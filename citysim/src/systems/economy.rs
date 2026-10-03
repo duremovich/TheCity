@@ -159,9 +159,6 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     let tax_rate = world.levers.tax_rate;
     let day = world.day();
     let Some(job) = world.comp::<Job>(agent).cloned() else { return 0 };
-    if let Some(j) = world.comp_mut::<Job>(agent) {
-        j.last_wage_attempt_day = Some(day);
-    }
     if job.days_unpaid == 0 {
         return 0;
     }
@@ -187,6 +184,10 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     if remainder == 0 {
         world.remember(agent, MemoryKind::Paid, None, 0.3, 0.3, false);
     } else {
+        // Short: no second visit today.
+        if let Some(j) = world.comp_mut::<Job>(agent) {
+            j.last_wage_attempt_day = Some(day);
+        }
         world.remember(agent, MemoryKind::Unpaid, None, 0.5, -0.5, false);
         if let Some(n) = world.comp_mut::<Needs>(agent) {
             n.wealth = (n.wealth - 0.1).max(0.0);

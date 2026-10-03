@@ -73,10 +73,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         ActionKind::Drink => at(world, id, BuildingKind::Bar) && coins >= 2,
         ActionKind::CollectWage => {
-            at(world, id, BuildingKind::Hall)
-                && world
-                    .comp::<Job>(id)
-                    .is_some_and(|j| j.days_unpaid >= 1 && j.last_wage_attempt_day != Some(world.day()))
+            at(world, id, BuildingKind::Hall) && world.comp::<Job>(id).is_some_and(|j| j.wage_collectable(world.day()))
         }
         ActionKind::CollectDole => {
             at(world, id, BuildingKind::Hall)
@@ -106,6 +103,10 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             let units = economy::buy_quantity(world, id);
             let paid = economy::pay_for_food(world, id, units);
             world.pending_purchase.insert(id, (units, paid));
+        }
+        ActionKind::Wander => {
+            // Effect `at = Street`: step out of whatever building we are in.
+            world.leave_building(id);
         }
         ActionKind::HaulToMarket => {
             // The transfer happens on pickup so an interrupted walk cannot lose the load.
@@ -156,7 +157,10 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind) -> bool {
             world.comp::<Needs>(id).is_some_and(|n| n.energy >= 0.9)
                 || crate::exec::routine::must_leave_for_work(world, id)
         }
-        ActionKind::Rest => crate::exec::routine::must_leave_for_work(world, id),
+        ActionKind::Rest => {
+            crate::exec::routine::must_leave_for_work(world, id)
+                || world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j))
+        }
         // Waiting at the workplace for the shift: start the moment it begins.
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),
         _ => false,

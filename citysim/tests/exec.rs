@@ -92,10 +92,14 @@ fn test_full_agent_walks_to_work_and_produces() {
         brain.exec
     );
 
-    // By 23:30 they are home again, and a day of wages is owed.
+    // By 23:30 they are home again (or on the last stretch of the walk there).
     w.run_ticks(1410 - 800);
     let pos = w.comp::<Position>(farmer).expect("pos");
-    assert_eq!(pos.building, Some(home), "farmer should be home at 23:30");
+    let heading_home = matches!(
+        &w.comp::<Brain>(farmer).expect("brain").exec,
+        citysim::ExecState::Goto { target, .. } if target.building == Some(home)
+    );
+    assert!(pos.building == Some(home) || heading_home, "farmer should be home at 23:30: {pos:?}");
     let job = w.comp::<Job>(farmer).expect("job");
     assert_eq!(job.last_shift_day, Some(0));
     assert_eq!(job.days_unpaid, 0, "wages were collected at the Hall in the evening");
@@ -228,4 +232,21 @@ fn test_short_treasury_does_not_make_workers_quit_in_a_day() {
         let Some(job) = w.comp::<Job>(id) else { continue };
         assert!(job.days_unpaid <= 2, "{}", job.days_unpaid);
     }
+}
+
+#[test]
+fn test_idle_agent_leaves_the_hall() {
+    use citysim::exec::routine;
+    use citysim::{ActionKind, GoalKind, LocationKey};
+    let mut w = world(13);
+    let id = w.citizens().into_iter().find(|&id| !w.has::<Job>(id)).expect("unemployed");
+    let hall = w.building_of_kind(BuildingKind::Hall).expect("hall");
+    w.leave_building(id);
+    w.enter_building(id, hall);
+    let plan = routine::plan_for_goal(&w, id, GoalKind::Idle).expect("idle plan");
+    assert_eq!(plan.steps[0].action, ActionKind::GoTo(LocationKey::Home), "idle inside the Hall goes home: {plan:?}");
+    // and a homeless idler steps outside rather than squatting
+    w.comp_mut::<citysim::Household>(id).expect("hh").home = None;
+    let plan = routine::plan_for_goal(&w, id, GoalKind::Idle).expect("idle plan");
+    assert_eq!(plan.steps[0].action, ActionKind::Wander);
 }

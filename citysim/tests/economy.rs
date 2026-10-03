@@ -154,3 +154,25 @@ fn test_starvation_kills_after_grace() {
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Death && e.actors.contains(&victim)));
     assert!(w.comp::<citysim::Identity>(victim).is_some(), "identity survives death");
 }
+
+#[test]
+fn test_wage_visit_blocked_only_after_short_payment() {
+    let mut w = world(8);
+    let worker =
+        w.citizens().into_iter().find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Clerk)).expect("a clerk");
+    w.comp_mut::<Job>(worker).expect("job").days_unpaid = 1;
+    assert!(w.comp::<Job>(worker).expect("job").wage_collectable(w.day()));
+    economy::collect_wage(&mut w, worker);
+    let job = w.comp::<Job>(worker).expect("job");
+    assert_eq!(job.days_unpaid, 0);
+    assert_eq!(job.last_wage_attempt_day, None, "a full payment does not block a later visit today");
+
+    w.comp_mut::<Job>(worker).expect("job").days_unpaid = 2;
+    w.treasury_mut().expect("treasury").coins = 1;
+    economy::collect_wage(&mut w, worker);
+    let job = w.comp::<Job>(worker).expect("job");
+    assert!(job.days_unpaid >= 1);
+    assert_eq!(job.last_wage_attempt_day, Some(w.day()), "a short payment blocks a second visit today");
+    assert!(!job.wage_collectable(w.day()));
+    assert!(job.wage_collectable(w.day() + 1));
+}

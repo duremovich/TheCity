@@ -357,7 +357,8 @@ pub struct Job {
     /// Key of the last shift worked (see `shift_key_at`); one shift per key.
     #[serde(default)]
     pub last_shift_day: Option<i64>,
-    /// Day of the last CollectWage attempt; one visit to the Hall per day.
+    /// Day of the last CollectWage that the Treasury could not pay in full;
+    /// one such visit per day, so a short Treasury is not hammered.
     #[serde(default)]
     pub last_wage_attempt_day: Option<u64>,
 }
@@ -365,6 +366,12 @@ pub struct Job {
 impl Job {
     pub fn on_shift(&self, tick_of_day: u16) -> bool {
         self.shifts.iter().any(|&(s, e)| tick_of_day >= s && tick_of_day < e)
+    }
+
+    /// Is a Hall visit for wages worthwhile today: wages owed, and no
+    /// short payment yet today.
+    pub fn wage_collectable(&self, day: u64) -> bool {
+        self.days_unpaid >= 1 && self.last_wage_attempt_day != Some(day)
     }
 
     /// Ticks until the next shift start, or 0 if on shift now.

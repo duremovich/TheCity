@@ -98,16 +98,17 @@ pub fn think(world: &World, id: EntityId) -> Option<(GoalKind, ThinkTrace)> {
     let hysteresis = if brain.plan.is_some() { world.config.brain.goal_hysteresis } else { 0.0 };
     let tick = world.tick;
 
+    let has_spouse = goals::has_spouse(world, id);
     let mut scored: Vec<GoalScore> = Vec::new();
     for goal in goals::GOAL_ORDER {
         // A cooled goal scores 0 (skipped).
         if brain.cooldowns.get(&goal).is_some_and(|&until| until > tick) {
             continue;
         }
-        if goals::already_satisfied(world, id, goal) {
+        if goals::already_satisfied(world, id, goal, has_spouse) {
             continue;
         }
-        let Some((considerations, flat)) = goals::considerations(world, id, goal) else { continue };
+        let Some((considerations, flat)) = goals::considerations(world, id, goal, has_spouse) else { continue };
         if let Some(s) = score_goal(goal, considerations, current, hysteresis, flat) {
             scored.push(s);
         }

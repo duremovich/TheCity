@@ -3,8 +3,8 @@
 //! (crime reports, hostiles, corpses) gate to zero until their milestone.
 
 use crate::components::{
-    Brain, BuildingKind, GoalKind, Household, Identity, Inventory, Job, Memory, MemoryKind, Needs, Personality,
-    RelKind, Role, Sentence, Skills, Wallet,
+    Brain, GoalKind, Household, Identity, Inventory, Job, Memory, MemoryKind, Needs, Personality, RelKind, Role,
+    Sentence, Skills, Wallet,
 };
 use crate::entity::EntityId;
 use crate::time::{self, DayPhase};
@@ -55,7 +55,7 @@ pub fn shift_reachable(world: &World, id: EntityId, job: &Job) -> bool {
 /// Is the goal's GOAP goal state already true? Such a goal has nothing to
 /// plan and is skipped before scoring, like one missing a component.
 /// Otherwise Eat beats Idle at hunger 0.8 and most of every meal is wasted.
-pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind) -> bool {
+pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse: bool) -> bool {
     use crate::goap::world_state::{BELONGING_SATISFIED, ENERGY_SATISFIED, HUNGER_SATISFIED, SAFE, SAVINGS_DAYS};
     let needs = world.comp::<Needs>(id);
     match goal {
@@ -67,14 +67,19 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind) -> bool {
             let price = world.market().map_or(i64::MAX, |m| m.price_food);
             world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price))
         }
-        GoalKind::Court => has_spouse(world, id),
+        GoalKind::Court => has_spouse,
         _ => false,
     }
 }
 
 /// Considerations and flat bonus for one goal, or `None` if the agent lacks a
 /// required component.
-pub fn considerations(world: &World, id: EntityId, goal: GoalKind) -> Option<(Vec<Consideration>, f32)> {
+pub fn considerations(
+    world: &World,
+    id: EntityId,
+    goal: GoalKind,
+    has_spouse: bool,
+) -> Option<(Vec<Consideration>, f32)> {
     let needs = world.comp::<Needs>(id);
     let pers = world.comp::<Personality>(id);
     let mood = world.comp::<crate::components::Mood>(id).map_or(0.0, |m| m.value);
@@ -154,7 +159,7 @@ pub fn considerations(world: &World, id: EntityId, goal: GoalKind) -> Option<(Ve
             let n = needs?;
             let p = pers?;
             let ident = world.comp::<Identity>(id)?;
-            if ident.age_days < 18 * time::DAYS_PER_YEAR as u32 || has_spouse(world, id) {
+            if ident.age_days < 18 * time::DAYS_PER_YEAR as u32 || has_spouse {
                 return None;
             }
             let candidate = world.edges.iter().any(|(&(a, b), e)| (a == id || b == id) && e.affinity >= 0.3);
@@ -301,10 +306,10 @@ pub fn considerations(world: &World, id: EntityId, goal: GoalKind) -> Option<(Ve
         }
         GoalKind::Idle => vec![Consideration::new("constant", 0.0, Curve::Step { t: 0.0, lo: 0.05, hi: 0.05 })],
     };
-    let _ = BuildingKind::Home;
     Some((cs, flat))
 }
 
-fn has_spouse(world: &World, id: EntityId) -> bool {
+/// One scan of the edge map per think, shared by every goal that asks.
+pub fn has_spouse(world: &World, id: EntityId) -> bool {
     world.edges.iter().any(|(&(a, b), e)| e.kind == RelKind::Spouse && (a == id || b == id))
 }

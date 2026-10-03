@@ -12,9 +12,9 @@ use crate::utility;
 use crate::world::World;
 
 /// Steps that a goal change must not abort.
-fn uninterruptible(brain: &Brain) -> bool {
+fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
     match &brain.exec {
-        ExecState::Use { kind: ActionKind::Sleep, started, .. } => brain.last_think_tick.saturating_sub(*started) >= 60,
+        ExecState::Use { kind: ActionKind::Sleep, started, .. } => now.saturating_sub(*started) >= 60,
         ExecState::Use { kind, .. } => matches!(
             kind,
             ActionKind::Arrest
@@ -49,11 +49,10 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     let tick = world.tick;
     let Some((winner, trace)) = utility::think(world, id) else { return };
     let Some(brain) = world.comp::<Brain>(id) else { return };
-    let changed = brain.current_goal != Some(winner);
-    let abort = changed && brain.plan.is_some() && !uninterruptible(brain);
-    // The previous goal's plan just failed and a different goal now wins.
-    let failed_over =
-        changed && brain.plan.is_none() && brain.last_plan_failure.is_some_and(|(g, _)| Some(g) == brain.current_goal);
+    // A different winner while an uninterruptible step runs is deferred: the
+    // goal and its plan stay together until the step completes.
+    let changed = brain.current_goal != Some(winner) && !(brain.plan.is_some() && uninterruptible(brain, tick));
+    let abort = changed && brain.plan.is_some();
     let old = brain.current_goal;
 
     if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -75,16 +74,16 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
         }
     }
     // A goal change is a change of mind: a different goal displacing one still
-    // being pursued, or taking over from one whose plan just failed. Picking
-    // the next goal after a plan completes is not flapping and is not counted.
-    if abort || failed_over {
+    // being pursued. Taking over after a plan completed, failed or was cooled
+    // is the world's doing, not flapping, and is not counted.
+    if abort {
         world.stats.current.goal_changes += 1;
     }
 
-    // Plan for the goal if nothing is running.
-    let idle = world.comp::<Brain>(id).is_some_and(|b| b.plan.is_none());
-    if idle {
-        plan_for_goal(world, id, winner);
+    // Plan for the current goal if nothing is running.
+    let current = world.comp::<Brain>(id).and_then(|b| if b.plan.is_none() { b.current_goal } else { None });
+    if let Some(goal) = current {
+        plan_for_goal(world, id, goal);
     }
 }
 

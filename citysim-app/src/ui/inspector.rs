@@ -4,8 +4,8 @@
 use egui_macroquad::egui::{self, Color32, ProgressBar, RichText, Ui};
 
 use citysim::{
-    time, Brain, Building, Corpse, EntityId, ExecState, GangMember, Household, Identity, Inventory, Job, Lod, Memory,
-    Mood, Needs, Personality, PlayerCommand, Position, Sentence, Wallet, World, TICKS_PER_DAY,
+    time, Brain, Building, Corpse, EntityId, ExecState, GangMember, Household, Identity, Inventory, Job, Memory, Mood,
+    Needs, Personality, PlayerCommand, Position, Sentence, Wallet, World, TICKS_PER_DAY,
 };
 
 use crate::App;
@@ -130,8 +130,8 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     let Some(ident) = world.comp::<Identity>(id) else { return };
     section(ui, "Identity", |ui| {
         ui.heading(&ident.name);
-        let years = ident.age_days / 120;
-        let days = ident.age_days % 120;
+        let years = ident.age_years();
+        let days = ident.age_days % citysim::time::DAYS_PER_YEAR as u32;
         ui.label(format!("{years} years {days} days · {:?} · id {id}", ident.sex));
         if let Some(b) = world.comp::<Brain>(id) {
             ui.horizontal(|ui| {
@@ -326,7 +326,6 @@ fn buttons(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         if ui.selectable_label(app.follow, follow_label).clicked() {
             app.follow = !app.follow;
         }
-        let _ = Lod::Full;
         if ui.button("Close").clicked() {
             app.selected = None;
             app.follow = false;

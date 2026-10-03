@@ -14,8 +14,6 @@ use crate::world::World;
 const DEPARTURE_MARGIN: u64 = 60;
 /// An agent already at the workplace waits for a shift this far off.
 const WAIT_AT_WORK_MAX: u64 = 600;
-/// Energy at which sleep is not worth starting.
-const RESTED_AT: f32 = 0.9;
 
 fn step(action: ActionKind, target: Option<EntityId>) -> ActionInstance {
     ActionInstance { action, target, tile: None }
@@ -49,7 +47,7 @@ pub fn is_workday(shift_key: i64) -> bool {
 /// A worked shift whose wages have not been collected today: the tail of the
 /// Work plan (haul, Hall visit) is still pending.
 pub fn wage_pending(world: &World, job: &Job) -> bool {
-    job.last_shift_day.is_some() && job.days_unpaid >= 1 && job.last_wage_attempt_day != Some(world.day())
+    job.last_shift_day.is_some() && job.wage_collectable(world.day())
 }
 
 /// A shift to attend to right now: on shift, waiting at the workplace for one
@@ -95,7 +93,7 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
 pub fn plan_for_goal(world: &World, id: EntityId, goal: GoalKind) -> Option<Plan> {
     let tick = world.tick;
     let day = world.day();
-    let needs = world.comp::<Needs>(id)?;
+    world.comp::<Needs>(id)?;
     let pos = world.comp::<Position>(id)?;
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
@@ -130,12 +128,7 @@ pub fn plan_for_goal(world: &World, id: EntityId, goal: GoalKind) -> Option<Plan
             }
             None
         }
-        GoalKind::Sleep => {
-            if needs.energy >= RESTED_AT {
-                return Some(plan(goal, home, at_bed(ActionKind::Rest), tick));
-            }
-            Some(plan(goal, home, at_bed(ActionKind::Sleep), tick))
-        }
+        GoalKind::Sleep => Some(plan(goal, home, at_bed(ActionKind::Sleep), tick)),
         GoalKind::Work => {
             let job = world.comp::<Job>(id)?;
             let employer = job.employer?;
@@ -143,16 +136,16 @@ pub fn plan_for_goal(world: &World, id: EntityId, goal: GoalKind) -> Option<Plan
             if shift_pending(world, id, job) {
                 let go = step(ActionKind::GoTo(workplace_key(job.role)), Some(employer));
                 if job.on_shift(tod) {
-                    let steps = vec![
-                        go,
-                        step(ActionKind::work_for(job.role), Some(employer)),
-                        step(ActionKind::GoTo(LocationKey::Hall), None),
-                        step(ActionKind::CollectWage, None),
-                    ];
+                    let mut steps = vec![go, step(ActionKind::work_for(job.role), Some(employer))];
+                    // The wage trip, unless the Treasury already came up short today.
+                    if job.last_wage_attempt_day != Some(day) {
+                        steps.push(step(ActionKind::GoTo(LocationKey::Hall), None));
+                        steps.push(step(ActionKind::CollectWage, None));
+                    }
                     return Some(plan(goal, Some(employer), steps, tick));
                 }
-                // Not on shift yet: head over (or stay) and idle at the door until it begins.
-                return Some(plan(goal, Some(employer), vec![go, step(ActionKind::Wander, None)], tick));
+                // Not on shift yet: head over (or stay) and rest inside until it begins.
+                return Some(plan(goal, Some(employer), vec![go, step(ActionKind::Rest, None)], tick));
             }
             if wage_pending(world, job) {
                 let mut steps = Vec::new();
@@ -174,8 +167,7 @@ pub fn plan_for_goal(world: &World, id: EntityId, goal: GoalKind) -> Option<Plan
         GoalKind::Earn => {
             let hall = step(ActionKind::GoTo(LocationKey::Hall), None);
             if let Some(job) = world.comp::<Job>(id) {
-                if job.days_unpaid >= 1 && !job.on_shift(world.tick_of_day()) && job.last_wage_attempt_day != Some(day)
-                {
+                if job.wage_collectable(day) && !job.on_shift(world.tick_of_day()) {
                     return Some(plan(goal, None, vec![hall, step(ActionKind::CollectWage, None)], tick));
                 }
                 return None;
@@ -190,22 +182,33 @@ pub fn plan_for_goal(world: &World, id: EntityId, goal: GoalKind) -> Option<Plan
             None
         }
         GoalKind::Socialise => {
-            // M2: a drink at the Bar; Chat with a partner arrives with the social graph (M5).
-            if coins >= 2 {
+            // M2: one drink at the Bar per day; Chat with a partner arrives with the social graph (M5).
+            let drank_today = world.comp::<crate::components::Memory>(id).is_some_and(|m| {
+                m.entries
+                    .iter()
+                    .any(|e| e.kind == crate::components::MemoryKind::Socialised && crate::time::day(e.tick) == day)
+            });
+            if coins >= 2 && !drank_today {
                 let steps = vec![step(ActionKind::GoTo(LocationKey::Bar), None), step(ActionKind::Drink, None)];
                 return Some(plan(goal, None, steps, tick));
             }
             None
         }
         GoalKind::Idle => {
-            // Bypasses the planner: Rest at Home or Bar, else Wander (stand about).
-            // Spare food carried home goes into the pantry first.
+            // Bypasses the planner: Rest at Home or the Bar; otherwise go home
+            // (loitering inside the Hall or Market blocks everyone else), or
+            // Wander outside if homeless. Spare food goes into the pantry first.
             if at_home && inv.food > inv.stolen_food && inv.food >= 2 {
                 return Some(plan(goal, home, vec![step(ActionKind::StoreFood, None)], tick));
             }
             let here = pos.building.and_then(|b| world.comp::<Building>(b)).map(|b| b.kind);
-            let action = if at_home || here == Some(BuildingKind::Bar) { ActionKind::Rest } else { ActionKind::Wander };
-            Some(plan(goal, None, vec![step(action, None)], tick))
+            if at_home || here == Some(BuildingKind::Bar) {
+                return Some(plan(goal, None, vec![step(ActionKind::Rest, None)], tick));
+            }
+            if home.is_some() {
+                return Some(plan(goal, home, vec![go_home, step(ActionKind::Rest, None)], tick));
+            }
+            Some(plan(goal, None, vec![step(ActionKind::Wander, None)], tick))
         }
         // Planned by GOAP from M3 (Court, Flee, Fight, ReportCrime, Patrol,
         // Arrest, JoinGang, GangWork, Bury): unavailable until then.
