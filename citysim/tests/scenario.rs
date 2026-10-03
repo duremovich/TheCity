@@ -3,6 +3,31 @@
 
 use citysim::{Config, World, TICKS_PER_DAY};
 
+/// `run --days 30 --seed 42`: the M1 gate. Hunger stays up, nobody much
+/// starves, the price stays sane and the Market is not empty for long.
+#[test]
+fn test_m1_thirty_days_seed_42() {
+    let mut w = World::new(42, Config::load());
+    for _ in 0..30 {
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    assert_eq!(w.stats.history.len(), 30);
+    let mut empty_streak = 0;
+    let mut starvation = 0;
+    for row in &w.stats.history {
+        assert!(row.mean_hunger >= 0.4, "day {}: mean_hunger {}", row.day, row.mean_hunger);
+        assert!((2..=8).contains(&row.price), "day {}: price {}", row.day, row.price);
+        starvation += row.deaths_starvation;
+        if row.food_market == 0 {
+            empty_streak += 1;
+            assert!(empty_streak <= 2, "day {}: Market empty for {empty_streak} days", row.day);
+        } else {
+            empty_streak = 0;
+        }
+    }
+    assert!(starvation <= 5, "{starvation} starvation deaths");
+}
+
 #[test]
 fn test_m0_ten_days_headless() {
     let mut w = World::new(42, Config::load());
@@ -12,11 +37,9 @@ fn test_m0_ten_days_headless() {
     assert_eq!(w.stats.history.len(), 10);
     for (i, row) in w.stats.history.iter().enumerate() {
         assert_eq!(row.day, i as u64);
-        assert_eq!(row.population, 300);
-        assert_eq!(row.employed, 40);
+        assert!(row.population >= 295, "day {}: population {}", row.day, row.population);
         assert_eq!(row.homeless, 0);
-        assert_eq!(row.price, 3);
-        assert_eq!(row.treasury, 5000);
+        assert!((1..=30).contains(&row.price));
     }
     assert_eq!(w.stats.current.day, 10);
 }

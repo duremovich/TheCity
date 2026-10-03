@@ -17,6 +17,13 @@ const C_WATER: u32 = 0x27485e;
 const C_OUTLINE: u32 = 0xc8c0b0;
 const C_CORPSE: u32 = 0x1a1a1a;
 const C_AGENT_IDLE: u32 = 0x8a8a8a;
+const C_AGENT_WORKING: u32 = 0x3d7bd9;
+const C_AGENT_EATING: u32 = 0x4caf50;
+const C_AGENT_SLEEPING: u32 = 0x1f2f6b;
+const C_AGENT_CRIME: u32 = 0xd92f2f;
+const C_AGENT_FLEEING: u32 = 0xf08c1e;
+const C_AGENT_GUARDING: u32 = 0xf5f5f5;
+const C_AGENT_SOCIAL: u32 = 0xd9a23d;
 const C_AGENT_JAILED: u32 = 0x555555;
 const C_GANG_BORDER: u32 = 0x8e44ad;
 const C_SELECTION: u32 = 0xffd700;
@@ -121,8 +128,7 @@ pub fn draw(world: &World, app: &App) {
     // 5. Full agents, coloured by current action (M0: everyone is idle)
     for (id, tile) in full {
         let p = cam.tile_to_screen(vec2(f32::from(tile.x), f32::from(tile.y)));
-        let jailed = world.has::<citysim::Sentence>(id);
-        let colour = if jailed { Color { a: 0.6, ..hex(C_AGENT_JAILED) } } else { hex(C_AGENT_IDLE) };
+        let colour = agent_colour(world, id);
         draw_rectangle(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, colour);
         if world.has::<GangMember>(id) {
             draw_rectangle_lines(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, 2.0, hex(C_GANG_BORDER));
@@ -175,6 +181,44 @@ fn night_alpha(tick: u64) -> f32 {
         0.0
     };
     NIGHT_ALPHA * k
+}
+
+/// Agent square colour by current action (spec › Draw order and colours).
+fn agent_colour(world: &World, id: citysim::EntityId) -> Color {
+    use citysim::{ActionKind as A, ExecState as E};
+    if world.has::<citysim::Sentence>(id) {
+        return Color { a: 0.6, ..hex(C_AGENT_JAILED) };
+    }
+    let Some(brain) = world.comp::<Brain>(id) else { return hex(C_AGENT_IDLE) };
+    let kind = match &brain.exec {
+        E::Use { kind, .. } => *kind,
+        E::Goto { .. } | E::GotoTimed { .. } => match brain.current_step().map(|s| s.action) {
+            // en route: colour by the step after the walk, so a guard heading to an arrest reads as guarding
+            Some(_) => brain
+                .plan
+                .as_ref()
+                .and_then(|p| p.steps.get(usize::from(brain.plan_step) + 1))
+                .map_or(A::Wander, |s| s.action),
+            None => A::Wander,
+        },
+        E::Idle | E::Wait { .. } => A::Wander,
+    };
+    hex(match kind {
+        A::FarmWork
+        | A::ClerkWork
+        | A::BartendWork
+        | A::TendGraves
+        | A::HaulToMarket
+        | A::CollectWage
+        | A::CollectDole => C_AGENT_WORKING,
+        A::EatFromInventory | A::EatAtHome | A::BuyFood | A::Forage | A::StoreFood => C_AGENT_EATING,
+        A::Sleep | A::Rest => C_AGENT_SLEEPING,
+        A::StealFood(_) | A::Extort | A::Attack | A::Fence | A::SplitLoot => C_AGENT_CRIME,
+        A::FleeToHome | A::HideFromLaw => C_AGENT_FLEEING,
+        A::GuardJail | A::PatrolLeg | A::Arrest | A::Escort => C_AGENT_GUARDING,
+        A::Chat | A::Drink | A::Flirt | A::Propose | A::JoinGang => C_AGENT_SOCIAL,
+        _ => C_AGENT_IDLE,
+    })
 }
 
 fn dashed_rect(x: f32, y: f32, w: f32, h: f32, colour: Color) {

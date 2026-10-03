@@ -110,6 +110,9 @@ pub struct World {
     pub command_log: Vec<(Tick, PlayerCommand)>,
     /// `None` until `citysim-cli calibrate` has produced `assets/stat_table.toml` (M7).
     pub stat_table: Option<StatTable>,
+    /// BuyFood in progress: `(units, coins paid)` so a lost stock can be refunded.
+    #[serde(default)]
+    pub pending_purchase: BTreeMap<EntityId, (u32, i64)>,
 }
 
 /// Wire every component store: the `Component` impl, plus `grow`/`clear`
@@ -260,6 +263,7 @@ impl World {
             command_queue: Vec::new(),
             command_log: Vec::new(),
             stat_table,
+            pending_purchase: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.spawn_gang();
@@ -449,7 +453,10 @@ impl World {
                     wc.shift_day.clone()
                 };
                 let wage_per_day = self.config.economy.wage(role);
-                self.insert(id, Job { employer, role, wage_per_day, shifts, days_unpaid: 0, tax_accum: 0.0 });
+                self.insert(
+                    id,
+                    Job { employer, role, wage_per_day, shifts, days_unpaid: 0, tax_accum: 0.0, last_shift_day: None },
+                );
             }
         }
     }
@@ -558,10 +565,92 @@ impl World {
     /// social, gang, demography, stats`.
     pub fn tick(&mut self) {
         self.apply_commands();
-        // time: the clock is `self.tick`; per-phase hooks arrive with the systems that need them.
-        // lod, needs, memory, think, plan, exec, economy, law, social, gang, demography: M1–M7.
+        // time: the clock is `self.tick`; daily hooks live in the systems that need them.
+        systems::lod::run(self);
+        crate::needs::run(self);
+        // memory (daily decay), think, plan: M2–M4. The M1 routine plans inside exec.
+        crate::exec::run(self);
+        systems::economy::run(self);
+        // law, social, gang, demography: M4–M6.
         systems::stats::run(self);
         self.tick += 1;
+    }
+
+    // -----------------------------------------------------------------------
+    // Shared mutations used by several systems
+    // -----------------------------------------------------------------------
+
+    /// Add a memory, evicting the lowest `salience × recency` entry past the cap.
+    pub fn remember(
+        &mut self,
+        id: EntityId,
+        kind: MemoryKind,
+        subject: Option<EntityId>,
+        salience: f32,
+        valence: f32,
+        second_hand: bool,
+    ) {
+        let tick = self.tick;
+        let cap = self.config.brain.memory_cap;
+        let half_life = self.config.brain.memory_half_life_days.max(0.01);
+        let Some(m) = self.comp_mut::<Memory>(id) else { return };
+        m.entries.push(MemoryEntry { kind, subject, tick, salience, valence, second_hand });
+        if m.entries.len() > cap {
+            let weight = |e: &MemoryEntry| {
+                let age_days = (tick - e.tick) as f32 / TICKS_PER_DAY as f32;
+                e.salience * 0.5f32.powf(age_days / half_life)
+            };
+            let (worst, _) = m
+                .entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| (i, weight(e)))
+                .fold((0, f32::INFINITY), |acc, (i, w)| if w < acc.1 { (i, w) } else { acc });
+            m.entries.remove(worst);
+        }
+    }
+
+    /// Death: every component but `Position` and `Identity` goes, a `Corpse`
+    /// is added, the building and household forget the agent, the job is
+    /// vacated, and the event and daily counter are recorded.
+    pub fn kill(&mut self, id: EntityId, cause: DeathCause) {
+        if !self.has::<Identity>(id) || self.has::<Corpse>(id) {
+            return;
+        }
+        let tick = self.tick;
+        let name = self.name_of(id);
+        if let Some(job) = self.remove::<Job>(id) {
+            if let Some(employer) = job.employer {
+                self.vacancies.entry(employer).or_default().push(job.role);
+            }
+        }
+        if let Some(here) = self.comp::<Position>(id).and_then(|p| p.building) {
+            if let Some(b) = self.comp_mut::<Building>(here) {
+                if let Ok(i) = b.occupants.binary_search(&id) {
+                    b.occupants.remove(i);
+                }
+            }
+        }
+        self.remove::<Needs>(id);
+        self.remove::<Personality>(id);
+        self.remove::<Mood>(id);
+        self.remove::<Wallet>(id);
+        self.remove::<Inventory>(id);
+        self.remove::<Household>(id);
+        self.remove::<Brain>(id);
+        self.remove::<Memory>(id);
+        self.remove::<Skills>(id);
+        self.remove::<Sentence>(id);
+        self.remove::<GangMember>(id);
+        self.release_all(id);
+        self.pending_purchase.remove(&id);
+        self.insert(id, Corpse { died_tick: tick, cause, buried: false });
+        match cause {
+            DeathCause::Starvation => self.stats.current.deaths_starvation += 1,
+            DeathCause::OldAge => self.stats.current.deaths_old_age += 1,
+            DeathCause::Violence | DeathCause::Execution => self.stats.current.deaths_violence += 1,
+        }
+        self.push_event(crate::events::EventKind::Death, &[id], format!("{name} died of {cause:?}"));
     }
 
     /// Run `n` ticks.

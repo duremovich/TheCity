@@ -55,6 +55,37 @@ pub enum ActionKind {
     GuardJail,
     /// The forced plan of a sentenced agent; never chosen by the planner.
     ServeTime,
+    /// At Home: move carried (unstolen) food into the pantry. Dur 5. In the
+    /// Building table but missing from the spec's enum.
+    StoreFood,
+    /// Gravedigger's shift with no corpse to bury: at the Cemetery, runs to
+    /// shift end like GuardJail. Not in the spec; needed so the role is paid.
+    TendGraves,
+}
+
+impl ActionKind {
+    /// The on-shift action for a role.
+    pub fn work_for(role: crate::components::Role) -> ActionKind {
+        use crate::components::Role;
+        match role {
+            Role::Farmer => ActionKind::FarmWork,
+            Role::Guard => ActionKind::GuardJail,
+            Role::Clerk => ActionKind::ClerkWork,
+            Role::Bartender => ActionKind::BartendWork,
+            Role::Gravedigger => ActionKind::TendGraves,
+        }
+    }
+
+    pub fn is_work(self) -> bool {
+        matches!(
+            self,
+            ActionKind::FarmWork
+                | ActionKind::GuardJail
+                | ActionKind::ClerkWork
+                | ActionKind::BartendWork
+                | ActionKind::TendGraves
+        )
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

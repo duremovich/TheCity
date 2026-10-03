@@ -157,6 +157,8 @@ pub struct EconomyCfg {
     pub spoilage_market: f32,
     pub haul_batch: u32,
     pub haul_min_stock: u32,
+    /// Tests disable hauling to measure raw farm output.
+    pub haul_enabled: bool,
     pub build_home_cost: i64,
 }
 

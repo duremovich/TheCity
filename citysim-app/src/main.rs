@@ -81,10 +81,12 @@ struct Args {
     fps: bool,
     /// Render a few frames, write this PNG, exit. For smoke tests.
     screenshot: Option<PathBuf>,
+    /// Run this many ticks before the first frame.
+    start_tick: u64,
 }
 
 fn parse_args() -> Args {
-    let mut args = Args { seed: 42, load: None, fps: false, screenshot: None };
+    let mut args = Args { seed: 42, load: None, fps: false, screenshot: None, start_tick: 0 };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -92,6 +94,7 @@ fn parse_args() -> Args {
             "--load" => args.load = Some(PathBuf::from(it.next().expect("--load <FILE>"))),
             "--fps" => args.fps = true,
             "--screenshot" => args.screenshot = Some(PathBuf::from(it.next().expect("--screenshot <FILE>"))),
+            "--start-tick" => args.start_tick = it.next().and_then(|s| s.parse().ok()).expect("--start-tick <N>"),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -105,6 +108,7 @@ async fn main() {
         Some(path) => save::load_from_file(path).unwrap_or_else(|e| panic!("{e}")),
         None => World::new(args.seed, Config::load()),
     };
+    world.run_ticks(args.start_tick);
     let mut app = App::new(args.fps);
     app.notify(format!(
         "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · F5 save · F9 load",

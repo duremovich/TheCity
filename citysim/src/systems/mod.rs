@@ -3,8 +3,10 @@
 //! `commands, time, lod, needs, memory, think, plan, exec, economy, law,
 //! social, gang, demography, stats`.
 //!
-//! M0 ships `stats` only; the others arrive milestone by milestone.
+//! Needs decay lives in `crate::needs`, execution in `crate::exec`.
 
 #![deny(clippy::unwrap_used)]
 
+pub mod economy;
+pub mod lod;
 pub mod stats;

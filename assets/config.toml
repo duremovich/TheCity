@@ -72,7 +72,8 @@ wage_guard = 8
 wage_clerk = 6
 wage_bartender = 5
 wage_gravedigger = 5
-farm_yield_base = 1.4
+# 1.4 on paper; farms work 6 days in 7 and spoilage eats ~20/day, so 1.8 is break-even in Spring.
+farm_yield_base = 1.8
 farm_skill_floor = 0.6
 farm_skill_slope = 0.8
 season_mult = [1.0, 1.4, 1.1, 0.3]
@@ -81,6 +82,7 @@ spoilage_pantry = 0.05
 spoilage_market = 0.01
 haul_batch = 50
 haul_min_stock = 10
+haul_enabled = true
 build_home_cost = 200
 
 [crime]

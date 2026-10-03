@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 
 use crate::entity::EntityId;
+use crate::exec::ExecState;
 use crate::goap::actions::{ActionKind, Plan};
 use crate::time::Tick;
 use crate::utility::ThinkTrace;
@@ -353,11 +354,40 @@ pub struct Job {
     /// Quits at 7.
     pub days_unpaid: u8,
     pub tax_accum: f32,
+    /// Day on which the last shift was started; one shift per day.
+    #[serde(default)]
+    pub last_shift_day: Option<u64>,
 }
 
 impl Job {
     pub fn on_shift(&self, tick_of_day: u16) -> bool {
         self.shifts.iter().any(|&(s, e)| tick_of_day >= s && tick_of_day < e)
+    }
+
+    /// Ticks until the next shift start, or 0 if on shift now.
+    pub fn ticks_until_shift(&self, tick_of_day: u16) -> u16 {
+        if self.on_shift(tick_of_day) {
+            return 0;
+        }
+        self.shifts
+            .iter()
+            .map(|&(s, _)| if s > tick_of_day { s - tick_of_day } else { 1440 - tick_of_day + s })
+            .min()
+            .unwrap_or(0)
+    }
+
+    /// Absolute tick at which the shift containing `tick` ends. A shift that
+    /// runs to 1440 and continues from 0 (night guards) is one shift.
+    pub fn shift_end(&self, tick: Tick) -> Option<Tick> {
+        let tod = (tick % 1440) as u16;
+        let &(_, end) = self.shifts.iter().find(|&&(s, e)| tod >= s && tod < e)?;
+        let mut until = tick + Tick::from(end - tod);
+        if end == 1440 {
+            if let Some(&(_, e2)) = self.shifts.iter().find(|&&(s, _)| s == 0) {
+                until += Tick::from(e2);
+            }
+        }
+        Some(until)
     }
 }
 
@@ -383,6 +413,12 @@ pub struct Brain {
     pub last_think_tick: Tick,
     /// Coarse: when the current action resolves.
     pub action_until: Tick,
+    /// Execution state of the current plan step.
+    #[serde(default)]
+    pub exec: ExecState,
+    /// Day on which the dole was last collected.
+    #[serde(default)]
+    pub last_dole_day: Option<u64>,
 }
 
 impl Default for Brain {
@@ -399,7 +435,23 @@ impl Default for Brain {
             last_think: None,
             last_think_tick: 0,
             action_until: 0,
+            exec: ExecState::Idle,
+            last_dole_day: None,
         }
+    }
+}
+
+impl Brain {
+    /// The plan step currently being executed.
+    pub fn current_step(&self) -> Option<&ActionInstance> {
+        self.plan.as_ref().and_then(|p| p.steps.get(usize::from(self.plan_step)))
+    }
+
+    /// Drop the plan and reset execution.
+    pub fn clear_plan(&mut self) {
+        self.plan = None;
+        self.plan_step = 0;
+        self.exec = ExecState::Idle;
     }
 }
 
@@ -481,6 +533,18 @@ pub struct Building {
     pub occupants: Vec<EntityId>,
     /// Set by `DemolishHome`; drawn dashed, never used.
     pub demolished: bool,
+}
+
+impl Building {
+    /// Interior tiles (everything inside the perimeter), row-major.
+    pub fn interior(&self) -> impl Iterator<Item = TilePos> + '_ {
+        let r = self.rect;
+        (r.y + 1..r.y + r.h - 1).flat_map(move |y| (r.x + 1..r.x + r.w - 1).map(move |x| TilePos { x, y }))
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.occupants.len() >= usize::from(self.capacity)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

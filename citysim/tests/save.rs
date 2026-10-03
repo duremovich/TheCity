@@ -25,9 +25,11 @@ fn test_save_round_trips_commands_and_events() {
     w.push_command(PlayerCommand::SetTaxRate(0.2));
     w.run_ticks(10);
     assert_eq!(w.command_log.len(), 2);
-    assert_eq!(w.events.len(), 2);
+    let player_actions = w.events.iter().filter(|e| e.kind == citysim::EventKind::PlayerAction).count();
+    assert_eq!(player_actions, 2);
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
-    assert_eq!(w.comp::<citysim::Building>(market).expect("market").stock_food, 700);
+    // 600 + 100 released, minus the day-0 1% spoilage, minus the first ten ticks of shopping
+    assert!(w.comp::<citysim::Building>(market).expect("market").stock_food <= 693);
 
     let text = save::to_ron(&w);
     let back = save::from_ron(&text).expect("load");
