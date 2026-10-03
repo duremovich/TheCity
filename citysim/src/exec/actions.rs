@@ -3,8 +3,7 @@
 //! uses are implemented; the rest fail `can_start` until their milestone.
 
 use crate::components::{
-    Brain, Building, BuildingKind, Edge, Household, Inventory, Job, MemoryKind, Needs, Position, RelKind, Skills,
-    TilePos, Wallet,
+    Brain, Building, BuildingKind, Household, Inventory, Job, MemoryKind, Needs, Position, Skills, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::exec::{FailReason, StepResult};
@@ -37,6 +36,10 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::PatrolLeg => 20,
         ActionKind::Arrest => 10,
         ActionKind::HideFromLaw => 120,
+        ActionKind::Chat | ActionKind::Flirt | ActionKind::JoinGang => 30,
+        ActionKind::Propose | ActionKind::SplitLoot => 10,
+        ActionKind::Extort => 20,
+        ActionKind::Fence | ActionKind::Attack => 15,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -102,6 +105,12 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
         }
         ActionKind::Wander => true,
+        // Planned toward a partner at a venue; starting needs them in the room.
+        ActionKind::Flirt | ActionKind::Propose => target.is_some_and(|t| {
+            world.comp::<Position>(t).and_then(|p| p.building).is_some()
+                && world.comp::<Position>(t).and_then(|p| p.building)
+                    == world.comp::<Position>(id).and_then(|p| p.building)
+        }),
         // Symbolic preconditions (goap::ActionKind::preconditions) cover these.
         ActionKind::StealFood(_)
         | ActionKind::Forage
@@ -110,7 +119,13 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         | ActionKind::ReportCrime
         | ActionKind::PatrolLeg
         | ActionKind::Arrest
-        | ActionKind::HideFromLaw => true,
+        | ActionKind::HideFromLaw
+        | ActionKind::Chat
+        | ActionKind::JoinGang
+        | ActionKind::Extort
+        | ActionKind::SplitLoot
+        | ActionKind::Fence
+        | ActionKind::Attack => true,
         _ => false,
     }
 }
@@ -363,6 +378,127 @@ pub fn on_complete(
             }
             StepResult::Done
         }
+        ActionKind::Chat => {
+            let Some(partner) = target else { return StepResult::Failed(FailReason::PartnerLeft) };
+            if !crate::systems::law::near(world, id, partner, 1)
+                && world.comp::<Position>(id).and_then(|p| p.building)
+                    != world.comp::<Position>(partner).and_then(|p| p.building)
+            {
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
+            let gain = world.config.needs.chat_belonging;
+            let halved = world.comp::<crate::components::Mood>(id).is_some_and(|m| m.value < -0.3);
+            for who in [id, partner] {
+                if let Some(n) = world.comp_mut::<Needs>(who) {
+                    n.belonging = (n.belonging + gain).min(1.0);
+                }
+                world.remember(
+                    who,
+                    MemoryKind::Socialised,
+                    Some(if who == id { partner } else { id }),
+                    0.2,
+                    0.2,
+                    false,
+                );
+            }
+            let m = crate::systems::social::similarity_mult(world, id, partner);
+            let step = world.config.social.affinity_per_hour * m * if halved { 0.5 } else { 1.0 };
+            crate::systems::social::adjust(world, id, partner, step, 0.02);
+            crate::systems::social::gossip(world, id, partner);
+            crate::systems::social::gossip(world, partner, id);
+            world.release_all(id);
+            StepResult::Done
+        }
+        ActionKind::Flirt => {
+            let Some(partner) = target else { return StepResult::Failed(FailReason::PartnerLeft) };
+            if world.comp::<Position>(id).and_then(|p| p.building)
+                != world.comp::<Position>(partner).and_then(|p| p.building)
+            {
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
+            let aff = world.edge(id, partner).map_or(0.0, |e| e.affinity);
+            let sociable = world.comp::<crate::components::Personality>(partner).map_or(0.5, |p| p.sociability);
+            let accept = {
+                use rand::Rng;
+                let roll: f32 = world.rng.world().random();
+                !crate::systems::social::has_spouse(world, partner)
+                    && !world.rejected_recently(id, partner)
+                    && roll < 0.3 + aff + 0.2 * sociable
+            };
+            if accept {
+                for who in [id, partner] {
+                    if let Some(n) = world.comp_mut::<Needs>(who) {
+                        n.intimacy = (n.intimacy + 0.1).min(1.0);
+                    }
+                    world.remember(
+                        who,
+                        MemoryKind::Courted,
+                        Some(if who == id { partner } else { id }),
+                        0.4,
+                        0.3,
+                        false,
+                    );
+                }
+                crate::systems::social::adjust(world, id, partner, 0.1, 0.02);
+            } else {
+                world.remember(id, MemoryKind::Rejected, Some(partner), 0.4, -0.3, false);
+            }
+            world.release_all(id);
+            StepResult::Done
+        }
+        ActionKind::Propose => {
+            let Some(partner) = target else { return StepResult::Failed(FailReason::PartnerLeft) };
+            if world.comp::<Position>(id).and_then(|p| p.building)
+                != world.comp::<Position>(partner).and_then(|p| p.building)
+            {
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
+            crate::systems::social::propose(world, id, partner);
+            world.release_all(id);
+            StepResult::Done
+        }
+        ActionKind::JoinGang => {
+            if crate::systems::gang::join(world, id) {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::PreconditionLost)
+            }
+        }
+        ActionKind::Extort => {
+            let Some(home) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            crate::systems::gang::extort(world, id, home);
+            StepResult::Done
+        }
+        ActionKind::SplitLoot => {
+            crate::systems::gang::split_loot(world, id);
+            StepResult::Done
+        }
+        ActionKind::Fence => {
+            if crate::systems::gang::fence(world, id) > 0 {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::StockGone)
+            }
+        }
+        ActionKind::Attack => {
+            let Some(victim) = target else { return StepResult::Failed(FailReason::PartnerLeft) };
+            if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, id, victim, 4) {
+                return StepResult::Failed(FailReason::PartnerLeft);
+            }
+            let (_, loser, died) = crate::systems::law::resolve_fight(world, id, victim);
+            let crime = if died { crate::components::Crime::Murder } else { crate::components::Crime::Assault };
+            let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
+            let name = world.name_of(id);
+            world.push_event(
+                if died { crate::events::EventKind::Murder } else { crate::events::EventKind::Assault },
+                &[id, victim],
+                format!("{name} attacked {}", world.name_of(victim)),
+            );
+            let victim_alive = crate::systems::law::living(world, victim);
+            crate::systems::law::raise_crime(world, id, victim_alive.then_some(victim), crime, tile);
+            let _ = loser;
+            StepResult::Done
+        }
         ActionKind::StealFood(source) => steal_food(world, id, source, target),
         ActionKind::Forage => {
             if let Some(inv) = world.comp_mut::<Inventory>(id) {
@@ -473,10 +609,14 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
             if let Some(w) = world.comp_mut::<Wallet>(id) {
                 w.coins += coins;
             }
-            if let Some(e) = world.edges.get_mut(&key) {
+            {
                 // the lower id owes the higher id
                 let (lo, _) = key;
+                let tick = world.tick;
+                let e = world.edge_entry(id, other);
                 e.debt += if lo == id { coins as i32 } else { -(coins as i32) };
+                e.debt_since.get_or_insert(tick);
+                e.last_interaction = tick;
             }
             return StepResult::Done;
         }
@@ -507,6 +647,8 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
 /// `ReportCrime` at the Hall: file the most salient unreported first-hand
 /// SawCrime as a report.
 fn report_crime(world: &mut World, id: EntityId) -> StepResult {
+    let betraying = world.comp::<Brain>(id).is_some_and(|b| b.betraying);
+    let leader = world.gang_id().and_then(|g| world.comp::<crate::components::Gang>(g)).and_then(|g| g.leader);
     let Some(mem) = world.comp::<crate::components::Memory>(id) else {
         return StepResult::Failed(FailReason::PreconditionLost);
     };
@@ -515,13 +657,21 @@ fn report_crime(world: &mut World, id: EntityId) -> StepResult {
         .iter()
         .filter(|e| e.kind == MemoryKind::SawCrime && !e.second_hand && e.salience >= 0.5)
         .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::reported_since(world, s, e.tick)))
-        .max_by(|a, b| a.salience.total_cmp(&b.salience))
+        // A betrayer names the leader's most salient crime first.
+        .max_by(|a, b| {
+            (betraying && a.subject == leader)
+                .cmp(&(betraying && b.subject == leader))
+                .then(a.salience.total_cmp(&b.salience))
+        })
         .map(|e| (e.subject, e.crime));
     let Some((Some(suspect), crime)) = best else { return StepResult::Failed(FailReason::PreconditionLost) };
     let crime = crime.unwrap_or(crate::components::Crime::Theft);
     crate::systems::law::file_report(world, crime, suspect, Some(id));
     if let Some(p) = world.comp_mut::<crate::components::Personality>(id) {
         p.drift(crate::personality::Drift::ReportedCrime);
+    }
+    if betraying && leader == Some(suspect) {
+        crate::systems::gang::betrayal_filed(world, id);
     }
     StepResult::Done
 }
@@ -539,9 +689,5 @@ pub fn end_shift(world: &mut World, id: EntityId) {
 
 fn spouse_in_same_home(world: &World, id: EntityId) -> bool {
     let Some(home) = world.comp::<Position>(id).and_then(|p| p.building) else { return false };
-    world.edges.iter().any(|(&(a, b), e): (&(EntityId, EntityId), &Edge)| {
-        e.kind == RelKind::Spouse
-            && (a == id || b == id)
-            && world.comp::<Position>(if a == id { b } else { a }).is_some_and(|p| p.building == Some(home))
-    })
+    world.spouse_of(id).and_then(|s| world.comp::<Position>(s)).is_some_and(|p| p.building == Some(home))
 }

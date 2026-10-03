@@ -102,6 +102,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         }
         noticed += 1;
         world.remember_crime(w, actor, crime, salience);
+        crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {
             n.safety = (n.safety - 0.2).max(0.0);
         }
@@ -120,6 +121,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
             Crime::Theft | Crime::Extortion => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
+        crate::systems::social::robbed_by(world, v, actor);
         if let Some(n) = world.comp_mut::<Needs>(v) {
             n.safety = (n.safety - 0.4).max(0.0);
         }
@@ -201,6 +203,7 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
     if let Some(s) = world.comp_mut::<Skills>(winner) {
         s.fighting = (s.fighting + 0.01).min(1.0);
     }
+    crate::systems::social::fought(world, winner, loser);
     let p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner));
     let roll: f32 = world.rng.world().random();
     let died = roll < p_death;
@@ -416,6 +419,9 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     let name = world.name_of(who);
     let days = until.saturating_sub(world.tick).div_ceil(TICKS_PER_DAY);
     world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {crime:?}"));
+    if world.has::<crate::components::GangMember>(who) {
+        crate::systems::gang::recompute_leader(world);
+    }
 }
 
 fn release_at_jail_door(world: &mut World, who: EntityId, _why: &str) {

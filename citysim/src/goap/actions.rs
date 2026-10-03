@@ -178,6 +178,14 @@ impl ActionKind {
                 | ActionKind::Escort
                 | ActionKind::HideFromLaw
                 | ActionKind::FleeToHome
+                | ActionKind::Chat
+                | ActionKind::Flirt
+                | ActionKind::Propose
+                | ActionKind::JoinGang
+                | ActionKind::Extort
+                | ActionKind::SplitLoot
+                | ActionKind::Fence
+                | ActionKind::Attack
         )
     }
 }
@@ -239,6 +247,21 @@ pub struct PlanCtx {
     pub haul_min_stock: u32,
     /// Wages owed right now (`days_unpaid >= 1`).
     pub wage_due: bool,
+    /// A co-located partner for Chat (the plan target, in the same building).
+    pub partner: Option<EntityId>,
+    /// The bound partner is here or at a Bar / Market the plan can walk to.
+    pub partner_reachable: bool,
+    /// The bound target is a partner candidate (affinity >= 0.6, trust >= 0.5, both unmarried).
+    pub candidate_bound: bool,
+    pub gang_eligible: bool,
+    /// Extort: the bound Home has occupants and no guard within 8.
+    pub extort_ok: bool,
+    /// SplitLoot: loot taken today not yet split.
+    pub has_loot: bool,
+    /// Fence: carrying stolen food and the gang can pay.
+    pub can_fence: bool,
+    /// Attack: the bound target is within 4 tiles (or the same building).
+    pub hostile_adjacent: bool,
     /// An open warrant on this agent.
     pub wanted: bool,
     /// The bound suspect has been seen by a guard recently.
@@ -386,6 +409,40 @@ impl PlanCtx {
                 .is_some_and(|(m, stock)| stock > WorldState::reserved_by_others(world, m, Some(agent))),
             haul_min_stock: world.config.economy.haul_min_stock,
             wage_due: job.is_some_and(|j| j.days_unpaid >= 1),
+            partner: target.filter(|&t| {
+                world.has::<crate::components::Brain>(t)
+                    && world
+                        .comp::<Position>(t)
+                        .is_some_and(|p| p.building.is_some() && p.building == pos.and_then(|q| q.building))
+            }),
+            partner_reachable: target.is_some_and(|t| {
+                world.has::<crate::components::Brain>(t)
+                    && world.comp::<Position>(t).and_then(|p| p.building).is_some_and(|b| {
+                        Some(b) == pos.and_then(|q| q.building)
+                            || world
+                                .comp::<Building>(b)
+                                .is_some_and(|bd| matches!(bd.kind, BuildingKind::Bar | BuildingKind::Market))
+                    })
+            }),
+            candidate_bound: target.is_some_and(|t| {
+                world.edge(agent, t).is_some_and(|e| {
+                    e.affinity >= world.config.social.propose_affinity && e.trust >= world.config.social.propose_trust
+                }) && !crate::systems::social::has_spouse(world, agent)
+                    && !crate::systems::social::has_spouse(world, t)
+            }),
+            gang_eligible: crate::systems::gang::eligible(world, agent),
+            extort_ok: target
+                .and_then(|t| world.comp::<Building>(t))
+                .is_some_and(|b| b.kind == BuildingKind::Home && !b.occupants.is_empty()),
+            has_loot: world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.loot_today > 0),
+            can_fence: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.stolen_food > 0)
+                && world
+                    .gang_id()
+                    .and_then(|g| world.comp::<crate::components::Gang>(g))
+                    .is_some_and(|g| g.treasury > 0),
+            hostile_adjacent: target.is_some_and(|t| {
+                world.has::<crate::components::Brain>(t) && crate::systems::law::near(world, agent, t, 4)
+            }),
             wanted: crate::systems::law::wanted(world, agent),
             suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),
             jail_day: job.is_some_and(|j| crate::systems::law::jail_day(agent, j.next_shift_key(world.tick))),
@@ -465,7 +522,8 @@ impl ActionKind {
             ActionKind::Beg => !ctx.is(Role::Guard),
             ActionKind::Fence | ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
-            ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult,
+            ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult && ctx.gang_eligible,
+            ActionKind::Flirt | ActionKind::Propose => ctx.adult,
             ActionKind::ServeTime => false,
             _ => true,
         }
@@ -514,6 +572,21 @@ impl ActionKind {
             ActionKind::Escort => ws.suspect_cuffed && ctx.dist.contains_key(&LocationKey::Jail),
             ActionKind::HideFromLaw => (at(LocationKey::Hideout) || at(LocationKey::Home)) && ctx.wanted,
             ActionKind::FleeToHome => !ws.is_safe && ctx.dist.contains_key(&LocationKey::Home),
+            ActionKind::Chat => {
+                matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
+                    && ctx.partner.is_some()
+            }
+            // Flirt and Propose plan toward a partner who is here or at a Bar /
+            // Market; execution re-checks co-location (PartnerLeft otherwise).
+            ActionKind::Flirt => {
+                matches!(ws.at, LocationKey::Bar | LocationKey::Market) && ctx.partner_reachable && !ws.has_spouse
+            }
+            ActionKind::Propose => ws.has_partner_candidate && ctx.partner_reachable && !ws.has_spouse,
+            ActionKind::JoinGang => at(LocationKey::Hideout) && !ws.in_gang,
+            ActionKind::Extort => ws.in_gang && at(LocationKey::TargetHome) && !ctx.guard8 && ctx.extort_ok,
+            ActionKind::SplitLoot => ws.in_gang && at(LocationKey::Hideout) && ws.gang_task_done && ctx.has_loot,
+            ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence,
+            ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
             _ => false,
         }
     }
@@ -547,6 +620,13 @@ impl ActionKind {
             ActionKind::Arrest => ctx.suspect_located,
             ActionKind::HideFromLaw => ctx.wanted,
             ActionKind::FleeToHome => ctx.dist.contains_key(&LocationKey::Home),
+            ActionKind::Chat => ctx.partner.is_some(),
+            ActionKind::Flirt | ActionKind::Propose => ctx.partner_reachable,
+            ActionKind::JoinGang => ctx.gang_eligible && ctx.dist.contains_key(&LocationKey::Hideout),
+            ActionKind::Extort => ctx.extort_ok && ctx.dist.contains_key(&LocationKey::TargetHome),
+            ActionKind::SplitLoot => ctx.has_loot,
+            ActionKind::Fence => ctx.can_fence,
+            ActionKind::Attack => ctx.hostile_adjacent,
             _ => true,
         }
     }
@@ -647,6 +727,27 @@ impl ActionKind {
                 n.at = LocationKey::Home;
                 n.is_safe = true;
             }
+            ActionKind::Chat => n.belonging_satisfied = true,
+            // Flirt's planning effect is deterministic; the roll happens at execution.
+            ActionKind::Flirt => n.has_partner_candidate = true,
+            ActionKind::Propose => n.has_spouse = true,
+            ActionKind::JoinGang => n.in_gang = true,
+            ActionKind::Extort => {
+                n.gang_task_done = true;
+                n.coin_bucket = n.coin_bucket.max(1);
+                n.has_coins = true;
+            }
+            ActionKind::SplitLoot | ActionKind::Fence => {
+                n.has_coins = true;
+                n.coin_bucket = 2;
+                n.has_savings = true;
+                if self == ActionKind::Fence {
+                    n.carrying_stolen = false;
+                    n.has_food = false;
+                    n.food_count = 0;
+                }
+            }
+            ActionKind::Attack => n.threat_removed = true,
             _ => {}
         }
         n
@@ -719,7 +820,12 @@ impl ActionKind {
             | ActionKind::StealFood(StealSource::Home)
             | ActionKind::GoTo(LocationKey::SuspectTile)
             | ActionKind::Arrest
-            | ActionKind::Escort => ctx.target,
+            | ActionKind::Escort
+            | ActionKind::Chat
+            | ActionKind::Flirt
+            | ActionKind::Propose
+            | ActionKind::Extort
+            | ActionKind::Attack => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

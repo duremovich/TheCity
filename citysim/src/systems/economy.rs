@@ -183,6 +183,7 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     }
     if remainder == 0 {
         world.remember(agent, MemoryKind::Paid, None, 0.3, 0.3, false);
+        crate::systems::social::repay_debts(world, agent);
     } else {
         // Short: no second visit today.
         if let Some(j) = world.comp_mut::<Job>(agent) {

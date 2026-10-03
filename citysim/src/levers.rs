@@ -103,7 +103,7 @@ impl World {
     }
 
     /// Drain the queue, apply each command in order, log it.
-    pub(crate) fn apply_commands(&mut self) {
+    pub fn apply_commands(&mut self) {
         let queue = std::mem::take(&mut self.command_queue);
         for cmd in queue {
             self.apply_command(&cmd);

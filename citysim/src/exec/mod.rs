@@ -549,9 +549,11 @@ impl World {
                 bd.occupants.insert(i, agent);
             }
         }
+        let tick = self.tick;
         if let Some(p) = self.comp_mut::<Position>(agent) {
             p.tile = slot;
             p.building = Some(b);
+            p.entered = tick;
         }
     }
 

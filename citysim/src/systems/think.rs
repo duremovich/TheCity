@@ -53,6 +53,15 @@ pub fn run(world: &mut World) {
 /// when idle.
 pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     let tick = world.tick;
+    // The Court gate's neighbour scan runs once a day, not every think.
+    let today = world.day();
+    let stale = world.comp::<Brain>(id).is_some_and(|b| b.court_candidate.is_none_or(|(d, _)| d != today));
+    if stale {
+        let candidate = crate::systems::social::known_candidate(world, id, 0.3).is_some();
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.court_candidate = Some((today, candidate));
+        }
+    }
     let Some((winner, trace)) = utility::think(world, id) else { return };
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let score = trace.goals.first().map_or(0.0, |g| g.score);
@@ -85,11 +94,11 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
             world.push_event(EventKind::PlanAborted, &[id], format!("{old:?} -> {winner:?}"));
         }
     }
-    // A goal change is a pursued goal replaced before its plan completed:
-    // displaced mid-plan, or replaced after its plan failed in execution.
-    // Picking the next goal after a plan completes is not counted, and nor is
-    // leaving Idle, which is the absence of a goal rather than one.
-    if (abort || failed_over) && old != Some(GoalKind::Idle) {
+    // A goal change is a pursued goal being taken up: from Idle, after a plan
+    // completed or failed, or displacing another goal. Dropping to Idle is the
+    // absence of a goal, not a change.
+    let _ = failed_over;
+    if changed && winner != GoalKind::Idle {
         world.stats.current.goal_changes += 1;
     }
 

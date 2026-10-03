@@ -8,9 +8,11 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod economy;
+pub mod gang;
 pub mod law;
 pub mod lod;
 pub mod memory;
 pub mod plan;
+pub mod social;
 pub mod stats;
 pub mod think;

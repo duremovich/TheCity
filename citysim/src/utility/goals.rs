@@ -81,10 +81,13 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // off for the day once had, and off while it cannot be had (no 2
             // coins, or the Bar is visibly full). Otherwise it wins every think
             // and churns through plan failures.
+            // Satisfied, or nothing to do for it: no Chat partner here and no drink possible.
+            let chat_possible = crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
             needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED)
-                || world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
-                || bar_full_for(world, id)
-                || drank_today(world, id)
+                || (!chat_possible
+                    && (world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
+                        || bar_full_for(world, id)
+                        || drank_today(world, id)))
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
@@ -107,6 +110,12 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             }
         }
         GoalKind::Court => has_spouse,
+        GoalKind::GangWork => {
+            !world.has::<crate::components::GangMember>(id)
+                || world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()))
+                || crate::systems::gang::extort_target(world, id).is_none()
+        }
+        GoalKind::JoinGang => !crate::systems::gang::eligible(world, id),
         GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
         }),
@@ -204,7 +213,20 @@ pub fn considerations(
             if ident.age_days < 18 * time::DAYS_PER_YEAR as u32 || has_spouse {
                 return None;
             }
-            let candidate = world.edges.iter().any(|(&(a, b), e)| (a == id || b == id) && e.affinity >= 0.3);
+            // Daily pre-filter (any edge >= 0.3 to an unmarried agent), then a
+            // target the plan can act on now: someone here, or at a venue.
+            let candidate = world.comp::<Brain>(id).and_then(|b| b.court_candidate).is_some_and(|(_, c)| c)
+                && crate::systems::social::court_target(world, id).is_some();
+            // A widowed spouse grieves for 14 days (Social); a Courted memory toward
+            // the same subject adds +0.1 (Memory readers).
+            let grief = world.comp::<Memory>(id).is_some_and(|m| {
+                m.entries.iter().any(|e| {
+                    e.kind == MemoryKind::Grief && world.tick.saturating_sub(e.tick) < 14 * time::TICKS_PER_DAY
+                })
+            });
+            if grief {
+                return None;
+            }
             let intimacy = Consideration::new("U(intimacy)", urgency(n.intimacy), SQUARE);
             vec![
                 Consideration::raw("U(intimacy)", intimacy.input, intimacy.output * mm),
@@ -216,13 +238,27 @@ pub fn considerations(
         GoalKind::Flee => {
             let n = needs?;
             let p = pers?;
+            // Memory reader: Fought or Lost in the last two days with the other
+            // party within 8 tiles is +0.15.
+            let two_days = world.tick.saturating_sub(2 * time::TICKS_PER_DAY);
+            let shaken = world.comp::<Memory>(id).is_some_and(|m| {
+                m.entries.iter().any(|e| {
+                    matches!(e.kind, MemoryKind::Fought | MemoryKind::Lost)
+                        && e.tick >= two_days
+                        && e.subject.is_some_and(|s| crate::systems::law::near(world, id, s, 8))
+                })
+            });
+            if shaken {
+                flat += 0.15;
+            }
             vec![
                 Consideration::new("U(safety)", urgency(n.safety), Curve::Logistic { k: 12.0, mid: 0.5 }),
-                // A guard is hostile to the wanted; enemies arrive with the social graph (M5).
+                // A guard is hostile to the wanted; so is anyone on an Enemy edge.
                 Consideration::new(
                     "hostile near",
-                    can(crate::systems::law::wanted(world, id)
-                        && crate::systems::law::guard_within(world, id, world.config.crime.sight)),
+                    can((crate::systems::law::wanted(world, id)
+                        && crate::systems::law::guard_within(world, id, world.config.crime.sight))
+                        || hostile_near(world, id, world.config.crime.sight)),
                     GATE,
                 ),
                 Consideration::new("1-courage", 1.0 - p.courage, Curve::Linear { m: 0.8, b: 0.2 }),
@@ -235,8 +271,30 @@ pub fn considerations(
             if mood < -0.6 {
                 flat = 0.15;
             }
+            // Memory readers: a Fought or Lost memory in the last two days means
+            // the matter rests (a lost fight ends it; a fought enemy is not fought
+            // again at once); WasRobbed by an enemy in reach is +0.2.
+            let two_days = world.tick.saturating_sub(2 * time::TICKS_PER_DAY);
+            let mem = world.comp::<Memory>(id);
+            let lost_recently =
+                mem.is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::Lost && e.tick >= two_days));
+            if lost_recently {
+                return None;
+            }
+            let fresh_enemy = fresh_hostile_near(world, id, 4);
+            let robbed_by_enemy = mem.is_some_and(|m| {
+                m.entries.iter().any(|e| {
+                    e.kind == MemoryKind::WasRobbed
+                        && e.subject.is_some_and(|s| {
+                            world.enemies_of(id).any(|o| o == s) && crate::systems::law::near(world, id, s, 4)
+                        })
+                })
+            });
+            if robbed_by_enemy {
+                flat += 0.2;
+            }
             vec![
-                Consideration::new("enemy near", can(false), GATE), // M5: rivals/enemies
+                Consideration::new("enemy near", can(fresh_enemy), GATE),
                 Consideration::new("courage", p.courage, IDENTITY),
                 Consideration::new("fighting", s.fighting, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("U(safety)", urgency(n.safety), Curve::Linear { m: 0.5, b: 0.5 }),
@@ -262,6 +320,10 @@ pub fn considerations(
                 .subject
                 .and_then(|s| world.edges.get(&crate::components::edge_key(id, s)))
                 .map_or(0.0, |e| e.affinity);
+            // A betraying gang member gets +0.3 (Gang › Betrayal).
+            if betraying {
+                flat = 0.3;
+            }
             vec![
                 Consideration::new("lawfulness", p.lawfulness, Curve::Logistic { k: 8.0, mid: 0.5 }),
                 Consideration::new("salience", saw.salience, IDENTITY),
@@ -312,7 +374,7 @@ pub fn considerations(
             vec![
                 Consideration::new("1-lawfulness", 1.0 - p.lawfulness, SQUARE),
                 Consideration::new("U(wealth)", urgency(n.wealth), IDENTITY),
-                Consideration::new("eligible", can(false), GATE), // M5: Gang › Eligibility
+                Consideration::new("eligible", can(crate::systems::gang::eligible(world, id)), GATE),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
             ]
         }
@@ -325,7 +387,11 @@ pub fn considerations(
                 Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("greed", p.greed, Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("not in shift", can(!in_shift), gate_or(0.5)),
-                Consideration::new("no guard near target", can(false), gate_or(0.2)), // M5
+                Consideration::new(
+                    "no guard near target",
+                    can(crate::systems::gang::extort_target(world, id).is_some()),
+                    gate_or(0.2),
+                ),
             ]
         }
         GoalKind::Bury => {
@@ -362,7 +428,25 @@ pub fn considerations(
     Some((cs, flat))
 }
 
-/// One scan of the edge map per think, shared by every goal that asks.
+/// Shared by every goal that asks.
 pub fn has_spouse(world: &World, id: EntityId) -> bool {
-    world.edges.iter().any(|(&(a, b), e)| e.kind == RelKind::Spouse && (a == id || b == id))
+    crate::systems::social::has_spouse(world, id)
+}
+
+/// An Enemy-edge partner (or the subject of a WasRobbed memory) within `r` tiles.
+pub fn hostile_near(world: &World, id: EntityId, r: u32) -> bool {
+    world.enemies_of(id).any(|o| world.has::<Brain>(o) && crate::systems::law::near(world, id, o, r))
+}
+
+/// An enemy within `r` tiles not fought in the last two days.
+pub fn fresh_hostile_near(world: &World, id: EntityId, r: u32) -> bool {
+    let two_days = world.tick.saturating_sub(2 * time::TICKS_PER_DAY);
+    let mem = world.comp::<Memory>(id);
+    world.enemies_of(id).any(|o| {
+        world.has::<Brain>(o)
+            && crate::systems::law::near(world, id, o, r)
+            && !mem.is_some_and(|m| {
+                m.entries.iter().any(|e| e.kind == MemoryKind::Fought && e.subject == Some(o) && e.tick >= two_days)
+            })
+    })
 }

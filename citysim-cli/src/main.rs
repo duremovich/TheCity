@@ -45,6 +45,9 @@ struct RunArgs {
     /// Print DailyStats as CSV, one row per day, header first.
     #[arg(long)]
     report: bool,
+    /// Print every event as `tick<TAB>kind<TAB>text` to stderr.
+    #[arg(long)]
+    events: bool,
     /// Schedule a lever: `day=<D>:<lever>=<value>`. Repeatable.
     #[arg(long = "lever", value_name = "SPEC")]
     levers: Vec<String>,
@@ -157,6 +160,7 @@ fn run(args: RunArgs) -> Result<(), String> {
     }
 
     let mut next_lever = 0;
+    let mut last_event_tick: Option<u64> = None;
     save_if_due(&world)?;
     while world.tick < end_tick {
         let day_start = Instant::now();
@@ -169,6 +173,19 @@ fn run(args: RunArgs) -> Result<(), String> {
                 next_lever += 1;
             }
             citysim::tick(&mut world);
+            if args.events {
+                let fresh: Vec<_> = world
+                    .events
+                    .iter()
+                    .rev()
+                    .take_while(|e| last_event_tick.is_none_or(|t| e.tick > t))
+                    .map(|e| (e.tick, e.kind, e.text.clone()))
+                    .collect();
+                for (tick, kind, text) in fresh.into_iter().rev() {
+                    eprintln!("{tick}	{kind:?}	{text}");
+                    last_event_tick = Some(tick);
+                }
+            }
             save_if_due(&world)?;
         }
         let secs = day_start.elapsed().as_secs_f32().max(1e-9);

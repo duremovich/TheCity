@@ -275,6 +275,9 @@ pub struct Position {
     pub tile: TilePos,
     /// `Some` if inside a building rect (including its door).
     pub building: Option<EntityId>,
+    /// The tick the agent entered `building` (co-location is measured from here).
+    #[serde(default)]
+    pub entered: Tick,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -478,6 +481,15 @@ pub struct Brain {
     /// The shift key the patrol route belongs to.
     #[serde(default)]
     pub patrol_shift_key: Option<i64>,
+    /// Gang: the day the extortion task was done, and coins taken today (for SplitLoot).
+    #[serde(default)]
+    pub gang_task_day: Option<u64>,
+    #[serde(default)]
+    pub loot_today: i64,
+    /// `(day, any edge with affinity >= 0.3 to an unmarried agent)`: the Court
+    /// gate, refreshed daily because the neighbour scan is O(degree).
+    #[serde(default)]
+    pub court_candidate: Option<(u64, bool)>,
 }
 
 impl Default for Brain {
@@ -504,6 +516,9 @@ impl Default for Brain {
             patrol_route: Vec::new(),
             patrol_legs: 0,
             patrol_shift_key: None,
+            gang_task_day: None,
+            loot_today: 0,
+            court_candidate: None,
         }
     }
 }
@@ -569,6 +584,8 @@ pub struct Sentence {
 pub struct GangMember {
     pub gang: EntityId,
     pub rank: u8,
+    #[serde(default)]
+    pub joined_tick: Tick,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -677,11 +694,22 @@ pub struct Edge {
     pub last_interaction: Tick,
     /// Spouse edges only.
     pub last_birth_tick: Option<Tick>,
+    /// When the current debt was incurred (ageing charges after 14 days).
+    #[serde(default)]
+    pub debt_since: Option<Tick>,
 }
 
 impl Edge {
     pub fn new(kind: RelKind, tick: Tick) -> Self {
-        Edge { affinity: 0.0, trust: 0.3, debt: 0, kind, last_interaction: tick, last_birth_tick: None }
+        Edge {
+            affinity: 0.0,
+            trust: 0.3,
+            debt: 0,
+            kind,
+            last_interaction: tick,
+            last_birth_tick: None,
+            debt_since: None,
+        }
     }
 }
 

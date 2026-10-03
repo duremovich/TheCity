@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::{
     Brain, Building, BuildingKind, Corpse, GangMember, Household, Inventory, Job, Memory, MemoryKind, Needs, Position,
-    RelKind, Wallet,
+    Wallet,
 };
 use crate::entity::EntityId;
 use crate::exec::ReservationKind;
@@ -250,7 +250,9 @@ impl WorldState {
         // Symbolic places that depend on the plan: adjacent to (or in the same
         // building as) the bound suspect is SuspectTile; inside the current
         // patrol stop, while patrolling, is PatrolWaypoint.
-        let suspect_target = target.filter(|&t| world.has::<Brain>(t));
+        let suspect_target = target
+            .filter(|&t| world.has::<Brain>(t))
+            .filter(|&t| crate::systems::law::is_guard(world, agent) && crate::systems::law::wanted(world, t));
         let at_suspect = suspect_target.is_some_and(|t| crate::systems::law::near(world, agent, t, 1));
         let patrolling = world.comp::<Brain>(agent).is_some_and(|b| {
             b.current_goal == Some(crate::components::GoalKind::Patrol)
@@ -291,22 +293,21 @@ impl WorldState {
             None => (false, false),
         };
 
-        let mut has_spouse = false;
-        let mut has_partner_candidate = false;
-        for (&(a, b), e) in world.edges.iter() {
-            if a != agent && b != agent {
-                continue;
-            }
-            if e.kind == RelKind::Spouse {
-                has_spouse = true;
-            }
-            if e.affinity >= 0.6 && e.trust >= 0.5 {
-                has_partner_candidate = true;
-            }
-        }
-        if has_spouse {
-            has_partner_candidate = false;
-        }
+        let has_spouse = crate::systems::social::has_spouse(world, agent);
+        // The bound target is the candidate when there is one; otherwise any.
+        let has_partner_candidate = !has_spouse
+            && match target.filter(|&t| world.has::<Brain>(t)) {
+                Some(t) => {
+                    world.edge(agent, t).is_some_and(|e| e.affinity >= 0.6 && e.trust >= 0.5)
+                        && !crate::systems::social::has_spouse(world, t)
+                }
+                // Propose needs a bound partner, so an unbound plan has no candidate.
+                None => false,
+            };
+        let gang_task_done = world.comp::<Brain>(agent).is_some_and(|b| b.gang_task_day == Some(world.day()));
+        // A hostile (Enemy edge) within 4 tiles.
+        let hostile_near =
+            world.enemies_of(agent).any(|o| world.has::<Brain>(o) && crate::systems::law::near(world, agent, o, 4));
 
         let memory = world.comp::<Memory>(agent);
         // No unreported first-hand SawCrime (salience >= 0.5) whose subject lacks an open report.
@@ -355,12 +356,12 @@ impl WorldState {
             has_partner_candidate,
             // Not safe while wanted with a guard within 8 (HideFromLaw reader).
             is_safe: needs.safety >= SAFE && !guard8,
-            threat_removed: true, // Enemy edges and fights arrive with the social graph (M5)
+            threat_removed: !hostile_near,
             crime_reported,
             suspect_jailed: target.is_some_and(|t| world.has::<crate::components::Sentence>(t)),
             suspect_cuffed: target.is_some_and(|t| world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_some())),
             in_gang: world.has::<GangMember>(agent),
-            gang_task_done: false,
+            gang_task_done,
             corpse_buried: false,
             carrying_corpse: false,
             carrying_stolen: inv.stolen_food >= 1,

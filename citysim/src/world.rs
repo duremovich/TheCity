@@ -102,7 +102,6 @@ pub struct World {
     #[serde(skip)]
     pub flow_fields: BTreeMap<EntityId, FlowField>,
     pub last_seen: BTreeMap<EntityId, (TilePos, Tick)>,
-    pub colocation: BTreeMap<(EntityId, EntityId), u16>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -113,6 +112,15 @@ pub struct World {
     /// BuyFood in progress: `(units, coins paid)` so a lost stock can be refunded.
     #[serde(default)]
     pub pending_purchase: BTreeMap<EntityId, (u32, i64)>,
+    /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`.
+    #[serde(default)]
+    pub neighbours: BTreeMap<EntityId, BTreeSet<EntityId>>,
+    /// Spouse lookup, both directions; written only by `set_spouse`.
+    #[serde(default)]
+    pub spouses: BTreeMap<EntityId, EntityId>,
+    /// Enemy edges by agent, both directions; kept by `social::reindex_kind`.
+    #[serde(default)]
+    pub enemies: BTreeMap<EntityId, BTreeSet<EntityId>>,
 }
 
 /// Wire every component store: the `Component` impl, plus `grow`/`clear`
@@ -256,7 +264,6 @@ impl World {
             door_queue: BTreeMap::new(),
             flow_fields: BTreeMap::new(),
             last_seen: BTreeMap::new(),
-            colocation: BTreeMap::new(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
@@ -264,6 +271,9 @@ impl World {
             command_log: Vec::new(),
             stat_table,
             pending_purchase: BTreeMap::new(),
+            neighbours: BTreeMap::new(),
+            spouses: BTreeMap::new(),
+            enemies: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.spawn_gang();
@@ -396,12 +406,14 @@ impl World {
             let door = self.comp::<Building>(home).map(|b| b.door).unwrap_or_default();
             for &id in chunk {
                 self.insert(id, Household { home: Some(home) });
-                self.insert(id, Position { tile: door, building: None });
+                self.insert(id, Position { tile: door, building: None, entered: 0 });
                 self.enter_building(id, home); // an interior slot each
             }
             if chunk.len() >= 2 && self.rng.world().random_bool(wc.spouse_p) {
-                let key = edge_key(chunk[0], chunk[1]);
-                self.edges.insert(key, Edge::new(RelKind::Spouse, 0));
+                self.set_spouse(chunk[0], chunk[1]);
+                let e = self.edge_entry(chunk[0], chunk[1]);
+                e.affinity = 0.6;
+                e.trust = 0.6;
             }
         }
         // Anyone left over (population > homes × residents) is homeless on the
@@ -417,7 +429,7 @@ impl World {
             .unwrap_or(market_door.1);
         for &id in &ids {
             if !self.has::<Position>(id) {
-                self.insert(id, Position { tile: street, building: None });
+                self.insert(id, Position { tile: street, building: None, entered: 0 });
             }
         }
 
@@ -569,7 +581,9 @@ impl World {
         crate::exec::run(self);
         systems::economy::run(self);
         systems::law::run(self);
-        // social, gang, demography: M5–M6.
+        systems::social::run(self);
+        systems::gang::run(self);
+        // demography: M6.
         systems::stats::run(self);
         self.tick += 1;
     }
@@ -594,6 +608,62 @@ impl World {
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let entry = MemoryEntry { kind, subject, tick, salience, valence, second_hand, crime: None };
         systems::memory::insert(m, entry, tick, cap, half_life);
+    }
+
+    /// The edge between two agents, if any.
+    pub fn edge(&self, a: EntityId, b: EntityId) -> Option<&Edge> {
+        self.edges.get(&edge_key(a, b))
+    }
+
+    /// The edge between two agents, created as an Acquaintance at affinity 0
+    /// if absent. Keeps the neighbour index in step.
+    pub fn edge_entry(&mut self, a: EntityId, b: EntityId) -> &mut Edge {
+        let key = edge_key(a, b);
+        let tick = self.tick;
+        if !self.edges.contains_key(&key) {
+            self.neighbours.entry(a).or_default().insert(b);
+            self.neighbours.entry(b).or_default().insert(a);
+        }
+        self.edges.entry(key).or_insert_with(|| Edge::new(RelKind::Acquaintance, tick))
+    }
+
+    pub fn remove_edge(&mut self, a: EntityId, b: EntityId) {
+        self.edges.remove(&edge_key(a, b));
+        for (x, y) in [(a, b), (b, a)] {
+            if let Some(s) = self.enemies.get_mut(&x) {
+                s.remove(&y);
+            }
+        }
+        if let Some(n) = self.neighbours.get_mut(&a) {
+            n.remove(&b);
+        }
+        if let Some(n) = self.neighbours.get_mut(&b) {
+            n.remove(&a);
+        }
+    }
+
+    /// Everyone `id` has an edge with, ascending.
+    pub fn neighbours(&self, id: EntityId) -> impl Iterator<Item = EntityId> + '_ {
+        self.neighbours.get(&id).into_iter().flat_map(|s| s.iter().copied())
+    }
+
+    /// Marry two agents: a Spouse edge and the lookup in both directions.
+    pub fn set_spouse(&mut self, a: EntityId, b: EntityId) {
+        let tick = self.tick;
+        let e = self.edge_entry(a, b);
+        e.kind = RelKind::Spouse;
+        e.last_interaction = tick;
+        self.spouses.insert(a, b);
+        self.spouses.insert(b, a);
+    }
+
+    pub fn spouse_of(&self, id: EntityId) -> Option<EntityId> {
+        self.spouses.get(&id).copied()
+    }
+
+    /// Everyone on an Enemy edge with `id`.
+    pub fn enemies_of(&self, id: EntityId) -> impl Iterator<Item = EntityId> + '_ {
+        self.enemies.get(&id).into_iter().flat_map(|s| s.iter().copied())
     }
 
     /// A SawCrime memory that also records which crime was seen.
@@ -664,6 +734,9 @@ impl World {
                 g.members.retain(|&m| m != id);
                 if g.leader == Some(id) {
                     g.leader = None;
+                }
+                if g.members.is_empty() {
+                    g.empty_since = Some(tick);
                 }
             }
         }
