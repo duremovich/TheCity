@@ -31,7 +31,7 @@ pub use config::Config;
 pub use entity::EntityId;
 pub use events::{Event, EventKind};
 pub use exec::{ExecState, FailReason, StepResult};
-pub use goap::{ActionKind, LocationKey, Plan};
+pub use goap::{ActionKind, GoalState, Key, LocationKey, Plan, PlanCtx, StealSource, WorldState};
 pub use levers::{Levers, PlayerCommand, Speed};
 pub use map::{Map, MAP_H, MAP_W};
 pub use stats::{DailyStats, DayRow};

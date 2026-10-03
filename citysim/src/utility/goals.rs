@@ -3,8 +3,8 @@
 //! (crime reports, hostiles, corpses) gate to zero until their milestone.
 
 use crate::components::{
-    Brain, GoalKind, Household, Identity, Inventory, Job, Memory, MemoryKind, Needs, Personality, RelKind, Role,
-    Sentence, Skills, Wallet,
+    Brain, BuildingKind, GoalKind, Household, Identity, Inventory, Job, Memory, MemoryKind, Needs, Personality,
+    RelKind, Role, Sentence, Skills, Wallet,
 };
 use crate::entity::EntityId;
 use crate::time::{self, DayPhase};
@@ -61,13 +61,41 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
     match goal {
         GoalKind::Eat => needs.is_some_and(|n| n.hunger >= HUNGER_SATISFIED),
         GoalKind::Sleep => needs.is_some_and(|n| n.energy >= ENERGY_SATISFIED),
-        GoalKind::Socialise => needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED),
+        GoalKind::Socialise => {
+            // Until Chat arrives (M5) a drink is the only satisfier: the goal is
+            // off for the day once had, and off while it cannot be had (no 2
+            // coins, or the Bar is visibly full). Otherwise it wins every think
+            // and churns through plan failures.
+            let bar_full = world
+                .building_of_kind(BuildingKind::Bar)
+                .and_then(|b| world.comp::<crate::components::Building>(b))
+                .is_some_and(|b| b.is_full() && !b.occupants.contains(&id));
+            needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED)
+                || world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
+                || bar_full
+                || world.comp::<Memory>(id).is_some_and(|m| {
+                    m.entries.iter().any(|e| e.kind == MemoryKind::Socialised && time::day(e.tick) == world.day())
+                })
+        }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
             let price = world.market().map_or(i64::MAX, |m| m.price_food);
-            world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price))
+            if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price)) {
+                return true;
+            }
+            // An unemployed agent whose dole is taken or suspended has no income
+            // action left (Beg yields coins, never savings): nothing to plan.
+            // The employed are scored as the spec's worked example does.
+            let day = world.day();
+            world.comp::<Job>(id).is_none()
+                && (world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day == Some(day))
+                    || world.treasury().is_some_and(|t| t.coins < 0)
+                    || world.levers.dole_per_day == 0)
         }
         GoalKind::Court => has_spouse,
+        GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {
+            j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
+        }),
         _ => false,
     }
 }

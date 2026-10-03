@@ -564,7 +564,8 @@ impl World {
         crate::needs::run(self);
         // memory (daily decay): M4.
         crate::mood::run(self);
-        systems::think::run(self); // think + plan (M2: routine; M3: GOAP)
+        systems::think::run(self);
+        systems::plan::run(self);
         crate::exec::run(self);
         systems::economy::run(self);
         // law, social, gang, demography: M4–M6.

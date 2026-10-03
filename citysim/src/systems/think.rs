@@ -1,13 +1,14 @@
 //! Think scheduling: utility scoring every 30 ticks, staggered by
 //! `tick % 30 == id.index % 30`, plus one urgent think per 30 ticks when a
 //! plan ends or fails. On a goal change the current plan is aborted (unless
-//! the step is uninterruptible) and a new plan is built for the winner.
+//! the step is uninterruptible) and the agent is queued for planning.
 
 use crate::components::{Brain, GoalKind, Lod, Sentence};
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::exec::{routine, ExecState};
+use crate::exec::ExecState;
 use crate::goap::ActionKind;
+use crate::systems::plan;
 use crate::utility;
 use crate::world::World;
 
@@ -37,6 +38,7 @@ pub fn run(world: &mut World) {
         }
         let scheduled = tick % interval == u64::from(id.index) % interval;
         let urgent = brain.plan.is_none()
+            && !brain.plan_queued
             && (brain.last_think.is_none() || tick.saturating_sub(brain.last_urgent_think_tick) >= interval);
         if scheduled || urgent {
             think_once(world, id, scheduled);
@@ -44,15 +46,22 @@ pub fn run(world: &mut World) {
     }
 }
 
-/// Score goals, switch goal if a different one wins, and plan when idle.
+/// Score goals, switch goal if a different one wins, and queue for planning
+/// when idle.
 pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     let tick = world.tick;
     let Some((winner, trace)) = utility::think(world, id) else { return };
     let Some(brain) = world.comp::<Brain>(id) else { return };
+    let score = trace.goals.first().map_or(0.0, |g| g.score);
     // A different winner while an uninterruptible step runs is deferred: the
     // goal and its plan stay together until the step completes.
     let changed = brain.current_goal != Some(winner) && !(brain.plan.is_some() && uninterruptible(brain, tick));
     let abort = changed && brain.plan.is_some();
+    // The old goal's plan failed in execution and a different one takes over.
+    // (A goal cooled because it could not be planned at all was never started:
+    // not a change of mind.)
+    let failed_over =
+        changed && brain.plan.is_none() && brain.last_plan_failure.is_some_and(|(g, _)| Some(g) == brain.current_goal);
     let old = brain.current_goal;
 
     if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -73,39 +82,23 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
             world.push_event(EventKind::PlanAborted, &[id], format!("{old:?} -> {winner:?}"));
         }
     }
-    // A goal change is a change of mind: a different goal displacing one still
-    // being pursued. Taking over after a plan completed, failed or was cooled
-    // is the world's doing, not flapping, and is not counted.
-    if abort {
+    // A goal change is a pursued goal replaced before its plan completed:
+    // displaced mid-plan, or replaced after its plan failed in execution.
+    // Picking the next goal after a plan completes is not counted, and nor is
+    // leaving Idle, which is the absence of a goal rather than one.
+    if (abort || failed_over) && old != Some(GoalKind::Idle) {
         world.stats.current.goal_changes += 1;
     }
 
-    // Plan for the current goal if nothing is running.
-    let current = world.comp::<Brain>(id).and_then(|b| if b.plan.is_none() { b.current_goal } else { None });
-    if let Some(goal) = current {
-        plan_for_goal(world, id, goal);
-    }
-}
-
-/// Build a plan for `goal` (M2: the routine; M3: GOAP). A goal that cannot be
-/// planned right now is cooled so the next think picks something else.
-pub fn plan_for_goal(world: &mut World, id: EntityId, goal: GoalKind) {
-    let tick = world.tick;
-    let cooldown = world.config.brain.goal_cooldown_ticks;
-    match routine::plan_for_goal(world, id, goal) {
-        Some(plan) => {
-            if let Some(b) = world.comp_mut::<Brain>(id) {
-                b.plan = Some(plan);
-                b.plan_step = 0;
-                b.exec = ExecState::Idle;
-            }
+    // Queue the current goal for planning if nothing is running. Idle plans
+    // immediately (it bypasses the planner and costs nothing).
+    let current =
+        world.comp::<Brain>(id).and_then(|b| if b.plan.is_none() && !b.plan_queued { b.current_goal } else { None });
+    match current {
+        Some(GoalKind::Idle) => {
+            plan::plan_for(world, id, GoalKind::Idle);
         }
-        None => {
-            if let Some(b) = world.comp_mut::<Brain>(id) {
-                if goal != GoalKind::Idle {
-                    b.cooldowns.insert(goal, tick + cooldown);
-                }
-            }
-        }
+        Some(_) => plan::enqueue(world, id, score),
+        None => {}
     }
 }

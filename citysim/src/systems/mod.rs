@@ -9,5 +9,6 @@
 
 pub mod economy;
 pub mod lod;
+pub mod plan;
 pub mod stats;
 pub mod think;

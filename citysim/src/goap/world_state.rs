@@ -1,6 +1,16 @@
-//! The symbolic snapshot the planner searches over.
+//! The symbolic snapshot the planner searches over, and how it is observed
+//! from components.
 
 use serde::{Deserialize, Serialize};
+
+use crate::components::{
+    Brain, Building, BuildingKind, Corpse, GangMember, Household, Inventory, Job, Memory, MemoryKind, Needs, Position,
+    RelKind, Wallet,
+};
+use crate::entity::EntityId;
+use crate::exec::ReservationKind;
+use crate::time::Season;
+use crate::world::World;
 
 // Thresholds that define the symbolic keys (spec › WorldState comments).
 /// `hunger_satisfied`: `needs.hunger >= 0.6`.
@@ -13,6 +23,8 @@ pub const BELONGING_SATISFIED: f32 = 0.5;
 pub const SAFE: f32 = 0.4;
 /// `has_savings`: `coins >= 7 × price_food`.
 pub const SAVINGS_DAYS: i64 = 7;
+/// `food_count` saturates here.
+pub const FOOD_COUNT_MAX: u8 = 3;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
 pub enum LocationKey {
@@ -39,6 +51,74 @@ pub enum LocationKey {
     /// Next patrol leg.
     PatrolWaypoint,
 }
+
+impl LocationKey {
+    /// Keys a `GoTo` may target, in enum (tie-break) order.
+    pub const GOTO: [LocationKey; 14] = [
+        LocationKey::Home,
+        LocationKey::Farm,
+        LocationKey::Market,
+        LocationKey::Bar,
+        LocationKey::Jail,
+        LocationKey::Cemetery,
+        LocationKey::Hall,
+        LocationKey::Hideout,
+        LocationKey::Warehouse,
+        LocationKey::Street,
+        LocationKey::TargetHome,
+        LocationKey::SuspectTile,
+        LocationKey::CorpseTile,
+        LocationKey::PatrolWaypoint,
+    ];
+
+    pub fn of_building(kind: BuildingKind) -> LocationKey {
+        match kind {
+            BuildingKind::Home => LocationKey::Home,
+            BuildingKind::Farm => LocationKey::Farm,
+            BuildingKind::Market => LocationKey::Market,
+            BuildingKind::Bar => LocationKey::Bar,
+            BuildingKind::Jail => LocationKey::Jail,
+            BuildingKind::Cemetery => LocationKey::Cemetery,
+            BuildingKind::Hall => LocationKey::Hall,
+            BuildingKind::Hideout => LocationKey::Hideout,
+            BuildingKind::Warehouse => LocationKey::Warehouse,
+        }
+    }
+}
+
+/// A boolean key of the world state, for goal states.
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum Key {
+    HungerSatisfied,
+    EnergySatisfied,
+    BelongingSatisfied,
+    HasFood,
+    HasCoins,
+    HasSavings,
+    HasWageDue,
+    ShiftDone,
+    HasSpouse,
+    HasPartnerCandidate,
+    IsSafe,
+    ThreatRemoved,
+    CrimeReported,
+    SuspectJailed,
+    SuspectCuffed,
+    InGang,
+    GangTaskDone,
+    CorpseBuried,
+    CarryingCorpse,
+    CarryingStolen,
+    IsDark,
+    KnownCorpse,
+    KnownSuspectLocation,
+    PatrolLegDone,
+    FoodSourceAvailable,
+    ForageAvailable,
+}
+
+/// Partial goal state: at most 3 listed keys.
+pub type GoalState = Vec<(Key, bool)>;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
 pub struct WorldState {
@@ -73,4 +153,193 @@ pub struct WorldState {
     pub patrol_leg_done: bool,
     pub food_source_available: bool,
     pub forage_available: bool,
+}
+
+impl WorldState {
+    pub fn get(&self, key: Key) -> bool {
+        match key {
+            Key::HungerSatisfied => self.hunger_satisfied,
+            Key::EnergySatisfied => self.energy_satisfied,
+            Key::BelongingSatisfied => self.belonging_satisfied,
+            Key::HasFood => self.has_food,
+            Key::HasCoins => self.has_coins,
+            Key::HasSavings => self.has_savings,
+            Key::HasWageDue => self.has_wage_due,
+            Key::ShiftDone => self.shift_done,
+            Key::HasSpouse => self.has_spouse,
+            Key::HasPartnerCandidate => self.has_partner_candidate,
+            Key::IsSafe => self.is_safe,
+            Key::ThreatRemoved => self.threat_removed,
+            Key::CrimeReported => self.crime_reported,
+            Key::SuspectJailed => self.suspect_jailed,
+            Key::SuspectCuffed => self.suspect_cuffed,
+            Key::InGang => self.in_gang,
+            Key::GangTaskDone => self.gang_task_done,
+            Key::CorpseBuried => self.corpse_buried,
+            Key::CarryingCorpse => self.carrying_corpse,
+            Key::CarryingStolen => self.carrying_stolen,
+            Key::IsDark => self.is_dark,
+            Key::KnownCorpse => self.known_corpse,
+            Key::KnownSuspectLocation => self.known_suspect_location,
+            Key::PatrolLegDone => self.patrol_leg_done,
+            Key::FoodSourceAvailable => self.food_source_available,
+            Key::ForageAvailable => self.forage_available,
+        }
+    }
+
+    /// `satisfied(ws, goal)` compares only the listed keys.
+    pub fn satisfies(&self, goal: &GoalState) -> bool {
+        goal.iter().all(|&(k, v)| self.get(k) == v)
+    }
+
+    /// Number of goal keys not yet satisfied (the planner's heuristic input).
+    pub fn unsatisfied(&self, goal: &GoalState) -> usize {
+        goal.iter().filter(|&&(k, v)| self.get(k) != v).count()
+    }
+
+    /// Coin bucket from a wallet and the price: 0 below price, 1 below twice it, 2 more.
+    pub fn bucket(coins: i64, price: i64) -> u8 {
+        let price = price.max(1);
+        if coins < price {
+            0
+        } else if coins < 2 * price {
+            1
+        } else {
+            2
+        }
+    }
+
+    /// Food units reserved on a building by every holder.
+    pub fn reserved_units(world: &World, building: EntityId) -> u32 {
+        WorldState::reserved_by_others(world, building, None)
+    }
+
+    /// Food units reserved on a building by holders other than `except`.
+    pub fn reserved_by_others(world: &World, building: EntityId, except: Option<EntityId>) -> u32 {
+        world
+            .reservations
+            .iter()
+            .filter(|(&holder, _)| Some(holder) != except)
+            .flat_map(|(_, v)| v.iter())
+            .filter_map(|r| match r.kind {
+                ReservationKind::FoodUnits { building: b, units } if b == building => Some(units),
+                _ => None,
+            })
+            .sum()
+    }
+
+    /// Snapshot an agent's state. `target` is `Plan.target` (bound at plan
+    /// time) or `None`.
+    pub fn observe(world: &World, agent: EntityId, target: Option<EntityId>) -> WorldState {
+        let needs = world.comp::<Needs>(agent).cloned().unwrap_or(Needs {
+            hunger: 1.0,
+            energy: 1.0,
+            safety: 1.0,
+            wealth: 1.0,
+            belonging: 1.0,
+            intimacy: 1.0,
+            starving_since: None,
+        });
+        let inv = world.comp::<Inventory>(agent).cloned().unwrap_or_default();
+        let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
+        let price = world.market().map_or(1, |m| m.price_food).max(1);
+        let home = world.comp::<Household>(agent).and_then(|h| h.home);
+        let pos = world.comp::<Position>(agent);
+        let job = world.comp::<Job>(agent);
+
+        let at = match pos.and_then(|p| p.building) {
+            Some(b) if Some(b) == home => LocationKey::Home,
+            Some(b)
+                if Some(b) == target && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home) =>
+            {
+                LocationKey::TargetHome
+            }
+            Some(b) => match world.comp::<Building>(b) {
+                Some(bd) if bd.kind == BuildingKind::Home => LocationKey::Street, // someone else's home
+                Some(bd) => LocationKey::of_building(bd.kind),
+                None => LocationKey::Street,
+            },
+            None => LocationKey::Street,
+        };
+
+        // `shift_done`: the shift this moment belongs to has been worked. Keyed
+        // on the current shift day, not the next one, so it stays true after
+        // the shift ends and the wage trip can still be planned.
+        let (has_wage_due, shift_done) = match job {
+            Some(j) => (j.days_unpaid >= 1, j.last_shift_day == Some(j.shift_key_at(world.tick))),
+            None => (false, false),
+        };
+
+        let mut has_spouse = false;
+        let mut has_partner_candidate = false;
+        for (&(a, b), e) in world.edges.iter() {
+            if a != agent && b != agent {
+                continue;
+            }
+            if e.kind == RelKind::Spouse {
+                has_spouse = true;
+            }
+            if e.affinity >= 0.6 && e.trust >= 0.5 {
+                has_partner_candidate = true;
+            }
+        }
+        if has_spouse {
+            has_partner_candidate = false;
+        }
+
+        let memory = world.comp::<Memory>(agent);
+        let crime_reported = memory.is_none_or(|m| {
+            !m.entries.iter().any(|e| e.kind == MemoryKind::SawCrime && e.salience >= 0.5 && !e.second_hand)
+        });
+        let known_corpse = memory.is_some_and(|m| {
+            m.entries.iter().any(|e| {
+                e.kind == MemoryKind::SawCorpse
+                    && e.subject.is_some_and(|c| world.comp::<Corpse>(c).is_some_and(|k| !k.buried))
+            })
+        });
+
+        let market_free = world
+            .building_of_kind(BuildingKind::Market)
+            .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food)))
+            .is_some_and(|(m, stock)| stock > WorldState::reserved_by_others(world, m, Some(agent)));
+        let pantry_free = home
+            .and_then(|h| world.comp::<Building>(h).map(|b| (h, b.stock_food)))
+            .is_some_and(|(h, stock)| stock > WorldState::reserved_by_others(world, h, Some(agent)));
+
+        let season = world.season();
+        let dark = world.is_dark();
+        let _ = world.comp::<Brain>(agent);
+
+        WorldState {
+            at,
+            hunger_satisfied: needs.hunger >= HUNGER_SATISFIED,
+            energy_satisfied: needs.energy >= ENERGY_SATISFIED,
+            belonging_satisfied: needs.belonging >= BELONGING_SATISFIED,
+            has_food: inv.food >= 1,
+            has_coins: coins >= price,
+            has_savings: coins >= SAVINGS_DAYS * price,
+            coin_bucket: WorldState::bucket(coins, price),
+            food_count: inv.food.min(u32::from(FOOD_COUNT_MAX)) as u8,
+            has_wage_due,
+            shift_done,
+            has_spouse,
+            has_partner_candidate,
+            is_safe: needs.safety >= SAFE,
+            threat_removed: true, // hostiles arrive with the law and social systems (M4/M5)
+            crime_reported,
+            suspect_jailed: false,
+            suspect_cuffed: false,
+            in_gang: world.has::<GangMember>(agent),
+            gang_task_done: false,
+            corpse_buried: false,
+            carrying_corpse: false,
+            carrying_stolen: inv.stolen_food >= 1,
+            is_dark: dark,
+            known_corpse,
+            known_suspect_location: false,
+            patrol_leg_done: false,
+            food_source_available: market_free || pantry_free,
+            forage_available: matches!(season, Season::Summer | Season::Autumn) && !dark,
+        }
+    }
 }

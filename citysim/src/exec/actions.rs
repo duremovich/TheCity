@@ -8,7 +8,7 @@ use crate::components::{
 };
 use crate::entity::EntityId;
 use crate::exec::{FailReason, StepResult};
-use crate::goap::ActionKind;
+use crate::goap::{ActionKind, StealSource};
 use crate::needs;
 use crate::systems::economy;
 use crate::time::Tick;
@@ -27,6 +27,12 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::CollectWage | ActionKind::CollectDole | ActionKind::StoreFood => 5,
         ActionKind::Drink => 45,
         ActionKind::Wander => 30,
+        ActionKind::StealFood(StealSource::Market) => 20,
+        ActionKind::StealFood(StealSource::Home) => 20,
+        ActionKind::StealFood(StealSource::Warehouse) => 25,
+        ActionKind::Forage => 45,
+        ActionKind::Beg => 30,
+        ActionKind::SellFood => 10,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -92,6 +98,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
         }
         ActionKind::Wander => true,
+        // Symbolic preconditions (goap::ActionKind::preconditions) cover these.
+        ActionKind::StealFood(_) | ActionKind::Forage | ActionKind::Beg | ActionKind::SellFood => true,
         _ => false,
     }
 }
@@ -173,7 +181,7 @@ pub fn on_complete(
     world: &mut World,
     id: EntityId,
     kind: ActionKind,
-    _target: Option<EntityId>,
+    target: Option<EntityId>,
     started: Tick,
     now: Tick,
 ) -> StepResult {
@@ -201,6 +209,7 @@ pub fn on_complete(
                 return StepResult::Failed(FailReason::StockGone);
             }
             b.stock_food -= 1;
+            world.release_all(id);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
@@ -223,6 +232,7 @@ pub fn on_complete(
         }
         ActionKind::BuyFood => {
             let (units, paid) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
+            world.release_all(id);
             if economy::take_food(world, id, units, paid) {
                 StepResult::Done
             } else {
@@ -310,8 +320,118 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::Wander => StepResult::Done,
+        ActionKind::StealFood(source) => steal_food(world, id, source, target),
+        ActionKind::Forage => {
+            if let Some(inv) = world.comp_mut::<Inventory>(id) {
+                inv.food = (inv.food + 1).min(20);
+            }
+            StepResult::Done
+        }
+        ActionKind::Beg => beg(world, id),
+        ActionKind::SellFood => {
+            let price = world.market().map_or(0, |m| m.price_food);
+            let pay = (price as f32 * 0.6).floor() as i64;
+            let treasury = world.treasury().map_or(0, |t| t.coins);
+            let Some(inv) = world.comp::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
+            let units = inv.food.saturating_sub(inv.stolen_food).min(3);
+            if units == 0 || treasury < pay * i64::from(units) {
+                return StepResult::Failed(FailReason::StockGone);
+            }
+            if let Some(inv) = world.comp_mut::<Inventory>(id) {
+                inv.food -= units;
+            }
+            if let Some(m) = world.building_of_kind(BuildingKind::Market).and_then(|m| world.comp_mut::<Building>(m)) {
+                m.stock_food += units;
+            }
+            if let Some(t) = world.treasury_mut() {
+                t.coins -= pay * i64::from(units);
+            }
+            if let Some(w) = world.comp_mut::<Wallet>(id) {
+                w.coins += pay * i64::from(units);
+            }
+            world.remember(id, MemoryKind::Paid, None, 0.1, 0.1, false);
+            StepResult::Done
+        }
         _ => StepResult::Failed(FailReason::PreconditionLost),
     }
+}
+
+/// Theft: units leave the source into the thief's inventory as stolen food.
+/// Witnesses, crime reports and arrests arrive with the law system (M4); for
+/// now the event and the daily counter record it.
+fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Option<EntityId>) -> StepResult {
+    let (building, take) = match source {
+        StealSource::Market => (world.building_of_kind(BuildingKind::Market), 2),
+        StealSource::Home => (target, 2),
+        StealSource::Warehouse => (world.building_of_kind(BuildingKind::Warehouse), 5),
+    };
+    let Some(b) = building else { return StepResult::Failed(FailReason::NoSuchPlace) };
+    let Some(bd) = world.comp_mut::<Building>(b) else { return StepResult::Failed(FailReason::NoSuchPlace) };
+    let units = take.min(bd.stock_food);
+    if units == 0 {
+        return StepResult::Failed(FailReason::StockGone);
+    }
+    bd.stock_food -= units;
+    let kind = bd.kind;
+    if let Some(inv) = world.comp_mut::<Inventory>(id) {
+        inv.food = (inv.food + units).min(20);
+        inv.stolen_food = (inv.stolen_food + units).min(inv.food);
+    }
+    world.stats.current.thefts += 1;
+    let name = world.name_of(id);
+    world.push_event(
+        crate::events::EventKind::Theft,
+        &[id, b],
+        format!("{name} stole {units} food from the {kind}#{}", b.index),
+    );
+    world.release_all(id);
+    StepResult::Done
+}
+
+/// Beg: up to 4 passers-by within 3 tiles (lowest id first); each with
+/// `edge.affinity > 0` and `coins > 10` rolls `rng < 0.3 + sociability × 0.4`;
+/// the first success gives `1 + (rng < 0.5)` coins and records a debt. Fails
+/// (memory Rejected) if nothing was gained.
+fn beg(world: &mut World, id: EntityId) -> StepResult {
+    use rand::Rng;
+    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else {
+        return StepResult::Failed(FailReason::NoSuchPlace);
+    };
+    let sociability = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.sociability);
+    let passers: Vec<EntityId> = world
+        .citizens()
+        .into_iter()
+        .filter(|&o| o != id)
+        .filter(|&o| world.comp::<Position>(o).is_some_and(|p| p.tile.manhattan(tile) <= 3))
+        .take(4)
+        .collect();
+    for other in passers {
+        let key = crate::components::edge_key(id, other);
+        let generous = world.edges.get(&key).is_some_and(|e| e.affinity > 0.0)
+            && world.comp::<Wallet>(other).is_some_and(|w| w.coins > 10);
+        if !generous {
+            continue;
+        }
+        let roll: f32 = world.rng.world().random();
+        if roll < 0.3 + sociability * 0.4 {
+            let bonus: f32 = world.rng.world().random();
+            let coins = 1 + i64::from(bonus < 0.5);
+            if let Some(w) = world.comp_mut::<Wallet>(other) {
+                w.coins -= coins;
+            }
+            if let Some(w) = world.comp_mut::<Wallet>(id) {
+                w.coins += coins;
+            }
+            if let Some(e) = world.edges.get_mut(&key) {
+                // the lower id owes the higher id
+                let (lo, _) = key;
+                e.debt += if lo == id { coins as i32 } else { -(coins as i32) };
+            }
+            return StepResult::Done;
+        }
+    }
+    world.remember(id, MemoryKind::Rejected, None, 0.3, -0.3, false);
+    StepResult::Failed(FailReason::PreconditionLost)
 }
 
 /// Shift end: the shift is marked worked (so Work stays pending while it

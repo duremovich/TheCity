@@ -14,14 +14,19 @@ fn test_m1_thirty_days_seed_42() {
     assert_eq!(w.stats.history.len(), 30);
     let mut empty_streak = 0;
     let mut starvation = 0;
+    let mut thefts = 0;
+    let mut arrests = 0;
     for row in &w.stats.history {
         assert!(row.mean_hunger >= 0.4, "day {}: mean_hunger {}", row.day, row.mean_hunger);
         assert!((2..=8).contains(&row.price), "day {}: price {}", row.day, row.price);
         starvation += row.deaths_starvation;
-        // M2: goal selection should neither flap nor stick. Day 0 is excused:
-        // everyone starts fed and solvent, so there is little to change one's mind about.
+        thefts += row.thefts;
+        arrests += row.arrests;
+        // M2: goal selection should neither flap nor stick. Days 0-1 are excused:
+        // everyone starts fed and solvent with a stocked pantry, so there is
+        // little to change one's mind about until the pantries run down.
         assert!(
-            row.day == 0 || (3.0..=12.0).contains(&row.goal_changes_per_agent),
+            row.day <= 1 || (3.0..=12.0).contains(&row.goal_changes_per_agent),
             "day {}: goal_changes_per_agent {}",
             row.day,
             row.goal_changes_per_agent
@@ -34,6 +39,10 @@ fn test_m1_thirty_days_seed_42() {
         }
     }
     assert!(starvation <= 5, "{starvation} starvation deaths");
+    // M3: the first emergent thefts, and nobody to arrest them yet
+    assert!(thefts >= 1, "no theft in 30 days");
+    assert_eq!(arrests, 0, "no law until M4");
+    assert_eq!(w.population(), 300);
 }
 
 #[test]

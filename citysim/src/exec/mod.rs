@@ -18,6 +18,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::components::{Brain, Building, Household, Lod, Position, TilePos};
 use crate::entity::EntityId;
+use crate::events::EventKind;
 use crate::goap::{ActionKind, LocationKey};
 use crate::time::Tick;
 use crate::world::World;
@@ -113,6 +114,13 @@ fn step_agent(world: &mut World, id: EntityId) {
     let lod = brain.lod;
     let state = brain.exec.clone();
     let tick = world.tick;
+    let started = brain.plan.as_ref().map_or(tick, |p| p.started_tick);
+
+    // Replan trigger (d): a plan that has run too long.
+    if tick.saturating_sub(started) > world.config.brain.plan_timeout_ticks {
+        world.fail_plan(id);
+        return;
+    }
 
     let result = match state {
         ExecState::Idle => start_step(world, id, &step, lod),
@@ -151,21 +159,48 @@ fn step_agent(world: &mut World, id: EntityId) {
                 b.action_until = tick;
             }
         }
-        StepResult::Failed(_) => world.fail_plan(id),
+        StepResult::Failed(reason) => {
+            let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
+            world.push_event(
+                EventKind::PlanAborted,
+                &[id],
+                format!("{goal:?} failed at {:?}: {reason:?}", step.action),
+            );
+            world.fail_plan(id);
+        }
     }
 }
 
 impl World {
     /// A step failed: the goal is replanned once; a second consecutive
-    /// failure of the same goal (no plan completed in between) cools it for
-    /// `goal_cooldown_ticks`. The spec's "within 60 ticks" window is shorter
-    /// than one door wait plus think latency, so consecutive-ness is the
-    /// usable reading.
+    /// failure cools it.
     pub fn fail_plan(&mut self, id: EntityId) {
+        if let Some(goal) = self.comp::<Brain>(id).and_then(|b| b.plan_goal()) {
+            self.goal_failed(id, goal);
+        }
+        self.abort_plan(id);
+    }
+
+    /// A goal that cannot be planned at all: nothing will change in a tick, so
+    /// it cools straight away (the replan-once rule is for steps that fail
+    /// in execution, where the world may have moved).
+    pub fn cool_goal(&mut self, id: EntityId, goal: crate::components::GoalKind) {
+        let until = self.tick + self.config.brain.goal_cooldown_ticks;
+        if let Some(b) = self.comp_mut::<Brain>(id) {
+            b.cooldowns.insert(goal, until);
+            b.last_plan_failure = None;
+        }
+    }
+
+    /// A goal could not be planned or its plan failed: replanned once; a
+    /// second consecutive failure of the same goal (no plan completed in
+    /// between) cools it for `goal_cooldown_ticks`. The spec's "within 60
+    /// ticks" window is shorter than one door wait plus think latency, so
+    /// consecutive-ness is the usable reading.
+    pub fn goal_failed(&mut self, id: EntityId, goal: crate::components::GoalKind) {
         let tick = self.tick;
         let cooldown = self.config.brain.goal_cooldown_ticks;
-        let goal = self.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).map(|p| p.goal);
-        if let (Some(goal), Some(b)) = (goal, self.comp_mut::<Brain>(id)) {
+        if let Some(b) = self.comp_mut::<Brain>(id) {
             match b.last_plan_failure {
                 Some((g, _)) if g == goal => {
                     b.cooldowns.insert(goal, tick + cooldown);
@@ -174,7 +209,6 @@ impl World {
                 _ => b.last_plan_failure = Some((goal, tick)),
             }
         }
-        self.abort_plan(id);
     }
 
     /// Drop the current plan: abandon the running step (partial effects per
@@ -228,7 +262,10 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             StepResult::Running
         }
         kind => {
-            if !actions::can_start(world, id, kind, step.target) {
+            // Replan trigger (b): re-observe; a false precondition fails the step.
+            let ctx = crate::goap::PlanCtx::build(world, id, plan_target_of(world, id));
+            let ws = crate::goap::WorldState::observe(world, id, ctx.target);
+            if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
                 return StepResult::Failed(FailReason::PreconditionLost);
             }
             let dur = actions::duration(world, id, kind);
@@ -240,6 +277,10 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             StepResult::Running
         }
     }
+}
+
+fn plan_target_of(world: &World, id: EntityId) -> Option<EntityId> {
+    world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target)
 }
 
 /// The tile a walk starts from: the street outside the current building, or

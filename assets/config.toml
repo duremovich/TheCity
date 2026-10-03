@@ -59,9 +59,9 @@ safety_recover_per_tick = 0.0010
 belonging_decay_per_tick = 0.000139
 intimacy_decay_per_tick = 0.0000694
 # 7 on paper; at 7 a typical starting wallet (10-40 coins at price 3) reads as secure, half the
-# workforce idles until the Market empties, and farmers abandon shifts for snacks. 21 gives Work the
-# U(wealth) the spec's worked example assumes (~0.87) for an ordinary wallet.
-wealth_days_secure = 21.0
+# workforce idles until the Market empties, and farmers abandon shifts for snacks. 30 gives Work the
+# U(wealth) the spec's worked example assumes (~0.87) for a wallet of a few days' wages.
+wealth_days_secure = 30.0
 food_satisfy = 0.5
 sleep_ticks_full = 480
 chat_belonging = 0.3
@@ -137,6 +137,8 @@ emigrate_days = 7
 memory_cap = 24
 memory_half_life_days = 7.0
 goal_hysteresis = 0.10
+# Raising this to stop Bar retries costs whole shifts: two failed wage trips at a full Hall cooled
+# Work for the morning. The planner now refuses a visibly full Bar instead.
 goal_cooldown_ticks = 120
 think_interval_ticks = 30
 plan_budget_per_tick = 12
@@ -165,5 +167,6 @@ tax_rate = 0.05
 sentence_mult = 1.0
 guard_count = 10
 immigration_per_week = 2
-# 3 on paper = one meal at price 3; the unemployed need ~1.2 meals a day, so at 3 they slowly starve.
-dole_per_day = 4
+# 3 = one meal at price 3; the unemployed need ~1.2 meals a day, so some go hungry, and the hungry
+# poor steal (M3's point). At 4 nobody ever steals.
+dole_per_day = 3
