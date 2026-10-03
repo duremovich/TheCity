@@ -4,7 +4,7 @@
 
 use crate::components::{Brain, Lod, Position, Sentence, TilePos};
 use crate::entity::EntityId;
-use crate::exec::ExecState;
+use crate::exec::{self, ExecState};
 use crate::goap::ActionKind;
 use crate::map::{MAP_H, MAP_W};
 use crate::time::TICKS_PER_HOUR;
@@ -71,28 +71,22 @@ pub fn run(world: &mut World) {
     }
 }
 
-/// Change an agent's LOD, converting its execution state per the transition table.
+/// Change an agent's LOD, converting its execution state per the transition
+/// table: a walk becomes a timed arrival and back; Use and Wait keep their
+/// remaining duration.
 pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
-    let tick = world.tick;
-    let move_ticks = world.config.exec.move_ticks_full;
     let Some(brain) = world.comp::<Brain>(id) else { return };
     if brain.lod == lod {
         return;
     }
-    let from_tile = world.comp::<Position>(id).map(|p| p.tile);
     let exec = brain.exec.clone();
     let new_exec = match (exec, lod) {
-        (ExecState::Goto { dest, building, .. }, Lod::Coarse | Lod::Statistical) => {
-            let dest_tile = building.and_then(|b| world.comp::<crate::components::Building>(b)).map(|b| b.door);
-            let dist = match (from_tile, dest_tile) {
-                (Some(a), Some(b)) => u64::from(a.manhattan(b)),
-                _ => 0,
-            };
-            ExecState::GotoTimed { arrive_tick: tick + dist * move_ticks, dest, building }
-        }
-        (ExecState::GotoTimed { dest, building, .. }, Lod::Full) => {
-            ExecState::Goto { path: Vec::new(), next_move_tick: tick, dest, building, blocked_since: None }
-        }
+        (ExecState::Goto { target, .. }, Lod::Coarse | Lod::Statistical) => exec::timed_goto(world, id, target),
+        (ExecState::GotoTimed { target, .. }, Lod::Full) => match exec::walking_goto(world, id, target) {
+            Some(state) => state,
+            // Unreachable on foot: let the step fail and the agent replan.
+            None => ExecState::Idle,
+        },
         (other, _) => other,
     };
     if let Some(b) = world.comp_mut::<Brain>(id) {

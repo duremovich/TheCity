@@ -354,9 +354,12 @@ pub struct Job {
     /// Quits at 7.
     pub days_unpaid: u8,
     pub tax_accum: f32,
-    /// Day on which the last shift was started; one shift per day.
+    /// Key of the last shift worked (see `shift_key_at`); one shift per key.
     #[serde(default)]
-    pub last_shift_day: Option<u64>,
+    pub last_shift_day: Option<i64>,
+    /// Day of the last CollectWage attempt; one visit to the Hall per day.
+    #[serde(default)]
+    pub last_wage_attempt_day: Option<u64>,
 }
 
 impl Job {
@@ -374,6 +377,27 @@ impl Job {
             .map(|&(s, _)| if s > tick_of_day { s - tick_of_day } else { 1440 - tick_of_day + s })
             .min()
             .unwrap_or(0)
+    }
+
+    /// The day that owns the shift containing `tick`. A segment starting at 0
+    /// that continues a 1440-ending segment (night guards) belongs to the
+    /// previous day, so the 21:00-06:00 shift has one key, not two.
+    pub fn shift_key_at(&self, tick: Tick) -> i64 {
+        let day = (tick / 1440) as i64;
+        let tod = (tick % 1440) as u16;
+        let in_tail = self.shifts.iter().any(|&(s, e)| s == 0 && tod < e);
+        let wraps = self.shifts.iter().any(|&(_, e)| e == 1440);
+        if in_tail && wraps {
+            day - 1
+        } else {
+            day
+        }
+    }
+
+    /// Key of the shift in progress, or of the next one to start.
+    pub fn next_shift_key(&self, tick: Tick) -> i64 {
+        let tod = (tick % 1440) as u16;
+        self.shift_key_at(tick + Tick::from(self.ticks_until_shift(tod)))
     }
 
     /// Absolute tick at which the shift containing `tick` ends. A shift that

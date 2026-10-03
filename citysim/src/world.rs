@@ -455,7 +455,16 @@ impl World {
                 let wage_per_day = self.config.economy.wage(role);
                 self.insert(
                     id,
-                    Job { employer, role, wage_per_day, shifts, days_unpaid: 0, tax_accum: 0.0, last_shift_day: None },
+                    Job {
+                        employer,
+                        role,
+                        wage_per_day,
+                        shifts,
+                        days_unpaid: 0,
+                        tax_accum: 0.0,
+                        last_shift_day: None,
+                        last_wage_attempt_day: None,
+                    },
                 );
             }
         }
@@ -610,6 +619,26 @@ impl World {
         }
     }
 
+    /// Remove the Job, posting a vacancy at the employer. Returns the old Job.
+    pub fn vacate_job(&mut self, id: EntityId) -> Option<Job> {
+        let job = self.remove::<Job>(id)?;
+        if let Some(employer) = job.employer {
+            self.vacancies.entry(employer).or_default().push(job.role);
+        }
+        Some(job)
+    }
+
+    /// Drop the agent from its building's occupant list; the Position is left
+    /// to the caller (a leaver moves to the street, a corpse stays put).
+    pub fn remove_from_building(&mut self, id: EntityId) {
+        let Some(here) = self.comp::<Position>(id).and_then(|p| p.building) else { return };
+        if let Some(b) = self.comp_mut::<Building>(here) {
+            if let Ok(i) = b.occupants.binary_search(&id) {
+                b.occupants.remove(i);
+            }
+        }
+    }
+
     /// Death: every component but `Position` and `Identity` goes, a `Corpse`
     /// is added, the building and household forget the agent, the job is
     /// vacated, and the event and daily counter are recorded.
@@ -619,15 +648,13 @@ impl World {
         }
         let tick = self.tick;
         let name = self.name_of(id);
-        if let Some(job) = self.remove::<Job>(id) {
-            if let Some(employer) = job.employer {
-                self.vacancies.entry(employer).or_default().push(job.role);
-            }
-        }
-        if let Some(here) = self.comp::<Position>(id).and_then(|p| p.building) {
-            if let Some(b) = self.comp_mut::<Building>(here) {
-                if let Ok(i) = b.occupants.binary_search(&id) {
-                    b.occupants.remove(i);
+        self.vacate_job(id);
+        self.remove_from_building(id);
+        if let Some(gang) = self.comp::<GangMember>(id).map(|g| g.gang) {
+            if let Some(g) = self.comp_mut::<Gang>(gang) {
+                g.members.retain(|&m| m != id);
+                if g.leader == Some(id) {
+                    g.leader = None;
                 }
             }
         }

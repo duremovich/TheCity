@@ -49,16 +49,16 @@ fn travel_estimate(world: &World, from: crate::components::TilePos, to: crate::c
     u64::from(from.manhattan(to)) * world.config.exec.move_ticks_full * 3 / 2
 }
 
-/// Is today a working day for everyone (6 days in 7)?
-pub fn is_workday(day: u64) -> bool {
-    day % 7 != 6
+/// Is a shift key a working day (6 days in 7)?
+pub fn is_workday(shift_key: i64) -> bool {
+    shift_key.rem_euclid(7) != 6
 }
 
 /// Should this agent drop what it is doing and head to work now?
 pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     let Some(job) = world.comp::<Job>(id) else { return false };
-    let day = world.day();
-    if !is_workday(day) || job.last_shift_day == Some(day) {
+    let key = job.next_shift_key(world.tick);
+    if !is_workday(key) || job.last_shift_day == Some(key) {
         return false;
     }
     let Some(employer) = job.employer else { return false };
@@ -94,8 +94,8 @@ pub fn plan_for(world: &World, id: EntityId) -> Option<Plan> {
         if let Some(employer) = job.employer {
             let tod = world.tick_of_day();
             let on_shift = job.on_shift(tod);
-            let today_done = job.last_shift_day == Some(day);
-            if is_workday(day) && !today_done {
+            let key = job.next_shift_key(tick);
+            if is_workday(key) && job.last_shift_day != Some(key) {
                 let go = step(ActionKind::GoTo(workplace_key(job.role)), Some(employer));
                 if on_shift {
                     let steps = vec![go, step(ActionKind::work_for(job.role), Some(employer))];
@@ -118,7 +118,8 @@ pub fn plan_for(world: &World, id: EntityId) -> Option<Plan> {
     // 2. Money: wages owed, or the daily dole, when the Hall is open (not at night).
     if phase != DayPhase::Night && !dark {
         if let Some(job) = job {
-            if job.days_unpaid >= 1 && !job.on_shift(world.tick_of_day()) {
+            // One visit per day: a short Treasury must not be hammered every few ticks.
+            if job.days_unpaid >= 1 && !job.on_shift(world.tick_of_day()) && job.last_wage_attempt_day != Some(day) {
                 let steps = vec![step(ActionKind::GoTo(LocationKey::Hall), None), step(ActionKind::CollectWage, None)];
                 return Some(plan(GoalKind::Earn, None, steps, tick));
             }
@@ -168,16 +169,19 @@ pub fn plan_for(world: &World, id: EntityId) -> Option<Plan> {
         }
     }
 
-    // 5. Night, or exhausted: home to bed.
-    if dark || needs.energy < EXHAUSTED_BELOW {
-        let steps = if needs.energy < RESTED_AT {
-            vec![go_home, step(ActionKind::Sleep, None)]
+    // 5. Night, or exhausted: home to bed (the homeless sleep where they stand).
+    let bed = |action: ActionKind| -> Vec<ActionInstance> {
+        if home.is_some() {
+            vec![go_home.clone(), step(action, None)]
         } else {
-            vec![go_home, step(ActionKind::Rest, None)]
-        };
+            vec![step(action, None)]
+        }
+    };
+    if dark || needs.energy < EXHAUSTED_BELOW {
+        let steps = if needs.energy < RESTED_AT { bed(ActionKind::Sleep) } else { bed(ActionKind::Rest) };
         return Some(plan(GoalKind::Sleep, home, steps, tick));
     }
 
     // 6. Nothing to do: rest at home.
-    Some(plan(GoalKind::Idle, home, vec![go_home, step(ActionKind::Rest, None)], tick))
+    Some(plan(GoalKind::Idle, home, bed(ActionKind::Rest), tick))
 }

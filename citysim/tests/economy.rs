@@ -33,7 +33,7 @@ fn test_price_rises_when_stock_falls() {
 #[test]
 fn test_farmer_produces_food() {
     let mut w = world(42);
-    w.config.economy.haul_enabled = false;
+    w.config.economy.haul_min_stock = u32::MAX; // no hauling: measure raw farm output
     let farmers: Vec<_> =
         w.citizens().into_iter().filter(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Farmer)).collect();
     assert_eq!(farmers.len(), 24);

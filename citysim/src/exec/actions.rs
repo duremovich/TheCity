@@ -3,7 +3,7 @@
 //! uses are implemented; the rest fail `can_start` until their milestone.
 
 use crate::components::{
-    Brain, Building, BuildingKind, Edge, Household, Inventory, Job, MemoryKind, Needs, Position, RelKind, Role, Skills,
+    Brain, Building, BuildingKind, Edge, Household, Inventory, Job, MemoryKind, Needs, Position, RelKind, Skills,
     Wallet,
 };
 use crate::entity::EntityId;
@@ -52,6 +52,13 @@ fn home_pantry(world: &World, id: EntityId) -> u32 {
     world.comp::<Household>(id).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food)
 }
 
+/// On shift, at the employer, and this shift not yet worked.
+pub fn can_work_now(world: &World, id: EntityId, job: &Job) -> bool {
+    job.on_shift(world.tick_of_day())
+        && job.last_shift_day != Some(job.shift_key_at(world.tick))
+        && job.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
+}
+
 pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> bool {
     let inv = world.comp::<Inventory>(id);
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
@@ -82,11 +89,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         k if k.is_work() => {
             let Some(job) = world.comp::<Job>(id) else { return false };
-            let tod = world.tick_of_day();
-            job.on_shift(tod)
-                && job.last_shift_day != Some(world.day())
-                && job.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
-                && ActionKind::work_for(job.role) == k
+            can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
         }
         ActionKind::Wander => true,
         _ => false,
@@ -110,9 +113,9 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, _target: Opti
             }
         }
         k if k.is_work() => {
-            let day = world.day();
+            let tick = world.tick;
             if let Some(j) = world.comp_mut::<Job>(id) {
-                j.last_shift_day = Some(day);
+                j.last_shift_day = Some(j.shift_key_at(tick));
             }
         }
         _ => {}
@@ -128,11 +131,7 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind) -> bool {
         }
         ActionKind::Rest => crate::exec::routine::must_leave_for_work(world, id),
         // Waiting at the workplace for the shift: start the moment it begins.
-        ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| {
-            j.on_shift(world.tick_of_day())
-                && j.last_shift_day != Some(world.day())
-                && j.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
-        }),
+        ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),
         _ => false,
     }
 }
@@ -252,10 +251,9 @@ pub fn on_complete(
             }
             end_shift(world, id);
             // Hauling: appended to the plan if the farm has enough stock.
-            let haul_enabled = world.config.economy.haul_enabled;
             let min = world.config.economy.haul_min_stock;
             let stock = farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food);
-            if haul_enabled && stock >= min {
+            if stock >= min {
                 if let (Some(farm), Some(b)) = (farm, world.comp_mut::<Brain>(id)) {
                     if let Some(plan) = b.plan.as_mut() {
                         plan.steps.push(crate::components::ActionInstance {
@@ -287,7 +285,6 @@ fn end_shift(world: &mut World, id: EntityId) {
     if let Some(j) = world.comp_mut::<Job>(id) {
         j.days_unpaid = j.days_unpaid.saturating_add(1);
     }
-    let _ = Role::Farmer; // keeps the Role import for `work_for` callers below
     economy::maybe_quit(world, id);
 }
 

@@ -25,25 +25,32 @@ use crate::world::World;
 pub use flowfield::FlowField;
 pub use reservations::{Reservation, ReservationKind};
 
+/// Where a Goto is heading. Shared by the Full and Coarse variants so an LOD
+/// change can convert one into the other without re-resolving.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GotoTarget {
+    pub dest: LocationKey,
+    /// The door of `building`, or the street tile for non-building destinations.
+    pub tile: TilePos,
+    pub building: Option<EntityId>,
+}
+
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub enum ExecState {
     #[default]
     Idle,
     Goto {
-        /// Remaining A* path, reversed (next tile is `last()`); empty = follow the flow field.
+        target: GotoTarget,
+        /// Remaining A* path, reversed (next tile is `last()`); empty when following a flow field.
         path: Vec<TilePos>,
         next_move_tick: Tick,
-        dest: LocationKey,
-        /// Building being walked to, if any.
-        building: Option<EntityId>,
         /// When the agent first found the door or building full.
         blocked_since: Option<Tick>,
     },
     /// Coarse LOD.
     GotoTimed {
+        target: GotoTarget,
         arrive_tick: Tick,
-        dest: LocationKey,
-        building: Option<EntityId>,
     },
     Use {
         kind: ActionKind,
@@ -114,14 +121,14 @@ fn step_agent(world: &mut World, id: EntityId) {
 
     let result = match state {
         ExecState::Idle => start_step(world, id, &step, lod),
-        ExecState::Goto { path, next_move_tick, dest, building, blocked_since } => {
-            advance_goto(world, id, path, next_move_tick, dest, building, blocked_since)
+        ExecState::Goto { target, path, next_move_tick, blocked_since } => {
+            advance_goto(world, id, target, path, next_move_tick, blocked_since)
         }
-        ExecState::GotoTimed { arrive_tick, building, .. } => {
+        ExecState::GotoTimed { target, arrive_tick } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
-                arrive(world, id, building)
+                arrive(world, id, &target)
             }
         }
         ExecState::Use { kind, until, started } => {
@@ -165,38 +172,26 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
     match step.action {
         ActionKind::GoTo(key) => {
             let building = world.resolve_building(id, key, step.target);
-            let Some(dest_tile) = world.resolve_location(id, key, step.target) else {
+            let Some(tile) = world.resolve_location(id, key, step.target) else {
                 return StepResult::Failed(FailReason::NoSuchPlace);
             };
-            let Some(pos) = world.comp::<Position>(id) else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            let Some(pos) = world.comp::<Position>(id).cloned() else {
+                return StepResult::Failed(FailReason::NoSuchPlace);
+            };
             let already_there = match building {
                 Some(b) => pos.building == Some(b),
-                None => pos.tile == dest_tile,
+                None => pos.tile == tile,
             };
             if already_there {
                 return StepResult::Done;
             }
-            let from = pos.tile;
+            let target = GotoTarget { dest: key, tile, building };
             let state = match lod {
-                Lod::Coarse | Lod::Statistical => ExecState::GotoTimed {
-                    arrive_tick: tick + Tick::from(from.manhattan(dest_tile)) * world.config.exec.move_ticks_full,
-                    dest: key,
-                    building,
+                Lod::Coarse | Lod::Statistical => timed_goto(world, id, target),
+                Lod::Full => match walking_goto(world, id, target) {
+                    Some(s) => s,
+                    None => return StepResult::Failed(FailReason::NoSuchPlace),
                 },
-                Lod::Full => {
-                    let path = if building.is_some() {
-                        Vec::new()
-                    } else {
-                        let Some(mut p) =
-                            pathfind::astar(&world.map, from, dest_tile, world.config.exec.astar_max_expansions)
-                        else {
-                            return StepResult::Failed(FailReason::NoSuchPlace);
-                        };
-                        p.reverse();
-                        p
-                    };
-                    ExecState::Goto { path, next_move_tick: tick, dest: key, building, blocked_since: None }
-                }
             };
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.exec = state;
@@ -218,58 +213,91 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
     }
 }
 
+/// The tile a walk starts from: the street outside the current building, or
+/// the agent's own tile.
+fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
+    let pos = world.comp::<Position>(id)?;
+    match pos.building.and_then(|b| world.comp::<Building>(b)) {
+        Some(b) => Some(world.outside_door(b)),
+        None => Some(pos.tile),
+    }
+}
+
+/// A Coarse Goto: arrive after Manhattan distance × move ticks.
+pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
+    let from = walk_origin(world, id).unwrap_or(target.tile);
+    let arrive_tick = world.tick + Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
+    ExecState::GotoTimed { target, arrive_tick }
+}
+
+/// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.
+pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<ExecState> {
+    let path = if target.building.is_some() {
+        Vec::new()
+    } else {
+        let from = walk_origin(world, id)?;
+        let mut p = pathfind::astar(&world.map, from, target.tile, world.config.exec.astar_max_expansions)?;
+        p.reverse();
+        p
+    };
+    Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None })
+}
+
 /// One tick of Full-LOD movement.
-#[allow(clippy::too_many_arguments)]
 fn advance_goto(
     world: &mut World,
     id: EntityId,
+    target: GotoTarget,
     mut path: Vec<TilePos>,
     next_move_tick: Tick,
-    dest: LocationKey,
-    building: Option<EntityId>,
     blocked_since: Option<Tick>,
 ) -> StepResult {
     let tick = world.tick;
     if tick < next_move_tick {
         return StepResult::Running;
     }
+    let move_ticks = world.config.exec.move_ticks_full;
     let Some(pos) = world.comp::<Position>(id).cloned() else { return StepResult::Failed(FailReason::NoSuchPlace) };
 
     // Inside some other building: step out onto the street first.
     if let Some(here) = pos.building {
-        if Some(here) == building {
+        if Some(here) == target.building {
             return StepResult::Done;
         }
         world.leave_building(id);
-        return set_goto(world, id, path, tick + world.config.exec.move_ticks_full, dest, building, None);
+        return set_goto(world, id, target, path, tick + move_ticks, None);
     }
 
-    // Next tile: flow field toward a building door, or the precomputed A* path.
-    let next = match building {
+    match target.building {
         Some(b) => {
             let door = world.comp::<Building>(b).map(|bd| bd.door);
             if door == Some(pos.tile) {
-                None
-            } else {
-                world.flow_step(b, pos.tile)
+                return try_enter(world, id, target, path, blocked_since);
+            }
+            match world.flow_step(b, pos.tile) {
+                Some(n) if door == Some(n) => try_enter(world, id, target, path, blocked_since),
+                Some(n) => {
+                    move_to(world, id, n);
+                    set_goto(world, id, target, path, tick + move_ticks, None)
+                }
+                // The field never reached this tile: there is no way there.
+                None => StepResult::Failed(FailReason::NoSuchPlace),
             }
         }
-        None => path.pop(),
-    };
+        None => match path.pop() {
+            Some(n) => {
+                move_to(world, id, n);
+                set_goto(world, id, target, path, tick + move_ticks, None)
+            }
+            None if pos.tile == target.tile => StepResult::Done,
+            None => StepResult::Failed(FailReason::NoSuchPlace),
+        },
+    }
+}
 
-    match (next, building) {
-        (Some(n), Some(b)) if world.comp::<Building>(b).is_some_and(|bd| bd.door == n) => {
-            try_enter(world, id, b, path, dest, blocked_since)
-        }
-        (None, Some(b)) => try_enter(world, id, b, path, dest, blocked_since),
-        (Some(n), _) => {
-            if let Some(p) = world.comp_mut::<Position>(id) {
-                p.tile = n;
-            }
-            let move_ticks = world.config.exec.move_ticks_full;
-            set_goto(world, id, path, tick + move_ticks, dest, building, None)
-        }
-        (None, None) => StepResult::Done,
+fn move_to(world: &mut World, id: EntityId, tile: TilePos) {
+    if let Some(p) = world.comp_mut::<Position>(id) {
+        p.tile = tile;
     }
 }
 
@@ -277,12 +305,12 @@ fn advance_goto(
 fn try_enter(
     world: &mut World,
     id: EntityId,
-    b: EntityId,
+    target: GotoTarget,
     path: Vec<TilePos>,
-    dest: LocationKey,
     blocked_since: Option<Tick>,
 ) -> StepResult {
     let tick = world.tick;
+    let Some(b) = target.building else { return StepResult::Failed(FailReason::NoSuchPlace) };
     let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else {
         return StepResult::Failed(FailReason::NoSuchPlace);
     };
@@ -298,27 +326,26 @@ fn try_enter(
     if tick - since >= world.config.exec.door_queue_max_ticks {
         return StepResult::Failed(if full { FailReason::BuildingFull } else { FailReason::Timeout });
     }
-    set_goto(world, id, path, tick + 1, dest, Some(b), Some(since))
+    set_goto(world, id, target, path, tick + 1, Some(since))
 }
 
 fn set_goto(
     world: &mut World,
     id: EntityId,
+    target: GotoTarget,
     path: Vec<TilePos>,
     next_move_tick: Tick,
-    dest: LocationKey,
-    building: Option<EntityId>,
     blocked_since: Option<Tick>,
 ) -> StepResult {
     if let Some(brain) = world.comp_mut::<Brain>(id) {
-        brain.exec = ExecState::Goto { path, next_move_tick, dest, building, blocked_since };
+        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since };
     }
     StepResult::Running
 }
 
-/// Coarse arrival: leave wherever we are and appear inside the destination.
-fn arrive(world: &mut World, id: EntityId, building: Option<EntityId>) -> StepResult {
-    match building {
+/// Coarse arrival: leave wherever we are and appear at the destination.
+fn arrive(world: &mut World, id: EntityId, target: &GotoTarget) -> StepResult {
+    match target.building {
         Some(b) => {
             if world.comp::<Position>(id).is_some_and(|p| p.building == Some(b)) {
                 return StepResult::Done;
@@ -330,7 +357,11 @@ fn arrive(world: &mut World, id: EntityId, building: Option<EntityId>) -> StepRe
             world.enter_building(id, b);
             StepResult::Done
         }
-        None => StepResult::Done,
+        None => {
+            world.leave_building(id);
+            move_to(world, id, target.tile);
+            StepResult::Done
+        }
     }
 }
 
@@ -418,11 +449,7 @@ impl World {
     pub fn leave_building(&mut self, agent: EntityId) {
         let Some(here) = self.comp::<Position>(agent).and_then(|p| p.building) else { return };
         let outside = self.comp::<Building>(here).map(|bd| self.outside_door(bd));
-        if let Some(bd) = self.comp_mut::<Building>(here) {
-            if let Ok(i) = bd.occupants.binary_search(&agent) {
-                bd.occupants.remove(i);
-            }
-        }
+        self.remove_from_building(agent);
         if let (Some(p), Some(out)) = (self.comp_mut::<Position>(agent), outside) {
             p.tile = out;
             p.building = None;
@@ -444,7 +471,7 @@ impl World {
         self.flow_field_for(b).and_then(|f| f.step(from))
     }
 
-    /// Drop a cached field (after BuildHome / DemolishHome).
+    /// Drop every cached field (after BuildHome / DemolishHome).
     pub fn invalidate_flow_fields(&mut self) {
         self.flow_fields.clear();
     }

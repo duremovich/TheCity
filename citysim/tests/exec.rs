@@ -138,3 +138,78 @@ fn test_lod_assigns_fifty_full() {
     let full = w.citizens().into_iter().filter(|&id| w.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Full)).count();
     assert_eq!(full, 0);
 }
+
+#[test]
+fn test_night_guard_works_both_halves_of_the_shift() {
+    let mut w = world(8);
+    let guard = w
+        .citizens()
+        .into_iter()
+        .find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard && j.shifts[0].0 == 1260))
+        .expect("a night guard");
+    let jail = w.comp::<Job>(guard).expect("job").employer.expect("jail");
+    let working = |w: &World| {
+        w.comp::<Position>(guard).expect("pos").building == Some(jail)
+            && matches!(
+                w.comp::<Brain>(guard).expect("brain").exec,
+                citysim::ExecState::Use { kind: citysim::ActionKind::GuardJail, .. }
+            )
+    };
+    // Day 0 22:00: the shift that starts at 21:00 is in progress.
+    w.run_ticks(1320);
+    assert!(working(&w), "22:00 day 0");
+    // Day 1 03:00: still the same shift.
+    w.run_ticks(TICKS_PER_DAY - 1320 + 180);
+    assert!(working(&w), "03:00 day 1");
+    // Day 1 22:00: the next shift, not "already worked today".
+    w.run_ticks(1320 - 180);
+    assert!(working(&w), "22:00 day 1");
+    let job = w.comp::<Job>(guard).expect("job");
+    assert_eq!(job.last_shift_day, Some(1));
+    assert!(job.days_unpaid <= 2, "one wage day per shift, not per segment: {}", job.days_unpaid);
+}
+
+#[test]
+fn test_buy_quantity_capped_by_market_stock() {
+    let mut w = world(9);
+    let market = w.building_of_kind(BuildingKind::Market).expect("market");
+    w.comp_mut::<Building>(market).expect("market").stock_food = 2;
+    let rich = w.citizens()[0];
+    w.comp_mut::<citysim::Wallet>(rich).expect("wallet").coins = 100;
+    w.comp_mut::<citysim::Inventory>(rich).expect("inv").food = 0;
+    assert_eq!(citysim::systems::economy::buy_quantity(&w, rich), 2);
+    w.comp_mut::<Building>(market).expect("market").stock_food = 0;
+    assert_eq!(citysim::systems::economy::buy_quantity(&w, rich), 0);
+}
+
+#[test]
+fn test_homeless_agent_sleeps_on_the_street() {
+    let mut w = world(10);
+    let id = w.citizens()[0];
+    w.comp_mut::<citysim::Household>(id).expect("hh").home = None;
+    w.leave_building(id);
+    w.comp_mut::<citysim::Needs>(id).expect("needs").energy = 0.2;
+    w.run_ticks(5);
+    let brain = w.comp::<Brain>(id).expect("brain");
+    assert!(matches!(brain.exec, citysim::ExecState::Use { kind: citysim::ActionKind::Sleep, .. }), "{:?}", brain.exec);
+    assert!(w.comp::<Position>(id).expect("pos").building.is_none());
+}
+
+#[test]
+fn test_short_treasury_does_not_make_workers_quit_in_a_day() {
+    let mut w = world(12);
+    w.treasury_mut().expect("treasury").coins = 0;
+    w.levers.dole_per_day = 0;
+    let workers = w.citizens().into_iter().filter(|&id| w.has::<Job>(id)).count();
+    assert_eq!(workers, 40);
+    w.run_ticks(TICKS_PER_DAY * 2);
+    let still = w.citizens().into_iter().filter(|&id| w.has::<Job>(id)).count();
+    assert_eq!(
+        still, 40,
+        "nobody quits after two unpaid days; the rule is seven days or three Unpaid memories in a week"
+    );
+    for id in w.citizens() {
+        let Some(job) = w.comp::<Job>(id) else { continue };
+        assert!(job.days_unpaid <= 2, "{}", job.days_unpaid);
+    }
+}

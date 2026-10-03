@@ -103,13 +103,18 @@ pub fn haul(world: &mut World, farm: EntityId) -> u32 {
     moved
 }
 
-/// Units `agent` can afford and carry right now: `min(3, floor(coins / price), 20 − food)`.
+/// Units `agent` can afford, carry and the Market can supply right now:
+/// `min(3, floor(coins / price), 20 - food, Market stock)`.
 pub fn buy_quantity(world: &World, agent: EntityId) -> u32 {
     let price = world.market().map_or(i64::MAX, |m| m.price_food).max(1);
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let food = world.comp::<Inventory>(agent).map_or(20, |i| i.food);
+    let stock = world
+        .building_of_kind(BuildingKind::Market)
+        .and_then(|m| world.comp::<Building>(m))
+        .map_or(0, |b| b.stock_food);
     let afford = (coins / price).clamp(0, 3) as u32;
-    afford.min(20u32.saturating_sub(food))
+    afford.min(20u32.saturating_sub(food)).min(stock)
 }
 
 /// Pay for `units` at the Market (into the Treasury). Returns the coins paid.
@@ -149,10 +154,14 @@ pub fn take_food(world: &mut World, agent: EntityId, units: u32, paid: i64) -> b
     true
 }
 
-/// `CollectWage` at the Hall. Returns the net coins paid.
+/// `CollectWage` at the Hall, once per day whatever the outcome. Returns the net coins paid.
 pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     let tax_rate = world.levers.tax_rate;
+    let day = world.day();
     let Some(job) = world.comp::<Job>(agent).cloned() else { return 0 };
+    if let Some(j) = world.comp_mut::<Job>(agent) {
+        j.last_wage_attempt_day = Some(day);
+    }
     if job.days_unpaid == 0 {
         return 0;
     }
@@ -203,12 +212,9 @@ pub fn maybe_quit(world: &mut World, agent: EntityId) {
     }
 }
 
-/// Remove the Job and post a vacancy at the employer.
+/// Remove the Job (posting a vacancy), drop the plan, log the event.
 pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
-    let Some(job) = world.remove::<Job>(agent) else { return };
-    if let Some(employer) = job.employer {
-        world.vacancies.entry(employer).or_default().push(job.role);
-    }
+    let Some(job) = world.vacate_job(agent) else { return };
     if let Some(b) = world.comp_mut::<Brain>(agent) {
         b.clear_plan();
     }

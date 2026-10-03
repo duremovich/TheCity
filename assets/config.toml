@@ -82,7 +82,6 @@ spoilage_pantry = 0.05
 spoilage_market = 0.01
 haul_batch = 50
 haul_min_stock = 10
-haul_enabled = true
 build_home_cost = 200
 
 [crime]

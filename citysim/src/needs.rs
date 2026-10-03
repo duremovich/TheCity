@@ -1,21 +1,21 @@
 //! Need decay, satisfiers, starvation. Runs every tick for Full and Coarse
 //! agents; the Statistical tick (M7) applies 60 steps at once.
 
-use crate::components::{
-    Brain, Identity, Job, Lod, MemoryKind, Needs, Personality, Position, Role, Sentence, Skills, Wallet,
-};
+use crate::components::{Brain, Identity, Job, Lod, MemoryKind, Needs, Personality, Position, Role, Sentence};
 use crate::config::NeedsCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::exec::ExecState;
 use crate::goap::ActionKind;
-use crate::time::{self, TICKS_PER_DAY, TICKS_PER_HOUR};
+use crate::time::{self, TICKS_PER_HOUR};
 use crate::world::World;
 
 /// Everything that modifies one agent's decay this tick.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DecayCtx {
     pub sleeping: bool,
+    /// Asleep on the street: energy recovers at x0.6.
+    pub sleeping_outside: bool,
     pub farm_working: bool,
     pub jailed: bool,
     /// Fleeing or fighting.
@@ -46,7 +46,8 @@ pub fn decay(n: &mut Needs, cfg: &NeedsCfg, ctx: &DecayCtx, ticks: u32) {
     n.hunger = (n.hunger - hunger * t).max(0.0);
 
     if ctx.sleeping {
-        n.energy = (n.energy + t / cfg.sleep_ticks_full as f32).min(1.0);
+        let gain = if ctx.sleeping_outside { 0.6 } else { 1.0 };
+        n.energy = (n.energy + gain * t / cfg.sleep_ticks_full as f32).min(1.0);
     } else {
         let mut energy = cfg.energy_decay_per_tick * ctx.season_energy_mult;
         if ctx.exerting {
@@ -98,6 +99,7 @@ pub fn run(world: &mut World) {
             continue;
         }
         let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. });
+        let sleeping_outside = sleeping && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });
         let jailed = world.has::<Sentence>(id);
         let tile = world.comp::<Position>(id).map(|p| p.tile);
@@ -106,6 +108,7 @@ pub fn run(world: &mut World) {
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let ctx = DecayCtx {
             sleeping,
+            sleeping_outside,
             farm_working,
             jailed,
             exerting: false,
@@ -157,21 +160,3 @@ fn starvation(world: &mut World, id: EntityId) {
         world.kill(id, crate::components::DeathCause::Starvation);
     }
 }
-
-/// Days of food a wallet buys at the current price; used by the inspector.
-pub fn food_days(world: &World, id: EntityId) -> f32 {
-    let price = world.market().map_or(1, |m| m.price_food).max(1) as f32;
-    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins) as f32;
-    let _ = Skills::default_farming;
-    coins / price
-}
-
-impl Skills {
-    /// Placeholder for the farming skill a brand-new citizen starts with.
-    pub fn default_farming() -> f32 {
-        0.25
-    }
-}
-
-/// Ticks in a day, re-exported for callers that only import this module.
-pub const DAY: u64 = TICKS_PER_DAY;
