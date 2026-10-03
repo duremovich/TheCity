@@ -31,6 +31,7 @@ fn test_m1_thirty_days_seed_42() {
             row.day,
             row.goal_changes_per_agent
         );
+        assert!(row.jailed <= 16, "day {}: jailed {}", row.day, row.jailed);
         if row.food_market == 0 {
             empty_streak += 1;
             assert!(empty_streak <= 2, "day {}: Market empty for {empty_streak} days", row.day);
@@ -39,10 +40,10 @@ fn test_m1_thirty_days_seed_42() {
         }
     }
     assert!(starvation <= 5, "{starvation} starvation deaths");
-    // M3: the first emergent thefts, and nobody to arrest them yet
-    assert!(thefts >= 1, "no theft in 30 days");
-    assert_eq!(arrests, 0, "no law until M4");
-    assert_eq!(w.population(), 300);
+    // M3/M4: emergent thefts, and the law catches some
+    assert!(thefts >= 3, "only {thefts} thefts in 30 days");
+    assert!(arrests >= 1, "no arrest in 30 days");
+    assert!(w.population() >= 295, "population {}", w.population());
 }
 
 #[test]

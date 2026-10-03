@@ -68,7 +68,14 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
                 .min_by_key(|(h, b)| (b.door.manhattan(tile), h.index))
                 .map(|(h, _)| h)
         }
-        // Socialise, Court, GangWork, Arrest, Bury, Fight bind with M4–M5 data.
+        // Arrest binds the located warrant suspect nearest the guard.
+        GoalKind::Arrest => {
+            let tile = world.comp::<Position>(id)?.tile;
+            crate::systems::law::located_suspects(world)
+                .into_iter()
+                .min_by_key(|&s| (world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile)), s.index))
+        }
+        // Socialise, Court, GangWork, Bury, Fight bind with M5–M6 data.
         _ => None,
     }
 }
@@ -91,6 +98,16 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         return 0;
     };
 
+    if goal == GoalKind::Patrol {
+        let needs_route = world.comp::<Brain>(id).is_some_and(|b| b.patrol_route.is_empty());
+        if needs_route {
+            let route = crate::systems::law::new_patrol_route(world);
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.patrol_route = route;
+                b.patrol_legs = 0;
+            }
+        }
+    }
     let target = bind_target(world, id, goal);
     let ctx = PlanCtx::build(world, id, target);
     let start = WorldState::observe(world, id, target);

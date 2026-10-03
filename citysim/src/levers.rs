@@ -164,12 +164,22 @@ impl World {
                 self.view_rect = *rect;
             }
             PlayerCommand::SetSpeed(_) => {}
-            // Arrest / Release land with the law system (M4); Demolish / Build
-            // with the full lever set (M7).
-            PlayerCommand::Arrest(_)
-            | PlayerCommand::Release(_)
-            | PlayerCommand::DemolishHome(_)
-            | PlayerCommand::BuildHome { .. } => {
+            PlayerCommand::Arrest(who) => match crate::systems::law::player_arrest(self, *who) {
+                Ok(()) => {
+                    let name = self.name_of(*who);
+                    self.push_event(EventKind::PlayerAction, &[*who], format!("Arrested {name}"));
+                }
+                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Arrest: {e}")),
+            },
+            PlayerCommand::Release(who) => match crate::systems::law::player_release(self, *who) {
+                Ok(()) => {
+                    let name = self.name_of(*who);
+                    self.push_event(EventKind::PlayerAction, &[*who], format!("Released {name}"));
+                }
+                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Release: {e}")),
+            },
+            // Demolish / Build land with the full lever set (M7).
+            PlayerCommand::DemolishHome(_) | PlayerCommand::BuildHome { .. } => {
                 self.push_event(EventKind::PlayerActionFailed, &[], format!("{cmd:?}: not implemented yet"));
             }
         }

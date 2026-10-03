@@ -89,13 +89,17 @@ pub fn run(world: &mut World) {
     world.sweep_reservations();
     for id in world.citizens() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
-        if brain.lod == Lod::Statistical || world.has::<crate::components::Sentence>(id) {
+        if brain.lod == Lod::Statistical || world.has::<crate::components::Sentence>(id) || brain.cuffed_by.is_some() {
             continue;
         }
         if brain.plan.is_none() {
             continue; // the think system plans
         }
         step_agent(world, id);
+        // An escorting guard drags the suspect along.
+        if world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some()) {
+            crate::systems::law::follow_guard(world, id);
+        }
     }
 }
 
@@ -158,6 +162,7 @@ fn step_agent(world: &mut World, id: EntityId) {
                 b.exec = ExecState::Idle;
                 b.action_until = tick;
             }
+            actions::on_arrive(world, id, &step);
         }
         StepResult::Failed(reason) => {
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
@@ -214,6 +219,15 @@ impl World {
     /// Drop the current plan: abandon the running step (partial effects per
     /// `actions::on_abort`), release reservations, reset execution.
     pub fn abort_plan(&mut self, id: EntityId) {
+        // A guard abandoning an escort lets the suspect go (to be re-arrested).
+        if let Some(suspect) = self.comp::<Brain>(id).and_then(|b| b.escorting) {
+            if let Some(b) = self.comp_mut::<Brain>(suspect) {
+                b.cuffed_by = None;
+            }
+            if let Some(b) = self.comp_mut::<Brain>(id) {
+                b.escorting = None;
+            }
+        }
         let running = match self.comp::<Brain>(id).map(|b| &b.exec) {
             Some(ExecState::Use { kind, started, .. }) => Some((*kind, *started)),
             _ => None,
@@ -232,10 +246,19 @@ impl World {
 /// effects for an action.
 fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionInstance, lod: Lod) -> StepResult {
     let tick = world.tick;
-    match step.action {
-        ActionKind::GoTo(key) => {
-            let building = world.resolve_building(id, key, step.target);
-            let Some(tile) = world.resolve_location(id, key, step.target) else {
+    // Escort and FleeToHome are walks with a completion effect.
+    let walk_key = match step.action {
+        ActionKind::GoTo(key) => Some(key),
+        ActionKind::Escort => Some(LocationKey::Jail),
+        ActionKind::FleeToHome => Some(LocationKey::Home),
+        _ => None,
+    };
+    match walk_key {
+        Some(key) => {
+            // Escort's target is the suspect, not the destination.
+            let walk_target = if matches!(step.action, ActionKind::GoTo(_)) { step.target } else { None };
+            let building = world.resolve_building(id, key, walk_target);
+            let Some(tile) = world.resolve_location(id, key, walk_target) else {
                 return StepResult::Failed(FailReason::NoSuchPlace);
             };
             let Some(pos) = world.comp::<Position>(id).cloned() else {
@@ -261,7 +284,8 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             }
             StepResult::Running
         }
-        kind => {
+        None => {
+            let kind = step.action;
             // Replan trigger (b): re-observe; a false precondition fails the step.
             let ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
             let ws = crate::goap::WorldState::observe(world, id, ctx.target);
@@ -463,11 +487,12 @@ impl World {
             LocationKey::Hall => target.or_else(|| self.building_of_kind(K::Hall)),
             LocationKey::Hideout => target.or_else(|| self.building_of_kind(K::Hideout)),
             LocationKey::Warehouse => target.or_else(|| self.building_of_kind(K::Warehouse)),
-            LocationKey::Anywhere
-            | LocationKey::Street
-            | LocationKey::SuspectTile
-            | LocationKey::CorpseTile
-            | LocationKey::PatrolWaypoint => None,
+            // A suspect inside a building is reached through its door.
+            LocationKey::SuspectTile => target.and_then(|s| self.comp::<Position>(s)).and_then(|p| p.building),
+            LocationKey::PatrolWaypoint => self
+                .comp::<Brain>(agent)
+                .and_then(|b| b.patrol_route.get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1)).copied()),
+            LocationKey::Anywhere | LocationKey::Street | LocationKey::CorpseTile => None,
         }
     }
 
@@ -485,9 +510,8 @@ impl World {
                     None => Some(pos.tile),
                 }
             }
-            LocationKey::SuspectTile | LocationKey::CorpseTile => {
-                target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile)
-            }
+            LocationKey::SuspectTile => target.and_then(|t| self.last_seen.get(&t)).map(|&(tile, _)| tile),
+            LocationKey::CorpseTile => target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile),
             _ => None,
         }
     }

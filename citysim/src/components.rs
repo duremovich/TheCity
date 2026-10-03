@@ -241,6 +241,10 @@ pub enum MemoryKind {
     SawCorpse,
     Paid,
     Unpaid,
+    /// Jail co-location (Social graph, M5).
+    MetInJail,
+    /// Witnessed outburst of a very low mood (Mood table).
+    Tantrum,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -460,6 +464,17 @@ pub struct Brain {
     /// Waiting in `World::plan_queue`.
     #[serde(default)]
     pub plan_queued: bool,
+    /// Cuffed by this guard: no thinking or acting until jailed or freed.
+    #[serde(default)]
+    pub cuffed_by: Option<EntityId>,
+    /// A guard escorting this cuffed suspect to the Jail.
+    #[serde(default)]
+    pub escorting: Option<EntityId>,
+    /// Guards: the current patrol loop (buildings) and legs completed this shift.
+    #[serde(default)]
+    pub patrol_route: Vec<EntityId>,
+    #[serde(default)]
+    pub patrol_legs: u8,
 }
 
 impl Default for Brain {
@@ -481,6 +496,10 @@ impl Default for Brain {
             last_urgent_think_tick: 0,
             last_plan_failure: None,
             plan_queued: false,
+            cuffed_by: None,
+            escorting: None,
+            patrol_route: Vec::new(),
+            patrol_legs: 0,
         }
     }
 }

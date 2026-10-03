@@ -111,6 +111,10 @@ sentence_days = [3, 6, 10, 30]
 # jail capacity is buildings.jail.capacity
 fight_death_p = 0.15
 stat_theft_caught_p = 0.25
+warrant_expiry_days = 30
+suspect_seen_ticks = 240
+patrol_legs_per_shift = 5
+fine_mult = 2
 
 [social]
 edge_create_ticks = 30

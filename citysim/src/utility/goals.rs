@@ -218,7 +218,13 @@ pub fn considerations(
             let p = pers?;
             vec![
                 Consideration::new("U(safety)", urgency(n.safety), Curve::Logistic { k: 12.0, mid: 0.5 }),
-                Consideration::new("hostile near", can(false), GATE), // M4: law/witness data
+                // A guard is hostile to the wanted; enemies arrive with the social graph (M5).
+                Consideration::new(
+                    "hostile near",
+                    can(crate::systems::law::wanted(world, id)
+                        && crate::systems::law::guard_within(world, id, world.config.crime.sight)),
+                    GATE,
+                ),
                 Consideration::new("1-courage", 1.0 - p.courage, Curve::Linear { m: 0.8, b: 0.2 }),
             ]
         }
@@ -243,7 +249,8 @@ pub fn considerations(
             let saw = mem
                 .entries
                 .iter()
-                .filter(|e| e.kind == MemoryKind::SawCrime && e.tick >= two_days)
+                .filter(|e| e.kind == MemoryKind::SawCrime && e.tick >= two_days && !e.second_hand)
+                .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::wanted(world, s)))
                 .max_by(|a, b| a.salience.partial_cmp(&b.salience).unwrap_or(std::cmp::Ordering::Equal))?;
             let in_gang = world.has::<crate::components::GangMember>(id);
             let betraying = world.comp::<Brain>(id).is_some_and(|b| b.betraying);
@@ -268,15 +275,17 @@ pub fn considerations(
                 return None;
             }
             let n = needs?;
+            let key = job.next_shift_key(world.tick);
+            let patrol_day = !crate::systems::law::jail_day(id, key);
+            let legs_left =
+                world.comp::<Brain>(id).is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift);
+            let on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;
+            let no_warrant = crate::systems::law::located_suspects(world).is_empty();
             vec![
-                Consideration::new("in shift", can(job.on_shift(tod)), GATE),
+                Consideration::new("in shift", can(on_duty), GATE),
                 Consideration::new("energy", n.energy, Curve::Linear { m: 0.8, b: 0.2 }),
-                Consideration::new("no warrant", can(world.crime_reports.iter().all(|r| r.resolved)), gate_or(0.3)),
+                Consideration::new("no warrant", can(no_warrant), gate_or(0.3)),
             ]
-            .into_iter()
-            // Patrol plans arrive with the law system (M4); until then the goal is unavailable.
-            .chain(std::iter::once(Consideration::new("patrol available", can(false), GATE)))
-            .collect()
         }
         GoalKind::Arrest => {
             let job = world.comp::<Job>(id)?;
@@ -284,8 +293,10 @@ pub fn considerations(
                 return None;
             }
             let p = pers?;
+            let located = !crate::systems::law::located_suspects(world).is_empty()
+                || world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
             vec![
-                Consideration::new("warrant located", can(false), GATE), // M4
+                Consideration::new("warrant located", can(located), GATE),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("in shift", can(job.on_shift(tod)), gate_or(0.5)),
             ]

@@ -192,6 +192,13 @@ pub struct CrimeCfg {
     pub sentence_days: [u32; 4],
     pub fight_death_p: f64,
     pub stat_theft_caught_p: f64,
+    /// Unresolved warrants expire after this many days.
+    pub warrant_expiry_days: u64,
+    /// A sighting locates a suspect for this many ticks.
+    pub suspect_seen_ticks: u64,
+    pub patrol_legs_per_shift: u8,
+    /// A Theft arrest at a full Jail becomes a fine of this many × price_food.
+    pub fine_mult: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

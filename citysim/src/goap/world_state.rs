@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    Building, BuildingKind, Corpse, GangMember, Household, Inventory, Job, Memory, MemoryKind, Needs, Position,
+    Brain, Building, BuildingKind, Corpse, GangMember, Household, Inventory, Job, Memory, MemoryKind, Needs, Position,
     RelKind, Wallet,
 };
 use crate::entity::EntityId;
@@ -247,7 +247,20 @@ impl WorldState {
         let pos = world.comp::<Position>(agent);
         let job = world.comp::<Job>(agent);
 
+        // Symbolic places that depend on the plan: adjacent to (or in the same
+        // building as) the bound suspect is SuspectTile; inside the current
+        // patrol stop, while patrolling, is PatrolWaypoint.
+        let suspect_target = target.filter(|&t| world.has::<Brain>(t));
+        let at_suspect = suspect_target.is_some_and(|t| crate::systems::law::near(world, agent, t, 1));
+        let patrolling = world.comp::<Brain>(agent).is_some_and(|b| {
+            b.current_goal == Some(crate::components::GoalKind::Patrol)
+                && b.patrol_route
+                    .get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1))
+                    .is_some_and(|&stop| pos.is_some_and(|p| p.building == Some(stop)))
+        });
         let at = match pos.and_then(|p| p.building) {
+            _ if at_suspect => LocationKey::SuspectTile,
+            _ if patrolling => LocationKey::PatrolWaypoint,
             Some(b) if Some(b) == home => LocationKey::Home,
             Some(b)
                 if Some(b) == target && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home) =>
@@ -296,9 +309,18 @@ impl WorldState {
         }
 
         let memory = world.comp::<Memory>(agent);
+        // No unreported first-hand SawCrime (salience >= 0.5) whose subject lacks an open report.
         let crime_reported = memory.is_none_or(|m| {
-            !m.entries.iter().any(|e| e.kind == MemoryKind::SawCrime && e.salience >= 0.5 && !e.second_hand)
+            !m.entries.iter().any(|e| {
+                e.kind == MemoryKind::SawCrime
+                    && e.salience >= 0.5
+                    && !e.second_hand
+                    && e.subject.is_some_and(|s| !crate::systems::law::wanted(world, s))
+            })
         });
+        let wanted = crate::systems::law::wanted(world, agent);
+        let guard8 = wanted && crate::systems::law::guard_within(world, agent, world.config.crime.sight_day_crime);
+        let suspect_located = target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t));
         let known_corpse = memory.is_some_and(|m| {
             m.entries.iter().any(|e| {
                 e.kind == MemoryKind::SawCorpse
@@ -331,11 +353,12 @@ impl WorldState {
             shift_done,
             has_spouse,
             has_partner_candidate,
-            is_safe: needs.safety >= SAFE,
-            threat_removed: true, // hostiles arrive with the law and social systems (M4/M5)
+            // Not safe while wanted with a guard within 8 (HideFromLaw reader).
+            is_safe: needs.safety >= SAFE && !guard8,
+            threat_removed: true, // Enemy edges and fights arrive with the social graph (M5)
             crime_reported,
-            suspect_jailed: false,
-            suspect_cuffed: false,
+            suspect_jailed: target.is_some_and(|t| world.has::<crate::components::Sentence>(t)),
+            suspect_cuffed: target.is_some_and(|t| world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_some())),
             in_gang: world.has::<GangMember>(agent),
             gang_task_done: false,
             corpse_buried: false,
@@ -343,8 +366,8 @@ impl WorldState {
             carrying_stolen: inv.stolen_food >= 1,
             is_dark: dark,
             known_corpse,
-            known_suspect_location: false,
-            patrol_leg_done: false,
+            known_suspect_location: suspect_located,
+            patrol_leg_done: false, // one leg per plan; the goal re-wins for the next
             food_source_available: market_free || pantry_free,
             forage_available: matches!(season, Season::Summer | Season::Autumn) && !dark,
         }

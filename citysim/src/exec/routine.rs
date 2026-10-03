@@ -54,6 +54,10 @@ pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
     if !is_workday(key) || job.last_shift_day == Some(key) {
         return false;
     }
+    // A guard's Patrol day is the Patrol goal's business.
+    if job.role == Role::Guard && !crate::systems::law::jail_day(id, key) {
+        return false;
+    }
     let tod = world.tick_of_day();
     if job.on_shift(tod) {
         return true;
@@ -73,6 +77,9 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     let Some(job) = world.comp::<Job>(id) else { return false };
     let key = job.next_shift_key(world.tick);
     if !is_workday(key) || job.last_shift_day == Some(key) {
+        return false;
+    }
+    if job.role == Role::Guard && !crate::systems::law::jail_day(id, key) {
         return false;
     }
     let Some(employer) = job.employer else { return false };

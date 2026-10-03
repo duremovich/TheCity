@@ -176,9 +176,13 @@ fn test_night_guard_works_both_halves_of_the_shift() {
     // Day 1 03:00: still the same shift.
     w.run_ticks(TICKS_PER_DAY - 1320 + 180);
     assert!(working(&w), "03:00 day 1");
-    // Day 1 22:00: the next shift, not "already worked today".
+    // Day 1 22:00: the next shift, not "already worked today". Guard duty
+    // alternates: day 1 is this guard's Patrol day, so on duty means either
+    // GuardJail or a Patrol plan.
     w.run_ticks(1320 - 180);
-    assert!(working(&w), "22:00 day 1");
+    let on_duty =
+        working(&w) || matches!(w.comp::<Brain>(guard).expect("brain").current_goal, Some(citysim::GoalKind::Patrol));
+    assert!(on_duty, "22:00 day 1: {:?}", w.comp::<Brain>(guard).expect("brain").current_goal);
     let job = w.comp::<Job>(guard).expect("job");
     // shifts are marked at their end: day 0's shift (ended 06:00 day 1) is the last complete one
     assert_eq!(job.last_shift_day, Some(0));

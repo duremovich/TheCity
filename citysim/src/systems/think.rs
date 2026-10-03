@@ -14,6 +14,9 @@ use crate::world::World;
 
 /// Steps that a goal change must not abort.
 fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
+    if brain.current_step().is_some_and(|s| matches!(s.action, ActionKind::Arrest | ActionKind::Escort)) {
+        return true;
+    }
     match &brain.exec {
         ExecState::Use { kind: ActionKind::Sleep, started, .. } => now.saturating_sub(*started) >= 60,
         ExecState::Use { kind, .. } => matches!(
@@ -33,7 +36,7 @@ pub fn run(world: &mut World) {
     let tick = world.tick;
     for id in world.citizens() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
-        if brain.lod == Lod::Statistical || world.has::<Sentence>(id) {
+        if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() {
             continue;
         }
         let scheduled = tick % interval == u64::from(id.index) % interval;

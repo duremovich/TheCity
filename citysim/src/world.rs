@@ -562,13 +562,14 @@ impl World {
         // time: the clock is `self.tick`; daily hooks live in the systems that need them.
         systems::lod::run(self);
         crate::needs::run(self);
-        // memory (daily decay): M4.
+        systems::memory::run(self);
         crate::mood::run(self);
         systems::think::run(self);
         systems::plan::run(self);
         crate::exec::run(self);
         systems::economy::run(self);
-        // law, social, gang, demography: M4–M6.
+        systems::law::run(self);
+        // social, gang, demography: M5–M6.
         systems::stats::run(self);
         self.tick += 1;
     }
@@ -589,22 +590,10 @@ impl World {
     ) {
         let tick = self.tick;
         let cap = self.config.brain.memory_cap;
-        let half_life = self.config.brain.memory_half_life_days.max(0.01);
+        let half_life = self.config.brain.memory_half_life_days;
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
-        m.entries.push(MemoryEntry { kind, subject, tick, salience, valence, second_hand });
-        if m.entries.len() > cap {
-            let weight = |e: &MemoryEntry| {
-                let age_days = (tick - e.tick) as f32 / TICKS_PER_DAY as f32;
-                e.salience * 0.5f32.powf(age_days / half_life)
-            };
-            let (worst, _) = m
-                .entries
-                .iter()
-                .enumerate()
-                .map(|(i, e)| (i, weight(e)))
-                .fold((0, f32::INFINITY), |acc, (i, w)| if w < acc.1 { (i, w) } else { acc });
-            m.entries.remove(worst);
-        }
+        let entry = MemoryEntry { kind, subject, tick, salience, valence, second_hand };
+        systems::memory::insert(m, entry, tick, cap, half_life);
     }
 
     /// Remove the Job, posting a vacancy at the employer. Returns the old Job.

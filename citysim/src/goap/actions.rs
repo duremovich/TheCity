@@ -172,6 +172,12 @@ impl ActionKind {
                 | ActionKind::Wander
                 | ActionKind::StoreFood
                 | ActionKind::HaulToMarket
+                | ActionKind::ReportCrime
+                | ActionKind::PatrolLeg
+                | ActionKind::Arrest
+                | ActionKind::Escort
+                | ActionKind::HideFromLaw
+                | ActionKind::FleeToHome
         )
     }
 }
@@ -233,6 +239,15 @@ pub struct PlanCtx {
     pub haul_min_stock: u32,
     /// Wages owed right now (`days_unpaid >= 1`).
     pub wage_due: bool,
+    /// An open warrant on this agent.
+    pub wanted: bool,
+    /// The bound suspect has been seen by a guard recently.
+    pub suspect_located: bool,
+    /// Guards: today's shift is a Jail day (else Patrol).
+    pub jail_day: bool,
+    /// Guards on a Patrol shift with legs left.
+    pub patrol_pending: bool,
+    pub hall_open: bool,
     /// Already had today's drink (one per day; the M1/M2 rule, kept).
     pub drank_today: bool,
     /// The Bar is at capacity right now: no point walking over.
@@ -288,6 +303,10 @@ impl PlanCtx {
         });
         let mut dist = BTreeMap::new();
         if let (Some(o), false) = (origin, light) {
+            dist.insert(LocationKey::Street, 0);
+            if let Some(&(t, _)) = target.and_then(|s| world.last_seen.get(&s)) {
+                dist.insert(LocationKey::SuspectTile, o.manhattan(t));
+            }
             let mut add = |key: LocationKey, b: Option<EntityId>| {
                 if let Some(door) = b.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) {
                     dist.insert(key, o.manhattan(door));
@@ -307,7 +326,12 @@ impl PlanCtx {
                 add(LocationKey::of_building(kind), world.building_of_kind(kind));
             }
             add(LocationKey::TargetHome, target);
-            dist.insert(LocationKey::Street, 0);
+            if let Some(b) = world
+                .comp::<crate::components::Brain>(agent)
+                .and_then(|b| b.patrol_route.get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1)).copied())
+            {
+                add(LocationKey::PatrolWaypoint, Some(b));
+            }
         }
 
         let (target_pantry, target_occupied) = target
@@ -362,6 +386,22 @@ impl PlanCtx {
                 .is_some_and(|(m, stock)| stock > WorldState::reserved_by_others(world, m, Some(agent))),
             haul_min_stock: world.config.economy.haul_min_stock,
             wage_due: job.is_some_and(|j| j.days_unpaid >= 1),
+            wanted: crate::systems::law::wanted(world, agent),
+            suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),
+            jail_day: job.is_some_and(|j| crate::systems::law::jail_day(agent, j.next_shift_key(world.tick))),
+            patrol_pending: job.is_some_and(|j| {
+                j.role == Role::Guard
+                    && j.on_shift(tod)
+                    && !crate::systems::law::jail_day(agent, j.next_shift_key(world.tick))
+                    && j.last_shift_day != Some(j.next_shift_key(world.tick))
+                    && world
+                        .comp::<crate::components::Brain>(agent)
+                        .is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift)
+            }),
+            hall_open: matches!(
+                world.phase(),
+                crate::time::DayPhase::Morning | crate::time::DayPhase::Work | crate::time::DayPhase::Evening
+            ),
             drank_today: crate::utility::goals::drank_today(world, agent),
             bar_full: crate::utility::goals::bar_full_for(world, agent),
             dist,
@@ -418,7 +458,7 @@ impl ActionKind {
             ActionKind::HaulToMarket => false,
             ActionKind::ClerkWork => ctx.is(Role::Clerk),
             ActionKind::BartendWork => ctx.is(Role::Bartender),
-            ActionKind::GuardJail => ctx.is(Role::Guard),
+            ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
             ActionKind::TendGraves => ctx.is(Role::Gravedigger),
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
@@ -468,6 +508,12 @@ impl ActionKind {
             ActionKind::Drink => at(LocationKey::Bar) && ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full,
             ActionKind::StoreFood => at(LocationKey::Home) && ctx.food_unstolen,
             ActionKind::Wander => true,
+            ActionKind::ReportCrime => at(LocationKey::Hall) && !ws.crime_reported && ctx.hall_open,
+            ActionKind::PatrolLeg => at(LocationKey::PatrolWaypoint) && ctx.patrol_pending,
+            ActionKind::Arrest => at(LocationKey::SuspectTile) && ws.known_suspect_location && !ws.suspect_cuffed,
+            ActionKind::Escort => ws.suspect_cuffed && ctx.dist.contains_key(&LocationKey::Jail),
+            ActionKind::HideFromLaw => (at(LocationKey::Hideout) || at(LocationKey::Home)) && ctx.wanted,
+            ActionKind::FleeToHome => !ws.is_safe && ctx.dist.contains_key(&LocationKey::Home),
             _ => false,
         }
     }
@@ -496,6 +542,11 @@ impl ActionKind {
             ActionKind::CollectDole => ctx.dole_available,
             ActionKind::Drink => ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full,
             ActionKind::StoreFood => ctx.food_unstolen,
+            ActionKind::ReportCrime => ctx.hall_open,
+            ActionKind::PatrolLeg => ctx.patrol_pending && ctx.dist.contains_key(&LocationKey::PatrolWaypoint),
+            ActionKind::Arrest => ctx.suspect_located,
+            ActionKind::HideFromLaw => ctx.wanted,
+            ActionKind::FleeToHome => ctx.dist.contains_key(&LocationKey::Home),
             _ => true,
         }
     }
@@ -584,6 +635,18 @@ impl ActionKind {
                 n.food_count = 0;
             }
             ActionKind::Wander => n.at = LocationKey::Street,
+            ActionKind::ReportCrime => n.crime_reported = true,
+            ActionKind::PatrolLeg => n.patrol_leg_done = true,
+            ActionKind::Arrest => n.suspect_cuffed = true,
+            ActionKind::Escort => {
+                n.at = LocationKey::Jail;
+                n.suspect_jailed = true;
+            }
+            ActionKind::HideFromLaw => n.is_safe = true,
+            ActionKind::FleeToHome => {
+                n.at = LocationKey::Home;
+                n.is_safe = true;
+            }
             _ => {}
         }
         n
@@ -652,7 +715,11 @@ impl ActionKind {
     /// The entity a step is about, if the kind needs one bound in the plan.
     pub fn instance(self, ctx: &PlanCtx) -> ActionInstance {
         let target = match self {
-            ActionKind::GoTo(LocationKey::TargetHome) | ActionKind::StealFood(StealSource::Home) => ctx.target,
+            ActionKind::GoTo(LocationKey::TargetHome)
+            | ActionKind::StealFood(StealSource::Home)
+            | ActionKind::GoTo(LocationKey::SuspectTile)
+            | ActionKind::Arrest
+            | ActionKind::Escort => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

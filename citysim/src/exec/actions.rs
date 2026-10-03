@@ -4,7 +4,7 @@
 
 use crate::components::{
     Brain, Building, BuildingKind, Edge, Household, Inventory, Job, MemoryKind, Needs, Position, RelKind, Skills,
-    Wallet,
+    TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::exec::{FailReason, StepResult};
@@ -33,6 +33,10 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Forage => 45,
         ActionKind::Beg => 30,
         ActionKind::SellFood => 10,
+        ActionKind::ReportCrime => 10,
+        ActionKind::PatrolLeg => 20,
+        ActionKind::Arrest => 10,
+        ActionKind::HideFromLaw => 120,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -99,7 +103,14 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         ActionKind::Wander => true,
         // Symbolic preconditions (goap::ActionKind::preconditions) cover these.
-        ActionKind::StealFood(_) | ActionKind::Forage | ActionKind::Beg | ActionKind::SellFood => true,
+        ActionKind::StealFood(_)
+        | ActionKind::Forage
+        | ActionKind::Beg
+        | ActionKind::SellFood
+        | ActionKind::ReportCrime
+        | ActionKind::PatrolLeg
+        | ActionKind::Arrest
+        | ActionKind::HideFromLaw => true,
         _ => false,
     }
 }
@@ -320,6 +331,36 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::Wander => StepResult::Done,
+        ActionKind::ReportCrime => report_crime(world, id),
+        ActionKind::PatrolLeg => {
+            let legs_per_shift = world.config.crime.patrol_legs_per_shift;
+            let legs = world.comp_mut::<Brain>(id).map(|b| {
+                b.patrol_legs = b.patrol_legs.saturating_add(1);
+                b.patrol_legs
+            });
+            if legs.is_some_and(|l| l >= legs_per_shift) {
+                end_shift(world, id);
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.patrol_legs = 0;
+                    b.patrol_route.clear();
+                }
+            }
+            StepResult::Done
+        }
+        ActionKind::Arrest => {
+            let Some(suspect) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if crate::systems::law::arrest(world, id, suspect) {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::PreconditionLost)
+            }
+        }
+        ActionKind::HideFromLaw => {
+            if let Some(n) = world.comp_mut::<Needs>(id) {
+                n.safety = (n.safety + 0.4).min(1.0);
+            }
+            StepResult::Done
+        }
         ActionKind::StealFood(source) => steal_food(world, id, source, target),
         ActionKind::Forage => {
             if let Some(inv) = world.comp_mut::<Inventory>(id) {
@@ -385,6 +426,14 @@ fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Opti
         format!("{name} stole {units} food from the {kind}#{}", b.index),
     );
     world.release_all(id);
+    // Witnesses: the victims are the building's occupants (a Home's residents,
+    // the clerk on duty); for the Market and Warehouse there is no single victim.
+    let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
+    let victim = match source {
+        StealSource::Home => world.comp::<Building>(b).and_then(|bd| bd.occupants.iter().copied().find(|&o| o != id)),
+        _ => None,
+    };
+    crate::systems::law::raise_crime(world, id, victim, crate::components::Crime::Theft, tile);
     StepResult::Done
 }
 
@@ -434,9 +483,58 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
     StepResult::Failed(FailReason::PreconditionLost)
 }
 
+/// Walks with a completion effect: Escort delivers the suspect, FleeToHome
+/// settles the nerves.
+pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::ActionInstance) {
+    match step.action {
+        ActionKind::Escort => {
+            let suspect = world.comp::<Brain>(id).and_then(|b| b.escorting).or(step.target);
+            if let Some(s) = suspect {
+                crate::systems::law::jail_suspect(world, id, s);
+            }
+        }
+        ActionKind::FleeToHome => {
+            if let Some(n) = world.comp_mut::<Needs>(id) {
+                n.safety = n.safety.max(0.5);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// `ReportCrime` at the Hall: file the most salient unreported first-hand
+/// SawCrime as a report.
+fn report_crime(world: &mut World, id: EntityId) -> StepResult {
+    let Some(mem) = world.comp::<crate::components::Memory>(id) else {
+        return StepResult::Failed(FailReason::PreconditionLost);
+    };
+    let best = mem
+        .entries
+        .iter()
+        .filter(|e| e.kind == MemoryKind::SawCrime && !e.second_hand && e.salience >= 0.5)
+        .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::wanted(world, s)))
+        .max_by(|a, b| a.salience.total_cmp(&b.salience))
+        .map(|e| (e.subject, e.salience));
+    let Some((Some(suspect), salience)) = best else { return StepResult::Failed(FailReason::PreconditionLost) };
+    let crime = if salience >= 1.0 {
+        crate::components::Crime::Murder
+    } else if salience >= 0.8 {
+        crate::components::Crime::Assault
+    } else if salience >= 0.6 {
+        crate::components::Crime::Extortion
+    } else {
+        crate::components::Crime::Theft
+    };
+    crate::systems::law::file_report(world, crime, suspect, Some(id));
+    if let Some(p) = world.comp_mut::<crate::components::Personality>(id) {
+        p.drift(crate::personality::Drift::ReportedCrime);
+    }
+    StepResult::Done
+}
+
 /// Shift end: the shift is marked worked (so Work stays pending while it
 /// runs and a resumed shift is not counted twice) and a day of wages is owed.
-fn end_shift(world: &mut World, id: EntityId) {
+pub fn end_shift(world: &mut World, id: EntityId) {
     let tick = world.tick;
     if let Some(j) = world.comp_mut::<Job>(id) {
         j.last_shift_day = Some(j.shift_key_at(tick.saturating_sub(1)));
