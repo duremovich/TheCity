@@ -21,9 +21,10 @@ fn test_price_rises_when_stock_falls() {
     let mut w = world(1);
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
     assert_eq!(w.market().expect("market").price_food, 3);
+    // drain the shelf just before the day-1 price tick (farms haul in during the day)
+    w.run_ticks(TICKS_PER_DAY - 1);
     w.comp_mut::<Building>(market).expect("market").stock_food = 100;
-    // next daily tick is tick_of_day == 0 of day 1
-    w.run_ticks(TICKS_PER_DAY + 1);
+    w.run_ticks(2);
     let price = w.market().expect("market").price_food;
     assert!(price > 3, "price {price}");
     assert_eq!(price, economy::price_for_stock(&w.config.economy, w.comp::<Building>(market).expect("m").stock_food));
@@ -39,6 +40,9 @@ fn test_farmer_produces_food() {
     assert_eq!(farmers.len(), 24);
     for &id in &farmers {
         w.comp_mut::<Skills>(id).expect("skills").farming = 0.5;
+        // broke: Work outscores everything for a full shift (a yield test, not a motivation test)
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = 0;
+        w.comp_mut::<Needs>(id).expect("needs").hunger = 1.0;
     }
     let farm_stock = |w: &World| -> u32 {
         w.buildings_by_kind[&BuildingKind::Farm].iter().map(|&f| w.comp::<Building>(f).expect("farm").stock_food).sum()

@@ -73,7 +73,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         ActionKind::Drink => at(world, id, BuildingKind::Bar) && coins >= 2,
         ActionKind::CollectWage => {
-            at(world, id, BuildingKind::Hall) && world.comp::<Job>(id).is_some_and(|j| j.days_unpaid >= 1)
+            at(world, id, BuildingKind::Hall)
+                && world
+                    .comp::<Job>(id)
+                    .is_some_and(|j| j.days_unpaid >= 1 && j.last_wage_attempt_day != Some(world.day()))
         }
         ActionKind::CollectDole => {
             at(world, id, BuildingKind::Hall)
@@ -97,12 +100,18 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 }
 
 /// Start effects: money moves now so an interruption cannot duplicate it.
-pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, _target: Option<EntityId>) {
+pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Option<EntityId>) {
     match kind {
         ActionKind::BuyFood => {
             let units = economy::buy_quantity(world, id);
             let paid = economy::pay_for_food(world, id, units);
             world.pending_purchase.insert(id, (units, paid));
+        }
+        ActionKind::HaulToMarket => {
+            // The transfer happens on pickup so an interrupted walk cannot lose the load.
+            if let Some(farm) = target {
+                economy::haul(world, farm);
+            }
         }
         ActionKind::Drink => {
             if let Some(w) = world.comp_mut::<Wallet>(id) {
@@ -112,10 +121,28 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, _target: Opti
                 t.coins += 2; // the Bar is city-owned in v1
             }
         }
-        k if k.is_work() => {
-            let tick = world.tick;
-            if let Some(j) = world.comp_mut::<Job>(id) {
-                j.last_shift_day = Some(j.shift_key_at(tick));
+        _ => {}
+    }
+}
+
+/// Effects of abandoning a step mid-way: hours already farmed still count,
+/// a paid-for purchase is refunded; everything else is simply dropped.
+pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick) {
+    match kind {
+        ActionKind::FarmWork => {
+            if let Some(farm) = world.comp::<Job>(id).and_then(|j| j.employer) {
+                let now = world.tick;
+                economy::accrue_farm_work(world, id, farm, now.saturating_sub(started));
+            }
+        }
+        ActionKind::BuyFood => {
+            if let Some((_, paid)) = world.pending_purchase.remove(&id) {
+                if let Some(w) = world.comp_mut::<Wallet>(id) {
+                    w.coins += paid;
+                }
+                if let Some(t) = world.treasury_mut() {
+                    t.coins -= paid;
+                }
             }
         }
         _ => {}
@@ -142,7 +169,7 @@ pub fn on_complete(
     world: &mut World,
     id: EntityId,
     kind: ActionKind,
-    target: Option<EntityId>,
+    _target: Option<EntityId>,
     started: Tick,
     now: Tick,
 ) -> StepResult {
@@ -234,13 +261,7 @@ pub fn on_complete(
             economy::collect_dole(world, id);
             StepResult::Done
         }
-        ActionKind::HaulToMarket => {
-            let Some(farm) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
-            if economy::haul(world, farm) == 0 {
-                return StepResult::Failed(FailReason::StockGone);
-            }
-            StepResult::Done
-        }
+        ActionKind::HaulToMarket => StepResult::Done, // moved on pickup, see on_start
         ActionKind::FarmWork => {
             let farm = world.comp::<Job>(id).and_then(|j| j.employer);
             if let Some(farm) = farm {
@@ -255,17 +276,26 @@ pub fn on_complete(
             let stock = farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food);
             if stock >= min {
                 if let (Some(farm), Some(b)) = (farm, world.comp_mut::<Brain>(id)) {
+                    let at = usize::from(b.plan_step) + 1;
                     if let Some(plan) = b.plan.as_mut() {
-                        plan.steps.push(crate::components::ActionInstance {
-                            action: ActionKind::HaulToMarket,
-                            target: Some(farm),
-                            tile: None,
-                        });
-                        plan.steps.push(crate::components::ActionInstance {
-                            action: ActionKind::GoTo(crate::goap::LocationKey::Market),
-                            target: None,
-                            tile: None,
-                        });
+                        // Insert right after this step: the farmer is still at the farm.
+                        let at = at.min(plan.steps.len());
+                        plan.steps.insert(
+                            at,
+                            crate::components::ActionInstance {
+                                action: ActionKind::GoTo(crate::goap::LocationKey::Market),
+                                target: None,
+                                tile: None,
+                            },
+                        );
+                        plan.steps.insert(
+                            at,
+                            crate::components::ActionInstance {
+                                action: ActionKind::HaulToMarket,
+                                target: Some(farm),
+                                tile: None,
+                            },
+                        );
                     }
                 }
             }
@@ -280,9 +310,12 @@ pub fn on_complete(
     }
 }
 
-/// Shift end: one more day of wages owed.
+/// Shift end: the shift is marked worked (so Work stays pending while it
+/// runs and a resumed shift is not counted twice) and a day of wages is owed.
 fn end_shift(world: &mut World, id: EntityId) {
+    let tick = world.tick;
     if let Some(j) = world.comp_mut::<Job>(id) {
+        j.last_shift_day = Some(j.shift_key_at(tick.saturating_sub(1)));
         j.days_unpaid = j.days_unpaid.saturating_add(1);
     }
     economy::maybe_quit(world, id);

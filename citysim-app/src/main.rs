@@ -38,6 +38,9 @@ pub struct App {
     pub saves_dir: PathBuf,
     pub status: String,
     pub status_until: f64,
+    /// The pointer is over an egui panel (last frame): the map ignores it.
+    pub ui_hover: bool,
+    pub log: ui::log::LogState,
 }
 
 impl App {
@@ -55,6 +58,8 @@ impl App {
             saves_dir: PathBuf::from("saves"),
             status: String::new(),
             status_until: 0.0,
+            ui_hover: false,
+            log: ui::log::LogState::default(),
         }
     }
 
@@ -83,10 +88,12 @@ struct Args {
     screenshot: Option<PathBuf>,
     /// Run this many ticks before the first frame.
     start_tick: u64,
+    /// Select this entity index at start (inspector smoke tests).
+    select: Option<u32>,
 }
 
 fn parse_args() -> Args {
-    let mut args = Args { seed: 42, load: None, fps: false, screenshot: None, start_tick: 0 };
+    let mut args = Args { seed: 42, load: None, fps: false, screenshot: None, start_tick: 0, select: None };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -95,6 +102,7 @@ fn parse_args() -> Args {
             "--fps" => args.fps = true,
             "--screenshot" => args.screenshot = Some(PathBuf::from(it.next().expect("--screenshot <FILE>"))),
             "--start-tick" => args.start_tick = it.next().and_then(|s| s.parse().ok()).expect("--start-tick <N>"),
+            "--select" => args.select = Some(it.next().and_then(|s| s.parse().ok()).expect("--select <INDEX>")),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -110,6 +118,12 @@ async fn main() {
     };
     world.run_ticks(args.start_tick);
     let mut app = App::new(args.fps);
+    if let Some(index) = args.select {
+        app.selected = world.citizens().into_iter().find(|id| id.index == index);
+        if let Some(p) = app.selected.and_then(|id| world.comp::<citysim::Position>(id)) {
+            app.camera.centre_on(p.tile);
+        }
+    }
     app.notify(format!(
         "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · F5 save · F9 load",
         world.seed()

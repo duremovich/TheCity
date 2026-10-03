@@ -11,6 +11,8 @@ use crate::App;
 pub fn handle(app: &mut App, world: &mut World) {
     let dt = get_frame_time();
     let mouse = Vec2::from(mouse_position());
+    // Mouse over an egui panel: the panel owns it.
+    let map_mouse = !app.ui_hover;
 
     // --- pan: WASD or left-drag below the HUD ------------------------------
     let mut pan = Vec2::ZERO;
@@ -30,7 +32,7 @@ pub fn handle(app: &mut App, world: &mut World) {
         app.camera.pan(pan.normalize() * PAN_TILES_PER_SEC * dt);
         app.follow = false;
     }
-    if is_mouse_button_down(MouseButton::Left) && mouse.y > HUD_H {
+    if map_mouse && is_mouse_button_down(MouseButton::Left) && mouse.y > HUD_H {
         let delta = mouse_delta_position();
         if delta != Vec2::ZERO {
             // mouse_delta_position is in normalised [-1, 1] screen units
@@ -42,17 +44,25 @@ pub fn handle(app: &mut App, world: &mut World) {
 
     // --- zoom about the cursor ----------------------------------------------
     let (_, wheel) = mouse_wheel();
-    if wheel != 0.0 && mouse.y > HUD_H {
+    if map_mouse && wheel != 0.0 && mouse.y > HUD_H {
         let factor = if wheel > 0.0 { ZOOM_PER_NOTCH } else { 1.0 / ZOOM_PER_NOTCH };
         app.camera.zoom_about(mouse, factor);
     }
 
-    // --- select: click on a Full agent's tile --------------------------------
-    if is_mouse_button_pressed(MouseButton::Left) && mouse.y > HUD_H {
+    // --- select: a Full agent on the tile, else the first occupant of the building there
+    if map_mouse && is_mouse_button_pressed(MouseButton::Left) && mouse.y > HUD_H {
         if let Some(tile) = app.camera.tile_at(mouse) {
-            app.selected = world.citizens().into_iter().find(|&id| {
+            let on_tile = world.citizens().into_iter().find(|&id| {
                 world.comp::<Position>(id).is_some_and(|p| p.tile == tile)
                     && world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Full)
+            });
+            app.selected = on_tile.or_else(|| {
+                world
+                    .with::<citysim::Building>()
+                    .into_iter()
+                    .filter_map(|b| world.comp::<citysim::Building>(b))
+                    .find(|b| b.rect.contains(tile))
+                    .and_then(|b| b.occupants.first().copied())
             });
         }
     }

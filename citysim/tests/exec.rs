@@ -76,6 +76,9 @@ fn test_full_agent_walks_to_work_and_produces() {
     let farm = w.comp::<Job>(farmer).expect("job").employer.expect("employer");
     let home = w.comp::<Position>(farmer).expect("pos").building.expect("at home");
     assert_ne!(home, farm);
+    // broke and fed: Work beats Eat and Idle all day
+    w.comp_mut::<citysim::Wallet>(farmer).expect("wallet").coins = 0;
+    w.comp_mut::<citysim::Needs>(farmer).expect("needs").hunger = 1.0;
 
     // By mid-shift the farmer is inside the farm and working.
     w.run_ticks(800);
@@ -114,7 +117,14 @@ fn test_building_capacity_is_respected() {
             let p = w.comp::<Position>(o).expect("pos");
             assert_eq!(p.building, Some(id));
             assert!(b.rect.contains(p.tile));
-            assert!(!tiles.contains(&p.tile) || b.kind == BuildingKind::Home && b.occupants.len() > 6);
+            assert!(
+                !tiles.contains(&p.tile),
+                "{} #{}: two occupants on {} (occupants {:?})",
+                b.kind,
+                id.index,
+                p.tile,
+                b.occupants
+            );
             tiles.push(p.tile);
         }
     }
@@ -148,6 +158,11 @@ fn test_night_guard_works_both_halves_of_the_shift() {
         .find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard && j.shifts[0].0 == 1260))
         .expect("a night guard");
     let jail = w.comp::<Job>(guard).expect("job").employer.expect("jail");
+    // broke, fed and content: Work outscores Eat and Socialise on both evenings
+    w.comp_mut::<citysim::Wallet>(guard).expect("wallet").coins = 0;
+    let n = w.comp_mut::<citysim::Needs>(guard).expect("needs");
+    n.hunger = 1.0;
+    n.belonging = 1.0;
     let working = |w: &World| {
         w.comp::<Position>(guard).expect("pos").building == Some(jail)
             && matches!(
@@ -165,8 +180,9 @@ fn test_night_guard_works_both_halves_of_the_shift() {
     w.run_ticks(1320 - 180);
     assert!(working(&w), "22:00 day 1");
     let job = w.comp::<Job>(guard).expect("job");
-    assert_eq!(job.last_shift_day, Some(1));
-    assert!(job.days_unpaid <= 2, "one wage day per shift, not per segment: {}", job.days_unpaid);
+    // shifts are marked at their end: day 0's shift (ended 06:00 day 1) is the last complete one
+    assert_eq!(job.last_shift_day, Some(0));
+    assert!(job.days_unpaid <= 1, "one wage day per shift, not per segment: {}", job.days_unpaid);
 }
 
 #[test]

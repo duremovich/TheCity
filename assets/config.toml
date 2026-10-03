@@ -52,11 +52,16 @@ warehouse = { capacity = 6, stock_cap = 3000 }
 
 [needs]
 hunger_decay_per_tick = 0.000347
-energy_decay_per_tick = 0.000926
+# 0.000926 (18 h awake) on paper; with an 8 h sleep that is a 26 h cycle and workers nod off mid-shift.
+# 0.000694 (24 h) locks sleep to the night.
+energy_decay_per_tick = 0.000694
 safety_recover_per_tick = 0.0010
 belonging_decay_per_tick = 0.000139
 intimacy_decay_per_tick = 0.0000694
-wealth_days_secure = 7.0
+# 7 on paper; at 7 a typical starting wallet (10-40 coins at price 3) reads as secure, half the
+# workforce idles until the Market empties, and farmers abandon shifts for snacks. 21 gives Work the
+# U(wealth) the spec's worked example assumes (~0.87) for an ordinary wallet.
+wealth_days_secure = 21.0
 food_satisfy = 0.5
 sleep_ticks_full = 480
 chat_belonging = 0.3
@@ -72,8 +77,11 @@ wage_guard = 8
 wage_clerk = 6
 wage_bartender = 5
 wage_gravedigger = 5
-# 1.4 on paper; farms work 6 days in 7 and spoilage eats ~20/day, so 1.8 is break-even in Spring.
-farm_yield_base = 1.8
+# 1.4 on paper assumes 24 farmers x 9 h at farming 0.5 and one meal per citizen. In practice farms
+# work 6 days in 7, farmers attend ~75% of a shift (meals, wage trips), initial farming skill is
+# U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.8 gives a small
+# Spring surplus; Summer (x1.4) fills the stores and Winter (x0.3) is still a famine by design.
+farm_yield_base = 2.8
 farm_skill_floor = 0.6
 farm_skill_slope = 0.8
 season_mult = [1.0, 1.4, 1.1, 0.3]
@@ -157,4 +165,5 @@ tax_rate = 0.05
 sentence_mult = 1.0
 guard_count = 10
 immigration_per_week = 2
-dole_per_day = 3
+# 3 on paper = one meal at price 3; the unemployed need ~1.2 meals a day, so at 3 they slowly starve.
+dole_per_day = 4

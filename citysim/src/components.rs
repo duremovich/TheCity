@@ -443,6 +443,13 @@ pub struct Brain {
     /// Day on which the dole was last collected.
     #[serde(default)]
     pub last_dole_day: Option<u64>,
+    /// Last think triggered by a plan ending or failing (one per 30 ticks).
+    #[serde(default)]
+    pub last_urgent_think_tick: Tick,
+    /// The last plan failure: a second failure of the same goal within 60
+    /// ticks cools the goal; the first is simply replanned.
+    #[serde(default)]
+    pub last_plan_failure: Option<(GoalKind, Tick)>,
 }
 
 impl Default for Brain {
@@ -461,6 +468,8 @@ impl Default for Brain {
             action_until: 0,
             exec: ExecState::Idle,
             last_dole_day: None,
+            last_urgent_think_tick: 0,
+            last_plan_failure: None,
         }
     }
 }

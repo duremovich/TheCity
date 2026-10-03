@@ -2,6 +2,18 @@
 
 use serde::{Deserialize, Serialize};
 
+// Thresholds that define the symbolic keys (spec › WorldState comments).
+/// `hunger_satisfied`: `needs.hunger >= 0.6`.
+pub const HUNGER_SATISFIED: f32 = 0.6;
+/// `energy_satisfied`: `needs.energy >= 0.6`.
+pub const ENERGY_SATISFIED: f32 = 0.6;
+/// `belonging_satisfied`: `needs.belonging >= 0.5`.
+pub const BELONGING_SATISFIED: f32 = 0.5;
+/// `is_safe`: `needs.safety >= 0.4`.
+pub const SAFE: f32 = 0.4;
+/// `has_savings`: `coins >= 7 × price_food`.
+pub const SAVINGS_DAYS: i64 = 7;
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
 pub enum LocationKey {
     /// Only in goal states / preconditions, never observed.

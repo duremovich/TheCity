@@ -51,6 +51,9 @@ pub enum ExecState {
     GotoTimed {
         target: GotoTarget,
         arrive_tick: Tick,
+        /// When the agent first found the building full on arrival.
+        #[serde(default)]
+        blocked_since: Option<Tick>,
     },
     Use {
         kind: ActionKind,
@@ -89,16 +92,7 @@ pub fn run(world: &mut World) {
             continue;
         }
         if brain.plan.is_none() {
-            // M1: the hard-coded routine; from M2 the think/plan systems fill this.
-            let Some(plan) = routine::plan_for(world, id) else { continue };
-            let tick = world.tick;
-            if let Some(b) = world.comp_mut::<Brain>(id) {
-                b.current_goal = Some(plan.goal);
-                b.goal_since = tick;
-                b.plan = Some(plan);
-                b.plan_step = 0;
-                b.exec = ExecState::Idle;
-            }
+            continue; // the think system plans
         }
         step_agent(world, id);
     }
@@ -108,9 +102,10 @@ pub fn run(world: &mut World) {
 fn step_agent(world: &mut World, id: EntityId) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let Some(step) = brain.current_step().cloned() else {
-        // Plan finished.
+        // Plan finished: a success resets the consecutive-failure count.
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.clear_plan();
+            b.last_plan_failure = None;
         }
         world.release_all(id);
         return;
@@ -124,11 +119,11 @@ fn step_agent(world: &mut World, id: EntityId) {
         ExecState::Goto { target, path, next_move_tick, blocked_since } => {
             advance_goto(world, id, target, path, next_move_tick, blocked_since)
         }
-        ExecState::GotoTimed { target, arrive_tick } => {
+        ExecState::GotoTimed { target, arrive_tick, blocked_since } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
-                arrive(world, id, &target)
+                arrive(world, id, target, blocked_since)
             }
         }
         ExecState::Use { kind, until, started } => {
@@ -156,12 +151,46 @@ fn step_agent(world: &mut World, id: EntityId) {
                 b.action_until = tick;
             }
         }
-        StepResult::Failed(_) => {
-            if let Some(b) = world.comp_mut::<Brain>(id) {
-                b.clear_plan();
+        StepResult::Failed(_) => world.fail_plan(id),
+    }
+}
+
+impl World {
+    /// A step failed: the goal is replanned once; a second consecutive
+    /// failure of the same goal (no plan completed in between) cools it for
+    /// `goal_cooldown_ticks`. The spec's "within 60 ticks" window is shorter
+    /// than one door wait plus think latency, so consecutive-ness is the
+    /// usable reading.
+    pub fn fail_plan(&mut self, id: EntityId) {
+        let tick = self.tick;
+        let cooldown = self.config.brain.goal_cooldown_ticks;
+        let goal = self.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).map(|p| p.goal);
+        if let (Some(goal), Some(b)) = (goal, self.comp_mut::<Brain>(id)) {
+            match b.last_plan_failure {
+                Some((g, _)) if g == goal => {
+                    b.cooldowns.insert(goal, tick + cooldown);
+                    b.last_plan_failure = None;
+                }
+                _ => b.last_plan_failure = Some((goal, tick)),
             }
-            world.release_all(id);
         }
+        self.abort_plan(id);
+    }
+
+    /// Drop the current plan: abandon the running step (partial effects per
+    /// `actions::on_abort`), release reservations, reset execution.
+    pub fn abort_plan(&mut self, id: EntityId) {
+        let running = match self.comp::<Brain>(id).map(|b| &b.exec) {
+            Some(ExecState::Use { kind, started, .. }) => Some((*kind, *started)),
+            _ => None,
+        };
+        if let Some((kind, started)) = running {
+            actions::on_abort(self, id, kind, started);
+        }
+        if let Some(b) = self.comp_mut::<Brain>(id) {
+            b.clear_plan();
+        }
+        self.release_all(id);
     }
 }
 
@@ -227,7 +256,7 @@ fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
 pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
     let from = walk_origin(world, id).unwrap_or(target.tile);
     let arrive_tick = world.tick + Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
-    ExecState::GotoTimed { target, arrive_tick }
+    ExecState::GotoTimed { target, arrive_tick, blocked_since: None }
 }
 
 /// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.
@@ -343,15 +372,24 @@ fn set_goto(
     StepResult::Running
 }
 
-/// Coarse arrival: leave wherever we are and appear at the destination.
-fn arrive(world: &mut World, id: EntityId, target: &GotoTarget) -> StepResult {
+/// Coarse arrival: leave wherever we are and appear at the destination. A
+/// full building is queued at for `door_queue_max_ticks`, as on foot.
+fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Option<Tick>) -> StepResult {
+    let tick = world.tick;
     match target.building {
         Some(b) => {
             if world.comp::<Position>(id).is_some_and(|p| p.building == Some(b)) {
                 return StepResult::Done;
             }
             if world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) {
-                return StepResult::Failed(FailReason::BuildingFull);
+                let since = blocked_since.unwrap_or(tick);
+                if tick - since >= world.config.exec.door_queue_max_ticks {
+                    return StepResult::Failed(FailReason::BuildingFull);
+                }
+                if let Some(brain) = world.comp_mut::<Brain>(id) {
+                    brain.exec = ExecState::GotoTimed { target, arrive_tick: tick + 1, blocked_since: Some(since) };
+                }
+                return StepResult::Running;
             }
             world.leave_building(id);
             world.enter_building(id, b);

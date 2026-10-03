@@ -15,7 +15,9 @@ pub mod exec;
 pub mod goap;
 pub mod levers;
 pub mod map;
+pub mod mood;
 pub mod needs;
+pub mod personality;
 pub mod rng;
 pub mod save;
 pub mod stats;
@@ -34,6 +36,7 @@ pub use levers::{Levers, PlayerCommand, Speed};
 pub use map::{Map, MAP_H, MAP_W};
 pub use stats::{DailyStats, DayRow};
 pub use time::{DayPhase, Season, Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
+pub use utility::{Consideration, GoalScore, ThinkTrace};
 pub use world::World;
 
 /// Advance the world by exactly one tick (one in-game minute).

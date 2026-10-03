@@ -38,7 +38,8 @@ pub struct DayRow {
     pub immigrants: u32,
     pub emigrants: u32,
     pub burials: u32,
-    /// Raw count; divided by population into `goal_changes_per_agent` at day end.
+    /// Goals displaced mid-plan by a different winner (flapping). Raw count;
+    /// divided by population into `goal_changes_per_agent` at day end.
     pub goal_changes: u32,
     pub goal_changes_per_agent: f32,
     /// Filled in by the runner (the library has no clock).

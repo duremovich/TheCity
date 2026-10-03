@@ -1,28 +1,20 @@
-//! M1's hard-coded daily routine. Produces ordinary `Plan`s so the execution
-//! layer cannot tell it from the GOAP planner that replaces it in M3.
-//!
-//! Night: go home and sleep. Work: go to the workplace. Evening: Market if
-//! hungry and able to pay, else Bar if sociable; eat at home. Wages and the
-//! dole are collected at the Hall.
+//! Goal → plan without a planner. Utility picks the goal (M2); this module
+//! turns it into the fixed step list the M1 routine used. The GOAP planner
+//! (M3) replaces `plan_for_goal` and nothing else changes.
 
 use crate::components::{
-    ActionInstance, Brain, Building, BuildingKind, GoalKind, Household, Inventory, Job, MemoryKind, Needs, Personality,
-    Position, Role, Wallet,
+    ActionInstance, Brain, Building, BuildingKind, GoalKind, Household, Inventory, Job, Needs, Position, Role, Wallet,
 };
 use crate::entity::EntityId;
 use crate::goap::{ActionKind, LocationKey, Plan};
 use crate::systems::economy;
-use crate::time::{self, DayPhase};
 use crate::world::World;
 
 /// Extra ticks of slack when leaving for work.
 const DEPARTURE_MARGIN: u64 = 60;
 /// An agent already at the workplace waits for a shift this far off.
 const WAIT_AT_WORK_MAX: u64 = 600;
-/// Below this an agent is "hungry" (matches `hunger_satisfied` in WorldState).
-const HUNGRY_BELOW: f32 = 0.6;
-/// Below this an agent goes to bed whatever the hour.
-const EXHAUSTED_BELOW: f32 = 0.3;
+/// Energy at which sleep is not worth starting.
 const RESTED_AT: f32 = 0.9;
 
 fn step(action: ActionKind, target: Option<EntityId>) -> ActionInstance {
@@ -33,7 +25,7 @@ fn plan(goal: GoalKind, target: Option<EntityId>, steps: Vec<ActionInstance>, ti
     Plan { goal, target, steps, started_tick: tick }
 }
 
-fn workplace_key(role: Role) -> LocationKey {
+pub fn workplace_key(role: Role) -> LocationKey {
     match role {
         Role::Farmer => LocationKey::Farm,
         Role::Guard => LocationKey::Jail,
@@ -54,6 +46,33 @@ pub fn is_workday(shift_key: i64) -> bool {
     shift_key.rem_euclid(7) != 6
 }
 
+/// A worked shift whose wages have not been collected today: the tail of the
+/// Work plan (haul, Hall visit) is still pending.
+pub fn wage_pending(world: &World, job: &Job) -> bool {
+    job.last_shift_day.is_some() && job.days_unpaid >= 1 && job.last_wage_attempt_day != Some(world.day())
+}
+
+/// A shift to attend to right now: on shift, waiting at the workplace for one
+/// that starts soon, or time to set off.
+pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
+    let key = job.next_shift_key(world.tick);
+    if !is_workday(key) || job.last_shift_day == Some(key) {
+        return false;
+    }
+    let tod = world.tick_of_day();
+    if job.on_shift(tod) {
+        return true;
+    }
+    let at_work = job.employer.is_some() && world.comp::<Position>(id).is_some_and(|p| p.building == job.employer);
+    let until = u64::from(job.ticks_until_shift(tod));
+    (at_work && until <= WAIT_AT_WORK_MAX) || must_leave_for_work(world, id)
+}
+
+/// The Work goal's gate: a shift to work, or wages to collect for one.
+pub fn work_pending(world: &World, id: EntityId, job: &Job) -> bool {
+    shift_pending(world, id, job) || wage_pending(world, job)
+}
+
 /// Should this agent drop what it is doing and head to work now?
 pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     let Some(job) = world.comp::<Job>(id) else { return false };
@@ -72,116 +91,124 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     until <= travel_estimate(world, pos.tile, door) + DEPARTURE_MARGIN
 }
 
-/// The next plan for an idle agent, or `None` to stand still this tick.
-pub fn plan_for(world: &World, id: EntityId) -> Option<Plan> {
+/// The fixed plan for a goal, or `None` if it cannot be pursued right now.
+pub fn plan_for_goal(world: &World, id: EntityId, goal: GoalKind) -> Option<Plan> {
     let tick = world.tick;
     let day = world.day();
-    let phase = world.phase();
-    let dark = world.is_dark();
     let needs = world.comp::<Needs>(id)?;
     let pos = world.comp::<Position>(id)?;
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let inv = world.comp::<Inventory>(id).cloned().unwrap_or_default();
-    let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
-    let job = world.comp::<Job>(id);
     let at_home = home.is_some() && pos.building == home;
     let go_home = step(ActionKind::GoTo(LocationKey::Home), None);
-
-    // 1. Work: on shift, or close enough to the shift to head over (or, once
-    //    there, to wait at the workplace rather than wander off home).
-    if let Some(job) = job {
-        if let Some(employer) = job.employer {
-            let tod = world.tick_of_day();
-            let on_shift = job.on_shift(tod);
-            let key = job.next_shift_key(tick);
-            if is_workday(key) && job.last_shift_day != Some(key) {
-                let go = step(ActionKind::GoTo(workplace_key(job.role)), Some(employer));
-                if on_shift {
-                    let steps = vec![go, step(ActionKind::work_for(job.role), Some(employer))];
-                    return Some(plan(GoalKind::Work, Some(employer), steps, tick));
-                }
-                let at_work = pos.building == Some(employer);
-                let door = world.comp::<Building>(employer).map_or(pos.tile, |b| b.door);
-                let until = u64::from(job.ticks_until_shift(tod));
-                // Already there (arrived early): stay put rather than wander off and bounce.
-                let wait_here = at_work && until <= WAIT_AT_WORK_MAX;
-                if wait_here || until <= travel_estimate(world, pos.tile, door) + DEPARTURE_MARGIN {
-                    // Arrive early and idle at the door until the shift begins.
-                    let steps = vec![go, step(ActionKind::Wander, None)];
-                    return Some(plan(GoalKind::Work, Some(employer), steps, tick));
-                }
-            }
-        }
-    }
-
-    // 2. Money: wages owed, or the daily dole, when the Hall is open (not at night).
-    if phase != DayPhase::Night && !dark {
-        if let Some(job) = job {
-            // One visit per day: a short Treasury must not be hammered every few ticks.
-            if job.days_unpaid >= 1 && !job.on_shift(world.tick_of_day()) && job.last_wage_attempt_day != Some(day) {
-                let steps = vec![step(ActionKind::GoTo(LocationKey::Hall), None), step(ActionKind::CollectWage, None)];
-                return Some(plan(GoalKind::Earn, None, steps, tick));
-            }
-        } else {
-            let dole_due = world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day != Some(day));
-            let treasury_ok = world.treasury().is_some_and(|t| t.coins >= 0) && world.levers.dole_per_day > 0;
-            if dole_due && treasury_ok {
-                let steps = vec![step(ActionKind::GoTo(LocationKey::Hall), None), step(ActionKind::CollectDole, None)];
-                return Some(plan(GoalKind::Earn, None, steps, tick));
-            }
-        }
-    }
-
-    // 3. Hunger: inventory first, then the pantry, then the Market.
-    if needs.hunger < HUNGRY_BELOW {
-        if inv.food >= 1 {
-            return Some(plan(GoalKind::Eat, None, vec![step(ActionKind::EatFromInventory, None)], tick));
-        }
-        let pantry = home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food);
-        if pantry > 0 {
-            let steps = vec![go_home.clone(), step(ActionKind::EatAtHome, None)];
-            return Some(plan(GoalKind::Eat, home, steps, tick));
-        }
-        let market_stock = world
-            .building_of_kind(BuildingKind::Market)
-            .and_then(|m| world.comp::<Building>(m))
-            .map_or(0, |b| b.stock_food);
-        if economy::buy_quantity(world, id) > 0 && market_stock > 0 {
-            let steps = vec![step(ActionKind::GoTo(LocationKey::Market), None), step(ActionKind::BuyFood, None)];
-            return Some(plan(GoalKind::Eat, None, steps, tick));
-        }
-    }
-
-    // 3b. Carrying spare food at home: put it in the pantry.
-    if at_home && inv.food > inv.stolen_food && inv.food >= 2 {
-        return Some(plan(GoalKind::Idle, home, vec![step(ActionKind::StoreFood, None)], tick));
-    }
-
-    // 4. Evening: a drink for the sociable, once per evening.
-    if phase == DayPhase::Evening && !dark && sociability >= 0.5 && coins >= 2 {
-        let drank_today = world
-            .comp::<crate::components::Memory>(id)
-            .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::Socialised && time::day(e.tick) == day));
-        if !drank_today {
-            let steps = vec![step(ActionKind::GoTo(LocationKey::Bar), None), step(ActionKind::Drink, None)];
-            return Some(plan(GoalKind::Socialise, None, steps, tick));
-        }
-    }
-
-    // 5. Night, or exhausted: home to bed (the homeless sleep where they stand).
-    let bed = |action: ActionKind| -> Vec<ActionInstance> {
+    // Home if there is one, else where the agent stands.
+    let at_bed = |action: ActionKind| -> Vec<ActionInstance> {
         if home.is_some() {
             vec![go_home.clone(), step(action, None)]
         } else {
             vec![step(action, None)]
         }
     };
-    if dark || needs.energy < EXHAUSTED_BELOW {
-        let steps = if needs.energy < RESTED_AT { bed(ActionKind::Sleep) } else { bed(ActionKind::Rest) };
-        return Some(plan(GoalKind::Sleep, home, steps, tick));
-    }
 
-    // 6. Nothing to do: rest at home.
-    Some(plan(GoalKind::Idle, home, bed(ActionKind::Rest), tick))
+    match goal {
+        GoalKind::Eat => {
+            if inv.food >= 1 {
+                return Some(plan(goal, None, vec![step(ActionKind::EatFromInventory, None)], tick));
+            }
+            let pantry = home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food);
+            if pantry > 0 {
+                return Some(plan(goal, home, vec![go_home, step(ActionKind::EatAtHome, None)], tick));
+            }
+            if economy::buy_quantity(world, id) > 0 {
+                let steps = vec![
+                    step(ActionKind::GoTo(LocationKey::Market), None),
+                    step(ActionKind::BuyFood, None),
+                    step(ActionKind::EatFromInventory, None),
+                ];
+                return Some(plan(goal, None, steps, tick));
+            }
+            None
+        }
+        GoalKind::Sleep => {
+            if needs.energy >= RESTED_AT {
+                return Some(plan(goal, home, at_bed(ActionKind::Rest), tick));
+            }
+            Some(plan(goal, home, at_bed(ActionKind::Sleep), tick))
+        }
+        GoalKind::Work => {
+            let job = world.comp::<Job>(id)?;
+            let employer = job.employer?;
+            let tod = world.tick_of_day();
+            if shift_pending(world, id, job) {
+                let go = step(ActionKind::GoTo(workplace_key(job.role)), Some(employer));
+                if job.on_shift(tod) {
+                    let steps = vec![
+                        go,
+                        step(ActionKind::work_for(job.role), Some(employer)),
+                        step(ActionKind::GoTo(LocationKey::Hall), None),
+                        step(ActionKind::CollectWage, None),
+                    ];
+                    return Some(plan(goal, Some(employer), steps, tick));
+                }
+                // Not on shift yet: head over (or stay) and idle at the door until it begins.
+                return Some(plan(goal, Some(employer), vec![go, step(ActionKind::Wander, None)], tick));
+            }
+            if wage_pending(world, job) {
+                let mut steps = Vec::new();
+                // A farmer still at a stocked farm takes a load to the Market on the way.
+                let farm_stock = world.comp::<Building>(employer).map_or(0, |b| b.stock_food);
+                if job.role == Role::Farmer
+                    && pos.building == Some(employer)
+                    && farm_stock >= world.config.economy.haul_min_stock
+                {
+                    steps.push(step(ActionKind::HaulToMarket, Some(employer)));
+                    steps.push(step(ActionKind::GoTo(LocationKey::Market), None));
+                }
+                steps.push(step(ActionKind::GoTo(LocationKey::Hall), None));
+                steps.push(step(ActionKind::CollectWage, None));
+                return Some(plan(goal, Some(employer), steps, tick));
+            }
+            None
+        }
+        GoalKind::Earn => {
+            let hall = step(ActionKind::GoTo(LocationKey::Hall), None);
+            if let Some(job) = world.comp::<Job>(id) {
+                if job.days_unpaid >= 1 && !job.on_shift(world.tick_of_day()) && job.last_wage_attempt_day != Some(day)
+                {
+                    return Some(plan(goal, None, vec![hall, step(ActionKind::CollectWage, None)], tick));
+                }
+                return None;
+            }
+            let dole_due = world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day != Some(day));
+            let treasury_ok = world.treasury().is_some_and(|t| t.coins >= 0) && world.levers.dole_per_day > 0;
+            // Collectable at any hour: visits then spread with wallet depletion
+            // instead of bunching at dawn in front of a 20-capacity Hall.
+            if dole_due && treasury_ok {
+                return Some(plan(goal, None, vec![hall, step(ActionKind::CollectDole, None)], tick));
+            }
+            None
+        }
+        GoalKind::Socialise => {
+            // M2: a drink at the Bar; Chat with a partner arrives with the social graph (M5).
+            if coins >= 2 {
+                let steps = vec![step(ActionKind::GoTo(LocationKey::Bar), None), step(ActionKind::Drink, None)];
+                return Some(plan(goal, None, steps, tick));
+            }
+            None
+        }
+        GoalKind::Idle => {
+            // Bypasses the planner: Rest at Home or Bar, else Wander (stand about).
+            // Spare food carried home goes into the pantry first.
+            if at_home && inv.food > inv.stolen_food && inv.food >= 2 {
+                return Some(plan(goal, home, vec![step(ActionKind::StoreFood, None)], tick));
+            }
+            let here = pos.building.and_then(|b| world.comp::<Building>(b)).map(|b| b.kind);
+            let action = if at_home || here == Some(BuildingKind::Bar) { ActionKind::Rest } else { ActionKind::Wander };
+            Some(plan(goal, None, vec![step(action, None)], tick))
+        }
+        // Planned by GOAP from M3 (Court, Flee, Fight, ReportCrime, Patrol,
+        // Arrest, JoinGang, GangWork, Bury): unavailable until then.
+        _ => None,
+    }
 }

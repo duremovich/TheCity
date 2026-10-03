@@ -6,3 +6,4 @@ edition.workspace = true
 [dependencies]
 citysim = { path = "../citysim" }
 macroquad = "0.4"
+egui-macroquad = "0.17"

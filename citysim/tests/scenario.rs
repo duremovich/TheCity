@@ -18,6 +18,14 @@ fn test_m1_thirty_days_seed_42() {
         assert!(row.mean_hunger >= 0.4, "day {}: mean_hunger {}", row.day, row.mean_hunger);
         assert!((2..=8).contains(&row.price), "day {}: price {}", row.day, row.price);
         starvation += row.deaths_starvation;
+        // M2: goal selection should neither flap nor stick. Day 0 is excused:
+        // everyone starts fed and solvent, so there is little to change one's mind about.
+        assert!(
+            row.day == 0 || (3.0..=12.0).contains(&row.goal_changes_per_agent),
+            "day {}: goal_changes_per_agent {}",
+            row.day,
+            row.goal_changes_per_agent
+        );
         if row.food_market == 0 {
             empty_streak += 1;
             assert!(empty_streak <= 2, "day {}: Market empty for {empty_streak} days", row.day);

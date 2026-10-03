@@ -356,19 +356,7 @@ impl World {
             let born_tick = -(i64::from(age_days) * TICKS_PER_DAY as i64);
             let coins = rng.random_range(wc.initial_coins_min..=wc.initial_coins_max);
             let food = rng.random_range(wc.initial_food_min..=wc.initial_food_max);
-            let beta = |rng: &mut rand_chacha::ChaCha8Rng| -> f32 {
-                let mut d = [rng.random::<f32>(), rng.random::<f32>(), rng.random::<f32>()];
-                d.sort_by(f32::total_cmp);
-                d[1]
-            };
-            let personality = Personality {
-                lawfulness: beta(rng),
-                greed: beta(rng),
-                pride: beta(rng),
-                sociability: beta(rng),
-                courage: beta(rng),
-                loyalty: beta(rng),
-            };
+            let personality = Personality::random(rng);
             let skills = Skills {
                 stealth: rng.random_range(wc.skill_min..wc.skill_max),
                 fighting: rng.random_range(wc.skill_min..wc.skill_max),
@@ -408,11 +396,8 @@ impl World {
             let door = self.comp::<Building>(home).map(|b| b.door).unwrap_or_default();
             for &id in chunk {
                 self.insert(id, Household { home: Some(home) });
-                self.insert(id, Position { tile: door, building: Some(home) });
-            }
-            if let Some(b) = self.comp_mut::<Building>(home) {
-                b.occupants.extend_from_slice(chunk);
-                b.occupants.sort_unstable();
+                self.insert(id, Position { tile: door, building: None });
+                self.enter_building(id, home); // an interior slot each
             }
             if chunk.len() >= 2 && self.rng.world().random_bool(wc.spouse_p) {
                 let key = edge_key(chunk[0], chunk[1]);
@@ -577,7 +562,9 @@ impl World {
         // time: the clock is `self.tick`; daily hooks live in the systems that need them.
         systems::lod::run(self);
         crate::needs::run(self);
-        // memory (daily decay), think, plan: M2–M4. The M1 routine plans inside exec.
+        // memory (daily decay): M4.
+        crate::mood::run(self);
+        systems::think::run(self); // think + plan (M2: routine; M3: GOAP)
         crate::exec::run(self);
         systems::economy::run(self);
         // law, social, gang, demography: M4–M6.
