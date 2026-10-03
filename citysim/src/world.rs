@@ -112,14 +112,15 @@ pub struct World {
     /// BuyFood in progress: `(units, coins paid)` so a lost stock can be refunded.
     #[serde(default)]
     pub pending_purchase: BTreeMap<EntityId, (u32, i64)>,
-    /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`.
-    #[serde(default)]
+    /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
+    /// rebuilt on load.
+    #[serde(skip)]
     pub neighbours: BTreeMap<EntityId, BTreeSet<EntityId>>,
-    /// Spouse lookup, both directions; written only by `set_spouse`.
-    #[serde(default)]
+    /// Spouse lookup, both directions; written only by `set_spouse` / death.
+    #[serde(skip)]
     pub spouses: BTreeMap<EntityId, EntityId>,
     /// Enemy edges by agent, both directions; kept by `social::reindex_kind`.
-    #[serde(default)]
+    #[serde(skip)]
     pub enemies: BTreeMap<EntityId, BTreeSet<EntityId>>,
 }
 
@@ -642,6 +643,31 @@ impl World {
         }
     }
 
+    /// Rebuild `neighbours`, `spouses` and `enemies` from `edges` (after a
+    /// load; the indices are not saved).
+    pub fn rebuild_indices(&mut self) {
+        self.neighbours.clear();
+        self.spouses.clear();
+        self.enemies.clear();
+        let living = |w: &World, id: EntityId| w.has::<Identity>(id) && !w.has::<Corpse>(id);
+        let edges: Vec<((EntityId, EntityId), RelKind)> = self.edges.iter().map(|(&k, e)| (k, e.kind)).collect();
+        for ((a, b), kind) in edges {
+            self.neighbours.entry(a).or_default().insert(b);
+            self.neighbours.entry(b).or_default().insert(a);
+            match kind {
+                RelKind::Spouse if living(self, a) && living(self, b) => {
+                    self.spouses.insert(a, b);
+                    self.spouses.insert(b, a);
+                }
+                RelKind::Enemy => {
+                    self.enemies.entry(a).or_default().insert(b);
+                    self.enemies.entry(b).or_default().insert(a);
+                }
+                _ => {}
+            }
+        }
+    }
+
     /// Everyone `id` has an edge with, ascending.
     pub fn neighbours(&self, id: EntityId) -> impl Iterator<Item = EntityId> + '_ {
         self.neighbours.get(&id).into_iter().flat_map(|s| s.iter().copied())
@@ -727,6 +753,7 @@ impl World {
                 }
             }
         }
+        crate::systems::social::on_death(self, id);
         self.vacate_job(id);
         self.remove_from_building(id);
         if let Some(gang) = self.comp::<GangMember>(id).map(|g| g.gang) {

@@ -69,11 +69,6 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     // goal and its plan stay together until the step completes.
     let changed = brain.current_goal != Some(winner) && !(brain.plan.is_some() && uninterruptible(brain, tick));
     let abort = changed && brain.plan.is_some();
-    // The old goal's plan failed in execution and a different one takes over.
-    // (A goal cooled because it could not be planned at all was never started:
-    // not a change of mind.)
-    let failed_over =
-        changed && brain.plan.is_none() && brain.last_plan_failure.is_some_and(|(g, _)| Some(g) == brain.current_goal);
     let old = brain.current_goal;
 
     if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -97,7 +92,6 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     // A goal change is a pursued goal being taken up: from Idle, after a plan
     // completed or failed, or displacing another goal. Dropping to Idle is the
     // absence of a goal, not a change.
-    let _ = failed_over;
     if changed && winner != GoalKind::Idle {
         world.stats.current.goal_changes += 1;
     }

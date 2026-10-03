@@ -82,7 +82,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // coins, or the Bar is visibly full). Otherwise it wins every think
             // and churns through plan failures.
             // Satisfied, or nothing to do for it: no Chat partner here and no drink possible.
-            let chat_possible = crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
+            let chat_possible = chat_venue(world, id)
+                && crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
             needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED)
                 || (!chat_possible
                     && (world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
@@ -426,6 +427,17 @@ pub fn considerations(
         GoalKind::Idle => vec![Consideration::new("constant", 0.0, Curve::Step { t: 0.0, lo: 0.05, hi: 0.05 })],
     };
     Some((cs, flat))
+}
+
+/// Chat is allowed at the Market, Bar, Farm and one's own Home.
+pub fn chat_venue(world: &World, id: EntityId) -> bool {
+    use crate::components::{Building, BuildingKind, Household, Position};
+    let Some(b) = world.comp::<Position>(id).and_then(|p| p.building) else { return false };
+    let own_home = world.comp::<Household>(id).and_then(|h| h.home) == Some(b);
+    own_home
+        || world
+            .comp::<Building>(b)
+            .is_some_and(|bd| matches!(bd.kind, BuildingKind::Market | BuildingKind::Bar | BuildingKind::Farm))
 }
 
 /// Shared by every goal that asks.

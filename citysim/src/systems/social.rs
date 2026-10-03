@@ -47,6 +47,37 @@ pub fn promote(e: &mut Edge) {
     };
 }
 
+/// Death effects on the graph: Grief (0.9, -0.9) to every Spouse / Parent /
+/// Family partner, the widow(er) freed to remarry (the Spouse edge itself
+/// stays, per the spec), the dead dropped from the enemies index.
+pub fn on_death(world: &mut World, id: EntityId) {
+    let kin: Vec<EntityId> = world
+        .neighbours(id)
+        .filter(|&o| {
+            world.has::<Brain>(o)
+                && world
+                    .edge(id, o)
+                    .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family))
+        })
+        .collect();
+    for k in kin {
+        world.remember(k, MemoryKind::Grief, Some(id), 0.9, -0.9, false);
+    }
+    if let Some(spouse) = world.spouses.remove(&id) {
+        world.spouses.remove(&spouse);
+        if let Some(p) = world.comp_mut::<Personality>(spouse) {
+            p.drift(crate::personality::Drift::SpouseDied);
+        }
+    }
+    if let Some(enemies) = world.enemies.remove(&id) {
+        for e in enemies {
+            if let Some(s) = world.enemies.get_mut(&e) {
+                s.remove(&id);
+            }
+        }
+    }
+}
+
 /// Keep the enemies index in step with an edge's kind. Call after any kind change.
 pub fn reindex_kind(world: &mut World, a: EntityId, b: EntityId) {
     let enemy = world.edge(a, b).is_some_and(|e| e.kind == RelKind::Enemy);
@@ -114,12 +145,14 @@ pub fn spouse_of(world: &World, id: EntityId) -> Option<EntityId> {
     world.spouse_of(id)
 }
 
-/// Everyone currently held by a Partner reservation.
-pub fn reserved_partners(world: &World) -> std::collections::BTreeSet<EntityId> {
+/// Everyone held by a Partner reservation of someone other than `holder`
+/// (an agent's own reservation must not hide their own partner from them).
+pub fn reserved_partners(world: &World, holder: EntityId) -> std::collections::BTreeSet<EntityId> {
     world
         .reservations
-        .values()
-        .flatten()
+        .iter()
+        .filter(|(&h, _)| h != holder)
+        .flat_map(|(_, rs)| rs.iter())
         .filter_map(|r| match r.kind {
             crate::exec::ReservationKind::Partner { other } => Some(other),
             _ => None,
@@ -129,9 +162,20 @@ pub fn reserved_partners(world: &World) -> std::collections::BTreeSet<EntityId> 
 
 /// The co-located agent with the highest affinity who is reservable.
 pub fn best_colocated_partner(world: &World, id: EntityId, min_affinity: f32, unmarried: bool) -> Option<EntityId> {
+    let reserved = reserved_partners(world, id);
+    best_colocated_partner_in(world, id, min_affinity, unmarried, &reserved)
+}
+
+/// As `best_colocated_partner`, with the reservation set supplied by the caller.
+pub fn best_colocated_partner_in(
+    world: &World,
+    id: EntityId,
+    min_affinity: f32,
+    unmarried: bool,
+    reserved: &std::collections::BTreeSet<EntityId>,
+) -> Option<EntityId> {
     let here = world.comp::<crate::components::Position>(id)?.building?;
     let b = world.comp::<Building>(here)?;
-    let reserved = reserved_partners(world);
     b.occupants
         .iter()
         .copied()
@@ -187,7 +231,18 @@ pub fn candidate_at_venue(world: &World, id: EntityId, min: f32) -> Option<Entit
                 .collect()
         })
         .unwrap_or_default();
-    let reserved = reserved_partners(world);
+    let reserved = reserved_partners(world, id);
+    candidate_at_venue_in(world, id, min, &rejected, &reserved)
+}
+
+/// As `candidate_at_venue`, with the rejection and reservation sets supplied.
+pub fn candidate_at_venue_in(
+    world: &World,
+    id: EntityId,
+    min: f32,
+    rejected: &[EntityId],
+    reserved: &std::collections::BTreeSet<EntityId>,
+) -> Option<EntityId> {
     let venues = [BuildingKind::Bar, BuildingKind::Market];
     venues
         .iter()
@@ -214,18 +269,37 @@ pub fn court_target(world: &World, id: EntityId) -> Option<EntityId> {
     let venue = here
         .and_then(|b| world.comp::<Building>(b))
         .is_some_and(|bd| matches!(bd.kind, BuildingKind::Bar | BuildingKind::Market));
+    let reserved = reserved_partners(world, id);
     if here.is_some() {
         let min = world.config.social.propose_affinity;
-        if let Some(t) = best_colocated_partner(world, id, min, true).filter(|&t| propose_allowed(world, id, t)) {
+        if let Some(t) =
+            best_colocated_partner_in(world, id, min, true, &reserved).filter(|&t| propose_allowed(world, id, t))
+        {
             return Some(t);
         }
         if venue {
-            if let Some(t) = best_colocated_partner(world, id, 0.3, true) {
+            if let Some(t) = best_colocated_partner_in(world, id, 0.3, true, &reserved) {
                 return Some(t);
             }
         }
     }
-    candidate_at_venue(world, id, 0.3)
+    let rejected = rejected_recently_by(world, id);
+    candidate_at_venue_in(world, id, 0.3, &rejected, &reserved)
+}
+
+/// Subjects of this week's Rejected memories.
+pub fn rejected_recently_by(world: &World, id: EntityId) -> smallvec::SmallVec<[EntityId; 8]> {
+    let week = 7 * TICKS_PER_DAY;
+    world
+        .comp::<crate::components::Memory>(id)
+        .map(|m| {
+            m.entries
+                .iter()
+                .filter(|e| e.kind == MemoryKind::Rejected && world.tick.saturating_sub(e.tick) < week)
+                .filter_map(|e| e.subject)
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Propose: both unmarried, affinity >= 0.6, trust >= 0.5; roll
@@ -409,10 +483,6 @@ fn colocation(world: &mut World) {
                 && world.comp::<Job>(b).is_some_and(|j| j.employer == Some(building));
             if jail || cowork {
                 interacted(world, a, b);
-                if jail {
-                    world.remember(a, MemoryKind::MetInJail, Some(b), 0.5, 0.0, false);
-                    world.remember(b, MemoryKind::MetInJail, Some(a), 0.5, 0.0, false);
-                }
             }
         }
     }
@@ -424,9 +494,15 @@ fn daily(world: &mut World) {
     let month = 30 * TICKS_PER_DAY;
     let mut prune = Vec::new();
     let mut aged_debts = Vec::new();
+    let mut rekinded = Vec::new();
     for (&(a, b), e) in world.edges.iter_mut() {
         if tick.saturating_sub(e.last_interaction) >= week {
             e.affinity *= 0.98;
+            let before = e.kind;
+            promote(e);
+            if e.kind != before {
+                rekinded.push((a, b));
+            }
         }
         if e.kind == RelKind::Acquaintance
             && e.affinity.abs() < 0.05
@@ -437,20 +513,20 @@ fn daily(world: &mut World) {
         if e.debt != 0 {
             if let Some(since) = e.debt_since {
                 if tick.saturating_sub(since) >= 14 * TICKS_PER_DAY {
-                    aged_debts.push((a, b, e.debt));
+                    aged_debts.push((a, b));
                     e.debt_since = Some(tick); // charged once per fortnight
                 }
             }
         }
     }
+    for (a, b) in rekinded {
+        reindex_kind(world, a, b);
+    }
     for (a, b) in prune {
         world.remove_edge(a, b);
     }
     // A debt older than 14 days costs affinity on the donor's side (the creditor).
-    for (a, b, debt) in aged_debts {
-        let (debtor, creditor) = if debt > 0 { (a, b) } else { (b, a) };
-        let _ = debtor;
-        let _ = creditor;
+    for (a, b) in aged_debts {
         let e = world.edge_entry(a, b);
         e.affinity = (e.affinity - 0.15).max(-1.0);
         promote(e);

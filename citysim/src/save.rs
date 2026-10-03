@@ -11,7 +11,9 @@ pub fn to_ron(world: &World) -> String {
 }
 
 pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
-    ron::from_str(text)
+    let mut world: World = ron::from_str(text)?;
+    world.rebuild_indices();
+    Ok(world)
 }
 
 /// `saves/<seed>-<tick>.ron`.

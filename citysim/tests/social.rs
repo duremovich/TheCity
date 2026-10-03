@@ -177,3 +177,51 @@ fn test_edges_deterministic_order() {
     assert_eq!(a.neighbours.len(), b.neighbours.len());
     assert_eq!(a.enemies, b.enemies);
 }
+
+#[test]
+fn test_widow_can_remarry_and_grieves() {
+    let mut w = world(37);
+    let (a, b) = two_civilians(&w);
+    w.set_spouse(a, b);
+    assert!(social::has_spouse(&w, a));
+    w.kill(b, citysim::DeathCause::Violence);
+    assert!(!social::has_spouse(&w, a), "the widow is free to remarry");
+    assert_eq!(w.edge(a, b).map(|e| e.kind), Some(RelKind::Spouse), "the edge itself stays");
+    let grief =
+        w.comp::<Memory>(a).expect("mem").entries.iter().any(|m| m.kind == MemoryKind::Grief && m.subject == Some(b));
+    assert!(grief, "no Grief memory");
+    assert!(w.enemies_of(b).next().is_none());
+}
+
+#[test]
+fn test_own_partner_reservation_does_not_hide_partner() {
+    let mut w = world(38);
+    let (a, b) = two_civilians(&w);
+    let bar = w.building_of_kind(BuildingKind::Bar).expect("bar");
+    for id in [a, b] {
+        w.abort_plan(id);
+        w.leave_building(id);
+        w.enter_building(id, bar);
+    }
+    assert_eq!(social::best_colocated_partner(&w, a, -1.0, false), Some(b));
+    let expires = w.tick + 100;
+    w.reserve(a, citysim::exec::ReservationKind::Partner { other: b }, expires);
+    assert_eq!(social::best_colocated_partner(&w, a, -1.0, false), Some(b), "my own reservation is not a block");
+    let c = w.citizens().into_iter().find(|&c| c != a && c != b && w.has::<Brain>(c)).expect("c");
+    w.abort_plan(c);
+    w.leave_building(c);
+    w.enter_building(c, bar);
+    assert_ne!(social::best_colocated_partner(&w, c, -1.0, false), Some(b), "someone else's reservation is");
+}
+
+#[test]
+fn test_indices_rebuilt_on_load() {
+    let mut w = world(39);
+    w.run_ticks(2 * TICKS_PER_DAY);
+    let text = citysim::save::to_ron(&w);
+    let loaded = citysim::save::from_ron(&text).expect("load");
+    assert_eq!(loaded.neighbours, w.neighbours);
+    assert_eq!(loaded.spouses, w.spouses);
+    assert_eq!(loaded.enemies, w.enemies);
+    assert!(!loaded.spouses.is_empty());
+}

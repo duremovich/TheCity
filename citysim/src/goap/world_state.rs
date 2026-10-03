@@ -295,15 +295,10 @@ impl WorldState {
 
         let has_spouse = crate::systems::social::has_spouse(world, agent);
         // The bound target is the candidate when there is one; otherwise any.
-        let has_partner_candidate = !has_spouse
-            && match target.filter(|&t| world.has::<Brain>(t)) {
-                Some(t) => {
-                    world.edge(agent, t).is_some_and(|e| e.affinity >= 0.6 && e.trust >= 0.5)
-                        && !crate::systems::social::has_spouse(world, t)
-                }
-                // Propose needs a bound partner, so an unbound plan has no candidate.
-                None => false,
-            };
+        // Propose needs a bound partner, so an unbound plan has no candidate.
+        let has_partner_candidate = target
+            .filter(|&t| world.has::<Brain>(t))
+            .is_some_and(|t| crate::systems::social::propose_allowed(world, agent, t));
         let gang_task_done = world.comp::<Brain>(agent).is_some_and(|b| b.gang_task_day == Some(world.day()));
         // A hostile (Enemy edge) within 4 tiles.
         let hostile_near =

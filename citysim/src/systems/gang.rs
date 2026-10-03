@@ -10,7 +10,7 @@ use crate::personality::Drift;
 use crate::time::TICKS_PER_DAY;
 use crate::world::World;
 
-/// Eligibility for JoinGang: an edge to any member with affinity >= 0.2; or
+/// Eligibility for JoinGang: an edge to any member with affinity >= join_gang_affinity; or
 /// `hunger < 0.2 && lawfulness < 0.3`; or the gang is empty and the agent
 /// holds a WasArrested memory.
 pub fn eligible(world: &World, id: EntityId) -> bool {
@@ -150,15 +150,20 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
         crate::systems::social::robbed_by(world, o, actor);
     }
-    // Round the proportional split up to the full amount from the richest.
-    if taken < take {
-        if let Some(&richest) = occupants.iter().max_by_key(|&&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)) {
-            let extra = take - taken;
-            if let Some(w) = world.comp_mut::<Wallet>(richest) {
-                w.coins -= extra;
-            }
-            taken += extra;
+    // The rounding remainder comes a coin at a time from whoever still has one.
+    let mut guard = 0;
+    while taken < take && guard < 64 {
+        guard += 1;
+        let Some(&payer) = occupants.iter().max_by_key(|&&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)) else {
+            break;
+        };
+        if world.comp::<Wallet>(payer).is_none_or(|w| w.coins <= 0) {
+            break;
         }
+        if let Some(w) = world.comp_mut::<Wallet>(payer) {
+            w.coins -= 1;
+        }
+        taken += 1;
     }
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins += taken;

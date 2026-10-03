@@ -79,8 +79,9 @@ wage_bartender = 5
 wage_gravedigger = 5
 # 1.4 on paper assumes 24 farmers x 9 h at farming 0.5 and one meal per citizen. In practice farms
 # work 6 days in 7, farmers attend ~75% of a shift (meals, wage trips), initial farming skill is
-# U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.8 gives a small
-# Spring surplus; Summer (x1.4) fills the stores and Winter (x0.3) is still a famine by design.
+# U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.4 keeps the
+# Market stocked but not flooded (2.8 left nobody ever broke, so no crime; the spec's 1.25 starves
+# the town by day 14); Summer (x1.4) fills the stores and Winter (x0.3) is still a famine by design.
 farm_yield_base = 2.4
 farm_skill_floor = 0.6
 farm_skill_slope = 0.8

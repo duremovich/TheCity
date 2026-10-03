@@ -150,6 +150,11 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // already attempted): drop the HasWageDue key rather than skip the shift.
     let goal_state: crate::goap::GoalState = if goal == GoalKind::Work && !ctx.wage_collectable {
         goal_state.into_iter().filter(|&(k, _)| k != crate::goap::Key::HasWageDue).collect()
+    } else if goal == GoalKind::Court && !start.has_partner_candidate {
+        // Courtship in two visits: Flirt until affinity and trust clear the
+        // proposal thresholds, Propose once they do. A single Flirt -> Propose
+        // plan would fail at Propose's precondition re-check nearly every time.
+        vec![(crate::goap::Key::HasPartnerCandidate, true)]
     } else {
         goal_state
     };

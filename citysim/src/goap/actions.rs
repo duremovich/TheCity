@@ -251,8 +251,6 @@ pub struct PlanCtx {
     pub partner: Option<EntityId>,
     /// The bound partner is here or at a Bar / Market the plan can walk to.
     pub partner_reachable: bool,
-    /// The bound target is a partner candidate (affinity >= 0.6, trust >= 0.5, both unmarried).
-    pub candidate_bound: bool,
     pub gang_eligible: bool,
     /// Extort: the bound Home has occupants and no guard within 8.
     pub extort_ok: bool,
@@ -423,12 +421,6 @@ impl PlanCtx {
                                 .comp::<Building>(b)
                                 .is_some_and(|bd| matches!(bd.kind, BuildingKind::Bar | BuildingKind::Market))
                     })
-            }),
-            candidate_bound: target.is_some_and(|t| {
-                world.edge(agent, t).is_some_and(|e| {
-                    e.affinity >= world.config.social.propose_affinity && e.trust >= world.config.social.propose_trust
-                }) && !crate::systems::social::has_spouse(world, agent)
-                    && !crate::systems::social::has_spouse(world, t)
             }),
             gang_eligible: crate::systems::gang::eligible(world, agent),
             extort_ok: target
