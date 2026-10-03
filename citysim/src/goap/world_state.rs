@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    Brain, Building, BuildingKind, Corpse, GangMember, Household, Inventory, Job, Memory, MemoryKind, Needs, Position,
+    Building, BuildingKind, Corpse, GangMember, Household, Inventory, Job, Memory, MemoryKind, Needs, Position,
     RelKind, Wallet,
 };
 use crate::entity::EntityId;
@@ -265,8 +265,16 @@ impl WorldState {
         // `shift_done`: the shift this moment belongs to has been worked. Keyed
         // on the current shift day, not the next one, so it stays true after
         // the shift ends and the wage trip can still be planned.
+        // ... and once the shift key rolls over (midnight, or 06:00 for night
+        // guards) a worker still owed wages counts as "shift done" while no
+        // shift is on, so the wage trip remains plannable.
         let (has_wage_due, shift_done) = match job {
-            Some(j) => (j.days_unpaid >= 1, j.last_shift_day == Some(j.shift_key_at(world.tick))),
+            Some(j) => {
+                let due = j.days_unpaid >= 1;
+                let done =
+                    j.last_shift_day == Some(j.shift_key_at(world.tick)) || (due && !j.on_shift(world.tick_of_day()));
+                (due, done)
+            }
             None => (false, false),
         };
 
@@ -308,7 +316,6 @@ impl WorldState {
 
         let season = world.season();
         let dark = world.is_dark();
-        let _ = world.comp::<Brain>(agent);
 
         WorldState {
             at,

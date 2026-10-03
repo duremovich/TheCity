@@ -169,8 +169,10 @@ fn test_reservation_prevents_overcommit() {
         w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     }
     let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
+    let price = w.market().expect("market").price_food;
     for &id in &ids {
-        w.comp_mut::<Wallet>(id).expect("wallet").coins = 30;
+        // one unit's worth each: BuyFood reserves what it will actually buy
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = price;
         w.comp_mut::<Inventory>(id).expect("inv").food = 0;
         w.comp_mut::<Needs>(id).expect("needs").hunger = 0.2;
         w.comp_mut::<Brain>(id).expect("brain").current_goal = Some(GoalKind::Eat);
@@ -183,4 +185,93 @@ fn test_reservation_prevents_overcommit() {
     assert!(w.comp::<Brain>(ids[1]).expect("b").plan.is_some());
     assert!(!WorldState::observe(&w, ids[2], None).food_source_available, "both units reserved");
     assert_eq!(WorldState::reserved_units(&w, market), 2);
+}
+
+#[test]
+fn test_idle_with_stolen_food_can_still_store() {
+    use citysim::exec::routine;
+    let mut w = world(5);
+    let id = w.citizens().into_iter().find(|&id| !w.has::<Job>(id)).expect("unemployed");
+    let inv = w.comp_mut::<Inventory>(id).expect("inv");
+    inv.food = 3;
+    inv.stolen_food = 1;
+    let plan = routine::idle_plan(&w, id).expect("idle plan");
+    assert_eq!(plan.steps[0].action, ActionKind::StoreFood);
+    let ctx = PlanCtx::build_light(&w, id, None);
+    let ws = WorldState::observe(&w, id, None);
+    assert!(ActionKind::StoreFood.preconditions(&ws, &ctx), "the symbolic check must agree with the executor");
+}
+
+#[test]
+fn test_work_plans_the_shift_when_the_wage_trip_is_blocked() {
+    let mut w = world(6);
+    let farmer = w
+        .citizens()
+        .into_iter()
+        .find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == citysim::Role::Farmer))
+        .expect("farmer");
+    let farm = w.comp::<Job>(farmer).expect("job").employer.expect("farm");
+    w.tick = 600; // on shift
+    w.leave_building(farmer);
+    w.enter_building(farmer, farm);
+    w.comp_mut::<Job>(farmer).expect("job").last_wage_attempt_day = Some(0); // short-paid this morning
+    w.comp_mut::<Brain>(farmer).expect("brain").current_goal = Some(GoalKind::Work);
+    plan::plan_for(&mut w, farmer, GoalKind::Work);
+    let brain = w.comp::<Brain>(farmer).expect("brain");
+    let steps: Vec<_> = brain.plan.as_ref().expect("a plan").steps.iter().map(|s| s.action).collect();
+    assert_eq!(steps, vec![ActionKind::FarmWork], "{steps:?}");
+    assert!(!brain.cooldowns.contains_key(&GoalKind::Work));
+}
+
+#[test]
+fn test_wage_trip_plannable_after_midnight() {
+    let mut w = world(7);
+    let farmer = w
+        .citizens()
+        .into_iter()
+        .find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == citysim::Role::Farmer))
+        .expect("farmer");
+    // worked day 0, could not reach the Hall; it is now 00:30 on day 1
+    let j = w.comp_mut::<Job>(farmer).expect("job");
+    j.last_shift_day = Some(0);
+    j.days_unpaid = 1;
+    w.tick = citysim::TICKS_PER_DAY + 30;
+    let ws = WorldState::observe(&w, farmer, None);
+    assert!(ws.shift_done && ws.has_wage_due);
+    w.comp_mut::<Brain>(farmer).expect("brain").current_goal = Some(GoalKind::Work);
+    plan::plan_for(&mut w, farmer, GoalKind::Work);
+    let steps: Vec<_> =
+        w.comp::<Brain>(farmer).expect("brain").plan.as_ref().expect("plan").steps.iter().map(|s| s.action).collect();
+    assert_eq!(steps, vec![ActionKind::GoTo(LocationKey::Hall), ActionKind::CollectWage]);
+}
+
+#[test]
+fn test_empty_market_with_stocked_pantry_eats_at_home() {
+    let mut w = world(8);
+    let id = scenario(&mut w, 14, 30, 0.8, 0.5, 0.5);
+    let market = w.building_of_kind(BuildingKind::Market).expect("market");
+    w.comp_mut::<Building>(market).expect("market").stock_food = 0;
+    let home = w.comp::<citysim::Household>(id).expect("hh").home.expect("home");
+    w.comp_mut::<Building>(home).expect("home").stock_food = 2;
+    let ctx = PlanCtx::build(&w, id, None);
+    let start = WorldState::observe(&w, id, None);
+    let found = planner::plan(&ctx, start, &vec![(Key::HungerSatisfied, true)], limits(&w)).expect("plan");
+    assert!(!found.steps.contains(&ActionKind::BuyFood), "{:?}", found.steps);
+    assert!(found.steps.contains(&ActionKind::EatAtHome), "{:?}", found.steps);
+}
+
+#[test]
+fn test_beg_does_not_promise_a_meal_at_price_three() {
+    let mut w = world(9);
+    let id = scenario(&mut w, 14, 0, 0.9, 0.4, 0.6);
+    w.market_mut().expect("market").price_food = 3;
+    let ctx = PlanCtx::build(&w, id, None);
+    let mut ws = WorldState::observe(&w, id, None);
+    ws.at = LocationKey::Market;
+    let after = ActionKind::Beg.apply(&ws, &ctx);
+    assert!(!after.has_coins);
+    w.market_mut().expect("market").price_food = 2;
+    let ctx = PlanCtx::build(&w, id, None);
+    let after = ActionKind::Beg.apply(&ws, &ctx);
+    assert!(after.has_coins);
 }

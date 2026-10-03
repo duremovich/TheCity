@@ -70,7 +70,7 @@ pub enum ActionKind {
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 51] = [
+pub const PLANNABLE: [ActionKind; 50] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -96,7 +96,6 @@ pub const PLANNABLE: [ActionKind; 51] = [
     ActionKind::Sleep,
     ActionKind::Rest,
     ActionKind::FarmWork,
-    ActionKind::HaulToMarket,
     ActionKind::ClerkWork,
     ActionKind::BartendWork,
     ActionKind::CollectWage,
@@ -227,6 +226,13 @@ pub struct PlanCtx {
     pub farm_stock: u32,
     pub coins: i64,
     pub price: i64,
+    /// Carrying food that is not stolen (StoreFood moves only that).
+    pub food_unstolen: bool,
+    /// Market stock beyond what others have reserved.
+    pub market_free: bool,
+    pub haul_min_stock: u32,
+    /// Wages owed right now (`days_unpaid >= 1`).
+    pub wage_due: bool,
     /// Already had today's drink (one per day; the M1/M2 rule, kept).
     pub drank_today: bool,
     /// The Bar is at capacity right now: no point walking over.
@@ -236,7 +242,19 @@ pub struct PlanCtx {
 }
 
 impl PlanCtx {
+    /// Full context for planning (distances and the guard scan included).
     pub fn build(world: &World, agent: EntityId, target: Option<EntityId>) -> PlanCtx {
+        PlanCtx::build_inner(world, agent, target, false)
+    }
+
+    /// Context for re-checking one action's preconditions at step start:
+    /// skips the O(population) guard scan and the distance table, which
+    /// only costs and GoTo need.
+    pub fn build_light(world: &World, agent: EntityId, target: Option<EntityId>) -> PlanCtx {
+        PlanCtx::build_inner(world, agent, target, true)
+    }
+
+    fn build_inner(world: &World, agent: EntityId, target: Option<EntityId>, light: bool) -> PlanCtx {
         let p = world.comp::<Personality>(agent);
         let s = world.comp::<Skills>(agent);
         let job = world.comp::<Job>(agent);
@@ -245,13 +263,14 @@ impl PlanCtx {
         let tile = pos.map(|p| p.tile);
         let home = world.comp::<Household>(agent).and_then(|h| h.home);
         let sight = world.config.crime.sight_day_crime; // "guard8"
-        let guard8 = tile.is_some_and(|t| {
-            world.citizens().into_iter().any(|g| {
-                g != agent
-                    && world.comp::<Job>(g).is_some_and(|j| j.role == Role::Guard)
-                    && world.comp::<Position>(g).is_some_and(|gp| gp.tile.manhattan(t) <= sight)
-            })
-        });
+        let guard8 = !light
+            && tile.is_some_and(|t| {
+                world.citizens().into_iter().any(|g| {
+                    g != agent
+                        && world.comp::<Job>(g).is_some_and(|j| j.role == Role::Guard)
+                        && world.comp::<Position>(g).is_some_and(|gp| gp.tile.manhattan(t) <= sight)
+                })
+            });
         let stock_of = |kind: BuildingKind| -> u32 {
             world.building_of_kind(kind).and_then(|b| world.comp::<Building>(b)).map_or(0, |b| b.stock_food)
         };
@@ -268,7 +287,7 @@ impl PlanCtx {
             None => p.tile,
         });
         let mut dist = BTreeMap::new();
-        if let Some(o) = origin {
+        if let (Some(o), false) = (origin, light) {
             let mut add = |key: LocationKey, b: Option<EntityId>| {
                 if let Some(door) = b.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) {
                     dist.insert(key, o.manhattan(door));
@@ -336,15 +355,15 @@ impl PlanCtx {
             farm_stock: farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food),
             coins: world.comp::<Wallet>(agent).map_or(0, |w| w.coins),
             price: world.market().map_or(1, |m| m.price_food).max(1),
-            drank_today: world.comp::<crate::components::Memory>(agent).is_some_and(|m| {
-                m.entries
-                    .iter()
-                    .any(|e| e.kind == crate::components::MemoryKind::Socialised && crate::time::day(e.tick) == day)
-            }),
-            bar_full: world
-                .building_of_kind(BuildingKind::Bar)
-                .and_then(|b| world.comp::<Building>(b))
-                .is_some_and(|b| b.is_full() && !b.occupants.contains(&agent)),
+            food_unstolen: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.food > i.stolen_food),
+            market_free: world
+                .building_of_kind(BuildingKind::Market)
+                .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food)))
+                .is_some_and(|(m, stock)| stock > WorldState::reserved_by_others(world, m, Some(agent))),
+            haul_min_stock: world.config.economy.haul_min_stock,
+            wage_due: job.is_some_and(|j| j.days_unpaid >= 1),
+            drank_today: crate::utility::goals::drank_today(world, agent),
+            bar_full: crate::utility::goals::bar_full_for(world, agent),
             dist,
         }
     }
@@ -394,7 +413,9 @@ impl ActionKind {
             return false;
         }
         match self {
-            ActionKind::FarmWork | ActionKind::HaulToMarket => ctx.is(Role::Farmer),
+            ActionKind::FarmWork => ctx.is(Role::Farmer),
+            // Appended by the executor after FarmWork; never planned.
+            ActionKind::HaulToMarket => false,
             ActionKind::ClerkWork => ctx.is(Role::Clerk),
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard),
@@ -406,7 +427,6 @@ impl ActionKind {
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
             ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult,
             ActionKind::ServeTime => false,
-            // Hauling is appended at shift end by the executor, never planned.
             _ => true,
         }
     }
@@ -418,9 +438,9 @@ impl ActionKind {
             ActionKind::GoTo(k) => ws.at != k && ctx.dist.contains_key(&k),
             ActionKind::EatFromInventory => ws.has_food,
             ActionKind::EatAtHome => at(LocationKey::Home) && ctx.pantry > 0,
-            ActionKind::BuyFood => at(LocationKey::Market) && ws.has_coins && ws.food_source_available,
+            ActionKind::BuyFood => at(LocationKey::Market) && ws.has_coins && ctx.market_free,
             ActionKind::StealFood(StealSource::Market) => {
-                at(LocationKey::Market) && !ws.carrying_stolen && ctx.market_stock > 0
+                at(LocationKey::Market) && !ws.carrying_stolen && ctx.market_free
             }
             ActionKind::StealFood(StealSource::Home) => {
                 at(LocationKey::TargetHome) && !ws.carrying_stolen && ctx.target_pantry > 0
@@ -441,12 +461,12 @@ impl ActionKind {
             ActionKind::BartendWork => at(LocationKey::Bar) && !ws.shift_done && (ctx.on_shift || ctx.evening),
             ActionKind::GuardJail => at(LocationKey::Jail) && !ws.shift_done && ctx.on_shift,
             ActionKind::TendGraves => at(LocationKey::Cemetery) && !ws.shift_done && ctx.on_shift,
-            ActionKind::HaulToMarket => at(LocationKey::Farm) && ctx.farm_stock >= 10,
+            ActionKind::HaulToMarket => at(LocationKey::Farm) && ctx.farm_stock >= ctx.haul_min_stock,
             ActionKind::CollectWage => at(LocationKey::Hall) && ws.has_wage_due && ctx.wage_collectable,
             ActionKind::CollectDole => at(LocationKey::Hall) && ctx.dole_available,
             ActionKind::SellFood => at(LocationKey::Market) && ws.has_food && !ws.carrying_stolen,
             ActionKind::Drink => at(LocationKey::Bar) && ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full,
-            ActionKind::StoreFood => at(LocationKey::Home) && ws.has_food && !ws.carrying_stolen,
+            ActionKind::StoreFood => at(LocationKey::Home) && ctx.food_unstolen,
             ActionKind::Wander => true,
             _ => false,
         }
@@ -462,8 +482,8 @@ impl ActionKind {
         match self {
             ActionKind::GoTo(k) => ctx.dist.contains_key(&k),
             ActionKind::EatAtHome => ctx.pantry > 0,
-            ActionKind::BuyFood => ctx.coins >= ctx.price && ctx.market_stock > 0,
-            ActionKind::StealFood(StealSource::Market) => ctx.market_stock > 0,
+            ActionKind::BuyFood => ctx.coins >= ctx.price && ctx.market_free,
+            ActionKind::StealFood(StealSource::Market) => ctx.market_free,
             ActionKind::StealFood(StealSource::Home) => ctx.target_pantry > 0,
             ActionKind::StealFood(StealSource::Warehouse) => ctx.warehouse_stock > 0 && ctx.stealth >= 0.4,
             ActionKind::Forage => matches!(ctx.season, Season::Summer | Season::Autumn) && !ctx.dark,
@@ -471,10 +491,11 @@ impl ActionKind {
                 ctx.on_shift
             }
             ActionKind::BartendWork => ctx.on_shift || ctx.evening,
-            ActionKind::HaulToMarket => ctx.farm_stock >= 10,
+            ActionKind::HaulToMarket => ctx.farm_stock >= ctx.haul_min_stock,
             ActionKind::CollectWage => ctx.wage_collectable,
             ActionKind::CollectDole => ctx.dole_available,
             ActionKind::Drink => ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full,
+            ActionKind::StoreFood => ctx.food_unstolen,
             _ => true,
         }
     }
@@ -528,8 +549,11 @@ impl ActionKind {
             }
             ActionKind::Forage => gain_food(&mut n, 1),
             ActionKind::Beg => {
-                n.coin_bucket = n.coin_bucket.max(1);
-                n.has_coins = true;
+                // Yields 1-2 coins at best: only a meal's worth when the price is that low.
+                if _ctx.price <= 2 {
+                    n.coin_bucket = n.coin_bucket.max(1);
+                    n.has_coins = true;
+                }
             }
             // Rest really gives +0.1 energy: claiming `energy_satisfied` sent tired
             // agents to the Bar to doze instead of home to sleep.
@@ -629,7 +653,6 @@ impl ActionKind {
     pub fn instance(self, ctx: &PlanCtx) -> ActionInstance {
         let target = match self {
             ActionKind::GoTo(LocationKey::TargetHome) | ActionKind::StealFood(StealSource::Home) => ctx.target,
-            ActionKind::GoTo(LocationKey::Farm) | ActionKind::FarmWork | ActionKind::HaulToMarket => None,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

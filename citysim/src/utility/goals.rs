@@ -52,6 +52,21 @@ pub fn shift_reachable(world: &World, id: EntityId, job: &Job) -> bool {
     crate::exec::routine::work_pending(world, id, job)
 }
 
+/// Had today's drink (the one-per-day rule).
+pub fn drank_today(world: &World, id: EntityId) -> bool {
+    world
+        .comp::<Memory>(id)
+        .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::Socialised && time::day(e.tick) == world.day()))
+}
+
+/// The Bar is at capacity and this agent is not inside it.
+pub fn bar_full_for(world: &World, id: EntityId) -> bool {
+    world
+        .building_of_kind(BuildingKind::Bar)
+        .and_then(|b| world.comp::<crate::components::Building>(b))
+        .is_some_and(|b| b.is_full() && !b.occupants.contains(&id))
+}
+
 /// Is the goal's GOAP goal state already true? Such a goal has nothing to
 /// plan and is skipped before scoring, like one missing a component.
 /// Otherwise Eat beats Idle at hunger 0.8 and most of every meal is wasted.
@@ -66,16 +81,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // off for the day once had, and off while it cannot be had (no 2
             // coins, or the Bar is visibly full). Otherwise it wins every think
             // and churns through plan failures.
-            let bar_full = world
-                .building_of_kind(BuildingKind::Bar)
-                .and_then(|b| world.comp::<crate::components::Building>(b))
-                .is_some_and(|b| b.is_full() && !b.occupants.contains(&id));
             needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED)
                 || world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
-                || bar_full
-                || world.comp::<Memory>(id).is_some_and(|m| {
-                    m.entries.iter().any(|e| e.kind == MemoryKind::Socialised && time::day(e.tick) == world.day())
-                })
+                || bar_full_for(world, id)
+                || drank_today(world, id)
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
@@ -83,14 +92,19 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price)) {
                 return true;
             }
-            // An unemployed agent whose dole is taken or suspended has no income
-            // action left (Beg yields coins, never savings): nothing to plan.
-            // The employed are scored as the spec's worked example does.
+            // Nothing to plan: an unemployed agent whose dole is taken or
+            // suspended (Beg yields coins, never savings), or an employed one
+            // off shift with no wage due (the in-shift case stays scored, as in
+            // the spec's worked example; it loses to Work's hysteresis).
             let day = world.day();
-            world.comp::<Job>(id).is_none()
-                && (world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day == Some(day))
-                    || world.treasury().is_some_and(|t| t.coins < 0)
-                    || world.levers.dole_per_day == 0)
+            match world.comp::<Job>(id) {
+                Some(j) => j.days_unpaid == 0 && !j.on_shift(world.tick_of_day()),
+                None => {
+                    world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day == Some(day))
+                        || world.treasury().is_some_and(|t| t.coins < 0)
+                        || world.levers.dole_per_day == 0
+                }
+            }
         }
         GoalKind::Court => has_spouse,
         GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {

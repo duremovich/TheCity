@@ -8,7 +8,7 @@
 use crate::components::{Brain, Building, BuildingKind, GoalKind, Household, Position};
 use crate::entity::EntityId;
 use crate::exec::{routine, ExecState, ReservationKind};
-use crate::goap::{self, ActionKind, Limits, LocationKey, Plan, PlanCtx, StealSource, WorldState};
+use crate::goap::{self, ActionKind, Limits, Plan, PlanCtx, StealSource, WorldState};
 use crate::time::Tick;
 use crate::world::{Urgency, World};
 
@@ -94,6 +94,13 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     let target = bind_target(world, id, goal);
     let ctx = PlanCtx::build(world, id, target);
     let start = WorldState::observe(world, id, target);
+    // A shift is worked even when today's wage trip is blocked (short payment
+    // already attempted): drop the HasWageDue key rather than skip the shift.
+    let goal_state: crate::goap::GoalState = if goal == GoalKind::Work && !ctx.wage_collectable {
+        goal_state.into_iter().filter(|&(k, _)| k != crate::goap::Key::HasWageDue).collect()
+    } else {
+        goal_state
+    };
     // Fail fast: every unsatisfied goal key needs at least one feasible action
     // that produces it; otherwise A* would only exhaust its expansion cap.
     let hopeless = goal_state.iter().any(|&(key, value)| {
@@ -142,7 +149,10 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     for step in &plan.steps {
         let kind = match step.action {
-            ActionKind::BuyFood => market.map(|b| ReservationKind::FoodUnits { building: b, units: 1 }),
+            ActionKind::BuyFood => {
+                let units = crate::systems::economy::buy_quantity(world, id).max(1);
+                market.map(|b| ReservationKind::FoodUnits { building: b, units })
+            }
             ActionKind::StealFood(StealSource::Market) => {
                 market.map(|b| ReservationKind::FoodUnits { building: b, units: 2 })
             }
@@ -150,7 +160,6 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
                 plan.target.map(|b| ReservationKind::FoodUnits { building: b, units: 2 })
             }
             ActionKind::EatAtHome => home.map(|b| ReservationKind::FoodUnits { building: b, units: 1 }),
-            ActionKind::GoTo(LocationKey::Home) => None,
             _ => None,
         };
         if let Some(kind) = kind {

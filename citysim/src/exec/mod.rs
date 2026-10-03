@@ -263,7 +263,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
         }
         kind => {
             // Replan trigger (b): re-observe; a false precondition fails the step.
-            let ctx = crate::goap::PlanCtx::build(world, id, plan_target_of(world, id));
+            let ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
             let ws = crate::goap::WorldState::observe(world, id, ctx.target);
             if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
                 return StepResult::Failed(FailReason::PreconditionLost);

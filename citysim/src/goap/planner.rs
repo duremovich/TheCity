@@ -80,7 +80,7 @@ pub fn plan(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits) 
         let g = nodes[idx].g;
         let depth = nodes[idx].depth;
         for (order, &kind) in PLANNABLE.iter().enumerate() {
-            if !kind.allowed(ctx) || !kind.preconditions(&state, ctx) {
+            if !kind.allowed(ctx) || !kind.feasible(ctx) || !kind.preconditions(&state, ctx) {
                 continue;
             }
             let next = kind.apply(&state, ctx);
