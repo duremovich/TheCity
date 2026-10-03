@@ -1,0 +1,21 @@
+[package]
+name = "citysim"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+rand = "0.9"
+rand_chacha = { version = "0.9", features = ["serde"] }
+serde = { version = "1", features = ["derive"] }
+ron = { version = "0.10", features = ["integer128"] }
+toml = "0.8"
+smallvec = { version = "1", features = ["serde"] }
+ordered-float = { version = "5", features = ["serde"] }
+
+[dev-dependencies]
+blake3 = "1"
+criterion = "0.5"
+
+[[bench]]
+name = "tick"
+harness = false

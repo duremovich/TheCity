@@ -1,0 +1,146 @@
+# Living City Simulator tuning. Every constant the simulation uses lives here.
+# See docs/SPEC.md › Tuning defaults for what to raise or lower and when.
+
+[world]
+population = 300
+residents_per_home = 5
+spouse_p = 0.6
+age_min_years = 18.0
+age_max_years = 60.0
+initial_coins_min = 10
+initial_coins_max = 40
+initial_food_min = 0
+initial_food_max = 2
+skill_min = 0.1
+skill_max = 0.4
+home_pantry_initial = 10
+market_initial = 600
+warehouse_initial = 1500
+treasury_initial = 5000
+price_initial = 3
+gang_name = "The Hollow"
+gang_treasury_initial = 50
+
+[world.jobs]
+farmer = 24
+guard = 10
+clerk = 3
+bartender = 2
+gravedigger = 1
+
+[world.needs_initial]
+hunger = 0.8
+energy = 0.9
+safety = 0.8
+belonging = 0.6
+intimacy = 0.5
+
+# Capacity = max agents inside at once; stock_cap = food units the building can hold.
+[buildings]
+home = { capacity = 6, stock_cap = 30 }
+farm = { capacity = 12, stock_cap = 400 }
+market = { capacity = 20, stock_cap = 2000 }
+bar = { capacity = 24, stock_cap = 0 }
+jail = { capacity = 16, stock_cap = 0 }
+cemetery = { capacity = 8, stock_cap = 0 }
+hall = { capacity = 20, stock_cap = 0 }
+hideout = { capacity = 12, stock_cap = 200 }
+warehouse = { capacity = 6, stock_cap = 3000 }
+
+[needs]
+hunger_decay_per_tick = 0.000347
+energy_decay_per_tick = 0.000926
+safety_recover_per_tick = 0.0010
+belonging_decay_per_tick = 0.000139
+intimacy_decay_per_tick = 0.0000694
+wealth_days_secure = 7.0
+food_satisfy = 0.5
+sleep_ticks_full = 480
+chat_belonging = 0.3
+starvation_grace_ticks = 4320
+
+[economy]
+price_base = 3.0
+price_ref_stock = 600.0
+price_min_stock = 7
+price_cap = 30
+wage_farmer = 6
+wage_guard = 8
+wage_clerk = 6
+wage_bartender = 5
+wage_gravedigger = 5
+farm_yield_base = 1.4
+farm_skill_floor = 0.6
+farm_skill_slope = 0.8
+season_mult = [1.0, 1.4, 1.1, 0.3]
+energy_decay_mult = [1.0, 1.0, 1.0, 1.15]
+spoilage_pantry = 0.05
+spoilage_market = 0.01
+haul_batch = 50
+haul_min_stock = 10
+build_home_cost = 200
+
+[crime]
+steal_base_cost = 8.0
+steal_lawfulness_factor = 20.0
+steal_guard_penalty = 6.0
+steal_starving_bonus = 4.0
+steal_dark_bonus = 3.0
+beg_base_cost = 5.0
+beg_pride_factor = 10.0
+forage_base_cost = 6.0
+witness_base = 0.6
+witness_stealth_factor = 0.5
+witness_guard_bonus = 0.3
+sight = 6
+sight_day_crime = 8
+sight_night_crime = 4
+sentence_days = [3, 6, 10, 30]
+jail_capacity = 16
+fight_death_p = 0.15
+stat_theft_caught_p = 0.25
+
+[social]
+edge_create_ticks = 30
+affinity_per_hour = 0.05
+friend_threshold = 0.4
+rival_threshold = -0.3
+enemy_threshold = -0.6
+propose_affinity = 0.6
+propose_trust = 0.5
+gang_stipend = 4
+extort_amount = 5
+join_gang_affinity = 0.2
+join_gang_desperation_hunger = 0.2
+join_gang_desperation_lawfulness = 0.3
+
+[demography]
+birth_p_per_day = 0.004
+old_age_days = 10800
+old_age_p_per_day = 0.01
+emigrate_mood = -0.8
+emigrate_days = 7
+
+[brain]
+memory_cap = 24
+memory_half_life_days = 7.0
+goal_hysteresis = 0.10
+goal_cooldown_ticks = 120
+think_interval_ticks = 30
+plan_budget_per_tick = 12
+plan_max_expansions = 200
+plan_max_len = 6
+path_budget_per_tick = 20
+mood_w_need = 0.7
+mood_w_memory = 0.3
+
+[lod]
+max_full = 50
+max_coarse = 100
+
+[levers]
+tax_rate = 0.05
+sentence_mult = 1.0
+guard_count = 10
+immigration_per_week = 2
+dole_per_day = 3

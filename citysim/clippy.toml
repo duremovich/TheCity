@@ -1,0 +1,4 @@
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "sim logic must be deterministic: use BTreeMap" },
+    { path = "std::collections::HashSet", reason = "sim logic must be deterministic: use BTreeSet" },
+]

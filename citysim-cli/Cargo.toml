@@ -1,0 +1,8 @@
+[package]
+name = "citysim-cli"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+citysim = { path = "../citysim" }
+clap = { version = "4", features = ["derive"] }
