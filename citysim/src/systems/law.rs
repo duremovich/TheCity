@@ -28,6 +28,12 @@ pub fn near(world: &World, a: EntityId, b: EntityId, r: u32) -> bool {
     (pa.building.is_some() && pa.building == pb.building) || chebyshev(pa.tile, pb.tile) <= r
 }
 
+/// A live agent: the entity exists and still has a Brain (corpses keep
+/// Position and Identity, so `is_alive` alone is not enough).
+pub fn living(world: &World, id: EntityId) -> bool {
+    world.is_alive(id) && world.has::<Brain>(id)
+}
+
 pub fn is_guard(world: &World, id: EntityId) -> bool {
     world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard)
 }
@@ -53,6 +59,13 @@ pub fn crime_salience(crime: Crime) -> f32 {
     }
 }
 
+/// Has `suspect` been reported for anything since `tick` (open, or filed and
+/// resolved after the sighting)? A witness does not re-file a crime the law
+/// already dealt with.
+pub fn reported_since(world: &World, suspect: EntityId, tick: Tick) -> bool {
+    world.crime_reports.iter().any(|r| r.suspect == suspect && (!r.resolved || r.tick >= tick))
+}
+
 /// Is there an open warrant on `suspect`?
 pub fn wanted(world: &World, suspect: EntityId) -> bool {
     world.crime_reports.iter().any(|r| !r.resolved && r.suspect == suspect)
@@ -67,7 +80,6 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     let stealth = world.comp::<Skills>(actor).map_or(0.0, |s| s.stealth);
     let actor_building = world.comp::<Position>(actor).and_then(|p| p.building);
     let salience = crime_salience(crime);
-    let tick = world.tick;
 
     let witnesses: Vec<EntityId> = world
         .citizens()
@@ -89,7 +101,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
             continue;
         }
         noticed += 1;
-        world.remember(w, MemoryKind::SawCrime, Some(actor), salience, -salience, false);
+        world.remember_crime(w, actor, crime, salience);
         if let Some(n) = world.comp_mut::<Needs>(w) {
             n.safety = (n.safety - 0.2).max(0.0);
         }
@@ -120,7 +132,6 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
             s.stealth = (s.stealth + 0.01).min(1.0);
         }
     }
-    let _ = tick;
 }
 
 /// File (or refresh) the one open report per `(suspect, crime)`.
@@ -203,14 +214,26 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
 /// building). A suspect with courage > 0.7 contests it. Returns whether the
 /// suspect is now cuffed.
 pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
-    if !world.is_alive(suspect) || world.has::<Sentence>(suspect) || !near(world, guard, suspect, 1) {
+    if !living(world, suspect)
+        || !living(world, guard)
+        || world.has::<Sentence>(suspect)
+        || !near(world, guard, suspect, 1)
+    {
         return false;
     }
     let courage = world.comp::<Personality>(suspect).map_or(0.0, |p| p.courage);
     if courage > 0.7 {
-        let (winner, _, died) = resolve_fight(world, guard, suspect);
+        let (winner, loser, died) = resolve_fight(world, guard, suspect);
         if died {
-            resolve_reports(world, suspect);
+            if loser == suspect {
+                // The suspect died resisting: nothing left to prosecute.
+                resolve_reports(world, suspect);
+            } else {
+                // The suspect killed the guard: a Murder, witnessed by whoever is near.
+                let tile = world.comp::<Position>(suspect).map_or(TilePos::default(), |p| p.tile);
+                file_report(world, Crime::Murder, suspect, None);
+                raise_crime(world, suspect, None, Crime::Murder, tile);
+            }
             return false;
         }
         if winner != guard {
@@ -244,7 +267,7 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
 /// The escorting guard moved: the cuffed suspect comes along.
 pub fn follow_guard(world: &mut World, guard: EntityId) {
     let Some(suspect) = world.comp::<Brain>(guard).and_then(|b| b.escorting) else { return };
-    if !world.is_alive(suspect) {
+    if !living(world, suspect) {
         if let Some(b) = world.comp_mut::<Brain>(guard) {
             b.escorting = None;
         }
@@ -275,14 +298,19 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     if let Some(b) = world.comp_mut::<Brain>(guard) {
         b.escorting = None;
     }
-    if !world.is_alive(suspect) {
+    if !living(world, suspect) {
         return;
     }
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
         b.cuffed_by = None;
     }
-    let Some(report) =
-        world.crime_reports.iter().filter(|r| !r.resolved && r.suspect == suspect).max_by_key(|r| r.tick).cloned()
+    // The most severe open crime sets the sentence; the rest are covered by it.
+    let Some(report) = world
+        .crime_reports
+        .iter()
+        .filter(|r| !r.resolved && r.suspect == suspect)
+        .max_by_key(|r| (r.crime, r.tick))
+        .cloned()
     else {
         release_at_jail_door(world, suspect, "no open warrant");
         return;
@@ -361,6 +389,15 @@ fn resolve_reports(world: &mut World, suspect: EntityId) {
 /// Put an agent in the Jail with a `Sentence`; a job survives a sentence of
 /// three days or less.
 pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jail: EntityId) {
+    // Whoever was escorting them is done; a cuffed prisoner is a contradiction.
+    if let Some(g) = world.comp::<Brain>(who).and_then(|b| b.cuffed_by) {
+        if let Some(gb) = world.comp_mut::<Brain>(g) {
+            gb.escorting = None;
+        }
+    }
+    if let Some(b) = world.comp_mut::<Brain>(who) {
+        b.cuffed_by = None;
+    }
     world.abort_plan(who);
     world.leave_building(who);
     world.enter_building(who, jail);

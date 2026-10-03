@@ -410,7 +410,7 @@ fn try_enter(
     };
     let cap = world.config.exec.door_capacity_per_tick;
     let slots = world.door_queue.get(&door).copied().unwrap_or(0);
-    let full = world.comp::<Building>(b).is_some_and(|bd| bd.is_full());
+    let full = world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, b);
     if slots < cap && !full {
         *world.door_queue.entry(door).or_insert(0) += 1;
         world.enter_building(id, b);
@@ -446,7 +446,7 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
             if world.comp::<Position>(id).is_some_and(|p| p.building == Some(b)) {
                 return StepResult::Done;
             }
-            if world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) {
+            if world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, b) {
                 let since = blocked_since.unwrap_or(tick);
                 if tick - since >= world.config.exec.door_queue_max_ticks {
                     return StepResult::Failed(FailReason::BuildingFull);
@@ -514,6 +514,13 @@ impl World {
             LocationKey::CorpseTile => target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile),
             _ => None,
         }
+    }
+
+    /// Guards enter the Jail whatever its occupancy: the prisoner cap is the
+    /// law system's rule (fines and early releases), not the door's.
+    pub fn capacity_exempt(&self, agent: EntityId, b: EntityId) -> bool {
+        self.comp::<Building>(b).is_some_and(|bd| bd.kind == crate::components::BuildingKind::Jail)
+            && crate::systems::law::is_guard(self, agent)
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

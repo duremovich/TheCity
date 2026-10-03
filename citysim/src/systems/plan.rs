@@ -99,12 +99,17 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     };
 
     if goal == GoalKind::Patrol {
-        let needs_route = world.comp::<Brain>(id).is_some_and(|b| b.patrol_route.is_empty());
+        // A fresh route and leg count per shift; a stale route from an earlier
+        // day must not carry its legs over.
+        let key = world.comp::<crate::components::Job>(id).map(|j| j.next_shift_key(world.tick));
+        let needs_route =
+            world.comp::<Brain>(id).is_some_and(|b| b.patrol_route.is_empty() || b.patrol_shift_key != key);
         if needs_route {
             let route = crate::systems::law::new_patrol_route(world);
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.patrol_route = route;
                 b.patrol_legs = 0;
+                b.patrol_shift_key = key;
             }
         }
     }

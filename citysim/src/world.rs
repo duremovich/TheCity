@@ -592,7 +592,25 @@ impl World {
         let cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
-        let entry = MemoryEntry { kind, subject, tick, salience, valence, second_hand };
+        let entry = MemoryEntry { kind, subject, tick, salience, valence, second_hand, crime: None };
+        systems::memory::insert(m, entry, tick, cap, half_life);
+    }
+
+    /// A SawCrime memory that also records which crime was seen.
+    pub fn remember_crime(&mut self, id: EntityId, subject: EntityId, crime: Crime, salience: f32) {
+        let tick = self.tick;
+        let cap = self.config.brain.memory_cap;
+        let half_life = self.config.brain.memory_half_life_days;
+        let Some(m) = self.comp_mut::<Memory>(id) else { return };
+        let entry = MemoryEntry {
+            kind: MemoryKind::SawCrime,
+            subject: Some(subject),
+            tick,
+            salience,
+            valence: -salience,
+            second_hand: false,
+            crime: Some(crime),
+        };
         systems::memory::insert(m, entry, tick, cap, half_life);
     }
 
@@ -625,6 +643,20 @@ impl World {
         }
         let tick = self.tick;
         let name = self.name_of(id);
+        // A dead guard lets their suspect go; a dead suspect frees their guard.
+        if let Some(b) = self.comp::<Brain>(id) {
+            let (escorting, cuffed_by) = (b.escorting, b.cuffed_by);
+            if let Some(s) = escorting {
+                if let Some(sb) = self.comp_mut::<Brain>(s) {
+                    sb.cuffed_by = None;
+                }
+            }
+            if let Some(g) = cuffed_by {
+                if let Some(gb) = self.comp_mut::<Brain>(g) {
+                    gb.escorting = None;
+                }
+            }
+        }
         self.vacate_job(id);
         self.remove_from_building(id);
         if let Some(gang) = self.comp::<GangMember>(id).map(|g| g.gang) {

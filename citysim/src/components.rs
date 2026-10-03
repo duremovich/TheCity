@@ -475,6 +475,9 @@ pub struct Brain {
     pub patrol_route: Vec<EntityId>,
     #[serde(default)]
     pub patrol_legs: u8,
+    /// The shift key the patrol route belongs to.
+    #[serde(default)]
+    pub patrol_shift_key: Option<i64>,
 }
 
 impl Default for Brain {
@@ -500,6 +503,7 @@ impl Default for Brain {
             escorting: None,
             patrol_route: Vec::new(),
             patrol_legs: 0,
+            patrol_shift_key: None,
         }
     }
 }
@@ -534,6 +538,9 @@ pub struct MemoryEntry {
     pub valence: f32,
     /// Heard rather than seen.
     pub second_hand: bool,
+    /// For SawCrime: which crime, so a report names it after salience has decayed.
+    #[serde(default)]
+    pub crime: Option<Crime>,
 }
 
 /// Cap 24; evict lowest `salience * recency`.

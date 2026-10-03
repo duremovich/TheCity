@@ -315,7 +315,7 @@ impl WorldState {
                 e.kind == MemoryKind::SawCrime
                     && e.salience >= 0.5
                     && !e.second_hand
-                    && e.subject.is_some_and(|s| !crate::systems::law::wanted(world, s))
+                    && e.subject.is_some_and(|s| !crate::systems::law::reported_since(world, s, e.tick))
             })
         });
         let wanted = crate::systems::law::wanted(world, agent);

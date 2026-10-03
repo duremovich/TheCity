@@ -250,7 +250,7 @@ pub fn considerations(
                 .entries
                 .iter()
                 .filter(|e| e.kind == MemoryKind::SawCrime && e.tick >= two_days && !e.second_hand)
-                .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::wanted(world, s)))
+                .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::reported_since(world, s, e.tick)))
                 .max_by(|a, b| a.salience.partial_cmp(&b.salience).unwrap_or(std::cmp::Ordering::Equal))?;
             let in_gang = world.has::<crate::components::GangMember>(id);
             let betraying = world.comp::<Brain>(id).is_some_and(|b| b.betraying);

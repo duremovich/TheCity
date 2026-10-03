@@ -338,7 +338,9 @@ pub fn on_complete(
                 b.patrol_legs = b.patrol_legs.saturating_add(1);
                 b.patrol_legs
             });
-            if legs.is_some_and(|l| l >= legs_per_shift) {
+            // Five legs complete the shift; so does the clock running out mid-loop.
+            let shift_over = world.comp::<Job>(id).is_some_and(|j| !j.on_shift(world.tick_of_day()));
+            if legs.is_some_and(|l| l >= legs_per_shift) || shift_over {
                 end_shift(world, id);
                 if let Some(b) = world.comp_mut::<Brain>(id) {
                     b.patrol_legs = 0;
@@ -512,19 +514,11 @@ fn report_crime(world: &mut World, id: EntityId) -> StepResult {
         .entries
         .iter()
         .filter(|e| e.kind == MemoryKind::SawCrime && !e.second_hand && e.salience >= 0.5)
-        .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::wanted(world, s)))
+        .filter(|e| e.subject.is_some_and(|s| !crate::systems::law::reported_since(world, s, e.tick)))
         .max_by(|a, b| a.salience.total_cmp(&b.salience))
-        .map(|e| (e.subject, e.salience));
-    let Some((Some(suspect), salience)) = best else { return StepResult::Failed(FailReason::PreconditionLost) };
-    let crime = if salience >= 1.0 {
-        crate::components::Crime::Murder
-    } else if salience >= 0.8 {
-        crate::components::Crime::Assault
-    } else if salience >= 0.6 {
-        crate::components::Crime::Extortion
-    } else {
-        crate::components::Crime::Theft
-    };
+        .map(|e| (e.subject, e.crime));
+    let Some((Some(suspect), crime)) = best else { return StepResult::Failed(FailReason::PreconditionLost) };
+    let crime = crime.unwrap_or(crate::components::Crime::Theft);
     crate::systems::law::file_report(world, crime, suspect, Some(id));
     if let Some(p) = world.comp_mut::<crate::components::Personality>(id) {
         p.drift(crate::personality::Drift::ReportedCrime);
