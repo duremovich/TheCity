@@ -133,3 +133,39 @@ fn test_entity_generation_invalidates_stale_id() {
     assert!(!w.is_alive(a));
     assert!(w.is_alive(b));
 }
+
+#[test]
+fn test_set_view_dedupes_pending_commands() {
+    use citysim::{PlayerCommand, Rect};
+    let mut w = world(1);
+    let r = Some(Rect { x: 10, y: 10, w: 20, h: 20 });
+    // a paused app calls set_view every frame with the same rect
+    for _ in 0..100 {
+        w.set_view(r);
+    }
+    assert_eq!(w.command_queue, vec![PlayerCommand::SetView(r)]);
+    w.tick();
+    assert_eq!(w.view_rect, r);
+    assert_eq!(w.command_log.len(), 1);
+    // same rect after it was applied: nothing new
+    w.set_view(r);
+    assert!(w.command_queue.is_empty());
+    // a different rect queues exactly once more
+    let r2 = Some(Rect { x: 0, y: 0, w: 5, h: 5 });
+    w.set_view(r2);
+    w.set_view(r2);
+    assert_eq!(w.command_queue.len(), 1);
+}
+
+#[test]
+fn test_free_list_reuses_lowest_slot_first() {
+    let mut w = world(1);
+    let a = w.spawn();
+    let b = w.spawn();
+    let c = w.spawn();
+    assert!(w.despawn(c) && w.despawn(a) && w.despawn(b));
+    let first = w.spawn();
+    let second = w.spawn();
+    assert_eq!(first.index, a.index);
+    assert_eq!(second.index, b.index);
+}

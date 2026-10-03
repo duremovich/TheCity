@@ -37,7 +37,7 @@ impl fmt::Display for TilePos {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct Rect {
     pub x: u8,
     pub y: u8,

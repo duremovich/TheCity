@@ -5,7 +5,7 @@ use ordered_float::OrderedFloat;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::components::*;
 use crate::config::Config;
@@ -61,7 +61,8 @@ pub struct World {
     pub map: Map,
     // entity allocator
     pub generations: Vec<u32>,
-    pub free_list: Vec<u32>,
+    /// Freed slots; `spawn` always reuses the lowest.
+    pub free_list: BTreeSet<u32>,
     pub alive: Vec<bool>,
     // agent components (index = EntityId.index)
     pub position: Vec<Option<Position>>,
@@ -202,9 +203,14 @@ impl World {
         let names_text =
             std::fs::read_to_string(config.asset("names.txt")).unwrap_or_else(|e| panic!("cannot read names.txt: {e}"));
         let names = NameTables::parse(&names_text);
-        let stat_table = std::fs::read_to_string(config.asset("stat_table.toml"))
-            .ok()
-            .map(|t| toml::from_str(&t).unwrap_or_else(|e| panic!("bad stat_table.toml: {e}")));
+        // Absent until `citysim-cli calibrate` (M7) has written it; any other
+        // read failure is a broken checkout and must not pass silently.
+        let stat_path = config.asset("stat_table.toml");
+        let stat_table = match std::fs::read_to_string(&stat_path) {
+            Ok(t) => Some(toml::from_str(&t).unwrap_or_else(|e| panic!("bad {}: {e}", stat_path.display()))),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => panic!("cannot read {}: {e}", stat_path.display()),
+        };
 
         let edge_roads = map.edge_roads();
         let levers = Levers::from_config(&config);
@@ -214,7 +220,7 @@ impl World {
             config,
             map,
             generations: Vec::new(),
-            free_list: Vec::new(),
+            free_list: BTreeSet::new(),
             alive: Vec::new(),
             position: Vec::new(),
             identity: Vec::new(),
@@ -409,14 +415,20 @@ impl World {
                 self.edges.insert(key, Edge::new(RelKind::Spouse, 0));
             }
         }
-        // Anyone left over (population > homes × residents) is homeless at the Market door.
+        // Anyone left over (population > homes × residents) is homeless on the
+        // road outside the Market door: on the street, so `building` is None.
         let market_door = self
             .building_of_kind(BuildingKind::Market)
-            .and_then(|m| self.comp::<Building>(m).map(|b| b.door))
+            .and_then(|m| self.comp::<Building>(m).map(|b| (b.rect, b.door)))
             .unwrap_or_default();
+        let street = self
+            .map
+            .neighbours4(market_door.1)
+            .find(|&n| !market_door.0.contains(n) && self.map.tile_at(n) == TileKind::Road)
+            .unwrap_or(market_door.1);
         for &id in &ids {
             if !self.has::<Position>(id) {
-                self.insert(id, Position { tile: market_door, building: None });
+                self.insert(id, Position { tile: street, building: None });
             }
         }
 
@@ -432,9 +444,9 @@ impl World {
                 next += 1;
                 let employer = workplaces.get(k % workplaces.len().max(1)).copied();
                 let shifts = if role == Role::Guard && id.index % 2 == 0 {
-                    vec![(1260, 1440), (0, 360)]
+                    wc.shift_night.clone()
                 } else {
-                    vec![(540, 1080)]
+                    wc.shift_day.clone()
                 };
                 let wage_per_day = self.config.economy.wage(role);
                 self.insert(id, Job { employer, role, wage_per_day, shifts, days_unpaid: 0, tax_accum: 0.0 });
@@ -524,9 +536,15 @@ impl World {
         time::is_dark(self.tick)
     }
 
-    /// Set by the app every frame via a `SetView` command; headless runs leave it `None`.
+    /// Called by the app every frame; queues a `SetView` command only when the
+    /// rect differs from the last one queued (or applied, if none is pending),
+    /// so a paused app does not flood the command log. Headless runs leave it `None`.
     pub fn set_view(&mut self, rect: Option<Rect>) {
-        if self.view_rect != rect {
+        let pending = self.command_queue.iter().rev().find_map(|c| match c {
+            PlayerCommand::SetView(r) => Some(*r),
+            _ => None,
+        });
+        if pending.unwrap_or(self.view_rect) != rect {
             self.push_command(PlayerCommand::SetView(rect));
         }
     }

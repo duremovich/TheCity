@@ -4,9 +4,7 @@
 
 use macroquad::prelude::*;
 
-use citysim::{
-    time, Brain, Building, Corpse, GangMember, Job, Lod, Position, Role, TileKind, TilePos, World, MAP_H, MAP_W,
-};
+use citysim::{time, Brain, Building, Corpse, GangMember, Job, Lod, Position, Role, TileKind, TilePos, World};
 
 use crate::App;
 
@@ -57,14 +55,18 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
-    // 3 (prep). count badges: Coarse + Statistical agents inside each building
+    // One pass over citizens: badge counts for non-Full agents inside
+    // buildings, and the list of Full agents to draw as squares.
     let mut inside = vec![0u16; world.building.len()];
+    let mut full: Vec<(citysim::EntityId, TilePos)> = Vec::new();
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
-        if let (Some(b), true) = (pos.building, brain.lod != Lod::Full) {
-            if let Some(n) = inside.get_mut(b.index as usize) {
-                *n += 1;
+        if brain.lod == Lod::Full {
+            if view.contains(pos.tile) {
+                full.push((id, pos.tile));
             }
+        } else if let Some(n) = pos.building.and_then(|b| inside.get_mut(b.index as usize)) {
+            *n += 1;
         }
     }
 
@@ -117,12 +119,8 @@ pub fn draw(world: &World, app: &App) {
     }
 
     // 5. Full agents, coloured by current action (M0: everyone is idle)
-    for id in world.citizens() {
-        let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
-        if brain.lod != Lod::Full || !view.contains(pos.tile) {
-            continue;
-        }
-        let p = cam.tile_to_screen(vec2(f32::from(pos.tile.x), f32::from(pos.tile.y)));
+    for (id, tile) in full {
+        let p = cam.tile_to_screen(vec2(f32::from(tile.x), f32::from(tile.y)));
         let jailed = world.has::<citysim::Sentence>(id);
         let colour = if jailed { Color { a: 0.6, ..hex(C_AGENT_JAILED) } } else { hex(C_AGENT_IDLE) };
         draw_rectangle(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, colour);
@@ -195,10 +193,4 @@ fn dashed_rect(x: f32, y: f32, w: f32, h: f32, colour: Color) {
         draw_line(x + w, y + t, x + w, y + e, 2.0, colour);
         t += dash * 2.0;
     }
-}
-
-/// Clamp a tile to the map; used by callers that compute tiles from pixels.
-#[allow(dead_code)]
-pub fn clamp_tile(p: TilePos) -> TilePos {
-    TilePos { x: p.x.min(MAP_W as u8 - 1), y: p.y.min(MAP_H as u8 - 1) }
 }

@@ -12,7 +12,8 @@ use crate::components::{BuildingKind, Lod, Role};
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
     /// Directory that holds `map.txt`, `names.txt`, `stat_table.toml`.
-    #[serde(skip)]
+    /// Not saved: a loaded world re-resolves it on this machine.
+    #[serde(skip, default = "Config::assets_dir_or_empty")]
     pub assets_dir: PathBuf,
     pub world: WorldCfg,
     pub buildings: BuildingsCfg,
@@ -22,6 +23,7 @@ pub struct Config {
     pub social: SocialCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
+    pub exec: ExecCfg,
     pub lod: LodCfg,
     pub levers: LeversCfg,
 }
@@ -46,6 +48,10 @@ pub struct WorldCfg {
     pub price_initial: i64,
     pub gang_name: String,
     pub gang_treasury_initial: i64,
+    /// `tick_of_day` ranges `[start, end)` for the default shift.
+    pub shift_day: Vec<(u16, u16)>,
+    /// Night shift for guards with an even `EntityId.index`.
+    pub shift_night: Vec<(u16, u16)>,
     pub jobs: JobsCfg,
     pub needs_initial: NeedsInitialCfg,
 }
@@ -184,7 +190,6 @@ pub struct CrimeCfg {
     pub sight_night_crime: u32,
     /// Theft, Extortion, Assault, Murder.
     pub sentence_days: [u32; 4],
-    pub jail_capacity: u8,
     pub fight_death_p: f64,
     pub stat_theft_caught_p: f64,
 }
@@ -224,9 +229,23 @@ pub struct BrainCfg {
     pub plan_budget_per_tick: usize,
     pub plan_max_expansions: usize,
     pub plan_max_len: usize,
+    pub plan_timeout_ticks: u64,
+    /// A search past this many expansions in one tick resumes next tick.
+    pub plan_expansion_budget_per_tick: usize,
     pub path_budget_per_tick: usize,
     pub mood_w_need: f32,
     pub mood_w_memory: f32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ExecCfg {
+    /// One tile per this many ticks for Full agents.
+    pub move_ticks_full: u64,
+    pub interrupt_check_ticks: u64,
+    pub door_capacity_per_tick: u8,
+    pub door_queue_max_ticks: u64,
+    pub reservation_ttl: u64,
+    pub astar_max_expansions: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -266,6 +285,10 @@ impl Config {
         let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
         cfg.assets_dir = assets_dir.to_path_buf();
         cfg
+    }
+
+    fn assets_dir_or_empty() -> PathBuf {
+        Config::find_assets_dir().unwrap_or_default()
     }
 
     pub fn find_assets_dir() -> Option<PathBuf> {

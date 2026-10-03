@@ -28,7 +28,7 @@ pub trait Component: Sized {
 impl World {
     /// Allocate a fresh entity. Reuses the lowest freed slot if one exists.
     pub fn spawn(&mut self) -> EntityId {
-        if let Some(index) = self.free_list.pop() {
+        if let Some(index) = self.free_list.pop_first() {
             let i = index as usize;
             self.alive[i] = true;
             EntityId { index, generation: self.generations[i] }
@@ -51,9 +51,7 @@ impl World {
         self.generations[i] = self.generations[i].wrapping_add(1);
         self.clear_components(i);
         self.rng.forget_agent(id);
-        self.free_list.push(id.index);
-        // Keep the free list sorted descending so `pop` yields the lowest index.
-        self.free_list.sort_unstable_by(|a, b| b.cmp(a));
+        self.free_list.insert(id.index);
         true
     }
 

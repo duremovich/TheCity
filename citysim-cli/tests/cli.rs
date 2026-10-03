@@ -68,6 +68,37 @@ fn test_cli_lever_and_save_at() {
     let row2 = stdout2.lines().nth(1).expect("row");
     let strip = |r: &str| r.rsplit_once(',').map(|(a, _)| a.to_string()).expect("row");
     assert_eq!(strip(row2), strip(row));
+    // replaying with the same --lever must not double-apply the lever already in the save
+    let out3 = cli()
+        .args(["run", "--days", "1", "--seed", "3", "--report", "--lever", "day=0:release_reserve=200", "--load"])
+        .arg(dir.join("3-100.ron"))
+        .output()
+        .expect("run cli");
+    assert!(out3.status.success());
+    let stderr3 = String::from_utf8_lossy(&out3.stderr);
+    assert!(stderr3.contains("skipped"), "stderr: {stderr3}");
+    let stdout3 = String::from_utf8(out3.stdout).expect("utf8");
+    assert_eq!(strip(stdout3.lines().nth(1).expect("row")), strip(row));
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn test_cli_save_at_end_tick_and_out_of_range() {
+    let dir = std::env::temp_dir().join(format!("citysim-cli-test-end-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let out = cli()
+        .args(["run", "--days", "1", "--seed", "4", "--save-at", "1440", "--saves-dir"])
+        .arg(&dir)
+        .output()
+        .expect("run cli");
+    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(dir.join("4-1440.ron").is_file(), "save at the final tick must be written");
+    let out = cli()
+        .args(["run", "--days", "1", "--seed", "4", "--save-at", "1441", "--saves-dir"])
+        .arg(&dir)
+        .output()
+        .expect("run cli");
+    assert_eq!(out.status.code(), Some(2), "out-of-range --save-at must fail loudly");
     let _ = std::fs::remove_dir_all(&dir);
 }
 

@@ -101,7 +101,10 @@ pub fn handle(app: &mut App, world: &mut World) {
             Some(path) => match save::load_from_file(&path) {
                 Ok(w) => {
                     *world = w;
+                    // Anything queued against the old world (stale ids, speed) must not leak in.
+                    app.cmds.clear();
                     app.selected = None;
+                    app.follow = false;
                     app.acc = 0.0;
                     app.notify(format!("Loaded {}", path.display()));
                 }

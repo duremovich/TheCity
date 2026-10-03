@@ -20,6 +20,9 @@ treasury_initial = 5000
 price_initial = 3
 gang_name = "The Hollow"
 gang_treasury_initial = 50
+# tick_of_day ranges [start, end): Work phase 6 days in 7; guards with an even index work nights.
+shift_day = [[540, 1080]]
+shift_night = [[1260, 1440], [0, 360]]
 
 [world.jobs]
 farmer = 24
@@ -96,7 +99,7 @@ sight = 6
 sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
-jail_capacity = 16
+# jail capacity is buildings.jail.capacity
 fight_death_p = 0.15
 stat_theft_caught_p = 0.25
 
@@ -130,9 +133,19 @@ think_interval_ticks = 30
 plan_budget_per_tick = 12
 plan_max_expansions = 200
 plan_max_len = 6
+plan_timeout_ticks = 900
+plan_expansion_budget_per_tick = 600
 path_budget_per_tick = 20
 mood_w_need = 0.7
 mood_w_memory = 0.3
+
+[exec]
+move_ticks_full = 2
+interrupt_check_ticks = 30
+door_capacity_per_tick = 2
+door_queue_max_ticks = 30
+reservation_ttl = 120
+astar_max_expansions = 4000
 
 [lod]
 max_full = 50

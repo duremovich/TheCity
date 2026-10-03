@@ -15,11 +15,7 @@ use crate::time::Tick;
 pub use flowfield::FlowField;
 pub use reservations::{Reservation, ReservationKind};
 
-pub const MOVE_TICKS_FULL: Tick = 2;
-pub const INTERRUPT_CHECK_TICKS: Tick = 30;
-pub const DOOR_CAPACITY_PER_TICK: u8 = 2;
-pub const DOOR_QUEUE_MAX_TICKS: Tick = 30;
-pub const RESERVATION_TTL: Tick = 120;
+// Movement, door and reservation constants live in `config.exec`.
 
 #[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub enum ExecState {
