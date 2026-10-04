@@ -4,5 +4,6 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+toml = "0.8"
 citysim = { path = "../citysim" }
 clap = { version = "4", features = ["derive"] }

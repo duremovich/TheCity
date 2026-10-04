@@ -51,6 +51,12 @@ pub fn promote(e: &mut Edge) {
 /// Family partner, the widow(er) freed to remarry (the Spouse edge itself
 /// stays, per the spec), the dead dropped from the enemies index.
 pub fn on_death(world: &mut World, id: EntityId) {
+    grieve(world, id);
+    unlink(world, id);
+}
+
+/// Grief (0.9, -0.9) to every Spouse / Parent / Family partner.
+pub fn grieve(world: &mut World, id: EntityId) {
     let kin: Vec<EntityId> = world
         .neighbours(id)
         .filter(|&o| {
@@ -63,6 +69,11 @@ pub fn on_death(world: &mut World, id: EntityId) {
     for k in kin {
         world.remember(k, MemoryKind::Grief, Some(id), 0.9, -0.9, false);
     }
+}
+
+/// Drop `id` from the spouse lookup (the widow(er) may remarry) and the
+/// enemies index. No memories: used for emigrants and freed corpses too.
+pub fn unlink(world: &mut World, id: EntityId) {
     if let Some(spouse) = world.spouses.remove(&id) {
         world.spouses.remove(&spouse);
         if let Some(p) = world.comp_mut::<Personality>(spouse) {

@@ -32,6 +32,7 @@ fn test_witness_notice_formula() {
 #[test]
 fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
     let mut w = world(21);
+    w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
     let thief = civilian(&w);
     let g = guard(&w);
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
@@ -127,6 +128,7 @@ fn test_memory_cap_24_evicts_lowest_weight() {
 #[test]
 fn test_memory_half_life() {
     let mut w = world(23);
+    w.config.lod.force = Some(citysim::Lod::Full); // Statistical memories keep only three kinds
     let id = civilian(&w);
     w.comp_mut::<Memory>(id).expect("mem").entries.clear();
     w.remember(id, MemoryKind::Grief, None, 1.0, -0.5, false);

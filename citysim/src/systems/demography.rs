@@ -82,8 +82,15 @@ pub fn mature(world: &mut World, id: EntityId) {
     world.insert(id, Memory::default());
     world.insert(id, Inventory { food: 0, stolen_food: 0 });
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
-    if let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) {
-        world.enter_building(id, home);
+    // At the door, not pushed in over the cap: a resident may always enter
+    // their own Home (see `capacity_exempt`), so they walk in on their own.
+    let door = world.comp::<Household>(id).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)).map(|b| b.door);
+    if let Some(door) = door {
+        world.remove_from_building(id);
+        if let Some(p) = world.comp_mut::<Position>(id) {
+            p.tile = door;
+            p.building = None;
+        }
     }
 }
 
@@ -305,19 +312,6 @@ pub fn on_death(world: &mut World, id: EntityId) {
     for w in witnesses {
         world.remember(w, MemoryKind::SawCorpse, Some(id), 0.6, -0.5, false);
     }
-    // 5. Grief to every Spouse / Parent / Family partner; the spouse is widowed.
-    let kin: Vec<EntityId> = world
-        .neighbours(id)
-        .filter(|&o| {
-            world.has::<Brain>(o)
-                && world
-                    .edge(id, o)
-                    .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family))
-        })
-        .collect();
-    for k in kin {
-        world.remember(k, MemoryKind::Grief, Some(id), 0.9, -0.9, false);
-    }
     // `social::on_death` writes Grief, frees the widow(er) to remarry and
     // drifts them; the date of widowhood is recorded here.
     if let Some(spouse) = world.spouse_of(id) {
@@ -489,7 +483,8 @@ fn job_search(world: &mut World) {
             let candidate = world
                 .citizens()
                 .into_iter()
-                .filter(|&id| world.has::<Brain>(id) && !world.has::<Job>(id) && !world.has::<Sentence>(id))
+                .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
+                .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
                 .filter(|&id| is_adult(world, id))
                 .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
                 .map(|id| {
@@ -603,8 +598,10 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     let name = world.random_name(sex);
     let (age_days, personality, tile) = {
         let edge_roads = world.edge_roads.clone();
+        let (lo, hi) = (world.config.world.age_min_years, world.config.world.age_max_years);
         let rng = world.rng.world();
-        let age_days: u32 = rng.random_range(ADULT_AGE_DAYS..12000);
+        let years: f32 = rng.random_range(lo..hi);
+        let age_days = ((years * DAYS_PER_YEAR as f32) as u32).max(ADULT_AGE_DAYS);
         let personality = Personality {
             lawfulness: rng.random(),
             greed: rng.random(),

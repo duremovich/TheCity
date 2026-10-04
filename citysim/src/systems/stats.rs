@@ -63,6 +63,14 @@ pub fn snapshot(world: &mut World) {
 
     let population = citizens.len() as u32;
     let denom = population.max(1) as f32;
+    // Goal changes are per agent that thinks (Statistical agents have no goals).
+    let thinking = citizens
+        .iter()
+        .filter(|&&id| {
+            world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod != crate::components::Lod::Statistical)
+        })
+        .count()
+        .max(1) as f32;
     let row = &mut world.stats.current;
     row.population = population;
     row.employed = employed;
@@ -76,6 +84,5 @@ pub fn snapshot(world: &mut World) {
     row.treasury = treasury;
     row.mean_hunger = hunger_sum / denom;
     row.mean_mood = mood_sum / denom;
-    // `goal_changes` is bumped by the think system from M2 on.
-    row.goal_changes_per_agent = row.goal_changes as f32 / denom;
+    row.goal_changes_per_agent = row.goal_changes as f32 / thinking;
 }

@@ -28,8 +28,8 @@ pub fn eligible(world: &World, id: EntityId) -> bool {
             .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
     // A gang recruits while it can pay: the treasury must cover a day's stipend
     // for everyone including the recruit. Loot funds growth; a broke gang
-    // stops growing.
-    let funded = gang.treasury >= cfg.gang_stipend * (gang.members.len() as i64 + 1);
+    // stops growing. A gang of fewer than three recruits on promise.
+    let funded = gang.members.len() < 3 || gang.treasury >= cfg.gang_stipend * (gang.members.len() as i64 + 1);
     bootstrap || ((contact || desperate) && funded)
 }
 
@@ -51,8 +51,19 @@ pub fn join(world: &mut World, id: EntityId) -> bool {
         p.drift(Drift::JoinedGang);
     }
     world.remember(id, MemoryKind::Socialised, None, 0.4, 0.2, false);
+    // A recruit who met a current member in jail cites that memory.
+    let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+    let cites = world.comp::<crate::components::Memory>(id).and_then(|m| {
+        m.entries
+            .iter()
+            .position(|e| e.kind == MemoryKind::MetInJail && e.subject.is_some_and(|s| s != id && members.contains(&s)))
+    });
     let name = world.name_of(id);
-    world.push_event(EventKind::GangJoin, &[id], format!("{name} joined the gang"));
+    let text = match cites {
+        Some(n) => format!("{name} joined the gang (cites mem#{n})"),
+        None => format!("{name} joined the gang"),
+    };
+    world.push_event(EventKind::GangJoin, &[id], text);
     recompute_leader(world);
     true
 }

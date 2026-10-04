@@ -205,6 +205,7 @@ fn test_buy_quantity_capped_by_market_stock() {
 #[test]
 fn test_homeless_agent_sleeps_on_the_street() {
     let mut w = world(10);
+    w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
     let id = w.citizens()[0];
     w.comp_mut::<citysim::Household>(id).expect("hh").home = None;
     w.leave_building(id);

@@ -620,8 +620,16 @@ impl World {
         second_hand: bool,
     ) {
         let tick = self.tick;
-        let cap = self.config.brain.memory_cap;
+        let mut cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;
+        // A Statistical agent keeps only what the hourly tick can act on, in
+        // eight slots; the entries survive promotion, when the cap becomes 24.
+        if self.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical) {
+            if !matches!(kind, MemoryKind::Grief | MemoryKind::WasRobbed | MemoryKind::MetInJail) {
+                return;
+            }
+            cap = 8;
+        }
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let entry = MemoryEntry { kind, subject, tick, salience, valence, second_hand, crime: None };
         systems::memory::insert(m, entry, tick, cap, half_life);
@@ -701,7 +709,7 @@ impl World {
         if self.has::<GangMember>(id) {
             systems::gang::leave(self, id, "gone");
         }
-        crate::systems::social::on_death(self, id);
+        crate::systems::social::unlink(self, id);
         for o in self.neighbours(id).collect::<Vec<_>>() {
             self.remove_edge(id, o);
         }
@@ -879,6 +887,21 @@ impl World {
             DeathCause::Violence | DeathCause::Execution => self.stats.current.deaths_violence += 1,
         }
         self.push_event(crate::events::EventKind::Death, &[id], format!("{name} died of {cause:?}"));
+    }
+
+    /// Rebuild a world from its seed and command log: the commands are queued
+    /// at the ticks they were applied, and the world runs to `end_tick`.
+    pub fn replay(seed: u64, config: Config, log: &[(Tick, PlayerCommand)], end_tick: Tick) -> World {
+        let mut w = World::new(seed, config);
+        let mut next = 0;
+        while w.tick < end_tick {
+            while next < log.len() && log[next].0 == w.tick {
+                w.push_command(log[next].1.clone());
+                next += 1;
+            }
+            w.tick();
+        }
+        w
     }
 
     /// Run `n` ticks.

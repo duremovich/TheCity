@@ -94,6 +94,7 @@ fn test_hysteresis_prevents_flip() {
 #[test]
 fn test_think_runs_every_30_ticks_staggered() {
     let mut w = world(3);
+    w.config.lod.force = Some(citysim::Lod::Full);
     let ids = w.citizens();
     w.run_ticks(TICKS_PER_HOUR); // let everyone think at least once
     let before: Vec<u64> = ids.iter().map(|&id| w.comp::<Brain>(id).expect("brain").last_think_tick).collect();

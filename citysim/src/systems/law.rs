@@ -5,8 +5,8 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, MemoryKind, Needs, Personality, Position, Role,
-    Sentence, Skills, TilePos,
+    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, Lod, MemoryKind, Needs, Personality, Position,
+    Role, Sentence, Skills, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -84,7 +84,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     let witnesses: Vec<EntityId> = world
         .citizens()
         .into_iter()
-        .filter(|&w| w != actor && world.has::<Brain>(w))
+        .filter(|&w| w != actor && world.comp::<Brain>(w).is_some_and(|b| b.lod != Lod::Statistical))
         .filter(|&w| {
             world.comp::<Position>(w).is_some_and(|p| {
                 (actor_building.is_some() && p.building == actor_building) || chebyshev(p.tile, tile) <= r
@@ -454,8 +454,48 @@ pub fn run(world: &mut World) {
     if world.tick_of_day() == 0 {
         expire_warrants(world);
         jail_upkeep(world);
+        reconcile_guards(world);
     }
     releases(world);
+}
+
+/// The `guard_count` lever, reconciled daily with at most five changes:
+/// hire unemployed, unjailed adults of lawfulness >= 0.4 (highest first);
+/// fire the guard with the lowest loyalty.
+pub fn reconcile_guards(world: &mut World) {
+    let want = usize::from(world.levers.guard_count);
+    let guards: Vec<EntityId> = world.citizens().into_iter().filter(|&g| is_guard(world, g)).collect();
+    let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
+    let mut changes = 0;
+    if guards.len() < want {
+        let mut candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
+            .citizens()
+            .into_iter()
+            .filter(|&id| world.has::<Brain>(id) && !world.has::<Job>(id) && !world.has::<Sentence>(id))
+            .filter(|&id| crate::systems::demography::is_adult(world, id))
+            .filter_map(|id| world.comp::<Personality>(id).map(|p| (ordered_float::OrderedFloat(p.lawfulness), id)))
+            .filter(|&(l, _)| l.0 >= 0.4)
+            .collect();
+        candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
+        for (_, id) in candidates.into_iter().take((want - guards.len()).min(5)) {
+            crate::systems::demography::hire(world, id, jail, Role::Guard);
+            changes += 1;
+        }
+    } else if guards.len() > want {
+        let mut by_loyalty: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = guards
+            .iter()
+            .filter_map(|&g| world.comp::<Personality>(g).map(|p| (ordered_float::OrderedFloat(p.loyalty), g)))
+            .collect();
+        by_loyalty.sort();
+        for (_, g) in by_loyalty.into_iter().take((guards.len() - want).min(5)) {
+            world.abort_plan(g);
+            world.remove::<Job>(g);
+            let name = world.name_of(g);
+            world.push_event(EventKind::Fire, &[g], format!("{name} dismissed from the guard"));
+            changes += 1;
+        }
+    }
+    let _ = changes;
 }
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.

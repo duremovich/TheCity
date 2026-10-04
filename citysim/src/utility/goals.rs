@@ -220,11 +220,14 @@ pub fn considerations(
                 && crate::systems::social::court_target(world, id).is_some();
             // A widowed spouse grieves for 14 days (Social); a Courted memory toward
             // the same subject adds +0.1 (Memory readers).
-            let grief = world.comp::<Memory>(id).is_some_and(|m| {
-                m.entries.iter().any(|e| {
-                    e.kind == MemoryKind::Grief && world.tick.saturating_sub(e.tick) < 14 * time::TICKS_PER_DAY
-                })
-            });
+            let widowed =
+                ident.spouse_died_tick.is_some_and(|t| world.tick.saturating_sub(t) < 14 * time::TICKS_PER_DAY);
+            let grief = widowed
+                || world.comp::<Memory>(id).is_some_and(|m| {
+                    m.entries.iter().any(|e| {
+                        e.kind == MemoryKind::Grief && world.tick.saturating_sub(e.tick) < 14 * time::TICKS_PER_DAY
+                    })
+                });
             if grief {
                 return None;
             }

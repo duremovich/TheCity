@@ -388,6 +388,9 @@ pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState 
 
 /// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.
 pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<ExecState> {
+    if world.config.exec.straight_line_paths {
+        return Some(timed_goto(world, id, target));
+    }
     let path = if target.building.is_some() {
         Vec::new()
     } else {
@@ -583,8 +586,11 @@ impl World {
     /// Guards enter the Jail whatever its occupancy: the prisoner cap is the
     /// law system's rule (fines and early releases), not the door's.
     pub fn capacity_exempt(&self, agent: EntityId, b: EntityId) -> bool {
-        self.comp::<Building>(b).is_some_and(|bd| bd.kind == crate::components::BuildingKind::Jail)
-            && crate::systems::law::is_guard(self, agent)
+        let guard_at_jail = self.comp::<Building>(b).is_some_and(|bd| bd.kind == crate::components::BuildingKind::Jail)
+            && crate::systems::law::is_guard(self, agent);
+        // Residents always get into their own Home (births may exceed the cap).
+        let own_home = self.comp::<Household>(agent).and_then(|h| h.home) == Some(b);
+        guard_at_jail || own_home
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

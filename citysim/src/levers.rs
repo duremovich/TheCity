@@ -292,6 +292,15 @@ impl World {
                 }
             }
         }
+        let door = TilePos { x: rect.x + rect.w / 2, y: rect.y + rect.h - 1 };
+        let outside = (i32::from(door.x), i32::from(door.y) + 1);
+        if !Map::in_bounds(outside.0, outside.1) {
+            return Err("the door would open off the map".into());
+        }
+        let outside_tile = TilePos { x: outside.0 as u8, y: outside.1 as u8 };
+        if !matches!(self.map.tile_at(outside_tile), TileKind::Ground | TileKind::Road) {
+            return Err(format!("the door would open onto {:?}", self.map.tile_at(outside_tile)));
+        }
         let cost = self.config.economy.build_home_cost;
         let coins = self.treasury().map_or(0, |t| t.coins);
         if coins < cost {
@@ -300,7 +309,6 @@ impl World {
         if let Some(t) = self.treasury_mut() {
             t.coins -= cost;
         }
-        let door = TilePos { x: rect.x + rect.w / 2, y: rect.y + rect.h - 1 };
         for y in rect.y..rect.y + rect.h {
             for x in rect.x..rect.x + rect.w {
                 let t = TilePos { x, y };

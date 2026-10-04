@@ -31,6 +31,7 @@ pub fn memory_term(m: &Memory, now: Tick) -> f32 {
 }
 
 /// One hourly update of an agent's mood. Returns the new value.
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     mood: &mut Mood,
     needs: &Needs,
@@ -38,6 +39,7 @@ pub fn update(
     pride: f32,
     w_need: f32,
     w_memory: f32,
+    low_mood: f32,
     now: Tick,
 ) -> f32 {
     let raw = (w_need * need_term(needs) + w_memory * memory_term(memory, now)).clamp(-1.0, 1.0);
@@ -47,7 +49,7 @@ pub fn update(
     }
     mood.value = (mood.value + delta).clamp(-1.0, 1.0);
     mood.last_computed = now;
-    if mood.value < -0.8 {
+    if mood.value < low_mood {
         mood.low_since.get_or_insert(now);
     } else {
         mood.low_since = None;
@@ -72,7 +74,8 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
         return;
     };
     let pride = world.comp::<Personality>(id).map_or(0.5, |p| p.pride);
+    let low_mood = world.config.demography.emigrate_mood;
     if let Some(mood) = world.comp_mut::<Mood>(id) {
-        update(mood, &needs, &memory, pride, w_need, w_memory, now);
+        update(mood, &needs, &memory, pride, w_need, w_memory, low_mood, now);
     }
 }

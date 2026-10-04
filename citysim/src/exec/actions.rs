@@ -144,6 +144,15 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 /// Start effects: money moves now so an interruption cannot duplicate it.
 pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Option<EntityId>) {
     match kind {
+        // Sleeping at home beside a spouse: intimacy +0.4, at the start so an
+        // interrupted night still counts.
+        ActionKind::Sleep => {
+            if at_home(world, id) && spouse_in_same_home(world, id) {
+                if let Some(n) = world.comp_mut::<Needs>(id) {
+                    n.intimacy = (n.intimacy + 0.4).min(1.0);
+                }
+            }
+        }
         ActionKind::BuyFood => {
             let units = economy::buy_quantity(world, id);
             let paid = economy::pay_for_food(world, id, units);
@@ -281,11 +290,8 @@ pub fn on_complete(
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     n.safety = (n.safety + 0.3).min(1.0);
                 }
-                if spouse_in_same_home(world, id) {
-                    if let Some(n) = world.comp_mut::<Needs>(id) {
-                        n.intimacy = (n.intimacy + 0.4).min(1.0);
-                    }
-                }
+                // (the spouse's intimacy bonus is granted at Sleep start: most
+                // nights' sleep is cut short by the morning shift, not completed)
             } else if let Some(n) = world.comp_mut::<Needs>(id) {
                 n.safety = (n.safety - 0.1).max(0.0);
             }

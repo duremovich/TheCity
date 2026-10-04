@@ -462,12 +462,14 @@ impl PlanCtx {
                         )
                     })
                 });
+                let corpse = target.is_some_and(|t| world.has::<crate::components::Corpse>(t));
                 digger
                     || kin
-                    || !world.citizens().into_iter().any(|c| {
-                        world.has::<crate::components::Brain>(c)
-                            && world.comp::<Job>(c).is_some_and(|j| j.role == Role::Gravedigger)
-                    })
+                    || corpse
+                        && !world.citizens().into_iter().any(|c| {
+                            world.has::<crate::components::Brain>(c)
+                                && world.comp::<Job>(c).is_some_and(|j| j.role == Role::Gravedigger)
+                        })
             },
             wanted: crate::systems::law::wanted(world, agent),
             suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),

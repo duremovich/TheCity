@@ -15,12 +15,24 @@ fn probe_system_timing() {
     w.run_ticks(warm_days * TICKS_PER_DAY);
     eprintln!("warm-up {warm_days} days in {:.1}s, edges {}", t0.elapsed().as_secs_f32(), w.edges.len());
     let names = [
-        "commands", "lod", "needs", "memory", "mood", "think", "plan", "exec", "economy", "law", "social", "gang",
+        "commands",
+        "lod",
+        "needs",
+        "memory",
+        "mood",
+        "think",
+        "plan",
+        "exec",
+        "economy",
+        "law",
+        "social",
+        "gang",
+        "demography",
         "stats",
     ];
-    let mut acc = [0f64; 13];
+    let mut acc = [0f64; 14];
     for _ in 0..TICKS_PER_DAY {
-        let steps: [&dyn Fn(&mut World); 13] = [
+        let steps: [&dyn Fn(&mut World); 14] = [
             &|w| w.apply_commands(),
             &citysim::systems::lod::run,
             &citysim::needs::run,
@@ -33,6 +45,7 @@ fn probe_system_timing() {
             &citysim::systems::law::run,
             &citysim::systems::social::run,
             &citysim::systems::gang::run,
+            &citysim::systems::demography::run,
             &citysim::systems::stats::run,
         ];
         for (i, step) in steps.iter().enumerate() {
@@ -170,4 +183,160 @@ fn probe_births() {
         pairs.len(),
         ages.len()
     );
+}
+
+/// What are Full agents doing at 02:00? (Calibration sanity.)
+#[test]
+#[ignore]
+fn probe_night_states() {
+    use citysim::{Brain, ExecState, Lod};
+    let mut cfg = Config::load();
+    cfg.lod.force = Some(Lod::Full);
+    cfg.world.population = 200;
+    let mut w = World::new(1000, cfg);
+    w.run_ticks(2 * TICKS_PER_DAY + 120);
+    let mut hist: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for id in w.citizens() {
+        let Some(b) = w.comp::<Brain>(id) else { continue };
+        let key = match &b.exec {
+            ExecState::Use { kind, .. } => format!("Use({kind:?})"),
+            ExecState::Goto { .. } => "Goto".into(),
+            ExecState::GotoTimed { .. } => "GotoTimed".into(),
+            ExecState::Wait { .. } => "Wait".into(),
+            ExecState::Idle => format!("Idle goal={:?} plan={}", b.current_goal, b.plan.is_some()),
+        };
+        *hist.entry(key).or_default() += 1;
+    }
+    eprintln!("phase {:?} tick {}", w.phase(), w.tick);
+    for (k, n) in hist {
+        eprintln!("{n:4} {k}");
+    }
+}
+
+/// Whose mood never moved in ten days, by LOD?
+#[test]
+#[ignore]
+fn probe_still_moods() {
+    use citysim::{Brain, Mood};
+    let mut w = World::new(5, Config::load());
+    w.run_ticks(10 * TICKS_PER_DAY);
+    let mut hist: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+    for id in w.citizens() {
+        let Some(m) = w.comp::<Mood>(id) else { continue };
+        if m.value == 0.0 {
+            let lod = w.comp::<Brain>(id).map(|b| format!("{:?}", b.lod)).unwrap_or("none".into());
+            *hist.entry(lod).or_default() += 1;
+        }
+    }
+    eprintln!("still moods by lod: {hist:?}");
+    let id = w.citizens().into_iter().find(|&id| w.comp::<Mood>(id).is_some_and(|m| m.value == 0.0)).expect("one");
+    eprintln!(
+        "example needs {:?} last_computed {:?}",
+        w.comp::<citysim::Needs>(id),
+        w.comp::<Mood>(id).map(|m| m.last_computed)
+    );
+}
+
+/// Every GangJoin on seed 7: does the recruit hold a MetInJail memory, and of a member?
+#[test]
+#[ignore]
+fn probe_gang_join_citations() {
+    use citysim::{EventKind, Gang, Memory, MemoryKind};
+    let mut w = World::new(7, Config::load());
+    let mut seen = 0;
+    for _ in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        let joins: Vec<_> = w
+            .events
+            .iter()
+            .filter(|e| e.tick >= seen && e.kind == EventKind::GangJoin)
+            .map(|e| (e.tick, e.actors[0], e.text.clone()))
+            .collect();
+        for (tick, id, text) in joins {
+            let members = w.gang_id().and_then(|g| w.comp::<Gang>(g)).map(|g| g.members.clone()).unwrap_or_default();
+            let met: Vec<String> = w
+                .comp::<Memory>(id)
+                .map(|m| {
+                    m.entries
+                        .iter()
+                        .filter(|e| e.kind == MemoryKind::MetInJail)
+                        .map(|e| {
+                            format!(
+                                "{:?}{}",
+                                e.subject.map(|s| s.index),
+                                if e.subject.is_some_and(|s| members.contains(&s)) { "*" } else { "" }
+                            )
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            eprintln!("t{tick} {text} | members {} | MetInJail {met:?}", members.len());
+        }
+        seen = w.tick;
+    }
+    let jailed_days: u32 = w.stats.history.iter().map(|r| r.jailed).sum();
+    eprintln!("jailed agent-days {jailed_days}");
+}
+
+/// Seed 7: why does the gang stop at one member? Daily treasury, members,
+/// contacts and funded eligibility.
+#[test]
+#[ignore]
+fn probe_gang_growth() {
+    use citysim::systems::gang;
+    use citysim::{Brain, Gang, GangMember, Job, Role, Sentence};
+    let mut w = World::new(7, Config::load());
+    for day in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        if day % 6 != 5 {
+            continue;
+        }
+        let Some(g) = w.gang_id().and_then(|g| w.comp::<Gang>(g)).cloned() else { continue };
+        let thr = w.config.social.join_gang_affinity;
+        let contacts = w
+            .citizens()
+            .into_iter()
+            .filter(|&id| w.has::<Brain>(id) && !w.has::<GangMember>(id))
+            .filter(|&id| g.members.iter().any(|&m| w.edge(id, m).is_some_and(|e| e.affinity >= thr)))
+            .count();
+        let eligible = w.citizens().into_iter().filter(|&id| w.has::<Brain>(id) && gang::eligible(&w, id)).count();
+        let jailed_members = g.members.iter().filter(|&&m| w.has::<Sentence>(m)).count();
+        let guards =
+            w.citizens().into_iter().filter(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard)).count();
+        eprintln!(
+            "day {day}: members {} (jailed {jailed_members}) treasury {} territory {} contacts>={thr} {contacts} eligible {eligible} guards {guards}",
+            g.members.len(),
+            g.treasury,
+            g.territory.len()
+        );
+    }
+}
+
+/// Cohabiting fertile couples at day 60: LOD pair and intimacy.
+#[test]
+#[ignore]
+fn probe_couple_intimacy() {
+    use citysim::{Brain, Household, Identity, Needs};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(60 * TICKS_PER_DAY);
+    let mut hist: std::collections::BTreeMap<String, (usize, f32)> = std::collections::BTreeMap::new();
+    for (&a, &b) in w.spouses.iter().filter(|(a, b)| a < b) {
+        let ha = w.comp::<Household>(a).and_then(|h| h.home);
+        if ha.is_none() || ha != w.comp::<Household>(b).and_then(|h| h.home) {
+            continue;
+        }
+        let age = |id| w.comp::<Identity>(id).map_or(0, |i| i.age_days);
+        if !(2160..=5400).contains(&age(a)) || !(2160..=5400).contains(&age(b)) {
+            continue;
+        }
+        let lod = |id| w.comp::<Brain>(id).map(|b| format!("{:?}", b.lod)).unwrap_or("-".into());
+        let int = |id| w.comp::<Needs>(id).map_or(-1.0, |n| n.intimacy);
+        let key = format!("{}+{}", lod(a), lod(b));
+        let e = hist.entry(key).or_insert((0, 0.0));
+        e.0 += 1;
+        e.1 += (int(a) + int(b)) / 2.0;
+    }
+    for (k, (n, sum)) in hist {
+        eprintln!("{k}: {n} couples, mean intimacy {:.2}", sum / n as f32);
+    }
 }

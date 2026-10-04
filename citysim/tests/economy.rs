@@ -34,6 +34,7 @@ fn test_price_rises_when_stock_falls() {
 #[test]
 fn test_farmer_produces_food() {
     let mut w = world(42);
+    w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
     w.config.economy.haul_min_stock = u32::MAX; // no hauling: measure raw farm output
     let farmers: Vec<_> =
         w.citizens().into_iter().filter(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Farmer)).collect();

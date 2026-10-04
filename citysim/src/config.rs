@@ -253,6 +253,9 @@ pub struct ExecCfg {
     pub door_queue_max_ticks: u64,
     pub reservation_ttl: u64,
     pub astar_max_expansions: usize,
+    /// Calibration only: every walk is a timed arrival (manhattan x 2 ticks).
+    #[serde(default)]
+    pub straight_line_paths: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

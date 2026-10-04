@@ -41,6 +41,7 @@ pub struct App {
     /// The pointer is over an egui panel (last frame): the map ignores it.
     pub ui_hover: bool,
     pub log: ui::log::LogState,
+    pub city: ui::city::CityState,
 }
 
 impl App {
@@ -60,6 +61,7 @@ impl App {
             status_until: 0.0,
             ui_hover: false,
             log: ui::log::LogState::default(),
+            city: ui::city::CityState::default(),
         }
     }
 
