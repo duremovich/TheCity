@@ -34,7 +34,9 @@ fn test_cli_ten_days_seed_42() {
     for (i, row) in rows.iter().enumerate() {
         let cols: Vec<&str> = row.split(',').collect();
         assert_eq!(cols[0], i.to_string());
-        assert_eq!(cols[2], "300");
+        // Two immigrants a week from day 7 (M6); nobody dies in the first ten days.
+        let expected = 300 + 2 * (i / 7);
+        assert_eq!(cols[2], expected.to_string());
     }
 }
 

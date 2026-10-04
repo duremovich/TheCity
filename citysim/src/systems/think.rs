@@ -36,7 +36,7 @@ pub fn run(world: &mut World) {
     let tick = world.tick;
     for id in world.citizens() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
-        if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() {
+        if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() || brain.emigrating {
             continue;
         }
         let scheduled = tick % interval == u64::from(id.index) % interval;

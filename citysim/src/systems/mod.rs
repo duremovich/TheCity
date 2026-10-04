@@ -7,6 +7,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+pub mod demography;
 pub mod economy;
 pub mod gang;
 pub mod law;

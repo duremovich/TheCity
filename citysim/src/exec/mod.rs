@@ -92,14 +92,76 @@ pub fn run(world: &mut World) {
         if brain.lod == Lod::Statistical || world.has::<crate::components::Sentence>(id) || brain.cuffed_by.is_some() {
             continue;
         }
+        if brain.emigrating {
+            emigrate_step(world, id);
+            continue;
+        }
         if brain.plan.is_none() {
             continue; // the think system plans
         }
         step_agent(world, id);
-        // An escorting guard drags the suspect along.
+        // An escorting guard drags the suspect along; a carried corpse follows.
         if world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some()) {
             crate::systems::law::follow_guard(world, id);
         }
+        if let Some(c) = world.comp::<Brain>(id).and_then(|b| b.carrying_corpse) {
+            follow_bearer(world, id, c);
+        }
+    }
+}
+
+/// The carried corpse takes its bearer's tile and building.
+fn follow_bearer(world: &mut World, bearer: EntityId, corpse: EntityId) {
+    let Some((tile, building)) = world.comp::<Position>(bearer).map(|p| (p.tile, p.building)) else { return };
+    if !world.has::<crate::components::Corpse>(corpse) {
+        if let Some(b) = world.comp_mut::<Brain>(bearer) {
+            b.carrying_corpse = None;
+        }
+        return;
+    }
+    if let Some(p) = world.comp_mut::<Position>(corpse) {
+        p.tile = tile;
+        p.building = building;
+    }
+}
+
+/// An emigrant walks to the nearest map-edge Road and is gone on arrival.
+fn emigrate_step(world: &mut World, id: EntityId) {
+    let tick = world.tick;
+    let Some(brain) = world.comp::<Brain>(id) else { return };
+    let lod = brain.lod;
+    let state = brain.exec.clone();
+    let result = match state {
+        ExecState::Goto { target, path, next_move_tick, blocked_since } => {
+            advance_goto(world, id, target, path, next_move_tick, blocked_since)
+        }
+        ExecState::GotoTimed { target, arrive_tick, blocked_since } => {
+            if tick < arrive_tick {
+                StepResult::Running
+            } else {
+                arrive(world, id, target, blocked_since)
+            }
+        }
+        _ => {
+            let from = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
+            let Some(edge) = crate::systems::demography::nearest_edge_road(world, from) else {
+                crate::systems::demography::emigrate(world, id);
+                return;
+            };
+            let target = GotoTarget { dest: LocationKey::Street, tile: edge, building: None };
+            let exec = match lod {
+                Lod::Full => walking_goto(world, id, target.clone()).unwrap_or_else(|| timed_goto(world, id, target)),
+                _ => timed_goto(world, id, target),
+            };
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.exec = exec;
+            }
+            StepResult::Running
+        }
+    };
+    match result {
+        StepResult::Running => {}
+        StepResult::Done | StepResult::Failed(_) => crate::systems::demography::emigrate(world, id),
     }
 }
 
@@ -487,12 +549,14 @@ impl World {
             LocationKey::Hall => target.or_else(|| self.building_of_kind(K::Hall)),
             LocationKey::Hideout => target.or_else(|| self.building_of_kind(K::Hideout)),
             LocationKey::Warehouse => target.or_else(|| self.building_of_kind(K::Warehouse)),
-            // A suspect inside a building is reached through its door.
-            LocationKey::SuspectTile => target.and_then(|s| self.comp::<Position>(s)).and_then(|p| p.building),
+            // A suspect or corpse inside a building is reached through its door.
+            LocationKey::SuspectTile | LocationKey::CorpseTile => {
+                target.and_then(|s| self.comp::<Position>(s)).and_then(|p| p.building)
+            }
             LocationKey::PatrolWaypoint => self
                 .comp::<Brain>(agent)
                 .and_then(|b| b.patrol_route.get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1)).copied()),
-            LocationKey::Anywhere | LocationKey::Street | LocationKey::CorpseTile => None,
+            LocationKey::Anywhere | LocationKey::Street => None,
         }
     }
 

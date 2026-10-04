@@ -218,11 +218,12 @@ fn test_mood_in_range() {
     for _ in 0..10 {
         w.run_ticks(TICKS_PER_DAY);
         for id in w.citizens() {
-            let m = w.comp::<Mood>(id).expect("mood");
+            // Children have no Mood.
+            let Some(m) = w.comp::<Mood>(id) else { continue };
             assert!((-1.0..=1.0).contains(&m.value), "{id}: {}", m.value);
             assert!(!m.value.is_nan());
         }
     }
-    let moved = w.citizens().into_iter().filter(|&id| w.comp::<Mood>(id).expect("mood").value != 0.0).count();
+    let moved = w.citizens().into_iter().filter(|&id| w.comp::<Mood>(id).is_some_and(|m| m.value != 0.0)).count();
     assert!(moved > 250, "moods should move: {moved} of 300");
 }

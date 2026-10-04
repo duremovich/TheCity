@@ -250,10 +250,15 @@ impl WorldState {
         // Symbolic places that depend on the plan: adjacent to (or in the same
         // building as) the bound suspect is SuspectTile; inside the current
         // patrol stop, while patrolling, is PatrolWaypoint.
+        let carrying = world.comp::<Brain>(agent).is_some_and(|b| b.carrying_corpse.is_some());
         let suspect_target = target
             .filter(|&t| world.has::<Brain>(t))
             .filter(|&t| crate::systems::law::is_guard(world, agent) && crate::systems::law::wanted(world, t));
         let at_suspect = suspect_target.is_some_and(|t| crate::systems::law::near(world, agent, t, 1));
+        // Next to (or in the same building as) the bound unburied corpse.
+        let at_corpse = target
+            .filter(|&t| world.comp::<Corpse>(t).is_some_and(|c| !c.buried))
+            .is_some_and(|t| crate::systems::law::near(world, agent, t, 1));
         let patrolling = world.comp::<Brain>(agent).is_some_and(|b| {
             b.current_goal == Some(crate::components::GoalKind::Patrol)
                 && b.patrol_route
@@ -262,6 +267,7 @@ impl WorldState {
         });
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
+            _ if at_corpse && !carrying => LocationKey::CorpseTile,
             _ if patrolling => LocationKey::PatrolWaypoint,
             Some(b) if Some(b) == home => LocationKey::Home,
             Some(b)
@@ -357,8 +363,8 @@ impl WorldState {
             suspect_cuffed: target.is_some_and(|t| world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_some())),
             in_gang: world.has::<GangMember>(agent),
             gang_task_done,
-            corpse_buried: false,
-            carrying_corpse: false,
+            corpse_buried: target.is_some_and(|t| world.comp::<Corpse>(t).is_some_and(|c| c.buried)),
+            carrying_corpse: carrying,
             carrying_stolen: inv.stolen_food >= 1,
             is_dark: dark,
             known_corpse,

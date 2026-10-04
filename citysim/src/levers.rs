@@ -4,10 +4,11 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::components::{Brain, Building, BuildingKind, Rect, Wallet};
+use crate::components::{Brain, Building, BuildingKind, Household, Position, Rect, TileKind, TilePos, Wallet};
 use crate::config::Config;
 use crate::entity::EntityId;
 use crate::events::EventKind;
+use crate::map::Map;
 use crate::world::World;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -77,6 +78,10 @@ pub struct Levers {
     pub immigration_per_week: u8,
     /// `0..=10`, default 3.
     pub dole_per_day: u8,
+}
+
+fn rects_overlap(a: Rect, b: Rect) -> bool {
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
 }
 
 impl Levers {
@@ -178,11 +183,170 @@ impl World {
                 }
                 Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Release: {e}")),
             },
-            // Demolish / Build land with the full lever set (M7).
-            PlayerCommand::DemolishHome(_) | PlayerCommand::BuildHome { .. } => {
-                self.push_event(EventKind::PlayerActionFailed, &[], format!("{cmd:?}: not implemented yet"));
+            PlayerCommand::DemolishHome(home) => match self.cmd_demolish_home(*home) {
+                Ok(n) => self.push_event(
+                    EventKind::PlayerAction,
+                    &[*home],
+                    format!("Demolished Home#{} ({n} residents made homeless)", home.index),
+                ),
+                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*home], format!("DemolishHome: {e}")),
+            },
+            PlayerCommand::BuildHome { rect } => match self.cmd_build_home(*rect) {
+                Ok((id, housed)) => self.push_event(
+                    EventKind::PlayerAction,
+                    &[id],
+                    format!("Built Home#{} at ({}, {}); {housed} moved in", id.index, rect.x, rect.y),
+                ),
+                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("BuildHome: {e}")),
+            },
+        }
+    }
+
+    /// Tiles become Ground, residents are homeless (one event each), the
+    /// building is marked demolished and dropped from the kind index.
+    fn cmd_demolish_home(&mut self, home: EntityId) -> Result<usize, String> {
+        let Some(b) = self.comp::<Building>(home) else { return Err("no such building".into()) };
+        if b.kind != BuildingKind::Home {
+            return Err(format!("{:?} is not a Home", b.kind));
+        }
+        if b.demolished {
+            return Err("already demolished".into());
+        }
+        let (rect, door, occupants) = (b.rect, b.door, b.occupants.clone());
+        let outside = self.outside_door(b);
+        for o in occupants {
+            self.abort_plan(o);
+            self.remove_from_building(o);
+            if let Some(p) = self.comp_mut::<Position>(o) {
+                p.tile = outside;
+                p.building = None;
             }
         }
+        let residents: Vec<EntityId> = self
+            .citizens()
+            .into_iter()
+            .filter(|&c| self.comp::<Household>(c).and_then(|h| h.home) == Some(home))
+            .collect();
+        for &r in &residents {
+            if let Some(h) = self.comp_mut::<Household>(r) {
+                h.home = None;
+            }
+            // Children living there stand outside too.
+            if self.comp::<Position>(r).is_some_and(|p| p.building == Some(home)) {
+                if let Some(p) = self.comp_mut::<Position>(r) {
+                    p.tile = outside;
+                    p.building = None;
+                }
+            }
+            let name = self.name_of(r);
+            self.push_event(EventKind::Homeless, &[r], format!("{name} is homeless"));
+        }
+        for y in rect.y..rect.y + rect.h {
+            for x in rect.x..rect.x + rect.w {
+                self.map.set_tile(TilePos { x, y }, TileKind::Ground);
+            }
+        }
+        let _ = door;
+        if let Some(b) = self.comp_mut::<Building>(home) {
+            b.demolished = true;
+            b.occupants.clear();
+            b.stock_food = 0;
+        }
+        if let Some(v) = self.buildings_by_kind.get_mut(&BuildingKind::Home) {
+            v.retain(|&h| h != home);
+        }
+        self.invalidate_flow_fields();
+        Ok(residents.len())
+    }
+
+    /// A 4×4..6×6 rect of Ground, clear of other buildings and of Water,
+    /// paid from the Treasury: walls on the perimeter, a door mid-south,
+    /// capacity 6; the lowest-index homeless move in.
+    fn cmd_build_home(&mut self, rect: Rect) -> Result<(EntityId, usize), String> {
+        if !(4..=6).contains(&rect.w) || !(4..=6).contains(&rect.h) {
+            return Err(format!("rect must be 4x4 to 6x6, got {}x{}", rect.w, rect.h));
+        }
+        let (x1, y1) = (i32::from(rect.x) + i32::from(rect.w), i32::from(rect.y) + i32::from(rect.h));
+        if !Map::in_bounds(i32::from(rect.x), i32::from(rect.y)) || !Map::in_bounds(x1 - 1, y1 - 1) {
+            return Err("rect is off the map".into());
+        }
+        for y in rect.y..rect.y + rect.h {
+            for x in rect.x..rect.x + rect.w {
+                let t = TilePos { x, y };
+                if self.map.tile_at(t) != TileKind::Ground {
+                    return Err(format!("({x}, {y}) is {:?}, not Ground", self.map.tile_at(t)));
+                }
+            }
+        }
+        for b in self.with::<Building>() {
+            if let Some(bd) = self.comp::<Building>(b) {
+                if !bd.demolished && rects_overlap(bd.rect, rect) {
+                    return Err(format!("overlaps {:?}#{}", bd.kind, b.index));
+                }
+            }
+        }
+        for y in (i32::from(rect.y) - 1)..=y1 {
+            for x in (i32::from(rect.x) - 1)..=x1 {
+                if Map::in_bounds(x, y) && self.map.tile_at(TilePos { x: x as u8, y: y as u8 }) == TileKind::Water {
+                    return Err("adjacent to Water".into());
+                }
+            }
+        }
+        let cost = self.config.economy.build_home_cost;
+        let coins = self.treasury().map_or(0, |t| t.coins);
+        if coins < cost {
+            return Err(format!("Treasury has {coins}, needs {cost}"));
+        }
+        if let Some(t) = self.treasury_mut() {
+            t.coins -= cost;
+        }
+        let door = TilePos { x: rect.x + rect.w / 2, y: rect.y + rect.h - 1 };
+        for y in rect.y..rect.y + rect.h {
+            for x in rect.x..rect.x + rect.w {
+                let t = TilePos { x, y };
+                let kind = if t == door {
+                    TileKind::Door
+                } else if rect.on_perimeter(t) {
+                    TileKind::Wall
+                } else {
+                    TileKind::Ground
+                };
+                self.map.set_tile(t, kind);
+            }
+        }
+        let capacity = self.config.buildings.home.capacity;
+        let id = self.spawn();
+        self.insert(
+            id,
+            Building {
+                kind: BuildingKind::Home,
+                production_accum: 0.0,
+                extort_count: 0,
+                child_food_debt: 0.0,
+                rect,
+                door,
+                stock_food: 0,
+                capacity,
+                owner: None,
+                occupants: Vec::new(),
+                demolished: false,
+            },
+        );
+        self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);
+        self.invalidate_flow_fields();
+        let homeless: Vec<EntityId> = self
+            .citizens()
+            .into_iter()
+            .filter(|&c| matches!(self.comp::<Household>(c), Some(Household { home: None })))
+            .take(usize::from(capacity))
+            .collect();
+        let housed = homeless.len();
+        for h in homeless {
+            if let Some(hh) = self.comp_mut::<Household>(h) {
+                hh.home = Some(id);
+            }
+        }
+        Ok((id, housed))
     }
 
     fn cmd_release_reserve(&mut self, amount: u32) {

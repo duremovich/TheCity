@@ -85,7 +85,7 @@ wage_gravedigger = 5
 farm_yield_base = 2.4
 farm_skill_floor = 0.6
 farm_skill_slope = 0.8
-season_mult = [1.0, 1.4, 1.1, 0.3]
+season_mult = [1.0, 1.4, 1.1, 0.8]
 energy_decay_mult = [1.0, 1.0, 1.0, 1.15]
 spoilage_pantry = 0.05
 spoilage_market = 0.01
@@ -110,7 +110,7 @@ sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
 # jail capacity is buildings.jail.capacity
-fight_death_p = 0.15
+fight_death_p = 0.03
 stat_theft_caught_p = 0.25
 warrant_expiry_days = 30
 suspect_seen_ticks = 240

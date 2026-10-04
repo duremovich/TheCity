@@ -289,6 +289,16 @@ pub struct Identity {
     pub sex: Sex,
     /// Negative for the initial population.
     pub born_tick: i64,
+    /// Widowed at this tick (Grief; the Spouse edge stays).
+    #[serde(default)]
+    pub spouse_died_tick: Option<Tick>,
+}
+
+/// Under 18: Statistical only, no Brain or Needs; fed from the Home pantry.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Child {
+    /// Consecutive days the pantry could not feed them; three kills.
+    pub hunger_days: u8,
 }
 
 impl Identity {
@@ -490,6 +500,12 @@ pub struct Brain {
     /// gate, refreshed daily because the neighbour scan is O(degree).
     #[serde(default)]
     pub court_candidate: Option<(u64, bool)>,
+    /// The corpse being carried to the Cemetery; its Position follows.
+    #[serde(default)]
+    pub carrying_corpse: Option<EntityId>,
+    /// Walking to the map edge to leave the city; no goals, no plans.
+    #[serde(default)]
+    pub emigrating: bool,
 }
 
 impl Default for Brain {
@@ -519,6 +535,8 @@ impl Default for Brain {
             gang_task_day: None,
             loot_today: 0,
             court_candidate: None,
+            carrying_corpse: None,
+            emigrating: false,
         }
     }
 }
@@ -593,6 +611,9 @@ pub struct Corpse {
     pub died_tick: Tick,
     pub cause: DeathCause,
     pub buried: bool,
+    /// Freed a day after this.
+    #[serde(default)]
+    pub buried_tick: Option<Tick>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -614,6 +635,9 @@ pub struct Building {
     pub production_accum: f32,
     /// Home only.
     pub extort_count: u8,
+    /// Homes: children's food owed to the pantry, `0.5 × children` per day.
+    #[serde(default)]
+    pub child_food_debt: f32,
     pub rect: Rect,
     pub door: TilePos,
     /// `0..=cap` per kind table.

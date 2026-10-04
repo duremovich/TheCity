@@ -69,10 +69,12 @@ fn test_m5_sixty_days_seed_42() {
         }
         seen_tick = w.tick;
     }
-    let last = w.stats.history.back().expect("rows");
     let thefts: u32 = w.stats.history.iter().map(|r| r.thefts).sum();
     let arrests: u32 = w.stats.history.iter().map(|r| r.arrests).sum();
-    assert!(last.gang_members >= 2, "gang_members {}", last.gang_members);
+    // "A gang of two or more by day 60": members come and go (jail, death),
+    // so the peak is what counts.
+    let peak_gang = w.stats.history.iter().map(|r| r.gang_members).max().unwrap_or(0);
+    assert!(peak_gang >= 2, "peak gang_members {peak_gang}");
     assert!(joins >= 1, "no GangJoin in 60 days");
     assert!(marriages >= 1, "no Marriage in 60 days");
     assert!(thefts >= 3, "only {thefts} thefts in 60 days");
@@ -97,4 +99,21 @@ fn test_m0_ten_days_headless() {
         assert!((1..=30).contains(&row.price));
     }
     assert_eq!(w.stats.current.day, 10);
+}
+
+/// `run --days 120 --seed 42`: the M6 gate. Births, deaths and burials
+/// happen and the population stays in 200..=400.
+#[test]
+fn test_m6_hundred_twenty_days_seed_42() {
+    let mut w = World::new(42, Config::load());
+    for _ in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    let births: u32 = w.stats.history.iter().map(|r| r.births).sum();
+    let deaths: u32 = w.stats.history.iter().map(|r| r.deaths_starvation + r.deaths_old_age + r.deaths_violence).sum();
+    let burials: u32 = w.stats.history.iter().map(|r| r.burials).sum();
+    assert!(births >= 1, "no birth in 120 days");
+    assert!(deaths >= 1, "no death in 120 days");
+    assert!(burials >= 1, "no burial in 120 days");
+    assert!((200..=400).contains(&w.population()), "population {}", w.population());
 }

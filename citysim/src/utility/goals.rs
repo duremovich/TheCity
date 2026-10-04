@@ -450,13 +450,26 @@ pub fn hostile_near(world: &World, id: EntityId, r: u32) -> bool {
     world.enemies_of(id).any(|o| world.has::<Brain>(o) && crate::systems::law::near(world, id, o, r))
 }
 
-/// An enemy within `r` tiles not fought in the last two days.
+/// Did `other` wrong `id` personally: a WasRobbed, Fought or Lost memory
+/// naming them? Fights are revenge, not vigilantism: witnessing someone's
+/// crime makes them an enemy, but only their victims attack.
+pub fn wronged_by(world: &World, id: EntityId, other: EntityId) -> bool {
+    world.comp::<Memory>(id).is_some_and(|m| {
+        m.entries.iter().any(|e| {
+            matches!(e.kind, MemoryKind::WasRobbed | MemoryKind::Fought | MemoryKind::Lost) && e.subject == Some(other)
+        })
+    })
+}
+
+/// An enemy within `r` tiles who wronged this agent and was not fought in
+/// the last two days.
 pub fn fresh_hostile_near(world: &World, id: EntityId, r: u32) -> bool {
     let two_days = world.tick.saturating_sub(2 * time::TICKS_PER_DAY);
     let mem = world.comp::<Memory>(id);
     world.enemies_of(id).any(|o| {
         world.has::<Brain>(o)
             && crate::systems::law::near(world, id, o, r)
+            && wronged_by(world, id, o)
             && !mem.is_some_and(|m| {
                 m.entries.iter().any(|e| e.kind == MemoryKind::Fought && e.subject == Some(o) && e.tick >= two_days)
             })

@@ -80,6 +80,7 @@ pub struct World {
     pub sentence: Vec<Option<Sentence>>,
     pub gang_member: Vec<Option<GangMember>>,
     pub corpse: Vec<Option<Corpse>>,
+    pub child: Vec<Option<Child>>,
     // non-agent components
     pub building: Vec<Option<Building>>,
     pub gang: Vec<Option<Gang>>,
@@ -122,6 +123,9 @@ pub struct World {
     /// Enemy edges by agent, both directions; kept by `social::reindex_kind`.
     #[serde(skip)]
     pub enemies: BTreeMap<EntityId, BTreeSet<EntityId>>,
+    /// Name tables for births and immigrants; reloaded from assets on load.
+    #[serde(skip)]
+    pub names: NameTables,
 }
 
 /// Wire every component store: the `Component` impl, plus `grow`/`clear`
@@ -161,6 +165,7 @@ components! {
     sentence: Sentence,
     gang_member: GangMember,
     corpse: Corpse,
+    child: Child,
     building: Building,
     gang: Gang,
     market: Market,
@@ -168,14 +173,21 @@ components! {
 }
 
 /// First/last name tables from `assets/names.txt`.
-struct NameTables {
+#[derive(Clone, Debug, Default)]
+pub struct NameTables {
     first_male: Vec<String>,
     first_female: Vec<String>,
     last: Vec<String>,
 }
 
 impl NameTables {
-    fn parse(text: &str) -> NameTables {
+    pub fn load(config: &Config) -> NameTables {
+        let text =
+            std::fs::read_to_string(config.asset("names.txt")).unwrap_or_else(|e| panic!("cannot read names.txt: {e}"));
+        NameTables::parse(&text)
+    }
+
+    pub fn parse(text: &str) -> NameTables {
         let mut tables = NameTables { first_male: Vec::new(), first_female: Vec::new(), last: Vec::new() };
         let mut section = "";
         for line in text.lines() {
@@ -212,9 +224,7 @@ impl World {
     /// and jobs. Deterministic for a given `(seed, config)`.
     pub fn new(seed: u64, config: Config) -> World {
         let map = Map::load(&config.asset("map.txt"));
-        let names_text =
-            std::fs::read_to_string(config.asset("names.txt")).unwrap_or_else(|e| panic!("cannot read names.txt: {e}"));
-        let names = NameTables::parse(&names_text);
+        let names = NameTables::load(&config);
         // Absent until `citysim-cli calibrate` (M7) has written it; any other
         // read failure is a broken checkout and must not pass silently.
         let stat_path = config.asset("stat_table.toml");
@@ -249,6 +259,7 @@ impl World {
             sentence: Vec::new(),
             gang_member: Vec::new(),
             corpse: Vec::new(),
+            child: Vec::new(),
             building: Vec::new(),
             gang: Vec::new(),
             market: Vec::new(),
@@ -275,6 +286,7 @@ impl World {
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
+            names: names.clone(),
         };
         w.spawn_buildings();
         w.spawn_gang();
@@ -308,6 +320,7 @@ impl World {
                     kind: def.kind,
                     production_accum: 0.0,
                     extort_count: 0,
+                    child_food_debt: 0.0,
                     rect: def.rect,
                     door: def.door,
                     stock_food,
@@ -374,7 +387,10 @@ impl World {
                 farming: rng.random_range(wc.skill_min..wc.skill_max),
             };
 
-            self.insert(id, Identity { name: format!("{first} {last}"), age_days, sex, born_tick });
+            self.insert(
+                id,
+                Identity { name: format!("{first} {last}"), age_days, sex, born_tick, spouse_died_tick: None },
+            );
             self.insert(
                 id,
                 Needs {
@@ -584,7 +600,7 @@ impl World {
         systems::law::run(self);
         systems::social::run(self);
         systems::gang::run(self);
-        // demography: M6.
+        systems::demography::run(self);
         systems::stats::run(self);
         self.tick += 1;
     }
@@ -641,6 +657,78 @@ impl World {
         if let Some(n) = self.neighbours.get_mut(&b) {
             n.remove(&a);
         }
+    }
+
+    /// A first name for `sex` from the tables (seeded).
+    pub fn random_first_name(&mut self, sex: Sex) -> String {
+        let table = match sex {
+            Sex::Male => &self.names.first_male,
+            Sex::Female => &self.names.first_female,
+        };
+        if table.is_empty() {
+            return "Nameless".to_string();
+        }
+        let i = self.rng.world().random_range(0..table.len());
+        table[i].clone()
+    }
+
+    /// A full name from the tables (seeded).
+    pub fn random_name(&mut self, sex: Sex) -> String {
+        let first = self.random_first_name(sex);
+        let last = if self.names.last.is_empty() {
+            "Doe".to_string()
+        } else {
+            let i = self.rng.world().random_range(0..self.names.last.len());
+            self.names.last[i].clone()
+        };
+        format!("{first} {last}")
+    }
+
+    /// After a load: the tables are not saved.
+    pub fn reload_names(&mut self) {
+        self.names = NameTables::load(&self.config);
+    }
+
+    /// Remove an entity from every index and free it (emigrants, rotted or
+    /// buried corpses). Edges to it are dropped.
+    pub fn remove_agent(&mut self, id: EntityId) {
+        if !self.is_alive(id) {
+            return;
+        }
+        self.abort_plan(id);
+        self.vacate_job(id);
+        self.remove_from_building(id);
+        if self.has::<GangMember>(id) {
+            systems::gang::leave(self, id, "gone");
+        }
+        crate::systems::social::on_death(self, id);
+        for o in self.neighbours(id).collect::<Vec<_>>() {
+            self.remove_edge(id, o);
+        }
+        self.neighbours.remove(&id);
+        self.release_all(id);
+        self.reservations.retain(|_, rs| {
+            rs.retain(|r| !matches!(r.kind, crate::exec::ReservationKind::Partner { other } | crate::exec::ReservationKind::Corpse { corpse: other } | crate::exec::ReservationKind::Suspect { suspect: other } if other == id));
+            !rs.is_empty()
+        });
+        self.pending_purchase.remove(&id);
+        self.plan_queue.retain(|&(_, who), _| who != id);
+        self.last_seen.remove(&id);
+        self.crime_reports.retain(|r| r.suspect != id);
+        for id2 in self.citizens() {
+            if let Some(b) = self.comp_mut::<Brain>(id2) {
+                if b.escorting == Some(id) {
+                    b.escorting = None;
+                }
+                if b.cuffed_by == Some(id) {
+                    b.cuffed_by = None;
+                }
+                if b.carrying_corpse == Some(id) {
+                    b.carrying_corpse = None;
+                }
+            }
+        }
+        self.despawn(id);
     }
 
     /// Rebuild `neighbours`, `spouses` and `enemies` from `edges` (after a
@@ -753,6 +841,8 @@ impl World {
                 }
             }
         }
+        // Witnesses, grief, widowhood and inheritance read the living state.
+        systems::demography::on_death(self, id);
         crate::systems::social::on_death(self, id);
         self.vacate_job(id);
         self.remove_from_building(id);
@@ -778,9 +868,11 @@ impl World {
         self.remove::<Skills>(id);
         self.remove::<Sentence>(id);
         self.remove::<GangMember>(id);
+        self.remove::<Child>(id);
         self.release_all(id);
         self.pending_purchase.remove(&id);
-        self.insert(id, Corpse { died_tick: tick, cause, buried: false });
+        self.plan_queue.retain(|&(_, who), _| who != id);
+        self.insert(id, Corpse { died_tick: tick, cause, buried: false, buried_tick: None });
         match cause {
             DeathCause::Starvation => self.stats.current.deaths_starvation += 1,
             DeathCause::OldAge => self.stats.current.deaths_old_age += 1,

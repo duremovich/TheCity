@@ -101,11 +101,34 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
             world
                 .enemies_of(id)
                 .filter(|&o| world.has::<Brain>(o) && crate::systems::law::near(world, id, o, 4) && !fought(o))
+                .filter(|&o| crate::utility::goals::wronged_by(world, id, o))
                 .min_by_key(|&o| {
                     (!robbed_by(o), world.comp::<Position>(o).map_or(u32::MAX, |p| p.tile.manhattan(tile)), o.index)
                 })
         }
-        // Bury binds with M6 data.
+        // Bury binds the nearest unburied corpse the agent knows of (SawCorpse),
+        // skipping corpses someone else has reserved.
+        GoalKind::Bury => {
+            let tile = world.comp::<Position>(id)?.tile;
+            let reserved: Vec<EntityId> = world
+                .reservations
+                .iter()
+                .filter(|(&h, _)| h != id)
+                .flat_map(|(_, rs)| rs.iter())
+                .filter_map(|r| match r.kind {
+                    ReservationKind::Corpse { corpse } => Some(corpse),
+                    _ => None,
+                })
+                .collect();
+            let mem = world.comp::<crate::components::Memory>(id)?;
+            mem.entries
+                .iter()
+                .filter(|e| e.kind == crate::components::MemoryKind::SawCorpse)
+                .filter_map(|e| e.subject)
+                .filter(|&c| world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried))
+                .filter(|c| !reserved.contains(c))
+                .min_by_key(|&c| (world.comp::<Position>(c).map_or(u32::MAX, |p| p.tile.manhattan(tile)), c.index))
+        }
         _ => None,
     }
 }
@@ -220,6 +243,7 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
             ActionKind::Chat | ActionKind::Flirt | ActionKind::Propose => {
                 plan.target.map(|other| ReservationKind::Partner { other })
             }
+            ActionKind::CarryCorpse => plan.target.map(|corpse| ReservationKind::Corpse { corpse }),
             _ => None,
         };
         if let Some(kind) = kind {

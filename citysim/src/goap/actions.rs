@@ -186,6 +186,8 @@ impl ActionKind {
                 | ActionKind::SplitLoot
                 | ActionKind::Fence
                 | ActionKind::Attack
+                | ActionKind::CarryCorpse
+                | ActionKind::BuryCorpse
         )
     }
 }
@@ -260,6 +262,10 @@ pub struct PlanCtx {
     pub can_fence: bool,
     /// Attack: the bound target is within 4 tiles (or the same building).
     pub hostile_adjacent: bool,
+    /// The bound target is an unburied corpse.
+    pub corpse_target: bool,
+    /// Gravedigger, kin of the corpse, or nobody else alive to do it.
+    pub may_bury: bool,
     /// An open warrant on this agent.
     pub wanted: bool,
     /// The bound suspect has been seen by a guard recently.
@@ -353,6 +359,13 @@ impl PlanCtx {
             {
                 add(LocationKey::PatrolWaypoint, Some(b));
             }
+            // A corpse is reached at its tile, or through its building's door.
+            if let Some(c) = target.filter(|&t| world.has::<crate::components::Corpse>(t)) {
+                if let Some(p) = world.comp::<Position>(c) {
+                    let there = p.building.and_then(|b| world.comp::<Building>(b)).map_or(p.tile, |b| b.door);
+                    dist.insert(LocationKey::CorpseTile, o.manhattan(there));
+                }
+            }
         }
 
         let (target_pantry, target_occupied) = target
@@ -435,6 +448,27 @@ impl PlanCtx {
             hostile_adjacent: target.is_some_and(|t| {
                 world.has::<crate::components::Brain>(t) && crate::systems::law::near(world, agent, t, 4)
             }),
+            corpse_target: target
+                .is_some_and(|t| world.comp::<crate::components::Corpse>(t).is_some_and(|c| !c.buried)),
+            may_bury: {
+                let digger = job.is_some_and(|j| j.role == Role::Gravedigger);
+                let kin = target.is_some_and(|t| {
+                    world.edge(agent, t).is_some_and(|e| {
+                        matches!(
+                            e.kind,
+                            crate::components::RelKind::Family
+                                | crate::components::RelKind::Spouse
+                                | crate::components::RelKind::Parent
+                        )
+                    })
+                });
+                digger
+                    || kin
+                    || !world.citizens().into_iter().any(|c| {
+                        world.has::<crate::components::Brain>(c)
+                            && world.comp::<Job>(c).is_some_and(|j| j.role == Role::Gravedigger)
+                    })
+            },
             wanted: crate::systems::law::wanted(world, agent),
             suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),
             jail_day: job.is_some_and(|j| crate::systems::law::jail_day(agent, j.next_shift_key(world.tick))),
@@ -509,6 +543,7 @@ impl ActionKind {
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
             ActionKind::TendGraves => ctx.is(Role::Gravedigger),
+            ActionKind::CarryCorpse | ActionKind::BuryCorpse => ctx.adult && ctx.may_bury,
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
             ActionKind::Beg => !ctx.is(Role::Guard),
@@ -579,6 +614,8 @@ impl ActionKind {
             ActionKind::SplitLoot => ws.in_gang && at(LocationKey::Hideout) && ws.gang_task_done && ctx.has_loot,
             ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence,
             ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
+            ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
+            ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
             _ => false,
         }
     }
@@ -619,6 +656,8 @@ impl ActionKind {
             ActionKind::SplitLoot => ctx.has_loot,
             ActionKind::Fence => ctx.can_fence,
             ActionKind::Attack => ctx.hostile_adjacent,
+            ActionKind::CarryCorpse => ctx.corpse_target,
+            ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),
             _ => true,
         }
     }
@@ -740,6 +779,14 @@ impl ActionKind {
                 }
             }
             ActionKind::Attack => n.threat_removed = true,
+            ActionKind::CarryCorpse => {
+                n.carrying_corpse = true;
+                n.at = LocationKey::Street;
+            }
+            ActionKind::BuryCorpse => {
+                n.carrying_corpse = false;
+                n.corpse_buried = true;
+            }
             _ => {}
         }
         n
@@ -817,7 +864,10 @@ impl ActionKind {
             | ActionKind::Flirt
             | ActionKind::Propose
             | ActionKind::Extort
-            | ActionKind::Attack => ctx.target,
+            | ActionKind::Attack
+            | ActionKind::GoTo(LocationKey::CorpseTile)
+            | ActionKind::CarryCorpse
+            | ActionKind::BuryCorpse => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

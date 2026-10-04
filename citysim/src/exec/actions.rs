@@ -40,6 +40,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Propose | ActionKind::SplitLoot => 10,
         ActionKind::Extort => 20,
         ActionKind::Fence | ActionKind::Attack => 15,
+        ActionKind::CarryCorpse => 20,
+        ActionKind::BuryCorpse => 60,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -105,6 +107,15 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
         }
         ActionKind::Wander => true,
+        ActionKind::CarryCorpse => target.is_some_and(|c| {
+            world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried)
+                && crate::systems::law::near(world, id, c, 1)
+                && world.comp::<Brain>(id).is_some_and(|b| b.carrying_corpse.is_none())
+        }),
+        ActionKind::BuryCorpse => {
+            at(world, id, BuildingKind::Cemetery)
+                && target.is_some_and(|c| world.comp::<Brain>(id).is_some_and(|b| b.carrying_corpse == Some(c)))
+        }
         // Planned toward a partner at a venue; starting needs them in the room.
         ActionKind::Flirt | ActionKind::Propose => target.is_some_and(|t| {
             world.comp::<Position>(t).and_then(|p| p.building).is_some()
@@ -499,6 +510,26 @@ pub fn on_complete(
             let _ = loser;
             StepResult::Done
         }
+        ActionKind::CarryCorpse => {
+            let Some(c) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if !world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried) {
+                return StepResult::Failed(FailReason::StockGone);
+            }
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.carrying_corpse = Some(c);
+            }
+            world.remember(id, MemoryKind::SawCorpse, Some(c), 0.5, -0.4, false);
+            StepResult::Done
+        }
+        ActionKind::BuryCorpse => {
+            let Some(c) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if crate::systems::demography::bury(world, id, c) {
+                world.release_all(id);
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::StockGone)
+            }
+        }
         ActionKind::StealFood(source) => steal_food(world, id, source, target),
         ActionKind::Forage => {
             if let Some(inv) = world.comp_mut::<Inventory>(id) {
@@ -687,7 +718,11 @@ pub fn end_shift(world: &mut World, id: EntityId) {
     economy::maybe_quit(world, id);
 }
 
+/// Sleeping at home with a spouse who lives there too. Checked by household
+/// rather than by the spouse's position at wake-up, because one of them has
+/// usually left for a shift by then.
 fn spouse_in_same_home(world: &World, id: EntityId) -> bool {
-    let Some(home) = world.comp::<Position>(id).and_then(|p| p.building) else { return false };
-    world.spouse_of(id).and_then(|s| world.comp::<Position>(s)).is_some_and(|p| p.building == Some(home))
+    let Some(here) = world.comp::<Position>(id).and_then(|p| p.building) else { return false };
+    let home = world.comp::<Household>(id).and_then(|h| h.home);
+    home == Some(here) && world.spouse_of(id).is_some_and(|s| world.comp::<Household>(s).and_then(|h| h.home) == home)
 }

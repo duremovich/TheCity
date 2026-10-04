@@ -26,7 +26,11 @@ pub fn eligible(world: &World, id: EntityId) -> bool {
         && world
             .comp::<crate::components::Memory>(id)
             .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
-    contact || desperate || bootstrap
+    // A gang recruits while it can pay: the treasury must cover a day's stipend
+    // for everyone including the recruit. Loot funds growth; a broke gang
+    // stops growing.
+    let funded = gang.treasury >= cfg.gang_stipend * (gang.members.len() as i64 + 1);
+    bootstrap || ((contact || desperate) && funded)
 }
 
 /// JoinGang at the Hideout.
