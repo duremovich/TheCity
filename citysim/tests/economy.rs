@@ -10,10 +10,11 @@ fn world(seed: u64) -> World {
 #[test]
 fn test_price_formula_table() {
     let cfg = Config::load();
-    for (stock, price) in [(7, 28), (50, 10), (600, 3), (2400, 2), (10000, 1)] {
+    // price_ref_stock 1500: round(3 * sqrt(1500 / max(stock, 7))) clamped to 1..=30
+    for (stock, price) in [(7, 30), (50, 16), (400, 6), (600, 5), (1500, 3), (2400, 2), (10000, 1)] {
         assert_eq!(economy::price_for_stock(&cfg.economy, stock), price, "stock {stock}");
     }
-    assert_eq!(economy::price_for_stock(&cfg.economy, 0), 28, "stock below the floor is clamped to 7");
+    assert_eq!(economy::price_for_stock(&cfg.economy, 0), 30, "stock below the floor is clamped to 7");
 }
 
 #[test]

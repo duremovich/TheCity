@@ -157,6 +157,12 @@ pub struct EconomyCfg {
     pub spoilage_market: f32,
     pub haul_batch: u32,
     pub haul_min_stock: u32,
+    /// Daily: while the Market holds less than this, clerks restock it from the
+    /// Warehouse, at most `restock_batch` a day. 0 disables (spec v1 behaviour).
+    #[serde(default)]
+    pub restock_floor: u32,
+    #[serde(default)]
+    pub restock_batch: u32,
     pub build_home_cost: i64,
 }
 

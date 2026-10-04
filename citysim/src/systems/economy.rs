@@ -19,8 +19,43 @@ pub fn run(world: &mut World) {
     if world.tick_of_day() != 0 {
         return;
     }
+    daily_restock(world);
     daily_price(world);
     daily_spoilage(world);
+}
+
+/// Clerks top the Market up from the Warehouse while it is under
+/// `restock_floor`, at most `restock_batch` a day. See config.toml for why
+/// this deviates from the spec.
+fn daily_restock(world: &mut World) {
+    let floor = world.config.economy.restock_floor;
+    let batch = world.config.economy.restock_batch;
+    let (Some(wh), Some(mk)) =
+        (world.building_of_kind(BuildingKind::Warehouse), world.building_of_kind(BuildingKind::Market))
+    else {
+        return;
+    };
+    let stock = world.comp::<Building>(mk).map_or(0, |b| b.stock_food);
+    let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
+    let moved = floor.saturating_sub(stock).min(batch).min(available);
+    if moved == 0 {
+        return;
+    }
+    if let Some(b) = world.comp_mut::<Building>(wh) {
+        b.stock_food -= moved;
+    }
+    if let Some(b) = world.comp_mut::<Building>(mk) {
+        b.stock_food += moved;
+    }
+    world.push_event(
+        EventKind::Restock,
+        &[],
+        format!(
+            "Clerks restocked {moved} food from the Warehouse (Market {stock} -> {}, reserve {})",
+            stock + moved,
+            available - moved
+        ),
+    );
 }
 
 fn daily_price(world: &mut World) {

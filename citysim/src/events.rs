@@ -48,13 +48,14 @@ pub enum EventKind {
     Homeless,
     PlanAborted,
     PriceChange,
+    Restock,
     Inheritance,
     PlayerAction,
     PlayerActionFailed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 31] = [
+    pub const ALL: [EventKind; 32] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -83,6 +84,7 @@ impl EventKind {
         EventKind::Homeless,
         EventKind::PlanAborted,
         EventKind::PriceChange,
+        EventKind::Restock,
         EventKind::Inheritance,
         EventKind::PlayerAction,
         EventKind::PlayerActionFailed,

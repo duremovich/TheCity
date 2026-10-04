@@ -69,7 +69,11 @@ starvation_grace_ticks = 4320
 
 [economy]
 price_base = 3.0
-price_ref_stock = 600.0
+# The spec's 600 assumed a 600-unit Market; with farm_yield_base 2.4 the shelf sits at ~1500-1900,
+# so at 600 the price was pinned at 2 all year, the Treasury could not cover wages plus dole, and the
+# first price signal of a Winter famine was the 2 -> 28 cliff on the day the shelf hit zero.
+# 1500 puts the price at 3 in normal times and lets it climb through 4, 6, 9 as Winter draws it down.
+price_ref_stock = 1500.0
 price_min_stock = 7
 price_cap = 30
 wage_farmer = 6
@@ -91,6 +95,13 @@ spoilage_pantry = 0.05
 spoilage_market = 0.01
 haul_batch = 50
 haul_min_stock = 10
+# Deviation from the spec (which has no automatic Warehouse -> Market transfer): without it the
+# Summer surplus overflows a full Warehouse and is lost, then ~2000 units rot in it while the
+# Market stands empty for the last ten days of Winter. The floor is well under price_ref_stock, so
+# Winter still pushes the price to ~6-7; the player's Release reserve lever remains the only way
+# to flood the shelf and bring the price back down. 0 restores the spec behaviour.
+restock_floor = 400
+restock_batch = 200
 build_home_cost = 200
 
 [crime]
