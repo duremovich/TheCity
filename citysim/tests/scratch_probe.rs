@@ -340,3 +340,23 @@ fn probe_couple_intimacy() {
         eprintln!("{k}: {n} couples, mean intimacy {:.2}", sum / n as f32);
     }
 }
+
+/// Save/load round trip on a day-30 world (spec: < 200 ms).
+#[test]
+#[ignore]
+fn probe_save_roundtrip_time() {
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(30 * TICKS_PER_DAY);
+    let t0 = Instant::now();
+    let text = citysim::save::to_ron(&w);
+    let t1 = Instant::now();
+    let back = citysim::save::from_ron(&text).expect("load");
+    let t2 = Instant::now();
+    eprintln!(
+        "save {:.0} ms ({} KB), load {:.0} ms, tick {}",
+        (t1 - t0).as_secs_f64() * 1e3,
+        text.len() / 1024,
+        (t2 - t1).as_secs_f64() * 1e3,
+        back.tick
+    );
+}

@@ -506,6 +506,9 @@ pub struct Brain {
     /// Walking to the map edge to leave the city; no goals, no plans.
     #[serde(default)]
     pub emigrating: bool,
+    /// The day the spouse intimacy bonus was last granted (once a night).
+    #[serde(default)]
+    pub last_spouse_night: Option<u64>,
 }
 
 impl Default for Brain {
@@ -537,6 +540,7 @@ impl Default for Brain {
             court_candidate: None,
             carrying_corpse: None,
             emigrating: false,
+            last_spouse_night: None,
         }
     }
 }

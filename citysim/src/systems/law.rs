@@ -466,7 +466,6 @@ pub fn reconcile_guards(world: &mut World) {
     let want = usize::from(world.levers.guard_count);
     let guards: Vec<EntityId> = world.citizens().into_iter().filter(|&g| is_guard(world, g)).collect();
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
-    let mut changes = 0;
     if guards.len() < want {
         let mut candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
             .citizens()
@@ -479,7 +478,15 @@ pub fn reconcile_guards(world: &mut World) {
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
         for (_, id) in candidates.into_iter().take((want - guards.len()).min(5)) {
             crate::systems::demography::hire(world, id, jail, Role::Guard);
-            changes += 1;
+            // A dead guard's vacancy is this hire, not a second one.
+            if let Some(v) = world.vacancies.get_mut(&jail) {
+                if let Some(i) = v.iter().position(|&r| r == Role::Guard) {
+                    v.remove(i);
+                }
+                if v.is_empty() {
+                    world.vacancies.remove(&jail);
+                }
+            }
         }
     } else if guards.len() > want {
         let mut by_loyalty: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = guards
@@ -492,10 +499,8 @@ pub fn reconcile_guards(world: &mut World) {
             world.remove::<Job>(g);
             let name = world.name_of(g);
             world.push_event(EventKind::Fire, &[g], format!("{name} dismissed from the guard"));
-            changes += 1;
         }
     }
-    let _ = changes;
 }
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.

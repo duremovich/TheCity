@@ -129,8 +129,9 @@ pub fn run(world: &mut World) {
     }
 }
 
-/// Starvation bookkeeping for one agent; may kill.
-fn starvation(world: &mut World, id: EntityId) {
+/// Starvation bookkeeping for one agent; may kill. Per tick for Full and
+/// Coarse agents, hourly for Statistical ones.
+pub fn starvation(world: &mut World, id: EntityId) {
     let tick = world.tick;
     let grace = world.config.needs.starvation_grace_ticks;
     let Some(n) = world.comp_mut::<Needs>(id) else { return };

@@ -84,13 +84,8 @@ pub fn mature(world: &mut World, id: EntityId) {
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     // At the door, not pushed in over the cap: a resident may always enter
     // their own Home (see `capacity_exempt`), so they walk in on their own.
-    let door = world.comp::<Household>(id).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)).map(|b| b.door);
-    if let Some(door) = door {
-        world.remove_from_building(id);
-        if let Some(p) = world.comp_mut::<Position>(id) {
-            p.tile = door;
-            p.building = None;
-        }
+    if let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) {
+        world.stand_at_door(id, home);
     }
 }
 

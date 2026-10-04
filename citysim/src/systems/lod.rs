@@ -41,10 +41,12 @@ pub fn run(world: &mut World) {
         return;
     }
     if let Some(forced) = world.config.lod.force {
+        // Prisoners and emigrants stay Coarse here too: a Statistical prisoner
+        // would be snapped out of the Jail and never fed.
         for id in world.citizens() {
-            if world.has::<Brain>(id) {
-                set_lod(world, id, forced);
-            }
+            let Some(b) = world.comp::<Brain>(id) else { continue };
+            let held = world.has::<Sentence>(id) || b.emigrating || b.cuffed_by.is_some();
+            set_lod(world, id, if held { Lod::Coarse } else { forced });
         }
     } else {
         assign(world);
@@ -76,12 +78,16 @@ fn assign(world: &mut World) {
             set_lod(world, id, Lod::Coarse);
             continue;
         }
-        let story = brain.current_step().is_some_and(|s| story_relevant(s.action));
+        // A wanted agent counts as a story step: a reported thief must stay on
+        // the map for the arrest path to reach them.
+        let story =
+            brain.current_step().is_some_and(|s| story_relevant(s.action)) || crate::systems::law::wanted(world, id);
         let priority = i32::from(on_screen(pos.tile)) * 3 + i32::from(brain.pinned) * 2 + i32::from(story);
         ranked.push((-priority, pos.tile.manhattan(centre), id.index, id));
     }
     ranked.sort_unstable();
     let ids: Vec<EntityId> = ranked.iter().map(|&(_, _, _, id)| id).collect();
+    let prio: Vec<i32> = ranked.iter().map(|&(p, _, _, _)| -p).collect();
     let current: Vec<Lod> = ids.iter().map(|&id| world.comp::<Brain>(id).map_or(Lod::Coarse, |b| b.lod)).collect();
 
     let max_full = world.config.lod.max_full;
@@ -98,16 +104,20 @@ fn assign(world: &mut World) {
         })
         .collect();
     // Hysteresis at each boundary: an incumbent ranked just past it keeps its
-    // tier, and the lowest-ranked newcomer above the line is held back.
+    // tier against a newcomer of equal priority (interchangeable agents do
+    // not swap tiers over a tile of distance); a pinned or on-screen or
+    // story newcomer always takes the slot. Newcomers at the Coarse line are
+    // the Statistical: a Full agent being demoted keeps its plan as Coarse.
     for (upper, boundary) in [(Lod::Full, max_full), (Lod::Coarse, max_full + max_coarse)] {
         let lower = if upper == Lod::Full { Lod::Coarse } else { Lod::Statistical };
+        let is_newcomer =
+            |r: usize| if upper == Lod::Full { current[r] != Lod::Full } else { current[r] == Lod::Statistical };
         let band_end = (boundary + HYSTERESIS_BAND).min(ids.len());
         for rank in boundary..band_end {
             if current[rank] != upper || tier[rank] == upper {
                 continue;
             }
-            // The lowest-ranked newcomer (currently in a lower tier) above the line.
-            let newcomer = (0..boundary).rev().find(|&r| tier[r] == upper && current[r] != upper);
+            let newcomer = (0..boundary).rev().find(|&r| tier[r] == upper && is_newcomer(r) && prio[r] == prio[rank]);
             if let Some(r) = newcomer {
                 tier[r] = lower;
                 tier[rank] = upper;
@@ -192,13 +202,8 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
         DayPhase::Evening => home,
     }
     .or_else(|| world.building_of_kind(BuildingKind::Market));
-    let Some(door) = building.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) else { return };
-    world.remove_from_building(id);
-    let tick = world.tick;
-    if let Some(p) = world.comp_mut::<Position>(id) {
-        p.tile = door;
-        p.building = None;
-        p.entered = tick;
+    if let Some(b) = building {
+        world.stand_at_door(id, b);
     }
 }
 
@@ -241,6 +246,10 @@ pub fn run_statistical(world: &mut World) {
                 crate::needs::DecayCtx { season_energy_mult, sociability, under_18, ..crate::needs::DecayCtx::plain() };
             crate::needs::decay(n, &cfg, &ctx, TICKS_PER_HOUR as u32);
         }
+        crate::needs::starvation(world, id);
+        if !world.has::<Brain>(id) {
+            continue; // starved this hour
+        }
         // 2b. Work is not a gamble: an employed agent on shift works the hour
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
@@ -249,9 +258,11 @@ pub fn run_statistical(world: &mut World) {
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
         // hungry Statistical agent eats if it can and the draw covers the
         // discretionary meals of the fed.
-        let hungry = world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger < 0.4);
+        // ... and a sated one does not (a Full agent skips Eat above ~0.7).
+        let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
+        let (hungry, sated) = (hunger < 0.4, hunger >= 0.7);
         let u: f32 = world.rng.agent(id).random();
-        let outcome = if hungry || u < row.p_eat {
+        let outcome = if hungry || (u < row.p_eat && !sated) {
             Outcome::Eat
         } else if u < row.p_eat + row.p_work {
             Outcome::Idle
@@ -331,22 +342,24 @@ fn stat_eat(world: &mut World, id: EntityId) {
     }
     let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
     if coins >= price {
-        if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
-            w.coins -= price;
-        }
-        if let Some(t) = world.treasury_mut() {
-            t.coins += price;
-        }
-        if let Some(b) = world.comp_mut::<Building>(market) {
-            b.stock_food -= 1;
-        }
-        if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
-            crate::needs::eat(n, &cfg);
+        // The same purchase a Full agent makes: pay, take, eat.
+        let paid = economy::pay_for_food(world, id, 1);
+        if economy::take_food(world, id, 1, paid) {
+            if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
+                i.food = i.food.saturating_sub(1);
+            }
+            if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+                crate::needs::eat(n, &cfg);
+            }
         }
         return;
     }
+    // Theft is a hungry agent's resort, as the planner's cost table makes it
+    // for Full agents (steal_starving_bonus): the lawless steal when hungry,
+    // not for a discretionary meal.
     let lawless = world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < 0.3);
-    if !lawless {
+    let hungry = world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger < 0.4);
+    if !lawless || !hungry {
         return;
     }
     if let Some(b) = world.comp_mut::<Building>(market) {
@@ -375,7 +388,8 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
         }
         return;
     };
-    if !job.on_shift(world.tick_of_day()) {
+    let key = job.shift_key_at(tick);
+    if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::is_workday(key) {
         return;
     }
     if job.role == Role::Farmer {
@@ -383,7 +397,6 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
             economy::accrue_farm_work(world, id, farm, u64::from(TICKS_PER_HOUR as u32));
         }
     }
-    let key = job.shift_key_at(tick);
     let shift_ends_soon = job.shift_end(tick).is_some_and(|end| end <= tick + TICKS_PER_HOUR);
     if shift_ends_soon && job.last_shift_day != Some(key) {
         if let Some(j) = world.comp_mut::<Job>(id) {

@@ -583,6 +583,19 @@ impl World {
         }
     }
 
+    /// Stand outside a building's door (off its occupant list). Promotion,
+    /// demotion and coming of age all place agents this way.
+    pub fn stand_at_door(&mut self, agent: EntityId, b: EntityId) {
+        let Some(door) = self.comp::<Building>(b).map(|bd| bd.door) else { return };
+        self.remove_from_building(agent);
+        let tick = self.tick;
+        if let Some(p) = self.comp_mut::<Position>(agent) {
+            p.tile = door;
+            p.building = None;
+            p.entered = tick;
+        }
+    }
+
     /// Guards enter the Jail whatever its occupancy: the prisoner cap is the
     /// law system's rule (fines and early releases), not the door's.
     pub fn capacity_exempt(&self, agent: EntityId, b: EntityId) -> bool {

@@ -246,7 +246,13 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 DayPhase::Evening => 2,
                 DayPhase::Night => 3,
             };
+            // The dead and the departed leave the tally; an empty hour counts
+            // for nothing.
+            tally.retain(|&id, _| world.is_alive(id) && world.has::<Brain>(id));
             for t in tally.values_mut() {
+                if t.iter().all(|&n| n == 0) {
+                    continue;
+                }
                 // A meal is short, so any eating in the hour makes it an "ate"
                 // hour (the Statistical eat outcome is one meal); otherwise the
                 // state that held the most ticks wins, idle last.

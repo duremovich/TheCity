@@ -147,9 +147,15 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         // Sleeping at home beside a spouse: intimacy +0.4, at the start so an
         // interrupted night still counts.
         ActionKind::Sleep => {
-            if at_home(world, id) && spouse_in_same_home(world, id) {
+            // Once a night: a sleep interrupted and resumed does not stack it.
+            let night = world.tick.saturating_add(crate::time::TICKS_PER_DAY / 2) / crate::time::TICKS_PER_DAY;
+            let fresh = world.comp::<Brain>(id).is_some_and(|b| b.last_spouse_night != Some(night));
+            if fresh && at_home(world, id) && spouse_in_same_home(world, id) {
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     n.intimacy = (n.intimacy + 0.4).min(1.0);
+                }
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.last_spouse_night = Some(night);
                 }
             }
         }
