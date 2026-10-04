@@ -137,9 +137,20 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
-    // 6. selection
+    // 6. selection: a Full agent's square and sight radius, else the building
+    // the selection is (or is inside)
     if let Some(sel) = app.selected {
-        if let (Some(pos), Some(brain)) = (world.comp::<Position>(sel), world.comp::<Brain>(sel)) {
+        if let Some(b) = world.comp::<Building>(sel) {
+            let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
+            draw_rectangle_lines(
+                tl.x,
+                tl.y,
+                f32::from(b.rect.w) * ppt,
+                f32::from(b.rect.h) * ppt,
+                3.0,
+                hex(C_SELECTION),
+            );
+        } else if let (Some(pos), Some(brain)) = (world.comp::<Position>(sel), world.comp::<Brain>(sel)) {
             if brain.lod == Lod::Full {
                 let p = cam.tile_to_screen(vec2(f32::from(pos.tile.x), f32::from(pos.tile.y)));
                 draw_rectangle_lines(p.x, p.y, ppt, ppt, 2.0, hex(C_SELECTION));

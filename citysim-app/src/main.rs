@@ -1,7 +1,7 @@
 //! macroquad front end: squares and letters, a HUD, time controls, save/load.
 //!
 //! ```text
-//! citysim-app [--seed N] [--load FILE] [--fps]
+//! citysim-app [--seed N] [--load FILE] [--fps] [--select INDEX | --select-kind Kind]
 //! ```
 
 mod camera;
@@ -92,10 +92,13 @@ struct Args {
     start_tick: u64,
     /// Select this entity index at start (inspector smoke tests).
     select: Option<u32>,
+    /// Select the first building of this kind at start (building panel smoke tests).
+    select_kind: Option<citysim::BuildingKind>,
 }
 
 fn parse_args() -> Args {
-    let mut args = Args { seed: 42, load: None, fps: false, screenshot: None, start_tick: 0, select: None };
+    let mut args =
+        Args { seed: 42, load: None, fps: false, screenshot: None, start_tick: 0, select: None, select_kind: None };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
@@ -105,6 +108,11 @@ fn parse_args() -> Args {
             "--screenshot" => args.screenshot = Some(PathBuf::from(it.next().expect("--screenshot <FILE>"))),
             "--start-tick" => args.start_tick = it.next().and_then(|s| s.parse().ok()).expect("--start-tick <N>"),
             "--select" => args.select = Some(it.next().and_then(|s| s.parse().ok()).expect("--select <INDEX>")),
+            "--select-kind" => {
+                args.select_kind = Some(
+                    it.next().and_then(|s| citysim::BuildingKind::parse(&s)).expect("--select-kind <BuildingKind>"),
+                )
+            }
             other => panic!("unknown argument {other}"),
         }
     }
@@ -124,6 +132,12 @@ async fn main() {
         app.selected = world.citizens().into_iter().find(|id| id.index == index);
         if let Some(p) = app.selected.and_then(|id| world.comp::<citysim::Position>(id)) {
             app.camera.centre_on(p.tile);
+        }
+    }
+    if let Some(kind) = args.select_kind {
+        app.selected = world.building_of_kind(kind);
+        if let Some(b) = app.selected.and_then(|id| world.comp::<citysim::Building>(id)) {
+            app.camera.centre_on(b.door);
         }
     }
     app.notify(format!(

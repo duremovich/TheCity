@@ -168,7 +168,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
         });
         if let Some(sel) = app.selected {
-            if let Some(home) = world.comp::<citysim::Household>(sel).and_then(|h| h.home) {
+            let own_home = world.comp::<Building>(sel).filter(|b| b.kind == BuildingKind::Home).map(|_| sel);
+            if let Some(home) = own_home.or_else(|| world.comp::<citysim::Household>(sel).and_then(|h| h.home)) {
                 if ui.button(format!("Demolish Home#{}", home.index)).clicked() {
                     app.cmds.push(PlayerCommand::DemolishHome(home));
                 }

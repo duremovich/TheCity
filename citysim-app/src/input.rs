@@ -49,7 +49,7 @@ pub fn handle(app: &mut App, world: &mut World) {
         app.camera.zoom_about(mouse, factor);
     }
 
-    // --- select: a Full agent on the tile, else the first occupant of the building there
+    // --- select: a Full agent on the tile, else the building there
     if map_mouse && is_mouse_button_pressed(MouseButton::Left) && mouse.y > HUD_H {
         if let Some(tile) = app.camera.tile_at(mouse) {
             let on_tile = world.citizens().into_iter().find(|&id| {
@@ -60,9 +60,7 @@ pub fn handle(app: &mut App, world: &mut World) {
                 world
                     .with::<citysim::Building>()
                     .into_iter()
-                    .filter_map(|b| world.comp::<citysim::Building>(b))
-                    .find(|b| b.rect.contains(tile))
-                    .and_then(|b| b.occupants.first().copied())
+                    .find(|&b| world.comp::<citysim::Building>(b).is_some_and(|bd| bd.rect.contains(tile)))
             });
         }
     }

@@ -1,6 +1,7 @@
 //! HUD and panels. The top bar is macroquad text; the inspector (right) and
 //! the event log (bottom) and the city panel (left) are egui.
 
+pub mod building;
 pub mod city;
 pub mod inspector;
 pub mod log;
@@ -23,10 +24,14 @@ pub fn draw(app: &mut App, world: &World) {
         egui_macroquad::egui::SidePanel::left("city")
             .exact_width(city::CITY_W)
             .show(ctx, |ui| city::draw(ui, app, world));
-        if app.selected.is_some() {
-            egui_macroquad::egui::SidePanel::right("inspector")
-                .exact_width(INSPECTOR_W)
-                .show(ctx, |ui| inspector::draw(ui, app, world));
+        if let Some(sel) = app.selected {
+            egui_macroquad::egui::SidePanel::right("inspector").exact_width(INSPECTOR_W).show(ctx, |ui| {
+                if world.has::<citysim::Building>(sel) {
+                    building::draw(ui, app, world, sel);
+                } else {
+                    inspector::draw(ui, app, world);
+                }
+            });
         }
         egui_macroquad::egui::TopBottomPanel::bottom("log")
             .resizable(true)
