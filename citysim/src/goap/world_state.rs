@@ -132,6 +132,8 @@ pub enum Key {
     PatrolLegDone,
     FoodSourceAvailable,
     ForageAvailable,
+    /// M11 D26: a business registered (never observed true; `Register` sets it).
+    Founded,
 }
 
 /// Partial goal state: at most 3 listed keys.
@@ -172,6 +174,7 @@ pub struct WorldState {
     pub patrol_leg_done: bool,
     pub food_source_available: bool,
     pub forage_available: bool,
+    pub founded: bool,
 }
 
 impl WorldState {
@@ -205,6 +208,7 @@ impl WorldState {
             Key::PatrolLegDone => self.patrol_leg_done,
             Key::FoodSourceAvailable => self.food_source_available,
             Key::ForageAvailable => self.forage_available,
+            Key::Founded => self.founded,
         }
     }
 
@@ -397,6 +401,7 @@ impl WorldState {
             patrol_leg_done: false, // one leg per plan; the goal re-wins for the next
             food_source_available: market_free || pantry_free,
             forage_available: matches!(season, Season::Summer | Season::Autumn) && !dark,
+            founded: false,
         }
     }
 }

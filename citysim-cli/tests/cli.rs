@@ -16,7 +16,7 @@ fn test_cli_report_csv_header() {
     let mut lines = stdout.lines();
     assert_eq!(
         lines.next(),
-        Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,acquisitions,bankruptcies,monopolies,ticks_per_sec")
+        Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,ticks_per_sec")
     );
     let row = lines.next().expect("one data row");
     // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4), nobody homeless;
@@ -28,7 +28,7 @@ fn test_cli_report_csv_header() {
     assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
     let n = |i: usize| cols[i].parse::<u32>().expect("a count");
     assert!((1995..=2000).contains(&n(2)) && (215..=236).contains(&n(3)) && n(4) == 0, "row: {row}");
-    assert_eq!(row.split(',').count(), 71);
+    assert_eq!(row.split(',').count(), 81);
     assert!(lines.next().is_none());
 }
 
@@ -40,8 +40,9 @@ fn test_cli_ten_days_seed_42() {
     let rows: Vec<&str> = stdout.lines().skip(1).collect();
     assert_eq!(rows.len(), 10);
     // M10: at 2,000 residents a birth or a death in ten days is ordinary, so the population is
-    // checked as an account: 2,000 + births + immigrants - deaths - emigrants, with thirteen
-    // immigrants a week from day 7.
+    // checked as an account: 2,000 + births + immigrants - deaths - emigrants, with at most
+    // thirteen immigrants a week from day 7 (M11 § 7: the lever times a logistic of Street
+    // happiness).
     let mut expected: i64 = 2000;
     let mut immigrants = 0;
     for (i, row) in rows.iter().enumerate() {
@@ -52,7 +53,10 @@ fn test_cli_ten_days_seed_42() {
         expected += cols[16] + cols[17] - cols[13] - cols[14] - cols[15] - cols[18];
         immigrants += cols[17];
         assert_eq!(cols[1], expected, "day {i}");
-        assert_eq!(immigrants, 13 * (i as i64 / 7), "day {i}");
+        assert!(immigrants <= 13 * (i as i64 / 7), "day {i}");
+        if i % 7 != 0 {
+            assert_eq!(cols[17], 0, "immigrants arrive weekly: day {i}");
+        }
     }
 }
 

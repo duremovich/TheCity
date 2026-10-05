@@ -32,6 +32,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::GangWork => vec![(Key::GangTaskDone, true)],
         GoalKind::Raid => vec![(Key::RaidDone, true)],
         GoalKind::Bury => vec![(Key::CorpseBuried, true)],
+        GoalKind::Found => vec![(Key::Founded, true)],
         GoalKind::Idle => return None,
     })
 }

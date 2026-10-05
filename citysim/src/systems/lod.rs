@@ -144,7 +144,12 @@ fn assign(world: &mut World) {
         } else {
             0
         };
-        let priority = i32::from(on_screen(pos.tile)) * 4 + class + i32::from(story);
+        // M11: a fresh lawless evictee (D36: so the spiral's first link,
+        // JoinGang, can be planned) and an agent able to found (D25) get a
+        // body; neither can happen in the hourly table.
+        let m11 =
+            crate::systems::classes::evicted_desperate(world, id) || crate::systems::founding::can_found(world, id);
+        let priority = i32::from(on_screen(pos.tile)) * 4 + class + i32::from(story || m11);
         ranked.push((-priority, pos.tile.manhattan(centre), id.index, id));
     }
     ranked.sort_unstable();
@@ -732,6 +737,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     };
     let key = job.shift_key_at(tick);
     if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::is_workday(key) {
+        return;
+    }
+    // This shift is already done, or struck (M11 D35): no work, no wage.
+    if job.last_shift_day == Some(key) {
         return;
     }
     if job.role == Role::Farmer {

@@ -662,6 +662,9 @@ pub fn run(world: &mut World) {
     }
     upkeep(world);
     exec_wages(world);
+    // D27: an agent owning enough buildings becomes a corp (inheritance,
+    // the seeded Bar owners); a `Register` checks its founder at once.
+    crate::systems::founding::incorporate_daily(world);
     bar_vacancies(world);
     rolls(world);
 }

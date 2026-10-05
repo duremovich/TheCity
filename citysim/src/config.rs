@@ -37,6 +37,10 @@ pub struct Config {
     /// M11 corps; absent from pre-M11 saves: no corps (plan D40).
     #[serde(default = "CorpsCfg::none")]
     pub corps: CorpsCfg,
+    /// M11 classes (§ 7); absent from pre-M11 saves: no coupling, no Dreg
+    /// emigration (plan D40).
+    #[serde(default = "ClassesCfg::off")]
+    pub classes: ClassesCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -683,6 +687,8 @@ pub struct CorpsCfg {
     pub security_guards: u32,
     pub lobby_min_treasury: i64,
     pub monopoly_markup_cap: f32,
+    /// Squeeze's `price_level` ceiling without a monopoly (spec: 1.5).
+    pub squeeze_cap: f32,
     pub bar_owner_count: usize,
     pub upkeep: UpkeepCfg,
     pub value: ValueCfg,
@@ -692,6 +698,9 @@ pub struct CorpsCfg {
     pub private_pursuit_radius: u32,
     pub found_cooldown_days: u64,
     pub residents_per_bar: u32,
+    /// M11 phase 4: a flat term on the Found goal's score (calibration knob).
+    #[serde(default)]
+    pub found_flat: f32,
     pub hoard_tilt: f32,
     pub megacorp: Vec<bool>,
     pub outside_treasury_initial: i64,
@@ -730,6 +739,7 @@ impl CorpsCfg {
             security_guards: 6,
             lobby_min_treasury: 400,
             monopoly_markup_cap: 2.0,
+            squeeze_cap: 1.5,
             bar_owner_count: 0,
             upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: [3; 3], security_office: 60 },
             value: ValueCfg { farm: 1000, market: 1000, security_office: 500 },
@@ -739,6 +749,7 @@ impl CorpsCfg {
             private_pursuit_radius: 16,
             found_cooldown_days: 10,
             residents_per_bar: 300,
+            found_flat: 0.0,
             hoard_tilt: 0.1,
             megacorp: Vec::new(),
             outside_treasury_initial: 100_000,
@@ -777,6 +788,55 @@ impl CorpsCfg {
             .iter()
             .map(|s| Niche::parse(s).unwrap_or_else(|| panic!("[corps] row {i}: unknown niche {s:?}")))
             .collect()
+    }
+}
+
+/// M11 classes (docs/M11_OWNERSHIP.md § 7; plan D34-D36).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClassesCfg {
+    /// Street unrest above this calls a strike.
+    pub strike_threshold: f32,
+    pub strike_cooldown_days: u64,
+    /// D34: Chebyshev tiles from a Home's door that an on-shift guard watches.
+    pub fear_radius: u32,
+    /// Guard-hours a day near a Home that read as full fear.
+    pub fear_hours_full: f32,
+    /// Immigration = lever x Logistic{k, mid}(Street happiness); false = the lever.
+    pub couple_immigration: bool,
+    pub immigration_k: f32,
+    pub immigration_mid: f32,
+    pub dreg_emigrate_mood: f32,
+    /// 0 = off.
+    pub dreg_emigrate_days: u8,
+    /// D36: an evictee this recent and this lawless is desperate for a gang.
+    pub evicted_recruit_days: u64,
+    pub evicted_recruit_lawfulness: f32,
+}
+
+impl Default for ClassesCfg {
+    fn default() -> Self {
+        ClassesCfg::off()
+    }
+}
+
+impl ClassesCfg {
+    /// The documented defaults with the coupling and Dreg emigration off
+    /// (pre-M11 saves, `v1_profile`: plan D9, D40).
+    pub fn off() -> ClassesCfg {
+        ClassesCfg {
+            strike_threshold: 0.6,
+            strike_cooldown_days: 7,
+            fear_radius: 6,
+            fear_hours_full: 1.0,
+            couple_immigration: false,
+            immigration_k: 8.0,
+            immigration_mid: 0.5,
+            dreg_emigrate_mood: -0.5,
+            dreg_emigrate_days: 0,
+            evicted_recruit_days: 14,
+            evicted_recruit_lawfulness: 0.5,
+        }
     }
 }
 
@@ -867,6 +927,8 @@ impl Config {
         self.rent.base = [0, 0, 0];
         self.corps = CorpsCfg::none();
         self.world.coins_by_tier = [1.0, 1.0, 1.0];
+        self.classes.couple_immigration = false;
+        self.classes.dreg_emigrate_days = 0;
         self
     }
 
@@ -887,6 +949,10 @@ impl Config {
         c.rent.base = [0, 0, 0];
         c.corps = CorpsCfg::none();
         c.world.coins_by_tier = [1.0, 1.0, 1.0];
+        // M11 phase 4: no class coupling (immigration at the lever, no Dreg
+        // emigration), as v1_profile.
+        c.classes.couple_immigration = false;
+        c.classes.dreg_emigrate_days = 0;
         c
     }
 

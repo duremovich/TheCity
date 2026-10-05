@@ -536,6 +536,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
 
 /// Daily: mood below the threshold for `emigrate_days` marks the agent as
 /// leaving; the executor walks them to the edge and `emigrate` despawns them.
+/// M11 § 7: a Corp-class agent never emigrates.
 fn emigration(world: &mut World) {
     let cfg = world.config.demography.clone();
     let tick = world.tick;
@@ -552,15 +553,35 @@ fn emigration(world: &mut World) {
             })
         })
         .collect();
+    let leaving: Vec<EntityId> = if leaving.is_empty() {
+        leaving
+    } else {
+        leaving
+            .into_iter()
+            .filter(|&id| crate::systems::classes::class_of(world, id) != crate::components::Class::Corp)
+            .collect()
+    };
     for id in leaving {
-        world.abort_plan(id);
-        if let Some(b) = world.comp_mut::<Brain>(id) {
-            b.emigrating = true;
-            b.current_goal = None;
-        }
-        let name = world.name_of(id);
-        world.push_event(EventKind::Emigration, &[id], format!("{name} is leaving the city"));
+        start_emigrating(world, id, "");
     }
+}
+
+/// Mark an agent as leaving: the plan is dropped and the executor walks them
+/// to the map edge (`emigrate` despawns them there). `why` is appended to
+/// the event text when not empty.
+pub fn start_emigrating(world: &mut World, id: EntityId, why: &str) {
+    world.abort_plan(id);
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.emigrating = true;
+        b.current_goal = None;
+    }
+    let name = world.name_of(id);
+    let text = if why.is_empty() {
+        format!("{name} is leaving the city")
+    } else {
+        format!("{name} is leaving the city ({why})")
+    };
+    world.push_event(EventKind::Emigration, &[id], text);
 }
 
 /// The nearest map-edge Road tile.
@@ -576,9 +597,10 @@ pub fn emigrate(world: &mut World, id: EntityId) {
     world.remove_agent(id);
 }
 
-/// Weekly: `immigration_per_week` newcomers at the map edge.
+/// Weekly: `immigration_per_week` newcomers at the map edge; M11 § 7 scales
+/// the lever by Street happiness (`classes::immigrants_this_week`).
 fn immigration(world: &mut World) {
-    let n = world.levers.immigration_per_week;
+    let n = crate::systems::classes::immigrants_this_week(world);
     for _ in 0..n {
         spawn_immigrant(world);
     }

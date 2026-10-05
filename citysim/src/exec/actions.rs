@@ -48,6 +48,7 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
             .and_then(|g| g.raid_at)
             .map_or(0, |t| t.saturating_sub(world.tick)),
         ActionKind::Brawl => 15,
+        ActionKind::Register => 30,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -118,6 +119,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
         }
         ActionKind::Wander => true,
+        ActionKind::Register => at(world, id, BuildingKind::Hall) && crate::systems::founding::can_found(world, id),
         ActionKind::CarryCorpse => target.is_some_and(|c| {
             world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried)
                 && crate::systems::law::near(world, id, c, 1)
@@ -350,6 +352,11 @@ pub fn on_complete(
             economy::collect_dole(world, id);
             StepResult::Done
         }
+        // M11 D25: no Lot or coins left by now fails the step.
+        ActionKind::Register => match crate::systems::founding::register(world, id) {
+            Ok(_) => StepResult::Done,
+            Err(_) => StepResult::Failed(FailReason::PreconditionLost),
+        },
         ActionKind::HaulToMarket => StepResult::Done, // moved on pickup, see on_start
         ActionKind::FarmWork => {
             let farm = world.comp::<Job>(id).and_then(|j| j.employer);

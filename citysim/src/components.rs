@@ -377,6 +377,8 @@ pub enum GoalKind {
     Raid,
     Bury,
     Idle,
+    /// M11 D26: open a business (a Bar or a Home) on a vacant Lot.
+    Found,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -1022,11 +1024,15 @@ pub struct Household {
     /// Rent paid, decaying by a seventh a day (about the last week), for the inspector.
     #[serde(default)]
     pub rent_paid_7d: i64,
+    /// M11 § 7: consecutive midnights as a Dreg with mood below
+    /// `[classes] dreg_emigrate_mood`; at `dreg_emigrate_days` they leave.
+    #[serde(default)]
+    pub miserable_days: u8,
 }
 
 impl Household {
     pub fn new(home: Option<EntityId>) -> Household {
-        Household { home, rent_due: 0.0, arrears: 0, evicted_by: None, rent_paid_7d: 0 }
+        Household { home, rent_due: 0.0, arrears: 0, evicted_by: None, rent_paid_7d: 0, miserable_days: 0 }
     }
 }
 
@@ -1104,6 +1110,9 @@ pub struct Brain {
     /// assignment (the trace's `STATISTICAL_ALL_DAY` is `body_day != today`).
     #[serde(default)]
     pub body_day: Option<u64>,
+    /// M11 D26: the day of the last `Register` (the Found cooldown).
+    #[serde(default)]
+    pub last_found_day: Option<u64>,
 }
 
 impl Default for Brain {
@@ -1139,6 +1148,7 @@ impl Default for Brain {
             following_order: None,
             disobeyed_day: None,
             body_day: None,
+            last_found_day: None,
         }
     }
 }
@@ -1688,6 +1698,67 @@ impl Trace {
             self.days.pop_front();
         }
     }
+}
+
+// ---------------------------------------------------------------------------
+// M11: classes (docs/M11_OWNERSHIP.md § 7)
+// ---------------------------------------------------------------------------
+
+/// Derived, never stored: Corp = employed by a corp-owned building or a
+/// corp's exec; Dreg = no Home; Street = everyone else.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum Class {
+    Corp,
+    Street,
+    Dreg,
+}
+
+impl Class {
+    pub const ALL: [Class; 3] = [Class::Corp, Class::Street, Class::Dreg];
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Class::Corp => "Corp",
+            Class::Street => "Street",
+            Class::Dreg => "Dreg",
+        }
+    }
+}
+
+/// One class's daily aggregate (§ 7), recomputed at midnight after rent.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ClassAggregate {
+    /// Adults with a Brain in the class.
+    pub count: u32,
+    /// Mean `(mood + 1) / 2`.
+    pub happiness: f32,
+    /// Employed adults / adults.
+    pub employment: f32,
+    /// Mean over members of yesterday's guard-hours near their Home ÷
+    /// `fear_hours_full`, clamped to 1 (D34; a Dreg reads its zone's Homes).
+    pub fear: f32,
+    /// `happiness × min(employment + 0.5, 1)`.
+    pub loyalty: f32,
+    /// `0.3 + 0.7 × fear`.
+    pub submission: f32,
+    /// `(1 − loyalty) × (1 − submission) + 0.1 × evictions_7d ÷ count`.
+    pub unrest: f32,
+    pub evictions_7d: u32,
+    /// The inputs, for the City panel; not saved.
+    #[serde(skip)]
+    pub trace: Vec<(&'static str, f32)>,
+}
+
+/// D34: guard-hours per Home (on-shift guards within `fear_radius` of the
+/// door, counted on the hour), today and yesterday.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct HomeWatch {
+    pub today: BTreeMap<EntityId, u16>,
+    pub yesterday: BTreeMap<EntityId, u16>,
 }
 
 /// Guard-on-shift ticks per zone (`Zone::index`), today and yesterday (M10 D33).

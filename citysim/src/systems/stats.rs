@@ -70,6 +70,8 @@ pub fn record_traces(world: &mut World) {
     }
     world.day_marks.clear();
     world.zone_watch.yesterday = std::mem::take(&mut world.zone_watch.today);
+    // M11 D34: the guard-hours near each Home roll with the zone watch.
+    world.home_watch.yesterday = std::mem::take(&mut world.home_watch.today);
 }
 
 /// Fill the snapshot columns of the current day from live world state.
@@ -157,6 +159,15 @@ pub fn snapshot(world: &mut World) {
         }
     }
     world.stats.current.corps = slots;
+    let cls = world.classes.clone();
+    let row = &mut world.stats.current;
+    row.unrest_corp = cls[0].unrest;
+    row.unrest_street = cls[1].unrest;
+    row.unrest_dreg = cls[2].unrest;
+    row.class_corp = cls[0].count;
+    row.class_street = cls[1].count;
+    row.class_dreg = cls[2].count;
+    row.happiness_street = cls[1].happiness;
     let mut coins: Vec<i64> = citizens
         .iter()
         .filter(|&&id| world.has::<Brain>(id) && crate::systems::demography::is_adult(world, id))

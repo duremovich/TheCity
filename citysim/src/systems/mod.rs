@@ -1,13 +1,14 @@
 //! World systems. Each is `pub fn run(world: &mut World)` and `World::tick`
 //! calls them in the fixed order
-//! `commands, time, lod, needs, memory, think, plan, exec, ownership, economy,
-//! bind, law, social, gang, corp_brain, demography, stats`.
+//! `commands, time, lod, needs, memory, think, plan, exec, ownership,
+//! classes, economy, bind, law, social, gang, corp_brain, demography, stats`.
 //!
 //! Needs decay lives in `crate::needs`, execution in `crate::exec`.
 
 #![deny(clippy::unwrap_used)]
 
 pub mod bind;
+pub mod classes;
 pub mod corp_brain;
 pub mod corps;
 pub mod demography;

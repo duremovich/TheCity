@@ -331,6 +331,16 @@ pub struct World {
     /// M11: eviction ticks over the last 60 days, oldest first.
     #[serde(default)]
     pub eviction_log: VecDeque<Tick>,
+    /// M11 § 7: the class aggregates (`Class::index`), recomputed daily by
+    /// `classes::run` after rent and before the brains (D42).
+    #[serde(default)]
+    pub classes: [crate::components::ClassAggregate; 3],
+    /// M11 D35: the last Strike (one per `[classes] strike_cooldown_days`).
+    #[serde(default)]
+    pub last_strike: Option<Tick>,
+    /// M11 D34: guard-hours near each Home, rolled with `zone_watch`.
+    #[serde(default)]
+    pub home_watch: crate::components::HomeWatch,
     /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
     /// rebuilt on load.
     #[serde(skip)]
@@ -580,6 +590,9 @@ impl World {
             pending_purchase: BTreeMap::new(),
             tax_accum: BTreeMap::new(),
             eviction_log: VecDeque::new(),
+            classes: Default::default(),
+            last_strike: None,
+            home_watch: Default::default(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
@@ -1401,7 +1414,7 @@ impl World {
 
     /// One in-game minute, systems in the fixed order
     /// `commands, time, lod, needs, memory, think, plan, exec, ownership,
-    /// economy, bind, law, social, gang, corp_brain, demography, stats`. The binder runs
+    /// classes, economy, bind, law, social, gang, corp_brain, demography, stats`. The binder runs
     /// before the law so a cold-case report reaches the captain's daily
     /// rescoring (M10 D32); ownership's daily pass (rent, evictions,
     /// re-housing, upkeep) runs before the economy's price step (M11 D42).
@@ -1416,6 +1429,7 @@ impl World {
         systems::plan::run(self);
         crate::exec::run(self);
         systems::ownership::run(self);
+        systems::classes::run(self);
         systems::economy::run(self);
         systems::bind::run(self);
         systems::law::run(self);

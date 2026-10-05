@@ -560,7 +560,8 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
 }
 
 /// D17 Hunker: no open vacancies; one firing per building per day, the
-/// newest hire first (ties higher id), while above half staff.
+/// newest hire first (ties higher id), while above half staff; never at a
+/// Farm (see below).
 fn hunker_staff(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let buildings = c.buildings.clone();
@@ -579,6 +580,12 @@ fn hunker_staff(world: &mut World, corp: EntityId) {
     }
     for (b, mut list) in staff {
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
+        // Vat Techs are the city's food: a Food corp that laid them off in
+        // Winter (one per Farm a day) took employment from 213 to 138 and the
+        // price to 7 on seed 42. Hunker cuts every other staff.
+        if kind == BuildingKind::Farm {
+            continue;
+        }
         let full = full_staff(world, kind);
         if full == 0 || list.len() <= full / 2 {
             continue;
@@ -643,7 +650,8 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
 
 fn squeeze(world: &mut World, corp: EntityId, n: Niche) {
     let cfg = &world.config.corps;
-    let cap = if crate::systems::corps::is_monopoly(world, corp, n) { cfg.monopoly_markup_cap } else { 1.5 };
+    let cap =
+        if crate::systems::corps::is_monopoly(world, corp, n) { cfg.monopoly_markup_cap } else { cfg.squeeze_cap };
     let level = world.comp::<Corp>(corp).map_or(1.0, |c| c.level(n));
     set_level(world, corp, n, (level + 0.1).min(cap));
 }

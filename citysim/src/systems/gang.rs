@@ -75,8 +75,10 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
     if let Some((_, _, _, gid)) = best {
         return Some(gid);
     }
-    let desperate = world.comp::<Needs>(id).is_some_and(|n| n.hunger < cfg.join_gang_desperation_hunger)
-        && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < cfg.join_gang_desperation_lawfulness);
+    // M11 D36: a fresh, lawless evictee is desperate too (the spiral's first link).
+    let desperate = (world.comp::<Needs>(id).is_some_and(|n| n.hunger < cfg.join_gang_desperation_hunger)
+        && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < cfg.join_gang_desperation_lawfulness))
+        || crate::systems::classes::evicted_desperate(world, id);
     let arrested =
         world.comp::<Memory>(id).is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
     if !desperate && !arrested {

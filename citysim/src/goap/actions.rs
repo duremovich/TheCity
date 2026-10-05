@@ -72,10 +72,13 @@ pub enum ActionKind {
     /// Gravedigger's shift with no corpse to bury: at the Cemetery, runs to
     /// shift end like GuardJail. Not in the spec; needed so the role is paid.
     TendGraves,
+    /// M11 § 6 / D25: at the Hall, pay `found_cost` and turn a vacant Lot
+    /// into a Bar or a Home of one's own.
+    Register,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 54] = [
+pub const PLANNABLE: [ActionKind; 55] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -131,6 +134,7 @@ pub const PLANNABLE: [ActionKind; 54] = [
     ActionKind::CollectDole,
     ActionKind::GuardJail,
     ActionKind::TendGraves,
+    ActionKind::Register,
 ];
 
 impl ActionKind {
@@ -200,6 +204,7 @@ impl ActionKind {
                 | ActionKind::BuryCorpse
                 | ActionKind::Muster
                 | ActionKind::Brawl
+                | ActionKind::Register
         )
     }
 }
@@ -299,6 +304,8 @@ pub struct PlanCtx {
     pub raid_pending: bool,
     /// The agent's gang Hideout is sacked: no SplitLoot or Fence.
     pub hideout_sacked: bool,
+    /// M11 D26: `founding::can_found` (eligible, can afford a kind, a Lot exists).
+    pub can_found: bool,
     /// The agent sleeps and idles at the Hideout tonight (`gang::holes_up_at`):
     /// on the night watch, lying low, or homeless; never when it is sacked or full.
     pub holes_up: bool,
@@ -531,6 +538,7 @@ impl PlanCtx {
             raid_pending: crate::systems::raid::raid_pending(world, agent),
             hideout_sacked,
             holes_up: crate::systems::gang::holes_up_at(world, agent).is_some(),
+            can_found: crate::systems::founding::can_found(world, agent),
             dist,
         }
     }
@@ -572,6 +580,7 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::PatrolLegDone => ws.patrol_leg_done = value,
         K::FoodSourceAvailable => ws.food_source_available = value,
         K::ForageAvailable => ws.forage_available = value,
+        K::Founded => ws.founded = value,
     }
 }
 
@@ -599,6 +608,7 @@ impl ActionKind {
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
             ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult && ctx.gang_eligible,
             ActionKind::Flirt | ActionKind::Propose => ctx.adult,
+            ActionKind::Register => ctx.adult && !ctx.in_gang,
             ActionKind::ServeTime => false,
             _ => true,
         }
@@ -677,6 +687,7 @@ impl ActionKind {
             ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
             ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
+            ActionKind::Register => at(LocationKey::Hall) && !ws.founded && ctx.can_found,
             _ => false,
         }
     }
@@ -721,6 +732,7 @@ impl ActionKind {
             ActionKind::Attack => ctx.hostile_adjacent,
             ActionKind::CarryCorpse => ctx.corpse_target,
             ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),
+            ActionKind::Register => ctx.can_found && ctx.dist.contains_key(&LocationKey::Hall),
             _ => true,
         }
     }
@@ -852,6 +864,7 @@ impl ActionKind {
                 n.carrying_corpse = false;
                 n.corpse_buried = true;
             }
+            ActionKind::Register => n.founded = true,
             _ => {}
         }
         n
@@ -915,6 +928,7 @@ impl ActionKind {
             ActionKind::CollectDole => 2.0,
             ActionKind::ServeTime => 60.0,
             ActionKind::StoreFood => 1.0,
+            ActionKind::Register => 20.0,
         };
         c.clamp(0.5, 60.0)
     }

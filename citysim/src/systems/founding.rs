@@ -1,10 +1,18 @@
-//! M11 founding (docs/M11_OWNERSHIP.md § 6, plan D25). Phase 3 needs only
-//! the construction half: a corp's `Grow` order builds on a vacant Lot.
-//! Phase 4 adds the NPC side (the `Found` goal, `Register`, incorporation).
+//! M11 founding (docs/M11_OWNERSHIP.md § 6, plan D25-D27): building on a
+//! vacant Lot (a corp's `Grow`, an agent's `Register`), the `Found` goal's
+//! eligibility, and incorporation of an agent who owns enough buildings.
 
-use crate::components::{Building, BuildingKind, Position, TileKind, TilePos, Zone};
+use crate::components::{
+    Brain, Building, BuildingKind, Corp, Corpse, GangMember, Household, Identity, Job, Lod, Position, Sentence,
+    TileKind, TilePos, Wallet, Zone,
+};
 use crate::entity::EntityId;
+use crate::events::EventKind;
+use crate::systems::ownership::{self, Flow};
 use crate::world::World;
+
+/// The kinds an agent can found, in tie-break order (D25: tie -> Bar).
+const FOUNDABLE: [BuildingKind; 2] = [BuildingKind::Bar, BuildingKind::Home];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
 pub fn vacant_lots(world: &World) -> Vec<EntityId> {
@@ -110,4 +118,176 @@ pub fn build_on_lot(
     world.invalidate_flow_fields_for_lot(rect);
     world.guarded_homes = Default::default();
     Ok(lot)
+}
+
+/// Agents with a Brain (every tier): the per-capita denominator, O(1).
+fn living(world: &World) -> usize {
+    [Lod::Full, Lod::Coarse, Lod::Statistical].iter().map(|&l| world.tier(l).len()).sum()
+}
+
+/// D25: the affordable kind with the lowest `count ÷ target`, where
+/// `target(Bar) = population ÷ residents_per_bar` and `target(Home) =
+/// population ÷ residents_per_home`; ties to the Bar.
+pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
+    let pop = living(world).max(1) as f32;
+    let per = |kind: BuildingKind| -> f32 {
+        match kind {
+            BuildingKind::Bar => world.config.corps.residents_per_bar.max(1) as f32,
+            _ => world.config.world.residents_per_home.max(1) as f32,
+        }
+    };
+    let mut best: Option<(f32, BuildingKind)> = None;
+    for kind in FOUNDABLE {
+        let Some(cost) = found_cost(world, kind) else { continue };
+        if coins < cost {
+            continue;
+        }
+        let count = world
+            .buildings_of_kind(kind)
+            .iter()
+            .filter(|&&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+            .count() as f32;
+        let ratio = count / (pop / per(kind)).max(1e-3);
+        if best.is_none_or(|(r, _)| ratio < r) {
+            best = Some((ratio, kind));
+        }
+    }
+    best.map(|(_, k)| k)
+}
+
+/// The executive of some corp (they grow through the corp, not by founding).
+pub fn is_exec(world: &World, agent: EntityId) -> bool {
+    world.corps().into_iter().any(|c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(agent)))
+}
+
+/// D26: may `agent` take up the Found goal now? An adult with a Brain, not a
+/// gang member, not jailed, not a corp's exec, jobless or paid no more than
+/// the dole, off the founding cooldown, who can afford a foundable kind,
+/// with a vacant Lot in the city. Cheap checks first: this runs per think.
+pub fn can_found(world: &World, agent: EntityId) -> bool {
+    let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
+    let c = &world.config.corps.found_cost;
+    if coins < c.bar.min(c.home) {
+        return false;
+    }
+    let Some(brain) = world.comp::<Brain>(agent) else { return false };
+    let cd = world.config.corps.found_cooldown_days;
+    if brain.last_found_day.is_some_and(|d| world.day().saturating_sub(d) < cd) || brain.emigrating {
+        return false;
+    }
+    if world.has::<GangMember>(agent) || world.has::<Sentence>(agent) || world.has::<Corpse>(agent) {
+        return false;
+    }
+    if !crate::systems::demography::is_adult(world, agent) {
+        return false;
+    }
+    let dole = i64::from(world.levers.dole_per_day);
+    if world.comp::<Job>(agent).is_some_and(|j| j.wage_per_day > dole) {
+        return false;
+    }
+    choose_kind(world, coins).is_some() && !vacant_lots(world).is_empty() && !is_exec(world, agent)
+}
+
+/// D25 / § 6: the `Register` action's effect. The founder pays `found_cost`
+/// to the Treasury (`Flow::Found`), the Lot nearest their Home door (their
+/// tile when homeless) becomes a building of the chosen kind owned by them,
+/// `Founded` is logged with the founder in slot 0 ("registered", where a
+/// corp's `Grow` says "built"), and an owner of `incorporate_buildings`
+/// becomes a corp.
+pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> {
+    if !can_found(world, agent) {
+        return Err("cannot found".into());
+    }
+    let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
+    let kind = choose_kind(world, coins).ok_or("nothing affordable")?;
+    let cost = found_cost(world, kind).ok_or("not foundable")?;
+    let from = world
+        .comp::<Household>(agent)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door)
+        .or_else(|| world.comp::<Position>(agent).map(|p| p.tile))
+        .ok_or("nowhere")?;
+    let lot = nearest_lot(world, from).ok_or("no vacant Lot")?;
+    let paid = ownership::pay(world, Some(agent), None, cost, Flow::Found);
+    debug_assert_eq!(paid, cost, "can_found checked the wallet");
+    build_on_lot(world, lot, kind, Some(agent))?;
+    let today = world.day();
+    if let Some(b) = world.comp_mut::<Brain>(agent) {
+        b.last_found_day = Some(today);
+    }
+    let (name, what) = (world.name_of(agent), world.name_of(lot));
+    world.push_event(EventKind::Founded, &[agent, lot], format!("{name} registered {what} on a Lot for {cost}"));
+    world.stats.current.foundings += 1;
+    maybe_incorporate(world, agent);
+    Ok(lot)
+}
+
+/// D27: an agent owning `[corps] incorporate_buildings` or more becomes a
+/// corp `"{last name} Holdings"`: niches from the kinds owned, treasury 0,
+/// exec the agent, no CSV slot; the buildings move to it. `Incorporated`
+/// with the corp in slot 0 and the exec in slot 1 (the Life row).
+pub fn maybe_incorporate(world: &mut World, agent: EntityId) -> Option<EntityId> {
+    if !world.has::<Wallet>(agent) || !world.has::<Brain>(agent) || world.has::<Corpse>(agent) {
+        return None;
+    }
+    let owned: Vec<EntityId> = world
+        .with::<Building>()
+        .into_iter()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.owner == Some(agent) && !bd.demolished))
+        .collect();
+    incorporate_owned(world, agent, owned)
+}
+
+fn incorporate_owned(world: &mut World, agent: EntityId, owned: Vec<EntityId>) -> Option<EntityId> {
+    let need = world.config.corps.incorporate_buildings.max(1);
+    if owned.len() < need || is_exec(world, agent) {
+        return None;
+    }
+    let niches: std::collections::BTreeSet<_> = owned
+        .iter()
+        .filter_map(|&b| world.comp::<Building>(b).and_then(|bd| crate::systems::corp_brain::niche_of_kind(bd.kind)))
+        .collect();
+    if niches.is_empty() {
+        return None;
+    }
+    let full = world.comp::<Identity>(agent).map(|i| i.name.clone()).unwrap_or_default();
+    let last = full.split_whitespace().last().unwrap_or("Nobody").to_string();
+    let name = format!("{last} Holdings");
+    let corp = ownership::spawn_corp(world, name.clone(), niches, 0, Some(agent));
+    if let Some(c) = world.comp_mut::<Corp>(corp) {
+        // The `cash` denominator, as a spinoff's.
+        c.treasury_ref = 1000;
+    }
+    for &b in &owned {
+        crate::systems::corps::move_building(world, b, Some(corp));
+    }
+    let who = world.name_of(agent);
+    world.push_event(
+        EventKind::Incorporated,
+        &[corp, agent],
+        format!("{who} incorporated {name} ({} buildings)", owned.len()),
+    );
+    world.stats.current.incorporations += 1;
+    Some(corp)
+}
+
+/// The daily pass (`ownership::run`): every agent owner of enough buildings
+/// incorporates. One walk over the buildings.
+pub fn incorporate_daily(world: &mut World) {
+    let need = world.config.corps.incorporate_buildings.max(1);
+    let mut by_owner: std::collections::BTreeMap<EntityId, Vec<EntityId>> = Default::default();
+    for b in world.with::<Building>() {
+        let Some(owner) = world.comp::<Building>(b).filter(|bd| !bd.demolished).and_then(|bd| bd.owner) else {
+            continue;
+        };
+        if world.has::<Identity>(owner) && world.has::<Brain>(owner) && !world.has::<Corpse>(owner) {
+            by_owner.entry(owner).or_default().push(b);
+        }
+    }
+    for (agent, owned) in by_owner {
+        if owned.len() >= need {
+            incorporate_owned(world, agent, owned);
+        }
+    }
 }

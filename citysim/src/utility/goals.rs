@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 16] = [
+pub const GOAL_ORDER: [GoalKind; 17] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -29,6 +29,8 @@ pub const GOAL_ORDER: [GoalKind; 16] = [
     GoalKind::GangWork,
     GoalKind::Raid,
     GoalKind::Bury,
+    // M11 D26: just before Idle.
+    GoalKind::Found,
     GoalKind::Idle,
 ];
 
@@ -126,6 +128,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
         }),
+        // M11 D26: nothing to found (also the eligibility gate).
+        GoalKind::Found => !crate::systems::founding::can_found(world, id),
         _ => false,
     }
 }
@@ -474,6 +478,21 @@ pub fn considerations(
             ]
         }
         GoalKind::Idle => vec![Consideration::new("constant", 0.0, Curve::Step { t: 0.0, lo: 0.05, hi: 0.05 })],
+        // M11 § 6 / D26: open a business. `already_satisfied` has just run
+        // the eligibility check (it skips Found for the ineligible).
+        GoalKind::Found => {
+            let n = needs?;
+            let p = pers?;
+            let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
+            flat = world.config.corps.found_flat;
+            vec![
+                Consideration::new("can found", can(true), GATE),
+                Consideration::new("greed", p.greed, SQUARE),
+                Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.3, b: 0.7 }),
+                Consideration::new("lawfulness", p.lawfulness, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("not in shift", can(!in_shift), gate_or(0.3)),
+            ]
+        }
     };
     Some((cs, flat))
 }

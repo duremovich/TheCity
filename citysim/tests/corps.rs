@@ -404,6 +404,9 @@ fn test_bankruptcy_sells_to_richest_then_city() {
 #[test]
 fn test_monopoly_raises_markup_cap() {
     let mut w = world();
+    // The spec's ceilings (the shipped config lowers both until phase 5).
+    w.config.corps.squeeze_cap = 1.5;
+    w.config.corps.monopoly_markup_cap = 2.0;
     let (food, _, _) = three(&w);
     {
         let c = w.comp_mut::<Corp>(food).expect("c");

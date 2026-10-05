@@ -282,7 +282,8 @@ fn agent_colour(world: &World, id: citysim::EntityId) -> Color {
         | A::TendGraves
         | A::HaulToMarket
         | A::CollectWage
-        | A::CollectDole => C_AGENT_WORKING,
+        | A::CollectDole
+        | A::Register => C_AGENT_WORKING,
         A::EatFromInventory | A::EatAtHome | A::BuyFood | A::Forage | A::StoreFood => C_AGENT_EATING,
         A::Sleep | A::Rest => C_AGENT_SLEEPING,
         A::StealFood(_) | A::Extort | A::Attack | A::Fence | A::SplitLoot => C_AGENT_CRIME,

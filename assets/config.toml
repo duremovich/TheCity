@@ -380,12 +380,24 @@ shock_severity_rethink = 0.5
 # at worst, which runs it as in v1) before its workers' wages are a week late.
 bankrupt_days = 3
 incorporate_buildings = 2         # an agent owning this many becomes a corp
-found_cost = { bar = 300, home = 400 }
+# M11 phase 4: bar 300 -> 200. Seed 42, 2,000, 120 days: wages (5-8) are all above the dole, so only
+# the jobless can found, and at 300 never more than two jobless non-execs held 300 at once (most of the
+# city's coins sit with the employed and the execs): 3 NPC Bars from day 91 and no incorporation. At
+# 200 6 NPC foundings from day 28 and the first incorporation on day 28; at 150 15 foundings (12 Bars
+# by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
+found_cost = { bar = 200, home = 400 }
 wholesale = 2                      # coins per unit Farm → Market when owners differ
 contract_per_guard_day = 10
 security_guards = 6
 lobby_min_treasury = 400
-monopoly_markup_cap = 2.0          # price_level ceiling with a monopoly; 1.5 without
+# M11 phase 3: both Squeeze ceilings 1.15 (spec: 2.0 with a monopoly, 1.5 without). The dole is one
+# meal at price 3, so any Food markup that rounds 3 up to 4 is a skipped meal for every dole agent:
+# with the spec caps a Food monopoly squeezing in Winter (seed 42, days 99-119) ran thefts to 3,800
+# per 10 days and failed the M10 gate (6.1k ticks/s, save 41.9 MB). At 1.15 a Squeeze is invisible at
+# price 3 and still bites a short shelf (4 -> 5) and a contract (10 -> 12). Phase 5 recalibrates the
+# dole and the rent tiers and should lift these back toward the spec.
+monopoly_markup_cap = 1.15         # price_level ceiling with a monopoly
+squeeze_cap = 1.15                 # price_level ceiling without a monopoly
 # --- M11 plan additions (decisions D4, D11, D15, D17-D25, D28, D33, D41, D48) ---
 bar_owner_count = 2
 # D4: the Treasury's return flow. M11 phase 2, from the ledger columns over 120 days (seed 42, 2,000):
@@ -435,6 +447,23 @@ acquire = -0.2
 secure = 0.0
 hunker = 0.15
 lobby = 0.0
+
+# M11 classes (docs/M11_OWNERSHIP.md § 7; plan D34-D36).
+[classes]
+# M11 phase 4: 0.6 -> 0.42. Seed 42: Street unrest runs 0.30-0.46 after day 0 (mean 0.36; fear from
+# the patrols holds submission near 0.65), so 0.6 never struck; 0.44 struck once (day 4), 0.42 four
+# times in the first month (the 7-day lockout binds), none once unrest eases after day 30.
+strike_threshold = 0.42
+strike_cooldown_days = 7
+fear_radius = 6
+fear_hours_full = 1.0          # guard-hours a day near your Home that read as full fear
+couple_immigration = true
+immigration_k = 8.0            # Logistic{8, 0.5} over Street happiness; the lever is the ceiling
+immigration_mid = 0.5
+dreg_emigrate_mood = -0.5
+dreg_emigrate_days = 7         # 0 = off
+evicted_recruit_days = 14
+evicted_recruit_lawfulness = 0.5
 
 [levers]
 tax_rate = 0.05

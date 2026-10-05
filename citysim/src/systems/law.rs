@@ -620,6 +620,40 @@ fn tally_watch(world: &mut World) {
         let z = world.map.zone(tile).index();
         world.zone_watch.today[z] += 1;
     }
+    if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
+        tally_home_watch(world, tod);
+    }
+}
+
+/// M11 D34: on the hour, one guard-hour to every standing Home whose door is
+/// within `[classes] fear_radius` (Chebyshev) of an on-shift, unjailed guard.
+/// O(guards x Homes) once an hour.
+pub fn tally_home_watch(world: &mut World, tod: u16) {
+    let r = i32::try_from(world.config.classes.fear_radius).unwrap_or(i32::MAX);
+    let tiles: Vec<crate::components::TilePos> = world
+        .guards()
+        .iter()
+        .filter(|&&g| !world.has::<Sentence>(g) && world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod)))
+        .filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile))
+        .collect();
+    if tiles.is_empty() {
+        return;
+    }
+    let doors: Vec<(EntityId, crate::components::TilePos)> = world
+        .buildings_of_kind(crate::components::BuildingKind::Home)
+        .iter()
+        .filter_map(|&h| world.comp::<crate::components::Building>(h).filter(|b| !b.demolished).map(|b| (h, b.door)))
+        .collect();
+    for t in tiles {
+        for &(h, d) in &doors {
+            let dx = (i32::from(d.x) - i32::from(t.x)).abs();
+            let dy = (i32::from(d.y) - i32::from(t.y)).abs();
+            if dx.max(dy) <= r {
+                let e = world.home_watch.today.entry(h).or_insert(0);
+                *e = e.saturating_add(1);
+            }
+        }
+    }
 }
 
 /// M10 5c: a guard's day of wages is owed here, and only here, by the shift
