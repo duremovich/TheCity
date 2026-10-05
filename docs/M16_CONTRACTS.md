@@ -562,3 +562,22 @@ Every new field is `#[serde(default)]`: `Hole.contract`, `Gang.temperament`, the
 ## 14. Out of scope (M17 and later)
 
 Contracts across the city boundary, a parent's `Retake` posted as contracts, outside combat maps and their transient casts (M17); the player taking and posting jobs in person, haggling over price as a dialogue render, the quest log beyond the Board panel's viewer filter, story LOD for contract parties (M18); daemons as contractors without a body (the candidate; `Contract.taker` is an `EntityId` so a daemon entity can hold one later), the Blackwall; Power and Water as goods, the Soylent factory as a building (it reads `Deliver { Captive }`), map layers, interiors and room-level prisons; courts and trials, insurance, outsourcing the law's convicts to private prisons, bounty hunters as a profession beyond Locate, and a contract market in Data beyond Steal and Deliver.
+
+## Addendum (2026-10-05, Dylan): attention and distraction
+
+Spec amendment; decisions tabled as overturnable and to be read by the M16 plan and its coders, with hooks in M14 (detection rolls) and M9/M12 (the law's sightings and responses).
+
+**The idea.** Factions and NPCs have only so much attention. A faction fighting a physical war, a riot or a large run may not notice one lone runner stealing something quietly, or one sneaky infiltrator while a tank is outside blowing things up. If you can manipulate a group's attention and threat assessment you can be ignored long enough to get in and out. Sparking a war between the target and another faction is a tactic.
+
+**Attention as a faction resource.** `Faction.attention: f32` (0..1) is a daily pool sized by the faction's management competence (M15) and headcount, consumed by active **threats** in order of assessed severity: a raid or breach in progress, a riot in a district it controls, a loud run against its nodes, a strike, a hostile acquisition, a vendetta, a sanction. Each threat holds a share for its duration plus `attention_linger_days`. What remains is the faction's **alertness**, and every detection and response roll the faction makes scales by it: guard sightings and witness rolls (M9, M12 stances), sweeps and ICE contests on its nodes (M14), camera identification (M14), riot and raid response strength (M12), the Security corp's contract response. Below `alert_floor` (0.2) the faction is **distracted**: quiet runs and infiltrations against it roll at the floor, and the law's reports from its guards slow.
+
+**Threat assessment is manipulable.** The faction ranks threats by what it *knows* (M15: rumours, sightings, the trace), not by what is true. So: a war started through a contract or propaganda (M15 `Spin`, M16 `Hit` on a rival's member framed through a hop chain), a loud decoy run (M14 addendum) that is real but pointless, a riot sparked in its district (M12), a strike bought (M16 coercion of a union-shaped group), a sanction (M17) all consume its attention. The brains read attention too: a distracted faction's own orders tilt to `Hunker`/`Garrison`/`LieLow`.
+
+| Decision | Call |
+| --- | --- |
+| Where it lives | `attention` on `Gang`, `Corp`, `Law` and `OutsideFaction`; recomputed daily and on each threat event; saved. |
+| Pool | `pool = clamp(0.4 + 0.4 × competence + 0.2 × min(headcount ÷ 20, 1), 0.3, 1.0)`; threat shares from a table (raid 0.5, riot 0.4, loud run 0.3, strike 0.2, acquisition 0.15, vendetta 0.15, sanction 0.2), summed and clamped; `alertness = max(pool − Σ shares, alert_floor)`; `attention_linger_days` 2. |
+| Detection hook | One multiplier `alertness_mult(faction)` read by: `law::sightings` and the witness roll for the law; M14 sweeps, ICE contests, camera id; M12 riot/raid response; M16 hit-squad and bodyguard reaction; M13 robot sensors. Default 1.0 when the field is absent (old saves). |
+| Brains | `OrderInputs.attention`; a consideration `1 − alertness` on Hunker/Garrison/LieLow (Linear{0.5, 0.5}); the law's posture brain reads it on Garrison. |
+| Player and NPC tactics | No new action: a distraction is any existing threat the actor can cause; the Quest view (M18) labels a contract's side effect "distracts X" when it would consume X's attention. |
+| Bound | Attention is O(factions) daily; no per-agent cost. |
