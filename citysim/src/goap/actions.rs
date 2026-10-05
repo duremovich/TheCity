@@ -495,7 +495,7 @@ impl PlanCtx {
                         && !world.workers(Role::Gravedigger).iter().any(|&c| world.has::<crate::components::Brain>(c))
             },
             wanted: crate::systems::law::wanted(world, agent),
-            suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),
+            suspect_located: target.is_some_and(|t| crate::systems::law::is_located_suspect(world, t)),
             jail_day: job.is_some_and(|j| crate::systems::law::jail_duty(world, agent, j.next_shift_key(world.tick))),
             patrol_pending: job.is_some_and(|j| {
                 j.role == Role::Guard

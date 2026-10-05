@@ -77,6 +77,10 @@ struct RunArgs {
     /// Map file, overriding `[world] map` (ignored with `--load`).
     #[arg(long, value_name = "FILE")]
     map: Option<PathBuf>,
+    /// Run the 300-resident v1 city (`Config::v1_profile`) instead of the
+    /// configured one (ignored with `--load`).
+    #[arg(long)]
+    v1_profile: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -117,6 +121,9 @@ struct CalibrateArgs {
     /// Cities run (seeds 1000, 1001, ...), tallied together.
     #[arg(long, default_value_t = 3)]
     seeds: u64,
+    /// Print each city's day-end health (price, Treasury, stocks, thefts).
+    #[arg(long)]
+    health: bool,
     /// Timed straight-line walks (the M7 shortcut). Off by default since M10:
     /// on the 256 x 192 map they starve the city and cut its crime threefold.
     #[arg(long)]
@@ -216,6 +223,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     levers.sort_by_key(|(t, _)| *t);
 
     let mut config = Config::load();
+    if args.v1_profile {
+        config = config.v1_profile();
+    }
     config.lod.force = args.force_lod.map(Lod::from);
     if let Some(n) = args.population {
         config.world.population = n;
@@ -281,13 +291,18 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             citysim::tick(&mut world);
             if args.events {
-                let fresh: Vec<_> = world
-                    .events
-                    .iter()
-                    .rev()
-                    .take_while(|e| last_event_tick.is_none_or(|t| e.tick > t))
-                    .map(|e| (e.tick, e.kind, e.text.clone()))
-                    .collect();
+                // The story ring and the plan-abort debug ring, merged by tick.
+                let fresh_of = |ring: &'_ std::collections::VecDeque<citysim::Event>| {
+                    ring.iter()
+                        .rev()
+                        .take_while(|e| last_event_tick.is_none_or(|t| e.tick > t))
+                        .cloned()
+                        .collect::<Vec<_>>()
+                };
+                let mut both = fresh_of(&world.events);
+                both.extend(fresh_of(&world.debug_events));
+                both.sort_by_key(|e| std::cmp::Reverse(e.tick));
+                let fresh: Vec<_> = both.iter().map(|e| (e.tick, e.kind, e.text.clone())).collect();
                 for (tick, kind, text) in fresh.into_iter().rev() {
                     eprintln!("{tick}	{kind:?}	{text}");
                     last_event_tick = Some(tick);
@@ -357,9 +372,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         Brain, Corpse, DeathCause, EventKind, MemoryKind, Needs, Personality, StatRow, StatTable, STAT_ROWS,
     };
     use std::collections::BTreeMap;
-    let mut config = Config::load().scaled_to(args.agents);
+    let mut config = Config::load().calibration_city(args.agents);
     config.world.map = map_path(&args.map)?;
-    config.gangs.max_members = 0;
     config.lod.force = Some(Lod::Full);
     config.exec.straight_line_paths = args.straight_lines;
     // Only the bucket edges are read from this header.
@@ -500,6 +514,31 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 }
             }
             // Day end: did the poor collect the dole?
+            if let Some(r) =
+                world.stats.history.back().filter(|_| args.health && world.tick.is_multiple_of(TICKS_PER_DAY))
+            {
+                let homes = world
+                    .buildings_of_kind(citysim::BuildingKind::Home)
+                    .iter()
+                    .filter(|&&h| {
+                        world.comp::<citysim::Building>(h).is_some_and(|b| {
+                            b.occupants
+                                .iter()
+                                .any(|&o| world.comp::<citysim::Household>(o).is_some_and(|hh| hh.home == Some(h)))
+                        })
+                    })
+                    .count();
+                let farms: u32 = world
+                    .buildings_of_kind(citysim::BuildingKind::Farm)
+                    .iter()
+                    .filter_map(|&f| world.comp::<citysim::Building>(f))
+                    .map(|b| b.stock_food)
+                    .sum();
+                eprintln!(
+                    "seed {seed} day {}: price {} treasury {} warehouse {} market {} pantry {} farms {farms} employed {} thefts {} starved {} occupied homes {homes}",
+                    r.day, r.price, r.treasury, r.food_warehouse, r.food_market, r.food_pantry, r.employed, r.thefts, r.deaths_starvation
+                );
+            }
             if world.tick.is_multiple_of(TICKS_PER_DAY) {
                 let day = world.day() - 1;
                 if poor_today.0 == day {

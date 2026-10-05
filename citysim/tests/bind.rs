@@ -256,7 +256,7 @@ fn test_bound_actor_with_witness_is_reported_and_arrested() {
     }
     let id = manual_hole(&mut w, victim, HoleKind::Assaulted, 600);
     assert_eq!(bind::bind(&mut w, id), Some(Bound::Actor(actor)));
-    assert!(w.crime_reports.iter().any(|r| r.suspect == actor && r.witness.is_some() && !r.resolved));
+    assert!(w.crime_reports().iter().any(|r| r.suspect == actor && r.witness.is_some() && !r.resolved));
     assert!(w.comp::<citysim::Brain>(actor).is_some_and(|b| b.lod != Lod::Statistical), "the actor got a body");
     let mut arrested = false;
     let mut cursor = w.next_event_id;
@@ -430,13 +430,14 @@ fn test_trace_runs_fold_into_one_line() {
 
 #[test]
 fn test_life_same_richness_full_vs_statistical() {
-    // Same seed, whole city forced to one tier each, 10 days: every kind of
-    // entry one tier writes, the other writes too.
+    // Same seed, whole city forced to one tier each, 15 days: every kind of
+    // entry one tier writes, the other writes too. (10 days left the Full
+    // city's best biography at 2-3 kinds, on the threshold; M10 phase 5b.)
     let kinds = |tier: Lod| {
         let mut cfg = Config::load().v1_profile();
         cfg.lod.force = Some(tier);
         let mut w = World::new(408, cfg);
-        w.run_ticks(10 * TICKS_PER_DAY);
+        w.run_ticks(15 * TICKS_PER_DAY);
         let mut seen = std::collections::BTreeSet::new();
         let mut best = 0;
         for id in w.with::<Life>() {

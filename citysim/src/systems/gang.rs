@@ -47,20 +47,32 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
     }
     let cfg = &world.config.social;
     let gangs = world.gangs();
-    let mut best: Option<(f32, EntityId)> = None;
-    for &gid in &gangs {
-        let Some(g) = world.comp::<Gang>(gid) else { continue };
-        if !recruiting(world, g) {
-            continue;
-        }
-        for &m in &g.members {
+    // The member with the best qualifying edge: the highest affinity, ties to
+    // the first gang in `gangs()` then the first in its roster. Walks the
+    // agent's own edges rather than every roster (M10 phase 5b).
+    let open: Vec<bool> = gangs.iter().map(|&g| world.comp::<Gang>(g).is_some_and(|g| recruiting(world, g))).collect();
+    let mut best: Option<(f32, usize, usize, EntityId)> = None;
+    if open.contains(&true) {
+        for m in world.neighbours(id) {
+            let Some(gid) = world.comp::<GangMember>(m).map(|gm| gm.gang) else { continue };
+            let Some(gi) = gangs.iter().position(|&g| g == gid) else { continue };
+            if !open[gi] {
+                continue;
+            }
             let Some(e) = world.edge(id, m) else { continue };
-            if e.affinity >= cfg.join_gang_affinity && best.is_none_or(|(a, _)| e.affinity > a) {
-                best = Some((e.affinity, gid));
+            if e.affinity < cfg.join_gang_affinity {
+                continue;
+            }
+            let Some(mi) = world.comp::<Gang>(gid).and_then(|g| g.members.iter().position(|&x| x == m)) else {
+                continue;
+            };
+            let better = best.is_none_or(|(a, bg, bm, _)| e.affinity > a || (e.affinity == a && (gi, mi) < (bg, bm)));
+            if better {
+                best = Some((e.affinity, gi, mi, gid));
             }
         }
     }
-    if let Some((_, gid)) = best {
+    if let Some((_, _, _, gid)) = best {
         return Some(gid);
     }
     let desperate = world.comp::<Needs>(id).is_some_and(|n| n.hunger < cfg.join_gang_desperation_hunger)
@@ -354,18 +366,15 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);
     let actor_tile = world.comp::<Position>(id)?.tile;
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
-    let r = world.config.crime.sight_day_crime;
-    let guards: Vec<TilePos> =
-        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
-    let candidates: Vec<(EntityId, &Building)> = world
-        .buildings_by_kind
-        .get(&BuildingKind::Home)?
+    let homes = world.buildings_by_kind.get(&BuildingKind::Home)?;
+    let guarded = guarded_homes(world, homes);
+    let candidates: Vec<(EntityId, &Building)> = homes
         .iter()
         .copied()
-        .filter(|&h| Some(h) != own_home)
-        .filter_map(|h| world.comp::<Building>(h).map(|b| (h, b)))
+        .zip(guarded.iter().copied())
+        .filter(|&(h, g)| !g && Some(h) != own_home)
+        .filter_map(|(h, _)| world.comp::<Building>(h).map(|b| (h, b)))
         .filter(|(_, b)| !b.demolished && !b.occupants.is_empty())
-        .filter(|(_, b)| !guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r))
         .collect();
     let nearest = |from: TilePos, pick: &dyn Fn(EntityId) -> bool| -> Option<EntityId> {
         candidates
@@ -388,6 +397,31 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         }
         Some(_) => None,
     }
+}
+
+/// Per Home in `homes`: a guard within `sight_day_crime` of its door. Cached
+/// on the guards' tiles (`World::guarded_homes`), so the 400 × guards scan
+/// runs once per guard move, not once per GangWork think.
+fn guarded_homes(world: &World, homes: &[EntityId]) -> std::sync::Arc<Vec<bool>> {
+    let guards: Vec<TilePos> =
+        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
+    let mut cache = world.guarded_homes.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if let Some((key, v)) = cache.as_ref() {
+        if *key == guards && v.len() == homes.len() {
+            return v.clone();
+        }
+    }
+    let r = world.config.crime.sight_day_crime;
+    let v: std::sync::Arc<Vec<bool>> = std::sync::Arc::new(
+        homes
+            .iter()
+            .map(|&h| {
+                world.comp::<Building>(h).is_some_and(|b| guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r))
+            })
+            .collect(),
+    );
+    *cache = Some((guards, v.clone()));
+    v
 }
 
 /// The Home a GangWork plan extorts.
@@ -717,7 +751,7 @@ pub fn betrayal_filed(world: &mut World, betrayer: EntityId) {
     for m in members.into_iter().filter(|&m| m != betrayer) {
         social::make_enemy(world, m, betrayer, -0.7);
     }
-    for r in world.crime_reports.iter_mut().filter(|r| r.suspect == betrayer) {
+    for r in world.reports_mut().iter_mut().filter(|r| r.suspect == betrayer) {
         r.resolved = true;
     }
     if let Some(b) = world.comp_mut::<Brain>(betrayer) {

@@ -350,7 +350,7 @@ fn jail(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     let mut inmates: Vec<(EntityId, &Sentence)> =
         world.with::<Sentence>().into_iter().filter_map(|a| world.comp::<Sentence>(a).map(|s| (a, s))).collect();
     inmates.sort_by_key(|(_, s)| s.until_tick);
-    let open_warrants = world.crime_reports.iter().filter(|r| !r.resolved).count();
+    let open_warrants = world.crime_reports().iter().filter(|r| !r.resolved).count();
     section(ui, &format!("Inmates ({} / {capacity})", inmates.len()), |ui| {
         if inmates.len() >= usize::from(capacity) {
             ui.colored_label(RED, "Full: new convicts are fined or released");

@@ -427,9 +427,11 @@ fn test_m10_scale_seed_42() {
         check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
     }
     check(offscreen_kills >= 20, format!("off-screen killings {offscreen_kills} >= 20"));
-    let day_start = w.day() * TICKS_PER_DAY;
+    // The binder runs on a day's first tick and the run stops just before
+    // day 120's, so the last bind covered holes opened before day 119.
+    let day_start = w.day().saturating_sub(1) * TICKS_PER_DAY;
     let stale = w.holes.values().filter(|x| x.kind == HoleKind::Killed && x.tick < day_start).count();
-    check(stale == 0, format!("{stale} Killed holes older than today still open"));
+    check(stale == 0, format!("{stale} Killed holes older than yesterday still open"));
     let reached_law =
         killers.iter().filter(|&(a, &t)| arrests.iter().any(|(at, who)| *at > t && who.contains(a))).count();
     check(reached_law >= 1, format!("{reached_law} of {} bound killers were arrested afterwards", killers.len()));

@@ -63,12 +63,12 @@ pub fn crime_salience(crime: Crime) -> f32 {
 /// resolved after the sighting)? A witness does not re-file a crime the law
 /// already dealt with.
 pub fn reported_since(world: &World, suspect: EntityId, tick: Tick) -> bool {
-    world.crime_reports.iter().any(|r| r.suspect == suspect && (!r.resolved || r.tick >= tick))
+    world.reports_on(suspect).is_some_and(|(open, last)| open > 0 || last >= tick)
 }
 
 /// Is there an open warrant on `suspect`?
 pub fn wanted(world: &World, suspect: EntityId) -> bool {
-    world.crime_reports.iter().any(|r| !r.resolved && r.suspect == suspect)
+    world.reports_on(suspect).is_some_and(|(open, _)| open > 0)
 }
 
 /// A crime happened: roll every nearby Brain-bearing agent as a witness, give
@@ -139,45 +139,60 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
 /// File (or refresh) the one open report per `(suspect, crime)`.
 pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: Option<EntityId>) {
     let tick = world.tick;
-    if let Some(r) = world.crime_reports.iter_mut().find(|r| !r.resolved && r.suspect == suspect && r.crime == crime) {
+    if let Some(r) = world.reports_mut().iter_mut().find(|r| !r.resolved && r.suspect == suspect && r.crime == crime) {
         r.tick = tick;
         if r.witness.is_none() {
             r.witness = witness;
         }
         return;
     }
-    world.crime_reports.push(CrimeReport { crime, suspect, witness, tick, resolved: false });
+    world.reports_mut().push(CrimeReport { crime, suspect, witness, tick, resolved: false });
     let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
     world.push_event(EventKind::Report, &[suspect], format!("{who} reported {} for {crime:?}", world.name_of(suspect)));
     crate::systems::law_brain::log_report(world, suspect);
 }
 
-/// The open report on `suspect` whose sighting is freshest, if located.
-pub fn located_suspects(world: &World) -> Vec<EntityId> {
+/// A wanted suspect the law can chase now: free, uncuffed and seen by a
+/// guard within `suspect_seen_ticks`. Callers pair it with an open report.
+fn located(world: &World, s: EntityId) -> bool {
     let window = world.config.crime.suspect_seen_ticks;
     let tick = world.tick;
-    let mut out: Vec<EntityId> = world
-        .crime_reports
-        .iter()
-        .filter(|r| !r.resolved)
-        .map(|r| r.suspect)
-        .filter(|&s| world.is_alive(s) && !world.has::<Sentence>(s))
-        .filter(|&s| world.comp::<Brain>(s).is_some_and(|b| b.cuffed_by.is_none()))
-        .filter(|&s| world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window))
-        .collect();
-    out.sort_unstable();
-    out.dedup();
-    out
+    world.is_alive(s)
+        && !world.has::<Sentence>(s)
+        && world.comp::<Brain>(s).is_some_and(|b| b.cuffed_by.is_none())
+        && world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
+}
+
+/// Open-warrant suspects that are located, ascending.
+pub fn located_suspects(world: &World) -> Vec<EntityId> {
+    // `open_suspects` is ascending and deduplicated.
+    world.open_suspects().filter(|&s| located(world, s)).collect()
+}
+
+/// Is `s` in `located_suspects`?
+pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
+    wanted(world, s) && located(world, s)
+}
+
+/// Is `located_suspects` non-empty?
+pub fn any_located_suspect(world: &World) -> bool {
+    world.open_suspects().any(|s| located(world, s))
+}
+
+fn seen_near(world: &World, s: EntityId, tile: TilePos) -> bool {
+    let radius = world.config.law.pursuit_radius;
+    world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(tile) <= radius)
 }
 
 /// `located_suspects` last seen within `[law] pursuit_radius` tiles of
 /// `tile`: the warrants a guard standing there will chase (M10).
 pub fn located_suspects_near(world: &World, tile: TilePos) -> Vec<EntityId> {
-    let radius = world.config.law.pursuit_radius;
-    located_suspects(world)
-        .into_iter()
-        .filter(|s| world.last_seen.get(s).is_some_and(|&(t, _)| t.manhattan(tile) <= radius))
-        .collect()
+    world.open_suspects().filter(|&s| located(world, s) && seen_near(world, s, tile)).collect()
+}
+
+/// Is `located_suspects_near` non-empty?
+pub fn any_located_suspect_near(world: &World, tile: TilePos) -> bool {
+    world.open_suspects().any(|s| located(world, s) && seen_near(world, s, tile))
 }
 
 /// Sentence length in ticks for a crime at the current lever.
@@ -290,7 +305,8 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
 /// The escorting guard moved: the cuffed suspect comes along.
 pub fn follow_guard(world: &mut World, guard: EntityId) {
     let Some(suspect) = world.comp::<Brain>(guard).and_then(|b| b.escorting) else { return };
-    if !living(world, suspect) {
+    // A prisoner stays in the Jail whoever still thinks they are escorting them.
+    if !living(world, suspect) || world.has::<Sentence>(suspect) {
         if let Some(b) = world.comp_mut::<Brain>(guard) {
             b.escorting = None;
         }
@@ -334,7 +350,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     }
     // The most severe open crime sets the sentence; the rest are covered by it.
     let Some(report) = world
-        .crime_reports
+        .crime_reports()
         .iter()
         .filter(|r| !r.resolved && r.suspect == suspect)
         .max_by_key(|r| (r.crime, r.tick))
@@ -409,7 +425,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 }
 
 fn resolve_reports(world: &mut World, suspect: EntityId) {
-    for r in world.crime_reports.iter_mut().filter(|r| r.suspect == suspect) {
+    for r in world.reports_mut().iter_mut().filter(|r| r.suspect == suspect) {
         r.resolved = true;
     }
 }
@@ -418,7 +434,18 @@ fn resolve_reports(world: &mut World, suspect: EntityId) {
 /// three days or less.
 pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jail: EntityId) {
     // Whoever was escorting them is done; a cuffed prisoner is a contradiction.
-    if let Some(g) = world.comp::<Brain>(who).and_then(|b| b.cuffed_by) {
+    // Every escort, not only `cuffed_by`: when two guards had cuffed the same
+    // suspect, the first to reach the Jail cleared `cuffed_by`, the second kept
+    // escorting, and `follow_guard` walked the new prisoner out of the Jail
+    // (M10 phase 5b: prisoners with a Sentence outside the Jail).
+    let escorts: Vec<EntityId> = world
+        .guards()
+        .iter()
+        .copied()
+        .chain(world.comp::<Brain>(who).and_then(|b| b.cuffed_by))
+        .filter(|&g| world.comp::<Brain>(g).is_some_and(|b| b.escorting == Some(who)))
+        .collect();
+    for g in escorts {
         if let Some(gb) = world.comp_mut::<Brain>(g) {
             gb.escorting = None;
         }
@@ -604,29 +631,22 @@ pub fn reconcile_guards(world: &mut World) {
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.
 fn sightings(world: &mut World) {
-    let suspects: Vec<EntityId> = {
-        let mut v: Vec<EntityId> = world
-            .crime_reports
-            .iter()
-            .filter(|r| !r.resolved)
-            .map(|r| r.suspect)
-            .filter(|&s| world.is_alive(s) && !world.has::<Sentence>(s))
-            .collect();
-        v.sort_unstable();
-        v.dedup();
-        v
-    };
+    let suspects: Vec<EntityId> =
+        world.open_suspects().filter(|&s| world.is_alive(s) && !world.has::<Sentence>(s)).collect();
     if suspects.is_empty() {
         return;
     }
     let sight = world.config.crime.sight;
-    let guards: Vec<EntityId> = world.guards().to_vec();
+    // `near` per (guard, suspect) pair, with the guards' positions read once.
+    let guards: Vec<(TilePos, Option<EntityId>)> =
+        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| (p.tile, p.building))).collect();
     let tick = world.tick;
     for s in suspects {
-        if guards.iter().any(|&g| near(world, g, s, sight)) {
-            if let Some(p) = world.comp::<Position>(s).map(|p| p.tile) {
-                world.last_seen.insert(s, (p, tick));
-            }
+        let Some(ps) = world.comp::<Position>(s) else { continue };
+        let (tile, building) = (ps.tile, ps.building);
+        let seen = guards.iter().any(|&(t, b)| (b.is_some() && b == building) || chebyshev(t, tile) <= sight);
+        if seen {
+            world.last_seen.insert(s, (tile, tick));
         }
     }
 }
@@ -635,7 +655,7 @@ fn expire_warrants(world: &mut World) {
     let expiry = world.config.crime.warrant_expiry_days * TICKS_PER_DAY;
     let tick = world.tick;
     let mut expired = Vec::new();
-    for r in world.crime_reports.iter_mut().filter(|r| !r.resolved && tick.saturating_sub(r.tick) >= expiry) {
+    for r in world.reports_mut().iter_mut().filter(|r| !r.resolved && tick.saturating_sub(r.tick) >= expiry) {
         r.resolved = true;
         expired.push(r.suspect);
     }
@@ -646,7 +666,7 @@ fn expire_warrants(world: &mut World) {
         let name = world.name_of(s);
         world.push_event(EventKind::Unpunished, &[s], format!("warrant on {name} expired"));
     }
-    world.crime_reports.retain(|r| !r.resolved || tick.saturating_sub(r.tick) < 2 * expiry);
+    world.reports_mut().retain(|r| !r.resolved || tick.saturating_sub(r.tick) < 2 * expiry);
 }
 
 /// Prisoners get one meal a day from the Market nearest the Jail, paid by the

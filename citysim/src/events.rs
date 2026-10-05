@@ -14,6 +14,13 @@ use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
 
 pub const EVENT_RING_CAP: usize = 50_000;
+/// `PlanAborted` goes to its own small ring, `World::debug_events`, not saved
+/// (M10 phase 5b): at 2,000 residents it was ~1,000 a day and pushed every
+/// story event out of the 50,000 within two months.
+pub const DEBUG_RING_CAP: usize = 2_000;
+/// The `id` of an event in the debug ring: it takes no place in the story
+/// ring's contiguous numbering.
+pub const DEBUG_EVENT_ID: u64 = u64::MAX;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Event {
@@ -129,7 +136,16 @@ impl EventKind {
 impl World {
     /// Append one event at the current tick, evicting the oldest past the cap.
     /// Returns the event's id.
+    /// `PlanAborted` goes to the debug ring instead and returns `DEBUG_EVENT_ID`.
     pub fn push_event(&mut self, kind: EventKind, actors: &[EntityId], text: impl Into<String>) -> u64 {
+        if kind == EventKind::PlanAborted {
+            if self.debug_events.len() >= DEBUG_RING_CAP {
+                self.debug_events.pop_front();
+            }
+            let actors = SmallVec::from_slice(actors);
+            self.debug_events.push_back(Event { id: DEBUG_EVENT_ID, tick: self.tick, kind, actors, text: text.into() });
+            return DEBUG_EVENT_ID;
+        }
         if self.events.len() >= EVENT_RING_CAP {
             self.events.pop_front();
         }

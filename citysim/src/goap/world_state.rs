@@ -340,7 +340,7 @@ impl WorldState {
         });
         let wanted = crate::systems::law::wanted(world, agent);
         let guard8 = wanted && crate::systems::law::guard_within(world, agent, world.config.crime.sight_day_crime);
-        let suspect_located = target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t));
+        let suspect_located = target.is_some_and(|t| crate::systems::law::is_located_suspect(world, t));
         let known_corpse = memory.is_some_and(|m| {
             m.entries.iter().any(|e| {
                 e.kind == MemoryKind::SawCorpse

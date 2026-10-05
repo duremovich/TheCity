@@ -639,6 +639,9 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
         // Treasury and left the wages unpaid): its Earn goal is satisfied
         // while it holds `SAVINGS_DAYS` meals of coins, and below that it
         // makes the walk to the Hall on the table's `p_dole_day` of days.
+        // An agent who cannot buy today's meal always goes (M10 phase 5b): a
+        // broke Full agent collects on ~97 % of days, and each day a broke
+        // Statistical agent lost the lottery became a desperation theft.
         let day = world.day();
         let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_at(m));
         let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
@@ -647,7 +650,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
         if phase == DayPhase::Work && !saving && undecided && crate::systems::demography::is_adult(world, id) {
             let p = world.stat_table.as_ref().map_or(1.0, |t| t.p_dole_day);
             let u: f32 = world.rng.agent(id).random();
-            if u < p {
+            if u < p || coins < price {
                 economy::collect_dole(world, id);
             }
             if let Some(b) = world.comp_mut::<Brain>(id) {

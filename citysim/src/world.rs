@@ -201,7 +201,22 @@ pub struct World {
     pub life: Vec<Option<Life>>,
     // graph + blackboard
     pub edges: BTreeMap<(EntityId, EntityId), Edge>,
-    pub crime_reports: Vec<CrimeReport>,
+    /// Private so every write goes through `reports_mut`, which drops the
+    /// per-suspect index; read with `crime_reports()`.
+    crime_reports: Vec<CrimeReport>,
+    /// Per suspect: (open reports, latest report tick). Built lazily from
+    /// `crime_reports` on the first read after a write (M10 phase 5b: the
+    /// warrant checks walked every report per citizen per hour).
+    #[serde(skip)]
+    report_index: std::sync::OnceLock<BTreeMap<EntityId, (u32, Tick)>>,
+    /// Every gang, ascending by id; kept by the Gang insert/remove hooks and
+    /// rebuilt on load (`gangs()` was a full entity scan).
+    #[serde(skip)]
+    gang_ids: Vec<EntityId>,
+    /// GangWork's "no guard within `sight_day_crime` of the door" per Home,
+    /// keyed on the guards' tiles: reused until a guard moves.
+    #[serde(skip)]
+    pub guarded_homes: GuardedHomes,
     pub buildings_by_kind: BTreeMap<BuildingKind, Vec<EntityId>>,
     /// Rebuilt each tick for Full agents.
     pub agents_by_tile: BTreeMap<TilePos, Vec<EntityId>>,
@@ -209,6 +224,9 @@ pub struct World {
     pub stats: DailyStats,
     /// Ring of 50,000, never drained; the UI keeps a read cursor.
     pub events: VecDeque<Event>,
+    /// The last `DEBUG_RING_CAP` `PlanAborted` events; not saved.
+    #[serde(skip)]
+    pub debug_events: VecDeque<Event>,
     /// The id the next `push_event` assigns (M10 D12).
     #[serde(default)]
     pub next_event_id: u64,
@@ -326,6 +344,22 @@ components! {
     life: Life,
 }
 
+/// For `gang::gang_work_target`: `guarded[i]` = a guard stands within
+/// `sight_day_crime` of the door of the `i`-th Home in `buildings_by_kind`,
+/// computed for the guard tiles in the key. A pure function of the key, the
+/// Home list and the config, so reusing it changes nothing.
+#[derive(Default, Debug)]
+pub struct GuardedHomes(pub std::sync::Mutex<Option<GuardedKeyed>>);
+
+/// The guard tiles a `GuardedHomes` entry was computed for, and the flags.
+pub type GuardedKeyed = (Vec<TilePos>, std::sync::Arc<Vec<bool>>);
+
+impl Clone for GuardedHomes {
+    fn clone(&self) -> Self {
+        GuardedHomes::default()
+    }
+}
+
 /// Statistical agents by hourly slot: `slots[s]` holds the ids with
 /// `index % 60 == s`, ascending.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -440,11 +474,15 @@ impl World {
             life: Vec::new(),
             edges: BTreeMap::new(),
             crime_reports: Vec::new(),
+            report_index: std::sync::OnceLock::new(),
+            gang_ids: Vec::new(),
+            guarded_homes: GuardedHomes::default(),
             buildings_by_kind: BTreeMap::new(),
             agents_by_tile: BTreeMap::new(),
             levers,
             stats: DailyStats::new(),
             events: VecDeque::new(),
+            debug_events: VecDeque::new(),
             next_event_id: 0,
             plan_queue: BTreeMap::new(),
             reservations: BTreeMap::new(),
@@ -624,6 +662,18 @@ impl World {
                 e.trust = 0.6;
             }
         }
+        // Under capacity, an empty Home starts with an empty pantry: in the
+        // 500-resident calibration city 300 unwatched pantries of opening food
+        // were free loot, and the Full thieves the table learns from cleared
+        // them (M10 phase 5b).
+        let used: BTreeSet<EntityId> = homes.iter().copied().take(n.div_ceil(per)).collect();
+        for h in self.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default() {
+            if !used.contains(&h) {
+                if let Some(b) = self.comp_mut::<Building>(h) {
+                    b.stock_food = 0;
+                }
+            }
+        }
         // Anyone left over (population > homes × residents) is homeless on the
         // road outside the Market door: on the street, so `building` is None.
         let market_door = self
@@ -731,6 +781,8 @@ impl World {
             self.index_brain(id);
         } else if TypeId::of::<T>() == TypeId::of::<Job>() {
             self.index_job(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
+            Self::list_insert(&mut self.gang_ids, id);
         }
     }
 
@@ -740,7 +792,14 @@ impl World {
             self.unindex_brain(id);
         } else if TypeId::of::<T>() == TypeId::of::<Job>() {
             self.unindex_job(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
+            self.unindex_gang(id);
         }
+    }
+
+    /// Drop a gang from `gang_ids` (its Gang removed, or despawned).
+    pub(crate) fn unindex_gang(&mut self, id: EntityId) {
+        Self::list_remove(&mut self.gang_ids, id);
     }
 
     fn list_remove(list: &mut Vec<EntityId>, id: EntityId) {
@@ -834,6 +893,8 @@ impl World {
         self.by_tier = tiers;
         self.by_role = roles;
         self.stat_slots = slots;
+        self.gang_ids = self.with::<Gang>();
+        self.guarded_homes = GuardedHomes::default();
     }
 
     fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 5], StatSlots) {
@@ -873,6 +934,14 @@ impl World {
                 self.by_role.iter().map(Vec::len).collect::<Vec<_>>(),
                 roles.iter().map(Vec::len).collect::<Vec<_>>()
             ));
+        }
+        if self.gang_ids != self.with::<Gang>() {
+            return Err(format!("gang_ids out of sync: {:?}", self.gang_ids));
+        }
+        if let Some(idx) = self.report_index.get() {
+            if *idx != Self::build_report_index(&self.crime_reports) {
+                return Err("report_index out of sync with crime_reports".to_string());
+            }
         }
         Ok(())
     }
@@ -967,9 +1036,44 @@ impl World {
         self.building_of_kind(BuildingKind::Jail).and_then(|id| self.comp_mut::<Law>(id))
     }
 
+    /// Every crime report, oldest first.
+    pub fn crime_reports(&self) -> &[CrimeReport] {
+        &self.crime_reports
+    }
+
+    /// The reports, for writing; drops the per-suspect index.
+    pub fn reports_mut(&mut self) -> &mut Vec<CrimeReport> {
+        self.report_index.take();
+        &mut self.crime_reports
+    }
+
+    fn build_report_index(reports: &[CrimeReport]) -> BTreeMap<EntityId, (u32, Tick)> {
+        let mut m: BTreeMap<EntityId, (u32, Tick)> = BTreeMap::new();
+        for r in reports {
+            let e = m.entry(r.suspect).or_insert((0, 0));
+            e.0 += u32::from(!r.resolved);
+            e.1 = e.1.max(r.tick);
+        }
+        m
+    }
+
+    fn report_index(&self) -> &BTreeMap<EntityId, (u32, Tick)> {
+        self.report_index.get_or_init(|| Self::build_report_index(&self.crime_reports))
+    }
+
+    /// `(open reports, latest report tick)` on `suspect`, if any report names them.
+    pub fn reports_on(&self, suspect: EntityId) -> Option<(u32, Tick)> {
+        self.report_index().get(&suspect).copied()
+    }
+
+    /// Suspects with an open report, ascending, each once.
+    pub fn open_suspects(&self) -> impl Iterator<Item = EntityId> + '_ {
+        self.report_index().iter().filter(|(_, &(open, _))| open > 0).map(|(&s, _)| s)
+    }
+
     /// Every gang, ascending by id (map order of their Hideouts).
     pub fn gangs(&self) -> Vec<EntityId> {
-        self.with::<Gang>()
+        self.gang_ids.clone()
     }
 
     /// The gang an agent belongs to.
@@ -984,8 +1088,9 @@ impl World {
 
     /// The other gang; with more than two, the one holding the most territory.
     pub fn rival_of(&self, gang: EntityId) -> Option<EntityId> {
-        self.gangs()
-            .into_iter()
+        self.gang_ids
+            .iter()
+            .copied()
             .filter(|&g| g != gang)
             .filter_map(|g| self.comp::<Gang>(g).map(|gg| (std::cmp::Reverse(gg.territory.len()), g)))
             .min()
@@ -994,7 +1099,7 @@ impl World {
 
     /// Position of a gang in `gangs()`: picks its colour in the app.
     pub fn gang_index(&self, gang: EntityId) -> usize {
-        self.gangs().iter().position(|&g| g == gang).unwrap_or(0)
+        self.gang_ids.iter().position(|&g| g == gang).unwrap_or(0)
     }
 
     /// The agent's name, or `#index` for anything without an `Identity`.
@@ -1209,7 +1314,7 @@ impl World {
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.last_seen.remove(&id);
-        self.crime_reports.retain(|r| r.suspect != id);
+        self.reports_mut().retain(|r| r.suspect != id);
         for id2 in self.citizens() {
             if let Some(b) = self.comp_mut::<Brain>(id2) {
                 if b.escorting == Some(id) {

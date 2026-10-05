@@ -155,10 +155,9 @@ fn test_full_vs_statistical_within_15pct() {
         })
     }
     fn run(force: Lod, seed: u64) -> Run {
-        let mut cfg = Config::load().scaled_to(AGENTS);
+        // The city `calibrate` measured: gangless, full Warehouse.
+        let mut cfg = Config::load().calibration_city(AGENTS);
         cfg.lod.force = Some(force);
-        // The table never modelled gang actions (calibrate is gangless too, D26).
-        cfg.gangs.max_members = 0;
         cfg.lod.stat_violence_mult = 1.0;
         let mut w = World::new(seed, cfg);
         let mut hunger_days = 0u64;
@@ -175,7 +174,19 @@ fn test_full_vs_statistical_within_15pct() {
                 }
                 let actor_side = match force {
                     Lod::Full => matches!(e.kind, EventKind::Theft | EventKind::Assault | EventKind::Murder),
-                    _ => matches!(e.kind, EventKind::Theft) || (e.kind == EventKind::Attributed && e.actors.len() == 2),
+                    // A Full robbery is one Theft by its thief. Off screen
+                    // the thief's own `p_steal` roll is that Theft, and the
+                    // victim's `p_robbed` hole is the same robbery seen from
+                    // the other side: counting its bound actor too counted
+                    // every robbery twice, at the binder's (1 - l)^2 weights
+                    // (M10 phase 5b, once the fed calibration city's thefts
+                    // became mostly robberies).
+                    _ => {
+                        matches!(e.kind, EventKind::Theft)
+                            || (e.kind == EventKind::Attributed
+                                && e.actors.len() == 2
+                                && !e.text.contains(citysim::HoleKind::Robbed.noun()))
+                    }
                 };
                 if actor_side {
                     if let Some(b) = e.actors.first().and_then(|&a| bucket(w, a)) {

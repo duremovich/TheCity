@@ -159,11 +159,14 @@ fn test_night_guard_works_both_halves_of_the_shift() {
         .find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard && j.shifts[0].0 == 1260))
         .expect("a night guard");
     let jail = w.comp::<Job>(guard).expect("job").employer.expect("jail");
-    // broke, fed and content: Work outscores Eat and Socialise on both evenings
+    // broke, fed, rested and content: Work outscores Eat, Sleep and Socialise
+    // on both evenings (rested: a guard who starts the night at the opening
+    // energy can tire enough to go home half an hour before 06:00)
     w.comp_mut::<citysim::Wallet>(guard).expect("wallet").coins = 0;
     let n = w.comp_mut::<citysim::Needs>(guard).expect("needs");
     n.hunger = 1.0;
     n.belonging = 1.0;
+    n.energy = 1.0;
     let working = |w: &World| {
         w.comp::<Position>(guard).expect("pos").building == Some(jail)
             && matches!(

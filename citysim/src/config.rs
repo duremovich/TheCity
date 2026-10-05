@@ -586,12 +586,30 @@ impl Config {
         self.levers.guard_count = 10;
         self.levers.immigration_per_week = 2;
         self.gangs.max_members = 20;
+        // M10 raised these for the 256 x 192 map and two 60-member gangs.
+        self.gangs.recruit_on_promise = 5;
+        self.gangs.raid_gather_hours = 3;
         self.economy.restock_floor = 400;
         self.economy.restock_batch = 200;
         self.lod.max_coarse = 100;
         // Not a D23 key: the v1 city had no pursuit limit.
         self.law.pursuit_radius = 512;
         self
+    }
+
+    /// The city `calibrate` measures and the LOD parity test replays: `n`
+    /// residents (`scaled_to`), gangless (the table never modelled gang
+    /// actions, D26) and a full Warehouse (M10 phase 5b). Full farmers work
+    /// about half the shift hours a Statistical farmer is credited with, so
+    /// an all-Full city runs a food deficit the real, mostly Statistical
+    /// city never sees: at 500 residents it emptied its Warehouse by day 24,
+    /// the price reached 16, and the table learned famine theft as everyday
+    /// theft.
+    pub fn calibration_city(self, n: u32) -> Config {
+        let mut c = self.scaled_to(n);
+        c.gangs.max_members = 0;
+        c.world.warehouse_initial = c.buildings.warehouse.stock_cap;
+        c
     }
 
     /// The same city at `n` residents: jobs, opening stocks, the Treasury, the

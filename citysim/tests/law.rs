@@ -61,7 +61,7 @@ fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
     let s = w.comp::<Sentence>(thief).expect("sentence");
     assert_eq!(s.crime, Crime::Theft);
     assert!(w.comp::<Memory>(thief).expect("mem").entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
-    assert!(w.crime_reports.iter().filter(|r| r.suspect == thief).all(|r| r.resolved));
+    assert!(w.crime_reports().iter().filter(|r| r.suspect == thief).all(|r| r.resolved));
     assert_eq!(w.comp::<Position>(thief).expect("pos").building, w.building_of_kind(BuildingKind::Jail));
 }
 
@@ -84,7 +84,7 @@ fn test_theft_unwitnessed_no_arrest() {
     law::raise_crime(&mut w, thief, None, Crime::Theft, tile);
     assert!(!law::wanted(&w, thief));
     w.run_ticks(3 * TICKS_PER_DAY);
-    assert!(w.crime_reports.iter().all(|r| r.suspect != thief), "{:?}", w.crime_reports);
+    assert!(w.crime_reports().iter().all(|r| r.suspect != thief), "{:?}", w.crime_reports());
     assert!(!w.has::<Sentence>(thief));
     // the unwitnessed thief got better at it
     assert!(w.comp::<Skills>(thief).expect("skills").stealth > 0.1);

@@ -118,7 +118,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                 || world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()))
                 || crate::systems::gang::extort_target(world, id).is_none()
         }
-        GoalKind::JoinGang => !crate::systems::gang::eligible(world, id),
+        // A guard never scores JoinGang (`considerations` says None): skip the scan.
+        GoalKind::JoinGang => {
+            world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) || !crate::systems::gang::eligible(world, id)
+        }
         GoalKind::Raid => !world.has::<crate::components::GangMember>(id) || crate::systems::raid::raid_done(world, id),
         GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
@@ -349,7 +352,7 @@ pub fn considerations(
             let legs_left =
                 world.comp::<Brain>(id).is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift);
             let on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;
-            let no_warrant = crate::systems::law::located_suspects(world).is_empty();
+            let no_warrant = !crate::systems::law::any_located_suspect(world);
             vec![
                 Consideration::new("in shift", can(on_duty), GATE),
                 Consideration::new("energy", n.energy, Curve::Linear { m: 0.8, b: 0.2 }),
@@ -364,7 +367,7 @@ pub fn considerations(
             let p = pers?;
             // M10: only warrants within pursuit range of this guard.
             let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
-            let located = !crate::systems::law::located_suspects_near(world, here).is_empty()
+            let located = crate::systems::law::any_located_suspect_near(world, here)
                 || world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
             vec![
                 Consideration::new("warrant located", can(located), GATE),
@@ -383,7 +386,9 @@ pub fn considerations(
             vec![
                 Consideration::new("1-lawfulness", 1.0 - p.lawfulness, SQUARE),
                 Consideration::new("U(wealth)", urgency(n.wealth), IDENTITY),
-                Consideration::new("eligible", can(crate::systems::gang::eligible(world, id)), GATE),
+                // `already_satisfied` has just checked eligibility (it skips
+                // JoinGang for the ineligible), so the gate is open here.
+                Consideration::new("eligible", can(true), GATE),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
             ]
         }

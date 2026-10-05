@@ -59,6 +59,7 @@ impl World {
         let i = id.index as usize;
         self.unindex_brain(id);
         self.unindex_job(id);
+        self.unindex_gang(id);
         self.alive[i] = false;
         self.generations[i] = self.generations[i].wrapping_add(1);
         self.clear_components(i);

@@ -148,8 +148,8 @@ pub fn fought(world: &mut World, winner: EntityId, loser: EntityId) {
     e.last_interaction = tick;
 }
 
-/// Interaction drift (Chat, Drink together, Flirt, each hour of co-work or
-/// co-jail): `affinity += 0.05 × m`, `trust += 0.02`.
+/// Interaction drift (Chat, Drink together, Flirt, each hour of co-work;
+/// co-jail drifts in four-hour steps): `affinity += 0.05 × m`, `trust += 0.02`.
 pub fn interacted(world: &mut World, a: EntityId, b: EntityId) {
     let m = similarity_mult(world, a, b);
     let step = world.config.social.affinity_per_hour * m;
@@ -447,6 +447,9 @@ pub fn run(world: &mut World) {
 /// pair. An agent whose stay reaches 30 ticks creates edges with everyone who
 /// was already there; each full hour of its stay drifts the pairs that share a
 /// workplace or the Jail.
+/// Co-jailed pairs drift once every this many hours (M10 phase 5b).
+const JAIL_DRIFT_HOURS: u64 = 4;
+
 fn colocation(world: &mut World) {
     let create_at = Tick::from(edge_create_ticks(world));
     let tick = world.tick;
@@ -461,6 +464,11 @@ fn colocation(world: &mut World) {
             continue;
         }
         let Some(bd) = world.comp::<Building>(building) else { continue };
+        // The Jail's ~70 prisoners drift every `JAIL_DRIFT_HOURS` hours, by
+        // that many hours' worth: the hourly pairs were a fifth of a tick.
+        if !create && bd.kind == BuildingKind::Jail && !stay.is_multiple_of(JAIL_DRIFT_HOURS * TICKS_PER_HOUR) {
+            continue;
+        }
         for &b in &bd.occupants {
             if b == a || !world.has::<Brain>(b) {
                 continue;
@@ -501,7 +509,11 @@ fn colocation(world: &mut World) {
         } else {
             let cowork = world.comp::<Job>(a).is_some_and(|j| j.employer == Some(building))
                 && world.comp::<Job>(b).is_some_and(|j| j.employer == Some(building));
-            if jail || cowork {
+            if jail {
+                let step = world.config.social.affinity_per_hour * similarity_mult(world, a, b);
+                let hours = JAIL_DRIFT_HOURS as f32;
+                adjust(world, a, b, hours * step, hours * 0.02);
+            } else if cowork {
                 interacted(world, a, b);
             }
         }
