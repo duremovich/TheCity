@@ -54,6 +54,7 @@ fn manual_hole(w: &mut World, victim: EntityId, kind: HoleKind, tick: Tick) -> H
         kind,
         victim,
         zone,
+        district: w.district_of(tile),
         tick,
         event_id: ev,
         consequential: false,
@@ -66,7 +67,7 @@ fn manual_hole(w: &mut World, victim: EntityId, kind: HoleKind, tick: Tick) -> H
 }
 
 /// Mark `id`'s trace for `day` with `flag`.
-fn set_trace_flag(w: &mut World, id: EntityId, day: u64, flag: u8) {
+fn set_trace_flag(w: &mut World, id: EntityId, day: u64, flag: u16) {
     let t = w.comp_mut::<Trace>(id).expect("trace");
     let back = (t.last_day - day) as usize;
     let n = t.days.len();

@@ -127,13 +127,14 @@ fn text(s: impl Into<String>) -> Span {
     Span::Text(s.into())
 }
 
-/// The zone a victim-side entry happened in: the open hole's, else the
-/// victim's trace on that day.
-fn zone_of(world: &World, id: EntityId, e: &LifeEvent) -> Option<Zone> {
-    if let Some(h) = e.hole.and_then(|h| world.holes.get(&h)) {
-        return Some(h.zone);
-    }
-    world.comp::<Trace>(id)?.on_day(time::day(e.tick)).map(|t| t.zone)
+/// The district a victim-side entry happened in, by name: the open hole's,
+/// else the victim's trace on that day (M12 D5).
+fn district_of(world: &World, id: EntityId, e: &LifeEvent) -> Option<String> {
+    let d = match e.hole.and_then(|h| world.holes.get(&h)) {
+        Some(h) => h.district,
+        None => world.comp::<Trace>(id)?.on_day(time::day(e.tick))?.district,
+    };
+    (!d.is_unset()).then(|| world.district_name(d).to_string())
 }
 
 /// One life event as spans. `unknown` is what stands for a missing name.
@@ -142,7 +143,7 @@ fn body(world: &World, id: EntityId, e: &LifeEvent) -> Vec<Span> {
         Some(o) => Span::Agent(o, world.name_of(o)),
         None => text(fallback),
     };
-    let in_zone = || zone_of(world, id, e).map(|z| format!(" in the {z}")).unwrap_or_default();
+    let in_zone = || district_of(world, id, e).map(|d| format!(" in {d}")).unwrap_or_default();
     // Still open: the player can find out. Closed unbound: nobody ever will.
     let open = e.hole.is_some_and(|h| world.holes.contains_key(&h));
     let unknown = if open { "an unknown assailant" } else { "someone who was never found" };

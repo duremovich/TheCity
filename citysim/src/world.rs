@@ -373,7 +373,7 @@ pub struct World {
     pub zone_watch: ZoneWatch,
     /// Today's ATE and SLEPT_AT_HOME bits per agent, folded into the trace at day end.
     #[serde(default)]
-    pub day_marks: BTreeMap<EntityId, u8>,
+    pub day_marks: BTreeMap<EntityId, u16>,
     /// BuyFood in progress: `(units, coins paid)` so a lost stock can be refunded.
     #[serde(default)]
     pub pending_purchase: BTreeMap<EntityId, (u32, i64)>,
@@ -393,6 +393,28 @@ pub struct World {
     /// M11 D34: guard-hours near each Home, rolled with `zone_watch`.
     #[serde(default)]
     pub home_watch: crate::components::HomeWatch,
+    /// M12 § 1: the districts, `[districts]` row order; aggregates recomputed
+    /// daily by `systems::districts::daily`. A pre-M12 save gets them from
+    /// `districts::rebuild` on load.
+    #[serde(default)]
+    pub districts: Vec<crate::components::District>,
+    /// M12 D1: one byte per tile, row-major like `Map::tiles`: the low nibble
+    /// is the `DistrictId`, `districts::STREET_BIT` marks a walkable tile
+    /// inside no building. Rebuilt on load and on every wall change.
+    #[serde(skip)]
+    pub district_grid: Vec<u8>,
+    /// M12 D1: per district, a bitmask of the districts sharing a 4-neighbour edge.
+    #[serde(skip)]
+    pub district_adjacent: Vec<u16>,
+    /// M12 D3: guard-on-shift ticks per district, rolled with `zone_watch`.
+    #[serde(default)]
+    pub district_watch: crate::components::DistrictWatch,
+    /// M12 D13 (phase 2 fills it): `(tick, gang, district)` of each report on a gang member.
+    #[serde(default)]
+    pub report_places: VecDeque<(Tick, EntityId, crate::components::DistrictId)>,
+    /// M12 D29: `(tick, district, owner)` per evicted adult, 30-day window.
+    #[serde(default)]
+    pub eviction_places: VecDeque<(Tick, crate::components::DistrictId, Option<EntityId>)>,
     /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
     /// rebuilt on load.
     #[serde(skip)]
@@ -631,6 +653,12 @@ impl World {
             classes: Default::default(),
             last_strike: None,
             home_watch: Default::default(),
+            districts: Vec::new(),
+            district_grid: Vec::new(),
+            district_adjacent: Vec::new(),
+            district_watch: Default::default(),
+            report_places: VecDeque::new(),
+            eviction_places: VecDeque::new(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
@@ -640,6 +668,7 @@ impl World {
             names: names.clone(),
         };
         w.spawn_buildings();
+        systems::districts::rebuild(&mut w);
         w.spawn_gangs();
         w.spawn_population(&names);
         systems::ownership::seed(&mut w);
@@ -1579,8 +1608,10 @@ impl World {
     // -----------------------------------------------------------------------
 
     /// One in-game minute, systems in the fixed order
-    /// `commands, time, lod, needs, memory, think, plan, exec, ownership,
-    /// classes, economy, bind, law, social, gang, corp_brain, demography, stats`. The binder runs
+    /// `commands, time, lod, needs, memory, mood, think, plan, exec, ownership,
+    /// classes, districts, economy, bind, law, social, gang, corp_brain,
+    /// demography, stats`. The district aggregates read the class pass's
+    /// midnight state (M12 D6). The binder runs
     /// before the law so a cold-case report reaches the captain's daily
     /// rescoring (M10 D32); ownership's daily pass (rent, evictions,
     /// re-housing, upkeep) runs before the economy's price step (M11 D42).
@@ -1596,6 +1627,7 @@ impl World {
         crate::exec::run(self);
         systems::ownership::run(self);
         systems::classes::run(self);
+        systems::districts::run(self);
         systems::economy::run(self);
         systems::bind::run(self);
         systems::law::run(self);
@@ -1725,7 +1757,7 @@ impl World {
     }
 
     /// Set a `trace_flags` bit (ATE, SLEPT_AT_HOME) for today.
-    pub fn mark_day(&mut self, id: EntityId, bit: u8) {
+    pub fn mark_day(&mut self, id: EntityId, bit: u16) {
         *self.day_marks.entry(id).or_default() |= bit;
     }
 
@@ -1837,6 +1869,11 @@ impl World {
                 self.insert(jail, Law::default());
             }
         }
+        // M12 D1/D46: the district grid and rows (a pre-M12 save has none),
+        // then every UNSET trace entry and hole to its zone's first district,
+        // and the zone watch to the district watch.
+        systems::districts::rebuild(self);
+        self.migrate_district_ids();
         let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
         for (i, gang) in self.gangs().into_iter().enumerate() {
             let Some(g) = self.comp::<Gang>(gang) else { continue };
@@ -1858,6 +1895,37 @@ impl World {
                 if let Some(b) = self.comp_mut::<Building>(home) {
                     b.claim = Some(Claim { gang, count: systems::gang::CLAIM_HELD });
                 }
+            }
+        }
+    }
+
+    /// M12 D4/D5/D46: a pre-M12 save's trace entries and holes carry no
+    /// district: each takes its zone's first district. A zone watch with no
+    /// district watch moves each zone's count to its first district.
+    /// Idempotent.
+    fn migrate_district_ids(&mut self) {
+        let first: [crate::components::DistrictId; 5] =
+            std::array::from_fn(|z| systems::districts::first_of_zone(self, crate::components::Zone::ALL[z]));
+        for tr in self.trace.iter_mut().flatten() {
+            for t in tr.days.iter_mut() {
+                if t.district.is_unset() {
+                    t.district = first[t.zone.index()];
+                }
+            }
+        }
+        for h in self.holes.values_mut() {
+            if h.district.is_unset() {
+                h.district = first[h.zone.index()];
+            }
+        }
+        let dw = &self.district_watch;
+        let empty = dw.today.iter().chain(dw.yesterday.iter()).all(|&v| v == 0);
+        if empty {
+            let zw = self.zone_watch.clone();
+            for (z, f) in first.iter().enumerate() {
+                let d = f.index().min(crate::components::MAX_DISTRICTS - 1);
+                self.district_watch.today[d] += zw.today[z];
+                self.district_watch.yesterday[d] += zw.yesterday[z];
             }
         }
     }

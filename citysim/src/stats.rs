@@ -10,10 +10,18 @@ use crate::time::Season;
 /// Days of history kept for the city panel's sparklines.
 pub const STATS_HISTORY_CAP: usize = 120;
 
-pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,ticks_per_sec";
+pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,d1_coverage,d1_control,d1_litter,d1_unrest,d1_crime,d1_guards,d2_coverage,d2_control,d2_litter,d2_unrest,d2_crime,d2_guards,d3_coverage,d3_control,d3_litter,d3_unrest,d3_crime,d3_guards,d4_coverage,d4_control,d4_litter,d4_unrest,d4_crime,d4_guards,d5_coverage,d5_control,d5_litter,d5_unrest,d5_crime,d5_guards,d6_coverage,d6_control,d6_litter,d6_unrest,d6_crime,d6_guards,d7_coverage,d7_control,d7_litter,d7_unrest,d7_crime,d7_guards,d8_coverage,d8_control,d8_litter,d8_unrest,d8_crime,d8_guards,dregs,hotel_nights,squatters,derelicts,vagrancy,riots,crossfire,gangs,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order).
 pub const CORP_SLOTS: usize = 8;
+
+/// M12 D45: district CSV slots (`[districts]` row order); a 9th-12th
+/// district is not printed.
+pub const DISTRICT_SLOTS: usize = 8;
+
+/// M12 D45: one district's CSV numbers: coverage, control code, litter,
+/// unrest, crime rate, guards.
+pub type DistrictCols = (f32, u8, f32, f32, f32, u8);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DayRow {
@@ -151,6 +159,28 @@ pub struct DayRow {
     pub class_dreg: u32,
     #[serde(default)]
     pub happiness_street: f32,
+    /// M12 D45 snapshot: per district slot (`DISTRICT_SLOTS`).
+    #[serde(default)]
+    pub districts: Vec<DistrictCols>,
+    /// M12 D45: Dreg adults, squatters, derelict buildings and gangs are
+    /// day-end snapshots; hotel nights, Vagrancy fines and sentences, riots
+    /// and crossfire hits are daily counters (zero until their phase).
+    #[serde(default)]
+    pub dregs: u32,
+    #[serde(default)]
+    pub hotel_nights: u32,
+    #[serde(default)]
+    pub squatters: u32,
+    #[serde(default)]
+    pub derelicts: u32,
+    #[serde(default)]
+    pub vagrancy: u32,
+    #[serde(default)]
+    pub riots: u32,
+    #[serde(default)]
+    pub crossfire: u32,
+    #[serde(default)]
+    pub gangs: u32,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -224,6 +254,15 @@ impl DayRow {
             class_street: 0,
             class_dreg: 0,
             happiness_street: 0.0,
+            districts: Vec::new(),
+            dregs: 0,
+            hotel_nights: 0,
+            squatters: 0,
+            derelicts: 0,
+            vagrancy: 0,
+            riots: 0,
+            crossfire: 0,
+            gangs: 0,
             ticks_per_sec: 0.0,
         }
     }
@@ -236,8 +275,14 @@ impl DayRow {
                 None => "0,-".to_string(),
             })
             .collect();
+        let districts: Vec<String> = (0..DISTRICT_SLOTS)
+            .map(|i| {
+                let (cov, ctrl, litter, unrest, crime, guards) = self.districts.get(i).copied().unwrap_or_default();
+                format!("{cov:.3},{ctrl},{litter:.3},{unrest:.3},{crime:.3},{guards}")
+            })
+            .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -303,6 +348,15 @@ impl DayRow {
             self.class_street,
             self.class_dreg,
             self.happiness_street,
+            districts.join(","),
+            self.dregs,
+            self.hotel_nights,
+            self.squatters,
+            self.derelicts,
+            self.vagrancy,
+            self.riots,
+            self.crossfire,
+            self.gangs,
             self.ticks_per_sec,
         )
     }

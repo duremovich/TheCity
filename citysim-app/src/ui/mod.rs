@@ -4,6 +4,7 @@
 pub mod building;
 pub mod city;
 pub mod corp;
+pub mod district;
 pub mod inspector;
 pub mod log;
 
@@ -65,6 +66,10 @@ pub fn draw(app: &mut App, world: &World) {
                     inspector::draw(ui, app, world);
                 }
             });
+        } else if let Some(d) = app.selected_district.filter(|d| d.index() < world.districts.len()) {
+            egui_macroquad::egui::SidePanel::right("inspector")
+                .exact_width(INSPECTOR_W)
+                .show(ctx, |ui| district::draw(ui, app, world, d));
         }
         egui_macroquad::egui::TopBottomPanel::bottom("log")
             .resizable(true)

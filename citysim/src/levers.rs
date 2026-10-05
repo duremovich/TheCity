@@ -668,6 +668,7 @@ impl World {
             v.retain(|&h| h != home);
         }
         self.invalidate_flow_fields();
+        crate::systems::districts::rebuild(self);
         Ok(residents.len())
     }
 
@@ -759,6 +760,7 @@ impl World {
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);
         self.invalidate_flow_fields();
+        crate::systems::districts::rebuild(self);
         let homeless: Vec<EntityId> = self
             .citizens()
             .into_iter()

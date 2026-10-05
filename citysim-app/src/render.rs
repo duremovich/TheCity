@@ -239,6 +239,48 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
+    // 6b. M12 D43: district borders, a line on every tile edge between two
+    // districts; the selected district's in the selection colour.
+    if app.show_districts {
+        let (w, h) = (world.map.w() as u16, world.map.h() as u16);
+        let sel = app.selected_district;
+        for y in vy0..y1.min(h) {
+            for x in vx0..x1.min(w) {
+                let t = TilePos { x: x as u8, y: y as u8 };
+                let d = world.district_of(t);
+                let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
+                let colour = |o: citysim::DistrictId| {
+                    if sel == Some(d) || sel == Some(o) {
+                        hex(C_SELECTION)
+                    } else {
+                        Color { a: 0.85, ..WHITE }
+                    }
+                };
+                if x + 1 < w {
+                    let e = world.district_of(TilePos { x: (x + 1) as u8, y: y as u8 });
+                    if e != d {
+                        draw_line(p.x + ppt, p.y, p.x + ppt, p.y + ppt, 2.0, colour(e));
+                    }
+                }
+                if y + 1 < h {
+                    let s = world.district_of(TilePos { x: x as u8, y: (y + 1) as u8 });
+                    if s != d {
+                        draw_line(p.x, p.y + ppt, p.x + ppt, p.y + ppt, 2.0, colour(s));
+                    }
+                }
+            }
+        }
+        // Each district's name at its centroid.
+        for dist in &world.districts {
+            if !in_view(dist.centroid) {
+                continue;
+            }
+            let p = cam.tile_to_screen(vec2(f32::from(dist.centroid.x), f32::from(dist.centroid.y)));
+            let dims = measure_text(&dist.name, None, 18, 1.0);
+            draw_text(&dist.name, p.x - dims.width / 2.0, p.y, 18.0, WHITE);
+        }
+    }
+
     // 7. day/night overlay
     let alpha = night_alpha(world.tick);
     if alpha > 0.0 {

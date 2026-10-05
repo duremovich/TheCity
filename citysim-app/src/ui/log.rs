@@ -98,12 +98,12 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             for h in world.holes.values().rev().take(400) {
                 let line = format!(
-                    "{:>3} {} | {:<9} | {} | {:?}",
+                    "{:>3} {} | {:<9} | {} | {}",
                     time::day(h.tick),
                     time::clock(h.tick),
                     format!("{:?}", h.kind),
                     world.name_of(h.victim),
-                    h.zone
+                    world.district_name(h.district)
                 );
                 let text = egui::RichText::new(line).monospace().color(Color32::from_rgb(217, 47, 47));
                 if ui.selectable_label(selected == Some(h.victim), text).clicked() {

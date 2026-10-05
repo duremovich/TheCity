@@ -27,6 +27,8 @@ use crate::world::World;
 /// (oldest goes Unknown without a draw), count it.
 pub fn open_hole(world: &mut World, hole: Hole) -> HoleId {
     let (id, victim) = (hole.id, hole.victim);
+    // M12 D7: the district's crime counter.
+    crate::systems::districts::note_crime_in(world, hole.district);
     world.holes.insert(id, hole);
     let list = world.holes_by_agent.entry(victim).or_default();
     if let Err(i) = list.binary_search(&id) {
@@ -159,6 +161,29 @@ pub fn zone_law_coverage(world: &World, zone: Zone) -> f32 {
         return cfg.coverage_max;
     }
     let cov = (hz as f32 / nz as f32) / (hours_all as f32 / homes_all as f32);
+    cov.clamp(cfg.coverage_min, cfg.coverage_max)
+}
+
+/// M12 D3: guard presence in a district yesterday, the `zone_law_coverage`
+/// formula over the district's standing Homes and `district_watch`:
+/// `(hours_d / homes_d) / (hours_all / homes_all)` clamped to
+/// `coverage_min..=coverage_max`; a district without Homes reads the max,
+/// no guard hours anywhere reads 1. Cached daily in `District::coverage`;
+/// phase 1 has no reader but the aggregates.
+pub fn district_coverage(world: &World, d: crate::components::DistrictId) -> f32 {
+    let cfg = &world.config.bind;
+    let hours = &world.district_watch.yesterday;
+    let hours_all: u32 = hours.iter().sum();
+    if hours_all == 0 {
+        return 1.0;
+    }
+    let homes_all: usize = world.districts.iter().map(|x| x.homes.len()).sum();
+    let nd = world.districts.get(d.index()).map_or(0, |x| x.homes.len());
+    let hd = hours.get(d.index()).copied().unwrap_or(0);
+    if nd == 0 || homes_all == 0 {
+        return cfg.coverage_max;
+    }
+    let cov = (hd as f32 / nd as f32) / (hours_all as f32 / homes_all as f32);
     cov.clamp(cfg.coverage_min, cfg.coverage_max)
 }
 
@@ -300,7 +325,8 @@ fn rewrite_event(world: &mut World, hole: &Hole, bound: Bound) {
 fn attributed_event(world: &mut World, hole: &Hole, bound: Bound, witness: Option<EntityId>) {
     let day = time::day(hole.tick);
     let victim = world.name_of(hole.victim);
-    let what = format!("the {} {} of {victim} on day {day}", hole.zone, hole.kind.noun());
+    let place = world.district_name(hole.district).to_string();
+    let what = format!("the {place} {} of {victim} on day {day}", hole.kind.noun());
     match bound {
         Bound::Actor(a) => {
             let seen = witness.map(|w| format!(", seen by {}", world.name_of(w))).unwrap_or_default();

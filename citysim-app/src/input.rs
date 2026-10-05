@@ -62,11 +62,20 @@ pub fn handle(app: &mut App, world: &mut World) {
                     .into_iter()
                     .find(|&b| world.comp::<citysim::Building>(b).is_some_and(|bd| bd.rect.contains(tile)))
             });
+            // M12 D43: with the borders on, a click on a street tile selects its district.
+            app.selected_district = match app.selected {
+                None if app.show_districts && world.is_street(tile) => Some(world.district_of(tile)),
+                _ => None,
+            };
         }
     }
     if is_key_pressed(KeyCode::Escape) {
         app.selected = None;
+        app.selected_district = None;
         app.follow = false;
+    }
+    if is_key_pressed(KeyCode::B) {
+        app.show_districts = !app.show_districts;
     }
     if is_key_pressed(KeyCode::F) {
         app.follow = app.selected.is_some() && !app.follow;

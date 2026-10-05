@@ -113,7 +113,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             BuildingKind::Lot => {
                 ui.label(format!(
                     "{} · a vacant Lot: an NPC Registers a Bar or a Block here, a corp Grows one",
-                    world.map.zone(b.door)
+                    world.district_name(world.district_of(b.door))
                 ));
             }
         }

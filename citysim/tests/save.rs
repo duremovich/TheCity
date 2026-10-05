@@ -215,3 +215,43 @@ fn test_pre_m11_save_loads() {
         m11.comp::<citysim::Corp>(corp).expect("c").governance
     );
 }
+
+/// M12 D46: a save from before districts has no `[districts]` config, no
+/// `districts`, `district_watch`, `report_places` or `eviction_places`:
+/// loading one rebuilds the grid and the rows with empty aggregates, and it
+/// runs.
+#[test]
+fn test_pre_m12_save_loads() {
+    let mut w = World::new(19, Config::load().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY + 10);
+    let text = save::to_ron(&w);
+    let text = strip_field(&text, "districts:(names");
+    // The world's districts and every DayRow's district slots.
+    let mut text = text;
+    while text.contains("districts:[") {
+        text = strip_list_field(&text, "districts:[");
+    }
+    let text = strip_field(&text, "district_watch:(today");
+    let text = strip_list_field(&text, "report_places:[");
+    let text = strip_list_field(&text, "eviction_places:[");
+    assert!(!text.contains("districts:") && !text.contains("district_watch:"), "the M12 keys are stripped");
+    let mut back = save::from_ron(&text).expect("a pre-M12 save loads");
+    assert_eq!(back.config.districts, w.config.districts, "the assets' cuts");
+    assert_eq!(back.districts.len(), 8);
+    assert_eq!(back.district_grid, w.district_grid, "the grid is rebuilt");
+    for (a, b) in back.districts.iter().zip(&w.districts) {
+        assert_eq!(a.name, b.name);
+        assert_eq!(a.homes, b.homes);
+        assert_eq!(a.population, 0, "aggregates start empty");
+        assert!(!a.control_init);
+    }
+    // The zone watch moved to each zone's first district.
+    let moved: u32 = back.district_watch.yesterday.iter().sum();
+    assert_eq!(moved, back.zone_watch.yesterday.iter().sum::<u32>());
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.districts.iter().any(|d| d.population > 0), "the next midnight aggregates");
+    assert!(back.districts.iter().all(|d| d.control_init));
+    // A current save keeps its districts bit for bit.
+    let text = save::to_ron(&w);
+    assert_eq!(save::to_ron(&save::from_ron(&text).expect("loads")), text);
+}

@@ -49,6 +49,16 @@ fn class_with(world: &World, agent: EntityId, execs: &BTreeSet<EntityId>) -> Cla
     Class::Street
 }
 
+/// Every corp's exec (for [`class_in`] over many agents in one pass).
+pub fn exec_set(world: &World) -> BTreeSet<EntityId> {
+    execs(world)
+}
+
+/// [`class_of`] with the exec set computed once by the caller.
+pub fn class_in(world: &World, agent: EntityId, execs: &BTreeSet<EntityId>) -> Class {
+    class_with(world, agent, execs)
+}
+
 /// The agent's class (§ 7): Corp first (a homeless corp worker is Corp).
 pub fn class_of(world: &World, agent: EntityId) -> Class {
     class_with(world, agent, &execs(world))
@@ -91,7 +101,7 @@ pub fn aggregate(members: &[(f32, bool, f32)], evictions_7d: u32) -> ClassAggreg
 }
 
 /// D34: one Home's fear, yesterday's guard-hours ÷ `fear_hours_full`, capped at 1.
-fn home_fear(world: &World, home: EntityId) -> f32 {
+pub fn home_fear(world: &World, home: EntityId) -> f32 {
     let full = world.config.classes.fear_hours_full.max(1e-6);
     let hours = world.home_watch.yesterday.get(&home).copied().unwrap_or(0);
     (f32::from(hours) / full).min(1.0)

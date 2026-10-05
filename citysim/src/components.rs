@@ -438,6 +438,8 @@ pub enum Shock {
     /// M10: a member's killing, already shocked as `MemberKilled { by_rival:
     /// false }` and consumed, was later laid to a rival: the difference.
     RivalNamed,
+    /// M12 D8: lost control of a district (not a grudge).
+    LostDistrict,
 }
 
 impl Shock {
@@ -456,6 +458,7 @@ impl Shock {
             Shock::RivalNamed => {
                 Shock::MemberKilled { by_rival: true }.severity() - Shock::MemberKilled { by_rival: false }.severity()
             }
+            Shock::LostDistrict => 0.5,
         }
     }
 
@@ -672,6 +675,8 @@ pub enum CorpShock {
     Strike,
     Undercut,
     BuildingLost,
+    /// M12 D8: lost control of a district.
+    LostDistrict,
 }
 
 impl CorpShock {
@@ -685,6 +690,7 @@ impl CorpShock {
             CorpShock::Strike => 0.8,
             CorpShock::Undercut => 0.3,
             CorpShock::BuildingLost => 0.5,
+            CorpShock::LostDistrict => 0.4,
         }
     }
 }
@@ -1612,6 +1618,10 @@ pub struct Hole {
     pub kind: HoleKind,
     pub victim: EntityId,
     pub zone: Zone,
+    /// M12 D5: the district of the victim's tile; UNSET in a pre-M12 save
+    /// until `migrate_legacy` sets the zone's first district.
+    #[serde(default = "DistrictId::unset")]
+    pub district: DistrictId,
     pub tick: Tick,
     /// The ring entry to rewrite on binding.
     pub event_id: u64,
@@ -1639,32 +1649,43 @@ pub enum Bound {
 
 /// Bits of `DayTrace::flags`.
 pub mod trace_flags {
-    pub const ALIVE: u8 = 1;
-    pub const JAILED: u8 = 2;
-    pub const HOMELESS: u8 = 4;
-    pub const EMPLOYED: u8 = 8;
-    pub const GANG: u8 = 16;
-    pub const STATISTICAL_ALL_DAY: u8 = 32;
-    pub const SLEPT_AT_HOME: u8 = 64;
-    pub const ATE: u8 = 128;
+    pub const ALIVE: u16 = 1;
+    pub const JAILED: u16 = 2;
+    pub const HOMELESS: u16 = 4;
+    pub const EMPLOYED: u16 = 8;
+    pub const GANG: u16 = 16;
+    pub const STATISTICAL_ALL_DAY: u16 = 32;
+    pub const SLEPT_AT_HOME: u16 = 64;
+    pub const ATE: u16 = 128;
+    /// M12 phase 3: slept in a booked Hotel bed.
+    pub const HOTEL: u16 = 1 << 8;
+    /// M12 phase 3: slept in a squat.
+    pub const SQUAT: u16 = 1 << 9;
 }
 
-/// One day of an adult's life, packed into a u32 for the save:
-/// zone (3 bits) | flags (8) << 3 | hunger band (2) << 11 | mood band (2) << 13.
+/// One day of an adult's life, packed into a u32 for the save (M12 D4):
+/// zone (3 bits) | flags 0-7 (8) << 3 | hunger band (2) << 11 | mood band (2) << 13
+/// | district (4) << 15 | has-district (1) << 19 | flags 8-9 (2) << 20.
+/// A pre-M12 value has bit 19 clear and decodes `district = UNSET`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(from = "u32", into = "u32")]
 pub struct DayTrace {
-    /// Where the agent ended the day.
+    /// The zone the agent ended the day in.
     pub zone: Zone,
-    pub flags: u8,
+    /// The district the agent ended the day in.
+    pub district: DistrictId,
+    pub flags: u16,
     /// `0..=3` band at day end.
     pub hunger: u8,
     /// `0..=3` band at day end.
     pub mood: u8,
 }
 
+/// Bit 19 of a packed `DayTrace`: the district nibble is meaningful.
+const TRACE_HAS_DISTRICT: u32 = 1 << 19;
+
 impl DayTrace {
-    pub fn has(&self, flag: u8) -> bool {
+    pub fn has(&self, flag: u16) -> bool {
         self.flags & flag != 0
     }
 
@@ -1698,9 +1719,12 @@ impl DayTrace {
 impl From<u32> for DayTrace {
     fn from(v: u32) -> DayTrace {
         let z = (v & 0b111) as usize;
+        let district =
+            if v & TRACE_HAS_DISTRICT != 0 { DistrictId(((v >> 15) & 0xf) as u8) } else { DistrictId::UNSET };
         DayTrace {
             zone: Zone::ALL[z.min(Zone::ALL.len() - 1)],
-            flags: ((v >> 3) & 0xff) as u8,
+            district,
+            flags: ((v >> 3) & 0xff) as u16 | (((v >> 20) & 0b11) as u16) << 8,
             hunger: ((v >> 11) & 0b11) as u8,
             mood: ((v >> 13) & 0b11) as u8,
         }
@@ -1709,10 +1733,13 @@ impl From<u32> for DayTrace {
 
 impl From<DayTrace> for u32 {
     fn from(t: DayTrace) -> u32 {
+        let district = if t.district.is_unset() { 0 } else { u32::from(t.district.0 & 0xf) << 15 | TRACE_HAS_DISTRICT };
         t.zone.index() as u32
-            | u32::from(t.flags) << 3
+            | u32::from(t.flags & 0xff) << 3
             | u32::from(t.hunger & 0b11) << 11
             | u32::from(t.mood & 0b11) << 13
+            | district
+            | u32::from((t.flags >> 8) & 0b11) << 20
     }
 }
 
@@ -1831,6 +1858,192 @@ pub struct HomeWatch {
 pub struct ZoneWatch {
     pub today: [u32; 5],
     pub yesterday: [u32; 5],
+}
+
+// ---------------------------------------------------------------------------
+// M12: districts (docs/M12_DISTRICTS.md § 1)
+// ---------------------------------------------------------------------------
+
+/// Most districts a config may define (the `[u32; 12]` watch slots, the
+/// low nibble of `World::district_grid`).
+pub const MAX_DISTRICTS: usize = 12;
+
+/// A district's index in `World::districts` (`[districts]` row order).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
+pub struct DistrictId(pub u8);
+
+impl DistrictId {
+    /// Not yet known: a pre-M12 trace entry or hole, fixed by `World::migrate_legacy`.
+    pub const UNSET: DistrictId = DistrictId(255);
+
+    pub fn unset() -> DistrictId {
+        DistrictId::UNSET
+    }
+
+    pub fn index(self) -> usize {
+        usize::from(self.0)
+    }
+
+    pub fn is_unset(self) -> bool {
+        self == DistrictId::UNSET
+    }
+}
+
+/// Who controls a district (plan D8): the top presence with at least
+/// `[districts] control_min_share` of the total, else Contested.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum Controller {
+    #[default]
+    Contested,
+    City,
+    Gang(EntityId),
+    Corp(EntityId),
+}
+
+impl Controller {
+    /// The CSV code (plan D45): 0 Contested, 1 City, 2 Gang, 3 Corp.
+    pub fn csv_code(self) -> u8 {
+        match self {
+            Controller::Contested => 0,
+            Controller::City => 1,
+            Controller::Gang(_) => 2,
+            Controller::Corp(_) => 3,
+        }
+    }
+
+    /// Tie order (plan D8): City, then gangs, then corps; then lower id.
+    pub fn tie_rank(self) -> (u8, EntityId) {
+        match self {
+            Controller::Contested => (3, EntityId::NONE),
+            Controller::City => (0, EntityId::NONE),
+            Controller::Gang(g) => (1, g),
+            Controller::Corp(c) => (2, c),
+        }
+    }
+
+    /// The controlling entity, if the controller is one.
+    pub fn entity(self) -> Option<EntityId> {
+        match self {
+            Controller::Gang(e) | Controller::Corp(e) => Some(e),
+            Controller::Contested | Controller::City => None,
+        }
+    }
+}
+
+/// The captain's per-district stance (phase 2 scores it; Patrol until then).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum Stance {
+    #[default]
+    Patrol,
+    Crackdown(EntityId),
+    Sweep,
+    Cordon,
+    Withdrawn,
+}
+
+/// Guard-on-shift ticks per district (`DistrictId::index`), today and yesterday.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DistrictWatch {
+    pub today: [u32; MAX_DISTRICTS],
+    pub yesterday: [u32; MAX_DISTRICTS],
+}
+
+/// One district: a cut of a zone (plan "District cuts"), its daily
+/// aggregates (recomputed at midnight by `systems::districts::daily`; `trace`
+/// explains each), its controller and, from phase 2, its law.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct District {
+    pub id: DistrictId,
+    pub name: String,
+    pub zone: Zone,
+    /// Buildings whose door is inside, sorted; rebuilt on load and on any wall change.
+    #[serde(skip)]
+    pub buildings: Vec<EntityId>,
+    /// Walkable tiles inside no building rect (the litter denominator).
+    #[serde(skip)]
+    pub walk_tiles: u32,
+    /// Standing Blocks (Homes) whose door is inside, sorted.
+    #[serde(skip)]
+    pub homes: Vec<EntityId>,
+    /// Living adults binned here by the last aggregate pass, ascending.
+    #[serde(skip)]
+    pub residents: Vec<EntityId>,
+    /// Mean walkable street tile, rounded.
+    #[serde(skip)]
+    pub centroid: TilePos,
+    // --- daily aggregates ---
+    /// Every resident binned here (adults and children).
+    #[serde(default)]
+    pub population: u32,
+    /// Living adults with a Brain binned here.
+    #[serde(default)]
+    pub adults: u32,
+    /// Corp, Street, Dreg adults (`Class::index`).
+    #[serde(default)]
+    pub classes: [u32; 3],
+    /// Mean `(mood + 1) / 2` of the resident adults.
+    #[serde(default)]
+    pub happiness: f32,
+    /// `bind::district_coverage`, normalised `coverage_min..=coverage_max`.
+    #[serde(default)]
+    pub coverage: f32,
+    #[serde(default)]
+    pub fear: f32,
+    /// Phase 4: Street + Dreg residents only.
+    #[serde(default)]
+    pub unrest: f32,
+    #[serde(default)]
+    pub unrest_streak: u16,
+    /// Phase 3: mean litter ÷ 255 over `walk_tiles`.
+    #[serde(default)]
+    pub litter: f32,
+    /// Crimes per day, the last 7, newest last.
+    #[serde(default)]
+    pub crimes: VecDeque<u16>,
+    /// Crimes today, rolled into `crimes` at midnight.
+    #[serde(default)]
+    pub crimes_today: u16,
+    /// Crimes per 100 residents per day over the last 7 days.
+    #[serde(default)]
+    pub crime_rate: f32,
+    #[serde(default)]
+    pub control: Controller,
+    #[serde(default)]
+    pub control_share: f32,
+    #[serde(default)]
+    pub control_since: Tick,
+    /// The first control computation after a seed or a load is silent.
+    #[serde(default)]
+    pub control_init: bool,
+    // --- the law (phase 2) ---
+    #[serde(default)]
+    pub stance: Stance,
+    #[serde(default)]
+    pub stance_since: Tick,
+    /// City guards allocated today.
+    #[serde(default)]
+    pub guards: u8,
+    /// Sanitation workers allocated today (phase 3).
+    #[serde(default)]
+    pub sweepers: u8,
+    #[serde(default)]
+    pub curfew: bool,
+    #[serde(default)]
+    pub crush_until: Option<Tick>,
+    /// Rough sleepers last night (phase 2/3).
+    #[serde(default)]
+    pub rough: u16,
+    #[serde(default)]
+    pub vagrancy_log: VecDeque<Tick>,
+    #[serde(default)]
+    pub shakedowns: VecDeque<(Tick, EntityId)>,
+    #[serde(default)]
+    pub last_riot: Option<Tick>,
+    #[serde(default)]
+    pub last_strike: Option<Tick>,
+    /// The inputs of the last daily pass, by name, for the District panel.
+    #[serde(skip)]
+    pub trace: Vec<(&'static str, f32)>,
 }
 
 // ---------------------------------------------------------------------------

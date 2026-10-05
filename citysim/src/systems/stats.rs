@@ -41,9 +41,12 @@ pub fn live_day_trace(world: &World, id: EntityId) -> DayTrace {
         flags |= trace_flags::STATISTICAL_ALL_DAY;
     }
     flags |= world.day_marks.get(&id).copied().unwrap_or(0);
-    let zone = world.comp::<Position>(id).map_or_else(Default::default, |p| world.map.zone(p.tile));
+    let tile = world.comp::<Position>(id).map(|p| p.tile);
+    let zone = tile.map_or_else(Default::default, |t| world.map.zone(t));
+    let district = tile.map_or(crate::components::DistrictId::UNSET, |t| world.district_of(t));
     DayTrace {
         zone,
+        district,
         flags,
         hunger: DayTrace::hunger_band(world.comp::<Needs>(id).map_or(1.0, |n| n.hunger)),
         mood: DayTrace::mood_band(world.comp::<Mood>(id).map_or(0.0, |m| m.value)),
@@ -70,6 +73,7 @@ pub fn record_traces(world: &mut World) {
     }
     world.day_marks.clear();
     world.zone_watch.yesterday = std::mem::take(&mut world.zone_watch.today);
+    world.district_watch.yesterday = std::mem::take(&mut world.district_watch.today);
     // M11 D34: the guard-hours near each Home roll with the zone watch.
     world.home_watch.yesterday = std::mem::take(&mut world.home_watch.today);
 }
@@ -168,6 +172,18 @@ pub fn snapshot(world: &mut World) {
     row.class_street = cls[1].count;
     row.class_dreg = cls[2].count;
     row.happiness_street = cls[1].happiness;
+    // M12 D45: the district slots and the city-wide street/riot columns.
+    row.dregs = cls[2].count;
+    let slots: Vec<crate::stats::DistrictCols> = world
+        .districts
+        .iter()
+        .take(crate::stats::DISTRICT_SLOTS)
+        .map(|d| (d.coverage, d.control.csv_code(), d.litter, d.unrest, d.crime_rate, d.guards))
+        .collect();
+    let gangs = world.gang_list().len() as u32;
+    let row = &mut world.stats.current;
+    row.districts = slots;
+    row.gangs = gangs;
     let mut coins: Vec<i64> = citizens
         .iter()
         .filter(|&&id| world.has::<Brain>(id) && crate::systems::demography::is_adult(world, id))

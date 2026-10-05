@@ -940,6 +940,7 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
         }
         world.push_event(EventKind::Evicted, &actors, format!("{name} was evicted from {place} by {label} ({reason})"));
         world.eviction_log.push_back(tick);
+        crate::systems::districts::note_eviction(world, home, owner);
         world.stats.current.evictions += 1;
     }
     for c in children {

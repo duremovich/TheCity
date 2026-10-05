@@ -95,10 +95,12 @@ pub enum EventKind {
     CorpOrder,
     Strike,
     Contract,
+    /// M12 districts: a district's controller changed (`[old?, new?]`).
+    DistrictControl,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 54] = [
+    pub const ALL: [EventKind; 55] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -153,6 +155,7 @@ impl EventKind {
         EventKind::CorpOrder,
         EventKind::Strike,
         EventKind::Contract,
+        EventKind::DistrictControl,
     ];
 }
 

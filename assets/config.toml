@@ -532,6 +532,17 @@ dreg_emigrate_days = 7         # 0 = off
 evicted_recruit_days = 14
 evicted_recruit_lawfulness = 0.5
 
+[districts]
+# M12 § 1. One row per district: name, zone letter, and an x-range inside that
+# zone (tiles, cut on road lines). A tile is in the first row whose zone
+# matches and whose x_from <= x < x_to.
+names  = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
+zones  = ["S", "C", "V", "M", "M", "U", "U", "U"]
+x_from = [0, 0, 0, 0, 64, 0, 72, 136]
+x_to   = [256, 256, 256, 64, 256, 72, 136, 256]
+control_min_share = 0.4            # below this the district is Contested
+control_weights = { held_home = 1.0, owned_home = 1.0, owned_other = 3.0, city_per_coverage = 1.0 }
+
 [levers]
 # M11 phase 5: 0.05 -> 0.12 pays for the dole's fourth coin. At 0.10 (the diagnosis's value) the
 # Treasury fell 34k -> 1-5k by day 90 on seeds 42-44 (the dole is ~5,900 a day, Farm overflow ~1,700,

@@ -459,6 +459,8 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     let adult = crate::systems::demography::is_adult(world, id);
     let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return };
     let zone = world.map.zone(tile);
+    let district = world.district_of(tile);
+    let place = world.district_name(district).to_string();
     let tick = world.tick;
     let consequential = crate::systems::law::is_guard(world, id) || world.has::<crate::components::GangMember>(id);
     let base = |kind: HoleKind, event_id: u64, consequential: bool, loot: i64, w: &World| Hole {
@@ -466,6 +468,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         kind,
         victim: id,
         zone,
+        district,
         tick,
         event_id,
         consequential,
@@ -481,7 +484,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         let ev = world.push_event(
             EventKind::Murder,
             &[EntityId::NONE, id],
-            format!("{name} was killed in the {zone} (assailant unknown)"),
+            format!("{name} was killed in {place} (assailant unknown)"),
         );
         world.kill_by(id, DeathCause::Violence, None);
         world.stats.current.deaths_violence_offscreen += 1;
@@ -500,8 +503,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
             p.drift(crate::personality::Drift::Robbed);
         }
         let name = world.name_of(id);
-        let ev =
-            world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in the {zone}"));
+        let ev = world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in {place}"));
         let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
         bind::open_hole(world, hole);
     }
@@ -523,7 +525,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         let ev = world.push_event(
             EventKind::Robbed,
             &[EntityId::NONE, id],
-            format!("{name} was robbed of {loot} in the {zone}"),
+            format!("{name} was robbed of {loot} in {place}"),
         );
         let hole = base(HoleKind::Robbed, ev, consequential, loot, world);
         bind::open_hole(world, hole);

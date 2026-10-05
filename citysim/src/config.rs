@@ -41,6 +41,10 @@ pub struct Config {
     /// emigration (plan D40).
     #[serde(default = "ClassesCfg::off")]
     pub classes: ClassesCfg,
+    /// M12 districts; absent from pre-M12 saves: the assets' cuts (a pure
+    /// partition, behaviour-neutral alone; plan D46).
+    #[serde(default = "DistrictsCfg::from_assets")]
+    pub districts: DistrictsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -896,6 +900,83 @@ impl ClassesCfg {
     }
 }
 
+/// M12 control presence weights (plan D8).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ControlWeights {
+    pub held_home: f32,
+    pub owned_home: f32,
+    pub owned_other: f32,
+    pub city_per_coverage: f32,
+}
+
+/// M12 districts (docs/M12_DISTRICTS.md § 1). One row per district: a name,
+/// a zone letter and a half-open x range inside that zone. A tile is in the
+/// first row whose zone matches its zone and whose range holds its x.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct DistrictsCfg {
+    pub names: Vec<String>,
+    pub zones: Vec<String>,
+    pub x_from: Vec<u16>,
+    pub x_to: Vec<u16>,
+    /// Below this share of the total presence the district is Contested.
+    pub control_min_share: f32,
+    pub control_weights: ControlWeights,
+}
+
+impl DistrictsCfg {
+    /// The `[districts]` block of `assets/config.toml`, for saves written before it existed.
+    pub fn from_assets() -> DistrictsCfg {
+        let dir = Config::find_assets_dir()
+            .unwrap_or_else(|| panic!("assets/config.toml not found; set CITYSIM_ASSETS or run from the repo"));
+        Config::load_from(&dir).districts
+    }
+
+    /// One district, "City", covering the whole map (the v1 city, plan D1).
+    pub fn single() -> DistrictsCfg {
+        DistrictsCfg {
+            names: vec!["City".to_string()],
+            zones: vec!["M".to_string()],
+            x_from: vec![0],
+            x_to: vec![256],
+            control_min_share: 0.4,
+            control_weights: ControlWeights {
+                held_home: 1.0,
+                owned_home: 1.0,
+                owned_other: 3.0,
+                city_per_coverage: 1.0,
+            },
+        }
+    }
+
+    /// The number of rows; panics when the row vectors disagree, a zone
+    /// letter is unknown or there are more than `MAX_DISTRICTS` rows.
+    pub fn row_count(&self) -> usize {
+        let n = self.names.len();
+        for (name, len) in [("zones", self.zones.len()), ("x_from", self.x_from.len()), ("x_to", self.x_to.len())] {
+            assert!(len == n, "[districts] {name} has {len} rows, names has {n}");
+        }
+        assert!(
+            (1..=crate::components::MAX_DISTRICTS).contains(&n),
+            "[districts] has {n} rows; 1..={} allowed",
+            crate::components::MAX_DISTRICTS
+        );
+        for i in 0..n {
+            assert!(self.zone_of(i).is_some(), "[districts] row {i}: unknown zone {:?}", self.zones[i]);
+        }
+        n
+    }
+
+    /// Row `i`'s zone, from its letter.
+    pub fn zone_of(&self, i: usize) -> Option<crate::components::Zone> {
+        let mut chars = self.zones.get(i)?.chars();
+        let c = chars.next()?;
+        if chars.next().is_some() {
+            return None;
+        }
+        crate::components::Zone::parse(c)
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeversCfg {
     pub tax_rate: f32,
@@ -923,6 +1004,7 @@ impl Config {
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
         cfg.assets_dir = assets_dir.to_path_buf();
+        cfg.districts.row_count();
         cfg
     }
 
@@ -994,6 +1076,8 @@ impl Config {
         self.demography.school_meals = false;
         self.economy.price_tenths = false;
         self.rent.rehouse_wait_days = 0;
+        // M12 D1: the v1 city is one district.
+        self.districts = DistrictsCfg::single();
         self
     }
 

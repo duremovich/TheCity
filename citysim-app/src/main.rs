@@ -54,6 +54,11 @@ pub struct App {
     pub ui_hover: bool,
     pub log: ui::log::LogState,
     pub city: ui::city::CityState,
+    /// M12 D43: `B` draws the district borders; with it on, a click on a
+    /// street tile selects the district.
+    pub show_districts: bool,
+    /// M12: the district shown in the right panel when nothing else is selected.
+    pub selected_district: Option<citysim::DistrictId>,
 }
 
 impl App {
@@ -78,6 +83,8 @@ impl App {
             ui_hover: false,
             log: ui::log::LogState::default(),
             city: ui::city::CityState::default(),
+            show_districts: false,
+            selected_district: None,
         }
     }
 
@@ -122,6 +129,10 @@ struct Args {
     fit: bool,
     /// Map file overriding `[world] map` (made absolute).
     map: Option<PathBuf>,
+    /// M12: start with the district borders on (`B`).
+    districts: bool,
+    /// M12: open the District panel on this district index at start.
+    select_district: Option<u8>,
 }
 
 fn parse_args() -> Args {
@@ -139,6 +150,8 @@ fn parse_args() -> Args {
         no_autobind: false,
         fit: false,
         map: None,
+        districts: false,
+        select_district: None,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -160,6 +173,10 @@ fn parse_args() -> Args {
             }
             "--select-name" => args.select_name = Some(it.next().expect("--select-name <NAME>")),
             "--fit" => args.fit = true,
+            "--districts" => args.districts = true,
+            "--select-district" => {
+                args.select_district = Some(it.next().and_then(|s| s.parse().ok()).expect("--select-district <INDEX>"))
+            }
             "--no-autobind" => args.no_autobind = true,
             "--tab" => match it.next().as_deref() {
                 Some("story") => args.story_tab = true,
@@ -223,11 +240,13 @@ async fn main() {
             app.selected = owned.and_then(|b| world.corp_of_building(b));
         }
     }
+    app.show_districts = args.districts;
+    app.selected_district = args.select_district.map(citysim::DistrictId);
     // Screenshots with no selection frame the whole map, as `--fit` does anywhere.
     let unselected = args.select.is_none() && args.select_name.is_none() && args.select_kind.is_none();
     app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
-        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · F5 save · F9 load",
+        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · F5 save · F9 load",
         world.seed()
     ));
 

@@ -120,6 +120,8 @@ pub fn build_on_lot(
         }
     }
     world.invalidate_flow_fields_for_lot(rect);
+    // M12 D1: a new Block joins its district's `homes`.
+    crate::systems::districts::rebuild(world);
     Ok(lot)
 }
 

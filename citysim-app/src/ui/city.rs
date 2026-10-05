@@ -153,6 +153,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
 
         corps_section(ui, app, world);
         classes_section(ui, world);
+        districts_section(ui, app, world);
 
         ui.separator();
         ui.strong("Food");
@@ -444,4 +445,29 @@ fn classes_section(ui: &mut Ui, world: &World) {
     if let Some(t) = world.last_strike {
         ui.small(format!("last strike day {}", citysim::time::day(t)));
     }
+}
+
+/// M12: one row per district (controller, coverage, crime rate); a row
+/// click opens the District panel.
+fn districts_section(ui: &mut Ui, app: &mut App, world: &World) {
+    ui.separator();
+    ui.strong("Districts");
+    egui::Grid::new("city_districts").striped(true).show(ui, |ui| {
+        for h in ["district", "control", "cover", "crime"] {
+            ui.strong(h);
+        }
+        ui.end_row();
+        for d in &world.districts {
+            let sel = app.selected_district == Some(d.id) && app.selected.is_none();
+            if ui.selectable_label(sel, &d.name).clicked() {
+                app.selected = None;
+                app.selected_district = Some(d.id);
+                app.follow = false;
+            }
+            ui.label(crate::ui::district::controller_text(world, d.control));
+            ui.label(format!("{:.2}", d.coverage));
+            ui.label(format!("{:.2}", d.crime_rate));
+            ui.end_row();
+        }
+    });
 }

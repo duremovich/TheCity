@@ -80,6 +80,8 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     let stealth = world.comp::<Skills>(actor).map_or(0.0, |s| s.stealth);
     let actor_building = world.comp::<Position>(actor).and_then(|p| p.building);
     let salience = crime_salience(crime);
+    // M12 D7: the district's crime counter.
+    crate::systems::districts::note_crime(world, tile);
 
     let witnesses: Vec<EntityId> = world
         .bodies()
@@ -611,7 +613,8 @@ pub fn run(world: &mut World) {
 }
 
 /// M10 D33: one tick of watch per on-shift, unjailed guard, in the zone it
-/// stands in (`bind::zone_law_coverage` reads yesterday's totals).
+/// stands in (`bind::zone_law_coverage` reads yesterday's totals), and in
+/// its district (M12 D3, `bind::district_coverage`).
 fn tally_watch(world: &mut World) {
     let tod = world.tick_of_day();
     for i in 0..world.guards().len() {
@@ -622,6 +625,8 @@ fn tally_watch(world: &mut World) {
         let Some(tile) = world.comp::<Position>(g).map(|p| p.tile) else { continue };
         let z = world.map.zone(tile).index();
         world.zone_watch.today[z] += 1;
+        let d = world.district_of(tile).index().min(crate::components::MAX_DISTRICTS - 1);
+        world.district_watch.today[d] += 1;
     }
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
         tally_home_watch(world, tod);
