@@ -367,3 +367,9 @@ Folded into the sketches above rather than a milestone of their own:
 - **Power** (the goods milestone after M14; M12–M14 consumers): a good from generators by tier (fusion, solar rigs, a city grid), consumed by security tiers, ICE, chrome and vehicles; grid dependence vs self-generation as a faction decision; cutting power cripples security.
 - **Water** (the goods milestone): a Farm input and a need; wells, desalination, shipments; scarce in the Sump.
 - **Data** stays the M14 faction resource, not money.
+
+## Addendum 10 (2026-10-05, Dylan): building interiors
+
+- **Room templates per kind** (the verticality/layers milestone, with M12 districts): a `Layout` of typed rooms generated from TOML templates (room types, size ranges, adjacency); capacity from room area by type (beds per barracks area, generators per plant area); factions designate rooms, the solver places them.
+- **Upgrades as the physical Security and Power profiles**: sensors and turrets on walls and ceilings, locks on doors, solar panels and windows on exterior walls (windows feed a sunlight exposure that mood and a nutrition-style need read).
+- **Stairs and elevators** as portals between layers; rooms as named regions for pathfinding, LOD, raids and biographies.
