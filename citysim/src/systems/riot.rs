@@ -207,6 +207,10 @@ pub fn muster_building(world: &World, d: DistrictId) -> Option<EntityId> {
 /// D34: the captain's riot response: courage < 0.4 Contain; lawfulness <
 /// 0.4 and courage ≥ 0.6 Crush; else Disperse. No captain: Contain.
 pub fn response(world: &World) -> RiotResponse {
+    // M12 D42: the player's pin wins.
+    if let Some(r) = world.levers.riot_response {
+        return r;
+    }
     let Some(c) = world.law().and_then(|l| l.captain).filter(|&c| law::is_guard(world, c)) else {
         return RiotResponse::Contain;
     };

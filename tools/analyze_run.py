@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Summarise a TheCity headless run.
 
-Usage: python tools/analyze_run.py run.csv events.tsv [--days N] [--json] [--jail-cap K]
+Usage: python tools/analyze_run.py run.csv [events.tsv] [--days N] [--json] [--jail-cap K]
 
 run.csv    per-day report from `citysim-cli run --report` (stdout). Normally has a header
            line (stats::CSV_HEADER); columns are looked up by name, so new columns are fine.
@@ -15,10 +15,18 @@ M11: an "ownership" section (evictions, rent, foundings, incorporations, acquisi
 bankruptcies, strikes, monopolies, class unrest, each corp slot's treasury and order days),
 CorpOrder transitions per corp, and flags for a corp in the red 3+ days running, any
 monopoly, Street unrest outside 0.2-0.7 and no Dregs for 30+ days running.
+
+M12: a "districts" section (per-district means of coverage, unrest, litter, crime and guards
+from the d1..d8 columns, days per controller, riot/crossfire/vagrancy/hotel-night totals, Dregs
+as a share of adults) and, with an events file, riots, strikes and splits by district and corp
+raids won/lost. Flags: a district above unrest 0.8 for 30+ days running with no riot there,
+district litter above 0.5, no Dregs (`dregs`) for 30+ days running, corp raids never lost.
+The events file is optional; without it the event-based parts are skipped.
 """
 import argparse
 import csv
 import json
+import os
 import re
 import statistics as st
 import sys
@@ -34,6 +42,8 @@ STORY = ["OrderChanged", "Raid", "Jailbreak", "Posture", "Bribe", "TerritoryFlip
          "Bankrupt", "Acquired", "Strike", "CorpOrder", "Contract", "Housed", "Attributed", "Robbed",
          "Assaulted"]
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
+DISTRICTS = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
+CONTROLLERS = {0: "Contested", 1: "City", 2: "Gang", 3: "Corp"}
 
 
 def num(v):
@@ -172,6 +182,7 @@ def analyze(rows, events, jail_cap=None):
         if k in STORY and k not in one_offs and last_day - last >= 30:
             flags.append(f"no {k} events since day {last} ({kinds[k]} before)")
     ownership(rows, events, out, flags)
+    districts(rows, events, out, flags)
     out["flags"] = flags
     return out
 
@@ -257,6 +268,117 @@ def ownership(rows, events, out, flags):
     out["corp_transitions"] = {c: dict(v.most_common()) for c, v in sorted(per.items())}
 
 
+def district_names():
+    """`[districts] names` from assets/config.toml next to this script, else the default."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "assets", "config.toml")
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return list(DISTRICTS)
+    sec = re.search(r"^\[districts\][ \t]*$(.*?)(?=^\[|\Z)", text, re.M | re.S)
+    m = sec and re.search(r"^names\s*=\s*\[(.*?)\]", sec.group(1), re.M | re.S)
+    names = re.findall(r'"([^"]*)"', m.group(1)) if m else []
+    return names or list(DISTRICTS)
+
+
+def day_ranges(ds):
+    """[3, 4, 5, 9] -> "3-5, 9"."""
+    ds = sorted(set(ds))
+    if not ds:
+        return ""
+    have = set(ds)
+    spans = runs(((d, d in have) for d in range(ds[0], ds[-1] + 1)), bool)
+    return ", ".join(f"{a}-{b}" if a != b else f"{a}" for a, b, _ in spans)
+
+
+def districts(rows, events, out, flags):
+    """M12: the district story of a run, from the D45 columns and (if given) the events."""
+    if not rows or "d1_control" not in rows[0]:
+        return
+    names = district_names()
+    days = [int(r["day"]) for r in rows]
+    total = lambda k: sum(col(rows, k))
+
+    # Events: riots (start "{D} is rising: ...", finish "{D} rioted at T: won|lost (...)" or
+    # "{D}'s riot against T fizzled|dispersed: ..."), strikes ("... in {D} walk out"), splits
+    # ("... Blocks in {D}...: the X"), corp raids ("G raided Owner's B: Won|Lost (... food taken)").
+    riot_days, riots_ev, strikes, splits = defaultdict(set), defaultdict(Counter), Counter(), []
+    raids = Counter()
+    if events:
+        alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+        riot_re = re.compile(rf"({alt})(?:( is rising):|'s riot against .*? (fizzled|dispersed):| rioted at .*?: (\w+) \()")
+        for tick, kind, text in events:
+            d = tick // TICKS_PER_DAY
+            if kind == "Riot":
+                m = riot_re.match(text)
+                if m:
+                    riot_days[m.group(1)].add(d)
+                    riots_ev[m.group(1)]["started" if m.group(2) else (m.group(3) or m.group(4))] += 1
+            elif kind == "Strike":
+                m = re.search(rf" in ({alt}) walk out", text)
+                strikes[m.group(1) if m else "?"] += 1
+            elif kind == "Split":
+                m = re.search(rf" Blocks in ({alt})", text)
+                splits.append((d, m.group(1) if m else "?", text))
+            elif kind == "Raid":
+                m = re.match(r".+? raided (.+?)'s .+?: (Won|Lost) \(.* food taken\)$", text)
+                if m and m.group(1) != "the city":
+                    raids[m.group(2)] += 1
+    city_riot_days = {d for d, r in zip(days, rows) if isinstance(r.get("riots"), float) and r["riots"] > 0}
+
+    per = {}
+    for i in range(8):
+        p = f"d{i + 1}_"
+        if p + "control" not in rows[0]:
+            continue
+        name = names[i] if i < len(names) else f"d{i + 1}"
+        ctrl = Counter(CONTROLLERS.get(int(r[p + "control"]), str(r[p + "control"])) for r in rows
+                       if isinstance(r.get(p + "control"), float))
+        v = {k: mean(col(rows, p + k)) for k in ("coverage", "unrest", "litter", "crime", "guards")}
+        v["control_days"] = {c: ctrl[c] for c in CONTROLLERS.values() if ctrl[c]}
+        if events:
+            v["riots"] = dict(riots_ev[name])
+            v["strikes"] = strikes[name]
+            v["splits"] = sum(1 for _, dn, _ in splits if dn == name)
+        per[name] = v
+        rdays = riot_days[name] if events else city_riot_days
+        hot = ((d, isinstance(r.get(p + "unrest"), float) and r[p + "unrest"] > 0.8 and d not in rdays)
+               for d, r in zip(days, rows))
+        for a, b, length in runs(hot, bool):
+            if length >= 30:
+                flags.append(f"{name} unrest > 0.8 days {a}-{b} ({length} days) without a riot there")
+        dirty = [d for d, r in zip(days, rows) if isinstance(r.get(p + "litter"), float) and r[p + "litter"] > 0.5]
+        if dirty:
+            flags.append(f"{name} litter > 0.5 on {len(dirty)} days: {day_ranges(dirty)}")
+
+    o = {k: total(k) for k in ("riots", "crossfire", "vagrancy", "hotel_nights") if k in rows[0]}
+    for k in ("dregs", "squatters", "derelicts", "gangs"):
+        if k in rows[0]:
+            o[k + "_mean"] = mean(col(rows, k))
+    adults = ("class_corp", "class_street", "class_dreg")
+    if "dregs" in rows[0] and all(k in rows[0] for k in adults):
+        share = []
+        for r in rows:
+            a = sum(r[k] for k in adults if isinstance(r.get(k), float))
+            if a > 0 and isinstance(r.get("dregs"), float):
+                share.append(r["dregs"] / a)
+        o["dreg_share_mean"] = mean(share)
+        o["dreg_share_1_5pct_days"] = sum(1 for x in share if 0.01 <= x <= 0.05)
+    if events:
+        o["corp_raids_won"], o["corp_raids_lost"] = raids["Won"], raids["Lost"]
+        o["splits"] = len(splits)
+        o["strike_events"] = sum(strikes.values())
+    out["districts"] = {"city": o, "per_district": per, "splits": [f"day {d}: {t}" for d, _, t in splits]}
+
+    if "dregs" in rows[0]:
+        for a, b, length in runs(zip(days, (r.get("dregs") == 0 for r in rows)), bool):
+            if length >= 30:
+                flags.append(f"no Dregs (dregs == 0) days {a}-{b} ({length} days)")
+    if events and raids["Won"] + raids["Lost"] > 0 and raids["Lost"] == 0:
+        flags.append(f"corp raids never lost ({raids['Won']} won)")
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -291,6 +413,23 @@ def fmt(o):
         L.append("-- CorpOrder transitions per corp --")
         for c, v in o.get("corp_transitions", {}).items():
             L.append(f"  {c}: " + ", ".join(f"{t} x{n}" for t, n in v.items()))
+    if "districts" in o:
+        dd = o["districts"]
+        L.append("-- districts (M12) --")
+        L.append(f(dd["city"]))
+        L.append(f"  {'district':<14}{'cover':>6}{'unrest':>7}{'litter':>7}{'crime':>7}{'guards':>7}  control days")
+        for name, v in dd["per_district"].items():
+            ctrl = " ".join(f"{c}:{n}" for c, n in v["control_days"].items())
+            L.append(f"  {name:<14}{v['coverage']:>6.2f}{v['unrest']:>7.2f}{v['litter']:>7.3f}"
+                     f"{v['crime']:>7.2f}{v['guards']:>7.1f}  {ctrl}")
+        if any("riots" in v for v in dd["per_district"].values()):
+            L.append("  by district: riots started/won/lost/fizzled/dispersed, strikes, splits")
+            for name, v in dd["per_district"].items():
+                r = v["riots"]
+                if r or v["strikes"] or v["splits"]:
+                    rs = "/".join(str(r.get(k, 0)) for k in ("started", "won", "lost", "fizzled", "dispersed"))
+                    L.append(f"    {name:<14}riots {rs}, strikes {v['strikes']}, splits {v['splits']}")
+        L += [f"  {x}" for x in dd["splits"]]
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)
@@ -299,12 +438,12 @@ def fmt(o):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("csv")
-    ap.add_argument("events")
+    ap.add_argument("events", nargs="?")
     ap.add_argument("--days", type=int)
     ap.add_argument("--json", action="store_true")
     ap.add_argument("--jail-cap", type=float)
     a = ap.parse_args()
-    rows, events = load_csv(a.csv), load_events(a.events)
+    rows, events = load_csv(a.csv), (load_events(a.events) if a.events else [])
     if a.days:
         rows = rows[:a.days]
         events = [e for e in events if e[0] // TICKS_PER_DAY < a.days]

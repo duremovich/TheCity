@@ -1004,14 +1004,18 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
     if held.len() < 2 {
         return Err(format!("holds Homes in {} district(s)", held.len()));
     }
+    // M12 phase 5: the god `SplitGang` (`roll` false) skips the character
+    // tests too (the lieutenant's strength, the gang's loyalty); only the
+    // structure (a lieutenant, two held districts, the cap, a Hideout site)
+    // can refuse it.
     let (sl, sll) = (raid::strength(world, leader), raid::strength(world, lt));
-    if sll < cfg.split_strength_ratio * sl {
+    if roll && sll < cfg.split_strength_ratio * sl {
         return Err(format!("lieutenant too weak ({sll:.2} vs {sl:.2})"));
     }
     let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
     let loyalty = members.iter().map(|&m| world.comp::<Personality>(m).map_or(0.5, |p| p.loyalty)).sum::<f32>()
         / members.len().max(1) as f32;
-    if loyalty >= cfg.split_loyalty {
+    if roll && loyalty >= cfg.split_loyalty {
         return Err(format!("too loyal ({loyalty:.2})"));
     }
     // Fix pass (phase 4 review): an emptied gang (a ghost waiting to

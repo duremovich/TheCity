@@ -137,6 +137,45 @@ pub enum PlayerCommand {
     StrikeNow(EntityId),
     /// Every corp's treasury to 0.
     WipeTreasuries,
+    // --- M12 levers (docs/M12_DISTRICTS.md § 7, plan D42) ---
+    /// The city's Sanitation headcount (`0..=60`).
+    SetSanitation(u8),
+    /// A district's sweeper weight multiplier (`0.0..=5.0`; 0 sends no sweepers).
+    SetSanitationWeight {
+        district: crate::components::DistrictId,
+        weight: f32,
+    },
+    /// A district curfew: Vagrancy × `curfew_mult`, submission + `curfew_fear`,
+    /// residents' happiness − 0.05 in the aggregate.
+    SetCurfew {
+        district: crate::components::DistrictId,
+        on: bool,
+    },
+    /// Pin the law's riot response, or (`None`) hand it back to the captain.
+    SetRiotResponse(Option<crate::components::RiotResponse>),
+    // --- M12 god commands (docs/GOD_SCENARIOS_V3.md): districts, out of the rules.
+    /// A riot in the district at the next muster hour, unrest, streak,
+    /// cooldown and caps ignored (one eligible rioter is enough).
+    Riot(crate::components::DistrictId),
+    /// Every street tile of the district to `round(level × 254)`.
+    Litter {
+        district: crate::components::DistrictId,
+        level: f32,
+    },
+    /// Split a gang by the D36 rule minus the roll and the character tests
+    /// (lieutenant strength, loyalty); refused with the reason when the
+    /// structure fails (no lieutenant, one held district, the cap, no site).
+    SplitGang(EntityId),
+    /// A Block, Bar or Hotel goes derelict now.
+    Derelict(EntityId),
+    /// `buyer` (an agent, gang or corp; `None` = the city) buys `building`
+    /// for `price` (paid to the owner, from nowhere when the city sells to
+    /// itself); a derelict is restored to the buyer.
+    BuyBuilding {
+        buyer: Option<EntityId>,
+        building: EntityId,
+        price: i64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -203,6 +242,9 @@ pub struct Levers {
     /// M12 D23: a multiplier on each district's sweeper weight (1.0).
     #[serde(default = "default_guard_weight")]
     pub sanitation_weight: [f32; crate::components::MAX_DISTRICTS],
+    /// M12 D42: the player's riot-response pin; `None` = the captain (D34).
+    #[serde(default)]
+    pub riot_response: Option<crate::components::RiotResponse>,
 }
 
 fn default_guard_weight() -> [f32; crate::components::MAX_DISTRICTS] {
@@ -229,6 +271,7 @@ impl Levers {
             curfew: [false; crate::components::MAX_DISTRICTS],
             sanitation_count: cfg.levers.sanitation_count,
             sanitation_weight: default_guard_weight(),
+            riot_response: None,
         }
     }
 }
@@ -358,6 +401,42 @@ impl World {
                 self.push_event(EventKind::PlayerAction, &[], text);
                 crate::systems::law_brain::redeal(self, "pinned");
             }
+            PlayerCommand::SetSanitation(n) => {
+                self.levers.sanitation_count = (*n).min(60);
+                let text = format!("Sanitation headcount set to {}", self.levers.sanitation_count);
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetSanitationWeight { district, weight } => {
+                let i = district.index();
+                if i >= self.districts.len() {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetSanitationWeight: no such district");
+                    return;
+                }
+                let w = weight.clamp(0.0, 5.0);
+                self.levers.sanitation_weight[i] = w;
+                let text = format!("Sanitation weight in {} set to {w:.2}", self.district_name(*district));
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetCurfew { district, on } => {
+                let i = district.index();
+                if i >= self.districts.len() {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetCurfew: no such district");
+                    return;
+                }
+                self.levers.curfew[i] = *on;
+                self.districts[i].curfew = *on;
+                let name = self.district_name(*district).to_string();
+                let text = if *on { format!("Curfew in {name}") } else { format!("Curfew in {name} lifted") };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetRiotResponse(r) => {
+                self.levers.riot_response = *r;
+                let text = match r {
+                    Some(r) => format!("Riot response pinned to {r:?}"),
+                    None => "Riot response handed back to the captain".to_string(),
+                };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
             PlayerCommand::Arrest(who) => match crate::systems::law::player_arrest(self, *who) {
                 Ok(()) => {
                     let name = self.name_of(*who);
@@ -392,7 +471,12 @@ impl World {
             | PlayerCommand::KillStaff(_)
             | PlayerCommand::SetCorpOrder { .. }
             | PlayerCommand::StrikeNow(_)
-            | PlayerCommand::WipeTreasuries => {
+            | PlayerCommand::WipeTreasuries
+            | PlayerCommand::Riot(_)
+            | PlayerCommand::Litter { .. }
+            | PlayerCommand::SplitGang(_)
+            | PlayerCommand::Derelict(_)
+            | PlayerCommand::BuyBuilding { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -535,7 +619,107 @@ impl World {
                 t.coins = coins;
                 Ok((vec![], format!("set the Treasury to {coins}")))
             }
+            PlayerCommand::Riot(_)
+            | PlayerCommand::Litter { .. }
+            | PlayerCommand::SplitGang(_)
+            | PlayerCommand::Derelict(_)
+            | PlayerCommand::BuyBuilding { .. } => self.cmd_god_district(cmd),
             _ => self.cmd_god_corp(cmd),
+        }
+    }
+
+    /// The M12 god commands on districts (docs/GOD_SCENARIOS_V3.md, plan D42).
+    fn cmd_god_district(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
+        use crate::systems::{gang, litter, ownership, riot, street};
+        let check_district = |w: &World, d: crate::components::DistrictId, what: &str| {
+            if d.index() < w.districts.len() {
+                Ok(w.district_name(d).to_string())
+            } else {
+                Err(format!("{what}: no such district"))
+            }
+        };
+        match *cmd {
+            PlayerCommand::Riot(d) => {
+                let name = check_district(self, d, "Riot")?;
+                riot::start(self, d, true).map_err(|e| format!("Riot in {name}: {e}"))?;
+                Ok((vec![], format!("raised a riot in {name}")))
+            }
+            PlayerCommand::Litter { district, level } => {
+                let name = check_district(self, district, "Litter")?;
+                if self.litter.is_empty() {
+                    return Err("Litter: litter is off".into());
+                }
+                let v = (level.clamp(0.0, 1.0) * 254.0).round() as u8;
+                let tiles = self.districts[district.index()].streets.clone();
+                for &i in &tiles {
+                    if let Some(t) = self.litter.get_mut(i as usize) {
+                        // Rubble (the Damage hook) stays rubble.
+                        if *t != litter::RUBBLE {
+                            *t = v;
+                        }
+                    }
+                }
+                litter::district_means(self);
+                Ok((vec![], format!("littered {} street tiles of {name} to {v}", tiles.len())))
+            }
+            PlayerCommand::SplitGang(g) => {
+                let name = self.comp::<Gang>(g).map(|x| x.name.clone()).ok_or("SplitGang: no such gang")?;
+                let s = gang::split(self, g, None, false).map_err(|e| format!("SplitGang {name}: {e}"))?;
+                let sn = self.comp::<Gang>(s).map_or_else(String::new, |x| x.name.clone());
+                Ok((vec![g, s], format!("split {name}: the {sn}")))
+            }
+            PlayerCommand::Derelict(b) => {
+                let what = self.name_of(b);
+                let Some(bd) = self.comp::<Building>(b) else { return Err("Derelict: no such building".into()) };
+                if bd.demolished || bd.derelict {
+                    return Err(format!("Derelict: {what} is already gone or derelict"));
+                }
+                if !street::can_go_derelict(bd.kind) {
+                    return Err(format!("Derelict: a {} cannot go derelict", bd.kind.label()));
+                }
+                if !street::make_derelict(self, b, "by god") {
+                    return Err(format!("Derelict: {what} refused"));
+                }
+                Ok((vec![b], format!("made {what} derelict")))
+            }
+            PlayerCommand::BuyBuilding { buyer, building, price } => {
+                let Some(bd) = self.comp::<Building>(building) else {
+                    return Err("BuyBuilding: no such building".into());
+                };
+                if bd.demolished {
+                    return Err("BuyBuilding: demolished".into());
+                }
+                let (owner, derelict) = (bd.owner, bd.derelict);
+                if buyer.is_some_and(|t| !(self.has::<Wallet>(t) || self.has::<Gang>(t) || self.has::<Corp>(t))) {
+                    return Err("BuyBuilding: the buyer is not an agent, gang or corp".into());
+                }
+                if owner == buyer && !derelict {
+                    return Err("BuyBuilding: the buyer owns it".into());
+                }
+                let price = price.max(0);
+                // As every M11 flow: the buyer pays, the owner (or the city) is paid.
+                let paid = if owner == buyer {
+                    0
+                } else {
+                    ownership::charge(self, buyer, owner, price, ownership::Flow::Sale)
+                };
+                let what = self.name_of(building);
+                let (from, to) = (self.owner_label(owner), self.owner_label(buyer));
+                if derelict {
+                    street::restore(self, building, buyer, "bought by god");
+                } else {
+                    crate::systems::corps::move_building(self, building, buyer);
+                    if buyer.is_none() {
+                        crate::systems::corps::end_contract(self, building, "bought by the city");
+                    }
+                }
+                if let Some(c) = owner.filter(|&o| self.has::<Corp>(o) && Some(o) != buyer) {
+                    ownership::push_corp_shock(self, c, CorpShock::BuildingLost);
+                }
+                let actors: Vec<EntityId> = [Some(building), owner, buyer].into_iter().flatten().collect();
+                Ok((actors, format!("{to} bought {what} from {from} for {paid}")))
+            }
+            _ => Err("not a god command".into()),
         }
     }
 

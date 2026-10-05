@@ -443,7 +443,13 @@ pub fn alloc_weights(world: &World) -> Vec<(f32, Vec<(&'static str, f32)>)> {
         .map(|(i, d)| {
             let inhabited = d.inhabited();
             let base = if inhabited { cfg.alloc_base } else { 0.0 };
-            let crime = if mean > 0.0 && inhabited { cfg.alloc_crime * (d.crime_rate / mean).min(3.0) } else { 0.0 };
+            // Phase 5 calibration: squared, so the worst district draws twice the
+            // best's guards on most days (linear gave ~1.6x on seed 42).
+            let crime = if mean > 0.0 && inhabited {
+                cfg.alloc_crime * (d.crime_rate / mean).min(3.0).powf(cfg.alloc_crime_exp)
+            } else {
+                0.0
+            };
             let paid_t = cfg.alloc_paid * paid.get(i).copied().unwrap_or(0.0);
             let landlord = if gang_landlord(world, d.id).is_some() { cfg.alloc_gang_landlord } else { 0.0 };
             // M12 D10: a riot musters or runs here.

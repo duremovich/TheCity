@@ -30,6 +30,12 @@ pub struct CityState {
     pub rent_cap: i64,
     pub no_city_evictions: bool,
     pub subsidise_amount: i64,
+    /// M12 D42: Sanitation headcount, the riot response pin (`None` = the
+    /// captain), and the District panel's per-district weights.
+    pub sanitation_count: u8,
+    pub riot_response: Option<citysim::RiotResponse>,
+    pub guard_weight: [f32; citysim::MAX_DISTRICTS],
+    pub sanitation_weight: [f32; citysim::MAX_DISTRICTS],
     pub synced: bool,
 }
 
@@ -49,6 +55,10 @@ impl Default for CityState {
             rent_cap: 4,
             no_city_evictions: false,
             subsidise_amount: 1000,
+            sanitation_count: 0,
+            riot_response: None,
+            guard_weight: [1.0; citysim::MAX_DISTRICTS],
+            sanitation_weight: [1.0; citysim::MAX_DISTRICTS],
             synced: false,
         }
     }
@@ -71,6 +81,10 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.rent_cap_on = world.levers.rent_cap.is_some();
         app.city.rent_cap = world.levers.rent_cap.unwrap_or(4);
         app.city.no_city_evictions = world.levers.no_city_evictions;
+        app.city.sanitation_count = world.levers.sanitation_count;
+        app.city.riot_response = world.levers.riot_response;
+        app.city.guard_weight = world.levers.guard_weight;
+        app.city.sanitation_weight = world.levers.sanitation_weight;
         app.city.synced = true;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -227,6 +241,23 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             ui.add_enabled(c.rent_cap_on, egui::Slider::new(&mut c.rent_cap, 0..=20).suffix("¢"));
         });
         ui.checkbox(&mut c.no_city_evictions, "the city never evicts");
+        // M12 D42: Sanitation headcount and the riot response pin.
+        ui.add(egui::Slider::new(&mut c.sanitation_count, 0..=60).text("sanitation"));
+        ui.horizontal(|ui| {
+            ui.label("riot response");
+            let combo =
+                egui::ComboBox::from_id_salt("riot_response").selected_text(riot_response_label(c.riot_response));
+            combo.show_ui(ui, |ui| {
+                for r in [
+                    None,
+                    Some(citysim::RiotResponse::Contain),
+                    Some(citysim::RiotResponse::Disperse),
+                    Some(citysim::RiotResponse::Crush),
+                ] {
+                    ui.selectable_value(&mut c.riot_response, r, riot_response_label(r));
+                }
+            });
+        });
         ui.horizontal(|ui| {
             ui.label("law posture");
             let name = |p: Option<citysim::Posture>| p.map_or("Auto (captain)".to_string(), |p| p.to_string());
@@ -266,6 +297,12 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
             if c.no_city_evictions != l.no_city_evictions {
                 app.cmds.push(PlayerCommand::NoCityEvictions(c.no_city_evictions));
+            }
+            if c.sanitation_count != l.sanitation_count {
+                app.cmds.push(PlayerCommand::SetSanitation(c.sanitation_count));
+            }
+            if c.riot_response != l.riot_response {
+                app.cmds.push(PlayerCommand::SetRiotResponse(c.riot_response));
             }
         }
         ui.horizontal(|ui| {
@@ -447,27 +484,44 @@ fn classes_section(ui: &mut Ui, world: &World) {
     }
 }
 
-/// M12: one row per district (controller, coverage, crime rate); a row
-/// click opens the District panel.
+/// The riot response combo's text.
+pub fn riot_response_label(r: Option<citysim::RiotResponse>) -> String {
+    r.map_or("Auto (captain)".to_string(), |r| format!("{r:?}"))
+}
+
+/// M12 § 8: one row per district (controller, guards, unrest, litter, crime
+/// rate, a live riot); a row click opens the District panel.
 fn districts_section(ui: &mut Ui, app: &mut App, world: &World) {
+    const RED: Color32 = Color32::from_rgb(220, 60, 60);
     ui.separator();
     ui.strong("Districts");
-    egui::Grid::new("city_districts").striped(true).show(ui, |ui| {
-        for h in ["district", "control", "cover", "crime"] {
-            ui.strong(h);
+    let hot = world.config.riots.riot_threshold;
+    egui::Grid::new("city_districts").striped(true).spacing([6.0, 2.0]).show(ui, |ui| {
+        for h in ["district", "control", "grd", "unrest", "litter", "crime"] {
+            ui.label(egui::RichText::new(h).small().strong());
         }
         ui.end_row();
         for d in &world.districts {
             let sel = app.selected_district == Some(d.id) && app.selected.is_none();
-            if ui.selectable_label(sel, &d.name).clicked() {
+            let riot = world.riots.iter().any(|r| r.district == d.id);
+            let mut name = egui::RichText::new(if riot { format!("{} !", d.name) } else { d.name.clone() }).small();
+            if riot {
+                name = name.color(RED);
+            }
+            let row = ui.selectable_label(sel, name);
+            if row.on_hover_text(if riot { "a riot under way" } else { "open the District panel" }).clicked() {
                 app.selected = None;
                 app.selected_district = Some(d.id);
                 app.follow = false;
             }
-            ui.label(crate::ui::district::controller_text(world, d.control));
-            ui.label(format!("{:.2}", d.coverage));
-            ui.label(format!("{:.2}", d.crime_rate));
+            ui.label(crate::ui::district::controller_text(world, d.control).small());
+            ui.small(format!("{}", d.guards));
+            let unrest = egui::RichText::new(format!("{:.2}", d.unrest)).small();
+            ui.label(if d.unrest > hot { unrest.color(RED) } else { unrest });
+            ui.small(format!("{:.2}", d.litter));
+            ui.small(format!("{:.1}", d.crime_rate));
             ui.end_row();
         }
     });
+    ui.small("! a riot under way · unrest red over the riot threshold");
 }

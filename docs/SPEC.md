@@ -796,6 +796,12 @@ Since M11 the tick order is `commands, lod, needs, memory, mood, think, plan, ex
 
 The rules are in [M11_OWNERSHIP.md](M11_OWNERSHIP.md): ownership and purses § 3, rent and eviction § 4, corps and the corp brain § 5, founding and incorporation § 6, classes § 7, the levers § 8, and what the build changed under "Implemented: deviations". The Economy text below is the v1 city, where the Treasury owns everything; `Config::v1_profile()` still runs it that way (no rent, no corps).
 
+### Districts, the street and riots (M12)
+
+Since M12 the tick order is `commands, lod, needs, memory, mood, think, plan, exec, ownership, classes, districts, economy, [bind], law, social, gang, corp_brain, demography, stats`. The v2 map's five zones are cut into eight districts on road lines (`[districts]`: Spire, Civic, Vats, Mid West, Mid East, Sump West, Sump Central, Sump East); `World::district_of(tile)` is one byte read from a per-tile grid whose bit 7 marks a street tile (walkable, inside no building), the litter and sweep domain. `districts::run` does the daily pass at midnight (crime counters, the street's day, litter decay, the sweepers and owners cleaning, aggregates, control, unrest, the riot trigger, district strikes) and the street's nightly pass at 03:00 (Hotel bookings, squats, Vagrancy). Litter is a byte per tile in bands: 0-31 clean, 32-95 littered, 96-191 trashed, 192-254 heaped, 255 rubble (the Damage hook, off); a district's litter is the share of its street tiles at 32 or above. The captain deals the patrol guards to districts and sets a stance per district beside the M9 Jail posture.
+
+The rules are in [M12_DISTRICTS.md](M12_DISTRICTS.md): districts § 1, the law in districts § 2, litter § 3, the street § 4, gangs § 5, unrest, riots, crossfire and strikes § 6, the levers § 7, UI, events and CSV § 8, and what the build changed under § 14 and "Implemented: deviations". `Config::v1_profile()` turns districts into one and litter, the street and riots off.
+
 ### Economy
 
 Daily at `tick_of_day == 0` plus per-event hooks. Inputs: building stocks, Market, Treasury, Jobs, lever `tax_rate`, season. Outputs: stock changes, `price_food`, `price_history` (cap 120), Wallet changes, `days_unpaid`.

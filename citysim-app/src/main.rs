@@ -250,8 +250,16 @@ async fn main() {
     app.show_districts = args.districts;
     app.show_litter = args.litter;
     app.selected_district = args.select_district.map(citysim::DistrictId);
+    if let Some(d) = app.selected_district.and_then(|d| world.districts.get(d.index())) {
+        // Zoomed out so most of the district shows between the panels.
+        app.camera.px_per_tile = camera::MIN_PX_PER_TILE;
+        app.camera.centre_on(d.centroid);
+    }
     // Screenshots with no selection frame the whole map, as `--fit` does anywhere.
-    let unselected = args.select.is_none() && args.select_name.is_none() && args.select_kind.is_none();
+    let unselected = args.select.is_none()
+        && args.select_name.is_none()
+        && args.select_kind.is_none()
+        && args.select_district.is_none();
     app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
         "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · F5 save · F9 load",

@@ -1,12 +1,14 @@
-//! M12 District panel (right, read-only): name and zone, population and
-//! class mix, happiness, coverage, fear, crime rate, the controller with its
-//! share and top three presences, the daily trace and (phase 2) the law:
-//! guards allocated and the weight's terms, the stance and its trace, rough
-//! sleepers and Vagrancy in 14 days.
+//! M12 District panel (right, docs/M12_DISTRICTS.md § 8): name and zone,
+//! population and class mix, happiness, coverage, fear, unrest, riots and
+//! strikes, crime rate, the controller with its share and top three
+//! presences, the daily trace, the law (guards allocated and the weight's
+//! terms, the stance and its trace, rough sleepers and Vagrancy in 14 days),
+//! the street (litter, sweepers, derelicts, Hotels), and the district levers
+//! (D42: guard and sanitation weights, curfew, the stance pin).
 
 use egui_macroquad::egui::{self, Color32, RichText, Ui};
 
-use citysim::{Controller, DistrictId, World};
+use citysim::{Controller, DistrictId, PlayerCommand, Stance, World};
 
 use crate::App;
 
@@ -22,6 +24,10 @@ pub fn controller_text(world: &World, c: Controller) -> RichText {
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
+    egui::ScrollArea::vertical().show(ui, |ui| body(ui, app, world, d));
+}
+
+fn body(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
     let dist = world.district(d);
     ui.horizontal(|ui| {
         ui.heading(&dist.name);
@@ -64,16 +70,28 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
         ui.label(dist.last_riot.map_or_else(|| "never".to_string(), |t| format!("day {}", citysim::time::day(t))));
         ui.end_row();
         if let Some(r) = world.riots.iter().find(|r| r.district == d) {
-            ui.label("Riot");
+            ui.label(RichText::new("Riot").color(Color32::from_rgb(220, 60, 60)));
+            let state = match r.departed {
+                Some(t) => format!("marched at {}", citysim::time::clock(t)),
+                None => {
+                    format!("musters day {} {}", citysim::time::day(r.muster_at), citysim::time::clock(r.muster_at))
+                }
+            };
             ui.label(format!(
-                "{} rioters against {} at {} ({:?})",
+                "{} rioters on {} ({:?}) · {state} · response {:?}",
                 r.rioters.len(),
                 world.name_of(r.target),
-                citysim::time::clock(r.muster_at),
+                r.kind,
                 r.response
             ));
             ui.end_row();
         }
+        ui.label("Last strike");
+        ui.label(dist.last_strike.map_or_else(|| "never".to_string(), |t| format!("day {}", citysim::time::day(t))));
+        ui.end_row();
+        ui.label("Curfew");
+        ui.label(if dist.curfew { "on" } else { "off" });
+        ui.end_row();
         ui.label("Crime rate");
         let crimes: u32 = dist.crimes.iter().map(|&c| u32::from(c)).sum();
         ui.label(format!("{:.2} /100/day ({crimes} in 7 days, {} today)", dist.crime_rate, dist.crimes_today));
@@ -85,6 +103,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
         });
         ui.end_row();
     });
+    ui.separator();
+    levers(ui, app, world, d);
     ui.separator();
     law(ui, world, d);
     ui.separator();
@@ -110,6 +130,56 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
             ui.end_row();
         }
     });
+}
+
+/// The stance pin combo's text.
+fn pin_label(world: &World, s: Option<Stance>) -> String {
+    s.map_or_else(|| "Auto (captain)".to_string(), |s| citysim::systems::law_brain::stance_label(world, s))
+}
+
+/// M12 D42: the district levers. The weight sliders edit `app.city` and an
+/// Apply button commits them (a drag does not spam the command log); the
+/// curfew and the stance pin commit at once.
+fn levers(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
+    let i = d.index();
+    if i >= citysim::MAX_DISTRICTS {
+        return;
+    }
+    ui.strong("Levers");
+    let c = &mut app.city;
+    ui.add(egui::Slider::new(&mut c.guard_weight[i], 0.0..=5.0).step_by(0.25).text("guard weight"));
+    ui.add(egui::Slider::new(&mut c.sanitation_weight[i], 0.0..=5.0).step_by(0.25).text("sanitation weight"));
+    let l = &world.levers;
+    let dirty = (c.guard_weight[i] - l.guard_weight[i]).abs() > 1e-4
+        || (c.sanitation_weight[i] - l.sanitation_weight[i]).abs() > 1e-4;
+    if ui.add_enabled(dirty, egui::Button::new("Apply weights")).clicked() {
+        if (c.guard_weight[i] - l.guard_weight[i]).abs() > 1e-4 {
+            app.cmds.push(PlayerCommand::SetGuardWeight { district: d, weight: c.guard_weight[i] });
+        }
+        if (c.sanitation_weight[i] - l.sanitation_weight[i]).abs() > 1e-4 {
+            app.cmds.push(PlayerCommand::SetSanitationWeight { district: d, weight: c.sanitation_weight[i] });
+        }
+    }
+    let mut curfew = l.curfew[i];
+    if ui.checkbox(&mut curfew, "curfew").changed() {
+        app.cmds.push(PlayerCommand::SetCurfew { district: d, on: curfew });
+    }
+    let pinned = l.stance_pin[i];
+    let mut pin = pinned;
+    ui.horizontal(|ui| {
+        ui.label("stance");
+        egui::ComboBox::from_id_salt(("stance_pin", i)).selected_text(pin_label(world, pin)).show_ui(ui, |ui| {
+            for s in [None, Some(Stance::Patrol), Some(Stance::Sweep), Some(Stance::Cordon), Some(Stance::Withdrawn)] {
+                ui.selectable_value(&mut pin, s, pin_label(world, s));
+            }
+            for &g in world.gang_list().iter().filter(|&&g| world.has::<citysim::Gang>(g)) {
+                ui.selectable_value(&mut pin, Some(Stance::Crackdown(g)), pin_label(world, Some(Stance::Crackdown(g))));
+            }
+        });
+    });
+    if pin != pinned {
+        app.cmds.push(PlayerCommand::SetStance { district: d, stance: pin });
+    }
 }
 
 /// M12 phase 3: litter, the sweepers, and the street's rungs here.
@@ -188,7 +258,7 @@ fn law(ui: &mut Ui, world: &World, d: DistrictId) {
             }
         });
     });
-    egui::CollapsingHeader::new("Stance trace").default_open(false).show(ui, |ui| {
+    egui::CollapsingHeader::new("Stance trace (top three)").default_open(true).show(ui, |ui| {
         if dist.stance_trace.is_empty() {
             ui.label("not scored (uninhabited, pinned, Garrison or no captain)");
         }

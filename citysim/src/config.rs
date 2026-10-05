@@ -548,6 +548,10 @@ pub struct LawCfg {
     pub alloc_base: f32,
     #[serde(default = "LawCfg::d_alloc_crime")]
     pub alloc_crime: f32,
+    /// M12 phase 5 calibration: the crime term is `alloc_crime × min(3,
+    /// rate ÷ mean) ^ alloc_crime_exp` (1.0 = the phase 2 linear term).
+    #[serde(default = "LawCfg::d_alloc_crime_exp")]
+    pub alloc_crime_exp: f32,
     #[serde(default = "LawCfg::d_alloc_paid")]
     pub alloc_paid: f32,
     #[serde(default = "LawCfg::d_alloc_gang_landlord")]
@@ -609,6 +613,9 @@ impl LawCfg {
         1.0
     }
     fn d_alloc_crime() -> f32 {
+        1.0
+    }
+    fn d_alloc_crime_exp() -> f32 {
         1.0
     }
     fn d_alloc_paid() -> f32 {

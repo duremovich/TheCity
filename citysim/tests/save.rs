@@ -1,6 +1,8 @@
 //! Save/load round trip.
 
-use citysim::{save, BuildingKind, Config, PlayerCommand, World, TICKS_PER_DAY};
+use std::collections::BTreeMap;
+
+use citysim::{save, BuildingKind, Config, Edge, EntityId, PlayerCommand, RelKind, World, TICKS_PER_DAY};
 
 #[test]
 fn test_save_load_bit_identical() {
@@ -254,4 +256,62 @@ fn test_pre_m12_save_loads() {
     // A current save keeps its districts bit for bit.
     let text = save::to_ron(&w);
     assert_eq!(save::to_ron(&save::from_ron(&text).expect("loads")), text);
+}
+
+/// Every field of every edge, floats as bits, in key order.
+type EdgeBits = ((EntityId, EntityId), (u32, u32, i32, RelKind, u64, Option<u64>, Option<u64>));
+
+fn edge_bits(w: &World) -> Vec<EdgeBits> {
+    w.edges
+        .iter()
+        .map(|(&k, e)| {
+            let f = (
+                e.affinity.to_bits(),
+                e.trust.to_bits(),
+                e.debt,
+                e.kind,
+                e.last_interaction,
+                e.last_birth_tick,
+                e.debt_since,
+            );
+            (k, f)
+        })
+        .collect()
+}
+
+/// M12: the packed edge string round-trips bit-exactly, and saving the
+/// loaded world again gives the same bytes.
+#[test]
+fn test_save_edges_round_trip_lossless() {
+    let mut w = World::new(42, Config::load().v1_profile());
+    w.run_ticks(10 * TICKS_PER_DAY);
+    assert!(w.edges.len() > 100, "a city ten days in knows people");
+    assert!(w.edges.values().any(|e| e.trust != 0.3), "some trust has moved");
+    let text = save::to_ron(&w);
+    assert!(text.contains("edges:\"e1:"), "edges are saved packed");
+    let back = save::from_ron(&text).expect("load");
+    assert_eq!(edge_bits(&back), edge_bits(&w));
+    assert_eq!(save::to_ron(&back), text);
+}
+
+/// M12: a save from before the packed format (edges as a map of key ->
+/// field-named struct) still loads, to the same edges.
+#[test]
+fn test_save_loads_legacy_edge_map() {
+    let mut w = World::new(7, Config::load().v1_profile());
+    w.run_ticks(3 * TICKS_PER_DAY);
+    assert!(!w.edges.is_empty());
+    let text = save::to_ron(&w);
+    // The old serializer: the ordered map of `Edge` structs.
+    let legacy_map: BTreeMap<(EntityId, EntityId), Edge> = w.edges.iter().map(|(&k, e)| (k, e.clone())).collect();
+    let legacy_edges = ron::to_string(&legacy_map).expect("legacy edges");
+    assert!(legacy_edges.starts_with('{') && legacy_edges.contains("affinity:"));
+    let start = text.find("edges:\"e1:").expect("packed edges in save") + "edges:".len();
+    let end = start + 1 + text[start + 1..].find('"').expect("closing quote") + 1;
+    let legacy = format!("{}{}{}", &text[..start], legacy_edges, &text[end..]);
+    assert!(legacy.len() > text.len());
+
+    let back = save::from_ron(&legacy).expect("legacy load");
+    assert_eq!(edge_bits(&back), edge_bits(&w));
+    assert_eq!(save::to_ron(&back), text);
 }

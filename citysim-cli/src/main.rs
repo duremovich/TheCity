@@ -170,6 +170,30 @@ enum Lever {
     Strike(u8),
     /// M12: `stance=<district>:crackdown<gang index>`.
     StanceCrackdown(u8, usize),
+    /// M12 god: `split_gang=<gang index>`.
+    SplitGang(usize),
+    /// M12 god: `derelict=<building index>`.
+    Derelict(u32),
+    /// M12 god: `buy_building=<buyer>:<building index>:<price>`.
+    BuyBuilding(Buyer, u32, i64),
+}
+
+/// Who `buy_building` buys for: `city`, `gang<i>`, `corp<slot>` or an agent's entity index.
+#[derive(Clone, Copy, Debug)]
+enum Buyer {
+    City,
+    Gang(usize),
+    Corp(u8),
+    Agent(u32),
+}
+
+/// The live building with this entity index.
+fn building_at(world: &World, index: u32) -> Result<citysim::EntityId, String> {
+    world
+        .with::<citysim::Building>()
+        .into_iter()
+        .find(|b| b.index == index)
+        .ok_or_else(|| format!("no building {index}"))
 }
 
 /// Who `seize_corp` hands the buildings to.
@@ -224,6 +248,20 @@ impl Lever {
                 district: citysim::DistrictId(d),
                 stance: Some(citysim::Stance::Crackdown(gang(i)?)),
             },
+            Lever::SplitGang(i) => PlayerCommand::SplitGang(gang(i)?),
+            Lever::Derelict(b) => PlayerCommand::Derelict(building_at(world, b)?),
+            Lever::BuyBuilding(buyer, b, price) => PlayerCommand::BuyBuilding {
+                buyer: match buyer {
+                    Buyer::City => None,
+                    Buyer::Gang(i) => Some(gang(i)?),
+                    Buyer::Corp(s) => Some(corp_in_slot(world, s)?),
+                    Buyer::Agent(a) => Some(
+                        world.citizens().into_iter().find(|c| c.index == a).ok_or_else(|| format!("no agent {a}"))?,
+                    ),
+                },
+                building: building_at(world, b)?,
+                price,
+            },
         })
     }
 }
@@ -236,7 +274,12 @@ impl Lever {
 /// `:city`, `:<slot>`), `kill_exec=0`, `kill_staff=0`,
 /// `corp_order=3:Squeeze:30` (or `1:Squeeze:Housing:30`), `strike=0`,
 /// `wipe_corps=1`. M12 (plan D42): `guard_weight=<district>:<weight>`,
-/// `stance=<district>:sweep|patrol|cordon|withdrawn|crackdown<gang index>|auto`.
+/// `stance=<district>:sweep|patrol|cordon|withdrawn|crackdown<gang index>|auto`,
+/// `sanitation=12`, `sanitation_weight=<district>:<weight>`,
+/// `curfew=<district>:on|off`, `riot_response=crush|disperse|contain|auto`;
+/// M12 god levers `riot=<district>`, `litter=<district>:<level 0..1>`,
+/// `split_gang=<gang index>`, `derelict=<building index>`,
+/// `buy_building=<city|gang<i>|corp<slot>|agent index>:<building index>:<price>`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -304,6 +347,25 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 }
             }
         }
+        "split_gang" => Some(Lever::SplitGang(idx(value)?)),
+        "derelict" => Some(Lever::Derelict(value.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?)),
+        "buy_building" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [who, b, price] = parts[..] else {
+                return Err(format!("{spec}: expected <buyer>:<building index>:<price>"));
+            };
+            let buyer = match who {
+                "city" => Buyer::City,
+                w if w.starts_with("gang") => Buyer::Gang(idx(&w[4..])?),
+                w if w.starts_with("corp") => Buyer::Corp(slot(&w[4..])?),
+                w => Buyer::Agent(w.parse::<u32>().map_err(|e| format!("{spec}: bad buyer: {e}"))?),
+            };
+            Some(Lever::BuyBuilding(
+                buyer,
+                b.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?,
+                price.parse::<i64>().map_err(|e| format!("{spec}: bad price: {e}"))?,
+            ))
+        }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -360,6 +422,43 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             PlayerCommand::SetGuardWeight {
                 district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
                 weight: wt.parse::<f32>().map_err(|e| format!("{spec}: bad weight: {e}"))?,
+            }
+        }
+        "sanitation" => PlayerCommand::SetSanitation(num("count")?.clamp(0.0, 255.0) as u8),
+        "sanitation_weight" => {
+            let (d, wt) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<weight>"))?;
+            PlayerCommand::SetSanitationWeight {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                weight: wt.parse::<f32>().map_err(|e| format!("{spec}: bad weight: {e}"))?,
+            }
+        }
+        "curfew" => {
+            let (d, on) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:on|off"))?;
+            let on = match on.to_ascii_lowercase().as_str() {
+                "on" | "1" | "true" => true,
+                "off" | "0" | "false" => false,
+                _ => return Err(format!("{spec}: curfew must be on|off")),
+            };
+            PlayerCommand::SetCurfew {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                on,
+            }
+        }
+        "riot_response" => PlayerCommand::SetRiotResponse(match value.to_ascii_lowercase().as_str() {
+            "auto" => None,
+            "contain" => Some(citysim::RiotResponse::Contain),
+            "disperse" => Some(citysim::RiotResponse::Disperse),
+            "crush" => Some(citysim::RiotResponse::Crush),
+            _ => return Err(format!("{spec}: riot_response must be auto|contain|disperse|crush")),
+        }),
+        "riot" => PlayerCommand::Riot(citysim::DistrictId(
+            value.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?,
+        )),
+        "litter" => {
+            let (d, l) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<level>"))?;
+            PlayerCommand::Litter {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                level: l.parse::<f32>().map_err(|e| format!("{spec}: bad level: {e}"))?,
             }
         }
         "treasury" => PlayerCommand::SetTreasury(value.parse::<i64>().map_err(|e| format!("{spec}: bad coins: {e}"))?),

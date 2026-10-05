@@ -231,7 +231,7 @@ empty_claims_days = 3              # an empty gang loses its claims after this m
 reform_days = 14                   # an emptied gang re-forms no sooner ...
 reform_max_coverage = 1.2          # ... and only while its Hideout's district coverage is below this
 split_strength_ratio = 0.8
-split_loyalty = 0.6
+split_loyalty = 0.66               # M12 phase 5: 0.6 -> 0.66 (mean gang loyalty sits at 0.61-0.71 at a decapitation; at 0.6 seeds 42-44 never split with the phase 5 stat table)
 split_base = 0.5
 max_gangs = 4
 splinter_names = ["Rust Saints", "Low Choir", "Gutter Kings"]
@@ -309,7 +309,8 @@ shift_duty_share = 0.5
 # keeps the M11 routes with none of it.
 district_beats = true
 alloc_base = 1.0
-alloc_crime = 1.0
+alloc_crime = 1.5                # M12 phase 5: 1.0 -> 1.5 with alloc_crime_exp, the worst district >= 2x the best's guards on >= 60 % of days
+alloc_crime_exp = 2.0            # M12 phase 5: the crime ratio squared (linear gave 40/120 days on seed 42)
 alloc_paid = 0.5
 alloc_gang_landlord = 1.5
 alloc_riot = 3.0
@@ -318,7 +319,7 @@ max_crackdowns = 2
 sweep_full = 10                    # rough sleepers that read as full Sweep pressure
 private_fill_coverage = 0.7
 private_fill_weight = 0.5
-vagrancy_base = 0.04               # per rough night at coverage 1.0
+vagrancy_base = 0.25               # per rough night at coverage 1.0; M12 phase 5: 0.04 -> 0.25 (the street rungs leave ~2 rough sleepers a night: 0-3 Vagrancy a run at 0.04)
 sweep_mult = 3.0
 curfew_mult = 2.0
 vagrancy_fine = 3

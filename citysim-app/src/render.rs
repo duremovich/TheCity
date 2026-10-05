@@ -43,6 +43,9 @@ const C_LITTER: [u32; 3] = [0xbdb76b, 0x8b5a2b, 0x8b1a1a];
 /// M12: a derelict's crack, a Hotel's bed.
 const C_DERELICT: u32 = 0x9a5a3a;
 const C_BED: u32 = 0xd8cfe8;
+/// M12 D43: the district overlay's controller fill (the City's grey fainter).
+const DISTRICT_ALPHA: f32 = 0.22;
+const DISTRICT_CITY_ALPHA: f32 = 0.12;
 const SIGHT_TILES: f32 = 6.0;
 
 fn hex(c: u32) -> Color {
@@ -102,6 +105,43 @@ pub fn draw(world: &World, app: &App) {
                 let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
                 let c = Color { a: (f32::from(v) / 255.0).max(0.25), ..hex(C_LITTER[band - 1]) };
                 draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, c);
+            }
+        }
+    }
+
+    // 1c. M12 D43: with the borders on (`B`), each district filled in its
+    // controller's colour, translucent so the map reads; Contested hatched at
+    // 45° (a tile's anti-diagonal on every third diagonal, so they join up).
+    if app.show_districts && !world.districts.is_empty() {
+        let corps = world.corps();
+        let fills: Vec<Option<Color>> = world
+            .districts
+            .iter()
+            .map(|d| {
+                let c = match d.control {
+                    citysim::Controller::Gang(g) => crate::ui::gang_hex(world.gang_index(g)),
+                    citysim::Controller::Corp(k) => {
+                        crate::ui::corp_hex(corps.iter().position(|&c| c == k).unwrap_or(0))
+                    }
+                    citysim::Controller::City => C_OUTLINE,
+                    citysim::Controller::Contested => return None,
+                };
+                let alpha = if d.control == citysim::Controller::City { DISTRICT_CITY_ALPHA } else { DISTRICT_ALPHA };
+                Some(Color { a: alpha, ..hex(c) })
+            })
+            .collect();
+        let (w, h) = (world.map.w() as u16, world.map.h() as u16);
+        for y in vy0..y1.min(h) {
+            for x in vx0..x1.min(w) {
+                let d = world.district_of(TilePos { x: x as u8, y: y as u8 });
+                let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
+                match fills.get(d.index()) {
+                    Some(Some(c)) => draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, *c),
+                    Some(None) if (x + y) % 3 == 0 => {
+                        draw_line(p.x, p.y + ppt, p.x + ppt, p.y, 1.0, Color { a: 0.45, ..WHITE });
+                    }
+                    _ => {}
+                }
             }
         }
     }
@@ -310,6 +350,14 @@ pub fn draw(world: &World, app: &App) {
             }
             let p = cam.tile_to_screen(vec2(f32::from(dist.centroid.x), f32::from(dist.centroid.y)));
             let dims = measure_text(&dist.name, None, 18, 1.0);
+            // A dark backdrop so the name reads over a fill or the hatch.
+            draw_rectangle(
+                p.x - dims.width / 2.0 - 4.0,
+                p.y - dims.offset_y - 3.0,
+                dims.width + 8.0,
+                dims.height + 6.0,
+                Color::new(0.0, 0.0, 0.0, 0.6),
+            );
             draw_text(&dist.name, p.x - dims.width / 2.0, p.y, 18.0, WHITE);
         }
     }

@@ -163,6 +163,16 @@ fn header(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
                 ui.colored_label(RED, "Demolished");
             }
         });
+        // M12: the district, a derelict flag, and a riot's closure.
+        ui.horizontal(|ui| {
+            ui.label(world.district_name(world.district_of(b.door)));
+            if b.derelict {
+                ui.colored_label(RED, "Derelict");
+            }
+            if let Some(t) = b.closed_until.filter(|&t| t > world.tick) {
+                ui.colored_label(RED, format!("Closed (riot) until day {} {}", time::day(t), time::clock(t)));
+            }
+        });
         let tier = ["Sump", "Mid", "Spire"].get(usize::from(b.tier)).copied().unwrap_or("?");
         if b.kind == BuildingKind::Home {
             let cap = world.levers.rent_cap.map_or(String::new(), |c| format!(" (cap {c}¢)"));

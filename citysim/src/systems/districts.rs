@@ -28,6 +28,8 @@ pub const STREET_BIT: u8 = 0x80;
 const ID_MASK: u8 = 0x0f;
 /// Days kept in `District::crimes`.
 const CRIME_DAYS: usize = 7;
+/// M12 D42: the happiness a curfew costs a district's residents.
+pub const CURFEW_HAPPINESS: f32 = 0.05;
 /// Days kept in `World::eviction_places`.
 pub const EVICTION_PLACE_DAYS: u64 = 30;
 
@@ -626,11 +628,15 @@ pub fn aggregates(world: &mut World) {
     let coverage: Vec<f32> =
         (0..n).map(|d| crate::systems::bind::district_coverage(world, DistrictId(d as u8))).collect();
     let fear = district_fear(world);
+    let curfews = world.levers.curfew;
     for (i, d) in world.districts.iter_mut().enumerate() {
         d.population = population[i];
         d.adults = adults[i];
         d.classes = classes[i];
-        d.happiness = if adults[i] == 0 { 0.0 } else { happy[i] / adults[i] as f32 };
+        // M12 D42: the curfew lever; residents pay 0.05 happiness under it.
+        d.curfew = curfews.get(i).copied().unwrap_or(false);
+        let toll = if d.curfew { CURFEW_HAPPINESS } else { 0.0 };
+        d.happiness = if adults[i] == 0 { 0.0 } else { (happy[i] / adults[i] as f32 - toll).max(0.0) };
         d.coverage = coverage[i];
         d.fear = fear[i];
         let crimes: u32 = d.crimes.iter().map(|&c| u32::from(c)).sum();
@@ -659,6 +665,7 @@ pub fn aggregates(world: &mut World) {
             ("crimes_7d", crimes as f32),
             ("crime_rate", d.crime_rate),
             ("homes", d.homes.len() as f32),
+            ("curfew", f32::from(u8::from(d.curfew))),
         ];
     }
 }

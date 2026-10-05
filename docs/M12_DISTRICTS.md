@@ -492,3 +492,67 @@ The phase 1-3 reviews and the phase 3-4 carry-overs, applied before phase 5. The
 - **The M16 hook.** `faction::alertness_mult(world, faction)` (1.0 until M16) scales the riot response (the beat's answering guards), the corp-raid response (posted guards and answering beat) and the stance sweep (`vagrancy_p`).
 - **Splits.** A decapitated gang holding one district does not split (the rule needs two held districts); god_decapitate's gang held one. Kept as specified; a weaker one-district splinter is left for later.
 - **Accepted as they are.** Legacy traces and holes migrate to the zone's first district (D4, cosmetic). `zone_law_coverage` sums the district watch by `District.zone`: districts are cut inside zones, so the sum equals the old per-tile zone tally (parity passed). Crackdown held on 34 of 120 days in the M9 gate (band 20-60 %). Disperse reports the rioters within 8 tiles once, at the clash (the spec's two hours of arrests): kept.
+
+## Implemented: deviations
+
+Where the build departs from the text above. The numbered rows are the plan's Decisions table (`~/.claude/plans/m12-districts.md`, D1-D48); the rest are the phase commits' deviations, the calibration calls (each changed value carries its reason as a comment in `assets/config.toml`) and the fix pass's rulings (§ 14 has the detail). One line each.
+
+### Decisions that changed the spec
+
+- **D1:** `World::districts` (saved) plus a `#[serde(skip)]` byte per tile, `World::district_grid`: low nibble the district, bit 7 a street tile (walkable, inside no building rect). `districts::rebuild` runs at creation, on load and after every wall change. A zoneless map is one district, `City`.
+- **D2:** `district_of`, `is_street` and `district_of_building` are one byte read each; `district(d)` returns an empty default before `rebuild` (review fix).
+- **D3:** the binder, the watch, the trace and class fear moved to districts; the Statistical meeting rule (`lod::stranger_in_zone`), founding tiers and the ground tint stay per zone (districts are 3-5x smaller and would cut the calibrated meeting rate).
+- **D4:** `DayTrace` packs the district into bits 15-18 of the same `u32` with a has-district bit; a legacy entry migrates to its zone's first district (cosmetic, kept).
+- **D5:** `Hole` gains `district`; event texts name the district ("in Sump West") from phase 1.
+- **D6:** tick order `..., classes, districts, economy, ...`; the street's nightly pass at 03:00 (`NIGHTLY_TOD` 180); allocation and stances run inside the law brain's daily rescore.
+- **D7:** aggregates bin adults by Home door, else by tile; crime is fed at the crime tile; a district without Homes or adults reads crime 0 (fix pass).
+- **D8:** control from presence: held Homes 1.0, owned Homes 1.0, other owned buildings 3.0, the city's buildings × coverage; a gang-owned Home weighs `owned_home` (owned and held is 2x; fix pass); Contested below 0.4; a change needs a real takeover to hold (phase 2 review).
+- **D9:** the M9 posture brain is unchanged; `Law.target` keeps its M9 meaning; `law::cracking_down_on` reads the posture or any district stance.
+- **D10:** allocation weight `(base + crime + paid + gang landlord + riot) × lever`, dealt by largest remainder over inhabited districts. Phase 5 makes the crime term `alloc_crime × min(3, rate ÷ mean) ^ alloc_crime_exp` (see calibration). The fix pass kept the paid term on uninhabited districts (gating it removed the beat on the Civic's Markets and the Vats' Farms and broke the M11 spiral gate).
+- **D11:** district beats (a Market and Homes, or four Homes where there is no Market); Garrison empties every district (allocation 0, coverage at its floor): a documented cost.
+- **D12:** per-district stances with hysteresis and `max_crackdowns`; a Lobby hold forces its Crackdown; Patrol's Linear{0.6,0.4} floor means a Crackdown or Sweep needs a brave, lawful captain (documented).
+- **D13:** reports carry their district (`World::report_places`, 512).
+- **D14:** private security fills thin districts through the corp brain's `losses` input.
+- **D15:** Vagrancy fines a payer, jails a broke Statistical sleeper for the night, reports a broke Full or Coarse one; never feeds the gang report log (fix pass); a Homeless district rolls at coverage 1 (fix pass).
+- **D16:** litter is a byte per tile, saved run-length encoded. The fix pass changed `District.litter` from the mean byte to the share of street tiles at or above `visible` (32), the number every band reads.
+- **D17:** deposits ×`deposit_mult` (8, fix pass), capped at 254; an event inside a building lands outside its door (`street_anchor`).
+- **D18:** litter delays a Full mover's next step and a Coarse walk; flow fields never change; Sleep reads the street outside the door (fix pass); a mood term, no new field.
+- **D19:** the rubble hook exists and is off; `Litter` god levels clamp to 254, so god litter never blocks a tile.
+- **D20-D22:** Hotels: a foundable kind, a bed a night paid to the owner, booked by Sleep (Full) or nightly (Statistical); upkeep 10 → 4 (fix pass); occupancy runs 10-20 % of beds against the 30-90 % band (a calibration note, not a fix).
+- **D23:** `Role::Sanitation`, hired toward `levers.sanitation_count` (12), dealt daily by litter × street tiles × the district weight; a changed deal logs `Sanitation`.
+- **D24:** owners pay the City to sweep their doors; a broke owner skips (fix pass); a proud gang sweeps its held Homes.
+- **D25-D26:** derelicts: only Blocks, Bars and Hotels; 16 seeded Sump Blocks (the spec said 8); abandonment and re-letting cover every derelict kind (fix pass); a restored building keeps the capacity it stood at; a gang-held squat is not re-let.
+- **D27:** the Squat goal and squatter component; any path to a Home ends a squat and a booking (fix pass).
+- **D28:** `rehouse_wait_days` 7 and `rehouse_coins_mult` (21 × rent in hand) for everyone without a Home.
+- **D29:** district unrest over Street and Dreg residents with the rent-burden term; strikes read Street unrest only.
+- **D30-D34:** riots muster at a Bar, Market, Hotel or Block door, march as a raid, loot only a Market, Bar or Hotel closed afterwards (fix pass); a crowd too thin at the door is a fizzle (fix pass); Contain and Crush cordon; Disperse reports the rioters within 8 tiles once, at the clash (kept); rioters take a body `riot_promote_hours` (9) before the muster, at most `riot_promote_max` (20).
+- **D35:** crossfire rolls once per brawl for bodies within the radius and, for a riot, sampled Statistical residents; a hit is an Assault or Murder; neither party is a bystander (fix pass).
+- **D36:** splits after a decapitation, two held districts needed (a one-district gang never splits: kept); the old boss stays (fix pass); emptied gangs do not count toward `max_gangs` (fix pass).
+- **D37:** musters at the held Home nearest the target within `muster_near_tiles` (180); the first marcher waits for `min(3, marchers)`; a march that has left is committed.
+- **D38:** target cover gates Raid, Retaliate and BreakOut; `raid::depart` refuses into cover; `raids_into_cover` counts arrivals under a cover that turned mid-march (phase 4), so the M12 gate checks departures tick by tick instead.
+- **D39:** corp raids on the hoard corp's best building in or next to the gang's turf: loot capped (`corp_raid_loot_frac` 0.25 of food, the coin cap), posted private guards, a crew that breaks at half its pairings lost, a raided corp hardens (fix pass).
+- **D40:** no instant hydra: claims cleared after `empty_claims_days`, re-forming gated by district control, coverage and `reform_days`; a dead gang whose Hideout district stays at high coverage never re-forms (fix pass ruling, documented).
+- **D41:** strikes per district on Street unrest, threshold 0.51, cooldown 30 days (fix pass).
+- **D42:** the levers and god commands as listed, CLI spellings `guard_weight`, `stance`, `sanitation`, `sanitation_weight`, `curfew`, `riot_response`, `riot`, `litter`, `split_gang`, `derelict`, `buy_building` (the spec's `day:SetGuardWeight:6:2.0` form does not exist). Phase 5 deviation: the god `SplitGang` skips the lieutenant-strength and loyalty tests as well as the roll (refused only on the structure: no lieutenant, one held district, the gang cap, no Hideout site); with them it was refused for both seed-42 gangs on day 45 and was no lever. `BuyBuilding` charges the buyer (a corp or the City may go negative), restores a derelict to the buyer, and is a god command, not a market.
+- **D43:** overlay keys `B` (districts) and `L` (litter); `D` stays camera pan.
+- **D44:** the M12 event kinds appended; amber in the log.
+- **D45:** eight district slots in the CSV, 56 columns plus eight city columns, before `ticks_per_sec`.
+- **D46:** every new field serde-defaulted; a pre-M12 save loads (phase 1 test).
+- **D47:** nothing new per agent per tick; the gate's 11-12k ticks/s is unchanged from M11.
+- **D48:** the calibration city; `calibrate` re-run in phase 3 (largest move 0.045 on `p_eat`), in the fix pass, and in phase 5 after the allocation and Vagrancy retunes (the calibration city runs the district law; largest move 0.078 on `p_chat_home`).
+
+### Phase deviations and calibration calls
+
+- **Phase 1:** byte-identical 10-day CSV outside the new columns; event texts normalised for place names.
+- **Phase 2:** the allocation's highest-crime district held 2x the lowest's guards on 16 of 120 days (the base weight dominated) and Garrison emptied the districts on 52; carried to phase 5.
+- **Phase 3:** 16 derelict Blocks, not 8 (the Dreg band needed them); litter missed its band by two orders of magnitude and went to the fix pass; Dreg emigration never fired until the fix pass moved it to mood −0.3 for 10 days.
+- **Phase 4:** riots 0.54 × 4 days; `muster_near_tiles` 180; corp raids never lost and loot uncapped (fixed in the fix pass); throughput dips were the CLI's unbuffered `--events` (buffered in the fix pass).
+- **Fix pass:** 41 items (§ 14); the M10 save bound 40 → 45 MB, restored to 40 MB in phase 5.
+- **Phase 5, allocation:** `alloc_crime` 1.0 → 1.5 and a new `alloc_crime_exp` 2.0 (the crime ratio squared). Linear, the worst district held 2x the best's guards on 40 of 87 days outside Garrison; squared (with the phase 5 stat table), 48 of 56. The whole-run figure stays under the bullet's 60 % (48 of 120 on seed 42) because Garrison (D11) zeroes every allocation on 64 days, so the gate asserts the bullet on days outside Garrison and prints the whole-run figure; likewise the gang-landlord bullet is asserted on windows not wholly under Garrison.
+- **Phase 5, Vagrancy:** `vagrancy_base` 0.04 → 0.25. The street rungs (Hotels, squats) leave about two rough sleepers a night, and the fix pass's "rollable only" cut Vagrancy to 0-3 a run. The bullet's "arrests" are read as D15 hits, fines plus jailings (the CSV `vagrancy` column): the jailings alone swung 2-36 on seed 42 between stat tables and loyalty settings, the hits 19-68.
+- **Phase 5, splits:** `split_loyalty` 0.6 → 0.66. After the phase 5 recalibration seeds 42-44 decapitated gangs dozens of times and never split: mean member loyalty sat at 0.61-0.71, just over the bar. At 0.66 seeds 43 and 44 split (2 and 1), seed 42 does not; 0.68 split as often but lost seed 42's Sanitation reallocation in days 90-119, a reminder that the single-seed bullets are chaotic.
+- **Phase 5, riots:** "each with ≥ 6 rioters" is read as the crowd that gathered (`riot_min` 6 is the start condition); the count at the door is printed (10 of 11 on seed 42; 3 is the fizzle line).
+- **Phase 5, raids into cover:** the bullet "no raid departs into cover" is checked per tick at each departure (0 of 15 on seed 42); the arrivals-under-a-turned-cover counter is reported.
+- **Phase 5, the save:** the social graph is saved as one packed string (`edge_map.rs`), lossless and loading the old map form; the day-120 seed-42 save is 21.7 MB (40.5 before, edges 21 → 3.3 MB) and the M10 bound is back at 40 MB.
+- **Phase 5, curfew:** `District.curfew` follows the lever at the midnight aggregate (and at once on the command); residents' happiness reads 0.05 lower under it.
+- **Hotel occupancy** stays under its band (10-20 % of beds against 30-90 %): Hotels are few and the homeless who can pay are fewer; left as a calibration note for M13's corp Hotels.

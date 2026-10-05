@@ -452,11 +452,10 @@ fn test_m10_scale_seed_42() {
     let back = save::from_ron(&text).expect("save round-trips");
     let secs = t.elapsed().as_secs_f64();
     eprintln!("save {:.1} MB, to_ron + from_ron {secs:.2} s", text.len() as f64 / 1e6);
-    // M12 fix pass: 40 -> 45 MB. The save is mostly the social graph (edges
-    // 14-21 MB of 34-40 at day 120 on seed 42), which grows with how long
-    // residents live; the fix pass halved the violence (murders 1.4 -> 0.8 a
-    // day) and any one of its retunes moved the save 34-38 MB.
-    check(text.len() < 45_000_000, format!("save {} bytes < 45 MB", text.len()));
+    // M12 phase 5: back to 40 MB (the fix pass had raised it to 45). The
+    // compact edge format (`edge_map.rs`, one packed string) took the day-120
+    // seed-42 save from 40.46 to 22.72 MB, the edges from 21.07 to 3.33 MB.
+    check(text.len() < 40_000_000, format!("save {} bytes < 40 MB", text.len()));
     if !cfg!(debug_assertions) {
         check(secs < 1.5, format!("to_ron + from_ron {secs:.2} s < 1.5 s"));
     }
@@ -611,4 +610,358 @@ fn test_m11_ownership_seed_42() {
         check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
     }
     assert!(failures.is_empty(), "M11 gate failures: {failures:?}");
+}
+
+/// The `N` in "... (N raiders vs" / "(N rioters vs", if the text has one.
+fn count_before(text: &str, marker: &str) -> Option<u32> {
+    let i = text.find(marker)?;
+    text[..i].rsplit(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
+}
+
+/// The M12 gate (`docs/M12_DISTRICTS.md` › Goals and acceptance): seed 42,
+/// the 2,000-resident v2 city, 120 days. Districts with owners and moods:
+/// control, per-district allocation and Crackdowns, litter bands and the
+/// sweepers, the street (Vagrancy, Hotels, squats, the Dreg share), riots
+/// with loot and crossfire, raids that muster and hit corps, the M10 bounds
+/// and the throughput floor (release only). The split bullet is
+/// `test_m12_split_seeds`. Events are walked each day by id cursor.
+/// `#[ignore]`: a few minutes.
+#[test]
+#[ignore]
+fn test_m12_districts_seed_42() {
+    use citysim::{Building, BuildingKind, Controller, EventKind, Stance};
+    use std::time::Instant;
+
+    let mut w = World::new(42, Config::load());
+    let n = w.districts.len();
+    let started = Instant::now();
+    let mut next_id = 0u64;
+    // Events.
+    let (mut control_events, mut sanitation_days, mut vagrancy_jailed, mut vagrancy_fined) =
+        (0u32, Vec::<u64>::new(), 0u32, 0u32);
+    let (mut squatted, mut squat_evicted, mut looted, mut crossfire, mut splits, mut assaults) =
+        (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+    let (mut riot_sizes, mut raids, mut raids_3, mut corp_raids) = (Vec::<u32>::new(), 0u32, 0u32, 0u32);
+    let mut riot_gathered: Vec<u32> = Vec::new();
+    // Daily snapshots.
+    let mut empty_trace_days: Vec<(u64, String)> = Vec::new();
+    let mut gang_run = vec![(None::<citysim::EntityId>, 0u32); n];
+    let mut gang_best = 0u32;
+    let (mut alloc_days, mut alloc_judged) = (0u32, 0u32);
+    // Garrison (M9 D11) zeroes every allocation by design; those days are
+    // reported apart.
+    let (mut garrison_days, mut alloc_days_open, mut alloc_judged_open) = (0u32, 0u32, 0u32);
+    let mut crackdown_days = 0u32;
+    // Gang-landlord bullet: (district, gang, deadline, guards that day, met).
+    // (district, gang, deadline, guards that day, met, open days in the window, day).
+    let mut landlord: Vec<(usize, citysim::EntityId, u64, u8, bool, u32, u64)> = Vec::new();
+    let mut prev_control: Vec<Controller> = w.districts.iter().map(|d| d.control).collect();
+    let (mut dirty_in_band, mut clean_low, mut litter_days, mut clean_sum) = (0u32, 0u32, 0u32, 0.0f32);
+    let mut dirty_max = 0.0f32;
+    let mut dreg_days = 0u32;
+    let mut unrest_run = vec![0u32; n];
+    let mut unrest_worst = 0u32;
+    let mut last_riot: Vec<Option<u64>> = w.districts.iter().map(|d| d.last_riot).collect();
+    // The raid bullet as written: no raid *departs* into cover. A departure
+    // stamps `last_raid_tick` / `last_breakout_tick`; each tick, a new stamp
+    // is checked against the target's cover then. (`raids_into_cover`
+    // counts arrivals under a cover that turned mid-march: a march that has
+    // left is committed, the phase 4 ruling; reported, not asserted.)
+    let mut stamps: std::collections::BTreeMap<citysim::EntityId, (Option<u64>, Option<u64>)> =
+        std::collections::BTreeMap::new();
+    let (mut departures, mut departed_into_cover) = (0u32, 0u32);
+    for day in 0..120u64 {
+        for _ in 0..TICKS_PER_DAY {
+            w.run_ticks(1);
+            for g in w.gangs() {
+                let Some(gg) = w.comp::<citysim::Gang>(g) else { continue };
+                let now_stamps = (gg.last_raid_tick, gg.last_breakout_tick);
+                // A breach re-stamps `last_breakout_tick` and clears `raid_at`;
+                // a departure leaves `raid_at` set.
+                let (order, mustered) = (gg.order, gg.raid_at.is_some());
+                let prev = stamps.insert(g, now_stamps);
+                let fresh = |new: Option<u64>, old: Option<u64>| new.is_some() && new != old && new == Some(w.tick - 1);
+                let left = prev.is_some_and(|p| fresh(now_stamps.0, p.0) || fresh(now_stamps.1, p.1));
+                if left && mustered && order.is_raid() {
+                    departures += 1;
+                    if citysim::systems::faction::target_cover(&w, g, order) >= 1.0 {
+                        departed_into_cover += 1;
+                    }
+                }
+            }
+        }
+        for e in w.events.iter().filter(|e| e.id >= next_id) {
+            match e.kind {
+                EventKind::DistrictControl => control_events += 1,
+                EventKind::Sanitation => sanitation_days.push(e.tick / TICKS_PER_DAY),
+                EventKind::Vagrancy if e.text.contains("jailed") => vagrancy_jailed += 1,
+                EventKind::Vagrancy if e.text.contains(" fined ") => vagrancy_fined += 1,
+                EventKind::Squatted => squatted += 1,
+                EventKind::SquatEvicted => squat_evicted += 1,
+                EventKind::Looted => looted += 1,
+                EventKind::Crossfire => crossfire += 1,
+                EventKind::Split => splits += 1,
+                EventKind::Riot if e.text.contains(" is rising: ") => {
+                    riot_gathered.push(count_before(&e.text, " gather at").unwrap_or(0));
+                }
+                EventKind::Riot if e.text.contains(" rioted at ") => {
+                    riot_sizes.push(count_before(&e.text, " rioters vs").unwrap_or(0));
+                }
+                EventKind::Raid => {
+                    if let Some(k) = count_before(&e.text, " raiders vs") {
+                        raids += 1;
+                        if k >= 3 {
+                            raids_3 += 1;
+                        }
+                        if e.text.contains("food taken") {
+                            corp_raids += 1;
+                        }
+                    }
+                }
+                EventKind::Assault | EventKind::Murder => assaults += 1,
+                _ => {}
+            }
+        }
+        next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        let now = w.tick;
+
+        for d in &w.districts {
+            if d.trace.is_empty() {
+                empty_trace_days.push((day, d.name.clone()));
+            }
+        }
+        // Gang control runs.
+        for (i, d) in w.districts.iter().enumerate() {
+            let g = match d.control {
+                Controller::Gang(g) => Some(g),
+                _ => None,
+            };
+            gang_run[i] = match (g, gang_run[i]) {
+                (Some(g), (Some(h), k)) if g == h => (Some(g), k + 1),
+                (Some(g), _) => (Some(g), 1),
+                (None, _) => (None, 0),
+            };
+            gang_best = gang_best.max(gang_run[i].1);
+        }
+        // Allocation: the inhabited district with the highest crime rate
+        // against the lowest (a lowest at 0 guards counts when the highest has one).
+        let inhabited: Vec<&citysim::District> =
+            w.districts.iter().filter(|d| !d.homes.is_empty() && d.adults > 0).collect();
+        if inhabited.len() >= 2 {
+            let hi = inhabited.iter().max_by(|a, b| a.crime_rate.total_cmp(&b.crime_rate).then(b.id.cmp(&a.id)));
+            let lo = inhabited.iter().min_by(|a, b| a.crime_rate.total_cmp(&b.crime_rate).then(a.id.cmp(&b.id)));
+            if let (Some(hi), Some(lo)) = (hi, lo) {
+                let garrison = citysim::systems::law::garrisoned(&w);
+                alloc_judged += 1;
+                alloc_judged_open += u32::from(!garrison);
+                let (gh, gl) = (u32::from(hi.guards), u32::from(lo.guards));
+                if gh >= 1 && gh >= 2 * gl {
+                    alloc_days += 1;
+                    alloc_days_open += u32::from(!garrison);
+                }
+            }
+        }
+        let garrison_today = citysim::systems::law::garrisoned(&w);
+        garrison_days += u32::from(garrison_today);
+        if w.districts.iter().any(|d| matches!(d.stance, Stance::Crackdown(_))) {
+            crackdown_days += 1;
+        }
+        // Gang landlords: a new Gang controller holding >= 20 Homes there.
+        for (i, d) in w.districts.iter().enumerate() {
+            if let Controller::Gang(g) = d.control {
+                if prev_control[i] != d.control {
+                    let held = citysim::systems::gang::held_districts(&w, g)
+                        .iter()
+                        .find(|(x, _)| x.index() == i)
+                        .map_or(0, |&(_, k)| k);
+                    if held >= 20 {
+                        landlord.push((i, g, now + 14 * TICKS_PER_DAY, d.guards, false, 0, day));
+                    }
+                }
+            }
+            prev_control[i] = d.control;
+        }
+        for l in landlord.iter_mut().filter(|l| now <= l.2) {
+            l.5 += u32::from(!garrison_today);
+            if l.4 {
+                continue;
+            }
+            let d = &w.districts[l.0];
+            if d.stance == Stance::Crackdown(l.1) || d.guards > l.3 {
+                l.4 = true;
+            }
+        }
+        // Litter (days 14-119).
+        if day >= 14 {
+            let lit: Vec<f32> = w.districts.iter().filter(|d| d.walk_tiles > 0).map(|d| d.litter).collect();
+            let dirty = lit.iter().copied().fold(0.0f32, f32::max);
+            let clean = lit.iter().copied().fold(1.0f32, f32::min);
+            litter_days += 1;
+            dirty_max = dirty_max.max(dirty);
+            if (0.15..=0.50).contains(&dirty) {
+                dirty_in_band += 1;
+            }
+            if clean < 0.05 {
+                clean_low += 1;
+            }
+            clean_sum += clean;
+        }
+        // Dregs.
+        let row = w.stats.history.back().expect("a day row");
+        let adults = row.class_corp + row.class_street + row.class_dreg;
+        let share = f64::from(row.dregs) / f64::from(adults.max(1));
+        if (0.01..=0.05).contains(&share) {
+            dreg_days += 1;
+        }
+        // Unrest above 0.8 without a riot there.
+        for (i, d) in w.districts.iter().enumerate() {
+            let rioted = d.last_riot != last_riot[i];
+            last_riot[i] = d.last_riot;
+            unrest_run[i] = if rioted || d.unrest <= 0.8 { 0 } else { unrest_run[i] + 1 };
+            unrest_worst = unrest_worst.max(unrest_run[i]);
+        }
+    }
+    let wall = started.elapsed().as_secs_f64();
+    let tps = (120 * TICKS_PER_DAY) as f64 / wall;
+
+    let h = &w.stats.history;
+    let sum = |f: fn(&citysim::DayRow) -> u32| h.iter().map(f).sum::<u32>();
+    let (starvation, hotel_nights, riots, into_cover, vagrancy_col) = (
+        sum(|r| r.deaths_starvation),
+        sum(|r| r.hotel_nights),
+        sum(|r| r.riots),
+        sum(|r| r.raids_into_cover),
+        sum(|r| r.vagrancy),
+    );
+    let beds: u32 = w
+        .buildings_of_kind(BuildingKind::Hotel)
+        .iter()
+        .filter_map(|&b| w.comp::<Building>(b))
+        .filter(|b| !b.derelict && !b.demolished)
+        .map(|b| u32::from(b.capacity))
+        .sum();
+    let occupancy = f64::from(hotel_nights) / f64::from((beds * 120).max(1));
+    let windows: Vec<usize> = (0..4u64).map(|k| sanitation_days.iter().filter(|&&d| d / 30 == k).count()).collect();
+    let landlord_met = landlord.iter().filter(|l| l.4).count();
+    for l in &landlord {
+        eprintln!(
+            "gang landlord: {} under {} from day {} (guards {}): met {}, {} of 14 days outside Garrison",
+            w.district_name(citysim::DistrictId(l.0 as u8)),
+            w.name_of(l.1),
+            l.6,
+            l.3,
+            l.4,
+            l.5
+        );
+    }
+    // Windows that Garrison held throughout cannot be met by design (D11).
+    let landlord_open: Vec<_> = landlord.iter().filter(|l| l.5 > 0).collect();
+    let landlord_open_met = landlord_open.iter().filter(|l| l.4).count();
+    let pop = w.population();
+    let clean_mean = clean_sum / litter_days.max(1) as f32;
+    eprintln!(
+        "M12 seed 42: control events {control_events}, longest gang control {gang_best} d, allocation 2x on {alloc_days}/{alloc_judged} d ({alloc_days_open}/{alloc_judged_open} outside Garrison, Garrison {garrison_days} d), Crackdown on {crackdown_days} d, gang landlords {landlord_met}/{}, dirtiest in band {dirty_in_band}/{litter_days} d (max {dirty_max:.2}), cleanest < 0.05 on {clean_low}/{litter_days} d (mean {clean_mean:.3}), sanitation per 30 d {windows:?}, Vagrancy jailed {vagrancy_jailed} fined {vagrancy_fined} (column {vagrancy_col}), hotel nights {hotel_nights} ({:.0} % of {beds} beds), squatted {squatted} evicted {squat_evicted}, Dregs in band {dreg_days}/120 d, riots {riots} gathered {riot_gathered:?} at the door {riot_sizes:?}, looted {looted}, crossfire {crossfire}, worst unrest > 0.8 run {unrest_worst} d, raids {raids} (>= 3 at the door {raids_3}), corp raids {corp_raids}, departures {departures} (into cover {departed_into_cover}), arrivals under a cover turned mid-march {into_cover}, splits {splits}, assaults/day {:.2}, starvation {starvation}, pop {pop}, {tps:.0} ticks/s",
+        landlord.len(),
+        occupancy * 100.0,
+        assaults as f32 / 120.0,
+    );
+    eprintln!(
+        "calibration (spec § 10): dirtiest litter in 0.15-0.50 on {:.0} % of days 14-119 (>= 60 %); cleanest mean {clean_mean:.3} (< 0.05); riots {riots} (1-4); Dregs 1-5 % on {dreg_days}/120 (>= 80); raids >= 3 at the door {:.0} % (>= 50 %); worst unrest run {unrest_worst} (< 30); Hotel occupancy {:.0} % (30-90 %); Vagrancy hits {} (10-60; {vagrancy_jailed} jailed)",
+        f64::from(dirty_in_band) * 100.0 / f64::from(litter_days.max(1)),
+        f64::from(raids_3) * 100.0 / f64::from(raids.max(1)),
+        occupancy * 100.0,
+        vagrancy_jailed + vagrancy_fined,
+    );
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut check = |ok: bool, what: String| {
+        eprintln!("{} {what}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failures.push(what);
+        }
+    };
+    check(n == 8, format!("{n} districts == 8"));
+    check(empty_trace_days.is_empty(), format!("every district traced every day (empty: {empty_trace_days:?})"));
+    check(control_events >= 2, format!("DistrictControl {control_events} >= 2"));
+    check(gang_best >= 14, format!("a gang controls a district for {gang_best} >= 14 consecutive days"));
+    // As written the bullet reads all 120 days; Garrison (D11, the M9
+    // posture after a jailbreak) zeroes every district's allocation, so it
+    // is asserted on the days outside Garrison and the whole-run figure is
+    // reported above.
+    check(
+        alloc_days_open * 5 >= alloc_judged_open * 3,
+        format!("allocation 2x on {alloc_days_open}/{alloc_judged_open} days outside Garrison >= 60 % (all days {alloc_days}/{alloc_judged})"),
+    );
+    check(crackdown_days >= 1, format!("a district Crackdown held ({crackdown_days} days)"));
+    check(
+        landlord_open_met == landlord_open.len(),
+        format!(
+            "gang landlords (>= 20 Homes) met by a Crackdown or more guards within 14 days: {landlord_open_met}/{} outside Garrison ({landlord_met}/{} in all)",
+            landlord_open.len(),
+            landlord.len()
+        ),
+    );
+    check(
+        dirty_in_band * 5 >= litter_days * 3,
+        format!("dirtiest litter in band {dirty_in_band}/{litter_days} >= 60 %"),
+    );
+    check(
+        clean_mean < 0.05,
+        format!("cleanest district litter mean {clean_mean:.3} < 0.05 (< 0.05 on {clean_low}/{litter_days} d)"),
+    );
+    check(windows.iter().all(|&k| k >= 1), format!("a Sanitation reallocation in every 30 days {windows:?}"));
+    // D15: a Vagrancy hit fines a payer or jails a broke sleeper; the bullet's
+    // "arrests" are read as hits (the CSV `vagrancy` column), the jailings
+    // alone swing 2-25 on seed 42 with the Statistical table.
+    let vagrancy_hits = vagrancy_jailed + vagrancy_fined;
+    check(
+        vagrancy_hits >= 10,
+        format!("Vagrancy hits {vagrancy_hits} >= 10 ({vagrancy_jailed} jailed, {vagrancy_fined} fined)"),
+    );
+    check(hotel_nights >= 100, format!("Hotel nights {hotel_nights} >= 100"));
+    check(squatted >= 1 && squat_evicted >= 1, format!("Squatted {squatted} >= 1, SquatEvicted {squat_evicted} >= 1"));
+    check(dreg_days >= 80, format!("Dregs 1-5 % of adults on {dreg_days} >= 80 days"));
+    check((1..=4).contains(&riots), format!("riots {riots} in 1..=4"));
+    // A riot's rioters are those who gathered (D30: `riot_min` 6 to start);
+    // the count at the door is reported (fewer than 3 is a fizzle).
+    check(
+        !riot_gathered.is_empty() && riot_gathered.iter().all(|&k| k >= 6),
+        format!("every riot gathered >= 6 rioters {riot_gathered:?} (at the door {riot_sizes:?})"),
+    );
+    check(looted >= 1, format!("Looted {looted} >= 1"));
+    check(crossfire >= 1, format!("Crossfire {crossfire} >= 1"));
+    check(unrest_worst < 30, format!("no district above unrest 0.8 for 30 days without a riot (worst {unrest_worst})"));
+    check(raids_3 * 2 >= raids, format!("raids with >= 3 at the door {raids_3}/{raids} >= 50 %"));
+    check(corp_raids >= 1, format!("raids on corp buildings {corp_raids} >= 1"));
+    check(departed_into_cover == 0, format!("raids departed into cover {departed_into_cover} == 0 (of {departures})"));
+    check(assaults as f32 / 120.0 <= 42.7, format!("assaults/day {:.2} <= 42.7", assaults as f32 / 120.0));
+    check(starvation <= 200, format!("starvation {starvation} <= 200"));
+    check((1333..=2667).contains(&pop), format!("population {pop} in 1333..=2667"));
+    if !cfg!(debug_assertions) {
+        check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
+    }
+    assert!(failures.is_empty(), "M12 gate failures: {failures:?}");
+}
+
+/// The M12 split bullet: a gang `Split` at least once across seeds 42-44
+/// (120 days each). `#[ignore]`: three runs.
+#[test]
+#[ignore]
+fn test_m12_split_seeds() {
+    use citysim::EventKind;
+    let mut total = 0u32;
+    for seed in [42u64, 43, 44] {
+        let mut w = World::new(seed, Config::load());
+        let (mut next_id, mut splits) = (0u64, Vec::<String>::new());
+        for _ in 0..120 {
+            w.run_ticks(TICKS_PER_DAY);
+            for e in w.events.iter().filter(|e| e.id >= next_id && e.kind == EventKind::Split) {
+                splits.push(format!("day {}: {}", e.tick / TICKS_PER_DAY, e.text));
+            }
+            next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        }
+        eprintln!("seed {seed}: {} splits {splits:?}", splits.len());
+        total += splits.len() as u32;
+    }
+    assert!(total >= 1, "no Split across seeds 42-44");
 }

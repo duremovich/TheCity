@@ -227,6 +227,24 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 (None, None) => ui.colored_label(RED, "Homeless"),
             },
         };
+        // M12 § 8: the district they stand in (and live in, if elsewhere),
+        // and their Vagrancy record from the report list.
+        if let Some(p) = world.comp::<Position>(id) {
+            let here = world.district_of(p.tile);
+            let home = world.comp::<Household>(id).and_then(|h| h.home).map(|h| world.district_of_building(h));
+            let text = match home {
+                Some(h) if h != here => {
+                    format!("In {} · lives in {}", world.district_name(here), world.district_name(h))
+                }
+                _ => format!("In {}", world.district_name(here)),
+            };
+            ui.label(text);
+        }
+        let vagrancy =
+            world.crime_reports().iter().filter(|r| r.suspect == id && r.crime == citysim::Crime::Vagrancy).count();
+        if vagrancy > 0 {
+            ui.label(format!("Vagrancy reports: {vagrancy}"));
+        }
         ownership(ui, app, world, id);
         ui.horizontal(|ui| {
             if let Some(s) = world.comp::<Sentence>(id) {
