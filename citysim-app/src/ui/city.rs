@@ -76,6 +76,20 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             ui.label("Gang");
             ui.label(format!("{}", s.gang_members));
             ui.end_row();
+            ui.label("Tiers");
+            ui.label(format!(
+                "Full {} · Coarse {} · Stat {}",
+                world.tier(citysim::Lod::Full).len(),
+                world.tier(citysim::Lod::Coarse).len(),
+                world.tier(citysim::Lod::Statistical).len()
+            ));
+            ui.end_row();
+            ui.label("Open holes");
+            ui.label(format!("{}", world.holes.len()));
+            ui.end_row();
+            ui.label("Ticks/s");
+            ui.label(format!("{:.0}", app.ticks_per_sec));
+            ui.end_row();
         });
 
         ui.separator();

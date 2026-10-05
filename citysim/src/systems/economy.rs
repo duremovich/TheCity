@@ -31,16 +31,41 @@ fn daily_restock(world: &mut World) {
     let floor = world.config.economy.restock_floor;
     let batch = world.config.economy.restock_batch;
     let Some(wh) = world.building_of_kind(BuildingKind::Warehouse) else { return };
-    for mk in world.buildings_of_kind(BuildingKind::Market).to_vec() {
-        if world.comp::<Building>(mk).is_none_or(|b| b.demolished) {
-            continue;
+    // Every Market's shortfall; when the Reserve cannot cover them all it is
+    // split in proportion to the shortfall (floor division, the remainder one
+    // unit at a time to the lowest ids), so no Market starves last-in-line.
+    let wants: Vec<(EntityId, u32, u32)> = world
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .filter_map(|&mk| {
+            let b = world.comp::<Building>(mk).filter(|b| !b.demolished)?;
+            Some((mk, b.stock_food, floor.saturating_sub(b.stock_food).min(batch)))
+        })
+        .collect();
+    let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
+    let total: u32 = wants.iter().map(|w| w.2).sum();
+    let mut shares: Vec<u32> = if total <= available {
+        wants.iter().map(|w| w.2).collect()
+    } else {
+        wants.iter().map(|w| (u64::from(w.2) * u64::from(available) / u64::from(total.max(1))) as u32).collect()
+    };
+    if total > available {
+        let mut left = available - shares.iter().sum::<u32>();
+        for (share, w) in shares.iter_mut().zip(&wants) {
+            if left == 0 {
+                break;
+            }
+            if *share < w.2 {
+                *share += 1;
+                left -= 1;
+            }
         }
-        let stock = world.comp::<Building>(mk).map_or(0, |b| b.stock_food);
-        let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
-        let moved = floor.saturating_sub(stock).min(batch).min(available);
+    }
+    for (&(mk, stock, _), &moved) in wants.iter().zip(&shares) {
         if moved == 0 {
             continue;
         }
+        let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
         if let Some(b) = world.comp_mut::<Building>(wh) {
             b.stock_food -= moved;
         }

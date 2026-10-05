@@ -290,3 +290,27 @@ fn test_two_thousand_spawn_housed() {
         assert_eq!(clerks.count(), 4, "clerks at Market#{}", m.index);
     }
 }
+
+/// M10 D39: the median single tick of the 2,000-resident city is under 250 µs.
+/// Release only (a debug build is an order of magnitude slower); `#[ignore]`
+/// because it times the machine. Run with `--release -- --ignored`.
+#[test]
+#[ignore]
+fn test_tick_2000_median_under_250us() {
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY);
+    let mut times: Vec<u128> = (0..2000)
+        .map(|_| {
+            let start = std::time::Instant::now();
+            w.tick();
+            start.elapsed().as_nanos()
+        })
+        .collect();
+    times.sort_unstable();
+    let median_us = times[times.len() / 2] as f64 / 1000.0;
+    let p99_us = times[times.len() * 99 / 100] as f64 / 1000.0;
+    eprintln!("tick median {median_us:.1} us, p99 {p99_us:.1} us over 2000 ticks after day 1");
+    if !cfg!(debug_assertions) {
+        assert!(median_us <= 250.0, "median tick {median_us:.1} us > 250 us");
+    }
+}

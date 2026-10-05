@@ -635,6 +635,11 @@ pub struct Job {
     /// one such visit per day, so a short Treasury is not hammered.
     #[serde(default)]
     pub last_wage_attempt_day: Option<u64>,
+    /// Key of the shift whose day of wages is already owed because of law work
+    /// (an arrest or an escort) while the shift was still running; the shift
+    /// itself goes on and `end_shift` does not owe it twice.
+    #[serde(default)]
+    pub shift_credited: Option<i64>,
 }
 
 impl Job {

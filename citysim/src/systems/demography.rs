@@ -523,6 +523,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             tax_accum: 0.0,
             last_shift_day: None,
             last_wage_attempt_day: None,
+            shift_credited: None,
         },
     );
     world.abort_plan(id);

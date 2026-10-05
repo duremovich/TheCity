@@ -40,6 +40,10 @@ pub struct App {
     pub follow: bool,
     pub show_fps: bool,
     pub fps_avg: f32,
+    /// Smoothed sim rate: ticks run divided by the wall seconds they took.
+    pub ticks_per_sec: f32,
+    /// Frame the whole map on the first frame (`--fit`).
+    pub fit_pending: bool,
     pub cmds: Vec<PlayerCommand>,
     pub saves_dir: PathBuf,
     pub status: String,
@@ -63,6 +67,8 @@ impl App {
             follow: false,
             show_fps,
             fps_avg: 60.0,
+            ticks_per_sec: 0.0,
+            fit_pending: false,
             cmds: Vec::new(),
             saves_dir: PathBuf::from("saves"),
             status: String::new(),
@@ -108,6 +114,8 @@ struct Args {
     story_tab: bool,
     /// Do not bind the selected agent's open holes on open (screenshots of an unbound line).
     no_autobind: bool,
+    /// Frame the whole map (screenshots of the full city).
+    fit: bool,
     /// Map file overriding `[world] map` (made absolute).
     map: Option<PathBuf>,
 }
@@ -124,6 +132,7 @@ fn parse_args() -> Args {
         select_name: None,
         story_tab: false,
         no_autobind: false,
+        fit: false,
         map: None,
     };
     let mut it = std::env::args().skip(1);
@@ -145,6 +154,7 @@ fn parse_args() -> Args {
                 )
             }
             "--select-name" => args.select_name = Some(it.next().expect("--select-name <NAME>")),
+            "--fit" => args.fit = true,
             "--no-autobind" => args.no_autobind = true,
             "--tab" => args.story_tab = it.next().as_deref() == Some("story"),
             other => panic!("unknown argument {other}"),
@@ -196,6 +206,9 @@ async fn main() {
             app.camera.centre_on(b.door);
         }
     }
+    // Screenshots with no selection frame the whole map, as `--fit` does anywhere.
+    let unselected = args.select.is_none() && args.select_name.is_none() && args.select_kind.is_none();
+    app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
         "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · F5 save · F9 load",
         world.seed()
@@ -204,6 +217,10 @@ async fn main() {
     let mut frame = 0u32;
 
     loop {
+        // Screen size is only known inside the loop; frame the map on the first pass.
+        if std::mem::take(&mut app.fit_pending) {
+            app.camera.fit();
+        }
         let dt = f64::from(get_frame_time());
         app.fps_avg = app.fps_avg * 0.95 + (1.0 / get_frame_time().max(1e-4)) * 0.05;
 
@@ -218,8 +235,13 @@ async fn main() {
 
         world.set_view(Some(app.camera.view_rect()));
         world.push_commands(&mut app.cmds);
+        let started = std::time::Instant::now();
         for _ in 0..n {
             citysim::tick(&mut world);
+        }
+        if n > 0 {
+            let rate = n as f32 / started.elapsed().as_secs_f32().max(1e-6);
+            app.ticks_per_sec = if app.ticks_per_sec == 0.0 { rate } else { app.ticks_per_sec * 0.95 + rate * 0.05 };
         }
 
         render::draw(&world, &app);

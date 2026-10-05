@@ -63,15 +63,20 @@ pub fn draw(world: &World, app: &App) {
     clear_background(hex(C_GROUND));
     let cam = &app.camera;
     let ppt = cam.px_per_tile;
-    let view = cam.view_rect();
+    // Culling uses the u16 bounds so a whole-map frame reaches column 255.
+    let (vx0, vy0, x1, y1) = cam.view_bounds();
+    let in_view =
+        |t: TilePos| u16::from(t.x) >= vx0 && u16::from(t.x) < x1 && u16::from(t.y) >= vy0 && u16::from(t.y) < y1;
+    let rect_in_view = |r: &citysim::Rect| {
+        u16::from(r.x) < x1
+            && vx0 < u16::from(r.x) + u16::from(r.w)
+            && u16::from(r.y) < y1
+            && vy0 < u16::from(r.y) + u16::from(r.h)
+    };
 
-    // 1. tiles, culled to the view (u16: a view can reach column 255)
-    let (x1, y1) = (
-        (u16::from(view.x) + u16::from(view.w)).min(world.map.w() as u16),
-        (u16::from(view.y) + u16::from(view.h)).min(world.map.h() as u16),
-    );
-    for y in u16::from(view.y)..y1 {
-        for x in u16::from(view.x)..x1 {
+    // 1. tiles, culled to the view
+    for y in vy0..y1 {
+        for x in vx0..x1 {
             let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
             let t = TilePos { x: x as u8, y: y as u8 };
             draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, tile_colour(world.map.tile_at(t), world.map.zone(t)));
@@ -85,7 +90,7 @@ pub fn draw(world: &World, app: &App) {
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
         if brain.lod == Lod::Full {
-            if view.contains(pos.tile) {
+            if in_view(pos.tile) {
                 full.push((id, pos.tile));
             }
         } else if let Some(n) = pos.building.and_then(|b| inside.get_mut(b.index as usize)) {
@@ -96,7 +101,7 @@ pub fn draw(world: &World, app: &App) {
     // 2 + 3. buildings: outline, letter, badge
     for id in world.with::<Building>() {
         let Some(b) = world.comp::<Building>(id) else { continue };
-        if !b.rect.overlaps(&view) {
+        if !rect_in_view(&b.rect) {
             continue;
         }
         let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
@@ -140,7 +145,7 @@ pub fn draw(world: &World, app: &App) {
         let colour = gang_colour(i);
         for &h in &g.territory {
             let Some(b) = world.comp::<Building>(h) else { continue };
-            if !b.rect.overlaps(&view) {
+            if !rect_in_view(&b.rect) {
                 continue;
             }
             let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
@@ -148,7 +153,7 @@ pub fn draw(world: &World, app: &App) {
             draw_rectangle_lines(tl.x + 3.0, tl.y + 3.0, w - 6.0, h - 6.0, 1.5, colour);
         }
         if g.is_sacked(world.tick) {
-            if let Some(b) = world.comp::<Building>(g.hideout).filter(|b| b.rect.overlaps(&view)) {
+            if let Some(b) = world.comp::<Building>(g.hideout).filter(|b| rect_in_view(&b.rect)) {
                 let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
                 dashed_rect(tl.x, tl.y, f32::from(b.rect.w) * ppt, f32::from(b.rect.h) * ppt, colour);
             }
@@ -158,7 +163,7 @@ pub fn draw(world: &World, app: &App) {
     // 4. corpses
     for id in world.with::<Corpse>() {
         let Some(pos) = world.comp::<Position>(id) else { continue };
-        if !view.contains(pos.tile) {
+        if !in_view(pos.tile) {
             continue;
         }
         let p = cam.tile_to_screen(vec2(f32::from(pos.tile.x), f32::from(pos.tile.y)));

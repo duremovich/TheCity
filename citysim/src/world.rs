@@ -694,6 +694,7 @@ impl World {
                         tax_accum: 0.0,
                         last_shift_day: None,
                         last_wage_attempt_day: None,
+                        shift_credited: None,
                     },
                 );
             }

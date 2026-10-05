@@ -123,8 +123,18 @@ fn assign(world: &mut World) {
         let guard = world
             .comp::<crate::components::Job>(id)
             .is_some_and(|j| matches!(j.role, crate::components::Role::Guard | crate::components::Role::Gravedigger));
-        let priority =
-            i32::from(on_screen(pos.tile)) * 3 + i32::from(brain.pinned || gang || guard) * 2 + i32::from(story);
+        // Pinned tops the ladder, then the watch (3), then gang members (2):
+        // at the Coarse cap the farthest gang member falls first, not a guard.
+        let class = if brain.pinned {
+            5
+        } else if guard {
+            3
+        } else if gang {
+            2
+        } else {
+            0
+        };
+        let priority = i32::from(on_screen(pos.tile)) * 4 + class + i32::from(story);
         ranked.push((-priority, pos.tile.manhattan(centre), id.index, id));
     }
     ranked.sort_unstable();
@@ -703,8 +713,13 @@ fn stat_social(world: &mut World, id: EntityId) {
     if neighbours.is_empty() {
         // Nobody known yet: meet a Statistical housemate.
         let home = world.comp::<Household>(id).and_then(|h| h.home);
-        let mates: Vec<EntityId> = world
-            .tier(Lod::Statistical)
+        // Scan a fixed window of 32 Statistical ids around this one in id
+        // order (a household is created together, so its members have nearby
+        // ids) instead of the whole tier.
+        let tier = world.tier(Lod::Statistical);
+        let at = tier.partition_point(|&o| o < id);
+        let window = &tier[at.saturating_sub(16)..(at + 16).min(tier.len())];
+        let mates: Vec<EntityId> = window
             .iter()
             .copied()
             .filter(|&o| o != id && world.comp::<Household>(o).and_then(|h| h.home) == home && home.is_some())

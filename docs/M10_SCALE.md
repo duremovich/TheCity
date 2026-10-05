@@ -221,3 +221,64 @@ All new components and world fields are `#[serde(default)]`; a pre-M10 save load
 ## 9. Out of scope (M11 and later)
 
 Ownership, rent and corps (M11), districts replacing zones (M12), assets (M13), Virt and Data (M14); group-level aggregates beyond what the binder needs; gossip propagating bound crimes; the Statistical tier running gang orders; more than two gangs at seed; a hierarchical pathfinder (lazy fields are enough at 256 × 192; revisit if the map grows again).
+
+## Implemented: deviations
+
+Where the build departs from the text above. The numbered rows are the plan's Decisions table (`~/.claude/plans/m10-scale.md`, D1-D40); the rest are the phase commits' deviations. One line each.
+
+### Decisions that changed the spec
+
+- **D1:** `by_tier` and the guard index are kept exact by `Component` insert/remove hooks on `Brain` and `Job`, `despawn`, `set_lod` and `World::retier`; sorted, `#[serde(skip)]`, rebuilt on load, checked hourly in debug builds.
+- **D2:** the hourly guard cache of § 1 is replaced by an exact incremental role index, `World::by_role`.
+- **D3:** phase 1 step A was verified byte-identical against a baseline CSV before the spread tick changed results on purpose.
+- **D4:** children and the jailed need no code for the spread: children have no Brain, the jailed are always Coarse.
+- **D5:** each Statistical agent runs on a fixed slot `id.index % 60`, 24 times a day, with 60 ticks of decay per run; wealth is recomputed per processed agent.
+- **D6:** the spread test asserts at most `2 x ceil(n / 60)` agents per tick, not a sixtieth.
+- **D7:** `SimRng::hole(id)` seeds a ChaCha8 stream from the world seed and the hole id; it is never stored.
+- **D8:** `HoleId` is a packed collision-free key `(tick << 24) | (victim << 2) | kind`, not a hash, so the map iterates oldest first.
+- **D9:** `holes_by_agent` is a `BTreeMap` of small vectors, rebuilt on load, capped at 8 open holes per victim; the 9th expires the oldest to Unknown.
+- **D10:** `Hole` also carries `spouse`, `loot` and, as built, `home` and `gang` (a Killed victim's are gone by bind time).
+- **D11:** the Unknown share comes from a first `[bind] p_unknown` draw (0.30), because the weighted candidate list is almost never empty.
+- **D12:** the event ring is 50,000 with contiguous ids, so `event_mut(id)` is O(1); `push_event` returns the id.
+- **D13:** victim-side events carry `[EntityId::NONE, victim]` until bound; the app shows `NONE` as "someone".
+- **D14:** map v2 is a `<w> <h>` header, tile rows, a blank line, zone rows, a blank line, then `B` lines with an optional tier; a headerless file is v1.
+- **D15:** `Map` stores `w`, `h` and `zones`; a save keeps its own map, so a v1 save keeps its dimensions.
+- **D16:** `Rect` arithmetic is widened to `u16`, so a rect may reach column 255; the app's whole-map frame still clamps its world view rect to 255 (the on-screen margin covers the last column).
+- **D17:** blocks are 7 x 7 cells between roads, so Lots are 7 x 6 (spec 8 x 6); Markets and Bars are 15 x 6, Farms 15 x 7, Hideouts 15 x 5 and the Precinct 15 x 15.
+- **D18:** a Lot has no walls (one door, ground inside), capacity 0, and is inert; a Security Office is a normal walled building, capacity 12, inert.
+- **D19:** capacities and levers per the plan (jail 80, farm 16, hideout 30, `guard_count` 36, `immigration_per_week` 13, clamps 60 and 30); final restock is 1,200 floor and 1,200 batch, not 900 and 450.
+- **D20:** guards and gravediggers rank above gang members for the Coarse tier and `max_coarse` is 150; after the phase 2 review guards and gravediggers rank 3 against gang members 2, pinned on top.
+- **D21:** `World::local(agent, kind)` resolves the nearest Market or Bar; `mean_price()` replaces `market()`, which is deleted.
+- **D22:** `ReleaseReserve` splits evenly with the remainder to the lowest id; a Market without room drops its share and the leftover goes to Markets with room in a second pass.
+- **D23:** `Config::v1_profile()` puts unit tests back on the v1 map and scale; scenario gates use the v2 default.
+- **D24:** a population below capacity spreads over Homes by even stride, so a 500-agent world spans every zone.
+- **D25:** `Config::scaled_to(n)` scales jobs, stocks, levers, gang size and restock keys for calibrate and the parity test.
+- **D26:** calibrate v2 and the parity test are gangless; `[lod] stat_violence_mult` is the off-screen violence knob, pinned to 1.0 in parity.
+- **D27:** off-screen versus body violent-death rates are reported by the scenario, not asserted, because bodies are selected for violence.
+- **D28:** `World.stat_table` is not saved; an old four-row file loads as legacy and `run_statistical` panics with the calibrate message.
+- **D29:** `p_steal` is counted only for rows the eat-path theft does not model; the eat-path theft stays for a starving agent who cannot pay.
+- **D30:** an assault victim gets `Fought` and `Lost` memories (no `Assaulted` kind); the Statistical memory whitelist grows by `Fought, Lost, Won, Courted, Rejected`.
+- **D31:** bind-time consequences reuse the death-time shocks; only an other-gang actor adds `MemberKilled { by_rival: true }`, and `GuardBeaten` is added for assaulted guards.
+- **D32:** the binder runs after economy and before the law; promotion binds are queued and drained at the end of `lod::run`.
+- **D33:** `zone_law_coverage` is `(hours_z / homes_z) / (hours_all / homes_all)` clamped to 0.5 to 2.0, from per-tick guard-on-shift tallies rolled daily.
+- **D34:** `Trace` and the hole CSV columns moved to phase 3 because the binder reads them; phase 4 kept Life, the Story tab and `Bind`.
+- **D35:** `LifeKind::RobbedSomeone` (not `Robbed_`) and a new `Died` for non-violent deaths.
+- **D36:** the life table is one function in `events.rs` that recomputes a hole from its packed key; the binder's entries go through `life_bound`.
+- **D37:** the parity actor side compares per-bucket shares of attributed crimes, within `max(15 %, 0.05)`, because Unknown binding lowers attributed rates by construction.
+- **D38:** gate bounds scale by 2000/300; count minimums are unchanged; capacity-bound gates use the capacity.
+- **D39:** there is no CI config; "CI fails" is `tests/no_per_tick_scan.rs` and the `#[ignore]` release-only median test in `tests/scale.rs`; the criterion bench is informational.
+- **D40:** every new field is `#[serde(default)]` or `#[serde(skip)]`; `migrate_legacy` resizes the new stores.
+
+### Phase commit deviations
+
+- **Phase 1:** `bodies()` (Full plus Coarse) replaces `citizens()` in every per-tick system; remaining scans carry a `scan-ok:` marker that a source-scan test enforces. Statistical ids are bucketed by slot (`World::stat_slots`) so finding the due agents is O(due).
+- **Phase 2:** initial jobs go to the nearest resident; the patrol beat is a Market, the nearest Bar, the Hall and two nearby Homes; crackdown routes start at the Market nearest the target's Hideout; an arrest or escort on shift credits the shift; `recruit_on_promise` 15 and `raid_gather_hours` 8 (from 5 and 3).
+- **Phase 3:** StatTable v2 has 24 rows keyed on phase, lawfulness bucket and hunger bucket, pooled over the hunger buckets; `calibrate --straight-lines` is opt-in; Statistical agents draw the dole by the Full Earn rule, buy up to three meals into the pantry, flirt and court at the Full rate, and drift in co-work and chat.
+- **Phase 4:** Life is capped at 48 entries and written only by `events.rs`; the Story tab is an inspector tab, and opening an agent binds their open holes through the `Bind` command; the app gains `--select-name`, `--tab story` and `--no-autobind`.
+- **Phase 5:** a guard's arrest or escort now credits the shift's wage once without ending the shift (`Job.shift_credited`), so the guard keeps patrolling; the Coarse ranking, Reserve split, `ReleaseReserve` redistribution, `stat_social` window scan and the whole-map screenshot (`--fit`) were review fixups.
+
+### Spec text not implemented as written
+
+- **§ 2 "clerks restock their own Market from the Reserve":** the daily pass moves food from the Warehouse to each Market with no clerk involved, exactly as v1 did. When the Reserve runs short it is split across Markets in proportion to their shortfall.
+- **§ 1 `stat_social`:** an agent with no contacts meets a housemate from a fixed window of 32 Statistical ids around its own, not a scan of the tier.
+- **Acceptance, throughput and save size:** when this was written the M10 scenario missed the 8,000 ticks/s gate and the 40 MB save bound; both are calibration work (plan 5.5) and the scenario prints the numbers.

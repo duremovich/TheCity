@@ -359,3 +359,99 @@ fn test_m9_law_seed_42() {
     assert!(starvation <= 200, "{starvation} starvation deaths");
     assert!((1333..=2667).contains(&w.population()), "population {}", w.population());
 }
+
+/// M10 scale gate: the 2,000-resident v2 city for 120 days. Throughput (release
+/// only), off-screen violence that is bound by the next day and reaches the
+/// law, the hole ledger, the Unknown share and the save's size and time.
+/// `#[ignore]`: a few minutes.
+#[test]
+#[ignore]
+fn test_m10_scale_seed_42() {
+    use citysim::{save, EventKind, HoleKind};
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+
+    let mut w = World::new(42, Config::load());
+    let started = Instant::now();
+    // Bound killers: actor -> tick of the bind. Event ids are contiguous, so
+    // each day scans only the new tail of the ring.
+    let mut killers: BTreeMap<citysim::EntityId, u64> = BTreeMap::new();
+    let mut arrests: Vec<(u64, Vec<citysim::EntityId>)> = Vec::new();
+    let mut next_id = 0u64;
+    for _ in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        for e in w.events.iter().rev().take_while(|e| e.id >= next_id) {
+            match e.kind {
+                EventKind::Attributed
+                    if e.actors.len() == 2
+                        && e.text.contains(HoleKind::Killed.noun())
+                        && e.text.contains("laid to") =>
+                {
+                    killers.entry(e.actors[0]).or_insert(e.tick);
+                }
+                EventKind::Arrest => arrests.push((e.tick, e.actors.to_vec())),
+                _ => {}
+            }
+        }
+        next_id = w.events.back().map_or(0, |e| e.id + 1);
+    }
+    let wall = started.elapsed().as_secs_f64();
+    let ticks = 120 * TICKS_PER_DAY;
+    let tps = ticks as f64 / wall;
+    eprintln!("throughput {tps:.0} ticks/s over 120 days (gate 8,000 release, target 12,000), {wall:.1} s wall");
+
+    let h = &w.stats.history;
+    let sum = |f: fn(&citysim::DayRow) -> u32| h.iter().map(f).sum::<u32>();
+    let (opened, bound, unknown) = (sum(|r| r.holes_opened), sum(|r| r.holes_bound), sum(|r| r.holes_unknown));
+    let offscreen_kills = sum(|r| r.deaths_violence_offscreen);
+    let violent = sum(|r| r.deaths_violence);
+    eprintln!("holes opened {opened} bound {bound} unknown {unknown}, off-screen kills {offscreen_kills}");
+
+    // D27: off-screen vs body violent deaths per 100 agent-days.
+    let stat_days: u64 = h.iter().map(|r| u64::from(r.tier_stat)).sum();
+    let body_days: u64 = h.iter().map(|r| u64::from(r.tier_full + r.tier_coarse)).sum();
+    eprintln!(
+        "violent deaths per 100 agent-days: off-screen {:.3}, bodies {:.3}",
+        f64::from(offscreen_kills) * 100.0 / stat_days.max(1) as f64,
+        f64::from(violent - offscreen_kills.min(violent)) * 100.0 / body_days.max(1) as f64
+    );
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut check = |ok: bool, what: String| {
+        eprintln!("{} {what}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failures.push(what);
+        }
+    };
+    if !cfg!(debug_assertions) {
+        check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
+    }
+    check(offscreen_kills >= 20, format!("off-screen killings {offscreen_kills} >= 20"));
+    let day_start = w.day() * TICKS_PER_DAY;
+    let stale = w.holes.values().filter(|x| x.kind == HoleKind::Killed && x.tick < day_start).count();
+    check(stale == 0, format!("{stale} Killed holes older than today still open"));
+    let reached_law =
+        killers.iter().filter(|&(a, &t)| arrests.iter().any(|(at, who)| *at > t && who.contains(a))).count();
+    check(reached_law >= 1, format!("{reached_law} of {} bound killers were arrested afterwards", killers.len()));
+    let consequential_less = opened.saturating_sub(offscreen_kills);
+    check(consequential_less >= 100, format!("Robbed + Assaulted holes {consequential_less} >= 100"));
+    let open_ra = w.holes.values().filter(|x| x.kind != HoleKind::Killed).count();
+    check(
+        open_ra as f64 <= 0.4 * f64::from(consequential_less),
+        format!("open Robbed/Assaulted holes {open_ra} <= 40% of {consequential_less}"),
+    );
+    let share = f64::from(unknown) / f64::from((bound + unknown).max(1));
+    check((0.20..=0.50).contains(&share), format!("Unknown share {share:.3} in 0.20..=0.50"));
+
+    let t = Instant::now();
+    let text = save::to_ron(&w);
+    let back = save::from_ron(&text).expect("save round-trips");
+    let secs = t.elapsed().as_secs_f64();
+    eprintln!("save {:.1} MB, to_ron + from_ron {secs:.2} s", text.len() as f64 / 1e6);
+    check(text.len() < 40_000_000, format!("save {} bytes < 40 MB", text.len()));
+    if !cfg!(debug_assertions) {
+        check(secs < 1.5, format!("to_ron + from_ron {secs:.2} s < 1.5 s"));
+    }
+    assert_eq!(back.population(), w.population());
+    assert!(failures.is_empty(), "M10 gate failures: {failures:?}");
+}

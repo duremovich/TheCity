@@ -17,6 +17,8 @@ pub struct LogState {
     pub hidden: BTreeSet<EventKind>,
     pub only_selected: bool,
     pub show_filter: bool,
+    /// List open holes (crimes with no actor yet) instead of events.
+    pub unattributed: bool,
 }
 
 fn kind_colour(kind: EventKind) -> Color32 {
@@ -52,6 +54,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         ui.strong("Events");
         ui.label(format!("{}", world.events.len()));
         ui.checkbox(&mut app.log.only_selected, "Only selected");
+        ui.checkbox(&mut app.log.unattributed, format!("Unattributed ({})", world.holes.len()));
         if ui.selectable_label(app.log.show_filter, "Kinds…").clicked() {
             app.log.show_filter = !app.log.show_filter;
         }
@@ -78,29 +81,54 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
     let selected = app.selected;
     let only_selected = app.log.only_selected;
     let mut clicked = None;
-    egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-        let rows = world
-            .events
-            .iter()
-            .rev()
-            .filter(|e| !app.log.hidden.contains(&e.kind))
-            .filter(|e| !only_selected || selected.is_some_and(|s| e.actors.contains(&s)))
-            .take(400);
-        for e in rows {
-            let line = format!(
-                "{:>3} {} | {:<18} | {}",
-                time::day(e.tick),
-                time::clock(e.tick),
-                format!("{:?}", e.kind),
-                e.text
-            );
-            let highlight = selected.is_some_and(|s| e.actors.contains(&s));
-            let text = egui::RichText::new(line).monospace().color(kind_colour(e.kind));
-            if ui.selectable_label(highlight, text).clicked() {
-                clicked = e.actors.iter().copied().find(|&a| a != EntityId::NONE);
+    if app.log.unattributed {
+        // Open holes, newest first: click to bind the hole and select the victim.
+        let mut bind = None;
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            for h in world.holes.values().rev().take(400) {
+                let line = format!(
+                    "{:>3} {} | {:<9} | {} | {:?}",
+                    time::day(h.tick),
+                    time::clock(h.tick),
+                    format!("{:?}", h.kind),
+                    world.name_of(h.victim),
+                    h.zone
+                );
+                let text = egui::RichText::new(line).monospace().color(Color32::from_rgb(217, 47, 47));
+                if ui.selectable_label(selected == Some(h.victim), text).clicked() {
+                    bind = Some((h.id, h.victim));
+                }
             }
+        });
+        if let Some((hole, victim)) = bind {
+            app.cmds.push(citysim::PlayerCommand::Bind(hole));
+            clicked = Some(victim);
         }
-    });
+    } else {
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            let rows = world
+                .events
+                .iter()
+                .rev()
+                .filter(|e| !app.log.hidden.contains(&e.kind))
+                .filter(|e| !only_selected || selected.is_some_and(|s| e.actors.contains(&s)))
+                .take(400);
+            for e in rows {
+                let line = format!(
+                    "{:>3} {} | {:<18} | {}",
+                    time::day(e.tick),
+                    time::clock(e.tick),
+                    format!("{:?}", e.kind),
+                    e.text
+                );
+                let highlight = selected.is_some_and(|s| e.actors.contains(&s));
+                let text = egui::RichText::new(line).monospace().color(kind_colour(e.kind));
+                if ui.selectable_label(highlight, text).clicked() {
+                    clicked = e.actors.iter().copied().find(|&a| a != EntityId::NONE);
+                }
+            }
+        });
+    }
 
     if let Some(id) = clicked {
         app.selected = Some(id);

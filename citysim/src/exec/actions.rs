@@ -773,8 +773,12 @@ fn report_crime(world: &mut World, id: EntityId) -> StepResult {
 pub fn end_shift(world: &mut World, id: EntityId) {
     let tick = world.tick;
     if let Some(j) = world.comp_mut::<Job>(id) {
-        j.last_shift_day = Some(j.shift_key_at(tick.saturating_sub(1)));
-        j.days_unpaid = j.days_unpaid.saturating_add(1);
+        let key = j.shift_key_at(tick.saturating_sub(1));
+        j.last_shift_day = Some(key);
+        // Law work already owed this shift's wage (see `credit_law_work`).
+        if j.shift_credited != Some(key) {
+            j.days_unpaid = j.days_unpaid.saturating_add(1);
+        }
     }
     economy::maybe_quit(world, id);
 }
@@ -790,8 +794,14 @@ fn credit_law_work(world: &mut World, id: EntityId) {
         return;
     }
     let key = job.shift_key_at(world.tick);
-    if crate::exec::routine::is_workday(key) && job.last_shift_day != Some(key) {
-        end_shift(world, id);
+    if crate::exec::routine::is_workday(key) && job.last_shift_day != Some(key) && job.shift_credited != Some(key) {
+        // Owe the day but keep the shift open: the guard patrols on until the
+        // shift's end, and `end_shift` will not owe it again.
+        if let Some(j) = world.comp_mut::<Job>(id) {
+            j.shift_credited = Some(key);
+            j.days_unpaid = j.days_unpaid.saturating_add(1);
+        }
+        economy::maybe_quit(world, id);
     }
 }
 

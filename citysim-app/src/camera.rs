@@ -47,14 +47,31 @@ impl Camera {
         Some(TilePos { x: t.x as u8, y: t.y as u8 })
     }
 
-    /// Visible tiles, clamped to the map; `w` and `h` at most 255 (`u8`).
-    /// Passed to `world.set_view` every frame.
-    pub fn view_rect(&self) -> TileRect {
+    /// Visible tiles as `(x0, y0, x1, y1)`, right and bottom exclusive, in
+    /// `u16` so a view of the whole 256-wide map is representable.
+    pub fn view_bounds(&self) -> (u16, u16, u16, u16) {
         let half = vec2(screen_width(), screen_height()) * 0.5 / self.px_per_tile;
         let x0 = (self.centre.x - half.x).floor().clamp(0.0, self.map_w - 1.0);
         let y0 = (self.centre.y - half.y).floor().clamp(0.0, self.map_h - 1.0);
         let x1 = (self.centre.x + half.x).ceil().clamp(1.0, self.map_w);
         let y1 = (self.centre.y + half.y).ceil().clamp(1.0, self.map_h);
+        (x0 as u16, y0 as u16, x1 as u16, y1 as u16)
+    }
+
+    /// Frame the whole map in the window (the `--fit` screenshot helper). May
+    /// zoom below `MIN_PX_PER_TILE`; the next wheel notch clamps it back.
+    pub fn fit(&mut self) {
+        self.centre = vec2(self.map_w / 2.0, self.map_h / 2.0);
+        self.px_per_tile = (screen_width() / self.map_w).min(screen_height() / self.map_h).max(1.0);
+    }
+
+    /// The world's view rect: `view_bounds` with `w` and `h` clamped to 255
+    /// (`u8`). The world's on-screen test adds a margin, so the one column or
+    /// row a full-map frame loses is still counted as on screen. Passed to
+    /// `world.set_view` every frame.
+    pub fn view_rect(&self) -> TileRect {
+        let (x0, y0, x1, y1) = self.view_bounds();
+        let (x0, y0, x1, y1) = (f32::from(x0), f32::from(y0), f32::from(x1), f32::from(y1));
         TileRect {
             x: x0 as u8,
             y: y0 as u8,

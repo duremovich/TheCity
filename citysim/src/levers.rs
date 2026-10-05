@@ -405,17 +405,30 @@ impl World {
         let mut available = self.comp::<Building>(wh).map_or(0, |b| b.stock_food);
         let n = markets.len() as u32;
         let mut moved = 0;
-        for (i, &mk) in markets.iter().enumerate() {
-            let share = amount / n + u32::from((i as u32) < amount % n);
-            let room = self.comp::<Building>(mk).map_or(0, |b| market_cap.saturating_sub(b.stock_food));
-            let m = share.min(room).min(available);
-            if m == 0 {
-                continue;
+        // Pass 0 hands out the even shares; a Market with no room drops its
+        // share, which pass 1 redistributes to the Markets that still have room.
+        let mut leftover = 0;
+        for pass in 0..2 {
+            for (i, &mk) in markets.iter().enumerate() {
+                let share = if pass == 0 { amount / n + u32::from((i as u32) < amount % n) } else { leftover };
+                let room = self.comp::<Building>(mk).map_or(0, |b| market_cap.saturating_sub(b.stock_food));
+                let m = share.min(room).min(available);
+                if pass == 0 {
+                    leftover += share - m.min(share);
+                } else {
+                    leftover -= m;
+                }
+                if m == 0 {
+                    continue;
+                }
+                available -= m;
+                moved += m;
+                if let Some(b) = self.comp_mut::<Building>(mk) {
+                    b.stock_food += m;
+                }
             }
-            available -= m;
-            moved += m;
-            if let Some(b) = self.comp_mut::<Building>(mk) {
-                b.stock_food += m;
+            if leftover == 0 || available == 0 {
+                break;
             }
         }
         if moved == 0 {
