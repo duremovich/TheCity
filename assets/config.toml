@@ -146,8 +146,10 @@ names = ["The Hollow", "Ninefold"]
 treasury_initial = [50, 50]
 order_weight = 0.35
 freelance_loyalty = 0.3
-# v1 recruited on promise up to 3. A sacked gang has no treasury, and three members' loot never
-# out-earns their stipend, so 3 left the loser of the first raid stuck for good. 5 is a comeback.
+# v1 recruited on promise up to 3 and then asked the treasury to fund the whole roster. A gang of
+# 3-5 sits at the stipend's break-even, so that left the loser of the first raid stuck for good and
+# made growth hostage to a windfall. The promise now covers the first 5 for good; the treasury
+# funds each member beyond them.
 recruit_on_promise = 5
 # Members are never Statistical now, so every one of them extorts daily and the revenge fights
 # scale with headcount: an uncapped gang reached 29 and 7 Assaults/day (the M7 baseline is 3).
@@ -160,7 +162,9 @@ raid_min_ratio = 1.2
 # Gang treasuries run at 0-30 (the stipend eats the tribute); 40 meant no raid was ever worth it.
 # At 10 a strong gang raids a few times a season; the cooldown caps the pace.
 raid_min_prize = 10
-raid_cooldown_days = 10
+# 30: Retaliate obeys the cooldown too, and at 10 every sack bred a counter-sack five days later
+# (17 raids on seed 42 against the spec's 2-6). A raid a season per gang.
+raid_cooldown_days = 30
 raid_prize_frac = 0.5
 raid_muster_hour = 22
 raid_gather_hours = 3

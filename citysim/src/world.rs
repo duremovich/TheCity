@@ -788,18 +788,18 @@ impl World {
         }
     }
 
-    /// Fix up a save written before M8: gangs without a Hideout take the
-    /// Hideouts in map order, territory keeps Homes only, and every held Home
-    /// gets a full claim.
+    /// Fix up a save written before M8: a gang without a Hideout (the serde
+    /// default) takes the Hideouts in map order, its territory keeps Homes
+    /// only, and every held Home gets a full claim. A gang that already has a
+    /// Hideout is left alone: its claims are live state.
     pub fn migrate_legacy(&mut self) {
         let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
         for (i, gang) in self.gangs().into_iter().enumerate() {
             let Some(g) = self.comp::<Gang>(gang) else { continue };
-            let hideout = if self.has::<Building>(g.hideout) {
-                g.hideout
-            } else {
-                hideouts.get(i).or(hideouts.first()).copied().unwrap_or(EntityId::NONE)
-            };
+            if self.has::<Building>(g.hideout) {
+                continue;
+            }
+            let hideout = hideouts.get(i).or(hideouts.first()).copied().unwrap_or(EntityId::NONE);
             let territory: Vec<EntityId> = g
                 .territory
                 .iter()

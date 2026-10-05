@@ -14,14 +14,18 @@ use crate::App;
 
 pub const HUD_H: f32 = 28.0;
 
-/// A gang's colour by its index in `World::gangs()`.
+/// Gang colours by index in `World::gangs()`, as `0xRRGGBB`; the map and
+/// the panels both read this table.
+pub const GANG_COLOURS: [u32; 3] = [0x8e44ad, 0x1abc9c, 0xe67e22];
+
+pub fn gang_hex(index: usize) -> u32 {
+    GANG_COLOURS[index % GANG_COLOURS.len()]
+}
+
+/// A gang's panel colour.
 pub fn gang_colour(index: usize) -> egui_macroquad::egui::Color32 {
-    use egui_macroquad::egui::Color32;
-    match index {
-        0 => Color32::from_rgb(142, 68, 173),
-        1 => Color32::from_rgb(26, 188, 156),
-        _ => Color32::from_rgb(230, 126, 34),
-    }
+    let c = gang_hex(index);
+    egui_macroquad::egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
 pub const INSPECTOR_W: f32 = 360.0;
 pub const LOG_H: f32 = 220.0;

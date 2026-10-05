@@ -2,9 +2,7 @@
 //! door, and the brawl there, resolved strongest-against-strongest through
 //! `law::resolve_fight`. Three outcomes: lost, won (half the treasury), sacked.
 
-use crate::components::{
-    Brain, Building, Crime, Gang, GoalKind, Personality, Position, Sentence, Shock, Skills, TilePos,
-};
+use crate::components::{Brain, Building, Crime, Gang, GoalKind, Order, Position, Sentence, Shock, TilePos};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::{faction, gang, law};
@@ -65,8 +63,7 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
 
 /// `fighting + 0.25 × courage`: the brawl's pairing order.
 fn strength(world: &World, id: EntityId) -> f32 {
-    world.comp::<Skills>(id).map_or(0.2, |s| s.fighting)
-        + 0.25 * world.comp::<Personality>(id).map_or(0.5, |p| p.courage)
+    law::fighting(world, id) + 0.25 * law::courage(world, id)
 }
 
 fn by_strength(world: &World, ids: &mut [EntityId]) {
@@ -116,12 +113,17 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         if died {
             deaths += 1;
         }
-        let crime = if died { Crime::Murder } else { Crime::Assault };
-        let kind = if died { EventKind::Murder } else { EventKind::Assault };
-        let text = format!("{} attacked {} at the {rival_name} Hideout", world.name_of(r), world.name_of(d));
+        // The raider is the aggressor: Murder when the defender died, Assault
+        // otherwise; a raider who died is charged with nothing.
+        let murder = died && loser == d;
+        let crime = if murder { Crime::Murder } else { Crime::Assault };
+        let kind = if murder { EventKind::Murder } else { EventKind::Assault };
+        let fell = if died && loser == r { " and died" } else { "" };
+        let text = format!("{} attacked {} at the {rival_name} Hideout{fell}", world.name_of(r), world.name_of(d));
         world.push_event(kind, &[r, d], text);
-        let victim_alive = law::living(world, d);
-        law::raise_crime(world, r, victim_alive.then_some(d), crime, door);
+        if law::living(world, r) {
+            law::raise_crime(world, r, (!murder).then_some(d), crime, door);
+        }
         if loser == d {
             defenders.remove(0);
         } else {
@@ -152,8 +154,15 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
 fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
     let now = world.tick;
     let cfg = world.config.gangs.clone();
+    // A retaliation is satisfied by being launched, win or lose (spec): a lost
+    // one is not a fresh grudge, or a weaker gang would raid nightly to the end.
+    let retaliation = world.comp::<Gang>(gid).is_some_and(|g| g.order == Order::Retaliate);
     match outcome {
-        Outcome::Lost => gang::push_shock(world, gid, Shock::RaidLost),
+        Outcome::Lost => {
+            if !retaliation {
+                gang::push_shock(world, gid, Shock::RaidLost);
+            }
+        }
         Outcome::Won => {
             let prize = world
                 .comp::<Gang>(rival)
@@ -183,6 +192,10 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             if let Some(g) = world.comp_mut::<Gang>(rival) {
                 g.treasury -= loot;
                 g.sacked_until = Some(now + cfg.sacked_days * TICKS_PER_DAY);
+                // The grudge outlives the sack: the Sacked shock is consumed
+                // while Retaliate is still gated, so the brain reads the
+                // grievance from retaliate_until once it can muster again.
+                g.retaliate_until = Some(now + (cfg.sacked_days + cfg.retaliate_days) * TICKS_PER_DAY);
             }
             if let Some(g) = world.comp_mut::<Gang>(gid) {
                 g.treasury += loot;

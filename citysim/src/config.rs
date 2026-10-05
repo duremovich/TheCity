@@ -21,6 +21,8 @@ pub struct Config {
     pub economy: EconomyCfg,
     pub crime: CrimeCfg,
     pub social: SocialCfg,
+    /// Absent from pre-M8 saves: read from the assets on this machine instead.
+    #[serde(default = "GangsCfg::from_assets")]
     pub gangs: GangsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
@@ -259,6 +261,15 @@ pub struct GangsCfg {
     /// Pending shock severities that force an immediate rescoring.
     pub shock_severity_rethink: f32,
     pub order_flat: OrderFlatCfg,
+}
+
+impl GangsCfg {
+    /// The `[gangs]` block of `assets/config.toml`, for saves written before it existed.
+    pub fn from_assets() -> GangsCfg {
+        let dir = Config::find_assets_dir()
+            .unwrap_or_else(|| panic!("assets/config.toml not found; set CITYSIM_ASSETS or run from the repo"));
+        Config::load_from(&dir).gangs
+    }
 }
 
 /// Flat terms added to each order's product of considerations.

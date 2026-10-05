@@ -530,17 +530,25 @@ pub fn on_complete(
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
             let (_, loser, died) = crate::systems::law::resolve_fight(world, id, victim);
-            let crime = if died { crate::components::Crime::Murder } else { crate::components::Crime::Assault };
+            // The attacker's crime: Murder only when the victim died. An attacker
+            // who died resisting is charged with nothing (the dead cannot be).
+            let murder = died && loser == victim;
+            let crime = if murder { crate::components::Crime::Murder } else { crate::components::Crime::Assault };
             let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
             let name = world.name_of(id);
+            let text = if died && loser == id {
+                format!("{name} attacked {} and died", world.name_of(victim))
+            } else {
+                format!("{name} attacked {}", world.name_of(victim))
+            };
             world.push_event(
-                if died { crate::events::EventKind::Murder } else { crate::events::EventKind::Assault },
+                if murder { crate::events::EventKind::Murder } else { crate::events::EventKind::Assault },
                 &[id, victim],
-                format!("{name} attacked {}", world.name_of(victim)),
+                text,
             );
-            let victim_alive = crate::systems::law::living(world, victim);
-            crate::systems::law::raise_crime(world, id, victim_alive.then_some(victim), crime, tile);
-            let _ = loser;
+            if crate::systems::law::living(world, id) {
+                crate::systems::law::raise_crime(world, id, (!murder).then_some(victim), crime, tile);
+            }
             StepResult::Done
         }
         ActionKind::CarryCorpse => {

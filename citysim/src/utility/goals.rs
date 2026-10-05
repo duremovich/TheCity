@@ -391,14 +391,15 @@ pub fn considerations(
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
             // The order tilts the day: a loyal member following orders scores
             // 1.0 here, a freelancer 1 - order_weight. Hunger and fear still win.
+            // `already_satisfied` has just scanned for a target (and skipped the
+            // goal when there is none), so only the cheap order flag is read here.
             let w = world.config.gangs.order_weight;
-            let target = crate::systems::gang::gang_work_target(world, id);
-            let following = target.is_some_and(|(_, o)| o.is_some());
+            let following = crate::systems::gang::following_order(world, id).is_some();
             vec![
                 Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("greed", p.greed, Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("not in shift", can(!in_shift), gate_or(0.5)),
-                Consideration::new("no guard near target", can(target.is_some()), gate_or(0.2)),
+                Consideration::new("target", 1.0, GATE),
                 Consideration::new(
                     "order",
                     if following { p.loyalty } else { 0.0 },

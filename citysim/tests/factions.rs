@@ -78,8 +78,10 @@ fn test_order_raid_with_a_strength_edge_and_a_prize() {
 fn test_order_retaliate_on_a_grudge_regardless_of_ratio() {
     let i = OrderInputs { grudge: true, own: 2, rival: 8, ..inputs() };
     assert_eq!(best(&i), Order::Retaliate);
-    let sacked = OrderInputs { sacked: true, ..i };
+    let sacked = OrderInputs { sacked: true, raid_ready: false, ..i };
     assert_ne!(best(&sacked), Order::Retaliate, "a sacked gang cannot muster");
+    let cooling = OrderInputs { raid_ready: false, ..i };
+    assert_ne!(best(&cooling), Order::Retaliate, "one raid per cooldown, grudge or not");
 }
 
 #[test]
@@ -402,4 +404,38 @@ fn test_gang_members_are_never_statistical() {
     for m in members {
         assert_ne!(w.comp::<Brain>(m).expect("b").lod, citysim::Lod::Statistical);
     }
+}
+
+#[test]
+fn test_contest_keeps_working_a_home_after_the_first_blow() {
+    let mut w = world(54);
+    let (g0, g1) = gangs(&w);
+    let (a, b) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    gang::enlist(&mut w, b, g1);
+    temper(&mut w, a);
+    let homes = [a, b].map(|x| w.comp::<citysim::Household>(x).and_then(|h| h.home));
+    // The only rival-held Home: g1 holds it outright.
+    let home = w.buildings_by_kind[&BuildingKind::Home]
+        .iter()
+        .copied()
+        .find(|&h| !homes.contains(&Some(h)) && w.comp::<Building>(h).is_some_and(|bd| bd.occupants.len() >= 2))
+        .expect("an occupied home");
+    for _ in 0..3 {
+        gang::extort(&mut w, b, home);
+    }
+    assert_eq!(gang::holder_of(&w, home), Some(g1));
+    w.comp_mut::<Gang>(g0).expect("g").order = Order::Contest;
+    // Guards may stand near it; the target picker is what is under test, so clear them.
+    for g in w.citizens().into_iter().filter(|&g| citysim::systems::law::is_guard(&w, g)).collect::<Vec<_>>() {
+        w.comp_mut::<citysim::Position>(g).expect("p").tile = citysim::TilePos { x: 95, y: 0 };
+    }
+    assert_eq!(gang::gang_work_target(&w, a), Some((home, Some(Order::Contest))));
+    gang::extort(&mut w, a, home);
+    assert_eq!(w.comp::<Building>(home).expect("b").claim, Some(Claim { gang: g0, count: 1 }));
+    assert_eq!(gang::gang_work_target(&w, a), Some((home, Some(Order::Contest))), "still the rival's until it flips");
+    gang::extort(&mut w, a, home);
+    gang::extort(&mut w, a, home);
+    assert_eq!(gang::holder_of(&w, home), Some(g0));
+    assert!(gang::gang_work_target(&w, a).is_none(), "nothing of the rival's left to contest");
 }

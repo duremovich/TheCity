@@ -176,11 +176,19 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     days * TICKS_PER_DAY
 }
 
+/// The fight model's inputs, with the defaults for agents lacking the component.
+pub fn fighting(world: &World, id: EntityId) -> f32 {
+    world.comp::<Skills>(id).map_or(0.2, |s| s.fighting)
+}
+
+pub fn courage(world: &World, id: EntityId) -> f32 {
+    world.comp::<Personality>(id).map_or(0.5, |p| p.courage)
+}
+
 /// `p_win = clamp(0.5 + 0.4 (fi_a − fi_b) + 0.1 (C_a − C_b), 0.1, 0.9)`.
 /// Returns `(winner, loser, loser_died)`.
 pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, EntityId, bool) {
-    let fi = |w: &World, id| w.comp::<Skills>(id).map_or(0.2, |s| s.fighting);
-    let co = |w: &World, id| w.comp::<Personality>(id).map_or(0.5, |p| p.courage);
+    let (fi, co) = (fighting, courage);
     let p_win = (0.5 + 0.4 * (fi(world, a) - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))).clamp(0.1, 0.9);
     let roll: f32 = world.rng.world().random();
     let (winner, loser) = if roll < p_win { (a, b) } else { (b, a) };

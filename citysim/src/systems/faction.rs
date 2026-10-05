@@ -6,7 +6,6 @@ use crate::components::{Building, BuildingKind, Gang, Household, Order, OrderSco
 use crate::config::GangsCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::systems::gang::CLAIM_HELD;
 use crate::time::{Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::utility::curves::{can, Curve, GATE};
 use crate::utility::Consideration;
@@ -28,7 +27,8 @@ pub struct OrderInputs {
     pub heat: f32,
     /// The rival's treasury.
     pub prize: i64,
-    /// A grudge shock is pending, or `retaliate_until` has not passed.
+    /// A grudge shock is pending, or `retaliate_until` has not passed (a
+    /// sack sets it past `sacked_until`, so the grievance outlives the sack).
     pub grudge: bool,
     pub greed: f32,
     pub courage: f32,
@@ -109,7 +109,9 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
         score(
             Order::Retaliate,
             vec![
-                Consideration::new("grudge", can(i.grudge && i.rival_exists && !i.sacked), GATE),
+                // Also off the raid cooldown (the spec exempts Retaliate): a
+                // grudge a night is a feud, and the cooldown paces it.
+                Consideration::new("grudge", can(i.grudge && i.rival_exists && i.raid_ready), GATE),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.9, b: 0.1 }),
                 Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
             ],
@@ -196,7 +198,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
             continue;
         }
         frontier_total += 1;
-        if !b.claim.is_some_and(|c| c.count >= CLAIM_HELD) {
+        if crate::systems::gang::holder_of(world, h).is_none() {
             frontier += 1;
         }
     }
@@ -228,11 +230,13 @@ pub const RAID_MARCH_TICKS: Tick = 6 * TICKS_PER_HOUR;
 /// Score the orders and switch when the best clears `hysteresis`. A change
 /// logs `OrderChanged`; Raid and Retaliate schedule the next muster. A raid
 /// that has departed is not second-guessed until it resolves or fizzles.
-pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) {
+/// Returns whether the orders were scored (the caller consumes the pending
+/// shocks only then: a shock that lands mid-march waits for the brawl).
+pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     let now = world.tick;
     if let Some(t) = world.comp::<Gang>(gang).and_then(|g| g.raid_at).filter(|&t| t <= now) {
         if now < t + RAID_MARCH_TICKS {
-            return; // marching
+            return false; // marching
         }
         let name = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
         if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -247,18 +251,18 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) {
         if let Some(g) = world.comp_mut::<Gang>(gang) {
             g.raid_at = None;
         }
-        return;
+        return true;
     };
     let cfg = world.config.gangs.clone();
     let scores = score_orders(&inputs, &cfg);
-    let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return };
+    let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return false };
     let next = choose(&scores, current, hysteresis);
     let best_score = scores.first().map_or(0.0, |s| s.score);
     let current_score = scores.iter().find(|s| s.order == current).map_or(0.0, |s| s.score);
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order_trace = scores;
     }
-    let Some(order) = next else { return };
+    let Some(order) = next else { return true };
     let muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;
@@ -274,12 +278,15 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) {
         &[gang],
         format!("{name}: {current:?} -> {order:?} ({why}, {best_score:.2} vs {current_score:.2})"),
     );
+    true
 }
 
-/// An immediate rescoring with no hysteresis; the pending shocks are consumed.
+/// An immediate rescoring with no hysteresis; the pending shocks are consumed
+/// when the orders were scored (not while a raid is marching).
 pub fn rethink(world: &mut World, gang: EntityId) {
-    rescore(world, gang, 0.0);
-    if let Some(g) = world.comp_mut::<Gang>(gang) {
-        g.shocks.clear();
+    if rescore(world, gang, 0.0) {
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.shocks.clear();
+        }
     }
 }

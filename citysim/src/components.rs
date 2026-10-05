@@ -326,9 +326,19 @@ impl Shock {
         }
     }
 
-    /// A grievance against the rival: feeds the Retaliate order.
+    /// A grievance against the rival: feeds the Retaliate order. A flipped
+    /// Home counts (the spec lists only kills, lost raids and sacks): it is
+    /// the everyday wrong, and without it a gang whose rival never raids
+    /// has nothing to avenge.
     pub fn is_grudge(self) -> bool {
-        matches!(self, Shock::MemberKilled { by_rival: true } | Shock::RaidLost | Shock::Raided | Shock::Sacked)
+        matches!(
+            self,
+            Shock::MemberKilled { by_rival: true }
+                | Shock::RaidLost
+                | Shock::Raided
+                | Shock::Sacked
+                | Shock::HomeFlippedAgainst
+        )
     }
 }
 

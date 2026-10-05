@@ -24,16 +24,17 @@ pub const HEAT_LOG_CAP: usize = 64;
 // Recruitment
 // ---------------------------------------------------------------------------
 
-/// Can `g` take recruits: not sacked, and able to pay a day's stipend for
-/// everyone including the recruit (a gang under `recruit_on_promise` recruits
-/// on promise).
+/// Can `g` take recruits: not sacked, under `max_members`, and able to pay
+/// a day's stipend for every member beyond the first `recruit_on_promise`,
+/// the recruit included. The promise covers the core for good: a gang of
+/// exactly `recruit_on_promise` sits at the stipend's break-even, and
+/// asking its treasury to fund the whole roster left it there for ever.
 fn recruiting(world: &World, g: &Gang) -> bool {
     let stipend = world.config.social.gang_stipend;
     let cfg = &world.config.gangs;
     let n = g.members.len();
-    !g.is_sacked(world.tick)
-        && n < cfg.max_members
-        && (n < cfg.recruit_on_promise || g.treasury >= stipend * (n as i64 + 1))
+    let funded = (n + 1).saturating_sub(cfg.recruit_on_promise) as i64;
+    !g.is_sacked(world.tick) && n < cfg.max_members && g.treasury >= stipend * funded
 }
 
 /// The gang a non-member would join right now, if any: the gang of the member
@@ -248,21 +249,38 @@ pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId
 // Targets and extortion
 // ---------------------------------------------------------------------------
 
-/// Who holds a Home (a claim at `CLAIM_HELD`).
-fn held_by(b: &Building) -> Option<EntityId> {
-    b.claim.filter(|c| c.count >= CLAIM_HELD).map(|c| c.gang)
+/// The gang whose territory holds this Home.
+pub fn holder_of(world: &World, home: EntityId) -> Option<EntityId> {
+    world
+        .gangs()
+        .into_iter()
+        .find(|&g| world.comp::<Gang>(g).is_some_and(|gg| gg.territory.binary_search(&home).is_ok()))
+}
+
+/// The order a loyal member's GangWork serves right now, or `None` while
+/// freelancing (below `freelance_loyalty`) or under an order with no
+/// extortion in it. Cheap: no Home scan.
+pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
+    let g = world.gang_of(id).and_then(|g| world.comp::<Gang>(g))?;
+    let loyalty = world.comp::<Personality>(id).map_or(0.0, |p| p.loyalty);
+    if loyalty < world.config.gangs.freelance_loyalty {
+        return None;
+    }
+    matches!(g.order, Order::Expand | Order::Contest).then_some(g.order)
 }
 
 /// The Home a GangWork plan extorts and the order it serves (`None` =
 /// freelancing). Expand: the unclaimed Home nearest the gang's Hideout;
-/// Contest: the rival-held Home nearest it; Raid, Retaliate and LieLow: none.
-/// A member below `freelance_loyalty` ignores the order and takes the
-/// unclaimed Home nearest themselves. Always: inhabited right now, not the
-/// actor's own Home, no guard within `sight_day_crime` of the door.
+/// Contest: the Home in the rival's territory nearest it; Raid, Retaliate
+/// and LieLow: none. A member below `freelance_loyalty` ignores the order
+/// and takes the unclaimed Home nearest themselves. Always: inhabited right
+/// now, not the actor's own Home, no guard within `sight_day_crime` of the
+/// door. "Unclaimed" and "rival's" read the territory lists, the same
+/// definition `claim` flips on, so a contested Home whose claim has been
+/// reset still reads as the rival's until the third blow lands.
 pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option<Order>)> {
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
-    let loyalty = world.comp::<Personality>(id).map_or(0.0, |p| p.loyalty);
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);
     let actor_tile = world.comp::<Position>(id)?.tile;
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
@@ -283,23 +301,26 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         .filter(|(_, b)| !b.demolished && !b.occupants.is_empty())
         .filter(|(_, b)| !guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r))
         .collect();
-    let nearest = |from: TilePos, pick: &dyn Fn(&Building) -> bool| -> Option<EntityId> {
+    let nearest = |from: TilePos, pick: &dyn Fn(EntityId) -> bool| -> Option<EntityId> {
         candidates
             .iter()
-            .filter(|(_, b)| pick(b))
+            .filter(|(h, _)| pick(*h))
             .min_by_key(|(h, b)| (b.door.manhattan(from), h.index))
             .map(|(h, _)| *h)
     };
-    if loyalty < world.config.gangs.freelance_loyalty {
-        return nearest(actor_tile, &|b| held_by(b).is_none()).map(|h| (h, None));
-    }
-    match g.order {
-        Order::Expand => nearest(hideout_door, &|b| held_by(b).is_none()).map(|h| (h, Some(Order::Expand))),
-        Order::Contest => {
-            let rival = world.rival_of(gang)?;
-            nearest(hideout_door, &|b| held_by(b) == Some(rival)).map(|h| (h, Some(Order::Contest)))
+    let unclaimed = |h: EntityId| holder_of(world, h).is_none();
+    match following_order(world, id) {
+        None if world.comp::<Personality>(id).map_or(0.0, |p| p.loyalty) < world.config.gangs.freelance_loyalty => {
+            nearest(actor_tile, &unclaimed).map(|h| (h, None))
         }
-        Order::Raid | Order::Retaliate | Order::LieLow => None,
+        None => None,
+        Some(Order::Expand) => nearest(hideout_door, &unclaimed).map(|h| (h, Some(Order::Expand))),
+        Some(Order::Contest) => {
+            let rival = world.rival_of(gang)?;
+            let theirs = world.comp::<Gang>(rival)?.territory.clone();
+            nearest(hideout_door, &|h| theirs.binary_search(&h).is_ok()).map(|h| (h, Some(Order::Contest)))
+        }
+        Some(_) => None,
     }
 }
 
@@ -310,9 +331,10 @@ pub fn extort_target(world: &World, id: EntityId) -> Option<EntityId> {
 
 /// Record which order a GangWork plan serves (inspector) and log a
 /// once-a-day `Disobeyed` when a freelancer works while the gang musters or
-/// lies low. Called by `plan::plan_for` when a GangWork plan is bound.
+/// lies low. Called by `plan::plan_for` once the GangWork plan is bound, so
+/// it reads the cheap `following_order` instead of rescanning the Homes.
 pub fn note_gang_work(world: &mut World, id: EntityId) {
-    let following = gang_work_target(world, id).and_then(|(_, o)| o);
+    let following = following_order(world, id);
     let (order, gname) = world
         .gang_of(id)
         .and_then(|g| world.comp::<Gang>(g))
@@ -514,9 +536,10 @@ pub fn run(world: &mut World) {
         }
         let pending: f32 = world.comp::<Gang>(gang).map_or(0.0, |g| g.shocks.iter().map(|s| s.severity()).sum());
         if daily {
-            faction::rescore(world, gang, hysteresis);
-            if let Some(g) = world.comp_mut::<Gang>(gang) {
-                g.shocks.clear();
+            if faction::rescore(world, gang, hysteresis) {
+                if let Some(g) = world.comp_mut::<Gang>(gang) {
+                    g.shocks.clear();
+                }
             }
         } else if pending >= threshold {
             faction::rethink(world, gang);

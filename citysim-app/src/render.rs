@@ -25,7 +25,6 @@ const C_AGENT_FLEEING: u32 = 0xf08c1e;
 const C_AGENT_GUARDING: u32 = 0xf5f5f5;
 const C_AGENT_SOCIAL: u32 = 0xd9a23d;
 const C_AGENT_JAILED: u32 = 0x555555;
-const C_GANG: [u32; 3] = [0x8e44ad, 0x1abc9c, 0xe67e22];
 const C_SELECTION: u32 = 0xffd700;
 const C_NIGHT: u32 = 0x0a0f2a;
 const NIGHT_ALPHA: f32 = 0.35;
@@ -37,9 +36,9 @@ fn hex(c: u32) -> Color {
     Color::from_hex(c)
 }
 
-/// A gang's colour by its index in `World::gangs()` (matches `ui::gang_colour`).
+/// A gang's map colour, from the shared table in `ui`.
 fn gang_colour(index: usize) -> Color {
-    hex(C_GANG[index % C_GANG.len()])
+    hex(crate::ui::gang_hex(index))
 }
 
 fn tile_colour(kind: TileKind) -> Color {
