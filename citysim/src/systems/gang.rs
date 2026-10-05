@@ -596,6 +596,9 @@ pub fn run(world: &mut World) {
     for gang in world.gangs() {
         if daily {
             recompute_leader(world, gang);
+            // The law has just rescored (it runs before this system): a gang
+            // under Crackdown may buy its way out before choosing its order.
+            faction::consider_bribe(world, gang);
         }
         let pending: f32 = world.comp::<Gang>(gang).map_or(0.0, |g| g.shocks.iter().map(|s| s.severity()).sum());
         if daily {

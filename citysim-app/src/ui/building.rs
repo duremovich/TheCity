@@ -491,6 +491,28 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
         if let Some(t) = gang.retaliate_until.filter(|&t| t > now) {
             ui.label(format!("retaliating for {:.1} more days", days(t - now)));
         }
+        if world.law().is_some_and(|l| l.cracking_down_on(gid)) {
+            ui.colored_label(RED, "Under crackdown");
+            match citysim::systems::faction::bribe_score(world, gid) {
+                Some(cs) => {
+                    let score: f32 = cs.iter().map(|c| c.output).product();
+                    ui.label(format!(
+                        "bribe {} coins: score {score:.2} (pays at {:.2})",
+                        citysim::systems::faction::bribe_price(world),
+                        world.config.law.bribe_threshold
+                    ));
+                }
+                None => {
+                    ui.label(format!(
+                        "bribe {} coins: cannot (paid, broke or leaderless)",
+                        citysim::systems::faction::bribe_price(world)
+                    ));
+                }
+            }
+        }
+        if let Some(t) = gang.bribe_until.filter(|&t| t > now) {
+            ui.label(format!("the captain is bought (or refused) for {:.1} more days", days(t - now)));
+        }
         let heat = citysim::systems::faction::heat(world, gid);
         let window = world.config.gangs.heat_days * TICKS_PER_DAY;
         let hot = gang.heat_log.iter().filter(|&&(t, _)| now.saturating_sub(t) < window).count();

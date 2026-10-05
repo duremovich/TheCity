@@ -191,6 +191,89 @@ fn test_jailbreak_shocks_the_law_into_garrison() {
     assert_eq!(w.law().map(|l| l.posture), Some(Posture::Patrol));
 }
 
+/// A gang under Crackdown with a leader of pride `pride`, a treasury of
+/// `coins`, and a captain of the given greed and lawfulness.
+fn crackdown_scene(seed: u64, pride: f32, coins: i64, greed: f32, lawfulness: f32) -> (World, EntityId, EntityId) {
+    let mut w = world(seed);
+    let gang = w.gangs()[0];
+    let civ = civilians(&w, 2);
+    for &m in &civ {
+        gang::enlist(&mut w, m, gang);
+    }
+    let leader = w.comp::<Gang>(gang).expect("g").leader.expect("leader");
+    w.comp_mut::<Personality>(leader).expect("p").pride = pride;
+    w.comp_mut::<Gang>(gang).expect("g").treasury = coins;
+    let gs = guards(&w);
+    for &g in &gs {
+        w.comp_mut::<Personality>(g).expect("p").lawfulness = 0.5;
+    }
+    let captain = gs[0];
+    {
+        let p = w.comp_mut::<Personality>(captain).expect("p");
+        p.lawfulness = lawfulness;
+        p.greed = greed;
+    }
+    law_brain::recompute_captain(&mut w);
+    assert_eq!(w.law().and_then(|l| l.captain), Some(captain));
+    {
+        let l = w.law_mut().expect("law");
+        l.posture = Posture::Crackdown;
+        l.target = Some(gang);
+    }
+    // Some heat: an arrest in the log.
+    gang::push_shock(&mut w, gang, citysim::Shock::MemberArrested);
+    (w, gang, captain)
+}
+
+#[test]
+fn test_a_greedy_captain_takes_the_bribe_and_the_crackdown_lifts() {
+    use citysim::systems::faction;
+    let (mut w, gang, captain) = crackdown_scene(66, 0.2, 100, 0.9, 0.5);
+    let price = faction::bribe_price(&w);
+    assert_eq!(price, 10 + guards(&w).len() as i64);
+    let wallet = w.comp::<citysim::Wallet>(captain).map_or(0, |w| w.coins);
+    assert!(faction::consider_bribe(&mut w, gang), "offered");
+    assert_eq!(w.comp::<Gang>(gang).expect("g").treasury, 100 - price);
+    assert_eq!(w.comp::<citysim::Wallet>(captain).map_or(0, |w| w.coins), wallet + price);
+    assert!(w.comp::<Gang>(gang).expect("g").bribe_until.is_some());
+    let l = w.law().expect("law");
+    assert!(!l.cracking_down_on(gang), "the crackdown lifted at once");
+    assert!(l.hardened_until.is_none());
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Bribe && e.text.contains("paid captain")));
+    assert!(w.comp::<Personality>(captain).is_some_and(|p| p.lawfulness < 0.5), "the captain is a little dirtier");
+    assert!(!faction::consider_bribe(&mut w, gang), "not twice");
+}
+
+#[test]
+fn test_an_incorruptible_captain_refuses_and_the_crackdown_hardens() {
+    use citysim::systems::faction;
+    let (mut w, gang, captain) = crackdown_scene(67, 0.2, 100, 0.9, 0.9);
+    assert!(faction::consider_bribe(&mut w, gang), "offered");
+    assert_eq!(w.comp::<Gang>(gang).expect("g").treasury, 100, "no coins move");
+    assert!(w.comp::<Gang>(gang).expect("g").bribe_until.is_some(), "and no second try");
+    let l = w.law().expect("law");
+    assert!(l.hardened_until.is_some());
+    assert!(l.shocks.contains(&LawShock::BribeRefused));
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Bribe && e.text.contains("refused")));
+    let _ = captain;
+}
+
+#[test]
+fn test_a_proud_or_broke_gang_does_not_pay() {
+    use citysim::systems::faction;
+    let (mut w, gang, _) = crackdown_scene(68, 0.95, 100, 0.9, 0.5);
+    assert!(faction::bribe_score(&w, gang).is_some(), "could pay");
+    assert!(!faction::consider_bribe(&mut w, gang), "too proud");
+    let (mut w, gang, _) = crackdown_scene(69, 0.2, 5, 0.9, 0.5);
+    assert!(faction::bribe_score(&w, gang).is_none(), "cannot afford it");
+    assert!(!faction::consider_bribe(&mut w, gang));
+    // Not under crackdown: nothing to buy.
+    let (mut w, gang, _) = crackdown_scene(70, 0.2, 100, 0.9, 0.5);
+    w.law_mut().expect("law").posture = Posture::Patrol;
+    assert!(faction::bribe_score(&w, gang).is_none());
+    assert!(!faction::consider_bribe(&mut w, gang));
+}
+
 #[test]
 fn test_player_pins_and_releases_the_posture() {
     let mut w = world(65);

@@ -31,6 +31,8 @@ pub enum Drift {
     PaidOnTimeWeek,
     ReportedCrime,
     BirthdayAfter40,
+    /// M9: the captain took a gang's money.
+    TookBribe,
 }
 
 impl Personality {
@@ -113,6 +115,10 @@ impl Personality {
             Drift::BirthdayAfter40 => {
                 add(&mut self.greed, -0.005);
                 add(&mut self.courage, -0.005);
+            }
+            Drift::TookBribe => {
+                add(&mut self.lawfulness, -0.05);
+                add(&mut self.greed, 0.02);
             }
         }
     }
