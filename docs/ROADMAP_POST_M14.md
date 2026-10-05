@@ -373,3 +373,10 @@ Folded into the sketches above rather than a milestone of their own:
 - **Room templates per kind** (the verticality/layers milestone, with M12 districts): a `Layout` of typed rooms generated from TOML templates (room types, size ranges, adjacency); capacity from room area by type (beds per barracks area, generators per plant area); factions designate rooms, the solver places them.
 - **Upgrades as the physical Security and Power profiles**: sensors and turrets on walls and ceilings, locks on doors, solar panels and windows on exterior walls (windows feed a sunlight exposure that mood and a nutrition-style need read).
 - **Stairs and elevators** as portals between layers; rooms as named regions for pathfinding, LOD, raids and biographies.
+
+## Addendum 11 (2026-10-05, Dylan, candidate): daemons, rogue agents, the Blackwall
+
+- **Daemons** (after M14; M16 contracts): a brain without a body on a Virt node with a goal, a tier and a compute budget; gated by the owner's server capacity (an M13 asset), so the count is bounded by design; event-driven like the faction brains.
+- **Rogue by cheapness**: competence and lawfulness from the maker's tech tier and training Data; cheap daemons solve problems illegally and the binder attributes the crime to the owner.
+- **The Blackwall** (M17): daemon tiers cap at 3; a breach attempt is a rare, ruinous event owned by the outside world.
+- Status: candidate, not committed.
