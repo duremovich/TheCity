@@ -69,7 +69,7 @@ fn draw_hud(app: &App, world: &World) {
     let price = world.mean_price();
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let text = format!(
-        "Day {} · {} · {} {} · {}x · Pop {} · Food {} · Price {} · Treasury {}",
+        "Day {} · {} · {} {} · {}x · Pop {} · Food {} · Price {}¢ · Treasury {}¢",
         world.day(),
         world.season(),
         world.phase(),

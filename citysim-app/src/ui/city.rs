@@ -97,8 +97,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         egui::Grid::new("city_gangs").striped(true).show(ui, |ui| {
             ui.strong("gang");
             ui.strong("heads");
-            ui.strong("homes");
-            ui.strong("coins");
+            ui.strong("blocks");
+            ui.strong("¢");
             ui.strong("order");
             ui.end_row();
             for (i, gid) in world.gangs().into_iter().enumerate() {
@@ -109,7 +109,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 }
                 ui.label(format!("{}", g.members.len()));
                 ui.label(format!("{}", g.territory.len()));
-                ui.label(format!("{}", g.treasury));
+                ui.label(format!("{}¢", g.treasury));
                 let order = if g.is_sacked(world.tick) { "sacked".to_string() } else { g.order.to_string() };
                 ui.label(order);
                 ui.end_row();
@@ -122,7 +122,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 let guards = citysim::systems::law_brain::guards(world).len();
                 ui.label(format!("{guards}"));
                 ui.label("");
-                ui.label(format!("{}", world.treasury().map_or(0, |t| t.coins)));
+                ui.label(format!("{}¢", world.treasury().map_or(0, |t| t.coins)));
                 let on = law
                     .target
                     .and_then(|g| world.comp::<citysim::Gang>(g))
@@ -146,11 +146,11 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
         }
         ui.label(format!(
-            "Markets {market} · Warehouse {warehouse} · Pantries {pantry} · Sum {}",
+            "Street Markets {market} · Reserve Depot {warehouse} · Pantries {pantry} · Sum {}",
             market + warehouse + pantry
         ));
         let price = world.mean_price();
-        ui.label(format!("Price {price} · Treasury {}", world.treasury().map_or(0, |t| t.coins)));
+        ui.label(format!("Price {price}¢ · Treasury {}¢", world.treasury().map_or(0, |t| t.coins)));
         sparkline(ui, world);
 
         ui.separator();
@@ -230,7 +230,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
         });
         ui.horizontal(|ui| {
-            ui.label("Home at");
+            ui.label("Block at");
             ui.add(egui::DragValue::new(&mut c.build_rect.x).range(0..=90));
             ui.add(egui::DragValue::new(&mut c.build_rect.y).range(0..=60));
             ui.add(egui::DragValue::new(&mut c.build_rect.w).range(4..=6));
@@ -242,7 +242,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         if let Some(sel) = app.selected {
             let own_home = world.comp::<Building>(sel).filter(|b| b.kind == BuildingKind::Home).map(|_| sel);
             if let Some(home) = own_home.or_else(|| world.comp::<citysim::Household>(sel).and_then(|h| h.home)) {
-                if ui.button(format!("Demolish Home#{}", home.index)).clicked() {
+                if ui.button(format!("Demolish Block#{}", home.index)).clicked() {
                     app.cmds.push(PlayerCommand::DemolishHome(home));
                 }
             }

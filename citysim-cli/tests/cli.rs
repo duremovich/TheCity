@@ -71,7 +71,7 @@ fn test_cli_lever_and_save_at() {
     // M10: three Markets fill during the day and farms overflow into the Warehouse, so its stock
     // is dynamic now; the release itself is checked through its event (split over 3 Markets).
     let events = String::from_utf8_lossy(&out.stderr);
-    assert!(events.contains("Released 200 food from the Warehouse to 3 Markets"), "no release event");
+    assert!(events.contains("Released 200 food from the Reserve Depot to 3 Street Markets"), "no release event");
     assert!(dir.join("3-100.ron").is_file());
 
     // resume from the save and finish the day: identical row

@@ -524,7 +524,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     );
     world.abort_plan(id);
     let name = world.name_of(id);
-    world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {role:?}"));
+    world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {}", role.label()));
 }
 
 // ---------------------------------------------------------------------------
@@ -642,7 +642,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     world.stats.current.immigrants += 1;
     let name = world.name_of(id);
     let where_ = match home {
-        Some(h) => format!("housed in Home#{}", h.index),
+        Some(h) => format!("housed in Block#{}", h.index),
         None => "homeless".to_string(),
     };
     world.push_event(EventKind::Immigration, &[id], format!("{name} arrived, {where_}"));

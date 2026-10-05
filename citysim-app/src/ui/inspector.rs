@@ -56,7 +56,7 @@ fn signed_bar(ui: &mut Ui, label: &str, value: f32) {
 
 fn building_label(world: &World, b: EntityId) -> String {
     match world.comp::<Building>(b) {
-        Some(bd) => format!("{}#{}", bd.kind, b.index),
+        Some(bd) => format!("{}#{}", bd.kind.label(), b.index),
         None => format!("#{}", b.index),
     }
 }
@@ -142,7 +142,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             section(ui, "Wallet and inventory", |ui| {
                 let unpaid = world.comp::<Job>(id).map_or(0, |j| j.days_unpaid);
                 ui.label(format!(
-                    "{} coins · {} food ({} stolen) · {unpaid} days unpaid",
+                    "{}¢ · {} food ({} stolen) · {unpaid} days unpaid",
                     w.coins, inv.food, inv.stolen_food
                 ));
             });
@@ -209,14 +209,14 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             Some(j) => {
                 let at = j.employer.map_or("nowhere".to_string(), |e| building_label(world, e));
                 let captain = if world.law().is_some_and(|l| l.captain == Some(id)) { " · captain" } else { "" };
-                ui.label(format!("{} @ {at} · wage {}/day{captain}", j.role, j.wage_per_day));
+                ui.label(format!("{} @ {at} · wage {}¢/day{captain}", j.role.label(), j.wage_per_day));
             }
             None => {
                 ui.label("No job");
             }
         }
         match world.comp::<Household>(id).and_then(|h| h.home) {
-            Some(h) => ui.label(format!("Home {}", building_label(world, h))),
+            Some(h) => ui.label(format!("Block {}", building_label(world, h))),
             None => ui.colored_label(RED, "Homeless"),
         };
         ui.horizontal(|ui| {

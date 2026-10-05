@@ -571,8 +571,8 @@ fn test_breach_against_three_guards_fails_and_shocks() {
     let g = w.comp::<Gang>(g0).expect("g");
     assert!(g.last_breakout_tick.is_some(), "the cooldown runs either way");
     assert_ne!(g.order, Order::BreakOut, "the brain rethought at once");
-    assert!(w.events.iter().any(|e| e.kind == EventKind::Assault && e.text.contains("at the Jail")));
-    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("stormed the Jail: Lost")));
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Assault && e.text.contains("at the Precinct")));
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("stormed the Precinct: Lost")));
     assert!(!w.events.iter().any(|e| e.kind == EventKind::Jailbreak));
 }
 

@@ -120,7 +120,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
 
 fn header(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
     section(ui, "Building", |ui| {
-        ui.heading(format!("{}#{}", b.kind, id.index));
+        ui.heading(format!("{}#{}", b.kind.label(), id.index));
         ui.label(format!(
             "{}×{} at ({}, {}) · door {} · capacity {}",
             b.rect.w, b.rect.h, b.rect.x, b.rect.y, b.door, b.capacity
@@ -168,8 +168,8 @@ fn home(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
                 agent_link(ui, app, world, r);
                 ui.label(lod_tag(world, r));
                 let coins = world.comp::<Wallet>(r).map_or(0, |w| w.coins);
-                ui.label(format!("{coins} coins"));
-                let job = world.comp::<Job>(r).map_or("no job".to_string(), |j| j.role.to_string());
+                ui.label(format!("{coins}¢"));
+                let job = world.comp::<Job>(r).map_or("no job".to_string(), |j| j.role.label().to_string());
                 ui.label(job);
                 let flags =
                     [world.has::<GangMember>(r).then_some("gang"), world.has::<Sentence>(r).then_some("jailed")];
@@ -194,7 +194,7 @@ fn home(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
     });
     section(ui, "Gang pressure", |ui| {
         if territory_of(world, id).is_some() {
-            ui.colored_label(PURPLE, "Pays 2 coins/day tribute");
+            ui.colored_label(PURPLE, "Pays 2¢/day tribute");
         } else {
             match b.claim {
                 Some(c) => {
@@ -218,7 +218,7 @@ fn farm(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
         let mult = world.config.economy.season_mult[season.index()];
         ui.label(format!("{season} yield multiplier {mult:.2}"));
     });
-    staff(ui, app, world, id, "Farmers");
+    staff(ui, app, world, id, "Vat Techs");
 }
 
 fn market(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
@@ -226,7 +226,7 @@ fn market(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
     section(ui, "Stock and price", |ui| {
         stock_bar(ui, "food", b.stock_food, cap);
         if let Some(m) = world.comp::<Market>(id) {
-            ui.label(format!("price {} coins (city mean {})", m.price_food, world.mean_price()));
+            ui.label(format!("price {}¢ (city mean {}¢)", m.price_food, world.mean_price()));
             price_history(ui, m);
         }
         let warehouse = world
@@ -368,7 +368,7 @@ fn jail(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             ui.end_row();
             for (a, s) in inmates {
                 agent_link(ui, app, world, a);
-                ui.label(format!("{:?}", s.crime));
+                ui.label(s.crime.label());
                 let left = s.until_tick.saturating_sub(world.tick) as f32 / TICKS_PER_DAY as f32;
                 ui.label(format!("day {} ({left:.1}d)", time::day(s.until_tick)));
                 match world.gang_of(a).and_then(|g| world.comp::<Gang>(g)) {
@@ -404,16 +404,16 @@ fn cemetery(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     section(ui, "Graves", |ui| {
         ui.label(format!("{here} corpses here awaiting the grave · {unburied} unburied in the city"));
     });
-    staff(ui, app, world, id, "Gravedigger");
+    staff(ui, app, world, id, "Recycler Techs");
 }
 
 fn hall(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     section(ui, "Treasury", |ui| {
         let coins = world.treasury().map_or(0, |t| t.coins);
         if coins < 0 {
-            ui.colored_label(RED, format!("{coins} coins: wages unpaid"));
+            ui.colored_label(RED, format!("{coins}¢: wages unpaid"));
         } else {
-            ui.label(format!("{coins} coins"));
+            ui.label(format!("{coins}¢"));
         }
         let l = &world.levers;
         ui.label(format!(
@@ -500,14 +500,14 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
                 Some(cs) => {
                     let score: f32 = cs.iter().map(|c| c.output).product();
                     ui.label(format!(
-                        "bribe {} coins: score {score:.2} (pays at {:.2})",
+                        "bribe {}¢: score {score:.2} (pays at {:.2})",
                         citysim::systems::faction::bribe_price(world),
                         world.config.law.bribe_threshold
                     ));
                 }
                 None => {
                     ui.label(format!(
-                        "bribe {} coins: cannot (paid, broke or leaderless)",
+                        "bribe {}¢: cannot (paid, broke or leaderless)",
                         citysim::systems::faction::bribe_price(world)
                     ));
                 }
@@ -563,7 +563,7 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
             ui.strong("name");
             ui.strong("rank");
             ui.strong("joined");
-            ui.strong("coins");
+            ui.strong("¢");
             ui.strong("doing");
             ui.end_row();
             for (m, rank, joined) in members {
@@ -575,7 +575,7 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
                     ui.label(rank_name);
                 }
                 ui.label(format!("day {}", time::day(joined)));
-                ui.label(format!("{}", world.comp::<Wallet>(m).map_or(0, |w| w.coins)));
+                ui.label(format!("{}¢", world.comp::<Wallet>(m).map_or(0, |w| w.coins)));
                 if world.has::<Sentence>(m) {
                     ui.colored_label(RED, "jailed");
                 } else {
@@ -590,7 +590,7 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
         });
     });
     let tribute = gang.territory.len() * 2;
-    section(ui, &format!("Territory ({} homes, {tribute} coins/day)", gang.territory.len()), |ui| {
+    section(ui, &format!("Territory ({} blocks, {tribute}¢/day)", gang.territory.len()), |ui| {
         if gang.territory.is_empty() {
             ui.label("none yet");
         }
@@ -609,7 +609,7 @@ fn warehouse(ui: &mut Ui, world: &World, b: &Building) {
     let cap = world.config.buildings.for_kind(b.kind).stock_cap;
     section(ui, "Reserve", |ui| {
         stock_bar(ui, "food", b.stock_food, cap);
-        ui.label("Moved to the Market by the city panel's Release reserve lever.");
+        ui.label("Moved to the Street Market by the city panel's Release reserve lever.");
     });
 }
 
@@ -624,7 +624,7 @@ fn staff(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, title: &str) {
         egui::Grid::new("staff").striped(true).show(ui, |ui| {
             for (w, role) in staff {
                 agent_link(ui, app, world, w);
-                ui.label(role.to_string());
+                ui.label(role.label());
                 let here = world.comp::<Position>(w).is_some_and(|p| p.building == Some(id));
                 let jailed = world.has::<Sentence>(w);
                 ui.label(if jailed {

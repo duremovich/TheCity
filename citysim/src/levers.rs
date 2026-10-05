@@ -214,7 +214,7 @@ impl World {
                 if let Some(l) = self.law_mut() {
                     l.pinned = *p;
                 } else {
-                    self.push_event(EventKind::PlayerActionFailed, &[], "SetLawPosture: no Jail");
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetLawPosture: no Precinct");
                     return;
                 }
                 crate::systems::law_brain::rescore(self, 0.0, "pinned");
@@ -261,7 +261,7 @@ impl World {
                     Ok(n) => self.push_event(
                         EventKind::PlayerAction,
                         &[*home],
-                        format!("Demolished Home#{} ({n} residents made homeless)", home.index),
+                        format!("Demolished Block#{} ({n} residents made homeless)", home.index),
                     ),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*home], format!("DemolishHome: {e}")),
                 };
@@ -271,7 +271,7 @@ impl World {
                     Ok((id, housed)) => self.push_event(
                         EventKind::PlayerAction,
                         &[id],
-                        format!("Built Home#{} at ({}, {}); {housed} moved in", id.index, rect.x, rect.y),
+                        format!("Built Block#{} at ({}, {}); {housed} moved in", id.index, rect.x, rect.y),
                     ),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("BuildHome: {e}")),
                 };
@@ -352,7 +352,7 @@ impl World {
                 Ok((guards, "dismissed every guard".to_string()))
             }
             PlayerCommand::SetTreasury(coins) => {
-                let t = self.treasury_mut().ok_or("SetTreasury: no Hall")?;
+                let t = self.treasury_mut().ok_or("SetTreasury: no Civic Hall")?;
                 t.coins = coins;
                 Ok((vec![], format!("set the Treasury to {coins}")))
             }
@@ -375,7 +375,7 @@ impl World {
             s.crime = s.crime.max(Crime::Assault);
             return Ok(());
         }
-        let jail = self.building_of_kind(BuildingKind::Jail).ok_or("JailAgent: no Jail")?;
+        let jail = self.building_of_kind(BuildingKind::Jail).ok_or("JailAgent: no Precinct")?;
         crate::systems::law::sentence(self, who, Crime::Assault, until, jail);
         Ok(())
     }
@@ -385,7 +385,7 @@ impl World {
     fn cmd_demolish_home(&mut self, home: EntityId) -> Result<usize, String> {
         let Some(b) = self.comp::<Building>(home) else { return Err("no such building".into()) };
         if b.kind != BuildingKind::Home {
-            return Err(format!("{:?} is not a Home", b.kind));
+            return Err(format!("{} is not a Block", b.kind.label()));
         }
         if b.demolished {
             return Err("already demolished".into());
@@ -453,7 +453,7 @@ impl World {
         for b in self.with::<Building>() {
             if let Some(bd) = self.comp::<Building>(b) {
                 if !bd.demolished && rects_overlap(bd.rect, rect) {
-                    return Err(format!("overlaps {:?}#{}", bd.kind, b.index));
+                    return Err(format!("overlaps {}#{}", bd.kind.label(), b.index));
                 }
             }
         }
@@ -539,7 +539,7 @@ impl World {
             .filter(|&m| self.comp::<Building>(m).is_some_and(|b| !b.demolished))
             .collect();
         let Some(wh) = self.building_of_kind(BuildingKind::Warehouse).filter(|_| !markets.is_empty()) else {
-            self.push_event(EventKind::PlayerActionFailed, &[], "ReleaseReserve: no Warehouse or Market");
+            self.push_event(EventKind::PlayerActionFailed, &[], "ReleaseReserve: no Reserve Depot or Street Market");
             return;
         };
         let market_cap = self.config.buildings.market.stock_cap;
@@ -586,8 +586,8 @@ impl World {
         if let Some(b) = self.comp_mut::<Building>(wh) {
             b.stock_food -= moved;
         }
-        let to = if n == 1 { "the Market".to_string() } else { format!("{n} Markets") };
-        self.push_event(EventKind::PlayerAction, &[], format!("Released {moved} food from the Warehouse to {to}"));
+        let to = if n == 1 { "the Street Market".to_string() } else { format!("{n} Street Markets") };
+        self.push_event(EventKind::PlayerAction, &[], format!("Released {moved} food from the Reserve Depot to {to}"));
     }
 
     fn cmd_grant_coins(&mut self, agent: EntityId, amount: i64) {

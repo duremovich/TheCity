@@ -76,7 +76,7 @@ fn daily_restock(world: &mut World) {
             EventKind::Restock,
             &[mk],
             format!(
-                "Clerks restocked {moved} food from the Warehouse (Market#{} {stock} -> {}, reserve {})",
+                "Clerks restocked {moved} food from the Reserve Depot (Street Market#{} {stock} -> {}, reserve {})",
                 mk.index,
                 stock + moved,
                 available - moved
@@ -102,7 +102,7 @@ fn daily_price(world: &mut World) {
             world.push_event(
                 EventKind::PriceChange,
                 &[market_id],
-                format!("Food price {old} -> {price} (Market#{} stock {stock})", market_id.index),
+                format!("Food price {old} -> {price} (Street Market#{} stock {stock})", market_id.index),
             );
         }
     }
@@ -288,7 +288,7 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
         b.clear_plan();
     }
     let name = world.name_of(agent);
-    world.push_event(EventKind::Quit, &[agent], format!("{name} quit as {} ({reason})", job.role));
+    world.push_event(EventKind::Quit, &[agent], format!("{name} quit as {} ({reason})", job.role.label()));
 }
 
 /// `CollectDole` at the Hall, once per day, while the Treasury is not negative.

@@ -309,7 +309,7 @@ fn test_m9_law_seed_42() {
                     }
                 }
                 EventKind::Bribe => bribes += 1,
-                EventKind::Raid if e.text.contains("stormed the Jail") => breaches += 1,
+                EventKind::Raid if e.text.contains("stormed the Precinct") => breaches += 1,
                 EventKind::Raid if e.text.contains(" raided ") => {
                     raids += 1;
                     if e.text.contains("Sacked") {

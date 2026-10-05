@@ -523,7 +523,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     world.push_event(
         EventKind::Extortion,
         &[actor, home],
-        format!("{name} extorted {taken} coins from Home#{}{suffix}", home.index),
+        format!("{name} extorted {taken} coins from Block#{}{suffix}", home.index),
     );
     let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
     law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
@@ -572,7 +572,7 @@ fn claim(world: &mut World, actor: EntityId, home: EntityId) -> Option<String> {
         world.push_event(
             EventKind::TerritoryFlipped,
             &[gang, h, home],
-            format!("{gname} took Home#{} from {hname}", home.index),
+            format!("{gname} took Block#{} from {hname}", home.index),
         );
         push_shock(world, h, Shock::HomeFlippedAgainst);
         suffix = Some(format!(" (took it from {hname})"));

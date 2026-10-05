@@ -194,6 +194,23 @@ impl BuildingKind {
         })
     }
 
+    /// The display name (M11 section 1). Identifiers and `Display` stay the v1 names.
+    pub fn label(self) -> &'static str {
+        match self {
+            BuildingKind::Home => "Block",
+            BuildingKind::Farm => "Vat Farm",
+            BuildingKind::Market => "Street Market",
+            BuildingKind::Bar => "Bar",
+            BuildingKind::Jail => "Precinct",
+            BuildingKind::Cemetery => "Recycler",
+            BuildingKind::Hall => "Civic Hall",
+            BuildingKind::Hideout => "Hideout",
+            BuildingKind::Warehouse => "Reserve Depot",
+            BuildingKind::SecurityOffice => "Security Office",
+            BuildingKind::Lot => "Lot",
+        }
+    }
+
     /// The letter drawn at the building's centre.
     pub fn letter(self) -> char {
         match self {
@@ -243,6 +260,17 @@ pub enum Role {
 impl Role {
     pub const ALL: [Role; 5] = [Role::Farmer, Role::Guard, Role::Clerk, Role::Bartender, Role::Gravedigger];
 
+    /// The display name (M11 section 1).
+    pub fn label(self) -> &'static str {
+        match self {
+            Role::Farmer => "Vat Tech",
+            Role::Guard => "Guard",
+            Role::Clerk => "Clerk",
+            Role::Bartender => "Bartender",
+            Role::Gravedigger => "Recycler Tech",
+        }
+    }
+
     /// The building kind that employs this role.
     pub fn workplace(self) -> BuildingKind {
         match self {
@@ -267,6 +295,18 @@ pub enum Crime {
     Extortion,
     Assault,
     Murder,
+}
+
+impl Crime {
+    /// The display name (M11 section 1).
+    pub fn label(self) -> &'static str {
+        match self {
+            Crime::Theft => "Theft",
+            Crime::Extortion => "Shakedown",
+            Crime::Assault => "Assault",
+            Crime::Murder => "Murder",
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

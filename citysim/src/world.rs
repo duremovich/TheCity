@@ -1219,7 +1219,7 @@ impl World {
         match self.comp::<Identity>(id) {
             Some(i) => i.name.clone(),
             None => match self.comp::<Building>(id) {
-                Some(b) => format!("{}#{}", b.kind, id.index),
+                Some(b) => format!("{}#{}", b.kind.label(), id.index),
                 None => format!("#{}", id.index),
             },
         }

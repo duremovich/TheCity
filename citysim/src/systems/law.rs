@@ -109,7 +109,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         world.push_event(
             EventKind::Witness,
             &[w, actor],
-            format!("{} saw {} commit {crime:?}", world.name_of(w), world.name_of(actor)),
+            format!("{} saw {} commit {}", world.name_of(w), world.name_of(actor), crime.label()),
         );
         if guard {
             file_report(world, crime, actor, Some(w));
@@ -148,7 +148,11 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
     }
     world.reports_mut().push(CrimeReport { crime, suspect, witness, tick, resolved: false });
     let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
-    world.push_event(EventKind::Report, &[suspect], format!("{who} reported {} for {crime:?}", world.name_of(suspect)));
+    world.push_event(
+        EventKind::Report,
+        &[suspect],
+        format!("{who} reported {} for {}", world.name_of(suspect), crime.label()),
+    );
     crate::systems::law_brain::log_report(world, suspect);
 }
 
@@ -382,7 +386,11 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                     world.remember(suspect, MemoryKind::Paid, None, 0.4, -0.4, false);
                     resolve_reports(world, suspect);
                     let name = world.name_of(suspect);
-                    world.push_event(EventKind::Sentence, &[suspect], format!("{name} fined {fine} coins (Jail full)"));
+                    world.push_event(
+                        EventKind::Sentence,
+                        &[suspect],
+                        format!("{name} fined {fine} coins (Precinct full)"),
+                    );
                     world.stats.current.arrests += 1;
                     release_at_jail_door(world, suspect, "fined");
                 } else {
@@ -394,7 +402,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                     world.push_event(
                         EventKind::Unpunished,
                         &[suspect],
-                        format!("{name} released: Jail full, cannot pay"),
+                        format!("{name} released: Precinct full, cannot pay"),
                     );
                     release_at_jail_door(world, suspect, "unpunished");
                 }
@@ -412,7 +420,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                     None => {
                         resolve_reports(world, suspect);
                         let name = world.name_of(suspect);
-                        world.push_event(EventKind::Unpunished, &[suspect], format!("{name} released: Jail full"));
+                        world.push_event(EventKind::Unpunished, &[suspect], format!("{name} released: Precinct full"));
                         release_at_jail_door(world, suspect, "unpunished");
                         return;
                     }
@@ -474,7 +482,7 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     world.retier(who);
     let name = world.name_of(who);
     let days = until.saturating_sub(world.tick).div_ceil(TICKS_PER_DAY);
-    world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {crime:?}"));
+    world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {}", crime.label()));
     crate::systems::gang::on_member_arrested(world, who);
 }
 
@@ -498,7 +506,7 @@ pub fn release(world: &mut World, who: EntityId, full: bool) {
         }
     }
     let name = world.name_of(who);
-    world.push_event(EventKind::Release, &[who], format!("{name} released from the Jail"));
+    world.push_event(EventKind::Release, &[who], format!("{name} released from the Precinct"));
     crate::systems::gang::on_member_released(world, who);
 }
 
@@ -787,9 +795,9 @@ pub fn player_arrest(world: &mut World, who: EntityId) -> Result<(), String> {
     if world.has::<Sentence>(who) {
         return Err("already jailed".into());
     }
-    let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return Err("no Jail".into()) };
+    let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return Err("no Precinct".into()) };
     if world.with::<Sentence>().len() >= usize::from(world.config.buildings.jail.capacity) {
-        return Err("the Jail is full".into());
+        return Err("the Precinct is full".into());
     }
     let until = world.tick + sentence_ticks(world, Crime::Theft);
     sentence(world, who, Crime::Theft, until, jail);

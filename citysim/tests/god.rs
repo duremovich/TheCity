@@ -111,7 +111,7 @@ fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOn
                 EventKind::Posture => d.posture_changes += 1,
                 EventKind::Assault | EventKind::Murder => d.violence += 1,
                 EventKind::Raid if e.text.contains(" raided ") => d.raids += 1,
-                EventKind::Raid if e.text.contains("stormed the Jail") => d.storms += 1,
+                EventKind::Raid if e.text.contains("stormed the Precinct") => d.storms += 1,
                 EventKind::Raid => d.fizzles += 1,
                 EventKind::Jailbreak => d.jailbreaks += 1,
                 EventKind::Bribe => d.bribes += 1,

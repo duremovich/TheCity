@@ -192,7 +192,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
         .collect();
     by_strength(world, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
-    let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Jail");
+    let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct");
     let (deaths, beaten) = (tally.deaths, tally.defenders_beaten);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
 
@@ -225,7 +225,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
             world.push_event(
                 EventKind::Jailbreak,
                 &actors,
-                format!("{gname} broke {} out of the Jail: {}", freed.len(), names.join(", ")),
+                format!("{gname} broke {} out of the Precinct: {}", freed.len(), names.join(", ")),
             );
         }
         _ => gang::push_shock(world, gid, Shock::BreakoutFailed),
@@ -243,7 +243,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
         EventKind::Raid,
         &[gid, jail, actor],
         format!(
-            "{gname} stormed the Jail: {verdict} ({n_raiders} raiders vs {n_defenders} guards, {deaths} dead, {} freed)",
+            "{gname} stormed the Precinct: {verdict} ({n_raiders} raiders vs {n_defenders} guards, {deaths} dead, {} freed)",
             freed.len()
         ),
     );
