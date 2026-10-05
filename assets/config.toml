@@ -176,6 +176,11 @@ shock_severity_rethink = 0.5
 # M9: this many members (at most half the gang, newest first, rotating daily) sleep at the Hideout
 # each night, so a raid meets defenders. In M8 every raid found the Hideout empty and sacked it.
 night_watch = 2
+# M9 breakouts (docs/M9_LAW.md): a cooldown of their own, the fit headcount needed to try, and how
+# many convicts one breach frees. The boss sitting inside doubles the pull (a consideration, not a flat).
+breakout_cooldown_days = 15
+breakout_min_members = 2
+breakout_max_freed = 3
 
 # Flat terms on each order's score (product of considerations + flat). Retaliate's 0.6 lets a
 # grudge beat Expand for any leader with greed < 1; LieLow's 0.15 keeps it always available;
@@ -187,6 +192,7 @@ contest = 0.1
 raid = 0.3
 retaliate = 0.6
 lielow = 0.15
+breakout = 0.2
 
 [demography]
 birth_p_per_day = 0.004

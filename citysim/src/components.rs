@@ -245,6 +245,8 @@ pub enum MemoryKind {
     MetInJail,
     /// Witnessed outburst of a very low mood (Mood table).
     Tantrum,
+    /// M9: broken out of the Jail by the gang.
+    Escaped,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -277,14 +279,22 @@ pub enum Order {
     Raid,
     Retaliate,
     LieLow,
+    /// M9: muster, march to the Jail, breach it and free our convicts.
+    BreakOut,
 }
 
 impl Order {
-    pub const ALL: [Order; 5] = [Order::Expand, Order::Contest, Order::Raid, Order::Retaliate, Order::LieLow];
+    pub const ALL: [Order; 6] =
+        [Order::Expand, Order::Contest, Order::Raid, Order::Retaliate, Order::LieLow, Order::BreakOut];
 
     /// Members muster and march under these.
     pub fn is_raid(self) -> bool {
-        matches!(self, Order::Raid | Order::Retaliate)
+        matches!(self, Order::Raid | Order::Retaliate | Order::BreakOut)
+    }
+
+    /// The expedition's door is the Jail's, not the rival Hideout's.
+    pub fn target_is_jail(self) -> bool {
+        self == Order::BreakOut
     }
 }
 
@@ -310,6 +320,10 @@ pub enum Shock {
     HomeFlippedAgainst,
     LeaderChanged,
     Sacked,
+    /// M9: our breakout was beaten at the Jail door.
+    BreakoutFailed,
+    /// M9: a breakout freed one of ours.
+    MemberFreed,
 }
 
 impl Shock {
@@ -323,6 +337,8 @@ impl Shock {
             Shock::HomeFlippedAgainst => 0.4,
             Shock::LeaderChanged => 0.5,
             Shock::Sacked => 1.0,
+            Shock::BreakoutFailed => 0.8,
+            Shock::MemberFreed => 0.3,
         }
     }
 
@@ -807,6 +823,17 @@ pub struct Gang {
     /// `(tick, member)` arrested or killed, newest last, capped at 64.
     #[serde(default)]
     pub heat_log: VecDeque<(Tick, EntityId)>,
+    /// M9: the leader at the moment of their arrest, while they sit inside.
+    /// The acting leader leans toward breaking them out.
+    #[serde(default)]
+    pub boss: Option<EntityId>,
+    /// M9: departure of the last breakout (its own cooldown).
+    #[serde(default)]
+    pub last_breakout_tick: Option<Tick>,
+    /// M9: the captain has been paid or has refused; no further bribe, and no
+    /// Crackdown against this gang, until here.
+    #[serde(default)]
+    pub bribe_until: Option<Tick>,
 }
 
 impl Gang {
@@ -828,6 +855,9 @@ impl Gang {
             sacked_until: None,
             shocks: Vec::new(),
             heat_log: VecDeque::new(),
+            boss: None,
+            last_breakout_tick: None,
+            bribe_until: None,
         }
     }
 

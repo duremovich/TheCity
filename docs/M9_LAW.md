@@ -90,7 +90,6 @@ pub enum LawShock {
 breakout_cooldown_days = 15
 breakout_min_members = 2       # fit members needed to attempt one
 breakout_max_freed = 3         # convicts freed per successful breach
-breakout_boss_flat = 0.3       # added to BreakOut's score while the boss is inside
 [gangs.order_flat]
 breakout = 0.2
 
@@ -134,7 +133,7 @@ Measured on seed 42 over 120 days: five raids, three met defenders, one was Won 
 
 | Order | Considerations (input → curve) |
 | --- | --- |
-| BreakOut | `Can(jailed > 0 ∧ breakout_ready ∧ own ≥ breakout_min_members)` → GATE; `jailed / (jailed + own)` → Linear{0.6,0.4}; `L.courage` → Linear{0.6,0.4}; `L.loyalty` → Linear{0.5,0.5}; `1 − garrison` → Linear{0.5,0.5}; flat `order_flat.breakout`, plus `breakout_boss_flat` while `boss_jailed` |
+| BreakOut | `Can(jailed > 0 ∧ breakout_ready ∧ own ≥ breakout_min_members)` → GATE; `jailed / (jailed + own)` → Linear{0.5,0.5}; `Can(boss_jailed)` → Linear{0.5,0.5} (the boss inside doubles the pull); `L.courage` → Linear{0.8,0.2}; `L.loyalty` → Linear{0.6,0.4}; `1 − garrison` → Linear{0.5,0.5}; flat `order_flat.breakout` |
 
 BreakOut competes with LieLow by design: arrests raise heat, heat feeds LieLow, and a brave loyal leader breaks out where a timid one hides. Choosing it sets `raid_at = next_muster(raid_muster_hour)` exactly as Raid does.
 

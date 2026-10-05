@@ -108,6 +108,16 @@ fn test_legacy_save_without_gangs_config_loads() {
     );
 }
 
+/// M9 renamed `LocationKey::RivalHideout` to `RaidTarget`; a save taken
+/// mid-raid still loads through the serde alias.
+#[test]
+fn test_rival_hideout_location_key_alias_loads() {
+    let key: citysim::LocationKey = ron::from_str("RivalHideout").expect("alias");
+    assert_eq!(key, citysim::LocationKey::RaidTarget);
+    let step: citysim::ActionKind = ron::from_str("GoTo(RivalHideout)").expect("alias in a step");
+    assert_eq!(step, citysim::ActionKind::GoTo(citysim::LocationKey::RaidTarget));
+}
+
 /// A current save is not touched by the migration: an in-progress claim survives.
 #[test]
 fn test_current_save_keeps_live_claims() {

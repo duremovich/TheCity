@@ -189,6 +189,9 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
         if g.members.is_empty() {
             g.empty_since = Some(tick);
         }
+        if g.boss == Some(id) {
+            g.boss = None;
+        }
     }
     if let Some(p) = world.comp_mut::<Personality>(id) {
         p.drift(Drift::LeftGang);
@@ -222,12 +225,34 @@ pub fn recompute_leader(world: &mut World, gang: EntityId) {
             gm.rank = if Some(m) == leader { 2 } else { 0 };
         }
     }
+    // A leader who lost the post to a Sentence is the boss until they are out.
+    let jailed_boss = old.filter(|&o| leader != Some(o) && world.has::<Sentence>(o));
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.leader = leader;
+        if jailed_boss.is_some() {
+            g.boss = jailed_boss;
+        }
     }
     if old.is_some() && leader != old {
         push_shock(world, gang, Shock::LeaderChanged);
     }
+}
+
+/// A member is out of the Jail (served, player-released or broken out):
+/// they are nobody's boss any more and may lead again.
+pub fn on_member_released(world: &mut World, id: EntityId) {
+    let Some(gang) = world.gang_of(id) else { return };
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        if g.boss == Some(id) {
+            g.boss = None;
+        }
+    }
+    recompute_leader(world, gang);
+}
+
+/// Members with a `Sentence`.
+pub fn jailed_headcount(world: &World, gang: EntityId) -> usize {
+    world.comp::<Gang>(gang).map_or(0, |g| g.members.iter().filter(|&&m| world.has::<Sentence>(m)).count())
 }
 
 /// Members not in the Jail.
@@ -273,6 +298,9 @@ pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId
         g.members.retain(|&m| m != id);
         if g.members.is_empty() {
             g.empty_since = Some(tick);
+        }
+        if g.boss == Some(id) {
+            g.boss = None;
         }
     }
     log_heat(world, gang, id);
@@ -376,7 +404,7 @@ pub fn note_gang_work(world: &mut World, id: EntityId) {
         .map(|g| (Some(g.order), g.name.clone()))
         .unwrap_or_default();
     let today = world.day();
-    let visible = order.is_some_and(|o| matches!(o, Order::Raid | Order::Retaliate | Order::LieLow));
+    let visible = order.is_some_and(|o| o.is_raid() || o == Order::LieLow);
     let mut log = false;
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.following_order = following;

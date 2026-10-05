@@ -58,10 +58,14 @@ pub enum EventKind {
     Raid,
     Disobeyed,
     Sacked,
+    /// M9 the law.
+    Jailbreak,
+    Posture,
+    Bribe,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 37] = [
+    pub const ALL: [EventKind; 40] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -99,6 +103,9 @@ impl EventKind {
         EventKind::Raid,
         EventKind::Disobeyed,
         EventKind::Sacked,
+        EventKind::Jailbreak,
+        EventKind::Posture,
+        EventKind::Bribe,
     ];
 }
 

@@ -157,7 +157,10 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         };
         ui.horizontal(|ui| {
             if let Some(s) = world.comp::<Sentence>(id) {
-                ui.colored_label(RED, format!("Jailed until day {}", time::day(s.until_tick)));
+                let boss =
+                    world.gang_of(id).and_then(|g| world.comp::<citysim::Gang>(g)).is_some_and(|g| g.boss == Some(id));
+                let tag = if boss { " (the boss)" } else { "" };
+                ui.colored_label(RED, format!("Jailed until day {}{tag}", time::day(s.until_tick)));
             }
             if let Some(gid) = world.gang_of(id) {
                 let name = world.comp::<citysim::Gang>(gid).map_or("gang".to_string(), |g| g.name.clone());

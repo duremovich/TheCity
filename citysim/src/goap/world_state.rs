@@ -39,8 +39,10 @@ pub enum LocationKey {
     Cemetery,
     Hall,
     Hideout,
-    /// The street tile outside the rival gang's Hideout door (raiders stop there).
-    RivalHideout,
+    /// The street tile outside the current expedition's door: the rival
+    /// Hideout under Raid / Retaliate, the Jail under BreakOut (raiders stop there).
+    #[serde(alias = "RivalHideout")]
+    RaidTarget,
     Warehouse,
     /// On a non-building tile.
     Street,
@@ -65,7 +67,7 @@ impl LocationKey {
         LocationKey::Cemetery,
         LocationKey::Hall,
         LocationKey::Hideout,
-        LocationKey::RivalHideout,
+        LocationKey::RaidTarget,
         LocationKey::Warehouse,
         LocationKey::Street,
         LocationKey::TargetHome,
@@ -276,7 +278,7 @@ impl WorldState {
                     .get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1))
                     .is_some_and(|&stop| pos.is_some_and(|p| p.building == Some(stop)))
         });
-        let rival_tile = crate::systems::raid::rival_hideout_tile(world, agent);
+        let raid_tile = crate::systems::raid::target_tile(world, agent);
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
@@ -292,7 +294,7 @@ impl WorldState {
                 Some(bd) => LocationKey::of_building(bd.kind),
                 None => LocationKey::Street,
             },
-            None if rival_tile.is_some() && rival_tile == pos.map(|p| p.tile) => LocationKey::RivalHideout,
+            None if raid_tile.is_some() && raid_tile == pos.map(|p| p.tile) => LocationKey::RaidTarget,
             None => LocationKey::Street,
         };
 

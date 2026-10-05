@@ -451,6 +451,34 @@ pub fn release(world: &mut World, who: EntityId, full: bool) {
     }
     let name = world.name_of(who);
     world.push_event(EventKind::Release, &[who], format!("{name} released from the Jail"));
+    crate::systems::gang::on_member_released(world, who);
+}
+
+/// M9: a convict is broken out. The `Sentence` goes, they stand at the Jail
+/// door hunted (`safety` 0.3) and glad of it (`Escaped`), and the warrant
+/// **reopens** for the sentence's crime, so a re-arrest sentences them afresh.
+pub fn escape(world: &mut World, who: EntityId) {
+    let Some(s) = world.remove::<Sentence>(who) else { return };
+    world.leave_building(who);
+    world.remember(who, MemoryKind::Escaped, None, 0.7, 0.4, false);
+    if let Some(n) = world.comp_mut::<Needs>(who) {
+        n.safety = 0.3;
+    }
+    file_report(world, s.crime, who, None);
+    crate::systems::gang::on_member_released(world, who);
+}
+
+/// M9: a gang stormed the Jail (`won`: convicts were freed). The law's own
+/// reaction (shocks, the Garrison posture) arrives with its brain.
+pub fn on_breakout(world: &mut World, _gang: EntityId, won: bool) {
+    let _ = (world, won);
+}
+
+/// M9: is every guard holding the Jail (`Posture::Garrison`)? Until the
+/// law has a brain, never.
+pub fn garrisoned(world: &World) -> bool {
+    let _ = world;
+    false
 }
 
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.

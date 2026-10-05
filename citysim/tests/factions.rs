@@ -49,6 +49,11 @@ fn inputs() -> OrderInputs {
         raid_ready: true,
         rival_exists: true,
         sacked: false,
+        jailed: 0,
+        boss_jailed: false,
+        breakout_ready: true,
+        garrison: false,
+        loyalty: 0.5,
     }
 }
 
@@ -89,6 +94,23 @@ fn test_order_retaliate_on_a_grudge_regardless_of_ratio() {
 fn test_order_lie_low_under_heat() {
     let i = OrderInputs { heat: 0.6, ..inputs() };
     assert_eq!(best(&i), Order::LieLow);
+}
+
+#[test]
+fn test_order_break_out_for_the_boss_or_lie_low_when_timid() {
+    // Two inside, the boss among them, a brave loyal leader: break them out.
+    let i = OrderInputs { jailed: 2, boss_jailed: true, courage: 0.8, loyalty: 0.8, heat: 0.4, ..inputs() };
+    assert_eq!(best(&i), Order::BreakOut);
+    // The same gang under a timid leader and more heat lies low instead.
+    let timid = OrderInputs { courage: 0.2, loyalty: 0.3, heat: 0.6, ..i.clone() };
+    assert_eq!(best(&timid), Order::LieLow);
+    // The cooldown, the headcount and an empty Jail each gate it.
+    assert_ne!(best(&OrderInputs { breakout_ready: false, ..i.clone() }), Order::BreakOut);
+    assert_ne!(best(&OrderInputs { own: 1, ..i.clone() }), Order::BreakOut);
+    assert_ne!(best(&OrderInputs { jailed: 0, boss_jailed: false, ..i.clone() }), Order::BreakOut);
+    // Without the boss inside a lone grunt is not worth the Jail's guards.
+    let grunt = OrderInputs { jailed: 1, boss_jailed: false, courage: 0.5, loyalty: 0.5, heat: 0.0, ..i };
+    assert_ne!(best(&grunt), Order::BreakOut);
 }
 
 #[test]
@@ -298,6 +320,8 @@ fn test_brawl_with_no_defenders_sacks_the_hideout() {
     assert!(w.events.iter().any(|e| e.kind == EventKind::Sacked));
     assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("Sacked")));
     assert_eq!(raid::brawl(&mut w, a), None, "a late raider finds it resolved");
+    // The shock list is drained by the rethink; the loser keeps its grievance in retaliate_until.
+    assert!(w.comp::<Gang>(g1).expect("g").retaliate_until.is_some());
 }
 
 #[test]
@@ -384,6 +408,118 @@ fn test_raid_goal_opens_in_the_gather_window() {
     w.comp_mut::<Gang>(g0).expect("g").raid_at = None;
     assert!(raid::raid_done(&w, a));
     assert!(!raid::depart(&mut w, a), "no muster to depart from");
+}
+
+/// Every guard far from the Jail door, out of any building.
+fn clear_guards(w: &mut World) {
+    for g in w.citizens().into_iter().filter(|&g| citysim::systems::law::is_guard(w, g)).collect::<Vec<_>>() {
+        w.abort_plan(g);
+        w.leave_building(g);
+        w.comp_mut::<citysim::Position>(g).expect("p").tile = citysim::TilePos { x: 95, y: 0 };
+    }
+}
+
+/// Jail `who` for `crime` (the leader's arrest makes them the boss).
+fn jail(w: &mut World, who: EntityId, crime: citysim::Crime) {
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let until = w.tick + citysim::systems::law::sentence_ticks(w, crime);
+    citysim::systems::law::sentence(w, who, crime, until, jail);
+}
+
+#[test]
+fn test_breach_with_no_guards_frees_the_boss_first_and_reopens_the_warrant() {
+    use citysim::Crime;
+    let mut w = world(58);
+    w.config.crime.fight_death_p = 0.0;
+    let (g0, _) = gangs(&w);
+    let civ = civilians(&w, 3);
+    let (boss, grunt, raider) = (civ[0], civ[1], civ[2]);
+    for &m in &[boss, grunt, raider] {
+        gang::enlist(&mut w, m, g0);
+    }
+    w.comp_mut::<Personality>(boss).expect("p").loyalty = 1.0;
+    gang::recompute_leader(&mut w, g0);
+    assert_eq!(w.comp::<Gang>(g0).expect("g").leader, Some(boss));
+    w.config.gangs.breakout_max_freed = 1;
+    jail(&mut w, grunt, Crime::Theft);
+    jail(&mut w, boss, Crime::Assault);
+    let g = w.comp::<Gang>(g0).expect("g");
+    assert_eq!(g.boss, Some(boss), "the jailed leader is the boss");
+    assert_eq!(g.leader, Some(raider));
+    assert!(!citysim::systems::law::wanted(&w, boss), "the arrest resolved the warrant");
+
+    clear_guards(&mut w);
+    let door = raid::jail_tile(&w).expect("jail door");
+    stage_raider(&mut w, raider, door);
+    {
+        let now = w.tick;
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::BreakOut;
+        g.raid_at = Some(now);
+    }
+    assert_eq!(raid::target_tile(&w, raider), Some(door), "a breakout marches on the Jail");
+    assert_eq!(raid::resolve(&mut w, raider), Some(Outcome::Won));
+    assert!(!w.has::<citysim::Sentence>(boss), "the boss is out");
+    assert!(w.has::<citysim::Sentence>(grunt), "one freed per breach: the boss first");
+    assert!(citysim::systems::law::wanted(&w, boss), "the warrant reopens");
+    assert!(w.comp::<citysim::Position>(boss).is_some_and(|p| p.building.is_none()), "at the Jail door");
+    let g = w.comp::<Gang>(g0).expect("g");
+    assert_eq!(g.boss, None);
+    assert_eq!(g.leader, Some(boss), "and leads again");
+    assert!(g.last_breakout_tick.is_some());
+    // The rethink may already have mustered a raid (the rival here is empty
+    // and rich); the breakout itself is over.
+    assert!(!g.order.target_is_jail());
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Jailbreak && e.text.contains("broke 1 out")));
+    assert!(w
+        .comp::<citysim::Memory>(boss)
+        .is_some_and(|m| m.entries.iter().any(|e| e.kind == citysim::MemoryKind::Escaped)));
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::BreakOut;
+        g.raid_at = None;
+    }
+    assert_eq!(raid::resolve(&mut w, raider), None, "a late raider finds it resolved");
+}
+
+#[test]
+fn test_breach_against_three_guards_fails_and_shocks() {
+    use citysim::Crime;
+    let mut w = world(59);
+    w.config.crime.fight_death_p = 0.0;
+    let (g0, _) = gangs(&w);
+    let civ = civilians(&w, 3);
+    let (convict, raider, other) = (civ[0], civ[1], civ[2]);
+    for &m in &[convict, raider, other] {
+        gang::enlist(&mut w, m, g0);
+    }
+    jail(&mut w, convict, Crime::Assault);
+    clear_guards(&mut w);
+    let jail_b = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let guards: Vec<EntityId> =
+        w.citizens().into_iter().filter(|&g| citysim::systems::law::is_guard(&w, g)).take(3).collect();
+    for &g in &guards {
+        set_fighter(&mut w, g, 0.9, 0.9);
+        w.enter_building(g, jail_b);
+    }
+    set_fighter(&mut w, raider, 0.1, 0.5);
+    let door = raid::jail_tile(&w).expect("jail door");
+    stage_raider(&mut w, raider, door);
+    w.tick = 700;
+    {
+        let now = w.tick;
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::BreakOut;
+        g.raid_at = Some(now);
+    }
+    assert_eq!(raid::resolve(&mut w, raider), Some(Outcome::Lost));
+    assert!(w.has::<citysim::Sentence>(convict), "nobody freed");
+    let g = w.comp::<Gang>(g0).expect("g");
+    assert!(g.last_breakout_tick.is_some(), "the cooldown runs either way");
+    assert_ne!(g.order, Order::BreakOut, "the brain rethought at once");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Assault && e.text.contains("at the Jail")));
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("stormed the Jail: Lost")));
+    assert!(!w.events.iter().any(|e| e.kind == EventKind::Jailbreak));
 }
 
 #[test]

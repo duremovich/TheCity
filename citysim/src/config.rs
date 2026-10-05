@@ -263,12 +263,29 @@ pub struct GangsCfg {
     /// Members who sleep at the Hideout each night (at most half the gang), so a raid meets someone.
     #[serde(default = "GangsCfg::default_night_watch")]
     pub night_watch: usize,
+    /// M9 breakouts: their own cooldown, the fit headcount needed, and the
+    /// convicts freed per breach.
+    #[serde(default = "GangsCfg::default_breakout_cooldown_days")]
+    pub breakout_cooldown_days: u64,
+    #[serde(default = "GangsCfg::default_breakout_min_members")]
+    pub breakout_min_members: usize,
+    #[serde(default = "GangsCfg::default_breakout_max_freed")]
+    pub breakout_max_freed: usize,
     pub order_flat: OrderFlatCfg,
 }
 
 impl GangsCfg {
     fn default_night_watch() -> usize {
         2
+    }
+    fn default_breakout_cooldown_days() -> u64 {
+        15
+    }
+    fn default_breakout_min_members() -> usize {
+        2
+    }
+    fn default_breakout_max_freed() -> usize {
+        3
     }
 
     /// The `[gangs]` block of `assets/config.toml`, for saves written before it existed.
@@ -287,6 +304,14 @@ pub struct OrderFlatCfg {
     pub raid: f32,
     pub retaliate: f32,
     pub lielow: f32,
+    #[serde(default = "OrderFlatCfg::default_breakout")]
+    pub breakout: f32,
+}
+
+impl OrderFlatCfg {
+    fn default_breakout() -> f32 {
+        0.2
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

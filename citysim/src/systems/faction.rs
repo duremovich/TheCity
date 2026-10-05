@@ -37,6 +37,14 @@ pub struct OrderInputs {
     pub raid_ready: bool,
     pub rival_exists: bool,
     pub sacked: bool,
+    /// M9: members in the Jail, whether the boss is among them, whether the
+    /// breakout cooldown has passed (and the gang is not sacked), and whether
+    /// the law holds the Jail in force (`Posture::Garrison`).
+    pub jailed: usize,
+    pub boss_jailed: bool,
+    pub breakout_ready: bool,
+    pub garrison: bool,
+    pub loyalty: f32,
 }
 
 /// `own / max(rival, 1)` mapped onto `[0, 1]` as `ratio / 2`: a Logistic mid of
@@ -61,6 +69,7 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
     let calm = 1.0 - i.heat;
     let weakness = ((i.rival as f32 / i.own.max(1) as f32) / 2.0).clamp(0.0, 1.0);
     let prize_x = (i.prize as f32 / 200.0).clamp(0.0, 1.0);
+    let jailed_frac = i.jailed as f32 / (i.jailed + i.own).max(1) as f32;
     let scored = [
         score(
             Order::Expand,
@@ -124,6 +133,22 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("weakness", weakness, Curve::Linear { m: 0.6, b: 0.4 }),
             ],
             f.lielow,
+        ),
+        score(
+            Order::BreakOut,
+            vec![
+                Consideration::new(
+                    "convicts",
+                    can(i.jailed > 0 && i.breakout_ready && i.own >= cfg.breakout_min_members),
+                    GATE,
+                ),
+                Consideration::new("jailed frac", jailed_frac, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("boss inside", can(i.boss_jailed), Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("courage", i.courage, Curve::Linear { m: 0.8, b: 0.2 }),
+                Consideration::new("loyalty", i.loyalty, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("1-garrison", can(!i.garrison), Curve::Linear { m: 0.5, b: 0.5 }),
+            ],
+            f.breakout,
         ),
     ];
     let mut out: Vec<OrderScore> = scored.into_iter().flatten().collect();
@@ -205,6 +230,8 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let own = crate::systems::gang::fit_headcount(world, gang);
     let rival_count = rival.map_or(0, |r| crate::systems::gang::fit_headcount(world, r));
     let cooldown = cfg.raid_cooldown_days * TICKS_PER_DAY;
+    let breakout_cooldown = cfg.breakout_cooldown_days * TICKS_PER_DAY;
+    let jailed = crate::systems::gang::jailed_headcount(world, gang);
     Some(OrderInputs {
         frontier,
         frontier_total,
@@ -220,6 +247,12 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         raid_ready: g.last_raid_tick.is_none_or(|t| now.saturating_sub(t) >= cooldown) && !g.is_sacked(now),
         rival_exists: rg.is_some(),
         sacked: g.is_sacked(now),
+        jailed,
+        boss_jailed: g.boss.is_some_and(|b| world.has::<Sentence>(b)),
+        breakout_ready: g.last_breakout_tick.is_none_or(|t| now.saturating_sub(t) >= breakout_cooldown)
+            && !g.is_sacked(now),
+        garrison: crate::systems::law::garrisoned(world),
+        loyalty: p.loyalty,
     })
 }
 

@@ -521,7 +521,7 @@ pub fn on_complete(
             }
         }
         ActionKind::Brawl => {
-            crate::systems::raid::brawl(world, id);
+            crate::systems::raid::resolve(world, id);
             StepResult::Done
         }
         ActionKind::Attack => {

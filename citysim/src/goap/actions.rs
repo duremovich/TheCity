@@ -56,7 +56,8 @@ pub enum ActionKind {
     SplitLoot,
     /// Gang: wait at the own Hideout for the raid's departure.
     Muster,
-    /// Gang: fight at the rival Hideout's door; resolves the raid.
+    /// Gang: fight at the expedition's door (the rival Hideout, or the Jail
+    /// under BreakOut); resolves the raid.
     Brawl,
     BuryCorpse,
     CarryCorpse,
@@ -83,7 +84,7 @@ pub const PLANNABLE: [ActionKind; 53] = [
     ActionKind::GoTo(LocationKey::Cemetery),
     ActionKind::GoTo(LocationKey::Hall),
     ActionKind::GoTo(LocationKey::Hideout),
-    ActionKind::GoTo(LocationKey::RivalHideout),
+    ActionKind::GoTo(LocationKey::RaidTarget),
     ActionKind::GoTo(LocationKey::Warehouse),
     ActionKind::GoTo(LocationKey::Street),
     ActionKind::GoTo(LocationKey::TargetHome),
@@ -382,8 +383,8 @@ impl PlanCtx {
                     dist.insert(LocationKey::CorpseTile, o.manhattan(there));
                 }
             }
-            if let Some(t) = crate::systems::raid::rival_hideout_tile(world, agent) {
-                dist.insert(LocationKey::RivalHideout, o.manhattan(t));
+            if let Some(t) = crate::systems::raid::target_tile(world, agent) {
+                dist.insert(LocationKey::RaidTarget, o.manhattan(t));
             }
         }
 
@@ -659,7 +660,7 @@ impl ActionKind {
             }
             ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence && !ctx.hideout_sacked,
             ActionKind::Muster => at(LocationKey::Hideout) && !ws.mustered && ctx.raid_pending,
-            ActionKind::Brawl => at(LocationKey::RivalHideout) && ws.mustered && !ws.raid_done,
+            ActionKind::Brawl => at(LocationKey::RaidTarget) && ws.mustered && !ws.raid_done,
             ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
             ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
@@ -703,7 +704,7 @@ impl ActionKind {
             ActionKind::SplitLoot => ctx.has_loot && !ctx.hideout_sacked,
             ActionKind::Fence => ctx.can_fence && !ctx.hideout_sacked,
             ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::Hideout),
-            ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RivalHideout),
+            ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RaidTarget),
             ActionKind::Attack => ctx.hostile_adjacent,
             ActionKind::CarryCorpse => ctx.corpse_target,
             ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),

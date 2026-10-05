@@ -81,8 +81,16 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Court => crate::systems::social::court_target(world, id),
         // GangWork binds the Extort target per the Gang section.
         GoalKind::GangWork => crate::systems::gang::extort_target(world, id),
-        // Raid binds the rival Hideout (the inspector shows it as the plan target).
-        GoalKind::Raid => world.gang_of(id).and_then(|g| world.rival_of(g)).and_then(|r| world.hideout_of(r)),
+        // Raid binds the expedition's building, the rival Hideout or the Jail
+        // (the inspector shows it as the plan target).
+        GoalKind::Raid => {
+            let gang = world.gang_of(id)?;
+            if world.comp::<crate::components::Gang>(gang).is_some_and(|g| g.order.target_is_jail()) {
+                world.building_of_kind(BuildingKind::Jail)
+            } else {
+                world.rival_of(gang).and_then(|r| world.hideout_of(r))
+            }
+        }
         // Fight binds the hostile within 4, or the revenge subject.
         GoalKind::Fight => {
             let tile = world.comp::<Position>(id)?.tile;

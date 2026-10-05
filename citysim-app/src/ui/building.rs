@@ -381,7 +381,21 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
         }
         if let Some(t) = gang.raid_at {
             let when = if t > now { format!("in {} min", t - now) } else { "departed".to_string() };
-            ui.colored_label(RED, format!("Raid musters {when} ({})", time::clock(t)));
+            let what = if gang.order.target_is_jail() { "Breakout" } else { "Raid" };
+            ui.colored_label(RED, format!("{what} musters {when} ({})", time::clock(t)));
+        }
+        let jailed = citysim::systems::gang::jailed_headcount(world, gid);
+        if let Some(b) = gang.boss.filter(|&b| world.has::<Sentence>(b)) {
+            ui.horizontal(|ui| {
+                ui.colored_label(RED, "Boss inside:");
+                agent_link(ui, app, world, b);
+            });
+        }
+        if jailed > 0 {
+            let cooldown = world.config.gangs.breakout_cooldown_days * TICKS_PER_DAY;
+            let wait = gang.last_breakout_tick.map_or(0, |t| (t + cooldown).saturating_sub(now));
+            let note = if wait > 0 { format!(" · breakout possible in {:.1} d", days(wait)) } else { String::new() };
+            ui.label(format!("{jailed} in the Jail{note}"));
         }
         if gang.is_sacked(now) {
             let left = gang.sacked_until.map_or(0.0, |t| days(t.saturating_sub(now)));
