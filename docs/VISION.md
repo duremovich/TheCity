@@ -129,3 +129,19 @@ Design implications: a `Death` for the player is a save-ending event by default 
 ## Note: learned policies vs explicit brains (added 2026-10-05, Dylan's question)
 
 As complexity grows and performance bottlenecks appear, investigate whether a tightly tuned neural network beats the explicit decision logic. Assessment at the time of writing (M10, profiled): the faction brains (gang, law, corp) rescore daily and on shocks and cost nothing; their value is the consideration trace that explains a decision, which a network would hide. The per-tick cost is per-agent `think`, `plan` and LOD assignment over bodies. The candidate that fits is the **Statistical tier**: its table is already a policy distilled from Full runs by `calibrate`, and as M11–M13 add conditioning (class, wealth, zone, chrome) a lookup table explodes where a small MLP over the same features would not. Experiment after M11: distil the table into a small network, judge it by the parity test and ticks/s; keep the faction brains explicit unless a learned brain can emit the same trace.
+
+## The survival loop (added 2026-10-05, Dylan)
+
+The player character's loop shares most of its shape with the NPC loop. **Survival is the main goal**: hard at first, easy later. The hardest part at first is probably **shelter**. Sleep on the street and you may be robbed, killed, or arrested for sleeping in public. Food can be hard too. But you could steal enough for a hotel every night at first. Or find unowned areas of town and try to take over a building and secure it. **Squatting** is probably common for a poor PC and for gangs alike.
+
+The ladder, as the sim should offer it to NPCs first:
+
+| Rung | What it is | What the sim needs |
+| --- | --- | --- |
+| The street | sleep rough; the Statistical victim rolls and the Full fight rules already prefer the homeless; `Vagrancy` as a crime so the law can sweep | a `Vagrancy` crime with a posture-dependent enforcement rate (M12 law allocation) |
+| The hotel | a bed for the night at a price; a business kind anyone can found | `BuildingKind::Hotel` (foundable, owner revenue per night, M12/M13 as the second service good) |
+| The squat | occupy a vacant Lot or a derelict building; secure it (a door, a lookout, a gang); risk eviction by the owner, the law or a stronger squatter | `Squat` as a Dreg goal and a gang order on derelict buildings (bankrupt estates with no buyer, demolished Blocks), with `owner = None` and `claim` as the gangs' Home claims (M12 districts, where derelict tiles exist) |
+| The lease | rent, as M11 | done |
+| The deed | own, found, incorporate, as M11 | done |
+
+The loop for a broke PC on day one is theft → hotel → a job or a gang → a lease → a deed, and every rung is one NPCs climb too, so the god tests can time the climb.

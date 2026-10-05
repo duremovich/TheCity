@@ -334,3 +334,10 @@ Folded into the sketches above rather than a milestone of their own:
 - **Unequal tiered economy** (M11 onward): wealth seeded by tier and kept unequal by rent and wages; a few hold most of it.
 - **Status and dress** (M15): an `appearance` vector (dress tier, visible chrome, faction colours) read by social moves with per-faction taste; blend in, pass security, unlock dialogue; anti-tech religious factions avoid the chromed.
 
+## Addendum 5 (2026-10-05, Dylan): the survival loop
+
+- **Vagrancy** (M12 law allocation): sleeping in public is a crime with a posture-dependent sweep rate; the street is the bottom rung.
+- **Hotels** (M12/M13, the second service good): `BuildingKind::Hotel`, foundable, a bed per night for a price; the first rung a thief can afford.
+- **Squatting** (M12 districts): `Squat` as a Dreg goal and a gang order on derelict buildings (bankrupt estates with no buyer, demolished Blocks, `owner = None`); securing a squat uses the gangs' claim machinery; eviction by owner, law or a stronger squatter.
+- The PC loop (M18) is the NPC ladder: street, hotel, squat, lease, deed. God tests time the climb.
+
