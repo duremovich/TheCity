@@ -245,7 +245,7 @@ pub fn strike_target(world: &World) -> Option<(EntityId, Vec<EntityId>)> {
 }
 
 /// A corp's non-exec employees, ascending.
-fn employees(world: &World, cc: &Corp) -> Vec<EntityId> {
+pub(crate) fn employees(world: &World, cc: &Corp) -> Vec<EntityId> {
     let mut out = Vec::new();
     for role in Role::ALL {
         for &a in world.workers(role) {

@@ -496,6 +496,10 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
     let evict_days = world.config.rent.evict_days;
     let Some(c) = world.comp_mut::<Corp>(corp) else { return };
     c.order_trace = scores;
+    // A god pin (`PlayerCommand::SetCorpOrder`) holds the order.
+    if c.pinned_until.is_some_and(|t| now < t) {
+        return;
+    }
     let Some((order, niche)) = next else { return };
     if current == CorpOrder::Squeeze {
         c.wage_mult = 1.0;

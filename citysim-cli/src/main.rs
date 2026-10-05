@@ -148,6 +148,31 @@ enum Lever {
     SeizeGang(usize),
     /// M11: `breakup=<corp slot>` (the seeding row, 0-based).
     BreakUp(u8),
+    // M11 god levers, a corp by its seeding slot (docs/GOD_SCENARIOS_V2.md).
+    FundCorp(u8, i64),
+    BankruptCorp(u8),
+    SeizeCorp(u8, SeizeTo),
+    KillExec(u8),
+    KillStaff(u8),
+    CorpOrder(u8, citysim::CorpOrder, Option<citysim::Niche>, u32),
+    Strike(u8),
+}
+
+/// Who `seize_corp` hands the buildings to.
+#[derive(Clone, Copy, Debug)]
+enum SeizeTo {
+    Corp(u8),
+    City,
+    Gang(usize),
+}
+
+/// The corp seeded in `slot`, if it still exists.
+fn corp_in_slot(world: &World, slot: u8) -> Result<citysim::EntityId, String> {
+    world
+        .corps()
+        .into_iter()
+        .find(|&c| world.comp::<citysim::Corp>(c).is_some_and(|cc| cc.slot == Some(slot)))
+        .ok_or_else(|| format!("no corp in slot {slot}"))
 }
 
 impl Lever {
@@ -164,14 +189,23 @@ impl Lever {
             Lever::KillGang(i) => PlayerCommand::KillGang(gang(i)?),
             Lever::FundGang(i, amount) => PlayerCommand::FundGang { gang: gang(i)?, amount },
             Lever::SeizeGang(i) => PlayerCommand::SeizeGangTreasury(gang(i)?),
-            Lever::BreakUp(slot) => {
-                let corp = world
-                    .corps()
-                    .into_iter()
-                    .find(|&c| world.comp::<citysim::Corp>(c).is_some_and(|cc| cc.slot == Some(slot)))
-                    .ok_or_else(|| format!("no corp in slot {slot}"))?;
-                PlayerCommand::BreakUp(corp)
+            Lever::BreakUp(slot) => PlayerCommand::BreakUp(corp_in_slot(world, slot)?),
+            Lever::FundCorp(slot, amount) => PlayerCommand::FundCorp { corp: corp_in_slot(world, slot)?, amount },
+            Lever::BankruptCorp(slot) => PlayerCommand::BankruptCorp(corp_in_slot(world, slot)?),
+            Lever::SeizeCorp(slot, to) => PlayerCommand::SeizeBuildings {
+                owner: Some(corp_in_slot(world, slot)?),
+                to: match to {
+                    SeizeTo::Corp(s) => Some(corp_in_slot(world, s)?),
+                    SeizeTo::City => None,
+                    SeizeTo::Gang(i) => Some(gang(i)?),
+                },
+            },
+            Lever::KillExec(slot) => PlayerCommand::KillExec(corp_in_slot(world, slot)?),
+            Lever::KillStaff(slot) => PlayerCommand::KillStaff(corp_in_slot(world, slot)?),
+            Lever::CorpOrder(slot, order, niche, days) => {
+                PlayerCommand::SetCorpOrder { corp: corp_in_slot(world, slot)?, order, niche, days }
             }
+            Lever::Strike(slot) => PlayerCommand::StrikeNow(corp_in_slot(world, slot)?),
         })
     }
 }
@@ -179,7 +213,11 @@ impl Lever {
 /// `day=90:release_reserve=1500` → `(tick, lever)`. God levers name a gang
 /// by index: `kill_leader=0`, `jail_gang=0:60`, `kill_gang=0`,
 /// `fund_gang=1:10000`, `seize_gang=0`, `fire_guards=1`, `treasury=-50000`;
-/// M11 names a corp by its seeding slot: `breakup=0`.
+/// M11 names a corp by its seeding slot: `breakup=0`, and the corp god levers
+/// `fund_corp=0:200000`, `bankrupt_corp=0`, `seize_corp=3:gang0` (or
+/// `:city`, `:<slot>`), `kill_exec=0`, `kill_staff=0`,
+/// `corp_order=3:Squeeze:30` (or `1:Squeeze:Housing:30`), `strike=0`,
+/// `wipe_corps=1`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -191,6 +229,7 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (name, value) = cmd_part.split_once('=').ok_or_else(|| format!("{spec}: expected <lever>=<value>"))?;
     let num = |what: &str| value.parse::<f64>().map_err(|e| format!("{spec}: bad {what}: {e}"));
     let idx = |v: &str| v.parse::<usize>().map_err(|e| format!("{spec}: bad gang index: {e}"));
+    let slot = |v: &str| v.parse::<u8>().map_err(|e| format!("{spec}: bad corp slot: {e}"));
     // `<gang index>:<n>`
     let pair = || -> Result<(usize, i64), String> {
         let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <gang index>:<n>"))?;
@@ -208,7 +247,52 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             let (g, n) = pair()?;
             Some(Lever::FundGang(g, n))
         }
-        "breakup" => Some(Lever::BreakUp(value.parse::<u8>().map_err(|e| format!("{spec}: bad corp slot: {e}"))?)),
+        "breakup" => Some(Lever::BreakUp(slot(value)?)),
+        "fund_corp" => {
+            let (s, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <corp slot>:<coins>"))?;
+            Some(Lever::FundCorp(slot(s)?, n.parse::<i64>().map_err(|e| format!("{spec}: bad coins: {e}"))?))
+        }
+        "bankrupt_corp" => Some(Lever::BankruptCorp(slot(value)?)),
+        "seize_corp" => {
+            let (s, to) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <corp slot>:<to>"))?;
+            let to = match to {
+                "city" => SeizeTo::City,
+                t if t.starts_with("gang") => SeizeTo::Gang(idx(&t[4..])?),
+                t => SeizeTo::Corp(slot(t)?),
+            };
+            Some(Lever::SeizeCorp(slot(s)?, to))
+        }
+        "kill_exec" => Some(Lever::KillExec(slot(value)?)),
+        "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
+        "strike" => Some(Lever::Strike(slot(value)?)),
+        // `<slot>:<Order>:<days>` or `<slot>:<Order>:<Niche>:<days>`.
+        "corp_order" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let (s, o, n, d) = match parts[..] {
+                [s, o, d] => (s, o, None, d),
+                [s, o, n, d] => (s, o, Some(n), d),
+                _ => return Err(format!("{spec}: expected <corp slot>:<Order>[:<Niche>]:<days>")),
+            };
+            let order = citysim::CorpOrder::ALL
+                .into_iter()
+                .find(|x| x.to_string().eq_ignore_ascii_case(o))
+                .ok_or_else(|| format!("{spec}: unknown corp order {o}"))?;
+            let niche = match n {
+                Some(n) => Some(
+                    citysim::Niche::ALL
+                        .into_iter()
+                        .find(|x| x.label().eq_ignore_ascii_case(n))
+                        .ok_or_else(|| format!("{spec}: unknown niche {n}"))?,
+                ),
+                None => None,
+            };
+            Some(Lever::CorpOrder(
+                slot(s)?,
+                order,
+                niche,
+                d.parse::<u32>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            ))
+        }
         _ => None,
     };
     if let Some(l) = god {
@@ -245,6 +329,7 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             v => Some(v.parse::<i64>().map_err(|e| format!("{spec}: bad cap: {e}"))?),
         }),
         "no_city_evictions" => PlayerCommand::NoCityEvictions(num("flag")? != 0.0),
+        "wipe_corps" => PlayerCommand::WipeTreasuries,
         other => return Err(format!("{spec}: unknown lever {other}")),
     };
     Ok((day * TICKS_PER_DAY, Lever::Cmd(cmd)))
