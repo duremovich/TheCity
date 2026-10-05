@@ -29,3 +29,14 @@ The city must run on an average PC. Realism is bought with design, not CPU: ever
 ## How we know it works
 
 The sim is numerical. Whether it is working is decided from data first: the CSV report, the event log, the scenario gates and the parity tests. A story that cannot be seen in the numbers is not yet in the sim. Watching it live in the app is the second check, not the first.
+
+## The world outside the city (added 2026-10-05, Dylan)
+
+There is an economy beyond the city. **Megacorps exist as an economic idea outside it**: the whole outside world runs at a very low LOD, a ledger of resources and intents, never bodies. A megacorp's presence in the city (its buildings, its exec, its guards) is a branch, not the whole. That has two consequences:
+
+- **Destroying a megacorp completely is hard.** Wipe out its city holdings and the parent can send agents in from abroad to take territory back, fund a new branch, or buy up what is left. Driving it out is a campaign, not a raid.
+- **There are still ways to kill one.** Cyber attacks (Virt, M14: Data theft, ICE, decks) and economic warfare (undercutting, strikes, monopolies broken, supply cut off) hit the ledger the parent runs on. A megacorp dies when its outside resources run dry, not when its last city building falls.
+
+The same is probably true of every faction: gangs can have brothers in the next city, the law has a state behind it. Since the game will ultimately be first person, all of this is abstracted. It enters a player's game only through its effects: groups having more or fewer resources, more or fewer bodies, a branch that is or is not reinforced. Nothing outside the city is ever simulated per agent.
+
+Design implications for the milestones: the M11 corp needs room for a parent (an outside treasury and a reinforcement rule), M12 districts give the parent territory to retake, M14 Virt gives the player and rival corps the only weapon that reaches the ledger directly. A later milestone (after M14) gives the outside world its own daily tick.
