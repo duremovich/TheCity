@@ -10,6 +10,11 @@ events.tsv per-event log from `--events` (stderr): `tick<TAB>Kind<TAB>text`. Lin
            not start with an integer tick (e.g. "saved ...") are ignored. 1 day = 1440 ticks.
 --days N   only look at the first N days.
 --jail-cap K  jail capacity for the "stuck at cap" flag (default: the run's max jailed).
+
+M11: an "ownership" section (evictions, rent, foundings, incorporations, acquisitions,
+bankruptcies, strikes, monopolies, class unrest, each corp slot's treasury and order days),
+CorpOrder transitions per corp, and flags for a corp in the red 3+ days running, any
+monopoly, Street unrest outside 0.2-0.7 and no Dregs for 30+ days running.
 """
 import argparse
 import csv
@@ -26,7 +31,8 @@ DEFAULT_COLS = ("day,season,population,employed,homeless,jailed,gang_members,foo
                 "mean_mood,goal_changes_per_agent,ticks_per_sec").split(",")
 STORY = ["OrderChanged", "Raid", "Jailbreak", "Posture", "Bribe", "TerritoryFlipped", "GangJoin",
          "Marriage", "Birth", "Death", "Murder", "Assault", "Evicted", "Founded", "Incorporated",
-         "Bankrupt", "Acquired", "Strike", "CorpOrder", "Attributed", "Robbed", "Assaulted"]
+         "Bankrupt", "Acquired", "Strike", "CorpOrder", "Contract", "Housed", "Attributed", "Robbed",
+         "Assaulted"]
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
 
 
@@ -117,8 +123,6 @@ def analyze(rows, events, jail_cap=None):
             flags.append(f"day {d}: price {r['price']:g} outside 2..8")
         if isinstance(r.get("mean_hunger"), float) and r["mean_hunger"] < 0.4:
             flags.append(f"day {d}: mean hunger {r['mean_hunger']:.3f} < 0.4")
-        if isinstance(r.get("ticks_per_sec"), float) and r["ticks_per_sec"] < 8000:
-            flags.append(f"day {d}: tps {r['ticks_per_sec']:.0f} < 8000")
 
     kinds = Counter(k for _, k, _ in events)
     jailed = col(rows, "jailed")
@@ -143,6 +147,9 @@ def analyze(rows, events, jail_cap=None):
     tps = col(rows, "ticks_per_sec")
     if tps:
         out["throughput"] = {"tps_mean": mean(tps), "tps_min": min(tps)}
+        slow = [t for t in tps if t < 8000]
+        if slow:
+            flags.append(f"tps < 8000 on {len(slow)} of {len(tps)} days (min {min(slow):.0f})")
 
     out["event_counts"] = dict(kinds.most_common())
     weekly = defaultdict(Counter)
@@ -164,8 +171,90 @@ def analyze(rows, events, jail_cap=None):
     for k, (_, last) in span.items():
         if k in STORY and k not in one_offs and last_day - last >= 30:
             flags.append(f"no {k} events since day {last} ({kinds[k]} before)")
+    ownership(rows, events, out, flags)
     out["flags"] = flags
     return out
+
+
+def runs(days, pred):
+    """Maximal runs of consecutive rows where pred holds: [(first_day, last_day, length)]."""
+    out, start, prev = [], None, None
+    for d, ok in days:
+        if ok and start is None:
+            start = d
+        if not ok and start is not None:
+            out.append((start, prev, prev - start + 1))
+            start = None
+        prev = d
+    if start is not None:
+        out.append((start, prev, prev - start + 1))
+    return out
+
+
+def ownership(rows, events, out, flags):
+    """M11: the money and class story of a run, from the D38 columns and the events."""
+    if not rows or "evictions" not in rows[0]:
+        return
+    total = lambda k: sum(col(rows, k))
+    kinds = Counter(k for _, k, _ in events)
+    o = {k: total(k) for k in ("evictions", "rent_paid", "rent_short", "housed", "foundings",
+                               "incorporations", "acquisitions", "bankruptcies", "strikes")
+         if k in rows[0]}
+    o["registered"] = sum(1 for _, k, t in events if k == "Founded" and " registered " in t)
+    o["corp_builds"] = sum(1 for _, k, t in events if k == "Founded" and " built " in t)
+    o["hostile"] = sum(1 for _, k, t in events if k == "Acquired" and "(hostile)" in t)
+    o["contracts_events"] = kinds["Contract"]
+    mono = col(rows, "monopolies")
+    o["monopoly_days"] = sum(1 for m in mono if m > 0)
+    for c in ("unrest_corp", "unrest_street", "unrest_dreg", "class_dreg", "happiness_street"):
+        if c in rows[0]:
+            o[c] = stat(col(rows, c))
+    ledger = [k for k in rows[0] if k.startswith("flow_")]
+    o["ledger_per_day"] = {k[5:]: total(k) / max(len(rows), 1) for k in ledger}
+    out["ownership"] = o
+
+    days = [int(r["day"]) for r in rows]
+    corps = {}
+    for i in range(1, 9):
+        t, od = f"corp{i}_treasury", f"corp{i}_order"
+        if t not in rows[0]:
+            continue
+        orders = Counter(r[od] for r in rows if r.get(od) not in ("-", None, ""))
+        tre = [r[t] for r in rows if isinstance(r.get(t), float)]
+        alive = [r for r in rows if r.get(od) not in ("-", None, "")]
+        corps[f"corp{i}"] = {"start": tre[0] if tre else 0, "end": tre[-1] if tre else 0,
+                             "min": min(tre) if tre else 0, "alive_days": len(alive),
+                             "order_days": dict(orders.most_common())}
+        for a, b, length in runs(zip(days, (r.get(od) not in ("-", None, "") and isinstance(r.get(t), float)
+                                              and r[t] < 0 for r in rows)), bool):
+            if length >= 3:
+                flags.append(f"corp{i} in the red days {a}-{b} ({length} days)")
+    out["corps"] = corps
+
+    for d, m in zip(days, (r.get("monopolies") for r in rows)):
+        if isinstance(m, float) and m > 0:
+            flags.append(f"day {d}: monopoly ({m:g} niche(s)); first only")
+            break
+    if "unrest_street" in rows[0]:
+        bad = [(d, r["unrest_street"]) for d, r in zip(days, rows)
+               if isinstance(r.get("unrest_street"), float) and not 0.2 <= r["unrest_street"] <= 0.7]
+        if bad:
+            flags.append(f"Street unrest outside 0.2-0.7 on {len(bad)} days (first day {bad[0][0]}: "
+                         f"{bad[0][1]:.2f})")
+    if "class_dreg" in rows[0]:
+        for a, b, length in runs(zip(days, (r.get("class_dreg") == 0 for r in rows)), bool):
+            if length >= 30:
+                flags.append(f"no Dregs days {a}-{b} ({length} days)")
+
+    # CorpOrder transitions per corp: "Name: Old [in N] -> New in N (why, ...)".
+    per = defaultdict(Counter)
+    for _, kind, text in events:
+        if kind != "CorpOrder":
+            continue
+        m = re.match(r"(.+?): (\w+(?: in \w+)?) -> (\w+(?: in \w+)?)", text)
+        if m:
+            per[m.group(1)][f"{m.group(2)} -> {m.group(3)}"] += 1
+    out["corp_transitions"] = {c: dict(v.most_common()) for c, v in sorted(per.items())}
 
 
 def fmt(o):
@@ -189,6 +278,19 @@ def fmt(o):
     for k, v in o["transitions"].items():
         L.append(f"-- {k} transitions --")
         L += [f"  {c:>5}  {t}" for t, c in v.items()]
+    if "ownership" in o:
+        w = o["ownership"]
+        L.append("-- ownership (M11) --")
+        L.append(f({k: v for k, v in w.items() if not isinstance(v, dict)}))
+        L += [f"{k}: " + f(v) for k, v in w.items() if isinstance(v, dict) and v]
+        L.append("-- corp slots (treasury start/end/min, alive days, days per order) --")
+        for k, v in o.get("corps", {}).items():
+            orders = " ".join(f"{a}:{b}" for a, b in v["order_days"].items())
+            L.append(f"  {k}: {v['start']:.0f} -> {v['end']:.0f} (min {v['min']:.0f}), "
+                     f"{v['alive_days']} days, {orders}")
+        L.append("-- CorpOrder transitions per corp --")
+        for c, v in o.get("corp_transitions", {}).items():
+            L.append(f"  {c}: " + ", ".join(f"{t} x{n}" for t, n in v.items()))
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

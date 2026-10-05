@@ -778,6 +778,24 @@ When a plan is returned, each step that consumes a shared resource calls `reserv
 
 Five systems tick for every citizen at every LOD. `World::tick` runs them in the fixed order `commands, time, lod, needs, memory (daily decay), think, plan, exec, economy, law, social, gang, demography, stats`.
 
+### Ownership, rent, corps and classes (M11)
+
+Since M11 the tick order is `commands, lod, needs, memory, mood, think, plan, exec, ownership, classes, economy, [bind], law, social, gang, corp_brain, demography, stats` (`ownership::run` and `classes::run` act at midnight, before the price step; `corp_brain::run` checks shocks every tick and rescores at midnight). Every building has an owner: `None` is the city (the Treasury), else an agent (their wallet), a gang or a corp (its treasury). The money model, as built:
+
+| Flow | From | To |
+| --- | --- | --- |
+| Food (`BuyFood`), Drink | buyer | the Market's or Bar's owner (taxed) |
+| Wages | the employer's owner, collected at the workplace (`LocationKey::Workplace`; the Hall for a city job) | worker (taxed) |
+| Rent | each adult's share of their Block's `rent_per_day`, at midnight | the Block's owner (taxed) |
+| Upkeep | every non-city owner, per building | the Treasury |
+| Wholesale | a Market's owner for a Farm's food (different owners); the City for Farm overflow; a Market's owner for restock | the Farm's owner; the Farm's owner; the Treasury |
+| Security contracts | a client building's owner, daily | the Security corp |
+| Exec wage | a corp | its exec |
+| Found, Sale, Subsidy, Bribe, SellFood, Precinct meals | as named | as named |
+| Dole | the Treasury | an unemployed adult |
+
+The rules are in [M11_OWNERSHIP.md](M11_OWNERSHIP.md): ownership and purses § 3, rent and eviction § 4, corps and the corp brain § 5, founding and incorporation § 6, classes § 7, the levers § 8, and what the build changed under "Implemented: deviations". The Economy text below is the v1 city, where the Treasury owns everything; `Config::v1_profile()` still runs it that way (no rent, no corps).
+
 ### Economy
 
 Daily at `tick_of_day == 0` plus per-event hooks. Inputs: building stocks, Market, Treasury, Jobs, lever `tax_rate`, season. Outputs: stock changes, `price_food`, `price_history` (cap 120), Wallet changes, `days_unpaid`.

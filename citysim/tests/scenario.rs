@@ -457,3 +457,152 @@ fn test_m10_scale_seed_42() {
     assert_eq!(back.population(), w.population());
     assert!(failures.is_empty(), "M10 gate failures: {failures:?}");
 }
+
+/// The M11 gate (`docs/M11_OWNERSHIP.md` › Goals and acceptance): seed 42, the
+/// 2,000-resident v2 city, 120 days. Corps with intent, landlords evicting,
+/// the spiral's first link, an NPC founding and incorporating, a hostile
+/// takeover, a strike, immigration that moves, the M10 bounds and the
+/// throughput floor (release only). Events are walked each day by id cursor
+/// (the ring cannot hold 120 days at 2,000). `#[ignore]`: a few minutes.
+#[test]
+#[ignore]
+fn test_m11_ownership_seed_42() {
+    use citysim::{Corp, CorpOrder, EntityId, EventKind, Season};
+    use std::collections::{BTreeMap, BTreeSet};
+    use std::time::Instant;
+
+    let mut w = World::new(42, Config::load());
+    let seeded: Vec<EntityId> =
+        w.corps().into_iter().filter(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.slot.is_some())).collect();
+    let mut corps_seen: BTreeSet<EntityId> = w.corps().into_iter().collect();
+    let mut order_changes: BTreeMap<EntityId, u32> = BTreeMap::new();
+    let (mut squeeze_held, mut undercut_held) = (false, false);
+    let (mut corp_bribes, mut corp_bribes_taken) = (0u32, 0u32);
+    let (mut evicted, mut founded, mut incorporated, mut hostile, mut strikes, mut assaults) =
+        (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
+    let mut evicted_at: BTreeMap<EntityId, Vec<u64>> = BTreeMap::new();
+    let mut spiral = 0u32;
+    let mut monopoly_before_60 = None;
+    let mut next_id = 0u64;
+    let started = Instant::now();
+    for _ in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        // Corps founded today (incorporations, spinoffs) count as corps for
+        // today's events.
+        corps_seen.extend(w.corps());
+        for e in w.events.iter().filter(|e| e.id >= next_id) {
+            match e.kind {
+                EventKind::CorpOrder => {
+                    if let Some(&c) = e.actors.first() {
+                        *order_changes.entry(c).or_default() += 1;
+                    }
+                }
+                EventKind::Bribe if e.actors.first().is_some_and(|a| corps_seen.contains(a)) => {
+                    corp_bribes += 1;
+                    if e.text.contains(" paid ") {
+                        corp_bribes_taken += 1;
+                    }
+                }
+                EventKind::Evicted => {
+                    evicted += 1;
+                    if let Some(&a) = e.actors.first() {
+                        evicted_at.entry(a).or_default().push(e.tick);
+                    }
+                }
+                EventKind::GangJoin => {
+                    let recent = e
+                        .actors
+                        .first()
+                        .and_then(|a| evicted_at.get(a))
+                        .is_some_and(|ts| ts.iter().any(|&t| t <= e.tick && e.tick - t <= 14 * TICKS_PER_DAY));
+                    if recent {
+                        spiral += 1;
+                    }
+                }
+                EventKind::Founded if e.text.contains(" registered ") => founded += 1,
+                EventKind::Incorporated => incorporated += 1,
+                EventKind::Acquired
+                    if e.text.contains("(hostile)")
+                        && e.actors.len() >= 3
+                        && corps_seen.contains(&e.actors[0])
+                        && corps_seen.contains(&e.actors[1]) =>
+                {
+                    hostile += 1
+                }
+                EventKind::Strike => strikes += 1,
+                EventKind::Assault | EventKind::Murder => assaults += 1,
+                _ => {}
+            }
+        }
+        next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        for c in w.corps() {
+            match w.comp::<Corp>(c).map(|cc| cc.order) {
+                Some(CorpOrder::Squeeze) => squeeze_held = true,
+                Some(CorpOrder::Undercut) => undercut_held = true,
+                _ => {}
+            }
+        }
+        let row = w.stats.history.back().expect("a day row");
+        if row.day < 60 && row.monopolies > 0 && monopoly_before_60.is_none() {
+            monopoly_before_60 = Some(row.day);
+        }
+    }
+    let wall = started.elapsed().as_secs_f64();
+    let tps = (120 * TICKS_PER_DAY) as f64 / wall;
+
+    let h = &w.stats.history;
+    let sum = |f: fn(&citysim::DayRow) -> u32| h.iter().map(f).sum::<u32>();
+    let starvation = sum(|r| r.deaths_starvation);
+    let (bankruptcies, acquisitions) = (sum(|r| r.bankruptcies), sum(|r| r.acquisitions));
+    let rows: Vec<&citysim::DayRow> = h.iter().collect();
+    let weekly: Vec<u32> = rows.chunks(7).map(|c| c.iter().map(|r| r.immigrants).sum()).collect();
+    let distinct_weekly: BTreeSet<u32> = weekly.iter().copied().collect();
+    let unrest_days = h.iter().filter(|r| (0.2..=0.7).contains(&r.unrest_street)).count();
+    let summer: Vec<i64> = h.iter().filter(|r| r.season == Season::Summer).map(|r| r.price).collect();
+    let treasury: Vec<String> =
+        h.iter().filter(|r| r.day % 30 == 0 || r.day == 119).map(|r| format!("d{} {}", r.day, r.treasury)).collect();
+    let unchanged: Vec<String> =
+        seeded.iter().filter(|c| order_changes.get(c).copied().unwrap_or(0) == 0).map(|&c| w.name_of(c)).collect();
+    let pop = w.population();
+    eprintln!(
+        "M11 seed 42: corps {} (seeded {}), order changes {}, squeeze {squeeze_held}, undercut {undercut_held}, corp bribes {corp_bribes} ({corp_bribes_taken} taken), evicted {evicted}, spiral joins {spiral}, founded {founded}, incorporated {incorporated}, hostile {hostile}, acquisitions {acquisitions}, bankruptcies {bankruptcies}, first monopoly before 60 {monopoly_before_60:?}, strikes {strikes}, weekly immigrants {weekly:?}, assaults/day {:.2}, starvation {starvation}, pop {pop}, {tps:.0} ticks/s",
+        corps_seen.len(),
+        seeded.len(),
+        order_changes.values().sum::<u32>(),
+        assaults as f32 / 120.0,
+    );
+    eprintln!(
+        "calibration: Street unrest in 0.2-0.7 on {unrest_days}/120 days; bankruptcies + acquisitions {}; Summer price {}..{}; Treasury {}",
+        bankruptcies + acquisitions,
+        summer.iter().min().copied().unwrap_or(0),
+        summer.iter().max().copied().unwrap_or(0),
+        treasury.join(", ")
+    );
+
+    let mut failures: Vec<String> = Vec::new();
+    let mut check = |ok: bool, what: String| {
+        eprintln!("{} {what}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failures.push(what);
+        }
+    };
+    check(seeded.len() == 8 && unchanged.is_empty(), format!("every seeded corp changed order (never: {unchanged:?})"));
+    check(squeeze_held, "Squeeze held".into());
+    check(corp_bribes >= 1, format!("Lobby bribes with a corp payer {corp_bribes} >= 1"));
+    check(evicted >= 10, format!("Evicted {evicted} >= 10"));
+    check(spiral >= 3, format!("GangJoin within 14 days of an eviction {spiral} >= 3"));
+    check(founded >= 1, format!("NPC Founded (registered) {founded} >= 1"));
+    check(incorporated >= 1, format!("Incorporated {incorporated} >= 1"));
+    check(hostile >= 1, format!("hostile Acquired between corps {hostile} >= 1"));
+    check(undercut_held, "Undercut held".into());
+    check(monopoly_before_60.is_none(), format!("no monopoly before day 60 (first {monopoly_before_60:?})"));
+    check(strikes >= 1, format!("Strike {strikes} >= 1"));
+    check(distinct_weekly.len() >= 2, format!("weekly immigration not constant ({} values)", distinct_weekly.len()));
+    check(assaults as f32 / 120.0 <= 42.7, format!("assaults/day {:.2} <= 42.7", assaults as f32 / 120.0));
+    check(starvation <= 200, format!("starvation {starvation} <= 200"));
+    check((1333..=2667).contains(&pop), format!("population {pop} in 1333..=2667"));
+    if !cfg!(debug_assertions) {
+        check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
+    }
+    assert!(failures.is_empty(), "M11 gate failures: {failures:?}");
+}

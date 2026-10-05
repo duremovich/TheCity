@@ -23,6 +23,13 @@ pub struct CityState {
     pub law_pin: Option<citysim::Posture>,
     pub release_amount: u32,
     pub build_rect: Rect,
+    /// M11 levers: city rent per tier, the rent cap, no city evictions, and
+    /// the corp panel's Subsidise amount.
+    pub city_rent: [i64; 3],
+    pub rent_cap_on: bool,
+    pub rent_cap: i64,
+    pub no_city_evictions: bool,
+    pub subsidise_amount: i64,
     pub synced: bool,
 }
 
@@ -37,6 +44,11 @@ impl Default for CityState {
             law_pin: None,
             release_amount: 500,
             build_rect: Rect { x: 40, y: 40, w: 5, h: 4 },
+            city_rent: [1, 2, 4],
+            rent_cap_on: false,
+            rent_cap: 4,
+            no_city_evictions: false,
+            subsidise_amount: 1000,
             synced: false,
         }
     }
@@ -55,11 +67,17 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.immigration_per_week = world.levers.immigration_per_week;
         app.city.dole_per_day = world.levers.dole_per_day;
         app.city.law_pin = world.law().and_then(|l| l.pinned);
+        app.city.city_rent = world.levers.city_rent;
+        app.city.rent_cap_on = world.levers.rent_cap.is_some();
+        app.city.rent_cap = world.levers.rent_cap.unwrap_or(4);
+        app.city.no_city_evictions = world.levers.no_city_evictions;
         app.city.synced = true;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("City");
-        let s = &world.stats.current;
+        // Employed, homeless, jailed and gang are end-of-day snapshots: read
+        // the last closed day (today's row is zero until midnight).
+        let s = world.stats.history.back().unwrap_or(&world.stats.current);
         egui::Grid::new("city_pop").striped(true).show(ui, |ui| {
             ui.label("Population");
             ui.label(format!("{}", world.population()));
@@ -133,6 +151,9 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
         });
 
+        corps_section(ui, app, world);
+        classes_section(ui, world);
+
         ui.separator();
         ui.strong("Food");
         let (mut market, mut warehouse, mut pantry) = (0u32, 0u32, 0u32);
@@ -192,6 +213,19 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         ui.add(egui::Slider::new(&mut c.guard_count, 0..=60).text("guards"));
         ui.add(egui::Slider::new(&mut c.immigration_per_week, 0..=30).text("immigrants / week"));
         ui.add(egui::Slider::new(&mut c.dole_per_day, 0..=10).text("dole / day"));
+        // M11 § 8: rent on city Blocks per tier, a cap on every Block, and
+        // the city's own evictions.
+        ui.horizontal(|ui| {
+            ui.label("city rent");
+            for (i, tier) in ["Sump", "Mid", "Spire"].iter().enumerate() {
+                ui.add(egui::DragValue::new(&mut c.city_rent[i]).range(0..=20).prefix(format!("{tier} ")));
+            }
+        });
+        ui.horizontal(|ui| {
+            ui.checkbox(&mut c.rent_cap_on, "rent cap");
+            ui.add_enabled(c.rent_cap_on, egui::Slider::new(&mut c.rent_cap, 0..=20).suffix("¢"));
+        });
+        ui.checkbox(&mut c.no_city_evictions, "the city never evicts");
         ui.horizontal(|ui| {
             ui.label("law posture");
             let name = |p: Option<citysim::Posture>| p.map_or("Auto (captain)".to_string(), |p| p.to_string());
@@ -222,6 +256,16 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             if c.law_pin != world.law().and_then(|l| l.pinned) {
                 app.cmds.push(PlayerCommand::SetLawPosture(c.law_pin));
             }
+            if c.city_rent != l.city_rent {
+                app.cmds.push(PlayerCommand::SetCityRent(c.city_rent));
+            }
+            let cap = c.rent_cap_on.then_some(c.rent_cap);
+            if cap != l.rent_cap {
+                app.cmds.push(PlayerCommand::SetRentCap(cap));
+            }
+            if c.no_city_evictions != l.no_city_evictions {
+                app.cmds.push(PlayerCommand::NoCityEvictions(c.no_city_evictions));
+            }
         }
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut c.release_amount).range(1..=3000));
@@ -240,6 +284,15 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
         });
         if let Some(sel) = app.selected {
+            // Nationalise the selected building (Subsidise and BreakUp live
+            // on the corp panel).
+            let owned = world.comp::<Building>(sel).filter(|b| b.owner.is_some() && !b.demolished);
+            if let Some(b) = owned {
+                let price = citysim::systems::ownership::value(world, b.kind);
+                if price > 0 && ui.button(format!("Nationalise {} ({price}¢)", world.name_of(sel))).clicked() {
+                    app.cmds.push(PlayerCommand::Nationalise(sel));
+                }
+            }
             let own_home = world.comp::<Building>(sel).filter(|b| b.kind == BuildingKind::Home).map(|_| sel);
             if let Some(home) = own_home.or_else(|| world.comp::<citysim::Household>(sel).and_then(|h| h.home)) {
                 if ui.button(format!("Demolish Block#{}", home.index)).clicked() {
@@ -287,4 +340,108 @@ fn crimes_by_kind(world: &World) -> String {
         }
     }
     format!("logged: theft {} extortion {} assault {} murder {}", n[0], n[1], n[2], n[3])
+}
+
+/// One row per corp (name, niches, order, treasury, price levels, building
+/// count) and a share bar per niche (D16, `corp_brain::shares`).
+fn corps_section(ui: &mut Ui, app: &mut App, world: &World) {
+    use citysim::{Corp, Niche};
+    let corps = world.corps();
+    ui.separator();
+    ui.strong(format!("Corps ({})", corps.len()));
+    egui::Grid::new("city_corps").striped(true).show(ui, |ui| {
+        for h in ["corp", "order", "¢", "price", "bld"] {
+            ui.strong(h);
+        }
+        ui.end_row();
+        for (i, &cid) in corps.iter().enumerate() {
+            let Some(c) = world.comp::<Corp>(cid) else { continue };
+            let niches: Vec<&str> = c.niches.iter().map(|n| n.label()).collect();
+            let link = ui.link(egui::RichText::new(&c.name).color(crate::ui::corp_colour(i)));
+            if link.on_hover_text(niches.join(" + ")).clicked() {
+                app.selected = Some(cid);
+                app.follow = false;
+            }
+            ui.label(c.order.to_string());
+            if c.treasury < 0 {
+                ui.colored_label(Color32::from_rgb(220, 60, 60), format!("{}", c.treasury));
+            } else {
+                ui.label(format!("{}", c.treasury));
+            }
+            let levels: Vec<String> = c.niches.iter().map(|&n| format!("{:.1}", c.level(n))).collect();
+            ui.label(levels.join("/"));
+            ui.label(format!("{}", c.buildings.len()));
+            ui.end_row();
+        }
+    });
+    ui.small("price: level per niche · hover a name for its niches");
+    for niche in Niche::ALL {
+        let shares = citysim::systems::corp_brain::shares(world, niche);
+        ui.horizontal(|ui| {
+            ui.label(format!("{:<8}", niche.label()));
+            share_bar(ui, world, &corps, &shares);
+        });
+    }
+}
+
+/// A stacked bar: each corp's share in its colour, the rest (city, agents,
+/// gangs) grey.
+fn share_bar(
+    ui: &mut Ui,
+    world: &World,
+    corps: &[citysim::EntityId],
+    shares: &std::collections::BTreeMap<citysim::EntityId, f32>,
+) {
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(200.0, 12.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 1.0, Color32::from_gray(60));
+    let mut x = rect.left();
+    let mut tip: Vec<String> = Vec::new();
+    for (i, cid) in corps.iter().enumerate() {
+        let Some(&s) = shares.get(cid).filter(|&&s| s > 0.0) else { continue };
+        let w = s.clamp(0.0, 1.0) * rect.width();
+        painter.rect_filled(
+            egui::Rect::from_min_max(egui::pos2(x, rect.top()), egui::pos2(x + w, rect.bottom())),
+            0.0,
+            crate::ui::corp_colour(i),
+        );
+        x += w;
+        tip.push(format!("{} {:.0}%", world.owner_label(Some(*cid)), s * 100.0));
+    }
+    if shares.is_empty() {
+        resp.on_hover_text("no market yet");
+    } else {
+        resp.on_hover_text(tip.join(" · "));
+    }
+}
+
+/// Corp, Street and Dreg: count, happiness, loyalty, submission, unrest
+/// (§ 7, computed at midnight).
+fn classes_section(ui: &mut Ui, world: &World) {
+    ui.separator();
+    ui.strong("Classes");
+    egui::Grid::new("city_classes").striped(true).show(ui, |ui| {
+        for h in ["class", "n", "happy", "loyal", "submit", "unrest"] {
+            ui.strong(h);
+        }
+        ui.end_row();
+        for class in citysim::Class::ALL {
+            let a = &world.classes[class.index()];
+            ui.label(class.label());
+            ui.label(format!("{}", a.count));
+            ui.label(format!("{:.2}", a.happiness));
+            ui.label(format!("{:.2}", a.loyalty));
+            ui.label(format!("{:.2}", a.submission));
+            let hot = class == citysim::Class::Street && a.unrest > world.config.classes.strike_threshold;
+            if hot {
+                ui.colored_label(Color32::from_rgb(220, 60, 60), format!("{:.2}", a.unrest));
+            } else {
+                ui.label(format!("{:.2}", a.unrest));
+            }
+            ui.end_row();
+        }
+    });
+    if let Some(t) = world.last_strike {
+        ui.small(format!("last strike day {}", citysim::time::day(t)));
+    }
 }

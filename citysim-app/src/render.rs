@@ -201,7 +201,15 @@ pub fn draw(world: &World, app: &App) {
     // 6. selection: a Full agent's square and sight radius, else the building
     // the selection is (or is inside)
     if let Some(sel) = app.selected {
-        if let Some(b) = world.comp::<Building>(sel) {
+        if let Some(c) = world.comp::<Corp>(sel) {
+            // A selected corp marks every building it owns.
+            for &id in &c.buildings {
+                let Some(b) = world.comp::<Building>(id).filter(|b| rect_in_view(&b.rect)) else { continue };
+                let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
+                let (w, h) = (f32::from(b.rect.w) * ppt, f32::from(b.rect.h) * ppt);
+                draw_rectangle_lines(tl.x - 2.0, tl.y - 2.0, w + 4.0, h + 4.0, 2.0, hex(C_SELECTION));
+            }
+        } else if let Some(b) = world.comp::<Building>(sel) {
             let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
             draw_rectangle_lines(
                 tl.x,

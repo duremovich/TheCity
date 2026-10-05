@@ -445,6 +445,11 @@ secure_per_day = 2                 # D24
 private_pursuit_radius = 16        # D18
 found_cooldown_days = 10           # D26
 residents_per_bar = 300            # D25
+# M11 phase 5b: 0 -> 0.1. The Found score is greed squared, so a low-greed Bar owner holding 250-355
+# coins for 65 days on seed 43 (greed term 0.03) scored Found at 0.01-0.03 against Idle's 0.05-0.15 and
+# never founded again; with 0.1 an eligible agent (jobless or self-employed, coins >= found_cost: one
+# or two at a time city-wide) acts on it.
+found_flat = 0.1
 # D33. M11 phase 3: 0.1 -> 0. Nutrix passes hoard_heat by day 5 and at 0.1 the Contest tilt doubled
 # both gangs by day 29 (65 members vs 30 with the brain off) and cost the M10 gate ~4% (7.8k ticks/s).
 # The term is wired and tested (tests/corps.rs); it waits for M12, where a gang can raid a corp

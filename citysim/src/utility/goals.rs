@@ -488,7 +488,10 @@ pub fn considerations(
             vec![
                 Consideration::new("can found", can(true), GATE),
                 Consideration::new("greed", p.greed, SQUARE),
-                Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.3, b: 0.7 }),
+                // M11 phase 5b: spec Linear{0.3, 0.7} read a rich agent's
+                // low wealth urgency as 0.7, so the richer the founder the
+                // less they founded; inverted, savings push toward founding.
+                Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: -0.3, b: 1.0 }),
                 Consideration::new("lawfulness", p.lawfulness, Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("not in shift", can(!in_shift), gate_or(0.3)),
             ]

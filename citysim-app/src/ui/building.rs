@@ -109,12 +109,16 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             BuildingKind::Hall => hall(ui, app, world, id),
             BuildingKind::Hideout => hideout(ui, app, world, id, b),
             BuildingKind::Warehouse => warehouse(ui, world, b),
-            BuildingKind::SecurityOffice | BuildingKind::Lot => {
-                ui.label(format!("{} · inert until M11", world.map.zone(b.door)));
+            BuildingKind::SecurityOffice => staff(ui, app, world, id, "Guards"),
+            BuildingKind::Lot => {
+                ui.label(format!(
+                    "{} · a vacant Lot: an NPC Registers a Bar or a Block here, a corp Grows one",
+                    world.map.zone(b.door)
+                ));
             }
         }
         occupants(ui, app, world, b);
-        buttons(ui, app, id, b);
+        buttons(ui, app, world, id, b);
     });
 }
 
@@ -129,14 +133,24 @@ fn header(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
             ui.label("Owner");
             match b.owner {
                 Some(o) if world.has::<Corp>(o) => {
+                    // The owner link opens the corp panel.
                     let i = world.corp_index(o);
-                    ui.colored_label(crate::ui::corp_colour(i), world.owner_label(Some(o)));
+                    let name = RichText::new(world.owner_label(Some(o))).color(crate::ui::corp_colour(i));
+                    if ui.link(name).clicked() {
+                        app.selected = Some(o);
+                        app.follow = false;
+                    }
                     if let Some(c) = world.comp::<Corp>(o) {
-                        ui.label(format!("· {}¢", c.treasury));
+                        ui.label(format!("· {}¢ · {}", c.treasury, c.order));
                     }
                 }
                 Some(o) if world.has::<Gang>(o) => {
-                    ui.colored_label(crate::ui::gang_colour(world.gang_index(o)), world.owner_label(Some(o)));
+                    let name =
+                        RichText::new(world.owner_label(Some(o))).color(crate::ui::gang_colour(world.gang_index(o)));
+                    if ui.link(name).clicked() {
+                        app.selected = world.hideout_of(o);
+                        app.follow = false;
+                    }
                 }
                 Some(o) => agent_link(ui, app, world, o),
                 None => {
@@ -147,13 +161,23 @@ fn header(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
                 ui.colored_label(RED, "Demolished");
             }
         });
+        let tier = ["Sump", "Mid", "Spire"].get(usize::from(b.tier)).copied().unwrap_or("?");
         if b.kind == BuildingKind::Home {
-            ui.label(format!("Rent {}¢/day · tier {}", b.rent_per_day, b.tier));
+            let cap = world.levers.rent_cap.map_or(String::new(), |c| format!(" (cap {c}¢)"));
+            ui.label(format!("Rent {}¢/day{cap} · tier {} {tier}", b.rent_per_day, b.tier));
+        } else {
+            ui.label(format!("Tier {} {tier}", b.tier));
         }
         if !b.revenue.is_empty() || b.revenue_today != 0 {
-            let week: i64 = b.revenue.iter().sum();
-            ui.label(format!("Revenue {}¢ today, {}¢ over {} days", b.revenue_today, week, b.revenue.len()));
+            let week: i64 = b.revenue.iter().rev().take(7).sum();
+            ui.label(format!(
+                "Revenue {}¢ today, {}¢ over the last {} days",
+                b.revenue_today,
+                week,
+                b.revenue.len().min(7)
+            ));
         }
+        security(ui, app, world, id, b);
         if let Some((gid, gang)) = territory_of(world, id) {
             ui.horizontal(|ui| {
                 ui.colored_label(crate::ui::gang_colour(world.gang_index(gid)), format!("Territory of {}", gang.name));
@@ -186,7 +210,8 @@ fn home(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
                 ui.label(format!("{coins}¢"));
                 let job = world.comp::<Job>(r).map_or("no job".to_string(), |j| j.role.label().to_string());
                 ui.label(job);
-                let arrears = world.comp::<Household>(r).map_or(0, |h| h.arrears);
+                let (arrears, paid) = world.comp::<Household>(r).map_or((0, 0), |h| (h.arrears, h.rent_paid_7d));
+                ui.label(format!("rent {paid}¢/7d"));
                 let behind = (arrears > 0).then(|| format!("{arrears} days behind"));
                 let flags = [
                     world.has::<GangMember>(r).then(|| "gang".to_string()),
@@ -691,14 +716,23 @@ fn occupants(ui: &mut Ui, app: &mut App, world: &World, b: &Building) {
     });
 }
 
-fn buttons(ui: &mut Ui, app: &mut App, id: EntityId, b: &Building) {
+fn buttons(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
     ui.separator();
     ui.horizontal_wrapped(|ui| {
         if ui.button("Centre camera").clicked() {
             app.camera.centre_on(b.door);
         }
-        if b.kind == BuildingKind::Home && !b.demolished && ui.button("Demolish").clicked() {
+        // D44: only a city Block can be demolished; nationalise it first.
+        if b.kind == BuildingKind::Home && !b.demolished && b.owner.is_none() && ui.button("Demolish").clicked() {
             app.cmds.push(PlayerCommand::DemolishHome(id));
+        }
+        let value = citysim::systems::ownership::value(world, b.kind);
+        if b.owner.is_some() && !b.demolished && value > 0 {
+            let afford = world.treasury().is_some_and(|t| t.coins >= value);
+            let button = egui::Button::new(format!("Nationalise ({value}¢)"));
+            if ui.add_enabled(afford, button).on_disabled_hover_text("the Treasury cannot pay").clicked() {
+                app.cmds.push(PlayerCommand::Nationalise(id));
+            }
         }
         if ui.button("Close").clicked() {
             app.selected = None;
@@ -710,4 +744,37 @@ fn buttons(ui: &mut Ui, app: &mut App, id: EntityId, b: &Building) {
         RichText::new("Click a name to inspect that agent; click a Home in the territory list to jump to it.")
             .color(GOLD),
     );
+}
+
+/// D19: the Security corp guarding this building, its price, and its guards.
+fn security(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
+    let Some(seller) = b.secured_by else { return };
+    let Some(c) = world.comp::<Corp>(seller) else { return };
+    let until = c.contracts.iter().find(|(client, _)| *client == id).map(|&(_, t)| t);
+    ui.horizontal_wrapped(|ui| {
+        ui.label("Secured by");
+        let name = RichText::new(&c.name).color(crate::ui::corp_colour(world.corp_index(seller)));
+        if ui.link(name).clicked() {
+            app.selected = Some(seller);
+            app.follow = false;
+        }
+        let price = citysim::systems::corps::contract_price(world, seller);
+        let till = until.map_or(String::new(), |t| format!(" until day {}", time::day(t)));
+        ui.label(format!("{price}¢/day{till}"));
+    });
+    // The seller's guards: the staff of its Security Offices.
+    let guards: Vec<EntityId> = c
+        .buildings
+        .iter()
+        .filter(|&&o| world.comp::<Building>(o).is_some_and(|bd| bd.kind == BuildingKind::SecurityOffice))
+        .flat_map(|&o| workers(world, o).into_iter().map(|(g, _)| g))
+        .collect();
+    if !guards.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.small("guards");
+            for g in guards {
+                agent_link(ui, app, world, g);
+            }
+        });
+    }
 }

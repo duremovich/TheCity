@@ -10,6 +10,10 @@ python tools/compare_runs.py a.csv b.csv
 
 - `analyze_run.py`: population, economy, law, mood, throughput, event counts, weekly histograms
   for story events, order/posture transitions, and a list of anomaly flags. CSV columns are read by
-  header name, so new columns do not break it.
+  header name, so new columns do not break it. M11 adds an ownership section (evictions, rent,
+  registered foundings and corp builds, incorporations, hostile acquisitions, bankruptcies, strikes,
+  monopoly days, unrest per class, the ledger per day), each corp slot's treasury and days per order,
+  CorpOrder transitions per corp, and flags for a corp in the red 3+ days running, a monopoly,
+  Street unrest outside 0.2-0.7 and no Dregs for 30+ days running.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.

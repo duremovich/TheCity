@@ -1,10 +1,12 @@
 //! macroquad front end: squares and letters, a HUD, time controls, save/load.
 //!
 //! ```text
-//! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind] [--select-name NAME] [--tab story]
+//! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind] [--select-name NAME] [--tab story|corp]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the v2 256 x 192 map by default).
+//! `--tab corp` with `--select-kind` opens the selected building's owning
+//! corp's panel (M11 screenshots of the Corp panel).
 
 mod camera;
 mod input;
@@ -112,6 +114,8 @@ struct Args {
     select_kind: Option<citysim::BuildingKind>,
     /// Open the inspector on its Story tab (`--tab story`).
     story_tab: bool,
+    /// Select the selected building's owning corp instead (`--tab corp`).
+    corp_tab: bool,
     /// Do not bind the selected agent's open holes on open (screenshots of an unbound line).
     no_autobind: bool,
     /// Frame the whole map (screenshots of the full city).
@@ -131,6 +135,7 @@ fn parse_args() -> Args {
         select_kind: None,
         select_name: None,
         story_tab: false,
+        corp_tab: false,
         no_autobind: false,
         fit: false,
         map: None,
@@ -156,7 +161,11 @@ fn parse_args() -> Args {
             "--select-name" => args.select_name = Some(it.next().expect("--select-name <NAME>")),
             "--fit" => args.fit = true,
             "--no-autobind" => args.no_autobind = true,
-            "--tab" => args.story_tab = it.next().as_deref() == Some("story"),
+            "--tab" => match it.next().as_deref() {
+                Some("story") => args.story_tab = true,
+                Some("corp") => args.corp_tab = true,
+                other => panic!("--tab story|corp, got {other:?}"),
+            },
             other => panic!("unknown argument {other}"),
         }
     }
@@ -204,6 +213,14 @@ async fn main() {
         app.selected = world.building_of_kind(kind);
         if let Some(b) = app.selected.and_then(|id| world.comp::<citysim::Building>(id)) {
             app.camera.centre_on(b.door);
+        }
+        if args.corp_tab {
+            // The first building of the kind owned by a corp, then its corp.
+            let owned = world.buildings_of_kind(kind).iter().copied().find(|&b| world.corp_of_building(b).is_some());
+            if let Some(b) = owned.and_then(|b| world.comp::<citysim::Building>(b)) {
+                app.camera.centre_on(b.door);
+            }
+            app.selected = owned.and_then(|b| world.corp_of_building(b));
         }
     }
     // Screenshots with no selection frame the whole map, as `--fit` does anywhere.

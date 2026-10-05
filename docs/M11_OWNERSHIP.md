@@ -312,3 +312,78 @@ This is a five-phase milestone, larger than M8 or M9; phase 2 is a gate on its o
 ## 13. Out of scope (M12 and later)
 
 Districts and anything per district (law allocation, litter, control), riots and crossfire, raids on corp buildings, assets with upkeep (vehicles, chrome, robots), a second good, Virt and Data, corp wars beyond Lobby, Undercut and Acquire, corps hiring gangs, a corp buying a gang's Hideout, trials and fines, and the player character.
+
+## Implemented: deviations
+
+Where the build departs from the text above. The numbered rows are the plan's Decisions table (`~/.claude/plans/m11-ownership.md`, D1-D49); the rest are the phase commits' deviations and calibration calls (each changed value carries its reason as a comment in `assets/config.toml`). One line each.
+
+### Decisions that changed the spec
+
+- **D1:** `ownership::owner_kind` resolves an owner as City (`None`), Corp, Gang or Agent in that order; `World::purse` / `purse_add` read and write the Treasury, a corp or gang treasury or a wallet.
+- **D2:** one transfer path: `ownership::pay` moves at most what a non-negative purse holds; `charge` lets a corp or the City go negative (upkeep, the city's bankruptcy purchase). Owner revenue is taxed at the moment of the flow.
+- **D3:** a `Flow` ledger lands in the CSV (`flow_*` columns) and a unit test checks money conservation over a daily pass (tax is the only sink).
+- **D4:** the Treasury's return flow is building upkeep charged to every non-city owner (`[corps] upkeep`), sized from the ledger, since food revenue now goes to the Market owners.
+- **D5:** wholesale has three legs: Farm to Market between owners, the City buying a Farm's overflow into the Reserve Depot, and a Market buying its restock from it.
+- **D6:** rent is per Block, split among its adults (`Household.rent_due`), not per adult; per adult it evicted hundreds in two weeks.
+- **D7:** `Household.arrears` counts consecutive short nights; eviction at `evict_days` (a Squeezing landlord's override); the evicting owner refuses the agent for `refuse_days`.
+- **D8:** an eviction takes the spouse and their children in the same Block; re-housing moves the family together.
+- **D9:** `Config::v1_profile` turns rent, corps and the class couplings off, so the v1, M8 and M9 unit tests run unchanged.
+- **D10:** seeding draws no RNG; the corps are dealt from config rows in order.
+- **D11:** two Bars go to the jobless adults living nearest them, with `bar_owner_coins`.
+- **D12:** each corp's exec is the greediest jobless adult at seed; a dead exec is replaced by the corp's greediest employee.
+- **D13:** wages are collected at the workplace (`LocationKey::Workplace`; the Hall for a city job).
+- **D14:** a city job is any job at a city-owned building, paid from the Treasury at the Hall.
+- **D15:** every tier picks a Street Market by door distance + `shop_price_tiles` x price, not "cheapest within 24 tiles for Full agents", or Undercut would move nobody on the v2 map.
+- **D16:** Food demand is sales over stock (7 days), Housing demand is occupancy, Security demand is contracts over guards; a monopoly is share >= 0.999; a niche too young or too thin to be a market reads every share as 0.
+- **D17:** buildings carry a full staff (`staff`); Grow tops vacancies up, Hunker fires the newest hire per building per day down to half.
+- **D18:** private guards (employer a Security Office) patrol their corp's clients and never hold the Precinct; `law_brain::guards()` is the city's guards only.
+- **D19:** a Security contract is one client building billed daily and renewed weekly to the cheapest seller.
+- **D20:** `Corp.loss_log` keeps the culprit gang, which Lobby needs.
+- **D21:** Lobby is the gang bribe path with a corp payer (`offer_bribe`, `Payer::Corp`), buying a Crackdown on a gang through a `LobbyHold`.
+- **D22:** entering Squeeze shortens a landlord's eviction notice by a day (Housing) or cuts wages to 0.9 (Food).
+- **D23:** a corp builds at most one Lot per `grow_cooldown_days`.
+- **D24:** Secure contracts only buildings with a loss in 14 days, at most two a day.
+- **D25:** `Register` picks the foundable kind furthest below its per-capita target (the spec's "fewest per capita" always picked the Bar), on the vacant Lot nearest the founder's Block; Grow and Register share `founding::build_on_lot`.
+- **D26:** the Found goal's eligibility: an adult, not in a gang, jobless or paid at most the dole, off a `found_cooldown_days` cooldown.
+- **D27:** an agent owning `incorporate_buildings` becomes `"{surname} Holdings"`; every exec draws `wage_exec` from the corp.
+- **D28:** building values: Bar and Block at `found_cost`, Farm and Market 1,000, Security Office 500; a hostile offer is value x `acquire_premium`.
+- **D29:** a bankrupt corp's buildings go to the richest buyer, else to the City at half value; the remainder goes to the exec or is absorbed by the Treasury.
+- **D30:** a building moves with its employees, vacancies and contracts.
+- **D31:** BreakUp moves every second niche building to `"{name} Spinoff"`, refused without a monopoly.
+- **D32:** Squeeze steps toward `monopoly_markup_cap` with a monopoly, else `squeeze_cap`; `rent_cap` caps every Block's rent.
+- **D33:** a hoarding corp tilts the gangs' Contest (`hoard_tilt`, 0 in M11: the raid on a corp building is M12).
+- **D34:** fear is guard-hours per Block on the hour (`World::home_watch`), not a per-tick walk.
+- **D35:** strikers are every non-exec employee of the highest-priced corp (the spec's "Street worker of the corp" is empty by definition).
+- **D36:** an evictee within 14 days with lawfulness < 0.5 is desperate for gang recruitment and gets LOD priority.
+- **D37:** display labels (`label()`) without renaming identifiers or CSV columns.
+- **D38:** CSV corp columns by fixed seeding slot (`Corp.slot`; spinoffs and incorporations have none).
+- **D39:** an eleventh event, `Housed`, and Life rows for Evicted, Housed, Founded and Incorporated.
+- **D40:** new config sections default to off, so a pre-M11 save keeps M9 behaviour.
+- **D41:** Arasaka and Militech are branches of an outside parent (`Corp.parent`, `outside_treasury`), with no behaviour until M17.
+- **D42:** tick order `commands, lod, needs, memory, mood, think, plan, exec, ownership, classes, economy, [bind], law, social, gang, corp_brain, demography, stats`.
+- **D43:** map outlines in the owner's colour (`ui::corp_hex` by corp index, gangs as M8, the city grey, an agent white).
+- **D44:** DemolishHome is refused on a non-city Block (nationalise it first).
+- **D45:** an agent owner pays from the wallet only and never goes bankrupt; their buildings are inherited by spouse, then child, then the City.
+- **D46:** SellFood is paid by the Market's owner; Precinct meals pay the Market's owner from the Treasury.
+- **D47:** a conglomerate's corp-wide orders resolve to the first niche in order.
+- **D48:** `[corps.order_flat]` per order, as `[gangs.order_flat]`.
+- **D49:** `Governance { Dictator, Board }` on corps and gangs; only Dictator is built in M11 and the Corp panel prints "dictatorship" or "board of N".
+
+### Phase deviations and calibration calls
+
+- **Phase 1:** labels only; a 10-day CSV identical before and after.
+- **Phase 2:** rent is paid on payday, not from what is left at midnight (118 evictions on day 25 otherwise); Farm upkeep carries the Treasury because the city buys Farm overflow; wealth seeded by Block tier (`[world] coins_by_tier`); throughput fixes kept the M10 gate (GoTo(Workplace) was missing from the planner list; private guards rank with gang members for LOD).
+- **Phase 3:** `bankrupt_days` 14 -> 3 (a corp in the red pays nobody while it lingers); Grow flat -0.15 and Acquire flat -0.2 (broke landlords built, Farms grabbed stranded Markets); `hoard_tilt` 0.1 -> 0.
+- **Phase 4:** `found_cost.bar` 300 -> 200 (only the jobless can found, and almost none held 300); `strike_threshold` 0.6 -> 0.42 (Street unrest never passed 0.46).
+- **God scenarios v2:** corp god commands and ten shocks; the gaps they found are in `GOD_SCENARIOS_V2.md`.
+- **Phase 5a, the economy:** the dole 3 -> 4 with tax 0.05 -> 0.12 (the dole was exactly one meal, so every coin of rent or markup was a skipped meal and a theft); children eat from the Reserve when the pantry is empty (`school_meals`); rent back to `[1, 2, 4]` per Block with Block upkeep `[0, 1, 2]`; prices in tenths (a fractional corp level, per-agent rounding by hash) so Undercut and Squeeze move customers; the estate rule (a buyer must be in the niche below half its share, at most 12 buildings of one estate); solvency judged on the midnight close before upkeep; contracts 20 a guard-day with office upkeep 10 so Security corps live; incorporation moves the founder's savings into the corp with 14 days free of upkeep; evictees wait `rehouse_wait_days` (3) on the street so Dregs exist; `strike_threshold` 0.42 -> 0.45; the Squeeze caps back to the spec's 1.5 and 2.0; Hunker spares Farm staff.
+- **Phase 5b, incorporation:** seed 42 had no incorporation. The seeded Bar owner tended his own Bar at 5 a day with 625 coins, which the "jobless or at the dole" rule read as employed: an owner working in a building they own is now eligible (`founding::can_found`). A low-greed owner on seed 43 held 250-355 coins for 65 days with Found at 0.01-0.03 (greed squared) against Idle's 0.05-0.15: `found_flat` 0 -> 0.1. The Found goal's wealth curve is inverted from the spec's Linear{0.3, 0.7} to Linear{-0.3, 1.0}, so savings push toward founding instead of away from it. Result: an incorporation on seeds 42, 43 and 44 (days 1-7), 8 NPC foundings on seed 42. Each of those Holdings goes bankrupt 30-40 days later (two Bars do not cover upkeep, six bartenders and the exec's wage), so incorporation is a story with an end, not a corp that lasts.
+
+### The § 11 targets as measured (seed 42, 2,000, 120 days, `test_m11_ownership_seed_42`)
+
+- Evictions 25 (target 10-40). Street unrest inside 0.2-0.7 on 120 of 120 days.
+- "One to three bankruptcies or acquisitions" is re-read as one to three bankruptcies plus at least one hostile acquisition: 1 bankruptcy (Varley Holdings) and 19 hostile acquisitions (20 sales in all). Hostile bids are frequent and small (a Block at 400 x 1.2), so counting them against a cap of three would forbid the order.
+- No monopoly on any day. Summer price 3 throughout (inside the v1 band 2-8). Treasury 33.7k, 50.8k (day 30), 31.1k (day 60), 21.9k (day 90), 38.3k (day 119), never below 0.
+- Strikes 3, all in the first month; corp-payer bribes 15, all refused by an incorruptible captain; 3 recruits joined a gang within 14 days of their eviction (the gate's floor, so this link is thin).
+- Dregs exist (mean 1.6, max 6) but none on days 0-57.
+- Throughput 6,900-7,900 ticks/s on this machine against the 8,000 gate; the engine pass lands separately.

@@ -316,3 +316,7 @@ structural, as force was in v1.
 - **Hyperinflation:** `ReleaseReserve` zero and Farms nationalised then demolished; does price ever move?
 - **Every v2 scenario over 10 seeds**, reporting distributions (seed 42 is chaotic enough that kill_exec
   "reacts" through gang noise alone).
+
+## After calibration (M11 phases 5a and 5b)
+
+Re-run on the calibrated economy (dole 4, tax 0.12, rent [1, 2, 4], prices in tenths, the estate rule, owners eligible to found from their own payroll, `found_flat` 0.1): `--test god_corps` passes 12/12. What changed against the gaps above: evictees now wait three days on the street, so Dregs exist (rare: mean 1.6 on seed 42, none before day 57); a millionaire still founds two buildings and incorporates ("Quarry Holdings", 999k in the treasury, Undercut), since money still buys nothing beyond `found_cost`; incorporated corps start with the founder's savings and 14 days free of upkeep, yet the ordinary two-Bar Holdings still go bankrupt 30-40 days later; bankrupting Nutrix now shakes the other Food corps' orders within a week and the law swings to Garrison. The zombie corp, the gang landlord the law ignores and order flapping on ties are not addressed.

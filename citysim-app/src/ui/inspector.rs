@@ -219,6 +219,7 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             Some(h) => ui.label(format!("Block {}", building_label(world, h))),
             None => ui.colored_label(RED, "Homeless"),
         };
+        ownership(ui, app, world, id);
         ui.horizontal(|ui| {
             if let Some(s) = world.comp::<Sentence>(id) {
                 let boss =
@@ -406,4 +407,127 @@ fn buttons(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     });
     ui.add_space(4.0);
     ui.small(RichText::new("Arrest and Release land with the law system (M4).").color(GOLD));
+}
+
+/// M11 § 9: class, the employer's owner, rent paid and arrears, what the
+/// agent founded, and the corp they run.
+fn ownership(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    if world.has::<citysim::Child>(id) {
+        return;
+    }
+    let class = citysim::systems::classes::class_of(world, id);
+    let colour = match class {
+        citysim::Class::Corp => GOLD,
+        citysim::Class::Street => BLUE,
+        citysim::Class::Dreg => RED,
+    };
+    ui.horizontal_wrapped(|ui| {
+        ui.colored_label(colour, format!("{} class", class.label()));
+        if let Some(e) = world.comp::<Job>(id).and_then(|j| j.employer) {
+            let owner = world.owner_of(e);
+            ui.label("· employer owned by");
+            owner_link(ui, app, world, owner);
+        }
+    });
+    if let Some(h) = world.comp::<Household>(id) {
+        if h.home.is_some() || h.rent_paid_7d > 0 || h.arrears > 0 {
+            let rent = h.home.and_then(|b| world.comp::<Building>(b)).map_or(0, |b| b.rent_per_day);
+            let line = format!("Rent {rent}¢/day · paid {}¢ in 7 days", h.rent_paid_7d);
+            if h.arrears > 0 {
+                ui.colored_label(RED, format!("{line} · {} days in arrears", h.arrears));
+            } else {
+                ui.label(line);
+            }
+        }
+        if let Some((by, t)) = h.evicted_by {
+            ui.horizontal_wrapped(|ui| {
+                ui.colored_label(RED, format!("evicted day {} by", time::day(t)));
+                owner_link(ui, app, world, by);
+            });
+        }
+    }
+    // "founded X": the biography counts the foundings (a Life row names
+    // agents only); the event ring still holding them names the buildings.
+    let rows = world
+        .life
+        .get(id.index as usize)
+        .and_then(|l| l.as_ref())
+        .map_or(0, |l| l.events.iter().filter(|e| e.kind == citysim::LifeKind::Founded).count());
+    if rows > 0 {
+        let named: Vec<EntityId> = world
+            .events
+            .iter()
+            .filter(|e| e.kind == citysim::EventKind::Founded && e.actors.first() == Some(&id))
+            .filter_map(|e| e.actors.get(1).copied())
+            .collect();
+        ui.horizontal_wrapped(|ui| {
+            ui.label("founded");
+            for &b in &named {
+                if ui.link(building_label(world, b)).clicked() {
+                    app.selected = Some(b);
+                    app.follow = false;
+                }
+            }
+            if rows > named.len() {
+                ui.label(format!("{} more", rows - named.len()));
+            }
+        });
+    }
+    let owned: Vec<EntityId> = world
+        .with::<Building>()
+        .into_iter()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.owner == Some(id) && !bd.demolished))
+        .collect();
+    if !owned.is_empty() {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("owns");
+            for b in owned {
+                if ui.link(building_label(world, b)).clicked() {
+                    app.selected = Some(b);
+                    app.follow = false;
+                }
+            }
+        });
+    }
+    for c in world.corps() {
+        let Some(corp) = world.comp::<citysim::Corp>(c).filter(|cc| cc.exec == Some(id)) else { continue };
+        ui.horizontal_wrapped(|ui| {
+            ui.label("exec of");
+            let name = RichText::new(&corp.name).color(crate::ui::corp_colour(world.corp_index(c)));
+            if ui.link(name).clicked() {
+                app.selected = Some(c);
+                app.follow = false;
+            }
+        });
+    }
+}
+
+/// A clickable owner: a corp opens its panel, a gang its Hideout, an agent
+/// the inspector; the city is plain text.
+fn owner_link(ui: &mut Ui, app: &mut App, world: &World, owner: Option<EntityId>) {
+    let label = world.owner_label(owner);
+    let Some(o) = owner else {
+        ui.label(label);
+        return;
+    };
+    let (text, target) = if world.has::<citysim::Corp>(o) {
+        (RichText::new(label).color(crate::ui::corp_colour(world.corp_index(o))), Some(o))
+    } else if world.has::<citysim::Gang>(o) {
+        (RichText::new(label).color(crate::ui::gang_colour(world.gang_index(o))), world.hideout_of(o))
+    } else if world.is_alive(o) {
+        (RichText::new(label), Some(o))
+    } else {
+        (RichText::new(label), None)
+    };
+    match target {
+        Some(t) => {
+            if ui.link(text).clicked() {
+                app.selected = Some(t);
+                app.follow = false;
+            }
+        }
+        None => {
+            ui.label(text);
+        }
+    }
 }

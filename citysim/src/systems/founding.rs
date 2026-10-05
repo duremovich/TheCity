@@ -186,7 +186,11 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
         return false;
     }
     let dole = i64::from(world.levers.dole_per_day);
-    if world.comp::<Job>(agent).is_some_and(|j| j.wage_per_day > dole) {
+    // M11 phase 5b: an owner working in their own building pays themselves,
+    // so their wage is not a reason to stay put (seed 42's Bar owner tended
+    // his own Bar at 5 a day with 625 coins and could never found again).
+    let self_employed = |j: &Job| j.employer.is_some_and(|e| world.owner_of(e) == Some(agent));
+    if world.comp::<Job>(agent).is_some_and(|j| j.wage_per_day > dole && !self_employed(j)) {
         return false;
     }
     choose_kind(world, coins).is_some() && !vacant_lots(world).is_empty() && !is_exec(world, agent)
