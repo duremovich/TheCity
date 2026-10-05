@@ -6,8 +6,11 @@
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
+use crate::components::{
+    hole_id, Bound, Corpse, DeathCause, Hole, HoleId, HoleKind, Identity, Life, LifeEvent, LifeKind, LIFE_CAP,
+};
 use crate::entity::EntityId;
-use crate::time::Tick;
+use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
 
 pub const EVENT_RING_CAP: usize = 50_000;
@@ -132,13 +135,9 @@ impl World {
         }
         let id = self.next_event_id;
         self.next_event_id += 1;
-        self.events.push_back(Event {
-            id,
-            tick: self.tick,
-            kind,
-            actors: SmallVec::from_slice(actors),
-            text: text.into(),
-        });
+        let event = Event { id, tick: self.tick, kind, actors: SmallVec::from_slice(actors), text: text.into() };
+        record_life(self, &event);
+        self.events.push_back(event);
         id
     }
 
@@ -154,4 +153,151 @@ impl World {
     pub fn events_for(&self, id: EntityId) -> impl Iterator<Item = &Event> {
         self.events.iter().rev().filter(move |e| e.actors.contains(&id))
     }
+}
+
+// ---------------------------------------------------------------------------
+// Lives (M10 phase 4): the one table that writes `Life`
+// ---------------------------------------------------------------------------
+
+/// What `life_kind` says an event did to the agent in `slot`.
+struct LifeRow {
+    kind: LifeKind,
+    other: Option<EntityId>,
+    hole: Option<HoleId>,
+}
+
+/// The table (M10 D36). Actor order per push site:
+/// `Birth [child, mother, father]`, `Marriage [a, b]`, `Death [dead, spouse?]`,
+/// `Hire [id, employer]`, `Fire/Quit/Starving/Theft/Release/Homeless/Immigration/Betrayal [id, ..]`,
+/// `Robbed/Assaulted [NONE, victim]`, `Assault/Murder [attacker, victim]`,
+/// `Extortion [actor, home]`, `Arrest [guard, suspect]`, `Jailbreak [gang, jail, freed..]`,
+/// `GangJoin/GangLeave [id, gang]`, `Burial [digger, corpse]`, `Witness [witness, actor]`.
+fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Option<LifeRow> {
+    use EventKind as E;
+    let other = event.actors.iter().copied().find(|&o| o != actor && o != EntityId::NONE && world.has::<Identity>(o));
+    let row = |kind| Some(LifeRow { kind, other, hole: None });
+    let victim_side = |kind: LifeKind, hole_kind: HoleKind| {
+        // A victim-side event whose actor is still `NONE` is a hole.
+        let hole =
+            event.actors.first().is_some_and(|a| *a == EntityId::NONE).then(|| hole_id(event.tick, actor, hole_kind));
+        Some(LifeRow { kind, other, hole })
+    };
+    match (event.kind, slot) {
+        (E::Birth, 0) => row(LifeKind::Born),
+        (E::Marriage, _) => row(LifeKind::Married),
+        (E::Death, 0) => {
+            let violent = world.comp::<Corpse>(actor).is_some_and(|c| c.cause == DeathCause::Violence);
+            Some(LifeRow { kind: if violent { LifeKind::Killed } else { LifeKind::Died }, other: None, hole: None })
+        }
+        (E::Death, 1) => row(LifeKind::Widowed),
+        (E::Hire, 0) => row(LifeKind::Hired),
+        (E::Fire, 0) => row(LifeKind::Fired),
+        (E::Quit, 0) => row(LifeKind::Quit),
+        (E::Starving, 0) => row(LifeKind::Starving),
+        (E::Theft, 0) => row(LifeKind::Stole),
+        (E::Robbed, 1) => victim_side(LifeKind::Robbed, HoleKind::Robbed),
+        (E::Assaulted, 1) => victim_side(LifeKind::Assaulted, HoleKind::Assaulted),
+        (E::Assault, 0) => row(LifeKind::AssaultedSomeone),
+        (E::Assault, 1) => row(LifeKind::Assaulted),
+        (E::Murder, 0) => row(LifeKind::KilledSomeone),
+        (E::Murder, 1) => victim_side(LifeKind::Killed, HoleKind::Killed),
+        (E::Extortion, 0) => row(LifeKind::RobbedSomeone),
+        (E::Arrest, 1) => row(LifeKind::Arrested),
+        (E::Release, 0) => row(LifeKind::Released),
+        // The gang and the Jail come first; the freed are the rest.
+        (E::Jailbreak, s) if s >= 2 => row(LifeKind::Escaped),
+        (E::GangJoin, 0) => row(LifeKind::JoinedGang),
+        (E::GangLeave, 0) => row(LifeKind::LeftGang),
+        (E::Betrayal, 0) => row(LifeKind::Betrayed),
+        (E::Homeless, 0) => row(LifeKind::Evicted),
+        (E::Immigration, 0) => row(LifeKind::Immigrated),
+        (E::Burial, 1) => row(LifeKind::Buried),
+        (E::Witness, 0) => row(LifeKind::Witnessed),
+        _ => None,
+    }
+}
+
+/// Append the event to the biography of every agent in `actors` that the
+/// table has a row for. Per event, never per tick.
+fn record_life(world: &mut World, event: &Event) {
+    for (slot, &actor) in event.actors.iter().enumerate() {
+        if actor == EntityId::NONE || !world.has::<Identity>(actor) {
+            continue;
+        }
+        let Some(row) = life_kind(world, event, slot, actor) else { continue };
+        let entry = LifeEvent {
+            tick: event.tick,
+            kind: row.kind,
+            other: row.other,
+            hole: row.hole,
+            salience: row.kind.salience(),
+        };
+        add_life(world, actor, entry);
+    }
+}
+
+/// Close a hole's biography entries (M10 D36): the victim's entry stops
+/// reading "unknown" and names the actor; the actor's gains the crime at its
+/// original tick with salience 1.0, so it is never evicted.
+pub fn life_bound(world: &mut World, hole: &Hole, bound: Bound) {
+    let actor = match bound {
+        Bound::Actor(a) => Some(a),
+        Bound::Unknown => None,
+    };
+    if let Some(life) = world.comp_mut::<Life>(hole.victim) {
+        for e in life.events.iter_mut().filter(|e| e.hole == Some(hole.id)) {
+            e.hole = None;
+            e.other = actor;
+        }
+    }
+    if let Some(a) = actor {
+        let kind = match hole.kind {
+            HoleKind::Robbed => LifeKind::RobbedSomeone,
+            HoleKind::Assaulted => LifeKind::AssaultedSomeone,
+            HoleKind::Killed => LifeKind::KilledSomeone,
+        };
+        add_life(world, a, LifeEvent { tick: hole.tick, kind, other: Some(hole.victim), hole: None, salience: 1.0 });
+    }
+}
+
+/// Insert in tick order; a permanent kind already recorded this tick is
+/// completed rather than doubled (a Death and its Murder both say Killed);
+/// past `LIFE_CAP` the lowest `salience × recency` evictable entry goes.
+fn add_life(world: &mut World, id: EntityId, entry: LifeEvent) {
+    if !world.has::<Life>(id) {
+        world.insert(id, Life::default());
+    }
+    let now = world.tick;
+    let half_life = world.config.brain.memory_half_life_days.max(0.01);
+    let Some(life) = world.comp_mut::<Life>(id) else { return };
+    if entry.kind.permanent() {
+        if let Some(e) = life.events.iter_mut().find(|e| e.kind == entry.kind && e.tick == entry.tick) {
+            e.other = e.other.or(entry.other);
+            e.hole = e.hole.or(entry.hole);
+            return;
+        }
+    }
+    if life.events.len() >= LIFE_CAP {
+        let weight = |e: &LifeEvent| {
+            let age_days = now.saturating_sub(e.tick) as f32 / TICKS_PER_DAY as f32;
+            e.salience * 0.5f32.powf(age_days / half_life)
+        };
+        // Lowest weight; the oldest on a tie (the list is oldest first).
+        let worst = life.events.iter().enumerate().filter(|(_, e)| !e.kind.permanent() && e.salience < 1.0).fold(
+            None::<(usize, f32)>,
+            |acc, (i, e)| {
+                let w = weight(e);
+                match acc {
+                    Some((_, best)) if best <= w => acc,
+                    _ => Some((i, w)),
+                }
+            },
+        );
+        if let Some((i, _)) = worst {
+            life.events.remove(i);
+        }
+        // Nothing evictable: every entry is permanent or a bound crime, so the list grows.
+    }
+    let at = life.events.partition_point(|e| e.tick <= entry.tick);
+    life.events.insert(at, entry);
 }

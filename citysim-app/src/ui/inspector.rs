@@ -3,6 +3,7 @@
 
 use egui_macroquad::egui::{self, Color32, ProgressBar, RichText, Ui};
 
+use citysim::story::{self, Span};
 use citysim::{
     time, Brain, Building, Corpse, EntityId, ExecState, Household, Identity, Inventory, Job, Memory, Mood, Needs,
     Personality, PlayerCommand, Position, Sentence, Wallet, World, TICKS_PER_DAY,
@@ -14,6 +15,14 @@ const RED: Color32 = Color32::from_rgb(220, 60, 60);
 const GREEN: Color32 = Color32::from_rgb(80, 170, 90);
 const BLUE: Color32 = Color32::from_rgb(70, 120, 210);
 const GOLD: Color32 = Color32::from_rgb(217, 162, 61);
+
+/// Which half of the inspector is showing.
+#[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
+pub enum InspectorTab {
+    #[default]
+    Now,
+    Story,
+}
 
 fn section(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
     egui::CollapsingHeader::new(title).default_open(true).show(ui, body);
@@ -59,8 +68,24 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.selected = None;
         return;
     }
+    // Opening an agent binds their open victim holes, once per selection,
+    // through the command so replays stay deterministic.
+    if app.bound_for != Some(id) {
+        app.bound_for = Some(id);
+        if let Some(holes) = world.holes_by_agent.get(&id) {
+            app.cmds.extend(holes.iter().map(|&h| PlayerCommand::Bind(h)));
+        }
+    }
     egui::ScrollArea::vertical().show(ui, |ui| {
         identity(ui, app, world, id);
+        ui.horizontal(|ui| {
+            ui.selectable_value(&mut app.inspector_tab, InspectorTab::Now, "Now");
+            ui.selectable_value(&mut app.inspector_tab, InspectorTab::Story, "Story");
+        });
+        if app.inspector_tab == InspectorTab::Story {
+            story_tab(ui, app, world, id);
+            return;
+        }
         if let Some(n) = world.comp::<Needs>(id) {
             section(ui, "Needs", |ui| {
                 bar(ui, "hunger", n.hunger, Some(0.25));
@@ -124,6 +149,44 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         }
         buttons(ui, app, world, id);
     });
+}
+
+/// The biography: life events and folded trace runs, newest first. The same
+/// for every tier; an unbound victim line offers "find out".
+fn story_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    let lines = story::lines(world, id);
+    if lines.is_empty() {
+        ui.label("Nothing to tell yet.");
+        return;
+    }
+    for line in lines {
+        ui.horizontal_wrapped(|ui| {
+            ui.label(RichText::new(line.when()).weak().monospace());
+            for span in &line.spans {
+                match span {
+                    Span::Text(t) if line.run => {
+                        ui.label(RichText::new(t).italics().color(Color32::GRAY));
+                    }
+                    Span::Text(t) => {
+                        ui.label(t);
+                    }
+                    Span::Agent(o, name) if world.is_alive(*o) && world.has::<Identity>(*o) => {
+                        if ui.link(name).clicked() {
+                            app.selected = Some(*o);
+                        }
+                    }
+                    Span::Agent(_, name) => {
+                        ui.label(name);
+                    }
+                }
+            }
+            if let Some(h) = line.find_out {
+                if ui.small_button("find out").clicked() {
+                    app.cmds.push(PlayerCommand::Bind(h));
+                }
+            }
+        });
+    }
 }
 
 fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {

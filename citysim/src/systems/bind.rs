@@ -234,6 +234,7 @@ pub fn bind(world: &mut World, id: HoleId) -> Option<Bound> {
     }
     // 8. The ring entry names the actor (or says nobody ever will).
     rewrite_event(world, &hole, bound);
+    crate::events::life_bound(world, &hole, bound);
     // 9. Counters, 10. the Attributed event.
     match bound {
         Bound::Actor(_) => world.stats.current.holes_bound += 1,
@@ -281,6 +282,7 @@ fn attributed_event(world: &mut World, hole: &Hole, bound: Bound, witness: Optio
 pub fn expire(world: &mut World, id: HoleId) {
     let Some(hole) = take(world, id) else { return };
     rewrite_event(world, &hole, Bound::Unknown);
+    crate::events::life_bound(world, &hole, Bound::Unknown);
     world.stats.current.holes_unknown += 1;
     attributed_event(world, &hole, Bound::Unknown, None);
 }

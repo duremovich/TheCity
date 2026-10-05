@@ -12,6 +12,9 @@ use crate::world::World;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
 pub enum PlayerCommand {
+    /// Attribute an open hole now (the inspector's "find out"). A missing
+    /// hole does nothing. Logged, so a replay binds at the same tick.
+    Bind(crate::components::HoleId),
     ReleaseReserve {
         amount: u32,
     },
@@ -119,6 +122,9 @@ impl World {
 
     fn apply_command(&mut self, cmd: &PlayerCommand) {
         match cmd {
+            PlayerCommand::Bind(hole) => {
+                crate::systems::bind::bind(self, *hole);
+            }
             PlayerCommand::ReleaseReserve { amount } => self.cmd_release_reserve(*amount),
             PlayerCommand::SetTaxRate(r) => {
                 self.levers.tax_rate = r.clamp(0.0, 0.3);

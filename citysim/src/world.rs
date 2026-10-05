@@ -196,6 +196,9 @@ pub struct World {
     /// M10: per adult, kept after death. Absent from older saves; `migrate_legacy` fills it.
     #[serde(default)]
     pub trace: Vec<Option<Trace>>,
+    /// M10: per agent, kept after death. Absent from older saves; `migrate_legacy` fills it.
+    #[serde(default)]
+    pub life: Vec<Option<Life>>,
     // graph + blackboard
     pub edges: BTreeMap<(EntityId, EntityId), Edge>,
     pub crime_reports: Vec<CrimeReport>,
@@ -320,6 +323,7 @@ components! {
     treasury: Treasury,
     law: Law,
     trace: Trace,
+    life: Life,
 }
 
 /// Statistical agents by hourly slot: `slots[s]` holds the ids with
@@ -433,6 +437,7 @@ impl World {
             treasury: Vec::new(),
             law: Vec::new(),
             trace: Vec::new(),
+            life: Vec::new(),
             edges: BTreeMap::new(),
             crime_reports: Vec::new(),
             buildings_by_kind: BTreeMap::new(),
@@ -1270,6 +1275,9 @@ impl World {
         if self.trace.len() < n {
             self.trace.resize_with(n, || None);
         }
+        if self.life.len() < n {
+            self.life.resize_with(n, || None);
+        }
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {
                 self.insert(jail, Law::default());
@@ -1376,6 +1384,8 @@ impl World {
         }
         let tick = self.tick;
         let name = self.name_of(id);
+        // Widowhood is recorded on the Death event, and `on_death` unlinks the pair.
+        let spouse = self.spouse_of(id);
         // A dead guard lets their suspect go; a dead suspect frees their guard.
         if let Some(b) = self.comp::<Brain>(id) {
             let (escorting, cuffed_by) = (b.escorting, b.cuffed_by);
@@ -1422,7 +1432,11 @@ impl World {
             DeathCause::OldAge => self.stats.current.deaths_old_age += 1,
             DeathCause::Violence | DeathCause::Execution => self.stats.current.deaths_violence += 1,
         }
-        self.push_event(crate::events::EventKind::Death, &[id], format!("{name} died of {cause:?}"));
+        let actors: &[EntityId] = match &spouse {
+            Some(s) => &[id, *s],
+            None => &[id],
+        };
+        self.push_event(crate::events::EventKind::Death, actors, format!("{name} died of {cause:?}"));
     }
 
     /// Rebuild a world from its seed and command log: the commands are queued

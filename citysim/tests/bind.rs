@@ -320,3 +320,135 @@ fn test_trace_written_daily_and_survives_death() {
     w.run_ticks(TICKS_PER_DAY);
     assert_eq!(w.comp::<Trace>(id).map(|t| t.last_day), Some(0), "no entries after death");
 }
+
+// ---------------------------------------------------------------------------
+// M10 phase 4: lives, biographies and the Bind command
+// ---------------------------------------------------------------------------
+
+use citysim::{story, Life, LifeKind, PlayerCommand, LIFE_CAP};
+
+fn life_kinds(w: &World, id: EntityId) -> Vec<LifeKind> {
+    w.comp::<Life>(id).map(|l| l.events.iter().map(|e| e.kind).collect()).unwrap_or_default()
+}
+
+#[test]
+fn test_bind_command_logged_and_replays() {
+    let cfg = Config::load().v1_profile();
+    let mut w = World::new(404, cfg.clone());
+    // Run until the real table has left a hole open.
+    while w.holes.is_empty() {
+        w.tick();
+        assert!(w.tick < 30 * TICKS_PER_DAY, "no hole opened in 30 days");
+    }
+    let hole = *w.holes.keys().next().expect("hole");
+    w.push_command(PlayerCommand::Bind(hole));
+    w.run_ticks(TICKS_PER_HOUR);
+    assert!(!w.holes.contains_key(&hole), "the command did not bind the hole");
+    assert!(w.command_log.iter().any(|(_, c)| *c == PlayerCommand::Bind(hole)), "not logged");
+    // A missing hole does nothing and is still logged.
+    w.push_command(PlayerCommand::Bind(hole));
+    w.run_ticks(2);
+    let end = w.tick;
+    let replayed = World::replay(404, cfg, &w.command_log, end);
+    assert_eq!(save::to_ron(&replayed), save::to_ron(&w), "replay diverged");
+}
+
+#[test]
+fn test_life_keeps_birth_and_death_past_cap() {
+    let mut w = World::new(405, Config::load().v1_profile());
+    let id = *w.citizens().first().expect("citizen");
+    w.push_event(EventKind::Birth, &[id], "born");
+    for i in 0..60 {
+        w.run_ticks(1);
+        w.push_event(EventKind::Starving, &[id], format!("hungry {i}"));
+    }
+    w.push_event(EventKind::Death, &[id], "died");
+    for i in 0..10 {
+        w.run_ticks(1);
+        w.push_event(EventKind::Quit, &[id], format!("quit {i}"));
+    }
+    let kinds = life_kinds(&w, id);
+    assert!(kinds.len() <= LIFE_CAP, "{} entries", kinds.len());
+    assert!(kinds.contains(&LifeKind::Born), "Born was evicted");
+    assert!(kinds.contains(&LifeKind::Died), "Died was evicted");
+}
+
+#[test]
+fn test_biography_renders_unknown_then_named() {
+    let mut w = traced_world(406);
+    let victims: Vec<EntityId> = w.tier(Lod::Statistical).iter().copied().take(20).collect();
+    let mut named = 0;
+    for victim in victims {
+        let tick = w.tick;
+        let id = manual_hole(&mut w, victim, HoleKind::Assaulted, tick);
+        let before = story::lines(&w, victim);
+        let line = before.iter().find(|l| l.find_out == Some(id)).expect("the open hole has a line");
+        assert!(line.text().contains("an unknown assailant"), "{}", line.text());
+        match bind::bind(&mut w, id) {
+            Some(Bound::Actor(a)) => {
+                let after = story::lines(&w, victim);
+                assert!(after.iter().all(|l| l.find_out.is_none()), "an open hole is left");
+                let named_line = after.iter().find(|l| l.text().contains(&w.name_of(a))).expect("the actor is named");
+                assert!(!named_line.text().contains("unknown"), "{}", named_line.text());
+                let theirs = story::lines(&w, a);
+                assert!(
+                    theirs.iter().any(|l| l.text().contains("beat") && l.text().contains(&w.name_of(victim))),
+                    "the actor's biography grew the crime"
+                );
+                named += 1;
+            }
+            Some(Bound::Unknown) => {
+                let after = story::lines(&w, victim);
+                assert!(after.iter().all(|l| l.find_out.is_none()), "an unknown hole still offers find out");
+            }
+            None => panic!("hole {id} vanished"),
+        }
+    }
+    assert!(named > 0, "no hole bound to an actor in 20 tries");
+}
+
+#[test]
+fn test_trace_runs_fold_into_one_line() {
+    let mut w = traced_world(407);
+    let id = adults_with_trace(&w)[0];
+    // Nine jailed days, then a gap, then three: one line for the nine.
+    let t = w.comp_mut::<Trace>(id).expect("trace");
+    let base = t.days.back().copied().expect("day");
+    t.days.clear();
+    let jailed = citysim::DayTrace { flags: trace_flags::ALIVE | trace_flags::JAILED, ..base };
+    let free = citysim::DayTrace { flags: trace_flags::ALIVE, hunger: 3, mood: 1, ..base };
+    for i in 0..12 {
+        t.days.push_back(if i < 9 { jailed } else { free });
+    }
+    t.last_day = 20;
+    let lines = story::lines(&w, id);
+    let runs: Vec<_> = lines.iter().filter(|l| l.run).collect();
+    assert_eq!(runs.len(), 1, "{runs:?}");
+    assert_eq!(runs[0].text(), "9 days inside");
+    assert_eq!((runs[0].first_day, runs[0].last_day), (9, 17));
+}
+
+#[test]
+fn test_life_same_richness_full_vs_statistical() {
+    // Same seed, whole city forced to one tier each, 10 days: every kind of
+    // entry one tier writes, the other writes too.
+    let kinds = |tier: Lod| {
+        let mut cfg = Config::load().v1_profile();
+        cfg.lod.force = Some(tier);
+        let mut w = World::new(408, cfg);
+        w.run_ticks(10 * TICKS_PER_DAY);
+        let mut seen = std::collections::BTreeSet::new();
+        let mut best = 0;
+        for id in w.with::<Life>() {
+            let ks: std::collections::BTreeSet<LifeKind> = life_kinds(&w, id).into_iter().collect();
+            best = best.max(ks.len());
+            seen.extend(ks);
+        }
+        (seen, best)
+    };
+    let (full, full_best) = kinds(Lod::Full);
+    let (stat, stat_best) = kinds(Lod::Statistical);
+    eprintln!("full {full:?} (best agent {full_best})\nstat {stat:?} (best agent {stat_best})");
+    assert!(full.len() >= 3 && stat.len() >= 3, "too few kinds: full {full:?}, stat {stat:?}");
+    assert!(full_best >= 3 && stat_best >= 3);
+}

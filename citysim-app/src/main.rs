@@ -1,7 +1,7 @@
 //! macroquad front end: squares and letters, a HUD, time controls, save/load.
 //!
 //! ```text
-//! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind]
+//! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind] [--select-name NAME] [--tab story]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the v2 256 x 192 map by default).
@@ -33,6 +33,10 @@ pub struct App {
     pub speed: Speed,
     pub acc: f64,
     pub selected: Option<EntityId>,
+    /// The inspector's open tab.
+    pub inspector_tab: ui::inspector::InspectorTab,
+    /// The agent whose open victim holes the inspector last bound.
+    pub bound_for: Option<EntityId>,
     pub follow: bool,
     pub show_fps: bool,
     pub fps_avg: f32,
@@ -54,6 +58,8 @@ impl App {
             speed: Speed::X1,
             acc: 0.0,
             selected: None,
+            inspector_tab: ui::inspector::InspectorTab::default(),
+            bound_for: None,
             follow: false,
             show_fps,
             fps_avg: 60.0,
@@ -94,8 +100,14 @@ struct Args {
     start_tick: u64,
     /// Select this entity index at start (inspector smoke tests).
     select: Option<u32>,
+    /// Select the citizen with this name at start (`--select-name "First Last"`).
+    select_name: Option<String>,
     /// Select the first building of this kind at start (building panel smoke tests).
     select_kind: Option<citysim::BuildingKind>,
+    /// Open the inspector on its Story tab (`--tab story`).
+    story_tab: bool,
+    /// Do not bind the selected agent's open holes on open (screenshots of an unbound line).
+    no_autobind: bool,
     /// Map file overriding `[world] map` (made absolute).
     map: Option<PathBuf>,
 }
@@ -109,6 +121,9 @@ fn parse_args() -> Args {
         start_tick: 0,
         select: None,
         select_kind: None,
+        select_name: None,
+        story_tab: false,
+        no_autobind: false,
         map: None,
     };
     let mut it = std::env::args().skip(1);
@@ -129,6 +144,9 @@ fn parse_args() -> Args {
                     it.next().and_then(|s| citysim::BuildingKind::parse(&s)).expect("--select-kind <BuildingKind>"),
                 )
             }
+            "--select-name" => args.select_name = Some(it.next().expect("--select-name <NAME>")),
+            "--no-autobind" => args.no_autobind = true,
+            "--tab" => args.story_tab = it.next().as_deref() == Some("story"),
             other => panic!("unknown argument {other}"),
         }
     }
@@ -155,6 +173,22 @@ async fn main() {
         if let Some(p) = app.selected.and_then(|id| world.comp::<citysim::Position>(id)) {
             app.camera.centre_on(p.tile);
         }
+    }
+    if let Some(name) = &args.select_name {
+        // Names repeat: prefer the namesake with an open hole, then the first.
+        let named: Vec<_> = world.citizens().into_iter().filter(|&id| world.name_of(id) == *name).collect();
+        app.selected =
+            named.iter().copied().find(|id| world.holes_by_agent.contains_key(id)).or(named.first().copied());
+        // Centring the camera promotes the agent and binds their holes.
+        if let (false, Some(p)) = (args.no_autobind, app.selected.and_then(|id| world.comp::<citysim::Position>(id))) {
+            app.camera.centre_on(p.tile);
+        }
+    }
+    if args.no_autobind {
+        app.bound_for = app.selected;
+    }
+    if args.story_tab {
+        app.inspector_tab = ui::inspector::InspectorTab::Story;
     }
     if let Some(kind) = args.select_kind {
         app.selected = world.building_of_kind(kind);

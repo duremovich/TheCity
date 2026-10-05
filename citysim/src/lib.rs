@@ -21,6 +21,7 @@ pub mod personality;
 pub mod rng;
 pub mod save;
 pub mod stats;
+pub mod story;
 pub mod systems;
 pub mod time;
 pub mod utility;
