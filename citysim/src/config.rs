@@ -427,6 +427,46 @@ pub struct LawCfg {
     #[serde(default = "default_shift_duty_share")]
     pub shift_duty_share: f32,
     pub posture_flat: PostureFlatCfg,
+    // --- M12 phase 2: the law in districts (docs/M12_DISTRICTS.md § 2, plan D9-D15) ---
+    /// Plan D9-D11: per-district allocation, beats, stances and Vagrancy. `false`
+    /// (older configs, `v1_profile`) keeps the M11 routes and nothing else runs.
+    #[serde(default)]
+    pub district_beats: bool,
+    #[serde(default = "LawCfg::d_alloc_base")]
+    pub alloc_base: f32,
+    #[serde(default = "LawCfg::d_alloc_crime")]
+    pub alloc_crime: f32,
+    #[serde(default = "LawCfg::d_alloc_paid")]
+    pub alloc_paid: f32,
+    #[serde(default = "LawCfg::d_alloc_gang_landlord")]
+    pub alloc_gang_landlord: f32,
+    #[serde(default = "LawCfg::d_alloc_riot")]
+    pub alloc_riot: f32,
+    #[serde(default = "LawCfg::d_gang_landlord_homes")]
+    pub gang_landlord_homes: usize,
+    #[serde(default = "LawCfg::d_max_crackdowns")]
+    pub max_crackdowns: usize,
+    /// Rough sleepers in a district that read as full Sweep pressure.
+    #[serde(default = "LawCfg::d_sweep_full")]
+    pub sweep_full: u32,
+    #[serde(default = "LawCfg::d_private_fill_coverage")]
+    pub private_fill_coverage: f32,
+    #[serde(default = "LawCfg::d_private_fill_weight")]
+    pub private_fill_weight: f32,
+    /// Per rough night at coverage 1.0.
+    #[serde(default = "LawCfg::d_vagrancy_base")]
+    pub vagrancy_base: f32,
+    #[serde(default = "LawCfg::d_sweep_mult")]
+    pub sweep_mult: f32,
+    #[serde(default = "LawCfg::d_curfew_mult")]
+    pub curfew_mult: f32,
+    #[serde(default = "LawCfg::d_vagrancy_fine")]
+    pub vagrancy_fine: i64,
+    /// One night.
+    #[serde(default = "LawCfg::d_vagrancy_sentence_ticks")]
+    pub vagrancy_sentence_ticks: u64,
+    #[serde(default)]
+    pub stance_flat: StanceFlatCfg,
 }
 
 fn default_target_margin() -> usize {
@@ -451,6 +491,66 @@ impl LawCfg {
         let dir = Config::find_assets_dir()
             .unwrap_or_else(|| panic!("assets/config.toml not found; set CITYSIM_ASSETS or run from the repo"));
         Config::load_from(&dir).law
+    }
+
+    fn d_alloc_base() -> f32 {
+        1.0
+    }
+    fn d_alloc_crime() -> f32 {
+        1.0
+    }
+    fn d_alloc_paid() -> f32 {
+        0.5
+    }
+    fn d_alloc_gang_landlord() -> f32 {
+        1.5
+    }
+    fn d_alloc_riot() -> f32 {
+        3.0
+    }
+    fn d_gang_landlord_homes() -> usize {
+        20
+    }
+    fn d_max_crackdowns() -> usize {
+        2
+    }
+    fn d_sweep_full() -> u32 {
+        10
+    }
+    fn d_private_fill_coverage() -> f32 {
+        0.7
+    }
+    fn d_private_fill_weight() -> f32 {
+        0.5
+    }
+    fn d_vagrancy_base() -> f32 {
+        0.04
+    }
+    fn d_sweep_mult() -> f32 {
+        3.0
+    }
+    fn d_curfew_mult() -> f32 {
+        2.0
+    }
+    fn d_vagrancy_fine() -> i64 {
+        3
+    }
+    fn d_vagrancy_sentence_ticks() -> u64 {
+        600
+    }
+}
+
+/// M12 D12: flat terms added to each district stance's product.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StanceFlatCfg {
+    pub patrol: f32,
+    pub crackdown: f32,
+    pub sweep: f32,
+}
+
+impl Default for StanceFlatCfg {
+    fn default() -> Self {
+        StanceFlatCfg { patrol: 0.2, crackdown: 0.0, sweep: 0.0 }
     }
 }
 
@@ -569,11 +669,23 @@ pub struct BindCfg {
     /// The exponent on `1 - lawfulness`; tuned by the parity test's actor shares.
     #[serde(default = "BindCfg::default_lawfulness_power")]
     pub lawfulness_power: f64,
+    /// M12 D3: a candidate in the hole's zone but another district. 1.0 (the
+    /// serde default, `v1_profile`) is the M11 binder: the whole zone weighs 1.
+    #[serde(default = "BindCfg::default_same_zone_weight")]
+    pub same_zone_weight: f64,
+    /// M12 D3: the witness roll reads `District.coverage` and the witness
+    /// pool is the hole's district; `false` is the M11 zone binder.
+    #[serde(default)]
+    pub district_coverage: bool,
 }
 
 impl BindCfg {
     fn default_lawfulness_power() -> f64 {
         2.0
+    }
+
+    fn default_same_zone_weight() -> f64 {
+        1.0
     }
 
     /// The `[bind]` block of `assets/config.toml`, for saves written before it existed.
@@ -1078,6 +1190,10 @@ impl Config {
         self.rent.rehouse_wait_days = 0;
         // M12 D1: the v1 city is one district.
         self.districts = DistrictsCfg::single();
+        // M12 D46: the M11 law and binder.
+        self.law.district_beats = false;
+        self.bind.same_zone_weight = 1.0;
+        self.bind.district_coverage = false;
         self
     }
 

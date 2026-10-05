@@ -141,6 +141,8 @@ pub enum Flow {
     JailFood,
     /// Wage tax a non-city employer owes the Treasury (`economy::collect_wage`).
     Tax,
+    /// M12 D15: a Vagrancy fine, agent -> Treasury (untaxed).
+    Fine,
 }
 
 impl Flow {
@@ -169,7 +171,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Wholesale => row.flow_wholesale += coins,
         Flow::Contract => row.flow_contract += coins,
         Flow::Tax => row.flow_tax += coins,
-        Flow::Found | Flow::Sale | Flow::Bribe | Flow::Subsidy | Flow::SellFood | Flow::JailFood => {
+        Flow::Found | Flow::Sale | Flow::Bribe | Flow::Subsidy | Flow::SellFood | Flow::JailFood | Flow::Fine => {
             row.flow_other += coins
         }
     }

@@ -246,10 +246,14 @@ pub fn note_eviction(world: &mut World, home: EntityId, owner: Option<EntityId>)
     }
 }
 
-/// D6: daily at midnight after `classes`.
+/// D6: daily at midnight after `classes`; at 03:00 the street's nightly
+/// pass (phase 2: Vagrancy, with `[law] district_beats`).
 pub fn run(world: &mut World) {
-    if world.tick_of_day() == 0 {
+    let tod = world.tick_of_day();
+    if tod == 0 {
         daily(world);
+    } else if tod == crate::systems::street::NIGHTLY_TOD && world.config.law.district_beats {
+        crate::systems::street::nightly(world);
     }
 }
 
@@ -278,7 +282,6 @@ pub fn daily(world: &mut World) {
 /// fear, coverage, crime rate, `residents` and the trace.
 pub fn aggregates(world: &mut World) {
     let n = world.districts.len();
-    let now = world.tick;
     let execs = crate::systems::classes::exec_set(world);
     let mut population = vec![0u32; n];
     let mut adults = vec![0u32; n];
@@ -308,18 +311,7 @@ pub fn aggregates(world: &mut World) {
     }
     let coverage: Vec<f32> =
         (0..n).map(|d| crate::systems::bind::district_coverage(world, DistrictId(d as u8))).collect();
-    let fear: Vec<f32> = (0..n)
-        .map(|d| {
-            let homes = &world.districts[d].homes;
-            let base = if homes.is_empty() {
-                0.0
-            } else {
-                homes.iter().map(|&h| crate::systems::classes::home_fear(world, h)).sum::<f32>() / homes.len() as f32
-            };
-            let crush = if world.districts[d].crush_until.is_some_and(|t| t > now) { 0.3 } else { 0.0 };
-            (base + crush).min(1.0)
-        })
-        .collect();
+    let fear = district_fear(world);
     for (i, d) in world.districts.iter_mut().enumerate() {
         d.population = population[i];
         d.adults = adults[i];
@@ -328,7 +320,14 @@ pub fn aggregates(world: &mut World) {
         d.coverage = coverage[i];
         d.fear = fear[i];
         let crimes: u32 = d.crimes.iter().map(|&c| u32::from(c)).sum();
-        d.crime_rate = crimes as f32 / CRIME_DAYS as f32 / population[i].max(1) as f32 * 100.0;
+        // Phase 1's note: a district without Blocks (the Civic, the Vats) has
+        // no residents to divide by (a homeless adult or two at most), so its
+        // rate reads 0; its crimes still count in `crimes`.
+        d.crime_rate = if population[i] == 0 || d.homes.is_empty() {
+            0.0
+        } else {
+            crimes as f32 / CRIME_DAYS as f32 / population[i] as f32 * 100.0
+        };
         d.residents = std::mem::take(&mut residents[i]);
         d.trace = vec![
             ("population", population[i] as f32),
@@ -344,6 +343,27 @@ pub fn aggregates(world: &mut World) {
             ("homes", d.homes.len() as f32),
         ];
     }
+}
+
+/// D7: each district's fear: the mean `classes::home_fear` over its standing
+/// Homes (0 with none), + 0.3 while a Crush holds, capped at 1. A Dreg's fear
+/// (M12 D3, `classes::member`) reads its district's.
+pub fn district_fear(world: &World) -> Vec<f32> {
+    let now = world.tick;
+    world
+        .districts
+        .iter()
+        .map(|d| {
+            let base = if d.homes.is_empty() {
+                0.0
+            } else {
+                d.homes.iter().map(|&h| crate::systems::classes::home_fear(world, h)).sum::<f32>()
+                    / d.homes.len() as f32
+            };
+            let crush = if d.crush_until.is_some_and(|t| t > now) { 0.3 } else { 0.0 };
+            (base + crush).min(1.0)
+        })
+        .collect()
 }
 
 /// D8: presence per faction in `d`, highest first; ties City, then gangs,

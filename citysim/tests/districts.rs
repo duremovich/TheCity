@@ -1,11 +1,14 @@
-//! M12 phase 1: districts, the lookup, aggregates and control
-//! (docs/M12_DISTRICTS.md § 1; plan phase 1 tests, D1-D8).
+//! M12 districts: phase 1 (the lookup, aggregates and control; § 1, D1-D8)
+//! and phase 2 (the law in districts; § 2, D9-D15, D38).
 
 use citysim::config::{ControlWeights, DistrictsCfg};
-use citysim::systems::{classes, districts, gang};
+use citysim::save;
+use citysim::systems::{bind, classes, corp_brain, districts, faction, gang, law, law_brain, lod, street};
+use citysim::util::largest_remainder;
 use citysim::{
-    Brain, Building, BuildingKind, Claim, Config, Controller, DayTrace, DistrictId, EntityId, EventKind, Household,
-    Mood, Position, TilePos, Trace, World, Zone,
+    Brain, Building, BuildingKind, Claim, Config, Controller, Crime, DayTrace, DistrictId, EntityId, EventKind, Gang,
+    Hole, HoleKind, Household, Lod, Mood, Order, Personality, Position, Posture, Sentence, Stance, TilePos, Trace,
+    Wallet, World, Zone, TICKS_PER_DAY,
 };
 
 fn v2_world() -> World {
@@ -14,6 +17,10 @@ fn v2_world() -> World {
 
 /// The v1 city cut into three Mid districts by x (thirds of the 96-wide map).
 fn v1_three() -> World {
+    World::new(7, three_cfg())
+}
+
+fn three_cfg() -> Config {
     let mut c = Config::load().v1_profile();
     c.districts = DistrictsCfg {
         names: vec!["West".into(), "Centre".into(), "East".into()],
@@ -23,7 +30,7 @@ fn v1_three() -> World {
         control_min_share: 0.4,
         control_weights: ControlWeights { held_home: 1.0, owned_home: 1.0, owned_other: 3.0, city_per_coverage: 1.0 },
     };
-    World::new(7, c)
+    c
 }
 
 fn count(w: &World, kind: EventKind) -> usize {
@@ -333,4 +340,550 @@ fn test_daily_trace_and_crime_counter() {
     let row = w.stats.history.back().expect("a day");
     assert_eq!(row.districts.len(), 8);
     assert_eq!(row.districts[3].1, w.districts[3].control.csv_code());
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: the law in districts (docs/M12_DISTRICTS.md § 2, plan D9-D15, D38)
+// ---------------------------------------------------------------------------
+
+/// The three-district v1 city with the district law on.
+fn law_city() -> World {
+    let mut c = three_cfg();
+    c.law.district_beats = true;
+    World::new(7, c)
+}
+
+/// Mark district `d` inhabited with `adults` residents at `crime` per 100.
+fn inhabit(w: &mut World, d: usize, adults: u32, crime: f32) {
+    let x = &mut w.districts[d];
+    x.adults = adults;
+    x.population = adults;
+    x.crime_rate = crime;
+    x.classes = [0, adults, 0];
+}
+
+/// The captain, with the given traits.
+fn captain(w: &mut World, courage: f32, lawfulness: f32) -> EntityId {
+    let c = law_brain::recompute_captain(w).expect("a captain");
+    let p = w.comp_mut::<Personality>(c).expect("personality");
+    p.courage = courage;
+    p.lawfulness = lawfulness;
+    c
+}
+
+/// Adults with a Brain who are not guards or gang members, ascending.
+fn civilians(w: &World) -> Vec<EntityId> {
+    w.citizens()
+        .into_iter()
+        .filter(|&a| w.has::<Brain>(a) && citysim::systems::demography::is_adult(w, a))
+        .filter(|&a| !law::is_guard(w, a) && w.gang_of(a).is_none() && !w.has::<Sentence>(a))
+        .collect()
+}
+
+/// Put an agent out on the street at `tile`, homeless.
+fn sleep_rough(w: &mut World, a: EntityId, tile: TilePos) {
+    w.leave_building(a);
+    w.comp_mut::<Household>(a).expect("household").home = None;
+    let p = w.comp_mut::<Position>(a).expect("position");
+    p.tile = tile;
+    p.building = None;
+}
+
+#[test]
+fn test_largest_remainder_is_exact_and_stable() {
+    assert_eq!(largest_remainder(10, &[1.0, 1.0, 1.0]), vec![4, 3, 3], "ties go to the lower index");
+    assert_eq!(largest_remainder(7, &[1.0, 2.0, 4.0]), vec![1, 2, 4]);
+    assert_eq!(largest_remainder(5, &[0.0, 0.0]), vec![0, 0], "all zero deals nothing");
+    assert_eq!(largest_remainder(0, &[1.0, 3.0]), vec![0, 0]);
+    assert_eq!(largest_remainder(3, &[f32::NAN, -1.0, 2.0]), vec![0, 0, 3], "bad weights count as zero");
+    for n in 0..40u32 {
+        let w = [0.3, 1.7, 0.0, 2.2, 0.9];
+        let out = largest_remainder(n, &w);
+        assert_eq!(out.iter().map(|&x| u32::from(x)).sum::<u32>(), n, "sums to n");
+        assert_eq!(out[2], 0, "a zero weight gets nothing");
+        assert_eq!(out, largest_remainder(n, &w), "stable");
+    }
+}
+
+#[test]
+fn test_allocation_follows_crime_and_lever() {
+    let mut w = law_city();
+    w.config.law.alloc_base = 0.0;
+    inhabit(&mut w, 0, 50, 1.0);
+    inhabit(&mut w, 1, 50, 4.0);
+    // District 2 has Blocks but nobody binned there: not inhabited.
+    let patrol = law_brain::patrol_guards(&w);
+    assert!(patrol.len() >= 3, "patrol guards: {}", patrol.len());
+    law_brain::allocate(&mut w);
+    let g: Vec<u8> = w.districts.iter().map(|d| d.guards).collect();
+    assert_eq!(g.iter().map(|&x| usize::from(x)).sum::<usize>(), patrol.len(), "allocation sums to the roster");
+    assert!(g[1] >= 2 * g[0] && g[1] > 0, "crime 4 vs 1 draws at least 2:1, got {g:?}");
+    assert_eq!(g[2], 0, "an uninhabited district gets nobody");
+    let beats = w.law().expect("law").beats.clone();
+    assert_eq!(beats.keys().copied().collect::<Vec<_>>(), patrol, "every patrol guard has a beat");
+    for (i, &n) in g.iter().enumerate() {
+        assert_eq!(beats.values().filter(|d| d.index() == i).count(), usize::from(n));
+    }
+    // With the base back on, the higher-crime district still gets more.
+    w.config.law.alloc_base = 1.0;
+    law_brain::allocate(&mut w);
+    assert!(
+        w.districts[1].guards > w.districts[0].guards,
+        "{:?}",
+        w.districts.iter().map(|d| d.guards).collect::<Vec<_>>()
+    );
+    // The lever at 0 abandons the district: no guards, stance Withdrawn.
+    captain(&mut w, 0.5, 0.9);
+    w.levers.guard_weight[1] = 0.0;
+    law_brain::allocate(&mut w);
+    law_brain::rescore_stances(&mut w, 0.1, "test");
+    assert_eq!(w.districts[1].guards, 0);
+    assert_eq!(w.districts[1].stance, Stance::Withdrawn);
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Stance && e.text.starts_with("Centre: Patrol -> Withdrawn")));
+    // The beat routes the guard inside its district.
+    let (&g0, &d0) = w.law().expect("law").beats.iter().next().expect("a beat");
+    let route = law::new_patrol_route(&mut w, g0);
+    let homes: Vec<EntityId> = route
+        .iter()
+        .copied()
+        .filter(|&b| w.comp::<Building>(b).is_some_and(|x| x.kind == BuildingKind::Home))
+        .collect();
+    assert!(
+        !homes.is_empty() && homes.iter().all(|&h| w.district_of_building(h) == d0),
+        "the beat's Homes are in its district"
+    );
+}
+
+#[test]
+fn test_gang_landlord_draws_crackdown() {
+    let mut w = law_city();
+    w.config.law.gang_landlord_homes = 5;
+    let gang = w.gang_list()[0];
+    let mut homes: Vec<EntityId> = w.districts[1].homes.iter().take(5).copied().collect();
+    homes.sort();
+    assert_eq!(homes.len(), 5);
+    w.comp_mut::<Gang>(gang).expect("gang").territory = homes;
+    inhabit(&mut w, 1, 50, 1.0);
+    w.districts[1].control = Controller::Gang(gang);
+    w.districts[1].guards = 3;
+    assert!(w.report_places.is_empty(), "no reports at all");
+    assert_eq!(law_brain::gang_landlord(&w, DistrictId(1)), Some(gang));
+    captain(&mut w, 1.0, 1.0);
+    law_brain::rescore_stances(&mut w, 0.1, "test");
+    assert_eq!(w.districts[1].stance, Stance::Crackdown(gang), "trace {:?}", w.districts[1].stance_trace);
+    assert!(law::cracking_down_on(&w, gang), "the city-wide question sees the district Crackdown");
+    let e = w.events.iter().rev().find(|e| e.kind == EventKind::Stance).expect("a Stance event");
+    assert!(e.actors.contains(&gang), "the target gang is an actor");
+    // A gang landlord also lifts the allocation weight.
+    let (_, terms) = law_brain::alloc_weight(&w, DistrictId(1));
+    assert!(terms.iter().any(|&(k, v)| k == "gang landlord" && v > 0.0));
+    // A taken bribe takes the gang off the target list.
+    let now = w.tick;
+    w.comp_mut::<Gang>(gang).expect("gang").paid_until = Some(now + 1000);
+    assert_eq!(law_brain::gang_landlord(&w, DistrictId(1)), None);
+}
+
+#[test]
+fn test_sweep_wins_with_rough_sleepers_and_lawful_captain() {
+    let mut w = law_city();
+    w.config.law.vagrancy_base = 0.0;
+    let at = w.districts[2].centroid;
+    let rough: Vec<EntityId> = civilians(&w).into_iter().take(12).collect();
+    for &a in &rough {
+        sleep_rough(&mut w, a, at);
+    }
+    street::vagrancy(&mut w);
+    assert!(w.districts[2].rough >= 12, "rough {}", w.districts[2].rough);
+    inhabit(&mut w, 2, 50, 1.0);
+    w.districts[2].rough = 12;
+    captain(&mut w, 0.5, 0.9);
+    law_brain::rescore_stances(&mut w, 0.1, "test");
+    assert_eq!(w.districts[2].stance, Stance::Sweep, "trace {:?}", w.districts[2].stance_trace);
+    // The stance triples the sweep.
+    w.config.law.vagrancy_base = 0.04;
+    w.districts[2].coverage = 1.0;
+    let swept = street::vagrancy_p(&w, DistrictId(2));
+    w.districts[2].stance = Stance::Patrol;
+    let patrol = street::vagrancy_p(&w, DistrictId(2));
+    assert!((swept - 3.0 * patrol).abs() < 1e-6 && (patrol - 0.04).abs() < 1e-6, "{swept} vs {patrol}");
+    // A timid captain does not sweep.
+    w.districts[2].stance = Stance::Patrol;
+    captain(&mut w, 0.5, 0.3);
+    law_brain::rescore_stances(&mut w, 0.1, "test");
+    assert_eq!(w.districts[2].stance, Stance::Patrol);
+}
+
+#[test]
+fn test_garrison_zeroes_allocations() {
+    let mut w = law_city();
+    for d in 0..3 {
+        inhabit(&mut w, d, 50, 1.0 + d as f32);
+    }
+    law_brain::allocate(&mut w);
+    assert!(w.districts.iter().any(|d| d.guards > 0));
+    w.districts[0].stance = Stance::Sweep;
+    captain(&mut w, 0.5, 0.9);
+    w.law_mut().expect("law").pinned = Some(Posture::Garrison);
+    law_brain::rescore(&mut w, 0.0, "pinned");
+    assert_eq!(w.law().expect("law").posture, Posture::Garrison);
+    law_brain::allocate(&mut w);
+    assert!(w.districts.iter().all(|d| d.guards == 0));
+    assert!(w.law().expect("law").beats.is_empty());
+    law_brain::rescore_stances(&mut w, 0.1, "daily");
+    assert!(w.districts.iter().all(|d| d.stance == Stance::Patrol));
+}
+
+#[test]
+fn test_max_crackdowns_respected() {
+    let mut w = law_city();
+    let gang = w.gang_list()[0];
+    for d in 0..3 {
+        inhabit(&mut w, d, 50, 1.0);
+        w.districts[d].guards = 3;
+        for _ in 0..20 {
+            w.report_places.push_back((0, gang, DistrictId(d as u8)));
+        }
+    }
+    captain(&mut w, 1.0, 1.0);
+    law_brain::rescore_stances(&mut w, 0.1, "test");
+    let n = w.districts.iter().filter(|d| matches!(d.stance, Stance::Crackdown(_))).count();
+    assert_eq!(n, 2, "max_crackdowns = 2");
+    // The third has the gate shut, not merely a lower score.
+    let shut = w.districts.iter().find(|d| d.stance == Stance::Patrol).expect("one left on Patrol");
+    assert!(shut.stance_trace.iter().all(|s| !matches!(s.stance, Stance::Crackdown(_))));
+    // The holders keep their slots on the next rescoring.
+    let before: Vec<Stance> = w.districts.iter().map(|d| d.stance).collect();
+    law_brain::rescore_stances(&mut w, 0.1, "test");
+    assert_eq!(w.districts.iter().map(|d| d.stance).collect::<Vec<_>>(), before);
+}
+
+#[test]
+fn test_vagrancy_fines_payer_and_jails_broke_vagrant() {
+    let mut w = law_city();
+    w.config.law.vagrancy_base = 1.0;
+    let at = w.districts[0].centroid;
+    let civ = civilians(&w);
+    let (payer, broke, full) = (civ[0], civ[1], civ[2]);
+    // The tier first: a change of tier may move an agent.
+    lod::set_lod(&mut w, payer, Lod::Statistical);
+    lod::set_lod(&mut w, broke, Lod::Statistical);
+    lod::set_lod(&mut w, full, Lod::Full);
+    for a in [payer, broke, full] {
+        sleep_rough(&mut w, a, at);
+    }
+    w.comp_mut::<Wallet>(payer).expect("wallet").coins = 10;
+    w.comp_mut::<Wallet>(broke).expect("wallet").coins = 0;
+    w.comp_mut::<Wallet>(full).expect("wallet").coins = 0;
+    w.districts[0].coverage = 1.0;
+    let treasury = w.treasury().expect("treasury").coins;
+    let now = w.tick;
+    street::vagrancy(&mut w);
+    assert_eq!(w.comp::<Wallet>(payer).expect("wallet").coins, 7, "the payer pays the fine");
+    let fines: i64 = w
+        .events
+        .iter()
+        .filter(|e| e.kind == EventKind::Vagrancy && e.text.contains("fined"))
+        .map(|e| if e.actors.contains(&payer) { 3 } else { 0 })
+        .sum();
+    assert_eq!(fines, 3);
+    assert!(w.treasury().expect("treasury").coins >= treasury + 3, "the fine goes to the Treasury, untaxed");
+    let s = w.comp::<Sentence>(broke).expect("the broke Statistical vagrant is jailed");
+    assert_eq!(s.crime, Crime::Vagrancy);
+    assert_eq!(s.until_tick - now, 600, "one night");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Vagrancy && e.text.contains("jailed for the night")));
+    assert!(
+        w.crime_reports().iter().any(|r| r.suspect == full && r.crime == Crime::Vagrancy && !r.resolved),
+        "a Full vagrant is reported for the arrest path"
+    );
+    assert!(!w.has::<Sentence>(full));
+    // Escorted to the Precinct in another district, the sentence still counts where they slept.
+    let logged = w.districts[0].vagrancy_log.len();
+    let far = w.districts[2].centroid;
+    w.comp_mut::<Position>(full).expect("position").tile = far;
+    let guard = law_brain::guards(&w)[0];
+    law::jail_suspect(&mut w, guard, full);
+    assert_eq!(w.comp::<Sentence>(full).map(|s| s.crime), Some(Crime::Vagrancy));
+    assert_eq!(w.districts[0].vagrancy_log.len(), logged + 1, "logged where swept");
+    assert!(w.stats.current.vagrancy >= 2);
+    assert!(w.districts[0].vagrancy_log.len() >= 3);
+    // A night in the cells is the least crime: it never sets a sentence over a real one,
+    // and it is no convict for a BreakOut.
+    assert!(Crime::Vagrancy < Crime::Theft);
+    // A full Precinct is never emptied for a vagrant: they are moved on.
+    let other = civ[3];
+    lod::set_lod(&mut w, other, Lod::Statistical);
+    sleep_rough(&mut w, other, at);
+    w.comp_mut::<Wallet>(other).expect("wallet").coins = 0;
+    w.config.buildings.jail.capacity = w.sentenced().len() as u8;
+    street::vagrancy(&mut w);
+    assert!(!w.has::<Sentence>(other), "no cell is freed for a vagrant");
+}
+
+#[test]
+fn test_raid_gated_by_crackdown_on_raider() {
+    let cfg = Config::load().gangs;
+    let base = faction::OrderInputs {
+        frontier: 0,
+        frontier_total: 10,
+        rival_territory: 0,
+        own: 10,
+        rival: 5,
+        heat: 0.0,
+        prize: 400,
+        grudge: true,
+        greed: 0.5,
+        courage: 0.8,
+        pride: 0.8,
+        raid_ready: true,
+        rival_exists: true,
+        sacked: false,
+        jailed: 3,
+        boss_jailed: true,
+        breakout_ready: true,
+        garrison: false,
+        loyalty: 0.8,
+        hoard: 0.0,
+        hoard_corp: None,
+        hoard_tilt: 0.0,
+        target_cover: 0.3,
+        jail_cover: 0.3,
+    };
+    let has = |i: &faction::OrderInputs, o: Order| faction::score_orders(i, &cfg).iter().any(|s| s.order == o);
+    for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {
+        assert!(has(&base, o), "{o:?} scores under partial cover");
+    }
+    let covered = faction::OrderInputs { target_cover: 1.0, jail_cover: 1.0, ..base.clone() };
+    for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {
+        assert!(!has(&covered, o), "{o:?} is gated under full cover");
+    }
+    // The cover term lowers the score below full cover.
+    let open = faction::OrderInputs { target_cover: 0.0, jail_cover: 0.0, ..base.clone() };
+    let score = |i: &faction::OrderInputs| {
+        faction::score_orders(i, &cfg).iter().find(|s| s.order == Order::Raid).map(|s| s.score).expect("Raid")
+    };
+    assert!(score(&open) > score(&base));
+}
+
+#[test]
+fn test_breakout_not_gated_by_civic_coverage() {
+    let mut w = v2_world();
+    assert!(w.config.law.district_beats, "the assets turn the district law on");
+    districts::daily(&mut w);
+    let gang = w.gang_list()[0];
+    let cover = faction::target_cover(&w, gang, Order::BreakOut);
+    assert!(cover < 1.0 && (cover - 1.0 / 3.0).abs() < 1e-5, "the Civic reads coverage 1.0: {cover}");
+    // Garrison shuts it.
+    w.law_mut().expect("law").posture = Posture::Garrison;
+    assert_eq!(faction::target_cover(&w, gang, Order::BreakOut), 1.0);
+    w.law_mut().expect("law").posture = Posture::Patrol;
+    // A Crackdown on the raider (or a Cordon) where the rival's Hideout stands shuts the raids.
+    let rival = w.rival_of(gang).expect("a rival");
+    let hq = w.hideout_of(rival).expect("a Hideout");
+    let d = w.district_of_building(hq);
+    assert!(faction::target_cover(&w, gang, Order::Raid) < 1.0);
+    w.district_mut(d).stance = Stance::Crackdown(gang);
+    assert_eq!(faction::target_cover(&w, gang, Order::Raid), 1.0);
+    assert!(faction::target_cover(&w, rival, Order::Raid) < 1.0, "only against the raider");
+    w.district_mut(d).stance = Stance::Cordon;
+    assert_eq!(faction::target_cover(&w, gang, Order::Raid), 1.0);
+    // Off with the district law: the M11 brain.
+    w.config.law.district_beats = false;
+    assert_eq!(faction::target_cover(&w, gang, Order::Raid), 0.0);
+}
+
+#[test]
+fn test_report_carries_its_district() {
+    let mut w = v2_world();
+    let gang = w.gang_list()[0];
+    let m = civilians(&w)[0];
+    gang::enlist(&mut w, m, gang);
+    assert_eq!(w.gang_of(m), Some(gang));
+    let tile = w.comp::<Position>(m).expect("position").tile;
+    let d = w.district_of(tile);
+    let before = w.report_places.len();
+    law::file_report(&mut w, Crime::Theft, m, None);
+    assert_eq!(w.report_places.len(), before + 1);
+    assert_eq!(*w.report_places.back().expect("a place"), (w.tick, gang, d));
+    assert_eq!(law_brain::top_gang(&w, d).map(|(g, _)| g), Some(gang));
+}
+
+#[test]
+fn test_binder_draws_from_district() {
+    let mut w = v2_world();
+    assert_eq!(w.config.bind.same_zone_weight, 0.5);
+    let civ = civilians(&w);
+    let victim = civ[0];
+    let picks: Vec<EntityId> = civ[1..]
+        .iter()
+        .copied()
+        .filter(|&a| Some(a) != w.spouse_of(victim) && !w.enemies.get(&victim).is_some_and(|s| s.contains(&a)))
+        .take(3)
+        .collect();
+    let rows = [(DistrictId(5), Zone::Sump), (DistrictId(6), Zone::Sump), (DistrictId(3), Zone::Mid)];
+    for (&a, &(district, zone)) in picks.iter().zip(&rows) {
+        let t = DayTrace { zone, district, flags: citysim::trace_flags::ALIVE, hunger: 0, mood: 0 };
+        w.insert(a, Trace::default());
+        w.comp_mut::<Trace>(a).expect("trace").push(0, t, 7);
+    }
+    let hole = Hole {
+        id: 99,
+        kind: HoleKind::Robbed,
+        victim,
+        zone: Zone::Sump,
+        district: DistrictId(5),
+        tick: 10,
+        event_id: 0,
+        consequential: false,
+        spouse: w.spouse_of(victim),
+        loot: 0,
+        home: None,
+        gang: None,
+    };
+    let cands = bind::candidates(&w, &hole);
+    let weight = |a: EntityId| cands.iter().find(|&&(c, _)| c == a).map(|&(_, x)| x).expect("a candidate");
+    let (same, zone, other) = (weight(picks[0]), weight(picks[1]), weight(picks[2]));
+    assert!((zone / same - 0.5).abs() < 1e-9, "same zone, other district: x0.5");
+    assert!((other / same - 0.25).abs() < 1e-9, "another zone: x0.25");
+}
+
+#[test]
+fn test_coverage_per_district() {
+    let mut w = v2_world();
+    // Guard-hours in proportion to Homes read 1.0 everywhere with Homes.
+    let homes: Vec<u32> = w.districts.iter().map(|d| d.homes.len() as u32).collect();
+    for (i, &h) in homes.iter().enumerate() {
+        w.district_watch.yesterday[i] = 10 * h;
+    }
+    for (i, d) in w.districts.iter().enumerate() {
+        let c = bind::district_coverage(&w, DistrictId(i as u8));
+        if d.homes.is_empty() {
+            assert_eq!(c, w.config.bind.coverage_max, "{} has no Homes", d.name);
+        } else {
+            assert!((c - 1.0).abs() < 1e-5, "{}: {c}", d.name);
+        }
+    }
+    // Every hour in Sump West: it reads the max, the rest the floor.
+    w.district_watch.yesterday = [0; 12];
+    w.district_watch.yesterday[5] = 1000;
+    assert_eq!(bind::district_coverage(&w, DistrictId(5)), w.config.bind.coverage_max);
+    assert_eq!(bind::district_coverage(&w, DistrictId(6)), w.config.bind.coverage_min);
+    // The M11 zone coverage is the district watch summed by zone: the Sump's
+    // 1000 hours over its 200 Homes against 1000 over 400.
+    let z = bind::zone_law_coverage(&w, Zone::Sump);
+    let expect = (1000.0 / 200.0) / (1000.0 / 400.0);
+    assert!((z - f32::min(expect, w.config.bind.coverage_max)).abs() < 1e-5, "{z}");
+    // The binder's witness roll reads the cached District.coverage.
+    districts::daily(&mut w);
+    assert_eq!(w.districts[5].coverage, w.config.bind.coverage_max);
+}
+
+#[test]
+fn test_private_guard_fills_thin_district() {
+    let mut w = v2_world();
+    districts::daily(&mut w);
+    // A corp with an unsecured building in an inhabited district.
+    let (corp, b) = w
+        .corps()
+        .into_iter()
+        .find_map(|c| {
+            let bs = w.comp::<citysim::Corp>(c)?.buildings.clone();
+            bs.into_iter()
+                .find(|&b| {
+                    w.comp::<Building>(b).is_some_and(|x| x.secured_by.is_none())
+                        && !w.district(w.district_of_building(b)).homes.is_empty()
+                })
+                .map(|b| (c, b))
+        })
+        .expect("a corp building in an inhabited district");
+    for d in &mut w.districts {
+        d.coverage = 2.0;
+    }
+    assert_eq!(corp_brain::at_risk_share(&w, corp), 0.0, "well covered: nothing at risk");
+    let d = w.district_of_building(b);
+    w.district_mut(d).coverage = 0.5;
+    let share = corp_brain::at_risk_share(&w, corp);
+    assert!(share > 0.0);
+    let i = corp_brain::gather_inputs(&w, corp).expect("inputs");
+    assert!(i.losses >= share * w.config.law.private_fill_weight - 1e-6, "losses {} share {share}", i.losses);
+    // Secure contracts the thinly covered building even without a loss.
+    w.comp_mut::<citysim::Corp>(corp).expect("corp").order = citysim::CorpOrder::Secure;
+    corp_brain::act(&mut w, corp);
+    let thin: Vec<EntityId> = w
+        .comp::<citysim::Corp>(corp)
+        .expect("corp")
+        .buildings
+        .iter()
+        .copied()
+        .filter(|&x| corp_brain::thinly_covered(&w, x))
+        .collect();
+    assert!(
+        thin.iter().any(|&x| w.comp::<Building>(x).is_some_and(|bd| bd.secured_by.is_some())),
+        "a private guard contract where the law is thin"
+    );
+}
+
+#[test]
+fn test_district_beats_run_daily_and_survive_a_save() {
+    let mut w = World::new(19, Config::load().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY + 10);
+    assert!(!w.law().expect("law").beats.is_empty(), "the first midnight deals the beats");
+    let alloc: u32 = w.districts.iter().map(|d| u32::from(d.guards)).sum();
+    assert_eq!(alloc as usize, w.law().expect("law").beats.len());
+    assert!(w.districts.iter().all(|d| !d.alloc_trace.is_empty()));
+    // A pre-M12 save (no beats, no report places) loads and deals at the next midnight.
+    let text = save::to_ron(&w);
+    let text = text.replacen("beats:{", "beats_gone:{", 1);
+    let stripped = {
+        let start = text.find("beats_gone:{").expect("beats in the save");
+        let mut depth = 0usize;
+        let mut end = start;
+        for (i, ch) in text[start..].char_indices() {
+            match ch {
+                '{' => depth += 1,
+                '}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = start + i + 1;
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
+        let end = if text[end..].starts_with(',') { end + 1 } else { end };
+        format!("{}{}", &text[..start], &text[end..])
+    };
+    let mut back = save::from_ron(&stripped).expect("a save without beats loads");
+    assert!(back.law().expect("law").beats.is_empty());
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(!back.law().expect("law").beats.is_empty());
+    // A current save round-trips its beats.
+    let text = save::to_ron(&w);
+    assert_eq!(save::to_ron(&save::from_ron(&text).expect("loads")), text);
+}
+
+#[test]
+fn test_full_precinct_frees_the_vagrant_first() {
+    let mut w = law_city();
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("a Precinct");
+    let civ = civilians(&w);
+    let (vagrant, thief, assailant) = (civ[0], civ[1], civ[2]);
+    let now = w.tick;
+    law::sentence(&mut w, vagrant, Crime::Vagrancy, now + 600, jail);
+    law::sentence(&mut w, thief, Crime::Theft, now + 3 * TICKS_PER_DAY, jail);
+    w.config.buildings.jail.capacity = w.sentenced().len() as u8;
+    law::file_report(&mut w, Crime::Assault, assailant, None);
+    let guard = law_brain::guards(&w)[0];
+    law::jail_suspect(&mut w, guard, assailant);
+    assert!(w.has::<Sentence>(assailant), "the assailant is jailed");
+    assert!(!w.has::<Sentence>(vagrant), "the vagrant makes room");
+    assert!(w.has::<Sentence>(thief), "the thief stays");
+    // A vagrant brought to a full Precinct is fined or let go, never jailed over a convict.
+    let late = civ[3];
+    law::file_report(&mut w, Crime::Vagrancy, late, None);
+    w.comp_mut::<Wallet>(late).expect("wallet").coins = 0;
+    w.config.buildings.jail.capacity = w.sentenced().len() as u8;
+    law::jail_suspect(&mut w, guard, late);
+    assert!(!w.has::<Sentence>(late));
+    assert!(w.has::<Sentence>(thief) && w.has::<Sentence>(assailant));
 }

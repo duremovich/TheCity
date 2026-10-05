@@ -712,6 +712,8 @@ fn test_hoard_tilts_contest() {
         hoard: 0.0,
         hoard_corp: None,
         hoard_tilt: 0.1,
+        target_cover: 0.0,
+        jail_cover: 0.0,
     };
     let contest = |i: &faction::OrderInputs| {
         faction::score_orders(i, &w.config.gangs)

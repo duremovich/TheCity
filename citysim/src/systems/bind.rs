@@ -97,7 +97,9 @@ impl DayPools {
 /// alive and free that day per their trace, an adult with a Personality now,
 /// not the victim or the victim's spouse. Weight exactly
 /// `(1 − l)^lawfulness_power × (1 + gang_claim_mult·g·c) × (1 + enemy_mult·e) × (1 + statistical_mult·s)`,
-/// times `other_zone_weight` off the victim's zone.
+/// times (M12 D3) 1 in the hole's district, `same_zone_weight` elsewhere in
+/// its zone, `other_zone_weight` off the zone. A trace or hole from before
+/// M12 with no district reads its zone only (`same_zone_weight` 1.0 is M11).
 pub fn candidates(world: &World, hole: &Hole) -> Vec<(EntityId, f64)> {
     DayPools::default().with_day(world, time::day(hole.tick), |pool| candidates_in(world, hole, pool))
 }
@@ -130,6 +132,8 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
             * (1.0 + cfg.statistical_mult * f64::from(u8::from(s)));
         if t.zone != hole.zone {
             w *= cfg.other_zone_weight;
+        } else if t.district != hole.district || hole.district.is_unset() {
+            w *= cfg.same_zone_weight;
         }
         if w > 0.0 {
             out.push((id, w));
@@ -141,10 +145,15 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
 /// Guard presence in a zone yesterday, normalised by Homes (M10 D33):
 /// `(hours_z / homes_z) / (hours_all / homes_all)` clamped to
 /// `coverage_min..=coverage_max`; a zone without Homes reads the max, no
-/// guard hours anywhere reads 1.
+/// guard hours anywhere reads 1. M12 D3: the hours are the district watch
+/// summed over the zone's districts (`zone_watch` is no longer written), so
+/// the M11 binder (`[bind] district_coverage = false`) reads the same number.
 pub fn zone_law_coverage(world: &World, zone: Zone) -> f32 {
     let cfg = &world.config.bind;
-    let hours = world.zone_watch.yesterday;
+    let mut hours = [0u32; 5];
+    for (d, &h) in world.districts.iter().zip(world.district_watch.yesterday.iter()) {
+        hours[d.zone.index()] += h;
+    }
     let hours_all: u32 = hours.iter().sum();
     if hours_all == 0 {
         return 1.0;
@@ -224,13 +233,18 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         }
     }
     // 4. The witness roll is always drawn (the spec's "bound witness decision").
-    let p = cfg.p_witness * zone_law_coverage(world, hole.zone);
+    // M12 D3: the district's cached coverage; the pool is the district's.
+    let by_district = cfg.district_coverage && !hole.district.is_unset();
+    let coverage =
+        if by_district { world.district(hole.district).coverage } else { zone_law_coverage(world, hole.zone) };
+    let p = cfg.p_witness * coverage;
     let witnessed = rng.random::<f32>() < p;
     let mut witness = None;
     if let (true, Bound::Actor(actor)) = (witnessed, bound) {
         let pool: Vec<EntityId> = pools.with_day(world, day, |pool| {
             pool.iter()
-                .filter(|&&(w, t)| w != actor && w != hole.victim && t.has(trace_flags::ALIVE) && t.zone == hole.zone)
+                .filter(|&&(w, t)| w != actor && w != hole.victim && t.has(trace_flags::ALIVE))
+                .filter(|&&(_, t)| if by_district { t.district == hole.district } else { t.zone == hole.zone })
                 .map(|&(w, _)| w)
                 .filter(|&w| crate::systems::law::living(world, w) && crate::systems::demography::is_adult(world, w))
                 .collect()

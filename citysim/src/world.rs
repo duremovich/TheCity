@@ -415,6 +415,11 @@ pub struct World {
     /// M12 D29: `(tick, district, owner)` per evicted adult, 30-day window.
     #[serde(default)]
     pub eviction_places: VecDeque<(Tick, crate::components::DistrictId, Option<EntityId>)>,
+    /// M12 D15: where each reported Full or Coarse vagrant was swept, so the
+    /// sentence counts there and not at the Precinct the escort ends in;
+    /// taken by `law::sentence`, dropped with the agent.
+    #[serde(default)]
+    pub vagrancy_places: BTreeMap<EntityId, crate::components::DistrictId>,
     /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
     /// rebuilt on load.
     #[serde(skip)]
@@ -659,6 +664,7 @@ impl World {
             district_watch: Default::default(),
             report_places: VecDeque::new(),
             eviction_places: VecDeque::new(),
+            vagrancy_places: BTreeMap::new(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
@@ -1788,6 +1794,7 @@ impl World {
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.last_seen.remove(&id);
+        self.vagrancy_places.remove(&id);
         crate::systems::bind::drop_victim_holes(self, id);
         self.drop_reports_of(id);
         for id2 in self.citizens() {

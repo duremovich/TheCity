@@ -368,6 +368,23 @@ fn law_section(ui: &mut Ui, app: &mut App, world: &World) {
             }
         }
     });
+    if !law.beats.is_empty() {
+        // M12 D10: the patrol guards dealt to each district today.
+        section(ui, "Beats", |ui| {
+            egui::Grid::new("jail-beats").striped(true).show(ui, |ui| {
+                for d in &world.districts {
+                    let n = law.beats.values().filter(|&&b| b == d.id).count();
+                    if n == 0 {
+                        continue;
+                    }
+                    ui.label(&d.name);
+                    ui.label(format!("{n}"));
+                    ui.label(citysim::systems::law_brain::stance_label(world, d.stance));
+                    ui.end_row();
+                }
+            });
+        });
+    }
     section(ui, "Posture trace", |ui| {
         if law.posture_trace.is_empty() {
             ui.label("no rescoring yet");
@@ -540,7 +557,7 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
         if let Some(t) = gang.retaliate_until.filter(|&t| t > now) {
             ui.label(format!("retaliating for {:.1} more days", days(t - now)));
         }
-        if world.law().is_some_and(|l| l.cracking_down_on(gid)) {
+        if citysim::systems::law::cracking_down_on(world, gid) {
             ui.colored_label(RED, "Under crackdown");
             match citysim::systems::faction::bribe_score(world, gid) {
                 Some(cs) => {

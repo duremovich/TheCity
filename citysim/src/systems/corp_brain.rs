@@ -297,7 +297,9 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
     Some(CorpInputs {
         cash: cash_of(c),
         flow: (mean_flow / bill as f32).clamp(-1.0, 1.0),
-        losses: (lost as f32 / closed_treasury(c).max(1) as f32).clamp(0.0, 1.0),
+        losses: (lost as f32 / closed_treasury(c).max(1) as f32)
+            .clamp(0.0, 1.0)
+            .max(at_risk_share(world, corp) * world.config.law.private_fill_weight),
         unrest: street_unrest(world),
         greed: p.map_or(0.5, |p| p.greed),
         courage: p.map_or(0.5, |p| p.courage),
@@ -308,6 +310,30 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         culprit: culprit(world, c),
         niches,
     })
+}
+
+/// M12 D14: a building is at risk where the law is thin: its district's
+/// coverage is below `[law] private_fill_coverage` (only with `[law]
+/// district_beats`; a district without Homes reads `coverage_max`).
+pub fn thinly_covered(world: &World, b: EntityId) -> bool {
+    world.config.law.district_beats
+        && world.district(world.district_of_building(b)).coverage < world.config.law.private_fill_coverage
+}
+
+/// M12 D14: the share of the corp's standing buildings at risk (0 with
+/// district beats off), the Secure input `losses` floors at it times
+/// `private_fill_weight`.
+pub fn at_risk_share(world: &World, corp: EntityId) -> f32 {
+    if !world.config.law.district_beats {
+        return 0.0;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return 0.0 };
+    let standing: Vec<EntityId> =
+        c.buildings.iter().copied().filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished)).collect();
+    if standing.is_empty() {
+        return 0.0;
+    }
+    standing.iter().filter(|&&b| thinly_covered(world, b)).count() as f32 / standing.len() as f32
 }
 
 /// Product of the outputs plus a flat term; `None` when a gate is shut.
@@ -731,6 +757,23 @@ fn secure(world: &mut World, corp: EntityId) {
         if targets.len() >= per_day {
             break;
         }
+    }
+    // M12 D14: then the unsecured buildings where the law is thinnest
+    // (lowest district coverage first, ties the lower id).
+    if targets.len() < per_day && world.config.law.district_beats {
+        let mut thin: Vec<(f32, EntityId)> = c
+            .buildings
+            .iter()
+            .copied()
+            .filter(|b| !targets.contains(b))
+            .filter(|&b| {
+                world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && bd.secured_by.is_none())
+                    && thinly_covered(world, b)
+            })
+            .map(|b| (world.district(world.district_of_building(b)).coverage, b))
+            .collect();
+        thin.sort_by(|a, b| a.0.total_cmp(&b.0).then(a.1.cmp(&b.1)));
+        targets.extend(thin.into_iter().take(per_day - targets.len()).map(|(_, b)| b));
     }
     let own_security = c.niches.contains(&Niche::Security);
     for b in targets {

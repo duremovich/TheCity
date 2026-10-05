@@ -269,6 +269,31 @@ pursuit_radius = 64
 # Owing the day only to a PatrolLeg at the end or an arrest left 412 of 584 shifts unpaid; owing it
 # for the goal held at the last tick still left most shifts spent 60-100 % on duty unpaid.
 shift_duty_share = 0.5
+# M12 phase 2 (docs/M12_DISTRICTS.md § 2, plan D9-D15): the captain deals the patrol guards (those not
+# on Jail duty) to districts daily by weight, scores a stance per inhabited district, and a nightly
+# 03:00 pass sweeps rough sleepers for Vagrancy. district_beats = false (older configs, v1_profile)
+# keeps the M11 routes with none of it.
+district_beats = true
+alloc_base = 1.0
+alloc_crime = 1.0
+alloc_paid = 0.5
+alloc_gang_landlord = 1.5
+alloc_riot = 3.0
+gang_landlord_homes = 20
+max_crackdowns = 2
+sweep_full = 10                    # rough sleepers that read as full Sweep pressure
+private_fill_coverage = 0.7
+private_fill_weight = 0.5
+vagrancy_base = 0.04               # per rough night at coverage 1.0
+sweep_mult = 3.0
+curfew_mult = 2.0
+vagrancy_fine = 3
+vagrancy_sentence_ticks = 600      # one night
+
+[law.stance_flat]
+patrol = 0.2
+crackdown = 0.0
+sweep = 0.0
 
 # Patrol's 0.2 keeps it the resting posture; Crackdown earns its place from pressure alone (+0.3
 # while a refused bribe hardens it); Garrison's 0.05 (+0.5 for a week after a jailbreak).
@@ -346,6 +371,11 @@ gang_claim_mult = 2.0
 enemy_mult = 1.0
 statistical_mult = 0.5
 other_zone_weight = 0.25
+# M12 D3: a candidate in the hole's zone but another district weighs this (the hole's own district 1,
+# another zone other_zone_weight); district_coverage: the witness roll reads the district's coverage
+# and the witness pool is the hole's district.
+same_zone_weight = 0.5
+district_coverage = true
 # M10 phase 5c: 0.0 (spec default 2.0; serde default 2.0 for older saves). See enemy_mult: in Full,
 # lawfulness does not predict who robs or beats someone, so the binder does not weigh it either.
 lawfulness_power = 0.0

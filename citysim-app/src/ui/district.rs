@@ -1,6 +1,8 @@
-//! M12 District panel (right, read-only in phase 1): name and zone,
-//! population and class mix, happiness, coverage, fear, crime rate, the
-//! controller with its share and top three presences, and the daily trace.
+//! M12 District panel (right, read-only): name and zone, population and
+//! class mix, happiness, coverage, fear, crime rate, the controller with its
+//! share and top three presences, the daily trace and (phase 2) the law:
+//! guards allocated and the weight's terms, the stance and its trace, rough
+//! sleepers and Vagrancy in 14 days.
 
 use egui_macroquad::egui::{self, Color32, RichText, Ui};
 
@@ -63,6 +65,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
         ui.end_row();
     });
     ui.separator();
+    law(ui, world, d);
+    ui.separator();
     ui.strong("Presence");
     let pres = citysim::systems::districts::presence(world, d);
     let total: f32 = pres.iter().map(|&(_, v)| v).sum();
@@ -81,6 +85,72 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
             ui.label(name);
             ui.label(format!("{v:.3}"));
             ui.end_row();
+        }
+    });
+}
+
+/// M12 phase 2: the district's law.
+fn law(ui: &mut Ui, world: &World, d: DistrictId) {
+    let dist = world.district(d);
+    ui.strong("The law");
+    let now = world.tick;
+    let fortnight = 14 * citysim::TICKS_PER_DAY;
+    let vagrancy = dist.vagrancy_log.iter().filter(|&&t| now.saturating_sub(t) < fortnight).count();
+    egui::Grid::new("district_law").striped(true).show(ui, |ui| {
+        ui.label("Guards allocated");
+        ui.label(format!("{}", dist.guards));
+        ui.end_row();
+        ui.label("Stance");
+        ui.label(format!(
+            "{} since day {}",
+            citysim::systems::law_brain::stance_label(world, dist.stance),
+            citysim::time::day(dist.stance_since)
+        ));
+        ui.end_row();
+        ui.label("Rough sleepers");
+        ui.label(format!("{} last night", dist.rough));
+        ui.end_row();
+        ui.label("Vagrancy (14 d)");
+        ui.label(format!("{vagrancy} fined or jailed"));
+        ui.end_row();
+        if let Some((g, n)) = citysim::systems::law_brain::top_gang(world, d) {
+            ui.label("Most reported");
+            ui.label(format!(
+                "{} ({n} reports)",
+                world.comp::<citysim::Gang>(g).map_or_else(|| world.name_of(g), |x| x.name.clone())
+            ));
+            ui.end_row();
+        }
+    });
+    egui::CollapsingHeader::new("Allocation weight").default_open(false).show(ui, |ui| {
+        egui::Grid::new("district_alloc").striped(true).show(ui, |ui| {
+            for &(name, v) in &dist.alloc_trace {
+                ui.label(name);
+                ui.label(format!("{v:.3}"));
+                ui.end_row();
+            }
+        });
+    });
+    egui::CollapsingHeader::new("Stance trace").default_open(false).show(ui, |ui| {
+        if dist.stance_trace.is_empty() {
+            ui.label("not scored (uninhabited, pinned, Garrison or no captain)");
+        }
+        for (k, s) in dist.stance_trace.iter().take(3).enumerate() {
+            let label = citysim::systems::law_brain::stance_label(world, s.stance);
+            egui::CollapsingHeader::new(format!("{label}  {:.3}", s.score)).id_salt(("stance", d.0, k)).show(
+                ui,
+                |ui| {
+                    egui::Grid::new(("stance_cs", d.0, k)).striped(true).show(ui, |ui| {
+                        for c in &s.considerations {
+                            ui.label(c.name.as_ref());
+                            ui.label(format!("{:.3}", c.input));
+                            ui.label("->");
+                            ui.label(format!("{:.3}", c.output));
+                            ui.end_row();
+                        }
+                    });
+                },
+            );
         }
     });
 }

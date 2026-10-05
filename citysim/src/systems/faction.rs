@@ -55,6 +55,44 @@ pub struct OrderInputs {
     pub hoard: f32,
     pub hoard_corp: Option<EntityId>,
     pub hoard_tilt: f32,
+    /// M12 D38: how covered the rival Hideout's district is (Raid,
+    /// Retaliate): 1 under a `Crackdown(self)` or `Cordon` stance there,
+    /// else `(coverage − 0.5) ÷ 1.5` clamped to 0..0.95. 0 with `[law]
+    /// district_beats` off (the M11 brain).
+    pub target_cover: f32,
+    /// M12 D38: the same for the Jail's district (BreakOut); 1 under
+    /// Garrison. Plan deviation: one field per target, since BreakOut and
+    /// the raids aim at different districts.
+    pub jail_cover: f32,
+}
+
+/// M12 D38: the cover over `gang`'s target under `order` (the Jail for
+/// BreakOut, the rival Hideout otherwise): 1 when the target is the Jail
+/// under Garrison, or its district's stance is `Crackdown(gang)` or
+/// `Cordon`; else `((cov − 0.5) ÷ 1.5).clamp(0, 0.95)`, with a district
+/// without Homes (the Civic) reading coverage 1.0, so coverage alone never
+/// shuts the gate. 0 with `[law] district_beats` off or no target.
+pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
+    use crate::components::Stance;
+    if !world.config.law.district_beats {
+        return 0.0;
+    }
+    let jail = order.target_is_jail();
+    let target = if jail {
+        world.building_of_kind(BuildingKind::Jail)
+    } else {
+        world.rival_of(gang).and_then(|r| world.hideout_of(r))
+    };
+    let Some(target) = target else { return 0.0 };
+    if jail && crate::systems::law::garrisoned(world) {
+        return 1.0;
+    }
+    let d = world.district(world.district_of_building(target));
+    if d.stance == Stance::Crackdown(gang) || d.stance == Stance::Cordon {
+        return 1.0;
+    }
+    let cov = if d.homes.is_empty() { 1.0 } else { d.coverage };
+    ((cov - 0.5) / 1.5).clamp(0.0, 0.95)
 }
 
 /// D33: `(clamp((richest corp treasury − hoard_heat) ÷ hoard_heat, 0, 1), that
@@ -140,6 +178,8 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("prize", prize_x, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("1-heat", calm, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("open target", can(i.target_cover < 1.0), GATE),
+                Consideration::new("target cover", 1.0 - i.target_cover, Curve::Linear { m: 0.8, b: 0.2 }),
             ],
             f.raid,
         ),
@@ -151,6 +191,8 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("grudge", can(i.grudge && i.rival_exists && i.raid_ready), GATE),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.9, b: 0.1 }),
                 Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("open target", can(i.target_cover < 1.0), GATE),
+                Consideration::new("target cover", 1.0 - i.target_cover, Curve::Linear { m: 0.8, b: 0.2 }),
             ],
             f.retaliate,
         ),
@@ -175,6 +217,8 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("courage", i.courage, Curve::Linear { m: 0.8, b: 0.2 }),
                 Consideration::new("loyalty", i.loyalty, Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("1-garrison", can(!i.garrison), Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("open target", can(i.jail_cover < 1.0), GATE),
+                Consideration::new("target cover", 1.0 - i.jail_cover, Curve::Linear { m: 0.8, b: 0.2 }),
             ],
             f.breakout,
         ),
@@ -285,6 +329,8 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         hoard,
         hoard_corp,
         hoard_tilt: world.config.corps.hoard_tilt,
+        target_cover: target_cover(world, gang, Order::Raid),
+        jail_cover: target_cover(world, gang, Order::BreakOut),
     })
 }
 
@@ -360,7 +406,10 @@ pub fn bribe_score(world: &World, gang: EntityId) -> Option<Vec<Consideration>> 
     let law = world.law()?;
     let captain = law.captain.filter(|&c| crate::systems::law::is_guard(world, c))?;
     let now = world.tick;
-    if !law.cracking_down_on(gang) || g.bribe_until.is_some_and(|t| t > now) || g.treasury < bribe_price(world) {
+    if !crate::systems::law::cracking_down_on(world, gang)
+        || g.bribe_until.is_some_and(|t| t > now)
+        || g.treasury < bribe_price(world)
+    {
         return None;
     }
     let leader = g.leader.filter(|&l| !world.has::<Sentence>(l))?;

@@ -12,8 +12,7 @@
 use std::collections::BTreeSet;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Class, ClassAggregate, Corp, CorpShock, Household, Job, Mood, Personality, Position,
-    Sentence,
+    Brain, Class, ClassAggregate, Corp, CorpShock, Household, Job, Mood, Personality, Position, Sentence,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -23,8 +22,6 @@ use crate::world::World;
 
 /// Days of eviction counted in a class's `evictions_7d`.
 const EVICTION_WINDOW_DAYS: u64 = 7;
-/// Zones on the map (`Zone::index`).
-const ZONES: usize = 5;
 
 /// Every corp's exec, for `class_of` in a pass.
 fn execs(world: &World) -> BTreeSet<EntityId> {
@@ -117,32 +114,22 @@ pub fn run(world: &mut World) {
     strike(world);
 }
 
-/// Per zone, the mean fear over its standing Homes (a Dreg's fear).
-fn zone_fear(world: &World) -> [f32; ZONES] {
-    let mut zone_sum = [0.0f32; ZONES];
-    let mut zone_n = [0u32; ZONES];
-    for &h in world.buildings_of_kind(BuildingKind::Home) {
-        let Some(b) = world.comp::<Building>(h).filter(|b| !b.demolished) else { continue };
-        let z = world.map.zone(b.door).index().min(ZONES - 1);
-        zone_sum[z] += home_fear(world, h);
-        zone_n[z] += 1;
-    }
-    std::array::from_fn(|z| if zone_n[z] == 0 { 0.0 } else { zone_sum[z] / zone_n[z] as f32 })
-}
-
 /// One member's aggregate inputs: `(class, mood, employed, fear)`. A housed
-/// agent's fear is its Home's; a Dreg's is the mean over its zone's Homes.
+/// agent's fear is its Home's; a Dreg's (M12 D3) is its district's
+/// (`districts::district_fear`: the mean over the district's Homes).
 pub fn member_inputs(world: &World, agent: EntityId) -> (Class, f32, bool, f32) {
-    member(world, agent, &execs(world), &zone_fear(world))
+    member(world, agent, &execs(world), &crate::systems::districts::district_fear(world))
 }
 
-fn member(world: &World, a: EntityId, execs: &BTreeSet<EntityId>, zones: &[f32; ZONES]) -> (Class, f32, bool, f32) {
+fn member(world: &World, a: EntityId, execs: &BTreeSet<EntityId>, districts: &[f32]) -> (Class, f32, bool, f32) {
     let class = class_with(world, a, execs);
     let mood = world.comp::<Mood>(a).map_or(0.0, |m| m.value);
     let employed = world.has::<Job>(a);
     let fear = match world.comp::<Household>(a).and_then(|h| h.home) {
         Some(h) => home_fear(world, h),
-        None => world.comp::<Position>(a).map_or(0.0, |p| zones[world.map.zone(p.tile).index().min(ZONES - 1)]),
+        None => world
+            .comp::<Position>(a)
+            .map_or(0.0, |p| districts.get(world.district_of(p.tile).index()).copied().unwrap_or(0.0)),
     };
     (class, mood, employed, fear)
 }
@@ -150,14 +137,14 @@ fn member(world: &World, a: EntityId, execs: &BTreeSet<EntityId>, zones: &[f32; 
 /// Recompute `World::classes` from the living adults with a Brain.
 pub fn compute(world: &mut World) {
     let execs = execs(world);
-    let zones = zone_fear(world);
+    let fears = crate::systems::districts::district_fear(world);
     let mut members: [Vec<(f32, bool, f32)>; 3] = Default::default();
     // scan-ok: daily: class aggregates
     for a in world.citizens() {
         if !world.has::<Brain>(a) || !crate::systems::demography::is_adult(world, a) {
             continue;
         }
-        let (class, mood, employed, fear) = member(world, a, &execs, &zones);
+        let (class, mood, employed, fear) = member(world, a, &execs, &fears);
         members[class.index()].push((mood, employed, fear));
     }
     // § 7 puts the eviction term on the Street aggregate (an evictee is a

@@ -271,9 +271,11 @@ pub fn on_member_released(world: &mut World, id: EntityId) {
     recompute_leader(world, gang);
 }
 
-/// Members with a `Sentence`.
+/// Members serving a sentence (a Vagrancy night excluded).
 pub fn jailed_headcount(world: &World, gang: EntityId) -> usize {
-    world.comp::<Gang>(gang).map_or(0, |g| g.members.iter().filter(|&&m| world.has::<Sentence>(m)).count())
+    // M12 D15: a night in the cells for Vagrancy is no reason to storm the Jail.
+    let held = |m: EntityId| world.comp::<Sentence>(m).is_some_and(|s| s.crime != crate::components::Crime::Vagrancy);
+    world.comp::<Gang>(gang).map_or(0, |g| g.members.iter().filter(|&&m| held(m)).count())
 }
 
 /// Members not in the Jail.

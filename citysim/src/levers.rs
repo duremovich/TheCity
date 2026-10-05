@@ -44,6 +44,16 @@ pub enum PlayerCommand {
     SetSpeed(Speed),
     /// M9: pin the law's posture, or (`None`) hand it back to the captain.
     SetLawPosture(Option<Posture>),
+    /// M12 D42: a district's allocation weight multiplier (`0.0..=5.0`; 0 withdraws the law).
+    SetGuardWeight {
+        district: crate::components::DistrictId,
+        weight: f32,
+    },
+    /// M12 D42: pin a district's stance, or (`None`) hand it back to the captain.
+    SetStance {
+        district: crate::components::DistrictId,
+        stance: Option<crate::components::Stance>,
+    },
     // --- God commands (docs/VISION.md "How we test: god scenarios"). They
     // break the world's rules on purpose: money from nowhere, death without a
     // killer, sentences without a crime. Logged and replayed like the rest.
@@ -177,6 +187,20 @@ pub struct Levers {
     /// M11: the city never evicts.
     #[serde(default)]
     pub no_city_evictions: bool,
+    /// M12 D10: a multiplier on each district's allocation weight (1.0; 0
+    /// abandons the district: no guards, stance Withdrawn).
+    #[serde(default = "default_guard_weight")]
+    pub guard_weight: [f32; crate::components::MAX_DISTRICTS],
+    /// M12 D12: the player's stance pin per district; `None` = the captain.
+    #[serde(default)]
+    pub stance_pin: [Option<crate::components::Stance>; crate::components::MAX_DISTRICTS],
+    /// M12 (curfew lands with the levers in phase 5; Vagrancy reads it now).
+    #[serde(default)]
+    pub curfew: [bool; crate::components::MAX_DISTRICTS],
+}
+
+fn default_guard_weight() -> [f32; crate::components::MAX_DISTRICTS] {
+    [1.0; crate::components::MAX_DISTRICTS]
 }
 
 fn rects_overlap(a: Rect, b: Rect) -> bool {
@@ -194,6 +218,9 @@ impl Levers {
             city_rent: cfg.rent.base,
             rent_cap: None,
             no_city_evictions: false,
+            guard_weight: default_guard_weight(),
+            stance_pin: [None; crate::components::MAX_DISTRICTS],
+            curfew: [false; crate::components::MAX_DISTRICTS],
         }
     }
 }
@@ -287,6 +314,41 @@ impl World {
                     None => "Law posture handed back to the captain".to_string(),
                 };
                 self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetGuardWeight { district, weight } => {
+                let i = district.index();
+                if i >= self.districts.len() {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetGuardWeight: no such district");
+                    return;
+                }
+                self.levers.guard_weight[i] = weight.clamp(0.0, 5.0);
+                let text =
+                    format!("Guard weight in {} set to {:.2}", self.district_name(*district), weight.clamp(0.0, 5.0));
+                self.push_event(EventKind::PlayerAction, &[], text);
+                crate::systems::law_brain::redeal(self, "lever");
+            }
+            PlayerCommand::SetStance { district, stance } => {
+                let i = district.index();
+                if i >= self.districts.len() {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetStance: no such district");
+                    return;
+                }
+                if let Some(crate::components::Stance::Crackdown(g)) = stance {
+                    if !self.has::<Gang>(*g) {
+                        self.push_event(EventKind::PlayerActionFailed, &[], "SetStance: no such gang");
+                        return;
+                    }
+                }
+                self.levers.stance_pin[i] = *stance;
+                let name = self.district_name(*district).to_string();
+                let text = match stance {
+                    Some(s) => {
+                        format!("Stance in {name} pinned to {}", crate::systems::law_brain::stance_label(self, *s))
+                    }
+                    None => format!("Stance in {name} handed back to the captain"),
+                };
+                self.push_event(EventKind::PlayerAction, &[], text);
+                crate::systems::law_brain::redeal(self, "pinned");
             }
             PlayerCommand::Arrest(who) => match crate::systems::law::player_arrest(self, *who) {
                 Ok(()) => {

@@ -97,10 +97,14 @@ pub enum EventKind {
     Contract,
     /// M12 districts: a district's controller changed (`[old?, new?]`).
     DistrictControl,
+    /// M12 D12: a district's stance changed (`[jail, target gang?]`).
+    Stance,
+    /// M12 D15: a rough sleeper fined or jailed for the night.
+    Vagrancy,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 55] = [
+    pub const ALL: [EventKind; 57] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -156,6 +160,8 @@ impl EventKind {
         EventKind::Strike,
         EventKind::Contract,
         EventKind::DistrictControl,
+        EventKind::Stance,
+        EventKind::Vagrancy,
     ];
 }
 

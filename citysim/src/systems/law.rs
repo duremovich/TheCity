@@ -56,6 +56,7 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::Extortion => 0.6,
         Crime::Assault => 0.8,
         Crime::Murder => 1.0,
+        Crime::Vagrancy => 0.2,
     }
 }
 
@@ -120,7 +121,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     if let Some(v) = victim {
         let kind = match crime {
             Crime::Assault | Crime::Murder => MemoryKind::Fought,
-            Crime::Theft | Crime::Extortion => MemoryKind::WasRobbed,
+            Crime::Theft | Crime::Extortion | Crime::Vagrancy => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -230,6 +231,10 @@ pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
 
 /// Sentence length in ticks for a crime at the current lever.
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
+    // M12 D15: a night in the cells, whatever the sentence lever.
+    if crime == Crime::Vagrancy {
+        return world.config.law.vagrancy_sentence_ticks.max(1);
+    }
     let base = world.config.crime.sentence_days[crime as usize] as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;
     days * TICKS_PER_DAY
@@ -400,8 +405,12 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 
     if jailed >= capacity {
         match crime {
-            Crime::Theft => {
-                let fine = world.config.crime.fine_mult * world.mean_price();
+            Crime::Theft | Crime::Vagrancy => {
+                let fine = if crime == Crime::Vagrancy {
+                    world.config.law.vagrancy_fine
+                } else {
+                    world.config.crime.fine_mult * world.mean_price()
+                };
                 let coins = world.comp::<crate::components::Wallet>(suspect).map_or(0, |w| w.coins);
                 if coins >= fine {
                     if let Some(w) = world.comp_mut::<crate::components::Wallet>(suspect) {
@@ -436,12 +445,16 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                 return;
             }
             _ => {
-                // Free the Theft prisoner with the longest remaining sentence.
+                // Free the least prisoner: a vagrant first (M12 D15: a night
+                // in the cells never keeps a real criminal out), else the
+                // Theft prisoner with the longest remaining sentence.
                 let victim = world
                     .with::<Sentence>()
                     .into_iter()
-                    .filter(|&p| world.comp::<Sentence>(p).is_some_and(|s| s.crime == Crime::Theft))
-                    .max_by_key(|&p| world.comp::<Sentence>(p).map_or(0, |s| s.until_tick));
+                    .filter_map(|p| world.comp::<Sentence>(p).map(|s| (p, s.crime, s.until_tick)))
+                    .filter(|&(_, c, _)| matches!(c, Crime::Theft | Crime::Vagrancy))
+                    .max_by_key(|&(p, c, until)| (c == Crime::Vagrancy, until, p))
+                    .map(|(p, ..)| p);
                 match victim {
                     Some(p) => release(world, p, false),
                     None => {
@@ -469,6 +482,15 @@ fn resolve_reports(world: &mut World, suspect: EntityId) {
 /// Put an agent in the Jail with a `Sentence`; a job survives a sentence of
 /// three days or less.
 pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jail: EntityId) {
+    // M12 D15: a Vagrancy sentence is counted where the vagrant was swept
+    // (`World::vagrancy_places`, else where they stand), before the Jail.
+    let swept = world.vagrancy_places.remove(&who);
+    let place = (crime == Crime::Vagrancy).then(|| {
+        swept.unwrap_or_else(|| {
+            let tile = world.comp::<Position>(who).map(|p| p.tile).unwrap_or_default();
+            world.district_of(tile)
+        })
+    });
     // Whoever was escorting them is done; a cuffed prisoner is a contradiction.
     // Every escort, not only `cuffed_by`: when two guards had cuffed the same
     // suspect, the first to reach the Jail cleared `cuffed_by`, the second kept
@@ -508,6 +530,11 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     let name = world.name_of(who);
     let days = until.saturating_sub(world.tick).div_ceil(TICKS_PER_DAY);
     world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {}", crime.label()));
+    if let Some(place) = place {
+        crate::systems::street::note_vagrancy(world, place);
+        let text = format!("{name} jailed for the night for vagrancy in {}", world.district_name(place));
+        world.push_event(EventKind::Vagrancy, &[who], text);
+    }
     crate::systems::gang::on_member_arrested(world, who);
 }
 
@@ -612,9 +639,10 @@ pub fn run(world: &mut World) {
     releases(world);
 }
 
-/// M10 D33: one tick of watch per on-shift, unjailed guard, in the zone it
-/// stands in (`bind::zone_law_coverage` reads yesterday's totals), and in
-/// its district (M12 D3, `bind::district_coverage`).
+/// M10 D33, M12 D3: one tick of watch per on-shift, unjailed guard, in the
+/// district it stands in (`bind::district_coverage` reads yesterday's
+/// totals; `bind::zone_law_coverage` sums them by zone). `World::zone_watch`
+/// is kept for old saves and no longer written.
 fn tally_watch(world: &mut World) {
     let tod = world.tick_of_day();
     for i in 0..world.guards().len() {
@@ -623,8 +651,6 @@ fn tally_watch(world: &mut World) {
             continue;
         }
         let Some(tile) = world.comp::<Position>(g).map(|p| p.tile) else { continue };
-        let z = world.map.zone(tile).index();
-        world.zone_watch.today[z] += 1;
         let d = world.district_of(tile).index().min(crate::components::MAX_DISTRICTS - 1);
         world.district_watch.today[d] += 1;
     }
@@ -905,13 +931,26 @@ pub fn player_release(world: &mut World, who: EntityId) -> Result<(), String> {
 /// a Crackdown: `[Market, Home(t), Home(t), Hideout(t), Home(t)]`, the Homes
 /// drawn from the target gang's territory (or, with fewer than three held,
 /// from the six inhabited Homes nearest its Hideout).
+///
+/// M12 D11: a city guard with a district beat (`Law.beats`, dealt daily by
+/// `law_brain::allocate`) walks its district instead ([`district_route`]);
+/// a guard without one (districts off, Garrison, a fresh load) walks the
+/// M11 route above exactly.
 pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
     if let Some(route) = private_patrol_route(world, guard) {
         return route;
     }
+    let beat = world
+        .law()
+        .filter(|_| world.config.law.district_beats)
+        .and_then(|l| l.beats.get(&guard).copied())
+        .filter(|d| d.index() < world.districts.len());
+    if let Some(d) = beat {
+        return district_route(world, d);
+    }
     let target = world.law().filter(|l| l.posture == Posture::Crackdown).and_then(|l| l.target);
     if let Some(gang) = target.filter(|&g| world.has::<crate::components::Gang>(g)) {
-        return crackdown_route(world, gang);
+        return crackdown_route(world, gang, None);
     }
     let mut route = Vec::new();
     let markets: Vec<EntityId> = world
@@ -947,6 +986,84 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
         }
     }
     route
+}
+
+/// M12 D11: a beat in district `d`. Under the district's `Crackdown(g)` the
+/// crackdown loop on g's turf in d; else a Market in d drawn as the city's
+/// beat is (no draw with one), the Bar nearest it, the Hall only when d
+/// holds it, and two Homes drawn from the `patrol_beat_homes` Homes of d
+/// nearest the Market (none in d: the nearest anywhere). Plan deviation: a
+/// district with Homes and no Market (the Spire, the three Sumps) walks
+/// four Homes drawn from the `patrol_beat_homes` nearest its centroid, so
+/// the beat stays in the district; with the plan's Market nearest the
+/// centroid, Sump guards spent their loop at a Mid Market and the Sump read
+/// the coverage floor (0.5) with four guards allocated.
+pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Vec<EntityId> {
+    use crate::components::Stance;
+    if let Stance::Crackdown(g) = world.district(d).stance {
+        if world.has::<crate::components::Gang>(g) {
+            return crackdown_route(world, g, Some(d));
+        }
+    }
+    let standing = |w: &World, b: EntityId| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished);
+    let of_kind = |w: &World, k: BuildingKind| -> Vec<EntityId> {
+        w.district(d)
+            .buildings
+            .iter()
+            .copied()
+            .filter(|&b| w.comp::<Building>(b).is_some_and(|bd| bd.kind == k && !bd.demolished))
+            .collect()
+    };
+    let markets = of_kind(world, BuildingKind::Market);
+    let hall_here = !of_kind(world, BuildingKind::Hall).is_empty();
+    let centroid = world.district(d).centroid;
+    let homes_d: Vec<EntityId> = world.district(d).homes.iter().copied().filter(|&h| standing(world, h)).collect();
+    let beat = match markets.len() {
+        0 if !homes_d.is_empty() => None,
+        0 => world.nearest_of_kind(BuildingKind::Market, centroid),
+        1 => Some(markets[0]),
+        n => Some(markets[world.rng.world().random_range(0..n)]),
+    };
+    let draws = if markets.is_empty() && !homes_d.is_empty() { 4 } else { 2 };
+    let beat_door = beat.and_then(|m| world.comp::<Building>(m)).map(|b| b.door);
+    let mut route = Vec::new();
+    route.extend(beat);
+    if beat.is_some() {
+        route.extend(beat_door.and_then(|door| world.nearest_of_kind(BuildingKind::Bar, door)));
+    }
+    if hall_here {
+        route.extend(world.building_of_kind(BuildingKind::Hall));
+    }
+    let mut homes = if homes_d.is_empty() {
+        world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default()
+    } else {
+        homes_d
+    };
+    let beat_homes = world.config.law.patrol_beat_homes;
+    let from = beat_door.unwrap_or(centroid);
+    if homes.len() > beat_homes {
+        let mut near: Vec<(u32, EntityId)> = homes
+            .iter()
+            .filter_map(|&h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(from), h)))
+            .collect();
+        near.sort();
+        homes = near.into_iter().take(beat_homes).map(|(_, h)| h).collect();
+    }
+    if !homes.is_empty() {
+        for _ in 0..draws {
+            let i = world.rng.world().random_range(0..homes.len());
+            route.push(homes[i]);
+        }
+    }
+    route
+}
+
+/// M12 D9: is the law cracking down on `gang` anywhere: the posture's
+/// Crackdown, or (with district beats) any district's `Crackdown(gang)`?
+pub fn cracking_down_on(world: &World, gang: EntityId) -> bool {
+    use crate::components::Stance;
+    world.law().is_some_and(|l| l.posture == Posture::Crackdown && l.target == Some(gang))
+        || (world.config.law.district_beats && world.districts.iter().any(|d| d.stance == Stance::Crackdown(gang)))
 }
 
 /// M11 D18: a private guard walks up to five of its corp's contracted
@@ -1006,12 +1123,53 @@ pub fn crackdown_turf(world: &World, gang: EntityId) -> Vec<EntityId> {
     homes.into_iter().take(6).map(|(_, h)| h).collect()
 }
 
-fn crackdown_route(world: &mut World, gang: EntityId) -> Vec<EntityId> {
-    let turf = crackdown_turf(world, gang);
-    let hideout = world.hideout_of(gang);
+/// M12 D11: the turf a district Crackdown patrols: g's held Homes in `d`,
+/// or, with fewer than three, the six inhabited Homes of `d` nearest g's
+/// Hideout door.
+pub fn crackdown_turf_in(world: &World, gang: EntityId, d: crate::components::DistrictId) -> Vec<EntityId> {
+    let Some(g) = world.comp::<crate::components::Gang>(gang) else { return Vec::new() };
+    let held: Vec<EntityId> = g.territory.iter().copied().filter(|&h| world.district_of_building(h) == d).collect();
+    if held.len() >= 3 {
+        return held;
+    }
+    let door = world.comp::<Building>(g.hideout).map_or(world.district(d).centroid, |b| b.door);
+    let mut homes: Vec<(u32, EntityId)> = world
+        .district(d)
+        .homes
+        .iter()
+        .copied()
+        .filter_map(|h| world.comp::<Building>(h).map(|b| (h, b)))
+        .filter(|(_, b)| !b.demolished && !b.occupants.is_empty())
+        .map(|(h, b)| (b.door.manhattan(door), h))
+        .collect();
+    homes.sort();
+    homes.into_iter().take(6).map(|(_, h)| h).collect()
+}
+
+/// The crackdown loop: `[Market, Home(t), Home(t), Hideout, Home(t)]`. With
+/// `district` (M12 D11) the turf is the district's ([`crackdown_turf_in`]),
+/// the Market the one nearest the turf's first Home, and the Hideout stop is
+/// kept only when it lies in the district; `None` is the M9 loop exactly.
+pub fn crackdown_route(
+    world: &mut World,
+    gang: EntityId,
+    district: Option<crate::components::DistrictId>,
+) -> Vec<EntityId> {
+    let turf = match district {
+        Some(d) => crackdown_turf_in(world, gang, d),
+        None => crackdown_turf(world, gang),
+    };
+    let hideout = match district {
+        Some(d) => world.hideout_of(gang).filter(|&h| world.district_of_building(h) == d),
+        None => world.hideout_of(gang),
+    };
     let mut route = Vec::new();
-    // The Market nearest the target's Hideout (the only one on the v1 map).
-    let near = hideout.and_then(|h| world.comp::<Building>(h)).map(|b| b.door);
+    // The Market nearest the target's Hideout (the only one on the v1 map);
+    // in a district, the one nearest the turf's first Home.
+    let near = match district {
+        Some(_) => turf.first().and_then(|&h| world.comp::<Building>(h)).map(|b| b.door),
+        None => hideout.and_then(|h| world.comp::<Building>(h)).map(|b| b.door),
+    };
     if let Some(m) = near.and_then(|d| world.nearest_of_kind(BuildingKind::Market, d)) {
         route.push(m);
     }

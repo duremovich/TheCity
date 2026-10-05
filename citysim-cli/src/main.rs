@@ -168,6 +168,8 @@ enum Lever {
     KillStaff(u8),
     CorpOrder(u8, citysim::CorpOrder, Option<citysim::Niche>, u32),
     Strike(u8),
+    /// M12: `stance=<district>:crackdown<gang index>`.
+    StanceCrackdown(u8, usize),
 }
 
 /// Who `seize_corp` hands the buildings to.
@@ -218,6 +220,10 @@ impl Lever {
                 PlayerCommand::SetCorpOrder { corp: corp_in_slot(world, slot)?, order, niche, days }
             }
             Lever::Strike(slot) => PlayerCommand::StrikeNow(corp_in_slot(world, slot)?),
+            Lever::StanceCrackdown(d, i) => PlayerCommand::SetStance {
+                district: citysim::DistrictId(d),
+                stance: Some(citysim::Stance::Crackdown(gang(i)?)),
+            },
         })
     }
 }
@@ -229,7 +235,8 @@ impl Lever {
 /// `fund_corp=0:200000`, `bankrupt_corp=0`, `seize_corp=3:gang0` (or
 /// `:city`, `:<slot>`), `kill_exec=0`, `kill_staff=0`,
 /// `corp_order=3:Squeeze:30` (or `1:Squeeze:Housing:30`), `strike=0`,
-/// `wipe_corps=1`.
+/// `wipe_corps=1`. M12 (plan D42): `guard_weight=<district>:<weight>`,
+/// `stance=<district>:sweep|patrol|cordon|withdrawn|crackdown<gang index>|auto`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -273,6 +280,29 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 t => SeizeTo::Corp(slot(t)?),
             };
             Some(Lever::SeizeCorp(slot(s)?, to))
+        }
+        "stance" => {
+            let (d, st) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<stance>"))?;
+            let d = d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?;
+            let st = st.to_ascii_lowercase();
+            match st.strip_prefix("crackdown") {
+                Some(g) => Some(Lever::StanceCrackdown(d, idx(g)?)),
+                None => {
+                    let stance = match st.as_str() {
+                        "auto" => None,
+                        "patrol" => Some(citysim::Stance::Patrol),
+                        "sweep" => Some(citysim::Stance::Sweep),
+                        "cordon" => Some(citysim::Stance::Cordon),
+                        "withdrawn" => Some(citysim::Stance::Withdrawn),
+                        _ => {
+                            return Err(format!(
+                                "{spec}: stance must be auto|patrol|sweep|cordon|withdrawn|crackdown<gang index>"
+                            ))
+                        }
+                    };
+                    Some(Lever::Cmd(PlayerCommand::SetStance { district: citysim::DistrictId(d), stance }))
+                }
+            }
         }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
@@ -325,6 +355,13 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             _ => return Err(format!("{spec}: law_posture must be Auto|Patrol|Crackdown|Garrison")),
         }),
         "fire_guards" => PlayerCommand::FireAllGuards,
+        "guard_weight" => {
+            let (d, wt) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<weight>"))?;
+            PlayerCommand::SetGuardWeight {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                weight: wt.parse::<f32>().map_err(|e| format!("{spec}: bad weight: {e}"))?,
+            }
+        }
         "treasury" => PlayerCommand::SetTreasury(value.parse::<i64>().map_err(|e| format!("{spec}: bad coins: {e}"))?),
         // M11: `city_rent=0/1/2` (Sump/Mid/Spire), `rent_cap=3` or `rent_cap=none`, `no_city_evictions=1`.
         "city_rent" => {

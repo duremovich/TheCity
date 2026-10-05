@@ -289,12 +289,16 @@ impl fmt::Display for Role {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+/// Ordered by severity (`Crime::severity`), not by declaration: Vagrancy
+/// (M12 D15, appended so saves keep their variant names) is the least.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Crime {
     Theft,
     Extortion,
     Assault,
     Murder,
+    /// M12 D15: sleeping rough where the law sweeps.
+    Vagrancy,
 }
 
 impl Crime {
@@ -305,7 +309,32 @@ impl Crime {
             Crime::Extortion => "Shakedown",
             Crime::Assault => "Assault",
             Crime::Murder => "Murder",
+            Crime::Vagrancy => "Vagrancy",
         }
+    }
+
+    /// The order the law ranks crimes by (the most severe open report sets
+    /// a sentence): Vagrancy, Theft, Shakedown, Assault, Murder.
+    pub fn severity(self) -> u8 {
+        match self {
+            Crime::Vagrancy => 0,
+            Crime::Theft => 1,
+            Crime::Extortion => 2,
+            Crime::Assault => 3,
+            Crime::Murder => 4,
+        }
+    }
+}
+
+impl PartialOrd for Crime {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Crime {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.severity().cmp(&other.severity())
     }
 }
 
@@ -573,6 +602,19 @@ pub struct Law {
     /// M11 D21: a corp's bought Crackdown (phase 3).
     #[serde(default)]
     pub lobby: Option<LobbyHold>,
+    /// M12 D10: each patrol guard's district beat from the last allocation
+    /// (empty with `[law] district_beats` off, under Garrison, or before the
+    /// first allocation: those guards walk the M11 route).
+    #[serde(default)]
+    pub beats: BTreeMap<EntityId, DistrictId>,
+}
+
+/// M12 D12: one district stance's score from the last rescoring.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StanceScore {
+    pub stance: Stance,
+    pub score: f32,
+    pub considerations: Vec<Consideration>,
 }
 
 /// M11 D21: a corp paid the captain to crack down on `gang` until `until`.
@@ -1889,6 +1931,16 @@ impl DistrictId {
     }
 }
 
+impl District {
+    /// M12 phase 2 (plan deviation on "inhabited = `adults > 0`"): the
+    /// district has standing Blocks and adults binned to it. A few homeless
+    /// adults sleeping in the Civic made it "inhabited" at a crime rate of
+    /// 257 per 100, drew Crackdowns and six to eight guards.
+    pub fn inhabited(&self) -> bool {
+        self.adults > 0 && !self.homes.is_empty()
+    }
+}
+
 /// Who controls a district (plan D8): the top presence with at least
 /// `[districts] control_min_share` of the total, else Contested.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
@@ -2044,6 +2096,12 @@ pub struct District {
     /// The inputs of the last daily pass, by name, for the District panel.
     #[serde(skip)]
     pub trace: Vec<(&'static str, f32)>,
+    /// M12 D12: every stance's score from the last rescoring, best first.
+    #[serde(skip)]
+    pub stance_trace: Vec<StanceScore>,
+    /// M12 D10: the allocation weight's terms from the last allocation.
+    #[serde(skip)]
+    pub alloc_trace: Vec<(&'static str, f32)>,
 }
 
 // ---------------------------------------------------------------------------

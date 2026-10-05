@@ -181,6 +181,10 @@ pub struct DayRow {
     pub crossfire: u32,
     #[serde(default)]
     pub gangs: u32,
+    /// M12 D38: raids and breakouts that reached a door under full cover
+    /// (the stance turned mid-march); not a CSV column (the gate reads it).
+    #[serde(default)]
+    pub raids_into_cover: u32,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -263,6 +267,7 @@ impl DayRow {
             riots: 0,
             crossfire: 0,
             gangs: 0,
+            raids_into_cover: 0,
             ticks_per_sec: 0.0,
         }
     }

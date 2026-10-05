@@ -71,6 +71,15 @@ pub fn target_tile(world: &World, agent: EntityId) -> Option<TilePos> {
 pub fn depart(world: &mut World, agent: EntityId) -> bool {
     let Some(gid) = world.gang_of(agent) else { return false };
     let now = world.tick;
+    // M12 D38: no raid departs into a garrisoned Jail or a district cracking
+    // down on the raider or cordoned, whatever held when the order was
+    // scored; the member replans and the brain rescores the gang.
+    let order = world.comp::<Gang>(gid).map(|g| g.order);
+    if let Some(order) = order.filter(|o| o.is_raid()) {
+        if crate::systems::faction::target_cover(world, gid, order) >= 1.0 {
+            return false;
+        }
+    }
     let Some(g) = world.comp_mut::<Gang>(gid) else { return false };
     if g.raid_at.is_none_or(|t| t > now) {
         return false;
@@ -89,6 +98,13 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
 /// `Brawl` at the expedition's door: a breach of the Jail under BreakOut,
 /// a raid on the rival Hideout otherwise.
 pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
+    // M12 D38: count an expedition that reached a door under full cover.
+    if let Some((gid, order)) = world.gang_of(actor).and_then(|g| world.comp::<Gang>(g).map(|x| (g, x.order))) {
+        let live = world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_some());
+        if live && order.is_raid() && crate::systems::faction::target_cover(world, gid, order) >= 1.0 {
+            world.stats.current.raids_into_cover += 1;
+        }
+    }
     if own_gang(world, actor).is_some_and(|g| g.order.target_is_jail()) {
         breach(world, actor)
     } else {
