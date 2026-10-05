@@ -68,3 +68,19 @@ The same contract (M16) backs all three; only the renderer differs.
 **The outside world as limited combat maps.** Missions outside the city (an asset in the outside ledger, M17: a rival's depot, a parent's data centre) are small maps with a limited cast of NPCs who need no persistence beyond the moment. The exception is the point: if the player befriends one, or makes a specific enemy of one, they can become persistent and later show up in the city seeking out the player character, for good or ill. The outside world's agents enter the city the way everything outside does, as a resource effect, until a story promotes one of them to a person.
 
 Design implications: a `Governance` on every faction (Dictator(agent) | Board(members, vote rule)) whose brain reads an aggregate Personality; leadership change as a vote the leverage moves can swing; missions as contracts with a renderer flag; a "promoted from outside" immigrant with a grudge or a friendship edge to the player as the hook from a combat map back into the city.
+
+## Economy, tech, skills and verticality (added 2026-10-05, Dylan)
+
+**A robust, fluid economy.** Supply and demand across many goods, not one. Different types of food and food production, with the dystopian twist: legitimate operations like vertical farming and fish farms beside a Soylent-style factory whose raw material is people abducted off the street, and scavengers who abduct anyone whose implants look expensive to harvest the chrome, for profit and to upgrade themselves. Every one of these is a business an NPC corp or the player can run.
+
+**Tech trees and tech decay.** A tech tree gates what can be built and used. Technology can be lost over time if research is not kept up (Songs of Syx's rule). Data can be stolen and deleted (M14), so a company can lose its most advanced technologies when its research cannot sustain them or its Data is taken.
+
+**Competence is people.** A corporation's or government's effectiveness is an aggregate of its management's stats and its employees' stats for the relevant actions, so good employees matter. Characters with high stats in specific skills are rare. You can render a company or a government ineffective by murdering its smartest managers and scientists; the skill loss cripples it. Employees can be poached from other groups with better pay, or with threats and extortion.
+
+**Hostages and private prisons.** Megacorps routinely keep prisons filled with hostages for leverage over people. Freeing people from private prisons is a mission type.
+
+**Reputation everywhere.** The player character has a reputation with each faction, and factions have reputations with each other.
+
+**Verticality.** The city needs layers of verticality to feel like a true metropolis.
+
+Design implications: goods as a typed resource with per-good supply, demand and price (M13 adds the second good; the generalisation follows); production chains with inputs, including the illegal ones whose input is a person (abduction as a leverage move, M16, feeding a factory); skills as the Full-tier stat model with a rarity distribution, and `Corp` effectiveness terms read from the skills of exec and staff; a research upkeep rule in the M14 tech tree with decay and Data loss; a `Prison` building kind for corps with hostages as contracts; reputation as a matrix of faction × faction plus player × faction, derived from what is known (gossip); map layers (a `z` on `TilePos`, portals between layers, the Virt plane as the first second layer) as a later map milestone.

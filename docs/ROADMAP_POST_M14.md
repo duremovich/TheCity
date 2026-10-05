@@ -310,3 +310,12 @@ Folded into the sketches above rather than a milestone of their own:
 - **Missions at three LODs** (M16/M18): a contract can be resolved off screen as a probability (the brawl resolver and binder already do this), watched live through Virt when the agents carry the gear (M14), or played by the player character. One contract, three renderers.
 - **The outside as combat maps** (M17/M18): a mission on an outside asset is a small map with a transient cast; an NPC who becomes a friend or a specific enemy of the player is promoted to persistence and may later arrive in the city as an immigrant with an edge to the player.
 
+## Addendum 2 (2026-10-05, Dylan): economy, tech, skills, prisons, verticality
+
+- **Goods and production chains** (grows out of M13's second good): many foods and goods with per-good supply, demand and price; vertical farms and fish farms as legitimate producers; a Soylent-style factory and scav chop-shops whose input is abducted people (abduction = a leverage move, M16). Likely its own milestone between M14 and M15 or folded into M13 if the second good is designed as "goods" from the start.
+- **Tech decay** (M14): research upkeep; a tech is lost when upkeep lapses or its Data is stolen and deleted.
+- **Skills as competence** (M15 stat model, M11/M16 consumers): a rarity distribution over skills; `Corp` and law effectiveness terms read the skills of exec and staff; killing or poaching the skilled cripples a group; poaching by pay, threat or extortion is a contract.
+- **Private prisons and hostages** (M16): a corp `Prison` building; hostages as leverage contracts; freeing them as a mission type.
+- **Reputation matrix** (M15): faction × faction and player × faction, derived from what is known.
+- **Verticality** (a map milestone after M14): layers with a `z` on tile positions and portals between them; the Virt plane is the first second layer and should be built as one.
+
