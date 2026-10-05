@@ -161,6 +161,9 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             // Once a night: a sleep interrupted and resumed does not stack it.
             let night = world.tick.saturating_add(crate::time::TICKS_PER_DAY / 2) / crate::time::TICKS_PER_DAY;
             let fresh = world.comp::<Brain>(id).is_some_and(|b| b.last_spouse_night != Some(night));
+            if at_home(world, id) {
+                world.mark_day(id, crate::components::trace_flags::SLEPT_AT_HOME);
+            }
             if fresh && at_home(world, id) && spouse_in_same_home(world, id) {
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     n.intimacy = (n.intimacy + 0.4).min(1.0);
@@ -263,6 +266,7 @@ pub fn on_complete(
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
+            world.mark_day(id, crate::components::trace_flags::ATE);
             world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             StepResult::Done
         }
@@ -279,6 +283,7 @@ pub fn on_complete(
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
+            world.mark_day(id, crate::components::trace_flags::ATE);
             world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             StepResult::Done
         }
@@ -311,6 +316,7 @@ pub fn on_complete(
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             let hideout_home = here.is_some() && crate::systems::gang::holes_up_at(world, id) == here;
             if at_home(world, id) || hideout_home {
+                world.mark_day(id, crate::components::trace_flags::SLEPT_AT_HOME);
                 // M10: +0.2 / +0.3 / +0.4 by the building's tier (Sump, Mid, Spire).
                 let tier = here.and_then(|b| world.comp::<Building>(b)).map_or(1, |b| b.tier);
                 if let Some(n) = world.comp_mut::<Needs>(id) {

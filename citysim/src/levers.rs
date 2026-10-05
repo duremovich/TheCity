@@ -189,31 +189,39 @@ impl World {
                     let name = self.name_of(*who);
                     self.push_event(EventKind::PlayerAction, &[*who], format!("Arrested {name}"));
                 }
-                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Arrest: {e}")),
+                Err(e) => {
+                    self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Arrest: {e}"));
+                }
             },
             PlayerCommand::Release(who) => match crate::systems::law::player_release(self, *who) {
                 Ok(()) => {
                     let name = self.name_of(*who);
                     self.push_event(EventKind::PlayerAction, &[*who], format!("Released {name}"));
                 }
-                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Release: {e}")),
+                Err(e) => {
+                    self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Release: {e}"));
+                }
             },
-            PlayerCommand::DemolishHome(home) => match self.cmd_demolish_home(*home) {
-                Ok(n) => self.push_event(
-                    EventKind::PlayerAction,
-                    &[*home],
-                    format!("Demolished Home#{} ({n} residents made homeless)", home.index),
-                ),
-                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*home], format!("DemolishHome: {e}")),
-            },
-            PlayerCommand::BuildHome { rect } => match self.cmd_build_home(*rect) {
-                Ok((id, housed)) => self.push_event(
-                    EventKind::PlayerAction,
-                    &[id],
-                    format!("Built Home#{} at ({}, {}); {housed} moved in", id.index, rect.x, rect.y),
-                ),
-                Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("BuildHome: {e}")),
-            },
+            PlayerCommand::DemolishHome(home) => {
+                let _ = match self.cmd_demolish_home(*home) {
+                    Ok(n) => self.push_event(
+                        EventKind::PlayerAction,
+                        &[*home],
+                        format!("Demolished Home#{} ({n} residents made homeless)", home.index),
+                    ),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*home], format!("DemolishHome: {e}")),
+                };
+            }
+            PlayerCommand::BuildHome { rect } => {
+                let _ = match self.cmd_build_home(*rect) {
+                    Ok((id, housed)) => self.push_event(
+                        EventKind::PlayerAction,
+                        &[id],
+                        format!("Built Home#{} at ({}, {}); {housed} moved in", id.index, rect.x, rect.y),
+                    ),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("BuildHome: {e}")),
+                };
+            }
         }
     }
 

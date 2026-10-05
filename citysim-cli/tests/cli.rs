@@ -16,12 +16,13 @@ fn test_cli_report_csv_header() {
     let mut lines = stdout.lines();
     assert_eq!(
         lines.next(),
-        Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,ticks_per_sec")
+        Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,ticks_per_sec")
     );
     let row = lines.next().expect("one data row");
-    // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4).
-    assert!(row.starts_with("0,Spring,2000,220,0,0,0,"), "row: {row}");
-    assert_eq!(row.split(',').count(), 25);
+    // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4), nobody homeless.
+    // (Off-screen thieves can be jailed on day 0 since M10 phase 3.)
+    assert!(row.starts_with("0,Spring,2000,220,0,"), "row: {row}");
+    assert_eq!(row.split(',').count(), 33);
     assert!(lines.next().is_none());
 }
 

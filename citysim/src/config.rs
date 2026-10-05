@@ -27,6 +27,9 @@ pub struct Config {
     /// M9; absent from pre-M9 saves likewise.
     #[serde(default = "LawCfg::from_assets")]
     pub law: LawCfg,
+    /// M10 holes and the binder; absent from pre-M10 saves likewise.
+    #[serde(default = "BindCfg::from_assets")]
+    pub bind: BindCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -461,6 +464,51 @@ pub struct LodCfg {
     /// Set by the CLI's `--force-lod`; never in the file.
     #[serde(default)]
     pub force: Option<Lod>,
+    /// M10: days of `Trace` kept per adult.
+    #[serde(default = "default_trace_days")]
+    pub trace_days: usize,
+    /// M10: multiplies the table's `p_robbed`, `p_assaulted` and `p_killed`
+    /// at use (D26); the parity test pins it to 1.0.
+    #[serde(default = "default_stat_violence_mult")]
+    pub stat_violence_mult: f32,
+}
+
+fn default_trace_days() -> usize {
+    120
+}
+
+fn default_stat_violence_mult() -> f32 {
+    1.0
+}
+
+/// M10 holes and the binder (`docs/M10_SCALE.md` § 3). A candidate's weight is
+/// `(1 - lawfulness)^2 x (1 + gang_claim_mult x gang x claims) x (1 + enemy_mult x enemy)
+/// x (1 + statistical_mult x statistical)`, times `other_zone_weight` off the victim's zone.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct BindCfg {
+    /// A hole older than this binds (or goes Unknown) at the daily pass.
+    pub hole_ttl_days: u64,
+    /// Open holes per victim; the oldest expires to Unknown past it.
+    pub max_open_per_agent: usize,
+    /// Drawn first: nobody ever learns who did it (M10 D11).
+    pub p_unknown: f64,
+    /// Witness chance of a bound crime, times the zone's law coverage.
+    pub p_witness: f32,
+    pub coverage_min: f32,
+    pub coverage_max: f32,
+    pub gang_claim_mult: f64,
+    pub enemy_mult: f64,
+    pub statistical_mult: f64,
+    pub other_zone_weight: f64,
+}
+
+impl BindCfg {
+    /// The `[bind]` block of `assets/config.toml`, for saves written before it existed.
+    pub fn from_assets() -> BindCfg {
+        let dir = Config::find_assets_dir()
+            .unwrap_or_else(|| panic!("assets/config.toml not found; set CITYSIM_ASSETS or run from the repo"));
+        Config::load_from(&dir).bind
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

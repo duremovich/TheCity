@@ -40,6 +40,15 @@ impl SimRng {
         })
     }
 
+    /// A hole's own stream (M10 D7): a fresh ChaCha8 from `(world_seed, hole
+    /// id)`, never stored, so call order, save/load and repetition never
+    /// change the draw. Agent streams use `index + 1 < 2^33`; this sets bit 63.
+    pub fn hole(&self, id: crate::components::HoleId) -> ChaCha8Rng {
+        let mut r = ChaCha8Rng::seed_from_u64(self.seed);
+        r.set_stream(id | (1 << 63));
+        r
+    }
+
     /// Drop an agent's stream when the entity is despawned.
     pub fn forget_agent(&mut self, id: EntityId) {
         self.agents.remove(&id.index);

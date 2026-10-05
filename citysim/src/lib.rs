@@ -37,7 +37,7 @@ pub use map::Map;
 pub use stats::{DailyStats, DayRow};
 pub use time::{DayPhase, Season, Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 pub use utility::{Consideration, GoalScore, ThinkTrace};
-pub use world::{StatRow, StatTable, World};
+pub use world::{load_stat_table, StatRow, StatTable, World, STAT_ROWS};
 
 /// Advance the world by exactly one tick (one in-game minute).
 pub fn tick(world: &mut World) {

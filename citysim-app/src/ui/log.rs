@@ -1,12 +1,13 @@
 //! Event log panel (bottom): newest first, `day hh:mm | kind | text`, a kind
-//! multi-select and an "Only selected" filter. Clicking a row selects
-//! `actors[0]` and centres the camera.
+//! multi-select and an "Only selected" filter. Clicking a row selects the
+//! first actor (an off-screen crime's unknown assailant, `EntityId::NONE`, is
+//! skipped: the victim is selected) and centres the camera.
 
 use std::collections::BTreeSet;
 
 use egui_macroquad::egui::{self, Color32, Ui};
 
-use citysim::{time, Brain, Building, EventKind, Lod, Position, World};
+use citysim::{time, Brain, Building, EntityId, EventKind, Lod, Position, World};
 
 use crate::App;
 
@@ -20,10 +21,15 @@ pub struct LogState {
 
 fn kind_colour(kind: EventKind) -> Color32 {
     match kind {
-        EventKind::Theft | EventKind::Extortion | EventKind::Assault | EventKind::Murder => {
-            Color32::from_rgb(217, 47, 47)
+        EventKind::Theft
+        | EventKind::Extortion
+        | EventKind::Assault
+        | EventKind::Murder
+        | EventKind::Robbed
+        | EventKind::Assaulted => Color32::from_rgb(217, 47, 47),
+        EventKind::Arrest | EventKind::Sentence | EventKind::Report | EventKind::Witness | EventKind::Attributed => {
+            Color32::WHITE
         }
-        EventKind::Arrest | EventKind::Sentence | EventKind::Report | EventKind::Witness => Color32::WHITE,
         EventKind::Death | EventKind::Starving | EventKind::Rotted => Color32::from_rgb(240, 140, 30),
         EventKind::Birth | EventKind::Marriage | EventKind::Proposal => Color32::from_rgb(80, 170, 90),
         EventKind::PlayerAction | EventKind::PlayerActionFailed => Color32::from_rgb(255, 215, 0),
@@ -91,7 +97,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             let highlight = selected.is_some_and(|s| e.actors.contains(&s));
             let text = egui::RichText::new(line).monospace().color(kind_colour(e.kind));
             if ui.selectable_label(highlight, text).clicked() {
-                clicked = e.actors.first().copied();
+                clicked = e.actors.iter().copied().find(|&a| a != EntityId::NONE);
             }
         }
     });

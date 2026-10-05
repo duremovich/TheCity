@@ -120,8 +120,12 @@ pub fn run(world: &mut World) {
         starvation(world, id);
     }
 
+    // Bodies only: a Statistical agent's wealth is refreshed by its own
+    // spread hourly run (`lod::run_statistical`).
     if hourly {
-        world.recompute_wealth();
+        for id in world.bodies() {
+            world.recompute_wealth_for(id);
+        }
     }
 }
 

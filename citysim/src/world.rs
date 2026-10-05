@@ -5,6 +5,7 @@ use ordered_float::OrderedFloat;
 use rand::seq::SliceRandom;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::components::*;
@@ -41,21 +42,119 @@ impl Ord for Urgency {
     }
 }
 
-/// Calibrated hourly behaviour table for Statistical agents.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// Rows in a v2 table: 4 phases x 3 lawfulness buckets x 2 hunger buckets.
+pub const STAT_ROWS: usize = 24;
+
+/// One row of the calibrated hourly table (M10 v2). The first four are one
+/// outcome drawn per hour, as in v1; the rest are independent hourly rolls.
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
 pub struct StatRow {
+    /// "Morning law0 hunger1", for humans.
+    #[serde(default)]
+    pub label: String,
     pub p_eat: f32,
     pub p_work: f32,
     pub p_social: f32,
     pub p_sleep: f32,
+    /// Actor side: Market theft beyond the eat path's desperation theft.
+    pub p_steal: f32,
+    /// Actor side: a Flirt with a known edge of affinity >= 0.3.
+    pub p_flirt: f32,
+    /// Victim side: the actor is a hole until bound.
+    pub p_robbed: f32,
+    pub p_assaulted: f32,
+    pub p_killed: f32,
 }
 
+/// Calibrated hourly behaviour table for Statistical agents (`citysim-cli
+/// calibrate`, v2). Rows by `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct StatTable {
-    pub morning: StatRow,
-    pub work: StatRow,
-    pub evening: StatRow,
-    pub night: StatRow,
+    /// 2.
+    pub version: u32,
+    pub seed: u64,
+    pub days: u64,
+    pub agents: u32,
+    /// `[0.3, 0.7]`: lawfulness `< e0` is bucket 0, `< e1` bucket 1, else 2.
+    pub lawfulness_edges: [f32; 2],
+    /// `0.4`: hunger `< edge` is bucket 0 (hungry), else 1.
+    pub hunger_edge: f32,
+    /// The chance a jobless Full agent who starts the Work phase below its
+    /// savings line (`SAVINGS_DAYS` meals) collects the dole that day; it
+    /// has to walk to the Hall. 1 in a table without it.
+    #[serde(default = "one_f32")]
+    pub p_dole_day: f32,
+    pub rows: Vec<StatRow>,
+}
+
+fn one_f32() -> f32 {
+    1.0
+}
+
+impl StatTable {
+    /// Morning 0, Work 1, Evening 2, Night 3 (`DayPhase` declares Night first).
+    pub fn phase_index(phase: time::DayPhase) -> usize {
+        match phase {
+            time::DayPhase::Morning => 0,
+            time::DayPhase::Work => 1,
+            time::DayPhase::Evening => 2,
+            time::DayPhase::Night => 3,
+        }
+    }
+
+    pub fn lawfulness_bucket(&self, lawfulness: f32) -> usize {
+        if lawfulness < self.lawfulness_edges[0] {
+            0
+        } else if lawfulness < self.lawfulness_edges[1] {
+            1
+        } else {
+            2
+        }
+    }
+
+    pub fn hunger_bucket(&self, hunger: f32) -> usize {
+        usize::from(hunger >= self.hunger_edge)
+    }
+
+    /// `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
+    pub fn index(&self, phase: time::DayPhase, lawfulness: f32, hunger: f32) -> usize {
+        Self::phase_index(phase) * 6 + self.lawfulness_bucket(lawfulness) * 2 + self.hunger_bucket(hunger)
+    }
+
+    pub fn row(&self, phase: time::DayPhase, lawfulness: f32, hunger: f32) -> &StatRow {
+        &self.rows[self.index(phase, lawfulness, hunger)]
+    }
+
+    /// "Morning law0 hunger1" for row `i`.
+    pub fn label(i: usize) -> String {
+        let phase = ["Morning", "Work", "Evening", "Night"][i / 6];
+        format!("{phase} law{} hunger{}", (i % 6) / 2, i % 2)
+    }
+}
+
+/// Read `assets/stat_table.toml`: `(table, legacy)`. Missing gives `(None,
+/// false)`; the pre-M10 four-row table `(None, true)` (M10 D28); a v2 table
+/// with the wrong row count, or anything unparsable, panics.
+pub fn load_stat_table(config: &Config) -> (Option<StatTable>, bool) {
+    let path = config.asset("stat_table.toml");
+    let text = match std::fs::read_to_string(&path) {
+        Ok(t) => t,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (None, false),
+        Err(e) => panic!("cannot read {}: {e}", path.display()),
+    };
+    match toml::from_str::<StatTable>(&text) {
+        Ok(t) => {
+            assert!(
+                t.rows.len() == STAT_ROWS,
+                "{}: {} rows, expected {STAT_ROWS}: run `cargo run --release -p citysim-cli -- calibrate`",
+                path.display(),
+                t.rows.len()
+            );
+            (Some(t), false)
+        }
+        Err(_) if text.contains("[morning]") => (None, true),
+        Err(e) => panic!("bad {}: {e}", path.display()),
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -94,6 +193,9 @@ pub struct World {
     /// M9: on the Jail. Absent from older saves; `migrate_legacy` fills it.
     #[serde(default)]
     pub law: Vec<Option<Law>>,
+    /// M10: per adult, kept after death. Absent from older saves; `migrate_legacy` fills it.
+    #[serde(default)]
+    pub trace: Vec<Option<Trace>>,
     // graph + blackboard
     pub edges: BTreeMap<(EntityId, EntityId), Edge>,
     pub crime_reports: Vec<CrimeReport>,
@@ -102,8 +204,11 @@ pub struct World {
     pub agents_by_tile: BTreeMap<TilePos, Vec<EntityId>>,
     pub levers: Levers,
     pub stats: DailyStats,
-    /// Ring of 5,000, never drained; the UI keeps a read cursor.
+    /// Ring of 50,000, never drained; the UI keeps a read cursor.
     pub events: VecDeque<Event>,
+    /// The id the next `push_event` assigns (M10 D12).
+    #[serde(default)]
+    pub next_event_id: u64,
     /// Value = enqueue tick.
     pub plan_queue: BTreeMap<(Urgency, EntityId), Tick>,
     pub reservations: BTreeMap<EntityId, Vec<Reservation>>,
@@ -117,8 +222,30 @@ pub struct World {
     pub view_rect: Option<Rect>,
     pub command_queue: Vec<PlayerCommand>,
     pub command_log: Vec<(Tick, PlayerCommand)>,
-    /// `None` until `citysim-cli calibrate` has produced `assets/stat_table.toml` (M7).
+    /// `None` until `citysim-cli calibrate` has produced `assets/stat_table.toml`.
+    /// Not saved (M10 D28): reloaded from the assets on load, like the names.
+    #[serde(skip)]
     pub stat_table: Option<StatTable>,
+    /// The assets hold the pre-M10 four-row table: `run_statistical` panics
+    /// with the calibrate message.
+    #[serde(skip)]
+    pub stat_table_legacy: bool,
+    /// M10: open holes, oldest first (the key packs the tick on top).
+    #[serde(default)]
+    pub holes: BTreeMap<HoleId, Hole>,
+    /// Open holes by victim; rebuilt on load.
+    #[serde(skip)]
+    pub holes_by_agent: BTreeMap<EntityId, SmallVec<[HoleId; 4]>>,
+    /// Victim holes of agents promoted off the Statistical tier, bound at the
+    /// end of `lod::run` (M10 D32).
+    #[serde(default)]
+    pub bind_queue: Vec<HoleId>,
+    /// Guard-on-shift ticks per zone, for `bind::zone_law_coverage`.
+    #[serde(default)]
+    pub zone_watch: ZoneWatch,
+    /// Today's ATE and SLEPT_AT_HOME bits per agent, folded into the trace at day end.
+    #[serde(default)]
+    pub day_marks: BTreeMap<EntityId, u8>,
     /// BuyFood in progress: `(units, coins paid)` so a lost stock can be refunded.
     #[serde(default)]
     pub pending_purchase: BTreeMap<EntityId, (u32, i64)>,
@@ -138,6 +265,10 @@ pub struct World {
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
     pub by_role: [Vec<EntityId>; 5],
+    /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
+    /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
+    #[serde(skip)]
+    pub stat_slots: StatSlots,
     /// Name tables for births and immigrants; reloaded from assets on load.
     #[serde(skip)]
     pub names: NameTables,
@@ -188,6 +319,29 @@ components! {
     market: Market,
     treasury: Treasury,
     law: Law,
+    trace: Trace,
+}
+
+/// Statistical agents by hourly slot: `slots[s]` holds the ids with
+/// `index % 60 == s`, ascending.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StatSlots(pub Vec<Vec<EntityId>>);
+
+impl Default for StatSlots {
+    fn default() -> Self {
+        StatSlots(vec![Vec::new(); time::TICKS_PER_HOUR as usize])
+    }
+}
+
+impl StatSlots {
+    fn slot_of(id: EntityId) -> usize {
+        (u64::from(id.index) % time::TICKS_PER_HOUR) as usize
+    }
+
+    /// The bucket for `tick % 60`.
+    pub fn at(&self, tick: Tick) -> &[EntityId] {
+        &self.0[(tick % time::TICKS_PER_HOUR) as usize]
+    }
 }
 
 /// First/last name tables from `assets/names.txt`.
@@ -243,14 +397,9 @@ impl World {
     pub fn new(seed: u64, config: Config) -> World {
         let map = Map::load(&config.asset(&config.world.map));
         let names = NameTables::load(&config);
-        // Absent until `citysim-cli calibrate` (M7) has written it; any other
-        // read failure is a broken checkout and must not pass silently.
-        let stat_path = config.asset("stat_table.toml");
-        let stat_table = match std::fs::read_to_string(&stat_path) {
-            Ok(t) => Some(toml::from_str(&t).unwrap_or_else(|e| panic!("bad {}: {e}", stat_path.display()))),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
-            Err(e) => panic!("cannot read {}: {e}", stat_path.display()),
-        };
+        // Absent until `citysim-cli calibrate` has written it; any other read
+        // failure is a broken checkout and must not pass silently.
+        let (stat_table, stat_table_legacy) = load_stat_table(&config);
 
         let edge_roads = map.edge_roads();
         let levers = Levers::from_config(&config);
@@ -283,6 +432,7 @@ impl World {
             market: Vec::new(),
             treasury: Vec::new(),
             law: Vec::new(),
+            trace: Vec::new(),
             edges: BTreeMap::new(),
             crime_reports: Vec::new(),
             buildings_by_kind: BTreeMap::new(),
@@ -290,6 +440,7 @@ impl World {
             levers,
             stats: DailyStats::new(),
             events: VecDeque::new(),
+            next_event_id: 0,
             plan_queue: BTreeMap::new(),
             reservations: BTreeMap::new(),
             door_queue: BTreeMap::new(),
@@ -301,12 +452,19 @@ impl World {
             command_queue: Vec::new(),
             command_log: Vec::new(),
             stat_table,
+            stat_table_legacy,
+            holes: BTreeMap::new(),
+            holes_by_agent: BTreeMap::new(),
+            bind_queue: Vec::new(),
+            zone_watch: ZoneWatch::default(),
+            day_marks: BTreeMap::new(),
             pending_purchase: BTreeMap::new(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
             by_tier: Default::default(),
             by_role: Default::default(),
+            stat_slots: StatSlots::default(),
             names: names.clone(),
         };
         w.spawn_buildings();
@@ -595,8 +753,11 @@ impl World {
     pub fn index_brain(&mut self, id: EntityId) {
         self.unindex_brain(id);
         if let Some(b) = self.comp::<Brain>(id) {
-            let lod = b.lod as usize;
-            Self::list_insert(&mut self.by_tier[lod], id);
+            let lod = b.lod;
+            Self::list_insert(&mut self.by_tier[lod as usize], id);
+            if lod == Lod::Statistical {
+                Self::list_insert(&mut self.stat_slots.0[StatSlots::slot_of(id)], id);
+            }
         }
     }
 
@@ -604,6 +765,7 @@ impl World {
         for list in &mut self.by_tier {
             Self::list_remove(list, id);
         }
+        Self::list_remove(&mut self.stat_slots.0[StatSlots::slot_of(id)], id);
     }
 
     /// Call after any write to `Brain::lod`.
@@ -662,28 +824,36 @@ impl World {
 
     /// Rebuild both indices from the stores (after a load).
     pub fn rebuild_tiers_and_roles(&mut self) {
-        let (tiers, roles) = self.indices_from_stores();
+        let (tiers, roles, slots) = self.indices_from_stores();
         self.by_tier = tiers;
         self.by_role = roles;
+        self.stat_slots = slots;
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 5]) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 5], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
         let mut roles: [Vec<EntityId>; 5] = Default::default();
+        let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
                 tiers[b.lod as usize].push(id);
+                if b.lod == Lod::Statistical {
+                    slots.0[StatSlots::slot_of(id)].push(id);
+                }
             }
             if let Some(j) = self.comp::<Job>(id) {
                 roles[role_index(j.role)].push(id);
             }
         }
-        (tiers, roles)
+        (tiers, roles, slots)
     }
 
     /// Compare the incremental indices with a rebuild from the stores.
     pub fn check_indices(&self) -> Result<(), String> {
-        let (tiers, roles) = self.indices_from_stores();
+        let (tiers, roles, slots) = self.indices_from_stores();
+        if slots != self.stat_slots {
+            return Err("stat_slots out of sync with the Statistical tier".to_string());
+        }
         if tiers != self.by_tier {
             return Err(format!(
                 "by_tier out of sync: have {:?}, stores say {:?}",
@@ -870,8 +1040,9 @@ impl World {
     // -----------------------------------------------------------------------
 
     /// One in-game minute, systems in the fixed order
-    /// `commands, time, lod, needs, memory, think, plan, exec, economy, law,
-    /// social, gang, demography, stats`.
+    /// `commands, time, lod, needs, memory, think, plan, exec, economy, bind,
+    /// law, social, gang, demography, stats`. The binder runs before the law
+    /// so a cold-case report reaches the captain's daily rescoring (M10 D32).
     pub fn tick(&mut self) {
         self.apply_commands();
         // time: the clock is `self.tick`; daily hooks live in the systems that need them.
@@ -883,6 +1054,7 @@ impl World {
         systems::plan::run(self);
         crate::exec::run(self);
         systems::economy::run(self);
+        systems::bind::run(self);
         systems::law::run(self);
         systems::social::run(self);
         systems::gang::run(self);
@@ -910,8 +1082,23 @@ impl World {
         let half_life = self.config.brain.memory_half_life_days;
         // A Statistical agent keeps only what the hourly tick can act on, in
         // eight slots; the entries survive promotion, when the cap becomes 24.
+        // M10 D30: the off-screen crimes and courtships the hourly table now
+        // produces leave their memories too. Starved too: `needs::starvation`
+        // drifts lawfulness once a day by checking for today's entry, and
+        // without it a starving Statistical agent drifted every hour.
         if self.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical) {
-            if !matches!(kind, MemoryKind::Grief | MemoryKind::WasRobbed | MemoryKind::MetInJail) {
+            if !matches!(
+                kind,
+                MemoryKind::Grief
+                    | MemoryKind::Starved
+                    | MemoryKind::WasRobbed
+                    | MemoryKind::MetInJail
+                    | MemoryKind::Fought
+                    | MemoryKind::Lost
+                    | MemoryKind::Won
+                    | MemoryKind::Courted
+                    | MemoryKind::Rejected
+            ) {
                 return;
             }
             cap = 8;
@@ -981,6 +1168,14 @@ impl World {
     /// After a load: the tables are not saved.
     pub fn reload_names(&mut self) {
         self.names = NameTables::load(&self.config);
+        let (table, legacy) = load_stat_table(&self.config);
+        self.stat_table = table;
+        self.stat_table_legacy = legacy;
+    }
+
+    /// Set a `trace_flags` bit (ATE, SLEPT_AT_HOME) for today.
+    pub fn mark_day(&mut self, id: EntityId, bit: u8) {
+        *self.day_marks.entry(id).or_default() |= bit;
     }
 
     /// Remove an entity from every index and free it (emigrants, rotted or
@@ -1049,6 +1244,10 @@ impl World {
             }
         }
         self.rebuild_tiers_and_roles();
+        self.holes_by_agent.clear();
+        for (&hid, h) in &self.holes {
+            self.holes_by_agent.entry(h.victim).or_default().push(hid);
+        }
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde
@@ -1056,10 +1255,20 @@ impl World {
     /// only, and every held Home gets a full claim. A gang that already has a
     /// Hideout is left alone: its claims are live state.
     pub fn migrate_legacy(&mut self) {
+        // M10: a pre-M10 ring has no event ids; number it 0..n.
+        if self.next_event_id == 0 && !self.events.is_empty() {
+            for (i, e) in self.events.iter_mut().enumerate() {
+                e.id = i as u64;
+            }
+            self.next_event_id = self.events.len() as u64;
+        }
         // M9: a save from before the law had a brain has no `law` store.
         let n = self.alive.len();
         if self.law.len() < n {
             self.law.resize_with(n, || None);
+        }
+        if self.trace.len() < n {
+            self.trace.resize_with(n, || None);
         }
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {

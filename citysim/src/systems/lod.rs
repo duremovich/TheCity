@@ -3,18 +3,25 @@
 //! (`assets/stat_table.toml`, written by `citysim-cli calibrate`) stands in
 //! for the brain of a Statistical agent. The tiers are kept as index lists on
 //! the world (`World::tier`), and the Statistical hourly tick is spread over
-//! the hour: an agent runs on the ticks where `id.index % 60 == tick % 60`.
+//! the hour: an agent runs on the ticks where `id.index % 60 == tick % 60`
+//! (`World::stat_slots` buckets the tier by that slot).
+//!
+//! M10: the table has 24 rows (phase x lawfulness x hunger) and five
+//! independent hourly rolls beyond the one outcome: the agent's own theft and
+//! courtship, and being robbed, beaten or killed by an actor nobody has drawn
+//! yet. Those open a hole (`systems::bind`), bound later from the traces.
 
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, Household, Job, Lod, Personality, Position, Role, Sentence, TilePos,
+    hole_id, trace_flags, Brain, Building, BuildingKind, Crime, DeathCause, Hole, HoleKind, Household, Job, Lod,
+    MemoryKind, Personality, Position, Role, Sentence, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::exec::{self, ExecState};
 use crate::goap::ActionKind;
-use crate::systems::economy;
+use crate::systems::{bind, economy};
 use crate::time::{DayPhase, TICKS_PER_HOUR};
 use crate::world::{StatRow, World};
 
@@ -43,19 +50,34 @@ pub fn run(world: &mut World) {
     if world.tick.is_multiple_of(TICKS_PER_HOUR) {
         assign_hour(world);
         debug_assert!(world.check_indices().is_ok(), "{:?}", world.check_indices());
+        // The trace's STATISTICAL_ALL_DAY: a body at any assignment today.
+        let today = world.day();
+        for id in world.bodies() {
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.body_day = Some(today);
+            }
+        }
     }
     run_statistical(world);
+    // Promotions this tick queued their victims' open holes (M10 D32).
+    bind::drain_queue(world);
 }
 
 fn assign_hour(world: &mut World) {
     if let Some(forced) = world.config.lod.force {
         // Prisoners and emigrants stay Coarse here too: a Statistical prisoner
-        // would be snapped out of the Jail and never fed.
+        // would be snapped out of the Jail and never fed. A forced
+        // Statistical city also keeps the bodies the default tiers always
+        // give one (M10): guards and gravediggers (D20) and the wanted, so
+        // its off-screen thieves can still be arrested.
         // scan-ok: hourly: forced tiers
         for id in world.citizens() {
             let Some(b) = world.comp::<Brain>(id) else { continue };
             let held = world.has::<Sentence>(id) || b.emigrating || b.cuffed_by.is_some();
-            set_lod(world, id, if held { Lod::Coarse } else { forced });
+            let body = forced == Lod::Statistical
+                && (world.comp::<Job>(id).is_some_and(|j| matches!(j.role, Role::Guard | Role::Gravedigger))
+                    || crate::systems::law::wanted(world, id));
+            set_lod(world, id, if held || body { Lod::Coarse } else { forced });
         }
     } else {
         assign(world);
@@ -177,13 +199,21 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         return;
     }
     if from == Lod::Statistical {
+        let today = world.day();
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.lod = lod;
             b.exec = ExecState::Idle;
             b.current_goal = None;
+            b.body_day = Some(today);
         }
         world.retier(id);
         snap_to_phase_door(world, id, true);
+        // A body's memories are never half-filled: its open victim holes bind
+        // at the end of this tick's `lod::run`.
+        if let Some(hs) = world.holes_by_agent.get(&id) {
+            let hs = hs.clone();
+            world.bind_queue.extend(hs);
+        }
         return;
     }
     let exec = brain.exec.clone();
@@ -230,29 +260,21 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
     }
 }
 
-/// Which table row the current phase uses.
-fn stat_row(world: &World) -> Option<StatRow> {
+/// The agent's table row: the current phase, and its lawfulness and hunger
+/// at the start of the hour (before the hour's decay), as `calibrate` buckets.
+fn stat_row(world: &World, id: EntityId) -> Option<StatRow> {
     let t = world.stat_table.as_ref()?;
-    Some(match world.phase() {
-        DayPhase::Morning => t.morning.clone(),
-        DayPhase::Work => t.work.clone(),
-        DayPhase::Evening => t.evening.clone(),
-        DayPhase::Night => t.night.clone(),
-    })
+    let lawfulness = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
+    let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
+    Some(t.row(world.phase(), lawfulness, hunger).clone())
 }
 
 /// Statistical agents whose hourly slot is this tick: `id.index % 60 == tick % 60`.
 /// Each agent keeps a fixed minute of the hour, so it runs 24 times a day and
 /// the load is spread evenly over the ticks.
+/// Reads one slot bucket (`World::stat_slots`), so the cost is O(due agents).
 pub fn due_this_tick(world: &World) -> Vec<EntityId> {
-    let slot = world.tick % TICKS_PER_HOUR;
-    world
-        .tier(Lod::Statistical)
-        .iter()
-        .copied()
-        .filter(|id| u64::from(id.index) % TICKS_PER_HOUR == slot)
-        .filter(|&id| !world.has::<Sentence>(id))
-        .collect()
+    world.stat_slots.at(world.tick).iter().copied().filter(|&id| !world.has::<Sentence>(id)).collect()
 }
 
 /// The hourly stand-in for a Statistical brain: an hour of need decay, then
@@ -263,14 +285,20 @@ pub fn run_statistical(world: &mut World) {
     if agents.is_empty() {
         return;
     }
-    let Some(row) = stat_row(world) else {
-        panic!("assets/stat_table.toml is missing: run `cargo run -p citysim-cli -- calibrate`");
-    };
+    if world.stat_table.is_none() {
+        if world.stat_table_legacy {
+            panic!(
+                "assets/stat_table.toml is the pre-M10 four-row table: run `cargo run --release -p citysim-cli -- calibrate`"
+            );
+        }
+        panic!("assets/stat_table.toml is missing: run `cargo run --release -p citysim-cli -- calibrate`");
+    }
     let cfg = world.config.needs.clone();
     let season = world.season().index();
     let season_energy_mult = world.config.economy.energy_decay_mult[season];
     let phase = world.phase();
     for id in agents {
+        let Some(row) = stat_row(world, id) else { continue };
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
@@ -314,6 +342,9 @@ pub fn run_statistical(world: &mut World) {
                     // As a Full agent's Sleep at home: energy back, and a
                     // cohabiting spouse keeps the marriage warm.
                     let home = world.comp::<Household>(id).and_then(|h| h.home);
+                    if home.is_some() {
+                        world.mark_day(id, trace_flags::SLEPT_AT_HOME);
+                    }
                     let with_spouse = home.is_some()
                         && world.spouse_of(id).is_some_and(|s| world.comp::<Household>(s).and_then(|h| h.home) == home);
                     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
@@ -326,8 +357,165 @@ pub fn run_statistical(world: &mut World) {
             }
             Outcome::Idle => {}
         }
-        world.recompute_wealth_for(id);
+        // 4. The independent rolls: the agent's own crimes and courtship, and
+        // what is done to it by an actor nobody has drawn yet (a hole).
+        stat_rolls(world, id, &row);
+        if world.has::<Brain>(id) {
+            world.recompute_wealth_for(id);
+        }
     }
+}
+
+/// The five independent hourly rolls, always drawn from the agent's stream in
+/// the fixed order steal, flirt, robbed, assaulted, killed (so the stream
+/// advances identically whatever fires), then applied killed first. An agent
+/// whose hour already took it off the tier (a caught thief) only draws.
+fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
+    let rng = world.rng.agent(id);
+    let u_steal: f32 = rng.random();
+    let u_flirt: f32 = rng.random();
+    let u_robbed: f32 = rng.random();
+    let u_assaulted: f32 = rng.random();
+    let u_killed: f32 = rng.random();
+    if world.comp::<Brain>(id).is_none_or(|b| b.lod != Lod::Statistical) {
+        return;
+    }
+    let m = world.config.lod.stat_violence_mult;
+    let adult = crate::systems::demography::is_adult(world, id);
+    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return };
+    let zone = world.map.zone(tile);
+    let tick = world.tick;
+    let name = world.name_of(id);
+    let consequential = crate::systems::law::is_guard(world, id) || world.has::<crate::components::GangMember>(id);
+    let base = |kind: HoleKind, event_id: u64, consequential: bool, loot: i64, w: &World| Hole {
+        id: hole_id(tick, id, kind),
+        kind,
+        victim: id,
+        zone,
+        tick,
+        event_id,
+        consequential,
+        spouse: w.spouse_of(id),
+        loot,
+        home: w.comp::<Household>(id).and_then(|h| h.home),
+        gang: w.gang_of(id),
+    };
+
+    if adult && u_killed < row.p_killed * m {
+        let hole = base(HoleKind::Killed, 0, true, 0, world);
+        let ev = world.push_event(
+            EventKind::Murder,
+            &[EntityId::NONE, id],
+            format!("{name} was killed in the {zone} (assailant unknown)"),
+        );
+        world.kill_by(id, DeathCause::Violence, None);
+        world.stats.current.deaths_violence_offscreen += 1;
+        bind::open_hole(world, Hole { event_id: ev, ..hole });
+        return;
+    }
+    if u_assaulted < row.p_assaulted * m {
+        world.remember(id, MemoryKind::Fought, None, 0.7, -0.7, false);
+        world.remember(id, MemoryKind::Lost, None, 0.6, -0.6, false);
+        if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+            n.safety = (n.safety - 0.6).max(0.0);
+            n.energy = (n.energy - 0.2).max(0.0);
+        }
+        // As `law::raise_crime` drifts a Full victim.
+        if let Some(p) = world.comp_mut::<Personality>(id) {
+            p.drift(crate::personality::Drift::Robbed);
+        }
+        let ev =
+            world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in the {zone}"));
+        let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
+        bind::open_hole(world, hole);
+    }
+    if u_robbed < row.p_robbed * m {
+        let extort = world.config.social.extort_amount;
+        let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+        let loot = extort.min(coins.max(0));
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
+            w.coins -= loot;
+        }
+        world.remember(id, MemoryKind::WasRobbed, None, 0.6, -0.6, false);
+        if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+            n.safety = (n.safety - 0.4).max(0.0);
+        }
+        if let Some(p) = world.comp_mut::<Personality>(id) {
+            p.drift(crate::personality::Drift::Robbed);
+        }
+        let ev = world.push_event(
+            EventKind::Robbed,
+            &[EntityId::NONE, id],
+            format!("{name} was robbed of {loot} in the {zone}"),
+        );
+        let hole = base(HoleKind::Robbed, ev, consequential, loot, world);
+        bind::open_hole(world, hole);
+    }
+    if u_flirt < row.p_flirt {
+        stat_flirt(world, id);
+    }
+    if u_steal < row.p_steal {
+        stat_theft(world, id);
+    }
+}
+
+/// A Flirt off screen, as `exec/actions.rs` Flirt: the highest-affinity known
+/// edge (>= 0.3) with a living, adult, unmarried counterpart not rejected this
+/// week (ties: lower id). Ready to propose: the proposal (the second visit of
+/// the v1 courtship). Else accepted at the v1 rate `0.3 + affinity + 0.2 x
+/// sociability`, rolled on the agent's stream.
+fn stat_flirt(world: &mut World, id: EntityId) {
+    use crate::systems::{demography, social};
+    if !demography::is_adult(world, id) || social::has_spouse(world, id) {
+        return;
+    }
+    // The same candidate rule `calibrate` conditions `p_flirt` on.
+    let Some(partner) = social::known_candidate(world, id, 0.3).filter(|&o| demography::is_adult(world, o)) else {
+        return;
+    };
+    if social::propose_allowed(world, id, partner) {
+        social::propose(world, id, partner);
+        return;
+    }
+    let aff = world.edge(id, partner).map_or(0.0, |e| e.affinity);
+    let sociable = world.comp::<Personality>(partner).map_or(0.5, |p| p.sociability);
+    let roll: f32 = world.rng.agent(id).random();
+    if roll < 0.3 + aff + 0.2 * sociable {
+        for who in [id, partner] {
+            if let Some(n) = world.comp_mut::<crate::components::Needs>(who) {
+                n.intimacy = (n.intimacy + 0.1).min(1.0);
+            }
+            world.remember(who, MemoryKind::Courted, Some(if who == id { partner } else { id }), 0.4, 0.3, false);
+        }
+        social::adjust(world, id, partner, 0.1, 0.02);
+    } else {
+        world.remember(id, MemoryKind::Rejected, Some(partner), 0.4, -0.3, false);
+    }
+}
+
+/// An off-screen Market theft: one unit from the agent's Market into its
+/// inventory as stolen food, the `Theft` event and counter, and a
+/// `stat_theft_caught_p` report with no witness (the thief then gets a body,
+/// which the arrest path needs). Shared by the eat path and the `p_steal`
+/// roll. Returns whether anything was taken.
+fn stat_theft(world: &mut World, id: EntityId) -> bool {
+    let Some(market) = world.local(id, BuildingKind::Market) else { return false };
+    let Some(b) = world.comp_mut::<Building>(market).filter(|b| b.stock_food > 0) else { return false };
+    b.stock_food -= 1;
+    if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
+        i.food += 1;
+        i.stolen_food += 1;
+    }
+    world.stats.current.thefts += 1;
+    let name = world.name_of(id);
+    world.push_event(EventKind::Theft, &[id, market], format!("{name} stole food (off screen)"));
+    let caught: f64 = world.rng.agent(id).random();
+    if caught < world.config.crime.stat_theft_caught_p {
+        crate::systems::law::file_report(world, Crime::Theft, id, None);
+        // The normal arrest path needs a body on the map.
+        set_lod(world, id, Lod::Coarse);
+    }
+    true
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -349,6 +537,7 @@ fn stat_eat(world: &mut World, id: EntityId) {
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
+        world.mark_day(id, trace_flags::ATE);
         return;
     }
     // The Home pantry feeds a Statistical resident as it feeds a Full one.
@@ -363,6 +552,7 @@ fn stat_eat(world: &mut World, id: EntityId) {
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
+        world.mark_day(id, trace_flags::ATE);
         return;
     }
     let Some((market, stock, price)) = world
@@ -376,49 +566,83 @@ fn stat_eat(world: &mut World, id: EntityId) {
     }
     let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
     if coins >= price {
-        // The same purchase a Full agent makes: pay, take, eat.
-        let paid = economy::pay_for_food(world, id, Some(market), 1);
-        if economy::take_food(world, id, Some(market), 1, paid) {
+        // The purchase a Full agent makes (BuyFood: up to three units), one
+        // eaten and the rest stored in the Home pantry (StoreFood), where the
+        // household eats it. Buying one meal at a time left a broke
+        // housemate nothing to eat once the opening pantry was gone (M10).
+        let units = economy::buy_quantity(world, id, Some(market)).max(1);
+        let paid = economy::pay_for_food(world, id, Some(market), units);
+        if economy::take_food(world, id, Some(market), units, paid) {
             if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
                 i.food = i.food.saturating_sub(1);
             }
             if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
                 crate::needs::eat(n, &cfg);
             }
+            world.mark_day(id, trace_flags::ATE);
+            stat_store_food(world, id);
         }
         return;
     }
-    // Theft is a hungry agent's resort, as the planner's cost table makes it
-    // for Full agents (steal_starving_bonus): the lawless steal when hungry,
-    // not for a discretionary meal.
-    let lawless = world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < 0.3);
-    let hungry = world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger < 0.4);
-    if !lawless || !hungry {
+    // Desperation theft: a starving agent with no food and no coins steals,
+    // whatever its lawfulness (with nothing else to eat that is a Full
+    // agent's only Eat plan). Every other theft is the table's `p_steal`,
+    // calibrated on all Full thefts but these (M10; replaces the v1
+    // lawless-and-hungry gate, D29).
+    let starving = world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger <= 0.0);
+    if !starving {
         return;
     }
-    if let Some(b) = world.comp_mut::<Building>(market) {
-        b.stock_food -= 1;
+    if !stat_theft(world, id) {
+        return;
+    }
+    // ... and eaten at once.
+    if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
+        i.food = i.food.saturating_sub(1);
+        i.stolen_food = i.stolen_food.min(i.food);
     }
     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
         crate::needs::eat(n, &cfg);
     }
-    world.stats.current.thefts += 1;
-    let name = world.name_of(id);
-    world.push_event(EventKind::Theft, &[id], format!("{name} stole food (off screen)"));
-    let caught: f64 = world.rng.agent(id).random();
-    if caught < world.config.crime.stat_theft_caught_p {
-        crate::systems::law::file_report(world, Crime::Theft, id, None);
-        // The normal arrest path needs a body on the map.
-        set_lod(world, id, Lod::Coarse);
+    world.mark_day(id, trace_flags::ATE);
+}
+
+/// StoreFood off screen: the agent's bought (not stolen) food goes into its
+/// Home pantry up to the pantry's cap.
+fn stat_store_food(world: &mut World, id: EntityId) {
+    let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return };
+    let cap = world.config.buildings.home.stock_cap;
+    let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
+    let Some(inv) = world.comp_mut::<crate::components::Inventory>(id) else { return };
+    let movable = inv.food.saturating_sub(inv.stolen_food).min(room);
+    inv.food -= movable;
+    if let Some(b) = world.comp_mut::<Building>(home) {
+        b.stock_food += movable;
     }
 }
 
 fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     let tick = world.tick;
     let Some(job) = world.comp::<Job>(id).cloned() else {
-        // The dole, paid directly, once a day in the Work phase.
-        if phase == DayPhase::Work && crate::systems::demography::is_adult(world, id) {
-            economy::collect_dole(world, id);
+        // The dole, paid directly, decided once a day in the Work phase as a
+        // Full agent decides it (M10; drawing it daily regardless drained the
+        // Treasury and left the wages unpaid): its Earn goal is satisfied
+        // while it holds `SAVINGS_DAYS` meals of coins, and below that it
+        // makes the walk to the Hall on the table's `p_dole_day` of days.
+        let day = world.day();
+        let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_at(m));
+        let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+        let saving = coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price);
+        let undecided = world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day != Some(day));
+        if phase == DayPhase::Work && !saving && undecided && crate::systems::demography::is_adult(world, id) {
+            let p = world.stat_table.as_ref().map_or(1.0, |t| t.p_dole_day);
+            let u: f32 = world.rng.agent(id).random();
+            if u < p {
+                economy::collect_dole(world, id);
+            }
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.last_dole_day = Some(day);
+            }
         }
         return;
     };
@@ -429,6 +653,26 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     if job.role == Role::Farmer {
         if let Some(farm) = job.employer {
             economy::accrue_farm_work(world, id, farm, u64::from(TICKS_PER_HOUR as u32));
+        }
+    }
+    // An hour of co-work drifts each pair of co-workers as `social`'s
+    // co-location does for bodies (bodies never see a Statistical agent in
+    // their building). Each Statistical pair once an hour: the lower id drives.
+    if job.employer.is_some() {
+        let tod = world.tick_of_day();
+        let mates: Vec<EntityId> = world
+            .workers(job.role)
+            .iter()
+            .copied()
+            .filter(|&c| c > id)
+            .filter(|&c| {
+                world.comp::<Job>(c).is_some_and(|j| j.employer == job.employer && j.on_shift(tod))
+                    && world.comp::<Brain>(c).is_some_and(|b| b.lod == Lod::Statistical)
+                    && !world.has::<Sentence>(c)
+            })
+            .collect();
+        for c in mates {
+            crate::systems::social::interacted(world, id, c);
         }
     }
     let shift_ends_soon = job.shift_end(tick).is_some_and(|end| end <= tick + TICKS_PER_HOUR);
@@ -473,6 +717,7 @@ fn stat_social(world: &mut World, id: EntityId) {
         }
         return;
     }
+    // A Chat's drift (`exec/actions.rs` Chat): affinity by similarity, trust +0.02.
     let k = world.rng.agent(id).random_range(0..neighbours.len());
-    crate::systems::social::adjust(world, id, neighbours[k], 0.02, 0.0);
+    crate::systems::social::interacted(world, id, neighbours[k]);
 }

@@ -772,6 +772,10 @@ pub struct Brain {
     /// Gang: the day a `Disobeyed` event was last logged for this member.
     #[serde(default)]
     pub disobeyed_day: Option<u64>,
+    /// M10: the last day the agent was not Statistical at an hourly
+    /// assignment (the trace's `STATISTICAL_ALL_DAY` is `body_day != today`).
+    #[serde(default)]
+    pub body_day: Option<u64>,
 }
 
 impl Default for Brain {
@@ -806,6 +810,7 @@ impl Default for Brain {
             last_spouse_night: None,
             following_order: None,
             disobeyed_day: None,
+            body_day: None,
         }
     }
 }
@@ -1099,4 +1104,212 @@ pub fn edge_key(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
     } else {
         (b, a)
     }
+}
+
+// ---------------------------------------------------------------------------
+// M10: holes (off-screen crimes whose actor is drawn lazily) and traces
+// ---------------------------------------------------------------------------
+
+/// `(tick << 24) | (victim.index << 2) | kind` (M10 D8): unique per victim,
+/// kind and tick, and ascending ids are oldest first.
+pub type HoleId = u64;
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum HoleKind {
+    Robbed,
+    Assaulted,
+    Killed,
+}
+
+impl HoleKind {
+    /// The crime a witness reports once the hole is bound.
+    pub fn crime(self) -> Crime {
+        match self {
+            HoleKind::Robbed => Crime::Theft,
+            HoleKind::Assaulted => Crime::Assault,
+            HoleKind::Killed => Crime::Murder,
+        }
+    }
+
+    /// "robbery", "beating", "killing".
+    pub fn noun(self) -> &'static str {
+        match self {
+            HoleKind::Robbed => "robbery",
+            HoleKind::Assaulted => "beating",
+            HoleKind::Killed => "killing",
+        }
+    }
+}
+
+/// The packed hole key (M10 D8).
+pub fn hole_id(tick: Tick, victim: EntityId, kind: HoleKind) -> HoleId {
+    debug_assert!(victim.index < 1 << 22, "hole key packs the victim index in 22 bits");
+    (tick << 24) | (u64::from(victim.index) << 2) | kind as u64
+}
+
+/// An off-screen crime against a Statistical victim, actor not yet drawn.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Hole {
+    pub id: HoleId,
+    pub kind: HoleKind,
+    pub victim: EntityId,
+    pub zone: Zone,
+    pub tick: Tick,
+    /// The ring entry to rewrite on binding.
+    pub event_id: u64,
+    /// Killed, or the victim is a gang member or a guard: bound by the next daily pass.
+    pub consequential: bool,
+    /// Captured at creation: `World::spouses` forgets the dead (M10 D10).
+    #[serde(default)]
+    pub spouse: Option<EntityId>,
+    /// Coins a Robbed victim lost; paid to the actor at bind, gone on Unknown.
+    #[serde(default)]
+    pub loot: i64,
+    /// The victim's Home and gang at creation: a Killed victim's are gone by
+    /// bind time, and the binder's gang-claim weight and gang shock need them.
+    #[serde(default)]
+    pub home: Option<EntityId>,
+    #[serde(default)]
+    pub gang: Option<EntityId>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Bound {
+    Actor(EntityId),
+    Unknown,
+}
+
+/// Bits of `DayTrace::flags`.
+pub mod trace_flags {
+    pub const ALIVE: u8 = 1;
+    pub const JAILED: u8 = 2;
+    pub const HOMELESS: u8 = 4;
+    pub const EMPLOYED: u8 = 8;
+    pub const GANG: u8 = 16;
+    pub const STATISTICAL_ALL_DAY: u8 = 32;
+    pub const SLEPT_AT_HOME: u8 = 64;
+    pub const ATE: u8 = 128;
+}
+
+/// One day of an adult's life, packed into a u32 for the save:
+/// zone (3 bits) | flags (8) << 3 | hunger band (2) << 11 | mood band (2) << 13.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[serde(from = "u32", into = "u32")]
+pub struct DayTrace {
+    /// Where the agent ended the day.
+    pub zone: Zone,
+    pub flags: u8,
+    /// `0..=3` band at day end.
+    pub hunger: u8,
+    /// `0..=3` band at day end.
+    pub mood: u8,
+}
+
+impl DayTrace {
+    pub fn has(&self, flag: u8) -> bool {
+        self.flags & flag != 0
+    }
+
+    /// Hunger `< 0.25 → 0, < 0.5 → 1, < 0.75 → 2, else 3`.
+    pub fn hunger_band(h: f32) -> u8 {
+        if h < 0.25 {
+            0
+        } else if h < 0.5 {
+            1
+        } else if h < 0.75 {
+            2
+        } else {
+            3
+        }
+    }
+
+    /// Mood (`-1..1`) `< -0.5 → 0, < 0 → 1, < 0.5 → 2, else 3`.
+    pub fn mood_band(m: f32) -> u8 {
+        if m < -0.5 {
+            0
+        } else if m < 0.0 {
+            1
+        } else if m < 0.5 {
+            2
+        } else {
+            3
+        }
+    }
+}
+
+impl From<u32> for DayTrace {
+    fn from(v: u32) -> DayTrace {
+        let z = (v & 0b111) as usize;
+        DayTrace {
+            zone: Zone::ALL[z.min(Zone::ALL.len() - 1)],
+            flags: ((v >> 3) & 0xff) as u8,
+            hunger: ((v >> 11) & 0b11) as u8,
+            mood: ((v >> 13) & 0b11) as u8,
+        }
+    }
+}
+
+impl From<DayTrace> for u32 {
+    fn from(t: DayTrace) -> u32 {
+        t.zone.index() as u32
+            | u32::from(t.flags) << 3
+            | u32::from(t.hunger & 0b11) << 11
+            | u32::from(t.mood & 0b11) << 13
+    }
+}
+
+/// The last `[lod] trace_days` days of an adult, newest last. Survives death
+/// (the binder and the biography read the past of the dead too).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Trace {
+    /// The day of the newest entry.
+    pub last_day: u64,
+    pub days: VecDeque<DayTrace>,
+}
+
+impl Trace {
+    /// The entry for `day`, if recorded and not yet evicted.
+    pub fn on_day(&self, day: u64) -> Option<DayTrace> {
+        if self.days.is_empty() || day > self.last_day {
+            return None;
+        }
+        let back = usize::try_from(self.last_day - day).ok()?;
+        let n = self.days.len();
+        if back >= n {
+            return None;
+        }
+        self.days.get(n - 1 - back).copied()
+    }
+
+    /// Record `day`, one entry per day, the oldest evicted past `cap`.
+    pub fn push(&mut self, day: u64, t: DayTrace, cap: usize) {
+        if !self.days.is_empty() && day <= self.last_day {
+            // Same day twice (a re-run of the daily pass): replace.
+            if day == self.last_day {
+                if let Some(last) = self.days.back_mut() {
+                    *last = t;
+                }
+            }
+            return;
+        }
+        // Keep indices contiguous: a skipped day repeats the previous entry.
+        if let Some(&prev) = self.days.back() {
+            let gap = (day - self.last_day - 1).min(cap as u64);
+            for _ in 0..gap {
+                self.days.push_back(prev);
+            }
+        }
+        self.days.push_back(t);
+        self.last_day = day;
+        while self.days.len() > cap.max(1) {
+            self.days.pop_front();
+        }
+    }
+}
+
+/// Guard-on-shift ticks per zone (`Zone::index`), today and yesterday (M10 D33).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ZoneWatch {
+    pub today: [u32; 5],
+    pub yesterday: [u32; 5],
 }

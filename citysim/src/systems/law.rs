@@ -524,6 +524,7 @@ pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.
 /// Daily: warrants expire, prisoners are fed and released.
 pub fn run(world: &mut World) {
+    tally_watch(world);
     sightings(world);
     if world.tick_of_day() == 0 {
         expire_warrants(world);
@@ -533,6 +534,21 @@ pub fn run(world: &mut World) {
     // The captain's daily rescoring, after the guard roster is reconciled.
     crate::systems::law_brain::run(world);
     releases(world);
+}
+
+/// M10 D33: one tick of watch per on-shift, unjailed guard, in the zone it
+/// stands in (`bind::zone_law_coverage` reads yesterday's totals).
+fn tally_watch(world: &mut World) {
+    let tod = world.tick_of_day();
+    for i in 0..world.guards().len() {
+        let g = world.guards()[i];
+        if world.has::<Sentence>(g) || !world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod)) {
+            continue;
+        }
+        let Some(tile) = world.comp::<Position>(g).map(|p| p.tile) else { continue };
+        let z = world.map.zone(tile).index();
+        world.zone_watch.today[z] += 1;
+    }
 }
 
 /// The `guard_count` lever, reconciled daily with at most five changes:
@@ -653,6 +669,7 @@ fn jail_upkeep(world: &mut World) {
             if let Some(n) = world.comp_mut::<Needs>(who) {
                 crate::needs::eat(n, &cfg);
             }
+            world.mark_day(who, crate::components::trace_flags::ATE);
         }
         if let Some(n) = world.comp_mut::<Needs>(who) {
             n.energy = 1.0;

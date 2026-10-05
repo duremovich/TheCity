@@ -291,6 +291,26 @@ max_full = 50
 # M10: 150 (v1 100). Guards now get gang members' priority; without the room 120 gang members take
 # every slot and the whole watch is Statistical.
 max_coarse = 150
+# M10: days of per-adult Trace kept (the binder and the biography read it).
+trace_days = 120
+# M10 D26: multiplies the table's p_robbed / p_assaulted / p_killed at use; the knob if off-screen
+# violence falls short of the M10 scenario. The parity test pins it to 1.0.
+stat_violence_mult = 1.0
+
+# M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
+# (1 - lawfulness)^2 x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
+# x other_zone_weight off-zone. p_unknown is drawn first ("nobody ever learns who", D11).
+[bind]
+hole_ttl_days = 30
+max_open_per_agent = 8
+p_unknown = 0.30
+p_witness = 0.25
+coverage_min = 0.5
+coverage_max = 2.0
+gang_claim_mult = 2.0
+enemy_mult = 3.0
+statistical_mult = 0.5
+other_zone_weight = 0.25
 
 [levers]
 tax_rate = 0.05

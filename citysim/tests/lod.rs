@@ -126,37 +126,119 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
     }
 }
 
-/// Thefts, hunger-days and arrests per 100 agent-days, Statistical within
-/// 15% of Full (floor 0.5). Run with `--ignored`.
+/// Parity v2 (M10 § 7, D37): Full vs Statistical on the 2,000 map's city
+/// scaled to 500, gangless, 30 days, seeds 2000-2002 pooled. Thefts, hunger-days, arrests,
+/// assaults, violent deaths and marriages per 100 agent-days within 15%
+/// (floor 0.5); then, with every hole bound, the share of attributed crimes
+/// per actor lawfulness bucket within `max(0.15 x share, 0.05)`. Run with
+/// `--ignored`.
 #[test]
 #[ignore]
 fn test_full_vs_statistical_within_15pct() {
-    fn metrics(force: Lod) -> (f64, f64, f64) {
-        // M10: the 2,000 map's city scaled to 200 (D25).
-        let mut cfg = Config::load().scaled_to(200);
+    use citysim::systems::bind;
+    use citysim::{EventKind, Personality};
+    const AGENTS: u32 = 500;
+    const DAYS: u64 = 30;
+    const SEEDS: [u64; 3] = [2000, 2001, 2002];
+    struct Run {
+        rates: [f64; 6],
+        actors: [f64; 3],
+    }
+    fn bucket(w: &World, id: citysim::EntityId) -> Option<usize> {
+        let l = w.comp::<Personality>(id)?.lawfulness;
+        Some(if l < 0.3 {
+            0
+        } else if l < 0.7 {
+            1
+        } else {
+            2
+        })
+    }
+    fn run(force: Lod, seed: u64) -> Run {
+        let mut cfg = Config::load().scaled_to(AGENTS);
         cfg.lod.force = Some(force);
-        // The table never modelled gang actions, and a forced-Statistical
-        // world has no gang at all: compare the tiers on gangless cities.
+        // The table never modelled gang actions (calibrate is gangless too, D26).
         cfg.gangs.max_members = 0;
-        let mut w = World::new(2000, cfg);
+        cfg.lod.stat_violence_mult = 1.0;
+        let mut w = World::new(seed, cfg);
         let mut hunger_days = 0u64;
-        for _ in 0..30 {
+        let (mut assaults, mut marriages) = (0u64, 0u64);
+        let mut actors = [0u64; 3];
+        let mut cursor = 0u64;
+        // Actor buckets are read when the event is seen (end of its day).
+        let scan = |w: &World, cursor: &mut u64, assaults: &mut u64, marriages: &mut u64, actors: &mut [u64; 3]| {
+            for e in w.events.iter().filter(|e| e.id >= *cursor) {
+                match e.kind {
+                    EventKind::Assault | EventKind::Assaulted => *assaults += 1,
+                    EventKind::Marriage => *marriages += 1,
+                    _ => {}
+                }
+                let actor_side = match force {
+                    Lod::Full => matches!(e.kind, EventKind::Theft | EventKind::Assault | EventKind::Murder),
+                    _ => matches!(e.kind, EventKind::Theft) || (e.kind == EventKind::Attributed && e.actors.len() == 2),
+                };
+                if actor_side {
+                    if let Some(b) = e.actors.first().and_then(|&a| bucket(w, a)) {
+                        actors[b] += 1;
+                    }
+                }
+            }
+            *cursor = w.next_event_id;
+        };
+        for _ in 0..DAYS {
             w.run_ticks(TICKS_PER_DAY);
             hunger_days +=
                 w.citizens().into_iter().filter(|&id| w.comp::<Needs>(id).is_some_and(|n| n.hunger < 0.2)).count()
                     as u64;
+            scan(&w, &mut cursor, &mut assaults, &mut marriages, &mut actors);
         }
-        let agent_days = 200.0 * 30.0 / 100.0;
-        let thefts: u32 = w.stats.history.iter().map(|r| r.thefts).sum();
-        let arrests: u32 = w.stats.history.iter().map(|r| r.arrests).sum();
-        (f64::from(thefts) / agent_days, hunger_days as f64 / agent_days, f64::from(arrests) / agent_days)
+        bind::bind_all(&mut w);
+        scan(&w, &mut cursor, &mut assaults, &mut marriages, &mut actors);
+        let per = f64::from(AGENTS) * DAYS as f64 / 100.0;
+        let sum = |f: fn(&citysim::DayRow) -> u32| w.stats.history.iter().map(f).sum::<u32>() as f64 / per;
+        Run {
+            rates: [
+                sum(|r| r.thefts),
+                hunger_days as f64 / per,
+                sum(|r| r.arrests),
+                assaults as f64 / per,
+                sum(|r| r.deaths_violence),
+                marriages as f64 / per,
+            ],
+            actors: actors.map(|n| n as f64),
+        }
     }
-    let full = metrics(Lod::Full);
-    let stat = metrics(Lod::Statistical);
-    for (name, f, s) in [("thefts", full.0, stat.0), ("hunger-days", full.1, stat.1), ("arrests", full.2, stat.2)] {
+    // Three cities per tier, pooled: one 30-day city's theft rate varies by a
+    // quarter from seed to seed (seed 2000 alone runs 4.1 against 2.9-3.6).
+    let pooled = |force: Lod| {
+        let runs: Vec<Run> = SEEDS.iter().map(|&s| run(force, s)).collect();
+        let n = runs.len() as f64;
+        let rates = std::array::from_fn(|i| runs.iter().map(|r| r.rates[i]).sum::<f64>() / n);
+        let counts: [f64; 3] = std::array::from_fn(|b| runs.iter().map(|r| r.actors[b]).sum::<f64>());
+        let total = counts.iter().sum::<f64>().max(1.0);
+        Run { rates, actors: counts.map(|c| c / total) }
+    };
+    let full = pooled(Lod::Full);
+    let stat = pooled(Lod::Statistical);
+    let names = ["thefts", "hunger-days", "arrests", "assaults", "violent deaths", "marriages"];
+    let mut failures = Vec::new();
+    for (i, name) in names.iter().enumerate() {
+        let (f, s) = (full.rates[i], stat.rates[i]);
         let tolerance = (0.15 * f).max(0.5);
-        assert!((f - s).abs() <= tolerance, "{name}: Full {f:.2} vs Statistical {s:.2} per 100 agent-days");
+        eprintln!("{name:15} Full {f:7.3}  Statistical {s:7.3}  per 100 agent-days (tolerance {tolerance:.2})");
+        if (f - s).abs() > tolerance {
+            failures.push(format!("{name}: Full {f:.3} vs Statistical {s:.3}"));
+        }
     }
+    for b in 0..3 {
+        let (f, s) = (full.actors[b], stat.actors[b]);
+        let tolerance = (0.15 * f).max(0.05);
+        eprintln!("actor share law{b}  Full {f:.3}  Statistical {s:.3}  (tolerance {tolerance:.3})");
+        if (f - s).abs() > tolerance {
+            failures.push(format!("actor share law{b}: Full {f:.3} vs Statistical {s:.3}"));
+        }
+    }
+    assert!(failures.is_empty(), "{failures:?}");
 }
 
 #[test]

@@ -3,10 +3,10 @@
 
 use std::collections::BTreeMap;
 
-use citysim::systems::{demography, lod};
+use citysim::systems::{demography, law, lod};
 use citysim::{
-    save, Brain, Building, BuildingKind, Config, DeathCause, EntityId, Household, Job, Lod, Map, Position, Role,
-    TileKind, TilePos, World, Zone, TICKS_PER_DAY, TICKS_PER_HOUR,
+    save, Brain, Building, BuildingKind, Config, Crime, DeathCause, EntityId, Household, Job, Lod, Map, Needs,
+    Position, Role, TileKind, TilePos, World, Zone, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
 fn world(seed: u64) -> World {
@@ -67,41 +67,46 @@ fn test_guard_index_tracks_hire_and_fire() {
 
 #[test]
 fn test_statistical_runs_once_per_hour_spread() {
+    // Observe the sim, not the formula: a Statistical agent's hunger only
+    // moves when its spread hourly run decays it (needs::run skips the tier),
+    // so it must change exactly 24 times a day, each on its own slot.
     let mut w = world(104);
     w.run_ticks(TICKS_PER_HOUR);
-    // Tick 60 has been assigned at the start of its own tick; step into the window.
     let start = w.tick;
     assert_eq!(start % TICKS_PER_HOUR, 0);
-    let always_stat: Vec<EntityId> = w.tier(Lod::Statistical).to_vec();
-    let mut still: BTreeMap<EntityId, bool> = always_stat.iter().map(|&id| (id, true)).collect();
-    let mut runs: BTreeMap<EntityId, u32> = BTreeMap::new();
-    let mut max_per_tick = 0usize;
+    let watched: Vec<EntityId> = w.tier(Lod::Statistical).to_vec();
+    let hunger = |w: &World, id: EntityId| w.comp::<Needs>(id).map(|n| n.hunger);
+    let mut last: BTreeMap<EntityId, Option<f32>> = watched.iter().map(|&id| (id, hunger(&w, id))).collect();
+    let mut steady: BTreeMap<EntityId, bool> = watched.iter().map(|&id| (id, true)).collect();
+    let mut changes: BTreeMap<EntityId, u32> = BTreeMap::new();
+    let mut max_due = 0usize;
     let mut max_n = 0usize;
     while w.tick < start + TICKS_PER_DAY {
-        // `World::tick` assigns, then runs the due agents: read what it will run.
+        let due = lod::due_this_tick(&w);
+        max_due = max_due.max(due.len());
+        max_n = max_n.max(w.tier(Lod::Statistical).len());
+        let slot = w.tick % TICKS_PER_HOUR;
         w.tick();
-        // The tick counter has advanced; the run used `tick - 1`.
-        let slot = (w.tick - 1) % TICKS_PER_HOUR;
-        for (&id, ok) in still.iter_mut() {
-            if w.comp::<Brain>(id).is_none_or(|b| b.lod != Lod::Statistical) {
-                *ok = false;
+        for &id in &watched {
+            let now = hunger(&w, id);
+            let stat = w.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical);
+            if !stat || now.is_none_or(|h| h <= 0.0) {
+                steady.insert(id, false);
             }
-        }
-        let n = w.tier(Lod::Statistical).len();
-        max_n = max_n.max(n);
-        let due = w.tier(Lod::Statistical).iter().filter(|id| u64::from(id.index) % TICKS_PER_HOUR == slot).count();
-        max_per_tick = max_per_tick.max(due);
-        for &id in &always_stat {
-            if u64::from(id.index) % TICKS_PER_HOUR == slot && *still.get(&id).unwrap_or(&false) {
-                *runs.entry(id).or_default() += 1;
+            if now != last[&id] {
+                *changes.entry(id).or_default() += 1;
+                if u64::from(id.index) % TICKS_PER_HOUR != slot {
+                    steady.insert(id, false); // moved off its slot: only legal if it left the tier
+                }
             }
+            last.insert(id, now);
         }
     }
-    assert!(max_per_tick <= 2 * max_n.div_ceil(TICKS_PER_HOUR as usize), "{max_per_tick} due in one tick of {max_n}");
-    let steady: Vec<EntityId> = still.iter().filter(|(_, &ok)| ok).map(|(&id, _)| id).collect();
+    assert!(max_due <= 2 * max_n.div_ceil(TICKS_PER_HOUR as usize), "{max_due} due in one tick of {max_n}");
+    let steady: Vec<EntityId> = steady.iter().filter(|(_, &ok)| ok).map(|(&id, _)| id).collect();
     assert!(steady.len() > 50, "too few steady statistical agents: {}", steady.len());
     for id in steady {
-        assert_eq!(runs.get(&id).copied().unwrap_or(0), 24, "{id} ran a wrong number of times");
+        assert_eq!(changes.get(&id).copied().unwrap_or(0), 24, "{id}: hunger changed a wrong number of times");
     }
 }
 
@@ -111,8 +116,37 @@ fn test_due_this_tick_lists_the_slot() {
     w.run_ticks(TICKS_PER_HOUR + 7);
     let due = lod::due_this_tick(&w);
     let slot = w.tick % TICKS_PER_HOUR;
+    assert!(!due.is_empty(), "nobody due in slot {slot}");
     assert!(due.iter().all(|id| u64::from(id.index) % TICKS_PER_HOUR == slot));
     assert!(due.iter().all(|id| w.comp::<Brain>(*id).is_some_and(|b| b.lod == Lod::Statistical)));
+    // The 60 buckets partition the tier.
+    let mut all: Vec<EntityId> = (0..TICKS_PER_HOUR).flat_map(|t| w.stat_slots.at(t).to_vec()).collect();
+    all.sort();
+    assert_eq!(all, w.tier(Lod::Statistical).to_vec());
+}
+
+#[test]
+fn test_indices_survive_jail_remove_promote_demote() {
+    let mut w = world(107);
+    w.run_ticks(TICKS_PER_HOUR + 1);
+    let stat: Vec<EntityId> = w.tier(Lod::Statistical).to_vec();
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let jailed = stat[0];
+    let until = w.tick + TICKS_PER_DAY;
+    law::sentence(&mut w, jailed, Crime::Theft, until, jail);
+    w.check_indices().expect("after jail");
+    assert!(!w.tier(Lod::Statistical).contains(&jailed));
+    let gone = *stat[1..].iter().find(|&&id| !w.has::<Job>(id)).expect("a jobless statistical agent");
+    w.remove_agent(gone);
+    w.check_indices().expect("after remove");
+    let up = *stat.iter().rev().find(|&&id| id != jailed && id != gone).expect("another");
+    lod::set_lod(&mut w, up, Lod::Coarse);
+    w.check_indices().expect("after promote");
+    let down = *w.tier(Lod::Full).first().expect("a full agent");
+    lod::set_lod(&mut w, down, Lod::Statistical);
+    w.check_indices().expect("after demote");
+    assert!(w.stat_slots.at(u64::from(down.index)).contains(&down));
+    assert!(!w.stat_slots.at(u64::from(up.index)).contains(&up));
 }
 
 #[test]

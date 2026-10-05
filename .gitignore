@@ -12,3 +12,6 @@ Cargo.lock.bak
 *.swp
 .DS_Store
 Thumbs.db
+
+# agent worktrees
+.claude/worktrees/

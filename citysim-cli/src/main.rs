@@ -5,13 +5,15 @@
 //!                 [--lever "day=90:release_reserve=1500"]... [--save-at T]
 //!                 [--load FILE] [--force-lod full|coarse|stat] [--population N]
 //!                 [--map FILE]
-//! citysim-cli calibrate [--days 30] [--agents 500] [--map assets/map.txt]
-//!                       [--out assets/stat_table.toml]
+//! citysim-cli calibrate [--days 30] [--agents 500] [--seeds 3] [--map assets/map.txt]
+//!                       [--out assets/stat_table.toml] [--straight-lines]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the M10 256 x 192 map by default).
 //! `calibrate` runs the city scaled to `--agents` (`Config::scaled_to`) with
-//! no gangs, so a 500-agent world on the 2,000 map keeps its proportions.
+//! no gangs, so a 500-agent world on the 2,000 map keeps its proportions, and
+//! writes the v2 table (M10): 24 rows by phase, lawfulness and hunger bucket,
+//! with the hourly outcome mix and the actor- and victim-side crime rolls.
 //!
 //! Exit code 0 on completion, 101 on panic.
 
@@ -112,6 +114,13 @@ struct CalibrateArgs {
     map: PathBuf,
     #[arg(long, default_value = "assets/stat_table.toml")]
     out: PathBuf,
+    /// Cities run (seeds 1000, 1001, ...), tallied together.
+    #[arg(long, default_value_t = 3)]
+    seeds: u64,
+    /// Timed straight-line walks (the M7 shortcut). Off by default since M10:
+    /// on the 256 x 192 map they starve the city and cut its crime threefold.
+    #[arg(long)]
+    straight_lines: bool,
 }
 
 /// `day=90:release_reserve=1500` → `(tick, command)`.
@@ -253,86 +262,256 @@ fn exec_category(exec: &citysim::ExecState, night: bool) -> usize {
     }
 }
 
+/// Below the Full Earn goal's savings line (`SAVINGS_DAYS` meals of coins).
+fn below_savings(world: &World, id: citysim::EntityId) -> bool {
+    let price = world.local(id, citysim::BuildingKind::Market).map_or(1, |m| world.price_at(m));
+    world
+        .comp::<citysim::Wallet>(id)
+        .is_some_and(|w| w.coins < citysim::goap::world_state::SAVINGS_DAYS.saturating_mul(price))
+}
+
+/// Per-agent tallies for the hour in progress.
+#[derive(Default, Clone)]
+struct HourTally {
+    /// The table row the agent's hour falls in (lawfulness and hunger at the hour's start).
+    row: usize,
+    /// Ticks per exec category.
+    ticks: [u16; 5],
+    /// steal, flirt, robbed, assaulted, killed.
+    extra: [u16; 5],
+    /// Had a courtship candidate at the hour's start (`p_flirt` is per such hour).
+    courting: bool,
+}
+
 /// Build a Full-only world (seed 1000, straight-line walks, gangless, the
-/// city scaled to `--agents`), run it, and write the per-phase frequencies of
-/// what agents spent each hour doing.
+/// city scaled to `--agents`), run it, and write the v2 table: per row
+/// (phase x lawfulness bucket x hunger bucket, at the start of each
+/// agent-hour) the frequency of the dominant exec category, and of hours in
+/// which the agent stole, flirted (or proposed), was robbed, assaulted or
+/// killed.
 fn calibrate(args: CalibrateArgs) -> Result<(), String> {
-    use citysim::{Brain, DayPhase};
+    use citysim::{
+        Brain, Corpse, DeathCause, EventKind, MemoryKind, Needs, Personality, StatRow, StatTable, STAT_ROWS,
+    };
+    use std::collections::BTreeMap;
     let mut config = Config::load().scaled_to(args.agents);
     config.world.map = map_path(&args.map)?;
     config.gangs.max_members = 0;
     config.lod.force = Some(Lod::Full);
-    config.exec.straight_line_paths = true;
-    let mut world = World::new(1000, config);
-    // counts[phase][category] of agent-hours
-    let mut counts = [[0u64; 5]; 4];
-    let mut tally: std::collections::BTreeMap<citysim::EntityId, [u16; 5]> = std::collections::BTreeMap::new();
+    config.exec.straight_line_paths = args.straight_lines;
+    // Only the bucket edges are read from this header.
+    let header = StatTable {
+        version: 2,
+        seed: 1000,
+        days: args.days,
+        agents: args.agents,
+        lawfulness_edges: [0.3, 0.7],
+        hunger_edge: 0.4,
+        p_dole_day: 1.0,
+        rows: Vec::new(),
+    };
+    let mut counts = [[0u64; 5]; STAT_ROWS];
+    let mut extra = [[0u64; 5]; STAT_ROWS];
+    let mut denom = [0u64; STAT_ROWS];
+    let mut court_denom = [0u64; STAT_ROWS];
+    let (mut dole_days, mut dole_taken) = (0u64, 0u64);
+    let open_hour = |world: &World, hour: &mut BTreeMap<citysim::EntityId, HourTally>| {
+        hour.clear();
+        for id in world.citizens() {
+            if !world.has::<Brain>(id) {
+                continue;
+            }
+            let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
+            let hunger = world.comp::<Needs>(id).map_or(1.0, |n| n.hunger);
+            let courting = citysim::systems::social::known_candidate(world, id, 0.3).is_some();
+            hour.insert(
+                id,
+                HourTally { row: header.index(world.phase(), law, hunger), courting, ..Default::default() },
+            );
+        }
+    };
     let total_ticks = args.days * TICKS_PER_DAY;
     let t0 = Instant::now();
-    for _ in 0..total_ticks {
-        citysim::tick(&mut world);
-        let night = world.phase() == DayPhase::Night;
-        for id in world.citizens() {
-            let Some(brain) = world.comp::<Brain>(id) else { continue };
-            tally.entry(id).or_default()[exec_category(&brain.exec, night)] += 1;
-        }
-        if world.tick.is_multiple_of(citysim::TICKS_PER_HOUR) {
-            let phase = match world.phase() {
-                DayPhase::Morning => 0,
-                DayPhase::Work => 1,
-                DayPhase::Evening => 2,
-                DayPhase::Night => 3,
-            };
-            // The dead and the departed leave the tally; an empty hour counts
-            // for nothing.
-            tally.retain(|&id, _| world.is_alive(id) && world.has::<Brain>(id));
-            for t in tally.values_mut() {
-                if t.iter().all(|&n| n == 0) {
-                    continue;
+    // Several seeds, one tally: a single 30-day city varies by a quarter in
+    // its theft rate from seed to seed (M10).
+    for seed in 1000..1000 + args.seeds {
+        let mut world = World::new(seed, config.clone());
+        let mut hour: BTreeMap<citysim::EntityId, HourTally> = BTreeMap::new();
+        let mut hour_start = world.tick;
+        let mut poor_today: (u64, Vec<citysim::EntityId>) = (u64::MAX, Vec::new());
+        let mut cursor = world.next_event_id;
+        open_hour(&world, &mut hour);
+        for _ in 0..total_ticks {
+            citysim::tick(&mut world);
+            let night = world.phase() == citysim::DayPhase::Night;
+            let just = world.tick - 1;
+            for (&id, t) in hour.iter_mut() {
+                let Some(brain) = world.comp::<Brain>(id) else { continue };
+                t.ticks[exec_category(&brain.exec, night)] += 1;
+                if let citysim::ExecState::Use {
+                    kind: citysim::ActionKind::Flirt | citysim::ActionKind::Propose,
+                    started,
+                    ..
+                } = brain.exec
+                {
+                    if started == just {
+                        t.extra[1] += 1;
+                    }
                 }
-                // A meal is short, so any eating in the hour makes it an "ate"
-                // hour (the Statistical eat outcome is one meal); otherwise the
-                // state that held the most ticks wins, idle last.
-                let dominant =
-                    if t[0] > 0 { 0 } else { (1..5).max_by_key(|&c| (t[c], std::cmp::Reverse(c))).unwrap_or(4) };
-                counts[phase][dominant] += 1;
-                *t = [0; 5];
+            }
+            // New ring entries since the cursor.
+            let first = world.events.front().map_or(0, |e| e.id);
+            for e in world.events.iter().skip(cursor.saturating_sub(first) as usize) {
+                let hit = |k: usize, who: Option<&citysim::EntityId>, hour: &mut BTreeMap<_, HourTally>| {
+                    if let Some(t) = who.and_then(|w| hour.get_mut(w)) {
+                        t.extra[k] += 1;
+                    }
+                };
+                match e.kind {
+                    // Every theft but a starving one (the Statistical eat path's
+                    // desperation theft models those; M10, replaces D29's
+                    // lawless-and-hungry rows).
+                    EventKind::Theft => {
+                        let thief = e.actors.first().copied();
+                        if thief.is_some_and(|a| world.comp::<Needs>(a).is_some_and(|n| n.hunger > 0.0)) {
+                            hit(0, thief.as_ref(), &mut hour);
+                        }
+                    }
+                    EventKind::Assault => hit(3, e.actors.get(1), &mut hour),
+                    EventKind::Death => {
+                        let violent = e
+                            .actors
+                            .first()
+                            .and_then(|&a| world.comp::<Corpse>(a))
+                            .is_some_and(|c| c.cause == DeathCause::Violence);
+                        if violent {
+                            hit(4, e.actors.first(), &mut hour);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            cursor = world.next_event_id;
+            if world.tick.is_multiple_of(citysim::TICKS_PER_HOUR) {
+                // Close the hour: first-hand robberies, then every agent of the
+                // hour (the dead included) into its row.
+                for (&id, t) in hour.iter_mut() {
+                    let robbed = world.comp::<citysim::Memory>(id).is_some_and(|m| {
+                        m.entries
+                            .iter()
+                            .any(|e| e.kind == MemoryKind::WasRobbed && !e.second_hand && e.tick >= hour_start)
+                    });
+                    if robbed {
+                        t.extra[2] += 1;
+                    }
+                }
+                for t in hour.values() {
+                    let c = t.ticks;
+                    let dominant =
+                        if c[0] > 0 { 0 } else { (1..5).max_by_key(|&k| (c[k], std::cmp::Reverse(k))).unwrap_or(4) };
+                    counts[t.row][dominant] += 1;
+                    denom[t.row] += 1;
+                    court_denom[t.row] += u64::from(t.courting);
+                    for (k, (sum, &n)) in extra[t.row].iter_mut().zip(&t.extra).enumerate() {
+                        // A flirt counts in the hours it had a candidate for.
+                        if k != 1 || t.courting {
+                            *sum += u64::from(n.min(1));
+                        }
+                    }
+                }
+                hour_start = world.tick;
+                open_hour(&world, &mut hour);
+                // The Work phase opens: which jobless adults are below their
+                // savings line (the Full Earn goal's gate) today?
+                if world.phase() == citysim::DayPhase::Work && poor_today.0 != world.day() {
+                    poor_today = (world.day(), Vec::new());
+                    for id in world.citizens() {
+                        if world.has::<Brain>(id)
+                            && !world.has::<citysim::Job>(id)
+                            && citysim::systems::demography::is_adult(&world, id)
+                            && below_savings(&world, id)
+                        {
+                            poor_today.1.push(id);
+                        }
+                    }
+                }
+            }
+            // Day end: did the poor collect the dole?
+            if world.tick.is_multiple_of(TICKS_PER_DAY) {
+                let day = world.day() - 1;
+                if poor_today.0 == day {
+                    for &id in &poor_today.1 {
+                        dole_days += 1;
+                        dole_taken += u64::from(world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day == Some(day)));
+                    }
+                }
             }
         }
     }
-    let row = |c: [u64; 5]| {
-        let total = c.iter().sum::<u64>().max(1) as f32;
-        citysim::StatRow {
-            p_eat: c[0] as f32 / total,
-            p_work: c[1] as f32 / total,
-            p_social: c[2] as f32 / total,
-            p_sleep: c[3] as f32 / total,
+    // The five independent rolls are pooled over the two hunger buckets of a
+    // phase and lawfulness: a Statistical agent eats as soon as it is hungry
+    // and spends a sixth of a Full agent's hours in the hungry bucket, so
+    // hunger-conditioned crime rates would not transfer.
+    // `p_flirt` is per hour with a courtship candidate (a Full agent only
+    // flirts when it has one, and the Statistical roll needs one too).
+    let pooled = |i: usize| -> ([u64; 5], u64, u64) {
+        let (a, b) = (i & !1, i | 1);
+        let x: [u64; 5] = std::array::from_fn(|k| extra[a][k] + extra[b][k]);
+        (x, denom[a] + denom[b], court_denom[a] + court_denom[b])
+    };
+    let mut rows: Vec<StatRow> = (0..STAT_ROWS)
+        .map(|i| {
+            let n = denom[i].max(1) as f32;
+            let c = counts[i];
+            let (x, pn, cn) = pooled(i);
+            let (pn, cn) = (pn.max(1) as f32, cn.max(1) as f32);
+            StatRow {
+                label: StatTable::label(i),
+                p_eat: c[0] as f32 / n,
+                p_work: c[1] as f32 / n,
+                p_social: c[2] as f32 / n,
+                p_sleep: c[3] as f32 / n,
+                p_steal: x[0] as f32 / pn,
+                p_flirt: x[1] as f32 / cn,
+                p_robbed: x[2] as f32 / pn,
+                p_assaulted: x[3] as f32 / pn,
+                p_killed: x[4] as f32 / pn,
+            }
+        })
+        .collect();
+    // An empty row borrows the same phase and lawfulness row's other hunger bucket.
+    for i in 0..STAT_ROWS {
+        if denom[i] == 0 {
+            let twin = i ^ 1;
+            rows[i] = if denom[twin] > 0 {
+                StatRow { label: StatTable::label(i), ..rows[twin].clone() }
+            } else {
+                StatRow { label: StatTable::label(i), ..Default::default() }
+            };
         }
-    };
-    let table = citysim::StatTable {
-        morning: row(counts[0]),
-        work: row(counts[1]),
-        evening: row(counts[2]),
-        night: row(counts[3]),
-    };
+    }
+    let p_dole_day = (dole_taken as f32 / dole_days.max(1) as f32).min(1.0);
+    let table = StatTable { rows, p_dole_day, ..header };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
     let text = format!(
-        "# generated by calibrate, seed 1000, {} days, {} agents, map {}, DO NOT EDIT
-{body}",
+        "# generated by calibrate v2: seeds 1000..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",
+        1000 + args.seeds - 1,
         args.days,
         args.agents,
-        args.map.display()
+        args.map.display(),
+        if args.straight_lines { "straight-line" } else { "pathed" }
     );
     if let Some(parent) = args.out.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
     std::fs::write(&args.out, text).map_err(|e| format!("{}: {e}", args.out.display()))?;
     eprintln!(
-        "calibrated {} agents over {} days in {:.1}s -> {}",
+        "calibrated {} agents over {} days in {:.1}s -> {} (agent-hours per row: {:?})",
         args.agents,
         args.days,
         t0.elapsed().as_secs_f32(),
-        args.out.display()
+        args.out.display(),
+        denom
     );
     Ok(())
 }

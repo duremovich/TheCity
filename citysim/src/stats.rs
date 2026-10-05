@@ -9,7 +9,7 @@ use crate::time::Season;
 /// Days of history kept for the city panel's sparklines.
 pub const STATS_HISTORY_CAP: usize = 120;
 
-pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,ticks_per_sec";
+pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,ticks_per_sec";
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DayRow {
@@ -42,6 +42,25 @@ pub struct DayRow {
     /// divided by population into `goal_changes_per_agent` at day end.
     pub goal_changes: u32,
     pub goal_changes_per_agent: f32,
+    /// M10 counters: holes opened, bound to an actor, closed as Unknown, and
+    /// Statistical agents killed off screen.
+    #[serde(default)]
+    pub holes_opened: u32,
+    #[serde(default)]
+    pub holes_bound: u32,
+    #[serde(default)]
+    pub holes_unknown: u32,
+    #[serde(default)]
+    pub deaths_violence_offscreen: u32,
+    /// M10 snapshots: open holes and the tier sizes at day end.
+    #[serde(default)]
+    pub holes_open: u32,
+    #[serde(default)]
+    pub tier_full: u32,
+    #[serde(default)]
+    pub tier_coarse: u32,
+    #[serde(default)]
+    pub tier_stat: u32,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -74,6 +93,14 @@ impl DayRow {
             burials: 0,
             goal_changes: 0,
             goal_changes_per_agent: 0.0,
+            holes_opened: 0,
+            holes_bound: 0,
+            holes_unknown: 0,
+            deaths_violence_offscreen: 0,
+            holes_open: 0,
+            tier_full: 0,
+            tier_coarse: 0,
+            tier_stat: 0,
             ticks_per_sec: 0.0,
         }
     }
@@ -81,7 +108,7 @@ impl DayRow {
     /// One CSV line matching [`CSV_HEADER`], without a trailing newline.
     pub fn csv_row(&self) -> String {
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -106,6 +133,14 @@ impl DayRow {
             self.mean_hunger,
             self.mean_mood,
             self.goal_changes_per_agent,
+            self.holes_opened,
+            self.holes_open,
+            self.holes_bound,
+            self.holes_unknown,
+            self.deaths_violence_offscreen,
+            self.tier_full,
+            self.tier_coarse,
+            self.tier_stat,
             self.ticks_per_sec,
         )
     }
