@@ -38,7 +38,7 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
 pub fn run(world: &mut World) {
     let interval = world.config.brain.think_interval_ticks.max(1);
     let tick = world.tick;
-    for id in world.citizens() {
+    for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
         if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() || brain.emigrating {
             continue;

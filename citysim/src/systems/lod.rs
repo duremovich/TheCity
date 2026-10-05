@@ -1,7 +1,9 @@
 //! Level of detail. Every 60 ticks the highest-priority agents become Full,
 //! the next band Coarse and the rest Statistical; a calibrated hourly table
 //! (`assets/stat_table.toml`, written by `citysim-cli calibrate`) stands in
-//! for the brain of a Statistical agent.
+//! for the brain of a Statistical agent. The tiers are kept as index lists on
+//! the world (`World::tier`), and the Statistical hourly tick is spread over
+//! the hour: an agent runs on the ticks where `id.index % 60 == tick % 60`.
 
 use rand::Rng;
 
@@ -39,12 +41,18 @@ pub fn story_relevant(kind: ActionKind) -> bool {
 }
 
 pub fn run(world: &mut World) {
-    if !world.tick.is_multiple_of(TICKS_PER_HOUR) {
-        return;
+    if world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        assign_hour(world);
+        debug_assert!(world.check_indices().is_ok(), "{:?}", world.check_indices());
     }
+    run_statistical(world);
+}
+
+fn assign_hour(world: &mut World) {
     if let Some(forced) = world.config.lod.force {
         // Prisoners and emigrants stay Coarse here too: a Statistical prisoner
         // would be snapped out of the Jail and never fed.
+        // scan-ok: hourly: forced tiers
         for id in world.citizens() {
             let Some(b) = world.comp::<Brain>(id) else { continue };
             let held = world.has::<Sentence>(id) || b.emigrating || b.cuffed_by.is_some();
@@ -53,7 +61,6 @@ pub fn run(world: &mut World) {
     } else {
         assign(world);
     }
-    run_statistical(world);
 }
 
 /// Rank every living adult and hand out the tiers with hysteresis. Jailed
@@ -74,6 +81,7 @@ fn assign(world: &mut World) {
     };
 
     let mut ranked: Vec<(i32, u32, u32, EntityId)> = Vec::new();
+    // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
         if world.has::<Sentence>(id) || brain.emigrating {
@@ -156,6 +164,7 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             b.current_goal = None;
             b.plan_queued = false;
         }
+        world.retier(id);
         world.plan_queue.retain(|&(_, who), _| who != id);
         snap_to_phase_door(world, id, false);
         return;
@@ -166,6 +175,7 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             b.exec = ExecState::Idle;
             b.current_goal = None;
         }
+        world.retier(id);
         snap_to_phase_door(world, id, true);
         return;
     }
@@ -183,6 +193,7 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         b.lod = lod;
         b.exec = new_exec;
     }
+    world.retier(id);
 }
 
 /// The door an off-screen agent stands at for the current phase. Demotion:
@@ -223,15 +234,25 @@ fn stat_row(world: &World) -> Option<StatRow> {
     })
 }
 
-/// The hourly stand-in for a Statistical brain: an hour of need decay, then
-/// one outcome drawn from the calibrated row with the agent's own stream.
-pub fn run_statistical(world: &mut World) {
-    let agents: Vec<EntityId> = world
-        .citizens()
-        .into_iter()
-        .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical))
+/// Statistical agents whose hourly slot is this tick: `id.index % 60 == tick % 60`.
+/// Each agent keeps a fixed minute of the hour, so it runs 24 times a day and
+/// the load is spread evenly over the ticks.
+pub fn due_this_tick(world: &World) -> Vec<EntityId> {
+    let slot = world.tick % TICKS_PER_HOUR;
+    world
+        .tier(Lod::Statistical)
+        .iter()
+        .copied()
+        .filter(|id| u64::from(id.index) % TICKS_PER_HOUR == slot)
         .filter(|&id| !world.has::<Sentence>(id))
-        .collect();
+        .collect()
+}
+
+/// The hourly stand-in for a Statistical brain: an hour of need decay, then
+/// one outcome drawn from the calibrated row with the agent's own stream. It
+/// runs every tick for the agents due this tick (`due_this_tick`).
+pub fn run_statistical(world: &mut World) {
+    let agents = due_this_tick(world);
     if agents.is_empty() {
         return;
     }
@@ -298,8 +319,8 @@ pub fn run_statistical(world: &mut World) {
             }
             Outcome::Idle => {}
         }
+        world.recompute_wealth_for(id);
     }
-    world.recompute_wealth();
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -431,10 +452,10 @@ fn stat_social(world: &mut World, id: EntityId) {
         // Nobody known yet: meet a Statistical housemate.
         let home = world.comp::<Household>(id).and_then(|h| h.home);
         let mates: Vec<EntityId> = world
-            .citizens()
-            .into_iter()
+            .tier(Lod::Statistical)
+            .iter()
+            .copied()
             .filter(|&o| o != id && world.comp::<Household>(o).and_then(|h| h.home) == home && home.is_some())
-            .filter(|&o| world.comp::<Brain>(o).is_some_and(|b| b.lod == Lod::Statistical))
             .collect();
         if !mates.is_empty() {
             let k = world.rng.agent(id).random_range(0..mates.len());

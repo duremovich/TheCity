@@ -952,7 +952,7 @@ Stable-sort by `(priority desc, dist asc, index asc)`. First `MAX_FULL = 50` →
 
 ### Statistical hourly tick
 
-`systems::lod::run_statistical` runs when `tick % 60 == 0`, after assignment. For each Statistical agent:
+`systems::lod::run_statistical` runs every tick, for the Statistical agents whose `id.index % 60 == tick % 60` (`lod::due_this_tick`; the slot is fixed per agent, so each runs 24 times a day and the load is spread over the hour), after assignment. For each such agent:
 
 1. Apply 60 ticks of need decay in one step, clamped to `[0,1]`; recompute `wealth`.
 2. Load the `StatTable` row for the current phase.

@@ -324,11 +324,10 @@ impl PlanCtx {
         let sight = world.config.crime.sight_day_crime; // "guard8"
         let guard8 = !light
             && tile.is_some_and(|t| {
-                world.citizens().into_iter().any(|g| {
-                    g != agent
-                        && world.comp::<Job>(g).is_some_and(|j| j.role == Role::Guard)
-                        && world.comp::<Position>(g).is_some_and(|gp| gp.tile.manhattan(t) <= sight)
-                })
+                world
+                    .guards()
+                    .iter()
+                    .any(|&g| g != agent && world.comp::<Position>(g).is_some_and(|gp| gp.tile.manhattan(t) <= sight))
             });
         let stock_of = |kind: BuildingKind| -> u32 {
             world.building_of_kind(kind).and_then(|b| world.comp::<Building>(b)).map_or(0, |b| b.stock_food)
@@ -492,10 +491,7 @@ impl PlanCtx {
                 digger
                     || kin
                     || corpse
-                        && !world.citizens().into_iter().any(|c| {
-                            world.has::<crate::components::Brain>(c)
-                                && world.comp::<Job>(c).is_some_and(|j| j.role == Role::Gravedigger)
-                        })
+                        && !world.workers(Role::Gravedigger).iter().any(|&c| world.has::<crate::components::Brain>(c))
             },
             wanted: crate::systems::law::wanted(world, agent),
             suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),

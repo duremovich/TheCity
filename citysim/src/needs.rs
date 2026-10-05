@@ -1,7 +1,7 @@
 //! Need decay, satisfiers, starvation. Runs every tick for Full and Coarse
 //! agents; the Statistical tick (M7) applies 60 steps at once.
 
-use crate::components::{Brain, Identity, Job, Lod, MemoryKind, Needs, Personality, Position, Role, Sentence};
+use crate::components::{Brain, Identity, Lod, MemoryKind, Needs, Personality, Position, Sentence};
 use crate::config::NeedsCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -85,15 +85,11 @@ pub fn run(world: &mut World) {
     let hourly = world.tick.is_multiple_of(TICKS_PER_HOUR);
 
     // Guard positions once per tick for the safety modifier.
-    let guard_tiles: Vec<(EntityId, crate::components::TilePos)> = world
-        .citizens()
-        .into_iter()
-        .filter(|&id| world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard))
-        .filter_map(|id| world.comp::<Position>(id).map(|p| (id, p.tile)))
-        .collect();
+    let guard_tiles: Vec<(EntityId, crate::components::TilePos)> =
+        world.guards().iter().copied().filter_map(|id| world.comp::<Position>(id).map(|p| (id, p.tile))).collect();
     let sight = world.config.crime.sight;
 
-    for id in world.citizens() {
+    for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
         if brain.lod == Lod::Statistical {
             continue;

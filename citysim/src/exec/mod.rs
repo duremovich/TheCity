@@ -87,7 +87,7 @@ pub enum StepResult {
 pub fn run(world: &mut World) {
     world.door_queue.clear();
     world.sweep_reservations();
-    for id in world.citizens() {
+    for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
         if brain.lod == Lod::Statistical || world.has::<crate::components::Sentence>(id) || brain.cuffed_by.is_some() {
             continue;

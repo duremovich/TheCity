@@ -19,6 +19,11 @@ use crate::stats::DailyStats;
 use crate::systems;
 use crate::time::{self, Tick, DAYS_PER_YEAR, TICKS_PER_DAY};
 
+/// Position of a role in `Role::ALL`.
+fn role_index(role: Role) -> usize {
+    Role::ALL.iter().position(|&r| r == role).expect("every role is in Role::ALL")
+}
+
 /// Plan-queue key: highest urgency first, then lowest id. `Reverse` has no
 /// serde impl, so the ordering is flipped by hand.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,6 +131,12 @@ pub struct World {
     /// Enemy edges by agent, both directions; kept by `social::reindex_kind`.
     #[serde(skip)]
     pub enemies: BTreeMap<EntityId, BTreeSet<EntityId>>,
+    /// Agents by LOD (`Lod as usize`), ascending. Kept by the Brain hooks and `retier`; rebuilt on load.
+    #[serde(skip)]
+    pub by_tier: [Vec<EntityId>; 3],
+    /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
+    #[serde(skip)]
+    pub by_role: [Vec<EntityId>; 5],
     /// Name tables for births and immigrants; reloaded from assets on load.
     #[serde(skip)]
     pub names: NameTables,
@@ -293,6 +304,8 @@ impl World {
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
+            by_tier: Default::default(),
+            by_role: Default::default(),
             names: names.clone(),
         };
         w.spawn_buildings();
@@ -492,15 +505,166 @@ impl World {
 
     /// `wealth = clamp(coins / (7 × price × (1 + greed)), 0, 1)` for every citizen.
     pub fn recompute_wealth(&mut self) {
+        for id in self.citizens() {
+            // scan-ok: hourly
+            self.recompute_wealth_for(id);
+        }
+    }
+
+    /// `recompute_wealth` for one agent (the spread Statistical tick calls it
+    /// per processed agent).
+    pub fn recompute_wealth_for(&mut self, id: EntityId) {
         let price = self.market().map_or(1, |m| m.price_food).max(1) as f32;
         let days = self.config.needs.wealth_days_secure;
-        for id in self.citizens() {
-            let greed = self.comp::<Personality>(id).map_or(0.5, |p| p.greed);
-            let coins = self.comp::<Wallet>(id).map_or(0, |w| w.coins) as f32;
-            if let Some(n) = self.comp_mut::<Needs>(id) {
-                n.wealth = (coins / (days * price * (1.0 + greed))).clamp(0.0, 1.0);
+        let greed = self.comp::<Personality>(id).map_or(0.5, |p| p.greed);
+        let coins = self.comp::<Wallet>(id).map_or(0, |w| w.coins) as f32;
+        if let Some(n) = self.comp_mut::<Needs>(id) {
+            n.wealth = (coins / (days * price * (1.0 + greed))).clamp(0.0, 1.0);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // Tier and role indices (kept incrementally; no per-tick scans)
+    // -----------------------------------------------------------------------
+
+    pub(crate) fn after_insert<T: Component>(&mut self, id: EntityId) {
+        use std::any::TypeId;
+        if TypeId::of::<T>() == TypeId::of::<Brain>() {
+            self.index_brain(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Job>() {
+            self.index_job(id);
+        }
+    }
+
+    pub(crate) fn after_remove<T: Component>(&mut self, id: EntityId) {
+        use std::any::TypeId;
+        if TypeId::of::<T>() == TypeId::of::<Brain>() {
+            self.unindex_brain(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Job>() {
+            self.unindex_job(id);
+        }
+    }
+
+    fn list_remove(list: &mut Vec<EntityId>, id: EntityId) {
+        if let Ok(i) = list.binary_search(&id) {
+            list.remove(i);
+        }
+    }
+
+    fn list_insert(list: &mut Vec<EntityId>, id: EntityId) {
+        if let Err(i) = list.binary_search(&id) {
+            list.insert(i, id);
+        }
+    }
+
+    /// File the agent under its Brain's current LOD.
+    pub fn index_brain(&mut self, id: EntityId) {
+        self.unindex_brain(id);
+        if let Some(b) = self.comp::<Brain>(id) {
+            let lod = b.lod as usize;
+            Self::list_insert(&mut self.by_tier[lod], id);
+        }
+    }
+
+    pub fn unindex_brain(&mut self, id: EntityId) {
+        for list in &mut self.by_tier {
+            Self::list_remove(list, id);
+        }
+    }
+
+    /// Call after any write to `Brain::lod`.
+    pub fn retier(&mut self, id: EntityId) {
+        self.index_brain(id);
+    }
+
+    /// File the agent under its Job's role.
+    pub fn index_job(&mut self, id: EntityId) {
+        self.unindex_job(id);
+        if let Some(j) = self.comp::<Job>(id) {
+            let r = role_index(j.role);
+            Self::list_insert(&mut self.by_role[r], id);
+        }
+    }
+
+    pub fn unindex_job(&mut self, id: EntityId) {
+        for list in &mut self.by_role {
+            Self::list_remove(list, id);
+        }
+    }
+
+    /// Agents with a Brain at this LOD, ascending.
+    pub fn tier(&self, lod: Lod) -> &[EntityId] {
+        &self.by_tier[lod as usize]
+    }
+
+    /// Full and Coarse agents (the ones with bodies), ascending.
+    pub fn bodies(&self) -> Vec<EntityId> {
+        let (a, b) = (&self.by_tier[Lod::Full as usize], &self.by_tier[Lod::Coarse as usize]);
+        let mut out = Vec::with_capacity(a.len() + b.len());
+        let (mut i, mut j) = (0, 0);
+        while i < a.len() && j < b.len() {
+            if a[i] < b[j] {
+                out.push(a[i]);
+                i += 1;
+            } else {
+                out.push(b[j]);
+                j += 1;
             }
         }
+        out.extend_from_slice(&a[i..]);
+        out.extend_from_slice(&b[j..]);
+        out
+    }
+
+    /// Job holders of one role, ascending.
+    pub fn workers(&self, role: Role) -> &[EntityId] {
+        &self.by_role[role_index(role)]
+    }
+
+    /// Every guard (a Job holder with `Role::Guard`), ascending.
+    pub fn guards(&self) -> &[EntityId] {
+        self.workers(Role::Guard)
+    }
+
+    /// Rebuild both indices from the stores (after a load).
+    pub fn rebuild_tiers_and_roles(&mut self) {
+        let (tiers, roles) = self.indices_from_stores();
+        self.by_tier = tiers;
+        self.by_role = roles;
+    }
+
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 5]) {
+        let mut tiers: [Vec<EntityId>; 3] = Default::default();
+        let mut roles: [Vec<EntityId>; 5] = Default::default();
+        for id in self.entities() {
+            if let Some(b) = self.comp::<Brain>(id) {
+                tiers[b.lod as usize].push(id);
+            }
+            if let Some(j) = self.comp::<Job>(id) {
+                roles[role_index(j.role)].push(id);
+            }
+        }
+        (tiers, roles)
+    }
+
+    /// Compare the incremental indices with a rebuild from the stores.
+    pub fn check_indices(&self) -> Result<(), String> {
+        let (tiers, roles) = self.indices_from_stores();
+        if tiers != self.by_tier {
+            return Err(format!(
+                "by_tier out of sync: have {:?}, stores say {:?}",
+                self.by_tier.iter().map(Vec::len).collect::<Vec<_>>(),
+                tiers.iter().map(Vec::len).collect::<Vec<_>>()
+            ));
+        }
+        if roles != self.by_role {
+            return Err(format!(
+                "by_role out of sync: have {:?}, stores say {:?}",
+                self.by_role.iter().map(Vec::len).collect::<Vec<_>>(),
+                roles.iter().map(Vec::len).collect::<Vec<_>>()
+            ));
+        }
+        Ok(())
     }
 
     // -----------------------------------------------------------------------
@@ -803,6 +967,7 @@ impl World {
                 _ => {}
             }
         }
+        self.rebuild_tiers_and_roles();
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde

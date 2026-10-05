@@ -5,7 +5,7 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, LawShock, Lod, MemoryKind, Needs, Personality,
+    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, LawShock, MemoryKind, Needs, Personality,
     Position, Posture, Role, Sentence, Skills, TilePos,
 };
 use crate::entity::EntityId;
@@ -40,7 +40,7 @@ pub fn is_guard(world: &World, id: EntityId) -> bool {
 
 /// Guards (any LOD) within `r` tiles of `id`, excluding `id`.
 pub fn guard_within(world: &World, id: EntityId, r: u32) -> bool {
-    world.citizens().into_iter().any(|g| g != id && is_guard(world, g) && near(world, id, g, r))
+    world.guards().iter().any(|&g| g != id && near(world, id, g, r))
 }
 
 /// The witness notice probability: `0.6 − 0.5 × stealth + 0.3 × guard`.
@@ -82,9 +82,9 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     let salience = crime_salience(crime);
 
     let witnesses: Vec<EntityId> = world
-        .citizens()
+        .bodies()
         .into_iter()
-        .filter(|&w| w != actor && world.comp::<Brain>(w).is_some_and(|b| b.lod != Lod::Statistical))
+        .filter(|&w| w != actor)
         .filter(|&w| {
             world.comp::<Position>(w).is_some_and(|p| {
                 (actor_building.is_some() && p.building == actor_building) || chebyshev(p.tile, tile) <= r
@@ -426,6 +426,7 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
         b.current_goal = None;
         b.lod = crate::components::Lod::Coarse;
     }
+    world.retier(who);
     let name = world.name_of(who);
     let days = until.saturating_sub(world.tick).div_ceil(TICKS_PER_DAY);
     world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {crime:?}"));
@@ -529,10 +530,11 @@ pub fn run(world: &mut World) {
 /// fire the guard with the lowest loyalty.
 pub fn reconcile_guards(world: &mut World) {
     let want = usize::from(world.levers.guard_count);
-    let guards: Vec<EntityId> = world.citizens().into_iter().filter(|&g| is_guard(world, g)).collect();
+    let guards: Vec<EntityId> = world.guards().to_vec();
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
     if guards.len() < want {
         let mut candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
+            // scan-ok: daily: reconcile_guards
             .citizens()
             .into_iter()
             .filter(|&id| world.has::<Brain>(id) && !world.has::<Job>(id) && !world.has::<Sentence>(id))
@@ -587,7 +589,7 @@ fn sightings(world: &mut World) {
         return;
     }
     let sight = world.config.crime.sight;
-    let guards: Vec<EntityId> = world.citizens().into_iter().filter(|&g| is_guard(world, g)).collect();
+    let guards: Vec<EntityId> = world.guards().to_vec();
     let tick = world.tick;
     for s in suspects {
         if guards.iter().any(|&g| near(world, g, s, sight)) {

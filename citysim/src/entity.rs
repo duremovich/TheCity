@@ -30,7 +30,7 @@ impl EntityId {
 }
 
 /// A component type with a `Vec<Option<T>>` store on the world.
-pub trait Component: Sized {
+pub trait Component: Sized + 'static {
     fn store(world: &World) -> &Vec<Option<Self>>;
     fn store_mut(world: &mut World) -> &mut Vec<Option<Self>>;
 }
@@ -57,6 +57,8 @@ impl World {
             return false;
         }
         let i = id.index as usize;
+        self.unindex_brain(id);
+        self.unindex_job(id);
         self.alive[i] = false;
         self.generations[i] = self.generations[i].wrapping_add(1);
         self.clear_components(i);
@@ -106,13 +108,16 @@ impl World {
     pub fn insert<T: Component>(&mut self, id: EntityId, value: T) {
         assert!(self.is_alive(id), "insert on dead entity {id}");
         T::store_mut(self)[id.index as usize] = Some(value);
+        self.after_insert::<T>(id);
     }
 
     pub fn remove<T: Component>(&mut self, id: EntityId) -> Option<T> {
         if !self.is_alive(id) {
             return None;
         }
-        T::store_mut(self)[id.index as usize].take()
+        let old = T::store_mut(self)[id.index as usize].take();
+        self.after_remove::<T>(id);
+        old
     }
 
     /// Ids of every live entity that has component `T`, ascending by index.

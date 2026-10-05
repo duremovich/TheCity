@@ -3,7 +3,7 @@
 //! ```text
 //! citysim-cli run --days N --seed S [--speed 1000] [--report]
 //!                 [--lever "day=90:release_reserve=1500"]... [--save-at T]
-//!                 [--load FILE] [--force-lod full|coarse|stat]
+//!                 [--load FILE] [--force-lod full|coarse|stat] [--population N]
 //! citysim-cli calibrate [--days 30] [--agents 200] [--out assets/stat_table.toml]
 //! ```
 //!
@@ -63,6 +63,9 @@ struct RunArgs {
     /// Directory for `--save-at`.
     #[arg(long, default_value = "saves")]
     saves_dir: PathBuf,
+    /// Starting population, overriding the config (ignored with `--load`).
+    #[arg(long)]
+    population: Option<u32>,
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -128,6 +131,9 @@ fn run(args: RunArgs) -> Result<(), String> {
 
     let mut config = Config::load();
     config.lod.force = args.force_lod.map(Lod::from);
+    if let Some(n) = args.population {
+        config.world.population = n;
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;

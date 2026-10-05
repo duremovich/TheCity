@@ -661,6 +661,7 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
     };
     let sociability = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.sociability);
     let passers: Vec<EntityId> = world
+        // scan-ok: per Beg, includes Statistical passers
         .citizens()
         .into_iter()
         .filter(|&o| o != id)

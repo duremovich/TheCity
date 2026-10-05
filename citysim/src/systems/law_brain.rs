@@ -97,7 +97,7 @@ pub fn choose(scores: &[PostureScore], current: Posture, hysteresis: f32) -> Opt
 
 /// Guards on the payroll.
 pub fn guards(world: &World) -> Vec<EntityId> {
-    world.citizens().into_iter().filter(|&g| crate::systems::law::is_guard(world, g)).collect()
+    world.guards().to_vec()
 }
 
 /// The captain: the most lawful living guard, ties by lower index. Stored

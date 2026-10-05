@@ -370,6 +370,7 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
     let room = |w: &World, h: Option<EntityId>| {
         h.and_then(|h| w.comp::<Building>(h)).is_some_and(|bd| {
             let residents =
+                // scan-ok: event: marriage
                 w.citizens().into_iter().filter(|&c| w.comp::<Household>(c).and_then(|hh| hh.home) == h).count();
             residents < usize::from(bd.capacity)
         })
@@ -450,7 +451,7 @@ fn colocation(world: &mut World) {
     let create_at = Tick::from(edge_create_ticks(world));
     let tick = world.tick;
     let mut events: Vec<(EntityId, EntityId, EntityId, bool)> = Vec::new(); // (a, b, building, create)
-    for a in world.with::<Brain>() {
+    for a in world.bodies() {
         let Some(pa) = world.comp::<Position>(a) else { continue };
         let Some(building) = pa.building else { continue };
         let stay = tick.saturating_sub(pa.entered);

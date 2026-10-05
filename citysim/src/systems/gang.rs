@@ -355,12 +355,8 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let actor_tile = world.comp::<Position>(id)?.tile;
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
     let r = world.config.crime.sight_day_crime;
-    let guards: Vec<TilePos> = world
-        .citizens()
-        .into_iter()
-        .filter(|&g| law::is_guard(world, g))
-        .filter_map(|g| world.comp::<Position>(g).map(|p| p.tile))
-        .collect();
+    let guards: Vec<TilePos> =
+        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
     let candidates: Vec<(EntityId, &Building)> = world
         .buildings_by_kind
         .get(&BuildingKind::Home)?
@@ -625,6 +621,7 @@ pub fn run(world: &mut World) {
 
 fn daily_economy(world: &mut World) {
     let today = world.day();
+    // scan-ok: daily
     for id in world.citizens() {
         if let Some(b) = world.comp_mut::<Brain>(id) {
             if b.gang_task_day != Some(today) {
@@ -639,6 +636,7 @@ fn daily_economy(world: &mut World) {
         let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
         for home in territory {
             let residents: Vec<EntityId> = world
+                // scan-ok: daily
                 .citizens()
                 .into_iter()
                 .filter(|&c| world.comp::<Household>(c).and_then(|h| h.home) == Some(home))
