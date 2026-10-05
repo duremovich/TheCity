@@ -92,3 +92,22 @@ In the final testing phase of every run, make up crazy scenarios and see whether
 These actions should be hard for a real player. The god tests are not balance tests; they show what is *possible*, so that the world has enough possibilities and reacts in interesting ways to big changes. Every god scenario asks the same questions of the factions it hits: **what happens when an organisation panics versus when it is stable? Does it bunker? Does it become more violent? Does it split into subfactions?** Gaps in the answers are the next features.
 
 Until the player character exists, the god actor is the lever set (`PlayerCommand`) plus god commands added for testing (kill, jail, free, fund, bankrupt, seize), scripted through the CLI's `--lever` syntax and read back through the CSV, the event log and `tools/analyze_run.py`. A god scenario is a `#[ignore]` test in `citysim/tests/god.rs`: the shock, the window, and assertions that the world *reacted* (orders changed, postures changed, counts moved), never that it reacted in one prescribed way.
+
+## Location, surveillance and hit squads (added 2026-10-05, Dylan)
+
+In the realm of hacking and data, **location information about specific NPCs exists inside the brains of NPCs and the databases of factions**. Megacorp 1 has a hit out on you. If they know where you are, they send out hit squads to take you out, if they think they can succeed. If a member of a faction recognises you, they may relay that back to the faction, which can call for a squad or an assassin. Corporations may put out a **bounty for up-to-date location information**, or ask you to **location-tag** an NPC and collect by providing constant information; **scanners** help detect tracking tags. The world is full of **cameras with face scanning** that relay locations to various factions.
+
+**Assassins and death squads decide whether to strike** on who controls the territory you are in, relative power, and how much they are willing to anger the faction there by trying for you. Or the corporation hires the faction whose territory you are in to get you, if that faction will sell you out for the price. Backstabbing and death. A million ways to die. If you anger a lot of factions, you need either an army or enough stealth tech that the surveillance cannot identify you correctly.
+
+Design implications, all of which generalise things the sim already has:
+
+| Need | Existing seed | Generalisation |
+| --- | --- | --- |
+| Sightings as knowledge | `law::sightings` (a guard sees a wanted agent, files a report) | a `Sighting { who, where, tick, confidence }` held in an agent's memory or a faction's database; relayed on membership edges; decays |
+| Cameras | the guard's sight radius | static sensors on tiles owned by a faction, feeding its database with an ID probability that stealth tech lowers |
+| Bounties and tags | contracts (M16) | a contract whose deliverable is a sighting stream; a tag is a sensor on a person; a scanner finds it |
+| Hit squads | `raid::brawl` with a muster and a march | a raid on a person; the target tile comes from the freshest sighting; gated on territory control (M12), relative strength and the political cost with the territory's faction |
+| Selling you out | bribery (M9), contracts (M16) | a faction accepts a contract to deliver someone inside its own turf |
+| Stealth | — | an identification roll per sensor that the target's stealth tech and the sensor's quality decide |
+
+The data model is the point: nobody in the sim knows where anyone is except through sightings, and the player's safety is the difference between what the factions know and where the player is.

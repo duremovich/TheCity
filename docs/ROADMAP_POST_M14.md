@@ -319,3 +319,10 @@ Folded into the sketches above rather than a milestone of their own:
 - **Reputation matrix** (M15): faction × faction and player × faction, derived from what is known.
 - **Verticality** (a map milestone after M14): layers with a `z` on tile positions and portals between them; the Virt plane is the first second layer and should be built as one.
 
+## Addendum 3 (2026-10-05, Dylan): location knowledge, surveillance, hit squads
+
+- **Sightings as knowledge** (M15, with gossip): `Sighting { who, where, tick, confidence }` in agent memory and in a faction database; relayed along membership edges; decaying. `law::sightings` is the seed. Nobody knows where anyone is except through sightings.
+- **Cameras and stealth** (M14 Data, M13 chrome): static sensors on faction-owned tiles feeding the faction database with an ID probability; stealth tech lowers it, sensor quality raises it.
+- **Bounties and tags** (M16 contracts): a contract whose deliverable is a sighting stream; tracking tags as sensors on a person; scanners detect tags.
+- **Hit squads** (M16, M12 territory): a raid on a person, target tile from the freshest sighting, gated on who controls the territory, relative strength and the political cost with that faction; or the territory's faction is hired to deliver the target.
+
