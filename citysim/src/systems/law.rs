@@ -185,14 +185,16 @@ fn seen_near(world: &World, s: EntityId, tile: TilePos) -> bool {
 }
 
 /// `located_suspects` last seen within `[law] pursuit_radius` tiles of
-/// `tile`: the warrants a guard standing there will chase (M10).
-pub fn located_suspects_near(world: &World, tile: TilePos) -> Vec<EntityId> {
-    world.open_suspects().filter(|&s| located(world, s) && seen_near(world, s, tile)).collect()
+/// `tile`: the warrants the guard `me` standing there will chase (M10). A
+/// guard never chases their own warrant: one who did cuffed themselves, with
+/// no escort to end it, and starved in their own cuffs.
+pub fn located_suspects_near(world: &World, tile: TilePos, me: EntityId) -> Vec<EntityId> {
+    world.open_suspects().filter(|&s| s != me && located(world, s) && seen_near(world, s, tile)).collect()
 }
 
 /// Is `located_suspects_near` non-empty?
-pub fn any_located_suspect_near(world: &World, tile: TilePos) -> bool {
-    world.open_suspects().any(|s| located(world, s) && seen_near(world, s, tile))
+pub fn any_located_suspect_near(world: &World, tile: TilePos, me: EntityId) -> bool {
+    world.open_suspects().any(|s| s != me && located(world, s) && seen_near(world, s, tile))
 }
 
 /// Sentence length in ticks for a crime at the current lever.
@@ -251,7 +253,8 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
 /// building). A suspect with courage > 0.7 contests it. Returns whether the
 /// suspect is now cuffed.
 pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
-    if !living(world, suspect)
+    if guard == suspect
+        || !living(world, suspect)
         || !living(world, guard)
         || world.has::<Sentence>(suspect)
         || !near(world, guard, suspect, 1)
@@ -557,6 +560,7 @@ pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
 /// Daily: warrants expire, prisoners are fed and released.
 pub fn run(world: &mut World) {
     tally_watch(world);
+    credit_guard_shifts(world);
     sightings(world);
     if world.tick_of_day() == 0 {
         expire_warrants(world);
@@ -580,6 +584,56 @@ fn tally_watch(world: &mut World) {
         let Some(tile) = world.comp::<Position>(g).map(|p| p.tile) else { continue };
         let z = world.map.zone(tile).index();
         world.zone_watch.today[z] += 1;
+    }
+}
+
+/// M10 5c: a guard still on law duty when the shift's clock runs out has
+/// worked the shift. A Patrol day was credited only by a PatrolLeg finishing
+/// at or after the end (whose precondition needs the shift still running), or
+/// by an arrest or delivery; a guard mid-chase or walking to a waypoint when
+/// the clock ran out was never owed the day. Seed 42 at 2,000: 412 of 584
+/// workday shifts in 20 days went uncredited and the watch starved on full pay.
+/// Duty is the goal held at the end: Patrol, Arrest, or Work on a Jail day (a
+/// guard back from a chase, walking to the Jail). The shift is marked credited
+/// so a GuardJail finishing a tick later does not owe it twice.
+fn credit_guard_shifts(world: &mut World) {
+    use crate::components::GoalKind;
+    let tod = world.tick_of_day();
+    let last = if tod == 0 { 1439 } else { tod - 1 };
+    let ended_tick = world.tick.saturating_sub(1);
+    // A copy: `maybe_quit` can take a guard off the roster mid-loop.
+    let guards = world.guards().to_vec();
+    for g in guards {
+        let Some(job) = world.comp::<Job>(g) else { continue };
+        if !job.on_shift(last) || job.on_shift(tod) {
+            continue;
+        }
+        let key = job.shift_key_at(ended_tick);
+        if !crate::exec::routine::is_workday(key) || job.last_shift_day == Some(key) || job.shift_credited == Some(key)
+        {
+            continue;
+        }
+        if world.has::<Sentence>(g) {
+            continue;
+        }
+        let on_duty = match world.comp::<Brain>(g).and_then(|b| b.current_goal) {
+            Some(GoalKind::Patrol | GoalKind::Arrest) => true,
+            Some(GoalKind::Work) => jail_duty(world, g, key),
+            _ => false,
+        };
+        if !on_duty {
+            continue;
+        }
+        if let Some(j) = world.comp_mut::<Job>(g) {
+            j.shift_credited = Some(key);
+            j.last_shift_day = Some(key);
+            j.days_unpaid = j.days_unpaid.saturating_add(1);
+        }
+        if let Some(b) = world.comp_mut::<Brain>(g) {
+            b.patrol_legs = 0;
+            b.patrol_route.clear();
+        }
+        crate::systems::economy::maybe_quit(world, g);
     }
 }
 

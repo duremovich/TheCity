@@ -165,7 +165,8 @@ fn test_full_vs_statistical_within_15pct() {
         let mut actors = [0u64; 3];
         let mut cursor = 0u64;
         // Actor buckets are read when the event is seen (end of its day).
-        let scan = |w: &World, cursor: &mut u64, assaults: &mut u64, marriages: &mut u64, actors: &mut [u64; 3]| {
+        let mut split = [[0u64; 3]; 2];
+        let mut scan = |w: &World, cursor: &mut u64, assaults: &mut u64, marriages: &mut u64, actors: &mut [u64; 3]| {
             for e in w.events.iter().filter(|e| e.id >= *cursor) {
                 match e.kind {
                     EventKind::Assault | EventKind::Assaulted => *assaults += 1,
@@ -181,8 +182,16 @@ fn test_full_vs_statistical_within_15pct() {
                     // every robbery twice, at the binder's (1 - l)^2 weights
                     // (M10 phase 5b, once the fed calibration city's thefts
                     // became mostly robberies).
+                    //
+                    // Assaults and murders count on both sides: a forced
+                    // Statistical city keeps guards, gravediggers and the
+                    // wanted as bodies, and their fights are Full events with
+                    // a named actor (an off-screen victim's Murder names
+                    // nobody, so `bucket` skips it). Counting only thefts
+                    // here dropped the bodies' violence from this side alone
+                    // (M10 phase 5c).
                     _ => {
-                        matches!(e.kind, EventKind::Theft)
+                        matches!(e.kind, EventKind::Theft | EventKind::Assault | EventKind::Murder)
                             || (e.kind == EventKind::Attributed
                                 && e.actors.len() == 2
                                 && !e.text.contains(citysim::HoleKind::Robbed.noun()))
@@ -191,6 +200,9 @@ fn test_full_vs_statistical_within_15pct() {
                 if actor_side {
                     if let Some(b) = e.actors.first().and_then(|&a| bucket(w, a)) {
                         actors[b] += 1;
+                        // Thefts apart from assaults, murders and bound holes, for the diagnosis.
+                        let kind = usize::from(e.kind != EventKind::Theft);
+                        split[kind][b] += 1;
                     }
                 }
             }
@@ -205,6 +217,12 @@ fn test_full_vs_statistical_within_15pct() {
         }
         bind::bind_all(&mut w);
         scan(&w, &mut cursor, &mut assaults, &mut marriages, &mut actors);
+        let pop: [usize; 3] =
+            std::array::from_fn(|b| w.citizens().into_iter().filter(|&id| bucket(&w, id) == Some(b)).count());
+        eprintln!(
+            "{force:?} seed {seed}: thefts by bucket {:?}, violence/attributed by bucket {:?}, population {pop:?}",
+            split[0], split[1]
+        );
         let per = f64::from(AGENTS) * DAYS as f64 / 100.0;
         let sum = |f: fn(&citysim::DayRow) -> u32| w.stats.history.iter().map(f).sum::<u32>() as f64 / per;
         Run {

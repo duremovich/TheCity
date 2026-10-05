@@ -425,3 +425,208 @@ fn probe_assault_sources() {
     }
     eprintln!("extortions {extortions} | assaults: cross-gang {cross} civilian-on-member {civ_on_gang} member-on-civilian {gang_on_civ} civilian-on-civilian {civ_on_civ}");
 }
+
+/// M10 5c: for every guard shift that ends uncredited, what was the guard doing
+/// at the shift's last tick, and what did it do over the shift?
+#[test]
+#[ignore]
+fn probe_guard_shift_end() {
+    use citysim::{Brain, Job, Role};
+    use std::collections::BTreeMap;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+    let mut w = World::new(42, Config::load());
+    let guards: Vec<_> =
+        w.citizens().into_iter().filter(|&g| w.comp::<Job>(g).is_some_and(|j| j.role == Role::Guard)).collect();
+    let mut was_on: BTreeMap<_, bool> = BTreeMap::new();
+    let mut shift_goals: BTreeMap<_, BTreeMap<String, u32>> = BTreeMap::new();
+    let mut at_end: BTreeMap<String, u32> = BTreeMap::new();
+    let mut over: BTreeMap<String, u32> = BTreeMap::new();
+    let (mut credited, mut uncredited, mut offday) = (0, 0, 0);
+    let mut pending = Vec::new();
+    for _ in 0..days * TICKS_PER_DAY {
+        let before: BTreeMap<_, String> = guards
+            .iter()
+            .filter_map(|&g| {
+                let b = w.comp::<Brain>(g)?;
+                let step = b
+                    .plan
+                    .as_ref()
+                    .and_then(|p| p.steps.get(usize::from(b.plan_step)))
+                    .map_or("none".to_string(), |s| format!("{:?}", s.action));
+                Some((g, format!("{:?}/{}", b.current_goal, step)))
+            })
+            .collect();
+        w.tick();
+        for &g in &guards {
+            let Some(j) = w.comp::<Job>(g) else { continue };
+            let on = j.on_shift(w.tick_of_day());
+            let prev = was_on.insert(g, on).unwrap_or(false);
+            if on {
+                let goal = w.comp::<Brain>(g).map_or("-".into(), |b| format!("{:?}", b.current_goal));
+                *shift_goals.entry(g).or_default().entry(goal).or_default() += 1;
+            }
+            if prev && !on {
+                let key = j.shift_key_at(w.tick - 1);
+                if !citysim::exec::routine::is_workday(key) {
+                    offday += 1;
+                } else {
+                    pending.push((
+                        w.tick + 90,
+                        g,
+                        key,
+                        before.get(&g).cloned().unwrap_or_default(),
+                        shift_goals.get(&g).cloned().unwrap_or_default(),
+                    ));
+                }
+                shift_goals.remove(&g);
+            }
+        }
+        let now = w.tick;
+        let (due, rest): (Vec<_>, Vec<_>) = pending.drain(..).partition(|p| p.0 <= now);
+        pending = rest;
+        for (_, g, key, doing, goals) in due {
+            let Some(j) = w.comp::<Job>(g) else { continue };
+            {
+                if j.last_shift_day == Some(key) || j.shift_credited == Some(key) {
+                    credited += 1;
+                } else {
+                    let before: BTreeMap<_, String> = [(g, doing)].into_iter().collect();
+                    let shift_goals: BTreeMap<_, BTreeMap<String, u32>> = [(g, goals)].into_iter().collect();
+                    uncredited += 1;
+                    *at_end.entry(before.get(&g).cloned().unwrap_or_default()).or_default() += 1;
+                    let goals = shift_goals.get(&g).cloned().unwrap_or_default();
+                    let top = goals.iter().max_by_key(|(_, &n)| n).map(|(k, _)| k.clone()).unwrap_or_default();
+                    *over.entry(top).or_default() += 1;
+                }
+            }
+        }
+    }
+    eprintln!("shifts credited {credited} uncredited {uncredited} offday {offday}");
+    let mut v: Vec<_> = at_end.into_iter().collect();
+    v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
+    eprintln!("doing at shift end (uncredited): {:#?}", &v[..v.len().min(15)]);
+    eprintln!("dominant goal over uncredited shifts: {over:?}");
+}
+
+/// M10 5c: guard hardship (days 1-60) and starvation deaths by age (120 days).
+/// `V1=1` runs the v1 profile.
+#[test]
+#[ignore]
+fn probe_starvation() {
+    use citysim::{Corpse, DeathCause, Identity, Job, Needs, Role, Wallet, TICKS_PER_HOUR};
+    use std::collections::BTreeSet;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let seed: u64 = std::env::var("SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let cfg = if std::env::var("V1").is_ok() { Config::load().v1_profile() } else { Config::load() };
+    let mut w = World::new(seed, cfg);
+    let pop0 = w.citizens().len();
+    let mut ever_guard = BTreeSet::new();
+    let mut broke = BTreeSet::new();
+    let mut starving_guard_days = 0u32;
+    let mut dead = BTreeSet::new();
+    let (mut adult, mut child, mut adult_guard) = (0u32, 0u32, 0u32);
+    let mut ages = std::collections::BTreeMap::new();
+    let mut guard_now = BTreeSet::new();
+    let mut last_seen = std::collections::BTreeMap::new();
+    for day in 0..days {
+        let mut starving_today = BTreeSet::new();
+        for h in 0..24 {
+            for _ in 0..TICKS_PER_HOUR {
+                w.tick();
+            }
+            let living: BTreeSet<_> = w.citizens().into_iter().collect();
+            for &id in ages.keys().filter(|id| !living.contains(id)) {
+                if let Some(c) = w.comp::<Corpse>(id) {
+                    if dead.insert(id) && c.cause == DeathCause::Starvation {
+                        let age: u32 = *ages.get(&id).unwrap_or(&99999);
+                        if age >= citysim::systems::demography::ADULT_AGE_DAYS {
+                            adult += 1;
+                            if guard_now.contains(&id) {
+                                adult_guard += 1;
+                                eprintln!("  day {day} guard {id:?} starved; last seen {:?}", last_seen.get(&id));
+                            }
+                        } else {
+                            child += 1;
+                        }
+                    }
+                }
+            }
+            for &id in &living {
+                if w.comp::<Needs>(id).is_some_and(|n| n.starving_since.is_some()) {
+                    let b = w.comp::<citysim::Brain>(id);
+                    last_seen.insert(
+                        id,
+                        (
+                            w.comp::<Wallet>(id).map(|x| x.coins),
+                            w.comp::<citysim::Inventory>(id).map(|x| x.food),
+                            b.and_then(|b| b.current_goal),
+                            w.comp::<Job>(id).map(|j| (j.role, j.days_unpaid)),
+                            w.has::<citysim::Sentence>(id),
+                            b.and_then(|b| b.cuffed_by).is_some(),
+                        ),
+                    );
+                }
+                if let Some(i) = w.comp::<Identity>(id) {
+                    ages.insert(id, i.age_days);
+                }
+                let is_guard = w.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard);
+                if is_guard {
+                    guard_now.insert(id);
+                } else if h == 0 {
+                    guard_now.remove(&id);
+                }
+                if day < 60 && is_guard {
+                    ever_guard.insert(id);
+                    if w.comp::<Wallet>(id).is_some_and(|x| x.coins < 3) {
+                        broke.insert(id);
+                    }
+                    if w.comp::<Needs>(id).is_some_and(|n| n.starving_since.is_some()) {
+                        starving_today.insert(id);
+                    }
+                }
+            }
+        }
+        starving_guard_days += starving_today.len() as u32;
+        if day == 59 {
+            eprintln!(
+                "days 1-60: guards ever {} broke {} starving guard-days {starving_guard_days}",
+                ever_guard.len(),
+                broke.len()
+            );
+        }
+    }
+    eprintln!(
+        "{days} days, start pop {pop0}: starvation deaths adult {adult} (guards {adult_guard}) child {child}; per 100 residents {:.2}",
+        f64::from(adult + child) * 100.0 / pop0 as f64
+    );
+}
+
+/// M10 5c: the law's posture per day on seed 42 (2,000), with the Posture events.
+#[test]
+#[ignore]
+fn probe_posture_history() {
+    use citysim::{EventKind, Posture};
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let mut w = World::new(42, Config::load());
+    let mut line = String::new();
+    let mut crack = 0;
+    let mut seen = 0;
+    for day in 0..days {
+        w.run_ticks(TICKS_PER_DAY);
+        for e in w.events.iter().filter(|e| e.tick >= seen && e.kind == EventKind::Posture) {
+            eprintln!("  d{day} {}", e.text);
+        }
+        seen = w.tick;
+        let (p, t) = w.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target));
+        if p == Posture::Crackdown {
+            crack += 1;
+        }
+        line.push(match p {
+            Posture::Patrol => 'P',
+            Posture::Crackdown => 'C',
+            Posture::Garrison => 'G',
+        });
+        let _ = t;
+    }
+    eprintln!("{line}\nCrackdown {crack}/{days}");
+}

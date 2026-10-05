@@ -367,7 +367,7 @@ pub fn considerations(
             let p = pers?;
             // M10: only warrants within pursuit range of this guard.
             let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
-            let located = crate::systems::law::any_located_suspect_near(world, here)
+            let located = crate::systems::law::any_located_suspect_near(world, here, id)
                 || world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
             vec![
                 Consideration::new("warrant located", can(located), GATE),

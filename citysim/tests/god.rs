@@ -81,7 +81,14 @@ struct Run {
 
 /// Run seed 42 to `END_DAY`; `shock` fires at the start of `SHOCK_DAY`.
 fn run(name: &'static str, shock: impl FnOnce(&mut World)) -> Run {
+    run_from(name, |_| {}, shock)
+}
+
+/// `run`, with `setup` fired at the start of the baseline window (`BASE.0`),
+/// so the baseline and the shock's control share it.
+fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOnce(&mut World)) -> Run {
     let mut w = World::new(SEED, Config::load());
+    let mut setup = Some(setup);
     let gangs = w.gangs();
     let gang_names = gangs.iter().map(|&g| w.comp::<Gang>(g).map_or(String::new(), |g| g.name.clone())).collect();
     let mut shock = Some(shock);
@@ -89,6 +96,9 @@ fn run(name: &'static str, shock: impl FnOnce(&mut World)) -> Run {
     let mut story = Vec::new();
     let mut seen = 0;
     for day in 0..END_DAY {
+        if day == BASE.0 {
+            (setup.take().expect("once"))(&mut w);
+        }
         if day == SHOCK_DAY {
             (shock.take().expect("once"))(&mut w);
         }
@@ -326,7 +336,10 @@ impl Run {
     }
 
     fn assert_reacted(&self) {
-        let c = control();
+        self.assert_reacted_against(control());
+    }
+
+    fn assert_reacted_against(&self, c: &Run) {
         self.print(Some(c));
         let r = self.reactions(c, REACT_DAYS);
         assert!(!r.is_empty(), "{}: nothing reacted within {REACT_DAYS} days of the shock", self.name);
@@ -338,6 +351,20 @@ impl Run {
 fn control() -> &'static Run {
     static CONTROL: OnceLock<Run> = OnceLock::new();
     CONTROL.get_or_init(|| run("god_control", |_| {}))
+}
+
+/// The control for a posture pin: the law pinned to Patrol from the baseline
+/// window on, so pinning another posture at the shock is a change the
+/// captain did not choose. At 2,000 residents the unpinned captain sits in
+/// Crackdown or Garrison on most days (the v1 `crackdown_reports` is an
+/// absolute count), so an unpinned control was often already in Crackdown.
+fn patrol_control() -> &'static Run {
+    static CONTROL: OnceLock<Run> = OnceLock::new();
+    CONTROL.get_or_init(|| run_from("god_patrol_control", pin(Posture::Patrol), |_| {}))
+}
+
+fn pin(p: Posture) -> impl FnOnce(&mut World) {
+    move |w: &mut World| w.push_command(PlayerCommand::SetLawPosture(Some(p)))
 }
 
 /// No shock: the baseline world, for comparison with every scenario.
@@ -428,12 +455,13 @@ fn god_garrison_forever() {
 #[test]
 #[ignore]
 fn god_crackdown_forever() {
-    let r = run("god_crackdown_forever", |w| w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Crackdown))));
-    // A pin is only a shock when the captain would not have chosen it: if
-    // the control is already in Crackdown at the shock, nothing differs
-    // until it leaves. The 60-day line printed below shows the long view.
-    r.assert_reacted();
-    eprintln!("reactions within 60 days, vs control: {:?}", r.reactions(control(), END_DAY - SHOCK_DAY));
+    // A pin is only a shock when the captain would not have chosen it: an
+    // unpinned control was already in Crackdown on most days (M10 phase 5c).
+    // So the law holds Patrol from the baseline window on, in this run and in
+    // its control, and the shock turns that Patrol into a Crackdown.
+    let r = run_from("god_crackdown_forever", pin(Posture::Patrol), pin(Posture::Crackdown));
+    r.assert_reacted_against(patrol_control());
+    eprintln!("reactions within 60 days, vs control: {:?}", r.reactions(patrol_control(), END_DAY - SHOCK_DAY));
 }
 
 /// Set the Treasury to -50,000: the dole stops and the guards go unpaid.

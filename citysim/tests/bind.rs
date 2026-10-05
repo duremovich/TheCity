@@ -167,21 +167,23 @@ fn test_enemy_in_zone_gets_documented_weight() {
     citysim::systems::social::make_enemy(&mut w, victim, enemy, -0.6);
     let after = bind::candidates(&w, &hole);
     let w_after = after.iter().find(|&&(c, _)| c == enemy).map(|&(_, x)| x).expect("still a candidate");
-    // (1 - l)^2 x (1 + 3 x enemy) x ...: the enemy weighs four times as much.
-    assert!((w_after / w_before - 4.0).abs() < 1e-9, "{w_before} -> {w_after}");
-    // And the base term is (1 - l)^2 times the documented multipliers.
+    let cfg = w.config.bind.clone();
+    // (1 - l)^power x (1 + enemy_mult x enemy) x ...: the enemy weighs 1 + enemy_mult times as much.
+    let e = 1.0 + cfg.enemy_mult;
+    assert!((w_after / w_before - e).abs() < 1e-9, "{w_before} -> {w_after}");
+    // And the base term is (1 - l)^power times the documented multipliers.
     let l = f64::from(w.comp::<Personality>(enemy).expect("p").lawfulness);
     let t = w.comp::<Trace>(enemy).and_then(|t| t.on_day(0)).expect("trace day 0");
-    let s = if t.has(trace_flags::STATISTICAL_ALL_DAY) { 1.5 } else { 1.0 };
-    let z = if t.zone == hole.zone { 1.0 } else { 0.25 };
+    let s = if t.has(trace_flags::STATISTICAL_ALL_DAY) { 1.0 + cfg.statistical_mult } else { 1.0 };
+    let z = if t.zone == hole.zone { 1.0 } else { cfg.other_zone_weight };
     let g = if t.has(trace_flags::GANG)
         && hole.home.and_then(|h| w.comp::<Building>(h)).and_then(|b| b.claim).map(|c| c.gang) == w.gang_of(enemy)
     {
-        3.0
+        1.0 + cfg.gang_claim_mult
     } else {
         1.0
     };
-    let expected = (1.0 - l).powi(2) * 4.0 * s * z * g;
+    let expected = (1.0 - l).powf(cfg.lawfulness_power) * e * s * z * g;
     assert!((w_after - expected).abs() < 1e-9, "{w_after} vs {expected}");
     // Every other candidate is unchanged.
     for (&(c0, x0), &(c1, x1)) in before.iter().zip(&after) {

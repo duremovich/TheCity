@@ -298,7 +298,7 @@ trace_days = 120
 stat_violence_mult = 1.0
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
-# (1 - lawfulness)^2 x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
+# (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
 # x other_zone_weight off-zone. p_unknown is drawn first ("nobody ever learns who", D11).
 [bind]
 hole_ttl_days = 30
@@ -308,9 +308,17 @@ p_witness = 0.25
 coverage_min = 0.5
 coverage_max = 2.0
 gang_claim_mult = 2.0
-enemy_mult = 3.0
+# M10 phase 5c, tuned by the parity test's actor shares (spec § 3): v2 1.0 (was 3.0). Full crime per
+# head is flat across lawfulness (thefts .24/.52/.25 by bucket against a population of .22/.57/.21;
+# assaults and robberies are revenge-, gang- and hunger-driven), so the old weights pinned bound
+# crime on the lawless: law0 .34 against Full's .23, law2 .16 against .26. At power 0, enemy_mult 3
+# still leaves law2 at .205 (tolerance .05); 1.0 keeps a revenge tilt and passes (.214).
+enemy_mult = 1.0
 statistical_mult = 0.5
 other_zone_weight = 0.25
+# M10 phase 5c: 0.0 (spec default 2.0; serde default 2.0 for older saves). See enemy_mult: in Full,
+# lawfulness does not predict who robs or beats someone, so the binder does not weigh it either.
+lawfulness_power = 0.0
 
 [levers]
 tax_rate = 0.05

@@ -482,7 +482,7 @@ fn default_stat_violence_mult() -> f32 {
 }
 
 /// M10 holes and the binder (`docs/M10_SCALE.md` § 3). A candidate's weight is
-/// `(1 - lawfulness)^2 x (1 + gang_claim_mult x gang x claims) x (1 + enemy_mult x enemy)
+/// `(1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult x gang x claims) x (1 + enemy_mult x enemy)
 /// x (1 + statistical_mult x statistical)`, times `other_zone_weight` off the victim's zone.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BindCfg {
@@ -500,9 +500,16 @@ pub struct BindCfg {
     pub enemy_mult: f64,
     pub statistical_mult: f64,
     pub other_zone_weight: f64,
+    /// The exponent on `1 - lawfulness`; tuned by the parity test's actor shares.
+    #[serde(default = "BindCfg::default_lawfulness_power")]
+    pub lawfulness_power: f64,
 }
 
 impl BindCfg {
+    fn default_lawfulness_power() -> f64 {
+        2.0
+    }
+
     /// The `[bind]` block of `assets/config.toml`, for saves written before it existed.
     pub fn from_assets() -> BindCfg {
         let dir = Config::find_assets_dir()

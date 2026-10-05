@@ -71,7 +71,7 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // Arrest binds the located warrant suspect nearest the guard.
         GoalKind::Arrest => {
             let tile = world.comp::<Position>(id)?.tile;
-            crate::systems::law::located_suspects_near(world, tile)
+            crate::systems::law::located_suspects_near(world, tile, id)
                 .into_iter()
                 .min_by_key(|&s| (world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile)), s.index))
         }

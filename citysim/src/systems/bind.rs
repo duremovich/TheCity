@@ -66,7 +66,7 @@ fn trace_on(world: &World, id: EntityId, trace: &Trace, day: u64) -> Option<DayT
 /// Weighted candidates for a hole, ascending by id (pub for tests):
 /// alive and free that day per their trace, an adult with a Personality now,
 /// not the victim or the victim's spouse. Weight exactly
-/// `(1 − l)² × (1 + gang_claim_mult·g·c) × (1 + enemy_mult·e) × (1 + statistical_mult·s)`,
+/// `(1 − l)^lawfulness_power × (1 + gang_claim_mult·g·c) × (1 + enemy_mult·e) × (1 + statistical_mult·s)`,
 /// times `other_zone_weight` off the victim's zone.
 pub fn candidates(world: &World, hole: &Hole) -> Vec<(EntityId, f64)> {
     let cfg = &world.config.bind;
@@ -89,7 +89,11 @@ pub fn candidates(world: &World, hole: &Hole) -> Vec<(EntityId, f64)> {
         let c = claim_gang.is_some() && claim_gang == world.gang_of(id);
         let e = world.enemies.get(&hole.victim).is_some_and(|s| s.contains(&id));
         let s = t.has(trace_flags::STATISTICAL_ALL_DAY);
-        let mut w = (1.0 - l).powi(2)
+        let unlawful = 1.0 - l;
+        // Squared exactly at the default, so it matches the old `powi(2)` bit for bit.
+        let lawless =
+            if cfg.lawfulness_power == 2.0 { unlawful * unlawful } else { unlawful.powf(cfg.lawfulness_power) };
+        let mut w = lawless
             * (1.0 + cfg.gang_claim_mult * f64::from(u8::from(g && c)))
             * (1.0 + cfg.enemy_mult * f64::from(u8::from(e)))
             * (1.0 + cfg.statistical_mult * f64::from(u8::from(s)));

@@ -221,3 +221,62 @@ fn test_player_arrest_bypasses_witness() {
     let _ = w.comp::<Brain>(id);
     let _ = w.comp::<Building>(w.building_of_kind(BuildingKind::Jail).expect("jail"));
 }
+
+/// M10 5c: a guard with a warrant of their own never chases or cuffs
+/// themselves (one who did sat in their own cuffs, with no escort to end it,
+/// and starved).
+#[test]
+fn test_guard_never_arrests_self() {
+    let mut w = world(31);
+    let g = guard(&w);
+    law::file_report(&mut w, Crime::Theft, g, None);
+    let tile = w.comp::<Position>(g).expect("pos").tile;
+    let tick = w.tick;
+    w.last_seen.insert(g, (tile, tick));
+    assert!(law::is_located_suspect(&w, g), "the guard is a located suspect");
+    assert!(!law::located_suspects_near(&w, tile, g).contains(&g));
+    assert!(!law::arrest(&mut w, g, g));
+    assert!(w.comp::<Brain>(g).expect("brain").cuffed_by.is_none());
+}
+
+/// M10 5c: a guard still on law duty (Patrol) when the shift's clock runs out
+/// is owed the day once; one asleep at the end is not.
+#[test]
+fn test_guard_on_duty_at_shift_end_is_owed_the_day() {
+    use citysim::GoalKind;
+    let mut w = world(32);
+    let g = guard(&w);
+    let job = w.comp::<Job>(g).expect("job").clone();
+    // A segment end that really ends the shift (not 1440 continued by a 0 start).
+    let end = job.shifts.iter().map(|&(_, e)| e).find(|&e| !job.on_shift(e % 1440)).expect("an end");
+    let mut day = 1;
+    let key = loop {
+        let tick = day * TICKS_PER_DAY + u64::from(end % 1440) + if end == 1440 { TICKS_PER_DAY } else { 0 };
+        let key = job.shift_key_at(tick - 1);
+        if citysim::exec::routine::is_workday(key) {
+            w.tick = tick;
+            break key;
+        }
+        day += 1;
+    };
+    let before = w.comp::<Job>(g).expect("job").days_unpaid;
+    w.comp_mut::<Brain>(g).expect("brain").current_goal = Some(GoalKind::Patrol);
+    law::run(&mut w);
+    let j = w.comp::<Job>(g).expect("job");
+    assert_eq!(j.days_unpaid, before + 1, "one day owed");
+    assert_eq!(j.last_shift_day, Some(key));
+    law::run(&mut w);
+    assert_eq!(w.comp::<Job>(g).expect("job").days_unpaid, before + 1, "not owed twice");
+
+    // Another guard, asleep when the same shift ends, is owed nothing.
+    let other = w
+        .citizens()
+        .into_iter()
+        .find(|&o| o != g && w.comp::<Job>(o).is_some_and(|j| j.role == Role::Guard && j.shifts == job.shifts))
+        .expect("a guard on the same shift");
+    let before = w.comp::<Job>(other).expect("job").days_unpaid;
+    w.comp_mut::<Brain>(other).expect("brain").current_goal = Some(GoalKind::Sleep);
+    w.comp_mut::<Job>(other).expect("job").last_shift_day = None;
+    law::run(&mut w);
+    assert_eq!(w.comp::<Job>(other).expect("job").days_unpaid, before);
+}
