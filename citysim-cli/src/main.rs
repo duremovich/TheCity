@@ -114,8 +114,41 @@ struct CalibrateArgs {
     out: PathBuf,
 }
 
-/// `day=90:release_reserve=1500` → `(tick, command)`.
-fn parse_lever(spec: &str) -> Result<(u64, PlayerCommand), String> {
+/// A scheduled lever: a ready command, or a god command naming a gang by its
+/// index in `World::gangs()`, resolved to entity ids when it fires (the
+/// command log records the resolved command, so replays need no resolving).
+#[derive(Clone, Debug)]
+enum Lever {
+    Cmd(PlayerCommand),
+    KillLeader(usize),
+    JailGang(usize, u32),
+    KillGang(usize),
+    FundGang(usize, i64),
+    SeizeGang(usize),
+}
+
+impl Lever {
+    fn resolve(&self, world: &World) -> Result<PlayerCommand, String> {
+        let gang = |i: usize| world.gangs().get(i).copied().ok_or_else(|| format!("no gang {i}"));
+        Ok(match *self {
+            Lever::Cmd(ref c) => c.clone(),
+            Lever::KillLeader(i) => {
+                let g = gang(i)?;
+                let leader = world.comp::<citysim::Gang>(g).and_then(|g| g.leader);
+                PlayerCommand::KillAgent(leader.ok_or_else(|| format!("gang {i} has no leader"))?)
+            }
+            Lever::JailGang(i, days) => PlayerCommand::JailGang { gang: gang(i)?, days },
+            Lever::KillGang(i) => PlayerCommand::KillGang(gang(i)?),
+            Lever::FundGang(i, amount) => PlayerCommand::FundGang { gang: gang(i)?, amount },
+            Lever::SeizeGang(i) => PlayerCommand::SeizeGangTreasury(gang(i)?),
+        })
+    }
+}
+
+/// `day=90:release_reserve=1500` → `(tick, lever)`. God levers name a gang
+/// by index: `kill_leader=0`, `jail_gang=0:60`, `kill_gang=0`,
+/// `fund_gang=1:10000`, `seize_gang=0`, `fire_guards=1`, `treasury=-50000`.
+fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
     let day: u64 = day_part
@@ -125,6 +158,29 @@ fn parse_lever(spec: &str) -> Result<(u64, PlayerCommand), String> {
         .map_err(|e| format!("{spec}: bad day: {e}"))?;
     let (name, value) = cmd_part.split_once('=').ok_or_else(|| format!("{spec}: expected <lever>=<value>"))?;
     let num = |what: &str| value.parse::<f64>().map_err(|e| format!("{spec}: bad {what}: {e}"));
+    let idx = |v: &str| v.parse::<usize>().map_err(|e| format!("{spec}: bad gang index: {e}"));
+    // `<gang index>:<n>`
+    let pair = || -> Result<(usize, i64), String> {
+        let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <gang index>:<n>"))?;
+        Ok((idx(g)?, n.parse::<i64>().map_err(|e| format!("{spec}: bad number: {e}"))?))
+    };
+    let god = match name {
+        "kill_leader" => Some(Lever::KillLeader(idx(value)?)),
+        "kill_gang" => Some(Lever::KillGang(idx(value)?)),
+        "seize_gang" => Some(Lever::SeizeGang(idx(value)?)),
+        "jail_gang" => {
+            let (g, d) = pair()?;
+            Some(Lever::JailGang(g, u32::try_from(d).map_err(|e| format!("{spec}: bad days: {e}"))?))
+        }
+        "fund_gang" => {
+            let (g, n) = pair()?;
+            Some(Lever::FundGang(g, n))
+        }
+        _ => None,
+    };
+    if let Some(l) = god {
+        return Ok((day * TICKS_PER_DAY, l));
+    }
     let cmd = match name {
         "release_reserve" => PlayerCommand::ReleaseReserve { amount: num("amount")? as u32 },
         "tax_rate" => PlayerCommand::SetTaxRate(num("rate")? as f32),
@@ -139,13 +195,15 @@ fn parse_lever(spec: &str) -> Result<(u64, PlayerCommand), String> {
             "garrison" => Some(Posture::Garrison),
             _ => return Err(format!("{spec}: law_posture must be Auto|Patrol|Crackdown|Garrison")),
         }),
+        "fire_guards" => PlayerCommand::FireAllGuards,
+        "treasury" => PlayerCommand::SetTreasury(value.parse::<i64>().map_err(|e| format!("{spec}: bad coins: {e}"))?),
         other => return Err(format!("{spec}: unknown lever {other}")),
     };
-    Ok((day * TICKS_PER_DAY, cmd))
+    Ok((day * TICKS_PER_DAY, Lever::Cmd(cmd)))
 }
 
 fn run(args: RunArgs) -> Result<(), String> {
-    let mut levers: Vec<(u64, PlayerCommand)> = args.levers.iter().map(|s| parse_lever(s)).collect::<Result<_, _>>()?;
+    let mut levers: Vec<(u64, Lever)> = args.levers.iter().map(|s| parse_lever(s)).collect::<Result<_, _>>()?;
     levers.sort_by_key(|(t, _)| *t);
 
     let mut config = Config::load();
@@ -204,7 +262,12 @@ fn run(args: RunArgs) -> Result<(), String> {
         let chunk_ticks = day_end - world.tick;
         while world.tick < day_end {
             while next_lever < levers.len() && levers[next_lever].0 <= world.tick {
-                world.push_command(levers[next_lever].1.clone());
+                match levers[next_lever].1.resolve(&world) {
+                    Ok(cmd) => world.push_command(cmd),
+                    Err(e) => {
+                        eprintln!("warning: lever {:?} at tick {}: {e}; skipped", levers[next_lever].1, world.tick)
+                    }
+                }
                 next_lever += 1;
             }
             citysim::tick(&mut world);
