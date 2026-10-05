@@ -776,6 +776,10 @@ pub struct Corp {
     /// D49: `Dictator` = `exec` decides; no Board in M11.
     #[serde(default)]
     pub governance: Governance,
+    /// God `SetCorpOrder`: the order holds until this tick (the rescores
+    /// keep the trace but do not switch).
+    #[serde(default)]
+    pub pinned_until: Option<Tick>,
 }
 
 impl Corp {
@@ -809,6 +813,7 @@ impl Corp {
             parent: None,
             outside_treasury: 0,
             governance: Governance::Dictator,
+            pinned_until: None,
         }
     }
 

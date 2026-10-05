@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, DeathCause, Gang, Household, Job, Position, Posture, Rect, Sentence,
-    TileKind, TilePos, Wallet,
+    Brain, Building, BuildingKind, Corp, CorpOrder, CorpShock, Crime, DeathCause, Gang, Household, Job, Niche,
+    Position, Posture, Rect, Sentence, TileKind, TilePos, Wallet,
 };
 use crate::config::Config;
 use crate::entity::EntityId;
@@ -91,6 +91,42 @@ pub enum PlayerCommand {
     NoCityEvictions(bool),
     /// Split a corp's monopoly niche in two (D31); refused without one.
     BreakUp(EntityId),
+    // --- M11 god commands (docs/GOD_SCENARIOS_V2.md): corps, out of the rules.
+    /// Add coins to a corp's treasury, out of thin air.
+    FundCorp {
+        corp: EntityId,
+        amount: i64,
+    },
+    /// The corp's treasury goes to -1, `negative_since` is back-dated past
+    /// `bankrupt_days`, and it goes bankrupt at once (`corps::bankrupt`), so
+    /// a day's takings cannot save it before the midnight pass.
+    BankruptCorp(EntityId),
+    /// Every building of `owner` (`None` = the city) moves to `to` (an
+    /// agent, gang, corp or `None` = the city). A corp losing buildings takes
+    /// one `BuildingLost`, as when a rival's Acquire takes one.
+    SeizeBuildings {
+        owner: Option<EntityId>,
+        to: Option<EntityId>,
+    },
+    /// Kill a corp's exec (Violence, no killer).
+    KillExec(EntityId),
+    /// Kill every non-exec employee of a corp (Violence, no killer).
+    KillStaff(EntityId),
+    /// Pin a corp's order for `days` (the daily and shock rescores keep the
+    /// trace but do not switch). `niche` defaults to the order's current
+    /// niche, else the corp's first.
+    SetCorpOrder {
+        corp: EntityId,
+        order: CorpOrder,
+        #[serde(default)]
+        niche: Option<Niche>,
+        days: u32,
+    },
+    /// The corp's non-exec workers walk out of their next shift, as a Street
+    /// strike does (D35), whatever the unrest; the strike cooldown is untouched.
+    StrikeNow(EntityId),
+    /// Every corp's treasury to 0.
+    WipeTreasuries,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -278,7 +314,15 @@ impl World {
             | PlayerCommand::KillGang(_)
             | PlayerCommand::JailGang { .. }
             | PlayerCommand::FireAllGuards
-            | PlayerCommand::SetTreasury(_) => {
+            | PlayerCommand::SetTreasury(_)
+            | PlayerCommand::FundCorp { .. }
+            | PlayerCommand::BankruptCorp(_)
+            | PlayerCommand::SeizeBuildings { .. }
+            | PlayerCommand::KillExec(_)
+            | PlayerCommand::KillStaff(_)
+            | PlayerCommand::SetCorpOrder { .. }
+            | PlayerCommand::StrikeNow(_)
+            | PlayerCommand::WipeTreasuries => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -427,6 +471,138 @@ impl World {
                 let t = self.treasury_mut().ok_or("SetTreasury: no Civic Hall")?;
                 t.coins = coins;
                 Ok((vec![], format!("set the Treasury to {coins}")))
+            }
+            _ => self.cmd_god_corp(cmd),
+        }
+    }
+
+    /// The M11 god commands on corps (docs/GOD_SCENARIOS_V2.md).
+    fn cmd_god_corp(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
+        use crate::systems::{classes, corps, ownership};
+        let corp_name = |w: &World, c: EntityId| w.comp::<Corp>(c).map(|c| c.name.clone()).ok_or("no such corp");
+        match *cmd {
+            PlayerCommand::FundCorp { corp, amount } => {
+                let name = corp_name(self, corp)?;
+                if let Some(c) = self.comp_mut::<Corp>(corp) {
+                    c.treasury += amount;
+                }
+                Ok((vec![corp], format!("gave {name} {amount} coins")))
+            }
+            PlayerCommand::BankruptCorp(corp) => {
+                let name = corp_name(self, corp)?;
+                let days = self.config.corps.bankrupt_days + 1;
+                let back = self.tick.saturating_sub(days * crate::time::TICKS_PER_DAY);
+                if let Some(c) = self.comp_mut::<Corp>(corp) {
+                    c.treasury = -1;
+                    c.negative_since = Some(back);
+                }
+                corps::bankrupt(self, corp);
+                Ok((vec![corp], format!("bankrupted {name}")))
+            }
+            PlayerCommand::SeizeBuildings { owner, to } => {
+                if to.is_some_and(|t| !(self.has::<Wallet>(t) || self.has::<Gang>(t) || self.has::<Corp>(t))) {
+                    return Err("SeizeBuildings: the new owner is not an agent, gang or corp".into());
+                }
+                if owner == to {
+                    return Err("SeizeBuildings: same owner".into());
+                }
+                let owned: Vec<EntityId> = self
+                    .with::<Building>()
+                    .into_iter()
+                    .filter(|&b| self.comp::<Building>(b).is_some_and(|bd| bd.owner == owner && !bd.demolished))
+                    .collect();
+                if owned.is_empty() {
+                    return Err(format!("SeizeBuildings: {} owns nothing", self.owner_label(owner)));
+                }
+                let (from_label, to_label) = (self.owner_label(owner), self.owner_label(to));
+                for &b in &owned {
+                    corps::move_building(self, b, to);
+                    if to.is_none() {
+                        // The city does not keep a corp's guard contract.
+                        corps::end_contract(self, b, "seized by the city");
+                    }
+                }
+                if let Some(c) = owner.filter(|&o| self.has::<Corp>(o)) {
+                    ownership::push_corp_shock(self, c, CorpShock::BuildingLost);
+                }
+                let actors: Vec<EntityId> = owner.into_iter().chain(to).collect();
+                Ok((actors, format!("gave all {} buildings of {from_label} to {to_label}", owned.len())))
+            }
+            PlayerCommand::KillExec(corp) => {
+                let name = corp_name(self, corp)?;
+                let exec = self.comp::<Corp>(corp).and_then(|c| c.exec);
+                let exec = exec.filter(|&e| self.is_alive(e) && self.has::<Brain>(e));
+                let exec = exec.ok_or_else(|| format!("KillExec: {name} has no living exec"))?;
+                let who = self.name_of(exec);
+                self.kill_by(exec, DeathCause::Violence, None);
+                Ok((vec![corp, exec], format!("struck {who}, exec of {name}, dead")))
+            }
+            PlayerCommand::KillStaff(corp) => {
+                let name = corp_name(self, corp)?;
+                let staff = self.comp::<Corp>(corp).map(|c| classes::employees(self, c)).unwrap_or_default();
+                for &a in &staff {
+                    self.kill_by(a, DeathCause::Violence, None);
+                }
+                Ok((vec![corp], format!("killed all {} employees of {name}", staff.len())))
+            }
+            PlayerCommand::SetCorpOrder { corp, order, niche, days } => {
+                let name = corp_name(self, corp)?;
+                let (now, evict_days) = (self.tick, self.config.rent.evict_days);
+                let c = self.comp_mut::<Corp>(corp).ok_or("no such corp")?;
+                let niche = match niche {
+                    Some(n) if !c.niches.contains(&n) => return Err(format!("SetCorpOrder: {name} is not in {n}")),
+                    Some(n) => n,
+                    None => c
+                        .order_niche
+                        .filter(|n| c.niches.contains(n))
+                        .or_else(|| c.niches.iter().next().copied())
+                        .ok_or("SetCorpOrder: the corp has no niche")?,
+                };
+                // As `corp_brain::rescore` switches (D22).
+                if c.order == CorpOrder::Squeeze {
+                    c.wage_mult = 1.0;
+                    c.evict_days_override = None;
+                }
+                if order == CorpOrder::Squeeze {
+                    match niche {
+                        Niche::Housing => c.evict_days_override = Some(evict_days.saturating_sub(1).max(2)),
+                        Niche::Food => c.wage_mult = 0.9,
+                        Niche::Security => {}
+                    }
+                }
+                c.order = order;
+                c.order_niche = Some(niche);
+                c.order_since = now;
+                c.pinned_until = Some(now + u64::from(days) * crate::time::TICKS_PER_DAY);
+                Ok((vec![corp], format!("pinned {name} to {order} in {niche} for {days} days")))
+            }
+            PlayerCommand::StrikeNow(corp) => {
+                let name = corp_name(self, corp)?;
+                let strikers = self.comp::<Corp>(corp).map(|c| classes::employees(self, c)).unwrap_or_default();
+                if strikers.is_empty() {
+                    return Err(format!("StrikeNow: {name} has no workers"));
+                }
+                let now = self.tick;
+                for &a in &strikers {
+                    if let Some(j) = self.comp_mut::<Job>(a) {
+                        j.last_shift_day = Some(j.next_shift_key(now));
+                    }
+                }
+                self.stats.current.strikes += 1;
+                let text = format!("{} workers of {name} walk out (by god)", strikers.len());
+                self.push_event(EventKind::Strike, &[corp], text);
+                crate::systems::corp_brain::push_shock(self, corp, CorpShock::Strike);
+                Ok((vec![corp], format!("called a strike at {name}")))
+            }
+            PlayerCommand::WipeTreasuries => {
+                let all = self.corps();
+                for &c in &all {
+                    if let Some(cc) = self.comp_mut::<Corp>(c) {
+                        cc.treasury = 0;
+                    }
+                }
+                let n = all.len();
+                Ok((all, format!("wiped the treasuries of {n} corps")))
             }
             _ => Err("not a god command".into()),
         }
