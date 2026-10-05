@@ -299,7 +299,8 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         flow: (mean_flow / bill as f32).clamp(-1.0, 1.0),
         losses: (lost as f32 / closed_treasury(c).max(1) as f32)
             .clamp(0.0, 1.0)
-            .max(at_risk_share(world, corp) * world.config.law.private_fill_weight),
+            .max(at_risk_share(world, corp) * world.config.law.private_fill_weight)
+            .max(raided_floor(world, c)),
         unrest: street_unrest(world),
         greed: p.map_or(0.5, |p| p.greed),
         courage: p.map_or(0.5, |p| p.courage),
@@ -310,6 +311,18 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         culprit: culprit(world, c),
         niches,
     })
+}
+
+/// M12 fix pass: a corp raided (or looted by a riot) within `[corps]
+/// raided_days` reads `losses` of at least `raided_losses`, so the shock
+/// lands on Secure (or Lobby against the gang) whatever the coins were
+/// against its treasury.
+fn raided_floor(world: &World, c: &Corp) -> f32 {
+    let cfg = &world.config.corps;
+    match c.raided_at {
+        Some(t) if world.tick.saturating_sub(t) < cfg.raided_days * TICKS_PER_DAY => cfg.raided_losses,
+        _ => 0.0,
+    }
 }
 
 /// M12 D14: a building is at risk where the law is thin: its district's

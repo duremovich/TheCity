@@ -400,7 +400,10 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     }
     let corp_prize = if corp_raids { corp_prize(world, &turf, hoard_corp) } else { None };
     let corp_cover = corp_prize.map_or(0.0, |(b, _)| cover_of(world, gang, b));
-    let corp_guards = corp_prize.map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len());
+    // Fix pass: the guards the gang can expect at the door are the ones the
+    // corp posts there (`raid::posted_guards`' cap), not its whole roster.
+    let corp_guards = corp_prize
+        .map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len().min(cfg.corp_raid_posted));
     let rival_hq = rival.and_then(|r| world.hideout_of(r));
     let jail = world.building_of_kind(BuildingKind::Jail);
     Some(OrderInputs {
@@ -479,6 +482,15 @@ pub fn corp_prize(world: &World, held: &[bool], hoard_corp: Option<EntityId>) ->
         .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))?;
     let value = crate::systems::raid::corp_prize_value(world, corp);
     Some((best.1, value))
+}
+
+/// M16 hook (docs/M16_CONTRACTS.md, attention and distraction), left by the
+/// M12 fix pass: how alert a faction (a gang, a corp; `None` = the City's
+/// law) is, a multiplier on its detection and response rolls. M12 reads it
+/// in the riot response, the corp-raid response (the posted guards) and the
+/// stance's sweep rolls. Always 1.0 until M16 gives factions attention.
+pub fn alertness_mult(_world: &World, _faction: Option<EntityId>) -> f32 {
+    1.0
 }
 
 /// A departed raid has this long to reach the rival door before it is

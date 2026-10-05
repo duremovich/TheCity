@@ -442,6 +442,11 @@ fn run(args: RunArgs) -> Result<(), String> {
 
     let mut next_lever = 0;
     let mut last_event_tick: Option<u64> = None;
+    // M12 fix pass (throughput): `--events` writes through one buffer flushed
+    // once a day; an unbuffered line per event (1,000-1,500 a day, mostly
+    // PlanAborted) cost a fifth of a day's ticks and made the dip days.
+    use std::io::Write;
+    let mut events_out = std::io::BufWriter::with_capacity(1 << 16, std::io::stderr());
     save_if_due(&world)?;
     while world.tick < end_tick {
         let day_start = Instant::now();
@@ -473,12 +478,13 @@ fn run(args: RunArgs) -> Result<(), String> {
                 both.sort_by_key(|e| std::cmp::Reverse(e.tick));
                 let fresh: Vec<_> = both.iter().map(|e| (e.tick, e.kind, e.text.clone())).collect();
                 for (tick, kind, text) in fresh.into_iter().rev() {
-                    eprintln!("{tick}	{kind:?}	{text}");
+                    let _ = writeln!(events_out, "{tick}	{kind:?}	{text}");
                     last_event_tick = Some(tick);
                 }
             }
             save_if_due(&world)?;
         }
+        let _ = events_out.flush();
         if args.diag && args.events && world.tick % TICKS_PER_DAY == 0 {
             print_diag(&world);
         }

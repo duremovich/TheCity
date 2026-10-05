@@ -847,6 +847,7 @@ impl World {
                 derelict: false,
                 empty_since: None,
                 closed_until: None,
+                full_capacity: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

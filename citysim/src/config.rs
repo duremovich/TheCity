@@ -404,6 +404,19 @@ pub struct GangsCfg {
     pub corp_raid_frac: f32,
     #[serde(default)]
     pub corp_raid_cap: i64,
+    /// M12 fix pass: a won corp raid takes this share of the building's food
+    /// stock (the coins stay `corp_raid_frac`, capped at `corp_raid_cap`).
+    #[serde(default = "GangsCfg::default_corp_raid_loot_frac")]
+    pub corp_raid_loot_frac: f32,
+    /// M12 fix pass: the private guards on a corp building's side (its
+    /// owner's Security Office or its contractor's) posted at the door when a
+    /// raid arrives: up to this many on shift, nearest first.
+    #[serde(default = "GangsCfg::default_corp_raid_posted")]
+    pub corp_raid_posted: usize,
+    /// M12 fix pass: a corp raid's crew breaks once this share of it has
+    /// lost a pairing (rounded up, at least one); 0 = to the last raider.
+    #[serde(default)]
+    pub corp_raid_break: f32,
     /// M12 phase 4: Raid and Retaliate need this many fit members (a crew
     /// for the door); 0 = any (M11).
     #[serde(default)]
@@ -434,6 +447,12 @@ impl GangsCfg {
     }
     fn default_max_gangs() -> usize {
         4
+    }
+    fn default_corp_raid_loot_frac() -> f32 {
+        0.25
+    }
+    fn default_corp_raid_posted() -> usize {
+        3
     }
 
     /// M12 D46: the phase 4 gang keys at their M11 behaviour (no muster
@@ -981,11 +1000,27 @@ pub struct CorpsCfg {
     /// M11 phase 5: Housing Grow builds only when the corp's own Blocks are
     /// at least this full (0 = no gate).
     pub grow_min_occupancy: f32,
+    /// M12 fix pass: for this many days after a raid or a riot took from one
+    /// of its buildings, a corp's `losses` input reads at least
+    /// `raided_losses` (it hardens: Secure, or Lobby against the gang).
+    #[serde(default = "CorpsCfg::default_raided_days")]
+    pub raided_days: u64,
+    #[serde(default = "CorpsCfg::default_raided_losses")]
+    pub raided_losses: f32,
 }
 
 impl Default for CorpsCfg {
     fn default() -> Self {
         CorpsCfg::none()
+    }
+}
+
+impl CorpsCfg {
+    fn default_raided_days() -> u64 {
+        7
+    }
+    fn default_raided_losses() -> f32 {
+        0.5
     }
 }
 
@@ -1038,6 +1073,8 @@ impl CorpsCfg {
             incorporate_grace_days: 0,
             hunker_spares_farms: true,
             grow_min_occupancy: 0.0,
+            raided_days: 7,
+            raided_losses: 0.5,
             order_flat: CorpOrderFlatCfg {
                 grow: 0.0,
                 squeeze: 0.0,
@@ -1233,6 +1270,14 @@ pub struct LitterCfg {
     /// The Damage hook (D19): rubble (255) blocks movement. Off in M12.
     pub rubble_blocks: bool,
     pub rubble_clean_mult: u32,
+    /// M12 fix pass: every deposit in the spec's table is scaled by this
+    /// (then capped at 254), so one crime leaves a visible mark.
+    #[serde(default = "LitterCfg::d_deposit_mult")]
+    pub deposit_mult: f32,
+    /// M12 fix pass: a district's `litter` is the share of its street tiles
+    /// at or above this value (32, the littered band).
+    #[serde(default = "LitterCfg::d_visible")]
+    pub visible: u8,
 }
 
 impl LitterCfg {
@@ -1252,7 +1297,15 @@ impl LitterCfg {
             clean_pride: 0.5,
             rubble_blocks: false,
             rubble_clean_mult: 4,
+            deposit_mult: 1.0,
+            visible: 32,
         }
+    }
+    fn d_deposit_mult() -> f32 {
+        1.0
+    }
+    fn d_visible() -> u8 {
+        32
     }
 }
 
@@ -1325,6 +1378,11 @@ pub struct RiotsCfg {
     /// the trigger at midnight.
     #[serde(default = "RiotsCfg::default_promote_hours")]
     pub riot_promote_hours: u16,
+    /// M12 fix pass (throughput): only the first this many of a riot's
+    /// rioters (most miserable first) rank with the gangs for a body; the
+    /// rest march as they are. 0 = all of them.
+    #[serde(default)]
+    pub riot_promote_max: usize,
 }
 
 impl RiotsCfg {
@@ -1353,6 +1411,7 @@ impl RiotsCfg {
             p_crossfire_kill: 0.1,
             riot_stat_bystanders: 4,
             riot_promote_hours: 24,
+            riot_promote_max: 0,
         }
     }
 }

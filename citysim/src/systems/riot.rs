@@ -303,13 +303,28 @@ pub fn clash(world: &mut World, actor: EntityId) -> Option<Outcome> {
     };
     let beat: Vec<EntityId> =
         world.law().map(|l| l.beats.iter().filter(|(_, &bd)| bd == d).map(|(&g, _)| g).collect()).unwrap_or_default();
-    let mut defenders: Vec<EntityId> = law_brain::guards(world)
+    let free = |w: &World, g: EntityId| law::living(w, g) && !w.has::<Sentence>(g);
+    let mut defenders: Vec<EntityId> =
+        law_brain::guards(world).into_iter().filter(|&g| free(world, g) && near(world, g)).collect();
+    // The beat's on-shift guards answer the riot; how many is the law's
+    // response strength, scaled by its alertness (the M16 hook, 1.0 in M12).
+    let answering: Vec<EntityId> = law_brain::guards(world)
         .into_iter()
-        .filter(|&g| law::living(world, g) && !world.has::<Sentence>(g))
-        .filter(|&g| near(world, g) || (beat.contains(&g) && world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod))))
+        .filter(|&g| free(world, g) && !defenders.contains(&g))
+        .filter(|&g| beat.contains(&g) && world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod)))
         .collect();
+    let k = (answering.len() as f32 * faction::alertness_mult(world, None)).round().max(0.0) as usize;
+    defenders.extend(answering.into_iter().take(k));
     for g in raid::private_guards_of(world, target) {
-        if law::living(world, g) && near(world, g) && !defenders.contains(&g) {
+        if free(world, g) && near(world, g) && !defenders.contains(&g) {
+            defenders.push(g);
+        }
+    }
+    // Fix pass: a corp target's posted guards (as a corp raid's) hold its door.
+    for g in raid::posted_guards(world, target) {
+        if !defenders.contains(&g) {
+            world.abort_plan(g);
+            world.stand_at_door(g, target);
             defenders.push(g);
         }
     }
@@ -479,16 +494,23 @@ fn loot(world: &mut World, riot: &Riot, rioters: &[EntityId], actor: EntityId) {
             format!("{moved} coins")
         }
     };
-    if let Some(b) = world.comp_mut::<Building>(target) {
-        b.closed_until = Some(now + cfg.riot_close_days * TICKS_PER_DAY);
+    // Fix pass (phase 4 review): only a Market, Bar or Hotel closes (nothing
+    // reads a closed Block, Precinct or Hideout).
+    if matches!(kind, BuildingKind::Market | BuildingKind::Bar | BuildingKind::Hotel) {
+        if let Some(b) = world.comp_mut::<Building>(target) {
+            b.closed_until = Some(now + cfg.riot_close_days * TICKS_PER_DAY);
+        }
+    }
+    // Fix pass: a looted corp hardens like a raided one (`corp_brain`'s floor).
+    if let Some(c) = world.corp_of_building(target) {
+        if let Some(cc) = world.comp_mut::<Corp>(c) {
+            cc.raided_at = Some(now);
+        }
     }
     let tn = world.name_of(target);
     let dn = world.district_name(riot.district).to_string();
-    world.push_event(
-        EventKind::Looted,
-        &[target, actor],
-        format!("rioters from {dn} looted {tn}: {took}; closed {} days", cfg.riot_close_days),
-    );
+    let closed = if world.is_closed(target) { format!("; closed {} days", cfg.riot_close_days) } else { String::new() };
+    world.push_event(EventKind::Looted, &[target, actor], format!("rioters from {dn} looted {tn}: {took}{closed}"));
 }
 
 /// D32's tail, whatever the outcome: the `Riot` event, and (a riot that
@@ -509,11 +531,14 @@ fn finish(world: &mut World, id: u32, outcome: &str, n: usize, m: usize, dead: u
     let dn = world.district_name(d).to_string();
     let tn = world.name_of(riot.target);
     let fizzled = outcome == "fizzled";
+    // Fix pass (phase 4 review): a crowd too thin to fight at the door is a
+    // fizzle too: the cooldown and the streak, no vent, mess, shock or count.
+    let dispersed = outcome == "dispersed";
     let vent = world.config.riots.riot_vent;
     if let Some(x) = world.districts.get_mut(d.index()) {
         x.unrest_streak = 0;
         x.last_riot = Some(now);
-        if !fizzled {
+        if !fizzled && !dispersed {
             x.unrest *= vent;
         }
     }
@@ -524,6 +549,14 @@ fn finish(world: &mut World, id: u32, outcome: &str, n: usize, m: usize, dead: u
             EventKind::Riot,
             &actors,
             format!("{dn}'s riot against {tn} fizzled: nobody reached the door"),
+        );
+        return;
+    }
+    if dispersed {
+        world.push_event(
+            EventKind::Riot,
+            &actors,
+            format!("{dn}'s riot against {tn} dispersed: {n} at the door, too few to fight"),
         );
         return;
     }
@@ -555,9 +588,15 @@ fn finish(world: &mut World, id: u32, outcome: &str, n: usize, m: usize, dead: u
 }
 
 /// LOD (plan risk 3): a rioter of a live riot ranks with the gang members
-/// from `riot_promote_hours` before the muster until the riot ends.
+/// from `riot_promote_hours` before the muster until the riot ends (then the
+/// hourly ranking demotes it). Fix pass: only the riot's first
+/// `riot_promote_max` rioters (most miserable first; 0 = all) are promoted.
 pub fn promoted(world: &World, agent: EntityId) -> bool {
     let Some(&id) = world.rioter_of.get(&agent) else { return false };
-    let hours = Tick::from(world.config.riots.riot_promote_hours);
-    raid::riot_by_id(world, id).is_some_and(|r| world.tick + hours * TICKS_PER_HOUR >= r.muster_at)
+    let cfg = &world.config.riots;
+    let hours = Tick::from(cfg.riot_promote_hours);
+    raid::riot_by_id(world, id).is_some_and(|r| {
+        world.tick + hours * TICKS_PER_HOUR >= r.muster_at
+            && (cfg.riot_promote_max == 0 || r.rioters.iter().take(cfg.riot_promote_max).any(|&a| a == agent))
+    })
 }

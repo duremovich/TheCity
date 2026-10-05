@@ -350,6 +350,23 @@ pub fn fight_out(
     kill_mult: f32,
     riot: Option<DistrictId>,
 ) -> Tally {
+    fight_out_until(world, raiders, defenders, door, place, kill_mult, riot, usize::MAX)
+}
+
+/// [`fight_out`], but the raiders break and scatter once `max_losses` of
+/// them have lost a pairing (M12 fix pass: a corp raid's crew at a held
+/// door, `[gangs] corp_raid_break`); the defenders still standing hold.
+#[allow(clippy::too_many_arguments)]
+pub fn fight_out_until(
+    world: &mut World,
+    raiders: &mut Vec<EntityId>,
+    defenders: &mut Vec<EntityId>,
+    door: TilePos,
+    place: &str,
+    kill_mult: f32,
+    riot: Option<DistrictId>,
+    max_losses: usize,
+) -> Tally {
     let mut t = Tally::default();
     // A brawl needs two sides: a door nobody defends has no crossfire.
     if let (Some(&attacker), false) = (raiders.first(), defenders.is_empty()) {
@@ -362,6 +379,9 @@ pub fn fight_out(
         crate::systems::litter::deposit(world, door, 32, 2);
     }
     while let (Some(&r), Some(&d)) = (raiders.first(), defenders.first()) {
+        if t.raider_losses >= max_losses {
+            break;
+        }
         let (_, loser, died) = law::resolve_fight_with(world, r, d, kill_mult);
         if died {
             t.deaths += 1;
@@ -411,10 +431,22 @@ pub fn crossfire(
     if cfg.p_crossfire <= 0.0 {
         return 0;
     }
+    // Fix pass (phase 4 review): nobody on either side is a bystander: the
+    // parties' gangs, any rioter of a riot among them, and (when a guard
+    // fights) every guard.
+    let gangs: Vec<EntityId> = parties.iter().filter_map(|&p| world.gang_of(p)).collect();
+    let riots: Vec<u32> = parties.iter().filter_map(|p| world.rioter_of.get(p).copied()).collect();
+    let guard_side = parties.iter().any(|&p| law::is_guard(world, p));
+    let own_side = |w: &World, a: EntityId| {
+        w.gang_of(a).is_some_and(|g| gangs.contains(&g))
+            || w.rioter_of.get(&a).is_some_and(|r| riots.contains(r))
+            || (guard_side && law::is_guard(w, a))
+    };
     let mut candidates: Vec<EntityId> = world
         .bodies()
         .into_iter()
         .filter(|a| !parties.contains(a))
+        .filter(|&a| !own_side(world, a))
         .filter(|&a| law::living(world, a) && !world.has::<Sentence>(a))
         .filter(|&a| world.comp::<Position>(a).is_some_and(|p| law::chebyshev(p.tile, door) <= cfg.crossfire_radius))
         .collect();
@@ -425,7 +457,7 @@ pub fn crossfire(
             .map(|x| x.residents.clone())
             .unwrap_or_default()
             .into_iter()
-            .filter(|a| !parties.contains(a) && !candidates.contains(a))
+            .filter(|a| !parties.contains(a) && !candidates.contains(a) && !own_side(world, *a))
             .filter(|&a| {
                 law::living(world, a)
                     && !world.has::<Sentence>(a)
@@ -456,7 +488,8 @@ pub fn crossfire(
         let died = kill < cfg.p_crossfire_kill;
         let (an, bn) = (world.name_of(attacker), world.name_of(b));
         let fell = if died { " and died" } else { "" };
-        world.push_event(EventKind::Assault, &[attacker, b], format!("{an} hit bystander {bn} at {place}{fell}"));
+        let kind = if died { EventKind::Murder } else { EventKind::Assault };
+        world.push_event(kind, &[attacker, b], format!("{an} hit bystander {bn} at {place}{fell}"));
         world.push_event(
             EventKind::Crossfire,
             &[attacker, b],
@@ -464,6 +497,12 @@ pub fn crossfire(
         );
         if died {
             world.kill_by(b, crate::components::DeathCause::Violence, Some(attacker));
+        }
+        // Fix pass (phase 4 review): a hit is a crime as a pairing is (a
+        // report, a warrant, Murder when it kills), raised after the death.
+        if law::living(world, attacker) {
+            let crime = if died { Crime::Murder } else { Crime::Assault };
+            law::raise_crime(world, attacker, (!died).then_some(b), crime, door);
         }
     }
     hits
@@ -641,12 +680,45 @@ pub fn corp_prize_value(world: &World, corp: EntityId) -> i64 {
     ((t as f32 * cfg.corp_raid_frac).floor() as i64).min(cfg.corp_raid_cap).max(0)
 }
 
+/// M12 fix pass: the private guards posted at a corp building when a raid
+/// reaches it: of [`private_guards_of`] (its owner's Security Office or its
+/// contractor's), the living, free, uncuffed ones on shift now (any shift
+/// while the owner holds Secure: its response calls the off-shift in),
+/// nearest the door first (ties lower id), up to `[gangs] corp_raid_posted`
+/// × `alertness_mult` of the owner. A guard on contract is at its client
+/// when the raid comes (the M11 route walks it there); the brawl stands it
+/// at the door.
+pub fn posted_guards(world: &World, b: EntityId) -> Vec<EntityId> {
+    let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { return Vec::new() };
+    let owner = world.corp_of_building(b);
+    let cap = world.config.gangs.corp_raid_posted as f32 * faction::alertness_mult(world, owner);
+    let cap = cap.round().max(0.0) as usize;
+    let tod = world.tick_of_day();
+    let secure =
+        owner.and_then(|c| world.comp::<Corp>(c)).is_some_and(|c| c.order == crate::components::CorpOrder::Secure);
+    let mut out: Vec<(u32, EntityId)> = private_guards_of(world, b)
+        .into_iter()
+        .filter(|&g| law::living(world, g) && !world.has::<Sentence>(g))
+        .filter(|&g| {
+            world.comp::<Brain>(g).is_some_and(|br| br.cuffed_by.is_none() && br.escorting.is_none() && !br.emigrating)
+        })
+        .filter(|&g| secure || world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod)))
+        .filter(|&g| !world.rioter_of.contains_key(&g) && world.gang_of(g).is_none())
+        .filter_map(|g| world.comp::<Position>(g).map(|p| (p.tile.manhattan(door), g)))
+        .collect();
+    out.sort_unstable();
+    out.into_iter().take(cap).map(|(_, g)| g).collect()
+}
+
 /// D39: a raid on a corp building. Defenders: the corp's private guards (and
-/// its contractor's) within `raid_gather_radius` of the door or inside, its
+/// its contractor's) within `raid_gather_radius` of the door or inside, the
+/// guards posted there ([`posted_guards`], fix pass: stood at the door), its
 /// employees inside, and the city guards on the district's beat within the
 /// radius. Won (nobody left standing): `corp_prize_value` from the corp to
-/// the gang (`Flow::Robbery`), the building's food stock split among the
-/// raiders as stolen food, `CorpShock::Robbed` and `Raided`. Lost: `RaidLost`.
+/// the gang (`Flow::Robbery`), `[gangs] corp_raid_loot_frac` of the
+/// building's food stock split among the raiders as stolen food (fix pass:
+/// a quarter, not all of it), `CorpShock::Robbed` and `Raided`, the corp's
+/// `raided_at`. Lost: `RaidLost`.
 pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let gid = world.gang_of(actor)?;
     let target = corp_target(world, gid)?;
@@ -663,6 +735,15 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     };
     let mut defenders: Vec<EntityId> =
         private_guards_of(world, target).into_iter().filter(|&g| law::living(world, g) && near(world, g)).collect();
+    for g in posted_guards(world, target) {
+        if !defenders.contains(&g) {
+            if world.has::<Brain>(g) {
+                world.abort_plan(g);
+            }
+            world.stand_at_door(g, target);
+            defenders.push(g);
+        }
+    }
     for s in crate::systems::ownership::staff_at(world, target) {
         if world.comp::<Position>(s).is_some_and(|p| p.building == Some(target)) && !defenders.contains(&s) {
             defenders.push(s);
@@ -670,10 +751,50 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     }
     let beat: Vec<EntityId> =
         world.law().map(|l| l.beats.iter().filter(|(_, &bd)| bd == d).map(|(&g, _)| g).collect()).unwrap_or_default();
+    // Fix pass: the beat's guards near the door fight; the rest on shift on
+    // the district's beat answer the alarm (× the law's alertness, nearest
+    // first), as a riot's beat does.
+    let tod = world.tick_of_day();
+    let mut answering: Vec<(u32, EntityId)> = Vec::new();
     for g in beat {
-        if law::living(world, g) && near(world, g) && !defenders.contains(&g) {
-            defenders.push(g);
+        if !law::living(world, g) || defenders.contains(&g) {
+            continue;
         }
+        if near(world, g) {
+            defenders.push(g);
+        } else if world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod))
+            && world.comp::<Brain>(g).is_some_and(|b| b.cuffed_by.is_none() && b.escorting.is_none())
+        {
+            if let Some(p) = world.comp::<Position>(g) {
+                answering.push((p.tile.manhattan(door), g));
+            }
+        }
+    }
+    // In the Precinct's own district the watch on shift inside the Precinct
+    // answers a raid too (it is next door; that district has no Homes and
+    // only the paid term's thin beat).
+    if let Some(jail) = world.building_of_kind(BuildingKind::Jail).filter(|&j| world.district_of_building(j) == d) {
+        for g in law_brain::guards(world) {
+            if defenders.contains(&g) || answering.iter().any(|&(_, x)| x == g) || !law::living(world, g) {
+                continue;
+            }
+            let inside = world.comp::<Position>(g).is_some_and(|p| p.building == Some(jail));
+            let on = world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod));
+            let free = world.comp::<Brain>(g).is_some_and(|b| b.cuffed_by.is_none() && b.escorting.is_none());
+            if inside && on && free {
+                answering.push((u32::MAX, g));
+            }
+        }
+    }
+    answering.sort_unstable();
+    let k = (answering.len() as f32 * faction::alertness_mult(world, None)).round().max(0.0);
+    for (_, g) in answering.into_iter().take(k as usize) {
+        if world.has::<Sentence>(g) {
+            continue;
+        }
+        world.abort_plan(g);
+        world.stand_at_door(g, target);
+        defenders.push(g);
     }
     defenders.retain(|&x| !world.has::<Sentence>(x) && x != actor && world.gang_of(x) != Some(gid));
     by_strength(world, &mut defenders);
@@ -682,23 +803,33 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let what = world.name_of(target);
     let owner = world.owner_label(corp);
     let place = format!("{owner}'s {what}");
-    let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
+    // Fix pass: the crew breaks once `corp_raid_break` of it is down (at
+    // least one pairing lost); 0 fights to the last raider (phase 4).
+    let brk = world.config.gangs.corp_raid_break;
+    let max_losses = if brk > 0.0 { ((n_raiders as f32 * brk).ceil() as usize).max(1) } else { usize::MAX };
+    let tally = fight_out_until(world, &mut raiders, &mut defenders, door, &place, 1.0, None, max_losses);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
     let mut took = (0i64, 0u32);
     if outcome == Outcome::Won {
         let prize = corp.map_or(0, |c| corp_prize_value(world, c));
         let moved =
             crate::systems::ownership::pay(world, corp, Some(gid), prize, crate::systems::ownership::Flow::Robbery);
-        let food = world.comp::<Building>(target).map_or(0, |b| b.stock_food);
+        let stock = world.comp::<Building>(target).map_or(0, |b| b.stock_food);
+        let frac = world.config.gangs.corp_raid_loot_frac.clamp(0.0, 1.0);
         let standing: Vec<EntityId> = raiders.iter().copied().filter(|&r| law::living(world, r)).collect();
-        if food > 0 && !standing.is_empty() {
+        let food = if standing.is_empty() { 0 } else { (stock as f32 * frac).floor() as u32 };
+        if food > 0 {
             if let Some(b) = world.comp_mut::<Building>(target) {
-                b.stock_food = 0;
+                b.stock_food = b.stock_food.saturating_sub(food);
             }
             share_food(world, &standing, food);
         }
         took = (moved, food);
         if let Some(c) = corp {
+            let now = world.tick;
+            if let Some(cc) = world.comp_mut::<Corp>(c) {
+                cc.raided_at = Some(now);
+            }
             crate::systems::ownership::note_loss(world, target, moved, Some(actor));
             crate::systems::ownership::push_corp_shock(world, c, CorpShock::Robbed(moved));
             crate::systems::ownership::push_corp_shock(world, c, CorpShock::Raided);

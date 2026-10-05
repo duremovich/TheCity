@@ -426,11 +426,9 @@ pub fn squat_targets(world: &World, gang: EntityId) -> Vec<EntityId> {
     districts.push(world.district_of_building(g.hideout));
     districts.sort_unstable();
     districts.dedup();
-    world
-        .buildings_of_kind(BuildingKind::Home)
-        .iter()
-        .copied()
-        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.derelict && !bd.demolished))
+    // Fix pass (phase 3 review): any derelict (a Block, a Bar, a Hotel).
+    crate::systems::street::derelicts(world)
+        .into_iter()
         .filter(|&b| g.territory.binary_search(&b).is_err())
         .filter(|&b| districts.binary_search(&world.district_of_building(b)).is_ok())
         .collect()
@@ -942,7 +940,7 @@ pub fn clear_claims_if_empty(world: &mut World, gang: EntityId) {
         return;
     }
     let mut lost = 0usize;
-    for kind in [BuildingKind::Home] {
+    for kind in [BuildingKind::Home, BuildingKind::Bar, BuildingKind::Hotel] {
         for b in world.buildings_of_kind(kind).to_vec() {
             if let Some(bd) = world.comp_mut::<Building>(b) {
                 if bd.claim.is_some_and(|c| c.gang == gang) {
@@ -1016,8 +1014,15 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
     if loyalty >= cfg.split_loyalty {
         return Err(format!("too loyal ({loyalty:.2})"));
     }
-    if world.gang_list().len() >= cfg.max_gangs {
-        return Err(format!("{} gangs already", world.gang_list().len()));
+    // Fix pass (phase 4 review): an emptied gang (a ghost waiting to
+    // re-form, or never to) does not count toward the cap.
+    let live = world
+        .gang_list()
+        .iter()
+        .filter(|&&g| world.comp::<Gang>(g).is_some_and(|x| !(x.emptied && x.members.is_empty())))
+        .count();
+    if live >= cfg.max_gangs {
+        return Err(format!("{live} gangs already"));
     }
     if roll {
         let p = cfg.split_base * (1.0 - loyalty);
@@ -1045,10 +1050,14 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
         .find(|n| !used.contains(n))
         .cloned()
         .unwrap_or_else(|| format!("{old_name} Splinter {}", world.gang_list().len()));
+    // Fix pass (phase 4 review): a jailed old boss stays with the gang it
+    // ran (unless it is the lieutenant who leads the splinter).
+    let boss = world.comp::<Gang>(gang).and_then(|g| g.boss);
     let movers: Vec<EntityId> = members
         .iter()
         .copied()
         .filter(|&m| m != leader)
+        .filter(|&m| m == lt || Some(m) != boss)
         .filter(|&m| {
             m == lt
                 || home_or_squat(world, m).is_some_and(|b| world.district_of_building(b) == sd)
@@ -1180,6 +1189,7 @@ fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.kind = BuildingKind::Hideout;
         bd.derelict = false;
+        bd.full_capacity = None;
         bd.empty_since = None;
         bd.claim = None;
         bd.rent_per_day = 0;

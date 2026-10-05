@@ -33,7 +33,7 @@ pub const CHECKOUT_HOUR: u64 = 8;
 const SQUAT_LITTER: (u8, u8) = (4, 1);
 const ROUGH_LITTER: (u8, u8) = (2, 0);
 /// D17: a building going derelict, at its door.
-const DERELICT_LITTER: (u8, u8) = (48, 2);
+pub const DERELICT_LITTER: (u8, u8) = (48, 2);
 
 /// The street rung is on (`[street] enabled`).
 pub fn enabled(world: &World) -> bool {
@@ -396,6 +396,7 @@ pub fn seed_derelicts(world: &mut World) {
     for b in picks {
         empty_building(world, b);
         if let Some(bd) = world.comp_mut::<Building>(b) {
+            bd.full_capacity.get_or_insert(bd.capacity);
             bd.derelict = true;
             bd.empty_since = Some(0);
             bd.stock_food = 0;
@@ -432,6 +433,7 @@ pub fn make_derelict(world: &mut World, b: EntityId, why: &str) -> bool {
     }
     let tick = world.tick;
     if let Some(bd) = world.comp_mut::<Building>(b) {
+        bd.full_capacity.get_or_insert(bd.capacity);
         bd.derelict = true;
         bd.owner = None;
         bd.rent_per_day = 0;
@@ -456,18 +458,12 @@ pub fn restore(world: &mut World, b: EntityId, owner: Option<EntityId>, why: &st
     }
     evict_squatters(world, b, why);
     let kind = world.comp::<Building>(b).map(|bd| bd.kind).unwrap_or(BuildingKind::Home);
-    let cap = world.config.buildings.for_kind(kind).capacity;
-    let interior = world
-        .comp::<Building>(b)
-        .map(|bd| usize::from(bd.rect.w.saturating_sub(2)) * usize::from(bd.rect.h.saturating_sub(2)))
-        .unwrap_or(0);
-    let cap = match kind {
-        BuildingKind::Hotel => cap.min(world.config.street.hotel_beds).min(u8::try_from(interior).unwrap_or(u8::MAX)),
-        _ => cap,
-    };
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.derelict = false;
-        bd.capacity = cap;
+        // Fix pass (phase 3 review): back to the capacity it stood at before
+        // it went derelict (the map's, a founded building's interior, a
+        // Hotel's beds), not the config's.
+        bd.capacity = bd.full_capacity.take().unwrap_or(bd.capacity);
         bd.empty_since = None;
     }
     crate::systems::corps::move_building(world, b, owner);
@@ -485,56 +481,73 @@ pub fn restore(world: &mut World, b: EntityId, owner: Option<EntityId>, why: &st
 }
 
 /// D26 abandonment, daily: a non-city Block with no residents for
-/// `abandon_days` whose owner's purse is below zero goes derelict.
+/// `abandon_days` whose owner's purse is below zero goes derelict. Fix pass
+/// (phase 3 review): a Bar or Hotel with no trade (yesterday's revenue 0)
+/// for `abandon_days` under an owner in the red goes the same way.
 pub fn abandon_daily(world: &mut World) {
     let now = world.tick;
     let days = world.config.street.abandon_days * TICKS_PER_DAY;
     let mut abandon = Vec::new();
-    for h in world.buildings_of_kind(BuildingKind::Home).to_vec() {
-        let Some((owner, derelict, demolished)) =
-            world.comp::<Building>(h).map(|b| (b.owner, b.derelict, b.demolished))
-        else {
-            continue;
-        };
-        if derelict || demolished {
-            continue;
-        }
-        let empty = world.residents_of(h).is_empty();
-        let since = {
-            let Some(b) = world.comp_mut::<Building>(h) else { continue };
-            if empty && owner.is_some() {
-                *b.empty_since.get_or_insert(now)
-            } else {
-                b.empty_since = None;
+    for kind in [BuildingKind::Home, BuildingKind::Bar, BuildingKind::Hotel] {
+        for h in world.buildings_of_kind(kind).to_vec() {
+            let Some((owner, derelict, demolished, idle)) = world.comp::<Building>(h).map(|b| {
+                let idle = match kind {
+                    BuildingKind::Home => world.residents_of(h).is_empty(),
+                    _ => b.revenue.back().copied().unwrap_or(0) <= 0,
+                };
+                (b.owner, b.derelict, b.demolished, idle)
+            }) else {
+                continue;
+            };
+            if derelict || demolished {
                 continue;
             }
-        };
-        if now.saturating_sub(since) >= days && world.purse(owner) < 0 {
-            abandon.push(h);
+            let since = {
+                let Some(b) = world.comp_mut::<Building>(h) else { continue };
+                if idle && owner.is_some() {
+                    *b.empty_since.get_or_insert(now)
+                } else {
+                    b.empty_since = None;
+                    continue;
+                }
+            };
+            if now.saturating_sub(since) >= days && world.purse(owner) < 0 {
+                abandon.push(h);
+            }
         }
     }
+    abandon.sort_unstable();
     for h in abandon {
         make_derelict(world, h, "abandoned");
     }
 }
 
-/// Phase 3 decision ("who re-lets", `[street] relet_days`): one derelict
-/// Block a day, the longest derelict past `relet_days` (ties lower id), is
-/// repaired and re-let by the City while the Treasury holds
-/// `city_absorb_floor`. Its squatters are put out.
+/// A derelict held by a live gang (its claim at `CLAIM_HELD`): the City
+/// does not re-let it while the gang holds it (fix pass, phase 3 review).
+fn gang_held(world: &World, b: EntityId) -> bool {
+    world
+        .comp::<Building>(b)
+        .and_then(|bd| bd.claim)
+        .is_some_and(|c| c.count >= crate::systems::gang::CLAIM_HELD && world.has::<crate::components::Gang>(c.gang))
+}
+
+/// Phase 3 decision ("who re-lets", `[street] relet_days`): one derelict a
+/// day (any kind: a Block, a Bar or a Hotel, fix pass), the longest derelict
+/// past `relet_days` (ties lower id) and not held by a gang, is repaired and
+/// re-let by the City while the Treasury holds `city_absorb_floor`. Its
+/// squatters are put out.
 pub fn relet_daily(world: &mut World) {
     let days = world.config.street.relet_days;
     if days == 0 || world.purse(None) < world.config.street.city_absorb_floor {
         return;
     }
     let now = world.tick;
-    let pick = world
-        .buildings_of_kind(BuildingKind::Home)
-        .iter()
-        .copied()
+    let pick = derelicts(world)
+        .into_iter()
+        .filter(|&h| !gang_held(world, h))
         .filter_map(|h| {
             let b = world.comp::<Building>(h)?;
-            let since = b.empty_since.filter(|_| b.derelict && !b.demolished)?;
+            let since = b.empty_since?;
             (now.saturating_sub(since) >= days * TICKS_PER_DAY).then_some((since, h))
         })
         .min();
@@ -757,7 +770,12 @@ pub fn vagrancy_p(world: &World, d: DistrictId) -> f32 {
     let dist = world.district(d);
     let sweep = if dist.stance == Stance::Sweep { cfg.sweep_mult } else { 1.0 };
     let curfew = if world.levers.curfew.get(d.index()).copied().unwrap_or(false) { cfg.curfew_mult } else { 1.0 };
-    (cfg.vagrancy_base * dist.coverage * sweep * curfew).clamp(0.0, 1.0)
+    // Fix pass (phase 2 review): a district without Homes reads coverage_max
+    // in `bind::district_coverage` (no Homes to divide by), which would double
+    // the sweep where no guard walks; it rolls at coverage 1.
+    let coverage = if dist.homes.is_empty() { 1.0 } else { dist.coverage };
+    let alert = crate::systems::faction::alertness_mult(world, None);
+    (cfg.vagrancy_base * coverage * sweep * curfew * alert).clamp(0.0, 1.0)
 }
 
 /// The on-shift, free city guard standing in `d` nearest `tile` (Manhattan,
@@ -827,12 +845,15 @@ fn vagrancy_except(world: &mut World, skip: &[EntityId]) {
         let Some(pos) = world.comp::<Position>(a) else { continue };
         let tile = pos.tile;
         let d = world.district_of(tile);
-        if let Some(r) = rough.get_mut(d.index()) {
-            *r = r.saturating_add(1);
-        }
         let statistical = is_statistical(world, a);
         if (pos.building.is_some() && !statistical) || skip.contains(&a) {
             continue;
+        }
+        // Fix pass (phase 2 review): only the sleepers the law can roll count
+        // as rough (one asleep inside a building is not on the street, and
+        // `rough` feeds the Sweep stance).
+        if let Some(r) = rough.get_mut(d.index()) {
+            *r = r.saturating_add(1);
         }
         rolls.push((a, tile, d));
     }

@@ -49,14 +49,39 @@ pub fn at(world: &World, p: TilePos) -> u8 {
     world.litter.get(index(world, p)).copied().unwrap_or(0)
 }
 
-/// D16: `amount` at `tile`, spread to Chebyshev radius `r` with half the
-/// amount at the rim (`round(amount × (1 − k ÷ 2r))` at ring `k`); only
-/// street tiles (walkable, inside no building) take it, saturating at 254.
-/// Rubble is left as it is.
+/// Fix pass (phase 3 review): where litter from an event at `tile` lands.
+/// A street tile is itself; a tile inside a building (an indoor theft, a
+/// death in a Home, a raid at a door) is that building's outside door, so an
+/// indoor event still marks the street. Anything else (a wall, a demolished
+/// Home's ground) is left as it is and the deposit's street filter decides.
+pub fn street_anchor(world: &World, tile: TilePos) -> TilePos {
+    if world.is_street(tile) {
+        return tile;
+    }
+    let mut hit: Option<(crate::entity::EntityId, TilePos)> = None;
+    for b in world.with::<crate::components::Building>() {
+        let Some(bd) = world.comp::<crate::components::Building>(b) else { continue };
+        if bd.demolished || !(bd.door == tile || bd.rect.contains(tile)) {
+            continue;
+        }
+        if hit.is_none_or(|(h, _)| b < h) {
+            hit = Some((b, world.outside_door(bd)));
+        }
+    }
+    hit.map_or(tile, |(_, t)| t)
+}
+
+/// D16: `amount` at `tile` (mapped to the street by [`street_anchor`]),
+/// scaled by `[litter] deposit_mult` (fix pass; capped at 254), spread to
+/// Chebyshev radius `r` with half the amount at the rim (`round(amount × (1 −
+/// k ÷ 2r))` at ring `k`); only street tiles (walkable, inside no building)
+/// take it, saturating at 254. Rubble is left as it is.
 pub fn deposit(world: &mut World, tile: TilePos, amount: u8, r: u8) {
     if !enabled(world) || amount == 0 {
         return;
     }
+    let tile = street_anchor(world, tile);
+    let amount = (f32::from(amount) * world.config.litter.deposit_mult.max(0.0)).min(f32::from(MAX_LITTER));
     let (w, h) = (world.map.w() as i32, world.map.h() as i32);
     let r = i32::from(r);
     for dy in -r..=r {
@@ -70,7 +95,7 @@ pub fn deposit(world: &mut World, tile: TilePos, amount: u8, r: u8) {
                 continue;
             }
             let k = dx.abs().max(dy.abs());
-            let add = if r == 0 { f32::from(amount) } else { f32::from(amount) * (1.0 - k as f32 / (2 * r) as f32) };
+            let add = if r == 0 { amount } else { amount * (1.0 - k as f32 / (2 * r) as f32) };
             let add = add.round().clamp(0.0, 255.0) as u16;
             let i = index(world, p);
             if let Some(v) = world.litter.get_mut(i) {
@@ -115,21 +140,25 @@ pub fn decay(world: &mut World) {
     }
 }
 
-/// Midnight: each district's mean litter over its street tiles, ÷ 255.
+/// Midnight: each district's litter, the share of its street tiles at or
+/// above `[litter] visible` (32, the littered band; fix pass, phase 3
+/// review: the mean over ~30k street tiles pinned every district near 0).
+/// 0.30 reads "three street tiles in ten are visibly littered or worse".
 pub fn district_means(world: &mut World) {
-    let means: Vec<f32> = world
+    let visible = world.config.litter.visible.max(1);
+    let shares: Vec<f32> = world
         .districts
         .iter()
         .map(|d| {
             if d.streets.is_empty() {
                 return 0.0;
             }
-            let sum: u64 =
-                d.streets.iter().map(|&i| u64::from(world.litter.get(i as usize).copied().unwrap_or(0))).sum();
-            sum as f32 / (255.0 * d.streets.len() as f32)
+            let dirty =
+                d.streets.iter().filter(|&&i| world.litter.get(i as usize).is_some_and(|&v| v >= visible)).count();
+            dirty as f32 / d.streets.len() as f32
         })
         .collect();
-    for (d, m) in world.districts.iter_mut().zip(means) {
+    for (d, m) in world.districts.iter_mut().zip(shares) {
         d.litter = m;
     }
 }

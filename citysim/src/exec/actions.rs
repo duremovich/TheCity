@@ -347,8 +347,11 @@ pub fn on_complete(
                     world.mark_day(id, crate::components::trace_flags::HOTEL);
                 }
                 // M10: +0.2 / +0.3 / +0.4 by the building's tier (Sump, Mid, Spire).
-                let (tier, door) =
-                    here.and_then(|b| world.comp::<Building>(b)).map_or((1, None), |b| (b.tier, Some(b.door)));
+                // Fix pass: the street outside the door (the door tile is inside
+                // the building's rect, where no litter ever lands).
+                let (tier, door) = here
+                    .and_then(|b| world.comp::<Building>(b))
+                    .map_or((1, None), |b| (b.tier, Some(world.outside_door(b))));
                 let dirt = door.map_or(0.0, |d| litter_at(world, d));
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     n.safety = (n.safety + 0.2 + 0.1 * f32::from(tier) - penalty * dirt).clamp(0.0, 1.0);

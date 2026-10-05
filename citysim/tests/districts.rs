@@ -189,6 +189,9 @@ fn test_aggregates_on_hand_built_world() {
     }
     for i in 0..3 {
         let d = &w.districts[i];
+        // Exact on purpose (fix pass, phase 1 review): the hand count bins the
+        // same world by the same rule and draws nothing, so any difference is
+        // a binning bug, not noise.
         assert_eq!(d.population, pop[i], "{} population", d.name);
         assert_eq!(d.adults, adults[i]);
         assert_eq!(d.classes, cls[i]);
@@ -1127,6 +1130,34 @@ fn test_riot_win_loots_market_and_closes_it_and_crush_raises_fear() {
     assert!((fear_after - (fear_before + 0.3).min(1.0)).abs() < 1e-5, "{fear_before} -> {fear_after}");
 }
 
+/// Fix pass (item 39): a won riot on the Precinct frees convicts but closes
+/// nothing (only a Market, Bar or Hotel closes), and a closed Market takes
+/// no restock.
+#[test]
+fn test_riot_closes_only_trade_and_a_closed_market_takes_no_delivery() {
+    let mut w = riot_city();
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let d = w.district_of_building(jail).index();
+    let rioters = agitate(&mut w, 5, 6);
+    guards_away(&mut w);
+    hand_riot(&mut w, d, jail, &rioters, citysim::RiotResponse::Contain);
+    let out = citysim::systems::raid::resolve(&mut w, rioters[0]);
+    assert_eq!(out, Some(citysim::systems::raid::Outcome::Won));
+    assert!(!w.is_closed(jail), "the Precinct does not close");
+    let market = w.buildings_of_kind(BuildingKind::Market)[0];
+    let until = w.tick + TICKS_PER_DAY;
+    {
+        let b = w.comp_mut::<Building>(market).expect("b");
+        b.stock_food = 0;
+        b.closed_until = Some(until);
+    }
+    while !w.tick.is_multiple_of(TICKS_PER_DAY) {
+        w.tick += 1;
+    }
+    citysim::systems::economy::run(&mut w);
+    assert_eq!(w.comp::<Building>(market).expect("b").stock_food, 0, "a closed Market is not restocked");
+}
+
 #[test]
 fn test_riot_lost_jails_the_beaten_and_too_few_disperse() {
     let mut w = riot_city();
@@ -1163,9 +1194,17 @@ fn test_riot_lost_jails_the_beaten_and_too_few_disperse() {
         w2.comp_mut::<Brain>(a).expect("b").current_goal = None;
     }
     let assaults = count(&w2, EventKind::Assault);
+    let riots = w2.stats.current.riots;
+    let unrest = w2.districts[d].unrest;
+    let litter_before: u64 = w2.litter.iter().map(|&v| u64::from(v)).sum();
     citysim::systems::raid::resolve(&mut w2, few[0]);
     assert!(w2.events.iter().any(|e| e.kind == EventKind::Riot && e.text.contains("dispersed")));
     assert_eq!(count(&w2, EventKind::Assault), assaults, "no fight");
+    // Fix pass (item 34): a dispersed crowd is a fizzle: no count, no vent, no mess.
+    assert_eq!(w2.stats.current.riots, riots);
+    assert_eq!(w2.districts[d].unrest, unrest);
+    assert_eq!(w2.litter.iter().map(|&v| u64::from(v)).sum::<u64>(), litter_before);
+    assert_eq!(w2.districts[d].last_riot, Some(w2.tick), "the cooldown still runs");
 }
 
 #[test]
@@ -1217,8 +1256,26 @@ fn test_crossfire_hits_only_non_parties_within_radius() {
         w.comp::<citysim::Memory>(a)
             .is_some_and(|m| m.entries.iter().any(|e| e.kind == citysim::MemoryKind::CaughtInCrossfire))
     };
+    // Fix pass (item 37): the attacker's gang-mate at 2 tiles is on a side, not a bystander.
+    let mate = civ[4];
+    let g = w.gang_list()[0];
+    citysim::systems::gang::enlist(&mut w, attacker, g);
+    citysim::systems::gang::enlist(&mut w, mate, g);
+    lod::set_lod(&mut w, mate, Lod::Coarse);
+    w.abort_plan(mate);
+    w.leave_building(mate);
+    {
+        let p = w.comp_mut::<Position>(mate).expect("pos");
+        p.tile = TilePos { x: 41, y: 39 };
+        p.building = None;
+    }
+    let crimes_before: u32 = w.districts.iter().map(|d| u32::from(d.crimes_today)).sum();
     let hits = citysim::systems::raid::crossfire(&mut w, door, &[attacker, defender], attacker, None, "a door");
     assert_eq!(hits, 1);
+    assert!(!caught(&w, mate), "the attacker's own side is never a bystander");
+    // Fix pass (item 36): the hit is a crime (counted, an Assault raised).
+    let crimes_after: u32 = w.districts.iter().map(|d| u32::from(d.crimes_today)).sum();
+    assert_eq!(crimes_after, crimes_before + 1, "the hit is raised as an Assault");
     assert!(caught(&w, near), "the bystander at 3 is hit");
     assert!(!caught(&w, far), "the one at 4 is not");
     assert!(!caught(&w, attacker) && !caught(&w, defender), "the parties never are");
@@ -1299,4 +1356,82 @@ fn test_district_strike_hits_highest_priced_employer_of_residents() {
     let n = count(&w, EventKind::Strike);
     classes::strike(&mut w);
     assert_eq!(count(&w, EventKind::Strike), n);
+}
+
+// ---------------------------------------------------------------------------
+// M12 fix pass (phase 1 and 2 reviews)
+// ---------------------------------------------------------------------------
+
+/// Item 6: a gang-owned Home weighs as an owned Home (1.0); held as well it
+/// is 2x a held Home, not 4x.
+#[test]
+fn test_gang_owned_home_weighs_as_a_home() {
+    let mut w = v1_three();
+    w.run_ticks(1);
+    let g = w.gangs()[0];
+    let d = DistrictId(1);
+    let h = w.district(d).homes[0];
+    let base =
+        |w: &World| districts::presence(w, d).iter().find(|(c, _)| *c == Controller::Gang(g)).map_or(0.0, |&(_, v)| v);
+    let before = base(&w);
+    w.comp_mut::<Building>(h).expect("b").owner = Some(g);
+    assert!((base(&w) - before - 1.0).abs() < 1e-5, "owned: +1, not +3");
+    w.comp_mut::<Building>(h).expect("b").claim = Some(Claim { gang: g, count: gang::CLAIM_HELD });
+    assert!((base(&w) - before - 2.0).abs() < 1e-5, "owned and held: +2");
+}
+
+/// Item 22: a broke owner, corp or not, does not pay to clean its doors.
+#[test]
+fn test_broke_corp_skips_owner_cleaning() {
+    let mut w = v1_three();
+    w.config.litter = Config::load().litter;
+    let corp = w.spawn();
+    w.insert(corp, citysim::Corp::new("Broke".into(), Default::default(), 0, None));
+    w.comp_mut::<citysim::Corp>(corp).expect("c").order = citysim::CorpOrder::Secure;
+    let h = w.district(DistrictId(0)).homes[0];
+    w.comp_mut::<Building>(h).expect("b").owner = Some(corp);
+    let outside = {
+        let b = w.comp::<Building>(h).expect("b");
+        w.outside_door(b)
+    };
+    citysim::systems::litter::deposit(&mut w, outside, 100, 0);
+    let dirt = citysim::systems::litter::at(&w, outside);
+    assert!(dirt > 0);
+    districts::owner_cleaning(&mut w);
+    assert_eq!(citysim::systems::litter::at(&w, outside), dirt, "a broke Secure corp leaves its door dirty");
+    assert_eq!(w.comp::<citysim::Corp>(corp).expect("c").treasury, 0, "and pays nothing");
+    w.comp_mut::<citysim::Corp>(corp).expect("c").treasury = 100;
+    districts::owner_cleaning(&mut w);
+    assert!(citysim::systems::litter::at(&w, outside) < dirt, "with coins it cleans");
+}
+
+/// Item 3: a district with residents but no adults (here: nobody with a
+/// Brain) reads crime rate 0, not crimes over its population.
+#[test]
+fn test_crime_rate_zero_without_adults() {
+    let mut w = v1_three();
+    w.run_ticks(1);
+    for d in &mut w.districts {
+        d.crimes = (0..7).map(|_| 5).collect();
+    }
+    let in_d2: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| {
+            let at = match w.comp::<Household>(a).and_then(|h| h.home) {
+                Some(h) => w.comp::<Building>(h).expect("home").door,
+                None => w.comp::<Position>(a).expect("pos").tile,
+            };
+            w.district_of(at) == DistrictId(2)
+        })
+        .collect();
+    assert!(!in_d2.is_empty());
+    for a in in_d2 {
+        w.remove::<Brain>(a);
+    }
+    districts::aggregates(&mut w);
+    let d2 = w.district(DistrictId(2));
+    assert!(d2.population > 0 && d2.adults == 0 && !d2.homes.is_empty());
+    assert_eq!(d2.crime_rate, 0.0);
+    assert!(w.district(DistrictId(0)).crime_rate > 0.0);
 }

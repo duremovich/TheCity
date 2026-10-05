@@ -24,12 +24,15 @@ fn test_cli_report_csv_header() {
     // a bartender for the agent-owned Bar short of its staff of 3.
     // (Off-screen thieves can be jailed on day 0 since M10 phase 3, and an
     // off-screen killing can take a resident, and their job, on day 0.)
-    // M12 D26: the seeded derelicts' residents start homeless.
+    // M12 D26: the seeded derelicts' residents start homeless. M12 D23: the
+    // first midnight hires 5 sweepers (the reconcile's daily cap): 220 + 12 +
+    // 1 + 5 = 238 on seeds 1-3, less a resident jailed or killed off-screen
+    // (fix pass: the bound 250 tightened to 230-240).
     let cols: Vec<&str> = row.split(',').collect();
     assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
     let n = |i: usize| cols[i].parse::<u32>().expect("a count");
     let derelict_homeless = 5 * citysim::Config::load().street.seed_derelict_blocks as u32;
-    assert!((1995..=2000).contains(&n(2)) && (215..=250).contains(&n(3)), "row: {row}");
+    assert!((1995..=2000).contains(&n(2)) && (230..=240).contains(&n(3)), "row: {row}");
     assert!((derelict_homeless - 5..=derelict_homeless).contains(&n(4)), "row: {row}");
     assert_eq!(row.split(',').count(), 81 + 8 * 6 + 8);
     assert!(lines.next().is_none());

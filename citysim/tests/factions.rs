@@ -872,6 +872,8 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
 fn test_corp_building_raid_takes_documented_prize_against_private_guards() {
     use citysim::{Corp, CorpShock, Inventory};
     let mut w = v2(62);
+    // The posted guards have their own test; here only the one at the door.
+    w.config.gangs.corp_raid_posted = 0;
     let (g0, _) = gangs(&w);
     // A corp Market, its owner rich, one private guard on contract at its door.
     let market = w
@@ -910,7 +912,7 @@ fn test_corp_building_raid_takes_documented_prize_against_private_guards() {
     for s in citysim::systems::ownership::staff_at(&w, market) {
         w.leave_building(s);
     }
-    w.comp_mut::<Building>(market).expect("b").stock_food = 9;
+    w.comp_mut::<Building>(market).expect("b").stock_food = 100;
     let raiders = civilians(&w, 3);
     for &r in &raiders {
         gang::enlist(&mut w, r, g0);
@@ -932,15 +934,98 @@ fn test_corp_building_raid_takes_documented_prize_against_private_guards() {
     assert_eq!(out, Outcome::Won);
     assert_eq!(w.comp::<Gang>(g0).expect("g").treasury, treasury + 500);
     assert_eq!(w.comp::<Corp>(corp).expect("c").treasury, 19_500);
-    assert_eq!(w.comp::<Building>(market).expect("b").stock_food, 0);
+    // Fix pass: `corp_raid_loot_frac` (0.25) of the stock, not all of it.
+    assert_eq!(w.comp::<Building>(market).expect("b").stock_food, 75);
     let food_after: u32 = raiders.iter().map(|&r| w.comp::<Inventory>(r).map_or(0, |i| i.food)).sum();
-    assert_eq!(food_after, food_before + 9, "the stock goes to the raiders");
+    assert_eq!(food_after, food_before + 25, "a quarter of the stock goes to the raiders");
+    assert_eq!(w.comp::<Corp>(corp).expect("c").raided_at, Some(now), "the corp remembers the raid");
     let shocks = &w.comp::<Corp>(corp).expect("c").shocks;
     assert!(shocks.contains(&CorpShock::Robbed(500)) && shocks.contains(&CorpShock::Raided), "{shocks:?}");
     let e = w.events.iter().rev().find(|e| e.kind == EventKind::Raid).expect("a Raid event");
     assert!(e.text.contains(" raided ") && e.text.contains("3 raiders vs 1 defenders"), "{}", e.text);
+    assert!(e.text.contains("500 coins and 25 food taken"), "item 41: the real amount: {}", e.text);
     let g = w.comp::<Gang>(g0).expect("g");
     assert!(g.raid_at.is_none() && g.raid_target.is_none());
+}
+
+/// Fix pass (item 28): a contracted corp building's private guards are
+/// posted at its door when a raid comes (on shift, or any shift while the
+/// owner holds Secure), up to `corp_raid_posted`, and a crew that loses a
+/// third of its pairings breaks: the raid is lost.
+#[test]
+fn test_corp_raid_meets_posted_guards_and_the_crew_breaks() {
+    use citysim::{Corp, CorpOrder};
+    let mut w = v2(62);
+    let (g0, _) = gangs(&w);
+    let market = w
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .copied()
+        .find(|&m| w.corp_of_building(m).is_some())
+        .expect("a corp Market");
+    let corp = w.corp_of_building(market).expect("corp");
+    let door = w.comp::<Building>(market).map(|b| w.outside_door(b)).expect("door");
+    let far = TilePos { x: 250, y: 2 };
+    for g in w.guards().to_vec() {
+        w.abort_plan(g);
+        w.leave_building(g);
+        let p = w.comp_mut::<Position>(g).expect("pos");
+        p.tile = far;
+        p.building = None;
+    }
+    if let Some(l) = w.law_mut() {
+        l.beats.clear();
+    }
+    for s in citysim::systems::ownership::staff_at(&w, market) {
+        w.leave_building(s);
+    }
+    // The owner holds Secure and buys a contract: every guard of the seller
+    // may be called in, whatever the shift.
+    w.comp_mut::<Corp>(corp).expect("c").order = CorpOrder::Secure;
+    let office = w.buildings_of_kind(BuildingKind::SecurityOffice)[0];
+    let security = w.corp_of_building(office).expect("a security corp");
+    w.comp_mut::<Building>(market).expect("b").secured_by = Some(security);
+    for pg in civilians(&w, 4) {
+        citysim::systems::demography::hire(&mut w, pg, office, citysim::Role::Guard);
+        w.leave_building(pg);
+        let p = w.comp_mut::<Position>(pg).expect("pos");
+        p.tile = far;
+        p.building = None;
+    }
+    let roster = raid::private_guards_of(&w, market);
+    assert!(roster.len() >= 4, "the seller's guards: {}", roster.len());
+    w.config.gangs.corp_raid_posted = 3;
+    let posted = raid::posted_guards(&w, market);
+    assert_eq!(posted.len(), 3, "capped at corp_raid_posted");
+    for &g in &posted {
+        set_fighter(&mut w, g, 1.0, 1.0);
+    }
+    let raiders = civilians(&w, 4);
+    for &r in &raiders {
+        gang::enlist(&mut w, r, g0);
+        set_fighter(&mut w, r, 0.0, 0.0);
+        stage_raider(&mut w, r, door);
+    }
+    temper(&mut w, raiders[0]);
+    let now = w.tick;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::Raid;
+        g.raid_target = Some(market);
+        g.raid_at = Some(now);
+    }
+    let out = raid::resolve(&mut w, raiders[0]).expect("resolved");
+    assert_eq!(out, Outcome::Lost);
+    for &g in &posted {
+        let at = w.comp::<Position>(g).expect("pos").tile;
+        assert!(at.manhattan(door) <= 2, "posted guard stood at the door: {at:?}");
+    }
+    let e = w.events.iter().rev().find(|e| e.kind == EventKind::Raid).expect("a Raid event");
+    assert!(e.text.contains("4 raiders vs 3 defenders") && e.text.contains("Lost"), "{}", e.text);
+    // ceil(4 x 0.34) = 2 pairings lost and the crew scatters: two raiders
+    // never fought (no Assault event names them).
+    let fought = |r: EntityId| w.events.iter().any(|e| e.kind == EventKind::Assault && e.actors.first() == Some(&r));
+    assert_eq!(raiders.iter().filter(|&&r| fought(r)).count(), 2, "the crew broke after two losses");
 }
 
 /// A gang of `n` in g0 for the split tests: the old leader (loyalty 0.95),
@@ -987,9 +1072,23 @@ fn test_decapitation_splits_with_strong_lieutenant_and_two_districts() {
     assert_eq!(g.leader, Some(leader));
     assert_eq!(g.split_check, Some(old));
     w.comp_mut::<Gang>(g0).expect("g").split_check = None;
+    // Fix pass (item 35): the old boss living in the splinter's district stays.
+    let crew = w.comp::<Gang>(g0).expect("g").members.clone();
+    let boss = crew.iter().copied().find(|&m| m != leader && m != lt).expect("a third member");
+    w.comp_mut::<citysim::Household>(boss).expect("h").home = Some(central[1]);
+    w.comp_mut::<Gang>(g0).expect("g").boss = Some(boss);
+    // Fix pass (item 40): at the cap, but one gang is an emptied ghost.
     let gangs_before = w.gang_list().len();
+    w.config.gangs.max_gangs = gangs_before;
+    let ghost = w.gang_list().iter().copied().find(|&g| g != g0).expect("another gang");
+    {
+        let gg = w.comp_mut::<Gang>(ghost).expect("ghost");
+        gg.members.clear();
+        gg.emptied = true;
+    }
     let splinter = gang::split(&mut w, g0, Some(old), false).expect("a split");
     assert_eq!(w.gang_list().len(), gangs_before + 1);
+    assert_eq!(w.gang_of(boss), Some(g0), "the jailed boss stays with the gang it ran");
     let sg = w.comp::<Gang>(splinter).expect("splinter");
     assert_eq!(w.district_of_building(sg.hideout), DistrictId(6), "the splinter's Hideout is in Sump Central");
     assert_eq!(w.comp::<Building>(sg.hideout).map(|b| b.kind), Some(BuildingKind::Hideout));

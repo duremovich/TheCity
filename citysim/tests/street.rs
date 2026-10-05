@@ -113,6 +113,8 @@ fn derelict_in(w: &mut World, d: u8, n: usize) -> EntityId {
 #[test]
 fn test_litter_deposits_per_event_and_decays() {
     let mut w = city();
+    // The spec's table at scale 1 (the fix pass's `deposit_mult` has its own test).
+    w.config.litter.deposit_mult = 1.0;
     let t = open_street(&w, 0);
     let actor = civilians(&w)[0];
     // A Theft: 6 at the tile, nothing around it.
@@ -138,11 +140,48 @@ fn test_litter_deposits_per_event_and_decays() {
     assert_eq!(litter::at(&w, t), 5);
     assert_eq!(litter::at(&w, u), 11);
     assert_eq!(litter::at(&w, east), 0);
-    // The district means: Σ ÷ (255 × street tiles).
+    // Fix pass: a district's litter is the share of its street tiles at or
+    // above `visible` (32): a 5 is no visible mark.
     litter::district_means(&mut w);
     let d0 = w.district(DistrictId(0));
-    assert!((d0.litter - 5.0 / (255.0 * d0.streets.len() as f32)).abs() < 1e-6);
+    assert_eq!(d0.litter, 0.0);
     assert_eq!(d0.streets.len() as u32, d0.walk_tiles);
+}
+
+/// Fix pass (items 14, 18, 19): a deposit is scaled by `deposit_mult`, an
+/// event inside a building lands at its outside door, and the district's
+/// litter is the share of street tiles at or above `visible`.
+#[test]
+fn test_litter_scaled_anchored_at_the_door_and_read_as_a_share() {
+    let mut w = city();
+    w.config.litter.deposit_mult = 8.0;
+    w.config.litter.visible = 32;
+    let actor = civilians(&w)[0];
+    // A Theft on the street: 6 x 8 = 48, a visible mark.
+    let t = open_street(&w, 0);
+    law::raise_crime(&mut w, actor, None, Crime::Theft, t);
+    assert_eq!(litter::at(&w, t), 48);
+    // A Theft inside a Home (its interior tile) lands outside its door.
+    let home = w.district(DistrictId(1)).homes[0];
+    let (rect, outside) = {
+        let b = w.comp::<Building>(home).expect("home");
+        (b.rect, w.outside_door(b))
+    };
+    let inside = TilePos { x: rect.x + 1, y: rect.y + 1 };
+    assert!(!w.is_street(inside) && w.is_street(outside));
+    let before = litter::at(&w, outside);
+    litter::deposit(&mut w, inside, 6, 0);
+    assert_eq!(litter::at(&w, outside), before + 48, "the street outside the door takes it");
+    // Capped at 254: a violent death (40 x 8) is heaped, not rubble.
+    let u = open_street(&w, 2);
+    litter::deposit(&mut w, u, 40, 0);
+    assert_eq!(litter::at(&w, u), 254);
+    // The share: tiles >= 32 over the district's street tiles.
+    litter::district_means(&mut w);
+    let d0 = w.district(DistrictId(0));
+    let dirty = d0.streets.iter().filter(|&&i| w.litter[i as usize] >= 32).count();
+    assert!(dirty >= 1);
+    assert!((d0.litter - dirty as f32 / d0.streets.len() as f32).abs() < 1e-6);
 }
 
 #[test]
@@ -649,7 +688,8 @@ fn test_pre_m12_street_save_loads_with_zero_litter() {
     let text = strip(&text, "squatter:[", '[', ']');
     let text = strip(&text, "hotel_beds:{", '{', '}');
     let text = strip(&text, "sweep_beats:{", '{', '}');
-    let text = text.replace(",derelict:false,empty_since:None", "");
+    let text = text.replace(",derelict:false,full_capacity:None,empty_since:None", "");
+    let text = text.replace(",raided_at:None", "");
     assert!(!text.contains("litter:[") && !text.contains("squatter:[") && !text.contains("derelict:"));
     let mut back = citysim::save::from_ron(&text).expect("a pre-street save loads");
     assert_eq!(back.config.litter, LitterCfg::off());
@@ -676,4 +716,116 @@ fn test_pre_m12_street_save_loads_with_zero_litter() {
     assert_eq!(citysim::save::to_ron(&again), text);
     assert_eq!(again.squatters_of(b), &[a]);
     assert_eq!(again.litter, cur.litter);
+}
+
+// ---------------------------------------------------------------------------
+// M12 fix pass (phase 2 and 3 reviews)
+// ---------------------------------------------------------------------------
+
+/// Item 20: any path to a Home (here `set_home`, as a marriage takes) ends
+/// a squat and tonight's Hotel booking.
+#[test]
+fn test_set_home_ends_squat_and_booking() {
+    let mut w = city();
+    let b = derelict_in(&mut w, 0, 0);
+    let home = w.district(DistrictId(0)).homes[1];
+    let a = civilians(&w)[0];
+    let at = w.district(DistrictId(0)).centroid;
+    sleep_rough(&mut w, a, at);
+    street::occupy(&mut w, a, b).expect("slot");
+    w.hotel_beds.insert(a, (b, w.tick + 100));
+    w.set_home(a, Some(home));
+    assert!(!w.has::<Squatter>(a), "the squat ends");
+    assert!(!w.hotel_beds.contains_key(&a), "the booking ends");
+    assert!(w.squatters_of(b).is_empty());
+    assert!(w.check_indices().is_ok());
+}
+
+/// Items 21, 24, 25: the City re-lets a derelict of any kind (a Bar here) at
+/// the capacity it had, but not a squat a gang holds.
+#[test]
+fn test_relet_any_kind_keeps_capacity_and_skips_gang_held() {
+    let mut w = city();
+    w.config.street.relet_days = 1;
+    w.treasury_mut().expect("treasury").coins = w.config.street.city_absorb_floor * 2;
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    w.comp_mut::<Building>(bar).expect("bar").capacity = 7;
+    let home = w.district(DistrictId(0)).homes[0];
+    assert!(street::make_derelict(&mut w, bar, "test"));
+    assert!(street::make_derelict(&mut w, home, "test"));
+    // The Block is a gang's held squat.
+    let g = w.gang_list()[0];
+    w.comp_mut::<Building>(home).expect("b").claim = Some(citysim::Claim { gang: g, count: gang::CLAIM_HELD });
+    w.tick += 2 * TICKS_PER_DAY;
+    street::relet_daily(&mut w);
+    street::relet_daily(&mut w);
+    let b = w.comp::<Building>(bar).expect("bar");
+    assert!(!b.derelict, "a derelict Bar returns to use");
+    assert_eq!(b.capacity, 7, "at the capacity it stood at");
+    assert!(street::is_derelict(&w, home), "a gang-held squat is not re-let");
+}
+
+/// Item 21: a Bar with no trade for `abandon_days` under an owner in the red
+/// is abandoned like an empty Block.
+#[test]
+fn test_idle_bar_of_a_broke_owner_is_abandoned() {
+    let mut w = city();
+    let co = ownership::spawn_corp(&mut w, "Broke".into(), [Niche::Food].into_iter().collect(), -50, None);
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    ownership::transfer_building(&mut w, bar, Some(co));
+    w.comp_mut::<Corp>(co).expect("corp").treasury = -50;
+    w.comp_mut::<Building>(bar).expect("bar").revenue = std::iter::once(0).collect();
+    let days = w.config.street.abandon_days;
+    for _ in 0..=days {
+        street::abandon_daily(&mut w);
+        w.tick += TICKS_PER_DAY;
+    }
+    assert!(street::is_derelict(&w, bar), "an idle Bar in the red goes derelict");
+}
+
+/// Item 27: a bankruptcy marks every door of the estate, sold or foreclosed.
+#[test]
+fn test_bankruptcy_litters_every_door() {
+    let mut w = city();
+    w.config.litter.deposit_mult = 1.0;
+    let co = ownership::spawn_corp(&mut w, "Doomed".into(), [Niche::Food].into_iter().collect(), -1, None);
+    let market = w.buildings_of_kind(BuildingKind::Market)[0];
+    ownership::transfer_building(&mut w, market, Some(co));
+    let outside = {
+        let b = w.comp::<Building>(market).expect("m");
+        w.outside_door(b)
+    };
+    let before = litter::at(&w, outside);
+    corps::bankrupt(&mut w, co);
+    assert_eq!(litter::at(&w, outside), before + 48, "48 r2 at the door (anchored outside)");
+}
+
+/// Items 10 and 11: only the sleepers the law can roll count as rough, and a
+/// district without Homes rolls at coverage 1, not coverage_max.
+#[test]
+fn test_vagrancy_counts_rollable_sleepers_and_homeless_district_coverage() {
+    let mut w = city();
+    let civ = civilians(&w);
+    let at = open_street(&w, 0);
+    let (out, inside) = (civ[0], civ[1]);
+    lod::set_lod(&mut w, out, Lod::Full);
+    lod::set_lod(&mut w, inside, Lod::Full);
+    sleep_rough(&mut w, out, at);
+    sleep_rough(&mut w, inside, at);
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    w.enter_building(inside, bar);
+    let d = w.district_of(at);
+    w.config.law.vagrancy_base = 0.0;
+    street::vagrancy(&mut w);
+    let inside_d = w.district_of(w.comp::<Position>(inside).expect("p").tile);
+    let rough: u16 = w.districts.iter().map(|x| x.rough).sum();
+    assert_eq!(rough, 1, "the Full sleeper inside the Bar is not rough ({:?} / {:?})", d, inside_d);
+    // A district without Homes reads coverage_max but rolls at 1.
+    w.config.law.vagrancy_base = 0.1;
+    let i = d.index();
+    w.districts[i].coverage = 2.0;
+    let homes = std::mem::take(&mut w.districts[i].homes);
+    assert!((street::vagrancy_p(&w, d) - 0.1).abs() < 1e-6, "{}", street::vagrancy_p(&w, d));
+    w.districts[i].homes = homes;
+    assert!((street::vagrancy_p(&w, d) - 0.2).abs() < 1e-6);
 }

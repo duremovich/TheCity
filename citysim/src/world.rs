@@ -764,6 +764,7 @@ impl World {
                     derelict: false,
                     empty_since: None,
                     closed_until: None,
+                    full_capacity: None,
                 },
             );
             match def.kind {
@@ -1112,6 +1113,13 @@ impl World {
             }
             h.home = home;
             self.index_household(id);
+        }
+        // Fix pass (phase 3 review): any path to a Home (re-housing, a
+        // marriage, a god command) ends a squat and tonight's Hotel booking;
+        // a housed agent kept the slot and the Sweep evicted them.
+        if home.is_some() {
+            self.remove::<crate::components::Squatter>(id);
+            self.hotel_beds.remove(&id);
         }
     }
 

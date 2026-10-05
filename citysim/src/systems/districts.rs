@@ -465,7 +465,8 @@ pub fn sanitation(world: &mut World) {
 /// or any owner whose buildings took in more today than their upkeep,
 /// pays the City `owner_clean_cost` per 32 units (rounded up) to clear up to
 /// `owner_clean_units` within 2 tiles of each owned door (ascending); a door
-/// it cannot pay for is skipped. Buildings ascending by id.
+/// it cannot pay for out of its purse (a corp's treasury too) is skipped.
+/// Buildings ascending by id.
 pub fn owner_cleaning(world: &mut World) {
     let cfg = world.config.litter.clone();
     let up = world.config.corps.upkeep.clone();
@@ -499,7 +500,9 @@ pub fn owner_cleaning(world: &mut World) {
             let units = dirt.min(cfg.owner_clean_units);
             let cost = cfg.owner_clean_cost * i64::from(units.div_ceil(32));
             if cost > 0 {
-                if !corp && world.purse(Some(owner)) < cost {
+                // Fix pass (phase 3 review): a broke owner, corp or not, does not
+                // clean (the spec: "a dying corp's block goes to seed").
+                if world.purse(Some(owner)) < cost {
                     continue;
                 }
                 let flow = crate::systems::ownership::Flow::Sanitation;
@@ -634,7 +637,9 @@ pub fn aggregates(world: &mut World) {
         // Phase 1's note: a district without Blocks (the Civic, the Vats) has
         // no residents to divide by (a homeless adult or two at most), so its
         // rate reads 0; its crimes still count in `crimes`.
-        d.crime_rate = if population[i] == 0 || d.homes.is_empty() {
+        // Fix pass (phase 1 review): no adults (a district of children or of
+        // nobody) reads 0 too.
+        d.crime_rate = if population[i] == 0 || adults[i] == 0 || d.homes.is_empty() {
             0.0
         } else {
             // Over the days of history there are (review fix: a fresh world
@@ -702,7 +707,9 @@ pub fn presence(world: &World, d: DistrictId) -> Vec<(Controller, f32)> {
             continue;
         }
         let is_home = bd.kind == BuildingKind::Home;
-        if is_home {
+        // A held Home, or a held squat of any kind (fix pass: a gang may squat
+        // a derelict Bar or Hotel).
+        if is_home || bd.derelict {
             if let Some(c) = bd.claim.filter(|c| c.count >= held && world.has::<Gang>(c.gang)) {
                 add(&mut out, Controller::Gang(c.gang), wts.held_home);
             }
@@ -723,7 +730,13 @@ pub fn presence(world: &World, d: DistrictId) -> Vec<(Controller, f32)> {
         match bd.owner {
             None => city += w,
             Some(o) if world.has::<Corp>(o) => add(&mut out, Controller::Corp(o), w),
-            Some(o) if world.has::<Gang>(o) => add(&mut out, Controller::Gang(o), wts.owned_other),
+            // Fix pass (phase 1 review, D8): a gang-owned Home counts as an
+            // owned Home (1.0), not as an owned other building (3.0); held as
+            // well it is 2x a held Home, not 4x.
+            Some(o) if world.has::<Gang>(o) => {
+                let w = if is_home { wts.owned_home } else { wts.owned_other };
+                add(&mut out, Controller::Gang(o), w)
+            }
             Some(_) => {}
         }
     }

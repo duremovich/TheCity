@@ -452,7 +452,11 @@ fn test_m10_scale_seed_42() {
     let back = save::from_ron(&text).expect("save round-trips");
     let secs = t.elapsed().as_secs_f64();
     eprintln!("save {:.1} MB, to_ron + from_ron {secs:.2} s", text.len() as f64 / 1e6);
-    check(text.len() < 40_000_000, format!("save {} bytes < 40 MB", text.len()));
+    // M12 fix pass: 40 -> 45 MB. The save is mostly the social graph (edges
+    // 14-21 MB of 34-40 at day 120 on seed 42), which grows with how long
+    // residents live; the fix pass halved the violence (murders 1.4 -> 0.8 a
+    // day) and any one of its retunes moved the save 34-38 MB.
+    check(text.len() < 45_000_000, format!("save {} bytes < 45 MB", text.len()));
     if !cfg!(debug_assertions) {
         check(secs < 1.5, format!("to_ron + from_ron {secs:.2} s < 1.5 s"));
     }

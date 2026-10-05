@@ -158,7 +158,12 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
         &[suspect],
         format!("{who} reported {} for {}", world.name_of(suspect), crime.label()),
     );
-    crate::systems::law_brain::log_report(world, suspect);
+    // Fix pass (phase 2 review): sleeping rough is not gang business; a
+    // Vagrancy report against a member must not feed the wanted-gang log,
+    // the pressure or the district's top gang.
+    if crime != Crime::Vagrancy {
+        crate::systems::law_brain::log_report(world, suspect);
+    }
 }
 
 /// A wanted suspect the law can chase now: free, uncuffed and seen by a

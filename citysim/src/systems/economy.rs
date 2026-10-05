@@ -47,7 +47,8 @@ fn daily_restock(world: &mut World) {
     let mut budget: std::collections::BTreeMap<EntityId, i64> = std::collections::BTreeMap::new();
     let mut wants: Vec<(EntityId, u32, u32)> = Vec::new();
     for &mk in world.buildings_of_kind(BuildingKind::Market) {
-        let Some(b) = world.comp::<Building>(mk).filter(|b| !b.demolished) else { continue };
+        // Fix pass (phase 4 review): a Market a riot closed takes no delivery.
+        let Some(b) = world.comp::<Building>(mk).filter(|b| !b.demolished && !world.is_closed(mk)) else { continue };
         let mut want = floor.saturating_sub(b.stock_food).min(batch);
         if let Some(o) = b.owner.filter(|_| wholesale > 0) {
             let left = budget.entry(o).or_insert_with(|| {
@@ -207,12 +208,16 @@ pub fn haul(world: &mut World, farm: EntityId) -> u32 {
     let wh_cap = world.config.buildings.warehouse.stock_cap;
     let wholesale = world.config.corps.wholesale;
     let Some((farm_door, farm_owner)) = world.comp::<Building>(farm).map(|b| (b.door, b.owner)) else { return 0 };
+    // Fix pass (phase 4 review): no haul into a Market a riot closed (the
+    // batch goes to the Warehouse as an overflow would).
     let market = ownership::owned_of_kind(world, farm_owner, BuildingKind::Market)
         .into_iter()
+        .filter(|&m| !world.is_closed(m))
         .filter_map(|m| world.comp::<Building>(m).map(|b| (b.door.manhattan(farm_door), m)))
         .min()
         .map(|(_, m)| m)
-        .or_else(|| world.nearest_of_kind(BuildingKind::Market, farm_door));
+        .or_else(|| world.nearest_of_kind(BuildingKind::Market, farm_door))
+        .filter(|&m| !world.is_closed(m));
     let Some(b) = world.comp_mut::<Building>(farm) else { return 0 };
     let moved = batch.min(b.stock_food);
     b.stock_food -= moved;

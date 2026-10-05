@@ -380,3 +380,19 @@ fn test_crackdown_pressure_scales_per_capita() {
     assert_eq!(law_brain::crackdown_reports(&big), (k * n / 1000.0).round() as u32);
     assert!(law_brain::crackdown_reports(&big) > 3 * law_brain::crackdown_reports(&small), "it scales with the city");
 }
+
+/// M12 fix pass (item 8): a Vagrancy report against a gang member does not
+/// feed the law's report log (the wanted gang, the pressure, the district's
+/// top gang); any other crime does.
+#[test]
+fn test_vagrancy_report_is_not_gang_business() {
+    let mut w = world(5);
+    let g = w.gangs()[0];
+    let m = civilians(&w, 1)[0];
+    gang::enlist(&mut w, m, g);
+    let before = w.law().expect("law").report_log.len();
+    law::file_report(&mut w, Crime::Vagrancy, m, None);
+    assert_eq!(w.law().expect("law").report_log.len(), before, "sleeping rough is not gang business");
+    law::file_report(&mut w, Crime::Theft, m, None);
+    assert_eq!(w.law().expect("law").report_log.len(), before + 1);
+}

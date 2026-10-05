@@ -237,6 +237,17 @@ max_gangs = 4
 splinter_names = ["Rust Saints", "Low Choir", "Gutter Kings"]
 corp_raid_frac = 0.05
 corp_raid_cap = 500
+# M12 fix pass (corp raids were won 19 of 19 on seeds 42-44 and took whole Market stocks, 1,940
+# food, price 12 for four days). A won raid takes corp_raid_loot_frac of the building's food (the
+# coins stay corp_raid_frac of the treasury, capped at corp_raid_cap). The defence: up to
+# corp_raid_posted of the owner's or contractor's private guards on shift (any shift while the owner
+# holds Secure) are posted at the door, the district beat's on-shift guards answer (the Precinct's
+# watch in its own district too), and a crew breaks once corp_raid_break of it has lost a
+# pairing. Seeds 42-44: lost 1 / 1 / 2 of 4 / 6 / 6, 25 % (posted 3 with no break: 1 in 14 lost;
+# a 0.34 break: 14 of 20 lost; 0.5 lets big crews win); the raided Market's price never passed 8.
+corp_raid_loot_frac = 0.25
+corp_raid_posted = 5
+corp_raid_break = 0.5
 # Phase 4 (plan addition): Raid and Retaliate need 3 fit members. Early gangs of 4-10 and fresh
 # splinters raided with 1-2 at the door (seed 43: 9 of 17 expeditions); a raid is a crew's job.
 raid_min_members = 3
@@ -507,7 +518,13 @@ bar_owner_count = 2
 # tier's base rent: a free Sump Block costs its owner nothing. Corp Block upkeep goes from 300 to
 # 260 a day (Habitat's 60 Spire Blocks now pay 2).
 # M11 phase 5: security_office 30 -> 10 (see contract_per_guard_day).
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 10 }
+# M12 fix pass: hotel 10 -> 4. A Hotel books 2-3 nights a day at 3 coins (5-7 hotel nights a day
+# city-wide over 2-3 Hotels, seeds 42-44), ~7 gross and ~6 after tax: at 10 every Hotel owner bled.
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4 }
+# M12 fix pass: a corp raided (or looted by a riot) in the last raided_days reads Secure/Lobby
+# `losses` of at least raided_losses: it hardens (contracts the building, or lobbies on the gang).
+raided_days = 7
+raided_losses = 0.5
 value = { farm = 1000, market = 1000, security_office = 500 }                    # D28
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
@@ -584,15 +601,21 @@ lobby = 0.2
 # M11 phase 5: 0.42 -> 0.45. With rent [1, 2, 4] Street unrest runs 0.27-0.51 (mean 0.38-0.41 on
 # seeds 42-44): at 0.42 the city struck 6-15 times in 120 days (every week the lockout allowed), at
 # 0.46 0-1 times.
-strike_threshold = 0.45
-strike_cooldown_days = 7
+# M12 fix pass: 0.45 / 7 -> 0.52 / 30 days. D41 reads district Street unrest, which runs higher and
+# noisier than the city's (Sump West p50 0.46-0.50, p90 0.52-0.55 on seeds 42-44): 0.45 with a
+# 7-day per-district lockout struck 28-36 times a run, mostly "1 worker" walkouts in the Sump. At
+# 0.51 / 30: 8 / 4 / 3 strikes on seeds 42-44 (band 2-8); 0.52 / 30 gave 7 / 1 / 2, 0.50 / 30 9 / 4 / 3.
+strike_threshold = 0.51
+strike_cooldown_days = 30
 fear_radius = 6
 fear_hours_full = 1.0          # guard-hours a day near your Home that read as full fear
 couple_immigration = true
 immigration_k = 8.0            # Logistic{8, 0.5} over Street happiness; the lever is the ceiling
 immigration_mid = 0.5
-dreg_emigrate_mood = -0.5
-dreg_emigrate_days = 7         # 0 = off
+# M12 fix pass: -0.5 / 7 -> -0.3 / 10. No Dreg's mood held under -0.5 for a week (0 emigrations a
+# run); at -0.3 / 7 days 7-10 left, at -0.3 / 8 2-24, at -0.3 / 10 2 / 3 / 7 (band 1-10).
+dreg_emigrate_mood = -0.3
+dreg_emigrate_days = 10         # 0 = off
 evicted_recruit_days = 14
 evicted_recruit_lawfulness = 0.5
 rent_burden_w = 0.2            # M12 D29: district unrest + rent_burden_w x mean(rent / income) of renters
@@ -635,8 +658,19 @@ sanitation_count = 12
 # 6 r0, an assault or shakedown 12 r1, a violent death 40 r1, an unburied body 24 r0 a day, a brawl
 # at a door 32 r2, an eviction 24 r1, a building gone derelict 48 r2, a squat 4 r1 and a rough sleeper
 # 2 r0 a night), decayed daily, cleaned by the sweepers, owners and the ruling gang.
+# M12 fix pass (the litter scale): a district's `litter` is the share of its street tiles at or above
+# `visible` (32, the littered band), not the mean byte over ~30k tiles (which pinned at 0.001 with
+# the table's 2-64 deposits). Every deposit is scaled by deposit_mult (8: a theft 48, an assault 96
+# trashed with a 48 ring, a death or brawl 254 heaped) and capped at 254; an event inside a building
+# lands outside its door. decay 1 and 12 sweepers x clean_per_shift 120 needed no change: the
+# dirtiest district holds 0.26-0.28 (in 0.15-0.50 on 96-98 % of days 14-120, seeds 42-44) and the
+# Vats under 0.01. Effects stay bounded: a step costs at most step_ticks[3] = 2 ticks more, a Coarse
+# walk 1 + timed_mult x share (<= +23 % at 0.46), Sleep safety at most -sleep_penalty (0.15), mood
+# -mood x share (<= -0.09), witnesses x (1 - 0.3 x share) (>= 0.86).
 enabled = true                     # off() = false: no deposits, no delay, no sanitation
 decay = 1
+deposit_mult = 8.0
+visible = 32
 step_ticks = [0, 0, 1, 2]          # per band: clean, littered, trashed, heaped
 timed_mult = 0.5
 sleep_penalty = 0.15
@@ -676,9 +710,12 @@ enabled = true                     # off() = false
 # Phase 4 calibration: 0.55 -> 0.54 and 3 -> 4 days. District unrest tops out at 0.53-0.57 (seeds
 # 42-44, 120 days; the Civic's rough sleepers ~0.53, Sump West ~0.48): at 0.55 seed 42 never rioted,
 # at 0.54 with 3 days the Civic rioted every cooldown (5-6 a run). 0.54 x 4 days: 3 / 1 / 2 riots.
+# M12 fix pass: cooldown 14 -> 21 days (seed 44 rioted 5 times, the Civic every cooldown); with the
+# fix pass in, 1 / 2 / 2 riots on seeds 42-44 (5 days instead of 4 left seed 43 at 0). A crowd too
+# thin to fight at the door (dispersed) is a fizzle: the cooldown and streak only.
 riot_threshold = 0.54
 riot_days = 4
-riot_cooldown_days = 14
+riot_cooldown_days = 21
 riot_min = 6
 riot_max = 40
 max_active_riots = 2               # plan D30
@@ -692,4 +729,7 @@ crossfire_radius = 3
 p_crossfire = 0.15
 p_crossfire_kill = 0.1
 riot_stat_bystanders = 4
-riot_promote_hours = 24            # plan risk 3: rioters rank with the gangs from the trigger (24) or this many hours before the muster
+riot_promote_max = 20              # fix pass (throughput): the 20 most miserable rioters take a body, not 40
+# Fix pass (phase 4 review): 24 -> 9, the value phase 4 reported (it measured 12.4k vs 11.6k ticks/s
+# promoting 9 h ahead); with the buffered --events output seed 42 runs 8.3k minimum, 11.9k mean.
+riot_promote_hours = 9             # plan risk 3: rioters rank with the gangs from the trigger (24) or this many hours before the muster

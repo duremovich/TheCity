@@ -304,6 +304,19 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
             None
         };
         let what = world.name_of(b);
+        // Fix pass (phase 3 review): a bankruptcy marks every door of the
+        // estate (48 r2, the spec's row); a building going derelict lays the
+        // same deposit in `make_derelict`, so it is not laid twice.
+        let derelict = pick.is_none()
+            && world.config.street.enabled
+            && crate::systems::street::can_go_derelict(kind)
+            && world.purse(None) < world.config.street.city_absorb_floor;
+        if !derelict {
+            if let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) {
+                let (a, r) = crate::systems::street::DERELICT_LITTER;
+                crate::systems::litter::deposit(world, door, a, r);
+            }
+        }
         match pick {
             Some((k, buyer)) => {
                 ownership::pay(world, Some(buyer), Some(corp), v, Flow::Sale);
@@ -315,10 +328,7 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
             }
             // M12 D26: with the Treasury under `[street] city_absorb_floor`
             // the City takes no Block, Bar or Hotel: it goes derelict.
-            None if world.config.street.enabled
-                && crate::systems::street::can_go_derelict(kind)
-                && world.purse(None) < world.config.street.city_absorb_floor =>
-            {
+            None if derelict => {
                 crate::systems::street::make_derelict(world, b, "unsold");
             }
             None => {

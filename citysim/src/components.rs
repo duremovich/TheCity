@@ -872,6 +872,11 @@ pub struct Corp {
     /// keep the trace but do not switch).
     #[serde(default)]
     pub pinned_until: Option<Tick>,
+    /// M12 fix pass: the tick of the last raid or riot that took from one of
+    /// its buildings; for `[corps] raided_days` the Secure and Lobby input
+    /// `losses` floors at `raided_losses` (the raided corp hardens).
+    #[serde(default)]
+    pub raided_at: Option<Tick>,
 }
 
 impl Corp {
@@ -908,6 +913,7 @@ impl Corp {
             outside_treasury: 0,
             governance: Governance::Dictator,
             pinned_until: None,
+            raided_at: None,
         }
     }
 
@@ -1431,6 +1437,10 @@ pub struct Building {
     /// M12 D25: abandoned: no owner, no rent, no staff; squatters may move in.
     #[serde(default)]
     pub derelict: bool,
+    /// M12 fix pass: the capacity a derelict had before it went derelict (a
+    /// demolished Block stands at half), restored when it returns to use.
+    #[serde(default)]
+    pub full_capacity: Option<u8>,
     /// M12 D25/D26: a Block with no residents since this tick (abandonment),
     /// and, once derelict, the tick it went derelict (re-letting).
     #[serde(default)]
