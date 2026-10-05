@@ -341,3 +341,9 @@ Folded into the sketches above rather than a milestone of their own:
 - **Squatting** (M12 districts): `Squat` as a Dreg goal and a gang order on derelict buildings (bankrupt estates with no buyer, demolished Blocks, `owner = None`); securing a squat uses the gangs' claim machinery; eviction by owner, law or a stronger squatter.
 - The PC loop (M18) is the NPC ladder: street, hotel, squat, lease, deed. God tests time the climb.
 
+## Addendum 6 (2026-10-05, Dylan): building, destruction, wreckage, news
+
+- **Organic city from a seed** (M11 founding + a headless pre-roll of years): the generator keeps zoning and roads; buildings, factions, biographies and ruins come from the run.
+- **Destructible property and wreckage** (M12 litter generalised to a `Damage` tile state; M13 vehicles; M16 combat): missed shots hit buildings and pedestrians; rubble raises road cost to impassable; the ruling faction or a functioning city posts repair jobs, or does not; rails as a transport layer that accidents and terrorism damage.
+- **News and propaganda** (M15 gossip at faction scale, M16 contracts): outlets as businesses turning salient events into stories with reach; a story read is a second-hand memory; propaganda plants or buries stories and moves reputation, loyalty and submission.
+

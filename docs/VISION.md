@@ -145,3 +145,13 @@ The ladder, as the sim should offer it to NPCs first:
 | The deed | own, found, incorporate, as M11 | done |
 
 The loop for a broke PC on day one is theft → hotel → a job or a gang → a lease → a deed, and every rung is one NPCs climb too, so the god tests can time the climb.
+
+## Building, destruction, wreckage and the news (added 2026-10-05, Dylan)
+
+**Building.** Eventually the city is procedural from a seed, with buildings sprouting up organically, so that there is a robust city with history and mature factions by the time the player gets there. The sim already founds buildings (M11 `Register`, corp `Grow`); the generator's job shrinks to zoning and roads, and the city's history is a headless pre-roll of years before the player arrives, with its biographies, grudges and ruins intact.
+
+**Destruction.** Property is destructible. Fire a missile and miss and it hits a building or a pedestrian. Roads take damage from explosions, with wreckage that the ruling faction of the area, or the city government if it is functioning, removes, or does not. In bad areas roads become impassable to land vehicles and pedestrians depending on the amount and location of wreckage. Public transport rails can be damaged by accident or by terrorism.
+
+**The news.** News outlets report on events: VIP sightings, battles, scandals. **Propaganda is a mechanic**: bad stories about a faction hurt its morale and reputation and erode loyalty; a faction can buy or make stories.
+
+Design implications: a `Damage` tile state generalising M12's litter (rubble on roads raises move cost to impassable; a damaged building loses capacity until repaired; repair is a job the owner or the district's ruling faction posts or ignores); a `Rail` layer with its own damage and a transport tier that vehicles (M13) and the layers milestone share; projectile misses resolved against the tile and whoever stands on it (the hazard rolls); news as faction-scale gossip (M15: an outlet is a business that turns high-salience events into stories with reach; reading a story is a second-hand memory), and propaganda as a contract (M16) that plants or buries a story, moving reputation, loyalty and submission (the class aggregates of M11).
