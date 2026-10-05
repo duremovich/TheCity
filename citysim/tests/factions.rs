@@ -243,3 +243,163 @@ fn test_legacy_save_migrates_hideout_and_claims() {
     assert_eq!(g.territory, vec![home]);
     assert_eq!(w.comp::<Building>(home).expect("b").claim, Some(Claim { gang: g0, count: 3 }));
 }
+
+// ---------------------------------------------------------------------------
+// Raids
+// ---------------------------------------------------------------------------
+
+use citysim::systems::raid::{self, Outcome};
+use citysim::{GoalKind, Skills};
+
+/// Put a member on a street tile with the Raid goal, as a raider who has marched.
+fn stage_raider(w: &mut World, id: EntityId, tile: citysim::TilePos) {
+    w.abort_plan(id);
+    w.leave_building(id);
+    let p = w.comp_mut::<citysim::Position>(id).expect("pos");
+    p.tile = tile;
+    p.building = None;
+    w.comp_mut::<Brain>(id).expect("b").current_goal = Some(GoalKind::Raid);
+}
+
+fn set_fighter(w: &mut World, id: EntityId, fighting: f32, courage: f32) {
+    w.comp_mut::<Skills>(id).expect("s").fighting = fighting;
+    w.comp_mut::<Personality>(id).expect("p").courage = courage;
+}
+
+fn civilians(w: &World, n: usize) -> Vec<EntityId> {
+    w.citizens().into_iter().filter(|&id| !w.has::<citysim::Job>(id) && w.has::<Brain>(id)).take(n).collect()
+}
+
+#[test]
+fn test_brawl_with_no_defenders_sacks_the_hideout() {
+    let mut w = world(49);
+    w.config.crime.fight_death_p = 0.0;
+    let (g0, g1) = gangs(&w);
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    temper(&mut w, a);
+    let h1 = w.hideout_of(g1).expect("h1");
+    w.comp_mut::<Gang>(g1).expect("g").treasury = 100;
+    w.comp_mut::<Building>(h1).expect("b").stock_food = 20;
+    let door_tile = raid::rival_hideout_tile(&w, a).expect("tile");
+    stage_raider(&mut w, a, door_tile);
+    w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(w.tick);
+    assert_eq!(raid::brawl(&mut w, a), Some(Outcome::Sacked));
+    assert_eq!(w.comp::<Gang>(g0).expect("g").treasury, 150);
+    assert_eq!(w.comp::<Gang>(g1).expect("g").treasury, 0);
+    assert!(w.comp::<Gang>(g1).expect("g").is_sacked(w.tick));
+    assert!(w.comp::<Gang>(g1).expect("g").shocks.contains(&Shock::Sacked));
+    assert_eq!(w.comp::<Building>(h1).expect("b").stock_food, 0);
+    assert_eq!(w.comp::<Building>(w.hideout_of(g0).expect("h0")).expect("b").stock_food, 20);
+    assert_eq!(w.comp::<Gang>(g0).expect("g").raid_at, None);
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Sacked));
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("Sacked")));
+    assert_eq!(raid::brawl(&mut w, a), None, "a late raider finds it resolved");
+}
+
+#[test]
+fn test_brawl_three_on_one_takes_the_treasury() {
+    let mut w = world(50);
+    w.config.crime.fight_death_p = 0.0;
+    let (g0, g1) = gangs(&w);
+    let civ = civilians(&w, 4);
+    let (r1, r2, r3, d) = (civ[0], civ[1], civ[2], civ[3]);
+    for r in [r1, r2, r3] {
+        gang::enlist(&mut w, r, g0);
+        set_fighter(&mut w, r, 0.9, 0.9);
+    }
+    temper(&mut w, r1);
+    gang::enlist(&mut w, d, g1);
+    set_fighter(&mut w, d, 0.1, 0.1);
+    let h1 = w.hideout_of(g1).expect("h1");
+    w.leave_building(d);
+    w.enter_building(d, h1);
+    w.comp_mut::<Gang>(g1).expect("g").treasury = 100;
+    let door_tile = raid::rival_hideout_tile(&w, r1).expect("tile");
+    for r in [r1, r2, r3] {
+        stage_raider(&mut w, r, door_tile);
+    }
+    w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(w.tick);
+    let out = raid::brawl(&mut w, r1).expect("resolved");
+    assert!(matches!(out, Outcome::Won | Outcome::Sacked), "{out:?}");
+    assert!(w.comp::<Gang>(g0).expect("g").treasury >= 100, "half the prize at least");
+    assert!(w.comp::<Gang>(g1).expect("g").treasury <= 50);
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Assault), "every pairing is an Assault");
+}
+
+#[test]
+fn test_brawl_one_on_three_loses_and_the_leader_retaliates() {
+    let mut w = world(51);
+    w.config.crime.fight_death_p = 0.0;
+    let (g0, g1) = gangs(&w);
+    let civ = civilians(&w, 4);
+    let (r, d1, d2, d3) = (civ[0], civ[1], civ[2], civ[3]);
+    gang::enlist(&mut w, r, g0);
+    temper(&mut w, r);
+    set_fighter(&mut w, r, 0.1, 0.5);
+    let h1 = w.hideout_of(g1).expect("h1");
+    for d in [d1, d2, d3] {
+        gang::enlist(&mut w, d, g1);
+        set_fighter(&mut w, d, 0.9, 0.9);
+        w.leave_building(d);
+        w.enter_building(d, h1);
+    }
+    w.comp_mut::<Gang>(g1).expect("g").treasury = 100;
+    let door_tile = raid::rival_hideout_tile(&w, r).expect("tile");
+    stage_raider(&mut w, r, door_tile);
+    w.tick = 700;
+    w.comp_mut::<Gang>(g0).expect("g").raid_at = Some(w.tick);
+    assert_eq!(raid::brawl(&mut w, r), Some(Outcome::Lost));
+    assert_eq!(w.comp::<Gang>(g1).expect("g").treasury, 100);
+    let g = w.comp::<Gang>(g0).expect("g");
+    assert_eq!(g.order, Order::Retaliate, "a lost raid is a grudge");
+    assert_eq!(g.raid_at, Some(1320), "the counter-raid musters tonight");
+}
+
+#[test]
+fn test_raid_goal_opens_in_the_gather_window() {
+    let mut w = world(52);
+    let (g0, _) = gangs(&w);
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    temper(&mut w, a);
+    w.tick = 600;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::Raid;
+        g.raid_at = Some(1320);
+    }
+    assert!(!raid::raid_pending(&w, a), "22:00 is twelve hours off");
+    assert!(!raid::raid_done(&w, a));
+    w.tick = 1200;
+    assert!(raid::raid_pending(&w, a), "two hours off: muster");
+    assert!(!raid::mustered(&w, a));
+    w.tick = 1320;
+    assert!(raid::mustered(&w, a));
+    assert!(raid::depart(&mut w, a));
+    assert_eq!(w.comp::<Gang>(g0).expect("g").last_raid_tick, Some(1320));
+    w.comp_mut::<Gang>(g0).expect("g").raid_at = None;
+    assert!(raid::raid_done(&w, a));
+    assert!(!raid::depart(&mut w, a), "no muster to depart from");
+}
+
+#[test]
+fn test_gang_members_are_never_statistical() {
+    let mut w = world(53);
+    let (g0, _) = gangs(&w);
+    let members = civilians(&w, 3);
+    for &m in &members {
+        gang::enlist(&mut w, m, g0);
+    }
+    w.tick = 60;
+    citysim::systems::lod::run(&mut w);
+    let stat = w
+        .citizens()
+        .into_iter()
+        .filter(|&id| w.comp::<Brain>(id).is_some_and(|b| b.lod == citysim::Lod::Statistical))
+        .count();
+    assert!(stat > 100, "most of the city is Statistical ({stat})");
+    for m in members {
+        assert_ne!(w.comp::<Brain>(m).expect("b").lod, citysim::Lod::Statistical);
+    }
+}

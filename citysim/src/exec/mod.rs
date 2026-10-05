@@ -559,7 +559,7 @@ impl World {
             LocationKey::PatrolWaypoint => self
                 .comp::<Brain>(agent)
                 .and_then(|b| b.patrol_route.get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1)).copied()),
-            LocationKey::Anywhere | LocationKey::Street => None,
+            LocationKey::Anywhere | LocationKey::Street | LocationKey::RivalHideout => None,
         }
     }
 
@@ -579,6 +579,7 @@ impl World {
             }
             LocationKey::SuspectTile => target.and_then(|t| self.last_seen.get(&t)).map(|&(tile, _)| tile),
             LocationKey::CorpseTile => target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile),
+            LocationKey::RivalHideout => crate::systems::raid::rival_hideout_tile(self, agent),
             _ => None,
         }
     }

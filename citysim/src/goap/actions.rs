@@ -54,6 +54,10 @@ pub enum ActionKind {
     JoinGang,
     Extort,
     SplitLoot,
+    /// Gang: wait at the own Hideout for the raid's departure.
+    Muster,
+    /// Gang: fight at the rival Hideout's door; resolves the raid.
+    Brawl,
     BuryCorpse,
     CarryCorpse,
     Wander,
@@ -70,7 +74,7 @@ pub enum ActionKind {
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 50] = [
+pub const PLANNABLE: [ActionKind; 53] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -79,6 +83,7 @@ pub const PLANNABLE: [ActionKind; 50] = [
     ActionKind::GoTo(LocationKey::Cemetery),
     ActionKind::GoTo(LocationKey::Hall),
     ActionKind::GoTo(LocationKey::Hideout),
+    ActionKind::GoTo(LocationKey::RivalHideout),
     ActionKind::GoTo(LocationKey::Warehouse),
     ActionKind::GoTo(LocationKey::Street),
     ActionKind::GoTo(LocationKey::TargetHome),
@@ -115,6 +120,8 @@ pub const PLANNABLE: [ActionKind; 50] = [
     ActionKind::JoinGang,
     ActionKind::Extort,
     ActionKind::SplitLoot,
+    ActionKind::Muster,
+    ActionKind::Brawl,
     ActionKind::BuryCorpse,
     ActionKind::CarryCorpse,
     ActionKind::Wander,
@@ -188,6 +195,8 @@ impl ActionKind {
                 | ActionKind::Attack
                 | ActionKind::CarryCorpse
                 | ActionKind::BuryCorpse
+                | ActionKind::Muster
+                | ActionKind::Brawl
         )
     }
 }
@@ -279,6 +288,10 @@ pub struct PlanCtx {
     pub drank_today: bool,
     /// The Bar is at capacity right now: no point walking over.
     pub bar_full: bool,
+    /// Raid: the gang's muster is called and within the gather window.
+    pub raid_pending: bool,
+    /// The agent's gang Hideout is sacked: no SplitLoot or Fence.
+    pub hideout_sacked: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -365,6 +378,9 @@ impl PlanCtx {
                     let there = p.building.and_then(|b| world.comp::<Building>(b)).map_or(p.tile, |b| b.door);
                     dist.insert(LocationKey::CorpseTile, o.manhattan(there));
                 }
+            }
+            if let Some(t) = crate::systems::raid::rival_hideout_tile(world, agent) {
+                dist.insert(LocationKey::RivalHideout, o.manhattan(t));
             }
         }
 
@@ -489,6 +505,11 @@ impl PlanCtx {
             ),
             drank_today: crate::utility::goals::drank_today(world, agent),
             bar_full: crate::utility::goals::bar_full_for(world, agent),
+            raid_pending: crate::systems::raid::raid_pending(world, agent),
+            hideout_sacked: world
+                .gang_of(agent)
+                .and_then(|g| world.comp::<crate::components::Gang>(g))
+                .is_some_and(|g| g.is_sacked(world.tick)),
             dist,
         }
     }
@@ -519,6 +540,8 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::SuspectCuffed => ws.suspect_cuffed = value,
         K::InGang => ws.in_gang = value,
         K::GangTaskDone => ws.gang_task_done = value,
+        K::RaidDone => ws.raid_done = value,
+        K::Mustered => ws.mustered = value,
         K::CorpseBuried => ws.corpse_buried = value,
         K::CarryingCorpse => ws.carrying_corpse = value,
         K::CarryingStolen => ws.carrying_stolen = value,
@@ -549,7 +572,9 @@ impl ActionKind {
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
             ActionKind::Beg => !ctx.is(Role::Guard),
-            ActionKind::Fence | ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
+            ActionKind::Fence | ActionKind::Extort | ActionKind::SplitLoot | ActionKind::Muster | ActionKind::Brawl => {
+                ctx.in_gang
+            }
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
             ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult && ctx.gang_eligible,
             ActionKind::Flirt | ActionKind::Propose => ctx.adult,
@@ -613,8 +638,12 @@ impl ActionKind {
             ActionKind::Propose => ws.has_partner_candidate && ctx.partner_reachable && !ws.has_spouse,
             ActionKind::JoinGang => at(LocationKey::Hideout) && !ws.in_gang,
             ActionKind::Extort => ws.in_gang && at(LocationKey::TargetHome) && !ctx.guard8 && ctx.extort_ok,
-            ActionKind::SplitLoot => ws.in_gang && at(LocationKey::Hideout) && ws.gang_task_done && ctx.has_loot,
-            ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence,
+            ActionKind::SplitLoot => {
+                ws.in_gang && at(LocationKey::Hideout) && ws.gang_task_done && ctx.has_loot && !ctx.hideout_sacked
+            }
+            ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence && !ctx.hideout_sacked,
+            ActionKind::Muster => at(LocationKey::Hideout) && !ws.mustered && ctx.raid_pending,
+            ActionKind::Brawl => at(LocationKey::RivalHideout) && ws.mustered && !ws.raid_done,
             ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
             ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
@@ -655,8 +684,10 @@ impl ActionKind {
             ActionKind::Flirt | ActionKind::Propose => ctx.partner_reachable,
             ActionKind::JoinGang => ctx.gang_eligible && ctx.dist.contains_key(&LocationKey::Hideout),
             ActionKind::Extort => ctx.extort_ok && ctx.dist.contains_key(&LocationKey::TargetHome),
-            ActionKind::SplitLoot => ctx.has_loot,
-            ActionKind::Fence => ctx.can_fence,
+            ActionKind::SplitLoot => ctx.has_loot && !ctx.hideout_sacked,
+            ActionKind::Fence => ctx.can_fence && !ctx.hideout_sacked,
+            ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::Hideout),
+            ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RivalHideout),
             ActionKind::Attack => ctx.hostile_adjacent,
             ActionKind::CarryCorpse => ctx.corpse_target,
             ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),
@@ -781,6 +812,8 @@ impl ActionKind {
                 }
             }
             ActionKind::Attack => n.threat_removed = true,
+            ActionKind::Muster => n.mustered = true,
+            ActionKind::Brawl => n.raid_done = true,
             ActionKind::CarryCorpse => {
                 n.carrying_corpse = true;
                 n.at = LocationKey::Street;
@@ -844,6 +877,8 @@ impl ActionKind {
             ActionKind::JoinGang => 6.0 + ctx.lawfulness * 15.0 - (1.0 - ctx.hunger) * 4.0,
             ActionKind::Extort => 6.0 + ctx.lawfulness * 12.0,
             ActionKind::SplitLoot => 2.0,
+            ActionKind::Muster => 1.0,
+            ActionKind::Brawl => 15.0,
             ActionKind::BuryCorpse => 2.0,
             ActionKind::CarryCorpse => 3.0,
             ActionKind::Wander => 1.0,

@@ -32,6 +32,8 @@ pub fn story_relevant(kind: ActionKind) -> bool {
             | ActionKind::Propose
             | ActionKind::JoinGang
             | ActionKind::Extort
+            | ActionKind::Muster
+            | ActionKind::Brawl
             | ActionKind::BuryCorpse
     )
 }
@@ -82,7 +84,10 @@ fn assign(world: &mut World) {
         // the map for the arrest path to reach them.
         let story =
             brain.current_step().is_some_and(|s| story_relevant(s.action)) || crate::systems::law::wanted(world, id);
-        let priority = i32::from(on_screen(pos.tile)) * 3 + i32::from(brain.pinned) * 2 + i32::from(story);
+        // Gang members are never Statistical: the hourly table has no orders,
+        // claims or raids, and two gangs fit inside the Coarse budget.
+        let gang = world.has::<crate::components::GangMember>(id);
+        let priority = i32::from(on_screen(pos.tile)) * 3 + i32::from(brain.pinned || gang) * 2 + i32::from(story);
         ranked.push((-priority, pos.tile.manhattan(centre), id.index, id));
     }
     ranked.sort_unstable();

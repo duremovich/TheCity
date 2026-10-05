@@ -30,8 +30,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Arrest => vec![(Key::SuspectJailed, true)],
         GoalKind::JoinGang => vec![(Key::InGang, true)],
         GoalKind::GangWork => vec![(Key::GangTaskDone, true)],
-        // Phase 2 of M8 gives Raid its goal state.
-        GoalKind::Raid => return None,
+        GoalKind::Raid => vec![(Key::RaidDone, true)],
         GoalKind::Bury => vec![(Key::CorpseBuried, true)],
         GoalKind::Idle => return None,
     })

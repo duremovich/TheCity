@@ -42,6 +42,12 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Fence | ActionKind::Attack => 15,
         ActionKind::CarryCorpse => 20,
         ActionKind::BuryCorpse => 60,
+        ActionKind::Muster => world
+            .gang_of(id)
+            .and_then(|g| world.comp::<crate::components::Gang>(g))
+            .and_then(|g| g.raid_at)
+            .map_or(0, |t| t.saturating_sub(world.tick)),
+        ActionKind::Brawl => 15,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -136,7 +142,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         | ActionKind::Extort
         | ActionKind::SplitLoot
         | ActionKind::Fence
-        | ActionKind::Attack => true,
+        | ActionKind::Attack
+        | ActionKind::Muster
+        | ActionKind::Brawl => true,
         _ => false,
     }
 }
@@ -223,6 +231,8 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind) -> bool {
         }
         // Waiting at the workplace for the shift: start the moment it begins.
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),
+        // The order changed: the muster breaks up (on_complete then fails the step).
+        ActionKind::Muster => crate::systems::raid::raid_done(world, id),
         _ => false,
     }
 }
@@ -502,6 +512,17 @@ pub fn on_complete(
             } else {
                 StepResult::Failed(FailReason::StockGone)
             }
+        }
+        ActionKind::Muster => {
+            if crate::systems::raid::depart(world, id) {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::PreconditionLost)
+            }
+        }
+        ActionKind::Brawl => {
+            crate::systems::raid::brawl(world, id);
+            StepResult::Done
         }
         ActionKind::Attack => {
             let Some(victim) = target else { return StepResult::Failed(FailReason::PartnerLeft) };

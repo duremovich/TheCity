@@ -15,6 +15,7 @@ pub mod law;
 pub mod lod;
 pub mod memory;
 pub mod plan;
+pub mod raid;
 pub mod social;
 pub mod stats;
 pub mod think;

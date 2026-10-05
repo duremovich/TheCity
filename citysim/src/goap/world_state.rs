@@ -39,6 +39,8 @@ pub enum LocationKey {
     Cemetery,
     Hall,
     Hideout,
+    /// The street tile outside the rival gang's Hideout door (raiders stop there).
+    RivalHideout,
     Warehouse,
     /// On a non-building tile.
     Street,
@@ -54,7 +56,7 @@ pub enum LocationKey {
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 14] = [
+    pub const GOTO: [LocationKey; 15] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -63,6 +65,7 @@ impl LocationKey {
         LocationKey::Cemetery,
         LocationKey::Hall,
         LocationKey::Hideout,
+        LocationKey::RivalHideout,
         LocationKey::Warehouse,
         LocationKey::Street,
         LocationKey::TargetHome,
@@ -106,6 +109,10 @@ pub enum Key {
     SuspectCuffed,
     InGang,
     GangTaskDone,
+    /// No raid is pending for the agent's gang.
+    RaidDone,
+    /// The gang's raid has departed (latecomers skip the muster).
+    Mustered,
     CorpseBuried,
     CarryingCorpse,
     CarryingStolen,
@@ -144,6 +151,8 @@ pub struct WorldState {
     pub suspect_cuffed: bool,
     pub in_gang: bool,
     pub gang_task_done: bool,
+    pub raid_done: bool,
+    pub mustered: bool,
     pub corpse_buried: bool,
     pub carrying_corpse: bool,
     pub carrying_stolen: bool,
@@ -175,6 +184,8 @@ impl WorldState {
             Key::SuspectCuffed => self.suspect_cuffed,
             Key::InGang => self.in_gang,
             Key::GangTaskDone => self.gang_task_done,
+            Key::RaidDone => self.raid_done,
+            Key::Mustered => self.mustered,
             Key::CorpseBuried => self.corpse_buried,
             Key::CarryingCorpse => self.carrying_corpse,
             Key::CarryingStolen => self.carrying_stolen,
@@ -265,6 +276,7 @@ impl WorldState {
                     .get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1))
                     .is_some_and(|&stop| pos.is_some_and(|p| p.building == Some(stop)))
         });
+        let rival_tile = crate::systems::raid::rival_hideout_tile(world, agent);
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
@@ -280,6 +292,7 @@ impl WorldState {
                 Some(bd) => LocationKey::of_building(bd.kind),
                 None => LocationKey::Street,
             },
+            None if rival_tile.is_some() && rival_tile == pos.map(|p| p.tile) => LocationKey::RivalHideout,
             None => LocationKey::Street,
         };
 
@@ -363,6 +376,8 @@ impl WorldState {
             suspect_cuffed: target.is_some_and(|t| world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_some())),
             in_gang: world.has::<GangMember>(agent),
             gang_task_done,
+            raid_done: crate::systems::raid::raid_done(world, agent),
+            mustered: crate::systems::raid::mustered(world, agent),
             corpse_buried: target.is_some_and(|t| world.comp::<Corpse>(t).is_some_and(|c| c.buried)),
             carrying_corpse: carrying,
             carrying_stolen: inv.stolen_food >= 1,

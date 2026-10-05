@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 15] = [
+pub const GOAL_ORDER: [GoalKind; 16] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -27,6 +27,7 @@ pub const GOAL_ORDER: [GoalKind; 15] = [
     GoalKind::Arrest,
     GoalKind::JoinGang,
     GoalKind::GangWork,
+    GoalKind::Raid,
     GoalKind::Bury,
     GoalKind::Idle,
 ];
@@ -117,6 +118,7 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                 || crate::systems::gang::extort_target(world, id).is_none()
         }
         GoalKind::JoinGang => !crate::systems::gang::eligible(world, id),
+        GoalKind::Raid => !world.has::<crate::components::GangMember>(id) || crate::systems::raid::raid_done(world, id),
         GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
         }),
@@ -387,15 +389,36 @@ pub fn considerations(
             let n = needs?;
             let p = pers?;
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
+            // The order tilts the day: a loyal member following orders scores
+            // 1.0 here, a freelancer 1 - order_weight. Hunger and fear still win.
+            let w = world.config.gangs.order_weight;
+            let target = crate::systems::gang::gang_work_target(world, id);
+            let following = target.is_some_and(|(_, o)| o.is_some());
             vec![
                 Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("greed", p.greed, Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("not in shift", can(!in_shift), gate_or(0.5)),
+                Consideration::new("no guard near target", can(target.is_some()), gate_or(0.2)),
                 Consideration::new(
-                    "no guard near target",
-                    can(crate::systems::gang::extort_target(world, id).is_some()),
-                    gate_or(0.2),
+                    "order",
+                    if following { p.loyalty } else { 0.0 },
+                    Curve::Linear { m: w, b: 1.0 - w },
                 ),
+            ]
+        }
+        GoalKind::Raid => {
+            world.comp::<crate::components::GangMember>(id)?;
+            let n = needs?;
+            let p = pers?;
+            let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
+            let called =
+                crate::systems::raid::raid_pending(world, id) && p.loyalty >= world.config.gangs.freelance_loyalty;
+            vec![
+                Consideration::new("muster called", can(called), GATE),
+                Consideration::new("courage", p.courage, Curve::Linear { m: 0.7, b: 0.3 }),
+                Consideration::new("loyalty", p.loyalty, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("U(safety)", urgency(n.safety), Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("not in shift", can(!in_shift), gate_or(0.5)),
             ]
         }
         GoalKind::Bury => {
@@ -428,8 +451,6 @@ pub fn considerations(
             ]
         }
         GoalKind::Idle => vec![Consideration::new("constant", 0.0, Curve::Step { t: 0.0, lo: 0.05, hi: 0.05 })],
-        // Phase 2 of M8 scores Raid.
-        GoalKind::Raid => return None,
     };
     Some((cs, flat))
 }

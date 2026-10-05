@@ -81,6 +81,8 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Court => crate::systems::social::court_target(world, id),
         // GangWork binds the Extort target per the Gang section.
         GoalKind::GangWork => crate::systems::gang::extort_target(world, id),
+        // Raid binds the rival Hideout (the inspector shows it as the plan target).
+        GoalKind::Raid => world.gang_of(id).and_then(|g| world.rival_of(g)).and_then(|r| world.hideout_of(r)),
         // Fight binds the hostile within 4, or the revenge subject.
         GoalKind::Fight => {
             let tile = world.comp::<Position>(id)?.tile;
@@ -167,6 +169,9 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         }
     }
     let target = bind_target(world, id, goal);
+    if goal == GoalKind::GangWork {
+        crate::systems::gang::note_gang_work(world, id);
+    }
     let ctx = PlanCtx::build(world, id, target);
     let start = WorldState::observe(world, id, target);
     // A shift is worked even when today's wage trip is blocked (short payment
