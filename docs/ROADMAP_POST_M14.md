@@ -354,3 +354,9 @@ Folded into the sketches above rather than a milestone of their own:
 - **Intel** (M15/M16): a target's routine is a pattern in their Trace and Life, obtainable as Data; "frequents X" is the ambush hook.
 - **Tiered security** (M12 private security, M13 chrome tiers, M14 ICE, M16): a `Security` profile per building (sensor, lock, guard, ICE tiers) set by the owner's brain as a spend proportional to the asset value inside; one tier-contest rule shared by stealth/sensor, lockpick/lock, deck/ICE, armour/weapon; every skill has a counter; cheap security is bribable.
 - **Bunkers and escape** (M17/M18): a bunker is a hardened owned building that can still be traced; sensors and minions warn; the escape plan is a goal.
+
+## Addendum 8 (2026-10-05, Dylan): inventory, loot, the wounded
+
+- **Inventory** (M13): capacity from gear (backpacks) and strength; storage and safe houses beyond it.
+- **Loot** (M13/M16): the Wallet and gear stay on the Corpse until taken; a `Loot` goal for scavengers and the desperate; a body is a contested target settled by the fight rules; allies hold a `Guard the body` goal, the start of a revenge chain.
+- **Wounded and rescue** (M16 combat): a `Wounded` state between standing and dead; a `Rescue` goal gated by a faction temperament trait (scavs abandon, corps and the law recover, gangs by loyalty); a `Clinic` kind that sells treatment (the M13 Ripperdoc is one); Trauma Team as a Security-niche contract on a person, located by the subscriber's last sighting.
