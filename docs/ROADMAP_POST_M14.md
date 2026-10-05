@@ -326,3 +326,11 @@ Folded into the sketches above rather than a milestone of their own:
 - **Bounties and tags** (M16 contracts): a contract whose deliverable is a sighting stream; tracking tags as sensors on a person; scanners detect tags.
 - **Hit squads** (M16, M12 territory): a raid on a person, target tile from the freshest sighting, gated on who controls the territory, relative strength and the political cost with that faction; or the territory's faction is hired to deliver the target.
 
+## Addendum 4 (2026-10-05, Dylan): brutality, enhancement, status
+
+- **Permadeath default, per-world options** (M18): the player's Death ends the save unless the world option says otherwise; no sim change.
+- **Hazards and reflexes** (M13 vehicles, M14 ICE, M16 combat): a `reflex` stat and implants give auto-dodge / slowed-time rolls against cars, bullets and ICE; combat stays rolls and targeting for the player too.
+- **Cyberpsychosis and addiction** (M13): per-agent `sanity` and `addiction` driven by chrome count and stim use; treatment purchasable; Berserk and Withdrawal outcomes feed the violence tables; poor chromed gangs devolve.
+- **Unequal tiered economy** (M11 onward): wealth seeded by tier and kept unequal by rent and wages; a few hold most of it.
+- **Status and dress** (M15): an `appearance` vector (dress tier, visible chrome, faction colours) read by social moves with per-faction taste; blend in, pass security, unlock dialogue; anti-tech religious factions avoid the chromed.
+

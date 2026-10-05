@@ -111,3 +111,17 @@ Design implications, all of which generalise things the sim already has:
 | Stealth | — | an identification roll per sensor that the target's stealth tech and the sensor's quality decide |
 
 The data model is the point: nobody in the sim knows where anyone is except through sightings, and the player's safety is the difference between what the factions know and where the player is.
+
+## Brutality, enhancement and status (added 2026-10-05, Dylan)
+
+**The world is brutal**, like Kenshi. You start as a poor nobody and the world will absolutely kill you; **permadeath is the default**, with custom options per world. You learn how dangerous the world is by exploration and by dying. Hack a megacorp without proper protection and its ICE fries your brain instantly. At first most people can kill you easily; step into a crosswalk during an unrelated car chase and you may be run over in the first five minutes. Reflex stats and good implants save you: auto-dodging cars and bullets, or slowing time so you can react.
+
+**Combat is rolls and targeting, not direct control**, for the player character as for everyone else. The player picks targets and stances; the sim rolls, as `law::resolve_fight` does today.
+
+**Cyberpsychosis and addiction.** How you and NPCs enhance themselves has a cost: implants push toward cyberpsychosis, stims toward addiction. With money these are treated. Poor gangs that chrome up often devolve into violence and lose members to insanity.
+
+**A deeply unequal, tiered economy.** A few hold the majority of wealth and power; the mass of the populace fights over scraps. Carving out a piece of the power is the challenge.
+
+**Status, dress and faction.** The luxury status of clothing and cyberware changes how characters react to you and to each other, and it changes by faction. Dressing like a faction helps you blend in, pass some levels of security, or unlock dialogue. A snooty high-society type will not talk to a Mad Max-looking individual, but reacts warmly to the same person in a very expensive suit. Religious factions that hate technology avoid anyone with implants.
+
+Design implications: a `Death` for the player is a save-ending event by default with a per-world option (the sim side needs nothing: the player is one more agent); a `reflex` stat and a hazard roll per dangerous tile event (vehicles, M13; combat; ICE, M14); stability per agent (`sanity`/`addiction`) driven by chrome count and stim use, with treatment as a purchasable service and a `Berserk`/`Withdrawal` outcome feeding the violence tables; seed wealth by tier (Spire, Mid, Sump) and let rent and wages keep it unequal (M11); `appearance` as a per-agent vector (dress tier, visible chrome, faction colours) read by every social move alongside reputation, with per-faction taste (M15); anti-tech religious factions as a faction type with a tolerance rule (M12 districts, M15).
