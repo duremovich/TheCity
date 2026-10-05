@@ -145,7 +145,8 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         match world.comp::<Job>(id) {
             Some(j) => {
                 let at = j.employer.map_or("nowhere".to_string(), |e| building_label(world, e));
-                ui.label(format!("{} @ {at} · wage {}/day", j.role, j.wage_per_day));
+                let captain = if world.law().is_some_and(|l| l.captain == Some(id)) { " · captain" } else { "" };
+                ui.label(format!("{} @ {at} · wage {}/day{captain}", j.role, j.wage_per_day));
             }
             None => {
                 ui.label("No job");

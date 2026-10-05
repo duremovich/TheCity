@@ -1,6 +1,6 @@
 //! Save/load round trip.
 
-use citysim::{save, BuildingKind, Config, PlayerCommand, World};
+use citysim::{save, BuildingKind, Config, PlayerCommand, World, TICKS_PER_DAY};
 
 #[test]
 fn test_save_load_bit_identical() {
@@ -106,6 +106,49 @@ fn test_legacy_save_without_gangs_config_loads() {
         Some(citysim::Claim { gang: gangs[0], count: 3 }),
         "held territory gets a full claim"
     );
+}
+
+/// Drop one `field:[...]` (and its trailing comma) from compact RON.
+fn strip_list_field(text: &str, token: &str) -> String {
+    let start = text.find(token).unwrap_or_else(|| panic!("{token} not in save"));
+    let open = start + token.find('[').expect("token holds the opening bracket");
+    let mut depth = 0usize;
+    let mut end = open;
+    for (i, ch) in text[open..].char_indices() {
+        match ch {
+            '[' => depth += 1,
+            ']' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = open + i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = if text[end..].starts_with(',') { end + 1 } else { end };
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// A save from before M9 has no `[law]` config and no `law` store: loading
+/// one reads the config from the assets and puts a default `Law` on the Jail.
+#[test]
+fn test_legacy_save_without_law_loads() {
+    let mut w = World::new(13, Config::load());
+    w.run_ticks(100);
+    let text = save::to_ron(&w);
+    let text = strip_field(&text, "law:(window_days");
+    let text = strip_list_field(&text, "law:[");
+    assert!(!text.contains("law:["), "the law store is stripped");
+    let back = save::from_ron(&text).expect("a pre-M9 save loads");
+    assert_eq!(back.config.law.window_days, w.config.law.window_days);
+    let law = back.law().expect("a default Law on the Jail");
+    assert_eq!(law.posture, citysim::Posture::Patrol);
+    assert_eq!(back.law.len(), back.alive.len(), "the store covers every entity");
+    let mut back = back;
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.law().is_some_and(|l| l.captain.is_some()), "the captain is found at the first midnight");
 }
 
 /// M9 renamed `LocationKey::RivalHideout` to `RaidTarget`; a save taken

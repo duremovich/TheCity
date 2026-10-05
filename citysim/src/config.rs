@@ -24,6 +24,9 @@ pub struct Config {
     /// Absent from pre-M8 saves: read from the assets on this machine instead.
     #[serde(default = "GangsCfg::from_assets")]
     pub gangs: GangsCfg,
+    /// M9; absent from pre-M9 saves likewise.
+    #[serde(default = "LawCfg::from_assets")]
+    pub law: LawCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -312,6 +315,48 @@ impl OrderFlatCfg {
     fn default_breakout() -> f32 {
         0.2
     }
+}
+
+/// The law as a faction (M9, `docs/M9_LAW.md`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct LawCfg {
+    /// Reports against gang members counted for pressure.
+    pub window_days: u64,
+    /// Reports in the window that read as full pressure.
+    pub crackdown_reports: u32,
+    /// A jailbreak holds the Jail this long.
+    pub garrison_days: u64,
+    pub hysteresis: f32,
+    pub shock_severity_rethink: f32,
+    /// Crackdown and Garrison need this many guards on the payroll.
+    pub min_guards: usize,
+    /// Captain lawfulness at or above this refuses bribes.
+    pub incorruptible: f32,
+    /// A bribe costs `bribe_base + bribe_per_guard x guards`.
+    pub bribe_base: i64,
+    pub bribe_per_guard: i64,
+    /// A bribe (taken or refused) holds for this long.
+    pub bribe_days: u64,
+    /// The gang pays when its bribe score reaches this.
+    pub bribe_threshold: f32,
+    pub posture_flat: PostureFlatCfg,
+}
+
+impl LawCfg {
+    /// The `[law]` block of `assets/config.toml`, for saves written before it existed.
+    pub fn from_assets() -> LawCfg {
+        let dir = Config::find_assets_dir()
+            .unwrap_or_else(|| panic!("assets/config.toml not found; set CITYSIM_ASSETS or run from the repo"));
+        Config::load_from(&dir).law
+    }
+}
+
+/// Flat terms added to each posture's product of considerations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct PostureFlatCfg {
+    pub patrol: f32,
+    pub crackdown: f32,
+    pub garrison: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

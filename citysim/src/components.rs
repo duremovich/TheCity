@@ -366,6 +366,91 @@ pub struct OrderScore {
     pub considerations: Vec<Consideration>,
 }
 
+/// M9: the law's posture, chosen by the captain (`systems::law_brain`).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
+pub enum Posture {
+    /// The v1 routine: half the guards hold the Jail, half walk the loop.
+    #[default]
+    Patrol,
+    /// Patrol loops through the target gang's turf; one guard in three holds the Jail.
+    Crackdown,
+    /// Every guard holds the Jail.
+    Garrison,
+}
+
+impl Posture {
+    pub const ALL: [Posture; 3] = [Posture::Patrol, Posture::Crackdown, Posture::Garrison];
+}
+
+impl fmt::Display for Posture {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+/// M9: something that happened to the law since its last rescoring.
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum LawShock {
+    /// Convicts were broken out of the Jail.
+    Jailbreak,
+    GuardKilled,
+    /// A guard lost a fight (a contested arrest, a breach).
+    GuardBeaten,
+    BribeRefused,
+}
+
+impl LawShock {
+    pub fn severity(self) -> f32 {
+        match self {
+            LawShock::Jailbreak => 1.0,
+            LawShock::GuardKilled => 0.8,
+            LawShock::GuardBeaten => 0.4,
+            LawShock::BribeRefused => 0.5,
+        }
+    }
+}
+
+/// One posture's score from the last rescoring, for the Jail panel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PostureScore {
+    pub posture: Posture,
+    pub score: f32,
+    pub considerations: Vec<Consideration>,
+}
+
+/// M9: the law as a faction. One per city, on the Jail building.
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct Law {
+    #[serde(default)]
+    pub posture: Posture,
+    #[serde(default)]
+    pub posture_since: Tick,
+    /// The gang a Crackdown is against.
+    #[serde(default)]
+    pub target: Option<EntityId>,
+    /// The most lawful guard; decides the posture.
+    #[serde(default)]
+    pub captain: Option<EntityId>,
+    /// The player's pin; `None` = the captain decides.
+    #[serde(default)]
+    pub pinned: Option<Posture>,
+    /// The last breakout that freed convicts.
+    #[serde(default)]
+    pub last_breakout_tick: Option<Tick>,
+    /// A refused bribe hardens the crackdown until here.
+    #[serde(default)]
+    pub hardened_until: Option<Tick>,
+    /// `(tick, gang)` per report filed against a gang member, newest last, capped.
+    #[serde(default)]
+    pub report_log: VecDeque<(Tick, EntityId)>,
+    /// Every posture's score from the last rescoring, best first. Not saved.
+    #[serde(skip)]
+    pub posture_trace: Vec<PostureScore>,
+    /// Pending since the last rescoring. Not saved.
+    #[serde(skip)]
+    pub shocks: Vec<LawShock>,
+}
+
 /// A gang's hold on a Home: `count` extortions by `gang`; at 3 the Home is territory.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct Claim {

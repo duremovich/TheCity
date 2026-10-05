@@ -86,6 +86,9 @@ pub struct World {
     pub gang: Vec<Option<Gang>>,
     pub market: Vec<Option<Market>>,
     pub treasury: Vec<Option<Treasury>>,
+    /// M9: on the Jail. Absent from older saves; `migrate_legacy` fills it.
+    #[serde(default)]
+    pub law: Vec<Option<Law>>,
     // graph + blackboard
     pub edges: BTreeMap<(EntityId, EntityId), Edge>,
     pub crime_reports: Vec<CrimeReport>,
@@ -127,6 +130,8 @@ pub struct World {
     #[serde(skip)]
     pub names: NameTables,
 }
+
+use crate::components::{Law, LawShock};
 
 /// Wire every component store: the `Component` impl, plus `grow`/`clear`
 /// so spawn/despawn can never miss a store.
@@ -170,6 +175,7 @@ components! {
     gang: Gang,
     market: Market,
     treasury: Treasury,
+    law: Law,
 }
 
 /// First/last name tables from `assets/names.txt`.
@@ -264,6 +270,7 @@ impl World {
             gang: Vec::new(),
             market: Vec::new(),
             treasury: Vec::new(),
+            law: Vec::new(),
             edges: BTreeMap::new(),
             crime_reports: Vec::new(),
             buildings_by_kind: BTreeMap::new(),
@@ -339,6 +346,7 @@ impl World {
                     let coins = self.config.world.treasury_initial;
                     self.insert(id, Treasury { coins });
                 }
+                BuildingKind::Jail => self.insert(id, Law::default()),
                 _ => {}
             }
             self.buildings_by_kind.entry(def.kind).or_default().push(id);
@@ -527,6 +535,15 @@ impl World {
 
     pub fn treasury_mut(&mut self) -> Option<&mut Treasury> {
         self.building_of_kind(BuildingKind::Hall).and_then(|id| self.comp_mut::<Treasury>(id))
+    }
+
+    /// M9: the law, on the Jail.
+    pub fn law(&self) -> Option<&Law> {
+        self.building_of_kind(BuildingKind::Jail).and_then(|id| self.comp::<Law>(id))
+    }
+
+    pub fn law_mut(&mut self) -> Option<&mut Law> {
+        self.building_of_kind(BuildingKind::Jail).and_then(|id| self.comp_mut::<Law>(id))
     }
 
     /// Every gang, ascending by id (map order of their Hideouts).
@@ -793,6 +810,16 @@ impl World {
     /// only, and every held Home gets a full claim. A gang that already has a
     /// Hideout is left alone: its claims are live state.
     pub fn migrate_legacy(&mut self) {
+        // M9: a save from before the law had a brain has no `law` store.
+        let n = self.alive.len();
+        if self.law.len() < n {
+            self.law.resize_with(n, || None);
+        }
+        if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
+            if !self.has::<Law>(jail) {
+                self.insert(jail, Law::default());
+            }
+        }
         let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
         for (i, gang) in self.gangs().into_iter().enumerate() {
             let Some(g) = self.comp::<Gang>(gang) else { continue };
@@ -911,6 +938,9 @@ impl World {
         // Witnesses, grief, widowhood and inheritance read the living state.
         systems::demography::on_death(self, id);
         crate::systems::social::on_death(self, id);
+        if systems::law::is_guard(self, id) {
+            systems::law_brain::push_shock(self, LawShock::GuardKilled);
+        }
         self.vacate_job(id);
         self.remove_from_building(id);
         if self.has::<GangMember>(id) {

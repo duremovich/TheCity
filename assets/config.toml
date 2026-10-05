@@ -194,6 +194,29 @@ retaliate = 0.6
 lielow = 0.15
 breakout = 0.2
 
+# M9: the law as a faction (docs/M9_LAW.md). A captain (the most lawful guard) scores Patrol,
+# Crackdown (on the most-reported gang: patrol loops through its turf, one guard in three holds the
+# Jail) and Garrison (every guard holds the Jail) daily and on shocks.
+[law]
+window_days = 7
+crackdown_reports = 6
+garrison_days = 7
+hysteresis = 0.10
+shock_severity_rethink = 0.5
+min_guards = 2
+incorruptible = 0.8
+bribe_base = 10
+bribe_per_guard = 1
+bribe_days = 10
+bribe_threshold = 0.35
+
+# Patrol's 0.2 keeps it the resting posture; Crackdown earns its place from pressure alone (+0.3
+# while a refused bribe hardens it); Garrison's 0.05 (+0.5 for a week after a jailbreak).
+[law.posture_flat]
+patrol = 0.2
+crackdown = 0.0
+garrison = 0.05
+
 [demography]
 birth_p_per_day = 0.004
 old_age_days = 10800

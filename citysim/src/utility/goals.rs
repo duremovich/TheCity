@@ -344,7 +344,7 @@ pub fn considerations(
             }
             let n = needs?;
             let key = job.next_shift_key(world.tick);
-            let patrol_day = !crate::systems::law::jail_day(id, key);
+            let patrol_day = !crate::systems::law::jail_duty(world, id, key);
             let legs_left =
                 world.comp::<Brain>(id).is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift);
             let on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;

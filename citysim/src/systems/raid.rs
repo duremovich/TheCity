@@ -183,6 +183,8 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let (_, deaths) = fight_out(world, &mut raiders, &mut defenders, door, "the Jail");
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
+    // Guards beaten and still alive (the dead shocked the law as they fell).
+    let beaten = n_defenders - defenders.len() - deaths.min(n_defenders - defenders.len());
 
     let mut freed = Vec::new();
     if outcome == Outcome::Won {
@@ -228,7 +230,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
             freed.len()
         ),
     );
-    crate::systems::law::on_breakout(world, gid, outcome == Outcome::Won);
+    crate::systems::law::on_breakout(world, gid, outcome == Outcome::Won, beaten);
     faction::rethink(world, gid);
     Some(outcome)
 }

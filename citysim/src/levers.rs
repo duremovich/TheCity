@@ -4,7 +4,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::components::{Brain, Building, BuildingKind, Household, Position, Rect, TileKind, TilePos, Wallet};
+use crate::components::{Brain, Building, BuildingKind, Household, Position, Posture, Rect, TileKind, TilePos, Wallet};
 use crate::config::Config;
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -37,6 +37,8 @@ pub enum PlayerCommand {
     SetDolePerDay(u8),
     /// App-only; logged so replays know the speed, no sim effect.
     SetSpeed(Speed),
+    /// M9: pin the law's posture, or (`None`) hand it back to the captain.
+    SetLawPosture(Option<Posture>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -169,6 +171,20 @@ impl World {
                 self.view_rect = *rect;
             }
             PlayerCommand::SetSpeed(_) => {}
+            PlayerCommand::SetLawPosture(p) => {
+                if let Some(l) = self.law_mut() {
+                    l.pinned = *p;
+                } else {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetLawPosture: no Jail");
+                    return;
+                }
+                crate::systems::law_brain::rescore(self, 0.0, "pinned");
+                let text = match p {
+                    Some(p) => format!("Law posture pinned to {p}"),
+                    None => "Law posture handed back to the captain".to_string(),
+                };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
             PlayerCommand::Arrest(who) => match crate::systems::law::player_arrest(self, *who) {
                 Ok(()) => {
                     let name = self.name_of(*who);

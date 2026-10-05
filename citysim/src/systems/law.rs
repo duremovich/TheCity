@@ -5,8 +5,8 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, Lod, MemoryKind, Needs, Personality, Position,
-    Role, Sentence, Skills, TilePos,
+    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, LawShock, Lod, MemoryKind, Needs, Personality,
+    Position, Posture, Role, Sentence, Skills, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -149,6 +149,7 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
     world.crime_reports.push(CrimeReport { crime, suspect, witness, tick, resolved: false });
     let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
     world.push_event(EventKind::Report, &[suspect], format!("{who} reported {} for {crime:?}", world.name_of(suspect)));
+    crate::systems::law_brain::log_report(world, suspect);
 }
 
 /// The open report on `suspect` whose sighting is freshest, if located.
@@ -256,6 +257,7 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
                 &[suspect, guard],
                 format!("{} fought off {}", world.name_of(suspect), world.name_of(guard)),
             );
+            crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
             return false;
         }
     }
@@ -468,17 +470,35 @@ pub fn escape(world: &mut World, who: EntityId) {
     crate::systems::gang::on_member_released(world, who);
 }
 
-/// M9: a gang stormed the Jail (`won`: convicts were freed). The law's own
-/// reaction (shocks, the Garrison posture) arrives with its brain.
-pub fn on_breakout(world: &mut World, _gang: EntityId, won: bool) {
-    let _ = (world, won);
+/// M9: a gang stormed the Jail. `won`: convicts were freed, which is the
+/// shock that garrisons the Jail; `beaten` guards lost their fight.
+pub fn on_breakout(world: &mut World, _gang: EntityId, won: bool, beaten: usize) {
+    for _ in 0..beaten {
+        crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
+    }
+    if won {
+        let now = world.tick;
+        if let Some(l) = world.law_mut() {
+            l.last_breakout_tick = Some(now);
+        }
+        crate::systems::law_brain::push_shock(world, LawShock::Jailbreak);
+    }
 }
 
-/// M9: is every guard holding the Jail (`Posture::Garrison`)? Until the
-/// law has a brain, never.
+/// M9: is every guard holding the Jail (`Posture::Garrison`)?
 pub fn garrisoned(world: &World) -> bool {
-    let _ = world;
-    false
+    world.law().is_some_and(|l| l.posture == Posture::Garrison)
+}
+
+/// M9: does this guard hold the Jail on the shift `shift_key`? Patrol: the
+/// v1 split (`jail_day`); Crackdown: one in three; Garrison: everyone. A
+/// Crackdown with nobody to crack down on is a Patrol.
+pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
+    match world.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target)) {
+        (Posture::Garrison, _) => true,
+        (Posture::Crackdown, Some(_)) => i64::from(guard.index % 3) == shift_key.rem_euclid(3),
+        _ => jail_day(guard, shift_key),
+    }
 }
 
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.
@@ -490,6 +510,8 @@ pub fn run(world: &mut World) {
         jail_upkeep(world);
         reconcile_guards(world);
     }
+    // The captain's daily rescoring, after the guard roster is reconciled.
+    crate::systems::law_brain::run(world);
     releases(world);
 }
 
@@ -535,6 +557,7 @@ pub fn reconcile_guards(world: &mut World) {
             world.push_event(EventKind::Fire, &[g], format!("{name} dismissed from the guard"));
         }
     }
+    crate::systems::law_brain::recompute_captain(world);
 }
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.
@@ -658,8 +681,15 @@ pub fn jail_day(guard: EntityId, shift_key: i64) -> bool {
     i64::from(guard.index % 2) == shift_key.rem_euclid(2)
 }
 
-/// The next patrol route: `[Market, Bar, Hall, Home(rng), Home(rng)]`.
+/// The next patrol route: `[Market, Bar, Hall, Home(rng), Home(rng)]`. Under
+/// a Crackdown: `[Market, Home(t), Home(t), Hideout(t), Home(t)]`, the Homes
+/// drawn from the target gang's territory (or, with fewer than three held,
+/// from the six inhabited Homes nearest its Hideout).
 pub fn new_patrol_route(world: &mut World) -> Vec<EntityId> {
+    let target = world.law().filter(|l| l.posture == Posture::Crackdown).and_then(|l| l.target);
+    if let Some(gang) = target.filter(|&g| world.has::<crate::components::Gang>(g)) {
+        return crackdown_route(world, gang);
+    }
     let mut route = Vec::new();
     for kind in [BuildingKind::Market, BuildingKind::Bar, BuildingKind::Hall] {
         if let Some(b) = world.building_of_kind(kind) {
@@ -676,10 +706,55 @@ pub fn new_patrol_route(world: &mut World) -> Vec<EntityId> {
     route
 }
 
+/// The turf a Crackdown patrols: the gang's territory, or the six inhabited
+/// Homes nearest its Hideout while it holds fewer than three.
+pub fn crackdown_turf(world: &World, gang: EntityId) -> Vec<EntityId> {
+    let Some(g) = world.comp::<crate::components::Gang>(gang) else { return Vec::new() };
+    if g.territory.len() >= 3 {
+        return g.territory.clone();
+    }
+    let Some(door) = world.comp::<Building>(g.hideout).map(|b| b.door) else { return Vec::new() };
+    let mut homes: Vec<(u32, EntityId)> = world
+        .buildings_by_kind
+        .get(&BuildingKind::Home)
+        .map(|v| v.as_slice())
+        .unwrap_or(&[])
+        .iter()
+        .copied()
+        .filter_map(|h| world.comp::<Building>(h).map(|b| (h, b)))
+        .filter(|(_, b)| !b.demolished && !b.occupants.is_empty())
+        .map(|(h, b)| (b.door.manhattan(door), h))
+        .collect();
+    homes.sort();
+    homes.into_iter().take(6).map(|(_, h)| h).collect()
+}
+
+fn crackdown_route(world: &mut World, gang: EntityId) -> Vec<EntityId> {
+    let turf = crackdown_turf(world, gang);
+    let hideout = world.hideout_of(gang);
+    let mut route = Vec::new();
+    if let Some(m) = world.building_of_kind(BuildingKind::Market) {
+        route.push(m);
+    }
+    let pick = |world: &mut World| {
+        if !turf.is_empty() {
+            let i = world.rng.world().random_range(0..turf.len());
+            Some(turf[i])
+        } else {
+            None
+        }
+    };
+    route.extend(pick(world));
+    route.extend(pick(world));
+    route.extend(hideout);
+    route.extend(pick(world));
+    route
+}
+
 /// The action a guard's shift uses today.
 pub fn guard_duty_action(world: &World, guard: EntityId) -> ActionKind {
     let key = world.comp::<Job>(guard).map_or(0, |j| j.next_shift_key(world.tick));
-    if jail_day(guard, key) {
+    if jail_duty(world, guard, key) {
         ActionKind::GuardJail
     } else {
         ActionKind::PatrolLeg

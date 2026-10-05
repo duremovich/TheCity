@@ -177,9 +177,9 @@ Inputs:
 
 | Posture | Considerations |
 | --- | --- |
-| Patrol | `1 − pressure` → Linear{0.5,0.5}; `1 − jailed_gang` → Linear{0.5,0.5}; flat `posture_flat.patrol` |
+| Patrol | `1 − pressure` → Linear{0.6,0.4}; `1 − jailed_gang` → Linear{0.5,0.5}; flat `posture_flat.patrol` |
 | Crackdown | `Can(wanted_gang ∧ guards ≥ min_guards)` → GATE; `pressure` → Logistic{8,0.5}; `C.courage` → Linear{0.5,0.5}; `C.lawfulness` → Linear{0.5,0.5}; flat `posture_flat.crackdown`, +0.3 while `hardened` |
-| Garrison | `Can(guards ≥ min_guards)` → GATE; `jailed_gang` → Logistic{8,0.3}; `1 − C.courage` → Linear{0.4,0.6}; flat `posture_flat.garrison`, +0.5 while `breakout_recent` |
+| Garrison | `Can(guards ≥ min_guards)` → GATE; `threat` (1 while `breakout_recent`, else `jailed_gang`) → Logistic{8,0.3}; `1 − C.courage` → Linear{0.4,0.6}; flat `posture_flat.garrison`, +0.5 while `breakout_recent` |
 
 A change logs `Posture` with both postures, the target gang and the reason (daily / shock / pinned). `report_log` is fed by `file_report` whenever the suspect is a gang member.
 

@@ -19,6 +19,8 @@ pub struct CityState {
     pub guard_count: u8,
     pub immigration_per_week: u8,
     pub dole_per_day: u8,
+    /// M9: `None` = the captain decides.
+    pub law_pin: Option<citysim::Posture>,
     pub release_amount: u32,
     pub build_rect: Rect,
     pub synced: bool,
@@ -32,6 +34,7 @@ impl Default for CityState {
             guard_count: 10,
             immigration_per_week: 2,
             dole_per_day: 3,
+            law_pin: None,
             release_amount: 500,
             build_rect: Rect { x: 40, y: 40, w: 5, h: 4 },
             synced: false,
@@ -51,6 +54,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.guard_count = world.levers.guard_count;
         app.city.immigration_per_week = world.levers.immigration_per_week;
         app.city.dole_per_day = world.levers.dole_per_day;
+        app.city.law_pin = world.law().and_then(|l| l.pinned);
         app.city.synced = true;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -94,6 +98,23 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 ui.label(format!("{}", g.treasury));
                 let order = if g.is_sacked(world.tick) { "sacked".to_string() } else { g.order.to_string() };
                 ui.label(order);
+                ui.end_row();
+            }
+            if let Some(law) = world.law() {
+                if ui.link(egui::RichText::new("The Law").color(Color32::from_rgb(120, 170, 220))).clicked() {
+                    app.selected = world.building_of_kind(BuildingKind::Jail);
+                    app.follow = false;
+                }
+                let guards = citysim::systems::law_brain::guards(world).len();
+                ui.label(format!("{guards}"));
+                ui.label("");
+                ui.label(format!("{}", world.treasury().map_or(0, |t| t.coins)));
+                let on = law
+                    .target
+                    .and_then(|g| world.comp::<citysim::Gang>(g))
+                    .map_or(String::new(), |g| format!(" on {}", g.name));
+                let pin = if law.pinned.is_some() { " (pinned)" } else { "" };
+                ui.label(format!("{}{on}{pin}", law.posture));
                 ui.end_row();
             }
         });
@@ -157,6 +178,16 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         ui.add(egui::Slider::new(&mut c.guard_count, 0..=30).text("guards"));
         ui.add(egui::Slider::new(&mut c.immigration_per_week, 0..=10).text("immigrants / week"));
         ui.add(egui::Slider::new(&mut c.dole_per_day, 0..=10).text("dole / day"));
+        ui.horizontal(|ui| {
+            ui.label("law posture");
+            let name = |p: Option<citysim::Posture>| p.map_or("Auto (captain)".to_string(), |p| p.to_string());
+            egui::ComboBox::from_id_salt("law_pin").selected_text(name(c.law_pin)).show_ui(ui, |ui| {
+                ui.selectable_value(&mut c.law_pin, None, name(None));
+                for p in citysim::Posture::ALL {
+                    ui.selectable_value(&mut c.law_pin, Some(p), name(Some(p)));
+                }
+            });
+        });
         if ui.button("Apply levers").clicked() {
             let l = &world.levers;
             if (c.tax_rate - l.tax_rate).abs() > 1e-4 {
@@ -173,6 +204,9 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
             if c.dole_per_day != l.dole_per_day {
                 app.cmds.push(PlayerCommand::SetDolePerDay(c.dole_per_day));
+            }
+            if c.law_pin != world.law().and_then(|l| l.pinned) {
+                app.cmds.push(PlayerCommand::SetLawPosture(c.law_pin));
             }
         }
         ui.horizontal(|ui| {

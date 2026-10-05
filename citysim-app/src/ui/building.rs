@@ -259,7 +259,90 @@ fn price_history(ui: &mut Ui, m: &Market) {
     ui.small(format!("{} days · max {max:.0}", prices.len()));
 }
 
+fn law_section(ui: &mut Ui, app: &mut App, world: &World) {
+    let Some(law) = world.law() else { return };
+    let now = world.tick;
+    let days = |t: u64| t as f32 / TICKS_PER_DAY as f32;
+    section(ui, "The Law", |ui| {
+        let target = law.target.and_then(|g| world.comp::<Gang>(g)).map(|g| g.name.clone());
+        let on = target.map_or(String::new(), |t| format!(" on {t}"));
+        ui.colored_label(
+            egui::Color32::from_rgb(120, 170, 220),
+            format!(
+                "Posture {}{on} since day {} ({:.1} d)",
+                law.posture,
+                time::day(law.posture_since),
+                days(now.saturating_sub(law.posture_since))
+            ),
+        );
+        if let Some(p) = law.pinned {
+            ui.colored_label(GOLD, format!("pinned to {p} by the player"));
+        }
+        ui.horizontal(|ui| match law.captain {
+            Some(c) => {
+                ui.label("Captain");
+                agent_link(ui, app, world, c);
+                if let Some(p) = world.comp::<citysim::Personality>(c) {
+                    ui.label(format!(
+                        "lawfulness {:.2} · greed {:.2} · courage {:.2}",
+                        p.lawfulness, p.greed, p.courage
+                    ));
+                }
+            }
+            None => {
+                ui.colored_label(RED, "No captain: no guards");
+            }
+        });
+        let reports = citysim::systems::law_brain::reports_by_gang(world);
+        let mut parts: Vec<String> = Vec::new();
+        for (g, n) in &reports {
+            if let Some(gg) = world.comp::<Gang>(*g) {
+                parts.push(format!("{} {n}", gg.name));
+            }
+        }
+        ui.label(format!(
+            "reports in {} days: {}",
+            world.config.law.window_days,
+            if parts.is_empty() { "none".to_string() } else { parts.join(" · ") }
+        ));
+        if let Some(t) = law.last_breakout_tick {
+            ui.colored_label(RED, format!("last jailbreak day {} ({:.1} d ago)", time::day(t), days(now - t)));
+        }
+        if let Some(t) = law.hardened_until.filter(|&t| t > now) {
+            ui.label(format!("a refused bribe hardens the crackdown for {:.1} d", days(t - now)));
+        }
+        for gid in world.gangs() {
+            if let Some(g) = world.comp::<Gang>(gid) {
+                if let Some(t) = g.bribe_until.filter(|&t| t > now) {
+                    ui.label(format!("{}: no crackdown for {:.1} d (bribe)", g.name, days(t - now)));
+                }
+            }
+        }
+    });
+    section(ui, "Posture trace", |ui| {
+        if law.posture_trace.is_empty() {
+            ui.label("no rescoring yet");
+        }
+        for s in &law.posture_trace {
+            egui::CollapsingHeader::new(format!("{}  {:.3}", s.posture, s.score))
+                .default_open(s.posture == law.posture)
+                .show(ui, |ui| {
+                    egui::Grid::new(format!("posture-{}", s.posture)).striped(true).show(ui, |ui| {
+                        for c in &s.considerations {
+                            ui.label(&c.name);
+                            ui.label(format!("{:.3}", c.input));
+                            ui.label("->");
+                            ui.label(format!("{:.3}", c.output));
+                            ui.end_row();
+                        }
+                    });
+                });
+        }
+    });
+}
+
 fn jail(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    law_section(ui, app, world);
     let capacity = world.config.buildings.jail.capacity;
     let mut inmates: Vec<(EntityId, &Sentence)> =
         world.with::<Sentence>().into_iter().filter_map(|a| world.comp::<Sentence>(a).map(|s| (a, s))).collect();
@@ -285,10 +368,14 @@ fn jail(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 ui.label(format!("{:?}", s.crime));
                 let left = s.until_tick.saturating_sub(world.tick) as f32 / TICKS_PER_DAY as f32;
                 ui.label(format!("day {} ({left:.1}d)", time::day(s.until_tick)));
-                if world.has::<GangMember>(a) {
-                    ui.colored_label(PURPLE, "gang");
-                } else {
-                    ui.label("");
+                match world.gang_of(a).and_then(|g| world.comp::<Gang>(g)) {
+                    Some(g) => {
+                        let boss = if g.boss == Some(a) { " (boss)" } else { "" };
+                        ui.colored_label(PURPLE, format!("{}{boss}", g.name));
+                    }
+                    None => {
+                        ui.label("");
+                    }
                 }
                 ui.end_row();
             }

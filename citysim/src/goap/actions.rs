@@ -499,11 +499,11 @@ impl PlanCtx {
             },
             wanted: crate::systems::law::wanted(world, agent),
             suspect_located: target.is_some_and(|t| crate::systems::law::located_suspects(world).contains(&t)),
-            jail_day: job.is_some_and(|j| crate::systems::law::jail_day(agent, j.next_shift_key(world.tick))),
+            jail_day: job.is_some_and(|j| crate::systems::law::jail_duty(world, agent, j.next_shift_key(world.tick))),
             patrol_pending: job.is_some_and(|j| {
                 j.role == Role::Guard
                     && j.on_shift(tod)
-                    && !crate::systems::law::jail_day(agent, j.next_shift_key(world.tick))
+                    && !crate::systems::law::jail_duty(world, agent, j.next_shift_key(world.tick))
                     && j.last_shift_day != Some(j.next_shift_key(world.tick))
                     && world
                         .comp::<crate::components::Brain>(agent)
