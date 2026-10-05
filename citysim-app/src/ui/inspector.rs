@@ -4,8 +4,8 @@
 use egui_macroquad::egui::{self, Color32, ProgressBar, RichText, Ui};
 
 use citysim::{
-    time, Brain, Building, Corpse, EntityId, ExecState, GangMember, Household, Identity, Inventory, Job, Memory, Mood,
-    Needs, Personality, PlayerCommand, Position, Sentence, Wallet, World, TICKS_PER_DAY,
+    time, Brain, Building, Corpse, EntityId, ExecState, Household, Identity, Inventory, Job, Memory, Mood, Needs,
+    Personality, PlayerCommand, Position, Sentence, Wallet, World, TICKS_PER_DAY,
 };
 
 use crate::App;
@@ -159,8 +159,14 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             if let Some(s) = world.comp::<Sentence>(id) {
                 ui.colored_label(RED, format!("Jailed until day {}", time::day(s.until_tick)));
             }
-            if world.has::<GangMember>(id) {
-                ui.colored_label(Color32::from_rgb(142, 68, 173), "Gang");
+            if let Some(gid) = world.gang_of(id) {
+                let name = world.comp::<citysim::Gang>(gid).map_or("gang".to_string(), |g| g.name.clone());
+                let following = world.comp::<Brain>(id).and_then(|b| b.following_order);
+                let text = match following {
+                    Some(o) => format!("{name} · following {o}"),
+                    None => format!("{name} · freelancing"),
+                };
+                ui.colored_label(crate::ui::gang_colour(world.gang_index(gid)), text);
             }
             if world.has::<Corpse>(id) {
                 ui.colored_label(Color32::GRAY, "Corpse");

@@ -75,6 +75,30 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         });
 
         ui.separator();
+        ui.strong("Gangs");
+        egui::Grid::new("city_gangs").striped(true).show(ui, |ui| {
+            ui.strong("gang");
+            ui.strong("heads");
+            ui.strong("homes");
+            ui.strong("coins");
+            ui.strong("order");
+            ui.end_row();
+            for (i, gid) in world.gangs().into_iter().enumerate() {
+                let Some(g) = world.comp::<citysim::Gang>(gid) else { continue };
+                if ui.link(egui::RichText::new(&g.name).color(crate::ui::gang_colour(i))).clicked() {
+                    app.selected = Some(g.hideout);
+                    app.follow = false;
+                }
+                ui.label(format!("{}", g.members.len()));
+                ui.label(format!("{}", g.territory.len()));
+                ui.label(format!("{}", g.treasury));
+                let order = if g.is_sacked(world.tick) { "sacked".to_string() } else { g.order.to_string() };
+                ui.label(order);
+                ui.end_row();
+            }
+        });
+
+        ui.separator();
         ui.strong("Food");
         let (mut market, mut warehouse, mut pantry) = (0u32, 0u32, 0u32);
         for id in world.with::<Building>() {

@@ -4,7 +4,7 @@
 
 use macroquad::prelude::*;
 
-use citysim::{time, Brain, Building, Corpse, GangMember, Job, Lod, Position, Role, TileKind, TilePos, World};
+use citysim::{time, Brain, Building, Corpse, Gang, Job, Lod, Position, Role, TileKind, TilePos, World};
 
 use crate::App;
 
@@ -25,7 +25,7 @@ const C_AGENT_FLEEING: u32 = 0xf08c1e;
 const C_AGENT_GUARDING: u32 = 0xf5f5f5;
 const C_AGENT_SOCIAL: u32 = 0xd9a23d;
 const C_AGENT_JAILED: u32 = 0x555555;
-const C_GANG_BORDER: u32 = 0x8e44ad;
+const C_GANG: [u32; 3] = [0x8e44ad, 0x1abc9c, 0xe67e22];
 const C_SELECTION: u32 = 0xffd700;
 const C_NIGHT: u32 = 0x0a0f2a;
 const NIGHT_ALPHA: f32 = 0.35;
@@ -35,6 +35,11 @@ const SIGHT_TILES: f32 = 6.0;
 
 fn hex(c: u32) -> Color {
     Color::from_hex(c)
+}
+
+/// A gang's colour by its index in `World::gangs()` (matches `ui::gang_colour`).
+fn gang_colour(index: usize) -> Color {
+    hex(C_GANG[index % C_GANG.len()])
 }
 
 fn tile_colour(kind: TileKind) -> Color {
@@ -114,6 +119,27 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
+    // 3b. territory outlines in the holder's colour; a sacked Hideout is dashed.
+    for (i, gid) in world.gangs().into_iter().enumerate() {
+        let Some(g) = world.comp::<Gang>(gid) else { continue };
+        let colour = gang_colour(i);
+        for &h in &g.territory {
+            let Some(b) = world.comp::<Building>(h) else { continue };
+            if !b.rect.overlaps(&view) {
+                continue;
+            }
+            let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
+            let (w, h) = (f32::from(b.rect.w) * ppt, f32::from(b.rect.h) * ppt);
+            draw_rectangle_lines(tl.x + 3.0, tl.y + 3.0, w - 6.0, h - 6.0, 1.5, colour);
+        }
+        if g.is_sacked(world.tick) {
+            if let Some(b) = world.comp::<Building>(g.hideout).filter(|b| b.rect.overlaps(&view)) {
+                let tl = cam.tile_to_screen(vec2(f32::from(b.rect.x), f32::from(b.rect.y)));
+                dashed_rect(tl.x, tl.y, f32::from(b.rect.w) * ppt, f32::from(b.rect.h) * ppt, colour);
+            }
+        }
+    }
+
     // 4. corpses
     for id in world.with::<Corpse>() {
         let Some(pos) = world.comp::<Position>(id) else { continue };
@@ -130,8 +156,8 @@ pub fn draw(world: &World, app: &App) {
         let p = cam.tile_to_screen(vec2(f32::from(tile.x), f32::from(tile.y)));
         let colour = agent_colour(world, id);
         draw_rectangle(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, colour);
-        if world.has::<GangMember>(id) {
-            draw_rectangle_lines(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, 2.0, hex(C_GANG_BORDER));
+        if let Some(g) = world.gang_of(id) {
+            draw_rectangle_lines(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, 2.0, gang_colour(world.gang_index(g)));
         } else if world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) {
             draw_rectangle_lines(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, 1.0, WHITE);
         }

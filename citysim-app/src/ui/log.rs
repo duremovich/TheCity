@@ -27,6 +27,14 @@ fn kind_colour(kind: EventKind) -> Color32 {
         EventKind::Death | EventKind::Starving | EventKind::Rotted => Color32::from_rgb(240, 140, 30),
         EventKind::Birth | EventKind::Marriage | EventKind::Proposal => Color32::from_rgb(80, 170, 90),
         EventKind::PlayerAction | EventKind::PlayerActionFailed => Color32::from_rgb(255, 215, 0),
+        EventKind::OrderChanged
+        | EventKind::TerritoryFlipped
+        | EventKind::Raid
+        | EventKind::Disobeyed
+        | EventKind::Sacked
+        | EventKind::GangJoin
+        | EventKind::GangLeave
+        | EventKind::Betrayal => Color32::from_rgb(142, 68, 173),
         _ => Color32::LIGHT_GRAY,
     }
 }

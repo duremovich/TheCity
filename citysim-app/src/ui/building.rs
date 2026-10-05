@@ -340,19 +340,91 @@ fn hall(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
 
 fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
     let cap = world.config.buildings.for_kind(b.kind).stock_cap;
-    let Some(gang) = world.gangs().into_iter().find_map(|g| world.comp::<Gang>(g).filter(|gg| gg.hideout == id)) else {
+    let Some((gid, gang)) =
+        world.gangs().into_iter().find_map(|g| world.comp::<Gang>(g).filter(|gg| gg.hideout == id).map(|gg| (g, gg)))
+    else {
         section(ui, "Gang", |ui| {
-            ui.label("no gang");
+            ui.label("no gang holds this Hideout");
         });
         return;
     };
+    let colour = crate::ui::gang_colour(world.gang_index(gid));
+    let now = world.tick;
+    let days = |t: u64| t as f32 / TICKS_PER_DAY as f32;
+    let rival = world.rival_of(gid);
+    let rival_gang = rival.and_then(|r| world.comp::<Gang>(r));
+    let fit = citysim::systems::gang::fit_headcount(world, gid);
+    let rival_fit = rival.map_or(0, |r| citysim::systems::gang::fit_headcount(world, r));
     section(ui, &format!("{} ({} members)", gang.name, gang.members.len()), |ui| {
-        ui.label(format!("treasury {} coins", gang.treasury));
+        ui.colored_label(
+            colour,
+            format!(
+                "Order {} since day {} ({:.1} d)",
+                gang.order,
+                time::day(gang.order_since),
+                days(now.saturating_sub(gang.order_since))
+            ),
+        );
+        match gang.leader {
+            Some(l) => {
+                ui.horizontal(|ui| {
+                    ui.label("Leader");
+                    agent_link(ui, app, world, l);
+                    if world.has::<Sentence>(l) {
+                        ui.colored_label(RED, "jailed: no new orders");
+                    }
+                });
+            }
+            None => {
+                ui.colored_label(RED, "No leader: no new orders");
+            }
+        }
+        if let Some(t) = gang.raid_at {
+            let when = if t > now { format!("in {} min", t - now) } else { "departed".to_string() };
+            ui.colored_label(RED, format!("Raid musters {when} ({})", time::clock(t)));
+        }
+        if gang.is_sacked(now) {
+            let left = gang.sacked_until.map_or(0.0, |t| days(t.saturating_sub(now)));
+            ui.colored_label(RED, format!("SACKED: {left:.1} days to recover"));
+        }
+        if let Some(t) = gang.retaliate_until.filter(|&t| t > now) {
+            ui.label(format!("retaliating for {:.1} more days", days(t - now)));
+        }
+        let heat = citysim::systems::faction::heat(world, gid);
+        let window = world.config.gangs.heat_days * TICKS_PER_DAY;
+        let hot = gang.heat_log.iter().filter(|&&(t, _)| now.saturating_sub(t) < window).count();
+        ui.label(format!("heat {heat:.2} ({hot} arrests or deaths in {} days)", world.config.gangs.heat_days));
+        ui.label(format!(
+            "{fit} fit vs {rival_fit} rival · treasury {} vs {}",
+            gang.treasury,
+            rival_gang.map_or(0, |g| g.treasury)
+        ));
         stock_bar(ui, "fenced", b.stock_food, cap);
         if let Some(t) = gang.empty_since {
-            let days = world.tick.saturating_sub(t) as f32 / TICKS_PER_DAY as f32;
-            ui.colored_label(RED, format!("empty for {days:.1} days (disbands at 30)"));
+            ui.colored_label(RED, format!("empty for {:.1} days (disbands at 30)", days(now.saturating_sub(t))));
         }
+    });
+    section(ui, "Order trace", |ui| {
+        if gang.order_trace.is_empty() {
+            ui.label("no rescoring yet");
+        }
+        for s in gang.order_trace.iter().take(3) {
+            egui::CollapsingHeader::new(format!("{}  {:.3}", s.order, s.score))
+                .default_open(s.order == gang.order)
+                .show(ui, |ui| {
+                    egui::Grid::new(format!("order-{}", s.order)).striped(true).show(ui, |ui| {
+                        for c in &s.considerations {
+                            ui.label(&c.name);
+                            ui.label(format!("{:.3}", c.input));
+                            ui.label("->");
+                            ui.label(format!("{:.3}", c.output));
+                            ui.end_row();
+                        }
+                    });
+                });
+        }
+    });
+    section(ui, "Roster", |ui| {
         let mut members: Vec<(EntityId, u8, u64)> = gang
             .members
             .iter()
@@ -364,15 +436,11 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
             ui.strong("rank");
             ui.strong("joined");
             ui.strong("coins");
-            ui.strong("");
+            ui.strong("doing");
             ui.end_row();
             for (m, rank, joined) in members {
                 agent_link(ui, app, world, m);
-                let rank_name = match rank {
-                    2 => "leader",
-                    1 => "lieutenant",
-                    _ => "grunt",
-                };
+                let rank_name = if rank == 2 { "leader" } else { "grunt" };
                 if rank == 2 {
                     ui.colored_label(GOLD, rank_name);
                 } else {
@@ -383,7 +451,11 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
                 if world.has::<Sentence>(m) {
                     ui.colored_label(RED, "jailed");
                 } else {
-                    ui.label(lod_tag(world, m));
+                    let following = world.comp::<Brain>(m).and_then(|b| b.following_order);
+                    ui.label(match following {
+                        Some(o) => format!("{o} ({})", lod_tag(world, m)),
+                        None => format!("freelance ({})", lod_tag(world, m)),
+                    });
                 }
                 ui.end_row();
             }
@@ -396,7 +468,10 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
         }
         ui.horizontal_wrapped(|ui| {
             for &h in &gang.territory {
-                building_link(ui, app, world, h);
+                if ui.link(RichText::new(world.name_of(h)).color(colour)).clicked() {
+                    app.selected = Some(h);
+                    app.follow = false;
+                }
             }
         });
     });
