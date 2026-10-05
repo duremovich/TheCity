@@ -20,8 +20,12 @@ fn test_cli_report_csv_header() {
     );
     let row = lines.next().expect("one data row");
     // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4), nobody homeless.
-    // (Off-screen thieves can be jailed on day 0 since M10 phase 3.)
-    assert!(row.starts_with("0,Spring,2000,220,0,"), "row: {row}");
+    // (Off-screen thieves can be jailed on day 0 since M10 phase 3, and an
+    // off-screen killing can take a resident, and their job, on day 0.)
+    let cols: Vec<&str> = row.split(',').collect();
+    assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
+    let n = |i: usize| cols[i].parse::<u32>().expect("a count");
+    assert!((1995..=2000).contains(&n(2)) && (215..=220).contains(&n(3)) && n(4) == 0, "row: {row}");
     assert_eq!(row.split(',').count(), 33);
     assert!(lines.next().is_none());
 }

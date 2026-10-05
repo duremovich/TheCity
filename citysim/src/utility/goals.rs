@@ -185,7 +185,14 @@ pub fn considerations(
             vec![
                 Consideration::new("in shift", can(shift_reachable(world, id, job)), GATE),
                 Consideration::new("energy", n.energy, IDENTITY),
-                Consideration::new("U(wealth)", urgency(n.wealth), Curve::Logistic { k: 8.0, mid: 0.5 }),
+                // Wages owed press too (M10 phase 5c): a guard collects only
+                // by winning Work after a Patrol shift, and a guard with coins
+                // in hand never did, so the week ran out and they quit unpaid.
+                Consideration::new(
+                    "U(wealth) or wages owed",
+                    urgency(n.wealth).max((f32::from(job.days_unpaid) / 4.0).min(1.0)),
+                    Curve::Logistic { k: 8.0, mid: 0.5 },
+                ),
                 Consideration::new("paid", can(job.days_unpaid < 7), GATE),
             ]
         }
@@ -352,7 +359,13 @@ pub fn considerations(
             let legs_left =
                 world.comp::<Brain>(id).is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift);
             let on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;
-            let no_warrant = !crate::systems::law::any_located_suspect(world);
+            // The same reach as Arrest's gate (M10 phase 5c review): a
+            // located warrant across the city scaled every guard's Patrol by
+            // 0.3 while only the guards in range could Arrest, so the rest
+            // idled, never walked a leg and were never owed the shift.
+            let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
+            let by = crate::systems::law::Pursuer { tile: here, guard: id };
+            let no_warrant = !crate::systems::law::any_located_suspect(world, Some(by));
             vec![
                 Consideration::new("in shift", can(on_duty), GATE),
                 Consideration::new("energy", n.energy, Curve::Linear { m: 0.8, b: 0.2 }),
@@ -367,7 +380,8 @@ pub fn considerations(
             let p = pers?;
             // M10: only warrants within pursuit range of this guard.
             let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
-            let located = crate::systems::law::any_located_suspect_near(world, here, id)
+            let by = crate::systems::law::Pursuer { tile: here, guard: id };
+            let located = crate::systems::law::any_located_suspect(world, Some(by))
                 || world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
             vec![
                 Consideration::new("warrant located", can(located), GATE),

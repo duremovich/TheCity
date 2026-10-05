@@ -114,11 +114,7 @@ fn old_age(world: &mut World) {
 
 /// Children of a Home: residents under 18.
 fn children_of(world: &World, home: EntityId) -> Vec<EntityId> {
-    world
-        .citizens()
-        .into_iter()
-        .filter(|&c| world.has::<Child>(c) && world.comp::<Household>(c).and_then(|h| h.home) == Some(home))
-        .collect()
+    world.residents_of(home).iter().copied().filter(|&c| world.has::<Child>(c)).collect()
 }
 
 /// Each Home feeds its children from the pantry; three days unfed kills.
@@ -523,7 +519,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             tax_accum: 0.0,
             last_shift_day: None,
             last_wage_attempt_day: None,
-            shift_credited: None,
+            duty_ticks: 0,
         },
     );
     world.abort_plan(id);

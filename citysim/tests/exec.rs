@@ -211,7 +211,7 @@ fn test_homeless_agent_sleeps_on_the_street() {
     let mut w = world(10);
     w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
     let id = w.citizens()[0];
-    w.comp_mut::<citysim::Household>(id).expect("hh").home = None;
+    w.set_home(id, None);
     w.leave_building(id);
     w.comp_mut::<citysim::Needs>(id).expect("needs").energy = 0.2;
     w.run_ticks(5);
@@ -251,7 +251,7 @@ fn test_idle_agent_leaves_the_hall() {
     let plan = routine::idle_plan(&w, id).expect("idle plan");
     assert_eq!(plan.steps[0].action, ActionKind::GoTo(LocationKey::Home), "idle inside the Hall goes home: {plan:?}");
     // and a homeless idler steps outside rather than squatting
-    w.comp_mut::<citysim::Household>(id).expect("hh").home = None;
+    w.set_home(id, None);
     let plan = routine::idle_plan(&w, id).expect("idle plan");
     assert_eq!(plan.steps[0].action, ActionKind::Wander);
 }

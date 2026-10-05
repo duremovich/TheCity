@@ -153,13 +153,15 @@ fn test_starvation_kills_after_grace() {
     w.comp_mut::<Building>(home).expect("home").stock_food = 0;
     w.comp_mut::<Needs>(victim).expect("needs").hunger = 0.0;
     w.levers.dole_per_day = 0; // no coins from the Hall
-    w.comp_mut::<citysim::Household>(victim).expect("hh").home = None; // no housemates' pantry
+    w.set_home(victim, None); // no housemates' pantry
     w.leave_building(victim);
     let grace = w.config.needs.starvation_grace_ticks;
     w.run_ticks(grace + 2);
     assert!(w.has::<citysim::Corpse>(victim), "starved");
     assert!(!w.citizens().contains(&victim));
-    assert_eq!(w.population(), 299);
+    // Anyone else who died meanwhile (an off-screen killing) is not this test's business.
+    let others = w.events.iter().filter(|e| e.kind == citysim::EventKind::Death && e.actors[0] != victim).count();
+    assert_eq!(w.population(), 299 - others);
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Death && e.actors.contains(&victim)));
     assert!(w.comp::<citysim::Identity>(victim).is_some(), "identity survives death");
 }

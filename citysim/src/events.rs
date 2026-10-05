@@ -184,6 +184,7 @@ struct LifeRow {
 
 /// The table (M10 D36). Actor order per push site:
 /// `Birth [child, mother, father]`, `Marriage [a, b]`, `Death [dead, spouse?]`,
+/// `Death [dead, spouse or NONE, killer]` when the killer is known,
 /// `Hire [id, employer]`, `Fire/Quit/Starving/Theft/Release/Homeless/Immigration/Betrayal [id, ..]`,
 /// `Robbed/Assaulted [NONE, victim]`, `Assault/Murder [attacker, victim]`,
 /// `Extortion [actor, home]`, `Arrest [guard, suspect]`, `Jailbreak [gang, jail, freed..]`,
@@ -203,7 +204,9 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         (E::Marriage, _) => row(LifeKind::Married),
         (E::Death, 0) => {
             let violent = world.comp::<Corpse>(actor).is_some_and(|c| c.cause == DeathCause::Violence);
-            Some(LifeRow { kind: if violent { LifeKind::Killed } else { LifeKind::Died }, other: None, hole: None })
+            // The killer, when `kill_by` named one.
+            let killer = event.actors.get(2).copied().filter(|&k| k != EntityId::NONE && violent);
+            Some(LifeRow { kind: if violent { LifeKind::Killed } else { LifeKind::Died }, other: killer, hole: None })
         }
         (E::Death, 1) => row(LifeKind::Widowed),
         (E::Hire, 0) => row(LifeKind::Hired),

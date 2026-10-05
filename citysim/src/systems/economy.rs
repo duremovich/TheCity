@@ -87,6 +87,7 @@ fn daily_restock(world: &mut World) {
 
 /// Each Market prices from its own stock and keeps its own history.
 fn daily_price(world: &mut World) {
+    world.mean_price_cache = None;
     for market_id in world.buildings_of_kind(BuildingKind::Market).to_vec() {
         let stock = world.comp::<Building>(market_id).map_or(0, |b| b.stock_food);
         let price = price_for_stock(&world.config.economy, stock);

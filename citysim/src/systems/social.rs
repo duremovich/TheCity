@@ -368,22 +368,14 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
     let home_a = world.comp::<Household>(a).and_then(|h| h.home);
     let home_b = world.comp::<Household>(b).and_then(|h| h.home);
     let room = |w: &World, h: Option<EntityId>| {
-        h.and_then(|h| w.comp::<Building>(h)).is_some_and(|bd| {
-            let residents =
-                // scan-ok: event: marriage
-                w.citizens().into_iter().filter(|&c| w.comp::<Household>(c).and_then(|hh| hh.home) == h).count();
-            residents < usize::from(bd.capacity)
-        })
+        h.and_then(|h| w.comp::<Building>(h).map(|bd| w.residents_of(h).len() < usize::from(bd.capacity)))
+            .unwrap_or(false)
     };
     if home_a != home_b {
         if room(world, home_a) {
-            if let Some(h) = world.comp_mut::<Household>(b) {
-                h.home = home_a;
-            }
+            world.set_home(b, home_a);
         } else if room(world, home_b) {
-            if let Some(h) = world.comp_mut::<Household>(a) {
-                h.home = home_b;
-            }
+            world.set_home(a, home_b);
         }
     }
     let (na, nb) = (world.name_of(a), world.name_of(b));
@@ -490,17 +482,9 @@ fn colocation(world: &mut World) {
                     world.comp::<Personality>(a).map_or(0.5, |p| p.sociability),
                     world.comp::<Personality>(b).map_or(0.5, |p| p.sociability),
                 );
-                let noise: f32 = {
-                    let u1: f32 = world.rng.world().random::<f32>().max(1e-6);
-                    let u2: f32 = world.rng.world().random();
-                    (-2.0 * u1.ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos() * 0.05
-                };
-                let affinity = ((sa + sb) / 2.0 * 0.1 + noise).clamp(-0.15, 0.15);
-                let e = world.edge_entry(a, b);
-                e.affinity = affinity;
-                e.trust = 0.3;
-                e.kind = RelKind::Acquaintance;
-                e.last_interaction = tick;
+                let u1: f32 = world.rng.world().random::<f32>();
+                let u2: f32 = world.rng.world().random();
+                first_meeting(world, a, b, first_affinity(sa, sb, u1, u2));
             }
             if jail {
                 world.remember(a, MemoryKind::MetInJail, Some(b), 0.5, 0.0, false);
@@ -518,6 +502,24 @@ fn colocation(world: &mut World) {
             }
         }
     }
+}
+
+/// The v1 first-meeting affinity: the pair's mean sociability x 0.1 plus
+/// N(0, 0.05) noise (Box-Muller from two uniforms), clamped to ±0.15.
+pub fn first_affinity(sa: f32, sb: f32, u1: f32, u2: f32) -> f32 {
+    let noise = (-2.0 * u1.max(1e-6).ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos() * 0.05;
+    ((sa + sb) / 2.0 * 0.1 + noise).clamp(-0.15, 0.15)
+}
+
+/// A new Acquaintance edge at `affinity`, trust 0.3 (`colocation`'s first
+/// meeting; `lod::stat_social`'s meeting off screen).
+pub fn first_meeting(world: &mut World, a: EntityId, b: EntityId, affinity: f32) {
+    let tick = world.tick;
+    let e = world.edge_entry(a, b);
+    e.affinity = affinity;
+    e.trust = 0.3;
+    e.kind = RelKind::Acquaintance;
+    e.last_interaction = tick;
 }
 
 fn daily(world: &mut World) {

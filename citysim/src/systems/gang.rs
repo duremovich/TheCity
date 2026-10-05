@@ -289,6 +289,19 @@ pub fn push_shock(world: &mut World, gang: EntityId, shock: Shock) {
     }
 }
 
+/// A member's killer turned out to be a rival (an off-screen killing bound
+/// later): the pending `MemberKilled { by_rival: false }` becomes
+/// `by_rival: true`; once the brain has consumed it, only the difference
+/// arrives (`Shock::RivalNamed`). One death is never two shocks.
+pub fn upgrade_kill_shock(world: &mut World, gang: EntityId) {
+    let Some(g) = world.comp_mut::<Gang>(gang) else { return };
+    if let Some(s) = g.shocks.iter_mut().find(|s| **s == Shock::MemberKilled { by_rival: false }) {
+        *s = Shock::MemberKilled { by_rival: true };
+    } else {
+        g.shocks.push(Shock::RivalNamed);
+    }
+}
+
 fn log_heat(world: &mut World, gang: EntityId, member: EntityId) {
     let tick = world.tick;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -669,12 +682,7 @@ fn daily_economy(world: &mut World) {
         // Territory tribute: 2 coins/day per Home when the occupants can pay.
         let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
         for home in territory {
-            let residents: Vec<EntityId> = world
-                // scan-ok: daily
-                .citizens()
-                .into_iter()
-                .filter(|&c| world.comp::<Household>(c).and_then(|h| h.home) == Some(home))
-                .collect();
+            let residents: Vec<EntityId> = world.residents_of(home).to_vec();
             let mut owed = 2;
             for r in residents {
                 if owed == 0 {

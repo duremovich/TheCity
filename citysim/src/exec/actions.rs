@@ -416,7 +416,6 @@ pub fn on_complete(
         ActionKind::Arrest => {
             let Some(suspect) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
             if crate::systems::law::arrest(world, id, suspect) {
-                credit_law_work(world, id);
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::PreconditionLost)
@@ -724,7 +723,6 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
             let suspect = world.comp::<Brain>(id).and_then(|b| b.escorting).or(step.target);
             if let Some(s) = suspect {
                 crate::systems::law::jail_suspect(world, id, s);
-                credit_law_work(world, id);
             }
         }
         ActionKind::FleeToHome => {
@@ -770,39 +768,17 @@ fn report_crime(world: &mut World, id: EntityId) -> StepResult {
 
 /// Shift end: the shift is marked worked (so Work stays pending while it
 /// runs and a resumed shift is not counted twice) and a day of wages is owed.
+/// A guard's wages are owed by the shift clock instead
+/// (`law::credit_guard_shifts`), whichever plan the guard ends the shift on.
 pub fn end_shift(world: &mut World, id: EntityId) {
     let tick = world.tick;
     if let Some(j) = world.comp_mut::<Job>(id) {
-        let key = j.shift_key_at(tick.saturating_sub(1));
-        j.last_shift_day = Some(key);
-        // Law work already owed this shift's wage (see `credit_law_work`).
-        if j.shift_credited != Some(key) {
+        j.last_shift_day = Some(j.shift_key_at(tick.saturating_sub(1)));
+        if j.role != crate::components::Role::Guard {
             j.days_unpaid = j.days_unpaid.saturating_add(1);
         }
     }
     economy::maybe_quit(world, id);
-}
-
-/// M10: an arrest made or a prisoner delivered on shift is that shift's work,
-/// as a PatrolLeg after the clock runs out already is. With guards always
-/// bodies (D20) and a warrant always open among 2,000 residents, arrests
-/// pre-empted most patrols and jail duties, so the shift was never credited,
-/// no wage was owed, and the watch starved on its payroll.
-fn credit_law_work(world: &mut World, id: EntityId) {
-    let Some(job) = world.comp::<Job>(id) else { return };
-    if job.role != crate::components::Role::Guard || !job.on_shift(world.tick_of_day()) {
-        return;
-    }
-    let key = job.shift_key_at(world.tick);
-    if crate::exec::routine::is_workday(key) && job.last_shift_day != Some(key) && job.shift_credited != Some(key) {
-        // Owe the day but keep the shift open: the guard patrols on until the
-        // shift's end, and `end_shift` will not owe it again.
-        if let Some(j) = world.comp_mut::<Job>(id) {
-            j.shift_credited = Some(key);
-            j.days_unpaid = j.days_unpaid.saturating_add(1);
-        }
-        economy::maybe_quit(world, id);
-    }
 }
 
 /// Sleeping at home with a spouse who lives there too. Checked by household

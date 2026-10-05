@@ -443,6 +443,7 @@ fn probe_guard_shift_end() {
     let mut over: BTreeMap<String, u32> = BTreeMap::new();
     let (mut credited, mut uncredited, mut offday) = (0, 0, 0);
     let mut pending = Vec::new();
+    let mut duty: Vec<(bool, f32, f32)> = Vec::new();
     for _ in 0..days * TICKS_PER_DAY {
         let before: BTreeMap<_, String> = guards
             .iter()
@@ -487,7 +488,7 @@ fn probe_guard_shift_end() {
         for (_, g, key, doing, goals) in due {
             let Some(j) = w.comp::<Job>(g) else { continue };
             {
-                if j.last_shift_day == Some(key) || j.shift_credited == Some(key) {
+                if j.last_shift_day == Some(key) {
                     credited += 1;
                 } else {
                     let before: BTreeMap<_, String> = [(g, doing)].into_iter().collect();
@@ -497,6 +498,15 @@ fn probe_guard_shift_end() {
                     let goals = shift_goals.get(&g).cloned().unwrap_or_default();
                     let top = goals.iter().max_by_key(|(_, &n)| n).map(|(k, _)| k.clone()).unwrap_or_default();
                     *over.entry(top).or_default() += 1;
+                    let total: u32 = goals.values().sum();
+                    let law: u32 = goals
+                        .iter()
+                        .filter(|(k, _)| k.contains("Patrol") || k.contains("Arrest") || k.contains("Work"))
+                        .map(|(_, n)| n)
+                        .sum();
+                    let sleep: u32 = goals.iter().filter(|(k, _)| k.contains("Sleep")).map(|(_, n)| n).sum();
+                    let night = j.shifts[0].0 > 1000;
+                    duty.push((night, law as f32 / total.max(1) as f32, sleep as f32 / total.max(1) as f32));
                 }
             }
         }
@@ -506,6 +516,15 @@ fn probe_guard_shift_end() {
     v.sort_by_key(|(_, n)| std::cmp::Reverse(*n));
     eprintln!("doing at shift end (uncredited): {:#?}", &v[..v.len().min(15)]);
     eprintln!("dominant goal over uncredited shifts: {over:?}");
+    for night in [false, true] {
+        let v: Vec<_> = duty.iter().filter(|d| d.0 == night).collect();
+        let mut hist = [0u32; 5];
+        for d in &v {
+            hist[((d.1 * 5.0) as usize).min(4)] += 1;
+        }
+        let sleep = v.iter().map(|d| d.2).sum::<f32>() / v.len().max(1) as f32;
+        eprintln!("uncredited {} shifts: {} ; law-duty share histogram (0-20%..80-100%) {hist:?}; mean sleep share {sleep:.2}", if night { "night" } else { "day" }, v.len());
+    }
 }
 
 /// M10 5c: guard hardship (days 1-60) and starvation deaths by age (120 days).
@@ -560,7 +579,7 @@ fn probe_starvation() {
                             w.comp::<Wallet>(id).map(|x| x.coins),
                             w.comp::<citysim::Inventory>(id).map(|x| x.food),
                             b.and_then(|b| b.current_goal),
-                            w.comp::<Job>(id).map(|j| (j.role, j.days_unpaid)),
+                            w.comp::<Job>(id).map(|j| (j.role, j.days_unpaid, j.shifts[0].0)),
                             w.has::<citysim::Sentence>(id),
                             b.and_then(|b| b.cuffed_by).is_some(),
                         ),
@@ -629,4 +648,38 @@ fn probe_posture_history() {
         let _ = t;
     }
     eprintln!("{line}\nCrackdown {crack}/{days}");
+}
+
+/// M10 5c: guards who quit unpaid: how many days owed, and the Unpaid memories, an hour before.
+#[test]
+#[ignore]
+fn probe_guard_quits() {
+    use citysim::{Brain, Job, Memory, MemoryKind, Role, TICKS_PER_HOUR};
+    use std::collections::BTreeMap;
+    let mut w = World::new(42, Config::load());
+    let mut last: BTreeMap<_, String> = BTreeMap::new();
+    for _ in 0..60 * 24 {
+        let guards = w.guards().to_vec();
+        w.run_ticks(TICKS_PER_HOUR);
+        for g in guards {
+            if w.comp::<Job>(g).is_some_and(|j| j.role == Role::Guard) {
+                let j = w.comp::<Job>(g).expect("job");
+                let unpaid = w
+                    .comp::<Memory>(g)
+                    .map_or(0, |m| m.entries.iter().filter(|e| e.kind == MemoryKind::Unpaid).count());
+                let goal = w.comp::<Brain>(g).and_then(|b| b.current_goal);
+                last.insert(
+                    g,
+                    format!(
+                        "days_unpaid {} last_attempt {:?} unpaid_mem {unpaid} goal {goal:?} shift {}",
+                        j.days_unpaid, j.last_wage_attempt_day, j.shifts[0].0
+                    ),
+                );
+            } else if let Some(s) = last.remove(&g) {
+                if w.comp::<Brain>(g).is_some() {
+                    eprintln!("day {} {g:?} left the watch; an hour before: {s}", w.day());
+                }
+            }
+        }
+    }
 }

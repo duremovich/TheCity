@@ -243,6 +243,11 @@ patrol_beat_homes = 60
 # map, with a warrant always open somewhere among 2,000 residents, every guard spent a fifth of the
 # day walking across the city after the nearest one, was never credited a shift, and starved.
 pursuit_radius = 64
+# M10 phase 5c: a guard is owed a shift on law duty (Patrol, Arrest, Work on a Jail day) for at least
+# this share of it, or completed (five legs, a held Jail), judged by the clock when the shift ends.
+# Owing the day only to a PatrolLeg at the end or an arrest left 412 of 584 shifts unpaid; owing it
+# for the goal held at the last tick still left most shifts spent 60-100 % on duty unpaid.
+shift_duty_share = 0.5
 
 # Patrol's 0.2 keeps it the resting posture; Crackdown earns its place from pressure alone (+0.3
 # while a refused bribe hardens it); Garrison's 0.05 (+0.5 for a week after a jailbreak).

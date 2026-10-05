@@ -127,7 +127,7 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
 }
 
 /// Parity v2 (M10 § 7, D37): Full vs Statistical on the 2,000 map's city
-/// scaled to 500, gangless, 30 days, seeds 2000-2002 pooled. Thefts, hunger-days, arrests,
+/// scaled to 500, gangless, 30 days, seeds 2000-2005 pooled. Thefts, hunger-days, arrests,
 /// assaults, violent deaths and marriages per 100 agent-days within 15%
 /// (floor 0.5); then, with every hole bound, the share of attributed crimes
 /// per actor lawfulness bucket within `max(0.15 x share, 0.05)`. Run with
@@ -139,7 +139,7 @@ fn test_full_vs_statistical_within_15pct() {
     use citysim::{EventKind, Personality};
     const AGENTS: u32 = 500;
     const DAYS: u64 = 30;
-    const SEEDS: [u64; 3] = [2000, 2001, 2002];
+    const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
     struct Run {
         rates: [f64; 6],
         actors: [f64; 3],
@@ -237,8 +237,11 @@ fn test_full_vs_statistical_within_15pct() {
             actors: actors.map(|n| n as f64),
         }
     }
-    // Three cities per tier, pooled: one 30-day city's theft rate varies by a
-    // quarter from seed to seed (seed 2000 alone runs 4.1 against 2.9-3.6).
+    // Six cities per tier, pooled: one 30-day city's theft rate varies by a
+    // quarter from seed to seed (seed 2000 alone runs 4.1 against 2.9-3.6),
+    // and the actor shares, which a few repeat thieves dominate, moved 0.04
+    // on the Full side alone between seeds 2000-2002 and 2003-2005 (law0
+    // 0.204 vs 0.242) against a 0.05 tolerance (M10 review fixes).
     let pooled = |force: Lod| {
         let runs: Vec<Run> = SEEDS.iter().map(|&s| run(force, s)).collect();
         let n = runs.len() as f64;

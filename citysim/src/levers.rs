@@ -340,7 +340,13 @@ impl World {
                         }
                     }
                     self.abort_plan(g);
+                    // As `law::reconcile_guards` dismisses: no vacancy (job
+                    // search would rehire the whole watch the next morning;
+                    // reconcile_guards rehires up to the lever, five a day),
+                    // but a Fire event, so it reaches the biography.
                     self.remove::<Job>(g);
+                    let name = self.name_of(g);
+                    self.push_event(EventKind::Fire, &[g], format!("{name} dismissed from the guard"));
                 }
                 law_brain::recompute_captain(self);
                 Ok((guards, "dismissed every guard".to_string()))
@@ -394,15 +400,9 @@ impl World {
                 p.building = None;
             }
         }
-        let residents: Vec<EntityId> = self
-            .citizens()
-            .into_iter()
-            .filter(|&c| self.comp::<Household>(c).and_then(|h| h.home) == Some(home))
-            .collect();
+        let residents: Vec<EntityId> = self.residents_of(home).to_vec();
         for &r in &residents {
-            if let Some(h) = self.comp_mut::<Household>(r) {
-                h.home = None;
-            }
+            self.set_home(r, None);
             // Children living there stand outside too.
             if self.comp::<Position>(r).is_some_and(|p| p.building == Some(home)) {
                 if let Some(p) = self.comp_mut::<Position>(r) {
@@ -523,9 +523,7 @@ impl World {
             .collect();
         let housed = homeless.len();
         for h in homeless {
-            if let Some(hh) = self.comp_mut::<Household>(h) {
-                hh.home = Some(id);
-            }
+            self.set_home(h, Some(id));
         }
         Ok((id, housed))
     }
@@ -548,31 +546,38 @@ impl World {
         let mut available = self.comp::<Building>(wh).map_or(0, |b| b.stock_food);
         let n = markets.len() as u32;
         let mut moved = 0;
-        // Pass 0 hands out the even shares; a Market with no room drops its
-        // share, which pass 1 redistributes to the Markets that still have room.
-        let mut leftover = 0;
-        for pass in 0..2 {
-            for (i, &mk) in markets.iter().enumerate() {
-                let share = if pass == 0 { amount / n + u32::from((i as u32) < amount % n) } else { leftover };
-                let room = self.comp::<Building>(mk).map_or(0, |b| market_cap.saturating_sub(b.stock_food));
+        // Each round splits what is left evenly over the Markets that still
+        // have room (remainder to the lowest ids); a Market that fills drops
+        // out and the next round shares its overflow among the rest.
+        let mut left = amount;
+        loop {
+            let open: Vec<(EntityId, u32)> = markets
+                .iter()
+                .map(|&mk| (mk, self.comp::<Building>(mk).map_or(0, |b| market_cap.saturating_sub(b.stock_food))))
+                .filter(|&(_, room)| room > 0)
+                .collect();
+            if left == 0 || available == 0 || open.is_empty() {
+                break;
+            }
+            let k = open.len() as u32;
+            let mut round = 0;
+            for (i, &(mk, room)) in open.iter().enumerate() {
+                let share = left / k + u32::from((i as u32) < left % k);
                 let m = share.min(room).min(available);
-                if pass == 0 {
-                    leftover += share - m.min(share);
-                } else {
-                    leftover -= m;
-                }
                 if m == 0 {
                     continue;
                 }
                 available -= m;
-                moved += m;
+                round += m;
                 if let Some(b) = self.comp_mut::<Building>(mk) {
                     b.stock_food += m;
                 }
             }
-            if leftover == 0 || available == 0 {
+            if round == 0 {
                 break;
             }
+            left -= round;
+            moved += round;
         }
         if moved == 0 {
             self.push_event(EventKind::PlayerActionFailed, &[], "ReleaseReserve: nothing to move");

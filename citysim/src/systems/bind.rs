@@ -15,8 +15,8 @@
 use rand::Rng;
 
 use crate::components::{
-    trace_flags, Bound, BuildingKind, DayTrace, Hole, HoleId, HoleKind, LawShock, Lod, MemoryKind, Personality, Shock,
-    Trace, Wallet, Zone,
+    trace_flags, Bound, BuildingKind, DayTrace, Hole, HoleId, HoleKind, LawShock, Lod, MemoryKind, Personality, Trace,
+    Wallet, Zone,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -63,23 +63,52 @@ fn trace_on(world: &World, id: EntityId, trace: &Trace, day: u64) -> Option<DayT
     })
 }
 
+/// Who had a trace entry on a day, with it, ascending by id: one walk of
+/// the Trace store per day and drain instead of one per bind (M10 review:
+/// a promotion wave binds hundreds of holes in one tick). Past days only:
+/// a day's trace is fixed once written, while today's is built from live
+/// state that a bind can change (a witnessed actor's promotion), so today
+/// is walked afresh every time.
+#[derive(Default)]
+struct DayPools {
+    days: std::collections::BTreeMap<u64, Vec<(EntityId, DayTrace)>>,
+}
+
+impl DayPools {
+    fn walk(world: &World, day: u64) -> Vec<(EntityId, DayTrace)> {
+        world
+            .with::<Trace>()
+            .into_iter()
+            .filter_map(|id| world.comp::<Trace>(id).and_then(|t| trace_on(world, id, t, day)).map(|t| (id, t)))
+            .collect()
+    }
+
+    fn with_day<R>(&mut self, world: &World, day: u64, f: impl FnOnce(&[(EntityId, DayTrace)]) -> R) -> R {
+        if day >= world.day() {
+            return f(&Self::walk(world, day));
+        }
+        f(self.days.entry(day).or_insert_with(|| Self::walk(world, day)))
+    }
+}
+
 /// Weighted candidates for a hole, ascending by id (pub for tests):
 /// alive and free that day per their trace, an adult with a Personality now,
 /// not the victim or the victim's spouse. Weight exactly
 /// `(1 − l)^lawfulness_power × (1 + gang_claim_mult·g·c) × (1 + enemy_mult·e) × (1 + statistical_mult·s)`,
 /// times `other_zone_weight` off the victim's zone.
 pub fn candidates(world: &World, hole: &Hole) -> Vec<(EntityId, f64)> {
+    DayPools::default().with_day(world, time::day(hole.tick), |pool| candidates_in(world, hole, pool))
+}
+
+fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> Vec<(EntityId, f64)> {
     let cfg = &world.config.bind;
-    let day = time::day(hole.tick);
     let claim_gang = hole.home.and_then(|h| world.comp::<crate::components::Building>(h)).and_then(|b| b.claim);
     let claim_gang = claim_gang.map(|c| c.gang);
     let mut out = Vec::new();
-    for id in world.with::<Trace>() {
+    for &(id, t) in pool {
         if id == hole.victim || Some(id) == hole.spouse {
             continue;
         }
-        let Some(trace) = world.comp::<Trace>(id) else { continue };
-        let Some(t) = trace_on(world, id, trace, day) else { continue };
         if !t.has(trace_flags::ALIVE) || t.has(trace_flags::JAILED) {
             continue;
         }
@@ -136,6 +165,11 @@ pub fn zone_law_coverage(world: &World, zone: Zone) -> f32 {
 /// Attribute a hole. Deterministic in `(world seed, hole id)` and the traces.
 /// `None` if no such hole is open.
 pub fn bind(world: &mut World, id: HoleId) -> Option<Bound> {
+    bind_in(world, id, &mut DayPools::default())
+}
+
+/// `bind` drawing its candidates and witnesses from `pools`.
+fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound> {
     // 1. Out of the indices.
     let hole = take(world, id)?;
     // 2. The hole's own stream.
@@ -144,8 +178,9 @@ pub fn bind(world: &mut World, id: HoleId) -> Option<Bound> {
     // 3. Unknown first (D11), else a weighted draw over the candidates.
     let unknown = rng.random::<f64>() < cfg.p_unknown;
     let mut bound = Bound::Unknown;
+    let day = time::day(hole.tick);
     if !unknown {
-        let cands = candidates(world, &hole);
+        let cands = pools.with_day(world, day, |pool| candidates_in(world, &hole, pool));
         let total: f64 = cands.iter().map(|&(_, w)| w).sum();
         if total > 0.0 {
             let u = rng.random::<f64>() * total;
@@ -168,19 +203,13 @@ pub fn bind(world: &mut World, id: HoleId) -> Option<Bound> {
     let witnessed = rng.random::<f32>() < p;
     let mut witness = None;
     if let (true, Bound::Actor(actor)) = (witnessed, bound) {
-        let day = time::day(hole.tick);
-        let pool: Vec<EntityId> = world
-            .with::<Trace>()
-            .into_iter()
-            .filter(|&w| w != actor && w != hole.victim)
-            .filter(|&w| crate::systems::law::living(world, w) && crate::systems::demography::is_adult(world, w))
-            .filter(|&w| {
-                world
-                    .comp::<Trace>(w)
-                    .and_then(|t| trace_on(world, w, t, day))
-                    .is_some_and(|t| t.has(trace_flags::ALIVE) && t.zone == hole.zone)
-            })
-            .collect();
+        let pool: Vec<EntityId> = pools.with_day(world, day, |pool| {
+            pool.iter()
+                .filter(|&&(w, t)| w != actor && w != hole.victim && t.has(trace_flags::ALIVE) && t.zone == hole.zone)
+                .map(|&(w, _)| w)
+                .filter(|&w| crate::systems::law::living(world, w) && crate::systems::demography::is_adult(world, w))
+                .collect()
+        });
         if !pool.is_empty() {
             witness = Some(pool[rng.random_range(0..pool.len())]);
         }
@@ -225,10 +254,12 @@ pub fn bind(world: &mut World, id: HoleId) -> Option<Bound> {
             }
         }
         // 7. Consequences (D31).
+        // The death itself was shocked at `kill_by`, with no killer named
+        // (`by_rival: false`): naming a rival only upgrades it.
         if hole.kind == HoleKind::Killed {
             if let (Some(gang), Some(theirs)) = (hole.gang, world.gang_of(actor)) {
                 if theirs != gang {
-                    crate::systems::gang::push_shock(world, gang, Shock::MemberKilled { by_rival: true });
+                    crate::systems::gang::upgrade_kill_shock(world, gang);
                 }
             }
         }
@@ -282,6 +313,19 @@ fn attributed_event(world: &mut World, hole: &Hole, bound: Bound, witness: Optio
     }
 }
 
+/// An agent leaving the world (`World::remove_agent`) takes its open victim
+/// holes with it: each closes as Unknown and is counted, with no draw, no
+/// event and no biography (both go with the agent).
+pub fn drop_victim_holes(world: &mut World, victim: EntityId) {
+    let ids = world.holes_by_agent.get(&victim).cloned().unwrap_or_default();
+    for id in ids {
+        if take(world, id).is_some() {
+            world.stats.current.holes_unknown += 1;
+        }
+    }
+    world.holes_by_agent.remove(&victim);
+}
+
 /// Close a hole as Unknown without a draw (the per-victim cap).
 pub fn expire(world: &mut World, id: HoleId) {
     let Some(hole) = take(world, id) else { return };
@@ -301,13 +345,14 @@ pub fn run(world: &mut World) {
     let day_start = time::day(now) * TICKS_PER_DAY;
     let due: Vec<HoleId> =
         world.holes.values().filter(|h| h.consequential && h.tick < day_start).map(|h| h.id).collect();
+    let mut pools = DayPools::default();
     for id in due {
-        bind(world, id);
+        bind_in(world, id, &mut pools);
     }
     let ttl = world.config.bind.hole_ttl_days * TICKS_PER_DAY;
     let old: Vec<HoleId> = world.holes.values().filter(|h| h.tick + ttl <= now).map(|h| h.id).collect();
     for id in old {
-        bind(world, id);
+        bind_in(world, id, &mut pools);
     }
 }
 
@@ -315,12 +360,13 @@ pub fn run(world: &mut World) {
 /// `lod::run`, oldest first. A bind may promote a witnessed actor and queue
 /// more; the loop runs until the queue is empty.
 pub fn drain_queue(world: &mut World) {
+    let mut pools = DayPools::default();
     while !world.bind_queue.is_empty() {
         let mut ids = std::mem::take(&mut world.bind_queue);
         ids.sort_unstable();
         ids.dedup();
         for id in ids {
-            bind(world, id);
+            bind_in(world, id, &mut pools);
         }
     }
 }
@@ -328,7 +374,8 @@ pub fn drain_queue(world: &mut World) {
 /// Bind every open hole, oldest first (tests, end-of-run parity).
 pub fn bind_all(world: &mut World) {
     let ids: Vec<HoleId> = world.holes.keys().copied().collect();
+    let mut pools = DayPools::default();
     for id in ids {
-        bind(world, id);
+        bind_in(world, id, &mut pools);
     }
 }

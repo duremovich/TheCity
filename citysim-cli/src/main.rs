@@ -359,6 +359,11 @@ struct HourTally {
     extra: [u16; 5],
     /// Had a courtship candidate at the hour's start (`p_flirt` is per such hour).
     courting: bool,
+    /// New edges this hour with anyone but a co-worker (`p_meet`).
+    met: u16,
+    /// Chats begun this hour, and those with a housemate (`p_chat_home`).
+    chats: u16,
+    chats_home: u16,
 }
 
 /// Build a Full-only world (seed 1000, straight-line walks, gangless, the
@@ -385,13 +390,19 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         lawfulness_edges: [0.3, 0.7],
         hunger_edge: 0.4,
         p_dole_day: 1.0,
+        p_theft_caught: None,
         rows: Vec::new(),
     };
     let mut counts = [[0u64; 5]; STAT_ROWS];
     let mut extra = [[0u64; 5]; STAT_ROWS];
     let mut denom = [0u64; STAT_ROWS];
     let mut court_denom = [0u64; STAT_ROWS];
+    // New non-co-worker edge ends per row, for `p_meet`.
+    let mut met = [0u64; STAT_ROWS];
+    let mut chats = [[0u64; 2]; STAT_ROWS];
     let (mut dole_days, mut dole_taken) = (0u64, 0u64);
+    // Every Theft, every Arrest, and the arrests of a thief (`p_theft_caught`).
+    let (mut thefts_all, mut arrests, mut theft_arrests) = (0u64, 0u64, 0u64);
     let open_hour = |world: &World, hour: &mut BTreeMap<citysim::EntityId, HourTally>| {
         hour.clear();
         for id in world.citizens() {
@@ -418,6 +429,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         let mut poor_today: (u64, Vec<citysim::EntityId>) = (u64::MAX, Vec::new());
         let mut cursor = world.next_event_id;
         open_hour(&world, &mut hour);
+        let mut known: std::collections::BTreeSet<_> = world.edges.keys().copied().collect();
         for _ in 0..total_ticks {
             citysim::tick(&mut world);
             let night = world.phase() == citysim::DayPhase::Night;
@@ -435,6 +447,14 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         t.extra[1] += 1;
                     }
                 }
+                if let citysim::ExecState::Use { kind: citysim::ActionKind::Chat, started, .. } = brain.exec {
+                    if started == just {
+                        let home = |x| world.comp::<citysim::Household>(x).and_then(|h| h.home);
+                        let partner = brain.current_step().and_then(|s| s.target);
+                        t.chats += 1;
+                        t.chats_home += u16::from(home(id).is_some() && partner.is_some_and(|p| home(p) == home(id)));
+                    }
+                }
             }
             // New ring entries since the cursor.
             let first = world.events.front().map_or(0, |e| e.id);
@@ -448,7 +468,17 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     // Every theft but a starving one (the Statistical eat path's
                     // desperation theft models those; M10, replaces D29's
                     // lawless-and-hungry rows).
+                    EventKind::Arrest => {
+                        arrests += 1;
+                        let suspect = e.actors.get(1).copied();
+                        let thief = world
+                            .crime_reports()
+                            .iter()
+                            .any(|r| Some(r.suspect) == suspect && r.crime == citysim::Crime::Theft);
+                        theft_arrests += u64::from(thief);
+                    }
                     EventKind::Theft => {
+                        thefts_all += 1;
                         let thief = e.actors.first().copied();
                         if thief.is_some_and(|a| world.comp::<Needs>(a).is_some_and(|n| n.hunger > 0.0)) {
                             hit(0, thief.as_ref(), &mut hour);
@@ -482,6 +512,21 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         t.extra[2] += 1;
                     }
                 }
+                // The hour's first meetings: edges that were not there at its
+                // start. Co-workers are left out (the Statistical shift
+                // drifts its co-workers itself).
+                let employer = |id| world.comp::<citysim::Job>(id).and_then(|j| j.employer);
+                for &(a, b) in world.edges.keys().filter(|k| !known.contains(k)) {
+                    if employer(a).is_some() && employer(a) == employer(b) {
+                        continue;
+                    }
+                    for x in [a, b] {
+                        if let Some(t) = hour.get_mut(&x) {
+                            t.met += 1;
+                        }
+                    }
+                }
+                known = world.edges.keys().copied().collect();
                 for t in hour.values() {
                     let c = t.ticks;
                     let dominant =
@@ -489,6 +534,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     counts[t.row][dominant] += 1;
                     denom[t.row] += 1;
                     court_denom[t.row] += u64::from(t.courting);
+                    met[t.row] += u64::from(t.met);
+                    chats[t.row][0] += u64::from(t.chats);
+                    chats[t.row][1] += u64::from(t.chats_home);
                     for (k, (sum, &n)) in extra[t.row].iter_mut().zip(&t.extra).enumerate() {
                         // A flirt counts in the hours it had a candidate for.
                         if k != 1 || t.courting {
@@ -578,6 +626,25 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 p_robbed: x[2] as f32 / pn,
                 p_assaulted: x[3] as f32 / pn,
                 p_killed: x[4] as f32 / pn,
+                // Each Statistical meeting gives both agents an edge: half the
+                // ends per agent-hour, pooled over hunger.
+                p_meet: {
+                    let (a, b) = (i & !1, i | 1);
+                    (met[a] + met[b]) as f32 / 2.0 / pn
+                },
+                p_chat: {
+                    let (a, b) = (i & !1, i | 1);
+                    (chats[a][0] + chats[b][0]) as f32 / pn
+                },
+                p_chat_home: {
+                    let (a, b) = (i & !1, i | 1);
+                    let all = chats[a][0] + chats[b][0];
+                    if all == 0 {
+                        0.0
+                    } else {
+                        (chats[a][1] + chats[b][1]) as f32 / all as f32
+                    }
+                },
             }
         })
         .collect();
@@ -593,7 +660,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         }
     }
     let p_dole_day = (dole_taken as f32 / dole_days.max(1) as f32).min(1.0);
-    let table = StatTable { rows, p_dole_day, ..header };
+    let p_theft_caught = Some((theft_arrests as f32 / thefts_all.max(1) as f32).min(1.0));
+    eprintln!("thefts {thefts_all}, arrests {arrests}, of a thief {theft_arrests}");
+    let table = StatTable { rows, p_dole_day, p_theft_caught, ..header };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
     let text = format!(
         "# generated by calibrate v2: seeds 1000..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",
@@ -615,6 +684,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         args.out.display(),
         denom
     );
+    eprintln!("new non-co-worker edge ends per row {met:?}");
+    eprintln!("chats (all, with a housemate) per row {chats:?}");
     Ok(())
 }
 

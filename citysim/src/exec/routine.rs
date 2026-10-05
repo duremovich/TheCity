@@ -44,10 +44,7 @@ pub fn is_workday(shift_key: i64) -> bool {
 /// A worked shift whose wages have not been collected today: the tail of the
 /// Work plan (haul, Hall visit) is still pending.
 pub fn wage_pending(world: &World, job: &Job) -> bool {
-    // A shift credited by law work is still running: the guard collects after it.
-    let mid_credited_shift =
-        job.on_shift(world.tick_of_day()) && job.shift_credited == Some(job.shift_key_at(world.tick));
-    job.last_shift_day.is_some() && job.wage_collectable(world.day()) && !mid_credited_shift
+    job.last_shift_day.is_some() && job.wage_collectable(world.day())
 }
 
 /// A shift to attend to right now: on shift, waiting at the workplace for one

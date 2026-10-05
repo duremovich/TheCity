@@ -21,6 +21,7 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         lawfulness_edges: [0.3, 0.7],
         hunger_edge: 0.4,
         p_dole_day: 1.0,
+        p_theft_caught: None,
         rows,
     }
 }
@@ -236,8 +237,11 @@ fn test_bound_gang_member_victim_shocks_gang() {
         g.shocks.clear();
     }
     assert_eq!(bind::bind(&mut w, id), Some(Bound::Actor(rival)));
+    // No `MemberKilled` was pending (the death's shock was cleared above, as
+    // if consumed): naming the rival sends only the difference.
     let shocks = w.comp::<Gang>(ours).map(|g| g.shocks.clone()).unwrap_or_default();
-    assert!(shocks.contains(&Shock::MemberKilled { by_rival: true }), "{shocks:?}");
+    assert_eq!(shocks, vec![Shock::RivalNamed], "{shocks:?}");
+    assert!(Shock::RivalNamed.is_grudge());
 }
 
 #[test]
@@ -454,4 +458,123 @@ fn test_life_same_richness_full_vs_statistical() {
     eprintln!("full {full:?} (best agent {full_best})\nstat {stat:?} (best agent {stat_best})");
     assert!(full.len() >= 3 && stat.len() >= 3, "too few kinds: full {full:?}, stat {stat:?}");
     assert!(full_best >= 3 && stat_best >= 3);
+}
+
+/// Review fix: an off-screen killing of a gang member is one death, one
+/// shock. `kill_by` shocked it with no killer named; binding it to a rival
+/// upgrades that pending shock, or, once the brain consumed it, sends only
+/// the difference.
+#[test]
+fn test_bound_rival_kill_upgrades_the_one_shock() {
+    for consumed in [false, true] {
+        let mut w = traced_world(309);
+        w.config.bind.p_unknown = 0.0;
+        let gangs = w.gangs();
+        let (ours, theirs) = (gangs[0], gangs[1]);
+        let stat: Vec<EntityId> = w.tier(Lod::Statistical).to_vec();
+        let (victim, rival) = (stat[0], stat[1]);
+        gang::enlist(&mut w, victim, ours);
+        gang::enlist(&mut w, rival, theirs);
+        for o in adults_with_trace(&w) {
+            if o != victim && o != rival {
+                set_trace_flag(&mut w, o, 0, trace_flags::JAILED);
+            }
+        }
+        if let Some(g) = w.comp_mut::<Gang>(ours) {
+            g.shocks.clear();
+        }
+        let id = manual_hole(&mut w, victim, HoleKind::Killed, 500);
+        w.holes.get_mut(&id).expect("hole").gang = Some(ours);
+        w.kill_by(victim, DeathCause::Violence, None);
+        // The death shocks (a dead boss also changes the leader).
+        let deaths = |w: &World| -> Vec<Shock> {
+            let g = w.comp::<Gang>(ours).map(|g| g.shocks.clone()).unwrap_or_default();
+            g.into_iter().filter(|s| matches!(s, Shock::MemberKilled { .. } | Shock::RivalNamed)).collect()
+        };
+        let at_death = deaths(&w);
+        assert_eq!(at_death, vec![Shock::MemberKilled { by_rival: false }]);
+        if consumed {
+            if let Some(g) = w.comp_mut::<Gang>(ours) {
+                g.shocks.clear();
+            }
+        }
+        assert_eq!(bind::bind(&mut w, id), Some(Bound::Actor(rival)));
+        let shocks = deaths(&w);
+        let want = if consumed { vec![Shock::RivalNamed] } else { vec![Shock::MemberKilled { by_rival: true }] };
+        assert_eq!(shocks, want, "consumed {consumed}");
+        let total: f32 = shocks.iter().map(|s| s.severity()).sum::<f32>()
+            + if consumed { Shock::MemberKilled { by_rival: false }.severity() } else { 0.0 };
+        assert!((total - Shock::MemberKilled { by_rival: true }.severity()).abs() < 1e-6);
+    }
+}
+
+/// Review fix: an attacker who loses and dies is killed by someone known;
+/// the Death event names them, so the biography does too.
+#[test]
+fn test_killed_attacker_biography_names_the_killer() {
+    let mut w = World::new(410, Config::load().v1_profile());
+    let c = w.citizens();
+    let (dead, killer) = (c[0], c[1]);
+    w.kill_by(dead, DeathCause::Violence, Some(killer));
+    let life = w.comp::<Life>(dead).expect("life");
+    let killed = life.events.iter().find(|e| e.kind == LifeKind::Killed).expect("a Killed entry");
+    assert_eq!(killed.other, Some(killer));
+    let lines: Vec<String> = story::lines(&w, dead).iter().map(|l| l.text()).collect();
+    assert!(lines.iter().any(|l| l.contains(&w.name_of(killer))), "{lines:?}");
+    assert!(lines.iter().all(|l| !l.contains("never found")), "{lines:?}");
+    // A widow still reads Widowed, naming the dead.
+    let ev = w.events.iter().rev().find(|e| e.kind == EventKind::Death).expect("death");
+    assert_eq!(ev.actors.get(2), Some(&killer));
+}
+
+/// Review fix: an agent leaving the world takes its open victim holes with
+/// it, counted Unknown, with no event.
+#[test]
+fn test_removed_agent_leaves_no_open_holes() {
+    let mut w = traced_world(411);
+    let victim = w.tier(Lod::Statistical)[0];
+    let tick = w.tick;
+    let id = manual_hole(&mut w, victim, HoleKind::Robbed, tick);
+    let unknown = w.stats.current.holes_unknown;
+    let attributed = attributed_texts(&w).len();
+    w.remove_agent(victim);
+    assert!(!w.holes.contains_key(&id));
+    assert!(!w.holes_by_agent.contains_key(&victim));
+    assert_eq!(w.stats.current.holes_unknown, unknown + 1);
+    assert_eq!(attributed_texts(&w).len(), attributed, "a quiet close");
+    assert_eq!(bind::bind(&mut w, id), None);
+}
+
+/// Review fixes, parity: the `p_meet` roll gives a Statistical agent a new
+/// edge with a stranger from its own zone, and the `p_chat` roll with
+/// `p_chat_home` 1 drifts a housemate edge. Both replay identically.
+#[test]
+fn test_stat_meet_and_home_chat_rolls() {
+    let run = |meet: bool| {
+        let mut w = stat_world(412);
+        w.stat_table = Some(table(|r| {
+            if meet {
+                r.p_meet = 1.0;
+            } else {
+                r.p_chat = 1.0;
+                r.p_chat_home = 1.0;
+            }
+        }));
+        w.edges.clear();
+        w.rebuild_indices();
+        w.run_ticks(TICKS_PER_HOUR + 1);
+        w
+    };
+    let w = run(true);
+    assert!(!w.edges.is_empty(), "nobody met anyone");
+    for &(a, b) in w.edges.keys() {
+        let zone = |x| w.map.zone(w.comp::<Position>(x).expect("pos").tile);
+        assert_eq!(zone(a), zone(b), "a meeting crossed zones");
+    }
+    assert_eq!(save::to_ron(&w), save::to_ron(&run(true)), "meetings are not deterministic");
+    let w = run(false);
+    let home = |x| w.comp::<Household>(x).and_then(|h| h.home);
+    assert!(!w.edges.is_empty(), "nobody chatted");
+    assert!(w.edges.keys().all(|&(a, b)| home(a).is_some() && home(a) == home(b)), "a home chat left the Home");
+    assert!(w.edges.values().any(|e| e.affinity > 0.0));
 }

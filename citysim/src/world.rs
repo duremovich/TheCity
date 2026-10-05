@@ -64,6 +64,26 @@ pub struct StatRow {
     pub p_robbed: f32,
     pub p_assaulted: f32,
     pub p_killed: f32,
+    /// Independent roll: the agent meets a stranger from its zone (a new
+    /// edge). `calibrate`: half the Full agents' new non-co-worker edge ends
+    /// per agent-hour (each meeting gives two agents an edge), pooled over
+    /// hunger like the other rolls. Full agents meet in every phase (the
+    /// Market, the street, home), not in Social hours: per Social hour the
+    /// rate exceeded 1 in every row. 0 in a table without it.
+    #[serde(default)]
+    pub p_meet: f32,
+    /// Independent roll: a Chat (a known edge's drift). `calibrate`: Full
+    /// Chats begun per agent-hour, pooled over hunger. A Chat is a few
+    /// minutes of an hour some other category dominates, so the Social
+    /// outcome (dominant hours) undercounted them by about half.
+    #[serde(default)]
+    pub p_chat: f32,
+    /// Given a Chat: it is with a housemate rather than a random known edge.
+    /// `calibrate`: the share of Full Chats begun with someone of the same
+    /// Home, pooled over hunger (a Full agent chats with whoever is there,
+    /// and at home that is the household).
+    #[serde(default)]
+    pub p_chat_home: f32,
 }
 
 /// Calibrated hourly behaviour table for Statistical agents (`citysim-cli
@@ -84,6 +104,16 @@ pub struct StatTable {
     /// has to walk to the Hall. 1 in a table without it.
     #[serde(default = "one_f32")]
     pub p_dole_day: f32,
+    /// The chance an off-screen theft is reported and its thief given a body
+    /// (`lod::stat_theft`): Full arrests per Full theft. Off screen that
+    /// report is the only road to an arrest (an Assaulted hole files its
+    /// witness's report only when bound, at `hole_ttl_days`), and nearly
+    /// every one ends in one, so it carries the Full city's whole arrest
+    /// rate; the Full share of thefts reported (0.53) put Statistical
+    /// arrests 18 % over Full. A table without it falls back to
+    /// `[crime] stat_theft_caught_p`.
+    #[serde(default)]
+    pub p_theft_caught: Option<f32>,
     pub rows: Vec<StatRow>,
 }
 
@@ -213,6 +243,18 @@ pub struct World {
     /// rebuilt on load (`gangs()` was a full entity scan).
     #[serde(skip)]
     gang_ids: Vec<EntityId>,
+    /// Residents by Home, each list ascending; kept by the Household hooks
+    /// and `set_home`, rebuilt on load (M10 review: the per-Home
+    /// `citizens()` scans). `resident_home` is the reverse, so a removed
+    /// Household can be unfiled.
+    #[serde(skip)]
+    residents: BTreeMap<EntityId, Vec<EntityId>>,
+    #[serde(skip)]
+    resident_home: BTreeMap<EntityId, EntityId>,
+    /// `mean_price` for the tick it was read at, for the per-agent wealth
+    /// refresh; `economy::daily_price` drops it.
+    #[serde(skip)]
+    pub(crate) mean_price_cache: Option<(Tick, i64)>,
     /// GangWork's "no guard within `sight_day_crime` of the door" per Home,
     /// keyed on the guards' tiles: reused until a guard moves.
     #[serde(skip)]
@@ -476,6 +518,9 @@ impl World {
             crime_reports: Vec::new(),
             report_index: std::sync::OnceLock::new(),
             gang_ids: Vec::new(),
+            residents: BTreeMap::new(),
+            resident_home: BTreeMap::new(),
+            mean_price_cache: None,
             guarded_homes: GuardedHomes::default(),
             buildings_by_kind: BTreeMap::new(),
             agents_by_tile: BTreeMap::new(),
@@ -744,7 +789,7 @@ impl World {
                         tax_accum: 0.0,
                         last_shift_day: None,
                         last_wage_attempt_day: None,
-                        shift_credited: None,
+                        duty_ticks: 0,
                     },
                 );
             }
@@ -762,7 +807,16 @@ impl World {
     /// `recompute_wealth` for one agent (the spread Statistical tick calls it
     /// per processed agent).
     pub fn recompute_wealth_for(&mut self, id: EntityId) {
-        let price = self.mean_price().max(1) as f32;
+        let tick = self.tick;
+        let price = match self.mean_price_cache {
+            Some((t, p)) if t == tick => p,
+            _ => {
+                let p = self.mean_price();
+                self.mean_price_cache = Some((tick, p));
+                p
+            }
+        };
+        let price = price.max(1) as f32;
         let days = self.config.needs.wealth_days_secure;
         let greed = self.comp::<Personality>(id).map_or(0.5, |p| p.greed);
         let coins = self.comp::<Wallet>(id).map_or(0, |w| w.coins) as f32;
@@ -783,6 +837,8 @@ impl World {
             self.index_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
             Self::list_insert(&mut self.gang_ids, id);
+        } else if TypeId::of::<T>() == TypeId::of::<Household>() {
+            self.index_household(id);
         }
     }
 
@@ -794,7 +850,44 @@ impl World {
             self.unindex_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
             self.unindex_gang(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Household>() {
+            self.unindex_household(id);
         }
+    }
+
+    /// File the agent under its Household's Home.
+    fn index_household(&mut self, id: EntityId) {
+        self.unindex_household(id);
+        if let Some(home) = self.comp::<Household>(id).and_then(|h| h.home) {
+            Self::list_insert(self.residents.entry(home).or_default(), id);
+            self.resident_home.insert(id, home);
+        }
+    }
+
+    pub(crate) fn unindex_household(&mut self, id: EntityId) {
+        if let Some(home) = self.resident_home.remove(&id) {
+            if let Some(list) = self.residents.get_mut(&home) {
+                Self::list_remove(list, id);
+                if list.is_empty() {
+                    self.residents.remove(&home);
+                }
+            }
+        }
+    }
+
+    /// Move an agent into a Home (or out of any): the one write to
+    /// `Household::home`, so `residents_of` stays in step.
+    pub fn set_home(&mut self, id: EntityId, home: Option<EntityId>) {
+        if let Some(h) = self.comp_mut::<Household>(id) {
+            h.home = home;
+            self.index_household(id);
+        }
+    }
+
+    /// Everyone whose Household names this Home, ascending (the living:
+    /// a death removes the Household).
+    pub fn residents_of(&self, home: EntityId) -> &[EntityId] {
+        self.residents.get(&home).map_or(&[], Vec::as_slice)
     }
 
     /// Drop a gang from `gang_ids` (its Gang removed, or despawned).
@@ -894,7 +987,22 @@ impl World {
         self.by_role = roles;
         self.stat_slots = slots;
         self.gang_ids = self.with::<Gang>();
+        (self.residents, self.resident_home) = self.residents_from_stores();
         self.guarded_homes = GuardedHomes::default();
+        self.mean_price_cache = None;
+    }
+
+    #[allow(clippy::type_complexity)]
+    fn residents_from_stores(&self) -> (BTreeMap<EntityId, Vec<EntityId>>, BTreeMap<EntityId, EntityId>) {
+        let mut residents: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
+        let mut back = BTreeMap::new();
+        for id in self.entities() {
+            if let Some(home) = self.comp::<Household>(id).and_then(|h| h.home) {
+                residents.entry(home).or_default().push(id);
+                back.insert(id, home);
+            }
+        }
+        (residents, back)
     }
 
     fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 5], StatSlots) {
@@ -934,6 +1042,10 @@ impl World {
                 self.by_role.iter().map(Vec::len).collect::<Vec<_>>(),
                 roles.iter().map(Vec::len).collect::<Vec<_>>()
             ));
+        }
+        let (residents, resident_home) = self.residents_from_stores();
+        if residents != self.residents || resident_home != self.resident_home {
+            return Err("residents out of sync with the Household stores".to_string());
         }
         if self.gang_ids != self.with::<Gang>() {
             return Err(format!("gang_ids out of sync: {:?}", self.gang_ids));
@@ -1314,6 +1426,7 @@ impl World {
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.last_seen.remove(&id);
+        crate::systems::bind::drop_victim_holes(self, id);
         self.reports_mut().retain(|r| r.suspect != id);
         for id2 in self.citizens() {
             if let Some(b) = self.comp_mut::<Brain>(id2) {
@@ -1538,11 +1651,15 @@ impl World {
             DeathCause::OldAge => self.stats.current.deaths_old_age += 1,
             DeathCause::Violence | DeathCause::Execution => self.stats.current.deaths_violence += 1,
         }
-        let actors: &[EntityId] = match &spouse {
-            Some(s) => &[id, *s],
-            None => &[id],
+        // `[dead, spouse?]`, or `[dead, spouse or NONE, killer]` when the
+        // killer is known, so the biography names them (an attacker who
+        // lost the fight has no Murder event saying who killed them).
+        let actors: smallvec::SmallVec<[EntityId; 3]> = match (spouse, killer) {
+            (s, Some(k)) => smallvec::smallvec![id, s.unwrap_or(EntityId::NONE), k],
+            (Some(s), None) => smallvec::smallvec![id, s],
+            (None, None) => smallvec::smallvec![id],
         };
-        self.push_event(crate::events::EventKind::Death, actors, format!("{name} died of {cause:?}"));
+        self.push_event(crate::events::EventKind::Death, &actors, format!("{name} died of {cause:?}"));
     }
 
     /// Rebuild a world from its seed and command log: the commands are queued

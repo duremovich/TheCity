@@ -376,6 +376,10 @@ pub struct LawCfg {
     /// (Manhattan). The default reaches across any map.
     #[serde(default = "default_pursuit_radius")]
     pub pursuit_radius: u32,
+    /// M10 phase 5c: a guard is owed a shift on law duty for at least this
+    /// share of it (or completed: five legs, a held Jail).
+    #[serde(default = "default_shift_duty_share")]
+    pub shift_duty_share: f32,
     pub posture_flat: PostureFlatCfg,
 }
 
@@ -385,6 +389,10 @@ fn default_target_margin() -> usize {
 
 fn default_patrol_beat_homes() -> usize {
     60
+}
+
+fn default_shift_duty_share() -> f32 {
+    0.5
 }
 
 fn default_pursuit_radius() -> u32 {

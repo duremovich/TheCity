@@ -49,7 +49,11 @@ pub fn story_relevant(kind: ActionKind) -> bool {
 pub fn run(world: &mut World) {
     if world.tick.is_multiple_of(TICKS_PER_HOUR) {
         assign_hour(world);
-        debug_assert!(world.check_indices().is_ok(), "{:?}", world.check_indices());
+        #[cfg(debug_assertions)]
+        {
+            let checked = world.check_indices();
+            debug_assert!(checked.is_ok(), "{checked:?}");
+        }
         // The trace's STATISTICAL_ALL_DAY: a body at any assignment today.
         let today = world.day();
         for id in world.bodies() {
@@ -74,14 +78,18 @@ fn assign_hour(world: &mut World) {
         for id in world.citizens() {
             let Some(b) = world.comp::<Brain>(id) else { continue };
             let held = world.has::<Sentence>(id) || b.emigrating || b.cuffed_by.is_some();
-            let body = forced == Lod::Statistical
-                && (world.comp::<Job>(id).is_some_and(|j| matches!(j.role, Role::Guard | Role::Gravedigger))
-                    || crate::systems::law::wanted(world, id));
+            let body = forced == Lod::Statistical && (body_role(world, id) || crate::systems::law::wanted(world, id));
             set_lod(world, id, if held || body { Lod::Coarse } else { forced });
         }
     } else {
         assign(world);
     }
+}
+
+/// A guard or gravedigger: a job the hourly table cannot do, so it always
+/// keeps a body (M10 D20).
+fn body_role(world: &World, id: EntityId) -> bool {
+    world.comp::<Job>(id).is_some_and(|j| matches!(j.role, Role::Guard | Role::Gravedigger))
 }
 
 /// Rank every living adult and hand out the tiers with hysteresis. Jailed
@@ -120,9 +128,7 @@ fn assign(world: &mut World) {
         // every Coarse slot and the whole watch is Statistical. Gravediggers
         // too: the hourly table cannot bury, and a Statistical digger never
         // even learns of a corpse (it keeps no SawCorpse memory).
-        let guard = world
-            .comp::<crate::components::Job>(id)
-            .is_some_and(|j| matches!(j.role, crate::components::Role::Guard | crate::components::Role::Gravedigger));
+        let guard = body_role(world, id);
         // Pinned tops the ladder, then the watch (3), then gang members (2):
         // at the Coarse cap the farthest gang member falls first, not a guard.
         let class = if brain.pinned {
@@ -376,8 +382,52 @@ pub fn run_statistical(world: &mut World) {
     }
 }
 
-/// The five independent hourly rolls, always drawn from the agent's stream in
-/// the fixed order steal, flirt, robbed, assaulted, killed (so the stream
+/// A first meeting off screen (the `p_meet` roll): a stranger from the
+/// agent's zone, at the v1 first-meeting affinity. No Chat's drift: a Full
+/// first meeting (`social::colocation`) is the bare edge, Chats are the
+/// separately calibrated `p_chat` roll, and drifting every new acquaintance
+/// past the prune line kept them all (the 2,000 save grew 30 -> 48 MB).
+fn stat_meet(world: &mut World, id: EntityId) {
+    let Some(stranger) = stranger_in_zone(world, id) else { return };
+    let sa = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
+    let sb = world.comp::<Personality>(stranger).map_or(0.5, |p| p.sociability);
+    let rng = world.rng.agent(id);
+    let (u1, u2): (f32, f32) = (rng.random(), rng.random());
+    let affinity = crate::systems::social::first_affinity(sa, sb, u1, u2);
+    crate::systems::social::first_meeting(world, id, stranger, affinity);
+}
+
+/// A stranger for an off-screen meeting: up to `STRANGER_TRIES` uniform
+/// draws from the Statistical tier on the agent's stream, the first standing
+/// in the agent's zone taken (rejection sampling: uniform over that zone's
+/// Statistical agents). `None` when no draw lands in the zone, or the one
+/// that does is a child, the agent itself or someone it already knows: no
+/// meeting this hour. Only Statistical strangers: bodies meet by co-location,
+/// and drawing them gave the gang members and guards hundreds of
+/// acquaintances that every think walks. A scan of the zone's Homes per
+/// meeting cost 7 % of the 2,000 city's throughput.
+fn stranger_in_zone(world: &mut World, id: EntityId) -> Option<EntityId> {
+    const STRANGER_TRIES: usize = 16;
+    let zone_of = |w: &World, o: EntityId| w.comp::<Position>(o).map(|p| w.map.zone(p.tile));
+    let zone = zone_of(world, id)?;
+    let n = world.tier(Lod::Statistical).len();
+    if n == 0 {
+        return None;
+    }
+    for _ in 0..STRANGER_TRIES {
+        let k = world.rng.agent(id).random_range(0..n);
+        let o = world.tier(Lod::Statistical)[k];
+        if zone_of(world, o) != Some(zone) {
+            continue;
+        }
+        let ok = o != id && crate::systems::demography::is_adult(world, o) && world.edge(id, o).is_none();
+        return ok.then_some(o);
+    }
+    None
+}
+
+/// The seven independent hourly rolls, always drawn from the agent's stream in
+/// the fixed order steal, flirt, robbed, assaulted, killed, meet, chat (so the stream
 /// advances identically whatever fires), then applied killed first. An agent
 /// whose hour already took it off the tier (a caught thief) only draws.
 fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
@@ -387,6 +437,8 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     let u_robbed: f32 = rng.random();
     let u_assaulted: f32 = rng.random();
     let u_killed: f32 = rng.random();
+    let u_meet: f32 = rng.random();
+    let u_chat: f32 = rng.random();
     if world.comp::<Brain>(id).is_none_or(|b| b.lod != Lod::Statistical) {
         return;
     }
@@ -461,6 +513,13 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         let hole = base(HoleKind::Robbed, ev, consequential, loot, world);
         bind::open_hole(world, hole);
     }
+    // Meet before courting: Full agents court the people they meet.
+    if u_meet < row.p_meet {
+        stat_meet(world, id);
+    }
+    if u_chat < row.p_chat {
+        stat_chat(world, id, row);
+    }
     if u_flirt < row.p_flirt {
         stat_flirt(world, id);
     }
@@ -520,7 +579,12 @@ fn stat_theft(world: &mut World, id: EntityId) -> bool {
     let name = world.name_of(id);
     world.push_event(EventKind::Theft, &[id, market], format!("{name} stole food (off screen)"));
     let caught: f64 = world.rng.agent(id).random();
-    if caught < world.config.crime.stat_theft_caught_p {
+    let p = world
+        .stat_table
+        .as_ref()
+        .and_then(|t| t.p_theft_caught)
+        .map_or(world.config.crime.stat_theft_caught_p, f64::from);
+    if caught < p {
         crate::systems::law::file_report(world, Crime::Theft, id, None);
         // The normal arrest path needs a body on the map.
         set_lod(world, id, Lod::Coarse);
@@ -708,24 +772,47 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     }
 }
 
+/// An off-screen Social hour: belonging. The Chat it used to carry is the
+/// `p_chat` roll.
 fn stat_social(world: &mut World, id: EntityId) {
     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
         n.belonging = (n.belonging + 0.1).min(1.0);
+    }
+}
+
+/// A Chat off screen (the `p_chat` roll): on the row's `p_chat_home`
+/// (always drawn) with the housemate a Full agent at home would pick (the
+/// highest affinity, ties to the lower id, as `best_colocated_partner`),
+/// else with a random known edge, else (nobody known yet) a Statistical
+/// housemate met.
+fn stat_chat(world: &mut World, id: EntityId, row: &StatRow) {
+    let u_home: f32 = world.rng.agent(id).random();
+    if u_home < row.p_chat_home {
+        let home = world.comp::<Household>(id).and_then(|h| h.home);
+        let best = home
+            .map(|h| world.residents_of(h))
+            .unwrap_or_default()
+            .iter()
+            .copied()
+            .filter(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o))
+            .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
+            .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
+            .map(|(o, _)| o);
+        if let Some(mate) = best {
+            crate::systems::social::interacted(world, id, mate);
+            return;
+        }
     }
     let neighbours: Vec<EntityId> = world.neighbours(id).collect();
     if neighbours.is_empty() {
         // Nobody known yet: meet a Statistical housemate.
         let home = world.comp::<Household>(id).and_then(|h| h.home);
-        // Scan a fixed window of 32 Statistical ids around this one in id
-        // order (a household is created together, so its members have nearby
-        // ids) instead of the whole tier.
-        let tier = world.tier(Lod::Statistical);
-        let at = tier.partition_point(|&o| o < id);
-        let window = &tier[at.saturating_sub(16)..(at + 16).min(tier.len())];
-        let mates: Vec<EntityId> = window
+        let mates: Vec<EntityId> = home
+            .map(|h| world.residents_of(h))
+            .unwrap_or_default()
             .iter()
             .copied()
-            .filter(|&o| o != id && world.comp::<Household>(o).and_then(|h| h.home) == home && home.is_some())
+            .filter(|&o| o != id && world.comp::<Brain>(o).is_some_and(|b| b.lod == Lod::Statistical))
             .collect();
         if !mates.is_empty() {
             let k = world.rng.agent(id).random_range(0..mates.len());

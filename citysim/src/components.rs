@@ -389,6 +389,9 @@ pub enum Shock {
     BreakoutFailed,
     /// M9: a breakout freed one of ours.
     MemberFreed,
+    /// M10: a member's killing, already shocked as `MemberKilled { by_rival:
+    /// false }` and consumed, was later laid to a rival: the difference.
+    RivalNamed,
 }
 
 impl Shock {
@@ -404,6 +407,9 @@ impl Shock {
             Shock::Sacked => 1.0,
             Shock::BreakoutFailed => 0.8,
             Shock::MemberFreed => 0.3,
+            Shock::RivalNamed => {
+                Shock::MemberKilled { by_rival: true }.severity() - Shock::MemberKilled { by_rival: false }.severity()
+            }
         }
     }
 
@@ -415,6 +421,7 @@ impl Shock {
         matches!(
             self,
             Shock::MemberKilled { by_rival: true }
+                | Shock::RivalNamed
                 | Shock::RaidLost
                 | Shock::Raided
                 | Shock::Sacked
@@ -635,11 +642,11 @@ pub struct Job {
     /// one such visit per day, so a short Treasury is not hammered.
     #[serde(default)]
     pub last_wage_attempt_day: Option<u64>,
-    /// Key of the shift whose day of wages is already owed because of law work
-    /// (an arrest or an escort) while the shift was still running; the shift
-    /// itself goes on and `end_shift` does not owe it twice.
+    /// Guards: ticks of the running shift spent on law duty (Patrol, Arrest,
+    /// or Work on a Jail day); `law::credit_guard_shifts` reads and clears it
+    /// when the shift ends.
     #[serde(default)]
-    pub shift_credited: Option<i64>,
+    pub duty_ticks: u16,
 }
 
 impl Job {
@@ -1076,16 +1083,34 @@ pub struct Edge {
     /// `-1.0..=1.0`, default 0.0.
     pub affinity: f32,
     /// `0.0..=1.0`, default 0.3.
+    #[serde(default = "first_trust", skip_serializing_if = "is_first_trust")]
     pub trust: f32,
     /// Coins the lower id owes the higher id; negative = reverse.
+    /// This, `trust` and the two `Option`s are left out of a save at their
+    /// defaults (M10 review: ~55 of ~170 bytes per edge, and edges are most
+    /// of a save; an off-screen acquaintance never touched again keeps all four).
+    #[serde(default, skip_serializing_if = "is_zero")]
     pub debt: i32,
     pub kind: RelKind,
     pub last_interaction: Tick,
     /// Spouse edges only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_birth_tick: Option<Tick>,
     /// When the current debt was incurred (ageing charges after 14 days).
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub debt_since: Option<Tick>,
+}
+
+fn is_zero(v: &i32) -> bool {
+    *v == 0
+}
+
+fn first_trust() -> f32 {
+    0.3
+}
+
+fn is_first_trust(v: &f32) -> bool {
+    *v == first_trust()
 }
 
 impl Edge {

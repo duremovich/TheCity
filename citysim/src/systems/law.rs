@@ -163,38 +163,38 @@ fn located(world: &World, s: EntityId) -> bool {
         && world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
 }
 
-/// Open-warrant suspects that are located, ascending.
-pub fn located_suspects(world: &World) -> Vec<EntityId> {
-    // `open_suspects` is ascending and deduplicated.
-    world.open_suspects().filter(|&s| located(world, s)).collect()
+/// Who a guard can chase: `Some((tile, guard))` keeps the located suspects
+/// last seen within `[law] pursuit_radius` tiles of `tile` (M10), and never
+/// the guard themselves (one who chased their own warrant cuffed themselves,
+/// with no escort to end it, and starved); `None` is the whole city.
+#[derive(Clone, Copy, Debug)]
+pub struct Pursuer {
+    pub tile: TilePos,
+    pub guard: EntityId,
 }
 
-/// Is `s` in `located_suspects`?
+fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>) -> bool {
+    let near = |p: Pursuer| {
+        let radius = world.config.law.pursuit_radius;
+        s != p.guard && world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(p.tile) <= radius)
+    };
+    located(world, s) && by.is_none_or(near)
+}
+
+/// Open-warrant suspects that are located (and in reach of `by`), ascending.
+pub fn located_suspects(world: &World, by: Option<Pursuer>) -> Vec<EntityId> {
+    // `open_suspects` is ascending and deduplicated.
+    world.open_suspects().filter(|&s| chaseable(world, s, by)).collect()
+}
+
+/// Is `located_suspects(world, by)` non-empty?
+pub fn any_located_suspect(world: &World, by: Option<Pursuer>) -> bool {
+    world.open_suspects().any(|s| chaseable(world, s, by))
+}
+
+/// Is `s` a wanted, located suspect (anywhere)?
 pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
     wanted(world, s) && located(world, s)
-}
-
-/// Is `located_suspects` non-empty?
-pub fn any_located_suspect(world: &World) -> bool {
-    world.open_suspects().any(|s| located(world, s))
-}
-
-fn seen_near(world: &World, s: EntityId, tile: TilePos) -> bool {
-    let radius = world.config.law.pursuit_radius;
-    world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(tile) <= radius)
-}
-
-/// `located_suspects` last seen within `[law] pursuit_radius` tiles of
-/// `tile`: the warrants the guard `me` standing there will chase (M10). A
-/// guard never chases their own warrant: one who did cuffed themselves, with
-/// no escort to end it, and starved in their own cuffs.
-pub fn located_suspects_near(world: &World, tile: TilePos, me: EntityId) -> Vec<EntityId> {
-    world.open_suspects().filter(|&s| s != me && located(world, s) && seen_near(world, s, tile)).collect()
-}
-
-/// Is `located_suspects_near` non-empty?
-pub fn any_located_suspect_near(world: &World, tile: TilePos, me: EntityId) -> bool {
-    world.open_suspects().any(|s| s != me && located(world, s) && seen_near(world, s, tile))
 }
 
 /// Sentence length in ticks for a crime at the current lever.
@@ -587,53 +587,64 @@ fn tally_watch(world: &mut World) {
     }
 }
 
-/// M10 5c: a guard still on law duty when the shift's clock runs out has
-/// worked the shift. A Patrol day was credited only by a PatrolLeg finishing
-/// at or after the end (whose precondition needs the shift still running), or
-/// by an arrest or delivery; a guard mid-chase or walking to a waypoint when
-/// the clock ran out was never owed the day. Seed 42 at 2,000: 412 of 584
-/// workday shifts in 20 days went uncredited and the watch starved on full pay.
-/// Duty is the goal held at the end: Patrol, Arrest, or Work on a Jail day (a
-/// guard back from a chase, walking to the Jail). The shift is marked credited
-/// so a GuardJail finishing a tick later does not owe it twice.
+/// M10 5c: a guard's day of wages is owed here, and only here, by the shift
+/// clock: each on-shift tick on law duty (Patrol, Arrest, or Work on a Jail
+/// day) counts, and when the shift ends the day is owed if it was completed
+/// (five patrol legs, a held Jail) or on duty for `[law] shift_duty_share` of
+/// it, whatever plan was running at the end. Before, a Patrol day was owed
+/// only by a PatrolLeg finishing at or after the end (whose precondition needs
+/// the shift still running) or by an arrest or delivery: on seed 42 at 2,000,
+/// 412 of 584 workday shifts in 20 days went unpaid, most of them on duty
+/// for most of the shift, and the watch starved on full pay. A segment end
+/// that a 0-start segment continues (night guards) is not an end, so each
+/// shift is judged once.
 fn credit_guard_shifts(world: &mut World) {
     use crate::components::GoalKind;
     let tod = world.tick_of_day();
     let last = if tod == 0 { 1439 } else { tod - 1 };
     let ended_tick = world.tick.saturating_sub(1);
+    let share = world.config.law.shift_duty_share;
     // A copy: `maybe_quit` can take a guard off the roster mid-loop.
     let guards = world.guards().to_vec();
     for g in guards {
         let Some(job) = world.comp::<Job>(g) else { continue };
-        if !job.on_shift(last) || job.on_shift(tod) {
+        let (on_now, ended) = (job.on_shift(tod), job.on_shift(last) && !job.on_shift(tod));
+        if on_now {
+            let key = job.shift_key_at(world.tick);
+            let on_duty = !world.has::<Sentence>(g)
+                && match world.comp::<Brain>(g).and_then(|b| b.current_goal) {
+                    Some(GoalKind::Patrol | GoalKind::Arrest) => true,
+                    Some(GoalKind::Work) => jail_duty(world, g, key),
+                    _ => false,
+                };
+            if on_duty {
+                if let Some(j) = world.comp_mut::<Job>(g) {
+                    j.duty_ticks = j.duty_ticks.saturating_add(1);
+                }
+            }
+            continue;
+        }
+        if !ended {
             continue;
         }
         let key = job.shift_key_at(ended_tick);
-        if !crate::exec::routine::is_workday(key) || job.last_shift_day == Some(key) || job.shift_credited == Some(key)
-        {
-            continue;
-        }
-        if world.has::<Sentence>(g) {
-            continue;
-        }
-        let on_duty = match world.comp::<Brain>(g).and_then(|b| b.current_goal) {
-            Some(GoalKind::Patrol | GoalKind::Arrest) => true,
-            Some(GoalKind::Work) => jail_duty(world, g, key),
-            _ => false,
-        };
-        if !on_duty {
-            continue;
-        }
+        let length: u32 = job.shifts.iter().map(|&(s, e)| u32::from(e.saturating_sub(s))).sum();
+        let worked = job.last_shift_day == Some(key) || f32::from(job.duty_ticks) >= share * length as f32;
+        let owed = worked && crate::exec::routine::is_workday(key) && !world.has::<Sentence>(g);
         if let Some(j) = world.comp_mut::<Job>(g) {
-            j.shift_credited = Some(key);
-            j.last_shift_day = Some(key);
-            j.days_unpaid = j.days_unpaid.saturating_add(1);
+            j.duty_ticks = 0;
+            if owed {
+                j.last_shift_day = Some(key);
+                j.days_unpaid = j.days_unpaid.saturating_add(1);
+            }
         }
         if let Some(b) = world.comp_mut::<Brain>(g) {
             b.patrol_legs = 0;
             b.patrol_route.clear();
         }
-        crate::systems::economy::maybe_quit(world, g);
+        if owed {
+            crate::systems::economy::maybe_quit(world, g);
+        }
     }
 }
 
