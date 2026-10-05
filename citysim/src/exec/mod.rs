@@ -168,6 +168,21 @@ fn emigrate_step(world: &mut World, id: EntityId) {
 /// Run the current step's state machine for one tick.
 fn step_agent(world: &mut World, id: EntityId) {
     let Some(brain) = world.comp::<Brain>(id) else { return };
+    let tick = world.tick;
+    // A walk between moves (or a timed walk not yet arrived) is `Running` and
+    // touches nothing: skip the step and path clones (perf). The plan
+    // timeout still fires first, as below.
+    let between_moves = brain.plan.as_ref().is_some_and(|p| {
+        usize::from(brain.plan_step) < p.steps.len()
+            && tick.saturating_sub(p.started_tick) <= world.config.brain.plan_timeout_ticks
+    }) && match &brain.exec {
+        ExecState::Goto { next_move_tick, .. } => tick < *next_move_tick,
+        ExecState::GotoTimed { arrive_tick, .. } => tick < *arrive_tick,
+        _ => false,
+    };
+    if between_moves {
+        return;
+    }
     let Some(step) = brain.current_step().cloned() else {
         // Plan finished: a success resets the consecutive-failure count.
         if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -179,7 +194,6 @@ fn step_agent(world: &mut World, id: EntityId) {
     };
     let lod = brain.lod;
     let state = brain.exec.clone();
-    let tick = world.tick;
     let started = brain.plan.as_ref().map_or(tick, |p| p.started_tick);
 
     // Replan trigger (d): a plan that has run too long.

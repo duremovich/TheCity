@@ -291,7 +291,7 @@ fn stat_row(world: &World, id: EntityId) -> Option<StatRow> {
     let t = world.stat_table.as_ref()?;
     let lawfulness = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
     let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
-    Some(t.row(world.phase(), lawfulness, hunger).clone())
+    Some(t.row(world.phase(), lawfulness, hunger).numbers())
 }
 
 /// Statistical agents whose hourly slot is this tick: `id.index % 60 == tick % 60`.
@@ -456,7 +456,6 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return };
     let zone = world.map.zone(tile);
     let tick = world.tick;
-    let name = world.name_of(id);
     let consequential = crate::systems::law::is_guard(world, id) || world.has::<crate::components::GangMember>(id);
     let base = |kind: HoleKind, event_id: u64, consequential: bool, loot: i64, w: &World| Hole {
         id: hole_id(tick, id, kind),
@@ -474,6 +473,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
 
     if adult && u_killed < row.p_killed * m {
         let hole = base(HoleKind::Killed, 0, true, 0, world);
+        let name = world.name_of(id);
         let ev = world.push_event(
             EventKind::Murder,
             &[EntityId::NONE, id],
@@ -495,6 +495,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         if let Some(p) = world.comp_mut::<Personality>(id) {
             p.drift(crate::personality::Drift::Robbed);
         }
+        let name = world.name_of(id);
         let ev =
             world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in the {zone}"));
         let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
@@ -514,6 +515,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         if let Some(p) = world.comp_mut::<Personality>(id) {
             p.drift(crate::personality::Drift::Robbed);
         }
+        let name = world.name_of(id);
         let ev = world.push_event(
             EventKind::Robbed,
             &[EntityId::NONE, id],
@@ -753,11 +755,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     // their building). Each Statistical pair once an hour: the lower id drives.
     if job.employer.is_some() {
         let tod = world.tick_of_day();
-        let mates: Vec<EntityId> = world
-            .workers(job.role)
+        let ws = world.workers(job.role);
+        let mates: Vec<EntityId> = ws[ws.partition_point(|&c| c <= id)..]
             .iter()
             .copied()
-            .filter(|&c| c > id)
             .filter(|&c| {
                 world.comp::<Job>(c).is_some_and(|j| j.employer == job.employer && j.on_shift(tod))
                     && world.comp::<Brain>(c).is_some_and(|b| b.lod == Lod::Statistical)

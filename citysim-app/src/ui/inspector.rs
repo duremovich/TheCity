@@ -271,7 +271,7 @@ fn goal(ui: &mut Ui, world: &World, b: &Brain) {
                 .show(ui, |ui| {
                     egui::Grid::new(format!("cons-{:?}", g.goal)).striped(true).show(ui, |ui| {
                         for c in &g.considerations {
-                            ui.label(&c.name);
+                            ui.label(c.name.as_ref());
                             ui.label(format!("{:.3}", c.input));
                             ui.label("->");
                             let text = format!("{:.3}", c.output);
@@ -347,12 +347,9 @@ fn memories(ui: &mut Ui, world: &World, mem: &Memory) {
 
 fn edges(ui: &mut Ui, world: &World, id: EntityId) {
     section(ui, "Edges", |ui| {
-        let mut rows: Vec<_> = world
-            .edges
-            .iter()
-            .filter(|(&(a, b), _)| a == id || b == id)
-            .map(|(&(a, b), e)| (if a == id { b } else { a }, e))
-            .collect();
+        // The agent's own edges, ascending by the other id (as the key-ordered
+        // edge scan gave them, without walking every edge each frame).
+        let mut rows: Vec<_> = world.neighbours(id).filter_map(|o| world.edge(id, o).map(|e| (o, e))).collect();
         if rows.is_empty() {
             ui.label("none");
             return;

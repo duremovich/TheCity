@@ -70,12 +70,16 @@ pub fn run(world: &mut World) {
 }
 
 fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now: Tick) {
-    let (Some(needs), Some(memory)) = (world.comp::<Needs>(id).cloned(), world.comp::<Memory>(id).cloned()) else {
+    // The small Mood is copied out instead of cloning Needs and the Memory
+    // vector per citizen per hour (perf); the same update, written back.
+    let (Some(needs), Some(memory)) = (world.comp::<Needs>(id), world.comp::<Memory>(id)) else {
         return;
     };
+    let Some(mut mood) = world.comp::<Mood>(id).cloned() else { return };
     let pride = world.comp::<Personality>(id).map_or(0.5, |p| p.pride);
     let low_mood = world.config.demography.emigrate_mood;
-    if let Some(mood) = world.comp_mut::<Mood>(id) {
-        update(mood, &needs, &memory, pride, w_need, w_memory, low_mood, now);
+    update(&mut mood, needs, memory, pride, w_need, w_memory, low_mood, now);
+    if let Some(m) = world.comp_mut::<Mood>(id) {
+        *m = mood;
     }
 }

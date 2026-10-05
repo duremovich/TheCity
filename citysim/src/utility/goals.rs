@@ -147,7 +147,6 @@ pub fn considerations(
     let mood = world.comp::<crate::components::Mood>(id).map_or(0.0, |m| m.value);
     let phase = world.phase();
     let tod = world.tick_of_day();
-    let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_at(m));
     let mm = mood_mult(mood, goal);
 
     let mut flat = 0.0;
@@ -162,6 +161,8 @@ pub fn considerations(
                 .and_then(|h| world.comp::<crate::components::Building>(h))
                 .map_or(0, |b| b.stock_food);
             let lawfulness = pers.map_or(0.5, |p| p.lawfulness);
+            // Only Eat reads the local price: one Market scan per think, not per goal.
+            let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_at(m));
             let can_eat = inv.food > 0 || wallet.coins >= price || pantry > 0 || lawfulness < 0.3;
             vec![
                 Consideration::new("U(hunger)", urgency(n.hunger), SQUARE),

@@ -92,6 +92,11 @@ pub fn unlink(world: &mut World, id: EntityId) {
 /// Keep the enemies index in step with an edge's kind. Call after any kind change.
 pub fn reindex_kind(world: &mut World, a: EntityId, b: EntityId) {
     let enemy = world.edge(a, b).is_some_and(|e| e.kind == RelKind::Enemy);
+    reindex_kind_as(world, a, b, enemy);
+}
+
+/// `reindex_kind` with the edge's Enemy-ness already in hand.
+fn reindex_kind_as(world: &mut World, a: EntityId, b: EntityId, enemy: bool) {
     for (x, y) in [(a, b), (b, a)] {
         if enemy {
             world.enemies.entry(x).or_default().insert(y);
@@ -112,7 +117,8 @@ pub fn adjust(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32, d_tr
     e.trust = (e.trust + d_trust).clamp(0.0, 1.0);
     e.last_interaction = tick;
     promote(e);
-    reindex_kind(world, a, b);
+    let enemy = e.kind == RelKind::Enemy;
+    reindex_kind_as(world, a, b, enemy);
 }
 
 /// Being robbed or extorted by someone: an Enemy, at once.
@@ -181,6 +187,12 @@ pub fn reserved_partners(world: &World, holder: EntityId) -> std::collections::B
 
 /// The co-located agent with the highest affinity who is reservable.
 pub fn best_colocated_partner(world: &World, id: EntityId, min_affinity: f32, unmarried: bool) -> Option<EntityId> {
+    // Alone (the usual case at home): no reservation scan (perf).
+    let here = world.comp::<crate::components::Position>(id)?.building?;
+    let b = world.comp::<Building>(here)?;
+    if !b.occupants.iter().any(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o)) {
+        return None;
+    }
     let reserved = reserved_partners(world, id);
     best_colocated_partner_in(world, id, min_affinity, unmarried, &reserved)
 }
@@ -461,8 +473,19 @@ fn colocation(world: &mut World) {
         if !create && bd.kind == BuildingKind::Jail && !stay.is_multiple_of(JAIL_DRIFT_HOURS * TICKS_PER_HOUR) {
             continue;
         }
+        // An hourly pair outside the Jail drifts only between co-workers of
+        // this building: skip the occupant scan when `a` is not one (perf;
+        // such pairs had no effect below).
+        let works_here = |o: EntityId| world.comp::<Job>(o).is_some_and(|j| j.employer == Some(building));
+        let jail = bd.kind == BuildingKind::Jail;
+        if !create && !jail && !works_here(a) {
+            continue;
+        }
         for &b in &bd.occupants {
             if b == a || !world.has::<Brain>(b) {
+                continue;
+            }
+            if !create && !jail && !works_here(b) {
                 continue;
             }
             let Some(pb) = world.comp::<Position>(b) else { continue };
@@ -529,7 +552,10 @@ fn daily(world: &mut World) {
     let mut prune = Vec::new();
     let mut aged_debts = Vec::new();
     let mut rekinded = Vec::new();
-    for (&(a, b), e) in world.edges.iter_mut() {
+    // Each edge's update is its own; only the three lists depend on order,
+    // and they are sorted into key order below (the hash map's order is not
+    // the key order; sorting every edge daily cost ~6 %).
+    for (&(a, b), e) in world.edges.iter_mut_unordered() {
         if tick.saturating_sub(e.last_interaction) >= week {
             e.affinity *= 0.98;
             let before = e.kind;
@@ -553,6 +579,9 @@ fn daily(world: &mut World) {
             }
         }
     }
+    rekinded.sort_unstable();
+    prune.sort_unstable();
+    aged_debts.sort_unstable();
     for (a, b) in rekinded {
         reindex_kind(world, a, b);
     }

@@ -178,6 +178,88 @@ pub struct WorldState {
 }
 
 impl WorldState {
+    /// An injective 64-bit packing (the planner's closed set keys on it):
+    /// `at` in bits 0-7, `coin_bucket` 8-15, `food_count` 16-23, then one
+    /// bit per flag from 24. The destructuring is exhaustive, so a new field
+    /// fails to compile here until it is packed.
+    pub fn pack(&self) -> u64 {
+        let WorldState {
+            at,
+            hunger_satisfied,
+            energy_satisfied,
+            belonging_satisfied,
+            has_food,
+            has_coins,
+            has_savings,
+            coin_bucket,
+            food_count,
+            has_wage_due,
+            shift_done,
+            has_spouse,
+            has_partner_candidate,
+            is_safe,
+            threat_removed,
+            crime_reported,
+            suspect_jailed,
+            suspect_cuffed,
+            in_gang,
+            gang_task_done,
+            raid_done,
+            mustered,
+            corpse_buried,
+            carrying_corpse,
+            carrying_stolen,
+            is_dark,
+            known_corpse,
+            known_suspect_location,
+            patrol_leg_done,
+            food_source_available,
+            forage_available,
+            founded,
+        } = *self;
+        let flags = [
+            hunger_satisfied,
+            energy_satisfied,
+            belonging_satisfied,
+            has_food,
+            has_coins,
+            has_savings,
+            has_wage_due,
+            shift_done,
+            has_spouse,
+            has_partner_candidate,
+            is_safe,
+            threat_removed,
+            crime_reported,
+            suspect_jailed,
+            suspect_cuffed,
+            in_gang,
+            gang_task_done,
+            raid_done,
+            mustered,
+            corpse_buried,
+            carrying_corpse,
+            carrying_stolen,
+            is_dark,
+            known_corpse,
+            known_suspect_location,
+            patrol_leg_done,
+            food_source_available,
+            forage_available,
+            founded,
+        ];
+        let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
+        for (i, f) in flags.into_iter().enumerate() {
+            k |= u64::from(f) << (24 + i);
+        }
+        k
+    }
+
+    /// `pack()` of this state with `at` replaced, from its packed key.
+    pub fn repack_at(key: u64, at: LocationKey) -> u64 {
+        (key & !0xFF) | u64::from(at as u8)
+    }
+
     pub fn get(&self, key: Key) -> bool {
         match key {
             Key::HungerSatisfied => self.hunger_satisfied,
