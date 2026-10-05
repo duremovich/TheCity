@@ -468,3 +468,26 @@ Every new field is `#[serde(default)]`. A pre-M14 save gets `World::virt` built 
 ## 15. Out of scope (M15 and later)
 
 Power and Water as goods, generators and a `powered` state (the goods milestone; `Flow::IceUpkeep` and `Flow::Research` are the hooks); gossip, reputation, sightings held by agents and relayed along edges, intel as Data about a person's routine (M15); contracts, Fixers, Data sold through fixers, hit squads, bounties and tracking tags, `Heist` as a contract kind (M16); parents, uplink nodes behind tier-3 Trunks and the `edge` cut from Data theft (M17); the player and first-person runs (M18); map layers beyond the Virt plane, stairs and elevators as portals, interiors and room-level security; Virt combat between runners, AI agents on the plane, gang tech trees, Data as currency, and outside combat maps.
+
+## Addendum (2026-10-05, Dylan): the overlay, firewalls on links, bridges, hop chains, quiet and loud
+
+Spec amendment; decisions tabled as overturnable and to be read by the M14 plan and its coders.
+
+**The overlay.** The plane is drawn as an overlay on a ghosted real city: instead of buildings and roads there are nodes, servers and links, positioned at the buildings they belong to, so a runner's route reads against the streets it crosses. Rendering only; the graph is unchanged.
+
+**Firewalls on links.** A link, not only a node, can carry ICE (a `firewall` tier on the link). A route must pass every firewall on the way, each a contest. A near-impenetrable firewall is the normal state of a megacorp's trunk links.
+
+**Bridges (the physical bypass).** The common tactic against a strong firewall is to go around it in the real world: enter the building and plant a **bridge** (an M13 asset kind `Bridge`, carried then installed at a building tile) that creates a new link from a node behind the firewall to a node the runner can reach. Planting one is a physical mission (an M16 contract kind, or the player in person: credentials, disguise, a break-in, a bribed guard) resolved on the raid machinery or the social resolver. Owners detect bridges by **sweeps** (a `Secure` spend: a daily detection roll per building against the bridge's tier, higher for private security and robots), then **cut** them (destroyed, the asset lost) or **firewall** them (a firewall tier placed on the bridge link, which makes it a normal link). A found bridge is a deed that gossip carries and the law can trace to the planter through the binder.
+
+**Hop chains and the trace.** A runner routes through intermediate nodes on purpose: each hop is one more contest but lowers the trace. The trace outcome's attribution confidence falls per hop (`trace_decay_per_hop`), so a long chain yields a `Sighting` with low confidence or none, while a direct run yields a certain one. Hops through nodes owned by other factions spread heat onto them (a wrongly traced run is a cause for a grudge, M15).
+
+**Quiet and loud.** Every run has a mode: **quiet** (lower success per contest, lower detection, no alarm) or **loud** (brute force: higher success, guaranteed trace, an alarm that raises the node's ICE for a day and summons the owner's response: a robot, private security, or a counter-run). The mode is a choice for the player and a consideration for the brains (a corp's `VirtRaid` goes loud when it does not care who knows).
+
+| Decision | Call |
+| --- | --- |
+| Where firewalls live | On links as well as nodes; a node's own ICE is the last contest. |
+| Bridge as an asset | `AssetKind::Bridge` (M13), tier 1–3, planted at a building tile by an agent inside; one bridge per building per tier; the link it creates has no firewall until the owner adds one. |
+| Detection | A daily sweep roll per building with a Security profile: `p = sweep_base × security_tier ÷ bridge_tier`, clamped; sweeps cost the owner a coin upkeep as part of `Secure`. |
+| Hop decay | `trace_decay_per_hop` 0.35: the trace confidence after h hops is `0.65^h`; below `trace_floor` 0.15 no Sighting is written. |
+| Quiet/loud | Quiet: contest tier −0.5, detection ×0.5, no alarm. Loud: contest tier +1.0, trace certain, alarm (node ICE +1 for a day, owner response). |
+| Rendering | Nodes and links as an overlay on the ghosted map at their buildings; bridges drawn as dashed links. |

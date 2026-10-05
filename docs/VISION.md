@@ -210,3 +210,9 @@ Assessment (2026-10-05): the sim already has the shape. A faction's brain is an 
 - **Fun**: the bunker mode (emergence section): a crew of daemons working while the player sleeps, with budget and rogue risk as the trade-off; daemons as hireable crew for NPC netrunners and corps alike.
 
 Lands, if at all, after M14 (nodes, ICE, Data, the tech tree exist), as a small milestone or inside M16 (contracts: a daemon is a contractor without a body) and M17 (the Blackwall).
+
+## Virt as an overlay, firewalls, bridges and hop chains (added 2026-10-05, Dylan)
+
+Virt is an overlay that lives on top of a ghosted real world: instead of buildings and roads, nodes, servers and links. Links can be blocked by firewalls, which can be contested. A common tactic against a near-impenetrable firewall is to go around it in the real world: find a way to add a link from a node that connects to the server from behind the firewall. There must be ways to detect such links, physically destroy them, or firewall them off. Runners usually reach a target through a chain of other hops so their true source is obscured. As in the real world there are quiet ways and brute-force, scorched-earth ways.
+
+Folded into `docs/M14_VIRT.md` as an addendum: firewalls on links, the `Bridge` asset planted in person (the emergence doctrine's "go around it" as a physical mission), sweeps that detect, cut or firewall a bridge, hop chains that lower the trace per hop, and quiet/loud run modes.
