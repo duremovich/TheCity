@@ -229,6 +229,9 @@ pub struct World {
     /// M10: per agent, kept after death. Absent from older saves; `migrate_legacy` fills it.
     #[serde(default)]
     pub life: Vec<Option<Life>>,
+    /// M11: corps, each its own entity. Absent from older saves; `migrate_legacy` fills it.
+    #[serde(default)]
+    pub corp: Vec<Option<Corp>>,
     // graph + blackboard
     pub edges: BTreeMap<(EntityId, EntityId), Edge>,
     /// Private so every write goes through `reports_mut`, which drops the
@@ -238,7 +241,7 @@ pub struct World {
     /// `crime_reports` on the first read after a write (M10 phase 5b: the
     /// warrant checks walked every report per citizen per hour).
     #[serde(skip)]
-    report_index: std::sync::OnceLock<BTreeMap<EntityId, (u32, Tick)>>,
+    report_index: std::sync::OnceLock<ReportIndex>,
     /// Every gang, ascending by id; kept by the Gang insert/remove hooks and
     /// rebuilt on load (`gangs()` was a full entity scan).
     #[serde(skip)]
@@ -312,6 +315,12 @@ pub struct World {
     /// BuyFood in progress: `(units, coins paid)` so a lost stock can be refunded.
     #[serde(default)]
     pub pending_purchase: BTreeMap<EntityId, (u32, i64)>,
+    /// M11 D2: the fractional tax owed per payee, withheld whole coins at a time.
+    #[serde(default)]
+    pub tax_accum: BTreeMap<EntityId, f32>,
+    /// M11: eviction ticks over the last 60 days, oldest first.
+    #[serde(default)]
+    pub eviction_log: VecDeque<Tick>,
     /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
     /// rebuilt on load.
     #[serde(skip)]
@@ -384,6 +393,15 @@ components! {
     law: Law,
     trace: Trace,
     life: Life,
+    corp: Corp,
+}
+
+/// Per suspect `(open reports, latest report tick)`, and the suspects with an
+/// open report, ascending.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReportIndex {
+    pub by_suspect: BTreeMap<EntityId, (u32, Tick)>,
+    pub open: Vec<EntityId>,
 }
 
 /// For `gang::gang_work_target`: `guarded[i]` = a guard stands within
@@ -514,6 +532,7 @@ impl World {
             law: Vec::new(),
             trace: Vec::new(),
             life: Vec::new(),
+            corp: Vec::new(),
             edges: BTreeMap::new(),
             crime_reports: Vec::new(),
             report_index: std::sync::OnceLock::new(),
@@ -547,6 +566,8 @@ impl World {
             zone_watch: ZoneWatch::default(),
             day_marks: BTreeMap::new(),
             pending_purchase: BTreeMap::new(),
+            tax_accum: BTreeMap::new(),
+            eviction_log: VecDeque::new(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
@@ -558,6 +579,7 @@ impl World {
         w.spawn_buildings();
         w.spawn_gangs();
         w.spawn_population(&names);
+        systems::ownership::seed(&mut w);
         w
     }
 
@@ -596,12 +618,16 @@ impl World {
                     occupants: Vec::new(),
                     demolished: false,
                     tier: def.tier,
+                    rent_per_day: 0,
+                    revenue_today: 0,
+                    revenue: VecDeque::new(),
+                    secured_by: None,
                 },
             );
             match def.kind {
                 BuildingKind::Market => {
                     let price = self.config.world.price_initial;
-                    self.insert(id, Market { price_food: price, price_history: VecDeque::new() });
+                    self.insert(id, Market::new(price));
                 }
                 BuildingKind::Hall => {
                     let coins = self.config.world.treasury_initial;
@@ -677,7 +703,7 @@ impl World {
             self.insert(id, Brain::default());
             self.insert(id, Memory::default());
             self.insert(id, skills);
-            self.insert(id, Household { home: None });
+            self.insert(id, Household::new(None));
             ids.push(id);
         }
         self.recompute_wealth();
@@ -696,7 +722,7 @@ impl World {
         for (chunk, &home) in shuffled.chunks(wc.residents_per_home as usize).zip(homes.iter()) {
             let door = self.comp::<Building>(home).map(|b| b.door).unwrap_or_default();
             for &id in chunk {
-                self.insert(id, Household { home: Some(home) });
+                self.insert(id, Household::new(Some(home)));
                 self.insert(id, Position { tile: door, building: None, entered: 0 });
                 self.enter_building(id, home); // an interior slot each
             }
@@ -718,6 +744,26 @@ impl World {
                     b.stock_food = 0;
                 }
             }
+        }
+        // M11: inequality from day one. The coin draw above is scaled by the
+        // tier of the Home the agent was dealt (no new draws: the world
+        // stream is untouched). The homeless keep the draw.
+        let mult = wc.coins_by_tier;
+        if mult != [1.0, 1.0, 1.0] {
+            for &id in &ids {
+                let Some(tier) = self
+                    .comp::<Household>(id)
+                    .and_then(|h| h.home)
+                    .and_then(|h| self.comp::<Building>(h))
+                    .map(|b| usize::from(b.tier.min(2)))
+                else {
+                    continue;
+                };
+                if let Some(w) = self.comp_mut::<Wallet>(id) {
+                    w.coins = (w.coins as f32 * mult[tier]).round() as i64;
+                }
+            }
+            self.recompute_wealth();
         }
         // Anyone left over (population > homes × residents) is homeless on the
         // road outside the Market door: on the street, so `building` is None.
@@ -790,6 +836,7 @@ impl World {
                         last_shift_day: None,
                         last_wage_attempt_day: None,
                         duty_ticks: 0,
+                        hired_tick: 0,
                     },
                 );
             }
@@ -1107,7 +1154,69 @@ impl World {
         if let Some(e) = self.comp::<Job>(agent).and_then(|j| j.employer).filter(|&e| usable(e)) {
             return Some(e);
         }
+        if kind == BuildingKind::Market {
+            return self.market_by_price(pos.tile);
+        }
         self.nearest_of_kind(kind, pos.tile)
+    }
+
+    /// M11 D15: the Market a shopper at `from` picks, every tier alike: the
+    /// least `door distance + shop_price_tiles × price` (ties lower id), so a
+    /// cheaper Market draws custom from further off. Prices change only at
+    /// midnight, so the choice holds from planning to execution.
+    pub fn market_by_price(&self, from: TilePos) -> Option<EntityId> {
+        let per_coin = self.config.corps.shop_price_tiles;
+        self.buildings_of_kind(BuildingKind::Market)
+            .iter()
+            .filter_map(|&m| {
+                let b = self.comp::<Building>(m).filter(|b| !b.demolished)?;
+                Some((i64::from(b.door.manhattan(from)) + per_coin * self.price_at(m), m))
+            })
+            .min()
+            .map(|(_, m)| m)
+    }
+
+    // -----------------------------------------------------------------------
+    // M11: corps and owners
+    // -----------------------------------------------------------------------
+
+    /// Every corp, ascending by id (a full entity scan: daily callers only).
+    pub fn corps(&self) -> Vec<EntityId> {
+        self.with::<Corp>()
+    }
+
+    /// Position of a corp in `corps()`: picks its colour in the app.
+    pub fn corp_index(&self, corp: EntityId) -> usize {
+        self.corps().iter().position(|&c| c == corp).unwrap_or(0)
+    }
+
+    /// A building's owner (`None` = the city).
+    pub fn owner_of(&self, building: EntityId) -> Option<EntityId> {
+        self.comp::<Building>(building).and_then(|b| b.owner)
+    }
+
+    /// The corp owning a building, if its owner is one.
+    pub fn corp_of_building(&self, building: EntityId) -> Option<EntityId> {
+        self.owner_of(building).filter(|&o| self.has::<Corp>(o))
+    }
+
+    /// The corp an agent works for: the one it is exec of, else the one
+    /// owning its employer. A daily-or-rarer query (the exec lookup scans corps).
+    pub fn corp_of_agent(&self, agent: EntityId) -> Option<EntityId> {
+        self.corps()
+            .into_iter()
+            .find(|&c| self.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(agent)))
+            .or_else(|| self.comp::<Job>(agent).and_then(|j| j.employer).and_then(|e| self.corp_of_building(e)))
+    }
+
+    /// M11 D13: where an agent collects wages: the Civic Hall for a city job
+    /// (an employer the city owns, or none), else the employer building.
+    pub fn wage_desk(&self, agent: EntityId) -> Option<EntityId> {
+        let employer = self.comp::<Job>(agent).and_then(|j| j.employer);
+        match employer {
+            Some(e) if self.owner_of(e).is_some() => Some(e),
+            _ => self.building_of_kind(BuildingKind::Hall),
+        }
     }
 
     /// One Market's food price (`price_initial` if it has no `Market`).
@@ -1159,28 +1268,31 @@ impl World {
         &mut self.crime_reports
     }
 
-    fn build_report_index(reports: &[CrimeReport]) -> BTreeMap<EntityId, (u32, Tick)> {
+    fn build_report_index(reports: &[CrimeReport]) -> ReportIndex {
         let mut m: BTreeMap<EntityId, (u32, Tick)> = BTreeMap::new();
         for r in reports {
             let e = m.entry(r.suspect).or_insert((0, 0));
             e.0 += u32::from(!r.resolved);
             e.1 = e.1.max(r.tick);
         }
-        m
+        // M11 phase 2: the suspects with an open report, kept apart so the
+        // guards' warrant checks do not walk 60 days of closed ones.
+        let open = m.iter().filter(|(_, &(open, _))| open > 0).map(|(&s, _)| s).collect();
+        ReportIndex { by_suspect: m, open }
     }
 
-    fn report_index(&self) -> &BTreeMap<EntityId, (u32, Tick)> {
+    fn report_index(&self) -> &ReportIndex {
         self.report_index.get_or_init(|| Self::build_report_index(&self.crime_reports))
     }
 
     /// `(open reports, latest report tick)` on `suspect`, if any report names them.
     pub fn reports_on(&self, suspect: EntityId) -> Option<(u32, Tick)> {
-        self.report_index().get(&suspect).copied()
+        self.report_index().by_suspect.get(&suspect).copied()
     }
 
     /// Suspects with an open report, ascending, each once.
     pub fn open_suspects(&self) -> impl Iterator<Item = EntityId> + '_ {
-        self.report_index().iter().filter(|(_, &(open, _))| open > 0).map(|(&s, _)| s)
+        self.report_index().open.iter().copied()
     }
 
     /// Every gang, ascending by id (map order of their Hideouts).
@@ -1263,9 +1375,11 @@ impl World {
     // -----------------------------------------------------------------------
 
     /// One in-game minute, systems in the fixed order
-    /// `commands, time, lod, needs, memory, think, plan, exec, economy, bind,
-    /// law, social, gang, demography, stats`. The binder runs before the law
-    /// so a cold-case report reaches the captain's daily rescoring (M10 D32).
+    /// `commands, time, lod, needs, memory, think, plan, exec, ownership,
+    /// economy, bind, law, social, gang, demography, stats`. The binder runs
+    /// before the law so a cold-case report reaches the captain's daily
+    /// rescoring (M10 D32); ownership's daily pass (rent, evictions,
+    /// re-housing, upkeep) runs before the economy's price step (M11 D42).
     pub fn tick(&mut self) {
         self.apply_commands();
         // time: the clock is `self.tick`; daily hooks live in the systems that need them.
@@ -1276,6 +1390,7 @@ impl World {
         systems::think::run(self);
         systems::plan::run(self);
         crate::exec::run(self);
+        systems::ownership::run(self);
         systems::economy::run(self);
         systems::bind::run(self);
         systems::law::run(self);
@@ -1321,6 +1436,8 @@ impl World {
                     | MemoryKind::Won
                     | MemoryKind::Courted
                     | MemoryKind::Rejected
+                    | MemoryKind::RentShort
+                    | MemoryKind::Evicted
             ) {
                 return;
             }
@@ -1407,6 +1524,8 @@ impl World {
         if !self.is_alive(id) {
             return;
         }
+        // M11 D45: an emigrant's buildings pass to their heirs.
+        systems::ownership::on_owner_gone(self, id);
         self.abort_plan(id);
         self.vacate_job(id);
         self.remove_from_building(id);
@@ -1496,6 +1615,11 @@ impl World {
         }
         if self.life.len() < n {
             self.life.resize_with(n, || None);
+        }
+        // M11: a save from before corps has no `corp` store (no corps, city
+        // ownership, rent 0 through `RentCfg::off`).
+        if self.corp.len() < n {
+            self.corp.resize_with(n, || None);
         }
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {
@@ -1624,6 +1748,12 @@ impl World {
         crate::systems::social::on_death(self, id);
         if cause == DeathCause::Violence && systems::law::is_guard(self, id) {
             systems::law_brain::push_shock(self, LawShock::GuardKilled);
+        }
+        // M11 D20: a corp loses an employee to violence.
+        if cause == DeathCause::Violence {
+            if let Some(corp) = self.comp::<Job>(id).and_then(|j| j.employer).and_then(|e| self.corp_of_building(e)) {
+                systems::ownership::push_corp_shock(self, corp, CorpShock::EmployeeKilled);
+            }
         }
         self.vacate_job(id);
         self.remove_from_building(id);

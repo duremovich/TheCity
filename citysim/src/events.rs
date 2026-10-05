@@ -83,10 +83,22 @@ pub enum EventKind {
     Robbed,
     Assaulted,
     Attributed,
+    /// M11 ownership and corps (`[evictee, home, owner?]`, `[agent, home]`, ...).
+    Evicted,
+    RentShort,
+    Housed,
+    Founded,
+    Incorporated,
+    Bankrupt,
+    Acquired,
+    BrokenUp,
+    CorpOrder,
+    Strike,
+    Contract,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 43] = [
+    pub const ALL: [EventKind; 54] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -130,6 +142,17 @@ impl EventKind {
         EventKind::Robbed,
         EventKind::Assaulted,
         EventKind::Attributed,
+        EventKind::Evicted,
+        EventKind::RentShort,
+        EventKind::Housed,
+        EventKind::Founded,
+        EventKind::Incorporated,
+        EventKind::Bankrupt,
+        EventKind::Acquired,
+        EventKind::BrokenUp,
+        EventKind::CorpOrder,
+        EventKind::Strike,
+        EventKind::Contract,
     ];
 }
 
@@ -229,6 +252,12 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         (E::GangLeave, 0) => row(LifeKind::LeftGang),
         (E::Betrayal, 0) => row(LifeKind::Betrayed),
         (E::Homeless, 0) => row(LifeKind::Evicted),
+        // M11 (plan D39): `Evicted [evictee, home, owner?]`, `Housed [agent,
+        // home]`, `Founded [founder, ..]`, `Incorporated [corp, exec]`.
+        (E::Evicted, 0) => row(LifeKind::Evicted),
+        (E::Housed, 0) => row(LifeKind::Housed),
+        (E::Founded, 0) => row(LifeKind::Founded),
+        (E::Incorporated, 1) => row(LifeKind::Incorporated),
         (E::Immigration, 0) => row(LifeKind::Immigrated),
         (E::Burial, 1) => row(LifeKind::Buried),
         (E::Witness, 0) => row(LifeKind::Witnessed),

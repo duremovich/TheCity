@@ -95,9 +95,21 @@ pub fn choose(scores: &[PostureScore], current: Posture, hysteresis: f32) -> Opt
     (best.posture != current && best.score > current_score + hysteresis).then_some(best.posture)
 }
 
-/// Guards on the payroll.
+/// Guards on the city payroll: employed at the Precinct (M11 D18). Private
+/// guards (a Security Office's) are guards for sightings, witnesses and
+/// fear (`World::guards`), but never the captain, the Jail roster, a bribe's
+/// price or a breach's defenders.
 pub fn guards(world: &World) -> Vec<EntityId> {
-    world.guards().to_vec()
+    world.guards().iter().copied().filter(|&g| is_city_guard(world, g)).collect()
+}
+
+/// A guard on the city payroll (employed at the Precinct, or by nobody).
+pub fn is_city_guard(world: &World, g: EntityId) -> bool {
+    world.comp::<crate::components::Job>(g).filter(|j| j.role == crate::components::Role::Guard).is_some_and(|j| {
+        j.employer
+            .and_then(|e| world.comp::<crate::components::Building>(e))
+            .is_none_or(|b| b.kind == crate::components::BuildingKind::Jail)
+    })
 }
 
 /// The captain: the most lawful living guard, ties by lower index. Stored

@@ -177,12 +177,32 @@ pub struct Pursuer {
     pub guard: EntityId,
 }
 
+/// M11 D18: a private guard chases only nearby warrants.
+pub fn pursuit_radius_for(world: &World, guard: EntityId) -> u32 {
+    if is_private_guard(world, guard) {
+        world.config.corps.private_pursuit_radius
+    } else {
+        world.config.law.pursuit_radius
+    }
+}
+
+/// M11 D18: a guard employed by a Security Office.
+pub fn is_private_guard(world: &World, guard: EntityId) -> bool {
+    world
+        .comp::<Job>(guard)
+        .filter(|j| j.role == Role::Guard)
+        .and_then(|j| j.employer)
+        .and_then(|e| world.comp::<Building>(e))
+        .is_some_and(|b| b.kind == BuildingKind::SecurityOffice)
+}
+
 fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>) -> bool {
     let near = |p: Pursuer| {
-        let radius = world.config.law.pursuit_radius;
+        let radius = pursuit_radius_for(world, p.guard);
         s != p.guard && world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(p.tile) <= radius)
     };
-    located(world, s) && by.is_none_or(near)
+    // The cheap reach test first (the same conjunction, reordered).
+    by.is_none_or(near) && located(world, s)
 }
 
 /// Open-warrant suspects that are located (and in reach of `by`), ascending.
@@ -550,18 +570,25 @@ pub fn garrisoned(world: &World) -> bool {
 /// guard's place among the guards by entity index, so a small roster never
 /// leaves the Jail empty: when no rank matches the shift, the first guard holds it.
 pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
+    // M11 D18: only the city's guards hold the Jail, Garrison included. The
+    // roster is read off the role index without a copy: this runs per guard
+    // per tick (`credit_guard_shifts`) and in every guard's think.
+    use crate::systems::law_brain::is_city_guard;
+    if !is_city_guard(world, guard) {
+        return false;
+    }
     let modulus: i64 = match world.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target)) {
         (Posture::Garrison, _) => return true,
         (Posture::Crackdown, Some(_)) => 3,
         _ => 2,
     };
-    let roster = crate::systems::law_brain::guards(world);
-    if !roster.contains(&guard) {
-        return false;
-    }
-    let rank = roster.iter().filter(|&&g| g.index < guard.index).count() as i64;
+    let all = world.guards();
+    let rank = all.iter().take_while(|&&g| g.index < guard.index).filter(|&&g| is_city_guard(world, g)).count() as i64;
     let slot = shift_key.rem_euclid(modulus);
-    rank % modulus == slot || (rank == 0 && roster.len() as i64 <= slot)
+    if rank % modulus == slot {
+        return true;
+    }
+    rank == 0 && (all.iter().filter(|&&g| is_city_guard(world, g)).count() as i64) <= slot
 }
 
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.
@@ -661,7 +688,8 @@ fn credit_guard_shifts(world: &mut World) {
 /// fire the guard with the lowest loyalty.
 pub fn reconcile_guards(world: &mut World) {
     let want = usize::from(world.levers.guard_count);
-    let guards: Vec<EntityId> = world.guards().to_vec();
+    // M11 D18: the city's payroll only; private guards are the corps'.
+    let guards: Vec<EntityId> = crate::systems::law_brain::guards(world);
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };
     if guards.len() < want {
         let mut candidates: Vec<(ordered_float::OrderedFloat<f32>, EntityId)> = world
@@ -743,7 +771,8 @@ fn expire_warrants(world: &mut World) {
 }
 
 /// Prisoners get one meal a day from the Market nearest the Jail, paid by the
-/// Treasury at the city's mean price, and a full night's sleep.
+/// Treasury at the city's mean price to the Market's owner (M11 D46; the
+/// coins used to vanish), and a full night's sleep.
 fn jail_upkeep(world: &mut World) {
     let price = world.mean_price();
     let market = world
@@ -761,8 +790,16 @@ fn jail_upkeep(world: &mut World) {
             }
         });
         if fed {
-            if let Some(t) = world.treasury_mut() {
-                t.coins -= price;
+            if let Some(m) = market {
+                let owner = world.owner_of(m);
+                let paid = crate::systems::ownership::charge(
+                    world,
+                    None,
+                    owner,
+                    price,
+                    crate::systems::ownership::Flow::JailFood,
+                );
+                crate::systems::ownership::credit(world, m, paid);
             }
             if let Some(n) = world.comp_mut::<Needs>(who) {
                 crate::needs::eat(n, &cfg);
@@ -824,7 +861,10 @@ pub fn player_release(world: &mut World, who: EntityId) -> Result<(), String> {
 /// a Crackdown: `[Market, Home(t), Home(t), Hideout(t), Home(t)]`, the Homes
 /// drawn from the target gang's territory (or, with fewer than three held,
 /// from the six inhabited Homes nearest its Hideout).
-pub fn new_patrol_route(world: &mut World) -> Vec<EntityId> {
+pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
+    if let Some(route) = private_patrol_route(world, guard) {
+        return route;
+    }
     let target = world.law().filter(|l| l.posture == Posture::Crackdown).and_then(|l| l.target);
     if let Some(gang) = target.filter(|&g| world.has::<crate::components::Gang>(g)) {
         return crackdown_route(world, gang);
@@ -863,6 +903,27 @@ pub fn new_patrol_route(world: &mut World) -> Vec<EntityId> {
         }
     }
     route
+}
+
+/// M11 D18: a private guard walks up to five of its corp's buildings
+/// nearest its Security Office (the office first); contracted clients are
+/// phase 3. No draw: the world stream is untouched. `None` for a city guard.
+fn private_patrol_route(world: &World, guard: EntityId) -> Option<Vec<EntityId>> {
+    if !is_private_guard(world, guard) {
+        return None;
+    }
+    let office = world.comp::<Job>(guard).and_then(|j| j.employer)?;
+    let from = world.comp::<Building>(office)?.door;
+    let owned: Vec<EntityId> = match world.corp_of_building(office) {
+        Some(c) => world.comp::<crate::components::Corp>(c).map(|c| c.buildings.clone()).unwrap_or_default(),
+        None => vec![office],
+    };
+    let mut near: Vec<(u32, EntityId)> = owned
+        .into_iter()
+        .filter_map(|b| world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.door.manhattan(from), b)))
+        .collect();
+    near.sort();
+    Some(near.into_iter().take(5).map(|(_, b)| b).collect())
 }
 
 /// The turf a Crackdown patrols: the gang's territory, or the six inhabited

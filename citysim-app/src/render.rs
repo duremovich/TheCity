@@ -5,7 +5,8 @@
 use macroquad::prelude::*;
 
 use citysim::{
-    time, Brain, Building, BuildingKind, Corpse, Gang, Job, Lod, Position, Role, TileKind, TilePos, World, Zone,
+    time, Brain, Building, BuildingKind, Corp, Corpse, Gang, Job, Lod, Position, Role, TileKind, TilePos, Wallet,
+    World, Zone,
 };
 
 use crate::App;
@@ -98,7 +99,9 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
-    // 2 + 3. buildings: outline, letter, badge
+    // 2 + 3. buildings: outline, letter, badge. M11 D43: the outline is the
+    // owner's colour (corp, gang, an agent white, the city grey).
+    let corps = world.corps();
     for id in world.with::<Building>() {
         let Some(b) = world.comp::<Building>(id) else { continue };
         if !rect_in_view(&b.rect) {
@@ -112,8 +115,20 @@ pub fn draw(world: &World, app: &App) {
             // An open plot: dashed, no letter (inert until M11).
             dashed_rect(tl.x, tl.y, w, h, hex(C_LOT));
         } else {
-            let outline = if b.kind == BuildingKind::SecurityOffice { C_SECURITY } else { C_OUTLINE };
-            draw_rectangle_lines(tl.x, tl.y, w, h, 2.0, hex(outline));
+            let city = if b.kind == BuildingKind::SecurityOffice { C_SECURITY } else { C_OUTLINE };
+            let outline = match b.owner {
+                Some(o) if world.has::<Corp>(o) => crate::ui::corp_hex(corps.iter().position(|&c| c == o).unwrap_or(0)),
+                Some(o) if world.has::<Gang>(o) => crate::ui::gang_hex(world.gang_index(o)),
+                Some(o) if world.has::<Wallet>(o) => 0xffffff,
+                _ => city,
+            };
+            let mut colour = hex(outline);
+            // Spire Blocks a shade brighter.
+            if b.kind == BuildingKind::Home && b.tier >= 2 {
+                colour =
+                    Color::new((colour.r * 1.2).min(1.0), (colour.g * 1.2).min(1.0), (colour.b * 1.2).min(1.0), 1.0);
+            }
+            draw_rectangle_lines(tl.x, tl.y, w, h, 2.0, colour);
             if ppt >= LABEL_MIN_PX {
                 let size = (ppt * 1.4).clamp(14.0, 40.0);
                 let text = b.kind.letter().to_string();

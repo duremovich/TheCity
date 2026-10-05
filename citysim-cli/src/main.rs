@@ -213,6 +213,21 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         }),
         "fire_guards" => PlayerCommand::FireAllGuards,
         "treasury" => PlayerCommand::SetTreasury(value.parse::<i64>().map_err(|e| format!("{spec}: bad coins: {e}"))?),
+        // M11: `city_rent=0/1/2` (Sump/Mid/Spire), `rent_cap=3` or `rent_cap=none`, `no_city_evictions=1`.
+        "city_rent" => {
+            let parts: Vec<i64> = value
+                .split('/')
+                .map(|v| v.parse::<i64>().map_err(|e| format!("{spec}: bad rent: {e}")))
+                .collect::<Result<_, _>>()?;
+            let rent: [i64; 3] =
+                parts.try_into().map_err(|_| format!("{spec}: city_rent takes three values, Sump/Mid/Spire"))?;
+            PlayerCommand::SetCityRent(rent)
+        }
+        "rent_cap" => PlayerCommand::SetRentCap(match value {
+            "none" => None,
+            v => Some(v.parse::<i64>().map_err(|e| format!("{spec}: bad cap: {e}"))?),
+        }),
+        "no_city_evictions" => PlayerCommand::NoCityEvictions(num("flag")? != 0.0),
         other => return Err(format!("{spec}: unknown lever {other}")),
     };
     Ok((day * TICKS_PER_DAY, Lever::Cmd(cmd)))

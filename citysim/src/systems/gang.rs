@@ -518,6 +518,10 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         b.loot_today += taken;
         b.gang_task_day = Some(today);
     }
+    // M11 D20: a corp landlord books the shakedown as a loss.
+    if taken > 0 {
+        crate::systems::ownership::note_loss(world, home, taken, Some(actor));
+    }
     let suffix = claim(world, actor, home).unwrap_or_default();
     let name = world.name_of(actor);
     world.push_event(

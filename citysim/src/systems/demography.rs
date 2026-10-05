@@ -224,7 +224,7 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     world.insert(id, personality);
     world.insert(id, Skills { stealth: 0.0, fighting: 0.0, farming: 0.0 });
     world.insert(id, Wallet { coins: 0 });
-    world.insert(id, Household { home: Some(home) });
+    world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
     // In the Home, but not an occupant: a birth may exceed the capacity of 6.
     let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);
@@ -310,6 +310,8 @@ pub fn on_death(world: &mut World, id: EntityId) {
             i.spouse_died_tick = Some(tick);
         }
     }
+    // M11 D45: owned buildings pass to the spouse, a child, else the city.
+    crate::systems::ownership::on_owner_gone(world, id);
     // 6. Inheritance: spouse, else children equally (remainder to the first), else Treasury.
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins).max(0);
     if coins > 0 {
@@ -520,6 +522,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             last_shift_day: None,
             last_wage_attempt_day: None,
             duty_ticks: 0,
+            hired_tick: world.tick,
         },
     );
     world.abort_plan(id);
@@ -638,7 +641,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     world.insert(id, Position { tile, building: None, entered: tick });
     let home = emptiest_home(world);
-    world.insert(id, Household { home });
+    world.insert(id, Household::new(home));
     world.stats.current.immigrants += 1;
     let name = world.name_of(id);
     let where_ = match home {

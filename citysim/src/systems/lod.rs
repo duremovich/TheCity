@@ -129,13 +129,17 @@ fn assign(world: &mut World) {
         // too: the hourly table cannot bury, and a Statistical digger never
         // even learns of a corpse (it keeps no SawCorpse memory).
         let guard = body_role(world, id);
+        // M11: a private guard keeps a body but ranks with the gangs: at the
+        // watch's rank the twelve took Full slots and walked their corp's
+        // Blocks tile by tile (-800 ticks/s at 2,000).
+        let private = guard && crate::systems::law::is_private_guard(world, id);
         // Pinned tops the ladder, then the watch (3), then gang members (2):
         // at the Coarse cap the farthest gang member falls first, not a guard.
         let class = if brain.pinned {
             5
-        } else if guard {
+        } else if guard && !private {
             3
-        } else if gang {
+        } else if gang || private {
             2
         } else {
             0
@@ -571,6 +575,9 @@ fn stat_theft(world: &mut World, id: EntityId) -> bool {
     let Some(market) = world.local(id, BuildingKind::Market) else { return false };
     let Some(b) = world.comp_mut::<Building>(market).filter(|b| b.stock_food > 0) else { return false };
     b.stock_food -= 1;
+    // M11 D20: a corp-owned Market books the unit at its price.
+    let coins = world.price_at(market);
+    crate::systems::ownership::note_loss(world, market, coins, Some(id));
     if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
         i.food += 1;
         i.stolen_food += 1;

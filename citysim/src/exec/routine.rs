@@ -20,6 +20,7 @@ fn plan(goal: GoalKind, target: Option<EntityId>, steps: Vec<ActionInstance>, ti
     Plan { goal, target, steps, started_tick: tick }
 }
 
+/// The location key of a role's workplace (the v1 table).
 pub fn workplace_key(role: Role) -> LocationKey {
     match role {
         Role::Farmer => LocationKey::Farm,
@@ -27,6 +28,18 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Clerk => LocationKey::Market,
         Role::Bartender => LocationKey::Bar,
         Role::Gravedigger => LocationKey::Cemetery,
+    }
+}
+
+/// M11 D13: the key of this agent's workplace: a guard employed at a
+/// Security Office works at `Workplace`; every other role at its own kind.
+pub fn workplace_key_for(world: &World, _agent: EntityId, job: &Job) -> LocationKey {
+    let private = job.role == Role::Guard
+        && job.employer.and_then(|e| world.comp::<Building>(e)).is_some_and(|b| b.kind == BuildingKind::SecurityOffice);
+    if private {
+        LocationKey::Workplace
+    } else {
+        workplace_key(job.role)
     }
 }
 
@@ -102,7 +115,8 @@ pub fn commute_plan(world: &World, id: EntityId) -> Option<Plan> {
     if job.on_shift(world.tick_of_day()) || !shift_pending(world, id, job) {
         return None;
     }
-    let steps = vec![step(ActionKind::GoTo(workplace_key(job.role)), Some(employer)), step(ActionKind::Rest, None)];
+    let key = workplace_key_for(world, id, job);
+    let steps = vec![step(ActionKind::GoTo(key), Some(employer)), step(ActionKind::Rest, None)];
     Some(plan(GoalKind::Work, Some(employer), steps, world.tick))
 }
 

@@ -683,3 +683,259 @@ fn probe_guard_quits() {
         }
     }
 }
+
+/// M11: who carries rent arrears, by tier, owner and job; wallets at midnight.
+#[test]
+#[ignore]
+fn probe_m11_rent() {
+    use citysim::{Brain, Building, Household, Job, Lod, Wallet};
+    use std::collections::BTreeMap;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(24);
+    let mut w = World::new(42, Config::load());
+    for d in 0..days {
+        w.run_ticks(TICKS_PER_DAY);
+        if d % 4 != 3 {
+            continue;
+        }
+        // just after midnight's pass (tick of day 1)
+        w.run_ticks(1);
+        let mut by: BTreeMap<String, (u32, u32, i64)> = BTreeMap::new();
+        for id in w.citizens() {
+            let Some(h) = w.comp::<Household>(id) else { continue };
+            let Some(home) = h.home else { continue };
+            if !w.has::<Brain>(id) || !citysim::systems::demography::is_adult(&w, id) {
+                continue;
+            }
+            let b = w.comp::<Building>(home).expect("home");
+            let owner = if b.owner.is_none() { "city" } else { "corp" };
+            let job = if w.has::<Job>(id) { "job" } else { "dole" };
+            let lod = w.comp::<Brain>(id).map(|b| b.lod).unwrap_or(Lod::Statistical);
+            let key = format!("t{} {owner} {job} {lod:?}", b.tier);
+            let e = by.entry(key).or_default();
+            e.0 += 1;
+            e.1 += u32::from(h.arrears > 0);
+            e.2 += w.comp::<Wallet>(id).map_or(0, |w| w.coins);
+        }
+        eprintln!("--- day {} (adults, in arrears, mean coins at 00:01)", w.day());
+        for (k, (n, a, c)) in by {
+            eprintln!("{k:32} {n:5} {a:5} {:6.1}", c as f64 / f64::from(n.max(1)));
+        }
+    }
+}
+
+/// M11: per-system wall time over one day of the default city (bind and
+/// ownership included) after `WARM_DAYS`; `CITYSIM_ASSETS` picks the config.
+#[test]
+#[ignore]
+fn probe_m11_timing() {
+    let warm_days: u64 = std::env::var("WARM_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(45);
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(warm_days * TICKS_PER_DAY);
+    let names = [
+        "lod",
+        "needs",
+        "memory",
+        "mood",
+        "think",
+        "plan",
+        "exec",
+        "ownership",
+        "economy",
+        "bind",
+        "law",
+        "social",
+        "gang",
+        "demography",
+        "stats",
+    ];
+    let mut acc = [0f64; 15];
+    for _ in 0..TICKS_PER_DAY {
+        w.apply_commands();
+        let steps: [&dyn Fn(&mut World); 15] = [
+            &citysim::systems::lod::run,
+            &citysim::needs::run,
+            &citysim::systems::memory::run,
+            &citysim::mood::run,
+            &citysim::systems::think::run,
+            &citysim::systems::plan::run,
+            &citysim::exec::run,
+            &citysim::systems::ownership::run,
+            &citysim::systems::economy::run,
+            &citysim::systems::bind::run,
+            &citysim::systems::law::run,
+            &citysim::systems::social::run,
+            &citysim::systems::gang::run,
+            &citysim::systems::demography::run,
+            &citysim::systems::stats::run,
+        ];
+        for (i, step) in steps.iter().enumerate() {
+            let t = Instant::now();
+            step(&mut w);
+            acc[i] += t.elapsed().as_secs_f64();
+        }
+        w.tick += 1;
+    }
+    let total: f64 = acc.iter().sum();
+    for (name, secs) in names.iter().zip(acc) {
+        eprintln!("{name:>10} {:7.1} ms  {:5.1}%", secs * 1e3, secs / total * 100.0);
+    }
+    let gang: usize = w.gangs().iter().filter_map(|&g| w.comp::<citysim::Gang>(g)).map(|g| g.members.len()).sum();
+    eprintln!(
+        "day total {:.0} ms -> {:.0} ticks/s; gang members {gang}, guards {}",
+        total * 1e3,
+        TICKS_PER_DAY as f64 / total,
+        w.guards().len()
+    );
+}
+
+/// M11: who is evicted: jailed, employed, gang, tier, coins, last dole.
+#[test]
+#[ignore]
+fn probe_m11_evictions() {
+    use citysim::{Brain, Building, EventKind, GangMember, Household, Job, Sentence, Wallet};
+    use std::collections::BTreeMap;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(60);
+    let mut w = World::new(42, Config::load());
+    let mut tally: BTreeMap<String, u32> = BTreeMap::new();
+    let mut next = 0u64;
+    let mut snap: BTreeMap<citysim::EntityId, String> = BTreeMap::new();
+    for _ in 0..days * 24 {
+        // Snapshot the state an hour before; evictions happen at midnight.
+        if w.tick_of_day() == 23 * 60 {
+            snap = {
+                w.citizens()
+                    .into_iter()
+                    .filter(|&a| w.comp::<Household>(a).is_some_and(|h| h.arrears >= 6 && h.home.is_some()))
+                    .map(|a| {
+                        let tier = w
+                            .comp::<Household>(a)
+                            .and_then(|h| h.home)
+                            .and_then(|h| w.comp::<Building>(h))
+                            .map_or(9, |b| b.tier);
+                        let lod = w.comp::<Brain>(a).map(|b| format!("{:?}", b.lod)).unwrap_or_default();
+                        let dole = w.comp::<Brain>(a).and_then(|b| b.last_dole_day).map_or(-1, |d| d as i64);
+                        let s = format!(
+                            "jail {} job {} gang {} t{tier} {lod} coins {} dole_age {}",
+                            w.has::<Sentence>(a),
+                            w.has::<Job>(a),
+                            w.has::<GangMember>(a),
+                            w.comp::<Wallet>(a).map_or(0, |w| w.coins),
+                            w.day() as i64 - dole
+                        );
+                        (a, s)
+                    })
+                    .collect()
+            };
+        }
+        w.run_ticks(60);
+        for e in w.events.iter().filter(|e| e.id >= next && e.kind == EventKind::Evicted) {
+            let key = snap.get(&e.actors[0]).cloned().unwrap_or_else(|| "spouse/unknown".into());
+            let short: String = key.split(" coins").next().unwrap_or("").to_string();
+            *tally.entry(short).or_default() += 1;
+            eprintln!("day {} {}", w.day(), key);
+        }
+        next = w.events.back().map_or(0, |e| e.id + 1);
+    }
+    for (k, n) in tally {
+        eprintln!("{n:4} {k}");
+    }
+}
+
+/// M11: plan_for wall time by group and goal over one day at day 45.
+#[test]
+#[ignore]
+fn probe_m11_plan_time() {
+    use citysim::{Brain, GangMember, Job, Role};
+    use std::collections::BTreeMap;
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(45 * TICKS_PER_DAY);
+    let group = |w: &World, id: citysim::EntityId| -> &'static str {
+        if w.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) {
+            if citysim::systems::law::is_private_guard(w, id) {
+                "private"
+            } else {
+                "guard"
+            }
+        } else if w.has::<GangMember>(id) {
+            "gang"
+        } else {
+            "other"
+        }
+    };
+    let mut acc: BTreeMap<String, (u32, f64)> = BTreeMap::new();
+    for _ in 0..TICKS_PER_DAY {
+        w.apply_commands();
+        citysim::systems::lod::run(&mut w);
+        citysim::needs::run(&mut w);
+        citysim::systems::memory::run(&mut w);
+        citysim::mood::run(&mut w);
+        citysim::systems::think::run(&mut w);
+        // plan::run, timed per call
+        let tick = w.tick;
+        let (mut planned, mut expansions) = (0usize, 0usize);
+        while planned < w.config.brain.plan_budget_per_tick
+            && expansions < w.config.brain.plan_expansion_budget_per_tick
+        {
+            let Some((&(u, id), &enq)) = w.plan_queue.iter().next() else { break };
+            w.plan_queue.remove(&(u, id));
+            if let Some(b) = w.comp_mut::<Brain>(id) {
+                b.plan_queued = false;
+            }
+            if tick.saturating_sub(enq) > citysim::systems::plan::PLAN_QUEUE_MAX_AGE {
+                continue;
+            }
+            let Some(goal) = w.comp::<Brain>(id).filter(|b| b.plan.is_none()).and_then(|b| b.current_goal) else {
+                continue;
+            };
+            planned += 1;
+            let g = group(&w, id);
+            let t = Instant::now();
+            expansions += citysim::systems::plan::plan_for(&mut w, id, goal);
+            let e = acc.entry(format!("{g:8} {goal:?}")).or_default();
+            e.0 += 1;
+            e.1 += t.elapsed().as_secs_f64();
+        }
+        citysim::exec::run(&mut w);
+        citysim::systems::ownership::run(&mut w);
+        citysim::systems::economy::run(&mut w);
+        citysim::systems::bind::run(&mut w);
+        citysim::systems::law::run(&mut w);
+        citysim::systems::social::run(&mut w);
+        citysim::systems::gang::run(&mut w);
+        citysim::systems::demography::run(&mut w);
+        citysim::systems::stats::run(&mut w);
+        w.tick += 1;
+    }
+    let mut v: Vec<_> = acc.into_iter().collect();
+    v.sort_by(|a, b| b.1 .1.total_cmp(&a.1 .1));
+    let total: f64 = v.iter().map(|x| x.1 .1).sum();
+    eprintln!("plan total {:.1} ms", total * 1e3);
+    for (k, (n, s)) in v.iter().take(20) {
+        eprintln!("{:7.1} ms {n:6} calls {:6.1} us/call  {k}", s * 1e3, s * 1e6 / f64::from(*n));
+    }
+}
+
+/// M11: starvation deaths over a run, children (under 18) and adults.
+#[test]
+#[ignore]
+fn probe_m11_starvation_by_age() {
+    use citysim::{EventKind, Identity};
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let mut w = World::new(42, Config::load());
+    let (mut kids, mut adults, mut next) = (0, 0, 0u64);
+    for _ in 0..days * 24 {
+        w.run_ticks(60);
+        for e in
+            w.events.iter().filter(|e| e.id >= next && e.kind == EventKind::Death && e.text.ends_with("Starvation"))
+        {
+            let child = w.comp::<Identity>(e.actors[0]).is_some_and(|i| i.age_years() < 18);
+            if child {
+                kids += 1;
+            } else {
+                adults += 1;
+            }
+        }
+        next = w.events.back().map_or(0, |e| e.id + 1);
+    }
+    eprintln!("starvation over {days} days: {kids} children, {adults} adults");
+}

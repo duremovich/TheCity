@@ -96,8 +96,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             true
         }
         ActionKind::Drink => at(world, id, BuildingKind::Bar) && coins >= 2,
+        // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
-            at(world, id, BuildingKind::Hall) && world.comp::<Job>(id).is_some_and(|j| j.wage_collectable(world.day()))
+            world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
+                && world.comp::<Job>(id).is_some_and(|j| j.wage_collectable(world.day()))
         }
         ActionKind::CollectDole => {
             at(world, id, BuildingKind::Hall)
@@ -190,11 +192,13 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             }
         }
         ActionKind::Drink => {
-            if let Some(w) = world.comp_mut::<Wallet>(id) {
-                w.coins -= 2;
-            }
-            if let Some(t) = world.treasury_mut() {
-                t.coins += 2; // the Bar is city-owned in v1
+            // M11: the Bar's owner takes the 2 coins (the Treasury owns a city Bar).
+            let bar = world.comp::<Position>(id).and_then(|p| p.building);
+            let owner = bar.and_then(|b| world.owner_of(b));
+            let paid =
+                crate::systems::ownership::pay(world, Some(id), owner, 2, crate::systems::ownership::Flow::Drink);
+            if let Some(b) = bar {
+                crate::systems::ownership::credit(world, b, paid);
             }
         }
         _ => {}
@@ -213,12 +217,8 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         }
         ActionKind::BuyFood => {
             if let Some((_, paid)) = world.pending_purchase.remove(&id) {
-                if let Some(w) = world.comp_mut::<Wallet>(id) {
-                    w.coins += paid;
-                }
-                if let Some(t) = world.treasury_mut() {
-                    t.coins -= paid;
-                }
+                let market = world.local(id, BuildingKind::Market);
+                economy::refund_food(world, id, market, paid);
             }
         }
         _ => {}
@@ -360,14 +360,20 @@ pub fn on_complete(
                 s.farming = (s.farming + 0.002).min(1.0);
             }
             end_shift(world, id);
+            let collect_here = farm.is_some() && world.wage_desk(id) == farm;
             // Hauling: appended to the plan if the farm has enough stock.
             let min = world.config.economy.haul_min_stock;
             let stock = farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food);
             if stock >= min {
                 if let (Some(farm), Some(b)) = (farm, world.comp_mut::<Brain>(id)) {
-                    let at = usize::from(b.plan_step) + 1;
+                    let mut at = usize::from(b.plan_step) + 1;
                     if let Some(plan) = b.plan.as_mut() {
-                        // Insert right after this step: the farmer is still at the farm.
+                        // Insert right after this step: the farmer is still at the
+                        // farm. M11 D13: a corp farmer collects at the Farm, so
+                        // the haul goes after that wage step.
+                        if plan.steps.get(at).is_some_and(|s| s.action == ActionKind::CollectWage) && collect_here {
+                            at += 1;
+                        }
                         let at = at.min(plan.steps.len());
                         plan.steps.insert(
                             at,
@@ -599,10 +605,12 @@ pub fn on_complete(
             let market = world.local(id, BuildingKind::Market);
             let price = market.map_or(0, |m| world.price_at(m));
             let pay = (price as f32 * 0.6).floor() as i64;
-            let treasury = world.treasury().map_or(0, |t| t.coins);
+            // M11 D46: the Market's owner buys (refused when it cannot pay).
+            let owner = market.and_then(|m| world.owner_of(m));
+            let purse = world.purse(owner);
             let Some(inv) = world.comp::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
             let units = inv.food.saturating_sub(inv.stolen_food).min(3);
-            if units == 0 || treasury < pay * i64::from(units) {
+            if units == 0 || purse < pay * i64::from(units) {
                 return StepResult::Failed(FailReason::StockGone);
             }
             if let Some(inv) = world.comp_mut::<Inventory>(id) {
@@ -611,12 +619,13 @@ pub fn on_complete(
             if let Some(m) = market.and_then(|m| world.comp_mut::<Building>(m)) {
                 m.stock_food += units;
             }
-            if let Some(t) = world.treasury_mut() {
-                t.coins -= pay * i64::from(units);
-            }
-            if let Some(w) = world.comp_mut::<Wallet>(id) {
-                w.coins += pay * i64::from(units);
-            }
+            crate::systems::ownership::pay(
+                world,
+                owner,
+                Some(id),
+                pay * i64::from(units),
+                crate::systems::ownership::Flow::SellFood,
+            );
             world.remember(id, MemoryKind::Paid, None, 0.1, 0.1, false);
             StepResult::Done
         }
@@ -646,11 +655,16 @@ fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Opti
         inv.stolen_food = (inv.stolen_food + units).min(inv.food);
     }
     world.stats.current.thefts += 1;
+    // M11 D20: a corp-owned Market books the loss at its price.
+    if kind == BuildingKind::Market {
+        let coins = i64::from(units) * world.price_at(b);
+        crate::systems::ownership::note_loss(world, b, coins, Some(id));
+    }
     let name = world.name_of(id);
     world.push_event(
         crate::events::EventKind::Theft,
         &[id, b],
-        format!("{name} stole {units} food from the {kind}#{}", b.index),
+        format!("{name} stole {units} food from the {}#{}", kind.label(), b.index),
     );
     world.release_all(id);
     // Witnesses: the victims are the building's occupants (a Home's residents,

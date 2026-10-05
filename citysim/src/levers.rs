@@ -75,6 +75,20 @@ pub enum PlayerCommand {
     FireAllGuards,
     /// Set the city Treasury to exactly this many coins (may be negative).
     SetTreasury(i64),
+    // --- M11 levers (docs/M11_OWNERSHIP.md § 8) ---
+    /// Rent on city-owned Blocks per tier (Sump, Mid, Spire), each `0..=20`.
+    SetCityRent([i64; 3]),
+    /// A ceiling on every Block's rent; `None` lifts it.
+    SetRentCap(Option<i64>),
+    /// The city buys a building at its value from its owner.
+    Nationalise(EntityId),
+    /// Treasury -> a corp's treasury.
+    Subsidise {
+        corp: EntityId,
+        amount: i64,
+    },
+    /// The city never evicts while set.
+    NoCityEvictions(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -116,6 +130,15 @@ pub struct Levers {
     pub immigration_per_week: u8,
     /// `0..=10`, default 3.
     pub dole_per_day: u8,
+    /// M11: rent on city-owned Blocks per tier (initially `[rent] base`).
+    #[serde(default)]
+    pub city_rent: [i64; 3],
+    /// M11: a ceiling on any Block's rent.
+    #[serde(default)]
+    pub rent_cap: Option<i64>,
+    /// M11: the city never evicts.
+    #[serde(default)]
+    pub no_city_evictions: bool,
 }
 
 fn rects_overlap(a: Rect, b: Rect) -> bool {
@@ -130,6 +153,9 @@ impl Levers {
             guard_count: cfg.levers.guard_count,
             immigration_per_week: cfg.levers.immigration_per_week,
             dole_per_day: cfg.levers.dole_per_day,
+            city_rent: cfg.rent.base,
+            rent_cap: None,
+            no_city_evictions: false,
         }
     }
 }
@@ -254,6 +280,40 @@ impl World {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
+                };
+            }
+            PlayerCommand::SetCityRent(rent) => {
+                self.levers.city_rent = rent.map(|r| r.clamp(0, 20));
+                let [a, b, c] = self.levers.city_rent;
+                self.push_event(
+                    EventKind::PlayerAction,
+                    &[],
+                    format!("City rent set to {a}/{b}/{c} per Block per day"),
+                );
+            }
+            PlayerCommand::SetRentCap(cap) => {
+                self.levers.rent_cap = cap.map(|c| c.max(0));
+                let text = match self.levers.rent_cap {
+                    Some(c) => format!("Rent capped at {c} per Block per day"),
+                    None => "Rent cap lifted".to_string(),
+                };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::NoCityEvictions(on) => {
+                self.levers.no_city_evictions = *on;
+                let text = if *on { "The city stops evicting" } else { "The city evicts again" };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::Nationalise(b) => {
+                let _ = match crate::systems::ownership::nationalise(self, *b) {
+                    Ok(text) => self.push_event(EventKind::PlayerAction, &[*b], text),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*b], format!("Nationalise: {e}")),
+                };
+            }
+            PlayerCommand::Subsidise { corp, amount } => {
+                let _ = match crate::systems::ownership::subsidise(self, *corp, *amount) {
+                    Ok(text) => self.push_event(EventKind::PlayerAction, &[*corp], text),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*corp], format!("Subsidise: {e}")),
                 };
             }
             PlayerCommand::DemolishHome(home) => {
@@ -390,6 +450,10 @@ impl World {
         if b.demolished {
             return Err("already demolished".into());
         }
+        // M11 D44: only the city's own Blocks.
+        if b.owner.is_some() {
+            return Err(format!("owned by {}; nationalise it first", self.owner_label(b.owner)));
+        }
         let (rect, door, occupants) = (b.rect, b.door, b.occupants.clone());
         let outside = self.outside_door(b);
         for o in occupants {
@@ -511,6 +575,10 @@ impl World {
                 occupants: Vec::new(),
                 demolished: false,
                 tier: 1,
+                rent_per_day: self.levers.city_rent[1],
+                revenue_today: 0,
+                revenue: std::collections::VecDeque::new(),
+                secured_by: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);
@@ -518,7 +586,7 @@ impl World {
         let homeless: Vec<EntityId> = self
             .citizens()
             .into_iter()
-            .filter(|&c| matches!(self.comp::<Household>(c), Some(Household { home: None })))
+            .filter(|&c| matches!(self.comp::<Household>(c), Some(Household { home: None, .. })))
             .take(usize::from(capacity))
             .collect();
         let housed = homeless.len();

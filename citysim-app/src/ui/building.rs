@@ -5,8 +5,8 @@
 use egui_macroquad::egui::{self, Color32, ProgressBar, RichText, Ui};
 
 use citysim::{
-    time, Brain, Building, BuildingKind, Child, Corpse, EntityId, Gang, GangMember, Household, Identity, Job, Lod,
-    Market, PlayerCommand, Position, Role, Sentence, Wallet, World, TICKS_PER_DAY,
+    time, Brain, Building, BuildingKind, Child, Corp, Corpse, EntityId, Gang, GangMember, Household, Identity, Job,
+    Lod, Market, PlayerCommand, Position, Role, Sentence, Wallet, World, TICKS_PER_DAY,
 };
 
 use crate::App;
@@ -126,19 +126,34 @@ fn header(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
             b.rect.w, b.rect.h, b.rect.x, b.rect.y, b.door, b.capacity
         ));
         ui.horizontal(|ui| {
+            ui.label("Owner");
             match b.owner {
-                Some(o) => {
-                    ui.label("Owner");
-                    agent_link(ui, app, world, o);
+                Some(o) if world.has::<Corp>(o) => {
+                    let i = world.corp_index(o);
+                    ui.colored_label(crate::ui::corp_colour(i), world.owner_label(Some(o)));
+                    if let Some(c) = world.comp::<Corp>(o) {
+                        ui.label(format!("· {}¢", c.treasury));
+                    }
                 }
+                Some(o) if world.has::<Gang>(o) => {
+                    ui.colored_label(crate::ui::gang_colour(world.gang_index(o)), world.owner_label(Some(o)));
+                }
+                Some(o) => agent_link(ui, app, world, o),
                 None => {
-                    ui.label("City-owned");
+                    ui.label("the city");
                 }
             }
             if b.demolished {
                 ui.colored_label(RED, "Demolished");
             }
         });
+        if b.kind == BuildingKind::Home {
+            ui.label(format!("Rent {}¢/day · tier {}", b.rent_per_day, b.tier));
+        }
+        if !b.revenue.is_empty() || b.revenue_today != 0 {
+            let week: i64 = b.revenue.iter().sum();
+            ui.label(format!("Revenue {}¢ today, {}¢ over {} days", b.revenue_today, week, b.revenue.len()));
+        }
         if let Some((gid, gang)) = territory_of(world, id) {
             ui.horizontal(|ui| {
                 ui.colored_label(crate::ui::gang_colour(world.gang_index(gid)), format!("Territory of {}", gang.name));
@@ -171,8 +186,13 @@ fn home(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
                 ui.label(format!("{coins}¢"));
                 let job = world.comp::<Job>(r).map_or("no job".to_string(), |j| j.role.label().to_string());
                 ui.label(job);
-                let flags =
-                    [world.has::<GangMember>(r).then_some("gang"), world.has::<Sentence>(r).then_some("jailed")];
+                let arrears = world.comp::<Household>(r).map_or(0, |h| h.arrears);
+                let behind = (arrears > 0).then(|| format!("{arrears} days behind"));
+                let flags = [
+                    world.has::<GangMember>(r).then(|| "gang".to_string()),
+                    world.has::<Sentence>(r).then(|| "jailed".to_string()),
+                    behind,
+                ];
                 ui.label(flags.into_iter().flatten().collect::<Vec<_>>().join(" "));
                 ui.end_row();
             }

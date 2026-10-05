@@ -75,7 +75,7 @@ pub enum ActionKind {
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 53] = [
+pub const PLANNABLE: [ActionKind; 54] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -91,6 +91,8 @@ pub const PLANNABLE: [ActionKind; 53] = [
     ActionKind::GoTo(LocationKey::SuspectTile),
     ActionKind::GoTo(LocationKey::CorpseTile),
     ActionKind::GoTo(LocationKey::PatrolWaypoint),
+    // M11 D13: a non-city job's wage desk, a private guard's office.
+    ActionKind::GoTo(LocationKey::Workplace),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -235,7 +237,11 @@ pub struct PlanCtx {
     /// A guard within 8 tiles.
     pub guard8: bool,
     pub season: Season,
-    pub treasury_negative: bool,
+    /// M11: the employer's owner (the Treasury for a city job) is below zero.
+    pub payer_negative: bool,
+    /// M11 D13: where CollectWage runs: `Hall` for a city job, else the
+    /// employer's key (`Farm`, `Market`, `Bar`, or `Workplace`).
+    pub wage_at: LocationKey,
     pub wage_collectable: bool,
     pub dole_available: bool,
     pub on_shift: bool,
@@ -339,6 +345,12 @@ impl PlanCtx {
             .filter(|&e| world.comp::<Building>(e).is_some_and(|b| b.kind == BuildingKind::Farm));
         let tod = world.tick_of_day();
         let day = world.day();
+        let wage_desk = job.and_then(|_| world.wage_desk(agent));
+        let wage_at = match wage_desk.and_then(|d| world.comp::<Building>(d)) {
+            Some(b) if b.kind != BuildingKind::Hall => LocationKey::of_building(b.kind),
+            _ => LocationKey::Hall,
+        };
+        let payer = job.and_then(|j| j.employer).and_then(|e| world.owner_of(e));
 
         // Distances: every singleton building, the agent's Home, the employer's
         // workplace for Farm, and the bound target.
@@ -370,6 +382,9 @@ impl PlanCtx {
                 add(LocationKey::of_building(kind), world.local(agent, kind));
             }
             add(LocationKey::Hideout, crate::systems::gang::hideout_for(world, agent));
+            if wage_at == LocationKey::Workplace {
+                add(LocationKey::Workplace, world.wage_desk(agent));
+            }
             add(LocationKey::TargetHome, target);
             if let Some(b) = world
                 .comp::<crate::components::Brain>(agent)
@@ -418,7 +433,8 @@ impl PlanCtx {
             dark: world.is_dark(),
             guard8,
             season: world.season(),
-            treasury_negative: world.treasury().is_some_and(|t| t.coins < 0),
+            payer_negative: world.purse(payer) < 0,
+            wage_at,
             // Whether wages are owed is symbolic (`has_wage_due`); the context
             // carries only today's short-payment block.
             wage_collectable: job.is_some_and(|j| j.last_wage_attempt_day != Some(day)),
@@ -431,7 +447,7 @@ impl PlanCtx {
             homeless: home.is_none(),
             workplace: job
                 .filter(|j| crate::exec::routine::shift_pending(world, agent, j))
-                .map(|j| crate::exec::routine::workplace_key(j.role)),
+                .map(|j| crate::exec::routine::workplace_key_for(world, agent, j)),
             pantry: home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food),
             target_pantry,
             target_occupied,
@@ -628,7 +644,7 @@ impl ActionKind {
             ActionKind::GuardJail => at(LocationKey::Jail) && !ws.shift_done && ctx.on_shift,
             ActionKind::TendGraves => at(LocationKey::Cemetery) && !ws.shift_done && ctx.on_shift,
             ActionKind::HaulToMarket => at(LocationKey::Farm) && ctx.farm_stock >= ctx.haul_min_stock,
-            ActionKind::CollectWage => at(LocationKey::Hall) && ws.has_wage_due && ctx.wage_collectable,
+            ActionKind::CollectWage => at(ctx.wage_at) && ws.has_wage_due && ctx.wage_collectable,
             ActionKind::CollectDole => at(LocationKey::Hall) && ctx.dole_available,
             ActionKind::SellFood => at(LocationKey::Market) && ws.has_food && !ws.carrying_stolen,
             ActionKind::Drink => at(LocationKey::Bar) && ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full,
@@ -874,7 +890,7 @@ impl ActionKind {
             ActionKind::FarmWork => 3.0 - ctx.farming * 2.0,
             ActionKind::HaulToMarket => 3.0,
             ActionKind::ClerkWork | ActionKind::BartendWork | ActionKind::GuardJail | ActionKind::TendGraves => 3.0,
-            ActionKind::CollectWage => 2.0 + if ctx.treasury_negative { 4.0 } else { 0.0 },
+            ActionKind::CollectWage => 2.0 + if ctx.payer_negative { 4.0 } else { 0.0 },
             ActionKind::SellFood => 3.0 - ctx.greed * 2.0,
             ActionKind::Fence => 3.0 + ctx.lawfulness * 8.0,
             ActionKind::Chat => 3.0 - ctx.sociability * 2.0,

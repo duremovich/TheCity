@@ -85,7 +85,7 @@ pub fn snapshot(world: &mut World) {
         if world.has::<Job>(id) {
             employed += 1;
         }
-        if matches!(world.comp::<Household>(id), Some(Household { home: None })) {
+        if matches!(world.comp::<Household>(id), Some(Household { home: None, .. })) {
             homeless += 1;
         }
         if world.has::<Sentence>(id) {
@@ -148,4 +148,40 @@ pub fn snapshot(world: &mut World) {
     row.tier_full = tiers[0];
     row.tier_coarse = tiers[1];
     row.tier_stat = tiers[2];
+    let mut slots = vec![None; crate::stats::CORP_SLOTS];
+    for c in world.corps() {
+        if let Some(cc) = world.comp::<crate::components::Corp>(c) {
+            if let Some(s) = cc.slot.map(usize::from).filter(|&s| s < slots.len()) {
+                slots[s] = Some((cc.treasury, cc.order));
+            }
+        }
+    }
+    world.stats.current.corps = slots;
+    let mut coins: Vec<i64> = citizens
+        .iter()
+        .filter(|&&id| world.has::<Brain>(id) && crate::systems::demography::is_adult(world, id))
+        .filter_map(|&id| world.comp::<crate::components::Wallet>(id).map(|w| w.coins.max(0)))
+        .collect();
+    let (gini, top10) = wealth_spread(&mut coins);
+    let row = &mut world.stats.current;
+    row.wallets = coins.iter().sum();
+    row.wallet_gini = gini;
+    row.wallet_top10 = top10;
+}
+
+/// `(Gini, the richest tenth's share)` of non-negative holdings; sorts `v`.
+pub fn wealth_spread(v: &mut [i64]) -> (f32, f32) {
+    v.sort_unstable();
+    let n = v.len();
+    let total: i64 = v.iter().sum();
+    if n == 0 || total <= 0 {
+        return (0.0, 0.0);
+    }
+    // Gini = sum_i (2i - n - 1) x_i / (n sum x), i from 1, ascending.
+    let weighted: i128 =
+        v.iter().enumerate().map(|(i, &x)| (2 * (i as i128 + 1) - n as i128 - 1) * i128::from(x)).sum();
+    let gini = weighted as f64 / (n as f64 * total as f64);
+    let top = n.div_ceil(10);
+    let top_sum: i64 = v[n - top..].iter().sum();
+    (gini as f32, (top_sum as f64 / total as f64) as f32)
 }

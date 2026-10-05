@@ -2,7 +2,7 @@
 //! as `Vec<Option<T>>` on [`crate::World`], indexed by `EntityId.index`.
 
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 
 use crate::entity::EntityId;
@@ -352,6 +352,10 @@ pub enum MemoryKind {
     Tantrum,
     /// M9: broken out of the Jail by the gang.
     Escaped,
+    /// M11: could not pay the day's rent in full.
+    RentShort,
+    /// M11: put out of the Home for arrears.
+    Evicted,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -561,6 +565,252 @@ pub struct Law {
     /// Pending since the last rescoring. Not saved.
     #[serde(skip)]
     pub shocks: Vec<LawShock>,
+    /// M11 D21: a corp's bought Crackdown (phase 3).
+    #[serde(default)]
+    pub lobby: Option<LobbyHold>,
+}
+
+/// M11 D21: a corp paid the captain to crack down on `gang` until `until`.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct LobbyHold {
+    pub corp: EntityId,
+    pub gang: EntityId,
+    pub until: Tick,
+}
+
+// ---------------------------------------------------------------------------
+// M11: corps (docs/M11_OWNERSHIP.md § 5)
+// ---------------------------------------------------------------------------
+
+/// D41: the outside parent a branch belongs to (M17 gives it a body).
+pub type ParentId = u32;
+
+/// D49 hook: who decides for a faction. `Dictator` = the corp's `exec` / the
+/// gang's `leader`. M16 adds the vote.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub enum Governance {
+    #[default]
+    Dictator,
+    Board {
+        members: Vec<EntityId>,
+    },
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum Niche {
+    Food,
+    Housing,
+    Security,
+}
+
+impl Niche {
+    pub const ALL: [Niche; 3] = [Niche::Food, Niche::Housing, Niche::Security];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Niche::Food => "Food",
+            Niche::Housing => "Housing",
+            Niche::Security => "Security",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Niche> {
+        Niche::ALL.into_iter().find(|n| n.label() == s)
+    }
+}
+
+impl fmt::Display for Niche {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.label())
+    }
+}
+
+/// A corp's standing order (phase 3's brain; phase 2 seeds every corp at `Hunker`).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
+pub enum CorpOrder {
+    Grow,
+    Squeeze,
+    Undercut,
+    Acquire,
+    Secure,
+    #[default]
+    Hunker,
+    Lobby,
+}
+
+impl CorpOrder {
+    pub const ALL: [CorpOrder; 7] = [
+        CorpOrder::Grow,
+        CorpOrder::Squeeze,
+        CorpOrder::Undercut,
+        CorpOrder::Acquire,
+        CorpOrder::Secure,
+        CorpOrder::Hunker,
+        CorpOrder::Lobby,
+    ];
+}
+
+impl fmt::Display for CorpOrder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+/// Something that happened to a corp since its last rescoring.
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum CorpShock {
+    Robbed(i64),
+    Extorted,
+    EmployeeKilled,
+    Bankrupt(EntityId),
+    Strike,
+    Undercut,
+    BuildingLost,
+}
+
+impl CorpShock {
+    pub fn severity(self) -> f32 {
+        match self {
+            CorpShock::Robbed(c) if c > 100 => 0.6,
+            CorpShock::Robbed(_) => 0.3,
+            CorpShock::Extorted => 0.4,
+            CorpShock::EmployeeKilled => 0.5,
+            CorpShock::Bankrupt(_) => 0.5,
+            CorpShock::Strike => 0.8,
+            CorpShock::Undercut => 0.3,
+            CorpShock::BuildingLost => 0.5,
+        }
+    }
+}
+
+/// One `(order, niche)` score from the last rescoring, for the Corp panel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CorpOrderScore {
+    pub order: CorpOrder,
+    pub niche: Niche,
+    pub score: f32,
+    pub considerations: Vec<Consideration>,
+}
+
+/// D20: a crime loss on an owned building, and the gang behind it if any.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct CorpLoss {
+    pub tick: Tick,
+    pub coins: i64,
+    pub gang: Option<EntityId>,
+}
+
+fn one_f32() -> f32 {
+    1.0
+}
+
+/// A corporation: a faction that owns buildings, earns through them and pays
+/// their upkeep. Its own entity, carrying only this component.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct Corp {
+    pub name: String,
+    pub niches: BTreeSet<Niche>,
+    pub treasury: i64,
+    /// The agent whose Personality the brain reads; `None` = a default.
+    pub exec: Option<EntityId>,
+    /// Sorted; redundant with `Building.owner`, kept for O(1) listing.
+    pub buildings: Vec<EntityId>,
+    #[serde(default)]
+    pub order: CorpOrder,
+    #[serde(default)]
+    pub order_niche: Option<Niche>,
+    #[serde(default)]
+    pub order_since: Tick,
+    #[serde(skip)]
+    pub order_trace: Vec<CorpOrderScore>,
+    #[serde(skip)]
+    pub shocks: Vec<CorpShock>,
+    /// Per niche: Food markup, Housing rent level, Security contract price.
+    #[serde(default)]
+    pub price_level: BTreeMap<Niche, f32>,
+    /// Net coins per day, last 14, newest last.
+    #[serde(default)]
+    pub cashflow: VecDeque<i64>,
+    /// D20: crime losses on owned buildings, last 14 days.
+    #[serde(default)]
+    pub loss_log: VecDeque<CorpLoss>,
+    #[serde(default)]
+    pub negative_since: Option<Tick>,
+    /// Security only: `(client building, until)`, sorted (phase 3).
+    #[serde(default)]
+    pub contracts: Vec<(EntityId, Tick)>,
+    #[serde(default)]
+    pub lobby_until: Option<Tick>,
+    #[serde(default)]
+    pub last_acquisition_tick: Option<Tick>,
+    /// D38: the seeding row (CSV columns); spinoffs and incorporations `None`.
+    #[serde(default)]
+    pub slot: Option<u8>,
+    /// The `cash` denominator: `treasury_initial`, or the treasury at founding.
+    #[serde(default)]
+    pub treasury_ref: i64,
+    /// Net coins through `World::purse_add` today; rolled into `cashflow`.
+    #[serde(default)]
+    pub cashflow_today: i64,
+    /// D22: wages paid × this (Food Squeeze 0.9).
+    #[serde(default = "one_f32")]
+    pub wage_mult: f32,
+    /// D22: Housing Squeeze evicts sooner.
+    #[serde(default)]
+    pub evict_days_override: Option<u8>,
+    #[serde(default)]
+    pub share_hist: BTreeMap<Niche, VecDeque<f32>>,
+    /// D23.
+    #[serde(default)]
+    pub last_build_tick: Option<Tick>,
+    /// D41: a branch of an outside parent (no behaviour in M11).
+    #[serde(default)]
+    pub parent: Option<ParentId>,
+    #[serde(default)]
+    pub outside_treasury: i64,
+    /// D49: `Dictator` = `exec` decides; no Board in M11.
+    #[serde(default)]
+    pub governance: Governance,
+}
+
+impl Corp {
+    pub fn new(name: String, niches: BTreeSet<Niche>, treasury: i64, exec: Option<EntityId>) -> Corp {
+        let price_level = niches.iter().map(|&n| (n, 1.0)).collect();
+        Corp {
+            name,
+            niches,
+            treasury,
+            exec,
+            buildings: Vec::new(),
+            order: CorpOrder::Hunker,
+            order_niche: None,
+            order_since: 0,
+            order_trace: Vec::new(),
+            shocks: Vec::new(),
+            price_level,
+            cashflow: VecDeque::new(),
+            loss_log: VecDeque::new(),
+            negative_since: None,
+            contracts: Vec::new(),
+            lobby_until: None,
+            last_acquisition_tick: None,
+            slot: None,
+            treasury_ref: treasury.max(1000),
+            cashflow_today: 0,
+            wage_mult: 1.0,
+            evict_days_override: None,
+            share_hist: BTreeMap::new(),
+            last_build_tick: None,
+            parent: None,
+            outside_treasury: 0,
+            governance: Governance::Dictator,
+        }
+    }
+
+    /// The niche's price level (1.0 when unset).
+    pub fn level(&self, niche: Niche) -> f32 {
+        self.price_level.get(&niche).copied().unwrap_or(1.0)
+    }
 }
 
 /// A gang's hold on a Home: `count` extortions by `gang`; at 3 the Home is territory.
@@ -687,6 +937,9 @@ pub struct Job {
     /// when the shift ends.
     #[serde(default)]
     pub duty_ticks: u16,
+    /// M11 D17: when hired (seeded jobs 0); Hunker fires the newest first.
+    #[serde(default)]
+    pub hired_tick: Tick,
 }
 
 impl Job {
@@ -752,6 +1005,26 @@ impl Job {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Household {
     pub home: Option<EntityId>,
+    /// M11 D6: this adult's share of the Home's rent, accrued daily; the
+    /// integer part is due at midnight.
+    #[serde(default)]
+    pub rent_due: f32,
+    /// M11 D7: consecutive midnights a due rent went short; eviction at `evict_days`.
+    #[serde(default)]
+    pub arrears: u8,
+    /// M11 D7: `(owner, tick)` of the last eviction; that owner refuses the
+    /// agent for `[rent] refuse_days`.
+    #[serde(default)]
+    pub evicted_by: Option<(Option<EntityId>, Tick)>,
+    /// Rent paid, decaying by a seventh a day (about the last week), for the inspector.
+    #[serde(default)]
+    pub rent_paid_7d: i64,
+}
+
+impl Household {
+    pub fn new(home: Option<EntityId>) -> Household {
+        Household { home, rent_due: 0.0, arrears: 0, evicted_by: None, rent_paid_7d: 0 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -982,6 +1255,19 @@ pub struct Building {
     /// Sleep safety bonus at home; rent is M11.
     #[serde(default = "default_tier")]
     pub tier: u8,
+    /// M11 D6: a Home's daily rent, split among its adult residents; set by
+    /// the owner at the rent pass.
+    #[serde(default)]
+    pub rent_per_day: i64,
+    /// M11: coins earned through this building today (gross), and the last
+    /// seven days, newest last.
+    #[serde(default)]
+    pub revenue_today: i64,
+    #[serde(default)]
+    pub revenue: VecDeque<i64>,
+    /// M11 D19: the security corp holding a contract on this building (phase 3).
+    #[serde(default)]
+    pub secured_by: Option<EntityId>,
 }
 
 pub fn default_tier() -> u8 {
@@ -1054,6 +1340,9 @@ pub struct Gang {
     /// M9: a bribe was taken; no Crackdown against this gang until here.
     #[serde(default)]
     pub paid_until: Option<Tick>,
+    /// M11 D49: who decides; `Dictator` = the leader. No Board in M11.
+    #[serde(default)]
+    pub governance: Governance,
 }
 
 impl Gang {
@@ -1079,6 +1368,7 @@ impl Gang {
             last_breakout_tick: None,
             bribe_until: None,
             paid_until: None,
+            governance: Governance::Dictator,
         }
     }
 
@@ -1094,6 +1384,26 @@ pub struct Market {
     pub price_food: i64,
     /// Cap 120, one per day.
     pub price_history: VecDeque<i64>,
+    /// M11 D16: units sold today, and the last seven days' sales and
+    /// opening stock (newest last), rolled in `economy::daily_price`.
+    #[serde(default)]
+    pub sales_today: u32,
+    #[serde(default)]
+    pub sales: VecDeque<u32>,
+    #[serde(default)]
+    pub stock_hist: VecDeque<u32>,
+}
+
+impl Market {
+    pub fn new(price_food: i64) -> Market {
+        Market {
+            price_food,
+            price_history: VecDeque::new(),
+            sales_today: 0,
+            sales: VecDeque::new(),
+            stock_hist: VecDeque::new(),
+        }
+    }
 }
 
 /// May go negative; wages unpaid while `< 0`.
@@ -1419,6 +1729,10 @@ pub enum LifeKind {
     Immigrated,
     Buried,
     Witnessed,
+    /// M11: opened a business on a Lot (phase 4).
+    Founded,
+    /// M11: became the exec of their own corp (phase 4).
+    Incorporated,
 }
 
 impl LifeKind {
@@ -1444,7 +1758,11 @@ impl LifeKind {
             | LifeKind::Killed
             | LifeKind::KilledSomeone
             | LifeKind::Died => 1.0,
-            LifeKind::Betrayed | LifeKind::RobbedSomeone | LifeKind::AssaultedSomeone => 0.9,
+            LifeKind::Betrayed
+            | LifeKind::RobbedSomeone
+            | LifeKind::AssaultedSomeone
+            | LifeKind::Founded
+            | LifeKind::Incorporated => 0.9,
             LifeKind::Robbed | LifeKind::Assaulted | LifeKind::Arrested | LifeKind::Escaped | LifeKind::JoinedGang => {
                 0.7
             }

@@ -24,6 +24,9 @@ warehouse_initial = 10000
 # M10: v1 5000, scaled for ~6.7x the payroll and dole.
 treasury_initial = 35000
 price_initial = 3
+# M11 (VISION "Brutality, enhancement and status": a deeply unequal city from day one): the initial
+# coin draw is multiplied by the Home's tier, Sump / Mid / Spire. v1_profile keeps [1, 1, 1].
+coins_by_tier = [0.5, 1.0, 3.0]
 # tick_of_day ranges [start, end): Work phase 6 days in 7; guards with an even index work nights.
 shift_day = [[540, 1080]]
 shift_night = [[1260, 1440], [0, 360]]
@@ -49,9 +52,11 @@ intimacy = 0.5
 home = { capacity = 6, stock_cap = 30 }
 # M10: farm 16 (160 farmers / 12 farms; v1 12), jail 80 (v1 16), hideout 30 (60 members; v1 12),
 # warehouse stock_cap 20,000 (v1 3000). Lots and Security Offices are inert until M11.
-farm = { capacity = 16, stock_cap = 400 }
-market = { capacity = 20, stock_cap = 2000 }
-bar = { capacity = 24, stock_cap = 0 }
+# M11 D17: staff = full staff of an owned niche building (Grow tops vacancies up to it; an
+# agent-owned Bar below it posts a bartender vacancy daily).
+farm = { capacity = 16, stock_cap = 400, staff = 14 }
+market = { capacity = 20, stock_cap = 2000, staff = 4 }
+bar = { capacity = 24, stock_cap = 0, staff = 3 }
 jail = { capacity = 80, stock_cap = 0 }
 cemetery = { capacity = 8, stock_cap = 0 }
 hall = { capacity = 20, stock_cap = 0 }
@@ -119,6 +124,8 @@ haul_min_stock = 10
 restock_floor = 1200
 restock_batch = 1200
 build_home_cost = 200
+# M11 D27: an exec's daily draw from their corp.
+wage_exec = 10
 
 [crime]
 steal_base_cost = 8.0
@@ -324,6 +331,88 @@ other_zone_weight = 0.25
 # M10 phase 5c: 0.0 (spec default 2.0; serde default 2.0 for older saves). See enemy_mult: in Full,
 # lawfulness does not predict who robs or beats someone, so the binder does not weigh it either.
 lawfulness_power = 0.0
+
+# M11 rent (docs/M11_OWNERSHIP.md § 4; plan D6/D7). Rent is per Home per day by tier
+# (0 Sump, 1 Mid, 2 Spire), split equally among the Home's adult residents. The city's own Blocks
+# charge levers.city_rent (initially this base); a corp's charge base x its Housing price level.
+[rent]
+# M11 phase 2: [0, 1, 2], not the spec's [1, 2, 4]. Seed 42, 2,000, 60 days each (M10-off control:
+# 2,897 thefts, 33 gang members, 8,823 ticks/s): [1, 2, 4] 8,209 thefts, 87 members, 7,037 ticks/s;
+# [1, 1, 1] 5,573 / 88 / 7,381; [0, 1, 2] 3,861 / 38 / 7,778. With the dole at 3 and food at 3 the
+# dole is exactly a meal, so any coin of rent from the 80 % on it is a meal skipped, hungry adults
+# steal and join gangs, and the bodies that buys sank throughput under the 8,000 gate. A Sump Block
+# is rent-free (a Dreg on the dole can afford tier 0); the dole at 4 with [1, 2, 4] also held theft
+# at 2,808 but cost the Treasury 500 a day. Phase 3 note: Squeeze cannot raise a 0 base.
+base = [0, 1, 2]
+evict_days = 7
+rehouse_coins_mult = 3   # a homeless adult moves in with coins >= 3 x the Home's rent
+refuse_days = 30
+sump_spoilage_mult = 1.5 # tier-0 pantries spoil this much faster
+# M11 phase 2 (seed 42, 2,000): with rent taken only from what is left at midnight, the 89 % on the
+# 3-coin dole (price 3) reach midnight with 0 coins once their opening savings are gone (mean 12 at
+# day 4, 2 at day 24): 600 adults were short every night and 118 were evicted on day 25 alone, against
+# a target of 10-40 in 120 days. Paying the due rent out of the dole or a wage when it is collected
+# (rent before food) leaves eviction to those with no income for a week: the jailed, the unpaid, and
+# everyone once the Treasury cannot pay the dole.
+pay_from_income = true
+# The jailed: arrears do not count while inside (the debt still runs and is paid on release). Without
+# that, 50 of 67 evictees in 60 days were prisoners and their spouses went with them.
+
+[corps]
+# placeholders; one row per corp, niches as a list, holdings as counts per niche kind
+names    = ["Nutrix", "Vatra", "Greenline", "Habitat", "Stackwell", "Kessler", "Arasaka", "Militech"]
+niches   = [["Food"], ["Food", "Housing"], ["Food"], ["Housing"], ["Housing"], ["Housing"], ["Security"], ["Security", "Housing"]]
+farms    = [6, 4, 2, 0, 0, 0, 0, 0]
+markets  = [1, 1, 1, 0, 0, 0, 0, 0]
+blocks   = [0, 60, 0, 120, 60, 20, 0, 40]
+offices  = [0, 0, 0, 0, 0, 0, 1, 1]
+treasury_initial = [6000, 5000, 2500, 8000, 4000, 1500, 4000, 3000]
+bar_owner_coins = 200
+hoard_heat = 5000                  # a corp treasury above this is a raid prize in the gang brain
+acquire_premium = 1.2              # offer = value × premium
+acquire_cooldown_days = 10
+undercut_floor = 0.6               # price_level cannot be undercut below this
+hysteresis = 0.10
+shock_severity_rethink = 0.5
+bankrupt_days = 14
+incorporate_buildings = 2         # an agent owning this many becomes a corp
+found_cost = { bar = 300, home = 400 }
+wholesale = 2                      # coins per unit Farm → Market when owners differ
+contract_per_guard_day = 10
+security_guards = 6
+lobby_min_treasury = 400
+monopoly_markup_cap = 2.0          # price_level ceiling with a monopoly; 1.5 without
+# --- M11 plan additions (decisions D4, D11, D15, D17-D25, D28, D33, D41, D48) ---
+bar_owner_count = 2
+# D4: the Treasury's return flow. M11 phase 2, from the ledger columns over 120 days (seed 42, 2,000):
+# the plan's { farm 120, home 3, security_office 60 } left the Treasury -1,140 a day from day 15 (the
+# city buys Farm overflow into the Reserve at wholesale, ~1,200 a day, and the dole grows to ~4,900 as
+# opening savings run out) and broke it on day 45, so the dole stopped. Farm upkeep carries it, since
+# the overflow it pays for is per Farm: 250 overshot (+800 a day, Vatra and Greenline bled out), 215
+# with home 3 held days 15-45 flat. With rent [0, 1, 2] a Block earns 0-2, so home 3 bled every
+# landlord (Militech 79 a day per 1,000 of treasury against the plan's 50 limit): home 1 and
+# security_office 30, and farm 245 makes up the Treasury's share. Result: Treasury 34,618 -> 49,191 in
+# 120 days (+121 a day; flat to day 60, then the debt of corps below zero lifts it: no bankruptcy yet).
+upkeep = { farm = 245, market = 600, bar = 15, home = 1, security_office = 30 }
+value = { farm = 1000, market = 1000, security_office = 500 }                    # D28
+shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
+grow_cooldown_days = 7             # D23
+secure_per_day = 2                 # D24
+private_pursuit_radius = 16        # D18
+found_cooldown_days = 10           # D26
+residents_per_bar = 300            # D25
+hoard_tilt = 0.1                   # D33
+megacorp = [false, false, false, false, false, false, true, true]  # D41
+outside_treasury_initial = 100000
+
+[corps.order_flat]                 # D48
+grow = 0.0
+squeeze = 0.0
+undercut = 0.0
+acquire = 0.0
+secure = 0.0
+hunker = 0.15
+lobby = 0.0
 
 [levers]
 tax_rate = 0.05

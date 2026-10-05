@@ -16,17 +16,19 @@ fn test_cli_report_csv_header() {
     let mut lines = stdout.lines();
     assert_eq!(
         lines.next(),
-        Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,ticks_per_sec")
+        Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,ticks_per_sec")
     );
     let row = lines.next().expect("one data row");
-    // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4), nobody homeless.
+    // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4), nobody homeless;
+    // M11: plus 12 private guards hired at tick 0 (two Security Offices) and
+    // a bartender for the agent-owned Bar short of its staff of 3.
     // (Off-screen thieves can be jailed on day 0 since M10 phase 3, and an
     // off-screen killing can take a resident, and their job, on day 0.)
     let cols: Vec<&str> = row.split(',').collect();
     assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
     let n = |i: usize| cols[i].parse::<u32>().expect("a count");
-    assert!((1995..=2000).contains(&n(2)) && (215..=220).contains(&n(3)) && n(4) == 0, "row: {row}");
-    assert_eq!(row.split(',').count(), 33);
+    assert!((1995..=2000).contains(&n(2)) && (215..=236).contains(&n(3)) && n(4) == 0, "row: {row}");
+    assert_eq!(row.split(',').count(), 68);
     assert!(lines.next().is_none());
 }
 

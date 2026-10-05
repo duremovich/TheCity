@@ -27,6 +27,22 @@ pub fn gang_colour(index: usize) -> egui_macroquad::egui::Color32 {
     let c = gang_hex(index);
     egui_macroquad::egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
 }
+
+/// M11 D43: corp colours by index in `World::corps()` (ascending id).
+pub const CORP_COLOURS: [u32; 12] = [
+    0xe6194b, 0x3cb44b, 0xffe119, 0x4363d8, 0xf58231, 0x911eb4, 0x46f0f0, 0xf032e6, 0xbcf60c, 0xfabebe, 0x008080,
+    0xe6beff,
+];
+
+pub fn corp_hex(index: usize) -> u32 {
+    CORP_COLOURS[index % CORP_COLOURS.len()]
+}
+
+/// A corp's panel colour.
+pub fn corp_colour(index: usize) -> egui_macroquad::egui::Color32 {
+    let c = corp_hex(index);
+    egui_macroquad::egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
+}
 pub const INSPECTOR_W: f32 = 360.0;
 pub const LOG_H: f32 = 220.0;
 const C_PAUSED: Color = Color::new(1.0, 0.6, 0.1, 1.0);

@@ -36,6 +36,17 @@ fn kind_colour(kind: EventKind) -> Color32 {
         EventKind::Birth | EventKind::Marriage | EventKind::Proposal => Color32::from_rgb(80, 170, 90),
         EventKind::PlayerAction | EventKind::PlayerActionFailed => Color32::from_rgb(255, 215, 0),
         EventKind::Posture | EventKind::Bribe => Color32::from_rgb(120, 170, 220),
+        // M11: rent trouble red, the rest of the corp world orange.
+        EventKind::Evicted | EventKind::RentShort => Color32::from_rgb(217, 47, 47),
+        EventKind::Housed
+        | EventKind::Founded
+        | EventKind::Incorporated
+        | EventKind::Bankrupt
+        | EventKind::Acquired
+        | EventKind::BrokenUp
+        | EventKind::CorpOrder
+        | EventKind::Strike
+        | EventKind::Contract => Color32::from_rgb(0xff, 0x9a, 0x3c),
         EventKind::OrderChanged
         | EventKind::TerritoryFlipped
         | EventKind::Raid

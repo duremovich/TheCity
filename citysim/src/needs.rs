@@ -85,9 +85,23 @@ pub fn run(world: &mut World) {
     let hourly = world.tick.is_multiple_of(TICKS_PER_HOUR);
 
     // Guard positions once per tick for the safety modifier.
-    let guard_tiles: Vec<(EntityId, crate::components::TilePos)> =
-        world.guards().iter().copied().filter_map(|id| world.comp::<Position>(id).map(|p| (id, p.tile))).collect();
+    // Sorted by row so each agent checks only the guards within `sight` rows
+    // (M11: twelve private guards made the all-pairs scan a third dearer).
+    let mut guard_tiles: Vec<(u8, EntityId, crate::components::TilePos)> = world
+        .guards()
+        .iter()
+        .copied()
+        .filter_map(|id| world.comp::<Position>(id).map(|p| (p.tile.y, id, p.tile)))
+        .collect();
+    guard_tiles.sort_unstable();
     let sight = world.config.crime.sight;
+    let guard_near_at = |id: EntityId, t: crate::components::TilePos| -> bool {
+        let lo = guard_tiles.partition_point(|&(y, _, _)| u32::from(y) + sight < u32::from(t.y));
+        guard_tiles[lo..]
+            .iter()
+            .take_while(|&&(y, _, _)| u32::from(y) <= u32::from(t.y) + sight)
+            .any(|&(_, g, gt)| g != id && gt.manhattan(t) <= sight)
+    };
 
     for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
@@ -99,7 +113,7 @@ pub fn run(world: &mut World) {
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });
         let jailed = world.has::<Sentence>(id);
         let tile = world.comp::<Position>(id).map(|p| p.tile);
-        let guard_near = tile.is_some_and(|t| guard_tiles.iter().any(|&(g, gt)| g != id && gt.manhattan(t) <= sight));
+        let guard_near = tile.is_some_and(|t| guard_near_at(id, t));
         let under_18 = world.comp::<Identity>(id).is_some_and(|i| i.age_days < 18 * 120);
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let ctx = DecayCtx {

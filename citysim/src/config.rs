@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::components::{BuildingKind, Lod, Role};
+use crate::components::{BuildingKind, Lod, Niche, Role};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -30,6 +30,13 @@ pub struct Config {
     /// M10 holes and the binder; absent from pre-M10 saves likewise.
     #[serde(default = "BindCfg::from_assets")]
     pub bind: BindCfg,
+    /// M11 rent (docs/M11_OWNERSHIP.md § 4); absent from pre-M11 saves, which
+    /// keep M9 behaviour: rent 0 (plan D40).
+    #[serde(default = "RentCfg::off")]
+    pub rent: RentCfg,
+    /// M11 corps; absent from pre-M11 saves: no corps (plan D40).
+    #[serde(default = "CorpsCfg::none")]
+    pub corps: CorpsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -65,6 +72,14 @@ pub struct WorldCfg {
     pub shift_night: Vec<(u16, u16)>,
     pub jobs: JobsCfg,
     pub needs_initial: NeedsInitialCfg,
+    /// M11 (VISION "Brutality, enhancement and status"): the initial coin
+    /// draw is multiplied by this per Home tier (0 Sump, 1 Mid, 2 Spire).
+    #[serde(default = "default_coins_by_tier")]
+    pub coins_by_tier: [f32; 3],
+}
+
+fn default_coins_by_tier() -> [f32; 3] {
+    [1.0, 1.0, 1.0]
 }
 
 fn default_map() -> String {
@@ -105,12 +120,16 @@ pub struct NeedsInitialCfg {
 pub struct BuildingCfg {
     pub capacity: u8,
     pub stock_cap: u32,
+    /// M11 D17: full staff for an owned niche building (Grow tops up to it;
+    /// an agent-owned Bar posts a vacancy below it). 0 = no rule.
+    #[serde(default)]
+    pub staff: u32,
 }
 
 impl BuildingCfg {
     /// No room, no stock: the M10 kinds that do nothing until M11.
     pub fn inert() -> BuildingCfg {
-        BuildingCfg { capacity: 0, stock_cap: 0 }
+        BuildingCfg { capacity: 0, stock_cap: 0, staff: 0 }
     }
 }
 
@@ -194,6 +213,13 @@ pub struct EconomyCfg {
     #[serde(default)]
     pub restock_batch: u32,
     pub build_home_cost: i64,
+    /// M11 D27: an exec's daily draw from their corp.
+    #[serde(default = "default_wage_exec")]
+    pub wage_exec: i64,
+}
+
+fn default_wage_exec() -> i64 {
+    10
 }
 
 impl EconomyCfg {
@@ -526,6 +552,216 @@ impl BindCfg {
     }
 }
 
+/// M11 rent (docs/M11_OWNERSHIP.md § 4, plan D6/D7). Rent is per Home per day
+/// by tier, split equally among the Home's adult residents.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct RentCfg {
+    /// Per Home per day, by tier (0 Sump, 1 Mid, 2 Spire); a corp's Housing
+    /// `price_level` multiplies it, the city's is `levers.city_rent`.
+    pub base: [i64; 3],
+    pub evict_days: u8,
+    /// A homeless adult moves in with coins >= this x the Home's rent.
+    pub rehouse_coins_mult: i64,
+    /// An evicting owner refuses the evictee this long.
+    pub refuse_days: u64,
+    /// Tier-0 pantries spoil this much faster.
+    pub sump_spoilage_mult: f32,
+    /// Rent due is paid out of a wage or the dole the moment it is collected
+    /// (before it can be spent on food), not only from what is left at
+    /// midnight. Phase 2 measurement: see `assets/config.toml`.
+    #[serde(default)]
+    pub pay_from_income: bool,
+}
+
+impl RentCfg {
+    /// A save from before M11: no rent and M9's spoilage (plan D40; the
+    /// plan's `off()` keeps the 1.5 Sump spoilage, which would change an old
+    /// save's behaviour, so it is 1.0 here).
+    pub fn off() -> RentCfg {
+        RentCfg {
+            base: [0, 0, 0],
+            evict_days: 7,
+            rehouse_coins_mult: 3,
+            refuse_days: 30,
+            sump_spoilage_mult: 1.0,
+            pay_from_income: false,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FoundCostCfg {
+    pub bar: i64,
+    pub home: i64,
+}
+
+/// D4: daily upkeep per building kind, owner -> Treasury, non-city owners only.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct UpkeepCfg {
+    pub farm: i64,
+    pub market: i64,
+    pub bar: i64,
+    pub home: i64,
+    pub security_office: i64,
+}
+
+impl UpkeepCfg {
+    pub fn for_kind(&self, kind: BuildingKind) -> i64 {
+        match kind {
+            BuildingKind::Farm => self.farm,
+            BuildingKind::Market => self.market,
+            BuildingKind::Bar => self.bar,
+            BuildingKind::Home => self.home,
+            BuildingKind::SecurityOffice => self.security_office,
+            _ => 0,
+        }
+    }
+}
+
+/// D28: what a building sells for (Bar and Home use `found_cost`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ValueCfg {
+    pub farm: i64,
+    pub market: i64,
+    pub security_office: i64,
+}
+
+/// D48: flat terms on each corp order's score.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CorpOrderFlatCfg {
+    pub grow: f32,
+    pub squeeze: f32,
+    pub undercut: f32,
+    pub acquire: f32,
+    pub secure: f32,
+    pub hunker: f32,
+    pub lobby: f32,
+}
+
+/// M11 corps (docs/M11_OWNERSHIP.md § 5 and the plan's additions). One row
+/// per corp in the row vectors; `none()` is the corp-free city.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CorpsCfg {
+    pub names: Vec<String>,
+    pub niches: Vec<Vec<String>>,
+    pub farms: Vec<u32>,
+    pub markets: Vec<u32>,
+    pub blocks: Vec<u32>,
+    pub offices: Vec<u32>,
+    pub treasury_initial: Vec<i64>,
+    pub bar_owner_coins: i64,
+    pub hoard_heat: i64,
+    pub acquire_premium: f32,
+    pub acquire_cooldown_days: u64,
+    pub undercut_floor: f32,
+    pub hysteresis: f32,
+    pub shock_severity_rethink: f32,
+    pub bankrupt_days: u64,
+    pub incorporate_buildings: usize,
+    pub found_cost: FoundCostCfg,
+    pub wholesale: i64,
+    pub contract_per_guard_day: i64,
+    pub security_guards: u32,
+    pub lobby_min_treasury: i64,
+    pub monopoly_markup_cap: f32,
+    pub bar_owner_count: usize,
+    pub upkeep: UpkeepCfg,
+    pub value: ValueCfg,
+    pub shop_price_tiles: i64,
+    pub grow_cooldown_days: u64,
+    pub secure_per_day: usize,
+    pub private_pursuit_radius: u32,
+    pub found_cooldown_days: u64,
+    pub residents_per_bar: u32,
+    pub hoard_tilt: f32,
+    pub megacorp: Vec<bool>,
+    pub outside_treasury_initial: i64,
+    pub order_flat: CorpOrderFlatCfg,
+}
+
+impl Default for CorpsCfg {
+    fn default() -> Self {
+        CorpsCfg::none()
+    }
+}
+
+impl CorpsCfg {
+    /// No corps and no agent Bar owners; every scalar at its documented default.
+    pub fn none() -> CorpsCfg {
+        CorpsCfg {
+            names: Vec::new(),
+            niches: Vec::new(),
+            farms: Vec::new(),
+            markets: Vec::new(),
+            blocks: Vec::new(),
+            offices: Vec::new(),
+            treasury_initial: Vec::new(),
+            bar_owner_coins: 200,
+            hoard_heat: 5000,
+            acquire_premium: 1.2,
+            acquire_cooldown_days: 10,
+            undercut_floor: 0.6,
+            hysteresis: 0.10,
+            shock_severity_rethink: 0.5,
+            bankrupt_days: 14,
+            incorporate_buildings: 2,
+            found_cost: FoundCostCfg { bar: 300, home: 400 },
+            wholesale: 2,
+            contract_per_guard_day: 10,
+            security_guards: 6,
+            lobby_min_treasury: 400,
+            monopoly_markup_cap: 2.0,
+            bar_owner_count: 0,
+            upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: 3, security_office: 60 },
+            value: ValueCfg { farm: 1000, market: 1000, security_office: 500 },
+            shop_price_tiles: 12,
+            grow_cooldown_days: 7,
+            secure_per_day: 2,
+            private_pursuit_radius: 16,
+            found_cooldown_days: 10,
+            residents_per_bar: 300,
+            hoard_tilt: 0.1,
+            megacorp: Vec::new(),
+            outside_treasury_initial: 100_000,
+            order_flat: CorpOrderFlatCfg {
+                grow: 0.0,
+                squeeze: 0.0,
+                undercut: 0.0,
+                acquire: 0.0,
+                secure: 0.0,
+                hunker: 0.15,
+                lobby: 0.0,
+            },
+        }
+    }
+
+    /// The number of corp rows; panics when the row vectors disagree.
+    pub fn row_count(&self) -> usize {
+        let n = self.names.len();
+        let lens = [
+            ("niches", self.niches.len()),
+            ("farms", self.farms.len()),
+            ("markets", self.markets.len()),
+            ("blocks", self.blocks.len()),
+            ("offices", self.offices.len()),
+            ("treasury_initial", self.treasury_initial.len()),
+        ];
+        for (name, len) in lens {
+            assert!(len == n, "[corps] {name} has {len} rows, names has {n}");
+        }
+        n
+    }
+
+    /// Row `i`'s niches; panics on an unknown name.
+    pub fn niches_of(&self, i: usize) -> std::collections::BTreeSet<Niche> {
+        self.niches[i]
+            .iter()
+            .map(|s| Niche::parse(s).unwrap_or_else(|| panic!("[corps] row {i}: unknown niche {s:?}")))
+            .collect()
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeversCfg {
     pub tax_rate: f32,
@@ -609,6 +845,10 @@ impl Config {
         self.lod.max_coarse = 100;
         // Not a D23 key: the v1 city had no pursuit limit.
         self.law.pursuit_radius = 512;
+        // M11 D9: a city-owned v1 city, no rent, no corps, equal wallets.
+        self.rent.base = [0, 0, 0];
+        self.corps = CorpsCfg::none();
+        self.world.coins_by_tier = [1.0, 1.0, 1.0];
         self
     }
 
@@ -624,6 +864,11 @@ impl Config {
         let mut c = self.scaled_to(n);
         c.gangs.max_members = 0;
         c.world.warehouse_initial = c.buildings.warehouse.stock_cap;
+        // M11: the calibration city stays city-owned and rent-free with equal
+        // wallets, so the table measures behaviour, not one seed's landlords.
+        c.rent.base = [0, 0, 0];
+        c.corps = CorpsCfg::none();
+        c.world.coins_by_tier = [1.0, 1.0, 1.0];
         c
     }
 
@@ -656,6 +901,16 @@ impl Config {
         self.economy.restock_floor = scale(self.economy.restock_floor);
         self.economy.restock_batch = scale(self.economy.restock_batch);
         self.economy.price_ref_stock *= f;
+        // M11: corp treasuries, Block holdings and the Bar owners' purse
+        // scale; Farms, Markets and Offices do not (every one exists at any n).
+        let c = &mut self.corps;
+        for t in &mut c.treasury_initial {
+            *t = (*t as f64 * f).round() as i64;
+        }
+        for b in &mut c.blocks {
+            *b = (f64::from(*b) * f).round() as u32;
+        }
+        c.bar_owner_coins = (c.bar_owner_coins as f64 * f).round() as i64;
         self
     }
 }

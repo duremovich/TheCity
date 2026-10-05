@@ -168,7 +168,9 @@ fn test_jail_duty_per_posture() {
     assert!(!law::jail_duty(&w, gs[1], 0), "a non-guard holds nothing");
 
     w.law_mut().expect("law").posture = Posture::Garrison;
-    assert_eq!(on_jail(&w), gs.len(), "Garrison: everyone");
+    // M11 D18: every guard on the city roster (no longer any id at all: the
+    // vacated ex-guards above, and a corp's private guards, hold nothing).
+    assert_eq!(on_jail(&w), guards(&w).len(), "Garrison: everyone on the roster");
     assert!(law::garrisoned(&w));
 }
 
@@ -185,7 +187,8 @@ fn test_crackdown_patrol_loop_walks_the_target_turf() {
         l.posture = Posture::Crackdown;
         l.target = Some(gang);
     }
-    let route = law::new_patrol_route(&mut w);
+    let guard = w.guards()[0];
+    let route = law::new_patrol_route(&mut w, guard);
     assert_eq!(route.len(), 5);
     assert_eq!(route[0], market);
     assert_eq!(route[3], hideout, "the loop passes the Hideout");
@@ -194,7 +197,8 @@ fn test_crackdown_patrol_loop_walks_the_target_turf() {
     }
     // Under Patrol the v1 loop is back: Market, Bar, Hall, two Homes.
     w.law_mut().expect("law").posture = Posture::Patrol;
-    let route = law::new_patrol_route(&mut w);
+    let guard = w.guards()[0];
+    let route = law::new_patrol_route(&mut w, guard);
     assert_eq!(route[1], w.building_of_kind(BuildingKind::Bar).expect("bar"));
     assert_eq!(route[2], w.building_of_kind(BuildingKind::Hall).expect("hall"));
     // A gang with little turf is patrolled around its Hideout.

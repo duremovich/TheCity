@@ -175,3 +175,43 @@ fn test_current_save_keeps_live_claims() {
         Some(citysim::Claim { gang: gangs[1], count: 2 })
     );
 }
+
+/// M11 (plan D40, D49): a save from before ownership has no `[rent]` or
+/// `[corps]` config and no `corp` store. It loads with M9 behaviour (rent 0,
+/// no corps, no payday rent), runs, and every gang reads `Dictator`; a fresh
+/// save round-trips a corp's `Governance`.
+#[test]
+fn test_pre_m11_save_loads() {
+    let mut w = World::new(17, Config::load().v1_profile());
+    w.run_ticks(100);
+    let text = save::to_ron(&w);
+    let text = strip_field(&text, "rent:(base");
+    let text = strip_field(&text, "corps:(names");
+    let text = strip_list_field(&text, "corp:[");
+    assert!(!text.contains("corp:[") && !text.contains("rent:(base"), "the M11 keys are stripped");
+    let mut back = save::from_ron(&text).expect("a pre-M11 save loads");
+    assert!(back.corps().is_empty());
+    assert_eq!(back.config.rent.base, [0, 0, 0]);
+    assert!(!back.config.rent.pay_from_income);
+    assert_eq!(back.config.rent.sump_spoilage_mult, 1.0, "M9 spoilage");
+    assert!(back.config.corps.names.is_empty());
+    assert_eq!(back.corp.len(), back.alive.len(), "the store covers every entity");
+    for g in back.gangs() {
+        assert_eq!(back.comp::<citysim::Gang>(g).expect("gang").governance, citysim::Governance::Dictator);
+    }
+    back.run_ticks(TICKS_PER_DAY);
+    assert_eq!(back.stats.history.back().map(|r| r.evictions), Some(0));
+    // A current save with corps keeps them, and their governance, bit for bit.
+    let mut m11 = World::new(17, Config::load());
+    m11.run_ticks(10);
+    let corp = m11.corps()[0];
+    m11.comp_mut::<citysim::Corp>(corp).expect("corp").governance =
+        citysim::Governance::Board { members: vec![citysim::EntityId::NONE] };
+    let text = save::to_ron(&m11);
+    let again = save::from_ron(&text).expect("loads");
+    assert_eq!(save::to_ron(&again), text);
+    assert_eq!(
+        again.comp::<citysim::Corp>(corp).expect("corp").governance,
+        m11.comp::<citysim::Corp>(corp).expect("c").governance
+    );
+}

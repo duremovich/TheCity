@@ -52,6 +52,16 @@ pub fn plan(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits) 
     open.push(Reverse((OrderedFloat(h(&start)), 0, 0)));
     let mut closed: BTreeSet<WorldState> = BTreeSet::new();
     let mut expansions = 0usize;
+    // `allowed`, `feasible` and `cost` read only the context: decide them
+    // once per search, not once per expansion (M11 phase 2: Arrest plans spent
+    // ~60 us re-checking 54 actions at each of ~54 expansions). Same order,
+    // same costs, so the same plans.
+    let usable: Vec<(usize, ActionKind, f32)> = PLANNABLE
+        .iter()
+        .enumerate()
+        .filter(|(_, k)| k.allowed(ctx) && k.feasible(ctx))
+        .map(|(order, &k)| (order, k, k.cost(ctx)))
+        .collect();
 
     while let Some(Reverse((_, _, idx))) = open.pop() {
         let state = nodes[idx].state;
@@ -79,15 +89,15 @@ pub fn plan(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits) 
         }
         let g = nodes[idx].g;
         let depth = nodes[idx].depth;
-        for (order, &kind) in PLANNABLE.iter().enumerate() {
-            if !kind.allowed(ctx) || !kind.feasible(ctx) || !kind.preconditions(&state, ctx) {
+        for &(order, kind, cost) in &usable {
+            if !kind.preconditions(&state, ctx) {
                 continue;
             }
             let next = kind.apply(&state, ctx);
             if closed.contains(&next) {
                 continue;
             }
-            let ng = g + kind.cost(ctx);
+            let ng = g + cost;
             let f = ng + h(&next);
             nodes.push(Node { g: ng, state: next, depth: depth + 1, parent: Some(idx), via: Some(kind) });
             open.push(Reverse((OrderedFloat(f), order, nodes.len() - 1)));

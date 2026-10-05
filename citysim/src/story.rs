@@ -183,6 +183,8 @@ fn body(world: &World, id: EntityId, e: &LifeEvent) -> Vec<Span> {
         LifeKind::Betrayed => vec![text("betrayed the gang")],
         LifeKind::Evicted => vec![text("ended up homeless")],
         LifeKind::Housed => vec![text("found a home")],
+        LifeKind::Founded => vec![text("opened a business")],
+        LifeKind::Incorporated => vec![text("incorporated a company")],
         LifeKind::Immigrated => vec![text("arrived in the city")],
         LifeKind::Buried => match e.other {
             Some(_) => vec![text("was laid to rest by "), who("")],

@@ -54,11 +54,15 @@ pub enum LocationKey {
     CorpseTile,
     /// Next patrol leg.
     PatrolWaypoint,
+    /// M11 D13: the employer building of a non-city job (the wage desk), and
+    /// a Security Office for the private guard inside it. A city job's
+    /// resolves to the Civic Hall, so an old plan still completes.
+    Workplace,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 15] = [
+    pub const GOTO: [LocationKey; 16] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -74,6 +78,7 @@ impl LocationKey {
         LocationKey::SuspectTile,
         LocationKey::CorpseTile,
         LocationKey::PatrolWaypoint,
+        LocationKey::Workplace,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -87,8 +92,9 @@ impl LocationKey {
             BuildingKind::Hall => LocationKey::Hall,
             BuildingKind::Hideout => LocationKey::Hideout,
             BuildingKind::Warehouse => LocationKey::Warehouse,
-            // Inert until M11: never a destination, nobody is ever inside.
-            BuildingKind::SecurityOffice | BuildingKind::Lot => LocationKey::Street,
+            // M11: a private guard inside their office is at their workplace.
+            BuildingKind::SecurityOffice => LocationKey::Workplace,
+            BuildingKind::Lot => LocationKey::Street,
         }
     }
 }

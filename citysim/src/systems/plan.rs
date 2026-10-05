@@ -168,7 +168,7 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         let needs_route =
             world.comp::<Brain>(id).is_some_and(|b| b.patrol_route.is_empty() || b.patrol_shift_key != key);
         if needs_route {
-            let route = crate::systems::law::new_patrol_route(world);
+            let route = crate::systems::law::new_patrol_route(world, id);
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.patrol_route = route;
                 b.patrol_legs = 0;

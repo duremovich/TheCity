@@ -560,6 +560,10 @@ impl World {
             LocationKey::PatrolWaypoint => self
                 .comp::<Brain>(agent)
                 .and_then(|b| b.patrol_route.get(usize::from(b.patrol_legs) % b.patrol_route.len().max(1)).copied()),
+            // M11 D13: the wage desk (the Hall for a city job).
+            LocationKey::Workplace => target
+                .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::SecurityOffice))
+                .or_else(|| self.wage_desk(agent)),
             LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget => None,
         }
     }
