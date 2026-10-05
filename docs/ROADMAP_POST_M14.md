@@ -347,3 +347,10 @@ Folded into the sketches above rather than a milestone of their own:
 - **Destructible property and wreckage** (M12 litter generalised to a `Damage` tile state; M13 vehicles; M16 combat): missed shots hit buildings and pedestrians; rubble raises road cost to impassable; the ruling faction or a functioning city posts repair jobs, or does not; rails as a transport layer that accidents and terrorism damage.
 - **News and propaganda** (M15 gossip at faction scale, M16 contracts): outlets as businesses turning salient events into stories with reach; a story read is a second-hand memory; propaganda plants or buries stories and moves reputation, loyalty and submission.
 
+
+## Addendum 7 (2026-10-05, Dylan): emergence, approaches, tiered security
+
+- **Approaches are action chains** (M13–M18): assault, ambush from intel, at home; forged credentials, disguise, stealth; vehicle breach; implants vs doors; hacking vs security; bunker-and-drones vs murder hobo. New approaches are new GOAP actions with preconditions, never scripts.
+- **Intel** (M15/M16): a target's routine is a pattern in their Trace and Life, obtainable as Data; "frequents X" is the ambush hook.
+- **Tiered security** (M12 private security, M13 chrome tiers, M14 ICE, M16): a `Security` profile per building (sensor, lock, guard, ICE tiers) set by the owner's brain as a spend proportional to the asset value inside; one tier-contest rule shared by stealth/sensor, lockpick/lock, deck/ICE, armour/weapon; every skill has a counter; cheap security is bribable.
+- **Bunkers and escape** (M17/M18): a bunker is a hardened owned building that can still be traced; sensors and minions warn; the escape plan is a goal.
