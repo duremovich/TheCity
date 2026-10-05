@@ -141,6 +141,8 @@ enum Lever {
     KillGang(usize),
     FundGang(usize, i64),
     SeizeGang(usize),
+    /// M11: `breakup=<corp slot>` (the seeding row, 0-based).
+    BreakUp(u8),
 }
 
 impl Lever {
@@ -157,13 +159,22 @@ impl Lever {
             Lever::KillGang(i) => PlayerCommand::KillGang(gang(i)?),
             Lever::FundGang(i, amount) => PlayerCommand::FundGang { gang: gang(i)?, amount },
             Lever::SeizeGang(i) => PlayerCommand::SeizeGangTreasury(gang(i)?),
+            Lever::BreakUp(slot) => {
+                let corp = world
+                    .corps()
+                    .into_iter()
+                    .find(|&c| world.comp::<citysim::Corp>(c).is_some_and(|cc| cc.slot == Some(slot)))
+                    .ok_or_else(|| format!("no corp in slot {slot}"))?;
+                PlayerCommand::BreakUp(corp)
+            }
         })
     }
 }
 
 /// `day=90:release_reserve=1500` → `(tick, lever)`. God levers name a gang
 /// by index: `kill_leader=0`, `jail_gang=0:60`, `kill_gang=0`,
-/// `fund_gang=1:10000`, `seize_gang=0`, `fire_guards=1`, `treasury=-50000`.
+/// `fund_gang=1:10000`, `seize_gang=0`, `fire_guards=1`, `treasury=-50000`;
+/// M11 names a corp by its seeding slot: `breakup=0`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -192,6 +203,7 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             let (g, n) = pair()?;
             Some(Lever::FundGang(g, n))
         }
+        "breakup" => Some(Lever::BreakUp(value.parse::<u8>().map_err(|e| format!("{spec}: bad corp slot: {e}"))?)),
         _ => None,
     };
     if let Some(l) = god {

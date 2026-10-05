@@ -89,6 +89,8 @@ pub enum PlayerCommand {
     },
     /// The city never evicts while set.
     NoCityEvictions(bool),
+    /// Split a corp's monopoly niche in two (D31); refused without one.
+    BreakUp(EntityId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -314,6 +316,16 @@ impl World {
                 let _ = match crate::systems::ownership::subsidise(self, *corp, *amount) {
                     Ok(text) => self.push_event(EventKind::PlayerAction, &[*corp], text),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*corp], format!("Subsidise: {e}")),
+                };
+            }
+            PlayerCommand::BreakUp(corp) => {
+                let _ = match crate::systems::corps::break_up(self, *corp) {
+                    Ok(s) => {
+                        let text =
+                            format!("Broke up {} into {}", self.owner_label(Some(*corp)), self.owner_label(Some(s)));
+                        self.push_event(EventKind::PlayerAction, &[*corp, s], text)
+                    }
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[*corp], format!("BreakUp: {e}")),
                 };
             }
             PlayerCommand::DemolishHome(home) => {

@@ -601,17 +601,35 @@ pub struct UpkeepCfg {
     pub farm: i64,
     pub market: i64,
     pub bar: i64,
-    pub home: i64,
+    /// Per Block by tier (Sump, Mid, Spire); a scalar in the TOML means the
+    /// same for every tier (phase 2's form).
+    #[serde(deserialize_with = "per_tier")]
+    pub home: [i64; 3],
     pub security_office: i64,
 }
 
+/// `home = 1` or `home = [0, 1, 2]`.
+fn per_tier<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[i64; 3], D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Tiered {
+        One(i64),
+        Three([i64; 3]),
+    }
+    Ok(match Tiered::deserialize(d)? {
+        Tiered::One(v) => [v; 3],
+        Tiered::Three(v) => v,
+    })
+}
+
 impl UpkeepCfg {
-    pub fn for_kind(&self, kind: BuildingKind) -> i64 {
+    /// A building's daily upkeep; a Block's by its tier.
+    pub fn for_building(&self, kind: BuildingKind, tier: u8) -> i64 {
         match kind {
             BuildingKind::Farm => self.farm,
             BuildingKind::Market => self.market,
             BuildingKind::Bar => self.bar,
-            BuildingKind::Home => self.home,
+            BuildingKind::Home => self.home[usize::from(tier.min(2))],
             BuildingKind::SecurityOffice => self.security_office,
             _ => 0,
         }
@@ -713,7 +731,7 @@ impl CorpsCfg {
             lobby_min_treasury: 400,
             monopoly_markup_cap: 2.0,
             bar_owner_count: 0,
-            upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: 3, security_office: 60 },
+            upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: [3; 3], security_office: 60 },
             value: ValueCfg { farm: 1000, market: 1000, security_office: 500 },
             shop_price_tiles: 12,
             grow_cooldown_days: 7,

@@ -258,6 +258,8 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         (E::Housed, 0) => row(LifeKind::Housed),
         (E::Founded, 0) => row(LifeKind::Founded),
         (E::Incorporated, 1) => row(LifeKind::Incorporated),
+        // M11 phase 3: corp events name corps and buildings; no biography row.
+        (E::CorpOrder | E::Bankrupt | E::Acquired | E::BrokenUp | E::Contract, _) => None,
         (E::Immigration, 0) => row(LifeKind::Immigrated),
         (E::Burial, 1) => row(LifeKind::Buried),
         (E::Witness, 0) => row(LifeKind::Witnessed),

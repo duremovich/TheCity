@@ -698,6 +698,9 @@ pub struct CorpLoss {
     pub tick: Tick,
     pub coins: i64,
     pub gang: Option<EntityId>,
+    /// The building it happened at (`Secure` contracts the newest first).
+    #[serde(default)]
+    pub building: Option<EntityId>,
 }
 
 fn one_f32() -> f32 {

@@ -374,7 +374,11 @@ acquire_cooldown_days = 10
 undercut_floor = 0.6               # price_level cannot be undercut below this
 hysteresis = 0.10
 shock_severity_rethink = 0.5
-bankrupt_days = 14
+# M11 phase 3: 14 -> 3. A corp in the red pays nobody (wages, restock), so its workers walk out and
+# its Market's shelf empties (price 30) for as long as it lingers; at 14 the seed-42 run had thefts
+# x4 and the M10 throughput gate fell to 5.6k ticks/s, at 7 to 6.9k. At 3 it is sold off (to the city
+# at worst, which runs it as in v1) before its workers' wages are a week late.
+bankrupt_days = 3
 incorporate_buildings = 2         # an agent owning this many becomes a corp
 found_cost = { bar = 300, home = 400 }
 wholesale = 2                      # coins per unit Farm → Market when owners differ
@@ -393,7 +397,12 @@ bar_owner_count = 2
 # landlord (Militech 79 a day per 1,000 of treasury against the plan's 50 limit): home 1 and
 # security_office 30, and farm 245 makes up the Treasury's share. Result: Treasury 34,618 -> 49,191 in
 # 120 days (+121 a day; flat to day 60, then the debt of corps below zero lifts it: no bankruptcy yet).
-upkeep = { farm = 245, market = 600, bar = 15, home = 1, security_office = 30 }
+# M11 phase 3: Block upkeep by tier (Sump, Mid, Spire), was a flat 1. With [rent] base [0, 1, 2] a
+# Sump Block earns nothing, so a flat 1 made every Sump landlord (Kessler: 20 Sump Blocks only;
+# Stackwell and Militech: 40 each) go bankrupt by arithmetic, not by play. Upkeep now matches the
+# tier's base rent: a free Sump Block costs its owner nothing. Corp Block upkeep goes from 300 to
+# 260 a day (Habitat's 60 Spire Blocks now pay 2).
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 30 }
 value = { farm = 1000, market = 1000, security_office = 500 }                    # D28
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
@@ -401,15 +410,28 @@ secure_per_day = 2                 # D24
 private_pursuit_radius = 16        # D18
 found_cooldown_days = 10           # D26
 residents_per_bar = 300            # D25
-hoard_tilt = 0.1                   # D33
+# D33. M11 phase 3: 0.1 -> 0. Nutrix passes hoard_heat by day 5 and at 0.1 the Contest tilt doubled
+# both gangs by day 29 (65 members vs 30 with the brain off) and cost the M10 gate ~4% (7.8k ticks/s).
+# The term is wired and tested (tests/corps.rs); it waits for M12, where a gang can raid a corp
+# building (spec: until then it only tilts Contest).
+hoard_tilt = 0.0
 megacorp = [false, false, false, false, false, false, true, true]  # D41
 outside_treasury_initial = 100000
 
 [corps.order_flat]                 # D48
-grow = 0.0
-squeeze = 0.0
+# M11 phase 3 (seed 42, 2,000, 120 days): at 0 every landlord took Grow on day 0 (occupancy ~0.83
+# reads as demand, 0.43 against Hunker's 0.18) and the thin ones (Kessler 1,070, Militech 2,496)
+# spent 400 a week on Sump Blocks nobody moved into, then bled into bankruptcy. -0.15 makes growth
+# need a profit: with flow 0 Grow is ~0.28 (no switch from Hunker), with flow 0.5 ~0.46.
+grow = -0.15
+# M11 phase 3: -0.2. With the dole at one meal at price 3, Food Squeeze to 1.2 is price 4 and a
+# skipped meal for every dole agent; at 0 the Food corps squeezed from week 1 and thefts ran 3-4x
+# the brain-off run. Squeeze still wins with a dominant share and a greedy exec.
+squeeze = -0.2
 undercut = 0.0
-acquire = 0.0
+# M11 phase 3: -0.2. At 0 Nutrix bought a Farm from each weak rival every 10 days, stranding their
+# Markets (no supply, no restock money: price 30 for two weeks).
+acquire = -0.2
 secure = 0.0
 hunker = 0.15
 lobby = 0.0

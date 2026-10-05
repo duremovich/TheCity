@@ -38,8 +38,44 @@ impl FlowField {
         usize::from(p.y) * usize::from(self.w) + usize::from(p.x)
     }
 
-    /// Build the field for `door`.
+    /// Build the field for `door`: Dijkstra in `(cost, tile)` order with a
+    /// monotone radix heap (M11: about twice the binary heap's speed; the
+    /// pop order, so every direction byte, is the same; see
+    /// [`FlowField::build_binary_heap`] and `tests/exec.rs`).
     pub fn build(map: &Map, door: TilePos) -> FlowField {
+        let n = map.w() * map.h();
+        let mut f = FlowField { next: vec![0; n], w: map.w() as u16, door: Some(door) };
+        let mut cost = vec![f32::INFINITY; n];
+        let mut open = RadixHeap::new();
+        cost[f.idx(door)] = 0.0;
+        open.push(key(0.0, door));
+        while let Some(k) = open.pop() {
+            let (c, cur) = unkey(k);
+            if c > cost[f.idx(cur)] {
+                continue;
+            }
+            // Travelling from n to cur enters cur, so n's cost = cost(cur) + dist(cur).
+            let enter_cur = map.tile_at(cur).move_cost();
+            for nb in map.neighbours4(cur) {
+                if !map.walkable(nb) {
+                    continue;
+                }
+                let nc = c + enter_cur;
+                let i = f.idx(nb);
+                if nc < cost[i] {
+                    cost[i] = nc;
+                    f.next[i] = dir_byte(nb, cur);
+                    open.push(key(nc, nb));
+                }
+            }
+        }
+        f
+    }
+
+    /// The M10 build (binary heap of `(cost, tile)`), kept as the reference
+    /// the radix-heap build is tested against.
+    #[doc(hidden)]
+    pub fn build_binary_heap(map: &Map, door: TilePos) -> FlowField {
         let n = map.w() * map.h();
         let mut f = FlowField { next: vec![0; n], w: map.w() as u16, door: Some(door) };
         let mut cost = vec![f32::INFINITY; n];
@@ -78,6 +114,21 @@ impl FlowField {
         Some(TilePos { x: (i32::from(p.x) + dx) as u8, y: (i32::from(p.y) + dy) as u8 })
     }
 
+    /// Does a tile outside `sealed` step into `t`? (`t` is on the descent of
+    /// some tile a mover can stand on.)
+    pub fn entered_from_outside(&self, t: TilePos, sealed: &dyn Fn(TilePos) -> bool) -> bool {
+        let w = i32::from(self.w);
+        let h = (self.next.len() / usize::from(self.w.max(1))) as i32;
+        DIRS.iter().any(|&(dx, dy)| {
+            let (x, y) = (i32::from(t.x) - dx, i32::from(t.y) - dy);
+            if x < 0 || y < 0 || x >= w || y >= h {
+                return false;
+            }
+            let from = TilePos { x: x as u8, y: y as u8 };
+            !sealed(from) && self.step(from) == Some(t)
+        })
+    }
+
     /// Full descent from `p` to the door, excluding `p`, including the door.
     pub fn descend(&self, p: TilePos) -> Vec<TilePos> {
         let mut out = Vec::new();
@@ -90,6 +141,65 @@ impl FlowField {
             }
         }
         out
+    }
+}
+
+/// `(cost, tile)` as one `u64` ordered like the tuple: a non-negative `f32`'s
+/// bits order like its value, and `TilePos` orders by `(x, y)`.
+fn key(cost: f32, t: TilePos) -> u64 {
+    (u64::from(cost.to_bits()) << 16) | (u64::from(t.x) << 8) | u64::from(t.y)
+}
+
+fn unkey(k: u64) -> (f32, TilePos) {
+    (f32::from_bits((k >> 16) as u32), TilePos { x: (k >> 8) as u8, y: k as u8 })
+}
+
+/// A monotone priority queue (radix heap): every pushed key is at least the
+/// last popped one, as in Dijkstra with positive step costs. Pops in key
+/// order; equal keys are identical entries, so their order is moot.
+struct RadixHeap {
+    last: u64,
+    buckets: Vec<Vec<u64>>,
+    len: usize,
+}
+
+impl RadixHeap {
+    fn new() -> RadixHeap {
+        RadixHeap { last: 0, buckets: vec![Vec::new(); 65], len: 0 }
+    }
+
+    fn bucket(&self, k: u64) -> usize {
+        64 - (k ^ self.last).leading_zeros() as usize
+    }
+
+    fn push(&mut self, k: u64) {
+        debug_assert!(k >= self.last, "radix heap keys must not decrease");
+        let b = self.bucket(k);
+        self.buckets[b].push(k);
+        self.len += 1;
+    }
+
+    fn pop(&mut self) -> Option<u64> {
+        if self.len == 0 {
+            return None;
+        }
+        if self.buckets[0].is_empty() {
+            let i = self.buckets.iter().position(|b| !b.is_empty())?;
+            let moved = std::mem::take(&mut self.buckets[i]);
+            self.last = moved.iter().copied().min()?;
+            for k in &moved {
+                let b = self.bucket(*k);
+                self.buckets[b].push(*k);
+            }
+            // Hand the allocation back to the emptied bucket.
+            let mut spare = moved;
+            spare.clear();
+            if self.buckets[i].is_empty() {
+                self.buckets[i] = spare;
+            }
+        }
+        self.len -= 1;
+        self.buckets[0].pop()
     }
 }
 
@@ -115,6 +225,18 @@ impl FlowCache {
 
     pub fn clear(&mut self) {
         self.fields.clear();
+    }
+
+    /// A building went up on a Lot: `sealed` is its new walls plus its
+    /// interior (reachable only through its door now). Drop only the fields
+    /// in which a tile outside `sealed` steps into it. In every other field
+    /// the sealed tiles were dead ends of the Dijkstra tree for every tile a
+    /// mover can stand on (movers leave a building through its door before
+    /// stepping, and nobody stands on a wall), so those tiles' directions
+    /// are byte-identical to a rebuild on the new map: keeping the field
+    /// changes nothing and spares the rebuilds.
+    pub fn invalidate_sealed(&mut self, tiles: &[TilePos], sealed: &dyn Fn(TilePos) -> bool) {
+        self.fields.retain(|_, (f, _)| !tiles.iter().any(|&t| f.entered_from_outside(t, sealed)));
     }
 
     /// The cached field for `b`, stamped as just used.

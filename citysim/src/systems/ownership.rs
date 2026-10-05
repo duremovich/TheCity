@@ -28,7 +28,7 @@ const REVENUE_DAYS: usize = 7;
 const CASHFLOW_DAYS: usize = 14;
 /// `Corp.loss_log` window.
 const LOSS_DAYS: u64 = 14;
-/// Pending corp shocks kept while no brain drains them (phase 2).
+/// Pending corp shocks kept between rescorings.
 const SHOCK_CAP: usize = 32;
 
 // ---------------------------------------------------------------------------
@@ -144,6 +144,13 @@ pub enum Flow {
 }
 
 impl Flow {
+    /// Capital, not trading: buying and selling buildings, founding one, a
+    /// subsidy. Kept out of a corp's `cashflow` (the brain's `flow` input),
+    /// or one purchase reads as two weeks of losses.
+    pub fn capital(self) -> bool {
+        matches!(self, Flow::Sale | Flow::Found | Flow::Subsidy)
+    }
+
     /// Owner revenue taxed at the moment of the flow (spec § 3); wage tax
     /// keeps `Job.tax_accum`.
     pub fn taxed(self) -> bool {
@@ -209,7 +216,18 @@ fn transfer(
         world.purse_add(None, tax);
         world.stats.current.flow_tax += tax;
     }
+    if flow.capital() {
+        uncount_cashflow(world, from, moved);
+        uncount_cashflow(world, to, -(moved - tax));
+    }
     moved
+}
+
+/// Take a capital transfer back out of a corp's `cashflow_today`.
+fn uncount_cashflow(world: &mut World, owner: Option<EntityId>, delta: i64) {
+    if let Some(c) = owner.and_then(|o| world.comp_mut::<Corp>(o)) {
+        c.cashflow_today += delta;
+    }
 }
 
 /// Move `min(amount, max(purse(from), 0))` from one purse to another: nobody
@@ -325,13 +343,17 @@ pub fn spawn_corp(
     id
 }
 
-/// Queue a shock for the corp brain (phase 3); capped while nothing drains it.
+/// Queue a shock for the corp brain; once the pending severities reach
+/// `[corps] shock_severity_rethink`, `corp_brain::run` rescores this tick.
 pub fn push_corp_shock(world: &mut World, corp: EntityId, shock: CorpShock) {
-    if let Some(c) = world.comp_mut::<Corp>(corp) {
-        if c.shocks.len() >= SHOCK_CAP {
-            c.shocks.remove(0);
-        }
-        c.shocks.push(shock);
+    let threshold = world.config.corps.shock_severity_rethink;
+    let Some(c) = world.comp_mut::<Corp>(corp) else { return };
+    if c.shocks.len() >= SHOCK_CAP {
+        c.shocks.remove(0);
+    }
+    c.shocks.push(shock);
+    if c.shocks.iter().map(|s| s.severity()).sum::<f32>() >= threshold {
+        world.corp_rethink = true;
     }
 }
 
@@ -342,7 +364,7 @@ pub fn note_loss(world: &mut World, building: EntityId, coins: i64, culprit: Opt
     let tick = world.tick;
     let extortion = world.comp::<Building>(building).is_some_and(|b| b.kind == BuildingKind::Home);
     if let Some(c) = world.comp_mut::<Corp>(corp) {
-        c.loss_log.push_back(CorpLoss { tick, coins, gang });
+        c.loss_log.push_back(CorpLoss { tick, coins, gang, building: Some(building) });
     }
     let shock = if extortion { CorpShock::Extorted } else { CorpShock::Robbed(coins) };
     push_corp_shock(world, corp, shock);
@@ -894,11 +916,12 @@ fn rehouse(world: &mut World) {
 fn upkeep(world: &mut World) {
     let up = world.config.corps.upkeep.clone();
     for b in world.with::<Building>() {
-        let Some((kind, owner)) = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.kind, bd.owner))
+        let Some((kind, tier, owner)) =
+            world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.kind, bd.tier, bd.owner))
         else {
             continue;
         };
-        let cost = up.for_kind(kind);
+        let cost = up.for_building(kind, tier);
         if owner.is_none() || cost <= 0 {
             continue;
         }
@@ -989,7 +1012,12 @@ fn rolls(world: &mut World) {
     for c in world.corps() {
         let Some(cc) = world.comp_mut::<Corp>(c) else { continue };
         let today = std::mem::take(&mut cc.cashflow_today);
-        cc.cashflow.push_back(today);
+        // Tick 0 has charged the first upkeep and earned nothing yet: not a
+        // day of trading, so it is no cashflow entry (the brain read every
+        // corp as losing money for two weeks).
+        if now > 0 {
+            cc.cashflow.push_back(today);
+        }
         while cc.cashflow.len() > CASHFLOW_DAYS {
             cc.cashflow.pop_front();
         }

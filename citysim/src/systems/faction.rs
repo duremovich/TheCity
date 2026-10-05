@@ -3,7 +3,8 @@
 //! Orders bias members' goals (`utility::goals`); the brain never acts.
 
 use crate::components::{
-    Building, BuildingKind, Gang, Household, LawShock, MemoryKind, Order, OrderScore, Personality, Sentence, Wallet,
+    Building, BuildingKind, Corp, Gang, Household, LawShock, LobbyHold, MemoryKind, Order, OrderScore, Personality,
+    Sentence,
 };
 use crate::config::GangsCfg;
 use crate::entity::EntityId;
@@ -48,6 +49,30 @@ pub struct OrderInputs {
     pub breakout_ready: bool,
     pub garrison: bool,
     pub loyalty: f32,
+    /// M11 D33: how far the richest corp's treasury is past `[corps]
+    /// hoard_heat` (0..1), and which corp; Contest's flat gains
+    /// `hoard_tilt × hoard` (0 with no hoarder, so the M8 brain is unchanged).
+    pub hoard: f32,
+    pub hoard_corp: Option<EntityId>,
+    pub hoard_tilt: f32,
+}
+
+/// D33: `(clamp((richest corp treasury − hoard_heat) ÷ hoard_heat, 0, 1), that
+/// corp)`; `(0, None)` with no corp past the heat.
+pub fn hoard(world: &World) -> (f32, Option<EntityId>) {
+    let heat = world.config.corps.hoard_heat;
+    if heat <= 0 {
+        return (0.0, None);
+    }
+    let richest = world
+        .corps()
+        .into_iter()
+        .filter_map(|c| world.comp::<Corp>(c).map(|cc| (cc.treasury, c)))
+        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    match richest {
+        Some((t, c)) if t > heat => (((t - heat) as f32 / heat as f32).clamp(0.0, 1.0), Some(c)),
+        _ => (0.0, None),
+    }
 }
 
 /// `own / max(rival, 1)` mapped onto `[0, 1]` as `ratio / 2`: a Logistic mid of
@@ -97,7 +122,7 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("greed", i.greed, Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.4, b: 0.6 }),
             ],
-            f.contest,
+            f.contest + i.hoard_tilt * i.hoard,
         ),
         score(
             Order::Raid,
@@ -235,6 +260,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let cooldown = cfg.raid_cooldown_days * TICKS_PER_DAY;
     let breakout_cooldown = cfg.breakout_cooldown_days * TICKS_PER_DAY;
     let jailed = crate::systems::gang::jailed_headcount(world, gang);
+    let (hoard, hoard_corp) = hoard(world);
     Some(OrderInputs {
         frontier,
         frontier_total,
@@ -256,6 +282,9 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
             && !g.is_sacked(now),
         garrison: crate::systems::law::garrisoned(world),
         loyalty: p.loyalty,
+        hoard,
+        hoard_corp,
+        hoard_tilt: world.config.corps.hoard_tilt,
     })
 }
 
@@ -344,6 +373,21 @@ pub fn bribe_score(world: &World, gang: EntityId) -> Option<Vec<Consideration>> 
     ])
 }
 
+/// M11 D21: who offers a bribe.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Payer {
+    Gang(EntityId),
+    Corp(EntityId),
+}
+
+/// M11 D21: what a bribe buys. A gang pays the law to look away; a corp
+/// (`Lobby`) pays it to crack down on a gang.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum BribeAsk {
+    LookAway,
+    Crackdown(EntityId),
+}
+
 /// Daily, after the law has rescored: a gang under Crackdown may pay the
 /// captain. A captain of lawfulness ≥ `incorruptible` refuses (no coins
 /// move, the crackdown hardens, `LawShock::BribeRefused`); otherwise the
@@ -354,43 +398,92 @@ pub fn bribe_score(world: &World, gang: EntityId) -> Option<Vec<Consideration>> 
 pub fn consider_bribe(world: &mut World, gang: EntityId) -> bool {
     let Some(cs) = bribe_score(world, gang) else { return false };
     let score: f32 = cs.iter().map(|c| c.output).product();
-    let cfg = world.config.law.clone();
-    if score < cfg.bribe_threshold {
+    if score < world.config.law.bribe_threshold {
         return false;
     }
+    offer_bribe(world, Payer::Gang(gang), BribeAsk::LookAway, score)
+}
+
+/// M11 D21: one bribe offer to the captain, by a gang or a corp. The same
+/// price (`bribe_price`), the same `incorruptible` refusal (`hardened_until`,
+/// `LawShock::BribeRefused`), the same `Bribe` event (actors `[payer,
+/// captain, leader or exec]`), drift and rethink. A gang's taken bribe buys
+/// `paid_until` and clears any corp's `Law.lobby` (the gang out-bids); a
+/// corp's buys `Law.lobby` (a forced Crackdown on the gang) and never
+/// touches the gang's `bribe_until`. The payer must hold the price (a gang's
+/// is checked by `bribe_score`). Returns whether an offer was made.
+pub fn offer_bribe(world: &mut World, payer: Payer, ask: BribeAsk, score: f32) -> bool {
+    let cfg = world.config.law.clone();
     let now = world.tick;
     let Some(captain) = world.law().and_then(|l| l.captain) else { return false };
-    let (gname, leader) = match world.comp::<Gang>(gang) {
-        Some(g) => (g.name.clone(), g.leader),
-        None => return false,
-    };
     let price = bribe_price(world);
     let hold = now + cfg.bribe_days * TICKS_PER_DAY;
+    let (payer_id, pname, decider) = match payer {
+        Payer::Gang(g) => match world.comp::<Gang>(g) {
+            Some(gg) => (g, gg.name.clone(), gg.leader),
+            None => return false,
+        },
+        Payer::Corp(c) => match world.comp::<Corp>(c) {
+            Some(cc) if cc.treasury >= price => (c, cc.name.clone(), cc.exec),
+            _ => return false,
+        },
+    };
     let refused = world.comp::<Personality>(captain).is_some_and(|p| p.lawfulness >= cfg.incorruptible);
-    if let Some(g) = world.comp_mut::<Gang>(gang) {
-        g.bribe_until = Some(hold);
+    match payer {
+        Payer::Gang(g) => {
+            if let Some(gg) = world.comp_mut::<Gang>(g) {
+                gg.bribe_until = Some(hold);
+            }
+        }
+        Payer::Corp(c) => {
+            if let Some(cc) = world.comp_mut::<Corp>(c) {
+                cc.lobby_until = Some(hold);
+            }
+        }
     }
-    let mut actors = vec![gang, captain];
-    actors.extend(leader);
+    let mut actors = vec![payer_id, captain];
+    actors.extend(decider);
     let cname = world.name_of(captain);
+    let what = match ask {
+        BribeAsk::LookAway => "to look away".to_string(),
+        BribeAsk::Crackdown(g) => {
+            format!(
+                "for a crackdown on {}",
+                world.comp::<Gang>(g).map_or_else(|| "a gang".to_string(), |g| g.name.clone())
+            )
+        }
+    };
     if refused {
         if let Some(l) = world.law_mut() {
             l.hardened_until = Some(hold);
         }
         crate::systems::law_brain::push_shock(world, LawShock::BribeRefused);
-        world.push_event(
-            EventKind::Bribe,
-            &actors,
-            format!("{gname} offered captain {cname} {price} coins; refused ({score:.2})"),
-        );
+        let text = match ask {
+            BribeAsk::LookAway => format!("{pname} offered captain {cname} {price} coins; refused ({score:.2})"),
+            BribeAsk::Crackdown(_) => {
+                format!("{pname} offered captain {cname} {price} coins {what}; refused ({score:.2})")
+            }
+        };
+        world.push_event(EventKind::Bribe, &actors, text);
         return true;
     }
-    if let Some(g) = world.comp_mut::<Gang>(gang) {
-        g.treasury -= price;
-        g.paid_until = Some(hold);
-    }
-    if let Some(w) = world.comp_mut::<Wallet>(captain) {
-        w.coins += price;
+    crate::systems::ownership::pay(world, Some(payer_id), Some(captain), price, crate::systems::ownership::Flow::Bribe);
+    match (payer, ask) {
+        (Payer::Gang(g), _) => {
+            if let Some(gg) = world.comp_mut::<Gang>(g) {
+                gg.paid_until = Some(hold);
+            }
+            // The gang out-bids a corp's bought crackdown.
+            if let Some(l) = world.law_mut() {
+                l.lobby = None;
+            }
+        }
+        (Payer::Corp(c), BribeAsk::Crackdown(gang)) => {
+            if let Some(l) = world.law_mut() {
+                l.lobby = Some(LobbyHold { corp: c, gang, until: hold });
+            }
+        }
+        (Payer::Corp(_), BribeAsk::LookAway) => {}
     }
     if let Some(p) = world.comp_mut::<Personality>(captain) {
         p.drift(Drift::TookBribe);
@@ -399,7 +492,7 @@ pub fn consider_bribe(world: &mut World, gang: EntityId) -> bool {
     world.push_event(
         EventKind::Bribe,
         &actors,
-        format!("{gname} paid captain {cname} {price} coins to look away ({score:.2})"),
+        format!("{pname} paid captain {cname} {price} coins {what} ({score:.2})"),
     );
     crate::systems::law_brain::rethink(world);
     true

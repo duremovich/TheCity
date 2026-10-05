@@ -678,4 +678,15 @@ impl World {
     pub fn invalidate_flow_fields(&mut self) {
         self.flow_fields.clear();
     }
+
+    /// A building went up on a Lot (`rect`): drop the cached fields whose
+    /// paths from outside cross its new walls or its interior.
+    pub fn invalidate_flow_fields_for_lot(&mut self, rect: crate::components::Rect) {
+        let tiles: Vec<TilePos> = (rect.y..rect.y + rect.h)
+            .flat_map(|y| (rect.x..rect.x + rect.w).map(move |x| TilePos { x, y }))
+            .filter(|&t| self.map.tile_at(t) != crate::components::TileKind::Door)
+            .collect();
+        let sealed = |t: TilePos| rect.contains(t) && self.map.tile_at(t) != crate::components::TileKind::Door;
+        self.flow_fields.invalidate_sealed(&tiles, &sealed);
+    }
 }

@@ -905,23 +905,38 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
     route
 }
 
-/// M11 D18: a private guard walks up to five of its corp's buildings
-/// nearest its Security Office (the office first); contracted clients are
-/// phase 3. No draw: the world stream is untouched. `None` for a city guard.
-fn private_patrol_route(world: &World, guard: EntityId) -> Option<Vec<EntityId>> {
+/// M11 D18: a private guard walks up to five of its corp's contracted
+/// clients (all of them, nearest its office first, when there are five or
+/// fewer; else five drawn with the world stream as the city's beat is), or
+/// with no clients its corp's own buildings nearest its Security Office.
+/// `None` for a city guard.
+fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<EntityId>> {
     if !is_private_guard(world, guard) {
         return None;
     }
     let office = world.comp::<Job>(guard).and_then(|j| j.employer)?;
     let from = world.comp::<Building>(office)?.door;
-    let owned: Vec<EntityId> = match world.corp_of_building(office) {
-        Some(c) => world.comp::<crate::components::Corp>(c).map(|c| c.buildings.clone()).unwrap_or_default(),
-        None => vec![office],
+    let corp = world.corp_of_building(office);
+    let usable = |w: &World, b: EntityId| w.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| bd.door);
+    let clients: Vec<EntityId> = corp
+        .and_then(|c| world.comp::<crate::components::Corp>(c))
+        .map(|c| c.contracts.iter().map(|&(b, _)| b).collect())
+        .unwrap_or_default();
+    let clients: Vec<EntityId> = clients.into_iter().filter(|&b| usable(world, b).is_some()).collect();
+    if clients.len() > 5 {
+        let picks = (0..5).map(|_| clients[world.rng.world().random_range(0..clients.len())]).collect();
+        return Some(picks);
+    }
+    let pool: Vec<EntityId> = if clients.is_empty() {
+        match corp {
+            Some(c) => world.comp::<crate::components::Corp>(c).map(|c| c.buildings.clone()).unwrap_or_default(),
+            None => vec![office],
+        }
+    } else {
+        clients
     };
-    let mut near: Vec<(u32, EntityId)> = owned
-        .into_iter()
-        .filter_map(|b| world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.door.manhattan(from), b)))
-        .collect();
+    let mut near: Vec<(u32, EntityId)> =
+        pool.into_iter().filter_map(|b| usable(world, b).map(|d| (d.manhattan(from), b))).collect();
     near.sort();
     Some(near.into_iter().take(5).map(|(_, b)| b).collect())
 }

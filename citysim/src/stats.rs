@@ -10,7 +10,7 @@ use crate::time::Season;
 /// Days of history kept for the city panel's sparklines.
 pub const STATS_HISTORY_CAP: usize = 120;
 
-pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,ticks_per_sec";
+pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,acquisitions,bankruptcies,monopolies,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order).
 pub const CORP_SLOTS: usize = 8;
@@ -118,6 +118,15 @@ pub struct DayRow {
     /// (`None` once dissolved).
     #[serde(default)]
     pub corps: Vec<Option<(i64, CorpOrder)>>,
+    /// M11 phase 3 counters: buildings that changed hands by sale (hostile
+    /// acquisitions and bankruptcy sales), corps gone bankrupt; and a
+    /// snapshot: corp-niche pairs at monopoly at day end.
+    #[serde(default)]
+    pub acquisitions: u32,
+    #[serde(default)]
+    pub bankruptcies: u32,
+    #[serde(default)]
+    pub monopolies: u32,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -178,6 +187,9 @@ impl DayRow {
             wallet_gini: 0.0,
             wallet_top10: 0.0,
             corps: Vec::new(),
+            acquisitions: 0,
+            bankruptcies: 0,
+            monopolies: 0,
             ticks_per_sec: 0.0,
         }
     }
@@ -191,7 +203,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -244,6 +256,9 @@ impl DayRow {
             self.wallet_gini,
             self.wallet_top10,
             corps.join(","),
+            self.acquisitions,
+            self.bankruptcies,
+            self.monopolies,
             self.ticks_per_sec,
         )
     }

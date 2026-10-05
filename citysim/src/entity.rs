@@ -60,6 +60,7 @@ impl World {
         self.unindex_brain(id);
         self.unindex_job(id);
         self.unindex_gang(id);
+        self.unindex_corp(id);
         self.unindex_household(id);
         self.alive[i] = false;
         self.generations[i] = self.generations[i].wrapping_add(1);

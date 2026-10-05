@@ -556,6 +556,15 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
         if gang.order_trace.is_empty() {
             ui.label("no rescoring yet");
         }
+        // M11 D33: a hoarding corp tilts Contest.
+        let (hoard, hoard_corp) = citysim::systems::faction::hoard(world);
+        if hoard > 0.0 {
+            ui.label(format!(
+                "hoard {} +{:.3} on Contest",
+                world.owner_label(hoard_corp),
+                world.config.corps.hoard_tilt * hoard
+            ));
+        }
         for s in gang.order_trace.iter().take(3) {
             egui::CollapsingHeader::new(format!("{}  {:.3}", s.order, s.score))
                 .default_open(s.order == gang.order)

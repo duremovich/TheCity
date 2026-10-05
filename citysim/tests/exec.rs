@@ -255,3 +255,19 @@ fn test_idle_agent_leaves_the_hall() {
     let plan = routine::idle_plan(&w, id).expect("idle plan");
     assert_eq!(plan.steps[0].action, ActionKind::Wander);
 }
+
+/// M11: the radix-heap build pops in the binary heap's `(cost, tile)` order,
+/// so every field is byte-identical to the M10 build, on both maps, for
+/// every door.
+#[test]
+fn test_flowfield_radix_build_matches_binary_heap() {
+    let assets = Config::load().assets_dir;
+    for file in ["map_v1.txt", "map.txt"] {
+        let map = citysim::Map::load(&assets.join(file));
+        for b in &map.buildings {
+            let fast = FlowField::build(&map, b.door);
+            let reference = FlowField::build_binary_heap(&map, b.door);
+            assert!(fast.next == reference.next, "{file}: field for the door at {} differs", b.door);
+        }
+    }
+}

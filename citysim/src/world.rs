@@ -246,6 +246,11 @@ pub struct World {
     /// rebuilt on load (`gangs()` was a full entity scan).
     #[serde(skip)]
     gang_ids: Vec<EntityId>,
+    /// Every corp, ascending by id; kept by the Corp insert/remove hooks and
+    /// rebuilt on load (a Corp store scan is ~600 bytes a slot, and the corp
+    /// brain asks several times a rescoring).
+    #[serde(skip)]
+    corp_ids: Vec<EntityId>,
     /// Residents by Home, each list ascending; kept by the Household hooks
     /// and `set_home`, rebuilt on load (M10 review: the per-Home
     /// `citizens()` scans). `resident_home` is the reverse, so a removed
@@ -262,6 +267,11 @@ pub struct World {
     /// keyed on the guards' tiles: reused until a guard moves.
     #[serde(skip)]
     pub guarded_homes: GuardedHomes,
+    /// M11: a corp's pending shocks reached `[corps] shock_severity_rethink`
+    /// (set by `ownership::push_corp_shock`), so `corp_brain::run` scans the
+    /// corps this tick. Shocks are not saved, so neither is this.
+    #[serde(skip)]
+    pub corp_rethink: bool,
     pub buildings_by_kind: BTreeMap<BuildingKind, Vec<EntityId>>,
     /// Rebuilt each tick for Full agents.
     pub agents_by_tile: BTreeMap<TilePos, Vec<EntityId>>,
@@ -537,10 +547,12 @@ impl World {
             crime_reports: Vec::new(),
             report_index: std::sync::OnceLock::new(),
             gang_ids: Vec::new(),
+            corp_ids: Vec::new(),
             residents: BTreeMap::new(),
             resident_home: BTreeMap::new(),
             mean_price_cache: None,
             guarded_homes: GuardedHomes::default(),
+            corp_rethink: false,
             buildings_by_kind: BTreeMap::new(),
             agents_by_tile: BTreeMap::new(),
             levers,
@@ -884,6 +896,8 @@ impl World {
             self.index_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
             Self::list_insert(&mut self.gang_ids, id);
+        } else if TypeId::of::<T>() == TypeId::of::<Corp>() {
+            Self::list_insert(&mut self.corp_ids, id);
         } else if TypeId::of::<T>() == TypeId::of::<Household>() {
             self.index_household(id);
         }
@@ -897,6 +911,8 @@ impl World {
             self.unindex_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
             self.unindex_gang(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Corp>() {
+            self.unindex_corp(id);
         } else if TypeId::of::<T>() == TypeId::of::<Household>() {
             self.unindex_household(id);
         }
@@ -940,6 +956,11 @@ impl World {
     /// Drop a gang from `gang_ids` (its Gang removed, or despawned).
     pub(crate) fn unindex_gang(&mut self, id: EntityId) {
         Self::list_remove(&mut self.gang_ids, id);
+    }
+
+    /// Drop a corp from `corp_ids` (its Corp removed, or despawned).
+    pub(crate) fn unindex_corp(&mut self, id: EntityId) {
+        Self::list_remove(&mut self.corp_ids, id);
     }
 
     fn list_remove(list: &mut Vec<EntityId>, id: EntityId) {
@@ -1034,6 +1055,7 @@ impl World {
         self.by_role = roles;
         self.stat_slots = slots;
         self.gang_ids = self.with::<Gang>();
+        self.corp_ids = self.with::<Corp>();
         (self.residents, self.resident_home) = self.residents_from_stores();
         self.guarded_homes = GuardedHomes::default();
         self.mean_price_cache = None;
@@ -1096,6 +1118,9 @@ impl World {
         }
         if self.gang_ids != self.with::<Gang>() {
             return Err(format!("gang_ids out of sync: {:?}", self.gang_ids));
+        }
+        if self.corp_ids != self.with::<Corp>() {
+            return Err(format!("corp_ids out of sync: {:?}", self.corp_ids));
         }
         if let Some(idx) = self.report_index.get() {
             if *idx != Self::build_report_index(&self.crime_reports) {
@@ -1180,9 +1205,9 @@ impl World {
     // M11: corps and owners
     // -----------------------------------------------------------------------
 
-    /// Every corp, ascending by id (a full entity scan: daily callers only).
+    /// Every corp, ascending by id (an index kept by the Corp hooks).
     pub fn corps(&self) -> Vec<EntityId> {
-        self.with::<Corp>()
+        self.corp_ids.clone()
     }
 
     /// Position of a corp in `corps()`: picks its colour in the app.
@@ -1376,7 +1401,7 @@ impl World {
 
     /// One in-game minute, systems in the fixed order
     /// `commands, time, lod, needs, memory, think, plan, exec, ownership,
-    /// economy, bind, law, social, gang, demography, stats`. The binder runs
+    /// economy, bind, law, social, gang, corp_brain, demography, stats`. The binder runs
     /// before the law so a cold-case report reaches the captain's daily
     /// rescoring (M10 D32); ownership's daily pass (rent, evictions,
     /// re-housing, upkeep) runs before the economy's price step (M11 D42).
@@ -1396,6 +1421,7 @@ impl World {
         systems::law::run(self);
         systems::social::run(self);
         systems::gang::run(self);
+        systems::corp_brain::run(self);
         systems::demography::run(self);
         systems::stats::run(self);
         self.tick += 1;

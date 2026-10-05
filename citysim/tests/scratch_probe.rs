@@ -939,3 +939,84 @@ fn probe_m11_starvation_by_age() {
     }
     eprintln!("starvation over {days} days: {kids} children, {adults} adults");
 }
+
+/// M11 phase 3: seed 42, 120 days on the default config. Per Market: owner,
+/// price and sales per day (price min/mean/max, sales share by 10 days); per
+/// corp: buildings at day 0/60/119 and Food price level while it Undercuts.
+#[test]
+#[ignore]
+fn probe_m11_corps() {
+    use citysim::{BuildingKind, Corp, CorpOrder, Market, Niche};
+    let mut w = World::new(42, Config::load());
+    let markets = w.buildings_of_kind(BuildingKind::Market).to_vec();
+    let name = |w: &World, c: Option<citysim::EntityId>| w.owner_label(c);
+    let mut prices: Vec<Vec<i64>> = vec![Vec::new(); markets.len()];
+    let mut sales: Vec<Vec<u32>> = vec![Vec::new(); markets.len()];
+    let mut owners: Vec<Vec<String>> = vec![Vec::new(); markets.len()];
+    let mut undercut_days: Vec<(u64, String, f32)> = Vec::new();
+    let snapshot = |w: &World| -> Vec<(String, usize, i64)> {
+        w.corps()
+            .into_iter()
+            .filter_map(|c| w.comp::<Corp>(c).map(|cc| (cc.name.clone(), cc.buildings.len(), cc.treasury)))
+            .collect()
+    };
+    let mut snaps = vec![(0u64, snapshot(&w))];
+    for day in 0..120u64 {
+        w.run_ticks(TICKS_PER_DAY);
+        for (i, &m) in markets.iter().enumerate() {
+            let mk = w.comp::<Market>(m).expect("market");
+            prices[i].push(mk.price_food);
+            sales[i].push(mk.sales.back().copied().unwrap_or(0));
+            owners[i].push(name(&w, w.owner_of(m)));
+        }
+        for c in w.corps() {
+            let cc = w.comp::<Corp>(c).expect("corp");
+            if cc.order == CorpOrder::Undercut && cc.order_niche == Some(Niche::Food) {
+                undercut_days.push((day, cc.name.clone(), cc.level(Niche::Food)));
+            }
+        }
+        if day == 59 || day == 119 {
+            snaps.push((day + 1, snapshot(&w)));
+        }
+    }
+    for (i, &m) in markets.iter().enumerate() {
+        let p = &prices[i];
+        let mean = p.iter().sum::<i64>() as f64 / p.len() as f64;
+        let mut owner_runs: Vec<(usize, String)> = Vec::new();
+        for (d, o) in owners[i].iter().enumerate() {
+            if owner_runs.last().is_none_or(|(_, last)| last != o) {
+                owner_runs.push((d, o.clone()));
+            }
+        }
+        eprintln!(
+            "Market#{} price min {} mean {mean:.2} max {} owners {:?}",
+            m.index,
+            p.iter().min().unwrap_or(&0),
+            p.iter().max().unwrap_or(&0),
+            owner_runs
+        );
+    }
+    for d in (0..120).step_by(10) {
+        let tot: Vec<u32> = (0..markets.len()).map(|i| sales[i][d..d + 10].iter().sum()).collect();
+        let all: u32 = tot.iter().sum::<u32>().max(1);
+        let share: Vec<String> = tot.iter().map(|&t| format!("{:.2}", f64::from(t) / f64::from(all))).collect();
+        let price: Vec<String> = (0..markets.len())
+            .map(|i| format!("{:.1}", prices[i][d..d + 10].iter().sum::<i64>() as f64 / 10.0))
+            .collect();
+        eprintln!("days {d:3}-{:3}: sales share {share:?} mean price {price:?}", d + 9);
+    }
+    let mut runs: Vec<(String, u64, u64, f32)> = Vec::new();
+    for (d, n, l) in undercut_days {
+        match runs.last_mut() {
+            Some(r) if r.0 == n && r.2 + 1 == d => {
+                r.2 = d;
+                r.3 = l;
+            }
+            _ => runs.push((n, d, d, l)),
+        }
+    }
+    eprintln!("Food Undercut held (corp, from, to, level at end): {runs:?}");
+    for (d, s) in snaps {
+        eprintln!("day {d}: {s:?}");
+    }
+}

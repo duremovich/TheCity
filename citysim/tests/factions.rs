@@ -54,6 +54,9 @@ fn inputs() -> OrderInputs {
         breakout_ready: true,
         garrison: false,
         loyalty: 0.5,
+        hoard: 0.0,
+        hoard_corp: None,
+        hoard_tilt: 0.1,
     }
 }
 

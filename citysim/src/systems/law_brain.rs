@@ -198,14 +198,39 @@ pub fn rescore(world: &mut World, hysteresis: f32, why: &str) {
     let inputs = gather_inputs(world);
     let scores = inputs.as_ref().map(|i| score_postures(i, &cfg)).unwrap_or_default();
     let brain = choose(&scores, current, hysteresis);
+    // M11 D21: a corp's bought crackdown, while it holds and its gang lives,
+    // forces a Crackdown on that gang (the player's pin still wins).
+    let lobby = world.law().and_then(|l| l.lobby);
+    let live_lobby = lobby.filter(|h| h.until > now && world.has::<crate::components::Gang>(h.gang));
+    if lobby.is_some() && live_lobby.is_none() {
+        if let Some(l) = world.law_mut() {
+            l.lobby = None;
+        }
+    }
+    let forced = live_lobby.filter(|_| pinned.is_none());
+    let lobby_why;
+    let why = match forced {
+        Some(h) => {
+            let corp =
+                world.comp::<crate::components::Corp>(h.corp).map_or_else(|| "a corp".to_string(), |c| c.name.clone());
+            lobby_why = format!("lobbied by {corp}");
+            lobby_why.as_str()
+        }
+        None => why,
+    };
     // No captain: nothing is scored and the posture is the pin, or Patrol.
-    let next = match (pinned, inputs.is_some()) {
-        (Some(p), _) => (p != current).then_some(p),
-        (None, true) => brain,
-        (None, false) => (current != Posture::Patrol).then_some(Posture::Patrol),
+    let next = match (pinned, forced, inputs.is_some()) {
+        (Some(p), _, _) => (p != current).then_some(p),
+        (None, Some(_), _) => (current != Posture::Crackdown).then_some(Posture::Crackdown),
+        (None, None, true) => brain,
+        (None, None, false) => (current != Posture::Patrol).then_some(Posture::Patrol),
     };
     let posture = next.unwrap_or(current);
-    let target = if posture == Posture::Crackdown { inputs.as_ref().and_then(|i| i.wanted_gang) } else { None };
+    let target = match (posture, forced) {
+        (Posture::Crackdown, Some(h)) => Some(h.gang),
+        (Posture::Crackdown, None) => inputs.as_ref().and_then(|i| i.wanted_gang),
+        _ => None,
+    };
     let best_score = scores.first().map_or(0.0, |s| s.score);
     let current_score = scores.iter().find(|s| s.posture == current).map_or(0.0, |s| s.score);
     if let Some(l) = world.law_mut() {
