@@ -52,3 +52,19 @@ At the closest level of detail there is a **dialogue system**. A player close en
 **Leverage is a first-class tool, for everyone.** Taking someone hostage gives leverage over someone else for information or access to a building. Extortion, blackmail, threats, fraud: all available to the player character and to NPCs and factions alike, through the same mechanisms. The sim already has extortion as a gang action; it generalises to a social move with a target, a demand, a threat and a credibility derived from relative strength and reputation.
 
 Design implications: social stats and reputation belong to the sim before the player exists (NPCs use them on each other; the gossip and revenge systems read reputation); leverage moves are the contract entity again (buyer, target, price, deadline) with a threat instead of a payment; the dialogue layer is a renderer over the social state and never a second source of truth; the stat and reputation model lands with gossip (post-M14), the generated-dialogue layer with the player character.
+
+## Governance, missions and the outside as combat maps (added 2026-10-05, Dylan)
+
+**Governance.** Governments and corporations have a governance model. Some are dictatorships (one leader, one Personality driving the brain, as the gang leader does today); some have shared leadership, a **board**. Most of the time a board is abstracted as a corporate personality (the aggregate of its members' Personalities drives the brain). But at first-person detail the members are agents, and a player could bribe, blackmail or threaten every member of a board to get themselves voted in as the leader of a megacorp. Super hard, not impossible for a determined player with enough power, especially one who can send agents on missions.
+
+**Missions at three LODs.** A player can send agents on missions (a raid, a hit, a heist, a board member's persuasion). Each mission can be:
+
+- **watched in real time** through cyberspace, if the soldiers are equipped with the right technology (Virt, M14: the deck is the camera);
+- **resolved off screen** and rendered as a probability (the M8 brawl resolver and the M10 binder already do this for NPC actions);
+- **carried out by the player character** in person.
+
+The same contract (M16) backs all three; only the renderer differs.
+
+**The outside world as limited combat maps.** Missions outside the city (an asset in the outside ledger, M17: a rival's depot, a parent's data centre) are small maps with a limited cast of NPCs who need no persistence beyond the moment. The exception is the point: if the player befriends one, or makes a specific enemy of one, they can become persistent and later show up in the city seeking out the player character, for good or ill. The outside world's agents enter the city the way everything outside does, as a resource effect, until a story promotes one of them to a person.
+
+Design implications: a `Governance` on every faction (Dictator(agent) | Board(members, vote rule)) whose brain reads an aggregate Personality; leadership change as a vote the leverage moves can swing; missions as contracts with a renderer flag; a "promoted from outside" immigrant with a grudge or a friendship edge to the player as the hook from a combat map back into the city.

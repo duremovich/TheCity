@@ -301,3 +301,12 @@ pub enum PlayerCommand { /* … */ Step(PlanStep), Move(SocialMove), Coerce(Coer
 | What the model may invent | Wording and tone. Never facts: names, deeds, prices and places come from the context. |
 
 **Out of scope:** first-person rendering, voice, multiplayer, a scripted main story.
+
+## Addendum (2026-10-05, Dylan): governance, missions, combat maps
+
+Folded into the sketches above rather than a milestone of their own:
+
+- **Governance** (M11 hook, M16/M18 behaviour): every faction carries `Governance::Dictator(agent) | Board { members, vote }`. A board's brain reads the aggregate of its members' `Personality`; a leadership change is a vote that leverage moves (M16) can swing one member at a time. A player voted in as a megacorp's leader is the hardest version of "take over".
+- **Missions at three LODs** (M16/M18): a contract can be resolved off screen as a probability (the brawl resolver and binder already do this), watched live through Virt when the agents carry the gear (M14), or played by the player character. One contract, three renderers.
+- **The outside as combat maps** (M17/M18): a mission on an outside asset is a small map with a transient cast; an NPC who becomes a friend or a specific enemy of the player is promoted to persistence and may later arrive in the city as an immigrant with an edge to the player.
+
