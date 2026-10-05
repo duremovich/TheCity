@@ -13,7 +13,7 @@ Decisions taken on 2026-10-05 (Dylan was away; these are the implementing agent'
 | Bribery | A gang under crackdown may pay the captain from its treasury. A bribed captain drops the crackdown and cannot resume it against that gang for `bribe_days`. A captain with lawfulness ≥ `incorruptible` refuses, and the crackdown hardens. |
 | Player | A `SetLawPosture` command pins the posture, or hands it back to the captain. |
 | Escapees | A freed convict's warrant reopens for the original crime; re-arrest means a fresh full sentence. |
-| Empty Hideout (M8 residual) | Fixed here: members sleep and idle at the Hideout while lying low, and whenever homeless, so a raid on a gang that is lying low meets defenders. |
+| Empty Hideout (M8 residual) | Fixed here: a rotating night watch (`night_watch` grunts, at most half the gang) sleeps at the Hideout every night, and every member holes up there while lying low or when homeless. Lying low alone was tried first and did nothing: on seed 42 no raid fell on a night the victim lay low. |
 
 ## Goals and acceptance
 
@@ -114,12 +114,17 @@ garrison = 0.05
 
 New `[gangs]` keys and `[law]` have serde defaults, so an M8 save loads.
 
-## 2. Lying low at the Hideout (the M8 residual)
+## 2. The night watch (the M8 residual)
 
-- **Sleep** is allowed at the Hideout for a member whose gang is lying low or who is homeless, while the Hideout is not sacked and not full. While lying low, Sleep at Home is *not* allowed unless the Hideout is full: lying low means holing up. `PlanCtx` gains `hideout_bed` and `hideout_full`.
-- **Rest** is allowed at the Hideout for any member.
-- **Idle** (`routine::idle_plan`) sends a member who is lying low, or homeless, to the Hideout to Rest instead of Home.
-- Nothing else changes. A raid on a gang that is lying low now finds its members inside; a raid on a gang out expanding still finds an empty Hideout and sacks it. That trade-off is the point.
+`gang::holes_up_at(member)` names the member's Hideout when they sleep and idle there tonight, `None` otherwise:
+
+- **On watch.** `min(night_watch, n / 2)` members stand watch each night (`[gangs] night_watch`, default 2): the roster newest-first (the grunts), rotated by the night, so the duty goes round and a gang of one keeps no watch. A night is keyed on the day it starts, so the 22:00 watch is still the watch at 02:00.
+- **Lying low**, or **homeless**: every member.
+- Never while the Hideout is sacked, or full for anyone not already inside.
+
+In the planner `PlanCtx.holes_up` carries it: **Sleep** is allowed at the Hideout and *not* at Home while it is set (holing up means holing up; a full Hideout sends them home again); **Rest** is allowed at the Hideout for any member; **Idle** (`routine::idle_plan`) sends a member who holes up to the Hideout to Rest.
+
+Measured on seed 42 over 120 days: five raids, three met defenders, one was Won rather than Sacked (M8: five raids, five sacks, never a defender). Across seeds 1, 2, 3 and 7 the watch changed no headline count systematically (arrests, thefts and starvation swing by 2-3× between seeds either way).
 
 ## 3. BreakOut
 

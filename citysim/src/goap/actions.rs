@@ -292,6 +292,9 @@ pub struct PlanCtx {
     pub raid_pending: bool,
     /// The agent's gang Hideout is sacked: no SplitLoot or Fence.
     pub hideout_sacked: bool,
+    /// The agent sleeps and idles at the Hideout tonight (`gang::holes_up_at`):
+    /// on the night watch, lying low, or homeless; never when it is sacked or full.
+    pub holes_up: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -388,11 +391,17 @@ impl PlanCtx {
             .and_then(|t| world.comp::<Building>(t))
             .map_or((0, false), |b| (b.stock_food, !b.occupants.is_empty()));
 
+        let in_gang = world.has::<GangMember>(agent);
+        let hideout_sacked = world
+            .gang_of(agent)
+            .and_then(|g| world.comp::<crate::components::Gang>(g))
+            .is_some_and(|g| g.is_sacked(world.tick));
+
         PlanCtx {
             agent,
             target,
             role: job.map(|j| j.role),
-            in_gang: world.has::<GangMember>(agent),
+            in_gang,
             adult: world.comp::<Identity>(agent).is_some_and(|i| i.age_days >= 18 * crate::time::DAYS_PER_YEAR as u32),
             lawfulness: p.map_or(0.5, |p| p.lawfulness),
             greed: p.map_or(0.5, |p| p.greed),
@@ -506,10 +515,8 @@ impl PlanCtx {
             drank_today: crate::utility::goals::drank_today(world, agent),
             bar_full: crate::utility::goals::bar_full_for(world, agent),
             raid_pending: crate::systems::raid::raid_pending(world, agent),
-            hideout_sacked: world
-                .gang_of(agent)
-                .and_then(|g| world.comp::<crate::components::Gang>(g))
-                .is_some_and(|g| g.is_sacked(world.tick)),
+            hideout_sacked,
+            holes_up: crate::systems::gang::holes_up_at(world, agent).is_some(),
             dist,
         }
     }
@@ -603,10 +610,19 @@ impl ActionKind {
             ActionKind::Forage => at(LocationKey::Farm) && ws.forage_available,
             // `bar_full` is a plan-time hint only: once inside, the agent counts as an occupant.
             ActionKind::Beg => at(LocationKey::Market) || (at(LocationKey::Bar) && !ctx.bar_full),
-            ActionKind::Sleep => at(LocationKey::Home) || (ctx.homeless && at(LocationKey::Street)),
-            // Rest at Bar or Home; also at the workplace while waiting for a shift.
+            // A member on watch, lying low or homeless beds down at the Hideout.
+            ActionKind::Sleep => {
+                (at(LocationKey::Home) && !ctx.holes_up)
+                    || (ctx.homeless && at(LocationKey::Street))
+                    || (ctx.holes_up && at(LocationKey::Hideout))
+            }
+            // Rest at Bar or Home; also at the workplace while waiting for a
+            // shift, and at the Hideout for a gang member.
             ActionKind::Rest => {
-                (at(LocationKey::Bar) && !ctx.bar_full) || at(LocationKey::Home) || ctx.workplace.is_some_and(at)
+                (at(LocationKey::Bar) && !ctx.bar_full)
+                    || at(LocationKey::Home)
+                    || ctx.workplace.is_some_and(at)
+                    || (ctx.in_gang && at(LocationKey::Hideout))
             }
             ActionKind::FarmWork => at(LocationKey::Farm) && !ws.shift_done && ctx.on_shift,
             ActionKind::ClerkWork => at(LocationKey::Market) && !ws.shift_done && ctx.on_shift,

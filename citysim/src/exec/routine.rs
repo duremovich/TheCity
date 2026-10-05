@@ -119,6 +119,14 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     if at_home && inv.food > inv.stolen_food && inv.food >= 2 {
         return Some(plan(goal, home, vec![step(ActionKind::StoreFood, None)], tick));
     }
+    // A member lying low, or without a Home, idles at the Hideout.
+    if let Some(h) = crate::systems::gang::holes_up_at(world, id) {
+        if pos.building == Some(h) {
+            return Some(plan(goal, None, vec![step(ActionKind::Rest, None)], tick));
+        }
+        let steps = vec![step(ActionKind::GoTo(LocationKey::Hideout), Some(h)), step(ActionKind::Rest, None)];
+        return Some(plan(goal, Some(h), steps, tick));
+    }
     let here = pos.building.and_then(|b| world.comp::<Building>(b)).map(|b| b.kind);
     if at_home || here == Some(BuildingKind::Bar) {
         return Some(plan(goal, None, vec![step(ActionKind::Rest, None)], tick));

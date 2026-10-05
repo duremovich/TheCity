@@ -3,7 +3,8 @@
 use citysim::systems::faction::{self, OrderInputs};
 use citysim::systems::gang;
 use citysim::{
-    Brain, Building, BuildingKind, Claim, Config, EntityId, EventKind, Gang, Order, Personality, Shock, World,
+    ActionKind, Brain, Building, BuildingKind, Claim, Config, EntityId, EventKind, Gang, LocationKey, Needs, Order,
+    Personality, Shock, World,
 };
 
 fn world(seed: u64) -> World {
@@ -404,6 +405,80 @@ fn test_gang_members_are_never_statistical() {
     for m in members {
         assert_ne!(w.comp::<Brain>(m).expect("b").lod, citysim::Lod::Statistical);
     }
+}
+
+#[test]
+fn test_night_watch_rotates_through_the_grunts() {
+    let mut w = world(56);
+    let (g0, _) = gangs(&w);
+    let members = civilians(&w, 5);
+    for (i, &m) in members.iter().enumerate() {
+        w.tick = i as u64; // distinct joining ticks: the newest stand watch first
+        gang::enlist(&mut w, m, g0);
+    }
+    w.tick = 1300;
+    let watch = |w: &World| -> Vec<EntityId> { members.iter().copied().filter(|&m| gang::on_watch(w, m)).collect() };
+    let tonight = watch(&w);
+    assert_eq!(tonight.len(), 2, "min(night_watch, n / 2)");
+    for &m in &tonight {
+        assert_eq!(gang::holes_up_at(&w, m), w.hideout_of(g0));
+    }
+    assert_eq!(watch(&w).len(), 2);
+    w.tick = 1300 + 300; // 03:40, the same night
+    assert_eq!(watch(&w), tonight, "a watch lasts the night");
+    w.tick = 1300 + 1440;
+    let tomorrow = watch(&w);
+    assert_eq!(tomorrow.len(), 2);
+    assert_ne!(tomorrow, tonight, "the duty goes round");
+    // A gang of one keeps no watch.
+    let mut lone = world(57);
+    let (g0, _) = gangs(&lone);
+    let (a, _) = two_civilians(&lone);
+    gang::enlist(&mut lone, a, g0);
+    assert!(!gang::on_watch(&lone, a));
+}
+
+#[test]
+fn test_lying_low_sleeps_and_idles_at_the_hideout() {
+    use citysim::systems::plan;
+    let mut w = world(55);
+    let (g0, _) = gangs(&w);
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    temper(&mut w, a);
+    let hideout = w.hideout_of(g0).expect("h0");
+    let home = w.comp::<citysim::Household>(a).and_then(|h| h.home).expect("home");
+    w.abort_plan(a);
+    w.leave_building(a);
+    w.comp_mut::<Needs>(a).expect("n").energy = 0.2;
+    w.tick = 1300;
+    let steps = |w: &mut World| -> Vec<ActionKind> {
+        w.abort_plan(a);
+        plan::plan_for(w, a, GoalKind::Sleep);
+        w.comp::<Brain>(a)
+            .and_then(|b| b.plan.as_ref())
+            .map(|p| p.steps.iter().map(|s| s.action).collect())
+            .unwrap_or_default()
+    };
+    assert_eq!(steps(&mut w), vec![ActionKind::GoTo(LocationKey::Home), ActionKind::Sleep], "expanding: home to bed");
+    w.comp_mut::<Gang>(g0).expect("g").order = Order::LieLow;
+    assert_eq!(steps(&mut w), vec![ActionKind::GoTo(LocationKey::Hideout), ActionKind::Sleep], "lying low: hole up");
+    assert_eq!(gang::holes_up_at(&w, a), Some(hideout));
+    let idle = citysim::exec::routine::idle_plan(&w, a).expect("idle plan");
+    assert_eq!(
+        idle.steps.iter().map(|s| s.action).collect::<Vec<_>>(),
+        vec![ActionKind::GoTo(LocationKey::Hideout), ActionKind::Rest]
+    );
+    // A full Hideout sends them home after all.
+    let filler: Vec<EntityId> = civilians(&w, 13).into_iter().filter(|&c| c != a).take(12).collect();
+    for c in filler {
+        w.leave_building(c);
+        w.enter_building(c, hideout);
+    }
+    assert!(w.comp::<Building>(hideout).expect("b").is_full());
+    assert_eq!(gang::holes_up_at(&w, a), None);
+    assert_eq!(steps(&mut w), vec![ActionKind::GoTo(LocationKey::Home), ActionKind::Sleep], "full: home after all");
+    let _ = home;
 }
 
 #[test]

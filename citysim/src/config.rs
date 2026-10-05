@@ -260,10 +260,17 @@ pub struct GangsCfg {
     pub sacked_days: u64,
     /// Pending shock severities that force an immediate rescoring.
     pub shock_severity_rethink: f32,
+    /// Members who sleep at the Hideout each night (at most half the gang), so a raid meets someone.
+    #[serde(default = "GangsCfg::default_night_watch")]
+    pub night_watch: usize,
     pub order_flat: OrderFlatCfg,
 }
 
 impl GangsCfg {
+    fn default_night_watch() -> usize {
+        2
+    }
+
     /// The `[gangs]` block of `assets/config.toml`, for saves written before it existed.
     pub fn from_assets() -> GangsCfg {
         let dir = Config::find_assets_dir()

@@ -12,7 +12,7 @@ use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::personality::Drift;
 use crate::systems::{faction, law, social};
-use crate::time::TICKS_PER_DAY;
+use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
 
 /// A claim at this count holds the Home: it is territory.
@@ -104,6 +104,41 @@ pub fn hideout_for(world: &World, id: EntityId) -> Option<EntityId> {
         .or_else(|| recruit_gang(world, id))
         .and_then(|g| world.hideout_of(g))
         .or_else(|| world.building_of_kind(BuildingKind::Hideout))
+}
+
+/// Is this member on tonight's watch? `min(night_watch, n / 2)` members
+/// sleep at the Hideout each night so a raid meets someone: the roster in
+/// joining order (newest first: the grunts stand watch), rotated by the day,
+/// so the duty goes round. The night is keyed on the day it starts: a watch
+/// that began at 22:00 is the same watch at 02:00.
+pub fn on_watch(world: &World, id: EntityId) -> bool {
+    let Some(g) = world.gang_of(id).and_then(|g| world.comp::<Gang>(g)) else { return false };
+    let n = g.members.len();
+    let watch = world.config.gangs.night_watch.min(n / 2);
+    if watch == 0 {
+        return false;
+    }
+    let mut roster: Vec<(Tick, EntityId)> =
+        g.members.iter().map(|&m| (world.comp::<GangMember>(m).map_or(0, |gm| gm.joined_tick), m)).collect();
+    roster.sort_by(|a, b| b.cmp(a));
+    let night = (world.tick + TICKS_PER_DAY / 2) / TICKS_PER_DAY;
+    let start = (night % n as u64) as usize;
+    (0..watch).any(|i| roster[(start + i) % n].1 == id)
+}
+
+/// The Hideout a member idles and sleeps in right now: their gang's, while
+/// on watch, while the gang lies low, or when the member has no Home;
+/// never when it is sacked or full (for anyone not already inside). `None`
+/// for everyone else.
+pub fn holes_up_at(world: &World, id: EntityId) -> Option<EntityId> {
+    let gang = world.gang_of(id)?;
+    let g = world.comp::<Gang>(gang)?;
+    let homeless = world.comp::<Household>(id).is_none_or(|h| h.home.is_none());
+    if g.is_sacked(world.tick) || !(g.order == Order::LieLow || homeless || on_watch(world, id)) {
+        return None;
+    }
+    let b = world.comp::<Building>(g.hideout)?;
+    (!b.is_full() || b.occupants.contains(&id)).then_some(g.hideout)
 }
 
 /// JoinGang at the Hideout: join the gang `recruit_gang` names.

@@ -173,6 +173,9 @@ retaliate_days = 3
 sacked_days = 3
 # 0.5: one arrest (0.3) alone no longer forces a rethink; two in a day, or any death, does.
 shock_severity_rethink = 0.5
+# M9: this many members (at most half the gang, newest first, rotating daily) sleep at the Hideout
+# each night, so a raid meets defenders. In M8 every raid found the Hideout empty and sacked it.
+night_watch = 2
 
 # Flat terms on each order's score (product of considerations + flat). Retaliate's 0.6 lets a
 # grudge beat Expand for any leader with greed < 1; LieLow's 0.15 keeps it always available;
