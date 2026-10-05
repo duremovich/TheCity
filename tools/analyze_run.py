@@ -40,6 +40,8 @@ def num(v):
 def load_csv(path):
     with open(path, newline="") as f:
         rows = [r for r in csv.reader(f) if r]
+    if not rows:
+        return []
     if rows[0][0].strip().isdigit():
         header = DEFAULT_COLS[:len(rows[0])]
     else:
@@ -157,8 +159,10 @@ def analyze(rows, events, jail_cap=None):
     nweeks = last_day // 7 + 1
     out["weekly"] = {k: [weekly[k][w] for w in range(nweeks)] for k in STORY if k in kinds}
     out["transitions"] = {k: dict(v.most_common()) for k, v in trans.items()}
+    # Only recurring story kinds can go stale; one-offs like Founded never repeat.
+    one_offs = {"Founded", "Incorporated"}
     for k, (_, last) in span.items():
-        if last_day - last >= 30:
+        if k in STORY and k not in one_offs and last_day - last >= 30:
             flags.append(f"no {k} events since day {last} ({kinds[k]} before)")
     out["flags"] = flags
     return out

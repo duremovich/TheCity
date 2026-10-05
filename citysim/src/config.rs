@@ -313,7 +313,7 @@ pub struct OrderFlatCfg {
 
 impl OrderFlatCfg {
     fn default_breakout() -> f32 {
-        0.2
+        0.28
     }
 }
 
@@ -339,7 +339,14 @@ pub struct LawCfg {
     pub bribe_days: u64,
     /// The gang pays when its bribe score reaches this.
     pub bribe_threshold: f32,
+    /// A Crackdown keeps its target unless a challenger leads it by this many reports.
+    #[serde(default = "default_target_margin")]
+    pub target_margin: usize,
     pub posture_flat: PostureFlatCfg,
+}
+
+fn default_target_margin() -> usize {
+    2
 }
 
 impl LawCfg {

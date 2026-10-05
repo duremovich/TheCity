@@ -302,7 +302,10 @@ pub fn on_complete(
             }
         }
         ActionKind::Sleep => {
-            if at_home(world, id) {
+            // A gang member holing up at their own Hideout sleeps at home.
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            let hideout_home = here.is_some() && crate::systems::gang::holes_up_at(world, id) == here;
+            if at_home(world, id) || hideout_home {
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     n.safety = (n.safety + 0.3).min(1.0);
                 }

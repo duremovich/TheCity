@@ -105,8 +105,8 @@ pub fn guards(world: &World) -> Vec<EntityId> {
 pub fn recompute_captain(world: &mut World) -> Option<EntityId> {
     let captain = guards(world)
         .into_iter()
-        .filter_map(|g| world.comp::<Personality>(g).map(|p| (ordered_float::OrderedFloat(p.lawfulness), g)))
-        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))
+        .filter_map(|g| world.comp::<Personality>(g).map(|p| (p.lawfulness, g)))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, g)| g);
     if let Some(l) = world.law_mut() {
         l.captain = captain;
@@ -127,16 +127,27 @@ pub fn reports_by_gang(world: &World) -> BTreeMap<EntityId, usize> {
     out
 }
 
-/// The gang with the most recent reports, bribed gangs excluded (ties: the
-/// lower id), with its count.
+/// The gang with the most recent reports, gangs whose bribe was taken
+/// excluded (ties: the lower id), with its count. The standing Crackdown
+/// target is kept unless a challenger leads it by `target_margin` reports.
 pub fn wanted_gang(world: &World) -> Option<(EntityId, usize)> {
     let now = world.tick;
-    reports_by_gang(world)
+    let counts: BTreeMap<EntityId, usize> = reports_by_gang(world)
         .into_iter()
         .filter(|&(g, n)| {
-            n > 0 && world.comp::<crate::components::Gang>(g).is_some_and(|gg| gg.bribe_until.is_none_or(|t| t <= now))
+            n > 0 && world.comp::<crate::components::Gang>(g).is_some_and(|gg| gg.paid_until.is_none_or(|t| t <= now))
         })
-        .max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+        .collect();
+    let best = counts.iter().map(|(&g, &n)| (g, n)).max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))?;
+    let margin = world.config.law.target_margin;
+    if let Some(cur) = world.law().and_then(|l| l.target) {
+        if let Some(&n) = counts.get(&cur) {
+            if best.1 < n + margin {
+                return Some((cur, n));
+            }
+        }
+    }
+    Some(best)
 }
 
 /// Gather the inputs, or `None` when there is no captain to decide.

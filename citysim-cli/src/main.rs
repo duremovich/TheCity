@@ -14,7 +14,7 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use citysim::{save, stats, Config, Lod, PlayerCommand, World, TICKS_PER_DAY};
+use citysim::{save, stats, Config, Lod, PlayerCommand, Posture, World, TICKS_PER_DAY};
 
 #[derive(Parser)]
 #[command(name = "citysim-cli", about = "Living City Simulator headless runner")]
@@ -110,6 +110,13 @@ fn parse_lever(spec: &str) -> Result<(u64, PlayerCommand), String> {
         "guard_count" => PlayerCommand::SetGuardCount(num("count")? as u8),
         "immigration_per_week" => PlayerCommand::SetImmigrationPerWeek(num("count")? as u8),
         "dole_per_day" => PlayerCommand::SetDolePerDay(num("coins")? as u8),
+        "law_posture" => PlayerCommand::SetLawPosture(match value.to_ascii_lowercase().as_str() {
+            "auto" => None,
+            "patrol" => Some(Posture::Patrol),
+            "crackdown" => Some(Posture::Crackdown),
+            "garrison" => Some(Posture::Garrison),
+            _ => return Err(format!("{spec}: law_posture must be Auto|Patrol|Crackdown|Garrison")),
+        }),
         other => return Err(format!("{spec}: unknown lever {other}")),
     };
     Ok((day * TICKS_PER_DAY, cmd))

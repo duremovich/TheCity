@@ -483,6 +483,60 @@ fn test_breach_with_no_guards_frees_the_boss_first_and_reopens_the_warrant() {
 }
 
 #[test]
+fn test_breach_frees_the_longest_remaining_sentence_after_the_boss() {
+    use citysim::Crime;
+    let mut w = world(69);
+    w.config.crime.fight_death_p = 0.0;
+    let (g0, _) = gangs(&w);
+    let civ = civilians(&w, 3);
+    let (short, long, raider) = (civ[0], civ[1], civ[2]);
+    for &m in &[short, long, raider] {
+        gang::enlist(&mut w, m, g0);
+    }
+    let jail_b = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let now = w.tick;
+    citysim::systems::law::sentence(&mut w, short, Crime::Theft, now + 500, jail_b);
+    citysim::systems::law::sentence(&mut w, long, Crime::Theft, now + 5000, jail_b);
+    w.config.gangs.breakout_max_freed = 1;
+    w.comp_mut::<Gang>(g0).expect("g").boss = None;
+    clear_guards(&mut w);
+    let door = raid::jail_tile(&w).expect("jail door");
+    stage_raider(&mut w, raider, door);
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::BreakOut;
+        g.raid_at = Some(now);
+    }
+    assert_eq!(raid::resolve(&mut w, raider), Some(Outcome::Won));
+    assert!(!w.has::<citysim::Sentence>(long), "the longest sentence is freed");
+    assert!(w.has::<citysim::Sentence>(short));
+}
+
+#[test]
+fn test_breach_with_nobody_inside_fizzles() {
+    let mut w = world(70);
+    let (g0, _) = gangs(&w);
+    let civ = civilians(&w, 2);
+    for &m in &civ {
+        gang::enlist(&mut w, m, g0);
+    }
+    clear_guards(&mut w);
+    let door = raid::jail_tile(&w).expect("jail door");
+    stage_raider(&mut w, civ[0], door);
+    let now = w.tick;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::BreakOut;
+        g.raid_at = Some(now);
+    }
+    raid::resolve(&mut w, civ[0]);
+    assert!(!w.events.iter().any(|e| e.kind == EventKind::Jailbreak), "no jailbreak");
+    assert!(w.comp::<Gang>(g0).expect("g").last_breakout_tick.is_some(), "the cooldown still runs");
+    assert!(w.law().is_some_and(|l| l.last_breakout_tick.is_none()), "and the law is not shocked");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("fizzled")));
+}
+
+#[test]
 fn test_breach_against_three_guards_fails_and_shocks() {
     use citysim::Crime;
     let mut w = world(59);
@@ -566,6 +620,19 @@ fn test_night_watch_rotates_through_the_grunts() {
     let tomorrow = watch(&w);
     assert_eq!(tomorrow.len(), 2);
     assert_ne!(tomorrow, tonight, "the duty goes round");
+    // A jailed member leaves the roster: the watch is drawn from the free.
+    let mut jailed = world(54);
+    let (j0, _) = gangs(&jailed);
+    let crew = civilians(&jailed, 4);
+    for (i, &m) in crew.iter().enumerate() {
+        jailed.tick = i as u64;
+        gang::enlist(&mut jailed, m, j0);
+    }
+    jailed.tick = 1300;
+    jail(&mut jailed, crew[0], citysim::Crime::Theft);
+    jail(&mut jailed, crew[1], citysim::Crime::Theft);
+    jail(&mut jailed, crew[2], citysim::Crime::Theft);
+    assert!(crew.iter().all(|&m| !gang::on_watch(&jailed, m)), "one free member keeps no watch");
     // A gang of one keeps no watch.
     let mut lone = world(57);
     let (g0, _) = gangs(&lone);

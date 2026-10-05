@@ -350,7 +350,7 @@ pub fn bribe_score(world: &World, gang: EntityId) -> Option<Vec<Consideration>> 
 /// price moves from the treasury to the captain's wallet, the captain
 /// drifts (`TookBribe`), the gang is immune to Crackdown for `bribe_days`
 /// and the law rethinks at once. Either way the gang does not try again
-/// until `bribe_until`. Returns whether a bribe was offered.
+/// until `bribe_until`; only a taken bribe sets `paid_until`. Returns whether a bribe was offered.
 pub fn consider_bribe(world: &mut World, gang: EntityId) -> bool {
     let Some(cs) = bribe_score(world, gang) else { return false };
     let score: f32 = cs.iter().map(|c| c.output).product();
@@ -387,6 +387,7 @@ pub fn consider_bribe(world: &mut World, gang: EntityId) -> bool {
     }
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.treasury -= price;
+        g.paid_until = Some(hold);
     }
     if let Some(w) = world.comp_mut::<Wallet>(captain) {
         w.coins += price;

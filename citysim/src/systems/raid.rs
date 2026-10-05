@@ -10,7 +10,7 @@ use crate::components::{
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::systems::{faction, gang, law};
+use crate::systems::{faction, gang, law, law_brain};
 use crate::time::{Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::world::World;
 
@@ -117,20 +117,29 @@ fn raiders_at(world: &World, gid: EntityId, actor: EntityId, door: TilePos) -> V
 }
 
 /// Strongest against strongest until one side is out. Each pairing is an
-/// Assault (or a Murder) by the raider, witnessed as usual. Returns
-/// `(raider losses, deaths)`; the vectors hold whoever is still standing.
+/// Assault (or a Murder) by the raider, witnessed as usual. The vectors hold
+/// whoever is still standing.
+#[derive(Default)]
+struct Tally {
+    raider_losses: usize,
+    /// Deaths on either side.
+    deaths: usize,
+    /// Defenders who lost the pairing and lived.
+    defenders_beaten: usize,
+}
+
 fn fight_out(
     world: &mut World,
     raiders: &mut Vec<EntityId>,
     defenders: &mut Vec<EntityId>,
     door: TilePos,
     place: &str,
-) -> (usize, usize) {
-    let (mut raider_losses, mut deaths) = (0usize, 0usize);
+) -> Tally {
+    let mut t = Tally::default();
     while let (Some(&r), Some(&d)) = (raiders.first(), defenders.first()) {
         let (_, loser, died) = law::resolve_fight(world, r, d);
         if died {
-            deaths += 1;
+            t.deaths += 1;
         }
         // The raider is the aggressor: Murder when the defender died, Assault
         // otherwise; a raider who died is charged with nothing.
@@ -145,12 +154,15 @@ fn fight_out(
         }
         if loser == d {
             defenders.remove(0);
+            if !died {
+                t.defenders_beaten += 1;
+            }
         } else {
             raiders.remove(0);
-            raider_losses += 1;
+            t.raider_losses += 1;
         }
     }
-    (raider_losses, deaths)
+    t
 }
 
 /// The first raider at the Jail door resolves the breakout; later arrivals
@@ -169,10 +181,9 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let (gname, boss) = world.comp::<Gang>(gid).map(|g| (g.name.clone(), g.boss))?;
 
     let mut raiders = raiders_at(world, gid, actor, door);
-    let mut defenders: Vec<EntityId> = world
-        .citizens()
+    let mut defenders: Vec<EntityId> = law_brain::guards(world)
         .into_iter()
-        .filter(|&g| law::is_guard(world, g) && law::living(world, g))
+        .filter(|&g| law::living(world, g))
         .filter(|&g| {
             world
                 .comp::<Position>(g)
@@ -181,10 +192,9 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
         .collect();
     by_strength(world, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
-    let (_, deaths) = fight_out(world, &mut raiders, &mut defenders, door, "the Jail");
+    let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Jail");
+    let (deaths, beaten) = (tally.deaths, tally.defenders_beaten);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
-    // Guards beaten and still alive (the dead shocked the law as they fell).
-    let beaten = n_defenders - defenders.len() - deaths.min(n_defenders - defenders.len());
 
     let mut freed = Vec::new();
     if outcome == Outcome::Won {
@@ -194,7 +204,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
             .map(|g| g.members.clone())
             .unwrap_or_default()
             .into_iter()
-            .filter_map(|m| world.comp::<Sentence>(m).map(|s| (Some(m) != boss, now.saturating_sub(s.until_tick), m)))
+            .filter_map(|m| world.comp::<Sentence>(m).map(|s| (Some(m) != boss, s.until_tick.saturating_sub(now), m)))
             .collect();
         // The boss first (false sorts first), then the longest remaining sentence.
         convicts.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)).then(a.2.cmp(&b.2)));
@@ -206,6 +216,8 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     }
     let now = world.tick;
     match outcome {
+        // Nobody inside to free: the breach fizzles, no jailbreak, no shock.
+        Outcome::Won if freed.is_empty() => {}
         Outcome::Won => {
             let names: Vec<String> = freed.iter().map(|&m| world.name_of(m)).collect();
             let mut actors = vec![gid, jail];
@@ -222,15 +234,20 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
         g.raid_at = None;
         g.last_breakout_tick = Some(now);
     }
+    let verdict = if outcome == Outcome::Won && freed.is_empty() {
+        "fizzled, nobody to free".to_string()
+    } else {
+        format!("{outcome:?}")
+    };
     world.push_event(
         EventKind::Raid,
         &[gid, jail, actor],
         format!(
-            "{gname} stormed the Jail: {outcome:?} ({n_raiders} raiders vs {n_defenders} guards, {deaths} dead, {} freed)",
+            "{gname} stormed the Jail: {verdict} ({n_raiders} raiders vs {n_defenders} guards, {deaths} dead, {} freed)",
             freed.len()
         ),
     );
-    crate::systems::law::on_breakout(world, gid, outcome == Outcome::Won, beaten);
+    crate::systems::law::on_breakout(world, gid, outcome == Outcome::Won && !freed.is_empty(), beaten);
     faction::rethink(world, gid);
     Some(outcome)
 }
@@ -268,7 +285,8 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     by_strength(world, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let place = format!("the {rival_name} Hideout");
-    let (raider_losses, deaths) = fight_out(world, &mut raiders, &mut defenders, door, &place);
+    let tally = fight_out(world, &mut raiders, &mut defenders, door, &place);
+    let (raider_losses, deaths) = (tally.raider_losses, tally.deaths);
     let outcome = if n_defenders == 0 || (defenders.is_empty() && raider_losses == 0) {
         Outcome::Sacked
     } else if defenders.is_empty() {

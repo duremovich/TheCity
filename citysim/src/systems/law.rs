@@ -491,14 +491,23 @@ pub fn garrisoned(world: &World) -> bool {
 }
 
 /// M9: does this guard hold the Jail on the shift `shift_key`? Patrol: the
-/// v1 split (`jail_day`); Crackdown: one in three; Garrison: everyone. A
-/// Crackdown with nobody to crack down on is a Patrol.
+/// split in two by roster rank; Crackdown: one in three; Garrison: everyone.
+/// A Crackdown with nobody to crack down on is a Patrol. The rank is the
+/// guard's place among the guards by entity index, so a small roster never
+/// leaves the Jail empty: when no rank matches the shift, the first guard holds it.
 pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
-    match world.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target)) {
-        (Posture::Garrison, _) => true,
-        (Posture::Crackdown, Some(_)) => i64::from(guard.index % 3) == shift_key.rem_euclid(3),
-        _ => jail_day(guard, shift_key),
+    let modulus: i64 = match world.law().map_or((Posture::Patrol, None), |l| (l.posture, l.target)) {
+        (Posture::Garrison, _) => return true,
+        (Posture::Crackdown, Some(_)) => 3,
+        _ => 2,
+    };
+    let roster = crate::systems::law_brain::guards(world);
+    if !roster.contains(&guard) {
+        return false;
     }
+    let rank = roster.iter().filter(|&&g| g.index < guard.index).count() as i64;
+    let slot = shift_key.rem_euclid(modulus);
+    rank % modulus == slot || (rank == 0 && roster.len() as i64 <= slot)
 }
 
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.
@@ -674,11 +683,6 @@ pub fn player_release(world: &mut World, who: EntityId) -> Result<(), String> {
     }
     release(world, who, false);
     Ok(())
-}
-
-/// Is a guard's shift today a Jail day (`index % 2 == day % 2`) or a Patrol day?
-pub fn jail_day(guard: EntityId, shift_key: i64) -> bool {
-    i64::from(guard.index % 2) == shift_key.rem_euclid(2)
 }
 
 /// The next patrol route: `[Market, Bar, Hall, Home(rng), Home(rng)]`. Under

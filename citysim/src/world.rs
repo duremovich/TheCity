@@ -938,7 +938,7 @@ impl World {
         // Witnesses, grief, widowhood and inheritance read the living state.
         systems::demography::on_death(self, id);
         crate::systems::social::on_death(self, id);
-        if systems::law::is_guard(self, id) {
+        if cause == DeathCause::Violence && systems::law::is_guard(self, id) {
             systems::law_brain::push_shock(self, LawShock::GuardKilled);
         }
         self.vacate_job(id);

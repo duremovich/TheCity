@@ -193,7 +193,7 @@ contest = 0.1
 raid = 0.3
 retaliate = 0.6
 lielow = 0.15
-breakout = 0.2
+breakout = 0.28 # was 0.2: after the M9 review fixes (jail duty by rank, Hideout sleep, night watch) 0.2 produced no breakout on seed 42
 
 # M9: the law as a faction (docs/M9_LAW.md). A captain (the most lawful guard) scores Patrol,
 # Crackdown (on the most-reported gang: patrol loops through its turf, one guard in three holds the
@@ -210,6 +210,7 @@ bribe_base = 10
 bribe_per_guard = 1
 bribe_days = 10
 bribe_threshold = 0.35
+target_margin = 2
 
 # Patrol's 0.2 keeps it the resting posture; Crackdown earns its place from pressure alone (+0.3
 # while a refused bribe hardens it); Garrison's 0.05 (+0.5 for a week after a jailbreak).

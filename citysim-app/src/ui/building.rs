@@ -313,7 +313,7 @@ fn law_section(ui: &mut Ui, app: &mut App, world: &World) {
         }
         for gid in world.gangs() {
             if let Some(g) = world.comp::<Gang>(gid) {
-                if let Some(t) = g.bribe_until.filter(|&t| t > now) {
+                if let Some(t) = g.paid_until.filter(|&t| t > now) {
                     ui.label(format!("{}: no crackdown for {:.1} d (bribe)", g.name, days(t - now)));
                 }
             }
@@ -510,8 +510,10 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
                 }
             }
         }
-        if let Some(t) = gang.bribe_until.filter(|&t| t > now) {
-            ui.label(format!("the captain is bought (or refused) for {:.1} more days", days(t - now)));
+        if let Some(t) = gang.paid_until.filter(|&t| t > now) {
+            ui.label(format!("the captain is bought for {:.1} more days", days(t - now)));
+        } else if let Some(t) = gang.bribe_until.filter(|&t| t > now) {
+            ui.label(format!("the captain refused; no new offer for {:.1} more days", days(t - now)));
         }
         let heat = citysim::systems::faction::heat(world, gid);
         let window = world.config.gangs.heat_days * TICKS_PER_DAY;

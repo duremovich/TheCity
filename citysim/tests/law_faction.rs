@@ -82,6 +82,17 @@ fn test_captain_is_the_most_lawful_guard() {
 }
 
 #[test]
+fn test_only_violence_against_a_guard_shocks_the_law() {
+    let mut w = world(68);
+    let gs = guards(&w);
+    w.kill(gs[0], citysim::DeathCause::OldAge);
+    w.kill(gs[1], citysim::DeathCause::Starvation);
+    assert!(w.law().is_some_and(|l| !l.shocks.contains(&LawShock::GuardKilled)));
+    w.kill(gs[2], citysim::DeathCause::Violence);
+    assert!(w.law().is_some_and(|l| l.shocks.contains(&LawShock::GuardKilled)));
+}
+
+#[test]
 fn test_wanted_gang_counts_reports_and_skips_the_bribed() {
     let mut w = world(61);
     let gs = w.gangs();
@@ -97,7 +108,19 @@ fn test_wanted_gang_counts_reports_and_skips_the_bribed() {
     assert_eq!(law_brain::reports_by_gang(&w).get(&gs[1]), Some(&1));
     assert_eq!(law_brain::wanted_gang(&w), Some((gs[0], 3)));
     w.comp_mut::<Gang>(gs[0]).expect("g").bribe_until = Some(w.tick + 1000);
+    assert_eq!(law_brain::wanted_gang(&w), Some((gs[0], 3)), "a refusal (bribe_until only) does not lift it");
+    w.comp_mut::<Gang>(gs[0]).expect("g").paid_until = Some(w.tick + 1000);
     assert_eq!(law_brain::wanted_gang(&w), Some((gs[1], 1)), "a bribed gang is left alone");
+    // Hysteresis: the standing target holds against a challenger who does not lead by the margin.
+    w.comp_mut::<Gang>(gs[0]).expect("g").paid_until = None;
+    {
+        let l = w.law_mut().expect("law");
+        l.posture = Posture::Crackdown;
+        l.target = Some(gs[1]);
+    }
+    assert_eq!(law_brain::wanted_gang(&w), Some((gs[0], 3)), "a lead of two clears the default margin");
+    w.config.law.target_margin = 3;
+    assert_eq!(law_brain::wanted_gang(&w), Some((gs[1], 1)), "a lead of two does not clear a margin of three");
     // Reports age out of the window.
     w.tick += (w.config.law.window_days + 1) * TICKS_PER_DAY;
     assert_eq!(law_brain::wanted_gang(&w), None);
@@ -111,8 +134,11 @@ fn test_jail_duty_per_posture() {
     let on_jail = |w: &World| gs.iter().filter(|&&g| law::jail_duty(w, g, key)).count();
     let patrol = on_jail(&w);
     assert!(patrol >= 1 && patrol < gs.len(), "Patrol: a split ({patrol} of {})", gs.len());
-    for &g in &gs {
-        assert_eq!(law::jail_duty(&w, g, key), law::jail_day(g, key));
+    // Patrol is the rank split: every other guard by index.
+    let mut ranked = gs.clone();
+    ranked.sort_by_key(|g| g.index);
+    for (rank, &g) in ranked.iter().enumerate() {
+        assert_eq!(law::jail_duty(&w, g, key), rank as i64 % 2 == key % 2);
     }
     let gang = w.gangs()[0];
     {
@@ -124,6 +150,23 @@ fn test_jail_duty_per_posture() {
     assert!(crackdown < patrol, "Crackdown: fewer hold the Jail ({crackdown} vs {patrol})");
     w.law_mut().expect("law").target = None;
     assert_eq!(on_jail(&w), patrol, "a Crackdown on nobody is a Patrol");
+    // However small the roster, some guard holds the Jail on every shift.
+    for &g in gs.iter().skip(1) {
+        w.vacate_job(g);
+    }
+    assert_eq!(guards(&w).len(), 1);
+    for posture in [Posture::Patrol, Posture::Crackdown] {
+        {
+            let l = w.law_mut().expect("law");
+            l.posture = posture;
+            l.target = Some(gang);
+        }
+        for key in 0..7i64 {
+            assert!(law::jail_duty(&w, gs[0], key), "{posture:?} key {key}: the lone guard holds the Jail");
+        }
+    }
+    assert!(!law::jail_duty(&w, gs[1], 0), "a non-guard holds nothing");
+
     w.law_mut().expect("law").posture = Posture::Garrison;
     assert_eq!(on_jail(&w), gs.len(), "Garrison: everyone");
     assert!(law::garrisoned(&w));
@@ -236,6 +279,7 @@ fn test_a_greedy_captain_takes_the_bribe_and_the_crackdown_lifts() {
     assert_eq!(w.comp::<Gang>(gang).expect("g").treasury, 100 - price);
     assert_eq!(w.comp::<citysim::Wallet>(captain).map_or(0, |w| w.coins), wallet + price);
     assert!(w.comp::<Gang>(gang).expect("g").bribe_until.is_some());
+    assert!(w.comp::<Gang>(gang).expect("g").paid_until.is_some());
     let l = w.law().expect("law");
     assert!(!l.cracking_down_on(gang), "the crackdown lifted at once");
     assert!(l.hardened_until.is_none());
@@ -255,6 +299,17 @@ fn test_an_incorruptible_captain_refuses_and_the_crackdown_hardens() {
     assert!(l.hardened_until.is_some());
     assert!(l.shocks.contains(&LawShock::BribeRefused));
     assert!(w.events.iter().any(|e| e.kind == EventKind::Bribe && e.text.contains("refused")));
+    // The refusal hardens the crackdown on the same gang; it does not lift it.
+    let members = w.comp::<Gang>(gang).expect("g").members.clone();
+    for &m in &members {
+        for crime in [Crime::Theft, Crime::Extortion, Crime::Assault] {
+            law::file_report(&mut w, crime, m, None);
+        }
+    }
+    law_brain::rethink(&mut w);
+    let l = w.law().expect("law");
+    assert!(l.cracking_down_on(gang), "still a Crackdown on the same gang");
+    assert!(w.comp::<Gang>(gang).expect("g").paid_until.is_none());
     let _ = captain;
 }
 
@@ -299,7 +354,6 @@ fn test_player_pins_and_releases_the_posture() {
     assert_eq!(l.target, None);
     let gs = guards(&w);
     let key = 3i64;
-    for &g in &gs {
-        assert_eq!(law::jail_duty(&w, g, key), law::jail_day(g, key));
-    }
+    let holding = gs.iter().filter(|&&g| law::jail_duty(&w, g, key)).count();
+    assert!(holding >= 1 && holding < gs.len(), "a Crackdown on nobody patrols as usual");
 }

@@ -915,10 +915,13 @@ pub struct Gang {
     /// M9: departure of the last breakout (its own cooldown).
     #[serde(default)]
     pub last_breakout_tick: Option<Tick>,
-    /// M9: the captain has been paid or has refused; no further bribe, and no
-    /// Crackdown against this gang, until here.
+    /// M9: the captain has been paid or has refused; the gang makes no
+    /// further offer until here.
     #[serde(default)]
     pub bribe_until: Option<Tick>,
+    /// M9: a bribe was taken; no Crackdown against this gang until here.
+    #[serde(default)]
+    pub paid_until: Option<Tick>,
 }
 
 impl Gang {
@@ -943,6 +946,7 @@ impl Gang {
             boss: None,
             last_breakout_tick: None,
             bribe_until: None,
+            paid_until: None,
         }
     }
 

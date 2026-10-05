@@ -113,13 +113,18 @@ pub fn hideout_for(world: &World, id: EntityId) -> Option<EntityId> {
 /// that began at 22:00 is the same watch at 02:00.
 pub fn on_watch(world: &World, id: EntityId) -> bool {
     let Some(g) = world.gang_of(id).and_then(|g| world.comp::<Gang>(g)) else { return false };
-    let n = g.members.len();
+    // Jailed members cannot stand watch: only the free roster counts.
+    let mut roster: Vec<(Tick, EntityId)> = g
+        .members
+        .iter()
+        .filter(|&&m| !world.has::<Sentence>(m))
+        .map(|&m| (world.comp::<GangMember>(m).map_or(0, |gm| gm.joined_tick), m))
+        .collect();
+    let n = roster.len();
     let watch = world.config.gangs.night_watch.min(n / 2);
     if watch == 0 {
         return false;
     }
-    let mut roster: Vec<(Tick, EntityId)> =
-        g.members.iter().map(|&m| (world.comp::<GangMember>(m).map_or(0, |gm| gm.joined_tick), m)).collect();
     roster.sort_by(|a, b| b.cmp(a));
     let night = (world.tick + TICKS_PER_DAY / 2) / TICKS_PER_DAY;
     let start = (night % n as u64) as usize;
@@ -226,10 +231,12 @@ pub fn recompute_leader(world: &mut World, gang: EntityId) {
         }
     }
     // A leader who lost the post to a Sentence is the boss until they are out.
+    // The standing boss is kept while they are still inside.
     let jailed_boss = old.filter(|&o| leader != Some(o) && world.has::<Sentence>(o));
+    let boss_inside = world.comp::<Gang>(gang).and_then(|g| g.boss).is_some_and(|b| world.has::<Sentence>(b));
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.leader = leader;
-        if jailed_boss.is_some() {
+        if jailed_boss.is_some() && !boss_inside {
             g.boss = jailed_boss;
         }
     }
