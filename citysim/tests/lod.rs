@@ -135,6 +135,9 @@ fn test_full_vs_statistical_within_15pct() {
         let mut cfg = Config::load();
         cfg.world.population = 200;
         cfg.lod.force = Some(force);
+        // The table never modelled gang actions, and a forced-Statistical
+        // world has no gang at all: compare the tiers on gangless cities.
+        cfg.gangs.max_members = 0;
         let mut w = World::new(2000, cfg);
         let mut hunger_days = 0u64;
         for _ in 0..30 {

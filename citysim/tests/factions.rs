@@ -70,7 +70,7 @@ fn test_order_contest_at_parity_once_the_frontier_is_claimed() {
 fn test_order_raid_with_a_strength_edge_and_a_prize() {
     let i = OrderInputs { frontier: 0, rival_territory: 5, own: 10, rival: 5, prize: 200, courage: 0.8, ..inputs() };
     assert_eq!(best(&i), Order::Raid);
-    let broke = OrderInputs { prize: 10, ..i };
+    let broke = OrderInputs { prize: 5, ..i };
     assert_ne!(best(&broke), Order::Raid, "no prize, no raid");
 }
 

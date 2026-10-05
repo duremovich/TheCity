@@ -118,7 +118,7 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
         score(
             Order::LieLow,
             vec![
-                Consideration::new("heat", i.heat, Curve::Logistic { k: 10.0, mid: 0.35 }),
+                Consideration::new("heat", i.heat, Curve::Logistic { k: 10.0, mid: 0.55 }),
                 Consideration::new("weakness", weakness, Curve::Linear { m: 0.6, b: 0.4 }),
             ],
             f.lielow,
@@ -148,14 +148,16 @@ pub fn next_muster(now: Tick, hour: u16) -> Tick {
     }
 }
 
-/// `heat_log` entries within `heat_days` ÷ fit headcount, clamped to 1.
+/// `heat_log` entries within `heat_days` ÷ headcount, clamped to 1: the
+/// fraction of the gang hit lately. The whole roster is the denominator (the
+/// spec says the fit count): with half the gang in the Jail the fit count
+/// doubled the heat and every gang lay low for good.
 pub fn heat(world: &World, gang: EntityId) -> f32 {
     let Some(g) = world.comp::<Gang>(gang) else { return 0.0 };
     let window = world.config.gangs.heat_days * TICKS_PER_DAY;
     let now = world.tick;
     let recent = g.heat_log.iter().filter(|&&(t, _)| now.saturating_sub(t) < window).count();
-    let own = crate::systems::gang::fit_headcount(world, gang).max(1);
-    (recent as f32 / own as f32).clamp(0.0, 1.0)
+    (recent as f32 / g.members.len().max(1) as f32).clamp(0.0, 1.0)
 }
 
 /// Gather the inputs, or `None` when the gang has no leader fit to decide
@@ -219,9 +221,26 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     })
 }
 
+/// A departed raid has this long to reach the rival door before it is
+/// written off and the brain rescores again.
+pub const RAID_MARCH_TICKS: Tick = 6 * TICKS_PER_HOUR;
+
 /// Score the orders and switch when the best clears `hysteresis`. A change
-/// logs `OrderChanged`; Raid and Retaliate schedule the next muster.
+/// logs `OrderChanged`; Raid and Retaliate schedule the next muster. A raid
+/// that has departed is not second-guessed until it resolves or fizzles.
 pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) {
+    let now = world.tick;
+    if let Some(t) = world.comp::<Gang>(gang).and_then(|g| g.raid_at).filter(|&t| t <= now) {
+        if now < t + RAID_MARCH_TICKS {
+            return; // marching
+        }
+        let name = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.raid_at = None;
+            g.retaliate_until = None;
+        }
+        world.push_event(EventKind::Raid, &[gang], format!("{name}'s raid fizzled: nobody reached the rival door"));
+    }
     let Some(inputs) = gather_inputs(world, gang) else {
         // Leaderless, or the leader is in the Jail: nothing new is issued and
         // a planned raid is off. (M9's jailbreak is what fixes that.)
@@ -240,7 +259,6 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) {
         g.order_trace = scores;
     }
     let Some(order) = next else { return };
-    let now = world.tick;
     let muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;

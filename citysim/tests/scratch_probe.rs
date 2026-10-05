@@ -366,3 +366,62 @@ fn probe_save_roundtrip_time() {
         back.tick
     );
 }
+
+/// M8: one line per gang per day: order, headcounts, heat, treasury,
+/// territory, and the top order scores. Seed 42, 120 days.
+#[test]
+#[ignore]
+fn probe_faction_brain() {
+    use citysim::systems::faction;
+    use citysim::Gang;
+    let mut w = World::new(42, Config::load());
+    let gangs = w.gangs();
+    for day in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        for &g in &gangs {
+            let Some(gang) = w.comp::<Gang>(g) else { continue };
+            let fit = citysim::systems::gang::fit_headcount(&w, g);
+            let heat = faction::heat(&w, g);
+            let inputs = faction::gather_inputs(&w, g);
+            let trace: Vec<String> = gang.order_trace.iter().map(|s| format!("{}={:.2}", s.order, s.score)).collect();
+            let (frontier, prize) = inputs.as_ref().map_or((0, 0), |i| (i.frontier, i.prize));
+            eprintln!(
+                "d{day:>3} {:<10} {:<9} n{:>2} fit{:>2} heat{heat:.2} $ {:>4} terr{:>2} front{frontier:>2} prize{prize:>4} raid_at{:?} {}",
+                gang.name, gang.order.to_string(), gang.members.len(), fit, gang.treasury, gang.territory.len(),
+                gang.raid_at.map(|t| t / TICKS_PER_DAY), trace.join(" ")
+            );
+        }
+    }
+}
+
+/// M8: who is fighting whom? Assaults over 120 days on seed 42, classified
+/// by the gang membership of attacker and victim at the day's end.
+#[test]
+#[ignore]
+fn probe_assault_sources() {
+    use citysim::EventKind;
+    let mut w = World::new(42, Config::load());
+    let (mut cross, mut civ_on_gang, mut gang_on_civ, mut civ_on_civ, mut extortions) = (0, 0, 0, 0, 0);
+    let mut seen = 0;
+    for _ in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        for e in w.events.iter().filter(|e| e.tick >= seen) {
+            match e.kind {
+                EventKind::Extortion => extortions += 1,
+                EventKind::Assault | EventKind::Murder => {
+                    let a = e.actors.first().and_then(|&a| w.gang_of(a));
+                    let v = e.actors.get(1).and_then(|&v| w.gang_of(v));
+                    match (a, v) {
+                        (Some(x), Some(y)) if x != y => cross += 1,
+                        (Some(_), _) => gang_on_civ += 1,
+                        (None, Some(_)) => civ_on_gang += 1,
+                        (None, None) => civ_on_civ += 1,
+                    }
+                }
+                _ => {}
+            }
+        }
+        seen = w.tick;
+    }
+    eprintln!("extortions {extortions} | assaults: cross-gang {cross} civilian-on-member {civ_on_gang} member-on-civilian {gang_on_civ} civilian-on-civilian {civ_on_civ}");
+}

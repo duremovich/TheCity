@@ -180,3 +180,83 @@ fn test_v1_acceptance() {
     // Not worse by more than one is the usable reading.
     assert!(starv_b <= starv_a + 1, "the reserve lever made Winter starvation worse: A {starv_a} vs B {starv_b}");
 }
+
+/// The M8 gate (`docs/M8_FACTIONS.md` › Goals and acceptance): seed 42, 120
+/// days, two factions fighting over the same Homes. `#[ignore]`: ~20 s.
+#[test]
+#[ignore]
+fn test_m8_factions_seed_42() {
+    use citysim::{EventKind, Gang};
+    let mut w = World::new(42, Config::load());
+    let gangs = w.gangs();
+    assert_eq!(gangs.len(), 2);
+    let mut peak = [0usize; 2];
+    let (mut flips, mut raids, mut cross, mut shock_changes, mut retaliates, mut assaults) = (0, 0, 0, 0, 0, 0u32);
+    let mut seen = 0;
+    for _ in 0..120 {
+        w.run_ticks(TICKS_PER_DAY);
+        for (i, &g) in gangs.iter().enumerate() {
+            peak[i] = peak[i].max(w.comp::<Gang>(g).map_or(0, |g| g.members.len()));
+        }
+        // Membership is read at the day's end, so a victim killed in a cross-gang
+        // fight is missed; Assault victims are alive and counted.
+        for e in w.events.iter().filter(|e| e.tick >= seen) {
+            match e.kind {
+                EventKind::TerritoryFlipped => flips += 1,
+                EventKind::Raid => raids += 1,
+                EventKind::OrderChanged => {
+                    if e.text.contains("shock") {
+                        shock_changes += 1;
+                    }
+                    if e.text.contains("-> Retaliate") {
+                        retaliates += 1;
+                    }
+                }
+                EventKind::Assault | EventKind::Murder => {
+                    assaults += 1;
+                    let gs: Vec<_> = e.actors.iter().take(2).map(|&a| w.gang_of(a)).collect();
+                    if gs.len() == 2 && gs[0].is_some() && gs[1].is_some() && gs[0] != gs[1] {
+                        cross += 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        seen = w.tick;
+    }
+    // A border: seen from each Hideout, the gang's own Homes lie nearer than
+    // the rival's do, on average. (The spec's "nearer its own Hideout than the
+    // rival's" fails for a gang that holds most of the city, whose territory
+    // then spans both corners.)
+    let mean_dist = |g: citysim::EntityId, to: citysim::EntityId| -> f32 {
+        let door = w.hideout_of(to).and_then(|h| w.comp::<citysim::Building>(h)).map(|b| b.door).expect("door");
+        let t = &w.comp::<Gang>(g).expect("gang").territory;
+        let sum: u32 = t.iter().filter_map(|&h| w.comp::<citysim::Building>(h)).map(|b| b.door.manhattan(door)).sum();
+        sum as f32 / t.len().max(1) as f32
+    };
+    let starvation: u32 = w.stats.history.iter().map(|r| r.deaths_starvation).sum();
+    eprintln!(
+        "peak {peak:?} flips {flips} raids {raids} cross-gang assaults {cross} shock rethinks {shock_changes} retaliates {retaliates} assaults/day {:.2} starvation {starvation} pop {}",
+        assaults as f32 / 120.0,
+        w.population()
+    );
+    for (i, &g) in gangs.iter().enumerate() {
+        let r = gangs[1 - i];
+        let (own, theirs) = (mean_dist(g, g), mean_dist(r, g));
+        let empty = w.comp::<Gang>(g).expect("gang").territory.is_empty()
+            || w.comp::<Gang>(r).expect("gang").territory.is_empty();
+        assert!(empty || own < theirs, "gang {i}: the rival's Homes are nearer its Hideout ({own:.1} vs {theirs:.1})");
+    }
+    assert!(peak.iter().all(|&p| p >= 5), "peak headcounts {peak:?}");
+    assert!(flips >= 1, "no Home flipped");
+    assert!(raids >= 1, "no raid resolved");
+    assert!(cross >= 1, "no cross-gang Assault");
+    assert!(shock_changes >= 1, "no emergency rethink changed an order");
+    assert!(retaliates >= 1, "no Retaliate order");
+    // 2x the M7 baseline: 3.2/day (379 Assault + 8 Murder over 120 days on
+    // this seed at 29f7bbf), so 6.4. Two always-simulated gangs extort three
+    // times as often as the one gang did, and every extortion seeds revenge.
+    assert!(assaults as f32 / 120.0 <= 6.4, "{} assaults/day", assaults as f32 / 120.0);
+    assert!(starvation <= 30, "{starvation} starvation deaths");
+    assert!((200..=400).contains(&w.population()), "population {}", w.population());
+}

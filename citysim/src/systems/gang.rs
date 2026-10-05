@@ -25,10 +25,15 @@ pub const HEAT_LOG_CAP: usize = 64;
 // ---------------------------------------------------------------------------
 
 /// Can `g` take recruits: not sacked, and able to pay a day's stipend for
-/// everyone including the recruit (a gang of fewer than three recruits on promise).
+/// everyone including the recruit (a gang under `recruit_on_promise` recruits
+/// on promise).
 fn recruiting(world: &World, g: &Gang) -> bool {
     let stipend = world.config.social.gang_stipend;
-    !g.is_sacked(world.tick) && (g.members.len() < 3 || g.treasury >= stipend * (g.members.len() as i64 + 1))
+    let cfg = &world.config.gangs;
+    let n = g.members.len();
+    !g.is_sacked(world.tick)
+        && n < cfg.max_members
+        && (n < cfg.recruit_on_promise || g.treasury >= stipend * (n as i64 + 1))
 }
 
 /// The gang a non-member would join right now, if any: the gang of the member
@@ -74,7 +79,10 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         .into_iter()
         .filter_map(|gid| world.comp::<Gang>(gid).map(|g| (gid, g)))
         .filter(|(_, g)| !g.is_sacked(world.tick))
-        .filter(|(_, g)| (desperate && recruiting(world, g)) || (arrested && g.members.is_empty()))
+        .filter(|(_, g)| {
+            (desperate && recruiting(world, g))
+                || (arrested && g.members.is_empty() && world.config.gangs.max_members > 0)
+        })
         .filter_map(|(gid, g)| {
             world.comp::<Building>(g.hideout).map(|b| (b.door.manhattan(from), g.hideout.index, gid))
         })

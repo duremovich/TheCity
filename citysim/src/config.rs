@@ -233,6 +233,10 @@ pub struct GangsCfg {
     pub order_weight: f32,
     /// Below this loyalty a member ignores the order.
     pub freelance_loyalty: f32,
+    /// A gang smaller than this recruits on promise; past it the treasury must fund the stipend.
+    pub recruit_on_promise: usize,
+    /// No gang recruits past this headcount.
+    pub max_members: usize,
     pub heat_days: u64,
     /// A new order must beat the current one by this at the daily rescoring.
     pub hysteresis: f32,

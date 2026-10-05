@@ -476,15 +476,26 @@ pub fn hostile_near(world: &World, id: EntityId, r: u32) -> bool {
     world.enemies_of(id).any(|o| world.has::<Brain>(o) && crate::systems::law::near(world, id, o, r))
 }
 
-/// Did `other` wrong `id` personally: a WasRobbed, Fought or Lost memory
-/// naming them? Fights are revenge, not vigilantism: witnessing someone's
-/// crime makes them an enemy, but only their victims attack.
+/// Did `other` wrong `id` personally: a WasRobbed memory naming them with no
+/// fight since? Fights are revenge, not vigilantism: witnessing someone's
+/// crime makes them an enemy, but only their victims attack, and one fight
+/// settles a robbery (M8: before, a Fought memory itself counted as a wrong,
+/// so every robbery became a month-long feud). A rival gang's member counts
+/// too: the turf is the grievance.
 pub fn wronged_by(world: &World, id: EntityId, other: EntityId) -> bool {
-    world.comp::<Memory>(id).is_some_and(|m| {
-        m.entries.iter().any(|e| {
-            matches!(e.kind, MemoryKind::WasRobbed | MemoryKind::Fought | MemoryKind::Lost) && e.subject == Some(other)
+    let rival = match (world.gang_of(id), world.gang_of(other)) {
+        (Some(a), Some(b)) => a != b,
+        _ => false,
+    };
+    rival
+        || world.comp::<Memory>(id).is_some_and(|m| {
+            let about = |e: &&crate::components::MemoryEntry| e.subject == Some(other);
+            let avenged = m.entries.iter().filter(about).filter(|e| e.kind == MemoryKind::Fought).map(|e| e.tick).max();
+            m.entries
+                .iter()
+                .filter(about)
+                .any(|e| e.kind == MemoryKind::WasRobbed && avenged.is_none_or(|t| e.tick > t))
         })
-    })
 }
 
 /// An enemy within `r` tiles who wronged this agent and was not fought in
