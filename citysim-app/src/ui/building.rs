@@ -85,11 +85,10 @@ fn residents(world: &World, b: EntityId) -> (Vec<EntityId>, Vec<EntityId>) {
 }
 
 /// The gang whose territory holds this building, if any.
-fn territory_of(world: &World, b: EntityId) -> Option<&Gang> {
-    world
-        .with::<Gang>()
-        .into_iter()
-        .find_map(|g| world.comp::<Gang>(g).filter(|gang| gang.territory.binary_search(&b).is_ok()))
+fn territory_of(world: &World, b: EntityId) -> Option<(EntityId, &Gang)> {
+    world.gangs().into_iter().find_map(|g| {
+        world.comp::<Gang>(g).filter(|gang| gang.territory.binary_search(&b).is_ok()).map(|gang| (g, gang))
+    })
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
@@ -108,7 +107,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             BuildingKind::Jail => jail(ui, app, world, id),
             BuildingKind::Cemetery => cemetery(ui, app, world, id),
             BuildingKind::Hall => hall(ui, app, world, id),
-            BuildingKind::Hideout => hideout(ui, app, world, b),
+            BuildingKind::Hideout => hideout(ui, app, world, id, b),
             BuildingKind::Warehouse => warehouse(ui, world, b),
         }
         occupants(ui, app, world, b);
@@ -137,10 +136,10 @@ fn header(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
                 ui.colored_label(RED, "Demolished");
             }
         });
-        if let Some(gang) = territory_of(world, id) {
+        if let Some((gid, gang)) = territory_of(world, id) {
             ui.horizontal(|ui| {
-                ui.colored_label(PURPLE, format!("Territory of {}", gang.name));
-                if let Some(h) = world.building_of_kind(BuildingKind::Hideout) {
+                ui.colored_label(crate::ui::gang_colour(world.gang_index(gid)), format!("Territory of {}", gang.name));
+                if let Some(h) = world.hideout_of(gid) {
                     building_link(ui, app, world, h);
                 }
             });
@@ -194,7 +193,15 @@ fn home(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
         if territory_of(world, id).is_some() {
             ui.colored_label(PURPLE, "Pays 2 coins/day tribute");
         } else {
-            ui.label(format!("extorted {} / 3 times before it becomes territory", b.extort_count));
+            match b.claim {
+                Some(c) => {
+                    let who = world.comp::<Gang>(c.gang).map_or("a gang", |g| g.name.as_str());
+                    ui.label(format!("{who} has extorted it {} / 3 times", c.count));
+                }
+                None => {
+                    ui.label("unclaimed");
+                }
+            }
         }
     });
 }
@@ -331,9 +338,9 @@ fn hall(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     staff(ui, app, world, id, "Clerks");
 }
 
-fn hideout(ui: &mut Ui, app: &mut App, world: &World, b: &Building) {
+fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
     let cap = world.config.buildings.for_kind(b.kind).stock_cap;
-    let Some(gang) = world.gang_id().and_then(|g| world.comp::<Gang>(g)) else {
+    let Some(gang) = world.gangs().into_iter().find_map(|g| world.comp::<Gang>(g).filter(|gg| gg.hideout == id)) else {
         section(ui, "Gang", |ui| {
             ui.label("no gang");
         });

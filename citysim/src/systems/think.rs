@@ -18,6 +18,10 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
         return true;
     }
     match &brain.exec {
+        // Think runs before exec in the tick: a step completing this very tick
+        // keeps its completion effects (a shift's wage, a meal) instead of
+        // being aborted one tick short by a goal that only wins because it ended.
+        ExecState::Use { until, .. } if *until <= now => true,
         ExecState::Use { kind: ActionKind::Sleep, started, .. } => now.saturating_sub(*started) >= 60,
         ExecState::Use { kind, .. } => matches!(
             kind,

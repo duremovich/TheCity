@@ -9,6 +9,7 @@
 
 pub mod demography;
 pub mod economy;
+pub mod faction;
 pub mod gang;
 pub mod law;
 pub mod lod;

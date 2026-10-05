@@ -289,7 +289,7 @@ impl World {
             names: names.clone(),
         };
         w.spawn_buildings();
-        w.spawn_gang();
+        w.spawn_gangs();
         w.spawn_population(&names);
         w
     }
@@ -319,7 +319,7 @@ impl World {
                 Building {
                     kind: def.kind,
                     production_accum: 0.0,
-                    extort_count: 0,
+                    claim: None,
                     child_food_debt: 0.0,
                     rect: def.rect,
                     door: def.door,
@@ -345,18 +345,16 @@ impl World {
         }
     }
 
-    fn spawn_gang(&mut self) {
-        let id = self.spawn();
-        let territory = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
-        let gang = Gang {
-            name: self.config.world.gang_name.clone(),
-            members: Vec::new(),
-            treasury: self.config.world.gang_treasury_initial,
-            territory,
-            leader: None,
-            empty_since: Some(0),
-        };
-        self.insert(id, gang);
+    /// One gang per Hideout, in map order, named and funded from `[gangs]`.
+    fn spawn_gangs(&mut self) {
+        let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
+        let cfg = self.config.gangs.clone();
+        for (i, hideout) in hideouts.into_iter().enumerate() {
+            let id = self.spawn();
+            let name = cfg.names.get(i).cloned().unwrap_or_else(|| format!("Gang {}", i + 1));
+            let treasury = cfg.treasury_initial.get(i).or(cfg.treasury_initial.last()).copied().unwrap_or(0);
+            self.insert(id, Gang::new(name, hideout, treasury));
+        }
     }
 
     fn spawn_population(&mut self, names: &NameTables) {
@@ -531,8 +529,34 @@ impl World {
         self.building_of_kind(BuildingKind::Hall).and_then(|id| self.comp_mut::<Treasury>(id))
     }
 
-    pub fn gang_id(&self) -> Option<EntityId> {
-        self.with::<Gang>().first().copied()
+    /// Every gang, ascending by id (map order of their Hideouts).
+    pub fn gangs(&self) -> Vec<EntityId> {
+        self.with::<Gang>()
+    }
+
+    /// The gang an agent belongs to.
+    pub fn gang_of(&self, agent: EntityId) -> Option<EntityId> {
+        self.comp::<GangMember>(agent).map(|g| g.gang).filter(|&g| self.has::<Gang>(g))
+    }
+
+    /// A gang's Hideout, if the building still exists.
+    pub fn hideout_of(&self, gang: EntityId) -> Option<EntityId> {
+        self.comp::<Gang>(gang).map(|g| g.hideout).filter(|&h| self.has::<Building>(h))
+    }
+
+    /// The other gang; with more than two, the one holding the most territory.
+    pub fn rival_of(&self, gang: EntityId) -> Option<EntityId> {
+        self.gangs()
+            .into_iter()
+            .filter(|&g| g != gang)
+            .filter_map(|g| self.comp::<Gang>(g).map(|gg| (std::cmp::Reverse(gg.territory.len()), g)))
+            .min()
+            .map(|(_, g)| g)
+    }
+
+    /// Position of a gang in `gangs()`: picks its colour in the app.
+    pub fn gang_index(&self, gang: EntityId) -> usize {
+        self.gangs().iter().position(|&g| g == gang).unwrap_or(0)
     }
 
     /// The agent's name, or `#index` for anything without an `Identity`.
@@ -764,6 +788,36 @@ impl World {
         }
     }
 
+    /// Fix up a save written before M8: gangs without a Hideout take the
+    /// Hideouts in map order, territory keeps Homes only, and every held Home
+    /// gets a full claim.
+    pub fn migrate_legacy(&mut self) {
+        let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
+        for (i, gang) in self.gangs().into_iter().enumerate() {
+            let Some(g) = self.comp::<Gang>(gang) else { continue };
+            let hideout = if self.has::<Building>(g.hideout) {
+                g.hideout
+            } else {
+                hideouts.get(i).or(hideouts.first()).copied().unwrap_or(EntityId::NONE)
+            };
+            let territory: Vec<EntityId> = g
+                .territory
+                .iter()
+                .copied()
+                .filter(|&b| self.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home))
+                .collect();
+            if let Some(g) = self.comp_mut::<Gang>(gang) {
+                g.hideout = hideout;
+                g.territory = territory.clone();
+            }
+            for home in territory {
+                if let Some(b) = self.comp_mut::<Building>(home) {
+                    b.claim = Some(Claim { gang, count: systems::gang::CLAIM_HELD });
+                }
+            }
+        }
+    }
+
     /// Everyone `id` has an edge with, ascending.
     pub fn neighbours(&self, id: EntityId) -> impl Iterator<Item = EntityId> + '_ {
         self.neighbours.get(&id).into_iter().flat_map(|s| s.iter().copied())
@@ -830,6 +884,11 @@ impl World {
     /// is added, the building and household forget the agent, the job is
     /// vacated, and the event and daily counter are recorded.
     pub fn kill(&mut self, id: EntityId, cause: DeathCause) {
+        self.kill_by(id, cause, None);
+    }
+
+    /// `kill` with the killer named, so a gang knows whether a rival did it.
+    pub fn kill_by(&mut self, id: EntityId, cause: DeathCause, killer: Option<EntityId>) {
         if !self.has::<Identity>(id) || self.has::<Corpse>(id) {
             return;
         }
@@ -854,16 +913,8 @@ impl World {
         crate::systems::social::on_death(self, id);
         self.vacate_job(id);
         self.remove_from_building(id);
-        if let Some(gang) = self.comp::<GangMember>(id).map(|g| g.gang) {
-            if let Some(g) = self.comp_mut::<Gang>(gang) {
-                g.members.retain(|&m| m != id);
-                if g.leader == Some(id) {
-                    g.leader = None;
-                }
-                if g.members.is_empty() {
-                    g.empty_since = Some(tick);
-                }
-            }
+        if self.has::<GangMember>(id) {
+            systems::gang::on_member_killed(self, id, killer);
         }
         self.remove::<Needs>(id);
         self.remove::<Personality>(id);

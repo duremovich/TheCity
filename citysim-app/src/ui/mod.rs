@@ -13,6 +13,16 @@ use citysim::{time, BuildingKind, World};
 use crate::App;
 
 pub const HUD_H: f32 = 28.0;
+
+/// A gang's colour by its index in `World::gangs()`.
+pub fn gang_colour(index: usize) -> egui_macroquad::egui::Color32 {
+    use egui_macroquad::egui::Color32;
+    match index {
+        0 => Color32::from_rgb(142, 68, 173),
+        1 => Color32::from_rgb(26, 188, 156),
+        _ => Color32::from_rgb(230, 126, 34),
+    }
+}
 pub const INSPECTOR_W: f32 = 360.0;
 pub const LOG_H: f32 = 220.0;
 const C_PAUSED: Color = Color::new(1.0, 0.6, 0.1, 1.0);

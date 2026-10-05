@@ -117,13 +117,21 @@ pub fn adjust(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32, d_tr
 
 /// Being robbed or extorted by someone: an Enemy, at once.
 pub fn robbed_by(world: &mut World, victim: EntityId, robber: EntityId) {
+    make_enemy(world, victim, robber, -0.6);
+}
+
+/// Turn an edge hostile: `d_affinity` (negative), trust to zero, kind Enemy.
+pub fn make_enemy(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32) {
+    if a == b {
+        return;
+    }
     let tick = world.tick;
-    let e = world.edge_entry(victim, robber);
-    e.affinity = (e.affinity - 0.6).max(-1.0);
+    let e = world.edge_entry(a, b);
+    e.affinity = (e.affinity + d_affinity).clamp(-1.0, 1.0);
     e.trust = 0.0;
     e.kind = RelKind::Enemy;
     e.last_interaction = tick;
-    reindex_kind(world, victim, robber);
+    reindex_kind(world, a, b);
 }
 
 /// Witnessing someone's crime.

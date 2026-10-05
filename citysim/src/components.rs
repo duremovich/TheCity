@@ -9,7 +9,7 @@ use crate::entity::EntityId;
 use crate::exec::ExecState;
 use crate::goap::actions::{ActionKind, Plan};
 use crate::time::Tick;
-use crate::utility::ThinkTrace;
+use crate::utility::{Consideration, ThinkTrace};
 
 // ---------------------------------------------------------------------------
 // Core value types
@@ -262,8 +262,89 @@ pub enum GoalKind {
     Arrest,
     JoinGang,
     GangWork,
+    /// Gang members: muster at the Hideout and brawl at the rival's door.
+    Raid,
     Bury,
     Idle,
+}
+
+/// A gang's standing order, issued by the faction brain (`systems::faction`).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
+pub enum Order {
+    #[default]
+    Expand,
+    Contest,
+    Raid,
+    Retaliate,
+    LieLow,
+}
+
+impl Order {
+    pub const ALL: [Order; 5] = [Order::Expand, Order::Contest, Order::Raid, Order::Retaliate, Order::LieLow];
+
+    /// Members muster and march under these.
+    pub fn is_raid(self) -> bool {
+        matches!(self, Order::Raid | Order::Retaliate)
+    }
+}
+
+impl fmt::Display for Order {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
+    }
+}
+
+/// Something that happened to a gang since its last rescoring. When the
+/// pending severities add up to `shock_severity_rethink` the brain rescores
+/// at once, without hysteresis.
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Shock {
+    MemberKilled {
+        by_rival: bool,
+    },
+    MemberArrested,
+    /// Our raid on the rival failed.
+    RaidLost,
+    /// The rival's raid on us succeeded; half the treasury went.
+    Raided,
+    HomeFlippedAgainst,
+    LeaderChanged,
+    Sacked,
+}
+
+impl Shock {
+    pub fn severity(self) -> f32 {
+        match self {
+            Shock::MemberKilled { by_rival: true } => 1.0,
+            Shock::MemberKilled { by_rival: false } => 0.6,
+            Shock::MemberArrested => 0.3,
+            Shock::RaidLost => 0.8,
+            Shock::Raided => 0.6,
+            Shock::HomeFlippedAgainst => 0.4,
+            Shock::LeaderChanged => 0.5,
+            Shock::Sacked => 1.0,
+        }
+    }
+
+    /// A grievance against the rival: feeds the Retaliate order.
+    pub fn is_grudge(self) -> bool {
+        matches!(self, Shock::MemberKilled { by_rival: true } | Shock::RaidLost | Shock::Raided | Shock::Sacked)
+    }
+}
+
+/// One order's score from the last rescoring, for the Hideout panel.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct OrderScore {
+    pub order: Order,
+    pub score: f32,
+    pub considerations: Vec<Consideration>,
+}
+
+/// A gang's hold on a Home: `count` extortions by `gang`; at 3 the Home is territory.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Claim {
+    pub gang: EntityId,
+    pub count: u8,
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +590,12 @@ pub struct Brain {
     /// The day the spouse intimacy bonus was last granted (once a night).
     #[serde(default)]
     pub last_spouse_night: Option<u64>,
+    /// Gang: the order the current GangWork plan serves; `None` while freelancing.
+    #[serde(default)]
+    pub following_order: Option<Order>,
+    /// Gang: the day a `Disobeyed` event was last logged for this member.
+    #[serde(default)]
+    pub disobeyed_day: Option<u64>,
 }
 
 impl Default for Brain {
@@ -541,6 +628,8 @@ impl Default for Brain {
             carrying_corpse: None,
             emigrating: false,
             last_spouse_night: None,
+            following_order: None,
+            disobeyed_day: None,
         }
     }
 }
@@ -556,6 +645,7 @@ impl Brain {
         self.plan = None;
         self.plan_step = 0;
         self.exec = ExecState::Idle;
+        self.following_order = None;
     }
 
     /// The current plan's goal, if any.
@@ -637,8 +727,10 @@ pub struct Building {
     pub kind: BuildingKind,
     /// Farm only.
     pub production_accum: f32,
-    /// Home only.
-    pub extort_count: u8,
+    /// Home only: which gang is working this Home and how far along
+    /// (`systems::gang::CLAIM_HELD` holds it).
+    #[serde(default)]
+    pub claim: Option<Claim>,
     /// Homes: children's food owed to the pantry, `0.5 × children` per day.
     #[serde(default)]
     pub child_food_debt: f32,
@@ -673,10 +765,65 @@ pub struct Gang {
     /// Sorted.
     pub members: Vec<EntityId>,
     pub treasury: i64,
-    /// Building ids, sorted.
+    /// Homes held (claim count 3), sorted. The Hideout is `hideout`, not territory.
     pub territory: Vec<EntityId>,
     pub leader: Option<EntityId>,
     pub empty_since: Option<Tick>,
+    /// This gang's Hideout building.
+    #[serde(default = "EntityId::none")]
+    pub hideout: EntityId,
+    /// Standing order from the faction brain.
+    #[serde(default)]
+    pub order: Order,
+    #[serde(default)]
+    pub order_since: Tick,
+    /// Every order's score from the last rescoring, best first. Not saved.
+    #[serde(skip)]
+    pub order_trace: Vec<OrderScore>,
+    /// Scheduled muster departure while `order.is_raid()`.
+    #[serde(default)]
+    pub raid_at: Option<Tick>,
+    /// Departure tick of the last raid this gang launched (cooldown).
+    #[serde(default)]
+    pub last_raid_tick: Option<Tick>,
+    #[serde(default)]
+    pub retaliate_until: Option<Tick>,
+    /// The Hideout is unusable until this tick.
+    #[serde(default)]
+    pub sacked_until: Option<Tick>,
+    /// Pending since the last rescoring; drained by the brain. Not saved.
+    #[serde(skip)]
+    pub shocks: Vec<Shock>,
+    /// `(tick, member)` arrested or killed, newest last, capped at 64.
+    #[serde(default)]
+    pub heat_log: VecDeque<(Tick, EntityId)>,
+}
+
+impl Gang {
+    pub fn new(name: String, hideout: EntityId, treasury: i64) -> Gang {
+        Gang {
+            name,
+            members: Vec::new(),
+            treasury,
+            territory: Vec::new(),
+            leader: None,
+            empty_since: Some(0),
+            hideout,
+            order: Order::Expand,
+            order_since: 0,
+            order_trace: Vec::new(),
+            raid_at: None,
+            last_raid_tick: None,
+            retaliate_until: None,
+            sacked_until: None,
+            shocks: Vec::new(),
+            heat_log: VecDeque::new(),
+        }
+    }
+
+    pub fn is_sacked(&self, now: Tick) -> bool {
+        self.sacked_until.is_some_and(|t| t > now)
+    }
 }
 
 /// Stock lives on the Market building's `Building.stock_food`.

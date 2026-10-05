@@ -347,11 +347,11 @@ impl PlanCtx {
                 BuildingKind::Jail,
                 BuildingKind::Cemetery,
                 BuildingKind::Hall,
-                BuildingKind::Hideout,
                 BuildingKind::Warehouse,
             ] {
                 add(LocationKey::of_building(kind), world.building_of_kind(kind));
             }
+            add(LocationKey::Hideout, crate::systems::gang::hideout_for(world, agent));
             add(LocationKey::TargetHome, target);
             if let Some(b) = world
                 .comp::<crate::components::Brain>(agent)
@@ -442,7 +442,7 @@ impl PlanCtx {
             has_loot: world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.loot_today > 0),
             can_fence: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.stolen_food > 0)
                 && world
-                    .gang_id()
+                    .gang_of(agent)
                     .and_then(|g| world.comp::<crate::components::Gang>(g))
                     .is_some_and(|g| g.treasury > 0),
             hostile_adjacent: target.is_some_and(|t| {

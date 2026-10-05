@@ -208,7 +208,7 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
     let roll: f32 = world.rng.world().random();
     let died = roll < p_death;
     if died {
-        world.kill(loser, DeathCause::Violence);
+        world.kill_by(loser, DeathCause::Violence, Some(winner));
     }
     (winner, loser, died)
 }
@@ -419,9 +419,7 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     let name = world.name_of(who);
     let days = until.saturating_sub(world.tick).div_ceil(TICKS_PER_DAY);
     world.push_event(EventKind::Sentence, &[who], format!("{name} sentenced to {days} days for {crime:?}"));
-    if world.has::<crate::components::GangMember>(who) {
-        crate::systems::gang::recompute_leader(world);
-    }
+    crate::systems::gang::on_member_arrested(world, who);
 }
 
 fn release_at_jail_door(world: &mut World, who: EntityId, _why: &str) {

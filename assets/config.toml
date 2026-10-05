@@ -18,8 +18,6 @@ market_initial = 600
 warehouse_initial = 1500
 treasury_initial = 5000
 price_initial = 3
-gang_name = "The Hollow"
-gang_treasury_initial = 50
 # tick_of_day ranges [start, end): Work phase 6 days in 7; guards with an even index work nights.
 shift_day = [[540, 1080]]
 shift_night = [[1260, 1440], [0, 360]]
@@ -141,6 +139,35 @@ extort_amount = 5
 join_gang_affinity = 0.4
 join_gang_desperation_hunger = 0.2
 join_gang_desperation_lawfulness = 0.3
+
+[gangs]
+# One gang per Hideout in map order: The Hollow holds the south-west corner, Ninefold the south-east.
+names = ["The Hollow", "Ninefold"]
+treasury_initial = [50, 50]
+order_weight = 0.35
+freelance_loyalty = 0.3
+heat_days = 7
+hysteresis = 0.10
+contest_min_ratio = 0.8
+raid_min_ratio = 1.2
+raid_min_prize = 40
+raid_cooldown_days = 10
+raid_prize_frac = 0.5
+raid_muster_hour = 22
+raid_gather_hours = 3
+raid_gather_radius = 6
+retaliate_days = 3
+sacked_days = 3
+shock_severity_rethink = 0.3
+
+# Flat terms on each order's score (product of considerations + flat). Retaliate's 0.6 lets a
+# grudge beat Expand for any leader with greed < 1; LieLow's 0.15 keeps it always available.
+[gangs.order_flat]
+expand = 0.1
+contest = 0.0
+raid = 0.0
+retaliate = 0.6
+lielow = 0.15
 
 [demography]
 birth_p_per_day = 0.004

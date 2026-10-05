@@ -691,7 +691,7 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
 /// SawCrime as a report.
 fn report_crime(world: &mut World, id: EntityId) -> StepResult {
     let betraying = world.comp::<Brain>(id).is_some_and(|b| b.betraying);
-    let leader = world.gang_id().and_then(|g| world.comp::<crate::components::Gang>(g)).and_then(|g| g.leader);
+    let leader = world.gang_of(id).and_then(|g| world.comp::<crate::components::Gang>(g)).and_then(|g| g.leader);
     let Some(mem) = world.comp::<crate::components::Memory>(id) else {
         return StepResult::Failed(FailReason::PreconditionLost);
     };

@@ -329,7 +329,7 @@ impl World {
             Building {
                 kind: BuildingKind::Home,
                 production_accum: 0.0,
-                extort_count: 0,
+                claim: None,
                 child_food_debt: 0.0,
                 rect,
                 door,

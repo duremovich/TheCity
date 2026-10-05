@@ -253,7 +253,13 @@ fn probe_gang_join_citations() {
             .map(|e| (e.tick, e.actors[0], e.text.clone()))
             .collect();
         for (tick, id, text) in joins {
-            let members = w.gang_id().and_then(|g| w.comp::<Gang>(g)).map(|g| g.members.clone()).unwrap_or_default();
+            let members = w
+                .gangs()
+                .first()
+                .copied()
+                .and_then(|g| w.comp::<Gang>(g))
+                .map(|g| g.members.clone())
+                .unwrap_or_default();
             let met: Vec<String> = w
                 .comp::<Memory>(id)
                 .map(|m| {
@@ -291,7 +297,7 @@ fn probe_gang_growth() {
         if day % 6 != 5 {
             continue;
         }
-        let Some(g) = w.gang_id().and_then(|g| w.comp::<Gang>(g)).cloned() else { continue };
+        let Some(g) = w.gangs().first().copied().and_then(|g| w.comp::<Gang>(g)).cloned() else { continue };
         let thr = w.config.social.join_gang_affinity;
         let contacts = w
             .citizens()

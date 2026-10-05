@@ -52,10 +52,16 @@ pub enum EventKind {
     Inheritance,
     PlayerAction,
     PlayerActionFailed,
+    /// M8 factions.
+    OrderChanged,
+    TerritoryFlipped,
+    Raid,
+    Disobeyed,
+    Sacked,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 32] = [
+    pub const ALL: [EventKind; 37] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -88,6 +94,11 @@ impl EventKind {
         EventKind::Inheritance,
         EventKind::PlayerAction,
         EventKind::PlayerActionFailed,
+        EventKind::OrderChanged,
+        EventKind::TerritoryFlipped,
+        EventKind::Raid,
+        EventKind::Disobeyed,
+        EventKind::Sacked,
     ];
 }
 

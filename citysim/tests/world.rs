@@ -18,12 +18,12 @@ fn test_map_parses_expected_counts() {
         BuildingKind::Jail,
         BuildingKind::Cemetery,
         BuildingKind::Hall,
-        BuildingKind::Hideout,
         BuildingKind::Warehouse,
     ] {
         assert_eq!(map.count_kind(kind), 1, "{kind}");
     }
-    assert_eq!(map.buildings.len(), 69);
+    assert_eq!(map.count_kind(BuildingKind::Hideout), 2, "one per gang (M8)");
+    assert_eq!(map.buildings.len(), 70);
     for b in &map.buildings {
         // exactly one Door on the perimeter, and the tile outside it is Road
         let doors = (b.rect.y..b.rect.y + b.rect.h)
@@ -103,12 +103,15 @@ fn test_initial_stocks_and_treasury() {
     assert_eq!(stock(BuildingKind::Home), 10);
     assert_eq!(w.treasury().expect("treasury").coins, 5000);
     assert_eq!(w.market().expect("market").price_food, 3);
-    let gang = w.gang_id().expect("gang");
-    let gang = w.comp::<citysim::Gang>(gang).expect("gang");
+    let gangs = w.gangs();
+    assert_eq!(gangs.len(), 2, "one gang per Hideout");
+    let gang = w.comp::<citysim::Gang>(gangs[0]).expect("gang");
     assert_eq!(gang.name, "The Hollow");
     assert_eq!(gang.treasury, 50);
     assert!(gang.members.is_empty());
-    assert_eq!(gang.territory, vec![w.building_of_kind(BuildingKind::Hideout).expect("hideout")]);
+    assert!(gang.territory.is_empty());
+    assert_eq!(gang.hideout, w.building_of_kind(BuildingKind::Hideout).expect("hideout"));
+    assert_eq!(w.rival_of(gangs[0]), Some(gangs[1]));
 }
 
 #[test]

@@ -93,7 +93,7 @@ fn test_propose_requires_thresholds() {
 fn test_join_gang_requires_contact_or_desperation() {
     let mut w = world(34);
     let (recruit, member) = two_civilians(&w);
-    let gang_id = w.gang_id().expect("gang");
+    let gang_id = w.gangs()[0];
     // one member so the empty-gang bootstrap is off
     w.insert(member, GangMember { gang: gang_id, rank: 0, joined_tick: 0 });
     w.comp_mut::<Gang>(gang_id).expect("gang").members = vec![member];
@@ -117,6 +117,8 @@ fn test_join_gang_requires_contact_or_desperation() {
 fn test_extort_moves_coins_and_adds_memory() {
     let mut w = world(35);
     let actor = two_civilians(&w).0;
+    let g0 = w.gangs()[0];
+    gang::enlist(&mut w, actor, g0);
     let actor_home = w.comp::<citysim::Household>(actor).and_then(|h| h.home);
     let home = w.buildings_by_kind[&BuildingKind::Home]
         .iter()
@@ -141,7 +143,7 @@ fn test_extort_moves_coins_and_adds_memory() {
         assert!(robbed, "victim lacks WasRobbed");
         assert_eq!(w.edge(v, actor).expect("edge").kind, RelKind::Enemy);
     }
-    assert_eq!(w.comp::<citysim::Building>(home).expect("b").extort_count, 1);
+    assert_eq!(w.comp::<citysim::Building>(home).expect("b").claim, Some(citysim::Claim { gang: g0, count: 1 }));
 }
 
 #[test]

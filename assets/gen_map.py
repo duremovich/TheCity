@@ -5,7 +5,7 @@ Layout: a road grid every 8 tiles (vertical roads at x = 7 + 8k for k in 0..9, h
 at y = 7 + 8k for k in 0..6, horizontal roads stop at x = 79), 5x4 Homes bottom-aligned to the
 road below each block, the two Farms and the Warehouse on the east edge facing the x = 79 road,
 Market and Hall at the central crossing (44, 31) / (54, 31), the Bar below the Market, the Jail
-below the Hall, the Cemetery in the north-west corner, the Hideout in the south-east corner, and
+below the Hall, the Cemetery in the north-west corner, the Hideouts in the south-east and south-west corners, and
 a 3-tile Water strip along the south edge.
 
 Run:  python assets/gen_map.py > assets/map.txt
@@ -62,6 +62,7 @@ specials = [
     ("Farm", 80, 14, 12, 9, (80, 18)),
     ("Warehouse", 80, 26, 8, 6, (80, 28)),
     ("Hideout", 80, 56, 7, 5, (80, 58)),
+    ("Hideout", 0, 56, 7, 5, (3, 56)),       # door north onto road y=55 (x=7 is a road, so x=0 not x=1)
 ]
 
 
@@ -126,7 +127,7 @@ for (kind, x, y, w, h, dx, dy) in buildings:
 
 counts = {k: sum(1 for b in buildings if b[0] == k) for k in KIND_ORDER}
 assert counts == {"Home": 60, "Farm": 2, "Market": 1, "Bar": 1, "Jail": 1, "Cemetery": 1,
-                  "Hall": 1, "Hideout": 1, "Warehouse": 1}, counts
+                  "Hall": 1, "Hideout": 2, "Warehouse": 1}, counts
 
 # --- output -------------------------------------------------------------------
 out = sys.stdout

@@ -21,6 +21,7 @@ pub struct Config {
     pub economy: EconomyCfg,
     pub crime: CrimeCfg,
     pub social: SocialCfg,
+    pub gangs: GangsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -46,8 +47,6 @@ pub struct WorldCfg {
     pub warehouse_initial: u32,
     pub treasury_initial: i64,
     pub price_initial: i64,
-    pub gang_name: String,
-    pub gang_treasury_initial: i64,
     /// `tick_of_day` ranges `[start, end)` for the default shift.
     pub shift_day: Vec<(u16, u16)>,
     /// Night shift for guards with an even `EntityId.index`.
@@ -221,6 +220,51 @@ pub struct SocialCfg {
     pub join_gang_affinity: f32,
     pub join_gang_desperation_hunger: f32,
     pub join_gang_desperation_lawfulness: f32,
+}
+
+/// Several gangs and their faction brain (M8, `docs/M8_FACTIONS.md`).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct GangsCfg {
+    /// One gang per Hideout, in map file order; a missing name is `Gang N`.
+    pub names: Vec<String>,
+    /// Per gang; the last entry repeats.
+    pub treasury_initial: Vec<i64>,
+    /// GangWork's order consideration: `Linear{order_weight, 1 - order_weight}` on loyalty while following.
+    pub order_weight: f32,
+    /// Below this loyalty a member ignores the order.
+    pub freelance_loyalty: f32,
+    pub heat_days: u64,
+    /// A new order must beat the current one by this at the daily rescoring.
+    pub hysteresis: f32,
+    /// own / rival headcount needed to Contest / Raid (Logistic mids).
+    pub contest_min_ratio: f32,
+    pub raid_min_ratio: f32,
+    /// Rival treasury worth raiding.
+    pub raid_min_prize: i64,
+    pub raid_cooldown_days: u64,
+    /// Treasury fraction taken on a won raid; a sack takes everything.
+    pub raid_prize_frac: f32,
+    /// Departure at this hour of the day the order is set (or the next day if under two hours away).
+    pub raid_muster_hour: u16,
+    /// The Raid goal opens this many hours before `raid_at`.
+    pub raid_gather_hours: u16,
+    /// Raiders within this many tiles of the rival door join the brawl.
+    pub raid_gather_radius: u32,
+    pub retaliate_days: u64,
+    pub sacked_days: u64,
+    /// Pending shock severities that force an immediate rescoring.
+    pub shock_severity_rethink: f32,
+    pub order_flat: OrderFlatCfg,
+}
+
+/// Flat terms added to each order's product of considerations.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct OrderFlatCfg {
+    pub expand: f32,
+    pub contest: f32,
+    pub raid: f32,
+    pub retaliate: f32,
+    pub lielow: f32,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

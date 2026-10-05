@@ -13,6 +13,7 @@ pub fn to_ron(world: &World) -> String {
 pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     let mut world: World = ron::from_str(text)?;
     world.rebuild_indices();
+    world.migrate_legacy();
     world.reload_names();
     Ok(world)
 }

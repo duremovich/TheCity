@@ -19,6 +19,16 @@ impl fmt::Display for EntityId {
     }
 }
 
+impl EntityId {
+    /// A sentinel that is never alive: the serde default for ids a v1 save
+    /// lacks, fixed up by `World::migrate_legacy`.
+    pub const NONE: EntityId = EntityId { index: u32::MAX, generation: u32::MAX };
+
+    pub fn none() -> EntityId {
+        EntityId::NONE
+    }
+}
+
 /// A component type with a `Vec<Option<T>>` store on the world.
 pub trait Component: Sized {
     fn store(world: &World) -> &Vec<Option<Self>>;

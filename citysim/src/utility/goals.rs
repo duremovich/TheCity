@@ -428,6 +428,8 @@ pub fn considerations(
             ]
         }
         GoalKind::Idle => vec![Consideration::new("constant", 0.0, Curve::Step { t: 0.0, lo: 0.05, hi: 0.05 })],
+        // Phase 2 of M8 scores Raid.
+        GoalKind::Raid => return None,
     };
     Some((cs, flat))
 }

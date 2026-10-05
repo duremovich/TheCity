@@ -550,7 +550,7 @@ impl World {
             LocationKey::Jail => target.or_else(|| self.building_of_kind(K::Jail)),
             LocationKey::Cemetery => target.or_else(|| self.building_of_kind(K::Cemetery)),
             LocationKey::Hall => target.or_else(|| self.building_of_kind(K::Hall)),
-            LocationKey::Hideout => target.or_else(|| self.building_of_kind(K::Hideout)),
+            LocationKey::Hideout => target.or_else(|| crate::systems::gang::hideout_for(self, agent)),
             LocationKey::Warehouse => target.or_else(|| self.building_of_kind(K::Warehouse)),
             // A suspect or corpse inside a building is reached through its door.
             LocationKey::SuspectTile | LocationKey::CorpseTile => {

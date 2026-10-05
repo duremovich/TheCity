@@ -1,44 +1,112 @@
-//! The gang: eligibility, joining, ranks and the leader, the daily stipend,
-//! extortion and territory, loot splitting, fencing, disbanding, betrayal.
+//! The gangs: recruitment into one of several gangs, joining and leaving,
+//! ranks and leaders, heat and shocks for the faction brain, extortion and
+//! Home claims, loot splitting, fencing, the daily economy, betrayal.
+//!
+//! The brain that issues orders lives in `faction`; raids in `raid`.
 
 use crate::components::{
-    Brain, Building, BuildingKind, Gang, GangMember, Household, MemoryKind, Needs, Personality, Wallet,
+    Brain, Building, BuildingKind, Claim, Gang, GangMember, Household, Memory, MemoryKind, Needs, Order, Personality,
+    Position, Sentence, Shock, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::personality::Drift;
+use crate::systems::{faction, law, social};
 use crate::time::TICKS_PER_DAY;
 use crate::world::World;
 
-/// Eligibility for JoinGang: an edge to any member with affinity >= join_gang_affinity; or
-/// `hunger < 0.2 && lawfulness < 0.3`; or the gang is empty and the agent
-/// holds a WasArrested memory.
-pub fn eligible(world: &World, id: EntityId) -> bool {
-    if world.has::<GangMember>(id) {
-        return false;
-    }
-    let Some(gang) = world.gang_id().and_then(|g| world.comp::<Gang>(g)) else { return false };
-    let cfg = &world.config.social;
-    let contact = gang.members.iter().any(|&m| world.edge(id, m).is_some_and(|e| e.affinity >= cfg.join_gang_affinity));
-    let desperate = world.comp::<Needs>(id).is_some_and(|n| n.hunger < cfg.join_gang_desperation_hunger)
-        && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < cfg.join_gang_desperation_lawfulness);
-    let bootstrap = gang.members.is_empty()
-        && world
-            .comp::<crate::components::Memory>(id)
-            .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
-    // A gang recruits while it can pay: the treasury must cover a day's stipend
-    // for everyone including the recruit. Loot funds growth; a broke gang
-    // stops growing. A gang of fewer than three recruits on promise.
-    let funded = gang.members.len() < 3 || gang.treasury >= cfg.gang_stipend * (gang.members.len() as i64 + 1);
-    bootstrap || ((contact || desperate) && funded)
+/// A claim at this count holds the Home: it is territory.
+pub const CLAIM_HELD: u8 = 3;
+/// `heat_log` keeps at most this many arrests and deaths.
+pub const HEAT_LOG_CAP: usize = 64;
+
+// ---------------------------------------------------------------------------
+// Recruitment
+// ---------------------------------------------------------------------------
+
+/// Can `g` take recruits: not sacked, and able to pay a day's stipend for
+/// everyone including the recruit (a gang of fewer than three recruits on promise).
+fn recruiting(world: &World, g: &Gang) -> bool {
+    let stipend = world.config.social.gang_stipend;
+    !g.is_sacked(world.tick) && (g.members.len() < 3 || g.treasury >= stipend * (g.members.len() as i64 + 1))
 }
 
-/// JoinGang at the Hideout.
-pub fn join(world: &mut World, id: EntityId) -> bool {
-    let Some(gang) = world.gang_id() else { return false };
-    if !eligible(world, id) {
-        return false;
+/// The gang a non-member would join right now, if any: the gang of the member
+/// they have the best qualifying edge to; a desperate (`hunger < 0.2 &&
+/// lawfulness < 0.3`) or bootstrap (empty gang, WasArrested memory) recruit
+/// joins the gang whose Hideout is nearest their Home (ties: lower index).
+pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
+    if world.has::<GangMember>(id) {
+        return None;
     }
+    let cfg = &world.config.social;
+    let gangs = world.gangs();
+    let mut best: Option<(f32, EntityId)> = None;
+    for &gid in &gangs {
+        let Some(g) = world.comp::<Gang>(gid) else { continue };
+        if !recruiting(world, g) {
+            continue;
+        }
+        for &m in &g.members {
+            let Some(e) = world.edge(id, m) else { continue };
+            if e.affinity >= cfg.join_gang_affinity && best.is_none_or(|(a, _)| e.affinity > a) {
+                best = Some((e.affinity, gid));
+            }
+        }
+    }
+    if let Some((_, gid)) = best {
+        return Some(gid);
+    }
+    let desperate = world.comp::<Needs>(id).is_some_and(|n| n.hunger < cfg.join_gang_desperation_hunger)
+        && world.comp::<Personality>(id).is_some_and(|p| p.lawfulness < cfg.join_gang_desperation_lawfulness);
+    let arrested =
+        world.comp::<Memory>(id).is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::WasArrested));
+    if !desperate && !arrested {
+        return None;
+    }
+    let from = world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door)
+        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))?;
+    gangs
+        .into_iter()
+        .filter_map(|gid| world.comp::<Gang>(gid).map(|g| (gid, g)))
+        .filter(|(_, g)| !g.is_sacked(world.tick))
+        .filter(|(_, g)| (desperate && recruiting(world, g)) || (arrested && g.members.is_empty()))
+        .filter_map(|(gid, g)| {
+            world.comp::<Building>(g.hideout).map(|b| (b.door.manhattan(from), g.hideout.index, gid))
+        })
+        .min()
+        .map(|(_, _, gid)| gid)
+}
+
+/// Eligibility for JoinGang: some gang would take them.
+pub fn eligible(world: &World, id: EntityId) -> bool {
+    recruit_gang(world, id).is_some()
+}
+
+/// The Hideout a `LocationKey::Hideout` means for this agent: their gang's,
+/// or the gang they would join, or the first on the map.
+pub fn hideout_for(world: &World, id: EntityId) -> Option<EntityId> {
+    world
+        .gang_of(id)
+        .or_else(|| recruit_gang(world, id))
+        .and_then(|g| world.hideout_of(g))
+        .or_else(|| world.building_of_kind(BuildingKind::Hideout))
+}
+
+/// JoinGang at the Hideout: join the gang `recruit_gang` names.
+pub fn join(world: &mut World, id: EntityId) -> bool {
+    let Some(gang) = recruit_gang(world, id) else { return false };
+    enlist(world, id, gang);
+    true
+}
+
+/// Put `id` into `gang` with every side effect of joining. No eligibility
+/// check: `join` does that; tests call this directly.
+pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
     let tick = world.tick;
     world.insert(id, GangMember { gang, rank: 0, joined_tick: tick });
     if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -52,31 +120,28 @@ pub fn join(world: &mut World, id: EntityId) -> bool {
     }
     world.remember(id, MemoryKind::Socialised, None, 0.4, 0.2, false);
     // A recruit who met a current member in jail cites that memory.
-    let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
-    let cites = world.comp::<crate::components::Memory>(id).and_then(|m| {
+    let (members, gname) = world.comp::<Gang>(gang).map(|g| (g.members.clone(), g.name.clone())).unwrap_or_default();
+    let cites = world.comp::<Memory>(id).and_then(|m| {
         m.entries
             .iter()
             .position(|e| e.kind == MemoryKind::MetInJail && e.subject.is_some_and(|s| s != id && members.contains(&s)))
     });
     let name = world.name_of(id);
     let text = match cites {
-        Some(n) => format!("{name} joined the gang (cites mem#{n})"),
-        None => format!("{name} joined the gang"),
+        Some(n) => format!("{name} joined {gname} (cites mem#{n})"),
+        None => format!("{name} joined {gname}"),
     };
-    world.push_event(EventKind::GangJoin, &[id], text);
-    recompute_leader(world);
-    true
+    world.push_event(EventKind::GangJoin, &[id, gang], text);
+    recompute_leader(world, gang);
 }
 
-/// Leave the gang (betrayal, death handled in kill).
+/// Leave the gang (betrayal, emigration; death goes through `on_member_killed`).
 pub fn leave(world: &mut World, id: EntityId, reason: &str) {
     let Some(gm) = world.remove::<GangMember>(id) else { return };
     let tick = world.tick;
+    let gname = world.comp::<Gang>(gm.gang).map_or_else(|| "the gang".to_string(), |g| g.name.clone());
     if let Some(g) = world.comp_mut::<Gang>(gm.gang) {
         g.members.retain(|&m| m != id);
-        if g.leader == Some(id) {
-            g.leader = None;
-        }
         if g.members.is_empty() {
             g.empty_since = Some(tick);
         }
@@ -85,19 +150,20 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
         p.drift(Drift::LeftGang);
     }
     let name = world.name_of(id);
-    world.push_event(EventKind::GangLeave, &[id], format!("{name} left the gang ({reason})"));
-    recompute_leader(world);
+    world.push_event(EventKind::GangLeave, &[id, gm.gang], format!("{name} left {gname} ({reason})"));
+    recompute_leader(world, gm.gang);
 }
 
-/// `leader = argmax(loyalty + days_in_gang / 100)`; rank 2, others 0.
-pub fn recompute_leader(world: &mut World) {
-    let Some(gang) = world.gang_id() else { return };
-    let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+/// `leader = argmax(loyalty + days_in_gang / 100)` over members with a Brain
+/// and no Sentence; rank 2, others 0. A change of leader is a shock.
+pub fn recompute_leader(world: &mut World, gang: EntityId) {
+    let Some(g) = world.comp::<Gang>(gang) else { return };
+    let (members, old) = (g.members.clone(), g.leader);
     let tick = world.tick;
     let leader = members
         .iter()
         .copied()
-        .filter(|&m| world.has::<Brain>(m) && !world.has::<crate::components::Sentence>(m))
+        .filter(|&m| world.has::<Brain>(m) && !world.has::<Sentence>(m))
         .map(|m| {
             let loyalty = world.comp::<Personality>(m).map_or(0.0, |p| p.loyalty);
             let days = world
@@ -115,37 +181,158 @@ pub fn recompute_leader(world: &mut World) {
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.leader = leader;
     }
+    if old.is_some() && leader != old {
+        push_shock(world, gang, Shock::LeaderChanged);
+    }
 }
 
-/// The nearest Home not in territory with no guard within 8 tiles of it.
-pub fn extort_target(world: &World, id: EntityId) -> Option<EntityId> {
-    let gang = world.gang_id()?;
-    let territory = world.comp::<Gang>(gang)?.territory.clone();
-    let tile = world.comp::<crate::components::Position>(id)?.tile;
+/// Members not in the Jail.
+pub fn fit_headcount(world: &World, gang: EntityId) -> usize {
+    world.comp::<Gang>(gang).map_or(0, |g| g.members.iter().filter(|&&m| !world.has::<Sentence>(m)).count())
+}
+
+// ---------------------------------------------------------------------------
+// Heat and shocks
+// ---------------------------------------------------------------------------
+
+pub fn push_shock(world: &mut World, gang: EntityId, shock: Shock) {
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.shocks.push(shock);
+    }
+}
+
+fn log_heat(world: &mut World, gang: EntityId, member: EntityId) {
+    let tick = world.tick;
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        if g.heat_log.len() >= HEAT_LOG_CAP {
+            g.heat_log.pop_front();
+        }
+        g.heat_log.push_back((tick, member));
+    }
+}
+
+/// `law::sentence` jailed a member: heat, a shock, and maybe a new leader.
+pub fn on_member_arrested(world: &mut World, id: EntityId) {
+    let Some(gang) = world.gang_of(id) else { return };
+    log_heat(world, gang, id);
+    push_shock(world, gang, Shock::MemberArrested);
+    recompute_leader(world, gang);
+}
+
+/// `World::kill_by`, before the components go: the member leaves the roster;
+/// the gang logs the heat and the shock (`by_rival` when a rival member did it).
+pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId>) {
+    let Some(gang) = world.gang_of(id) else { return };
+    let by_rival = killer.and_then(|k| world.gang_of(k)).is_some_and(|k| k != gang);
+    let tick = world.tick;
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.members.retain(|&m| m != id);
+        if g.members.is_empty() {
+            g.empty_since = Some(tick);
+        }
+    }
+    log_heat(world, gang, id);
+    push_shock(world, gang, Shock::MemberKilled { by_rival });
+    recompute_leader(world, gang);
+}
+
+// ---------------------------------------------------------------------------
+// Targets and extortion
+// ---------------------------------------------------------------------------
+
+/// Who holds a Home (a claim at `CLAIM_HELD`).
+fn held_by(b: &Building) -> Option<EntityId> {
+    b.claim.filter(|c| c.count >= CLAIM_HELD).map(|c| c.gang)
+}
+
+/// The Home a GangWork plan extorts and the order it serves (`None` =
+/// freelancing). Expand: the unclaimed Home nearest the gang's Hideout;
+/// Contest: the rival-held Home nearest it; Raid, Retaliate and LieLow: none.
+/// A member below `freelance_loyalty` ignores the order and takes the
+/// unclaimed Home nearest themselves. Always: inhabited right now, not the
+/// actor's own Home, no guard within `sight_day_crime` of the door.
+pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option<Order>)> {
+    let gang = world.gang_of(id)?;
+    let g = world.comp::<Gang>(gang)?;
+    let loyalty = world.comp::<Personality>(id).map_or(0.0, |p| p.loyalty);
+    let own_home = world.comp::<Household>(id).and_then(|h| h.home);
+    let actor_tile = world.comp::<Position>(id)?.tile;
+    let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
     let r = world.config.crime.sight_day_crime;
-    let own = world.comp::<Household>(id).and_then(|h| h.home);
-    let guards: Vec<crate::components::TilePos> = world
+    let guards: Vec<TilePos> = world
         .citizens()
         .into_iter()
-        .filter(|&g| crate::systems::law::is_guard(world, g))
-        .filter_map(|g| world.comp::<crate::components::Position>(g).map(|p| p.tile))
+        .filter(|&g| law::is_guard(world, g))
+        .filter_map(|g| world.comp::<Position>(g).map(|p| p.tile))
         .collect();
-    world
+    let candidates: Vec<(EntityId, &Building)> = world
         .buildings_by_kind
         .get(&BuildingKind::Home)?
         .iter()
         .copied()
-        .filter(|h| !territory.contains(h) && Some(*h) != own)
+        .filter(|&h| Some(h) != own_home)
         .filter_map(|h| world.comp::<Building>(h).map(|b| (h, b)))
         .filter(|(_, b)| !b.demolished && !b.occupants.is_empty())
-        .filter(|(_, b)| !guards.iter().any(|&g| crate::systems::law::chebyshev(g, b.door) <= r))
-        .min_by_key(|(h, b)| (b.door.manhattan(tile), h.index))
-        .map(|(h, _)| h)
+        .filter(|(_, b)| !guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r))
+        .collect();
+    let nearest = |from: TilePos, pick: &dyn Fn(&Building) -> bool| -> Option<EntityId> {
+        candidates
+            .iter()
+            .filter(|(_, b)| pick(b))
+            .min_by_key(|(h, b)| (b.door.manhattan(from), h.index))
+            .map(|(h, _)| *h)
+    };
+    if loyalty < world.config.gangs.freelance_loyalty {
+        return nearest(actor_tile, &|b| held_by(b).is_none()).map(|h| (h, None));
+    }
+    match g.order {
+        Order::Expand => nearest(hideout_door, &|b| held_by(b).is_none()).map(|h| (h, Some(Order::Expand))),
+        Order::Contest => {
+            let rival = world.rival_of(gang)?;
+            nearest(hideout_door, &|b| held_by(b) == Some(rival)).map(|h| (h, Some(Order::Contest)))
+        }
+        Order::Raid | Order::Retaliate | Order::LieLow => None,
+    }
 }
 
-/// Extort at a Home: take `min(5, occupants' coins)` proportionally into the
-/// actor's wallet; the Home's extort_count rises and at 3 it joins the
-/// territory. Victims remember WasRobbed and become enemies.
+/// The Home a GangWork plan extorts.
+pub fn extort_target(world: &World, id: EntityId) -> Option<EntityId> {
+    gang_work_target(world, id).map(|(h, _)| h)
+}
+
+/// Record which order a GangWork plan serves (inspector) and log a
+/// once-a-day `Disobeyed` when a freelancer works while the gang musters or
+/// lies low. Called by `plan::plan_for` when a GangWork plan is bound.
+pub fn note_gang_work(world: &mut World, id: EntityId) {
+    let following = gang_work_target(world, id).and_then(|(_, o)| o);
+    let (order, gname) = world
+        .gang_of(id)
+        .and_then(|g| world.comp::<Gang>(g))
+        .map(|g| (Some(g.order), g.name.clone()))
+        .unwrap_or_default();
+    let today = world.day();
+    let visible = order.is_some_and(|o| matches!(o, Order::Raid | Order::Retaliate | Order::LieLow));
+    let mut log = false;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.following_order = following;
+        if following.is_none() && visible && b.disobeyed_day != Some(today) {
+            b.disobeyed_day = Some(today);
+            log = true;
+        }
+    }
+    if log {
+        let name = world.name_of(id);
+        world.push_event(
+            EventKind::Disobeyed,
+            &[id],
+            format!("{name} ignores {gname}'s {:?} order and works alone", order.unwrap_or_default()),
+        );
+    }
+}
+
+/// Extort at a Home: take `min(extort_amount, occupants' coins)` proportionally
+/// into the actor's wallet; the Home's claim advances (`claim`); victims
+/// remember WasRobbed and become enemies.
 pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     let amount = world.config.social.extort_amount;
     let occupants: Vec<EntityId> = world
@@ -163,7 +350,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         }
         taken += share;
         world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
-        crate::systems::social::robbed_by(world, o, actor);
+        social::robbed_by(world, o, actor);
     }
     // The rounding remainder comes a coin at a time from whoever still has one.
     let mut guard = 0;
@@ -188,28 +375,71 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         b.loot_today += taken;
         b.gang_task_day = Some(today);
     }
-    let mut joined_territory = false;
-    if let Some(b) = world.comp_mut::<Building>(home) {
-        b.extort_count = b.extort_count.saturating_add(1);
-        joined_territory = b.extort_count >= 3;
-    }
-    if joined_territory {
-        if let Some(g) = world.gang_id().and_then(|g| world.comp_mut::<Gang>(g)) {
-            if let Err(i) = g.territory.binary_search(&home) {
-                g.territory.insert(i, home);
-            }
-        }
-    }
+    let suffix = claim(world, actor, home).unwrap_or_default();
     let name = world.name_of(actor);
     world.push_event(
         EventKind::Extortion,
         &[actor, home],
-        format!("{name} extorted {taken} coins from Home#{}", home.index),
+        format!("{name} extorted {taken} coins from Home#{}{suffix}", home.index),
     );
-    let tile =
-        world.comp::<crate::components::Position>(actor).map_or(crate::components::TilePos::default(), |p| p.tile);
-    crate::systems::law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
+    law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
     taken
+}
+
+/// The claim rules (spec › Contested Homes): own blows count up, a rival's
+/// first blow takes the claim at one, the third blow holds the Home. Every
+/// blow on a Home in another gang's territory makes that gang's members the
+/// actor's enemies; the flip itself logs `TerritoryFlipped` and shocks the
+/// loser. Returns a suffix for the Extortion event text when the Home is held.
+fn claim(world: &mut World, actor: EntityId, home: EntityId) -> Option<String> {
+    let gang = world.gang_of(actor)?;
+    let gname = world.comp::<Gang>(gang)?.name.clone();
+    let holders: Vec<EntityId> = world
+        .gangs()
+        .into_iter()
+        .filter(|&g| g != gang && world.comp::<Gang>(g).is_some_and(|gg| gg.territory.binary_search(&home).is_ok()))
+        .collect();
+    for &h in &holders {
+        let members = world.comp::<Gang>(h).map(|g| g.members.clone()).unwrap_or_default();
+        for m in members {
+            social::make_enemy(world, m, actor, -0.7);
+        }
+    }
+    let count = {
+        let b = world.comp_mut::<Building>(home)?;
+        let count = match b.claim {
+            Some(c) if c.gang == gang => c.count.saturating_add(1),
+            _ => 1,
+        };
+        b.claim = Some(Claim { gang, count });
+        count
+    };
+    if count < CLAIM_HELD {
+        return None;
+    }
+    let mut suffix = None;
+    for h in holders {
+        if let Some(g) = world.comp_mut::<Gang>(h) {
+            if let Ok(i) = g.territory.binary_search(&home) {
+                g.territory.remove(i);
+            }
+        }
+        let hname = world.comp::<Gang>(h).map_or_else(String::new, |g| g.name.clone());
+        world.push_event(
+            EventKind::TerritoryFlipped,
+            &[gang, h, home],
+            format!("{gname} took Home#{} from {hname}", home.index),
+        );
+        push_shock(world, h, Shock::HomeFlippedAgainst);
+        suffix = Some(format!(" (took it from {hname})"));
+    }
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        if let Err(i) = g.territory.binary_search(&home) {
+            g.territory.insert(i, home);
+        }
+    }
+    Some(suffix.unwrap_or_else(|| format!(" (now {gname} territory)")))
 }
 
 /// SplitLoot at the Hideout: half the day's haul into the gang treasury.
@@ -220,7 +450,7 @@ pub fn split_loot(world: &mut World, actor: EntityId) -> i64 {
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins -= share;
     }
-    if let Some(g) = world.gang_id().and_then(|g| world.comp_mut::<Gang>(g)) {
+    if let Some(g) = world.gang_of(actor).and_then(|g| world.comp_mut::<Gang>(g)) {
         g.treasury += share;
     }
     if let Some(b) = world.comp_mut::<Brain>(actor) {
@@ -231,12 +461,13 @@ pub fn split_loot(world: &mut World, actor: EntityId) -> i64 {
 }
 
 /// Fence at the Hideout: stolen food sold to the gang at floor(price × 0.8)
-/// each, paid from the gang treasury.
+/// each, paid from the gang treasury; the food goes into the Hideout's stock.
 pub fn fence(world: &mut World, actor: EntityId) -> i64 {
+    let Some(gang) = world.gang_of(actor) else { return 0 };
     let price = world.market().map_or(0, |m| m.price_food);
     let each = (price as f32 * 0.8).floor() as i64;
     let units = world.comp::<crate::components::Inventory>(actor).map_or(0, |i| i.stolen_food);
-    let treasury = world.gang_id().and_then(|g| world.comp::<Gang>(g)).map_or(0, |g| g.treasury);
+    let treasury = world.comp::<Gang>(gang).map_or(0, |g| g.treasury);
     let affordable = if each > 0 { (treasury / each).max(0) as u32 } else { units };
     let sold = units.min(affordable);
     if sold == 0 {
@@ -247,7 +478,7 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
         i.food -= sold;
         i.stolen_food -= sold;
     }
-    if let Some(g) = world.gang_id().and_then(|g| world.comp_mut::<Gang>(g)) {
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.treasury -= pay;
         g.treasury += i64::from(sold) * price; // the gang resells at market price
     }
@@ -255,20 +486,40 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
         w.coins += pay;
     }
     let cap = world.config.buildings.hideout.stock_cap;
-    if let Some(m) = world.building_of_kind(BuildingKind::Hideout).and_then(|h| world.comp_mut::<Building>(h)) {
+    if let Some(m) = world.hideout_of(gang).and_then(|h| world.comp_mut::<Building>(h)) {
         m.stock_food = (m.stock_food + sold).min(cap);
     }
     pay
 }
 
-/// Daily: ranks, stipend, territory tribute, disbanding, betrayal.
+// ---------------------------------------------------------------------------
+// Per tick: the brain; daily: leaders, tribute, stipend, disbanding, betrayal
+// ---------------------------------------------------------------------------
+
 pub fn run(world: &mut World) {
-    if world.tick_of_day() != 0 {
-        return;
+    let daily = world.tick_of_day() == 0;
+    let hysteresis = world.config.gangs.hysteresis;
+    let threshold = world.config.gangs.shock_severity_rethink;
+    for gang in world.gangs() {
+        if daily {
+            recompute_leader(world, gang);
+        }
+        let pending: f32 = world.comp::<Gang>(gang).map_or(0.0, |g| g.shocks.iter().map(|s| s.severity()).sum());
+        if daily {
+            faction::rescore(world, gang, hysteresis);
+            if let Some(g) = world.comp_mut::<Gang>(gang) {
+                g.shocks.clear();
+            }
+        } else if pending >= threshold {
+            faction::rethink(world, gang);
+        }
     }
-    let Some(gang) = world.gang_id() else { return };
-    recompute_leader(world);
-    // Task flags reset daily.
+    if daily {
+        daily_economy(world);
+    }
+}
+
+fn daily_economy(world: &mut World) {
     let today = world.day();
     for id in world.citizens() {
         if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -277,71 +528,80 @@ pub fn run(world: &mut World) {
             }
         }
     }
-    // Territory tribute: 2 coins/day per Home when the occupants can pay.
-    let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
-    for home in territory {
-        let residents: Vec<EntityId> = world
-            .citizens()
-            .into_iter()
-            .filter(|&c| world.comp::<Household>(c).and_then(|h| h.home) == Some(home))
-            .collect();
-        let mut owed = 2;
-        for r in residents {
-            if owed == 0 {
-                break;
-            }
-            let coins = world.comp::<Wallet>(r).map_or(0, |w| w.coins);
-            let pay = owed.min(coins.max(0));
-            if pay > 0 {
-                if let Some(w) = world.comp_mut::<Wallet>(r) {
-                    w.coins -= pay;
-                }
-                owed -= pay;
-            }
-        }
-        let paid = 2 - owed;
-        if let Some(g) = world.comp_mut::<Gang>(gang) {
-            g.treasury += paid;
-        }
-    }
-    // Stipend: 4 coins each while the treasury holds >= 4, leader first.
     let stipend = world.config.social.gang_stipend;
-    let (mut members, leader) = world.comp::<Gang>(gang).map(|g| (g.members.clone(), g.leader)).unwrap_or_default();
-    if let Some(l) = leader {
-        members.retain(|&m| m != l);
-        members.insert(0, l);
-    }
-    for m in members {
-        let can = world.comp::<Gang>(gang).is_some_and(|g| g.treasury >= stipend);
-        if !can {
-            break;
+    let now = world.tick;
+    for gang in world.gangs() {
+        // Territory tribute: 2 coins/day per Home when the occupants can pay.
+        let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
+        for home in territory {
+            let residents: Vec<EntityId> = world
+                .citizens()
+                .into_iter()
+                .filter(|&c| world.comp::<Household>(c).and_then(|h| h.home) == Some(home))
+                .collect();
+            let mut owed = 2;
+            for r in residents {
+                if owed == 0 {
+                    break;
+                }
+                let coins = world.comp::<Wallet>(r).map_or(0, |w| w.coins);
+                let pay = owed.min(coins.max(0));
+                if pay > 0 {
+                    if let Some(w) = world.comp_mut::<Wallet>(r) {
+                        w.coins -= pay;
+                    }
+                    owed -= pay;
+                }
+            }
+            if let Some(g) = world.comp_mut::<Gang>(gang) {
+                g.treasury += 2 - owed;
+            }
         }
-        if let Some(g) = world.comp_mut::<Gang>(gang) {
-            g.treasury -= stipend;
+        // Stipend while the treasury holds it, leader first; none while sacked.
+        let sacked = world.comp::<Gang>(gang).is_some_and(|g| g.is_sacked(now));
+        if !sacked {
+            let (mut members, leader) =
+                world.comp::<Gang>(gang).map(|g| (g.members.clone(), g.leader)).unwrap_or_default();
+            if let Some(l) = leader {
+                members.retain(|&m| m != l);
+                members.insert(0, l);
+            }
+            for m in members {
+                if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury >= stipend) {
+                    break;
+                }
+                if let Some(g) = world.comp_mut::<Gang>(gang) {
+                    g.treasury -= stipend;
+                }
+                if let Some(w) = world.comp_mut::<Wallet>(m) {
+                    w.coins += stipend;
+                }
+            }
         }
-        if let Some(w) = world.comp_mut::<Wallet>(m) {
-            w.coins += stipend;
-        }
-    }
-    // Disband after 30 days with no members: treasury and territory go, the name stays.
-    let empty_since = world.comp::<Gang>(gang).and_then(|g| if g.members.is_empty() { g.empty_since } else { None });
-    if let Some(since) = empty_since {
-        let now = world.tick;
-        if now.saturating_sub(since) >= 30 * TICKS_PER_DAY {
+        // Disband after 30 days with no members: treasury and territory go, the name stays.
+        let empty_since =
+            world.comp::<Gang>(gang).and_then(|g| if g.members.is_empty() { g.empty_since } else { None });
+        if empty_since.is_some_and(|since| now.saturating_sub(since) >= 30 * TICKS_PER_DAY) {
+            let territory = world.comp::<Gang>(gang).map(|g| g.territory.clone()).unwrap_or_default();
+            for home in territory {
+                if let Some(b) = world.comp_mut::<Building>(home) {
+                    b.claim = None;
+                }
+            }
             if let Some(g) = world.comp_mut::<Gang>(gang) {
                 g.treasury = 0;
                 g.territory.clear();
                 g.empty_since = Some(now);
             }
         }
-    }
-    // Betrayal: a member with loyalty < 0.3 and an open warrant on themselves.
-    let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
-    for m in members {
-        let disloyal = world.comp::<Personality>(m).is_some_and(|p| p.loyalty < 0.3);
-        let wanted = crate::systems::law::wanted(world, m);
-        if let Some(b) = world.comp_mut::<Brain>(m) {
-            b.betraying = disloyal && wanted;
+        // Betrayal: a member with loyalty < 0.3 and an open warrant on themselves.
+        let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+        for m in members {
+            let disloyal = world.comp::<Personality>(m).is_some_and(|p| p.loyalty < 0.3);
+            let wanted = law::wanted(world, m);
+            if let Some(b) = world.comp_mut::<Brain>(m) {
+                b.betraying = disloyal && wanted;
+            }
         }
     }
 }
@@ -349,16 +609,11 @@ pub fn run(world: &mut World) {
 /// A betrayer filed a report naming the leader: they leave, every remaining
 /// member becomes their enemy, and their own warrant is resolved.
 pub fn betrayal_filed(world: &mut World, betrayer: EntityId) {
-    let Some(gang) = world.gang_id() else { return };
+    let Some(gang) = world.gang_of(betrayer) else { return };
     let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
     leave(world, betrayer, "betrayal");
     for m in members.into_iter().filter(|&m| m != betrayer) {
-        let tick = world.tick;
-        let e = world.edge_entry(m, betrayer);
-        e.affinity = (e.affinity - 0.7).max(-1.0);
-        e.kind = crate::components::RelKind::Enemy;
-        e.last_interaction = tick;
-        crate::systems::social::reindex_kind(world, m, betrayer);
+        social::make_enemy(world, m, betrayer, -0.7);
     }
     for r in world.crime_reports.iter_mut().filter(|r| r.suspect == betrayer) {
         r.resolved = true;
