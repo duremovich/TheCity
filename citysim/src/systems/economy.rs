@@ -1,7 +1,7 @@
 //! Economy: daily price and spoilage, plus the wage, dole, trade, production
 //! and hauling primitives the execution layer calls at action boundaries.
 
-use crate::components::{Brain, Building, BuildingKind, Inventory, Job, MemoryKind, Needs, Skills, Wallet};
+use crate::components::{Brain, Building, BuildingKind, Inventory, Job, Market, MemoryKind, Needs, Skills, Wallet};
 use crate::config::EconomyCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -24,54 +24,61 @@ pub fn run(world: &mut World) {
     daily_spoilage(world);
 }
 
-/// Clerks top the Market up from the Warehouse while it is under
-/// `restock_floor`, at most `restock_batch` a day. See config.toml for why
-/// this deviates from the spec.
+/// Clerks top each Market up from the Warehouse while it is under
+/// `restock_floor`, at most `restock_batch` a day per Market, in ascending
+/// order. See config.toml for why this deviates from the spec.
 fn daily_restock(world: &mut World) {
     let floor = world.config.economy.restock_floor;
     let batch = world.config.economy.restock_batch;
-    let (Some(wh), Some(mk)) =
-        (world.building_of_kind(BuildingKind::Warehouse), world.building_of_kind(BuildingKind::Market))
-    else {
-        return;
-    };
-    let stock = world.comp::<Building>(mk).map_or(0, |b| b.stock_food);
-    let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
-    let moved = floor.saturating_sub(stock).min(batch).min(available);
-    if moved == 0 {
-        return;
+    let Some(wh) = world.building_of_kind(BuildingKind::Warehouse) else { return };
+    for mk in world.buildings_of_kind(BuildingKind::Market).to_vec() {
+        if world.comp::<Building>(mk).is_none_or(|b| b.demolished) {
+            continue;
+        }
+        let stock = world.comp::<Building>(mk).map_or(0, |b| b.stock_food);
+        let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
+        let moved = floor.saturating_sub(stock).min(batch).min(available);
+        if moved == 0 {
+            continue;
+        }
+        if let Some(b) = world.comp_mut::<Building>(wh) {
+            b.stock_food -= moved;
+        }
+        if let Some(b) = world.comp_mut::<Building>(mk) {
+            b.stock_food += moved;
+        }
+        world.push_event(
+            EventKind::Restock,
+            &[mk],
+            format!(
+                "Clerks restocked {moved} food from the Warehouse (Market#{} {stock} -> {}, reserve {})",
+                mk.index,
+                stock + moved,
+                available - moved
+            ),
+        );
     }
-    if let Some(b) = world.comp_mut::<Building>(wh) {
-        b.stock_food -= moved;
-    }
-    if let Some(b) = world.comp_mut::<Building>(mk) {
-        b.stock_food += moved;
-    }
-    world.push_event(
-        EventKind::Restock,
-        &[],
-        format!(
-            "Clerks restocked {moved} food from the Warehouse (Market {stock} -> {}, reserve {})",
-            stock + moved,
-            available - moved
-        ),
-    );
 }
 
+/// Each Market prices from its own stock and keeps its own history.
 fn daily_price(world: &mut World) {
-    let Some(market_id) = world.building_of_kind(BuildingKind::Market) else { return };
-    let stock = world.comp::<Building>(market_id).map_or(0, |b| b.stock_food);
-    let price = price_for_stock(&world.config.economy, stock);
-    let old = world.market().map_or(price, |m| m.price_food);
-    if let Some(m) = world.market_mut() {
+    for market_id in world.buildings_of_kind(BuildingKind::Market).to_vec() {
+        let stock = world.comp::<Building>(market_id).map_or(0, |b| b.stock_food);
+        let price = price_for_stock(&world.config.economy, stock);
+        let Some(m) = world.comp_mut::<Market>(market_id) else { continue };
+        let old = m.price_food;
         m.price_food = price;
         if m.price_history.len() >= 120 {
             m.price_history.pop_front();
         }
         m.price_history.push_back(price);
-    }
-    if price != old {
-        world.push_event(EventKind::PriceChange, &[], format!("Food price {old} -> {price} (Market stock {stock})"));
+        if price != old {
+            world.push_event(
+                EventKind::PriceChange,
+                &[market_id],
+                format!("Food price {old} -> {price} (Market#{} stock {stock})", market_id.index),
+            );
+        }
     }
 }
 
@@ -114,17 +121,19 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
     }
 }
 
-/// Move `min(haul_batch, stock)` food from a farm to the Market, overflowing
-/// to the Warehouse and then lost. Returns units moved out of the farm.
+/// Move `min(haul_batch, stock)` food from a farm to the Market nearest its
+/// door, overflowing to the Warehouse and then lost. Returns units moved out
+/// of the farm.
 pub fn haul(world: &mut World, farm: EntityId) -> u32 {
     let batch = world.config.economy.haul_batch;
     let market_cap = world.config.buildings.market.stock_cap;
     let wh_cap = world.config.buildings.warehouse.stock_cap;
+    let market = world.comp::<Building>(farm).and_then(|b| world.nearest_of_kind(BuildingKind::Market, b.door));
     let Some(b) = world.comp_mut::<Building>(farm) else { return 0 };
     let moved = batch.min(b.stock_food);
     b.stock_food -= moved;
     let mut left = moved;
-    if let Some(m) = world.building_of_kind(BuildingKind::Market).and_then(|m| world.comp_mut::<Building>(m)) {
+    if let Some(m) = market.and_then(|m| world.comp_mut::<Building>(m)) {
         let take = left.min(market_cap.saturating_sub(m.stock_food));
         m.stock_food += take;
         left -= take;
@@ -138,23 +147,21 @@ pub fn haul(world: &mut World, farm: EntityId) -> u32 {
     moved
 }
 
-/// Units `agent` can afford, carry and the Market can supply right now:
+/// Units `agent` can afford, carry and `market` can supply right now:
 /// `min(3, floor(coins / price), 20 - food, Market stock)`.
-pub fn buy_quantity(world: &World, agent: EntityId) -> u32 {
-    let price = world.market().map_or(i64::MAX, |m| m.price_food).max(1);
+pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) -> u32 {
+    let Some(market) = market else { return 0 };
+    let price = world.comp::<Market>(market).map_or(i64::MAX, |m| m.price_food).max(1);
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let food = world.comp::<Inventory>(agent).map_or(20, |i| i.food);
-    let stock = world
-        .building_of_kind(BuildingKind::Market)
-        .and_then(|m| world.comp::<Building>(m))
-        .map_or(0, |b| b.stock_food);
+    let stock = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
     let afford = (coins / price).clamp(0, 3) as u32;
     afford.min(20u32.saturating_sub(food)).min(stock)
 }
 
-/// Pay for `units` at the Market (into the Treasury). Returns the coins paid.
-pub fn pay_for_food(world: &mut World, agent: EntityId, units: u32) -> i64 {
-    let price = world.market().map_or(0, |m| m.price_food);
+/// Pay for `units` at `market`'s price (into the Treasury). Returns the coins paid.
+pub fn pay_for_food(world: &mut World, agent: EntityId, market: Option<EntityId>, units: u32) -> i64 {
+    let price = market.and_then(|m| world.comp::<Market>(m)).map_or(0, |m| m.price_food);
     let cost = price * i64::from(units);
     if let Some(w) = world.comp_mut::<Wallet>(agent) {
         w.coins -= cost;
@@ -165,11 +172,10 @@ pub fn pay_for_food(world: &mut World, agent: EntityId, units: u32) -> i64 {
     cost
 }
 
-/// Take `units` off the Market shelf into the agent's inventory. Returns false
+/// Take `units` off `market`'s shelf into the agent's inventory. Returns false
 /// (and refunds) if the stock is gone.
-pub fn take_food(world: &mut World, agent: EntityId, units: u32, paid: i64) -> bool {
-    let Some(market) = world.building_of_kind(BuildingKind::Market) else { return false };
-    let stock = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
+pub fn take_food(world: &mut World, agent: EntityId, market: Option<EntityId>, units: u32, paid: i64) -> bool {
+    let stock = market.and_then(|m| world.comp::<Building>(m)).map_or(0, |b| b.stock_food);
     if stock < units || units == 0 {
         if let Some(w) = world.comp_mut::<Wallet>(agent) {
             w.coins += paid;
@@ -179,7 +185,7 @@ pub fn take_food(world: &mut World, agent: EntityId, units: u32, paid: i64) -> b
         }
         return false;
     }
-    if let Some(b) = world.comp_mut::<Building>(market) {
+    if let Some(b) = market.and_then(|m| world.comp_mut::<Building>(m)) {
         b.stock_food -= units;
     }
     if let Some(i) = world.comp_mut::<Inventory>(agent) {

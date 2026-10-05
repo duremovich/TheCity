@@ -71,7 +71,7 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // Arrest binds the located warrant suspect nearest the guard.
         GoalKind::Arrest => {
             let tile = world.comp::<Position>(id)?.tile;
-            crate::systems::law::located_suspects(world)
+            crate::systems::law::located_suspects_near(world, tile)
                 .into_iter()
                 .min_by_key(|&s| (world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile)), s.index))
         }
@@ -238,12 +238,13 @@ fn install(world: &mut World, id: EntityId, plan: Plan) {
 /// Reserve the shared resources a plan consumes, for `reservation_ttl` ticks.
 fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
     let expires = world.tick + world.config.exec.reservation_ttl;
-    let market = world.building_of_kind(BuildingKind::Market);
+    // The plan's Market: the one the agent is in, else the nearest (M10 D21).
+    let market = world.local(id, BuildingKind::Market);
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     for step in &plan.steps {
         let kind = match step.action {
             ActionKind::BuyFood => {
-                let units = crate::systems::economy::buy_quantity(world, id).max(1);
+                let units = crate::systems::economy::buy_quantity(world, id, market).max(1);
                 market.map(|b| ReservationKind::FoodUnits { building: b, units })
             }
             ActionKind::StealFood(StealSource::Market) => {

@@ -170,6 +170,16 @@ pub fn located_suspects(world: &World) -> Vec<EntityId> {
     out
 }
 
+/// `located_suspects` last seen within `[law] pursuit_radius` tiles of
+/// `tile`: the warrants a guard standing there will chase (M10).
+pub fn located_suspects_near(world: &World, tile: TilePos) -> Vec<EntityId> {
+    let radius = world.config.law.pursuit_radius;
+    located_suspects(world)
+        .into_iter()
+        .filter(|s| world.last_seen.get(s).is_some_and(|&(t, _)| t.manhattan(tile) <= radius))
+        .collect()
+}
+
 /// Sentence length in ticks for a crime at the current lever.
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     let base = world.config.crime.sentence_days[crime as usize] as f32;
@@ -336,7 +346,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     if jailed >= capacity {
         match crime {
             Crime::Theft => {
-                let fine = world.config.crime.fine_mult * world.market().map_or(1, |m| m.price_food);
+                let fine = world.config.crime.fine_mult * world.mean_price();
                 let coins = world.comp::<crate::components::Wallet>(suspect).map_or(0, |w| w.coins);
                 if coins >= fine {
                     if let Some(w) = world.comp_mut::<crate::components::Wallet>(suspect) {
@@ -618,11 +628,14 @@ fn expire_warrants(world: &mut World) {
     world.crime_reports.retain(|r| !r.resolved || tick.saturating_sub(r.tick) < 2 * expiry);
 }
 
-/// Prisoners get one meal a day from the Market, paid by the Treasury, and a
-/// full night's sleep.
+/// Prisoners get one meal a day from the Market nearest the Jail, paid by the
+/// Treasury at the city's mean price, and a full night's sleep.
 fn jail_upkeep(world: &mut World) {
-    let price = world.market().map_or(0, |m| m.price_food);
-    let market = world.building_of_kind(BuildingKind::Market);
+    let price = world.mean_price();
+    let market = world
+        .building_of_kind(BuildingKind::Jail)
+        .and_then(|j| world.comp::<Building>(j).map(|b| b.door))
+        .and_then(|door| world.nearest_of_kind(BuildingKind::Market, door));
     let cfg = world.config.needs.clone();
     for who in world.with::<Sentence>() {
         let fed = market.and_then(|m| world.comp_mut::<Building>(m)).is_some_and(|b| {
@@ -687,7 +700,12 @@ pub fn player_release(world: &mut World, who: EntityId) -> Result<(), String> {
     Ok(())
 }
 
-/// The next patrol route: `[Market, Bar, Hall, Home(rng), Home(rng)]`. Under
+/// The next patrol route: `[Market, Bar, Hall, Home(rng), Home(rng)]` on a
+/// beat. M10: with several Markets the beat is one drawn at random, the Bar
+/// is the one nearest it and the Homes come from the `[law]
+/// patrol_beat_homes` nearest it, so a loop fits in a shift on the 256 x 192
+/// map (with every Home in play a single leg could take half the shift). On
+/// the v1 map (one Market, 60 Homes) the loop is the v1 loop. Under
 /// a Crackdown: `[Market, Home(t), Home(t), Hideout(t), Home(t)]`, the Homes
 /// drawn from the target gang's territory (or, with fewer than three held,
 /// from the six inhabited Homes nearest its Hideout).
@@ -697,12 +715,32 @@ pub fn new_patrol_route(world: &mut World) -> Vec<EntityId> {
         return crackdown_route(world, gang);
     }
     let mut route = Vec::new();
-    for kind in [BuildingKind::Market, BuildingKind::Bar, BuildingKind::Hall] {
-        if let Some(b) = world.building_of_kind(kind) {
-            route.push(b);
-        }
+    let markets: Vec<EntityId> = world
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .copied()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+        .collect();
+    // No draw with a single Market, so the v1 city keeps its v1 sequence.
+    let beat = match markets.len() {
+        0 => None,
+        1 => Some(markets[0]),
+        n => Some(markets[world.rng.world().random_range(0..n)]),
+    };
+    let beat_door = beat.and_then(|m| world.comp::<Building>(m)).map(|b| b.door);
+    route.extend(beat);
+    route.extend(beat_door.and_then(|d| world.nearest_of_kind(BuildingKind::Bar, d)));
+    route.extend(world.building_of_kind(BuildingKind::Hall));
+    let mut homes = world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
+    let beat_homes = world.config.law.patrol_beat_homes;
+    if let (Some(door), true) = (beat_door, homes.len() > beat_homes) {
+        let mut near: Vec<(u32, EntityId)> = homes
+            .iter()
+            .filter_map(|&h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(door), h)))
+            .collect();
+        near.sort();
+        homes = near.into_iter().take(beat_homes).map(|(_, h)| h).collect();
     }
-    let homes = world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
     if !homes.is_empty() {
         for _ in 0..2 {
             let i = world.rng.world().random_range(0..homes.len());
@@ -739,7 +777,9 @@ fn crackdown_route(world: &mut World, gang: EntityId) -> Vec<EntityId> {
     let turf = crackdown_turf(world, gang);
     let hideout = world.hideout_of(gang);
     let mut route = Vec::new();
-    if let Some(m) = world.building_of_kind(BuildingKind::Market) {
+    // The Market nearest the target's Hideout (the only one on the v1 map).
+    let near = hideout.and_then(|h| world.comp::<Building>(h)).map(|b| b.door);
+    if let Some(m) = near.and_then(|d| world.nearest_of_kind(BuildingKind::Market, d)) {
         route.push(m);
     }
     let pick = |world: &mut World| {

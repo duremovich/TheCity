@@ -4,7 +4,7 @@ use citysim::{save, BuildingKind, Config, PlayerCommand, World, TICKS_PER_DAY};
 
 #[test]
 fn test_save_load_bit_identical() {
-    let mut original = World::new(42, Config::load());
+    let mut original = World::new(42, Config::load().v1_profile());
     original.run_ticks(3000);
     let saved = save::to_ron(&original);
 
@@ -20,7 +20,7 @@ fn test_save_load_bit_identical() {
 
 #[test]
 fn test_save_round_trips_commands_and_events() {
-    let mut w = World::new(5, Config::load());
+    let mut w = World::new(5, Config::load().v1_profile());
     w.push_command(PlayerCommand::ReleaseReserve { amount: 100 });
     w.push_command(PlayerCommand::SetTaxRate(0.2));
     w.run_ticks(10);
@@ -43,7 +43,7 @@ fn test_save_round_trips_commands_and_events() {
 fn test_save_file_helpers() {
     let dir = std::env::temp_dir().join(format!("citysim-save-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let mut w = World::new(9, Config::load());
+    let mut w = World::new(9, Config::load().v1_profile());
     w.run_ticks(5);
     let p5 = save::save_path(&dir, 9, w.tick);
     save::save_to_file(&w, &p5).expect("save");
@@ -86,7 +86,7 @@ fn strip_field(text: &str, token: &str) -> String {
 /// their Hideouts in map order (`World::migrate_legacy`).
 #[test]
 fn test_legacy_save_without_gangs_config_loads() {
-    let mut w = World::new(11, Config::load());
+    let mut w = World::new(11, Config::load().v1_profile());
     w.run_ticks(100);
     let gangs = w.gangs();
     let home = w.buildings_by_kind[&BuildingKind::Home][0];
@@ -135,7 +135,7 @@ fn strip_list_field(text: &str, token: &str) -> String {
 /// one reads the config from the assets and puts a default `Law` on the Jail.
 #[test]
 fn test_legacy_save_without_law_loads() {
-    let mut w = World::new(13, Config::load());
+    let mut w = World::new(13, Config::load().v1_profile());
     w.run_ticks(100);
     let text = save::to_ron(&w);
     let text = strip_field(&text, "law:(window_days");
@@ -164,7 +164,7 @@ fn test_rival_hideout_location_key_alias_loads() {
 /// A current save is not touched by the migration: an in-progress claim survives.
 #[test]
 fn test_current_save_keeps_live_claims() {
-    let mut w = World::new(12, Config::load());
+    let mut w = World::new(12, Config::load().v1_profile());
     let gangs = w.gangs();
     let home = w.buildings_by_kind[&BuildingKind::Home][0];
     w.comp_mut::<citysim::Gang>(gangs[0]).expect("gang").territory = vec![home];

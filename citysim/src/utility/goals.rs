@@ -60,10 +60,11 @@ pub fn drank_today(world: &World, id: EntityId) -> bool {
         .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::Socialised && time::day(e.tick) == world.day()))
 }
 
-/// The Bar is at capacity and this agent is not inside it.
+/// The agent's Bar (the one it is in, else the nearest) is at capacity and
+/// this agent is not inside it.
 pub fn bar_full_for(world: &World, id: EntityId) -> bool {
     world
-        .building_of_kind(BuildingKind::Bar)
+        .local(id, BuildingKind::Bar)
         .and_then(|b| world.comp::<crate::components::Building>(b))
         .is_some_and(|b| b.is_full() && !b.occupants.contains(&id))
 }
@@ -93,7 +94,7 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
-            let price = world.market().map_or(i64::MAX, |m| m.price_food);
+            let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_at(m));
             if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price)) {
                 return true;
             }
@@ -139,7 +140,7 @@ pub fn considerations(
     let mood = world.comp::<crate::components::Mood>(id).map_or(0.0, |m| m.value);
     let phase = world.phase();
     let tod = world.tick_of_day();
-    let price = world.market().map_or(i64::MAX, |m| m.price_food);
+    let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_at(m));
     let mm = mood_mult(mood, goal);
 
     let mut flat = 0.0;
@@ -361,7 +362,9 @@ pub fn considerations(
                 return None;
             }
             let p = pers?;
-            let located = !crate::systems::law::located_suspects(world).is_empty()
+            // M10: only warrants within pursuit range of this guard.
+            let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
+            let located = !crate::systems::law::located_suspects_near(world, here).is_empty()
                 || world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
             vec![
                 Consideration::new("warrant located", can(located), GATE),

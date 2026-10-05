@@ -1,12 +1,22 @@
 #!/usr/bin/env python3
-"""Generate assets/map.txt for the Living City Simulator (spec: World model > Map file format).
+"""Generate assets/map.txt, the M10 v2 map (docs/M10_SCALE.md section 2).
 
-Layout: a road grid every 8 tiles (vertical roads at x = 7 + 8k for k in 0..9, horizontal roads
-at y = 7 + 8k for k in 0..6, horizontal roads stop at x = 79), 5x4 Homes bottom-aligned to the
-road below each block, the two Farms and the Warehouse on the east edge facing the x = 79 road,
-Market and Hall at the central crossing (44, 31) / (54, 31), the Bar below the Market, the Jail
-below the Hall, the Cemetery in the north-west corner, the Hideouts in the south-east and south-west corners, and
-a 3-tile Water strip along the south edge.
+256 x 192 tiles. Cells of 7 x 7 tiles between roads: column c = 0..31 covers x = 8c..8c+6, row
+r = 0..22 covers y = 8r..8r+6. Vertical roads at x = 7 + 8k (x = 255 is the east edge road),
+horizontal roads at y = 7 + 8k up to y = 183; y = 184..188 is open Sump ground and a 3-tile Water
+strip runs along the south edge.
+
+Zones (per tile, first match wins): x >= 208 Vats; y >= 112 Sump; y < 40 and x >= 64 Spire;
+40 <= y < 80 and 96 <= x < 176 Civic; else Mid.
+
+Buildings: 400 Blocks (Homes) at 5 residents (60 Spire tier 2, 140 Mid tier 1, 200 Sump tier 0),
+12 Vat Farms in the Vats, 3 Street Markets and 3 Bars (one each Civic, two each Mid), the Precinct
+(Jail) and the Civic Hall in Civic, the Recycler (Cemetery), Reserve Depot (Warehouse) and two
+Security Offices in the Vats, two Hideouts in the SW and SE corners of the Sump, and 60 Lots
+(open plots: no walls, one door) spread over every zone. Double-wide buildings overwrite the road
+segment between their two cells; the BFS below proves every door is still reachable.
+
+The old 96 x 64 map is assets/map_v1.txt (unit tests only).
 
 Run:  python assets/gen_map.py > assets/map.txt
 The output is committed; the loader never calls this script.
@@ -14,104 +24,181 @@ The output is committed; the loader never calls this script.
 import sys
 from collections import deque
 
-W, H = 96, 64
+W, H = 256, 192
 GROUND, WALL, ROAD, DOOR, FARM, WATER = ".", "#", "=", "D", "f", "~"
+COLS, ROWS = 32, 23
 
 grid = [[GROUND] * W for _ in range(H)]
 
-# Water strip along the south edge.
-for y in range(61, 64):
+
+def zone_of(x, y):
+    if x >= 208:
+        return "V"
+    if y >= 112:
+        return "U"
+    if y < 40 and x >= 64:
+        return "S"
+    if 40 <= y < 80 and 96 <= x < 176:
+        return "C"
+    return "M"
+
+
+zones = [[zone_of(x, y) for x in range(W)] for y in range(H)]
+
+# Roads, then water.
+for k in range(COLS):
+    x = 7 + 8 * k
+    for y in range(0, 189):
+        grid[y][x] = ROAD
+for k in range(ROWS):
+    y = 7 + 8 * k
+    for x in range(W):
+        grid[y][x] = ROAD
+for y in range(189, 192):
     for x in range(W):
         grid[y][x] = WATER
 
-# Road grid.
-V_ROADS = [7 + 8 * k for k in range(10)]  # 7..79
-H_ROADS = [7 + 8 * k for k in range(7)]   # 7..55
-for x in V_ROADS:
-    for y in range(0, 61):
-        grid[y][x] = ROAD
-for y in H_ROADS:
-    for x in range(0, 80):
-        grid[y][x] = ROAD
-
-buildings = []  # (kind, x, y, w, h, door_x, door_y)
+buildings = []  # (kind, x, y, w, h, door_x, door_y, tier)
+used = set()  # cells taken
 
 
-def stamp(kind, x, y, w, h, door):
-    dx, dy = door
+def take(cells):
+    for cell in cells:
+        assert cell not in used, ("cell used twice", cell)
+        used.add(cell)
+
+
+def place(kind, c, r, tier=1):
+    """One building from its template at cell (c, r) (the top-left cell for multi-cell kinds)."""
+    if kind == "Home":
+        rect, door, cells = (8 * c + 1, 8 * r + 3, 5, 4), (8 * c + 3, 8 * r + 6), [(c, r)]
+    elif kind in ("Hall", "Warehouse", "SecurityOffice", "Lot"):
+        rect, door, cells = (8 * c, 8 * r + 1, 7, 6), (8 * c + 3, 8 * r + 6), [(c, r)]
+    elif kind == "Cemetery":
+        rect, door, cells = (8 * c, 8 * r, 7, 7), (8 * c + 3, 8 * r + 6), [(c, r)]
+    elif kind in ("Market", "Bar"):
+        rect, door, cells = (8 * c, 8 * r + 1, 15, 6), (8 * c + 7, 8 * r + 6), [(c, r), (c + 1, r)]
+    elif kind == "Farm":
+        rect, door, cells = (8 * c, 8 * r, 15, 7), (8 * c + 7, 8 * r + 6), [(c, r), (c + 1, r)]
+    elif kind == "Hideout":
+        rect, door, cells = (8 * c, 8 * r + 2, 15, 5), (8 * c + 7, 8 * r + 6), [(c, r), (c + 1, r)]
+    elif kind == "Jail":
+        rect, door = (8 * c, 8 * r, 15, 15), (8 * c + 7, 8 * r + 14)
+        cells = [(c, r), (c + 1, r), (c, r + 1), (c + 1, r + 1)]
+    else:
+        raise ValueError(kind)
+    take(cells)
+    x, y, w, h = rect
+    buildings.append((kind, x, y, w, h, door[0], door[1], tier))
+
+
+def cell_zone(c, r):
+    return zones[8 * r][8 * c]
+
+
+# --- Civic ---------------------------------------------------------------------
+place("Jail", 16, 6)
+place("Hall", 14, 7)
+place("Market", 12, 7)
+place("Bar", 18, 7)
+for c in range(12, 22):
+    place("Lot", c, 5)
+
+# --- Mid -----------------------------------------------------------------------
+place("Market", 2, 7)
+place("Bar", 4, 7)
+place("Market", 16, 11)
+place("Bar", 18, 11)
+for c in range(0, 8):
+    place("Lot", c, 0)
+for c in (8, 9, 22, 23, 24, 25):
+    place("Lot", c, 5)
+
+# --- Spire ---------------------------------------------------------------------
+for c in range(8, 18):
+    place("Lot", c, 0)
+
+# --- Vats ----------------------------------------------------------------------
+for c in (26, 28, 30):
+    for r in range(1, 5):
+        place("Farm", c, r)
+place("Warehouse", 26, 6)
+place("Cemetery", 28, 6)
+place("SecurityOffice", 30, 6)
+place("SecurityOffice", 26, 8)
+for c in range(27, 32):
+    place("Lot", c, 8)
+for c in range(26, 31):
+    place("Lot", c, 10)
+
+# --- Sump ----------------------------------------------------------------------
+place("Hideout", 0, 22)
+place("Hideout", 24, 22)
+for c in range(0, 16):
+    place("Lot", c, 14)
+
+
+def stride(cells, n):
+    assert len(cells) >= n, (len(cells), n)
+    return [cells[i * len(cells) // n] for i in range(n)]
+
+
+def free_cells(zone, rows=range(ROWS), cols=range(COLS)):
+    return [(c, r) for r in rows for c in cols if (c, r) not in used and cell_zone(c, r) == zone]
+
+
+spire = free_cells("S")
+mid = free_cells("M", cols=range(26))
+sump = free_cells("U", rows=range(15, 23), cols=range(26))
+for (c, r) in stride(spire, 60):
+    place("Home", c, r, 2)
+for (c, r) in stride(mid, 140):
+    place("Home", c, r, 1)
+for (c, r) in stride(sump, 200):
+    place("Home", c, r, 0)
+
+# --- stamp ---------------------------------------------------------------------
+for (kind, x, y, w, h, dx, dy, tier) in buildings:
     for yy in range(y, y + h):
         for xx in range(x, x + w):
             on_perimeter = yy in (y, y + h - 1) or xx in (x, x + w - 1)
-            if on_perimeter:
+            if kind == "Lot":
+                grid[yy][xx] = GROUND
+            elif on_perimeter:
                 grid[yy][xx] = WALL
             else:
                 grid[yy][xx] = FARM if kind == "Farm" else GROUND
-    assert dy in (y, y + h - 1) or dx in (x, x + w - 1), (kind, door)
+    assert dy in (y, y + h - 1) or dx in (x, x + w - 1), (kind, dx, dy)
     grid[dy][dx] = DOOR
-    buildings.append((kind, x, y, w, h, dx, dy))
 
-
-# Special buildings first so Home slots can be excluded where they overlap.
-specials = [
-    ("Cemetery", 8, 0, 8, 8, (8, 3)),        # door west onto road x=7
-    ("Market", 40, 25, 8, 6, (44, 30)),      # door south onto road y=31
-    ("Hall", 49, 25, 10, 6, (54, 30)),       # door south onto road y=31
-    ("Bar", 40, 32, 8, 6, (44, 32)),         # door north onto road y=31
-    ("Jail", 49, 32, 6, 6, (52, 32)),        # door north onto road y=31
-    ("Farm", 80, 2, 12, 9, (80, 6)),         # door west onto road x=79
-    ("Farm", 80, 14, 12, 9, (80, 18)),
-    ("Warehouse", 80, 26, 8, 6, (80, 28)),
-    ("Hideout", 80, 56, 7, 5, (80, 58)),
-    ("Hideout", 0, 56, 7, 5, (3, 56)),       # door north onto road y=55 (x=7 is a road, so x=0 not x=1)
-]
-
-
-def rect_overlaps(ax, ay, aw, ah, bx, by, bw, bh):
-    return ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah
-
-
-# Home slots: column blocks c = 0..9 (x = 8c .. 8c+6), row blocks r = 0..6 (y = 8r .. 8r+6).
-# Each Home is 5x4 at (8c+1, 8r+3) with its door at the bottom centre facing the road at y = 8r+7.
-home_slots = []
-for r in range(7):
-    for c in range(10):
-        hx, hy = 8 * c + 1, 8 * r + 3
-        if any(rect_overlaps(hx, hy, 5, 4, sx, sy, sw, sh) for (_, sx, sy, sw, sh, _) in specials):
-            continue
-        home_slots.append((hx, hy))
-assert len(home_slots) >= 60, len(home_slots)
-home_slots = home_slots[:60]
-
-for (hx, hy) in home_slots:
-    stamp("Home", hx, hy, 5, 4, (hx + 2, hy + 3))
-for (kind, x, y, w, h, door) in specials:
-    stamp(kind, x, y, w, h, door)
-
-# Order buildings exactly as the spec's count table lists kinds, Homes first.
-KIND_ORDER = ["Home", "Farm", "Market", "Bar", "Jail", "Cemetery", "Hall", "Hideout", "Warehouse"]
+KIND_ORDER = ["Home", "Farm", "Market", "Bar", "Jail", "Cemetery", "Hall", "Hideout", "Warehouse",
+              "SecurityOffice", "Lot"]
 buildings.sort(key=lambda b: (KIND_ORDER.index(b[0]), b[2], b[1]))
 
 # --- validation ---------------------------------------------------------------
-for (kind, x, y, w, h, dx, dy) in buildings:
+for (kind, x, y, w, h, dx, dy, tier) in buildings:
+    assert x + w <= 255 and y + h <= 184, ("rect reaches the east road or the south band", kind, x, y)
     doors = 0
     for yy in range(y, y + h):
         for xx in range(x, x + w):
             on_perimeter = yy in (y, y + h - 1) or xx in (x, x + w - 1)
             ch = grid[yy][xx]
-            if on_perimeter:
+            if kind == "Lot":
+                assert ch in (GROUND, DOOR), (kind, xx, yy, ch)
+                doors += ch == DOOR
+                assert ch == GROUND or on_perimeter, (kind, xx, yy, "interior door")
+            elif on_perimeter:
                 assert ch in (WALL, DOOR), (kind, xx, yy, ch)
                 doors += ch == DOOR
             else:
                 assert ch == (FARM if kind == "Farm" else GROUND), (kind, xx, yy, ch)
-    assert doors == 1, (kind, doors)
-    # the tile outside the door must be Road
+    assert doors == 1, (kind, x, y, doors)
     outside = [(dx - 1, dy), (dx + 1, dy), (dx, dy - 1), (dx, dy + 1)]
     outside = [(ox, oy) for (ox, oy) in outside if not (x <= ox < x + w and y <= oy < y + h)]
     assert any(0 <= ox < W and 0 <= oy < H and grid[oy][ox] == ROAD for (ox, oy) in outside), (kind, dx, dy)
     if kind == "Farm":
         assert sum(row[x:x + w].count(FARM) for row in grid[y:y + h]) >= 60
 
-# Every door must be reachable from every other door over walkable tiles.
 walk = {GROUND, ROAD, DOOR, FARM}
 start = (buildings[0][5], buildings[0][6])
 seen = {start}
@@ -122,17 +209,33 @@ while q:
         if 0 <= nx < W and 0 <= ny < H and grid[ny][nx] in walk and (nx, ny) not in seen:
             seen.add((nx, ny))
             q.append((nx, ny))
-for (kind, x, y, w, h, dx, dy) in buildings:
+for (kind, x, y, w, h, dx, dy, tier) in buildings:
     assert (dx, dy) in seen, ("unreachable door", kind, dx, dy)
 
 counts = {k: sum(1 for b in buildings if b[0] == k) for k in KIND_ORDER}
-assert counts == {"Home": 60, "Farm": 2, "Market": 1, "Bar": 1, "Jail": 1, "Cemetery": 1,
-                  "Hall": 1, "Hideout": 2, "Warehouse": 1}, counts
+assert counts == {"Home": 400, "Farm": 12, "Market": 3, "Bar": 3, "Jail": 1, "Cemetery": 1, "Hall": 1,
+                  "Hideout": 2, "Warehouse": 1, "SecurityOffice": 2, "Lot": 60}, counts
+lots_by_zone = {}
+homes_by_zone = {}
+for (kind, x, y, w, h, dx, dy, tier) in buildings:
+    z = zones[dy][dx]
+    if kind == "Lot":
+        lots_by_zone[z] = lots_by_zone.get(z, 0) + 1
+    if kind == "Home":
+        homes_by_zone[z] = homes_by_zone.get(z, 0) + 1
+        assert tier == {"S": 2, "M": 1, "U": 0}[z], (x, y, z, tier)
+assert all(lots_by_zone.get(z, 0) >= 8 for z in "SCVMU"), lots_by_zone
+assert homes_by_zone == {"S": 60, "M": 140, "U": 200}, homes_by_zone
 
 # --- output -------------------------------------------------------------------
-out = sys.stdout
+out = []
+out.append(f"{W} {H}\n")
 for row in grid:
-    out.write("".join(row) + "\n")
-out.write("\n")
-for (kind, x, y, w, h, dx, dy) in buildings:
-    out.write(f"B {kind} {x} {y} {w} {h}\n")
+    out.append("".join(row) + "\n")
+out.append("\n")
+for row in zones:
+    out.append("".join(row) + "\n")
+out.append("\n")
+for (kind, x, y, w, h, dx, dy, tier) in buildings:
+    out.append(f"B {kind} {x} {y} {w} {h} {tier}\n")
+sys.stdout.buffer.write("".join(out).encode("ascii"))

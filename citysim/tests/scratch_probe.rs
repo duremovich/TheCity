@@ -10,7 +10,7 @@ use citysim::{Config, World, TICKS_PER_DAY};
 #[ignore]
 fn probe_system_timing() {
     let warm_days: u64 = std::env::var("WARM_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(50);
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().v1_profile());
     let t0 = Instant::now();
     w.run_ticks(warm_days * TICKS_PER_DAY);
     eprintln!("warm-up {warm_days} days in {:.1}s, edges {}", t0.elapsed().as_secs_f32(), w.edges.len());
@@ -67,7 +67,7 @@ fn probe_system_timing() {
 #[ignore]
 fn probe_burial() {
     use citysim::{Brain, DeathCause, EventKind, Household, Job, Role};
-    let mut w = World::new(43, Config::load());
+    let mut w = World::new(43, Config::load().v1_profile());
     let id = w.citizens().into_iter().find(|&id| !w.has::<Job>(id) && w.has::<Brain>(id)).expect("civilian");
     let diggers: Vec<_> =
         w.citizens().into_iter().filter(|&d| w.comp::<Job>(d).is_some_and(|j| j.role == Role::Gravedigger)).collect();
@@ -115,7 +115,7 @@ fn probe_burial() {
 #[ignore]
 fn probe_bury_feasible() {
     use citysim::{ActionKind, Brain, DeathCause, Job, LocationKey, PlanCtx, Role, WorldState};
-    let mut w = World::new(43, Config::load());
+    let mut w = World::new(43, Config::load().v1_profile());
     let id = w.citizens().into_iter().find(|&id| !w.has::<Job>(id) && w.has::<Brain>(id)).expect("civilian");
     let digger =
         w.citizens().into_iter().find(|&d| w.comp::<Job>(d).is_some_and(|j| j.role == Role::Gravedigger)).expect("d");
@@ -153,7 +153,7 @@ fn probe_bury_feasible() {
 #[ignore]
 fn probe_births() {
     use citysim::{Household, Identity, Mood, Needs};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().v1_profile());
     w.run_ticks(60 * TICKS_PER_DAY);
     let pairs: Vec<(citysim::EntityId, citysim::EntityId)> =
         w.spouses.iter().filter(|(a, b)| a < b).map(|(&a, &b)| (a, b)).collect();
@@ -190,7 +190,7 @@ fn probe_births() {
 #[ignore]
 fn probe_night_states() {
     use citysim::{Brain, ExecState, Lod};
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().v1_profile();
     cfg.lod.force = Some(Lod::Full);
     cfg.world.population = 200;
     let mut w = World::new(1000, cfg);
@@ -218,7 +218,7 @@ fn probe_night_states() {
 #[ignore]
 fn probe_still_moods() {
     use citysim::{Brain, Mood};
-    let mut w = World::new(5, Config::load());
+    let mut w = World::new(5, Config::load().v1_profile());
     w.run_ticks(10 * TICKS_PER_DAY);
     let mut hist: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
     for id in w.citizens() {
@@ -242,7 +242,7 @@ fn probe_still_moods() {
 #[ignore]
 fn probe_gang_join_citations() {
     use citysim::{EventKind, Gang, Memory, MemoryKind};
-    let mut w = World::new(7, Config::load());
+    let mut w = World::new(7, Config::load().v1_profile());
     let mut seen = 0;
     for _ in 0..120 {
         w.run_ticks(TICKS_PER_DAY);
@@ -291,7 +291,7 @@ fn probe_gang_join_citations() {
 fn probe_gang_growth() {
     use citysim::systems::gang;
     use citysim::{Brain, Gang, GangMember, Job, Role, Sentence};
-    let mut w = World::new(7, Config::load());
+    let mut w = World::new(7, Config::load().v1_profile());
     for day in 0..120 {
         w.run_ticks(TICKS_PER_DAY);
         if day % 6 != 5 {
@@ -323,7 +323,7 @@ fn probe_gang_growth() {
 #[ignore]
 fn probe_couple_intimacy() {
     use citysim::{Brain, Household, Identity, Needs};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().v1_profile());
     w.run_ticks(60 * TICKS_PER_DAY);
     let mut hist: std::collections::BTreeMap<String, (usize, f32)> = std::collections::BTreeMap::new();
     for (&a, &b) in w.spouses.iter().filter(|(a, b)| a < b) {
@@ -351,7 +351,7 @@ fn probe_couple_intimacy() {
 #[test]
 #[ignore]
 fn probe_save_roundtrip_time() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().v1_profile());
     w.run_ticks(30 * TICKS_PER_DAY);
     let t0 = Instant::now();
     let text = citysim::save::to_ron(&w);
@@ -374,7 +374,7 @@ fn probe_save_roundtrip_time() {
 fn probe_faction_brain() {
     use citysim::systems::faction;
     use citysim::Gang;
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().v1_profile());
     let gangs = w.gangs();
     for day in 0..120 {
         w.run_ticks(TICKS_PER_DAY);
@@ -400,7 +400,7 @@ fn probe_faction_brain() {
 #[ignore]
 fn probe_assault_sources() {
     use citysim::EventKind;
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().v1_profile());
     let (mut cross, mut civ_on_gang, mut gang_on_civ, mut civ_on_civ, mut extortions) = (0, 0, 0, 0, 0);
     let mut seen = 0;
     for _ in 0..120 {

@@ -23,7 +23,7 @@ use crate::goap::{ActionKind, LocationKey};
 use crate::time::Tick;
 use crate::world::World;
 
-pub use flowfield::FlowField;
+pub use flowfield::{FlowCache, FlowField};
 pub use reservations::{Reservation, ReservationKind};
 
 /// Where a Goto is heading. Shared by the Full and Coarse variants so an LOD
@@ -544,9 +544,10 @@ impl World {
                 .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::Farm))
                 .or_else(|| self.comp::<crate::components::Job>(agent).and_then(|j| j.employer))
                 .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::Farm))
-                .or_else(|| self.building_of_kind(K::Farm)),
-            LocationKey::Market => target.or_else(|| self.building_of_kind(K::Market)),
-            LocationKey::Bar => target.or_else(|| self.building_of_kind(K::Bar)),
+                .or_else(|| self.local(agent, K::Farm)),
+            // M10: several of each; the agent's own (D21).
+            LocationKey::Market => target.or_else(|| self.local(agent, K::Market)),
+            LocationKey::Bar => target.or_else(|| self.local(agent, K::Bar)),
             LocationKey::Jail => target.or_else(|| self.building_of_kind(K::Jail)),
             LocationKey::Cemetery => target.or_else(|| self.building_of_kind(K::Cemetery)),
             LocationKey::Hall => target.or_else(|| self.building_of_kind(K::Hall)),
@@ -652,14 +653,16 @@ impl World {
         }
     }
 
-    /// Lazily build and cache the flow field for a building's door.
+    /// Lazily build and cache the flow field for a building's door; past
+    /// `[exec] flow_field_cache` fields the least recently used is evicted.
     pub fn flow_field_for(&mut self, b: EntityId) -> Option<&FlowField> {
-        if !self.flow_fields.contains_key(&b) {
+        if !self.flow_fields.contains(b) {
             let door = self.comp::<Building>(b)?.door;
             let field = FlowField::build(&self.map, door);
-            self.flow_fields.insert(b, field);
+            let cap = self.config.exec.flow_field_cache;
+            self.flow_fields.insert(b, field, cap);
         }
-        self.flow_fields.get(&b)
+        self.flow_fields.get(b)
     }
 
     /// Next tile toward building `b` from `from`.

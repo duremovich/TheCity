@@ -4,7 +4,9 @@
 
 use macroquad::prelude::*;
 
-use citysim::{time, Brain, Building, Corpse, Gang, Job, Lod, Position, Role, TileKind, TilePos, World};
+use citysim::{
+    time, Brain, Building, BuildingKind, Corpse, Gang, Job, Lod, Position, Role, TileKind, TilePos, World, Zone,
+};
 
 use crate::App;
 
@@ -15,6 +17,11 @@ const C_DOOR: u32 = 0x9a7b4f;
 const C_FARMLAND: u32 = 0x3f5a2a;
 const C_WATER: u32 = 0x27485e;
 const C_OUTLINE: u32 = 0xc8c0b0;
+/// M10: Lots (open plots) and Security Offices.
+const C_LOT: u32 = 0x7a7466;
+const C_SECURITY: u32 = 0x5fb3c8;
+/// Ground tint per zone (Spire, Civic, Vats, Mid, Sump); Mid is the v1 ground.
+const C_ZONE_GROUND: [u32; 5] = [0x2c2f3a, 0x33302a, 0x26301f, 0x2e2a24, 0x2a2420];
 const C_CORPSE: u32 = 0x1a1a1a;
 const C_AGENT_IDLE: u32 = 0x8a8a8a;
 const C_AGENT_WORKING: u32 = 0x3d7bd9;
@@ -41,9 +48,9 @@ fn gang_colour(index: usize) -> Color {
     hex(crate::ui::gang_hex(index))
 }
 
-fn tile_colour(kind: TileKind) -> Color {
+fn tile_colour(kind: TileKind, zone: Zone) -> Color {
     hex(match kind {
-        TileKind::Ground => C_GROUND,
+        TileKind::Ground => C_ZONE_GROUND[zone.index()],
         TileKind::Road => C_ROAD,
         TileKind::Wall => C_WALL,
         TileKind::Door => C_DOOR,
@@ -58,11 +65,16 @@ pub fn draw(world: &World, app: &App) {
     let ppt = cam.px_per_tile;
     let view = cam.view_rect();
 
-    // 1. tiles, culled to the view
-    for y in view.y..view.y + view.h {
-        for x in view.x..view.x + view.w {
+    // 1. tiles, culled to the view (u16: a view can reach column 255)
+    let (x1, y1) = (
+        (u16::from(view.x) + u16::from(view.w)).min(world.map.w() as u16),
+        (u16::from(view.y) + u16::from(view.h)).min(world.map.h() as u16),
+    );
+    for y in u16::from(view.y)..y1 {
+        for x in u16::from(view.x)..x1 {
             let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
-            draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, tile_colour(world.map.tile(usize::from(x), usize::from(y))));
+            let t = TilePos { x: x as u8, y: y as u8 };
+            draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, tile_colour(world.map.tile_at(t), world.map.zone(t)));
         }
     }
 
@@ -91,8 +103,12 @@ pub fn draw(world: &World, app: &App) {
         let (w, h) = (f32::from(b.rect.w) * ppt, f32::from(b.rect.h) * ppt);
         if b.demolished {
             dashed_rect(tl.x, tl.y, w, h, hex(C_OUTLINE));
+        } else if b.kind == BuildingKind::Lot {
+            // An open plot: dashed, no letter (inert until M11).
+            dashed_rect(tl.x, tl.y, w, h, hex(C_LOT));
         } else {
-            draw_rectangle_lines(tl.x, tl.y, w, h, 2.0, hex(C_OUTLINE));
+            let outline = if b.kind == BuildingKind::SecurityOffice { C_SECURITY } else { C_OUTLINE };
+            draw_rectangle_lines(tl.x, tl.y, w, h, 2.0, hex(outline));
             if ppt >= LABEL_MIN_PX {
                 let size = (ppt * 1.4).clamp(14.0, 40.0);
                 let text = b.kind.letter().to_string();

@@ -3,7 +3,7 @@
 use citysim::{save, Config, World};
 
 fn hash_after(seed: u64, ticks: u64) -> blake3::Hash {
-    let mut w = World::new(seed, Config::load());
+    let mut w = World::new(seed, Config::load().v1_profile());
     w.run_ticks(ticks);
     blake3::hash(save::to_ron(&w).as_bytes())
 }

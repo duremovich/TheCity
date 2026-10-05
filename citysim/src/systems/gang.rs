@@ -560,7 +560,7 @@ pub fn split_loot(world: &mut World, actor: EntityId) -> i64 {
 /// each, paid from the gang treasury; the food goes into the Hideout's stock.
 pub fn fence(world: &mut World, actor: EntityId) -> i64 {
     let Some(gang) = world.gang_of(actor) else { return 0 };
-    let price = world.market().map_or(0, |m| m.price_food);
+    let price = world.mean_price();
     let each = (price as f32 * 0.8).floor() as i64;
     let units = world.comp::<crate::components::Inventory>(actor).map_or(0, |i| i.stolen_food);
     let treasury = world.comp::<Gang>(gang).map_or(0, |g| g.treasury);

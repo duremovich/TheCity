@@ -5,17 +5,16 @@ use rand::{Rng, SeedableRng};
 use citysim::exec::flowfield::FlowField;
 use citysim::exec::pathfind;
 use citysim::{
-    Brain, Building, BuildingKind, Config, Job, Lod, Position, Role, TileKind, TilePos, World, MAP_H, MAP_W,
-    TICKS_PER_DAY,
+    Brain, Building, BuildingKind, Config, Job, Lod, Position, Role, TileKind, TilePos, World, TICKS_PER_DAY,
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 fn random_walkable(w: &World, rng: &mut rand_chacha::ChaCha8Rng) -> TilePos {
     loop {
-        let p = TilePos { x: rng.random_range(0..MAP_W as u8), y: rng.random_range(0..MAP_H as u8) };
+        let p = TilePos { x: rng.random_range(0..w.map.w() as u8), y: rng.random_range(0..w.map.h() as u8) };
         // stay on the street: building interiors are only reachable through their door
         if w.map.tile_at(p) == TileKind::Road || w.map.tile_at(p) == TileKind::Ground {
             let inside = w.map.buildings.iter().any(|b| b.rect.contains(p));
@@ -41,7 +40,9 @@ fn test_flowfield_matches_astar_length() {
         let dc = pathfind::path_cost(&w.map, &descent);
         let ac = pathfind::path_cost(&w.map, &astar);
         assert!((dc - ac).abs() < 1e-3, "start {start} door {door}: field {dc} vs A* {ac}");
-        assert!((field.cost_from(start) - ac).abs() < 1e-3);
+        // M10: no cost array is kept; the descent's entered-tile costs are the field's cost.
+        let entered: f32 = descent.iter().map(|&t| w.map.tile_at(t).move_cost()).sum();
+        assert!((entered - ac).abs() < 1e-3);
         assert_eq!(descent.len(), astar.len(), "start {start} door {door}");
     }
 }
@@ -197,9 +198,9 @@ fn test_buy_quantity_capped_by_market_stock() {
     let rich = w.citizens()[0];
     w.comp_mut::<citysim::Wallet>(rich).expect("wallet").coins = 100;
     w.comp_mut::<citysim::Inventory>(rich).expect("inv").food = 0;
-    assert_eq!(citysim::systems::economy::buy_quantity(&w, rich), 2);
+    assert_eq!(citysim::systems::economy::buy_quantity(&w, rich, Some(market)), 2);
     w.comp_mut::<Building>(market).expect("market").stock_food = 0;
-    assert_eq!(citysim::systems::economy::buy_quantity(&w, rich), 0);
+    assert_eq!(citysim::systems::economy::buy_quantity(&w, rich, Some(market)), 0);
 }
 
 #[test]

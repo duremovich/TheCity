@@ -2,7 +2,10 @@
 # See docs/SPEC.md › Tuning defaults for what to raise or lower and when.
 
 [world]
-population = 300
+# M10: the 256 x 192 map (assets/map_v1.txt is the 96 x 64 v1 city; unit tests use Config::v1_profile).
+map = "map.txt"
+# M10: 2,000 residents (400 Blocks x 5). v1 was 300.
+population = 2000
 residents_per_home = 5
 spouse_p = 0.6
 age_min_years = 18.0
@@ -14,20 +17,25 @@ initial_food_max = 2
 skill_min = 0.1
 skill_max = 0.4
 home_pantry_initial = 10
-market_initial = 600
-warehouse_initial = 1500
-treasury_initial = 5000
+# M10 (2,000 residents): per Market (three of them); v1 600 for one.
+market_initial = 1500
+# M10: v1 1500. The Reserve Depot holds 20,000.
+warehouse_initial = 10000
+# M10: v1 5000, scaled for ~6.7x the payroll and dole.
+treasury_initial = 35000
 price_initial = 3
 # tick_of_day ranges [start, end): Work phase 6 days in 7; guards with an even index work nights.
 shift_day = [[540, 1080]]
 shift_night = [[1260, 1440], [0, 360]]
 
+# M10 (2,000 residents): v1 24 / 10 / 3 / 2 / 1. Four clerks per Market, eight bartenders over three
+# Bars, 16 farmers per Vat Farm; the rest draw the dole.
 [world.jobs]
-farmer = 24
-guard = 10
-clerk = 3
-bartender = 2
-gravedigger = 1
+farmer = 160
+guard = 36
+clerk = 12
+bartender = 8
+gravedigger = 4
 
 [world.needs_initial]
 hunger = 0.8
@@ -39,14 +47,18 @@ intimacy = 0.5
 # Capacity = max agents inside at once; stock_cap = food units the building can hold.
 [buildings]
 home = { capacity = 6, stock_cap = 30 }
-farm = { capacity = 12, stock_cap = 400 }
+# M10: farm 16 (160 farmers / 12 farms; v1 12), jail 80 (v1 16), hideout 30 (60 members; v1 12),
+# warehouse stock_cap 20,000 (v1 3000). Lots and Security Offices are inert until M11.
+farm = { capacity = 16, stock_cap = 400 }
 market = { capacity = 20, stock_cap = 2000 }
 bar = { capacity = 24, stock_cap = 0 }
-jail = { capacity = 16, stock_cap = 0 }
+jail = { capacity = 80, stock_cap = 0 }
 cemetery = { capacity = 8, stock_cap = 0 }
 hall = { capacity = 20, stock_cap = 0 }
-hideout = { capacity = 12, stock_cap = 200 }
-warehouse = { capacity = 6, stock_cap = 3000 }
+hideout = { capacity = 30, stock_cap = 200 }
+warehouse = { capacity = 6, stock_cap = 20000 }
+security_office = { capacity = 12, stock_cap = 0 }
+lot = { capacity = 0, stock_cap = 0 }
 
 [needs]
 hunger_decay_per_tick = 0.000347
@@ -98,8 +110,14 @@ haul_min_stock = 10
 # Market stands empty for the last ten days of Winter. The floor is well under price_ref_stock, so
 # Winter still pushes the price to ~6-7; the player's Release reserve lever remains the only way
 # to flood the shelf and bring the price back down. 0 restores the spec behaviour.
-restock_floor = 400
-restock_batch = 200
+# M10: per Market now (three of them, 2,000 residents); v1 400 / 200 for one Market and 300.
+# 1200 / 1200, not the plan's 900 / 450: every Vat Farm's nearest Market is the Civic one (the
+# farms tie on door distance and the lower index wins), so the two Mid Markets are fed by restock
+# alone. At 450 a day they were empty from day 3, the Reserve sat full at 20,000, and by day 9
+# eighty hungry thieves filled the Jail. A floor of 1200 carries a Market's daily demand and still
+# prices at 3; Winter drains the Reserve and the price climbs as before.
+restock_floor = 1200
+restock_batch = 1200
 build_home_cost = 200
 
 [crime]
@@ -150,10 +168,14 @@ freelance_loyalty = 0.3
 # 3-5 sits at the stipend's break-even, so that left the loser of the first raid stuck for good and
 # made growth hostage to a windfall. The promise now covers the first 5 for good; the treasury
 # funds each member beyond them.
-recruit_on_promise = 5
+# M10: 15 (was 5). At 2,000 residents both gangs stalled at 5-6 members all year (the stipend
+# break-even), never touched each other's turf across the Sump and the M8 gate saw no flip or
+# cross-gang fight; 15 lets them reach ~16 each. (10 was path-dependent and stalled at ~10.)
+recruit_on_promise = 15
 # Members are never Statistical now, so every one of them extorts daily and the revenge fights
 # scale with headcount: an uncapped gang reached 29 and 7 Assaults/day (the M7 baseline is 3).
-max_members = 20
+# M10: 60 (v1 20) for 2,000 residents; still two gangs.
+max_members = 60
 # 4: with 7, a burst of arrests kept a gang lying low for weeks (and lying low earns nothing).
 heat_days = 4
 hysteresis = 0.10
@@ -167,7 +189,9 @@ raid_min_prize = 10
 raid_cooldown_days = 30
 raid_prize_frac = 0.5
 raid_muster_hour = 22
-raid_gather_hours = 3
+# M10: 8 (was 3). On the 256 x 192 map a member can be 6 h from the Hideout, so with 3 h the muster
+# left without them and raiders reached the door one at a time.
+raid_gather_hours = 8
 raid_gather_radius = 6
 retaliate_days = 3
 sacked_days = 3
@@ -211,6 +235,14 @@ bribe_per_guard = 1
 bribe_days = 10
 bribe_threshold = 0.35
 target_margin = 2
+# M10: a patrol loop's two Homes come from this many nearest its Market (one of three, drawn per
+# loop). 60 is the whole v1 city; on the 256 x 192 map a loop over all 400 Homes could not be walked
+# in a shift, so guards on patrol were never credited a shift and starved on full pay.
+patrol_beat_homes = 60
+# M10: a guard chases only warrants last seen within this many tiles (v1: no limit). On the 256 x 192
+# map, with a warrant always open somewhere among 2,000 residents, every guard spent a fifth of the
+# day walking across the city after the nearest one, was never credited a shift, and starved.
+pursuit_radius = 64
 
 # Patrol's 0.2 keeps it the resting posture; Crackdown earns its place from pressure alone (+0.3
 # while a refused bribe hardens it); Garrison's 0.05 (+0.5 for a week after a jailbreak).
@@ -249,17 +281,24 @@ interrupt_check_ticks = 30
 door_capacity_per_tick = 2
 door_queue_max_ticks = 30
 reservation_ttl = 120
-astar_max_expansions = 4000
+# M10: 16000 (v1 4000) for the 256 x 192 map; street targets can be 300+ tiles away.
+astar_max_expansions = 16000
+# M10: lazy flow fields kept in an LRU of this many (49 KB each); every real destination fits.
+flow_field_cache = 512
 
 [lod]
 max_full = 50
-max_coarse = 100
+# M10: 150 (v1 100). Guards now get gang members' priority; without the room 120 gang members take
+# every slot and the whole watch is Statistical.
+max_coarse = 150
 
 [levers]
 tax_rate = 0.05
 sentence_mult = 1.0
-guard_count = 10
-immigration_per_week = 2
+# M10 (2,000 residents): v1 10 and 2. The daily reconcile fires down to the lever, so it must match
+# [world.jobs] guard.
+guard_count = 36
+immigration_per_week = 13
 # 3 = one meal at price 3; the unemployed need ~1.2 meals a day, so some go hungry, and the hungry
 # poor steal (M3's point). At 4 nobody ever steals.
 dole_per_day = 3

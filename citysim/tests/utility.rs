@@ -7,7 +7,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 fn set_needs(w: &mut World, id: citysim::EntityId, f: impl FnOnce(&mut Needs)) {
@@ -185,7 +185,9 @@ fn test_worked_example_through_goal_table() {
     w.tick = 700; // Work phase, in shift
     w.leave_building(id);
     w.enter_building(id, farm);
-    w.market_mut().expect("market").price_food = 3;
+    w.comp_mut::<citysim::Market>(w.building_of_kind(citysim::BuildingKind::Market).expect("market"))
+        .expect("market")
+        .price_food = 3;
     w.comp_mut::<Wallet>(id).expect("wallet").coins = 4;
     w.comp_mut::<citysim::Inventory>(id).expect("inv").food = 0;
     let p = w.comp_mut::<Personality>(id).expect("p");

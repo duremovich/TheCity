@@ -109,6 +109,9 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             BuildingKind::Hall => hall(ui, app, world, id),
             BuildingKind::Hideout => hideout(ui, app, world, id, b),
             BuildingKind::Warehouse => warehouse(ui, world, b),
+            BuildingKind::SecurityOffice | BuildingKind::Lot => {
+                ui.label(format!("{} · inert until M11", world.map.zone(b.door)));
+            }
         }
         occupants(ui, app, world, b);
         buttons(ui, app, id, b);
@@ -222,8 +225,8 @@ fn market(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building)
     let cap = world.config.buildings.for_kind(b.kind).stock_cap;
     section(ui, "Stock and price", |ui| {
         stock_bar(ui, "food", b.stock_food, cap);
-        if let Some(m) = world.market() {
-            ui.label(format!("price {} coins", m.price_food));
+        if let Some(m) = world.comp::<Market>(id) {
+            ui.label(format!("price {} coins (city mean {})", m.price_food, world.mean_price()));
             price_history(ui, m);
         }
         let warehouse = world

@@ -8,7 +8,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 fn limits(w: &World) -> Limits {
@@ -169,7 +169,7 @@ fn test_reservation_prevents_overcommit() {
         w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     }
     let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
-    let price = w.market().expect("market").price_food;
+    let price = w.mean_price();
     for &id in &ids {
         // one unit's worth each: BuyFood reserves what it will actually buy
         w.comp_mut::<Wallet>(id).expect("wallet").coins = price;
@@ -264,13 +264,17 @@ fn test_empty_market_with_stocked_pantry_eats_at_home() {
 fn test_beg_does_not_promise_a_meal_at_price_three() {
     let mut w = world(9);
     let id = scenario(&mut w, 14, 0, 0.9, 0.4, 0.6);
-    w.market_mut().expect("market").price_food = 3;
+    w.comp_mut::<citysim::Market>(w.building_of_kind(BuildingKind::Market).expect("market"))
+        .expect("market")
+        .price_food = 3;
     let ctx = PlanCtx::build(&w, id, None);
     let mut ws = WorldState::observe(&w, id, None);
     ws.at = LocationKey::Market;
     let after = ActionKind::Beg.apply(&ws, &ctx);
     assert!(!after.has_coins);
-    w.market_mut().expect("market").price_food = 2;
+    w.comp_mut::<citysim::Market>(w.building_of_kind(BuildingKind::Market).expect("market"))
+        .expect("market")
+        .price_food = 2;
     let ctx = PlanCtx::build(&w, id, None);
     let after = ActionKind::Beg.apply(&ws, &ctx);
     assert!(after.has_coins);

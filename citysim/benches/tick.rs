@@ -4,7 +4,7 @@ use citysim::{Config, World};
 use criterion::{criterion_group, criterion_main, Criterion};
 
 fn bench_tick_300_agents(c: &mut Criterion) {
-    let mut world = World::new(42, Config::load());
+    let mut world = World::new(42, Config::load().v1_profile());
     c.bench_function("tick_300_agents", |b| b.iter(|| world.tick()));
 }
 

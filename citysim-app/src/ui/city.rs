@@ -132,10 +132,10 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             }
         }
         ui.label(format!(
-            "Market {market} · Warehouse {warehouse} · Pantries {pantry} · Sum {}",
+            "Markets {market} · Warehouse {warehouse} · Pantries {pantry} · Sum {}",
             market + warehouse + pantry
         ));
-        let price = world.market().map_or(0, |m| m.price_food);
+        let price = world.mean_price();
         ui.label(format!("Price {price} · Treasury {}", world.treasury().map_or(0, |t| t.coins)));
         sparkline(ui, world);
 
@@ -175,8 +175,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         let c = &mut app.city;
         ui.add(egui::Slider::new(&mut c.tax_rate, 0.0..=0.3).text("tax rate"));
         ui.add(egui::Slider::new(&mut c.sentence_mult, 0.5..=3.0).text("sentence ×"));
-        ui.add(egui::Slider::new(&mut c.guard_count, 0..=30).text("guards"));
-        ui.add(egui::Slider::new(&mut c.immigration_per_week, 0..=10).text("immigrants / week"));
+        ui.add(egui::Slider::new(&mut c.guard_count, 0..=60).text("guards"));
+        ui.add(egui::Slider::new(&mut c.immigration_per_week, 0..=30).text("immigrants / week"));
         ui.add(egui::Slider::new(&mut c.dole_per_day, 0..=10).text("dole / day"));
         ui.horizontal(|ui| {
             ui.label("law posture");

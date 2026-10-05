@@ -3,7 +3,7 @@
 
 use macroquad::prelude::*;
 
-use citysim::{Rect as TileRect, TilePos, MAP_H, MAP_W};
+use citysim::{Rect as TileRect, TilePos};
 
 pub const MIN_PX_PER_TILE: f32 = 8.0;
 pub const MAX_PX_PER_TILE: f32 = 48.0;
@@ -17,15 +17,17 @@ pub struct Camera {
     pub centre: Vec2,
     /// `8.0..=48.0`.
     pub px_per_tile: f32,
-}
-
-impl Default for Camera {
-    fn default() -> Self {
-        Camera { centre: vec2(MAP_W as f32 / 2.0, MAP_H as f32 / 2.0), px_per_tile: DEFAULT_PX_PER_TILE }
-    }
+    /// Map size in tiles (from the loaded map).
+    pub map_w: f32,
+    pub map_h: f32,
 }
 
 impl Camera {
+    pub fn new(map_w: usize, map_h: usize) -> Camera {
+        let (map_w, map_h) = (map_w as f32, map_h as f32);
+        Camera { centre: vec2(map_w / 2.0, map_h / 2.0), px_per_tile: DEFAULT_PX_PER_TILE, map_w, map_h }
+    }
+
     /// Screen pixel of a tile-space point.
     pub fn tile_to_screen(&self, tile: Vec2) -> Vec2 {
         (tile - self.centre) * self.px_per_tile + vec2(screen_width(), screen_height()) * 0.5
@@ -39,20 +41,26 @@ impl Camera {
     /// The integer tile under a screen pixel, if on the map.
     pub fn tile_at(&self, screen: Vec2) -> Option<TilePos> {
         let t = self.screen_to_tile(screen);
-        if t.x < 0.0 || t.y < 0.0 || t.x >= MAP_W as f32 || t.y >= MAP_H as f32 {
+        if t.x < 0.0 || t.y < 0.0 || t.x >= self.map_w || t.y >= self.map_h {
             return None;
         }
         Some(TilePos { x: t.x as u8, y: t.y as u8 })
     }
 
-    /// Visible tiles, clamped to the map. Passed to `world.set_view` every frame.
+    /// Visible tiles, clamped to the map; `w` and `h` at most 255 (`u8`).
+    /// Passed to `world.set_view` every frame.
     pub fn view_rect(&self) -> TileRect {
         let half = vec2(screen_width(), screen_height()) * 0.5 / self.px_per_tile;
-        let x0 = (self.centre.x - half.x).floor().clamp(0.0, MAP_W as f32 - 1.0);
-        let y0 = (self.centre.y - half.y).floor().clamp(0.0, MAP_H as f32 - 1.0);
-        let x1 = (self.centre.x + half.x).ceil().clamp(1.0, MAP_W as f32);
-        let y1 = (self.centre.y + half.y).ceil().clamp(1.0, MAP_H as f32);
-        TileRect { x: x0 as u8, y: y0 as u8, w: (x1 - x0).max(1.0) as u8, h: (y1 - y0).max(1.0) as u8 }
+        let x0 = (self.centre.x - half.x).floor().clamp(0.0, self.map_w - 1.0);
+        let y0 = (self.centre.y - half.y).floor().clamp(0.0, self.map_h - 1.0);
+        let x1 = (self.centre.x + half.x).ceil().clamp(1.0, self.map_w);
+        let y1 = (self.centre.y + half.y).ceil().clamp(1.0, self.map_h);
+        TileRect {
+            x: x0 as u8,
+            y: y0 as u8,
+            w: (x1 - x0).clamp(1.0, 255.0) as u8,
+            h: (y1 - y0).clamp(1.0, 255.0) as u8,
+        }
     }
 
     pub fn pan(&mut self, delta_tiles: Vec2) {
@@ -75,7 +83,7 @@ impl Camera {
     }
 
     fn clamp_centre(&mut self) {
-        self.centre.x = self.centre.x.clamp(0.0, MAP_W as f32);
-        self.centre.y = self.centre.y.clamp(0.0, MAP_H as f32);
+        self.centre.x = self.centre.x.clamp(0.0, self.map_w);
+        self.centre.y = self.centre.y.clamp(0.0, self.map_h);
     }
 }

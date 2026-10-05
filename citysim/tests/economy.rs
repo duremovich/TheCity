@@ -4,7 +4,7 @@ use citysim::systems::economy;
 use citysim::{needs, Building, BuildingKind, Config, Job, Needs, Role, Skills, Wallet, World, TICKS_PER_DAY};
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 #[test]
@@ -21,15 +21,22 @@ fn test_price_formula_table() {
 fn test_price_rises_when_stock_falls() {
     let mut w = world(1);
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
-    assert_eq!(w.market().expect("market").price_food, 3);
+    assert_eq!(w.mean_price(), 3);
     // drain the shelf just before the day-1 price tick (farms haul in during the day)
     w.run_ticks(TICKS_PER_DAY - 1);
     w.comp_mut::<Building>(market).expect("market").stock_food = 100;
     w.run_ticks(2);
-    let price = w.market().expect("market").price_food;
+    let price = w.mean_price();
     assert!(price > 3, "price {price}");
     assert_eq!(price, economy::price_for_stock(&w.config.economy, w.comp::<Building>(market).expect("m").stock_food));
-    assert_eq!(w.market().expect("market").price_history.len(), 2, "day 0 and day 1");
+    assert_eq!(
+        w.comp::<citysim::Market>(w.building_of_kind(BuildingKind::Market).expect("market"))
+            .expect("market")
+            .price_history
+            .len(),
+        2,
+        "day 0 and day 1"
+    );
 }
 
 #[test]

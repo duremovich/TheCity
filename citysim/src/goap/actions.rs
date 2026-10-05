@@ -329,8 +329,10 @@ impl PlanCtx {
                     .iter()
                     .any(|&g| g != agent && world.comp::<Position>(g).is_some_and(|gp| gp.tile.manhattan(t) <= sight))
             });
+        // M10: the agent's own Market (the one it is in, else the nearest).
+        let market = world.local(agent, BuildingKind::Market);
         let stock_of = |kind: BuildingKind| -> u32 {
-            world.building_of_kind(kind).and_then(|b| world.comp::<Building>(b)).map_or(0, |b| b.stock_food)
+            world.local(agent, kind).and_then(|b| world.comp::<Building>(b)).map_or(0, |b| b.stock_food)
         };
         let farm = job
             .and_then(|j| j.employer)
@@ -356,7 +358,7 @@ impl PlanCtx {
                 }
             };
             add(LocationKey::Home, home);
-            add(LocationKey::Farm, farm.or_else(|| world.building_of_kind(BuildingKind::Farm)));
+            add(LocationKey::Farm, farm.or_else(|| world.local(agent, BuildingKind::Farm)));
             for kind in [
                 BuildingKind::Market,
                 BuildingKind::Bar,
@@ -365,7 +367,7 @@ impl PlanCtx {
                 BuildingKind::Hall,
                 BuildingKind::Warehouse,
             ] {
-                add(LocationKey::of_building(kind), world.building_of_kind(kind));
+                add(LocationKey::of_building(kind), world.local(agent, kind));
             }
             add(LocationKey::Hideout, crate::systems::gang::hideout_for(world, agent));
             add(LocationKey::TargetHome, target);
@@ -437,10 +439,9 @@ impl PlanCtx {
             warehouse_stock: stock_of(BuildingKind::Warehouse),
             farm_stock: farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food),
             coins: world.comp::<Wallet>(agent).map_or(0, |w| w.coins),
-            price: world.market().map_or(1, |m| m.price_food).max(1),
+            price: market.map_or(1, |m| world.price_at(m)).max(1),
             food_unstolen: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.food > i.stolen_food),
-            market_free: world
-                .building_of_kind(BuildingKind::Market)
+            market_free: market
                 .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food)))
                 .is_some_and(|(m, stock)| stock > WorldState::reserved_by_others(world, m, Some(agent))),
             haul_min_stock: world.config.economy.haul_min_stock,

@@ -87,6 +87,8 @@ impl LocationKey {
             BuildingKind::Hall => LocationKey::Hall,
             BuildingKind::Hideout => LocationKey::Hideout,
             BuildingKind::Warehouse => LocationKey::Warehouse,
+            // Inert until M11: never a destination, nobody is ever inside.
+            BuildingKind::SecurityOffice | BuildingKind::Lot => LocationKey::Street,
         }
     }
 }
@@ -255,7 +257,8 @@ impl WorldState {
         });
         let inv = world.comp::<Inventory>(agent).cloned().unwrap_or_default();
         let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-        let price = world.market().map_or(1, |m| m.price_food).max(1);
+        let market = world.local(agent, BuildingKind::Market);
+        let price = market.map_or(1, |m| world.price_at(m)).max(1);
         let home = world.comp::<Household>(agent).and_then(|h| h.home);
         let pos = world.comp::<Position>(agent);
         let job = world.comp::<Job>(agent);
@@ -345,8 +348,7 @@ impl WorldState {
             })
         });
 
-        let market_free = world
-            .building_of_kind(BuildingKind::Market)
+        let market_free = market
             .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food)))
             .is_some_and(|(m, stock)| stock > WorldState::reserved_by_others(world, m, Some(agent)));
         let pantry_free = home

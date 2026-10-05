@@ -36,6 +36,10 @@ pub struct Config {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct WorldCfg {
+    /// The map file, relative to the assets directory (an absolute path
+    /// replaces it). M10: the 256 x 192 v2 map; `map_v1.txt` is the old one.
+    #[serde(default = "default_map")]
+    pub map: String,
     pub population: u32,
     pub residents_per_home: u32,
     pub spouse_p: f64,
@@ -58,6 +62,10 @@ pub struct WorldCfg {
     pub shift_night: Vec<(u16, u16)>,
     pub jobs: JobsCfg,
     pub needs_initial: NeedsInitialCfg,
+}
+
+fn default_map() -> String {
+    "map.txt".to_string()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -96,6 +104,13 @@ pub struct BuildingCfg {
     pub stock_cap: u32,
 }
 
+impl BuildingCfg {
+    /// No room, no stock: the M10 kinds that do nothing until M11.
+    pub fn inert() -> BuildingCfg {
+        BuildingCfg { capacity: 0, stock_cap: 0 }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BuildingsCfg {
     pub home: BuildingCfg,
@@ -107,6 +122,12 @@ pub struct BuildingsCfg {
     pub hall: BuildingCfg,
     pub hideout: BuildingCfg,
     pub warehouse: BuildingCfg,
+    /// M10, inert until M11.
+    #[serde(default = "BuildingCfg::inert")]
+    pub security_office: BuildingCfg,
+    /// M10, inert until M11.
+    #[serde(default = "BuildingCfg::inert")]
+    pub lot: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -121,6 +142,8 @@ impl BuildingsCfg {
             BuildingKind::Hall => &self.hall,
             BuildingKind::Hideout => &self.hideout,
             BuildingKind::Warehouse => &self.warehouse,
+            BuildingKind::SecurityOffice => &self.security_office,
+            BuildingKind::Lot => &self.lot,
         }
     }
 }
@@ -342,11 +365,27 @@ pub struct LawCfg {
     /// A Crackdown keeps its target unless a challenger leads it by this many reports.
     #[serde(default = "default_target_margin")]
     pub target_margin: usize,
+    /// M10: a patrol loop draws its Homes from this many nearest its Market
+    /// (60: the whole v1 city).
+    #[serde(default = "default_patrol_beat_homes")]
+    pub patrol_beat_homes: usize,
+    /// M10: a guard chases only warrants last seen within this many tiles
+    /// (Manhattan). The default reaches across any map.
+    #[serde(default = "default_pursuit_radius")]
+    pub pursuit_radius: u32,
     pub posture_flat: PostureFlatCfg,
 }
 
 fn default_target_margin() -> usize {
     2
+}
+
+fn default_patrol_beat_homes() -> usize {
+    60
+}
+
+fn default_pursuit_radius() -> u32 {
+    512
 }
 
 impl LawCfg {
@@ -405,6 +444,14 @@ pub struct ExecCfg {
     /// Calibration only: every walk is a timed arrival (manhattan x 2 ticks).
     #[serde(default)]
     pub straight_line_paths: bool,
+    /// Flow fields kept (LRU); each is one byte per tile. Eviction never
+    /// changes results: a field is a pure function of the map and its door.
+    #[serde(default = "default_flow_cache")]
+    pub flow_field_cache: usize,
+}
+
+fn default_flow_cache() -> usize {
+    512
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -472,5 +519,62 @@ impl Config {
 
     pub fn asset(&self, name: &str) -> PathBuf {
         self.assets_dir.join(name)
+    }
+
+    /// The v1 city (96 x 64, 300 residents) on top of the current tuning:
+    /// only the scale keys are put back. Unit tests that hand-build small
+    /// worlds use it; nothing else may load `map_v1.txt` (M10 D23).
+    pub fn v1_profile(mut self) -> Config {
+        self.world.map = "map_v1.txt".to_string();
+        self.world.population = 300;
+        self.world.jobs = JobsCfg { farmer: 24, guard: 10, clerk: 3, bartender: 2, gravedigger: 1 };
+        self.world.market_initial = 600;
+        self.world.warehouse_initial = 1500;
+        self.world.treasury_initial = 5000;
+        self.buildings.jail.capacity = 16;
+        self.buildings.farm.capacity = 12;
+        self.buildings.hideout.capacity = 12;
+        self.buildings.warehouse.stock_cap = 3000;
+        self.levers.guard_count = 10;
+        self.levers.immigration_per_week = 2;
+        self.gangs.max_members = 20;
+        self.economy.restock_floor = 400;
+        self.economy.restock_batch = 200;
+        self.lod.max_coarse = 100;
+        // Not a D23 key: the v1 city had no pursuit limit.
+        self.law.pursuit_radius = 512;
+        self
+    }
+
+    /// The same city at `n` residents: jobs, opening stocks, the Treasury, the
+    /// guard and immigration levers and the gang cap scale by `n / population`
+    /// (M10 D25; `calibrate` and the parity test run 500 on the 2,000 map).
+    /// The per-Market restock floor and batch and `price_ref_stock` scale too,
+    /// so a scaled Market's smaller shelf prices like the full city's.
+    pub fn scaled_to(mut self, n: u32) -> Config {
+        let from = self.world.population.max(1);
+        let f = f64::from(n) / f64::from(from);
+        let scale = |v: u32| (f64::from(v) * f).round() as u32;
+        let job = |v: u32| if v == 0 { 0 } else { scale(v).max(1) };
+        let j = &mut self.world.jobs;
+        *j = JobsCfg {
+            farmer: job(j.farmer),
+            guard: job(j.guard),
+            clerk: job(j.clerk),
+            bartender: job(j.bartender),
+            gravedigger: job(j.gravedigger),
+        };
+        self.world.population = n;
+        self.world.market_initial = scale(self.world.market_initial);
+        self.world.warehouse_initial = scale(self.world.warehouse_initial);
+        self.world.treasury_initial = (self.world.treasury_initial as f64 * f).round() as i64;
+        self.levers.guard_count = (f64::from(self.levers.guard_count) * f).round().clamp(0.0, 255.0) as u8;
+        self.levers.immigration_per_week =
+            (f64::from(self.levers.immigration_per_week) * f).round().clamp(0.0, 255.0) as u8;
+        self.gangs.max_members = (self.gangs.max_members as f64 * f).round() as usize;
+        self.economy.restock_floor = scale(self.economy.restock_floor);
+        self.economy.restock_batch = scale(self.economy.restock_batch);
+        self.economy.price_ref_stock *= f;
+        self
     }
 }

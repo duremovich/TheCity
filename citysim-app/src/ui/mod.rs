@@ -66,7 +66,7 @@ fn draw_hud(app: &App, world: &World) {
         .filter(|b| matches!(b.kind, BuildingKind::Market | BuildingKind::Warehouse | BuildingKind::Home))
         .map(|b| b.stock_food)
         .sum();
-    let price = world.market().map_or(0, |m| m.price_food);
+    let price = world.mean_price();
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let text = format!(
         "Day {} · {} · {} {} · {}x · Pop {} · Food {} · Price {} · Treasury {}",

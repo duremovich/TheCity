@@ -7,7 +7,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 fn counts(w: &World) -> (usize, usize, usize) {
@@ -132,8 +132,8 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
 #[ignore]
 fn test_full_vs_statistical_within_15pct() {
     fn metrics(force: Lod) -> (f64, f64, f64) {
-        let mut cfg = Config::load();
-        cfg.world.population = 200;
+        // M10: the 2,000 map's city scaled to 200 (D25).
+        let mut cfg = Config::load().scaled_to(200);
         cfg.lod.force = Some(force);
         // The table never modelled gang actions, and a forced-Statistical
         // world has no gang at all: compare the tiers on gangless cities.
@@ -196,7 +196,7 @@ fn test_command_log_replay_matches() {
     assert_eq!(a.command_log.len(), 5);
     let saved = citysim::save::to_ron(&a);
 
-    let mut b = World::replay(65, Config::load(), &a.command_log, end);
+    let mut b = World::replay(65, Config::load().v1_profile(), &a.command_log, end);
     assert_eq!(b.tick, end);
     assert_eq!(citysim::save::to_ron(&b), saved, "replay diverged");
     b.tick();

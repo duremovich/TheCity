@@ -1,5 +1,10 @@
 //! Long-running scenarios. The v1 acceptance test lands in M7 and is
 //! `#[ignore]`d for CI with `--ignored`.
+//!
+//! M10: every gate runs the 2,000-resident city on the v2 map. Population
+//! bounds scale by 2000/300, per-capita caps likewise, capacity-bound caps
+//! use the capacity (Jail 80), and event-count minimums are unchanged
+//! (M10 plan D38).
 
 use citysim::{Config, World, TICKS_PER_DAY};
 
@@ -18,6 +23,7 @@ fn test_m1_thirty_days_seed_42() {
     let mut arrests = 0;
     for row in &w.stats.history {
         assert!(row.mean_hunger >= 0.4, "day {}: mean_hunger {}", row.day, row.mean_hunger);
+        // M10: the mean over the three Markets (the stats column).
         assert!((2..=8).contains(&row.price), "day {}: price {}", row.day, row.price);
         starvation += row.deaths_starvation;
         thefts += row.thefts;
@@ -34,7 +40,9 @@ fn test_m1_thirty_days_seed_42() {
             row.day,
             row.goal_changes_per_agent
         );
-        assert!(row.jailed <= 16, "day {}: jailed {}", row.day, row.jailed);
+        // M10: the Jail's capacity (80), not 16 x 2000/300.
+        assert!(row.jailed <= 80, "day {}: jailed {}", row.day, row.jailed);
+        // M10: `food_market` is the sum over the three Markets, so this is "all empty".
         if row.food_market == 0 {
             empty_streak += 1;
             assert!(empty_streak <= 2, "day {}: Market empty for {empty_streak} days", row.day);
@@ -42,12 +50,12 @@ fn test_m1_thirty_days_seed_42() {
             empty_streak = 0;
         }
     }
-    assert!(starvation <= 5, "{starvation} starvation deaths");
-    // M3/M4 asked for thefts >= 3 and an arrest here; since M5 nobody drinks
-    // themselves broke (Chat is free), so crime starts later and those gates
-    // live in the 60-day scenario below.
+    assert!(starvation <= 33, "{starvation} starvation deaths"); // v1 5, x 2000/300
+                                                                 // M3/M4 asked for thefts >= 3 and an arrest here; since M5 nobody drinks
+                                                                 // themselves broke (Chat is free), so crime starts later and those gates
+                                                                 // live in the 60-day scenario below.
     let _ = (thefts, arrests);
-    assert!(w.population() >= 295, "population {}", w.population());
+    assert!(w.population() >= 1967, "population {}", w.population()); // v1 295
 }
 
 /// `run --days 60 --seed 42`: the M5 gate. A gang forms, people marry, and the
@@ -80,9 +88,9 @@ fn test_m5_sixty_days_seed_42() {
     assert!(marriages >= 1, "no Marriage in 60 days");
     assert!(thefts >= 3, "only {thefts} thefts in 60 days");
     assert!(arrests >= 1, "no arrest in 60 days");
-    assert!(w.population() >= 250, "population {}", w.population());
+    assert!(w.population() >= 1667, "population {}", w.population()); // v1 250
     for row in &w.stats.history {
-        assert!(row.jailed <= 16, "day {}: jailed {}", row.day, row.jailed);
+        assert!(row.jailed <= 80, "day {}: jailed {}", row.day, row.jailed); // Jail capacity
     }
 }
 
@@ -95,7 +103,7 @@ fn test_m0_ten_days_headless() {
     assert_eq!(w.stats.history.len(), 10);
     for (i, row) in w.stats.history.iter().enumerate() {
         assert_eq!(row.day, i as u64);
-        assert!(row.population >= 295, "day {}: population {}", row.day, row.population);
+        assert!(row.population >= 1967, "day {}: population {}", row.day, row.population); // v1 295
         assert_eq!(row.homeless, 0);
         assert!((1..=30).contains(&row.price));
     }
@@ -103,7 +111,7 @@ fn test_m0_ten_days_headless() {
 }
 
 /// `run --days 120 --seed 42`: the M6 gate. Births, deaths and burials
-/// happen and the population stays in 200..=400.
+/// happen and the population stays in 1333..=2667 (v1 200..=400).
 #[test]
 fn test_m6_hundred_twenty_days_seed_42() {
     let mut w = World::new(42, Config::load());
@@ -116,11 +124,12 @@ fn test_m6_hundred_twenty_days_seed_42() {
     assert!(births >= 1, "no birth in 120 days");
     assert!(deaths >= 1, "no death in 120 days");
     assert!(burials >= 1, "no burial in 120 days");
-    assert!((200..=400).contains(&w.population()), "population {}", w.population());
+    assert!((1333..=2667).contains(&w.population()), "population {}", w.population());
 }
 
 /// The v1 acceptance run (spec): seed 7, 120 days; Run B adds the reserve
-/// lever at day 90. `#[ignore]`: run with `--ignored` (about a minute).
+/// lever at day 90 (M10: 10,000, v1 1,500). `#[ignore]`: run with `--ignored`
+/// (two 2,000-resident cities: several minutes).
 #[test]
 #[ignore]
 fn test_v1_acceptance() {
@@ -143,7 +152,7 @@ fn test_v1_acceptance() {
         seen_tick = a.tick;
     }
     assert_eq!(citysim::save::to_ron(&a), citysim::save::to_ron(&b), "A and B diverged before the lever");
-    b.push_command(PlayerCommand::ReleaseReserve { amount: 1500 });
+    b.push_command(PlayerCommand::ReleaseReserve { amount: 10000 });
     while a.tick < 120 * TICKS_PER_DAY {
         a.run_ticks(TICKS_PER_DAY);
         b.run_ticks(TICKS_PER_DAY);
@@ -179,16 +188,16 @@ fn test_v1_acceptance() {
     assert!(starvation >= 1, "no starvation death all year");
     assert!(winter_starving >= 1, "nobody starved in Winter");
     assert!(burials >= 1, "no burial");
-    assert!((200..=400).contains(&a.population()), "population {}", a.population());
+    assert!((1333..=2667).contains(&a.population()), "population {}", a.population());
     // The spec asks for strictly fewer; at this calibration Winter kills a
     // handful (2-7), so the lever's effect sits inside the noise and the two
     // runs have differed by one death in either direction across milestones.
-    // Not worse by more than one is the usable reading.
-    assert!(starv_b <= starv_a + 1, "the reserve lever made Winter starvation worse: A {starv_a} vs B {starv_b}");
+    // Not worse by more than one is the usable reading; M10 scales the slack by 2000/300 (7).
+    assert!(starv_b <= starv_a + 7, "the reserve lever made Winter starvation worse: A {starv_a} vs B {starv_b}");
 }
 
 /// The M8 gate (`docs/M8_FACTIONS.md` › Goals and acceptance): seed 42, 120
-/// days, two factions fighting over the same Homes. `#[ignore]`: ~20 s.
+/// days, two factions fighting over the same Homes. `#[ignore]`: a few minutes at 2,000.
 #[test]
 #[ignore]
 fn test_m8_factions_seed_42() {
@@ -265,14 +274,15 @@ fn test_m8_factions_seed_42() {
     // 2x the M7 baseline: 3.2/day (379 Assault + 8 Murder over 120 days on
     // this seed at 29f7bbf), so 6.4. Two always-simulated gangs extort three
     // times as often as the one gang did, and every extortion seeds revenge.
-    assert!(assaults as f32 / 120.0 <= 6.4, "{} assaults/day", assaults as f32 / 120.0);
-    assert!(starvation <= 30, "{starvation} starvation deaths");
-    assert!((200..=400).contains(&w.population()), "population {}", w.population());
+    // M10: per capita, x 2000/300 (v1 6.4, starvation 30).
+    assert!(assaults as f32 / 120.0 <= 42.7, "{} assaults/day", assaults as f32 / 120.0);
+    assert!(starvation <= 200, "{starvation} starvation deaths");
+    assert!((1333..=2667).contains(&w.population()), "population {}", w.population());
 }
 
 /// M9 gate: the law as a third faction. Seed 42, 120 days: a breakout, a
 /// jailbreak, postures that move, a Garrison after the jailbreak, raids that
-/// meet defenders. Bribes are reported, not asserted. `#[ignore]`: ~20 s.
+/// meet defenders. Bribes are reported, not asserted. `#[ignore]`: a few minutes at 2,000.
 #[test]
 #[ignore]
 fn test_m9_law_seed_42() {
@@ -344,7 +354,8 @@ fn test_m9_law_seed_42() {
     );
     assert!(defended >= 1, "no raid met a defender");
     assert!(sacked < raids, "every raid was a sack ({sacked}/{raids})");
-    assert!(assaults as f32 / 120.0 <= 6.4, "{} assaults/day", assaults as f32 / 120.0);
-    assert!(starvation <= 30, "{starvation} starvation deaths");
-    assert!((200..=400).contains(&w.population()), "population {}", w.population());
+    // M10: per capita, x 2000/300 (v1 6.4, starvation 30).
+    assert!(assaults as f32 / 120.0 <= 42.7, "{} assaults/day", assaults as f32 / 120.0);
+    assert!(starvation <= 200, "{starvation} starvation deaths");
+    assert!((1333..=2667).contains(&w.population()), "population {}", w.population());
 }

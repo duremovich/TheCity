@@ -47,12 +47,22 @@ pub struct Rect {
 }
 
 impl Rect {
+    /// Exclusive right and bottom edges, in `u16` so a rect reaching column 255 cannot overflow.
+    fn x1(&self) -> u16 {
+        u16::from(self.x) + u16::from(self.w)
+    }
+
+    fn y1(&self) -> u16 {
+        u16::from(self.y) + u16::from(self.h)
+    }
+
     pub fn contains(&self, p: TilePos) -> bool {
-        p.x >= self.x && p.x < self.x + self.w && p.y >= self.y && p.y < self.y + self.h
+        p.x >= self.x && u16::from(p.x) < self.x1() && p.y >= self.y && u16::from(p.y) < self.y1()
     }
 
     pub fn on_perimeter(&self, p: TilePos) -> bool {
-        self.contains(p) && (p.x == self.x || p.x == self.x + self.w - 1 || p.y == self.y || p.y == self.y + self.h - 1)
+        self.contains(p)
+            && (p.x == self.x || u16::from(p.x) + 1 == self.x1() || p.y == self.y || u16::from(p.y) + 1 == self.y1())
     }
 
     pub fn centre(&self) -> (f32, f32) {
@@ -60,7 +70,52 @@ impl Rect {
     }
 
     pub fn overlaps(&self, o: &Rect) -> bool {
-        self.x < o.x + o.w && o.x < self.x + self.w && self.y < o.y + o.h && o.y < self.y + self.h
+        u16::from(self.x) < o.x1()
+            && u16::from(o.x) < self.x1()
+            && u16::from(self.y) < o.y1()
+            && u16::from(o.y) < self.y1()
+    }
+}
+
+/// A coarse district of the map (M10): the second grid of a v2 map file.
+/// A v1 map has no zone grid and reads `Mid` everywhere.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
+pub enum Zone {
+    Spire,
+    Civic,
+    Vats,
+    #[default]
+    Mid,
+    Sump,
+}
+
+impl Zone {
+    pub const ALL: [Zone; 5] = [Zone::Spire, Zone::Civic, Zone::Vats, Zone::Mid, Zone::Sump];
+
+    /// Position in `Zone::ALL`.
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The map-file letter.
+    pub fn letter(self) -> char {
+        match self {
+            Zone::Spire => 'S',
+            Zone::Civic => 'C',
+            Zone::Vats => 'V',
+            Zone::Mid => 'M',
+            Zone::Sump => 'U',
+        }
+    }
+
+    pub fn parse(c: char) -> Option<Zone> {
+        Zone::ALL.into_iter().find(|z| z.letter() == c)
+    }
+}
+
+impl fmt::Display for Zone {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(self, f)
     }
 }
 
@@ -101,10 +156,14 @@ pub enum BuildingKind {
     Hall,
     Hideout,
     Warehouse,
+    /// M10: two in the Vats, loaded and drawn, inert until M11.
+    SecurityOffice,
+    /// M10: an empty walled-off plot (no walls, one door), inert until M11.
+    Lot,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 9] = [
+    pub const ALL: [BuildingKind; 11] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -114,6 +173,8 @@ impl BuildingKind {
         BuildingKind::Hall,
         BuildingKind::Hideout,
         BuildingKind::Warehouse,
+        BuildingKind::SecurityOffice,
+        BuildingKind::Lot,
     ];
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
@@ -127,6 +188,8 @@ impl BuildingKind {
             "Hall" => BuildingKind::Hall,
             "Hideout" => BuildingKind::Hideout,
             "Warehouse" => BuildingKind::Warehouse,
+            "SecurityOffice" => BuildingKind::SecurityOffice,
+            "Lot" => BuildingKind::Lot,
             _ => return None,
         })
     }
@@ -143,6 +206,8 @@ impl BuildingKind {
             BuildingKind::Hall => 'T',
             BuildingKind::Hideout => 'G',
             BuildingKind::Warehouse => 'W',
+            BuildingKind::SecurityOffice => 'O',
+            BuildingKind::Lot => 'L',
         }
     }
 }
@@ -856,13 +921,23 @@ pub struct Building {
     pub occupants: Vec<EntityId>,
     /// Set by `DemolishHome`; drawn dashed, never used.
     pub demolished: bool,
+    /// M10: 0 Sump, 1 Mid, 2 Spire (the map's seventh `B` field). Scales the
+    /// Sleep safety bonus at home; rent is M11.
+    #[serde(default = "default_tier")]
+    pub tier: u8,
+}
+
+pub fn default_tier() -> u8 {
+    1
 }
 
 impl Building {
     /// Interior tiles (everything inside the perimeter), row-major.
     pub fn interior(&self) -> impl Iterator<Item = TilePos> + '_ {
         let r = self.rect;
-        (r.y + 1..r.y + r.h - 1).flat_map(move |y| (r.x + 1..r.x + r.w - 1).map(move |x| TilePos { x, y }))
+        let (x0, y0) = (u16::from(r.x) + 1, u16::from(r.y) + 1);
+        let (x1, y1) = (u16::from(r.x) + u16::from(r.w) - 1, u16::from(r.y) + u16::from(r.h) - 1);
+        (y0..y1).flat_map(move |y| (x0..x1).map(move |x| TilePos { x: x as u8, y: y as u8 }))
     }
 
     pub fn is_full(&self) -> bool {

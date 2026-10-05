@@ -87,7 +87,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::EatFromInventory => inv.is_some_and(|i| i.food >= 1),
         ActionKind::EatAtHome => at_home(world, id) && home_pantry(world, id) > 0,
         ActionKind::StoreFood => at_home(world, id) && inv.is_some_and(|i| i.food > i.stolen_food),
-        ActionKind::BuyFood => at(world, id, BuildingKind::Market) && economy::buy_quantity(world, id) > 0,
+        ActionKind::BuyFood => {
+            at(world, id, BuildingKind::Market)
+                && economy::buy_quantity(world, id, world.local(id, BuildingKind::Market)) > 0
+        }
         ActionKind::Sleep | ActionKind::Rest => {
             // Sleep on the street is allowed (homeless); Rest anywhere indoors.
             true
@@ -168,8 +171,9 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             }
         }
         ActionKind::BuyFood => {
-            let units = economy::buy_quantity(world, id);
-            let paid = economy::pay_for_food(world, id, units);
+            let market = world.local(id, BuildingKind::Market);
+            let units = economy::buy_quantity(world, id, market);
+            let paid = economy::pay_for_food(world, id, market, units);
             world.pending_purchase.insert(id, (units, paid));
         }
         ActionKind::Wander => {
@@ -295,7 +299,8 @@ pub fn on_complete(
         ActionKind::BuyFood => {
             let (units, paid) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
             world.release_all(id);
-            if economy::take_food(world, id, units, paid) {
+            let market = world.local(id, BuildingKind::Market);
+            if economy::take_food(world, id, market, units, paid) {
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::StockGone)
@@ -306,8 +311,10 @@ pub fn on_complete(
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             let hideout_home = here.is_some() && crate::systems::gang::holes_up_at(world, id) == here;
             if at_home(world, id) || hideout_home {
+                // M10: +0.2 / +0.3 / +0.4 by the building's tier (Sump, Mid, Spire).
+                let tier = here.and_then(|b| world.comp::<Building>(b)).map_or(1, |b| b.tier);
                 if let Some(n) = world.comp_mut::<Needs>(id) {
-                    n.safety = (n.safety + 0.3).min(1.0);
+                    n.safety = (n.safety + 0.2 + 0.1 * f32::from(tier)).min(1.0);
                 }
                 // (the spouse's intimacy bonus is granted at Sleep start: most
                 // nights' sleep is cut short by the morning shift, not completed)
@@ -403,6 +410,7 @@ pub fn on_complete(
         ActionKind::Arrest => {
             let Some(suspect) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
             if crate::systems::law::arrest(world, id, suspect) {
+                credit_law_work(world, id);
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::PreconditionLost)
@@ -583,7 +591,8 @@ pub fn on_complete(
         }
         ActionKind::Beg => beg(world, id),
         ActionKind::SellFood => {
-            let price = world.market().map_or(0, |m| m.price_food);
+            let market = world.local(id, BuildingKind::Market);
+            let price = market.map_or(0, |m| world.price_at(m));
             let pay = (price as f32 * 0.6).floor() as i64;
             let treasury = world.treasury().map_or(0, |t| t.coins);
             let Some(inv) = world.comp::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
@@ -594,7 +603,7 @@ pub fn on_complete(
             if let Some(inv) = world.comp_mut::<Inventory>(id) {
                 inv.food -= units;
             }
-            if let Some(m) = world.building_of_kind(BuildingKind::Market).and_then(|m| world.comp_mut::<Building>(m)) {
+            if let Some(m) = market.and_then(|m| world.comp_mut::<Building>(m)) {
                 m.stock_food += units;
             }
             if let Some(t) = world.treasury_mut() {
@@ -615,7 +624,7 @@ pub fn on_complete(
 /// now the event and the daily counter record it.
 fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Option<EntityId>) -> StepResult {
     let (building, take) = match source {
-        StealSource::Market => (world.building_of_kind(BuildingKind::Market), 2),
+        StealSource::Market => (world.local(id, BuildingKind::Market), 2),
         StealSource::Home => (target, 2),
         StealSource::Warehouse => (world.building_of_kind(BuildingKind::Warehouse), 5),
     };
@@ -709,6 +718,7 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
             let suspect = world.comp::<Brain>(id).and_then(|b| b.escorting).or(step.target);
             if let Some(s) = suspect {
                 crate::systems::law::jail_suspect(world, id, s);
+                credit_law_work(world, id);
             }
         }
         ActionKind::FleeToHome => {
@@ -761,6 +771,22 @@ pub fn end_shift(world: &mut World, id: EntityId) {
         j.days_unpaid = j.days_unpaid.saturating_add(1);
     }
     economy::maybe_quit(world, id);
+}
+
+/// M10: an arrest made or a prisoner delivered on shift is that shift's work,
+/// as a PatrolLeg after the clock runs out already is. With guards always
+/// bodies (D20) and a warrant always open among 2,000 residents, arrests
+/// pre-empted most patrols and jail duties, so the shift was never credited,
+/// no wage was owed, and the watch starved on its payroll.
+fn credit_law_work(world: &mut World, id: EntityId) {
+    let Some(job) = world.comp::<Job>(id) else { return };
+    if job.role != crate::components::Role::Guard || !job.on_shift(world.tick_of_day()) {
+        return;
+    }
+    let key = job.shift_key_at(world.tick);
+    if crate::exec::routine::is_workday(key) && job.last_shift_day != Some(key) {
+        end_shift(world, id);
+    }
 }
 
 /// Sleeping at home with a spouse who lives there too. Checked by household

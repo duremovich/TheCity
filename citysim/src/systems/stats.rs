@@ -2,7 +2,7 @@
 //! each day it fills the snapshot columns of `stats.current` and rolls it
 //! into `stats.history`.
 
-use crate::components::{Building, BuildingKind, GangMember, Household, Job, Market, Mood, Needs, Sentence, Treasury};
+use crate::components::{Building, BuildingKind, GangMember, Household, Job, Mood, Needs, Sentence, Treasury};
 use crate::time::{self, TICKS_PER_DAY};
 use crate::world::World;
 
@@ -58,7 +58,7 @@ pub fn snapshot(world: &mut World) {
         }
     }
 
-    let price = world.market().map_or(0, |m: &Market| m.price_food);
+    let price = world.mean_price();
     let treasury = world.treasury().map_or(0, |t: &Treasury| t.coins);
 
     let population = citizens.len() as u32;

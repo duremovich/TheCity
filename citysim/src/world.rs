@@ -11,7 +11,7 @@ use crate::components::*;
 use crate::config::Config;
 use crate::entity::{Component, EntityId};
 use crate::events::Event;
-use crate::exec::{FlowField, Reservation};
+use crate::exec::{FlowCache, Reservation};
 use crate::levers::{Levers, PlayerCommand};
 use crate::map::Map;
 use crate::rng::SimRng;
@@ -108,8 +108,9 @@ pub struct World {
     pub plan_queue: BTreeMap<(Urgency, EntityId), Tick>,
     pub reservations: BTreeMap<EntityId, Vec<Reservation>>,
     pub door_queue: BTreeMap<TilePos, u8>,
+    /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
     #[serde(skip)]
-    pub flow_fields: BTreeMap<EntityId, FlowField>,
+    pub flow_fields: FlowCache,
     pub last_seen: BTreeMap<EntityId, (TilePos, Tick)>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
@@ -240,7 +241,7 @@ impl World {
     /// Build the initial city: map, buildings, gang, 300 citizens with homes
     /// and jobs. Deterministic for a given `(seed, config)`.
     pub fn new(seed: u64, config: Config) -> World {
-        let map = Map::load(&config.asset("map.txt"));
+        let map = Map::load(&config.asset(&config.world.map));
         let names = NameTables::load(&config);
         // Absent until `citysim-cli calibrate` (M7) has written it; any other
         // read failure is a broken checkout and must not pass silently.
@@ -292,7 +293,7 @@ impl World {
             plan_queue: BTreeMap::new(),
             reservations: BTreeMap::new(),
             door_queue: BTreeMap::new(),
-            flow_fields: BTreeMap::new(),
+            flow_fields: FlowCache::default(),
             last_seen: BTreeMap::new(),
             vacancies: BTreeMap::new(),
             edge_roads,
@@ -348,6 +349,7 @@ impl World {
                     owner: None,
                     occupants: Vec::new(),
                     demolished: false,
+                    tier: def.tier,
                 },
             );
             match def.kind {
@@ -435,7 +437,14 @@ impl World {
         self.recompute_wealth();
 
         // --- homes: seeded shuffle, residents_per_home each ----------------
-        let homes = self.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
+        let mut homes = self.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
+        // Under capacity, spread the households over the whole map by even
+        // stride (M10 D24), so a 500-agent world still spans every zone.
+        let per = (wc.residents_per_home as usize).max(1);
+        let needed = n.div_ceil(per);
+        if needed < homes.len() {
+            homes = (0..needed).map(|k| homes[k * homes.len() / needed]).collect();
+        }
         let mut shuffled = ids.clone();
         shuffled.shuffle(self.rng.world());
         for (chunk, &home) in shuffled.chunks(wc.residents_per_home as usize).zip(homes.iter()) {
@@ -470,16 +479,41 @@ impl World {
         }
 
         // --- jobs: seeded shuffle, fixed role order ------------------------
+        // M10: each slot goes to the unassigned resident living nearest the
+        // workplace (home door to workplace door; ties in shuffle order), as
+        // `job_search` already hires. On the 256 x 192 map a shuffled
+        // assignment put commutes at 100-300 tiles, most of a shift.
         let mut pool = ids.clone();
         pool.shuffle(self.rng.world());
-        let mut next = 0usize;
+        let home_door: BTreeMap<EntityId, TilePos> = pool
+            .iter()
+            .filter_map(|&id| {
+                let home = self.comp::<Household>(id).and_then(|h| h.home)?;
+                Some((id, self.comp::<Building>(home)?.door))
+            })
+            .collect();
+        let mut taken = vec![false; pool.len()];
         for role in Role::ALL {
             let count = wc.jobs.count(role) as usize;
             let workplaces = self.buildings_by_kind.get(&role.workplace()).cloned().unwrap_or_default();
             for k in 0..count {
-                let Some(&id) = pool.get(next) else { break };
-                next += 1;
                 let employer = workplaces.get(k % workplaces.len().max(1)).copied();
+                let work_door = employer.and_then(|e| self.comp::<Building>(e)).map(|b| b.door);
+                let pick = pool
+                    .iter()
+                    .enumerate()
+                    .filter(|&(i, _)| !taken[i])
+                    .map(|(i, id)| {
+                        let d = match (home_door.get(id), work_door) {
+                            (Some(h), Some(w)) => h.manhattan(w),
+                            _ => u32::MAX,
+                        };
+                        (d, i)
+                    })
+                    .min();
+                let Some((_, i)) = pick else { break };
+                taken[i] = true;
+                let id = pool[i];
                 let shifts = if role == Role::Guard && id.index % 2 == 0 {
                     wc.shift_night.clone()
                 } else {
@@ -514,7 +548,7 @@ impl World {
     /// `recompute_wealth` for one agent (the spread Statistical tick calls it
     /// per processed agent).
     pub fn recompute_wealth_for(&mut self, id: EntityId) {
-        let price = self.market().map_or(1, |m| m.price_food).max(1) as f32;
+        let price = self.mean_price().max(1) as f32;
         let days = self.config.needs.wealth_days_secure;
         let greed = self.comp::<Personality>(id).map_or(0.5, |p| p.greed);
         let coins = self.comp::<Wallet>(id).map_or(0, |w| w.coins) as f32;
@@ -685,12 +719,59 @@ impl World {
         self.buildings_by_kind.get(&kind).and_then(|v| v.first().copied())
     }
 
-    pub fn market(&self) -> Option<&Market> {
-        self.building_of_kind(BuildingKind::Market).and_then(|id| self.comp::<Market>(id))
+    /// Every building of a kind, ascending (map order), demolished included.
+    pub fn buildings_of_kind(&self, kind: BuildingKind) -> &[EntityId] {
+        self.buildings_by_kind.get(&kind).map_or(&[], Vec::as_slice)
     }
 
-    pub fn market_mut(&mut self) -> Option<&mut Market> {
-        self.building_of_kind(BuildingKind::Market).and_then(|id| self.comp_mut::<Market>(id))
+    /// The building of `kind` whose door is nearest `from` by Manhattan
+    /// distance; ties to the lower index; demolished ones skipped.
+    pub fn nearest_of_kind(&self, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
+        self.buildings_of_kind(kind)
+            .iter()
+            .filter_map(|&b| {
+                self.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.door.manhattan(from), b))
+            })
+            .min()
+            .map(|(_, b)| b)
+    }
+
+    /// The building of `kind` an agent uses: the one it is inside, else its
+    /// employer if that is of `kind` (a clerk's own Market, a bartender's own
+    /// Bar, as the Farm rule already did), else the nearest door to its tile
+    /// (M10 D21). Stable between planning and execution because the agent
+    /// stands on the same tile at both.
+    pub fn local(&self, agent: EntityId, kind: BuildingKind) -> Option<EntityId> {
+        let pos = self.comp::<Position>(agent)?;
+        let usable = |b: EntityId| self.comp::<Building>(b).is_some_and(|bd| bd.kind == kind && !bd.demolished);
+        if let Some(b) = pos.building.filter(|&b| usable(b)) {
+            return Some(b);
+        }
+        if let Some(e) = self.comp::<Job>(agent).and_then(|j| j.employer).filter(|&e| usable(e)) {
+            return Some(e);
+        }
+        self.nearest_of_kind(kind, pos.tile)
+    }
+
+    /// One Market's food price (`price_initial` if it has no `Market`).
+    pub fn price_at(&self, market: EntityId) -> i64 {
+        self.comp::<Market>(market).map_or(self.config.world.price_initial, |m| m.price_food)
+    }
+
+    /// The rounded mean price over every Market: the city-wide reading for
+    /// wealth, stats, fines, Jail upkeep, the fence and the UI.
+    pub fn mean_price(&self) -> i64 {
+        let prices: Vec<i64> = self
+            .buildings_of_kind(BuildingKind::Market)
+            .iter()
+            .filter_map(|&m| self.comp::<Market>(m))
+            .map(|m| m.price_food)
+            .collect();
+        if prices.is_empty() {
+            return self.config.world.price_initial;
+        }
+        let n = prices.len() as i64;
+        (prices.iter().sum::<i64>() + n / 2) / n
     }
 
     pub fn treasury(&self) -> Option<&Treasury> {

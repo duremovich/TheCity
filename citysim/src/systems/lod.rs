@@ -14,7 +14,6 @@ use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::exec::{self, ExecState};
 use crate::goap::ActionKind;
-use crate::map::{MAP_H, MAP_W};
 use crate::systems::economy;
 use crate::time::{DayPhase, TICKS_PER_HOUR};
 use crate::world::{StatRow, World};
@@ -69,7 +68,7 @@ fn assign(world: &mut World) {
     let view = world.view_rect;
     let centre = match view {
         Some(r) => TilePos { x: r.x + r.w / 2, y: r.y + r.h / 2 },
-        None => TilePos { x: (MAP_W / 2) as u8, y: (MAP_H / 2) as u8 },
+        None => TilePos { x: (world.map.w() / 2) as u8, y: (world.map.h() / 2) as u8 },
     };
     let on_screen = |t: TilePos| -> bool {
         let Some(r) = view else { return false };
@@ -95,7 +94,15 @@ fn assign(world: &mut World) {
         // Gang members are never Statistical: the hourly table has no orders,
         // claims or raids, and two gangs fit inside the Coarse budget.
         let gang = world.has::<crate::components::GangMember>(id);
-        let priority = i32::from(on_screen(pos.tile)) * 3 + i32::from(brain.pinned || gang) * 2 + i32::from(story);
+        // M10 D20: guards rank with gang members, or at 2,000 the gangs take
+        // every Coarse slot and the whole watch is Statistical. Gravediggers
+        // too: the hourly table cannot bury, and a Statistical digger never
+        // even learns of a corpse (it keeps no SawCorpse memory).
+        let guard = world
+            .comp::<crate::components::Job>(id)
+            .is_some_and(|j| matches!(j.role, crate::components::Role::Guard | crate::components::Role::Gravedigger));
+        let priority =
+            i32::from(on_screen(pos.tile)) * 3 + i32::from(brain.pinned || gang || guard) * 2 + i32::from(story);
         ranked.push((-priority, pos.tile.manhattan(centre), id.index, id));
     }
     ranked.sort_unstable();
@@ -210,14 +217,14 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
         DayPhase::Work => workplace.or(home),
         DayPhase::Evening if promotion => {
             if sociable {
-                world.building_of_kind(BuildingKind::Bar)
+                world.local(id, BuildingKind::Bar)
             } else {
-                world.building_of_kind(BuildingKind::Market)
+                world.local(id, BuildingKind::Market)
             }
         }
         DayPhase::Evening => home,
     }
-    .or_else(|| world.building_of_kind(BuildingKind::Market));
+    .or_else(|| world.local(id, BuildingKind::Market));
     if let Some(b) = building {
         world.stand_at_door(id, b);
     }
@@ -358,9 +365,10 @@ fn stat_eat(world: &mut World, id: EntityId) {
         }
         return;
     }
-    let Some((market, stock, price)) = world.building_of_kind(BuildingKind::Market).and_then(|m| {
-        world.comp::<Building>(m).map(|b| (m, b.stock_food, world.market().map_or(1, |mk| mk.price_food)))
-    }) else {
+    let Some((market, stock, price)) = world
+        .local(id, BuildingKind::Market)
+        .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food, world.price_at(m))))
+    else {
         return;
     };
     if stock == 0 {
@@ -369,8 +377,8 @@ fn stat_eat(world: &mut World, id: EntityId) {
     let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
     if coins >= price {
         // The same purchase a Full agent makes: pay, take, eat.
-        let paid = economy::pay_for_food(world, id, 1);
-        if economy::take_food(world, id, 1, paid) {
+        let paid = economy::pay_for_food(world, id, Some(market), 1);
+        if economy::take_food(world, id, Some(market), 1, paid) {
             if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
                 i.food = i.food.saturating_sub(1);
             }

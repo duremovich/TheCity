@@ -7,7 +7,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 fn guard(w: &World) -> citysim::EntityId {
@@ -164,7 +164,7 @@ fn test_jail_full_theft_becomes_fine() {
     let thief = ids[16];
     let g = guard(&w);
     w.comp_mut::<Wallet>(thief).expect("wallet").coins = 20;
-    let price = w.market().expect("market").price_food;
+    let price = w.mean_price();
     let treasury = w.treasury().expect("t").coins;
     law::file_report(&mut w, Crime::Theft, thief, Some(g));
     law::jail_suspect(&mut w, g, thief);

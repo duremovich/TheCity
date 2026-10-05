@@ -19,7 +19,8 @@ fn test_cli_report_csv_header() {
         Some("day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,ticks_per_sec")
     );
     let row = lines.next().expect("one data row");
-    assert!(row.starts_with("0,Spring,300,40,0,0,0,"), "row: {row}");
+    // M10: 2,000 residents, 220 jobs (160 / 36 / 12 / 8 / 4).
+    assert!(row.starts_with("0,Spring,2000,220,0,0,0,"), "row: {row}");
     assert_eq!(row.split(',').count(), 25);
     assert!(lines.next().is_none());
 }
@@ -31,12 +32,20 @@ fn test_cli_ten_days_seed_42() {
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     let rows: Vec<&str> = stdout.lines().skip(1).collect();
     assert_eq!(rows.len(), 10);
+    // M10: at 2,000 residents a birth or a death in ten days is ordinary, so the population is
+    // checked as an account: 2,000 + births + immigrants - deaths - emigrants, with thirteen
+    // immigrants a week from day 7.
+    let mut expected: i64 = 2000;
+    let mut immigrants = 0;
     for (i, row) in rows.iter().enumerate() {
-        let cols: Vec<&str> = row.split(',').collect();
-        assert_eq!(cols[0], i.to_string());
-        // Two immigrants a week from day 7 (M6); nobody dies in the first ten days.
-        let expected = 300 + 2 * (i / 7);
-        assert_eq!(cols[2], expected.to_string());
+        let cols: Vec<i64> =
+            row.split(',').enumerate().filter(|&(k, _)| k != 1).map(|(_, c)| c.parse().unwrap_or(0)).collect();
+        // cols (season dropped): 0 day, 1 population, ..., 13..=15 deaths, 16 births, 17 immigrants, 18 emigrants
+        assert_eq!(cols[0], i as i64);
+        expected += cols[16] + cols[17] - cols[13] - cols[14] - cols[15] - cols[18];
+        immigrants += cols[17];
+        assert_eq!(cols[1], expected, "day {i}");
+        assert_eq!(immigrants, 13 * (i as i64 / 7), "day {i}");
     }
 }
 
@@ -45,7 +54,7 @@ fn test_cli_lever_and_save_at() {
     let dir = std::env::temp_dir().join(format!("citysim-cli-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
     let out = cli()
-        .args(["run", "--days", "1", "--seed", "3", "--report"])
+        .args(["run", "--days", "1", "--seed", "3", "--report", "--events"])
         .args(["--lever", "day=0:release_reserve=200", "--save-at", "100"])
         .arg("--saves-dir")
         .arg(&dir)
@@ -54,9 +63,10 @@ fn test_cli_lever_and_save_at() {
     assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     let row = stdout.lines().nth(1).expect("row");
-    let cols: Vec<&str> = row.split(',').collect();
-    // 1500 - 200 released, then the day-0 1% spoilage: 1287. Market stock is dynamic.
-    assert_eq!(cols[8], "1287", "warehouse stock after release and spoilage");
+    // M10: three Markets fill during the day and farms overflow into the Warehouse, so its stock
+    // is dynamic now; the release itself is checked through its event (split over 3 Markets).
+    let events = String::from_utf8_lossy(&out.stderr);
+    assert!(events.contains("Released 200 food from the Warehouse to 3 Markets"), "no release event");
     assert!(dir.join("3-100.ron").is_file());
 
     // resume from the save and finish the day: identical row

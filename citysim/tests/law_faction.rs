@@ -9,7 +9,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 fn civilians(w: &World, n: usize) -> Vec<EntityId> {

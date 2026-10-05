@@ -8,7 +8,6 @@ use crate::components::{Brain, Building, BuildingKind, Household, Position, Post
 use crate::config::Config;
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::map::Map;
 use crate::world::World;
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -74,16 +73,16 @@ pub struct Levers {
     pub tax_rate: f32,
     /// `0.5..=3.0`, default 1.0.
     pub sentence_mult: f32,
-    /// `0..=30`, default 10.
+    /// `0..=60`, default 36 (M10, 2,000 residents; v1 `0..=30`, 10).
     pub guard_count: u8,
-    /// `0..=10`, default 2.
+    /// `0..=30`, default 13 (M10; v1 `0..=10`, 2).
     pub immigration_per_week: u8,
     /// `0..=10`, default 3.
     pub dole_per_day: u8,
 }
 
 fn rects_overlap(a: Rect, b: Rect) -> bool {
-    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h
+    a.overlaps(&b)
 }
 
 impl Levers {
@@ -134,7 +133,7 @@ impl World {
                 );
             }
             PlayerCommand::SetGuardCount(n) => {
-                self.levers.guard_count = (*n).min(30);
+                self.levers.guard_count = (*n).min(60);
                 self.push_event(
                     EventKind::PlayerAction,
                     &[],
@@ -142,7 +141,7 @@ impl World {
                 );
             }
             PlayerCommand::SetImmigrationPerWeek(n) => {
-                self.levers.immigration_per_week = (*n).min(10);
+                self.levers.immigration_per_week = (*n).min(30);
                 self.push_event(
                     EventKind::PlayerAction,
                     &[],
@@ -283,7 +282,7 @@ impl World {
             return Err(format!("rect must be 4x4 to 6x6, got {}x{}", rect.w, rect.h));
         }
         let (x1, y1) = (i32::from(rect.x) + i32::from(rect.w), i32::from(rect.y) + i32::from(rect.h));
-        if !Map::in_bounds(i32::from(rect.x), i32::from(rect.y)) || !Map::in_bounds(x1 - 1, y1 - 1) {
+        if !self.map.in_bounds(i32::from(rect.x), i32::from(rect.y)) || !self.map.in_bounds(x1 - 1, y1 - 1) {
             return Err("rect is off the map".into());
         }
         for y in rect.y..rect.y + rect.h {
@@ -303,14 +302,14 @@ impl World {
         }
         for y in (i32::from(rect.y) - 1)..=y1 {
             for x in (i32::from(rect.x) - 1)..=x1 {
-                if Map::in_bounds(x, y) && self.map.tile_at(TilePos { x: x as u8, y: y as u8 }) == TileKind::Water {
+                if self.map.in_bounds(x, y) && self.map.tile_at(TilePos { x: x as u8, y: y as u8 }) == TileKind::Water {
                     return Err("adjacent to Water".into());
                 }
             }
         }
         let door = TilePos { x: rect.x + rect.w / 2, y: rect.y + rect.h - 1 };
         let outside = (i32::from(door.x), i32::from(door.y) + 1);
-        if !Map::in_bounds(outside.0, outside.1) {
+        if !self.map.in_bounds(outside.0, outside.1) {
             return Err("the door would open off the map".into());
         }
         let outside_tile = TilePos { x: outside.0 as u8, y: outside.1 as u8 };
@@ -354,6 +353,7 @@ impl World {
                 owner: None,
                 occupants: Vec::new(),
                 demolished: false,
+                tier: 1,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);
@@ -373,17 +373,37 @@ impl World {
         Ok((id, housed))
     }
 
+    /// Split `amount` evenly over every Market (remainder to the lowest id),
+    /// each share capped by that Market's room and by what the Warehouse holds
+    /// (M10 D22).
     fn cmd_release_reserve(&mut self, amount: u32) {
-        let (Some(wh), Some(mk)) =
-            (self.building_of_kind(BuildingKind::Warehouse), self.building_of_kind(BuildingKind::Market))
-        else {
+        let markets: Vec<EntityId> = self
+            .buildings_of_kind(BuildingKind::Market)
+            .iter()
+            .copied()
+            .filter(|&m| self.comp::<Building>(m).is_some_and(|b| !b.demolished))
+            .collect();
+        let Some(wh) = self.building_of_kind(BuildingKind::Warehouse).filter(|_| !markets.is_empty()) else {
             self.push_event(EventKind::PlayerActionFailed, &[], "ReleaseReserve: no Warehouse or Market");
             return;
         };
         let market_cap = self.config.buildings.market.stock_cap;
-        let available = self.comp::<Building>(wh).map_or(0, |b| b.stock_food);
-        let room = self.comp::<Building>(mk).map_or(0, |b| market_cap.saturating_sub(b.stock_food));
-        let moved = amount.min(available).min(room);
+        let mut available = self.comp::<Building>(wh).map_or(0, |b| b.stock_food);
+        let n = markets.len() as u32;
+        let mut moved = 0;
+        for (i, &mk) in markets.iter().enumerate() {
+            let share = amount / n + u32::from((i as u32) < amount % n);
+            let room = self.comp::<Building>(mk).map_or(0, |b| market_cap.saturating_sub(b.stock_food));
+            let m = share.min(room).min(available);
+            if m == 0 {
+                continue;
+            }
+            available -= m;
+            moved += m;
+            if let Some(b) = self.comp_mut::<Building>(mk) {
+                b.stock_food += m;
+            }
+        }
         if moved == 0 {
             self.push_event(EventKind::PlayerActionFailed, &[], "ReleaseReserve: nothing to move");
             return;
@@ -391,14 +411,8 @@ impl World {
         if let Some(b) = self.comp_mut::<Building>(wh) {
             b.stock_food -= moved;
         }
-        if let Some(b) = self.comp_mut::<Building>(mk) {
-            b.stock_food += moved;
-        }
-        self.push_event(
-            EventKind::PlayerAction,
-            &[],
-            format!("Released {moved} food from the Warehouse to the Market"),
-        );
+        let to = if n == 1 { "the Market".to_string() } else { format!("{n} Markets") };
+        self.push_event(EventKind::PlayerAction, &[], format!("Released {moved} food from the Warehouse to {to}"));
     }
 
     fn cmd_grant_coins(&mut self, agent: EntityId, amount: i64) {

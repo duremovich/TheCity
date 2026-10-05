@@ -1,8 +1,10 @@
 //! macroquad front end: squares and letters, a HUD, time controls, save/load.
 //!
 //! ```text
-//! citysim-app [--seed N] [--load FILE] [--fps] [--select INDEX | --select-kind Kind]
+//! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind]
 //! ```
+//!
+//! `--map` overrides `[world] map` (the v2 256 x 192 map by default).
 
 mod camera;
 mod input;
@@ -45,9 +47,9 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(show_fps: bool) -> App {
+    pub fn new(show_fps: bool, map_w: usize, map_h: usize) -> App {
         App {
-            camera: Camera::default(),
+            camera: Camera::new(map_w, map_h),
             paused: false,
             speed: Speed::X1,
             acc: 0.0,
@@ -94,17 +96,31 @@ struct Args {
     select: Option<u32>,
     /// Select the first building of this kind at start (building panel smoke tests).
     select_kind: Option<citysim::BuildingKind>,
+    /// Map file overriding `[world] map` (made absolute).
+    map: Option<PathBuf>,
 }
 
 fn parse_args() -> Args {
-    let mut args =
-        Args { seed: 42, load: None, fps: false, screenshot: None, start_tick: 0, select: None, select_kind: None };
+    let mut args = Args {
+        seed: 42,
+        load: None,
+        fps: false,
+        screenshot: None,
+        start_tick: 0,
+        select: None,
+        select_kind: None,
+        map: None,
+    };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         match a.as_str() {
             "--seed" => args.seed = it.next().and_then(|s| s.parse().ok()).expect("--seed <N>"),
             "--load" => args.load = Some(PathBuf::from(it.next().expect("--load <FILE>"))),
             "--fps" => args.fps = true,
+            "--map" => {
+                let p = PathBuf::from(it.next().expect("--map <FILE>"));
+                args.map = Some(std::fs::canonicalize(&p).unwrap_or_else(|e| panic!("--map {}: {e}", p.display())));
+            }
             "--screenshot" => args.screenshot = Some(PathBuf::from(it.next().expect("--screenshot <FILE>"))),
             "--start-tick" => args.start_tick = it.next().and_then(|s| s.parse().ok()).expect("--start-tick <N>"),
             "--select" => args.select = Some(it.next().and_then(|s| s.parse().ok()).expect("--select <INDEX>")),
@@ -124,10 +140,16 @@ async fn main() {
     let args = parse_args();
     let mut world = match &args.load {
         Some(path) => save::load_from_file(path).unwrap_or_else(|e| panic!("{e}")),
-        None => World::new(args.seed, Config::load()),
+        None => {
+            let mut config = Config::load();
+            if let Some(map) = &args.map {
+                config.world.map = map.to_string_lossy().into_owned();
+            }
+            World::new(args.seed, config)
+        }
     };
     world.run_ticks(args.start_tick);
-    let mut app = App::new(args.fps);
+    let mut app = App::new(args.fps, world.map.w(), world.map.h());
     if let Some(index) = args.select {
         app.selected = world.citizens().into_iter().find(|id| id.index == index);
         if let Some(p) = app.selected.and_then(|id| world.comp::<citysim::Position>(id)) {

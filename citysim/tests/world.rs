@@ -3,7 +3,7 @@
 use citysim::{BuildingKind, Config, EntityId, Household, Identity, Job, Position, Role, Wallet, World};
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().v1_profile())
 }
 
 #[test]
@@ -102,7 +102,7 @@ fn test_initial_stocks_and_treasury() {
     assert_eq!(stock(BuildingKind::Farm), 0);
     assert_eq!(stock(BuildingKind::Home), 10);
     assert_eq!(w.treasury().expect("treasury").coins, 5000);
-    assert_eq!(w.market().expect("market").price_food, 3);
+    assert_eq!(w.mean_price(), 3);
     let gangs = w.gangs();
     assert_eq!(gangs.len(), 2, "one gang per Hideout");
     let gang = w.comp::<citysim::Gang>(gangs[0]).expect("gang");

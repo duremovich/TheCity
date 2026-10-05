@@ -33,7 +33,7 @@ pub use events::{Event, EventKind};
 pub use exec::{ExecState, FailReason, StepResult};
 pub use goap::{ActionKind, GoalState, Key, LocationKey, Plan, PlanCtx, StealSource, WorldState};
 pub use levers::{Levers, PlayerCommand, Speed};
-pub use map::{Map, MAP_H, MAP_W};
+pub use map::Map;
 pub use stats::{DailyStats, DayRow};
 pub use time::{DayPhase, Season, Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 pub use utility::{Consideration, GoalScore, ThinkTrace};
