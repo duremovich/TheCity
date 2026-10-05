@@ -4,7 +4,8 @@
 
 use ordered_float::OrderedFloat;
 use std::cmp::Reverse;
-use std::collections::{BTreeSet, BinaryHeap};
+use std::collections::BinaryHeap;
+use std::hash::{BuildHasherDefault, Hasher};
 
 use crate::goap::actions::{ActionKind, PlanCtx, PLANNABLE};
 use crate::goap::world_state::{GoalState, WorldState};
@@ -30,6 +31,8 @@ pub struct Limits {
 struct Node {
     g: f32,
     state: WorldState,
+    /// `state.pack()`, computed once.
+    key: u64,
     depth: u8,
     parent: Option<usize>,
     via: Option<ActionKind>,
@@ -43,14 +46,41 @@ pub struct Found {
     pub expansions: usize,
 }
 
+/// A multiplicative hasher for the packed `u64` closed-set keys (the set is
+/// only probed for membership, so its iteration order never matters).
+#[derive(Default)]
+struct PackHasher(u64);
+
+impl Hasher for PackHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+    fn write(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.write_u64(u64::from(b));
+        }
+    }
+    fn write_u64(&mut self, n: u64) {
+        self.0 = (self.0.rotate_left(5) ^ n).wrapping_mul(0x517c_c1b7_2722_0a95);
+    }
+}
+
+/// The closed set, keyed on the packed state (`WorldState::pack` is
+/// injective). Membership only, never iterated, so the hash order cannot
+/// reach a plan: the `disallowed_types` rule guards iteration order, which
+/// this set has none of (and its hasher is fixed, not seeded per process).
+#[allow(clippy::disallowed_types)]
+type ClosedSet = std::collections::HashSet<u64, BuildHasherDefault<PackHasher>>;
+
 /// Search from `start` for a state satisfying `goal`.
 pub fn plan(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits) -> Result<Found, (PlanError, usize)> {
     let h = |s: &WorldState| s.unsatisfied(goal) as f32 * H_PER_KEY;
-    let mut nodes: Vec<Node> = vec![Node { g: 0.0, state: start, depth: 0, parent: None, via: None }];
+    let mut nodes: Vec<Node> = Vec::with_capacity(64);
+    nodes.push(Node { g: 0.0, state: start, key: start.pack(), depth: 0, parent: None, via: None });
     // (f, action order of the step that produced the node, node index)
-    let mut open: BinaryHeap<Reverse<(OrderedFloat<f32>, usize, usize)>> = BinaryHeap::new();
+    let mut open: BinaryHeap<Reverse<(OrderedFloat<f32>, usize, usize)>> = BinaryHeap::with_capacity(64);
     open.push(Reverse((OrderedFloat(h(&start)), 0, 0)));
-    let mut closed: BTreeSet<WorldState> = BTreeSet::new();
+    let mut closed = ClosedSet::default();
     let mut expansions = 0usize;
     // `allowed`, `feasible` and `cost` read only the context: decide them
     // once per search, not once per expansion (M11 phase 2: Arrest plans spent
@@ -77,7 +107,7 @@ pub fn plan(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits) 
             steps.reverse();
             return Ok(Found { steps, cost: nodes[idx].g, expansions });
         }
-        if !closed.insert(state) {
+        if !closed.insert(nodes[idx].key) {
             continue;
         }
         if usize::from(nodes[idx].depth) >= limits.max_len {
@@ -89,17 +119,34 @@ pub fn plan(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits) 
         }
         let g = nodes[idx].g;
         let depth = nodes[idx].depth;
+        let state_key = nodes[idx].key;
         for &(order, kind, cost) in &usable {
-            if !kind.preconditions(&state, ctx) {
-                continue;
-            }
-            let next = kind.apply(&state, ctx);
-            if closed.contains(&next) {
+            let (next, key) = match kind {
+                // `feasible` (in `usable`) already required the GoTo key's
+                // distance entry, so only the location test of its
+                // precondition remains; its effect is `at = k` alone.
+                ActionKind::GoTo(k) => {
+                    if state.at == k {
+                        continue;
+                    }
+                    let mut next = state;
+                    next.at = k;
+                    (next, WorldState::repack_at(state_key, k))
+                }
+                _ => {
+                    if !kind.preconditions(&state, ctx) {
+                        continue;
+                    }
+                    let next = kind.apply(&state, ctx);
+                    (next, next.pack())
+                }
+            };
+            if closed.contains(&key) {
                 continue;
             }
             let ng = g + cost;
             let f = ng + h(&next);
-            nodes.push(Node { g: ng, state: next, depth: depth + 1, parent: Some(idx), via: Some(kind) });
+            nodes.push(Node { g: ng, state: next, key, depth: depth + 1, parent: Some(idx), via: Some(kind) });
             open.push(Reverse((OrderedFloat(f), order, nodes.len() - 1)));
         }
     }

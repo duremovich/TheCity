@@ -25,19 +25,20 @@ pub const TRACE_TOP_N: usize = 5;
 /// One consideration's input and curve output, for the inspector.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Consideration {
-    pub name: String,
+    /// Always a literal: borrowed, so a think allocates no names (perf).
+    pub name: std::borrow::Cow<'static, str>,
     pub input: f32,
     pub output: f32,
 }
 
 impl Consideration {
-    pub fn new(name: &str, input: f32, curve: Curve) -> Self {
-        Consideration { name: name.to_string(), input, output: curve.eval(input) }
+    pub fn new(name: &'static str, input: f32, curve: Curve) -> Self {
+        Consideration { name: std::borrow::Cow::Borrowed(name), input, output: curve.eval(input) }
     }
 
     /// A pre-computed output (e.g. a mood multiplier already applied).
-    pub fn raw(name: &str, input: f32, output: f32) -> Self {
-        Consideration { name: name.to_string(), input, output: output.clamp(0.0, 1.0) }
+    pub fn raw(name: &'static str, input: f32, output: f32) -> Self {
+        Consideration { name: std::borrow::Cow::Borrowed(name), input, output: output.clamp(0.0, 1.0) }
     }
 }
 

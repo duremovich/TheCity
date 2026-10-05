@@ -349,8 +349,9 @@ pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId
 /// The gang whose territory holds this Home.
 pub fn holder_of(world: &World, home: EntityId) -> Option<EntityId> {
     world
-        .gangs()
-        .into_iter()
+        .gang_list()
+        .iter()
+        .copied()
         .find(|&g| world.comp::<Gang>(g).is_some_and(|gg| gg.territory.binary_search(&home).is_ok()))
 }
 
@@ -381,62 +382,56 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);
     let actor_tile = world.comp::<Position>(id)?.tile;
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
-    let homes = world.buildings_by_kind.get(&BuildingKind::Home)?;
-    let guarded = guarded_homes(world, homes);
-    let candidates: Vec<(EntityId, &Building)> = homes
-        .iter()
-        .copied()
-        .zip(guarded.iter().copied())
-        .filter(|&(h, g)| !g && Some(h) != own_home)
-        .filter_map(|(h, _)| world.comp::<Building>(h).map(|b| (h, b)))
-        .filter(|(_, b)| !b.demolished && !b.occupants.is_empty())
-        .collect();
-    let nearest = |from: TilePos, pick: &dyn Fn(EntityId) -> bool| -> Option<EntityId> {
-        candidates
-            .iter()
-            .filter(|(h, _)| pick(*h))
-            .min_by_key(|(h, b)| (b.door.manhattan(from), h.index))
-            .map(|(h, _)| *h)
-    };
-    let unclaimed = |h: EntityId| holder_of(world, h).is_none();
-    match following_order(world, id) {
+    // The order decides the origin and the filter before any Home is read:
+    // the orders with no target return without the scan (perf).
+    let theirs: Option<&[EntityId]>;
+    let (from, order) = match following_order(world, id) {
         None if world.comp::<Personality>(id).map_or(0.0, |p| p.loyalty) < world.config.gangs.freelance_loyalty => {
-            nearest(actor_tile, &unclaimed).map(|h| (h, None))
+            theirs = None;
+            (actor_tile, None)
         }
-        None => None,
-        Some(Order::Expand) => nearest(hideout_door, &unclaimed).map(|h| (h, Some(Order::Expand))),
+        None => return None,
+        Some(Order::Expand) => {
+            theirs = None;
+            (hideout_door, Some(Order::Expand))
+        }
         Some(Order::Contest) => {
             let rival = world.rival_of(gang)?;
-            let theirs = world.comp::<Gang>(rival)?.territory.clone();
-            nearest(hideout_door, &|h| theirs.binary_search(&h).is_ok()).map(|h| (h, Some(Order::Contest)))
+            theirs = Some(world.comp::<Gang>(rival)?.territory.as_slice());
+            (hideout_door, Some(Order::Contest))
         }
-        Some(_) => None,
-    }
-}
-
-/// Per Home in `homes`: a guard within `sight_day_crime` of its door. Cached
-/// on the guards' tiles (`World::guarded_homes`), so the 400 × guards scan
-/// runs once per guard move, not once per GangWork think.
-fn guarded_homes(world: &World, homes: &[EntityId]) -> std::sync::Arc<Vec<bool>> {
+        Some(_) => return None,
+    };
+    let homes = world.buildings_by_kind.get(&BuildingKind::Home)?;
+    // Unclaimed (no gang holds it), or under Contest in the rival's list.
+    let pick = |h: EntityId| match theirs {
+        Some(t) => t.binary_search(&h).is_ok(),
+        None => holder_of(world, h).is_none(),
+    };
+    // Guarded: a guard within `sight_day_crime` of the door. The nearest
+    // unguarded candidate by `(door distance, index)`; the guard test runs
+    // only for a candidate that would beat the best so far (it was a
+    // Homes x guards table rebuilt whenever a guard moved; perf).
     let guards: Vec<TilePos> =
         world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
-    let mut cache = world.guarded_homes.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-    if let Some((key, v)) = cache.as_ref() {
-        if *key == guards && v.len() == homes.len() {
-            return v.clone();
-        }
-    }
     let r = world.config.crime.sight_day_crime;
-    let v: std::sync::Arc<Vec<bool>> = std::sync::Arc::new(
-        homes
-            .iter()
-            .map(|&h| {
-                world.comp::<Building>(h).is_some_and(|b| guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r))
-            })
-            .collect(),
-    );
-    *cache = Some((guards, v.clone()));
-    v
+    let guarded = |door: TilePos| guards.iter().any(|&gt| law::chebyshev(gt, door) <= r);
+    let mut best: Option<((u32, u32), EntityId)> = None;
+    for &h in homes {
+        if Some(h) == own_home {
+            continue;
+        }
+        let Some(b) = world.comp::<Building>(h) else { continue };
+        if b.demolished || b.occupants.is_empty() {
+            continue;
+        }
+        let key = (b.door.manhattan(from), h.index);
+        if best.is_some_and(|(k, _)| key >= k) || !pick(h) || guarded(b.door) {
+            continue;
+        }
+        best = Some((key, h));
+    }
+    best.map(|(_, h)| (h, order))
 }
 
 /// The Home a GangWork plan extorts.

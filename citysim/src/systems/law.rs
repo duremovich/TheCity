@@ -139,14 +139,10 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
 /// File (or refresh) the one open report per `(suspect, crime)`.
 pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: Option<EntityId>) {
     let tick = world.tick;
-    if let Some(r) = world.reports_mut().iter_mut().find(|r| !r.resolved && r.suspect == suspect && r.crime == crime) {
-        r.tick = tick;
-        if r.witness.is_none() {
-            r.witness = witness;
-        }
+    if world.refresh_open_report(crime, suspect, witness) {
         return;
     }
-    world.reports_mut().push(CrimeReport { crime, suspect, witness, tick, resolved: false });
+    world.push_report(CrimeReport { crime, suspect, witness, tick, resolved: false });
     let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
     world.push_event(
         EventKind::Report,
@@ -456,9 +452,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 }
 
 fn resolve_reports(world: &mut World, suspect: EntityId) {
-    for r in world.reports_mut().iter_mut().filter(|r| r.suspect == suspect) {
-        r.resolved = true;
-    }
+    world.resolve_reports_of(suspect);
 }
 
 /// Put an agent in the Jail with a `Sentence`; a job survives a sentence of
@@ -849,8 +843,9 @@ fn jail_upkeep(world: &mut World) {
 fn releases(world: &mut World) {
     let tick = world.tick;
     let due: Vec<EntityId> = world
-        .with::<Sentence>()
-        .into_iter()
+        .sentenced()
+        .iter()
+        .copied()
         .filter(|&p| world.comp::<Sentence>(p).is_some_and(|s| tick >= s.until_tick))
         .collect();
     for p in due {

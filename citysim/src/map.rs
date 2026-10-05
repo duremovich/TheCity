@@ -246,6 +246,11 @@ impl Map {
         self.tiles[y * self.w() + x]
     }
 
+    /// Every tile, row-major (`index`).
+    pub fn tiles(&self) -> &[TileKind] {
+        &self.tiles
+    }
+
     pub fn tile_at(&self, p: TilePos) -> TileKind {
         self.tile(usize::from(p.x), usize::from(p.y))
     }

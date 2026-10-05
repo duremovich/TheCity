@@ -377,7 +377,7 @@ fn law_section(ui: &mut Ui, app: &mut App, world: &World) {
                 .show(ui, |ui| {
                     egui::Grid::new(format!("posture-{}", s.posture)).striped(true).show(ui, |ui| {
                         for c in &s.considerations {
-                            ui.label(&c.name);
+                            ui.label(c.name.as_ref());
                             ui.label(format!("{:.3}", c.input));
                             ui.label("->");
                             ui.label(format!("{:.3}", c.output));
@@ -596,7 +596,7 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
                 .show(ui, |ui| {
                     egui::Grid::new(format!("order-{}", s.order)).striped(true).show(ui, |ui| {
                         for c in &s.considerations {
-                            ui.label(&c.name);
+                            ui.label(c.name.as_ref());
                             ui.label(format!("{:.3}", c.input));
                             ui.label("->");
                             ui.label(format!("{:.3}", c.output));

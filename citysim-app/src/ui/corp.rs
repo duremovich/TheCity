@@ -151,7 +151,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                     .show(ui, |ui| {
                         egui::Grid::new(format!("corp-cons-{}-{}", s.order, s.niche)).striped(true).show(ui, |ui| {
                             for k in &s.considerations {
-                                ui.label(&k.name);
+                                ui.label(k.name.as_ref());
                                 ui.label(format!("{:.3}", k.input));
                                 ui.label("->");
                                 ui.label(format!("{:.3}", k.output));

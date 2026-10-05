@@ -38,42 +38,65 @@ impl FlowField {
         usize::from(p.y) * usize::from(self.w) + usize::from(p.x)
     }
 
-    /// Build the field for `door`: Dijkstra in `(cost, tile)` order with a
-    /// monotone radix heap (M11: about twice the binary heap's speed; the
-    /// pop order, so every direction byte, is the same; see
+    /// Build the field for `door`: Dijkstra in `(cost, tile)` order over cost
+    /// buckets ([`CostQueue`]; the pop order, so every direction byte, is
+    /// the binary heap's; see
     /// [`FlowField::build_binary_heap`] and `tests/exec.rs`).
     pub fn build(map: &Map, door: TilePos) -> FlowField {
-        let n = map.w() * map.h();
-        let mut f = FlowField { next: vec![0; n], w: map.w() as u16, door: Some(door) };
+        let (w, h) = (map.w(), map.h());
+        let n = w * h;
+        let mut f = FlowField { next: vec![0; n], w: w as u16, door: Some(door) };
+        // Per tile, flat: the cost of entering it, infinite exactly where it
+        // is not walkable (Wall, Water). The same Dijkstra as
+        // `build_binary_heap`, with the per-neighbour tile matches and bounds
+        // iterator hoisted out of the loop (perf).
+        let enter: Vec<f32> = map.tiles().iter().map(|t| t.move_cost()).collect();
         let mut cost = vec![f32::INFINITY; n];
-        let mut open = RadixHeap::new();
+        let mut open = CostQueue::new();
         cost[f.idx(door)] = 0.0;
         open.push(key(0.0, door));
+        // The byte a neighbour gets points back at `cur`: W of cur steps E, etc.
+        let (to_e, to_w, to_s, to_n) = (
+            dir_byte(TilePos { x: 0, y: 0 }, TilePos { x: 1, y: 0 }),
+            dir_byte(TilePos { x: 1, y: 0 }, TilePos { x: 0, y: 0 }),
+            dir_byte(TilePos { x: 0, y: 0 }, TilePos { x: 0, y: 1 }),
+            dir_byte(TilePos { x: 0, y: 1 }, TilePos { x: 0, y: 0 }),
+        );
         while let Some(k) = open.pop() {
             let (c, cur) = unkey(k);
-            if c > cost[f.idx(cur)] {
+            let (x, y) = (usize::from(cur.x), usize::from(cur.y));
+            let ci = y * w + x;
+            if c > cost[ci] {
                 continue;
             }
             // Travelling from n to cur enters cur, so n's cost = cost(cur) + dist(cur).
-            let enter_cur = map.tile_at(cur).move_cost();
-            for nb in map.neighbours4(cur) {
-                if !map.walkable(nb) {
-                    continue;
-                }
-                let nc = c + enter_cur;
-                let i = f.idx(nb);
-                if nc < cost[i] {
+            let nc = c + enter[ci];
+            let mut relax = |i: usize, nx: usize, ny: usize, byte: u8| {
+                if enter[i].is_finite() && nc < cost[i] {
                     cost[i] = nc;
-                    f.next[i] = dir_byte(nb, cur);
-                    open.push(key(nc, nb));
+                    f.next[i] = byte;
+                    open.push(key(nc, TilePos { x: nx as u8, y: ny as u8 }));
                 }
+            };
+            // W, E, N, S: the order of `Map::neighbours4`.
+            if x > 0 {
+                relax(ci - 1, x - 1, y, to_e);
+            }
+            if x + 1 < w {
+                relax(ci + 1, x + 1, y, to_w);
+            }
+            if y > 0 {
+                relax(ci - w, x, y - 1, to_s);
+            }
+            if y + 1 < h {
+                relax(ci + w, x, y + 1, to_n);
             }
         }
         f
     }
 
     /// The M10 build (binary heap of `(cost, tile)`), kept as the reference
-    /// the radix-heap build is tested against.
+    /// the bucketed build is tested against.
     #[doc(hidden)]
     pub fn build_binary_heap(map: &Map, door: TilePos) -> FlowField {
         let n = map.w() * map.h();
@@ -154,52 +177,47 @@ fn unkey(k: u64) -> (f32, TilePos) {
     (f32::from_bits((k >> 16) as u32), TilePos { x: (k >> 8) as u8, y: k as u8 })
 }
 
-/// A monotone priority queue (radix heap): every pushed key is at least the
-/// last popped one, as in Dijkstra with positive step costs. Pops in key
-/// order; equal keys are identical entries, so their order is moot.
-struct RadixHeap {
-    last: u64,
-    buckets: Vec<Vec<u64>>,
-    len: usize,
+/// Dijkstra's open set as cost buckets: the tiles pushed at one cost are
+/// sorted when that cost comes up and popped in `(cost, x, y)` key order,
+/// exactly the order of a heap of the keys. Valid because every push lands at
+/// a strictly higher cost than the one being popped (each step costs at least
+/// 0.7), so a bucket is complete when it is reached. (M11's radix heap
+/// re-bucketed on nearly every pop, as the tile bits differ within a cost.)
+struct CostQueue {
+    /// `cost bits -> tiles (x << 8 | y)` not yet reached.
+    pending: BTreeMap<u32, Vec<u16>>,
+    /// The bucket being popped, sorted, and the next position in it.
+    cur: Vec<u16>,
+    cur_cost: u64,
+    pos: usize,
+    spare: Vec<Vec<u16>>,
 }
 
-impl RadixHeap {
-    fn new() -> RadixHeap {
-        RadixHeap { last: 0, buckets: vec![Vec::new(); 65], len: 0 }
-    }
-
-    fn bucket(&self, k: u64) -> usize {
-        64 - (k ^ self.last).leading_zeros() as usize
+impl CostQueue {
+    fn new() -> CostQueue {
+        CostQueue { pending: BTreeMap::new(), cur: Vec::new(), cur_cost: 0, pos: 0, spare: Vec::new() }
     }
 
     fn push(&mut self, k: u64) {
-        debug_assert!(k >= self.last, "radix heap keys must not decrease");
-        let b = self.bucket(k);
-        self.buckets[b].push(k);
-        self.len += 1;
+        let cost = (k >> 16) as u32;
+        debug_assert!(self.cur.is_empty() || u64::from(cost) > self.cur_cost, "costs must rise past the bucket");
+        let spare = &mut self.spare;
+        self.pending.entry(cost).or_insert_with(|| spare.pop().unwrap_or_default()).push(k as u16);
     }
 
     fn pop(&mut self) -> Option<u64> {
-        if self.len == 0 {
-            return None;
+        if self.pos == self.cur.len() {
+            let (cost, mut tiles) = self.pending.pop_first()?;
+            tiles.sort_unstable();
+            let mut done = std::mem::replace(&mut self.cur, tiles);
+            done.clear();
+            self.spare.push(done);
+            self.cur_cost = u64::from(cost);
+            self.pos = 0;
         }
-        if self.buckets[0].is_empty() {
-            let i = self.buckets.iter().position(|b| !b.is_empty())?;
-            let moved = std::mem::take(&mut self.buckets[i]);
-            self.last = moved.iter().copied().min()?;
-            for k in &moved {
-                let b = self.bucket(*k);
-                self.buckets[b].push(*k);
-            }
-            // Hand the allocation back to the emptied bucket.
-            let mut spare = moved;
-            spare.clear();
-            if self.buckets[i].is_empty() {
-                self.buckets[i] = spare;
-            }
-        }
-        self.len -= 1;
-        self.buckets[0].pop()
+        let t = self.cur[self.pos];
+        self.pos += 1;
+        Some((self.cur_cost << 16) | u64::from(t))
     }
 }
 

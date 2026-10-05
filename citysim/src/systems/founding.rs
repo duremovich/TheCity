@@ -120,7 +120,6 @@ pub fn build_on_lot(
         }
     }
     world.invalidate_flow_fields_for_lot(rect);
-    world.guarded_homes = Default::default();
     Ok(lot)
 }
 

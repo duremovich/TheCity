@@ -86,6 +86,44 @@ pub struct StatRow {
     pub p_chat_home: f32,
 }
 
+impl StatRow {
+    /// A copy without the human label: the hourly tick reads only the
+    /// numbers, and cloning the label allocated once per agent-hour.
+    /// Exhaustive, so a new field fails to compile until it is copied.
+    pub fn numbers(&self) -> StatRow {
+        let StatRow {
+            label: _,
+            p_eat,
+            p_work,
+            p_social,
+            p_sleep,
+            p_steal,
+            p_flirt,
+            p_robbed,
+            p_assaulted,
+            p_killed,
+            p_meet,
+            p_chat,
+            p_chat_home,
+        } = *self;
+        StatRow {
+            label: String::new(),
+            p_eat,
+            p_work,
+            p_social,
+            p_sleep,
+            p_steal,
+            p_flirt,
+            p_robbed,
+            p_assaulted,
+            p_killed,
+            p_meet,
+            p_chat,
+            p_chat_home,
+        }
+    }
+}
+
 /// Calibrated hourly behaviour table for Statistical agents (`citysim-cli
 /// calibrate`, v2). Rows by `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -233,7 +271,7 @@ pub struct World {
     #[serde(default)]
     pub corp: Vec<Option<Corp>>,
     // graph + blackboard
-    pub edges: BTreeMap<(EntityId, EntityId), Edge>,
+    pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the
     /// per-suspect index; read with `crime_reports()`.
     crime_reports: Vec<CrimeReport>,
@@ -246,6 +284,11 @@ pub struct World {
     /// rebuilt on load (`gangs()` was a full entity scan).
     #[serde(skip)]
     gang_ids: Vec<EntityId>,
+    /// Every agent with a `Sentence`, ascending; kept by the Sentence
+    /// insert/remove hooks and rebuilt on load (`releases` scanned every
+    /// entity each tick).
+    #[serde(skip)]
+    sentenced_ids: Vec<EntityId>,
     /// Every corp, ascending by id; kept by the Corp insert/remove hooks and
     /// rebuilt on load (a Corp store scan is ~600 bytes a slot, and the corp
     /// brain asks several times a rescoring).
@@ -263,10 +306,6 @@ pub struct World {
     /// refresh; `economy::daily_price` drops it.
     #[serde(skip)]
     pub(crate) mean_price_cache: Option<(Tick, i64)>,
-    /// GangWork's "no guard within `sight_day_crime` of the door" per Home,
-    /// keyed on the guards' tiles: reused until a guard moves.
-    #[serde(skip)]
-    pub guarded_homes: GuardedHomes,
     /// M11: a corp's pending shocks reached `[corps] shock_severity_rethink`
     /// (set by `ownership::push_corp_shock`), so `corp_brain::run` scans the
     /// corps this tick. Shocks are not saved, so neither is this.
@@ -424,22 +463,6 @@ pub struct ReportIndex {
     pub open: Vec<EntityId>,
 }
 
-/// For `gang::gang_work_target`: `guarded[i]` = a guard stands within
-/// `sight_day_crime` of the door of the `i`-th Home in `buildings_by_kind`,
-/// computed for the guard tiles in the key. A pure function of the key, the
-/// Home list and the config, so reusing it changes nothing.
-#[derive(Default, Debug)]
-pub struct GuardedHomes(pub std::sync::Mutex<Option<GuardedKeyed>>);
-
-/// The guard tiles a `GuardedHomes` entry was computed for, and the flags.
-pub type GuardedKeyed = (Vec<TilePos>, std::sync::Arc<Vec<bool>>);
-
-impl Clone for GuardedHomes {
-    fn clone(&self) -> Self {
-        GuardedHomes::default()
-    }
-}
-
 /// Statistical agents by hourly slot: `slots[s]` holds the ids with
 /// `index % 60 == s`, ascending.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -553,15 +576,15 @@ impl World {
             trace: Vec::new(),
             life: Vec::new(),
             corp: Vec::new(),
-            edges: BTreeMap::new(),
+            edges: crate::edge_map::EdgeMap::new(),
             crime_reports: Vec::new(),
             report_index: std::sync::OnceLock::new(),
             gang_ids: Vec::new(),
+            sentenced_ids: Vec::new(),
             corp_ids: Vec::new(),
             residents: BTreeMap::new(),
             resident_home: BTreeMap::new(),
             mean_price_cache: None,
-            guarded_homes: GuardedHomes::default(),
             corp_rethink: false,
             buildings_by_kind: BTreeMap::new(),
             agents_by_tile: BTreeMap::new(),
@@ -909,6 +932,8 @@ impl World {
             self.index_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
             Self::list_insert(&mut self.gang_ids, id);
+        } else if TypeId::of::<T>() == TypeId::of::<Sentence>() {
+            Self::list_insert(&mut self.sentenced_ids, id);
         } else if TypeId::of::<T>() == TypeId::of::<Corp>() {
             Self::list_insert(&mut self.corp_ids, id);
         } else if TypeId::of::<T>() == TypeId::of::<Household>() {
@@ -924,6 +949,8 @@ impl World {
             self.unindex_job(id);
         } else if TypeId::of::<T>() == TypeId::of::<Gang>() {
             self.unindex_gang(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Sentence>() {
+            self.unindex_sentenced(id);
         } else if TypeId::of::<T>() == TypeId::of::<Corp>() {
             self.unindex_corp(id);
         } else if TypeId::of::<T>() == TypeId::of::<Household>() {
@@ -970,6 +997,17 @@ impl World {
     /// a death removes the Household).
     pub fn residents_of(&self, home: EntityId) -> &[EntityId] {
         self.residents.get(&home).map_or(&[], Vec::as_slice)
+    }
+
+    /// Drop an agent from `sentenced_ids` (its Sentence removed, or despawned).
+    pub(crate) fn unindex_sentenced(&mut self, id: EntityId) {
+        Self::list_remove(&mut self.sentenced_ids, id);
+    }
+
+    /// Every agent with a `Sentence`, ascending by id (`with::<Sentence>()`
+    /// without the entity scan).
+    pub fn sentenced(&self) -> &[EntityId] {
+        &self.sentenced_ids
     }
 
     /// Drop a gang from `gang_ids` (its Gang removed, or despawned).
@@ -1074,9 +1112,9 @@ impl World {
         self.by_role = roles;
         self.stat_slots = slots;
         self.gang_ids = self.with::<Gang>();
+        self.sentenced_ids = self.with::<Sentence>();
         self.corp_ids = self.with::<Corp>();
         (self.residents, self.resident_home) = self.residents_from_stores();
-        self.guarded_homes = GuardedHomes::default();
         self.mean_price_cache = None;
     }
 
@@ -1137,6 +1175,9 @@ impl World {
         }
         if self.gang_ids != self.with::<Gang>() {
             return Err(format!("gang_ids out of sync: {:?}", self.gang_ids));
+        }
+        if self.sentenced_ids != self.with::<Sentence>() {
+            return Err(format!("sentenced_ids out of sync: {:?}", self.sentenced_ids));
         }
         if self.corp_ids != self.with::<Corp>() {
             return Err(format!("corp_ids out of sync: {:?}", self.corp_ids));
@@ -1341,6 +1382,75 @@ impl World {
         &mut self.crime_reports
     }
 
+    /// Refresh the open report on `(suspect, crime)`, if any: its tick to
+    /// now, its witness if it had none. Keeps a built index in step instead of
+    /// dropping it (a rebuild walks every report; perf). `false` if none.
+    pub fn refresh_open_report(
+        &mut self,
+        crime: crate::components::Crime,
+        suspect: EntityId,
+        witness: Option<EntityId>,
+    ) -> bool {
+        let tick = self.tick;
+        let Some(r) = self.crime_reports.iter_mut().find(|r| !r.resolved && r.suspect == suspect && r.crime == crime)
+        else {
+            return false;
+        };
+        r.tick = tick;
+        if r.witness.is_none() {
+            r.witness = witness;
+        }
+        if let Some(idx) = self.report_index.get_mut() {
+            if let Some(e) = idx.by_suspect.get_mut(&suspect) {
+                e.1 = e.1.max(tick);
+            }
+        }
+        true
+    }
+
+    /// Resolve every report on `suspect` (an arrest), keeping a built index
+    /// in step (as `refresh_open_report`).
+    pub fn resolve_reports_of(&mut self, suspect: EntityId) {
+        for r in self.crime_reports.iter_mut().filter(|r| r.suspect == suspect) {
+            r.resolved = true;
+        }
+        if let Some(idx) = self.report_index.get_mut() {
+            if let Some(e) = idx.by_suspect.get_mut(&suspect) {
+                e.0 = 0;
+            }
+            if let Ok(i) = idx.open.binary_search(&suspect) {
+                idx.open.remove(i);
+            }
+        }
+    }
+
+    /// Drop every report on `suspect` (removed from the world), keeping a
+    /// built index in step.
+    pub fn drop_reports_of(&mut self, suspect: EntityId) {
+        self.crime_reports.retain(|r| r.suspect != suspect);
+        if let Some(idx) = self.report_index.get_mut() {
+            idx.by_suspect.remove(&suspect);
+            if let Ok(i) = idx.open.binary_search(&suspect) {
+                idx.open.remove(i);
+            }
+        }
+    }
+
+    /// Append a report, keeping a built index in step (as `refresh_open_report`).
+    pub fn push_report(&mut self, r: CrimeReport) {
+        if let Some(idx) = self.report_index.get_mut() {
+            let e = idx.by_suspect.entry(r.suspect).or_insert((0, 0));
+            e.0 += u32::from(!r.resolved);
+            e.1 = e.1.max(r.tick);
+            if e.0 > 0 {
+                if let Err(i) = idx.open.binary_search(&r.suspect) {
+                    idx.open.insert(i, r.suspect);
+                }
+            }
+        }
+        self.crime_reports.push(r);
+    }
+
     fn build_report_index(reports: &[CrimeReport]) -> ReportIndex {
         let mut m: BTreeMap<EntityId, (u32, Tick)> = BTreeMap::new();
         for r in reports {
@@ -1371,6 +1481,11 @@ impl World {
     /// Every gang, ascending by id (map order of their Hideouts).
     pub fn gangs(&self) -> Vec<EntityId> {
         self.gang_ids.clone()
+    }
+
+    /// The gang ids, ascending, borrowed (no clone for read-only scans).
+    pub fn gang_list(&self) -> &[EntityId] {
+        &self.gang_ids
     }
 
     /// The gang an agent belongs to.
@@ -1533,11 +1648,15 @@ impl World {
     pub fn edge_entry(&mut self, a: EntityId, b: EntityId) -> &mut Edge {
         let key = edge_key(a, b);
         let tick = self.tick;
-        if !self.edges.contains_key(&key) {
-            self.neighbours.entry(a).or_default().insert(b);
-            self.neighbours.entry(b).or_default().insert(a);
+        // One tree search when the edge exists (the usual case; perf).
+        match self.edges.entry(key) {
+            std::collections::hash_map::Entry::Occupied(o) => o.into_mut(),
+            std::collections::hash_map::Entry::Vacant(v) => {
+                self.neighbours.entry(a).or_default().insert(b);
+                self.neighbours.entry(b).or_default().insert(a);
+                v.insert(Edge::new(RelKind::Acquaintance, tick))
+            }
         }
-        self.edges.entry(key).or_insert_with(|| Edge::new(RelKind::Acquaintance, tick))
     }
 
     pub fn remove_edge(&mut self, a: EntityId, b: EntityId) {
@@ -1621,7 +1740,7 @@ impl World {
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.last_seen.remove(&id);
         crate::systems::bind::drop_victim_holes(self, id);
-        self.reports_mut().retain(|r| r.suspect != id);
+        self.drop_reports_of(id);
         for id2 in self.citizens() {
             if let Some(b) = self.comp_mut::<Brain>(id2) {
                 if b.escorting == Some(id) {
