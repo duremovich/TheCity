@@ -38,6 +38,11 @@ const C_NIGHT: u32 = 0x0a0f2a;
 const NIGHT_ALPHA: f32 = 0.35;
 const NIGHT_RAMP_TICKS: f32 = 60.0;
 const LABEL_MIN_PX: f32 = 12.0;
+/// M12 D43: litter heat by band (littered, trashed, heaped); clean draws nothing.
+const C_LITTER: [u32; 3] = [0xbdb76b, 0x8b5a2b, 0x8b1a1a];
+/// M12: a derelict's crack, a Hotel's bed.
+const C_DERELICT: u32 = 0x9a5a3a;
+const C_BED: u32 = 0xd8cfe8;
 const SIGHT_TILES: f32 = 6.0;
 
 fn hex(c: u32) -> Color {
@@ -81,6 +86,23 @@ pub fn draw(world: &World, app: &App) {
             let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
             let t = TilePos { x: x as u8, y: y as u8 };
             draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, tile_colour(world.map.tile_at(t), world.map.zone(t)));
+        }
+    }
+
+    // 1b. M12 D43: litter heat (`L`): alpha = litter / 255 in the band's colour.
+    if app.show_litter && !world.litter.is_empty() {
+        let w = world.map.w();
+        for y in vy0..y1.min(world.map.h() as u16) {
+            for x in vx0..x1.min(w as u16) {
+                let v = world.litter.get(usize::from(y) * w + usize::from(x)).copied().unwrap_or(0);
+                let band = citysim::systems::litter::band(v);
+                if band == 0 {
+                    continue;
+                }
+                let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
+                let c = Color { a: (f32::from(v) / 255.0).max(0.25), ..hex(C_LITTER[band - 1]) };
+                draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, c);
+            }
         }
     }
 
@@ -129,6 +151,17 @@ pub fn draw(world: &World, app: &App) {
                     Color::new((colour.r * 1.2).min(1.0), (colour.g * 1.2).min(1.0), (colour.b * 1.2).min(1.0), 1.0);
             }
             draw_rectangle_lines(tl.x, tl.y, w, h, 2.0, colour);
+            // M12: a derelict is cracked corner to corner; a Hotel has a bed.
+            if b.derelict {
+                draw_line(tl.x, tl.y, tl.x + w, tl.y + h, 1.5, hex(C_DERELICT));
+                draw_line(tl.x + w, tl.y, tl.x, tl.y + h, 1.5, hex(C_DERELICT));
+            }
+            if b.kind == BuildingKind::Hotel && ppt >= LABEL_MIN_PX / 2.0 {
+                let (bw, bh) = (w * 0.5, (h * 0.12).max(2.0));
+                let (bx, by) = (tl.x + (w - bw) / 2.0, tl.y + h * 0.78);
+                draw_rectangle(bx, by, bw, bh, hex(C_BED));
+                draw_rectangle(bx, by - bh, bw * 0.25, bh, hex(C_BED));
+            }
             if ppt >= LABEL_MIN_PX {
                 let size = (ppt * 1.4).clamp(14.0, 40.0);
                 let text = b.kind.letter().to_string();

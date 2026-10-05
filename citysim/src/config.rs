@@ -45,6 +45,13 @@ pub struct Config {
     /// partition, behaviour-neutral alone; plan D46).
     #[serde(default = "DistrictsCfg::from_assets")]
     pub districts: DistrictsCfg,
+    /// M12 phase 3 litter (§ 3); absent from pre-M12 saves: off (plan D46).
+    #[serde(default = "LitterCfg::off")]
+    pub litter: LitterCfg,
+    /// M12 phase 3 the street (§ 4): Hotels, derelicts, squats; absent from
+    /// pre-M12 saves: off (plan D46).
+    #[serde(default = "StreetCfg::off")]
+    pub street: StreetCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -101,6 +108,9 @@ pub struct JobsCfg {
     pub clerk: u32,
     pub bartender: u32,
     pub gravedigger: u32,
+    /// M12 D23: hired by `levers.sanitation_count`, not seeded.
+    #[serde(default)]
+    pub sanitation: u32,
 }
 
 impl JobsCfg {
@@ -111,6 +121,7 @@ impl JobsCfg {
             Role::Clerk => self.clerk,
             Role::Bartender => self.bartender,
             Role::Gravedigger => self.gravedigger,
+            Role::Sanitation => self.sanitation,
         }
     }
 }
@@ -139,6 +150,12 @@ impl BuildingCfg {
     pub fn inert() -> BuildingCfg {
         BuildingCfg { capacity: 0, stock_cap: 0, staff: 0 }
     }
+
+    /// M12 D20: a Hotel holds its guests (capacity is capped by `[street]
+    /// hotel_beds` and the interior when built).
+    pub fn hotel() -> BuildingCfg {
+        BuildingCfg { capacity: 12, stock_cap: 0, staff: 0 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -158,6 +175,9 @@ pub struct BuildingsCfg {
     /// M10, inert until M11.
     #[serde(default = "BuildingCfg::inert")]
     pub lot: BuildingCfg,
+    /// M12 D20: a Capsule Hotel (beds are `[street] hotel_beds`).
+    #[serde(default = "BuildingCfg::hotel")]
+    pub hotel: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -174,6 +194,7 @@ impl BuildingsCfg {
             BuildingKind::Warehouse => &self.warehouse,
             BuildingKind::SecurityOffice => &self.security_office,
             BuildingKind::Lot => &self.lot,
+            BuildingKind::Hotel => &self.hotel,
         }
     }
 }
@@ -203,6 +224,9 @@ pub struct EconomyCfg {
     pub wage_clerk: i64,
     pub wage_bartender: i64,
     pub wage_gravedigger: i64,
+    /// M12 D23: a city sweeper's wage.
+    #[serde(default = "default_wage_sanitation")]
+    pub wage_sanitation: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -237,6 +261,10 @@ fn default_wage_exec() -> i64 {
     10
 }
 
+fn default_wage_sanitation() -> i64 {
+    5
+}
+
 impl EconomyCfg {
     pub fn wage(&self, role: Role) -> i64 {
         match role {
@@ -245,6 +273,7 @@ impl EconomyCfg {
             Role::Clerk => self.wage_clerk,
             Role::Bartender => self.wage_bartender,
             Role::Gravedigger => self.wage_gravedigger,
+            Role::Sanitation => self.wage_sanitation,
         }
     }
 }
@@ -376,6 +405,9 @@ pub struct OrderFlatCfg {
     pub lielow: f32,
     #[serde(default = "OrderFlatCfg::default_breakout")]
     pub breakout: f32,
+    /// M12 D38 (phase 3): the gang's Squat order.
+    #[serde(default)]
+    pub squat: f32,
 }
 
 impl OrderFlatCfg {
@@ -742,6 +774,15 @@ impl RentCfg {
 pub struct FoundCostCfg {
     pub bar: i64,
     pub home: i64,
+    /// M12 D20: a Capsule Hotel on a Lot.
+    #[serde(default = "FoundCostCfg::default_hotel")]
+    pub hotel: i64,
+}
+
+impl FoundCostCfg {
+    fn default_hotel() -> i64 {
+        250
+    }
 }
 
 /// D4: daily upkeep per building kind, owner -> Treasury, non-city owners only.
@@ -755,6 +796,9 @@ pub struct UpkeepCfg {
     #[serde(deserialize_with = "per_tier")]
     pub home: [i64; 3],
     pub security_office: i64,
+    /// M12 D20.
+    #[serde(default = "UpkeepCfg::default_hotel")]
+    pub hotel: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -772,6 +816,10 @@ fn per_tier<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[i64; 3], D::Error
 }
 
 impl UpkeepCfg {
+    fn default_hotel() -> i64 {
+        10
+    }
+
     /// A building's daily upkeep; a Block's by its tier.
     pub fn for_building(&self, kind: BuildingKind, tier: u8) -> i64 {
         match kind {
@@ -780,6 +828,7 @@ impl UpkeepCfg {
             BuildingKind::Bar => self.bar,
             BuildingKind::Home => self.home[usize::from(tier.min(2))],
             BuildingKind::SecurityOffice => self.security_office,
+            BuildingKind::Hotel => self.hotel,
             _ => 0,
         }
     }
@@ -843,6 +892,8 @@ pub struct CorpsCfg {
     pub private_pursuit_radius: u32,
     pub found_cooldown_days: u64,
     pub residents_per_bar: u32,
+    /// M12 D20: `Register`'s target count of Hotels is `population ÷ this`.
+    pub residents_per_hotel: u32,
     /// M11 phase 4: a flat term on the Found goal's score (calibration knob).
     #[serde(default)]
     pub found_flat: f32,
@@ -897,7 +948,7 @@ impl CorpsCfg {
             shock_severity_rethink: 0.5,
             bankrupt_days: 14,
             incorporate_buildings: 2,
-            found_cost: FoundCostCfg { bar: 300, home: 400 },
+            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250 },
             wholesale: 2,
             contract_per_guard_day: 10,
             security_guards: 6,
@@ -905,7 +956,7 @@ impl CorpsCfg {
             monopoly_markup_cap: 2.0,
             squeeze_cap: 1.5,
             bar_owner_count: 0,
-            upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: [3; 3], security_office: 60 },
+            upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: [3; 3], security_office: 60, hotel: 10 },
             value: ValueCfg { farm: 1000, market: 1000, security_office: 500 },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
@@ -914,6 +965,7 @@ impl CorpsCfg {
             private_pursuit_radius: 16,
             found_cooldown_days: 10,
             residents_per_bar: 300,
+            residents_per_hotel: 800,
             found_flat: 0.0,
             hoard_tilt: 0.1,
             megacorp: Vec::new(),
@@ -1089,6 +1141,95 @@ impl DistrictsCfg {
     }
 }
 
+/// M12 litter (docs/M12_DISTRICTS.md § 3, plan D16-D19, D23-D24).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LitterCfg {
+    /// `off()` = false: no deposits, no delay, no sanitation credit.
+    pub enabled: bool,
+    /// Lost by every tile in 1..=254 at midnight.
+    pub decay: u8,
+    /// Ticks added to a Full mover's next step per band (clean, littered, trashed, heaped).
+    pub step_ticks: [u8; 4],
+    /// A Coarse walk is `1 + timed_mult × district litter` longer.
+    pub timed_mult: f32,
+    pub sleep_penalty: f32,
+    /// Mood: `− mood × district litter` in the hourly update.
+    pub mood: f32,
+    pub clean_per_shift: u32,
+    /// Coins per 32 units an owner cleans around its doors.
+    pub owner_clean_cost: i64,
+    pub owner_clean_units: u32,
+    pub gang_clean_per_member: u32,
+    pub clean_pride: f32,
+    /// The Damage hook (D19): rubble (255) blocks movement. Off in M12.
+    pub rubble_blocks: bool,
+    pub rubble_clean_mult: u32,
+}
+
+impl LitterCfg {
+    /// No litter at all (a pre-M12 save, `v1_profile`).
+    pub fn off() -> LitterCfg {
+        LitterCfg {
+            enabled: false,
+            decay: 1,
+            step_ticks: [0, 0, 1, 2],
+            timed_mult: 0.5,
+            sleep_penalty: 0.15,
+            mood: 0.2,
+            clean_per_shift: 120,
+            owner_clean_cost: 1,
+            owner_clean_units: 64,
+            gang_clean_per_member: 8,
+            clean_pride: 0.5,
+            rubble_blocks: false,
+            rubble_clean_mult: 4,
+        }
+    }
+}
+
+/// M12 the street (docs/M12_DISTRICTS.md § 4, plan D20-D28).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct StreetCfg {
+    /// `off()` = false: no Hotels or derelicts seeded, no Squat goal, no nightly booking.
+    pub enabled: bool,
+    pub hotel_beds: u8,
+    pub night_price: i64,
+    /// Tiles from a Full or Coarse agent to a Hotel door it will walk to.
+    pub hotel_reach: u32,
+    pub seed_hotels: usize,
+    pub seed_derelict_blocks: usize,
+    /// An unsold estate's building goes to the City only while the Treasury holds this.
+    pub city_absorb_floor: i64,
+    /// A non-city Block empty this long whose owner's purse is negative is abandoned.
+    pub abandon_days: u64,
+    pub squat_reach: u32,
+    pub squat_ban_days: u64,
+    /// Phase 3 decision (plan D25 leaves "who re-lets" open): the City
+    /// repairs and re-lets a derelict Block after this many days derelict,
+    /// while the Treasury holds `city_absorb_floor` (0 = never).
+    #[serde(default)]
+    pub relet_days: u64,
+}
+
+impl StreetCfg {
+    /// The street rung off (a pre-M12 save, `v1_profile`).
+    pub fn off() -> StreetCfg {
+        StreetCfg {
+            enabled: false,
+            hotel_beds: 12,
+            night_price: 3,
+            hotel_reach: 48,
+            seed_hotels: 0,
+            seed_derelict_blocks: 0,
+            city_absorb_floor: 5000,
+            abandon_days: 14,
+            squat_reach: 40,
+            squat_ban_days: 14,
+            relet_days: 0,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeversCfg {
     pub tax_rate: f32,
@@ -1096,6 +1237,9 @@ pub struct LeversCfg {
     pub guard_count: u8,
     pub immigration_per_week: u8,
     pub dole_per_day: u8,
+    /// M12 D23: city Sanitation workers (0 in a pre-M12 save: nobody sweeps).
+    #[serde(default)]
+    pub sanitation_count: u8,
 }
 
 impl Config {
@@ -1154,7 +1298,7 @@ impl Config {
     pub fn v1_profile(mut self) -> Config {
         self.world.map = "map_v1.txt".to_string();
         self.world.population = 300;
-        self.world.jobs = JobsCfg { farmer: 24, guard: 10, clerk: 3, bartender: 2, gravedigger: 1 };
+        self.world.jobs = JobsCfg { farmer: 24, guard: 10, clerk: 3, bartender: 2, gravedigger: 1, sanitation: 0 };
         self.world.market_initial = 600;
         self.world.warehouse_initial = 1500;
         self.world.treasury_initial = 5000;
@@ -1194,6 +1338,10 @@ impl Config {
         self.law.district_beats = false;
         self.bind.same_zone_weight = 1.0;
         self.bind.district_coverage = false;
+        // M12 D46: no litter, no Hotels, derelicts or squats, nobody sweeps.
+        self.litter = LitterCfg::off();
+        self.street = StreetCfg::off();
+        self.levers.sanitation_count = 0;
         self
     }
 
@@ -1223,6 +1371,9 @@ impl Config {
         // emigration), as v1_profile.
         c.classes.couple_immigration = false;
         c.classes.dreg_emigrate_days = 0;
+        // M12 D48: litter and the street on, but no seeded derelicts (the
+        // table measures behaviour, not one seed's housing shortage).
+        c.street.seed_derelict_blocks = 0;
         c
     }
 
@@ -1243,6 +1394,7 @@ impl Config {
             clerk: job(j.clerk),
             bartender: job(j.bartender),
             gravedigger: job(j.gravedigger),
+            sanitation: job(j.sanitation),
         };
         self.world.population = n;
         self.world.market_initial = scale(self.world.market_initial);
@@ -1251,6 +1403,7 @@ impl Config {
         self.levers.guard_count = (f64::from(self.levers.guard_count) * f).round().clamp(0.0, 255.0) as u8;
         self.levers.immigration_per_week =
             (f64::from(self.levers.immigration_per_week) * f).round().clamp(0.0, 255.0) as u8;
+        self.levers.sanitation_count = (f64::from(self.levers.sanitation_count) * f).round().clamp(0.0, 255.0) as u8;
         self.gangs.max_members = (self.gangs.max_members as f64 * f).round() as usize;
         self.economy.restock_floor = scale(self.economy.restock_floor);
         self.economy.restock_batch = scale(self.economy.restock_batch);

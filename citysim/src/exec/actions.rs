@@ -49,6 +49,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
             .map_or(0, |t| t.saturating_sub(world.tick)),
         ActionKind::Brawl => 15,
         ActionKind::Register => 30,
+        ActionKind::CheckIn => 5,
+        ActionKind::Occupy => 10,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -120,6 +122,16 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         ActionKind::Wander => true,
         ActionKind::Register => at(world, id, BuildingKind::Hall) && crate::systems::founding::can_found(world, id),
+        // M12 D21: inside a standing Hotel (bed and coins re-checked at completion).
+        ActionKind::CheckIn => world
+            .comp::<Position>(id)
+            .and_then(|p| p.building)
+            .is_some_and(|b| crate::systems::street::is_hotel(world, b)),
+        // M12 D27: inside the bound derelict.
+        ActionKind::Occupy => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            here.is_some_and(|b| crate::systems::street::is_derelict(world, b)) && (target.is_none() || target == here)
+        }
         ActionKind::CarryCorpse => target.is_some_and(|c| {
             world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried)
                 && crate::systems::law::near(world, id, c, 1)
@@ -317,17 +329,43 @@ pub fn on_complete(
             // A gang member holing up at their own Hideout sleeps at home.
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             let hideout_home = here.is_some() && crate::systems::gang::holes_up_at(world, id) == here;
-            if at_home(world, id) || hideout_home {
+            // M12 D21: a booked Hotel bed is a bed (and marks HOTEL).
+            let hotel = here.is_some() && crate::systems::street::booked_hotel(world, id) == here;
+            let squat = here.is_some() && world.comp::<crate::components::Squatter>(id).map(|s| s.building) == here;
+            // M12 D18: litter at the door (rough: where the agent lies) costs sleep's safety.
+            let penalty = world.config.litter.sleep_penalty;
+            let litter_at = |w: &World, t: TilePos| -> f32 {
+                if crate::systems::litter::enabled(w) {
+                    f32::from(crate::systems::litter::at(w, t)) / 255.0
+                } else {
+                    0.0
+                }
+            };
+            if at_home(world, id) || hideout_home || hotel {
                 world.mark_day(id, crate::components::trace_flags::SLEPT_AT_HOME);
+                if hotel {
+                    world.mark_day(id, crate::components::trace_flags::HOTEL);
+                }
                 // M10: +0.2 / +0.3 / +0.4 by the building's tier (Sump, Mid, Spire).
-                let tier = here.and_then(|b| world.comp::<Building>(b)).map_or(1, |b| b.tier);
+                let (tier, door) =
+                    here.and_then(|b| world.comp::<Building>(b)).map_or((1, None), |b| (b.tier, Some(b.door)));
+                let dirt = door.map_or(0.0, |d| litter_at(world, d));
                 if let Some(n) = world.comp_mut::<Needs>(id) {
-                    n.safety = (n.safety + 0.2 + 0.1 * f32::from(tier)).min(1.0);
+                    n.safety = (n.safety + 0.2 + 0.1 * f32::from(tier) - penalty * dirt).clamp(0.0, 1.0);
                 }
                 // (the spouse's intimacy bonus is granted at Sleep start: most
                 // nights' sleep is cut short by the morning shift, not completed)
-            } else if let Some(n) = world.comp_mut::<Needs>(id) {
-                n.safety = (n.safety - 0.1).max(0.0);
+            } else if squat {
+                // M12 D21: a squat is shelter, no tier.
+                world.mark_day(id, crate::components::trace_flags::SQUAT);
+                if let Some(n) = world.comp_mut::<Needs>(id) {
+                    n.safety = (n.safety + 0.1).min(1.0);
+                }
+            } else {
+                let dirt = world.comp::<Position>(id).map_or(0.0, |p| litter_at(world, p.tile));
+                if let Some(n) = world.comp_mut::<Needs>(id) {
+                    n.safety = (n.safety - 0.1 - penalty * dirt).max(0.0);
+                }
             }
             StepResult::Done
         }
@@ -357,6 +395,27 @@ pub fn on_complete(
             Ok(_) => StepResult::Done,
             Err(_) => StepResult::Failed(FailReason::PreconditionLost),
         },
+        // M12 D21: a bed and the coins re-checked; else the plan fails.
+        ActionKind::CheckIn => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            match here.map(|h| crate::systems::street::check_in(world, id, h)) {
+                Some(Ok(())) => StepResult::Done,
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        // M12 D27/D38: a squat (or a blow of the gang's claim on it).
+        ActionKind::Occupy => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            let Some(b) = here else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if crate::systems::gang::serving_squat(world, id) {
+                crate::systems::gang::squat_claim(world, id, b);
+                return StepResult::Done;
+            }
+            match crate::systems::street::occupy(world, id, b) {
+                Ok(()) => StepResult::Done,
+                Err(_) => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
         ActionKind::HaulToMarket => StepResult::Done, // moved on pickup, see on_start
         ActionKind::FarmWork => {
             let farm = world.comp::<Job>(id).and_then(|j| j.employer);

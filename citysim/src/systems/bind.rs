@@ -29,6 +29,16 @@ pub fn open_hole(world: &mut World, hole: Hole) -> HoleId {
     let (id, victim) = (hole.id, hole.victim);
     // M12 D7: the district's crime counter.
     crate::systems::districts::note_crime_in(world, hole.district);
+    // M12 D17: its litter on a street tile of the district drawn from the
+    // hole's own key (a killing's is the death's, `kill_by`).
+    let amount = match hole.kind {
+        crate::components::HoleKind::Robbed => Some((6, 0)),
+        crate::components::HoleKind::Assaulted => Some((12, 1)),
+        crate::components::HoleKind::Killed => None,
+    };
+    if let Some((a, r)) = amount {
+        crate::systems::litter::deposit_in_district(world, hole.district, a, r, hole.id);
+    }
     world.holes.insert(id, hole);
     let list = world.holes_by_agent.entry(victim).or_default();
     if let Err(i) = list.binary_search(&id) {
@@ -237,7 +247,10 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     let by_district = cfg.district_coverage && !hole.district.is_unset();
     let coverage =
         if by_district { world.district(hole.district).coverage } else { zone_law_coverage(world, hole.zone) };
-    let p = cfg.p_witness * coverage;
+    // M12 D18: a dirty street sees less.
+    let dirt =
+        if by_district && crate::systems::litter::enabled(world) { world.district(hole.district).litter } else { 0.0 };
+    let p = cfg.p_witness * coverage * (1.0 - 0.3 * dirt);
     let witnessed = rng.random::<f32>() < p;
     let mut witness = None;
     if let (true, Bound::Actor(actor)) = (witnessed, bound) {

@@ -206,11 +206,13 @@ fn test_eviction_frees_slot_and_evictee_rehouses_when_able() {
     assert!(w.residents_of(h1).is_empty(), "the slot is free");
     assert!(w.comp::<citysim::Life>(a).expect("life").events.iter().any(|e| e.kind == LifeKind::Evicted));
     assert!(w.stats.current.evictions >= 1 || w.eviction_log.len() == 1);
-    // Broke, they stay out; with coins they move in at the next midnight,
-    // and not with the landlord who evicted them.
+    // Broke, they stay out; with coins (M12: `rehouse_coins_mult` weeks of
+    // the dearest rent) they move in at the next midnight, and not with the
+    // landlord who evicted them.
     midnight(&mut w);
     assert_eq!(w.comp::<Household>(a).expect("h").home, None);
-    set_coins(&mut w, a, 20);
+    let deposit = w.config.rent.rehouse_coins_mult * 4;
+    set_coins(&mut w, a, deposit);
     midnight(&mut w);
     let home = w.comp::<Household>(a).expect("h").home.expect("re-housed");
     assert_eq!(events(&w, EventKind::Housed, a), 1);

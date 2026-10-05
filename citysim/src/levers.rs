@@ -197,6 +197,12 @@ pub struct Levers {
     /// M12 (curfew lands with the levers in phase 5; Vagrancy reads it now).
     #[serde(default)]
     pub curfew: [bool; crate::components::MAX_DISTRICTS],
+    /// M12 D23: city Sanitation workers (`[levers] sanitation_count`).
+    #[serde(default)]
+    pub sanitation_count: u8,
+    /// M12 D23: a multiplier on each district's sweeper weight (1.0).
+    #[serde(default = "default_guard_weight")]
+    pub sanitation_weight: [f32; crate::components::MAX_DISTRICTS],
 }
 
 fn default_guard_weight() -> [f32; crate::components::MAX_DISTRICTS] {
@@ -221,6 +227,8 @@ impl Levers {
             guard_weight: default_guard_weight(),
             stance_pin: [None; crate::components::MAX_DISTRICTS],
             curfew: [false; crate::components::MAX_DISTRICTS],
+            sanitation_count: cfg.levers.sanitation_count,
+            sanitation_weight: default_guard_weight(),
         }
     }
 }
@@ -692,6 +700,24 @@ impl World {
         if b.owner.is_some() {
             return Err(format!("owned by {}; nationalise it first", self.owner_label(b.owner)));
         }
+        // M12 D26: with the street on, a demolished Block stands derelict at
+        // half capacity (squatters may move in), its walls left as they are.
+        if self.config.street.enabled {
+            if b.derelict {
+                return Err("already derelict".into());
+            }
+            let residents: Vec<EntityId> = self.residents_of(home).to_vec();
+            let cap = b.capacity;
+            for &r in &residents {
+                let name = self.name_of(r);
+                self.push_event(EventKind::Homeless, &[r], format!("{name} is homeless"));
+            }
+            crate::systems::street::make_derelict(self, home, "demolished");
+            if let Some(bd) = self.comp_mut::<Building>(home) {
+                bd.capacity = cap / 2;
+            }
+            return Ok(residents.len());
+        }
         let (rect, door, occupants) = (b.rect, b.door, b.occupants.clone());
         let outside = self.outside_door(b);
         for o in occupants {
@@ -818,6 +844,8 @@ impl World {
                 revenue_today: 0,
                 revenue: std::collections::VecDeque::new(),
                 secured_by: None,
+                derelict: false,
+                empty_since: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

@@ -313,6 +313,14 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
                 let text = format!("{} bought {what} from bankrupt {name} for {v}", world.owner_label(Some(buyer)));
                 world.push_event(EventKind::Acquired, &[buyer, corp, b], text);
             }
+            // M12 D26: with the Treasury under `[street] city_absorb_floor`
+            // the City takes no Block, Bar or Hotel: it goes derelict.
+            None if world.config.street.enabled
+                && crate::systems::street::can_go_derelict(kind)
+                && world.purse(None) < world.config.street.city_absorb_floor =>
+            {
+                crate::systems::street::make_derelict(world, b, "unsold");
+            }
             None => {
                 // Foreclosed at no price (the M11 review's estate rule): the
                 // city's half-value purchase went into the estate and on to

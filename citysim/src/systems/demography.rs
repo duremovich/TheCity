@@ -395,6 +395,12 @@ fn corpses(world: &mut World) {
             freed.push((c, true));
             continue;
         }
+        // M12 D17: an unburied body a day old fouls the street around it.
+        if age >= TICKS_PER_DAY {
+            if let Some(t) = world.comp::<Position>(c).map(|p| p.tile) {
+                crate::systems::litter::deposit(world, t, 24, 0);
+            }
+        }
         if age > 2 * TICKS_PER_DAY {
             let tile = world.comp::<Position>(c).map_or(TilePos::default(), |p| p.tile);
             let near: Vec<EntityId> = world
@@ -709,7 +715,7 @@ pub fn emptiest_home(world: &World) -> Option<EntityId> {
         .into_iter()
         .flatten()
         .copied()
-        .filter(|&h| world.comp::<Building>(h).is_some_and(|b| !b.demolished))
+        .filter(|&h| world.comp::<Building>(h).is_some_and(|b| !b.demolished && !b.derelict))
         .map(|h| (h, 0))
         .collect();
     for c in world.citizens() {

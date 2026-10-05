@@ -59,6 +59,7 @@ fn inputs() -> OrderInputs {
         hoard_tilt: 0.1,
         target_cover: 0.0,
         jail_cover: 0.0,
+        derelicts: 0,
     }
 }
 

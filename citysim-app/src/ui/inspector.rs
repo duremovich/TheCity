@@ -217,7 +217,15 @@ fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         }
         match world.comp::<Household>(id).and_then(|h| h.home) {
             Some(h) => ui.label(format!("Block {}", building_label(world, h))),
-            None => ui.colored_label(RED, "Homeless"),
+            // M12 phase 3: the street's rung, if any.
+            None => match (
+                world.comp::<citysim::Squatter>(id).map(|s| s.building),
+                citysim::systems::street::booked_hotel(world, id),
+            ) {
+                (Some(b), _) => ui.colored_label(RED, format!("Homeless · squatting in {}", building_label(world, b))),
+                (None, Some(h)) => ui.colored_label(RED, format!("Homeless · slept at {}", building_label(world, h))),
+                (None, None) => ui.colored_label(RED, "Homeless"),
+            },
         };
         ownership(ui, app, world, id);
         ui.horizontal(|ui| {

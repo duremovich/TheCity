@@ -63,6 +63,7 @@ impl World {
         self.unindex_sentenced(id);
         self.unindex_corp(id);
         self.unindex_household(id);
+        self.unindex_squatter(id);
         self.alive[i] = false;
         self.generations[i] = self.generations[i].wrapping_add(1);
         self.clear_components(i);

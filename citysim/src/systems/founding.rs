@@ -11,8 +11,9 @@ use crate::events::EventKind;
 use crate::systems::ownership::{self, Flow};
 use crate::world::World;
 
-/// The kinds an agent can found, in tie-break order (D25: tie -> Bar).
-const FOUNDABLE: [BuildingKind; 2] = [BuildingKind::Bar, BuildingKind::Home];
+/// The kinds an agent can found, in tie-break order (D25: tie -> Bar; M12
+/// D20 appends the Hotel, foundable only with `[street] enabled`).
+const FOUNDABLE: [BuildingKind; 3] = [BuildingKind::Bar, BuildingKind::Home, BuildingKind::Hotel];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
 pub fn vacant_lots(world: &World) -> Vec<EntityId> {
@@ -24,12 +25,14 @@ pub fn vacant_lots(world: &World) -> Vec<EntityId> {
         .collect()
 }
 
-/// What founding a building of `kind` costs (Bar and Home only).
+/// What founding a building of `kind` costs (Bar, Home, and with the street
+/// on a Hotel).
 pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
     let c = &world.config.corps.found_cost;
     match kind {
         BuildingKind::Bar => Some(c.bar),
         BuildingKind::Home => Some(c.home),
+        BuildingKind::Hotel if world.config.street.enabled => Some(c.hotel),
         _ => None,
     }
 }
@@ -55,7 +58,7 @@ pub fn build_on_lot(
     kind: BuildingKind,
     owner: Option<EntityId>,
 ) -> Result<EntityId, String> {
-    if !matches!(kind, BuildingKind::Bar | BuildingKind::Home) {
+    if !matches!(kind, BuildingKind::Bar | BuildingKind::Home | BuildingKind::Hotel) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
     let Some(b) = world.comp::<Building>(lot) else { return Err("no such Lot".into()) };
@@ -89,7 +92,11 @@ pub fn build_on_lot(
     }
     let cfg = world.config.buildings.for_kind(kind).clone();
     let interior = usize::from(rect.w.saturating_sub(2)) * usize::from(rect.h.saturating_sub(2));
-    let capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cfg.capacity);
+    let mut capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cfg.capacity);
+    if kind == BuildingKind::Hotel {
+        // M12 D20: a bed per `[street] hotel_beds`, as the interior allows.
+        capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(world.config.street.hotel_beds);
+    }
     let tier = match world.map.zone(door) {
         Zone::Spire => 2,
         Zone::Sump => 0,
@@ -138,6 +145,7 @@ pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
     let per = |kind: BuildingKind| -> f32 {
         match kind {
             BuildingKind::Bar => world.config.corps.residents_per_bar.max(1) as f32,
+            BuildingKind::Hotel => world.config.corps.residents_per_hotel.max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };

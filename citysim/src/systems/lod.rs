@@ -373,6 +373,11 @@ pub fn run_statistical(world: &mut World) {
                     let home = world.comp::<Household>(id).and_then(|h| h.home);
                     if home.is_some() {
                         world.mark_day(id, trace_flags::SLEPT_AT_HOME);
+                    } else if crate::systems::street::booked_hotel(world, id).is_some() {
+                        // M12 D21: a booked bed is a bed.
+                        world.mark_day(id, trace_flags::SLEPT_AT_HOME | trace_flags::HOTEL);
+                    } else if world.has::<crate::components::Squatter>(id) {
+                        world.mark_day(id, trace_flags::SQUAT);
                     }
                     let with_spouse = home.is_some()
                         && world.spouse_of(id).is_some_and(|s| world.comp::<Household>(s).and_then(|h| h.home) == home);
@@ -596,6 +601,11 @@ fn stat_theft(world: &mut World, id: EntityId) -> bool {
         i.stolen_food += 1;
     }
     world.stats.current.thefts += 1;
+    // M12 D17: an off-screen theft's litter, in the Market's district, at a
+    // tile drawn from its own key.
+    let d = world.district_of_building(market);
+    let key = crate::components::hole_id(world.tick, id, HoleKind::Robbed);
+    crate::systems::litter::deposit_in_district(world, d, 6, 0, key);
     let name = world.name_of(id);
     world.push_event(EventKind::Theft, &[id, market], format!("{name} stole food (off screen)"));
     let caught: f64 = world.rng.agent(id).random();

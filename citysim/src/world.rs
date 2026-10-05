@@ -262,6 +262,9 @@ pub struct World {
     pub gang_member: Vec<Option<GangMember>>,
     pub corpse: Vec<Option<Corpse>>,
     pub child: Vec<Option<Child>>,
+    /// M12 D27: absent from older saves; `migrate_legacy` fills it.
+    #[serde(default)]
+    pub squatter: Vec<Option<Squatter>>,
     // non-agent components
     pub building: Vec<Option<Building>>,
     pub gang: Vec<Option<Gang>>,
@@ -420,6 +423,21 @@ pub struct World {
     /// taken by `law::sentence`, dropped with the agent.
     #[serde(default)]
     pub vagrancy_places: BTreeMap<EntityId, crate::components::DistrictId>,
+    /// M12 D16: litter, one byte per tile, row-major like `Map::tiles`
+    /// (`systems::litter`); saved run-length encoded, zero-filled for a
+    /// pre-M12 save by `migrate_legacy`.
+    #[serde(default, with = "crate::systems::litter::rle")]
+    pub litter: Vec<u8>,
+    /// M12 D20: Hotel bookings, guest -> (hotel, the tick the bed is theirs until).
+    #[serde(default)]
+    pub hotel_beds: BTreeMap<EntityId, (EntityId, Tick)>,
+    /// M12 D23: each Sanitation worker's district today.
+    #[serde(default)]
+    pub sweep_beats: BTreeMap<EntityId, crate::components::DistrictId>,
+    /// M12 D27: squatters by building, each list ascending; kept by the
+    /// Squatter hooks, rebuilt on load.
+    #[serde(skip)]
+    pub squat_index: BTreeMap<EntityId, Vec<EntityId>>,
     /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
     /// rebuilt on load.
     #[serde(skip)]
@@ -435,7 +453,7 @@ pub struct World {
     pub by_tier: [Vec<EntityId>; 3],
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; 5],
+    pub by_role: [Vec<EntityId>; 6],
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -485,6 +503,7 @@ components! {
     gang_member: GangMember,
     corpse: Corpse,
     child: Child,
+    squatter: Squatter,
     building: Building,
     gang: Gang,
     market: Market,
@@ -609,6 +628,7 @@ impl World {
             gang_member: Vec::new(),
             corpse: Vec::new(),
             child: Vec::new(),
+            squatter: Vec::new(),
             building: Vec::new(),
             gang: Vec::new(),
             market: Vec::new(),
@@ -665,6 +685,10 @@ impl World {
             report_places: VecDeque::new(),
             eviction_places: VecDeque::new(),
             vagrancy_places: BTreeMap::new(),
+            litter: Vec::new(),
+            hotel_beds: BTreeMap::new(),
+            sweep_beats: BTreeMap::new(),
+            squat_index: BTreeMap::new(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
@@ -674,10 +698,16 @@ impl World {
             names: names.clone(),
         };
         w.spawn_buildings();
+        w.litter = vec![0; w.map.w() * w.map.h()];
         systems::districts::rebuild(&mut w);
         w.spawn_gangs();
         w.spawn_population(&names);
+        // M12 D26: the derelicts are cut after the population is dealt (the
+        // world stream is untouched) and before ownership skips them; the
+        // Hotels go up on Lots once the Bar owners are dealt.
+        systems::street::seed_derelicts(&mut w);
         systems::ownership::seed(&mut w);
+        systems::street::seed_hotels(&mut w);
         w
     }
 
@@ -720,6 +750,8 @@ impl World {
                     revenue_today: 0,
                     revenue: VecDeque::new(),
                     secured_by: None,
+                    derelict: false,
+                    empty_since: None,
                 },
             );
             match def.kind {
@@ -989,6 +1021,8 @@ impl World {
             Self::list_insert(&mut self.corp_ids, id);
         } else if TypeId::of::<T>() == TypeId::of::<Household>() {
             self.index_household(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Squatter>() {
+            self.index_squatter(id);
         }
     }
 
@@ -1006,7 +1040,30 @@ impl World {
             self.unindex_corp(id);
         } else if TypeId::of::<T>() == TypeId::of::<Household>() {
             self.unindex_household(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Squatter>() {
+            self.unindex_squatter(id);
         }
+    }
+
+    /// File a squatter under its building (D27).
+    fn index_squatter(&mut self, id: EntityId) {
+        self.unindex_squatter(id);
+        if let Some(b) = self.comp::<Squatter>(id).map(|s| s.building) {
+            Self::list_insert(self.squat_index.entry(b).or_default(), id);
+        }
+    }
+
+    /// Drop an agent from every squat list (its Squatter removed, or despawned).
+    pub(crate) fn unindex_squatter(&mut self, id: EntityId) {
+        self.squat_index.retain(|_, list| {
+            Self::list_remove(list, id);
+            !list.is_empty()
+        });
+    }
+
+    /// The squatters of a building, ascending.
+    pub fn squatters_of(&self, b: EntityId) -> &[EntityId] {
+        self.squat_index.get(&b).map_or(&[], Vec::as_slice)
     }
 
     /// File the agent under its Household's Home.
@@ -1038,6 +1095,8 @@ impl World {
             if home.is_none() {
                 h.arrears = 0;
                 h.rent_due = 0.0;
+            } else {
+                h.homeless_since = None;
             }
             h.home = home;
             self.index_household(id);
@@ -1166,7 +1225,18 @@ impl World {
         self.sentenced_ids = self.with::<Sentence>();
         self.corp_ids = self.with::<Corp>();
         (self.residents, self.resident_home) = self.residents_from_stores();
+        self.squat_index = self.squat_index_from_stores();
         self.mean_price_cache = None;
+    }
+
+    fn squat_index_from_stores(&self) -> BTreeMap<EntityId, Vec<EntityId>> {
+        let mut out: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
+        for id in self.entities() {
+            if let Some(s) = self.comp::<Squatter>(id) {
+                out.entry(s.building).or_default().push(id);
+            }
+        }
+        out
     }
 
     #[allow(clippy::type_complexity)]
@@ -1182,9 +1252,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 5], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 6], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; 5] = Default::default();
+        let mut roles: [Vec<EntityId>; 6] = Default::default();
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -1233,6 +1303,9 @@ impl World {
         if self.corp_ids != self.with::<Corp>() {
             return Err(format!("corp_ids out of sync: {:?}", self.corp_ids));
         }
+        if self.squat_index != self.squat_index_from_stores() {
+            return Err("squat_index out of sync with the Squatter store".to_string());
+        }
         if let Some(idx) = self.report_index.get() {
             if *idx != Self::build_report_index(&self.crime_reports) {
                 return Err("report_index out of sync with crime_reports".to_string());
@@ -1270,7 +1343,9 @@ impl World {
         self.buildings_of_kind(kind)
             .iter()
             .filter_map(|&b| {
-                self.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.door.manhattan(from), b))
+                self.comp::<Building>(b)
+                    .filter(|bd| !bd.demolished && !bd.derelict)
+                    .map(|bd| (bd.door.manhattan(from), b))
             })
             .min()
             .map(|(_, b)| b)
@@ -1283,7 +1358,8 @@ impl World {
     /// stands on the same tile at both.
     pub fn local(&self, agent: EntityId, kind: BuildingKind) -> Option<EntityId> {
         let pos = self.comp::<Position>(agent)?;
-        let usable = |b: EntityId| self.comp::<Building>(b).is_some_and(|bd| bd.kind == kind && !bd.demolished);
+        let usable =
+            |b: EntityId| self.comp::<Building>(b).is_some_and(|bd| bd.kind == kind && !bd.demolished && !bd.derelict);
         if let Some(b) = pos.building.filter(|&b| usable(b)) {
             return Some(b);
         }
@@ -1795,6 +1871,10 @@ impl World {
         self.plan_queue.retain(|&(_, who), _| who != id);
         self.last_seen.remove(&id);
         self.vagrancy_places.remove(&id);
+        // M12 D27/D20: a squatter's slot and a guest's bed are freed.
+        self.remove::<Squatter>(id);
+        self.hotel_beds.remove(&id);
+        self.sweep_beats.remove(&id);
         crate::systems::bind::drop_victim_holes(self, id);
         self.drop_reports_of(id);
         for id2 in self.citizens() {
@@ -1870,6 +1950,14 @@ impl World {
         // ownership, rent 0 through `RentCfg::off`).
         if self.corp.len() < n {
             self.corp.resize_with(n, || None);
+        }
+        // M12 D27: a pre-M12 save has no squatter store; D16: nor litter.
+        if self.squatter.len() < n {
+            self.squatter.resize_with(n, || None);
+        }
+        let tiles = self.map.w() * self.map.h();
+        if self.litter.len() != tiles {
+            self.litter.resize(tiles, 0);
         }
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {
@@ -2014,6 +2102,12 @@ impl World {
         let tick = self.tick;
         let name = self.name_of(id);
         let child = self.has::<Child>(id);
+        // M12 D17: a violent death leaves its mark on the street.
+        if cause == DeathCause::Violence {
+            if let Some(t) = self.comp::<Position>(id).map(|p| p.tile) {
+                systems::litter::deposit(self, t, 40, 1);
+            }
+        }
         // Widowhood is recorded on the Death event, and `on_death` unlinks the pair.
         let spouse = self.spouse_of(id);
         // A dead guard lets their suspect go; a dead suspect frees their guard.
@@ -2059,6 +2153,9 @@ impl World {
         self.remove::<Sentence>(id);
         self.remove::<GangMember>(id);
         self.remove::<Child>(id);
+        self.remove::<Squatter>(id);
+        self.hotel_beds.remove(&id);
+        self.sweep_beats.remove(&id);
         self.release_all(id);
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);

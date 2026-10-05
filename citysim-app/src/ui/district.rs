@@ -67,6 +67,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
     ui.separator();
     law(ui, world, d);
     ui.separator();
+    street(ui, world, d);
+    ui.separator();
     ui.strong("Presence");
     let pres = citysim::systems::districts::presence(world, d);
     let total: f32 = pres.iter().map(|&(_, v)| v).sum();
@@ -86,6 +88,40 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
             ui.label(format!("{v:.3}"));
             ui.end_row();
         }
+    });
+}
+
+/// M12 phase 3: litter, the sweepers, and the street's rungs here.
+fn street(ui: &mut Ui, world: &World, d: DistrictId) {
+    let dist = world.district(d);
+    ui.strong("The street");
+    let band = citysim::systems::litter::band((dist.litter * 255.0).round().clamp(0.0, 255.0) as u8);
+    let derelicts: Vec<citysim::EntityId> = citysim::systems::street::derelicts(world)
+        .into_iter()
+        .filter(|&b| world.district_of_building(b) == d)
+        .collect();
+    let squatters: usize = derelicts.iter().map(|&b| world.squatters_of(b).len()).sum();
+    let hotels = world
+        .buildings_of_kind(citysim::BuildingKind::Hotel)
+        .iter()
+        .filter(|&&h| citysim::systems::street::is_hotel(world, h) && world.district_of_building(h) == d)
+        .count();
+    egui::Grid::new("district_street").striped(true).show(ui, |ui| {
+        ui.label("Litter");
+        ui.label(format!("{:.3} ({})", dist.litter, citysim::systems::litter::band_label(band)));
+        ui.end_row();
+        ui.label("Sweepers");
+        ui.label(format!("{}", dist.sweepers));
+        ui.end_row();
+        ui.label("Rough sleepers");
+        ui.label(format!("{} last night", dist.rough));
+        ui.end_row();
+        ui.label("Derelicts");
+        ui.label(format!("{} ({squatters} squatters)", derelicts.len()));
+        ui.end_row();
+        ui.label("Hotels");
+        ui.label(format!("{hotels}"));
+        ui.end_row();
     });
 }
 

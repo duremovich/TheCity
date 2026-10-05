@@ -152,6 +152,10 @@ fn fight_out(
     place: &str,
 ) -> Tally {
     let mut t = Tally::default();
+    // M12 D17: a brawl at a door (a raid, a breach) wrecks the street there.
+    if !defenders.is_empty() && !raiders.is_empty() {
+        crate::systems::litter::deposit(world, door, 32, 2);
+    }
     while let (Some(&r), Some(&d)) = (raiders.first(), defenders.first()) {
         let (_, loser, died) = law::resolve_fight(world, r, d);
         if died {

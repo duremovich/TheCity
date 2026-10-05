@@ -14,8 +14,8 @@
 use std::collections::BTreeSet;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Controller, Corp, CorpShock, District, DistrictId, Gang, Household, Mood, Position,
-    Shock, TilePos, Zone, MAX_DISTRICTS,
+    Brain, Building, BuildingKind, Controller, Corp, CorpShock, District, DistrictId, Gang, Household, Job, Mood,
+    Position, Role, Shock, TilePos, Zone, MAX_DISTRICTS,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -87,7 +87,8 @@ pub fn rebuild(world: &mut World) {
     let mut buildings: Vec<(EntityId, TilePos, BuildingKind, bool)> = Vec::new();
     for id in world.with::<Building>() {
         let Some(b) = world.comp::<Building>(id) else { continue };
-        buildings.push((id, b.door, b.kind, b.demolished));
+        // M12 D25: a derelict Block is nobody's Home.
+        buildings.push((id, b.door, b.kind, b.demolished || b.derelict));
         if b.demolished {
             continue;
         }
@@ -105,6 +106,7 @@ pub fn rebuild(world: &mut World) {
     let n = rows.len();
     let mut grid = vec![0u8; w * h];
     let mut walk = vec![0u32; n];
+    let mut streets: Vec<Vec<u32>> = vec![Vec::new(); n];
     let mut sum = vec![(0u64, 0u64, 0u64); n];
     for y in 0..h {
         for x in 0..w {
@@ -116,6 +118,7 @@ pub fn rebuild(world: &mut World) {
             let s = &mut sum[usize::from(d)];
             if street {
                 walk[usize::from(d)] += 1;
+                streets[usize::from(d)].push(i as u32);
                 s.0 += x as u64;
                 s.1 += y as u64;
                 s.2 += 1;
@@ -164,6 +167,7 @@ pub fn rebuild(world: &mut World) {
         d.buildings.clear();
         d.homes.clear();
         d.walk_tiles = walk[i];
+        d.streets = std::mem::take(&mut streets[i]);
         let (sx, sy, c) = sum[i];
         d.centroid = match ((sx + c / 2).checked_div(c), (sy + c / 2).checked_div(c)) {
             (Some(x), Some(y)) => TilePos { x: x as u8, y: y as u8 },
@@ -171,11 +175,11 @@ pub fn rebuild(world: &mut World) {
         };
     }
     buildings.sort_by_key(|&(id, ..)| id);
-    for (id, door, kind, demolished) in buildings {
+    for (id, door, kind, unhoused) in buildings {
         let i = usize::from(grid[usize::from(door.y) * w + usize::from(door.x)] & ID_MASK);
         let d = &mut world.districts[i];
         d.buildings.push(id);
-        if kind == BuildingKind::Home && !demolished {
+        if kind == BuildingKind::Home && !unhoused {
             d.homes.push(id);
         }
     }
@@ -207,12 +211,24 @@ impl World {
         self.comp::<Building>(b).map_or(DistrictId(0), |bd| self.district_of(bd.door))
     }
 
+    /// The district `d` (out of range: the last). Before `rebuild` has run
+    /// (a hand-built world) there are none: an empty default (review fix).
     pub fn district(&self, d: DistrictId) -> &District {
-        &self.districts[d.index().min(self.districts.len().saturating_sub(1))]
+        static EMPTY: std::sync::OnceLock<District> = std::sync::OnceLock::new();
+        match self.districts.len() {
+            0 => EMPTY.get_or_init(District::default),
+            n => &self.districts[d.index().min(n - 1)],
+        }
     }
 
+    /// As `district`; before `rebuild` it creates the one default district
+    /// (and `debug_assert!`s: a caller mutating districts should have built them).
     pub fn district_mut(&mut self, d: DistrictId) -> &mut District {
-        let i = d.index().min(self.districts.len().saturating_sub(1));
+        debug_assert!(!self.districts.is_empty(), "district_mut before districts::rebuild");
+        if self.districts.is_empty() {
+            self.districts.push(District::default());
+        }
+        let i = d.index().min(self.districts.len() - 1);
         &mut self.districts[i]
     }
 
@@ -247,12 +263,15 @@ pub fn note_eviction(world: &mut World, home: EntityId, owner: Option<EntityId>)
 }
 
 /// D6: daily at midnight after `classes`; at 03:00 the street's nightly
-/// pass (phase 2: Vagrancy, with `[law] district_beats`).
+/// pass (Hotels and squats with `[street] enabled`, Vagrancy with `[law]
+/// district_beats`, the street's litter with `[litter] enabled`).
 pub fn run(world: &mut World) {
     let tod = world.tick_of_day();
     if tod == 0 {
         daily(world);
-    } else if tod == crate::systems::street::NIGHTLY_TOD && world.config.law.district_beats {
+    } else if tod == crate::systems::street::NIGHTLY_TOD
+        && (world.config.law.district_beats || world.config.street.enabled || world.config.litter.enabled)
+    {
         crate::systems::street::nightly(world);
     }
 }
@@ -272,8 +291,215 @@ pub fn daily(world: &mut World) {
             }
         }
     }
+    // M12 phase 3: the street's day (abandonment, re-letting), then the
+    // litter's (decay, the sweepers, owners and gangs cleaning, the means).
+    crate::systems::street::daily(world);
+    if crate::systems::litter::enabled(world) {
+        crate::systems::litter::decay(world);
+        crate::systems::litter::district_means(world);
+        sanitation(world);
+        owner_cleaning(world);
+        gang_cleaning(world);
+        crate::systems::litter::district_means(world);
+    }
     aggregates(world);
     update_control(world);
+}
+
+// ---------------------------------------------------------------------------
+// Cleaning (plan D23, D24)
+// ---------------------------------------------------------------------------
+
+/// D23: the city's sweepers (`Role::Sanitation`), ascending.
+pub fn sweepers(world: &World) -> Vec<EntityId> {
+    world.workers(Role::Sanitation).to_vec()
+}
+
+/// D23, daily at midnight: deal the sweepers to districts by `litter_d ×
+/// walk_tiles_d × levers.sanitation_weight[d]` (largest remainder, ties
+/// the lower district; in id order, district 0 first), log `Sanitation`
+/// when the allocation changes, then credit every sweeper whose shift
+/// yesterday was worked with `clean_per_shift` units off its beat's
+/// dirtiest street tiles.
+pub fn sanitation(world: &mut World) {
+    let workers = sweepers(world);
+    let n = world.districts.len();
+    // The credit: yesterday's beats, yesterday's shifts.
+    let per = world.config.litter.clean_per_shift;
+    let mut units = vec![0u32; n];
+    for &s in &workers {
+        let Some(&d) = world.sweep_beats.get(&s) else { continue };
+        let worked = world.comp::<Job>(s).is_some_and(|j| {
+            let yesterday = j.shift_key_at(world.tick.saturating_sub(1));
+            j.last_shift_day == Some(yesterday)
+        });
+        if worked && d.index() < n {
+            units[d.index()] += per;
+        }
+    }
+    for (i, &u) in units.iter().enumerate() {
+        crate::systems::litter::clean_dirtiest(world, DistrictId(i as u8), u);
+    }
+    // Today's allocation.
+    let weights: Vec<f32> = world
+        .districts
+        .iter()
+        .enumerate()
+        .map(|(i, d)| {
+            let lever = world.levers.sanitation_weight.get(i).copied().unwrap_or(1.0).max(0.0);
+            d.litter * d.walk_tiles as f32 * lever
+        })
+        .collect();
+    let alloc = crate::util::largest_remainder(workers.len() as u32, &weights);
+    let old: Vec<u8> = world.districts.iter().map(|d| d.sweepers).collect();
+    world.sweep_beats.clear();
+    let mut it = workers.iter();
+    for (i, &k) in alloc.iter().enumerate() {
+        for _ in 0..k {
+            if let Some(&s) = it.next() {
+                world.sweep_beats.insert(s, DistrictId(i as u8));
+            }
+        }
+    }
+    for (d, &k) in world.districts.iter_mut().zip(&alloc) {
+        d.sweepers = k;
+    }
+    if old != alloc && !workers.is_empty() {
+        let text = world
+            .districts
+            .iter()
+            .filter(|d| d.sweepers > 0)
+            .map(|d| format!("{} {}", d.name, d.sweepers))
+            .collect::<Vec<_>>()
+            .join(", ");
+        world.push_event(EventKind::Sanitation, &[], format!("sweepers dealt: {text}"));
+    }
+}
+
+/// D24: an owner keeps its doors clean when it can: a corp holding Secure,
+/// or any owner whose buildings took in more today than their upkeep,
+/// pays the City `owner_clean_cost` per 32 units (rounded up) to clear up to
+/// `owner_clean_units` within 2 tiles of each owned door (ascending); a door
+/// it cannot pay for is skipped. Buildings ascending by id.
+pub fn owner_cleaning(world: &mut World) {
+    let cfg = world.config.litter.clone();
+    let up = world.config.corps.upkeep.clone();
+    // Per owner: today's revenue and upkeep over its standing buildings.
+    // Per owner: (revenue, upkeep, doors).
+    type Books = std::collections::BTreeMap<EntityId, (i64, i64, Vec<TilePos>)>;
+    let mut books: Books = Default::default();
+    for b in world.with::<Building>() {
+        let Some(bd) = world.comp::<Building>(b) else { continue };
+        let Some(o) = bd.owner else { continue };
+        if bd.demolished || bd.derelict || bd.kind == BuildingKind::Lot {
+            continue;
+        }
+        let e = books.entry(o).or_default();
+        // `revenue_today` was rolled into `revenue` by `ownership::run` at this midnight.
+        e.0 += bd.revenue.back().copied().unwrap_or(0);
+        e.1 += up.for_building(bd.kind, bd.tier);
+        e.2.push(bd.door);
+    }
+    for (owner, (revenue, upkeep, doors)) in books {
+        let secure = world.comp::<Corp>(owner).is_some_and(|c| c.order == crate::components::CorpOrder::Secure);
+        if !(secure || revenue > upkeep) {
+            continue;
+        }
+        let corp = world.has::<Corp>(owner);
+        for door in doors {
+            let dirt = crate::systems::litter::units_around(world, door, 2);
+            if dirt == 0 {
+                continue;
+            }
+            let units = dirt.min(cfg.owner_clean_units);
+            let cost = cfg.owner_clean_cost * i64::from(units.div_ceil(32));
+            if cost > 0 {
+                if !corp && world.purse(Some(owner)) < cost {
+                    continue;
+                }
+                let flow = crate::systems::ownership::Flow::Sanitation;
+                if corp {
+                    crate::systems::ownership::charge(world, Some(owner), None, cost, flow);
+                } else {
+                    crate::systems::ownership::pay(world, Some(owner), None, cost, flow);
+                }
+            }
+            crate::systems::litter::clean_around(world, door, 2, units);
+        }
+    }
+}
+
+/// D24: a gang controlling a district whose leader's pride is at least
+/// `clean_pride`, under an order that is no raid and not LieLow, clears
+/// `gang_clean_per_member × fit members` units around its held Homes' doors
+/// there, free (Homes ascending, the units shared out in turn).
+pub fn gang_cleaning(world: &mut World) {
+    let cfg = world.config.litter.clone();
+    for i in 0..world.districts.len() {
+        let Controller::Gang(g) = world.districts[i].control else { continue };
+        let Some(gang) = world.comp::<Gang>(g) else { continue };
+        if gang.order.is_raid() || gang.order == crate::components::Order::LieLow {
+            continue;
+        }
+        let pride = gang.leader.and_then(|l| world.comp::<crate::components::Personality>(l)).map_or(0.0, |p| p.pride);
+        if pride < cfg.clean_pride {
+            continue;
+        }
+        let d = DistrictId(i as u8);
+        let doors: Vec<TilePos> = gang
+            .territory
+            .iter()
+            .copied()
+            .filter(|&h| world.district_of_building(h) == d)
+            .filter_map(|h| world.comp::<Building>(h).map(|b| b.door))
+            .collect();
+        let mut left = cfg.gang_clean_per_member * crate::systems::gang::fit_headcount(world, g) as u32;
+        for door in doors {
+            if left == 0 {
+                break;
+            }
+            left -= crate::systems::litter::clean_around(world, door, 2, left);
+        }
+    }
+}
+
+/// D23 (plan deviation: its own reconcile, not `law::reconcile_guards`
+/// generalised): hire jobless free adults (no lawfulness floor; the
+/// poorest first, ties lower id) or let the newest go, at most five a
+/// day, toward `levers.sanitation_count`; the Recycler employs them, the
+/// Treasury pays them.
+pub fn reconcile_sanitation(world: &mut World) {
+    let want = usize::from(world.levers.sanitation_count);
+    let have = sweepers(world);
+    let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
+    if have.len() < want {
+        let mut candidates: Vec<(i64, EntityId)> = world
+            // scan-ok: daily: reconcile_sanitation
+            .citizens()
+            .into_iter()
+            .filter(|&id| {
+                world.has::<Brain>(id) && !world.has::<Job>(id) && !world.has::<crate::components::Sentence>(id)
+            })
+            .filter(|&id| !world.has::<crate::components::GangMember>(id))
+            .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
+            .filter(|&id| crate::systems::demography::is_adult(world, id))
+            .filter(|&id| !crate::systems::founding::is_exec(world, id))
+            .map(|id| (world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins), id))
+            .collect();
+        candidates.sort_unstable();
+        for (_, id) in candidates.into_iter().take((want - have.len()).min(5)) {
+            crate::systems::demography::hire(world, id, recycler, Role::Sanitation);
+        }
+    } else if have.len() > want {
+        let mut newest: Vec<(std::cmp::Reverse<u64>, EntityId)> =
+            have.iter().filter_map(|&s| world.comp::<Job>(s).map(|j| (std::cmp::Reverse(j.hired_tick), s))).collect();
+        newest.sort_unstable();
+        for (_, s) in newest.into_iter().take((have.len() - want).min(5)) {
+            let text = format!("{} let go from Sanitation", world.name_of(s));
+            crate::systems::economy::dismiss(world, s, Some(recycler), text);
+            world.sweep_beats.remove(&s);
+        }
+    }
 }
 
 /// D7: one O(agents) pass. Every living adult with a Brain is binned by the
@@ -326,7 +552,9 @@ pub fn aggregates(world: &mut World) {
         d.crime_rate = if population[i] == 0 || d.homes.is_empty() {
             0.0
         } else {
-            crimes as f32 / CRIME_DAYS as f32 / population[i] as f32 * 100.0
+            // Over the days of history there are (review fix: a fresh world
+            // has fewer than 7, and dividing by 7 understated its rate).
+            crimes as f32 / d.crimes.len().max(1) as f32 / population[i] as f32 * 100.0
         };
         d.residents = std::mem::take(&mut residents[i]);
         d.trace = vec![
@@ -394,6 +622,10 @@ pub fn presence(world: &World, d: DistrictId) -> Vec<(Controller, f32)> {
                 add(&mut out, Controller::Gang(c.gang), wts.held_home);
             }
         }
+        // D8: a derelict counts for nobody (a gang's held squat counted above).
+        if bd.derelict {
+            continue;
+        }
         if bd.kind == BuildingKind::Hideout && hideouts.contains(&b) {
             // A gang's own Hideout is its presence, whoever holds the deed.
             if let Some(&g) = world.gang_list().iter().find(|&&g| world.comp::<Gang>(g).is_some_and(|x| x.hideout == b))
@@ -445,8 +677,10 @@ pub fn controller_label(world: &World, c: Controller) -> String {
 }
 
 /// D8: recompute every district's controller. The first computation after a
-/// seed or a pre-M12 load is silent; a later change logs `DistrictControl`
-/// and shocks the faction that lost it.
+/// seed or a pre-M12 load is silent; a later change logs `DistrictControl`.
+/// The faction that held it is shocked only when another faction (not
+/// Contested) takes it over, so a share hovering at `control_min_share` does
+/// not shock its gang every few days (phase 1 review).
 pub fn update_control(world: &mut World) {
     let min_share = world.config.districts.control_min_share;
     let now = world.tick;
@@ -470,6 +704,12 @@ pub fn update_control(world: &mut World) {
         if init && ctrl == old {
             continue;
         }
+        // A save from before the field (or a fresh district) has no holder
+        // recorded: the standing controller is it.
+        let last = match world.districts[i].last_holder {
+            Controller::Contested => old,
+            h => h,
+        };
         {
             let x = &mut world.districts[i];
             x.control = ctrl;
@@ -477,6 +717,9 @@ pub fn update_control(world: &mut World) {
             x.control_init = true;
         }
         if !init {
+            if ctrl != Controller::Contested {
+                world.districts[i].last_holder = ctrl;
+            }
             continue;
         }
         let name = world.districts[i].name.clone();
@@ -484,10 +727,20 @@ pub fn update_control(world: &mut World) {
             format!("{name}: {} -> {} ({share:.2})", controller_label(world, old), controller_label(world, ctrl));
         let actors: Vec<EntityId> = [old.entity(), ctrl.entity()].into_iter().flatten().collect();
         world.push_event(EventKind::DistrictControl, &actors, text);
-        match old {
-            Controller::Gang(g) => crate::systems::gang::push_shock(world, g, Shock::LostDistrict),
-            Controller::Corp(c) => crate::systems::ownership::push_corp_shock(world, c, CorpShock::LostDistrict),
-            Controller::Contested | Controller::City => {}
+        // Review fix: a share wobbling across `control_min_share` flips the
+        // district to Contested and back every few days; only another
+        // faction taking it (directly or after a Contested spell) is a loss.
+        if ctrl != Controller::Contested {
+            world.districts[i].last_holder = ctrl;
+            if last != ctrl {
+                match last {
+                    Controller::Gang(g) => crate::systems::gang::push_shock(world, g, Shock::LostDistrict),
+                    Controller::Corp(c) => {
+                        crate::systems::ownership::push_corp_shock(world, c, CorpShock::LostDistrict)
+                    }
+                    Controller::Contested | Controller::City => {}
+                }
+            }
         }
     }
 }

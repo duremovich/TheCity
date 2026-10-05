@@ -27,7 +27,7 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Guard => LocationKey::Jail,
         Role::Clerk => LocationKey::Market,
         Role::Bartender => LocationKey::Bar,
-        Role::Gravedigger => LocationKey::Cemetery,
+        Role::Gravedigger | Role::Sanitation => LocationKey::Cemetery,
     }
 }
 

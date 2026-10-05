@@ -83,6 +83,12 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     let salience = crime_salience(crime);
     // M12 D7: the district's crime counter.
     crate::systems::districts::note_crime(world, tile);
+    // M12 D17: the crime's litter (a Murder's is its death's, `kill_by`).
+    match crime {
+        Crime::Theft => crate::systems::litter::deposit(world, tile, 6, 0),
+        Crime::Extortion | Crime::Assault => crate::systems::litter::deposit(world, tile, 12, 1),
+        Crime::Murder | Crime::Vagrancy => {}
+    }
 
     let witnesses: Vec<EntityId> = world
         .bodies()
@@ -521,6 +527,9 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
     }
     if until.saturating_sub(world.tick) > 3 * TICKS_PER_DAY {
         world.vacate_job(who);
+        // M12 D27: a long sentence loses the squat (and tonight's bed).
+        world.remove::<crate::components::Squatter>(who);
+        world.hotel_beds.remove(&who);
     }
     if let Some(b) = world.comp_mut::<Brain>(who) {
         b.current_goal = None;
@@ -633,6 +642,8 @@ pub fn run(world: &mut World) {
         expire_warrants(world);
         jail_upkeep(world);
         reconcile_guards(world);
+        // M12 D23: the city's sweepers, toward `levers.sanitation_count`.
+        crate::systems::districts::reconcile_sanitation(world);
     }
     // The captain's daily rescoring, after the guard roster is reconciled.
     crate::systems::law_brain::run(world);

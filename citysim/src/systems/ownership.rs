@@ -143,6 +143,12 @@ pub enum Flow {
     Tax,
     /// M12 D15: a Vagrancy fine, agent -> Treasury (untaxed).
     Fine,
+    /// M12 D20: a Hotel night, guest -> the Hotel's owner (taxed).
+    Hotel,
+    /// M12 D24: an owner pays the City to sweep around its doors (untaxed).
+    Sanitation,
+    /// M12 D39 (phase 4): a corp robbed by a raid (untaxed).
+    Robbery,
 }
 
 impl Flow {
@@ -156,7 +162,7 @@ impl Flow {
     /// Owner revenue taxed at the moment of the flow (spec § 3); wage tax
     /// keeps `Job.tax_accum`.
     pub fn taxed(self) -> bool {
-        matches!(self, Flow::Food | Flow::Drink | Flow::Rent | Flow::Contract | Flow::Wholesale)
+        matches!(self, Flow::Food | Flow::Drink | Flow::Rent | Flow::Contract | Flow::Wholesale | Flow::Hotel)
     }
 }
 
@@ -171,9 +177,16 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Wholesale => row.flow_wholesale += coins,
         Flow::Contract => row.flow_contract += coins,
         Flow::Tax => row.flow_tax += coins,
-        Flow::Found | Flow::Sale | Flow::Bribe | Flow::Subsidy | Flow::SellFood | Flow::JailFood | Flow::Fine => {
-            row.flow_other += coins
-        }
+        Flow::Found
+        | Flow::Sale
+        | Flow::Bribe
+        | Flow::Subsidy
+        | Flow::SellFood
+        | Flow::JailFood
+        | Flow::Fine
+        | Flow::Hotel
+        | Flow::Sanitation
+        | Flow::Robbery => row.flow_other += coins,
     }
 }
 
@@ -444,10 +457,16 @@ pub fn on_owner_gone(world: &mut World, agent: EntityId) {
     }
 }
 
-/// The Nationalise lever: the Treasury buys a building at its value.
+/// The Nationalise lever: the Treasury buys a building at its value. A
+/// derelict (M12 D26) has nobody to pay: the City repairs and re-lets it.
 pub fn nationalise(world: &mut World, b: EntityId) -> Result<String, String> {
     let Some(bd) = world.comp::<Building>(b) else { return Err("no such building".into()) };
     let (kind, owner) = (bd.kind, bd.owner);
+    if bd.derelict {
+        let what = world.name_of(b);
+        crate::systems::street::restore(world, b, None, "nationalised");
+        return Ok(format!("the city took derelict {what} back"));
+    }
     if owner.is_none() {
         return Err("already the city's".into());
     }
@@ -563,6 +582,8 @@ pub fn seed(world: &mut World) {
         .buildings_of_kind(BuildingKind::Home)
         .iter()
         .enumerate()
+        // M12 D26: the seeded derelicts belong to nobody.
+        .filter(|&(_, &h)| world.comp::<Building>(h).is_some_and(|b| !b.derelict))
         .filter_map(|(k, &h)| world.comp::<Building>(h).map(|b| (std::cmp::Reverse(b.tier), k, h)))
         .collect();
     pool.sort();
@@ -662,7 +683,8 @@ pub fn seed(world: &mut World) {
 /// agent landlord's `base[tier]`; every one under the rent cap.
 pub fn rent_for(world: &World, home: EntityId) -> i64 {
     let Some(b) = world.comp::<Building>(home) else { return 0 };
-    if b.demolished {
+    // M12 D25: a derelict is let to nobody.
+    if b.demolished || b.derelict {
         return 0;
     }
     let tier = usize::from(b.tier.min(2));
@@ -689,7 +711,7 @@ pub fn rent_tenths_for(world: &World, home: EntityId) -> i64 {
     if !world.config.economy.price_tenths {
         return whole;
     }
-    let Some(b) = world.comp::<Building>(home).filter(|b| !b.demolished) else { return 0 };
+    let Some(b) = world.comp::<Building>(home).filter(|b| !b.demolished && !b.derelict) else { return 0 };
     let OwnerKind::Corp(c) = owner_kind(world, b.owner) else { return whole };
     let base = world.config.rent.base[usize::from(b.tier.min(2))];
     let level = world.comp::<Corp>(c).map_or(1.0, |c| c.level(Niche::Housing));
@@ -948,6 +970,8 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
     for c in children {
         put_out(world, c, home, outside);
     }
+    // M12 D17: belongings on the street at the Block door.
+    crate::systems::litter::deposit(world, outside, 24, 1);
 }
 
 /// Homeless adults move in where they can pay `rehouse_coins_mult × rent`,
@@ -959,8 +983,13 @@ fn rehouse(world: &mut World) {
     let tick = world.tick;
     // Phase 5: an evictee sleeps rough `rehouse_wait_days` before anyone
     // takes them in (re-housing was the same night, so no Dreg ever existed).
+    // M12 D28: so does anyone put on the street without an eviction (a
+    // derelict's residents, the seeded homeless).
     let waiting = |w: &World, a: EntityId| {
-        wait > 0 && w.comp::<Household>(a).and_then(|h| h.evicted_by).is_some_and(|(_, t)| tick < t + wait)
+        let h = w.comp::<Household>(a);
+        wait > 0
+            && (h.and_then(|h| h.evicted_by).is_some_and(|(_, t)| tick < t + wait)
+                || h.and_then(|h| h.homeless_since).is_some_and(|t| tick < t + wait))
     };
     let homeless: Vec<EntityId> = world
         // scan-ok: daily: re-housing
@@ -979,7 +1008,10 @@ fn rehouse(world: &mut World) {
         .buildings_of_kind(BuildingKind::Home)
         .iter()
         .filter_map(|&h| {
-            world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (h, b.door, b.owner, usize::from(b.capacity)))
+            world
+                .comp::<Building>(h)
+                .filter(|b| !b.demolished && !b.derelict)
+                .map(|b| (h, b.door, b.owner, usize::from(b.capacity)))
         })
         .collect();
     for a in homeless {
@@ -1013,6 +1045,8 @@ fn rehouse(world: &mut World) {
         let label = world.owner_label(world.owner_of(home));
         for &m in &movers {
             world.set_home(m, Some(home));
+            // M12 D28: housed: the squat and the booking end.
+            crate::systems::street::on_housed(world, m);
             let name = world.name_of(m);
             world.push_event(EventKind::Housed, &[m, home], format!("{name} moved into {place} ({label})"));
             world.stats.current.housed += 1;

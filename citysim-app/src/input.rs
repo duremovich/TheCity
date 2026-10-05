@@ -77,6 +77,9 @@ pub fn handle(app: &mut App, world: &mut World) {
     if is_key_pressed(KeyCode::B) {
         app.show_districts = !app.show_districts;
     }
+    if is_key_pressed(KeyCode::L) {
+        app.show_litter = !app.show_litter;
+    }
     if is_key_pressed(KeyCode::F) {
         app.follow = app.selected.is_some() && !app.follow;
     }

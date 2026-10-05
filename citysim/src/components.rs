@@ -160,10 +160,12 @@ pub enum BuildingKind {
     SecurityOffice,
     /// M10: an empty walled-off plot (no walls, one door), inert until M11.
     Lot,
+    /// M12 D20: beds by the night for the homeless who can pay.
+    Hotel,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 11] = [
+    pub const ALL: [BuildingKind; 12] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -175,6 +177,7 @@ impl BuildingKind {
         BuildingKind::Warehouse,
         BuildingKind::SecurityOffice,
         BuildingKind::Lot,
+        BuildingKind::Hotel,
     ];
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
@@ -190,6 +193,7 @@ impl BuildingKind {
             "Warehouse" => BuildingKind::Warehouse,
             "SecurityOffice" => BuildingKind::SecurityOffice,
             "Lot" => BuildingKind::Lot,
+            "Hotel" => BuildingKind::Hotel,
             _ => return None,
         })
     }
@@ -208,6 +212,7 @@ impl BuildingKind {
             BuildingKind::Warehouse => "Reserve Depot",
             BuildingKind::SecurityOffice => "Security Office",
             BuildingKind::Lot => "Lot",
+            BuildingKind::Hotel => "Capsule Hotel",
         }
     }
 
@@ -225,6 +230,7 @@ impl BuildingKind {
             BuildingKind::Warehouse => 'W',
             BuildingKind::SecurityOffice => 'O',
             BuildingKind::Lot => 'L',
+            BuildingKind::Hotel => 'N',
         }
     }
 }
@@ -255,10 +261,13 @@ pub enum Role {
     Clerk,
     Bartender,
     Gravedigger,
+    /// M12 D23: the city's street sweepers, employed at the Recycler.
+    Sanitation,
 }
 
 impl Role {
-    pub const ALL: [Role; 5] = [Role::Farmer, Role::Guard, Role::Clerk, Role::Bartender, Role::Gravedigger];
+    pub const ALL: [Role; 6] =
+        [Role::Farmer, Role::Guard, Role::Clerk, Role::Bartender, Role::Gravedigger, Role::Sanitation];
 
     /// The display name (M11 section 1).
     pub fn label(self) -> &'static str {
@@ -268,6 +277,7 @@ impl Role {
             Role::Clerk => "Clerk",
             Role::Bartender => "Bartender",
             Role::Gravedigger => "Recycler Tech",
+            Role::Sanitation => "Sanitation",
         }
     }
 
@@ -279,6 +289,7 @@ impl Role {
             Role::Clerk => BuildingKind::Market,
             Role::Bartender => BuildingKind::Bar,
             Role::Gravedigger => BuildingKind::Cemetery,
+            Role::Sanitation => BuildingKind::Cemetery,
         }
     }
 }
@@ -408,6 +419,8 @@ pub enum GoalKind {
     Idle,
     /// M11 D26: open a business (a Bar or a Home) on a vacant Lot.
     Found,
+    /// M12 D27: a homeless adult who cannot afford a Hotel moves into a derelict.
+    Squat,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -421,11 +434,14 @@ pub enum Order {
     LieLow,
     /// M9: muster, march to the Jail, breach it and free our convicts.
     BreakOut,
+    /// M12 D38 (phase 3): take a derelict Block in the gang's districts
+    /// through the claim machinery.
+    Squat,
 }
 
 impl Order {
-    pub const ALL: [Order; 6] =
-        [Order::Expand, Order::Contest, Order::Raid, Order::Retaliate, Order::LieLow, Order::BreakOut];
+    pub const ALL: [Order; 7] =
+        [Order::Expand, Order::Contest, Order::Raid, Order::Retaliate, Order::LieLow, Order::BreakOut, Order::Squat];
 
     /// Members muster and march under these.
     pub fn is_raid(self) -> bool {
@@ -1101,6 +1117,14 @@ pub struct Household {
     /// `[classes] dreg_emigrate_mood`; at `dreg_emigrate_days` they leave.
     #[serde(default)]
     pub miserable_days: u8,
+    /// M12 D27: put out of this squat; banned from it until the tick.
+    #[serde(default)]
+    pub squat_ban: Option<(EntityId, Tick)>,
+    /// M12 D28: put on the street without an eviction (a seeded derelict,
+    /// a Block gone derelict); the re-housing wait runs from here as from
+    /// an eviction. Cleared when housed.
+    #[serde(default)]
+    pub homeless_since: Option<Tick>,
 }
 
 impl Household {
@@ -1112,6 +1136,8 @@ impl Household {
             evicted_by: None,
             rent_paid_log: VecDeque::new(),
             miserable_days: 0,
+            squat_ban: None,
+            homeless_since: None,
         }
     }
 
@@ -1303,6 +1329,13 @@ pub struct Skills {
 }
 
 /// Present only while jailed.
+/// M12 D27: living in a derelict building, rent-free and unhoused (a Dreg).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Squatter {
+    pub building: EntityId,
+    pub since: Tick,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Sentence {
     pub until_tick: Tick,
@@ -1380,6 +1413,13 @@ pub struct Building {
     /// M11 D19: the security corp holding a contract on this building (phase 3).
     #[serde(default)]
     pub secured_by: Option<EntityId>,
+    /// M12 D25: abandoned: no owner, no rent, no staff; squatters may move in.
+    #[serde(default)]
+    pub derelict: bool,
+    /// M12 D25/D26: a Block with no residents since this tick (abandonment),
+    /// and, once derelict, the tick it went derelict (re-letting).
+    #[serde(default)]
+    pub empty_since: Option<Tick>,
 }
 
 pub fn default_tier() -> u8 {
@@ -2014,7 +2054,11 @@ pub struct District {
     /// Walkable tiles inside no building rect (the litter denominator).
     #[serde(skip)]
     pub walk_tiles: u32,
-    /// Standing Blocks (Homes) whose door is inside, sorted.
+    /// M12 phase 3: those tiles' grid indices, ascending (litter draws,
+    /// means and sweeping).
+    #[serde(skip)]
+    pub streets: Vec<u32>,
+    /// Standing, non-derelict Blocks (Homes) whose door is inside, sorted.
     #[serde(skip)]
     pub homes: Vec<EntityId>,
     /// Living adults binned here by the last aggregate pass, ascending.
@@ -2067,6 +2111,11 @@ pub struct District {
     /// The first control computation after a seed or a load is silent.
     #[serde(default)]
     pub control_init: bool,
+    /// The last non-Contested controller (phase 1 review): a faction is
+    /// shocked only when another faction takes the district from it, not
+    /// when its share wobbles across `control_min_share` into Contested.
+    #[serde(default)]
+    pub last_holder: Controller,
     // --- the law (phase 2) ---
     #[serde(default)]
     pub stance: Stance,

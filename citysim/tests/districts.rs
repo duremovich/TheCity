@@ -72,8 +72,19 @@ fn test_district_of_matches_cuts_on_v2_map() {
             assert_eq!(w.district(w.district_of(p)).zone, z);
         }
     }
-    // The Block column of the cuts table.
-    let blocks: Vec<usize> = w.districts.iter().map(|d| d.homes.len()).collect();
+    // The Block column of the cuts table (M12 D25: a derelict Block is no Home).
+    let blocks: Vec<usize> = w
+        .districts
+        .iter()
+        .map(|d| {
+            let derelict = d
+                .buildings
+                .iter()
+                .filter(|&&b| w.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home && bd.derelict))
+                .count();
+            d.homes.len() + derelict
+        })
+        .collect();
     assert_eq!(blocks, vec![60, 0, 0, 71, 69, 70, 64, 66]);
     // Each Home sits in the district of its door, and the street bit is a walkable non-building tile.
     for d in &w.districts {
@@ -293,6 +304,46 @@ fn test_control_first_computation_is_silent() {
     let shocks = &w.comp::<citysim::Gang>(g).expect("g").shocks;
     assert_eq!(shocks.len(), before + 1);
     assert_eq!(shocks.last(), Some(&citysim::Shock::LostDistrict));
+    // Review fix: a share wobbling into Contested and back is not a loss.
+    for h in w.district(d).homes.clone() {
+        w.comp_mut::<Building>(h).expect("b").claim = Some(Claim { gang: g, count: gang::CLAIM_HELD });
+    }
+    districts::update_control(&mut w);
+    assert_eq!(w.district(d).control, Controller::Gang(g));
+    let before = w.comp::<citysim::Gang>(g).expect("g").shocks.len();
+    for h in w.district(d).homes.clone() {
+        w.comp_mut::<Building>(h).expect("b").claim = None;
+    }
+    w.district_mut(d).coverage = 0.0;
+    districts::update_control(&mut w);
+    assert_eq!(w.district(d).control, Controller::Contested, "nobody present");
+    for h in w.district(d).homes.clone() {
+        w.comp_mut::<Building>(h).expect("b").claim = Some(Claim { gang: g, count: gang::CLAIM_HELD });
+    }
+    districts::update_control(&mut w);
+    assert_eq!(w.district(d).control, Controller::Gang(g));
+    assert_eq!(w.comp::<citysim::Gang>(g).expect("g").shocks.len(), before, "no shock for a Contested spell");
+    assert_eq!(count(&w, EventKind::DistrictControl), 5, "the flips are still logged");
+}
+
+#[test]
+fn test_district_lookup_before_rebuild_and_short_crime_history() {
+    // A hand-built world with no districts reads an empty default.
+    let mut w = v1_three();
+    w.districts.clear();
+    assert_eq!(w.district(DistrictId(3)).population, 0);
+    assert_eq!(w.district_name(DistrictId(0)), "?");
+    // Two days of history: the rate divides by 2, not 7.
+    let mut w = v1_three();
+    w.run_ticks(1);
+    for d in &mut w.districts {
+        d.crimes = [7u16, 7].into_iter().collect();
+    }
+    districts::aggregates(&mut w);
+    for d in &w.districts {
+        let expect = 7.0 / d.population as f32 * 100.0;
+        assert!((d.crime_rate - expect).abs() < 1e-4, "{}: {} vs {expect}", d.name, d.crime_rate);
+    }
 }
 
 #[test]
@@ -334,8 +385,11 @@ fn test_daily_trace_and_crime_counter() {
     for i in [0, 3, 4, 5, 6, 7] {
         assert!(w.districts[i].population > 0, "{} inhabited", w.districts[i].name);
     }
+    // Binned at midnight, before demography's midnight births and arrivals.
     let total: u32 = w.districts.iter().map(|d| d.population).sum();
-    assert_eq!(total as usize, w.citizens().len());
+    let late = w.stats.history.back().map_or(0, |r| r.births + r.immigrants) + w.stats.current.births;
+    let citizens = w.citizens().len() as u32;
+    assert!(total <= citizens && citizens - total <= late, "{total} binned of {citizens} ({late} born or arrived)");
     // Same CSV slots as the districts.
     let row = w.stats.history.back().expect("a day");
     assert_eq!(row.districts.len(), 8);
@@ -647,6 +701,7 @@ fn test_raid_gated_by_crackdown_on_raider() {
         hoard_tilt: 0.0,
         target_cover: 0.3,
         jail_cover: 0.3,
+        derelicts: 0,
     };
     let has = |i: &faction::OrderInputs, o: Order| faction::score_orders(i, &cfg).iter().any(|s| s.order == o);
     for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {

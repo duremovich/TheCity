@@ -104,7 +104,9 @@ fn test_m0_ten_days_headless() {
     for (i, row) in w.stats.history.iter().enumerate() {
         assert_eq!(row.day, i as u64);
         assert!(row.population >= 1967, "day {}: population {}", row.day, row.population); // v1 295
-        assert_eq!(row.homeless, 0);
+                                                                                           // M12 D26: only the seeded derelicts' residents (and the odd evictee) are on the street.
+        let seeded = 5 * w.config.street.seed_derelict_blocks as u32;
+        assert!(row.homeless <= seeded + 10, "day {}: homeless {}", row.day, row.homeless);
         assert!((1..=30).contains(&row.price));
     }
     assert_eq!(w.stats.current.day, 10);

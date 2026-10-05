@@ -366,7 +366,80 @@ pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
     if loyalty < world.config.gangs.freelance_loyalty {
         return None;
     }
-    matches!(g.order, Order::Expand | Order::Contest).then_some(g.order)
+    matches!(g.order, Order::Expand | Order::Contest | Order::Squat).then_some(g.order)
+}
+
+/// M12 D38 (phase 3): the derelict Blocks a gang's Squat order may take:
+/// in the district of its Hideout or of a Home it holds, not held by it
+/// yet, ascending.
+pub fn squat_targets(world: &World, gang: EntityId) -> Vec<EntityId> {
+    let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
+    let mut districts: Vec<crate::components::DistrictId> =
+        g.territory.iter().map(|&h| world.district_of_building(h)).collect();
+    districts.push(world.district_of_building(g.hideout));
+    districts.sort_unstable();
+    districts.dedup();
+    world
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.derelict && !bd.demolished))
+        .filter(|&b| g.territory.binary_search(&b).is_err())
+        .filter(|&b| districts.binary_search(&world.district_of_building(b)).is_ok())
+        .collect()
+}
+
+/// A member serving the gang's Squat order, inside a derelict.
+pub fn serving_squat(world: &World, id: EntityId) -> bool {
+    following_order(world, id) == Some(Order::Squat)
+        && world
+            .comp::<Position>(id)
+            .and_then(|p| p.building)
+            .is_some_and(|b| crate::systems::street::is_derelict(world, b))
+}
+
+/// M12 D38: a member's `Occupy` under the Squat order is a blow of the
+/// gang's claim on derelict `b` (no extortion, no crime); a homeless
+/// member also squats there. When the claim reaches `CLAIM_HELD` the
+/// non-member squatters go: one with courage > 0.6 fights the claimant
+/// (and stays if they win), the rest are evicted (ban, `SquatEvicted`).
+pub fn squat_claim(world: &mut World, actor: EntityId, b: EntityId) {
+    let today = world.day();
+    if let Some(br) = world.comp_mut::<Brain>(actor) {
+        br.gang_task_day = Some(today);
+    }
+    let Some(gang) = world.gang_of(actor) else { return };
+    if world.comp::<Household>(actor).is_some_and(|h| h.home.is_none())
+        && !world.has::<crate::components::Squatter>(actor)
+    {
+        let _ = crate::systems::street::occupy(world, actor, b);
+    }
+    let was_held =
+        world.comp::<Building>(b).and_then(|bd| bd.claim).is_some_and(|c| c.gang == gang && c.count >= CLAIM_HELD);
+    claim(world, actor, b);
+    let held =
+        world.comp::<Building>(b).and_then(|bd| bd.claim).is_some_and(|c| c.gang == gang && c.count >= CLAIM_HELD);
+    if !held || was_held {
+        return;
+    }
+    let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+    let gname = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+    let what = world.name_of(b);
+    world.push_event(EventKind::Squatted, &[actor, b], format!("{gname} took derelict {what} as a squat"));
+    let squatters: Vec<EntityId> =
+        world.squatters_of(b).iter().copied().filter(|s| members.binary_search(s).is_err()).collect();
+    for s in squatters {
+        let brave = world.comp::<Personality>(s).is_some_and(|p| p.courage > 0.6);
+        if brave && world.has::<Brain>(s) && world.has::<Brain>(actor) {
+            let (winner, _, _) = law::resolve_fight(world, s, actor);
+            if winner == s {
+                continue;
+            }
+        }
+        if world.has::<crate::components::Squatter>(s) {
+            crate::systems::street::evict_squatter(world, s, &format!("taken by {gname}"));
+        }
+    }
 }
 
 /// The Home a GangWork plan extorts and the order it serves (`None` =
@@ -402,6 +475,19 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
             theirs = Some(world.comp::<Gang>(rival)?.territory.as_slice());
             (hideout_door, Some(Order::Contest))
         }
+        // M12 D38: the unheld derelict in the gang's districts nearest the Hideout.
+        Some(Order::Squat) => {
+            let guards: Vec<TilePos> =
+                world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
+            let r = world.config.crime.sight_day_crime;
+            return squat_targets(world, gang)
+                .into_iter()
+                .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door, b)))
+                .filter(|&(door, _)| !guards.iter().any(|&gt| law::chebyshev(gt, door) <= r))
+                .map(|(door, b)| (door.manhattan(hideout_door), b.index, b))
+                .min()
+                .map(|(_, _, b)| (b, Some(Order::Squat)));
+        }
         Some(_) => return None,
     };
     let homes = world.buildings_by_kind.get(&BuildingKind::Home)?;
@@ -424,7 +510,8 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
             continue;
         }
         let Some(b) = world.comp::<Building>(h) else { continue };
-        if b.demolished || b.occupants.is_empty() {
+        // M12 D25: a derelict is no extortion target.
+        if b.demolished || b.derelict || b.occupants.is_empty() {
             continue;
         }
         let key = (b.door.manhattan(from), h.index);

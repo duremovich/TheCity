@@ -75,10 +75,15 @@ pub enum ActionKind {
     /// M11 § 6 / D25: at the Hall, pay `found_cost` and turn a vacant Lot
     /// into a Bar or a Home of one's own.
     Register,
+    /// M12 D21: at a Hotel, pay for a bed until 08:00.
+    CheckIn,
+    /// M12 D27: move into a derelict building (a squatter; under a gang's
+    /// Squat order, a blow of the gang's claim).
+    Occupy,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 55] = [
+pub const PLANNABLE: [ActionKind; 59] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -96,6 +101,9 @@ pub const PLANNABLE: [ActionKind; 55] = [
     ActionKind::GoTo(LocationKey::PatrolWaypoint),
     // M11 D13: a non-city job's wage desk, a private guard's office.
     ActionKind::GoTo(LocationKey::Workplace),
+    // M12 D21, D27.
+    ActionKind::GoTo(LocationKey::Hotel),
+    ActionKind::GoTo(LocationKey::Squat),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -135,6 +143,8 @@ pub const PLANNABLE: [ActionKind; 55] = [
     ActionKind::GuardJail,
     ActionKind::TendGraves,
     ActionKind::Register,
+    ActionKind::CheckIn,
+    ActionKind::Occupy,
 ];
 
 impl ActionKind {
@@ -146,6 +156,9 @@ impl ActionKind {
             Role::Clerk => ActionKind::ClerkWork,
             Role::Bartender => ActionKind::BartendWork,
             Role::Gravedigger => ActionKind::TendGraves,
+            // M12 D23 (phase 3 deviation): a sweeper's shift is worked at the
+            // Recycler; the street credit is the midnight ledger.
+            Role::Sanitation => ActionKind::TendGraves,
         }
     }
 
@@ -205,6 +218,8 @@ impl ActionKind {
                 | ActionKind::Muster
                 | ActionKind::Brawl
                 | ActionKind::Register
+                | ActionKind::CheckIn
+                | ActionKind::Occupy
         )
     }
 }
@@ -309,6 +324,15 @@ pub struct PlanCtx {
     /// The agent sleeps and idles at the Hideout tonight (`gang::holes_up_at`):
     /// on the night watch, lying low, or homeless; never when it is sacked or full.
     pub holes_up: bool,
+    /// M12 D21: homeless, and a bed tonight within means and `hotel_reach`.
+    pub hotel_available: bool,
+    /// M12 D27: has a squat.
+    pub squatter: bool,
+    /// M12 D27: the bound target is a derelict with a free slot this agent
+    /// may take (the Squat goal), or the gang's Squat target.
+    pub squat_ok: bool,
+    /// M12 D38: a member serving the gang's Squat order on a derelict target.
+    pub gang_squat: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -411,6 +435,32 @@ impl PlanCtx {
             }
         }
 
+        // M12 D21/D27: the street's rungs (homeless agents only; cheap scans
+        // over the few Hotels and derelicts).
+        let homeless = home.is_none();
+        let hotel = if homeless { crate::systems::street::hotel_for(world, agent) } else { None };
+        let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
+        let derelict_target = target.filter(|&t| crate::systems::street::is_derelict(world, t));
+        let gang_squat = derelict_target.is_some()
+            && world.gang_of(agent).is_some_and(|g| {
+                world.comp::<crate::components::Gang>(g).is_some_and(|x| x.order == crate::components::Order::Squat)
+            });
+        let squat_ok = derelict_target.is_some_and(|t| {
+            gang_squat
+                || (homeless
+                    && crate::systems::street::squat_slots(world, t) > 0
+                    && !crate::systems::street::squat_banned(world, agent, t))
+        });
+        if let (Some(o), false) = (origin, light) {
+            let mut add = |key: LocationKey, b: Option<EntityId>| {
+                if let Some(door) = b.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) {
+                    dist.insert(key, o.manhattan(door));
+                }
+            };
+            add(LocationKey::Hotel, hotel);
+            add(LocationKey::Squat, squat.or(derelict_target));
+        }
+
         let (target_pantry, target_occupied) = target
             .and_then(|t| world.comp::<Building>(t))
             .map_or((0, false), |b| (b.stock_food, !b.occupants.is_empty()));
@@ -487,7 +537,7 @@ impl PlanCtx {
             gang_eligible: crate::systems::gang::eligible(world, agent),
             extort_ok: target
                 .and_then(|t| world.comp::<Building>(t))
-                .is_some_and(|b| b.kind == BuildingKind::Home && !b.occupants.is_empty()),
+                .is_some_and(|b| b.kind == BuildingKind::Home && !b.occupants.is_empty() && !b.derelict),
             has_loot: world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.loot_today > 0),
             can_fence: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.stolen_food > 0)
                 && world
@@ -539,6 +589,10 @@ impl PlanCtx {
             hideout_sacked,
             holes_up: crate::systems::gang::holes_up_at(world, agent).is_some(),
             can_found: crate::systems::founding::can_found(world, agent),
+            hotel_available: homeless && hotel.is_some() && crate::systems::demography::is_adult(world, agent),
+            squatter: squat.is_some(),
+            squat_ok,
+            gang_squat,
             dist,
         }
     }
@@ -581,6 +635,8 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::FoodSourceAvailable => ws.food_source_available = value,
         K::ForageAvailable => ws.forage_available = value,
         K::Founded => ws.founded = value,
+        K::CheckedIn => ws.checked_in = value,
+        K::Squatting => ws.squatting = value,
     }
 }
 
@@ -597,7 +653,7 @@ impl ActionKind {
             ActionKind::ClerkWork => ctx.is(Role::Clerk),
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
-            ActionKind::TendGraves => ctx.is(Role::Gravedigger),
+            ActionKind::TendGraves => ctx.is(Role::Gravedigger) || ctx.is(Role::Sanitation),
             ActionKind::CarryCorpse | ActionKind::BuryCorpse => ctx.adult && ctx.may_bury,
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
@@ -609,6 +665,8 @@ impl ActionKind {
             ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult && ctx.gang_eligible,
             ActionKind::Flirt | ActionKind::Propose => ctx.adult,
             ActionKind::Register => ctx.adult && !ctx.in_gang,
+            ActionKind::CheckIn => ctx.adult && ctx.homeless,
+            ActionKind::Occupy => ctx.adult && (ctx.homeless || ctx.gang_squat),
             ActionKind::ServeTime => false,
             _ => true,
         }
@@ -635,10 +693,14 @@ impl ActionKind {
             // `bar_full` is a plan-time hint only: once inside, the agent counts as an occupant.
             ActionKind::Beg => at(LocationKey::Market) || (at(LocationKey::Bar) && !ctx.bar_full),
             // A member on watch, lying low or homeless beds down at the Hideout.
+            // M12 D21: one who can afford a bed never plans the street; a
+            // booked guest sleeps at the Hotel, a squatter in the squat.
             ActionKind::Sleep => {
                 (at(LocationKey::Home) && !ctx.holes_up)
-                    || (ctx.homeless && at(LocationKey::Street))
+                    || (ctx.homeless && !ctx.hotel_available && !ctx.squatter && at(LocationKey::Street))
                     || (ctx.holes_up && at(LocationKey::Hideout))
+                    || (ws.checked_in && at(LocationKey::Hotel))
+                    || (ctx.squatter && at(LocationKey::Squat))
             }
             // Rest at Bar or Home; also at the workplace while waiting for a
             // shift, and at the Hideout for a gang member.
@@ -688,6 +750,12 @@ impl ActionKind {
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
             ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
             ActionKind::Register => at(LocationKey::Hall) && !ws.founded && ctx.can_found,
+            ActionKind::CheckIn => at(LocationKey::Hotel) && ctx.hotel_available && !ws.checked_in,
+            ActionKind::Occupy => {
+                (at(LocationKey::Squat) || at(LocationKey::TargetHome))
+                    && ctx.squat_ok
+                    && (ctx.gang_squat || !ws.squatting)
+            }
             _ => false,
         }
     }
@@ -733,6 +801,8 @@ impl ActionKind {
             ActionKind::CarryCorpse => ctx.corpse_target,
             ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),
             ActionKind::Register => ctx.can_found && ctx.dist.contains_key(&LocationKey::Hall),
+            ActionKind::CheckIn => ctx.hotel_available && ctx.dist.contains_key(&LocationKey::Hotel),
+            ActionKind::Occupy => ctx.squat_ok,
             _ => true,
         }
     }
@@ -865,6 +935,18 @@ impl ActionKind {
                 n.corpse_buried = true;
             }
             ActionKind::Register => n.founded = true,
+            ActionKind::CheckIn => {
+                n.checked_in = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
+            ActionKind::Occupy => {
+                n.squatting = true;
+                if _ctx.gang_squat {
+                    n.gang_task_done = true;
+                }
+            }
             _ => {}
         }
         n
@@ -929,6 +1011,8 @@ impl ActionKind {
             ActionKind::ServeTime => 60.0,
             ActionKind::StoreFood => 1.0,
             ActionKind::Register => 20.0,
+            ActionKind::CheckIn => 4.0,
+            ActionKind::Occupy => 6.0,
         };
         c.clamp(0.5, 60.0)
     }
@@ -948,7 +1032,8 @@ impl ActionKind {
             | ActionKind::Attack
             | ActionKind::GoTo(LocationKey::CorpseTile)
             | ActionKind::CarryCorpse
-            | ActionKind::BuryCorpse => ctx.target,
+            | ActionKind::BuryCorpse
+            | ActionKind::Occupy => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

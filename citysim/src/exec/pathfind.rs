@@ -52,7 +52,7 @@ pub fn astar(map: &Map, start: TilePos, goal: TilePos, max_expansions: usize) ->
         }
         for n in map.neighbours4(cur) {
             let kind = map.tile_at(n);
-            if !kind.walkable() {
+            if !kind.walkable() || map.is_blocked(n) {
                 continue;
             }
             let ng = g + kind.move_cost();

@@ -79,8 +79,11 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // who has no Partner reservation (Court: unmarried, known candidate first).
         GoalKind::Socialise => crate::systems::social::best_colocated_partner(world, id, -1.0, false),
         GoalKind::Court => crate::systems::social::court_target(world, id),
-        // GangWork binds the Extort target per the Gang section.
+        // GangWork binds the Extort target per the Gang section (M12: under
+        // the Squat order, the derelict to take).
         GoalKind::GangWork => crate::systems::gang::extort_target(world, id),
+        // M12 D27: the derelict with a slot nearest the agent.
+        GoalKind::Squat => crate::systems::street::squat_target(world, id),
         // Raid binds the expedition's building, the rival Hideout or the Jail
         // (the inspector shows it as the plan target).
         GoalKind::Raid => {

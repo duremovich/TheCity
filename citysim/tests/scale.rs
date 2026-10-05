@@ -279,7 +279,8 @@ fn test_two_thousand_spawn_housed() {
     assert_eq!(w.population(), 2000);
     let homeless =
         w.citizens().into_iter().filter(|&id| w.comp::<Household>(id).is_none_or(|h| h.home.is_none())).count();
-    assert_eq!(homeless, 0);
+    // M12 D26: the seeded derelicts' residents start homeless, nobody else.
+    assert_eq!(homeless, 5 * w.config.street.seed_derelict_blocks);
     for (role, n) in
         [(Role::Farmer, 160), (Role::Guard, 36), (Role::Clerk, 12), (Role::Bartender, 8), (Role::Gravedigger, 4)]
     {

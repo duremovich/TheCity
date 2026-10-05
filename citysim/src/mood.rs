@@ -42,7 +42,24 @@ pub fn update(
     low_mood: f32,
     now: Tick,
 ) -> f32 {
-    let raw = (w_need * need_term(needs) + w_memory * memory_term(memory, now)).clamp(-1.0, 1.0);
+    update_biased(mood, needs, memory, pride, w_need, w_memory, low_mood, now, 0.0)
+}
+
+/// `update` with a flat `bias` added to the raw target before the clamp
+/// (M12 D18: `−[litter] mood × district litter`, no new Mood field).
+#[allow(clippy::too_many_arguments)]
+pub fn update_biased(
+    mood: &mut Mood,
+    needs: &Needs,
+    memory: &Memory,
+    pride: f32,
+    w_need: f32,
+    w_memory: f32,
+    low_mood: f32,
+    now: Tick,
+    bias: f32,
+) -> f32 {
+    let raw = (w_need * need_term(needs) + w_memory * memory_term(memory, now) + bias).clamp(-1.0, 1.0);
     let mut delta = 0.2 * (raw - mood.value);
     if delta < 0.0 {
         delta *= 1.0 + 0.5 * pride; // the proud take setbacks harder
@@ -69,6 +86,22 @@ pub fn run(world: &mut World) {
     }
 }
 
+/// M12 D18: `−[litter] mood × litter` of the agent's Home district (the
+/// homeless: the district it stands in); one lookup per hourly update.
+fn litter_bias(world: &World, id: EntityId) -> f32 {
+    if !crate::systems::litter::enabled(world) {
+        return 0.0;
+    }
+    let at = world
+        .comp::<crate::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<crate::components::Building>(h))
+        .map(|b| b.door)
+        .or_else(|| world.comp::<crate::components::Position>(id).map(|p| p.tile));
+    let Some(at) = at else { return 0.0 };
+    -world.config.litter.mood * world.district(world.district_of(at)).litter
+}
+
 fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now: Tick) {
     // The small Mood is copied out instead of cloning Needs and the Memory
     // vector per citizen per hour (perf); the same update, written back.
@@ -78,7 +111,8 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
     let Some(mut mood) = world.comp::<Mood>(id).cloned() else { return };
     let pride = world.comp::<Personality>(id).map_or(0.5, |p| p.pride);
     let low_mood = world.config.demography.emigrate_mood;
-    update(&mut mood, needs, memory, pride, w_need, w_memory, low_mood, now);
+    let bias = litter_bias(world, id);
+    update_biased(&mut mood, needs, memory, pride, w_need, w_memory, low_mood, now, bias);
     if let Some(m) = world.comp_mut::<Mood>(id) {
         *m = mood;
     }

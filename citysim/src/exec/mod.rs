@@ -393,11 +393,31 @@ fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
     }
 }
 
-/// A Coarse Goto: arrive after Manhattan distance × move ticks.
+/// A Coarse Goto: arrive after Manhattan distance × move ticks; M12 D18: ×
+/// `1 + timed_mult × litter` of the target's district, rounded.
 pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
     let from = walk_origin(world, id).unwrap_or(target.tile);
-    let arrive_tick = world.tick + Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
+    let mut walk = Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
+    if crate::systems::litter::enabled(world) {
+        let dirt = world.district(world.district_of(target.tile)).litter;
+        let mult = 1.0 + world.config.litter.timed_mult * dirt;
+        if mult > 1.0 {
+            walk = (walk as f32 * mult).round() as Tick;
+        }
+    }
+    let arrive_tick = world.tick + walk;
     ExecState::GotoTimed { target, arrive_tick, blocked_since: None }
+}
+
+/// M12 D18: the extra ticks before a Full mover's next step off `tile`,
+/// by the tile's litter band (`[litter] step_ticks`). One byte read on a
+/// step already taken; flow fields never change.
+pub fn litter_delay(world: &World, tile: TilePos) -> Tick {
+    if !crate::systems::litter::enabled(world) {
+        return 0;
+    }
+    let band = crate::systems::litter::band(crate::systems::litter::at(world, tile));
+    Tick::from(world.config.litter.step_ticks.get(band).copied().unwrap_or(0))
 }
 
 /// A Full Goto: flow field for buildings, A* otherwise. `None` if unreachable.
@@ -451,7 +471,8 @@ fn advance_goto(
                 Some(n) if door == Some(n) => try_enter(world, id, target, path, blocked_since),
                 Some(n) => {
                     move_to(world, id, n);
-                    set_goto(world, id, target, path, tick + move_ticks, None)
+                    let delay = litter_delay(world, n);
+                    set_goto(world, id, target, path, tick + move_ticks + delay, None)
                 }
                 // The field never reached this tile: there is no way there.
                 None => StepResult::Failed(FailReason::NoSuchPlace),
@@ -460,7 +481,8 @@ fn advance_goto(
         None => match path.pop() {
             Some(n) => {
                 move_to(world, id, n);
-                set_goto(world, id, target, path, tick + move_ticks, None)
+                let delay = litter_delay(world, n);
+                set_goto(world, id, target, path, tick + move_ticks + delay, None)
             }
             None if pos.tile == target.tile => StepResult::Done,
             None => StepResult::Failed(FailReason::NoSuchPlace),
@@ -578,6 +600,15 @@ impl World {
             LocationKey::Workplace => target
                 .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::SecurityOffice))
                 .or_else(|| self.wage_desk(agent)),
+            // M12 D21: the booked Hotel, else the one the agent can reach and pay.
+            LocationKey::Hotel => target
+                .filter(|&t| crate::systems::street::is_hotel(self, t))
+                .or_else(|| crate::systems::street::hotel_for(self, agent)),
+            // M12 D27: the agent's squat, else the bound derelict.
+            LocationKey::Squat => self
+                .comp::<crate::components::Squatter>(agent)
+                .map(|s| s.building)
+                .or_else(|| target.filter(|&t| crate::systems::street::is_derelict(self, t))),
             LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget => None,
         }
     }
@@ -623,7 +654,14 @@ impl World {
             && crate::systems::law::is_guard(self, agent);
         // Residents always get into their own Home (births may exceed the cap).
         let own_home = self.comp::<Household>(agent).and_then(|h| h.home) == Some(b);
-        guard_at_jail || own_home
+        // M12: a booked guest gets into their Hotel, a squatter into the
+        // squat, a sweeper into the Recycler it reports to.
+        let own_bed = crate::systems::street::booked_hotel(self, agent) == Some(b)
+            || self.comp::<crate::components::Squatter>(agent).is_some_and(|s| s.building == b);
+        let sweeper = self
+            .comp::<crate::components::Job>(agent)
+            .is_some_and(|j| j.role == crate::components::Role::Sanitation && j.employer == Some(b));
+        guard_at_jail || own_home || own_bed || sweeper
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

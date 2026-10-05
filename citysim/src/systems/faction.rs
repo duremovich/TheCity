@@ -64,6 +64,9 @@ pub struct OrderInputs {
     /// Garrison. Plan deviation: one field per target, since BreakOut and
     /// the raids aim at different districts.
     pub jail_cover: f32,
+    /// M12 D38 (phase 3): derelict Blocks in the gang's districts (its
+    /// Hideout's and its held Homes') it does not hold yet.
+    pub derelicts: usize,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
@@ -205,6 +208,20 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
             f.lielow,
         ),
         score(
+            Order::Squat,
+            vec![
+                Consideration::new("derelicts", can(i.derelicts > 0), GATE),
+                Consideration::new(
+                    "derelict count",
+                    (i.derelicts as f32 / 3.0).min(1.0),
+                    Curve::Linear { m: 0.5, b: 0.5 },
+                ),
+                Consideration::new("1-heat", calm, Curve::Linear { m: 0.8, b: 0.2 }),
+                Consideration::new("greed", i.greed, Curve::Linear { m: 0.5, b: 0.5 }),
+            ],
+            f.squat,
+        ),
+        score(
             Order::BreakOut,
             vec![
                 Consideration::new(
@@ -331,6 +348,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         hoard_tilt: world.config.corps.hoard_tilt,
         target_cover: target_cover(world, gang, Order::Raid),
         jail_cover: target_cover(world, gang, Order::BreakOut),
+        derelicts: crate::systems::gang::squat_targets(world, gang).len(),
     })
 }
 

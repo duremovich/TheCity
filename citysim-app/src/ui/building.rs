@@ -116,7 +116,9 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                     world.district_name(world.district_of(b.door))
                 ));
             }
+            BuildingKind::Hotel => hotel(ui, app, world, id),
         }
+        derelict(ui, app, world, id, b);
         occupants(ui, app, world, b);
         buttons(ui, app, world, id, b);
     });
@@ -713,6 +715,51 @@ fn staff(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, title: &str) {
                     ui.label("");
                 }
                 ui.end_row();
+            }
+        });
+    });
+}
+
+/// M12 D20: a Capsule Hotel: tonight's price, beds and guests.
+fn hotel(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    let price = citysim::systems::street::hotel_price(world, id);
+    let free = citysim::systems::street::free_beds(world, id);
+    let beds = world.comp::<Building>(id).map_or(0, |b| usize::from(b.capacity));
+    let now = world.tick;
+    let guests: Vec<EntityId> =
+        world.hotel_beds.iter().filter(|(_, &(h, until))| h == id && until > now).map(|(&g, _)| g).collect();
+    section(ui, &format!("Beds ({} of {beds} taken, {price} a night)", beds - free), |ui| {
+        if guests.is_empty() {
+            ui.label("no guests tonight");
+            return;
+        }
+        ui.horizontal_wrapped(|ui| {
+            for g in guests {
+                agent_link(ui, app, world, g);
+                ui.small(lod_tag(world, g));
+            }
+        });
+    });
+}
+
+/// M12 D25/D27: a derelict building and its squatters.
+fn derelict(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
+    if !b.derelict {
+        return;
+    }
+    let squatters = world.squatters_of(id).to_vec();
+    section(ui, &format!("Derelict · squatters {} / {}", squatters.len(), b.capacity), |ui| {
+        if let Some(t) = b.empty_since {
+            ui.label(format!("derelict since day {}", t / citysim::time::TICKS_PER_DAY));
+        }
+        if let Some(c) = b.claim {
+            let g = world.comp::<Gang>(c.gang).map_or_else(|| "a gang".to_string(), |g| g.name.clone());
+            ui.label(format!("claimed by {g} ({}/3)", c.count));
+        }
+        ui.horizontal_wrapped(|ui| {
+            for s in squatters {
+                agent_link(ui, app, world, s);
+                ui.small(lod_tag(world, s));
             }
         });
     });

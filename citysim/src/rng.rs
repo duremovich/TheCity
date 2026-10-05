@@ -88,6 +88,16 @@ impl SimRng {
         r
     }
 
+    /// M12 D17: a one-off stream for a keyed draw (where a Statistical
+    /// crime's litter lands), never stored, so it touches neither the world
+    /// stream nor any agent's. Bit 62 keeps it apart from holes (bit 63)
+    /// and agents (`index + 1`).
+    pub fn keyed(&self, key: u64) -> ChaCha8Rng {
+        let mut r = ChaCha8Rng::seed_from_u64(self.seed);
+        r.set_stream((key & !(1 << 63)) | (1 << 62));
+        r
+    }
+
     /// Drop an agent's stream when the entity is despawned.
     pub fn forget_agent(&mut self, id: EntityId) {
         if let Some(r) = self.agents.get_mut(id.index as usize) {

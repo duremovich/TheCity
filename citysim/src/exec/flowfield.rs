@@ -50,7 +50,14 @@ impl FlowField {
         // is not walkable (Wall, Water). The same Dijkstra as
         // `build_binary_heap`, with the per-neighbour tile matches and bounds
         // iterator hoisted out of the loop (perf).
-        let enter: Vec<f32> = map.tiles().iter().map(|t| t.move_cost()).collect();
+        let mut enter: Vec<f32> = map.tiles().iter().map(|t| t.move_cost()).collect();
+        // M12 D19: rubble is a wall while it lies there.
+        for &p in &map.blocked {
+            let i = usize::from(p.y) * w + usize::from(p.x);
+            if let Some(e) = enter.get_mut(i) {
+                *e = f32::INFINITY;
+            }
+        }
         let mut cost = vec![f32::INFINITY; n];
         let mut open = CostQueue::new();
         cost[f.idx(door)] = 0.0;

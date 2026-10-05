@@ -58,11 +58,15 @@ pub enum LocationKey {
     /// a Security Office for the private guard inside it. A city job's
     /// resolves to the Civic Hall, so an old plan still completes.
     Workplace,
+    /// M12 D21: the booked Hotel, else `street::hotel_for`.
+    Hotel,
+    /// M12 D27: the agent's squat, else the bound derelict target.
+    Squat,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 16] = [
+    pub const GOTO: [LocationKey; 18] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -79,6 +83,8 @@ impl LocationKey {
         LocationKey::CorpseTile,
         LocationKey::PatrolWaypoint,
         LocationKey::Workplace,
+        LocationKey::Hotel,
+        LocationKey::Squat,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -95,6 +101,7 @@ impl LocationKey {
             // M11: a private guard inside their office is at their workplace.
             BuildingKind::SecurityOffice => LocationKey::Workplace,
             BuildingKind::Lot => LocationKey::Street,
+            BuildingKind::Hotel => LocationKey::Hotel,
         }
     }
 }
@@ -134,6 +141,10 @@ pub enum Key {
     ForageAvailable,
     /// M11 D26: a business registered (never observed true; `Register` sets it).
     Founded,
+    /// M12 D21: a live Hotel booking tonight.
+    CheckedIn,
+    /// M12 D27: living in a squat.
+    Squatting,
 }
 
 /// Partial goal state: at most 3 listed keys.
@@ -175,6 +186,8 @@ pub struct WorldState {
     pub food_source_available: bool,
     pub forage_available: bool,
     pub founded: bool,
+    pub checked_in: bool,
+    pub squatting: bool,
 }
 
 impl WorldState {
@@ -216,6 +229,8 @@ impl WorldState {
             food_source_available,
             forage_available,
             founded,
+            checked_in,
+            squatting,
         } = *self;
         let flags = [
             hunger_satisfied,
@@ -247,6 +262,8 @@ impl WorldState {
             food_source_available,
             forage_available,
             founded,
+            checked_in,
+            squatting,
         ];
         let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
         for (i, f) in flags.into_iter().enumerate() {
@@ -291,6 +308,8 @@ impl WorldState {
             Key::FoodSourceAvailable => self.food_source_available,
             Key::ForageAvailable => self.forage_available,
             Key::Founded => self.founded,
+            Key::CheckedIn => self.checked_in,
+            Key::Squatting => self.squatting,
         }
     }
 
@@ -374,6 +393,8 @@ impl WorldState {
                     .is_some_and(|&stop| pos.is_some_and(|p| p.building == Some(stop)))
         });
         let raid_tile = crate::systems::raid::target_tile(world, agent);
+        // M12 D27: the agent's squat (or, while planning one, the bound derelict).
+        let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
@@ -383,6 +404,9 @@ impl WorldState {
                 if Some(b) == target && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home) =>
             {
                 LocationKey::TargetHome
+            }
+            Some(b) if Some(b) == squat || (Some(b) == target && crate::systems::street::is_derelict(world, b)) => {
+                LocationKey::Squat
             }
             Some(b) => match world.comp::<Building>(b) {
                 Some(bd) if bd.kind == BuildingKind::Home => LocationKey::Street, // someone else's home
@@ -484,6 +508,8 @@ impl WorldState {
             food_source_available: market_free || pantry_free,
             forage_available: matches!(season, Season::Summer | Season::Autumn) && !dark,
             founded: false,
+            checked_in: crate::systems::street::booked_hotel(world, agent).is_some(),
+            squatting: squat.is_some(),
         }
     }
 }

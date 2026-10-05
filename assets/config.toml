@@ -64,6 +64,7 @@ hideout = { capacity = 30, stock_cap = 200 }
 warehouse = { capacity = 6, stock_cap = 20000 }
 security_office = { capacity = 12, stock_cap = 0 }
 lot = { capacity = 0, stock_cap = 0 }
+hotel = { capacity = 12, stock_cap = 0 }       # M12 D20: beds ([street] hotel_beds caps a built one)
 
 [needs]
 hunger_decay_per_tick = 0.000347
@@ -96,6 +97,7 @@ wage_guard = 8
 wage_clerk = 6
 wage_bartender = 5
 wage_gravedigger = 5
+wage_sanitation = 5                # M12 D23: a city sweeper
 # 1.4 on paper assumes 24 farmers x 9 h at farming 0.5 and one meal per citizen. In practice farms
 # work 6 days in 7, farmers attend ~75% of a shift (meals, wage trips), initial farming skill is
 # U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.4 keeps the
@@ -230,6 +232,7 @@ raid = 0.3
 retaliate = 0.6
 lielow = 0.15
 breakout = 0.28 # was 0.2: after the M9 review fixes (jail duty by rank, Hideout sleep, night watch) 0.2 produced no breakout on seed 42
+squat = 0.0     # M12 D38 (phase 3): take a derelict Block in the gang's districts
 
 # M9: the law as a faction (docs/M9_LAW.md). A captain (the most lawful guard) scores Patrol,
 # Crackdown (on the most-reported gang: patrol loops through its turf, one guard in three holds the
@@ -398,13 +401,21 @@ base = [1, 2, 4]
 evict_days = 7
 # M11 phase 5: 3 -> 7, a week's rent up front. At 3 an evictee on the dole had the 3 coins for a Sump
 # Block the next day, so the street lasted exactly the re-housing wait (Dregs 0-5 a day on seeds 42-44).
-rehouse_coins_mult = 7
+# M12 phase 3: 7 -> 21, three weeks up front (21 coins for a Sump Block). Blocks hold 6, not the
+# spec's 5, and ~1.5 violent deaths a day free a bed, so supply never binds: at 7 the seeded homeless
+# and every evictee were housed the day their wait ended and the Dreg share fell to 0.1-0.3 % by day
+# 30 (8 or 16 derelicts alike). At 21 a Dreg on the dole, paying for Hotel nights, saves for weeks:
+# seed 42 2.06 % mean, 1.56-3.95 %, 120 of 120 days in 1-5 % (seed 43 2.00 %, 120/120); thefts per
+# 100 agent-days 3.16 (M11 config 2.84, x1.11), assaults 16.6/day.
+rehouse_coins_mult = 21
 refuse_days = 30
 sump_spoilage_mult = 1.5 # tier-0 pantries spoil this much faster
 # M11 phase 5: an evictee sleeps rough this many days before any owner takes them in. Re-housing was
 # the same night, so no Dreg ever existed and Dreg emigration and Dreg unrest never ran; the street is
 # a rung of the ladder (the survival loop), not a formality.
-rehouse_wait_days = 3
+# M12 D28: 3 -> 7 (spec § 4), and it now also runs for anyone put on the street without an eviction
+# (a derelict's residents, the seeded homeless).
+rehouse_wait_days = 7
 # M11 phase 2 (seed 42, 2,000): with rent taken only from what is left at midnight, the 89 % on the
 # 3-coin dole (price 3) reach midnight with 0 coins once their opening savings are gone (mean 12 at
 # day 4, 2 at day 24): 600 adults were short every night and 118 were evicted on day 25 alone, against
@@ -442,7 +453,7 @@ incorporate_buildings = 2         # an agent owning this many becomes a corp
 # city's coins sit with the employed and the execs): 3 NPC Bars from day 91 and no incorporation. At
 # 200 6 NPC foundings from day 28 and the first incorporation on day 28; at 150 15 foundings (12 Bars
 # by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
-found_cost = { bar = 200, home = 400 }
+found_cost = { bar = 200, home = 400, hotel = 250 }  # M12 D20: hotel
 wholesale = 2                      # coins per unit Farm → Market when owners differ
 # M11 phase 5: 10 -> 20, with upkeep.security_office 30 -> 10. A Security corp costs its Office's
 # upkeep, six guards' wages (48) and its exec (10) a day, ~88 at the old sizes against 6-10 a contract
@@ -476,7 +487,7 @@ bar_owner_count = 2
 # tier's base rent: a free Sump Block costs its owner nothing. Corp Block upkeep goes from 300 to
 # 260 a day (Habitat's 60 Spire Blocks now pay 2).
 # M11 phase 5: security_office 30 -> 10 (see contract_per_guard_day).
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10 }
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 10 }
 value = { farm = 1000, market = 1000, security_office = 500 }                    # D28
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
@@ -484,6 +495,7 @@ secure_per_day = 2                 # D24
 private_pursuit_radius = 16        # D18
 found_cooldown_days = 10           # D26
 residents_per_bar = 300            # D25
+residents_per_hotel = 800          # M12 D20: Register's Hotel target = population ÷ this
 # M11 phase 5b: 0 -> 0.1. The Found score is greed squared, so a low-greed Bar owner holding 250-355
 # coins for 65 days on seed 43 (greed term 0.03) scored Found at 0.01-0.03 against Idle's 0.05-0.15 and
 # never founded again; with 0.1 an eligible agent (jobless or self-employed, coins >= found_cost: one
@@ -591,3 +603,45 @@ immigration_per_week = 13
 # coin of slack halves them (3.2) and leaves need and lawfulness to decide who steals. v1_profile keeps
 # 3 (the v1 gates' thefts 2.62 -> 1.22 at 4).
 dole_per_day = 4
+# M12 D23: city Sanitation workers, hired from the jobless (the poorest first) by the daily reconcile.
+sanitation_count = 12
+
+[litter]
+# M12 § 3 (plan D16-D19, D23-D24). Litter is one byte per street tile, deposited by events (a theft
+# 6 r0, an assault or shakedown 12 r1, a violent death 40 r1, an unburied body 24 r0 a day, a brawl
+# at a door 32 r2, an eviction 24 r1, a building gone derelict 48 r2, a squat 4 r1 and a rough sleeper
+# 2 r0 a night), decayed daily, cleaned by the sweepers, owners and the ruling gang.
+enabled = true                     # off() = false: no deposits, no delay, no sanitation
+decay = 1
+step_ticks = [0, 0, 1, 2]          # per band: clean, littered, trashed, heaped
+timed_mult = 0.5
+sleep_penalty = 0.15
+mood = 0.2
+clean_per_shift = 120
+owner_clean_cost = 1               # coins per 32 units
+owner_clean_units = 64
+gang_clean_per_member = 8
+clean_pride = 0.5
+rubble_blocks = false              # the Damage hook (255 = rubble), off in M12
+rubble_clean_mult = 4
+
+[street]
+# M12 § 4 (plan D20-D28): Hotels, derelicts, squats.
+enabled = true                     # off() = false: no Hotels or derelicts seeded, no Squat goal
+hotel_beds = 12
+night_price = 3
+hotel_reach = 48
+seed_hotels = 2
+# Phase 3 calibration: 8 -> 16 (the spec's first knob). With 8 (and rehouse_coins_mult 21) the share
+# held 1.25-2.0 % but only at a 28-coin deposit; 16 keeps a squat pool (25 squatters a day on average)
+# and the share at 1.4-4 % on seeds 42-43 with the 21-coin deposit.
+seed_derelict_blocks = 16
+city_absorb_floor = 5000
+abandon_days = 14
+squat_reach = 40
+squat_ban_days = 14
+# Phase 3 decision (the spec leaves who re-lets a derelict open): the City repairs and re-lets the
+# longest-derelict Block once it has stood derelict this long, one a day, while the Treasury holds
+# city_absorb_floor; its squatters are put out (the SquatEvicted path). 30 re-let the whole seed by
+# day 46 and the street dried up; 60 keeps the squats through the season and returns them after.
+relet_days = 60

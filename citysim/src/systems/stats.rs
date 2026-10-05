@@ -181,9 +181,12 @@ pub fn snapshot(world: &mut World) {
         .map(|d| (d.coverage, d.control.csv_code(), d.litter, d.unrest, d.crime_rate, d.guards))
         .collect();
     let gangs = world.gang_list().len() as u32;
+    let (squatters, derelicts) = crate::systems::street::snapshot(world);
     let row = &mut world.stats.current;
     row.districts = slots;
     row.gangs = gangs;
+    row.squatters = squatters;
+    row.derelicts = derelicts;
     let mut coins: Vec<i64> = citizens
         .iter()
         .filter(|&&id| world.has::<Brain>(id) && crate::systems::demography::is_adult(world, id))

@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 17] = [
+pub const GOAL_ORDER: [GoalKind; 18] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -29,6 +29,8 @@ pub const GOAL_ORDER: [GoalKind; 17] = [
     GoalKind::GangWork,
     GoalKind::Raid,
     GoalKind::Bury,
+    // M12 D27: before Found.
+    GoalKind::Squat,
     // M11 D26: just before Idle.
     GoalKind::Found,
     GoalKind::Idle,
@@ -130,6 +132,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         }),
         // M11 D26: nothing to found (also the eligibility gate).
         GoalKind::Found => !crate::systems::founding::can_found(world, id),
+        // M12 D27: squatting already, or nowhere to squat (the eligibility gate).
+        GoalKind::Squat => !crate::systems::street::can_squat(world, id),
         _ => false,
     }
 }
@@ -479,6 +483,21 @@ pub fn considerations(
             ]
         }
         GoalKind::Idle => vec![Consideration::new("constant", 0.0, Curve::Step { t: 0.0, lo: 0.05, hi: 0.05 })],
+        // M12 D27 (spec § 4). `already_satisfied` has just run the
+        // eligibility check (a derelict slot within reach, not banned, no bed
+        // affordable). Plan deviation: the wealth term reads `U(wealth)`, not
+        // the spec's `1 − U(wealth)`, so the poor squat more, not less.
+        GoalKind::Squat => {
+            let n = needs?;
+            let p = pers?;
+            vec![
+                Consideration::new("derelict slot", can(true), GATE),
+                Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.4, b: 0.6 }),
+                Consideration::new("night", can(phase == DayPhase::Night), Curve::Step { t: 1.0, lo: 0.3, hi: 1.0 }),
+            ]
+        }
         // M11 § 6 / D26: open a business. `already_satisfied` has just run
         // the eligibility check (it skips Found for the ineligible).
         GoalKind::Found => {

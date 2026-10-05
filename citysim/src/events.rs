@@ -101,10 +101,18 @@ pub enum EventKind {
     Stance,
     /// M12 D15: a rough sleeper fined or jailed for the night.
     Vagrancy,
+    /// M12 D23: the sweepers' allocation across districts changed.
+    Sanitation,
+    /// M12 D27: a derelict building taken by a squatter (`[squatter, building]`).
+    Squatted,
+    /// M12 D27: a squatter put out (`[squatter, building]`).
+    SquatEvicted,
+    /// M12 D25: a building went derelict (`[building, old owner?]`), or was re-let.
+    Derelict,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 57] = [
+    pub const ALL: [EventKind; 61] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -162,6 +170,10 @@ impl EventKind {
         EventKind::DistrictControl,
         EventKind::Stance,
         EventKind::Vagrancy,
+        EventKind::Sanitation,
+        EventKind::Squatted,
+        EventKind::SquatEvicted,
+        EventKind::Derelict,
     ];
 }
 

@@ -47,6 +47,11 @@ pub struct Map {
     zones: Vec<Zone>,
     /// In file order; `EntityId`s are assigned in this order.
     pub buildings: Vec<MapBuilding>,
+    /// M12 D19 (the Damage hook, off in M12): rubble tiles that block
+    /// movement while `[litter] rubble_blocks`; written only by
+    /// `litter::set_rubble`.
+    #[serde(default)]
+    pub blocked: std::collections::BTreeSet<TilePos>,
 }
 
 fn parse_tile(ch: char, x: usize, y: usize) -> TileKind {
@@ -118,7 +123,8 @@ impl Map {
             assert!(lines.get(at).is_none_or(|l| l.trim().is_empty()), "line {} must be blank", at + 1);
         }
 
-        let mut map = Map { w: w as u16, h: h as u16, tiles, zones, buildings: Vec::new() };
+        let mut map =
+            Map { w: w as u16, h: h as u16, tiles, zones, buildings: Vec::new(), blocked: Default::default() };
         for (n, line) in lines.iter().enumerate().skip(at) {
             let line = line.trim();
             if line.is_empty() {
@@ -274,7 +280,12 @@ impl Map {
     }
 
     pub fn walkable(&self, p: TilePos) -> bool {
-        self.tile_at(p).walkable()
+        self.tile_at(p).walkable() && !self.is_blocked(p)
+    }
+
+    /// M12 D19: a rubble tile (empty in M12 unless the hook is switched on).
+    pub fn is_blocked(&self, p: TilePos) -> bool {
+        !self.blocked.is_empty() && self.blocked.contains(&p)
     }
 
     /// In-bounds 4-neighbours, in the fixed order W, E, N, S.
