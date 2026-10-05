@@ -258,6 +258,11 @@ pub fn courage(world: &World, id: EntityId) -> f32 {
 /// `p_win = clamp(0.5 + 0.4 (fi_a − fi_b) + 0.1 (C_a − C_b), 0.1, 0.9)`.
 /// Returns `(winner, loser, loser_died)`.
 pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, EntityId, bool) {
+    resolve_fight_with(world, a, b, 1.0)
+}
+
+/// M12 D32: [`resolve_fight`] with the death chance × `kill_mult` (a Crush).
+pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult: f32) -> (EntityId, EntityId, bool) {
     let (fi, co) = (fighting, courage);
     let p_win = (0.5 + 0.4 * (fi(world, a) - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))).clamp(0.1, 0.9);
     let roll: f32 = world.rng.world().random();
@@ -282,7 +287,7 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
         s.fighting = (s.fighting + 0.01).min(1.0);
     }
     crate::systems::social::fought(world, winner, loser);
-    let p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner));
+    let p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)) * kill_mult;
     let roll: f32 = world.rng.world().random();
     let died = roll < p_death;
     if died {
@@ -1011,6 +1016,12 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
 /// the coverage floor (0.5) with four guards allocated.
 pub fn district_route(world: &mut World, d: crate::components::DistrictId) -> Vec<EntityId> {
     use crate::components::Stance;
+    // M12 D34: under a Cordon every guard on the beat stands at the riot's target.
+    if world.district(d).stance == Stance::Cordon {
+        if let Some(t) = crate::systems::riot::cordon_target(world, d) {
+            return vec![t];
+        }
+    }
     if let Stance::Crackdown(g) = world.district(d).stance {
         if world.has::<crate::components::Gang>(g) {
             return crackdown_route(world, g, Some(d));

@@ -52,6 +52,9 @@ pub struct Config {
     /// pre-M12 saves: off (plan D46).
     #[serde(default = "StreetCfg::off")]
     pub street: StreetCfg,
+    /// M12 phase 4 riots and crossfire (§ 6); absent from pre-M12 saves: off (plan D46).
+    #[serde(default = "RiotsCfg::off")]
+    pub riots: RiotsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -371,6 +374,40 @@ pub struct GangsCfg {
     #[serde(default = "GangsCfg::default_breakout_max_freed")]
     pub breakout_max_freed: usize,
     pub order_flat: OrderFlatCfg,
+    /// M12 D37: a raid musters at the gang's held Home or squat nearest the
+    /// target door when one lies within this many tiles; 0 = the Hideout (M8).
+    #[serde(default)]
+    pub muster_near_tiles: u32,
+    /// M12 D40: a gang empty this many days loses its claims (0 = only the 30-day disband).
+    #[serde(default)]
+    pub empty_claims_days: u64,
+    /// M12 D40: an emptied gang re-forms only after this many days (0 = at once) ...
+    #[serde(default)]
+    pub reform_days: u64,
+    /// ... and only while its Hideout's district coverage is below this.
+    #[serde(default = "GangsCfg::default_reform_max_coverage")]
+    pub reform_max_coverage: f32,
+    /// M12 D36: splits after a decapitation. `split_base` 0 = never (M11).
+    #[serde(default = "GangsCfg::default_split_strength_ratio")]
+    pub split_strength_ratio: f32,
+    #[serde(default = "GangsCfg::default_split_loyalty")]
+    pub split_loyalty: f32,
+    #[serde(default)]
+    pub split_base: f32,
+    #[serde(default = "GangsCfg::default_max_gangs")]
+    pub max_gangs: usize,
+    #[serde(default)]
+    pub splinter_names: Vec<String>,
+    /// M12 D39: a won raid on a corp building takes `corp_raid_frac` of the
+    /// corp treasury, capped at `corp_raid_cap`; a cap of 0 = no corp raids (M11).
+    #[serde(default)]
+    pub corp_raid_frac: f32,
+    #[serde(default)]
+    pub corp_raid_cap: i64,
+    /// M12 phase 4: Raid and Retaliate need this many fit members (a crew
+    /// for the door); 0 = any (M11).
+    #[serde(default)]
+    pub raid_min_members: usize,
 }
 
 impl GangsCfg {
@@ -385,6 +422,30 @@ impl GangsCfg {
     }
     fn default_breakout_max_freed() -> usize {
         3
+    }
+    fn default_reform_max_coverage() -> f32 {
+        f32::MAX
+    }
+    fn default_split_strength_ratio() -> f32 {
+        0.8
+    }
+    fn default_split_loyalty() -> f32 {
+        0.6
+    }
+    fn default_max_gangs() -> usize {
+        4
+    }
+
+    /// M12 D46: the phase 4 gang keys at their M11 behaviour (no muster
+    /// points, no claim loss, instant re-forming, no splits, no corp raids).
+    pub fn m11_behaviour(&mut self) {
+        self.muster_near_tiles = 0;
+        self.empty_claims_days = 0;
+        self.reform_days = 0;
+        self.reform_max_coverage = f32::MAX;
+        self.split_base = 0.0;
+        self.corp_raid_cap = 0;
+        self.raid_min_members = 0;
     }
 
     /// The `[gangs]` block of `assets/config.toml`, for saves written before it existed.
@@ -1036,6 +1097,12 @@ pub struct ClassesCfg {
     /// D36: an evictee this recent and this lawless is desperate for a gang.
     pub evicted_recruit_days: u64,
     pub evicted_recruit_lawfulness: f32,
+    /// M12 D29: district unrest gains `rent_burden_w × burden_d` (0 = off).
+    #[serde(default)]
+    pub rent_burden_w: f32,
+    /// M12 D29: submission gains this under a district curfew.
+    #[serde(default)]
+    pub curfew_fear: f32,
 }
 
 impl Default for ClassesCfg {
@@ -1060,6 +1127,8 @@ impl ClassesCfg {
             dreg_emigrate_days: 0,
             evicted_recruit_days: 14,
             evicted_recruit_lawfulness: 0.5,
+            rent_burden_w: 0.0,
+            curfew_fear: 0.0,
         }
     }
 }
@@ -1230,6 +1299,64 @@ impl StreetCfg {
     }
 }
 
+/// M12 riots and crossfire (docs/M12_DISTRICTS.md § 6, plan D29-D35).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct RiotsCfg {
+    /// `off()` = false: no district riots (crossfire still reads `p_crossfire`).
+    pub enabled: bool,
+    pub riot_threshold: f32,
+    pub riot_days: u16,
+    pub riot_cooldown_days: u64,
+    pub riot_min: usize,
+    pub riot_max: usize,
+    pub max_active_riots: usize,
+    pub riot_lawfulness: f32,
+    pub riot_muster_hour: u16,
+    pub loot_frac: f32,
+    pub riot_close_days: u64,
+    pub riot_vent: f32,
+    pub crush_kill_mult: f32,
+    pub crossfire_radius: u32,
+    pub p_crossfire: f32,
+    pub p_crossfire_kill: f32,
+    pub riot_stat_bystanders: usize,
+    /// Plan risk 3 (LOD): a rioter ranks with the gangs (class 2) from this
+    /// many hours before the muster until the riot ends; 24 or more = from
+    /// the trigger at midnight.
+    #[serde(default = "RiotsCfg::default_promote_hours")]
+    pub riot_promote_hours: u16,
+}
+
+impl RiotsCfg {
+    fn default_promote_hours() -> u16 {
+        24
+    }
+
+    /// No riots and no crossfire (a pre-M12 save, `v1_profile`, the calibration city).
+    pub fn off() -> RiotsCfg {
+        RiotsCfg {
+            enabled: false,
+            riot_threshold: 0.55,
+            riot_days: 3,
+            riot_cooldown_days: 14,
+            riot_min: 6,
+            riot_max: 40,
+            max_active_riots: 2,
+            riot_lawfulness: 0.5,
+            riot_muster_hour: 20,
+            loot_frac: 0.3,
+            riot_close_days: 3,
+            riot_vent: 0.5,
+            crush_kill_mult: 3.0,
+            crossfire_radius: 3,
+            p_crossfire: 0.0,
+            p_crossfire_kill: 0.1,
+            riot_stat_bystanders: 4,
+            riot_promote_hours: 24,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeversCfg {
     pub tax_rate: f32,
@@ -1342,6 +1469,13 @@ impl Config {
         self.litter = LitterCfg::off();
         self.street = StreetCfg::off();
         self.levers.sanitation_count = 0;
+        // M12 D46 (phase 4): no riots or crossfire, the M11 gangs, no district
+        // unrest terms, and no hoard tilt.
+        self.riots = RiotsCfg::off();
+        self.gangs.m11_behaviour();
+        self.classes.rent_burden_w = 0.0;
+        self.classes.curfew_fear = 0.0;
+        self.corps.hoard_tilt = 0.0;
         self
     }
 
@@ -1374,6 +1508,9 @@ impl Config {
         // M12 D48: litter and the street on, but no seeded derelicts (the
         // table measures behaviour, not one seed's housing shortage).
         c.street.seed_derelict_blocks = 0;
+        // M12 D48 (phase 4): riots off, no splits, no crossfire.
+        c.riots = RiotsCfg::off();
+        c.gangs.split_base = 0.0;
         c
     }
 

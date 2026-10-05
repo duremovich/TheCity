@@ -58,7 +58,8 @@ pub fn build_on_lot(
     kind: BuildingKind,
     owner: Option<EntityId>,
 ) -> Result<EntityId, String> {
-    if !matches!(kind, BuildingKind::Bar | BuildingKind::Home | BuildingKind::Hotel) {
+    // M12 D36: a splinter gang builds its Hideout on a Lot.
+    if !matches!(kind, BuildingKind::Bar | BuildingKind::Home | BuildingKind::Hotel | BuildingKind::Hideout) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
     let Some(b) = world.comp::<Building>(lot) else { return Err("no such Lot".into()) };

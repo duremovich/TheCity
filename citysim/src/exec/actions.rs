@@ -42,11 +42,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Fence | ActionKind::Attack => 15,
         ActionKind::CarryCorpse => 20,
         ActionKind::BuryCorpse => 60,
-        ActionKind::Muster => world
-            .gang_of(id)
-            .and_then(|g| world.comp::<crate::components::Gang>(g))
-            .and_then(|g| g.raid_at)
-            .map_or(0, |t| t.saturating_sub(world.tick)),
+        // M12 D31: until the expedition leaves (a gang's raid_at, a riot's muster_at).
+        ActionKind::Muster => crate::systems::raid::departure(world, id).map_or(0, |t| t.saturating_sub(world.tick)),
         ActionKind::Brawl => 15,
         ActionKind::Register => 30,
         ActionKind::CheckIn => 5,
@@ -86,19 +83,22 @@ pub fn can_work_now(world: &World, id: EntityId, job: &Job) -> bool {
 pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> bool {
     let inv = world.comp::<Inventory>(id);
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+    // M12 D33: no trade in a building a riot closed.
+    let closed_here = || world.comp::<Position>(id).and_then(|p| p.building).is_some_and(|b| world.is_closed(b));
     match kind {
         ActionKind::EatFromInventory => inv.is_some_and(|i| i.food >= 1),
         ActionKind::EatAtHome => at_home(world, id) && home_pantry(world, id) > 0,
         ActionKind::StoreFood => at_home(world, id) && inv.is_some_and(|i| i.food > i.stolen_food),
         ActionKind::BuyFood => {
             at(world, id, BuildingKind::Market)
+                && !closed_here()
                 && economy::buy_quantity(world, id, world.local(id, BuildingKind::Market)) > 0
         }
         ActionKind::Sleep | ActionKind::Rest => {
             // Sleep on the street is allowed (homeless); Rest anywhere indoors.
             true
         }
-        ActionKind::Drink => at(world, id, BuildingKind::Bar) && coins >= 2,
+        ActionKind::Drink => at(world, id, BuildingKind::Bar) && coins >= 2 && !closed_here(),
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -609,6 +609,10 @@ pub fn on_complete(
             }
         }
         ActionKind::Brawl => {
+            // M12 phase 4: the first at the door waits for the crew.
+            if crate::systems::raid::wait_for_crew(world, id) {
+                return StepResult::Running;
+            }
             crate::systems::raid::resolve(world, id);
             StepResult::Done
         }

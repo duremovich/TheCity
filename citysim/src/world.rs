@@ -438,6 +438,14 @@ pub struct World {
     /// Squatter hooks, rebuilt on load.
     #[serde(skip)]
     pub squat_index: BTreeMap<EntityId, Vec<EntityId>>,
+    /// M12 D30: live riots, at most `[riots] max_active_riots`.
+    #[serde(default)]
+    pub riots: Vec<crate::components::Riot>,
+    #[serde(default)]
+    pub next_riot_id: u32,
+    /// M12 D30: rioter -> riot id, rebuilt from `riots` (on load and by `riot`).
+    #[serde(skip)]
+    pub rioter_of: BTreeMap<EntityId, u32>,
     /// Adjacency index over `edges`, kept in step by `edge_entry` / `remove_edge`;
     /// rebuilt on load.
     #[serde(skip)]
@@ -689,6 +697,9 @@ impl World {
             hotel_beds: BTreeMap::new(),
             sweep_beats: BTreeMap::new(),
             squat_index: BTreeMap::new(),
+            riots: Vec::new(),
+            next_riot_id: 0,
+            rioter_of: BTreeMap::new(),
             neighbours: BTreeMap::new(),
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
@@ -752,6 +763,7 @@ impl World {
                     secured_by: None,
                     derelict: false,
                     empty_since: None,
+                    closed_until: None,
                 },
             );
             match def.kind {
@@ -1226,6 +1238,8 @@ impl World {
         self.corp_ids = self.with::<Corp>();
         (self.residents, self.resident_home) = self.residents_from_stores();
         self.squat_index = self.squat_index_from_stores();
+        self.rioter_of =
+            self.riots.iter().flat_map(|r| r.rioters.iter().map(move |&a| (a, r.id))).collect::<BTreeMap<_, _>>();
         self.mean_price_cache = None;
     }
 
@@ -1358,8 +1372,13 @@ impl World {
     /// stands on the same tile at both.
     pub fn local(&self, agent: EntityId, kind: BuildingKind) -> Option<EntityId> {
         let pos = self.comp::<Position>(agent)?;
-        let usable =
-            |b: EntityId| self.comp::<Building>(b).is_some_and(|bd| bd.kind == kind && !bd.demolished && !bd.derelict);
+        // M12 D33: a building a riot looted is closed for trade.
+        let now = self.tick;
+        let usable = |b: EntityId| {
+            self.comp::<Building>(b).is_some_and(|bd| {
+                bd.kind == kind && !bd.demolished && !bd.derelict && bd.closed_until.is_none_or(|t| t <= now)
+            })
+        };
         if let Some(b) = pos.building.filter(|&b| usable(b)) {
             return Some(b);
         }
@@ -1382,7 +1401,7 @@ impl World {
         self.buildings_of_kind(BuildingKind::Market)
             .iter()
             .filter_map(|&m| {
-                let b = self.comp::<Building>(m).filter(|b| !b.demolished)?;
+                let b = self.comp::<Building>(m).filter(|b| !b.demolished && !self.is_closed(m))?;
                 Some((10 * i64::from(b.door.manhattan(from)) + per_coin * self.price_tenths_at(m), m))
             })
             .min()
@@ -1401,6 +1420,11 @@ impl World {
     /// Position of a corp in `corps()`: picks its colour in the app.
     pub fn corp_index(&self, corp: EntityId) -> usize {
         self.corps().iter().position(|&c| c == corp).unwrap_or(0)
+    }
+
+    /// M12 D33: a riot closed this building and the closure has not run out.
+    pub fn is_closed(&self, b: EntityId) -> bool {
+        self.comp::<Building>(b).and_then(|bd| bd.closed_until).is_some_and(|t| t > self.tick)
     }
 
     /// A building's owner (`None` = the city).

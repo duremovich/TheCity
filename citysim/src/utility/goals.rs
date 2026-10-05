@@ -126,7 +126,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::JoinGang => {
             world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) || !crate::systems::gang::eligible(world, id)
         }
-        GoalKind::Raid => !world.has::<crate::components::GangMember>(id) || crate::systems::raid::raid_done(world, id),
+        // M12 D31: a rioter has an expedition too (raid_done is true without one).
+        GoalKind::Raid => crate::systems::raid::raid_done(world, id),
         GoalKind::Work => world.comp::<Job>(id).is_some_and(|j| {
             j.last_shift_day == Some(j.next_shift_key(world.tick)) && !crate::exec::routine::wage_pending(world, j)
         }),
@@ -439,12 +440,19 @@ pub fn considerations(
             ]
         }
         GoalKind::Raid => {
-            world.comp::<crate::components::GangMember>(id)?;
+            // M12 D31: a gang member's muster, or a rioter's (no loyalty bar).
+            let rioter = matches!(
+                crate::systems::raid::expedition_of(world, id),
+                Some(crate::systems::raid::Expedition::Riot(_))
+            );
+            if !rioter {
+                world.comp::<crate::components::GangMember>(id)?;
+            }
             let n = needs?;
             let p = pers?;
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
-            let called =
-                crate::systems::raid::raid_pending(world, id) && p.loyalty >= world.config.gangs.freelance_loyalty;
+            let called = crate::systems::raid::raid_pending(world, id)
+                && (rioter || p.loyalty >= world.config.gangs.freelance_loyalty);
             vec![
                 Consideration::new("muster called", can(called), GATE),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.7, b: 0.3 }),

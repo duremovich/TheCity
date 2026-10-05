@@ -609,6 +609,11 @@ impl World {
                 .comp::<crate::components::Squatter>(agent)
                 .map(|s| s.building)
                 .or_else(|| target.filter(|&t| crate::systems::street::is_derelict(self, t))),
+            // M12 D37: inside the Hideout; a door muster resolves to its tile.
+            LocationKey::MusterPoint => match crate::systems::raid::muster_point(self, agent) {
+                Some(crate::systems::raid::MusterAt::Inside(b)) => Some(b),
+                _ => None,
+            },
             LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget => None,
         }
     }
@@ -630,6 +635,10 @@ impl World {
             LocationKey::SuspectTile => target.and_then(|t| self.last_seen.get(&t)).map(|&(tile, _)| tile),
             LocationKey::CorpseTile => target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile),
             LocationKey::RaidTarget => crate::systems::raid::target_tile(self, agent),
+            LocationKey::MusterPoint => match crate::systems::raid::muster_point(self, agent) {
+                Some(crate::systems::raid::MusterAt::Door(t)) => Some(t),
+                _ => None,
+            },
             _ => None,
         }
     }

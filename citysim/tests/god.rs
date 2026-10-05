@@ -132,7 +132,9 @@ fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOn
                     | EventKind::Sacked
                     | EventKind::PlayerAction
                     | EventKind::PlayerActionFailed
-            );
+                    | EventKind::Split
+                    | EventKind::Riot
+            ) || (e.kind == EventKind::GangLeave && e.text.contains("lost its claims"));
             if told && day >= SHOCK_DAY - 2 {
                 story.push((e.tick, e.kind, e.text.clone()));
             }

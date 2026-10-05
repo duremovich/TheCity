@@ -220,6 +220,26 @@ night_watch = 4
 breakout_cooldown_days = 15
 breakout_min_members = 2
 breakout_max_freed = 3
+# M12 phase 4 (docs/M12_DISTRICTS.md § 5, plan D36-D40).
+# Phase 4 calibration: 48 -> 180, the farthest muster a Coarse march (2 ticks a tile) can leave and
+# still reach the door inside the 6-hour march window (6 x 60 / 2). Gangs rarely hold a Home within 48
+# of a rival Hideout or a corp prize, so the march started at a corner Hideout 200-230 tiles off and
+# arrived after the window. Raids with >= 3 at the door, seeds 42 / 43 / 44 (with raid_min_members):
+# 48 -> 50 / 33 / 42 % (without it), 180 -> 78 / 94 / 79 %.
+muster_near_tiles = 180
+empty_claims_days = 3              # an empty gang loses its claims after this many days
+reform_days = 14                   # an emptied gang re-forms no sooner ...
+reform_max_coverage = 1.2          # ... and only while its Hideout's district coverage is below this
+split_strength_ratio = 0.8
+split_loyalty = 0.6
+split_base = 0.5
+max_gangs = 4
+splinter_names = ["Rust Saints", "Low Choir", "Gutter Kings"]
+corp_raid_frac = 0.05
+corp_raid_cap = 500
+# Phase 4 (plan addition): Raid and Retaliate need 3 fit members. Early gangs of 4-10 and fresh
+# splinters raided with 1-2 at the door (seed 43: 9 of 17 expeditions); a raid is a crew's job.
+raid_min_members = 3
 
 # Flat terms on each order's score (product of considerations + flat). Retaliate's 0.6 lets a
 # grudge beat Expand for any leader with greed < 1; LieLow's 0.15 keeps it always available;
@@ -232,7 +252,7 @@ raid = 0.3
 retaliate = 0.6
 lielow = 0.15
 breakout = 0.28 # was 0.2: after the M9 review fixes (jail duty by rank, Hideout sleep, night watch) 0.2 produced no breakout on seed 42
-squat = 0.0     # M12 D38 (phase 3): take a derelict Block in the gang's districts
+squat = 0.05    # M12 D38: take a derelict Block in the gang's districts (phase 3 ran 0.0; phase 4 sets the spec's 0.05)
 
 # M9: the law as a faction (docs/M9_LAW.md). A captain (the most lawful guard) scores Patrol,
 # Crackdown (on the most-reported gang: patrol loops through its turf, one guard in three holds the
@@ -505,7 +525,9 @@ found_flat = 0.1
 # both gangs by day 29 (65 members vs 30 with the brain off) and cost the M10 gate ~4% (7.8k ticks/s).
 # The term is wired and tested (tests/corps.rs); it waits for M12, where a gang can raid a corp
 # building (spec: until then it only tilts Contest).
-hoard_tilt = 0.0
+# M12 phase 4: 0 -> 0.2 (spec § 5). The tilt now lands on the corp-building Raid (plan D39) and no
+# longer on Contest (faction::score_orders: Contest reads it only with corp raids off, the M11 brain).
+hoard_tilt = 0.2
 megacorp = [false, false, false, false, false, false, true, true]  # D41
 outside_treasury_initial = 100000
 # M11 phase 5, the estate rule (diagnosis item 24): a bankruptcy estate's building goes only to a corp
@@ -573,6 +595,8 @@ dreg_emigrate_mood = -0.5
 dreg_emigrate_days = 7         # 0 = off
 evicted_recruit_days = 14
 evicted_recruit_lawfulness = 0.5
+rent_burden_w = 0.2            # M12 D29: district unrest + rent_burden_w x mean(rent / income) of renters
+curfew_fear = 0.2              # M12 D29: submission under a district curfew
 
 [districts]
 # M12 § 1. One row per district: name, zone letter, and an x-range inside that
@@ -645,3 +669,27 @@ squat_ban_days = 14
 # city_absorb_floor; its squatters are put out (the SquatEvicted path). 30 re-let the whole seed by
 # day 46 and the street dried up; 60 keeps the squats through the season and returns them after.
 relet_days = 60
+
+[riots]
+# M12 § 6 (plan D29-D35): district unrest, riots, crossfire.
+enabled = true                     # off() = false
+# Phase 4 calibration: 0.55 -> 0.54 and 3 -> 4 days. District unrest tops out at 0.53-0.57 (seeds
+# 42-44, 120 days; the Civic's rough sleepers ~0.53, Sump West ~0.48): at 0.55 seed 42 never rioted,
+# at 0.54 with 3 days the Civic rioted every cooldown (5-6 a run). 0.54 x 4 days: 3 / 1 / 2 riots.
+riot_threshold = 0.54
+riot_days = 4
+riot_cooldown_days = 14
+riot_min = 6
+riot_max = 40
+max_active_riots = 2               # plan D30
+riot_lawfulness = 0.5
+riot_muster_hour = 20
+loot_frac = 0.3
+riot_close_days = 3
+riot_vent = 0.5
+crush_kill_mult = 3.0
+crossfire_radius = 3
+p_crossfire = 0.15
+p_crossfire_kill = 0.1
+riot_stat_bystanders = 4
+riot_promote_hours = 24            # plan risk 3: rioters rank with the gangs from the trigger (24) or this many hours before the muster

@@ -62,11 +62,14 @@ pub enum LocationKey {
     Hotel,
     /// M12 D27: the agent's squat, else the bound derelict target.
     Squat,
+    /// M12 D37: where the expedition gathers (`raid::muster_point`): a held
+    /// Home's or a riot muster's door tile, else inside the Hideout.
+    MusterPoint,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 18] = [
+    pub const GOTO: [LocationKey; 19] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -85,6 +88,7 @@ impl LocationKey {
         LocationKey::Workplace,
         LocationKey::Hotel,
         LocationKey::Squat,
+        LocationKey::MusterPoint,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -393,12 +397,23 @@ impl WorldState {
                     .is_some_and(|&stop| pos.is_some_and(|p| p.building == Some(stop)))
         });
         let raid_tile = crate::systems::raid::target_tile(world, agent);
+        // M12 D37: a Raid goal's muster point, while the expedition is pending.
+        let mustering =
+            world.comp::<Brain>(agent).is_some_and(|b| b.current_goal == Some(crate::components::GoalKind::Raid))
+                && crate::systems::raid::raid_pending(world, agent);
+        let muster = if mustering { crate::systems::raid::muster_point(world, agent) } else { None };
+        let at_muster = match muster {
+            Some(crate::systems::raid::MusterAt::Inside(b)) => pos.is_some_and(|p| p.building == Some(b)),
+            Some(crate::systems::raid::MusterAt::Door(t)) => pos.is_some_and(|p| p.building.is_none() && p.tile == t),
+            None => false,
+        };
         // M12 D27: the agent's squat (or, while planning one, the bound derelict).
         let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
             _ if patrolling => LocationKey::PatrolWaypoint,
+            _ if at_muster => LocationKey::MusterPoint,
             Some(b) if Some(b) == home => LocationKey::Home,
             Some(b)
                 if Some(b) == target && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home) =>

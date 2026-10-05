@@ -53,6 +53,27 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, d: DistrictId) {
         ui.label("Fear");
         ui.label(format!("{:.2}", dist.fear));
         ui.end_row();
+        // M12 phase 4: unrest (Street and Dreg residents), its streak, riots.
+        ui.label("Unrest");
+        ui.label(format!(
+            "{:.2} (Street {:.2}) · {} day(s) over {:.2}",
+            dist.unrest, dist.street_unrest, dist.unrest_streak, world.config.riots.riot_threshold
+        ));
+        ui.end_row();
+        ui.label("Last riot");
+        ui.label(dist.last_riot.map_or_else(|| "never".to_string(), |t| format!("day {}", citysim::time::day(t))));
+        ui.end_row();
+        if let Some(r) = world.riots.iter().find(|r| r.district == d) {
+            ui.label("Riot");
+            ui.label(format!(
+                "{} rioters against {} at {} ({:?})",
+                r.rioters.len(),
+                world.name_of(r.target),
+                citysim::time::clock(r.muster_at),
+                r.response
+            ));
+            ui.end_row();
+        }
         ui.label("Crime rate");
         let crimes: u32 = dist.crimes.iter().map(|&c| u32::from(c)).sum();
         ui.label(format!("{:.2} /100/day ({crimes} in 7 days, {} today)", dist.crime_rate, dist.crimes_today));

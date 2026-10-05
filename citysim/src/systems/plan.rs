@@ -86,14 +86,8 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Squat => crate::systems::street::squat_target(world, id),
         // Raid binds the expedition's building, the rival Hideout or the Jail
         // (the inspector shows it as the plan target).
-        GoalKind::Raid => {
-            let gang = world.gang_of(id)?;
-            if world.comp::<crate::components::Gang>(gang).is_some_and(|g| g.order.target_is_jail()) {
-                world.building_of_kind(BuildingKind::Jail)
-            } else {
-                world.rival_of(gang).and_then(|r| world.hideout_of(r))
-            }
-        }
+        // M12 D31/D39: a riot's target, a corp building, the Jail or the rival Hideout.
+        GoalKind::Raid => crate::systems::raid::target_building(world, id),
         // Fight binds the hostile within 4, or the revenge subject.
         GoalKind::Fight => {
             let tile = world.comp::<Position>(id)?.tile;
@@ -153,6 +147,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     let bypass = match goal {
         GoalKind::Idle => routine::idle_plan(world, id),
         GoalKind::Work => routine::commute_plan(world, id),
+        // M12 phase 4: the expedition chain, built directly.
+        GoalKind::Raid => routine::raid_plan(world, id),
         _ => None,
     };
     if let Some(plan) = bypass {

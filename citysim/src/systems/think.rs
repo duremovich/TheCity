@@ -14,7 +14,17 @@ use crate::world::World;
 
 /// Steps that a goal change must not abort.
 fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
-    if brain.current_step().is_some_and(|s| matches!(s.action, ActionKind::Arrest | ActionKind::Escort)) {
+    // M12 phase 4: a march that has left the muster is committed: the
+    // marchers reach the door together instead of peeling off to bed.
+    if brain.current_step().is_some_and(|s| {
+        matches!(
+            s.action,
+            ActionKind::Arrest
+                | ActionKind::Escort
+                | ActionKind::Brawl
+                | ActionKind::GoTo(crate::goap::LocationKey::RaidTarget)
+        )
+    }) {
         return true;
     }
     match &brain.exec {
@@ -23,6 +33,10 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
         // being aborted one tick short by a goal that only wins because it ended.
         ExecState::Use { until, .. } if *until <= now => true,
         ExecState::Use { kind: ActionKind::Sleep, started, .. } => now.saturating_sub(*started) >= 60,
+        // M12 phase 4: a muster in its last two hours holds its crew.
+        ExecState::Use { kind: ActionKind::Muster, until, .. } => {
+            until.saturating_sub(now) <= 2 * crate::time::TICKS_PER_HOUR
+        }
         ExecState::Use { kind, .. } => matches!(
             kind,
             ActionKind::Arrest
@@ -71,7 +85,11 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     let score = trace.goals.first().map_or(0.0, |g| g.score);
     // A different winner while an uninterruptible step runs is deferred: the
     // goal and its plan stay together until the step completes.
-    let changed = brain.current_goal != Some(winner) && !(brain.plan.is_some() && uninterruptible(brain, tick));
+    // M12 phase 4: a committed march is released once its expedition is over.
+    let march_over =
+        brain.plan.as_ref().is_some_and(|p| p.goal == GoalKind::Raid) && crate::systems::raid::raid_done(world, id);
+    let held = brain.plan.is_some() && uninterruptible(brain, tick) && !march_over;
+    let changed = brain.current_goal != Some(winner) && !held;
     let abort = changed && brain.plan.is_some();
     let old = brain.current_goal;
 

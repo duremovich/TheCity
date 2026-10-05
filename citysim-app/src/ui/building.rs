@@ -539,6 +539,14 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
             let what = if gang.order.target_is_jail() { "Breakout" } else { "Raid" };
             ui.colored_label(RED, format!("{what} musters {when} ({})", time::clock(t)));
         }
+        // M12 D39: a corp building as the Raid's target; D36: lineage.
+        if let Some(t) = citysim::systems::raid::corp_target(world, gid) {
+            ui.label(format!("Raid target: {} ({})", world.name_of(t), world.owner_label(world.owner_of(t))));
+        }
+        if let Some(parent) = gang.split_from {
+            let name = world.comp::<Gang>(parent).map_or_else(|| "a gang gone".to_string(), |g| g.name.clone());
+            ui.label(format!("Split from {name}"));
+        }
         let jailed = citysim::systems::gang::jailed_headcount(world, gid);
         if let Some(b) = gang.boss.filter(|&b| world.has::<Sentence>(b)) {
             ui.horizontal(|ui| {

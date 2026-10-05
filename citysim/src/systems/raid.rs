@@ -1,12 +1,20 @@
-//! Hideout raids: the muster at the own Hideout, the march to the rival's
-//! door, and the brawl there, resolved strongest-against-strongest through
-//! `law::resolve_fight`. Three outcomes: lost, won (half the treasury), sacked.
+//! Expeditions: the muster, the march to a door, and the brawl there,
+//! resolved strongest-against-strongest through `law::resolve_fight`.
 //!
-//! M9: the same march under `Order::BreakOut` ends at the Jail door, where
-//! `breach` fights the guards present and frees the gang's convicts.
+//! A gang's raid on the rival Hideout has three outcomes: lost, won (half the
+//! treasury), sacked. M9: the same march under `Order::BreakOut` ends at the
+//! Jail door, where `breach` fights the guards present and frees the gang's
+//! convicts. M12 phase 4: a Raid may aim at a corp building instead
+//! (`Gang.raid_target`, [`corp_brawl`]); a district riot runs the same
+//! machinery with its rioters as raiders ([`Expedition::Riot`],
+//! `systems::riot`); musters gather near the target ([`muster_point`]); and
+//! every brawl at a door rolls once for bystanders ([`crossfire`]).
+
+use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, Gang, GoalKind, Order, Position, Sentence, Shock, TilePos,
+    Brain, Building, BuildingKind, Corp, CorpShock, Crime, DistrictId, Gang, GoalKind, Inventory, Job, MemoryKind,
+    Needs, Order, Position, Sentence, Shock, TilePos,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -21,25 +29,75 @@ pub enum Outcome {
     Sacked,
 }
 
+/// M12 D31: whose march an agent is on: its gang's, or a district riot's.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum Expedition {
+    Gang(EntityId),
+    Riot(u32),
+}
+
+/// M12 D37: where an expedition gathers.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum MusterAt {
+    /// Inside a building (the gang's Hideout, M8).
+    Inside(EntityId),
+    /// On the street tile outside a door (a held Home or squat near the
+    /// target, a riot's muster building).
+    Door(TilePos),
+}
+
+/// The riot with this id, if it is live.
+pub fn riot_by_id(world: &World, id: u32) -> Option<&crate::components::Riot> {
+    world.riots.iter().find(|r| r.id == id)
+}
+
+/// D31: a live riot's rioter marches with the riot; anyone else with its gang.
+pub fn expedition_of(world: &World, agent: EntityId) -> Option<Expedition> {
+    if let Some(&id) = world.rioter_of.get(&agent) {
+        if riot_by_id(world, id).is_some() {
+            return Some(Expedition::Riot(id));
+        }
+    }
+    world.gang_of(agent).map(Expedition::Gang)
+}
+
 fn own_gang(world: &World, agent: EntityId) -> Option<&Gang> {
     world.gang_of(agent).and_then(|g| world.comp::<Gang>(g))
 }
 
-/// The Raid goal's gate: the gang musters within `raid_gather_hours`.
-pub fn raid_pending(world: &World, agent: EntityId) -> bool {
-    let Some(g) = own_gang(world, agent) else { return false };
-    let window = Tick::from(world.config.gangs.raid_gather_hours) * TICKS_PER_HOUR;
-    g.order.is_raid() && g.raid_at.is_some_and(|t| t <= world.tick + window)
+/// The tick the expedition leaves the muster: the gang's `raid_at`, a riot's `muster_at`.
+pub fn departure(world: &World, agent: EntityId) -> Option<Tick> {
+    match expedition_of(world, agent)? {
+        Expedition::Riot(id) => riot_by_id(world, id).map(|r| r.muster_at),
+        Expedition::Gang(g) => world.comp::<Gang>(g).and_then(|g| g.raid_at),
+    }
 }
 
-/// No raid is pending for this agent's gang (the Raid goal state).
+/// The Raid goal's gate: the expedition musters within `raid_gather_hours`.
+pub fn raid_pending(world: &World, agent: EntityId) -> bool {
+    let window = Tick::from(world.config.gangs.raid_gather_hours) * TICKS_PER_HOUR;
+    match expedition_of(world, agent) {
+        Some(Expedition::Riot(id)) => riot_by_id(world, id).is_some_and(|r| r.muster_at <= world.tick + window),
+        Some(Expedition::Gang(_)) => {
+            let Some(g) = own_gang(world, agent) else { return false };
+            g.order.is_raid() && g.raid_at.is_some_and(|t| t <= world.tick + window)
+        }
+        None => false,
+    }
+}
+
+/// No expedition is pending for this agent (the Raid goal state).
 pub fn raid_done(world: &World, agent: EntityId) -> bool {
-    own_gang(world, agent).is_none_or(|g| g.raid_at.is_none())
+    match expedition_of(world, agent) {
+        Some(Expedition::Riot(_)) => false,
+        Some(Expedition::Gang(_)) => own_gang(world, agent).is_none_or(|g| g.raid_at.is_none()),
+        None => true,
+    }
 }
 
 /// The muster has departed: latecomers skip the wait.
 pub fn mustered(world: &World, agent: EntityId) -> bool {
-    own_gang(world, agent).is_some_and(|g| g.raid_at.is_some_and(|t| world.tick >= t))
+    departure(world, agent).is_some_and(|t| world.tick >= t)
 }
 
 /// The street tile outside the rival Hideout's door.
@@ -56,27 +114,112 @@ pub fn jail_tile(world: &World) -> Option<TilePos> {
     world.comp::<Building>(jail).map(|b| world.outside_door(b))
 }
 
-/// Where this agent's expedition ends: the Jail under BreakOut, else the
-/// rival Hideout (`LocationKey::RaidTarget`).
-pub fn target_tile(world: &World, agent: EntityId) -> Option<TilePos> {
-    if own_gang(world, agent).is_some_and(|g| g.order.target_is_jail()) {
-        jail_tile(world)
-    } else {
-        rival_hideout_tile(world, agent)
+/// D39: the corp building a gang's standing Raid aims at, while it stands.
+pub fn corp_target(world: &World, gang: EntityId) -> Option<EntityId> {
+    let g = world.comp::<Gang>(gang)?;
+    if g.order != Order::Raid {
+        return None;
+    }
+    g.raid_target.filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+}
+
+/// A gang's expedition target under its standing order: the Jail under
+/// BreakOut, a corp building under a corp Raid, else the rival Hideout.
+pub fn gang_target(world: &World, gang: EntityId) -> Option<EntityId> {
+    let g = world.comp::<Gang>(gang)?;
+    if g.order.target_is_jail() {
+        return world.building_of_kind(BuildingKind::Jail);
+    }
+    corp_target(world, gang).or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
+}
+
+/// The building this agent's expedition ends at (the plan's bound target).
+pub fn target_building(world: &World, agent: EntityId) -> Option<EntityId> {
+    match expedition_of(world, agent)? {
+        Expedition::Riot(id) => riot_by_id(world, id).map(|r| r.target),
+        Expedition::Gang(g) => gang_target(world, g),
     }
 }
 
-/// Muster complete: the raid departs. False when the order changed meanwhile
-/// (the step fails and the member replans).
+/// Where this agent's expedition ends (`LocationKey::RaidTarget`): the
+/// street tile outside the target's door.
+pub fn target_tile(world: &World, agent: EntityId) -> Option<TilePos> {
+    let b = target_building(world, agent)?;
+    world.comp::<Building>(b).map(|bd| world.outside_door(bd))
+}
+
+/// D37: where this agent's expedition gathers. A riot: outside its muster
+/// building. A gang: outside the held Home or squat nearest the target's
+/// door, when one lies within `muster_near_tiles` of it (ties lower id);
+/// else inside the Hideout (M8). `None` without an expedition or a Hideout.
+pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
+    match expedition_of(world, agent)? {
+        Expedition::Riot(id) => {
+            let r = riot_by_id(world, id)?;
+            world.comp::<Building>(r.muster).map(|b| MusterAt::Door(world.outside_door(b)))
+        }
+        Expedition::Gang(gid) => {
+            let hideout = world.hideout_of(gid);
+            let near = world.config.gangs.muster_near_tiles;
+            if near > 0 {
+                if let Some(t) = gang_target(world, gid).and_then(|b| world.comp::<Building>(b)).map(|b| b.door) {
+                    let g = world.comp::<Gang>(gid)?;
+                    let best = g
+                        .territory
+                        .iter()
+                        .filter_map(|&h| {
+                            world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(t), h, b))
+                        })
+                        .filter(|&(d, _, _)| d <= near)
+                        .min_by_key(|&(d, h, _)| (d, h));
+                    if let Some((_, _, b)) = best {
+                        return Some(MusterAt::Door(world.outside_door(b)));
+                    }
+                }
+            }
+            hideout.map(MusterAt::Inside)
+        }
+    }
+}
+
+/// Muster complete: the expedition departs. False when the order changed
+/// meanwhile, or the target fell under full cover (the step fails and the
+/// member replans).
 pub fn depart(world: &mut World, agent: EntityId) -> bool {
-    let Some(gid) = world.gang_of(agent) else { return false };
     let now = world.tick;
+    let gid = match expedition_of(world, agent) {
+        Some(Expedition::Riot(id)) => {
+            let Some(r) = world.riots.iter_mut().find(|r| r.id == id) else { return false };
+            if r.muster_at > now {
+                return false;
+            }
+            r.departed.get_or_insert(now);
+            return true;
+        }
+        Some(Expedition::Gang(g)) => g,
+        None => return false,
+    };
     // M12 D38: no raid departs into a garrisoned Jail or a district cracking
     // down on the raider or cordoned, whatever held when the order was
     // scored; the member replans and the brain rescores the gang.
     let order = world.comp::<Gang>(gid).map(|g| g.order);
     if let Some(order) = order.filter(|o| o.is_raid()) {
-        if crate::systems::faction::target_cover(world, gid, order) >= 1.0 {
+        if faction::target_cover(world, gid, order) >= 1.0 {
+            // Phase 4: the muster is called off once (one event), and the
+            // brain picks a new order at once.
+            if world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_some_and(|t| t <= now)) {
+                let gname = world.comp::<Gang>(gid).map_or_else(String::new, |g| g.name.clone());
+                let what = gang_target(world, gid).map_or_else(|| "its target".to_string(), |b| world.name_of(b));
+                if let Some(g) = world.comp_mut::<Gang>(gid) {
+                    g.raid_at = None;
+                }
+                world.push_event(
+                    EventKind::Raid,
+                    &[gid],
+                    format!("{gname}'s raid on {what} called off: the law holds the district"),
+                );
+                faction::rethink(world, gid);
+            }
             return false;
         }
     }
@@ -95,69 +238,131 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
     true
 }
 
-/// `Brawl` at the expedition's door: a breach of the Jail under BreakOut,
-/// a raid on the rival Hideout otherwise.
+/// `Brawl` at the expedition's door: a riot's clash, a breach of the Jail
+/// under BreakOut, a corp building under a corp Raid, else a raid on the
+/// rival Hideout.
 pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
+    let gid = match expedition_of(world, actor)? {
+        Expedition::Riot(_) => return crate::systems::riot::clash(world, actor),
+        Expedition::Gang(g) => g,
+    };
     // M12 D38: count an expedition that reached a door under full cover.
-    if let Some((gid, order)) = world.gang_of(actor).and_then(|g| world.comp::<Gang>(g).map(|x| (g, x.order))) {
-        let live = world.comp::<Gang>(gid).is_some_and(|g| g.raid_at.is_some());
-        if live && order.is_raid() && crate::systems::faction::target_cover(world, gid, order) >= 1.0 {
+    if let Some(order) = world.comp::<Gang>(gid).filter(|g| g.raid_at.is_some()).map(|g| g.order) {
+        if order.is_raid() && faction::target_cover(world, gid, order) >= 1.0 {
             world.stats.current.raids_into_cover += 1;
         }
     }
     if own_gang(world, actor).is_some_and(|g| g.order.target_is_jail()) {
         breach(world, actor)
+    } else if corp_target(world, gid).is_some() {
+        corp_brawl(world, actor)
     } else {
         brawl(world, actor)
     }
 }
 
+/// Phase 4 (raids ≥ 3 at the door): the first marcher at the door holds
+/// the Brawl while fewer than `min(3, marchers)` stand there (a riot:
+/// `riot_min ÷ 2`), marchers being the expedition's free agents whose goal
+/// is Raid, until the last hour of the march window. Event-driven: only a
+/// marcher standing at the door asks, once a tick.
+pub fn wait_for_crew(world: &World, actor: EntityId) -> bool {
+    let now = world.tick;
+    let (pool, target, depart, cap) = match expedition_of(world, actor) {
+        Some(Expedition::Riot(id)) => {
+            let Some(r) = riot_by_id(world, id) else { return false };
+            (r.rioters.clone(), Some(r.target), r.muster_at, (world.config.riots.riot_min / 2).max(1))
+        }
+        Some(Expedition::Gang(g)) => {
+            let Some(gg) = world.comp::<Gang>(g) else { return false };
+            let Some(t) = gg.raid_at else { return false };
+            (gg.members.clone(), gang_target(world, g), t, 3)
+        }
+        None => return false,
+    };
+    if now + TICKS_PER_HOUR >= depart + faction::RAID_MARCH_TICKS {
+        return false;
+    }
+    let Some(door) = target.and_then(|b| world.comp::<Building>(b)).map(|b| b.door) else { return false };
+    let marching = pool
+        .iter()
+        .filter(|&&m| {
+            law::living(world, m)
+                && !world.has::<Sentence>(m)
+                && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(GoalKind::Raid))
+        })
+        .count();
+    let present = gathered(world, &pool, actor, door).len();
+    present < cap.min(marching)
+}
+
 /// The raiders present at a door: the actor, plus every fit member of the
 /// gang within `raid_gather_radius` whose goal is Raid, strongest first.
 fn raiders_at(world: &World, gid: EntityId, actor: EntityId, door: TilePos) -> Vec<EntityId> {
+    let members = world.comp::<Gang>(gid).map(|g| g.members.clone()).unwrap_or_default();
+    gathered(world, &members, actor, door)
+}
+
+/// Of `pool`, the actor and every free agent within `raid_gather_radius` of
+/// the door whose goal is Raid, strongest first (riots reuse it, D32).
+pub fn gathered(world: &World, pool: &[EntityId], actor: EntityId, door: TilePos) -> Vec<EntityId> {
     let radius = world.config.gangs.raid_gather_radius;
-    let mut raiders: Vec<EntityId> = world
-        .comp::<Gang>(gid)
-        .map(|g| g.members.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|&m| !world.has::<Sentence>(m))
+    let mut out: Vec<EntityId> = pool
+        .iter()
+        .copied()
+        .filter(|&m| !world.has::<Sentence>(m) && law::living(world, m))
         .filter(|&m| {
             m == actor
                 || (world.comp::<Position>(m).is_some_and(|p| law::chebyshev(p.tile, door) <= radius)
                     && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(GoalKind::Raid)))
         })
         .collect();
-    by_strength(world, &mut raiders);
-    raiders
+    by_strength(world, &mut out);
+    out
 }
 
 /// Strongest against strongest until one side is out. Each pairing is an
 /// Assault (or a Murder) by the raider, witnessed as usual. The vectors hold
 /// whoever is still standing.
 #[derive(Default)]
-struct Tally {
-    raider_losses: usize,
+pub struct Tally {
+    pub raider_losses: usize,
     /// Deaths on either side.
-    deaths: usize,
+    pub deaths: usize,
     /// Defenders who lost the pairing and lived.
-    defenders_beaten: usize,
+    pub defenders_beaten: usize,
+    /// Raiders who lost a pairing and lived (a lost riot sentences them).
+    pub losers: Vec<EntityId>,
+    /// Bystanders hit (D35).
+    pub crossfire: usize,
 }
 
-fn fight_out(
+/// One brawl at `door` (D32, D35): the crossfire roll, the litter, then the
+/// pairings with the kill chance × `kill_mult` (a Crush). `riot`: the
+/// rioting district (its Statistical residents may be caught too, and the
+/// litter is a riot's).
+pub fn fight_out(
     world: &mut World,
     raiders: &mut Vec<EntityId>,
     defenders: &mut Vec<EntityId>,
     door: TilePos,
     place: &str,
+    kill_mult: f32,
+    riot: Option<DistrictId>,
 ) -> Tally {
     let mut t = Tally::default();
-    // M12 D17: a brawl at a door (a raid, a breach) wrecks the street there.
-    if !defenders.is_empty() && !raiders.is_empty() {
+    // A brawl needs two sides: a door nobody defends has no crossfire.
+    if let (Some(&attacker), false) = (raiders.first(), defenders.is_empty()) {
+        let parties: Vec<EntityId> = raiders.iter().chain(defenders.iter()).copied().collect();
+        t.crossfire = crossfire(world, door, &parties, attacker, riot, place);
+    }
+    // M12 D17: a brawl at a door (a raid, a breach) wrecks the street there;
+    // a riot's mess is laid by `riot::finish` (64 r3) whether or not it fought.
+    if riot.is_none() && !defenders.is_empty() && !raiders.is_empty() {
         crate::systems::litter::deposit(world, door, 32, 2);
     }
     while let (Some(&r), Some(&d)) = (raiders.first(), defenders.first()) {
-        let (_, loser, died) = law::resolve_fight(world, r, d);
+        let (_, loser, died) = law::resolve_fight_with(world, r, d, kill_mult);
         if died {
             t.deaths += 1;
         }
@@ -180,9 +385,88 @@ fn fight_out(
         } else {
             raiders.remove(0);
             t.raider_losses += 1;
+            if !died {
+                t.losers.push(r);
+            }
         }
     }
     t
+}
+
+/// D35: once per brawl, before the pairings. Every body within
+/// `crossfire_radius` of the door that is not a party rolls `p_crossfire`
+/// (ascending id); a riot also draws `riot_stat_bystanders` Statistical
+/// residents of its district at the same odds. A hit is an Assault by
+/// `attacker` (memory `CaughtInCrossfire`, safety −0.6); `p_crossfire_kill`
+/// of hits kill. Returns the hits.
+pub fn crossfire(
+    world: &mut World,
+    door: TilePos,
+    parties: &[EntityId],
+    attacker: EntityId,
+    riot: Option<DistrictId>,
+    place: &str,
+) -> usize {
+    let cfg = world.config.riots.clone();
+    if cfg.p_crossfire <= 0.0 {
+        return 0;
+    }
+    let mut candidates: Vec<EntityId> = world
+        .bodies()
+        .into_iter()
+        .filter(|a| !parties.contains(a))
+        .filter(|&a| law::living(world, a) && !world.has::<Sentence>(a))
+        .filter(|&a| world.comp::<Position>(a).is_some_and(|p| law::chebyshev(p.tile, door) <= cfg.crossfire_radius))
+        .collect();
+    if let Some(d) = riot {
+        let mut pool: Vec<EntityId> = world
+            .districts
+            .get(d.index())
+            .map(|x| x.residents.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|a| !parties.contains(a) && !candidates.contains(a))
+            .filter(|&a| {
+                law::living(world, a)
+                    && !world.has::<Sentence>(a)
+                    && world.comp::<Brain>(a).is_some_and(|b| b.lod == crate::components::Lod::Statistical)
+            })
+            .collect();
+        for _ in 0..cfg.riot_stat_bystanders {
+            if pool.is_empty() {
+                break;
+            }
+            let i = world.rng.world().random_range(0..pool.len());
+            candidates.push(pool.swap_remove(i));
+        }
+    }
+    let mut hits = 0;
+    for b in candidates {
+        let roll: f32 = world.rng.world().random();
+        if roll >= cfg.p_crossfire {
+            continue;
+        }
+        hits += 1;
+        world.stats.current.crossfire += 1;
+        world.remember(b, MemoryKind::CaughtInCrossfire, Some(attacker), 0.7, -0.7, false);
+        if let Some(n) = world.comp_mut::<Needs>(b) {
+            n.safety = (n.safety - 0.6).max(0.0);
+        }
+        let kill: f32 = world.rng.world().random();
+        let died = kill < cfg.p_crossfire_kill;
+        let (an, bn) = (world.name_of(attacker), world.name_of(b));
+        let fell = if died { " and died" } else { "" };
+        world.push_event(EventKind::Assault, &[attacker, b], format!("{an} hit bystander {bn} at {place}{fell}"));
+        world.push_event(
+            EventKind::Crossfire,
+            &[attacker, b],
+            format!("{bn} caught in the crossfire at {place}{fell}"),
+        );
+        if died {
+            world.kill_by(b, crate::components::DeathCause::Violence, Some(attacker));
+        }
+    }
+    hits
 }
 
 /// The first raider at the Jail door resolves the breakout; later arrivals
@@ -197,22 +481,12 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     }
     let jail = world.building_of_kind(BuildingKind::Jail)?;
     let door = world.comp::<Building>(jail)?.door;
-    let radius = world.config.gangs.raid_gather_radius;
     let (gname, boss) = world.comp::<Gang>(gid).map(|g| (g.name.clone(), g.boss))?;
 
     let mut raiders = raiders_at(world, gid, actor, door);
-    let mut defenders: Vec<EntityId> = law_brain::guards(world)
-        .into_iter()
-        .filter(|&g| law::living(world, g))
-        .filter(|&g| {
-            world
-                .comp::<Position>(g)
-                .is_some_and(|p| p.building == Some(jail) || law::chebyshev(p.tile, door) <= radius)
-        })
-        .collect();
-    by_strength(world, &mut defenders);
+    let mut defenders = jail_defenders(world, jail, door);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
-    let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct");
+    let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct", 1.0, None);
     let (deaths, beaten) = (tally.deaths, tally.defenders_beaten);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
 
@@ -272,12 +546,28 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     Some(outcome)
 }
 
+/// The city guards inside the Jail or within `raid_gather_radius` of its door.
+pub fn jail_defenders(world: &World, jail: EntityId, door: TilePos) -> Vec<EntityId> {
+    let radius = world.config.gangs.raid_gather_radius;
+    let mut defenders: Vec<EntityId> = law_brain::guards(world)
+        .into_iter()
+        .filter(|&g| law::living(world, g))
+        .filter(|&g| {
+            world
+                .comp::<Position>(g)
+                .is_some_and(|p| p.building == Some(jail) || law::chebyshev(p.tile, door) <= radius)
+        })
+        .collect();
+    by_strength(world, &mut defenders);
+    defenders
+}
+
 /// `fighting + 0.25 × courage`: the brawl's pairing order.
-fn strength(world: &World, id: EntityId) -> f32 {
+pub fn strength(world: &World, id: EntityId) -> f32 {
     law::fighting(world, id) + 0.25 * law::courage(world, id)
 }
 
-fn by_strength(world: &World, ids: &mut [EntityId]) {
+pub fn by_strength(world: &World, ids: &mut [EntityId]) {
     ids.sort_by(|&a, &b| strength(world, b).total_cmp(&strength(world, a)).then(a.cmp(&b)));
 }
 
@@ -305,7 +595,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     by_strength(world, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let place = format!("the {rival_name} Hideout");
-    let tally = fight_out(world, &mut raiders, &mut defenders, door, &place);
+    let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
     let (raider_losses, deaths) = (tally.raider_losses, tally.deaths);
     let outcome = if n_defenders == 0 || (defenders.is_empty() && raider_losses == 0) {
         Outcome::Sacked
@@ -323,6 +613,127 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         ),
     );
     Some(outcome)
+}
+
+/// The private guards on a building's side: guards employed by a Security
+/// Office owned by the building's corp or by the corp holding its security
+/// contract (`secured_by`), ascending.
+pub fn private_guards_of(world: &World, b: EntityId) -> Vec<EntityId> {
+    let owner = world.corp_of_building(b);
+    let contractor = world.comp::<Building>(b).and_then(|bd| bd.secured_by);
+    world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| law::is_private_guard(world, g))
+        .filter(|&g| {
+            let corp = world.comp::<Job>(g).and_then(|j| j.employer).and_then(|e| world.corp_of_building(e));
+            corp.is_some() && (corp == owner || corp == contractor)
+        })
+        .collect()
+}
+
+/// D39: the prize of a won raid on `corp`: `corp_raid_frac` of its treasury,
+/// capped at `corp_raid_cap` (never negative).
+pub fn corp_prize_value(world: &World, corp: EntityId) -> i64 {
+    let cfg = &world.config.gangs;
+    let t = world.comp::<Corp>(corp).map_or(0, |c| c.treasury.max(0));
+    ((t as f32 * cfg.corp_raid_frac).floor() as i64).min(cfg.corp_raid_cap).max(0)
+}
+
+/// D39: a raid on a corp building. Defenders: the corp's private guards (and
+/// its contractor's) within `raid_gather_radius` of the door or inside, its
+/// employees inside, and the city guards on the district's beat within the
+/// radius. Won (nobody left standing): `corp_prize_value` from the corp to
+/// the gang (`Flow::Robbery`), the building's food stock split among the
+/// raiders as stolen food, `CorpShock::Robbed` and `Raided`. Lost: `RaidLost`.
+pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
+    let gid = world.gang_of(actor)?;
+    let target = corp_target(world, gid)?;
+    if world.comp::<Gang>(gid).is_none_or(|g| g.raid_at.is_none()) {
+        return None;
+    }
+    let door = world.comp::<Building>(target)?.door;
+    let gname = world.comp::<Gang>(gid).map(|g| g.name.clone())?;
+    let corp = world.corp_of_building(target);
+    let radius = world.config.gangs.raid_gather_radius;
+    let d = world.district_of_building(target);
+    let near = |w: &World, a: EntityId| {
+        w.comp::<Position>(a).is_some_and(|p| p.building == Some(target) || law::chebyshev(p.tile, door) <= radius)
+    };
+    let mut defenders: Vec<EntityId> =
+        private_guards_of(world, target).into_iter().filter(|&g| law::living(world, g) && near(world, g)).collect();
+    for s in crate::systems::ownership::staff_at(world, target) {
+        if world.comp::<Position>(s).is_some_and(|p| p.building == Some(target)) && !defenders.contains(&s) {
+            defenders.push(s);
+        }
+    }
+    let beat: Vec<EntityId> =
+        world.law().map(|l| l.beats.iter().filter(|(_, &bd)| bd == d).map(|(&g, _)| g).collect()).unwrap_or_default();
+    for g in beat {
+        if law::living(world, g) && near(world, g) && !defenders.contains(&g) {
+            defenders.push(g);
+        }
+    }
+    defenders.retain(|&x| !world.has::<Sentence>(x) && x != actor && world.gang_of(x) != Some(gid));
+    by_strength(world, &mut defenders);
+    let mut raiders = raiders_at(world, gid, actor, door);
+    let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
+    let what = world.name_of(target);
+    let owner = world.owner_label(corp);
+    let place = format!("{owner}'s {what}");
+    let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
+    let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
+    let mut took = (0i64, 0u32);
+    if outcome == Outcome::Won {
+        let prize = corp.map_or(0, |c| corp_prize_value(world, c));
+        let moved =
+            crate::systems::ownership::pay(world, corp, Some(gid), prize, crate::systems::ownership::Flow::Robbery);
+        let food = world.comp::<Building>(target).map_or(0, |b| b.stock_food);
+        let standing: Vec<EntityId> = raiders.iter().copied().filter(|&r| law::living(world, r)).collect();
+        if food > 0 && !standing.is_empty() {
+            if let Some(b) = world.comp_mut::<Building>(target) {
+                b.stock_food = 0;
+            }
+            share_food(world, &standing, food);
+        }
+        took = (moved, food);
+        if let Some(c) = corp {
+            crate::systems::ownership::note_loss(world, target, moved, Some(actor));
+            crate::systems::ownership::push_corp_shock(world, c, CorpShock::Robbed(moved));
+            crate::systems::ownership::push_corp_shock(world, c, CorpShock::Raided);
+        }
+    } else if world.comp::<Gang>(gid).is_some_and(|g| g.order != Order::Retaliate) {
+        gang::push_shock(world, gid, Shock::RaidLost);
+    }
+    if let Some(g) = world.comp_mut::<Gang>(gid) {
+        g.raid_at = None;
+        g.raid_target = None;
+        g.retaliate_until = None;
+    }
+    world.push_event(
+        EventKind::Raid,
+        &[gid, target, actor],
+        format!(
+            "{gname} raided {place}: {outcome:?} ({n_raiders} raiders vs {n_defenders} defenders, {} dead, {} coins and {} food taken)",
+            tally.deaths, took.0, took.1
+        ),
+    );
+    faction::rethink(world, gid);
+    Some(outcome)
+}
+
+/// Food units into `to`'s inventories round-robin, as stolen food.
+pub fn share_food(world: &mut World, to: &[EntityId], units: u32) {
+    if to.is_empty() {
+        return;
+    }
+    for i in 0..units as usize {
+        if let Some(inv) = world.comp_mut::<Inventory>(to[i % to.len()]) {
+            inv.food += 1;
+            inv.stolen_food += 1;
+        }
+    }
 }
 
 /// Move the prize, mark the sack, shock the loser, and let the attacker

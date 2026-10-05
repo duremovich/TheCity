@@ -83,7 +83,7 @@ pub enum ActionKind {
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 59] = [
+pub const PLANNABLE: [ActionKind; 60] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -104,6 +104,8 @@ pub const PLANNABLE: [ActionKind; 59] = [
     // M12 D21, D27.
     ActionKind::GoTo(LocationKey::Hotel),
     ActionKind::GoTo(LocationKey::Squat),
+    // M12 D37.
+    ActionKind::GoTo(LocationKey::MusterPoint),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -433,6 +435,17 @@ impl PlanCtx {
             if let Some(t) = crate::systems::raid::target_tile(world, agent) {
                 dist.insert(LocationKey::RaidTarget, o.manhattan(t));
             }
+            // M12 D37: the muster point, while an expedition is pending.
+            if crate::systems::raid::raid_pending(world, agent) {
+                let there = match crate::systems::raid::muster_point(world, agent) {
+                    Some(crate::systems::raid::MusterAt::Inside(b)) => world.comp::<Building>(b).map(|bd| bd.door),
+                    Some(crate::systems::raid::MusterAt::Door(t)) => Some(t),
+                    None => None,
+                };
+                if let Some(t) = there {
+                    dist.insert(LocationKey::MusterPoint, o.manhattan(t));
+                }
+            }
         }
 
         // M12 D21/D27: the street's rungs (homeless agents only; cheap scans
@@ -658,9 +671,9 @@ impl ActionKind {
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
             ActionKind::Beg => !ctx.is(Role::Guard),
-            ActionKind::Fence | ActionKind::Extort | ActionKind::SplitLoot | ActionKind::Muster | ActionKind::Brawl => {
-                ctx.in_gang
-            }
+            ActionKind::Fence | ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
+            // M12 D31: a rioter marches too.
+            ActionKind::Muster | ActionKind::Brawl => ctx.in_gang || ctx.raid_pending,
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
             ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult && ctx.gang_eligible,
             ActionKind::Flirt | ActionKind::Propose => ctx.adult,
@@ -744,7 +757,7 @@ impl ActionKind {
                 ws.in_gang && at(LocationKey::Hideout) && ws.gang_task_done && ctx.has_loot && !ctx.hideout_sacked
             }
             ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence && !ctx.hideout_sacked,
-            ActionKind::Muster => at(LocationKey::Hideout) && !ws.mustered && ctx.raid_pending,
+            ActionKind::Muster => at(LocationKey::MusterPoint) && !ws.mustered && ctx.raid_pending,
             ActionKind::Brawl => at(LocationKey::RaidTarget) && ws.mustered && !ws.raid_done,
             ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
@@ -795,7 +808,7 @@ impl ActionKind {
             ActionKind::Extort => ctx.extort_ok && ctx.dist.contains_key(&LocationKey::TargetHome),
             ActionKind::SplitLoot => ctx.has_loot && !ctx.hideout_sacked,
             ActionKind::Fence => ctx.can_fence && !ctx.hideout_sacked,
-            ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::Hideout),
+            ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::MusterPoint),
             ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RaidTarget),
             ActionKind::Attack => ctx.hostile_adjacent,
             ActionKind::CarryCorpse => ctx.corpse_target,

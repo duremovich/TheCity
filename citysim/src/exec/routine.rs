@@ -121,6 +121,36 @@ pub fn commute_plan(world: &World, id: EntityId) -> Option<Plan> {
 /// Idle bypasses the planner: Rest at Home or the Bar; otherwise go home
 /// (loitering inside the Hall or Market blocks everyone else), or Wander
 /// outside if homeless. Spare food goes into the pantry first.
+/// M12 phase 4: an expedition's plan is always the same chain, so it is
+/// built directly (as the commute and the idle plan are): `GoTo(MusterPoint)
+/// → Muster → GoTo(RaidTarget) → Brawl`, the steps already behind the agent
+/// dropped. The planner's 200-expansion cap could not reach a door 200
+/// tiles off past the cheap GoTos (`ExpansionCap`), so far members never
+/// answered a muster. `None` without a pending expedition.
+pub fn raid_plan(world: &World, id: EntityId) -> Option<Plan> {
+    use crate::systems::raid;
+    if !raid::raid_pending(world, id) || raid::raid_done(world, id) {
+        return None;
+    }
+    let target = raid::target_building(world, id);
+    let ws = crate::goap::WorldState::observe(world, id, target);
+    let mustered = raid::mustered(world, id);
+    let mut steps = Vec::new();
+    if !mustered {
+        raid::muster_point(world, id)?;
+        if ws.at != LocationKey::MusterPoint {
+            steps.push(step(ActionKind::GoTo(LocationKey::MusterPoint), None));
+        }
+        steps.push(step(ActionKind::Muster, None));
+    }
+    raid::target_tile(world, id)?;
+    if !mustered || ws.at != LocationKey::RaidTarget {
+        steps.push(step(ActionKind::GoTo(LocationKey::RaidTarget), None));
+    }
+    steps.push(step(ActionKind::Brawl, None));
+    Some(plan(GoalKind::Raid, target, steps, world.tick))
+}
+
 pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     let tick = world.tick;
     let pos = world.comp::<Position>(id)?;

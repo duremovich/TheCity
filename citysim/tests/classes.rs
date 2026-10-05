@@ -278,10 +278,12 @@ fn test_strike_skips_shift_and_shocks_corp() {
     w.tick = 3 * TICKS_PER_DAY;
     // FoodCo charges the most.
     w.comp_mut::<Corp>(food).expect("c").price_level.insert(citysim::Niche::Food, 1.4);
-    w.classes[Class::Street.index()].unrest = w.config.classes.strike_threshold - 0.01;
+    // M12 D41: the strike reads the district's unrest (the v1 city is one district).
+    citysim::systems::districts::aggregates(&mut w);
+    w.districts[0].street_unrest = w.config.classes.strike_threshold - 0.01;
     classes::strike(&mut w);
     assert_eq!(count(&w, EventKind::Strike), 0, "below the threshold");
-    w.classes[Class::Street.index()].unrest = 0.9;
+    w.districts[0].street_unrest = 0.9;
     let (target, strikers) = classes::strike_target(&w).expect("a target");
     assert_eq!(target, food);
     assert!(!strikers.is_empty());

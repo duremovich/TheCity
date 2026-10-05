@@ -702,6 +702,12 @@ fn test_raid_gated_by_crackdown_on_raider() {
         target_cover: 0.3,
         jail_cover: 0.3,
         derelicts: 0,
+        districts_held: 0,
+        open_districts: 0,
+        corp_prize: None,
+        corp_cover: 0.0,
+        corp_guards: 0,
+        corp_raids: false,
     };
     let has = |i: &faction::OrderInputs, o: Order| faction::score_orders(i, &cfg).iter().any(|s| s.order == o);
     for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {
@@ -941,4 +947,356 @@ fn test_full_precinct_frees_the_vagrant_first() {
     law::jail_suspect(&mut w, guard, late);
     assert!(!w.has::<Sentence>(late));
     assert!(w.has::<Sentence>(thief) && w.has::<Sentence>(assailant));
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: unrest, riots, crossfire, strikes (docs/M12_DISTRICTS.md § 6, plan D29-D35, D41)
+// ---------------------------------------------------------------------------
+
+/// A v2 city with today's aggregates, every corp at price level 1.0 (so a
+/// riot's grievances are the ones a test sets), crossfire off, no deaths.
+fn riot_city() -> World {
+    let mut w = v2_world();
+    w.config.riots.p_crossfire = 0.0;
+    w.config.crime.fight_death_p = 0.0;
+    for c in w.corps() {
+        let cc = w.comp_mut::<citysim::Corp>(c).expect("corp");
+        for v in cc.price_level.values_mut() {
+            *v = 1.0;
+        }
+    }
+    districts::daily(&mut w);
+    w
+}
+
+/// Make `n` residents of `d` eligible rioters (lawless, miserable, not Corp
+/// class, no gang, no guard); returns them ascending.
+fn agitate(w: &mut World, d: usize, n: usize) -> Vec<EntityId> {
+    let execs = classes::exec_set(w);
+    let picks: Vec<EntityId> = w.districts[d]
+        .residents
+        .iter()
+        .copied()
+        .filter(|&a| !law::is_guard(w, a) && w.gang_of(a).is_none() && !w.has::<Sentence>(a))
+        .filter(|&a| classes::class_in(w, a, &execs) != citysim::Class::Corp)
+        .filter(|&a| w.comp::<Brain>(a).is_some_and(|b| !b.emigrating))
+        .take(n)
+        .collect();
+    assert_eq!(picks.len(), n, "district {d} has {n} non-corp residents");
+    for &a in &picks {
+        w.comp_mut::<Personality>(a).expect("p").lawfulness = 0.1;
+        w.comp_mut::<Mood>(a).expect("mood").value = -0.6;
+    }
+    picks
+}
+
+/// Every guard (city and private) far away, off any beat.
+fn guards_away(w: &mut World) {
+    let far = TilePos { x: 250, y: 2 };
+    for g in w.guards().to_vec() {
+        w.abort_plan(g);
+        w.leave_building(g);
+        let p = w.comp_mut::<Position>(g).expect("pos");
+        p.tile = far;
+        p.building = None;
+    }
+    if let Some(l) = w.law_mut() {
+        l.beats.clear();
+    }
+}
+
+/// A rioter standing at `tile` on the Raid goal, with a body.
+fn stage_rioter(w: &mut World, a: EntityId, tile: TilePos) {
+    lod::set_lod(w, a, Lod::Coarse);
+    w.abort_plan(a);
+    w.leave_building(a);
+    let p = w.comp_mut::<Position>(a).expect("pos");
+    p.tile = tile;
+    p.building = None;
+    w.comp_mut::<Brain>(a).expect("brain").current_goal = Some(citysim::GoalKind::Raid);
+}
+
+#[test]
+fn test_riot_fires_at_streak_and_picks_target() {
+    use citysim::systems::riot;
+    let mut w = riot_city();
+    // An inhabited district with a corp-owned Block.
+    let (d, block) = (0..w.districts.len())
+        .find_map(|i| w.districts[i].homes.iter().copied().find(|&h| w.corp_of_building(h).is_some()).map(|h| (i, h)))
+        .expect("a corp Block");
+    let rioters = agitate(&mut w, d, 8);
+    // The evicting corp's Block (3 evictions in 14 days) over the Precinct (1 Vagrancy).
+    let corp = w.corp_of_building(block);
+    let now = w.tick;
+    for _ in 0..3 {
+        w.eviction_places.push_back((now, DistrictId(d as u8), corp));
+    }
+    w.districts[d].vagrancy_log.push_back(now);
+    let (target, kind, grievance) = riot::score_targets(&w, DistrictId(d as u8)).expect("a target");
+    assert_eq!(target, block, "the evicting landlord's Block");
+    assert_eq!(kind, citysim::RiotTarget::Corp);
+    assert!((grievance - 3.0).abs() < 1e-5, "{grievance}");
+    // One midnight short of the streak: nothing.
+    w.districts[d].unrest_streak = w.config.riots.riot_days - 1;
+    riot::trigger(&mut w);
+    assert!(w.riots.is_empty());
+    w.districts[d].unrest_streak = w.config.riots.riot_days;
+    riot::trigger(&mut w);
+    assert_eq!(w.riots.len(), 1);
+    let r = w.riots[0].clone();
+    assert_eq!(r.district, DistrictId(d as u8));
+    assert_eq!(r.target, block);
+    assert!(r.rioters.len() >= w.config.riots.riot_min && r.rioters.len() <= w.config.riots.riot_max);
+    for a in &rioters {
+        assert!(r.rioters.contains(a), "every agitated resident marches");
+        assert_eq!(w.rioter_of.get(a), Some(&r.id));
+    }
+    assert_eq!(r.muster_at % TICKS_PER_DAY, 20 * citysim::TICKS_PER_HOUR, "musters at 20:00");
+    assert!(riot::riot_in(&w, r.district));
+    // The rioters run the Raid goal's machinery.
+    let a = rioters[0];
+    assert_eq!(citysim::systems::raid::target_building(&w, a), Some(block));
+    assert!(!citysim::systems::raid::raid_done(&w, a));
+    assert!(matches!(citysim::systems::raid::muster_point(&w, a), Some(citysim::systems::raid::MusterAt::Door(_))));
+    // No second riot in a district already rising, and the cooldown holds after it.
+    riot::trigger(&mut w);
+    assert_eq!(w.riots.len(), 1);
+}
+
+/// Build a riot by hand at `target` with `rioters` staged at its door.
+fn hand_riot(w: &mut World, d: usize, target: EntityId, rioters: &[EntityId], response: citysim::RiotResponse) -> u32 {
+    let now = w.tick;
+    let id = w.next_riot_id;
+    w.next_riot_id += 1;
+    w.riots.push(citysim::Riot {
+        id,
+        district: DistrictId(d as u8),
+        target,
+        kind: citysim::RiotTarget::Corp,
+        muster: target,
+        muster_at: now,
+        rioters: rioters.to_vec(),
+        response,
+        started: now,
+        departed: Some(now),
+    });
+    for &a in rioters {
+        w.rioter_of.insert(a, id);
+    }
+    let door = w.comp::<Building>(target).map(|b| w.outside_door(b)).expect("door");
+    for &a in rioters {
+        stage_rioter(w, a, door);
+    }
+    id
+}
+
+#[test]
+fn test_riot_win_loots_market_and_closes_it_and_crush_raises_fear() {
+    let mut w = riot_city();
+    let market = w.buildings_of_kind(BuildingKind::Market)[0];
+    let d = w.district_of_building(market).index();
+    let rioters = agitate(&mut w, 5, 6);
+    guards_away(&mut w);
+    for s in citysim::systems::ownership::staff_at(&w, market) {
+        w.leave_building(s);
+    }
+    w.comp_mut::<Building>(market).expect("b").stock_food = 100;
+    let food_before: u32 = rioters.iter().map(|&a| w.comp::<citysim::Inventory>(a).map_or(0, |i| i.food)).sum();
+    let fear_before = districts::district_fear(&w)[d];
+    hand_riot(&mut w, d, market, &rioters, citysim::RiotResponse::Crush);
+    let out = citysim::systems::raid::resolve(&mut w, rioters[0]);
+    assert_eq!(out, Some(citysim::systems::raid::Outcome::Won), "no defenders: the riot wins");
+    assert_eq!(w.comp::<Building>(market).expect("b").stock_food, 70, "30 % looted");
+    let food_after: u32 = rioters.iter().map(|&a| w.comp::<citysim::Inventory>(a).map_or(0, |i| i.food)).sum();
+    assert_eq!(food_after, food_before + 30, "into the rioters' inventories");
+    assert!(w.is_closed(market), "closed for riot_close_days");
+    assert!(count(&w, EventKind::Looted) == 1);
+    assert!(w
+        .events
+        .iter()
+        .any(|e| e.kind == EventKind::Riot && e.text.contains("rioted at") && e.text.contains("6 rioters")));
+    assert!(w.riots.is_empty() && w.rioter_of.is_empty(), "the riot is over");
+    assert_eq!(w.stats.current.riots, 1);
+    assert_eq!(w.districts[d].unrest_streak, 0);
+    assert_eq!(w.districts[d].last_riot, Some(w.tick));
+    // A closed Market sells nothing: nobody shops there.
+    assert!(w.market_by_price(w.comp::<Building>(market).expect("b").door) != Some(market));
+    // Crush: fear + 0.3 for 14 days.
+    assert!(w.districts[d].crush_until.is_some_and(|t| t > w.tick));
+    let fear_after = districts::district_fear(&w)[d];
+    assert!((fear_after - (fear_before + 0.3).min(1.0)).abs() < 1e-5, "{fear_before} -> {fear_after}");
+}
+
+#[test]
+fn test_riot_lost_jails_the_beaten_and_too_few_disperse() {
+    let mut w = riot_city();
+    let market = w.buildings_of_kind(BuildingKind::Market)[0];
+    let d = w.district_of_building(market).index();
+    let rioters = agitate(&mut w, 5, 6);
+    guards_away(&mut w);
+    // Three hard guards at the door against six soft rioters.
+    let door = w.comp::<Building>(market).map(|b| w.outside_door(b)).expect("door");
+    let guards: Vec<EntityId> = law_brain::guards(&w).into_iter().take(3).collect();
+    for &g in &guards {
+        let p = w.comp_mut::<Position>(g).expect("pos");
+        p.tile = door;
+        w.comp_mut::<citysim::Skills>(g).expect("s").fighting = 1.0;
+        w.comp_mut::<Personality>(g).expect("p").courage = 1.0;
+    }
+    for &a in &rioters {
+        w.comp_mut::<citysim::Skills>(a).expect("s").fighting = 0.0;
+        w.comp_mut::<Personality>(a).expect("p").courage = 0.0;
+    }
+    hand_riot(&mut w, d, market, &rioters, citysim::RiotResponse::Contain);
+    let out = citysim::systems::raid::resolve(&mut w, rioters[0]);
+    assert_eq!(out, Some(citysim::systems::raid::Outcome::Lost));
+    let jailed = rioters.iter().filter(|&&a| w.comp::<Sentence>(a).is_some_and(|s| s.crime == Crime::Assault)).count();
+    assert!(jailed >= 1, "rioters who lost a pairing are jailed");
+    assert!(!w.is_closed(market));
+    assert_eq!(count(&w, EventKind::Looted), 0);
+    // Two at the door (fewer than riot_min / 2): dispersed without a fight.
+    let mut w2 = riot_city();
+    let few = agitate(&mut w2, 5, 6);
+    guards_away(&mut w2);
+    hand_riot(&mut w2, d, market, &few, citysim::RiotResponse::Contain);
+    for &a in &few[2..] {
+        w2.comp_mut::<Brain>(a).expect("b").current_goal = None;
+    }
+    let assaults = count(&w2, EventKind::Assault);
+    citysim::systems::raid::resolve(&mut w2, few[0]);
+    assert!(w2.events.iter().any(|e| e.kind == EventKind::Riot && e.text.contains("dispersed")));
+    assert_eq!(count(&w2, EventKind::Assault), assaults, "no fight");
+}
+
+#[test]
+fn test_riot_dissolves_after_march_window() {
+    use citysim::systems::riot;
+    let mut w = riot_city();
+    let market = w.buildings_of_kind(BuildingKind::Market)[0];
+    let rioters = agitate(&mut w, 5, 6);
+    hand_riot(&mut w, 5, market, &rioters, citysim::RiotResponse::Disperse);
+    riot::run(&mut w);
+    assert_eq!(w.riots.len(), 1, "inside the march window");
+    w.tick += citysim::systems::faction::RAID_MARCH_TICKS;
+    riot::run(&mut w);
+    assert!(w.riots.is_empty() && w.rioter_of.is_empty());
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Riot && e.text.contains("fizzled")));
+    assert_eq!(w.stats.current.riots, 0, "a fizzled riot is not counted");
+    assert!(w.districts[5].last_riot.is_some(), "the cooldown starts");
+}
+
+#[test]
+fn test_crossfire_hits_only_non_parties_within_radius() {
+    let mut w = riot_city();
+    w.config.riots.p_crossfire = 1.0;
+    w.config.riots.p_crossfire_kill = 0.0;
+    let door = TilePos { x: 39, y: 39 };
+    let civ = civilians(&w);
+    let (attacker, defender, near, far) = (civ[0], civ[1], civ[2], civ[3]);
+    let spots = [(attacker, door), (defender, door), (near, TilePos { x: 42, y: 39 }), (far, TilePos { x: 43, y: 39 })];
+    for (a, t) in spots {
+        lod::set_lod(&mut w, a, Lod::Coarse);
+        w.abort_plan(a);
+        w.leave_building(a);
+        let p = w.comp_mut::<Position>(a).expect("pos");
+        p.tile = t;
+        p.building = None;
+    }
+    // Nobody else stands within the radius.
+    for b in w.bodies() {
+        if ![attacker, defender, near, far].contains(&b) {
+            if let Some(p) = w.comp_mut::<Position>(b) {
+                if law::chebyshev(p.tile, door) <= 4 {
+                    p.tile = TilePos { x: 250, y: 2 };
+                    p.building = None;
+                }
+            }
+        }
+    }
+    let caught = |w: &World, a: EntityId| {
+        w.comp::<citysim::Memory>(a)
+            .is_some_and(|m| m.entries.iter().any(|e| e.kind == citysim::MemoryKind::CaughtInCrossfire))
+    };
+    let hits = citysim::systems::raid::crossfire(&mut w, door, &[attacker, defender], attacker, None, "a door");
+    assert_eq!(hits, 1);
+    assert!(caught(&w, near), "the bystander at 3 is hit");
+    assert!(!caught(&w, far), "the one at 4 is not");
+    assert!(!caught(&w, attacker) && !caught(&w, defender), "the parties never are");
+    assert_eq!(count(&w, EventKind::Crossfire), 1);
+    assert_eq!(w.stats.current.crossfire, 1);
+    assert!(w.comp::<citysim::Needs>(near).is_some_and(|n| n.safety <= 0.4 + 1e-5));
+    // Off: no roll at all.
+    w.config.riots.p_crossfire = 0.0;
+    assert_eq!(citysim::systems::raid::crossfire(&mut w, door, &[attacker], attacker, None, "a door"), 0);
+}
+
+#[test]
+fn test_district_unrest_reads_rent_burden_and_counts_the_streak() {
+    let mut w = riot_city();
+    let d = 5usize;
+    let before = w.districts[d].unrest;
+    assert!(w.districts[d].trace.iter().any(|(k, _)| *k == "rent_burden"));
+    w.config.classes.rent_burden_w = 0.0;
+    districts::unrest(&mut w);
+    let without = w.districts[d].unrest;
+    assert!(before >= without, "rent burden adds unrest: {before} vs {without}");
+    w.config.riots.riot_threshold = -1.0;
+    let s = w.districts[d].unrest_streak;
+    districts::unrest(&mut w);
+    assert_eq!(w.districts[d].unrest_streak, s + 1);
+    w.config.riots.riot_threshold = 10.0;
+    districts::unrest(&mut w);
+    assert_eq!(w.districts[d].unrest_streak, 0);
+}
+
+#[test]
+fn test_district_strike_hits_highest_priced_employer_of_residents() {
+    let mut w = riot_city();
+    w.tick = TICKS_PER_DAY;
+    // A district with residents working for two corps or more.
+    let mut pick = None;
+    for (i, d) in w.districts.iter().enumerate() {
+        let mut corps: Vec<EntityId> = d
+            .residents
+            .iter()
+            .filter_map(|&a| w.comp::<citysim::Job>(a).and_then(|j| j.employer).and_then(|e| w.corp_of_building(e)))
+            .collect();
+        corps.sort_unstable();
+        corps.dedup();
+        if corps.len() >= 2 {
+            pick = Some((i, corps));
+            break;
+        }
+    }
+    let (d, corps) = pick.expect("a district employed by two corps");
+    let (dear, cheap) = (corps[0], corps[1]);
+    for (c, level) in [(dear, 1.5f32), (cheap, 1.2)] {
+        let cc = w.comp_mut::<citysim::Corp>(c).expect("corp");
+        let k = *cc.price_level.keys().next().expect("a niche");
+        cc.price_level.insert(k, level);
+    }
+    for (i, x) in w.districts.iter_mut().enumerate() {
+        x.street_unrest = if i == d { 0.9 } else { 0.0 };
+        x.last_strike = None;
+    }
+    classes::strike(&mut w);
+    let e = w.events.iter().find(|e| e.kind == EventKind::Strike).expect("a Strike");
+    assert_eq!(e.actors[0], dear, "the highest-priced employer");
+    assert!(e.text.contains(&w.districts[d].name), "{}", e.text);
+    let struck: Vec<EntityId> = w.districts[d]
+        .residents
+        .iter()
+        .copied()
+        .filter(|&a| w.comp::<citysim::Job>(a).is_some_and(|j| j.struck_shift.is_some()))
+        .collect();
+    assert!(!struck.is_empty());
+    for a in struck {
+        let employer = w.comp::<citysim::Job>(a).and_then(|j| j.employer).and_then(|e| w.corp_of_building(e));
+        assert_eq!(employer, Some(dear), "only the dear corp's workers walk out");
+    }
+    assert_eq!(w.districts[d].last_strike, Some(w.tick));
+    // The district's cooldown holds the next midnight.
+    let n = count(&w, EventKind::Strike);
+    classes::strike(&mut w);
+    assert_eq!(count(&w, EventKind::Strike), n);
 }

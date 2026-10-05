@@ -4,9 +4,11 @@
 //!
 //! The brain that issues orders lives in `faction`; raids in `raid`.
 
+use rand::Rng;
+
 use crate::components::{
-    Brain, Building, BuildingKind, Claim, Gang, GangMember, Household, Memory, MemoryKind, Needs, Order, Personality,
-    Position, Sentence, Shock, TilePos, Wallet,
+    Brain, Building, BuildingKind, Claim, DistrictId, Gang, GangMember, Household, Memory, MemoryKind, Needs, Order,
+    Personality, Position, Sentence, Shock, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -94,6 +96,7 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         .into_iter()
         .filter_map(|gid| world.comp::<Gang>(gid).map(|g| (gid, g)))
         .filter(|(_, g)| !g.is_sacked(world.tick))
+        .filter(|&(gid, _)| may_reform(world, gid))
         .filter(|(_, g)| {
             (desperate && recruiting(world, g))
                 || (arrested && g.members.is_empty() && world.config.gangs.max_members > 0)
@@ -103,6 +106,25 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         })
         .min()
         .map(|(_, _, gid)| gid)
+}
+
+/// M12 D40: no instant hydra. A gang whose roster emptied after having
+/// members takes a bootstrap recruit only once it has been empty
+/// `reform_days`, its Hideout's district is not held by another gang, and
+/// that district's coverage is below `reform_max_coverage`. A gang with
+/// members, or one that never had any (a fresh city), is always open.
+pub fn may_reform(world: &World, gang: EntityId) -> bool {
+    use crate::components::Controller;
+    let Some(g) = world.comp::<Gang>(gang) else { return false };
+    if !g.emptied || !g.members.is_empty() {
+        return true;
+    }
+    let cfg = &world.config.gangs;
+    let waited = g.empty_since.is_none_or(|t| world.tick.saturating_sub(t) >= cfg.reform_days * TICKS_PER_DAY);
+    let Some(hq) = world.hideout_of(gang) else { return waited };
+    let d = world.district(world.district_of_building(hq));
+    let taken = matches!(d.control, Controller::Gang(o) if o != gang);
+    waited && !taken && d.coverage < cfg.reform_max_coverage
 }
 
 /// Eligibility for JoinGang: some gang would take them.
@@ -177,6 +199,8 @@ pub fn enlist(world: &mut World, id: EntityId, gang: EntityId) {
             g.members.insert(i, id);
         }
         g.empty_since = None;
+        g.emptied = false;
+        g.claims_cleared = false;
     }
     if let Some(p) = world.comp_mut::<Personality>(id) {
         p.drift(Drift::JoinedGang);
@@ -207,6 +231,7 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
         g.members.retain(|&m| m != id);
         if g.members.is_empty() {
             g.empty_since = Some(tick);
+            g.emptied = true;
         }
         if g.boss == Some(id) {
             g.boss = None;
@@ -220,13 +245,14 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
     recompute_leader(world, gm.gang);
 }
 
-/// `leader = argmax(loyalty + days_in_gang / 100)` over members with a Brain
-/// and no Sentence; rank 2, others 0. A change of leader is a shock.
-pub fn recompute_leader(world: &mut World, gang: EntityId) {
-    let Some(g) = world.comp::<Gang>(gang) else { return };
-    let (members, old) = (g.members.clone(), g.leader);
+/// The leader ranking: free members with a Brain by `loyalty +
+/// days_in_gang / 100`, best first (ties the lower id). M12 D36: the
+/// runner-up is the lieutenant.
+pub fn leader_ranking(world: &World, gang: EntityId) -> Vec<EntityId> {
+    let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
     let tick = world.tick;
-    let leader = members
+    let mut ranked: Vec<(EntityId, f32)> = g
+        .members
         .iter()
         .copied()
         .filter(|&m| world.has::<Brain>(m) && !world.has::<Sentence>(m))
@@ -237,8 +263,24 @@ pub fn recompute_leader(world: &mut World, gang: EntityId) {
                 .map_or(0.0, |g| tick.saturating_sub(g.joined_tick) as f32 / TICKS_PER_DAY as f32);
             (m, loyalty + days / 100.0)
         })
-        .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
-        .map(|(m, _)| m);
+        .collect();
+    ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    ranked.into_iter().map(|(m, _)| m).collect()
+}
+
+/// `leader = argmax(loyalty + days_in_gang / 100)` over members with a Brain
+/// and no Sentence; rank 2, others 0. A change of leader is a shock.
+pub fn recompute_leader(world: &mut World, gang: EntityId) {
+    recompute_leader_after(world, gang, None);
+}
+
+/// [`recompute_leader`] after `fallen` was killed or jailed: when the fallen
+/// was the leader and a new one takes over, the gang is due a split check
+/// (M12 D36, `Gang.split_check`).
+fn recompute_leader_after(world: &mut World, gang: EntityId, fallen: Option<EntityId>) {
+    let Some(g) = world.comp::<Gang>(gang) else { return };
+    let (members, old) = (g.members.clone(), g.leader);
+    let leader = leader_ranking(world, gang).first().copied();
     for &m in &members {
         if let Some(gm) = world.comp_mut::<GangMember>(m) {
             gm.rank = if Some(m) == leader { 2 } else { 0 };
@@ -248,10 +290,14 @@ pub fn recompute_leader(world: &mut World, gang: EntityId) {
     // The standing boss is kept while they are still inside.
     let jailed_boss = old.filter(|&o| leader != Some(o) && world.has::<Sentence>(o));
     let boss_inside = world.comp::<Gang>(gang).and_then(|g| g.boss).is_some_and(|b| world.has::<Sentence>(b));
+    let decapitated = fallen.is_some() && old == fallen && leader.is_some() && leader != old;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.leader = leader;
         if jailed_boss.is_some() && !boss_inside {
             g.boss = jailed_boss;
+        }
+        if decapitated {
+            g.split_check = old;
         }
     }
     if old.is_some() && leader != old {
@@ -321,7 +367,7 @@ pub fn on_member_arrested(world: &mut World, id: EntityId) {
     let Some(gang) = world.gang_of(id) else { return };
     log_heat(world, gang, id);
     push_shock(world, gang, Shock::MemberArrested);
-    recompute_leader(world, gang);
+    recompute_leader_after(world, gang, Some(id));
 }
 
 /// `World::kill_by`, before the components go: the member leaves the roster;
@@ -334,6 +380,7 @@ pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId
         g.members.retain(|&m| m != id);
         if g.members.is_empty() {
             g.empty_since = Some(tick);
+            g.emptied = true;
         }
         if g.boss == Some(id) {
             g.boss = None;
@@ -341,7 +388,7 @@ pub fn on_member_killed(world: &mut World, id: EntityId, killer: Option<EntityId
     }
     log_heat(world, gang, id);
     push_shock(world, gang, Shock::MemberKilled { by_rival });
-    recompute_leader(world, gang);
+    recompute_leader_after(world, gang, Some(id));
 }
 
 // ---------------------------------------------------------------------------
@@ -608,6 +655,17 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     if taken > 0 {
         crate::systems::ownership::note_loss(world, home, taken, Some(actor));
     }
+    // M12 D30: the district remembers who shook it down (a riot's grievance).
+    if let Some(g) = world.gang_of(actor) {
+        let d = world.district_of_building(home);
+        let now = world.tick;
+        if let Some(x) = world.districts.get_mut(d.index()) {
+            if x.shakedowns.len() >= 64 {
+                x.shakedowns.pop_front();
+            }
+            x.shakedowns.push_back((now, g));
+        }
+    }
     let suffix = claim(world, actor, home).unwrap_or_default();
     let name = world.name_of(actor);
     world.push_event(
@@ -734,6 +792,10 @@ pub fn run(world: &mut World) {
     let hysteresis = world.config.gangs.hysteresis;
     let threshold = world.config.gangs.shock_severity_rethink;
     for gang in world.gangs() {
+        // M12 D36: a decapitation this tick may split the gang.
+        if let Some(old) = world.comp_mut::<Gang>(gang).and_then(|g| g.split_check.take()) {
+            let _ = split(world, gang, Some(old), true);
+        }
         if daily {
             recompute_leader(world, gang);
             // The law has just rescored (it runs before this system): a gang
@@ -812,6 +874,8 @@ fn daily_economy(world: &mut World) {
                 }
             }
         }
+        // M12 D40: an empty gang's claims lapse after `empty_claims_days`.
+        clear_claims_if_empty(world, gang);
         // Disband after 30 days with no members: treasury and territory go, the name stays.
         let empty_since =
             world.comp::<Gang>(gang).and_then(|g| if g.members.is_empty() { g.empty_since } else { None });
@@ -857,4 +921,279 @@ pub fn betrayal_filed(world: &mut World, betrayer: EntityId) {
     }
     let name = world.name_of(betrayer);
     world.push_event(EventKind::Betrayal, &[betrayer], format!("{name} betrayed the gang"));
+}
+
+// ---------------------------------------------------------------------------
+// M12 D36, D40: splits and the hydra rule
+// ---------------------------------------------------------------------------
+
+/// D40, daily: a gang empty for `empty_claims_days` (0 = off) loses every
+/// claim and its territory at once, not at the 30-day disband.
+pub fn clear_claims_if_empty(world: &mut World, gang: EntityId) {
+    let days = world.config.gangs.empty_claims_days;
+    let now = world.tick;
+    let due = world.comp::<Gang>(gang).is_some_and(|g| {
+        days > 0
+            && g.members.is_empty()
+            && !g.claims_cleared
+            && g.empty_since.is_some_and(|t| now.saturating_sub(t) >= days * TICKS_PER_DAY)
+    });
+    if !due {
+        return;
+    }
+    let mut lost = 0usize;
+    for kind in [BuildingKind::Home] {
+        for b in world.buildings_of_kind(kind).to_vec() {
+            if let Some(bd) = world.comp_mut::<Building>(b) {
+                if bd.claim.is_some_and(|c| c.gang == gang) {
+                    bd.claim = None;
+                    lost += 1;
+                }
+            }
+        }
+    }
+    let name = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+    let held = world.comp::<Gang>(gang).map_or(0, |g| g.territory.len());
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.territory.clear();
+        g.claims_cleared = true;
+    }
+    if lost > 0 || held > 0 {
+        world.push_event(
+            EventKind::GangLeave,
+            &[gang],
+            format!("{name} lost its claims on {lost} Blocks ({held} held): nobody left to hold them"),
+        );
+    }
+}
+
+/// D36: the districts a gang holds Homes in, `(district, held Homes)`,
+/// ascending by district.
+pub fn held_districts(world: &World, gang: EntityId) -> Vec<(DistrictId, usize)> {
+    let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
+    let mut counts: std::collections::BTreeMap<DistrictId, usize> = std::collections::BTreeMap::new();
+    for &h in &g.territory {
+        *counts.entry(world.district_of_building(h)).or_default() += 1;
+    }
+    counts.into_iter().collect()
+}
+
+/// D36: a decapitated gang (the old leader dead or jailed, a new one in)
+/// may split. The lieutenant (runner-up of `leader_ranking`) founds a
+/// splinter when the gang holds Homes in two districts or more, the
+/// lieutenant's strength is at least `split_strength_ratio` of the new
+/// leader's, the mean member loyalty is below `split_loyalty`, the city has
+/// fewer than `max_gangs` gangs, and (with `roll`) a draw under
+/// `split_base × (1 − mean loyalty)` lands. The splinter takes the held
+/// district other than the leader's Home district with the most held Homes
+/// (ties lower id); its Hideout is a gang-held squat there, else the vacant
+/// Lot there nearest the district's centroid, else no split. It takes
+/// every member whose Home (or squat) is there or who likes the lieutenant
+/// better than the leader, those Homes' claims, and the treasury share by
+/// headcount. `Split` event; Enemy edges across the rosters (30 pairs at
+/// most); `Shock::Split` on both. Returns the splinter, or why not.
+pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, roll: bool) -> Result<EntityId, String> {
+    use crate::systems::raid;
+    let cfg = world.config.gangs.clone();
+    if roll && cfg.split_base <= 0.0 {
+        return Err("splits are off".into());
+    }
+    let ranking = leader_ranking(world, gang);
+    let (Some(&leader), Some(&lt)) = (ranking.first(), ranking.get(1)) else {
+        return Err("no lieutenant".into());
+    };
+    let held = held_districts(world, gang);
+    if held.len() < 2 {
+        return Err(format!("holds Homes in {} district(s)", held.len()));
+    }
+    let (sl, sll) = (raid::strength(world, leader), raid::strength(world, lt));
+    if sll < cfg.split_strength_ratio * sl {
+        return Err(format!("lieutenant too weak ({sll:.2} vs {sl:.2})"));
+    }
+    let members = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+    let loyalty = members.iter().map(|&m| world.comp::<Personality>(m).map_or(0.5, |p| p.loyalty)).sum::<f32>()
+        / members.len().max(1) as f32;
+    if loyalty >= cfg.split_loyalty {
+        return Err(format!("too loyal ({loyalty:.2})"));
+    }
+    if world.gang_list().len() >= cfg.max_gangs {
+        return Err(format!("{} gangs already", world.gang_list().len()));
+    }
+    if roll {
+        let p = cfg.split_base * (1.0 - loyalty);
+        let r: f32 = world.rng.world().random();
+        if r >= p {
+            return Err(format!("held together ({r:.2} vs {p:.2})"));
+        }
+    }
+    let leader_d = home_or_squat(world, leader).map(|b| world.district_of_building(b));
+    let Some(&(sd, _)) =
+        held.iter().filter(|(d, _)| Some(*d) != leader_d).max_by(|a, b| a.1.cmp(&b.1).then(b.0.cmp(&a.0)))
+    else {
+        return Err("no district apart from the leader's".into());
+    };
+    let Some(hideout) = splinter_hideout(world, gang, sd) else {
+        return Err(format!("no squat or Lot in {}", world.district_name(sd)));
+    };
+    // The splinter.
+    let used: Vec<String> =
+        world.gang_list().iter().filter_map(|&g| world.comp::<Gang>(g).map(|g| g.name.clone())).collect();
+    let old_name = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
+    let name = cfg
+        .splinter_names
+        .iter()
+        .find(|n| !used.contains(n))
+        .cloned()
+        .unwrap_or_else(|| format!("{old_name} Splinter {}", world.gang_list().len()));
+    let movers: Vec<EntityId> = members
+        .iter()
+        .copied()
+        .filter(|&m| m != leader)
+        .filter(|&m| {
+            m == lt
+                || home_or_squat(world, m).is_some_and(|b| world.district_of_building(b) == sd)
+                || world.edge(m, lt).map_or(0.0, |e| e.affinity) > world.edge(m, leader).map_or(0.0, |e| e.affinity)
+        })
+        .collect();
+    let treasury = world.comp::<Gang>(gang).map_or(0, |g| g.treasury.max(0));
+    let share = treasury * movers.len() as i64 / members.len().max(1) as i64;
+    let splinter = world.spawn();
+    let mut sg = Gang::new(name.clone(), hideout, share);
+    sg.empty_since = None;
+    sg.split_from = Some(gang);
+    world.insert(splinter, sg);
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.treasury -= share;
+        g.members.retain(|m| !movers.contains(m));
+        if g.raid_target.is_some_and(|t| t == hideout) {
+            g.raid_target = None;
+        }
+    }
+    for &m in &movers {
+        if let Some(gm) = world.comp_mut::<GangMember>(m) {
+            gm.gang = splinter;
+        }
+    }
+    // Claims on the splinter district's Homes go with it.
+    let moved: Vec<EntityId> = world
+        .comp::<Gang>(gang)
+        .map(|g| g.territory.iter().copied().filter(|&h| world.district_of_building(h) == sd).collect())
+        .unwrap_or_default();
+    for &h in &moved {
+        if let Some(b) = world.comp_mut::<Building>(h) {
+            if let Some(c) = b.claim.as_mut() {
+                c.gang = splinter;
+            }
+        }
+    }
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.territory.retain(|h| !moved.contains(h));
+    }
+    if let Some(g) = world.comp_mut::<Gang>(splinter) {
+        g.members = movers.clone();
+        g.territory = moved.clone();
+    }
+    recompute_leader(world, splinter);
+    recompute_leader(world, gang);
+    // The halves are enemies: 30 pairs each way at most.
+    let rest = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+    let mut pairs = 0;
+    'outer: for &a in &movers {
+        for &b in &rest {
+            if pairs >= 30 {
+                break 'outer;
+            }
+            social::make_enemy(world, a, b, -0.5);
+            pairs += 1;
+        }
+    }
+    push_shock(world, gang, Shock::Split);
+    push_shock(world, splinter, Shock::Split);
+    let ltn = world.name_of(lt);
+    let dn = world.district_name(sd).to_string();
+    let why = match old_leader {
+        Some(o) => format!(" after {} fell", world.name_of(o)),
+        None => String::new(),
+    };
+    world.push_event(
+        EventKind::Split,
+        &[gang, splinter, lt],
+        format!(
+            "{ltn} split from {old_name} with {} members and {} Blocks in {dn}{why}: the {name}",
+            movers.len(),
+            moved.len()
+        ),
+    );
+    faction::rethink(world, splinter);
+    faction::rethink(world, gang);
+    Ok(splinter)
+}
+
+/// The Home an agent lives in, else the derelict it squats.
+fn home_or_squat(world: &World, a: EntityId) -> Option<EntityId> {
+    world
+        .comp::<Household>(a)
+        .and_then(|h| h.home)
+        .or_else(|| world.comp::<crate::components::Squatter>(a).map(|s| s.building))
+}
+
+/// D36: the splinter's Hideout in district `d`: a derelict the gang holds
+/// there (lowest id), turned into a Hideout; else the vacant Lot there
+/// nearest the district's centroid, built as one. `None` with neither.
+fn splinter_hideout(world: &mut World, gang: EntityId, d: DistrictId) -> Option<EntityId> {
+    let squat = world.comp::<Gang>(gang).and_then(|g| {
+        g.territory
+            .iter()
+            .copied()
+            .find(|&b| world.district_of_building(b) == d && crate::systems::street::is_derelict(world, b))
+    });
+    if let Some(b) = squat {
+        convert_to_hideout(world, gang, b);
+        return Some(b);
+    }
+    let centroid = world.district(d).centroid;
+    let lot = world
+        .buildings_of_kind(BuildingKind::Lot)
+        .iter()
+        .copied()
+        .filter_map(|l| world.comp::<Building>(l).filter(|b| !b.demolished).map(|b| (b.door, l)))
+        .filter(|&(door, _)| world.district_of(door) == d)
+        .map(|(door, l)| (door.manhattan(centroid), l))
+        .min()
+        .map(|(_, l)| l)?;
+    crate::systems::founding::build_on_lot(world, lot, BuildingKind::Hideout, None).ok()
+}
+
+/// A held derelict becomes a Hideout: its squatters put out, its claim and
+/// its place in the old gang's territory dropped, its kind and capacity
+/// changed, the district lists rebuilt.
+fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
+    crate::systems::street::evict_squatters(world, b, "a gang's new Hideout");
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.territory.retain(|&h| h != b);
+    }
+    let cap = world.config.buildings.hideout.capacity;
+    let interior = world
+        .comp::<Building>(b)
+        .map_or(0, |bd| usize::from(bd.rect.w.saturating_sub(2)) * usize::from(bd.rect.h.saturating_sub(2)));
+    let old_kind = world.comp::<Building>(b).map(|bd| bd.kind);
+    if let Some(bd) = world.comp_mut::<Building>(b) {
+        bd.kind = BuildingKind::Hideout;
+        bd.derelict = false;
+        bd.empty_since = None;
+        bd.claim = None;
+        bd.rent_per_day = 0;
+        bd.stock_food = 0;
+        bd.capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cap);
+    }
+    if let Some(k) = old_kind {
+        if let Some(v) = world.buildings_by_kind.get_mut(&k) {
+            v.retain(|&x| x != b);
+        }
+    }
+    let list = world.buildings_by_kind.entry(BuildingKind::Hideout).or_default();
+    if let Err(i) = list.binary_search(&b) {
+        list.insert(i, b);
+    }
+    crate::systems::districts::rebuild(world);
 }

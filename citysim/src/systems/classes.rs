@@ -111,7 +111,8 @@ pub fn run(world: &mut World) {
     }
     compute(world);
     miserable_dregs(world);
-    strike(world);
+    // M12 D41: strikes run per district, from `districts::daily` once the
+    // district unrest is in.
 }
 
 /// One member's aggregate inputs: `(class, mood, employed, fear)`. A housed
@@ -119,6 +120,11 @@ pub fn run(world: &mut World) {
 /// (`districts::district_fear`: the mean over the district's Homes).
 pub fn member_inputs(world: &World, agent: EntityId) -> (Class, f32, bool, f32) {
     member(world, agent, &execs(world), &crate::systems::districts::district_fear(world))
+}
+
+/// [`member_inputs`] with the exec set and the district fears computed once.
+pub fn member_in(world: &World, a: EntityId, execs: &BTreeSet<EntityId>, fears: &[f32]) -> (Class, f32, bool, f32) {
+    member(world, a, execs, fears)
 }
 
 fn member(world: &World, a: EntityId, execs: &BTreeSet<EntityId>, districts: &[f32]) -> (Class, f32, bool, f32) {
@@ -275,30 +281,66 @@ pub(crate) fn walk_out(world: &mut World, strikers: &[EntityId]) {
     }
 }
 
-/// D35: Street unrest above `strike_threshold`, no strike in the last
-/// `strike_cooldown_days`: the target corp's workers skip their next shift
-/// (no wage, no work), one `Strike` event, `CorpShock::Strike`.
+/// M12 D41 (M11 D35 per district): a district whose Street unrest (D29 over
+/// its Street class, `District.street_unrest`) is above
+/// `strike_threshold`, with no strike there in `strike_cooldown_days`,
+/// strikes: among the corps employing its residents, the one with the
+/// highest max `price_level` (ties the larger treasury, then the lower id)
+/// loses those residents' next shift (no wage, no work); one `Strike`
+/// event naming the district, `CorpShock::Strike`. Districts ascending.
 pub fn strike(world: &mut World) {
     let c = world.config.classes.clone();
     // Tick 0 has no yesterday's watch (fear reads 0): no strike on day 0.
-    if world.tick == 0 || street_unrest(world) <= c.strike_threshold {
+    if world.tick == 0 {
         return;
     }
     let now = world.tick;
     let cooldown: Tick = c.strike_cooldown_days * TICKS_PER_DAY;
-    if world.last_strike.is_some_and(|t| now.saturating_sub(t) < cooldown) {
-        return;
+    let execs = execs(world);
+    for i in 0..world.districts.len() {
+        let d = &world.districts[i];
+        if d.street_unrest <= c.strike_threshold || d.last_strike.is_some_and(|t| now.saturating_sub(t) < cooldown) {
+            continue;
+        }
+        let (name, unrest) = (d.name.clone(), d.street_unrest);
+        // The district's residents employed by each corp.
+        let mut staff: std::collections::BTreeMap<EntityId, Vec<EntityId>> = std::collections::BTreeMap::new();
+        for &a in &d.residents {
+            if execs.contains(&a) || !world.has::<Brain>(a) {
+                continue;
+            }
+            let corp = world
+                .comp::<Job>(a)
+                .and_then(|j| j.employer)
+                .and_then(|e| world.owner_of(e))
+                .filter(|&o| world.has::<Corp>(o));
+            if let Some(corp) = corp {
+                staff.entry(corp).or_default().push(a);
+            }
+        }
+        let mut best: Option<(f32, i64, EntityId)> = None;
+        for &corp in staff.keys() {
+            let Some(cc) = world.comp::<Corp>(corp) else { continue };
+            let level = cc.price_level.values().copied().fold(0.0f32, f32::max);
+            let better = best.is_none_or(|(l, t, id)| {
+                level > l || (level == l && (cc.treasury > t || (cc.treasury == t && corp < id)))
+            });
+            if better {
+                best = Some((level, cc.treasury, corp));
+            }
+        }
+        let Some((_, _, corp)) = best else { continue };
+        let strikers = staff.remove(&corp).unwrap_or_default();
+        walk_out(world, &strikers);
+        world.districts[i].last_strike = Some(now);
+        world.last_strike = Some(now);
+        world.stats.current.strikes += 1;
+        let cname = world.owner_label(Some(corp));
+        world.push_event(
+            EventKind::Strike,
+            &[corp],
+            format!("{} workers of {cname} in {name} walk out (unrest {unrest:.2})", strikers.len()),
+        );
+        crate::systems::corp_brain::push_shock(world, corp, CorpShock::Strike);
     }
-    let Some((corp, strikers)) = strike_target(world) else { return };
-    walk_out(world, &strikers);
-    world.last_strike = Some(now);
-    world.stats.current.strikes += 1;
-    let name = world.owner_label(Some(corp));
-    let unrest = street_unrest(world);
-    world.push_event(
-        EventKind::Strike,
-        &[corp],
-        format!("{} workers of {name} walk out (Street unrest {unrest:.2})", strikers.len()),
-    );
-    crate::systems::corp_brain::push_shock(world, corp, CorpShock::Strike);
 }

@@ -396,6 +396,8 @@ pub enum MemoryKind {
     RentShort,
     /// M11: put out of the Home for arrears.
     Evicted,
+    /// M12 D35: hit as a bystander in a brawl at a door.
+    CaughtInCrossfire,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -485,6 +487,8 @@ pub enum Shock {
     RivalNamed,
     /// M12 D8: lost control of a district (not a grudge).
     LostDistrict,
+    /// M12 D36: the gang split (both halves; a grudge).
+    Split,
 }
 
 impl Shock {
@@ -504,6 +508,7 @@ impl Shock {
                 Shock::MemberKilled { by_rival: true }.severity() - Shock::MemberKilled { by_rival: false }.severity()
             }
             Shock::LostDistrict => 0.5,
+            Shock::Split => 0.8,
         }
     }
 
@@ -520,6 +525,7 @@ impl Shock {
                 | Shock::Raided
                 | Shock::Sacked
                 | Shock::HomeFlippedAgainst
+                | Shock::Split
         )
     }
 }
@@ -735,6 +741,12 @@ pub enum CorpShock {
     BuildingLost,
     /// M12 D8: lost control of a district.
     LostDistrict,
+    /// M12 D39: a gang raid on one of its buildings was won.
+    Raided,
+    /// M12 D32: a riot hit one of its buildings ...
+    Rioted,
+    /// ... or another building in a district where it owns some (half severity).
+    RiotNearby,
 }
 
 impl CorpShock {
@@ -749,6 +761,9 @@ impl CorpShock {
             CorpShock::Undercut => 0.3,
             CorpShock::BuildingLost => 0.5,
             CorpShock::LostDistrict => 0.4,
+            CorpShock::Raided => 0.7,
+            CorpShock::Rioted => 0.9,
+            CorpShock::RiotNearby => 0.45,
         }
     }
 }
@@ -1420,6 +1435,9 @@ pub struct Building {
     /// and, once derelict, the tick it went derelict (re-letting).
     #[serde(default)]
     pub empty_since: Option<Tick>,
+    /// M12 D33: looted by a riot; no trade or beds until this tick.
+    #[serde(default)]
+    pub closed_until: Option<Tick>,
 }
 
 pub fn default_tier() -> u8 {
@@ -1495,6 +1513,24 @@ pub struct Gang {
     /// M11 D49: who decides; `Dictator` = the leader. No Board in M11.
     #[serde(default)]
     pub governance: Governance,
+    /// M12 D36: the old leader, when a decapitation (death or arrest) just
+    /// handed the gang a new one; `gang::run` resolves the split check.
+    #[serde(default)]
+    pub split_check: Option<EntityId>,
+    /// M12 D39: the corp building the standing Raid aims at; `None` = the
+    /// rival Hideout (M8).
+    #[serde(default)]
+    pub raid_target: Option<EntityId>,
+    /// M12 D40: the roster emptied after having members (a dead gang, not a
+    /// fresh one); cleared by the next recruit.
+    #[serde(default)]
+    pub emptied: bool,
+    /// M12 D40: the claims of an empty gang were cleared.
+    #[serde(default)]
+    pub claims_cleared: bool,
+    /// M12 D36: the gang this one split from (lineage for the Hideout panel).
+    #[serde(default)]
+    pub split_from: Option<EntityId>,
 }
 
 impl Gang {
@@ -1521,6 +1557,11 @@ impl Gang {
             bribe_until: None,
             paid_until: None,
             governance: Governance::Dictator,
+            split_check: None,
+            raid_target: None,
+            emptied: false,
+            claims_cleared: false,
+            split_from: None,
         }
     }
 
@@ -2033,6 +2074,48 @@ pub enum Stance {
     Withdrawn,
 }
 
+/// M12 D30: what a riot marches on.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum RiotTarget {
+    /// A corp-owned Market, Block or Hotel in the district.
+    Corp,
+    /// The Precinct.
+    Precinct,
+    /// The controlling gang's Hideout or held squat.
+    Gang,
+}
+
+/// M12 D34: how the law meets a riot.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum RiotResponse {
+    /// Cordon the district; the guards fight only at the door.
+    Contain,
+    /// Fight at the door, then report the stragglers.
+    Disperse,
+    /// Cordon, and fight to kill (`crush_kill_mult`); fear for 14 days.
+    Crush,
+}
+
+/// M12 D30: a district riot from its trigger at midnight to its clash (or
+/// its fizzling). Rioters run the Raid goal (`raid::Expedition::Riot`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Riot {
+    pub id: u32,
+    pub district: DistrictId,
+    pub target: EntityId,
+    pub kind: RiotTarget,
+    /// The muster building (rioters gather at its door).
+    pub muster: EntityId,
+    pub muster_at: Tick,
+    /// Ascending.
+    pub rioters: Vec<EntityId>,
+    pub response: RiotResponse,
+    pub started: Tick,
+    /// The first rioter out of the muster stamps it.
+    #[serde(default)]
+    pub departed: Option<Tick>,
+}
+
 /// Guard-on-shift ticks per district (`DistrictId::index`), today and yesterday.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DistrictWatch {
@@ -2090,6 +2173,10 @@ pub struct District {
     pub unrest: f32,
     #[serde(default)]
     pub unrest_streak: u16,
+    /// M12 D41: the same formula over its Street-class residents only (the
+    /// strike trigger: Dregs hold no shifts to walk out of).
+    #[serde(default)]
+    pub street_unrest: f32,
     /// Phase 3: mean litter ÷ 255 over `walk_tiles`.
     #[serde(default)]
     pub litter: f32,

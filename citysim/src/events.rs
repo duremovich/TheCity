@@ -109,10 +109,18 @@ pub enum EventKind {
     SquatEvicted,
     /// M12 D25: a building went derelict (`[building, old owner?]`), or was re-let.
     Derelict,
+    /// M12 D32: a district riot clashed, dispersed or fizzled (`[target, actor?]`).
+    Riot,
+    /// M12 D32: a won riot looted its target (`[target, district's riot actor]`).
+    Looted,
+    /// M12 D35: a bystander hit in a brawl at a door (`[attacker, bystander]`).
+    Crossfire,
+    /// M12 D36: a gang split (`[old gang, splinter, lieutenant]`).
+    Split,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 61] = [
+    pub const ALL: [EventKind; 65] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -174,6 +182,10 @@ impl EventKind {
         EventKind::Squatted,
         EventKind::SquatEvicted,
         EventKind::Derelict,
+        EventKind::Riot,
+        EventKind::Looted,
+        EventKind::Crossfire,
+        EventKind::Split,
     ];
 }
 

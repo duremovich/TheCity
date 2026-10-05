@@ -117,9 +117,10 @@ fn origin(world: &World, agent: EntityId) -> Option<TilePos> {
 // Hotels (D20-D22)
 // ---------------------------------------------------------------------------
 
-/// A standing Hotel (not derelict, not demolished).
+/// A standing Hotel (not derelict, not demolished, not closed by a riot: M12 D33).
 pub fn is_hotel(world: &World, b: EntityId) -> bool {
     world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Hotel && !bd.derelict && !bd.demolished)
+        && !world.is_closed(b)
 }
 
 /// D20: a night's price: `round(night_price × level)`, the owner corp's Food

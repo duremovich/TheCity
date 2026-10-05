@@ -266,6 +266,8 @@ pub fn note_eviction(world: &mut World, home: EntityId, owner: Option<EntityId>)
 /// pass (Hotels and squats with `[street] enabled`, Vagrancy with `[law]
 /// district_beats`, the street's litter with `[litter] enabled`).
 pub fn run(world: &mut World) {
+    // M12 D31: live riots fizzle past their march window (at most two).
+    crate::systems::riot::run(world);
     let tod = world.tick_of_day();
     if tod == 0 {
         daily(world);
@@ -304,6 +306,89 @@ pub fn daily(world: &mut World) {
     }
     aggregates(world);
     update_control(world);
+    // M12 phase 4: unrest per district (D29), the riot trigger (D30), the
+    // district strikes (D41), all reading today's aggregates.
+    unrest(world);
+    crate::systems::riot::trigger(world);
+    crate::systems::classes::strike(world);
+}
+
+/// D29: each district's unrest over its Street and Dreg resident adults:
+/// M11's class formula (`classes::aggregate`) with the district's 7-day
+/// evictions, submission + `curfew_fear` under a curfew, plus
+/// `rent_burden_w × burden`, `burden` = the mean over its renters of their
+/// share of the Home's rent ÷ their daily income (wage, else the dole).
+/// `unrest_streak` counts the midnights above `[riots] riot_threshold`.
+pub fn unrest(world: &mut World) {
+    use crate::components::Class;
+    let c = world.config.classes.clone();
+    let threshold = world.config.riots.riot_threshold;
+    let dole = i64::from(world.levers.dole_per_day);
+    let horizon = world.tick.saturating_sub(7 * crate::time::TICKS_PER_DAY);
+    let execs = crate::systems::classes::exec_set(world);
+    let fears = district_fear(world);
+    for i in 0..world.districts.len() {
+        let residents = world.districts[i].residents.clone();
+        let mut members: Vec<(f32, bool, f32)> = Vec::new();
+        let mut street: Vec<(f32, bool, f32)> = Vec::new();
+        let (mut burden, mut renters) = (0.0f32, 0u32);
+        for a in residents {
+            let (class, mood, employed, fear) = crate::systems::classes::member_in(world, a, &execs, &fears);
+            if class == Class::Corp {
+                continue;
+            }
+            members.push((mood, employed, fear));
+            if class == Class::Street {
+                street.push((mood, employed, fear));
+            }
+            let Some(h) = world.comp::<Household>(a).and_then(|h| h.home) else { continue };
+            let rent = world.comp::<Building>(h).map_or(0, |b| b.rent_per_day);
+            if rent <= 0 {
+                continue;
+            }
+            let adults = world
+                .residents_of(h)
+                .iter()
+                .filter(|&&r| crate::systems::demography::is_adult(world, r))
+                .count()
+                .max(1) as f32;
+            let income = world.comp::<Job>(a).map_or(dole, |j| j.wage_per_day).max(1) as f32;
+            burden += rent as f32 / adults / income;
+            renters += 1;
+        }
+        let evictions =
+            world.eviction_places.iter().filter(|&&(t, d, _)| t >= horizon && d.index() == i).count() as u32;
+        let curfew = if world.districts[i].curfew { c.curfew_fear } else { 0.0 };
+        let burden = if renters == 0 { 0.0 } else { burden / renters as f32 };
+        let formula = |m: &[(f32, bool, f32)]| {
+            let agg = crate::systems::classes::aggregate(m, evictions);
+            let submission = (agg.submission + curfew).min(1.0);
+            let n = m.len();
+            let unrest = if n == 0 {
+                0.0
+            } else {
+                (1.0 - agg.loyalty) * (1.0 - submission) + 0.1 * evictions as f32 / n as f32 + c.rent_burden_w * burden
+            };
+            (unrest, agg.loyalty, submission)
+        };
+        let (unrest, loyalty, submission) = formula(&members);
+        let (street_unrest, _, _) = formula(&street);
+        let n = members.len();
+        let d = &mut world.districts[i];
+        d.unrest = unrest;
+        d.street_unrest = street_unrest;
+        d.unrest_streak = if unrest > threshold { d.unrest_streak.saturating_add(1) } else { 0 };
+        d.trace.extend([
+            ("unrest_n", n as f32),
+            ("unrest_loyalty", loyalty),
+            ("unrest_submission", submission),
+            ("evictions_7d", evictions as f32),
+            ("rent_burden", burden),
+            ("unrest", unrest),
+            ("street_unrest", street_unrest),
+            ("unrest_streak", f32::from(d.unrest_streak)),
+        ]);
+    }
 }
 
 // ---------------------------------------------------------------------------

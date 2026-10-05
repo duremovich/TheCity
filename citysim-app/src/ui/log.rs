@@ -56,6 +56,18 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::GangJoin
         | EventKind::GangLeave
         | EventKind::Betrayal => Color32::from_rgb(142, 68, 173),
+        // M12 D44: districts, the street and riots in amber.
+        EventKind::DistrictControl
+        | EventKind::Stance
+        | EventKind::Sanitation
+        | EventKind::Vagrancy
+        | EventKind::Squatted
+        | EventKind::SquatEvicted
+        | EventKind::Derelict
+        | EventKind::Riot
+        | EventKind::Looted
+        | EventKind::Crossfire
+        | EventKind::Split => Color32::from_rgb(0xe0, 0xa0, 0x30),
         _ => Color32::LIGHT_GRAY,
     }
 }

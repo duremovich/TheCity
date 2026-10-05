@@ -123,7 +123,9 @@ fn assign(world: &mut World) {
             brain.current_step().is_some_and(|s| story_relevant(s.action)) || crate::systems::law::wanted(world, id);
         // Gang members are never Statistical: the hourly table has no orders,
         // claims or raids, and two gangs fit inside the Coarse budget.
-        let gang = world.has::<crate::components::GangMember>(id);
+        // M12 D31 (plan risk 3): a rioter of a live riot ranks with them,
+        // from `riot_promote_hours` before the muster.
+        let gang = world.has::<crate::components::GangMember>(id) || crate::systems::riot::promoted(world, id);
         // M10 D20: guards rank with gang members, or at 2,000 the gangs take
         // every Coarse slot and the whole watch is Statistical. Gravediggers
         // too: the hourly table cannot bury, and a Statistical digger never

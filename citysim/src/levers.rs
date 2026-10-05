@@ -846,6 +846,7 @@ impl World {
                 secured_by: None,
                 derelict: false,
                 empty_since: None,
+                closed_until: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

@@ -60,6 +60,12 @@ fn inputs() -> OrderInputs {
         target_cover: 0.0,
         jail_cover: 0.0,
         derelicts: 0,
+        districts_held: 0,
+        open_districts: 0,
+        corp_prize: None,
+        corp_cover: 0.0,
+        corp_guards: 0,
+        corp_raids: false,
     }
 }
 
@@ -88,8 +94,11 @@ fn test_order_raid_with_a_strength_edge_and_a_prize() {
 
 #[test]
 fn test_order_retaliate_on_a_grudge_regardless_of_ratio() {
-    let i = OrderInputs { grudge: true, own: 2, rival: 8, ..inputs() };
+    let i = OrderInputs { grudge: true, own: 3, rival: 8, ..inputs() };
     assert_eq!(best(&i), Order::Retaliate);
+    // M12 phase 4: below `raid_min_members` (3) there is no crew to send.
+    let alone = OrderInputs { own: 2, ..i.clone() };
+    assert_ne!(best(&alone), Order::Retaliate);
     let sacked = OrderInputs { sacked: true, raid_ready: false, ..i };
     assert_ne!(best(&sacked), Order::Retaliate, "a sacked gang cannot muster");
     let cooling = OrderInputs { raid_ready: false, ..i };
@@ -722,4 +731,371 @@ fn test_contest_keeps_working_a_home_after_the_first_blow() {
     gang::extort(&mut w, a, home);
     assert_eq!(gang::holder_of(&w, home), Some(g0));
     assert!(gang::gang_work_target(&w, a).is_none(), "nothing of the rival's left to contest");
+}
+
+// ---------------------------------------------------------------------------
+// M12 phase 4: gangs in districts (docs/M12_DISTRICTS.md § 5, plan D36-D40)
+// ---------------------------------------------------------------------------
+
+use citysim::{Controller, DistrictId, Position, TilePos, TICKS_PER_DAY};
+
+/// The 400-resident v2 city (districts, corps, Lots) with today's aggregates.
+fn v2(seed: u64) -> World {
+    let mut w = World::new(seed, Config::load().scaled_to(400));
+    w.config.crime.fight_death_p = 0.0;
+    w.config.riots.p_crossfire = 0.0;
+    citysim::systems::districts::daily(&mut w);
+    w
+}
+
+/// Hold `homes` for `g` (claims at three, territory sorted).
+fn hold(w: &mut World, g: EntityId, homes: &[EntityId]) {
+    for &h in homes {
+        w.comp_mut::<Building>(h).expect("b").claim = Some(Claim { gang: g, count: gang::CLAIM_HELD });
+    }
+    let mut t = homes.to_vec();
+    t.sort_unstable();
+    w.comp_mut::<Gang>(g).expect("g").territory = t;
+}
+
+/// Homes of district `d`, nearest `from` first.
+fn homes_by_distance(w: &World, d: u8, from: TilePos) -> Vec<(u32, EntityId)> {
+    let mut v: Vec<(u32, EntityId)> = w.districts[usize::from(d)]
+        .homes
+        .iter()
+        .filter_map(|&h| w.comp::<Building>(h).map(|b| (b.door.manhattan(from), h)))
+        .collect();
+    v.sort();
+    v
+}
+
+#[test]
+fn test_muster_point_is_held_home_nearest_target() {
+    let mut w = v2(60);
+    // The rule at the spec's radius (the assets calibrate it wider).
+    w.config.gangs.muster_near_tiles = 48;
+    let (g0, g1) = gangs(&w);
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    temper(&mut w, a);
+    let target = w.hideout_of(g1).and_then(|h| w.comp::<Building>(h)).map(|b| b.door).expect("rival door");
+    let d = w.district_of(target).0;
+    let homes = homes_by_distance(&w, d, target);
+    let near = homes.iter().find(|&&(dist, _)| (20..=40).contains(&dist)).map(|&(_, h)| h).expect("a Home at 20-40");
+    let far = homes.iter().find(|&&(dist, _)| (49..=90).contains(&dist)).map(|&(_, h)| h).expect("a Home past 48");
+    hold(&mut w, g0, &[near, far]);
+    let now = w.tick;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::Raid;
+        g.raid_at = Some(now + 60);
+    }
+    let door = |w: &World, h: EntityId| w.comp::<Building>(h).map(|b| w.outside_door(b)).expect("door");
+    assert_eq!(raid::muster_point(&w, a), Some(raid::MusterAt::Door(door(&w, near))), "the held Home near the target");
+    // The plan reaches the muster point: it is a known distance, and the
+    // Muster precondition is met standing on that tile.
+    let ctx = citysim::PlanCtx::build(&w, a, None);
+    assert!(ctx.dist.contains_key(&citysim::LocationKey::MusterPoint));
+    w.leave_building(a);
+    let tile = door(&w, near);
+    let p = w.comp_mut::<Position>(a).expect("pos");
+    p.tile = tile;
+    p.building = None;
+    w.comp_mut::<Brain>(a).expect("b").current_goal = Some(GoalKind::Raid);
+    let ws = citysim::WorldState::observe(&w, a, None);
+    assert_eq!(ws.at, citysim::LocationKey::MusterPoint);
+    // Only a Home past muster_near_tiles: the Hideout, as in M8.
+    hold(&mut w, g0, &[far]);
+    let hq = w.hideout_of(g0).expect("hq");
+    assert_eq!(raid::muster_point(&w, a), Some(raid::MusterAt::Inside(hq)));
+    // muster_near_tiles = 0 is the M8 muster.
+    hold(&mut w, g0, &[near]);
+    w.config.gangs.muster_near_tiles = 0;
+    assert_eq!(raid::muster_point(&w, a), Some(raid::MusterAt::Inside(hq)));
+}
+
+#[test]
+fn test_raid_into_cover_is_not_chosen_or_departed() {
+    let cfg = Config::load().gangs;
+    // The corp variant obeys its own cover.
+    let base = OrderInputs {
+        frontier: 0,
+        rival_exists: false,
+        prize: 0,
+        own: 10,
+        corp_prize: Some((EntityId::none(), 500)),
+        corp_raids: true,
+        hoard: 0.5,
+        hoard_tilt: 0.2,
+        courage: 0.8,
+        ..inputs()
+    };
+    let raid = |i: &OrderInputs| faction::score_orders(i, &cfg).into_iter().find(|s| s.order == Order::Raid);
+    let open = raid(&base).expect("a corp Raid under no cover");
+    assert!(faction::is_corp_raid(&open));
+    assert!(raid(&OrderInputs { corp_cover: 1.0, ..base.clone() }).is_none(), "full cover gates it");
+    // The rival variant still scores when it beats the corp one.
+    let both = OrderInputs { rival_exists: true, prize: 400, rival: 2, ..base.clone() };
+    assert!(raid(&both).is_some());
+    // The live gang: a Crackdown on the raider where the rival's Hideout
+    // stands closes the gate at scoring and at the muster's departure.
+    let mut w = v2(61);
+    let (g0, g1) = gangs(&w);
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    temper(&mut w, a);
+    let d = w.district_of_building(w.hideout_of(g1).expect("hq"));
+    w.district_mut(d).stance = citysim::Stance::Crackdown(g0);
+    let i = faction::gather_inputs(&w, g0).expect("inputs");
+    assert_eq!(i.target_cover, 1.0);
+    assert!(faction::score_orders(&i, &w.config.gangs)
+        .iter()
+        .all(|s| s.order != Order::Raid || faction::is_corp_raid(s)));
+    let now = w.tick;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::Raid;
+        g.raid_at = Some(now);
+    }
+    assert!(!raid::depart(&mut w, a), "no raid departs into a district cracking down on the raider");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Raid && e.text.contains("called off")));
+    w.district_mut(d).stance = citysim::Stance::Patrol;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::Raid;
+        g.raid_at = Some(now);
+    }
+    assert!(raid::depart(&mut w, a));
+}
+
+#[test]
+fn test_corp_building_raid_takes_documented_prize_against_private_guards() {
+    use citysim::{Corp, CorpShock, Inventory};
+    let mut w = v2(62);
+    let (g0, _) = gangs(&w);
+    // A corp Market, its owner rich, one private guard on contract at its door.
+    let market = w
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .copied()
+        .find(|&m| w.corp_of_building(m).is_some())
+        .expect("a corp Market");
+    let corp = w.corp_of_building(market).expect("corp");
+    w.comp_mut::<Corp>(corp).expect("c").treasury = 20_000;
+    let door = w.comp::<Building>(market).map(|b| w.outside_door(b)).expect("door");
+    let far = TilePos { x: 250, y: 2 };
+    for g in w.guards().to_vec() {
+        w.abort_plan(g);
+        w.leave_building(g);
+        let p = w.comp_mut::<Position>(g).expect("pos");
+        p.tile = far;
+        p.building = None;
+    }
+    if let Some(l) = w.law_mut() {
+        l.beats.clear();
+    }
+    let office = w.buildings_of_kind(BuildingKind::SecurityOffice)[0];
+    let pg = civilians(&w, 1)[0];
+    citysim::systems::demography::hire(&mut w, pg, office, citysim::Role::Guard);
+    assert!(citysim::systems::law::is_private_guard(&w, pg));
+    w.leave_building(pg);
+    let security = w.corp_of_building(office).expect("a security corp");
+    w.comp_mut::<Building>(market).expect("b").secured_by = Some(security);
+    assert!(raid::private_guards_of(&w, market).contains(&pg));
+    {
+        let p = w.comp_mut::<Position>(pg).expect("pos");
+        p.tile = door;
+    }
+    set_fighter(&mut w, pg, 0.0, 0.0);
+    for s in citysim::systems::ownership::staff_at(&w, market) {
+        w.leave_building(s);
+    }
+    w.comp_mut::<Building>(market).expect("b").stock_food = 9;
+    let raiders = civilians(&w, 3);
+    for &r in &raiders {
+        gang::enlist(&mut w, r, g0);
+        set_fighter(&mut w, r, 1.0, 1.0);
+        stage_raider(&mut w, r, door);
+    }
+    temper(&mut w, raiders[0]);
+    let food_before: u32 = raiders.iter().map(|&r| w.comp::<Inventory>(r).map_or(0, |i| i.food)).sum();
+    let treasury = w.comp::<Gang>(g0).expect("g").treasury;
+    let now = w.tick;
+    {
+        let g = w.comp_mut::<Gang>(g0).expect("g");
+        g.order = Order::Raid;
+        g.raid_target = Some(market);
+        g.raid_at = Some(now);
+    }
+    assert_eq!(raid::corp_prize_value(&w, corp), 500, "min(5 % of 20,000, 500)");
+    let out = raid::resolve(&mut w, raiders[0]).expect("resolved");
+    assert_eq!(out, Outcome::Won);
+    assert_eq!(w.comp::<Gang>(g0).expect("g").treasury, treasury + 500);
+    assert_eq!(w.comp::<Corp>(corp).expect("c").treasury, 19_500);
+    assert_eq!(w.comp::<Building>(market).expect("b").stock_food, 0);
+    let food_after: u32 = raiders.iter().map(|&r| w.comp::<Inventory>(r).map_or(0, |i| i.food)).sum();
+    assert_eq!(food_after, food_before + 9, "the stock goes to the raiders");
+    let shocks = &w.comp::<Corp>(corp).expect("c").shocks;
+    assert!(shocks.contains(&CorpShock::Robbed(500)) && shocks.contains(&CorpShock::Raided), "{shocks:?}");
+    let e = w.events.iter().rev().find(|e| e.kind == EventKind::Raid).expect("a Raid event");
+    assert!(e.text.contains(" raided ") && e.text.contains("3 raiders vs 1 defenders"), "{}", e.text);
+    let g = w.comp::<Gang>(g0).expect("g");
+    assert!(g.raid_at.is_none() && g.raid_target.is_none());
+}
+
+/// A gang of `n` in g0 for the split tests: the old leader (loyalty 0.95),
+/// the new leader L (0.3, fighting 0.5), the lieutenant (0.25, fighting
+/// 0.8), the rest 0.1. Returns (old, leader, lieutenant, all).
+fn split_gang(w: &mut World, g0: EntityId, n: usize) -> (EntityId, EntityId, EntityId, Vec<EntityId>) {
+    let crew = civilians(w, n);
+    for &m in &crew {
+        gang::enlist(w, m, g0);
+        let p = w.comp_mut::<Personality>(m).expect("p");
+        p.loyalty = 0.1;
+    }
+    let (old, leader, lt) = (crew[0], crew[1], crew[2]);
+    w.comp_mut::<Personality>(old).expect("p").loyalty = 0.95;
+    w.comp_mut::<Personality>(leader).expect("p").loyalty = 0.3;
+    w.comp_mut::<Personality>(lt).expect("p").loyalty = 0.25;
+    set_fighter(w, leader, 0.5, 0.5);
+    set_fighter(w, lt, 0.8, 0.5);
+    gang::recompute_leader(w, g0);
+    assert_eq!(w.comp::<Gang>(g0).expect("g").leader, Some(old));
+    (old, leader, lt, crew)
+}
+
+#[test]
+fn test_decapitation_splits_with_strong_lieutenant_and_two_districts() {
+    let mut w = v2(63);
+    w.config.gangs.split_base = 1.0;
+    let (g0, _) = gangs(&w);
+    let (old, leader, lt, _) = split_gang(&mut w, g0, 8);
+    // Homes in Sump West (5, the leader's) and Sump Central (6).
+    let west: Vec<EntityId> = w.districts[5].homes.iter().copied().take(3).collect();
+    let central: Vec<EntityId> = w.districts[6].homes.iter().copied().take(4).collect();
+    let mut all = west.clone();
+    all.extend(&central);
+    hold(&mut w, g0, &all);
+    w.comp_mut::<citysim::Household>(leader).expect("h").home = Some(west[0]);
+    // One held district: no split.
+    hold(&mut w, g0, &west);
+    assert!(gang::split(&mut w, g0, None, false).is_err());
+    hold(&mut w, g0, &all);
+    // The leader falls: a new leader, and a split check is due.
+    w.kill_by(old, citysim::DeathCause::Violence, None);
+    let g = w.comp::<Gang>(g0).expect("g");
+    assert_eq!(g.leader, Some(leader));
+    assert_eq!(g.split_check, Some(old));
+    w.comp_mut::<Gang>(g0).expect("g").split_check = None;
+    let gangs_before = w.gang_list().len();
+    let splinter = gang::split(&mut w, g0, Some(old), false).expect("a split");
+    assert_eq!(w.gang_list().len(), gangs_before + 1);
+    let sg = w.comp::<Gang>(splinter).expect("splinter");
+    assert_eq!(w.district_of_building(sg.hideout), DistrictId(6), "the splinter's Hideout is in Sump Central");
+    assert_eq!(w.comp::<Building>(sg.hideout).map(|b| b.kind), Some(BuildingKind::Hideout));
+    assert!(sg.members.contains(&lt), "the lieutenant leads it");
+    assert_eq!(sg.leader, Some(lt));
+    assert_eq!(sg.split_from, Some(g0));
+    assert!(!sg.territory.is_empty() && sg.territory.iter().all(|&h| w.district_of_building(h) == DistrictId(6)));
+    for &h in &sg.territory {
+        assert_eq!(w.comp::<Building>(h).and_then(|b| b.claim).map(|c| c.gang), Some(splinter));
+    }
+    let og = w.comp::<Gang>(g0).expect("old");
+    assert!(og.territory.iter().all(|&h| w.district_of_building(h) == DistrictId(5)), "the rest keep Sump West");
+    assert!(!og.members.contains(&lt) && og.members.contains(&leader));
+    assert_eq!(w.gang_of(lt), Some(splinter));
+    assert!(w.edge(lt, leader).is_some_and(|e| e.kind == citysim::RelKind::Enemy), "the halves are enemies");
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Split && e.text.contains("Rust Saints")));
+    // A district with neither a squat nor a Lot (Sump East): no split.
+    let mut w2 = v2(64);
+    w2.config.gangs.split_base = 1.0;
+    let (h0, _) = gangs(&w2);
+    let (_, leader2, _, _) = split_gang(&mut w2, h0, 8);
+    let west2: Vec<EntityId> = w2.districts[5].homes.iter().copied().take(2).collect();
+    let east2: Vec<EntityId> = w2.districts[7].homes.iter().copied().take(4).collect();
+    let mut all2 = west2.clone();
+    all2.extend(&east2);
+    hold(&mut w2, h0, &all2);
+    w2.comp_mut::<citysim::Household>(leader2).expect("h").home = Some(west2[0]);
+    let err = gang::split(&mut w2, h0, None, false).expect_err("no Hideout site");
+    assert!(err.contains("no squat or Lot"), "{err}");
+}
+
+#[test]
+fn test_empty_gang_cannot_reform_in_held_district_or_before_reform_days() {
+    let mut w = v2(65);
+    let (g0, g1) = gangs(&w);
+    // A fresh, never-manned gang is open (the city's first recruits).
+    assert!(gang::may_reform(&w, g0));
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    gang::leave(&mut w, a, "test");
+    assert!(w.comp::<Gang>(g0).expect("g").emptied);
+    assert!(!gang::may_reform(&w, g0), "not before reform_days");
+    w.tick += w.config.gangs.reform_days * TICKS_PER_DAY;
+    let d = w.district_of_building(w.hideout_of(g0).expect("hq"));
+    w.district_mut(d).coverage = 0.5;
+    w.district_mut(d).control = Controller::Gang(g1);
+    assert!(!gang::may_reform(&w, g0), "not in a district another gang holds");
+    w.district_mut(d).control = Controller::Contested;
+    w.district_mut(d).coverage = 1.5;
+    assert!(!gang::may_reform(&w, g0), "not under the law's eye");
+    w.district_mut(d).coverage = 0.5;
+    assert!(gang::may_reform(&w, g0));
+    // A recruit clears the flag.
+    gang::enlist(&mut w, a, g0);
+    assert!(!w.comp::<Gang>(g0).expect("g").emptied);
+}
+
+#[test]
+fn test_empty_gang_loses_claims_after_three_days() {
+    let mut w = v2(66);
+    let (g0, _) = gangs(&w);
+    let homes: Vec<EntityId> = w.districts[5].homes.iter().copied().take(3).collect();
+    hold(&mut w, g0, &homes);
+    let start = w.tick;
+    w.comp_mut::<Gang>(g0).expect("g").empty_since = Some(start);
+    w.tick = start + 2 * TICKS_PER_DAY;
+    gang::clear_claims_if_empty(&mut w, g0);
+    assert_eq!(w.comp::<Gang>(g0).expect("g").territory.len(), 3, "two days: still held");
+    w.tick = start + 3 * TICKS_PER_DAY;
+    gang::clear_claims_if_empty(&mut w, g0);
+    assert!(w.comp::<Gang>(g0).expect("g").territory.is_empty());
+    for h in homes {
+        assert_eq!(w.comp::<Building>(h).and_then(|b| b.claim), None);
+    }
+    // Off at 0 (M11).
+    let mut w2 = v2(66);
+    w2.config.gangs.empty_claims_days = 0;
+    let (h0, _) = gangs(&w2);
+    let homes2: Vec<EntityId> = w2.districts[5].homes.iter().copied().take(3).collect();
+    hold(&mut w2, h0, &homes2);
+    w2.tick += 40 * TICKS_PER_DAY;
+    gang::clear_claims_if_empty(&mut w2, h0);
+    assert_eq!(w2.comp::<Gang>(h0).expect("g").territory.len(), 3);
+}
+
+#[test]
+fn test_expand_frontier_reads_held_and_open_districts() {
+    let mut w = v2(67);
+    let (g0, g1) = gangs(&w);
+    let (a, _) = two_civilians(&w);
+    gang::enlist(&mut w, a, g0);
+    temper(&mut w, a);
+    let b = w.citizens().into_iter().find(|&x| x != a && w.gang_of(x).is_none() && w.has::<Brain>(x)).expect("b");
+    gang::enlist(&mut w, b, g1);
+    for d in w.districts.iter_mut() {
+        d.control = Controller::City;
+    }
+    w.district_mut(DistrictId(5)).control = Controller::Gang(g0);
+    let i = faction::gather_inputs(&w, g0).expect("inputs");
+    assert_eq!((i.districts_held, i.open_districts), (1, 0));
+    let held_total = i.frontier_total;
+    assert!(held_total > 0 && held_total <= w.districts[5].homes.len());
+    // A district whose gang has nobody fit is open ground.
+    w.district_mut(DistrictId(6)).control = Controller::Gang(g1);
+    w.insert(b, citysim::Sentence { until_tick: w.tick + TICKS_PER_DAY, crime: citysim::Crime::Theft });
+    let i = faction::gather_inputs(&w, g0).expect("inputs");
+    assert_eq!(i.open_districts, 1);
+    assert!(i.frontier_total > held_total, "Sump Central joins the frontier");
 }

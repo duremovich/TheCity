@@ -67,26 +67,48 @@ pub struct OrderInputs {
     /// M12 D38 (phase 3): derelict Blocks in the gang's districts (its
     /// Hideout's and its held Homes') it does not hold yet.
     pub derelicts: usize,
+    /// M12 D38: districts with `control == Gang(self)`, and districts that
+    /// are Contested or held by a gang with no fit members (Expand's ground).
+    pub districts_held: usize,
+    pub open_districts: usize,
+    /// M12 D39: the hoarding corp's richest building in (or next to) a
+    /// district this gang holds, and the prize of a won raid on it.
+    pub corp_prize: Option<(EntityId, i64)>,
+    /// M12 D39: the cover over that building's district, and the private
+    /// guards on its side (the corp Raid's ratio).
+    pub corp_cover: f32,
+    pub corp_guards: usize,
+    /// M12 D39: corp raids are on (`[gangs] corp_raid_cap > 0`): the hoard
+    /// tilt lands on the corp Raid, not on Contest (M11 D33).
+    pub corp_raids: bool,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
-/// BreakOut, the rival Hideout otherwise): 1 when the target is the Jail
-/// under Garrison, or its district's stance is `Crackdown(gang)` or
+/// BreakOut; under the gang's standing Raid its corp target if it has one;
+/// the rival Hideout otherwise). See [`cover_of`]. 0 with no target.
+pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
+    let target = if order.target_is_jail() {
+        world.building_of_kind(BuildingKind::Jail)
+    } else if order == Order::Raid {
+        crate::systems::raid::corp_target(world, gang)
+            .or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
+    } else {
+        world.rival_of(gang).and_then(|r| world.hideout_of(r))
+    };
+    target.map_or(0.0, |t| cover_of(world, gang, t))
+}
+
+/// M12 D38: the cover over a target building for `gang`: 1 when it is the
+/// Jail under Garrison, or its district's stance is `Crackdown(gang)` or
 /// `Cordon`; else `((cov − 0.5) ÷ 1.5).clamp(0, 0.95)`, with a district
 /// without Homes (the Civic) reading coverage 1.0, so coverage alone never
-/// shuts the gate. 0 with `[law] district_beats` off or no target.
-pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
+/// shuts the gate. 0 with `[law] district_beats` off.
+pub fn cover_of(world: &World, gang: EntityId, target: EntityId) -> f32 {
     use crate::components::Stance;
     if !world.config.law.district_beats {
         return 0.0;
     }
-    let jail = order.target_is_jail();
-    let target = if jail {
-        world.building_of_kind(BuildingKind::Jail)
-    } else {
-        world.rival_of(gang).and_then(|r| world.hideout_of(r))
-    };
-    let Some(target) = target else { return 0.0 };
+    let jail = world.comp::<Building>(target).is_some_and(|b| b.kind == BuildingKind::Jail);
     if jail && crate::systems::law::garrisoned(world) {
         return 1.0;
     }
@@ -137,7 +159,6 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
     let frontier_frac = i.frontier as f32 / i.frontier_total.max(1) as f32;
     let calm = 1.0 - i.heat;
     let weakness = ((i.rival as f32 / i.own.max(1) as f32) / 2.0).clamp(0.0, 1.0);
-    let prize_x = (i.prize as f32 / 200.0).clamp(0.0, 1.0);
     let jailed_frac = i.jailed as f32 / (i.jailed + i.own).max(1) as f32;
     let scored = [
         score(
@@ -163,35 +184,19 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("greed", i.greed, Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.4, b: 0.6 }),
             ],
-            f.contest + i.hoard_tilt * i.hoard,
+            f.contest + if i.corp_raids { 0.0 } else { i.hoard_tilt * i.hoard },
         ),
-        score(
-            Order::Raid,
-            vec![
-                Consideration::new(
-                    "raid ready",
-                    can(i.raid_ready && i.rival_exists && i.prize >= cfg.raid_min_prize),
-                    GATE,
-                ),
-                Consideration::new(
-                    "ratio",
-                    ratio_x(i.own, i.rival),
-                    Curve::Logistic { k: 16.0, mid: cfg.raid_min_ratio / 2.0 },
-                ),
-                Consideration::new("prize", prize_x, Curve::Linear { m: 0.5, b: 0.5 }),
-                Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
-                Consideration::new("1-heat", calm, Curve::Linear { m: 0.5, b: 0.5 }),
-                Consideration::new("open target", can(i.target_cover < 1.0), GATE),
-                Consideration::new("target cover", 1.0 - i.target_cover, Curve::Linear { m: 0.8, b: 0.2 }),
-            ],
-            f.raid,
-        ),
+        raid_score(i, cfg, false),
         score(
             Order::Retaliate,
             vec![
                 // Also off the raid cooldown (the spec exempts Retaliate): a
                 // grudge a night is a feud, and the cooldown paces it.
-                Consideration::new("grudge", can(i.grudge && i.rival_exists && i.raid_ready), GATE),
+                Consideration::new(
+                    "grudge",
+                    can(i.grudge && i.rival_exists && i.raid_ready && i.own >= cfg.raid_min_members),
+                    GATE,
+                ),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.9, b: 0.1 }),
                 Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("open target", can(i.target_cover < 1.0), GATE),
@@ -241,8 +246,55 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
         ),
     ];
     let mut out: Vec<OrderScore> = scored.into_iter().flatten().collect();
+    // M12 D39: Raid is scored for the rival and for the corp prize; the better stays.
+    if let Some(corp) = raid_score(i, cfg, true) {
+        match out.iter_mut().find(|s| s.order == Order::Raid) {
+            Some(rival) if rival.score >= corp.score => {}
+            Some(rival) => *rival = corp,
+            None => out.push(corp),
+        }
+    }
     out.sort_by(|a, b| b.score.total_cmp(&a.score).then(a.order.cmp(&b.order)));
     out
+}
+
+/// One Raid variant's score: the rival Hideout (M8), or (`corp`) the corp
+/// building of `corp_prize` (M12 D39), whose prize term reads the corp
+/// prize, whose ratio reads the private guards on its side, whose cover
+/// reads its district, and whose flat gains `hoard_tilt × hoard`. A corp
+/// variant's trace carries a "corp target" consideration (always 1).
+fn raid_score(i: &OrderInputs, cfg: &GangsCfg, corp: bool) -> Option<OrderScore> {
+    let f = &cfg.order_flat;
+    let calm = 1.0 - i.heat;
+    let (ready, opponents, prize, cover, flat) = if corp {
+        let (_, value) = i.corp_prize?;
+        (value >= cfg.raid_min_prize, i.corp_guards, value, i.corp_cover, f.raid + i.hoard_tilt * i.hoard)
+    } else {
+        (i.rival_exists && i.prize >= cfg.raid_min_prize, i.rival, i.prize, i.target_cover, f.raid)
+    };
+    let prize_x = (prize as f32 / 200.0).clamp(0.0, 1.0);
+    let mut cs = vec![
+        Consideration::new("raid ready", can(i.raid_ready && ready && i.own >= cfg.raid_min_members), GATE),
+        Consideration::new(
+            "ratio",
+            ratio_x(i.own, opponents),
+            Curve::Logistic { k: 16.0, mid: cfg.raid_min_ratio / 2.0 },
+        ),
+        Consideration::new("prize", prize_x, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("1-heat", calm, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("open target", can(cover < 1.0), GATE),
+        Consideration::new("target cover", 1.0 - cover, Curve::Linear { m: 0.8, b: 0.2 }),
+    ];
+    if corp {
+        cs.push(Consideration::new("corp target", 1.0, Curve::Linear { m: 0.0, b: 1.0 }));
+    }
+    score(Order::Raid, cs, flat)
+}
+
+/// D39: does this Raid score (the best Raid entry) aim at the corp building?
+pub fn is_corp_raid(s: &OrderScore) -> bool {
+    s.order == Order::Raid && s.considerations.iter().any(|c| c.name == "corp target")
 }
 
 /// The order to switch to, if the best beats the current one by `hysteresis`.
@@ -298,15 +350,29 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
             }
         }
     }
+    // M12 D38: the districts this gang holds, and the open ones (Contested,
+    // or held by a gang with nobody fit), each with Homes.
+    let (held, open) = district_ground(world, gang);
+    let districts_held = held.iter().filter(|&&x| x).count();
+    let open_districts = open.iter().filter(|&&x| x).count();
+    let by_district = world.districts.len() > 1 && districts_held > 0;
     let (mut frontier, mut frontier_total) = (0, 0);
     for &h in world.buildings_by_kind.get(&BuildingKind::Home).map(|v| v.as_slice()).unwrap_or(&[]) {
         let Some(b) = world.comp::<Building>(h) else { continue };
-        if b.demolished || residents.get(h.index as usize).is_none_or(|&n| n == 0) {
+        if b.demolished || b.derelict || residents.get(h.index as usize).is_none_or(|&n| n == 0) {
             continue;
         }
-        let ours = match (own_door, rival_door) {
-            (Some(o), Some(r)) => b.door.manhattan(o) <= b.door.manhattan(r),
-            _ => true,
+        // M12 D38: with a district held, Expand's frontier is the held and
+        // open districts; a gang holding none (or a one-district city) keeps
+        // the M8 midline, so a fresh gang still expands.
+        let ours = if by_district {
+            let d = world.district_of(b.door).index();
+            held.get(d).copied().unwrap_or(false) || open.get(d).copied().unwrap_or(false)
+        } else {
+            match (own_door, rival_door) {
+                (Some(o), Some(r)) => b.door.manhattan(o) <= b.door.manhattan(r),
+                _ => true,
+            }
         };
         if !ours {
             continue;
@@ -322,6 +388,21 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let breakout_cooldown = cfg.breakout_cooldown_days * TICKS_PER_DAY;
     let jailed = crate::systems::gang::jailed_headcount(world, gang);
     let (hoard, hoard_corp) = hoard(world);
+    let corp_raids = cfg.corp_raid_cap > 0;
+    // D39 reading: "a district held by this gang" = one where it holds Homes
+    // (as a split reads it); with control alone only the city's biggest gang
+    // ever had a prize (seed 42: one gang, 38 days in 120).
+    let mut turf = vec![false; world.districts.len()];
+    for &h in &g.territory {
+        if let Some(t) = turf.get_mut(world.district_of_building(h).index()) {
+            *t = true;
+        }
+    }
+    let corp_prize = if corp_raids { corp_prize(world, &turf, hoard_corp) } else { None };
+    let corp_cover = corp_prize.map_or(0.0, |(b, _)| cover_of(world, gang, b));
+    let corp_guards = corp_prize.map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len());
+    let rival_hq = rival.and_then(|r| world.hideout_of(r));
+    let jail = world.building_of_kind(BuildingKind::Jail);
     Some(OrderInputs {
         frontier,
         frontier_total,
@@ -346,10 +427,58 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         hoard,
         hoard_corp,
         hoard_tilt: world.config.corps.hoard_tilt,
-        target_cover: target_cover(world, gang, Order::Raid),
-        jail_cover: target_cover(world, gang, Order::BreakOut),
+        target_cover: rival_hq.map_or(0.0, |h| cover_of(world, gang, h)),
+        jail_cover: jail.map_or(0.0, |j| cover_of(world, gang, j)),
         derelicts: crate::systems::gang::squat_targets(world, gang).len(),
+        districts_held,
+        open_districts,
+        corp_prize,
+        corp_cover,
+        corp_guards,
+        corp_raids,
     })
+}
+
+/// M12 D38: per district, held by `gang` (`control == Gang(gang)`), and open
+/// (Contested, or held by a gang with no fit members); only districts with
+/// Homes count.
+pub fn district_ground(world: &World, gang: EntityId) -> (Vec<bool>, Vec<bool>) {
+    use crate::components::Controller;
+    let mut held = vec![false; world.districts.len()];
+    let mut open = vec![false; world.districts.len()];
+    for (i, d) in world.districts.iter().enumerate() {
+        if d.homes.is_empty() {
+            continue;
+        }
+        match d.control {
+            Controller::Gang(g) if g == gang => held[i] = true,
+            Controller::Gang(g) => open[i] = crate::systems::gang::fit_headcount(world, g) == 0,
+            Controller::Contested => open[i] = true,
+            _ => {}
+        }
+    }
+    (held, open)
+}
+
+/// M12 D39: the hoarding corp's building with the highest 7-day revenue
+/// (ties lower id) in a district `held` marks (the gang's turf) or next to one, with the
+/// prize a won raid on it takes (`raid::corp_prize_value`).
+pub fn corp_prize(world: &World, held: &[bool], hoard_corp: Option<EntityId>) -> Option<(EntityId, i64)> {
+    let corp = hoard_corp?;
+    let mask: u16 = held.iter().enumerate().filter(|(_, &h)| h).fold(0, |m, (i, _)| m | (1 << i));
+    if mask == 0 {
+        return None;
+    }
+    let near = |d: usize| mask & (1 << d) != 0 || world.district_adjacent.get(d).is_some_and(|&adj| adj & mask != 0);
+    let buildings = world.comp::<Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default();
+    let best = buildings
+        .into_iter()
+        .filter_map(|b| world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| (b, bd)))
+        .filter(|(_, bd)| near(world.district_of(bd.door).index()))
+        .map(|(b, bd)| (bd.revenue.iter().sum::<i64>(), b))
+        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))?;
+    let value = crate::systems::raid::corp_prize_value(world, corp);
+    Some((best.1, value))
 }
 
 /// A departed raid has this long to reach the rival door before it is
@@ -388,15 +517,19 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     let next = choose(&scores, current, hysteresis);
     let best_score = scores.first().map_or(0.0, |s| s.score);
     let current_score = scores.iter().find(|s| s.order == current).map_or(0.0, |s| s.score);
+    let corp_raid_best = scores.iter().find(|s| s.order == Order::Raid).is_some_and(is_corp_raid);
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order_trace = scores;
     }
     let Some(order) = next else { return true };
     let muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
+    // M12 D39: a Raid chosen for the corp prize names the corp building.
+    let corp_target = inputs.corp_prize.map(|(b, _)| b).filter(|_| order == Order::Raid && corp_raid_best);
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;
         g.order_since = now;
         g.raid_at = muster;
+        g.raid_target = corp_target;
         if order == Order::Retaliate {
             g.retaliate_until = Some(now + cfg.retaliate_days * TICKS_PER_DAY);
         }

@@ -446,8 +446,8 @@ pub fn alloc_weights(world: &World) -> Vec<(f32, Vec<(&'static str, f32)>)> {
             let crime = if mean > 0.0 && inhabited { cfg.alloc_crime * (d.crime_rate / mean).min(3.0) } else { 0.0 };
             let paid_t = cfg.alloc_paid * paid.get(i).copied().unwrap_or(0.0);
             let landlord = if gang_landlord(world, d.id).is_some() { cfg.alloc_gang_landlord } else { 0.0 };
-            // Riots arrive in phase 4.
-            let riot = 0.0;
+            // M12 D10: a riot musters or runs here.
+            let riot = if crate::systems::riot::riot_in(world, d.id) { cfg.alloc_riot } else { 0.0 };
             let lever = world.levers.guard_weight.get(i).copied().unwrap_or(1.0).max(0.0);
             let off = garrison || d.stance == Stance::Withdrawn;
             let w = if off { 0.0 } else { (base + crime + paid_t + landlord + riot) * lever };
@@ -562,7 +562,8 @@ pub fn gather_stance_inputs(world: &World, d: DistrictId) -> Option<StanceInputs
         pressure,
         crime,
         vagrants: (f32::from(dist.rough) / cfg.sweep_full.max(1) as f32).clamp(0.0, 1.0),
-        riot: false,
+        // M12 D34: Contain and Crush cordon the district while the riot musters.
+        riot: crate::systems::riot::cordon_target(world, d).is_some(),
         landlord: landlord.is_some() && landlord == top,
         coverage: dist.coverage,
         guards: dist.guards,
@@ -714,7 +715,8 @@ pub fn rescore_stances(world: &mut World, hysteresis: f32, why: &str) {
         } else if let (Some(h), Some(ld)) = (lobby, lobby_district.filter(|ld| ld.index() == i)) {
             let _ = ld;
             Some((Stance::Crackdown(h.gang), lobby_why.clone().unwrap_or_default()))
-        } else if !d.inhabited() {
+        } else if !d.inhabited() && !crate::systems::riot::riot_in(world, d.id) {
+            // D12: an uninhabited district stays Patrol unless it riots.
             Some((Stance::Patrol, "uninhabited".to_string()))
         } else {
             None

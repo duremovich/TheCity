@@ -715,6 +715,12 @@ fn test_hoard_tilts_contest() {
         target_cover: 0.0,
         jail_cover: 0.0,
         derelicts: 0,
+        districts_held: 0,
+        open_districts: 0,
+        corp_prize: None,
+        corp_cover: 0.0,
+        corp_guards: 0,
+        corp_raids: false,
     };
     let contest = |i: &faction::OrderInputs| {
         faction::score_orders(i, &w.config.gangs)
