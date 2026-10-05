@@ -24,5 +24,6 @@ pub mod ownership;
 pub mod plan;
 pub mod raid;
 pub mod social;
+pub mod stat_policy;
 pub mod stats;
 pub mod think;

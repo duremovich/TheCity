@@ -225,6 +225,15 @@ pub fn load_stat_table(config: &Config) -> (Option<StatTable>, bool) {
     }
 }
 
+/// `assets/stat_mlp.toml` under `[lod] policy = "mlp"`, else `None`.
+fn load_stat_mlp(config: &Config) -> Option<crate::systems::stat_policy::StatMlp> {
+    match config.lod.policy.as_str() {
+        "table" => None,
+        "mlp" => Some(crate::systems::stat_policy::StatMlp::load(config)),
+        other => panic!("[lod] policy = {other:?}: expected \"table\" or \"mlp\""),
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct World {
     pub tick: Tick,
@@ -345,6 +354,10 @@ pub struct World {
     /// with the calibrate message.
     #[serde(skip)]
     pub stat_table_legacy: bool,
+    /// Experiment: the learned Statistical policy, loaded only under
+    /// `[lod] policy = "mlp"` (`systems::stat_policy`). Not saved.
+    #[serde(skip)]
+    pub stat_mlp: Option<crate::systems::stat_policy::StatMlp>,
     /// M10: open holes, oldest first (the key packs the tick on top).
     #[serde(default)]
     pub holes: BTreeMap<HoleId, Hole>,
@@ -541,6 +554,7 @@ impl World {
         // Absent until `citysim-cli calibrate` has written it; any other read
         // failure is a broken checkout and must not pass silently.
         let (stat_table, stat_table_legacy) = load_stat_table(&config);
+        let stat_mlp = load_stat_mlp(&config);
 
         let edge_roads = map.edge_roads();
         let levers = Levers::from_config(&config);
@@ -605,6 +619,7 @@ impl World {
             command_log: Vec::new(),
             stat_table,
             stat_table_legacy,
+            stat_mlp,
             holes: BTreeMap::new(),
             holes_by_agent: BTreeMap::new(),
             bind_queue: Vec::new(),
@@ -1705,6 +1720,7 @@ impl World {
         let (table, legacy) = load_stat_table(&self.config);
         self.stat_table = table;
         self.stat_table_legacy = legacy;
+        self.stat_mlp = load_stat_mlp(&self.config);
     }
 
     /// Set a `trace_flags` bit (ATE, SLEPT_AT_HOME) for today.

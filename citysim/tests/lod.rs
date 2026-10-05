@@ -159,6 +159,10 @@ fn test_full_vs_statistical_within_15pct() {
         let mut cfg = Config::load().calibration_city(AGENTS);
         cfg.lod.force = Some(force);
         cfg.lod.stat_violence_mult = 1.0;
+        // The learned-policy experiment: `CITYSIM_STAT_POLICY=mlp`.
+        if let Ok(p) = std::env::var("CITYSIM_STAT_POLICY") {
+            cfg.lod.policy = p;
+        }
         let mut w = World::new(seed, cfg);
         let mut hunger_days = 0u64;
         let (mut assaults, mut marriages) = (0u64, 0u64);
@@ -314,4 +318,43 @@ fn test_command_log_replay_matches() {
     assert_eq!(b.tick, end);
     assert_eq!(citysim::save::to_ron(&b), saved, "replay diverged");
     b.tick();
+}
+
+/// The learned-policy experiment: microseconds per agent-hour row, table vs
+/// MLP (features + both forward passes), over the 2,000 city's agents after a
+/// day. Needs `assets/stat_mlp.toml`. Run with `--ignored`.
+#[test]
+#[ignore]
+fn bench_stat_policy_row() {
+    use citysim::systems::stat_policy::{features, MlpPolicy, StatMlp, StatPolicy, TablePolicy};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY + 7 * TICKS_PER_HOUR);
+    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| w.has::<Brain>(id)).collect();
+    let mlp = StatMlp::load(&w.config);
+    let table = w.stat_table.clone().expect("table");
+    const REPS: usize = 200;
+    let time = |name: &str, f: &dyn Fn(citysim::EntityId) -> f32| {
+        let t0 = std::time::Instant::now();
+        let mut acc = 0.0f32;
+        for _ in 0..REPS {
+            for &id in &ids {
+                acc += f(id);
+            }
+        }
+        let us = t0.elapsed().as_secs_f64() * 1e6 / (REPS * ids.len()) as f64;
+        eprintln!("{name:22} {us:.3} us per agent-hour ({} agents, checksum {acc:.1})", ids.len());
+    };
+    time("table", &|id| TablePolicy(&table).row(&w, id).p_eat);
+    time("features only", &|id| features(&w, id)[6]);
+    time("mlp (features + nets)", &|id| MlpPolicy(&mlp).row(&w, id).p_eat);
+    let x: Vec<_> = ids.iter().map(|&id| features(&w, id)).collect();
+    let t0 = std::time::Instant::now();
+    let mut acc = 0.0f32;
+    for _ in 0..REPS {
+        for f in &x {
+            acc += mlp.row_for(f).p_steal;
+        }
+    }
+    let us = t0.elapsed().as_secs_f64() * 1e6 / (REPS * x.len()) as f64;
+    eprintln!("{:22} {us:.3} us per agent-hour (checksum {acc:.3})", "mlp nets only");
 }
