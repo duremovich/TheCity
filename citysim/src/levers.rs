@@ -4,7 +4,10 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::components::{Brain, Building, BuildingKind, Household, Position, Posture, Rect, TileKind, TilePos, Wallet};
+use crate::components::{
+    Brain, Building, BuildingKind, Crime, DeathCause, Gang, Household, Job, Position, Posture, Rect, Sentence,
+    TileKind, TilePos, Wallet,
+};
 use crate::config::Config;
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -41,6 +44,37 @@ pub enum PlayerCommand {
     SetSpeed(Speed),
     /// M9: pin the law's posture, or (`None`) hand it back to the captain.
     SetLawPosture(Option<Posture>),
+    // --- God commands (docs/VISION.md "How we test: god scenarios"). They
+    // break the world's rules on purpose: money from nowhere, death without a
+    // killer, sentences without a crime. Logged and replayed like the rest.
+    /// Kill an agent: cause Violence, no killer.
+    KillAgent(EntityId),
+    /// Jail an agent for `days` (no crime, no report, no capacity check); a
+    /// prisoner's sentence is extended to at least that.
+    JailAgent {
+        who: EntityId,
+        days: u32,
+    },
+    /// Free a prisoner (as `Release`, but named for the god set).
+    FreeAgent(EntityId),
+    /// Add coins to a gang's treasury, out of thin air.
+    FundGang {
+        gang: EntityId,
+        amount: i64,
+    },
+    /// A gang's treasury moves into the city Treasury.
+    SeizeGangTreasury(EntityId),
+    /// Kill every living member of a gang.
+    KillGang(EntityId),
+    /// Jail every member of a gang for `days` (extending sentences already running).
+    JailGang {
+        gang: EntityId,
+        days: u32,
+    },
+    /// Dismiss every guard; `guard_count` is untouched, so the law re-hires.
+    FireAllGuards,
+    /// Set the city Treasury to exactly this many coins (may be negative).
+    SetTreasury(i64),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +242,20 @@ impl World {
                     self.push_event(EventKind::PlayerActionFailed, &[*who], format!("Release: {e}"));
                 }
             },
+            PlayerCommand::KillAgent(_)
+            | PlayerCommand::JailAgent { .. }
+            | PlayerCommand::FreeAgent(_)
+            | PlayerCommand::FundGang { .. }
+            | PlayerCommand::SeizeGangTreasury(_)
+            | PlayerCommand::KillGang(_)
+            | PlayerCommand::JailGang { .. }
+            | PlayerCommand::FireAllGuards
+            | PlayerCommand::SetTreasury(_) => {
+                let _ = match self.cmd_god(cmd) {
+                    Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
+                };
+            }
             PlayerCommand::DemolishHome(home) => {
                 let _ = match self.cmd_demolish_home(*home) {
                     Ok(n) => self.push_event(
@@ -229,6 +277,101 @@ impl World {
                 };
             }
         }
+    }
+
+    /// The god commands: `Ok((actors, event text))` or why nothing happened.
+    fn cmd_god(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
+        use crate::systems::{law, law_brain};
+        let gang_name = |w: &World, g: EntityId| w.comp::<Gang>(g).map(|g| g.name.clone()).ok_or("no such gang");
+        match *cmd {
+            PlayerCommand::KillAgent(who) => {
+                if !self.is_alive(who) || !self.has::<Brain>(who) {
+                    return Err("KillAgent: no such agent".into());
+                }
+                let name = self.name_of(who);
+                self.kill_by(who, DeathCause::Violence, None);
+                Ok((vec![who], format!("struck {name} dead")))
+            }
+            PlayerCommand::JailAgent { who, days } => {
+                let name = self.name_of(who);
+                self.god_jail(who, days)?;
+                Ok((vec![who], format!("jailed {name} for {days} days")))
+            }
+            PlayerCommand::FreeAgent(who) => {
+                law::player_release(self, who).map_err(|e| format!("FreeAgent: {e}"))?;
+                Ok((vec![who], format!("freed {}", self.name_of(who))))
+            }
+            PlayerCommand::FundGang { gang, amount } => {
+                let name = gang_name(self, gang)?;
+                if let Some(g) = self.comp_mut::<Gang>(gang) {
+                    g.treasury += amount;
+                }
+                Ok((vec![gang], format!("gave {name} {amount} coins")))
+            }
+            PlayerCommand::SeizeGangTreasury(gang) => {
+                let name = gang_name(self, gang)?;
+                let coins = self.comp_mut::<Gang>(gang).map_or(0, |g| std::mem::take(&mut g.treasury));
+                if let Some(t) = self.treasury_mut() {
+                    t.coins += coins;
+                }
+                Ok((vec![gang], format!("seized {coins} coins from {name}")))
+            }
+            PlayerCommand::KillGang(gang) => {
+                let name = gang_name(self, gang)?;
+                let members = self.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+                for &m in &members {
+                    self.kill_by(m, DeathCause::Violence, None);
+                }
+                Ok((vec![gang], format!("killed all {} of {name}", members.len())))
+            }
+            PlayerCommand::JailGang { gang, days } => {
+                let name = gang_name(self, gang)?;
+                let members = self.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
+                let jailed = members.into_iter().filter(|&m| self.god_jail(m, days).is_ok()).count();
+                Ok((vec![gang], format!("jailed {jailed} of {name} for {days} days")))
+            }
+            PlayerCommand::FireAllGuards => {
+                let guards = law_brain::guards(self);
+                for &g in &guards {
+                    // An escort in progress ends: the suspect walks.
+                    if let Some(s) = self.comp_mut::<Brain>(g).and_then(|b| b.escorting.take()) {
+                        if let Some(sb) = self.comp_mut::<Brain>(s) {
+                            sb.cuffed_by = None;
+                        }
+                    }
+                    self.abort_plan(g);
+                    self.remove::<Job>(g);
+                }
+                law_brain::recompute_captain(self);
+                Ok((guards, "dismissed every guard".to_string()))
+            }
+            PlayerCommand::SetTreasury(coins) => {
+                let t = self.treasury_mut().ok_or("SetTreasury: no Hall")?;
+                t.coins = coins;
+                Ok((vec![], format!("set the Treasury to {coins}")))
+            }
+            _ => Err("not a god command".into()),
+        }
+    }
+
+    /// A god sentence: no report, no capacity check. A prisoner's sentence is
+    /// extended instead. It is filed as Assault: a full Jail makes room by
+    /// freeing the Theft prisoner with the longest sentence, which a long
+    /// god sentence for Theft always was.
+    fn god_jail(&mut self, who: EntityId, days: u32) -> Result<(), String> {
+        if !self.is_alive(who) || !self.has::<Brain>(who) {
+            return Err("JailAgent: no such agent".into());
+        }
+        let until = self.tick + u64::from(days.max(1)) * crate::time::TICKS_PER_DAY;
+        // Already inside: the sentence runs to whichever end is later.
+        if let Some(s) = self.comp_mut::<Sentence>(who) {
+            s.until_tick = s.until_tick.max(until);
+            s.crime = s.crime.max(Crime::Assault);
+            return Ok(());
+        }
+        let jail = self.building_of_kind(BuildingKind::Jail).ok_or("JailAgent: no Jail")?;
+        crate::systems::law::sentence(self, who, Crime::Assault, until, jail);
+        Ok(())
     }
 
     /// Tiles become Ground, residents are homeless (one event each), the

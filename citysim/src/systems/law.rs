@@ -327,6 +327,11 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
         b.cuffed_by = None;
     }
+    // Sentenced while in cuffs (a second escort, a player or god jailing):
+    // the sentence they are serving stands.
+    if world.has::<Sentence>(suspect) {
+        return;
+    }
     // The most severe open crime sets the sentence; the rest are covered by it.
     let Some(report) = world
         .crime_reports
