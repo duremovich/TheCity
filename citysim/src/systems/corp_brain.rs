@@ -82,9 +82,15 @@ pub fn build_kind(n: Niche) -> Option<BuildingKind> {
     }
 }
 
-/// The Street class's unrest (§ 7). Classes land in phase 4; until then 0.
-pub fn street_unrest(_world: &World) -> f32 {
-    0.0
+/// The Street class's unrest (§ 7), the `1-unrest` term of Squeeze.
+pub fn street_unrest(world: &World) -> f32 {
+    crate::systems::classes::street_unrest(world)
+}
+
+/// A Security corp's sold contracts: its guard work on its own buildings is
+/// no sale (it inflated its share and its demand).
+pub fn sold_contracts(world: &World, c: &Corp, corp: EntityId) -> usize {
+    c.contracts.iter().filter(|&&(b, _)| world.owner_of(b) != Some(corp)).count()
 }
 
 /// Every corp's share of a niche (D16), one pass. A niche with nothing in it
@@ -125,7 +131,7 @@ pub fn shares(world: &World, niche: Niche) -> BTreeMap<EntityId, f32> {
         }
         Niche::Security => {
             for c in world.corps() {
-                let n = world.comp::<Corp>(c).map_or(0, |cc| cc.contracts.len());
+                let n = world.comp::<Corp>(c).map_or(0, |cc| sold_contracts(world, cc, c));
                 total += n as f32;
                 if n > 0 {
                     own.insert(c, n as f32);
@@ -239,7 +245,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
                 let residents: usize = own_buildings.iter().map(|&h| world.residents_of(h).len()).sum();
                 residents as f32 / (own_buildings.len() * cap).max(1) as f32
             }
-            Niche::Security => c.contracts.len() as f32 / cfg.security_guards.max(1) as f32,
+            Niche::Security => sold_contracts(world, c, corp) as f32 / cfg.security_guards.max(1) as f32,
         }
         .clamp(0.0, 1.0);
         let rivals = rivals_in(world, corp, n);
@@ -329,7 +335,11 @@ pub fn score_niche(i: &CorpInputs, n: Niche, cfg: &CorpsCfg) -> Vec<CorpOrderSco
             CorpOrder::Grow,
             n,
             vec![
-                Consideration::new("lots & cash", can(ni.lots > 0 && i.cash >= 0.5), GATE),
+                Consideration::new(
+                    "lots & cash",
+                    can(ni.lots > 0 && i.cash >= 0.5 && (n != Niche::Housing || ni.demand >= cfg.grow_min_occupancy)),
+                    GATE,
+                ),
                 Consideration::new("demand", ni.demand, Curve::Linear { m: 0.8, b: 0.2 }),
                 Consideration::new("flow", i.flow, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("greed", i.greed, Curve::Linear { m: 0.5, b: 0.5 }),
@@ -433,9 +443,22 @@ pub fn score_all(i: &CorpInputs, cfg: &CorpsCfg) -> Vec<CorpOrderScore> {
     out
 }
 
-/// The score of the standing `(order, niche)` (an unset niche matches any).
+/// Secure, Hunker and Lobby are scored once for the whole corp.
+fn corp_wide(order: CorpOrder) -> bool {
+    matches!(order, CorpOrder::Secure | CorpOrder::Hunker | CorpOrder::Lobby)
+}
+
+/// Does a score row stand for the order `current`? An unset niche matches
+/// any, and so does a corp-wide order (it is scored in whichever niche is
+/// first, which moves when the corp's niches change: the old niche scored
+/// 0 and logged a spurious switch).
+fn matches(s: &CorpOrderScore, current: (CorpOrder, Option<Niche>)) -> bool {
+    s.order == current.0 && (corp_wide(s.order) || current.1.is_none_or(|n| n == s.niche))
+}
+
+/// The score of the standing `(order, niche)`.
 fn current_score(scores: &[CorpOrderScore], current: (CorpOrder, Option<Niche>)) -> f32 {
-    scores.iter().find(|s| s.order == current.0 && current.1.is_none_or(|n| n == s.niche)).map_or(0.0, |s| s.score)
+    scores.iter().find(|s| matches(s, current)).map_or(0.0, |s| s.score)
 }
 
 /// The pair to switch to, if the best beats the standing one by `hysteresis`.
@@ -446,7 +469,7 @@ pub fn choose(
     hysteresis: f32,
 ) -> Option<(CorpOrder, Niche)> {
     let best = scores.first()?;
-    let same = best.order == current.0 && current.1.is_none_or(|n| n == best.niche);
+    let same = matches(best, current);
     (!same && best.score > current_score(scores, current) + hysteresis).then_some((best.order, best.niche))
 }
 
@@ -559,15 +582,43 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
     }
 }
 
-/// D17 Hunker: no open vacancies; one firing per building per day, the
-/// newest hire first (ties higher id), while above half staff; never at a
-/// Farm (see below).
+/// D17 Hunker: no open vacancies beyond half staff (every hunkering corp
+/// closes them at once). A building with fewer than half its staff keeps
+/// the vacancies that bring it back to half: Hunker is the quiet default,
+/// and closing every vacancy left a Farm whose Vat Techs died or were
+/// jailed unworked for good.
+fn hunker_vacancies(world: &mut World, corp: EntityId) {
+    let Some(c) = world.comp::<Corp>(corp) else { return };
+    let buildings = c.buildings.clone();
+    let mut employed: BTreeMap<EntityId, usize> = BTreeMap::new();
+    for role in Role::ALL {
+        for &a in world.workers(role) {
+            if let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) {
+                if buildings.binary_search(&e).is_ok() {
+                    *employed.entry(e).or_default() += 1;
+                }
+            }
+        }
+    }
+    for b in buildings {
+        let Some(open) = world.vacancies.get(&b).map(|v| v.len()) else { continue };
+        let kind = world.comp::<Building>(b).map(|bd| bd.kind);
+        let half = kind.map_or(0, |k| full_staff(world, k).div_ceil(2));
+        let keep = half.saturating_sub(employed.get(&b).copied().unwrap_or(0)).min(open);
+        if keep == 0 {
+            world.vacancies.remove(&b);
+        } else if let Some(v) = world.vacancies.get_mut(&b) {
+            v.truncate(keep);
+        }
+    }
+}
+
+/// D17 Hunker layoffs: one firing per building per day, the newest hire
+/// first (ties higher id), while above half staff; never at a Farm (see
+/// below).
 fn hunker_staff(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let buildings = c.buildings.clone();
-    for b in &buildings {
-        world.vacancies.remove(b);
-    }
     let mut staff: BTreeMap<EntityId, Vec<(crate::time::Tick, EntityId)>> = BTreeMap::new();
     for role in Role::ALL {
         for &a in world.workers(role) {
@@ -583,7 +634,7 @@ fn hunker_staff(world: &mut World, corp: EntityId) {
         // Vat Techs are the city's food: a Food corp that laid them off in
         // Winter (one per Farm a day) took employment from 213 to 138 and the
         // price to 7 on seed 42. Hunker cuts every other staff.
-        if kind == BuildingKind::Farm {
+        if kind == BuildingKind::Farm && world.config.corps.hunker_spares_farms {
             continue;
         }
         let full = full_staff(world, kind);
@@ -630,8 +681,9 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     if let (true, Some(kind), Some(cost), true) = (ready, kind, cost, lots > 0) {
         if world.purse(Some(corp)) >= cost {
             if let Some(lot) = lot_near(world, corp) {
-                ownership::pay(world, Some(corp), None, cost, Flow::Found);
+                // Paid once the building stands (a failed build cost nothing).
                 if crate::systems::founding::build_on_lot(world, lot, kind, Some(corp)).is_ok() {
+                    ownership::pay(world, Some(corp), None, cost, Flow::Found);
                     if let Some(c) = world.comp_mut::<Corp>(corp) {
                         c.last_build_tick = Some(now);
                     }
@@ -724,9 +776,18 @@ fn hunker(world: &mut World, corp: EntityId, i: &CorpInputs) {
     // Cutting staff is for a corp losing money over a week at least: Hunker
     // is also the quiet default (flat 0.15) and the seed order, and a corp
     // that laid off a Vat Tech a day from day 0 starved the city by Winter.
+    // Open vacancies close at once (item 13: the gate had hidden that).
+    hunker_vacancies(world, corp);
     let evidence = world.comp::<Corp>(corp).map_or(0, |c| c.cashflow.len());
-    if i.flow < 0.0 && evidence >= 7 {
+    let losing = i.flow < 0.0 && evidence >= 7;
+    if losing {
         hunker_staff(world, corp);
+    }
+    // Guard contracts are cut by the same evidence (phase 5): the quiet
+    // default cancelled every contract a Secure had bought within days, so
+    // the Security corps never kept a client and both bled out.
+    if !losing {
+        return;
     }
     let bought: Vec<EntityId> = world
         .comp::<Corp>(corp)

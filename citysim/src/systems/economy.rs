@@ -31,7 +31,11 @@ pub fn run(world: &mut World) {
 /// `restock_floor`, at most `restock_batch` a day per Market, in ascending
 /// order. See config.toml for why this deviates from the spec. M11 D5: a
 /// Market the city does not own buys its restock from the city at
-/// `[corps] wholesale` a unit, as much as its owner's purse covers.
+/// `[corps] wholesale` a unit, as much as its owner's budget covers. Phase
+/// 5: a corp's budget is its closing balance before tonight's upkeep (the
+/// restock runs after the upkeep lump, and a corp with a day's profit but
+/// less than a day's upkeep in the bank left its shelf empty, price 30),
+/// shared across its Markets; the restock is charged in full.
 fn daily_restock(world: &mut World) {
     let floor = world.config.economy.restock_floor;
     let batch = world.config.economy.restock_batch;
@@ -40,19 +44,22 @@ fn daily_restock(world: &mut World) {
     // Every Market's shortfall; when the Reserve cannot cover them all it is
     // split in proportion to the shortfall (floor division, the remainder one
     // unit at a time to the lowest ids), so no Market starves last-in-line.
-    let wants: Vec<(EntityId, u32, u32)> = world
-        .buildings_of_kind(BuildingKind::Market)
-        .iter()
-        .filter_map(|&mk| {
-            let b = world.comp::<Building>(mk).filter(|b| !b.demolished)?;
-            let mut want = floor.saturating_sub(b.stock_food).min(batch);
-            if b.owner.is_some() && wholesale > 0 {
-                let afford = (world.purse(b.owner).max(0) / wholesale).min(i64::from(u32::MAX)) as u32;
-                want = want.min(afford);
-            }
-            Some((mk, b.stock_food, want))
-        })
-        .collect();
+    let mut budget: std::collections::BTreeMap<EntityId, i64> = std::collections::BTreeMap::new();
+    let mut wants: Vec<(EntityId, u32, u32)> = Vec::new();
+    for &mk in world.buildings_of_kind(BuildingKind::Market) {
+        let Some(b) = world.comp::<Building>(mk).filter(|b| !b.demolished) else { continue };
+        let mut want = floor.saturating_sub(b.stock_food).min(batch);
+        if let Some(o) = b.owner.filter(|_| wholesale > 0) {
+            let left = budget.entry(o).or_insert_with(|| {
+                let purse = world.purse(Some(o));
+                world.comp::<Corp>(o).map_or(purse, |c| c.closing.max(purse))
+            });
+            let afford = ((*left).max(0) / wholesale).min(i64::from(u32::MAX)) as u32;
+            want = want.min(afford);
+            *left -= i64::from(want) * wholesale;
+        }
+        wants.push((mk, b.stock_food, want));
+    }
     let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
     let total: u32 = wants.iter().map(|w| w.2).sum();
     let mut shares: Vec<u32> = if total <= available {
@@ -85,7 +92,7 @@ fn daily_restock(world: &mut World) {
         }
         let owner = world.owner_of(mk);
         if owner.is_some() {
-            let paid = ownership::pay(world, owner, None, i64::from(moved) * wholesale, Flow::Wholesale);
+            let paid = ownership::charge(world, owner, None, i64::from(moved) * wholesale, Flow::Wholesale);
             world.stats.current.flow_restock += paid;
         }
         world.push_event(
@@ -113,9 +120,16 @@ fn daily_price(world: &mut World) {
             world.corp_of_building(market_id).and_then(|c| world.comp::<Corp>(c)).map_or(1.0, |c| c.level(Niche::Food));
         let base = price_for_stock(&world.config.economy, stock);
         let price = if level == 1.0 { base } else { ((base as f32 * level).round() as i64).clamp(1, cap) };
+        // Phase 5: the fraction a whole coin hides (0.9 x 3 = 2.7, not 3).
+        let tenths = if world.config.economy.price_tenths && level != 1.0 {
+            ((base as f32 * level * 10.0).round() as i64).clamp(10, cap * 10)
+        } else {
+            price * 10
+        };
         let Some(m) = world.comp_mut::<Market>(market_id) else { continue };
         let old = m.price_food;
         m.price_food = price;
+        m.price_tenths = tenths;
         if m.price_history.len() >= 120 {
             m.price_history.pop_front();
         }
@@ -239,7 +253,7 @@ pub fn haul(world: &mut World, farm: EntityId) -> u32 {
 /// `min(3, floor(coins / price), 20 - food, Market stock)`.
 pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) -> u32 {
     let Some(market) = market else { return 0 };
-    let price = world.comp::<Market>(market).map_or(i64::MAX, |m| m.price_food).max(1);
+    let price = if world.has::<Market>(market) { world.price_for(market, agent) } else { i64::MAX };
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let food = world.comp::<Inventory>(agent).map_or(20, |i| i.food);
     let stock = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
@@ -250,7 +264,7 @@ pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) ->
 /// Pay for `units` at `market`'s price to the Market's owner (M11; the
 /// Treasury before, which still owns a city Market). Returns the coins paid.
 pub fn pay_for_food(world: &mut World, agent: EntityId, market: Option<EntityId>, units: u32) -> i64 {
-    let price = market.and_then(|m| world.comp::<Market>(m)).map_or(0, |m| m.price_food);
+    let price = market.filter(|&m| world.has::<Market>(m)).map_or(0, |m| world.price_for(m, agent));
     let cost = price * i64::from(units);
     let owner = market.and_then(|m| world.owner_of(m));
     let paid = ownership::pay(world, Some(agent), owner, cost, Flow::Food);
@@ -306,21 +320,31 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| c.wage_mult);
     let per_day = if mult == 1.0 { job.wage_per_day } else { (job.wage_per_day as f32 * mult).round() as i64 };
     let due = per_day * i64::from(job.days_unpaid);
-    let mut tax_accum = job.tax_accum + due as f32 * tax_rate;
-    let tax = tax_accum.floor() as i64;
-    tax_accum -= tax as f32;
-    let net = due - tax;
     let available = world.purse(payer).max(0);
-    let paid = net.min(available);
+    // The gross a payer can cover: a non-city employer pays the net wage and
+    // the withheld tax out of the same purse, so both are capped together
+    // and tax accrues only on what is paid (it was capped after the wage and
+    // the Treasury shorted while `tax_accum` counted it). The city's own
+    // wage tax never leaves it: it pays the net.
+    let (gross, mut tax_accum, tax) = if payer.is_some() {
+        let gross = due.min(available);
+        let acc = job.tax_accum + gross as f32 * tax_rate;
+        let tax = (acc.floor() as i64).clamp(0, gross);
+        (gross, acc - tax as f32, tax)
+    } else {
+        let acc = job.tax_accum + due as f32 * tax_rate;
+        let tax = acc.floor() as i64;
+        let gross = (due - tax).min(available) + tax;
+        (gross, acc - tax as f32, tax)
+    };
+    let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
-    // A non-city employer hands the withheld tax to the Treasury (pro rata
-    // on a short payment); the city's own wage tax never leaves it.
-    if payer.is_some() && tax > 0 && net > 0 {
-        let owed = if paid >= net { tax } else { tax * paid / net };
-        ownership::pay(world, payer, None, owed, Flow::Tax);
+    if payer.is_some() && tax > 0 {
+        ownership::pay(world, payer, None, tax, Flow::Tax);
     }
-    let remainder = net - paid;
-    let days_left = if remainder > 0 { ((remainder + job.wage_per_day - 1) / job.wage_per_day) as u8 } else { 0 };
+    let remainder = due - gross;
+    let days_left = if remainder > 0 { ((remainder + per_day.max(1) - 1) / per_day.max(1)) as u8 } else { 0 };
+    tax_accum = tax_accum.max(0.0);
     if let Some(j) = world.comp_mut::<Job>(agent) {
         j.tax_accum = tax_accum;
         j.days_unpaid = days_left;

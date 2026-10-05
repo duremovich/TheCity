@@ -104,7 +104,11 @@ pub fn build_on_lot(
     if let Some(v) = world.buildings_by_kind.get_mut(&BuildingKind::Lot) {
         v.retain(|&x| x != lot);
     }
-    world.buildings_by_kind.entry(kind).or_default().push(lot);
+    // Kept ascending, as every other `buildings_by_kind` list.
+    let list = world.buildings_by_kind.entry(kind).or_default();
+    if let Err(i) = list.binary_search(&lot) {
+        list.insert(i, lot);
+    }
     crate::systems::ownership::transfer_building(world, lot, owner);
     let rent = crate::systems::ownership::rent_for(world, lot);
     if let Some(bd) = world.comp_mut::<Building>(lot) {
@@ -255,9 +259,25 @@ fn incorporate_owned(world: &mut World, agent: EntityId, owned: Vec<EntityId>) -
     let last = full.split_whitespace().last().unwrap_or("Nobody").to_string();
     let name = format!("{last} Holdings");
     let corp = ownership::spawn_corp(world, name.clone(), niches, 0, Some(agent));
+    // Phase 5: the founder's savings become the corp's capital (an exec
+    // draws a wage from it from now on) and its first `incorporate_grace_days`
+    // carry no upkeep: at treasury 0 Varley Holdings went bankrupt under
+    // upkeep on day 40, twelve days after it incorporated.
+    // The founder keeps a day's exec wage to eat on until the first draw.
+    let float = world.config.economy.wage_exec;
+    let capital = world.comp::<Wallet>(agent).map_or(0, |w| (w.coins - float).max(0));
+    if capital > 0 {
+        ownership::pay(world, Some(agent), Some(corp), capital, ownership::Flow::Subsidy);
+    }
+    let grace = world.config.corps.incorporate_grace_days * crate::time::TICKS_PER_DAY;
+    let now = world.tick;
     if let Some(c) = world.comp_mut::<Corp>(corp) {
         // The `cash` denominator, as a spinoff's.
         c.treasury_ref = 1000;
+        c.closing = c.treasury;
+        if grace > 0 {
+            c.upkeep_grace_until = Some(now + grace);
+        }
     }
     for &b in &owned {
         crate::systems::corps::move_building(world, b, Some(corp));

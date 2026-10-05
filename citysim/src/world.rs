@@ -955,6 +955,12 @@ impl World {
     /// `Household::home`, so `residents_of` stays in step.
     pub fn set_home(&mut self, id: EntityId, home: Option<EntityId>) {
         if let Some(h) = self.comp_mut::<Household>(id) {
+            // M11 phase 5: losing a Home (eviction, demolition) ends its rent:
+            // arrears kept after a DemolishHome barred re-housing for good.
+            if home.is_none() {
+                h.arrears = 0;
+                h.rent_due = 0.0;
+            }
             h.home = home;
             self.index_household(id);
         }
@@ -1192,7 +1198,7 @@ impl World {
         if let Some(e) = self.comp::<Job>(agent).and_then(|j| j.employer).filter(|&e| usable(e)) {
             return Some(e);
         }
-        if kind == BuildingKind::Market {
+        if kind == BuildingKind::Market && self.config.corps.shop_price_tiles > 0 {
             return self.market_by_price(pos.tile);
         }
         self.nearest_of_kind(kind, pos.tile)
@@ -1201,14 +1207,15 @@ impl World {
     /// M11 D15: the Market a shopper at `from` picks, every tier alike: the
     /// least `door distance + shop_price_tiles × price` (ties lower id), so a
     /// cheaper Market draws custom from further off. Prices change only at
-    /// midnight, so the choice holds from planning to execution.
+    /// midnight, so the choice holds from planning to execution. The price is
+    /// read in tenths (phase 5), so a 2.7 beats a 3.0 by 1.2 tiles.
     pub fn market_by_price(&self, from: TilePos) -> Option<EntityId> {
         let per_coin = self.config.corps.shop_price_tiles;
         self.buildings_of_kind(BuildingKind::Market)
             .iter()
             .filter_map(|&m| {
                 let b = self.comp::<Building>(m).filter(|b| !b.demolished)?;
-                Some((i64::from(b.door.manhattan(from)) + per_coin * self.price_at(m), m))
+                Some((10 * i64::from(b.door.manhattan(from)) + per_coin * self.price_tenths_at(m), m))
             })
             .min()
             .map(|(_, m)| m)
@@ -1257,9 +1264,37 @@ impl World {
         }
     }
 
-    /// One Market's food price (`price_initial` if it has no `Market`).
+    /// One Market's food price (`price_initial` if it has no `Market`): the
+    /// rounded price fines, the fence, theft losses and the UI read.
     pub fn price_at(&self, market: EntityId) -> i64 {
         self.comp::<Market>(market).map_or(self.config.world.price_initial, |m| m.price_food)
+    }
+
+    /// A Market's price in tenths of a coin (`price_food x 10` when it
+    /// carries no fraction).
+    pub fn price_tenths_at(&self, market: EntityId) -> i64 {
+        self.comp::<Market>(market).map_or(self.config.world.price_initial * 10, Market::tenths)
+    }
+
+    /// M11 phase 5: the whole-coin price `agent` pays at `market` today. A
+    /// fractional price rounds up with probability equal to its fraction,
+    /// from a hash of (agent, day, Market): no RNG draw, the same from
+    /// planning to paying within a day, the right mean over many shoppers.
+    /// Exactly `price_at` when the price is whole.
+    pub fn price_for(&self, market: EntityId, agent: EntityId) -> i64 {
+        let t = self.price_tenths_at(market);
+        let (whole, frac) = (t / 10, t % 10);
+        if frac == 0 {
+            return whole.max(1);
+        }
+        let day = self.tick / crate::time::TICKS_PER_DAY;
+        let mut h = (u64::from(agent.index) << 32) ^ day ^ (u64::from(market.index) << 48);
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xff51_afd7_ed55_8ccd);
+        h ^= h >> 33;
+        h = h.wrapping_mul(0xc4ce_b9fe_1a85_ec53);
+        h ^= h >> 33;
+        (whole + i64::from((h % 10) < frac as u64)).max(1)
     }
 
     /// The rounded mean price over every Market: the city-wide reading for
@@ -1767,6 +1802,7 @@ impl World {
         }
         let tick = self.tick;
         let name = self.name_of(id);
+        let child = self.has::<Child>(id);
         // Widowhood is recorded on the Death event, and `on_death` unlinks the pair.
         let spouse = self.spouse_of(id);
         // A dead guard lets their suspect go; a dead suspect frees their guard.
@@ -1829,7 +1865,11 @@ impl World {
             (Some(s), None) => smallvec::smallvec![id, s],
             (None, None) => smallvec::smallvec![id],
         };
-        self.push_event(crate::events::EventKind::Death, &actors, format!("{name} died of {cause:?}"));
+        self.push_event(
+            crate::events::EventKind::Death,
+            &actors,
+            format!("{name} died of {cause:?}{}", if child { " (child)" } else { "" }),
+        );
     }
 
     /// Rebuild a world from its seed and command log: the commands are queued

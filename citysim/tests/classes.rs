@@ -115,14 +115,22 @@ fn test_owning_two_buildings_incorporates() {
     let first = founding::register(&mut w, a).expect("first");
     assert_eq!(count(&w, EventKind::Incorporated), 0, "one building is not a company");
     w.comp_mut::<Brain>(a).expect("b").last_found_day = None;
+    let before = coins(&w, a);
     let second = founding::register(&mut w, a).expect("second");
+    let cost = before - coins(&w, a) - w.purse(Some(w.corps().last().copied().expect("corp")));
     let e = w.events.iter().rev().find(|e| e.kind == EventKind::Incorporated).expect("Incorporated").clone();
     let corp = e.actors[0];
     assert_eq!(e.actors.get(1), Some(&a), "the exec in slot 1");
     let c = w.comp::<Corp>(corp).expect("a corp").clone();
     assert_eq!(c.exec, Some(a));
     assert_eq!(c.slot, None);
-    assert_eq!(c.treasury, 0);
+    // Phase 5: the founder's savings, less a day's exec wage, are the capital.
+    let float = w.config.economy.wage_exec;
+    assert_eq!(coins(&w, a), float, "the founder keeps a day's wage");
+    assert_eq!(c.treasury, before - cost - float, "the rest is the corp's");
+    assert!(cost > 0);
+    let grace = w.config.corps.incorporate_grace_days;
+    assert_eq!(c.upkeep_grace_until, (grace > 0).then(|| w.tick + grace * TICKS_PER_DAY));
     assert!(c.name.ends_with(" Holdings"), "{}", c.name);
     assert_eq!(c.buildings, {
         let mut v = vec![first, second];

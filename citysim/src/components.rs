@@ -741,6 +741,15 @@ pub struct Corp {
     pub loss_log: VecDeque<CorpLoss>,
     #[serde(default)]
     pub negative_since: Option<Tick>,
+    /// M11 phase 5: the treasury at the last midnight close, before that
+    /// night's upkeep: what solvency (`negative_since`) and restocking read,
+    /// so a corp with a day's profit but less than a day's upkeep in the
+    /// bank is not in the red (the upkeep lump is the intra-day trough).
+    #[serde(default)]
+    pub closing: i64,
+    /// M11 phase 5: no upkeep before this tick (a newly incorporated corp).
+    #[serde(default)]
+    pub upkeep_grace_until: Option<Tick>,
     /// Security only: `(client building, until)`, sorted (phase 3).
     #[serde(default)]
     pub contracts: Vec<(EntityId, Tick)>,
@@ -796,6 +805,8 @@ impl Corp {
             cashflow: VecDeque::new(),
             loss_log: VecDeque::new(),
             negative_since: None,
+            closing: treasury,
+            upkeep_grace_until: None,
             contracts: Vec::new(),
             lobby_until: None,
             last_acquisition_tick: None,
@@ -1405,9 +1416,22 @@ pub struct Market {
     pub sales: VecDeque<u32>,
     #[serde(default)]
     pub stock_hist: VecDeque<u32>,
+    /// M11 phase 5: the price in tenths of a coin (`[economy] price_tenths`);
+    /// 0 reads as `price_food x 10` (an old save, the flag off).
+    #[serde(default)]
+    pub price_tenths: i64,
 }
 
 impl Market {
+    /// The price in tenths of a coin.
+    pub fn tenths(&self) -> i64 {
+        if self.price_tenths > 0 {
+            self.price_tenths
+        } else {
+            self.price_food * 10
+        }
+    }
+
     pub fn new(price_food: i64) -> Market {
         Market {
             price_food,
@@ -1415,6 +1439,7 @@ impl Market {
             sales_today: 0,
             sales: VecDeque::new(),
             stock_hist: VecDeque::new(),
+            price_tenths: 0,
         }
     }
 }

@@ -297,33 +297,42 @@ fn test_hostile_bid_never_takes_a_rivals_last_niche_building() {
 
 #[test]
 fn test_breakup_halves_a_monopoly() {
+    // The v1 city's one Market: a split cannot break the monopoly (phase 5).
     let mut w = world();
-    let (food, _, _) = three(&w);
+    let (food, farm_co, _) = three(&w);
     assert!(corps::break_up(&mut w, food).is_err(), "no monopoly without seven days of sales");
     full_sales(&mut w);
     assert!(corps::is_monopoly(&w, food, Niche::Food), "the v1 city's only Market");
-    let before = corp_brain::niche_buildings(&w, food, Niche::Food);
-    assert_eq!(before.len(), 3, "a Farm, the Market, the Bar");
-    w.comp_mut::<Corp>(food).expect("c").treasury = 3000;
-    let total = ownership::total_coins(&w);
-    w.push_command(citysim::PlayerCommand::BreakUp(food));
-    w.run_ticks(1);
-    let spin = w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.name == "FoodCo Spinoff"));
-    let spin = spin.expect("a spinoff");
-    let theirs = corp_brain::niche_buildings(&w, spin, Niche::Food);
-    assert_eq!(theirs, vec![before[1]], "every second niche building, from the second");
-    assert_eq!(corp_brain::niche_buildings(&w, food, Niche::Food), vec![before[0], before[2]]);
-    let sc = w.comp::<Corp>(spin).expect("c");
-    assert_eq!(sc.niches.iter().copied().collect::<Vec<_>>(), vec![Niche::Food]);
-    assert_eq!(sc.level(Niche::Food), 1.0);
-    assert_eq!(count(&w, EventKind::BrokenUp), 1);
-    assert!(ownership::total_coins(&w) == total || w.tick > 0, "the split moves coins");
+    assert!(corps::break_up(&mut w, food).is_err(), "one Market carries the whole share");
     // A corp with no monopoly is refused.
-    let (_, farm_co, _) = three(&w);
     let n = count(&w, EventKind::PlayerActionFailed);
     w.push_command(citysim::PlayerCommand::BreakUp(farm_co));
     w.run_ticks(1);
     assert_eq!(count(&w, EventKind::PlayerActionFailed), n + 1);
+    // The v2 city: Nutrix holds all three Markets.
+    let mut w = v2_world(3);
+    let nutrix = corp_named(&w, "Nutrix");
+    let markets = w.buildings_of_kind(BuildingKind::Market).to_vec();
+    for &m in &markets {
+        corps::move_building(&mut w, m, Some(nutrix));
+    }
+    full_sales(&mut w);
+    assert!(corps::is_monopoly(&w, nutrix, Niche::Food));
+    let farms = ownership::owned_of_kind(&w, Some(nutrix), BuildingKind::Farm);
+    w.comp_mut::<Corp>(nutrix).expect("c").treasury = 3000;
+    let total = ownership::total_coins(&w);
+    w.push_command(citysim::PlayerCommand::BreakUp(nutrix));
+    w.run_ticks(1);
+    let spin = corp_named(&w, "Nutrix Spinoff");
+    assert_eq!(ownership::owned_of_kind(&w, Some(spin), BuildingKind::Market), vec![markets[1]], "the second Market");
+    let spin_farms = ownership::owned_of_kind(&w, Some(spin), BuildingKind::Farm);
+    assert_eq!(spin_farms, farms.iter().copied().skip(1).step_by(2).collect::<Vec<_>>(), "every second Farm");
+    let sc = w.comp::<Corp>(spin).expect("c");
+    assert_eq!(sc.niches.iter().copied().collect::<Vec<_>>(), vec![Niche::Food]);
+    assert_eq!(sc.level(Niche::Food), 1.0);
+    assert_eq!(count(&w, EventKind::BrokenUp), 1);
+    assert!(!corps::is_monopoly(&w, nutrix, Niche::Food), "the share is split with the Markets");
+    assert!(ownership::total_coins(&w) == total || w.tick > 0, "the split moves coins");
 }
 
 #[test]
@@ -370,6 +379,8 @@ fn test_bankruptcy_sells_to_richest_then_city() {
     let r = w.comp::<Corp>(farm_co).expect("c").treasury_ref;
     w.comp_mut::<Corp>(farm_co).expect("c").treasury = r + 450;
     w.comp_mut::<Corp>(home).expect("c").treasury = -500;
+    // D29 as written (the estate rule has its own test): any corp may buy.
+    w.config.corps.estate_niche_only = false;
     let blocks = w.comp::<Corp>(home).expect("c").buildings.clone();
     let exec = w.comp::<Corp>(home).expect("c").exec.expect("exec");
     let greed = w.comp::<Personality>(exec).expect("p").greed;
@@ -404,7 +415,7 @@ fn test_bankruptcy_sells_to_richest_then_city() {
 #[test]
 fn test_monopoly_raises_markup_cap() {
     let mut w = world();
-    // The spec's ceilings (the shipped config lowers both until phase 5).
+    // The spec's ceilings (the shipped config's since phase 5).
     w.config.corps.squeeze_cap = 1.5;
     w.config.corps.monopoly_markup_cap = 2.0;
     let (food, _, _) = three(&w);
@@ -727,4 +738,204 @@ fn test_daily_brain_logs_order_changes_and_keeps_conservation() {
     let now = ownership::total_coins(&w);
     assert!((now - total).abs() < 5000, "coins {total} -> {now}");
     w.check_indices().expect("indices in sync");
+}
+
+// ---------------------------------------------------------------------------
+// M11 phase 5 fix pass (findings 11-18, 24, 26)
+// ---------------------------------------------------------------------------
+
+/// Six clients for a Security corp among other corps' Blocks.
+fn sell_contracts(w: &mut World, seller: EntityId, n: usize) -> Vec<EntityId> {
+    let clients: Vec<EntityId> = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .filter(|&b| w.corp_of_building(b).is_some_and(|c| c != seller))
+        .filter(|&b| w.comp::<Building>(b).is_some_and(|bd| bd.secured_by.is_none()))
+        .take(n)
+        .collect();
+    for &c in &clients {
+        assert!(corps::buy_contract(w, c, seller));
+    }
+    clients
+}
+
+#[test]
+fn test_security_breakup_splits_offices_and_contracts() {
+    let mut w = v2_world(6);
+    let arasaka = corp_named(&w, "Arasaka");
+    let militech = corp_named(&w, "Militech");
+    let office = ownership::owned_of_kind(&w, Some(militech), BuildingKind::SecurityOffice)[0];
+    corps::move_building(&mut w, office, Some(arasaka));
+    // Finding 14: Militech left Security with its last Office.
+    let m = w.comp::<Corp>(militech).expect("c");
+    assert_eq!(m.niches.iter().copied().collect::<Vec<_>>(), vec![Niche::Housing]);
+    assert!(!m.price_level.contains_key(&Niche::Security));
+    sell_contracts(&mut w, arasaka, 8);
+    assert!(corps::is_monopoly(&w, arasaka, Niche::Security));
+    let spin = corps::break_up(&mut w, arasaka).expect("split");
+    let (a, s) = (w.comp::<Corp>(arasaka).expect("c"), w.comp::<Corp>(spin).expect("c"));
+    assert_eq!(s.contracts.len(), 4, "every second contract follows the second Office");
+    assert_eq!(a.contracts.len(), 4);
+    for &(client, _) in &s.contracts {
+        assert_eq!(w.comp::<Building>(client).expect("b").secured_by, Some(spin));
+    }
+    assert!(!corps::is_monopoly(&w, arasaka, Niche::Security), "the share went with the contracts");
+}
+
+#[test]
+fn test_self_contracts_are_no_sale() {
+    let mut w = v2_world(6);
+    let militech = corp_named(&w, "Militech");
+    // Two Offices: room for twelve contracts.
+    let arasaka = corp_named(&w, "Arasaka");
+    let office = ownership::owned_of_kind(&w, Some(arasaka), BuildingKind::SecurityOffice)[0];
+    corps::move_building(&mut w, office, Some(militech));
+    let own: Vec<EntityId> =
+        ownership::owned_of_kind(&w, Some(militech), BuildingKind::Home).into_iter().take(6).collect();
+    for &b in &own {
+        assert!(corps::buy_contract(&mut w, b, militech));
+    }
+    assert!(corp_brain::shares(&w, Niche::Security).is_empty(), "guarding its own Blocks is not a market");
+    let i = corp_brain::gather_inputs(&w, militech).expect("inputs");
+    assert_eq!(i.niches[&Niche::Security].demand, 0.0);
+    sell_contracts(&mut w, militech, 6);
+    assert!(corps::is_monopoly(&w, militech, Niche::Security), "six sold contracts are the market");
+}
+
+#[test]
+fn test_undercut_shock_once_per_drop() {
+    let mut w = world();
+    let (food, farm_co, _) = three(&w);
+    {
+        let c = w.comp_mut::<Corp>(food).expect("c");
+        c.order = CorpOrder::Undercut;
+        c.order_niche = Some(Niche::Food);
+    }
+    w.comp_mut::<Corp>(farm_co).expect("c").share_hist.insert(Niche::Food, std::iter::repeat_n(0.5, 7).collect());
+    corps::daily(&mut w);
+    let undercut =
+        |w: &World| w.comp::<Corp>(farm_co).expect("c").shocks.iter().filter(|s| **s == CorpShock::Undercut).count();
+    assert_eq!(undercut(&w), 1, "the week's drop to 0 appeared today");
+    w.comp_mut::<Corp>(farm_co).expect("c").shocks.clear();
+    corps::daily(&mut w);
+    assert_eq!(undercut(&w), 0, "the same drop is not news the next day");
+}
+
+#[test]
+fn test_hunker_closes_vacancies_down_to_half_staff() {
+    let mut w = world();
+    let (food, _, _) = three(&w);
+    let farm = ownership::owned_of_kind(&w, Some(food), BuildingKind::Farm)[0];
+    let market = ownership::owned_of_kind(&w, Some(food), BuildingKind::Market)[0];
+    let employed = |w: &World, b: EntityId| {
+        w.citizens().into_iter().filter(|&a| w.comp::<Job>(a).and_then(|j| j.employer) == Some(b)).count()
+    };
+    // Every Vat Tech of the Farm gone: it keeps the vacancies back to half.
+    for a in w.citizens() {
+        if w.comp::<Job>(a).and_then(|j| j.employer) == Some(farm) {
+            w.vacate_job(a);
+        }
+    }
+    w.vacancies.insert(market, vec![Role::Clerk; 5]);
+    let half_farm = corp_brain::full_staff(&w, BuildingKind::Farm).div_ceil(2);
+    let half_market = corp_brain::full_staff(&w, BuildingKind::Market).div_ceil(2);
+    let market_staff = employed(&w, market);
+    {
+        let c = w.comp_mut::<Corp>(food).expect("c");
+        c.order = CorpOrder::Hunker;
+        c.order_niche = Some(Niche::Food);
+        c.cashflow.clear();
+    }
+    corp_brain::act(&mut w, food);
+    assert_eq!(w.vacancies.get(&farm).map_or(0, Vec::len), half_farm, "an empty Farm hires back to half");
+    assert_eq!(
+        w.vacancies.get(&market).map_or(0, Vec::len),
+        half_market.saturating_sub(market_staff),
+        "closed at once, no week of losses needed"
+    );
+}
+
+#[test]
+fn test_corp_wide_order_survives_a_niche_change() {
+    let mut w = v2_world(6);
+    let vatra = corp_named(&w, "Vatra");
+    let nutrix = corp_named(&w, "Nutrix");
+    {
+        let c = w.comp_mut::<Corp>(vatra).expect("c");
+        c.order = CorpOrder::Secure;
+        c.order_niche = Some(Niche::Food);
+    }
+    for b in corp_brain::niche_buildings(&w, vatra, Niche::Food) {
+        corps::move_building(&mut w, b, Some(nutrix));
+    }
+    let c = w.comp::<Corp>(vatra).expect("c");
+    assert_eq!(c.niches.iter().copied().collect::<Vec<_>>(), vec![Niche::Housing]);
+    assert_eq!((c.order, c.order_niche), (CorpOrder::Secure, Some(Niche::Housing)), "re-pointed, not dropped");
+    // The standing corp-wide order matches its score in any niche.
+    let scores = vec![citysim::CorpOrderScore {
+        order: CorpOrder::Secure,
+        niche: Niche::Housing,
+        score: 0.5,
+        considerations: Vec::new(),
+    }];
+    assert_eq!(corp_brain::choose(&scores, (CorpOrder::Secure, Some(Niche::Food)), 0.1), None);
+    // Nutrix took a second niche with Vatra's buildings? No: they were Food.
+    // A third niche is never added (spec: one or two).
+    let militech = corp_named(&w, "Militech");
+    let block = ownership::owned_of_kind(&w, Some(militech), BuildingKind::Home)[0];
+    corps::move_building(&mut w, block, Some(nutrix));
+    let office = ownership::owned_of_kind(&w, Some(militech), BuildingKind::SecurityOffice)[0];
+    corps::move_building(&mut w, office, Some(nutrix));
+    let n = w.comp::<Corp>(nutrix).expect("c");
+    assert_eq!(n.niches.iter().copied().collect::<Vec<_>>(), vec![Niche::Food, Niche::Housing]);
+}
+
+#[test]
+fn test_estate_rule_niche_share_and_buyer_cap() {
+    let mut w = world();
+    let (food, farm_co, home) = three(&w);
+    w.config.corps.estate_buyer_cap = 3;
+    for a in w.citizens() {
+        if let Some(wl) = w.comp_mut::<Wallet>(a) {
+            wl.coins = wl.coins.min(100);
+        }
+    }
+    for c in [food, farm_co] {
+        w.comp_mut::<Corp>(c).expect("c").treasury = 100_000;
+    }
+    let rich: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| w.has::<Brain>(a) && citysim::systems::demography::is_adult(&w, a))
+        .take(2)
+        .collect();
+    w.comp_mut::<Wallet>(rich[0]).expect("w").coins = 10_000;
+    w.comp_mut::<Wallet>(rich[1]).expect("w").coins = 5_000;
+    let blocks = w.comp::<Corp>(home).expect("c").buildings.clone();
+    corps::bankrupt(&mut w, home);
+    let owned = |w: &World, o: EntityId| blocks.iter().filter(|&&b| w.owner_of(b) == Some(o)).count();
+    assert_eq!(owned(&w, food) + owned(&w, farm_co), 0, "Food corps do not buy Blocks");
+    assert_eq!(owned(&w, rich[0]), 3, "one buyer, at most the cap");
+    assert_eq!(owned(&w, rich[1]), 3);
+    let city = blocks.iter().filter(|&&b| w.owner_of(b).is_none()).count();
+    assert_eq!(city, blocks.len() - 6, "the rest to the city");
+}
+
+#[test]
+fn test_bankrupt_farm_is_staffed_by_its_new_owner() {
+    let mut w = world();
+    let (_, farm_co, _) = three(&w);
+    let farm = ownership::owned_of_kind(&w, Some(farm_co), BuildingKind::Farm)[0];
+    // Its unpaid Vat Techs walked out and the vacancies were closed.
+    for a in w.citizens() {
+        if w.comp::<Job>(a).and_then(|j| j.employer) == Some(farm) {
+            w.vacate_job(a);
+        }
+    }
+    w.vacancies.remove(&farm);
+    corps::bankrupt(&mut w, farm_co);
+    assert_ne!(w.owner_of(farm), Some(farm_co));
+    let full = corp_brain::full_staff(&w, BuildingKind::Farm);
+    assert_eq!(w.vacancies.get(&farm).map_or(0, Vec::len), full, "the new owner posts every job");
 }

@@ -96,7 +96,7 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
-            let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_at(m));
+            let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
             if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price)) {
                 return true;
             }
@@ -147,7 +147,7 @@ pub fn considerations(
     let mood = world.comp::<crate::components::Mood>(id).map_or(0.0, |m| m.value);
     let phase = world.phase();
     let tod = world.tick_of_day();
-    let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_at(m));
+    let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
     let mm = mood_mult(mood, goal);
 
     let mut flat = 0.0;

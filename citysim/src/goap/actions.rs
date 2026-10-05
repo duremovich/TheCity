@@ -462,7 +462,7 @@ impl PlanCtx {
             warehouse_stock: stock_of(BuildingKind::Warehouse),
             farm_stock: farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food),
             coins: world.comp::<Wallet>(agent).map_or(0, |w| w.coins),
-            price: market.map_or(1, |m| world.price_at(m)).max(1),
+            price: market.map_or(1, |m| world.price_for(m, agent)).max(1),
             food_unstolen: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.food > i.stolen_food),
             market_free: market
                 .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food)))

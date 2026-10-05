@@ -372,7 +372,11 @@ fn test_restock_capped_by_owner_purse() {
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
     let wholesale = w.config.corps.wholesale;
     w.comp_mut::<Building>(market).expect("m").stock_food = 0;
-    w.comp_mut::<Corp>(food).expect("corp").treasury = 50 * wholesale;
+    // The restock reads the closing balance (phase 5): the treasury before
+    // tonight's upkeep, which `ownership::run` records.
+    let c = w.comp_mut::<Corp>(food).expect("corp");
+    c.treasury = 50 * wholesale;
+    c.closing = 50 * wholesale;
     let t0 = treasury(&w);
     economy::run(&mut w); // tick 0: restock, price, spoilage
     assert_eq!(w.comp::<Building>(market).expect("m").stock_food, 50, "50 units is all FoodCo could pay for");
@@ -426,8 +430,14 @@ fn test_upkeep_can_push_corp_negative_and_sets_negative_since() {
     ownership::run(&mut w);
     let c = w.comp::<Corp>(food).expect("corp");
     assert!(c.treasury < 0, "upkeep is charged in full: {}", c.treasury);
-    assert_eq!(c.negative_since, Some(0));
+    assert_eq!(c.closing, 10, "the books closed before the upkeep");
+    assert_eq!(c.negative_since, None, "solvent at the close: the upkeep lump is no day in the red");
     assert!(treasury(&w) > t0);
+    // In the red at the close: the clock starts.
+    w.comp_mut::<Corp>(food).expect("corp").treasury = -10;
+    w.tick += TICKS_PER_DAY;
+    ownership::run(&mut w);
+    assert_eq!(w.comp::<Corp>(food).expect("corp").negative_since, Some(TICKS_PER_DAY));
     w.comp_mut::<Corp>(food).expect("corp").treasury = 100_000;
     w.tick += TICKS_PER_DAY;
     ownership::run(&mut w);
@@ -534,4 +544,190 @@ fn test_owner_death_passes_buildings_to_heir() {
     w.remove_agent(o2); // emigration
     assert_eq!(w.owner_of(b2), None, "nobody left: the city");
     assert_eq!(w.events.iter().filter(|e| e.kind == EventKind::Acquired).count(), 2);
+}
+
+// ---------------------------------------------------------------------------
+// M11 phase 5 fix pass (findings 2, 4-9, 29)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_zero_rent_and_lost_home_clear_arrears() {
+    let mut w = world();
+    let (a, _, _, _) = two_tenants(&mut w);
+    midnight(&mut w);
+    midnight(&mut w);
+    assert_eq!(w.comp::<Household>(a).expect("h").arrears, 1);
+    // A rent cap of 0: what was owed is forgiven, the arrears end.
+    w.levers.rent_cap = Some(0);
+    midnight(&mut w);
+    let h = w.comp::<Household>(a).expect("h");
+    assert_eq!((h.arrears, h.rent_due), (0, 0.0), "rent 0 forgives the debt");
+    // A Home lost any way (DemolishHome) ends its rent and arrears.
+    w.levers.rent_cap = None;
+    w.comp_mut::<Household>(a).expect("h").arrears = 3;
+    w.comp_mut::<Household>(a).expect("h").rent_due = 4.0;
+    w.set_home(a, None);
+    let h = w.comp::<Household>(a).expect("h");
+    assert_eq!((h.arrears, h.rent_due), (0, 0.0), "a homeless adult owes no rent and can be re-housed");
+}
+
+#[test]
+fn test_owner_in_own_home_pays_no_rent() {
+    let mut w = world();
+    let (a, h1, _, _) = two_tenants(&mut w);
+    ownership::transfer_building(&mut w, h1, Some(a));
+    for _ in 0..4 {
+        midnight(&mut w);
+    }
+    let h = w.comp::<Household>(a).expect("h");
+    assert_eq!((h.arrears, h.rent_due), (0, 0.0), "no rent to oneself, no arrears, never evicted");
+    assert_eq!(events(&w, EventKind::RentShort, a), 0);
+    assert_eq!(w.comp::<Household>(a).expect("h").home, Some(h1));
+}
+
+#[test]
+fn test_wage_and_tax_capped_together_by_corp_purse() {
+    let mut w = world();
+    let (food, _) = corps(&w);
+    let farmer = w
+        .workers(Role::Farmer)
+        .iter()
+        .copied()
+        .find(|&f| w.comp::<Job>(f).and_then(|j| j.employer).and_then(|e| w.owner_of(e)) == Some(food))
+        .expect("a FoodCo farmer");
+    w.levers.tax_rate = 0.5;
+    w.comp_mut::<Corp>(food).expect("corp").treasury = 5;
+    let j = w.comp_mut::<Job>(farmer).expect("job");
+    j.wage_per_day = 6;
+    j.days_unpaid = 1;
+    j.tax_accum = 0.0;
+    let (c0, t0) = (coins(&w, farmer), treasury(&w));
+    economy::collect_wage(&mut w, farmer);
+    // 5 coins cover 5 of the 6 gross: tax 2.5 -> 2 to the Treasury, 3 net.
+    assert_eq!(w.purse(Some(food)), 0, "the corp paid what it had");
+    assert_eq!(coins(&w, farmer) - c0, 3);
+    assert_eq!(treasury(&w) - t0, 2, "the Treasury got the tax on what was paid, not shorted");
+    let j = w.comp::<Job>(farmer).expect("job");
+    assert!((j.tax_accum - 0.5).abs() < 1e-6, "only the paid gross accrues tax: {}", j.tax_accum);
+    assert_eq!(j.days_unpaid, 1, "the unpaid coin is a day still owed");
+}
+
+#[test]
+fn test_refund_reverses_the_tax_exactly() {
+    let mut w = world();
+    let (food, _) = corps(&w);
+    let buyer = jobless_adult(&w, &[]);
+    set_coins(&mut w, buyer, 30);
+    w.tax_accum.insert(food, 0.9);
+    let (b0, f0, t0) = (coins(&w, buyer), w.purse(Some(food)), treasury(&w));
+    let paid = ownership::pay(&mut w, Some(buyer), Some(food), 3, ownership::Flow::Food);
+    assert_eq!(treasury(&w) - t0, 1, "0.9 + 0.15 withheld a whole coin");
+    ownership::refund(&mut w, buyer, Some(food), paid, ownership::Flow::Food);
+    assert_eq!((coins(&w, buyer), w.purse(Some(food)), treasury(&w)), (b0, f0, t0), "everyone where they started");
+    assert!((w.tax_accum[&food] - 0.9).abs() < 1e-5);
+}
+
+#[test]
+fn test_rehouse_uses_each_home_capacity() {
+    let mut w = world();
+    let (a, _, _, _) = two_tenants(&mut w);
+    w.set_home(a, None);
+    set_coins(&mut w, a, 1000);
+    let homes = w.buildings_of_kind(BuildingKind::Home).to_vec();
+    for &h in &homes {
+        let n = w.residents_of(h).len() as u8;
+        w.comp_mut::<Building>(h).expect("b").capacity = n;
+    }
+    midnight(&mut w);
+    assert_eq!(w.comp::<Household>(a).expect("h").home, None, "every Home is full at its own capacity");
+    let roomy = homes[5];
+    let n = w.residents_of(roomy).len() as u8;
+    w.comp_mut::<Building>(roomy).expect("b").capacity = n + 4;
+    midnight(&mut w);
+    assert_eq!(w.comp::<Household>(a).expect("h").home, Some(roomy));
+}
+
+#[test]
+fn test_tax_remainder_of_gone_payee_dropped() {
+    let mut w = world();
+    let ghost = w.spawn();
+    w.tax_accum.insert(ghost, 0.7);
+    let (food, _) = corps(&w);
+    w.tax_accum.insert(food, 0.3);
+    midnight(&mut w);
+    assert!(!w.tax_accum.contains_key(&ghost), "a despawned payee leaves the save");
+    assert!(w.tax_accum.contains_key(&food));
+}
+
+#[test]
+fn test_full_day_of_flows_conserves_coins() {
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(3 * TICKS_PER_DAY);
+    assert_eq!(w.tick_of_day(), 0);
+    let mut before = ownership::total_coins(&w);
+    // Midnight: rent, upkeep (closing balance), exec wages; restock and price.
+    ownership::run(&mut w);
+    economy::run(&mut w);
+    // A purchase at every Market (with tenths), the first refunded.
+    let markets = w.buildings_of_kind(BuildingKind::Market).to_vec();
+    let mut shoppers = Vec::new();
+    for &m in &markets {
+        let a = jobless_adult(&w, &shoppers);
+        shoppers.push(a);
+        before += 50 - coins(&w, a);
+        set_coins(&mut w, a, 50);
+        let paid = economy::pay_for_food(&mut w, a, Some(m), 3);
+        assert!(paid > 0);
+        if m == markets[0] {
+            economy::refund_food(&mut w, a, Some(m), paid);
+        } else {
+            assert!(economy::take_food(&mut w, a, Some(m), 3, paid));
+        }
+    }
+    // A drink, a wage with tax, a haul that overflows into the Reserve.
+    if let Some(bar) = w.buildings_of_kind(BuildingKind::Bar).first().copied() {
+        let d = jobless_adult(&w, &shoppers);
+        before += 10 - coins(&w, d);
+        set_coins(&mut w, d, 10);
+        w.leave_building(d);
+        w.enter_building(d, bar);
+        citysim::exec::actions::on_start(&mut w, d, ActionKind::Drink, None);
+    }
+    let worker = w
+        .workers(Role::Farmer)
+        .iter()
+        .copied()
+        .find(|&f| w.comp::<Job>(f).and_then(|j| j.employer).and_then(|e| w.owner_of(e)).is_some())
+        .expect("a corp farmer");
+    w.comp_mut::<Job>(worker).expect("job").days_unpaid = 3;
+    economy::collect_wage(&mut w, worker);
+    let farm = w.comp::<Job>(worker).and_then(|j| j.employer).expect("farm");
+    w.comp_mut::<Building>(farm).expect("farm").stock_food = 400;
+    for m in &markets {
+        w.comp_mut::<Building>(*m).expect("m").stock_food = 2000;
+    }
+    let overflow0 = w.stats.current.flow_overflow;
+    assert!(economy::haul(&mut w, farm) > 0);
+    assert!(w.stats.current.flow_overflow > overflow0, "the Market was full: the Reserve bought the haul");
+    assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+}
+
+#[test]
+fn test_evictee_waits_on_the_street() {
+    let mut w = world();
+    w.config.rent.rehouse_wait_days = 3;
+    let (a, _, _, _) = two_tenants(&mut w);
+    let evict_days = w.config.rent.evict_days;
+    for _ in 0..=evict_days {
+        midnight(&mut w);
+    }
+    assert_eq!(events(&w, EventKind::Evicted, a), 1);
+    set_coins(&mut w, a, 1000);
+    for night in 0..2 {
+        midnight(&mut w);
+        assert_eq!(w.comp::<Household>(a).expect("h").home, None, "night {night} on the street");
+        assert_ne!(citysim::systems::classes::class_of(&w, a), citysim::Class::Street, "homeless: a Dreg (or Corp)");
+    }
+    midnight(&mut w);
+    assert!(w.comp::<Household>(a).expect("h").home.is_some(), "re-housed once the wait is over");
 }

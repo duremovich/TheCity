@@ -220,6 +220,13 @@ pub struct EconomyCfg {
     /// M11 D27: an exec's daily draw from their corp.
     #[serde(default = "default_wage_exec")]
     pub wage_exec: i64,
+    /// M11 phase 5: a corp-owned Market's price carries tenths (`base x
+    /// level`): each shopper pays a whole coin, rounded up with probability
+    /// equal to the fraction from a hash of (agent, day, Market), so a 0.9
+    /// Undercut on price 3 is 2.7 on average. Identical at level 1.0; off
+    /// (`false`) is the integer `round(base x level)` of phase 3.
+    #[serde(default)]
+    pub price_tenths: bool,
 }
 
 fn default_wage_exec() -> i64 {
@@ -453,6 +460,9 @@ pub struct DemographyCfg {
     pub old_age_p_per_day: f64,
     pub emigrate_mood: f32,
     pub emigrate_days: u32,
+    /// M11 phase 5: a child whose Home pantry is empty eats from the Reserve.
+    #[serde(default)]
+    pub school_meals: bool,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -575,6 +585,10 @@ pub struct RentCfg {
     /// midnight. Phase 2 measurement: see `assets/config.toml`.
     #[serde(default)]
     pub pay_from_income: bool,
+    /// M11 phase 5: an evictee sleeps rough this many days before any owner
+    /// takes them in (0 = re-housed the same night).
+    #[serde(default)]
+    pub rehouse_wait_days: u64,
 }
 
 impl RentCfg {
@@ -589,6 +603,7 @@ impl RentCfg {
             refuse_days: 30,
             sump_spoilage_mult: 1.0,
             pay_from_income: false,
+            rehouse_wait_days: 0,
         }
     }
 }
@@ -705,6 +720,22 @@ pub struct CorpsCfg {
     pub megacorp: Vec<bool>,
     pub outside_treasury_initial: i64,
     pub order_flat: CorpOrderFlatCfg,
+    /// M11 phase 5 (estate rule): a bankruptcy estate skips corps whose share
+    /// of the building's niche is at or above this.
+    pub estate_share_cap: f32,
+    /// M11 phase 5 (estate rule): an estate's building goes only to corps
+    /// already in its niche (agents may still buy).
+    pub estate_niche_only: bool,
+    /// M11 phase 5 (estate rule): one buyer takes at most this many buildings
+    /// of one estate (0 = no cap).
+    pub estate_buyer_cap: usize,
+    /// M11 phase 5: a newly incorporated corp pays no upkeep for this many days.
+    pub incorporate_grace_days: u64,
+    /// Hunker never lays off Farm staff (phase 3 follow-up).
+    pub hunker_spares_farms: bool,
+    /// M11 phase 5: Housing Grow builds only when the corp's own Blocks are
+    /// at least this full (0 = no gate).
+    pub grow_min_occupancy: f32,
 }
 
 impl Default for CorpsCfg {
@@ -743,7 +774,8 @@ impl CorpsCfg {
             bar_owner_count: 0,
             upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: [3; 3], security_office: 60 },
             value: ValueCfg { farm: 1000, market: 1000, security_office: 500 },
-            shop_price_tiles: 12,
+            // A pre-M11 save (and v1_profile) shops at the nearest Market.
+            shop_price_tiles: 0,
             grow_cooldown_days: 7,
             secure_per_day: 2,
             private_pursuit_radius: 16,
@@ -753,6 +785,12 @@ impl CorpsCfg {
             hoard_tilt: 0.1,
             megacorp: Vec::new(),
             outside_treasury_initial: 100_000,
+            estate_share_cap: 0.5,
+            estate_niche_only: true,
+            estate_buyer_cap: 0,
+            incorporate_grace_days: 0,
+            hunker_spares_farms: true,
+            grow_min_occupancy: 0.0,
             order_flat: CorpOrderFlatCfg {
                 grow: 0.0,
                 squeeze: 0.0,
@@ -929,6 +967,13 @@ impl Config {
         self.world.coins_by_tier = [1.0, 1.0, 1.0];
         self.classes.couple_immigration = false;
         self.classes.dreg_emigrate_days = 0;
+        // M11 phase 5 recalibrated the 2,000 city's dole, tax, school meals and
+        // prices; the v1 gates and unit tests keep the v1 economy.
+        self.levers.dole_per_day = 3;
+        self.levers.tax_rate = 0.05;
+        self.demography.school_meals = false;
+        self.economy.price_tenths = false;
+        self.rent.rehouse_wait_days = 0;
         self
     }
 
@@ -947,7 +992,12 @@ impl Config {
         // M11: the calibration city stays city-owned and rent-free with equal
         // wallets, so the table measures behaviour, not one seed's landlords.
         c.rent.base = [0, 0, 0];
+        // The real city shops by price (D15); keep that walk, not the
+        // corp-free default's nearest Market. The dole, tax and school
+        // meals stay the 2,000 city's.
+        let tiles = c.corps.shop_price_tiles;
         c.corps = CorpsCfg::none();
+        c.corps.shop_price_tiles = tiles;
         c.world.coins_by_tier = [1.0, 1.0, 1.0];
         // M11 phase 4: no class coupling (immigration at the lever, no Dreg
         // emigration), as v1_profile.

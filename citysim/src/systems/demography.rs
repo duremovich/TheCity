@@ -121,6 +121,8 @@ fn children_of(world: &World, home: EntityId) -> Vec<EntityId> {
 fn children(world: &mut World) {
     let homes = world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
     let mut starved = Vec::new();
+    let school = world.config.demography.school_meals;
+    let reserve = world.building_of_kind(BuildingKind::Warehouse);
     for home in homes {
         let kids = children_of(world, home);
         if kids.is_empty() {
@@ -140,6 +142,10 @@ fn children(world: &mut World) {
             }
             fed
         };
+        // M11 phase 5: school meals. A child whose pantry is empty eats from
+        // the Reserve (children ate only from the pantry and the dole is per
+        // adult: ~70 child starvation deaths in 120 days on seeds 42-44).
+        let fed = fed || (school && school_meal(world, home, reserve));
         for k in kids {
             let Some(c) = world.comp_mut::<Child>(k) else { continue };
             if fed {
@@ -155,6 +161,23 @@ fn children(world: &mut World) {
     for k in starved {
         world.kill(k, DeathCause::Starvation);
     }
+}
+
+/// Pay a Home's whole child-food debt from the Reserve; false when it cannot.
+fn school_meal(world: &mut World, home: EntityId, reserve: Option<EntityId>) -> bool {
+    let Some(r) = reserve else { return false };
+    let want = world.comp::<Building>(home).map_or(0, |b| b.child_food_debt.floor() as u32);
+    let have = world.comp::<Building>(r).map_or(0, |b| b.stock_food);
+    if want == 0 || have < want {
+        return false;
+    }
+    if let Some(b) = world.comp_mut::<Building>(r) {
+        b.stock_food -= want;
+    }
+    if let Some(b) = world.comp_mut::<Building>(home) {
+        b.child_food_debt -= want as f32;
+    }
+    true
 }
 
 /// Spouse pairs aged 18–45 in the same Home with intimacy >= 0.6 roll for a

@@ -244,17 +244,25 @@ pub fn charge(world: &mut World, from: Option<EntityId>, to: Option<EntityId>, a
 }
 
 /// Undo a `pay(agent -> owner, amount, flow)` (a purchase whose stock was
-/// gone): the owner returns its share and the Treasury the tax it took on
-/// such an amount. Conserves coins; the owner may dip below zero.
+/// gone): the owner returns its share and the Treasury the tax it took. The
+/// tax comes back through the payee's accumulator (`withhold` run
+/// backwards), so the owner and the Treasury end where they started, not a
+/// coin of rounding apart. Conserves coins; the owner may dip below zero.
 pub fn refund(world: &mut World, agent: EntityId, owner: Option<EntityId>, amount: i64, flow: Flow) {
     if amount <= 0 || owner == Some(agent) {
         return;
     }
     ledger(world, flow, -amount);
-    let tax = if flow.taxed() && owner.is_some() {
-        ((amount as f32 * world.levers.tax_rate).floor() as i64).clamp(0, amount)
-    } else {
-        0
+    let rate = world.levers.tax_rate;
+    let tax = match owner {
+        Some(payee) if flow.taxed() && rate > 0.0 => {
+            let acc = world.tax_accum.entry(payee).or_insert(0.0);
+            *acc -= amount as f32 * rate;
+            let back = if *acc < 0.0 { ((-*acc).ceil() as i64).clamp(0, amount) } else { 0 };
+            *acc += back as f32;
+            back
+        }
+        _ => 0,
     };
     world.purse_add(owner, -(amount - tax));
     if tax > 0 {
@@ -633,6 +641,24 @@ pub fn rent_for(world: &World, home: EntityId) -> i64 {
     world.levers.rent_cap.map_or(rent, |cap| rent.min(cap.max(0)))
 }
 
+/// A Home's rent in tenths of a coin: what accrues (`rent_due` is
+/// fractional). With `[economy] price_tenths` a corp's Housing level keeps
+/// its fraction (Squeeze to 1.2 on a Mid Block is 2.4 a day, an Undercut to
+/// 0.9 is 1.8, where `rent_for` rounds both back to 2); otherwise `rent_for`
+/// x 10.
+pub fn rent_tenths_for(world: &World, home: EntityId) -> i64 {
+    let whole = rent_for(world, home) * 10;
+    if !world.config.economy.price_tenths {
+        return whole;
+    }
+    let Some(b) = world.comp::<Building>(home).filter(|b| !b.demolished) else { return 0 };
+    let OwnerKind::Corp(c) = owner_kind(world, b.owner) else { return whole };
+    let base = world.config.rent.base[usize::from(b.tier.min(2))];
+    let level = world.comp::<Corp>(c).map_or(1.0, |c| c.level(Niche::Housing));
+    let t = ((level * base as f32 * 10.0).round() as i64).max(0);
+    world.levers.rent_cap.map_or(t, |cap| t.min(cap.max(0) * 10))
+}
+
 /// D7: the owner's eviction threshold.
 fn evict_days(world: &World, owner: Option<EntityId>) -> u8 {
     owner
@@ -647,18 +673,26 @@ pub fn run(world: &mut World) {
         return;
     }
     let rents: Vec<(EntityId, i64)> =
-        world.buildings_of_kind(BuildingKind::Home).iter().map(|&h| (h, rent_for(world, h))).collect();
-    for &(h, r) in &rents {
+        world.buildings_of_kind(BuildingKind::Home).iter().map(|&h| (h, rent_tenths_for(world, h))).collect();
+    for &(h, _) in &rents {
+        let r = rent_for(world, h);
         if let Some(b) = world.comp_mut::<Building>(h) {
             b.rent_per_day = r;
         }
     }
     // Under v1_profile and in a pre-M11 save every rent is 0: no rent, no
-    // evictions, no re-housing (M9 behaviour).
+    // evictions, no re-housing (M9 behaviour). The rent pass still runs: a
+    // rent cap of 0 forgives what was owed.
+    collect_rent(world, &rents);
     if rents.iter().any(|&(_, r)| r > 0) {
-        collect_rent(world, &rents);
         evictions(world);
         rehouse(world);
+    }
+    // Phase 5: the books close before the upkeep lump (`Corp.closing`).
+    for c in world.corps() {
+        if let Some(cc) = world.comp_mut::<Corp>(c) {
+            cc.closing = cc.treasury;
+        }
     }
     upkeep(world);
     exec_wages(world);
@@ -671,9 +705,26 @@ pub fn run(world: &mut World) {
 
 /// Settle the rent already due, then accrue today's share: a coin that falls
 /// due at midnight has the whole next day (and its wage or dole, when
-/// `[rent] pay_from_income`) to be paid before it counts as arrears.
+/// `[rent] pay_from_income`) to be paid before it counts as arrears. `rents`
+/// are in tenths (`rent_tenths_for`). A Home whose rent is 0 forgives what
+/// its residents owe (a rent cap or `SetCityRent` to 0 left arrears that
+/// never decayed); an owner living in their own Home pays nobody.
 fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
     for &(home, rent) in rents {
+        let owner = world.owner_of(home);
+        if rent <= 0 || owner.is_some_and(|o| world.residents_of(home).contains(&o)) {
+            let free: Vec<EntityId> =
+                world.residents_of(home).iter().copied().filter(|&a| rent <= 0 || Some(a) == owner).collect();
+            for a in free {
+                if let Some(h) = world.comp_mut::<Household>(a) {
+                    h.rent_due = 0.0;
+                    h.arrears = 0;
+                }
+            }
+            if rent <= 0 {
+                continue;
+            }
+        }
         let adults: Vec<EntityId> = world
             .residents_of(home)
             .iter()
@@ -683,8 +734,8 @@ fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
         if adults.is_empty() {
             continue;
         }
-        let share = rent as f32 / adults.len() as f32;
-        for a in adults {
+        let share = rent as f32 / 10.0 / adults.len() as f32;
+        for a in adults.into_iter().filter(|&a| Some(a) != owner) {
             settle_rent(world, a, home, true);
             if let Some(h) = world.comp_mut::<Household>(a) {
                 h.rent_paid_7d -= h.rent_paid_7d / 7;
@@ -702,6 +753,20 @@ fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
 fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
     let Some(due) = world.comp::<Household>(a).map(|h| h.rent_due.floor() as i64) else { return };
     if due < 1 {
+        // Not a whole coin owed: not in arrears.
+        if midnight {
+            if let Some(h) = world.comp_mut::<Household>(a) {
+                h.arrears = 0;
+            }
+        }
+        return;
+    }
+    // An owner housed in their own Home (an heir, a founder) owes nobody.
+    if world.owner_of(home) == Some(a) {
+        if let Some(h) = world.comp_mut::<Household>(a) {
+            h.rent_due = 0.0;
+            h.arrears = 0;
+        }
         return;
     }
     let owner = world.owner_of(home);
@@ -848,25 +913,34 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
 /// Homeless adults move in where they can pay `rehouse_coins_mult × rent`,
 /// nearest door first, with a homeless spouse and their homeless children.
 fn rehouse(world: &mut World) {
-    let cap = usize::from(world.config.buildings.home.capacity);
     let mult = world.config.rent.rehouse_coins_mult;
     let refuse = world.config.rent.refuse_days * TICKS_PER_DAY;
+    let wait = world.config.rent.rehouse_wait_days * TICKS_PER_DAY;
     let tick = world.tick;
+    // Phase 5: an evictee sleeps rough `rehouse_wait_days` before anyone
+    // takes them in (re-housing was the same night, so no Dreg ever existed).
+    let waiting = |w: &World, a: EntityId| {
+        wait > 0 && w.comp::<Household>(a).and_then(|h| h.evicted_by).is_some_and(|(_, t)| tick < t + wait)
+    };
     let homeless: Vec<EntityId> = world
         // scan-ok: daily: re-housing
         .citizens()
         .into_iter()
         .filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none() && h.arrears == 0))
+        .filter(|&a| !waiting(world, a))
         .filter(|&a| world.comp::<Brain>(a).is_some_and(|b| !b.emigrating))
         .filter(|&a| !world.has::<Sentence>(a) && crate::systems::demography::is_adult(world, a))
         .collect();
     if homeless.is_empty() {
         return;
     }
-    let homes: Vec<(EntityId, crate::components::TilePos, Option<EntityId>)> = world
+    // Each Home's own capacity (a built Home's is its interior's).
+    let homes: Vec<(EntityId, crate::components::TilePos, Option<EntityId>, usize)> = world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
-        .filter_map(|&h| world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (h, b.door, b.owner)))
+        .filter_map(|&h| {
+            world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (h, b.door, b.owner, usize::from(b.capacity)))
+        })
         .collect();
     for a in homeless {
         // Housed already, as someone's spouse, earlier in this pass.
@@ -886,12 +960,12 @@ fn rehouse(world: &mut World) {
         let from = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
         let pick = homes
             .iter()
-            .filter(|&&(h, _, owner)| {
+            .filter(|&&(h, _, owner, cap)| {
                 world.residents_of(h).len() + need <= cap
                     && coins >= mult * rent_for(world, h)
                     && refused_by.is_none_or(|(o, _)| o != owner)
             })
-            .map(|&(h, d, _)| (d.manhattan(from), h))
+            .map(|&(h, d, _, _)| (d.manhattan(from), h))
             .min();
         let Some((_, home)) = pick else { continue };
         let movers: Vec<EntityId> = std::iter::once(a).chain(spouse).collect();
@@ -926,6 +1000,10 @@ fn upkeep(world: &mut World) {
         };
         let cost = up.for_building(kind, tier);
         if owner.is_none() || cost <= 0 {
+            continue;
+        }
+        let now = world.tick;
+        if owner.and_then(|o| world.comp::<Corp>(o)).and_then(|c| c.upkeep_grace_until).is_some_and(|t| now < t) {
             continue;
         }
         charge(world, owner, None, cost, Flow::Upkeep);
@@ -996,8 +1074,18 @@ fn bar_vacancies(world: &mut World) {
     }
 }
 
-/// Revenue, cashflow and loss windows; `negative_since`.
+/// Revenue, cashflow and loss windows; `negative_since`; the tax remainders
+/// of payees that are gone (they leaked into the save).
 fn rolls(world: &mut World) {
+    let gone: Vec<EntityId> = world
+        .tax_accum
+        .keys()
+        .copied()
+        .filter(|&p| !(world.has::<Corp>(p) || world.has::<Gang>(p) || world.has::<Wallet>(p)))
+        .collect();
+    for p in gone {
+        world.tax_accum.remove(&p);
+    }
     for b in world.with::<Building>() {
         if let Some(bd) = world.comp_mut::<Building>(b) {
             if bd.revenue_today == 0 && bd.revenue.is_empty() {
@@ -1024,7 +1112,9 @@ fn rolls(world: &mut World) {
         while cc.cashflow.len() > CASHFLOW_DAYS {
             cc.cashflow.pop_front();
         }
-        if cc.treasury < 0 {
+        // In the red at the close, before the upkeep lump (phase 5; was
+        // after it, the intra-day trough).
+        if cc.closing < 0 {
             cc.negative_since.get_or_insert(now);
         } else {
             cc.negative_since = None;

@@ -56,6 +56,11 @@ struct RunArgs {
     /// Print every event as `tick<TAB>kind<TAB>text` to stderr.
     #[arg(long)]
     events: bool,
+    /// With `--events`: a daily `Diag` line per Market (owner, price in
+    /// tenths, yesterday's sales, stock) and per corp (treasury, closing,
+    /// buildings, niches, levels, order, sold contracts).
+    #[arg(long)]
+    diag: bool,
     /// Schedule a lever: `day=<D>:<lever>=<value>`. Repeatable.
     #[arg(long = "lever", value_name = "SPEC")]
     levers: Vec<String>,
@@ -337,6 +342,9 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             save_if_due(&world)?;
         }
+        if args.diag && args.events && world.tick % TICKS_PER_DAY == 0 {
+            print_diag(&world);
+        }
         let secs = day_start.elapsed().as_secs_f32().max(1e-9);
         if args.report && world.tick % TICKS_PER_DAY == 0 {
             if let Some(row) = world.stats.history.back_mut() {
@@ -346,6 +354,36 @@ fn run(args: RunArgs) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+/// `--diag`: one `Diag` event line per Market and per corp at the day's start.
+fn print_diag(world: &World) {
+    let tick = world.tick;
+    for &m in world.buildings_of_kind(citysim::BuildingKind::Market) {
+        let owner = world.owner_label(world.owner_of(m));
+        let sold = world.comp::<citysim::Market>(m).and_then(|mk| mk.sales.back().copied()).unwrap_or(0);
+        let stock = world.comp::<citysim::Building>(m).map_or(0, |b| b.stock_food);
+        eprintln!(
+            "{tick}	Diag	market {} owner={owner} tenths={} sold={sold} stock={stock}",
+            m.index,
+            world.price_tenths_at(m)
+        );
+    }
+    for c in world.corps() {
+        let Some(cc) = world.comp::<citysim::Corp>(c) else { continue };
+        let niches: Vec<String> = cc.niches.iter().map(|n| format!("{n}:{:.2}", cc.level(*n))).collect();
+        let sold = citysim::systems::corp_brain::sold_contracts(world, cc, c);
+        eprintln!(
+            "{tick}	Diag	corp {} treasury={} closing={} buildings={} niches={} order={:?} contracts={sold}/{}",
+            cc.name.replace(' ', "_"),
+            cc.treasury,
+            cc.closing,
+            cc.buildings.len(),
+            niches.join(","),
+            cc.order,
+            cc.contracts.len()
+        );
+    }
 }
 
 /// Which of the five Statistical outcomes an executor state counts toward.
@@ -369,7 +407,7 @@ fn exec_category(exec: &citysim::ExecState, night: bool) -> usize {
 
 /// Below the Full Earn goal's savings line (`SAVINGS_DAYS` meals of coins).
 fn below_savings(world: &World, id: citysim::EntityId) -> bool {
-    let price = world.local(id, citysim::BuildingKind::Market).map_or(1, |m| world.price_at(m));
+    let price = world.local(id, citysim::BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
     world
         .comp::<citysim::Wallet>(id)
         .is_some_and(|w| w.coins < citysim::goap::world_state::SAVINGS_DAYS.saturating_mul(price))

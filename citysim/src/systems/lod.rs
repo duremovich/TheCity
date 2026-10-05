@@ -643,7 +643,7 @@ fn stat_eat(world: &mut World, id: EntityId) {
     }
     let Some((market, stock, price)) = world
         .local(id, BuildingKind::Market)
-        .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food, world.price_at(m))))
+        .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food, world.price_for(m, id))))
     else {
         return;
     };
@@ -719,7 +719,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
         // broke Full agent collects on ~97 % of days, and each day a broke
         // Statistical agent lost the lottery became a desperation theft.
         let day = world.day();
-        let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_at(m));
+        let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
         let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
         let saving = coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price);
         let undecided = world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day != Some(day));

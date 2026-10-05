@@ -126,6 +126,11 @@ restock_batch = 1200
 build_home_cost = 200
 # M11 D27: an exec's daily draw from their corp.
 wage_exec = 10
+# M11 phase 5: a corp's Food level keeps its tenths (Undercut 0.9 x 3 = 2.7, each shopper pays 2 or 3
+# from a hash, no RNG draw; identical at level 1.0). Rounded to whole coins, Undercut and a 1.15
+# Squeeze never moved a price and so never moved a customer (diagnosis: Nutrix Squeeze to 4.5 took its
+# daily sales 760 -> 157 once the fraction was kept). Fines, the fence and the UI read the rounded price.
+price_tenths = true
 
 [crime]
 steal_base_cost = 8.0
@@ -269,6 +274,10 @@ old_age_days = 10800
 old_age_p_per_day = 0.01
 emigrate_mood = -0.8
 emigrate_days = 7
+# M11 phase 5: a child whose Home pantry is empty eats from the Reserve. Children ate only from the
+# pantry and the dole is per adult, so the poor's children starved (~70 deaths in 120 days on seeds 42,
+# 43, 44 at HEAD; 0 with school meals in the diagnosis).
+school_meals = true
 
 [brain]
 memory_cap = 24
@@ -343,11 +352,20 @@ lawfulness_power = 0.0
 # steal and join gangs, and the bodies that buys sank throughput under the 8,000 gate. A Sump Block
 # is rent-free (a Dreg on the dole can afford tier 0); the dole at 4 with [1, 2, 4] also held theft
 # at 2,808 but cost the Treasury 500 a day. Phase 3 note: Squeeze cannot raise a 0 base.
-base = [0, 1, 2]
+# M11 phase 5: back to the spec's [1, 2, 4] now that the dole has a coin of slack ([levers] dole 4):
+# rent no longer comes out of the one meal the dole bought, Squeeze can raise a Sump rent, and the
+# landlords are solvent against upkeep.home [0, 1, 2] (diagnosis: evictions 6-18 per 120 days).
+base = [1, 2, 4]
 evict_days = 7
-rehouse_coins_mult = 3   # a homeless adult moves in with coins >= 3 x the Home's rent
+# M11 phase 5: 3 -> 7, a week's rent up front. At 3 an evictee on the dole had the 3 coins for a Sump
+# Block the next day, so the street lasted exactly the re-housing wait (Dregs 0-5 a day on seeds 42-44).
+rehouse_coins_mult = 7
 refuse_days = 30
 sump_spoilage_mult = 1.5 # tier-0 pantries spoil this much faster
+# M11 phase 5: an evictee sleeps rough this many days before any owner takes them in. Re-housing was
+# the same night, so no Dreg ever existed and Dreg emigration and Dreg unrest never ran; the street is
+# a rung of the ladder (the survival loop), not a formality.
+rehouse_wait_days = 3
 # M11 phase 2 (seed 42, 2,000): with rent taken only from what is left at midnight, the 89 % on the
 # 3-coin dole (price 3) reach midnight with 0 coins once their opening savings are gone (mean 12 at
 # day 4, 2 at day 24): 600 adults were short every night and 118 were evicted on day 25 alone, against
@@ -387,17 +405,21 @@ incorporate_buildings = 2         # an agent owning this many becomes a corp
 # by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
 found_cost = { bar = 200, home = 400 }
 wholesale = 2                      # coins per unit Farm → Market when owners differ
-contract_per_guard_day = 10
+# M11 phase 5: 10 -> 20, with upkeep.security_office 30 -> 10. A Security corp costs its Office's
+# upkeep, six guards' wages (48) and its exec (10) a day, ~88 at the old sizes against 6-10 a contract
+# (Undercut races both to the 0.6 floor): Arasaka could not live on any number of clients it could
+# get and died near day 75 on every seed. Now 68 a day: break-even at 3.4 contracts at level 1.0 and
+# 5.7 at the floor.
+contract_per_guard_day = 20
 security_guards = 6
 lobby_min_treasury = 400
-# M11 phase 3: both Squeeze ceilings 1.15 (spec: 2.0 with a monopoly, 1.5 without). The dole is one
-# meal at price 3, so any Food markup that rounds 3 up to 4 is a skipped meal for every dole agent:
-# with the spec caps a Food monopoly squeezing in Winter (seed 42, days 99-119) ran thefts to 3,800
-# per 10 days and failed the M10 gate (6.1k ticks/s, save 41.9 MB). At 1.15 a Squeeze is invisible at
-# price 3 and still bites a short shelf (4 -> 5) and a contract (10 -> 12). Phase 5 recalibrates the
-# dole and the rent tiers and should lift these back toward the spec.
-monopoly_markup_cap = 1.15         # price_level ceiling with a monopoly
-squeeze_cap = 1.15                 # price_level ceiling without a monopoly
+# M11 phase 3 set both Squeeze ceilings to 1.15 (spec: 2.0 with a monopoly, 1.5 without): the dole
+# was one meal at price 3, so any Food markup that rounded 3 up to 4 was a skipped meal for every dole
+# agent, and a Winter Food monopoly at the spec caps ran thefts to 3,800 per 10 days. M11 phase 5: the
+# dole is 4 (a coin of slack), prices keep their tenths and customers walk to a cheaper Market, so the
+# spec caps are back.
+monopoly_markup_cap = 2.0          # price_level ceiling with a monopoly
+squeeze_cap = 1.5                  # price_level ceiling without a monopoly
 # --- M11 plan additions (decisions D4, D11, D15, D17-D25, D28, D33, D41, D48) ---
 bar_owner_count = 2
 # D4: the Treasury's return flow. M11 phase 2, from the ledger columns over 120 days (seed 42, 2,000):
@@ -414,7 +436,8 @@ bar_owner_count = 2
 # Stackwell and Militech: 40 each) go bankrupt by arithmetic, not by play. Upkeep now matches the
 # tier's base rent: a free Sump Block costs its owner nothing. Corp Block upkeep goes from 300 to
 # 260 a day (Habitat's 60 Spire Blocks now pay 2).
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 30 }
+# M11 phase 5: security_office 30 -> 10 (see contract_per_guard_day).
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10 }
 value = { farm = 1000, market = 1000, security_office = 500 }                    # D28
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
@@ -429,6 +452,24 @@ residents_per_bar = 300            # D25
 hoard_tilt = 0.0
 megacorp = [false, false, false, false, false, false, true, true]  # D41
 outside_treasury_initial = 100000
+# M11 phase 5, the estate rule (diagnosis item 24): a bankruptcy estate's building goes only to a corp
+# already in its niche holding under half of it (Nutrix, a Food corp, bought 60 Blocks of a dead
+# landlord; the richest corp swallowed every estate), and one buyer takes at most estate_buyer_cap
+# buildings of one estate (one agent bought 41 and incorporated a landlord overnight).
+estate_share_cap = 0.5
+estate_niche_only = true
+estate_buyer_cap = 12
+# M11 phase 5: an incorporated corp starts with its founder's savings (less a day's exec wage) and pays
+# no upkeep for 14 days; at treasury 0 Varley Holdings went bankrupt under upkeep 12 days after it
+# incorporated.
+incorporate_grace_days = 14
+# Phase 3 follow-up: Hunker never lays off a Farm's Vat Techs. Phase 5 measured it (config.toml note
+# below at hunker_spares_farms' value).
+hunker_spares_farms = true
+# M11 phase 5: a Housing corp builds a Block only when its own Blocks are 90 % full. With rent back at
+# [1, 2, 4] every landlord was in profit and Grow won on 83 % occupancy: 53 corp Blocks on seed 42 by
+# day ~90, every Lot gone, three NPC foundings.
+grow_min_occupancy = 0.9
 
 [corps.order_flat]                 # D48
 # M11 phase 3 (seed 42, 2,000, 120 days): at 0 every landlord took Grow on day 0 (occupancy ~0.83
@@ -446,14 +487,19 @@ undercut = 0.0
 acquire = -0.2
 secure = 0.0
 hunker = 0.15
-lobby = 0.0
+# M11 phase 5: 0 -> 0.2. With the economy solvent the corps are richer, so losses / treasury is small
+# and Secure (Logistic{8, 0.1} on losses) always outbid Lobby: no corp lobbied on seed 42.
+lobby = 0.2
 
 # M11 classes (docs/M11_OWNERSHIP.md § 7; plan D34-D36).
 [classes]
 # M11 phase 4: 0.6 -> 0.42. Seed 42: Street unrest runs 0.30-0.46 after day 0 (mean 0.36; fear from
 # the patrols holds submission near 0.65), so 0.6 never struck; 0.44 struck once (day 4), 0.42 four
 # times in the first month (the 7-day lockout binds), none once unrest eases after day 30.
-strike_threshold = 0.42
+# M11 phase 5: 0.42 -> 0.45. With rent [1, 2, 4] Street unrest runs 0.27-0.51 (mean 0.38-0.41 on
+# seeds 42-44): at 0.42 the city struck 6-15 times in 120 days (every week the lockout allowed), at
+# 0.46 0-1 times.
+strike_threshold = 0.45
 strike_cooldown_days = 7
 fear_radius = 6
 fear_hours_full = 1.0          # guard-hours a day near your Home that read as full fear
@@ -466,7 +512,11 @@ evicted_recruit_days = 14
 evicted_recruit_lawfulness = 0.5
 
 [levers]
-tax_rate = 0.05
+# M11 phase 5: 0.05 -> 0.12 pays for the dole's fourth coin. At 0.10 (the diagnosis's value) the
+# Treasury fell 34k -> 1-5k by day 90 on seeds 42-44 (the dole is ~5,900 a day, Farm overflow ~1,700,
+# against upkeep ~5,100, restock ~1,300 and tax ~950) once the corps stopped paying the city 400 a
+# Block for Lots (grow_min_occupancy), and a second Spring would have broken it.
+tax_rate = 0.12
 sentence_mult = 1.0
 # M10 (2,000 residents): v1 10 and 2. The daily reconcile fires down to the lever, so it must match
 # [world.jobs] guard.
@@ -474,4 +524,8 @@ guard_count = 36
 immigration_per_week = 13
 # 3 = one meal at price 3; the unemployed need ~1.2 meals a day, so some go hungry, and the hungry
 # poor steal (M3's point). At 4 nobody ever steals.
-dole_per_day = 3
+# M11 phase 5: 3 -> 4. With rent back at [1, 2, 4] every coin of rent or markup taken from a dole
+# agent was a skipped meal and a theft by arithmetic (thefts 6.7 per 100 agent-days on seed 42); one
+# coin of slack halves them (3.2) and leaves need and lawfulness to decide who steals. v1_profile keeps
+# 3 (the v1 gates' thefts 2.62 -> 1.22 at 4).
+dole_per_day = 4

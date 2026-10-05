@@ -101,19 +101,35 @@ pub fn end_contract(world: &mut World, client: EntityId, why: &str) {
     world.push_event(EventKind::Contract, &[seller, client], text);
 }
 
+/// The most niches a corp holds (spec § 5: one or two).
+pub const MAX_NICHES: usize = 2;
+
 /// D30 plus the Office rule: a building changes hands; a Security Office
 /// takes its seller's contracts along when the seller has no other office.
-/// A corp buying outside its niches gains the niche (at level 1.0).
+/// A corp buying outside its niches gains the niche (at level 1.0) while it
+/// holds fewer than two; a seller left with no building in a niche leaves
+/// it (a stale niche kept a rival's price and a third niche in play), and
+/// a standing order in it is re-pointed. The new owner staffs the building
+/// up to full (phase 5: a bankrupt corp's unpaid Vat Techs had walked out,
+/// and nobody re-posted their jobs, so its Farms stopped and Winter starved).
 pub fn move_building(world: &mut World, b: EntityId, to: Option<EntityId>) {
     let Some((kind, from)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.owner)) else { return };
     ownership::transfer_building(world, b, to);
-    if let (Some(n), Some(t)) = (corp_brain::niche_of_kind(kind), to) {
+    let niche = corp_brain::niche_of_kind(kind);
+    if let (Some(n), Some(t)) = (niche, to) {
         if let Some(c) = world.comp_mut::<Corp>(t) {
-            if c.niches.insert(n) {
+            if !c.niches.contains(&n) && c.niches.len() < MAX_NICHES {
+                c.niches.insert(n);
                 c.price_level.entry(n).or_insert(1.0);
             }
         }
     }
+    if let (Some(n), Some(f)) = (niche, from.filter(|&f| world.has::<Corp>(f))) {
+        if corp_brain::niche_buildings(world, f, n).is_empty() {
+            prune_niche(world, f, n);
+        }
+    }
+    staff_moved(world, b, kind);
     if kind != BuildingKind::SecurityOffice {
         return;
     }
@@ -145,6 +161,46 @@ pub fn move_building(world: &mut World, b: EntityId, to: Option<EntityId>) {
     }
 }
 
+/// A corp leaves a niche it no longer holds a building in (never its last).
+fn prune_niche(world: &mut World, corp: EntityId, n: Niche) {
+    let Some(c) = world.comp_mut::<Corp>(corp) else { return };
+    if c.niches.len() < 2 || !c.niches.remove(&n) {
+        return;
+    }
+    c.price_level.remove(&n);
+    c.share_hist.remove(&n);
+    if c.order_niche == Some(n) {
+        let first = c.niches.iter().next().copied();
+        if matches!(c.order, CorpOrder::Secure | CorpOrder::Hunker | CorpOrder::Lobby) {
+            // A corp-wide order is scored in the first niche (D47).
+            c.order_niche = first;
+        } else {
+            if c.order == CorpOrder::Squeeze {
+                c.wage_mult = 1.0;
+                c.evict_days_override = None;
+            }
+            c.order = CorpOrder::Hunker;
+            c.order_niche = first;
+        }
+    }
+}
+
+/// Top a building that changed hands up to full staff: its open vacancies
+/// stay with it (D30) and the new owner posts the rest.
+fn staff_moved(world: &mut World, b: EntityId, kind: BuildingKind) {
+    let Some(role) = ownership::role_for(kind) else { return };
+    let full = corp_brain::full_staff(world, kind);
+    let employed = world
+        .workers(role)
+        .iter()
+        .filter(|&&a| world.comp::<crate::components::Job>(a).is_some_and(|j| j.employer == Some(b)))
+        .count();
+    let open = world.vacancies.get(&b).map_or(0, |v| v.len());
+    if employed + open < full {
+        world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, full - employed - open));
+    }
+}
+
 /// `buyer` pays `price` for `building` (`Flow::Sale`) and takes it, with its
 /// employees, vacancies and contract (D30). `Acquired` event with `why`.
 pub fn acquire(world: &mut World, buyer: EntityId, building: EntityId, price: i64, why: &str) -> bool {
@@ -171,7 +227,11 @@ pub fn acquire(world: &mut World, buyer: EntityId, building: EntityId, price: i6
 /// D29: a corp in the red for `bankrupt_days` (or with nothing left) sells
 /// every building, ascending, to the highest purse among the other corps
 /// and living agents that can pay its value, else to the city at half; the
-/// estate settles and the corp is dissolved.
+/// estate settles and the corp is dissolved. Phase 5 estate rule: a corp
+/// buys only in a niche it is already in and holds under `estate_share_cap`
+/// of (Nutrix bought 60 Blocks; the richest corp swallowed every estate),
+/// and nobody takes more than `estate_buyer_cap` buildings of one estate
+/// (one agent bought 41).
 pub fn bankrupt(world: &mut World, corp: EntityId) {
     let Some((name, treasury, buildings, exec)) =
         world.comp::<Corp>(corp).map(|c| (c.name.clone(), c.treasury, c.buildings.clone(), c.exec))
@@ -190,7 +250,8 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
     // agent its wallet, a corp what it holds above its reserve
     // (`treasury_ref`: a corp does not empty its own treasury for a fire
     // sale; the richest corp bought every Sump Block in the city and starved
-    // its Farms). Updated as they buy.
+    // its Farms). Updated as they buy. A deviation from D29's "highest
+    // purse", kept on purpose.
     let mut buyers: Vec<(i64, EntityId)> = world
         .corps()
         .into_iter()
@@ -198,14 +259,28 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
         .filter_map(|c| world.comp::<Corp>(c).map(|cc| (cc.treasury - cc.treasury_ref, c)))
         .collect();
     buyers.extend(corp_brain::wallets(world));
+    let cfg = world.config.corps.clone();
+    let shares: BTreeMap<Niche, BTreeMap<EntityId, f32>> =
+        Niche::ALL.into_iter().map(|n| (n, corp_brain::shares(world, n))).collect();
+    let mut taken: BTreeMap<EntityId, usize> = BTreeMap::new();
     for b in buildings {
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
         let v = ownership::value(world, kind);
+        let niche = corp_brain::niche_of_kind(kind);
+        let barred = |id: EntityId| {
+            if cfg.estate_buyer_cap > 0 && taken.get(&id).is_some_and(|&k| k >= cfg.estate_buyer_cap) {
+                return true;
+            }
+            let Some(c) = world.comp::<Corp>(id) else { return false };
+            let Some(n) = niche else { return false };
+            (cfg.estate_niche_only && !c.niches.contains(&n))
+                || shares.get(&n).and_then(|m| m.get(&id)).is_some_and(|&s| s >= cfg.estate_share_cap)
+        };
         let pick = if v > 0 {
             buyers
                 .iter()
                 .enumerate()
-                .filter(|(_, &(p, _))| p >= v)
+                .filter(|(_, &(p, id))| p >= v && !barred(id))
                 .max_by(|a, b| a.1 .0.cmp(&b.1 .0).then(b.1 .1.cmp(&a.1 .1)))
                 .map(|(k, &(_, id))| (k, id))
         } else {
@@ -216,6 +291,7 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
             Some((k, buyer)) => {
                 ownership::pay(world, Some(buyer), Some(corp), v, Flow::Sale);
                 buyers[k].0 -= v;
+                *taken.entry(buyer).or_default() += 1;
                 move_building(world, b, Some(buyer));
                 let text = format!("{} bought {what} from bankrupt {name} for {v}", world.owner_label(Some(buyer)));
                 world.push_event(EventKind::Acquired, &[buyer, corp, b], text);
@@ -246,7 +322,10 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
 /// Settle the estate and despawn: a positive balance goes to the exec (else
 /// the city), a negative one is absorbed by the Treasury; the corp's sold
 /// contracts end, a lobby hold naming it lapses, anything still owned goes
-/// to the city.
+/// to the city. Why the Treasury, uncapped: a corp goes below zero only
+/// through `charge`, whose payee is the Treasury (upkeep, restock): the
+/// overdraft is coins the city was credited and never received, so writing
+/// it back conserves money (the corp's debt was to the city).
 pub fn dissolve(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let (left, clients, exec) = (c.buildings.clone(), c.contracts.clone(), c.exec);
@@ -281,10 +360,28 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
     let Some(niche) = niches.iter().copied().find(|&n| is_monopoly(world, corp, n)) else {
         return Err(format!("{name} is not a monopoly anywhere"));
     };
-    let moved: Vec<EntityId> = corp_brain::niche_buildings(world, corp, niche).into_iter().skip(1).step_by(2).collect();
-    if moved.is_empty() {
-        return Err(format!("{name} has one {niche} building; nothing to split"));
+    // Split each kind (every second one, from the second), so the spinoff
+    // takes half of what carries the share: Markets for Food (a lone Market
+    // stayed with the parent when the Farms sorted first), Offices for
+    // Security (and half the contracts with them: moved Offices took none),
+    // Blocks for Housing.
+    let carrier = match niche {
+        Niche::Food => BuildingKind::Market,
+        Niche::Housing => BuildingKind::Home,
+        Niche::Security => BuildingKind::SecurityOffice,
+    };
+    let all = corp_brain::niche_buildings(world, corp, niche);
+    let of_kind = |k: BuildingKind| -> Vec<EntityId> {
+        all.iter().copied().filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.kind == k)).collect()
+    };
+    if of_kind(carrier).len() < 2 {
+        return Err(format!("{name} has one {}; a split cannot break the {niche} monopoly", carrier.label()));
     }
+    let mut moved: Vec<EntityId> = Vec::new();
+    for &k in corp_brain::niche_kinds(niche) {
+        moved.extend(of_kind(k).into_iter().skip(1).step_by(2));
+    }
+    moved.sort();
     // The second-greediest adult employee who is nobody's exec (ties lower id).
     let buildings: Vec<EntityId> = world.comp::<Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default();
     let execs: Vec<EntityId> =
@@ -314,6 +411,31 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
     }
     for &b in &moved {
         move_building(world, b, Some(spinoff));
+    }
+    if niche == Niche::Security {
+        // Every second contract (by client) follows the Offices, up to room.
+        let contracts = world.comp::<Corp>(corp).map(|c| c.contracts.clone()).unwrap_or_default();
+        let room = capacity(world, spinoff);
+        let shift: Vec<(EntityId, crate::time::Tick)> = contracts
+            .into_iter()
+            .filter(|&(client, _)| world.owner_of(client) != Some(corp))
+            .skip(1)
+            .step_by(2)
+            .take(room)
+            .collect();
+        for &(client, until) in &shift {
+            if let Some(c) = world.comp_mut::<Corp>(corp) {
+                c.contracts.retain(|&(b, _)| b != client);
+            }
+            if let Some(s) = world.comp_mut::<Corp>(spinoff) {
+                if let Err(i) = s.contracts.binary_search_by_key(&client, |&(b, _)| b) {
+                    s.contracts.insert(i, (client, until));
+                }
+            }
+            if let Some(cb) = world.comp_mut::<Building>(client) {
+                cb.secured_by = Some(spinoff);
+            }
+        }
     }
     world.push_event(
         EventKind::BrokenUp,
@@ -416,8 +538,15 @@ fn roll_shares(world: &mut World) {
             continue;
         };
         for r in corp_brain::rivals_in(world, c, n) {
+            // Only the day the week's drop first reaches 0.1: pushed every
+            // day it lasted, a 0.3 shock was always pending and any Robbed
+            // shock forced a rescore with no hysteresis.
             let fell = world.comp::<Corp>(r).and_then(|rc| rc.share_hist.get(&n)).is_some_and(|h| {
-                h.len() >= 2 && h.front().copied().unwrap_or(0.0) - h.back().copied().unwrap_or(0.0) >= 0.1
+                let len = h.len();
+                let front = h.front().copied().unwrap_or(0.0);
+                let now = h.back().copied().unwrap_or(0.0);
+                let before = if len >= 3 { h[len - 2] } else { front };
+                len >= 2 && front - now >= 0.1 && front - before < 0.1
             });
             if fell {
                 corp_brain::push_shock(world, r, CorpShock::Undercut);
