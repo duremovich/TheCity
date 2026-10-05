@@ -360,3 +360,10 @@ Folded into the sketches above rather than a milestone of their own:
 - **Inventory** (M13): capacity from gear (backpacks) and strength; storage and safe houses beyond it.
 - **Loot** (M13/M16): the Wallet and gear stay on the Corpse until taken; a `Loot` goal for scavengers and the desperate; a body is a contested target settled by the fight rules; allies hold a `Guard the body` goal, the start of a revenge chain.
 - **Wounded and rescue** (M16 combat): a `Wounded` state between standing and dead; a `Rescue` goal gated by a faction temperament trait (scavs abandon, corps and the law recover, gangs by loyalty); a `Clinic` kind that sells treatment (the M13 Ripperdoc is one); Trauma Team as a Security-niche contract on a person, located by the subscriber's last sighting.
+
+## Addendum 9 (2026-10-05, Dylan): money, scrip, energy, water
+
+- **Scrip** (M15 reputation, M17 outside ledger): one base currency plus corp-issued scrip accepted only by the issuer's shops and landlords, paid as wages, valued by the issuer's reputation and treasury; a collapse wipes savings; conversion is a fixer's business. Not floating exchange rates.
+- **Power** (the goods milestone after M14; M12–M14 consumers): a good from generators by tier (fusion, solar rigs, a city grid), consumed by security tiers, ICE, chrome and vehicles; grid dependence vs self-generation as a faction decision; cutting power cripples security.
+- **Water** (the goods milestone): a Farm input and a need; wells, desalination, shipments; scarce in the Sump.
+- **Data** stays the M14 faction resource, not money.
