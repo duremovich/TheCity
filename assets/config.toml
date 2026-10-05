@@ -175,7 +175,8 @@ sacked_days = 3
 shock_severity_rethink = 0.5
 # M9: this many members (at most half the gang, newest first, rotating daily) sleep at the Hideout
 # each night, so a raid meets defenders. In M8 every raid found the Hideout empty and sacked it.
-night_watch = 2
+# 4 (was 2): after phases 2-4 changed who is jailed or mustering, 2 left every seed-42 raid a sack (0 of 5 met a defender); 4 meets 3 of 5.
+night_watch = 4
 # M9 breakouts (docs/M9_LAW.md): a cooldown of their own, the fit headcount needed to try, and how
 # many convicts one breach frees. The boss sitting inside doubles the pull (a consideration, not a flat).
 breakout_cooldown_days = 15

@@ -279,7 +279,7 @@ pub struct GangsCfg {
 
 impl GangsCfg {
     fn default_night_watch() -> usize {
-        2
+        4
     }
     fn default_breakout_cooldown_days() -> u64 {
         15

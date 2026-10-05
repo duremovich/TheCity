@@ -269,3 +269,82 @@ fn test_m8_factions_seed_42() {
     assert!(starvation <= 30, "{starvation} starvation deaths");
     assert!((200..=400).contains(&w.population()), "population {}", w.population());
 }
+
+/// M9 gate: the law as a third faction. Seed 42, 120 days: a breakout, a
+/// jailbreak, postures that move, a Garrison after the jailbreak, raids that
+/// meet defenders. Bribes are reported, not asserted. `#[ignore]`: ~20 s.
+#[test]
+#[ignore]
+fn test_m9_law_seed_42() {
+    use citysim::EventKind;
+    let mut w = World::new(42, Config::load());
+    let (mut breakouts, mut breaches, mut jailbreaks, mut postures, mut bribes) = (0u32, 0u32, 0u32, 0u32, 0u32);
+    let (mut raids, mut defended, mut sacked, mut assaults) = (0u32, 0u32, 0u32, 0u32);
+    let (mut crackdown_days, mut crackdown_held) = (0u32, false);
+    let (mut first_jailbreak_day, mut garrison_days_after) = (None::<u32>, Vec::<u32>::new());
+    let mut seen = 0;
+    for day in 0..120u32 {
+        w.run_ticks(TICKS_PER_DAY);
+        for e in w.events.iter().filter(|e| e.tick >= seen) {
+            match e.kind {
+                EventKind::OrderChanged if e.text.contains("-> BreakOut") => breakouts += 1,
+                EventKind::Jailbreak => {
+                    jailbreaks += 1;
+                    first_jailbreak_day.get_or_insert(day);
+                }
+                EventKind::Posture => {
+                    postures += 1;
+                    if e.text.contains("-> Garrison") {
+                        garrison_days_after.push(day);
+                    }
+                }
+                EventKind::Bribe => bribes += 1,
+                EventKind::Raid if e.text.contains("stormed the Jail") => breaches += 1,
+                EventKind::Raid if e.text.contains(" raided ") => {
+                    raids += 1;
+                    if e.text.contains("Sacked") {
+                        sacked += 1;
+                    }
+                    let defenders = e
+                        .text
+                        .split(" raiders vs ")
+                        .nth(1)
+                        .and_then(|s| s.split_whitespace().next())
+                        .and_then(|n| n.parse::<u32>().ok())
+                        .unwrap_or(0);
+                    if defenders >= 1 {
+                        defended += 1;
+                    }
+                }
+                EventKind::Assault | EventKind::Murder => assaults += 1,
+                _ => {}
+            }
+        }
+        seen = w.tick;
+        if w.law().is_some_and(|l| l.posture == citysim::Posture::Crackdown) {
+            crackdown_days += 1;
+            crackdown_held = true;
+        }
+    }
+    let starvation: u32 = w.stats.history.iter().map(|r| r.deaths_starvation).sum();
+    eprintln!(
+        "jailbreaks {jailbreaks} breakouts {breakouts} breaches {breaches} posture changes {postures} crackdown {crackdown_days}/120 days bribes {bribes} raids {raids} defended {defended} sacked {sacked} assaults/day {:.2} starvation {starvation} pop {}",
+        assaults as f32 / 120.0,
+        w.population()
+    );
+    assert!(breakouts >= 1, "no BreakOut order issued");
+    assert!(breaches >= 1, "no breach resolved");
+    assert!(jailbreaks >= 1, "no Jailbreak");
+    assert!(postures >= 1, "the law never changed posture");
+    assert!(crackdown_held, "Crackdown never held");
+    let jb = first_jailbreak_day.expect("jailbreak");
+    assert!(
+        garrison_days_after.iter().any(|&d| d == jb || d == jb + 1),
+        "no Garrison after the first jailbreak (day {jb}): {garrison_days_after:?}"
+    );
+    assert!(defended >= 1, "no raid met a defender");
+    assert!(sacked < raids, "every raid was a sack ({sacked}/{raids})");
+    assert!(assaults as f32 / 120.0 <= 6.4, "{} assaults/day", assaults as f32 / 120.0);
+    assert!(starvation <= 30, "{starvation} starvation deaths");
+    assert!((200..=400).contains(&w.population()), "population {}", w.population());
+}
