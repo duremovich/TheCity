@@ -17,3 +17,6 @@ python tools/compare_runs.py a.csv b.csv
   Street unrest outside 0.2-0.7 and no Dregs for 30+ days running.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.
+- `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`):
+  fits the 24-row table, a coarse extended table and 2-layer MLPs on `calibrate --rows-csv` agent-hours,
+  prints losses, calibration and held-out regimes, and exports `stat_mlp.toml`.

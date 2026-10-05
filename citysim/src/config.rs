@@ -524,6 +524,15 @@ pub struct LodCfg {
     /// at use (D26); the parity test pins it to 1.0.
     #[serde(default = "default_stat_violence_mult")]
     pub stat_violence_mult: f32,
+    /// Experiment: the Statistical tier's policy, `"table"` (the calibrated
+    /// 24-row table) or `"mlp"` (`assets/stat_mlp.toml`; see
+    /// `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`).
+    #[serde(default = "default_stat_policy")]
+    pub policy: String,
+}
+
+fn default_stat_policy() -> String {
+    "table".to_string()
 }
 
 fn default_trace_days() -> usize {

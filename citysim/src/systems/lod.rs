@@ -287,11 +287,15 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
 
 /// The agent's table row: the current phase, and its lawfulness and hunger
 /// at the start of the hour (before the hour's decay), as `calibrate` buckets.
+/// Under `[lod] policy = "mlp"` the learned policy's row instead
+/// (`systems::stat_policy`); the draws are the same either way.
 fn stat_row(world: &World, id: EntityId) -> Option<StatRow> {
+    use crate::systems::stat_policy::{MlpPolicy, StatPolicy, TablePolicy};
     let t = world.stat_table.as_ref()?;
-    let lawfulness = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
-    let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
-    Some(t.row(world.phase(), lawfulness, hunger).numbers())
+    Some(match world.stat_mlp.as_ref() {
+        Some(m) => MlpPolicy(m).row(world, id),
+        None => TablePolicy(t).row(world, id),
+    })
 }
 
 /// Statistical agents whose hourly slot is this tick: `id.index % 60 == tick % 60`.

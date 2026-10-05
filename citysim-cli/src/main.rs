@@ -86,6 +86,10 @@ struct RunArgs {
     /// configured one (ignored with `--load`).
     #[arg(long)]
     v1_profile: bool,
+    /// The Statistical tier's policy, overriding `[lod] policy`: `table` or
+    /// `mlp` (experiment; ignored with `--load`).
+    #[arg(long, value_name = "POLICY")]
+    stat_policy: Option<String>,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -126,6 +130,9 @@ struct CalibrateArgs {
     /// Cities run (seeds 1000, 1001, ...), tallied together.
     #[arg(long, default_value_t = 3)]
     seeds: u64,
+    /// The first seed (`--rows-csv` runs split the seeds over processes).
+    #[arg(long, default_value_t = 1000)]
+    first_seed: u64,
     /// Print each city's day-end health (price, Treasury, stocks, thefts).
     #[arg(long)]
     health: bool,
@@ -133,6 +140,11 @@ struct CalibrateArgs {
     /// on the 256 x 192 map they starve the city and cut its crime threefold.
     #[arg(long)]
     straight_lines: bool,
+    /// Also write one CSV row per Full agent-hour (the extended features at
+    /// the hour's start, the outcome and the rolls that fired): the training
+    /// data of the learned-policy experiment (`systems::stat_policy`).
+    #[arg(long, value_name = "FILE")]
+    rows_csv: Option<PathBuf>,
 }
 
 /// A scheduled lever: a ready command, or a god command naming a gang by its
@@ -350,6 +362,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     if let Some(m) = &args.map {
         config.world.map = map_path(m)?;
     }
+    if let Some(p) = &args.stat_policy {
+        config.lod.policy = p.clone();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -514,6 +529,8 @@ struct HourTally {
     /// Chats begun this hour, and those with a housemate (`p_chat_home`).
     chats: u16,
     chats_home: u16,
+    /// `stat_policy::features` at the hour's start (`--rows-csv` only).
+    features: Option<[f32; citysim::systems::stat_policy::N_FEATURES]>,
 }
 
 /// Build a Full-only world (seed 1000, straight-line walks, gangless, the
@@ -553,6 +570,25 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let (mut dole_days, mut dole_taken) = (0u64, 0u64);
     // Every Theft, every Arrest, and the arrests of a thief (`p_theft_caught`).
     let (mut thefts_all, mut arrests, mut theft_arrests) = (0u64, 0u64, 0u64);
+    let with_rows = args.rows_csv.is_some();
+    let mut rows_out = match &args.rows_csv {
+        Some(path) => {
+            use std::io::Write;
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+            }
+            let f = std::fs::File::create(path).map_err(|e| format!("{}: {e}", path.display()))?;
+            let mut w = std::io::BufWriter::new(f);
+            let names = citysim::systems::stat_policy::FEATURE_NAMES.join(",");
+            writeln!(
+                w,
+                "seed,tick,agent,row,{names},outcome,courting,steal,flirt,robbed,assaulted,killed,met,chats,chats_home"
+            )
+            .map_err(|e| e.to_string())?;
+            Some(w)
+        }
+        None => None,
+    };
     let open_hour = |world: &World, hour: &mut BTreeMap<citysim::EntityId, HourTally>| {
         hour.clear();
         for id in world.citizens() {
@@ -562,9 +598,10 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
             let hunger = world.comp::<Needs>(id).map_or(1.0, |n| n.hunger);
             let courting = citysim::systems::social::known_candidate(world, id, 0.3).is_some();
+            let features = with_rows.then(|| citysim::systems::stat_policy::features(world, id));
             hour.insert(
                 id,
-                HourTally { row: header.index(world.phase(), law, hunger), courting, ..Default::default() },
+                HourTally { row: header.index(world.phase(), law, hunger), courting, features, ..Default::default() },
             );
         }
     };
@@ -572,7 +609,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let t0 = Instant::now();
     // Several seeds, one tally: a single 30-day city varies by a quarter in
     // its theft rate from seed to seed (M10).
-    for seed in 1000..1000 + args.seeds {
+    for seed in args.first_seed..args.first_seed + args.seeds {
         let mut world = World::new(seed, config.clone());
         let mut hour: BTreeMap<citysim::EntityId, HourTally> = BTreeMap::new();
         let mut hour_start = world.tick;
@@ -677,10 +714,31 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     }
                 }
                 known = world.edges.keys().copied().collect();
-                for t in hour.values() {
+                for (&id, t) in hour.iter() {
                     let c = t.ticks;
                     let dominant =
                         if c[0] > 0 { 0 } else { (1..5).max_by_key(|&k| (c[k], std::cmp::Reverse(k))).unwrap_or(4) };
+                    if let (Some(w), Some(f)) = (rows_out.as_mut(), t.features.as_ref()) {
+                        use std::io::Write;
+                        let mut line = format!("{seed},{hour_start},{},{}", id.index, t.row);
+                        for v in f {
+                            line.push_str(&format!(",{v}"));
+                        }
+                        let x = t.extra.map(|n| n.min(1));
+                        line.push_str(&format!(
+                            ",{dominant},{},{},{},{},{},{},{},{},{}\n",
+                            u8::from(t.courting),
+                            x[0],
+                            x[1],
+                            x[2],
+                            x[3],
+                            x[4],
+                            t.met,
+                            t.chats,
+                            t.chats_home
+                        ));
+                        w.write_all(line.as_bytes()).map_err(|e| e.to_string())?;
+                    }
                     counts[t.row][dominant] += 1;
                     denom[t.row] += 1;
                     court_denom[t.row] += u64::from(t.courting);
@@ -809,14 +867,19 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             };
         }
     }
+    if let Some(mut w) = rows_out {
+        use std::io::Write;
+        w.flush().map_err(|e| e.to_string())?;
+    }
     let p_dole_day = (dole_taken as f32 / dole_days.max(1) as f32).min(1.0);
     let p_theft_caught = Some((theft_arrests as f32 / thefts_all.max(1) as f32).min(1.0));
     eprintln!("thefts {thefts_all}, arrests {arrests}, of a thief {theft_arrests}");
     let table = StatTable { rows, p_dole_day, p_theft_caught, ..header };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
     let text = format!(
-        "# generated by calibrate v2: seeds 1000..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",
-        1000 + args.seeds - 1,
+        "# generated by calibrate v2: seeds {}..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",
+        args.first_seed,
+        args.first_seed + args.seeds - 1,
         args.days,
         args.agents,
         args.map.display(),
