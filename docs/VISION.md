@@ -222,3 +222,9 @@ Folded into `docs/M14_VIRT.md` as an addendum: firewalls on links, the `Bridge` 
 Factions and NPCs have only so much attention to give. A target fighting a physical war or another large attack may not notice one lone runner stealing something quietly; a sneaky infiltrator is ignored while a tank is outside blowing things up. Manipulating a group's attention and threat assessment lets you be ignored long enough to get in and out, so sparking a war between the target and another faction is a tactic, for runs and physical infiltration alike.
 
 Folded into `docs/M16_CONTRACTS.md` as an addendum: `attention` as a daily faction pool sized by competence and headcount, consumed by active threats in order of assessed severity, with one `alertness_mult` hook read by every detection and response roll (guard sightings, sweeps, ICE, cameras, riot and raid response); threat assessment ranks what the faction knows, so wars, decoy runs, riots, strikes and sanctions all work as distractions, and the brains of a distracted faction tilt to hunkering.
+
+## The majordomo and the squad (added 2026-10-05, Dylan)
+
+When the player owns a faction they can hire a majordomo (a general, a lieutenant) to run the day-to-day of a bigger faction. A micromanager does not have to; a player who wants to be a CEO sets policy, hands the operation over, and goes rampaging with a smaller squad they direct personally.
+
+Folded into `docs/M18_PLAYER.md` as an addendum: the majordomo is the agent whose Personality the faction brain runs on (the M11 governance hook), under a `Policy` the player pins; without one the player issues the faction's orders directly; the squad is a crew of up to six directed on the raid machinery with the player as leader; the majordomo is an agent, so they can be poached, coerced, killed or turn (embezzle, leak, split); NPC factions name one the same way when their leader is away.

@@ -466,3 +466,25 @@ Agents are named by index or by `--select-name` names, as the existing levers do
 ## 12. Out of scope (after M18)
 
 First-person rendering and the camera beyond Follow, Free and Mission (§ 6 lists what it needs); real model-generated text and voice (the `DialogueWriter` trait is the hook, and only the template writer ships); generated combat maps for `Abroad` and anything drawn of the outside beyond the cast panel; multiplayer, and more than one holder per world; a scripted main story; haggling beyond the fixed M16 price; daemons beyond M17's Blackwall cap; Power and Water as goods; map layers, verticality, interiors and room-level security; climbing and jumping between buildings; a dedicated bunker goal beyond saved plans and Alarms; inventory management beyond the M13 Kit panel.
+
+## Addendum (2026-10-05, Dylan): the majordomo and the squad
+
+Spec amendment; decisions tabled as overturnable and to be read by the M18 plan and its coders.
+
+**The idea.** When the player owns a faction, they can hire a **majordomo** (a general, a lieutenant) to handle the day-to-day of a bigger faction. The player does not have to: a micromanager issues every order. A player who wants to be a CEO sets policy, hands the operation to the majordomo, and goes rampaging with a smaller **squad** they direct personally.
+
+**How it lands on what exists.** A faction's brain already runs off one agent's `Personality` (the gang leader, the corp exec; M11 `Governance::Dictator`). For a player-owned faction:
+
+- **No majordomo**: the faction's brain is off; the player issues the faction's orders directly through `Character` commands (the same `Order`/`CorpOrder` set the brains choose from, plus price levels, postures, contracts), and the faction's daily mechanics (wages, rent, upkeep, contracts, hiring) still run.
+- **A majordomo hired**: an agent with the role `Majordomo` (hired through the vacancy table like any job, at a wage; or promoted from a member) becomes the faction's `exec`/`leader` for the brain, which runs on *their* `Personality` and competence (M15) under the player's **policy**: pinned orders, a price-level band, a posture, a treasury floor, a "no raids into cover" flag, a list of standing contracts to keep. Policy is a small struct the brain reads as gates and flats. The player's own orders override for a day.
+- **The squad**: up to `squad_max` (6) members the player directs with the raid machinery (muster at the player, follow, attack a target, hold a door), through the same `Expedition` M16 uses, with the player as the leader body; squad members keep their needs and can refuse by loyalty (a social move).
+- **The majordomo is an agent**: they can be poached (M15), bribed, blackmailed, coerced (M16), killed, or **turn**: a majordomo whose loyalty falls below `turn_threshold` under a rival's coercion embezzles (a Flow to themselves), leaks (a deed to a rival's database), or splits the faction (the M12 split rule with themselves as the new leader). The player sees the trace of their decisions in the faction panel and can fire or replace them.
+
+| Decision | Call |
+| --- | --- |
+| Role | `Role::Majordomo` with `employer` = the faction's seat (Hideout or the corp's first building); wage `[player] majordomo_wage` (20/day); one per faction. |
+| Brain switch | `Faction.brain_runs = majordomo.is_some()`; when off, `Order`/`CorpOrder` come only from `Character::FactionOrder`; the orders' effects (`act`) run either way. |
+| Policy | `Policy { pinned_order: Option<..>, price_band: (f32, f32), posture: Option<..>, treasury_floor: i64, no_raids_into_cover: bool, keep_contracts: Vec<ContractId> }`, `#[serde(default)]`, read by the brain as gates and flats; the inspector shows which policy line gated a decision. |
+| Squad | `Squad { members: Vec<EntityId> }` on the player, cap 6; commands Follow, Hold, Attack(target), Muster, Dismiss; resolved on `Expedition` with the player as leader; refusal by loyalty through the social resolver. |
+| Turning | `loyalty < turn_threshold` (0.3) after a coercion or a missed wage: embezzle (`Flow::Embezzle`, 10 % of the treasury), leak (a deed), or split (M12 rule); logged as a `Betrayal` event the player's circle reports. |
+| NPCs too | Any faction whose leader or exec is away (jailed, Abroad, a run) names a majordomo by the same rule, so the mechanic is not player-only. |
