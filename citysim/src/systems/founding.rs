@@ -124,7 +124,7 @@ pub fn build_on_lot(
 }
 
 /// Agents with a Brain (every tier): the per-capita denominator, O(1).
-fn living(world: &World) -> usize {
+pub fn living(world: &World) -> usize {
     [Lod::Full, Lod::Coarse, Lod::Statistical].iter().map(|&l| world.tier(l).len()).sum()
 }
 
@@ -192,7 +192,18 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
     if world.comp::<Job>(agent).is_some_and(|j| j.wage_per_day > dole && !self_employed(j)) {
         return false;
     }
-    choose_kind(world, coins).is_some() && !vacant_lots(world).is_empty() && !is_exec(world, agent)
+    // The city-wide gates before the per-kind scan (`choose_kind` counts
+    // every Bar and Home): this runs per think, per plan and per hourly
+    // LOD assignment. All three are pure, so the order changes nothing.
+    any_vacant_lot(world) && !is_exec(world, agent) && choose_kind(world, coins).is_some()
+}
+
+/// Is any Lot vacant? `vacant_lots` without the list.
+pub fn any_vacant_lot(world: &World) -> bool {
+    world
+        .buildings_of_kind(BuildingKind::Lot)
+        .iter()
+        .any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Lot && !bd.demolished))
 }
 
 /// D25 / § 6: the `Register` action's effect. The founder pays `found_cost`
@@ -216,9 +227,11 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
         .or_else(|| world.comp::<Position>(agent).map(|p| p.tile))
         .ok_or("nowhere")?;
     let lot = nearest_lot(world, from).ok_or("no vacant Lot")?;
+    // Paid once the building stands (a failed build costs nothing), as a
+    // corp's `Grow`.
+    build_on_lot(world, lot, kind, Some(agent))?;
     let paid = ownership::pay(world, Some(agent), None, cost, Flow::Found);
     debug_assert_eq!(paid, cost, "can_found checked the wallet");
-    build_on_lot(world, lot, kind, Some(agent))?;
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(agent) {
         b.last_found_day = Some(today);

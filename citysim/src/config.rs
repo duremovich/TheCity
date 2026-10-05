@@ -385,8 +385,13 @@ impl OrderFlatCfg {
 pub struct LawCfg {
     /// Reports against gang members counted for pressure.
     pub window_days: u64,
-    /// Reports in the window that read as full pressure.
+    /// Reports in the window that read as full pressure (absolute; used
+    /// when `crackdown_reports_per_1000` is 0).
     pub crackdown_reports: u32,
+    /// M11 review: full pressure per 1,000 living residents (18: ~36 at 2,000);
+    /// 0 keeps the absolute `crackdown_reports` (v1_profile, older configs).
+    #[serde(default)]
+    pub crackdown_reports_per_1000: f32,
     /// A jailbreak holds the Jail this long.
     pub garrison_days: u64,
     pub hysteresis: f32,
@@ -729,6 +734,9 @@ pub struct CorpsCfg {
     /// M11 phase 5 (estate rule): one buyer takes at most this many buildings
     /// of one estate (0 = no cap).
     pub estate_buyer_cap: usize,
+    /// M11 review (estate settlement): the most of a dissolved corp's positive
+    /// balance its exec takes as severance; the rest goes to the Treasury.
+    pub estate_heir_cap: i64,
     /// M11 phase 5: a newly incorporated corp pays no upkeep for this many days.
     pub incorporate_grace_days: u64,
     /// Hunker never lays off Farm staff (phase 3 follow-up).
@@ -788,6 +796,7 @@ impl CorpsCfg {
             estate_share_cap: 0.5,
             estate_niche_only: true,
             estate_buyer_cap: 0,
+            estate_heir_cap: 300,
             incorporate_grace_days: 0,
             hunker_spares_farms: true,
             grow_min_occupancy: 0.0,
@@ -961,6 +970,8 @@ impl Config {
         self.lod.max_coarse = 100;
         // Not a D23 key: the v1 city had no pursuit limit.
         self.law.pursuit_radius = 512;
+        // The M11 review's per-capita pressure: the v1 city keeps its absolute 6.
+        self.law.crackdown_reports_per_1000 = 0.0;
         // M11 D9: a city-owned v1 city, no rent, no corps, equal wallets.
         self.rent.base = [0, 0, 0];
         self.corps = CorpsCfg::none();

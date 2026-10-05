@@ -6,7 +6,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::components::{Building, BuildingKind, Corp, CorpOrder, CorpShock, Niche, Personality, Role};
+use crate::components::{Building, BuildingKind, Corp, CorpOrder, CorpShock, Niche, Personality};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::corp_brain;
@@ -129,9 +129,18 @@ pub fn move_building(world: &mut World, b: EntityId, to: Option<EntityId>) {
             prune_niche(world, f, n);
         }
     }
-    staff_moved(world, b, kind);
     if kind != BuildingKind::SecurityOffice {
+        staff_moved(world, b, kind);
         return;
+    }
+    // A Security Office is a corp's: in the city's or an agent's hands it
+    // posts no guards and lets its own go (the city's payroll is the
+    // Precinct's, `law::reconcile_guards`; an Office's guards were paid by
+    // the Treasury, held no Jail and patrolled their own door).
+    if to.is_some_and(|t| world.has::<Corp>(t)) {
+        staff_moved(world, b, kind);
+    } else {
+        close_office(world, b);
     }
     let Some(seller) = from.filter(|&f| world.has::<Corp>(f)) else { return };
     if capacity(world, seller) > 0 {
@@ -185,16 +194,23 @@ fn prune_niche(world: &mut World, corp: EntityId, n: Niche) {
     }
 }
 
+/// A Security Office no corp owns: its vacancies close and its guards are
+/// laid off (no vacancy posted).
+fn close_office(world: &mut World, office: EntityId) {
+    world.vacancies.remove(&office);
+    let what = world.name_of(office);
+    for g in ownership::staff_at(world, office) {
+        let text = format!("{} let go as Guard: no corp runs {what}", world.name_of(g));
+        crate::systems::economy::dismiss(world, g, Some(office), text);
+    }
+}
+
 /// Top a building that changed hands up to full staff: its open vacancies
 /// stay with it (D30) and the new owner posts the rest.
 fn staff_moved(world: &mut World, b: EntityId, kind: BuildingKind) {
     let Some(role) = ownership::role_for(kind) else { return };
     let full = corp_brain::full_staff(world, kind);
-    let employed = world
-        .workers(role)
-        .iter()
-        .filter(|&&a| world.comp::<crate::components::Job>(a).is_some_and(|j| j.employer == Some(b)))
-        .count();
+    let employed = ownership::staff_at(world, b).len();
     let open = world.vacancies.get(&b).map_or(0, |v| v.len());
     if employed + open < full {
         world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, full - employed - open));
@@ -226,8 +242,9 @@ pub fn acquire(world: &mut World, buyer: EntityId, building: EntityId, price: i6
 
 /// D29: a corp in the red for `bankrupt_days` (or with nothing left) sells
 /// every building, ascending, to the highest purse among the other corps
-/// and living agents that can pay its value, else to the city at half; the
-/// estate settles and the corp is dissolved. Phase 5 estate rule: a corp
+/// and living agents that can pay its value, else the city forecloses it at
+/// no price (M11 review); the estate settles (`dissolve`) and the corp is
+/// dissolved. Phase 5 estate rule: a corp
 /// buys only in a niche it is already in and holds under `estate_share_cap`
 /// of (Nutrix bought 60 Blocks; the richest corp swallowed every estate),
 /// and nobody takes more than `estate_buyer_cap` buildings of one estate
@@ -297,12 +314,13 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
                 world.push_event(EventKind::Acquired, &[buyer, corp, b], text);
             }
             None => {
-                let half = v / 2;
-                ownership::charge(world, None, Some(corp), half, Flow::Sale);
+                // Foreclosed at no price (the M11 review's estate rule): the
+                // city's half-value purchase went into the estate and on to
+                // the exec, coins out of the Treasury into one wallet.
                 move_building(world, b, None);
                 // The city does not keep a corp's guard contract.
-                end_contract(world, b, "sold to the city");
-                let text = format!("the city took {what} from bankrupt {name} for {half}");
+                end_contract(world, b, "foreclosed by the city");
+                let text = format!("the city foreclosed {what} from bankrupt {name}");
                 world.push_event(EventKind::Acquired, &[corp, b], text);
             }
         }
@@ -319,13 +337,16 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
     dissolve(world, corp);
 }
 
-/// Settle the estate and despawn: a positive balance goes to the exec (else
-/// the city), a negative one is absorbed by the Treasury; the corp's sold
-/// contracts end, a lobby hold naming it lapses, anything still owned goes
-/// to the city. Why the Treasury, uncapped: a corp goes below zero only
-/// through `charge`, whose payee is the Treasury (upkeep, restock): the
-/// overdraft is coins the city was credited and never received, so writing
-/// it back conserves money (the corp's debt was to the city).
+/// Settle the estate and despawn: a positive balance pays the exec at most
+/// `[corps] estate_heir_cap` as severance and the rest goes to the Treasury
+/// (all of it with no living exec); a negative one is absorbed by the
+/// Treasury. The corp's sold contracts end, a lobby hold naming it lapses,
+/// anything still owned goes to the city. Why the Treasury, uncapped: a corp
+/// goes below zero only through `charge`, whose payee is the Treasury
+/// (upkeep, restock): the overdraft is coins the city was credited and never
+/// received, so writing it back conserves money (the corp's debt was to the
+/// city). Why the cap: the estate was handed to the exec whole, and one
+/// landlord's sell-off made its exec the richest agent in the city.
 pub fn dissolve(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let (left, clients, exec) = (c.buildings.clone(), c.contracts.clone(), c.exec);
@@ -338,7 +359,14 @@ pub fn dissolve(world: &mut World, corp: EntityId) {
     let balance = world.purse(Some(corp));
     if balance > 0 {
         let heir = exec.filter(|&e| matches!(ownership::owner_kind(world, Some(e)), OwnerKind::Agent(_)));
-        ownership::pay(world, Some(corp), heir, balance, Flow::Sale);
+        let severance = if heir.is_some() { balance.min(world.config.corps.estate_heir_cap.max(0)) } else { 0 };
+        if severance > 0 {
+            ownership::pay(world, Some(corp), heir, severance, Flow::Sale);
+        }
+        let rest = world.purse(Some(corp));
+        if rest > 0 {
+            ownership::pay(world, Some(corp), None, rest, Flow::Sale);
+        }
     } else if balance < 0 {
         ownership::charge(world, None, Some(corp), -balance, Flow::Sale);
     }
@@ -383,21 +411,13 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
     }
     moved.sort();
     // The second-greediest adult employee who is nobody's exec (ties lower id).
-    let buildings: Vec<EntityId> = world.comp::<Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default();
     let execs: Vec<EntityId> =
         world.corps().into_iter().filter_map(|c| world.comp::<Corp>(c).and_then(|c| c.exec)).collect();
-    let mut staff: Vec<(f32, EntityId)> = Vec::new();
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            let here = world
-                .comp::<crate::components::Job>(a)
-                .and_then(|j| j.employer)
-                .is_some_and(|e| buildings.binary_search(&e).is_ok());
-            if here && !execs.contains(&a) && crate::systems::demography::is_adult(world, a) {
-                staff.push((world.comp::<Personality>(a).map_or(0.0, |p| p.greed), a));
-            }
-        }
-    }
+    let mut staff: Vec<(f32, EntityId)> = ownership::employees_of(world, corp)
+        .into_iter()
+        .filter(|&a| !execs.contains(&a) && crate::systems::demography::is_adult(world, a))
+        .map(|a| (world.comp::<Personality>(a).map_or(0.0, |p| p.greed), a))
+        .collect();
     staff.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
     let exec = staff.get(1).or(staff.first()).map(|&(_, a)| a);
     let spin_name = format!("{name} Spinoff");
@@ -560,10 +580,11 @@ fn bankruptcies(world: &mut World) {
     let now = world.tick;
     let limit = world.config.corps.bankrupt_days * TICKS_PER_DAY;
     for c in world.corps() {
-        // Still in the red now: a sale since the midnight roll can save it.
+        // Still in the red now (or stalled at 0, `ownership::rolls`): a
+        // sale since the midnight roll can save it.
         let due = world.comp::<Corp>(c).is_some_and(|cc| {
             cc.buildings.is_empty()
-                || (cc.treasury < 0 && cc.negative_since.is_some_and(|t| now.saturating_sub(t) >= limit))
+                || (cc.treasury <= 0 && cc.negative_since.is_some_and(|t| now.saturating_sub(t) >= limit))
         });
         if due {
             bankrupt(world, c);

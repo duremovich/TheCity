@@ -347,6 +347,10 @@ fn test_seeding_matches_table() {
         assert_eq!(cc.order, citysim::CorpOrder::Hunker);
         assert_eq!(cc.governance, citysim::Governance::Dictator);
         assert_eq!(cc.parent.is_some(), i >= 6, "Arasaka and Militech are branches");
+        // M11 review: an outside parent's id is its own namespace, not the slot.
+        if let Some(p) = cc.parent {
+            assert!(p >= citysim::OUTSIDE_PARENT_BASE, "parent {p} reads as a slot");
+        }
     }
     assert_eq!(w.vacancies.get(&owned(Some(arasaka), BuildingKind::SecurityOffice)[0]).map(Vec::len), Some(6));
 }
@@ -730,4 +734,97 @@ fn test_evictee_waits_on_the_street() {
     }
     midnight(&mut w);
     assert!(w.comp::<Household>(a).expect("h").home.is_some(), "re-housed once the wait is over");
+}
+
+// ---------------------------------------------------------------------------
+// M11 review regressions
+// ---------------------------------------------------------------------------
+
+/// Item 1: a Security Office in the city's hands posts no guards and lets
+/// its own go (they were paid by the Treasury, held no Jail and patrolled
+/// their own door); one in an agent's hands likewise.
+#[test]
+fn test_office_without_a_corp_has_no_guards() {
+    let mut w = World::new(42, Config::load());
+    w.tick(); // tick 0: job search fills the Security Offices
+    let offices: Vec<EntityId> = w.buildings_of_kind(BuildingKind::SecurityOffice).to_vec();
+    let staff = |w: &World, o: EntityId| ownership::staff_at(w, o);
+    assert!(offices.len() >= 2 && offices.iter().all(|&o| !staff(&w, o).is_empty()), "every Office staffed");
+    let (to_city, to_agent) = (offices[0], offices[1]);
+    let guards = staff(&w, to_city);
+    let roster = citysim::systems::law_brain::guards(&w).len();
+    w.push_command(PlayerCommand::SetTreasury(1_000_000));
+    w.push_command(PlayerCommand::Nationalise(to_city));
+    w.apply_commands();
+    assert_eq!(w.owner_of(to_city), None);
+    let agent = jobless_adult(&w, &[]);
+    citysim::systems::corps::move_building(&mut w, to_agent, Some(agent));
+    for o in [to_city, to_agent] {
+        assert!(staff(&w, o).is_empty(), "no guard stays at an Office no corp owns");
+        assert!(!w.vacancies.contains_key(&o), "and none is posted");
+    }
+    for &g in &guards {
+        assert!(!w.has::<Job>(g), "laid off");
+        assert!(!citysim::systems::law::is_private_guard(&w, g));
+    }
+    assert_eq!(citysim::systems::law_brain::guards(&w).len(), roster, "the city's payroll is unchanged");
+    // A day later nobody has been hired there.
+    w.run_ticks(TICKS_PER_DAY);
+    assert!(staff(&w, to_city).is_empty() && staff(&w, to_agent).is_empty());
+}
+
+/// Item 3: a corp's replacement exec is never another corp's exec.
+#[test]
+fn test_replacement_exec_is_not_another_corps_exec() {
+    let mut w = world();
+    let (food, home_co) = corps(&w);
+    let farm = w.building_of_kind(BuildingKind::Farm).expect("farm");
+    let staff = ownership::staff_at(&w, farm);
+    assert!(staff.len() >= 2, "two farmers");
+    let (taken, next) = (staff[0], staff[1]);
+    for (a, g) in [(taken, 1.0), (next, 0.99)] {
+        w.comp_mut::<citysim::Personality>(a).expect("p").greed = g;
+    }
+    for &a in &staff[2..] {
+        w.comp_mut::<citysim::Personality>(a).expect("p").greed = 0.0;
+    }
+    w.comp_mut::<Corp>(home_co).expect("c").exec = Some(taken);
+    w.comp_mut::<Corp>(food).expect("c").exec = None;
+    midnight(&mut w);
+    let exec = w.comp::<Corp>(food).expect("c").exec;
+    assert_eq!(exec, Some(next), "the greediest employee who is not HomeCo's exec");
+}
+
+/// Item 5: an owner living in their own Block is not one of the adults its
+/// rent is split over: the tenant owes the whole rent.
+#[test]
+fn test_owner_resident_rent_split_over_tenants() {
+    let mut w = world();
+    let (a, h1, b, _) = two_tenants(&mut w);
+    set_coins(&mut w, a, 0);
+    let owner = jobless_adult(&w, &[a, b]);
+    ownership::transfer_building(&mut w, h1, Some(owner));
+    w.set_home(owner, Some(h1));
+    midnight(&mut w);
+    let rent = w.comp::<Building>(h1).expect("b").rent_per_day;
+    assert!(rent > 0);
+    assert_eq!(w.comp::<Household>(a).expect("h").rent_due, rent as f32, "the tenant owes the whole rent");
+    assert_eq!(w.comp::<Household>(owner).expect("h").rent_due, 0.0);
+    // Paid in full the next night: the Block yields its whole rent.
+    set_coins(&mut w, a, 100);
+    midnight(&mut w);
+    assert_eq!(coins(&w, a), 100 - rent);
+    assert_eq!(w.comp::<Building>(h1).expect("b").revenue.back(), Some(&rent), "the whole rent reaches the owner");
+}
+
+/// Item 7: "paid N in 7 days" is a seven-day window, not a decaying figure.
+#[test]
+fn test_rent_paid_is_a_seven_day_window() {
+    let mut h = Household::new(None);
+    for day in 0..10u64 {
+        h.note_rent_paid(day, 2);
+    }
+    assert_eq!(h.rent_paid_7d(9), 14, "days 3-9");
+    assert_eq!(h.rent_paid_7d(16), 0, "nothing paid in the last week");
+    assert!(h.rent_paid_log.len() <= 7);
 }

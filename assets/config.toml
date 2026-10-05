@@ -237,6 +237,15 @@ breakout = 0.28 # was 0.2: after the M9 review fixes (jail duty by rank, Hideout
 [law]
 window_days = 7
 crackdown_reports = 6
+# M11 review (pending item 33): crackdown_reports is an absolute count tuned for the v1 city's 300; at
+# 2,000 the most-reported gang reaches 6 reports in a week on nearly every day, so pressure saturated and
+# the law sat in Crackdown on 72 % of days (M9 band 20-60 %). Full pressure now scales with the living
+# residents, 18 per 1,000 (~36 at 2,000). Crackdown share over 120 days, seeds 42/43/44: absolute 6
+# 72/41/38 %; 20 per 1,000 29/18/10 %; 18 25/38/23 %; 16 31/33/22 %; 15 31/33/14 %; 12 45/33/40 %; 10
+# 58/27/38 %. Every key in 8-16 dropped a seed-level gate on its edge (the M11 eviction -> GangJoin
+# spiral at 1 of 3, the v1 run's one starvation death, the day-60 monopoly check); 18 clears them with
+# margin (spiral 8, 4 deaths). 0 keeps the absolute key; v1_profile sets 0 (300 residents keep 6).
+crackdown_reports_per_1000 = 18
 garrison_days = 7
 hysteresis = 0.10
 shock_severity_rethink = 0.5
@@ -464,6 +473,13 @@ outside_treasury_initial = 100000
 estate_share_cap = 0.5
 estate_niche_only = true
 estate_buyer_cap = 12
+# M11 review, the estate settlement: a building nobody buys is foreclosed by the city at no price (it
+# had paid half its value into the bankrupt corp's treasury, which dissolve then handed to the exec:
+# one 60-Block landlord's bankruptcy gave ~12,000 city coins to one agent and pushed the Treasury
+# negative). The estate's balance then settles: a negative one is absorbed by the Treasury (the corp's
+# debt was to the city), a positive one (sales to corps and agents, savings) pays the exec at most
+# estate_heir_cap as severance (30 days of wage_exec) and the rest goes to the Treasury.
+estate_heir_cap = 300
 # M11 phase 5: an incorporated corp starts with its founder's savings (less a day's exec wage) and pays
 # no upkeep for 14 days; at treasury 0 Varley Holdings went bankrupt under upkeep 12 days after it
 # incorporated.

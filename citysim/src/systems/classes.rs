@@ -13,7 +13,7 @@ use std::collections::BTreeSet;
 
 use crate::components::{
     Brain, Building, BuildingKind, Class, ClassAggregate, Corp, CorpShock, Household, Job, Mood, Personality, Position,
-    Role, Sentence,
+    Sentence,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -246,22 +246,36 @@ pub fn strike_target(world: &World) -> Option<(EntityId, Vec<EntityId>)> {
 
 /// A corp's non-exec employees, ascending.
 pub(crate) fn employees(world: &World, cc: &Corp) -> Vec<EntityId> {
-    let mut out = Vec::new();
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            if Some(a) == cc.exec {
-                continue;
-            }
-            let here =
-                world.comp::<Job>(a).and_then(|j| j.employer).is_some_and(|e| cc.buildings.binary_search(&e).is_ok());
-            if here && world.has::<Brain>(a) {
-                out.push(a);
-            }
+    crate::systems::ownership::staff_by_building(world, &cc.buildings)
+        .into_values()
+        .flatten()
+        .filter(|&a| Some(a) != cc.exec && world.has::<Brain>(a))
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .collect()
+}
+
+/// D35: `strikers` walk out of the shift in progress, or the next one: it
+/// is marked worked and struck (no wage; a guard's shift clock owes nothing
+/// either), and a body already on its way to work or at it drops that plan
+/// (a Work or Patrol plan running at the strike was finished and paid).
+pub(crate) fn walk_out(world: &mut World, strikers: &[EntityId]) {
+    use crate::components::{GoalKind, Lod};
+    let now = world.tick;
+    for &a in strikers {
+        let Some(j) = world.comp_mut::<Job>(a) else { continue };
+        let key = j.next_shift_key(now);
+        j.last_shift_day = Some(key);
+        j.struck_shift = Some(key);
+        j.duty_ticks = 0;
+        let working = world.comp::<Brain>(a).is_some_and(|b| {
+            b.lod != Lod::Statistical
+                && b.plan.as_ref().is_some_and(|p| matches!(p.goal, GoalKind::Work | GoalKind::Patrol))
+        });
+        if working {
+            world.abort_plan(a);
         }
     }
-    out.sort_unstable();
-    out.dedup();
-    out
 }
 
 /// D35: Street unrest above `strike_threshold`, no strike in the last
@@ -279,11 +293,7 @@ pub fn strike(world: &mut World) {
         return;
     }
     let Some((corp, strikers)) = strike_target(world) else { return };
-    for &a in &strikers {
-        if let Some(j) = world.comp_mut::<Job>(a) {
-            j.last_shift_day = Some(j.next_shift_key(now));
-        }
-    }
+    walk_out(world, &strikers);
     world.last_strike = Some(now);
     world.stats.current.strikes += 1;
     let name = world.owner_label(Some(corp));

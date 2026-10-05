@@ -5,8 +5,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::components::{
-    Brain, Building, BuildingKind, Corp, CorpOrder, CorpShock, Crime, DeathCause, Gang, Household, Job, Niche,
-    Position, Posture, Rect, Sentence, TileKind, TilePos, Wallet,
+    Brain, Building, BuildingKind, Corp, CorpOrder, CorpShock, Crime, DeathCause, Gang, Household, Niche, Position,
+    Posture, Rect, Sentence, TileKind, TilePos, Wallet,
 };
 use crate::config::Config;
 use crate::entity::EntityId;
@@ -449,20 +449,13 @@ impl World {
             PlayerCommand::FireAllGuards => {
                 let guards = law_brain::guards(self);
                 for &g in &guards {
-                    // An escort in progress ends: the suspect walks.
-                    if let Some(s) = self.comp_mut::<Brain>(g).and_then(|b| b.escorting.take()) {
-                        if let Some(sb) = self.comp_mut::<Brain>(s) {
-                            sb.cuffed_by = None;
-                        }
-                    }
-                    self.abort_plan(g);
                     // As `law::reconcile_guards` dismisses: no vacancy (job
                     // search would rehire the whole watch the next morning;
                     // reconcile_guards rehires up to the lever, five a day),
-                    // but a Fire event, so it reaches the biography.
-                    self.remove::<Job>(g);
-                    let name = self.name_of(g);
-                    self.push_event(EventKind::Fire, &[g], format!("{name} dismissed from the guard"));
+                    // but a Fire event, so it reaches the biography. An
+                    // escort in progress ends: the suspect walks.
+                    let text = format!("{} dismissed from the guard", self.name_of(g));
+                    crate::systems::economy::dismiss(self, g, None, text);
                 }
                 law_brain::recompute_captain(self);
                 Ok((guards, "dismissed every guard".to_string()))
@@ -582,12 +575,7 @@ impl World {
                 if strikers.is_empty() {
                     return Err(format!("StrikeNow: {name} has no workers"));
                 }
-                let now = self.tick;
-                for &a in &strikers {
-                    if let Some(j) = self.comp_mut::<Job>(a) {
-                        j.last_shift_day = Some(j.next_shift_key(now));
-                    }
-                }
+                classes::walk_out(self, &strikers);
                 self.stats.current.strikes += 1;
                 let text = format!("{} workers of {name} walk out (by god)", strikers.len());
                 self.push_event(EventKind::Strike, &[corp], text);

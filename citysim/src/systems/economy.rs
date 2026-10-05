@@ -385,6 +385,20 @@ pub fn maybe_quit(world: &mut World, agent: EntityId) {
     }
 }
 
+/// An employer lets `agent` go: no vacancy is posted (a layoff, a dismissal
+/// or a closed office is a job that no longer exists). The plan is aborted
+/// first, so an escort in progress ends and the suspect's `cuffed_by` is
+/// cleared, a running Use is settled, and the Job (with its `duty_ticks`)
+/// goes. `Fire` event with `text`, the building in slot 1 when given.
+pub fn dismiss(world: &mut World, agent: EntityId, building: Option<EntityId>, text: String) -> Option<Job> {
+    world.abort_plan(agent);
+    let job = world.remove::<Job>(agent)?;
+    let mut actors = vec![agent];
+    actors.extend(building);
+    world.push_event(EventKind::Fire, &actors, text);
+    Some(job)
+}
+
 /// Remove the Job (posting a vacancy), drop the plan, log the event.
 pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     let Some(job) = world.vacate_job(agent) else { return };

@@ -182,14 +182,23 @@ pub fn pursuit_radius_for(world: &World, guard: EntityId) -> u32 {
     }
 }
 
+/// M11 D18: a guard job at a Security Office (the one test behind
+/// `is_private_guard`, `is_city_guard` and `routine::workplace_key_for`).
+pub fn job_is_private_guard(world: &World, job: &Job) -> bool {
+    job.role == Role::Guard
+        && job.employer.and_then(|e| world.comp::<Building>(e)).is_some_and(|b| b.kind == BuildingKind::SecurityOffice)
+}
+
 /// M11 D18: a guard employed by a Security Office.
 pub fn is_private_guard(world: &World, guard: EntityId) -> bool {
-    world
-        .comp::<Job>(guard)
-        .filter(|j| j.role == Role::Guard)
-        .and_then(|j| j.employer)
-        .and_then(|e| world.comp::<Building>(e))
-        .is_some_and(|b| b.kind == BuildingKind::SecurityOffice)
+    world.comp::<Job>(guard).is_some_and(|j| job_is_private_guard(world, j))
+}
+
+/// A guard on the city payroll: a guard who is not a Security Office's
+/// (employed at the Precinct, or by nobody). The complement of
+/// `is_private_guard` among guards.
+pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
+    world.comp::<Job>(guard).is_some_and(|j| j.role == Role::Guard && !job_is_private_guard(world, j))
 }
 
 fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>) -> bool {
@@ -675,6 +684,7 @@ fn credit_guard_shifts(world: &mut World) {
         if on_now {
             let key = job.shift_key_at(world.tick);
             let on_duty = !world.has::<Sentence>(g)
+                && job.struck_shift != Some(key)
                 && match world.comp::<Brain>(g).and_then(|b| b.current_goal) {
                     Some(GoalKind::Patrol | GoalKind::Arrest) => true,
                     Some(GoalKind::Work) => jail_duty(world, g, key),
@@ -693,7 +703,9 @@ fn credit_guard_shifts(world: &mut World) {
         let key = job.shift_key_at(ended_tick);
         let length: u32 = job.shifts.iter().map(|&(s, e)| u32::from(e.saturating_sub(s))).sum();
         let worked = job.last_shift_day == Some(key) || f32::from(job.duty_ticks) >= share * length as f32;
-        let owed = worked && crate::exec::routine::is_workday(key) && !world.has::<Sentence>(g);
+        // A struck shift (M11 D35) is marked worked but owes nothing.
+        let struck = job.struck_shift == Some(key);
+        let owed = worked && !struck && crate::exec::routine::is_workday(key) && !world.has::<Sentence>(g);
         if let Some(j) = world.comp_mut::<Job>(g) {
             j.duty_ticks = 0;
             if owed {
@@ -749,10 +761,8 @@ pub fn reconcile_guards(world: &mut World) {
             .collect();
         by_loyalty.sort();
         for (_, g) in by_loyalty.into_iter().take((guards.len() - want).min(5)) {
-            world.abort_plan(g);
-            world.remove::<Job>(g);
-            let name = world.name_of(g);
-            world.push_event(EventKind::Fire, &[g], format!("{name} dismissed from the guard"));
+            let text = format!("{} dismissed from the guard", world.name_of(g));
+            crate::systems::economy::dismiss(world, g, None, text);
         }
     }
     crate::systems::law_brain::recompute_captain(world);
@@ -938,17 +948,18 @@ pub fn new_patrol_route(world: &mut World, guard: EntityId) -> Vec<EntityId> {
 /// clients (all of them, nearest its office first, when there are five or
 /// fewer; else five drawn with the world stream as the city's beat is), or
 /// with no clients its corp's own buildings nearest its Security Office.
-/// `None` for a city guard.
+/// `None` for a city guard, and for a guard whose Office no corp owns (none
+/// should exist: `corps::move_building` lays them off when it changes hands).
 fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<EntityId>> {
     if !is_private_guard(world, guard) {
         return None;
     }
     let office = world.comp::<Job>(guard).and_then(|j| j.employer)?;
     let from = world.comp::<Building>(office)?.door;
-    let corp = world.corp_of_building(office);
+    let corp = world.corp_of_building(office)?;
     let usable = |w: &World, b: EntityId| w.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| bd.door);
-    let clients: Vec<EntityId> = corp
-        .and_then(|c| world.comp::<crate::components::Corp>(c))
+    let clients: Vec<EntityId> = world
+        .comp::<crate::components::Corp>(corp)
         .map(|c| c.contracts.iter().map(|&(b, _)| b).collect())
         .unwrap_or_default();
     let clients: Vec<EntityId> = clients.into_iter().filter(|&b| usable(world, b).is_some()).collect();
@@ -957,10 +968,7 @@ fn private_patrol_route(world: &mut World, guard: EntityId) -> Option<Vec<Entity
         return Some(picks);
     }
     let pool: Vec<EntityId> = if clients.is_empty() {
-        match corp {
-            Some(c) => world.comp::<crate::components::Corp>(c).map(|c| c.buildings.clone()).unwrap_or_default(),
-            None => vec![office],
-        }
+        world.comp::<crate::components::Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default()
     } else {
         clients
     };

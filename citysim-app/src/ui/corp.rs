@@ -65,8 +65,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             let niches: Vec<&str> = c.niches.iter().map(|n| n.label()).collect();
             let slot = c.slot.map_or("unslotted".to_string(), |s| format!("slot {}", s + 1));
             ui.label(format!("{} · {} · {slot}", niches.join(" + "), governance_label(&c.governance)));
-            if let Some(p) = c.parent {
-                ui.colored_label(GOLD, format!("branch of an outside parent (#{p}, {}¢ abroad)", c.outside_treasury));
+            if c.parent.is_some() {
+                ui.colored_label(GOLD, format!("branch of an outside parent ({}¢ abroad)", c.outside_treasury));
             }
             ui.horizontal(|ui| {
                 ui.label("Exec");

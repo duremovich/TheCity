@@ -427,9 +427,10 @@ fn ownership(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         }
     });
     if let Some(h) = world.comp::<Household>(id) {
-        if h.home.is_some() || h.rent_paid_7d > 0 || h.arrears > 0 {
+        let paid = h.rent_paid_7d(world.day());
+        if h.home.is_some() || paid > 0 || h.arrears > 0 {
             let rent = h.home.and_then(|b| world.comp::<Building>(b)).map_or(0, |b| b.rent_per_day);
-            let line = format!("Rent {rent}¢/day · paid {}¢ in 7 days", h.rent_paid_7d);
+            let line = format!("Rent {rent}¢/day · paid {paid}¢ in 7 days");
             if h.arrears > 0 {
                 ui.colored_label(RED, format!("{line} · {} days in arrears", h.arrears));
             } else {

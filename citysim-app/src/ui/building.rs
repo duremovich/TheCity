@@ -210,7 +210,8 @@ fn home(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building) {
                 ui.label(format!("{coins}¢"));
                 let job = world.comp::<Job>(r).map_or("no job".to_string(), |j| j.role.label().to_string());
                 ui.label(job);
-                let (arrears, paid) = world.comp::<Household>(r).map_or((0, 0), |h| (h.arrears, h.rent_paid_7d));
+                let today = world.day();
+                let (arrears, paid) = world.comp::<Household>(r).map_or((0, 0), |h| (h.arrears, h.rent_paid_7d(today)));
                 ui.label(format!("rent {paid}¢/7d"));
                 let behind = (arrears > 0).then(|| format!("{arrears} days behind"));
                 let flags = [

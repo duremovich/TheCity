@@ -316,6 +316,40 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
     }
 }
 
+/// Everyone employed at one of `buildings` (ascending, as `Corp.buildings`),
+/// by workplace, each list ascending. The one employer-membership scan the
+/// corp code shares (staffing, layoffs, the wage bill, execs, strikes).
+pub fn staff_by_building(world: &World, buildings: &[EntityId]) -> BTreeMap<EntityId, Vec<EntityId>> {
+    let mut out: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
+    for role in Role::ALL {
+        for &a in world.workers(role) {
+            if let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) {
+                if buildings.binary_search(&e).is_ok() {
+                    out.entry(e).or_default().push(a);
+                }
+            }
+        }
+    }
+    for v in out.values_mut() {
+        v.sort_unstable();
+    }
+    out
+}
+
+/// Everyone employed at `building`, ascending.
+pub fn staff_at(world: &World, building: EntityId) -> Vec<EntityId> {
+    staff_by_building(world, &[building]).remove(&building).unwrap_or_default()
+}
+
+/// Everyone employed at one of a corp's buildings (its exec too, if they
+/// hold a job there), ascending.
+pub fn employees_of(world: &World, corp: EntityId) -> Vec<EntityId> {
+    let Some(c) = world.comp::<Corp>(corp) else { return Vec::new() };
+    let mut out: Vec<EntityId> = staff_by_building(world, &c.buildings).into_values().flatten().collect();
+    out.sort_unstable();
+    out
+}
+
 /// D30: a building changes hands. Employees and open vacancies stay with the
 /// building; a Home's rent is re-set from the new owner at the next pass.
 pub fn transfer_building(world: &mut World, b: EntityId, to: Option<EntityId>) {
@@ -425,7 +459,9 @@ pub fn nationalise(world: &mut World, b: EntityId) -> Result<String, String> {
     }
     let seller = world.owner_label(owner);
     pay(world, None, owner, price, Flow::Sale);
-    transfer_building(world, b, None);
+    // As any sale: niches, contracts and staff follow (a nationalised
+    // Security Office lets its guards go).
+    crate::systems::corps::move_building(world, b, None);
     let what = world.name_of(b);
     let text = format!("the city nationalised {what} from {seller} for {price}");
     world.push_event(EventKind::Acquired, &[b], text.clone());
@@ -479,7 +515,7 @@ pub fn seed(world: &mut World) {
             c.slot = Some(i as u8);
             c.treasury_ref = treasury.max(1);
             if cfg.megacorp.get(i).copied().unwrap_or(false) {
-                c.parent = Some(i as u32);
+                c.parent = Some(crate::components::OUTSIDE_PARENT_BASE + i as u32);
                 c.outside_treasury = cfg.outside_treasury_initial;
             }
         }
@@ -725,23 +761,23 @@ fn collect_rent(world: &mut World, rents: &[(EntityId, i64)]) {
                 continue;
             }
         }
+        // The paying adults: an owner living in their own Home is not one,
+        // so the Home still yields its whole rent from the others.
         let adults: Vec<EntityId> = world
             .residents_of(home)
             .iter()
             .copied()
+            .filter(|&a| Some(a) != owner)
             .filter(|&a| world.has::<Brain>(a) && crate::systems::demography::is_adult(world, a))
             .collect();
         if adults.is_empty() {
             continue;
         }
         let share = rent as f32 / 10.0 / adults.len() as f32;
-        for a in adults.into_iter().filter(|&a| Some(a) != owner) {
+        for a in adults {
             settle_rent(world, a, home, true);
             if let Some(h) = world.comp_mut::<Household>(a) {
-                h.rent_paid_7d -= h.rent_paid_7d / 7;
-                if rent > 0 {
-                    h.rent_due += share;
-                }
+                h.rent_due += share;
             }
         }
     }
@@ -773,9 +809,10 @@ fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
     let paid = pay(world, Some(a), owner, due, Flow::Rent);
     credit(world, home, paid);
     world.stats.current.rent_paid += paid;
+    let today = world.day();
     let Some(h) = world.comp_mut::<Household>(a) else { return };
     h.rent_due -= paid as f32;
-    h.rent_paid_7d += paid;
+    h.note_rent_paid(today, paid);
     if paid >= due {
         h.arrears = 0;
         return;
@@ -1033,20 +1070,19 @@ fn exec_wages(world: &mut World) {
     }
 }
 
+/// The greediest adult employee who is not already some corp's exec (ties
+/// lower id), as `seed` and `corps::break_up` pick.
 fn replacement_exec(world: &World, corp: EntityId) -> Option<EntityId> {
-    let buildings: BTreeSet<EntityId> =
-        world.comp::<Corp>(corp).map(|c| c.buildings.iter().copied().collect()).unwrap_or_default();
+    let execs: BTreeSet<EntityId> =
+        world.corps().into_iter().filter_map(|c| world.comp::<Corp>(c).and_then(|c| c.exec)).collect();
     let mut best: Option<(f32, EntityId)> = None;
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            let employed_here = world.comp::<Job>(a).and_then(|j| j.employer).is_some_and(|e| buildings.contains(&e));
-            if !employed_here || !crate::systems::demography::is_adult(world, a) {
-                continue;
-            }
-            let greed = world.comp::<Personality>(a).map_or(0.0, |p| p.greed);
-            if best.is_none_or(|(g, id)| greed > g || (greed == g && a < id)) {
-                best = Some((greed, a));
-            }
+    for a in employees_of(world, corp) {
+        if execs.contains(&a) || !crate::systems::demography::is_adult(world, a) {
+            continue;
+        }
+        let greed = world.comp::<Personality>(a).map_or(0.0, |p| p.greed);
+        if best.is_none_or(|(g, id)| greed > g || (greed == g && a < id)) {
+            best = Some((greed, a));
         }
     }
     best.map(|(_, a)| a)
@@ -1062,10 +1098,9 @@ fn bar_vacancies(world: &mut World) {
         if !matches!(owner_kind(world, world.owner_of(bar)), OwnerKind::Agent(_)) {
             continue;
         }
-        let working = world
-            .workers(Role::Bartender)
-            .iter()
-            .filter(|&&a| world.comp::<Job>(a).is_some_and(|j| j.employer == Some(bar)))
+        let working = staff_at(world, bar)
+            .into_iter()
+            .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == Role::Bartender))
             .count();
         let open = world.vacancies.get(&bar).map_or(0, |v| v.iter().filter(|&&r| r == Role::Bartender).count());
         if working + open < staff && open == 0 {
@@ -1113,8 +1148,12 @@ fn rolls(world: &mut World) {
             cc.cashflow.pop_front();
         }
         // In the red at the close, before the upkeep lump (phase 5; was
-        // after it, the intra-day trough).
-        if cc.closing < 0 {
+        // after it, the intra-day trough). A corp at exactly 0 that took in
+        // nothing today counts too (M11 review: god v2's Kessler, empty Sump
+        // Blocks with no upkeep and an exec wage paid only from a positive
+        // purse, sat at 0 for 60 days and could never go bankrupt).
+        let stalled = cc.closing == 0 && today <= 0 && now > 0;
+        if cc.closing < 0 || stalled {
             cc.negative_since.get_or_insert(now);
         } else {
             cc.negative_since = None;

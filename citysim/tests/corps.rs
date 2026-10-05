@@ -384,21 +384,22 @@ fn test_bankruptcy_sells_to_richest_then_city() {
     let blocks = w.comp::<Corp>(home).expect("c").buildings.clone();
     let exec = w.comp::<Corp>(home).expect("c").exec.expect("exec");
     let greed = w.comp::<Personality>(exec).expect("p").greed;
+    let exec_coins = w.comp::<Wallet>(exec).expect("w").coins;
     let total = ownership::total_coins(&w);
     let t0 = w.purse(None);
     corps::bankrupt(&mut w, home);
     assert!(!w.is_alive(home), "the corp is gone");
     assert_eq!(w.owner_of(blocks[0]), Some(farm_co), "the first Block to the richest purse that can pay");
     for &b in &blocks[1..] {
-        assert_eq!(w.owner_of(b), None, "the rest to the city at half");
+        assert_eq!(w.owner_of(b), None, "the rest foreclosed by the city");
     }
     assert_eq!(count(&w, EventKind::Bankrupt), 1);
     assert_eq!(count(&w, EventKind::Acquired), blocks.len());
     assert_eq!(ownership::total_coins(&w), total, "bankruptcy moves coins, never makes them");
-    // The city paid half a Block's value for each, and absorbed nothing: the
-    // estate (-500 + 400 + 29 x 200) was positive and went to the exec.
-    let half = w.config.corps.found_cost.home / 2;
-    assert_eq!(w.purse(None), t0 - half * (blocks.len() as i64 - 1));
+    // M11 review: the city forecloses at no price, so the estate (-500 +
+    // 400) is -100 and the Treasury absorbs it; the exec gets nothing.
+    assert_eq!(w.purse(None), t0 - 100);
+    assert_eq!(w.comp::<Wallet>(exec).expect("w").coins, exec_coins, "no severance from a debt");
     assert!(w.comp::<Personality>(exec).expect("p").greed >= greed + 0.049, "the exec drifts greedier");
     for c in [food, farm_co] {
         assert!(w.comp::<Corp>(c).expect("c").shocks.contains(&CorpShock::Bankrupt(home)));
@@ -938,4 +939,74 @@ fn test_bankrupt_farm_is_staffed_by_its_new_owner() {
     assert_ne!(w.owner_of(farm), Some(farm_co));
     let full = corp_brain::full_staff(&w, BuildingKind::Farm);
     assert_eq!(w.vacancies.get(&farm).map_or(0, Vec::len), full, "the new owner posts every job");
+}
+
+// ---------------------------------------------------------------------------
+// M11 review regressions
+// ---------------------------------------------------------------------------
+
+/// Item 2: a dissolved corp's positive estate pays its exec at most
+/// `estate_heir_cap` and the rest goes to the Treasury; with no living exec
+/// all of it does. Coins are conserved either way.
+#[test]
+fn test_estate_pays_capped_severance_and_the_rest_to_the_treasury() {
+    let mut w = world();
+    let (_, _, home) = three(&w);
+    let cap = w.config.corps.estate_heir_cap;
+    assert!(cap > 0);
+    w.comp_mut::<Corp>(home).expect("c").treasury = 12_000;
+    let exec = w.comp::<Corp>(home).expect("c").exec.expect("exec");
+    let (total, t0, e0) = (ownership::total_coins(&w), w.purse(None), w.comp::<Wallet>(exec).expect("w").coins);
+    corps::dissolve(&mut w, home);
+    assert!(!w.is_alive(home));
+    assert_eq!(w.comp::<Wallet>(exec).expect("w").coins - e0, cap, "severance, capped");
+    assert_eq!(w.purse(None) - t0, 12_000 - cap, "the rest to the Treasury");
+    assert_eq!(ownership::total_coins(&w), total, "the estate moves coins, never makes them");
+    // No exec: everything to the Treasury.
+    let mut w = world();
+    let (_, _, home) = three(&w);
+    w.comp_mut::<Corp>(home).expect("c").treasury = 5_000;
+    w.comp_mut::<Corp>(home).expect("c").exec = None;
+    let (total, t0) = (ownership::total_coins(&w), w.purse(None));
+    corps::dissolve(&mut w, home);
+    assert_eq!(w.purse(None) - t0, 5_000);
+    assert_eq!(ownership::total_coins(&w), total);
+    // A bankruptcy whose buildings nobody buys: foreclosed for nothing, and
+    // the Treasury pays no coin into the estate (it paid half value before).
+    let mut w = world();
+    let (food, farm_co, home) = three(&w);
+    for a in w.citizens() {
+        if let Some(wl) = w.comp_mut::<Wallet>(a) {
+            wl.coins = wl.coins.min(100);
+        }
+    }
+    for c in [food, farm_co] {
+        let r = w.comp::<Corp>(c).expect("c").treasury_ref;
+        w.comp_mut::<Corp>(c).expect("c").treasury = r;
+    }
+    w.comp_mut::<Corp>(home).expect("c").treasury = 0;
+    let exec = w.comp::<Corp>(home).expect("c").exec.expect("exec");
+    let (total, t0, e0) = (ownership::total_coins(&w), w.purse(None), w.comp::<Wallet>(exec).expect("w").coins);
+    let blocks = w.comp::<Corp>(home).expect("c").buildings.clone();
+    corps::bankrupt(&mut w, home);
+    assert!(blocks.iter().all(|&b| w.owner_of(b).is_none()), "all foreclosed");
+    assert_eq!(w.purse(None), t0, "the Treasury paid nothing");
+    assert_eq!(w.comp::<Wallet>(exec).expect("w").coins, e0, "and the exec got nothing of it");
+    assert_eq!(ownership::total_coins(&w), total);
+}
+
+/// Pending item 30: a corp with no income and exactly 0 in its treasury
+/// (god v2's Kessler: empty Sump Blocks, no upkeep, an exec wage paid only
+/// from a positive purse) goes bankrupt instead of sitting at 0 forever.
+#[test]
+fn test_zombie_corp_at_zero_goes_bankrupt() {
+    let mut w = world();
+    let (_, _, home) = three(&w);
+    // No rent (a rent cap of 0) and no upkeep: nothing comes in or goes out.
+    w.levers.rent_cap = Some(0);
+    w.config.corps.upkeep.home = [0, 0, 0];
+    w.config.corps.bankrupt_days = 3; // the shipped value
+    w.comp_mut::<Corp>(home).expect("c").treasury = 0;
+    w.run_ticks(TICKS_PER_DAY * (w.config.corps.bankrupt_days + 2));
+    assert!(!w.is_alive(home), "a corp with no income and nothing left dies");
 }

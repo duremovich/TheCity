@@ -587,6 +587,10 @@ pub struct LobbyHold {
 /// D41: the outside parent a branch belongs to (M17 gives it a body).
 pub type ParentId = u32;
 
+/// Outside parents are numbered from here (`OUTSIDE_PARENT_BASE + config
+/// row`), a namespace of their own: not a corp slot, not an entity id.
+pub const OUTSIDE_PARENT_BASE: ParentId = 1000;
+
 /// D49 hook: who decides for a faction. `Dictator` = the corp's `exec` / the
 /// gang's `leader`. M16 adds the vote.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -961,6 +965,10 @@ pub struct Job {
     /// M11 D17: when hired (seeded jobs 0); Hunker fires the newest first.
     #[serde(default)]
     pub hired_tick: Tick,
+    /// M11 D35: the shift key a strike struck (`classes::walk_out`): no
+    /// work, no wage, a guard's shift clock included.
+    #[serde(default)]
+    pub struck_shift: Option<i64>,
 }
 
 impl Job {
@@ -1037,9 +1045,10 @@ pub struct Household {
     /// agent for `[rent] refuse_days`.
     #[serde(default)]
     pub evicted_by: Option<(Option<EntityId>, Tick)>,
-    /// Rent paid, decaying by a seventh a day (about the last week), for the inspector.
+    /// Rent paid per day, `(day, coins)`, the last seven days only (the
+    /// inspector's "paid N in 7 days"; `rent_paid_7d`).
     #[serde(default)]
-    pub rent_paid_7d: i64,
+    pub rent_paid_log: VecDeque<(u64, i64)>,
     /// M11 § 7: consecutive midnights as a Dreg with mood below
     /// `[classes] dreg_emigrate_mood`; at `dreg_emigrate_days` they leave.
     #[serde(default)]
@@ -1048,7 +1057,33 @@ pub struct Household {
 
 impl Household {
     pub fn new(home: Option<EntityId>) -> Household {
-        Household { home, rent_due: 0.0, arrears: 0, evicted_by: None, rent_paid_7d: 0, miserable_days: 0 }
+        Household {
+            home,
+            rent_due: 0.0,
+            arrears: 0,
+            evicted_by: None,
+            rent_paid_log: VecDeque::new(),
+            miserable_days: 0,
+        }
+    }
+
+    /// Rent paid on `today` and the six days before.
+    pub fn rent_paid_7d(&self, today: u64) -> i64 {
+        self.rent_paid_log.iter().filter(|&&(d, _)| d + 7 > today).map(|&(_, c)| c).sum()
+    }
+
+    /// Record `coins` of rent paid on `today`; days older than a week drop.
+    pub fn note_rent_paid(&mut self, today: u64, coins: i64) {
+        if coins <= 0 {
+            return;
+        }
+        while self.rent_paid_log.front().is_some_and(|&(d, _)| d + 7 <= today) {
+            self.rent_paid_log.pop_front();
+        }
+        match self.rent_paid_log.back_mut() {
+            Some((d, c)) if *d == today => *c += coins,
+            _ => self.rent_paid_log.push_back((today, coins)),
+        }
     }
 }
 

@@ -34,9 +34,7 @@ pub fn workplace_key(role: Role) -> LocationKey {
 /// M11 D13: the key of this agent's workplace: a guard employed at a
 /// Security Office works at `Workplace`; every other role at its own kind.
 pub fn workplace_key_for(world: &World, _agent: EntityId, job: &Job) -> LocationKey {
-    let private = job.role == Role::Guard
-        && job.employer.and_then(|e| world.comp::<Building>(e)).is_some_and(|b| b.kind == BuildingKind::SecurityOffice);
-    if private {
+    if crate::systems::law::job_is_private_guard(world, job) {
         LocationKey::Workplace
     } else {
         workplace_key(job.role)

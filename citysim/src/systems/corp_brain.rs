@@ -7,8 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::components::{
-    Building, BuildingKind, Corp, CorpOrder, CorpOrderScore, CorpShock, Gang, Job, Market, Niche, Personality, Role,
-    Wallet,
+    Building, BuildingKind, Corp, CorpOrder, CorpOrderScore, CorpShock, Gang, Job, Market, Niche, Personality, Wallet,
 };
 use crate::config::CorpsCfg;
 use crate::entity::EntityId;
@@ -188,16 +187,11 @@ pub fn niche_buildings(world: &World, corp: EntityId, n: Niche) -> Vec<EntityId>
 /// The daily wage bill a corp owes: its employees' wages and its exec's.
 pub fn wage_bill(world: &World, corp: EntityId) -> i64 {
     let Some(c) = world.comp::<Corp>(corp) else { return 0 };
-    let mut bill = if c.exec.is_some() { world.config.economy.wage_exec } else { 0 };
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            let Some(j) = world.comp::<Job>(a) else { continue };
-            if j.employer.is_some_and(|e| c.buildings.binary_search(&e).is_ok()) {
-                bill += j.wage_per_day;
-            }
-        }
-    }
-    bill
+    let exec = if c.exec.is_some() { world.config.economy.wage_exec } else { 0 };
+    exec + ownership::employees_of(world, corp)
+        .into_iter()
+        .filter_map(|a| world.comp::<Job>(a).map(|j| j.wage_per_day))
+        .sum::<i64>()
 }
 
 /// The gang behind the most loss coins in the 14-day log (ties lower id).
@@ -554,16 +548,8 @@ fn set_level(world: &mut World, corp: EntityId, n: Niche, level: f32) {
 fn staff_up(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let buildings = c.buildings.clone();
-    let mut employed: BTreeMap<EntityId, usize> = BTreeMap::new();
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            if let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) {
-                if buildings.binary_search(&e).is_ok() {
-                    *employed.entry(e).or_default() += 1;
-                }
-            }
-        }
-    }
+    let employed: BTreeMap<EntityId, usize> =
+        ownership::staff_by_building(world, &buildings).into_iter().map(|(b, v)| (b, v.len())).collect();
     for b in buildings {
         let Some(kind) = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| bd.kind) else { continue };
         let Some(role) = ownership::role_for(kind) else { continue };
@@ -594,16 +580,8 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
 fn hunker_vacancies(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let buildings = c.buildings.clone();
-    let mut employed: BTreeMap<EntityId, usize> = BTreeMap::new();
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            if let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) {
-                if buildings.binary_search(&e).is_ok() {
-                    *employed.entry(e).or_default() += 1;
-                }
-            }
-        }
-    }
+    let employed: BTreeMap<EntityId, usize> =
+        ownership::staff_by_building(world, &buildings).into_iter().map(|(b, v)| (b, v.len())).collect();
     for b in buildings {
         let Some(open) = world.vacancies.get(&b).map(|v| v.len()) else { continue };
         let kind = world.comp::<Building>(b).map(|bd| bd.kind);
@@ -623,16 +601,10 @@ fn hunker_vacancies(world: &mut World, corp: EntityId) {
 fn hunker_staff(world: &mut World, corp: EntityId) {
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let buildings = c.buildings.clone();
-    let mut staff: BTreeMap<EntityId, Vec<(crate::time::Tick, EntityId)>> = BTreeMap::new();
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            if let Some(j) = world.comp::<Job>(a) {
-                if let Some(e) = j.employer.filter(|e| buildings.binary_search(e).is_ok()) {
-                    staff.entry(e).or_default().push((j.hired_tick, a));
-                }
-            }
-        }
-    }
+    let staff: BTreeMap<EntityId, Vec<(crate::time::Tick, EntityId)>> = ownership::staff_by_building(world, &buildings)
+        .into_iter()
+        .map(|(b, v)| (b, v.into_iter().filter_map(|a| world.comp::<Job>(a).map(|j| (j.hired_tick, a))).collect()))
+        .collect();
     for (b, mut list) in staff {
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
         // Vat Techs are the city's food: a Food corp that laid them off in
@@ -648,12 +620,12 @@ fn hunker_staff(world: &mut World, corp: EntityId) {
         list.sort();
         let Some(&(_, who)) = list.last() else { continue };
         let role = world.comp::<Job>(who).map(|j| j.role);
-        world.abort_plan(who);
-        world.remove::<Job>(who);
         let name = world.name_of(who);
         let what = role.map_or("worker", |r| r.label());
         let cname = world.owner_label(Some(corp));
-        world.push_event(EventKind::Fire, &[who, b], format!("{name} laid off as {what} by {cname} (hunkering)"));
+        // No vacancy: Hunker is shrinking, and `hunker_vacancies` would close it.
+        let text = format!("{name} laid off as {what} by {cname} (hunkering)");
+        crate::systems::economy::dismiss(world, who, Some(b), text);
     }
 }
 

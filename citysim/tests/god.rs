@@ -355,9 +355,10 @@ fn control() -> &'static Run {
 
 /// The control for a posture pin: the law pinned to Patrol from the baseline
 /// window on, so pinning another posture at the shock is a change the
-/// captain did not choose. At 2,000 residents the unpinned captain sits in
-/// Crackdown or Garrison on most days (the v1 `crackdown_reports` is an
-/// absolute count), so an unpinned control was often already in Crackdown.
+/// captain did not choose. At 2,000 residents the unpinned captain sat in
+/// Crackdown or Garrison on most days while `crackdown_reports` was an
+/// absolute count (per capita since the M11 review), so an unpinned control
+/// was often already in Crackdown.
 fn patrol_control() -> &'static Run {
     static CONTROL: OnceLock<Run> = OnceLock::new();
     CONTROL.get_or_init(|| run_from("god_patrol_control", pin(Posture::Patrol), |_| {}))

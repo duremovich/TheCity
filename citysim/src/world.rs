@@ -885,6 +885,7 @@ impl World {
                         last_wage_attempt_day: None,
                         duty_ticks: 0,
                         hired_tick: 0,
+                        struck_shift: None,
                     },
                 );
             }

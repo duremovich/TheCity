@@ -361,3 +361,22 @@ fn test_player_pins_and_releases_the_posture() {
     let holding = gs.iter().filter(|&&g| law::jail_duty(&w, g, key)).count();
     assert!(holding >= 1 && holding < gs.len(), "a Crackdown on nobody patrols as usual");
 }
+
+/// M11 review item 33: full Crackdown pressure scales with the residents
+/// (`crackdown_reports_per_1000`), and v1_profile keeps the absolute count.
+#[test]
+fn test_crackdown_pressure_scales_per_capita() {
+    let v1 = world(42);
+    assert_eq!(v1.config.law.crackdown_reports_per_1000, 0.0, "v1_profile keeps the absolute key");
+    assert_eq!(law_brain::crackdown_reports(&v1), v1.config.law.crackdown_reports);
+    let cfg = Config::load();
+    let k = cfg.law.crackdown_reports_per_1000;
+    assert!(k > 0.0, "the shipped city scales");
+    let small = World::new(42, cfg.clone().scaled_to(300));
+    let n = citysim::systems::founding::living(&small) as f32;
+    assert_eq!(law_brain::crackdown_reports(&small), ((k * n / 1000.0).round() as u32).max(1));
+    let big = World::new(42, cfg);
+    let n = citysim::systems::founding::living(&big) as f32;
+    assert_eq!(law_brain::crackdown_reports(&big), (k * n / 1000.0).round() as u32);
+    assert!(law_brain::crackdown_reports(&big) > 3 * law_brain::crackdown_reports(&small), "it scales with the city");
+}

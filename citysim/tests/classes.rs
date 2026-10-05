@@ -401,3 +401,37 @@ fn test_evicted_lawless_agent_is_recruitable() {
     w.tick = now + 30 * TICKS_PER_DAY;
     assert!(!classes::evicted_desperate(&w, a));
 }
+
+/// M11 review item 4: a strike bites mid-shift. A body already working (or
+/// walking to work) drops the plan and is not paid for the struck shift.
+#[test]
+fn test_strike_stops_a_shift_in_progress() {
+    let mut w = v1_corp_world();
+    let food = w.corps()[0];
+    // Day 1, an hour into the day shift.
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let working = |w: &World, a: EntityId| {
+        w.comp::<Brain>(a).is_some_and(|b| {
+            b.lod != citysim::Lod::Statistical && b.plan.as_ref().is_some_and(|p| p.goal == GoalKind::Work)
+        })
+    };
+    let staff = ownership::employees_of(&w, food);
+    let busy: Vec<EntityId> = staff.iter().copied().filter(|&a| working(&w, a)).collect();
+    assert!(!busy.is_empty(), "someone at FoodCo is on a Work plan");
+    let before: Vec<u8> = busy.iter().map(|&a| w.comp::<Job>(a).expect("job").days_unpaid).collect();
+    let keys: Vec<i64> = busy.iter().map(|&a| w.comp::<Job>(a).expect("job").next_shift_key(w.tick)).collect();
+    w.push_command(citysim::PlayerCommand::StrikeNow(food));
+    w.apply_commands();
+    for (&a, &key) in busy.iter().zip(&keys) {
+        assert!(!working(&w, a), "the Work plan was dropped");
+        let j = w.comp::<Job>(a).expect("job");
+        assert_eq!((j.last_shift_day, j.struck_shift), (Some(key), Some(key)));
+    }
+    // Past the end of the day shift: no struck shift was owed a wage.
+    w.run_ticks(9 * TICKS_PER_HOUR);
+    for (&a, &d0) in busy.iter().zip(&before) {
+        if let Some(j) = w.comp::<Job>(a) {
+            assert!(j.days_unpaid <= d0, "{}: owed {} -> {}", w.name_of(a), d0, j.days_unpaid);
+        }
+    }
+}

@@ -24,7 +24,7 @@ pub const REPORT_LOG_CAP: usize = 128;
 pub struct PostureInputs {
     /// The gang with the most reports in the window, bribes excluded.
     pub wanted_gang: Option<EntityId>,
-    /// Its reports ÷ `crackdown_reports`, clamped to 1.
+    /// Its reports ÷ `crackdown_reports()` (per capita since the M11 review), clamped to 1.
     pub pressure: f32,
     /// Gang members in the Jail ÷ its capacity, clamped to 1.
     pub jailed_gang: f32,
@@ -103,14 +103,9 @@ pub fn guards(world: &World) -> Vec<EntityId> {
     world.guards().iter().copied().filter(|&g| is_city_guard(world, g)).collect()
 }
 
-/// A guard on the city payroll (employed at the Precinct, or by nobody).
-pub fn is_city_guard(world: &World, g: EntityId) -> bool {
-    world.comp::<crate::components::Job>(g).filter(|j| j.role == crate::components::Role::Guard).is_some_and(|j| {
-        j.employer
-            .and_then(|e| world.comp::<crate::components::Building>(e))
-            .is_none_or(|b| b.kind == crate::components::BuildingKind::Jail)
-    })
-}
+/// A guard on the city payroll (`law::is_city_guard`, re-exported here
+/// where the roster lives).
+pub use crate::systems::law::is_city_guard;
 
 /// The captain: the most lawful living guard, ties by lower index. Stored
 /// on the `Law` and returned.
@@ -162,6 +157,18 @@ pub fn wanted_gang(world: &World) -> Option<(EntityId, usize)> {
     Some(best)
 }
 
+/// Reports in the window that read as full pressure: `[law]
+/// crackdown_reports_per_1000` per 1,000 living residents (at least 1), or
+/// the absolute `crackdown_reports` when that key is 0.
+pub fn crackdown_reports(world: &World) -> u32 {
+    let cfg = &world.config.law;
+    if cfg.crackdown_reports_per_1000 <= 0.0 {
+        return cfg.crackdown_reports.max(1);
+    }
+    let residents = crate::systems::founding::living(world) as f32;
+    ((cfg.crackdown_reports_per_1000 * residents / 1000.0).round() as u32).max(1)
+}
+
 /// Gather the inputs, or `None` when there is no captain to decide.
 pub fn gather_inputs(world: &World) -> Option<PostureInputs> {
     let l = world.law()?;
@@ -175,7 +182,7 @@ pub fn gather_inputs(world: &World) -> Option<PostureInputs> {
         world.with::<Sentence>().into_iter().filter(|&s| world.has::<crate::components::GangMember>(s)).count();
     Some(PostureInputs {
         wanted_gang: wanted,
-        pressure: (reports as f32 / cfg.crackdown_reports.max(1) as f32).clamp(0.0, 1.0),
+        pressure: (reports as f32 / crackdown_reports(world) as f32).clamp(0.0, 1.0),
         jailed_gang: (jailed_gang as f32 / capacity as f32).clamp(0.0, 1.0),
         breakout_recent: l
             .last_breakout_tick
