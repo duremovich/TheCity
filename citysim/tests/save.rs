@@ -56,3 +56,69 @@ fn test_save_file_helpers() {
     assert_eq!(back.tick, 10);
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Drop one `field:(...)` (and its trailing comma) from compact RON, found by
+/// `token`, the field's opening text (e.g. `gangs:(` or `hideout:(index:`).
+fn strip_field(text: &str, token: &str) -> String {
+    let start = text.find(token).unwrap_or_else(|| panic!("{token} not in save"));
+    let open = start + token.find('(').expect("token holds the opening paren");
+    let mut depth = 0usize;
+    let mut end = open;
+    for (i, ch) in text[open..].char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = open + i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = if text[end..].starts_with(',') { end + 1 } else { end };
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// A save from before M8 has no `[gangs]` config and no `Gang.hideout`:
+/// loading one reads the gang config from the assets and hands the gangs
+/// their Hideouts in map order (`World::migrate_legacy`).
+#[test]
+fn test_legacy_save_without_gangs_config_loads() {
+    let mut w = World::new(11, Config::load());
+    w.run_ticks(100);
+    let gangs = w.gangs();
+    let home = w.buildings_by_kind[&BuildingKind::Home][0];
+    w.comp_mut::<citysim::Gang>(gangs[0]).expect("gang").territory = vec![home];
+    let mut text = strip_field(&save::to_ron(&w), "gangs:(names");
+    for _ in 0..gangs.len() {
+        text = strip_field(&text, "hideout:(index:");
+    }
+    assert!(!text.contains("hideout:(index:"), "every Gang.hideout stripped");
+    let back = save::from_ron(&text).expect("a pre-M8 save loads");
+    assert_eq!(back.config.gangs.names, w.config.gangs.names);
+    let expected: Vec<_> = gangs.iter().map(|&g| w.hideout_of(g)).collect();
+    let got: Vec<_> = gangs.iter().map(|&g| back.hideout_of(g)).collect();
+    assert_eq!(got, expected, "Hideouts handed out in map order");
+    assert_eq!(
+        back.comp::<citysim::Building>(home).expect("home").claim,
+        Some(citysim::Claim { gang: gangs[0], count: 3 }),
+        "held territory gets a full claim"
+    );
+}
+
+/// A current save is not touched by the migration: an in-progress claim survives.
+#[test]
+fn test_current_save_keeps_live_claims() {
+    let mut w = World::new(12, Config::load());
+    let gangs = w.gangs();
+    let home = w.buildings_by_kind[&BuildingKind::Home][0];
+    w.comp_mut::<citysim::Gang>(gangs[0]).expect("gang").territory = vec![home];
+    w.comp_mut::<citysim::Building>(home).expect("home").claim = Some(citysim::Claim { gang: gangs[1], count: 2 });
+    let back = save::from_ron(&save::to_ron(&w)).expect("load");
+    assert_eq!(
+        back.comp::<citysim::Building>(home).expect("home").claim,
+        Some(citysim::Claim { gang: gangs[1], count: 2 })
+    );
+}
