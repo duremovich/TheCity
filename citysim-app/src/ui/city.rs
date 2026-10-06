@@ -36,6 +36,10 @@ pub struct CityState {
     pub riot_response: Option<citysim::RiotResponse>,
     pub guard_weight: [f32; citysim::MAX_DISTRICTS],
     pub sanitation_weight: [f32; citysim::MAX_DISTRICTS],
+    /// M13 D48: the Assets levers.
+    pub stims_legal: bool,
+    pub impound: bool,
+    pub asset_tax: [f32; 8],
     pub synced: bool,
 }
 
@@ -59,6 +63,9 @@ impl Default for CityState {
             riot_response: None,
             guard_weight: [1.0; citysim::MAX_DISTRICTS],
             sanitation_weight: [1.0; citysim::MAX_DISTRICTS],
+            stims_legal: false,
+            impound: true,
+            asset_tax: [0.0; 8],
             synced: false,
         }
     }
@@ -85,6 +92,9 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.riot_response = world.levers.riot_response;
         app.city.guard_weight = world.levers.guard_weight;
         app.city.sanitation_weight = world.levers.sanitation_weight;
+        app.city.stims_legal = world.levers.stims_legal;
+        app.city.impound = world.levers.impound;
+        app.city.asset_tax = world.levers.asset_tax;
         app.city.synced = true;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -168,6 +178,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         corps_section(ui, app, world);
         classes_section(ui, world);
         districts_section(ui, app, world);
+        assets_section(ui, app, world);
 
         ui.separator();
         ui.strong("Food");
@@ -481,6 +492,51 @@ fn classes_section(ui: &mut Ui, world: &World) {
     });
     if let Some(t) = world.last_strike {
         ui.small(format!("last strike day {}", citysim::time::day(t)));
+    }
+}
+
+/// M13 § 9: vehicles by kind, chromed agents, mean sanity, hooked adults,
+/// dealer and legal sales today, robots posted; then the levers.
+fn assets_section(ui: &mut Ui, app: &mut App, world: &World) {
+    use citysim::systems::{assets, stims};
+    ui.separator();
+    ui.strong("Assets");
+    let (chromed, sanity, robots, v) = assets::snapshot(world);
+    let hooked = stims::hooked_count(world);
+    let today = &world.stats.current;
+    egui::Grid::new("city_assets").striped(true).show(ui, |ui| {
+        ui.label("Vehicles");
+        ui.label(format!("bikes {} · cars {} · trucks {} · flyers {}", v[0], v[1], v[2], v[3]));
+        ui.end_row();
+        ui.label("Chromed agents");
+        ui.label(format!("{chromed}"));
+        ui.end_row();
+        ui.label("Mean sanity");
+        ui.label(format!("{sanity:.2}"));
+        ui.end_row();
+        ui.label("Hooked adults");
+        ui.label(format!("{hooked}"));
+        ui.end_row();
+        ui.label("Stims sold today");
+        ui.label(format!("dealer {} · legal {}", today.stims_dealt, today.stims_legal));
+        ui.end_row();
+        ui.label("Robots posted");
+        ui.label(format!("{robots}"));
+        ui.end_row();
+    });
+    ui.small("Levers");
+    if ui.checkbox(&mut app.city.stims_legal, "Stims legal (Markets stock and sell them)").changed() {
+        app.cmds.push(PlayerCommand::SetStimsLegal(app.city.stims_legal));
+    }
+    if ui.checkbox(&mut app.city.impound, "Impound vehicles with unpaid upkeep").changed() {
+        app.cmds.push(PlayerCommand::SetImpound(app.city.impound));
+    }
+    for class in citysim::AssetClass::ALL {
+        let slot = &mut app.city.asset_tax[class.index()];
+        let r = ui.add(egui::Slider::new(slot, 0.0..=5.0).text(format!("{class:?} tax")));
+        if r.drag_stopped() || (r.changed() && !r.dragged()) {
+            app.cmds.push(PlayerCommand::SetAssetTax { kind: class, rate: *slot });
+        }
     }
 }
 

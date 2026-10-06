@@ -61,6 +61,8 @@ pub struct App {
     pub selected_district: Option<citysim::DistrictId>,
     /// M12 D43: `L` draws the litter heat on street tiles.
     pub show_litter: bool,
+    /// M13 D47: `K` heats districts by hooked adults (`A` pans).
+    pub show_hooked: bool,
 }
 
 impl App {
@@ -88,6 +90,7 @@ impl App {
             show_districts: false,
             selected_district: None,
             show_litter: false,
+            show_hooked: false,
         }
     }
 
@@ -138,6 +141,8 @@ struct Args {
     select_district: Option<u8>,
     /// M12: start with the litter heat on (`L`).
     litter: bool,
+    /// M13: start with the hooked-adults heat on (`K`).
+    hooked: bool,
 }
 
 fn parse_args() -> Args {
@@ -158,6 +163,7 @@ fn parse_args() -> Args {
         districts: false,
         select_district: None,
         litter: false,
+        hooked: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -181,6 +187,7 @@ fn parse_args() -> Args {
             "--fit" => args.fit = true,
             "--districts" => args.districts = true,
             "--litter" => args.litter = true,
+            "--hooked" => args.hooked = true,
             "--select-district" => {
                 args.select_district = Some(it.next().and_then(|s| s.parse().ok()).expect("--select-district <INDEX>"))
             }
@@ -249,6 +256,7 @@ async fn main() {
     }
     app.show_districts = args.districts;
     app.show_litter = args.litter;
+    app.show_hooked = args.hooked;
     app.selected_district = args.select_district.map(citysim::DistrictId);
     if let Some(d) = app.selected_district.and_then(|d| world.districts.get(d.index())) {
         // Zoomed out so most of the district shows between the panels.
@@ -262,7 +270,7 @@ async fn main() {
         && args.select_district.is_none();
     app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
-        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · F5 save · F9 load",
+        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · F5 save · F9 load",
         world.seed()
     ));
 

@@ -80,6 +80,9 @@ pub fn handle(app: &mut App, world: &mut World) {
     if is_key_pressed(KeyCode::L) {
         app.show_litter = !app.show_litter;
     }
+    if is_key_pressed(KeyCode::K) {
+        app.show_hooked = !app.show_hooked;
+    }
     if is_key_pressed(KeyCode::F) {
         app.follow = app.selected.is_some() && !app.follow;
     }

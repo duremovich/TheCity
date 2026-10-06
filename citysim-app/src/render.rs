@@ -45,6 +45,9 @@ const C_DERELICT: u32 = 0x9a5a3a;
 const C_BED: u32 = 0xd8cfe8;
 /// M13 (plan 2.8): vehicles by kind (bike, car, truck, flyer).
 const C_VEHICLE: [u32; 4] = [0xe0c040, 0x40c8e0, 0xc87840, 0xe040c0];
+/// M13: the hooked-adults heat and the episode flash.
+const C_HOOKED: u32 = 0xd02040;
+const C_EPISODE: u32 = 0xff1010;
 /// M12 D43: the district overlay's controller fill (the City's grey fainter).
 const DISTRICT_ALPHA: f32 = 0.22;
 const DISTRICT_CITY_ALPHA: f32 = 0.12;
@@ -144,6 +147,35 @@ pub fn draw(world: &World, app: &App) {
                     }
                     _ => {}
                 }
+            }
+        }
+    }
+
+    // 1d. M13 D47: with `K` on, each district heated by its hooked adults
+    // (`A` is the pan key), alpha by the share of the worst district.
+    if app.show_hooked && !world.districts.is_empty() {
+        let mut hooked = vec![0u32; world.districts.len()];
+        for id in world.citizens() {
+            let Some(pos) = world.comp::<Position>(id) else { continue };
+            if !citysim::systems::stims::is_hooked(world, id) {
+                continue;
+            }
+            if let Some(n) = hooked.get_mut(world.district_of(pos.tile).index()) {
+                *n += 1;
+            }
+        }
+        let worst = hooked.iter().copied().max().unwrap_or(0).max(1) as f32;
+        let (w, h) = (world.map.w() as u16, world.map.h() as u16);
+        for y in vy0..y1.min(h) {
+            for x in vx0..x1.min(w) {
+                let d = world.district_of(TilePos { x: x as u8, y: y as u8 });
+                let n = hooked.get(d.index()).copied().unwrap_or(0);
+                if n == 0 {
+                    continue;
+                }
+                let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
+                let c = Color { a: 0.12 + 0.4 * n as f32 / worst, ..hex(C_HOOKED) };
+                draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, c);
             }
         }
     }
@@ -266,6 +298,10 @@ pub fn draw(world: &World, app: &App) {
         let p = cam.tile_to_screen(vec2(f32::from(tile.x), f32::from(tile.y)));
         let colour = agent_colour(world, id);
         draw_rectangle(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, colour);
+        // M13 D47: an agent in a cyberpsychotic episode flashes red.
+        if (get_time() * 5.0) as i64 % 2 == 0 && citysim::systems::chrome::in_episode(world, id) {
+            draw_rectangle(p.x - 1.0, p.y - 1.0, ppt + 2.0, ppt + 2.0, hex(C_EPISODE));
+        }
         if let Some(g) = world.gang_of(id) {
             draw_rectangle_lines(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, 2.0, gang_colour(world.gang_index(g)));
         } else if world.comp::<Job>(id).is_some_and(|j| j.role == Role::Guard) {

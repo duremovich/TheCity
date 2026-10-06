@@ -147,8 +147,114 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 ));
             });
         }
+        body_kit(ui, app, world, id);
         buttons(ui, app, world, id);
     });
+}
+
+/// M13 § 9: the Body (strength, reflex, sanity band, addiction), the Kit
+/// (vehicle, implants, finance), carry load over capacity and Appearance.
+fn body_kit(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    use citysim::systems::{assets, chrome, stims};
+    use citysim::{Appearance, Asset, Body, Kit};
+    if let Some(b) = world.comp::<Body>(id) {
+        section(ui, "Body", |ui| {
+            bar(ui, "strength", b.strength, None);
+            bar(ui, "reflex", b.reflex, None);
+            bar(ui, "sanity", b.sanity, Some(world.config.chrome.edgy));
+            let (band, colour) = if chrome::in_episode(world, id) {
+                ("in a cyberpsychotic episode", RED)
+            } else if chrome::edgy(world, id) {
+                ("edgy", GOLD)
+            } else {
+                ("calm", GREEN)
+            };
+            match b.episode_until.filter(|&t| t > world.tick) {
+                Some(t) => ui.colored_label(colour, format!("{band} · ends in {} ticks", t - world.tick)),
+                None => ui.colored_label(colour, band),
+            };
+            bar(ui, "addiction", b.addiction, None);
+            let state = if stims::in_withdrawal(world, id) {
+                Some(("hooked · in withdrawal", RED))
+            } else if stims::is_hooked(world, id) {
+                Some(("hooked", GOLD))
+            } else {
+                None
+            };
+            if let Some((t, c)) = state {
+                ui.colored_label(c, t);
+            }
+            let hours = |t: u64| (world.tick - t) as f32 / citysim::TICKS_PER_HOUR as f32;
+            let last = b.last_use.map_or("never".to_string(), |t| format!("{:.1}h ago", hours(t)));
+            ui.label(format!("last stim {last}{}", if stims::is_high(world, id) { " · high" } else { "" }));
+        });
+    }
+    if let Some(k) = world.comp::<Kit>(id) {
+        section(ui, "Kit", |ui| {
+            match k.vehicle {
+                Some(v) => {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("vehicle");
+                        super::asset::asset_link(ui, app, world, v);
+                    });
+                }
+                None => {
+                    ui.label("no vehicle");
+                }
+            }
+            let implants = chrome::installed(world, id);
+            if implants.is_empty() {
+                ui.label("no implants");
+            }
+            for a in implants {
+                let Some(x) = world.comp::<Asset>(a) else { continue };
+                ui.horizontal_wrapped(|ui| {
+                    let slot = match x.kind {
+                        citysim::AssetKind::Implant(s) => s.label(),
+                        _ => "?",
+                    };
+                    ui.label(format!("{slot} T{} cond {}", x.tier, x.condition));
+                    if x.bricked {
+                        ui.colored_label(RED, "bricked");
+                    } else if x.condition == 0 {
+                        ui.colored_label(RED, "failed");
+                    }
+                    if let Some(f) = &x.finance {
+                        let late = if f.arrears > 0 { format!(" · {} days late", f.arrears) } else { String::new() };
+                        ui.label(format!("owes {}¢ at {}¢/day{late}", f.remaining, f.per_day));
+                    }
+                    super::asset::asset_link(ui, app, world, a);
+                });
+            }
+            ui.label(format!(
+                "fight {:+.2} stealth {:+.2} reflex {:+.2} strength {:+.2} armour {:.2}",
+                k.fighting, k.stealth, k.reflex, k.strength, k.armour
+            ));
+            ui.label(format!("sanity load {:.2} · chrome worth {}¢", k.load, k.chrome_value));
+        });
+    }
+    if let Some(inv) = world.comp::<Inventory>(id) {
+        section(ui, "Carry", |ui| {
+            let (load, cap) = (assets::load(inv), assets::capacity(world, id));
+            let text = format!("load {load} / {cap} (food {}, stims {}, parts {})", inv.food, inv.stims, inv.parts);
+            if load > cap {
+                ui.colored_label(RED, text);
+            } else {
+                ui.label(text);
+            }
+        });
+    }
+    if let Some(a) = world.comp::<Appearance>(id) {
+        section(ui, "Appearance", |ui| {
+            const DRESS: [&str; 4] = ["rags", "street", "smart", "corporate"];
+            let colours = a.colours.map_or("none".to_string(), |c| world.owner_label(Some(c)));
+            ui.label(format!(
+                "dress {} · chrome visibility {} · colours {colours}",
+                DRESS.get(usize::from(a.dress)).copied().unwrap_or("?"),
+                a.chrome
+            ));
+        });
+    }
 }
 
 /// The biography: life events and folded trace runs, newest first. The same
@@ -531,7 +637,7 @@ fn ownership(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
 
 /// A clickable owner: a corp opens its panel, a gang its Hideout, an agent
 /// the inspector; the city is plain text.
-fn owner_link(ui: &mut Ui, app: &mut App, world: &World, owner: Option<EntityId>) {
+pub(super) fn owner_link(ui: &mut Ui, app: &mut App, world: &World, owner: Option<EntityId>) {
     let label = world.owner_label(owner);
     let Some(o) = owner else {
         ui.label(label);
