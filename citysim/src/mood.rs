@@ -111,7 +111,12 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
     let Some(mut mood) = world.comp::<Mood>(id).cloned() else { return };
     let pride = world.comp::<Personality>(id).map_or(0.5, |p| p.pride);
     let low_mood = world.config.demography.emigrate_mood;
-    let bias = litter_bias(world, id);
+    let mut bias = litter_bias(world, id);
+    // M13 D33: the body's term (a branch: a calm body adds nothing).
+    let body = crate::systems::chrome::body_bias(world, id);
+    if body != 0.0 {
+        bias += body;
+    }
     update_biased(&mut mood, needs, memory, pride, w_need, w_memory, low_mood, now, bias);
     if let Some(m) = world.comp_mut::<Mood>(id) {
         *m = mood;

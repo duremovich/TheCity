@@ -27,11 +27,18 @@ fn set_coins(w: &mut World, a: EntityId, coins: i64) {
     w.comp_mut::<Wallet>(a).expect("wallet").coins = coins;
 }
 
-/// Phase 2 seeds two Garages (D18); a phase 1 test that needs a city with
-/// none (an impound nobody buys, one Garage at the parts market) sets them
-/// aside: a demolished building buys and sells nothing.
+/// Phase 2 seeds two Garages and phase 3 three Clinics (D18); a phase 1
+/// test that needs a city with none (an impound nobody buys, one Garage at
+/// the parts market) sets them aside: a demolished building buys and sells
+/// nothing.
 fn set_seeded_garages_aside(w: &mut World) {
-    for g in w.buildings_of_kind(BuildingKind::Garage).to_vec() {
+    let sellers: Vec<EntityId> = w
+        .buildings_of_kind(BuildingKind::Garage)
+        .iter()
+        .chain(w.buildings_of_kind(BuildingKind::Clinic))
+        .copied()
+        .collect();
+    for g in sellers {
         w.comp_mut::<Building>(g).expect("garage").demolished = true;
     }
 }
@@ -272,6 +279,7 @@ fn test_corpse_keeps_loot_until_window_then_inherits() {
     assert_eq!(ownership::total_coins(&w), total);
     // Window 0 (phase 1): inheritance at death, as M12.
     let mut w = city();
+    w.config.assets.loot_window_hours = 0;
     let (dead, spouse) = couple(&w);
     set_coins(&mut w, dead, 100);
     let before = coins(&w, spouse);
@@ -374,4 +382,24 @@ fn test_body_draws_do_not_touch_world_stream() {
     assert!((0.2..0.6).contains(&body.strength) && (0.2..0.6).contains(&body.reflex));
     assert_eq!(body.sanity, 1.0);
     assert_eq!(b.comp::<Body>(who), Some(&body), "keyed: the same Body either way");
+    // Phase 2 review carry-over: a child's and an immigrant's Body draws
+    // leave the world stream and every agent's stream where they were too.
+    let (mother, father) = couple(&a);
+    let home = a.comp::<citysim::Household>(mother).and_then(|h| h.home).expect("a home");
+    let mut spawned = Vec::new();
+    for w in [&mut a, &mut b] {
+        let child = demography::spawn_child(w, mother, father, home);
+        let immigrant = demography::spawn_immigrant(w);
+        spawned.push((child, immigrant));
+    }
+    assert_eq!(spawned[0], spawned[1], "the same ids either way");
+    let (child, immigrant) = spawned[0];
+    for id in [child, immigrant] {
+        assert!(a.has::<Body>(id) && b.has::<Body>(id), "a Body either way");
+        assert_eq!(a.comp::<Body>(id), b.comp::<Body>(id), "keyed draws");
+    }
+    assert_eq!(a.rng.world().random::<u64>(), b.rng.world().random::<u64>(), "the world stream untouched");
+    for id in [mother, father, child, immigrant] {
+        assert_eq!(a.rng.agent(id).random::<u64>(), b.rng.agent(id).random::<u64>(), "agent streams untouched");
+    }
 }

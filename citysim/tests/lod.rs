@@ -277,6 +277,86 @@ fn test_full_vs_statistical_within_15pct() {
     assert!(failures.is_empty(), "{failures:?}");
 }
 
+/// M13 phase 3 (plan 3.9, D46): the parity harness at 500 agents, 30 days,
+/// seeds 2000-2002, one arm per tier (Full, Statistical). In each, every
+/// other adult (even `id.index`) is granted Nerves T2 and Skin T2 on day 0,
+/// so kitted and bare live side by side and a Full fight's reflex term is
+/// not cancelled by a kitted opponent on every side. Within each arm the
+/// kitted adults' violent-death rate ÷ the bare adults' is the kill ratio;
+/// the Statistical ratio is within 0.25 of the Full one. The calibration
+/// city kills too few for a ratio, so the fight's death chance is ×10 and
+/// the table's violence ×5 in both arms, and sanity is held at 1 (no drift:
+/// no Treat trips, no edgy mood; the D46 multipliers have no sanity
+/// reading). Run with `--ignored`.
+#[test]
+#[ignore]
+fn test_kitted_vs_unkitted_parity() {
+    use citysim::systems::{assets, demography};
+    use citysim::{AssetKind, EntityId, EventKind, Slot};
+    use std::collections::BTreeSet;
+    const AGENTS: u32 = 500;
+    const DAYS: u64 = 30;
+    const SEEDS: [u64; 3] = [2000, 2001, 2002];
+    // (kitted adults, kitted violent deaths, bare adults, bare violent deaths)
+    fn run(force: Lod, seed: u64) -> [u64; 4] {
+        let mut cfg = Config::load().calibration_city(AGENTS);
+        // Assets on (the Kit terms read nothing while off), nothing for sale.
+        let full = Config::load();
+        cfg.assets = full.assets.clone();
+        cfg.chrome = full.chrome.clone();
+        cfg.chrome.sanity_drift = 0.0;
+        cfg.lod.flash_w = full.lod.flash_w;
+        cfg.lod.force = Some(force);
+        cfg.lod.stat_violence_mult = 5.0;
+        cfg.crime.fight_death_p *= 10.0;
+        let mut w = World::new(seed, cfg);
+        let adults: Vec<EntityId> =
+            w.citizens().into_iter().filter(|&a| w.has::<Brain>(a) && demography::is_adult(&w, a)).collect();
+        let kitted: BTreeSet<EntityId> = adults.iter().copied().filter(|a| a.index % 2 == 0).collect();
+        let bare: BTreeSet<EntityId> = adults.iter().copied().filter(|a| a.index % 2 == 1).collect();
+        for &a in &kitted {
+            for slot in [Slot::Nerves, Slot::Skin] {
+                assets::grant(&mut w, a, AssetKind::Implant(slot), 2).expect("granted");
+            }
+        }
+        // Nothing to buy: no list prices.
+        w.config.assets.price = Default::default();
+        let (mut dk, mut db, mut cursor) = (0u64, 0u64, 0u64);
+        for _ in 0..DAYS {
+            w.run_ticks(TICKS_PER_DAY);
+            for e in w.events.iter().filter(|e| e.id >= cursor) {
+                if e.kind == EventKind::Death && e.text.contains("died of Violence") {
+                    if let Some(&who) = e.actors.first() {
+                        dk += u64::from(kitted.contains(&who));
+                        db += u64::from(bare.contains(&who));
+                    }
+                }
+            }
+            cursor = w.next_event_id;
+        }
+        [kitted.len() as u64, dk, bare.len() as u64, db]
+    }
+    let pooled = |force: Lod| -> [u64; 4] {
+        let runs: Vec<[u64; 4]> = SEEDS.iter().map(|&s| run(force, s)).collect();
+        std::array::from_fn(|i| runs.iter().map(|r| r[i]).sum())
+    };
+    let ratio = |c: [u64; 4]| {
+        let k = c[1] as f64 / c[0].max(1) as f64;
+        let b = c[3] as f64 / c[2].max(1) as f64;
+        if b > 0.0 {
+            k / b
+        } else {
+            1.0
+        }
+    };
+    let (f, s) = (pooled(Lod::Full), pooled(Lod::Statistical));
+    let (rf, rs) = (ratio(f), ratio(s));
+    eprintln!("Full: kitted {} deaths of {}, bare {} of {}: ratio {rf:.3}", f[1], f[0], f[3], f[2]);
+    eprintln!("Statistical: kitted {} deaths of {}, bare {} of {}: ratio {rs:.3}", s[1], s[0], s[3], s[2]);
+    eprintln!("kill ratio difference {:.3} (tolerance 0.25)", (rf - rs).abs());
+    assert!((rf - rs).abs() <= 0.25, "kill ratio Full {rf:.3} vs Statistical {rs:.3}");
+}
+
 #[test]
 fn test_headless_throughput_8000_tps() {
     if cfg!(debug_assertions) {

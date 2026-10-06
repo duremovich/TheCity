@@ -66,6 +66,11 @@ fn inputs() -> OrderInputs {
         corp_cover: 0.0,
         corp_guards: 0,
         corp_raids: false,
+        clinic_exists: false,
+        harvest_target: None,
+        harvest_cover: 0.0,
+        lawfulness: 0.5,
+        treasury_x: 0.0,
     }
 }
 
@@ -825,6 +830,11 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         own: 10,
         corp_prize: Some((EntityId::none(), 500)),
         corp_raids: true,
+        clinic_exists: false,
+        harvest_target: None,
+        harvest_cover: 0.0,
+        lawfulness: 0.5,
+        treasury_x: 0.0,
         hoard: 0.5,
         hoard_tilt: 0.2,
         courage: 0.8,

@@ -740,6 +740,11 @@ fn test_raid_gated_by_crackdown_on_raider() {
         corp_cover: 0.0,
         corp_guards: 0,
         corp_raids: false,
+        clinic_exists: false,
+        harvest_target: None,
+        harvest_cover: 0.0,
+        lawfulness: 0.5,
+        treasury_x: 0.0,
     };
     let has = |i: &faction::OrderInputs, o: Order| faction::score_orders(i, &cfg).iter().any(|s| s.order == o);
     for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {

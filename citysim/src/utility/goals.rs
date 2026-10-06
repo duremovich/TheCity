@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 19] = [
+pub const GOAL_ORDER: [GoalKind; 21] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -31,8 +31,10 @@ pub const GOAL_ORDER: [GoalKind; 19] = [
     GoalKind::Bury,
     // M12 D27: before Found.
     GoalKind::Squat,
-    // M13 D47: before Found.
+    // M13 D47: before Found (GetHigh joins in phase 4).
     GoalKind::Shop,
+    GoalKind::Treat,
+    GoalKind::Loot,
     // M11 D26: just before Idle.
     GoalKind::Found,
     GoalKind::Idle,
@@ -142,6 +144,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Squat => !crate::systems::street::can_squat(world, id),
         // M13 D43: nothing affordable, on cooldown, in arrears or no open seller.
         GoalKind::Shop => crate::systems::assets::shop_choice(world, id, true).is_none(),
+        // M13 D34 (phase 3: Therapy only): nothing to treat at `treat_below`.
+        GoalKind::Treat => !crate::systems::chrome::wants_treatment(world, id),
+        // M13 D35: no body within reach to strip.
+        GoalKind::Loot => crate::systems::chrome::loot_target(world, id).is_none(),
         _ => false,
     }
 }
@@ -299,11 +305,20 @@ pub fn considerations(
             ]
         }
         GoalKind::Fight => {
+            // M13 D33: an episode pins Fight: 1.0 flat, nothing else counts.
+            if crate::systems::chrome::in_episode(world, id) {
+                return Some((vec![Consideration::new("episode", 1.0, IDENTITY)], 1.0));
+            }
             let n = needs?;
             let s = world.comp::<Skills>(id)?;
             let p = pers?;
             if mood < -0.6 {
                 flat = 0.15;
+            }
+            // M13 D33: an edgy body is spoiling for it (a branch: 0 is M12).
+            let edgy = crate::systems::chrome::fight_flat(world, id);
+            if edgy != 0.0 {
+                flat += edgy;
             }
             // Memory readers: a Fought or Lost memory in the last two days means
             // the matter rests (a lost fight ends it; a fought enemy is not fought
@@ -511,6 +526,38 @@ pub fn considerations(
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.4, b: 0.6 }),
                 Consideration::new("night", can(phase == DayPhase::Night), Curve::Step { t: 1.0, lo: 0.3, hi: 1.0 }),
+            ]
+        }
+        // M13 D34 (spec § 4 table; phase 3 reads the sanity term only):
+        // `already_satisfied` has skipped the calm.
+        GoalKind::Treat => {
+            let n = needs?;
+            let p = pers?;
+            let body = world.comp::<crate::components::Body>(id)?;
+            let tile = world.comp::<crate::components::Position>(id)?.tile;
+            let clinic = crate::systems::chrome::nearest_clinic(world, tile, true);
+            let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+            let ok = clinic.is_some_and(|c| coins >= crate::systems::chrome::therapy_price(world, c));
+            let x = (world.config.chrome.edgy - body.sanity).clamp(0.0, 1.0);
+            vec![
+                Consideration::new("clinic open, can pay", can(ok), GATE),
+                Consideration::new("edgy - sanity", x, Curve::Logistic { k: 8.0, mid: 0.3 }),
+                Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("lawfulness", p.lawfulness, Curve::Linear { m: 0.4, b: 0.6 }),
+            ]
+        }
+        // M13 D35: `already_satisfied` has found a body within reach.
+        GoalKind::Loot => {
+            let n = needs?;
+            let p = pers?;
+            let tile = world.comp::<crate::components::Position>(id)?.tile;
+            let cover = world.district(world.district_of(tile)).coverage;
+            vec![
+                Consideration::new("body within reach", can(true), GATE),
+                Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("1-U(wealth)", 1.0 - urgency(n.wealth), Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("greed", p.greed, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("1-coverage/2", 1.0 - cover / 2.0, Curve::Linear { m: 0.5, b: 0.5 }),
             ]
         }
         // M13 D43: the best affordable offer's considerations (spec § 6).

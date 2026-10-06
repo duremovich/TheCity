@@ -560,6 +560,9 @@ pub struct OrderFlatCfg {
     /// M12 D38 (phase 3): the gang's Squat order.
     #[serde(default)]
     pub squat: f32,
+    /// M13 D36 (phase 3): the gang's Harvest order.
+    #[serde(default)]
+    pub harvest: f32,
 }
 
 impl OrderFlatCfg {
@@ -824,6 +827,13 @@ pub struct LodCfg {
     /// `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`).
     #[serde(default = "default_stat_policy")]
     pub policy: String,
+    /// M13 D46: a Statistical kitted agent's `p_robbed × (1 + flash_w × Kit.flash)`.
+    #[serde(default)]
+    pub flash_w: f32,
+    /// M13 D37: the binder weights an Assaulted or Killed candidate by
+    /// `1 + chrome_bind_w × Kit.fighting`.
+    #[serde(default)]
+    pub chrome_bind_w: f32,
 }
 
 fn default_stat_policy() -> String {
@@ -1714,6 +1724,50 @@ pub struct ChromeCfg {
     /// Spec § 3: a Clinic or Garage buys a used asset at this share of its
     /// value (phase 2: a hunkering corp's fleet sale, D44).
     pub buyback_frac: f32,
+    /// Phase 3 (spec § 3): the fee to install a gang's own implant, per tier.
+    pub install_fee: Vec<i64>,
+    /// Sanity lost at once on an install.
+    pub install_shock: f32,
+    /// Daily: sanity moves toward `1 − Kit.load` by at most this.
+    pub sanity_drift: f32,
+    /// Daily: an extra sanity loss per installed implant whose upkeep is unpaid.
+    pub unmedicated_drift: f32,
+    /// Below this sanity: `−edgy_mood` mood, `+edgy_fight` on the Fight flat.
+    pub edgy: f32,
+    pub edgy_mood: f32,
+    pub edgy_fight: f32,
+    /// Below this sanity an episode can start (daily roll).
+    pub psycho: f32,
+    /// `p_episode = episode_base × (psycho − sanity) ÷ psycho`.
+    pub episode_base: f32,
+    /// × on `p_episode` within `[stims] stim_hours` of a stim (phase 4 reads it).
+    pub stim_episode_mult: f32,
+    pub episode_hours: u32,
+    /// An episode's `Attack` kills at `fight_death_p × this`.
+    pub berserk_kill_mult: f32,
+    /// A guard's contested arrest of an episode kills at this.
+    pub psycho_kill: f32,
+    pub therapy_price: i64,
+    pub therapy_gain: f32,
+    /// Harvest sees chrome at `Kit.visible ≥` this.
+    pub harvest_min_visible: u8,
+    /// Daily, while a gang holds Harvest: a Statistical target's roll
+    /// `abduct_base × chrome_value ÷ 1000 × (2 − coverage)`.
+    pub abduct_base: f32,
+    /// A ripped live abductee dies with this chance.
+    pub p_rip_kill: f32,
+    /// Plan D35: the Loot goal sees unsettled bodies within this many tiles
+    /// (Manhattan; a plan key the spec leaves unnamed).
+    pub loot_reach: u32,
+    /// Plan D44 (phase 3 deviation): a gang buys its members' Arms with the
+    /// treasury at this (the spec's `gang_buy_floor` 600 is never reached
+    /// before phase 4's dealing money; seed 42's gangs hold 0-600).
+    pub gang_chrome_floor: i64,
+    /// Plan D34 (phase 3 deviation): the Treat goal is considered below this
+    /// sanity (1.0: any body that has lost some; a whole one has nothing to
+    /// treat, else the Treat curve's floor sent the calm to Therapy whenever
+    /// they idled).
+    pub treat_below: f32,
 }
 
 impl Default for ChromeCfg {
@@ -1737,6 +1791,27 @@ impl ChromeCfg {
             used_frac: 0.6,
             contest_step: 0.25,
             buyback_frac: 0.4,
+            install_fee: vec![30, 80, 200],
+            install_shock: 0.05,
+            sanity_drift: 0.05,
+            unmedicated_drift: 0.02,
+            edgy: 0.5,
+            edgy_mood: 0.2,
+            edgy_fight: 0.1,
+            psycho: 0.25,
+            episode_base: 0.05,
+            stim_episode_mult: 2.0,
+            episode_hours: 3,
+            berserk_kill_mult: 4.0,
+            psycho_kill: 0.3,
+            therapy_price: 60,
+            therapy_gain: 0.15,
+            harvest_min_visible: 3,
+            abduct_base: 0.002,
+            p_rip_kill: 0.5,
+            loot_reach: 16,
+            gang_chrome_floor: 300,
+            treat_below: 1.0,
         }
     }
 }

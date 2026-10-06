@@ -5,7 +5,7 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, LawShock, MemoryKind, Needs, Personality,
+    Brain, Building, BuildingKind, Crime, CrimeReport, DeathCause, Job, Kit, LawShock, MemoryKind, Needs, Personality,
     Position, Posture, Role, Sentence, Skills, TilePos,
 };
 use crate::entity::EntityId;
@@ -60,6 +60,7 @@ pub fn crime_salience(crime: Crime) -> f32 {
         // M13 D47.
         Crime::GrandTheft => 0.6,
         Crime::Manslaughter => 0.8,
+        Crime::Abduction => 0.9,
     }
 }
 
@@ -81,7 +82,12 @@ pub fn wanted(world: &World, suspect: EntityId) -> bool {
 pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>, crime: Crime, tile: TilePos) {
     let cfg = world.config.crime.clone();
     let r = if world.is_dark() { cfg.sight_night_crime } else { cfg.sight_day_crime };
-    let stealth = world.comp::<Skills>(actor).map_or(0.0, |s| s.stealth);
+    // M13 D32: Eyes add to the actor's stealth (read as M12 when 0).
+    let mut stealth = world.comp::<Skills>(actor).map_or(0.0, |s| s.stealth);
+    let kit_stealth = world.comp::<Kit>(actor).map_or(0.0, |k| k.stealth);
+    if kit_stealth != 0.0 {
+        stealth += kit_stealth;
+    }
     let actor_building = world.comp::<Position>(actor).and_then(|p| p.building);
     let salience = crime_salience(crime);
     // M12 D7: the district's crime counter.
@@ -92,6 +98,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         Crime::Extortion | Crime::Assault => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
         // A crash's litter is the crash's (`vehicles::crash`).
         Crime::Murder | Crime::Vagrancy | Crime::Manslaughter => {}
+        Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
     let witnesses: Vec<EntityId> = world
@@ -99,8 +106,10 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         .into_iter()
         .filter(|&w| w != actor)
         .filter(|&w| {
+            // M13 D32: a witness with Eyes sees `Kit.sight` tiles further.
+            let reach = r + world.comp::<Kit>(w).map_or(0, |k| u32::from(k.sight));
             world.comp::<Position>(w).is_some_and(|p| {
-                (actor_building.is_some() && p.building == actor_building) || chebyshev(p.tile, tile) <= r
+                (actor_building.is_some() && p.building == actor_building) || chebyshev(p.tile, tile) <= reach
             })
         })
         .collect();
@@ -130,7 +139,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     }
     if let Some(v) = victim {
         let kind = match crime {
-            Crime::Assault | Crime::Murder | Crime::Manslaughter => MemoryKind::Fought,
+            Crime::Assault | Crime::Murder | Crime::Manslaughter | Crime::Abduction => MemoryKind::Fought,
             Crime::Theft | Crime::Extortion | Crime::Vagrancy | Crime::GrandTheft => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
@@ -255,31 +264,77 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     let base = match crime {
         Crime::GrandTheft => ext.grand_theft,
         Crime::Manslaughter => ext.manslaughter,
+        Crime::Abduction => ext.abduction,
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;
     days * TICKS_PER_DAY
 }
 
-/// The fight model's inputs, with the defaults for agents lacking the component.
+/// The fight model's inputs, with the defaults for agents lacking the
+/// component. M13 D31: `Skills.fighting + Kit.fighting` (Arms), the Kit term
+/// added only when there is one, so a bare fighter reads as M12.
 pub fn fighting(world: &World, id: EntityId) -> f32 {
-    world.comp::<Skills>(id).map_or(0.2, |s| s.fighting)
+    let base = world.comp::<Skills>(id).map_or(0.2, |s| s.fighting);
+    match world.comp::<Kit>(id).map(|k| k.fighting) {
+        Some(k) if k != 0.0 => base + k,
+        _ => base,
+    }
 }
 
 pub fn courage(world: &World, id: EntityId) -> f32 {
     world.comp::<Personality>(id).map_or(0.5, |p| p.courage)
 }
 
+/// M13 D31: what a fight's caller adds: the death chance × `kill_mult` (a
+/// Crush, a berserker), and `a_bonus` on the attacker's fighting (an
+/// abduction crew's members within 2 tiles).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FightMods {
+    pub kill_mult: f32,
+    pub a_bonus: f32,
+}
+
+impl Default for FightMods {
+    fn default() -> Self {
+        FightMods { kill_mult: 1.0, a_bonus: 0.0 }
+    }
+}
+
 /// `p_win = clamp(0.5 + 0.4 (fi_a − fi_b) + 0.1 (C_a − C_b), 0.1, 0.9)`.
 /// Returns `(winner, loser, loser_died)`.
 pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, EntityId, bool) {
-    resolve_fight_with(world, a, b, 1.0)
+    resolve_fight_mods(world, a, b, FightMods::default())
 }
 
 /// M12 D32: [`resolve_fight`] with the death chance × `kill_mult` (a Crush).
 pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult: f32) -> (EntityId, EntityId, bool) {
+    resolve_fight_mods(world, a, b, FightMods { kill_mult, a_bonus: 0.0 })
+}
+
+/// M13 D31: the fight with its mods and the Kit terms. Only when either
+/// side's Kit is not bare does `+ 0.2 (K.reflex_a − K.reflex_b)` join
+/// `p_win`, and only when the loser has armour is the death chance ×
+/// `(1 − armour)`: branches, not zero terms, so two unchromed fighters roll
+/// exactly as in M12 (`tests/chrome.rs` asserts it).
+pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
+    // TODO(M13 ph4): a posted robot on either side (D41) has no Brain: its
+    // fighting is `robot_fighting[tier - 1]`, its courage 1.0, and the
+    // memories, drift, mood, skill gain and `social::fought` below are
+    // skipped for it; a robot loser is wrecked, never killed.
     let (fi, co) = (fighting, courage);
-    let p_win = (0.5 + 0.4 * (fi(world, a) - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))).clamp(0.1, 0.9);
+    let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
+    let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
+    let fi_a = if mods.a_bonus != 0.0 { fi(world, a) + mods.a_bonus } else { fi(world, a) };
+    let p_win = if kitted {
+        let reflex = |k: &Option<Kit>| k.as_ref().map_or(0.0, |k| k.reflex);
+        (0.5 + 0.4 * (fi_a - fi(world, b))
+            + 0.1 * (co(world, a) - co(world, b))
+            + 0.2 * (reflex(&kit_a) - reflex(&kit_b)))
+        .clamp(0.1, 0.9)
+    } else {
+        (0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))).clamp(0.1, 0.9)
+    };
     let roll: f32 = world.rng.world().random();
     let (winner, loser) = if roll < p_win { (a, b) } else { (b, a) };
     world.remember(a, MemoryKind::Fought, Some(b), 0.7, -0.5, false);
@@ -302,7 +357,12 @@ pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult
         s.fighting = (s.fighting + 0.01).min(1.0);
     }
     crate::systems::social::fought(world, winner, loser);
-    let p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)) * kill_mult;
+    let mut p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)) * mods.kill_mult;
+    let loser_kit = if loser == a { &kit_a } else { &kit_b };
+    let armour = loser_kit.as_ref().map_or(0.0, |k| k.armour);
+    if armour > 0.0 {
+        p_death *= 1.0 - armour;
+    }
     let roll: f32 = world.rng.world().random();
     let died = roll < p_death;
     if died {
@@ -324,12 +384,23 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
         return false;
     }
     let courage = world.comp::<Personality>(suspect).map_or(0.0, |p| p.courage);
-    if courage > 0.7 {
-        let (winner, loser, died) = resolve_fight(world, guard, suspect);
+    // M13 D33: a berserker always fights the cuffs, and the guard fights to
+    // kill (`psycho_kill`, × `crush_kill_mult` under a Crush).
+    let berserk = crate::systems::chrome::in_episode(world, suspect);
+    if courage > 0.7 || berserk {
+        let mods = if berserk {
+            FightMods { kill_mult: crate::systems::chrome::arrest_kill_mult(world, suspect), a_bonus: 0.0 }
+        } else {
+            FightMods::default()
+        };
+        let (winner, loser, died) = resolve_fight_mods(world, guard, suspect, mods);
         if died {
             if loser == suspect {
                 // The suspect died resisting: nothing left to prosecute.
                 resolve_reports(world, suspect);
+                if berserk {
+                    crate::systems::chrome::ended_by_law(world, suspect, "killed by the law");
+                }
             } else {
                 // The suspect killed the guard: a Murder, witnessed by whoever is near.
                 let tile = world.comp::<Position>(suspect).map_or(TilePos::default(), |p| p.tile);
@@ -355,6 +426,10 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
         b.cuffed_by = Some(guard);
         b.current_goal = None;
+    }
+    // M13 D33: the cuffs end an episode.
+    if berserk {
+        crate::systems::chrome::ended_by_law(world, suspect, "arrested");
     }
     if let Some(b) = world.comp_mut::<Brain>(guard) {
         b.escorting = Some(suspect);
@@ -408,6 +483,8 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
         b.cuffed_by = None;
     }
+    // M13 D33: jailing ends an episode still running.
+    crate::systems::chrome::ended_by_law(world, suspect, "jailed");
     // Sentenced while in cuffs (a second escort, a player or god jailing):
     // the sentence they are serving stands.
     if world.has::<Sentence>(suspect) {
@@ -861,13 +938,21 @@ fn sightings(world: &mut World) {
     }
     let sight = world.config.crime.sight;
     // `near` per (guard, suspect) pair, with the guards' positions read once.
-    let guards: Vec<(TilePos, Option<EntityId>)> =
-        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| (p.tile, p.building))).collect();
+    // M13 D32: a guard with Eyes sees `Kit.sight` tiles further.
+    let guards: Vec<(TilePos, Option<EntityId>, u32)> = world
+        .guards()
+        .iter()
+        .filter_map(|&g| {
+            let extra = world.comp::<Kit>(g).map_or(0, |k| u32::from(k.sight));
+            world.comp::<Position>(g).map(|p| (p.tile, p.building, extra))
+        })
+        .collect();
     let tick = world.tick;
     for s in suspects {
         let Some(ps) = world.comp::<Position>(s) else { continue };
         let (tile, building) = (ps.tile, ps.building);
-        let seen = guards.iter().any(|&(t, b)| (b.is_some() && b == building) || chebyshev(t, tile) <= sight);
+        let seen =
+            guards.iter().any(|&(t, b, extra)| (b.is_some() && b == building) || chebyshev(t, tile) <= sight + extra);
         if seen {
             world.last_seen.insert(s, (tile, tick));
         }

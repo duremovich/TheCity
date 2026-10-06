@@ -81,6 +81,17 @@ pub struct OrderInputs {
     /// M12 D39: corp raids are on (`[gangs] corp_raid_cap > 0`): the hoard
     /// tilt lands on the corp Raid, not on Contest (M11 D33).
     pub corp_raids: bool,
+    /// M13 D36: a Clinic stands (somewhere to sell or install the take).
+    pub clinic_exists: bool,
+    /// M13 D36: `chrome::harvest_target`: the most valuable visible chrome
+    /// on the gang's ground, and its value.
+    pub harvest_target: Option<(EntityId, i64)>,
+    /// M13 D36: the cover over the Harvest target's district (`target_cover`'s rule).
+    pub harvest_cover: f32,
+    /// M13 D36: the leader's lawfulness.
+    pub lawfulness: f32,
+    /// M13 D36: the gang's treasury ÷ `[corps] hoard_heat`, clamped 0..1.
+    pub treasury_x: f32,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
@@ -225,6 +236,23 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("greed", i.greed, Curve::Linear { m: 0.5, b: 0.5 }),
             ],
             f.squat,
+        ),
+        // M13 D36 (spec § 3 table).
+        score(
+            Order::Harvest,
+            vec![
+                Consideration::new(
+                    "crew, clinic, target",
+                    can(i.own >= 3 && i.clinic_exists && i.harvest_target.is_some()),
+                    GATE,
+                ),
+                Consideration::new("greed", i.greed, Curve::Quadratic { k: 2.0, m: 1.0, c: 0.0, b: 0.0 }),
+                Consideration::new("1-lawfulness", 1.0 - i.lawfulness, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("1-U(treasury/hoard_heat)", i.treasury_x, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("1-heat", calm, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("1-target cover", 1.0 - i.harvest_cover, Curve::Linear { m: 0.8, b: 0.2 }),
+            ],
+            f.harvest,
         ),
         score(
             Order::BreakOut,
@@ -407,6 +435,16 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         .map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len().min(cfg.corp_raid_posted));
     let rival_hq = rival.and_then(|r| world.hideout_of(r));
     let jail = world.building_of_kind(BuildingKind::Jail);
+    // M13 D36: the Harvest inputs (the target is cached on the gang by `rescore`).
+    let clinic_exists = world
+        .buildings_of_kind(BuildingKind::Clinic)
+        .iter()
+        .any(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict));
+    let harvest_target = if clinic_exists { crate::systems::chrome::harvest_target(world, gang) } else { None };
+    let harvest_cover = harvest_target
+        .and_then(|(t, _)| world.comp::<crate::components::Position>(t))
+        .map_or(0.0, |p| tile_cover(world, gang, p.tile));
+    let heat_ref = world.config.corps.hoard_heat.max(1);
     Some(OrderInputs {
         frontier,
         frontier_total,
@@ -440,7 +478,26 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         corp_cover,
         corp_guards,
         corp_raids,
+        clinic_exists,
+        harvest_target,
+        harvest_cover,
+        lawfulness: p.lawfulness,
+        treasury_x: (g.treasury as f32 / heat_ref as f32).clamp(0.0, 1.0),
     })
+}
+
+/// M13 D36: [`cover_of`]'s rule for a district by tile (the Harvest target's).
+fn tile_cover(world: &World, gang: EntityId, tile: crate::components::TilePos) -> f32 {
+    use crate::components::Stance;
+    if !world.config.law.district_beats {
+        return 0.0;
+    }
+    let d = world.district(world.district_of(tile));
+    if d.stance == Stance::Crackdown(gang) || d.stance == Stance::Cordon {
+        return 1.0;
+    }
+    let cov = if d.homes.is_empty() { 1.0 } else { d.coverage };
+    ((cov - 0.5) / 1.5).clamp(0.0, 0.95)
 }
 
 /// M12 D38: per district, held by `gang` (`control == Gang(gang)`), and open
@@ -526,6 +583,11 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     };
     let cfg = world.config.gangs.clone();
     let scores = score_orders(&inputs, &cfg);
+    // M13 D36: the Harvest target, cached for the members' GangWork.
+    let harvest = inputs.harvest_target.map(|(t, _)| t);
+    if let Some(g) = world.comp_mut::<Gang>(gang) {
+        g.harvest_target = harvest;
+    }
     let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return false };
     let next = choose(&scores, current, hysteresis);
     let best_score = scores.first().map_or(0.0, |s| s.score);

@@ -376,7 +376,8 @@ pub fn life_bound(world: &mut World, hole: &Hole, bound: Bound) {
         let kind = match hole.kind {
             HoleKind::Robbed => LifeKind::RobbedSomeone,
             HoleKind::Assaulted => LifeKind::AssaultedSomeone,
-            HoleKind::Killed => LifeKind::KilledSomeone,
+            // M13 D37: an abductee is dead by the time the hole binds.
+            HoleKind::Killed | HoleKind::Abducted => LifeKind::KilledSomeone,
         };
         add_life(world, a, LifeEvent { tick: hole.tick, kind, other: Some(hole.victim), hole: None, salience: 1.0 });
     }

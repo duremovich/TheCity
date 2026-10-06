@@ -22,6 +22,8 @@ const FILES: &[&str] = &[
     // M13 phase 2.
     "systems/vehicles.rs",
     "systems/security.rs",
+    // M13 phase 3.
+    "systems/chrome.rs",
 ];
 
 #[test]

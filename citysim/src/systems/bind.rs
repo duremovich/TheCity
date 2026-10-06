@@ -34,7 +34,7 @@ pub fn open_hole(world: &mut World, hole: Hole) -> HoleId {
     let amount = match hole.kind {
         crate::components::HoleKind::Robbed => Some((6, 0)),
         crate::components::HoleKind::Assaulted => Some((12, 1)),
-        crate::components::HoleKind::Killed => None,
+        crate::components::HoleKind::Killed | crate::components::HoleKind::Abducted => None,
     };
     if let Some((a, r)) = amount {
         crate::systems::litter::deposit_in_district(world, hole.district, a, r, hole.id);
@@ -129,6 +129,10 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
         let Some(p) = world.comp::<Personality>(id) else { continue };
         let l = f64::from(p.lawfulness);
         let g = t.has(trace_flags::GANG);
+        // M13 D37: only a gang member abducts for parts.
+        if hole.kind == HoleKind::Abducted && !g {
+            continue;
+        }
         let c = claim_gang.is_some() && claim_gang == world.gang_of(id);
         let e = world.enemies.get(&hole.victim).is_some_and(|s| s.contains(&id));
         let s = t.has(trace_flags::STATISTICAL_ALL_DAY);
@@ -144,6 +148,13 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
             w *= cfg.other_zone_weight;
         } else if t.district != hole.district || hole.district.is_unset() {
             w *= cfg.same_zone_weight;
+        }
+        // M13 D37: the chromed are the likelier culprits of a beating or a
+        // killing (a branch: a bare candidate's weight is untouched).
+        if matches!(hole.kind, HoleKind::Assaulted | HoleKind::Killed) {
+            if let Some(m) = crate::systems::chrome::bind_weight(world, id) {
+                w *= m;
+            }
         }
         if w > 0.0 {
             out.push((id, w));
@@ -274,7 +285,8 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
                 world.remember(actor, MemoryKind::Fought, Some(victim), 0.7, -0.5, false);
                 world.remember(actor, MemoryKind::Won, Some(victim), 0.6, 0.4, false);
             }
-            HoleKind::Robbed => {
+            // M13 D37: the abductee's coins go to the actor as a robbery's do.
+            HoleKind::Robbed | HoleKind::Abducted => {
                 if let Some(w) = world.comp_mut::<Wallet>(actor) {
                     w.coins += hole.loot;
                 }
@@ -283,6 +295,7 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         let kinds: &[MemoryKind] = match hole.kind {
             HoleKind::Robbed => &[MemoryKind::WasRobbed],
             HoleKind::Assaulted | HoleKind::Killed => &[MemoryKind::Fought, MemoryKind::Lost],
+            HoleKind::Abducted => &[],
         };
         if let Some(m) = world.comp_mut::<crate::components::Memory>(victim) {
             for e in m.entries.iter_mut() {
@@ -318,6 +331,14 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         if hole.kind == HoleKind::Assaulted && crate::systems::law::is_guard(world, victim) {
             crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
         }
+    }
+    // M13 D37: the limbo chrome goes to the actor's gang, or is destroyed.
+    if hole.kind == HoleKind::Abducted {
+        let actor = match bound {
+            Bound::Actor(a) => Some(a),
+            Bound::Unknown => None,
+        };
+        crate::systems::chrome::settle_limbo(world, hole.id, actor);
     }
     // 8. The ring entry names the actor (or says nobody ever will).
     rewrite_event(world, &hole, bound);
@@ -372,8 +393,11 @@ fn attributed_event(world: &mut World, hole: &Hole, bound: Bound, witness: Optio
 pub fn drop_victim_holes(world: &mut World, victim: EntityId) {
     let ids = world.holes_by_agent.get(&victim).cloned().unwrap_or_default();
     for id in ids {
-        if take(world, id).is_some() {
+        if let Some(hole) = take(world, id) {
             world.stats.current.holes_unknown += 1;
+            if hole.kind == HoleKind::Abducted {
+                crate::systems::chrome::settle_limbo(world, id, None);
+            }
         }
     }
     world.holes_by_agent.remove(&victim);
@@ -382,6 +406,9 @@ pub fn drop_victim_holes(world: &mut World, victim: EntityId) {
 /// Close a hole as Unknown without a draw (the per-victim cap).
 pub fn expire(world: &mut World, id: HoleId) {
     let Some(hole) = take(world, id) else { return };
+    if hole.kind == HoleKind::Abducted {
+        crate::systems::chrome::settle_limbo(world, id, None);
+    }
     rewrite_event(world, &hole, Bound::Unknown);
     crate::events::life_bound(world, &hole, Bound::Unknown);
     world.stats.current.holes_unknown += 1;

@@ -12,6 +12,7 @@
 
 pub mod assets;
 pub mod bind;
+pub mod chrome;
 pub mod classes;
 pub mod corp_brain;
 pub mod corps;

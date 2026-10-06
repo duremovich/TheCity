@@ -415,7 +415,7 @@ pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
     if loyalty < world.config.gangs.freelance_loyalty {
         return None;
     }
-    matches!(g.order, Order::Expand | Order::Contest | Order::Squat).then_some(g.order)
+    matches!(g.order, Order::Expand | Order::Contest | Order::Squat | Order::Harvest).then_some(g.order)
 }
 
 /// M12 D38 (phase 3): the derelict Blocks a gang's Squat order may take:
@@ -521,6 +521,12 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
             let rival = world.rival_of(gang)?;
             theirs = Some(world.comp::<Gang>(rival)?.territory.as_slice());
             (hideout_door, Some(Order::Contest))
+        }
+        // M13 D36: the gang's Harvest target (cached at the rescore).
+        Some(Order::Harvest) => {
+            return crate::systems::chrome::gang_harvest_target(world, gang)
+                .filter(|&t| t != id)
+                .map(|t| (t, Some(Order::Harvest)));
         }
         // M12 D38: the unheld derelict in the gang's districts nearest the Hideout.
         Some(Order::Squat) => {
@@ -904,6 +910,8 @@ fn daily_economy(world: &mut World) {
         // M13 D27: the chop shop, then D44: a bike for a member.
         crate::systems::vehicles::chop_daily(world, gang);
         crate::systems::vehicles::gang_bikes(world, gang);
+        // M13 D44 (phase 3): then an Arms implant for the strongest member.
+        crate::systems::chrome::gang_arms(world, gang);
     }
 }
 

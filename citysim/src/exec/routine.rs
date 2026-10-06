@@ -31,7 +31,7 @@ pub fn workplace_key(role: Role) -> LocationKey {
         // M13 D16: a Clinic's staff work at their employer (phase 3 gives
         // the Clinic its key); D47: a Garage's at the Garage, the key the
         // building is observed as.
-        Role::Ripperdoc => LocationKey::Workplace,
+        Role::Ripperdoc => LocationKey::Clinic,
         Role::Mechanic => LocationKey::Garage,
     }
 }

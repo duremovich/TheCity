@@ -48,9 +48,33 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Register => 30,
         ActionKind::CheckIn => 5,
         ActionKind::Occupy => 10,
-        // M13 D29 (+120 for an implant, phase 3), D26.
-        ActionKind::BuyAsset => 20,
+        // M13 D29 (+120 for an implant: it is installed in the same action), D26.
+        ActionKind::BuyAsset => {
+            let implant = world.comp::<Brain>(id).and_then(|b| b.shop_pick.as_ref()).is_some_and(|p| {
+                p.kind.is_implant()
+                    || p.used
+                        .and_then(|u| world.comp::<crate::components::Asset>(u))
+                        .is_some_and(|x| x.kind.is_implant())
+            });
+            if implant {
+                140
+            } else {
+                20
+            }
+        }
         ActionKind::StealVehicle => 15,
+        // M13 D34, D35, D36.
+        ActionKind::Install => 120,
+        ActionKind::Therapy | ActionKind::Uninstall => 60,
+        ActionKind::Strip => 10,
+        ActionKind::Rip => {
+            if crate::systems::chrome::dragging(world, id).is_some() {
+                60
+            } else {
+                40
+            }
+        }
+        ActionKind::Abduct => 5,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -65,6 +89,14 @@ fn at(world: &World, id: EntityId, kind: BuildingKind) -> bool {
         .and_then(|p| p.building)
         .and_then(|b| world.comp::<Building>(b))
         .is_some_and(|b| b.kind == kind)
+}
+
+/// Inside a Clinic with a Ripperdoc on shift (M13 D34).
+fn in_open_clinic(world: &World, id: EntityId) -> bool {
+    world.comp::<Position>(id).and_then(|p| p.building).is_some_and(|b| {
+        world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Clinic)
+            && crate::systems::assets::seller_open(world, b)
+    })
 }
 
 fn at_home(world: &World, id: EntityId) -> bool {
@@ -141,6 +173,39 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                 Some(b) == target && crate::systems::assets::seller_open(world, b) && !world.is_closed(b)
             }) && world.comp::<Brain>(id).is_some_and(|b| b.shop_pick.is_some())
         }
+        // M13 D34: inside an open Clinic (the Install with the gang's
+        // implant reserved; Uninstall with chrome in).
+        ActionKind::Install => {
+            in_open_clinic(world, id)
+                && target.is_none_or(|t| world.comp::<Position>(id).and_then(|p| p.building) == Some(t))
+                && crate::systems::chrome::reserved_implant(world, id).is_some()
+        }
+        ActionKind::Therapy => in_open_clinic(world, id),
+        ActionKind::Uninstall => {
+            in_open_clinic(world, id) && world.comp::<crate::components::Kit>(id).is_some_and(|k| k.chrome)
+        }
+        // M13 D35: beside a body this agent may strip.
+        ActionKind::Strip => target.is_some_and(|c| {
+            crate::systems::chrome::may_loot(world, id, c) && crate::systems::law::near(world, id, c, 1)
+        }),
+        // M13 D35/D36: beside a body with chrome, or home with the one in tow.
+        ActionKind::Rip => target.is_some_and(|b| {
+            let home = world.gang_of(id).and_then(|g| world.hideout_of(g));
+            let at_home = home.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == home;
+            let towed = crate::systems::chrome::dragging(world, id) == Some(b)
+                || world.comp::<Brain>(id).and_then(|x| x.carrying_corpse) == Some(b);
+            (towed && at_home)
+                || (crate::systems::chrome::may_rip(world, id)
+                    && world.comp::<crate::components::Corpse>(b).is_some_and(|c| !c.buried)
+                    && crate::systems::law::near(world, id, b, 1)
+                    && !crate::systems::chrome::installed(world, b).is_empty())
+        }),
+        // M13 D36: beside the Harvest target, not already in someone's hands.
+        ActionKind::Abduct => target.is_some_and(|v| {
+            crate::systems::law::living(world, v)
+                && crate::systems::law::near(world, id, v, 1)
+                && world.comp::<Brain>(v).is_some_and(|b| b.cuffed_by.is_none())
+        }),
         // M13 D26: standing at the bound vehicle's door, and it is still there.
         ActionKind::StealVehicle => target.is_some_and(|v| {
             crate::systems::vehicles::vehicle_stand(world, v)
@@ -645,18 +710,95 @@ pub fn on_complete(
                 StepResult::Failed(FailReason::StockGone)
             }
         }
-        // M13 D29: the pick is bought here (price, finance, import).
+        // M13 D29: the pick is bought here (price, finance, import); D34: an
+        // implant is installed in the same action.
         ActionKind::BuyAsset => {
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             let pick = world.comp_mut::<Brain>(id).and_then(|b| b.shop_pick.take());
             match (here, pick) {
                 (Some(seller), Some(pick)) if target == Some(seller) => {
-                    match crate::systems::assets::buy(world, id, seller, &pick) {
+                    match crate::systems::chrome::buy_install(world, id, seller, &pick) {
                         Ok(_) => StepResult::Done,
                         Err(_) => StepResult::Failed(FailReason::PreconditionLost),
                     }
                 }
                 _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        // M13 D34: the gang's implant, for the fee.
+        ActionKind::Install => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            let implant = crate::systems::chrome::reserved_implant(world, id);
+            let tier = implant.and_then(|a| world.comp::<crate::components::Asset>(a)).map_or(1, |x| x.tier);
+            let fee = crate::systems::chrome::install_fee(world, tier);
+            world.comp_mut::<Brain>(id).map(|b| b.shop_pick.take());
+            match (here, implant) {
+                (Some(c), Some(a)) if crate::systems::chrome::install(world, id, c, a, fee).is_ok() => {
+                    if let Some(b) = world.comp_mut::<crate::components::Body>(id) {
+                        b.last_shop = Some(now);
+                    }
+                    StepResult::Done
+                }
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        ActionKind::Therapy => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            match here {
+                Some(c) if crate::systems::chrome::therapy(world, id, c) => StepResult::Done,
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        ActionKind::Uninstall => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            match here {
+                Some(c) if crate::systems::chrome::uninstall(world, id, c) => StepResult::Done,
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        // M13 D35: a body with chrome left is ripped next by one who may.
+        ActionKind::Strip => {
+            let Some(c) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if !crate::systems::chrome::strip(world, id, c) {
+                return StepResult::Failed(FailReason::StockGone);
+            }
+            if crate::systems::chrome::may_rip(world, id) && !crate::systems::chrome::installed(world, c).is_empty() {
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    let at = usize::from(b.plan_step) + 1;
+                    if let Some(plan) = b.plan.as_mut() {
+                        let at = at.min(plan.steps.len());
+                        plan.steps.insert(
+                            at,
+                            crate::components::ActionInstance { action: ActionKind::Rip, target: Some(c), tile: None },
+                        );
+                    }
+                }
+            }
+            StepResult::Done
+        }
+        ActionKind::Rip => {
+            let Some(b) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            let live = crate::systems::law::living(world, b);
+            let n = crate::systems::chrome::rip(world, id, b);
+            // A Harvest crew's job is done once the take is home.
+            if world.has::<crate::components::GangMember>(id) {
+                let today = world.day();
+                if let Some(x) = world.comp_mut::<Brain>(id) {
+                    x.gang_task_day = Some(today);
+                }
+            }
+            if n == 0 && !live {
+                StepResult::Failed(FailReason::StockGone)
+            } else {
+                StepResult::Done
+            }
+        }
+        ActionKind::Abduct => {
+            let Some(v) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if crate::systems::chrome::abduct(world, id, v) {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::PreconditionLost)
             }
         }
         // M13 D26: the lock contest; a loss is a botched theft.
@@ -688,7 +830,12 @@ pub fn on_complete(
             if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, id, victim, 4) {
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
-            let (_, loser, died) = crate::systems::law::resolve_fight(world, id, victim);
+            // M13 D33: a berserker's blows kill at `berserk_kill_mult`.
+            let mods = crate::systems::law::FightMods {
+                kill_mult: crate::systems::chrome::attack_kill_mult(world, id),
+                a_bonus: 0.0,
+            };
+            let (_, loser, died) = crate::systems::law::resolve_fight_mods(world, id, victim, mods);
             // The attacker's crime: Murder only when the victim died. An attacker
             // who died resisting is charged with nothing (the dead cannot be).
             let murder = died && loser == victim;

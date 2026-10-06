@@ -84,10 +84,23 @@ pub enum ActionKind {
     BuyAsset,
     /// M13 D26: beat a street-parked vehicle's lock and drive off in it.
     StealVehicle,
+    /// M13 D34: at a Clinic, have the gang's implant (reserved in the
+    /// Hideout's stock) installed for `install_fee`.
+    Install,
+    /// M13 D34: at a Clinic, pay for Therapy (sanity + `therapy_gain`).
+    Therapy,
+    /// M13 D34: at a Clinic, sell the highest-load implant back.
+    Uninstall,
+    /// M13 D35: take a fresh body's coins, goods and packs.
+    Strip,
+    /// M13 D35/D36: rip a body's chrome (a corpse, or an abductee at the Hideout).
+    Rip,
+    /// M13 D36: drag the Harvest target off (a fight; the M9 escort drag).
+    Abduct,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 65] = [
+pub const PLANNABLE: [ActionKind; 73] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -114,6 +127,9 @@ pub const PLANNABLE: [ActionKind; 65] = [
     ActionKind::GoTo(LocationKey::Garage),
     ActionKind::GoTo(LocationKey::Seller),
     ActionKind::GoTo(LocationKey::Vehicle),
+    // M13 D34, D36.
+    ActionKind::GoTo(LocationKey::Clinic),
+    ActionKind::GoTo(LocationKey::Victim),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -157,6 +173,12 @@ pub const PLANNABLE: [ActionKind; 65] = [
     ActionKind::Occupy,
     ActionKind::BuyAsset,
     ActionKind::StealVehicle,
+    ActionKind::Install,
+    ActionKind::Therapy,
+    ActionKind::Uninstall,
+    ActionKind::Strip,
+    ActionKind::Rip,
+    ActionKind::Abduct,
 ];
 
 impl ActionKind {
@@ -237,6 +259,12 @@ impl ActionKind {
                 | ActionKind::Occupy
                 | ActionKind::BuyAsset
                 | ActionKind::StealVehicle
+                | ActionKind::Install
+                | ActionKind::Therapy
+                | ActionKind::Uninstall
+                | ActionKind::Strip
+                | ActionKind::Rip
+                | ActionKind::Abduct
         )
     }
 }
@@ -358,6 +386,23 @@ pub struct PlanCtx {
     pub can_fence_vehicle: bool,
     /// M13 D26: `[vehicles] steal_vehicle_cost`.
     pub steal_vehicle_cost: f32,
+    /// M13 D34: an implant of the agent's gang is reserved for it, and the
+    /// target is a Clinic.
+    pub install_ready: bool,
+    /// M13 D34: the target is a Clinic and the agent can pay for Therapy.
+    pub therapy_affordable: bool,
+    /// M13 D34: any implant installed.
+    pub has_implant: bool,
+    /// M13 D35: the target is a body this agent may strip.
+    pub loot_target: bool,
+    /// M13 D35: the target body has chrome and this agent may rip it.
+    pub loot_implants: bool,
+    /// M13 D35: a member, or `courage >= rip_courage`.
+    pub may_rip: bool,
+    /// M13 D36: the target is the gang's Harvest target.
+    pub victim_target: bool,
+    /// M13 D33: in a cyberpsychotic episode.
+    pub episode: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -475,6 +520,24 @@ impl PlanCtx {
             }
         }
 
+        // M13 D33/D36: the target is a living agent this agent hunts: its
+        // episode's quarry, or its gang's Harvest target.
+        let episode = crate::systems::chrome::in_episode(world, agent);
+        let victim_target = target.is_some_and(|t| {
+            world.gang_of(agent).is_some_and(|g| crate::systems::chrome::gang_harvest_target(world, g) == Some(t))
+        });
+        let victim_plan =
+            target.is_some_and(|t| t != agent && crate::systems::law::living(world, t)) && (episode || victim_target);
+        // M13 D34/D35: the Clinic and the body.
+        let target_clinic =
+            target.filter(|&t| world.comp::<Building>(t).is_some_and(|b| b.kind == BuildingKind::Clinic));
+        let may_rip = crate::systems::chrome::may_rip(world, agent);
+        let loot_target = target.is_some_and(|t| crate::systems::chrome::may_loot(world, agent, t));
+        let loot_implants = may_rip
+            && target.is_some_and(|t| {
+                world.comp::<crate::components::Corpse>(t).is_some_and(|c| !c.buried)
+                    && !crate::systems::chrome::installed(world, t).is_empty()
+            });
         // M12 D21/D27: the street's rungs (homeless agents only; cheap scans
         // over the few Hotels and derelicts).
         let homeless = home.is_none();
@@ -506,9 +569,24 @@ impl PlanCtx {
             {
                 add(LocationKey::Seller, target);
             }
+            // M13 D34: the bound Clinic, else a Ripperdoc's employer.
+            let clinic = target
+                .filter(|&t| world.comp::<Building>(t).is_some_and(|b| b.kind == BuildingKind::Clinic))
+                .or_else(|| {
+                    job.filter(|j| j.role == Role::Ripperdoc)
+                        .and_then(|_| world.resolve_building(agent, LocationKey::Clinic, None))
+                });
+            add(LocationKey::Clinic, clinic);
             // M13 D26: the bound vehicle's door, from the street outside it.
             if let Some(t) = target.and_then(|t| crate::systems::vehicles::vehicle_stand(world, t)) {
                 dist.insert(LocationKey::Vehicle, o.manhattan(t));
+            }
+            // M13 D33/D36: the bound quarry (an episode's, a Harvest crew's).
+            if victim_plan {
+                if let Some(p) = target.and_then(|t| world.comp::<Position>(t)) {
+                    let there = p.building.and_then(|b| world.comp::<Building>(b)).map_or(p.tile, |b| b.door);
+                    dist.insert(LocationKey::Victim, o.manhattan(there));
+                }
             }
         }
 
@@ -649,6 +727,16 @@ impl PlanCtx {
             vehicle_target: target.is_some_and(|t| crate::systems::vehicles::may_steal(world, agent, t)),
             can_fence_vehicle: crate::systems::vehicles::can_fence(world, agent, target),
             steal_vehicle_cost: world.config.vehicles.steal_vehicle_cost,
+            install_ready: target_clinic.is_some() && crate::systems::chrome::reserved_implant(world, agent).is_some(),
+            therapy_affordable: target_clinic.is_some_and(|c| {
+                world.comp::<Wallet>(agent).map_or(0, |w| w.coins) >= crate::systems::chrome::therapy_price(world, c)
+            }),
+            has_implant: world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.chrome),
+            loot_target,
+            loot_implants,
+            may_rip,
+            victim_target,
+            episode,
             dist,
         }
     }
@@ -695,6 +783,8 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::Squatting => ws.squatting = value,
         K::Bought => ws.bought = value,
         K::CarryingVehicle => ws.carrying_vehicle = value,
+        K::Treated => ws.treated = value,
+        K::Stripped => ws.stripped = value,
     }
 }
 
@@ -721,6 +811,9 @@ impl ActionKind {
             ActionKind::Fence => ctx.in_gang || ctx.vehicle_target,
             ActionKind::BuyAsset => ctx.adult,
             ActionKind::StealVehicle => ctx.adult && ctx.lawfulness < 0.4 && !ctx.is(Role::Guard),
+            ActionKind::Install | ActionKind::Therapy | ActionKind::Uninstall | ActionKind::Strip => ctx.adult,
+            ActionKind::Rip => ctx.adult && ctx.may_rip,
+            ActionKind::Abduct => ctx.in_gang,
             // M12 D31: a rioter marches too.
             ActionKind::Muster | ActionKind::Brawl => ctx.in_gang || ctx.raid_pending,
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
@@ -816,11 +909,26 @@ impl ActionKind {
                     && ((ctx.in_gang && ws.carrying_stolen && ctx.can_fence)
                         || (ws.carrying_vehicle && ctx.can_fence_vehicle))
             }
-            ActionKind::BuyAsset => at(LocationKey::Seller) && ctx.shop_pick && !ws.bought,
+            ActionKind::BuyAsset => at(LocationKey::Seller) && ctx.shop_pick && !ctx.install_ready && !ws.bought,
+            // M13 D34: a gang implant is installed where it is bought: at the seller.
+            ActionKind::Install => at(LocationKey::Seller) && ctx.install_ready && !ws.bought,
+            ActionKind::Therapy => at(LocationKey::Clinic) && ctx.therapy_affordable && !ws.treated,
+            ActionKind::Uninstall => at(LocationKey::Clinic) && ctx.has_implant && !ws.treated,
+            ActionKind::Strip => at(LocationKey::CorpseTile) && ctx.loot_target && !ws.stripped,
+            // "Strip [-> Rip]": a body is ripped once it is stripped (the
+            // executor appends the Rip to a ripper's Strip).
+            ActionKind::Rip => {
+                (at(LocationKey::CorpseTile) && ctx.loot_implants && !ctx.loot_target)
+                    || (at(LocationKey::Hideout) && ws.carrying_corpse)
+            }
+            ActionKind::Abduct => at(LocationKey::Victim) && ctx.victim_target && !ws.carrying_corpse,
             ActionKind::StealVehicle => at(LocationKey::Vehicle) && ctx.vehicle_target && !ws.carrying_vehicle,
             ActionKind::Muster => at(LocationKey::MusterPoint) && !ws.mustered && ctx.raid_pending,
             ActionKind::Brawl => at(LocationKey::RaidTarget) && ws.mustered && !ws.raid_done,
-            ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
+            // M13 D33: a berserker closes in on its quarry first.
+            ActionKind::Attack => {
+                (ctx.hostile_adjacent || (ctx.episode && at(LocationKey::Victim))) && !ws.threat_removed
+            }
             ActionKind::CarryCorpse => at(LocationKey::CorpseTile) && ws.known_corpse && !ws.carrying_corpse,
             ActionKind::BuryCorpse => at(LocationKey::Cemetery) && ws.carrying_corpse,
             ActionKind::Register => at(LocationKey::Hall) && !ws.founded && ctx.can_found,
@@ -870,10 +978,16 @@ impl ActionKind {
             ActionKind::SplitLoot => ctx.has_loot && !ctx.hideout_sacked,
             ActionKind::Fence => ((ctx.in_gang && ctx.can_fence) || ctx.can_fence_vehicle) && !ctx.hideout_sacked,
             ActionKind::BuyAsset => ctx.shop_pick && ctx.dist.contains_key(&LocationKey::Seller),
+            ActionKind::Install => ctx.install_ready && ctx.dist.contains_key(&LocationKey::Seller),
+            ActionKind::Therapy => ctx.therapy_affordable && ctx.dist.contains_key(&LocationKey::Clinic),
+            ActionKind::Uninstall => ctx.has_implant && ctx.dist.contains_key(&LocationKey::Clinic),
+            ActionKind::Strip => ctx.loot_target && ctx.dist.contains_key(&LocationKey::CorpseTile),
+            ActionKind::Rip => ctx.loot_implants || ctx.victim_target,
+            ActionKind::Abduct => ctx.victim_target && ctx.dist.contains_key(&LocationKey::Victim),
             ActionKind::StealVehicle => ctx.vehicle_target && ctx.dist.contains_key(&LocationKey::Vehicle),
             ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::MusterPoint),
             ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RaidTarget),
-            ActionKind::Attack => ctx.hostile_adjacent,
+            ActionKind::Attack => ctx.hostile_adjacent || (ctx.episode && ctx.dist.contains_key(&LocationKey::Victim)),
             ActionKind::CarryCorpse => ctx.corpse_target,
             ActionKind::BuryCorpse => ctx.corpse_target && ctx.dist.contains_key(&LocationKey::Cemetery),
             ActionKind::Register => ctx.can_found && ctx.dist.contains_key(&LocationKey::Hall),
@@ -1035,6 +1149,27 @@ impl ActionKind {
                 n.has_savings = false;
             }
             ActionKind::StealVehicle => n.carrying_vehicle = true,
+            ActionKind::Install => {
+                n.bought = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
+            ActionKind::Therapy => {
+                n.treated = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
+            ActionKind::Uninstall => n.treated = true,
+            ActionKind::Strip => n.stripped = true,
+            ActionKind::Rip => {
+                n.stripped = true;
+                n.gang_task_done = true;
+                n.carrying_corpse = false;
+            }
+            // The abductee rides the corpse-carry key (plan, Actions table).
+            ActionKind::Abduct => n.carrying_corpse = true,
             _ => {}
         }
         n
@@ -1104,6 +1239,10 @@ impl ActionKind {
             ActionKind::BuyAsset => 10.0,
             // M13 D26: StealFood's lawfulness, guard, starving and dark terms.
             ActionKind::StealVehicle => steal_mods(ctx.steal_vehicle_cost),
+            ActionKind::Install | ActionKind::Therapy => 5.0,
+            ActionKind::Uninstall => 8.0,
+            ActionKind::Strip => 4.0 + 4.0 * ctx.lawfulness,
+            ActionKind::Rip | ActionKind::Abduct => 6.0,
         };
         c.clamp(0.5, 60.0)
     }
@@ -1128,7 +1267,12 @@ impl ActionKind {
             | ActionKind::GoTo(LocationKey::Seller)
             | ActionKind::BuyAsset
             | ActionKind::GoTo(LocationKey::Vehicle)
-            | ActionKind::StealVehicle => ctx.target,
+            | ActionKind::StealVehicle
+            | ActionKind::GoTo(LocationKey::Clinic)
+            | ActionKind::GoTo(LocationKey::Victim)
+            | ActionKind::Strip
+            | ActionKind::Rip
+            | ActionKind::Abduct => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }
