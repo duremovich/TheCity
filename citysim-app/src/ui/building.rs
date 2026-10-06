@@ -21,7 +21,7 @@ fn section(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
 }
 
 /// `value / cap` bar with the raw numbers as text.
-fn stock_bar(ui: &mut Ui, label: &str, value: u32, cap: u32) {
+pub(super) fn stock_bar(ui: &mut Ui, label: &str, value: u32, cap: u32) {
     let frac = if cap == 0 { 0.0 } else { value as f32 / cap as f32 };
     let colour = if cap > 0 && frac < 0.1 { RED } else { BLUE };
     ui.horizontal(|ui| {
@@ -117,9 +117,10 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 ));
             }
             BuildingKind::Hotel => hotel(ui, app, world, id),
-            // M13 D16: the panels arrive in phase 5; the staff list for now.
+            // M13: sales and stock are in the Assets section below.
             BuildingKind::Clinic | BuildingKind::Garage => staff(ui, app, world, id, "Staff"),
         }
+        super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);
         occupants(ui, app, world, b);
         buttons(ui, app, world, id, b);
