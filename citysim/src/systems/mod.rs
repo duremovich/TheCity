@@ -1,8 +1,8 @@
 //! World systems. Each is `pub fn run(world: &mut World)` and `World::tick`
 //! calls them in the fixed order
-//! `commands, time, lod, needs, memory, mood, think, plan, exec, ownership,
-//! assets, classes, districts, economy, bind, law, social, gang, corp_brain,
-//! demography, stats`. `districts` also runs the street's nightly pass at
+//! `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
+//! ownership, assets, tech, classes, districts, economy, bind, law, social,
+//! gang, corp_brain, demography, stats` (M14 V39). `districts` also runs the street's nightly pass at
 //! 03:00 (`street::nightly`, M12 D6); `law` deals the district beats and
 //! scores the stances right after the captain's daily posture (D10, D12).
 //!
@@ -38,5 +38,7 @@ pub mod stat_policy;
 pub mod stats;
 pub mod stims;
 pub mod street;
+pub mod tech;
 pub mod think;
 pub mod vehicles;
+pub mod virt;

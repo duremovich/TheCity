@@ -10,7 +10,11 @@ use crate::time::Season;
 /// Days of history kept for the city panel's sparklines.
 pub const STATS_HISTORY_CAP: usize = 120;
 
-pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,corp9_treasury,corp9_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,d1_coverage,d1_control,d1_litter,d1_unrest,d1_crime,d1_guards,d2_coverage,d2_control,d2_litter,d2_unrest,d2_crime,d2_guards,d3_coverage,d3_control,d3_litter,d3_unrest,d3_crime,d3_guards,d4_coverage,d4_control,d4_litter,d4_unrest,d4_crime,d4_guards,d5_coverage,d5_control,d5_litter,d5_unrest,d5_crime,d5_guards,d6_coverage,d6_control,d6_litter,d6_unrest,d6_crime,d6_guards,d7_coverage,d7_control,d7_litter,d7_unrest,d7_crime,d7_guards,d8_coverage,d8_control,d8_litter,d8_unrest,d8_crime,d8_guards,hotel_nights,squatters,derelicts,vagrancy,riots,crossfire,gangs,vehicles_moto,vehicles_car,vehicles_truck,vehicles_flyer,truck_hauls,walk_hauls,commute_tpt_walk,commute_tpt_drive,chrome_installs,chrome_agents,mean_sanity,episodes,hooked,stims_dealt,stims_legal,dealing_reports,repos,impounds,crashes,crash_deaths,vehicle_thefts,chops,abductions,stripped,robots,flow_asset,flow_asset_upkeep,flow_finance,flow_import,flow_stims,flow_parts,flow_treatment,overdoses,harvests,stripped_window,gang_income,gang_income_dealing,episodes_by_law,treatments,detoxes,ticks_per_sec";
+pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,corp9_treasury,corp9_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,d1_coverage,d1_control,d1_litter,d1_unrest,d1_crime,d1_guards,d2_coverage,d2_control,d2_litter,d2_unrest,d2_crime,d2_guards,d3_coverage,d3_control,d3_litter,d3_unrest,d3_crime,d3_guards,d4_coverage,d4_control,d4_litter,d4_unrest,d4_crime,d4_guards,d5_coverage,d5_control,d5_litter,d5_unrest,d5_crime,d5_guards,d6_coverage,d6_control,d6_litter,d6_unrest,d6_crime,d6_guards,d7_coverage,d7_control,d7_litter,d7_unrest,d7_crime,d7_guards,d8_coverage,d8_control,d8_litter,d8_unrest,d8_crime,d8_guards,hotel_nights,squatters,derelicts,vagrancy,riots,crossfire,gangs,vehicles_moto,vehicles_car,vehicles_truck,vehicles_flyer,truck_hauls,walk_hauls,commute_tpt_walk,commute_tpt_drive,chrome_installs,chrome_agents,mean_sanity,episodes,hooked,stims_dealt,stims_legal,dealing_reports,repos,impounds,crashes,crash_deaths,vehicle_thefts,chops,abductions,stripped,robots,flow_asset,flow_asset_upkeep,flow_finance,flow_import,flow_stims,flow_parts,flow_treatment,overdoses,harvests,stripped_window,gang_income,gang_income_dealing,episodes_by_law,treatments,detoxes,\
+nodes,labs,decks,runs,runs_ok,data_made,data_stolen,data_wiped,data_sold,ledger_hacks,doors_hacked,traced,fried,flatlined,hack_arrests,ice_mean_corp,ice_spend,\
+runs_bounced,runs_captured,runs_dumped,hack_arrests_chair,robots_turned,blinded,cameras,sightings,ice_raised,ice_lowered,tech_gained,tech_lost,research_spent,data_held,\
+corp1_tier_chrome,corp1_tier_deck,corp1_tier_industry,corp1_data,corp2_tier_chrome,corp2_tier_deck,corp2_tier_industry,corp2_data,corp3_tier_chrome,corp3_tier_deck,corp3_tier_industry,corp3_data,corp4_tier_chrome,corp4_tier_deck,corp4_tier_industry,corp4_data,corp5_tier_chrome,corp5_tier_deck,corp5_tier_industry,corp5_data,corp6_tier_chrome,corp6_tier_deck,corp6_tier_industry,corp6_data,corp7_tier_chrome,corp7_tier_deck,corp7_tier_industry,corp7_data,corp8_tier_chrome,corp8_tier_deck,corp8_tier_industry,corp8_data,corp9_tier_chrome,corp9_tier_deck,corp9_tier_industry,corp9_data,\
+flow_data,flow_hack,flow_ice_upkeep,flow_research,flow_terminal,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
@@ -269,8 +273,110 @@ pub struct DayRow {
     pub treatments: u32,
     #[serde(default)]
     pub detoxes: u32,
+    /// M14 V43: the Virt columns (zero with the plane off).
+    #[serde(default)]
+    pub virt: VirtCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
+}
+
+/// M14 V43: the plane's CSV columns, in header order. `nodes`, `labs`,
+/// `decks`, `cameras`, `ice_mean_corp`, `data_held` and the per-corp tiers
+/// and Data are day-end snapshots; the rest are daily counters (zero until
+/// their phase).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VirtCols {
+    pub nodes: u32,
+    pub labs: u32,
+    pub decks: u32,
+    pub runs: u32,
+    pub runs_ok: u32,
+    pub data_made: u32,
+    pub data_stolen: u32,
+    pub data_wiped: u32,
+    pub data_sold: u32,
+    pub ledger_hacks: u32,
+    pub doors_hacked: u32,
+    pub traced: u32,
+    pub fried: u32,
+    pub flatlined: u32,
+    pub hack_arrests: u32,
+    pub ice_mean_corp: f32,
+    pub ice_spend: i64,
+    pub runs_bounced: u32,
+    pub runs_captured: u32,
+    pub runs_dumped: u32,
+    pub hack_arrests_chair: u32,
+    pub robots_turned: u32,
+    pub blinded: u32,
+    pub cameras: u32,
+    pub sightings: u32,
+    pub ice_raised: u32,
+    pub ice_lowered: u32,
+    pub tech_gained: u32,
+    pub tech_lost: u32,
+    pub research_spent: u32,
+    pub data_held: u32,
+    /// Per corp slot (`CORP_SLOTS`): Chrome, Deck, Industry tiers and Data held.
+    pub corps: Vec<[u32; 4]>,
+    pub flow_data: i64,
+    pub flow_hack: i64,
+    pub flow_ice_upkeep: i64,
+    pub flow_research: i64,
+    pub flow_terminal: i64,
+}
+
+impl VirtCols {
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        let corps: Vec<String> = (0..CORP_SLOTS)
+            .map(|i| {
+                let [c, d, n, data] = self.corps.get(i).copied().unwrap_or_default();
+                format!("{c},{d},{n},{data}")
+            })
+            .collect();
+        format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            self.nodes,
+            self.labs,
+            self.decks,
+            self.runs,
+            self.runs_ok,
+            self.data_made,
+            self.data_stolen,
+            self.data_wiped,
+            self.data_sold,
+            self.ledger_hacks,
+            self.doors_hacked,
+            self.traced,
+            self.fried,
+            self.flatlined,
+            self.hack_arrests,
+            self.ice_mean_corp,
+            self.ice_spend,
+            self.runs_bounced,
+            self.runs_captured,
+            self.runs_dumped,
+            self.hack_arrests_chair,
+            self.robots_turned,
+            self.blinded,
+            self.cameras,
+            self.sightings,
+            self.ice_raised,
+            self.ice_lowered,
+            self.tech_gained,
+            self.tech_lost,
+            self.research_spent,
+            self.data_held,
+            corps.join(","),
+            self.flow_data,
+            self.flow_hack,
+            self.flow_ice_upkeep,
+            self.flow_research,
+            self.flow_terminal,
+        )
+    }
 }
 
 impl DayRow {
@@ -391,6 +497,7 @@ impl DayRow {
             episodes_by_law: 0,
             treatments: 0,
             detoxes: 0,
+            virt: VirtCols::default(),
             ticks_per_sec: 0.0,
         }
     }
@@ -410,7 +517,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -524,6 +631,7 @@ impl DayRow {
             self.episodes_by_law,
             self.treatments,
             self.detoxes,
+            self.virt.csv(),
             self.ticks_per_sec,
         )
     }

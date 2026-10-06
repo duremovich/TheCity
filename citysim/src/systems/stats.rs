@@ -215,6 +215,45 @@ pub fn snapshot(world: &mut World) {
         row.commute_tpt_walk = tpt(acc[0], acc[1]);
         row.commute_tpt_drive = tpt(acc[2], acc[3]);
     }
+    // M14 V43 snapshots (0 with the plane off, V44).
+    if world.config.virt.enabled {
+        virt_snapshot(world);
+    }
+}
+
+/// M14 V43: alive nodes, standing Labs, the mean effective ICE over alive
+/// corp building nodes, the Data held on every alive node, and per corp
+/// slot its tiers and Data holding.
+fn virt_snapshot(world: &mut World) {
+    use crate::virt::{NodeId, NodeKind, OwnerTag, Track};
+    let nodes = world.virt.alive_count() as u32;
+    let labs = world
+        .buildings_of_kind(BuildingKind::Lab)
+        .iter()
+        .filter(|&&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+        .count() as u32;
+    let (mut ice, mut n_ice, mut held) = (0u32, 0u32, 0u32);
+    for (i, n) in world.virt.nodes.iter().enumerate().filter(|(_, n)| n.alive) {
+        held += n.store.total();
+        if n.owner_kind == OwnerTag::Corp && matches!(n.kind, NodeKind::Building(_)) {
+            ice += u32::from(crate::systems::virt::ice_eff(world, NodeId(i as u16)));
+            n_ice += 1;
+        }
+    }
+    let mut corps = vec![[0u32; 4]; crate::stats::CORP_SLOTS];
+    for c in world.corps() {
+        let Some(cc) = world.comp::<crate::components::Corp>(c) else { continue };
+        let Some(s) = cc.slot.map(usize::from).filter(|&s| s < corps.len()) else { continue };
+        let data: u32 = Track::ALL.iter().map(|&t| crate::systems::virt::holding(world, c, t)).sum();
+        let t = cc.tech.tier;
+        corps[s] = [u32::from(t[0]), u32::from(t[1]), u32::from(t[2]), data];
+    }
+    let v = &mut world.stats.current.virt;
+    v.nodes = nodes;
+    v.labs = labs;
+    v.ice_mean_corp = if n_ice > 0 { ice as f32 / n_ice as f32 } else { 0.0 };
+    v.data_held = held;
+    v.corps = corps;
 }
 
 /// `(Gini, the richest tenth's share)` of non-negative holdings; sorts `v`.

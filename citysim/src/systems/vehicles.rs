@@ -1007,7 +1007,9 @@ pub fn steal(world: &mut World, thief: EntityId, v: EntityId) -> bool {
     let Some(door) = vehicle_stand(world, v) else { return false };
     let tier = crate::systems::security::thief_tier(crate::systems::law::stealth(world, thief));
     let step = world.config.chrome.contest_step;
-    let won = crate::systems::security::contest(tier, x.tier, step, world.rng.world());
+    // M14 V23: the lock contests at the vehicle's effective tier.
+    let lock = assets::eff_tier_of(world, &x);
+    let won = crate::systems::security::contest(tier, lock, step, world.rng.world());
     let victim = x.owner.filter(|&o| world.has::<Brain>(o));
     crate::systems::law::raise_crime(world, thief, victim, Crime::GrandTheft, door);
     if !won || !crate::systems::law::living(world, thief) {

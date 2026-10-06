@@ -143,10 +143,43 @@ pub enum EventKind {
     Stripped,
     /// M13 (phase 4): `[agent]`.
     Overdose,
+    // --- M14 (plan V43; violet). Actors per the plan's Events table.
+    /// `[runner, chair]` (phase 2).
+    JackedIn,
+    /// `[runner, owner or NONE, patron or NONE]` (phase 2).
+    DataStolen,
+    /// `[runner or NONE, owner]`.
+    DataWiped,
+    /// `[seller, buyer corp]` (phase 2).
+    DataSold,
+    /// `[runner, owner or NONE]` (phase 2).
+    LedgerHacked,
+    /// `[runner, gang, building]` (phase 3).
+    DoorHacked,
+    /// `[runner, building]` (phase 3).
+    RobotTurned,
+    /// `[runner, building]` (phase 3).
+    Blinded,
+    /// `[runner, owner or NONE, chair]` (phase 2).
+    Traced,
+    /// `[runner, owner or NONE]` (phase 2).
+    Fried,
+    /// `[runner, owner or NONE]` (phase 2).
+    Flatlined,
+    /// `[runner]` (phase 2).
+    Dumpshock,
+    /// `[owner or NONE, building or NONE]`.
+    IceRaised,
+    /// `[owner or NONE, building or NONE]`.
+    IceLowered,
+    /// `[corp]`.
+    TechGained,
+    /// `[corp]`.
+    TechLost,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 78] = [
+    pub const ALL: [EventKind; 94] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -225,6 +258,22 @@ impl EventKind {
         EventKind::Harvested,
         EventKind::Stripped,
         EventKind::Overdose,
+        EventKind::JackedIn,
+        EventKind::DataStolen,
+        EventKind::DataWiped,
+        EventKind::DataSold,
+        EventKind::LedgerHacked,
+        EventKind::DoorHacked,
+        EventKind::RobotTurned,
+        EventKind::Blinded,
+        EventKind::Traced,
+        EventKind::Fried,
+        EventKind::Flatlined,
+        EventKind::Dumpshock,
+        EventKind::IceRaised,
+        EventKind::IceLowered,
+        EventKind::TechGained,
+        EventKind::TechLost,
     ];
 }
 

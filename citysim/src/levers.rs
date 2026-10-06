@@ -213,6 +213,21 @@ pub enum PlayerCommand {
     Brick(EntityId),
     /// Pin `chase` on the agent's next trip (D25; consumed at its end).
     Chase(EntityId),
+    // --- M14 god commands (plan V42; phase 1: the tests' and the gate's).
+    /// Wipe the Data on a building's node (`tech::wipe_store`).
+    WipeData(EntityId),
+    /// Set a corp's tier in a track (through `tech::gain_tier`/`lose_tier`).
+    SetTech {
+        corp: EntityId,
+        track: crate::virt::Track,
+        tier: u8,
+    },
+    /// Put Data into a faction's first Lab, else its Hideout's node.
+    GrantData {
+        faction: EntityId,
+        track: crate::virt::Track,
+        units: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -291,6 +306,13 @@ pub struct Levers {
     /// M13 D48: upkeep is charged × `1 + rate`, per `AssetClass`.
     #[serde(default)]
     pub asset_tax: [f32; 8],
+    /// M14 V42: the city's own nodes' ICE (`[levers] city_ice`).
+    #[serde(default = "default_city_ice")]
+    pub city_ice: u8,
+}
+
+fn default_city_ice() -> u8 {
+    2
 }
 
 fn default_true() -> bool {
@@ -325,6 +347,7 @@ impl Levers {
             stims_legal: cfg.levers.stims_legal,
             impound: true,
             asset_tax: [0.0; 8],
+            city_ice: cfg.levers.city_ice,
         }
     }
 }
@@ -552,7 +575,10 @@ impl World {
             | PlayerCommand::ChromeEveryone { .. }
             | PlayerCommand::FloodStims { .. }
             | PlayerCommand::Brick(_)
-            | PlayerCommand::Chase(_) => {
+            | PlayerCommand::Chase(_)
+            | PlayerCommand::WipeData(_)
+            | PlayerCommand::SetTech { .. }
+            | PlayerCommand::GrantData { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -717,7 +743,42 @@ impl World {
             | PlayerCommand::FloodStims { .. }
             | PlayerCommand::Brick(_)
             | PlayerCommand::Chase(_) => self.cmd_god_assets(cmd),
+            PlayerCommand::WipeData(_) | PlayerCommand::SetTech { .. } | PlayerCommand::GrantData { .. } => {
+                self.cmd_god_virt(cmd)
+            }
             _ => self.cmd_god_corp(cmd),
+        }
+    }
+
+    /// The M14 god commands on the plane (plan V42, phase 1).
+    fn cmd_god_virt(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
+        use crate::systems::{tech, virt};
+        if !virt::enabled(self) {
+            return Err("the Virt plane is off".into());
+        }
+        match *cmd {
+            PlayerCommand::WipeData(b) => {
+                if !self.has::<Building>(b) {
+                    return Err("WipeData: no such building".into());
+                }
+                virt::relink(self);
+                let n = virt::node_of_building(self, b).ok_or("WipeData: the building has no node")?;
+                let units = tech::wipe_store(self, n, None);
+                Ok((vec![b], format!("wiped {units} Data at {}", self.name_of(b))))
+            }
+            PlayerCommand::SetTech { corp, track, tier } => {
+                if !self.has::<Corp>(corp) {
+                    return Err("SetTech: no such corp".into());
+                }
+                tech::set_tier(self, corp, track, tier);
+                let now = self.comp::<Corp>(corp).map_or(0, |c| c.tech.tier_of(track));
+                Ok((vec![corp], format!("set {}'s {track} to {now}", self.owner_label(Some(corp)))))
+            }
+            PlayerCommand::GrantData { faction, track, units } => {
+                tech::grant_data(self, faction, track, units).map_err(|e| format!("GrantData: {e}"))?;
+                Ok((vec![faction], format!("gave {} {units} {track} Data", self.owner_label(Some(faction)))))
+            }
+            _ => Err("not a Virt god command".into()),
         }
     }
 
@@ -1222,6 +1283,9 @@ impl World {
                 stock_goods: [0; 2],
                 asset_sales_today: 0,
                 asset_sales: std::collections::VecDeque::new(),
+                security: Default::default(),
+                focus: None,
+                hacked: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

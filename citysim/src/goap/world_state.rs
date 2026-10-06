@@ -130,6 +130,8 @@ impl LocationKey {
             BuildingKind::Hotel => LocationKey::Hotel,
             BuildingKind::Garage => LocationKey::Garage,
             BuildingKind::Clinic => LocationKey::Clinic,
+            // M14 V16: a Researcher inside its Lab is at its workplace.
+            BuildingKind::Lab => LocationKey::Workplace,
         }
     }
 }

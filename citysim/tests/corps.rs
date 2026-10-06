@@ -44,6 +44,7 @@ fn inputs(n: NicheInputs) -> CorpInputs {
         lobby_ready: false,
         culprit: None,
         niches: BTreeMap::from([(Niche::Food, n)]),
+        virt: Default::default(),
     }
 }
 

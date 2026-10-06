@@ -213,6 +213,8 @@ impl ActionKind {
             // M13 D16: a Ripperdoc's or Mechanic's shift is the clerk's
             // counter shift at their own Clinic or Garage.
             Role::Ripperdoc | Role::Mechanic => ActionKind::ClerkWork,
+            // M14 V16: a Researcher's shift is the clerk's at its own Lab.
+            Role::Researcher => ActionKind::ClerkWork,
         }
     }
 
@@ -926,7 +928,9 @@ impl ActionKind {
             ActionKind::FarmWork => ctx.is(Role::Farmer),
             // Appended by the executor after FarmWork; never planned.
             ActionKind::HaulToMarket => false,
-            ActionKind::ClerkWork => ctx.is(Role::Clerk) || ctx.is(Role::Ripperdoc) || ctx.is(Role::Mechanic),
+            ActionKind::ClerkWork => {
+                ctx.is(Role::Clerk) || ctx.is(Role::Ripperdoc) || ctx.is(Role::Mechanic) || ctx.is(Role::Researcher)
+            }
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
             ActionKind::TendGraves => ctx.is(Role::Gravedigger) || ctx.is(Role::Sanitation),

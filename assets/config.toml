@@ -67,6 +67,7 @@ lot = { capacity = 0, stock_cap = 0 }
 hotel = { capacity = 12, stock_cap = 0 }       # M12 D20: beds ([street] hotel_beds caps a built one)
 clinic = { capacity = 6, stock_cap = 200, staff = 2 }    # M13 D16: the Ripperdoc (inert in phase 1)
 garage = { capacity = 8, stock_cap = 400, staff = 3 }    # M13 D16 (inert in phase 1)
+lab = { capacity = 8, stock_cap = 0, staff = 4 }         # M14 V16: four Researchers make Data
 
 [needs]
 hunger_decay_per_tick = 0.000347
@@ -102,6 +103,11 @@ wage_gravedigger = 5
 wage_sanitation = 5                # M12 D23: a city sweeper
 wage_ripperdoc = 8                 # M13 D16
 wage_mechanic = 7                  # M13 D16
+# M14 V16/V47 (phase 1 calibration, last of the four knobs): 9 -> 4. A Lab earns nothing until
+# phase 2's Data market, and Militech lives at break-even (M13 seed 42: 233 on day 60, 0 by day 90):
+# at 9 (36 a day a Lab) it went bankrupt on day 31, at 6 on day 59; at 4 the tech corps' day-60
+# treasuries clear half of M13's on seeds 42-45 and the seeded bankruptcies move by seed noise.
+wage_researcher = 4
 # 1.4 on paper assumes 24 farmers x 9 h at farming 0.5 and one meal per citizen. In practice farms
 # work 6 days in 7, farmers attend ~75% of a shift (meals, wage trips), initial farming skill is
 # U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.4 keeps the
@@ -507,7 +513,7 @@ incorporate_buildings = 2         # an agent owning this many becomes a corp
 # city's coins sit with the employed and the execs): 3 NPC Bars from day 91 and no incorporation. At
 # 200 6 NPC foundings from day 28 and the first incorporation on day 28; at 150 15 foundings (12 Bars
 # by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
-found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600 }  # M12 D20: hotel; M13 D16: clinic, garage
+found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600, lab = 800 }  # M12 D20: hotel; M13 D16: clinic, garage; M14: lab (Research only)
 wholesale = 2                      # coins per unit Farm → Market when owners differ
 # M11 phase 5: 10 -> 20, with upkeep.security_office 30 -> 10. A Security corp costs its Office's
 # upkeep, six guards' wages (48) and its exec (10) a day, ~88 at the old sizes against 6-10 a contract
@@ -543,12 +549,13 @@ bar_owner_count = 2
 # M11 phase 5: security_office 30 -> 10 (see contract_per_guard_day).
 # M12 fix pass: hotel 10 -> 4. A Hotel books 2-3 nights a day at 3 coins (5-7 hotel nights a day
 # city-wide over 2-3 Hotels, seeds 42-44), ~7 gross and ~6 after tax: at 10 every Hotel owner bled.
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10 }
+# M14 V47 (phase 1): lab 15 -> 0 (third knob; see wage_researcher).
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10, lab = 0 }
 # M12 fix pass: a corp raided (or looted by a riot) in the last raided_days reads Secure/Lobby
 # `losses` of at least raided_losses: it hardens (contracts the building, or lobbies on the gang).
 raided_days = 7
 raided_losses = 0.5
-value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800 }  # D28; M13 D16
+value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800, lab = 1200 }  # D28; M13 D16; M14
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
@@ -617,6 +624,8 @@ hunker = 0.15
 # M11 phase 5: 0 -> 0.2. With the economy solvent the corps are richer, so losses / treasury is small
 # and Secure (Logistic{8, 0.1} on losses) always outbid Lobby: no corp lobbied on seed 42.
 lobby = 0.2
+research = 0.05                    # M14 V31: Research needs a nudge to start a Lab
+virt_raid = 0.0                    # M14 V31 (phase 3)
 
 # M11 classes (docs/M11_OWNERSHIP.md § 7; plan D34-D36).
 [classes]
@@ -679,6 +688,8 @@ dole_per_day = 4
 sanitation_count = 12
 # M13 D40: Markets sell Stims legally (the lever; `--lever day=D:stims_legal=on|off`).
 stims_legal = false
+# M14 V26/V42: the ICE seeded on the Treasury and the Precinct.
+city_ice = 2
 
 [litter]
 # M12 § 3 (plan D16-D19, D23-D24). Litter is one byte per street tile, deposited by events (a theft
@@ -953,3 +964,103 @@ robot_horizon_days = 60
 robot_cash_mult = 2.0
 robot_tier_by_kind = { farm = 2, market = 2, home = 1, security_office = 3, clinic = 2, garage = 2 }
 hack_hours = 24                    # M14
+
+# --- M14 Data and Virt (docs/M14_VIRT.md, plan ~/.claude/plans/m14-virt.md) ---
+# A second board of abstract nodes and links over the city map; every contest on it is a seeded dice
+# roll between fictional parties. `--virt-off` (CLI) and `Config::virt_off` turn every section off.
+[virt]
+enabled = true
+terminal_fee = 3
+jacked_fight_mult = 0.3
+dump_sanity = 0.1
+hop_ticks = [8, 5, 3]              # per deck tier
+contest_ticks = 5
+hop_eps = 0.01
+min_route_p = 0.25                 # no free choice targets a node below this (V11: orders may)
+public_links_tier = 1
+access_links_tier = 1
+trunk_links_tier = 2
+
+[decks]
+deck_shop_min = 0.4
+hack_seed_scale = 0.8              # V35: Skills.hacking = scale x U(0,1)^3, keyed draw
+hack_drift = 0.01
+upgrade_frac = 0.7
+gang_deck_floor = 900
+gang_decks_max = 3
+
+[ice]
+hack_w = 1.0
+ice_price = [0, 150, 600, 2000]
+self_install_frac = 0.5
+# V47 (phase 1, second knob): [0, 3, 8, 20] -> [0, 0, 1, 2]. The plan's table cost the nine corps
+# 235 a day (every Ledger, Farm and Market carries seeded ICE); Kessler and Vatra went bankrupt on
+# days 50 and 51 (M13: never, 101).
+ice_upkeep = [0, 0, 1, 2]
+ice_off_days = 2
+ice_value_steps = [200, 1500, 6000]
+ice_seed = { lab = 2, security_office = 2, farm = 1, market = 1, hideout = 0, clinic = 1, garage = 1, bar = 0, hotel = 0 }
+alarm_hours = 48
+fry_base = [0.0, 0.05, 0.25, 0.6]
+fry_gap = 1.0
+fry_sanity = 0.3
+fry_energy = 0.5
+p_fry_kill = [0.0, 0.0, 0.05, 0.3]
+flatline_gap = 1.5
+p_flatline = 0.8
+fry_wear = 20
+trace_p = [0.0, 0.2, 0.45, 0.7]
+stealth_w = 0.5
+daze_ticks = 30
+act_ticks = { data = 30, ledger = 30, door = 10, robot = 15, camera = 5 }
+door_strip_cap = 0.5               # plan V32
+door_cooldown_days = 3             # plan V32
+
+[data]
+data_per_shift = 3.0
+store_cap = 2000
+steal_units = [60, 150, 400]
+data_price = 3
+gang_data_keep = 0
+backup_days = 3
+ledger_frac = 0.05
+ledger_cap = [0, 400, 1500]
+door_loss = 100
+seed_store = 300                   # plan: seeded Lab stores
+
+[tech]
+requires = { implant = [1, 2, 3], deck = [1, 2, 3], robot = [1, 2, 3], camera = [1, 2, 3], motorcycle = [1], car = [1, 2], truck = [2], flyer = [3], pack = [1, 1] }
+tier_cost = [0, 0, 400, 1200]      # Data to reach tier i
+tier_coins = [0, 0, 800, 2500]
+upkeep_data = [0, 0, 3, 8]
+# V47 (phase 1, first knob): [0, 0, 15, 40] -> 0. Zetatech's 80 a day of licences (Chrome 3 and
+# Industry 3) bankrupted it on day 44 (M13: 80). The Data upkeep and the lapse rule stand.
+upkeep_coins = [0, 0, 0, 0]
+decay_days = 7
+research_rate = 40
+orphan_cap = 2
+industry_prod = [0.0, 0.0, 0.1, 0.2]
+focus_by_niche = { food = "Industry", housing = "Industry", security = "Deck", tech = "Chrome" }
+seed = { Zetatech = [3, 1, 3], Arasaka = [1, 3, 1], Militech = [1, 2, 1] }   # [chrome, deck, industry]
+# Plan V47. Measured: a bigger grant does not help (6,000 a Lab left Militech bankrupt on day 69):
+# Secure spends it at once on robots (seed 42: 7 robots on days 1-5 against M13's 4).
+seed_lab_grant = 2000
+
+[hack]
+hack_min = 0.3
+hack_ref = 500
+hack_flat = 0.0
+hack_cooldown_days = 2
+fried_cooldown_days = 10
+virt_runners = 2
+door_lead_hours = 2
+door_hours = 6
+blind_hours = 12
+wipe_min = 0.6
+stream_min = 0.2
+order_score = 0.9                  # plan V11
+stat_hack_min = 0.5                # plan V38
+
+[db]
+db_cap = 32
+sighting_days = 14
