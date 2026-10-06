@@ -176,6 +176,71 @@ enum Lever {
     Derelict(u32),
     /// M12 god: `buy_building=<buyer>:<building index>:<price>`.
     BuyBuilding(Buyer, u32, i64),
+    /// M13 god: `grant_asset=<agent index>:<kind>:<tier>`.
+    GrantAsset(u32, citysim::AssetKind, u8),
+    /// M13 god: `wreck=<asset index>`.
+    Wreck(u32),
+    /// M13 god: `brick=<corp slot>` or `brick=agent:<index>`.
+    Brick(Lender),
+    /// M13 god: `chase=<agent index>`.
+    Chase(u32),
+}
+
+/// Whose financed implants `brick` bricks: a corp by its seeding slot or an agent.
+#[derive(Clone, Copy, Debug)]
+enum Lender {
+    Corp(u8),
+    Agent(u32),
+}
+
+/// The living agent with this entity index.
+fn agent_at(world: &World, index: u32) -> Result<citysim::EntityId, String> {
+    world.citizens().into_iter().find(|c| c.index == index).ok_or_else(|| format!("no agent {index}"))
+}
+
+/// `moto|car|truck|flyer|arms|legs|nerves|eyes|skin|robot|pack|bridge`.
+fn parse_asset_kind(s: &str) -> Option<citysim::AssetKind> {
+    use citysim::{AssetKind, Slot};
+    Some(match s.to_ascii_lowercase().as_str() {
+        "moto" | "motorcycle" | "bike" => AssetKind::Motorcycle,
+        "car" => AssetKind::Car,
+        "truck" => AssetKind::Truck,
+        "flyer" => AssetKind::Flyer,
+        "arms" => AssetKind::Implant(Slot::Arms),
+        "legs" => AssetKind::Implant(Slot::Legs),
+        "nerves" => AssetKind::Implant(Slot::Nerves),
+        "eyes" => AssetKind::Implant(Slot::Eyes),
+        "skin" => AssetKind::Implant(Slot::Skin),
+        "robot" => AssetKind::Robot,
+        "pack" => AssetKind::Pack,
+        "bridge" => AssetKind::Bridge,
+        _ => return None,
+    })
+}
+
+/// `moto|car|truck|flyer|implant|robot|pack|bridge` (`chrome` = implant).
+fn parse_asset_class(s: &str) -> Option<citysim::AssetClass> {
+    use citysim::AssetClass;
+    Some(match s.to_ascii_lowercase().as_str() {
+        "moto" | "motorcycle" | "bike" => AssetClass::Motorcycle,
+        "car" => AssetClass::Car,
+        "truck" => AssetClass::Truck,
+        "flyer" => AssetClass::Flyer,
+        "implant" | "chrome" => AssetClass::Implant,
+        "robot" => AssetClass::Robot,
+        "pack" => AssetClass::Pack,
+        "bridge" => AssetClass::Bridge,
+        _ => return None,
+    })
+}
+
+/// `on|off` (also `1|0`, `true|false`).
+fn on_off(v: &str) -> Option<bool> {
+    match v.to_ascii_lowercase().as_str() {
+        "on" | "1" | "true" => Some(true),
+        "off" | "0" | "false" => Some(false),
+        _ => None,
+    }
 }
 
 /// Who `buy_building` buys for: `city`, `gang<i>`, `corp<slot>` or an agent's entity index.
@@ -262,6 +327,17 @@ impl Lever {
                 building: building_at(world, b)?,
                 price,
             },
+            Lever::GrantAsset(a, kind, tier) => PlayerCommand::GrantAsset { agent: agent_at(world, a)?, kind, tier },
+            Lever::Wreck(i) => PlayerCommand::Wreck(
+                world
+                    .with::<citysim::Asset>()
+                    .into_iter()
+                    .find(|a| a.index == i)
+                    .ok_or_else(|| format!("no asset {i}"))?,
+            ),
+            Lever::Brick(Lender::Corp(s)) => PlayerCommand::Brick(corp_in_slot(world, s)?),
+            Lever::Brick(Lender::Agent(a)) => PlayerCommand::Brick(agent_at(world, a)?),
+            Lever::Chase(a) => PlayerCommand::Chase(agent_at(world, a)?),
         })
     }
 }
@@ -280,7 +356,13 @@ impl Lever {
 /// M12 god levers `riot=<district>`, `litter=<district>:<level 0..1>`,
 /// `split_gang=<gang index>`, `derelict=<building index>`,
 /// `buy_building=<city|gang<i>|corp<slot>|agent index>:<building index>:<price>`.
-/// M13 (plan D48, phase 4): `stims_legal=on|off`.
+/// M13 (plan D48): `stims_legal=on|off`, `asset_tax=car:0.5` (a class:
+/// `moto|car|truck|flyer|implant|robot|pack|bridge`), `impound=on|off`;
+/// M13 god levers `grant_asset=<agent index>:<kind>:<tier>` (kinds
+/// `moto|car|truck|flyer|arms|legs|nerves|eyes|skin|robot|pack|bridge`),
+/// `wreck=<asset index>`, `chrome_everyone=<tier>`,
+/// `flood_stims=<district>:<n>`, `brick=<corp slot>|agent:<index>`,
+/// `chase=<agent index>`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -367,6 +449,23 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 price.parse::<i64>().map_err(|e| format!("{spec}: bad price: {e}"))?,
             ))
         }
+        "grant_asset" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, k, t] = parts[..] else {
+                return Err(format!("{spec}: expected <agent index>:<kind>:<tier>"));
+            };
+            Some(Lever::GrantAsset(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                parse_asset_kind(k).ok_or_else(|| format!("{spec}: unknown asset kind {k}"))?,
+                t.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?,
+            ))
+        }
+        "wreck" => Some(Lever::Wreck(value.parse::<u32>().map_err(|e| format!("{spec}: bad asset: {e}"))?)),
+        "brick" => Some(Lever::Brick(match value.strip_prefix("agent:") {
+            Some(a) => Lender::Agent(a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?),
+            None => Lender::Corp(slot(value)?),
+        })),
+        "chase" => Some(Lever::Chase(value.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?)),
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -445,12 +544,29 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 on,
             }
         }
-        // M13 D48 (phase 4): `stims_legal=on|off`.
-        "stims_legal" => PlayerCommand::SetStimsLegal(match value.to_ascii_lowercase().as_str() {
-            "on" | "1" | "true" => true,
-            "off" | "0" | "false" => false,
-            _ => return Err(format!("{spec}: stims_legal must be on|off")),
-        }),
+        // M13 D48: `stims_legal=on|off`, `asset_tax=car:0.5`, `impound=on|off`,
+        // god `chrome_everyone=<tier>`, `flood_stims=<district>:<n>`.
+        "stims_legal" => {
+            PlayerCommand::SetStimsLegal(on_off(value).ok_or_else(|| format!("{spec}: stims_legal must be on|off"))?)
+        }
+        "asset_tax" => {
+            let (k, r) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <class>:<rate>"))?;
+            PlayerCommand::SetAssetTax {
+                kind: parse_asset_class(k).ok_or_else(|| format!("{spec}: unknown asset class {k}"))?,
+                rate: r.parse::<f32>().map_err(|e| format!("{spec}: bad rate: {e}"))?,
+            }
+        }
+        "impound" => PlayerCommand::SetImpound(on_off(value).ok_or_else(|| format!("{spec}: impound must be on|off"))?),
+        "chrome_everyone" => {
+            PlayerCommand::ChromeEveryone { tier: value.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))? }
+        }
+        "flood_stims" => {
+            let (d, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<n>"))?;
+            PlayerCommand::FloodStims {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                n: n.parse::<u32>().map_err(|e| format!("{spec}: bad doses: {e}"))?,
+            }
+        }
         "riot_response" => PlayerCommand::SetRiotResponse(match value.to_ascii_lowercase().as_str() {
             "auto" => None,
             "contain" => Some(citysim::RiotResponse::Contain),
@@ -1060,5 +1176,90 @@ fn main() {
     if let Err(e) = result {
         eprintln!("error: {e}");
         std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use citysim::{AssetClass, AssetKind, DistrictId, Slot};
+
+    fn cmd(spec: &str) -> PlayerCommand {
+        match parse_lever(spec).expect("parses") {
+            (_, Lever::Cmd(c)) => c,
+            (_, other) => panic!("{spec}: expected a plain command, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_stims_legal() {
+        assert_eq!(cmd("day=30:stims_legal=on"), PlayerCommand::SetStimsLegal(true));
+        assert_eq!(cmd("day=30:stims_legal=off"), PlayerCommand::SetStimsLegal(false));
+        assert!(parse_lever("day=30:stims_legal=maybe").is_err());
+    }
+
+    #[test]
+    fn test_parse_asset_tax() {
+        let (t, _) = parse_lever("day=5:asset_tax=car:0.5").unwrap();
+        assert_eq!(t, 5 * TICKS_PER_DAY);
+        assert_eq!(cmd("day=5:asset_tax=car:0.5"), PlayerCommand::SetAssetTax { kind: AssetClass::Car, rate: 0.5 });
+        assert_eq!(
+            cmd("day=5:asset_tax=chrome:1"),
+            PlayerCommand::SetAssetTax { kind: AssetClass::Implant, rate: 1.0 }
+        );
+        assert!(parse_lever("day=5:asset_tax=boat:1").is_err());
+        assert!(parse_lever("day=5:asset_tax=car").is_err());
+    }
+
+    #[test]
+    fn test_parse_impound() {
+        assert_eq!(cmd("day=1:impound=off"), PlayerCommand::SetImpound(false));
+        assert_eq!(cmd("day=1:impound=on"), PlayerCommand::SetImpound(true));
+        assert!(parse_lever("day=1:impound=2").is_err());
+    }
+
+    #[test]
+    fn test_parse_grant_asset() {
+        match parse_lever("day=2:grant_asset=17:arms:2").unwrap().1 {
+            Lever::GrantAsset(17, AssetKind::Implant(Slot::Arms), 2) => {}
+            other => panic!("{other:?}"),
+        }
+        match parse_lever("day=2:grant_asset=3:flyer:1").unwrap().1 {
+            Lever::GrantAsset(3, AssetKind::Flyer, 1) => {}
+            other => panic!("{other:?}"),
+        }
+        assert!(parse_lever("day=2:grant_asset=3:tank:1").is_err());
+        assert!(parse_lever("day=2:grant_asset=3:car").is_err());
+    }
+
+    #[test]
+    fn test_parse_wreck() {
+        assert!(matches!(parse_lever("day=2:wreck=2100").unwrap().1, Lever::Wreck(2100)));
+        assert!(parse_lever("day=2:wreck=x").is_err());
+    }
+
+    #[test]
+    fn test_parse_chrome_everyone() {
+        assert_eq!(cmd("day=10:chrome_everyone=2"), PlayerCommand::ChromeEveryone { tier: 2 });
+        assert!(parse_lever("day=10:chrome_everyone=-1").is_err());
+    }
+
+    #[test]
+    fn test_parse_flood_stims() {
+        assert_eq!(cmd("day=10:flood_stims=7:500"), PlayerCommand::FloodStims { district: DistrictId(7), n: 500 });
+        assert!(parse_lever("day=10:flood_stims=7").is_err());
+    }
+
+    #[test]
+    fn test_parse_brick() {
+        assert!(matches!(parse_lever("day=10:brick=8").unwrap().1, Lever::Brick(Lender::Corp(8))));
+        assert!(matches!(parse_lever("day=10:brick=agent:42").unwrap().1, Lever::Brick(Lender::Agent(42))));
+        assert!(parse_lever("day=10:brick=agent:x").is_err());
+    }
+
+    #[test]
+    fn test_parse_chase() {
+        assert!(matches!(parse_lever("day=10:chase=99").unwrap().1, Lever::Chase(99)));
+        assert!(parse_lever("day=10:chase=").is_err());
     }
 }
