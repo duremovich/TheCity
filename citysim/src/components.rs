@@ -166,10 +166,12 @@ pub enum BuildingKind {
     Clinic,
     /// M13 D16: vehicles, repairs, secure parking (inert until phase 2).
     Garage,
+    /// M14 D16 (plan V16): makes Data in its focus track.
+    Lab,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 14] = [
+    pub const ALL: [BuildingKind; 15] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -184,6 +186,7 @@ impl BuildingKind {
         BuildingKind::Hotel,
         BuildingKind::Clinic,
         BuildingKind::Garage,
+        BuildingKind::Lab,
     ];
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
@@ -202,6 +205,7 @@ impl BuildingKind {
             "Hotel" => BuildingKind::Hotel,
             "Clinic" => BuildingKind::Clinic,
             "Garage" => BuildingKind::Garage,
+            "Lab" => BuildingKind::Lab,
             _ => return None,
         })
     }
@@ -223,6 +227,7 @@ impl BuildingKind {
             BuildingKind::Hotel => "Capsule Hotel",
             BuildingKind::Clinic => "Ripperdoc",
             BuildingKind::Garage => "Garage",
+            BuildingKind::Lab => "Lab",
         }
     }
 
@@ -243,6 +248,7 @@ impl BuildingKind {
             BuildingKind::Hotel => 'N',
             BuildingKind::Clinic => 'R',
             BuildingKind::Garage => 'V',
+            BuildingKind::Lab => 'Q',
         }
     }
 }
@@ -279,10 +285,12 @@ pub enum Role {
     Ripperdoc,
     /// M13 D16: staff of a Garage.
     Mechanic,
+    /// M14 (plan V16): staff of a Lab.
+    Researcher,
 }
 
 impl Role {
-    pub const ALL: [Role; 8] = [
+    pub const ALL: [Role; 9] = [
         Role::Farmer,
         Role::Guard,
         Role::Clerk,
@@ -291,6 +299,7 @@ impl Role {
         Role::Sanitation,
         Role::Ripperdoc,
         Role::Mechanic,
+        Role::Researcher,
     ];
 
     /// The display name (M11 section 1).
@@ -304,6 +313,7 @@ impl Role {
             Role::Sanitation => "Sanitation",
             Role::Ripperdoc => "Ripperdoc",
             Role::Mechanic => "Mechanic",
+            Role::Researcher => "Researcher",
         }
     }
 
@@ -318,6 +328,7 @@ impl Role {
             Role::Sanitation => BuildingKind::Cemetery,
             Role::Ripperdoc => BuildingKind::Clinic,
             Role::Mechanic => BuildingKind::Garage,
+            Role::Researcher => BuildingKind::Lab,
         }
     }
 }
@@ -796,10 +807,12 @@ pub enum CorpOrder {
     #[default]
     Hunker,
     Lobby,
+    /// M14 (plan V31): research the focus track, build and staff Labs.
+    Research,
 }
 
 impl CorpOrder {
-    pub const ALL: [CorpOrder; 7] = [
+    pub const ALL: [CorpOrder; 8] = [
         CorpOrder::Grow,
         CorpOrder::Squeeze,
         CorpOrder::Undercut,
@@ -807,6 +820,7 @@ impl CorpOrder {
         CorpOrder::Secure,
         CorpOrder::Hunker,
         CorpOrder::Lobby,
+        CorpOrder::Research,
     ];
 }
 
@@ -834,6 +848,8 @@ pub enum CorpShock {
     Rioted,
     /// ... or another building in a district where it owns some (half severity).
     RiotNearby,
+    /// M14 (plan V34): a tech track dropped a tier.
+    TechLost,
 }
 
 impl CorpShock {
@@ -851,6 +867,7 @@ impl CorpShock {
             CorpShock::Raided => 0.7,
             CorpShock::Rioted => 0.9,
             CorpShock::RiotNearby => 0.45,
+            CorpShock::TechLost => 0.6,
         }
     }
 }
@@ -964,6 +981,18 @@ pub struct Corp {
     /// `losses` floors at `raided_losses` (the raided corp hardens).
     #[serde(default)]
     pub raided_at: Option<Tick>,
+    /// M14 (plan V21): the tech tree. A pre-M14 save reads `Tech::unset`
+    /// (tier 0), which `migrate_legacy` seeds by name.
+    #[serde(default = "crate::virt::Tech::unset")]
+    pub tech: crate::virt::Tech,
+    /// M14 (plan V25): the ICE on this corp's Ledger node.
+    #[serde(default)]
+    pub ledger_ice: crate::virt::SecurityProfile,
+    /// M14 (plan V27): ICE spend per day, last 30, newest last.
+    #[serde(default)]
+    pub ice_spend: VecDeque<i64>,
+    #[serde(default)]
+    pub ice_spend_today: i64,
 }
 
 impl Corp {
@@ -1009,6 +1038,10 @@ impl Corp {
             governance: Governance::Dictator,
             pinned_until: None,
             raided_at: None,
+            tech: crate::virt::Tech::default(),
+            ledger_ice: crate::virt::SecurityProfile::default(),
+            ice_spend: VecDeque::new(),
+            ice_spend_today: 0,
         }
     }
 
@@ -1456,6 +1489,17 @@ pub struct Skills {
     pub stealth: f32,
     pub fighting: f32,
     pub farming: f32,
+    /// M14 (plan V35): `hack_seed_scale x U(0,1)^3` from a keyed stream. A
+    /// pre-M14 save reads -1 (`Skills::unset_hacking`), backfilled by
+    /// `migrate_legacy`.
+    #[serde(default = "Skills::unset_hacking")]
+    pub hacking: f32,
+}
+
+impl Skills {
+    pub fn unset_hacking() -> f32 {
+        -1.0
+    }
 }
 
 /// Present only while jailed.
@@ -1574,6 +1618,15 @@ pub struct Building {
     pub asset_sales_today: u16,
     #[serde(default)]
     pub asset_sales: VecDeque<u16>,
+    /// M14 (plan V25): the building node's ICE.
+    #[serde(default, skip_serializing_if = "crate::virt::SecurityProfile::is_bare")]
+    pub security: crate::virt::SecurityProfile,
+    /// M14 (plan V16): a Lab's track.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub focus: Option<crate::virt::Track>,
+    /// M14 (plan V32/V33, phase 3 writes it): a hack on its node, until.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hacked: Option<(crate::virt::HackEffect, Tick)>,
 }
 
 pub fn default_tier() -> u8 {
@@ -2295,7 +2348,10 @@ pub struct District {
     #[serde(skip)]
     pub homes: Vec<EntityId>,
     /// Living adults binned here by the last aggregate pass, ascending.
-    #[serde(skip)]
+    /// M14 phase 1 fix: saved (it was skipped, so a resumed world read no
+    /// residents until the next midnight and a crash's Statistical-victim
+    /// fallback found nobody: save/load diverged on seed 3).
+    #[serde(default)]
     pub residents: Vec<EntityId>,
     /// Mean walkable street tile, rounded.
     #[serde(skip)]
@@ -2706,6 +2762,10 @@ pub struct Asset {
     /// owner's buildings (recalled at 2, `vehicles::fleet_recall`).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub away_days: u8,
+    /// M14 (plan V23): the corp whose tech tier caps this asset's effect;
+    /// `None` for pre-M14 assets and god grants (uncapped).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maker: Option<EntityId>,
 }
 
 fn is_zero_u8(v: &u8) -> bool {

@@ -14,6 +14,8 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     let mut world: World = ron::from_str(text)?;
     world.rebuild_indices();
     world.migrate_legacy();
+    // M14 V44: a pre-M14 save with the plane on gets its plane and ICE.
+    crate::systems::virt::migrate(&mut world);
     world.reload_names();
     Ok(world)
 }

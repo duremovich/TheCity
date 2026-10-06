@@ -374,3 +374,61 @@ fn test_pre_m13_save_loads() {
     let text = save::to_ron(&w);
     assert_eq!(save::to_ron(&save::from_ron(&text).expect("loads")), text);
 }
+
+/// Drop every `,<key>:<number>` (a scalar struct field) from compact RON.
+fn strip_scalar_fields(text: &str, key: &str) -> String {
+    let token = format!(",{key}:");
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(i) = rest.find(&token) {
+        out.push_str(&rest[..i]);
+        let tail = &rest[i + token.len()..];
+        let end = tail.find([',', ')']).unwrap_or(tail.len());
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// M14 V44: a save from before the plane has no `virt`, `db` or runs, no
+/// `Corp.tech` and no `Skills.hacking`: it loads with the plane built and
+/// its ICE seeded, the trees seeded by name, every hacking backfilled from
+/// its keyed stream, and a day runs.
+#[test]
+fn test_pre_m14_save_loads() {
+    let mut w = World::new(23, Config::load().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY + 10);
+    let text = save::to_ron(&w);
+    let mut text = strip_field(&text, "virt:(nodes:[");
+    for token in ["db:{", "runs:{", "run_orders:{", "last_trace:{"] {
+        text = strip_map_field(&text, token);
+    }
+    for token in ["run_queue:[", "run_log:["] {
+        text = strip_list_field(&text, token);
+    }
+    while text.contains("tech:(tier") {
+        text = strip_field(&text, "tech:(tier");
+    }
+    let text = strip_scalar_fields(&text, "hacking");
+    assert!(
+        !text.contains("virt:(nodes:[") && !text.contains("tech:(tier") && !text.contains("hacking:"),
+        "the M14 keys are stripped"
+    );
+    let mut back = save::from_ron(&text).expect("a pre-M14 save loads");
+    assert!(back.config.virt.enabled);
+    assert!(back.virt.alive_count() >= 20, "the plane is built: {} nodes", back.virt.alive_count());
+    assert!(back.virt.nodes.iter().all(|n| n.store.total() == 0), "no stores: the Research order builds the Labs");
+    let z = back
+        .corps()
+        .into_iter()
+        .find(|&c| back.comp::<citysim::Corp>(c).is_some_and(|cc| cc.name == "Zetatech"))
+        .expect("Zetatech");
+    assert_eq!(back.comp::<citysim::Corp>(z).expect("corp").tech.tier, [3, 1, 3], "seeded by name");
+    for id in back.citizens() {
+        let h = back.comp::<citysim::Skills>(id).expect("skills").hacking;
+        assert!((0.0..=1.0).contains(&h), "hacking backfilled: {h}");
+    }
+    back.check_indices().expect("indices in step");
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.population() > 0);
+}

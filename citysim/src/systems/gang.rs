@@ -1093,6 +1093,9 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
     sg.empty_since = None;
     sg.split_from = Some(gang);
     world.insert(splinter, sg);
+    // M14 V4: the splinter's Hideout (a converted derelict, or a Lot built
+    // with no owner yet) gets its node at the next tick, not the next midnight.
+    crate::systems::virt::mark_dirty(world);
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.treasury -= share;
         g.members.retain(|m| !movers.contains(m));
@@ -1228,4 +1231,6 @@ fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
         list.insert(i, b);
     }
     crate::systems::districts::rebuild(world);
+    // M14 V4: a kind change outside `transfer_building` relinks the plane.
+    crate::systems::virt::mark_dirty(world);
 }

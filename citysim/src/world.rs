@@ -524,7 +524,7 @@ pub struct World {
     pub by_tier: [Vec<EntityId>; 3],
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; 8],
+    pub by_role: [Vec<EntityId>; 9],
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -532,6 +532,32 @@ pub struct World {
     /// Name tables for births and immigrants; reloaded from assets on load.
     #[serde(skip)]
     pub names: NameTables,
+    /// M14 V1: the Virt plane (nodes, links, stores; indices rebuilt on load).
+    #[serde(default)]
+    pub virt: crate::virt::VirtPlane,
+    /// M14 V4: a hook changed an owner or a kind; `virt::run` relinks.
+    #[serde(skip)]
+    pub virt_dirty: bool,
+    /// M14 V28: faction databases (the city under `EntityId::NONE`).
+    #[serde(default)]
+    pub db: BTreeMap<EntityId, crate::virt::FactionDb>,
+    /// M14 V10: runs in progress and their due steps (phase 2).
+    #[serde(default)]
+    pub runs: BTreeMap<crate::virt::RunId, crate::virt::Run>,
+    #[serde(default)]
+    pub run_queue: BTreeSet<(Tick, crate::virt::RunId)>,
+    /// M14 V11: one order per runner (phase 2).
+    #[serde(default)]
+    pub run_orders: BTreeMap<EntityId, crate::virt::RunOrder>,
+    /// M14 V10: the last 64 finished runs.
+    #[serde(default)]
+    pub run_log: VecDeque<crate::virt::Run>,
+    /// M14 V15: each runner's newest trace `(chair, tick)`.
+    #[serde(default)]
+    pub last_trace: BTreeMap<EntityId, (EntityId, Tick)>,
+    /// M14 V10: runner -> run, rebuilt from `runs`.
+    #[serde(skip)]
+    pub runner_of: BTreeMap<EntityId, crate::virt::RunId>,
 }
 
 use crate::components::{Law, LawShock};
@@ -792,6 +818,15 @@ impl World {
             by_role: Default::default(),
             stat_slots: StatSlots::default(),
             names: names.clone(),
+            virt: Default::default(),
+            virt_dirty: false,
+            db: BTreeMap::new(),
+            runs: BTreeMap::new(),
+            run_queue: BTreeSet::new(),
+            run_orders: BTreeMap::new(),
+            run_log: VecDeque::new(),
+            last_trace: BTreeMap::new(),
+            runner_of: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -806,6 +841,13 @@ impl World {
         systems::street::seed_hotels(&mut w);
         // M13 D18: the Garages go up last, on the Lots the Hotels left.
         systems::assets::seed_sellers(&mut w);
+        // M14 (Seeding table, V21, V26, V47): the corps' trees by name (no
+        // RNG), then, with the plane on, the Labs on the Lots left, the
+        // plane and its opening ICE.
+        systems::tech::seed_corps(&mut w, false);
+        systems::virt::seed_labs(&mut w);
+        systems::virt::relink(&mut w);
+        systems::virt::seed_ice(&mut w);
         w
     }
 
@@ -855,6 +897,9 @@ impl World {
                     stock_goods: [0; 2],
                     asset_sales_today: 0,
                     asset_sales: VecDeque::new(),
+                    security: Default::default(),
+                    focus: None,
+                    hacked: None,
                 },
             );
             match def.kind {
@@ -911,6 +956,7 @@ impl World {
                 stealth: rng.random_range(wc.skill_min..wc.skill_max),
                 fighting: rng.random_range(wc.skill_min..wc.skill_max),
                 farming: rng.random_range(wc.skill_min..wc.skill_max),
+                hacking: Skills::unset_hacking(),
             };
 
             self.insert(
@@ -936,6 +982,9 @@ impl World {
             self.insert(id, Brain::default());
             self.insert(id, Memory::default());
             self.insert(id, skills);
+            // M14 V35: a keyed draw (the world stream is untouched).
+            let hacking = systems::tech::draw_hacking(self, id);
+            systems::tech::give_hacking(self, id, hacking);
             self.insert(id, Household::new(None));
             // M13 D4: keyed draws, so the world stream is untouched.
             let body = systems::assets::new_body(self, id);
@@ -1235,11 +1284,19 @@ impl World {
 
     /// Drop a gang from `gang_ids` (its Gang removed, or despawned).
     pub(crate) fn unindex_gang(&mut self, id: EntityId) {
+        if self.gang_ids.binary_search(&id).is_ok() {
+            // M14 V4: a gang gone (its Hideout node) relinks the plane.
+            self.virt_dirty = true;
+        }
         Self::list_remove(&mut self.gang_ids, id);
     }
 
     /// Drop a corp from `corp_ids` (its Corp removed, or despawned).
     pub(crate) fn unindex_corp(&mut self, id: EntityId) {
+        if self.corp_ids.binary_search(&id).is_ok() {
+            // M14 V4: a corp gone (its Ledger node) relinks the plane.
+            self.virt_dirty = true;
+        }
         Self::list_remove(&mut self.corp_ids, id);
     }
 
@@ -1367,9 +1424,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 8], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 9], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; 8] = Default::default();
+        let mut roles: [Vec<EntityId>; 9] = Default::default();
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -1819,9 +1876,10 @@ impl World {
     // -----------------------------------------------------------------------
 
     /// One in-game minute, systems in the fixed order
-    /// `commands, time, lod, needs, memory, mood, think, plan, exec, ownership,
-    /// assets, classes, districts, economy, bind, law, social, gang,
-    /// corp_brain, demography, stats`. The assets pass (M13 D9) runs at
+    /// `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
+    /// ownership, assets, tech, classes, districts, economy, bind, law, social,
+    /// gang, corp_brain, demography, stats` (M14 V39: `virt` relinks when
+    /// dirty and pops run steps; `tech` is the plane's midnight pass). The assets pass (M13 D9) runs at
     /// midnight right after ownership's, so upkeep and finance see the same
     /// purses the rent pass left. The district aggregates read the class pass's
     /// midnight state (M12 D6). The binder runs
@@ -1838,8 +1896,10 @@ impl World {
         systems::think::run(self);
         systems::plan::run(self);
         crate::exec::run(self);
+        systems::virt::run(self);
         systems::ownership::run(self);
         systems::assets::run(self);
+        systems::tech::run(self);
         systems::classes::run(self);
         systems::districts::run(self);
         systems::economy::run(self);
@@ -2061,6 +2121,9 @@ impl World {
         }
         // M13 D2/D3: the asset indices, the corpses to settle, every Kit.
         systems::assets::rebuild(self);
+        // M14 V1/V10: the plane's indices and the runners.
+        systems::virt::rebuild_index(self);
+        self.runner_of = self.runs.iter().map(|(&id, r)| (r.runner, id)).collect();
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde
@@ -2120,6 +2183,15 @@ impl World {
         if short || !bodiless.is_empty() {
             systems::assets::rebuild(self);
         }
+        // M14 V35/V44: hacking from each agent's keyed stream; the corps'
+        // trees from `[tech] seed` by name.
+        let unset: Vec<EntityId> =
+            self.entities().filter(|&id| self.comp::<Skills>(id).is_some_and(|s| s.hacking < 0.0)).collect();
+        for id in unset {
+            let h = systems::tech::draw_hacking(self, id);
+            systems::tech::give_hacking(self, id, h);
+        }
+        systems::tech::seed_corps(self, true);
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {
                 self.insert(jail, Law::default());

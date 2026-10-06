@@ -33,6 +33,8 @@ pub fn workplace_key(role: Role) -> LocationKey {
         // building is observed as.
         Role::Ripperdoc => LocationKey::Clinic,
         Role::Mechanic => LocationKey::Garage,
+        // M14 V16: a Lab's staff work at their employer (the wage desk).
+        Role::Researcher => LocationKey::Workplace,
     }
 }
 

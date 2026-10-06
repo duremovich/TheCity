@@ -78,6 +78,29 @@ pub struct Config {
     /// M13 phase 4 the security robot (§ 5); absent from pre-M13 saves likewise.
     #[serde(default = "RobotsCfg::off")]
     pub robots: RobotsCfg,
+    /// M14 the Virt plane (§ 1); absent from pre-M14 saves: off (plan V44).
+    /// `enabled = false` turns off relink, runs, ICE upkeep, Lab production,
+    /// research upkeep and every tier cap.
+    #[serde(default = "VirtCfg::off")]
+    pub virt: VirtCfg,
+    /// M14 decks (§ 2); read only while `[virt]` is on.
+    #[serde(default = "DecksCfg::off")]
+    pub decks: DecksCfg,
+    /// M14 ICE and the contest (§ 3); read only while `[virt]` is on.
+    #[serde(default = "IceCfg::off")]
+    pub ice: IceCfg,
+    /// M14 Data and Labs (§ 4); read only while `[virt]` is on.
+    #[serde(default = "DataCfg::off")]
+    pub data: DataCfg,
+    /// M14 the tech tree (§ 5); read only while `[virt]` is on.
+    #[serde(default = "TechCfg::off")]
+    pub tech: TechCfg,
+    /// M14 hacking goals and orders (§ 6); read only while `[virt]` is on.
+    #[serde(default = "HackCfg::off")]
+    pub hack: HackCfg,
+    /// M14 faction databases (§ 6); read only while `[virt]` is on.
+    #[serde(default = "DbCfg::off")]
+    pub db: DbCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -149,7 +172,8 @@ impl JobsCfg {
             Role::Gravedigger => self.gravedigger,
             Role::Sanitation => self.sanitation,
             // M13 D16: hired by the Clinics and Garages that are built, never seeded.
-            Role::Ripperdoc | Role::Mechanic => 0,
+            // M14: likewise the Labs' Researchers.
+            Role::Ripperdoc | Role::Mechanic | Role::Researcher => 0,
         }
     }
 }
@@ -184,6 +208,11 @@ impl BuildingCfg {
     pub fn hotel() -> BuildingCfg {
         BuildingCfg { capacity: 12, stock_cap: 0, staff: 0 }
     }
+
+    /// M14 (plan V16): a Lab of four Researchers.
+    pub fn lab() -> BuildingCfg {
+        BuildingCfg { capacity: 8, stock_cap: 0, staff: 4 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -212,6 +241,9 @@ pub struct BuildingsCfg {
     /// M13 D16.
     #[serde(default = "BuildingCfg::inert")]
     pub garage: BuildingCfg,
+    /// M14 (plan V16).
+    #[serde(default = "BuildingCfg::lab")]
+    pub lab: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -231,6 +263,7 @@ impl BuildingsCfg {
             BuildingKind::Hotel => &self.hotel,
             BuildingKind::Clinic => &self.clinic,
             BuildingKind::Garage => &self.garage,
+            BuildingKind::Lab => &self.lab,
         }
     }
 }
@@ -269,6 +302,9 @@ pub struct EconomyCfg {
     /// M13 D16: a Garage's staff.
     #[serde(default = "default_wage_mechanic")]
     pub wage_mechanic: i64,
+    /// M14 (plan V16): a Lab's staff.
+    #[serde(default = "default_wage_researcher")]
+    pub wage_researcher: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -315,6 +351,10 @@ fn default_wage_mechanic() -> i64 {
     7
 }
 
+fn default_wage_researcher() -> i64 {
+    4
+}
+
 impl EconomyCfg {
     pub fn wage(&self, role: Role) -> i64 {
         match role {
@@ -326,6 +366,7 @@ impl EconomyCfg {
             Role::Sanitation => self.wage_sanitation,
             Role::Ripperdoc => self.wage_ripperdoc,
             Role::Mechanic => self.wage_mechanic,
+            Role::Researcher => self.wage_researcher,
         }
     }
 }
@@ -959,6 +1000,9 @@ pub struct FoundCostCfg {
     pub clinic: i64,
     #[serde(default)]
     pub garage: i64,
+    /// M14 (spec § 4): a Lab, built only by the Research order.
+    #[serde(default)]
+    pub lab: i64,
 }
 
 impl FoundCostCfg {
@@ -986,6 +1030,9 @@ pub struct UpkeepCfg {
     pub clinic: i64,
     #[serde(default)]
     pub garage: i64,
+    /// M14 (spec § 4).
+    #[serde(default)]
+    pub lab: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -1018,6 +1065,7 @@ impl UpkeepCfg {
             BuildingKind::Hotel => self.hotel,
             BuildingKind::Clinic => self.clinic,
             BuildingKind::Garage => self.garage,
+            BuildingKind::Lab => self.lab,
             _ => 0,
         }
     }
@@ -1034,6 +1082,9 @@ pub struct ValueCfg {
     pub clinic: i64,
     #[serde(default)]
     pub garage: i64,
+    /// M14 (spec § 4).
+    #[serde(default)]
+    pub lab: i64,
 }
 
 /// D48: flat terms on each corp order's score.
@@ -1046,6 +1097,12 @@ pub struct CorpOrderFlatCfg {
     pub secure: f32,
     pub hunker: f32,
     pub lobby: f32,
+    /// M14 (plan V31).
+    #[serde(default)]
+    pub research: f32,
+    /// M14 (plan V31, phase 3).
+    #[serde(default)]
+    pub virt_raid: f32,
 }
 
 /// M11 corps (docs/M11_OWNERSHIP.md § 5 and the plan's additions). One row
@@ -1162,7 +1219,7 @@ impl CorpsCfg {
             shock_severity_rethink: 0.5,
             bankrupt_days: 14,
             incorporate_buildings: 2,
-            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250, clinic: 500, garage: 600 },
+            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250, clinic: 500, garage: 600, lab: 800 },
             wholesale: 2,
             contract_per_guard_day: 10,
             security_guards: 6,
@@ -1179,8 +1236,9 @@ impl CorpsCfg {
                 hotel: 10,
                 clinic: 10,
                 garage: 10,
+                lab: 0,
             },
-            value: ValueCfg { farm: 1000, market: 1000, security_office: 500, clinic: 600, garage: 800 },
+            value: ValueCfg { farm: 1000, market: 1000, security_office: 500, clinic: 600, garage: 800, lab: 1200 },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
             grow_cooldown_days: 7,
@@ -1212,6 +1270,8 @@ impl CorpsCfg {
                 secure: 0.0,
                 hunker: 0.15,
                 lobby: 0.0,
+                research: 0.0,
+                virt_raid: 0.0,
             },
         }
     }
@@ -2147,6 +2207,462 @@ pub struct LeversCfg {
     /// M13 D40: Markets sell Stims legally from day 0.
     #[serde(default)]
     pub stims_legal: bool,
+    /// M14 (plan V26/V42): the ICE seeded on the Treasury and the Precinct.
+    #[serde(default = "default_city_ice")]
+    pub city_ice: u8,
+}
+
+fn default_city_ice() -> u8 {
+    2
+}
+
+// ---------------------------------------------------------------------------
+// M14 Data and Virt (docs/M14_VIRT.md, plan phase 1.2). Each section has an
+// `off()`; `VirtCfg::off().enabled` is false and gates every M14 branch, the
+// others hold the TOML's values (read only while `[virt]` is on).
+// ---------------------------------------------------------------------------
+
+/// M14 § 1: the plane.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VirtCfg {
+    pub enabled: bool,
+    pub terminal_fee: i64,
+    pub jacked_fight_mult: f32,
+    pub dump_sanity: f32,
+    /// Per deck tier.
+    pub hop_ticks: Vec<u32>,
+    pub contest_ticks: u32,
+    pub hop_eps: f32,
+    /// No free choice targets a node below this (orders may, plan V11).
+    pub min_route_p: f32,
+    pub public_links_tier: u8,
+    pub access_links_tier: u8,
+    pub trunk_links_tier: u8,
+}
+
+impl Default for VirtCfg {
+    fn default() -> Self {
+        VirtCfg::off()
+    }
+}
+
+impl VirtCfg {
+    pub fn off() -> VirtCfg {
+        VirtCfg {
+            enabled: false,
+            terminal_fee: 3,
+            jacked_fight_mult: 0.3,
+            dump_sanity: 0.1,
+            hop_ticks: vec![8, 5, 3],
+            contest_ticks: 5,
+            hop_eps: 0.01,
+            min_route_p: 0.25,
+            public_links_tier: 1,
+            access_links_tier: 1,
+            trunk_links_tier: 2,
+        }
+    }
+}
+
+/// M14 § 2: decks and the hacking skill's seed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DecksCfg {
+    pub deck_shop_min: f32,
+    /// Plan V35: `hacking = hack_seed_scale x U(0,1)^3`.
+    pub hack_seed_scale: f32,
+    pub hack_drift: f32,
+    pub upgrade_frac: f32,
+    pub gang_deck_floor: i64,
+    pub gang_decks_max: u32,
+}
+
+impl Default for DecksCfg {
+    fn default() -> Self {
+        DecksCfg::off()
+    }
+}
+
+impl DecksCfg {
+    pub fn off() -> DecksCfg {
+        DecksCfg {
+            deck_shop_min: 0.4,
+            hack_seed_scale: 0.8,
+            hack_drift: 0.01,
+            upgrade_frac: 0.7,
+            gang_deck_floor: 900,
+            gang_decks_max: 3,
+        }
+    }
+}
+
+/// `[ice] ice_seed`: the ICE seeded on a building node by kind (plan V26).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IceSeed {
+    pub lab: u8,
+    pub security_office: u8,
+    pub farm: u8,
+    pub market: u8,
+    pub hideout: u8,
+    pub clinic: u8,
+    pub garage: u8,
+    pub bar: u8,
+    pub hotel: u8,
+}
+
+impl IceSeed {
+    pub fn for_kind(&self, kind: BuildingKind) -> u8 {
+        match kind {
+            BuildingKind::Lab => self.lab,
+            BuildingKind::SecurityOffice => self.security_office,
+            BuildingKind::Farm => self.farm,
+            BuildingKind::Market => self.market,
+            BuildingKind::Hideout => self.hideout,
+            BuildingKind::Clinic => self.clinic,
+            BuildingKind::Garage => self.garage,
+            BuildingKind::Bar => self.bar,
+            BuildingKind::Hotel => self.hotel,
+            _ => 0,
+        }
+    }
+}
+
+/// `[ice] act_ticks` per purpose (phase 2).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ActTicks {
+    pub data: u32,
+    pub ledger: u32,
+    pub door: u32,
+    pub robot: u32,
+    pub camera: u32,
+}
+
+/// M14 § 3: ICE, its upkeep and the contest's outcomes. The contest step is
+/// `[chrome] contest_step` (one value, plan 1.2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct IceCfg {
+    pub hack_w: f32,
+    /// Per ICE tier 0..=3.
+    pub ice_price: Vec<i64>,
+    pub self_install_frac: f32,
+    /// Per ICE tier 0..=3.
+    pub ice_upkeep: Vec<i64>,
+    pub ice_off_days: u8,
+    pub ice_value_steps: Vec<i64>,
+    pub ice_seed: IceSeed,
+    pub alarm_hours: u32,
+    pub fry_base: Vec<f32>,
+    pub fry_gap: f32,
+    pub fry_sanity: f32,
+    pub fry_energy: f32,
+    pub p_fry_kill: Vec<f32>,
+    pub flatline_gap: f32,
+    pub p_flatline: f32,
+    pub fry_wear: u8,
+    pub trace_p: Vec<f32>,
+    pub stealth_w: f32,
+    pub daze_ticks: u32,
+    pub act_ticks: ActTicks,
+    pub door_strip_cap: f32,
+    pub door_cooldown_days: u32,
+}
+
+impl Default for IceCfg {
+    fn default() -> Self {
+        IceCfg::off()
+    }
+}
+
+impl IceCfg {
+    pub fn off() -> IceCfg {
+        IceCfg {
+            hack_w: 1.0,
+            ice_price: vec![0, 150, 600, 2000],
+            self_install_frac: 0.5,
+            ice_upkeep: vec![0, 0, 1, 2],
+            ice_off_days: 2,
+            ice_value_steps: vec![200, 1500, 6000],
+            ice_seed: IceSeed {
+                lab: 2,
+                security_office: 2,
+                farm: 1,
+                market: 1,
+                hideout: 0,
+                clinic: 1,
+                garage: 1,
+                bar: 0,
+                hotel: 0,
+            },
+            alarm_hours: 48,
+            fry_base: vec![0.0, 0.05, 0.25, 0.6],
+            fry_gap: 1.0,
+            fry_sanity: 0.3,
+            fry_energy: 0.5,
+            p_fry_kill: vec![0.0, 0.0, 0.05, 0.3],
+            flatline_gap: 1.5,
+            p_flatline: 0.8,
+            fry_wear: 20,
+            trace_p: vec![0.0, 0.2, 0.45, 0.7],
+            stealth_w: 0.5,
+            daze_ticks: 30,
+            act_ticks: ActTicks { data: 30, ledger: 30, door: 10, robot: 15, camera: 5 },
+            door_strip_cap: 0.5,
+            door_cooldown_days: 3,
+        }
+    }
+
+    /// `ice_upkeep[tier]` (0 past the table).
+    pub fn upkeep(&self, tier: u8) -> i64 {
+        self.ice_upkeep.get(usize::from(tier)).copied().unwrap_or(0)
+    }
+
+    /// `ice_price[tier]` (`None` past the table).
+    pub fn price(&self, tier: u8) -> Option<i64> {
+        self.ice_price.get(usize::from(tier)).copied()
+    }
+}
+
+/// M14 § 4: Data and Labs.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DataCfg {
+    pub data_per_shift: f32,
+    pub store_cap: u32,
+    pub steal_units: Vec<u32>,
+    pub data_price: i64,
+    pub gang_data_keep: u32,
+    pub backup_days: u32,
+    pub ledger_frac: f32,
+    pub ledger_cap: Vec<i64>,
+    pub door_loss: i64,
+    /// Plan: a seeded Lab's opening store in its focus track.
+    pub seed_store: u32,
+}
+
+impl Default for DataCfg {
+    fn default() -> Self {
+        DataCfg::off()
+    }
+}
+
+impl DataCfg {
+    pub fn off() -> DataCfg {
+        DataCfg {
+            data_per_shift: 3.0,
+            store_cap: 2000,
+            steal_units: vec![60, 150, 400],
+            data_price: 3,
+            gang_data_keep: 0,
+            backup_days: 3,
+            ledger_frac: 0.05,
+            ledger_cap: vec![0, 400, 1500],
+            door_loss: 100,
+            seed_store: 300,
+        }
+    }
+}
+
+/// `[tech] requires`: the owner's tier in the kind's track a seller needs to
+/// sell tier `t` (`requires[t - 1]`; a tier past the list is not gated).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TechRequires {
+    pub implant: Vec<u8>,
+    pub deck: Vec<u8>,
+    pub robot: Vec<u8>,
+    pub camera: Vec<u8>,
+    pub motorcycle: Vec<u8>,
+    pub car: Vec<u8>,
+    pub truck: Vec<u8>,
+    pub flyer: Vec<u8>,
+    pub pack: Vec<u8>,
+    pub bridge: Vec<u8>,
+}
+
+impl TechRequires {
+    /// The list for an asset kind's class.
+    pub fn of(&self, kind: AssetKind) -> &[u8] {
+        match kind.class() {
+            AssetClass::Motorcycle => &self.motorcycle,
+            AssetClass::Car => &self.car,
+            AssetClass::Truck => &self.truck,
+            AssetClass::Flyer => &self.flyer,
+            AssetClass::Implant => &self.implant,
+            AssetClass::Robot => &self.robot,
+            AssetClass::Pack => &self.pack,
+            AssetClass::Bridge => &self.bridge,
+        }
+    }
+}
+
+/// `[tech] focus_by_niche`: a corp's opening focus by its first niche.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FocusByNiche {
+    pub food: String,
+    pub housing: String,
+    pub security: String,
+    pub tech: String,
+}
+
+impl Default for FocusByNiche {
+    fn default() -> Self {
+        FocusByNiche {
+            food: "Industry".into(),
+            housing: "Industry".into(),
+            security: "Deck".into(),
+            tech: "Chrome".into(),
+        }
+    }
+}
+
+impl FocusByNiche {
+    pub fn for_niche(&self, n: Niche) -> crate::virt::Track {
+        let s = match n {
+            Niche::Food => &self.food,
+            Niche::Housing => &self.housing,
+            Niche::Security => &self.security,
+            Niche::Tech => &self.tech,
+        };
+        crate::virt::Track::parse(s).unwrap_or(crate::virt::Track::Industry)
+    }
+}
+
+/// M14 § 5: the tech tree.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TechCfg {
+    pub requires: TechRequires,
+    /// Data to reach tier i.
+    pub tier_cost: Vec<u32>,
+    pub tier_coins: Vec<i64>,
+    pub upkeep_data: Vec<u32>,
+    pub upkeep_coins: Vec<i64>,
+    pub decay_days: u8,
+    pub research_rate: u32,
+    pub orphan_cap: u8,
+    pub industry_prod: Vec<f32>,
+    pub focus_by_niche: FocusByNiche,
+    /// `[chrome, deck, industry]` by `Corp.name`; every other corp `[1, 1, 1]`.
+    pub seed: std::collections::BTreeMap<String, [u8; 3]>,
+    /// Plan V47: coins per seeded Lab to its owner, out of nothing.
+    pub seed_lab_grant: i64,
+}
+
+impl Default for TechCfg {
+    fn default() -> Self {
+        TechCfg::off()
+    }
+}
+
+impl TechCfg {
+    pub fn off() -> TechCfg {
+        TechCfg {
+            requires: TechRequires {
+                implant: vec![1, 2, 3],
+                deck: vec![1, 2, 3],
+                robot: vec![1, 2, 3],
+                camera: vec![1, 2, 3],
+                motorcycle: vec![1],
+                car: vec![1, 2],
+                truck: vec![2],
+                flyer: vec![3],
+                pack: vec![1, 1],
+                bridge: Vec::new(),
+            },
+            tier_cost: vec![0, 0, 400, 1200],
+            tier_coins: vec![0, 0, 800, 2500],
+            upkeep_data: vec![0, 0, 3, 8],
+            upkeep_coins: vec![0, 0, 0, 0],
+            decay_days: 7,
+            research_rate: 40,
+            orphan_cap: 2,
+            industry_prod: vec![0.0, 0.0, 0.1, 0.2],
+            focus_by_niche: FocusByNiche::default(),
+            seed: [("Zetatech", [3, 1, 3]), ("Arasaka", [1, 3, 1]), ("Militech", [1, 2, 1])]
+                .into_iter()
+                .map(|(n, t)| (n.to_string(), t))
+                .collect(),
+            seed_lab_grant: 2000,
+        }
+    }
+
+    pub fn upkeep_data_at(&self, tier: u8) -> u32 {
+        self.upkeep_data.get(usize::from(tier)).copied().unwrap_or(0)
+    }
+
+    pub fn upkeep_coins_at(&self, tier: u8) -> i64 {
+        self.upkeep_coins.get(usize::from(tier)).copied().unwrap_or(0)
+    }
+}
+
+/// M14 § 6: the Hack goal and the orders (phases 2-3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HackCfg {
+    pub hack_min: f32,
+    pub hack_ref: i64,
+    pub hack_flat: f32,
+    pub hack_cooldown_days: u32,
+    pub fried_cooldown_days: u32,
+    pub virt_runners: u32,
+    pub door_lead_hours: u32,
+    pub door_hours: u32,
+    pub blind_hours: u32,
+    pub wipe_min: f32,
+    pub stream_min: f32,
+    pub order_score: f32,
+    pub stat_hack_min: f32,
+}
+
+impl Default for HackCfg {
+    fn default() -> Self {
+        HackCfg::off()
+    }
+}
+
+impl HackCfg {
+    pub fn off() -> HackCfg {
+        HackCfg {
+            hack_min: 0.3,
+            hack_ref: 500,
+            hack_flat: 0.0,
+            hack_cooldown_days: 2,
+            fried_cooldown_days: 10,
+            virt_runners: 2,
+            door_lead_hours: 2,
+            door_hours: 6,
+            blind_hours: 12,
+            wipe_min: 0.6,
+            stream_min: 0.2,
+            order_score: 0.9,
+            stat_hack_min: 0.5,
+        }
+    }
+}
+
+/// M14 § 6: faction databases (phases 2-3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DbCfg {
+    pub db_cap: usize,
+    pub sighting_days: u32,
+}
+
+impl Default for DbCfg {
+    fn default() -> Self {
+        DbCfg::off()
+    }
+}
+
+impl DbCfg {
+    pub fn off() -> DbCfg {
+        DbCfg { db_cap: 32, sighting_days: 14 }
+    }
 }
 
 impl Config {
@@ -2262,6 +2778,20 @@ impl Config {
         self.shop = ShopCfg::off();
         self.stims = StimsCfg::off();
         self.robots = RobotsCfg::off();
+        // M14 V44: no Virt plane, Labs, ICE, tech caps.
+        self.virt_off()
+    }
+
+    /// M14 (plan V44, V46): every M14 section `off()`: no relink, runs, ICE
+    /// upkeep, Lab production, research upkeep or tier cap (`--virt-off`).
+    pub fn virt_off(mut self) -> Config {
+        self.virt = VirtCfg::off();
+        self.decks = DecksCfg::off();
+        self.ice = IceCfg::off();
+        self.data = DataCfg::off();
+        self.tech = TechCfg::off();
+        self.hack = HackCfg::off();
+        self.db = DbCfg::off();
         self
     }
 
@@ -2303,7 +2833,8 @@ impl Config {
         c.shop = ShopCfg::off();
         c.stims = StimsCfg::off();
         c.robots = RobotsCfg::off();
-        c
+        // M14 V44: the parity table never saw a Researcher or a runner.
+        c.virt_off()
     }
 
     /// The same city at `n` residents: jobs, opening stocks, the Treasury, the

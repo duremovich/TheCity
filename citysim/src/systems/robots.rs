@@ -47,11 +47,13 @@ pub fn powered_robot(world: &World, b: EntityId) -> Option<EntityId> {
     })
 }
 
-/// D41: a robot's fighting, `robot_fighting[tier − 1]` (the last entry past it).
+/// D41: a robot's fighting, `robot_fighting[tier − 1]` (the last entry past
+/// it) at its effective tier (M14 V23).
 pub fn fighting(world: &World, robot: EntityId) -> Option<f32> {
     let x = world.comp::<Asset>(robot).filter(|x| x.kind == AssetKind::Robot)?;
     let table = &world.config.robots.robot_fighting;
-    let i = usize::from(x.tier.saturating_sub(1)).min(table.len().saturating_sub(1));
+    let tier = assets::eff_tier_of(world, x);
+    let i = usize::from(tier.saturating_sub(1)).min(table.len().saturating_sub(1));
     Some(table.get(i).copied().unwrap_or(0.5))
 }
 
@@ -102,7 +104,8 @@ pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> S
         return Sensed::Unseen;
     }
     let Some(robot) = powered_robot(world, b) else { return Sensed::Unseen };
-    let robot_tier = world.comp::<Asset>(robot).map_or(1, |x| x.tier);
+    // M14 V23: the sensor contests at the robot's effective tier.
+    let robot_tier = world.comp::<Asset>(robot).map_or(1, |x| assets::eff_tier_of(world, x));
     let thief_tier = crate::systems::security::thief_tier(crate::systems::law::stealth(world, actor));
     let step = world.config.chrome.contest_step;
     if crate::systems::security::contest(thief_tier, robot_tier, step, world.rng.world()) {
@@ -176,6 +179,40 @@ fn robot_seller(world: &World, corp: EntityId) -> Option<EntityId> {
         .map(|(_, _, c)| c)
 }
 
+/// M14 V22/V23: who sells `corp` its robot and at what tier: D42's seller
+/// when it can sell `want`, else the cheapest (D42's order) Security corp
+/// that can, else D42's seller at the highest tier it can sell. With the
+/// plane off this is D42's seller at `want`.
+fn robot_offer(
+    world: &World,
+    corp: EntityId,
+    door: crate::components::TilePos,
+    want: u8,
+) -> Option<(EntityId, EntityId, u8)> {
+    let first = robot_seller(world, corp)?;
+    let at = |s: EntityId| office_of(world, s, Some(door));
+    let sells = |s: EntityId, t: u8| at(s).is_some_and(|o| assets::can_sell(world, o, AssetKind::Robot, t));
+    if !world.config.virt.enabled || sells(first, want) {
+        return Some((first, at(first)?, want));
+    }
+    let other = world
+        .corps()
+        .into_iter()
+        .filter(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&Niche::Security)))
+        .filter(|&c| sells(c, want))
+        .map(|c| {
+            let level = world.comp::<Corp>(c).map_or(1.0, |cc| cc.level(Niche::Security));
+            (ordered_float::OrderedFloat(level), security_sold(world, c), c)
+        })
+        .min()
+        .map(|(_, _, c)| c);
+    if let Some(s) = other {
+        return Some((s, at(s)?, want));
+    }
+    let tier = (1..want).rev().find(|&t| sells(first, t))?;
+    Some((first, at(first)?, tier))
+}
+
 /// `seller`'s Security Office nearest `near` (door Manhattan, ties the lower
 /// id; any with `near` None).
 fn office_of(world: &World, seller: EntityId, near: Option<crate::components::TilePos>) -> Option<EntityId> {
@@ -206,9 +243,8 @@ pub fn consider_robot(world: &mut World, corp: EntityId, b: EntityId) -> bool {
     let Some((kind, door)) = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| (bd.kind, bd.door)) else {
         return false;
     };
-    let Some(seller) = robot_seller(world, corp) else { return false };
-    let Some(office) = office_of(world, seller, Some(door)) else { return false };
-    let tier = robot_tier_for(world, kind);
+    let want = robot_tier_for(world, kind);
+    let Some((seller, office, tier)) = robot_offer(world, corp, door, want) else { return false };
     let Some(list) = assets::list_price(world, AssetKind::Robot, tier) else { return false };
     let level = world.comp::<Corp>(seller).map_or(1.0, |c| c.level(Niche::Security));
     let price = if seller == corp {

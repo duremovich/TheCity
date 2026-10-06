@@ -90,6 +90,10 @@ struct RunArgs {
     /// `mlp` (experiment; ignored with `--load`).
     #[arg(long, value_name = "POLICY")]
     stat_policy: Option<String>,
+    /// M14 V46: every M14 section off (`Config::virt_off`): no plane, Labs,
+    /// ICE or tech caps; the M13 city.
+    #[arg(long)]
+    virt_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -184,6 +188,19 @@ enum Lever {
     Brick(Lender),
     /// M13 god: `chase=<agent index>`.
     Chase(u32),
+    /// M14 god: `wipe_data=<building index>`.
+    WipeData(u32),
+    /// M14 god: `set_tech=<corp slot>:<track>:<tier>`.
+    SetTech(u8, citysim::virt::Track, u8),
+    /// M14 god: `grant_data=<corp slot>|gang<i>:<track>:<units>`.
+    GrantData(Faction, citysim::virt::Track, u32),
+}
+
+/// A corp by its seeding slot or a gang by its index (`grant_data`).
+#[derive(Clone, Copy, Debug)]
+enum Faction {
+    Corp(u8),
+    Gang(usize),
 }
 
 /// Whose financed implants `brick` bricks: a corp by its seeding slot or an agent.
@@ -338,6 +355,16 @@ impl Lever {
             Lever::Brick(Lender::Corp(s)) => PlayerCommand::Brick(corp_in_slot(world, s)?),
             Lever::Brick(Lender::Agent(a)) => PlayerCommand::Brick(agent_at(world, a)?),
             Lever::Chase(a) => PlayerCommand::Chase(agent_at(world, a)?),
+            Lever::WipeData(b) => PlayerCommand::WipeData(building_at(world, b)?),
+            Lever::SetTech(s, track, tier) => PlayerCommand::SetTech { corp: corp_in_slot(world, s)?, track, tier },
+            Lever::GrantData(f, track, units) => PlayerCommand::GrantData {
+                faction: match f {
+                    Faction::Corp(s) => corp_in_slot(world, s)?,
+                    Faction::Gang(i) => gang(i)?,
+                },
+                track,
+                units,
+            },
         })
     }
 }
@@ -362,7 +389,9 @@ impl Lever {
 /// `moto|car|truck|flyer|arms|legs|nerves|eyes|skin|robot|pack|bridge`),
 /// `wreck=<asset index>`, `chrome_everyone=<tier>`,
 /// `flood_stims=<district>:<n>`, `brick=<corp slot>|agent:<index>`,
-/// `chase=<agent index>`.
+/// `chase=<agent index>`. M14 god levers (plan V42, phase 1):
+/// `wipe_data=<building index>`, `set_tech=<corp slot>:<chrome|deck|industry>:<tier>`,
+/// `grant_data=<corp slot>|gang<i>:<chrome|deck|industry>:<units>`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -466,6 +495,33 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             None => Lender::Corp(slot(value)?),
         })),
         "chase" => Some(Lever::Chase(value.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?)),
+        "wipe_data" => Some(Lever::WipeData(value.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?)),
+        "set_tech" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [s, t, n] = parts[..] else {
+                return Err(format!("{spec}: expected <corp slot>:<track>:<tier>"));
+            };
+            Some(Lever::SetTech(
+                slot(s)?,
+                citysim::virt::Track::parse(t).ok_or_else(|| format!("{spec}: unknown track {t}"))?,
+                n.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?,
+            ))
+        }
+        "grant_data" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [f, t, n] = parts[..] else {
+                return Err(format!("{spec}: expected <corp slot>|gang<i>:<track>:<units>"));
+            };
+            let faction = match f.strip_prefix("gang") {
+                Some(g) => Faction::Gang(idx(g)?),
+                None => Faction::Corp(slot(f)?),
+            };
+            Some(Lever::GrantData(
+                faction,
+                citysim::virt::Track::parse(t).ok_or_else(|| format!("{spec}: unknown track {t}"))?,
+                n.parse::<u32>().map_err(|e| format!("{spec}: bad units: {e}"))?,
+            ))
+        }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -624,11 +680,17 @@ fn run(args: RunArgs) -> Result<(), String> {
     if let Some(p) = &args.stat_policy {
         config.lod.policy = p.clone();
     }
+    if args.virt_off {
+        config = config.virt_off();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
             w.config.lod.force = config.lod.force;
             w.config.assets_dir = config.assets_dir;
+            if args.virt_off {
+                w.config = w.config.clone().virt_off();
+            }
             w
         }
         None => World::new(args.seed, config),
@@ -1255,6 +1317,20 @@ mod tests {
         assert!(matches!(parse_lever("day=10:brick=8").unwrap().1, Lever::Brick(Lender::Corp(8))));
         assert!(matches!(parse_lever("day=10:brick=agent:42").unwrap().1, Lever::Brick(Lender::Agent(42))));
         assert!(parse_lever("day=10:brick=agent:x").is_err());
+    }
+
+    #[test]
+    fn test_parse_virt_god_levers() {
+        assert!(matches!(parse_lever("day=3:wipe_data=812"), Ok((_, Lever::WipeData(812)))));
+        assert!(matches!(
+            parse_lever("day=3:set_tech=8:chrome:2"),
+            Ok((_, Lever::SetTech(8, citysim::virt::Track::Chrome, 2)))
+        ));
+        assert!(matches!(
+            parse_lever("day=3:grant_data=gang1:deck:500"),
+            Ok((_, Lever::GrantData(Faction::Gang(1), citysim::virt::Track::Deck, 500)))
+        ));
+        assert!(parse_lever("day=3:set_tech=8:psionics:2").is_err());
     }
 
     #[test]

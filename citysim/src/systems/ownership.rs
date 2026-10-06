@@ -177,6 +177,16 @@ pub enum Flow {
     Parts,
     /// M13 D8: Therapy and Detox (taxed).
     Treatment,
+    /// M14 V17/V40: a Data sale, Tech corp -> seller (taxed, as wholesale).
+    Data,
+    /// M14 V20/V40: a Ledger run's take (untaxed).
+    Hack,
+    /// M14 V26/V40: a node's daily ICE upkeep, owner -> Treasury (untaxed).
+    IceUpkeep,
+    /// M14 V21/V40: research upkeep and tier purchases, corp -> Treasury (untaxed).
+    Research,
+    /// M14 V5/V40: a public terminal's fee, runner -> Bar or Hotel owner (taxed).
+    Terminal,
 }
 
 impl Flow {
@@ -202,6 +212,8 @@ impl Flow {
                 | Flow::StimsLegal
                 | Flow::Parts
                 | Flow::Treatment
+                | Flow::Data
+                | Flow::Terminal
         )
     }
 }
@@ -234,6 +246,19 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Stims | Flow::StimsLegal => row.flow_stims += coins,
         Flow::Parts => row.flow_parts += coins,
         Flow::Treatment => row.flow_treatment += coins,
+        Flow::Data => row.virt.flow_data += coins,
+        Flow::Hack => row.virt.flow_hack += coins,
+        Flow::IceUpkeep => row.virt.flow_ice_upkeep += coins,
+        Flow::Research => row.virt.flow_research += coins,
+        Flow::Terminal => row.virt.flow_terminal += coins,
+    }
+}
+
+/// M14 V26: a flow that moves no coins (the city paying itself, the
+/// Treasury's own nodes' ICE upkeep) still shows in its ledger column.
+pub fn ledger_only(world: &mut World, flow: Flow, coins: i64) {
+    if coins > 0 {
+        ledger(world, flow, coins);
     }
 }
 
@@ -374,6 +399,7 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         BuildingKind::SecurityOffice => c.value.security_office,
         BuildingKind::Clinic => c.value.clinic,
         BuildingKind::Garage => c.value.garage,
+        BuildingKind::Lab => c.value.lab,
         _ => 0,
     }
 }
@@ -387,6 +413,7 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
         BuildingKind::SecurityOffice => Some(Role::Guard),
         BuildingKind::Clinic => Some(Role::Ripperdoc),
         BuildingKind::Garage => Some(Role::Mechanic),
+        BuildingKind::Lab => Some(Role::Researcher),
         _ => None,
     }
 }
@@ -445,6 +472,8 @@ pub fn transfer_building(world: &mut World, b: EntityId, to: Option<EntityId>) {
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.owner = to;
     }
+    // M14 V4: the plane relinks (a flag; nothing reads it with the plane off).
+    crate::systems::virt::mark_dirty(world);
 }
 
 /// A new corp entity (tests and incorporation).
@@ -457,6 +486,13 @@ pub fn spawn_corp(
 ) -> EntityId {
     let id = world.spawn();
     world.insert(id, Corp::new(name, niches, treasury, exec));
+    // M14 V21: a new corp's tree is [1, 1, 1] with the focus of its first
+    // niche (the seeded corps are re-seeded by name in `World::new`).
+    let tech = crate::systems::tech::seeded_tech(world, id);
+    if let Some(c) = world.comp_mut::<Corp>(id) {
+        c.tech = crate::virt::Tech::seeded([1, 1, 1], tech.focus);
+    }
+    crate::systems::virt::mark_dirty(world);
     id
 }
 

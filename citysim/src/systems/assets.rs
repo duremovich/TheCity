@@ -137,6 +137,58 @@ pub fn seller_level(world: &World, seller: EntityId) -> f32 {
 }
 
 // ---------------------------------------------------------------------------
+// Tech gates and effective tiers (M14 V22, V23)
+// ---------------------------------------------------------------------------
+
+/// M14 V23: the tier an asset works at: `tier` when it has no maker (a
+/// pre-M14 asset, a god grant) or the plane is off; `min(tier, orphan_cap)`
+/// when the maker corp is gone; else `min(tier, maker's tier in the
+/// kind's track)`. Prices, upkeep, value and the sanity `load` keep the
+/// nominal tier.
+pub fn eff_tier(world: &World, a: EntityId) -> u8 {
+    world.comp::<Asset>(a).map_or(0, |x| eff_tier_of(world, x))
+}
+
+/// [`eff_tier`] of an asset in hand.
+pub fn eff_tier_of(world: &World, x: &Asset) -> u8 {
+    let Some(m) = x.maker.filter(|_| world.config.virt.enabled) else { return x.tier };
+    x.tier.min(crate::systems::virt::maker_tier(world, m, crate::systems::tech::track_of(x.kind)))
+}
+
+/// M14 V22: the tier a seller building's owner sells at in `kind`'s track:
+/// a corp's own tier, else (an agent or the city) the street tier; and the
+/// corp recorded as the maker of what it sells.
+fn seller_tech(world: &World, seller: EntityId, kind: AssetKind) -> (u8, Option<EntityId>) {
+    let track = crate::systems::tech::track_of(kind);
+    match world.corp_of_building(seller).and_then(|c| world.comp::<Corp>(c).map(|cc| (c, cc))) {
+        Some((c, cc)) if !cc.tech.is_unset() => (cc.tech.tier_of(track), Some(c)),
+        _ => crate::systems::tech::street_tier(world, track),
+    }
+}
+
+/// M14 V22: may `seller` sell a new `kind` at `tier`? While its owner's tier
+/// in the kind's track is at least `[tech] requires[kind][tier - 1]` (a tier
+/// past the list is not gated). Always with the plane off. Used and
+/// repossessed stock is exempt (made already): callers gate new stock only.
+pub fn can_sell(world: &World, seller: EntityId, kind: AssetKind, tier: u8) -> bool {
+    if !world.config.virt.enabled {
+        return true;
+    }
+    let Some(&need) = world.config.tech.requires.of(kind).get(usize::from(tier.saturating_sub(1))) else {
+        return true;
+    };
+    seller_tech(world, seller, kind).0 >= need
+}
+
+/// M14 V22: the maker a new asset from `seller` records (`None` with the plane off).
+pub fn maker_for(world: &World, seller: EntityId, kind: AssetKind) -> Option<EntityId> {
+    if !world.config.virt.enabled {
+        return None;
+    }
+    seller_tech(world, seller, kind).1
+}
+
+// ---------------------------------------------------------------------------
 // Capacity (plan D7)
 // ---------------------------------------------------------------------------
 
@@ -159,7 +211,8 @@ pub fn capacity(world: &World, agent: EntityId) -> u32 {
         .flatten()
         .filter_map(|&a| world.comp::<Asset>(a))
         .filter(|x| x.kind == AssetKind::Pack && x.loc == AssetLoc::Carried(agent) && x.condition > 0)
-        .filter_map(|x| cfg.pack.get(usize::from(x.tier.saturating_sub(1))).copied())
+        // M14 V23: a pack carries at its effective tier.
+        .filter_map(|x| cfg.pack.get(usize::from(eff_tier_of(world, x).saturating_sub(1))).copied())
         .max()
         .unwrap_or(0);
     cfg.carry_base + carry + pack
@@ -343,6 +396,7 @@ pub fn spawn_asset(
             keeper: None,
             list,
             away_days: 0,
+            maker: None,
         },
     );
     file(world, id);
@@ -496,7 +550,6 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
             continue;
         }
         let t = x.tier.max(1);
-        let tf = f32::from(t);
         k.chrome = true;
         k.load += cfg.sanity_cost.get(usize::from(t - 1)).copied().unwrap_or(0.0);
         k.chrome_value += x.value;
@@ -506,6 +559,10 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
         if x.bricked || x.condition == 0 {
             continue;
         }
+        // M14 V23: the effects run at the effective tier (the nominal one
+        // above: load, value and what shows).
+        let t = eff_tier_of(world, x).max(1);
+        let tf = f32::from(t);
         match slot {
             Slot::Arms => {
                 k.fighting += cfg.arms_fighting * tf;
@@ -524,17 +581,14 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
     }
     k.vehicle = vehicle_of(world, agent);
     k.driving = world.trips.get(&agent).and_then(|t| world.comp::<Asset>(t.vehicle)).map(|x| x.kind);
-    let vehicle_tier =
-        k.vehicle.and_then(|v| world.comp::<Asset>(v)).map_or(
-            0,
-            |x| {
-                if x.kind == AssetKind::Flyer {
-                    3
-                } else {
-                    x.tier
-                }
-            },
-        );
+    let vehicle_tier = k.vehicle.and_then(|v| world.comp::<Asset>(v)).map_or(0, |x| {
+        if x.kind == AssetKind::Flyer {
+            3
+        } else {
+            // M14 V23: the vehicle's effective tier.
+            eff_tier_of(world, x)
+        }
+    });
     k.flash = ((f32::from(k.visible) + f32::from(vehicle_tier)) / 9.0).min(1.0);
     // D21: the Coarse multiplier of the vehicle the agent would drive (the
     // trip's own kind is read at the trip: `vehicles::timed_mult`).
@@ -1517,6 +1571,10 @@ pub fn buy_noted(
         Some((_, l, _, _, _)) => l,
         None => list_price(world, kind, tier).ok_or_else(|| format!("no {} T{tier} for sale", kind.label()))?,
     };
+    // M14 V22: new stock only while the seller's tech allows it.
+    if used.is_none() && !can_sell(world, seller, kind, tier) {
+        return Err(format!("{} cannot sell a {} T{tier} (tech)", world.name_of(seller), kind.label()));
+    }
     let price = match used {
         Some((_, l, c, _, _)) => (world.config.chrome.used_frac * l as f32 * f32::from(c) / 100.0).round() as i64,
         None => (list as f32 * seller_level(world, seller)).round() as i64,
@@ -1548,7 +1606,17 @@ pub fn buy_noted(
             set_loc(world, u, loc);
             u
         }
-        None => spawn_asset(world, kind, tier, Some(buyer), loc, list),
+        None => {
+            let maker = maker_for(world, seller, kind);
+            let a = spawn_asset(world, kind, tier, Some(buyer), loc, list);
+            if maker.is_some() {
+                if let Some(m) = world.comp_mut::<Asset>(a) {
+                    m.maker = maker;
+                }
+                rekit_touched(world, &touched(world, a));
+            }
+            a
+        }
     };
     if financed {
         let remaining = price - down;
@@ -1746,7 +1814,10 @@ fn dearest_affordable(
     coins: i64,
     room: f32,
 ) -> Option<(AssetKind, u8, i64, bool)> {
-    affordable_at(world, seller_level(world, seller), options, coins, room)
+    // M14 V22: only what the seller's tech lets it sell (all with the plane off).
+    let sellable: SmallVec<[(AssetKind, u8); 4]> =
+        options.iter().copied().filter(|&(k, t)| can_sell(world, seller, k, t)).collect();
+    affordable_at(world, seller_level(world, seller), &sellable, coins, room)
 }
 
 /// [`dearest_affordable`] at a given price level.

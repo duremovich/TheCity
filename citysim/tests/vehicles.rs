@@ -416,8 +416,8 @@ fn test_contest_half_at_equal_tiers() {
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
     let wins = (0..10_000).filter(|_| security::contest(2, 2, 0.25, &mut rng)).count();
     assert!((wins as f32 / 10_000.0 - 0.5).abs() < 0.02, "equal tiers: {wins}");
-    assert_eq!(security::contest_p(3, 1, 0.25), 0.95, "clamped");
-    assert_eq!(security::contest_p(1, 3, 0.25), 0.05, "clamped");
+    assert_eq!(security::contest_p(3.0, 1.0, 0.25), 0.95, "clamped");
+    assert_eq!(security::contest_p(1.0, 3.0, 0.25), 0.05, "clamped");
     let wins = (0..10_000).filter(|_| security::contest(3, 1, 0.25, &mut rng)).count();
     assert!((wins as f32 / 10_000.0 - 0.95).abs() < 0.01, "3 vs 1: {wins}");
 }

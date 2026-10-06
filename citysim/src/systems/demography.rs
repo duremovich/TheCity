@@ -245,7 +245,10 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
         Identity { name: format!("{first} {last}"), age_days: 0, sex, born_tick: tick as i64, spouse_died_tick: None },
     );
     world.insert(id, personality);
-    world.insert(id, Skills { stealth: 0.0, fighting: 0.0, farming: 0.0 });
+    world.insert(id, Skills { stealth: 0.0, fighting: 0.0, farming: 0.0, hacking: 0.0 });
+    // M14 V35: half the parents' mean, half the child's keyed draw.
+    let hacking = crate::systems::tech::child_hacking(world, id, mother, father);
+    crate::systems::tech::give_hacking(world, id, hacking);
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
@@ -552,6 +555,12 @@ fn job_search(world: &mut World) {
                 .filter(|&id| is_adult(world, id))
                 .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
                 .map(|id| {
+                    // M14 V16: a Lab hires the best hacker (ties lower id),
+                    // so Labs collect the city's runners.
+                    if role == Role::Researcher {
+                        let h = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
+                        return (u32::MAX - (h.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
+                    }
                     let from = world
                         .comp::<Household>(id)
                         .and_then(|h| h.home)
@@ -715,7 +724,10 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
         },
     );
     world.insert(id, personality);
-    world.insert(id, Skills { stealth: 0.1, fighting: 0.1, farming: 0.1 });
+    world.insert(id, Skills { stealth: 0.1, fighting: 0.1, farming: 0.1, hacking: 0.0 });
+    // M14 V35: an immigrant's keyed draw.
+    let hacking = crate::systems::tech::draw_hacking(world, id);
+    crate::systems::tech::give_hacking(world, id, hacking);
     world.insert(id, Wallet { coins: 15 });
     world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
     world.insert(

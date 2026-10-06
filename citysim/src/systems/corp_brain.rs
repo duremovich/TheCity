@@ -56,6 +56,22 @@ pub struct CorpInputs {
     pub lobby_ready: bool,
     pub culprit: Option<EntityId>,
     pub niches: BTreeMap<Niche, NicheInputs>,
+    /// M14 V31 (default: the plane off, no Research row).
+    pub virt: VirtInputs,
+}
+
+/// M14 V31: the Research order's inputs, gathered only with the plane on.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct VirtInputs {
+    /// `[virt] enabled`: without it Research is not scored at all.
+    pub enabled: bool,
+    /// `(max rival tier - own tier in focus) / 2`, rivals sharing a niche.
+    pub tech_gap: f32,
+    /// The largest `lapse / decay_days`.
+    pub max_lapse: f32,
+    pub has_lab: bool,
+    /// Vacant Lots while the treasury holds `found_cost.lab`.
+    pub lab_lots: usize,
 }
 
 /// The building kinds that make up a niche.
@@ -387,6 +403,19 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         );
     }
     let acquire_cd = cfg.acquire_cooldown_days * TICKS_PER_DAY;
+    let virt = if world.config.virt.enabled {
+        let (tech_gap, max_lapse) = crate::systems::tech::research_inputs(world, corp);
+        let lab_cost = cfg.found_cost.lab;
+        VirtInputs {
+            enabled: true,
+            tech_gap,
+            max_lapse,
+            has_lab: !crate::systems::tech::labs_of(world, corp).is_empty(),
+            lab_lots: if lab_cost > 0 && c.treasury >= lab_cost { lots_total } else { 0 },
+        }
+    } else {
+        VirtInputs::default()
+    };
     Some(CorpInputs {
         cash: cash_of(c),
         flow: (mean_flow / bill as f32).clamp(-1.0, 1.0),
@@ -403,6 +432,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         lobby_ready: c.treasury >= cfg.lobby_min_treasury && c.lobby_until.is_none_or(|t| t <= now),
         culprit: culprit(world, c),
         niches,
+        virt,
     })
 }
 
@@ -553,6 +583,28 @@ fn score_corp_wide(i: &CorpInputs, n: Niche, cfg: &CorpsCfg) -> Vec<CorpOrderSco
             ],
             f.lobby,
         ),
+        // M14 V31: only with the plane on (no row at all with it off).
+        i.virt
+            .enabled
+            .then(|| {
+                score(
+                    CorpOrder::Research,
+                    n,
+                    vec![
+                        Consideration::new(
+                            "lab & cash",
+                            can((i.virt.has_lab || i.virt.lab_lots > 0) && i.cash >= 0.3),
+                            GATE,
+                        ),
+                        Consideration::new("tech gap", i.virt.tech_gap, Curve::Linear { m: 0.6, b: 0.4 }),
+                        Consideration::new("max lapse", i.virt.max_lapse, Curve::Logistic { k: 8.0, mid: 0.4 }),
+                        Consideration::new("cash", i.cash, Curve::Linear { m: 0.5, b: 0.5 }),
+                        Consideration::new("greed", i.greed, Curve::Linear { m: 0.4, b: 0.6 }),
+                    ],
+                    f.research,
+                )
+            })
+            .flatten(),
     ]
     .into_iter()
     .flatten()
@@ -571,7 +623,7 @@ pub fn score_all(i: &CorpInputs, cfg: &CorpsCfg) -> Vec<CorpOrderScore> {
 
 /// Secure, Hunker and Lobby are scored once for the whole corp.
 fn corp_wide(order: CorpOrder) -> bool {
-    matches!(order, CorpOrder::Secure | CorpOrder::Hunker | CorpOrder::Lobby)
+    matches!(order, CorpOrder::Secure | CorpOrder::Hunker | CorpOrder::Lobby | CorpOrder::Research)
 }
 
 /// Does a score row stand for the order `current`? An unset niche matches
@@ -967,8 +1019,47 @@ pub fn act(world: &mut World, corp: EntityId) {
         (CorpOrder::Secure, _) => secure(world, corp),
         (CorpOrder::Hunker, _) => hunker(world, corp, &i),
         (CorpOrder::Lobby, _) => lobby(world, corp, &i),
+        (CorpOrder::Research, _) => research(world, corp),
         _ => {}
     }
+}
+
+/// M14 V31 (phase 1 part), daily under `Research` (the research itself is
+/// `tech::research` at midnight): reset the focus to the track with the
+/// largest rival tier gap (else the niche's); build a Lab in the focus on
+/// the Lot nearest an owned building when it owns none there
+/// (`found_cost.lab`, `Flow::Found`); staff every building up.
+fn research(world: &mut World, corp: EntityId) {
+    if !world.config.virt.enabled {
+        return;
+    }
+    crate::systems::tech::reset_focus(world, corp);
+    let Some(focus) = world.comp::<Corp>(corp).map(|c| c.tech.focus) else { return };
+    let has = crate::systems::tech::labs_of(world, corp)
+        .iter()
+        .any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.focus == Some(focus)));
+    let cost = world.config.corps.found_cost.lab;
+    if !has && cost > 0 && world.purse(Some(corp)) >= cost {
+        if let Some(lot) = lot_near(world, corp) {
+            if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Lab, Some(corp)).is_ok() {
+                ownership::pay(world, Some(corp), None, cost, Flow::Found);
+                if let Some(bd) = world.comp_mut::<Building>(lot) {
+                    bd.focus = Some(focus);
+                }
+                let now = world.tick;
+                if let Some(c) = world.comp_mut::<Corp>(corp) {
+                    c.last_build_tick = Some(now);
+                }
+                let (cname, what) = (world.owner_label(Some(corp)), world.name_of(lot));
+                world.push_event(
+                    EventKind::Founded,
+                    &[corp, lot],
+                    format!("{cname} built {what} ({focus}) on a Lot for {cost} (researching)"),
+                );
+            }
+        }
+    }
+    staff_up(world, corp);
 }
 
 /// Per tick: a corp whose pending shocks reached the threshold rescores at

@@ -88,6 +88,7 @@ pub fn build_on_lot(
             | BuildingKind::Hideout
             | BuildingKind::Clinic
             | BuildingKind::Garage
+            | BuildingKind::Lab
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }

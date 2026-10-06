@@ -186,7 +186,19 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
     let cfg = &world.config.economy;
     let farming = world.comp::<Skills>(farmer).map_or(0.0, |s| s.farming);
     let mult = cfg.season_mult[world.season().index()];
-    let per_hour = cfg.farm_yield_base * (cfg.farm_skill_floor + cfg.farm_skill_slope * farming) * mult;
+    let mut per_hour = cfg.farm_yield_base * (cfg.farm_skill_floor + cfg.farm_skill_slope * farming) * mult;
+    // M14 (spec § 5): a corp-owned Farm yields `x (1 + industry_prod[tier])`
+    // of its owner's Industry tier (a branch: tier 1 multiplies nothing).
+    if world.config.virt.enabled {
+        let tier = world
+            .corp_of_building(farm)
+            .and_then(|c| world.comp::<crate::components::Corp>(c))
+            .map_or(1, |c| c.tech.tier_of(crate::virt::Track::Industry));
+        if tier >= 2 {
+            let p = world.config.tech.industry_prod.get(usize::from(tier)).copied().unwrap_or(0.0);
+            per_hour *= 1.0 + p;
+        }
+    }
     // Fractional hours: whole units leave the accumulator, the rest carries, so
     // a shift that starts a few ticks late loses a few ticks, not an hour.
     let hours = ticks as f32 / time::TICKS_PER_HOUR as f32;

@@ -119,6 +119,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             BuildingKind::Hotel => hotel(ui, app, world, id),
             // M13: sales and stock are in the Assets section below.
             BuildingKind::Clinic | BuildingKind::Garage => staff(ui, app, world, id, "Staff"),
+            // M14 V16: the Lab's Researchers (its panel is phase 4).
+            BuildingKind::Lab => staff(ui, app, world, id, "Researchers"),
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);

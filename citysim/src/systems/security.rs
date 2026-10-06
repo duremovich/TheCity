@@ -6,9 +6,17 @@
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
 
-/// The attacker's chance against the defender at `step` per tier.
-pub fn contest_p(attacker: u8, defender: u8, step: f32) -> f32 {
-    (0.5 + step * (f32::from(attacker) - f32::from(defender))).clamp(0.05, 0.95)
+/// The attacker's chance against the defender at `step` per tier (M14 V8:
+/// over fractional tiers, `att = deck_eff + hack_w x hacking`; for integer
+/// tiers `0.5 + 0.25 x k` is exact in f32, so M13's odds are unchanged).
+pub fn contest_p(att: f32, def: f32, step: f32) -> f32 {
+    (0.5 + step * (att - def)).clamp(0.05, 0.95)
+}
+
+/// M14 V8: does the attacker win? One draw from `rng`, M13's draw.
+pub fn contest_f(att: f32, def: f32, step: f32, rng: &mut ChaCha8Rng) -> bool {
+    let roll: f32 = rng.random();
+    roll < contest_p(att, def, step)
 }
 
 /// A thief's tier from its stealth (`law::stealth`): `1 + round(2 ×
@@ -17,8 +25,7 @@ pub fn thief_tier(stealth: f32) -> u8 {
     (1.0 + (2.0 * stealth).round()).clamp(1.0, 255.0) as u8
 }
 
-/// Does the attacker win? One draw from `rng`.
+/// Does the attacker win? One draw from `rng` ([`contest_f`] over the tiers).
 pub fn contest(attacker: u8, defender: u8, step: f32, rng: &mut ChaCha8Rng) -> bool {
-    let roll: f32 = rng.random();
-    roll < contest_p(attacker, defender, step)
+    contest_f(f32::from(attacker), f32::from(defender), step, rng)
 }
