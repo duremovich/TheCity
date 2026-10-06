@@ -516,7 +516,15 @@ fn god_districts_control() {
 #[test]
 #[ignore]
 fn god_riot_sump_west() {
-    let r = run("god_riot_sump_west", |w| w.push_command(PlayerCommand::Riot(DistrictId(SUMP_WEST))));
+    // Seed 42's Sump West riots on its own on the shock's midnight (the
+    // control's natural riot is the god riot, one tick apart), so the shared
+    // setup switches natural riots off: the control then has none and the
+    // forced riot is the only one.
+    let r = run_from(
+        "god_riot_sump_west",
+        |w| w.config.riots.riot_days = u16::MAX,
+        |w| w.push_command(PlayerCommand::Riot(DistrictId(SUMP_WEST))),
+    );
     r.assert_reacted(&[SUMP_WEST]);
 }
 
