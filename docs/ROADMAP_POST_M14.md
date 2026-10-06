@@ -380,3 +380,12 @@ Folded into the sketches above rather than a milestone of their own:
 - **Rogue by cheapness**: competence and lawfulness from the maker's tech tier and training Data; cheap daemons solve problems illegally and the binder attributes the crime to the owner.
 - **The Blackwall** (M17): daemon tiers cap at 3; a breach attempt is a rare, ruinous event owned by the outside world.
 - Status: candidate, not committed.
+
+## Addendum 12 (2026-10-06, Dylan): world state and cataclysms
+
+- **World state** (a milestone after M18, hooks earlier): a `WorldState` of slow global scalars updated daily from existing aggregates: per-faction tech tier (the AI tier from M14/M15), net integrity, grid health (Addendum 9 Power), shock history, a ruin map (Addendum 6 wreckage). Read by cataclysm triggers and by the outside world (M17); written by nothing per tick.
+- **Cataclysms as data**: a TOML table of events, each a trigger (a predicate over `WorldState` plus a daily roll, or a `PlayerCommand`) and an effect list composed from the god-command vocabulary (M9-M13 god levers: kill, jail, fund, seize, bankrupt, wipe, treasury, chrome/stims floods; new primitives: destroy buildings in a radius into wreckage, cut power, burn Virt nodes and Data, cull population by district) plus unlocks (unique Data, blueprints, a tech-tree node, an ability) granted to the trigger's owner or to survivors by rule. Examples to spec at the lore pass: a DataKrash (any faction's AI tier past a cap, Addendum 11's Blackwall as the lore limiter), a city-centre device, a plague, a grid collapse.
+- **Organic triggers** come from faction brains reaching thresholds (a corp's Research order, a gang's stolen tech); the player trigger runs the same effect list.
+- **Chronicle**: world events are recorded as history the news outlets (Addendum 6) carry and biographies cite.
+- **Testing**: each event is written as a god scenario first (the standing method, `docs/GOD_SCENARIOS_V*.md`), with the aftermath's non-reactions becoming the gaps list; tuned one at a time, after the core simulation is done.
+- **Reserved now**: nothing is built; the M14-M18 plans should keep god commands composable (one `PlayerCommand` per primitive, no UI-only effects) and the tech tree should expose a per-faction tier scalar.
