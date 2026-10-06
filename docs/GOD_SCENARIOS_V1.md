@@ -375,3 +375,25 @@ funding a gang (19%).
   coin, change crime?
 - **Repeat every v1 scenario across 10 seeds** and report the distribution, not one story. Seed 42
   showed how much the day-45 world state matters (the Crackdown pin was a no-op in one trajectory).
+
+## After M13 (2026-10-06)
+
+`--test god` 15/15 pass (the 10 v1 scenarios plus the five M13 ones, which live in `GOD_SCENARIOS_V4.md`). Seed 42, 2,000 residents. Numbers are per-day means over days 45-75 against the control (ctl) unless a window is named. There was no earlier note for this doc, so "compared with before" means the body above and the M12 re-run note in `GOD_SCENARIOS_V3.md`. The body's tables are still the 300-resident city's.
+
+- **Control.** violence 25.9 (37.1 in days 75-105), thefts 50.6 (117), arrests 19.8, Jail 79.6 of its 80 cap, guards 41.7. The Hollow splinters and four gangs are live by day 70. Violence doubles at day 45 and thefts at day 75 with no intervention, which is far above the M12 note's 11-18 and 50-87.
+- **decapitate_gang.** g0 members 34.3 vs 41.9, territory 31.7 vs 50.7; by days 75-105 27.0 vs 54.6 members and 46.5 vs 80.9 territory. Stronger: it no longer recovers, and a Hollow split (Low Choir, 22 members) follows on day 62.
+- **jail_whole_gang.** g0 frozen at 32 members, territory 23.2 vs 50.7 (20.1 vs 80.9 late); Ninefold holds 102 vs 47 late. Stronger: the rival profits far more. Ninefold storms the Precinct on day 56 with 9 raiders against 0 guards and wins.
+- **kill_gang.** g0 members 0 in week one, 18.4 vs 41.9 later; territory 0 by day 49 (it used to keep its 7 Homes) and 8.6 vs 50.7. Ninefold takes the vacuum: 78 vs 42 territory, 164 Homes by day 104. Stronger: both "territory outlives the dead gang" and "rival never takes the vacuum" changed. The 700-coin treasury still sits unspent, and the gang is back at 53 members by day 64.
+- **fund_gang.** Ninefold 60.0 members (cap) vs 45.6; territory 26.1 vs 41.9 at first, 90.9 vs 47.3 late. violence 26.4 vs 25.9, no longer 4x. Weaker early, stronger late.
+- **fire_all_guards.** Guards 26.0 first week vs 41.7, back to 37.9 by day 75; violence 32.3 vs 25.9. New: a gang uses the gap, Low Choir breaks out 3 on day 54 (10 raiders vs 2 guards).
+- **garrison_forever** (own control). violence 31.7 vs 24.0, g0 territory 62.2 vs 37.5, arrests 19.1 vs 20.2. Same: posture barely moves arrests; late violence is not quiet any more (34.0 vs 28.3).
+- **crackdown_forever** (own control). violence 20.5 vs 24.0, and 16.0 vs 28.3 late; Ninefold storms the Precinct on day 60 (13 raiders vs 4 guards, won). Weaker as a jailbreak story, since the control now has jailbreaks too (d56); stronger as suppression.
+- **bankrupt_city.** thefts 927 vs 50.6 a day, guards 4.0 vs 40.9 late, starvation 4.5 vs 0.1, and population 1,979 to 268 in days 75-105 (the control stays at 1,913). Stronger: the city empties, so late theft (84) and violence (3.7) collapse. The gang takeover is weaker: g0+g1 hold 149 Homes late vs 128.
+- **city_takeover_by_force.** The Hollow 59.8 members, territory 87.9 vs 80.9 late; Ninefold keeps 59.9 members and 72 vs 47 territory. New: Ninefold sacks The Hollow's Hideout on day 73 (2 raiders vs 3 defenders) and takes 96,115 coins. Final Homes: The Hollow 121, Ninefold 77. Still no takeover.
+- Vehicles, chrome, stims and robots do not show in these printouts: no vehicle or robot row exists, the story lines name none, and the "chromed fighters" row appears only in the M13 scenarios. Splits and bigger raid musters (8-14 raiders) predate M13.
+
+### Gaps (after M13)
+
+- **Closed** by M11/M12 and still closed: a dead gang keeps no territory (kill_gang), the rival takes the vacuum, jail storms muster 8-14 raiders, a leader's fall now causes splits and Retaliate shocks. None of these came from M13.
+- **Closed by M13:** nothing in this suite; no scenario here touches assets.
+- **Remain:** naming a Crackdown target, attribution on `KillAgent`, rich gangs never bribing or buying guns (the 96,000-coin chest was lost to a raid instead), nobody reading the law's strength (fire_all_guards only worked through a lucky jailbreak), flat order flapping, and the bankrupt city's throughput. The Jail now sits at its cap of 80 in every run.
