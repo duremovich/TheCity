@@ -211,7 +211,8 @@ pub fn capacity(world: &World, agent: EntityId) -> u32 {
         .flatten()
         .filter_map(|&a| world.comp::<Asset>(a))
         .filter(|x| x.kind == AssetKind::Pack && x.loc == AssetLoc::Carried(agent) && x.condition > 0)
-        .filter_map(|x| cfg.pack.get(usize::from(x.tier.saturating_sub(1))).copied())
+        // M14 V23: a pack carries at its effective tier.
+        .filter_map(|x| cfg.pack.get(usize::from(eff_tier_of(world, x).saturating_sub(1))).copied())
         .max()
         .unwrap_or(0);
     cfg.carry_base + carry + pack
@@ -580,17 +581,14 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
     }
     k.vehicle = vehicle_of(world, agent);
     k.driving = world.trips.get(&agent).and_then(|t| world.comp::<Asset>(t.vehicle)).map(|x| x.kind);
-    let vehicle_tier =
-        k.vehicle.and_then(|v| world.comp::<Asset>(v)).map_or(
-            0,
-            |x| {
-                if x.kind == AssetKind::Flyer {
-                    3
-                } else {
-                    x.tier
-                }
-            },
-        );
+    let vehicle_tier = k.vehicle.and_then(|v| world.comp::<Asset>(v)).map_or(0, |x| {
+        if x.kind == AssetKind::Flyer {
+            3
+        } else {
+            // M14 V23: the vehicle's effective tier.
+            eff_tier_of(world, x)
+        }
+    });
     k.flash = ((f32::from(k.visible) + f32::from(vehicle_tier)) / 9.0).min(1.0);
     // D21: the Coarse multiplier of the vehicle the agent would drive (the
     // trip's own kind is read at the trip: `vehicles::timed_mult`).

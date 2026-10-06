@@ -111,12 +111,9 @@ fn test_research_keeps_backup_reserve() {
         c.order = CorpOrder::Research;
         c.tech.focus = Track::Chrome;
     }
-    // Chrome 3 (upkeep 8, reserve 24): at most 30 - 24 = 6 move (none: tier 3 has no next tier).
-    w.virt.node_mut(lab).expect("node").store.units[Track::Chrome.index()] = 30;
-    tech::research(&mut w, z);
-    let moved = 30 - virt::holding(&w, z, Track::Chrome);
-    assert!(moved <= 6, "moved {moved}");
-    // Chrome 2 (upkeep 3, reserve 9): 30 - 9 = 21 move, 9 stay.
+    // The plan's Chrome 3 case is vacuous (tier 3 has no next tier, so
+    // research spends nothing); Chrome 2 (upkeep 3, reserve 3 x 3 = 9) is
+    // the live case: of 30 held, 30 - 9 = 21 move and the reserve stays.
     tech::set_tier(&mut w, z, Track::Chrome, 2);
     w.comp_mut::<Corp>(z).expect("corp").tech.progress = [0; 3];
     w.virt.node_mut(lab).expect("node").store.units[Track::Chrome.index()] = 30;
@@ -272,5 +269,6 @@ fn test_caps_on_change_no_kit_at_seed() {
         .iter()
         .filter(|&&a| w.comp::<citysim::Asset>(a).is_some_and(|x| x.maker.is_some()))
         .count();
+    assert!(made > 0, "the guard compared Kits with at least one maker-capped asset");
     println!("{n} Kits compared; {made} assets with a maker");
 }

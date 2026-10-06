@@ -1114,6 +1114,13 @@ fn test_decapitation_splits_with_strong_lieutenant_and_two_districts() {
         gg.emptied = true;
     }
     let splinter = gang::split(&mut w, g0, Some(old), false).expect("a split");
+    // M14 V4: the split marks the plane dirty; the next tick's relink gives
+    // the new Hideout a live node owned by the splinter.
+    citysim::systems::virt::run(&mut w);
+    let hideout = w.comp::<Gang>(splinter).expect("splinter").hideout;
+    let n = citysim::systems::virt::node_of_building(&w, hideout).expect("the splinter's Hideout has a node");
+    assert!(w.virt.nodes[n.index()].alive);
+    assert_eq!(citysim::systems::virt::owner_of(&w, n), Some(splinter));
     assert_eq!(w.gang_list().len(), gangs_before + 1);
     assert_eq!(w.gang_of(boss), Some(g0), "the jailed boss stays with the gang it ran");
     let sg = w.comp::<Gang>(splinter).expect("splinter");
