@@ -176,6 +176,15 @@ pub enum PlayerCommand {
         building: EntityId,
         price: i64,
     },
+    // --- M13 god commands (plan D48; phase 1 for tests, the CLI in phase 5).
+    /// Give an agent a new asset, free and without import (`assets::grant`).
+    GrantAsset {
+        agent: EntityId,
+        kind: crate::components::AssetKind,
+        tier: u8,
+    },
+    /// Wreck an asset now (an implant fails instead).
+    Wreck(EntityId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,6 +254,19 @@ pub struct Levers {
     /// M12 D42: the player's riot-response pin; `None` = the captain (D34).
     #[serde(default)]
     pub riot_response: Option<crate::components::RiotResponse>,
+    /// M13 D48: Markets sell Stims legally (phase 4 reads it).
+    #[serde(default)]
+    pub stims_legal: bool,
+    /// M13 D12: the city impounds vehicles with unpaid upkeep.
+    #[serde(default = "default_true")]
+    pub impound: bool,
+    /// M13 D48: upkeep is charged × `1 + rate`, per `AssetClass`.
+    #[serde(default)]
+    pub asset_tax: [f32; 8],
+}
+
+fn default_true() -> bool {
+    true
 }
 
 fn default_guard_weight() -> [f32; crate::components::MAX_DISTRICTS] {
@@ -272,6 +294,9 @@ impl Levers {
             sanitation_count: cfg.levers.sanitation_count,
             sanitation_weight: default_guard_weight(),
             riot_response: None,
+            stims_legal: false,
+            impound: true,
+            asset_tax: [0.0; 8],
         }
     }
 }
@@ -476,7 +501,9 @@ impl World {
             | PlayerCommand::Litter { .. }
             | PlayerCommand::SplitGang(_)
             | PlayerCommand::Derelict(_)
-            | PlayerCommand::BuyBuilding { .. } => {
+            | PlayerCommand::BuyBuilding { .. }
+            | PlayerCommand::GrantAsset { .. }
+            | PlayerCommand::Wreck(_) => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -624,6 +651,19 @@ impl World {
             | PlayerCommand::SplitGang(_)
             | PlayerCommand::Derelict(_)
             | PlayerCommand::BuyBuilding { .. } => self.cmd_god_district(cmd),
+            PlayerCommand::GrantAsset { agent, kind, tier } => {
+                let a =
+                    crate::systems::assets::grant(self, agent, kind, tier).map_err(|e| format!("GrantAsset: {e}"))?;
+                Ok((vec![agent, a], format!("granted {} a {}", self.name_of(agent), self.name_of(a))))
+            }
+            PlayerCommand::Wreck(a) => {
+                if !self.has::<crate::components::Asset>(a) {
+                    return Err("Wreck: no such asset".into());
+                }
+                let what = self.name_of(a);
+                crate::systems::assets::wreck(self, a, "by god");
+                Ok((vec![a], format!("wrecked the {what}")))
+            }
             _ => self.cmd_god_corp(cmd),
         }
     }
@@ -1032,6 +1072,9 @@ impl World {
                 empty_since: None,
                 closed_until: None,
                 full_capacity: None,
+                stock_goods: [0; 2],
+                asset_sales_today: 0,
+                asset_sales: std::collections::VecDeque::new(),
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

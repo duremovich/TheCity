@@ -591,10 +591,12 @@ fn test_withdrawn_pin_empties_the_beat_on_the_same_deal() {
     assert_eq!(w.districts[1].stance, Stance::Withdrawn);
     let (_, terms) = law_brain::alloc_weight(&w, DistrictId(1));
     assert!(terms.iter().any(|&(k, v)| k == "off" && v == 1.0), "{terms:?}");
-    // Unpinned, the district draws guards again on the next deal.
+    // Unpinned, the district draws guards again on the same deal, though its
+    // stance still read Withdrawn when the deal ran.
     w.levers.stance_pin[1] = None;
     law_brain::redeal(&mut w, "unpinned");
     assert!(w.districts[1].guards > 0, "guards back once the pin is lifted");
+    assert_ne!(w.districts[1].stance, Stance::Withdrawn);
 }
 
 #[test]

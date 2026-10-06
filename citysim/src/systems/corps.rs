@@ -393,6 +393,8 @@ pub fn dissolve(world: &mut World, corp: EntityId) {
             l.lobby = None;
         }
     }
+    // M13 D10/D45: its assets go to the city, the plans it lent on too.
+    crate::systems::assets::on_owner_gone(world, corp);
     world.despawn(corp);
 }
 

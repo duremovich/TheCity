@@ -161,6 +161,9 @@ impl ActionKind {
             // M12 D23 (phase 3 deviation): a sweeper's shift is worked at the
             // Recycler; the street credit is the midnight ledger.
             Role::Sanitation => ActionKind::TendGraves,
+            // M13 D16: a Ripperdoc's or Mechanic's shift is the clerk's
+            // counter shift at their own Clinic or Garage.
+            Role::Ripperdoc | Role::Mechanic => ActionKind::ClerkWork,
         }
     }
 
@@ -663,7 +666,7 @@ impl ActionKind {
             ActionKind::FarmWork => ctx.is(Role::Farmer),
             // Appended by the executor after FarmWork; never planned.
             ActionKind::HaulToMarket => false,
-            ActionKind::ClerkWork => ctx.is(Role::Clerk),
+            ActionKind::ClerkWork => ctx.is(Role::Clerk) || ctx.is(Role::Ripperdoc) || ctx.is(Role::Mechanic),
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
             ActionKind::TendGraves => ctx.is(Role::Gravedigger) || ctx.is(Role::Sanitation),
@@ -724,7 +727,12 @@ impl ActionKind {
                     || (ctx.in_gang && at(LocationKey::Hideout))
             }
             ActionKind::FarmWork => at(LocationKey::Farm) && !ws.shift_done && ctx.on_shift,
-            ActionKind::ClerkWork => at(LocationKey::Market) && !ws.shift_done && ctx.on_shift,
+            // M13 D16: Ripperdocs and Mechanics clerk at their workplace.
+            ActionKind::ClerkWork => {
+                (if ctx.is(Role::Clerk) { at(LocationKey::Market) } else { ctx.workplace.is_some_and(at) })
+                    && !ws.shift_done
+                    && ctx.on_shift
+            }
             ActionKind::BartendWork => at(LocationKey::Bar) && !ws.shift_done && (ctx.on_shift || ctx.evening),
             ActionKind::GuardJail => at(LocationKey::Jail) && !ws.shift_done && ctx.on_shift,
             ActionKind::TendGraves => at(LocationKey::Cemetery) && !ws.shift_done && ctx.on_shift,

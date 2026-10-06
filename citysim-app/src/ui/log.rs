@@ -68,6 +68,20 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Looted
         | EventKind::Crossfire
         | EventKind::Split => Color32::from_rgb(0xe0, 0xa0, 0x30),
+        // M13 D47: assets in cyan.
+        EventKind::AssetBought
+        | EventKind::Repossessed
+        | EventKind::Wrecked
+        | EventKind::VehicleStolen
+        | EventKind::Chopped
+        | EventKind::Crash
+        | EventKind::Installed
+        | EventKind::Episode
+        | EventKind::Treated
+        | EventKind::Abducted
+        | EventKind::Harvested
+        | EventKind::Stripped
+        | EventKind::Overdose => Color32::from_rgb(0x40, 0xc8, 0xe0),
         _ => Color32::LIGHT_GRAY,
     }
 }

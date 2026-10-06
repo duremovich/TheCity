@@ -282,6 +282,44 @@ pub struct World {
     /// M11: corps, each its own entity. Absent from older saves; `migrate_legacy` fills it.
     #[serde(default)]
     pub corp: Vec<Option<Corp>>,
+    /// M13 D1: assets, each its own entity carrying only this. Absent from
+    /// older saves; `migrate_legacy` fills it.
+    #[serde(default)]
+    pub asset: Vec<Option<Asset>>,
+    /// M13 D4: every agent's Body. Absent from older saves; `migrate_legacy` backfills it.
+    #[serde(default)]
+    pub body: Vec<Option<Body>>,
+    /// M13 D5: stored daily for M15.
+    #[serde(default)]
+    pub appearance: Vec<Option<Appearance>>,
+    /// M13 D3: derived from the assets, never saved; rebuilt on load.
+    #[serde(skip)]
+    pub kit: Vec<Option<Kit>>,
+    /// M13 D2: assets by the building or agent their `loc` names, each
+    /// list ascending; kept by `assets::set_loc`, rebuilt on load.
+    #[serde(skip)]
+    pub assets_at: BTreeMap<EntityId, SmallVec<[EntityId; 4]>>,
+    /// M13 D2: assets by owner (the city under `EntityId::NONE`); kept by `assets::set_owner`.
+    #[serde(skip)]
+    pub assets_by_owner: BTreeMap<EntityId, SmallVec<[EntityId; 4]>>,
+    /// M13 D2: every vehicle, ascending.
+    #[serde(skip)]
+    pub vehicles: Vec<EntityId>,
+    /// M13 D2: assets held by an unbound Abducted hole.
+    #[serde(skip)]
+    pub limbo: BTreeMap<HoleId, SmallVec<[EntityId; 4]>>,
+    /// M13 D2/D13: corpses whose loot is not settled, ascending.
+    #[serde(skip)]
+    pub loot_corpses: Vec<EntityId>,
+    /// M13 D20: vehicle trips in progress (phase 2 fills it).
+    #[serde(default)]
+    pub trips: BTreeMap<EntityId, Trip>,
+    /// M13 D25: drivers the god `Chase` pinned (phase 2).
+    #[serde(default)]
+    pub chase_pins: BTreeSet<EntityId>,
+    /// M13 D38: Bar -> registered dealers (phase 4).
+    #[serde(default)]
+    pub dealers: BTreeMap<EntityId, Vec<EntityId>>,
     // graph + blackboard
     pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the
@@ -461,7 +499,7 @@ pub struct World {
     pub by_tier: [Vec<EntityId>; 3],
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; 6],
+    pub by_role: [Vec<EntityId>; 8],
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -520,6 +558,10 @@ components! {
     trace: Trace,
     life: Life,
     corp: Corp,
+    asset: Asset,
+    body: Body,
+    appearance: Appearance,
+    kit: Kit,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -645,6 +687,18 @@ impl World {
             trace: Vec::new(),
             life: Vec::new(),
             corp: Vec::new(),
+            asset: Vec::new(),
+            body: Vec::new(),
+            appearance: Vec::new(),
+            kit: Vec::new(),
+            assets_at: BTreeMap::new(),
+            assets_by_owner: BTreeMap::new(),
+            vehicles: Vec::new(),
+            limbo: BTreeMap::new(),
+            loot_corpses: Vec::new(),
+            trips: BTreeMap::new(),
+            chase_pins: BTreeSet::new(),
+            dealers: BTreeMap::new(),
             edges: crate::edge_map::EdgeMap::new(),
             crime_reports: Vec::new(),
             report_index: std::sync::OnceLock::new(),
@@ -765,6 +819,9 @@ impl World {
                     empty_since: None,
                     closed_until: None,
                     full_capacity: None,
+                    stock_goods: [0; 2],
+                    asset_sales_today: 0,
+                    asset_sales: VecDeque::new(),
                 },
             );
             match def.kind {
@@ -842,11 +899,14 @@ impl World {
             self.insert(id, personality);
             self.insert(id, Mood::default());
             self.insert(id, Wallet { coins });
-            self.insert(id, Inventory { food, stolen_food: 0 });
+            self.insert(id, Inventory { food, stolen_food: 0, stims: 0, parts: 0 });
             self.insert(id, Brain::default());
             self.insert(id, Memory::default());
             self.insert(id, skills);
             self.insert(id, Household::new(None));
+            // M13 D4: keyed draws, so the world stream is untouched.
+            let body = systems::assets::new_body(self, id);
+            systems::assets::give_body(self, id, body);
             ids.push(id);
         }
         self.recompute_wealth();
@@ -1274,9 +1334,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 6], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 8], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; 6] = Default::default();
+        let mut roles: [Vec<EntityId>; 8] = Default::default();
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -1333,7 +1393,7 @@ impl World {
                 return Err("report_index out of sync with crime_reports".to_string());
             }
         }
-        Ok(())
+        systems::assets::check(self)
     }
 
     // -----------------------------------------------------------------------
@@ -1673,13 +1733,17 @@ impl World {
         self.gang_ids.iter().position(|&g| g == gang).unwrap_or(0)
     }
 
-    /// The agent's name, or `#index` for anything without an `Identity`.
+    /// The agent's name, a building's `Kind#index`, an asset's `"{label}
+    /// T{tier}"` (M13 D1), or `#index` for anything else.
     pub fn name_of(&self, id: EntityId) -> String {
         match self.comp::<Identity>(id) {
             Some(i) => i.name.clone(),
             None => match self.comp::<Building>(id) {
                 Some(b) => format!("{}#{}", b.kind.label(), id.index),
-                None => format!("#{}", id.index),
+                None => match self.comp::<Asset>(id) {
+                    Some(a) => format!("{} T{}", a.kind.label(), a.tier),
+                    None => format!("#{}", id.index),
+                },
             },
         }
     }
@@ -1723,8 +1787,10 @@ impl World {
 
     /// One in-game minute, systems in the fixed order
     /// `commands, time, lod, needs, memory, mood, think, plan, exec, ownership,
-    /// classes, districts, economy, bind, law, social, gang, corp_brain,
-    /// demography, stats`. The district aggregates read the class pass's
+    /// assets, classes, districts, economy, bind, law, social, gang,
+    /// corp_brain, demography, stats`. The assets pass (M13 D9) runs at
+    /// midnight right after ownership's, so upkeep and finance see the same
+    /// purses the rent pass left. The district aggregates read the class pass's
     /// midnight state (M12 D6). The binder runs
     /// before the law so a cold-case report reaches the captain's daily
     /// rescoring (M10 D32); ownership's daily pass (rent, evictions,
@@ -1740,6 +1806,7 @@ impl World {
         systems::plan::run(self);
         crate::exec::run(self);
         systems::ownership::run(self);
+        systems::assets::run(self);
         systems::classes::run(self);
         systems::districts::run(self);
         systems::economy::run(self);
@@ -1883,6 +1950,10 @@ impl World {
         }
         // M11 D45: an emigrant's buildings pass to their heirs.
         systems::ownership::on_owner_gone(self, id);
+        // M13 D13/D45: its parked vehicles too; an unsettled corpse settles
+        // (the heirs are read from edges dropped below); what it carries goes.
+        systems::assets::on_owner_gone(self, id);
+        systems::assets::on_removed(self, id);
         self.abort_plan(id);
         self.vacate_job(id);
         self.remove_from_building(id);
@@ -1953,6 +2024,8 @@ impl World {
         for (&hid, h) in &self.holes {
             self.holes_by_agent.entry(h.victim).or_default().push(hid);
         }
+        // M13 D2/D3: the asset indices, the corpses to settle, every Kit.
+        systems::assets::rebuild(self);
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde
@@ -1990,6 +2063,27 @@ impl World {
         let tiles = self.map.w() * self.map.h();
         if self.litter.len() != tiles {
             self.litter.resize(tiles, 0);
+        }
+        // M13 D50: a pre-M13 save has no asset, body or appearance store;
+        // every agent gets a Body from its keyed stream (D4), then the Kits.
+        let short = self.asset.len() < n || self.body.len() < n || self.appearance.len() < n;
+        if self.asset.len() < n {
+            self.asset.resize_with(n, || None);
+        }
+        if self.body.len() < n {
+            self.body.resize_with(n, || None);
+        }
+        if self.appearance.len() < n {
+            self.appearance.resize_with(n, || None);
+        }
+        let bodiless: Vec<EntityId> =
+            self.entities().filter(|&id| self.has::<Identity>(id) && !self.has::<Body>(id)).collect();
+        for id in &bodiless {
+            let body = systems::assets::new_body(self, *id);
+            self.insert(*id, body);
+        }
+        if short || !bodiless.is_empty() {
+            systems::assets::rebuild(self);
         }
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {
@@ -2157,7 +2251,8 @@ impl World {
             }
         }
         // Witnesses, grief, widowhood and inheritance read the living state.
-        systems::demography::on_death(self, id);
+        // M13 D13: with a loot window the coins and goods stay on the body.
+        let loot = systems::demography::on_death(self, id);
         crate::systems::social::on_death(self, id);
         if cause == DeathCause::Violence && systems::law::is_guard(self, id) {
             systems::law_brain::push_shock(self, LawShock::GuardKilled);
@@ -2191,11 +2286,17 @@ impl World {
         self.release_all(id);
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);
-        self.insert(id, Corpse { died_tick: tick, cause, buried: false, buried_tick: None });
+        self.insert(
+            id,
+            Corpse { died_tick: tick, cause, buried: false, buried_tick: None, loot, stripped: false, settled: false },
+        );
+        systems::assets::on_corpse(self, id);
         match cause {
             DeathCause::Starvation => self.stats.current.deaths_starvation += 1,
             DeathCause::OldAge => self.stats.current.deaths_old_age += 1,
             DeathCause::Violence | DeathCause::Execution => self.stats.current.deaths_violence += 1,
+            DeathCause::Accident => self.stats.current.crash_deaths += 1,
+            DeathCause::Overdose => self.stats.current.overdoses += 1,
         }
         // `[dead, spouse?]`, or `[dead, spouse or NONE, killer]` when the
         // killer is known, so the biography names them (an attacker who

@@ -455,13 +455,13 @@ pub fn alloc_weights(world: &World) -> Vec<(f32, Vec<(&'static str, f32)>)> {
             // M12 D10: a riot musters or runs here.
             let riot = if crate::systems::riot::riot_in(world, d.id) { cfg.alloc_riot } else { 0.0 };
             let lever = world.levers.guard_weight.get(i).copied().unwrap_or(1.0).max(0.0);
-            // M12 review: a stance pin is read as it stands, not through the
-            // stance it sets: `rescore_stances` runs after the deal (its
-            // Crackdown gate reads today's guards), so a pin to Withdrawn
-            // empties the beat on the same deal (a zero guard weight already
-            // does, through `lever`).
-            let stance = world.levers.stance_pin.get(i).copied().flatten().unwrap_or(d.stance);
-            let off = garrison || stance == Stance::Withdrawn;
+            // M12 review: Withdrawn is only ever forced (a pin, or a zero
+            // guard weight, which `lever` already zeroes), so the deal reads
+            // the pin itself, not `District.stance`: `rescore_stances` runs
+            // after the deal (its Crackdown gate reads today's guards), and the
+            // stance would lag a pin or an unpin by one deal.
+            let pinned_off = world.levers.stance_pin.get(i).copied().flatten() == Some(Stance::Withdrawn);
+            let off = garrison || pinned_off;
             let w = if off { 0.0 } else { (base + crime + paid_t + landlord + riot) * lever };
             let terms = vec![
                 ("base", base),

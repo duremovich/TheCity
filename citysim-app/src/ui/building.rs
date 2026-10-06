@@ -117,6 +117,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 ));
             }
             BuildingKind::Hotel => hotel(ui, app, world, id),
+            // M13 D16: the panels arrive in phase 5; the staff list for now.
+            BuildingKind::Clinic | BuildingKind::Garage => staff(ui, app, world, id, "Staff"),
         }
         derelict(ui, app, world, id, b);
         occupants(ui, app, world, b);

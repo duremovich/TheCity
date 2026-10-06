@@ -65,6 +65,8 @@ warehouse = { capacity = 6, stock_cap = 20000 }
 security_office = { capacity = 12, stock_cap = 0 }
 lot = { capacity = 0, stock_cap = 0 }
 hotel = { capacity = 12, stock_cap = 0 }       # M12 D20: beds ([street] hotel_beds caps a built one)
+clinic = { capacity = 6, stock_cap = 200, staff = 2 }    # M13 D16: the Ripperdoc (inert in phase 1)
+garage = { capacity = 8, stock_cap = 400, staff = 3 }    # M13 D16 (inert in phase 1)
 
 [needs]
 hunger_decay_per_tick = 0.000347
@@ -98,6 +100,8 @@ wage_clerk = 6
 wage_bartender = 5
 wage_gravedigger = 5
 wage_sanitation = 5                # M12 D23: a city sweeper
+wage_ripperdoc = 8                 # M13 D16
+wage_mechanic = 7                  # M13 D16
 # 1.4 on paper assumes 24 farmers x 9 h at farming 0.5 and one meal per citizen. In practice farms
 # work 6 days in 7, farmers attend ~75% of a shift (meals, wage trips), initial farming skill is
 # U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.4 keeps the
@@ -494,7 +498,7 @@ incorporate_buildings = 2         # an agent owning this many becomes a corp
 # city's coins sit with the employed and the execs): 3 NPC Bars from day 91 and no incorporation. At
 # 200 6 NPC foundings from day 28 and the first incorporation on day 28; at 150 15 foundings (12 Bars
 # by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
-found_cost = { bar = 200, home = 400, hotel = 250 }  # M12 D20: hotel
+found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600 }  # M12 D20: hotel; M13 D16: clinic, garage
 wholesale = 2                      # coins per unit Farm → Market when owners differ
 # M11 phase 5: 10 -> 20, with upkeep.security_office 30 -> 10. A Security corp costs its Office's
 # upkeep, six guards' wages (48) and its exec (10) a day, ~88 at the old sizes against 6-10 a contract
@@ -530,12 +534,12 @@ bar_owner_count = 2
 # M11 phase 5: security_office 30 -> 10 (see contract_per_guard_day).
 # M12 fix pass: hotel 10 -> 4. A Hotel books 2-3 nights a day at 3 coins (5-7 hotel nights a day
 # city-wide over 2-3 Hotels, seeds 42-44), ~7 gross and ~6 after tax: at 10 every Hotel owner bled.
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4 }
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10 }
 # M12 fix pass: a corp raided (or looted by a riot) in the last raided_days reads Secure/Lobby
 # `losses` of at least raided_losses: it hardens (contracts the building, or lobbies on the gang).
 raided_days = 7
 raided_losses = 0.5
-value = { farm = 1000, market = 1000, security_office = 500 }                    # D28
+value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800 }  # D28; M13 D16
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
@@ -543,6 +547,8 @@ private_pursuit_radius = 16        # D18
 found_cooldown_days = 10           # D26
 residents_per_bar = 300            # D25
 residents_per_hotel = 800          # M12 D20: Register's Hotel target = population ÷ this
+residents_per_clinic = 700         # M13 D16
+residents_per_garage = 700         # M13 D16
 # M11 phase 5b: 0 -> 0.1. The Found score is greed squared, so a low-greed Bar owner holding 250-355
 # coins for 65 days on seed 43 (greed term 0.03) scored Found at 0.01-0.03 against Idle's 0.05-0.15 and
 # never founded again; with 0.1 an eligible agent (jobless or self-employed, coins >= found_cost: one
@@ -743,3 +749,48 @@ riot_promote_max = 20              # fix pass (throughput): the 20 most miserabl
 # Fix pass (phase 4 review): 24 -> 9, the value phase 4 reported (it measured 12.4k vs 11.6k ticks/s
 # promoting 9 h ahead); with the buffered --events output seed 42 runs 8.3k minimum, 11.9k mean.
 riot_promote_hours = 9             # plan risk 3: rioters rank with the gangs from the trigger (24) or this many hours before the muster
+
+[assets]
+# M13 § 1 (plan D1-D15): owned things with upkeep, finance, repossession and loot.
+enabled = true                     # off() = false: no pass, no Kit term, no Body read
+# list prices per tier [1, 2, 3]; a kind with fewer entries has fewer tiers. bridge: plan D52 (M14).
+price = { motorcycle = [300], car = [800, 1400], truck = [1500], flyer = [6000], implant = [150, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800] }
+upkeep = { motorcycle = [1], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0] }
+wear = { motorcycle = 1, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0 }
+parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10 }
+parts_price = 15
+import_frac = 0.6
+part_credit = 20                   # import coins one Part from a seller's stock replaces
+down_frac = 0.25
+interest = 0.2
+term_days = 60
+repo_days = 5
+brick_repo_days = 10
+impound_days = 10
+impound_frac = 0.5
+unpaid_wear_mult = 3
+repair_below = 50
+repair_price = 2                   # coins per condition point
+fail_shock = 0.1
+loot_window_hours = 0              # plan D13, phase 1: inheritance at death (M12); phase 3 sets the spec's 12
+rip_courage = 0.5
+scav_strip_base = 0.15
+carry_base = 20
+carry_per_strength = 10
+pack = [10, 25]
+goods_cap = 1000                   # plan D6: Stims/Parts cap where the kind's stock_cap is lower
+parts_floor = 20                   # plan D14
+parts_batch = 20                   # plan D14
+found_sellers = false              # phase 1: nobody founds a Clinic or Garage yet (phase 2 sets true)
+
+[chrome]
+# M13 § 3, the Kit table (plan "Kit tables"); phase 3 adds the rest.
+arms_fighting = 0.1
+arms_strength = 0.25
+legs_walk = [0.85, 0.75, 0.65]
+nerves_reflex = 0.15
+eyes_sight = 2
+eyes_stealth = 0.05
+skin_armour = 0.15
+sanity_cost = [0.08, 0.15, 0.25]
+used_frac = 0.6
