@@ -201,6 +201,16 @@ fn test_load_past_psycho_starts_episode_ending_at_arrest() {
     }
     assert!(!chrome::in_episode(&w, who), "the law ended it");
     assert_eq!(w.stats.current.episodes_by_law, 1);
+    // Review fix: with assets off, an M9 arrest leaves a suspect's LOD rank
+    // class where it was (only an abductee ranks with the gangs, D46).
+    let mut off = Config::load().scaled_to(300);
+    off.assets.enabled = false;
+    let mut m9 = World::new(42, off);
+    let civilians = free(&m9);
+    let (suspect, guard) = (civilians[0], civilians[1]);
+    let before = lod::rank_class(&m9, suspect);
+    m9.comp_mut::<Brain>(suspect).expect("brain").cuffed_by = Some(guard);
+    assert_eq!(lod::rank_class(&m9, suspect), before, "a cuffed suspect ranks as in M12");
 
     // Carry-over (phase 2 review): an episode survivor below 0.5 loyalty
     // leaves its gang, and its kept gang bike goes home.

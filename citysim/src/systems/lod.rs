@@ -110,9 +110,7 @@ fn assign(world: &mut World) {
     };
 
     let mut ranked: Vec<(i32, u32, u32, EntityId)> = Vec::new();
-    // M13 D46: the gangs' Harvest targets rank with the gangs while chosen.
-    let harvest: Vec<EntityId> =
-        world.gangs().into_iter().filter_map(|g| world.comp::<crate::components::Gang>(g)?.harvest_target).collect();
+    let harvest = harvest_targets(world);
     // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
@@ -124,36 +122,7 @@ fn assign(world: &mut World) {
         // the map for the arrest path to reach them.
         let story =
             brain.current_step().is_some_and(|s| story_relevant(s.action)) || crate::systems::law::wanted(world, id);
-        // Gang members are never Statistical: the hourly table has no orders,
-        // claims or raids, and two gangs fit inside the Coarse budget.
-        // M12 D31 (plan risk 3): a rioter of a live riot ranks with them,
-        // from `riot_promote_hours` before the muster.
-        let gang = world.has::<crate::components::GangMember>(id) || crate::systems::riot::promoted(world, id);
-        // M13 D46: a berserker, an abductee in tow and a Harvest target too.
-        let gang = gang
-            || brain.cuffed_by.is_some()
-            || harvest.contains(&id)
-            || (!world.episodes.is_empty() && world.episodes.contains(&id));
-        // M10 D20: guards rank with gang members, or at 2,000 the gangs take
-        // every Coarse slot and the whole watch is Statistical. Gravediggers
-        // too: the hourly table cannot bury, and a Statistical digger never
-        // even learns of a corpse (it keeps no SawCorpse memory).
-        let guard = body_role(world, id);
-        // M11: a private guard keeps a body but ranks with the gangs: at the
-        // watch's rank the twelve took Full slots and walked their corp's
-        // Blocks tile by tile (-800 ticks/s at 2,000).
-        let private = guard && crate::systems::law::is_private_guard(world, id);
-        // Pinned tops the ladder, then the watch (3), then gang members (2):
-        // at the Coarse cap the farthest gang member falls first, not a guard.
-        let class = if brain.pinned {
-            5
-        } else if guard && !private {
-            3
-        } else if gang || private {
-            2
-        } else {
-            0
-        };
+        let class = class_with(world, id, &harvest);
         // M11: a fresh lawless evictee (D36: so the spiral's first link,
         // JoinGang, can be planned) and an agent able to found (D25) get a
         // body; neither can happen in the hourly table.
@@ -203,6 +172,59 @@ fn assign(world: &mut World) {
     }
     for (i, &id) in ids.iter().enumerate() {
         set_lod(world, id, tier[i]);
+    }
+}
+
+/// M13 D46: the agents some gang is harvesting now (its order is Harvest
+/// and it has a cached target).
+fn harvest_targets(world: &World) -> Vec<EntityId> {
+    world
+        .gangs()
+        .into_iter()
+        .filter_map(|g| world.comp::<crate::components::Gang>(g))
+        .filter(|g| g.order == crate::components::Order::Harvest)
+        .filter_map(|g| g.harvest_target)
+        .collect()
+}
+
+/// An agent's rank class in the hourly LOD assignment: pinned 5, the
+/// watch 3, gang members (and those ranked with them) 2, else 0.
+pub fn rank_class(world: &World, id: EntityId) -> i32 {
+    class_with(world, id, &harvest_targets(world))
+}
+
+fn class_with(world: &World, id: EntityId, harvest: &[EntityId]) -> i32 {
+    let Some(brain) = world.comp::<Brain>(id) else { return 0 };
+    // Gang members are never Statistical: the hourly table has no orders,
+    // claims or raids, and two gangs fit inside the Coarse budget.
+    // M12 D31 (plan risk 3): a rioter of a live riot ranks with them,
+    // from `riot_promote_hours` before the muster.
+    let gang = world.has::<crate::components::GangMember>(id) || crate::systems::riot::promoted(world, id);
+    // M13 D46: a berserker, an abductee in tow and a gang's Harvest target
+    // (while that gang's order is Harvest) too.
+    let gang = gang
+        || brain.abducted_by.is_some()
+        || harvest.contains(&id)
+        || (!world.episodes.is_empty() && world.episodes.contains(&id));
+    // M10 D20: guards rank with gang members, or at 2,000 the gangs take
+    // every Coarse slot and the whole watch is Statistical. Gravediggers
+    // too: the hourly table cannot bury, and a Statistical digger never
+    // even learns of a corpse (it keeps no SawCorpse memory).
+    let guard = body_role(world, id);
+    // M11: a private guard keeps a body but ranks with the gangs: at the
+    // watch's rank the twelve took Full slots and walked their corp's
+    // Blocks tile by tile (-800 ticks/s at 2,000).
+    let private = guard && crate::systems::law::is_private_guard(world, id);
+    // Pinned tops the ladder, then the watch (3), then gang members (2):
+    // at the Coarse cap the farthest gang member falls first, not a guard.
+    if brain.pinned {
+        5
+    } else if guard && !private {
+        3
+    } else if gang || private {
+        2
+    } else {
+        0
     }
 }
 
