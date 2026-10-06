@@ -306,6 +306,11 @@ pub struct Plan {
 pub struct PlanCtx {
     pub agent: EntityId,
     pub target: Option<EntityId>,
+    /// The goal being planned (`build_for`); `None` (`build`, `build_light`)
+    /// gates nothing and computes every input. M13 review: a goal's
+    /// actions are offered only to the goals they serve, so `UseStim`,
+    /// `BuyAsset` and the like stop widening every node of every search.
+    pub goal: Option<GoalKind>,
     pub role: Option<Role>,
     pub in_gang: bool,
     pub adult: bool,
@@ -406,6 +411,10 @@ pub struct PlanCtx {
     pub vehicle_target: bool,
     /// M13 D26: a gang at the agent's Hideout would pay for a stolen vehicle.
     pub can_fence_vehicle: bool,
+    /// M13 review: the agent holds a stolen vehicle it has not fenced
+    /// (`vehicles::stolen_held_by`): a thief interrupted before the fence
+    /// may still plan it.
+    pub holds_stolen_vehicle: bool,
     /// M13 D26: `[vehicles] steal_vehicle_cost`.
     pub steal_vehicle_cost: f32,
     /// M13 D34: an implant of the agent's gang is reserved for it, and the
@@ -448,17 +457,31 @@ pub struct PlanCtx {
 impl PlanCtx {
     /// Full context for planning (distances and the guard scan included).
     pub fn build(world: &World, agent: EntityId, target: Option<EntityId>) -> PlanCtx {
-        PlanCtx::build_inner(world, agent, target, false)
+        PlanCtx::build_inner(world, agent, target, false, None)
+    }
+
+    /// [`PlanCtx::build`] for planning `goal`: the inputs only other goals'
+    /// actions read are skipped, and `allowed` offers each goal its own.
+    pub fn build_for(world: &World, agent: EntityId, target: Option<EntityId>, goal: GoalKind) -> PlanCtx {
+        PlanCtx::build_inner(world, agent, target, false, Some(goal))
     }
 
     /// Context for re-checking one action's preconditions at step start:
     /// skips the O(population) guard scan and the distance table, which
     /// only costs and GoTo need.
     pub fn build_light(world: &World, agent: EntityId, target: Option<EntityId>) -> PlanCtx {
-        PlanCtx::build_inner(world, agent, target, true)
+        PlanCtx::build_inner(world, agent, target, true, None)
     }
 
-    fn build_inner(world: &World, agent: EntityId, target: Option<EntityId>, light: bool) -> PlanCtx {
+    fn build_inner(
+        world: &World,
+        agent: EntityId,
+        target: Option<EntityId>,
+        light: bool,
+        goal: Option<GoalKind>,
+    ) -> PlanCtx {
+        // M13 review: is an input read by `goals`' actions (all with no goal)?
+        let wants = |goals: &[GoalKind]| goal.is_none_or(|g| goals.contains(&g));
         let p = world.comp::<Personality>(agent);
         let s = world.comp::<Skills>(agent);
         let job = world.comp::<Job>(agent);
@@ -561,30 +584,49 @@ impl PlanCtx {
         // M13 D33/D36: the target is a living agent this agent hunts: its
         // episode's quarry, or its gang's Harvest target.
         let episode = crate::systems::chrome::in_episode(world, agent);
-        let victim_target = target.is_some_and(|t| {
-            world.gang_of(agent).is_some_and(|g| crate::systems::chrome::gang_harvest_target(world, g) == Some(t))
-        });
+        let victim_target = wants(&[GoalKind::GangWork])
+            && target.is_some_and(|t| {
+                world.gang_of(agent).is_some_and(|g| crate::systems::chrome::gang_harvest_target(world, g) == Some(t))
+            });
         let victim_plan =
             target.is_some_and(|t| t != agent && crate::systems::law::living(world, t)) && (episode || victim_target);
         // M13 D34/D35: the Clinic and the body.
         let target_clinic =
             target.filter(|&t| world.comp::<Building>(t).is_some_and(|b| b.kind == BuildingKind::Clinic));
-        let may_rip = crate::systems::chrome::may_rip(world, agent);
-        let loot_target = target.is_some_and(|t| crate::systems::chrome::may_loot(world, agent, t));
+        let looting = wants(&[GoalKind::Loot, GoalKind::GangWork]);
+        let may_rip = looting && crate::systems::chrome::may_rip(world, agent);
+        let loot_target = looting && target.is_some_and(|t| crate::systems::chrome::may_loot(world, agent, t));
         let loot_implants = may_rip
             && target.is_some_and(|t| {
                 world.comp::<crate::components::Corpse>(t).is_some_and(|c| !c.buried)
-                    && !crate::systems::chrome::installed(world, t).is_empty()
+                    && crate::systems::assets::assets_at(world, t).iter().any(|&a| {
+                        world
+                            .comp::<crate::components::Asset>(a)
+                            .is_some_and(|x| x.kind.is_implant() && x.loc == crate::components::AssetLoc::Installed(t))
+                    })
             });
         // M13 D38-D40: dealing, buying and Detox.
         let stims_on = world.config.assets.enabled;
         let gang_hideout = world.gang_of(agent).and_then(|g| world.hideout_of(g));
-        let dealer = stims_on && target.is_some() && crate::systems::stims::dealer_target(world, agent) == target;
-        let source_price =
-            if stims_on { target.and_then(|t| crate::systems::stims::source_price(world, t)) } else { None };
+        let dealer = stims_on
+            && wants(&[GoalKind::GangWork])
+            && target.is_some()
+            && crate::systems::stims::dealer_target(world, agent) == target;
+        let source_price = if stims_on && wants(&[GoalKind::GetHigh]) {
+            target.and_then(|t| crate::systems::stims::source_price(world, t))
+        } else {
+            None
+        };
         let stim_source = source_price.is_some();
         let coins_now = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-        let detox_pick = stims_on && target_clinic.is_some() && crate::systems::stims::detox_drives(world, agent);
+        let treating = wants(&[GoalKind::Treat]);
+        let detox_pick =
+            stims_on && treating && target_clinic.is_some() && crate::systems::stims::detox_drives(world, agent);
+        // M13 D26: the thief's vehicles (the cheap tests first: a vehicle
+        // bound, or one held).
+        let target_vehicle =
+            target.is_some_and(|t| world.comp::<crate::components::Asset>(t).is_some_and(|x| x.kind.is_vehicle()));
+        let held_vehicle = stims_on && crate::systems::vehicles::stolen_held_by(world, agent).is_some();
         let withdrawal_bonus = if stims_on && crate::systems::stims::in_withdrawal(world, agent) {
             world.config.stims.withdrawal_steal_bonus
         } else {
@@ -659,6 +701,7 @@ impl PlanCtx {
         PlanCtx {
             agent,
             target,
+            goal,
             role: job.map(|j| j.role),
             in_gang,
             adult: world.comp::<Identity>(agent).is_some_and(|i| i.age_days >= 18 * crate::time::DAYS_PER_YEAR as u32),
@@ -780,13 +823,20 @@ impl PlanCtx {
             gang_squat,
             shop_pick: target.is_some_and(|t| world.has::<Building>(t))
                 && world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.shop_pick.is_some()),
-            vehicle_target: target.is_some_and(|t| crate::systems::vehicles::may_steal(world, agent, t)),
-            can_fence_vehicle: crate::systems::vehicles::can_fence(world, agent, target),
+            vehicle_target: target_vehicle
+                && wants(&[GoalKind::Earn])
+                && target.is_some_and(|t| crate::systems::vehicles::may_steal(world, agent, t)),
+            can_fence_vehicle: (target_vehicle || held_vehicle)
+                && crate::systems::vehicles::can_fence(world, agent, target),
+            holds_stolen_vehicle: held_vehicle,
             steal_vehicle_cost: world.config.vehicles.steal_vehicle_cost,
-            install_ready: target_clinic.is_some() && crate::systems::chrome::reserved_implant(world, agent).is_some(),
+            install_ready: target_clinic.is_some()
+                && wants(&[GoalKind::Shop])
+                && crate::systems::chrome::reserved_implant(world, agent).is_some(),
             // M13 D39: the Treat goal's Detox branch takes the Clinic visit
             // when addiction drives its score.
-            therapy_affordable: !detox_pick
+            therapy_affordable: treating
+                && !detox_pick
                 && target_clinic.is_some_and(|c| coins_now >= crate::systems::chrome::therapy_price(world, c)),
             has_implant: world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.chrome),
             loot_target,
@@ -795,7 +845,11 @@ impl PlanCtx {
             victim_target,
             episode,
             dealer,
-            hideout_stims: gang_hideout.map_or(0, |h| world.stock(h, crate::components::Good::Stims)),
+            hideout_stims: if wants(&[GoalKind::GangWork]) {
+                gang_hideout.map_or(0, |h| world.stock(h, crate::components::Good::Stims))
+            } else {
+                0
+            },
             deal_batch: world.config.stims.deal_batch,
             stim_affordable: source_price.is_some_and(|p| coins_now >= p),
             stim_legal: stim_source
@@ -809,6 +863,12 @@ impl PlanCtx {
 
     fn is(&self, role: Role) -> bool {
         self.role == Some(role)
+    }
+
+    /// M13 review: an action serving `goals` is offered while planning one
+    /// of them (any, with no goal: a step's re-check, a test).
+    fn serves(&self, goals: &[GoalKind]) -> bool {
+        self.goal.is_none_or(|g| goals.contains(&g))
     }
 }
 
@@ -875,16 +935,24 @@ impl ActionKind {
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
             ActionKind::Beg => !ctx.is(Role::Guard),
             ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
-            // M13 D26: anyone fences a stolen vehicle at a Hideout.
-            ActionKind::Fence => ctx.in_gang || ctx.vehicle_target,
-            ActionKind::BuyAsset => ctx.adult,
-            ActionKind::StealVehicle => ctx.adult && ctx.lawfulness < 0.4 && !ctx.is(Role::Guard),
-            ActionKind::Install | ActionKind::Therapy | ActionKind::Uninstall | ActionKind::Strip => ctx.adult,
-            ActionKind::Rip => ctx.adult && ctx.may_rip,
-            ActionKind::Abduct => ctx.in_gang,
+            // M13 D26: anyone fences a stolen vehicle at a Hideout: one
+            // bound to steal, or (review fix) one already held.
+            ActionKind::Fence => ctx.in_gang || ctx.vehicle_target || ctx.holds_stolen_vehicle,
+            // M13 review: each M13 action is offered only to the goals it
+            // serves (see `PlanCtx::goal`).
+            ActionKind::BuyAsset | ActionKind::Install => ctx.adult && ctx.serves(&[GoalKind::Shop]),
+            ActionKind::StealVehicle => {
+                ctx.adult && ctx.lawfulness < 0.4 && !ctx.is(Role::Guard) && ctx.serves(&[GoalKind::Earn])
+            }
+            ActionKind::Therapy | ActionKind::Uninstall | ActionKind::Detox => {
+                ctx.adult && ctx.serves(&[GoalKind::Treat])
+            }
+            ActionKind::Strip => ctx.adult && ctx.serves(&[GoalKind::Loot]),
+            ActionKind::Rip => ctx.adult && ctx.may_rip && ctx.serves(&[GoalKind::Loot, GoalKind::GangWork]),
+            ActionKind::Abduct => ctx.in_gang && ctx.serves(&[GoalKind::GangWork]),
             // M13 D38/D39.
-            ActionKind::PickUp | ActionKind::Deal => ctx.in_gang && ctx.dealer,
-            ActionKind::BuyStims | ActionKind::UseStim | ActionKind::Detox => ctx.adult,
+            ActionKind::PickUp | ActionKind::Deal => ctx.in_gang && ctx.dealer && ctx.serves(&[GoalKind::GangWork]),
+            ActionKind::BuyStims | ActionKind::UseStim => ctx.adult && ctx.serves(&[GoalKind::GetHigh]),
             // M12 D31: a rioter marches too.
             ActionKind::Muster | ActionKind::Brawl => ctx.in_gang || ctx.raid_pending,
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),

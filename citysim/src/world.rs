@@ -376,6 +376,11 @@ pub struct World {
     /// refresh; `economy::daily_price` drops it.
     #[serde(skip)]
     pub(crate) mean_price_cache: Option<(Tick, i64)>,
+    /// M13 review: the Shop offer a think scored (the tick, the offer), read
+    /// by the same tick's `plan_for` instead of computing it twice more;
+    /// cleared at each think pass.
+    #[serde(skip)]
+    pub shop_offers: BTreeMap<EntityId, (Tick, Option<crate::systems::assets::ShopOffer>)>,
     /// M11: a corp's pending shocks reached `[corps] shock_severity_rethink`
     /// (set by `ownership::push_corp_shock`), so `corp_brain::run` scans the
     /// corps this tick. Shocks are not saved, so neither is this.
@@ -733,6 +738,7 @@ impl World {
             residents: BTreeMap::new(),
             resident_home: BTreeMap::new(),
             mean_price_cache: None,
+            shop_offers: BTreeMap::new(),
             corp_rethink: false,
             buildings_by_kind: BTreeMap::new(),
             agents_by_tile: BTreeMap::new(),

@@ -89,7 +89,7 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // M13 D34: the nearest open Clinic.
         GoalKind::Treat => {
             let tile = world.comp::<Position>(id)?.tile;
-            crate::systems::chrome::nearest_clinic(world, tile, true)
+            crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, tile, true)
         }
         // M13 D35: the nearest body within reach.
         GoalKind::Loot => crate::systems::chrome::loot_target(world, id),
@@ -105,6 +105,11 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Fight if crate::systems::chrome::in_episode(world, id) => {
             crate::systems::chrome::episode_target(world, id)
         }
+        // M13 review: a thief already holding a stolen vehicle fences it
+        // first and binds no second one (the Hideout is in reach through
+        // `gang::hideout_for`; binding it as the target would make it a
+        // `TargetHome` to steal food from).
+        GoalKind::Earn if crate::systems::vehicles::stolen_held_by(world, id).is_some() => None,
         // M13 D26: the nearest street-parked vehicle a thief may take (and
         // a gang would pay for).
         GoalKind::Earn if crate::systems::vehicles::would_steal(world, id) => {
@@ -202,7 +207,24 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             }
         }
     }
-    let target = bind_target(world, id, goal);
+    // M13 D29: what to buy is fixed with the seller. Review fix: the offer
+    // the think just scored is reused (`World::shop_offers`, this tick
+    // only), not computed again for the target and again for the pick.
+    let offer = if goal == GoalKind::Shop {
+        let cached = world.shop_offers.remove(&id).filter(|(t, _)| *t == tick).map(|(_, o)| o);
+        let offer = cached.unwrap_or_else(|| crate::systems::assets::shop_choice(world, id, true));
+        if offer.is_none() {
+            world.cool_goal(id, goal);
+            return 0;
+        }
+        offer
+    } else {
+        None
+    };
+    let target = match &offer {
+        Some(o) => Some(o.seller),
+        None => bind_target(world, id, goal),
+    };
     // M13 D33: a berserker with nobody in sight roams.
     if goal == GoalKind::Fight && target.is_none() && crate::systems::chrome::in_episode(world, id) {
         let step = crate::components::ActionInstance { action: ActionKind::Wander, target: None, tile: None };
@@ -218,18 +240,12 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             crate::systems::lod::set_lod(world, t, crate::components::Lod::Coarse);
         }
     }
-    // M13 D29: what to buy is fixed with the seller.
-    if goal == GoalKind::Shop {
-        let pick = crate::systems::assets::shop_choice(world, id, true).map(|o| o.pick);
-        if pick.is_none() {
-            world.cool_goal(id, goal);
-            return 0;
-        }
+    if let Some(o) = offer {
         if let Some(b) = world.comp_mut::<Brain>(id) {
-            b.shop_pick = pick;
+            b.shop_pick = Some(o.pick);
         }
     }
-    let ctx = PlanCtx::build(world, id, target);
+    let ctx = PlanCtx::build_for(world, id, target, goal);
     let start = WorldState::observe(world, id, target);
     // M13 phase 5 (throughput): the dealer's chain and the claim on a bound
     // Home are built directly. A* needed ~420 expansions for `GoTo(Hideout)
@@ -237,7 +253,13 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // -> Extort` (M13's UseStim, BuyStims and the like widen every node)
     // against the 200 cap, so those plans exhausted the cap and failed (69
     // a day by day 90, 8.6 ms of a 160 ms day), and a dealer sometimes
-    // bought another dealer's doses to deal them.
+    // bought another dealer's doses to deal them. M13 review: gating each
+    // M13 action on its goal (`PlanCtx::goal`) does not make them plannable:
+    // the plateau is the cheap pre-M13 actions (a GoTo to every key, Wander,
+    // Rest, Beg), so `GoTo(TargetHome) -> Extort` still takes ~255
+    // expansions and the dealer's PickUp chain 267-485 (with BuyStims gone,
+    // its old 140-312 shortcut through another dealer); without the chains
+    // ~70 GangWork plans a day failed at the cap.
     if goal == GoalKind::GangWork {
         if let Some(kinds) = dealer_chain(&ctx, &start).or_else(|| claim_chain(&ctx, &start)) {
             let steps = kinds.iter().map(|k| k.instance(&ctx)).collect();

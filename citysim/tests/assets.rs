@@ -624,3 +624,88 @@ fn test_d48_levers_and_god_commands() {
     assert!(w.chase_pins.contains(&who));
     w.check_indices().expect("indices in step");
 }
+
+// ---------------------------------------------------------------------------
+// M13 review fixes
+// ---------------------------------------------------------------------------
+
+/// Review finding 1: a thief the robot kills in the detain fight is charged
+/// with nothing: no report on the corpse, no witness, no victim memory.
+#[test]
+fn test_thief_killed_by_robot_is_not_charged() {
+    use citysim::systems::{law, robots};
+    let mut w = city();
+    // Any fight the thief loses kills it.
+    w.config.crime.fight_death_p = 1.0;
+    let (owner, home) = homeowner(&w);
+    let mut robot = assets::grant(&mut w, owner, AssetKind::Robot, 3).expect("a robot");
+    let door = w.comp::<Building>(home).expect("home").door;
+    let mut dead = None;
+    for thief in others(&w, owner).into_iter().take(60) {
+        if !w.has::<Asset>(robot) {
+            robot = assets::grant(&mut w, owner, AssetKind::Robot, 3).expect("a robot");
+        }
+        assert_eq!(robots::powered_robot(&w, home), Some(robot));
+        put_in(&mut w, thief, home);
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").stealth = 0.0;
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").fighting = 0.0;
+        w.comp_mut::<citysim::Personality>(thief).expect("p").courage = 0.0;
+        let witnessed = count(&w, EventKind::Witness);
+        law::raise_crime(&mut w, thief, Some(owner), citysim::Crime::Theft, door);
+        if !law::living(&w, thief) {
+            assert_eq!(count(&w, EventKind::Witness), witnessed, "nobody witnesses a corpse's crime");
+            dead = Some(thief);
+            break;
+        }
+    }
+    let thief = dead.expect("a T3 robot kills a tier-1 thief within 60 tries");
+    assert!(!w.crime_reports().iter().any(|r| r.suspect == thief), "no report stands against the dead");
+    assert!(!law::wanted(&w, thief));
+    assert!(!w.has::<citysim::Sentence>(thief));
+    let robbed = w.comp::<citysim::Memory>(owner).is_some_and(|m| {
+        m.entries.iter().any(|e| e.kind == citysim::MemoryKind::WasRobbed && e.subject == Some(thief))
+    });
+    assert!(!robbed, "the raise ended at the death");
+}
+
+/// Review finding 5: the impound clears the keeper, and a used resale
+/// clears the last life's keeper, theft, arrears and finance.
+#[test]
+fn test_impound_and_used_resale_reset_the_title() {
+    let mut w = city();
+    set_seeded_garages_aside(&mut w);
+    let people = adults(&w);
+    let (who, keeper, buyer) = (people[7], people[8], people[9]);
+    let car = assets::grant(&mut w, who, AssetKind::Car, 1).expect("granted");
+    assets::set_keeper(&mut w, car, Some(keeper));
+    set_coins(&mut w, who, 0);
+    let precinct = w.building_of_kind(BuildingKind::Jail).expect("precinct");
+    for _ in 0..w.config.assets.impound_days {
+        assets::run(&mut w);
+    }
+    let x = asset(&w, car);
+    assert_eq!((x.owner, x.loc, x.keeper), (None, AssetLoc::Stock(precinct), None), "impounded, keeper cleared");
+    assert_eq!(w.comp::<Kit>(keeper).expect("kit").vehicle, None);
+    // Sold to a Garage, then resold used after a hard life in its stock.
+    let (_, g) = garage(&mut w, 5000);
+    assets::run(&mut w);
+    assert_eq!(asset(&w, car).loc, AssetLoc::Stock(g), "sold to the Garage");
+    {
+        let m = w.comp_mut::<Asset>(car).expect("asset");
+        m.stolen = true;
+        m.upkeep_arrears = 4;
+        m.away_days = 1;
+        m.finance = Some(Finance { lender: None, remaining: 100, per_day: 5, arrears: 3 });
+    }
+    assets::set_keeper(&mut w, car, Some(keeper));
+    set_coins(&mut w, buyer, 5000);
+    let bought =
+        assets::buy(&mut w, buyer, g, &ShopPick { kind: AssetKind::Car, tier: 1, used: Some(car) }).expect("bought");
+    assert_eq!(bought, car);
+    let x = asset(&w, car);
+    assert_eq!((x.owner, x.keeper, x.stolen, x.upkeep_arrears, x.away_days), (Some(buyer), None, false, 0, 0));
+    assert!(x.finance.is_none(), "paid in full: no plan of the last life's");
+    assert_eq!(w.comp::<Kit>(buyer).expect("kit").vehicle, Some(car));
+    assert_eq!(w.comp::<Kit>(keeper).expect("kit").vehicle, None);
+    w.check_indices().expect("indices in step");
+}

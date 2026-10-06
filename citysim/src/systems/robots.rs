@@ -76,37 +76,51 @@ pub fn robot_tier_for(world: &World, kind: BuildingKind) -> u8 {
     tier.clamp(1, 3)
 }
 
+/// What a robot's sensor made of a crime ([`sense`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Sensed {
+    /// No powered robot, the thief beat the sensor, or the robot lost the
+    /// fight (reported when it saw the crime) or could not book the thief.
+    Unseen,
+    /// The thief is booked (sentenced at once).
+    Detained,
+    /// The thief died in the fight to detain it: no report stands against
+    /// a corpse, and the caller raises nothing more.
+    Died,
+}
+
 /// D41, from `law::raise_crime` before the witness roll: a Theft or a
 /// Shakedown inside a building with a powered robot rolls
-/// `security::contest(thief tier, robot tier)` (`thief tier = 1 + round(2 ×
-/// stealth)`). The robot wins: a report with no witness, and a fight to
-/// detain; it wins that too and the thief (alive) is booked at once
+/// `security::contest(thief tier, robot tier)` (`security::thief_tier` of
+/// `law::stealth`). The robot wins: a fight to detain, and a report with no
+/// witness unless the thief died in it (the dead cannot be charged); it
+/// wins that fight too and the thief (alive) is booked at once
 /// (`law::sentence`, as M12 books a Statistical vagrant: no cuffed suspect
-/// waiting for a guard; plan deviation from the spec). Returns true when
-/// the actor was detained.
-pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> bool {
+/// waiting for a guard; plan deviation from the spec).
+pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> Sensed {
     if !matches!(crime, Crime::Theft | Crime::Extortion) || !world.has::<Brain>(actor) {
-        return false;
+        return Sensed::Unseen;
     }
-    let Some(robot) = powered_robot(world, b) else { return false };
+    let Some(robot) = powered_robot(world, b) else { return Sensed::Unseen };
     let robot_tier = world.comp::<Asset>(robot).map_or(1, |x| x.tier);
-    let stealth = world.comp::<crate::components::Skills>(actor).map_or(0.0, |s| s.stealth)
-        + world.comp::<crate::components::Kit>(actor).map_or(0.0, |k| k.stealth);
-    let thief_tier = (1.0 + (2.0 * stealth).round()).clamp(1.0, 255.0) as u8;
+    let thief_tier = crate::systems::security::thief_tier(crate::systems::law::stealth(world, actor));
     let step = world.config.chrome.contest_step;
     if crate::systems::security::contest(thief_tier, robot_tier, step, world.rng.world()) {
-        return false;
+        return Sensed::Unseen;
+    }
+    let (winner, _, died) = crate::systems::law::resolve_fight(world, robot, actor);
+    if !crate::systems::law::living(world, actor) {
+        return Sensed::Died;
     }
     crate::systems::law::file_report(world, crime, actor, None);
-    let (winner, _, died) = crate::systems::law::resolve_fight(world, robot, actor);
-    if winner != robot || died || !crate::systems::law::living(world, actor) {
-        return false;
+    if winner != robot || died {
+        return Sensed::Unseen;
     }
-    let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return false };
+    let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return Sensed::Unseen };
     if world.has::<crate::components::Sentence>(actor)
         || world.sentenced().len() >= usize::from(world.config.buildings.jail.capacity)
     {
-        return false;
+        return Sensed::Unseen;
     }
     crate::systems::stims::confiscate(world, actor);
     let until = world.tick + crate::systems::law::sentence_ticks(world, crime);
@@ -115,7 +129,7 @@ pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> b
     world.stats.current.arrests += 1;
     let text = format!("{} detained {} at {}", world.name_of(robot), world.name_of(actor), world.name_of(b));
     world.push_event(crate::events::EventKind::Arrest, &[actor, b, robot], text);
-    true
+    Sensed::Detained
 }
 
 /// D42: robots `corp` sold that are in service at a building it does not

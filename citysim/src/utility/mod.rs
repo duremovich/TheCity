@@ -92,6 +92,16 @@ pub fn score_goal(
 /// Evaluate every goal for an agent. Returns the winner and the trace
 /// (top `TRACE_TOP_N` by score). `None` when the agent cannot think.
 pub fn think(world: &World, id: EntityId) -> Option<(GoalKind, ThinkTrace)> {
+    think_with_offer(world, id).map(|(goal, trace, _)| (goal, trace))
+}
+
+/// [`think`], also returning the Shop goal's offer when it was scored (M13
+/// review: `shop_choice` runs once per think, for `already_satisfied` and
+/// the considerations both, and the planner reuses it).
+pub fn think_with_offer(
+    world: &World,
+    id: EntityId,
+) -> Option<(GoalKind, ThinkTrace, Option<crate::systems::assets::ShopOffer>)> {
     let brain = world.comp::<crate::components::Brain>(id)?;
     let current = brain.current_goal;
     // Hysteresis protects a goal being pursued, not one already achieved:
@@ -101,9 +111,20 @@ pub fn think(world: &World, id: EntityId) -> Option<(GoalKind, ThinkTrace)> {
 
     let has_spouse = goals::has_spouse(world, id);
     let mut scored: Vec<GoalScore> = Vec::new();
+    let mut shop = None;
     for goal in goals::GOAL_ORDER {
         // A cooled goal scores 0 (skipped).
         if brain.cooldowns.get(&goal).is_some_and(|&until| until > tick) {
+            continue;
+        }
+        // M13 D43: Shop's gate and considerations are its one offer.
+        if goal == GoalKind::Shop {
+            let Some(o) = crate::systems::assets::shop_choice(world, id, true) else { continue };
+            let cs = o.considerations.clone();
+            shop = Some(o);
+            if let Some(s) = score_goal(goal, cs, current, hysteresis, world.config.shop.shop_flat) {
+                scored.push(s);
+            }
             continue;
         }
         if goals::already_satisfied(world, id, goal, has_spouse) {
@@ -118,5 +139,5 @@ pub fn think(world: &World, id: EntityId) -> Option<(GoalKind, ThinkTrace)> {
     scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
     let winner = scored.first()?.goal;
     scored.truncate(TRACE_TOP_N);
-    Some((winner, ThinkTrace { tick, goals: scored }))
+    Some((winner, ThinkTrace { tick, goals: scored }, shop))
 }

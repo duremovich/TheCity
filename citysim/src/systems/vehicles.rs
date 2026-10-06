@@ -14,7 +14,7 @@ use rand::Rng;
 
 use crate::components::{
     AssetKind, AssetLoc, Body, Brain, Building, BuildingKind, Controller, Corp, Crime, DeathCause, Gang, GoalKind, Job,
-    Kit, Lod, MemoryKind, Needs, Position, Role, Sentence, ShopPick, Skills, TileKind, TilePos, Trip,
+    Kit, Lod, MemoryKind, Needs, Position, Role, Sentence, ShopPick, TileKind, TilePos, Trip,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -73,15 +73,8 @@ pub fn nearest_parking(world: &World, from: TilePos) -> Option<EntityId> {
 }
 
 /// The Garage nearest `from` (standing, not derelict), ties the lower id.
-pub fn nearest_garage(world: &World, from: TilePos) -> Option<EntityId> {
-    world
-        .buildings_of_kind(BuildingKind::Garage)
-        .iter()
-        .filter_map(|&g| {
-            world.comp::<Building>(g).filter(|b| !b.demolished && !b.derelict).map(|b| (b.door.manhattan(from), g))
-        })
-        .min()
-        .map(|(_, g)| g)
+fn nearest_garage(world: &World, from: TilePos) -> Option<EntityId> {
+    assets::nearest_building(world, BuildingKind::Garage, from, None)
 }
 
 fn door_of(world: &World, b: EntityId) -> Option<TilePos> {
@@ -590,11 +583,10 @@ fn corp_buy(world: &mut World, corp: EntityId, kind: AssetKind, home: EntityId, 
         return false;
     }
     let pick = ShopPick { kind, tier: 1, used };
-    let note = format!("for {}", world.name_of(home));
+    let note = format!("for {} ({why})", world.name_of(home));
     match assets::buy_noted(world, corp, g, &pick, Some(&note)) {
         Ok(v) => {
             assets::set_loc(world, v, AssetLoc::Parked(home));
-            let _ = why;
             true
         }
         Err(_) => false,
@@ -955,6 +947,13 @@ pub fn theft_plannable(world: &World, agent: EntityId) -> bool {
     would_steal(world, agent) && steal_target(world, agent).is_some_and(|v| can_fence(world, agent, Some(v)))
 }
 
+/// M13 review: the Earn goal has a fence to plan: a stolen vehicle held
+/// (a thief interrupted before the fence) and a gang at the Hideout that
+/// can pay for it.
+pub fn fence_plannable(world: &World, agent: EntityId) -> bool {
+    stolen_held_by(world, agent).is_some() && can_fence(world, agent, None)
+}
+
 /// A stolen vehicle the agent holds and has not fenced: kept by it and
 /// driven by it, or parked where it stands.
 pub fn stolen_held_by(world: &World, agent: EntityId) -> Option<EntityId> {
@@ -996,8 +995,8 @@ pub fn can_fence(world: &World, agent: EntityId, target: Option<EntityId>) -> bo
     world.purse(Some(g)) >= fence_price(world, v)
 }
 
-/// D26 at `StealVehicle`'s completion: the lock contest (`thief_tier = 1 +
-/// round(2 × stealth)` against the vehicle's tier); Grand Theft is raised
+/// D26 at `StealVehicle`'s completion: the lock contest
+/// (`security::thief_tier` against the vehicle's tier); Grand Theft is raised
 /// either way; a win drives off with it (stolen, kept by the thief, a trip
 /// begun so an abort parks it).
 pub fn steal(world: &mut World, thief: EntityId, v: EntityId) -> bool {
@@ -1006,9 +1005,7 @@ pub fn steal(world: &mut World, thief: EntityId, v: EntityId) -> bool {
         return false;
     }
     let Some(door) = vehicle_stand(world, v) else { return false };
-    let stealth =
-        world.comp::<Skills>(thief).map_or(0.0, |s| s.stealth) + world.comp::<Kit>(thief).map_or(0.0, |k| k.stealth);
-    let tier = (1.0 + (2.0 * stealth).round()).clamp(1.0, 255.0) as u8;
+    let tier = crate::systems::security::thief_tier(crate::systems::law::stealth(world, thief));
     let step = world.config.chrome.contest_step;
     let won = crate::systems::security::contest(tier, x.tier, step, world.rng.world());
     let victim = x.owner.filter(|&o| world.has::<Brain>(o));
@@ -1035,7 +1032,9 @@ pub fn steal(world: &mut World, thief: EntityId, v: EntityId) -> bool {
 /// D26 `Fence` of a vehicle at a Hideout: its gang pays `fence_frac ×
 /// value` (`Flow::Sale`) and takes it (owner the gang, parked there, still
 /// stolen). Phase 2 deviation: a member is paid too (the "member's
-/// arrival" handover rides its plan's Fence step).
+/// arrival" handover rides its plan's Fence step). The lender comes first
+/// (review fix): a financed vehicle the trip's end tows for its arrears
+/// (D11) is the lender's, not fenced; false.
 pub fn fence(world: &mut World, agent: EntityId) -> bool {
     let Some(v) = stolen_held_by(world, agent) else { return false };
     let Some(h) = world.comp::<Position>(agent).and_then(|p| p.building) else { return false };
@@ -1052,6 +1051,10 @@ pub fn fence(world: &mut World, agent: EntityId) -> bool {
         return false;
     }
     end_trip(world, agent, false);
+    // A tow at the trip's end took it to the lender.
+    if asset(world, v).is_none_or(|x| x.keeper != Some(agent) || !x.stolen) {
+        return false;
+    }
     ownership::pay(world, Some(g), Some(agent), price, Flow::Sale);
     assets::set_keeper(world, v, None);
     assets::set_owner(world, v, Some(g));
@@ -1070,11 +1073,15 @@ pub fn fence(world: &mut World, agent: EntityId) -> bool {
 /// recovered: `stolen` and the keeper cleared (the Asset's "cleared by a
 /// chop, a fence or recovery"); an agent's goes back to its Home, a corp's
 /// to the recall. A gang's (fenced or stolen off screen) stays stolen
-/// until chopped (D26).
+/// until chopped (D26). Review fix: not abandoned while its thief is alive,
+/// free and still means to fence it (a Fence step ahead in its plan).
 pub fn recover_abandoned(world: &mut World) {
     for v in world.vehicles.clone() {
         let Some(x) = asset(world, v).cloned() else { continue };
         if !x.stolen || !matches!(x.loc, AssetLoc::Parked(_)) || x.owner.is_some_and(|o| world.has::<Gang>(o)) {
+            continue;
+        }
+        if x.keeper.is_some_and(|k| fence_pending(world, k)) {
             continue;
         }
         if let Some(m) = world.comp_mut::<crate::components::Asset>(v) {
@@ -1086,6 +1093,20 @@ pub fn recover_abandoned(world: &mut World) {
             assets::set_loc(world, v, AssetLoc::Parked(h));
         }
     }
+}
+
+/// A thief alive, free (not jailed, not cuffed) whose plan has a `Fence`
+/// step at or after the current one.
+fn fence_pending(world: &World, thief: EntityId) -> bool {
+    if !crate::systems::law::living(world, thief) || world.has::<Sentence>(thief) {
+        return false;
+    }
+    world.comp::<Brain>(thief).is_some_and(|b| {
+        b.cuffed_by.is_none()
+            && b.plan
+                .as_ref()
+                .is_some_and(|p| p.steps.iter().skip(usize::from(b.plan_step)).any(|s| s.action == ActionKind::Fence))
+    })
 }
 
 /// The gang a vehicle stolen off screen at `tile` goes to: the district's
@@ -1146,14 +1167,7 @@ pub fn theft_daily(world: &mut World) {
             continue;
         }
         let Some((g, h)) = theft_gang(world, door) else { continue };
-        assets::set_keeper(world, v, None);
-        assets::set_owner(world, v, Some(g));
-        assets::set_loc(world, v, AssetLoc::Stock(h));
-        if let Some(m) = world.comp_mut::<crate::components::Asset>(v) {
-            m.stolen = true;
-            m.finance = None;
-            m.upkeep_arrears = 0;
-        }
+        assets::into_gang_stock(world, v, g, h);
         let (on, what, gn) = (world.owner_label(x.owner), world.name_of(v), world.owner_label(Some(g)));
         let place = world.district_name(world.district_of(door)).to_string();
         world.push_event(

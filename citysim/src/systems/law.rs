@@ -66,6 +66,18 @@ pub fn crime_salience(crime: Crime) -> f32 {
     }
 }
 
+/// M13 D32: an agent's stealth, its skill plus its Kit's (Eyes); read as
+/// M12 when the Kit adds 0.
+pub fn stealth(world: &World, id: EntityId) -> f32 {
+    let skill = world.comp::<Skills>(id).map_or(0.0, |s| s.stealth);
+    let kit = world.comp::<Kit>(id).map_or(0.0, |k| k.stealth);
+    if kit != 0.0 {
+        skill + kit
+    } else {
+        skill
+    }
+}
+
 /// Has `suspect` been reported for anything since `tick` (open, or filed and
 /// resolved after the sighting)? A witness does not re-file a crime the law
 /// already dealt with.
@@ -84,12 +96,7 @@ pub fn wanted(world: &World, suspect: EntityId) -> bool {
 pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>, crime: Crime, tile: TilePos) {
     let cfg = world.config.crime.clone();
     let r = if world.is_dark() { cfg.sight_night_crime } else { cfg.sight_day_crime };
-    // M13 D32: Eyes add to the actor's stealth (read as M12 when 0).
-    let mut stealth = world.comp::<Skills>(actor).map_or(0.0, |s| s.stealth);
-    let kit_stealth = world.comp::<Kit>(actor).map_or(0.0, |k| k.stealth);
-    if kit_stealth != 0.0 {
-        stealth += kit_stealth;
-    }
+    let stealth = stealth(world, actor);
     let actor_building = world.comp::<Position>(actor).and_then(|p| p.building);
     let salience = crime_salience(crime);
     // M12 D7: the district's crime counter.
@@ -105,8 +112,14 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
 
     // M13 D41: a powered robot at the building contests a theft or a
     // shakedown before anyone else sees it; a thief it detains is booked
-    // already, so nobody else's report follows.
-    let detained = actor_building.is_some_and(|b| crate::systems::robots::sense(world, actor, crime, b));
+    // already, so nobody else's report follows; one it kills is charged with
+    // nothing (the dead cannot be): no witness, memory or report follows.
+    let sensed = actor_building
+        .map_or(crate::systems::robots::Sensed::Unseen, |b| crate::systems::robots::sense(world, actor, crime, b));
+    if sensed == crate::systems::robots::Sensed::Died {
+        return;
+    }
+    let detained = sensed == crate::systems::robots::Sensed::Detained;
     let witnesses: Vec<EntityId> = world
         .bodies()
         .into_iter()

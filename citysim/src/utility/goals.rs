@@ -121,8 +121,11 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
                 }
             };
             // M13 D26: a vehicle within reach to steal, and a gang at the
-            // Hideout to pay for it, is something to plan.
-            nothing && !crate::systems::vehicles::theft_plannable(world, id)
+            // Hideout to pay for it, is something to plan; so (review fix) is
+            // the fence of a stolen vehicle already held.
+            nothing
+                && !crate::systems::vehicles::theft_plannable(world, id)
+                && !crate::systems::vehicles::fence_plannable(world, id)
         }
         GoalKind::Court => has_spouse,
         GoalKind::GangWork => {
@@ -542,7 +545,7 @@ pub fn considerations(
             let p = pers?;
             let body = world.comp::<crate::components::Body>(id)?;
             let tile = world.comp::<crate::components::Position>(id)?.tile;
-            let clinic = crate::systems::chrome::nearest_clinic(world, tile, true);
+            let clinic = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, tile, true);
             let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
             let detox = crate::systems::stims::detox_drives(world, id);
             let ok = clinic.is_some_and(|c| {

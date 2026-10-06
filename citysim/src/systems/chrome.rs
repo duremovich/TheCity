@@ -275,19 +275,6 @@ pub fn reserved_implant(world: &World, agent: EntityId) -> Option<EntityId> {
     })
 }
 
-/// The nearest open Clinic to `from` (door Manhattan, ties lower id).
-pub fn nearest_clinic(world: &World, from: crate::components::TilePos, require_open: bool) -> Option<EntityId> {
-    world
-        .buildings_of_kind(BuildingKind::Clinic)
-        .iter()
-        .copied()
-        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
-        .filter(|&b| !require_open || assets::seller_open(world, b))
-        .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
-        .min()
-        .map(|(_, b)| b)
-}
-
 /// D44 (phase 3), daily after the bike: the gang puts its chrome on its
 /// members. Each unreserved implant in the Hideout's stock (its take from
 /// rips and scavs, ascending) is reserved for the strongest member (highest
@@ -344,7 +331,7 @@ pub fn gang_arms(world: &mut World, gang: EntityId) {
     }
     let Some(member) = strongest(world, Slot::Arms) else { return };
     let from = world.comp::<Building>(h).map(|b| b.door).unwrap_or_default();
-    let Some(clinic) = nearest_clinic(world, from, false) else { return };
+    let Some(clinic) = assets::nearest_seller(world, BuildingKind::Clinic, from, false) else { return };
     let pick = ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 1, used: None };
     let note = format!("for {}", world.name_of(member));
     if let Ok(a) = assets::buy_noted(world, gang, clinic, &pick, Some(&note)) {
@@ -632,16 +619,7 @@ pub fn rip(world: &mut World, agent: EntityId, body: EntityId) -> usize {
     let per = world.config.assets.parts_per.implant;
     for &a in &implants {
         match (gang, hideout) {
-            (Some(g), Some(h)) => {
-                assets::set_keeper(world, a, None);
-                assets::set_owner(world, a, Some(g));
-                assets::set_loc(world, a, AssetLoc::Stock(h));
-                if let Some(m) = world.comp_mut::<Asset>(a) {
-                    m.stolen = true;
-                    m.finance = None;
-                    m.bricked = false;
-                }
-            }
+            (Some(g), Some(h)) => assets::into_gang_stock(world, a, g, h),
             _ => {
                 assets::despawn(world, a);
                 assets::give_goods(world, agent, 0, 0, u16::try_from(per).unwrap_or(u16::MAX));
@@ -898,15 +876,7 @@ pub fn settle_limbo(world: &mut World, hole: crate::components::HoleId, actor: O
     let hideout = gang.and_then(|g| world.hideout_of(g));
     for a in list {
         match (gang, hideout) {
-            (Some(g), Some(h)) => {
-                assets::set_owner(world, a, Some(g));
-                assets::set_loc(world, a, AssetLoc::Stock(h));
-                if let Some(m) = world.comp_mut::<Asset>(a) {
-                    m.stolen = true;
-                    m.finance = None;
-                    m.bricked = false;
-                }
-            }
+            (Some(g), Some(h)) => assets::into_gang_stock(world, a, g, h),
             _ => assets::despawn(world, a),
         }
     }

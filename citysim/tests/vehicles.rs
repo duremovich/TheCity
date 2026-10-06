@@ -898,3 +898,153 @@ fn test_thief_steals_drives_and_fences_end_to_end() {
     assert_eq!(gang0 - w.purse(Some(gang)), price, "paid by the gang (Flow::Sale)");
     w.check_indices().expect("indices in step");
 }
+
+// ---------------------------------------------------------------------------
+// M13 review fixes
+// ---------------------------------------------------------------------------
+
+/// A lawless jobless non-member who has just stolen `people[40]`'s car and
+/// parked it at the nearest Market it walked into (an Eat plan cut in before
+/// the fence), the dole taken; a rich gang at its Hideout.
+/// Returns (thief, car, gang, hideout, market).
+fn thief_holding_car(w: &mut World) -> (EntityId, EntityId, EntityId, EntityId, EntityId) {
+    let people = adults(w);
+    let victim = people[40];
+    let car = assets::grant(w, victim, AssetKind::Car, 1).expect("car");
+    let stand = vehicles::vehicle_stand(w, car).expect("stand");
+    let thief = people
+        .iter()
+        .copied()
+        .find(|&a| a != victim && w.gang_of(a).is_none() && !w.has::<Job>(a) && w.spouse_of(a) != Some(victim))
+        .expect("a jobless non-member");
+    on_street(w, thief, stand);
+    w.comp_mut::<citysim::Personality>(thief).expect("p").lawfulness = 0.1;
+    w.comp_mut::<citysim::Skills>(thief).expect("s").stealth = 1.0;
+    let today = w.day();
+    w.comp_mut::<Brain>(thief).expect("b").last_dole_day = Some(today);
+    let hideout = citysim::systems::gang::hideout_for(w, thief).expect("a Hideout");
+    let gang = w.owner_of(hideout).expect("its gang");
+    w.comp_mut::<citysim::Gang>(gang).expect("g").treasury = 5000;
+    while !vehicles::steal(w, thief, car) {}
+    let market = w.local(thief, BuildingKind::Market).expect("a Market");
+    inside(w, thief, market);
+    vehicles::end_trip(w, thief, false);
+    assert_eq!(asset(w, car).loc, AssetLoc::Parked(market));
+    assert_eq!(vehicles::stolen_held_by(w, thief), Some(car), "still the thief's to fence");
+    (thief, car, gang, hideout, market)
+}
+
+fn plan_steps(w: &World, id: EntityId) -> Vec<ActionKind> {
+    w.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).map_or(Vec::new(), |p| p.steps.iter().map(|s| s.action).collect())
+}
+
+/// Review finding 2: a non-member interrupted between the theft and the
+/// fence still plans the fence on its next Earn.
+#[test]
+fn test_interrupted_thief_plans_the_fence() {
+    let mut w = city();
+    let (thief, car, gang, hideout, _) = thief_holding_car(&mut w);
+    assert!(
+        !citysim::utility::goals::already_satisfied(&w, thief, GoalKind::Earn, false),
+        "a held vehicle is something to Earn by"
+    );
+    w.comp_mut::<Brain>(thief).expect("b").current_goal = Some(GoalKind::Earn);
+    plan::plan_for(&mut w, thief, GoalKind::Earn);
+    assert_eq!(plan_steps(&w, thief), [ActionKind::GoTo(LocationKey::Hideout), ActionKind::Fence]);
+    for _ in 0..3000 {
+        exec_tick(&mut w);
+        if w.comp::<Brain>(thief).expect("b").plan.is_none() {
+            break;
+        }
+    }
+    let x = asset(&w, car);
+    assert_eq!((x.owner, x.loc, x.keeper), (Some(gang), AssetLoc::Parked(hideout), None), "fenced");
+    w.check_indices().expect("indices in step");
+}
+
+/// Review finding 3: the midnight recovery leaves a stolen vehicle whose
+/// thief is free and still means to fence it; one given up is recovered.
+#[test]
+fn test_recovery_spares_a_pending_fence() {
+    let mut w = city();
+    let (thief, car, _, _, market) = thief_holding_car(&mut w);
+    w.comp_mut::<Brain>(thief).expect("b").current_goal = Some(GoalKind::Earn);
+    plan::plan_for(&mut w, thief, GoalKind::Earn);
+    assert!(plan_steps(&w, thief).contains(&ActionKind::Fence));
+    vehicles::recover_abandoned(&mut w);
+    let x = asset(&w, car);
+    assert_eq!((x.stolen, x.keeper, x.loc), (true, Some(thief), AssetLoc::Parked(market)), "the fence is pending");
+    // Given up: recovered.
+    w.abort_plan(thief);
+    vehicles::recover_abandoned(&mut w);
+    let x = asset(&w, car);
+    assert_eq!((x.stolen, x.keeper), (false, None), "abandoned, recovered");
+    w.check_indices().expect("indices in step");
+}
+
+/// Review finding 4: a financed vehicle in arrears is the lender's: the
+/// trip's end tows it, and the gang does not fence it.
+#[test]
+fn test_fence_loses_to_the_tow() {
+    let mut w = city();
+    let people = adults(&w);
+    let victim = people[40];
+    let g = w.buildings_of_kind(BuildingKind::Garage)[0];
+    let lender = w.owner_of(g).expect("a Garage owner");
+    let car = assets::grant(&mut w, victim, AssetKind::Car, 1).expect("car");
+    let repo_days = w.config.assets.repo_days;
+    w.comp_mut::<Asset>(car).expect("asset").finance =
+        Some(Finance { lender: Some(lender), remaining: 400, per_day: 5, arrears: repo_days });
+    let stand = vehicles::vehicle_stand(&w, car).expect("stand");
+    let thief = people
+        .iter()
+        .copied()
+        .find(|&a| a != victim && w.gang_of(a).is_none() && w.spouse_of(a) != Some(victim))
+        .expect("a non-member");
+    on_street(&mut w, thief, stand);
+    w.comp_mut::<citysim::Skills>(thief).expect("s").stealth = 1.0;
+    let hideout = citysim::systems::gang::hideout_for(&w, thief).expect("a Hideout");
+    let gang = w.owner_of(hideout).expect("its gang");
+    w.comp_mut::<citysim::Gang>(gang).expect("g").treasury = 5000;
+    while !vehicles::steal(&mut w, thief, car) {}
+    // Driven straight into the Hideout: the trip is still running.
+    inside(&mut w, thief, hideout);
+    assert!(w.trips.contains_key(&thief));
+    let (coins0, gang0) = (coins(&w, thief), w.purse(Some(gang)));
+    assert!(!vehicles::fence(&mut w, thief), "the lender wins");
+    let x = asset(&w, car);
+    assert_eq!((x.owner, x.keeper, x.stolen), (Some(lender), None, false), "towed to the lender");
+    assert!(matches!(x.loc, AssetLoc::Stock(_)));
+    assert_eq!((coins(&w, thief), w.purse(Some(gang))), (coins0, gang0), "nobody paid");
+    w.check_indices().expect("indices in step");
+}
+
+/// Review finding 6: the soft recall's count is per keeper: two one-night
+/// absences by different keepers do not recall the car.
+#[test]
+fn test_away_days_reset_with_the_keeper() {
+    let mut w = city();
+    let office = w.buildings_of_kind(BuildingKind::SecurityOffice)[0];
+    let corp = w.owner_of(office).expect("a Security corp");
+    let mut pool = adults(&w).into_iter().filter(|&a| !w.has::<Job>(a) && w.gang_of(a).is_none());
+    let (a, b) = (pool.next().expect("a"), pool.next().expect("b"));
+    demography::hire(&mut w, a, office, Role::Guard);
+    demography::hire(&mut w, b, office, Role::Guard);
+    let away = w
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .copied()
+        .find(|&m| w.owner_of(m) != Some(corp))
+        .expect("a building the corp does not own");
+    let car = assets::spawn_asset(&mut w, AssetKind::Car, 1, Some(corp), AssetLoc::Parked(away), 800);
+    assets::set_keeper(&mut w, car, Some(a));
+    vehicles::fleet_recall(&mut w);
+    assert_eq!(asset(&w, car).away_days, 1, "one night away under the first keeper");
+    // The first keeper hands it on where it stands.
+    assets::set_keeper(&mut w, car, None);
+    assets::set_keeper(&mut w, car, Some(b));
+    assert_eq!(asset(&w, car).away_days, 0, "a new keeper starts afresh");
+    vehicles::fleet_recall(&mut w);
+    let x = asset(&w, car);
+    assert_eq!((x.loc, x.keeper, x.away_days), (AssetLoc::Parked(away), Some(b), 1), "not recalled");
+}

@@ -61,6 +61,7 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
 pub fn run(world: &mut World) {
     let interval = world.config.brain.think_interval_ticks.max(1);
     let tick = world.tick;
+    world.shop_offers.clear();
     for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
         if brain.lod == Lod::Statistical || world.has::<Sentence>(id) || brain.cuffed_by.is_some() || brain.emigrating {
@@ -89,7 +90,7 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
             b.court_candidate = Some((today, candidate));
         }
     }
-    let Some((winner, trace)) = utility::think(world, id) else { return };
+    let Some((winner, trace, offer)) = utility::think_with_offer(world, id) else { return };
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let score = trace.goals.first().map_or(0.0, |g| g.score);
     // A different winner while an uninterruptible step runs is deferred: the
@@ -113,6 +114,11 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
             b.current_goal = Some(winner);
             b.goal_since = tick;
         }
+    }
+    // M13 review: the Shop offer just scored serves this tick's plan,
+    // unless an abort (a trip ended, a vehicle parked) may have changed it.
+    if winner == GoalKind::Shop && !abort {
+        world.shop_offers.insert(id, (tick, offer));
     }
     if abort {
         world.abort_plan(id);

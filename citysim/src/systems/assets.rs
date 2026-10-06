@@ -271,13 +271,46 @@ pub fn set_owner(world: &mut World, a: EntityId, owner: Option<EntityId>) {
     rekit_touched(world, &[before[0], before[1], before[2], owner]);
 }
 
-/// Set (or clear) a fleet vehicle's keeper (plan D24).
+/// Set (or clear) a fleet vehicle's keeper (plan D24). A new keeper (or
+/// none) starts the soft recall's count afresh (`away_days`, phase 5): one
+/// keeper's night away never adds to the next one's.
 pub fn set_keeper(world: &mut World, a: EntityId, keeper: Option<EntityId>) {
     let Some(old) = world.comp::<Asset>(a).map(|x| x.keeper) else { return };
     if let Some(x) = world.comp_mut::<Asset>(a) {
         x.keeper = keeper;
+        if old != keeper {
+            x.away_days = 0;
+        }
     }
     rekit_touched(world, &[old, keeper]);
+}
+
+/// A change of title clears the last holder's claims: no keeper, not
+/// stolen, no upkeep arrears, no finance (a financed buyer's plan is set
+/// after), the soft recall's count reset. Called by the impound, the
+/// impound sale, a tow, every used-asset resale and [`into_gang_stock`].
+pub fn reset_title(world: &mut World, a: EntityId) {
+    set_keeper(world, a, None);
+    if let Some(m) = world.comp_mut::<Asset>(a) {
+        m.stolen = false;
+        m.upkeep_arrears = 0;
+        m.finance = None;
+        m.away_days = 0;
+    }
+}
+
+/// Stolen goods into a gang's Hideout stock (an off-screen strip, a rip, a
+/// settled abduction, an off-screen vehicle theft): the title reset
+/// ([`reset_title`]), owned by `gang`, in `hideout`'s stock, stolen, and
+/// unbricked (the gang's ripperdoc strips the lender's lock).
+pub fn into_gang_stock(world: &mut World, a: EntityId, gang: EntityId, hideout: EntityId) {
+    reset_title(world, a);
+    set_owner(world, a, Some(gang));
+    set_loc(world, a, AssetLoc::Stock(hideout));
+    if let Some(m) = world.comp_mut::<Asset>(a) {
+        m.stolen = true;
+        m.bricked = false;
+    }
 }
 
 /// A new asset: condition 100, value = `list`, upkeep from the config.
@@ -539,7 +572,7 @@ pub fn asset_tile(world: &World, a: EntityId) -> Option<TilePos> {
 
 /// The building of `kind` nearest `from` (door Manhattan, ties lower id),
 /// standing and not derelict, optionally owned by `owner` only.
-fn nearest_building(
+pub(crate) fn nearest_building(
     world: &World,
     kind: BuildingKind,
     from: TilePos,
@@ -817,7 +850,7 @@ pub fn tow(world: &mut World, a: EntityId) -> bool {
     let from = asset_tile(world, a).unwrap_or_default();
     let to = nearest_building(world, BuildingKind::Garage, from, Some(Some(lender)))
         .or_else(|| world.building_of_kind(BuildingKind::Jail));
-    set_keeper(world, a, None);
+    reset_title(world, a);
     take_back(world, a, lender);
     if let Some(b) = to {
         set_loc(world, a, AssetLoc::Stock(b));
@@ -870,12 +903,9 @@ fn impound(world: &mut World) {
             {
                 continue;
             }
+            reset_title(world, a);
             set_owner(world, a, None);
             set_loc(world, a, AssetLoc::Stock(precinct));
-            if let Some(m) = world.comp_mut::<Asset>(a) {
-                m.finance = None;
-                m.upkeep_arrears = 0;
-            }
             repossessed(world, &x, None, a, "impounded");
             world.stats.current.impounds += 1;
         }
@@ -906,6 +936,7 @@ fn impound(world: &mut World) {
         };
         let buyer = world.owner_of(g);
         ownership::pay(world, buyer, x.owner, price, Flow::Asset);
+        reset_title(world, a);
         set_owner(world, a, buyer);
         set_loc(world, a, AssetLoc::Stock(g));
         let (what, who) = (world.name_of(a), world.owner_label(buyer));
@@ -1216,13 +1247,7 @@ pub fn strip_offscreen(world: &mut World, c: EntityId) {
             let mut chrome = 0;
             for a in assets_at(world, c).to_vec() {
                 chrome += usize::from(world.comp::<Asset>(a).is_some_and(|x| x.kind.is_implant()));
-                set_owner(world, a, Some(g));
-                set_loc(world, a, AssetLoc::Stock(h));
-                if let Some(m) = world.comp_mut::<Asset>(a) {
-                    m.stolen = true;
-                    m.finance = None;
-                    m.bricked = false;
-                }
+                into_gang_stock(world, a, g, h);
             }
             // Phase 3 (D35): the scavs' chrome is a harvest for the gang.
             if chrome > 0 {
@@ -1518,6 +1543,7 @@ pub fn buy_noted(
     let loc = new_loc(world, kind, buyer, seller);
     let a = match used {
         Some((u, ..)) => {
+            reset_title(world, u);
             set_owner(world, u, Some(buyer));
             set_loc(world, u, loc);
             u
@@ -1682,7 +1708,7 @@ fn finance_per_day(world: &World, kind: AssetKind, price: i64, coins: i64) -> i6
 
 /// The nearest seller of `kind` to `from` (ties lower id), open now when
 /// `require_open` (a body walks there; the Statistical pass buys remotely).
-fn nearest_seller(world: &World, kind: BuildingKind, from: TilePos, require_open: bool) -> Option<EntityId> {
+pub(crate) fn nearest_seller(world: &World, kind: BuildingKind, from: TilePos, require_open: bool) -> Option<EntityId> {
     world
         .buildings_of_kind(kind)
         .iter()

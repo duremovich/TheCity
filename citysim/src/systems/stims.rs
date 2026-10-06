@@ -567,7 +567,9 @@ fn stat_addicts(world: &mut World) {
         if coins >= 2 * cfg.detox_price && lawful {
             let p = f64::from(cfg.p_stat_detox.clamp(0.0, 1.0));
             if world.rng.world().random_bool(p) {
-                if let Some(c) = crate::systems::chrome::nearest_clinic(world, from, false) {
+                if let Some(c) =
+                    crate::systems::assets::nearest_seller(world, crate::components::BuildingKind::Clinic, from, false)
+                {
                     detox(world, id, c);
                 }
             }
