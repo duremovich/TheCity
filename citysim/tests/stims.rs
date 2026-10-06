@@ -100,6 +100,7 @@ fn test_cook_spends_treasury_into_hideout_stock() {
 #[test]
 fn test_deal_pays_gang_and_dealer() {
     let mut w = city();
+    w.config.stims.deal_price = 5; // the plan's (phase 5 calibration: 6)
     let people = free(&w);
     let (dealer, buyer) = (people[0], people[1]);
     let g = gang_of(&mut w, &[dealer]);
@@ -164,6 +165,7 @@ fn test_witnessed_deal_reported_and_arrest_confiscates() {
 #[test]
 fn test_addiction_rises_per_use_and_withdrawal_from_last_use() {
     let mut w = city();
+    w.config.stims.addict_per_use = 0.06; // the plan's (phase 5 calibration: 0.1)
     let a = free(&w)[0];
     w.comp_mut::<Personality>(a).expect("p").lawfulness = 0.5;
     set_body(&mut w, a, 0.0);

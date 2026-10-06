@@ -309,6 +309,7 @@ pub fn spawn_asset(
             bought,
             keeper: None,
             list,
+            away_days: 0,
         },
     );
     file(world, id);
@@ -997,9 +998,16 @@ pub fn wreck(world: &mut World, a: EntityId, why: &str) {
 /// the nearest Garage at `repair_price × level` a point (`Flow::Asset`),
 /// one Part per 25 points from its stock (a missing Part costs the Garage
 /// `part_credit` as `Import`). An agent or gang pays only in full.
+/// Phase 5: robots too, at the nearest Security Office (the seller; one
+/// repairing its own robot pays only the missing Parts): with repairs for
+/// vehicles alone every robot wore out around day 101.
 fn repairs(world: &mut World) {
     let cfg = world.config.assets.clone();
-    for a in world.vehicles.clone() {
+    let robots: Vec<EntityId> = all_assets(world)
+        .into_iter()
+        .filter(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Robot))
+        .collect();
+    for a in world.vehicles.clone().into_iter().chain(robots) {
         let Some(x) = world.comp::<Asset>(a).cloned() else { continue };
         if x.condition >= cfg.repair_below
             || x.condition == 0
@@ -1010,15 +1018,22 @@ fn repairs(world: &mut World) {
             continue;
         }
         let Some(from) = asset_tile(world, a) else { continue };
-        let Some(g) = nearest_building(world, BuildingKind::Garage, from, None) else { continue };
+        let shop = if x.kind == AssetKind::Robot { BuildingKind::SecurityOffice } else { BuildingKind::Garage };
+        let Some(g) = nearest_building(world, shop, from, None) else { continue };
+        let garage_owner = world.owner_of(g);
         let points = 100 - i64::from(x.condition);
-        let cost = (cfg.repair_price as f32 * seller_level(world, g) * points as f32).round() as i64;
+        let cost = if garage_owner == x.owner {
+            0
+        } else {
+            (cfg.repair_price as f32 * seller_level(world, g) * points as f32).round() as i64
+        };
         if !can_pay(world, x.owner, cost) {
             continue;
         }
-        let garage_owner = world.owner_of(g);
-        let paid = ownership::charge(world, x.owner, garage_owner, cost, Flow::Asset);
-        ownership::credit(world, g, paid);
+        if cost > 0 {
+            let paid = ownership::charge(world, x.owner, garage_owner, cost, Flow::Asset);
+            ownership::credit(world, g, paid);
+        }
         let need = (points as u32).div_ceil(25);
         let have = world.take_stock(g, Good::Parts, need);
         let missing = i64::from(need - have);
@@ -1483,7 +1498,7 @@ pub fn buy_noted(
     };
     let coins = world.purse(Some(buyer));
     let financed = coins < price;
-    let down = if financed { (cfg.down_frac * price as f32).round() as i64 } else { price };
+    let down = if financed { (cfg.down_frac_of(kind) * price as f32).round() as i64 } else { price };
     if coins < down || matches!(ownership::owner_kind(world, Some(buyer)), OwnerKind::City) {
         return Err(format!("{} cannot afford {price}", world.owner_label(Some(buyer))));
     }
@@ -1653,12 +1668,12 @@ pub struct ShopOffer {
 }
 
 /// D10's daily payment for `price` bought with `coins` (0 when paid in full).
-fn finance_per_day(world: &World, price: i64, coins: i64) -> i64 {
+fn finance_per_day(world: &World, kind: AssetKind, price: i64, coins: i64) -> i64 {
     if coins >= price {
         return 0;
     }
     let cfg = &world.config.assets;
-    let down = (cfg.down_frac * price as f32).round() as i64;
+    let down = (cfg.down_frac_of(kind) * price as f32).round() as i64;
     let remaining = price - down;
     let total = remaining + (remaining as f64 * f64::from(cfg.interest)).round() as i64;
     let term = i64::from(cfg.term_days.max(1));
@@ -1679,19 +1694,33 @@ fn nearest_seller(world: &World, kind: BuildingKind, from: TilePos, require_open
         .map(|(_, b)| b)
 }
 
+/// Phase 5 (D43 reading): the coins a day a new asset may still take,
+/// `max_burden x income` less the upkeep and finance `per_day` of what the
+/// agent already owns. The plan tested each candidate alone, so a wage
+/// earner financed implant after implant until it defaulted on all of them.
+fn burden_room(world: &World, id: EntityId, income: i64) -> f32 {
+    let committed: i64 = assets_of(world, Some(id))
+        .iter()
+        .filter_map(|&a| world.comp::<Asset>(a).map(|x| (a, x)))
+        .map(|(a, x)| upkeep_of(world, a) + x.finance.as_ref().map_or(0, |f| f.per_day))
+        .sum();
+    world.config.shop.max_burden * income as f32 - committed as f32
+}
+
 /// The dearest of `options` the agent can buy (D43): `coins >= down_frac x
 /// price` (a flyer only in full; phase 2 deviation: a pack too, or the
 /// homeless financed 30-coin packs on the dole and were repossessed within
 /// the week), and upkeep plus the plain finance `per_day` (not the catch-up
-/// due) at most `max_burden x income`.
+/// due) at most `room`: `max_burden x income` less what the agent's assets
+/// already take a day (phase 5; see [`burden_room`]).
 fn dearest_affordable(
     world: &World,
     seller: EntityId,
     options: &[(AssetKind, u8)],
     coins: i64,
-    income: i64,
+    room: f32,
 ) -> Option<(AssetKind, u8, i64, bool)> {
-    affordable_at(world, seller_level(world, seller), options, coins, income)
+    affordable_at(world, seller_level(world, seller), options, coins, room)
 }
 
 /// [`dearest_affordable`] at a given price level.
@@ -1700,10 +1729,8 @@ fn affordable_at(
     level: f32,
     options: &[(AssetKind, u8)],
     coins: i64,
-    income: i64,
+    cap: f32,
 ) -> Option<(AssetKind, u8, i64, bool)> {
-    let down_frac = world.config.assets.down_frac;
-    let cap = world.config.shop.max_burden * income as f32;
     options
         .iter()
         .filter_map(|&(kind, tier)| {
@@ -1713,9 +1740,9 @@ fn affordable_at(
             let ok = if matches!(kind, AssetKind::Flyer | AssetKind::Pack) {
                 full
             } else {
-                coins >= (down_frac * price as f32).round() as i64
+                coins >= (world.config.assets.down_frac_of(kind) * price as f32).round() as i64
             };
-            let burden = upkeep_for(world, kind, tier) + finance_per_day(world, price, coins);
+            let burden = upkeep_for(world, kind, tier) + finance_per_day(world, kind, price, coins);
             (ok && burden as f32 <= cap).then_some((kind, tier, price, !full))
         })
         .max_by_key(|&(_, _, price, _)| price)
@@ -1764,6 +1791,13 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     if world.has::<crate::components::GangMember>(id) {
         income += world.config.social.gang_stipend.max(0);
     }
+    // Phase 5 (the chrome finance spiral): net of the day's food, so a wage
+    // that only feeds its earner finances nothing.
+    let meals = cfg.shop.burden_meals;
+    if meals > 0.0 {
+        income = (income - (meals * world.mean_price() as f32).round() as i64).max(0);
+    }
+    let room = burden_room(world, id, income);
     let from = home
         .and_then(|h| world.comp::<Building>(h))
         .map(|b| b.door)
@@ -1785,16 +1819,16 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
         .iter()
         .any(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Pack && x.loc == AssetLoc::Carried(id)));
     let want_vehicle = kit.is_none_or(|k| k.vehicle.is_none())
-        && lowest(BuildingKind::Garage).is_some_and(|l| affordable_at(world, l, &VEHICLES, coins, income).is_some());
+        && lowest(BuildingKind::Garage).is_some_and(|l| affordable_at(world, l, &VEHICLES, coins, room).is_some());
     let want_pack = home.is_none()
         && !has_pack
-        && lowest(BuildingKind::Market).is_some_and(|l| affordable_at(world, l, &PACKS, coins, income).is_some());
+        && lowest(BuildingKind::Market).is_some_and(|l| affordable_at(world, l, &PACKS, coins, room).is_some());
     // Phase 3 (D43): the first empty slot of the agent's list, while a T1
     // is within reach at the cheapest Clinic (a used one may be cheaper).
     let chrome_slot = chrome_slot(world, id);
     let want_chrome = chrome_slot.is_some_and(|s| {
         lowest(BuildingKind::Clinic)
-            .is_some_and(|l| affordable_at(world, l, &[(AssetKind::Implant(s), 1)], coins, income).is_some())
+            .is_some_and(|l| affordable_at(world, l, &[(AssetKind::Implant(s), 1)], coins, room).is_some())
     });
     if !want_vehicle && !want_pack && !want_chrome {
         return None;
@@ -1821,7 +1855,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // A vehicle, for an agent without one.
     if want_vehicle {
         if let Some(g) = nearest_seller(world, BuildingKind::Garage, from, require_open) {
-            if let Some(o) = dearest_affordable(world, g, &VEHICLES, coins, income) {
+            if let Some(o) = dearest_affordable(world, g, &VEHICLES, coins, room) {
                 let work = job.and_then(|j| j.employer).and_then(|e| world.comp::<Building>(e)).map(|b| b.door);
                 let commute = match (home, work) {
                     (Some(_), Some(w)) => from.manhattan(w),
@@ -1836,7 +1870,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // Chrome: the dearest affordable tier of the slot, new or used.
     if let (true, Some(slot)) = (want_chrome, chrome_slot) {
         if let Some(c) = nearest_seller(world, BuildingKind::Clinic, from, require_open) {
-            if let Some((pick, price, financed)) = chrome_pick(world, c, slot, coins, income) {
+            if let Some((pick, price, financed)) = chrome_pick(world, c, slot, coins, room) {
                 let load = kit.map_or(0.0, |k| k.load);
                 let courage = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.courage);
                 let cs = vec![
@@ -1850,7 +1884,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // A pack, for the homeless without one.
     if want_pack {
         if let Some(m) = nearest_seller(world, BuildingKind::Market, from, require_open) {
-            if let Some(o) = dearest_affordable(world, m, &PACKS, coins, income) {
+            if let Some(o) = dearest_affordable(world, m, &PACKS, coins, room) {
                 offer(ShopCategory::Pack, m, o, None, Vec::new());
             }
         }
@@ -1883,12 +1917,11 @@ pub fn chrome_slot(world: &World, id: EntityId) -> Option<Slot> {
 /// Phase 3 (D43): the dearest implant for `slot` at Clinic `c` the agent
 /// can buy: a new tier (`dearest_affordable`'s rules), or a used one in the
 /// Clinic's stock at `used_frac × list × condition / 100`.
-fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, income: i64) -> Option<(ShopPick, i64, bool)> {
+fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, cap: f32) -> Option<(ShopPick, i64, bool)> {
     let kind = AssetKind::Implant(slot);
-    let new = dearest_affordable(world, c, &[(kind, 1), (kind, 2), (kind, 3)], coins, income)
+    let new = dearest_affordable(world, c, &[(kind, 1), (kind, 2), (kind, 3)], coins, cap)
         .map(|(k, t, price, fin)| (ShopPick { kind: k, tier: t, used: None }, price, fin));
-    let down_frac = world.config.assets.down_frac;
-    let cap = world.config.shop.max_burden * income as f32;
+    let down_frac = world.config.assets.down_frac_of(kind);
     let used = assets_at(world, c)
         .iter()
         .copied()
@@ -1899,7 +1932,7 @@ fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, income: i64) 
         .filter_map(|(a, x)| {
             let price = (world.config.chrome.used_frac * x.list as f32 * f32::from(x.condition) / 100.0).round() as i64;
             let ok = coins >= (down_frac * price as f32).round() as i64;
-            let burden = upkeep_for(world, kind, x.tier) + finance_per_day(world, price, coins);
+            let burden = upkeep_for(world, kind, x.tier) + finance_per_day(world, kind, price, coins);
             (ok && burden as f32 <= cap).then_some((
                 ShopPick { kind, tier: x.tier, used: Some(a) },
                 price,

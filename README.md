@@ -31,6 +31,10 @@ With `B` the app draws the eight districts (borders, a fill in the controller's 
 
 The CSV (`--report`) since M11 adds rent and evictions (`evictions, rent_paid, rent_short, housed`), the money ledger per flow (`flow_food, flow_drink, flow_wages, flow_rent, flow_upkeep, flow_wholesale, flow_overflow, flow_restock, flow_contract, flow_tax, flow_dole, flow_other`), wealth (`wallets, wallet_gini, wallet_top10`), each seeded corp's `corpN_treasury, corpN_order` (slots 1-8, `0,-` once dissolved), `acquisitions, bankruptcies, monopolies, foundings, incorporations, strikes`, and the classes (`unrest_corp, unrest_street, unrest_dreg, class_corp, class_street, class_dreg, happiness_street`), all before `ticks_per_sec`. M12 adds, per district (columns `d1_` to `d8_`, d1 = Spire; the levers number districts 0-7), `d{i}_coverage, d{i}_control` (0 Contested, 1 City, 2 Gang, 3 Corp), `d{i}_litter` (share of street tiles visibly littered), `d{i}_unrest, d{i}_crime, d{i}_guards`, then `dregs, hotel_nights, squatters, derelicts, vagrancy, riots, crossfire, gangs`, also before `ticks_per_sec`.
 
+M13 gives the city's people things. An asset is an entity with an owner (an agent, a gang, a corp or the city), an upkeep, a condition and maybe a finance plan; it can be repossessed (towed, bricked, taken), impounded, stolen, fenced, chopped for Parts, looted from a corpse and inherited. **Vehicles** (motorcycle, car, truck, flyer) change how long a step takes (road, ground, farmland), haul six batches on a Vat Farm truck, crash at the end of a trip (worse in a chase; reflex is the save) and are stolen from the street; corps run truck and patrol-car fleets and buy their execs flyers, gangs buy bikes for members. **Chrome** (Arms, Legs, Nerves, Eyes, Skin) is bought and installed at a Ripperdoc (Clinic), changes fights, sight and stealth, and costs sanity: low sanity rolls a berserk episode the law hunts; Therapy treats it; scavs strip and rip corpses, and gangs under the Harvest order abduct the chromed. **Stims** are cooked by gangs and dealt at Bars (illegal by default, the `stims_legal` lever lets Markets sell them), with addiction, withdrawal, overdose and Detox. The **security robot** is posted by a corp's Secure order, defends in brawls and detains thieves. Garages and Clinics are a ninth corp's niche (Tech) and agents can found them.
+
+The CSV since M13 adds, before `ticks_per_sec`: `vehicles_moto, vehicles_car, vehicles_truck, vehicles_flyer, truck_hauls, walk_hauls, commute_tpt_walk, commute_tpt_drive, chrome_installs, chrome_agents, mean_sanity, episodes, hooked, stims_dealt, stims_legal, dealing_reports, repos, impounds, crashes, crash_deaths, vehicle_thefts, chops, abductions, stripped, robots, flow_asset, flow_asset_upkeep, flow_finance, flow_import, flow_stims, flow_parts, flow_treatment, overdoses, harvests, stripped_window, gang_income, gang_income_dealing, episodes_by_law, treatments, detoxes`, and the ninth corp slot (`corp9_treasury, corp9_order`). The app's assets overlay heats the districts by hooked adults (`A` per the plan, `K` where `A` pans the camera: the UI phase decides).
+
 Display names differ from code names: Block (`Home`), Vat Farm (`Farm`), Street Market (`Market`), Precinct (`Jail`), Civic Hall (`Hall`), Recycler (`Cemetery`), Reserve Depot (`Warehouse`); money is shown as ¢. The CSV columns and the Rust identifiers keep the v1 names.
 
 ## Roadmap
@@ -43,7 +47,7 @@ Display names differ from code names: Block (`Home`), Vat Farm (`Farm`), Street 
 | M10 Scale (done) | 2,000 residents, five zones, Statistical tier, holes and the binder, Life | [M10](docs/M10_SCALE.md) |
 | M11 Ownership (done) | theme labels, owners and purses, rent and eviction, eight corps with a brain, founding, classes | [M11](docs/M11_OWNERSHIP.md) |
 | M12 Districts (done) | eight districts with owners and moods, per-district law and stances, litter and sweepers, Hotels, derelicts and squats, riots, crossfire, splits, corp raids | [M12](docs/M12_DISTRICTS.md) |
-| M13 Assets | vehicles, chrome, stims, the security robot | [post-M14](docs/ROADMAP_POST_M14.md) |
+| M13 Assets (done) | vehicles, chrome at the Ripperdoc, stims and dealing, the security robot, loot and the Tech niche | [M13](docs/M13_ASSETS.md) |
 | M14 Data and Virt | a second plane, decks, ICE, Data as a resource, the tech tree | [post-M14](docs/ROADMAP_POST_M14.md) |
 | M15 Word and blood | gossip, reputation, grudges, revenge chains | [post-M14](docs/ROADMAP_POST_M14.md) |
 | M16 Contracts | hits, fixers, leverage moves, the quest board | [post-M14](docs/ROADMAP_POST_M14.md) |
@@ -70,10 +74,16 @@ cargo test --release -p citysim --test scenario test_m11_ownership_seed_42 -- --
 # the M12 districts gate alone: district traces, control, allocation and Crackdowns, gang landlords, litter bands and
 # the sweepers, Vagrancy, Hotel nights, squats, the Dreg share, riots with loot and crossfire, raids that muster,
 # hit corps and never depart into cover, the M10 bounds and throughput; prints the calibration table (spec § 10).
-# Seeds 42-44: riots, gang control and gang landlords by majority, the split bullet on any seed (M13 phase 2)
+# Seeds 42-47 (M13 phase 5): riots by the six-seed mean, gang control and sanitation on half the seeds, gang
+# landlords pooled >= 2/3, the split bullet on any seed; seed 42 alone for the mechanism checks and ticks/s
 cargo test --release -p citysim --test scenario test_m12_districts_seed_42 -- --ignored --nocapture
-# the god suites: the player-lever scenarios (v1, gangs and the law), v2 (corps, classes, the economy) and v3
-# (districts, the street, riots)
+# the M13 assets gate alone: vehicles and trucks, the commute, chrome and harvests, an NPC Clinic or Garage,
+# episodes and Therapy, dealing, addiction and Detox, repossessions, crashes, theft and the chop, Secure robots,
+# strips, the M10 bounds and throughput; prints the calibration table (spec § 11). Seed 42, with the coin-flip
+# bullets (crash deaths, a chop after a theft, episodes, one ended by the law, an NPC seller) by majority of 42-44
+cargo test --release -p citysim --test scenario test_m13_assets_seed_42 -- --ignored --nocapture
+# the god suites: the player-lever scenarios (v1, gangs and the law, and the M13 assets scenarios of
+# docs/GOD_SCENARIOS_V4.md), v2 (corps, classes, the economy) and v3 (districts, the street, riots)
 cargo test --release -p citysim --test god -- --ignored --nocapture
 cargo test --release -p citysim --test god_corps -- --ignored --nocapture
 cargo test --release -p citysim --test god_districts -- --ignored --nocapture

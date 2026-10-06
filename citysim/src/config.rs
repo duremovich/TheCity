@@ -1568,6 +1568,17 @@ pub struct PerKind<T: Default> {
     pub bridge: T,
 }
 
+impl AssetsCfg {
+    /// The down payment share for `kind` (phase 5: implants have their own).
+    pub fn down_frac_of(&self, kind: AssetKind) -> f32 {
+        if kind.is_implant() {
+            self.implant_down_frac
+        } else {
+            self.down_frac
+        }
+    }
+}
+
 impl<T: Default> PerKind<T> {
     pub fn get(&self, kind: AssetKind) -> &T {
         match kind.class() {
@@ -1599,6 +1610,20 @@ pub struct AssetsCfg {
     /// Import coins one Part from a seller's stock replaces.
     pub part_credit: i64,
     pub down_frac: f32,
+    /// Phase 5 (the chrome finance spiral): an implant's down payment share
+    /// (1.0 = cash only). `down_frac` for every other kind.
+    pub implant_down_frac: f32,
+    /// Phase 5: what an agent's `Register` pays for a Clinic or a Garage,
+    /// overriding `[corps] found_cost` when set (seeded founders hold
+    /// 200-300 coins against 500 and 600, so no NPC ever founded one).
+    pub found_cost_clinic: Option<i64>,
+    pub found_cost_garage: Option<i64>,
+    /// Phase 5: an agent founder's per-capita target for a Clinic or a
+    /// Garage (`founding::choose_kind`), overriding `[corps]
+    /// residents_per_clinic`/`_garage` (which still cap the Tech corp): the
+    /// seeded three Clinics and three Garages met the 700 target, so a
+    /// founder always chose a Bar.
+    pub founder_residents_per_seller: Option<u32>,
     pub interest: f32,
     pub term_days: u32,
     pub repo_days: u8,
@@ -1678,6 +1703,10 @@ impl AssetsCfg {
             import_frac: 0.6,
             part_credit: 20,
             down_frac: 0.25,
+            implant_down_frac: 0.25,
+            found_cost_clinic: None,
+            found_cost_garage: None,
+            founder_residents_per_seller: None,
             interest: 0.2,
             term_days: 60,
             repo_days: 5,
@@ -1923,6 +1952,13 @@ pub struct ShopCfg {
     pub fleet_any_order: bool,
     /// Plan D17: a Tech corp's demand reference (sales a day per building).
     pub tech_demand_ref: f32,
+    /// M13 phase 5 (the chrome finance spiral): the D43 burden test reads
+    /// income net of this many meals a day at the mean Market price
+    /// (0 = gross income, the plan's rule).
+    pub burden_meals: f32,
+    /// Phase 5: a corp buys its exec a flyer with this many times its price
+    /// in the treasury and the books (0 = never).
+    pub exec_flyer_cash_mult: f32,
 }
 
 impl Default for ShopCfg {
@@ -1945,6 +1981,8 @@ impl ShopCfg {
             seed_owner_coins: 300,
             fleet_any_order: false,
             tech_demand_ref: 1.0,
+            burden_meals: 0.0,
+            exec_flyer_cash_mult: 0.0,
         }
     }
 }

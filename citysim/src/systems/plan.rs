@@ -231,6 +231,22 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     }
     let ctx = PlanCtx::build(world, id, target);
     let start = WorldState::observe(world, id, target);
+    // M13 phase 5 (throughput): the dealer's chain and the claim on a bound
+    // Home are built directly. A* needed ~420 expansions for `GoTo(Hideout)
+    // -> PickUp -> GoTo(Seller) -> Deal` and up to ~200 for `GoTo(TargetHome)
+    // -> Extort` (M13's UseStim, BuyStims and the like widen every node)
+    // against the 200 cap, so those plans exhausted the cap and failed (69
+    // a day by day 90, 8.6 ms of a 160 ms day), and a dealer sometimes
+    // bought another dealer's doses to deal them.
+    if goal == GoalKind::GangWork {
+        if let Some(kinds) = dealer_chain(&ctx, &start).or_else(|| claim_chain(&ctx, &start)) {
+            let steps = kinds.iter().map(|k| k.instance(&ctx)).collect();
+            let plan = Plan { goal, target, steps, started_tick: tick };
+            reserve_for(world, id, &plan);
+            install(world, id, plan);
+            return kinds.len();
+        }
+    }
     // A shift is worked even when today's wage trip is blocked (short payment
     // already attempted): drop the HasWageDue key rather than skip the shift.
     let goal_state: crate::goap::GoalState = if goal == GoalKind::Work && !ctx.wage_collectable {
@@ -274,6 +290,52 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             used
         }
     }
+}
+
+/// A dealer's GangWork chain (D38): `[GoTo(Hideout)] -> PickUp` unless it
+/// holds doses, then `[GoTo(Seller)] -> Deal`; `None` (the planner decides)
+/// when the agent is no dealer, the task is done, or any step is infeasible.
+fn dealer_chain(ctx: &PlanCtx, ws: &WorldState) -> Option<Vec<ActionKind>> {
+    use crate::goap::LocationKey;
+    if !ctx.dealer || ws.gang_task_done {
+        return None;
+    }
+    let mut kinds = Vec::with_capacity(4);
+    let mut at = ws.at;
+    if !ws.has_stims {
+        if ctx.hideout_stims < ctx.deal_batch {
+            return None;
+        }
+        if at != LocationKey::Hideout {
+            kinds.push(ActionKind::GoTo(LocationKey::Hideout));
+            at = LocationKey::Hideout;
+        }
+        kinds.push(ActionKind::PickUp);
+    }
+    if at != LocationKey::Seller {
+        kinds.push(ActionKind::GoTo(LocationKey::Seller));
+    }
+    kinds.push(ActionKind::Deal);
+    kinds.iter().all(|k| k.feasible(ctx)).then_some(kinds)
+}
+
+/// GangWork on a bound Home (Expand, Contest: `Extort`; Squat: `Occupy`):
+/// `[GoTo(TargetHome)] -> Extort | Occupy`, the first feasible; `None` when
+/// done or neither is feasible.
+fn claim_chain(ctx: &PlanCtx, ws: &WorldState) -> Option<Vec<ActionKind>> {
+    use crate::goap::LocationKey;
+    if ws.gang_task_done {
+        return None;
+    }
+    [ActionKind::Extort, ActionKind::Occupy].into_iter().find_map(|act| {
+        let mut kinds = Vec::with_capacity(2);
+        if ws.at != LocationKey::TargetHome {
+            kinds.push(ActionKind::GoTo(LocationKey::TargetHome));
+        }
+        kinds.push(act);
+        (act.produces(crate::goap::Key::GangTaskDone, true, ctx) && kinds.iter().all(|k| k.feasible(ctx)))
+            .then_some(kinds)
+    })
 }
 
 fn install(world: &mut World, id: EntityId, plan: Plan) {

@@ -74,6 +74,10 @@ fn couple(w: &World) -> (EntityId, EntityId) {
 #[test]
 fn test_purchase_pays_seller_imports_and_conserves() {
     let mut w = city();
+    // The plan's car and finance terms (phase 5 calibration moved them).
+    w.config.assets.price.car = vec![800, 1400];
+    w.config.assets.down_frac = 0.25;
+    w.config.assets.term_days = 60;
     let (corp, g) = garage(&mut w, 5000);
     let people = adults(&w);
     let (rich, poor) = (people[0], people[1]);

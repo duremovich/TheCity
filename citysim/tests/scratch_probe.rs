@@ -1021,3 +1021,486 @@ fn probe_m11_corps() {
         eprintln!("day {d}: {s:?}");
     }
 }
+
+/// M13 phase 5: who can buy what. Wallets, incomes, treasuries, the assets
+/// by owner kind and finance state, gang chrome, and the Shop offers, on a
+/// few days of seed 42 (`DAYS`, `SEED`).
+#[test]
+#[ignore]
+fn probe_m13_economy() {
+    use citysim::systems::{assets, demography, ownership};
+    use citysim::{Asset, AssetKind, AssetLoc, Corp, Gang, GangMember, Job, Kit, Wallet};
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let seed: u64 = std::env::var("SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let mut w = World::new(seed, Config::load());
+    let marks = [1u64, 5, 10, 20, 30, 45, 60, 90, 120];
+    for d in 1..=days {
+        w.run_ticks(TICKS_PER_DAY);
+        if !marks.contains(&d) {
+            continue;
+        }
+        let adults: Vec<_> = w.citizens().into_iter().filter(|&a| demography::is_adult(&w, a)).collect();
+        let mut coins: Vec<i64> = adults.iter().map(|&a| w.comp::<Wallet>(a).map_or(0, |x| x.coins)).collect();
+        coins.sort_unstable();
+        let q = |p: f64| coins[((coins.len() - 1) as f64 * p) as usize];
+        let ge = |n: i64| coins.iter().filter(|&&c| c >= n).count();
+        let mut wages = std::collections::BTreeMap::new();
+        for &a in &adults {
+            if let Some(j) = w.comp::<Job>(a) {
+                *wages.entry(j.wage_per_day).or_insert(0) += 1;
+            }
+        }
+        eprintln!(
+            "day {d}: adults {} coins p50 {} p90 {} p99 {} max {}; >=75 {} >=150 {} >=300 {} >=1000 {}; wages {wages:?}",
+            adults.len(),
+            q(0.5),
+            q(0.9),
+            q(0.99),
+            coins.last().unwrap(),
+            ge(75),
+            ge(150),
+            ge(300),
+            ge(1000)
+        );
+        for (what, sel) in [("employed", 0), ("members", 1)] {
+            let mut c: Vec<i64> = adults
+                .iter()
+                .filter(|&&a| if sel == 0 { w.has::<Job>(a) } else { w.has::<GangMember>(a) })
+                .map(|&a| w.comp::<Wallet>(a).map_or(0, |x| x.coins))
+                .collect();
+            c.sort_unstable();
+            if !c.is_empty() {
+                let q = |p: f64| c[((c.len() - 1) as f64 * p) as usize];
+                eprintln!(
+                    "  {what} {}: p25 {} p50 {} p75 {} p90 {} max {}",
+                    c.len(),
+                    q(0.25),
+                    q(0.5),
+                    q(0.75),
+                    q(0.9),
+                    c[c.len() - 1]
+                );
+            }
+        }
+        let gangs: Vec<String> = w
+            .gangs()
+            .iter()
+            .filter_map(|&g| w.comp::<Gang>(g).map(|x| format!("{}:{}m/{}c", x.name, x.members.len(), x.treasury)))
+            .collect();
+        let corps: Vec<String> =
+            w.corps().iter().filter_map(|&c| w.comp::<Corp>(c).map(|x| format!("{}:{}", x.name, x.treasury))).collect();
+        eprintln!("  gangs {gangs:?}\n  corps {corps:?}");
+        let kinds: Vec<_> = [200i64, 250, 300, 400, 1000]
+            .iter()
+            .map(|&c| (c, citysim::systems::founding::choose_kind(&w, c)))
+            .collect();
+        eprintln!("  choose_kind {kinds:?}");
+        // Assets by owner kind.
+        let mut by = std::collections::BTreeMap::new();
+        let (mut fin, mut cash, mut bricked, mut arrears) = (0, 0, 0, 0);
+        for a in assets::all_assets(&w) {
+            let Some(x) = w.comp::<Asset>(a) else { continue };
+            let ok = match ownership::owner_kind(&w, x.owner) {
+                ownership::OwnerKind::City => "city",
+                ownership::OwnerKind::Corp(_) => "corp",
+                ownership::OwnerKind::Gang(_) => "gang",
+                ownership::OwnerKind::Agent(_) => "agent",
+            };
+            let k = match x.kind {
+                AssetKind::Implant(_) => "implant",
+                k => k.label(),
+            };
+            let stock = matches!(x.loc, AssetLoc::Stock(_));
+            *by.entry((k, ok, stock)).or_insert(0) += 1;
+            if x.kind.is_implant() && matches!(x.loc, AssetLoc::Installed(_)) {
+                if x.finance.is_some() {
+                    fin += 1;
+                } else {
+                    cash += 1;
+                }
+                bricked += i32::from(x.bricked);
+                arrears += i32::from(x.finance.as_ref().is_some_and(|f| f.arrears > 0));
+                if x.finance.as_ref().is_some_and(|f| f.arrears > 0) {
+                    let o = x.owner.unwrap_or(citysim::EntityId::NONE);
+                    let k = if w.has::<GangMember>(o) {
+                        "member"
+                    } else if w.has::<Job>(o) {
+                        "employed"
+                    } else {
+                        "dole"
+                    };
+                    *by.entry(("ARREARS", k, false)).or_insert(0) += 1;
+                }
+                if x.finance.is_some() {
+                    let o = x.owner.unwrap_or(citysim::EntityId::NONE);
+                    let k = if w.has::<GangMember>(o) {
+                        "member"
+                    } else if w.has::<Job>(o) {
+                        "employed"
+                    } else {
+                        "dole"
+                    };
+                    *by.entry(("FINANCED", k, false)).or_insert(0) += 1;
+                }
+            }
+        }
+        eprintln!("  assets (kind, owner, in stock): {by:?}");
+        eprintln!("  installed implants financed {fin} cash {cash} bricked {bricked} in arrears {arrears}");
+        let members: Vec<_> = w.citizens().into_iter().filter(|&a| w.has::<GangMember>(a)).collect();
+        let chromed = members.iter().filter(|&&m| w.comp::<Kit>(m).is_some_and(|k| k.chrome)).count();
+        eprintln!("  gang members {} chromed {chromed}", members.len());
+        let mut loads = std::collections::BTreeMap::new();
+        for &a in &adults {
+            if let Some(k) = w.comp::<Kit>(a).filter(|k| k.chrome) {
+                *loads.entry((k.load * 100.0).round() as i32).or_insert(0) += 1;
+            }
+        }
+        let mut sanity = std::collections::BTreeMap::new();
+        for &a in &adults {
+            if let Some(b) = w.comp::<citysim::Body>(a) {
+                *sanity.entry((b.sanity * 10.0).floor() as i32).or_insert(0) += 1;
+            }
+        }
+        eprintln!(
+            "  loads x100 {loads:?}
+  sanity deciles {sanity:?}"
+        );
+        let (mut offers, mut good) = (std::collections::BTreeMap::new(), 0);
+        for &a in &adults {
+            if let Some(o) = assets::shop_choice(&w, a, false) {
+                *offers.entry(format!("{:?}{}", o.category, if o.financed { "/fin" } else { "" })).or_insert(0) += 1;
+                good += usize::from(o.score >= w.config.shop.stat_shop_min);
+            }
+        }
+        eprintln!("  shop offers {offers:?}, score >= stat_shop_min {good}");
+    }
+}
+
+/// M13 phase 5: per-system wall time, the full tick order and the default
+/// (2,000, assets on) config, per day over the whole run (`DAYS`, `SEED`):
+/// the mean share per system and the slowest days' breakdown.
+#[test]
+#[ignore]
+fn probe_system_timing_m13() {
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let seed: u64 = std::env::var("SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let mut w = World::new(seed, Config::load());
+    let names = [
+        "commands",
+        "lod",
+        "needs",
+        "memory",
+        "mood",
+        "think",
+        "plan",
+        "exec",
+        "ownership",
+        "assets",
+        "classes",
+        "districts",
+        "economy",
+        "bind",
+        "law",
+        "social",
+        "gang",
+        "corp_brain",
+        "demography",
+        "stats",
+    ];
+    const N: usize = 20;
+    let mut total = [0f64; N];
+    let mut per_day: Vec<(f64, [f64; N])> = Vec::new();
+    for _ in 0..days {
+        let mut acc = [0f64; N];
+        for _ in 0..TICKS_PER_DAY {
+            let steps: [&dyn Fn(&mut World); N] = [
+                &|w| w.apply_commands(),
+                &citysim::systems::lod::run,
+                &citysim::needs::run,
+                &citysim::systems::memory::run,
+                &citysim::mood::run,
+                &citysim::systems::think::run,
+                &citysim::systems::plan::run,
+                &citysim::exec::run,
+                &citysim::systems::ownership::run,
+                &citysim::systems::assets::run,
+                &citysim::systems::classes::run,
+                &citysim::systems::districts::run,
+                &citysim::systems::economy::run,
+                &citysim::systems::bind::run,
+                &citysim::systems::law::run,
+                &citysim::systems::social::run,
+                &citysim::systems::gang::run,
+                &citysim::systems::corp_brain::run,
+                &citysim::systems::demography::run,
+                &citysim::systems::stats::run,
+            ];
+            for (i, step) in steps.iter().enumerate() {
+                let t = Instant::now();
+                step(&mut w);
+                acc[i] += t.elapsed().as_secs_f64();
+            }
+            w.tick += 1;
+        }
+        let sum: f64 = acc.iter().sum();
+        for i in 0..N {
+            total[i] += acc[i];
+        }
+        per_day.push((sum, acc));
+    }
+    let all: f64 = total.iter().sum();
+    eprintln!("seed {seed}, {days} days: {:.0} ticks/s overall", (days * TICKS_PER_DAY) as f64 / all);
+    for (name, secs) in names.iter().zip(total) {
+        eprintln!("{name:>11} {:8.1} ms/day {:5.1}%", secs * 1e3 / days as f64, secs / all * 100.0);
+    }
+    let mut idx: Vec<usize> = (0..per_day.len()).collect();
+    idx.sort_by(|&a, &b| per_day[b].0.total_cmp(&per_day[a].0));
+    for &d in idx.iter().take(6) {
+        let (sum, acc) = &per_day[d];
+        let mut top: Vec<(f64, &str)> = acc.iter().copied().zip(names).collect();
+        top.sort_by(|a, b| b.0.total_cmp(&a.0));
+        let top: Vec<String> = top.iter().take(5).map(|(s, n)| format!("{n} {:.0}", s * 1e3)).collect();
+        eprintln!("slow day {d}: {:.0} ticks/s; ms: {}", TICKS_PER_DAY as f64 / sum, top.join(", "));
+    }
+}
+
+/// M13 phase 5 (H2): why is the law garrisoned? Daily means over the run of
+/// the jailed by crime and how many of them are gang members, the posture
+/// days, jailbreaks, robot detentions (`SEED`, `DAYS`).
+#[test]
+#[ignore]
+fn probe_m13_law() {
+    use citysim::{EventKind, GangMember, Posture, Sentence};
+    use std::collections::BTreeMap;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let seed: u64 = std::env::var("SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let mut w = World::new(seed, Config::load());
+    let mut by_crime: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    let mut posture: BTreeMap<String, u32> = BTreeMap::new();
+    let (mut breaks, mut detained, mut next) = (0u32, 0u32, 0u64);
+    for _ in 0..days {
+        w.run_ticks(TICKS_PER_DAY);
+        for e in w.events.iter().filter(|e| e.id >= next) {
+            match e.kind {
+                EventKind::Jailbreak => breaks += 1,
+                EventKind::Arrest if e.text.contains("detained") => detained += 1,
+                _ => {}
+            }
+        }
+        next = w.events.back().map_or(next, |e| e.id + 1);
+        for p in w.with::<Sentence>() {
+            let c = w.comp::<Sentence>(p).map(|s| format!("{:?}", s.crime)).unwrap_or_default();
+            let e = by_crime.entry(c).or_default();
+            e.0 += 1;
+            e.1 += u64::from(w.has::<GangMember>(p));
+        }
+        let p = w.law().map_or(Posture::Patrol, |l| l.posture);
+        *posture.entry(format!("{p:?}")).or_default() += 1;
+    }
+    eprintln!("seed {seed}: postures {posture:?}, jailbreaks {breaks}, robot detentions {detained}");
+    for (c, (n, g)) in by_crime {
+        eprintln!(
+            "  jailed for {c:<14} mean {:6.1} a day, gang members {:6.1}",
+            n as f64 / days as f64,
+            g as f64 / days as f64
+        );
+    }
+}
+
+/// M13 phase 5 throughput: the per-think M13 helpers timed over every Full
+/// and Coarse agent of seed 42 at day `DAYS` (100), 20 passes each.
+#[test]
+#[ignore]
+fn probe_m13_think_fns() {
+    use citysim::systems::{assets, chrome, stims, vehicles};
+    use citysim::Lod;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(days * TICKS_PER_DAY + 600);
+    let agents: Vec<_> = w.tier(Lod::Full).iter().chain(w.tier(Lod::Coarse)).copied().collect();
+    eprintln!("{} Full+Coarse agents, {} vehicles", agents.len(), w.vehicles.len());
+    let time = |name: &str, f: &dyn Fn(citysim::EntityId) -> bool| {
+        let t = Instant::now();
+        let mut hits = 0;
+        for _ in 0..20 {
+            for &a in &agents {
+                hits += usize::from(f(a));
+            }
+        }
+        let per = t.elapsed().as_secs_f64() / 20.0;
+        eprintln!("{name:>18}: {:8.1} us per pass over all, hits {}", per * 1e6, hits / 20);
+    };
+    time("shop_choice", &|a| assets::shop_choice(&w, a, true).is_some());
+    time("theft_plannable", &|a| vehicles::theft_plannable(&w, a));
+    time("would_steal", &|a| vehicles::would_steal(&w, a));
+    time("steal_target", &|a| vehicles::steal_target(&w, a).is_some());
+    time("wants_high", &|a| stims::wants_high(&w, a));
+    time("stim_source", &|a| stims::stim_source(&w, a).is_some());
+    time("wants_detox", &|a| stims::wants_detox(&w, a));
+    time("wants_treatment", &|a| chrome::wants_treatment(&w, a));
+    time("loot_target", &|a| chrome::loot_target(&w, a).is_some());
+    time("think", &|a| citysim::utility::think(&w, a).is_some());
+}
+
+/// M13 phase 5 throughput: `plan::run` re-implemented with a clock around
+/// each `plan_for`, by goal, over days `FROM`..120 of seed 42; also each
+/// goal's `bind_target` alone.
+#[test]
+#[ignore]
+fn probe_m13_plan_by_goal() {
+    use citysim::systems::plan;
+    use citysim::Brain;
+    use std::collections::BTreeMap;
+    let from: u64 = std::env::var("FROM").ok().and_then(|s| s.parse().ok()).unwrap_or(90);
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(from * TICKS_PER_DAY);
+    let mut by: BTreeMap<String, (u32, f64, usize, f64)> = BTreeMap::new();
+    for _ in from * TICKS_PER_DAY..120 * TICKS_PER_DAY {
+        w.apply_commands();
+        citysim::systems::lod::run(&mut w);
+        citysim::needs::run(&mut w);
+        citysim::systems::memory::run(&mut w);
+        citysim::mood::run(&mut w);
+        citysim::systems::think::run(&mut w);
+        // plan::run, timed.
+        let tick = w.tick;
+        let (max_plans, max_exp) = (w.config.brain.plan_budget_per_tick, w.config.brain.plan_expansion_budget_per_tick);
+        let (mut planned, mut expansions) = (0usize, 0usize);
+        while planned < max_plans && expansions < max_exp {
+            let Some((&(urgency, id), &enqueued)) = w.plan_queue.iter().next() else { break };
+            w.plan_queue.remove(&(urgency, id));
+            if let Some(b) = w.comp_mut::<Brain>(id) {
+                b.plan_queued = false;
+            }
+            if tick.saturating_sub(enqueued) > plan::PLAN_QUEUE_MAX_AGE {
+                continue;
+            }
+            let Some(goal) = w.comp::<Brain>(id).filter(|b| b.plan.is_none()).and_then(|b| b.current_goal) else {
+                continue;
+            };
+            planned += 1;
+            let t = Instant::now();
+            let _ = plan::bind_target(&w, id, goal);
+            let tb = t.elapsed().as_secs_f64();
+            let t = Instant::now();
+            let n = plan::plan_for(&mut w, id, goal);
+            let failed = w.comp::<Brain>(id).is_some_and(|b| b.plan.is_none());
+            let mut key = format!("{goal:?}{}", if failed { " FAIL" } else { "" });
+            if failed && goal == citysim::GoalKind::GangWork {
+                let dealer = citysim::systems::stims::dealer_target(&w, id).is_some();
+                let carrying = w.comp::<citysim::Inventory>(id).is_some_and(|i| i.stims > 0);
+                let order = citysim::systems::gang::following_order(&w, id);
+                let target = citysim::systems::gang::gang_work_target(&w, id)
+                    .map(|t| w.name_of(t.0).split('#').next().unwrap_or("").to_string());
+                let here = w
+                    .comp::<citysim::Position>(id)
+                    .and_then(|p| p.building)
+                    .map(|b| w.name_of(b).split('#').next().unwrap_or("").to_string());
+                key =
+                    format!("{key} dealer {dealer} carrying {carrying} order {order:?} target {target:?} in {here:?}");
+            }
+            let e = by.entry(key).or_default();
+            e.0 += 1;
+            e.1 += t.elapsed().as_secs_f64();
+            e.2 += n;
+            e.3 += tb;
+            expansions += n;
+        }
+        citysim::exec::run(&mut w);
+        citysim::systems::ownership::run(&mut w);
+        citysim::systems::assets::run(&mut w);
+        citysim::systems::classes::run(&mut w);
+        citysim::systems::districts::run(&mut w);
+        citysim::systems::economy::run(&mut w);
+        citysim::systems::bind::run(&mut w);
+        citysim::systems::law::run(&mut w);
+        citysim::systems::social::run(&mut w);
+        citysim::systems::gang::run(&mut w);
+        citysim::systems::corp_brain::run(&mut w);
+        citysim::systems::demography::run(&mut w);
+        citysim::systems::stats::run(&mut w);
+        w.tick += 1;
+    }
+    let days = (120 - from) as f64;
+    let mut rows: Vec<_> = by.into_iter().collect();
+    rows.sort_by(|a, b| b.1 .1.total_cmp(&a.1 .1));
+    for (g, (n, t, exp, tb)) in rows {
+        eprintln!(
+            "{g:>12}: {:7.0} plans/day {:7.2} ms/day ({:5.1} us each, bind {:5.1} us), {:6.1} expansions each",
+            f64::from(n) / days,
+            t * 1e3 / days,
+            t * 1e6 / f64::from(n.max(1)),
+            tb * 1e6 / f64::from(n.max(1)),
+            exp as f64 / f64::from(n.max(1))
+        );
+    }
+}
+
+/// M13 phase 5: why a dealer's GangWork plan exhausts the planner.
+#[test]
+#[ignore]
+fn probe_m13_dealer_plan() {
+    use citysim::goap::{self, planner, ActionKind, Limits, PlanCtx, WorldState};
+    use citysim::{GangMember, GoalKind};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(100 * TICKS_PER_DAY + 600);
+    let mut shown = 0;
+    for id in w.citizens() {
+        if !w.has::<GangMember>(id) || shown >= 6 {
+            continue;
+        }
+        let bar = citysim::systems::stims::dealer_target(&w, id);
+        if bar.is_some() == (std::env::var("EXTORT").is_ok()) {
+            continue;
+        }
+        let target = citysim::systems::plan::bind_target(&w, id, GoalKind::GangWork);
+        let ctx = PlanCtx::build(&w, id, target);
+        let start = WorldState::observe(&w, id, target);
+        let gs = goap::goal_state(GoalKind::GangWork).unwrap();
+        let r = planner::plan(&ctx, start, &gs, Limits { max_expansions: 5000, max_len: 12 });
+        let feas: Vec<ActionKind> = goap::actions::PLANNABLE.iter().copied().filter(|a| a.feasible(&ctx)).collect();
+        eprintln!(
+            "{} bar {:?} target {:?} dealer {} hideout_stims {} batch {} dist keys {:?}\n  feasible {:?}\n  result {:?}",
+            w.name_of(id),
+            bar,
+            target,
+            ctx.dealer,
+            ctx.hideout_stims,
+            ctx.deal_batch,
+            ctx.dist.keys().collect::<Vec<_>>(),
+            feas,
+            r.as_ref().map(|f| (f.steps.clone(), f.expansions)).map_err(|e| format!("{e:?}"))
+        );
+        shown += 1;
+    }
+}
+
+/// M13 phase 5 throughput: `think`'s cost by goal (already_satisfied plus
+/// considerations) over the Full and Coarse agents at day `DAYS` (100).
+#[test]
+#[ignore]
+fn probe_m13_think_by_goal() {
+    use citysim::utility::goals;
+    use citysim::Lod;
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(100);
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(days * TICKS_PER_DAY + 600);
+    let agents: Vec<_> = w.tier(Lod::Full).iter().chain(w.tier(Lod::Coarse)).copied().collect();
+    let mut rows = Vec::new();
+    for goal in goals::GOAL_ORDER {
+        let t = Instant::now();
+        for _ in 0..20 {
+            for &a in &agents {
+                let sp = goals::has_spouse(&w, a);
+                if !goals::already_satisfied(&w, a, goal, sp) {
+                    let _ = goals::considerations(&w, a, goal, sp);
+                }
+            }
+        }
+        rows.push((t.elapsed().as_secs_f64() / 20.0, goal));
+    }
+    rows.sort_by(|a, b| b.0.total_cmp(&a.0));
+    for (s, g) in rows.iter().take(12) {
+        eprintln!("{g:?}: {:.1} us per pass over {} agents", s * 1e6, agents.len());
+    }
+}

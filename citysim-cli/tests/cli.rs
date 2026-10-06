@@ -29,12 +29,15 @@ fn test_cli_report_csv_header() {
     // 1 + 5 = 238 on seeds 1-3, less a resident jailed or killed off-screen
     // (fix pass: the bound 250 tightened to 230-240). M13 D18: plus up to
     // six Mechanics at the two seeded Garages, and (phase 3) up to six
-    // Ripperdocs at the three seeded Clinics (230-252).
+    // Ripperdocs at the three seeded Clinics (230-252). M13 phase 5: the
+    // Tech corp's day-0 Garage hires three more Mechanics (9 in all on seed
+    // 1), and with nobody jailed or killed off screen that day seed 1 read
+    // 253: 230-255.
     let cols: Vec<&str> = row.split(',').collect();
     assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
     let n = |i: usize| cols[i].parse::<u32>().expect("a count");
     let derelict_homeless = 5 * citysim::Config::load().street.seed_derelict_blocks as u32;
-    assert!((1995..=2000).contains(&n(2)) && (230..=252).contains(&n(3)), "row: {row}");
+    assert!((1995..=2000).contains(&n(2)) && (230..=255).contains(&n(3)), "row: {row}");
     assert!((derelict_homeless - 5..=derelict_homeless).contains(&n(4)), "row: {row}");
     // M13 D49: corp slot 9 and the 40 asset columns.
     assert_eq!(row.split(',').count(), 81 + 8 * 6 + 7 + 2 + 40);

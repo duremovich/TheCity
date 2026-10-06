@@ -62,6 +62,9 @@ fn set_mood(w: &mut World, a: EntityId, v: f32) {
 #[test]
 fn test_register_converts_lot_and_stamps_walls() {
     let mut w = v2_world(11);
+    // M11's per-capita targets (phase 5 of M13 gives founders a Clinic or
+    // Garage target of their own).
+    w.config.assets.founder_residents_per_seller = None;
     let a = founder(&w);
     w.comp_mut::<Wallet>(a).expect("w").coins = 500;
     let lots0 = w.buildings_of_kind(BuildingKind::Lot).len();

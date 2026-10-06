@@ -802,6 +802,16 @@ Since M12 the tick order is `commands, lod, needs, memory, mood, think, plan, ex
 
 The rules are in [M12_DISTRICTS.md](M12_DISTRICTS.md): districts § 1, the law in districts § 2, litter § 3, the street § 4, gangs § 5, unrest, riots, crossfire and strikes § 6, the levers § 7, UI, events and CSV § 8, and what the build changed under § 14 and "Implemented: deviations". `Config::v1_profile()` turns districts into one and litter, the street and riots off.
 
+### Assets (M13)
+
+Since M13 the tick order is `commands, lod, needs, memory, mood, think, plan, exec, ownership, assets, classes, districts, economy, [bind], law, social, gang, corp_brain, demography, stats`. `assets::run` does nothing per tick except end episodes on the hour; at midnight it runs upkeep, finance, repossession and impound, wear, repairs (vehicles at a Garage, robots at a Security Office), Garage rent, sanity and episodes, the corpse window and scav strips, the parts market, abandoned-vehicle recovery and the fleet recall, off-screen vehicle theft and abduction, the Statistical addict pass and shop, and appearance.
+
+An asset is an entity carrying only `Asset` (kind, tier, owner, loc, condition, value, upkeep, finance, flags, keeper, list price), so no agent scan sees it. Its place is an `AssetLoc`: `Parked(building)` (at the door; Homes, workplaces, Garages, Hideouts), `InUse(agent)` (driven), `Carried(agent)` (a pack or bridge), `Installed(body)` (chrome, in a living agent or a corpse), `Posted(building)` (a robot), `Stock(building)` (for sale at a Clinic, Garage or Security Office, or a gang's take at its Hideout), `Limbo(hole)` (taken by an unbound Abducted hole). Only `assets::set_loc` and `set_owner` write them, keeping the indices (`assets_at`, `assets_by_owner`, `vehicles`, `limbo`, `loot_corpses`) and every touched agent's derived `Kit` in step.
+
+**Step quarters.** A Full mover's step durations are counted in quarter ticks: `ExecState::Goto` carries `carry_q`, and each executor call takes steps while `next_move_tick × 4 + carry_q` is below the next tick's quarter, at most `[vehicles] max_steps_per_tick`, stopping at the door. A step costs `step_q = max(1, round(4 × move_ticks_full × mult))` quarters, `mult` the driven road vehicle's entry for the tile entered (road, ground, farmland) or the walker's `Kit.walk_mult` (Legs chrome), plus M12's litter delay. An unchromed walker costs 8 quarters a step: one step every two ticks, the v1 arithmetic exactly. Coarse movers take a timed hop scaled by `Kit.timed_mult`; the flyer is a timed Chebyshev hop over walls at every tier (`ExecState::Fly`). Paths and flow fields stay pedestrian.
+
+The rules are in [M13_ASSETS.md](M13_ASSETS.md): the asset model § 1, vehicles § 2, chrome § 3, stims § 4, the robot § 5, the Shop § 6, the Statistical tier § 7, the levers § 8, UI, events and CSV § 9, and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city turn `[assets]` off: no pass, goal, order, Kit term or Body read.
+
 ### Economy
 
 Daily at `tick_of_day == 0` plus per-event hooks. Inputs: building stocks, Market, Treasury, Jobs, lever `tax_rate`, season. Outputs: stock changes, `price_food`, `price_history` (cap 120), Wallet changes, `days_unpaid`.

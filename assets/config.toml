@@ -765,23 +765,40 @@ riot_promote_hours = 9             # plan risk 3: rioters rank with the gangs fr
 # M13 § 1 (plan D1-D15): owned things with upkeep, finance, repossession and loot.
 enabled = true                     # off() = false: no pass, no Kit term, no Body read
 # list prices per tier [1, 2, 3]; a kind with fewer entries has fewer tiers. bridge: plan D52 (M14).
-price = { motorcycle = [300], car = [800, 1400], truck = [1500], flyer = [6000], implant = [150, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800] }
-upkeep = { motorcycle = [1], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0] }
-wear = { motorcycle = 1, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0 }
+# Phase 5 calibration (spec § 11; seed 42, checked on 42-47). The city is a dole city: ~250 of 2,000
+# adults hold a job (wage 5-8) and the median wallet falls from 21 coins on day 1 to 2-5 by day 60, so the
+# plan's prices sold 20 vehicles by day 120 (band 150-400) and only on finance. Motorcycle 300 -> 60 (a
+# Sump scooter: ten days' wages, bought cash or half down); car T1 800 -> 500; truck 1500 -> 900 (Farms
+# running a truck by day 30: 5-6 -> 8); flyer 6000 -> 2000 (nobody but a corp ever holds it; the exec
+# flyer, [shop] exec_flyer_cash_mult: at 3000 the 42-44 runs bought 0-2); implant T1 150 -> 60 (cash only
+# below, so the cash buyers must exist; adults chromed 13-17 %, members 40-60 %).
+price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800] }
+# Phase 5: motorcycle upkeep 1 -> 0 and wear 1 -> 0. Unpaid upkeep wore a bike 3 a day and wear 1 a
+# day wrecked every bike bought in the first week around day 100 (64 "worn out" on seed 42): no owner
+# could pay a repair. Crashes (crash_wear) still wreck them.
+upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0] }
+wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0 }
 parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10 }
 parts_price = 15
 import_frac = 0.6
 part_credit = 20                   # import coins one Part from a seller's stock replaces
-down_frac = 0.25
+down_frac = 0.5                    # phase 5: 0.25 -> 0.5 (bikes financed at a quarter down defaulted: 98 tows)
+# Phase 5 (the chrome finance spiral): an implant's down payment is 3/4 of its price. At the plan's 0.25
+# wage earners whose wallets drain all run long (dole city: ~250 of 2,000 adults hold a job) defaulted on
+# 1 coin a day: 209 of 215 implants financed, 160-260 bricks against the 3-40 repossession band. With the
+# net-income burden test ([shop] burden_meals), seeds 42-44 measured: 0.5 -> 43-60 bricks, repossessions
+# 46-63, 21-23 % of adults chromed (both bands broken); 0.75 -> 3-9 bricks, repossessions 13-22, 18-19 %
+# chromed; 1.0 (cash only) -> no bricks, so the Brick lever had nothing to act on.
+implant_down_frac = 0.75
 interest = 0.2
-term_days = 60
+term_days = 90                     # phase 5: 60 -> 90 (a smaller per_day under the net-income burden)
 repo_days = 5
 brick_repo_days = 10
 impound_days = 10
 impound_frac = 0.5
 unpaid_wear_mult = 3
-repair_below = 50
-repair_price = 2                   # coins per condition point
+repair_below = 80                  # phase 5: 50 -> 80 and the price 2 -> 1: a repair of ~20 coins a working owner can pay
+repair_price = 1                   # coins per condition point
 fail_shock = 0.1
 loot_window_hours = 12             # plan D13: phase 3 turns the loot window on (0 = inheritance at death, M12)
 rip_courage = 0.5
@@ -796,6 +813,13 @@ parts_batch = 20                   # plan D14
 # Clinics from phase 3.
 found_garage = true
 found_clinic = true
+# Phase 5: an NPC founder's Clinic or Garage (Register). Founders hold 200-300 coins against [corps]
+# found_cost 500 / 600, and the seeded three of each met the per-capita target of 700 residents, so
+# Register always chose a Bar: agents pay the Bar's 200 and see a back-alley seller wanted per 250.
+# ([corps] keeps both for the Tech corp's builds.)
+found_cost_clinic = 200
+found_cost_garage = 200
+founder_residents_per_seller = 250
 
 [chrome]
 # M13 § 3, the Kit table (plan "Kit tables"); phase 3 adds the rest.
@@ -818,10 +842,14 @@ unmedicated_drift = 0.02
 edgy = 0.5
 edgy_mood = 0.2
 edgy_fight = 0.1
-psycho = 0.25                      # spec risk 1: held at 0.25 until phase 4
-episode_base = 0.05
+# Phase 5: psycho 0.25 -> 0.8 and episode_base 0.05 -> 0.035. Chrome here is one or two T1 implants
+# (load 0.08-0.16), so sanity never fell under 0.25 and no seed had an episode; at 0.8 the three-implant
+# bodies roll (3-8 episodes a run on seeds 42-44, band 1-8). episode_hours 3 -> 6: at 3 the law reached
+# a berserker on 0 of 3 seeds.
+psycho = 0.8
+episode_base = 0.035
 stim_episode_mult = 2.0
-episode_hours = 3
+episode_hours = 6
 berserk_kill_mult = 4.0
 psycho_kill = 0.3
 therapy_price = 60
@@ -831,7 +859,7 @@ abduct_base = 0.002
 p_rip_kill = 0.5
 loot_reach = 16                    # plan D35: the Loot goal's reach (Manhattan tiles)
 treat_below = 1.0                  # plan D34 (phase 3): Treat is considered below this sanity (a whole body has nothing to treat)
-gang_chrome_floor = 300            # plan D44 (phase 3): a gang's Arms purchase floor (gang_buy_floor 600 is never reached before dealing)
+gang_chrome_floor = 80             # plan D44 (phase 3): a gang's Arms purchase floor; phase 5: 300 -> 80 (one T1 at 60 and a margin)
 
 [vehicles]
 # M13 § 2 (plan phase 2, D19-D27).
@@ -840,7 +868,7 @@ max_steps_per_tick = 4             # D19: a Full driver's steps per executor cal
 flyer_ticks_per_tile = 0.3         # D22: Chebyshev tiles, over walls
 mult = { motorcycle = [0.25, 0.6, 0.8], car = [0.2, 1.0, 1.0], truck = [0.3, 1.0, 0.6] }   # road, ground, farmland
 haul = { motorcycle = 1, car = 2, truck = 6, flyer = 1 }
-crash_per_tile = 0.00004
+crash_per_tile = 0.0001            # phase 5: 0.00004 -> 0.0001 (crash deaths 0 on seed 42; 1-6 a run now, band 1-10)
 speed = { motorcycle = 1.5, car = 1.0, truck = 1.2, flyer = 0.0 }
 chase_mult = 6.0
 crash_radius = 2
@@ -851,19 +879,22 @@ crash_wear = 30
 crash_litter = 24
 steal_vehicle_cost = 10.0
 fence_frac = 0.2
-vehicle_theft_base = 0.004
+vehicle_theft_base = 0.0015        # phase 5: 0.004 -> 0.0015 (with ~180 bikes parked at Block doors)
 garage_mult = 0.2
-bikes_max_share = 0.5
-steal_reach = 40                   # plan D26
+bikes_max_share = 0.25             # phase 5: 0.5 -> 0.25, so a gang chops more of what it steals (Chopped after a theft on most seeds)
+# Phase 5: 40 -> 6. With ~180 street-parked bikes every lawless adult had one in reach and seeds ran
+# 59-306 vehicle thefts (band 10-80); steal_vehicle_cost 20-40 changed nothing (the Earn theft family
+# is not chosen by cost), so it stays 10.
+steal_reach = 6                    # plan D26
 
 [shop]
 # M13 § 6 (plan D17, D18, D43, D44).
 shop_cooldown_days = 7
 commute_ref = 60
 shop_flat = 0.02
-gang_buy_floor = 600
+gang_buy_floor = 150               # phase 5: 600 -> 150 (gangs never held 600; a bike is 60)
 garage_rent = 1
-max_burden = 0.5                   # plan D43: upkeep + finance per day <= this share of daily income
+max_burden = 0.7                   # plan D43: upkeep + finance per day <= this share of daily income; phase 5: 0.5 -> 0.7 (now of net income)
 stat_shop_min = 0.3                # plan D43
 seed_owner_coins = 300             # plan D18
 # plan D44: Food trucks (and, phase 2 deviation, Security Office cars) under any order but Hunker.
@@ -871,6 +902,14 @@ seed_owner_coins = 300             # plan D18
 # so with false no Farm had a truck by day 30 (the plan's fallback, recorded both ways).
 fleet_any_order = true
 tech_demand_ref = 1.0              # plan D17
+# Phase 5: the D43 burden test reads income net of a day's meal at the mean price. On gross income
+# 209 of 215 implants were financed by wage earners who could not service them (181 bricked, 160
+# repossessions on seed 42 against the 3-40 band).
+burden_meals = 1.0
+# Phase 5: a corp under any order but Hunker buys its exec a flyer (owned by the corp, kept by the exec)
+# with this many times the price in its treasury and books, plus the fleet reserve. The acceptance's
+# "Spire execs flying over the Sump": no agent ever holds a flyer's price.
+exec_flyer_cash_mult = 1.0
 
 [stims]
 # M13 § 4 (plan phase 4, D38-D40): the gangs' cook, dealing, addiction, withdrawal, Detox, legal stims.
@@ -886,7 +925,7 @@ stim_restock_floor = 300
 stim_energy = 0.4
 stim_mood = 0.3
 stim_hours = 6
-addict_per_use = 0.06
+addict_per_use = 0.1               # phase 5: 0.06 -> 0.1 (hooked fell to 0.7-1.4 % once chrome and bikes took the coins; band 1-8 %)
 addiction_decay = 0.02
 hooked = 0.5
 withdrawal_hours = 24
@@ -902,7 +941,10 @@ p_stat_detox = 0.05
 # Phase 4 calibration: the plan's 0.0 left a non-addict's GetHigh at ~0.006 (craving 0 reads 0.04 on
 # Logistic{8,0.4}), far under Idle's 0.05, so nobody took a first dose and seed 42 dealt 0 in 120 days;
 # at 0.06 an idle body with the coins and a dealer on shift tries one (dealt 1,614, hooked 1.4 % on day 120).
-get_high_flat = 0.06
+# Phase 5: 0.06 -> 0.08, chosen with deal_price kept at the plan's 5 on seeds 42-47 against the M12
+# gate's bands (riots by the six-seed mean, gang control, landlords, sanitation) and the M13 gate's:
+# deal_price 6 put the riot mean at 4.17, deal_price 5 with 0.06 left dealing at 19.5 % of gang income.
+get_high_flat = 0.08
 
 [robots]
 # M13 § 5 (plan phase 4, D41, D42).
