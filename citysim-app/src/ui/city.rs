@@ -39,7 +39,7 @@ pub struct CityState {
     /// M13 D48: the Assets levers.
     pub stims_legal: bool,
     pub impound: bool,
-    pub asset_tax: [f32; 8],
+    pub asset_tax: [f32; citysim::AssetClass::ALL.len()],
     pub synced: bool,
 }
 
@@ -65,7 +65,7 @@ impl Default for CityState {
             sanitation_weight: [1.0; citysim::MAX_DISTRICTS],
             stims_legal: false,
             impound: true,
-            asset_tax: [0.0; 8],
+            asset_tax: [0.0; citysim::AssetClass::ALL.len()],
             synced: false,
         }
     }

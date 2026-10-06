@@ -444,6 +444,9 @@ fn plan(ui: &mut Ui, world: &World, b: &Brain) {
             }
             ExecState::Use { kind, until, .. } => format!("Use {kind:?} {} left", until.saturating_sub(world.tick)),
             ExecState::Wait { until } => format!("Wait {}", until.saturating_sub(world.tick)),
+            ExecState::JackedIn { run, since } => {
+                format!("Jacked in (run {run}) for {} ticks", world.tick.saturating_sub(*since))
+            }
             ExecState::Fly { target, arrive_tick, .. } => {
                 format!("Flying to {} lands in {}", target.tile, arrive_tick.saturating_sub(world.tick))
             }

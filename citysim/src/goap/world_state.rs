@@ -81,11 +81,17 @@ pub enum LocationKey {
     /// M13 D38/D40: the plan's target building as a source of Stims (a Bar
     /// with a dealer on shift, or a legal Market with stock).
     StimSource,
+    /// M14 V5: the chair of the agent's `RunOrder` (a Home, a Hideout, a
+    /// Lab, a Bar or Hotel terminal).
+    Chair,
+    /// M14 V29: a Lab of the Tech corp that buys Data (the plan's bound
+    /// step target, else the nearest).
+    DataBuyer,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 25] = [
+    pub const GOTO: [LocationKey; 27] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -111,6 +117,8 @@ impl LocationKey {
         LocationKey::Clinic,
         LocationKey::Victim,
         LocationKey::StimSource,
+        LocationKey::Chair,
+        LocationKey::DataBuyer,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -189,6 +197,10 @@ pub enum Key {
     HasStims,
     /// M13 D39: a dose within `stim_hours`.
     High,
+    /// M14 V29: a run was made (never observed true; `JackIn` sets it).
+    RunDone,
+    /// M14 V29: the carried deck holds Data.
+    HasData,
 }
 
 /// Partial goal state: at most 3 listed keys.
@@ -238,6 +250,8 @@ pub struct WorldState {
     pub stripped: bool,
     pub has_stims: bool,
     pub high: bool,
+    pub run_done: bool,
+    pub has_data: bool,
 }
 
 impl WorldState {
@@ -287,6 +301,8 @@ impl WorldState {
             stripped,
             has_stims,
             high,
+            run_done,
+            has_data,
         } = *self;
         let flags = [
             hunger_satisfied,
@@ -326,6 +342,8 @@ impl WorldState {
             stripped,
             has_stims,
             high,
+            run_done,
+            has_data,
         ];
         let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
         for (i, f) in flags.into_iter().enumerate() {
@@ -378,6 +396,8 @@ impl WorldState {
             Key::Stripped => self.stripped,
             Key::HasStims => self.has_stims,
             Key::High => self.high,
+            Key::RunDone => self.run_done,
+            Key::HasData => self.has_data,
         }
     }
 
@@ -498,7 +518,15 @@ impl WorldState {
                         .gang_of(agent)
                         .is_some_and(|g| crate::systems::chrome::gang_harvest_target(world, g) == Some(t)))
         });
+        // M14 V5/V29: under the Hack goal, inside the order's chair, or
+        // inside a Data buyer's Lab.
+        let hacking = goal == Some(crate::components::GoalKind::Hack);
+        let here = pos.and_then(|p| p.building);
+        let at_chair = hacking && here.is_some() && world.run_orders.get(&agent).map(|o| o.chair) == here;
+        let at_buyer = hacking && !at_chair && here.is_some_and(|b| crate::systems::tech::is_data_buyer_lab(world, b));
         let at = match pos.and_then(|p| p.building) {
+            _ if at_chair => LocationKey::Chair,
+            _ if at_buyer => LocationKey::DataBuyer,
             _ if at_suspect => LocationKey::SuspectTile,
             _ if at_victim => LocationKey::Victim,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
@@ -625,6 +653,8 @@ impl WorldState {
             stripped: false,
             has_stims: inv.stims > 0,
             high: crate::systems::stims::is_high(world, agent),
+            run_done: false,
+            has_data: crate::systems::virt::deck_data(world, agent) > 0,
         }
     }
 }

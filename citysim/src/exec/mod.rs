@@ -77,6 +77,13 @@ pub enum ExecState {
         depart: Tick,
         arrive_tick: Tick,
     },
+    /// M14 V12: seated at a chair while a run (an event chain of dice
+    /// contests on the Virt plane) is in `World::runs`; `Done` once it is
+    /// gone. Needs decay as Wait's; the body is no witness.
+    JackedIn {
+        run: crate::virt::RunId,
+        since: Tick,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -140,6 +147,10 @@ fn follow_bearer(world: &mut World, bearer: EntityId, corpse: EntityId) {
 
 /// An emigrant walks to the nearest map-edge Road and is gone on arrival.
 fn emigrate_step(world: &mut World, id: EntityId) {
+    // M14 V12: a runner leaving the city drops out of its run first.
+    if world.runner_of.contains_key(&id) {
+        crate::systems::virt::dump(world, id, "left the city");
+    }
     let tick = world.tick;
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let lod = brain.lod;
@@ -204,6 +215,19 @@ fn step_agent(world: &mut World, id: EntityId) {
     if between_moves {
         return;
     }
+    // M14 V12: a seated runner waits on its run (no plan timeout: the run's
+    // own steps bound it); the run's end moves the plan on.
+    if let ExecState::JackedIn { run, .. } = brain.exec {
+        if world.runs.contains_key(&run) {
+            return;
+        }
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.plan_step = b.plan_step.saturating_add(1);
+            b.exec = ExecState::Idle;
+            b.action_until = tick;
+        }
+        return;
+    }
     let Some(step) = brain.current_step().cloned() else {
         // Plan finished: a success resets the consecutive-failure count.
         if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -217,8 +241,10 @@ fn step_agent(world: &mut World, id: EntityId) {
     let state = brain.exec.clone();
     let started = brain.plan.as_ref().map_or(tick, |p| p.started_tick);
 
+    // M14 V12: a runner dazed by a lost contest sits it out in the chair.
+    let dazed = brain.dazed_until.is_some_and(|t| t > tick);
     // Replan trigger (d): a plan that has run too long.
-    if tick.saturating_sub(started) > world.config.brain.plan_timeout_ticks {
+    if tick.saturating_sub(started) > world.config.brain.plan_timeout_ticks && !dazed {
         world.fail_plan(id);
         return;
     }
@@ -251,13 +277,27 @@ fn step_agent(world: &mut World, id: EntityId) {
                 StepResult::Running
             }
         }
+        // M14 V11: a `JackIn` begun before its order's `not_before` waits
+        // in place, then retries the step (not the next one).
+        ExecState::Wait { until }
+            if step.action == ActionKind::JackIn && !dazed && world.run_orders.contains_key(&id) =>
+        {
+            if tick >= until {
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = ExecState::Idle;
+                }
+            }
+            StepResult::Running
+        }
         ExecState::Wait { until } => {
-            if tick >= until || routine::must_leave_for_work(world, id) {
+            if tick >= until || (!dazed && routine::must_leave_for_work(world, id)) {
                 StepResult::Done
             } else {
                 StepResult::Running
             }
         }
+        // Handled above (the run's end moves the plan on).
+        ExecState::JackedIn { .. } => StepResult::Running,
     };
 
     match result {
@@ -350,6 +390,10 @@ impl World {
         };
         if let Some((kind, started)) = running {
             actions::on_abort(self, id, kind, started);
+        }
+        // M14 V12: a body pulled out of the chair dumps its run.
+        if self.runner_of.contains_key(&id) {
+            crate::systems::virt::dump(self, id, "pulled from the chair");
         }
         // M13 D20: a vehicle on the road parks where its driver stands.
         crate::systems::vehicles::end_trip(self, id, false);
@@ -445,6 +489,17 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
         }
         None => {
             let kind = step.action;
+            // M14 V11: a `JackIn` begun before its order's `not_before` waits
+            // in the chair (then the step is retried).
+            if kind == ActionKind::JackIn {
+                let due = world.run_orders.get(&id).map(|o| o.not_before).filter(|&t| t > tick);
+                if let Some(until) = due {
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        b.exec = ExecState::Wait { until };
+                    }
+                    return StepResult::Running;
+                }
+            }
             // Replan trigger (b): re-observe; a false precondition fails the step.
             let ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
             let ws = crate::goap::WorldState::observe(world, id, ctx.target);
@@ -759,6 +814,12 @@ impl World {
             LocationKey::StimSource => target.filter(|&t| self.has::<Building>(t)),
             // M13 D36: a quarry inside a building is reached through its door.
             LocationKey::Victim => target.and_then(|s| self.comp::<Position>(s)).and_then(|p| p.building),
+            // M14 V5: the chair of the agent's run order.
+            LocationKey::Chair => self.run_orders.get(&agent).map(|o| o.chair),
+            // M14 V29: the bound Lab of a Data buyer, else the nearest one.
+            LocationKey::DataBuyer => target
+                .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::Lab))
+                .or_else(|| crate::systems::tech::data_buyer_lab(self, agent)),
             // M13 D26: a vehicle is reached on the street outside its door.
             LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget | LocationKey::Vehicle => None,
         }

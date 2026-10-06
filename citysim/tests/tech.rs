@@ -196,7 +196,8 @@ fn test_seller_gate_and_street_tier() {
         })
         .expect("an unchromed adult");
     w.comp_mut::<Wallet>(buyer).expect("wallet").coins = 100_000;
-    let a = assets::buy(&mut w, buyer, alley, &ShopPick { kind: arms, tier: 2, used: None }).expect("bought");
+    let a = assets::buy(&mut w, buyer, alley, &ShopPick { kind: arms, tier: 2, used: None, upgrade: false })
+        .expect("bought");
     assert_eq!(w.comp::<citysim::Asset>(a).expect("asset").maker, Some(z), "made by the street tier's corp");
     tech::set_tier(&mut w, z, Track::Chrome, 1);
     assert!(w.corps().iter().all(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.tech.tier_of(Track::Chrome) < 2)));
@@ -208,7 +209,7 @@ fn test_seller_gate_and_street_tier() {
         &mut w,
         buyer,
         corp_clinic,
-        &ShopPick { kind: AssetKind::Implant(Slot::Legs), tier: 2, used: None }
+        &ShopPick { kind: AssetKind::Implant(Slot::Legs), tier: 2, used: None, upgrade: false }
     )
     .is_err());
 }
@@ -235,7 +236,7 @@ fn test_maker_tier_loss_lowers_kit() {
         })
         .expect("an unchromed adult");
     w.comp_mut::<Wallet>(agent).expect("wallet").coins = 100_000;
-    let pick = ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 3, used: None };
+    let pick = ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 3, used: None, upgrade: false };
     let a = assets::buy(&mut w, agent, clinic, &pick).expect("bought");
     assert_eq!(w.comp::<citysim::Asset>(a).expect("asset").maker, Some(z));
     let k3 = w.comp::<Kit>(agent).expect("kit").clone();

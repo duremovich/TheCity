@@ -543,6 +543,8 @@ fn agent_colour(world: &World, id: citysim::EntityId) -> Color {
             None => A::Wander,
         },
         E::Idle | E::Wait { .. } => A::Wander,
+        // M14 V12: seated at a chair, coloured as its JackIn.
+        E::JackedIn { .. } => A::JackIn,
     };
     hex(match kind {
         A::FarmWork

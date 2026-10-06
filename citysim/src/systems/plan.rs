@@ -187,6 +187,22 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         install(world, id, plan);
         return 0;
     }
+    // M14 V29: the Hack chain is built directly (`[GoTo(Chair)] -> JackIn`,
+    // the freelance `RunOrder` written at bind; or `[GoTo(DataBuyer)] ->
+    // SellData` for a deck still holding Data), never searched.
+    if goal == GoalKind::Hack {
+        match crate::systems::virt::hack_plan(world, id) {
+            Some(plan) => {
+                let n = plan.steps.len();
+                install(world, id, plan);
+                return n;
+            }
+            None => {
+                world.cool_goal(id, goal);
+                return 0;
+            }
+        }
+    }
     let Some(goal_state) = goap::goal_state(goal) else {
         world.goal_failed(id, goal);
         return 0;

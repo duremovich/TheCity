@@ -120,8 +120,9 @@ fn assign(world: &mut World) {
         }
         // A wanted agent counts as a story step: a reported thief must stay on
         // the map for the arrest path to reach them.
-        let story =
-            brain.current_step().is_some_and(|s| story_relevant(s.action)) || crate::systems::law::wanted(world, id);
+        let story = brain.current_step().is_some_and(|s| story_relevant(s.action))
+            || crate::systems::law::wanted(world, id)
+            || world.runner_of.contains_key(&id);
         let class = class_with(world, id, &harvest);
         // M11: a fresh lawless evictee (D36: so the spiral's first link,
         // JoinGang, can be planned) and an agent able to found (D25) get a
@@ -217,8 +218,13 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId]) -> i32 {
     let private = guard && crate::systems::law::is_private_guard(world, id);
     // Pinned tops the ladder, then the watch (3), then gang members (2):
     // at the Coarse cap the farthest gang member falls first, not a guard.
+    // M14 V13: a runner seated or holding a run order (above the watch).
+    let runner =
+        !world.run_orders.is_empty() && (world.runner_of.contains_key(&id) || world.run_orders.contains_key(&id));
     if brain.pinned {
         5
+    } else if runner {
+        4
     } else if guard && !private {
         3
     } else if gang || private {
@@ -239,6 +245,10 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         return;
     }
     if lod == Lod::Statistical {
+        // M14 V13: a body jacked in is never Statistical.
+        if world.runner_of.contains_key(&id) {
+            return;
+        }
         if brain.plan.is_some() {
             let goal = brain.plan_goal();
             world.abort_plan(id);

@@ -38,6 +38,9 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Treat => vec![(Key::Treated, true)],
         GoalKind::Loot => vec![(Key::Stripped, true)],
         GoalKind::GetHigh => vec![(Key::High, true)],
+        // M14 V29: a run made (the sell branch's `(HasData, false)` is
+        // built with its plan in `systems::plan`).
+        GoalKind::Hack => vec![(Key::RunDone, true)],
         GoalKind::Idle => return None,
     })
 }

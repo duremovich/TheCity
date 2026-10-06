@@ -384,6 +384,8 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         (E::Immigration, 0) => row(LifeKind::Immigrated),
         (E::Burial, 1) => row(LifeKind::Buried),
         (E::Witness, 0) => row(LifeKind::Witnessed),
+        // M14 V14: `Flatlined [runner, owner or NONE]`.
+        (E::Flatlined, 0) => row(LifeKind::Flatlined),
         _ => None,
     }
 }

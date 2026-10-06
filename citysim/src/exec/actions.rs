@@ -79,6 +79,10 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::PickUp | ActionKind::BuyStims => 5,
         ActionKind::Deal | ActionKind::Detox => 240,
         ActionKind::UseStim => 2,
+        // M14 Actions table.
+        ActionKind::JackIn => 2,
+        ActionKind::SellData => 10,
+        ActionKind::UpgradeDeck => 30,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -210,6 +214,28 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::UseStim => inv.is_some_and(|i| i.stims > 0),
         // M13 D39: inside an open Clinic.
         ActionKind::Detox => in_open_clinic(world, id),
+        // M14 V11: inside the order's chair, the order due, a deck in hand.
+        ActionKind::JackIn => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            world.config.virt.enabled
+                && world.run_orders.get(&id).is_some_and(|o| Some(o.chair) == here && world.tick >= o.not_before)
+                && world.comp::<crate::components::Kit>(id).is_some_and(|k| k.deck.is_some())
+                && !world.runner_of.contains_key(&id)
+        }
+        // M14 V29: inside a Data buyer's Lab with Data on the deck.
+        ActionKind::SellData => {
+            world
+                .comp::<Position>(id)
+                .and_then(|p| p.building)
+                .is_some_and(|b| crate::systems::tech::is_data_buyer_lab(world, b) && !world.is_closed(b))
+                && crate::systems::virt::deck_data(world, id) > 0
+        }
+        // M14 V36: inside an open deck seller with an upgrade picked.
+        ActionKind::UpgradeDeck => {
+            world.comp::<Position>(id).and_then(|p| p.building).is_some_and(|b| {
+                Some(b) == target && crate::systems::assets::seller_open(world, b) && !world.is_closed(b)
+            }) && world.comp::<Brain>(id).and_then(|b| b.shop_pick.as_ref()).is_some_and(|p| p.upgrade)
+        }
         // M13 D35: beside a body this agent may strip.
         ActionKind::Strip => target.is_some_and(|c| {
             crate::systems::chrome::may_loot(world, id, c) && crate::systems::law::near(world, id, c, 1)
@@ -329,6 +355,9 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
                 }
             }
         }
+        // M14 V5: a public terminal's fee to the Bar's or Hotel's owner
+        // (`Flow::Terminal`, taxed), at the start (money moves at start).
+        ActionKind::JackIn => crate::systems::virt::pay_terminal(world, id),
         // M13 D38: the dealer is registered at the Bar for the shift.
         ActionKind::Deal => {
             if let Some(bar) = target {
@@ -753,6 +782,38 @@ pub fn on_complete(
                 (Some(seller), Some(pick)) if target == Some(seller) => {
                     match crate::systems::chrome::buy_install(world, id, seller, &pick) {
                         Ok(_) => StepResult::Done,
+                        Err(_) => StepResult::Failed(FailReason::PreconditionLost),
+                    }
+                }
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        // M14 V10/V12: the run starts; the body sits `JackedIn` until it ends.
+        ActionKind::JackIn => match crate::systems::virt::start_run(world, id) {
+            Ok(run) => {
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = crate::exec::ExecState::JackedIn { run, since: now };
+                }
+                StepResult::Running
+            }
+            Err(reason) => StepResult::Failed(reason),
+        },
+        // M14 V17/V29: the deck's Data to the buyer here.
+        ActionKind::SellData => {
+            if crate::systems::tech::sell_deck_data(world, id) > 0 {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::StockGone)
+            }
+        }
+        // M14 V36: the carried deck one tier up.
+        ActionKind::UpgradeDeck => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            let pick = world.comp_mut::<Brain>(id).and_then(|b| b.shop_pick.take());
+            match (here, pick) {
+                (Some(seller), Some(pick)) if target == Some(seller) && pick.upgrade => {
+                    match crate::systems::assets::upgrade_deck(world, id, seller, &pick) {
+                        Ok(()) => StepResult::Done,
                         Err(_) => StepResult::Failed(FailReason::PreconditionLost),
                     }
                 }

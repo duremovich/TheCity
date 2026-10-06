@@ -63,6 +63,9 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::Abduction => 0.9,
         // M13 D38.
         Crime::Dealing => 0.5,
+        // M14 V18.
+        Crime::Intrusion => 0.4,
+        Crime::DataTheft => 0.6,
     }
 }
 
@@ -106,7 +109,13 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         Crime::Theft | Crime::GrandTheft => crate::systems::litter::deposit_near(world, tile, actor_building, 6, 0),
         Crime::Extortion | Crime::Assault => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
         // A crash's litter is the crash's (`vehicles::crash`).
-        Crime::Murder | Crime::Vagrancy | Crime::Manslaughter | Crime::Dealing => {}
+        // M14 V18: a run leaves nothing on the street.
+        Crime::Murder
+        | Crime::Vagrancy
+        | Crime::Manslaughter
+        | Crime::Dealing
+        | Crime::Intrusion
+        | Crime::DataTheft => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -125,6 +134,8 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         .into_iter()
         .filter(|_| !detained)
         .filter(|&w| w != actor)
+        // M14 V12: a body jacked in sees nothing.
+        .filter(|w| world.runner_of.is_empty() || !world.runner_of.contains_key(w))
         .filter(|&w| {
             // M13 D32: a witness with Eyes sees `Kit.sight` tiles further.
             let reach = r + world.comp::<Kit>(w).map_or(0, |k| u32::from(k.sight));
@@ -161,9 +172,13 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     if let Some(v) = victim.filter(|&v| !crate::systems::robots::is_robot(world, v)) {
         let kind = match crime {
             Crime::Assault | Crime::Murder | Crime::Manslaughter | Crime::Abduction => MemoryKind::Fought,
-            Crime::Theft | Crime::Extortion | Crime::Vagrancy | Crime::GrandTheft | Crime::Dealing => {
-                MemoryKind::WasRobbed
-            }
+            Crime::Theft
+            | Crime::Extortion
+            | Crime::Vagrancy
+            | Crime::GrandTheft
+            | Crime::Dealing
+            | Crime::Intrusion
+            | Crime::DataTheft => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -293,6 +308,9 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         Crime::Manslaughter => ext.manslaughter,
         Crime::Abduction => ext.abduction,
         Crime::Dealing => ext.dealing,
+        // M14 V18.
+        Crime::Intrusion => ext.intrusion,
+        Crime::DataTheft => ext.data_theft,
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;
@@ -308,10 +326,15 @@ pub fn fighting(world: &World, id: EntityId) -> f32 {
         Some(s) => s.fighting,
         None => crate::systems::robots::fighting(world, id).unwrap_or(0.2),
     };
-    match world.comp::<Kit>(id).map(|k| k.fighting) {
+    let f = match world.comp::<Kit>(id).map(|k| k.fighting) {
         Some(k) if k != 0.0 => base + k,
         _ => base,
+    };
+    // M14 V12: a body jacked in fights at `jacked_fight_mult` (a branch).
+    if !world.runner_of.is_empty() && world.runner_of.contains_key(&id) {
+        return f * world.config.virt.jacked_fight_mult;
     }
+    f
 }
 
 pub fn courage(world: &World, id: EntityId) -> f32 {
@@ -362,6 +385,17 @@ pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult
 /// wrecked (`assets::wreck`, Parts at the door), never killed; a robot that
 /// kills passes its owner as the killer (no crime is raised for it).
 pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
+    let out = fight_inner(world, a, b, mods);
+    // M14 V12: a body jacked in and attacked is dumped from its run.
+    if !world.runner_of.is_empty() {
+        for x in [a, b] {
+            crate::systems::virt::dump(world, x, "attacked in the chair");
+        }
+    }
+    out
+}
+
+fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
     if crate::systems::robots::is_robot(world, a) || crate::systems::robots::is_robot(world, b) {
         return resolve_robot_fight(world, a, b, mods);
     }
@@ -489,7 +523,9 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     // M13 D33: a berserker always fights the cuffs, and the guard fights to
     // kill (`psycho_kill`, × `crush_kill_mult` under a Crush).
     let berserk = crate::systems::chrome::in_episode(world, suspect);
-    if courage > 0.7 || berserk {
+    // M14 V12: a runner dazed by a lost contest cannot contest the cuffs.
+    let dazed = world.comp::<Brain>(suspect).and_then(|b| b.dazed_until).is_some_and(|t| t > world.tick);
+    if (courage > 0.7 || berserk) && !dazed {
         let mods = if berserk {
             FightMods { kill_mult: crate::systems::chrome::arrest_kill_mult(world, suspect), a_bonus: 0.0 }
         } else {
@@ -523,6 +559,18 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
             crate::systems::law_brain::push_shock(world, LawShock::GuardBeaten);
             return false;
         }
+    }
+    // M14 V15: cuffed in the chair its newest trace named (the gate's
+    // "arrest at the chair"; `jail_suspect` counts the rest).
+    let at_chair = world.last_trace.get(&suspect).map(|&(chair, _)| chair).is_some_and(|chair| {
+        world.comp::<Position>(suspect).and_then(|p| p.building) == Some(chair)
+            && world
+                .crime_reports()
+                .iter()
+                .any(|r| !r.resolved && r.suspect == suspect && matches!(r.crime, Crime::Intrusion | Crime::DataTheft))
+    });
+    if at_chair {
+        world.stats.current.virt.hack_arrests_chair += 1;
     }
     world.abort_plan(suspect);
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
@@ -587,6 +635,17 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     }
     // M13 D38: the arrest confiscates the suspect's Stims (destroyed).
     crate::systems::stims::confiscate(world, suspect);
+    // M14 V12/V18: a runner is dumped; the deck's Data is confiscated.
+    crate::systems::virt::dump(world, suspect, "arrested");
+    crate::systems::virt::confiscate_data(world, suspect);
+    // M14 V15: an arrest on a run's report.
+    let hacked = world
+        .crime_reports()
+        .iter()
+        .any(|r| !r.resolved && r.suspect == suspect && matches!(r.crime, Crime::Intrusion | Crime::DataTheft));
+    if hacked {
+        world.stats.current.virt.hack_arrests += 1;
+    }
     // M13 D33: jailing ends an episode still running.
     crate::systems::chrome::ended_by_law(world, suspect, "jailed");
     // Sentenced while in cuffs (a second escort, a player or god jailing):

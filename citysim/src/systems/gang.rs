@@ -917,6 +917,8 @@ fn daily_economy(world: &mut World) {
         crate::systems::vehicles::gang_bikes(world, gang);
         // M13 D44 (phase 3): then an Arms implant for the strongest member.
         crate::systems::chrome::gang_arms(world, gang);
+        // M14 V30: then a deck for the best hacker.
+        crate::systems::virt::gang_deck(world, gang);
     }
 }
 

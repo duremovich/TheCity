@@ -837,3 +837,69 @@ fn test_rent_paid_is_a_seven_day_window() {
     assert_eq!(h.rent_paid_7d(16), 0, "nothing paid in the last week");
     assert!(h.rent_paid_log.len() <= 7);
 }
+
+/// M14 phase 2 (plan 2.8): a Ledger run's take (`Flow::Hack`, untaxed) and a
+/// Data sale (`Flow::Data`, taxed) in the day conserve coins. A run is a
+/// seeded dice contest between fictional agents; here every node of the
+/// victim corp is unguarded, so the run is sure.
+#[test]
+fn test_ledger_hack_conserves_money() {
+    use citysim::systems::{assets, lod, tech, virt};
+    use citysim::virt::{NodeId, Purpose, RunMode, RunOrder, RunOutcome, RunWhy, Track};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY);
+    let before = ownership::total_coins(&w);
+    let corp = w.corps().into_iter().max_by_key(|&c| (w.purse(Some(c)), c)).expect("a corp");
+    for i in 0..w.virt.nodes.len() {
+        if w.virt.nodes[i].alive && w.virt.nodes[i].owner == Some(corp) {
+            if let Some(p) = virt::profile_mut(&mut w, NodeId(i as u16)) {
+                p.ice = 0;
+            }
+        }
+    }
+    virt::bump_epoch(&mut w);
+    let ledger = virt::ledger_of(&w, corp).expect("a Ledger");
+    let a = w
+        .citizens()
+        .into_iter()
+        .find(|&a| {
+            w.has::<Brain>(a)
+                && citysim::systems::demography::is_adult(&w, a)
+                && w.comp::<citysim::Kit>(a).is_some_and(|k| k.deck.is_none())
+                && w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.corp_of_building(e)) != Some(corp)
+        })
+        .expect("an adult");
+    lod::set_lod(&mut w, a, Lod::Coarse);
+    assets::grant(&mut w, a, citysim::AssetKind::Deck, 2).expect("deck");
+    w.comp_mut::<citysim::Skills>(a).expect("skills").hacking = 0.5;
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    let now = w.tick;
+    w.run_orders.insert(
+        a,
+        RunOrder {
+            patron: None,
+            purpose: Purpose::Ledger,
+            target: ledger,
+            chair: bar,
+            not_before: now,
+            expires: now + TICKS_PER_DAY,
+            why: RunWhy::God,
+            mode: RunMode::Loud,
+        },
+    );
+    let purse = w.purse(Some(corp));
+    virt::start_run(&mut w, a).expect("run");
+    while let Some(&(t, _)) = w.run_queue.first() {
+        w.tick = w.tick.max(t);
+        virt::run(&mut w);
+    }
+    assert_eq!(w.run_log.back().and_then(|r| r.outcome), Some(RunOutcome::Success));
+    assert_eq!(w.stats.current.virt.ledger_hacks, 1);
+    let taken = purse - w.purse(Some(corp));
+    assert!(taken > 0 && w.stats.current.virt.flow_hack == taken, "took {taken}");
+    let deck = w.comp::<citysim::Kit>(a).and_then(|k| k.deck).expect("deck");
+    w.comp_mut::<citysim::Asset>(deck).expect("deck").data[Track::Deck.index()] = 100;
+    assert!(tech::sell_data(&mut w, a, Track::Deck, 100, None) > 0, "a Data sale");
+    assert!(w.stats.current.virt.flow_data > 0);
+    assert_eq!(ownership::total_coins(&w), before, "a Ledger hack and a Data sale move coins, never make them");
+}

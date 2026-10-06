@@ -113,8 +113,11 @@ pub fn think_with_offer(
     let mut scored: Vec<GoalScore> = Vec::new();
     let mut shop = None;
     for goal in goals::GOAL_ORDER {
-        // A cooled goal scores 0 (skipped).
-        if brain.cooldowns.get(&goal).is_some_and(|&until| until > tick) {
+        // A cooled goal scores 0 (skipped). M14 V29: Hack's sale of a deck's
+        // Data is not cooled by the run that took it.
+        if brain.cooldowns.get(&goal).is_some_and(|&until| until > tick)
+            && !(goal == GoalKind::Hack && crate::systems::virt::deck_data(world, id) > 0)
+        {
             continue;
         }
         // M13 D43: Shop's gate and considerations are its one offer.
@@ -123,6 +126,14 @@ pub fn think_with_offer(
             let cs = o.considerations.clone();
             shop = Some(o);
             if let Some(s) = score_goal(goal, cs, current, hysteresis, world.config.shop.shop_flat) {
+                scored.push(s);
+            }
+            continue;
+        }
+        // M14 V29: Hack's gate and considerations are its one offer.
+        if goal == GoalKind::Hack {
+            let Some(o) = crate::systems::virt::hack_choice(world, id) else { continue };
+            if let Some(s) = score_goal(goal, o.considerations, current, hysteresis, world.config.hack.hack_flat) {
                 scored.push(s);
             }
             continue;

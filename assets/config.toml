@@ -161,7 +161,7 @@ sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
 # M13 D47: the crimes appended after Vagrancy (GrandTheft and Manslaughter land in phase 2).
-sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10 }
+sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5 }   # M14 V18: intrusion, data_theft
 # jail capacity is buildings.jail.capacity
 fight_death_p = 0.03
 stat_theft_caught_p = 0.25
@@ -783,13 +783,19 @@ enabled = true                     # off() = false: no pass, no Kit term, no Bod
 # running a truck by day 30: 5-6 -> 8); flyer 6000 -> 2000 (nobody but a corp ever holds it; the exec
 # flyer, [shop] exec_flyer_cash_mult: at 3000 the 42-44 runs bought 0-2); implant T1 150 -> 60 (cash only
 # below, so the cash buyers must exist; adults chromed 13-17 %, members 40-60 %).
-price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800] }
+price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200] }
+# M14 phase 2 (outside the plan's knob list, the M13 price precedent): deck [400, 1500, 5000] ->
+# [60, 120, 600]. Hackers' wallets on seed 42 (hacking >= 0.4): median 19 / 8 / 5 coins on days 5 / 20 / 40,
+# p90 45 / 21 / 18, so at 400 no agent bought a deck in 120 days (decks owned: 2, both corp fleet). At
+# [60, 1500, 5000] agents bought 43 tier-1 decks by day 60 but never upgraded, and a tier-1 deck tops out
+# at p_success 0.20 against the seeded ICE-2 Labs (the Contest table), so no run cleared min_route_p. At
+# 120 a tier-2 upgrade costs 42 coins (upgrade_frac 0.7): the Contest table's tier-2 runners exist.
 # Phase 5: motorcycle upkeep 1 -> 0 and wear 1 -> 0. Unpaid upkeep wore a bike 3 a day and wear 1 a
 # day wrecked every bike bought in the first week around day 100 (64 "worn out" on seed 42): no owner
 # could pay a repair. Crashes (crash_wear) still wreck them.
-upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0] }
-wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0 }
-parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10 }
+upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4] }
+wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1 }
+parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10, deck = 4, camera = 2 }
 parts_price = 15
 import_frac = 0.6
 part_credit = 20                   # import coins one Part from a seller's stock replaces
@@ -976,13 +982,21 @@ dump_sanity = 0.1
 hop_ticks = [8, 5, 3]              # per deck tier
 contest_ticks = 5
 hop_eps = 0.01
-min_route_p = 0.25                 # no free choice targets a node below this (V11: orders may)
+# M14 phase 2 calibration (plan knob): 0.25 -> 0.20. At 0.25 only tier-2 decks cleared it: seed 42 ran 81
+# runs at 70 % success, 5 fried, no chair arrest. At 0.20 the best tier-1 hackers (hacking >= 0.79) try a
+# Lab too; with deck_shop_min 0.5, seed 42 ran 68 runs at 49 % success, 8 fried, 1 flatlined, 5 arrests at
+# the chair.
+min_route_p = 0.20                 # no free choice targets a node below this (V11: orders may)
 public_links_tier = 1
 access_links_tier = 1
 trunk_links_tier = 2
 
 [decks]
-deck_shop_min = 0.4
+# M14 phase 2 calibration (plan knob): 0.4 -> 0.5. At 0.4 decks (60 coins) crowded chrome out of the
+# dole budget: installs on seeds 42-44 fell to 530-580 (runs off: 574-627), episodes to 7/1/6 and episodes
+# ended by the law to 2/0/0 (the M13 gate's majority bullet failed). At 0.5: 517-668 installs, by law 1/1/2,
+# and seed 42 still owns 34 decks on day 60 and 45 on day 120.
+deck_shop_min = 0.5
 hack_seed_scale = 0.8              # V35: Skills.hacking = scale x U(0,1)^3, keyed draw
 hack_drift = 0.01
 upgrade_frac = 0.7
@@ -1015,6 +1029,8 @@ daze_ticks = 30
 act_ticks = { data = 30, ledger = 30, door = 10, robot = 15, camera = 5 }
 door_strip_cap = 0.5               # plan V32
 door_cooldown_days = 3             # plan V32
+trace_decay_per_hop = 0.35         # plan V65 (spec addendum): attribution confidence (1 - decay)^hops
+trace_floor = 0.15                 # plan V65: below it a trace names nobody
 
 [data]
 data_per_shift = 3.0
@@ -1060,6 +1076,16 @@ wipe_min = 0.6
 stream_min = 0.2
 order_score = 0.9                  # plan V11
 stat_hack_min = 0.5                # plan V38
+# Plan V66 (spec addendum, quiet and loud): a quiet run takes half the units (or coins), is traced at half
+# the odds and raises no alarm; a loud one takes 1.5x and is traced at twice the odds (capped at 1).
+# The addendum's contest shift (quiet -0.5, loud +1.0) is carried at 0 so the contest table holds.
+quiet_take = 0.5
+loud_take = 1.5
+quiet_trace = 0.5
+loud_trace = 2.0
+quiet_att = 0.0
+loud_att = 0.0
+loud_min = 0.3                     # a freelancer runs loud at (1 - lawfulness) x courage >= this
 
 [db]
 db_cap = 32

@@ -44,6 +44,8 @@ const REACT_DAYS: u64 = 7;
 struct Day {
     day: u64,
     orders: Vec<Order>,
+    /// Each gang's leader at the day's end (the decapitation's succession).
+    leaders: Vec<Option<EntityId>>,
     members: Vec<usize>,
     treasury: Vec<i64>,
     territory: Vec<usize>,
@@ -187,6 +189,7 @@ fn run_daily(
         for &g in &gangs {
             let gg = w.comp::<Gang>(g).expect("gangs are never despawned");
             d.orders.push(gg.order);
+            d.leaders.push(gg.leader);
             d.members.push(gg.members.len());
             d.treasury.push(gg.treasury);
             d.territory.push(gg.territory.len());
@@ -469,7 +472,42 @@ fn god_decapitate_gang() {
         eprintln!("killing {} (leader of gang 0)", w.name_of(l));
         w.push_command(PlayerCommand::KillAgent(l));
     });
-    r.assert_reacted();
+    // M14 phase 2: the deck shop shifts seed 42's gang 0 into a Squat held
+    // across day 45; a leader kill does not knock a held order, and the 7-day
+    // generic window misses the succession. A decapitation's direct
+    // consequences are gang-internal, so they are asserted here (14 days,
+    // each in the shocked run and not in the control).
+    let c = control();
+    r.print(Some(c));
+    let (from, to) = (SHOCK_DAY, SHOCK_DAY + 14);
+    let before = |run: &Run| run.days.iter().find(|d| d.day == SHOCK_DAY - 1).and_then(|d| d.leaders[0]);
+    let succeeded = |run: &Run| {
+        let old = before(run);
+        run.window(from, to).any(|d| d.leaders[0].is_some() && d.leaders[0] != old)
+    };
+    let splits = |run: &Run| {
+        run.story.iter().filter(|(t, k, _)| *k == EventKind::Split && (from..to).contains(&(t / TICKS_PER_DAY))).count()
+    };
+    let shaken = |run: &Run| run.window(from, to).any(|d| matches!(d.orders[0], Order::Retaliate | Order::LieLow));
+    let mut fired = Vec::new();
+    if succeeded(&r) && !succeeded(c) {
+        fired.push("a new leader (succession)".to_string());
+    }
+    if splits(&r) > splits(c) {
+        fired.push(format!("Split events {} (control {})", splits(&r), splits(c)));
+    }
+    if shaken(&r) && !shaken(c) {
+        fired.push("a Retaliate or LieLow order".to_string());
+    }
+    if let Some(d) = r.window(from, to).zip(c.window(from, to)).find(|(d, x)| d.orders[0] != x.orders[0]) {
+        fired.push(format!("g0 order on day {}: {:?} (control {:?})", d.0.day, d.0.orders[0], d.1.orders[0]));
+    }
+    let generic = r.reactions(c, 14);
+    if !generic.is_empty() {
+        fired.push(format!("generic: {generic:?}"));
+    }
+    eprintln!("decapitation reactions within 14 days: {fired:?}");
+    assert!(!fired.is_empty(), "god_decapitate_gang: nothing reacted within 14 days of the shock");
 }
 
 /// Jail every member of gang 0 for 60 days. Does the rival expand into its

@@ -423,11 +423,15 @@ pub struct SentenceDaysExt {
     pub dealing: u32,
     pub abduction: u32,
     pub manslaughter: u32,
+    /// M14 V18: the spec's 48 h.
+    pub intrusion: u32,
+    /// M14 V18: the spec's 120 h.
+    pub data_theft: u32,
 }
 
 impl Default for SentenceDaysExt {
     fn default() -> Self {
-        SentenceDaysExt { grand_theft: 6, dealing: 5, abduction: 20, manslaughter: 10 }
+        SentenceDaysExt { grand_theft: 6, dealing: 5, abduction: 20, manslaughter: 10, intrusion: 2, data_theft: 5 }
     }
 }
 
@@ -1626,6 +1630,12 @@ pub struct PerKind<T: Default> {
     /// Plan D52 (M14's Virt bridge).
     #[serde(default)]
     pub bridge: T,
+    /// M14 V36.
+    #[serde(default)]
+    pub deck: T,
+    /// M14 V28.
+    #[serde(default)]
+    pub camera: T,
 }
 
 impl AssetsCfg {
@@ -1650,6 +1660,8 @@ impl<T: Default> PerKind<T> {
             AssetClass::Robot => &self.robot,
             AssetClass::Pack => &self.pack,
             AssetClass::Bridge => &self.bridge,
+            AssetClass::Deck => &self.deck,
+            AssetClass::Camera => &self.camera,
         }
     }
 }
@@ -1737,6 +1749,8 @@ impl AssetsCfg {
                 robot: vec![800, 2000, 5000],
                 pack: vec![30, 80],
                 bridge: vec![200, 600, 1800],
+                deck: vec![400, 1500, 5000],
+                camera: vec![120, 400, 1200],
             },
             upkeep: PerKind {
                 motorcycle: vec![1],
@@ -1747,8 +1761,21 @@ impl AssetsCfg {
                 robot: vec![4, 8, 15],
                 pack: vec![0, 0],
                 bridge: vec![0, 0, 0],
+                deck: vec![1, 3, 8],
+                camera: vec![1, 2, 4],
             },
-            wear: PerKind { motorcycle: 1, car: 1, truck: 1, flyer: 1, implant: 0, robot: 1, pack: 0, bridge: 0 },
+            wear: PerKind {
+                motorcycle: 1,
+                car: 1,
+                truck: 1,
+                flyer: 1,
+                implant: 0,
+                robot: 1,
+                pack: 0,
+                bridge: 0,
+                deck: 0,
+                camera: 1,
+            },
             parts_per: PerKind {
                 motorcycle: 4,
                 car: 8,
@@ -1758,6 +1785,8 @@ impl AssetsCfg {
                 robot: 10,
                 pack: 0,
                 bridge: 0,
+                deck: 4,
+                camera: 2,
             },
             parts_price: 15,
             import_frac: 0.6,
@@ -2369,6 +2398,12 @@ pub struct IceCfg {
     pub act_ticks: ActTicks,
     pub door_strip_cap: f32,
     pub door_cooldown_days: u32,
+    /// M14 addendum (plan V65): a trace's attribution confidence after `h`
+    /// hops between the portal and the target is `(1 - decay)^h`.
+    pub trace_decay_per_hop: f32,
+    /// Plan V65: below this confidence a trace names nobody (no Sighting,
+    /// no report, no `last_seen`, the shock names no one).
+    pub trace_floor: f32,
 }
 
 impl Default for IceCfg {
@@ -2412,7 +2447,14 @@ impl IceCfg {
             act_ticks: ActTicks { data: 30, ledger: 30, door: 10, robot: 15, camera: 5 },
             door_strip_cap: 0.5,
             door_cooldown_days: 3,
+            trace_decay_per_hop: 0.35,
+            trace_floor: 0.15,
         }
+    }
+
+    /// `fry_base[ice]`, `p_fry_kill[ice]`, `trace_p[ice]` (0 past the table).
+    pub fn at(v: &[f32], ice: u8) -> f32 {
+        v.get(usize::from(ice)).copied().unwrap_or(0.0)
     }
 
     /// `ice_upkeep[tier]` (0 past the table).
@@ -2495,6 +2537,8 @@ impl TechRequires {
             AssetClass::Robot => &self.robot,
             AssetClass::Pack => &self.pack,
             AssetClass::Bridge => &self.bridge,
+            AssetClass::Deck => &self.deck,
+            AssetClass::Camera => &self.camera,
         }
     }
 }
@@ -2617,6 +2661,20 @@ pub struct HackCfg {
     pub stream_min: f32,
     pub order_score: f32,
     pub stat_hack_min: f32,
+    /// Plan V66 (addendum's quiet and loud): a quiet run takes `quiet_take`
+    /// of the units (or coins) and is traced at `quiet_trace` of the odds,
+    /// and raises no alarm; a loud one `loud_take` and `loud_trace` (the
+    /// trace capped at 1). `*_att` add to the runner's `att` (0: the
+    /// contest table holds in both modes).
+    pub quiet_take: f32,
+    pub loud_take: f32,
+    pub quiet_trace: f32,
+    pub loud_trace: f32,
+    pub quiet_att: f32,
+    pub loud_att: f32,
+    /// Plan V66: a freelancer runs loud when `(1 - lawfulness) x courage`
+    /// reaches this.
+    pub loud_min: f32,
 }
 
 impl Default for HackCfg {
@@ -2641,6 +2699,13 @@ impl HackCfg {
             stream_min: 0.2,
             order_score: 0.9,
             stat_hack_min: 0.5,
+            quiet_take: 0.5,
+            loud_take: 1.5,
+            quiet_trace: 0.5,
+            loud_trace: 2.0,
+            quiet_att: 0.0,
+            loud_att: 0.0,
+            loud_min: 0.3,
         }
     }
 }

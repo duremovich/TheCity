@@ -276,15 +276,23 @@ fn test_install_replaces_slot_with_buyback() {
     let c = open_clinic(&mut w, doc);
     let owner = w.owner_of(c);
     set_coins(&mut w, buyer, 2000);
-    let t1 =
-        chrome::buy_install(&mut w, buyer, c, &ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 1, used: None })
-            .expect("T1");
+    let t1 = chrome::buy_install(
+        &mut w,
+        buyer,
+        c,
+        &ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 1, used: None, upgrade: false },
+    )
+    .expect("T1");
     assert_eq!(asset(&w, t1).loc, AssetLoc::Installed(buyer));
     assert_eq!(coins(&w, buyer), 2000 - 150);
     let value = asset(&w, t1).value;
-    let t2 =
-        chrome::buy_install(&mut w, buyer, c, &ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 2, used: None })
-            .expect("T2");
+    let t2 = chrome::buy_install(
+        &mut w,
+        buyer,
+        c,
+        &ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 2, used: None, upgrade: false },
+    )
+    .expect("T2");
     let back = (0.4 * value as f32).round() as i64;
     assert_eq!(coins(&w, buyer), 2000 - 150 - 500 + back, "the T1 bought back at 0.4 x value");
     let x = asset(&w, t1);

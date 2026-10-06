@@ -107,10 +107,17 @@ pub enum ActionKind {
     UseStim,
     /// M13 D39: at a Clinic, pay for Detox (addiction x `detox_mult`).
     Detox,
+    /// M14 V11/V12: at the order's chair, start the run (a chain of dice
+    /// contests on the Virt plane) and sit `JackedIn` until it ends.
+    JackIn,
+    /// M14 V17/V29: at a Data buyer's Lab, sell the deck's Data.
+    SellData,
+    /// M14 V36: at a deck seller, raise the carried deck one tier.
+    UpgradeDeck,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 79] = [
+pub const PLANNABLE: [ActionKind; 84] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -142,6 +149,9 @@ pub const PLANNABLE: [ActionKind; 79] = [
     ActionKind::GoTo(LocationKey::Victim),
     // M13 D38/D40.
     ActionKind::GoTo(LocationKey::StimSource),
+    // M14 V5/V29.
+    ActionKind::GoTo(LocationKey::Chair),
+    ActionKind::GoTo(LocationKey::DataBuyer),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -196,6 +206,9 @@ pub const PLANNABLE: [ActionKind; 79] = [
     ActionKind::BuyStims,
     ActionKind::UseStim,
     ActionKind::Detox,
+    ActionKind::JackIn,
+    ActionKind::SellData,
+    ActionKind::UpgradeDeck,
 ];
 
 impl ActionKind {
@@ -289,6 +302,9 @@ impl ActionKind {
                 | ActionKind::BuyStims
                 | ActionKind::UseStim
                 | ActionKind::Detox
+                | ActionKind::JackIn
+                | ActionKind::SellData
+                | ActionKind::UpgradeDeck
         )
     }
 }
@@ -452,6 +468,12 @@ pub struct PlanCtx {
     /// M13 D39: in withdrawal, `withdrawal_steal_bonus` off a theft's cost
     /// (0 otherwise: a branch).
     pub withdrawal_bonus: f32,
+    /// M14 V11: the agent holds a `RunOrder` and a deck.
+    pub run_order: bool,
+    /// M14 V29: the carried deck holds Data.
+    pub has_data: bool,
+    /// M14 V36: the shop pick is an `UpgradeDeck`.
+    pub shop_upgrade: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -609,6 +631,8 @@ impl PlanCtx {
             });
         // M13 D38-D40: dealing, buying and Detox.
         let stims_on = world.config.assets.enabled;
+        // M14: every Virt input reads false with the plane off.
+        let hack_on = world.config.virt.enabled;
         let gang_hideout = world.gang_of(agent).and_then(|g| world.hideout_of(g));
         let dealer = stims_on
             && wants(&[GoalKind::GangWork])
@@ -661,9 +685,22 @@ impl PlanCtx {
             // M13 D29: the bound seller (a Garage, a Market for a pack).
             // M13 D38: a dealer's deal Bar too.
             if target.and_then(|t| world.comp::<Building>(t)).is_some_and(|b| {
-                matches!(b.kind, BuildingKind::Garage | BuildingKind::Clinic | BuildingKind::Market | BuildingKind::Bar)
+                matches!(
+                    b.kind,
+                    BuildingKind::Garage
+                        | BuildingKind::Clinic
+                        | BuildingKind::Market
+                        | BuildingKind::Bar
+                        // M14 V24: a deck bought at a Security Office.
+                        | BuildingKind::SecurityOffice
+                )
             }) {
                 add(LocationKey::Seller, target);
+            }
+            // M14 V5/V29: the run order's chair and a Data buyer, under Hack only.
+            if hack_on && wants(&[GoalKind::Hack]) {
+                add(LocationKey::Chair, world.run_orders.get(&agent).map(|o| o.chair));
+                add(LocationKey::DataBuyer, crate::systems::tech::data_buyer_lab(world, agent));
             }
             // M13 D38/D40: the bound Stims source.
             if stim_source {
@@ -695,6 +732,8 @@ impl PlanCtx {
             .map_or((0, false), |b| (b.stock_food, !b.occupants.is_empty()));
 
         let in_gang = world.has::<GangMember>(agent);
+        let shop_upgrade =
+            world.comp::<crate::components::Brain>(agent).and_then(|b| b.shop_pick.as_ref()).is_some_and(|p| p.upgrade);
         let hideout_sacked = world
             .gang_of(agent)
             .and_then(|g| world.comp::<crate::components::Gang>(g))
@@ -859,6 +898,11 @@ impl PlanCtx {
             detox_affordable: detox_pick
                 && target_clinic.is_some_and(|c| coins_now >= crate::systems::stims::detox_price(world, c)),
             withdrawal_bonus,
+            run_order: hack_on
+                && world.run_orders.contains_key(&agent)
+                && world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.deck.is_some()),
+            has_data: hack_on && crate::systems::virt::deck_data(world, agent) > 0,
+            shop_upgrade,
             dist,
         }
     }
@@ -915,6 +959,8 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::Stripped => ws.stripped = value,
         K::HasStims => ws.has_stims = value,
         K::High => ws.high = value,
+        K::RunDone => ws.run_done = value,
+        K::HasData => ws.has_data = value,
     }
 }
 
@@ -945,6 +991,10 @@ impl ActionKind {
             // M13 review: each M13 action is offered only to the goals it
             // serves (see `PlanCtx::goal`).
             ActionKind::BuyAsset | ActionKind::Install => ctx.adult && ctx.serves(&[GoalKind::Shop]),
+            // M14 V36: a deck upgrade is a Shop pick too.
+            ActionKind::UpgradeDeck => ctx.adult && ctx.serves(&[GoalKind::Shop]),
+            // M14 V11/V29: the Hack goal's chain.
+            ActionKind::JackIn | ActionKind::SellData => ctx.adult && ctx.serves(&[GoalKind::Hack]),
             ActionKind::StealVehicle => {
                 ctx.adult && ctx.lawfulness < 0.4 && !ctx.is(Role::Guard) && ctx.serves(&[GoalKind::Earn])
             }
@@ -1052,7 +1102,12 @@ impl ActionKind {
                     && ((ctx.in_gang && ws.carrying_stolen && ctx.can_fence)
                         || (ws.carrying_vehicle && ctx.can_fence_vehicle))
             }
-            ActionKind::BuyAsset => at(LocationKey::Seller) && ctx.shop_pick && !ctx.install_ready && !ws.bought,
+            ActionKind::BuyAsset => {
+                at(LocationKey::Seller) && ctx.shop_pick && !ctx.install_ready && !ctx.shop_upgrade && !ws.bought
+            }
+            ActionKind::UpgradeDeck => at(LocationKey::Seller) && ctx.shop_pick && ctx.shop_upgrade && !ws.bought,
+            ActionKind::JackIn => at(LocationKey::Chair) && ctx.run_order && !ws.run_done,
+            ActionKind::SellData => at(LocationKey::DataBuyer) && ws.has_data,
             // M13 D34: a gang implant is installed where it is bought: at the seller.
             ActionKind::Install => at(LocationKey::Seller) && ctx.install_ready && !ws.bought,
             ActionKind::Therapy => at(LocationKey::Clinic) && ctx.therapy_affordable && !ws.treated,
@@ -1127,6 +1182,9 @@ impl ActionKind {
             ActionKind::SplitLoot => ctx.has_loot && !ctx.hideout_sacked,
             ActionKind::Fence => ((ctx.in_gang && ctx.can_fence) || ctx.can_fence_vehicle) && !ctx.hideout_sacked,
             ActionKind::BuyAsset => ctx.shop_pick && ctx.dist.contains_key(&LocationKey::Seller),
+            ActionKind::UpgradeDeck => ctx.shop_pick && ctx.shop_upgrade && ctx.dist.contains_key(&LocationKey::Seller),
+            ActionKind::JackIn => ctx.run_order && ctx.dist.contains_key(&LocationKey::Chair),
+            ActionKind::SellData => ctx.has_data && ctx.dist.contains_key(&LocationKey::DataBuyer),
             ActionKind::Install => ctx.install_ready && ctx.dist.contains_key(&LocationKey::Seller),
             ActionKind::Therapy => ctx.therapy_affordable && ctx.dist.contains_key(&LocationKey::Clinic),
             ActionKind::Uninstall => ctx.has_implant && ctx.dist.contains_key(&LocationKey::Clinic),
@@ -1332,6 +1390,18 @@ impl ActionKind {
                 n.has_savings = false;
             }
             ActionKind::UseStim => n.high = true,
+            ActionKind::JackIn => n.run_done = true,
+            ActionKind::SellData => {
+                n.has_data = false;
+                n.coin_bucket = 2;
+                n.has_coins = true;
+            }
+            ActionKind::UpgradeDeck => {
+                n.bought = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
             ActionKind::Detox => {
                 n.treated = true;
                 n.coin_bucket = n.coin_bucket.saturating_sub(1);
@@ -1426,6 +1496,10 @@ impl ActionKind {
             }
             ActionKind::UseStim => 1.0,
             ActionKind::Detox => 5.0,
+            // M14 Actions table: 3 + 3 x lawfulness for a freelancer.
+            ActionKind::JackIn => 3.0 + 3.0 * ctx.lawfulness,
+            ActionKind::SellData => 2.0,
+            ActionKind::UpgradeDeck => 6.0,
         };
         c.clamp(0.5, 60.0)
     }
@@ -1458,7 +1532,8 @@ impl ActionKind {
             | ActionKind::Abduct
             | ActionKind::Deal
             | ActionKind::GoTo(LocationKey::StimSource)
-            | ActionKind::BuyStims => ctx.target,
+            | ActionKind::BuyStims
+            | ActionKind::UpgradeDeck => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

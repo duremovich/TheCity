@@ -27,6 +27,11 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
     }) {
         return true;
     }
+    // M14 V12: a seated runner stays in the chair until its run ends, and a
+    // runner dazed by a lost contest until the daze passes.
+    if matches!(brain.exec, ExecState::JackedIn { .. }) || brain.dazed_until.is_some_and(|t| t > now) {
+        return true;
+    }
     match &brain.exec {
         // Think runs before exec in the tick: a step completing this very tick
         // keeps its completion effects (a shift's wage, a meal) instead of

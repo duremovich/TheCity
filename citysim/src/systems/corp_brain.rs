@@ -858,6 +858,8 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
         }
     }
     staff_up(world, corp);
+    // M14 V31 (phase 2): a fleet deck posted at each Lab without one.
+    crate::systems::virt::fleet_decks(world, corp);
 }
 
 fn squeeze(world: &mut World, corp: EntityId, n: Niche) {
