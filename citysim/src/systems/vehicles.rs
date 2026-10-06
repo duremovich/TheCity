@@ -297,6 +297,8 @@ pub fn begin_trip(world: &mut World, agent: EntityId, target: &GotoTarget) -> Op
 /// rolls the crash (D25).
 pub fn end_trip(world: &mut World, agent: EntityId, arrived: bool) {
     let Some(trip) = world.trips.remove(&agent) else { return };
+    // A god `Chase` pin lasts one trip, arrived or not.
+    let pinned = world.chase_pins.remove(&agent);
     let v = trip.vehicle;
     let Some(x) = asset(world, v).cloned() else {
         assets::rekit(world, agent);
@@ -316,13 +318,17 @@ pub fn end_trip(world: &mut World, agent: EntityId, arrived: bool) {
     if let Some(k) = x.keeper {
         let corp_fleet = x.owner.is_some_and(|o| world.has::<Corp>(o));
         let workplace = world.comp::<Job>(k).and_then(|j| j.employer);
+        // M13 ph5: a corp car parked away from its owner's buildings for 2+
+        // days should be recalled (softer form of the abort-time keeper
+        // clear; the hard form shifted seed 42's regime, see the phase 2 fix
+        // commit).
         if corp_fleet && workplace == Some(park) {
             assets::set_keeper(world, v, None);
         }
     }
     let door = door_of(world, park).unwrap_or(trip.from);
     if arrived && x.kind.is_road_vehicle() {
-        crash_roll(world, agent, &trip, door, x.kind);
+        crash_roll(world, agent, &trip, door, x.kind, pinned);
     }
     let repo_days = world.config.assets.repo_days;
     let flagged =
@@ -386,11 +392,10 @@ pub fn p_dodge(world: &World, id: EntityId) -> f32 {
 
 /// D25 at an arrival: `p = crash_per_tile × road_tiles × speed × (1 +
 /// litter) × chase × (1 − 0.5 × min(1, reflex))` on the world stream.
-fn crash_roll(world: &mut World, driver: EntityId, trip: &Trip, door: TilePos, kind: AssetKind) {
+fn crash_roll(world: &mut World, driver: EntityId, trip: &Trip, door: TilePos, kind: AssetKind, pinned: bool) {
     let cfg = world.config.vehicles.clone();
     let speed = *cfg.speed.get(kind);
     if speed <= 0.0 || cfg.crash_per_tile <= 0.0 {
-        world.chase_pins.remove(&driver);
         return;
     }
     let road = if trip.steps > 0 {
@@ -401,8 +406,9 @@ fn crash_roll(world: &mut World, driver: EntityId, trip: &Trip, door: TilePos, k
     let tile = trip.mid.unwrap_or_else(|| midpoint(trip.from, door));
     let litter =
         if crate::systems::litter::enabled(world) { world.district(world.district_of(tile)).litter } else { 0.0 };
-    let pinned = world.chase_pins.remove(&driver);
-    let chased = trip.chase || pinned || chase_now(world, driver);
+    // The chase is the trip's, decided when it started (fix round: not the
+    // driver's plan at arrival), or a god pin.
+    let chased = trip.chase || pinned;
     let chase = if chased { cfg.chase_mult } else { 1.0 };
     let p = cfg.crash_per_tile * road * speed * (1.0 + litter) * chase * (1.0 - 0.5 * reflex(world, driver).min(1.0));
     if p <= 0.0 {
@@ -412,7 +418,9 @@ fn crash_roll(world: &mut World, driver: EntityId, trip: &Trip, door: TilePos, k
     if roll >= p {
         return;
     }
-    let murder = chased && fleeing(world, driver);
+    // A kill on a chase is Murder unless the driver was the law giving
+    // chase (a guard on an Arrest); else Manslaughter.
+    let murder = chased && !crate::systems::law::is_guard(world, driver);
     crash(world, driver, trip.vehicle, tile, murder);
 }
 
@@ -729,9 +737,20 @@ pub fn fleet_recall(world: &mut World) {
         let AssetLoc::Parked(at) = x.loc else { continue };
         let Some(owner) = x.owner else { continue };
         if world.has::<Corp>(owner) {
+            // Fix round: a keeper who is dead, jailed or no longer works for
+            // the owner keeps nothing.
+            let stale = x.keeper.is_some_and(|k| {
+                !crate::systems::law::living(world, k)
+                    || world.has::<crate::components::Sentence>(k)
+                    || world.comp::<Job>(k).and_then(|j| j.employer).and_then(|e| world.owner_of(e)) != Some(owner)
+            });
+            if stale {
+                assets::set_keeper(world, v, None);
+            }
+            let keeper = if stale { None } else { x.keeper };
             let (kind, home_kind) = match x.kind {
                 AssetKind::Truck => (x.kind, BuildingKind::Farm),
-                AssetKind::Car if x.keeper.is_none() => (x.kind, BuildingKind::SecurityOffice),
+                AssetKind::Car if keeper.is_none() => (x.kind, BuildingKind::SecurityOffice),
                 _ => continue,
             };
             let homes = corp_buildings(world, owner, home_kind);
@@ -763,6 +782,33 @@ pub fn fleet_recall(world: &mut World) {
 // ---------------------------------------------------------------------------
 // Theft, the fence, the chop (plan D26, D27)
 // ---------------------------------------------------------------------------
+
+/// Fix round: a member leaving its gang hands back the gang vehicles it
+/// keeps: a trip in one ends where it stands, then it goes home to the
+/// Hideout, keeper cleared.
+pub fn return_gang_vehicles(world: &mut World, agent: EntityId, gang: EntityId) {
+    let kept: Vec<EntityId> = world
+        .vehicles
+        .iter()
+        .copied()
+        .filter(|&v| asset(world, v).is_some_and(|x| x.keeper == Some(agent) && x.owner == Some(gang)))
+        .collect();
+    if kept.is_empty() {
+        return;
+    }
+    if world.trips.get(&agent).is_some_and(|t| kept.contains(&t.vehicle)) {
+        end_trip(world, agent, false);
+    }
+    let home = world.hideout_of(gang);
+    for v in kept {
+        assets::set_keeper(world, v, None);
+        if let Some(h) = home {
+            if asset(world, v).is_some_and(|x| matches!(x.loc, AssetLoc::Parked(_))) {
+                assets::set_loc(world, v, AssetLoc::Parked(h));
+            }
+        }
+    }
+}
 
 /// The agent's own vehicle, or its gang's, or one it keeps.
 fn own_or_gang(world: &World, agent: EntityId, x: &crate::components::Asset) -> bool {

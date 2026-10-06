@@ -756,3 +756,145 @@ fn test_abandoned_stolen_vehicle_is_recovered() {
     assert_eq!((x.loc, x.stolen, x.keeper, x.owner), (AssetLoc::Parked(home), false, None, Some(owner)));
     w.check_indices().expect("indices in step");
 }
+
+// ---------------------------------------------------------------------------
+// Phase 2 fix round
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_jailed_driver_office_car_goes_home() {
+    let mut w = city();
+    let office = w.buildings_of_kind(BuildingKind::SecurityOffice)[0];
+    let corp = w.owner_of(office).expect("a Security corp");
+    let guard = adults(&w).into_iter().find(|&a| !w.has::<Job>(a) && w.gang_of(a).is_none()).expect("jobless");
+    demography::hire(&mut w, guard, office, Role::Guard);
+    let car = assets::spawn_asset(&mut w, AssetKind::Car, 1, Some(corp), AssetLoc::Parked(office), 800);
+    let run = road_run(&w, 12);
+    on_street(&mut w, guard, run[3]);
+    assets::set_keeper(&mut w, car, Some(guard));
+    drive(&mut w, guard, car, run[12]);
+    path_plan(&mut w, guard, &run[4..]);
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let until = w.tick + 5 * citysim::TICKS_PER_DAY;
+    citysim::systems::law::sentence(&mut w, guard, citysim::Crime::Assault, until, jail);
+    let x = asset(&w, car);
+    assert!(matches!(x.loc, AssetLoc::Parked(b) if b != office), "left where the trip ended");
+    assert_eq!(x.keeper, Some(guard), "still kept by the jailed guard");
+    // The next midnight's pass clears the stale keeper (jailed) and recalls it.
+    w.tick = citysim::TICKS_PER_DAY;
+    assets::run(&mut w);
+    let x = asset(&w, car);
+    assert_eq!((x.loc, x.keeper), (AssetLoc::Parked(office), None), "home within a day");
+    w.check_indices().expect("indices in step");
+}
+
+#[test]
+fn test_leaving_the_gang_hands_back_its_bike() {
+    let mut w = city();
+    let gang = w.gangs()[0];
+    let hideout = w.hideout_of(gang).expect("hideout");
+    let member = adults(&w).into_iter().find(|&a| w.gang_of(a).is_none() && !w.has::<Job>(a)).expect("recruit");
+    citysim::systems::gang::enlist(&mut w, member, gang);
+    let bike = assets::spawn_asset(&mut w, AssetKind::Motorcycle, 1, Some(gang), AssetLoc::Parked(hideout), 300);
+    assets::set_keeper(&mut w, bike, Some(member));
+    let run = road_run(&w, 8);
+    on_street(&mut w, member, run[2]);
+    drive(&mut w, member, bike, run[8]);
+    path_plan(&mut w, member, &run[3..]);
+    assert_eq!(w.comp::<Kit>(member).expect("kit").vehicle, Some(bike));
+    citysim::systems::gang::leave(&mut w, member, "test");
+    let x = asset(&w, bike);
+    assert_eq!((x.loc, x.keeper, x.owner), (AssetLoc::Parked(hideout), None, Some(gang)));
+    assert!(w.trips.is_empty());
+    assert_eq!(w.comp::<Kit>(member).expect("kit").vehicle, None, "no longer theirs to ride");
+    w.check_indices().expect("indices in step");
+}
+
+#[test]
+fn test_chase_pin_consumed_on_abort() {
+    let mut w = city();
+    let who = adults(&w)[31];
+    let car = assets::grant(&mut w, who, AssetKind::Car, 1).expect("car");
+    let run = road_run(&w, 8);
+    on_street(&mut w, who, run[1]);
+    w.chase_pins.insert(who);
+    drive(&mut w, who, car, run[8]);
+    path_plan(&mut w, who, &run[2..]);
+    w.abort_plan(who);
+    assert!(!w.chase_pins.contains(&who), "a pin lasts one trip, arrived or not");
+}
+
+#[test]
+fn test_thief_steals_drives_and_fences_end_to_end() {
+    let mut w = city();
+    let people = adults(&w);
+    let victim = people[40];
+    let car = assets::grant(&mut w, victim, AssetKind::Car, 1).expect("car");
+    let stand = vehicles::vehicle_stand(&w, car).expect("stand");
+    let thief = people
+        .iter()
+        .copied()
+        .find(|&a| a != victim && w.gang_of(a).is_none() && !w.has::<Job>(a))
+        .expect("a jobless non-member");
+    // A Road tile a few steps from the car's stand.
+    let start = (0..w.map.h().min(256))
+        .flat_map(|y| (0..w.map.w().min(256)).map(move |x| TilePos { x: x as u8, y: y as u8 }))
+        .filter(|&t| w.map.tile_at(t) == TileKind::Road && (4..=8).contains(&t.manhattan(stand)))
+        .min_by_key(|&t| (t.manhattan(stand), t.y, t.x))
+        .expect("a road near the car");
+    on_street(&mut w, thief, start);
+    w.comp_mut::<citysim::Personality>(thief).expect("p").lawfulness = 0.1;
+    w.comp_mut::<citysim::Skills>(thief).expect("s").stealth = 1.0;
+    let today = w.day();
+    w.comp_mut::<Brain>(thief).expect("b").last_dole_day = Some(today);
+    let (gang, hideout) = {
+        let h = citysim::systems::gang::hideout_for(&w, thief).expect("a Hideout");
+        (w.owner_of(h).expect("its gang"), h)
+    };
+    w.comp_mut::<citysim::Gang>(gang).expect("g").treasury = 5000;
+    // The who: a guard and a lawful agent may not steal.
+    let ctx = citysim::PlanCtx::build(&w, thief, Some(car));
+    assert!(ctx.vehicle_target && ActionKind::StealVehicle.allowed(&ctx));
+    let guard = w.guards()[0];
+    assert!(!ActionKind::StealVehicle.allowed(&citysim::PlanCtx::build(&w, guard, Some(car))));
+    let lawful = people.iter().copied().find(|&a| a != thief && a != victim).expect("someone");
+    w.comp_mut::<citysim::Personality>(lawful).expect("p").lawfulness = 0.4;
+    assert!(!ActionKind::StealVehicle.allowed(&citysim::PlanCtx::build(&w, lawful, Some(car))));
+    // Plan the Earn goal: the theft chain.
+    w.comp_mut::<Brain>(thief).expect("b").current_goal = Some(GoalKind::Earn);
+    plan::plan_for(&mut w, thief, GoalKind::Earn);
+    let steps: Vec<ActionKind> =
+        w.comp::<Brain>(thief).expect("b").plan.as_ref().expect("a plan").steps.iter().map(|s| s.action).collect();
+    assert_eq!(
+        steps,
+        [
+            ActionKind::GoTo(LocationKey::Vehicle),
+            ActionKind::StealVehicle,
+            ActionKind::GoTo(LocationKey::Hideout),
+            ActionKind::Fence
+        ],
+        "walk to the car, steal it, drive to the Hideout, fence"
+    );
+    let value = asset(&w, car).value;
+    let price = (w.config.vehicles.fence_frac * value as f32).round() as i64;
+    let (coins0, gang0) = (coins(&w, thief), w.purse(Some(gang)));
+    for _ in 0..3000 {
+        exec_tick(&mut w);
+        if w.comp::<Brain>(thief).expect("b").plan.is_none() {
+            break;
+        }
+    }
+    assert!(count(&w, EventKind::VehicleStolen) >= 1);
+    let robbed = w
+        .comp::<citysim::Memory>(victim)
+        .expect("memory")
+        .entries
+        .iter()
+        .any(|e| e.kind == citysim::MemoryKind::WasRobbed && e.subject == Some(thief));
+    assert!(robbed, "Grand Theft raised against the thief (the owner's WasRobbed)");
+    let x = asset(&w, car);
+    assert_eq!((x.owner, x.loc, x.stolen, x.keeper), (Some(gang), AssetLoc::Parked(hideout), true, None));
+    assert_eq!(coins(&w, thief) - coins0, price, "fence_frac x value");
+    assert_eq!(gang0 - w.purse(Some(gang)), price, "paid by the gang (Flow::Sale)");
+    w.check_indices().expect("indices in step");
+}

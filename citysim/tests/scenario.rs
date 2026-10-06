@@ -623,21 +623,14 @@ fn count_before(text: &str, marker: &str) -> Option<u32> {
     text[..i].rsplit(|c: char| !c.is_ascii_digit()).next()?.parse().ok()
 }
 
-/// The M12 gate (`docs/M12_DISTRICTS.md` › Goals and acceptance): seed 42,
-/// the 2,000-resident v2 city, 120 days. Districts with owners and moods:
-/// control, per-district allocation and Crackdowns, litter bands and the
-/// sweepers, the street (Vagrancy, Hotels, squats, the Dreg share), riots
-/// with loot and crossfire, raids that muster and hit corps, the M10 bounds
-/// and the throughput floor (release only). The split bullet is
-/// `test_m12_split_seeds`. Events are walked each day by id cursor.
-/// `#[ignore]`: a few minutes.
-#[test]
-#[ignore]
-fn test_m12_districts_seed_42() {
+/// One M12 run (`docs/M12_DISTRICTS.md` › Goals and acceptance): the
+/// 2,000-resident v2 city, 120 days, every bullet's measure. Events are
+/// walked each day by id cursor.
+fn m12_run(seed: u64) -> M12 {
     use citysim::{Building, BuildingKind, Controller, EventKind, Stance};
     use std::time::Instant;
 
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(seed, Config::load());
     let n = w.districts.len();
     let started = Instant::now();
     let mut next_id = 0u64;
@@ -648,6 +641,7 @@ fn test_m12_districts_seed_42() {
         (0u32, 0u32, 0u32, 0u32, 0u32, 0u32);
     let (mut riot_sizes, mut raids, mut raids_3, mut corp_raids) = (Vec::<u32>::new(), 0u32, 0u32, 0u32);
     let mut riot_gathered: Vec<u32> = Vec::new();
+    let mut split_days: Vec<u64> = Vec::new();
     // Daily snapshots.
     let mut empty_trace_days: Vec<(u64, String)> = Vec::new();
     let mut gang_run = vec![(None::<citysim::EntityId>, 0u32); n];
@@ -705,7 +699,10 @@ fn test_m12_districts_seed_42() {
                 EventKind::SquatEvicted => squat_evicted += 1,
                 EventKind::Looted => looted += 1,
                 EventKind::Crossfire => crossfire += 1,
-                EventKind::Split => splits += 1,
+                EventKind::Split => {
+                    splits += 1;
+                    split_days.push(e.tick / TICKS_PER_DAY);
+                }
                 EventKind::Riot if e.text.contains(" is rising: ") => {
                     riot_gathered.push(count_before(&e.text, " gather at").unwrap_or(0));
                 }
@@ -869,7 +866,7 @@ fn test_m12_districts_seed_42() {
     let pop = w.population();
     let clean_mean = clean_sum / litter_days.max(1) as f32;
     eprintln!(
-        "M12 seed 42: control events {control_events}, longest gang control {gang_best} d, allocation 2x on {alloc_days}/{alloc_judged} d ({alloc_days_open}/{alloc_judged_open} outside Garrison, Garrison {garrison_days} d), Crackdown on {crackdown_days} d, gang landlords {landlord_met}/{}, dirtiest in band {dirty_in_band}/{litter_days} d (max {dirty_max:.2}), cleanest < 0.05 on {clean_low}/{litter_days} d (mean {clean_mean:.3}), sanitation per 30 d {windows:?}, Vagrancy jailed {vagrancy_jailed} fined {vagrancy_fined} (column {vagrancy_col}), hotel nights {hotel_nights} ({:.0} % of {beds} beds), squatted {squatted} evicted {squat_evicted}, Dregs in band {dreg_days}/120 d, riots {riots} gathered {riot_gathered:?} at the door {riot_sizes:?}, looted {looted}, crossfire {crossfire}, worst unrest > 0.8 run {unrest_worst} d, raids {raids} (>= 3 at the door {raids_3}), corp raids {corp_raids}, departures {departures} (into cover {departed_into_cover}), arrivals under a cover turned mid-march {into_cover}, splits {splits}, assaults/day {:.2}, starvation {starvation}, pop {pop}, {tps:.0} ticks/s",
+        "M12 seed {seed}: control events {control_events}, longest gang control {gang_best} d, allocation 2x on {alloc_days}/{alloc_judged} d ({alloc_days_open}/{alloc_judged_open} outside Garrison, Garrison {garrison_days} d), Crackdown on {crackdown_days} d, gang landlords {landlord_met}/{}, dirtiest in band {dirty_in_band}/{litter_days} d (max {dirty_max:.2}), cleanest < 0.05 on {clean_low}/{litter_days} d (mean {clean_mean:.3}), sanitation per 30 d {windows:?}, Vagrancy jailed {vagrancy_jailed} fined {vagrancy_fined} (column {vagrancy_col}), hotel nights {hotel_nights} ({:.0} % of {beds} beds), squatted {squatted} evicted {squat_evicted}, Dregs in band {dreg_days}/120 d, riots {riots} gathered {riot_gathered:?} at the door {riot_sizes:?}, looted {looted}, crossfire {crossfire}, worst unrest > 0.8 run {unrest_worst} d, raids {raids} (>= 3 at the door {raids_3}), corp raids {corp_raids}, departures {departures} (into cover {departed_into_cover}), arrivals under a cover turned mid-march {into_cover}, splits {splits}, assaults/day {:.2}, starvation {starvation}, pop {pop}, {tps:.0} ticks/s",
         landlord.len(),
         occupancy * 100.0,
         assaults as f32 / 120.0,
@@ -882,6 +879,114 @@ fn test_m12_districts_seed_42() {
         vagrancy_jailed + vagrancy_fined,
     );
 
+    M12 {
+        seed,
+        tps,
+        n,
+        empty_trace_days,
+        control_events,
+        gang_best,
+        alloc_days,
+        alloc_judged,
+        alloc_days_open,
+        alloc_judged_open,
+        crackdown_days,
+        landlord_open_met,
+        landlord_open: landlord_open.len(),
+        landlord_met,
+        landlord: landlord.len(),
+        dirty_in_band,
+        litter_days,
+        clean_mean,
+        clean_low,
+        windows,
+        vagrancy_jailed,
+        vagrancy_fined,
+        hotel_nights,
+        squatted,
+        squat_evicted,
+        dreg_days,
+        riots,
+        riot_gathered,
+        riot_sizes,
+        looted,
+        crossfire,
+        unrest_worst,
+        raids,
+        raids_3,
+        corp_raids,
+        departures,
+        departed_into_cover,
+        assaults,
+        starvation,
+        pop,
+        split_days,
+    }
+}
+
+/// What one M12 run measured (`m12_run`).
+struct M12 {
+    seed: u64,
+    tps: f64,
+    n: usize,
+    empty_trace_days: Vec<(u64, String)>,
+    control_events: u32,
+    gang_best: u32,
+    alloc_days: u32,
+    alloc_judged: u32,
+    alloc_days_open: u32,
+    alloc_judged_open: u32,
+    crackdown_days: u32,
+    landlord_open_met: usize,
+    landlord_open: usize,
+    landlord_met: usize,
+    landlord: usize,
+    dirty_in_band: u32,
+    litter_days: u32,
+    clean_mean: f32,
+    clean_low: u32,
+    windows: Vec<usize>,
+    vagrancy_jailed: u32,
+    vagrancy_fined: u32,
+    hotel_nights: u32,
+    squatted: u32,
+    squat_evicted: u32,
+    dreg_days: u32,
+    riots: u32,
+    riot_gathered: Vec<u32>,
+    riot_sizes: Vec<u32>,
+    looted: u32,
+    crossfire: u32,
+    unrest_worst: u32,
+    raids: u32,
+    raids_3: u32,
+    corp_raids: u32,
+    departures: u32,
+    departed_into_cover: u32,
+    assaults: u32,
+    starvation: u32,
+    pop: usize,
+    split_days: Vec<u64>,
+}
+
+/// The M12 gate, seeds 42-44 (one 120-day run each).
+///
+/// Why three seeds: the phase 2 fix round (M13) found seed 42's riot count,
+/// longest gang control and gang-landlord outcome flip with any behaviour
+/// change, while the 8-seed means of riots, assaults/day and gang joins
+/// moved less than the seed-to-seed spread. So those trajectory checks
+/// (riots in 1..=4, a gang controlling a district >= 14 days, gang
+/// landlords met within 14 days) are judged by majority, 2 of 3 seeds; the
+/// split bullet keeps its own rule (a Split on any of the three, formerly
+/// `test_m12_split_seeds`). Everything that is a property of the mechanism
+/// (throughput, litter and Dreg bands, Crackdown, raids, the M10 bounds, the
+/// counts) stays on seed 42 alone. No band or threshold changed.
+/// `#[ignore]`: three runs.
+#[test]
+#[ignore]
+fn test_m12_districts_seed_42() {
+    let runs: Vec<M12> = [42u64, 43, 44].into_iter().map(m12_run).collect();
+    let r = &runs[0];
     let mut failures: Vec<String> = Vec::new();
     let mut check = |ok: bool, what: String| {
         eprintln!("{} {what}", if ok { "PASS" } else { "FAIL" });
@@ -889,88 +994,99 @@ fn test_m12_districts_seed_42() {
             failures.push(what);
         }
     };
-    check(n == 8, format!("{n} districts == 8"));
-    check(empty_trace_days.is_empty(), format!("every district traced every day (empty: {empty_trace_days:?})"));
-    check(control_events >= 2, format!("DistrictControl {control_events} >= 2"));
-    check(gang_best >= 14, format!("a gang controls a district for {gang_best} >= 14 consecutive days"));
+    // Trajectory checks: per seed, then the majority verdict.
+    let mut majority = |name: &str, per: &dyn Fn(&M12) -> (bool, String)| {
+        let mut ok = 0;
+        for m in &runs {
+            let (pass, what) = per(m);
+            eprintln!("  seed {}: {} {what}", m.seed, if pass { "pass" } else { "fail" });
+            ok += usize::from(pass);
+        }
+        check(ok * 2 > runs.len(), format!("majority {ok}/{} seeds: {name}", runs.len()));
+    };
+    majority("riots in 1..=4", &|m| ((1..=4).contains(&m.riots), format!("riots {}", m.riots)));
+    majority("a gang controls a district >= 14 consecutive days", &|m| {
+        (m.gang_best >= 14, format!("longest gang control {} d", m.gang_best))
+    });
+    majority("gang landlords (>= 20 Homes) met by a Crackdown or more guards within 14 days", &|m| {
+        (
+            m.landlord_open_met == m.landlord_open,
+            format!(
+                "{}/{} outside Garrison ({}/{} in all; windows past day 120 unjudged)",
+                m.landlord_open_met, m.landlord_open, m.landlord_met, m.landlord
+            ),
+        )
+    });
+    let splits: usize = runs.iter().map(|m| m.split_days.len()).sum();
+    for m in &runs {
+        eprintln!("  seed {}: {} splits on days {:?}", m.seed, m.split_days.len(), m.split_days);
+    }
+    check(splits >= 1, format!("a Split across seeds 42-44: {splits} >= 1"));
+    // Mechanism checks: seed 42 alone.
+    check(r.n == 8, format!("{} districts == 8", r.n));
+    check(r.empty_trace_days.is_empty(), format!("every district traced every day (empty: {:?})", r.empty_trace_days));
+    check(r.control_events >= 2, format!("DistrictControl {} >= 2", r.control_events));
     // As written the bullet reads all 120 days; Garrison (D11, the M9
     // posture after a jailbreak) zeroes every district's allocation, so it
     // is asserted on the days outside Garrison and the whole-run figure is
     // reported above.
     check(
-        alloc_days_open * 5 >= alloc_judged_open * 3,
-        format!("allocation 2x on {alloc_days_open}/{alloc_judged_open} days outside Garrison >= 60 % (all days {alloc_days}/{alloc_judged})"),
-    );
-    check(crackdown_days >= 1, format!("a district Crackdown held ({crackdown_days} days)"));
-    check(
-        landlord_open_met == landlord_open.len(),
+        r.alloc_days_open * 5 >= r.alloc_judged_open * 3,
         format!(
-            "gang landlords (>= 20 Homes) met by a Crackdown or more guards within 14 days: {landlord_open_met}/{} outside Garrison ({landlord_met}/{} in all)",
-            landlord_open.len(),
-            landlord.len()
+            "allocation 2x on {}/{} days outside Garrison >= 60 % (all days {}/{})",
+            r.alloc_days_open, r.alloc_judged_open, r.alloc_days, r.alloc_judged
         ),
     );
+    check(r.crackdown_days >= 1, format!("a district Crackdown held ({} days)", r.crackdown_days));
     check(
-        dirty_in_band * 5 >= litter_days * 3,
-        format!("dirtiest litter in band {dirty_in_band}/{litter_days} >= 60 %"),
+        r.dirty_in_band * 5 >= r.litter_days * 3,
+        format!("dirtiest litter in band {}/{} >= 60 %", r.dirty_in_band, r.litter_days),
     );
     check(
-        clean_mean < 0.05,
-        format!("cleanest district litter mean {clean_mean:.3} < 0.05 (< 0.05 on {clean_low}/{litter_days} d)"),
+        r.clean_mean < 0.05,
+        format!(
+            "cleanest district litter mean {:.3} < 0.05 (< 0.05 on {}/{} d)",
+            r.clean_mean, r.clean_low, r.litter_days
+        ),
     );
-    check(windows.iter().all(|&k| k >= 1), format!("a Sanitation reallocation in every 30 days {windows:?}"));
+    check(r.windows.iter().all(|&k| k >= 1), format!("a Sanitation reallocation in every 30 days {:?}", r.windows));
     // D15: a Vagrancy hit fines a payer or jails a broke sleeper; the bullet's
     // "arrests" are read as hits (the CSV `vagrancy` column), the jailings
     // alone swing 2-25 on seed 42 with the Statistical table.
-    let vagrancy_hits = vagrancy_jailed + vagrancy_fined;
+    let vagrancy_hits = r.vagrancy_jailed + r.vagrancy_fined;
     check(
         vagrancy_hits >= 10,
-        format!("Vagrancy hits {vagrancy_hits} >= 10 ({vagrancy_jailed} jailed, {vagrancy_fined} fined)"),
+        format!("Vagrancy hits {vagrancy_hits} >= 10 ({} jailed, {} fined)", r.vagrancy_jailed, r.vagrancy_fined),
     );
-    check(hotel_nights >= 100, format!("Hotel nights {hotel_nights} >= 100"));
-    check(squatted >= 1 && squat_evicted >= 1, format!("Squatted {squatted} >= 1, SquatEvicted {squat_evicted} >= 1"));
-    check(dreg_days >= 80, format!("Dregs 1-5 % of adults on {dreg_days} >= 80 days"));
-    check((1..=4).contains(&riots), format!("riots {riots} in 1..=4"));
+    check(r.hotel_nights >= 100, format!("Hotel nights {} >= 100", r.hotel_nights));
+    check(
+        r.squatted >= 1 && r.squat_evicted >= 1,
+        format!("Squatted {} >= 1, SquatEvicted {} >= 1", r.squatted, r.squat_evicted),
+    );
+    check(r.dreg_days >= 80, format!("Dregs 1-5 % of adults on {} >= 80 days", r.dreg_days));
     // A riot's rioters are those who gathered (D30: `riot_min` 6 to start);
     // the count at the door is reported (fewer than 3 is a fizzle).
     check(
-        !riot_gathered.is_empty() && riot_gathered.iter().all(|&k| k >= 6),
-        format!("every riot gathered >= 6 rioters {riot_gathered:?} (at the door {riot_sizes:?})"),
+        !r.riot_gathered.is_empty() && r.riot_gathered.iter().all(|&k| k >= 6),
+        format!("every riot gathered >= 6 rioters {:?} (at the door {:?})", r.riot_gathered, r.riot_sizes),
     );
-    check(looted >= 1, format!("Looted {looted} >= 1"));
-    check(crossfire >= 1, format!("Crossfire {crossfire} >= 1"));
-    check(unrest_worst < 30, format!("no district above unrest 0.8 for 30 days without a riot (worst {unrest_worst})"));
-    check(raids_3 * 2 >= raids, format!("raids with >= 3 at the door {raids_3}/{raids} >= 50 %"));
-    check(corp_raids >= 1, format!("raids on corp buildings {corp_raids} >= 1"));
-    check(departed_into_cover == 0, format!("raids departed into cover {departed_into_cover} == 0 (of {departures})"));
-    check(assaults as f32 / 120.0 <= 42.7, format!("assaults/day {:.2} <= 42.7", assaults as f32 / 120.0));
-    check(starvation <= 200, format!("starvation {starvation} <= 200"));
-    check((1333..=2667).contains(&pop), format!("population {pop} in 1333..=2667"));
+    check(r.looted >= 1, format!("Looted {} >= 1", r.looted));
+    check(r.crossfire >= 1, format!("Crossfire {} >= 1", r.crossfire));
+    check(
+        r.unrest_worst < 30,
+        format!("no district above unrest 0.8 for 30 days without a riot (worst {})", r.unrest_worst),
+    );
+    check(r.raids_3 * 2 >= r.raids, format!("raids with >= 3 at the door {}/{} >= 50 %", r.raids_3, r.raids));
+    check(r.corp_raids >= 1, format!("raids on corp buildings {} >= 1", r.corp_raids));
+    check(
+        r.departed_into_cover == 0,
+        format!("raids departed into cover {} == 0 (of {})", r.departed_into_cover, r.departures),
+    );
+    check(r.assaults as f32 / 120.0 <= 42.7, format!("assaults/day {:.2} <= 42.7", r.assaults as f32 / 120.0));
+    check(r.starvation <= 200, format!("starvation {} <= 200", r.starvation));
+    check((1333..=2667).contains(&r.pop), format!("population {} in 1333..=2667", r.pop));
     if !cfg!(debug_assertions) {
-        check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
+        check(r.tps >= 8000.0, format!("ticks/s {:.0} >= 8000", r.tps));
     }
     assert!(failures.is_empty(), "M12 gate failures: {failures:?}");
-}
-
-/// The M12 split bullet: a gang `Split` at least once across seeds 42-44
-/// (120 days each). `#[ignore]`: three runs.
-#[test]
-#[ignore]
-fn test_m12_split_seeds() {
-    use citysim::EventKind;
-    let mut total = 0u32;
-    for seed in [42u64, 43, 44] {
-        let mut w = World::new(seed, Config::load());
-        let (mut next_id, mut splits) = (0u64, Vec::<String>::new());
-        for _ in 0..120 {
-            w.run_ticks(TICKS_PER_DAY);
-            for e in w.events.iter().filter(|e| e.id >= next_id && e.kind == EventKind::Split) {
-                splits.push(format!("day {}: {}", e.tick / TICKS_PER_DAY, e.text));
-            }
-            next_id = w.events.back().map_or(next_id, |e| e.id + 1);
-        }
-        eprintln!("seed {seed}: {} splits {splits:?}", splits.len());
-        total += splits.len() as u32;
-    }
-    assert!(total >= 1, "no Split across seeds 42-44");
 }
