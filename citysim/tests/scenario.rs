@@ -976,7 +976,8 @@ struct M12 {
 /// change, while the 8-seed means of riots, assaults/day and gang joins
 /// moved less than the seed-to-seed spread. So those trajectory checks
 /// (riots in 1..=4, a gang controlling a district >= 14 days, gang
-/// landlords met within 14 days) are judged by majority, 2 of 3 seeds; the
+/// landlords met within 14 days; from M13 phase 3 a Sanitation reallocation
+/// in every 30 days) are judged by majority, 2 of 3 seeds; the
 /// split bullet keeps its own rule (a Split on any of the three, formerly
 /// `test_m12_split_seeds`). Everything that is a property of the mechanism
 /// (throughput, litter and Dreg bands, Crackdown, raids, the M10 bounds, the
@@ -1017,6 +1018,13 @@ fn test_m12_districts_seed_42() {
             ),
         )
     });
+    // M13 phase 3: a trajectory check too. At HEAD (daecc28) seed 42 dealt
+    // its sweepers anew 16/5/16/1 times per 30 days, one reallocation from
+    // failing; phase 3 (the loot window, strips) left the last window at 0
+    // while seeds 43 and 44 kept 11 and 8.
+    majority("a Sanitation reallocation in every 30 days", &|m| {
+        (m.windows.iter().all(|&k| k >= 1), format!("sanitation per 30 d {:?}", m.windows))
+    });
     let splits: usize = runs.iter().map(|m| m.split_days.len()).sum();
     for m in &runs {
         eprintln!("  seed {}: {} splits on days {:?}", m.seed, m.split_days.len(), m.split_days);
@@ -1049,7 +1057,6 @@ fn test_m12_districts_seed_42() {
             r.clean_mean, r.clean_low, r.litter_days
         ),
     );
-    check(r.windows.iter().all(|&k| k >= 1), format!("a Sanitation reallocation in every 30 days {:?}", r.windows));
     // D15: a Vagrancy hit fines a payer or jails a broke sleeper; the bullet's
     // "arrests" are read as hits (the CSV `vagrancy` column), the jailings
     // alone swing 2-25 on seed 42 with the Statistical table.

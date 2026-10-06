@@ -317,6 +317,10 @@ pub struct World {
     /// M13 D25: drivers the god `Chase` pinned (phase 2).
     #[serde(default)]
     pub chase_pins: BTreeSet<EntityId>,
+    /// M13 D33 (phase 3): agents in a cyberpsychotic episode (ended hourly
+    /// at `Body.episode_until`, at arrest or at death).
+    #[serde(default)]
+    pub episodes: BTreeSet<EntityId>,
     /// M13 D38: Bar -> registered dealers (phase 4).
     #[serde(default)]
     pub dealers: BTreeMap<EntityId, Vec<EntityId>>,
@@ -706,6 +710,7 @@ impl World {
             loot_corpses: Vec::new(),
             trips: BTreeMap::new(),
             chase_pins: BTreeSet::new(),
+            episodes: BTreeSet::new(),
             commute_start: BTreeMap::new(),
             commute_acc: [0; 4],
             dealers: BTreeMap::new(),

@@ -86,6 +86,17 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Squat => crate::systems::street::squat_target(world, id),
         // M13 D29: the seller of the best offer (`plan_for` stores the pick).
         GoalKind::Shop => crate::systems::assets::shop_choice(world, id, true).map(|o| o.seller),
+        // M13 D34: the nearest open Clinic.
+        GoalKind::Treat => {
+            let tile = world.comp::<Position>(id)?.tile;
+            crate::systems::chrome::nearest_clinic(world, tile, true)
+        }
+        // M13 D35: the nearest body within reach.
+        GoalKind::Loot => crate::systems::chrome::loot_target(world, id),
+        // M13 D33: an episode's quarry, the nearest living body in sight.
+        GoalKind::Fight if crate::systems::chrome::in_episode(world, id) => {
+            crate::systems::chrome::episode_target(world, id)
+        }
         // M13 D26: the nearest street-parked vehicle a thief may take (and
         // a gang would pay for).
         GoalKind::Earn if crate::systems::vehicles::would_steal(world, id) => {
@@ -184,8 +195,20 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         }
     }
     let target = bind_target(world, id, goal);
+    // M13 D33: a berserker with nobody in sight roams.
+    if goal == GoalKind::Fight && target.is_none() && crate::systems::chrome::in_episode(world, id) {
+        let step = crate::components::ActionInstance { action: ActionKind::Wander, target: None, tile: None };
+        install(world, id, Plan { goal, target: None, steps: vec![step], started_tick: tick });
+        return 0;
+    }
     if goal == GoalKind::GangWork {
         crate::systems::gang::note_gang_work(world, id);
+        // M13 D36: a Statistical Harvest target is promoted to Coarse at bind.
+        if let Some(t) =
+            target.filter(|&t| world.comp::<Brain>(t).is_some_and(|b| b.lod == crate::components::Lod::Statistical))
+        {
+            crate::systems::lod::set_lod(world, t, crate::components::Lod::Coarse);
+        }
     }
     // M13 D29: what to buy is fixed with the seller.
     if goal == GoalKind::Shop {

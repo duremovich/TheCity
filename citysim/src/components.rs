@@ -342,6 +342,8 @@ pub enum Crime {
     GrandTheft,
     /// M13 D25: a crash that killed, the driver seen.
     Manslaughter,
+    /// M13 D36: a Harvest crew dragged someone off for their chrome.
+    Abduction,
 }
 
 impl Crime {
@@ -355,12 +357,13 @@ impl Crime {
             Crime::Vagrancy => "Vagrancy",
             Crime::GrandTheft => "Grand Theft",
             Crime::Manslaughter => "Manslaughter",
+            Crime::Abduction => "Abduction",
         }
     }
 
     /// The order the law ranks crimes by (the most severe open report sets
     /// a sentence): Vagrancy, Theft, Grand Theft, Shakedown, Assault,
-    /// Manslaughter, Murder. Unique per crime (`Ord` reads it).
+    /// Manslaughter, Abduction, Murder. Unique per crime (`Ord` reads it).
     pub fn severity(self) -> u8 {
         match self {
             Crime::Vagrancy => 0,
@@ -369,7 +372,8 @@ impl Crime {
             Crime::Extortion => 3,
             Crime::Assault => 4,
             Crime::Manslaughter => 5,
-            Crime::Murder => 6,
+            Crime::Abduction => 6,
+            Crime::Murder => 7,
         }
     }
 }
@@ -443,6 +447,14 @@ pub enum MemoryKind {
     Repossessed,
     /// M13 D25: hit by a vehicle and lived.
     Crashed,
+    /// M13 D35: an heir saw the body of their kin stripped.
+    Stripped,
+    /// M13 D33: came down from a cyberpsychotic episode.
+    Episode,
+    /// M13 D33: saw someone go berserk.
+    SawEpisode,
+    /// M13 D36: dragged off and ripped, and lived.
+    Abducted,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -468,8 +480,12 @@ pub enum GoalKind {
     Found,
     /// M12 D27: a homeless adult who cannot afford a Hotel moves into a derelict.
     Squat,
-    /// M13 D43: buy a vehicle or a pack (chrome from phase 3).
+    /// M13 D43: buy a vehicle, chrome or a pack.
     Shop,
+    /// M13 D34: Therapy at a Clinic (Detox from phase 4).
+    Treat,
+    /// M13 D35: strip a fresh body (and rip its chrome).
+    Loot,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -486,11 +502,21 @@ pub enum Order {
     /// M12 D38 (phase 3): take a derelict Block in the gang's districts
     /// through the claim machinery.
     Squat,
+    /// M13 D36: abduct the city's most visible chrome and rip it at the Hideout.
+    Harvest,
 }
 
 impl Order {
-    pub const ALL: [Order; 7] =
-        [Order::Expand, Order::Contest, Order::Raid, Order::Retaliate, Order::LieLow, Order::BreakOut, Order::Squat];
+    pub const ALL: [Order; 8] = [
+        Order::Expand,
+        Order::Contest,
+        Order::Raid,
+        Order::Retaliate,
+        Order::LieLow,
+        Order::BreakOut,
+        Order::Squat,
+        Order::Harvest,
+    ];
 
     /// Members muster and march under these.
     pub fn is_raid(self) -> bool {
@@ -1330,6 +1356,9 @@ pub struct Brain {
     /// M13 D29: what a Shop plan is buying, fixed when the seller is bound.
     #[serde(default)]
     pub shop_pick: Option<ShopPick>,
+    /// M13 D36: dragged off by this gang member (for the UI and the law).
+    #[serde(default)]
+    pub abducted_by: Option<EntityId>,
 }
 
 impl Default for Brain {
@@ -1367,6 +1396,7 @@ impl Default for Brain {
             body_day: None,
             last_found_day: None,
             shop_pick: None,
+            abducted_by: None,
         }
     }
 }
@@ -1630,6 +1660,10 @@ pub struct Gang {
     /// M12 D36: the gang this one split from (lineage for the Hideout panel).
     #[serde(default)]
     pub split_from: Option<EntityId>,
+    /// M13 D36: the Harvest target (`chrome::harvest_target`), cached at each
+    /// rescore so a member's GangWork never rescans the chromed.
+    #[serde(default)]
+    pub harvest_target: Option<EntityId>,
 }
 
 impl Gang {
@@ -1661,6 +1695,7 @@ impl Gang {
             emptied: false,
             claims_cleared: false,
             split_from: None,
+            harvest_target: None,
         }
     }
 
@@ -1805,6 +1840,8 @@ pub enum HoleKind {
     Robbed,
     Assaulted,
     Killed,
+    /// M13 D37: taken off screen for the chrome (packs as 3 in `hole_id`).
+    Abducted,
 }
 
 impl HoleKind {
@@ -1814,6 +1851,7 @@ impl HoleKind {
             HoleKind::Robbed => Crime::Theft,
             HoleKind::Assaulted => Crime::Assault,
             HoleKind::Killed => Crime::Murder,
+            HoleKind::Abducted => Crime::Abduction,
         }
     }
 
@@ -1823,6 +1861,7 @@ impl HoleKind {
             HoleKind::Robbed => "robbery",
             HoleKind::Assaulted => "beating",
             HoleKind::Killed => "killing",
+            HoleKind::Abducted => "abduction",
         }
     }
 }

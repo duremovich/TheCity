@@ -37,6 +37,10 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
         ExecState::Use { kind: ActionKind::Muster, until, .. } => {
             until.saturating_sub(now) <= 2 * crate::time::TICKS_PER_HOUR
         }
+        // M13 phase 3: an install on the table runs to the end.
+        ExecState::Use { kind: ActionKind::BuyAsset, .. } => {
+            brain.shop_pick.as_ref().is_some_and(|p| p.kind.is_implant() || p.used.is_some())
+        }
         ExecState::Use { kind, .. } => matches!(
             kind,
             ActionKind::Arrest
@@ -44,6 +48,10 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
                 | ActionKind::ServeTime
                 | ActionKind::BuryCorpse
                 | ActionKind::HaulToMarket
+                | ActionKind::Install
+                | ActionKind::Therapy
+                | ActionKind::Uninstall
+                | ActionKind::Rip
         ),
         _ => false,
     }

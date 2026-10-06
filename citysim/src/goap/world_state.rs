@@ -73,11 +73,16 @@ pub enum LocationKey {
     /// M13 D26: the street tile outside the door the plan's target vehicle
     /// is parked at (no building).
     Vehicle,
+    /// M13 D16/D34: a Clinic (a Ripperdoc's shift, Install, Therapy).
+    Clinic,
+    /// M13 D36/D33: next to the plan's target agent (a Harvest victim, an
+    /// episode's quarry): its building, else its tile.
+    Victim,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 22] = [
+    pub const GOTO: [LocationKey; 24] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -100,6 +105,8 @@ impl LocationKey {
         LocationKey::Garage,
         LocationKey::Seller,
         LocationKey::Vehicle,
+        LocationKey::Clinic,
+        LocationKey::Victim,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -118,9 +125,7 @@ impl LocationKey {
             BuildingKind::Lot => LocationKey::Street,
             BuildingKind::Hotel => LocationKey::Hotel,
             BuildingKind::Garage => LocationKey::Garage,
-            // TODO(M13 ph3): `LocationKey::Clinic` arrives with the plans
-            // that reach it; until then nobody plans a visit.
-            BuildingKind::Clinic => LocationKey::Street,
+            BuildingKind::Clinic => LocationKey::Clinic,
         }
     }
 }
@@ -170,6 +175,10 @@ pub enum Key {
     /// yet fenced. Its own key, not `CarryingStolen`, so a non-member's
     /// plan cannot fence stolen food it has no gang to sell to.
     CarryingVehicle,
+    /// M13 D34: treated at a Clinic (never observed true; Therapy sets it).
+    Treated,
+    /// M13 D35: a body stripped (never observed true; Strip and Rip set it).
+    Stripped,
 }
 
 /// Partial goal state: at most 3 listed keys.
@@ -215,6 +224,8 @@ pub struct WorldState {
     pub squatting: bool,
     pub bought: bool,
     pub carrying_vehicle: bool,
+    pub treated: bool,
+    pub stripped: bool,
 }
 
 impl WorldState {
@@ -260,6 +271,8 @@ impl WorldState {
             squatting,
             bought,
             carrying_vehicle,
+            treated,
+            stripped,
         } = *self;
         let flags = [
             hunger_satisfied,
@@ -295,6 +308,8 @@ impl WorldState {
             squatting,
             bought,
             carrying_vehicle,
+            treated,
+            stripped,
         ];
         let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
         for (i, f) in flags.into_iter().enumerate() {
@@ -343,6 +358,8 @@ impl WorldState {
             Key::Squatting => self.squatting,
             Key::Bought => self.bought,
             Key::CarryingVehicle => self.carrying_vehicle,
+            Key::Treated => self.treated,
+            Key::Stripped => self.stripped,
         }
     }
 
@@ -410,7 +427,9 @@ impl WorldState {
         // Symbolic places that depend on the plan: adjacent to (or in the same
         // building as) the bound suspect is SuspectTile; inside the current
         // patrol stop, while patrolling, is PatrolWaypoint.
-        let carrying = world.comp::<Brain>(agent).is_some_and(|b| b.carrying_corpse.is_some());
+        // M13 D36: an abductee in tow rides the corpse-carry key.
+        let carrying = world.comp::<Brain>(agent).is_some_and(|b| b.carrying_corpse.is_some())
+            || crate::systems::chrome::dragging(world, agent).is_some();
         let suspect_target = target
             .filter(|&t| world.has::<Brain>(t))
             .filter(|&t| crate::systems::law::is_guard(world, agent) && crate::systems::law::wanted(world, t));
@@ -443,8 +462,23 @@ impl WorldState {
             && world.comp::<Brain>(agent).is_some_and(|b| b.current_goal == Some(crate::components::GoalKind::Shop));
         // M13 D26: on the street outside the bound vehicle's door.
         let vehicle_tile = target.and_then(|t| crate::systems::vehicles::vehicle_stand(world, t));
+        // M13 D33/D36: next to the quarry (an episode's, a Harvest crew's),
+        // unless it is the abductee being dragged along.
+        let episode = crate::systems::chrome::in_episode(world, agent);
+        let dragging = crate::systems::chrome::dragging(world, agent);
+        let at_victim = target.is_some_and(|t| {
+            Some(t) != dragging
+                && t != agent
+                && world.has::<Brain>(t)
+                && crate::systems::law::near(world, agent, t, 1)
+                && (episode
+                    || world
+                        .gang_of(agent)
+                        .is_some_and(|g| crate::systems::chrome::gang_harvest_target(world, g) == Some(t)))
+        });
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
+            _ if at_victim => LocationKey::Victim,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
             _ if patrolling => LocationKey::PatrolWaypoint,
             _ if at_muster => LocationKey::MusterPoint,
@@ -541,7 +575,8 @@ impl WorldState {
             has_partner_candidate,
             // Not safe while wanted with a guard within 8 (HideFromLaw reader).
             is_safe: needs.safety >= SAFE && !guard8,
-            threat_removed: !hostile_near,
+            // M13 D33: no threat is ever removed for a berserker.
+            threat_removed: !hostile_near && !episode,
             crime_reported,
             suspect_jailed: target.is_some_and(|t| world.has::<crate::components::Sentence>(t)),
             suspect_cuffed: target.is_some_and(|t| world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_some())),
@@ -563,6 +598,8 @@ impl WorldState {
             squatting: squat.is_some(),
             bought: false,
             carrying_vehicle: crate::systems::vehicles::stolen_held_by(world, agent).is_some(),
+            treated: false,
+            stripped: false,
         }
     }
 }

@@ -333,10 +333,12 @@ impl World {
     /// Drop the current plan: abandon the running step (partial effects per
     /// `actions::on_abort`), release reservations, reset execution.
     pub fn abort_plan(&mut self, id: EntityId) {
-        // A guard abandoning an escort lets the suspect go (to be re-arrested).
+        // A guard abandoning an escort lets the suspect go (to be re-arrested);
+        // M13 D36: an abductor, its abductee.
         if let Some(suspect) = self.comp::<Brain>(id).and_then(|b| b.escorting) {
             if let Some(b) = self.comp_mut::<Brain>(suspect) {
                 b.cuffed_by = None;
+                b.abducted_by = None;
             }
             if let Some(b) = self.comp_mut::<Brain>(id) {
                 b.escorting = None;
@@ -745,6 +747,16 @@ impl World {
                     .or_else(|| self.comp::<crate::components::Job>(agent).and_then(|j| j.employer).filter(garage))
                     .or_else(|| self.local(agent, K::Garage))
             }
+            // M13 D34: the bound Clinic, else a Ripperdoc's employer, else the nearest.
+            LocationKey::Clinic => {
+                let clinic = |t: &EntityId| self.comp::<Building>(*t).is_some_and(|b| b.kind == K::Clinic);
+                target
+                    .filter(clinic)
+                    .or_else(|| self.comp::<crate::components::Job>(agent).and_then(|j| j.employer).filter(clinic))
+                    .or_else(|| self.local(agent, K::Clinic))
+            }
+            // M13 D36: a quarry inside a building is reached through its door.
+            LocationKey::Victim => target.and_then(|s| self.comp::<Position>(s)).and_then(|p| p.building),
             // M13 D26: a vehicle is reached on the street outside its door.
             LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget | LocationKey::Vehicle => None,
         }
@@ -765,7 +777,9 @@ impl World {
                 }
             }
             LocationKey::SuspectTile => target.and_then(|t| self.last_seen.get(&t)).map(|&(tile, _)| tile),
-            LocationKey::CorpseTile => target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile),
+            LocationKey::CorpseTile | LocationKey::Victim => {
+                target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile)
+            }
             LocationKey::RaidTarget => crate::systems::raid::target_tile(self, agent),
             LocationKey::MusterPoint => match crate::systems::raid::muster_point(self, agent) {
                 Some(crate::systems::raid::MusterAt::Door(t)) => Some(t),

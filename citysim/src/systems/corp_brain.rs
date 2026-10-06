@@ -86,16 +86,53 @@ pub fn build_kind(n: Niche) -> Option<BuildingKind> {
     }
 }
 
-/// M13 D17: the city has fewer Garages than `population ÷
-/// residents_per_garage` (the target `founding::choose_kind` reads).
-pub fn tech_room(world: &World) -> bool {
-    let target = crate::systems::founding::living(world) as f32 / world.config.corps.residents_per_garage.max(1) as f32;
-    let garages = world
-        .buildings_of_kind(BuildingKind::Garage)
+/// Standing buildings of `kind`, and the per-capita target
+/// `population ÷ residents_per_<kind>` (`founding::choose_kind`'s).
+fn tech_count_target(world: &World, kind: BuildingKind) -> (f32, f32) {
+    let per = match kind {
+        BuildingKind::Clinic => world.config.corps.residents_per_clinic,
+        _ => world.config.corps.residents_per_garage,
+    };
+    let target = crate::systems::founding::living(world) as f32 / per.max(1) as f32;
+    let count = world
+        .buildings_of_kind(kind)
         .iter()
         .filter(|&&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
         .count();
-    (garages as f32) < target
+    (count as f32, target)
+}
+
+/// M13 D17/D44 (phase 3): what a Tech corp builds: the kind with fewer per
+/// capita (`count ÷ target`; ties to the Garage), each only while
+/// foundable.
+pub fn tech_build_kind(world: &World) -> BuildingKind {
+    let ratio = |k: BuildingKind| {
+        let (count, target) = tech_count_target(world, k);
+        count / target.max(1e-3)
+    };
+    let clinic_ok = crate::systems::founding::found_cost(world, BuildingKind::Clinic).is_some();
+    let garage_ok = crate::systems::founding::found_cost(world, BuildingKind::Garage).is_some();
+    match (clinic_ok, garage_ok) {
+        (true, true) if ratio(BuildingKind::Clinic) < ratio(BuildingKind::Garage) => BuildingKind::Clinic,
+        (true, false) => BuildingKind::Clinic,
+        _ => BuildingKind::Garage,
+    }
+}
+
+/// The kind a corp grows a niche with (Tech: [`tech_build_kind`]).
+pub fn build_kind_in(world: &World, n: Niche) -> Option<BuildingKind> {
+    match n {
+        Niche::Tech => Some(tech_build_kind(world)),
+        _ => build_kind(n),
+    }
+}
+
+/// M13 D17: the city has fewer of the kind Tech would build than
+/// `population ÷ residents_per_<kind>` (the target `founding::choose_kind`
+/// reads).
+pub fn tech_room(world: &World) -> bool {
+    let (count, target) = tech_count_target(world, tech_build_kind(world));
+    count < target
 }
 
 /// The Street class's unrest (§ 7), the `1-unrest` term of Squeeze.
@@ -325,7 +362,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
                 .map(|(v, b)| (r, b, v))
         });
         let offer = weakest.map_or(0, |(_, _, v)| (v as f32 * cfg.acquire_premium).round() as i64);
-        let lots = match build_kind(n).and_then(|k| crate::systems::founding::found_cost(world, k)) {
+        let lots = match build_kind_in(world, n).and_then(|k| crate::systems::founding::found_cost(world, k)) {
             // M13 D17 (phase 2): Tech grows only while its kind is under the
             // per-capita target `choose_kind` uses (`population ÷
             // residents_per_garage`); without it Zetatech built two idle
@@ -744,7 +781,7 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     let now = world.tick;
     let cd = world.config.corps.grow_cooldown_days * TICKS_PER_DAY;
     let ready = world.comp::<Corp>(corp).is_some_and(|c| c.last_build_tick.is_none_or(|t| now.saturating_sub(t) >= cd));
-    let kind = build_kind(n);
+    let kind = build_kind_in(world, n);
     let cost = kind.and_then(|k| crate::systems::founding::found_cost(world, k));
     let lots = i.niches.get(&n).map_or(0, |ni| ni.lots);
     if let (true, Some(kind), Some(cost), true) = (ready, kind, cost, lots > 0) {

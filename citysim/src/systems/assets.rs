@@ -647,7 +647,14 @@ impl World {
 /// the corpse window and the scavs, the parts market, appearance, and the
 /// 7-day sales roll. Nothing per tick.
 pub fn run(world: &mut World) {
-    if world.tick_of_day() != 0 || !world.config.assets.enabled {
+    if !world.config.assets.enabled {
+        return;
+    }
+    // Phase 3 (D33): episodes end on the hour.
+    if world.tick.is_multiple_of(TICKS_PER_HOUR) && !world.episodes.is_empty() {
+        crate::systems::chrome::episodes_hourly(world);
+    }
+    if world.tick_of_day() != 0 {
         return;
     }
     let unpaid = upkeep(world);
@@ -656,12 +663,14 @@ pub fn run(world: &mut World) {
     wear(world, &unpaid);
     repairs(world);
     garage_rent(world);
+    crate::systems::chrome::sanity_daily(world);
     settle_window(world);
     scav_strip(world);
     parts_market(world);
     crate::systems::vehicles::recover_abandoned(world);
     crate::systems::vehicles::fleet_recall(world);
     crate::systems::vehicles::theft_daily(world);
+    crate::systems::chrome::abduction_daily(world);
     stat_shop(world);
     appearance(world);
     roll_sales(world);
@@ -1080,7 +1089,7 @@ pub fn settle_corpse(world: &mut World, c: EntityId) {
 
 /// Goods into an agent's inventory up to its capacity (food also to
 /// `FOOD_CAP`); the rest is lost.
-fn give_goods(world: &mut World, agent: EntityId, food: u32, stims: u16, parts: u16) {
+pub fn give_goods(world: &mut World, agent: EntityId, food: u32, stims: u16, parts: u16) {
     let cap = capacity(world, agent);
     let Some(inv) = world.comp_mut::<Inventory>(agent) else { return };
     let mut room = cap.saturating_sub(load(inv));
@@ -1185,13 +1194,22 @@ pub fn strip_offscreen(world: &mut World, c: EntityId) {
             world.add_stock(h, Good::Food, loot.food);
             world.add_stock(h, Good::Stims, u32::from(loot.stims));
             world.add_stock(h, Good::Parts, u32::from(loot.parts));
+            let mut chrome = 0;
             for a in assets_at(world, c).to_vec() {
+                chrome += usize::from(world.comp::<Asset>(a).is_some_and(|x| x.kind.is_implant()));
                 set_owner(world, a, Some(g));
                 set_loc(world, a, AssetLoc::Stock(h));
                 if let Some(m) = world.comp_mut::<Asset>(a) {
                     m.stolen = true;
                     m.finance = None;
+                    m.bricked = false;
                 }
+            }
+            // Phase 3 (D35): the scavs' chrome is a harvest for the gang.
+            if chrome > 0 {
+                world.stats.current.harvests += 1;
+                let (who, dead) = (world.owner_label(Some(g)), world.name_of(c));
+                world.push_event(EventKind::Harvested, &[g, c], format!("{who} ripped {chrome} implants from {dead}"));
             }
         }
         _ => {
@@ -1377,6 +1395,10 @@ pub fn on_owner_gone(world: &mut World, gone: EntityId) {
     }
     for a in kept {
         set_keeper(world, a, None);
+        // Phase 3: an implant reserved in a Hideout's stock stays there.
+        if world.comp::<Asset>(a).is_some_and(|x| !x.kind.is_vehicle()) {
+            continue;
+        }
         let home = world.comp::<Asset>(a).and_then(|x| x.owner).and_then(|o| world.hideout_of(o));
         let driven = world.comp::<Asset>(a).is_some_and(|x| matches!(x.loc, AssetLoc::InUse(_)));
         if let (Some(h), false) = (home, driven) {
@@ -1605,6 +1627,11 @@ pub fn seller_open(world: &World, b: EntityId) -> bool {
 pub enum ShopCategory {
     Vehicle,
     Pack,
+    /// Phase 3: an implant bought and installed at a Clinic.
+    Chrome,
+    /// Phase 3 (D44): the gang's implant reserved for this member, installed
+    /// at a Clinic for `install_fee`.
+    Install,
 }
 
 /// The Shop goal's best offer for one agent (D43).
@@ -1706,6 +1733,11 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
         return None;
     }
     let body = world.comp::<Body>(id)?;
+    // Phase 3 (D44): the gang's implant waiting for this member comes first,
+    // off any cooldown.
+    if let Some(offer) = install_offer(world, id, require_open) {
+        return Some(offer);
+    }
     let cooldown = u64::from(cfg.shop.shop_cooldown_days) * crate::time::TICKS_PER_DAY;
     if body.last_shop.is_some_and(|t| world.tick.saturating_sub(t) < cooldown) {
         return None;
@@ -1722,7 +1754,11 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     }
     let home = world.comp::<crate::components::Household>(id).and_then(|h| h.home);
     let job = world.comp::<Job>(id);
-    let income = job.map_or(i64::from(world.levers.dole_per_day), |j| j.wage_per_day).max(0);
+    let mut income = job.map_or(i64::from(world.levers.dole_per_day), |j| j.wage_per_day).max(0);
+    // Phase 3 (D43 reading): a member's daily income includes the gang's stipend.
+    if world.has::<crate::components::GangMember>(id) {
+        income += world.config.social.gang_stipend.max(0);
+    }
     let from = home
         .and_then(|h| world.comp::<Building>(h))
         .map(|b| b.door)
@@ -1748,13 +1784,21 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     let want_pack = home.is_none()
         && !has_pack
         && lowest(BuildingKind::Market).is_some_and(|l| affordable_at(world, l, &PACKS, coins, income).is_some());
-    if !want_vehicle && !want_pack {
+    // Phase 3 (D43): the first empty slot of the agent's list, while a T1
+    // is within reach at the cheapest Clinic (a used one may be cheaper).
+    let chrome_slot = chrome_slot(world, id);
+    let want_chrome = chrome_slot.is_some_and(|s| {
+        lowest(BuildingKind::Clinic)
+            .is_some_and(|l| affordable_at(world, l, &[(AssetKind::Implant(s), 1)], coins, income).is_some())
+    });
+    if !want_vehicle && !want_pack && !want_chrome {
         return None;
     }
     let mut best: Option<ShopOffer> = None;
     let mut offer = |category: ShopCategory,
                      seller: EntityId,
                      (kind, tier, price, financed): (AssetKind, u8, i64, bool),
+                     used: Option<EntityId>,
                      mut cs: Vec<Consideration>| {
         cs.insert(0, Consideration::new("can buy", can(true), GATE));
         cs.insert(1, Consideration::new("U(wealth)", wealth, Curve::Linear { m: 0.6, b: 0.4 }));
@@ -1765,7 +1809,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
         let raw: f32 = cs.iter().map(|c| c.output).product();
         let score = crate::utility::compensate(raw, cs.len()) + cfg.shop.shop_flat;
         if best.as_ref().is_none_or(|b| score > b.score) {
-            let pick = ShopPick { kind, tier, used: None };
+            let pick = ShopPick { kind, tier, used };
             best = Some(ShopOffer { pick, seller, price, financed, category, score, considerations: cs });
         }
     };
@@ -1780,7 +1824,21 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
                 };
                 let x = commute as f32 / (2.0 * cfg.shop.commute_ref.max(1) as f32);
                 let cs = vec![Consideration::new("commute", x, Curve::Logistic { k: 8.0, mid: 0.5 })];
-                offer(ShopCategory::Vehicle, g, o, cs);
+                offer(ShopCategory::Vehicle, g, o, None, cs);
+            }
+        }
+    }
+    // Chrome: the dearest affordable tier of the slot, new or used.
+    if let (true, Some(slot)) = (want_chrome, chrome_slot) {
+        if let Some(c) = nearest_seller(world, BuildingKind::Clinic, from, require_open) {
+            if let Some((pick, price, financed)) = chrome_pick(world, c, slot, coins, income) {
+                let load = kit.map_or(0.0, |k| k.load);
+                let courage = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.courage);
+                let cs = vec![
+                    Consideration::new("courage", courage, Curve::Linear { m: 0.5, b: 0.5 }),
+                    Consideration::new("1-load", (1.0 - load).clamp(0.0, 1.0), Curve::Linear { m: 0.6, b: 0.4 }),
+                ];
+                offer(ShopCategory::Chrome, c, (pick.kind, pick.tier, price, financed), pick.used, cs);
             }
         }
     }
@@ -1788,11 +1846,95 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     if want_pack {
         if let Some(m) = nearest_seller(world, BuildingKind::Market, from, require_open) {
             if let Some(o) = dearest_affordable(world, m, &PACKS, coins, income) {
-                offer(ShopCategory::Pack, m, o, Vec::new());
+                offer(ShopCategory::Pack, m, o, None, Vec::new());
             }
         }
     }
     best
+}
+
+/// Phase 3 (D43): the slot an agent would chrome next: the first empty one
+/// of `Arms, Nerves, Skin, Eyes, Legs` for a gang member, a guard or
+/// `courage >= 0.6`, else of `Legs, Eyes`.
+pub fn chrome_slot(world: &World, id: EntityId) -> Option<Slot> {
+    const FIGHTER: [Slot; 5] = [Slot::Arms, Slot::Nerves, Slot::Skin, Slot::Eyes, Slot::Legs];
+    const CIVILIAN: [Slot; 2] = [Slot::Legs, Slot::Eyes];
+    let fighter = world.has::<crate::components::GangMember>(id)
+        || crate::systems::law::is_guard(world, id)
+        || world.comp::<crate::components::Personality>(id).is_some_and(|p| p.courage >= 0.6);
+    let list: &[Slot] = if fighter { &FIGHTER } else { &CIVILIAN };
+    let taken: SmallVec<[Slot; 5]> = assets_at(world, id)
+        .iter()
+        .filter_map(|&a| world.comp::<Asset>(a))
+        .filter(|x| x.loc == AssetLoc::Installed(id))
+        .filter_map(|x| match x.kind {
+            AssetKind::Implant(s) => Some(s),
+            _ => None,
+        })
+        .collect();
+    list.iter().copied().find(|s| !taken.contains(s))
+}
+
+/// Phase 3 (D43): the dearest implant for `slot` at Clinic `c` the agent
+/// can buy: a new tier (`dearest_affordable`'s rules), or a used one in the
+/// Clinic's stock at `used_frac × list × condition / 100`.
+fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, income: i64) -> Option<(ShopPick, i64, bool)> {
+    let kind = AssetKind::Implant(slot);
+    let new = dearest_affordable(world, c, &[(kind, 1), (kind, 2), (kind, 3)], coins, income)
+        .map(|(k, t, price, fin)| (ShopPick { kind: k, tier: t, used: None }, price, fin));
+    let down_frac = world.config.assets.down_frac;
+    let cap = world.config.shop.max_burden * income as f32;
+    let used = assets_at(world, c)
+        .iter()
+        .copied()
+        .filter_map(|a| world.comp::<Asset>(a).map(|x| (a, x)))
+        .filter(|(_, x)| {
+            x.kind == kind && x.loc == AssetLoc::Stock(c) && x.condition > 0 && x.owner == world.owner_of(c)
+        })
+        .filter_map(|(a, x)| {
+            let price = (world.config.chrome.used_frac * x.list as f32 * f32::from(x.condition) / 100.0).round() as i64;
+            let ok = coins >= (down_frac * price as f32).round() as i64;
+            let burden = upkeep_for(world, kind, x.tier) + finance_per_day(world, price, coins);
+            (ok && burden as f32 <= cap).then_some((
+                ShopPick { kind, tier: x.tier, used: Some(a) },
+                price,
+                coins < price,
+            ))
+        })
+        .max_by_key(|(p, price, _)| (*price, std::cmp::Reverse(p.used)));
+    match (new, used) {
+        (Some(n), Some(u)) => Some(if u.1 > n.1 { u } else { n }),
+        (n, u) => n.or(u),
+    }
+}
+
+/// Phase 3 (D44): the install offer for a member with a gang implant
+/// reserved: at the nearest Clinic (open, for a body), considerations the
+/// shared gate and the member's loyalty and courage.
+fn install_offer(world: &World, id: EntityId, require_open: bool) -> Option<ShopOffer> {
+    use crate::utility::curves::{can, Curve, GATE};
+    use crate::utility::Consideration;
+    let a = crate::systems::chrome::reserved_implant(world, id)?;
+    let x = world.comp::<Asset>(a)?;
+    let from = world.comp::<Position>(id)?.tile;
+    let seller = nearest_seller(world, BuildingKind::Clinic, from, require_open)?;
+    let p = world.comp::<crate::components::Personality>(id);
+    let cs = vec![
+        Consideration::new("gang chrome", can(true), GATE),
+        Consideration::new("loyalty", p.map_or(0.5, |p| p.loyalty), Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("courage", p.map_or(0.5, |p| p.courage), Curve::Linear { m: 0.5, b: 0.5 }),
+    ];
+    let raw: f32 = cs.iter().map(|c| c.output).product();
+    let score = crate::utility::compensate(raw, cs.len()) + world.config.shop.shop_flat;
+    Some(ShopOffer {
+        pick: ShopPick { kind: x.kind, tier: x.tier, used: Some(a) },
+        seller,
+        price: crate::systems::chrome::install_fee(world, x.tier),
+        financed: false,
+        category: ShopCategory::Install,
+        score,
+        considerations: cs,
+    })
 }
 
 /// D43, daily: Statistical adults on their day in seven (`(index + day) %
@@ -1811,6 +1953,14 @@ fn stat_shop(world: &mut World) {
     for id in due {
         let Some(o) = shop_choice(world, id, false) else { continue };
         if o.score < min {
+            continue;
+        }
+        // Phase 3 (D43): Statistical chrome is installed in place.
+        if o.category == ShopCategory::Chrome {
+            crate::systems::chrome::stat_install(world, id, o.seller, &o.pick);
+            continue;
+        }
+        if o.category == ShopCategory::Install {
             continue;
         }
         let Ok(a) = buy(world, id, o.seller, &o.pick) else { continue };
@@ -1845,12 +1995,14 @@ fn garage_rent(world: &mut World) {
     }
 }
 
-/// D18 (phase 2 rows): last in `World::new`, a Garage on the vacant Lot
-/// nearest each row's district centroid (Manhattan from the Lot door, ties
-/// lower id): the Civic's owned by the Tech corp, Sump Central's by the
-/// jobless adult (not an exec nor a building owner) whose Home door is
-/// nearest the Lot's (ties lower id), dealt `[shop] seed_owner_coins`, its
-/// founding cooldown started.
+/// D18: last in `World::new`, a seller on the vacant Lot nearest each row's
+/// district centroid (Manhattan from the Lot door, ties lower id). Phase 2
+/// rows: a Garage in the Civic owned by the Tech corp, and one in Sump
+/// Central owned by the jobless adult (not an exec nor a building owner)
+/// whose Home door is nearest the Lot's (ties lower id), dealt `[shop]
+/// seed_owner_coins`, its founding cooldown started. Phase 3 rows: a
+/// Clinic in the Spire (the Tech corp's) and back-alley docs in Sump West
+/// and Mid East (agents', as Sump Central's Garage).
 /// Returns the Lots built, in row order.
 pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
@@ -1861,8 +2013,14 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
         .corps()
         .into_iter()
         .find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&crate::components::Niche::Tech)));
-    let rows: [(&str, bool); 2] = [("Civic", true), ("Sump Central", false)];
-    for (district, corp_owned) in rows {
+    let rows: [(&str, bool, BuildingKind); 5] = [
+        ("Civic", true, BuildingKind::Garage),
+        ("Sump Central", false, BuildingKind::Garage),
+        ("Spire", true, BuildingKind::Clinic),
+        ("Sump West", false, BuildingKind::Clinic),
+        ("Mid East", false, BuildingKind::Clinic),
+    ];
+    for (district, corp_owned, kind) in rows {
         let Some((d, centroid)) = world.districts.iter().find(|x| x.name == district).map(|x| (x.id, x.centroid))
         else {
             continue;
@@ -1897,7 +2055,7 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
                 .min()
                 .map(|(_, a)| a)
         };
-        if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Garage, owner).is_err() {
+        if crate::systems::founding::build_on_lot(world, lot, kind, owner).is_err() {
             continue;
         }
         if !corp_owned {
@@ -1905,7 +2063,7 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
             if let Some(w) = owner.and_then(|o| world.comp_mut::<Wallet>(o)) {
                 w.coins = coins;
             }
-            // The Garage is their registration: the founding cooldown runs
+            // The seller is their registration: the founding cooldown runs
             // from today (else the seed coins founded a Bar on day 0, the
             // pair incorporated and went bankrupt, and the city foreclosed
             // the Garage within a fortnight).

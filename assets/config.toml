@@ -279,6 +279,7 @@ retaliate = 0.6
 lielow = 0.15
 breakout = 0.28 # was 0.2: after the M9 review fixes (jail duty by rank, Hideout sleep, night watch) 0.2 produced no breakout on seed 42
 squat = 0.05    # M12 D38: take a derelict Block in the gang's districts (phase 3 ran 0.0; phase 4 sets the spec's 0.05)
+harvest = 0.0   # M13 D36: abduct the city's visible chrome for parts
 
 # M9: the law as a faction (docs/M9_LAW.md). A captain (the most lawful guard) scores Patrol,
 # Crackdown (on the most-reported gang: patrol loops through its turf, one guard in three holds the
@@ -401,6 +402,10 @@ trace_days = 120
 # M10 D26: multiplies the table's p_robbed / p_assaulted / p_killed at use; the knob if off-screen
 # violence falls short of the M10 scenario. The parity test pins it to 1.0.
 stat_violence_mult = 1.0
+# M13 D46: a kitted Statistical agent's p_robbed x (1 + flash_w x Kit.flash); D37: the binder's
+# Assaulted/Killed candidate weight x (1 + chrome_bind_w x Kit.fighting).
+flash_w = 0.5
+chrome_bind_w = 1.0
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
 # (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
@@ -776,7 +781,7 @@ unpaid_wear_mult = 3
 repair_below = 50
 repair_price = 2                   # coins per condition point
 fail_shock = 0.1
-loot_window_hours = 0              # plan D13, phase 1: inheritance at death (M12); phase 3 sets the spec's 12
+loot_window_hours = 12             # plan D13: phase 3 turns the loot window on (0 = inheritance at death, M12)
 rip_courage = 0.5
 scav_strip_base = 0.15
 carry_base = 20
@@ -785,10 +790,10 @@ pack = [10, 25]
 goods_cap = 1000                   # plan D6: Stims/Parts cap where the kind's stock_cap is lower
 parts_floor = 20                   # plan D14
 parts_batch = 20                   # plan D14
-# Phase 2 carry-over: per kind. Agents (Register) and a Tech corp (Grow) found Garages from phase 2;
-# Clinics stay off until phase 3 makes them do something.
+# Phase 2 carry-over: per kind. Agents (Register) and a Tech corp (Grow) found Garages from phase 2,
+# Clinics from phase 3.
 found_garage = true
-found_clinic = false
+found_clinic = true
 
 [chrome]
 # M13 § 3, the Kit table (plan "Kit tables"); phase 3 adds the rest.
@@ -803,6 +808,28 @@ sanity_cost = [0.08, 0.15, 0.25]
 used_frac = 0.6
 contest_step = 0.25                # plan D28: security::contest, per tier of difference
 buyback_frac = 0.4                 # spec § 3; phase 2 reads it for a hunkering corp's fleet sale (D44)
+# Phase 3 (spec § 3): install, sanity, episodes, Therapy, Harvest.
+install_fee = [30, 80, 200]
+install_shock = 0.05
+sanity_drift = 0.05
+unmedicated_drift = 0.02
+edgy = 0.5
+edgy_mood = 0.2
+edgy_fight = 0.1
+psycho = 0.25                      # spec risk 1: held at 0.25 until phase 4
+episode_base = 0.05
+stim_episode_mult = 2.0
+episode_hours = 3
+berserk_kill_mult = 4.0
+psycho_kill = 0.3
+therapy_price = 60
+therapy_gain = 0.15
+harvest_min_visible = 3
+abduct_base = 0.002
+p_rip_kill = 0.5
+loot_reach = 16                    # plan D35: the Loot goal's reach (Manhattan tiles)
+treat_below = 1.0                  # plan D34 (phase 3): Treat is considered below this sanity (a whole body has nothing to treat)
+gang_chrome_floor = 300            # plan D44 (phase 3): a gang's Arms purchase floor (gang_buy_floor 600 is never reached before dealing)
 
 [vehicles]
 # M13 § 2 (plan phase 2, D19-D27).

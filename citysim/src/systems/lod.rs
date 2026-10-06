@@ -110,6 +110,9 @@ fn assign(world: &mut World) {
     };
 
     let mut ranked: Vec<(i32, u32, u32, EntityId)> = Vec::new();
+    // M13 D46: the gangs' Harvest targets rank with the gangs while chosen.
+    let harvest: Vec<EntityId> =
+        world.gangs().into_iter().filter_map(|g| world.comp::<crate::components::Gang>(g)?.harvest_target).collect();
     // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
@@ -126,6 +129,11 @@ fn assign(world: &mut World) {
         // M12 D31 (plan risk 3): a rioter of a live riot ranks with them,
         // from `riot_promote_hours` before the muster.
         let gang = world.has::<crate::components::GangMember>(id) || crate::systems::riot::promoted(world, id);
+        // M13 D46: a berserker, an abductee in tow and a Harvest target too.
+        let gang = gang
+            || brain.cuffed_by.is_some()
+            || harvest.contains(&id)
+            || (!world.episodes.is_empty() && world.episodes.contains(&id));
         // M10 D20: guards rank with gang members, or at 2,000 the gangs take
         // every Coarse slot and the whole watch is Statistical. Gravediggers
         // too: the hourly table cannot bury, and a Statistical digger never
@@ -452,6 +460,26 @@ fn stranger_in_zone(world: &mut World, id: EntityId) -> Option<EntityId> {
 /// the fixed order steal, flirt, robbed, assaulted, killed, meet, chat (so the stream
 /// advances identically whatever fires), then applied killed first. An agent
 /// whose hour already took it off the tier (a caught thief) only draws.
+/// The hour's violence and theft probabilities a Statistical agent rolls
+/// against: `(p_killed, p_assaulted, p_robbed, p_steal)`, the row's times
+/// `stat_violence_mult`, then (M13 D46) only for a kitted agent `p_killed`
+/// and `p_assaulted × (1 − dodge_w × Kit.reflex) × (1 − Kit.armour)` and
+/// `p_robbed × (1 + flash_w × Kit.flash)`. A bare agent's are the M12
+/// products bit for bit (a branch, not a multiply by 1).
+pub fn stat_probs(world: &World, id: EntityId, row: &StatRow) -> (f32, f32, f32, f32) {
+    let m = world.config.lod.stat_violence_mult;
+    let (mut killed, mut assaulted, mut robbed) = (row.p_killed * m, row.p_assaulted * m, row.p_robbed * m);
+    if world.config.assets.enabled {
+        if let Some((harm, flash)) = crate::systems::chrome::stat_multipliers(world, id) {
+            killed *= harm;
+            assaulted *= harm;
+            robbed *= flash;
+        }
+    }
+    // TODO(M13 ph4): `p_steal × withdrawal_steal_mult` in withdrawal.
+    (killed, assaulted, robbed, row.p_steal)
+}
+
 fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     let rng = world.rng.agent(id);
     let u_steal: f32 = rng.random();
@@ -464,7 +492,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     if world.comp::<Brain>(id).is_none_or(|b| b.lod != Lod::Statistical) {
         return;
     }
-    let m = world.config.lod.stat_violence_mult;
+    let (p_killed, p_assaulted, p_robbed, p_steal) = stat_probs(world, id, row);
     let adult = crate::systems::demography::is_adult(world, id);
     let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return };
     let zone = world.map.zone(tile);
@@ -487,7 +515,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         gang: w.gang_of(id),
     };
 
-    if adult && u_killed < row.p_killed * m {
+    if adult && u_killed < p_killed {
         let hole = base(HoleKind::Killed, 0, true, 0, world);
         let name = world.name_of(id);
         let ev = world.push_event(
@@ -500,7 +528,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         bind::open_hole(world, Hole { event_id: ev, ..hole });
         return;
     }
-    if u_assaulted < row.p_assaulted * m {
+    if u_assaulted < p_assaulted {
         world.remember(id, MemoryKind::Fought, None, 0.7, -0.7, false);
         world.remember(id, MemoryKind::Lost, None, 0.6, -0.6, false);
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
@@ -516,7 +544,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
         let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
         bind::open_hole(world, hole);
     }
-    if u_robbed < row.p_robbed * m {
+    if u_robbed < p_robbed {
         let extort = world.config.social.extort_amount;
         let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
         let loot = extort.min(coins.max(0));
@@ -549,7 +577,7 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     if u_flirt < row.p_flirt {
         stat_flirt(world, id);
     }
-    if u_steal < row.p_steal {
+    if u_steal < p_steal {
         stat_theft(world, id);
     }
 }
