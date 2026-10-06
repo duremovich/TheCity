@@ -34,6 +34,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Bury => vec![(Key::CorpseBuried, true)],
         GoalKind::Found => vec![(Key::Founded, true)],
         GoalKind::Squat => vec![(Key::Squatting, true)],
+        GoalKind::Shop => vec![(Key::Bought, true)],
         GoalKind::Idle => return None,
     })
 }

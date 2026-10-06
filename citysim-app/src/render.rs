@@ -43,6 +43,8 @@ const C_LITTER: [u32; 3] = [0xbdb76b, 0x8b5a2b, 0x8b1a1a];
 /// M12: a derelict's crack, a Hotel's bed.
 const C_DERELICT: u32 = 0x9a5a3a;
 const C_BED: u32 = 0xd8cfe8;
+/// M13 (plan 2.8): vehicles by kind (bike, car, truck, flyer).
+const C_VEHICLE: [u32; 4] = [0xe0c040, 0x40c8e0, 0xc87840, 0xe040c0];
 /// M12 D43: the district overlay's controller fill (the City's grey fainter).
 const DISTRICT_ALPHA: f32 = 0.22;
 const DISTRICT_CITY_ALPHA: f32 = 0.12;
@@ -271,6 +273,11 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
+    // 5b. M13 (plan 2.8): parked vehicles as small rects along the door's
+    // top edge (at most four a door), drivers' glyphs over their squares,
+    // and flyers lerped from where they took off to the door, over walls.
+    draw_vehicles(world, app, &in_view);
+
     // 6. selection: a Full agent's square and sight radius, else the building
     // the selection is (or is inside)
     if let Some(sel) = app.selected {
@@ -369,6 +376,84 @@ pub fn draw(world: &World, app: &App) {
     }
 }
 
+fn vehicle_colour(kind: citysim::AssetKind) -> Color {
+    hex(match kind {
+        citysim::AssetKind::Motorcycle => C_VEHICLE[0],
+        citysim::AssetKind::Car => C_VEHICLE[1],
+        citysim::AssetKind::Truck => C_VEHICLE[2],
+        _ => C_VEHICLE[3],
+    })
+}
+
+fn vehicle_glyph(kind: citysim::AssetKind) -> &'static str {
+    match kind {
+        citysim::AssetKind::Motorcycle => "b",
+        citysim::AssetKind::Car => "c",
+        citysim::AssetKind::Truck => "t",
+        _ => "f",
+    }
+}
+
+/// Plan 2.8: parked vehicles, drivers and flyers.
+fn draw_vehicles(world: &World, app: &App, in_view: &dyn Fn(TilePos) -> bool) {
+    use citysim::{Asset, AssetLoc, ExecState};
+    let cam = &app.camera;
+    let ppt = cam.px_per_tile;
+    // Parked: up to four per door, in a 2 x 2 grid over the door tile.
+    let mut per_door: std::collections::BTreeMap<(u8, u8), u8> = std::collections::BTreeMap::new();
+    for &v in &world.vehicles {
+        let Some(x) = world.comp::<Asset>(v) else { continue };
+        let AssetLoc::Parked(b) = x.loc else { continue };
+        let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { continue };
+        if !in_view(door) {
+            continue;
+        }
+        let n = per_door.entry((door.x, door.y)).or_insert(0);
+        if *n >= 4 {
+            continue;
+        }
+        let p = cam.tile_to_screen(vec2(f32::from(door.x), f32::from(door.y)));
+        let w = (ppt / 2.0).max(3.0);
+        let (sx, sy) = (p.x + f32::from(*n % 2) * w, p.y + f32::from(*n / 2) * w);
+        draw_rectangle(sx, sy, w - 1.0, w - 1.0, vehicle_colour(x.kind));
+        draw_rectangle_lines(sx, sy, w - 1.0, w - 1.0, 1.0, BLACK);
+        *n += 1;
+    }
+    // Driving and flying, whatever the tier (the trips map is small).
+    for (&agent, trip) in &world.trips {
+        let Some(kind) = world.comp::<Asset>(trip.vehicle).map(|x| x.kind) else { continue };
+        let Some(brain) = world.comp::<Brain>(agent) else { continue };
+        let at = match &brain.exec {
+            ExecState::Fly { target, from, depart, arrive_tick } => {
+                let span = arrive_tick.saturating_sub(*depart).max(1) as f32;
+                let t = (world.tick.saturating_sub(*depart) as f32 / span).clamp(0.0, 1.0);
+                let (fx, fy) = (f32::from(from.x), f32::from(from.y));
+                let (tx, ty) = (f32::from(target.tile.x), f32::from(target.tile.y));
+                Some(vec2(fx + (tx - fx) * t, fy + (ty - fy) * t))
+            }
+            _ if brain.lod == Lod::Full => world
+                .comp::<Position>(agent)
+                .filter(|p| p.building.is_none())
+                .map(|p| vec2(f32::from(p.tile.x), f32::from(p.tile.y))),
+            _ => None,
+        };
+        let Some(at) = at else { continue };
+        if !in_view(TilePos { x: at.x as u8, y: at.y as u8 }) {
+            continue;
+        }
+        let p = cam.tile_to_screen(at);
+        if kind == citysim::AssetKind::Flyer {
+            draw_circle(p.x + ppt / 2.0, p.y + ppt / 2.0, (ppt * 0.45).max(3.0), vehicle_colour(kind));
+        } else {
+            draw_rectangle_lines(p.x, p.y, ppt, ppt, 2.0, vehicle_colour(kind));
+        }
+        if ppt >= LABEL_MIN_PX / 2.0 {
+            let size = (ppt * 0.9).clamp(10.0, 28.0);
+            draw_text(vehicle_glyph(kind), p.x + ppt * 0.25, p.y + ppt * 0.8, size, BLACK);
+        }
+    }
+}
+
 /// 0.35 while dark (21:00–06:00), ramping linearly over 60 ticks each side.
 fn night_alpha(tick: u64) -> f32 {
     let t = f32::from(time::tick_of_day(tick));
@@ -395,7 +480,7 @@ fn agent_colour(world: &World, id: citysim::EntityId) -> Color {
     let Some(brain) = world.comp::<Brain>(id) else { return hex(C_AGENT_IDLE) };
     let kind = match &brain.exec {
         E::Use { kind, .. } => *kind,
-        E::Goto { .. } | E::GotoTimed { .. } => match brain.current_step().map(|s| s.action) {
+        E::Goto { .. } | E::GotoTimed { .. } | E::Fly { .. } => match brain.current_step().map(|s| s.action) {
             // en route: colour by the step after the walk, so a guard heading to an arrest reads as guarding
             Some(_) => brain
                 .plan

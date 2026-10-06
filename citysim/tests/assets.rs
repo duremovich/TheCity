@@ -27,6 +27,15 @@ fn set_coins(w: &mut World, a: EntityId, coins: i64) {
     w.comp_mut::<Wallet>(a).expect("wallet").coins = coins;
 }
 
+/// Phase 2 seeds two Garages (D18); a phase 1 test that needs a city with
+/// none (an impound nobody buys, one Garage at the parts market) sets them
+/// aside: a demolished building buys and sells nothing.
+fn set_seeded_garages_aside(w: &mut World) {
+    for g in w.buildings_of_kind(BuildingKind::Garage).to_vec() {
+        w.comp_mut::<Building>(g).expect("garage").demolished = true;
+    }
+}
+
 fn coins(w: &World, a: EntityId) -> i64 {
     w.comp::<Wallet>(a).map_or(0, |x| x.coins)
 }
@@ -91,7 +100,8 @@ fn test_purchase_pays_seller_imports_and_conserves() {
     assets::run(&mut w);
     assert_eq!(ownership::total_coins(&w), total, "upkeep and finance move coins, never make them");
     assert_eq!(asset(&w, car2).finance.as_ref().expect("plan").remaining, 588);
-    assert_eq!(coins(&w, poor), 100 - 2 - 12, "upkeep 2, the day's 12");
+    // Phase 2: parked in the Garage, it pays the Garage its rent (1).
+    assert_eq!(coins(&w, poor), 100 - 2 - 12 - 1, "upkeep 2, the day's 12, the Garage's rent");
     assert!(w.stats.current.flow_asset_upkeep >= 4 && w.stats.current.flow_finance == 12);
     w.check_indices().expect("indices in step");
 }
@@ -164,6 +174,7 @@ fn test_financed_implant_bricks_then_transfers() {
 #[test]
 fn test_unpaid_upkeep_impounds_and_sells_to_garage() {
     let mut w = city();
+    set_seeded_garages_aside(&mut w);
     let who = adults(&w)[7];
     let car = assets::grant(&mut w, who, AssetKind::Car, 1).expect("granted");
     set_coins(&mut w, who, 0);
@@ -312,6 +323,7 @@ fn test_scav_strip_to_controlling_gang() {
 #[test]
 fn test_parts_market_buys_from_gang_first() {
     let mut w = city();
+    set_seeded_garages_aside(&mut w);
     let (corp, g) = garage(&mut w, 5000);
     let gang = w.gangs()[0];
     let hideout = w.hideout_of(gang).expect("hideout");

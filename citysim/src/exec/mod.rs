@@ -47,6 +47,10 @@ pub enum ExecState {
         next_move_tick: Tick,
         /// When the agent first found the door or building full.
         blocked_since: Option<Tick>,
+        /// M13 D19: quarter ticks carried past `next_move_tick` (a driver's
+        /// step can cost less than a tick).
+        #[serde(default)]
+        carry_q: u8,
     },
     /// Coarse LOD.
     GotoTimed {
@@ -63,6 +67,15 @@ pub enum ExecState {
     },
     Wait {
         until: Tick,
+    },
+    /// M13 D22: a flyer's hop, at every tier: off the ground at `from` (the
+    /// street outside the building it left), at the door at `arrive_tick`.
+    /// The renderer lerps `from` to the door and draws it over walls.
+    Fly {
+        target: GotoTarget,
+        from: TilePos,
+        depart: Tick,
+        arrive_tick: Tick,
     },
 }
 
@@ -132,14 +145,22 @@ fn emigrate_step(world: &mut World, id: EntityId) {
     let lod = brain.lod;
     let state = brain.exec.clone();
     let result = match state {
-        ExecState::Goto { target, path, next_move_tick, blocked_since } => {
-            advance_goto(world, id, target, path, next_move_tick, blocked_since)
+        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q } => {
+            advance_goto(world, id, target, path, next_move_tick, blocked_since, carry_q)
         }
         ExecState::GotoTimed { target, arrive_tick, blocked_since } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
                 arrive(world, id, target, blocked_since)
+            }
+        }
+        // M13 D22: an emigrant in the air lands as a timed walk does.
+        ExecState::Fly { target, arrive_tick, .. } => {
+            if tick < arrive_tick {
+                StepResult::Running
+            } else {
+                arrive(world, id, target, None)
             }
         }
         _ => {
@@ -177,7 +198,7 @@ fn step_agent(world: &mut World, id: EntityId) {
             && tick.saturating_sub(p.started_tick) <= world.config.brain.plan_timeout_ticks
     }) && match &brain.exec {
         ExecState::Goto { next_move_tick, .. } => tick < *next_move_tick,
-        ExecState::GotoTimed { arrive_tick, .. } => tick < *arrive_tick,
+        ExecState::GotoTimed { arrive_tick, .. } | ExecState::Fly { arrive_tick, .. } => tick < *arrive_tick,
         _ => false,
     };
     if between_moves {
@@ -204,14 +225,23 @@ fn step_agent(world: &mut World, id: EntityId) {
 
     let result = match state {
         ExecState::Idle => start_step(world, id, &step, lod),
-        ExecState::Goto { target, path, next_move_tick, blocked_since } => {
-            advance_goto(world, id, target, path, next_move_tick, blocked_since)
+        ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q } => {
+            advance_goto(world, id, target, path, next_move_tick, blocked_since, carry_q)
         }
         ExecState::GotoTimed { target, arrive_tick, blocked_since } => {
             if tick < arrive_tick {
                 StepResult::Running
             } else {
                 arrive(world, id, target, blocked_since)
+            }
+        }
+        // M13 D22: the flyer lands at the door (the door queue and a full
+        // building as a timed arrival).
+        ExecState::Fly { target, arrive_tick, .. } => {
+            if tick < arrive_tick {
+                StepResult::Running
+            } else {
+                arrive(world, id, target, None)
             }
         }
         ExecState::Use { kind, until, started } => {
@@ -237,6 +267,14 @@ fn step_agent(world: &mut World, id: EntityId) {
                 b.plan_step = b.plan_step.saturating_add(1);
                 b.exec = ExecState::Idle;
                 b.action_until = tick;
+            }
+            if matches!(step.action, ActionKind::GoTo(_)) {
+                // M13 D49: a commute sample; D20: the vehicle parks.
+                let driving = world.trips.contains_key(&id);
+                commute_arrived(world, id, driving);
+                if driving {
+                    crate::systems::vehicles::end_trip(world, id, true);
+                }
             }
             actions::on_arrive(world, id, &step);
         }
@@ -311,11 +349,43 @@ impl World {
         if let Some((kind, started)) = running {
             actions::on_abort(self, id, kind, started);
         }
+        // M13 D20: a vehicle on the road parks where its driver stands.
+        crate::systems::vehicles::end_trip(self, id, false);
+        self.commute_start.remove(&id);
         if let Some(b) = self.comp_mut::<Brain>(id) {
             b.clear_plan();
+            b.shop_pick = None;
         }
         self.release_all(id);
     }
+}
+
+/// M13 D49: a `GoTo` toward the agent's own workplace starts (Full and
+/// Coarse): remember when and how far, door to door.
+fn commute_started(world: &mut World, id: EntityId, target: &GotoTarget) {
+    if !world.config.assets.enabled {
+        return;
+    }
+    let employer = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);
+    if target.building.is_none() || target.building != employer {
+        return;
+    }
+    let Some(from) = walk_origin(world, id) else { return };
+    let tiles = from.manhattan(target.tile);
+    if tiles > 0 {
+        let tick = world.tick;
+        world.commute_start.insert(id, (tick, tiles));
+    }
+}
+
+/// M13 D49: an arrival at the workplace adds its ticks and tiles to the
+/// day's walked or driven sums (`commute_tpt_*`).
+fn commute_arrived(world: &mut World, id: EntityId, driving: bool) {
+    let Some((start, tiles)) = world.commute_start.remove(&id) else { return };
+    let ticks = world.tick.saturating_sub(start);
+    let i = if driving { 2 } else { 0 };
+    world.commute_acc[i] += ticks;
+    world.commute_acc[i + 1] += u64::from(tiles);
 }
 
 /// Begin a step: resolve a GoTo, or check preconditions and apply start
@@ -348,11 +418,22 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 return StepResult::Done;
             }
             let target = GotoTarget { dest: key, tile, building };
-            let state = match lod {
-                Lod::Coarse | Lod::Statistical => timed_goto(world, id, target),
-                Lod::Full => match walking_goto(world, id, target) {
+            // M13 D20: a GoTo rides when a vehicle is to hand (D22: a flyer hops).
+            let driving = if matches!(step.action, ActionKind::GoTo(_)) {
+                commute_started(world, id, &target);
+                crate::systems::vehicles::begin_trip(world, id, &target)
+            } else {
+                None
+            };
+            let state = match (driving, lod) {
+                (Some(crate::components::AssetKind::Flyer), _) => crate::systems::vehicles::fly(world, id, target),
+                (_, Lod::Coarse | Lod::Statistical) => timed_goto(world, id, target),
+                (_, Lod::Full) => match walking_goto(world, id, target) {
                     Some(s) => s,
-                    None => return StepResult::Failed(FailReason::NoSuchPlace),
+                    None => {
+                        crate::systems::vehicles::end_trip(world, id, false);
+                        return StepResult::Failed(FailReason::NoSuchPlace);
+                    }
                 },
             };
             if let Some(b) = world.comp_mut::<Brain>(id) {
@@ -385,7 +466,7 @@ fn plan_target_of(world: &World, id: EntityId) -> Option<EntityId> {
 
 /// The tile a walk starts from: the street outside the current building, or
 /// the agent's own tile.
-fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
+pub fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
     let pos = world.comp::<Position>(id)?;
     match pos.building.and_then(|b| world.comp::<Building>(b)) {
         Some(b) => Some(world.outside_door(b)),
@@ -394,17 +475,27 @@ fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
 }
 
 /// A Coarse Goto: arrive after Manhattan distance × move ticks; M12 D18: ×
-/// `1 + timed_mult × litter` of the target's district, rounded.
+/// `1 + timed_mult × litter` of the target's district, rounded. M13 D21:
+/// × the vehicle's `timed_mult` when driving (else `Kit.walk_mult`); at
+/// exactly 1.0 the integer formula runs unchanged (a branch, not a multiply).
 pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
     let from = walk_origin(world, id).unwrap_or(target.tile);
-    let mut walk = Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
+    let base = Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
+    let m = crate::systems::vehicles::timed_mult(world, id);
+    let mut litter = 1.0;
     if crate::systems::litter::enabled(world) {
         let dirt = world.district(world.district_of(target.tile)).litter;
-        let mult = 1.0 + world.config.litter.timed_mult * dirt;
-        if mult > 1.0 {
-            walk = (walk as f32 * mult).round() as Tick;
-        }
+        litter = 1.0 + world.config.litter.timed_mult * dirt;
     }
+    let walk = if m == 1.0 {
+        if litter > 1.0 {
+            (base as f32 * litter).round() as Tick
+        } else {
+            base
+        }
+    } else {
+        (base as f32 * m * litter.max(1.0)).round() as Tick
+    };
     let arrive_tick = world.tick + walk;
     ExecState::GotoTimed { target, arrive_tick, blocked_since: None }
 }
@@ -433,10 +524,17 @@ pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<E
         p.reverse();
         p
     };
-    Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None })
+    Some(ExecState::Goto { target, path, next_move_tick: world.tick, blocked_since: None, carry_q: 0 })
 }
 
-/// One tick of Full-LOD movement.
+/// One tick of Full-LOD movement. M13 D19: steps are counted in quarter
+/// ticks, `next_q = next_move_tick × 4 + carry_q` (never earlier than now);
+/// the call keeps stepping while `next_q` is inside this tick, up to
+/// `[vehicles] max_steps_per_tick` steps, stopping before the door (the
+/// door is entered by `try_enter` on the next call, never in a burst) and
+/// at the path's end. An unchromed walker's step is 8 quarters, so it takes
+/// one step and moves on `tick + 2`: the M12 arithmetic exactly. Leaving a
+/// building keeps `tick + move_ticks`.
 fn advance_goto(
     world: &mut World,
     id: EntityId,
@@ -444,6 +542,7 @@ fn advance_goto(
     mut path: Vec<TilePos>,
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
+    carry_q: u8,
 ) -> StepResult {
     let tick = world.tick;
     if tick < next_move_tick {
@@ -458,36 +557,58 @@ fn advance_goto(
             return StepResult::Done;
         }
         world.leave_building(id);
-        return set_goto(world, id, target, path, tick + move_ticks, None);
+        return set_goto(world, id, target, path, tick + move_ticks, None, 0);
     }
 
-    match target.building {
-        Some(b) => {
-            let door = world.comp::<Building>(b).map(|bd| bd.door);
-            if door == Some(pos.tile) {
-                return try_enter(world, id, target, path, blocked_since);
-            }
-            match world.flow_step(b, pos.tile) {
-                Some(n) if door == Some(n) => try_enter(world, id, target, path, blocked_since),
-                Some(n) => {
-                    move_to(world, id, n);
-                    let delay = litter_delay(world, n);
-                    set_goto(world, id, target, path, tick + move_ticks + delay, None)
+    let driving = world.comp::<crate::components::Kit>(id).is_some_and(|k| k.driving.is_some());
+    let max_steps = if driving { world.config.vehicles.max_steps_per_tick.max(1) } else { 1 };
+    let mut next_q = (next_move_tick * 4 + Tick::from(carry_q)).max(tick * 4);
+    let end_q = (tick + 1) * 4;
+    let mut here = pos.tile;
+    let mut steps = 0u8;
+    loop {
+        let next = match target.building {
+            Some(b) => {
+                let door = world.comp::<Building>(b).map(|bd| bd.door);
+                if door == Some(here) {
+                    if steps == 0 {
+                        return try_enter(world, id, target, path, blocked_since);
+                    }
+                    break;
                 }
-                // The field never reached this tile: there is no way there.
-                None => StepResult::Failed(FailReason::NoSuchPlace),
+                match world.flow_step(b, here) {
+                    Some(n) if door == Some(n) => {
+                        if steps == 0 {
+                            return try_enter(world, id, target, path, blocked_since);
+                        }
+                        break;
+                    }
+                    Some(n) => n,
+                    // The field never reached this tile: there is no way there.
+                    None if steps == 0 => return StepResult::Failed(FailReason::NoSuchPlace),
+                    None => break,
+                }
             }
+            None => match path.pop() {
+                Some(n) => n,
+                None if steps == 0 && here == target.tile => return StepResult::Done,
+                None if steps == 0 => return StepResult::Failed(FailReason::NoSuchPlace),
+                None => break,
+            },
+        };
+        move_to(world, id, next);
+        here = next;
+        steps += 1;
+        if driving {
+            crate::systems::vehicles::note_step(world, id, next);
         }
-        None => match path.pop() {
-            Some(n) => {
-                move_to(world, id, n);
-                let delay = litter_delay(world, n);
-                set_goto(world, id, target, path, tick + move_ticks + delay, None)
-            }
-            None if pos.tile == target.tile => StepResult::Done,
-            None => StepResult::Failed(FailReason::NoSuchPlace),
-        },
+        next_q += u64::from(crate::systems::vehicles::step_q(world, id, next)) + 4 * litter_delay(world, next);
+        if next_q >= end_q || steps >= max_steps || (target.building.is_none() && path.is_empty()) {
+            break;
+        }
     }
+    let carry = (next_q % 4) as u8;
+    set_goto(world, id, target, path, next_q / 4, None, carry)
 }
 
 fn move_to(world: &mut World, id: EntityId, tile: TilePos) {
@@ -521,7 +642,7 @@ fn try_enter(
     if tick - since >= world.config.exec.door_queue_max_ticks {
         return StepResult::Failed(if full { FailReason::BuildingFull } else { FailReason::Timeout });
     }
-    set_goto(world, id, target, path, tick + 1, Some(since))
+    set_goto(world, id, target, path, tick + 1, Some(since), 0)
 }
 
 fn set_goto(
@@ -531,9 +652,10 @@ fn set_goto(
     path: Vec<TilePos>,
     next_move_tick: Tick,
     blocked_since: Option<Tick>,
+    carry_q: u8,
 ) -> StepResult {
     if let Some(brain) = world.comp_mut::<Brain>(id) {
-        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since };
+        brain.exec = ExecState::Goto { target, path, next_move_tick, blocked_since, carry_q };
     }
     StepResult::Running
 }
@@ -614,7 +736,17 @@ impl World {
                 Some(crate::systems::raid::MusterAt::Inside(b)) => Some(b),
                 _ => None,
             },
-            LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget => None,
+            // M13 D29: the bound seller; D47: a bound Garage, else the nearest.
+            LocationKey::Seller => target.filter(|&t| self.has::<Building>(t)),
+            LocationKey::Garage => {
+                let garage = |t: &EntityId| self.comp::<Building>(*t).is_some_and(|b| b.kind == K::Garage);
+                target
+                    .filter(garage)
+                    .or_else(|| self.comp::<crate::components::Job>(agent).and_then(|j| j.employer).filter(garage))
+                    .or_else(|| self.local(agent, K::Garage))
+            }
+            // M13 D26: a vehicle is reached on the street outside its door.
+            LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget | LocationKey::Vehicle => None,
         }
     }
 
@@ -639,6 +771,7 @@ impl World {
                 Some(crate::systems::raid::MusterAt::Door(t)) => Some(t),
                 _ => None,
             },
+            LocationKey::Vehicle => target.and_then(|v| crate::systems::vehicles::vehicle_stand(self, v)),
             _ => None,
         }
     }

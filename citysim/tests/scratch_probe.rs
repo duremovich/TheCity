@@ -202,6 +202,7 @@ fn probe_night_states() {
             ExecState::Use { kind, .. } => format!("Use({kind:?})"),
             ExecState::Goto { .. } => "Goto".into(),
             ExecState::GotoTimed { .. } => "GotoTimed".into(),
+            ExecState::Fly { .. } => "Fly".into(),
             ExecState::Wait { .. } => "Wait".into(),
             ExecState::Idle => format!("Idle goal={:?} plan={}", b.current_goal, b.plan.is_some()),
         };

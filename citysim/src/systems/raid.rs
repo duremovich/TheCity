@@ -473,10 +473,18 @@ pub fn crossfire(
         }
     }
     let mut hits = 0;
+    let assets = world.config.assets.enabled;
     for b in candidates {
         let roll: f32 = world.rng.world().random();
         if roll >= cfg.p_crossfire {
             continue;
+        }
+        // M13 D25: the bystander's dodge (reflex chrome saves from bullets too).
+        if assets {
+            let dodge: f32 = world.rng.world().random();
+            if dodge < crate::systems::vehicles::p_dodge(world, b) {
+                continue;
+            }
         }
         hits += 1;
         world.stats.current.crossfire += 1;
@@ -485,7 +493,10 @@ pub fn crossfire(
             n.safety = (n.safety - 0.6).max(0.0);
         }
         let kill: f32 = world.rng.world().random();
-        let died = kill < cfg.p_crossfire_kill;
+        // M13 D25: armour (Skin chrome) takes its share of the kill roll.
+        let armour = if assets { world.comp::<crate::components::Kit>(b).map_or(0.0, |k| k.armour) } else { 0.0 };
+        let died =
+            if armour > 0.0 { kill < cfg.p_crossfire_kill * (1.0 - armour) } else { kill < cfg.p_crossfire_kill };
         let (an, bn) = (world.name_of(attacker), world.name_of(b));
         let fell = if died { " and died" } else { "" };
         let kind = if died { EventKind::Murder } else { EventKind::Assault };

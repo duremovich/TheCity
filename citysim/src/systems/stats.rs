@@ -206,6 +206,12 @@ pub fn snapshot(world: &mut World) {
         row.robots = robots;
         [row.vehicles_moto, row.vehicles_car, row.vehicles_truck, row.vehicles_flyer] = vehicles;
         row.stims_legal = legal;
+        // D49: the day's commutes, ticks per Manhattan tile, walked and driven.
+        let acc = std::mem::take(&mut world.commute_acc);
+        let tpt = |ticks: u64, tiles: u64| if tiles > 0 { ticks as f32 / tiles as f32 } else { 0.0 };
+        let row = &mut world.stats.current;
+        row.commute_tpt_walk = tpt(acc[0], acc[1]);
+        row.commute_tpt_drive = tpt(acc[2], acc[3]);
     }
 }
 

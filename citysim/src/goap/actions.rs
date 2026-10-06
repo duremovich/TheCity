@@ -80,10 +80,14 @@ pub enum ActionKind {
     /// M12 D27: move into a derelict building (a squatter; under a gang's
     /// Squat order, a blow of the gang's claim).
     Occupy,
+    /// M13 D29: at an open seller, buy the `Brain.shop_pick`.
+    BuyAsset,
+    /// M13 D26: beat a street-parked vehicle's lock and drive off in it.
+    StealVehicle,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 60] = [
+pub const PLANNABLE: [ActionKind; 65] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -106,6 +110,10 @@ pub const PLANNABLE: [ActionKind; 60] = [
     ActionKind::GoTo(LocationKey::Squat),
     // M12 D37.
     ActionKind::GoTo(LocationKey::MusterPoint),
+    // M13 D47 (a Mechanic's shift), D29, D26.
+    ActionKind::GoTo(LocationKey::Garage),
+    ActionKind::GoTo(LocationKey::Seller),
+    ActionKind::GoTo(LocationKey::Vehicle),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -147,6 +155,8 @@ pub const PLANNABLE: [ActionKind; 60] = [
     ActionKind::Register,
     ActionKind::CheckIn,
     ActionKind::Occupy,
+    ActionKind::BuyAsset,
+    ActionKind::StealVehicle,
 ];
 
 impl ActionKind {
@@ -225,6 +235,8 @@ impl ActionKind {
                 | ActionKind::Register
                 | ActionKind::CheckIn
                 | ActionKind::Occupy
+                | ActionKind::BuyAsset
+                | ActionKind::StealVehicle
         )
     }
 }
@@ -338,6 +350,14 @@ pub struct PlanCtx {
     pub squat_ok: bool,
     /// M12 D38: a member serving the gang's Squat order on a derelict target.
     pub gang_squat: bool,
+    /// M13 D29: a `Brain.shop_pick` is set and the target is its seller.
+    pub shop_pick: bool,
+    /// M13 D26: the bound target is a vehicle this agent may steal.
+    pub vehicle_target: bool,
+    /// M13 D26: a gang at the agent's Hideout would pay for a stolen vehicle.
+    pub can_fence_vehicle: bool,
+    /// M13 D26: `[vehicles] steal_vehicle_cost`.
+    pub steal_vehicle_cost: f32,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -421,6 +441,10 @@ impl PlanCtx {
             if wage_at == LocationKey::Workplace {
                 add(LocationKey::Workplace, world.wage_desk(agent));
             }
+            // M13 D47: a Mechanic's Garage (its employer).
+            if job.is_some_and(|j| j.role == Role::Mechanic) {
+                add(LocationKey::Garage, world.resolve_building(agent, LocationKey::Garage, None));
+            }
             add(LocationKey::TargetHome, target);
             if let Some(b) = world
                 .comp::<crate::components::Brain>(agent)
@@ -475,6 +499,17 @@ impl PlanCtx {
             };
             add(LocationKey::Hotel, hotel);
             add(LocationKey::Squat, squat.or(derelict_target));
+            // M13 D29: the bound seller (a Garage, a Market for a pack).
+            if target
+                .and_then(|t| world.comp::<Building>(t))
+                .is_some_and(|b| matches!(b.kind, BuildingKind::Garage | BuildingKind::Clinic | BuildingKind::Market))
+            {
+                add(LocationKey::Seller, target);
+            }
+            // M13 D26: the bound vehicle's door, from the street outside it.
+            if let Some(t) = target.and_then(|t| crate::systems::vehicles::vehicle_stand(world, t)) {
+                dist.insert(LocationKey::Vehicle, o.manhattan(t));
+            }
         }
 
         let (target_pantry, target_occupied) = target
@@ -609,6 +644,11 @@ impl PlanCtx {
             squatter: squat.is_some(),
             squat_ok,
             gang_squat,
+            shop_pick: target.is_some_and(|t| world.has::<Building>(t))
+                && world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.shop_pick.is_some()),
+            vehicle_target: target.is_some_and(|t| crate::systems::vehicles::may_steal(world, agent, t)),
+            can_fence_vehicle: crate::systems::vehicles::can_fence(world, agent, target),
+            steal_vehicle_cost: world.config.vehicles.steal_vehicle_cost,
             dist,
         }
     }
@@ -653,6 +693,8 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::Founded => ws.founded = value,
         K::CheckedIn => ws.checked_in = value,
         K::Squatting => ws.squatting = value,
+        K::Bought => ws.bought = value,
+        K::CarryingVehicle => ws.carrying_vehicle = value,
     }
 }
 
@@ -674,7 +716,11 @@ impl ActionKind {
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
             ActionKind::Beg => !ctx.is(Role::Guard),
-            ActionKind::Fence | ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
+            ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
+            // M13 D26: anyone fences a stolen vehicle at a Hideout.
+            ActionKind::Fence => ctx.in_gang || ctx.vehicle_target,
+            ActionKind::BuyAsset => ctx.adult,
+            ActionKind::StealVehicle => ctx.adult && ctx.lawfulness < 0.4 && !ctx.is(Role::Guard),
             // M12 D31: a rioter marches too.
             ActionKind::Muster | ActionKind::Brawl => ctx.in_gang || ctx.raid_pending,
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
@@ -764,7 +810,14 @@ impl ActionKind {
             ActionKind::SplitLoot => {
                 ws.in_gang && at(LocationKey::Hideout) && ws.gang_task_done && ctx.has_loot && !ctx.hideout_sacked
             }
-            ActionKind::Fence => at(LocationKey::Hideout) && ws.carrying_stolen && ctx.can_fence && !ctx.hideout_sacked,
+            ActionKind::Fence => {
+                at(LocationKey::Hideout)
+                    && !ctx.hideout_sacked
+                    && ((ctx.in_gang && ws.carrying_stolen && ctx.can_fence)
+                        || (ws.carrying_vehicle && ctx.can_fence_vehicle))
+            }
+            ActionKind::BuyAsset => at(LocationKey::Seller) && ctx.shop_pick && !ws.bought,
+            ActionKind::StealVehicle => at(LocationKey::Vehicle) && ctx.vehicle_target && !ws.carrying_vehicle,
             ActionKind::Muster => at(LocationKey::MusterPoint) && !ws.mustered && ctx.raid_pending,
             ActionKind::Brawl => at(LocationKey::RaidTarget) && ws.mustered && !ws.raid_done,
             ActionKind::Attack => ctx.hostile_adjacent && !ws.threat_removed,
@@ -815,7 +868,9 @@ impl ActionKind {
             ActionKind::JoinGang => ctx.gang_eligible && ctx.dist.contains_key(&LocationKey::Hideout),
             ActionKind::Extort => ctx.extort_ok && ctx.dist.contains_key(&LocationKey::TargetHome),
             ActionKind::SplitLoot => ctx.has_loot && !ctx.hideout_sacked,
-            ActionKind::Fence => ctx.can_fence && !ctx.hideout_sacked,
+            ActionKind::Fence => ((ctx.in_gang && ctx.can_fence) || ctx.can_fence_vehicle) && !ctx.hideout_sacked,
+            ActionKind::BuyAsset => ctx.shop_pick && ctx.dist.contains_key(&LocationKey::Seller),
+            ActionKind::StealVehicle => ctx.vehicle_target && ctx.dist.contains_key(&LocationKey::Vehicle),
             ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::MusterPoint),
             ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RaidTarget),
             ActionKind::Attack => ctx.hostile_adjacent,
@@ -939,9 +994,14 @@ impl ActionKind {
                 n.coin_bucket = 2;
                 n.has_savings = true;
                 if self == ActionKind::Fence {
-                    n.carrying_stolen = false;
-                    n.has_food = false;
-                    n.food_count = 0;
+                    // A vehicle's fence leaves the food; food's leaves the vehicle.
+                    if n.carrying_vehicle {
+                        n.carrying_vehicle = false;
+                    } else {
+                        n.carrying_stolen = false;
+                        n.has_food = false;
+                        n.food_count = 0;
+                    }
                 }
             }
             ActionKind::Attack => n.threat_removed = true,
@@ -968,6 +1028,13 @@ impl ActionKind {
                     n.gang_task_done = true;
                 }
             }
+            ActionKind::BuyAsset => {
+                n.bought = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
+            ActionKind::StealVehicle => n.carrying_vehicle = true,
             _ => {}
         }
         n
@@ -1034,6 +1101,9 @@ impl ActionKind {
             ActionKind::Register => 20.0,
             ActionKind::CheckIn => 4.0,
             ActionKind::Occupy => 6.0,
+            ActionKind::BuyAsset => 10.0,
+            // M13 D26: StealFood's lawfulness, guard, starving and dark terms.
+            ActionKind::StealVehicle => steal_mods(ctx.steal_vehicle_cost),
         };
         c.clamp(0.5, 60.0)
     }
@@ -1054,7 +1124,11 @@ impl ActionKind {
             | ActionKind::GoTo(LocationKey::CorpseTile)
             | ActionKind::CarryCorpse
             | ActionKind::BuryCorpse
-            | ActionKind::Occupy => ctx.target,
+            | ActionKind::Occupy
+            | ActionKind::GoTo(LocationKey::Seller)
+            | ActionKind::BuyAsset
+            | ActionKind::GoTo(LocationKey::Vehicle)
+            | ActionKind::StealVehicle => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

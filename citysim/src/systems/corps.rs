@@ -417,6 +417,8 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
         Niche::Food => BuildingKind::Market,
         Niche::Housing => BuildingKind::Home,
         Niche::Security => BuildingKind::SecurityOffice,
+        // M13 D17: Garages carry the Tech share in phase 2.
+        Niche::Tech => BuildingKind::Garage,
     };
     let all = corp_brain::niche_buildings(world, corp, niche);
     let of_kind = |k: BuildingKind| -> Vec<EntityId> {

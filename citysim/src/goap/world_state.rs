@@ -65,11 +65,19 @@ pub enum LocationKey {
     /// M12 D37: where the expedition gathers (`raid::muster_point`): a held
     /// Home's or a riot muster's door tile, else inside the Hideout.
     MusterPoint,
+    /// M13 D47: a Garage (its own key once plans reach one).
+    Garage,
+    /// M13 D29: the plan's target building as a seller (a Garage, a Market
+    /// for a pack): resolved like `TargetHome`, never a Home.
+    Seller,
+    /// M13 D26: the street tile outside the door the plan's target vehicle
+    /// is parked at (no building).
+    Vehicle,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 19] = [
+    pub const GOTO: [LocationKey; 22] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -89,6 +97,9 @@ impl LocationKey {
         LocationKey::Hotel,
         LocationKey::Squat,
         LocationKey::MusterPoint,
+        LocationKey::Garage,
+        LocationKey::Seller,
+        LocationKey::Vehicle,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -106,9 +117,10 @@ impl LocationKey {
             BuildingKind::SecurityOffice => LocationKey::Workplace,
             BuildingKind::Lot => LocationKey::Street,
             BuildingKind::Hotel => LocationKey::Hotel,
-            // TODO(M13 ph2): `LocationKey::{Clinic, Garage}` arrive with the
-            // plans that reach them; until then nobody plans a visit.
-            BuildingKind::Clinic | BuildingKind::Garage => LocationKey::Street,
+            BuildingKind::Garage => LocationKey::Garage,
+            // TODO(M13 ph3): `LocationKey::Clinic` arrives with the plans
+            // that reach it; until then nobody plans a visit.
+            BuildingKind::Clinic => LocationKey::Street,
         }
     }
 }
@@ -152,6 +164,12 @@ pub enum Key {
     CheckedIn,
     /// M12 D27: living in a squat.
     Squatting,
+    /// M13 D43: an asset bought (never observed true; `BuyAsset` sets it).
+    Bought,
+    /// M13 D26 (phase 2 deviation): driving or holding a stolen vehicle not
+    /// yet fenced. Its own key, not `CarryingStolen`, so a non-member's
+    /// plan cannot fence stolen food it has no gang to sell to.
+    CarryingVehicle,
 }
 
 /// Partial goal state: at most 3 listed keys.
@@ -195,6 +213,8 @@ pub struct WorldState {
     pub founded: bool,
     pub checked_in: bool,
     pub squatting: bool,
+    pub bought: bool,
+    pub carrying_vehicle: bool,
 }
 
 impl WorldState {
@@ -238,6 +258,8 @@ impl WorldState {
             founded,
             checked_in,
             squatting,
+            bought,
+            carrying_vehicle,
         } = *self;
         let flags = [
             hunger_satisfied,
@@ -271,6 +293,8 @@ impl WorldState {
             founded,
             checked_in,
             squatting,
+            bought,
+            carrying_vehicle,
         ];
         let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
         for (i, f) in flags.into_iter().enumerate() {
@@ -317,6 +341,8 @@ impl WorldState {
             Key::Founded => self.founded,
             Key::CheckedIn => self.checked_in,
             Key::Squatting => self.squatting,
+            Key::Bought => self.bought,
+            Key::CarryingVehicle => self.carrying_vehicle,
         }
     }
 
@@ -412,6 +438,11 @@ impl WorldState {
         };
         // M12 D27: the agent's squat (or, while planning one, the bound derelict).
         let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
+        // M13 D29: inside the bound seller while shopping.
+        let shopping = target.is_some()
+            && world.comp::<Brain>(agent).is_some_and(|b| b.current_goal == Some(crate::components::GoalKind::Shop));
+        // M13 D26: on the street outside the bound vehicle's door.
+        let vehicle_tile = target.and_then(|t| crate::systems::vehicles::vehicle_stand(world, t));
         let at = match pos.and_then(|p| p.building) {
             _ if at_suspect => LocationKey::SuspectTile,
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
@@ -426,12 +457,14 @@ impl WorldState {
             Some(b) if Some(b) == squat || (Some(b) == target && crate::systems::street::is_derelict(world, b)) => {
                 LocationKey::Squat
             }
+            Some(b) if shopping && Some(b) == target => LocationKey::Seller,
             Some(b) => match world.comp::<Building>(b) {
                 Some(bd) if bd.kind == BuildingKind::Home => LocationKey::Street, // someone else's home
                 Some(bd) => LocationKey::of_building(bd.kind),
                 None => LocationKey::Street,
             },
             None if raid_tile.is_some() && raid_tile == pos.map(|p| p.tile) => LocationKey::RaidTarget,
+            None if vehicle_tile.is_some() && vehicle_tile == pos.map(|p| p.tile) => LocationKey::Vehicle,
             None => LocationKey::Street,
         };
 
@@ -528,6 +561,8 @@ impl WorldState {
             founded: false,
             checked_in: crate::systems::street::booked_hotel(world, agent).is_some(),
             squatting: squat.is_some(),
+            bought: false,
+            carrying_vehicle: crate::systems::vehicles::stolen_held_by(world, agent).is_some(),
         }
     }
 }

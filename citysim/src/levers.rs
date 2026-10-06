@@ -854,7 +854,7 @@ impl World {
                     match niche {
                         Niche::Housing => c.evict_days_override = Some(evict_days.saturating_sub(1).max(2)),
                         Niche::Food => c.wage_mult = 0.9,
-                        Niche::Security => {}
+                        Niche::Security | Niche::Tech => {}
                     }
                 }
                 c.order = order;

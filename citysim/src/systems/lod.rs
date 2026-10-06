@@ -214,6 +214,8 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             world.abort_plan(id);
             world.push_event(EventKind::PlanAborted, &[id], format!("{goal:?} LodDemotion"));
         }
+        // M13 D46: no trip off screen; its own vehicles go home with it.
+        crate::systems::vehicles::on_demoted(world, id);
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.lod = Lod::Statistical;
             b.exec = ExecState::Idle;
@@ -800,7 +802,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
                 let enough =
                     world.comp::<Building>(farm).is_some_and(|b| b.stock_food >= world.config.economy.haul_min_stock);
                 if enough {
-                    economy::haul(world, farm);
+                    // M13 D23 (deviation): the Farm's fleet truck carries a
+                    // Statistical farmer's haul too.
+                    let mult = crate::systems::vehicles::stat_haul_mult(world, farm);
+                    economy::haul(world, farm, mult);
                 }
             }
         }

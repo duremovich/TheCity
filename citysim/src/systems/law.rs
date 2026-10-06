@@ -57,6 +57,9 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::Assault => 0.8,
         Crime::Murder => 1.0,
         Crime::Vagrancy => 0.2,
+        // M13 D47.
+        Crime::GrandTheft => 0.6,
+        Crime::Manslaughter => 0.8,
     }
 }
 
@@ -85,9 +88,10 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     crate::systems::districts::note_crime(world, tile);
     // M12 D17: the crime's litter (a Murder's is its death's, `kill_by`).
     match crime {
-        Crime::Theft => crate::systems::litter::deposit_near(world, tile, actor_building, 6, 0),
+        Crime::Theft | Crime::GrandTheft => crate::systems::litter::deposit_near(world, tile, actor_building, 6, 0),
         Crime::Extortion | Crime::Assault => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
-        Crime::Murder | Crime::Vagrancy => {}
+        // A crash's litter is the crash's (`vehicles::crash`).
+        Crime::Murder | Crime::Vagrancy | Crime::Manslaughter => {}
     }
 
     let witnesses: Vec<EntityId> = world
@@ -126,8 +130,8 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     }
     if let Some(v) = victim {
         let kind = match crime {
-            Crime::Assault | Crime::Murder => MemoryKind::Fought,
-            Crime::Theft | Crime::Extortion | Crime::Vagrancy => MemoryKind::WasRobbed,
+            Crime::Assault | Crime::Murder | Crime::Manslaughter => MemoryKind::Fought,
+            Crime::Theft | Crime::Extortion | Crime::Vagrancy | Crime::GrandTheft => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -246,7 +250,13 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     if crime == Crime::Vagrancy {
         return world.config.law.vagrancy_sentence_ticks.max(1);
     }
-    let base = world.config.crime.sentence_days[crime as usize] as f32;
+    // M13 D47: the crimes appended after Vagrancy read `sentence_days_ext`.
+    let ext = &world.config.crime.sentence_days_ext;
+    let base = match crime {
+        Crime::GrandTheft => ext.grand_theft,
+        Crime::Manslaughter => ext.manslaughter,
+        _ => world.config.crime.sentence_days[crime as usize],
+    } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;
     days * TICKS_PER_DAY
 }

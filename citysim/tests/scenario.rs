@@ -591,7 +591,12 @@ fn test_m11_ownership_seed_42() {
             failures.push(what);
         }
     };
-    check(seeded.len() == 8 && unchanged.is_empty(), format!("every seeded corp changed order (never: {unchanged:?})"));
+    // M13 D17: the ninth row (Zetatech) is seeded too.
+    let rows = w.config.corps.names.len();
+    check(
+        seeded.len() == rows && unchanged.is_empty(),
+        format!("every seeded corp changed order ({} of {rows} seeded; never: {unchanged:?})", seeded.len()),
+    );
     check(squeeze_held, "Squeeze held".into());
     check(corp_bribes >= 1, format!("Lobby bribes with a corp payer {corp_bribes} >= 1"));
     check(evicted >= 10, format!("Evicted {evicted} >= 10"));
@@ -842,18 +847,22 @@ fn test_m12_districts_seed_42() {
         .sum();
     let occupancy = f64::from(hotel_nights) / f64::from((beds * 120).max(1));
     let windows: Vec<usize> = (0..4u64).map(|k| sanitation_days.iter().filter(|&&d| d / 30 == k).count()).collect();
-    let landlord_met = landlord.iter().filter(|l| l.4).count();
+    // A window opening after day 120 - 14 cannot run its 14 days before the run ends: unjudged.
+    let judged = |l: &&(usize, citysim::EntityId, u64, u8, bool, u32, u64)| l.6 + 14 <= 120;
     for l in &landlord {
         eprintln!(
-            "gang landlord: {} under {} from day {} (guards {}): met {}, {} of 14 days outside Garrison",
+            "gang landlord: {} under {} from day {} (guards {}): met {}, {} of 14 days outside Garrison{}",
             w.district_name(citysim::DistrictId(l.0 as u8)),
             w.name_of(l.1),
             l.6,
             l.3,
             l.4,
-            l.5
+            l.5,
+            if judged(&l) { "" } else { " (unjudged: window runs past day 120)" }
         );
     }
+    let landlord: Vec<_> = landlord.iter().filter(judged).copied().collect();
+    let landlord_met = landlord.iter().filter(|l| l.4).count();
     // Windows that Garrison held throughout cannot be met by design (D11).
     let landlord_open: Vec<_> = landlord.iter().filter(|l| l.5 > 0).collect();
     let landlord_open_met = landlord_open.iter().filter(|l| l.4).count();

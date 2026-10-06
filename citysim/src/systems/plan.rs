@@ -84,6 +84,14 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::GangWork => crate::systems::gang::extort_target(world, id),
         // M12 D27: the derelict with a slot nearest the agent.
         GoalKind::Squat => crate::systems::street::squat_target(world, id),
+        // M13 D29: the seller of the best offer (`plan_for` stores the pick).
+        GoalKind::Shop => crate::systems::assets::shop_choice(world, id, true).map(|o| o.seller),
+        // M13 D26: the nearest street-parked vehicle a thief may take (and
+        // a gang would pay for).
+        GoalKind::Earn if crate::systems::vehicles::would_steal(world, id) => {
+            crate::systems::vehicles::steal_target(world, id)
+                .filter(|&v| crate::systems::vehicles::can_fence(world, id, Some(v)))
+        }
         // Raid binds the expedition's building, the rival Hideout or the Jail
         // (the inspector shows it as the plan target).
         // M12 D31/D39: a riot's target, a corp building, the Jail or the rival Hideout.
@@ -178,6 +186,17 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     let target = bind_target(world, id, goal);
     if goal == GoalKind::GangWork {
         crate::systems::gang::note_gang_work(world, id);
+    }
+    // M13 D29: what to buy is fixed with the seller.
+    if goal == GoalKind::Shop {
+        let pick = crate::systems::assets::shop_choice(world, id, true).map(|o| o.pick);
+        if pick.is_none() {
+            world.cool_goal(id, goal);
+            return 0;
+        }
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.shop_pick = pick;
+        }
     }
     let ctx = PlanCtx::build(world, id, target);
     let start = WorldState::observe(world, id, target);

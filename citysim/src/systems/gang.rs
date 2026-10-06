@@ -899,6 +899,9 @@ fn daily_economy(world: &mut World) {
                 b.betraying = disloyal && wanted;
             }
         }
+        // M13 D27: the chop shop, then D44: a bike for a member.
+        crate::systems::vehicles::chop_daily(world, gang);
+        crate::systems::vehicles::gang_bikes(world, gang);
     }
 }
 

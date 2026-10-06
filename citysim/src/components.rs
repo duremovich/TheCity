@@ -338,6 +338,10 @@ pub enum Crime {
     Murder,
     /// M12 D15: sleeping rough where the law sweeps.
     Vagrancy,
+    /// M13 D26: a vehicle stolen (or a botched attempt).
+    GrandTheft,
+    /// M13 D25: a crash that killed, the driver seen.
+    Manslaughter,
 }
 
 impl Crime {
@@ -349,18 +353,23 @@ impl Crime {
             Crime::Assault => "Assault",
             Crime::Murder => "Murder",
             Crime::Vagrancy => "Vagrancy",
+            Crime::GrandTheft => "Grand Theft",
+            Crime::Manslaughter => "Manslaughter",
         }
     }
 
     /// The order the law ranks crimes by (the most severe open report sets
-    /// a sentence): Vagrancy, Theft, Shakedown, Assault, Murder.
+    /// a sentence): Vagrancy, Theft, Grand Theft, Shakedown, Assault,
+    /// Manslaughter, Murder. Unique per crime (`Ord` reads it).
     pub fn severity(self) -> u8 {
         match self {
             Crime::Vagrancy => 0,
             Crime::Theft => 1,
-            Crime::Extortion => 2,
-            Crime::Assault => 3,
-            Crime::Murder => 4,
+            Crime::GrandTheft => 2,
+            Crime::Extortion => 3,
+            Crime::Assault => 4,
+            Crime::Manslaughter => 5,
+            Crime::Murder => 6,
         }
     }
 }
@@ -432,6 +441,8 @@ pub enum MemoryKind {
     CaughtInCrossfire,
     /// M13 D11: a lender towed, bricked or took an asset.
     Repossessed,
+    /// M13 D25: hit by a vehicle and lived.
+    Crashed,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -457,6 +468,8 @@ pub enum GoalKind {
     Found,
     /// M12 D27: a homeless adult who cannot afford a Hotel moves into a derelict.
     Squat,
+    /// M13 D43: buy a vehicle or a pack (chrome from phase 3).
+    Shop,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -712,16 +725,19 @@ pub enum Niche {
     Food,
     Housing,
     Security,
+    /// M13 D17: Clinics and Garages (Zetatech).
+    Tech,
 }
 
 impl Niche {
-    pub const ALL: [Niche; 3] = [Niche::Food, Niche::Housing, Niche::Security];
+    pub const ALL: [Niche; 4] = [Niche::Food, Niche::Housing, Niche::Security, Niche::Tech];
 
     pub fn label(self) -> &'static str {
         match self {
             Niche::Food => "Food",
             Niche::Housing => "Housing",
             Niche::Security => "Security",
+            Niche::Tech => "Tech",
         }
     }
 
@@ -1311,6 +1327,9 @@ pub struct Brain {
     /// M11 D26: the day of the last `Register` (the Found cooldown).
     #[serde(default)]
     pub last_found_day: Option<u64>,
+    /// M13 D29: what a Shop plan is buying, fixed when the seller is bound.
+    #[serde(default)]
+    pub shop_pick: Option<ShopPick>,
 }
 
 impl Default for Brain {
@@ -1347,6 +1366,7 @@ impl Default for Brain {
             disobeyed_day: None,
             body_day: None,
             last_found_day: None,
+            shop_pick: None,
         }
     }
 }

@@ -64,6 +64,8 @@ pub fn niche_kinds(n: Niche) -> &'static [BuildingKind] {
         Niche::Food => &[BuildingKind::Farm, BuildingKind::Market, BuildingKind::Bar],
         Niche::Housing => &[BuildingKind::Home],
         Niche::Security => &[BuildingKind::SecurityOffice],
+        // M13 D17.
+        Niche::Tech => &[BuildingKind::Clinic, BuildingKind::Garage],
     }
 }
 
@@ -73,12 +75,27 @@ pub fn niche_of_kind(kind: BuildingKind) -> Option<Niche> {
 }
 
 /// What `Grow` builds in a niche (a second Security Office is never built).
+/// M13 D17: Tech builds a Garage (phase 2: the only Tech kind `found_cost`
+/// prices; phase 3 picks the kind with fewer per capita).
 pub fn build_kind(n: Niche) -> Option<BuildingKind> {
     match n {
         Niche::Food => Some(BuildingKind::Bar),
         Niche::Housing => Some(BuildingKind::Home),
         Niche::Security => None,
+        Niche::Tech => Some(BuildingKind::Garage),
     }
+}
+
+/// M13 D17: the city has fewer Garages than `population ÷
+/// residents_per_garage` (the target `founding::choose_kind` reads).
+pub fn tech_room(world: &World) -> bool {
+    let target = crate::systems::founding::living(world) as f32 / world.config.corps.residents_per_garage.max(1) as f32;
+    let garages = world
+        .buildings_of_kind(BuildingKind::Garage)
+        .iter()
+        .filter(|&&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+        .count();
+    (garages as f32) < target
 }
 
 /// The Street class's unrest (§ 7), the `1-unrest` term of Squeeze.
@@ -138,6 +155,28 @@ pub fn shares(world: &World, niche: Niche) -> BTreeMap<EntityId, f32> {
             }
             if total < world.config.corps.security_guards as f32 {
                 return BTreeMap::new();
+            }
+        }
+        // M13 D17: asset sales over 7 days, per building (empty until every
+        // Tech building has its 7 days of history).
+        Niche::Tech => {
+            let tech: Vec<EntityId> = niche_kinds(Niche::Tech)
+                .iter()
+                .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
+                .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+                .collect();
+            if tech.is_empty()
+                || tech.iter().any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.asset_sales.len() < 7))
+            {
+                return BTreeMap::new();
+            }
+            for b in tech {
+                let sold: u32 =
+                    world.comp::<Building>(b).map_or(0, |bd| bd.asset_sales.iter().map(|&s| u32::from(s)).sum());
+                total += sold as f32;
+                if let Some(c) = world.corp_of_building(b) {
+                    *own.entry(c).or_default() += sold as f32;
+                }
             }
         }
     }
@@ -240,6 +279,16 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
                 residents as f32 / (own_buildings.len() * cap).max(1) as f32
             }
             Niche::Security => sold_contracts(world, c, corp) as f32 / cfg.security_guards.max(1) as f32,
+            // M13 D17: own 7-day sales ÷ (7 × tech_demand_ref × own Tech buildings).
+            Niche::Tech => {
+                let sold: u32 = own_buildings
+                    .iter()
+                    .filter_map(|&b| world.comp::<Building>(b))
+                    .map(|bd| bd.asset_sales.iter().map(|&s| u32::from(s)).sum::<u32>())
+                    .sum();
+                let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * own_buildings.len().max(1) as f32;
+                sold as f32 / reference
+            }
         }
         .clamp(0.0, 1.0);
         let rivals = rivals_in(world, corp, n);
@@ -277,6 +326,11 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         });
         let offer = weakest.map_or(0, |(_, _, v)| (v as f32 * cfg.acquire_premium).round() as i64);
         let lots = match build_kind(n).and_then(|k| crate::systems::founding::found_cost(world, k)) {
+            // M13 D17 (phase 2): Tech grows only while its kind is under the
+            // per-capita target `choose_kind` uses (`population ÷
+            // residents_per_garage`); without it Zetatech built two idle
+            // Garages in the first month on the corps' fleet orders.
+            Some(_) if n == Niche::Tech && !tech_room(world) => 0,
             Some(cost) if c.treasury >= cost => lots_total,
             _ => 0,
         };
@@ -542,7 +596,7 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
         match niche {
             Niche::Housing => c.evict_days_override = Some(evict_days.saturating_sub(1).max(2)),
             Niche::Food => c.wage_mult = 0.9,
-            Niche::Security => {}
+            Niche::Security | Niche::Tech => {}
         }
     }
     c.order = order;
@@ -890,6 +944,8 @@ pub fn run(world: &mut World) {
         }
         for &c in &corps {
             act(world, c);
+            // M13 D44: one fleet purchase (or a Hunker sale) inside the order.
+            crate::systems::vehicles::corp_fleet(world, c);
         }
         crate::systems::corps::daily(world);
         return;

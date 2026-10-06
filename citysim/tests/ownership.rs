@@ -291,10 +291,17 @@ fn test_wage_collected_at_workplace_for_corp_job() {
 fn test_seeding_matches_table() {
     let w = World::new(42, Config::load());
     let corps = w.corps();
-    assert_eq!(corps.len(), 8);
+    // M13 D17: the ninth row, Zetatech (Tech), owns the seeded Civic Garage.
+    assert_eq!(corps.len(), 9);
     let name = |c: EntityId| w.comp::<Corp>(c).expect("corp").name.clone();
     let names: Vec<String> = corps.iter().map(|&c| name(c)).collect();
-    assert_eq!(names, ["Nutrix", "Vatra", "Greenline", "Habitat", "Stackwell", "Kessler", "Arasaka", "Militech"]);
+    assert_eq!(
+        names,
+        ["Nutrix", "Vatra", "Greenline", "Habitat", "Stackwell", "Kessler", "Arasaka", "Militech", "Zetatech"]
+    );
+    let zetatech = corps[8];
+    assert_eq!(ownership::owned_of_kind(&w, Some(zetatech), BuildingKind::Garage).len(), 1);
+    let corps: Vec<EntityId> = corps[..8].to_vec();
     let owned = |c: Option<EntityId>, k: BuildingKind| ownership::owned_of_kind(&w, c, k);
     let at = |b: EntityId| w.comp::<Building>(b).map(|b| (b.rect.x, b.rect.y)).expect("b");
     let [nutrix, vatra, greenline, habitat, stackwell, kessler, arasaka, militech] =
@@ -713,7 +720,7 @@ fn test_full_day_of_flows_conserves_coins() {
         w.comp_mut::<Building>(*m).expect("m").stock_food = 2000;
     }
     let overflow0 = w.stats.current.flow_overflow;
-    assert!(economy::haul(&mut w, farm) > 0);
+    assert!(economy::haul(&mut w, farm, None) > 0);
     assert!(w.stats.current.flow_overflow > overflow0, "the Market was full: the Reserve bought the haul");
     assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
 }

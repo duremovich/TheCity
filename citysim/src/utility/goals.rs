@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 18] = [
+pub const GOAL_ORDER: [GoalKind; 19] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -31,6 +31,8 @@ pub const GOAL_ORDER: [GoalKind; 18] = [
     GoalKind::Bury,
     // M12 D27: before Found.
     GoalKind::Squat,
+    // M13 D47: before Found.
+    GoalKind::Shop,
     // M11 D26: just before Idle.
     GoalKind::Found,
     GoalKind::Idle,
@@ -107,14 +109,17 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // off shift with no wage due (the in-shift case stays scored, as in
             // the spec's worked example; it loses to Work's hysteresis).
             let day = world.day();
-            match world.comp::<Job>(id) {
+            let nothing = match world.comp::<Job>(id) {
                 Some(j) => j.days_unpaid == 0 && !j.on_shift(world.tick_of_day()),
                 None => {
                     world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day == Some(day))
                         || world.treasury().is_some_and(|t| t.coins < 0)
                         || world.levers.dole_per_day == 0
                 }
-            }
+            };
+            // M13 D26: a vehicle within reach to steal, and a gang at the
+            // Hideout to pay for it, is something to plan.
+            nothing && !crate::systems::vehicles::theft_plannable(world, id)
         }
         GoalKind::Court => has_spouse,
         GoalKind::GangWork => {
@@ -135,6 +140,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Found => !crate::systems::founding::can_found(world, id),
         // M12 D27: squatting already, or nowhere to squat (the eligibility gate).
         GoalKind::Squat => !crate::systems::street::can_squat(world, id),
+        // M13 D43: nothing affordable, on cooldown, in arrears or no open seller.
+        GoalKind::Shop => crate::systems::assets::shop_choice(world, id, true).is_none(),
         _ => false,
     }
 }
@@ -505,6 +512,12 @@ pub fn considerations(
                 Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.4, b: 0.6 }),
                 Consideration::new("night", can(phase == DayPhase::Night), Curve::Step { t: 1.0, lo: 0.3, hi: 1.0 }),
             ]
+        }
+        // M13 D43: the best affordable offer's considerations (spec § 6).
+        GoalKind::Shop => {
+            let o = crate::systems::assets::shop_choice(world, id, true)?;
+            flat = world.config.shop.shop_flat;
+            o.considerations
         }
         // M11 § 6 / D26: open a business. `already_satisfied` has just run
         // the eligibility check (it skips Found for the ineligible).
