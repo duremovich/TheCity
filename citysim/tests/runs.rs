@@ -496,3 +496,48 @@ fn test_attack_dumps_run() {
     }
     assert_eq!(w.stats.current.virt.runs_dumped, 1);
 }
+
+/// V9: a run's contest draws pass, fry, dodge, kill, trace on its stream, in
+/// that order: the live path (`step` -> `contest` -> `lose`) and the public
+/// `contest_draws` + `loss_verdict` agree, so the two cannot drift.
+#[test]
+fn test_contest_draw_order_pinned() {
+    let mut checked = 0;
+    for (k, ice) in [(0u64, 3u8), (1, 3), (2, 2), (3, 3), (4, 2), (5, 3)] {
+        let mut w = world();
+        w.tick += k * 7;
+        let a = runner(&mut w, &[]);
+        arm(&mut w, a, 1, 0.3);
+        let lab = lab_of(&w, corp_named(&w, "Militech"), Track::Deck);
+        let n = virt::node_of_building(&w, lab).expect("node");
+        set_ice(&mut w, n, ice);
+        let bar = first_bar(&w);
+        order(&mut w, a, bar, n, Purpose::Data { wipe: false }, RunWhy::God);
+        let id = virt::start_run(&mut w, a).expect("run");
+        let r = w.runs[&id].clone();
+        let o = virt::run_odds(&w, &r);
+        let d = f32::from(virt::def(&w, n));
+        let (pass, rolls) = virt::contest_draws(&w, id, 0, d - r.att);
+        let won = pass < security::contest_p(r.att, d, w.config.chrome.contest_step);
+        let (fried, dead, traced) = virt::loss_verdict(&w, n, &o, &rolls);
+        let fried0 = w.stats.current.virt.fried;
+        finish(&mut w);
+        let done = w.run_log.back().expect("logged");
+        assert_eq!(done.log.first().map(|e| e.2), Some(won), "the pass draw is first");
+        if !won {
+            let want = if dead {
+                RunOutcome::Flatlined
+            } else if fried {
+                RunOutcome::Fried
+            } else if traced {
+                RunOutcome::Traced
+            } else {
+                RunOutcome::Bounced
+            };
+            assert_eq!(done.outcome, Some(want), "fry, dodge, kill, trace follow in order");
+            assert_eq!(w.stats.current.virt.fried - fried0, u32::from(fried));
+            checked += 1;
+        }
+    }
+    assert!(checked >= 3, "{checked} lost first contests checked");
+}

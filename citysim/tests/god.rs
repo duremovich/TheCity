@@ -475,23 +475,31 @@ fn god_decapitate_gang() {
     // M14 phase 2: the deck shop shifts seed 42's gang 0 into a Squat held
     // across day 45; a leader kill does not knock a held order, and the 7-day
     // generic window misses the succession. A decapitation's direct
-    // consequences are gang-internal, so they are asserted here (14 days,
-    // each in the shocked run and not in the control).
+    // consequences are gang-internal, so only they are asserted (14 days):
+    // a succession (the leader differs from the control's on the same day,
+    // after changing from the pre-shock one: the control's leaders churn
+    // too, so "no change in the control" is the wrong test), a Split beyond
+    // the control's, or a Retaliate or LieLow order the control never had.
+    // The order difference and the generic reactions are printed only.
     let c = control();
     r.print(Some(c));
     let (from, to) = (SHOCK_DAY, SHOCK_DAY + 14);
     let before = |run: &Run| run.days.iter().find(|d| d.day == SHOCK_DAY - 1).and_then(|d| d.leaders[0]);
-    let succeeded = |run: &Run| {
-        let old = before(run);
-        run.window(from, to).any(|d| d.leaders[0].is_some() && d.leaders[0] != old)
-    };
+    let old = before(&r);
+    let succession = r
+        .window(from, to)
+        .zip(c.window(from, to))
+        .find(|(d, x)| d.leaders[0].is_some() && d.leaders[0] != old && d.leaders[0] != x.leaders[0]);
     let splits = |run: &Run| {
         run.story.iter().filter(|(t, k, _)| *k == EventKind::Split && (from..to).contains(&(t / TICKS_PER_DAY))).count()
     };
     let shaken = |run: &Run| run.window(from, to).any(|d| matches!(d.orders[0], Order::Retaliate | Order::LieLow));
     let mut fired = Vec::new();
-    if succeeded(&r) && !succeeded(c) {
-        fired.push("a new leader (succession)".to_string());
+    if let Some((d, x)) = succession {
+        fired.push(format!(
+            "succession on day {}: leader {:?} (before {:?}, control {:?})",
+            d.day, d.leaders[0], old, x.leaders[0]
+        ));
     }
     if splits(&r) > splits(c) {
         fired.push(format!("Split events {} (control {})", splits(&r), splits(c)));
@@ -499,14 +507,12 @@ fn god_decapitate_gang() {
     if shaken(&r) && !shaken(c) {
         fired.push("a Retaliate or LieLow order".to_string());
     }
+    let mut seen = Vec::new();
     if let Some(d) = r.window(from, to).zip(c.window(from, to)).find(|(d, x)| d.orders[0] != x.orders[0]) {
-        fired.push(format!("g0 order on day {}: {:?} (control {:?})", d.0.day, d.0.orders[0], d.1.orders[0]));
+        seen.push(format!("g0 order on day {}: {:?} (control {:?})", d.0.day, d.0.orders[0], d.1.orders[0]));
     }
-    let generic = r.reactions(c, 14);
-    if !generic.is_empty() {
-        fired.push(format!("generic: {generic:?}"));
-    }
-    eprintln!("decapitation reactions within 14 days: {fired:?}");
+    seen.push(format!("generic: {:?}", r.reactions(c, 14)));
+    eprintln!("decapitation reactions within 14 days: {fired:?}; also (not asserted): {seen:?}");
     assert!(!fired.is_empty(), "god_decapitate_gang: nothing reacted within 14 days of the shock");
 }
 
