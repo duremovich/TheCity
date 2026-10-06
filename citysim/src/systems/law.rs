@@ -85,8 +85,8 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     crate::systems::districts::note_crime(world, tile);
     // M12 D17: the crime's litter (a Murder's is its death's, `kill_by`).
     match crime {
-        Crime::Theft => crate::systems::litter::deposit(world, tile, 6, 0),
-        Crime::Extortion | Crime::Assault => crate::systems::litter::deposit(world, tile, 12, 1),
+        Crime::Theft => crate::systems::litter::deposit_near(world, tile, actor_building, 6, 0),
+        Crime::Extortion | Crime::Assault => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
         Crime::Murder | Crime::Vagrancy => {}
     }
 
@@ -428,12 +428,25 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                     world.config.crime.fine_mult * world.mean_price()
                 };
                 let coins = world.comp::<crate::components::Wallet>(suspect).map_or(0, |w| w.coins);
+                // M12 review: a Vagrancy report is settled as `street::vagrancy_hit`'s
+                // fine is: where the vagrant was swept, on the ledger, in the log.
+                let swept = (crime == Crime::Vagrancy).then(|| vagrancy_place(world, suspect));
                 if coins >= fine {
-                    if let Some(w) = world.comp_mut::<crate::components::Wallet>(suspect) {
-                        w.coins -= fine;
-                    }
-                    if let Some(t) = world.treasury_mut() {
-                        t.coins += fine;
+                    if crime == Crime::Vagrancy {
+                        crate::systems::ownership::pay(
+                            world,
+                            Some(suspect),
+                            None,
+                            fine,
+                            crate::systems::ownership::Flow::Fine,
+                        );
+                    } else {
+                        if let Some(w) = world.comp_mut::<crate::components::Wallet>(suspect) {
+                            w.coins -= fine;
+                        }
+                        if let Some(t) = world.treasury_mut() {
+                            t.coins += fine;
+                        }
                     }
                     world.remember(suspect, MemoryKind::Paid, None, 0.4, -0.4, false);
                     resolve_reports(world, suspect);
@@ -443,6 +456,11 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                         &[suspect],
                         format!("{name} fined {fine} coins (Precinct full)"),
                     );
+                    if let Some(place) = swept {
+                        crate::systems::street::note_vagrancy(world, place);
+                        let text = format!("{name} fined {fine} for sleeping rough in {}", world.district_name(place));
+                        world.push_event(EventKind::Vagrancy, &[suspect], text);
+                    }
                     world.stats.current.arrests += 1;
                     release_at_jail_door(world, suspect, "fined");
                 } else {
@@ -500,13 +518,8 @@ fn resolve_reports(world: &mut World, suspect: EntityId) {
 pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jail: EntityId) {
     // M12 D15: a Vagrancy sentence is counted where the vagrant was swept
     // (`World::vagrancy_places`, else where they stand), before the Jail.
-    let swept = world.vagrancy_places.remove(&who);
-    let place = (crime == Crime::Vagrancy).then(|| {
-        swept.unwrap_or_else(|| {
-            let tile = world.comp::<Position>(who).map(|p| p.tile).unwrap_or_default();
-            world.district_of(tile)
-        })
-    });
+    // Any other crime leaves the entry for the Vagrancy report it belongs to.
+    let place = (crime == Crime::Vagrancy).then(|| vagrancy_place(world, who));
     // Whoever was escorting them is done; a cuffed prisoner is a contradiction.
     // Every escort, not only `cuffed_by`: when two guards had cuffed the same
     // suspect, the first to reach the Jail cleared `cuffed_by`, the second kept
@@ -555,6 +568,15 @@ pub fn sentence(world: &mut World, who: EntityId, crime: Crime, until: Tick, jai
         world.push_event(EventKind::Vagrancy, &[who], text);
     }
     crate::systems::gang::on_member_arrested(world, who);
+}
+
+/// Where a Vagrancy report against `who` is counted: the district it was
+/// swept in (`World::vagrancy_places`, consumed), else where it stands.
+fn vagrancy_place(world: &mut World, who: EntityId) -> crate::components::DistrictId {
+    world.vagrancy_places.remove(&who).unwrap_or_else(|| {
+        let tile = world.comp::<Position>(who).map(|p| p.tile).unwrap_or_default();
+        world.district_of(tile)
+    })
 }
 
 fn release_at_jail_door(world: &mut World, who: EntityId, _why: &str) {

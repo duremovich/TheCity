@@ -536,6 +536,10 @@ pub struct OrderScore {
     pub order: Order,
     pub score: f32,
     pub considerations: Vec<Consideration>,
+    /// M12 D39: a Raid score aimed at the gang's corp prize, not the rival
+    /// Hideout (`faction::is_corp_raid`). False for every other order.
+    #[serde(default)]
+    pub corp_target: bool,
 }
 
 /// M9: the law's posture, chosen by the captain (`systems::law_brain`).
@@ -880,6 +884,14 @@ pub struct Corp {
 }
 
 impl Corp {
+    /// The highest `price_level` the corp charges in any niche; 0 with none
+    /// (M12 review: one fold for the strike target and the riot grievance; a
+    /// corp with no price levels never outranks a pricing one as a strike
+    /// target, and the riot reads it through `max(1.0)`, no grievance).
+    pub fn max_price_level(&self) -> f32 {
+        self.price_level.values().copied().fold(0.0f32, f32::max)
+    }
+
     pub fn new(name: String, niches: BTreeSet<Niche>, treasury: i64, exec: Option<EntityId>) -> Corp {
         let price_level = niches.iter().map(|&n| (n, 1.0)).collect();
         Corp {
@@ -2117,7 +2129,8 @@ pub struct Riot {
     /// The muster building (rioters gather at its door).
     pub muster: EntityId,
     pub muster_at: Tick,
-    /// Ascending.
+    /// Most miserable first, ties the lower id (`riot::eligible`'s order;
+    /// `riot::promoted` promotes the head of it).
     pub rioters: Vec<EntityId>,
     pub response: RiotResponse,
     pub started: Tick,

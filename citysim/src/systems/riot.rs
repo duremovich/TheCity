@@ -12,8 +12,8 @@
 //! `max_active_riots`) once a tick.
 
 use crate::components::{
-    Brain, Building, BuildingKind, Corp, CorpShock, Crime, DistrictId, Gang, GangMember, Job, Mood, Personality,
-    Position, Riot, RiotResponse, RiotTarget, Sentence, Stance,
+    Brain, Building, BuildingKind, Corp, CorpShock, Crime, DistrictId, Gang, GangMember, Mood, Personality, Position,
+    Riot, RiotResponse, RiotTarget, Sentence, Stance,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -107,9 +107,10 @@ pub fn eligible(world: &World, d: DistrictId) -> Vec<EntityId> {
     out.into_iter().take(cfg.riot_max).map(|(_, a)| a).collect()
 }
 
-/// The highest `price_level` a corp charges.
+/// The highest `price_level` a corp charges, read no lower than 1 (an
+/// undercutting corp or one with no prices carries no price grievance).
 fn price_level(world: &World, corp: EntityId) -> f32 {
-    world.comp::<Corp>(corp).map_or(1.0, |c| c.price_level.values().copied().fold(1.0f32, f32::max))
+    world.comp::<Corp>(corp).map_or(1.0, |c| c.max_price_level().max(1.0))
 }
 
 /// D30 riot tables: the target with the highest grievance (ties lower
@@ -300,25 +301,21 @@ pub fn clash(world: &mut World, actor: EntityId) -> Option<Outcome> {
         return Some(Outcome::Lost);
     }
     let radius = world.config.gangs.raid_gather_radius;
-    let tod = world.tick_of_day();
     let target = riot.target;
     let near = |w: &World, a: EntityId| {
         w.comp::<Position>(a).is_some_and(|p| p.building == Some(target) || law::chebyshev(p.tile, door) <= radius)
     };
-    let beat: Vec<EntityId> =
-        world.law().map(|l| l.beats.iter().filter(|(_, &bd)| bd == d).map(|(&g, _)| g).collect()).unwrap_or_default();
     let free = |w: &World, g: EntityId| law::living(w, g) && !w.has::<Sentence>(g);
     let mut defenders: Vec<EntityId> =
         law_brain::guards(world).into_iter().filter(|&g| free(world, g) && near(world, g)).collect();
-    // The beat's on-shift guards answer the riot; how many is the law's
-    // response strength, scaled by its alertness (the M16 hook, 1.0 in M12).
-    let answering: Vec<EntityId> = law_brain::guards(world)
-        .into_iter()
-        .filter(|&g| free(world, g) && !defenders.contains(&g))
-        .filter(|&g| beat.contains(&g) && world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod)))
-        .collect();
-    let k = (answering.len() as f32 * faction::alertness_mult(world, None)).round().max(0.0) as usize;
-    defenders.extend(answering.into_iter().take(k));
+    // The beat answers the riot (`raid::answering_guards`, the corp raid's
+    // rule: on shift, within `answer_radius`, × the law's alertness),
+    // stood at the door.
+    for g in raid::answering_guards(world, d, door, &defenders) {
+        world.abort_plan(g);
+        world.stand_at_door(g, target);
+        defenders.push(g);
+    }
     for g in raid::private_guards_of(world, target) {
         if free(world, g) && near(world, g) && !defenders.contains(&g) {
             defenders.push(g);
@@ -367,10 +364,26 @@ pub fn clash(world: &mut World, actor: EntityId) -> Option<Outcome> {
         let standing: Vec<EntityId> = rioters.iter().copied().filter(|&r| law::living(world, r)).collect();
         loot(world, &riot, &standing, actor);
     } else if let Some(jail) = world.building_of_kind(BuildingKind::Jail) {
+        // M12 review: the Precinct's free cells bound the booking (pairing
+        // order); the rest get the law's full-Precinct fallback for an
+        // Assault with nobody to bump: released unpunished.
         let until = now + law::sentence_ticks(world, Crime::Assault);
+        let capacity = usize::from(world.config.buildings.jail.capacity);
+        let mut free_cells = capacity.saturating_sub(world.sentenced().len());
         for r in tally.losers.iter().copied() {
-            if law::living(world, r) && !world.has::<Sentence>(r) {
+            if !law::living(world, r) || world.has::<Sentence>(r) {
+                continue;
+            }
+            if free_cells > 0 {
                 law::sentence(world, r, Crime::Assault, until, jail);
+                free_cells -= 1;
+            } else {
+                if let Some(p) = world.comp_mut::<Personality>(r) {
+                    p.lawfulness = (p.lawfulness - 0.05).max(0.0);
+                }
+                world.resolve_reports_of(r);
+                let name = world.name_of(r);
+                world.push_event(EventKind::Unpunished, &[r], format!("{name} let go after the riot: Precinct full"));
             }
         }
     }
@@ -566,7 +579,7 @@ fn finish(world: &mut World, id: u32, outcome: &str, n: usize, m: usize, dead: u
     }
     world.stats.current.riots += 1;
     if let Some(door) = world.comp::<Building>(riot.target).map(|b| b.door) {
-        crate::systems::litter::deposit(world, door, 64, 3);
+        crate::systems::litter::deposit_near(world, door, Some(riot.target), 64, 3);
     }
     let target_corp = world.corp_of_building(riot.target);
     if let Some(c) = target_corp {

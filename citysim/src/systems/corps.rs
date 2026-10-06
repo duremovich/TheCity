@@ -314,7 +314,7 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
         if !derelict {
             if let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) {
                 let (a, r) = crate::systems::street::DERELICT_LITTER;
-                crate::systems::litter::deposit(world, door, a, r);
+                crate::systems::litter::deposit_near(world, door, Some(b), a, r);
             }
         }
         match pick {

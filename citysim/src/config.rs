@@ -308,6 +308,17 @@ pub struct CrimeCfg {
     pub patrol_legs_per_shift: u8,
     /// A Theft arrest at a full Jail becomes a fine of this many × price_food.
     pub fine_mult: i64,
+    /// M12 review: a guard answers an alarm at a door (a corp raid, a riot)
+    /// only from within this many tiles of it (Chebyshev), on shift and
+    /// awake; the brawl then stands it at the door.
+    #[serde(default = "CrimeCfg::default_answer_radius")]
+    pub answer_radius: u32,
+}
+
+impl CrimeCfg {
+    fn default_answer_radius() -> u32 {
+        96
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

@@ -157,6 +157,15 @@ warrant_expiry_days = 30
 suspect_seen_ticks = 240
 patrol_legs_per_shift = 5
 fine_mult = 2
+# M12 review: guards answering an alarm at a door (a corp raid, a riot; the posted private guards
+# too) come only from within answer_radius tiles of it (Chebyshev); the brawl stands them at the
+# door. Off-shift guards answer (a Secure corp's call-in) only when awake: before, Secure dragged
+# them out of bed from anywhere on the map. Seeds 42-44, corp raids lost / district Crackdown days
+# / riots: HEAD 10 of 18 / 13 % / 1,2,4; radius 24: 1 of 14 / 29 % / 5,2,4; 48: 3 of 14 / 46 % /
+# 4,4,5 (the M12 gate's gang-landlord bullet fails, 6 of 8); 64: 4 of 16 / 42 % / 4,4,5; 80: 12 of
+# 23 / 30 % / 1,3,5; 96: 9 of 17 / 21 % / 1,3,3; 160: 13 of 20 / 15 % / 2,3,5. Without the night
+# call-in a won corp raid feeds the gang and the law's Crackdowns; 96 keeps the M12 bands.
+answer_radius = 96
 
 [social]
 edge_create_ticks = 30

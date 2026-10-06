@@ -687,7 +687,9 @@ pub fn corp_prize_value(world: &World, corp: EntityId) -> i64 {
 /// nearest the door first (ties lower id), up to `[gangs] corp_raid_posted`
 /// × `alertness_mult` of the owner. A guard on contract is at its client
 /// when the raid comes (the M11 route walks it there); the brawl stands it
-/// at the door.
+/// at the door. M12 review: only guards within `[crime] answer_radius` of
+/// the door are posted, and Secure calls in only the off-shift who are
+/// awake ([`can_answer`]), not the ones asleep at Home.
 pub fn posted_guards(world: &World, b: EntityId) -> Vec<EntityId> {
     let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { return Vec::new() };
     let owner = world.corp_of_building(b);
@@ -698,16 +700,71 @@ pub fn posted_guards(world: &World, b: EntityId) -> Vec<EntityId> {
         owner.and_then(|c| world.comp::<Corp>(c)).is_some_and(|c| c.order == crate::components::CorpOrder::Secure);
     let mut out: Vec<(u32, EntityId)> = private_guards_of(world, b)
         .into_iter()
-        .filter(|&g| law::living(world, g) && !world.has::<Sentence>(g))
         .filter(|&g| {
-            world.comp::<Brain>(g).is_some_and(|br| br.cuffed_by.is_none() && br.escorting.is_none() && !br.emigrating)
+            let on = world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod));
+            (secure || on) && can_answer(world, g, door, on)
         })
-        .filter(|&g| secure || world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod)))
         .filter(|&g| !world.rioter_of.contains_key(&g) && world.gang_of(g).is_none())
         .filter_map(|g| world.comp::<Position>(g).map(|p| (p.tile.manhattan(door), g)))
         .collect();
     out.sort_unstable();
     out.into_iter().take(cap).map(|(_, g)| g).collect()
+}
+
+/// M12 review: can guard `g` answer an alarm at `door`: living, free (no
+/// Sentence), not cuffed, escorting or emigrating, within `[crime]
+/// answer_radius` of the door (Chebyshev), and on shift (`on_shift`), or
+/// off shift but awake (its goal is not Sleep). The alarm wakes a guard on
+/// duty who dozed (the M10 night-shift Sleep residual); it does not drag an
+/// off-duty one out of bed.
+fn can_answer(world: &World, g: EntityId, door: TilePos, on_shift: bool) -> bool {
+    let radius = world.config.crime.answer_radius;
+    law::living(world, g)
+        && !world.has::<Sentence>(g)
+        && world.comp::<Brain>(g).is_some_and(|b| {
+            b.cuffed_by.is_none()
+                && b.escorting.is_none()
+                && !b.emigrating
+                && (on_shift || b.current_goal != Some(GoalKind::Sleep))
+        })
+        && world.comp::<Position>(g).is_some_and(|p| law::chebyshev(p.tile, door) <= radius)
+}
+
+/// M12 review (one rule for a corp raid and a riot): the city guards who
+/// answer an alarm at `door` in district `d`. The beat's guards on shift,
+/// and in the Precinct's own district the watch on shift inside the
+/// Precinct (it is next door; that district has no Homes and only the paid
+/// term's thin beat), who [`can_answer`] and are not in `exclude`. The beat
+/// first, nearest the door first (Manhattan, ties lower id), then the
+/// watch; the first `round(n × alertness_mult)` of them (the M16 hook, 1.0
+/// in M12). The caller stands them at the door.
+pub fn answering_guards(world: &World, d: DistrictId, door: TilePos, exclude: &[EntityId]) -> Vec<EntityId> {
+    let tod = world.tick_of_day();
+    let on_shift = |g: EntityId| world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod));
+    let mut out: Vec<(bool, u32, EntityId)> = Vec::new();
+    if let Some(l) = world.law() {
+        for (&g, &bd) in &l.beats {
+            if bd == d && !exclude.contains(&g) && on_shift(g) && can_answer(world, g, door, true) {
+                if let Some(p) = world.comp::<Position>(g) {
+                    out.push((false, p.tile.manhattan(door), g));
+                }
+            }
+        }
+    }
+    if let Some(jail) = world.building_of_kind(BuildingKind::Jail).filter(|&j| world.district_of_building(j) == d) {
+        for g in law_brain::guards(world) {
+            if exclude.contains(&g) || out.iter().any(|&(_, _, x)| x == g) {
+                continue;
+            }
+            let Some(p) = world.comp::<Position>(g).filter(|p| p.building == Some(jail)) else { continue };
+            if on_shift(g) && can_answer(world, g, door, true) {
+                out.push((true, p.tile.manhattan(door), g));
+            }
+        }
+    }
+    out.sort_unstable();
+    let k = (out.len() as f32 * faction::alertness_mult(world, None)).round().max(0.0) as usize;
+    out.into_iter().take(k).map(|(_, _, g)| g).collect()
 }
 
 /// D39: a raid on a corp building. Defenders: the corp's private guards (and
@@ -749,49 +806,16 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             defenders.push(s);
         }
     }
+    // Fix pass: the beat's guards near the door fight; the rest answer the
+    // alarm ([`answering_guards`], the riot's rule too).
     let beat: Vec<EntityId> =
         world.law().map(|l| l.beats.iter().filter(|(_, &bd)| bd == d).map(|(&g, _)| g).collect()).unwrap_or_default();
-    // Fix pass: the beat's guards near the door fight; the rest on shift on
-    // the district's beat answer the alarm (× the law's alertness, nearest
-    // first), as a riot's beat does.
-    let tod = world.tick_of_day();
-    let mut answering: Vec<(u32, EntityId)> = Vec::new();
     for g in beat {
-        if !law::living(world, g) || defenders.contains(&g) {
-            continue;
-        }
-        if near(world, g) {
+        if law::living(world, g) && !defenders.contains(&g) && near(world, g) {
             defenders.push(g);
-        } else if world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod))
-            && world.comp::<Brain>(g).is_some_and(|b| b.cuffed_by.is_none() && b.escorting.is_none())
-        {
-            if let Some(p) = world.comp::<Position>(g) {
-                answering.push((p.tile.manhattan(door), g));
-            }
         }
     }
-    // In the Precinct's own district the watch on shift inside the Precinct
-    // answers a raid too (it is next door; that district has no Homes and
-    // only the paid term's thin beat).
-    if let Some(jail) = world.building_of_kind(BuildingKind::Jail).filter(|&j| world.district_of_building(j) == d) {
-        for g in law_brain::guards(world) {
-            if defenders.contains(&g) || answering.iter().any(|&(_, x)| x == g) || !law::living(world, g) {
-                continue;
-            }
-            let inside = world.comp::<Position>(g).is_some_and(|p| p.building == Some(jail));
-            let on = world.comp::<Job>(g).is_some_and(|j| j.on_shift(tod));
-            let free = world.comp::<Brain>(g).is_some_and(|b| b.cuffed_by.is_none() && b.escorting.is_none());
-            if inside && on && free {
-                answering.push((u32::MAX, g));
-            }
-        }
-    }
-    answering.sort_unstable();
-    let k = (answering.len() as f32 * faction::alertness_mult(world, None)).round().max(0.0);
-    for (_, g) in answering.into_iter().take(k as usize) {
-        if world.has::<Sentence>(g) {
-            continue;
-        }
+    for g in answering_guards(world, d, door, &defenders) {
         world.abort_plan(g);
         world.stand_at_door(g, target);
         defenders.push(g);

@@ -20,7 +20,7 @@ M12: a "districts" section (per-district means of coverage, unrest, litter, crim
 from the d1..d8 columns, days per controller, riot/crossfire/vagrancy/hotel-night totals, Dregs
 as a share of adults) and, with an events file, riots, strikes and splits by district and corp
 raids won/lost. Flags: a district above unrest 0.8 for 30+ days running with no riot there,
-district litter above 0.5, no Dregs (`dregs`) for 30+ days running, corp raids never lost.
+district litter above 0.5, no Dregs (`class_dreg`) for 30+ days running, corp raids never lost.
 The events file is optional; without it the event-based parts are skipped.
 """
 import argparse
@@ -353,16 +353,19 @@ def districts(rows, events, out, flags):
             flags.append(f"{name} litter > 0.5 on {len(dirty)} days: {day_ranges(dirty)}")
 
     o = {k: total(k) for k in ("riots", "crossfire", "vagrancy", "hotel_nights") if k in rows[0]}
-    for k in ("dregs", "squatters", "derelicts", "gangs"):
+    # The Dreg adults are `class_dreg` (M12 review dropped the duplicate `dregs` column).
+    if "class_dreg" in rows[0]:
+        o["dregs_mean"] = mean(col(rows, "class_dreg"))
+    for k in ("squatters", "derelicts", "gangs"):
         if k in rows[0]:
             o[k + "_mean"] = mean(col(rows, k))
     adults = ("class_corp", "class_street", "class_dreg")
-    if "dregs" in rows[0] and all(k in rows[0] for k in adults):
+    if all(k in rows[0] for k in adults):
         share = []
         for r in rows:
             a = sum(r[k] for k in adults if isinstance(r.get(k), float))
-            if a > 0 and isinstance(r.get("dregs"), float):
-                share.append(r["dregs"] / a)
+            if a > 0 and isinstance(r.get("class_dreg"), float):
+                share.append(r["class_dreg"] / a)
         o["dreg_share_mean"] = mean(share)
         o["dreg_share_1_5pct_days"] = sum(1 for x in share if 0.01 <= x <= 0.05)
     if events:
@@ -371,10 +374,10 @@ def districts(rows, events, out, flags):
         o["strike_events"] = sum(strikes.values())
     out["districts"] = {"city": o, "per_district": per, "splits": [f"day {d}: {t}" for d, _, t in splits]}
 
-    if "dregs" in rows[0]:
-        for a, b, length in runs(zip(days, (r.get("dregs") == 0 for r in rows)), bool):
+    if "class_dreg" in rows[0]:
+        for a, b, length in runs(zip(days, (r.get("class_dreg") == 0 for r in rows)), bool):
             if length >= 30:
-                flags.append(f"no Dregs (dregs == 0) days {a}-{b} ({length} days)")
+                flags.append(f"no Dregs (class_dreg == 0) days {a}-{b} ({length} days)")
     if events and raids["Won"] + raids["Lost"] > 0 and raids["Lost"] == 0:
         flags.append(f"corp raids never lost ({raids['Won']} won)")
 

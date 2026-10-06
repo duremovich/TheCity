@@ -161,7 +161,7 @@ fn snapshot(w: &World, d: &mut Day, gangs: &[EntityId]) {
     d.hotel_nights = row.hotel_nights;
     d.squatters = row.squatters;
     d.derelicts = row.derelicts;
-    d.dregs = row.dregs;
+    d.dregs = row.class_dreg;
     d.strikes = row.strikes;
 }
 

@@ -137,8 +137,8 @@ fn test_choose_respects_hysteresis() {
     assert_eq!(faction::choose(&scores, Order::LieLow, 0.1), Some(Order::Expand));
     // Hand-built: a lead inside the band holds at the daily rescoring and switches on a shock.
     let close = vec![
-        citysim::OrderScore { order: Order::Contest, score: 0.50, considerations: vec![] },
-        citysim::OrderScore { order: Order::Expand, score: 0.45, considerations: vec![] },
+        citysim::OrderScore { order: Order::Contest, score: 0.50, considerations: vec![], corp_target: false },
+        citysim::OrderScore { order: Order::Expand, score: 0.45, considerations: vec![], corp_target: false },
     ];
     assert_eq!(faction::choose(&close, Order::Expand, 0.1), None);
     assert_eq!(faction::choose(&close, Order::Expand, 0.0), Some(Order::Contest));
@@ -965,7 +965,8 @@ fn test_corp_raid_meets_posted_guards_and_the_crew_breaks() {
         .expect("a corp Market");
     let corp = w.corp_of_building(market).expect("corp");
     let door = w.comp::<Building>(market).map(|b| w.outside_door(b)).expect("door");
-    let far = TilePos { x: 250, y: 2 };
+    // Across the map from the door (out of `answer_radius` on x).
+    let far = TilePos { x: if door.x < 128 { 250 } else { 2 }, y: 2 };
     for g in w.guards().to_vec() {
         w.abort_plan(g);
         w.leave_building(g);
@@ -985,15 +986,31 @@ fn test_corp_raid_meets_posted_guards_and_the_crew_breaks() {
     let office = w.buildings_of_kind(BuildingKind::SecurityOffice)[0];
     let security = w.corp_of_building(office).expect("a security corp");
     w.comp_mut::<Building>(market).expect("b").secured_by = Some(security);
-    for pg in civilians(&w, 4) {
+    // M12 review: four of the seller's guards are up within answer_radius
+    // of the door; a fifth is across the map and a sixth near but off shift
+    // and asleep: neither is called in (no teleport from a bed or the far
+    // side).
+    let near = TilePos { x: if door.x >= 10 { door.x - 10 } else { door.x + 10 }, y: door.y };
+    assert!(u32::from(far.x.abs_diff(door.x)) > w.config.crime.answer_radius, "the far tile is out of reach");
+    let hired = civilians(&w, 6);
+    for (i, &pg) in hired.iter().enumerate() {
         citysim::systems::demography::hire(&mut w, pg, office, citysim::Role::Guard);
         w.leave_building(pg);
         let p = w.comp_mut::<Position>(pg).expect("pos");
-        p.tile = far;
+        p.tile = if i == 4 { far } else { near };
         p.building = None;
     }
+    w.comp_mut::<Brain>(hired[5]).expect("brain").current_goal = Some(citysim::GoalKind::Sleep);
+    let tod = w.tick_of_day();
+    let off = if tod < 720 { (1000, 1100) } else { (100, 200) };
+    w.comp_mut::<citysim::Job>(hired[5]).expect("job").shifts = vec![off];
+    assert!(!w.comp::<citysim::Job>(hired[5]).expect("job").on_shift(tod));
     let roster = raid::private_guards_of(&w, market);
-    assert!(roster.len() >= 4, "the seller's guards: {}", roster.len());
+    assert!(roster.len() >= 6, "the seller's guards: {}", roster.len());
+    w.config.gangs.corp_raid_posted = 6;
+    let reachable = raid::posted_guards(&w, market);
+    assert_eq!(reachable.len(), 4, "only the four awake guards in reach: {reachable:?}");
+    assert!(!reachable.contains(&hired[4]) && !reachable.contains(&hired[5]));
     w.config.gangs.corp_raid_posted = 3;
     let posted = raid::posted_guards(&w, market);
     assert_eq!(posted.len(), 3, "capped at corp_raid_posted");

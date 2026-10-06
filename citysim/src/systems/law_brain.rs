@@ -455,7 +455,13 @@ pub fn alloc_weights(world: &World) -> Vec<(f32, Vec<(&'static str, f32)>)> {
             // M12 D10: a riot musters or runs here.
             let riot = if crate::systems::riot::riot_in(world, d.id) { cfg.alloc_riot } else { 0.0 };
             let lever = world.levers.guard_weight.get(i).copied().unwrap_or(1.0).max(0.0);
-            let off = garrison || d.stance == Stance::Withdrawn;
+            // M12 review: a stance pin is read as it stands, not through the
+            // stance it sets: `rescore_stances` runs after the deal (its
+            // Crackdown gate reads today's guards), so a pin to Withdrawn
+            // empties the beat on the same deal (a zero guard weight already
+            // does, through `lever`).
+            let stance = world.levers.stance_pin.get(i).copied().flatten().unwrap_or(d.stance);
+            let off = garrison || stance == Stance::Withdrawn;
             let w = if off { 0.0 } else { (base + crime + paid_t + landlord + riot) * lever };
             let terms = vec![
                 ("base", base),
@@ -718,8 +724,7 @@ pub fn rescore_stances(world: &mut World, hysteresis: f32, why: &str) {
             Some((Stance::Withdrawn, "withdrawn".to_string()))
         } else if garrison {
             Some((Stance::Patrol, "garrison".to_string()))
-        } else if let (Some(h), Some(ld)) = (lobby, lobby_district.filter(|ld| ld.index() == i)) {
-            let _ = ld;
+        } else if let (Some(h), Some(_)) = (lobby, lobby_district.filter(|ld| ld.index() == i)) {
             Some((Stance::Crackdown(h.gang), lobby_why.clone().unwrap_or_default()))
         } else if !d.inhabited() && !crate::systems::riot::riot_in(world, d.id) {
             // D12: an uninhabited district stays Patrol unless it riots.

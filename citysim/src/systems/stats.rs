@@ -173,7 +173,6 @@ pub fn snapshot(world: &mut World) {
     row.class_dreg = cls[2].count;
     row.happiness_street = cls[1].happiness;
     // M12 D45: the district slots and the city-wide street/riot columns.
-    row.dregs = cls[2].count;
     let slots: Vec<crate::stats::DistrictCols> = world
         .districts
         .iter()

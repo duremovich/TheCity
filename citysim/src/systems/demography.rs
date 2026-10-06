@@ -397,8 +397,8 @@ fn corpses(world: &mut World) {
         }
         // M12 D17: an unburied body a day old fouls the street around it.
         if age >= TICKS_PER_DAY {
-            if let Some(t) = world.comp::<Position>(c).map(|p| p.tile) {
-                crate::systems::litter::deposit(world, t, 24, 0);
+            if let Some((t, b)) = world.comp::<Position>(c).map(|p| (p.tile, p.building)) {
+                crate::systems::litter::deposit_near(world, t, b, 24, 0);
             }
         }
         if age > 2 * TICKS_PER_DAY {

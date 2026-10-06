@@ -571,6 +571,33 @@ fn test_sweep_wins_with_rough_sleepers_and_lawful_captain() {
 }
 
 #[test]
+fn test_withdrawn_pin_empties_the_beat_on_the_same_deal() {
+    // M12 review: the deal runs before the stances are rescored (Crackdown's
+    // gate reads today's guards), so the allocation reads a stance pin as it
+    // stands: a fresh Withdrawn pin gets no guards on the very deal that
+    // applies it, not one deal later.
+    let mut w = law_city();
+    for d in 0..2 {
+        inhabit(&mut w, d, 50, 1.0);
+    }
+    captain(&mut w, 0.5, 0.9);
+    law_brain::redeal(&mut w, "test");
+    assert!(w.districts[1].guards > 0, "district 1 starts with guards");
+    assert_ne!(w.districts[1].stance, Stance::Withdrawn);
+    w.levers.stance_pin[1] = Some(Stance::Withdrawn);
+    law_brain::redeal(&mut w, "pinned");
+    assert_eq!(w.districts[1].guards, 0, "no guards on the same deal");
+    assert!(w.law().expect("law").beats.values().all(|d| d.index() != 1), "no beat in district 1");
+    assert_eq!(w.districts[1].stance, Stance::Withdrawn);
+    let (_, terms) = law_brain::alloc_weight(&w, DistrictId(1));
+    assert!(terms.iter().any(|&(k, v)| k == "off" && v == 1.0), "{terms:?}");
+    // Unpinned, the district draws guards again on the next deal.
+    w.levers.stance_pin[1] = None;
+    law_brain::redeal(&mut w, "unpinned");
+    assert!(w.districts[1].guards > 0, "guards back once the pin is lifted");
+}
+
+#[test]
 fn test_garrison_zeroes_allocations() {
     let mut w = law_city();
     for d in 0..3 {

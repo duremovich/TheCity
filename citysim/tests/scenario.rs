@@ -809,7 +809,7 @@ fn test_m12_districts_seed_42() {
         // Dregs.
         let row = w.stats.history.back().expect("a day row");
         let adults = row.class_corp + row.class_street + row.class_dreg;
-        let share = f64::from(row.dregs) / f64::from(adults.max(1));
+        let share = f64::from(row.class_dreg) / f64::from(adults.max(1));
         if (0.01..=0.05).contains(&share) {
             dreg_days += 1;
         }

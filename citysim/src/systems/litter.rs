@@ -11,7 +11,8 @@
 
 use rand::Rng;
 
-use crate::components::{DistrictId, TilePos};
+use crate::components::{Building, DistrictId, TilePos};
+use crate::entity::EntityId;
 use crate::world::World;
 
 /// The rubble value (the `Damage` hook, D19). Deposits stop at 254.
@@ -50,58 +51,69 @@ pub fn at(world: &World, p: TilePos) -> u8 {
 }
 
 /// Fix pass (phase 3 review): where litter from an event at `tile` lands.
-/// A street tile is itself; a tile inside a building (an indoor theft, a
-/// death in a Home, a raid at a door) is that building's outside door, so an
-/// indoor event still marks the street. Anything else (a wall, a demolished
-/// Home's ground) is left as it is and the deposit's street filter decides.
-pub fn street_anchor(world: &World, tile: TilePos) -> TilePos {
+/// A street tile is itself; an event inside a building (`inside`: an indoor
+/// theft, a death in a Home, a raid at its door) lands at that building's
+/// outside door, so an indoor event still marks the street. M12 review: no
+/// building scan; with no building named, a tile next to the street (a door)
+/// lands on its first street neighbour (`neighbours4` order). Anything else
+/// (a wall, a demolished Home's ground) is left as it is and the deposit's
+/// street filter decides.
+pub fn street_anchor(world: &World, tile: TilePos, inside: Option<EntityId>) -> TilePos {
     if world.is_street(tile) {
         return tile;
     }
-    let mut hit: Option<(crate::entity::EntityId, TilePos)> = None;
-    for b in world.with::<crate::components::Building>() {
-        let Some(bd) = world.comp::<crate::components::Building>(b) else { continue };
-        if bd.demolished || !(bd.door == tile || bd.rect.contains(tile)) {
-            continue;
-        }
-        if hit.is_none_or(|(h, _)| b < h) {
-            hit = Some((b, world.outside_door(bd)));
-        }
+    if let Some(bd) = inside.and_then(|b| world.comp::<Building>(b)).filter(|bd| !bd.demolished) {
+        return world.outside_door(bd);
     }
-    hit.map_or(tile, |(_, t)| t)
+    world.map.neighbours4(tile).find(|&n| world.is_street(n)).unwrap_or(tile)
 }
 
-/// D16: `amount` at `tile` (mapped to the street by [`street_anchor`]),
-/// scaled by `[litter] deposit_mult` (fix pass; capped at 254), spread to
-/// Chebyshev radius `r` with half the amount at the rim (`round(amount × (1 −
-/// k ÷ 2r))` at ring `k`); only street tiles (walkable, inside no building)
-/// take it, saturating at 254. Rubble is left as it is.
+/// M12 review: the street tiles (walkable, inside no building) within
+/// Chebyshev `r` of `centre`, row by row, each with its ring `k`.
+pub fn street_tiles_around(world: &World, centre: TilePos, r: u8) -> impl Iterator<Item = (TilePos, i32)> + '_ {
+    let (w, h) = (world.map.w() as i32, world.map.h() as i32);
+    let r = i32::from(r);
+    let (cx, cy) = (i32::from(centre.x), i32::from(centre.y));
+    (-r..=r)
+        .flat_map(move |dy| (-r..=r).map(move |dx| (dx, dy)))
+        .filter(move |&(dx, dy)| {
+            let (x, y) = (cx + dx, cy + dy);
+            x >= 0 && y >= 0 && x < w && y < h
+        })
+        .map(move |(dx, dy)| (TilePos { x: (cx + dx) as u8, y: (cy + dy) as u8 }, dx.abs().max(dy.abs())))
+        .filter(move |&(p, _)| world.is_street(p))
+}
+
+/// D16: `amount` at `tile` (a street tile, or a door's: see
+/// [`street_anchor`]); [`deposit_near`] names the building an indoor event
+/// happened in.
 pub fn deposit(world: &mut World, tile: TilePos, amount: u8, r: u8) {
+    deposit_near(world, tile, None, amount, r);
+}
+
+/// D16: `amount` at `tile` (mapped to the street by [`street_anchor`] with
+/// the building `inside`, if the event happened in one), scaled by
+/// `[litter] deposit_mult` (fix pass; capped at 254), spread to Chebyshev
+/// radius `r` with half the amount at the rim (`round(amount × (1 − k ÷
+/// 2r))` at ring `k`); only street tiles (walkable, inside no building) take
+/// it, saturating at 254. Rubble is left as it is.
+pub fn deposit_near(world: &mut World, tile: TilePos, inside: Option<EntityId>, amount: u8, r: u8) {
     if !enabled(world) || amount == 0 {
         return;
     }
-    let tile = street_anchor(world, tile);
+    let tile = street_anchor(world, tile, inside);
     let amount = (f32::from(amount) * world.config.litter.deposit_mult.max(0.0)).min(f32::from(MAX_LITTER));
-    let (w, h) = (world.map.w() as i32, world.map.h() as i32);
-    let r = i32::from(r);
-    for dy in -r..=r {
-        for dx in -r..=r {
-            let (x, y) = (i32::from(tile.x) + dx, i32::from(tile.y) + dy);
-            if x < 0 || y < 0 || x >= w || y >= h {
-                continue;
-            }
-            let p = TilePos { x: x as u8, y: y as u8 };
-            if !world.is_street(p) {
-                continue;
-            }
-            let k = dx.abs().max(dy.abs());
-            let add = if r == 0 { amount } else { amount * (1.0 - k as f32 / (2 * r) as f32) };
-            let add = add.round().clamp(0.0, 255.0) as u16;
-            let i = index(world, p);
-            if let Some(v) = world.litter.get_mut(i) {
-                if *v != RUBBLE {
-                    *v = (u16::from(*v) + add).min(u16::from(MAX_LITTER)) as u8;
-                }
+    let rr = i32::from(r);
+    let adds: Vec<(usize, u16)> = street_tiles_around(world, tile, r)
+        .map(|(p, k)| {
+            let add = if rr == 0 { amount } else { amount * (1.0 - k as f32 / (2 * rr) as f32) };
+            (index(world, p), add.round().clamp(0.0, 255.0) as u16)
+        })
+        .collect();
+    for (i, add) in adds {
+        if let Some(v) = world.litter.get_mut(i) {
+            if *v != RUBBLE {
+                *v = (u16::from(*v) + add).min(u16::from(MAX_LITTER)) as u8;
             }
         }
     }
@@ -216,42 +228,13 @@ pub fn clean_around(world: &mut World, door: TilePos, r: u8, units: u32) -> u32 
     if units == 0 {
         return 0;
     }
-    let (w, h) = (world.map.w() as i32, world.map.h() as i32);
-    let r = i32::from(r);
-    let mut tiles = Vec::new();
-    for dy in -r..=r {
-        for dx in -r..=r {
-            let (x, y) = (i32::from(door.x) + dx, i32::from(door.y) + dy);
-            if x < 0 || y < 0 || x >= w || y >= h {
-                continue;
-            }
-            let p = TilePos { x: x as u8, y: y as u8 };
-            if world.is_street(p) {
-                tiles.push(index(world, p) as u32);
-            }
-        }
-    }
+    let tiles: Vec<u32> = street_tiles_around(world, door, r).map(|(p, _)| index(world, p) as u32).collect();
     clean_tiles(world, tiles, units)
 }
 
 /// The litter units within Chebyshev `r` of `door` (the owner's bill).
 pub fn units_around(world: &World, door: TilePos, r: u8) -> u32 {
-    let (w, h) = (world.map.w() as i32, world.map.h() as i32);
-    let r = i32::from(r);
-    let mut sum = 0u32;
-    for dy in -r..=r {
-        for dx in -r..=r {
-            let (x, y) = (i32::from(door.x) + dx, i32::from(door.y) + dy);
-            if x < 0 || y < 0 || x >= w || y >= h {
-                continue;
-            }
-            let p = TilePos { x: x as u8, y: y as u8 };
-            if world.is_street(p) {
-                sum += u32::from(at(world, p));
-            }
-        }
-    }
-    sum
+    street_tiles_around(world, door, r).map(|(p, _)| u32::from(at(world, p))).sum()
 }
 
 fn unblock(world: &mut World, p: TilePos) {

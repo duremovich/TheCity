@@ -170,7 +170,7 @@ fn test_litter_scaled_anchored_at_the_door_and_read_as_a_share() {
     let inside = TilePos { x: rect.x + 1, y: rect.y + 1 };
     assert!(!w.is_street(inside) && w.is_street(outside));
     let before = litter::at(&w, outside);
-    litter::deposit(&mut w, inside, 6, 0);
+    litter::deposit_near(&mut w, inside, Some(home), 6, 0);
     assert_eq!(litter::at(&w, outside), before + 48, "the street outside the door takes it");
     // Capped at 254: a violent death (40 x 8) is heaped, not rubble.
     let u = open_street(&w, 2);
@@ -495,10 +495,9 @@ fn test_occupy_makes_squatter_who_stays_dreg() {
     citysim::exec::actions::on_complete(&mut w, a, ActionKind::Sleep, None, now, now);
     assert!((w.comp::<Needs>(a).expect("needs").safety - 0.6).abs() < 1e-6);
     assert!(w.day_marks.get(&a).copied().unwrap_or(0) & trace_flags::SQUAT != 0);
-    // Housed: the squat ends.
+    // Housed: the squat ends (`set_home` ends it).
     let home = w.district(DistrictId(1)).homes[0];
     w.set_home(a, Some(home));
-    street::on_housed(&mut w, a);
     assert!(!w.has::<Squatter>(a));
     // A long sentence ends one too.
     let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
@@ -615,10 +614,10 @@ fn test_dreg_share_on_hand_built_world() {
     let adults: u32 = counts.iter().sum();
     let share = f64::from(counts[2]) / f64::from(adults);
     assert!((share - homeless as f64 / f64::from(adults)).abs() < 1e-9);
-    // The CSV's columns: dregs, squatters, derelicts, hotel nights.
+    // The CSV's columns: class_dreg, squatters, derelicts, hotel nights.
     w.run_ticks(TICKS_PER_DAY);
     let row = w.stats.history.back().expect("a row");
-    assert!(row.dregs >= 2, "the squatters at least are still Dregs ({})", row.dregs);
+    assert!(row.class_dreg >= 2, "the squatters at least are still Dregs ({})", row.class_dreg);
     assert!(row.derelicts >= 1);
     assert!(row.hotel_nights >= 2);
 }

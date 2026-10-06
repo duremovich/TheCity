@@ -1044,9 +1044,8 @@ fn rehouse(world: &mut World) {
         let place = world.name_of(home);
         let label = world.owner_label(world.owner_of(home));
         for &m in &movers {
+            // M12 D28: housed: the squat and the booking end (`set_home`).
             world.set_home(m, Some(home));
-            // M12 D28: housed: the squat and the booking end.
-            crate::systems::street::on_housed(world, m);
             let name = world.name_of(m);
             world.push_event(EventKind::Housed, &[m, home], format!("{name} moved into {place} ({label})"));
             world.stats.current.housed += 1;

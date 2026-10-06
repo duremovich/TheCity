@@ -424,7 +424,7 @@ New `EventKind`s: `DistrictControl`, `Stance`, `Sanitation`, `Vagrancy` (via the
 - **Map overlay** (toggle `D`): district borders; fill in the controller's colour (gang colours as M8, corp colours as M11, city grey, Contested hatched); a litter heat layer (toggle `L`) reading `World::litter`; derelict buildings drawn cracked; Hotels with a bed icon.
 - **City panel**: a Districts section, one row per district (controller, guards, unrest, litter, crime), and the levers above.
 - **Inspector**: district, "squatting in X", "slept at Y Hotel", Vagrancy record.
-- **CSV** (`--report`): per district `d{i}_coverage`, `d{i}_control` (0 Contested, 1 City, 2 Gang, 3 Corp), `d{i}_litter`, `d{i}_unrest`, `d{i}_crime`, `d{i}_guards`; city-wide `dregs`, `hotel_nights`, `squatters`, `derelicts`, `vagrancy`, `riots`, `crossfire`, `gangs`.
+- **CSV** (`--report`): per district `d{i}_coverage`, `d{i}_control` (0 Contested, 1 City, 2 Gang, 3 Corp), `d{i}_litter`, `d{i}_unrest`, `d{i}_crime`, `d{i}_guards`; city-wide `hotel_nights`, `squatters`, `derelicts`, `vagrancy`, `riots`, `crossfire`, `gangs`.
 
 ## 9. Save compatibility
 

@@ -150,7 +150,7 @@ fn score(order: Order, cs: Vec<Consideration>, flat: f32) -> Option<OrderScore> 
         return None;
     }
     let raw: f32 = cs.iter().map(|c| c.output).product();
-    Some(OrderScore { order, score: raw + flat, considerations: cs })
+    Some(OrderScore { order, score: raw + flat, considerations: cs, corp_target: false })
 }
 
 /// Score every order, best first. LieLow always scores, so the result is never empty.
@@ -262,7 +262,8 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
 /// building of `corp_prize` (M12 D39), whose prize term reads the corp
 /// prize, whose ratio reads the private guards on its side, whose cover
 /// reads its district, and whose flat gains `hoard_tilt × hoard`. A corp
-/// variant's trace carries a "corp target" consideration (always 1).
+/// variant is marked `corp_target` (its trace also shows a "corp target"
+/// consideration, always 1, for the panel).
 fn raid_score(i: &OrderInputs, cfg: &GangsCfg, corp: bool) -> Option<OrderScore> {
     let f = &cfg.order_flat;
     let calm = 1.0 - i.heat;
@@ -289,12 +290,12 @@ fn raid_score(i: &OrderInputs, cfg: &GangsCfg, corp: bool) -> Option<OrderScore>
     if corp {
         cs.push(Consideration::new("corp target", 1.0, Curve::Linear { m: 0.0, b: 1.0 }));
     }
-    score(Order::Raid, cs, flat)
+    score(Order::Raid, cs, flat).map(|s| OrderScore { corp_target: corp, ..s })
 }
 
 /// D39: does this Raid score (the best Raid entry) aim at the corp building?
 pub fn is_corp_raid(s: &OrderScore) -> bool {
-    s.order == Order::Raid && s.considerations.iter().any(|c| c.name == "corp target")
+    s.order == Order::Raid && s.corp_target
 }
 
 /// The order to switch to, if the best beats the current one by `hysteresis`.

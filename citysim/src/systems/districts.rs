@@ -598,6 +598,9 @@ pub fn reconcile_sanitation(world: &mut World) {
 /// fear, coverage, crime rate, `residents` and the trace.
 pub fn aggregates(world: &mut World) {
     let n = world.districts.len();
+    if n == 0 {
+        return;
+    }
     let execs = crate::systems::classes::exec_set(world);
     let mut population = vec![0u32; n];
     let mut adults = vec![0u32; n];

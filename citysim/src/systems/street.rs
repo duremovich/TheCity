@@ -73,13 +73,8 @@ pub fn daily(world: &mut World) {
 /// Homeless adults with a Brain who are free (no Sentence, not cuffed),
 /// not emigrating, with no booked Hotel bed and no squat, ascending.
 pub fn rough_sleepers(world: &World) -> Vec<EntityId> {
-    // scan-ok: nightly: rough sleepers
-    world
-        .citizens()
+    homeless_adults(world)
         .into_iter()
-        .filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none()))
-        .filter(|&a| world.comp::<Brain>(a).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating))
-        .filter(|&a| !world.has::<Sentence>(a) && crate::systems::demography::is_adult(world, a))
         .filter(|&a| !world.has::<Squatter>(a) && booked_hotel(world, a).is_none())
         .collect()
 }
@@ -444,7 +439,7 @@ pub fn make_derelict(world: &mut World, b: EntityId, why: &str) -> bool {
     let mut actors = vec![b];
     actors.extend(owner);
     world.push_event(EventKind::Derelict, &actors, format!("{what} went derelict ({why}; was {label}'s)"));
-    crate::systems::litter::deposit(world, door, DERELICT_LITTER.0, DERELICT_LITTER.1);
+    crate::systems::litter::deposit_near(world, door, Some(b), DERELICT_LITTER.0, DERELICT_LITTER.1);
     crate::systems::districts::rebuild(world);
     true
 }
@@ -727,7 +722,7 @@ fn street_litter(world: &mut World) {
             continue;
         }
         if let Some(door) = door_of(world, b) {
-            crate::systems::litter::deposit(world, door, SQUAT_LITTER.0, SQUAT_LITTER.1);
+            crate::systems::litter::deposit_near(world, door, Some(b), SQUAT_LITTER.0, SQUAT_LITTER.1);
         }
     }
     for a in rough_sleepers(world) {
@@ -740,12 +735,6 @@ fn street_litter(world: &mut World) {
 pub fn snapshot(world: &World) -> (u32, u32) {
     let squatters: usize = world.squat_index.values().map(Vec::len).sum();
     (squatters as u32, derelicts(world).len() as u32)
-}
-
-/// On housing (`ownership::rehouse`): a squat and a booking end.
-pub fn on_housed(world: &mut World, a: EntityId) {
-    world.remove::<Squatter>(a);
-    world.hotel_beds.remove(&a);
 }
 
 // ---------------------------------------------------------------------------

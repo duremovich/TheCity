@@ -236,7 +236,7 @@ pub fn strike_target(world: &World) -> Option<(EntityId, Vec<EntityId>)> {
         if staff.is_empty() {
             continue;
         }
-        let level = cc.price_level.values().copied().fold(0.0f32, f32::max);
+        let level = cc.max_price_level();
         let better = best.as_ref().is_none_or(|&(l, t, id, _)| {
             level > l || (level == l && (cc.treasury > t || (cc.treasury == t && c < id)))
         });
@@ -321,7 +321,7 @@ pub fn strike(world: &mut World) {
         let mut best: Option<(f32, i64, EntityId)> = None;
         for &corp in staff.keys() {
             let Some(cc) = world.comp::<Corp>(corp) else { continue };
-            let level = cc.price_level.values().copied().fold(0.0f32, f32::max);
+            let level = cc.max_price_level();
             let better = best.is_none_or(|(l, t, id)| {
                 level > l || (level == l && (cc.treasury > t || (cc.treasury == t && corp < id)))
             });

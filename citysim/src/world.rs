@@ -2136,8 +2136,8 @@ impl World {
         let child = self.has::<Child>(id);
         // M12 D17: a violent death leaves its mark on the street.
         if cause == DeathCause::Violence {
-            if let Some(t) = self.comp::<Position>(id).map(|p| p.tile) {
-                systems::litter::deposit(self, t, 40, 1);
+            if let Some((t, b)) = self.comp::<Position>(id).map(|p| (p.tile, p.building)) {
+                systems::litter::deposit_near(self, t, b, 40, 1);
             }
         }
         // Widowhood is recorded on the Death event, and `on_death` unlinks the pair.
