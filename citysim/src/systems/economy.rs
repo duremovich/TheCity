@@ -201,9 +201,17 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
 /// Warehouse and then lost. Returns units moved out of the farm. M11 D5:
 /// between different owners the Market's owner buys at `[corps] wholesale`
 /// a unit (units it cannot afford go to the Reserve), and the city buys the
-/// Reserve's share from a non-city Farm at the same price.
-pub fn haul(world: &mut World, farm: EntityId) -> u32 {
-    let batch = world.config.economy.haul_batch;
+/// Reserve's share from a non-city Farm at the same price. M13 D23: a
+/// vehicle's haul is `haul_batch × mult` (`Some(mult)`; `None` on foot),
+/// counted as a truck haul (a car's too) or a walked one.
+pub fn haul(world: &mut World, farm: EntityId, vehicle: Option<u32>) -> u32 {
+    let batch = world.config.economy.haul_batch * vehicle.unwrap_or(1).max(1);
+    if world.config.assets.enabled {
+        match vehicle {
+            Some(_) => world.stats.current.truck_hauls += 1,
+            None => world.stats.current.walk_hauls += 1,
+        }
+    }
     let market_cap = world.config.buildings.market.stock_cap;
     let wh_cap = world.config.buildings.warehouse.stock_cap;
     let wholesale = world.config.corps.wholesale;

@@ -154,6 +154,8 @@ sight = 6
 sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
+# M13 D47: the crimes appended after Vagrancy (GrandTheft and Manslaughter land in phase 2).
+sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10 }
 # jail capacity is buildings.jail.capacity
 fight_death_p = 0.03
 stat_theft_caught_p = 0.25
@@ -473,13 +475,15 @@ pay_from_income = true
 
 [corps]
 # placeholders; one row per corp, niches as a list, holdings as counts per niche kind
-names    = ["Nutrix", "Vatra", "Greenline", "Habitat", "Stackwell", "Kessler", "Arasaka", "Militech"]
-niches   = [["Food"], ["Food", "Housing"], ["Food"], ["Housing"], ["Housing"], ["Housing"], ["Security"], ["Security", "Housing"]]
-farms    = [6, 4, 2, 0, 0, 0, 0, 0]
-markets  = [1, 1, 1, 0, 0, 0, 0, 0]
-blocks   = [0, 60, 0, 120, 60, 20, 0, 40]
-offices  = [0, 0, 0, 0, 0, 0, 1, 1]
-treasury_initial = [6000, 5000, 2500, 8000, 4000, 1500, 4000, 3000]
+# M13 D17 (phase 2): row 9, Zetatech (placeholder name), the Tech corp: it owns the Civic Garage
+# (assets::seed_sellers) and, from phase 3, the Spire Clinic.
+names    = ["Nutrix", "Vatra", "Greenline", "Habitat", "Stackwell", "Kessler", "Arasaka", "Militech", "Zetatech"]
+niches   = [["Food"], ["Food", "Housing"], ["Food"], ["Housing"], ["Housing"], ["Housing"], ["Security"], ["Security", "Housing"], ["Tech"]]
+farms    = [6, 4, 2, 0, 0, 0, 0, 0, 0]
+markets  = [1, 1, 1, 0, 0, 0, 0, 0, 0]
+blocks   = [0, 60, 0, 120, 60, 20, 0, 40, 0]
+offices  = [0, 0, 0, 0, 0, 0, 1, 1, 0]
+treasury_initial = [6000, 5000, 2500, 8000, 4000, 1500, 4000, 3000, 5000]
 bar_owner_coins = 200
 hoard_heat = 5000                  # a corp treasury above this is a raid prize in the gang brain
 acquire_premium = 1.2              # offer = value × premium
@@ -561,7 +565,7 @@ found_flat = 0.1
 # M12 phase 4: 0 -> 0.2 (spec § 5). The tilt now lands on the corp-building Raid (plan D39) and no
 # longer on Contest (faction::score_orders: Contest reads it only with corp raids off, the M11 brain).
 hoard_tilt = 0.2
-megacorp = [false, false, false, false, false, false, true, true]  # D41
+megacorp = [false, false, false, false, false, false, true, true, false]  # D41; M13 D17 row 9
 outside_treasury_initial = 100000
 # M11 phase 5, the estate rule (diagnosis item 24): a bankruptcy estate's building goes only to a corp
 # already in its niche holding under half of it (Nutrix, a Food corp, bought 60 Blocks of a dead
@@ -781,7 +785,10 @@ pack = [10, 25]
 goods_cap = 1000                   # plan D6: Stims/Parts cap where the kind's stock_cap is lower
 parts_floor = 20                   # plan D14
 parts_batch = 20                   # plan D14
-found_sellers = false              # phase 1: nobody founds a Clinic or Garage yet (phase 2 sets true)
+# Phase 2 carry-over: per kind. Agents (Register) and a Tech corp (Grow) found Garages from phase 2;
+# Clinics stay off until phase 3 makes them do something.
+found_garage = true
+found_clinic = false
 
 [chrome]
 # M13 § 3, the Kit table (plan "Kit tables"); phase 3 adds the rest.
@@ -794,3 +801,44 @@ eyes_stealth = 0.05
 skin_armour = 0.15
 sanity_cost = [0.08, 0.15, 0.25]
 used_frac = 0.6
+contest_step = 0.25                # plan D28: security::contest, per tier of difference
+buyback_frac = 0.4                 # spec § 3; phase 2 reads it for a hunkering corp's fleet sale (D44)
+
+[vehicles]
+# M13 § 2 (plan phase 2, D19-D27).
+road_share = 0.7                   # D21: the road share a Coarse trip's timed_mult assumes
+max_steps_per_tick = 4             # D19: a Full driver's steps per executor call
+flyer_ticks_per_tile = 0.3         # D22: Chebyshev tiles, over walls
+mult = { motorcycle = [0.25, 0.6, 0.8], car = [0.2, 1.0, 1.0], truck = [0.3, 1.0, 0.6] }   # road, ground, farmland
+haul = { motorcycle = 1, car = 2, truck = 6, flyer = 1 }
+crash_per_tile = 0.00004
+speed = { motorcycle = 1.5, car = 1.0, truck = 1.2, flyer = 0.0 }
+chase_mult = 6.0
+crash_radius = 2
+dodge_w = 0.6
+dodge_cap = 0.9
+p_crash_kill = 0.3
+crash_wear = 30
+crash_litter = 24
+steal_vehicle_cost = 10.0
+fence_frac = 0.2
+vehicle_theft_base = 0.004
+garage_mult = 0.2
+bikes_max_share = 0.5
+steal_reach = 40                   # plan D26
+
+[shop]
+# M13 § 6 (plan D17, D18, D43, D44).
+shop_cooldown_days = 7
+commute_ref = 60
+shop_flat = 0.02
+gang_buy_floor = 600
+garage_rent = 1
+max_burden = 0.5                   # plan D43: upkeep + finance per day <= this share of daily income
+stat_shop_min = 0.3                # plan D43
+seed_owner_coins = 300             # plan D18
+# plan D44: Food trucks (and, phase 2 deviation, Security Office cars) under any order but Hunker.
+# Phase 2: true. Seed 42's Food corps sit in Secure or Hunker and never in Grow(Food) before day 30,
+# so with false no Farm had a truck by day 30 (the plan's fallback, recorded both ways).
+fleet_any_order = true
+tech_demand_ref = 1.0              # plan D17

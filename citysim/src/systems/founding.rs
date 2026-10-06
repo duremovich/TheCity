@@ -13,7 +13,8 @@ use crate::world::World;
 
 /// The kinds an agent can found, in tie-break order (D25: tie -> Bar; M12
 /// D20 appends the Hotel, foundable only with `[street] enabled`; M13 D16
-/// the Clinic and Garage, foundable only with `[assets] found_sellers`).
+/// the Clinic and Garage, each foundable only with its `[assets]
+/// found_clinic` / `found_garage` flag).
 const FOUNDABLE: [BuildingKind; 5] =
     [BuildingKind::Bar, BuildingKind::Home, BuildingKind::Hotel, BuildingKind::Clinic, BuildingKind::Garage];
 
@@ -28,16 +29,17 @@ pub fn vacant_lots(world: &World) -> Vec<EntityId> {
 }
 
 /// What founding a building of `kind` costs (Bar, Home, and with the street
-/// on a Hotel; M13 D16 a Clinic or Garage with `[assets] found_sellers`).
+/// on a Hotel; M13 D16 a Clinic or Garage with `[assets] found_clinic` /
+/// `found_garage`, per kind from phase 2).
 pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
     let c = &world.config.corps.found_cost;
-    let sellers = world.config.assets.enabled && world.config.assets.found_sellers;
+    let a = &world.config.assets;
     match kind {
         BuildingKind::Bar => Some(c.bar),
         BuildingKind::Home => Some(c.home),
         BuildingKind::Hotel if world.config.street.enabled => Some(c.hotel),
-        BuildingKind::Clinic if sellers => Some(c.clinic),
-        BuildingKind::Garage if sellers => Some(c.garage),
+        BuildingKind::Clinic if a.enabled && a.found_clinic => Some(c.clinic),
+        BuildingKind::Garage if a.enabled && a.found_garage => Some(c.garage),
         _ => None,
     }
 }

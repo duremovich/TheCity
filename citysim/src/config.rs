@@ -62,6 +62,14 @@ pub struct Config {
     /// by nothing while `[assets]` is off (plan D50).
     #[serde(default = "ChromeCfg::off")]
     pub chrome: ChromeCfg,
+    /// M13 phase 2 vehicles (§ 2); absent from pre-M13 saves: the spec's
+    /// values, read by nothing while `[assets]` is off (plan D50).
+    #[serde(default = "VehiclesCfg::off")]
+    pub vehicles: VehiclesCfg,
+    /// M13 phase 2 the Shop goal, the Garage and fleets (§ 6); absent from
+    /// pre-M13 saves likewise.
+    #[serde(default = "ShopCfg::off")]
+    pub shop: ShopCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -346,11 +354,31 @@ pub struct CrimeCfg {
     /// awake; the brawl then stands it at the door.
     #[serde(default = "CrimeCfg::default_answer_radius")]
     pub answer_radius: u32,
+    /// M13 D47: sentences for the crimes appended after Vagrancy (days).
+    #[serde(default)]
+    pub sentence_days_ext: SentenceDaysExt,
 }
 
 impl CrimeCfg {
     fn default_answer_radius() -> u32 {
         96
+    }
+}
+
+/// M13 D47: `[crime] sentence_days_ext`, matched by `law::sentence_ticks`
+/// before it indexes `sentence_days` (as M12 D15 did Vagrancy).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SentenceDaysExt {
+    pub grand_theft: u32,
+    pub dealing: u32,
+    pub abduction: u32,
+    pub manslaughter: u32,
+}
+
+impl Default for SentenceDaysExt {
+    fn default() -> Self {
+        SentenceDaysExt { grand_theft: 6, dealing: 5, abduction: 20, manslaughter: 10 }
     }
 }
 
@@ -1577,10 +1605,12 @@ pub struct AssetsCfg {
     /// Plan D14: a Clinic or Garage below this many Parts buys `parts_batch`.
     pub parts_floor: u32,
     pub parts_batch: u32,
-    /// Phase 1 deviation (plan D16 grows `FOUNDABLE`): `Register` and
-    /// `choose_kind` may pick a Clinic or Garage only while set. False in
-    /// phase 1, so the inert kinds are founded by nobody; phase 2 sets it.
-    pub found_sellers: bool,
+    /// Phase 1 deviation (plan D16 grows `FOUNDABLE`), per kind from phase
+    /// 2: `Register`, `choose_kind` and a Tech corp's `Grow` may build a
+    /// Garage only while `found_garage`, a Clinic only while `found_clinic`
+    /// (false until phase 3 makes the Clinic do something).
+    pub found_garage: bool,
+    pub found_clinic: bool,
 }
 
 impl Default for AssetsCfg {
@@ -1649,7 +1679,8 @@ impl AssetsCfg {
             goods_cap: 1000,
             parts_floor: 20,
             parts_batch: 20,
-            found_sellers: false,
+            found_garage: false,
+            found_clinic: false,
         }
     }
 }
@@ -1678,6 +1709,11 @@ pub struct ChromeCfg {
     pub sanity_cost: Vec<f32>,
     /// A used asset sells at `used_frac × list × condition / 100` (plan D29).
     pub used_frac: f32,
+    /// Plan D28: `security::contest` moves the odds this much per tier.
+    pub contest_step: f32,
+    /// Spec § 3: a Clinic or Garage buys a used asset at this share of its
+    /// value (phase 2: a hunkering corp's fleet sale, D44).
+    pub buyback_frac: f32,
 }
 
 impl Default for ChromeCfg {
@@ -1699,6 +1735,133 @@ impl ChromeCfg {
             skin_armour: 0.15,
             sanity_cost: vec![0.08, 0.15, 0.25],
             used_frac: 0.6,
+            contest_step: 0.25,
+            buyback_frac: 0.4,
+        }
+    }
+}
+
+/// M13 § 2 vehicles (plan phase 2, D19-D27). Read only while `[assets]
+/// enabled`; `off()` carries the spec's values.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VehiclesCfg {
+    /// The road share a Coarse trip's `timed_mult` assumes (D21).
+    pub road_share: f32,
+    /// A Full driver's steps per executor call (D19).
+    pub max_steps_per_tick: u8,
+    /// A flyer's ticks per Chebyshev tile (D22).
+    pub flyer_ticks_per_tile: f32,
+    /// Step multipliers `[road, ground, farmland]` per road vehicle (a Door
+    /// reads ground; 1.0 is walking pace).
+    pub mult: PerKind<Vec<f32>>,
+    /// `HaulToMarket` batch multiplier per vehicle (D23).
+    pub haul: PerKind<u32>,
+    pub crash_per_tile: f32,
+    pub speed: PerKind<f32>,
+    pub chase_mult: f32,
+    pub crash_radius: u32,
+    pub dodge_w: f32,
+    pub dodge_cap: f32,
+    pub p_crash_kill: f32,
+    pub crash_wear: u8,
+    pub crash_litter: u8,
+    pub steal_vehicle_cost: f32,
+    pub fence_frac: f32,
+    pub vehicle_theft_base: f32,
+    pub garage_mult: f32,
+    pub bikes_max_share: f32,
+    /// Plan D26: a thief binds a street-parked vehicle within this many tiles.
+    pub steal_reach: u32,
+}
+
+impl Default for VehiclesCfg {
+    fn default() -> Self {
+        VehiclesCfg::off()
+    }
+}
+
+impl VehiclesCfg {
+    /// The spec's values (assets off reads none of them).
+    pub fn off() -> VehiclesCfg {
+        VehiclesCfg {
+            road_share: 0.7,
+            max_steps_per_tick: 4,
+            flyer_ticks_per_tile: 0.3,
+            mult: PerKind {
+                motorcycle: vec![0.25, 0.6, 0.8],
+                car: vec![0.2, 1.0, 1.0],
+                truck: vec![0.3, 1.0, 0.6],
+                ..PerKind::default()
+            },
+            haul: PerKind { motorcycle: 1, car: 2, truck: 6, flyer: 1, ..PerKind::default() },
+            crash_per_tile: 0.00004,
+            speed: PerKind { motorcycle: 1.5, car: 1.0, truck: 1.2, flyer: 0.0, ..PerKind::default() },
+            chase_mult: 6.0,
+            crash_radius: 2,
+            dodge_w: 0.6,
+            dodge_cap: 0.9,
+            p_crash_kill: 0.3,
+            crash_wear: 30,
+            crash_litter: 24,
+            steal_vehicle_cost: 10.0,
+            fence_frac: 0.2,
+            vehicle_theft_base: 0.004,
+            garage_mult: 0.2,
+            bikes_max_share: 0.5,
+            steal_reach: 40,
+        }
+    }
+
+    /// `mult[kind][column]` (0 road, 1 ground, 2 farmland); 1.0 when absent.
+    pub fn mult_of(&self, kind: AssetKind, column: usize) -> f32 {
+        self.mult.get(kind).get(column).copied().unwrap_or(1.0)
+    }
+}
+
+/// M13 § 6 the Shop goal, the Garage and fleets (plan D17, D18, D43, D44).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ShopCfg {
+    pub shop_cooldown_days: u32,
+    /// Tiles of commute at which the vehicle term reads 0.5.
+    pub commute_ref: u32,
+    pub shop_flat: f32,
+    pub gang_buy_floor: i64,
+    /// Coins a day a vehicle parked in someone else's Garage pays its owner.
+    pub garage_rent: i64,
+    /// Plan D43: upkeep + finance a day at most this share of daily income.
+    pub max_burden: f32,
+    /// Plan D43: a Statistical shopper buys at this score or above.
+    pub stat_shop_min: f32,
+    /// Plan D18: a seeded Garage owner's wallet.
+    pub seed_owner_coins: i64,
+    /// Plan D44: Food corps buy trucks under any order but Hunker.
+    pub fleet_any_order: bool,
+    /// Plan D17: a Tech corp's demand reference (sales a day per building).
+    pub tech_demand_ref: f32,
+}
+
+impl Default for ShopCfg {
+    fn default() -> Self {
+        ShopCfg::off()
+    }
+}
+
+impl ShopCfg {
+    /// The spec's and plan's values (assets off reads none of them).
+    pub fn off() -> ShopCfg {
+        ShopCfg {
+            shop_cooldown_days: 7,
+            commute_ref: 60,
+            shop_flat: 0.02,
+            gang_buy_floor: 600,
+            garage_rent: 1,
+            max_burden: 0.5,
+            stat_shop_min: 0.3,
+            seed_owner_coins: 300,
+            fleet_any_order: false,
+            tech_demand_ref: 1.0,
         }
     }
 }
@@ -1824,6 +1987,8 @@ impl Config {
         self.corps.hoard_tilt = 0.0;
         // M13 D50: no assets, so the v1, M8 and M9 unit tests run unchanged.
         self.assets = AssetsCfg::off();
+        self.vehicles = VehiclesCfg::off();
+        self.shop = ShopCfg::off();
         self
     }
 
@@ -1861,6 +2026,8 @@ impl Config {
         c.gangs.split_base = 0.0;
         // M13 D46/D50: no assets: the table and the parity test are unchanged.
         c.assets = AssetsCfg::off();
+        c.vehicles = VehiclesCfg::off();
+        c.shop = ShopCfg::off();
         c
     }
 

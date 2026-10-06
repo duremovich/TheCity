@@ -48,6 +48,9 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Register => 30,
         ActionKind::CheckIn => 5,
         ActionKind::Occupy => 10,
+        // M13 D29 (+120 for an implant, phase 3), D26.
+        ActionKind::BuyAsset => 20,
+        ActionKind::StealVehicle => 15,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -132,6 +135,17 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             here.is_some_and(|b| crate::systems::street::is_derelict(world, b)) && (target.is_none() || target == here)
         }
+        // M13 D29: inside an open seller with a pick to buy.
+        ActionKind::BuyAsset => {
+            world.comp::<Position>(id).and_then(|p| p.building).is_some_and(|b| {
+                Some(b) == target && crate::systems::assets::seller_open(world, b) && !world.is_closed(b)
+            }) && world.comp::<Brain>(id).is_some_and(|b| b.shop_pick.is_some())
+        }
+        // M13 D26: standing at the bound vehicle's door, and it is still there.
+        ActionKind::StealVehicle => target.is_some_and(|v| {
+            crate::systems::vehicles::vehicle_stand(world, v)
+                .is_some_and(|t| world.comp::<Position>(id).is_some_and(|p| p.building.is_none() && p.tile == t))
+        }),
         ActionKind::CarryCorpse => target.is_some_and(|c| {
             world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried)
                 && crate::systems::law::near(world, id, c, 1)
@@ -202,7 +216,26 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         ActionKind::HaulToMarket => {
             // The transfer happens on pickup so an interrupted walk cannot lose the load.
             if let Some(farm) = target {
-                economy::haul(world, farm);
+                // M13 D23: a fleet truck (else car) parked here carries
+                // `haul[kind]` batches, and the plan brings it home.
+                let mult = crate::systems::vehicles::claim_haul(world, id, farm);
+                economy::haul(world, farm, mult);
+                if mult.is_some() {
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        let at = usize::from(b.plan_step) + 2;
+                        if let Some(plan) = b.plan.as_mut() {
+                            let at = at.min(plan.steps.len());
+                            plan.steps.insert(
+                                at,
+                                crate::components::ActionInstance {
+                                    action: ActionKind::GoTo(crate::goap::LocationKey::Farm),
+                                    target: Some(farm),
+                                    tile: None,
+                                },
+                            );
+                        }
+                    }
+                }
             }
         }
         ActionKind::Drink => {
@@ -598,10 +631,41 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::Fence => {
+            // M13 D26: a stolen vehicle first, else stolen food.
+            if crate::systems::vehicles::stolen_held_by(world, id).is_some() {
+                return if crate::systems::vehicles::fence(world, id) {
+                    StepResult::Done
+                } else {
+                    StepResult::Failed(FailReason::StockGone)
+                };
+            }
             if crate::systems::gang::fence(world, id) > 0 {
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::StockGone)
+            }
+        }
+        // M13 D29: the pick is bought here (price, finance, import).
+        ActionKind::BuyAsset => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            let pick = world.comp_mut::<Brain>(id).and_then(|b| b.shop_pick.take());
+            match (here, pick) {
+                (Some(seller), Some(pick)) if target == Some(seller) => {
+                    match crate::systems::assets::buy(world, id, seller, &pick) {
+                        Ok(_) => StepResult::Done,
+                        Err(_) => StepResult::Failed(FailReason::PreconditionLost),
+                    }
+                }
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        // M13 D26: the lock contest; a loss is a botched theft.
+        ActionKind::StealVehicle => {
+            let Some(v) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if crate::systems::vehicles::steal(world, id, v) {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::PreconditionLost)
             }
         }
         ActionKind::Muster => {

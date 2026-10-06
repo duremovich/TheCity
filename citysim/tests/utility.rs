@@ -212,7 +212,11 @@ fn test_worked_example_through_goal_table() {
     assert!((score(GoalKind::Eat) - 0.823).abs() < 0.005, "eat {}", score(GoalKind::Eat));
     assert!((score(GoalKind::Earn) - 0.240).abs() < 0.005, "earn {}", score(GoalKind::Earn));
     assert!((score(GoalKind::Socialise) - 0.072).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
-    assert_eq!(goals::GOAL_ORDER.len(), 18, "the spec's 15 goals plus M8's Raid, M11's Found and M12's Squat");
+    assert_eq!(
+        goals::GOAL_ORDER.len(),
+        19,
+        "the spec's 15 goals plus M8's Raid, M11's Found, M12's Squat and M13's Shop"
+    );
 }
 
 #[test]

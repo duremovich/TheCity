@@ -9,13 +9,24 @@
 //! and re-kit every agent whose `Kit` can change (plan D2). Nothing here
 //! runs per tick: [`run`] is the daily pass at midnight, right after
 //! ownership's (plan D9); the rest is event-driven.
+//!
+//! Payments are all-or-nothing (phase 2, from the phase 1 review): a day's
+//! upkeep or finance payment an agent or gang cannot cover in full is not
+//! taken at all (the wallet is left alone) and the arrears grow; a corp or
+//! the city always pays (`charge` lets them go negative). A partial sweep
+//! used to empty a short payer's wallet and count the arrears anyway.
+//!
+//! Phase 2 adds the sellers (plan D16-D18, D29, D43): [`seller_open`],
+//! [`shop_choice`] (the Shop goal's offer), the Statistical shop, the
+//! Garage rent, and [`seed_sellers`].
 
 use rand::Rng;
 use smallvec::SmallVec;
 
 use crate::components::{
     Appearance, Asset, AssetKind, AssetLoc, Body, Brain, Building, BuildingKind, Class, Controller, Corp, Corpse,
-    Finance, Gang, Good, Identity, Inventory, Job, Kit, MemoryKind, Position, ShopPick, Slot, TilePos, Wallet,
+    Finance, Gang, Good, Identity, Inventory, Job, Kit, Lod, MemoryKind, Position, Sentence, ShopPick, Slot, TilePos,
+    Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -112,13 +123,14 @@ pub fn upkeep_of(world: &World, a: EntityId) -> i64 {
 }
 
 /// The price level a seller building's owner sets (plan D29): a corp's
-/// `price_level` for the building's niche, 1.0 for an agent or the city.
-/// `Niche::Tech` (Clinics, Garages) arrives in phase 2; until then 1.0.
+/// `price_level` for the building's niche (`Tech` for a Clinic or Garage),
+/// 1.0 for an agent or the city.
 pub fn seller_level(world: &World, seller: EntityId) -> f32 {
     let Some(b) = world.comp::<Building>(seller) else { return 1.0 };
     let niche = match b.kind {
         BuildingKind::Market => crate::components::Niche::Food,
         BuildingKind::SecurityOffice => crate::components::Niche::Security,
+        BuildingKind::Clinic | BuildingKind::Garage => crate::components::Niche::Tech,
         _ => return 1.0,
     };
     world.corp_of_building(seller).and_then(|c| world.comp::<Corp>(c)).map_or(1.0, |c| c.level(niche))
@@ -489,6 +501,11 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
             },
         );
     k.flash = ((f32::from(k.visible) + f32::from(vehicle_tier)) / 9.0).min(1.0);
+    // D21: the Coarse multiplier of the vehicle the agent would drive (the
+    // trip's own kind is read at the trip: `vehicles::timed_mult`).
+    if let Some(kind) = k.vehicle.and_then(|v| world.comp::<Asset>(v)).map(|x| x.kind).filter(|k| k.is_road_vehicle()) {
+        k.timed_mult = crate::systems::vehicles::timed_mult_of(world, kind);
+    }
     k
 }
 
@@ -638,15 +655,21 @@ pub fn run(world: &mut World) {
     repossess(world);
     wear(world, &unpaid);
     repairs(world);
+    garage_rent(world);
     settle_window(world);
     scav_strip(world);
     parts_market(world);
+    crate::systems::vehicles::recover_abandoned(world);
+    crate::systems::vehicles::fleet_recall(world);
+    crate::systems::vehicles::theft_daily(world);
+    stat_shop(world);
     appearance(world);
     roll_sales(world);
 }
 
 /// Each asset with a live, non-city owner pays its upkeep (`Flow::AssetUpkeep`
-/// to the Treasury); short: `upkeep_arrears += 1`. Returns the unpaid ids.
+/// to the Treasury) in full or not at all; unpaid: `upkeep_arrears += 1`.
+/// Returns the unpaid ids.
 fn upkeep(world: &mut World) -> Vec<EntityId> {
     let mut unpaid = Vec::new();
     for a in all_assets(world) {
@@ -655,7 +678,11 @@ fn upkeep(world: &mut World) -> Vec<EntityId> {
             continue;
         }
         let cost = upkeep_of(world, a);
-        let paid = if cost > 0 { ownership::charge(world, owner, None, cost, Flow::AssetUpkeep) } else { 0 };
+        let paid = if cost > 0 && can_pay(world, owner, cost) {
+            ownership::charge(world, owner, None, cost, Flow::AssetUpkeep)
+        } else {
+            0
+        };
         let Some(x) = world.comp_mut::<Asset>(a) else { continue };
         if paid >= cost {
             x.upkeep_arrears = 0;
@@ -668,8 +695,10 @@ fn upkeep(world: &mut World) -> Vec<EntityId> {
 }
 
 /// Each finance plan takes the day's payment and any missed days, capped
-/// at what remains (`Flow::Finance`); short: `arrears += 1`, paid in full:
-/// arrears 0. A plan at 0 remaining ends.
+/// at what remains (`Flow::Finance`), in full or not at all: short, nothing
+/// is taken and `arrears += 1`; paid: arrears 0. A plan at 0 remaining
+/// ends. (The catch-up due compounds with the arrears; the Shop's
+/// affordability reads the plain `per_day`, D43.)
 fn finance(world: &mut World) {
     for a in all_assets(world) {
         let Some((owner, f)) = world.comp::<Asset>(a).and_then(|x| x.finance.clone().map(|f| (x.owner, f))) else {
@@ -679,7 +708,13 @@ fn finance(world: &mut World) {
             continue;
         }
         let due = (f.per_day * (1 + i64::from(f.arrears))).min(f.remaining).max(0);
-        let paid = if owner == f.lender { due } else { ownership::charge(world, owner, f.lender, due, Flow::Finance) };
+        let paid = if owner == f.lender {
+            due
+        } else if can_pay(world, owner, due) {
+            ownership::charge(world, owner, f.lender, due, Flow::Finance)
+        } else {
+            0
+        };
         let Some(x) = world.comp_mut::<Asset>(a) else { continue };
         let Some(fin) = x.finance.as_mut() else { continue };
         fin.remaining -= paid;
@@ -714,19 +749,8 @@ fn repossess(world: &mut World) {
             }
             match x.kind {
                 k if k.is_vehicle() => {
-                    if matches!(x.loc, AssetLoc::InUse(_)) {
-                        // Towed when it parks (phase 2's `end_trip`); retried daily.
-                        continue;
-                    }
-                    let from = asset_tile(world, a).unwrap_or_default();
-                    let to = nearest_building(world, BuildingKind::Garage, from, Some(Some(lender)))
-                        .or_else(|| world.building_of_kind(BuildingKind::Jail));
-                    take_back(world, a, lender);
-                    if let Some(b) = to {
-                        set_loc(world, a, AssetLoc::Stock(b));
-                    }
-                    repossessed(world, &x, Some(lender), a, "towed");
-                    world.stats.current.repos += 1;
+                    // An `InUse` one is towed by `vehicles::end_trip` when it parks.
+                    tow(world, a);
                 }
                 AssetKind::Implant(_) => {
                     if !x.bricked {
@@ -764,6 +788,30 @@ fn repossess(world: &mut World) {
         }
     }
     impound(world);
+}
+
+/// D11: tow a financed vehicle to its live lender's Garage nearest it,
+/// else to the Precinct (then sold as an impound, the proceeds to the
+/// lender). Not while it is driven. The caller has checked the arrears.
+pub fn tow(world: &mut World, a: EntityId) -> bool {
+    let Some(x) = world.comp::<Asset>(a).cloned() else { return false };
+    let Some(lender) = x.finance.as_ref().and_then(|f| f.lender).filter(|&l| live_owner(world, Some(l))) else {
+        return false;
+    };
+    if !x.kind.is_vehicle() || matches!(x.loc, AssetLoc::InUse(_)) {
+        return false;
+    }
+    let from = asset_tile(world, a).unwrap_or_default();
+    let to = nearest_building(world, BuildingKind::Garage, from, Some(Some(lender)))
+        .or_else(|| world.building_of_kind(BuildingKind::Jail));
+    set_keeper(world, a, None);
+    take_back(world, a, lender);
+    if let Some(b) = to {
+        set_loc(world, a, AssetLoc::Stock(b));
+    }
+    repossessed(world, &x, Some(lender), a, "towed");
+    world.stats.current.repos += 1;
+    true
 }
 
 /// The lender becomes the owner; the plan and the arrears end.
@@ -1299,14 +1347,17 @@ pub fn on_owner_gone(world: &mut World, gone: EntityId) {
     let heir = if agent { agent_heir(world, gone) } else { None };
     for a in assets_of(world, Some(gone)).to_vec() {
         let Some(x) = world.comp::<Asset>(a).cloned() else { continue };
+        // D45: a financed asset in arrears goes to its lender, even chrome
+        // that stays in the body (phase 2 fix: the body skip ran first).
+        let lender = x.finance.as_ref().filter(|f| f.arrears > 0).and_then(|f| f.lender);
+        if let Some(l) = lender.filter(|&l| l != gone && live_owner(world, Some(l))) {
+            take_back(world, a, l);
+            continue;
+        }
         if agent && matches!(x.loc, AssetLoc::Carried(h) | AssetLoc::Installed(h) | AssetLoc::InUse(h) if h == gone) {
             continue;
         }
-        let lender = x.finance.as_ref().filter(|f| f.arrears > 0).and_then(|f| f.lender);
-        match lender.filter(|&l| l != gone && live_owner(world, Some(l))) {
-            Some(l) => take_back(world, a, l),
-            None => set_owner(world, a, heir),
-        }
+        set_owner(world, a, heir);
     }
     let mut lent: Vec<EntityId> = Vec::new();
     let mut kept: Vec<EntityId> = Vec::new();
@@ -1368,6 +1419,17 @@ fn new_loc(world: &World, kind: AssetKind, buyer: EntityId, seller: EntityId) ->
 /// first (refused: no sale). `Flow::Asset`, the `AssetBought` event, the
 /// seller's credit and sales count, the buyer's `last_shop`.
 pub fn buy(world: &mut World, buyer: EntityId, seller: EntityId, pick: &ShopPick) -> Result<EntityId, String> {
+    buy_noted(world, buyer, seller, pick, None)
+}
+
+/// [`buy`] with a note appended to the `AssetBought` text ("for Vat Farm#12").
+pub fn buy_noted(
+    world: &mut World,
+    buyer: EntityId,
+    seller: EntityId,
+    pick: &ShopPick,
+    note: Option<&str>,
+) -> Result<EntityId, String> {
     let cfg = world.config.assets.clone();
     if !world.has::<Building>(seller) {
         return Err("no such seller".into());
@@ -1440,7 +1502,11 @@ pub fn buy(world: &mut World, buyer: EntityId, seller: EntityId, pick: &ShopPick
         bd.asset_sales_today = bd.asset_sales_today.saturating_add(1);
     }
     let (who, what, at) = (world.owner_label(Some(buyer)), world.name_of(a), world.name_of(seller));
-    let text = format!("{who} bought a {what} at {at} for {price}{}", if financed { " on finance" } else { "" });
+    let mut text = format!("{who} bought a {what} at {at} for {price}{}", if financed { " on finance" } else { "" });
+    if let Some(n) = note {
+        text.push(' ');
+        text.push_str(n);
+    }
     world.push_event(EventKind::AssetBought, &[buyer, seller, a], text);
     Ok(a)
 }
@@ -1517,4 +1583,346 @@ pub fn snapshot(world: &World) -> (u32, f32, u32, [u32; 4]) {
         })
         .count() as u32;
     (chrome, if n > 0 { sanity / n as f32 } else { 0.0 }, robots, vehicles)
+}
+
+// ---------------------------------------------------------------------------
+// Sellers and the Shop (plan D16, D29, D43)
+// ---------------------------------------------------------------------------
+
+/// D16: a seller is open while any of its staff (any tier) is on shift now.
+pub fn seller_open(world: &World, b: EntityId) -> bool {
+    let Some(bd) = world.comp::<Building>(b) else { return false };
+    if bd.demolished || bd.derelict || world.is_closed(b) {
+        return false;
+    }
+    let Some(role) = ownership::role_for(bd.kind) else { return false };
+    let tod = world.tick_of_day();
+    world.workers(role).iter().any(|&w| world.comp::<Job>(w).is_some_and(|j| j.employer == Some(b) && j.on_shift(tod)))
+}
+
+/// What a Shop offer is for (D43).
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum ShopCategory {
+    Vehicle,
+    Pack,
+}
+
+/// The Shop goal's best offer for one agent (D43).
+#[derive(Clone, Debug)]
+pub struct ShopOffer {
+    pub pick: ShopPick,
+    pub seller: EntityId,
+    pub price: i64,
+    pub financed: bool,
+    pub category: ShopCategory,
+    /// Compensated product of the considerations plus `shop_flat`.
+    pub score: f32,
+    pub considerations: Vec<crate::utility::Consideration>,
+}
+
+/// D10's daily payment for `price` bought with `coins` (0 when paid in full).
+fn finance_per_day(world: &World, price: i64, coins: i64) -> i64 {
+    if coins >= price {
+        return 0;
+    }
+    let cfg = &world.config.assets;
+    let down = (cfg.down_frac * price as f32).round() as i64;
+    let remaining = price - down;
+    let total = remaining + (remaining as f64 * f64::from(cfg.interest)).round() as i64;
+    let term = i64::from(cfg.term_days.max(1));
+    (total + term - 1) / term
+}
+
+/// The nearest seller of `kind` to `from` (ties lower id), open now when
+/// `require_open` (a body walks there; the Statistical pass buys remotely).
+fn nearest_seller(world: &World, kind: BuildingKind, from: TilePos, require_open: bool) -> Option<EntityId> {
+    world
+        .buildings_of_kind(kind)
+        .iter()
+        .copied()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+        .filter(|&b| !require_open || seller_open(world, b))
+        .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
+        .min()
+        .map(|(_, b)| b)
+}
+
+/// The dearest of `options` the agent can buy (D43): `coins >= down_frac x
+/// price` (a flyer only in full; phase 2 deviation: a pack too, or the
+/// homeless financed 30-coin packs on the dole and were repossessed within
+/// the week), and upkeep plus the plain finance `per_day` (not the catch-up
+/// due) at most `max_burden x income`.
+fn dearest_affordable(
+    world: &World,
+    seller: EntityId,
+    options: &[(AssetKind, u8)],
+    coins: i64,
+    income: i64,
+) -> Option<(AssetKind, u8, i64, bool)> {
+    affordable_at(world, seller_level(world, seller), options, coins, income)
+}
+
+/// [`dearest_affordable`] at a given price level.
+fn affordable_at(
+    world: &World,
+    level: f32,
+    options: &[(AssetKind, u8)],
+    coins: i64,
+    income: i64,
+) -> Option<(AssetKind, u8, i64, bool)> {
+    let down_frac = world.config.assets.down_frac;
+    let cap = world.config.shop.max_burden * income as f32;
+    options
+        .iter()
+        .filter_map(|&(kind, tier)| {
+            let list = list_price(world, kind, tier)?;
+            let price = (list as f32 * level).round() as i64;
+            let full = coins >= price;
+            let ok = if matches!(kind, AssetKind::Flyer | AssetKind::Pack) {
+                full
+            } else {
+                coins >= (down_frac * price as f32).round() as i64
+            };
+            let burden = upkeep_for(world, kind, tier) + finance_per_day(world, price, coins);
+            (ok && burden as f32 <= cap).then_some((kind, tier, price, !full))
+        })
+        .max_by_key(|&(_, _, price, _)| price)
+}
+
+/// D43: the agent's best affordable offer, or `None` (cooldown, arrears,
+/// nothing affordable, no seller). One candidate per category: a vehicle
+/// (Motorcycle T1, Car T1, Car T2, Flyer T1) at the nearest Garage for an
+/// agent without one, a pack at the nearest Market for the homeless without
+/// one. Considerations per spec section 6: the shared GATE, `U(wealth)`
+/// Linear{0.6,0.4}, `pride` Linear{0.5,0.5}; a vehicle's `commute`
+/// (Manhattan Home to workplace) Logistic{8, 0.5} on `commute / (2 x
+/// commute_ref)` (the spec's mid `commute_ref`, normalised); flat
+/// `shop_flat`.
+pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<ShopOffer> {
+    use crate::utility::curves::{can, urgency, Curve, GATE};
+    use crate::utility::Consideration;
+    let cfg = &world.config;
+    if !cfg.assets.enabled || world.has::<Sentence>(id) {
+        return None;
+    }
+    let body = world.comp::<Body>(id)?;
+    let cooldown = u64::from(cfg.shop.shop_cooldown_days) * crate::time::TICKS_PER_DAY;
+    if body.last_shop.is_some_and(|t| world.tick.saturating_sub(t) < cooldown) {
+        return None;
+    }
+    let coins = world.comp::<Wallet>(id)?.coins;
+    if coins <= 0 || !crate::systems::demography::is_adult(world, id) {
+        return None;
+    }
+    let in_arrears = assets_of(world, Some(id))
+        .iter()
+        .any(|&a| world.comp::<Asset>(a).is_some_and(|x| x.finance.as_ref().is_some_and(|f| f.arrears > 0)));
+    if in_arrears {
+        return None;
+    }
+    let home = world.comp::<crate::components::Household>(id).and_then(|h| h.home);
+    let job = world.comp::<Job>(id);
+    let income = job.map_or(i64::from(world.levers.dole_per_day), |j| j.wage_per_day).max(0);
+    let from = home
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door)
+        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))?;
+    let needs = world.comp::<crate::components::Needs>(id);
+    let wealth = urgency(needs.map_or(1.0, |n| n.wealth));
+    let pride = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.pride);
+    let kit = world.comp::<Kit>(id);
+    // Cheap gates before any seller's staff is scanned (this runs twice a
+    // think): a category is open only when its options are within reach at
+    // the lowest price level any seller of the kind asks.
+    const VEHICLES: [(AssetKind, u8); 4] =
+        [(AssetKind::Motorcycle, 1), (AssetKind::Car, 1), (AssetKind::Car, 2), (AssetKind::Flyer, 1)];
+    const PACKS: [(AssetKind, u8); 2] = [(AssetKind::Pack, 1), (AssetKind::Pack, 2)];
+    let lowest = |kind: BuildingKind| {
+        world.buildings_of_kind(kind).iter().map(|&b| seller_level(world, b)).min_by(|a, b| a.total_cmp(b))
+    };
+    let has_pack = assets_at(world, id)
+        .iter()
+        .any(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Pack && x.loc == AssetLoc::Carried(id)));
+    let want_vehicle = kit.is_none_or(|k| k.vehicle.is_none())
+        && lowest(BuildingKind::Garage).is_some_and(|l| affordable_at(world, l, &VEHICLES, coins, income).is_some());
+    let want_pack = home.is_none()
+        && !has_pack
+        && lowest(BuildingKind::Market).is_some_and(|l| affordable_at(world, l, &PACKS, coins, income).is_some());
+    if !want_vehicle && !want_pack {
+        return None;
+    }
+    let mut best: Option<ShopOffer> = None;
+    let mut offer = |category: ShopCategory,
+                     seller: EntityId,
+                     (kind, tier, price, financed): (AssetKind, u8, i64, bool),
+                     mut cs: Vec<Consideration>| {
+        cs.insert(0, Consideration::new("can buy", can(true), GATE));
+        cs.insert(1, Consideration::new("U(wealth)", wealth, Curve::Linear { m: 0.6, b: 0.4 }));
+        cs.insert(2, Consideration::new("pride", pride, Curve::Linear { m: 0.5, b: 0.5 }));
+        if cs.iter().any(|c| c.output <= 0.0) {
+            return;
+        }
+        let raw: f32 = cs.iter().map(|c| c.output).product();
+        let score = crate::utility::compensate(raw, cs.len()) + cfg.shop.shop_flat;
+        if best.as_ref().is_none_or(|b| score > b.score) {
+            let pick = ShopPick { kind, tier, used: None };
+            best = Some(ShopOffer { pick, seller, price, financed, category, score, considerations: cs });
+        }
+    };
+    // A vehicle, for an agent without one.
+    if want_vehicle {
+        if let Some(g) = nearest_seller(world, BuildingKind::Garage, from, require_open) {
+            if let Some(o) = dearest_affordable(world, g, &VEHICLES, coins, income) {
+                let work = job.and_then(|j| j.employer).and_then(|e| world.comp::<Building>(e)).map(|b| b.door);
+                let commute = match (home, work) {
+                    (Some(_), Some(w)) => from.manhattan(w),
+                    _ => 0,
+                };
+                let x = commute as f32 / (2.0 * cfg.shop.commute_ref.max(1) as f32);
+                let cs = vec![Consideration::new("commute", x, Curve::Logistic { k: 8.0, mid: 0.5 })];
+                offer(ShopCategory::Vehicle, g, o, cs);
+            }
+        }
+    }
+    // A pack, for the homeless without one.
+    if want_pack {
+        if let Some(m) = nearest_seller(world, BuildingKind::Market, from, require_open) {
+            if let Some(o) = dearest_affordable(world, m, &PACKS, coins, income) {
+                offer(ShopCategory::Pack, m, o, Vec::new());
+            }
+        }
+    }
+    best
+}
+
+/// D43, daily: Statistical adults on their day in seven (`(index + day) %
+/// 7 == 0`) score the same offer at the nearest seller, open or not (the
+/// pass runs at midnight; deviation), and buy remotely at `stat_shop_min`
+/// or better; a vehicle is parked at the buyer's Home.
+fn stat_shop(world: &mut World) {
+    let day = world.day();
+    let min = world.config.shop.stat_shop_min;
+    let due: Vec<EntityId> = world
+        .tier(Lod::Statistical)
+        .iter()
+        .copied()
+        .filter(|id| (u64::from(id.index) + day).is_multiple_of(7))
+        .collect();
+    for id in due {
+        let Some(o) = shop_choice(world, id, false) else { continue };
+        if o.score < min {
+            continue;
+        }
+        let Ok(a) = buy(world, id, o.seller, &o.pick) else { continue };
+        if o.category == ShopCategory::Vehicle {
+            if let Some(h) = world.comp::<crate::components::Household>(id).and_then(|h| h.home) {
+                set_loc(world, a, AssetLoc::Parked(h));
+            }
+        }
+    }
+}
+
+/// Spec section 6: a vehicle parked in a Garage its owner does not own pays
+/// `garage_rent` a day to the Garage's owner (`Flow::Rent`), in full or not
+/// at all.
+fn garage_rent(world: &mut World) {
+    let rent = world.config.shop.garage_rent;
+    if rent <= 0 {
+        return;
+    }
+    for g in world.buildings_of_kind(BuildingKind::Garage).to_vec() {
+        let landlord = world.owner_of(g);
+        for a in assets_at(world, g).to_vec() {
+            let Some(owner) = world.comp::<Asset>(a).filter(|x| x.loc == AssetLoc::Parked(g)).map(|x| x.owner) else {
+                continue;
+            };
+            if owner.is_none() || owner == landlord || !live_owner(world, owner) || !can_pay(world, owner, rent) {
+                continue;
+            }
+            let paid = ownership::charge(world, owner, landlord, rent, Flow::Rent);
+            ownership::credit(world, g, paid);
+        }
+    }
+}
+
+/// D18 (phase 2 rows): last in `World::new`, a Garage on the vacant Lot
+/// nearest each row's district centroid (Manhattan from the Lot door, ties
+/// lower id): the Civic's owned by the Tech corp, Sump Central's by the
+/// jobless adult (not an exec nor a building owner) whose Home door is
+/// nearest the Lot's (ties lower id), dealt `[shop] seed_owner_coins`, its
+/// founding cooldown started.
+/// Returns the Lots built, in row order.
+pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
+    let mut built = Vec::new();
+    if !world.config.assets.enabled {
+        return built;
+    }
+    let tech = world
+        .corps()
+        .into_iter()
+        .find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&crate::components::Niche::Tech)));
+    let rows: [(&str, bool); 2] = [("Civic", true), ("Sump Central", false)];
+    for (district, corp_owned) in rows {
+        let Some((d, centroid)) = world.districts.iter().find(|x| x.name == district).map(|x| (x.id, x.centroid))
+        else {
+            continue;
+        };
+        let lot = crate::systems::founding::vacant_lots(world)
+            .into_iter()
+            .filter(|&l| world.district_of_building(l) == d)
+            .filter_map(|l| world.comp::<Building>(l).map(|b| (b.door.manhattan(centroid), l)))
+            .min()
+            .map(|(_, l)| l);
+        let Some(lot) = lot else { continue };
+        let lot_door = world.comp::<Building>(lot).map(|b| b.door).unwrap_or_default();
+        let owner = if corp_owned {
+            tech
+        } else {
+            let owners: std::collections::BTreeSet<EntityId> = world
+                .with::<Building>()
+                .into_iter()
+                .filter_map(|b| world.comp::<Building>(b).and_then(|bd| bd.owner))
+                .collect();
+            world
+                // scan-ok: once, at seed
+                .citizens()
+                .into_iter()
+                .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a) && !owners.contains(&a))
+                .filter(|&a| crate::systems::demography::is_adult(world, a))
+                .filter(|&a| !crate::systems::founding::is_exec(world, a))
+                .filter_map(|a| {
+                    let home = world.comp::<crate::components::Household>(a).and_then(|h| h.home)?;
+                    Some((world.comp::<Building>(home)?.door.manhattan(lot_door), a))
+                })
+                .min()
+                .map(|(_, a)| a)
+        };
+        if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Garage, owner).is_err() {
+            continue;
+        }
+        if !corp_owned {
+            let coins = world.config.shop.seed_owner_coins;
+            if let Some(w) = owner.and_then(|o| world.comp_mut::<Wallet>(o)) {
+                w.coins = coins;
+            }
+            // The Garage is their registration: the founding cooldown runs
+            // from today (else the seed coins founded a Bar on day 0, the
+            // pair incorporated and went bankrupt, and the city foreclosed
+            // the Garage within a fortnight).
+            let today = world.day();
+            if let Some(b) = owner.and_then(|o| world.comp_mut::<Brain>(o)) {
+                b.last_found_day = Some(today);
+            }
+        }
+        built.push(lot);
+        let (what, who) = (world.name_of(lot), world.owner_label(owner));
+        let rect = world.comp::<Building>(lot).map(|b| b.rect);
+        let actors: Vec<EntityId> = owner.into_iter().chain([lot]).collect();
+        world.push_event(
+            EventKind::Founded,
+            &actors,
+            format!("{who} opened {what} in {district} (seeded; Lot {} {rect:?})", lot.index),
+        );
+    }
+    built
 }

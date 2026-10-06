@@ -67,9 +67,9 @@ cargo test --release -p citysim --test scenario test_m10_scale_seed_42 -- --igno
 cargo test --release -p citysim --test scenario test_m11_ownership_seed_42 -- --ignored --nocapture
 # the M12 districts gate alone: district traces, control, allocation and Crackdowns, gang landlords, litter bands and
 # the sweepers, Vagrancy, Hotel nights, squats, the Dreg share, riots with loot and crossfire, raids that muster,
-# hit corps and never depart into cover, the M10 bounds and throughput; prints the calibration table (spec § 10)
+# hit corps and never depart into cover, the M10 bounds and throughput; prints the calibration table (spec § 10).
+# Seeds 42-44: riots, gang control and gang landlords by majority, the split bullet on any seed (M13 phase 2)
 cargo test --release -p citysim --test scenario test_m12_districts_seed_42 -- --ignored --nocapture
-cargo test --release -p citysim --test scenario test_m12_split_seeds -- --ignored --nocapture
 # the god suites: the player-lever scenarios (v1, gangs and the law), v2 (corps, classes, the economy) and v3
 # (districts, the street, riots)
 cargo test --release -p citysim --test god -- --ignored --nocapture

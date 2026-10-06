@@ -242,6 +242,8 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
     }
     let name = world.name_of(id);
     world.push_event(EventKind::GangLeave, &[id, gm.gang], format!("{name} left {gname} ({reason})"));
+    // M13 fix round: the gang's bike stays with the gang.
+    crate::systems::vehicles::return_gang_vehicles(world, id, gm.gang);
     recompute_leader(world, gm.gang);
 }
 
@@ -899,6 +901,9 @@ fn daily_economy(world: &mut World) {
                 b.betraying = disloyal && wanted;
             }
         }
+        // M13 D27: the chop shop, then D44: a bike for a member.
+        crate::systems::vehicles::chop_daily(world, gang);
+        crate::systems::vehicles::gang_bikes(world, gang);
     }
 }
 

@@ -19,6 +19,9 @@ const FILES: &[&str] = &[
     "systems/gang.rs",
     "systems/raid.rs",
     "systems/assets.rs",
+    // M13 phase 2.
+    "systems/vehicles.rs",
+    "systems/security.rs",
 ];
 
 #[test]

@@ -320,6 +320,14 @@ pub struct World {
     /// M13 D38: Bar -> registered dealers (phase 4).
     #[serde(default)]
     pub dealers: BTreeMap<EntityId, Vec<EntityId>>,
+    /// M13 D49: a `GoTo` toward the agent's workplace in progress: (start
+    /// tick, Manhattan tiles door to door).
+    #[serde(default)]
+    pub commute_start: BTreeMap<EntityId, (Tick, u32)>,
+    /// M13 D49: today's commute sums: walked ticks, walked tiles, driven
+    /// ticks, driven tiles (`commute_tpt_*` at the day's close).
+    #[serde(default)]
+    pub commute_acc: [u64; 4],
     // graph + blackboard
     pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the
@@ -698,6 +706,8 @@ impl World {
             loot_corpses: Vec::new(),
             trips: BTreeMap::new(),
             chase_pins: BTreeSet::new(),
+            commute_start: BTreeMap::new(),
+            commute_acc: [0; 4],
             dealers: BTreeMap::new(),
             edges: crate::edge_map::EdgeMap::new(),
             crime_reports: Vec::new(),
@@ -773,6 +783,8 @@ impl World {
         systems::street::seed_derelicts(&mut w);
         systems::ownership::seed(&mut w);
         systems::street::seed_hotels(&mut w);
+        // M13 D18: the Garages go up last, on the Lots the Hotels left.
+        systems::assets::seed_sellers(&mut w);
         w
     }
 
@@ -1948,6 +1960,8 @@ impl World {
         if !self.is_alive(id) {
             return;
         }
+        // M13 D20: a trip ends first, so the vehicle is parked, not lost.
+        systems::vehicles::end_trip(self, id, false);
         // M11 D45: an emigrant's buildings pass to their heirs.
         systems::ownership::on_owner_gone(self, id);
         // M13 D13/D45: its parked vehicles too; an unsettled corpse settles
@@ -2228,6 +2242,10 @@ impl World {
         let tick = self.tick;
         let name = self.name_of(id);
         let child = self.has::<Child>(id);
+        // M13 D20 (phase 1 review): the trip ends before the heirs are dealt,
+        // so a vehicle being driven is parked and inherited, not lost with
+        // the corpse.
+        systems::vehicles::end_trip(self, id, false);
         // M12 D17: a violent death leaves its mark on the street.
         if cause == DeathCause::Violence {
             if let Some((t, b)) = self.comp::<Position>(id).map(|p| (p.tile, p.building)) {
