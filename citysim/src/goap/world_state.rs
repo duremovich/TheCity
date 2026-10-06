@@ -106,6 +106,9 @@ impl LocationKey {
             BuildingKind::SecurityOffice => LocationKey::Workplace,
             BuildingKind::Lot => LocationKey::Street,
             BuildingKind::Hotel => LocationKey::Hotel,
+            // TODO(M13 ph2): `LocationKey::{Clinic, Garage}` arrive with the
+            // plans that reach them; until then nobody plans a visit.
+            BuildingKind::Clinic | BuildingKind::Garage => LocationKey::Street,
         }
     }
 }

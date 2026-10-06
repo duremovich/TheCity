@@ -255,15 +255,21 @@ pub fn haul(world: &mut World, farm: EntityId) -> u32 {
 }
 
 /// Units `agent` can afford, carry and `market` can supply right now:
-/// `min(3, floor(coins / price), 20 - food, Market stock)`.
+/// `min(3, floor(coins / price), FOOD_CAP - food, capacity - load, Market
+/// stock)` (M13 D7). With no stims or parts `capacity - load >= 20 - food`
+/// (capacity is at least 22 by the defaults, 20 with assets off), so every
+/// purchase without them is the M12 one.
 pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) -> u32 {
+    use crate::systems::assets::{capacity, load, FOOD_CAP};
     let Some(market) = market else { return 0 };
     let price = if world.has::<Market>(market) { world.price_for(market, agent) } else { i64::MAX };
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-    let food = world.comp::<Inventory>(agent).map_or(20, |i| i.food);
+    let inv = world.comp::<Inventory>(agent);
+    let food = inv.map_or(FOOD_CAP, |i| i.food);
+    let room = inv.map_or(0, |i| capacity(world, agent).saturating_sub(load(i)));
     let stock = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
     let afford = (coins / price).clamp(0, 3) as u32;
-    afford.min(20u32.saturating_sub(food)).min(stock)
+    afford.min(FOOD_CAP.saturating_sub(food)).min(room).min(stock)
 }
 
 /// Pay for `units` at `market`'s price to the Market's owner (M11; the

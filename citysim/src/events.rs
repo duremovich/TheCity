@@ -117,10 +117,36 @@ pub enum EventKind {
     Crossfire,
     /// M12 D36: a gang split (`[old gang, splinter, lieutenant]`).
     Split,
+    /// M13 (spec § 9, plan "Events"): `[buyer, seller building, asset]`.
+    AssetBought,
+    /// M13 D11/D12: `[owner?, lender?, asset]` (NONE for the city).
+    Repossessed,
+    /// M13: `[asset, owner?]`.
+    Wrecked,
+    /// M13 (phase 2): `[thief or NONE, owner?, asset]`.
+    VehicleStolen,
+    /// M13 (phase 2): `[gang, asset]`.
+    Chopped,
+    /// M13 (phase 2): `[driver, victim?, asset]`.
+    Crash,
+    /// M13 (phase 3): `[agent, clinic, asset]`.
+    Installed,
+    /// M13 (phase 3): `[agent]`.
+    Episode,
+    /// M13 (phase 3): `[agent, clinic]`.
+    Treated,
+    /// M13 (phase 3): `[abductor or NONE, victim]`.
+    Abducted,
+    /// M13 (phase 3): `[ripper or gang, body]`.
+    Harvested,
+    /// M13 D15/D35: `[stripper or gang or NONE, corpse]`.
+    Stripped,
+    /// M13 (phase 4): `[agent]`.
+    Overdose,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 65] = [
+    pub const ALL: [EventKind; 78] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -186,6 +212,19 @@ impl EventKind {
         EventKind::Looted,
         EventKind::Crossfire,
         EventKind::Split,
+        EventKind::AssetBought,
+        EventKind::Repossessed,
+        EventKind::Wrecked,
+        EventKind::VehicleStolen,
+        EventKind::Chopped,
+        EventKind::Crash,
+        EventKind::Installed,
+        EventKind::Episode,
+        EventKind::Treated,
+        EventKind::Abducted,
+        EventKind::Harvested,
+        EventKind::Stripped,
+        EventKind::Overdose,
     ];
 }
 

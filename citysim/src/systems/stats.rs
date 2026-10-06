@@ -197,6 +197,17 @@ pub fn snapshot(world: &mut World) {
     row.wallets = coins.iter().sum();
     row.wallet_gini = gini;
     row.wallet_top10 = top10;
+    // M13 D49 snapshots (0 with assets off, D50).
+    if world.config.assets.enabled {
+        let (chrome, sanity, robots, vehicles) = crate::systems::assets::snapshot(world);
+        let legal = u32::from(world.levers.stims_legal);
+        let row = &mut world.stats.current;
+        row.chrome_agents = chrome;
+        row.mean_sanity = sanity;
+        row.robots = robots;
+        [row.vehicles_moto, row.vehicles_car, row.vehicles_truck, row.vehicles_flyer] = vehicles;
+        row.stims_legal = legal;
+    }
 }
 
 /// `(Gini, the richest tenth's share)` of non-negative holdings; sorts `v`.

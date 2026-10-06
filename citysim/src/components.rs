@@ -162,10 +162,14 @@ pub enum BuildingKind {
     Lot,
     /// M12 D20: beds by the night for the homeless who can pay.
     Hotel,
+    /// M13 D16: the Ripperdoc: chrome, Therapy, Detox (inert until phase 3).
+    Clinic,
+    /// M13 D16: vehicles, repairs, secure parking (inert until phase 2).
+    Garage,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 12] = [
+    pub const ALL: [BuildingKind; 14] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -178,6 +182,8 @@ impl BuildingKind {
         BuildingKind::SecurityOffice,
         BuildingKind::Lot,
         BuildingKind::Hotel,
+        BuildingKind::Clinic,
+        BuildingKind::Garage,
     ];
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
@@ -194,6 +200,8 @@ impl BuildingKind {
             "SecurityOffice" => BuildingKind::SecurityOffice,
             "Lot" => BuildingKind::Lot,
             "Hotel" => BuildingKind::Hotel,
+            "Clinic" => BuildingKind::Clinic,
+            "Garage" => BuildingKind::Garage,
             _ => return None,
         })
     }
@@ -213,6 +221,8 @@ impl BuildingKind {
             BuildingKind::SecurityOffice => "Security Office",
             BuildingKind::Lot => "Lot",
             BuildingKind::Hotel => "Capsule Hotel",
+            BuildingKind::Clinic => "Ripperdoc",
+            BuildingKind::Garage => "Garage",
         }
     }
 
@@ -231,6 +241,8 @@ impl BuildingKind {
             BuildingKind::SecurityOffice => 'O',
             BuildingKind::Lot => 'L',
             BuildingKind::Hotel => 'N',
+            BuildingKind::Clinic => 'R',
+            BuildingKind::Garage => 'V',
         }
     }
 }
@@ -263,11 +275,23 @@ pub enum Role {
     Gravedigger,
     /// M12 D23: the city's street sweepers, employed at the Recycler.
     Sanitation,
+    /// M13 D16: staff of a Clinic.
+    Ripperdoc,
+    /// M13 D16: staff of a Garage.
+    Mechanic,
 }
 
 impl Role {
-    pub const ALL: [Role; 6] =
-        [Role::Farmer, Role::Guard, Role::Clerk, Role::Bartender, Role::Gravedigger, Role::Sanitation];
+    pub const ALL: [Role; 8] = [
+        Role::Farmer,
+        Role::Guard,
+        Role::Clerk,
+        Role::Bartender,
+        Role::Gravedigger,
+        Role::Sanitation,
+        Role::Ripperdoc,
+        Role::Mechanic,
+    ];
 
     /// The display name (M11 section 1).
     pub fn label(self) -> &'static str {
@@ -278,6 +302,8 @@ impl Role {
             Role::Bartender => "Bartender",
             Role::Gravedigger => "Recycler Tech",
             Role::Sanitation => "Sanitation",
+            Role::Ripperdoc => "Ripperdoc",
+            Role::Mechanic => "Mechanic",
         }
     }
 
@@ -290,6 +316,8 @@ impl Role {
             Role::Bartender => BuildingKind::Bar,
             Role::Gravedigger => BuildingKind::Cemetery,
             Role::Sanitation => BuildingKind::Cemetery,
+            Role::Ripperdoc => BuildingKind::Clinic,
+            Role::Mechanic => BuildingKind::Garage,
         }
     }
 }
@@ -355,6 +383,10 @@ pub enum DeathCause {
     Violence,
     OldAge,
     Execution,
+    /// M13 D47: a crash (phase 2).
+    Accident,
+    /// M13 D47: a stim overdose (phase 4).
+    Overdose,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -398,6 +430,8 @@ pub enum MemoryKind {
     Evicted,
     /// M12 D35: hit as a bystander in a brawl at a door.
     CaughtInCrossfire,
+    /// M13 D11: a lender towed, bricked or took an asset.
+    Repossessed,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1022,6 +1056,12 @@ pub struct Wallet {
 pub struct Inventory {
     pub food: u32,
     pub stolen_food: u32,
+    /// M13 D7: stim doses carried (load 1 each).
+    #[serde(default)]
+    pub stims: u16,
+    /// M13 D7: Parts carried (load 3 each).
+    #[serde(default)]
+    pub parts: u16,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1380,6 +1420,15 @@ pub struct Corpse {
     /// Freed a day after this.
     #[serde(default)]
     pub buried_tick: Option<Tick>,
+    /// M13 D13: the coins and goods the dead carried, until stripped or settled.
+    #[serde(default)]
+    pub loot: Loot,
+    /// M13 D13: stripped (by hand or off screen).
+    #[serde(default)]
+    pub stripped: bool,
+    /// M13 D13: inheritance has run on what was left (`assets::settle_corpse`).
+    #[serde(default)]
+    pub settled: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1448,6 +1497,14 @@ pub struct Building {
     /// M12 D33: looted by a riot; no trade or beds until this tick.
     #[serde(default)]
     pub closed_until: Option<Tick>,
+    /// M13 D6: Stims and Parts in stock (`Good as usize - 1`); Food keeps `stock_food`.
+    #[serde(default)]
+    pub stock_goods: [u32; 2],
+    /// M13 D17: assets sold here today, and the last seven days (newest last).
+    #[serde(default)]
+    pub asset_sales_today: u16,
+    #[serde(default)]
+    pub asset_sales: VecDeque<u16>,
 }
 
 pub fn default_tier() -> u8 {
@@ -2348,3 +2405,338 @@ pub struct Life {
 }
 
 pub const LIFE_CAP: usize = 48;
+
+// ---------------------------------------------------------------------------
+// M13 assets (docs/M13_ASSETS.md § 1, plan phase 1)
+// ---------------------------------------------------------------------------
+
+/// An implant's place in the body: one implant per slot.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum Slot {
+    Arms,
+    Legs,
+    Nerves,
+    Eyes,
+    Skin,
+}
+
+impl Slot {
+    pub const ALL: [Slot; 5] = [Slot::Arms, Slot::Legs, Slot::Nerves, Slot::Eyes, Slot::Skin];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Slot::Arms => "Arms",
+            Slot::Legs => "Legs",
+            Slot::Nerves => "Nerves",
+            Slot::Eyes => "Eyes",
+            Slot::Skin => "Skin",
+        }
+    }
+}
+
+/// What an asset is. Appended only (saves name the variants).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum AssetKind {
+    Motorcycle,
+    Car,
+    Truck,
+    Flyer,
+    Implant(Slot),
+    Robot,
+    Pack,
+    /// M14 (plan D52): a Virt bridge, carried then planted at a building.
+    /// Only its asset entry exists in M13.
+    Bridge,
+}
+
+/// The lever and CSV grouping of an `AssetKind` (implants by class, not slot).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum AssetClass {
+    Motorcycle,
+    Car,
+    Truck,
+    Flyer,
+    Implant,
+    Robot,
+    Pack,
+    /// Plan D52.
+    Bridge,
+}
+
+impl AssetClass {
+    pub const ALL: [AssetClass; 8] = [
+        AssetClass::Motorcycle,
+        AssetClass::Car,
+        AssetClass::Truck,
+        AssetClass::Flyer,
+        AssetClass::Implant,
+        AssetClass::Robot,
+        AssetClass::Pack,
+        AssetClass::Bridge,
+    ];
+
+    /// Position in `ALL` (indexes `Levers::asset_tax`).
+    pub fn index(self) -> usize {
+        self as usize
+    }
+}
+
+impl AssetKind {
+    pub fn class(self) -> AssetClass {
+        match self {
+            AssetKind::Motorcycle => AssetClass::Motorcycle,
+            AssetKind::Car => AssetClass::Car,
+            AssetKind::Truck => AssetClass::Truck,
+            AssetKind::Flyer => AssetClass::Flyer,
+            AssetKind::Implant(_) => AssetClass::Implant,
+            AssetKind::Robot => AssetClass::Robot,
+            AssetKind::Pack => AssetClass::Pack,
+            AssetKind::Bridge => AssetClass::Bridge,
+        }
+    }
+
+    /// Motorcycle, Car, Truck, Flyer.
+    pub fn is_vehicle(self) -> bool {
+        matches!(self, AssetKind::Motorcycle | AssetKind::Car | AssetKind::Truck | AssetKind::Flyer)
+    }
+
+    /// A vehicle that keeps to the ground (not the Flyer).
+    pub fn is_road_vehicle(self) -> bool {
+        self.is_vehicle() && self != AssetKind::Flyer
+    }
+
+    pub fn is_implant(self) -> bool {
+        matches!(self, AssetKind::Implant(_))
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AssetKind::Motorcycle => "Motorcycle",
+            AssetKind::Car => "Car",
+            AssetKind::Truck => "Truck",
+            AssetKind::Flyer => "Flyer",
+            AssetKind::Implant(Slot::Arms) => "Arms implant",
+            AssetKind::Implant(Slot::Legs) => "Legs implant",
+            AssetKind::Implant(Slot::Nerves) => "Nerves implant",
+            AssetKind::Implant(Slot::Eyes) => "Eyes implant",
+            AssetKind::Implant(Slot::Skin) => "Skin implant",
+            AssetKind::Robot => "Security robot",
+            AssetKind::Pack => "Pack",
+            AssetKind::Bridge => "Bridge",
+        }
+    }
+}
+
+/// A traded good. Food lives in `Building.stock_food`; Stims and Parts in
+/// `Building.stock_goods[good as usize - 1]` (plan D6).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum Good {
+    Food,
+    Stims,
+    Parts,
+}
+
+impl Good {
+    pub const ALL: [Good; 3] = [Good::Food, Good::Stims, Good::Parts];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Good::Food => "Food",
+            Good::Stims => "Stims",
+            Good::Parts => "Parts",
+        }
+    }
+}
+
+/// Where an asset is. Write it only through `assets::set_loc` (plan D2).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum AssetLoc {
+    /// At a building (its door): Homes, workplaces, Garages, Hideouts.
+    Parked(EntityId),
+    /// Being driven by an agent.
+    InUse(EntityId),
+    /// A pack (or a bridge) on an agent.
+    Carried(EntityId),
+    /// Chrome in a body (a living agent or a corpse).
+    Installed(EntityId),
+    /// A robot guarding a building.
+    Posted(EntityId),
+    /// For sale at a Clinic, Garage or Security Office, or a gang's take at its Hideout.
+    Stock(EntityId),
+    /// Taken by an unbound Abducted hole.
+    Limbo(HoleId),
+}
+
+impl AssetLoc {
+    /// The building or agent the loc names (`None` for Limbo).
+    pub fn holder(self) -> Option<EntityId> {
+        match self {
+            AssetLoc::Parked(e)
+            | AssetLoc::InUse(e)
+            | AssetLoc::Carried(e)
+            | AssetLoc::Installed(e)
+            | AssetLoc::Posted(e)
+            | AssetLoc::Stock(e) => Some(e),
+            AssetLoc::Limbo(_) => None,
+        }
+    }
+}
+
+/// A finance plan (plan D10): `lender: None` is the city.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Finance {
+    pub lender: Option<EntityId>,
+    pub remaining: i64,
+    pub per_day: i64,
+    pub arrears: u8,
+}
+
+/// An owned thing (plan D1): an entity carrying only this component.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Asset {
+    pub kind: AssetKind,
+    /// 1..=3; also the lock tier (vehicles) and the sensor tier (robots).
+    pub tier: u8,
+    /// M11 owner; `None` = the city. Write only through `assets::set_owner`.
+    pub owner: Option<EntityId>,
+    /// Write only through `assets::set_loc`.
+    pub loc: AssetLoc,
+    /// 0..=100; 0 = wrecked (vehicles, robots) or failed (chrome).
+    pub condition: u8,
+    /// `list × condition / 100`, recomputed daily.
+    pub value: i64,
+    pub upkeep_per_day: i64,
+    pub upkeep_arrears: u8,
+    pub finance: Option<Finance>,
+    /// Chrome locked by its lender: modifiers off, load stays.
+    pub bricked: bool,
+    /// Set by theft or a rip; cleared by a chop, a fence or recovery.
+    pub stolen: bool,
+    pub bought: Tick,
+    /// Plan D24: who drives a fleet vehicle.
+    #[serde(default)]
+    pub keeper: Option<EntityId>,
+    /// Plan D1: the list price at purchase.
+    #[serde(default)]
+    pub list: i64,
+}
+
+/// Derived, never saved: rebuilt on load and by `assets::rekit` after any
+/// change (plan D3).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kit {
+    pub vehicle: Option<EntityId>,
+    pub fighting: f32,
+    pub stealth: f32,
+    pub reflex: f32,
+    pub strength: f32,
+    pub sight: u8,
+    pub armour: f32,
+    pub walk_mult: f32,
+    /// Σ sanity_cost of installed chrome (bricked and failed included).
+    pub load: f32,
+    pub chrome_value: i64,
+    /// Installed tiers in Arms, Eyes, Skin.
+    pub visible: u8,
+    /// Coarse GotoTimed multiplier of the vehicle (phase 2; 1.0 until then).
+    pub timed_mult: f32,
+    /// `min(1, (visible + vehicle tier, a flyer as 3) / 9)`.
+    pub flash: f32,
+    /// Plan D3: the kind of the vehicle being driven, cached from `World::trips`.
+    pub driving: Option<AssetKind>,
+    /// Plan D3: any implant installed (bricked or failed included).
+    pub chrome: bool,
+}
+
+impl Default for Kit {
+    fn default() -> Self {
+        Kit {
+            vehicle: None,
+            fighting: 0.0,
+            stealth: 0.0,
+            reflex: 0.0,
+            strength: 0.0,
+            sight: 0,
+            armour: 0.0,
+            walk_mult: 1.0,
+            load: 0.0,
+            chrome_value: 0,
+            visible: 0,
+            timed_mult: 1.0,
+            flash: 0.0,
+            driving: None,
+            chrome: false,
+        }
+    }
+}
+
+impl Kit {
+    /// No vehicle, no implant, not driving: every Kit term is skipped.
+    pub fn is_bare(&self) -> bool {
+        self.vehicle.is_none() && !self.chrome && self.driving.is_none()
+    }
+}
+
+/// Body stats (plan D4) on every agent, all tiers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Body {
+    /// `U(0.2, 0.6)`; children inherit the parents' mean ± 0.05.
+    pub strength: f32,
+    pub reflex: f32,
+    /// 0..=1, default 1.
+    pub sanity: f32,
+    /// 0..=1.
+    pub addiction: f32,
+    /// The last stim.
+    pub last_use: Option<Tick>,
+    /// In a cyberpsychotic episode (phase 3).
+    pub episode_until: Option<Tick>,
+    /// Plan D4: the last purchase (the Shop cooldown).
+    #[serde(default)]
+    pub last_shop: Option<Tick>,
+}
+
+/// For M15: stored daily, read by nobody in M13 (plan D5).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Appearance {
+    pub dress: u8,
+    pub chrome: u8,
+    pub colours: Option<EntityId>,
+}
+
+/// What a corpse carried (plan D13).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Loot {
+    pub coins: i64,
+    pub food: u32,
+    pub stims: u16,
+    pub parts: u16,
+}
+
+impl Loot {
+    pub fn is_empty(&self) -> bool {
+        self.coins == 0 && self.food == 0 && self.stims == 0 && self.parts == 0
+    }
+}
+
+/// What a shopper is buying, fixed at bind time (plan D29).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ShopPick {
+    pub kind: AssetKind,
+    pub tier: u8,
+    /// A used asset in the seller's stock, if the pick is one.
+    pub used: Option<EntityId>,
+}
+
+/// A vehicle trip in progress (plan D20; filled from phase 2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Trip {
+    pub vehicle: EntityId,
+    pub start: Tick,
+    pub from: TilePos,
+    pub road_tiles: u16,
+    pub steps: u16,
+    pub half: u16,
+    pub mid: Option<TilePos>,
+    pub chase: bool,
+}

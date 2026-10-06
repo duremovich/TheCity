@@ -149,6 +149,22 @@ pub enum Flow {
     Sanitation,
     /// M12 D39 (phase 4): a corp robbed by a raid (untaxed).
     Robbery,
+    /// M13 D8: an asset sale, an install fee, a repair, an impound sale (taxed).
+    Asset,
+    /// M13 D8: an asset's daily upkeep, owner -> Treasury (untaxed).
+    AssetUpkeep,
+    /// M13 D8: a finance payment, owner -> lender (untaxed).
+    Finance,
+    /// M13 D8: a seller's import, a gang's cook, a Market's Stims restock -> Treasury (untaxed).
+    Import,
+    /// M13 D8: a dealer's sale and cut (untaxed).
+    Stims,
+    /// M13 D8: a Market's legal Stims sale (taxed; the `flow_stims` column).
+    StimsLegal,
+    /// M13 D8: Parts bought by a Clinic or Garage (taxed, as wholesale).
+    Parts,
+    /// M13 D8: Therapy and Detox (taxed).
+    Treatment,
 }
 
 impl Flow {
@@ -162,7 +178,19 @@ impl Flow {
     /// Owner revenue taxed at the moment of the flow (spec § 3); wage tax
     /// keeps `Job.tax_accum`.
     pub fn taxed(self) -> bool {
-        matches!(self, Flow::Food | Flow::Drink | Flow::Rent | Flow::Contract | Flow::Wholesale | Flow::Hotel)
+        matches!(
+            self,
+            Flow::Food
+                | Flow::Drink
+                | Flow::Rent
+                | Flow::Contract
+                | Flow::Wholesale
+                | Flow::Hotel
+                | Flow::Asset
+                | Flow::StimsLegal
+                | Flow::Parts
+                | Flow::Treatment
+        )
     }
 }
 
@@ -187,6 +215,13 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         | Flow::Hotel
         | Flow::Sanitation
         | Flow::Robbery => row.flow_other += coins,
+        Flow::Asset => row.flow_asset += coins,
+        Flow::AssetUpkeep => row.flow_asset_upkeep += coins,
+        Flow::Finance => row.flow_finance += coins,
+        Flow::Import => row.flow_import += coins,
+        Flow::Stims | Flow::StimsLegal => row.flow_stims += coins,
+        Flow::Parts => row.flow_parts += coins,
+        Flow::Treatment => row.flow_treatment += coins,
     }
 }
 
@@ -294,13 +329,15 @@ pub fn credit(world: &mut World, building: EntityId, coins: i64) {
     }
 }
 
-/// Coins in every purse: wallets, gang and corp treasuries, the Treasury.
+/// Coins in every purse: wallets, gang and corp treasuries, the Treasury,
+/// and (M13 D13) the coins on unsettled corpses.
 pub fn total_coins(world: &World) -> i64 {
     let wallets: i64 = world.with::<Wallet>().iter().filter_map(|&a| world.comp::<Wallet>(a)).map(|w| w.coins).sum();
     let gangs: i64 = world.gangs().iter().filter_map(|&g| world.comp::<Gang>(g)).map(|g| g.treasury).sum();
     let corps: i64 = world.corps().iter().filter_map(|&c| world.comp::<Corp>(c)).map(|c| c.treasury).sum();
     let city: i64 = world.with::<Treasury>().iter().filter_map(|&t| world.comp::<Treasury>(t)).map(|t| t.coins).sum();
-    wallets + gangs + corps + city
+    let loot: i64 = world.loot_corpses.iter().filter_map(|&c| world.comp::<Corpse>(c)).map(|c| c.loot.coins).sum();
+    wallets + gangs + corps + city + loot
 }
 
 // ---------------------------------------------------------------------------
@@ -316,6 +353,8 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         BuildingKind::Farm => c.value.farm,
         BuildingKind::Market => c.value.market,
         BuildingKind::SecurityOffice => c.value.security_office,
+        BuildingKind::Clinic => c.value.clinic,
+        BuildingKind::Garage => c.value.garage,
         _ => 0,
     }
 }
@@ -327,6 +366,8 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
         BuildingKind::Market => Some(Role::Clerk),
         BuildingKind::Bar => Some(Role::Bartender),
         BuildingKind::SecurityOffice => Some(Role::Guard),
+        BuildingKind::Clinic => Some(Role::Ripperdoc),
+        BuildingKind::Garage => Some(Role::Mechanic),
         _ => None,
     }
 }

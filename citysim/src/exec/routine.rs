@@ -28,6 +28,8 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Clerk => LocationKey::Market,
         Role::Bartender => LocationKey::Bar,
         Role::Gravedigger | Role::Sanitation => LocationKey::Cemetery,
+        // M13 D16: a Clinic's or Garage's staff work at their employer.
+        Role::Ripperdoc | Role::Mechanic => LocationKey::Workplace,
     }
 }
 

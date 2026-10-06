@@ -12,8 +12,10 @@ use crate::systems::ownership::{self, Flow};
 use crate::world::World;
 
 /// The kinds an agent can found, in tie-break order (D25: tie -> Bar; M12
-/// D20 appends the Hotel, foundable only with `[street] enabled`).
-const FOUNDABLE: [BuildingKind; 3] = [BuildingKind::Bar, BuildingKind::Home, BuildingKind::Hotel];
+/// D20 appends the Hotel, foundable only with `[street] enabled`; M13 D16
+/// the Clinic and Garage, foundable only with `[assets] found_sellers`).
+const FOUNDABLE: [BuildingKind; 5] =
+    [BuildingKind::Bar, BuildingKind::Home, BuildingKind::Hotel, BuildingKind::Clinic, BuildingKind::Garage];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
 pub fn vacant_lots(world: &World) -> Vec<EntityId> {
@@ -26,13 +28,16 @@ pub fn vacant_lots(world: &World) -> Vec<EntityId> {
 }
 
 /// What founding a building of `kind` costs (Bar, Home, and with the street
-/// on a Hotel).
+/// on a Hotel; M13 D16 a Clinic or Garage with `[assets] found_sellers`).
 pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
     let c = &world.config.corps.found_cost;
+    let sellers = world.config.assets.enabled && world.config.assets.found_sellers;
     match kind {
         BuildingKind::Bar => Some(c.bar),
         BuildingKind::Home => Some(c.home),
         BuildingKind::Hotel if world.config.street.enabled => Some(c.hotel),
+        BuildingKind::Clinic if sellers => Some(c.clinic),
+        BuildingKind::Garage if sellers => Some(c.garage),
         _ => None,
     }
 }
@@ -59,7 +64,16 @@ pub fn build_on_lot(
     owner: Option<EntityId>,
 ) -> Result<EntityId, String> {
     // M12 D36: a splinter gang builds its Hideout on a Lot.
-    if !matches!(kind, BuildingKind::Bar | BuildingKind::Home | BuildingKind::Hotel | BuildingKind::Hideout) {
+    // M13 D16: and the Clinic and Garage.
+    if !matches!(
+        kind,
+        BuildingKind::Bar
+            | BuildingKind::Home
+            | BuildingKind::Hotel
+            | BuildingKind::Hideout
+            | BuildingKind::Clinic
+            | BuildingKind::Garage
+    ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
     let Some(b) = world.comp::<Building>(lot) else { return Err("no such Lot".into()) };
@@ -147,6 +161,8 @@ pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
         match kind {
             BuildingKind::Bar => world.config.corps.residents_per_bar.max(1) as f32,
             BuildingKind::Hotel => world.config.corps.residents_per_hotel.max(1) as f32,
+            BuildingKind::Clinic => world.config.corps.residents_per_clinic.max(1) as f32,
+            BuildingKind::Garage => world.config.corps.residents_per_garage.max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };

@@ -315,3 +315,62 @@ fn test_save_loads_legacy_edge_map() {
     assert_eq!(edge_bits(&back), edge_bits(&w));
     assert_eq!(save::to_ron(&back), text);
 }
+
+/// Drop one `field:{...}` (and its trailing comma) from compact RON.
+fn strip_map_field(text: &str, token: &str) -> String {
+    let start = text.find(token).unwrap_or_else(|| panic!("{token} not in save"));
+    let open = start + token.find('{').expect("token holds the opening brace");
+    let mut depth = 0usize;
+    let mut end = open;
+    for (i, ch) in text[open..].char_indices() {
+        match ch {
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    end = open + i + 1;
+                    break;
+                }
+            }
+            _ => {}
+        }
+    }
+    let end = if text[end..].starts_with(',') { end + 1 } else { end };
+    format!("{}{}", &text[..start], &text[end..])
+}
+
+/// M13 D50: a save from before assets has no `asset`, `body`, `appearance`
+/// or `trips` and no `[assets]`/`[chrome]` config: it loads with assets
+/// off, every agent gets a Body from its keyed stream, every Kit is bare,
+/// and a day runs.
+#[test]
+fn test_pre_m13_save_loads() {
+    let mut w = World::new(23, Config::load().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY + 10);
+    let text = save::to_ron(&w);
+    let text = strip_list_field(&text, "asset:[");
+    let text = strip_list_field(&text, "body:[");
+    let text = strip_list_field(&text, "appearance:[");
+    let text = strip_map_field(&text, "trips:{");
+    let text = strip_field(&text, "assets:(enabled");
+    let text = strip_field(&text, "chrome:(arms_fighting");
+    assert!(
+        !text.contains("asset:[") && !text.contains("body:[") && !text.contains("trips:"),
+        "the M13 keys are stripped"
+    );
+    let mut back = save::from_ron(&text).expect("a pre-M13 save loads");
+    assert!(!back.config.assets.enabled, "assets off");
+    assert_eq!(back.asset.len(), back.alive.len(), "the stores cover every entity");
+    assert_eq!(back.body.len(), back.alive.len());
+    for id in back.citizens() {
+        let body = back.comp::<citysim::Body>(id).expect("a backfilled Body");
+        assert!((0.2..0.6).contains(&body.strength) && body.sanity == 1.0);
+        assert!(back.comp::<citysim::Kit>(id).expect("a Kit").is_bare());
+    }
+    back.check_indices().expect("indices in step");
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.population() > 0);
+    // A current save keeps its Bodies bit for bit.
+    let text = save::to_ron(&w);
+    assert_eq!(save::to_ron(&save::from_ron(&text).expect("loads")), text);
+}

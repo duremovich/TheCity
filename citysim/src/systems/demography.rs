@@ -80,7 +80,7 @@ pub fn mature(world: &mut World, id: EntityId) {
     );
     world.insert(id, Mood::default());
     world.insert(id, Memory::default());
-    world.insert(id, Inventory { food: 0, stolen_food: 0 });
+    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     // At the door, not pushed in over the cap: a resident may always enter
     // their own Home (see `capacity_exempt`), so they walk in on their own.
@@ -249,6 +249,9 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
+    // M13 D4: the parents' mean from the child's keyed stream.
+    let body = crate::systems::assets::child_body(world, id, mother, father);
+    crate::systems::assets::give_body(world, id, body);
     // In the Home, but not an occupant: a birth may exceed the capacity of 6.
     let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);
     world.insert(id, Position { tile: door, building: Some(home), entered: tick });
@@ -307,8 +310,11 @@ pub fn children_of_agent(world: &World, id: EntityId) -> Vec<EntityId> {
 // ---------------------------------------------------------------------------
 
 /// Called by `World::kill` before the components go: witnesses, grief,
-/// inheritance.
-pub fn on_death(world: &mut World, id: EntityId) {
+/// inheritance. M13 D13: with `[assets] loot_window_hours > 0` the coins
+/// and goods stay on the body (returned, for the Corpse) until stripped,
+/// buried or settled; with 0 (or assets off) the coins are inherited at
+/// once, exactly as M12, and the loot is empty.
+pub fn on_death(world: &mut World, id: EntityId) -> crate::components::Loot {
     let tick = world.tick;
     let (tile, building) = world.comp::<Position>(id).map_or((TilePos::default(), None), |p| (p.tile, p.building));
     // 4. SawCorpse to Brain agents within 6 tiles or in the same building.
@@ -335,44 +341,78 @@ pub fn on_death(world: &mut World, id: EntityId) {
     }
     // M11 D45: owned buildings pass to the spouse, a child, else the city.
     crate::systems::ownership::on_owner_gone(world, id);
+    // M13 D45: so do parked vehicles and posted robots (carried and
+    // installed stay on the body).
+    crate::systems::assets::on_owner_gone(world, id);
     // 6. Inheritance: spouse, else children equally (remainder to the first), else Treasury.
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins).max(0);
-    if coins > 0 {
-        let spouse = world.neighbours(id).find(|&o| {
-            world.edge(id, o).is_some_and(|e| e.kind == RelKind::Spouse)
-                && world.has::<Identity>(o)
-                && !world.has::<Corpse>(o)
-        });
-        let heirs: Vec<EntityId> = match spouse {
-            Some(s) => vec![s],
-            None => children_of_agent(world, id),
-        };
-        if heirs.is_empty() {
-            if let Some(t) = world.treasury_mut() {
-                t.coins += coins;
-            }
-            world.push_event(EventKind::Inheritance, &[id], format!("{coins} coins to the Treasury"));
-        } else {
-            let n = heirs.len() as i64;
-            let share = coins / n;
-            let mut remainder = coins - share * n;
-            for h in &heirs {
-                let got = share + remainder;
-                remainder = 0;
-                if let Some(w) = world.comp_mut::<Wallet>(*h) {
-                    w.coins += got;
-                }
-            }
-            let name = world.name_of(heirs[0]);
-            world.push_event(
-                EventKind::Inheritance,
-                &[id, heirs[0]],
-                format!("{coins} coins to {name}{}", if n > 1 { " and others" } else { "" }),
-            );
+    let window = world.config.assets.enabled && world.config.assets.loot_window_hours > 0;
+    if window {
+        let mut loot = crate::components::Loot { coins, ..Default::default() };
+        if let Some(inv) = world.comp_mut::<Inventory>(id) {
+            loot.food = std::mem::take(&mut inv.food);
+            inv.stolen_food = 0;
+            loot.stims = std::mem::take(&mut inv.stims);
+            loot.parts = std::mem::take(&mut inv.parts);
         }
         if let Some(w) = world.comp_mut::<Wallet>(id) {
             w.coins = 0;
         }
+        return loot;
+    }
+    if coins > 0 {
+        inherit_coins(world, id, coins);
+        if let Some(w) = world.comp_mut::<Wallet>(id) {
+            w.coins = 0;
+        }
+    }
+    crate::components::Loot::default()
+}
+
+/// M11 inheritance's heirs: the spouse (a living Spouse edge), else the
+/// living children; empty = the Treasury.
+pub fn coin_heirs(world: &World, dead: EntityId) -> Vec<EntityId> {
+    let spouse = world.neighbours(dead).find(|&o| {
+        world.edge(dead, o).is_some_and(|e| e.kind == RelKind::Spouse)
+            && world.has::<Identity>(o)
+            && !world.has::<Corpse>(o)
+    });
+    match spouse {
+        Some(s) => vec![s],
+        None => children_of_agent(world, dead),
+    }
+}
+
+/// Inheritance of `coins` (M11, factored out for M13 D13): the spouse, else
+/// the children equally (remainder to the first), else the Treasury. The
+/// coins are no purse's when this runs (a wallet about to go, a corpse's loot).
+pub fn inherit_coins(world: &mut World, dead: EntityId, coins: i64) {
+    if coins <= 0 {
+        return;
+    }
+    let heirs = coin_heirs(world, dead);
+    if heirs.is_empty() {
+        if let Some(t) = world.treasury_mut() {
+            t.coins += coins;
+        }
+        world.push_event(EventKind::Inheritance, &[dead], format!("{coins} coins to the Treasury"));
+    } else {
+        let n = heirs.len() as i64;
+        let share = coins / n;
+        let mut remainder = coins - share * n;
+        for h in &heirs {
+            let got = share + remainder;
+            remainder = 0;
+            if let Some(w) = world.comp_mut::<Wallet>(*h) {
+                w.coins += got;
+            }
+        }
+        let name = world.name_of(heirs[0]);
+        world.push_event(
+            EventKind::Inheritance,
+            &[dead, heirs[0]],
+            format!("{coins} coins to {name}{}", if n > 1 { " and others" } else { "" }),
+        );
     }
 }
 
@@ -467,6 +507,8 @@ pub fn bury(world: &mut World, digger: EntityId, corpse: EntityId) -> bool {
     if let Some(b) = world.comp_mut::<Brain>(digger) {
         b.carrying_corpse = None;
     }
+    // M13 D13/D14: what is left is inherited; the chrome goes to the Recycler.
+    crate::systems::assets::on_buried(world, corpse);
     world.remember(digger, MemoryKind::Grief, Some(corpse), 0.3, -0.2, false);
     world.stats.current.burials += 1;
     let (nd, nc) = (world.name_of(digger), world.name_of(corpse));
@@ -675,7 +717,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     world.insert(id, personality);
     world.insert(id, Skills { stealth: 0.1, fighting: 0.1, farming: 0.1 });
     world.insert(id, Wallet { coins: 15 });
-    world.insert(id, Inventory { food: 0, stolen_food: 0 });
+    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
     world.insert(
         id,
         Needs {
@@ -692,6 +734,9 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     world.insert(id, Memory::default());
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     world.insert(id, Position { tile, building: None, entered: tick });
+    // M13 D4: a keyed Body (the world stream is untouched).
+    let body = crate::systems::assets::new_body(world, id);
+    crate::systems::assets::give_body(world, id, body);
     let home = emptiest_home(world);
     world.insert(id, Household::new(home));
     world.stats.current.immigrants += 1;

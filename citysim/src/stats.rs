@@ -10,10 +10,10 @@ use crate::time::Season;
 /// Days of history kept for the city panel's sparklines.
 pub const STATS_HISTORY_CAP: usize = 120;
 
-pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,d1_coverage,d1_control,d1_litter,d1_unrest,d1_crime,d1_guards,d2_coverage,d2_control,d2_litter,d2_unrest,d2_crime,d2_guards,d3_coverage,d3_control,d3_litter,d3_unrest,d3_crime,d3_guards,d4_coverage,d4_control,d4_litter,d4_unrest,d4_crime,d4_guards,d5_coverage,d5_control,d5_litter,d5_unrest,d5_crime,d5_guards,d6_coverage,d6_control,d6_litter,d6_unrest,d6_crime,d6_guards,d7_coverage,d7_control,d7_litter,d7_unrest,d7_crime,d7_guards,d8_coverage,d8_control,d8_litter,d8_unrest,d8_crime,d8_guards,dregs,hotel_nights,squatters,derelicts,vagrancy,riots,crossfire,gangs,ticks_per_sec";
+pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gang_members,food_market,food_warehouse,food_pantry,price,treasury,thefts,arrests,deaths_starvation,deaths_old_age,deaths_violence,births,immigrants,emigrants,burials,mean_hunger,mean_mood,goal_changes_per_agent,holes_opened,holes_open,holes_bound,holes_unknown,deaths_violence_offscreen,tier_full,tier_coarse,tier_stat,evictions,rent_paid,rent_short,housed,flow_food,flow_drink,flow_wages,flow_rent,flow_upkeep,flow_wholesale,flow_overflow,flow_restock,flow_contract,flow_tax,flow_dole,flow_other,wallets,wallet_gini,wallet_top10,corp1_treasury,corp1_order,corp2_treasury,corp2_order,corp3_treasury,corp3_order,corp4_treasury,corp4_order,corp5_treasury,corp5_order,corp6_treasury,corp6_order,corp7_treasury,corp7_order,corp8_treasury,corp8_order,corp9_treasury,corp9_order,acquisitions,bankruptcies,monopolies,foundings,incorporations,strikes,unrest_corp,unrest_street,unrest_dreg,class_corp,class_street,class_dreg,happiness_street,d1_coverage,d1_control,d1_litter,d1_unrest,d1_crime,d1_guards,d2_coverage,d2_control,d2_litter,d2_unrest,d2_crime,d2_guards,d3_coverage,d3_control,d3_litter,d3_unrest,d3_crime,d3_guards,d4_coverage,d4_control,d4_litter,d4_unrest,d4_crime,d4_guards,d5_coverage,d5_control,d5_litter,d5_unrest,d5_crime,d5_guards,d6_coverage,d6_control,d6_litter,d6_unrest,d6_crime,d6_guards,d7_coverage,d7_control,d7_litter,d7_unrest,d7_crime,d7_guards,d8_coverage,d8_control,d8_litter,d8_unrest,d8_crime,d8_guards,dregs,hotel_nights,squatters,derelicts,vagrancy,riots,crossfire,gangs,vehicles_moto,vehicles_car,vehicles_truck,vehicles_flyer,truck_hauls,walk_hauls,commute_tpt_walk,commute_tpt_drive,chrome_installs,chrome_agents,mean_sanity,episodes,hooked,stims_dealt,stims_legal,dealing_reports,repos,impounds,crashes,crash_deaths,vehicle_thefts,chops,abductions,stripped,robots,flow_asset,flow_asset_upkeep,flow_finance,flow_import,flow_stims,flow_parts,flow_treatment,overdoses,harvests,stripped_window,gang_income,gang_income_dealing,episodes_by_law,treatments,detoxes,ticks_per_sec";
 
-/// D38: corp CSV slots (seeding order).
-pub const CORP_SLOTS: usize = 8;
+/// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
+pub const CORP_SLOTS: usize = 9;
 
 /// M12 D45: district CSV slots (`[districts]` row order); a 9th-12th
 /// district is not printed.
@@ -185,6 +185,91 @@ pub struct DayRow {
     /// (the stance turned mid-march); not a CSV column (the gate reads it).
     #[serde(default)]
     pub raids_into_cover: u32,
+    /// M13 D49: vehicles by kind, chromed agents, the mean sanity of adults
+    /// with a Body, hooked adults, the legal-stims lever and posted robots
+    /// are day-end snapshots; the rest are daily counters (zero until their
+    /// phase). `commute_tpt_*` are ticks per Manhattan tile of the day's
+    /// arrivals at work, walked and driven.
+    #[serde(default)]
+    pub vehicles_moto: u32,
+    #[serde(default)]
+    pub vehicles_car: u32,
+    #[serde(default)]
+    pub vehicles_truck: u32,
+    #[serde(default)]
+    pub vehicles_flyer: u32,
+    #[serde(default)]
+    pub truck_hauls: u32,
+    #[serde(default)]
+    pub walk_hauls: u32,
+    #[serde(default)]
+    pub commute_tpt_walk: f32,
+    #[serde(default)]
+    pub commute_tpt_drive: f32,
+    #[serde(default)]
+    pub chrome_installs: u32,
+    #[serde(default)]
+    pub chrome_agents: u32,
+    #[serde(default)]
+    pub mean_sanity: f32,
+    #[serde(default)]
+    pub episodes: u32,
+    #[serde(default)]
+    pub hooked: u32,
+    #[serde(default)]
+    pub stims_dealt: u32,
+    #[serde(default)]
+    pub stims_legal: u32,
+    #[serde(default)]
+    pub dealing_reports: u32,
+    #[serde(default)]
+    pub repos: u32,
+    #[serde(default)]
+    pub impounds: u32,
+    #[serde(default)]
+    pub crashes: u32,
+    #[serde(default)]
+    pub crash_deaths: u32,
+    #[serde(default)]
+    pub vehicle_thefts: u32,
+    #[serde(default)]
+    pub chops: u32,
+    #[serde(default)]
+    pub abductions: u32,
+    #[serde(default)]
+    pub stripped: u32,
+    #[serde(default)]
+    pub robots: u32,
+    #[serde(default)]
+    pub flow_asset: i64,
+    #[serde(default)]
+    pub flow_asset_upkeep: i64,
+    #[serde(default)]
+    pub flow_finance: i64,
+    #[serde(default)]
+    pub flow_import: i64,
+    #[serde(default)]
+    pub flow_stims: i64,
+    #[serde(default)]
+    pub flow_parts: i64,
+    #[serde(default)]
+    pub flow_treatment: i64,
+    #[serde(default)]
+    pub overdoses: u32,
+    #[serde(default)]
+    pub harvests: u32,
+    #[serde(default)]
+    pub stripped_window: u32,
+    #[serde(default)]
+    pub gang_income: i64,
+    #[serde(default)]
+    pub gang_income_dealing: i64,
+    #[serde(default)]
+    pub episodes_by_law: u32,
+    #[serde(default)]
+    pub treatments: u32,
+    #[serde(default)]
+    pub detoxes: u32,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -268,6 +353,46 @@ impl DayRow {
             crossfire: 0,
             gangs: 0,
             raids_into_cover: 0,
+            vehicles_moto: 0,
+            vehicles_car: 0,
+            vehicles_truck: 0,
+            vehicles_flyer: 0,
+            truck_hauls: 0,
+            walk_hauls: 0,
+            commute_tpt_walk: 0.0,
+            commute_tpt_drive: 0.0,
+            chrome_installs: 0,
+            chrome_agents: 0,
+            mean_sanity: 0.0,
+            episodes: 0,
+            hooked: 0,
+            stims_dealt: 0,
+            stims_legal: 0,
+            dealing_reports: 0,
+            repos: 0,
+            impounds: 0,
+            crashes: 0,
+            crash_deaths: 0,
+            vehicle_thefts: 0,
+            chops: 0,
+            abductions: 0,
+            stripped: 0,
+            robots: 0,
+            flow_asset: 0,
+            flow_asset_upkeep: 0,
+            flow_finance: 0,
+            flow_import: 0,
+            flow_stims: 0,
+            flow_parts: 0,
+            flow_treatment: 0,
+            overdoses: 0,
+            harvests: 0,
+            stripped_window: 0,
+            gang_income: 0,
+            gang_income_dealing: 0,
+            episodes_by_law: 0,
+            treatments: 0,
+            detoxes: 0,
             ticks_per_sec: 0.0,
         }
     }
@@ -287,7 +412,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -362,6 +487,46 @@ impl DayRow {
             self.riots,
             self.crossfire,
             self.gangs,
+            self.vehicles_moto,
+            self.vehicles_car,
+            self.vehicles_truck,
+            self.vehicles_flyer,
+            self.truck_hauls,
+            self.walk_hauls,
+            self.commute_tpt_walk,
+            self.commute_tpt_drive,
+            self.chrome_installs,
+            self.chrome_agents,
+            self.mean_sanity,
+            self.episodes,
+            self.hooked,
+            self.stims_dealt,
+            self.stims_legal,
+            self.dealing_reports,
+            self.repos,
+            self.impounds,
+            self.crashes,
+            self.crash_deaths,
+            self.vehicle_thefts,
+            self.chops,
+            self.abductions,
+            self.stripped,
+            self.robots,
+            self.flow_asset,
+            self.flow_asset_upkeep,
+            self.flow_finance,
+            self.flow_import,
+            self.flow_stims,
+            self.flow_parts,
+            self.flow_treatment,
+            self.overdoses,
+            self.harvests,
+            self.stripped_window,
+            self.gang_income,
+            self.gang_income_dealing,
+            self.episodes_by_law,
+            self.treatments,
+            self.detoxes,
             self.ticks_per_sec,
         )
     }

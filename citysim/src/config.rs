@@ -7,7 +7,7 @@
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-use crate::components::{BuildingKind, Lod, Niche, Role};
+use crate::components::{AssetClass, AssetKind, BuildingKind, Lod, Niche, Role};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -55,6 +55,13 @@ pub struct Config {
     /// M12 phase 4 riots and crossfire (§ 6); absent from pre-M12 saves: off (plan D46).
     #[serde(default = "RiotsCfg::off")]
     pub riots: RiotsCfg,
+    /// M13 assets (§ 1); absent from pre-M13 saves: off (plan D50).
+    #[serde(default = "AssetsCfg::off")]
+    pub assets: AssetsCfg,
+    /// M13 chrome (§ 3); absent from pre-M13 saves: the spec's values, read
+    /// by nothing while `[assets]` is off (plan D50).
+    #[serde(default = "ChromeCfg::off")]
+    pub chrome: ChromeCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -125,6 +132,8 @@ impl JobsCfg {
             Role::Bartender => self.bartender,
             Role::Gravedigger => self.gravedigger,
             Role::Sanitation => self.sanitation,
+            // M13 D16: hired by the Clinics and Garages that are built, never seeded.
+            Role::Ripperdoc | Role::Mechanic => 0,
         }
     }
 }
@@ -181,6 +190,12 @@ pub struct BuildingsCfg {
     /// M12 D20: a Capsule Hotel (beds are `[street] hotel_beds`).
     #[serde(default = "BuildingCfg::hotel")]
     pub hotel: BuildingCfg,
+    /// M13 D16: the Ripperdoc.
+    #[serde(default = "BuildingCfg::inert")]
+    pub clinic: BuildingCfg,
+    /// M13 D16.
+    #[serde(default = "BuildingCfg::inert")]
+    pub garage: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -198,6 +213,8 @@ impl BuildingsCfg {
             BuildingKind::SecurityOffice => &self.security_office,
             BuildingKind::Lot => &self.lot,
             BuildingKind::Hotel => &self.hotel,
+            BuildingKind::Clinic => &self.clinic,
+            BuildingKind::Garage => &self.garage,
         }
     }
 }
@@ -230,6 +247,12 @@ pub struct EconomyCfg {
     /// M12 D23: a city sweeper's wage.
     #[serde(default = "default_wage_sanitation")]
     pub wage_sanitation: i64,
+    /// M13 D16: a Clinic's staff.
+    #[serde(default = "default_wage_ripperdoc")]
+    pub wage_ripperdoc: i64,
+    /// M13 D16: a Garage's staff.
+    #[serde(default = "default_wage_mechanic")]
+    pub wage_mechanic: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -268,6 +291,14 @@ fn default_wage_sanitation() -> i64 {
     5
 }
 
+fn default_wage_ripperdoc() -> i64 {
+    8
+}
+
+fn default_wage_mechanic() -> i64 {
+    7
+}
+
 impl EconomyCfg {
     pub fn wage(&self, role: Role) -> i64 {
         match role {
@@ -277,6 +308,8 @@ impl EconomyCfg {
             Role::Bartender => self.wage_bartender,
             Role::Gravedigger => self.wage_gravedigger,
             Role::Sanitation => self.wage_sanitation,
+            Role::Ripperdoc => self.wage_ripperdoc,
+            Role::Mechanic => self.wage_mechanic,
         }
     }
 }
@@ -864,6 +897,11 @@ pub struct FoundCostCfg {
     /// M12 D20: a Capsule Hotel on a Lot.
     #[serde(default = "FoundCostCfg::default_hotel")]
     pub hotel: i64,
+    /// M13 D16.
+    #[serde(default)]
+    pub clinic: i64,
+    #[serde(default)]
+    pub garage: i64,
 }
 
 impl FoundCostCfg {
@@ -886,6 +924,11 @@ pub struct UpkeepCfg {
     /// M12 D20.
     #[serde(default = "UpkeepCfg::default_hotel")]
     pub hotel: i64,
+    /// M13 D16.
+    #[serde(default)]
+    pub clinic: i64,
+    #[serde(default)]
+    pub garage: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -916,6 +959,8 @@ impl UpkeepCfg {
             BuildingKind::Home => self.home[usize::from(tier.min(2))],
             BuildingKind::SecurityOffice => self.security_office,
             BuildingKind::Hotel => self.hotel,
+            BuildingKind::Clinic => self.clinic,
+            BuildingKind::Garage => self.garage,
             _ => 0,
         }
     }
@@ -927,6 +972,11 @@ pub struct ValueCfg {
     pub farm: i64,
     pub market: i64,
     pub security_office: i64,
+    /// M13 D16.
+    #[serde(default)]
+    pub clinic: i64,
+    #[serde(default)]
+    pub garage: i64,
 }
 
 /// D48: flat terms on each corp order's score.
@@ -981,6 +1031,10 @@ pub struct CorpsCfg {
     pub residents_per_bar: u32,
     /// M12 D20: `Register`'s target count of Hotels is `population ÷ this`.
     pub residents_per_hotel: u32,
+    /// M13 D16: `Register`'s target count of Clinics is `population ÷ this`.
+    pub residents_per_clinic: u32,
+    /// M13 D16: likewise Garages.
+    pub residents_per_garage: u32,
     /// M11 phase 4: a flat term on the Found goal's score (calibration knob).
     #[serde(default)]
     pub found_flat: f32,
@@ -1051,7 +1105,7 @@ impl CorpsCfg {
             shock_severity_rethink: 0.5,
             bankrupt_days: 14,
             incorporate_buildings: 2,
-            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250 },
+            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250, clinic: 500, garage: 600 },
             wholesale: 2,
             contract_per_guard_day: 10,
             security_guards: 6,
@@ -1059,8 +1113,17 @@ impl CorpsCfg {
             monopoly_markup_cap: 2.0,
             squeeze_cap: 1.5,
             bar_owner_count: 0,
-            upkeep: UpkeepCfg { farm: 120, market: 600, bar: 15, home: [3; 3], security_office: 60, hotel: 10 },
-            value: ValueCfg { farm: 1000, market: 1000, security_office: 500 },
+            upkeep: UpkeepCfg {
+                farm: 120,
+                market: 600,
+                bar: 15,
+                home: [3; 3],
+                security_office: 60,
+                hotel: 10,
+                clinic: 10,
+                garage: 10,
+            },
+            value: ValueCfg { farm: 1000, market: 1000, security_office: 500, clinic: 600, garage: 800 },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
             grow_cooldown_days: 7,
@@ -1069,6 +1132,8 @@ impl CorpsCfg {
             found_cooldown_days: 10,
             residents_per_bar: 300,
             residents_per_hotel: 800,
+            residents_per_clinic: 700,
+            residents_per_garage: 700,
             found_flat: 0.0,
             hoard_tilt: 0.1,
             megacorp: Vec::new(),
@@ -1423,6 +1488,210 @@ impl RiotsCfg {
     }
 }
 
+/// M13 plan 1.2: one value per `AssetKind` class (implants share a row).
+/// Every field defaults, so `parts_per` may omit `pack` and `bridge`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct PerKind<T: Default> {
+    #[serde(default)]
+    pub motorcycle: T,
+    #[serde(default)]
+    pub car: T,
+    #[serde(default)]
+    pub truck: T,
+    #[serde(default)]
+    pub flyer: T,
+    #[serde(default)]
+    pub implant: T,
+    #[serde(default)]
+    pub robot: T,
+    #[serde(default)]
+    pub pack: T,
+    /// Plan D52 (M14's Virt bridge).
+    #[serde(default)]
+    pub bridge: T,
+}
+
+impl<T: Default> PerKind<T> {
+    pub fn get(&self, kind: AssetKind) -> &T {
+        match kind.class() {
+            AssetClass::Motorcycle => &self.motorcycle,
+            AssetClass::Car => &self.car,
+            AssetClass::Truck => &self.truck,
+            AssetClass::Flyer => &self.flyer,
+            AssetClass::Implant => &self.implant,
+            AssetClass::Robot => &self.robot,
+            AssetClass::Pack => &self.pack,
+            AssetClass::Bridge => &self.bridge,
+        }
+    }
+}
+
+/// M13 assets (docs/M13_ASSETS.md § 1, plan D1-D15, D50). Tier lists read
+/// `get(kind)[tier - 1]`; a missing tier is not sold.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AssetsCfg {
+    /// `off()` = false: no pass, no Kit term, no Body read; the CSV columns stay 0.
+    pub enabled: bool,
+    pub price: PerKind<Vec<i64>>,
+    pub upkeep: PerKind<Vec<i64>>,
+    pub wear: PerKind<u8>,
+    pub parts_per: PerKind<u32>,
+    pub parts_price: i64,
+    pub import_frac: f32,
+    /// Import coins one Part from a seller's stock replaces.
+    pub part_credit: i64,
+    pub down_frac: f32,
+    pub interest: f32,
+    pub term_days: u32,
+    pub repo_days: u8,
+    pub brick_repo_days: u8,
+    pub impound_days: u8,
+    pub impound_frac: f32,
+    pub unpaid_wear_mult: u8,
+    pub repair_below: u8,
+    /// Coins per condition point.
+    pub repair_price: i64,
+    pub fail_shock: f32,
+    /// Plan D13: 0 runs inheritance at death (M12); phase 3 sets 12.
+    pub loot_window_hours: u32,
+    pub rip_courage: f32,
+    pub scav_strip_base: f32,
+    pub carry_base: u32,
+    pub carry_per_strength: f32,
+    /// Carry added by a pack, per tier.
+    pub pack: Vec<u32>,
+    /// Plan D6: the Stims/Parts cap where a kind's `stock_cap` is lower.
+    pub goods_cap: u32,
+    /// Plan D14: a Clinic or Garage below this many Parts buys `parts_batch`.
+    pub parts_floor: u32,
+    pub parts_batch: u32,
+    /// Phase 1 deviation (plan D16 grows `FOUNDABLE`): `Register` and
+    /// `choose_kind` may pick a Clinic or Garage only while set. False in
+    /// phase 1, so the inert kinds are founded by nobody; phase 2 sets it.
+    pub found_sellers: bool,
+}
+
+impl Default for AssetsCfg {
+    fn default() -> Self {
+        AssetsCfg::off()
+    }
+}
+
+impl AssetsCfg {
+    /// Assets off (a pre-M13 save, `v1_profile`, the calibration city):
+    /// every other key at its `assets/config.toml` value.
+    pub fn off() -> AssetsCfg {
+        AssetsCfg {
+            enabled: false,
+            price: PerKind {
+                motorcycle: vec![300],
+                car: vec![800, 1400],
+                truck: vec![1500],
+                flyer: vec![6000],
+                implant: vec![150, 500, 1500],
+                robot: vec![800, 2000, 5000],
+                pack: vec![30, 80],
+                bridge: vec![200, 600, 1800],
+            },
+            upkeep: PerKind {
+                motorcycle: vec![1],
+                car: vec![2, 3],
+                truck: vec![4],
+                flyer: vec![15],
+                implant: vec![0, 1, 3],
+                robot: vec![4, 8, 15],
+                pack: vec![0, 0],
+                bridge: vec![0, 0, 0],
+            },
+            wear: PerKind { motorcycle: 1, car: 1, truck: 1, flyer: 1, implant: 0, robot: 1, pack: 0, bridge: 0 },
+            parts_per: PerKind {
+                motorcycle: 4,
+                car: 8,
+                truck: 12,
+                flyer: 30,
+                implant: 3,
+                robot: 10,
+                pack: 0,
+                bridge: 0,
+            },
+            parts_price: 15,
+            import_frac: 0.6,
+            part_credit: 20,
+            down_frac: 0.25,
+            interest: 0.2,
+            term_days: 60,
+            repo_days: 5,
+            brick_repo_days: 10,
+            impound_days: 10,
+            impound_frac: 0.5,
+            unpaid_wear_mult: 3,
+            repair_below: 50,
+            repair_price: 2,
+            fail_shock: 0.1,
+            loot_window_hours: 0,
+            rip_courage: 0.5,
+            scav_strip_base: 0.15,
+            carry_base: 20,
+            carry_per_strength: 10.0,
+            pack: vec![10, 25],
+            goods_cap: 1000,
+            parts_floor: 20,
+            parts_batch: 20,
+            found_sellers: false,
+        }
+    }
+}
+
+/// M13 chrome (docs/M13_ASSETS.md § 3). Phase 1 carries the Kit-table keys
+/// (plan "Kit tables"), the sanity cost and the used-sale fraction; phase 3
+/// adds the rest of the spec's `[chrome]`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ChromeCfg {
+    /// Arms: `fighting + arms_fighting × tier`.
+    pub arms_fighting: f32,
+    /// Arms: `strength + arms_strength × tier`.
+    pub arms_strength: f32,
+    /// Legs: `walk_mult` per tier.
+    pub legs_walk: Vec<f32>,
+    /// Nerves: `reflex + nerves_reflex × tier`.
+    pub nerves_reflex: f32,
+    /// Eyes: `sight + eyes_sight × tier` tiles.
+    pub eyes_sight: u8,
+    /// Eyes: `stealth + eyes_stealth × tier`.
+    pub eyes_stealth: f32,
+    /// Skin: `armour = skin_armour × tier`.
+    pub skin_armour: f32,
+    /// Sanity load per installed implant, per tier.
+    pub sanity_cost: Vec<f32>,
+    /// A used asset sells at `used_frac × list × condition / 100` (plan D29).
+    pub used_frac: f32,
+}
+
+impl Default for ChromeCfg {
+    fn default() -> Self {
+        ChromeCfg::off()
+    }
+}
+
+impl ChromeCfg {
+    /// The spec's values (assets off reads none of them).
+    pub fn off() -> ChromeCfg {
+        ChromeCfg {
+            arms_fighting: 0.1,
+            arms_strength: 0.25,
+            legs_walk: vec![0.85, 0.75, 0.65],
+            nerves_reflex: 0.15,
+            eyes_sight: 2,
+            eyes_stealth: 0.05,
+            skin_armour: 0.15,
+            sanity_cost: vec![0.08, 0.15, 0.25],
+            used_frac: 0.6,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeversCfg {
     pub tax_rate: f32,
@@ -1542,6 +1811,8 @@ impl Config {
         self.classes.rent_burden_w = 0.0;
         self.classes.curfew_fear = 0.0;
         self.corps.hoard_tilt = 0.0;
+        // M13 D50: no assets, so the v1, M8 and M9 unit tests run unchanged.
+        self.assets = AssetsCfg::off();
         self
     }
 
@@ -1577,6 +1848,8 @@ impl Config {
         // M12 D48 (phase 4): riots off, no splits, no crossfire.
         c.riots = RiotsCfg::off();
         c.gangs.split_base = 0.0;
+        // M13 D46/D50: no assets: the table and the parity test are unchanged.
+        c.assets = AssetsCfg::off();
         c
     }
 
