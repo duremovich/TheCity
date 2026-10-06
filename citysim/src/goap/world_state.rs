@@ -78,11 +78,14 @@ pub enum LocationKey {
     /// M13 D36/D33: next to the plan's target agent (a Harvest victim, an
     /// episode's quarry): its building, else its tile.
     Victim,
+    /// M13 D38/D40: the plan's target building as a source of Stims (a Bar
+    /// with a dealer on shift, or a legal Market with stock).
+    StimSource,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 24] = [
+    pub const GOTO: [LocationKey; 25] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -107,6 +110,7 @@ impl LocationKey {
         LocationKey::Vehicle,
         LocationKey::Clinic,
         LocationKey::Victim,
+        LocationKey::StimSource,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -179,6 +183,10 @@ pub enum Key {
     Treated,
     /// M13 D35: a body stripped (never observed true; Strip and Rip set it).
     Stripped,
+    /// M13 D38: carrying Stims (`Inventory.stims > 0`).
+    HasStims,
+    /// M13 D39: a dose within `stim_hours`.
+    High,
 }
 
 /// Partial goal state: at most 3 listed keys.
@@ -226,6 +234,8 @@ pub struct WorldState {
     pub carrying_vehicle: bool,
     pub treated: bool,
     pub stripped: bool,
+    pub has_stims: bool,
+    pub high: bool,
 }
 
 impl WorldState {
@@ -273,6 +283,8 @@ impl WorldState {
             carrying_vehicle,
             treated,
             stripped,
+            has_stims,
+            high,
         } = *self;
         let flags = [
             hunger_satisfied,
@@ -310,6 +322,8 @@ impl WorldState {
             carrying_vehicle,
             treated,
             stripped,
+            has_stims,
+            high,
         ];
         let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
         for (i, f) in flags.into_iter().enumerate() {
@@ -360,6 +374,8 @@ impl WorldState {
             Key::CarryingVehicle => self.carrying_vehicle,
             Key::Treated => self.treated,
             Key::Stripped => self.stripped,
+            Key::HasStims => self.has_stims,
+            Key::High => self.high,
         }
     }
 
@@ -457,9 +473,13 @@ impl WorldState {
         };
         // M12 D27: the agent's squat (or, while planning one, the bound derelict).
         let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
-        // M13 D29: inside the bound seller while shopping.
+        // M13 D29: inside the bound seller while shopping; D38: a dealer
+        // inside its deal Bar (GangWork's bound Bar).
+        let goal = world.comp::<Brain>(agent).and_then(|b| b.current_goal);
         let shopping = target.is_some()
-            && world.comp::<Brain>(agent).is_some_and(|b| b.current_goal == Some(crate::components::GoalKind::Shop));
+            && matches!(goal, Some(crate::components::GoalKind::Shop | crate::components::GoalKind::GangWork));
+        // M13 D39: inside the bound Stims source while getting high.
+        let scoring = target.is_some() && goal == Some(crate::components::GoalKind::GetHigh);
         // M13 D26: on the street outside the bound vehicle's door.
         let vehicle_tile = target.and_then(|t| crate::systems::vehicles::vehicle_stand(world, t));
         // M13 D33/D36: next to the quarry (an episode's, a Harvest crew's),
@@ -492,6 +512,7 @@ impl WorldState {
                 LocationKey::Squat
             }
             Some(b) if shopping && Some(b) == target => LocationKey::Seller,
+            Some(b) if scoring && Some(b) == target => LocationKey::StimSource,
             Some(b) => match world.comp::<Building>(b) {
                 Some(bd) if bd.kind == BuildingKind::Home => LocationKey::Street, // someone else's home
                 Some(bd) => LocationKey::of_building(bd.kind),
@@ -600,6 +621,8 @@ impl WorldState {
             carrying_vehicle: crate::systems::vehicles::stolen_held_by(world, agent).is_some(),
             treated: false,
             stripped: false,
+            has_stims: inv.stims > 0,
+            high: crate::systems::stims::is_high(world, agent),
         }
     }
 }

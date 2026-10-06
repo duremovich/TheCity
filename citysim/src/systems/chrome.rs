@@ -63,15 +63,16 @@ pub fn edgy(world: &World, agent: EntityId) -> bool {
     on(world) && world.comp::<Body>(agent).is_some_and(|b| b.sanity < world.config.chrome.edgy)
 }
 
-/// D33: the body's mood term, derived on read: `−edgy_mood` below `edgy`
-/// (the stim terms arrive in phase 4). 0 for a calm body or assets off.
+/// D33: the body's mood term, derived on read: `−edgy_mood` below `edgy`,
+/// plus (phase 4, D39) `+stim_mood` within `stim_hours` of a dose or
+/// `−withdrawal_mood` in withdrawal. 0 for a calm, clean body or assets off.
 pub fn body_bias(world: &World, agent: EntityId) -> f32 {
-    // TODO(M13 ph4): `+stim_mood` within `stim_hours` of `last_use`, and
-    // `−withdrawal_mood` in withdrawal.
-    if edgy(world, agent) {
-        -world.config.chrome.edgy_mood
+    let edgy = if edgy(world, agent) { -world.config.chrome.edgy_mood } else { 0.0 };
+    let stims = crate::systems::stims::mood_terms(world, agent);
+    if stims != 0.0 {
+        edgy + stims
     } else {
-        0.0
+        edgy
     }
 }
 
@@ -80,9 +81,10 @@ pub fn wants_treatment(world: &World, agent: EntityId) -> bool {
     on(world) && world.comp::<Body>(agent).is_some_and(|b| b.sanity < world.config.chrome.treat_below)
 }
 
-/// D33: the Fight goal's flat gains `edgy_fight` below `edgy`.
+/// D33: the Fight goal's flat gains `edgy_fight` below `edgy` or (D39) in
+/// withdrawal (once for either).
 pub fn fight_flat(world: &World, agent: EntityId) -> f32 {
-    if edgy(world, agent) {
+    if edgy(world, agent) || crate::systems::stims::in_withdrawal(world, agent) {
         world.config.chrome.edgy_fight
     } else {
         0.0
@@ -389,8 +391,12 @@ pub fn sanity_daily(world: &mut World) {
     }
     let psycho = cfg.psycho.max(1e-6);
     for (id, sanity) in rolls {
-        // TODO(M13 ph4): × `stim_episode_mult` within `stim_hours` of a stim.
-        let p = f64::from((cfg.episode_base * (cfg.psycho - sanity) / psycho).clamp(0.0, 1.0));
+        // Phase 4 (plan 4.3): × `stim_episode_mult` within 12 h of a dose.
+        let mut p = cfg.episode_base * (cfg.psycho - sanity) / psycho;
+        if crate::systems::stims::used_within(world, id, crate::systems::stims::EPISODE_STIM_HOURS) {
+            p *= cfg.stim_episode_mult;
+        }
+        let p = f64::from(p.clamp(0.0, 1.0));
         if world.rng.world().random_bool(p) {
             start_episode(world, id);
         }

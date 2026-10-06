@@ -353,6 +353,8 @@ pub fn clash(world: &mut World, actor: EntityId) -> Option<Outcome> {
     }
     defenders.retain(|x| !rioters.contains(x));
     raid::by_strength(world, &mut defenders);
+    // M13 D41: a powered robot at the target holds the door first.
+    raid::robots_first(world, target, &mut defenders);
     let kill_mult = if riot.response == RiotResponse::Crush { cfg.crush_kill_mult } else { 1.0 };
     let (n, m) = (rioters.len(), defenders.len());
     let all_defenders = defenders.clone();
@@ -489,7 +491,14 @@ fn loot(world: &mut World, riot: &Riot, rioters: &[EntityId], actor: EntityId) {
                 b.stock_food -= units;
             }
             raid::share_food(world, rioters, units);
-            format!("{units} food")
+            // M13 D38: `loot_frac` of the Market's Stims with its food, into
+            // the rioters' pockets round-robin as far as each can carry.
+            let stims = loot_stims(world, target, rioters, cfg.loot_frac);
+            if stims > 0 {
+                format!("{units} food and {stims} Stims")
+            } else {
+                format!("{units} food")
+            }
         }
         _ => {
             let owner = world.owner_of(target);
@@ -528,6 +537,32 @@ fn loot(world: &mut World, riot: &Riot, rioters: &[EntityId], actor: EntityId) {
     let dn = world.district_name(riot.district).to_string();
     let closed = if world.is_closed(target) { format!("; closed {} days", cfg.riot_close_days) } else { String::new() };
     world.push_event(EventKind::Looted, &[target, actor], format!("rioters from {dn} looted {tn}: {took}{closed}"));
+}
+
+/// M13 D38: `frac` of a building's Stims taken by `rioters`, a dose at a
+/// time round-robin while anyone has room; what nobody can carry is lost.
+/// Returns the doses taken.
+fn loot_stims(world: &mut World, b: EntityId, rioters: &[EntityId], frac: f32) -> u32 {
+    if !world.config.assets.enabled || rioters.is_empty() {
+        return 0;
+    }
+    let units = (world.stock(b, crate::components::Good::Stims) as f32 * frac).floor() as u32;
+    let taken = world.take_stock(b, crate::components::Good::Stims, units);
+    let mut kept = 0;
+    for i in 0..taken as usize {
+        let r = rioters[i % rioters.len()];
+        let room = world.comp::<crate::components::Inventory>(r).map_or(0, |inv| {
+            crate::systems::assets::capacity(world, r).saturating_sub(crate::systems::assets::load(inv))
+        });
+        if room == 0 {
+            continue;
+        }
+        if let Some(inv) = world.comp_mut::<crate::components::Inventory>(r) {
+            inv.stims = inv.stims.saturating_add(1);
+            kept += 1;
+        }
+    }
+    kept
 }
 
 /// D32's tail, whatever the outcome: the `Riot` event, and (a riot that

@@ -492,7 +492,8 @@ pub fn squat_claim(world: &mut World, actor: EntityId, b: EntityId) {
 /// The Home a GangWork plan extorts and the order it serves (`None` =
 /// freelancing). Expand: the unclaimed Home nearest the gang's Hideout;
 /// Contest: the Home in the rival's territory nearest it; Raid, Retaliate
-/// and LieLow: none. A member below `freelance_loyalty` ignores the order
+/// and LieLow: none. M13 D38: a dealer under any order it follows deals
+/// at its gang's deal Bar instead (`stims::dealer_target`). A member below `freelance_loyalty` ignores the order
 /// and takes the unclaimed Home nearest themselves. Always: inhabited right
 /// now, not the actor's own Home, no guard within `sight_day_crime` of the
 /// door. "Unclaimed" and "rival's" read the territory lists, the same
@@ -503,6 +504,9 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let g = world.comp::<Gang>(gang)?;
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);
     let actor_tile = world.comp::<Position>(id)?.tile;
+    if let Some(bar) = crate::systems::stims::dealer_target(world, id) {
+        return Some((bar, following_order(world, id)));
+    }
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
     // The order decides the origin and the filter before any Home is read:
     // the orders with no target return without the scan (perf).
@@ -747,8 +751,8 @@ pub fn split_loot(world: &mut World, actor: EntityId) -> i64 {
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins -= share;
     }
-    if let Some(g) = world.gang_of(actor).and_then(|g| world.comp_mut::<Gang>(g)) {
-        g.treasury += share;
+    if let Some(g) = world.gang_of(actor) {
+        world.gang_credit(g, share);
     }
     if let Some(b) = world.comp_mut::<Brain>(actor) {
         b.loot_today = 0;
@@ -777,8 +781,9 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
     }
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.treasury -= pay;
-        g.treasury += i64::from(sold) * price; // the gang resells at market price
     }
+    // The gang resells at market price.
+    world.gang_credit(gang, i64::from(sold) * price);
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins += pay;
     }
@@ -855,9 +860,7 @@ fn daily_economy(world: &mut World) {
                     owed -= pay;
                 }
             }
-            if let Some(g) = world.comp_mut::<Gang>(gang) {
-                g.treasury += 2 - owed;
-            }
+            world.gang_credit(gang, 2 - owed);
         }
         // Stipend while the treasury holds it, leader first; none while sacked.
         let sacked = world.comp::<Gang>(gang).is_some_and(|g| g.is_sacked(now));
@@ -907,6 +910,8 @@ fn daily_economy(world: &mut World) {
                 b.betraying = disloyal && wanted;
             }
         }
+        // M13 D38: the cook, before the chop and the purchases.
+        crate::systems::stims::cook(world, gang);
         // M13 D27: the chop shop, then D44: a bike for a member.
         crate::systems::vehicles::chop_daily(world, gang);
         crate::systems::vehicles::gang_bikes(world, gang);

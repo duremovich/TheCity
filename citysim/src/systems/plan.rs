@@ -93,6 +93,14 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         }
         // M13 D35: the nearest body within reach.
         GoalKind::Loot => crate::systems::chrome::loot_target(world, id),
+        // M13 D39: the nearest Stims source, unless a dose is in hand.
+        GoalKind::GetHigh => {
+            if world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.stims > 0) {
+                None
+            } else {
+                crate::systems::stims::stim_source(world, id)
+            }
+        }
         // M13 D33: an episode's quarry, the nearest living body in sight.
         GoalKind::Fight if crate::systems::chrome::in_episode(world, id) => {
             crate::systems::chrome::episode_target(world, id)

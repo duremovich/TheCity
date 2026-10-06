@@ -365,9 +365,15 @@ pub fn run_statistical(world: &mut World) {
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
+        let energy_mult = crate::systems::stims::energy_mult(world, id);
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
-            let ctx =
-                crate::needs::DecayCtx { season_energy_mult, sociability, under_18, ..crate::needs::DecayCtx::plain() };
+            let ctx = crate::needs::DecayCtx {
+                season_energy_mult,
+                sociability,
+                under_18,
+                energy_mult,
+                ..crate::needs::DecayCtx::plain()
+            };
             crate::needs::decay(n, &cfg, &ctx, TICKS_PER_HOUR as u32);
         }
         crate::needs::starvation(world, id);
@@ -498,8 +504,12 @@ pub fn stat_probs(world: &World, id: EntityId, row: &StatRow) -> (f32, f32, f32,
             robbed *= flash;
         }
     }
-    // TODO(M13 ph4): `p_steal × withdrawal_steal_mult` in withdrawal.
-    (killed, assaulted, robbed, row.p_steal)
+    // M13 D46: in withdrawal the hour's theft is likelier (a branch).
+    let mut steal = row.p_steal;
+    if crate::systems::stims::in_withdrawal(world, id) {
+        steal *= world.config.stims.withdrawal_steal_mult;
+    }
+    (killed, assaulted, robbed, steal)
 }
 
 fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {

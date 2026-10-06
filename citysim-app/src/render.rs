@@ -419,6 +419,23 @@ fn draw_vehicles(world: &World, app: &App, in_view: &dyn Fn(TilePos) -> bool) {
         draw_rectangle_lines(sx, sy, w - 1.0, w - 1.0, 1.0, BLACK);
         *n += 1;
     }
+    // M13 D41 (plan 4.5): a posted robot is a filled square on its door,
+    // steel blue while powered, grey when its upkeep is unpaid.
+    for a in world.assets_by_owner.values().flatten() {
+        let Some(x) = world.comp::<Asset>(*a).filter(|x| x.kind == citysim::AssetKind::Robot) else { continue };
+        let AssetLoc::Posted(b) = x.loc else { continue };
+        let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) else { continue };
+        if !in_view(door) {
+            continue;
+        }
+        let p = cam.tile_to_screen(vec2(f32::from(door.x), f32::from(door.y)));
+        let s = (ppt * 0.6).max(3.0);
+        let powered = x.condition > 0 && x.upkeep_arrears == 0 && !x.bricked;
+        let colour = if powered { Color::from_rgba(0x5A, 0x8C, 0xC8, 255) } else { GRAY };
+        let off = (ppt - s) / 2.0;
+        draw_rectangle(p.x + off, p.y + off, s, s, colour);
+        draw_rectangle_lines(p.x + off, p.y + off, s, s, 1.0, BLACK);
+    }
     // Driving and flying, whatever the tier (the trips map is small).
     for (&agent, trip) in &world.trips {
         let Some(kind) = world.comp::<Asset>(trip.vehicle).map(|x| x.kind) else { continue };

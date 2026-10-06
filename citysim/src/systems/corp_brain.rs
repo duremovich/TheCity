@@ -182,9 +182,11 @@ pub fn shares(world: &World, niche: Niche) -> BTreeMap<EntityId, f32> {
                 }
             }
         }
+        // M13 D42: robots sold and in service count as contracts do.
         Niche::Security => {
             for c in world.corps() {
-                let n = world.comp::<Corp>(c).map_or(0, |cc| sold_contracts(world, cc, c));
+                let n = world.comp::<Corp>(c).map_or(0, |cc| sold_contracts(world, cc, c))
+                    + crate::systems::robots::sold_in_service(world, c);
                 total += n as f32;
                 if n > 0 {
                     own.insert(c, n as f32);
@@ -841,7 +843,9 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
 
 /// D24: contract up to `secure_per_day` owned buildings with a recent loss,
 /// newest loss first; a Security corp covers its own, the rest buy from the
-/// cheapest Security corp with room.
+/// cheapest Security corp with room. M13 D42: a building with a robot
+/// posted needs neither; a robot is bought instead of a contract when it is
+/// cheaper over `robot_horizon_days` (`robots::consider_robot`).
 fn secure(world: &mut World, corp: EntityId) {
     let per_day = world.config.corps.secure_per_day;
     let Some(c) = world.comp::<Corp>(corp) else { return };
@@ -854,7 +858,8 @@ fn secure(world: &mut World, corp: EntityId) {
             continue;
         }
         let ok = world.comp::<Building>(b).is_some_and(|bd| bd.owner == Some(corp) && !bd.demolished)
-            && world.comp::<Building>(b).is_some_and(|bd| bd.secured_by.is_none());
+            && world.comp::<Building>(b).is_some_and(|bd| bd.secured_by.is_none())
+            && crate::systems::robots::posted_robot(world, b).is_none();
         if ok {
             targets.push(b);
         }
@@ -872,6 +877,7 @@ fn secure(world: &mut World, corp: EntityId) {
             .filter(|b| !targets.contains(b))
             .filter(|&b| {
                 world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && bd.secured_by.is_none())
+                    && crate::systems::robots::posted_robot(world, b).is_none()
                     && thinly_covered(world, b)
             })
             .map(|b| (world.district(world.district_of_building(b)).coverage, b))
@@ -881,6 +887,10 @@ fn secure(world: &mut World, corp: EntityId) {
     }
     let own_security = c.niches.contains(&Niche::Security);
     for b in targets {
+        // M13 D42: a robot instead of a contract when it is cheaper over the horizon.
+        if crate::systems::robots::consider_robot(world, corp, b) {
+            continue;
+        }
         let seller = if own_security { Some(corp) } else { crate::systems::corps::cheapest_seller(world, Some(corp)) };
         if let Some(s) = seller {
             crate::systems::corps::buy_contract(world, b, s);

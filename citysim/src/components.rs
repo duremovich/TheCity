@@ -344,6 +344,8 @@ pub enum Crime {
     Manslaughter,
     /// M13 D36: a Harvest crew dragged someone off for their chrome.
     Abduction,
+    /// M13 D38: a dealer's sale of illegal Stims.
+    Dealing,
 }
 
 impl Crime {
@@ -358,22 +360,25 @@ impl Crime {
             Crime::GrandTheft => "Grand Theft",
             Crime::Manslaughter => "Manslaughter",
             Crime::Abduction => "Abduction",
+            Crime::Dealing => "Dealing",
         }
     }
 
     /// The order the law ranks crimes by (the most severe open report sets
-    /// a sentence): Vagrancy, Theft, Grand Theft, Shakedown, Assault,
-    /// Manslaughter, Abduction, Murder. Unique per crime (`Ord` reads it).
+    /// a sentence): Vagrancy, Theft, Grand Theft, Dealing, Shakedown,
+    /// Assault, Manslaughter, Abduction, Murder. Unique per crime (`Ord`
+    /// reads it).
     pub fn severity(self) -> u8 {
         match self {
             Crime::Vagrancy => 0,
             Crime::Theft => 1,
             Crime::GrandTheft => 2,
-            Crime::Extortion => 3,
-            Crime::Assault => 4,
-            Crime::Manslaughter => 5,
-            Crime::Abduction => 6,
-            Crime::Murder => 7,
+            Crime::Dealing => 3,
+            Crime::Extortion => 4,
+            Crime::Assault => 5,
+            Crime::Manslaughter => 6,
+            Crime::Abduction => 7,
+            Crime::Murder => 8,
         }
     }
 }
@@ -482,10 +487,12 @@ pub enum GoalKind {
     Squat,
     /// M13 D43: buy a vehicle, chrome or a pack.
     Shop,
-    /// M13 D34: Therapy at a Clinic (Detox from phase 4).
+    /// M13 D34: Therapy or (phase 4, D39) Detox at a Clinic.
     Treat,
     /// M13 D35: strip a fresh body (and rip its chrome).
     Loot,
+    /// M13 D39: buy a dose (from a dealer at a Bar, or a legal Market) and use it.
+    GetHigh,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -1723,6 +1730,9 @@ pub struct Market {
     /// 0 reads as `price_food x 10` (an old save, the flag off).
     #[serde(default)]
     pub price_tenths: i64,
+    /// M13 D6/D40: legal Stims doses sold today (phase 4).
+    #[serde(default)]
+    pub stim_sales_today: u32,
 }
 
 impl Market {
@@ -1743,6 +1753,7 @@ impl Market {
             sales: VecDeque::new(),
             stock_hist: VecDeque::new(),
             price_tenths: 0,
+            stim_sales_today: 0,
         }
     }
 }

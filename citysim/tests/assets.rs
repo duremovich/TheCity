@@ -403,3 +403,164 @@ fn test_body_draws_do_not_touch_world_stream() {
         assert_eq!(a.rng.agent(id).random::<u64>(), b.rng.agent(id).random::<u64>(), "agent streams untouched");
     }
 }
+
+// ---------------------------------------------------------------------------
+// M13 phase 4: the security robot (plan 4.6, D41, D42)
+// ---------------------------------------------------------------------------
+
+/// A civilian adult (no gang, no job) and the Home it lives in.
+fn homeowner(w: &World) -> (EntityId, EntityId) {
+    adults(w)
+        .into_iter()
+        .filter(|&a| w.gang_of(a).is_none() && !w.has::<citysim::Job>(a))
+        .find_map(|a| w.comp::<citysim::Household>(a).and_then(|h| h.home).map(|h| (a, h)))
+        .expect("a housed civilian")
+}
+
+/// Adults other than `not`, outside any gang and job, ascending.
+fn others(w: &World, not: EntityId) -> Vec<EntityId> {
+    adults(w).into_iter().filter(|&a| a != not && w.gang_of(a).is_none() && !w.has::<citysim::Job>(a)).collect()
+}
+
+fn put_in(w: &mut World, a: EntityId, b: EntityId) {
+    w.remove_from_building(a);
+    w.enter_building(a, b);
+}
+
+#[test]
+fn test_robot_defends_in_brawl_and_wrecks_on_loss() {
+    use citysim::systems::{law, raid, robots};
+    let mut w = city();
+    w.config.crime.fight_death_p = 0.0;
+    w.config.riots.p_crossfire = 0.0;
+    w.config.robots.robot_fighting = vec![0.0, 0.0, 0.0];
+    let (owner, home) = homeowner(&w);
+    let pool = others(&w, owner);
+    let (raider, neighbour) = (pool[0], pool[1]);
+    w.comp_mut::<citysim::Skills>(raider).expect("skills").fighting = 1.0;
+    w.comp_mut::<citysim::Personality>(raider).expect("p").courage = 1.0;
+    let door = w.comp::<Building>(home).expect("home").door;
+    let mut wrecked = false;
+    for _ in 0..60 {
+        let r = assets::grant(&mut w, owner, AssetKind::Robot, 1).expect("a robot");
+        assert_eq!(asset(&w, r).loc, AssetLoc::Posted(home));
+        // A powered robot stands first among the defenders.
+        let mut defenders = vec![neighbour];
+        raid::robots_first(&w, home, &mut defenders);
+        assert_eq!(defenders, vec![r, neighbour]);
+        let parts = w.stock(home, Good::Parts);
+        let wrecks = count(&w, EventKind::Wrecked);
+        let mut raiders = vec![raider];
+        let mut held = vec![r];
+        let t = raid::fight_out(&mut w, &mut raiders, &mut held, door, "the test door", 1.0, None);
+        assert_eq!(t.deaths, 0, "nobody dies: a robot is never killed");
+        assert!(law::living(&w, raider));
+        if !w.has::<Asset>(r) {
+            assert!(held.is_empty(), "the robot lost");
+            assert!(!w.has::<Corpse>(r), "wrecked, not a corpse");
+            assert_eq!(count(&w, EventKind::Wrecked), wrecks + 1);
+            assert_eq!(w.stock(home, Good::Parts), parts + 5, "half its 10 Parts at the door");
+            assert!(!w.crime_reports().iter().any(|x| x.crime == citysim::Crime::Murder && x.suspect == raider));
+            wrecked = true;
+            break;
+        }
+        // The robot won this one: the raider was beaten, the robot stands.
+        assert!(raiders.is_empty() && held == vec![r]);
+        assets::despawn(&mut w, r);
+    }
+    assert!(wrecked, "a T1 robot at fighting 0 loses to a fighter at 1.0 in 60 tries");
+    assert!(robots::posted_robot(&w, home).is_none());
+    w.check_indices().expect("indices in step");
+}
+
+#[test]
+fn test_robot_detains_thief_who_loses_contest() {
+    use citysim::systems::{law, robots};
+    let mut w = city();
+    w.config.crime.fight_death_p = 0.0;
+    let (owner, home) = homeowner(&w);
+    let mut robot = assets::grant(&mut w, owner, AssetKind::Robot, 3).expect("a robot");
+    let door = w.comp::<Building>(home).expect("home").door;
+    let mut detained = None;
+    for thief in others(&w, owner).into_iter().take(40) {
+        if !w.has::<Asset>(robot) {
+            robot = assets::grant(&mut w, owner, AssetKind::Robot, 3).expect("a robot");
+        }
+        assert_eq!(robots::powered_robot(&w, home), Some(robot));
+        put_in(&mut w, thief, home);
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").stealth = 0.0;
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").fighting = 0.0;
+        w.comp_mut::<citysim::Personality>(thief).expect("p").courage = 0.0;
+        law::raise_crime(&mut w, thief, None, citysim::Crime::Theft, door);
+        if w.has::<citysim::Sentence>(thief) {
+            detained = Some(thief);
+            break;
+        }
+    }
+    let thief = detained.expect("a T3 robot detains a tier-1 thief within 40 tries");
+    assert_eq!(w.comp::<citysim::Sentence>(thief).map(|s| s.crime), Some(citysim::Crime::Theft));
+    assert!(
+        w.crime_reports().iter().any(|r| r.suspect == thief && r.crime == citysim::Crime::Theft && r.witness.is_none()),
+        "the robot's report names no witness"
+    );
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Arrest && e.text.contains("detained")));
+}
+
+#[test]
+fn test_unpowered_robot_neither_fights_nor_senses() {
+    use citysim::systems::{law, raid, robots};
+    let mut w = city();
+    w.config.crime.fight_death_p = 0.0;
+    let (owner, home) = homeowner(&w);
+    let r = assets::grant(&mut w, owner, AssetKind::Robot, 3).expect("a robot");
+    w.comp_mut::<Asset>(r).expect("robot").upkeep_arrears = 1;
+    assert_eq!(robots::posted_robot(&w, home), Some(r), "still posted");
+    assert_eq!(robots::powered_robot(&w, home), None, "but powered down");
+    let pool = others(&w, owner);
+    let mut defenders = vec![pool[0]];
+    raid::robots_first(&w, home, &mut defenders);
+    assert_eq!(defenders, vec![pool[0]], "it does not stand at the door");
+    let door = w.comp::<Building>(home).expect("home").door;
+    for &thief in pool.iter().skip(1).take(30) {
+        put_in(&mut w, thief, home);
+        w.comp_mut::<citysim::Skills>(thief).expect("skills").stealth = 0.0;
+        law::raise_crime(&mut w, thief, None, citysim::Crime::Theft, door);
+        assert!(!w.has::<citysim::Sentence>(thief), "nobody detained");
+        assert!(
+            !w.crime_reports().iter().any(|x| x.suspect == thief && x.witness.is_none()),
+            "no report from the robot"
+        );
+    }
+    assert!(w.has::<Asset>(r), "never fought");
+}
+
+#[test]
+fn test_secure_buys_robot_when_cheaper_over_horizon() {
+    use citysim::systems::robots;
+    let mut w = city();
+    for c in w.corps() {
+        let cc = w.comp_mut::<citysim::Corp>(c).expect("corp");
+        if cc.niches.contains(&citysim::Niche::Security) {
+            cc.price_level.insert(citysim::Niche::Security, 1.0);
+        }
+    }
+    let corp = ownership::spawn_corp(&mut w, "Holdings".into(), Default::default(), 5000, None);
+    let lots = founding::vacant_lots(&w);
+    let b1 = founding::build_on_lot(&mut w, lots[0], BuildingKind::Home, Some(corp)).expect("a Block");
+    let b2 = founding::build_on_lot(&mut w, lots[1], BuildingKind::Home, Some(corp)).expect("a Block");
+    assert_eq!(robots::robot_tier_for(&w, BuildingKind::Home), 1);
+    // Contract 20 a day x 60 = 1,200 against a T1 robot 800 + 4 x 60 = 1,040.
+    w.config.corps.contract_per_guard_day = 20;
+    assert!(robots::consider_robot(&mut w, corp, b1), "the robot is cheaper");
+    let r = robots::posted_robot(&w, b1).expect("posted");
+    assert_eq!(asset(&w, r).owner, Some(corp));
+    assert_eq!(asset(&w, r).tier, 1);
+    assert_eq!(w.comp::<citysim::Corp>(corp).expect("corp").treasury, 5000 - 800);
+    assert!(w.events.iter().any(|e| e.kind == EventKind::AssetBought && e.text.contains("for Secure")));
+    assert!(!robots::consider_robot(&mut w, corp, b1), "one robot a building");
+    // At 15 a day the contract (900) wins.
+    w.config.corps.contract_per_guard_day = 15;
+    assert!(!robots::consider_robot(&mut w, corp, b2), "the contract is cheaper");
+    assert!(robots::posted_robot(&w, b2).is_none());
+    w.check_indices().expect("indices in step");
+}

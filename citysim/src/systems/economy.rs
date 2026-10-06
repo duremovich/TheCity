@@ -23,6 +23,9 @@ pub fn run(world: &mut World) {
         return;
     }
     daily_restock(world);
+    // M13 D40: legal Stims on the Markets' shelves (the lever on only).
+    crate::systems::stims::roll_sales(world);
+    crate::systems::stims::restock_legal(world);
     daily_price(world);
     daily_spoilage(world);
 }

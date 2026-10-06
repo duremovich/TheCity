@@ -382,6 +382,8 @@ pub fn fight_out_until(
         if t.raider_losses >= max_losses {
             break;
         }
+        // Named before the fight: a beaten robot is wrecked (despawned) in it.
+        let (rn, dn) = (world.name_of(r), world.name_of(d));
         let (_, loser, died) = law::resolve_fight_with(world, r, d, kill_mult);
         if died {
             t.deaths += 1;
@@ -392,7 +394,7 @@ pub fn fight_out_until(
         let crime = if murder { Crime::Murder } else { Crime::Assault };
         let kind = if murder { EventKind::Murder } else { EventKind::Assault };
         let fell = if died && loser == r { " and died" } else { "" };
-        let text = format!("{} attacked {} at {place}{fell}", world.name_of(r), world.name_of(d));
+        let text = format!("{rn} attacked {dn} at {place}{fell}");
         world.push_event(kind, &[r, d], text);
         if law::living(world, r) {
             law::raise_crime(world, r, (!murder).then_some(d), crime, door);
@@ -535,6 +537,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
 
     let mut raiders = raiders_at(world, gid, actor, door);
     let mut defenders = jail_defenders(world, jail, door);
+    robots_first(world, jail, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct", 1.0, None);
     let (deaths, beaten) = (tally.deaths, tally.defenders_beaten);
@@ -612,6 +615,16 @@ pub fn jail_defenders(world: &World, jail: EntityId, door: TilePos) -> Vec<Entit
     defenders
 }
 
+/// M13 D41: the powered robots posted at `b` stand first among its defenders.
+pub fn robots_first(world: &World, b: EntityId, defenders: &mut Vec<EntityId>) {
+    let robots = crate::systems::robots::defenders_at(world, b);
+    if robots.is_empty() {
+        return;
+    }
+    defenders.retain(|d| !robots.contains(d));
+    defenders.splice(0..0, robots);
+}
+
 /// `fighting + 0.25 × courage`: the brawl's pairing order.
 pub fn strength(world: &World, id: EntityId) -> f32 {
     law::fighting(world, id) + 0.25 * law::courage(world, id)
@@ -643,6 +656,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
         .filter(|&m| world.comp::<Position>(m).is_some_and(|p| p.building == Some(rival_hideout)))
         .collect();
     by_strength(world, &mut defenders);
+    robots_first(world, rival_hideout, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let place = format!("the {rival_name} Hideout");
     let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
@@ -833,6 +847,7 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     }
     defenders.retain(|&x| !world.has::<Sentence>(x) && x != actor && world.gang_of(x) != Some(gid));
     by_strength(world, &mut defenders);
+    robots_first(world, target, &mut defenders);
     let mut raiders = raiders_at(world, gid, actor, door);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let what = world.name_of(target);
@@ -860,6 +875,8 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             share_food(world, &standing, food);
         }
         took = (moved, food);
+        // M13 D38: the building's Stims and Parts go to the winner's Hideout.
+        crate::systems::stims::loot_goods(world, target, gid);
         if let Some(c) = corp {
             let now = world.tick;
             if let Some(cc) = world.comp_mut::<Corp>(c) {
@@ -923,8 +940,10 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             if let Some(g) = world.comp_mut::<Gang>(rival) {
                 g.treasury -= prize;
             }
-            if let Some(g) = world.comp_mut::<Gang>(gid) {
-                g.treasury += prize;
+            world.gang_credit(gid, prize);
+            // M13 D38: the loser Hideout's Stims and Parts.
+            if let Some(h) = world.hideout_of(rival) {
+                crate::systems::stims::loot_goods(world, h, gid);
             }
             gang::push_shock(world, rival, Shock::Raided);
         }
@@ -950,9 +969,9 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
                 // grievance from retaliate_until once it can muster again.
                 g.retaliate_until = Some(now + (cfg.sacked_days + cfg.retaliate_days) * TICKS_PER_DAY);
             }
-            if let Some(g) = world.comp_mut::<Gang>(gid) {
-                g.treasury += loot;
-            }
+            world.gang_credit(gid, loot);
+            // M13 D38: the sacked Hideout's Stims and Parts.
+            crate::systems::stims::loot_goods(world, rival_hideout, gid);
             // Everyone inside is put out on the street.
             let inside = world.comp::<Building>(rival_hideout).map(|b| b.occupants.clone()).unwrap_or_default();
             for o in inside {

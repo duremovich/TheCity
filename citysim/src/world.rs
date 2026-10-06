@@ -321,9 +321,17 @@ pub struct World {
     /// at `Body.episode_until`, at arrest or at death).
     #[serde(default)]
     pub episodes: BTreeSet<EntityId>,
-    /// M13 D38: Bar -> registered dealers (phase 4).
+    /// M13 D38: Bar -> registered dealers (a `Deal` in progress), ascending.
     #[serde(default)]
     pub dealers: BTreeMap<EntityId, Vec<EntityId>>,
+    /// M13 D39: Bar -> the last dealer registered there and the day it was
+    /// (the Statistical addict pass buys from yesterday's dealers).
+    #[serde(default)]
+    pub deal_log: BTreeMap<EntityId, (EntityId, u64)>,
+    /// M13 D42: robot -> the Security corp that sold it (a robot in service
+    /// counts in its seller's Security share as a contract does).
+    #[serde(default)]
+    pub robot_sellers: BTreeMap<EntityId, EntityId>,
     /// M13 D49: a `GoTo` toward the agent's workplace in progress: (start
     /// tick, Manhattan tiles door to door).
     #[serde(default)]
@@ -714,6 +722,8 @@ impl World {
             commute_start: BTreeMap::new(),
             commute_acc: [0; 4],
             dealers: BTreeMap::new(),
+            deal_log: BTreeMap::new(),
+            robot_sellers: BTreeMap::new(),
             edges: crate::edge_map::EdgeMap::new(),
             crime_reports: Vec::new(),
             report_index: std::sync::OnceLock::new(),
@@ -2251,6 +2261,8 @@ impl World {
         // so a vehicle being driven is parked and inherited, not lost with
         // the corpse.
         systems::vehicles::end_trip(self, id, false);
+        // M13 D38: a dead dealer deals no more.
+        systems::stims::end_deal(self, id);
         // M12 D17: a violent death leaves its mark on the street.
         if cause == DeathCause::Violence {
             if let Some((t, b)) = self.comp::<Position>(id).map(|p| (p.tile, p.building)) {

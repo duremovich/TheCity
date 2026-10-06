@@ -75,6 +75,10 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
             }
         }
         ActionKind::Abduct => 5,
+        // M13 D38/D39.
+        ActionKind::PickUp | ActionKind::BuyStims => 5,
+        ActionKind::Deal | ActionKind::Detox => 240,
+        ActionKind::UseStim => 2,
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -184,6 +188,28 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         ActionKind::Uninstall => {
             in_open_clinic(world, id) && world.comp::<crate::components::Kit>(id).is_some_and(|k| k.chrome)
         }
+        // M13 D38: inside the gang's Hideout with doses in its stock.
+        ActionKind::PickUp => {
+            let hideout = world.gang_of(id).and_then(|g| world.hideout_of(g));
+            hideout.is_some()
+                && world.comp::<Position>(id).and_then(|p| p.building) == hideout
+                && hideout.is_some_and(|h| world.stock(h, crate::components::Good::Stims) > 0)
+        }
+        // M13 D38: inside the bound deal Bar with doses to sell.
+        ActionKind::Deal => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            here.is_some() && here == target && !closed_here() && inv.is_some_and(|i| i.stims > 0)
+        }
+        // M13 D38/D40: inside the bound source while it sells, with the coins for a dose.
+        ActionKind::BuyStims => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            here.is_some()
+                && here == target
+                && here.and_then(|b| crate::systems::stims::source_price(world, b)).is_some_and(|p| coins >= p)
+        }
+        ActionKind::UseStim => inv.is_some_and(|i| i.stims > 0),
+        // M13 D39: inside an open Clinic.
+        ActionKind::Detox => in_open_clinic(world, id),
         // M13 D35: beside a body this agent may strip.
         ActionKind::Strip => target.is_some_and(|c| {
             crate::systems::chrome::may_loot(world, id, c) && crate::systems::law::near(world, id, c, 1)
@@ -303,6 +329,12 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
                 }
             }
         }
+        // M13 D38: the dealer is registered at the Bar for the shift.
+        ActionKind::Deal => {
+            if let Some(bar) = target {
+                crate::systems::stims::start_deal(world, id, bar);
+            }
+        }
         ActionKind::Drink => {
             // M11: the Bar's owner takes the 2 coins (the Treasury owns a city Bar).
             let bar = world.comp::<Position>(id).and_then(|p| p.building);
@@ -333,6 +365,8 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
                 economy::refund_food(world, id, market, paid);
             }
         }
+        // M13 D38: a dealer who leaves the Bar is no longer dealing there.
+        ActionKind::Deal => crate::systems::stims::end_deal(world, id),
         _ => {}
     }
 }
@@ -746,6 +780,47 @@ pub fn on_complete(
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             match here {
                 Some(c) if crate::systems::chrome::therapy(world, id, c) => StepResult::Done,
+                _ => StepResult::Failed(FailReason::PreconditionLost),
+            }
+        }
+        // M13 D38: a batch from the Hideout.
+        ActionKind::PickUp => {
+            if crate::systems::stims::pick_up(world, id) > 0 {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::StockGone)
+            }
+        }
+        // M13 D38: the shift is over; the gang's task is done for the day.
+        ActionKind::Deal => {
+            crate::systems::stims::end_deal(world, id);
+            let today = world.day();
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.gang_task_day = Some(today);
+            }
+            StepResult::Done
+        }
+        // M13 D38/D40: doses from the dealer or the legal Market here.
+        ActionKind::BuyStims => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            match here {
+                Some(b) if crate::systems::stims::buy_stims(world, id, b) > 0 => StepResult::Done,
+                _ => StepResult::Failed(FailReason::StockGone),
+            }
+        }
+        // M13 D39: a dose (the overdose roll may end the agent here).
+        ActionKind::UseStim => {
+            if crate::systems::stims::use_stim(world, id) {
+                StepResult::Done
+            } else {
+                StepResult::Failed(FailReason::StockGone)
+            }
+        }
+        // M13 D39: Detox at the Clinic.
+        ActionKind::Detox => {
+            let here = world.comp::<Position>(id).and_then(|p| p.building);
+            match here {
+                Some(c) if crate::systems::stims::detox(world, id, c) => StepResult::Done,
                 _ => StepResult::Failed(FailReason::PreconditionLost),
             }
         }

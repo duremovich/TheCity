@@ -61,6 +61,8 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::GrandTheft => 0.6,
         Crime::Manslaughter => 0.8,
         Crime::Abduction => 0.9,
+        // M13 D38.
+        Crime::Dealing => 0.5,
     }
 }
 
@@ -97,13 +99,18 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         Crime::Theft | Crime::GrandTheft => crate::systems::litter::deposit_near(world, tile, actor_building, 6, 0),
         Crime::Extortion | Crime::Assault => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
         // A crash's litter is the crash's (`vehicles::crash`).
-        Crime::Murder | Crime::Vagrancy | Crime::Manslaughter => {}
+        Crime::Murder | Crime::Vagrancy | Crime::Manslaughter | Crime::Dealing => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
+    // M13 D41: a powered robot at the building contests a theft or a
+    // shakedown before anyone else sees it; a thief it detains is booked
+    // already, so nobody else's report follows.
+    let detained = actor_building.is_some_and(|b| crate::systems::robots::sense(world, actor, crime, b));
     let witnesses: Vec<EntityId> = world
         .bodies()
         .into_iter()
+        .filter(|_| !detained)
         .filter(|&w| w != actor)
         .filter(|&w| {
             // M13 D32: a witness with Eyes sees `Kit.sight` tiles further.
@@ -137,10 +144,13 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
             file_report(world, crime, actor, Some(w));
         }
     }
-    if let Some(v) = victim {
+    // M13 D41: a robot victim has no memory, edges or needs.
+    if let Some(v) = victim.filter(|&v| !crate::systems::robots::is_robot(world, v)) {
         let kind = match crime {
             Crime::Assault | Crime::Murder | Crime::Manslaughter | Crime::Abduction => MemoryKind::Fought,
-            Crime::Theft | Crime::Extortion | Crime::Vagrancy | Crime::GrandTheft => MemoryKind::WasRobbed,
+            Crime::Theft | Crime::Extortion | Crime::Vagrancy | Crime::GrandTheft | Crime::Dealing => {
+                MemoryKind::WasRobbed
+            }
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -151,7 +161,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
             p.drift(Drift::Robbed);
         }
     }
-    if noticed == 0 {
+    if noticed == 0 && !detained {
         if let Some(s) = world.comp_mut::<Skills>(actor) {
             s.stealth = (s.stealth + 0.01).min(1.0);
         }
@@ -165,6 +175,10 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
         return;
     }
     world.push_report(CrimeReport { crime, suspect, witness, tick, resolved: false });
+    // M13 D38: a new Dealing report (a refreshed one is the same warrant).
+    if crime == Crime::Dealing {
+        world.stats.current.dealing_reports += 1;
+    }
     let who = witness.map_or("the city".to_string(), |w| world.name_of(w));
     world.push_event(
         EventKind::Report,
@@ -265,6 +279,7 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         Crime::GrandTheft => ext.grand_theft,
         Crime::Manslaughter => ext.manslaughter,
         Crime::Abduction => ext.abduction,
+        Crime::Dealing => ext.dealing,
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;
@@ -275,7 +290,11 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
 /// component. M13 D31: `Skills.fighting + Kit.fighting` (Arms), the Kit term
 /// added only when there is one, so a bare fighter reads as M12.
 pub fn fighting(world: &World, id: EntityId) -> f32 {
-    let base = world.comp::<Skills>(id).map_or(0.2, |s| s.fighting);
+    // M13 D41: a robot (no Skills) fights at `robot_fighting[tier − 1]`.
+    let base = match world.comp::<Skills>(id) {
+        Some(s) => s.fighting,
+        None => crate::systems::robots::fighting(world, id).unwrap_or(0.2),
+    };
     match world.comp::<Kit>(id).map(|k| k.fighting) {
         Some(k) if k != 0.0 => base + k,
         _ => base,
@@ -283,7 +302,12 @@ pub fn fighting(world: &World, id: EntityId) -> f32 {
 }
 
 pub fn courage(world: &World, id: EntityId) -> f32 {
-    world.comp::<Personality>(id).map_or(0.5, |p| p.courage)
+    match world.comp::<Personality>(id) {
+        Some(p) => p.courage,
+        // M13 D41: a robot never breaks.
+        None if crate::systems::robots::is_robot(world, id) => 1.0,
+        None => 0.5,
+    }
 }
 
 /// M13 D31: what a fight's caller adds: the death chance × `kill_mult` (a
@@ -317,11 +341,17 @@ pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult
 /// `p_win`, and only when the loser has armour is the death chance ×
 /// `(1 − armour)`: branches, not zero terms, so two unchromed fighters roll
 /// exactly as in M12 (`tests/chrome.rs` asserts it).
+///
+/// M13 D41: a robot on either side (no Brain) fights at
+/// `robot_fighting[tier − 1]` with courage 1.0 (`fighting`, `courage`); the
+/// memories, drift, mood, safety, skill gain and `social::fought` are
+/// skipped for it (the agent's memories name no subject); a robot loser is
+/// wrecked (`assets::wreck`, Parts at the door), never killed; a robot that
+/// kills passes its owner as the killer (no crime is raised for it).
 pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
-    // TODO(M13 ph4): a posted robot on either side (D41) has no Brain: its
-    // fighting is `robot_fighting[tier - 1]`, its courage 1.0, and the
-    // memories, drift, mood, skill gain and `social::fought` below are
-    // skipped for it; a robot loser is wrecked, never killed.
+    if crate::systems::robots::is_robot(world, a) || crate::systems::robots::is_robot(world, b) {
+        return resolve_robot_fight(world, a, b, mods);
+    }
     let (fi, co) = (fighting, courage);
     let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
     let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
@@ -367,6 +397,65 @@ pub fn resolve_fight_mods(world: &mut World, a: EntityId, b: EntityId, mods: Fig
     let died = roll < p_death;
     if died {
         world.kill_by(loser, DeathCause::Violence, Some(winner));
+    }
+    (winner, loser, died)
+}
+
+/// M13 D41: [`resolve_fight_mods`] with a robot on one side or both. The
+/// same `p_win` (the Kit terms read a robot's absent Kit as bare) and the
+/// same two world-stream rolls, the death roll only for an agent loser.
+fn resolve_robot_fight(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> (EntityId, EntityId, bool) {
+    let (fi, co) = (fighting, courage);
+    let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
+    let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
+    let fi_a = fi(world, a) + mods.a_bonus;
+    let reflex = |k: &Option<Kit>| k.as_ref().map_or(0.0, |k| k.reflex);
+    let mut p_win = 0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b));
+    if kitted {
+        p_win += 0.2 * (reflex(&kit_a) - reflex(&kit_b));
+    }
+    let p_win = p_win.clamp(0.1, 0.9);
+    let roll: f32 = world.rng.world().random();
+    let (winner, loser) = if roll < p_win { (a, b) } else { (b, a) };
+    let agent = |w: &World, x: EntityId| w.has::<Brain>(x);
+    if agent(world, loser) {
+        world.remember(loser, MemoryKind::Fought, None, 0.7, -0.5, false);
+        world.remember(loser, MemoryKind::Lost, None, 0.6, -0.6, false);
+        if let Some(p) = world.comp_mut::<Personality>(loser) {
+            p.drift(Drift::LostFight);
+        }
+        if let Some(n) = world.comp_mut::<Needs>(loser) {
+            n.safety = (n.safety - 0.4).max(0.0);
+        }
+        if let Some(m) = world.comp_mut::<crate::components::Mood>(loser) {
+            m.value = (m.value - 0.3).max(-1.0);
+        }
+    }
+    if agent(world, winner) {
+        world.remember(winner, MemoryKind::Fought, None, 0.7, -0.5, false);
+        world.remember(winner, MemoryKind::Won, None, 0.6, 0.4, false);
+        if let Some(p) = world.comp_mut::<Personality>(winner) {
+            p.drift(Drift::WonFight);
+        }
+        if let Some(s) = world.comp_mut::<Skills>(winner) {
+            s.fighting = (s.fighting + 0.01).min(1.0);
+        }
+    }
+    if crate::systems::robots::is_robot(world, loser) {
+        crate::systems::assets::wreck(world, loser, "beaten in a fight");
+        return (winner, loser, false);
+    }
+    let mut p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)) * mods.kill_mult;
+    let loser_kit = if loser == a { &kit_a } else { &kit_b };
+    let armour = loser_kit.as_ref().map_or(0.0, |k| k.armour);
+    if armour > 0.0 {
+        p_death *= 1.0 - armour;
+    }
+    let roll: f32 = world.rng.world().random();
+    let died = roll < p_death;
+    if died {
+        let killer = world.comp::<crate::components::Asset>(winner).and_then(|x| x.owner);
+        world.kill_by(loser, DeathCause::Violence, killer);
     }
     (winner, loser, died)
 }
@@ -483,6 +572,8 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     if let Some(b) = world.comp_mut::<Brain>(suspect) {
         b.cuffed_by = None;
     }
+    // M13 D38: the arrest confiscates the suspect's Stims (destroyed).
+    crate::systems::stims::confiscate(world, suspect);
     // M13 D33: jailing ends an episode still running.
     crate::systems::chrome::ended_by_law(world, suspect, "jailed");
     // Sentenced while in cuffs (a second escort, a player or god jailing):

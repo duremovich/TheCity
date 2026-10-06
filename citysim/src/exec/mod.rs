@@ -755,6 +755,8 @@ impl World {
                     .or_else(|| self.comp::<crate::components::Job>(agent).and_then(|j| j.employer).filter(clinic))
                     .or_else(|| self.local(agent, K::Clinic))
             }
+            // M13 D38/D40: the bound Stims source (a dealer's Bar, a legal Market).
+            LocationKey::StimSource => target.filter(|&t| self.has::<Building>(t)),
             // M13 D36: a quarry inside a building is reached through its door.
             LocationKey::Victim => target.and_then(|s| self.comp::<Position>(s)).and_then(|p| p.building),
             // M13 D26: a vehicle is reached on the street outside its door.

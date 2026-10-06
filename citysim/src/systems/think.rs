@@ -52,6 +52,7 @@ fn uninterruptible(brain: &Brain, now: crate::time::Tick) -> bool {
                 | ActionKind::Therapy
                 | ActionKind::Uninstall
                 | ActionKind::Rip
+                | ActionKind::Detox
         ),
         _ => false,
     }
