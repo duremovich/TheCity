@@ -582,7 +582,7 @@ fn corp_buy(world: &mut World, corp: EntityId, kind: AssetKind, home: EntityId, 
     if world.purse(Some(corp)).min(closing) < list.saturating_add(reserve) {
         return false;
     }
-    let pick = ShopPick { kind, tier: 1, used };
+    let pick = ShopPick { kind, tier: 1, used, upgrade: false };
     let note = format!("for {} ({why})", world.name_of(home));
     match assets::buy_noted(world, corp, g, &pick, Some(&note)) {
         Ok(v) => {
@@ -761,7 +761,7 @@ fn exec_flyer(world: &mut World, corp: EntityId) -> bool {
         return false;
     }
     let Some(g) = door_of(world, home).and_then(|d| nearest_garage(world, d)) else { return false };
-    let pick = ShopPick { kind: AssetKind::Flyer, tier: 1, used: None };
+    let pick = ShopPick { kind: AssetKind::Flyer, tier: 1, used: None, upgrade: false };
     let note = format!("for {}", world.name_of(exec));
     match assets::buy_noted(world, corp, g, &pick, Some(&note)) {
         Ok(v) => {
@@ -1261,7 +1261,7 @@ pub fn gang_bikes(world: &mut World, gang: EntityId) {
     let Some(member) = rider_wanted(world, gang) else { return };
     let Some(from) = door_of(world, h) else { return };
     let Some(g) = nearest_garage(world, from) else { return };
-    let pick = ShopPick { kind: AssetKind::Motorcycle, tier: 1, used: None };
+    let pick = ShopPick { kind: AssetKind::Motorcycle, tier: 1, used: None, upgrade: false };
     let note = format!("for {}", world.name_of(member));
     if let Ok(v) = assets::buy_noted(world, gang, g, &pick, Some(&note)) {
         assets::set_keeper(world, v, Some(member));

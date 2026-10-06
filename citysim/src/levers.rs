@@ -303,9 +303,10 @@ pub struct Levers {
     /// M13 D12: the city impounds vehicles with unpaid upkeep.
     #[serde(default = "default_true")]
     pub impound: bool,
-    /// M13 D48: upkeep is charged × `1 + rate`, per `AssetClass`.
-    #[serde(default)]
-    pub asset_tax: [f32; 8],
+    /// M13 D48: upkeep is charged × `1 + rate`, per `AssetClass` (M14 V36:
+    /// ten classes with Deck and Camera; a save with eight reads padded).
+    #[serde(default, deserialize_with = "asset_tax_any_len")]
+    pub asset_tax: [f32; crate::components::AssetClass::ALL.len()],
     /// M14 V42: the city's own nodes' ICE (`[levers] city_ice`).
     #[serde(default = "default_city_ice")]
     pub city_ice: u8,
@@ -313,6 +314,32 @@ pub struct Levers {
 
 fn default_city_ice() -> u8 {
     2
+}
+
+/// M14 V36: `asset_tax` from a save written with fewer classes (M13's
+/// eight): the missing classes read 0.
+fn asset_tax_any_len<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<[f32; crate::components::AssetClass::ALL.len()], D::Error> {
+    struct V;
+    impl<'de> serde::de::Visitor<'de> for V {
+        type Value = [f32; crate::components::AssetClass::ALL.len()];
+        fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+            f.write_str("a list of asset-class tax rates")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut out = [0.0; crate::components::AssetClass::ALL.len()];
+            let mut i = 0;
+            while let Some(x) = seq.next_element::<f32>()? {
+                if let Some(slot) = out.get_mut(i) {
+                    *slot = x;
+                }
+                i += 1;
+            }
+            Ok(out)
+        }
+    }
+    d.deserialize_tuple(crate::components::AssetClass::ALL.len(), V)
 }
 
 fn default_true() -> bool {
@@ -346,7 +373,7 @@ impl Levers {
             riot_response: None,
             stims_legal: cfg.levers.stims_legal,
             impound: true,
-            asset_tax: [0.0; 8],
+            asset_tax: [0.0; crate::components::AssetClass::ALL.len()],
             city_ice: cfg.levers.city_ice,
         }
     }

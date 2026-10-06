@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 22] = [
+pub const GOAL_ORDER: [GoalKind; 23] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -36,6 +36,8 @@ pub const GOAL_ORDER: [GoalKind; 22] = [
     GoalKind::GetHigh,
     GoalKind::Treat,
     GoalKind::Loot,
+    // M14 V41: before Found.
+    GoalKind::Hack,
     // M11 D26: just before Idle.
     GoalKind::Found,
     GoalKind::Idle,
@@ -157,6 +159,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::GetHigh => !crate::systems::stims::wants_high(world, id),
         // M13 D35: no body within reach to strip.
         GoalKind::Loot => crate::systems::chrome::loot_target(world, id).is_none(),
+        // M14 V29: no deck, chair or target worth the risk.
+        GoalKind::Hack => crate::systems::virt::hack_choice(world, id).is_none(),
         _ => false,
     }
 }
@@ -299,6 +303,10 @@ pub fn considerations(
             });
             if shaken {
                 flat += 0.15;
+            }
+            // M14 V12: a dazed runner cannot flee the chair.
+            if world.comp::<Brain>(id).and_then(|b| b.dazed_until).is_some_and(|t| t > world.tick) {
+                return None;
             }
             vec![
                 Consideration::new("U(safety)", urgency(n.safety), Curve::Logistic { k: 12.0, mid: 0.5 }),
@@ -607,6 +615,13 @@ pub fn considerations(
                 cs.push(Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.5, b: 0.5 }));
             }
             cs
+        }
+        // M14 V29: the best run's considerations (`think` scores it from
+        // its offer; this arm serves other readers).
+        GoalKind::Hack => {
+            let o = crate::systems::virt::hack_choice(world, id)?;
+            flat = world.config.hack.hack_flat;
+            o.considerations
         }
         // M13 D43: the best affordable offer's considerations (spec § 6).
         GoalKind::Shop => {

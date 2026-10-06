@@ -204,6 +204,7 @@ fn probe_night_states() {
             ExecState::GotoTimed { .. } => "GotoTimed".into(),
             ExecState::Fly { .. } => "Fly".into(),
             ExecState::Wait { .. } => "Wait".into(),
+            ExecState::JackedIn { .. } => "JackedIn".into(),
             ExecState::Idle => format!("Idle goal={:?} plan={}", b.current_goal, b.plan.is_some()),
         };
         *hist.entry(key).or_default() += 1;

@@ -52,6 +52,13 @@ fn test_cli_ten_days_seed_42() {
     let stdout = String::from_utf8(out.stdout).expect("utf8");
     let rows: Vec<&str> = stdout.lines().skip(1).collect();
     assert_eq!(rows.len(), 10);
+    // M13 D20/D47 and M14 V14: a crash, an overdose and a Flatline are deaths
+    // outside the three `deaths_*` columns.
+    let header: Vec<&str> = stdout.lines().next().expect("header").split(',').collect();
+    let other: Vec<usize> = ["crash_deaths", "overdoses", "flatlined"]
+        .iter()
+        .map(|c| header.iter().position(|h| h == c).expect("a death column"))
+        .collect();
     // M10: at 2,000 residents a birth or a death in ten days is ordinary, so the population is
     // checked as an account: 2,000 + births + immigrants - deaths - emigrants, with at most
     // thirteen immigrants a week from day 7 (M11 § 7: the lever times a logistic of Street
@@ -63,7 +70,9 @@ fn test_cli_ten_days_seed_42() {
             row.split(',').enumerate().filter(|&(k, _)| k != 1).map(|(_, c)| c.parse().unwrap_or(0)).collect();
         // cols (season dropped): 0 day, 1 population, ..., 13..=15 deaths, 16 births, 17 immigrants, 18 emigrants
         assert_eq!(cols[0], i as i64);
-        expected += cols[16] + cols[17] - cols[13] - cols[14] - cols[15] - cols[18];
+        let raw: Vec<&str> = row.split(',').collect();
+        let other_deaths: i64 = other.iter().map(|&k| raw[k].parse::<i64>().unwrap_or(0)).sum();
+        expected += cols[16] + cols[17] - cols[13] - cols[14] - cols[15] - cols[18] - other_deaths;
         immigrants += cols[17];
         assert_eq!(cols[1], expected, "day {i}");
         assert!(immigrants <= 13 * (i as i64 / 7), "day {i}");

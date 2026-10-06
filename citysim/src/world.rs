@@ -2332,6 +2332,8 @@ impl World {
         if !self.has::<Identity>(id) || self.has::<Corpse>(id) {
             return;
         }
+        // M14 V12: a body jacked in is dumped from its run first.
+        systems::virt::dump(self, id, "died in the chair");
         let tick = self.tick;
         let name = self.name_of(id);
         let child = self.has::<Child>(id);
@@ -2410,6 +2412,8 @@ impl World {
             DeathCause::Violence | DeathCause::Execution => self.stats.current.deaths_violence += 1,
             DeathCause::Accident => self.stats.current.crash_deaths += 1,
             DeathCause::Overdose => self.stats.current.overdoses += 1,
+            // M14 V14: a Flatline is not violence.
+            DeathCause::Flatline => self.stats.current.virt.flatlined += 1,
         }
         // `[dead, spouse?]`, or `[dead, spouse or NONE, killer]` when the
         // killer is known, so the biography names them (an attacker who

@@ -10,7 +10,7 @@
 //! lives in `systems::virt` and `systems::tech`.
 
 use std::collections::{BTreeMap, VecDeque};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
@@ -154,11 +154,64 @@ pub struct VirtPlane {
     /// Bumped by every relink and every ICE write (plan V6).
     #[serde(skip)]
     pub epoch: u64,
-    /// Plan V6's route trees (deviation: `Arc`, not `Rc`, so `World` stays `Send`).
+    /// Plan V6's route trees (deviation: `Arc`, not `Rc`, so `World` stays
+    /// `Send`; behind a lock so a `&World` scorer, the Hack goal's think,
+    /// can fill it).
     #[serde(skip)]
-    pub cache: BTreeMap<RouteKey, Arc<RouteTree>>,
-    #[serde(skip)]
-    pub cache_hour: Tick,
+    pub cache: RouteCache,
+}
+
+/// Plan V6: the route trees of the current epoch-hour, keyed by
+/// `RouteKey`. A pure function of the saved state (never saved, cloned
+/// empty); `searches` counts the Dijkstra runs (the one-search-per-scorer
+/// test reads it).
+#[derive(Debug, Default)]
+pub struct RouteCache {
+    inner: Mutex<CacheInner>,
+}
+
+#[derive(Debug, Default)]
+struct CacheInner {
+    hour: Tick,
+    trees: BTreeMap<RouteKey, Arc<RouteTree>>,
+    searches: u64,
+}
+
+impl Clone for RouteCache {
+    fn clone(&self) -> Self {
+        RouteCache::default()
+    }
+}
+
+impl RouteCache {
+    /// Drop every tree (a relink, any ICE, alarm or hack write).
+    pub fn clear(&mut self) {
+        if let Ok(c) = self.inner.get_mut() {
+            c.trees.clear();
+        }
+    }
+
+    /// The tree for `key` in hour `hour`, built by `build` on a miss. A new
+    /// hour drops the old trees first (alarm and hack expiries need no hook).
+    pub fn get_or_build(&self, hour: Tick, key: RouteKey, build: impl FnOnce() -> RouteTree) -> Arc<RouteTree> {
+        let Ok(mut c) = self.inner.lock() else { return Arc::new(build()) };
+        if c.hour != hour {
+            c.hour = hour;
+            c.trees.clear();
+        }
+        if let Some(t) = c.trees.get(&key) {
+            return Arc::clone(t);
+        }
+        let t = Arc::new(build());
+        c.searches += 1;
+        c.trees.insert(key, Arc::clone(&t));
+        t
+    }
+
+    /// Dijkstra runs since the world was built or loaded.
+    pub fn searches(&self) -> u64 {
+        self.inner.lock().map_or(0, |c| c.searches)
+    }
 }
 
 impl VirtPlane {
@@ -335,6 +388,16 @@ pub enum RunWhy {
     God,
 }
 
+/// Plan V66 (the spec addendum's quiet and loud): how a run is made.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum RunMode {
+    /// Fewer units taken, lower trace odds, no alarm.
+    #[default]
+    Quiet,
+    /// More units taken, higher trace odds, the alarm.
+    Loud,
+}
+
 /// The one way into a run (plan V11; phase 2 reads it).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct RunOrder {
@@ -345,6 +408,9 @@ pub struct RunOrder {
     pub not_before: Tick,
     pub expires: Tick,
     pub why: RunWhy,
+    /// Plan V66.
+    #[serde(default)]
+    pub mode: RunMode,
 }
 
 /// A run in progress (spec § 3 plus the plan's fields; phase 2).
@@ -377,6 +443,16 @@ pub struct Run {
     /// Where the payload came from (Captured, Dumped).
     #[serde(default)]
     pub source: Option<NodeId>,
+    /// Plan V66.
+    #[serde(default)]
+    pub mode: RunMode,
+    /// Plan V11: who ordered it (the CSV and the sell-append read it).
+    #[serde(default = "freelance")]
+    pub why: RunWhy,
+}
+
+fn freelance() -> RunWhy {
+    RunWhy::Freelance
 }
 
 /// A faction's record of a seen agent (plan V28; phase 2 writes it).

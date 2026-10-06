@@ -99,7 +99,7 @@ pub fn seed_corps(world: &mut World, only_unset: bool) {
 pub fn track_of(kind: AssetKind) -> Track {
     match kind {
         AssetKind::Implant(_) => Track::Chrome,
-        AssetKind::Robot | AssetKind::Bridge => Track::Deck,
+        AssetKind::Robot | AssetKind::Bridge | AssetKind::Deck | AssetKind::Camera => Track::Deck,
         AssetKind::Motorcycle | AssetKind::Car | AssetKind::Truck | AssetKind::Flyer | AssetKind::Pack => {
             Track::Industry
         }
@@ -135,8 +135,10 @@ pub fn run(world: &mut World) {
         research_upkeep(world, c);
         if world.comp::<Corp>(c).is_some_and(|cc| cc.order == CorpOrder::Research) {
             research(world, c);
+            sell_spare(world, c);
         }
     }
+    gang_sales(world);
     expire(world);
     roll(world);
 }
@@ -552,4 +554,144 @@ pub fn labs_of(world: &World, faction: EntityId) -> Vec<EntityId> {
         .copied()
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.owner == Some(faction) && !bd.demolished))
         .collect()
+}
+
+// ---------------------------------------------------------------------------
+// The Data market (V17, V29, V30; phase 2)
+// ---------------------------------------------------------------------------
+
+/// Is `corp` a Tech-niche corp (M13 D17)?
+fn is_tech(world: &World, corp: EntityId) -> bool {
+    world.comp::<Corp>(corp).is_some_and(|c| c.niches.contains(&crate::components::Niche::Tech))
+}
+
+/// V17: a unit's price at `buyer`: `data_price × level(Tech)`, at least 1.
+pub fn data_unit_price(world: &World, buyer: EntityId) -> i64 {
+    let level = world.comp::<Corp>(buyer).map_or(1.0, |c| c.level(crate::components::Niche::Tech));
+    ((world.config.data.data_price as f32 * level).round() as i64).max(1)
+}
+
+/// V17: the Data buyer for `track`: the Tech-niche corp owning a Lab with
+/// the lowest holding in the track that can pay for a unit (ties the lower
+/// id), never `seller`; `only` restricts it to one corp (an agent selling
+/// at that corp's Lab).
+fn data_buyer(world: &World, track: Track, seller: EntityId, only: Option<EntityId>) -> Option<EntityId> {
+    world
+        .corps()
+        .into_iter()
+        .filter(|&c| c != seller && only.is_none_or(|o| o == c) && is_tech(world, c))
+        .filter(|&c| !labs_of(world, c).is_empty())
+        .filter(|&c| world.purse(Some(c)) >= data_unit_price(world, c))
+        .map(|c| (virt::holding(world, c, track), c))
+        .min()
+        .map(|(_, c)| c)
+}
+
+/// V17: `seller` (an agent's wallet, a gang's or a corp's treasury) sells up
+/// to `units` of `track`: the buyer pays `data_unit_price` a unit for as
+/// many as its treasury covers (`charge`, `Flow::Data`, taxed), the units go
+/// to its Lab of that focus (else its first Lab). Returns the units sold;
+/// the caller takes them from where they were. No buyer, no sale.
+pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, only: Option<EntityId>) -> u32 {
+    if !virt::enabled(world) || units == 0 {
+        return 0;
+    }
+    let Some(buyer) = data_buyer(world, track, seller, only) else { return 0 };
+    let price = data_unit_price(world, buyer);
+    let afford = u32::try_from(world.purse(Some(buyer)).max(0) / price).unwrap_or(u32::MAX);
+    let n = units.min(afford);
+    if n == 0 {
+        return 0;
+    }
+    let labs = labs_of(world, buyer);
+    let lab = labs
+        .iter()
+        .copied()
+        .find(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.focus == Some(track)))
+        .or_else(|| labs.first().copied());
+    let Some(node) = lab.and_then(|b| virt::node_of_building(world, b)) else { return 0 };
+    let coins = i64::from(n) * price;
+    ownership::charge(world, Some(buyer), Some(seller), coins, Flow::Data);
+    if let Some(x) = world.virt.node_mut(node) {
+        x.store.units[track.index()] = x.store.units[track.index()].saturating_add(n);
+    }
+    world.stats.current.virt.data_sold += n;
+    let text = format!(
+        "{} sold {n} {track} Data to {} for {coins}",
+        world.owner_label(Some(seller)),
+        world.owner_label(Some(buyer))
+    );
+    world.push_event(EventKind::DataSold, &[seller, buyer], text);
+    n
+}
+
+/// V29: is `b` a Lab of a Tech-niche corp (where a runner sells Data)?
+pub fn is_data_buyer_lab(world: &World, b: EntityId) -> bool {
+    world
+        .comp::<Building>(b)
+        .is_some_and(|bd| bd.kind == BuildingKind::Lab && !bd.demolished && bd.owner.is_some_and(|o| is_tech(world, o)))
+}
+
+/// V29 (`LocationKey::DataBuyer`): the open Lab of a Tech corp that can pay
+/// for a unit nearest the agent (Manhattan, ties the lower id).
+pub fn data_buyer_lab(world: &World, agent: EntityId) -> Option<EntityId> {
+    let tile = world.comp::<crate::components::Position>(agent)?.tile;
+    world
+        .buildings_of_kind(BuildingKind::Lab)
+        .iter()
+        .copied()
+        .filter(|&b| is_data_buyer_lab(world, b) && !world.is_closed(b))
+        .filter(|&b| world.owner_of(b).is_some_and(|o| world.purse(Some(o)) >= data_unit_price(world, o)))
+        .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(tile), b)))
+        .min()
+        .map(|(_, b)| b)
+}
+
+/// V29 `SellData`: the Data on the agent's deck, track by track, to the
+/// corp owning the Lab the agent stands in. Returns the units sold.
+pub fn sell_deck_data(world: &mut World, agent: EntityId) -> u32 {
+    let Some(deck) = world.comp::<crate::components::Kit>(agent).and_then(|k| k.deck) else { return 0 };
+    let here = world.comp::<crate::components::Position>(agent).and_then(|p| p.building);
+    let Some(buyer) = here.filter(|&b| is_data_buyer_lab(world, b)).and_then(|b| world.owner_of(b)) else {
+        return 0;
+    };
+    let mut sold = 0;
+    for track in Track::ALL {
+        let held = world.comp::<crate::components::Asset>(deck).map_or(0, |a| a.data[track.index()]);
+        let n = sell_data(world, agent, track, held, Some(buyer));
+        if let Some(a) = world.comp_mut::<crate::components::Asset>(deck) {
+            a.data[track.index()] -= n;
+        }
+        sold += n;
+    }
+    sold
+}
+
+/// V30: each gang's Hideout store above `gang_data_keep` (per track) is
+/// offered daily through V17.
+fn gang_sales(world: &mut World) {
+    let keep = world.config.data.gang_data_keep;
+    for g in world.gangs() {
+        let Some(n) = world.hideout_of(g).and_then(|h| virt::node_of_building(world, h)) else { continue };
+        for track in Track::ALL {
+            let spare = world.virt.node(n).map_or(0, |x| x.store.get(track)).saturating_sub(keep);
+            let sold = sell_data(world, g, track, spare, None);
+            if let Some(x) = world.virt.node_mut(n) {
+                x.store.units[track.index()] -= sold;
+            }
+        }
+    }
+}
+
+/// V17: a corp under `Research` sells the Data it holds in the tracks it
+/// does not research, above each track's backup reserve.
+fn sell_spare(world: &mut World, corp: EntityId) {
+    let Some((focus, tiers)) = world.comp::<Corp>(corp).map(|c| (c.tech.focus, c.tech.tier)) else { return };
+    for track in Track::ALL.into_iter().filter(|&t| t != focus) {
+        let tier = tiers[track.index()];
+        let reserve = world.config.tech.upkeep_data_at(tier) * world.config.data.backup_days;
+        let spare = virt::holding(world, corp, track).saturating_sub(reserve);
+        let sold = sell_data(world, corp, track, spare, None);
+        take_data(world, corp, track, sold);
+    }
 }

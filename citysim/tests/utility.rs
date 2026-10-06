@@ -214,8 +214,8 @@ fn test_worked_example_through_goal_table() {
     assert!((score(GoalKind::Socialise) - 0.072).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
     assert_eq!(
         goals::GOAL_ORDER.len(),
-        22,
-        "the spec's 15 goals plus M8's Raid, M11's Found, M12's Squat and M13's Shop, GetHigh, Treat and Loot"
+        23,
+        "the spec's 15 goals plus M8's Raid, M11's Found, M12's Squat, M13's Shop, GetHigh, Treat and Loot, M14's Hack"
     );
 }
 

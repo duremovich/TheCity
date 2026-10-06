@@ -357,6 +357,10 @@ pub enum Crime {
     Abduction,
     /// M13 D38: a dealer's sale of illegal Stims.
     Dealing,
+    /// M14 V18: a traced run on a node (no Data or coins taken).
+    Intrusion,
+    /// M14 V18: a traced run for Data or a Ledger.
+    DataTheft,
 }
 
 impl Crime {
@@ -372,24 +376,30 @@ impl Crime {
             Crime::Manslaughter => "Manslaughter",
             Crime::Abduction => "Abduction",
             Crime::Dealing => "Dealing",
+            Crime::Intrusion => "Intrusion",
+            Crime::DataTheft => "Data Theft",
         }
     }
 
     /// The order the law ranks crimes by (the most severe open report sets
-    /// a sentence): Vagrancy, Theft, Grand Theft, Dealing, Shakedown,
-    /// Assault, Manslaughter, Abduction, Murder. Unique per crime (`Ord`
+    /// a sentence): Vagrancy, Theft, Intrusion, Grand Theft, Data Theft,
+    /// Dealing, Shakedown, Assault, Manslaughter, Abduction, Murder (M14
+    /// V18 inserts Intrusion above Theft and Data Theft above Grand Theft;
+    /// the M13 crimes keep their relative order). Unique per crime (`Ord`
     /// reads it).
     pub fn severity(self) -> u8 {
         match self {
             Crime::Vagrancy => 0,
             Crime::Theft => 1,
-            Crime::GrandTheft => 2,
-            Crime::Dealing => 3,
-            Crime::Extortion => 4,
-            Crime::Assault => 5,
-            Crime::Manslaughter => 6,
-            Crime::Abduction => 7,
-            Crime::Murder => 8,
+            Crime::Intrusion => 2,
+            Crime::GrandTheft => 3,
+            Crime::DataTheft => 4,
+            Crime::Dealing => 5,
+            Crime::Extortion => 6,
+            Crime::Assault => 7,
+            Crime::Manslaughter => 8,
+            Crime::Abduction => 9,
+            Crime::Murder => 10,
         }
     }
 }
@@ -416,6 +426,8 @@ pub enum DeathCause {
     Accident,
     /// M13 D47: a stim overdose (phase 4).
     Overdose,
+    /// M14 V14: killed by a node's ICE in a lost contest (not violence).
+    Flatline,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -471,6 +483,8 @@ pub enum MemoryKind {
     SawEpisode,
     /// M13 D36: dragged off and ripped, and lived.
     Abducted,
+    /// M14 V14: fried by a node's ICE on a run.
+    Fried,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -504,6 +518,9 @@ pub enum GoalKind {
     Loot,
     /// M13 D39: buy a dose (from a dealer at a Bar, or a legal Market) and use it.
     GetHigh,
+    /// M14 V29: jack in at a chair and run a node for Data or a Ledger
+    /// (a game abstraction: a dice contest on the Virt plane).
+    Hack,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -580,6 +597,11 @@ pub enum Shock {
     LostDistrict,
     /// M12 D36: the gang split (both halves; a grudge).
     Split,
+    /// M14 V34: a run on one of our nodes was traced; `by` is the patron,
+    /// else the runner's gang, else `None` (a freelancer).
+    Hacked {
+        by: Option<EntityId>,
+    },
 }
 
 impl Shock {
@@ -600,6 +622,7 @@ impl Shock {
             }
             Shock::LostDistrict => 0.5,
             Shock::Split => 0.8,
+            Shock::Hacked { .. } => 0.5,
         }
     }
 
@@ -617,6 +640,9 @@ impl Shock {
                 | Shock::Sacked
                 | Shock::HomeFlippedAgainst
                 | Shock::Split
+                // M14 V34: a run attributed to someone (in phase 2 only a
+                // runner's gang is ever named).
+                | Shock::Hacked { by: Some(_) }
         )
     }
 }
@@ -1399,6 +1425,10 @@ pub struct Brain {
     /// M13 D36: dragged off by this gang member (for the UI and the law).
     #[serde(default)]
     pub abducted_by: Option<EntityId>,
+    /// M14 V12: dazed after a lost contest until this tick: no Flee, the
+    /// wait is not interrupted, an arrest is not contested.
+    #[serde(default)]
+    pub dazed_until: Option<Tick>,
 }
 
 impl Default for Brain {
@@ -1437,6 +1467,7 @@ impl Default for Brain {
             last_found_day: None,
             shop_pick: None,
             abducted_by: None,
+            dazed_until: None,
         }
     }
 }
@@ -1724,6 +1755,9 @@ pub struct Gang {
     /// rescore so a member's GangWork never rescans the chromed.
     #[serde(default)]
     pub harvest_target: Option<EntityId>,
+    /// M14 V37 (phase 3 sets it): the member streaming a departed raid.
+    #[serde(default)]
+    pub stream_by: Option<EntityId>,
 }
 
 impl Gang {
@@ -1756,6 +1790,7 @@ impl Gang {
             claims_cleared: false,
             split_from: None,
             harvest_target: None,
+            stream_by: None,
         }
     }
 
@@ -2485,6 +2520,8 @@ pub enum LifeKind {
     Founded,
     /// M11: became the exec of their own corp (phase 4).
     Incorporated,
+    /// M14 V14: died in a node's ICE (`other` = the node's owner).
+    Flatlined,
 }
 
 impl LifeKind {
@@ -2498,6 +2535,7 @@ impl LifeKind {
                 | LifeKind::Killed
                 | LifeKind::KilledSomeone
                 | LifeKind::Died
+                | LifeKind::Flatlined
         )
     }
 
@@ -2509,7 +2547,8 @@ impl LifeKind {
             | LifeKind::Widowed
             | LifeKind::Killed
             | LifeKind::KilledSomeone
-            | LifeKind::Died => 1.0,
+            | LifeKind::Died
+            | LifeKind::Flatlined => 1.0,
             LifeKind::Betrayed
             | LifeKind::RobbedSomeone
             | LifeKind::AssaultedSomeone
@@ -2586,6 +2625,11 @@ pub enum AssetKind {
     /// M14 (plan D52): a Virt bridge, carried then planted at a building.
     /// Only its asset entry exists in M13.
     Bridge,
+    /// M14 V36: a runner's deck (carried; a corp's fleet deck is posted at
+    /// a Lab). Its tier is the run's `deck_eff` (effective tier).
+    Deck,
+    /// M14 V28: a camera posted at a building (inert until phase 3).
+    Camera,
 }
 
 /// The lever and CSV grouping of an `AssetKind` (implants by class, not slot).
@@ -2600,10 +2644,14 @@ pub enum AssetClass {
     Pack,
     /// Plan D52.
     Bridge,
+    /// M14 V36.
+    Deck,
+    /// M14 V28.
+    Camera,
 }
 
 impl AssetClass {
-    pub const ALL: [AssetClass; 8] = [
+    pub const ALL: [AssetClass; 10] = [
         AssetClass::Motorcycle,
         AssetClass::Car,
         AssetClass::Truck,
@@ -2612,6 +2660,8 @@ impl AssetClass {
         AssetClass::Robot,
         AssetClass::Pack,
         AssetClass::Bridge,
+        AssetClass::Deck,
+        AssetClass::Camera,
     ];
 
     /// Position in `ALL` (indexes `Levers::asset_tax`).
@@ -2631,6 +2681,8 @@ impl AssetKind {
             AssetKind::Robot => AssetClass::Robot,
             AssetKind::Pack => AssetClass::Pack,
             AssetKind::Bridge => AssetClass::Bridge,
+            AssetKind::Deck => AssetClass::Deck,
+            AssetKind::Camera => AssetClass::Camera,
         }
     }
 
@@ -2662,6 +2714,8 @@ impl AssetKind {
             AssetKind::Robot => "Security robot",
             AssetKind::Pack => "Pack",
             AssetKind::Bridge => "Bridge",
+            AssetKind::Deck => "Deck",
+            AssetKind::Camera => "Camera",
         }
     }
 }
@@ -2766,10 +2820,22 @@ pub struct Asset {
     /// `None` for pre-M14 assets and god grants (uncapped).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub maker: Option<EntityId>,
+    /// M14 V36: Data a deck carries, per track (a freelancer's take,
+    /// sold by `SellData`; confiscated at an arrest).
+    #[serde(default, skip_serializing_if = "is_zero_data")]
+    pub data: [u32; 3],
+    /// M14 V33 (phase 3 writes it): a robot turned by a run fights for
+    /// this faction until the tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turned: Option<(EntityId, Tick)>,
 }
 
 fn is_zero_u8(v: &u8) -> bool {
     *v == 0
+}
+
+fn is_zero_data(v: &[u32; 3]) -> bool {
+    *v == [0; 3]
 }
 
 /// Derived, never saved: rebuilt on load and by `assets::rekit` after any
@@ -2797,6 +2863,10 @@ pub struct Kit {
     pub driving: Option<AssetKind>,
     /// Plan D3: any implant installed (bricked or failed included).
     pub chrome: bool,
+    /// M14 V36: the deck carried (lowest id, condition > 0).
+    pub deck: Option<EntityId>,
+    /// M14 V36: its effective tier (`assets::eff_tier`), 0 without one.
+    pub deck_tier: u8,
 }
 
 impl Default for Kit {
@@ -2817,6 +2887,8 @@ impl Default for Kit {
             flash: 0.0,
             driving: None,
             chrome: false,
+            deck: None,
+            deck_tier: 0,
         }
     }
 }
@@ -2877,6 +2949,9 @@ pub struct ShopPick {
     pub tier: u8,
     /// A used asset in the seller's stock, if the pick is one.
     pub used: Option<EntityId>,
+    /// M14 V36: an `UpgradeDeck` of the carried deck to `tier`.
+    #[serde(default)]
+    pub upgrade: bool,
 }
 
 /// A vehicle trip in progress (plan D20; filled from phase 2).

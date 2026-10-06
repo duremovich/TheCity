@@ -332,7 +332,7 @@ pub fn gang_arms(world: &mut World, gang: EntityId) {
     let Some(member) = strongest(world, Slot::Arms) else { return };
     let from = world.comp::<Building>(h).map(|b| b.door).unwrap_or_default();
     let Some(clinic) = assets::nearest_seller(world, BuildingKind::Clinic, from, false) else { return };
-    let pick = ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 1, used: None };
+    let pick = ShopPick { kind: AssetKind::Implant(Slot::Arms), tier: 1, used: None, upgrade: false };
     let note = format!("for {}", world.name_of(member));
     if let Ok(a) = assets::buy_noted(world, gang, clinic, &pick, Some(&note)) {
         assets::set_loc(world, a, AssetLoc::Stock(h));

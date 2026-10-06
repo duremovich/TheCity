@@ -582,7 +582,7 @@ fn test_shop_buys_car_when_commute_long_and_affordable() {
     let steps: Vec<ActionKind> = p.steps.iter().map(|s| s.action).collect();
     assert_eq!(steps, [ActionKind::GoTo(LocationKey::Seller), ActionKind::BuyAsset]);
     assert_eq!(p.target, Some(g));
-    assert_eq!(b.shop_pick, Some(ShopPick { kind: AssetKind::Car, tier: 1, used: None }));
+    assert_eq!(b.shop_pick, Some(ShopPick { kind: AssetKind::Car, tier: 1, used: None, upgrade: false }));
     // The purchase at the counter.
     inside(&mut w, who, g);
     let mut b = w.comp::<Brain>(who).expect("b").clone();

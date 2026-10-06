@@ -84,7 +84,7 @@ fn test_purchase_pays_seller_imports_and_conserves() {
     set_coins(&mut w, rich, 1000);
     let total = ownership::total_coins(&w);
     let (corp0, city0, tax0) = (w.purse(Some(corp)), w.purse(None), w.stats.current.flow_tax);
-    let pick = ShopPick { kind: AssetKind::Car, tier: 1, used: None };
+    let pick = ShopPick { kind: AssetKind::Car, tier: 1, used: None, upgrade: false };
     let car = assets::buy(&mut w, rich, g, &pick).expect("a cash purchase");
     let tax = w.stats.current.flow_tax - tax0;
     assert!(tax > 0, "the sale is taxed");
@@ -123,7 +123,8 @@ fn test_finance_arrears_tows_vehicle_to_lenders_garage() {
     let (corp, g) = garage(&mut w, 5000);
     let buyer = adults(&w)[3];
     set_coins(&mut w, buyer, 300);
-    let car = assets::buy(&mut w, buyer, g, &ShopPick { kind: AssetKind::Car, tier: 1, used: None }).expect("buy");
+    let car = assets::buy(&mut w, buyer, g, &ShopPick { kind: AssetKind::Car, tier: 1, used: None, upgrade: false })
+        .expect("buy");
     // The buyer drives it home.
     let home = w.comp::<citysim::Household>(buyer).and_then(|h| h.home).expect("a home");
     assets::set_loc(&mut w, car, AssetLoc::Parked(home));
@@ -700,7 +701,8 @@ fn test_impound_and_used_resale_reset_the_title() {
     assets::set_keeper(&mut w, car, Some(keeper));
     set_coins(&mut w, buyer, 5000);
     let bought =
-        assets::buy(&mut w, buyer, g, &ShopPick { kind: AssetKind::Car, tier: 1, used: Some(car) }).expect("bought");
+        assets::buy(&mut w, buyer, g, &ShopPick { kind: AssetKind::Car, tier: 1, used: Some(car), upgrade: false })
+            .expect("bought");
     assert_eq!(bought, car);
     let x = asset(&w, car);
     assert_eq!((x.owner, x.keeper, x.stolen, x.upkeep_arrears, x.away_days), (Some(buyer), None, false, 0, 0));

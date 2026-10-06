@@ -397,6 +397,8 @@ pub fn spawn_asset(
             list,
             away_days: 0,
             maker: None,
+            data: [0; 3],
+            turned: None,
         },
     );
     file(world, id);
@@ -578,6 +580,16 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
             }
             Slot::Skin => k.armour = k.armour.max(cfg.skin_armour * tf),
         }
+    }
+    // M14 V36: the deck carried (lowest id, condition > 0) at its effective tier.
+    if let Some((d, x)) = assets_at(world, agent).iter().find_map(|&a| {
+        world
+            .comp::<Asset>(a)
+            .filter(|x| x.kind == AssetKind::Deck && x.loc == AssetLoc::Carried(agent) && x.condition > 0)
+            .map(|x| (a, x))
+    }) {
+        k.deck = Some(d);
+        k.deck_tier = eff_tier_of(world, x).max(1);
     }
     k.vehicle = vehicle_of(world, agent);
     k.driving = world.trips.get(&agent).and_then(|t| world.comp::<Asset>(t.vehicle)).map(|x| x.kind);
@@ -1526,7 +1538,7 @@ fn new_loc(world: &World, kind: AssetKind, buyer: EntityId, seller: EntityId) ->
     match kind {
         k if k.is_vehicle() => AssetLoc::Parked(seller),
         AssetKind::Implant(_) if agent => AssetLoc::Installed(buyer),
-        AssetKind::Pack | AssetKind::Bridge if agent => AssetLoc::Carried(buyer),
+        AssetKind::Pack | AssetKind::Bridge | AssetKind::Deck if agent => AssetLoc::Carried(buyer),
         // M13 D42: a robot waits in the seller's stock until its buyer posts
         // it (`robots::consider_robot` posts it at the building Secure named).
         _ => AssetLoc::Stock(seller),
@@ -1746,6 +1758,8 @@ pub enum ShopCategory {
     /// Phase 3 (D44): the gang's implant reserved for this member, installed
     /// at a Clinic for `install_fee`.
     Install,
+    /// M14 V36: a deck, or the carried deck one tier up (`ShopPick.upgrade`).
+    Deck,
 }
 
 /// The Shop goal's best offer for one agent (D43).
@@ -1927,7 +1941,28 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
         lowest(BuildingKind::Clinic)
             .is_some_and(|l| affordable_at(world, l, &[(AssetKind::Implant(s), 1)], coins, room).is_some())
     });
-    if !want_vehicle && !want_pack && !want_chrome {
+    // M14 V36: a deck for a hacker without one (GATE `hacking >= deck_shop_min`),
+    // or the carried deck one tier up; at Clinics and Security Offices (V24).
+    let hacking = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
+    let deck_on = cfg.virt.enabled && hacking >= cfg.decks.deck_shop_min;
+    const DECKS: [(AssetKind, u8); 3] = [(AssetKind::Deck, 1), (AssetKind::Deck, 2), (AssetKind::Deck, 3)];
+    let deck_level = || {
+        [BuildingKind::Clinic, BuildingKind::SecurityOffice]
+            .into_iter()
+            .filter_map(lowest)
+            .min_by(|a, b| a.total_cmp(b))
+    };
+    let own_deck = kit
+        .and_then(|k| k.deck)
+        .and_then(|d| world.comp::<Asset>(d).filter(|x| x.owner == Some(id)).map(|x| (d, x.tier)));
+    let want_deck = deck_on
+        && kit.is_none_or(|k| k.deck.is_none())
+        && deck_level().is_some_and(|l| affordable_at(world, l, &DECKS, coins, room).is_some());
+    let want_upgrade = deck_on
+        && own_deck.is_some_and(|(_, t)| {
+            t < 3 && deck_level().is_some_and(|l| upgrade_price(world, t, l).is_some_and(|p| coins >= p))
+        });
+    if !want_vehicle && !want_pack && !want_chrome && !want_deck && !want_upgrade {
         return None;
     }
     let mut best: Option<ShopOffer> = None;
@@ -1935,6 +1970,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
                      seller: EntityId,
                      (kind, tier, price, financed): (AssetKind, u8, i64, bool),
                      used: Option<EntityId>,
+                     upgrade: bool,
                      mut cs: Vec<Consideration>| {
         cs.insert(0, Consideration::new("can buy", can(true), GATE));
         cs.insert(1, Consideration::new("U(wealth)", wealth, Curve::Linear { m: 0.6, b: 0.4 }));
@@ -1945,7 +1981,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
         let raw: f32 = cs.iter().map(|c| c.output).product();
         let score = crate::utility::compensate(raw, cs.len()) + cfg.shop.shop_flat;
         if best.as_ref().is_none_or(|b| score > b.score) {
-            let pick = ShopPick { kind, tier, used };
+            let pick = ShopPick { kind, tier, used, upgrade };
             best = Some(ShopOffer { pick, seller, price, financed, category, score, considerations: cs });
         }
     };
@@ -1960,7 +1996,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
                 };
                 let x = commute as f32 / (2.0 * cfg.shop.commute_ref.max(1) as f32);
                 let cs = vec![Consideration::new("commute", x, Curve::Logistic { k: 8.0, mid: 0.5 })];
-                offer(ShopCategory::Vehicle, g, o, None, cs);
+                offer(ShopCategory::Vehicle, g, o, None, false, cs);
             }
         }
     }
@@ -1974,7 +2010,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
                     Consideration::new("courage", courage, Curve::Linear { m: 0.5, b: 0.5 }),
                     Consideration::new("1-load", (1.0 - load).clamp(0.0, 1.0), Curve::Linear { m: 0.6, b: 0.4 }),
                 ];
-                offer(ShopCategory::Chrome, c, (pick.kind, pick.tier, price, financed), pick.used, cs);
+                offer(ShopCategory::Chrome, c, (pick.kind, pick.tier, price, financed), pick.used, false, cs);
             }
         }
     }
@@ -1982,11 +2018,120 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     if want_pack {
         if let Some(m) = nearest_seller(world, BuildingKind::Market, from, require_open) {
             if let Some(o) = dearest_affordable(world, m, &PACKS, coins, room) {
-                offer(ShopCategory::Pack, m, o, None, Vec::new());
+                offer(ShopCategory::Pack, m, o, None, false, Vec::new());
+            }
+        }
+    }
+    // M14 V36: the dearest affordable deck at the nearest Clinic or Office
+    // (ties the Clinic), or the carried deck's upgrade where it can be sold.
+    if want_deck || want_upgrade {
+        let law = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.lawfulness);
+        let cs = || {
+            vec![
+                Consideration::new("hacking", hacking, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("1-lawfulness", 1.0 - law, Curve::Linear { m: 0.5, b: 0.5 }),
+            ]
+        };
+        let sellers: SmallVec<[EntityId; 2]> = [BuildingKind::Clinic, BuildingKind::SecurityOffice]
+            .into_iter()
+            .filter_map(|k| nearest_seller(world, k, from, require_open))
+            .collect();
+        if want_deck {
+            let mut best_deck: Option<(EntityId, (AssetKind, u8, i64, bool))> = None;
+            for &s in &sellers {
+                if let Some(o) = dearest_affordable(world, s, &DECKS, coins, room) {
+                    if best_deck.is_none_or(|b| o.2 > b.1 .2) {
+                        best_deck = Some((s, o));
+                    }
+                }
+            }
+            if let Some((s, o)) = best_deck {
+                offer(ShopCategory::Deck, s, o, None, false, cs());
+            }
+        }
+        if let (true, Some((_, tier))) = (want_upgrade, own_deck) {
+            let up = sellers.iter().find_map(|&s| {
+                let price = upgrade_price(world, tier, seller_level(world, s))?;
+                (coins >= price && can_sell(world, s, AssetKind::Deck, tier + 1)).then_some((s, price))
+            });
+            if let Some((s, price)) = up {
+                offer(ShopCategory::Deck, s, (AssetKind::Deck, tier + 1, price, false), None, true, cs());
             }
         }
     }
     best
+}
+
+/// M14 V36: what raising a deck from `tier` to `tier + 1` costs at a price
+/// level: `(price[t + 1] - price[t]) x upgrade_frac x level`.
+pub fn upgrade_price(world: &World, tier: u8, level: f32) -> Option<i64> {
+    let (now, next) = (list_price(world, AssetKind::Deck, tier)?, list_price(world, AssetKind::Deck, tier + 1)?);
+    Some(((next - now) as f32 * world.config.decks.upgrade_frac * level).round() as i64)
+}
+
+/// M14 V24: what a seller building sells new (Clinic: implants and decks;
+/// Office: robots, decks, cameras; Garage: vehicles; Market: packs).
+pub fn sells(kind: BuildingKind) -> &'static [AssetKind] {
+    match kind {
+        BuildingKind::Clinic => &[
+            AssetKind::Implant(Slot::Arms),
+            AssetKind::Implant(Slot::Legs),
+            AssetKind::Implant(Slot::Nerves),
+            AssetKind::Implant(Slot::Eyes),
+            AssetKind::Implant(Slot::Skin),
+            AssetKind::Deck,
+        ],
+        BuildingKind::SecurityOffice => &[AssetKind::Robot, AssetKind::Deck, AssetKind::Camera],
+        BuildingKind::Garage => &[AssetKind::Motorcycle, AssetKind::Car, AssetKind::Truck, AssetKind::Flyer],
+        BuildingKind::Market => &[AssetKind::Pack],
+        _ => &[],
+    }
+}
+
+/// M14 V36 `UpgradeDeck`: the agent's own carried deck one tier up at
+/// `seller` (which must sell the new tier): `upgrade_price` in full to the
+/// seller's owner (`Flow::Asset`, taxed); the deck's tier, list, value and
+/// upkeep move up, its maker becomes the seller's. `AssetBought`.
+pub fn upgrade_deck(world: &mut World, agent: EntityId, seller: EntityId, pick: &ShopPick) -> Result<(), String> {
+    let deck = world.comp::<Kit>(agent).and_then(|k| k.deck).ok_or("no deck")?;
+    let tier = world
+        .comp::<Asset>(deck)
+        .filter(|x| x.owner == Some(agent) && x.kind == AssetKind::Deck)
+        .map(|x| x.tier)
+        .ok_or("not the agent's deck")?;
+    let sold_here = world.comp::<Building>(seller).is_some_and(|b| sells(b.kind).contains(&AssetKind::Deck));
+    if !sold_here || pick.tier != tier + 1 || !can_sell(world, seller, AssetKind::Deck, pick.tier) {
+        return Err(format!("{} cannot raise a deck to T{}", world.name_of(seller), pick.tier));
+    }
+    let price = upgrade_price(world, tier, seller_level(world, seller)).ok_or("no such tier")?;
+    if world.purse(Some(agent)) < price {
+        return Err("cannot afford the upgrade".into());
+    }
+    let owner = world.owner_of(seller);
+    let paid = ownership::charge(world, Some(agent), owner, price, Flow::Asset);
+    ownership::credit(world, seller, paid);
+    let list = list_price(world, AssetKind::Deck, pick.tier).unwrap_or(0);
+    let upkeep = upkeep_for(world, AssetKind::Deck, pick.tier);
+    let maker = maker_for(world, seller, AssetKind::Deck);
+    if let Some(x) = world.comp_mut::<Asset>(deck) {
+        x.tier = pick.tier;
+        x.list = list;
+        x.value = list;
+        x.upkeep_per_day = upkeep;
+        x.maker = maker;
+    }
+    rekit(world, agent);
+    let now = world.tick;
+    if let Some(b) = world.comp_mut::<Body>(agent) {
+        b.last_shop = Some(now);
+    }
+    if let Some(bd) = world.comp_mut::<Building>(seller) {
+        bd.asset_sales_today = bd.asset_sales_today.saturating_add(1);
+    }
+    let text =
+        format!("{} upgraded a deck to T{} at {} for {price}", world.name_of(agent), pick.tier, world.name_of(seller));
+    world.push_event(EventKind::AssetBought, &[agent, seller, deck], text);
+    Ok(())
 }
 
 /// Phase 3 (D43): the slot an agent would chrome next: the first empty one
@@ -2017,7 +2162,7 @@ pub fn chrome_slot(world: &World, id: EntityId) -> Option<Slot> {
 fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, cap: f32) -> Option<(ShopPick, i64, bool)> {
     let kind = AssetKind::Implant(slot);
     let new = dearest_affordable(world, c, &[(kind, 1), (kind, 2), (kind, 3)], coins, cap)
-        .map(|(k, t, price, fin)| (ShopPick { kind: k, tier: t, used: None }, price, fin));
+        .map(|(k, t, price, fin)| (ShopPick { kind: k, tier: t, used: None, upgrade: false }, price, fin));
     let down_frac = world.config.assets.down_frac_of(kind);
     let used = assets_at(world, c)
         .iter()
@@ -2031,7 +2176,7 @@ fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, cap: f32) -> 
             let ok = coins >= (down_frac * price as f32).round() as i64;
             let burden = upkeep_for(world, kind, x.tier) + finance_per_day(world, kind, price, coins);
             (ok && burden as f32 <= cap).then_some((
-                ShopPick { kind, tier: x.tier, used: Some(a) },
+                ShopPick { kind, tier: x.tier, used: Some(a), upgrade: false },
                 price,
                 coins < price,
             ))
@@ -2062,7 +2207,7 @@ fn install_offer(world: &World, id: EntityId, require_open: bool) -> Option<Shop
     let raw: f32 = cs.iter().map(|c| c.output).product();
     let score = crate::utility::compensate(raw, cs.len()) + world.config.shop.shop_flat;
     Some(ShopOffer {
-        pick: ShopPick { kind: x.kind, tier: x.tier, used: Some(a) },
+        pick: ShopPick { kind: x.kind, tier: x.tier, used: Some(a), upgrade: false },
         seller,
         price: crate::systems::chrome::install_fee(world, x.tier),
         financed: false,

@@ -240,6 +240,7 @@ fn virt_snapshot(world: &mut World) {
             n_ice += 1;
         }
     }
+    let decks = crate::systems::virt::decks_owned(world);
     let mut corps = vec![[0u32; 4]; crate::stats::CORP_SLOTS];
     for c in world.corps() {
         let Some(cc) = world.comp::<crate::components::Corp>(c) else { continue };
@@ -253,6 +254,7 @@ fn virt_snapshot(world: &mut World) {
     v.labs = labs;
     v.ice_mean_corp = if n_ice > 0 { ice as f32 / n_ice as f32 } else { 0.0 };
     v.data_held = held;
+    v.decks = decks;
     v.corps = corps;
 }
 

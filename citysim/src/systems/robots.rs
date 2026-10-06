@@ -262,7 +262,7 @@ pub fn consider_robot(world: &mut World, corp: EntityId, b: EntityId) -> bool {
     if robot_cost >= contract_cost || (treasury as f32) < world.config.robots.robot_cash_mult * full {
         return false;
     }
-    let pick = ShopPick { kind: AssetKind::Robot, tier, used: None };
+    let pick = ShopPick { kind: AssetKind::Robot, tier, used: None, upgrade: false };
     let note = format!("for Secure ({})", world.name_of(b));
     let Ok(a) = assets::buy_noted(world, corp, office, &pick, Some(&note)) else { return false };
     assets::set_loc(world, a, AssetLoc::Posted(b));

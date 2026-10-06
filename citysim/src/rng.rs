@@ -98,6 +98,20 @@ impl SimRng {
         r
     }
 
+    /// M14 V9: one contest of a run (a dice roll on the Virt plane) on its
+    /// own fresh stream, keyed on the run id and the contest's ordinal,
+    /// never stored: save/load, LOD and call order cannot move a run's dice,
+    /// and the world stream is never touched. Stream layout: agents `index
+    /// + 1 < 2^33`, holes bit 63, keyed draws bit 62 with keys below 2^60,
+    /// runs bits 62 and 61 (plan deviation: bit 61 keeps them off every
+    /// keyed key) with `run << 6 | contest` below (`RunId < 2^50`).
+    pub fn run(&self, run: crate::virt::RunId, contest: u8) -> ChaCha8Rng {
+        debug_assert!(run < (1 << 50), "a RunId fits 50 bits");
+        let mut r = ChaCha8Rng::seed_from_u64(self.seed);
+        r.set_stream((1 << 62) | (1 << 61) | (run << 6) | u64::from(contest & 0x3F));
+        r
+    }
+
     /// Drop an agent's stream when the entity is despawned.
     pub fn forget_agent(&mut self, id: EntityId) {
         if let Some(r) = self.agents.get_mut(id.index as usize) {
