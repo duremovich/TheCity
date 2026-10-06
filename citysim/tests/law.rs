@@ -194,6 +194,44 @@ fn test_jail_full_theft_becomes_fine() {
 }
 
 #[test]
+fn test_jail_full_bumps_a_less_severe_prisoner() {
+    let mut w = world(27);
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(17).collect();
+    let until = w.tick + 5 * TICKS_PER_DAY;
+    for &id in &ids[..16] {
+        law::sentence(&mut w, id, Crime::Dealing, until, jail);
+    }
+    assert_eq!(w.with::<Sentence>().len(), 16);
+    let killer = ids[16];
+    let g = guard(&w);
+    law::file_report(&mut w, Crime::Murder, killer, Some(g));
+    law::jail_suspect(&mut w, g, killer);
+    assert_eq!(w.comp::<Sentence>(killer).map(|s| s.crime), Some(Crime::Murder), "murderer sentenced");
+    let dealers = ids[..16].iter().filter(|&&id| w.has::<Sentence>(id)).count();
+    assert_eq!(dealers, 15, "one dealer released");
+    assert_eq!(w.with::<Sentence>().len(), 16);
+}
+
+#[test]
+fn test_jail_full_of_murderers_does_not_bump_for_a_thief() {
+    let mut w = world(28);
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(17).collect();
+    let until = w.tick + 5 * TICKS_PER_DAY;
+    for &id in &ids[..16] {
+        law::sentence(&mut w, id, Crime::Murder, until, jail);
+    }
+    let thief = ids[16];
+    let g = guard(&w);
+    w.comp_mut::<Wallet>(thief).expect("wallet").coins = 0;
+    law::file_report(&mut w, Crime::Theft, thief, Some(g));
+    law::jail_suspect(&mut w, g, thief);
+    assert!(!w.has::<Sentence>(thief), "thief released or fined");
+    assert!(ids[..16].iter().all(|&id| w.has::<Sentence>(id)), "no murderer bumped");
+}
+
+#[test]
 fn test_player_arrest_bypasses_witness() {
     let mut w = world(26);
     let id = civilian(&w);

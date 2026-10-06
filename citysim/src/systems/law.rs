@@ -670,15 +670,16 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                 return;
             }
             _ => {
-                // Free the least prisoner: a vagrant first (M12 D15: a night
-                // in the cells never keeps a real criminal out), else the
-                // Theft prisoner with the longest remaining sentence.
+                // Free the least prisoner whose crime is strictly less severe
+                // than this arrest's (a vagrant first, M12 D15: a night in the
+                // cells never keeps a real criminal out); ties go to the one
+                // released soonest, then the lower id.
                 let victim = world
                     .with::<Sentence>()
                     .into_iter()
                     .filter_map(|p| world.comp::<Sentence>(p).map(|s| (p, s.crime, s.until_tick)))
-                    .filter(|&(_, c, _)| matches!(c, Crime::Theft | Crime::Vagrancy))
-                    .max_by_key(|&(p, c, until)| (c == Crime::Vagrancy, until, p))
+                    .filter(|&(_, c, _)| c < crime)
+                    .min_by_key(|&(p, c, until)| (c, until, p))
                     .map(|(p, ..)| p);
                 match victim {
                     Some(p) => release(world, p, false),

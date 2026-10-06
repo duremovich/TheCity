@@ -1078,7 +1078,10 @@ fn test_m12_districts_seed_42() {
     };
     let riots: Vec<u32> = runs.iter().map(|m| m.riots).collect();
     let riot_mean = f64::from(riots.iter().sum::<u32>()) / runs.len() as f64;
-    check((1.0..=4.0).contains(&riot_mean), format!("riots mean {riot_mean:.2} in 1..=4 (per seed {riots:?})"));
+    // M13 raised baseline violence (assaults+murders ~16 -> ~24/day) and the full-Jail bump fix
+    // (2026-10-06) stopped releasing murderers; six-seed riot means have run 3.3-4.3 across
+    // builds with per-seed counts 2-7, so a cap of 4 on the mean flips on one seed.
+    check((1.0..=5.0).contains(&riot_mean), format!("riots mean {riot_mean:.2} in 1..=5 (per seed {riots:?})"));
     let (ok, what) = half("a gang controls a district >= 14 consecutive days", &|m| {
         (m.gang_best >= 14, format!("longest gang control {} d", m.gang_best))
     });
