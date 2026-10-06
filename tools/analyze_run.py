@@ -40,7 +40,19 @@ DEFAULT_COLS = ("day,season,population,employed,homeless,jailed,gang_members,foo
 STORY = ["OrderChanged", "Raid", "Jailbreak", "Posture", "Bribe", "TerritoryFlipped", "GangJoin",
          "Marriage", "Birth", "Death", "Murder", "Assault", "Evicted", "Founded", "Incorporated",
          "Bankrupt", "Acquired", "Strike", "CorpOrder", "Contract", "Housed", "Attributed", "Robbed",
-         "Assaulted"]
+         "Assaulted",
+         "AssetBought", "Repossessed", "Wrecked", "VehicleStolen", "Chopped", "Crash", "Installed",
+         "Episode", "Treated", "Abducted", "Harvested", "Stripped", "Overdose"]
+ASSET_EVENTS = STORY[-13:]
+ASSET_SNAPSHOT = ["vehicles_moto", "vehicles_car", "vehicles_truck", "vehicles_flyer", "robots",
+                  "chrome_agents", "mean_sanity", "hooked"]
+ASSET_TOTALS = ["truck_hauls", "walk_hauls", "crashes", "crash_deaths", "vehicle_thefts", "chops",
+                "repos", "impounds", "chrome_installs", "episodes", "episodes_by_law", "stims_dealt",
+                "overdoses", "treatments", "detoxes", "abductions", "harvests", "stripped"]
+ASSET_FLOWS = ["flow_asset", "flow_asset_upkeep", "flow_finance", "flow_import", "flow_stims",
+               "flow_parts", "flow_treatment"]
+ASSET_COLS = (ASSET_SNAPSHOT + ASSET_TOTALS + ASSET_FLOWS + ["commute_tpt_walk", "commute_tpt_drive"])
+ASSAULT_PER_DAY_FLAG = 42.7  # the scenario gate's assault bound (M8 gate, HANDOFF)
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
 DISTRICTS = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
 CONTROLLERS = {0: "Contested", 1: "City", 2: "Gang", 3: "Corp"}
@@ -183,6 +195,7 @@ def analyze(rows, events, jail_cap=None):
             flags.append(f"no {k} events since day {last} ({kinds[k]} before)")
     ownership(rows, events, out, flags)
     districts(rows, events, out, flags)
+    assets(rows, events, out, flags)
     out["flags"] = flags
     return out
 
@@ -226,7 +239,7 @@ def ownership(rows, events, out, flags):
 
     days = [int(r["day"]) for r in rows]
     corps = {}
-    for i in range(1, 9):
+    for i in range(1, 10):
         t, od = f"corp{i}_treasury", f"corp{i}_order"
         if t not in rows[0]:
             continue
@@ -382,6 +395,37 @@ def districts(rows, events, out, flags):
         flags.append(f"corp raids never lost ({raids['Won']} won)")
 
 
+def assets(rows, events, out, flags):
+    """M13: vehicles, hauling, chrome, sanity, stims, parts; only when the columns exist and any is non-zero."""
+    if not rows:
+        return
+    have = [c for c in ASSET_COLS if c in rows[0] and c != "mean_sanity"]
+    if not any(any(v != 0 for v in col(rows, c)) for c in have):
+        return
+    total = lambda k: sum(col(rows, k))
+    a = {"snapshot_last_day": {k: col(rows, k)[-1] for k in ASSET_SNAPSHOT if col(rows, k)}}
+    a["totals"] = {k: total(k) for k in ASSET_TOTALS if k in rows[0]}
+    late = [r for r in rows if int(r["day"]) > 30]
+    t, w = sum(col(late, "truck_hauls")), sum(col(late, "walk_hauls"))
+    if "truck_hauls" in rows[0] and "walk_hauls" in rows[0]:
+        a["truck_share_after_day30"] = t / (t + w) if t + w else None
+    if "commute_tpt_walk" in rows[0] and "commute_tpt_drive" in rows[0]:
+        cw, cd = mean(col(late, "commute_tpt_walk")), mean(col(late, "commute_tpt_drive"))
+        a["commute_after_day30"] = {"walk": cw, "drive": cd,
+                                    "drive_over_walk": cd / cw if cw and cw == cw else None}
+    a["flows_total"] = {k[5:]: total(k) for k in ASSET_FLOWS if k in rows[0]}
+    if events:
+        ek = Counter(k for _, k, _ in events)
+        a["events"] = {k: ek[k] for k in ASSET_EVENTS if ek[k]}
+    out["assets"] = a
+    cd = a["totals"].get("crash_deaths", 0)
+    if cd > 10:
+        flags.append(f"crash_deaths {cd:g} > 10 over the run")
+    apd = out["law"].get("assaults_murders_per_day", 0)
+    if events and apd > ASSAULT_PER_DAY_FLAG:
+        flags.append(f"assaults+murders {apd:.2f}/day > {ASSAULT_PER_DAY_FLAG:g}")
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -433,6 +477,21 @@ def fmt(o):
                     rs = "/".join(str(r.get(k, 0)) for k in ("started", "won", "lost", "fizzled", "dispersed"))
                     L.append(f"    {name:<14}riots {rs}, strikes {v['strikes']}, splits {v['splits']}")
         L += [f"  {x}" for x in dd["splits"]]
+    if "assets" in o:
+        w = o["assets"]
+        L.append("-- Assets (M13) --")
+        L.append("last day: " + f(w["snapshot_last_day"]))
+        L.append("run totals: " + f(w["totals"]))
+        ts = w.get("truck_share_after_day30")
+        L.append("truck share of hauls after day 30: " + ("n/a" if ts is None else f"{ts:.1%}"))
+        if "commute_after_day30" in w:
+            c = w["commute_after_day30"]
+            r = c["drive_over_walk"]
+            L.append(f"commute ticks/trip after day 30: walk {c['walk']:.4g}, drive {c['drive']:.4g}, "
+                     f"drive/walk {'n/a' if r is None else f'{r:.3f}'}")
+        L.append("asset flows (run totals): " + f(w["flows_total"]))
+        if w.get("events"):
+            L.append("asset events: " + f(w["events"]))
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

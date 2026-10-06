@@ -16,10 +16,10 @@ def means(path):
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     out = {}
-    for k in rows[0]:
+    for k in (rows[0] if rows else []):
         try:
             out[k] = sum(float(r[k]) for r in rows) / len(rows)
-        except ValueError:
+        except (ValueError, TypeError):
             pass
     return out
 
@@ -34,7 +34,8 @@ def main():
         rel = f"{(y - x) / abs(x):+.1%}" if x and y is not None else "-"
         fx = "-" if x is None else f"{x:.4g}"
         fy = "-" if y is None else f"{y:.4g}"
-        print(f"{k:<26}{fx:>12}{fy:>12}{rel:>10}")
+        note = "  (only in B)" if x is None else "  (only in A)" if y is None else ""
+        print(f"{k:<26}{fx:>12}{fy:>12}{rel:>10}{note}")
 
 
 if __name__ == "__main__":
