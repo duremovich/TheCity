@@ -320,3 +320,25 @@ structural, as force was in v1.
 ## After calibration (M11 phases 5a and 5b)
 
 Re-run on the calibrated economy (dole 4, tax 0.12, rent [1, 2, 4], prices in tenths, the estate rule, owners eligible to found from their own payroll, `found_flat` 0.1): `--test god_corps` passes 12/12. What changed against the gaps above: evictees now wait three days on the street, so Dregs exist (rare: mean 1.6 on seed 42, none before day 57); a millionaire still founds two buildings and incorporates ("Quarry Holdings", 999k in the treasury, Undercut), since money still buys nothing beyond `found_cost`; incorporated corps start with the founder's savings and 14 days free of upkeep, yet the ordinary two-Bar Holdings still go bankrupt 30-40 days later; bankrupting Nutrix now shakes the other Food corps' orders within a week and the law swings to Garrison. The zombie corp, the gang landlord the law ignores and order flapping on ties are not addressed.
+
+## After M13 (2026-10-06)
+
+`--test god_corps` 12/12 pass. Seed 42; per-day means over days 45-75 against the control (ctl), later window named. The previous note is "After calibration" above. The control is the same world as the v1 control (assaults 25.9, thefts 50.6, extortions 23.6, price 3.1 rising to 4.2 late).
+
+- **bankrupt_food_leader.** Nutrix gone from day 45; the city forecloses 9 buildings and one agent buys a Bar for 200. Acquisitions 1.43 vs 0.14 a day in week one, assaults 31.3 vs 25.3, homeless 47 vs 31 late, price 3.7 vs 4.2 late. Same as the calibration note.
+- **fund_corp_to_monopoly.** Greenline's 200,000 buys 2 to 8.6 buildings (4.6 in days 45-75) and employees 14 to 70, but it goes Secure, not Grow, and keeps 188,000 unspent. Same: money still buys little. Price 3.9 vs 4.2.
+- **kill_exec.** Nutrix leaves Secure for Acquire on day 46 (the control does it on day 87), one worker strikes on day 45; corp order changes 0.77 vs 0.67. Same: a faint shock, no panic.
+- **kill_staff.** Re-hired at once; assaults 18.7 vs 25.9, extortions 13.3 vs 23.6, Nutrix treasury 2,532 vs 5,250, corp order changes 0.33 vs 0.67 and 0.00 late (it sits in Hunker from day 48). Weaker orders than before, a bit more cost.
+- **seize_to_gang.** 121 Blocks to The Hollow; extortions 6.3 vs 13.3 in week one, 42 vs 51.5 late. Habitat is left with 0 coins. Same: the law does not react to a gang landlord; g1 territory 93 vs 47 is gang noise.
+- **rent_shock.** thefts 74 vs 50.6 (152 vs 117 late), rent shortfalls 16.5 vs 11.2, homeless 44.6 vs 38.1, Habitat treasury 5,493 vs 1,667; Street unrest 0.40 vs 0.37 and evictions 0.67 vs 0.47. Same: theft rises, no eviction wave, unrest barely moves.
+- **wipe_corps.** Bankruptcies 0.29 vs 0 and acquisitions 0.86 vs 0.14 in week one; new corps 1.0 vs 2.0. Kessler holds 14-32 coins rather than exactly 0, so the zombie gap is not reproduced as stated. Same otherwise.
+- **nationalise_food.** Price pinned at 3.00 all run (control 4.2 late), but thefts are 51.6 vs 117 late and extortions 71.8 vs 51.5. Same price story; the theft drop is new.
+- **no_evictions_forever.** Acquisitions 4.13 vs 0.10 a day, Habitat goes from 120 Blocks to 48 to 0, corps 324 to 188. Price 4.8 vs 4.2 late. Stronger: the landlord sells out, not merely loses rent.
+- **takeover_by_wealth (and _greedy).** New corps 2.0 a day late vs 0.17 (the millionaire incorporates), price 5.6 (6.2 greedy) vs 4.2 late. Same as the calibration note, with a higher price.
+- Vehicles, chrome, stims and robots: no visible effect. The only trace is an agent founding a Ripperdoc for 200 in the fund_corp run; no vehicle or robot row exists.
+
+### Gaps (after M13)
+
+- **Closed by M13:** none of the listed gaps. No corp scenario reacts to assets.
+- **Still open:** exec loss without a panic, staff loss costing nothing, nobody Undercutting a rich rival, corps dissolving instead of fighting, incorporation churn, unrest ignoring rent, the law ignoring a gang landlord, no `BuyBuilding`/`Invest` commands, and no board coup. kill_exec's gang noise is back (g1 territory 105 vs 47 late).
+- **New:** a nationalised Food sector halves late theft (51.6 vs 117). Worth a look: it may be the price pin, or an artefact of stock.

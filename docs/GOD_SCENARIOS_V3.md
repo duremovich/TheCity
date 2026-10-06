@@ -234,3 +234,24 @@ the baselines have moved:
   the 75 days). `god_bankrupt_food_leader` no longer churns through 14 bankruptcies: the fire sale clears in
   the first week (2 acquisitions a day at days 45-52) and bankruptcies stay near 0.1 a day.
   `god_rent_shock` raises thefts to 69-94 against 57-73, with no eviction wave.
+
+## After M13 (2026-10-06)
+
+`--test god_districts` 11/11 pass. Seed 42; per-day means over days 45-75 against the control (ctl), later window named. The previous note is "The v1 and v2 suites, re-run" above, and the body tables are the pre-M12-phase-5 city's. The control now splinters by itself (live gangs 2.4 in days 45-75 and 4.0 late, splinter fights 1.3 then 7.7), so scenarios that add splits show less than the body says.
+
+- **riot_sump_west.** A won riot (18 rioters vs 7 defenders) loots the Precinct and frees 3 convicts; riots 0.14 a day in week one, assaults 36.3 vs 25.3, live gangs 3.3 vs 2.0 (a Rust Saints split of 50 members on day 45). Sump West stays Patrol. Same machinery; the target is now the Precinct, not a corp Block, and a corp still does not answer.
+- **riot_in_spire.** 40 gather and lose (4 rioters vs 10 defenders at the Precinct). Stronger than before: the Spire riot meets a defence. No Spire stance change, no corp Secure; Spire crime 3.4 vs 3.4.
+- **litter_mid_east_to_cap.** Mid East litter 0.99 vs 0.15 (0.94 vs 0.19 late), crime 7.0 vs 6.7, unrest 0.31 vs 0.30, assaults 24.5 vs 25.9. Same: mood only, and the sweepers cannot dig out.
+- **split_gang.** Live gangs 3.9 vs 2.4 (4.9 vs 4.0 late), splinter fights 8.0 vs 1.3 but 7.9 vs 7.7 late; assaults 29.2 vs 25.9, 30.9 vs 37.1 late. Weaker: the control splinters on its own, so the late difference is gone.
+- **garrison_60_days** (own control). Sump West and Mid East guards 0 vs 3.1; assaults 31.7 vs 24.0 (34.0 vs 28.3 late), Mid East crime 7.7 vs 6.5 (9.7 vs 7.0 late). Weaker: +20-40%, not the old doubling.
+- **evict_sump_rent_10.** Thefts 175 vs 50.6 (263 vs 117 late), evictions 1.1 vs 0.5 (4.3 vs 0.4), homeless 104 vs 31 late, emigrants 0.40 vs 0.03, Sump West unrest 0.56 vs 0.47 late. Stronger on hardship; assaults are only 28.7 vs 37.1 late, so the 42-a-day ceiling is gone. One Civic riot (lost, 5 vs 7); no Sump riot even at unrest 0.56. Same gap.
+- **kill_sweepers / no_rehire.** The re-hire run returns to 12 sweepers; the no-rehire run goes to 0 and Mid East litter is 0.22 vs 0.19 late (the body says 0.42 worst district; the max printout is 0.37). Weaker. The re-hire run drifts higher (0.26) than no-rehire (0.22), which is butterfly noise, not a result.
+- **withdraw_sump_west.** Withdrawn from day 45, crime 7.6 vs 5.3 (7.4 vs 6.7 late), unrest 0.50 vs 0.49. Sump West stays Contested all run; The Hollow never takes it (the control run did on days 65-78). Weaker than the body: no takeover.
+- **derelict_and_buy_back.** Derelicts 11.6 vs 13.5 (1.2 vs 1.4 late), squatters 31 vs 30; no other change. Same.
+- Vehicles, chrome, stims and robots: nothing visible. No printout row or event mentions them; the only "Chrome" is a resident's name.
+
+### Gaps (after M13)
+
+- **Closed by M13:** none. These scenarios do not touch assets.
+- **Partly changed since the list above (not M13):** gap 7 (the Spire riot now meets 10 defenders at the Precinct, though no corp Block defender exists) and gap 8 (violence no longer approaches the 42-a-day gate bound: 28.7 in the rent-10 run, 34.0 in the 60-day Garrison).
+- **Remain:** 1 (riots miss the evicted Sump, even at unrest 0.56), 2 (a won Precinct riot is a jailbreak), 3 (looting loots nothing and no corp Secures), 4 and 5 (sweepers and litter), 6 (Disperse never cordons).
