@@ -74,6 +74,10 @@ fn couple(w: &World) -> (EntityId, EntityId) {
 #[test]
 fn test_purchase_pays_seller_imports_and_conserves() {
     let mut w = city();
+    // The plan's car and finance terms (phase 5 calibration moved them).
+    w.config.assets.price.car = vec![800, 1400];
+    w.config.assets.down_frac = 0.25;
+    w.config.assets.term_days = 60;
     let (corp, g) = garage(&mut w, 5000);
     let people = adults(&w);
     let (rich, poor) = (people[0], people[1]);
@@ -562,5 +566,61 @@ fn test_secure_buys_robot_when_cheaper_over_horizon() {
     w.config.corps.contract_per_guard_day = 15;
     assert!(!robots::consider_robot(&mut w, corp, b2), "the contract is cheaper");
     assert!(robots::posted_robot(&w, b2).is_none());
+    w.check_indices().expect("indices in step");
+}
+
+/// Plan 5.1 (D48): the M13 levers and god commands do what they say.
+#[test]
+fn test_d48_levers_and_god_commands() {
+    use citysim::{AssetClass, DistrictId, PlayerCommand};
+    let mut w = city();
+    let (corp, _) = garage(&mut w, 5000);
+    w.push_command(PlayerCommand::SetAssetTax { kind: AssetClass::Car, rate: 0.5 });
+    w.push_command(PlayerCommand::SetImpound(false));
+    w.apply_commands();
+    assert_eq!(w.levers.asset_tax[AssetClass::Car.index()], 0.5);
+    assert!(!w.levers.impound);
+    let who = adults(&w)[5];
+    let car = assets::grant(&mut w, who, AssetKind::Car, 1).expect("granted");
+    let base = assets::upkeep_for(&w, AssetKind::Car, 1);
+    assert_eq!(assets::upkeep_of(&w, car), (base as f32 * 1.5).round() as i64, "taxed upkeep");
+
+    // Brick: the lender's financed implants, at once.
+    let arm = assets::grant(&mut w, who, AssetKind::Implant(Slot::Arms), 1).expect("granted");
+    w.comp_mut::<Asset>(arm).expect("asset").finance =
+        Some(Finance { lender: Some(corp), remaining: 1000, per_day: 10, arrears: 0 });
+    w.push_command(PlayerCommand::Brick(corp));
+    w.apply_commands();
+    assert!(asset(&w, arm).bricked);
+    assert_eq!(w.comp::<Kit>(who).expect("kit").fighting, 0.0, "the Kit is rebuilt");
+    set_coins(&mut w, who, 0);
+    assets::run(&mut w);
+    assert!(asset(&w, arm).bricked, "a called loan stays bricked");
+
+    // ChromeEveryone: Arms (kept where filled) and Nerves for every adult.
+    w.push_command(PlayerCommand::ChromeEveryone { tier: 2 });
+    w.apply_commands();
+    for &a in adults(&w).iter().take(50) {
+        let k = w.comp::<Kit>(a).expect("kit");
+        assert!(k.chrome && k.reflex > 0.0, "{a:?} chromed");
+    }
+    assert_eq!(asset(&w, arm).tier, 1, "a filled slot is kept");
+
+    // FloodStims: into the Hideouts of the gangs dealing or holding there.
+    let g = w.gangs()[0];
+    let h = w.hideout_of(g).expect("hideout");
+    let d = w.district_of_building(h);
+    let before = w.stock(h, Good::Stims);
+    w.push_command(PlayerCommand::FloodStims { district: d, n: 50 });
+    w.apply_commands();
+    assert_eq!(w.stock(h, Good::Stims), (before + 50).min(w.goods_cap(h, Good::Stims)));
+    w.push_command(PlayerCommand::FloodStims { district: DistrictId(200), n: 50 });
+    w.apply_commands();
+    assert_eq!(w.events.back().expect("event").kind, EventKind::PlayerActionFailed);
+
+    // Chase: pinned until the next trip ends.
+    w.push_command(PlayerCommand::Chase(who));
+    w.apply_commands();
+    assert!(w.chase_pins.contains(&who));
     w.check_indices().expect("indices in step");
 }

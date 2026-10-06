@@ -167,6 +167,13 @@ fn snapshot(w: &World, d: &mut Day, gangs: &[EntityId]) {
 
 /// Seed 42 to `END_DAY`; `shock` fires at the start of `SHOCK_DAY`.
 fn run(name: &'static str, shock: impl FnOnce(&mut World)) -> Run {
+    run_from(name, |_| {}, shock)
+}
+
+/// `run`, with `setup` fired at the start of the baseline window (`BASE.0`),
+/// so the baseline and the shock's control share it (M13 phase 5).
+fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOnce(&mut World)) -> Run {
+    let mut setup = Some(setup);
     let mut w = World::new(SEED, Config::load());
     let gangs = w.gangs();
     let founders: Vec<EntityId> = gangs.clone();
@@ -176,6 +183,9 @@ fn run(name: &'static str, shock: impl FnOnce(&mut World)) -> Run {
     let (mut days, mut story) = (Vec::new(), Vec::new());
     let mut next_id = 0u64;
     for day in 0..END_DAY {
+        if day == BASE.0 {
+            (setup.take().expect("once"))(&mut w);
+        }
         if day == SHOCK_DAY {
             (shock.take().expect("once"))(&mut w);
         }
@@ -234,6 +244,17 @@ fn run(name: &'static str, shock: impl FnOnce(&mut World)) -> Run {
 fn control() -> &'static Run {
     static C: OnceLock<Run> = OnceLock::new();
     C.get_or_init(|| run("control", |_| {}))
+}
+
+/// The control for a posture pin (M13 phase 5, as `god.rs`): the law
+/// pinned to Patrol from the baseline window on.
+fn patrol_control() -> &'static Run {
+    static C: OnceLock<Run> = OnceLock::new();
+    C.get_or_init(|| run_from("patrol_control", pin_patrol, |_| {}))
+}
+
+fn pin_patrol(w: &mut World) {
+    w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Patrol)));
 }
 
 fn mean_sd(xs: &[f64]) -> (f64, f64) {
@@ -473,7 +494,10 @@ impl Run {
     }
 
     fn assert_reacted(&self, focus: &[u8]) {
-        let c = control();
+        self.assert_reacted_against(control(), focus);
+    }
+
+    fn assert_reacted_against(&self, c: &Run, focus: &[u8]) {
         self.print(Some(c), focus);
         let r = self.reactions(c, REACT_DAYS);
         assert!(!r.is_empty(), "{}: nothing reacted within {REACT_DAYS} days of the shock", self.name);
@@ -527,6 +551,10 @@ fn god_litter_mid_east_to_cap() {
 #[ignore]
 fn god_split_gang() {
     let r = run("god_split_gang", |w| {
+        // M13 phase 5: seed 42's gangs now split on their own by day 28, so
+        // the city is at `max_gangs` by the shock and the command was
+        // refused ("4 gangs already"); god lifts the cap by one.
+        w.config.gangs.max_gangs = w.gangs().len().max(w.config.gangs.max_gangs) + 1;
         let mut gangs = w.gangs();
         gangs.sort_by_key(|&g| std::cmp::Reverse(citysim::systems::gang::held_districts(w, g).len()));
         for g in gangs.into_iter().take(1) {
@@ -547,8 +575,12 @@ fn god_split_gang() {
 #[test]
 #[ignore]
 fn god_garrison_60_days() {
-    let r = run("god_garrison_60_days", |w| w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Garrison))));
-    r.assert_reacted(&[SUMP_WEST, MID_EAST]);
+    // M13 phase 5: against a Patrol-pinned control, as `god.rs`'s posture
+    // pins: the unpinned control already sat in Garrison over the shock.
+    let r = run_from("god_garrison_60_days", pin_patrol, |w| {
+        w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Garrison)));
+    });
+    r.assert_reacted_against(patrol_control(), &[SUMP_WEST, MID_EAST]);
 }
 
 /// City rent 10 on Sump Blocks: evict the Sump's city tenants. Dregs,

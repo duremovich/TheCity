@@ -258,6 +258,8 @@ fn test_therapy_raises_sanity() {
 #[test]
 fn test_install_replaces_slot_with_buyback() {
     let mut w = small();
+    // The plan's implant prices (phase 5 calibration moved T1 to 60).
+    w.config.assets.price.implant = vec![150, 500, 1500];
     // D18, phase 3 rows: the Spire's (the Tech corp's) and two back-alley docs.
     let clinics = w.buildings_of_kind(BuildingKind::Clinic).to_vec();
     let mut names: Vec<String> =

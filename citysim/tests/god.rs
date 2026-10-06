@@ -66,6 +66,33 @@ struct Day {
     jailed: u32,
     city_treasury: i64,
     homes: usize,
+    /// M13 (docs/GOD_SCENARIOS_V4.md): printed by `print_m13`, never in
+    /// `series`, so the v1 scenarios' reaction checks are unchanged.
+    m13: M13Day,
+}
+
+/// The M13 readings of one day.
+#[derive(Clone, Debug, Default)]
+struct M13Day {
+    episodes: u32,
+    episodes_by_law: u32,
+    therapy: u32,
+    detox: u32,
+    installs: u32,
+    hooked: u32,
+    dealt: u32,
+    legal_sales: u32,
+    gang_income: i64,
+    gang_dealing: i64,
+    harvest_orders: u32,
+    raid_orders: u32,
+    /// Gang members with a working fighting implant (`Kit.fighting > 0`).
+    fighters: u32,
+    bricked: u32,
+    crashes: u32,
+    crash_deaths: u32,
+    manslaughter_reports: u32,
+    murder_reports: u32,
 }
 
 /// A named per-day metric.
@@ -87,6 +114,17 @@ fn run(name: &'static str, shock: impl FnOnce(&mut World)) -> Run {
 /// `run`, with `setup` fired at the start of the baseline window (`BASE.0`),
 /// so the baseline and the shock's control share it.
 fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOnce(&mut World)) -> Run {
+    run_daily(name, setup, shock, |_, _| {})
+}
+
+/// `run_from`, with `daily` called at the start of every day (M13: a chase
+/// pinned for a week).
+fn run_daily(
+    name: &'static str,
+    setup: impl FnOnce(&mut World),
+    shock: impl FnOnce(&mut World),
+    mut daily: impl FnMut(&mut World, u64),
+) -> Run {
     let mut w = World::new(SEED, Config::load());
     let mut setup = Some(setup);
     let gangs = w.gangs();
@@ -102,6 +140,7 @@ fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOn
         if day == SHOCK_DAY {
             (shock.take().expect("once"))(&mut w);
         }
+        daily(&mut w, day);
         w.run_ticks(TICKS_PER_DAY);
         let mut d = Day { day, ..Day::default() };
         d.joins = vec![0; gangs.len()];
@@ -120,6 +159,11 @@ fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOn
                         d.joins[i] += 1;
                     }
                 }
+                EventKind::Episode if e.text.contains(" went berserk ") => d.m13.episodes += 1,
+                EventKind::Treated if e.text.contains("Therapy") => d.m13.therapy += 1,
+                EventKind::Treated => d.m13.detox += 1,
+                EventKind::Report if e.text.ends_with(" for Manslaughter") => d.m13.manslaughter_reports += 1,
+                EventKind::Report if e.text.ends_with(" for Murder") => d.m13.murder_reports += 1,
                 _ => {}
             }
             let told = matches!(
@@ -157,6 +201,35 @@ fn run_from(name: &'static str, setup: impl FnOnce(&mut World), shock: impl FnOn
         d.city_treasury = row.treasury;
         d.guards = w.guards().len();
         d.homes = w.buildings_of_kind(citysim::BuildingKind::Home).len();
+        d.m13.episodes_by_law = row.episodes_by_law;
+        d.m13.installs = row.chrome_installs;
+        d.m13.hooked = row.hooked;
+        d.m13.dealt = row.stims_dealt;
+        d.m13.gang_income = row.gang_income;
+        d.m13.gang_dealing = row.gang_income_dealing;
+        d.m13.crashes = row.crashes;
+        d.m13.crash_deaths = row.crash_deaths;
+        d.m13.legal_sales = w
+            .buildings_of_kind(citysim::BuildingKind::Market)
+            .iter()
+            .filter_map(|&m| w.comp::<citysim::Market>(m))
+            .map(|m| m.stim_sales_today)
+            .sum();
+        for g in w.gangs() {
+            let Some(gg) = w.comp::<Gang>(g) else { continue };
+            d.m13.harvest_orders += u32::from(gg.order == Order::Harvest);
+            d.m13.raid_orders += u32::from(gg.order.is_raid());
+            d.m13.fighters +=
+                gg.members.iter().filter(|&&m| w.comp::<citysim::Kit>(m).is_some_and(|k| k.fighting > 0.0)).count()
+                    as u32;
+        }
+        d.m13.bricked = citysim::systems::assets::all_assets(&w)
+            .into_iter()
+            .filter(|&a| {
+                w.comp::<citysim::Asset>(a)
+                    .is_some_and(|x| x.bricked && matches!(x.loc, citysim::AssetLoc::Installed(_)))
+            })
+            .count() as u32;
         days.push(d);
     }
     Run { name, gang_names, days, story }
@@ -449,8 +522,13 @@ fn god_fire_all_guards() {
 #[test]
 #[ignore]
 fn god_garrison_forever() {
-    let r = run("god_garrison_forever", |w| w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Garrison))));
-    r.assert_reacted();
+    // M13 phase 5: as `god_crackdown_forever`. The unpinned captain now
+    // garrisons most of the year (the Jail is half gang members), and the
+    // control sat in Garrison on days 43-56, so pinning it at day 45 was no
+    // shock. The law holds Patrol from the baseline on, here and in the
+    // control, and the shock turns that Patrol into Garrison.
+    let r = run_from("god_garrison_forever", pin(Posture::Patrol), pin(Posture::Garrison));
+    r.assert_reacted_against(patrol_control());
 }
 
 /// Pin Crackdown. Does the target gang bribe, LieLow, break out, collapse?
@@ -497,4 +575,155 @@ fn god_city_takeover_by_force() {
     }
     eprint!("{o}");
     r.assert_reacted();
+}
+
+// ---------------------------------------------------------------------------
+// M13 god scenarios (docs/GOD_SCENARIOS_V4.md, plan 5.4): findings printed
+// against the control, never asserted; a failure to react goes into the
+// docs' Gaps list.
+// ---------------------------------------------------------------------------
+
+impl Run {
+    /// The M13 rows (window means, this run against the control).
+    fn print_m13(&self, control: &Run) {
+        let mut o = String::new();
+        outln!(o, "---- M13 readings: {} ----", self.name);
+        let windows = [(BASE.0, BASE.1, "base 30-45"), (45, 52, "45-52"), (45, 75, "45-75"), (75, 105, "75-105")];
+        out!(o, "{:<20}", "per-day mean");
+        for (_, _, n) in windows {
+            out!(o, "{n:>12}");
+        }
+        for (_, _, n) in &windows[1..] {
+            out!(o, "{:>12}", format!("ctl {n}"));
+        }
+        outln!(o);
+        let rows: Vec<Series> = vec![
+            ("episodes".into(), Box::new(|d: &Day| f64::from(d.m13.episodes))),
+            ("episodes by law".into(), Box::new(|d: &Day| f64::from(d.m13.episodes_by_law))),
+            ("Therapy".into(), Box::new(|d: &Day| f64::from(d.m13.therapy))),
+            ("Detox".into(), Box::new(|d: &Day| f64::from(d.m13.detox))),
+            ("installs".into(), Box::new(|d: &Day| f64::from(d.m13.installs))),
+            ("hooked".into(), Box::new(|d: &Day| f64::from(d.m13.hooked))),
+            ("dealt".into(), Box::new(|d: &Day| f64::from(d.m13.dealt))),
+            ("legal sales".into(), Box::new(|d: &Day| f64::from(d.m13.legal_sales))),
+            ("gang income".into(), Box::new(|d: &Day| d.m13.gang_income as f64)),
+            ("gang dealing".into(), Box::new(|d: &Day| d.m13.gang_dealing as f64)),
+            ("Harvest orders".into(), Box::new(|d: &Day| f64::from(d.m13.harvest_orders))),
+            ("raid orders".into(), Box::new(|d: &Day| f64::from(d.m13.raid_orders))),
+            ("raids".into(), Box::new(|d: &Day| f64::from(d.raids))),
+            ("chromed fighters".into(), Box::new(|d: &Day| f64::from(d.m13.fighters))),
+            ("bricked implants".into(), Box::new(|d: &Day| f64::from(d.m13.bricked))),
+            ("crashes".into(), Box::new(|d: &Day| f64::from(d.m13.crashes))),
+            ("crash deaths".into(), Box::new(|d: &Day| f64::from(d.m13.crash_deaths))),
+            ("Manslaughter rep.".into(), Box::new(|d: &Day| f64::from(d.m13.manslaughter_reports))),
+            ("Murder reports".into(), Box::new(|d: &Day| f64::from(d.m13.murder_reports))),
+            ("violence".into(), Box::new(|d: &Day| f64::from(d.violence))),
+            ("posture changes".into(), Box::new(|d: &Day| f64::from(d.posture_changes))),
+        ];
+        let cell = |r: &Run, f: &dyn Fn(&Day) -> f64, a: u64, b: u64| {
+            let (m, _) = mean_sd(&r.window(a, b).map(f).collect::<Vec<_>>());
+            format!("{m:.2}")
+        };
+        for (name, f) in &rows {
+            out!(o, "{name:<20}");
+            for (a, b, _) in windows {
+                out!(o, "{:>12}", cell(self, f, a, b));
+            }
+            for (a, b, _) in &windows[1..] {
+                out!(o, "{:>12}", cell(control, f, *a, *b));
+            }
+            outln!(o);
+        }
+        outln!(o, "law: {}", self.posture_history());
+        eprint!("{o}");
+    }
+
+    /// The standard table, the M13 rows and the v1 reaction list, without
+    /// an assertion (plan 5.4: findings, not asserts).
+    fn report_m13(&self, control: &Run) {
+        self.print(Some(control));
+        self.print_m13(control);
+    }
+}
+
+/// Every adult gets Arms and Nerves T2. Does the episode rate rise, does
+/// the captain's posture move, do the Clinics sell Therapy?
+#[test]
+#[ignore]
+fn god_chrome_everyone_2() {
+    let r = run("god_chrome_everyone_2", |w| w.push_command(PlayerCommand::ChromeEveryone { tier: 2 }));
+    r.report_m13(control());
+}
+
+/// 500 doses into every Hideout dealing in Sump East (district 7). Does
+/// addiction spread, does a rival gang raid for the stock?
+#[test]
+#[ignore]
+fn god_flood_stims_sump_east() {
+    let r = run("god_flood_stims_sump_east", |w| {
+        w.push_command(PlayerCommand::FloodStims { district: citysim::DistrictId(7), n: 500 });
+    });
+    r.report_m13(control());
+}
+
+/// Stims legal from day 30 (the setup at the baseline's start). Does gang
+/// income fall, does a gang turn to Harvest or Raid?
+#[test]
+#[ignore]
+fn god_stims_legal_day_30() {
+    let r = run_from("god_stims_legal_day_30", |w| w.push_command(PlayerCommand::SetStimsLegal(true)), |_| {});
+    r.report_m13(control());
+}
+
+/// The Spire Clinic's owner bricks every implant it financed. Does a gang
+/// lose its fighters?
+#[test]
+#[ignore]
+fn god_brick_spire_clinic_owner() {
+    let r = run("god_brick_spire_clinic_owner", |w| {
+        let spire = w
+            .buildings_of_kind(citysim::BuildingKind::Clinic)
+            .iter()
+            .copied()
+            .find(|&c| w.district_of_building(c).index() == 0);
+        match spire.and_then(|c| w.owner_of(c)) {
+            Some(o) => w.push_command(PlayerCommand::Brick(o)),
+            None => eprintln!("no Spire Clinic with an owner"),
+        }
+    });
+    r.report_m13(control());
+}
+
+/// A chase pinned on every driver of the Civic (Home or work there) each
+/// day for a week. A crash death, a Manslaughter or Murder report?
+#[test]
+#[ignore]
+fn god_chase_civic_core() {
+    let r = run_daily(
+        "god_chase_civic_core",
+        |_| {},
+        |_| {},
+        |w, day| {
+            if !(SHOCK_DAY..SHOCK_DAY + REACT_DAYS).contains(&day) {
+                return;
+            }
+            let civic = |w: &World, b: Option<EntityId>| b.is_some_and(|b| w.district_of_building(b).index() == 1);
+            let drivers: Vec<EntityId> = w
+                .citizens()
+                .into_iter()
+                .filter(|&a| w.comp::<citysim::Kit>(a).is_some_and(|k| k.vehicle.is_some()))
+                .filter(|&a| {
+                    civic(w, w.comp::<citysim::Household>(a).and_then(|h| h.home))
+                        || civic(w, w.comp::<citysim::Job>(a).and_then(|j| j.employer))
+                })
+                .collect();
+            if day == SHOCK_DAY {
+                eprintln!("god_chase_civic_core: {} Civic drivers pinned a day", drivers.len());
+            }
+            for a in drivers {
+                w.push_command(PlayerCommand::Chase(a));
+            }
+        },
+    );
+    r.report_m13(control());
 }

@@ -187,6 +187,32 @@ pub enum PlayerCommand {
     Wreck(EntityId),
     /// M13 D40/D48 (phase 4): Markets sell Stims legally, or stop.
     SetStimsLegal(bool),
+    /// M13 D48: an extra share of upkeep to the Treasury for one asset
+    /// class (`0.0..=5.0`; upkeep is charged x `1 + rate`).
+    SetAssetTax {
+        kind: crate::components::AssetClass,
+        rate: f32,
+    },
+    /// M13 D12/D48: whether the city impounds vehicles with unpaid upkeep.
+    SetImpound(bool),
+    // --- M13 god commands (plan D48, docs/GOD_SCENARIOS_V4.md).
+    /// Every living adult gets Arms and Nerves implants of `tier` (a slot
+    /// already filled is kept), free and without import.
+    ChromeEveryone {
+        tier: u8,
+    },
+    /// `n` Stims into the Hideout stock of every gang dealing in, holding
+    /// or hiding in the district (capped at the goods cap).
+    FloodStims {
+        district: crate::components::DistrictId,
+        n: u32,
+    },
+    /// Every implant this lender (agent, gang or corp) financed is bricked
+    /// at once: the loan is called (arrears to `repo_days`), so it stays
+    /// bricked until the debtor catches up or the lender takes it back.
+    Brick(EntityId),
+    /// Pin `chase` on the agent's next trip (D25; consumed at its end).
+    Chase(EntityId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -461,6 +487,18 @@ impl World {
                 let text = if *on { "Stims legal: Markets stock and sell them" } else { "Stims banned again" };
                 self.push_event(EventKind::PlayerAction, &[], text);
             }
+            PlayerCommand::SetAssetTax { kind, rate } => {
+                let r = rate.clamp(0.0, 5.0);
+                if let Some(t) = self.levers.asset_tax.get_mut(kind.index()) {
+                    *t = r;
+                }
+                self.push_event(EventKind::PlayerAction, &[], format!("Asset tax on {kind:?} set to {r:.2}"));
+            }
+            PlayerCommand::SetImpound(on) => {
+                self.levers.impound = *on;
+                let text = if *on { "The city impounds unregistered vehicles" } else { "The city stops impounding" };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
             PlayerCommand::SetRiotResponse(r) => {
                 self.levers.riot_response = *r;
                 let text = match r {
@@ -510,7 +548,11 @@ impl World {
             | PlayerCommand::Derelict(_)
             | PlayerCommand::BuyBuilding { .. }
             | PlayerCommand::GrantAsset { .. }
-            | PlayerCommand::Wreck(_) => {
+            | PlayerCommand::Wreck(_)
+            | PlayerCommand::ChromeEveryone { .. }
+            | PlayerCommand::FloodStims { .. }
+            | PlayerCommand::Brick(_)
+            | PlayerCommand::Chase(_) => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -671,7 +713,105 @@ impl World {
                 crate::systems::assets::wreck(self, a, "by god");
                 Ok((vec![a], format!("wrecked the {what}")))
             }
+            PlayerCommand::ChromeEveryone { .. }
+            | PlayerCommand::FloodStims { .. }
+            | PlayerCommand::Brick(_)
+            | PlayerCommand::Chase(_) => self.cmd_god_assets(cmd),
             _ => self.cmd_god_corp(cmd),
+        }
+    }
+
+    /// The M13 god commands on assets (plan D48, docs/GOD_SCENARIOS_V4.md).
+    fn cmd_god_assets(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
+        use crate::components::{Asset, AssetKind, AssetLoc, Controller, Good, Slot};
+        use crate::systems::{assets, demography, law, stims};
+        if !self.config.assets.enabled {
+            return Err("assets are off".into());
+        }
+        match *cmd {
+            PlayerCommand::ChromeEveryone { tier } => {
+                if assets::list_price(self, AssetKind::Implant(Slot::Arms), tier).is_none() {
+                    return Err(format!("ChromeEveryone: no implant at tier {tier}"));
+                }
+                let adults: Vec<EntityId> = self
+                    .citizens()
+                    .into_iter()
+                    .filter(|&a| law::living(self, a) && demography::is_adult(self, a))
+                    .collect();
+                let mut n = 0;
+                for &a in &adults {
+                    for slot in [Slot::Arms, Slot::Nerves] {
+                        if assets::grant(self, a, AssetKind::Implant(slot), tier).is_ok() {
+                            n += 1;
+                        }
+                    }
+                }
+                Ok((vec![], format!("chromed {} adults ({n} T{tier} implants)", adults.len())))
+            }
+            PlayerCommand::FloodStims { district, n } => {
+                if district.index() >= self.districts.len() {
+                    return Err("FloodStims: no such district".into());
+                }
+                let name = self.district_name(district).to_string();
+                let control = self.districts[district.index()].control;
+                let mut hideouts: Vec<(EntityId, EntityId)> = Vec::new();
+                for g in self.gangs() {
+                    let Some(h) = self.hideout_of(g) else { continue };
+                    let deals_here = stims::deal_bar(self, g).is_some_and(|b| self.district_of_building(b) == district);
+                    if deals_here || control == Controller::Gang(g) || self.district_of_building(h) == district {
+                        hideouts.push((g, h));
+                    }
+                }
+                if hideouts.is_empty() {
+                    return Err(format!("FloodStims: no gang deals in {name}"));
+                }
+                let mut added = 0;
+                for &(_, h) in &hideouts {
+                    added += self.add_stock(h, Good::Stims, n);
+                }
+                let gangs: Vec<EntityId> = hideouts.iter().map(|&(g, _)| g).collect();
+                Ok((gangs, format!("flooded {} Hideouts dealing in {name} with {added} Stims", hideouts.len())))
+            }
+            PlayerCommand::Brick(lender) => {
+                if !(self.has::<Brain>(lender) || self.has::<Gang>(lender) || self.has::<Corp>(lender)) {
+                    return Err("Brick: no such lender".into());
+                }
+                let repo_days = self.config.assets.repo_days;
+                let mut bodies = Vec::new();
+                let mut n = 0;
+                for a in assets::all_assets(self) {
+                    let Some(x) = self.comp_mut::<Asset>(a) else { continue };
+                    if !x.kind.is_implant() {
+                        continue;
+                    }
+                    let Some(f) = x.finance.as_mut() else { continue };
+                    if f.lender != Some(lender) {
+                        continue;
+                    }
+                    f.arrears = f.arrears.max(repo_days);
+                    x.bricked = true;
+                    n += 1;
+                    if let AssetLoc::Installed(b) = x.loc {
+                        bodies.push(b);
+                    }
+                }
+                bodies.sort_unstable();
+                bodies.dedup();
+                for &b in &bodies {
+                    assets::rekit(self, b);
+                }
+                self.stats.current.repos += n;
+                let who = self.owner_label(Some(lender));
+                Ok((vec![lender], format!("{who} bricked {n} financed implants in {} bodies", bodies.len())))
+            }
+            PlayerCommand::Chase(agent) => {
+                if !law::living(self, agent) || !self.has::<Brain>(agent) {
+                    return Err("Chase: no such agent".into());
+                }
+                self.chase_pins.insert(agent);
+                Ok((vec![agent], format!("pinned a chase on {}'s next trip", self.name_of(agent))))
+            }
+            _ => Err("not an asset god command".into()),
         }
     }
 

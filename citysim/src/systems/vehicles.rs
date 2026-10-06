@@ -214,7 +214,11 @@ pub fn vehicle_for_trip(world: &World, agent: EntityId) -> Option<EntityId> {
     let owner = world.owner_of(here)?;
     at_here.iter().copied().find(|&a| {
         asset(world, a).is_some_and(|x| {
-            parked_here(x) && x.owner == Some(owner) && x.keeper.is_none() && x.kind != AssetKind::Truck && !x.stolen
+            parked_here(x)
+                && x.owner == Some(owner)
+                && x.keeper.is_none()
+                && !matches!(x.kind, AssetKind::Truck | AssetKind::Flyer)
+                && !x.stolen
         })
     })
 }
@@ -308,12 +312,14 @@ pub fn end_trip(world: &mut World, agent: EntityId, arrived: bool) {
     };
     assets::set_loc(world, v, AssetLoc::Parked(park));
     if let Some(k) = x.keeper {
-        let corp_fleet = x.owner.is_some_and(|o| world.has::<Corp>(o));
+        // An exec's flyer (phase 5) stays the exec's.
+        let corp_fleet = x.kind != AssetKind::Flyer && x.owner.is_some_and(|o| world.has::<Corp>(o));
         let workplace = world.comp::<Job>(k).and_then(|j| j.employer);
-        // M13 ph5: a corp car parked away from its owner's buildings for 2+
-        // days should be recalled (softer form of the abort-time keeper
-        // clear; the hard form shifted seed 42's regime, see the phase 2 fix
-        // commit).
+        // A trip aborted away from work keeps its keeper here; the soft
+        // form of the abort-time keeper clear is in `fleet_recall` (phase
+        // 5): a kept corp car parked away from its owner's buildings for 2
+        // midnights is recalled. (The hard form, clearing at the abort,
+        // shifted seed 42's regime: see the phase 2 fix commit.)
         if corp_fleet && workplace == Some(park) {
             assets::set_keeper(world, v, None);
         }
@@ -713,8 +719,65 @@ pub fn corp_fleet(world: &mut World, corp: EntityId) {
     if ((order == CorpOrder::Grow && niche == Some(Niche::Food)) || (any && food)) && buy_truck(world, corp) {
         return;
     }
-    if (order == CorpOrder::Grow && niche == Some(Niche::Security)) || (any && security) {
-        buy_office_car(world, corp);
+    if ((order == CorpOrder::Grow && niche == Some(Niche::Security)) || (any && security))
+        && buy_office_car(world, corp)
+    {
+        return;
+    }
+    if any || order == CorpOrder::Grow {
+        exec_flyer(world, corp);
+    }
+}
+
+/// Phase 5 (the acceptance's Spire execs flying over the Sump): a corp
+/// whose exec has no vehicle hands it the corp's keeper-less flyer, or buys
+/// one (cash only, as every flyer) when its treasury and books hold
+/// `[shop] exec_flyer_cash_mult × price` plus the fleet reserve. Owned by
+/// the corp (upkeep to its books), kept by the exec for good, parked at
+/// the exec's Home.
+fn exec_flyer(world: &mut World, corp: EntityId) -> bool {
+    let mult = world.config.shop.exec_flyer_cash_mult;
+    if mult <= 0.0 {
+        return false;
+    }
+    let Some(exec) = world.comp::<Corp>(corp).and_then(|c| c.exec) else { return false };
+    if !crate::systems::law::living(world, exec)
+        || world.has::<crate::components::Sentence>(exec)
+        || world.comp::<crate::components::Kit>(exec).is_some_and(|k| k.vehicle.is_some())
+    {
+        return false;
+    }
+    let Some(home) = world
+        .comp::<crate::components::Household>(exec)
+        .and_then(|h| h.home)
+        .or_else(|| world.comp::<Job>(exec).and_then(|j| j.employer))
+    else {
+        return false;
+    };
+    let flyers = corp_vehicles(world, corp, AssetKind::Flyer);
+    if let Some(&f) = flyers.iter().find(|&&f| asset(world, f).is_some_and(|x| x.keeper.is_none())) {
+        assets::set_keeper(world, f, Some(exec));
+        return true;
+    }
+    if !flyers.is_empty() {
+        return false;
+    }
+    let list = assets::list_price(world, AssetKind::Flyer, 1).unwrap_or(i64::MAX);
+    let (closing, reserve) = world.comp::<Corp>(corp).map_or((0, 0), |c| (c.closing, c.treasury_ref / 4));
+    let need = (list as f32 * mult).round() as i64;
+    if world.purse(Some(corp)).min(closing) < need.saturating_add(reserve) {
+        return false;
+    }
+    let Some(g) = door_of(world, home).and_then(|d| nearest_garage(world, d)) else { return false };
+    let pick = ShopPick { kind: AssetKind::Flyer, tier: 1, used: None };
+    let note = format!("for {}", world.name_of(exec));
+    match assets::buy_noted(world, corp, g, &pick, Some(&note)) {
+        Ok(v) => {
+            assets::set_loc(world, v, AssetLoc::Parked(home));
+            assets::set_keeper(world, v, Some(exec));
+            true
+        }
+        Err(_) => false,
     }
 }
 
@@ -739,7 +802,24 @@ pub fn fleet_recall(world: &mut World) {
             if stale {
                 assets::set_keeper(world, v, None);
             }
-            let keeper = if stale { None } else { x.keeper };
+            let mut keeper = if stale { None } else { x.keeper };
+            // Phase 5 (the soft abort-time keeper clear): a kept car parked
+            // away from every building of its owner for 2 midnights is
+            // recalled like a keeper-less one.
+            if x.kind == AssetKind::Car && keeper.is_some() {
+                let away = world.owner_of(at) != Some(owner);
+                let days = if away { x.away_days.saturating_add(1) } else { 0 };
+                if let Some(m) = world.comp_mut::<crate::components::Asset>(v) {
+                    m.away_days = days;
+                }
+                if days >= 2 {
+                    assets::set_keeper(world, v, None);
+                    if let Some(m) = world.comp_mut::<crate::components::Asset>(v) {
+                        m.away_days = 0;
+                    }
+                    keeper = None;
+                }
+            }
             let (kind, home_kind) = match x.kind {
                 AssetKind::Truck => (x.kind, BuildingKind::Farm),
                 AssetKind::Car if keeper.is_none() => (x.kind, BuildingKind::SecurityOffice),
@@ -802,9 +882,17 @@ pub fn return_gang_vehicles(world: &mut World, agent: EntityId, gang: EntityId) 
     }
 }
 
-/// The agent's own vehicle, or its gang's, or one it keeps.
+/// The agent's own vehicle, or its gang's, or one it keeps, or (phase 5)
+/// its household's: a spouse or housemate parked at the same Home. Seed 42
+/// had a wife steal her husband's bike from their door 9 times, each one
+/// recovered home when no gang could pay the fence (37 thefts of one bike).
 fn own_or_gang(world: &World, agent: EntityId, x: &crate::components::Asset) -> bool {
-    x.owner == Some(agent) || x.keeper == Some(agent) || (x.owner.is_some() && x.owner == world.gang_of(agent))
+    if x.owner == Some(agent) || x.keeper == Some(agent) || (x.owner.is_some() && x.owner == world.gang_of(agent)) {
+        return true;
+    }
+    let Some(o) = x.owner.filter(|&o| world.has::<crate::components::Household>(o)) else { return false };
+    let home = |a: EntityId| world.comp::<crate::components::Household>(a).and_then(|h| h.home);
+    world.spouse_of(agent) == Some(o) || home(agent).is_some_and(|h| home(o) == Some(h))
 }
 
 /// D26: may `agent` steal `v` now: a street-parked, working vehicle that is
@@ -812,13 +900,29 @@ fn own_or_gang(world: &World, agent: EntityId, x: &crate::components::Asset) -> 
 /// already stolen (phase 2: an abandoned stolen car was stolen again and
 /// again, 77 times in one run; `recover_abandoned` returns it instead).
 pub fn may_steal(world: &World, agent: EntityId, v: EntityId) -> bool {
-    let Some(x) = asset(world, v) else { return false };
-    if !x.kind.is_vehicle() || x.condition == 0 || x.stolen || own_or_gang(world, agent, x) || !street_parked(world, v)
-    {
-        return false;
+    let Some(pos) = world.comp::<Position>(agent).map(|p| p.tile) else { return false };
+    stealable_at(world, agent, v, pos).is_some()
+}
+
+/// [`may_steal`]'s test from `pos`, returning the stand's distance. Phase 5
+/// (throughput): the cheap tests and the reach first, the household and
+/// robot lookups last; `steal_target` runs it over every vehicle per think
+/// of a lawless adult (190 vehicles cost ~7 us an agent before).
+fn stealable_at(world: &World, agent: EntityId, v: EntityId, pos: TilePos) -> Option<u32> {
+    let x = asset(world, v)?;
+    if !x.kind.is_vehicle() || x.condition == 0 || x.stolen {
+        return None;
     }
-    let (Some(stand), Some(pos)) = (vehicle_stand(world, v), world.comp::<Position>(agent)) else { return false };
-    stand.manhattan(pos.tile) <= world.config.vehicles.steal_reach
+    let AssetLoc::Parked(b) = x.loc else { return None };
+    let bd = world.comp::<Building>(b)?;
+    if bd.kind == BuildingKind::Garage {
+        return None;
+    }
+    let d = world.outside_door(bd).manhattan(pos);
+    if d > world.config.vehicles.steal_reach || own_or_gang(world, agent, x) || powered_robot(world, b) {
+        return None;
+    }
+    Some(d)
 }
 
 /// D26: the nearest vehicle the agent may steal (ties lower id).
@@ -831,8 +935,7 @@ pub fn steal_target(world: &World, agent: EntityId) -> Option<EntityId> {
         .vehicles
         .iter()
         .copied()
-        .filter(|&v| may_steal(world, agent, v))
-        .filter_map(|v| vehicle_stand(world, v).map(|s| (s.manhattan(pos), v)))
+        .filter_map(|v| stealable_at(world, agent, v, pos).map(|d| (d, v)))
         .min()
         .map(|(_, v)| v)
 }

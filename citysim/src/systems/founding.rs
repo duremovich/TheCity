@@ -44,6 +44,19 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
     }
 }
 
+/// What an agent's `Register` pays: `found_cost`, except a Clinic or a
+/// Garage at `[assets] found_cost_clinic` / `found_cost_garage` when set
+/// (M13 phase 5; corps build at `found_cost`).
+pub fn agent_found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
+    let cost = found_cost(world, kind)?;
+    let a = &world.config.assets;
+    Some(match kind {
+        BuildingKind::Clinic => a.found_cost_clinic.unwrap_or(cost),
+        BuildingKind::Garage => a.found_cost_garage.unwrap_or(cost),
+        _ => cost,
+    })
+}
+
 /// The vacant Lot whose door is nearest `from` (Manhattan, ties lower id).
 pub fn nearest_lot(world: &World, from: TilePos) -> Option<EntityId> {
     vacant_lots(world)
@@ -163,14 +176,24 @@ pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
         match kind {
             BuildingKind::Bar => world.config.corps.residents_per_bar.max(1) as f32,
             BuildingKind::Hotel => world.config.corps.residents_per_hotel.max(1) as f32,
-            BuildingKind::Clinic => world.config.corps.residents_per_clinic.max(1) as f32,
-            BuildingKind::Garage => world.config.corps.residents_per_garage.max(1) as f32,
+            BuildingKind::Clinic => world
+                .config
+                .assets
+                .founder_residents_per_seller
+                .unwrap_or(world.config.corps.residents_per_clinic)
+                .max(1) as f32,
+            BuildingKind::Garage => world
+                .config
+                .assets
+                .founder_residents_per_seller
+                .unwrap_or(world.config.corps.residents_per_garage)
+                .max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };
     let mut best: Option<(f32, BuildingKind)> = None;
     for kind in FOUNDABLE {
-        let Some(cost) = found_cost(world, kind) else { continue };
+        let Some(cost) = agent_found_cost(world, kind) else { continue };
         if coins < cost {
             continue;
         }
@@ -247,7 +270,7 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
     }
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let kind = choose_kind(world, coins).ok_or("nothing affordable")?;
-    let cost = found_cost(world, kind).ok_or("not foundable")?;
+    let cost = agent_found_cost(world, kind).ok_or("not foundable")?;
     let from = world
         .comp::<Household>(agent)
         .and_then(|h| h.home)

@@ -2702,6 +2702,14 @@ pub struct Asset {
     /// Plan D1: the list price at purchase.
     #[serde(default)]
     pub list: i64,
+    /// Phase 5: midnights a kept corp car has stood parked away from its
+    /// owner's buildings (recalled at 2, `vehicles::fleet_recall`).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub away_days: u8,
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
 }
 
 /// Derived, never saved: rebuilt on load and by `assets::rekit` after any

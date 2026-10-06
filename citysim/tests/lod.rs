@@ -285,7 +285,8 @@ fn test_full_vs_statistical_within_15pct() {
 /// kitted adults' violent-death rate ÷ the bare adults' is the kill ratio;
 /// the Statistical ratio is within 0.25 of the Full one. The calibration
 /// city kills too few for a ratio, so the fight's death chance is ×10 and
-/// the table's violence ×5 in both arms, and sanity is held at 1 (no drift:
+/// the table's violence ×5 in both arms, and sanity is held at 1 (no drift,
+/// no unpaid-upkeep drift:
 /// no Treat trips, no edgy mood; the D46 multipliers have no sanity
 /// reading). Run with `--ignored`.
 #[test]
@@ -305,6 +306,10 @@ fn test_kitted_vs_unkitted_parity() {
         cfg.assets = full.assets.clone();
         cfg.chrome = full.chrome.clone();
         cfg.chrome.sanity_drift = 0.0;
+        // M13 phase 5: and no unpaid-upkeep drift. With `psycho` at 0.8 the
+        // T2 implants' unpaid upkeep (0.02 a day each) brought kitted bodies
+        // to episodes in days, and berserkers die resisting arrest.
+        cfg.chrome.unmedicated_drift = 0.0;
         cfg.lod.flash_w = full.lod.flash_w;
         cfg.lod.force = Some(force);
         cfg.lod.stat_violence_mult = 5.0;
