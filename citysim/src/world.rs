@@ -900,6 +900,7 @@ impl World {
                     security: Default::default(),
                     focus: None,
                     hacked: None,
+                    last_door_open: None,
                 },
             );
             match def.kind {

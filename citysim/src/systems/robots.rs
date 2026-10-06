@@ -36,6 +36,7 @@ pub fn powered_robot(world: &World, b: EntityId) -> Option<EntityId> {
     if !world.config.assets.enabled {
         return None;
     }
+    let now = world.tick;
     assets::assets_at(world, b).iter().copied().find(|&a| {
         world.comp::<Asset>(a).is_some_and(|x| {
             x.kind == AssetKind::Robot
@@ -43,6 +44,8 @@ pub fn powered_robot(world: &World, b: EntityId) -> Option<EntityId> {
                 && x.condition > 0
                 && x.upkeep_arrears == 0
                 && !x.bricked
+                // M14 V33: a turned robot serves its owner in nothing.
+                && x.turned.is_none_or(|(_, until)| until <= now)
         })
     })
 }
@@ -104,6 +107,10 @@ pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> S
         return Sensed::Unseen;
     }
     let Some(robot) = powered_robot(world, b) else { return Sensed::Unseen };
+    // M14 V32/V33: a Blind or DoorOpen hack keeps the sensor off.
+    if crate::systems::virt::sensors_off(world, b) {
+        return Sensed::Unseen;
+    }
     // M14 V23: the sensor contests at the robot's effective tier.
     let robot_tier = world.comp::<Asset>(robot).map_or(1, |x| assets::eff_tier_of(world, x));
     let thief_tier = crate::systems::security::thief_tier(crate::systems::law::stealth(world, actor));

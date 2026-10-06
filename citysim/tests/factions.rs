@@ -71,6 +71,10 @@ fn inputs() -> OrderInputs {
         harvest_cover: 0.0,
         lawfulness: 0.5,
         treasury_x: 0.0,
+        runner: None,
+        virt_ev: 0.0,
+        virt_p: 0.0,
+        hacked: false,
     }
 }
 
@@ -835,6 +839,10 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         harvest_cover: 0.0,
         lawfulness: 0.5,
         treasury_x: 0.0,
+        runner: None,
+        virt_ev: 0.0,
+        virt_p: 0.0,
+        hacked: false,
         hoard: 0.5,
         hoard_tilt: 0.2,
         courage: 0.8,

@@ -567,8 +567,11 @@ fn test_contracts_bill_daily_and_lapse_unpaid() {
     w.comp_mut::<Corp>(client).expect("c").treasury = 1000;
     let total = ownership::total_coins(&w);
     let (a0, c0) = (w.purse(Some(arasaka)), w.purse(Some(client)));
+    // M14 V40: ICE installs (day-0 Secure) also book `Flow::Contract`; the
+    // day's bill is the delta across `daily`.
+    let f0 = w.stats.current.flow_contract;
     corps::daily(&mut w);
-    assert_eq!(w.stats.current.flow_contract, price, "one day billed");
+    assert_eq!(w.stats.current.flow_contract - f0, price, "one day billed");
     assert_eq!(w.purse(Some(client)), c0 - price);
     assert!(w.purse(Some(arasaka)) > a0, "the seller earns it, less tax");
     assert_eq!(ownership::total_coins(&w), total);
@@ -727,6 +730,10 @@ fn test_hoard_tilts_contest() {
         harvest_cover: 0.0,
         lawfulness: 0.5,
         treasury_x: 0.0,
+        runner: None,
+        virt_ev: 0.0,
+        virt_p: 0.0,
+        hacked: false,
     };
     let contest = |i: &faction::OrderInputs| {
         faction::score_orders(i, &w.config.gangs)

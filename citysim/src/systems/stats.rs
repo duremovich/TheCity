@@ -241,6 +241,13 @@ fn virt_snapshot(world: &mut World) {
         }
     }
     let decks = crate::systems::virt::decks_owned(world);
+    // Phase 3 (V43): cameras posted and working.
+    let cameras = world
+        .buildings_by_kind
+        .values()
+        .flatten()
+        .filter(|&&b| crate::systems::virt::camera_at(world, b).is_some())
+        .count() as u32;
     let mut corps = vec![[0u32; 4]; crate::stats::CORP_SLOTS];
     for c in world.corps() {
         let Some(cc) = world.comp::<crate::components::Corp>(c) else { continue };
@@ -255,6 +262,7 @@ fn virt_snapshot(world: &mut World) {
     v.ice_mean_corp = if n_ice > 0 { ice as f32 / n_ice as f32 } else { 0.0 };
     v.data_held = held;
     v.decks = decks;
+    v.cameras = cameras;
     v.corps = corps;
 }
 
