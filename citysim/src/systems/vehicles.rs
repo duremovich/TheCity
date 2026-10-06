@@ -37,17 +37,9 @@ pub fn parked_at(world: &World, v: EntityId) -> Option<EntityId> {
     }
 }
 
-/// A powered robot is posted at `b` (phase 4 posts them; god grants now).
+/// A powered robot is posted at `b` (`robots::powered_robot`, D41).
 pub fn powered_robot(world: &World, b: EntityId) -> bool {
-    assets_at(world, b).iter().any(|&a| {
-        world.comp::<crate::components::Asset>(a).is_some_and(|x| {
-            x.kind == AssetKind::Robot
-                && x.loc == AssetLoc::Posted(b)
-                && x.condition > 0
-                && x.upkeep_arrears == 0
-                && !x.bricked
-        })
-    })
+    crate::systems::robots::powered_robot(world, b).is_some()
 }
 
 /// Plan D27: parked at a building that is not a Garage and has no powered robot.

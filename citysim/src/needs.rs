@@ -25,6 +25,9 @@ pub struct DecayCtx {
     pub threat_near: bool,
     pub under_18: bool,
     pub sociability: f32,
+    /// M13 D39: energy decay × this in withdrawal; `None` is today's
+    /// arithmetic (a branch, not a multiply by 1).
+    pub energy_mult: Option<f32>,
 }
 
 impl DecayCtx {
@@ -52,6 +55,9 @@ pub fn decay(n: &mut Needs, cfg: &NeedsCfg, ctx: &DecayCtx, ticks: u32) {
         let mut energy = cfg.energy_decay_per_tick * ctx.season_energy_mult;
         if ctx.exerting {
             energy *= 1.5;
+        }
+        if let Some(m) = ctx.energy_mult {
+            energy *= m;
         }
         n.energy = (n.energy - energy * t).max(0.0);
     }
@@ -103,11 +109,14 @@ pub fn run(world: &mut World) {
             .any(|&(_, g, gt)| g != id && gt.manhattan(t) <= sight)
     };
 
+    let assets = world.config.assets.enabled;
     for id in world.bodies() {
         let Some(brain) = world.comp::<Brain>(id) else { continue };
         if brain.lod == Lod::Statistical {
             continue;
         }
+        // M13 D39: one Body read (withdrawal is derived from `last_use`).
+        let energy_mult = if assets { crate::systems::stims::energy_mult(world, id) } else { None };
         let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. });
         let sleeping_outside = sleeping && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });
@@ -127,6 +136,7 @@ pub fn run(world: &mut World) {
             threat_near: false,
             under_18,
             sociability,
+            energy_mult,
         };
         let cfg = world.config.needs.clone();
         let Some(n) = world.comp_mut::<Needs>(id) else { continue };

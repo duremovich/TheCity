@@ -97,10 +97,20 @@ pub enum ActionKind {
     Rip,
     /// M13 D36: drag the Harvest target off (a fight; the M9 escort drag).
     Abduct,
+    /// M13 D38: a dealer takes a batch of Stims from its gang's Hideout.
+    PickUp,
+    /// M13 D38: a dealer's shift at the deal Bar (registered as a dealer there).
+    Deal,
+    /// M13 D38/D40: buy doses at a Stims source (a dealer, a legal Market).
+    BuyStims,
+    /// M13 D39: take a dose from the inventory.
+    UseStim,
+    /// M13 D39: at a Clinic, pay for Detox (addiction x `detox_mult`).
+    Detox,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 73] = [
+pub const PLANNABLE: [ActionKind; 79] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -130,6 +140,8 @@ pub const PLANNABLE: [ActionKind; 73] = [
     // M13 D34, D36.
     ActionKind::GoTo(LocationKey::Clinic),
     ActionKind::GoTo(LocationKey::Victim),
+    // M13 D38/D40.
+    ActionKind::GoTo(LocationKey::StimSource),
     ActionKind::EatFromInventory,
     ActionKind::EatAtHome,
     ActionKind::BuyFood,
@@ -179,6 +191,11 @@ pub const PLANNABLE: [ActionKind; 73] = [
     ActionKind::Strip,
     ActionKind::Rip,
     ActionKind::Abduct,
+    ActionKind::PickUp,
+    ActionKind::Deal,
+    ActionKind::BuyStims,
+    ActionKind::UseStim,
+    ActionKind::Detox,
 ];
 
 impl ActionKind {
@@ -265,6 +282,11 @@ impl ActionKind {
                 | ActionKind::Strip
                 | ActionKind::Rip
                 | ActionKind::Abduct
+                | ActionKind::PickUp
+                | ActionKind::Deal
+                | ActionKind::BuyStims
+                | ActionKind::UseStim
+                | ActionKind::Detox
         )
     }
 }
@@ -403,6 +425,22 @@ pub struct PlanCtx {
     pub victim_target: bool,
     /// M13 D33: in a cyberpsychotic episode.
     pub episode: bool,
+    /// M13 D38: a dealer of its gang whose bound target is its deal Bar.
+    pub dealer: bool,
+    /// M13 D38: Stims in the agent's gang's Hideout.
+    pub hideout_stims: u32,
+    /// M13 D38: `[stims] deal_batch`.
+    pub deal_batch: u32,
+    /// M13 D38/D40: the target is a Stims source and the agent can pay a dose.
+    pub stim_affordable: bool,
+    /// M13 D40: the bound source is a legal Market (no crime in it).
+    pub stim_legal: bool,
+    /// M13 D39: the target is a Clinic, addiction drives the Treat score, and
+    /// the agent can pay for Detox.
+    pub detox_affordable: bool,
+    /// M13 D39: in withdrawal, `withdrawal_steal_bonus` off a theft's cost
+    /// (0 otherwise: a branch).
+    pub withdrawal_bonus: f32,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -538,6 +576,20 @@ impl PlanCtx {
                 world.comp::<crate::components::Corpse>(t).is_some_and(|c| !c.buried)
                     && !crate::systems::chrome::installed(world, t).is_empty()
             });
+        // M13 D38-D40: dealing, buying and Detox.
+        let stims_on = world.config.assets.enabled;
+        let gang_hideout = world.gang_of(agent).and_then(|g| world.hideout_of(g));
+        let dealer = stims_on && target.is_some() && crate::systems::stims::dealer_target(world, agent) == target;
+        let source_price =
+            if stims_on { target.and_then(|t| crate::systems::stims::source_price(world, t)) } else { None };
+        let stim_source = source_price.is_some();
+        let coins_now = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
+        let detox_pick = stims_on && target_clinic.is_some() && crate::systems::stims::detox_drives(world, agent);
+        let withdrawal_bonus = if stims_on && crate::systems::stims::in_withdrawal(world, agent) {
+            world.config.stims.withdrawal_steal_bonus
+        } else {
+            0.0
+        };
         // M12 D21/D27: the street's rungs (homeless agents only; cheap scans
         // over the few Hotels and derelicts).
         let homeless = home.is_none();
@@ -563,11 +615,15 @@ impl PlanCtx {
             add(LocationKey::Hotel, hotel);
             add(LocationKey::Squat, squat.or(derelict_target));
             // M13 D29: the bound seller (a Garage, a Market for a pack).
-            if target
-                .and_then(|t| world.comp::<Building>(t))
-                .is_some_and(|b| matches!(b.kind, BuildingKind::Garage | BuildingKind::Clinic | BuildingKind::Market))
-            {
+            // M13 D38: a dealer's deal Bar too.
+            if target.and_then(|t| world.comp::<Building>(t)).is_some_and(|b| {
+                matches!(b.kind, BuildingKind::Garage | BuildingKind::Clinic | BuildingKind::Market | BuildingKind::Bar)
+            }) {
                 add(LocationKey::Seller, target);
+            }
+            // M13 D38/D40: the bound Stims source.
+            if stim_source {
+                add(LocationKey::StimSource, target);
             }
             // M13 D34: the bound Clinic, else a Ripperdoc's employer.
             let clinic = target
@@ -728,15 +784,25 @@ impl PlanCtx {
             can_fence_vehicle: crate::systems::vehicles::can_fence(world, agent, target),
             steal_vehicle_cost: world.config.vehicles.steal_vehicle_cost,
             install_ready: target_clinic.is_some() && crate::systems::chrome::reserved_implant(world, agent).is_some(),
-            therapy_affordable: target_clinic.is_some_and(|c| {
-                world.comp::<Wallet>(agent).map_or(0, |w| w.coins) >= crate::systems::chrome::therapy_price(world, c)
-            }),
+            // M13 D39: the Treat goal's Detox branch takes the Clinic visit
+            // when addiction drives its score.
+            therapy_affordable: !detox_pick
+                && target_clinic.is_some_and(|c| coins_now >= crate::systems::chrome::therapy_price(world, c)),
             has_implant: world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.chrome),
             loot_target,
             loot_implants,
             may_rip,
             victim_target,
             episode,
+            dealer,
+            hideout_stims: gang_hideout.map_or(0, |h| world.stock(h, crate::components::Good::Stims)),
+            deal_batch: world.config.stims.deal_batch,
+            stim_affordable: source_price.is_some_and(|p| coins_now >= p),
+            stim_legal: stim_source
+                && target.and_then(|t| world.comp::<Building>(t)).is_some_and(|b| b.kind == BuildingKind::Market),
+            detox_affordable: detox_pick
+                && target_clinic.is_some_and(|c| coins_now >= crate::systems::stims::detox_price(world, c)),
+            withdrawal_bonus,
             dist,
         }
     }
@@ -785,6 +851,8 @@ pub fn set_key(ws: &mut WorldState, key: crate::goap::world_state::Key, value: b
         K::CarryingVehicle => ws.carrying_vehicle = value,
         K::Treated => ws.treated = value,
         K::Stripped => ws.stripped = value,
+        K::HasStims => ws.has_stims = value,
+        K::High => ws.high = value,
     }
 }
 
@@ -814,6 +882,9 @@ impl ActionKind {
             ActionKind::Install | ActionKind::Therapy | ActionKind::Uninstall | ActionKind::Strip => ctx.adult,
             ActionKind::Rip => ctx.adult && ctx.may_rip,
             ActionKind::Abduct => ctx.in_gang,
+            // M13 D38/D39.
+            ActionKind::PickUp | ActionKind::Deal => ctx.in_gang && ctx.dealer,
+            ActionKind::BuyStims | ActionKind::UseStim | ActionKind::Detox => ctx.adult,
             // M12 D31: a rioter marches too.
             ActionKind::Muster | ActionKind::Brawl => ctx.in_gang || ctx.raid_pending,
             ActionKind::PatrolLeg | ActionKind::Arrest | ActionKind::Escort => ctx.is(Role::Guard),
@@ -923,6 +994,12 @@ impl ActionKind {
             }
             ActionKind::Abduct => at(LocationKey::Victim) && ctx.victim_target && !ws.carrying_corpse,
             ActionKind::StealVehicle => at(LocationKey::Vehicle) && ctx.vehicle_target && !ws.carrying_vehicle,
+            // M13 D38/D39.
+            ActionKind::PickUp => at(LocationKey::Hideout) && ctx.hideout_stims >= ctx.deal_batch && !ws.has_stims,
+            ActionKind::Deal => at(LocationKey::Seller) && ws.has_stims && !ws.gang_task_done,
+            ActionKind::BuyStims => at(LocationKey::StimSource) && ctx.stim_affordable && !ws.has_stims,
+            ActionKind::UseStim => ws.has_stims && !ws.high,
+            ActionKind::Detox => at(LocationKey::Clinic) && ctx.detox_affordable && !ws.treated,
             ActionKind::Muster => at(LocationKey::MusterPoint) && !ws.mustered && ctx.raid_pending,
             ActionKind::Brawl => at(LocationKey::RaidTarget) && ws.mustered && !ws.raid_done,
             // M13 D33: a berserker closes in on its quarry first.
@@ -985,6 +1062,10 @@ impl ActionKind {
             ActionKind::Rip => ctx.loot_implants || ctx.victim_target,
             ActionKind::Abduct => ctx.victim_target && ctx.dist.contains_key(&LocationKey::Victim),
             ActionKind::StealVehicle => ctx.vehicle_target && ctx.dist.contains_key(&LocationKey::Vehicle),
+            ActionKind::PickUp => ctx.hideout_stims >= ctx.deal_batch && ctx.dist.contains_key(&LocationKey::Hideout),
+            ActionKind::Deal => ctx.dist.contains_key(&LocationKey::Seller),
+            ActionKind::BuyStims => ctx.stim_affordable && ctx.dist.contains_key(&LocationKey::StimSource),
+            ActionKind::Detox => ctx.detox_affordable && ctx.dist.contains_key(&LocationKey::Clinic),
             ActionKind::Muster => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::MusterPoint),
             ActionKind::Brawl => ctx.raid_pending && ctx.dist.contains_key(&LocationKey::RaidTarget),
             ActionKind::Attack => ctx.hostile_adjacent || (ctx.episode && ctx.dist.contains_key(&LocationKey::Victim)),
@@ -1170,6 +1251,21 @@ impl ActionKind {
             }
             // The abductee rides the corpse-carry key (plan, Actions table).
             ActionKind::Abduct => n.carrying_corpse = true,
+            ActionKind::PickUp => n.has_stims = true,
+            ActionKind::Deal => n.gang_task_done = true,
+            ActionKind::BuyStims => {
+                n.has_stims = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
+            ActionKind::UseStim => n.high = true,
+            ActionKind::Detox => {
+                n.treated = true;
+                n.coin_bucket = n.coin_bucket.saturating_sub(1);
+                n.has_coins = n.coin_bucket >= 1;
+                n.has_savings = false;
+            }
             _ => {}
         }
         n
@@ -1187,6 +1283,10 @@ impl ActionKind {
             }
             if ctx.dark {
                 c -= 3.0;
+            }
+            // M13 D39: withdrawal makes a theft cheaper (as starving does).
+            if ctx.withdrawal_bonus != 0.0 {
+                c -= ctx.withdrawal_bonus;
             }
             c - ctx.stealth * 4.0
         };
@@ -1243,6 +1343,17 @@ impl ActionKind {
             ActionKind::Uninstall => 8.0,
             ActionKind::Strip => 4.0 + 4.0 * ctx.lawfulness,
             ActionKind::Rip | ActionKind::Abduct => 6.0,
+            ActionKind::PickUp => 2.0,
+            ActionKind::Deal => 3.0,
+            ActionKind::BuyStims => {
+                if ctx.stim_legal {
+                    3.0
+                } else {
+                    3.0 + 3.0 * ctx.lawfulness
+                }
+            }
+            ActionKind::UseStim => 1.0,
+            ActionKind::Detox => 5.0,
         };
         c.clamp(0.5, 60.0)
     }
@@ -1272,7 +1383,10 @@ impl ActionKind {
             | ActionKind::GoTo(LocationKey::Victim)
             | ActionKind::Strip
             | ActionKind::Rip
-            | ActionKind::Abduct => ctx.target,
+            | ActionKind::Abduct
+            | ActionKind::Deal
+            | ActionKind::GoTo(LocationKey::StimSource)
+            | ActionKind::BuyStims => ctx.target,
             _ => None,
         };
         ActionInstance { action: self, target, tile: None }

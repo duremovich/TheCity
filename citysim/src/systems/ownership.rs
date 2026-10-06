@@ -99,6 +99,18 @@ impl World {
         }
     }
 
+    /// M13 D38: coins into a gang's treasury from no purse (tribute, a split
+    /// of the day's loot, a fence's resale, a raid's prize, loot): the one
+    /// writer of `treasury +=` for gangs outside `pay`/`charge`, counted as
+    /// gang income (`stats.gang_income`, assets on only).
+    pub fn gang_credit(&mut self, gang: EntityId, coins: i64) {
+        let Some(g) = self.comp_mut::<Gang>(gang) else { return };
+        g.treasury += coins;
+        if coins > 0 && self.config.assets.enabled {
+            self.stats.current.gang_income += coins;
+        }
+    }
+
     /// "the city", a corp's or gang's name, an agent's name.
     pub fn owner_label(&self, owner: Option<EntityId>) -> String {
         match owner {
@@ -265,6 +277,13 @@ fn transfer(
     if tax > 0 {
         world.purse_add(None, tax);
         world.stats.current.flow_tax += tax;
+    }
+    // M13 D38: what reaches a gang's purse is gang income (dealing apart).
+    if to.is_some_and(|g| world.config.assets.enabled && world.has::<Gang>(g)) {
+        world.stats.current.gang_income += moved - tax;
+        if flow == Flow::Stims {
+            world.stats.current.gang_income_dealing += moved - tax;
+        }
     }
     if flow.capital() {
         uncount_cashflow(world, from, moved);

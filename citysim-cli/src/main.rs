@@ -280,6 +280,7 @@ impl Lever {
 /// M12 god levers `riot=<district>`, `litter=<district>:<level 0..1>`,
 /// `split_gang=<gang index>`, `derelict=<building index>`,
 /// `buy_building=<city|gang<i>|corp<slot>|agent index>:<building index>:<price>`.
+/// M13 (plan D48, phase 4): `stims_legal=on|off`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -444,6 +445,12 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 on,
             }
         }
+        // M13 D48 (phase 4): `stims_legal=on|off`.
+        "stims_legal" => PlayerCommand::SetStimsLegal(match value.to_ascii_lowercase().as_str() {
+            "on" | "1" | "true" => true,
+            "off" | "0" | "false" => false,
+            _ => return Err(format!("{spec}: stims_legal must be on|off")),
+        }),
         "riot_response" => PlayerCommand::SetRiotResponse(match value.to_ascii_lowercase().as_str() {
             "auto" => None,
             "contain" => Some(citysim::RiotResponse::Contain),

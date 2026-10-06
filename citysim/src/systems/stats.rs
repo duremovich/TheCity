@@ -200,12 +200,14 @@ pub fn snapshot(world: &mut World) {
     if world.config.assets.enabled {
         let (chrome, sanity, robots, vehicles) = crate::systems::assets::snapshot(world);
         let legal = u32::from(world.levers.stims_legal);
+        let hooked = crate::systems::stims::hooked_count(world);
         let row = &mut world.stats.current;
         row.chrome_agents = chrome;
         row.mean_sanity = sanity;
         row.robots = robots;
         [row.vehicles_moto, row.vehicles_car, row.vehicles_truck, row.vehicles_flyer] = vehicles;
         row.stims_legal = legal;
+        row.hooked = hooked;
         // D49: the day's commutes, ticks per Manhattan tile, walked and driven.
         let acc = std::mem::take(&mut world.commute_acc);
         let tpt = |ticks: u64, tiles: u64| if tiles > 0 { ticks as f32 / tiles as f32 } else { 0.0 };

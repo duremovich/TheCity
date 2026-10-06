@@ -330,6 +330,7 @@ pub fn despawn(world: &mut World, a: EntityId) {
             world.vehicles.remove(i);
         }
     }
+    world.robot_sellers.remove(&a);
     world.despawn(a);
     rekit_touched(world, &t);
 }
@@ -671,6 +672,8 @@ pub fn run(world: &mut World) {
     crate::systems::vehicles::fleet_recall(world);
     crate::systems::vehicles::theft_daily(world);
     crate::systems::chrome::abduction_daily(world);
+    // Phase 4 (D39): addiction decay and the Statistical addict pass.
+    crate::systems::stims::addiction_daily(world);
     stat_shop(world);
     appearance(world);
     roll_sales(world);
@@ -1140,6 +1143,7 @@ pub fn on_removed(world: &mut World, id: EntityId) {
     }
     world.trips.remove(&id);
     world.chase_pins.remove(&id);
+    crate::systems::stims::end_deal(world, id);
 }
 
 /// Daily: corpses older than the window settle (so the window is 12–36 h:
@@ -1232,10 +1236,10 @@ pub fn strip_offscreen(world: &mut World, c: EntityId) {
     settle_corpse(world, c);
 }
 
-/// Loot coins (held by no purse) into a gang's treasury.
+/// Loot coins (held by no purse) into a gang's treasury (gang income).
 pub fn loot_to_gang(world: &mut World, gang: EntityId, coins: i64) {
     if coins > 0 {
-        world.purse_add(Some(gang), coins);
+        world.gang_credit(gang, coins);
     }
 }
 
@@ -1429,7 +1433,8 @@ fn new_loc(world: &World, kind: AssetKind, buyer: EntityId, seller: EntityId) ->
         k if k.is_vehicle() => AssetLoc::Parked(seller),
         AssetKind::Implant(_) if agent => AssetLoc::Installed(buyer),
         AssetKind::Pack | AssetKind::Bridge if agent => AssetLoc::Carried(buyer),
-        // TODO(M13 ph4): a robot is posted at the building `Secure` names.
+        // M13 D42: a robot waits in the seller's stock until its buyer posts
+        // it (`robots::consider_robot` posts it at the building Secure named).
         _ => AssetLoc::Stock(seller),
     }
 }

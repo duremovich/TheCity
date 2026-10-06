@@ -70,6 +70,14 @@ pub struct Config {
     /// pre-M13 saves likewise.
     #[serde(default = "ShopCfg::off")]
     pub shop: ShopCfg,
+    /// M13 phase 4 stims, addiction and the drug trade (§ 4); absent from
+    /// pre-M13 saves: the spec's values, read by nothing while `[assets]`
+    /// is off (plan D50).
+    #[serde(default = "StimsCfg::off")]
+    pub stims: StimsCfg,
+    /// M13 phase 4 the security robot (§ 5); absent from pre-M13 saves likewise.
+    #[serde(default = "RobotsCfg::off")]
+    pub robots: RobotsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -1941,6 +1949,153 @@ impl ShopCfg {
     }
 }
 
+/// M13 § 4 stims (plan phase 4, D38-D40). Read only while `[assets]
+/// enabled`; `off()` carries the plan's values.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct StimsCfg {
+    /// Coins of precursors per dose cooked (`Flow::Import`); also a legal
+    /// Market's restock cost a dose (D40).
+    pub cook_cost: i64,
+    /// Doses a gang cooks per member a day.
+    pub cook_per_member: u32,
+    /// A gang cooks its Hideout stock up to this.
+    pub cook_target: u32,
+    /// A dealer picks up this many doses; the gang deals only with this much in stock.
+    pub deal_batch: u32,
+    /// A dealer's dose sells at `deal_price × (0.8 + 0.4 × leader greed)`.
+    pub deal_price: i64,
+    /// Coins a dose the dealer keeps.
+    pub dealer_cut: i64,
+    /// A legal Market's dose sells at `stim_price × the owner's Food price_level`.
+    pub stim_price: i64,
+    /// Legal Markets restock Stims to this at midnight.
+    pub stim_restock_floor: u32,
+    pub stim_energy: f32,
+    /// Mood bias for `stim_hours` after a dose.
+    pub stim_mood: f32,
+    pub stim_hours: u32,
+    /// `addiction += addict_per_use × (1.5 − lawfulness)` a dose.
+    pub addict_per_use: f32,
+    /// A day with no dose lowers addiction by this.
+    pub addiction_decay: f32,
+    /// Hooked at `addiction ≥` this.
+    pub hooked: f32,
+    /// Hooked with no dose for this long: withdrawal.
+    pub withdrawal_hours: u32,
+    pub withdrawal_mood: f32,
+    /// Energy decay × this in withdrawal.
+    pub withdrawal_energy: f32,
+    /// `StealFood` (and `StealVehicle`) cost − this in withdrawal.
+    pub withdrawal_steal_bonus: f32,
+    /// A Statistical agent's `p_steal` × this in withdrawal.
+    pub withdrawal_steal_mult: f32,
+    /// A dose taken at `addiction ≥ 0.8` kills with this chance.
+    pub p_overdose: f32,
+    /// Doses a hooked Statistical adult buys a day.
+    pub uses_per_day: u32,
+    pub detox_price: i64,
+    /// Detox: `addiction × detox_mult`.
+    pub detox_mult: f32,
+    /// A hooked Statistical adult with the coins and the will detoxes with this chance a day.
+    pub p_stat_detox: f32,
+    /// The GetHigh goal's flat.
+    pub get_high_flat: f32,
+}
+
+impl Default for StimsCfg {
+    fn default() -> Self {
+        StimsCfg::off()
+    }
+}
+
+impl StimsCfg {
+    /// The plan's values (assets off reads none of them).
+    pub fn off() -> StimsCfg {
+        StimsCfg {
+            cook_cost: 1,
+            cook_per_member: 2,
+            cook_target: 200,
+            deal_batch: 10,
+            deal_price: 5,
+            dealer_cut: 1,
+            stim_price: 6,
+            stim_restock_floor: 300,
+            stim_energy: 0.4,
+            stim_mood: 0.3,
+            stim_hours: 6,
+            addict_per_use: 0.06,
+            addiction_decay: 0.02,
+            hooked: 0.5,
+            withdrawal_hours: 24,
+            withdrawal_mood: 0.4,
+            withdrawal_energy: 1.3,
+            withdrawal_steal_bonus: 3.0,
+            withdrawal_steal_mult: 1.5,
+            p_overdose: 0.002,
+            uses_per_day: 2,
+            detox_price: 80,
+            detox_mult: 0.3,
+            p_stat_detox: 0.05,
+            get_high_flat: 0.0,
+        }
+    }
+}
+
+/// `[robots] robot_tier_by_kind` (spec § 5): the tier `Secure` buys per
+/// building kind; a kind left out buys tier 1.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RobotTiers {
+    pub farm: u8,
+    pub market: u8,
+    pub home: u8,
+    pub security_office: u8,
+    pub clinic: u8,
+    pub garage: u8,
+}
+
+impl Default for RobotTiers {
+    fn default() -> Self {
+        RobotTiers { farm: 2, market: 2, home: 1, security_office: 3, clinic: 2, garage: 2 }
+    }
+}
+
+/// M13 § 5 the security robot (plan phase 4, D41, D42).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RobotsCfg {
+    /// `law::fighting` of a robot, per tier.
+    pub robot_fighting: Vec<f32>,
+    /// D42: a robot's cost is its price plus this many days of upkeep,
+    /// against as many days of a guard contract.
+    pub robot_horizon_days: u32,
+    /// D42: a corp buys a robot only with its treasury at this × the price.
+    pub robot_cash_mult: f32,
+    pub robot_tier_by_kind: RobotTiers,
+    /// M14: a hacked robot changes owner for this long (nothing reads it in M13).
+    pub hack_hours: u32,
+}
+
+impl Default for RobotsCfg {
+    fn default() -> Self {
+        RobotsCfg::off()
+    }
+}
+
+impl RobotsCfg {
+    /// The plan's values (assets off reads none of them).
+    pub fn off() -> RobotsCfg {
+        RobotsCfg {
+            robot_fighting: vec![0.5, 0.75, 1.0],
+            robot_horizon_days: 60,
+            robot_cash_mult: 2.0,
+            robot_tier_by_kind: RobotTiers::default(),
+            hack_hours: 24,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct LeversCfg {
     pub tax_rate: f32,
@@ -1951,6 +2106,9 @@ pub struct LeversCfg {
     /// M12 D23: city Sanitation workers (0 in a pre-M12 save: nobody sweeps).
     #[serde(default)]
     pub sanitation_count: u8,
+    /// M13 D40: Markets sell Stims legally from day 0.
+    #[serde(default)]
+    pub stims_legal: bool,
 }
 
 impl Config {
@@ -2064,6 +2222,8 @@ impl Config {
         self.assets = AssetsCfg::off();
         self.vehicles = VehiclesCfg::off();
         self.shop = ShopCfg::off();
+        self.stims = StimsCfg::off();
+        self.robots = RobotsCfg::off();
         self
     }
 
@@ -2103,6 +2263,8 @@ impl Config {
         c.assets = AssetsCfg::off();
         c.vehicles = VehiclesCfg::off();
         c.shop = ShopCfg::off();
+        c.stims = StimsCfg::off();
+        c.robots = RobotsCfg::off();
         c
     }
 

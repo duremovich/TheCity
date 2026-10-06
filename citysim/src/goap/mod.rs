@@ -37,6 +37,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Shop => vec![(Key::Bought, true)],
         GoalKind::Treat => vec![(Key::Treated, true)],
         GoalKind::Loot => vec![(Key::Stripped, true)],
+        GoalKind::GetHigh => vec![(Key::High, true)],
         GoalKind::Idle => return None,
     })
 }

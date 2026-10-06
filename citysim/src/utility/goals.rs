@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 21] = [
+pub const GOAL_ORDER: [GoalKind; 22] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -31,8 +31,9 @@ pub const GOAL_ORDER: [GoalKind; 21] = [
     GoalKind::Bury,
     // M12 D27: before Found.
     GoalKind::Squat,
-    // M13 D47: before Found (GetHigh joins in phase 4).
+    // M13 D47: before Found, in the order Shop, GetHigh, Treat, Loot.
     GoalKind::Shop,
+    GoalKind::GetHigh,
     GoalKind::Treat,
     GoalKind::Loot,
     // M11 D26: just before Idle.
@@ -144,8 +145,13 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Squat => !crate::systems::street::can_squat(world, id),
         // M13 D43: nothing affordable, on cooldown, in arrears or no open seller.
         GoalKind::Shop => crate::systems::assets::shop_choice(world, id, true).is_none(),
-        // M13 D34 (phase 3: Therapy only): nothing to treat at `treat_below`.
-        GoalKind::Treat => !crate::systems::chrome::wants_treatment(world, id),
+        // M13 D34: nothing to treat at `treat_below`; D39: and no addiction
+        // within 0.2 of `hooked` to Detox.
+        GoalKind::Treat => {
+            !crate::systems::chrome::wants_treatment(world, id) && !crate::systems::stims::wants_detox(world, id)
+        }
+        // M13 D39: high already, or no dose in hand and none to buy.
+        GoalKind::GetHigh => !crate::systems::stims::wants_high(world, id),
         // M13 D35: no body within reach to strip.
         GoalKind::Loot => crate::systems::chrome::loot_target(world, id).is_none(),
         _ => false,
@@ -528,8 +534,9 @@ pub fn considerations(
                 Consideration::new("night", can(phase == DayPhase::Night), Curve::Step { t: 1.0, lo: 0.3, hi: 1.0 }),
             ]
         }
-        // M13 D34 (spec § 4 table; phase 3 reads the sanity term only):
-        // `already_satisfied` has skipped the calm.
+        // M13 D34 (spec § 4 table): `max(edgy − sanity, addiction − hooked
+        // + 0.2)`; D39: the price is Detox's when the addiction term drives
+        // it. `already_satisfied` has skipped the calm and the clean.
         GoalKind::Treat => {
             let n = needs?;
             let p = pers?;
@@ -537,8 +544,22 @@ pub fn considerations(
             let tile = world.comp::<crate::components::Position>(id)?.tile;
             let clinic = crate::systems::chrome::nearest_clinic(world, tile, true);
             let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
-            let ok = clinic.is_some_and(|c| coins >= crate::systems::chrome::therapy_price(world, c));
-            let x = (world.config.chrome.edgy - body.sanity).clamp(0.0, 1.0);
+            let detox = crate::systems::stims::detox_drives(world, id);
+            let ok = clinic.is_some_and(|c| {
+                let price = if detox {
+                    crate::systems::stims::detox_price(world, c)
+                } else {
+                    crate::systems::chrome::therapy_price(world, c)
+                };
+                coins >= price
+            });
+            let sanity_x = (world.config.chrome.edgy - body.sanity).clamp(0.0, 1.0);
+            // A branch: a body with no addiction reads the phase 3 term alone.
+            let x = if body.addiction > 0.0 {
+                sanity_x.max((body.addiction - world.config.stims.hooked + 0.2).clamp(0.0, 1.0))
+            } else {
+                sanity_x
+            };
             vec![
                 Consideration::new("clinic open, can pay", can(ok), GATE),
                 Consideration::new("edgy - sanity", x, Curve::Logistic { k: 8.0, mid: 0.3 }),
@@ -559,6 +580,30 @@ pub fn considerations(
                 Consideration::new("greed", p.greed, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("1-coverage/2", 1.0 - cover / 2.0, Curve::Linear { m: 0.5, b: 0.5 }),
             ]
+        }
+        // M13 D39 (spec § 4 table): `already_satisfied` has opened the gate
+        // (a dose in hand, or a source within reach and the coins for it).
+        GoalKind::GetHigh => {
+            let n = needs?;
+            let p = pers?;
+            world.comp::<crate::components::Body>(id)?;
+            let on_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
+            let tired = if on_shift { 1.0 - n.energy } else { 0.0 };
+            flat = world.config.stims.get_high_flat;
+            let mut cs = vec![
+                Consideration::new("dose or source", can(true), GATE),
+                Consideration::new(
+                    "craving",
+                    crate::systems::stims::craving(world, id),
+                    Curve::Logistic { k: 8.0, mid: 0.4 },
+                ),
+                Consideration::new("1-energy on shift", tired, Curve::Linear { m: 0.5, b: 0.2 }),
+                Consideration::new("1-mood", 1.0 - (mood + 1.0) / 2.0, Curve::Linear { m: 0.4, b: 0.4 }),
+            ];
+            if !crate::systems::stims::legal_reach(world, id) {
+                cs.push(Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.5, b: 0.5 }));
+            }
+            cs
         }
         // M13 D43: the best affordable offer's considerations (spec § 6).
         GoalKind::Shop => {

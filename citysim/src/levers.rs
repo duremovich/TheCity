@@ -185,6 +185,8 @@ pub enum PlayerCommand {
     },
     /// Wreck an asset now (an implant fails instead).
     Wreck(EntityId),
+    /// M13 D40/D48 (phase 4): Markets sell Stims legally, or stop.
+    SetStimsLegal(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -254,7 +256,7 @@ pub struct Levers {
     /// M12 D42: the player's riot-response pin; `None` = the captain (D34).
     #[serde(default)]
     pub riot_response: Option<crate::components::RiotResponse>,
-    /// M13 D48: Markets sell Stims legally (phase 4 reads it).
+    /// M13 D40: Markets restock and sell Stims legally.
     #[serde(default)]
     pub stims_legal: bool,
     /// M13 D12: the city impounds vehicles with unpaid upkeep.
@@ -294,7 +296,7 @@ impl Levers {
             sanitation_count: cfg.levers.sanitation_count,
             sanitation_weight: default_guard_weight(),
             riot_response: None,
-            stims_legal: false,
+            stims_legal: cfg.levers.stims_legal,
             impound: true,
             asset_tax: [0.0; 8],
         }
@@ -452,6 +454,11 @@ impl World {
                 self.districts[i].curfew = *on;
                 let name = self.district_name(*district).to_string();
                 let text = if *on { format!("Curfew in {name}") } else { format!("Curfew in {name} lifted") };
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetStimsLegal(on) => {
+                self.levers.stims_legal = *on;
+                let text = if *on { "Stims legal: Markets stock and sell them" } else { "Stims banned again" };
                 self.push_event(EventKind::PlayerAction, &[], text);
             }
             PlayerCommand::SetRiotResponse(r) => {
