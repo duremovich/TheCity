@@ -461,6 +461,24 @@ pub fn exec_score(world: &World, a: EntityId) -> Option<(i64, i64, u32)> {
     Some((coins(world, a), (skill * 1000.0).round() as i64, ident.age_days))
 }
 
+/// L1b: the exec from `candidates`: among the eligible (`exec_score`), the
+/// wealthiest tenth (at least 5), and of those the greediest (ties: the
+/// exec skill, then the lower id). The corp brain reads its exec's greed
+/// (Squeeze scores greed², Acquire greed): with wealth alone the execs were
+/// a random draw of greed and no corp ever held Squeeze or bid hostile
+/// (seeds 42-44: Squeeze 1 of 3, hostile Acquired 0).
+pub fn pick_exec(world: &World, candidates: impl Iterator<Item = EntityId>) -> Option<EntityId> {
+    let mut rich: Vec<((i64, i64, u32), EntityId)> =
+        candidates.filter_map(|a| exec_score(world, a).map(|k| (k, a))).collect();
+    rich.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
+    let n = if world.config.life.exec_greed { (rich.len() / 10).max(5).min(rich.len()) } else { rich.len().min(1) };
+    rich.truncate(n);
+    let greed = |a: EntityId| world.comp::<crate::components::Personality>(a).map_or(0.0, |p| p.greed);
+    rich.into_iter()
+        .max_by(|x, y| greed(x.1).total_cmp(&greed(y.1)).then(x.0 .1.cmp(&y.0 .1)).then(y.1.cmp(&x.1)))
+        .map(|(_, a)| a)
+}
+
 /// The corp's HQ for its exec's office hours: the corp's working building
 /// (no Home, no Lot) nearest the exec's Home, ties to the most senior kind
 /// and then the lower id.

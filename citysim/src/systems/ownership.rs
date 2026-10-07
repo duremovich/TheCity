@@ -761,14 +761,14 @@ pub fn seed(world: &mut World) {
         // coins (the greediest jobless adult over 18 made a 19-year-old on
         // the dole Zetatech's exec); the M11 pick when nobody qualifies.
         let seasoned = if crate::systems::life::on(world) {
-            world
-                .citizens()
-                .into_iter()
-                .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
-                .filter(|&a| !execs.contains(&a) && !owners.contains(&a))
-                .filter_map(|a| crate::systems::life::exec_score(world, a).map(|k| (k, a)))
-                .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
-                .map(|(_, a)| a)
+            crate::systems::life::pick_exec(
+                world,
+                world
+                    .citizens()
+                    .into_iter()
+                    .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
+                    .filter(|&a| !execs.contains(&a) && !owners.contains(&a)),
+            )
         } else {
             None
         };
@@ -1249,12 +1249,10 @@ fn replacement_exec(world: &World, corp: EntityId) -> Option<EntityId> {
         world.corps().into_iter().filter_map(|c| world.comp::<Corp>(c).and_then(|c| c.exec)).collect();
     // L1: the most seasoned employee first (as at seed), else the greediest.
     if crate::systems::life::on(world) {
-        let seasoned = employees_of(world, corp)
-            .into_iter()
-            .filter(|a| !execs.contains(a))
-            .filter_map(|a| crate::systems::life::exec_score(world, a).map(|k| (k, a)))
-            .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
-            .map(|(_, a)| a);
+        let seasoned = crate::systems::life::pick_exec(
+            world,
+            employees_of(world, corp).into_iter().filter(|a| !execs.contains(a)),
+        );
         if seasoned.is_some() {
             return seasoned;
         }

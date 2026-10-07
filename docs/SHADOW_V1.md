@@ -73,3 +73,32 @@ Clinic staff already work their Clinic shift. `ClerkWork` runs at the employer, 
 Need-driven crime falls sharply even with the bulk dole off. In the calibration city (500 agents, all Full) thefts went from 1,152 to 129. The rows of hungry agent-hours shrank about 5x: residents who are paid at work and do not walk 4 h for the dole eat on time. The Statistical table learns this from the Full tier, so off-screen theft (×0.17), robbery, assault and killing (×0.1) fall with it.
 
 Restoring the brutality is a tone decision through deliberate levers (dole size, prices, gang pressure), not through broken days. Gangs, membership and Hideout work stay near base. Witness lines fall from ~23k to ~16k, `OrderChanged` from ~240 to ~115, and save size at day 60 (seed 42) from 22.1 to 14.1 MB.
+
+### L1b: the pressure calibration
+
+Dylan's decision (2026-10-07): keep L1 and bring back the dystopian pressure through deliberate levers, not broken days. The levers, each commented in `assets/config.toml`:
+
+- Food `price_base` 3 → 4.
+- `[life] scavenge_p` 0.5 → 0.15. Scrap is a last resort, not a living.
+- Execs are the greediest of the wealthiest tenth of the jobless aged 30 or more (`life::pick_exec`, `exec_greed`). The corp brain reads its exec's greed: Squeeze scores greed², and Acquire reads greed.
+- The dole stays at 4. A cut to 3 starved the corps: truck share 0.2-0.3, Virt nodes 24-27, Data sold 0-100.
+
+The table was recalibrated. Seeds 42-44, compared with ab79188 and with L1 (the bulk dole off in both L1 rows):
+
+- Thefts are 9.2-14.6k (7.9-9.0k; L1 2.2-2.8k).
+- Violent deaths are 115-159 (239-277), Murders 33-55 (170-187), and jailed 96-111 (137-141).
+- Riots are 4-6 (2-4), and Dregs sit in the 1-5 % band on 118-120 days.
+- Starvation deaths are 10-15 (2-15), and population on day 120 is 1957-2001 (1904-1935).
+- Gang income is 26-43k (35-45k), and ticks/s is 6.3-7.8k (~5.6k).
+
+Off-screen killings stay at 3-6 (ab79188 ~140). The table learns its violence from the Full tier, and L1 removed the Hall-queue fights and the witness-spam feuds that produced it. Killings reach 20 only with thefts around 30-50k and ticks/s under 4,000.
+
+Gate doctrine (Dylan, 2026-10-07): the gates assert mechanism, sanity and existence. Calibration bands are printed as `FINDING` lines.
+
+Shadow, `--count 3`, life on with L1b. Hours are per free day:
+
+- Walking is 2.8-12.1 h a day; the Purist is the 12.1.
+- Sleep is 1.5-6.8 h, and the longest sleep is 4.8-8 h.
+- Hours at energy 0 are 0-18 per triple (L1 off: 0-76).
+- Guards made 12 arrests in 25 Arrest plans (L1 off: 12 in 105).
+- Workers worked 16 shifts and were paid for 11.

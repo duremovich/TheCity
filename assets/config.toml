@@ -90,7 +90,15 @@ chat_belonging = 0.3
 starvation_grace_ticks = 4320
 
 [economy]
-price_base = 3.0
+# L1b (the pressure calibration, Dylan 2026-10-07): 3.0 -> 4.0. Once L1 paid wages and the dole in place
+# and stopped the walks, food at 3 against a dole of 4 left nobody hungry and need-driven crime fell to
+# a quarter (seeds 42-44, scavenge_p 0.15 in both rows): price_base 3.0 thefts 1.9-3.0k, riots 0, Dregs in
+# band 27-32 of 120 days, litter in band 0-19 of 106; 4.0 thefts 9.2-14.6k (ab79188 7.9-9.0k), riots
+# 4-6, Dregs in band 118-120 days, litter 58-74 of 106, Farm trucks and Data sales back (the Food corps
+# earn again), starvation 10-15, ticks/s 5.3-6.1k. The dole cut instead (4 -> 3, price 3.0) starved
+# the corps: truck share 0.21-0.31, Virt nodes 24-27, Data sold 0-100. At 4.5 thefts 27-30k, ticks/s
+# 4.3-4.7k.
+price_base = 4.0
 # The spec's 600 assumed a 600-unit Market; with farm_yield_base 2.4 the shelf sits at ~1500-1900,
 # so at 600 the price was pinned at 2 all year, the Treasury could not cover wages plus dole, and the
 # first price signal of a Winter famine was the 2 -> 28 cliff on the day the shelf hit zero.
@@ -1385,10 +1393,18 @@ commute_cap_tiles = 30
 relocate_per_day = 8
 quit_rehire_days = 7
 exec_min_age_years = 30.0
+# L1b: the exec is the greediest of the wealthiest tenth of the 30+ jobless (the corp brain reads its
+# exec's greed: Squeeze scores greed^2, Acquire greed). Wealth alone drew greed at random: Squeeze held
+# on 1 of 3 seeds, no hostile acquisition; greedy: Squeeze 2 of 3 (0/4/10 days), hostile 1.
+exec_greed = true
 exec_pay_frac = 0.002
 exec_pay_cap = 40
 exec_shift = [540, 1020]
 scavenge_coins = 1                  # a coin for an hour of scrap (only while broke) ...
-scavenge_p = 0.5                    # ... on half the hours: a meal in ~6 h
+# L1b: 0.5 -> 0.15 (a meal in ~20 h of scrap): at 0.5 scrap fed the broke well enough that a price or
+# dole squeeze barely moved need-driven theft (calibration city, dole 3, price_base 5: 237 thefts at
+# 0.5, 921 at 0.15, 1,388 at 0); at 0.15 it is a last resort, not a living (seeds 42-44 with
+# price_base 4: thefts 9.2-14.6k at 0.15, 10.7-13.4k at 0.3, riots 4-6 vs 2-5).
+scavenge_p = 0.15
 escort_van_ticks = 60
 enabled = true

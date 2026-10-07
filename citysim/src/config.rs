@@ -3485,6 +3485,8 @@ pub struct LifeCfg {
     /// day's salary (floored at `[economy] wage_exec`) and its cap, and the
     /// office shift at the corp's HQ.
     pub exec_min_age_years: f32,
+    /// The exec is the greediest of the wealthiest tenth (else the wealthiest).
+    pub exec_greed: bool,
     pub exec_pay_frac: f32,
     pub exec_pay_cap: i64,
     pub exec_shift: (u16, u16),
@@ -3535,11 +3537,12 @@ impl LifeCfg {
             relocate_per_day: 8,
             quit_rehire_days: 7,
             exec_min_age_years: 30.0,
+            exec_greed: true,
             exec_pay_frac: 0.002,
             exec_pay_cap: 40,
             exec_shift: (540, 1020),
             scavenge_coins: 1,
-            scavenge_p: 0.5,
+            scavenge_p: 0.15,
             escort_van_ticks: 60,
         }
     }
@@ -3658,8 +3661,10 @@ impl Config {
         self.shop = ShopCfg::off();
         self.stims = StimsCfg::off();
         self.robots = RobotsCfg::off();
-        // L1: the life pass is the 2,000 city's (the v1 gates keep v1 days).
+        // L1: the life pass is the 2,000 city's (the v1 gates keep v1 days),
+        // and so is L1b's food price (the v1 economy prices at 3).
         self.life = LifeCfg::off();
+        self.economy.price_base = 3.0;
         // M14 V44: no Virt plane, Labs, ICE, tech caps; M15 W44: no word.
         self.virt_off().word_off()
     }

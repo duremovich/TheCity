@@ -9,7 +9,8 @@ fn world(seed: u64) -> World {
 
 #[test]
 fn test_price_formula_table() {
-    let cfg = Config::load();
+    // The M1 table at price_base 3 (the v1 economy; L1b prices the 2,000 city at 4).
+    let cfg = Config::load().v1_profile();
     // price_ref_stock 1500: round(3 * sqrt(1500 / max(stock, 7))) clamped to 1..=30
     for (stock, price) in [(7, 30), (50, 16), (400, 6), (600, 5), (1500, 3), (2400, 2), (10000, 1)] {
         assert_eq!(economy::price_for_stock(&cfg.economy, stock), price, "stock {stock}");
@@ -160,8 +161,14 @@ fn test_starvation_kills_after_grace() {
     assert!(w.has::<citysim::Corpse>(victim), "starved");
     assert!(!w.citizens().contains(&victim));
     // Anyone else who died meanwhile (an off-screen killing) is not this test's business.
+    // L1b: births and immigrants too (with the recalibrated table a birth landed in the window).
     let others = w.events.iter().filter(|e| e.kind == citysim::EventKind::Death && e.actors[0] != victim).count();
-    assert_eq!(w.population(), 299 - others);
+    let arrivals = w
+        .events
+        .iter()
+        .filter(|e| matches!(e.kind, citysim::EventKind::Birth | citysim::EventKind::Immigration))
+        .count();
+    assert_eq!(w.population(), 299 - others + arrivals);
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Death && e.actors.contains(&victim)));
     assert!(w.comp::<citysim::Identity>(victim).is_some(), "identity survives death");
 }
