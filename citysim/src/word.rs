@@ -519,3 +519,15 @@ pub struct Taste {
     pub own_colours: f32,
     pub rival_colours: f32,
 }
+
+/// The `shadow` observation tool's read-only notes (`World::shadow_notes`):
+/// pushed only while the tool has set the log to `Some`; never read by the
+/// sim and never drawing RNG.
+#[derive(Clone, Debug)]
+pub enum ShadowNote {
+    /// One resolved social move.
+    Move { tick: Tick, m: SocialMove, out: MoveOutcome },
+    /// One gossip telling (`gossip::exchange`): `heard` when the listener
+    /// took it in.
+    Told { tick: Tick, from: EntityId, to: EntityId, r: DeedRef, heard: bool },
+}

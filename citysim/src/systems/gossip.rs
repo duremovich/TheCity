@@ -423,6 +423,10 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     };
     let hops = entry.hops;
     let out = memory::hear_entry(world, to, entry);
+    if let Some(log) = world.shadow_notes.as_mut() {
+        let heard = matches!(out, HeardInsert::Inserted | HeardInsert::Contradicted);
+        log.push(crate::word::ShadowNote::Told { tick: now, from, to, r, heard });
+    }
     if matches!(out, HeardInsert::Inserted | HeardInsert::Contradicted) {
         let w = &mut world.stats.current.word;
         w.rumours_heard += 1;
