@@ -333,15 +333,20 @@ pub fn unrest(world: &mut World) {
         let residents = world.districts[i].residents.clone();
         let mut members: Vec<(f32, bool, f32)> = Vec::new();
         let mut street: Vec<(f32, bool, f32)> = Vec::new();
+        // M15 W38: the members' and the Street's summed press.
+        let (mut press, mut street_press) = (0.0f32, 0.0f32);
         let (mut burden, mut renters) = (0.0f32, 0u32);
         for a in residents {
             let (class, mood, employed, fear) = crate::systems::classes::member_in(world, a, &execs, &fears);
             if class == Class::Corp {
                 continue;
             }
+            let p = crate::systems::classes::press_of(world, a);
             members.push((mood, employed, fear));
+            press += p;
             if class == Class::Street {
                 street.push((mood, employed, fear));
+                street_press += p;
             }
             let Some(h) = world.comp::<Household>(a).and_then(|h| h.home) else { continue };
             let rent = world.comp::<Building>(h).map_or(0, |b| b.rent_per_day);
@@ -362,8 +367,12 @@ pub fn unrest(world: &mut World) {
             world.eviction_places.iter().filter(|&&(t, d, _)| t >= horizon && d.index() == i).count() as u32;
         let curfew = if world.districts[i].curfew { c.curfew_fear } else { 0.0 };
         let burden = if renters == 0 { 0.0 } else { burden / renters as f32 };
-        let formula = |m: &[(f32, bool, f32)]| {
-            let agg = crate::systems::classes::aggregate(m, evictions);
+        let news = crate::systems::news::on(world).then(|| world.config.news.clone());
+        let formula = |m: &[(f32, bool, f32)], p: f32| {
+            let mut agg = crate::systems::classes::aggregate(m, evictions);
+            if let Some(cfg) = &news {
+                agg = crate::systems::classes::with_press(agg, p / m.len().max(1) as f32, cfg);
+            }
             let submission = (agg.submission + curfew).min(1.0);
             let n = m.len();
             let unrest = if n == 0 {
@@ -373,8 +382,8 @@ pub fn unrest(world: &mut World) {
             };
             (unrest, agg.loyalty, submission)
         };
-        let (unrest, loyalty, submission) = formula(&members);
-        let (street_unrest, _, _) = formula(&street);
+        let (unrest, loyalty, submission) = formula(&members, press);
+        let (street_unrest, _, _) = formula(&street, street_press);
         let n = members.len();
         let d = &mut world.districts[i];
         d.unrest = unrest;

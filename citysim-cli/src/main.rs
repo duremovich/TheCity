@@ -225,6 +225,91 @@ enum Lever {
     GrantSkill(SkillTarget, citysim::word::SocialSkill, f32, bool),
     /// M15 god (W42, phase 2): `set_creed=<gang i>:purist|none`.
     SetCreed(usize, Option<citysim::word::Creed>),
+    /// M15 god (W42, phase 3): `declare_vendetta=<faction>:<faction>:<w>`.
+    DeclareVendetta(FactionRef, FactionRef, f32),
+    /// M15 god (W42, phase 3): `kill_friend=<agent|leader<g>>:<agent|member<g>>`.
+    KillFriend(Who, Who),
+    /// M15 god (W42, phase 3): `hunt=<agent>:<agent>`.
+    Hunt(u32, u32),
+    /// M15 lever (W42, phase 4): `censor=gang<i>|corp<slot>|law[:off]`.
+    Censor(FactionRef, bool),
+}
+
+/// A faction on the command line: `gang<i>`, `corp<slot>` or `law`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum FactionRef {
+    Gang(usize),
+    Corp(u8),
+    Law,
+}
+
+/// An agent on the command line: an entity index, `leader<g>` (gang g's
+/// leader) or `member<g>` (gang g's best fighter, ties the lower id).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Who {
+    Agent(u32),
+    Leader(usize),
+    Member(usize),
+}
+
+fn parse_faction(v: &str) -> Result<FactionRef, String> {
+    if v.eq_ignore_ascii_case("law") {
+        return Ok(FactionRef::Law);
+    }
+    if let Some(g) = v.strip_prefix("gang") {
+        return g.parse::<usize>().map(FactionRef::Gang).map_err(|e| format!("bad gang index {g}: {e}"));
+    }
+    if let Some(c) = v.strip_prefix("corp") {
+        return c.parse::<u8>().map(FactionRef::Corp).map_err(|e| format!("bad corp slot {c}: {e}"));
+    }
+    Err(format!("faction must be gang<i>|corp<slot>|law, got {v}"))
+}
+
+fn parse_who(v: &str) -> Result<Who, String> {
+    if let Some(g) = v.strip_prefix("leader") {
+        return g.parse::<usize>().map(Who::Leader).map_err(|e| format!("bad gang index {g}: {e}"));
+    }
+    if let Some(g) = v.strip_prefix("member") {
+        return g.parse::<usize>().map(Who::Member).map_err(|e| format!("bad gang index {g}: {e}"));
+    }
+    v.parse::<u32>().map(Who::Agent).map_err(|e| format!("bad agent {v}: {e}"))
+}
+
+impl FactionRef {
+    fn resolve(self, world: &World) -> Result<citysim::EntityId, String> {
+        match self {
+            FactionRef::Gang(i) => world.gangs().get(i).copied().ok_or_else(|| format!("no gang {i}")),
+            FactionRef::Corp(s) => corp_in_slot(world, s),
+            FactionRef::Law => world
+                .building_of_kind(citysim::BuildingKind::Jail)
+                .filter(|&j| world.has::<citysim::components::Law>(j))
+                .ok_or_else(|| "no Law".to_string()),
+        }
+    }
+}
+
+impl Who {
+    fn resolve(self, world: &World) -> Result<citysim::EntityId, String> {
+        let gang = |i: usize| world.gangs().get(i).copied().ok_or_else(|| format!("no gang {i}"));
+        match self {
+            Who::Agent(a) => agent_at(world, a),
+            Who::Leader(i) => world
+                .comp::<citysim::Gang>(gang(i)?)
+                .and_then(|g| g.leader)
+                .ok_or_else(|| format!("gang {i} has no leader")),
+            Who::Member(i) => {
+                let g = world.comp::<citysim::Gang>(gang(i)?).ok_or_else(|| format!("no gang {i}"))?;
+                g.members
+                    .iter()
+                    .copied()
+                    .filter(|&m| citysim::systems::law::living(world, m))
+                    .map(|m| (citysim::systems::law::fighting(world, m), m))
+                    .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+                    .map(|(_, m)| m)
+                    .ok_or_else(|| format!("gang {i} has no living member"))
+            }
+        }
+    }
 }
 
 /// Who `grant_skill=` names: an agent by index, or the n poorest Dregs.
@@ -454,6 +539,12 @@ impl Lever {
             }
             Lever::GrantSkill(SkillTarget::Dregs(_), ..) => return Err("dregs<n> resolves to many".into()),
             Lever::SetCreed(i, creed) => PlayerCommand::SetCreed { gang: gang(i)?, creed },
+            Lever::DeclareVendetta(a, b, weight) => {
+                PlayerCommand::DeclareVendetta { a: a.resolve(world)?, b: b.resolve(world)?, weight }
+            }
+            Lever::KillFriend(of, by) => PlayerCommand::KillFriend { of: of.resolve(world)?, by: by.resolve(world)? },
+            Lever::Hunt(h, t) => PlayerCommand::Hunt { hunter: agent_at(world, h)?, target: agent_at(world, t)? },
+            Lever::Censor(f, on) => PlayerCommand::CensorStories { faction: f.resolve(world)?, on },
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -508,7 +599,11 @@ impl Lever {
 /// `plant_rumour=<agent>:<deed>:<object agent|none>:<district>:<reach>`,
 /// `set_reputation=<agent>:<dread|standing|honour|heat>:<value>:<days>`;
 /// phase 2: `grant_skill=<agent>:<skill>:<v>`,
-/// `grant_skill=dregs<n>:<skill>:<v>:suit`, `set_creed=<gang i>:purist|none`.
+/// `grant_skill=dregs<n>:<skill>:<v>:suit`, `set_creed=<gang i>:purist|none`;
+/// phase 3: `declare_vendetta=<faction>:<faction>:<w>` (factions `gang<i>`,
+/// `corp<slot>`, `law`), `kill_friend=<agent|leader<g>>:<agent|member<g>>`,
+/// `hunt=<agent>:<agent>`. M15 levers (phase 4): `press_licence=on|off`,
+/// `news_tax=<0..1>`, `censor=gang<i>|corp<slot>|law[:off]`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -752,6 +847,39 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             };
             Some(Lever::SetCreed(g.parse::<usize>().map_err(|e| format!("{spec}: bad gang: {e}"))?, creed))
         }
+        "declare_vendetta" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, b, w] = parts[..] else {
+                return Err(format!("{spec}: expected <faction>:<faction>:<weight>"));
+            };
+            Some(Lever::DeclareVendetta(
+                parse_faction(a).map_err(|e| format!("{spec}: {e}"))?,
+                parse_faction(b).map_err(|e| format!("{spec}: {e}"))?,
+                w.parse::<f32>().map_err(|e| format!("{spec}: bad weight: {e}"))?,
+            ))
+        }
+        "kill_friend" => {
+            let (o, b) =
+                value.split_once(':').ok_or_else(|| format!("{spec}: expected <agent|leader<g>>:<agent|member<g>>"))?;
+            Some(Lever::KillFriend(
+                parse_who(o).map_err(|e| format!("{spec}: {e}"))?,
+                parse_who(b).map_err(|e| format!("{spec}: {e}"))?,
+            ))
+        }
+        "hunt" => {
+            let (h, t) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <agent>:<agent>"))?;
+            Some(Lever::Hunt(
+                h.parse::<u32>().map_err(|e| format!("{spec}: bad hunter: {e}"))?,
+                t.parse::<u32>().map_err(|e| format!("{spec}: bad target: {e}"))?,
+            ))
+        }
+        "censor" => {
+            let (f, on) = match value.split_once(':') {
+                Some((f, flag)) => (f, on_off(flag).ok_or_else(|| format!("{spec}: censor flag must be on|off"))?),
+                None => (value, true),
+            };
+            Some(Lever::Censor(parse_faction(f).map_err(|e| format!("{spec}: {e}"))?, on))
+        }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -890,6 +1018,11 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         // M14 V42: `city_ice=<0..3>`, `data_tax=<0..1>`, `hack_sentence=intrusion|data_theft:<days>`.
         "city_ice" => PlayerCommand::SetCityIce(value.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?),
         "data_tax" => PlayerCommand::SetDataTax(num("rate")? as f32),
+        // M15 W42: `press_licence=on|off`, `news_tax=<0..1>`.
+        "press_licence" => PlayerCommand::SetPressLicence(
+            on_off(value).ok_or_else(|| format!("{spec}: press_licence must be on|off"))?,
+        ),
+        "news_tax" => PlayerCommand::SetNewsTax(num("rate")? as f32),
         "hack_sentence" => {
             let (c, d) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <crime>:<days>"))?;
             let crime = match c.to_ascii_lowercase().as_str() {
@@ -1662,6 +1795,49 @@ mod tests {
         assert!(parse_lever("day=5:set_creed=1:monk").is_err());
         assert!(parse_lever("day=5:grant_skill=12:charisma:1.0").is_err());
         assert!(parse_lever("day=3:city_ice=x").is_err());
+    }
+
+    #[test]
+    fn test_parse_word_levers_phase_4() {
+        use citysim::PlayerCommand as P;
+        assert!(matches!(parse_lever("day=3:press_licence=off").unwrap().1, Lever::Cmd(P::SetPressLicence(false))));
+        assert!(matches!(parse_lever("day=3:press_licence=on").unwrap().1, Lever::Cmd(P::SetPressLicence(true))));
+        assert!(parse_lever("day=3:press_licence=maybe").is_err());
+        match parse_lever("day=3:news_tax=0.2").unwrap().1 {
+            Lever::Cmd(P::SetNewsTax(r)) => assert!((r - 0.2).abs() < 1e-6),
+            other => panic!("{other:?}"),
+        }
+        assert!(parse_lever("day=3:news_tax=lots").is_err());
+        assert!(matches!(parse_lever("day=3:censor=gang1").unwrap().1, Lever::Censor(FactionRef::Gang(1), true)));
+        assert!(matches!(parse_lever("day=3:censor=corp4:off").unwrap().1, Lever::Censor(FactionRef::Corp(4), false)));
+        assert!(matches!(parse_lever("day=3:censor=law").unwrap().1, Lever::Censor(FactionRef::Law, true)));
+        assert!(parse_lever("day=3:censor=church").is_err());
+        assert!(parse_lever("day=3:censor=law:maybe").is_err());
+    }
+
+    #[test]
+    fn test_parse_word_god_phase_3() {
+        match parse_lever("day=10:declare_vendetta=corp6:gang0:1.0").unwrap().1 {
+            Lever::DeclareVendetta(FactionRef::Corp(6), FactionRef::Gang(0), w) => assert!((w - 1.0).abs() < 1e-6),
+            other => panic!("{other:?}"),
+        }
+        assert!(matches!(
+            parse_lever("day=10:declare_vendetta=law:gang1:0.5").unwrap().1,
+            Lever::DeclareVendetta(FactionRef::Law, FactionRef::Gang(1), _)
+        ));
+        assert!(parse_lever("day=10:declare_vendetta=gang0:1.0").is_err());
+        assert!(parse_lever("day=10:declare_vendetta=gang0:club2:1.0").is_err());
+        assert!(matches!(
+            parse_lever("day=10:kill_friend=leader0:member1").unwrap().1,
+            Lever::KillFriend(Who::Leader(0), Who::Member(1))
+        ));
+        assert!(matches!(
+            parse_lever("day=10:kill_friend=12:34").unwrap().1,
+            Lever::KillFriend(Who::Agent(12), Who::Agent(34))
+        ));
+        assert!(parse_lever("day=10:kill_friend=leaderx:1").is_err());
+        assert!(matches!(parse_lever("day=10:hunt=12:34").unwrap().1, Lever::Hunt(12, 34)));
+        assert!(parse_lever("day=10:hunt=12").is_err());
     }
 
     #[test]

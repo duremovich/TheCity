@@ -187,6 +187,11 @@ pub enum Flow {
     Research,
     /// M14 V5/V40: a public terminal's fee, runner -> Bar or Hotel owner (taxed).
     Terminal,
+    /// M15 W37: a corp's daily ads, split across the licensed Feeds by reach
+    /// (taxed as owner revenue; the Civic Wire's share is the Treasury's).
+    Ads,
+    /// M15 W40: a Spin corp's plant or bury payment to a Feed's owner (taxed).
+    Plant,
 }
 
 impl Flow {
@@ -214,6 +219,8 @@ impl Flow {
                 | Flow::Treatment
                 | Flow::Data
                 | Flow::Terminal
+                | Flow::Ads
+                | Flow::Plant
         )
     }
 }
@@ -251,6 +258,8 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::IceUpkeep => row.virt.flow_ice_upkeep += coins,
         Flow::Research => row.virt.flow_research += coins,
         Flow::Terminal => row.virt.flow_terminal += coins,
+        Flow::Ads => row.word.flow_ads += coins,
+        Flow::Plant => row.word.flow_plant += coins,
     }
 }
 
@@ -400,6 +409,7 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         BuildingKind::Clinic => c.value.clinic,
         BuildingKind::Garage => c.value.garage,
         BuildingKind::Lab => c.value.lab,
+        BuildingKind::Feed => c.value.feed,
         _ => 0,
     }
 }
@@ -414,6 +424,7 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
         BuildingKind::Clinic => Some(Role::Ripperdoc),
         BuildingKind::Garage => Some(Role::Mechanic),
         BuildingKind::Lab => Some(Role::Researcher),
+        BuildingKind::Feed => Some(Role::Reporter),
         _ => None,
     }
 }

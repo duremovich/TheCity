@@ -14,9 +14,15 @@ use crate::world::World;
 /// The kinds an agent can found, in tie-break order (D25: tie -> Bar; M12
 /// D20 appends the Hotel, foundable only with `[street] enabled`; M13 D16
 /// the Clinic and Garage, each foundable only with its `[assets]
-/// found_clinic` / `found_garage` flag).
-const FOUNDABLE: [BuildingKind; 5] =
-    [BuildingKind::Bar, BuildingKind::Home, BuildingKind::Hotel, BuildingKind::Clinic, BuildingKind::Garage];
+/// found_clinic` / `found_garage` flag; M15 W36 the Feed, with `[news]` on).
+const FOUNDABLE: [BuildingKind; 6] = [
+    BuildingKind::Bar,
+    BuildingKind::Home,
+    BuildingKind::Hotel,
+    BuildingKind::Clinic,
+    BuildingKind::Garage,
+    BuildingKind::Feed,
+];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
 pub fn vacant_lots(world: &World) -> Vec<EntityId> {
@@ -40,6 +46,7 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         BuildingKind::Hotel if world.config.street.enabled => Some(c.hotel),
         BuildingKind::Clinic if a.enabled && a.found_clinic => Some(c.clinic),
         BuildingKind::Garage if a.enabled && a.found_garage => Some(c.garage),
+        BuildingKind::Feed if crate::systems::news::on(world) && c.feed > 0 => Some(c.feed),
         _ => None,
     }
 }
@@ -89,6 +96,7 @@ pub fn build_on_lot(
             | BuildingKind::Clinic
             | BuildingKind::Garage
             | BuildingKind::Lab
+            | BuildingKind::Feed
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -189,6 +197,7 @@ pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
                 .founder_residents_per_seller
                 .unwrap_or(world.config.corps.residents_per_garage)
                 .max(1) as f32,
+            BuildingKind::Feed => world.config.news.residents_per_feed.max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };

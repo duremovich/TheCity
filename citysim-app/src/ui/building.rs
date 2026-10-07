@@ -121,6 +121,11 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             BuildingKind::Clinic | BuildingKind::Garage => staff(ui, app, world, id, "Staff"),
             // M14 V16: the Lab's Researchers (its panel is phase 4).
             BuildingKind::Lab => staff(ui, app, world, id, "Researchers"),
+            // M15 § 10: the Feed panel, then its Reporters.
+            BuildingKind::Feed => {
+                super::feed::draw(ui, app, world, id);
+                staff(ui, app, world, id, "Reporters");
+            }
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);
@@ -649,6 +654,8 @@ fn hideout(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, b: &Building
                 });
         }
     });
+    // M15 § 10: the gang's axes, regard, vendettas and creed.
+    super::word::faction(ui, app, world, gid);
     section(ui, "Roster", |ui| {
         let mut members: Vec<(EntityId, u8, u64)> = gang
             .members

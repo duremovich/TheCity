@@ -202,10 +202,17 @@ pub enum EventKind {
     ContractLost,
     /// `[hunter, respondent]`.
     Deceived,
+    // --- M15 phase 4 (plan W43; crimson).
+    /// `[feed, actor, object or NONE]`.
+    Story,
+    /// `[corp, feed]`.
+    Planted,
+    /// `[corp, feed]`.
+    Buried,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 106] = [
+    pub const ALL: [EventKind; 109] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -312,6 +319,9 @@ impl EventKind {
         EventKind::VendettaEnded,
         EventKind::ContractLost,
         EventKind::Deceived,
+        EventKind::Story,
+        EventKind::Planted,
+        EventKind::Buried,
     ];
 }
 

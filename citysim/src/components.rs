@@ -168,10 +168,13 @@ pub enum BuildingKind {
     Garage,
     /// M14 D16 (plan V16): makes Data in its focus track.
     Lab,
+    /// M15 W36: a news outlet; its Reporters turn the day's deed records
+    /// into story records posted into the pools it covers.
+    Feed,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 15] = [
+    pub const ALL: [BuildingKind; 16] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -187,6 +190,7 @@ impl BuildingKind {
         BuildingKind::Clinic,
         BuildingKind::Garage,
         BuildingKind::Lab,
+        BuildingKind::Feed,
     ];
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
@@ -206,6 +210,7 @@ impl BuildingKind {
             "Clinic" => BuildingKind::Clinic,
             "Garage" => BuildingKind::Garage,
             "Lab" => BuildingKind::Lab,
+            "Feed" => BuildingKind::Feed,
             _ => return None,
         })
     }
@@ -228,6 +233,7 @@ impl BuildingKind {
             BuildingKind::Clinic => "Ripperdoc",
             BuildingKind::Garage => "Garage",
             BuildingKind::Lab => "Lab",
+            BuildingKind::Feed => "Feed",
         }
     }
 
@@ -249,6 +255,7 @@ impl BuildingKind {
             BuildingKind::Clinic => 'R',
             BuildingKind::Garage => 'V',
             BuildingKind::Lab => 'Q',
+            BuildingKind::Feed => 'P',
         }
     }
 }
@@ -287,10 +294,12 @@ pub enum Role {
     Mechanic,
     /// M14 (plan V16): staff of a Lab.
     Researcher,
+    /// M15 W36: staff of a Feed.
+    Reporter,
 }
 
 impl Role {
-    pub const ALL: [Role; 9] = [
+    pub const ALL: [Role; 10] = [
         Role::Farmer,
         Role::Guard,
         Role::Clerk,
@@ -300,6 +309,7 @@ impl Role {
         Role::Ripperdoc,
         Role::Mechanic,
         Role::Researcher,
+        Role::Reporter,
     ];
 
     /// The display name (M11 section 1).
@@ -314,6 +324,7 @@ impl Role {
             Role::Ripperdoc => "Ripperdoc",
             Role::Mechanic => "Mechanic",
             Role::Researcher => "Researcher",
+            Role::Reporter => "Reporter",
         }
     }
 
@@ -329,6 +340,7 @@ impl Role {
             Role::Ripperdoc => BuildingKind::Clinic,
             Role::Mechanic => BuildingKind::Garage,
             Role::Researcher => BuildingKind::Lab,
+            Role::Reporter => BuildingKind::Feed,
         }
     }
 }
@@ -1101,6 +1113,24 @@ pub struct Corp {
     /// (`competence::daily`); `comp_ref` until the first pass.
     #[serde(default = "default_competence")]
     pub competence: f32,
+    /// M15 W40: the corp's honour at the last 14 midnights, newest last
+    /// (Spin's `honour_drop`).
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub honour_hist: VecDeque<f32>,
+    /// M15 W40 (orchestrator deviation: Spin is a side spend, not a
+    /// corp-wide order): spinning since this midnight, while the corp's
+    /// Spin score clears `[news] spin_min` (`news::rescore_spin`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spin_since: Option<Tick>,
+    /// The last midnight's Spin score and its considerations (the panel).
+    #[serde(default, skip_serializing_if = "is_zero_f32_c")]
+    pub spin_score: f32,
+    #[serde(skip)]
+    pub spin_trace: Vec<Consideration>,
+}
+
+fn is_zero_f32_c(v: &f32) -> bool {
+    *v == 0.0
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1157,6 +1187,10 @@ impl Corp {
             data_bought_today: 0,
             ice_spend_today: 0,
             competence: default_competence(),
+            honour_hist: VecDeque::new(),
+            spin_since: None,
+            spin_score: 0.0,
+            spin_trace: Vec::new(),
         }
     }
 
@@ -1954,6 +1988,9 @@ pub struct Building {
     /// M15 W31: a display label over the kind's ("Chapel" for The Unplugged's Hideout).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
+    /// M15 W36: a Feed's state (name, reach, covered districts, buried actors).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub feed: Option<crate::word::FeedState>,
 }
 
 pub fn default_tier() -> u8 {

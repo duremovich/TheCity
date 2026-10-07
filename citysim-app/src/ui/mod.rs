@@ -6,11 +6,13 @@ pub mod building;
 pub mod city;
 pub mod corp;
 pub mod district;
+pub mod feed;
 pub mod inspector;
 pub mod log;
 pub mod mission;
 pub mod node;
 pub mod run;
+pub mod word;
 
 use macroquad::prelude::*;
 

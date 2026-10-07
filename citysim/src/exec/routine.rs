@@ -35,6 +35,8 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Mechanic => LocationKey::Garage,
         // M14 V16: a Lab's staff work at their employer (the wage desk).
         Role::Researcher => LocationKey::Workplace,
+        // M15 W36: a Feed's staff likewise.
+        Role::Reporter => LocationKey::Workplace,
     }
 }
 

@@ -335,6 +335,19 @@ pub enum PlayerCommand {
         hunter: EntityId,
         target: EntityId,
     },
+    // --- M15 levers (plan W42, phase 4).
+    /// Off: only the city's Civic Wire publishes; private Feeds keep their
+    /// staff and lose their ads.
+    SetPressLicence(bool),
+    /// An extra share (`0.0..=1.0`) of every ad and Spin payment to a Feed,
+    /// paid to the Treasury.
+    SetNewsTax(f32),
+    /// The Civic Wire buries every story about a faction (a gang, a corp
+    /// or the Law) while `on`.
+    CensorStories {
+        faction: EntityId,
+        on: bool,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -424,6 +437,15 @@ pub struct Levers {
     /// reads `[crime] sentence_days_ext`.
     #[serde(default)]
     pub hack_sentence_days: [Option<u16>; 2],
+    /// M15 W42: Feeds may publish (off: only the Civic Wire).
+    #[serde(default = "default_true")]
+    pub press_licence: bool,
+    /// M15 W42: an extra share of ads and Spin payments to the Treasury.
+    #[serde(default)]
+    pub news_tax: f32,
+    /// M15 W42: the factions the Civic Wire buries (`CensorStories`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub censored: std::collections::BTreeSet<EntityId>,
 }
 
 fn default_city_ice() -> u8 {
@@ -491,6 +513,9 @@ impl Levers {
             city_ice: cfg.levers.city_ice,
             data_tax: 0.0,
             hack_sentence_days: [None; 2],
+            press_licence: true,
+            news_tax: 0.0,
+            censored: Default::default(),
         }
     }
 }
@@ -702,6 +727,41 @@ impl World {
                     &[],
                     format!("Sentence for {} set to {d} days", crime.label()),
                 );
+            }
+            PlayerCommand::SetPressLicence(on) => {
+                self.levers.press_licence = *on;
+                let text = if *on {
+                    "Press licence granted: every Feed publishes"
+                } else {
+                    "Press licence revoked: only the Civic Wire publishes"
+                };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetNewsTax(r) => {
+                self.levers.news_tax = r.clamp(0.0, 1.0);
+                self.push_event(EventKind::PlayerAction, &[], format!("News tax set to {:.2}", self.levers.news_tax));
+            }
+            PlayerCommand::CensorStories { faction, on } => {
+                let known = self.has::<Gang>(*faction)
+                    || self.has::<Corp>(*faction)
+                    || self.has::<crate::components::Law>(*faction);
+                if !known {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "CensorStories: no such faction".to_string());
+                    return;
+                }
+                let name = if self.has::<crate::components::Law>(*faction) {
+                    "the Law".to_string()
+                } else {
+                    self.owner_label(Some(*faction))
+                };
+                let text = if *on {
+                    self.levers.censored.insert(*faction);
+                    format!("The Civic Wire buries every story about {name}")
+                } else {
+                    self.levers.censored.remove(faction);
+                    format!("The Civic Wire may run stories about {name} again")
+                };
+                self.push_event(EventKind::PlayerAction, &[*faction], text);
             }
             PlayerCommand::SetRiotResponse(r) => {
                 self.levers.riot_response = *r;
@@ -988,6 +1048,7 @@ impl World {
                     kin: Default::default(),
                     told: Default::default(),
                     district,
+                    press: 0,
                 };
                 crate::systems::gossip::post(self, district, e);
                 // One first-hand holder: the living adult of the district nearest `about`.
@@ -1803,6 +1864,7 @@ impl World {
                 hacked: None,
                 last_door_open: None,
                 label: None,
+                feed: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

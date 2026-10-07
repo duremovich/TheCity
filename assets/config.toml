@@ -68,6 +68,9 @@ hotel = { capacity = 12, stock_cap = 0 }       # M12 D20: beds ([street] hotel_b
 clinic = { capacity = 6, stock_cap = 200, staff = 2 }    # M13 D16: the Ripperdoc (inert in phase 1)
 garage = { capacity = 8, stock_cap = 400, staff = 3 }    # M13 D16 (inert in phase 1)
 lab = { capacity = 8, stock_cap = 0, staff = 4 }         # M14 V16: four Researchers make Data
+# M15 W36 (phase 4): staff 3 -> 1. A seeded corp Feed earns ~3/day of ads (few corps clear the cash bar);
+# at three Reporters and upkeep 10 Nutrix Now lost ~1,400 a run and Nutrix went bankrupt late on 3 of 42-47.
+feed = { capacity = 6, stock_cap = 0, staff = 1 }
 
 [needs]
 hunger_decay_per_tick = 0.000347
@@ -108,7 +111,9 @@ wage_mechanic = 7                  # M13 D16
 # at 9 (36 a day a Lab) it went bankrupt on day 31, at 6 on day 59; at 4 the tech corps' day-60
 # treasuries clear half of M13's on seeds 42-45 and the seeded bankruptcies move by seed noise.
 wage_researcher = 4
-wage_reporter = 8                  # M15 W36: a Feed's Reporter (phase 4)
+# M15 W36 (phase 4): 8 -> 4 (the Researcher's wage). At 8 Nutrix Now cost Nutrix ~34/day against ~10 of
+# ads: Nutrix ran ~1,400 below the word-off city by day 42 and lost its Secure/Research tie and early trucks.
+wage_reporter = 4
 # 1.4 on paper assumes 24 farmers x 9 h at farming 0.5 and one meal per citizen. In practice farms
 # work 6 days in 7, farmers attend ~75% of a shift (meals, wage trips), initial farming skill is
 # U(0.1, 0.4) (x0.8) and citizens eat ~1.2 meals a day, so ~380 food/day is needed. 2.4 keeps the
@@ -521,7 +526,7 @@ incorporate_buildings = 2         # an agent owning this many becomes a corp
 # city's coins sit with the employed and the execs): 3 NPC Bars from day 91 and no incorporation. At
 # 200 6 NPC foundings from day 28 and the first incorporation on day 28; at 150 15 foundings (12 Bars
 # by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
-found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600, lab = 800 }  # M12 D20: hotel; M13 D16: clinic, garage; M14: lab (Research only)
+found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600, lab = 800, feed = 500 }  # M12 D20: hotel; M13 D16: clinic, garage; M14: lab (Research only); M15: feed
 wholesale = 2                      # coins per unit Farm → Market when owners differ
 # M11 phase 5: 10 -> 20, with upkeep.security_office 30 -> 10. A Security corp costs its Office's
 # upkeep, six guards' wages (48) and its exec (10) a day, ~88 at the old sizes against 6-10 a contract
@@ -558,12 +563,13 @@ bar_owner_count = 2
 # M12 fix pass: hotel 10 -> 4. A Hotel books 2-3 nights a day at 3 coins (5-7 hotel nights a day
 # city-wide over 2-3 Hotels, seeds 42-44), ~7 gross and ~6 after tax: at 10 every Hotel owner bled.
 # M14 V47 (phase 1): lab 15 -> 0 (third knob; see wage_researcher).
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10, lab = 0 }
+# M15 phase 4: feed 10 -> 0 (as the Lab's in M14 V47): with one Reporter a Feed then nets ~0 a day on ads.
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10, lab = 0, feed = 0 }
 # M12 fix pass: a corp raided (or looted by a riot) in the last raided_days reads Secure/Lobby
 # `losses` of at least raided_losses: it hardens (contracts the building, or lobbies on the gang).
 raided_days = 7
 raided_losses = 0.5
-value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800, lab = 1200 }  # D28; M13 D16; M14
+value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800, lab = 1200, feed = 800 }  # D28; M13 D16; M14; M15
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
@@ -636,6 +642,7 @@ research = 0.05                    # M14 V31: Research needs a nudge to start a 
 # M14 V31 (phase 3): 0.0 -> 0.3. At 0.0-0.2 no corp took VirtRaid; at 0.3 Arasaka holds it on a few
 # stretches and runs Militech's Lab nightly.
 virt_raid = 0.3
+spin = 0.0                         # M15 W40: Spin is a side spend scored on its own ([news] spin_min)
 
 # M11 classes (docs/M11_OWNERSHIP.md § 7; plan D34-D36).
 [classes]
@@ -1329,11 +1336,16 @@ reach_per_reporter = 0.15
 story_reach = 0.8
 stories_per_day = 3
 ad_rate = 3
-plant_price = 120
-bury_price = 60
+# Phase 4: 120 -> 60 and 60 -> 30: Nutrix planted ~40 times a run and paid ~4,600 at 120.
+plant_price = 60
+bury_price = 30
 bury_days = 3
 press_w = 0.3
 press_loyalty = 0.1
 press_cap = 0.15
 censor_lawfulness = 0.3
+residents_per_feed = 1000           # plan key (W36): Register's per-capita Feed target
+# Orchestrator deviation (W40): Spin is a side spend, not a corp-wide order (as an order it took Nutrix's
+# corp-wide slot from Research, M14's Research-built Lab); a corp spins while its Spin score >= spin_min.
+spin_min = 0.2
 enabled = true

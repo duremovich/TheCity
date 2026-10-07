@@ -24,6 +24,8 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
         crate::systems::creeds::migrate(&mut world);
         crate::systems::competence::seed(&mut world);
     }
+    // M15 W41: a save from before the Feeds (news on) gets the opening two.
+    crate::systems::news::migrate(&mut world);
     world.reload_names();
     Ok(world)
 }

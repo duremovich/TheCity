@@ -179,11 +179,51 @@ pub fn members_of(world: &World, faction: EntityId) -> Vec<EntityId> {
     Vec::new()
 }
 
+/// W38: the agent's ties the press term reads: its employer corp and that
+/// corp's exec, its gang, and its Home's owner (a corp or a landlord).
+pub fn press_ties(world: &World, agent: EntityId) -> SmallVec<[EntityId; 4]> {
+    let mut out: SmallVec<[EntityId; 4]> = SmallVec::new();
+    if let Some(c) = world.corp_of_agent(agent) {
+        out.push(c);
+        if let Some(e) = world.comp::<Corp>(c).and_then(|cc| cc.exec).filter(|&e| e != agent) {
+            out.push(e);
+        }
+    }
+    if let Some(g) = world.gang_of(agent) {
+        out.push(g);
+    }
+    if let Some(o) = world
+        .comp::<crate::components::Household>(agent)
+        .and_then(|h| h.home)
+        .and_then(|h| world.owner_of(h))
+        .filter(|&o| o != agent && !out.contains(&o))
+    {
+        out.push(o);
+    }
+    out
+}
+
+/// W38: Σ over the agent's heard story entries whose actor is one of its
+/// ties (`press_ties`) of `slant × conf` (the entry's `press ÷ 100`).
+pub fn press_of(world: &World, agent: EntityId) -> f32 {
+    let Some(m) = world.comp::<Memory>(agent) else { return 0.0 };
+    if !m.heard.iter().any(|e| e.press != 0) {
+        return 0.0;
+    }
+    let ties = press_ties(world, agent);
+    m.heard
+        .iter()
+        .filter(|e| e.press != 0 && e.subject.is_some_and(|s| ties.contains(&s)))
+        .map(|e| f32::from(e.press) / 100.0 * e.conf)
+        .sum()
+}
+
 /// W14: an agent's opinion of a faction, on demand: `0.4 × mean affinity
 /// to its members the agent has edges with + 0.3 × own deed memories about
 /// it (valence-weighted) + 0.2 × (honour − 0.5) × 2 + 0.1 × taste (W30:
-/// `colours_taste`, 0 with moves off) + press_w × press`, plus `own_bias`
-/// for the employer and the gang, clamped −1..1.
+/// `colours_taste`, 0 with moves off) + press_w × press` (W38: when the
+/// faction is one of the agent's ties), plus `own_bias` for the employer
+/// and the gang, clamped −1..1.
 pub fn opinion(world: &World, agent: EntityId, faction: EntityId) -> f32 {
     let members = members_of(world, faction);
     let affs: Vec<f32> = members.iter().filter_map(|&m| world.edge(agent, m).map(|e| e.affinity)).collect();
@@ -202,7 +242,11 @@ pub fn opinion(world: &World, agent: EntityId, faction: EntityId) -> f32 {
         .unwrap_or(0.0)
         .clamp(-1.0, 1.0);
     let honour = rep(world, faction).honour;
-    let press = world.config.news.press_w * rep(world, agent).press;
+    let press = if press_ties(world, agent).contains(&faction) {
+        world.config.news.press_w * rep(world, agent).press
+    } else {
+        0.0
+    };
     let taste = if crate::systems::moves::on(world) { colours_taste(world, agent, faction) } else { 0.0 };
     let bias = if world.gang_of(agent) == Some(faction) || world.corp_of_agent(agent) == Some(faction) {
         world.config.reputation.own_bias
@@ -327,6 +371,7 @@ pub fn rebuild(world: &mut World) {
         }
     }
     let captain = world.law().and_then(|l| l.captain);
+    let news = crate::systems::news::on(world);
     let mut out: Vec<(EntityId, Reputation)> = Vec::with_capacity(adults.len() + 32);
     for &a in &adults {
         let kb = Acc::get(&acc.known, a);
@@ -367,7 +412,7 @@ pub fn rebuild(world: &mut World) {
             known_by: kb,
             top: top_of(&acc, a),
             pinned: None,
-            press: 0.0,
+            press: if news { press_of(world, a) } else { 0.0 },
         };
         out.push((a, r));
     }
@@ -493,6 +538,18 @@ pub fn rebuild(world: &mut World) {
     }
     rebuild_regard(world);
     sample_kill_watch(world, &acc.known);
+    // W40: each corp's honour at this midnight, 14 kept (Spin's honour drop).
+    if news {
+        for c in world.corps() {
+            let h = rep(world, c).honour;
+            if let Some(cc) = world.comp_mut::<Corp>(c) {
+                cc.honour_hist.push_back(h);
+                while cc.honour_hist.len() > 14 {
+                    cc.honour_hist.pop_front();
+                }
+            }
+        }
+    }
 }
 
 /// The four largest per-deed contributions of an actor, biggest first.

@@ -907,3 +907,50 @@ fn test_ledger_hack_conserves_money() {
     assert!(w.stats.current.virt.flow_data > 0);
     assert_eq!(ownership::total_coins(&w), before, "a Ledger hack and a Data sale move coins, never make them");
 }
+
+/// M15 phase 4 (Money model): a day of ads, a plant and a bury, with the
+/// news tax on, moves coins and never makes them.
+#[test]
+fn test_news_day_conserves_coins() {
+    use citysim::systems::{memory, news};
+    use citysim::word::{Deed, Story};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY);
+    w.levers.news_tax = 0.2;
+    let corp = |w: &World, n: &str| {
+        w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.name == n)).expect("corp")
+    };
+    let (nutrix, vatra) = (corp(&w, "Nutrix"), corp(&w, "Vatra"));
+    let exec = w.comp::<Corp>(nutrix).and_then(|c| c.exec).expect("exec");
+    let rival = w.comp::<Corp>(vatra).and_then(|c| c.exec).expect("rival exec");
+    let now = w.tick;
+    let rumour = citysim::MemoryEntry {
+        subject: Some(rival),
+        salience: 0.8,
+        second_hand: true,
+        deed: Some(Deed::Robbed),
+        hops: 1,
+        conf: 0.6,
+        ..citysim::MemoryEntry::blank(citysim::MemoryKind::Rumour, now)
+    };
+    memory::hear_entry(&mut w, exec, rumour);
+    // A story about Nutrix's exec on the Feed Nutrix does not own.
+    let feed = news::all_feeds(&w).into_iter().find(|&f| w.owner_of(f) != Some(nutrix)).expect("a Feed");
+    w.stories.push_back(Story {
+        id: 9_999,
+        feed,
+        deed: Deed::Evicted,
+        actor: exec,
+        object: None,
+        tick: now,
+        slant: -0.3,
+        paid_by: None,
+    });
+    w.config.news.spin_min = 0.0;
+    let before = ownership::total_coins(&w);
+    news::daily(&mut w);
+    let word = &w.stats.current.word;
+    assert!(word.flow_ads > 0 && word.flow_plant > 0, "ads {} plant {}", word.flow_ads, word.flow_plant);
+    assert!(word.planted >= 1 && word.buried >= 1, "planted {} buried {}", word.planted, word.buried);
+    assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+}

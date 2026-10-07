@@ -29,7 +29,8 @@ pub fn on(world: &World) -> bool {
 
 /// A role's skill on `id`, against its city mean, and its label (spec
 /// roles: Farm farming; Market, Bar, Clinic, Garage persuasion; a guard
-/// fighting; a Lab knowledge and hacking). `None` for an unskilled role.
+/// fighting; a Lab knowledge and hacking; a Feed knowledge). `None` for an
+/// unskilled role.
 pub fn role_skill(world: &World, id: EntityId, role: Role) -> Option<(f32, f32, &'static str)> {
     let s = world.comp::<Skills>(id)?;
     let m = &world.skill_means;
@@ -40,6 +41,7 @@ pub fn role_skill(world: &World, id: EntityId, role: Role) -> Option<(f32, f32, 
         Role::Guard => (s.fighting, m[MEAN_FIGHTING], "fighting"),
         Role::Clerk | Role::Bartender | Role::Ripperdoc | Role::Mechanic => (s.persuasion, m[p], "persuasion"),
         Role::Researcher => (0.5 * (s.knowledge + s.hacking.max(0.0)), 0.5 * (m[k] + m[MEAN_HACKING]), "knowledge"),
+        Role::Reporter => (s.knowledge, m[k], "knowledge"),
         Role::Gravedigger | Role::Sanitation => return None,
     })
 }
@@ -69,6 +71,7 @@ pub fn role_term(world: &World, id: EntityId, role: Role) -> Option<f32> {
         Role::Guard => norm(world, MEAN_FIGHTING, s.fighting),
         Role::Clerk | Role::Bartender | Role::Ripperdoc | Role::Mechanic => norm(world, p, s.persuasion),
         Role::Researcher => 0.5 * (norm(world, k, s.knowledge) + norm(world, MEAN_HACKING, s.hacking.max(0.0))),
+        Role::Reporter => norm(world, k, s.knowledge),
         Role::Gravedigger | Role::Sanitation => return None,
     })
 }
@@ -303,8 +306,8 @@ fn talent_lost(world: &mut World, group: EntityId, old: f32, new: f32) {
     world.push_event(EventKind::TalentLost, &[group, g.who], text);
 }
 
-/// W25: `+knowledge_work` per Lab shift worked yesterday (the shift
-/// ledger), at Full and Coarse.
+/// W25: `+knowledge_work` per Lab or Feed shift worked yesterday (the
+/// shift ledger), at Full and Coarse.
 fn knowledge_work(world: &mut World) {
     if !crate::systems::moves::on(world) {
         return;
@@ -312,7 +315,8 @@ fn knowledge_work(world: &mut World) {
     let step = world.config.skills.knowledge_work;
     let day = u16::try_from(world.day()).unwrap_or(u16::MAX);
     let k = SocialSkill::Knowledge.index();
-    let workers: Vec<EntityId> = world.workers(Role::Researcher).to_vec();
+    let mut workers: Vec<EntityId> = world.workers(Role::Researcher).to_vec();
+    workers.extend_from_slice(world.workers(Role::Reporter));
     for r in workers {
         let Some(j) = world.comp::<Job>(r) else { continue };
         let yesterday = j.shift_key_at(world.tick.saturating_sub(1));
@@ -365,10 +369,10 @@ fn rust(world: &mut World) {
 // ---------------------------------------------------------------------------
 
 /// The roles worth poaching for (W29): Vat Techs, private guards,
-/// Researchers, Clerks, Bartenders (Reporters in phase 4).
+/// Researchers, Clerks, Bartenders, Reporters.
 fn poachable(world: &World, building: EntityId, role: Role) -> bool {
     match role {
-        Role::Farmer | Role::Researcher | Role::Clerk | Role::Bartender => true,
+        Role::Farmer | Role::Researcher | Role::Clerk | Role::Bartender | Role::Reporter => true,
         Role::Guard => {
             world.comp::<crate::components::Building>(building).is_some_and(|b| b.kind == BuildingKind::SecurityOffice)
         }

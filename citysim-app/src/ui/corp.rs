@@ -163,6 +163,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         });
 
         tech_block(ui, app, world, id, c);
+        // M15 § 10: the axes, competence, regard, vendettas, plants and buries.
+        super::word::faction(ui, app, world, id);
 
         let mut by_kind: Vec<(BuildingKind, Vec<EntityId>)> = Vec::new();
         for &b in &c.buildings {

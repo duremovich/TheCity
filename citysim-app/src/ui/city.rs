@@ -44,6 +44,8 @@ pub struct CityState {
     pub city_ice: u8,
     pub data_tax: f32,
     pub hack_sentence_days: [u16; 2],
+    /// M15 W42: the news tax slider.
+    pub news_tax: f32,
     pub synced: bool,
 }
 
@@ -73,6 +75,7 @@ impl Default for CityState {
             city_ice: 2,
             data_tax: 0.0,
             hack_sentence_days: [2, 5],
+            news_tax: 0.0,
             synced: false,
         }
     }
@@ -104,6 +107,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.asset_tax = world.levers.asset_tax;
         app.city.city_ice = world.levers.city_ice;
         app.city.data_tax = world.levers.data_tax;
+        app.city.news_tax = world.levers.news_tax;
         let ext = &world.config.crime.sentence_days_ext;
         app.city.hack_sentence_days = [
             world.levers.hack_sentence_days[0].unwrap_or(ext.intrusion as u16),
@@ -194,6 +198,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         districts_section(ui, app, world);
         assets_section(ui, app, world);
         virt_section(ui, app, world);
+        super::word::city(ui, app, world);
 
         ui.separator();
         ui.strong("Food");
