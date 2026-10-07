@@ -2603,6 +2603,19 @@ pub struct TechCfg {
     pub seed: std::collections::BTreeMap<String, [u8; 3]>,
     /// Plan V47: coins per seeded Lab to its owner, out of nothing.
     pub seed_lab_grant: i64,
+    /// M14 phase 5 (deviation from the spec's Research score): Research's
+    /// tech gap reads the street tier (the best living corp's tier in the
+    /// corp's focus track), not only niche rivals. Off = the spec.
+    pub research_gap_street: bool,
+    /// M14 phase 5: a floor under Research's `max lapse` consideration so a
+    /// corp that is not lapsing can still score it. 0 = the spec.
+    pub research_lapse_floor: f32,
+    /// M14 phase 5: days a corp must have held Research before it builds a
+    /// Lab (0 = the spec: on the first day).
+    pub research_build_days: u32,
+    /// M14 phase 5: Research is gated shut until the corp has this many days
+    /// of cashflow on its books (0 = the spec: from day 0).
+    pub research_min_days: u32,
 }
 
 impl Default for TechCfg {
@@ -2640,6 +2653,10 @@ impl TechCfg {
                 .map(|(n, t)| (n.to_string(), t))
                 .collect(),
             seed_lab_grant: 2000,
+            research_gap_street: false,
+            research_lapse_floor: 0.0,
+            research_build_days: 0,
+            research_min_days: 0,
         }
     }
 

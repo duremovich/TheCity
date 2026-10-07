@@ -23,7 +23,13 @@ python tools/compare_runs.py a.csv b.csv
   district and corp-building raids won/lost. Flags: a district above unrest 0.8 for 30+ days
   running with no riot there (per-district riot events, or the city `riots` column without an
   events file), a district's litter above 0.5 (with the days), `dregs == 0` for 30+ days running,
-  and corp raids never lost. The events file is optional: `analyze_run.py run.csv` skips the
+  and corp raids never lost. M14 adds a Virt section (skipped when the plane did not run): the
+  plane's last-day snapshots (nodes, Labs, decks, cameras, mean corp ICE, Data held), run totals of
+  runs and outcomes, Data made/stolen/wiped/sold, Ledger hacks, doors, turned robots, traces, fries,
+  flatlines, arrests, ICE raised/lowered/spend and tiers gained/lost, the success share, traced share
+  of lost runs and stolen / made, each corp slot's tiers first and last day, the M14 flows and, with
+  events, the violet event counts and the tier, wipe, door, robot and flatline lines; flags for the
+  spec section 12 bands. The events file is optional: `analyze_run.py run.csv` skips the
   event-based parts.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.

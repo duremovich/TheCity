@@ -812,6 +812,27 @@ An asset is an entity carrying only `Asset` (kind, tier, owner, loc, condition, 
 
 The rules are in [M13_ASSETS.md](M13_ASSETS.md): the asset model § 1, vehicles § 2, chrome § 3, stims § 4, the robot § 5, the Shop § 6, the Statistical tier § 7, the levers § 8, UI, events and CSV § 9, and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city turn `[assets]` off: no pass, goal, order, Kit term or Body read.
 
+### Data and Virt (M14)
+
+Since M14 the tick order is `commands, lod, needs, memory, mood, think, plan, exec, virt, ownership, assets, tech, classes, districts, economy, [bind], law, social, gang, corp_brain, demography, stats`. `virt::run` relinks the plane when a hook marked it dirty and pops the run steps that are due; nothing else runs per tick. `tech::run` is the plane's midnight pass: relink, Lab production from the shift ledger, ICE upkeep, research upkeep and decay, research under the Research order, gang Data sales, the Statistical hack pass, the expiries (alarms, hacks, run orders, sightings, turned robots) and the 30-day ICE-spend roll.
+
+The Virt plane is a board game laid over the map, not a model of anything technical: `World::virt` holds abstract nodes (a Public node per district, a node per faction building, Lab and Hideout, the Precinct, a Ledger per living corp and the Treasury) and links with a tier (Street and Access 1, Trunk 2). A run is an event chain in `World::run_queue`, keyed by its id so its dice never touch the world stream:
+
+| Step | Does | Contest |
+| --- | --- | --- |
+| order | a freelancer's Hack goal, a gang or corp order, the Raid prelude, the Statistical pass or god writes a `RunOrder`; the runner plans `GoTo(Chair) → JackIn` | — |
+| `JackIn` | at the chair (home, Hideout, its Lab, or a Bar or Hotel terminal for a fee): route from the chair's portal node over links of tier ≤ the deck's, cheapest by `Σ −ln p`; the body sits `JackedIn` (never Statistical) | — |
+| hop | each node on the route, `hop_ticks[deck]` apart | every node owned by someone other than the patron with `def = ICE + alarm > 0` |
+| break-in, act, extract | the target, contested twice around `act_ticks[purpose]` | the target, when guarded |
+| out | the effect: Data stolen into the patron's store or the deck, a store wiped (a corp with no backup left drops the tier), coins from a Ledger (`Flow::Hack`), `DoorOpen` until the raid's window closes, a robot turned | — |
+| loss | the run ends: fry (reflex saves), death by flatline at ICE 3 or the kill roll, a trace to the chair (a corp or city owner files a report and the law knows where the body sits; a gang takes a grudge), the payload back on an extract loss; the body is dazed | — |
+
+The **tier contest** has a fourth user: M13's `security::contest` (a thief's tier against a lock, a robot sensor, a camera) is `contest_f(att, def, step)` over floats, `p = clamp(0.5 + contest_step × (att − def), 0.05, 0.95)`, and a run's contest is `att = deck tier + hack_w × Skills.hacking` against `def = ICE + alarm`, the same draw.
+
+Labs make Data in three tracks (Chrome, Deck, Industry) from the shift ledger; corps hold a tech tree of tiers 1-3 per track that costs Data a day to hold, lapses after `decay_days` short days or at once on a wipe with no backup, and gates what their sellers sell; an asset's effect reads `min(tier, its maker's tier)`. ICE sits on `Building.security` (and a corp's Ledger, the Treasury's on the Hall), is bought from a Security corp or self-installed under Secure and on the node robbed last week, and lowered under Hunker.
+
+The rules are in [M14_VIRT.md](M14_VIRT.md): the plane § 1, decks § 2, runs, ICE and the contest § 3, Data and Labs § 4, the tech tree § 5, goals, orders and the law § 6, watching live § 7, the Statistical tier § 8, levers § 9, UI, events and CSV § 10, and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city turn every M14 section off (`--virt-off` does the same for a run): no relink, run, upkeep, production or tier cap.
+
 ### Economy
 
 Daily at `tick_of_day == 0` plus per-event hooks. Inputs: building stocks, Market, Treasury, Jobs, lever `tax_rate`, season. Outputs: stock changes, `price_food`, `price_history` (cap 120), Wallet changes, `days_unpaid`.

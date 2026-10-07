@@ -202,6 +202,12 @@ enum Lever {
     Fry(u32),
     /// M14 god: `run_now=<agent index>:<building index|corp<slot>>:<data|wipe|ledger|door>`.
     RunNow(u32, RunTarget, citysim::virt::Purpose),
+    /// M14 god (phase 5): `wipe_corp_data=<corp slot>`.
+    WipeCorpData(u8),
+    /// M14 god (phase 5): `grant_decks=<district>:<n>:<tier>`.
+    GrantDecks(u8, u16, u8),
+    /// M14 god (phase 5): `set_corp_ice=<corp slot>:<tier>`.
+    SetCorpIce(u8, u8),
 }
 
 /// The target of `run_now`: a building by entity index, or a corp by slot
@@ -376,6 +382,9 @@ impl Lever {
             Lever::GrantDeck(a, tier) => PlayerCommand::GrantDeck { agent: agent_at(world, a)?, tier },
             Lever::SetIce(b, tier) => PlayerCommand::SetIce { building: building_at(world, b)?, tier },
             Lever::Fry(a) => PlayerCommand::Fry(agent_at(world, a)?),
+            Lever::WipeCorpData(s) => PlayerCommand::WipeCorpData(corp_in_slot(world, s)?),
+            Lever::GrantDecks(d, n, tier) => PlayerCommand::GrantDecks { district: citysim::DistrictId(d), n, tier },
+            Lever::SetCorpIce(s, tier) => PlayerCommand::SetCorpIce { corp: corp_in_slot(world, s)?, tier },
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -423,7 +432,9 @@ impl Lever {
 /// `data_tax=<0..1>` (an extra share of Data sales to the Treasury),
 /// `hack_sentence=intrusion|data_theft:<days>`; god `grant_deck=<agent
 /// index>:<tier>`, `set_ice=<building index>:<tier>`, `fry=<agent index>`,
-/// `run_now=<agent index>:<building index|corp<slot>>:<data|wipe|ledger|door>`.
+/// `run_now=<agent index>:<building index|corp<slot>>:<data|wipe|ledger|door>`;
+/// phase 5's plurals `wipe_corp_data=<corp slot>`,
+/// `grant_decks=<district>:<n>:<tier>`, `set_corp_ice=<corp slot>:<tier>`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -569,6 +580,22 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             ))
         }
         "fry" => Some(Lever::Fry(value.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?)),
+        "wipe_corp_data" => Some(Lever::WipeCorpData(slot(value)?)),
+        "grant_decks" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [d, n, t] = parts[..] else {
+                return Err(format!("{spec}: expected <district>:<n>:<tier>"));
+            };
+            Some(Lever::GrantDecks(
+                d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?,
+                n.parse::<u16>().map_err(|e| format!("{spec}: bad count: {e}"))?,
+                t.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?,
+            ))
+        }
+        "set_corp_ice" => {
+            let (s, t) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <corp slot>:<tier>"))?;
+            Some(Lever::SetCorpIce(slot(s)?, t.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?))
+        }
         "run_now" => {
             use citysim::virt::Purpose;
             let parts: Vec<&str> = value.split(':').collect();
@@ -1443,6 +1470,15 @@ mod tests {
             Lever::RunNow(77, RunTarget::Corp(3), Purpose::Ledger)
         ));
         assert!(parse_lever("day=3:run_now=77:812:hax").is_err());
+    }
+
+    #[test]
+    fn test_parse_virt_god_plurals_phase_5() {
+        assert!(matches!(parse_lever("day=20:wipe_corp_data=8").unwrap().1, Lever::WipeCorpData(8)));
+        assert!(matches!(parse_lever("day=45:grant_decks=6:10:3").unwrap().1, Lever::GrantDecks(6, 10, 3)));
+        assert!(matches!(parse_lever("day=45:set_corp_ice=6:0").unwrap().1, Lever::SetCorpIce(6, 0)));
+        assert!(parse_lever("day=45:grant_decks=6:10").is_err());
+        assert!(parse_lever("day=45:set_corp_ice=x:0").is_err());
         assert!(parse_lever("day=3:city_ice=x").is_err());
     }
 

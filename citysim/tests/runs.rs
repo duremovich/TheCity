@@ -212,6 +212,9 @@ fn test_unguarded_nodes_roll_nothing() {
     let gang = w.gang_list()[0];
     let hideout = w.hideout_of(gang).expect("hideout");
     let n = virt::node_of_building(&w, hideout).expect("node");
+    // Phase 5 seeds Hideouts at ICE 1 (`ice_seed.hideout`): take it off for the unguarded case.
+    virt::profile_mut(&mut w, n).expect("a Hideout's profile").ice = 0;
+    virt::bump_epoch(&mut w);
     assert_eq!(virt::def(&w, n), 0);
     w.virt.node_mut(n).expect("node").store.units[Track::Deck.index()] = 100;
     let a = runner(&mut w, &[]);
