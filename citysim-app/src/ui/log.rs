@@ -84,6 +84,22 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Overdose => Color32::from_rgb(0x40, 0xc8, 0xe0),
         // M14 § 10: the Virt plane in violet.
         k if is_virt(k) => super::run::VIOLET,
+        // M15 W43: the word in crimson.
+        EventKind::Poached
+        | EventKind::TalentLost
+        | EventKind::Expelled
+        | EventKind::Refused
+        | EventKind::GrudgeFormed
+        | EventKind::HuntStarted
+        | EventKind::HuntAbandoned
+        | EventKind::Avenged
+        | EventKind::Vendetta
+        | EventKind::VendettaEnded
+        | EventKind::ContractLost
+        | EventKind::Deceived
+        | EventKind::Story
+        | EventKind::Planted
+        | EventKind::Buried => super::word::CRIMSON,
         _ => Color32::LIGHT_GRAY,
     }
 }

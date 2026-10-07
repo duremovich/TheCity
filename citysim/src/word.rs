@@ -127,6 +127,14 @@ pub struct PoolEntry {
     /// The district it was first posted in (a leaked copy keeps it).
     #[serde(default)]
     pub district: DistrictId,
+    /// M15 W38 (plan field): a story's `slant × 100`, carried to the
+    /// heard entries drawn from it (0 = not a story).
+    #[serde(default, skip_serializing_if = "is_zero_i8")]
+    pub press: i8,
+}
+
+fn is_zero_i8(v: &i8) -> bool {
+    *v == 0
 }
 
 impl PoolEntry {

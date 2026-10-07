@@ -97,6 +97,35 @@ pub fn aggregate(members: &[(f32, bool, f32)], evictions_7d: u32) -> ClassAggreg
     }
 }
 
+/// M15 W38: the press term on a class aggregate: `loyalty += press_loyalty
+/// × mean press` of its members (yesterday's midnight `Reputation.press`),
+/// the change clamped to `±press_cap`, and unrest re-derived from it.
+pub fn with_press(mut agg: ClassAggregate, mean_press: f32, cfg: &crate::config::NewsCfg) -> ClassAggregate {
+    if agg.count == 0 {
+        return agg;
+    }
+    let delta = (cfg.press_loyalty * mean_press).clamp(-cfg.press_cap, cfg.press_cap);
+    agg.loyalty = (agg.loyalty + delta).clamp(0.0, 1.0);
+    agg.unrest = (1.0 - agg.loyalty) * (1.0 - agg.submission) + 0.1 * agg.evictions_7d as f32 / agg.count as f32;
+    for (k, v) in agg.trace.iter_mut() {
+        match *k {
+            "loyalty" => *v = agg.loyalty,
+            "unrest" => *v = agg.unrest,
+            _ => {}
+        }
+    }
+    agg.trace.push(("press", mean_press));
+    agg
+}
+
+/// M15 W38: an agent's press (0 with the news off).
+pub fn press_of(world: &World, agent: EntityId) -> f32 {
+    if !crate::systems::news::on(world) {
+        return 0.0;
+    }
+    world.reputation.get(agent.index as usize).and_then(Option::as_ref).map_or(0.0, |r| r.press)
+}
+
 /// D34: one Home's fear, yesterday's guard-hours ÷ `fear_hours_full`, capped at 1.
 pub fn home_fear(world: &World, home: EntityId) -> f32 {
     let full = world.config.classes.fear_hours_full.max(1e-6);
@@ -145,6 +174,7 @@ pub fn compute(world: &mut World) {
     let execs = execs(world);
     let fears = crate::systems::districts::district_fear(world);
     let mut members: [Vec<(f32, bool, f32)>; 3] = Default::default();
+    let mut press = [0.0f32; 3];
     // scan-ok: daily: class aggregates
     for a in world.citizens() {
         if !world.has::<Brain>(a) || !crate::systems::demography::is_adult(world, a) {
@@ -152,12 +182,21 @@ pub fn compute(world: &mut World) {
         }
         let (class, mood, employed, fear) = member(world, a, &execs, &fears);
         members[class.index()].push((mood, employed, fear));
+        press[class.index()] += press_of(world, a);
     }
     // § 7 puts the eviction term on the Street aggregate (an evictee is a
     // Dreg by the next midnight): the city's 7-day count goes there.
     let horizon = world.tick.saturating_sub(EVICTION_WINDOW_DAYS * TICKS_PER_DAY);
     let evictions = world.eviction_log.iter().filter(|&&t| t >= horizon).count() as u32;
-    world.classes = [aggregate(&members[0], 0), aggregate(&members[1], evictions), aggregate(&members[2], 0)];
+    let mut out = [aggregate(&members[0], 0), aggregate(&members[1], evictions), aggregate(&members[2], 0)];
+    if crate::systems::news::on(world) {
+        let cfg = world.config.news.clone();
+        for (i, agg) in out.iter_mut().enumerate() {
+            let mean = press[i] / members[i].len().max(1) as f32;
+            *agg = with_press(std::mem::take(agg), mean, &cfg);
+        }
+    }
+    world.classes = out;
 }
 
 /// Street unrest (the corp brain's `unrest` input, the strike trigger).

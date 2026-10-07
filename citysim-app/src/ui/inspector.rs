@@ -401,7 +401,9 @@ fn known_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         bar(ui, "standing", r.standing, None);
         bar(ui, "honour", r.honour, None);
         bar(ui, "heat", r.heat, None);
-        ui.label(format!("known by {}", r.known_by));
+        // M15 W38: the press term (stories held about the agent's ties).
+        let press = if r.press != 0.0 { format!(" · press {:+.2}", r.press) } else { String::new() };
+        ui.label(format!("known by {}{press}", r.known_by));
         if let Some((_, until)) = r.pinned.filter(|&(_, t)| t > world.tick) {
             ui.colored_label(GOLD, format!("pinned by god until day {}", until / TICKS_PER_DAY));
         }
@@ -413,6 +415,8 @@ fn known_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             }
         }
     });
+    // M15 § 10: the active Hunt, the grudges and the social skills.
+    super::word::agent(ui, app, world, id);
     let today = world.day();
     let fresh = app.known_cache.as_ref().is_some_and(|c| c.agent == id && c.day == today);
     if !fresh {
@@ -482,11 +486,15 @@ fn heard(ui: &mut Ui, world: &World, mem: &Memory) {
             ui.strong("conf");
             ui.end_row();
             for e in &mem.heard {
-                let what = match (e.kind, e.deed) {
+                let mut what = match (e.kind, e.deed) {
                     (citysim::MemoryKind::Sighting, _) => "seen".to_string(),
                     (_, Some(d)) => d.label().to_string(),
                     (k, None) => format!("{k:?}"),
                 };
+                // M15 W38: a story read off a Feed carries its slant.
+                if e.press != 0 {
+                    what = format!("{what} (story {:+.1})", f32::from(e.press) / 100.0);
+                }
                 ui.label(what);
                 ui.label(e.subject.map_or("someone".to_string(), |s| world.name_of(s)));
                 let whom = match e.kind {

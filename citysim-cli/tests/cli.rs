@@ -33,12 +33,13 @@ fn test_cli_report_csv_header() {
     // Tech corp's day-0 Garage hires three more Mechanics (9 in all on seed
     // 1), and with nobody jailed or killed off screen that day seed 1 read
     // 253: 230-255. M14 V16: plus the four seeded Labs' sixteen Researchers
-    // hired at the first midnight: 230-271.
+    // hired at the first midnight: 230-271. M15 W41: plus the two seeded
+    // Feeds' Reporters (one each since phase 4; the bound kept at 230-277).
     let cols: Vec<&str> = row.split(',').collect();
     assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
     let n = |i: usize| cols[i].parse::<u32>().expect("a count");
     let derelict_homeless = 5 * citysim::Config::load().street.seed_derelict_blocks as u32;
-    assert!((1995..=2000).contains(&n(2)) && (230..=271).contains(&n(3)), "row: {row}");
+    assert!((1995..=2000).contains(&n(2)) && (230..=277).contains(&n(3)), "row: {row}");
     assert!((derelict_homeless - 5..=derelict_homeless).contains(&n(4)), "row: {row}");
     // M13 D49: corp slot 9 and the 40 asset columns; M14 V43: the 72 Virt
     // columns; M15 W43: the 68 word columns (30, 4 gangs x 2, 9 corps x 3, 3).

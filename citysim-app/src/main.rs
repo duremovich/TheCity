@@ -2,7 +2,7 @@
 //!
 //! ```text
 //! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind] [--select-name NAME] [--tab story|corp]
-//!             [--overlay virt] [--select-node INDEX] [--select-runner]
+//!             [--overlay virt|word] [--select-node INDEX] [--select-runner] [--select-hunter]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the v2 256 x 192 map by default).
@@ -15,6 +15,7 @@ mod mission;
 mod overlay;
 mod render;
 mod ui;
+mod word_overlay;
 
 use std::path::PathBuf;
 
@@ -72,6 +73,11 @@ pub struct App {
     /// M14 § 10: `N` draws the Virt plane over a ghosted city; a click
     /// selects a node.
     pub show_virt: bool,
+    /// M15 § 10: `J` draws the word: each district's talk (Σ pool reach),
+    /// hunters on a stake-out, red lines between factions in a vendetta.
+    pub show_word: bool,
+    /// M15: keep the City panel scrolled to its Word section (`--scroll-word`, screenshots).
+    pub scroll_word: bool,
     /// M14: the node shown in the Node panel.
     pub selected_node: Option<citysim::virt::NodeId>,
     /// M14: the run shown in the Run panel (live in `world.runs`, else `run_log`).
@@ -108,6 +114,8 @@ impl App {
             show_litter: false,
             show_hooked: false,
             show_virt: false,
+            show_word: false,
+            scroll_word: false,
             selected_node: None,
             selected_run: None,
             selected_mission: None,
@@ -177,6 +185,12 @@ struct Args {
     hooked: bool,
     /// M14: `--overlay virt` starts with the Virt overlay on (`N`).
     overlay_virt: bool,
+    /// M15: `--overlay word` starts with the Word overlay on (`J`).
+    overlay_word: bool,
+    /// M15: select the first hunter (a stake-out first) on its Known tab.
+    select_hunter: bool,
+    /// M15: scroll the City panel to its Word section.
+    scroll_word: bool,
     /// M14: open the Node panel on this node index at start.
     select_node: Option<u16>,
     /// M14: select the first jacked-in agent and open its Run panel.
@@ -206,6 +220,9 @@ fn parse_args() -> Args {
         litter: false,
         hooked: false,
         overlay_virt: false,
+        overlay_word: false,
+        select_hunter: false,
+        scroll_word: false,
         select_node: None,
         select_runner: false,
         select_raid: false,
@@ -235,8 +252,11 @@ fn parse_args() -> Args {
             "--hooked" => args.hooked = true,
             "--overlay" => match it.next().as_deref() {
                 Some("virt") => args.overlay_virt = true,
-                other => panic!("--overlay virt, got {other:?}"),
+                Some("word") => args.overlay_word = true,
+                other => panic!("--overlay virt|word, got {other:?}"),
             },
+            "--select-hunter" => args.select_hunter = true,
+            "--scroll-word" => args.scroll_word = true,
             "--select-node" => {
                 args.select_node = Some(it.next().and_then(|s| s.parse().ok()).expect("--select-node <INDEX>"))
             }
@@ -322,8 +342,28 @@ async fn main() {
         app.camera.centre_on(d.centroid);
     }
     app.show_virt = args.overlay_virt;
+    app.show_word = args.overlay_word;
+    app.scroll_word = args.scroll_word;
+    if args.select_hunter {
+        // A hunter on a stake-out first, else the first hunter (ascending id).
+        let staking = |h: &EntityId| {
+            world
+                .comp::<citysim::Brain>(*h)
+                .and_then(|b| b.current_step())
+                .is_some_and(|s| s.action == citysim::ActionKind::StakeOut)
+        };
+        let pick = world.hunts.keys().copied().find(staking).or_else(|| world.hunts.keys().next().copied());
+        if let Some(h) = pick {
+            app.selected = Some(h);
+            app.inspector_tab = ui::inspector::InspectorTab::Known;
+            if let Some(p) = world.comp::<citysim::Position>(h) {
+                app.camera.px_per_tile = 12.0;
+                app.camera.centre_on(p.tile);
+            }
+        }
+    }
     // A run lasts tens of ticks: freeze the frames the M14 screenshots are taken in.
-    app.paused = args.select_runner || args.select_raid || args.select_node.is_some();
+    app.paused = args.select_runner || args.select_raid || args.select_node.is_some() || args.select_hunter;
     if let Some(i) = args.select_node.filter(|&i| usize::from(i) < world.virt.nodes.len()) {
         let n = citysim::virt::NodeId(i);
         app.selected_node = Some(n);
@@ -385,11 +425,12 @@ async fn main() {
         && args.select_kind.is_none()
         && args.select_district.is_none()
         && args.select_node.is_none()
+        && !(args.select_hunter && app.selected.is_some())
         && !(args.select_runner && app.selected_run.is_some())
         && !(args.select_raid && app.selected_mission.is_some());
     app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
-        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · N virt · F5 save · F9 load",
+        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · N virt · J word · F5 save · F9 load",
         world.seed()
     ));
 

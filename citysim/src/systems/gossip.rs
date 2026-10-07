@@ -93,6 +93,7 @@ pub fn post(world: &mut World, d: DistrictId, e: PoolEntry) {
         }
         if x.story.is_none() {
             x.story = e.story;
+            x.press = e.press;
         }
         return;
     }
@@ -143,6 +144,7 @@ pub fn post_deed_at(
         kin: SmallVec::new(),
         told: SmallVec::new(),
         district: d,
+        press: 0,
     };
     post(world, d, e);
 }
@@ -199,6 +201,7 @@ pub fn post_killing(world: &mut World, dead: EntityId) {
         kin,
         told: SmallVec::new(),
         district: d,
+        press: 0,
     };
     post(world, d, e);
 }
@@ -339,6 +342,7 @@ pub fn post_hole(world: &mut World, hole: &Hole) {
         kin: SmallVec::new(),
         told: SmallVec::new(),
         district: d,
+        press: 0,
     };
     post(world, d, e);
 }
@@ -583,6 +587,8 @@ fn pool_rumour(world: &World, e: &PoolEntry, hops: u8, conf: f32, salience: f32)
         object: e.object,
         hops,
         conf,
+        // W38: a story carries its slant to whoever reads it.
+        press: e.press,
         ..MemoryEntry::blank(MemoryKind::Rumour, e.tick)
     }
 }
@@ -593,7 +599,7 @@ fn pool_rumour(world: &World, e: &PoolEntry, hops: u8, conf: f32, salience: f32)
 /// holds a Rumour at hops + 1, `conf = pool_conf`, `salience = deed_sal ×
 /// reach`. Then its own first-hand deeds with salience ≥ `gossip_min` that
 /// the pool lacks go back in at `reach0 × 0.5`. A Full or Coarse adult
-/// draws once from story entries only (none before phase 4).
+/// draws once from story entries only (the Feeds' stories, `news::daily`).
 pub fn hear(world: &mut World) {
     let g = world.config.gossip.clone();
     let day = world.day();
@@ -657,6 +663,7 @@ pub fn hear(world: &mut World) {
                         kin: SmallVec::new(),
                         told: SmallVec::new(),
                         district: d,
+                        press: 0,
                     })
                     .collect()
             })

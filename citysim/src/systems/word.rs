@@ -8,7 +8,8 @@
 //! Statistical hearing and post-back, the kin channel, the reputation
 //! rebuild (axes, `known_by`, factions, regard, the kill-watch sample),
 //! competence (phase 2: the Lab shifts' knowledge, the rust, every corp's
-//! and the Law's competence, `TalentLost`), then expiry. With `[gossip]
+//! and the Law's competence, `TalentLost`), then expiry; phase 4 runs the
+//! Feeds (`news::daily`) after the pools decay. With `[gossip]
 //! enabled = false` nothing runs.
 
 use crate::world::World;
@@ -27,6 +28,9 @@ pub fn run(world: &mut World) {
         world.rumours.resize_with(n, Default::default);
     }
     crate::systems::gossip::decay_and_leak(world);
+    // Phase 4 (W37, W40): the Feeds' reach, Spin, stories and ads, before
+    // the hearing so a story is read the same night.
+    crate::systems::news::daily(world);
     crate::systems::gossip::hear(world);
     crate::systems::gossip::kin(world);
     crate::systems::reputation::rebuild(world);

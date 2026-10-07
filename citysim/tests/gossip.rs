@@ -293,6 +293,7 @@ fn test_pool_decays_leaks_adjacent_only_and_drops() {
         kin: Default::default(),
         told: Default::default(),
         district: DistrictId(d as u8),
+        press: 0,
     };
     let (big, small) = (entry(10, 1.0), entry(11, 0.06));
     gossip::post(&mut w, DistrictId(d as u8), big);

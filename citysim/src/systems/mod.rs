@@ -36,6 +36,7 @@ pub mod litter;
 pub mod lod;
 pub mod memory;
 pub mod moves;
+pub mod news;
 pub mod ownership;
 pub mod plan;
 pub mod raid;

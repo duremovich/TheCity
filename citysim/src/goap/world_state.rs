@@ -155,6 +155,8 @@ impl LocationKey {
             BuildingKind::Clinic => LocationKey::Clinic,
             // M14 V16: a Researcher inside its Lab is at its workplace.
             BuildingKind::Lab => LocationKey::Workplace,
+            // M15 W36: and a Reporter inside its Feed.
+            BuildingKind::Feed => LocationKey::Workplace,
         }
     }
 }

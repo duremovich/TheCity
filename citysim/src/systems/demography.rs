@@ -566,7 +566,8 @@ fn job_search(world: &mut World) {
 
 /// The adult `job_search` would hire for `role` at a workplace door: the
 /// nearest unemployed, free adult (home door, else tile; ties by id), a
-/// guard lawful (≥ 0.4); a Lab the best hacker (ties lower id).
+/// guard lawful (≥ 0.4); a Lab the best hacker, a Feed the most
+/// knowledgeable (ties lower id).
 fn pick_candidate(world: &World, workplace_door: TilePos, role: Role) -> Option<EntityId> {
     world
         .citizens()
@@ -581,6 +582,11 @@ fn pick_candidate(world: &World, workplace_door: TilePos, role: Role) -> Option<
             if role == Role::Researcher {
                 let h = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
                 return (u32::MAX - (h.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
+            }
+            // M15 W36: a Feed hires the most knowledgeable (ties lower id).
+            if role == Role::Reporter {
+                let k = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.knowledge);
+                return (u32::MAX - (k.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
             }
             let from = world
                 .comp::<Household>(id)

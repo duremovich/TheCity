@@ -43,6 +43,8 @@ const FILES: &[&str] = &[
     // M15 phase 3.
     "systems/grudges.rs",
     "systems/hunt.rs",
+    // M15 phase 4.
+    "systems/news.rs",
 ];
 
 #[test]

@@ -180,6 +180,11 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
+    // 1e. M15 § 10 (`J`): each district's talk (Σ pool reach) in crimson.
+    if app.show_word {
+        crate::word_overlay::fill(world, app, (vx0, vy0, x1, y1));
+    }
+
     // One pass over citizens: badge counts for non-Full agents inside
     // buildings, and the list of Full agents to draw as squares.
     let mut inside = vec![0u16; world.building.len()];
@@ -408,6 +413,11 @@ pub fn draw(world: &World, app: &App) {
     // 6c. M14 § 10 (`N`): the Virt plane over the ghosted city.
     if app.show_virt {
         crate::overlay::draw(world, app);
+    }
+
+    // 6d. M15 § 10 (`J`): stake-outs and vendettas over everything.
+    if app.show_word {
+        crate::word_overlay::marks(world, app);
     }
 
     // 7. day/night overlay

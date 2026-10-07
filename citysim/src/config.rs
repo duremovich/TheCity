@@ -205,7 +205,8 @@ impl JobsCfg {
             Role::Sanitation => self.sanitation,
             // M13 D16: hired by the Clinics and Garages that are built, never seeded.
             // M14: likewise the Labs' Researchers.
-            Role::Ripperdoc | Role::Mechanic | Role::Researcher => 0,
+            // M15 W36: and the Feeds' Reporters.
+            Role::Ripperdoc | Role::Mechanic | Role::Researcher | Role::Reporter => 0,
         }
     }
 }
@@ -245,6 +246,11 @@ impl BuildingCfg {
     pub fn lab() -> BuildingCfg {
         BuildingCfg { capacity: 8, stock_cap: 0, staff: 4 }
     }
+
+    /// M15 W36: a Feed of one Reporter (phase 4: `assets/config.toml`).
+    pub fn feed() -> BuildingCfg {
+        BuildingCfg { capacity: 6, stock_cap: 0, staff: 1 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -276,6 +282,9 @@ pub struct BuildingsCfg {
     /// M14 (plan V16).
     #[serde(default = "BuildingCfg::lab")]
     pub lab: BuildingCfg,
+    /// M15 W36.
+    #[serde(default = "BuildingCfg::feed")]
+    pub feed: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -296,6 +305,7 @@ impl BuildingsCfg {
             BuildingKind::Clinic => &self.clinic,
             BuildingKind::Garage => &self.garage,
             BuildingKind::Lab => &self.lab,
+            BuildingKind::Feed => &self.feed,
         }
     }
 }
@@ -406,6 +416,7 @@ impl EconomyCfg {
             Role::Ripperdoc => self.wage_ripperdoc,
             Role::Mechanic => self.wage_mechanic,
             Role::Researcher => self.wage_researcher,
+            Role::Reporter => self.wage_reporter,
         }
     }
 }
@@ -1053,6 +1064,9 @@ pub struct FoundCostCfg {
     /// M14 (spec § 4): a Lab, built only by the Research order.
     #[serde(default)]
     pub lab: i64,
+    /// M15 § 7: a Feed (foundable through `Register` with `[news]` on).
+    #[serde(default)]
+    pub feed: i64,
 }
 
 impl FoundCostCfg {
@@ -1083,6 +1097,9 @@ pub struct UpkeepCfg {
     /// M14 (spec § 4).
     #[serde(default)]
     pub lab: i64,
+    /// M15 § 7.
+    #[serde(default)]
+    pub feed: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -1116,6 +1133,7 @@ impl UpkeepCfg {
             BuildingKind::Clinic => self.clinic,
             BuildingKind::Garage => self.garage,
             BuildingKind::Lab => self.lab,
+            BuildingKind::Feed => self.feed,
             _ => 0,
         }
     }
@@ -1135,6 +1153,9 @@ pub struct ValueCfg {
     /// M14 (spec § 4).
     #[serde(default)]
     pub lab: i64,
+    /// M15 § 7.
+    #[serde(default)]
+    pub feed: i64,
 }
 
 /// D48: flat terms on each corp order's score.
@@ -1153,6 +1174,9 @@ pub struct CorpOrderFlatCfg {
     /// M14 (plan V31, phase 3).
     #[serde(default)]
     pub virt_raid: f32,
+    /// M15 W40.
+    #[serde(default)]
+    pub spin: f32,
 }
 
 /// M11 corps (docs/M11_OWNERSHIP.md § 5 and the plan's additions). One row
@@ -1269,7 +1293,7 @@ impl CorpsCfg {
             shock_severity_rethink: 0.5,
             bankrupt_days: 14,
             incorporate_buildings: 2,
-            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250, clinic: 500, garage: 600, lab: 800 },
+            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250, clinic: 500, garage: 600, lab: 800, feed: 500 },
             wholesale: 2,
             contract_per_guard_day: 10,
             security_guards: 6,
@@ -1287,8 +1311,17 @@ impl CorpsCfg {
                 clinic: 10,
                 garage: 10,
                 lab: 0,
+                feed: 0,
             },
-            value: ValueCfg { farm: 1000, market: 1000, security_office: 500, clinic: 600, garage: 800, lab: 1200 },
+            value: ValueCfg {
+                farm: 1000,
+                market: 1000,
+                security_office: 500,
+                clinic: 600,
+                garage: 800,
+                lab: 1200,
+                feed: 800,
+            },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
             grow_cooldown_days: 7,
@@ -1322,6 +1355,7 @@ impl CorpsCfg {
                 lobby: 0.0,
                 research: 0.0,
                 virt_raid: 0.0,
+                spin: 0.0,
             },
         }
     }
@@ -3339,6 +3373,13 @@ pub struct NewsCfg {
     pub press_loyalty: f32,
     pub press_cap: f32,
     pub censor_lawfulness: f32,
+    /// Plan key (W36): `Register`'s per-capita target for a Feed
+    /// (`founding::choose_kind`), as `residents_per_bar` for a Bar.
+    pub residents_per_feed: u32,
+    /// Orchestrator deviation (W40): Spin is a side spend; a corp spins
+    /// while its Spin score (the spec's considerations plus
+    /// `order_flat.spin`) is at least this.
+    pub spin_min: f32,
 }
 
 impl Default for NewsCfg {
@@ -3363,6 +3404,8 @@ impl NewsCfg {
             press_loyalty: 0.1,
             press_cap: 0.15,
             censor_lawfulness: 0.3,
+            residents_per_feed: 1000,
+            spin_min: 0.2,
         }
     }
 }

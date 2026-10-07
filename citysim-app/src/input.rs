@@ -101,6 +101,10 @@ pub fn handle(app: &mut App, world: &mut World) {
     if is_key_pressed(KeyCode::K) {
         app.show_hooked = !app.show_hooked;
     }
+    // M15 § 10 (`K` is M13's hooked heat): the word overlay.
+    if is_key_pressed(KeyCode::J) {
+        app.show_word = !app.show_word;
+    }
     if is_key_pressed(KeyCode::F) {
         app.follow = app.selected.is_some() && !app.follow;
     }

@@ -525,7 +525,7 @@ pub struct World {
     pub by_tier: [Vec<EntityId>; 3],
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; 9],
+    pub by_role: [Vec<EntityId>; 10],
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -628,6 +628,16 @@ pub struct World {
     /// rebuilt from the guards' plans on load.
     #[serde(skip)]
     pub guards_of_corpse: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
+    /// M15 W37: the last 256 stories the Feeds ran, oldest first.
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub stories: VecDeque<crate::word::Story>,
+    /// M15 W37: the next `Story.id`.
+    #[serde(default)]
+    pub next_story_id: u32,
+    /// M15 W41: the opening Feeds were seeded (at `World::new`, or by
+    /// `news::migrate` on the first load of an older save).
+    #[serde(default)]
+    pub feeds_seeded: bool,
 }
 
 /// `skip_serializing_if` for a component store with nothing in it.
@@ -921,6 +931,9 @@ impl World {
             kill_chain: BTreeMap::new(),
             vendettas: Vec::new(),
             guards_of_corpse: BTreeMap::new(),
+            stories: VecDeque::new(),
+            next_story_id: 0,
+            feeds_seeded: false,
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -944,6 +957,9 @@ impl World {
         // plane and its opening ICE.
         systems::tech::seed_corps(&mut w, false);
         systems::virt::seed_labs(&mut w);
+        // M15 W41: the Civic Wire and Nutrix Now on the Lots left (no RNG),
+        // before the plane links, so each has a node from the start.
+        systems::news::seed_feeds(&mut w);
         // M15 W31: The Unplugged on a Sump Central derelict (no RNG), before
         // the plane links, so its Chapel has a node from the start.
         systems::creeds::seed_unplugged(&mut w);
@@ -1005,6 +1021,7 @@ impl World {
                     hacked: None,
                     last_door_open: None,
                     label: None,
+                    feed: None,
                 },
             );
             match def.kind {
@@ -1528,9 +1545,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 9], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 10], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; 9] = Default::default();
+        let mut roles: [Vec<EntityId>; 10] = Default::default();
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -1933,6 +1950,8 @@ impl World {
         match self.comp::<Identity>(id) {
             Some(i) => i.name.clone(),
             None => match self.comp::<Building>(id) {
+                // M15 W36: a Feed goes by its name.
+                Some(b) if b.feed.is_some() => b.feed.as_ref().map(|f| f.name.clone()).unwrap_or_default(),
                 Some(b) => format!("{}#{}", b.kind.label(), id.index),
                 None => match self.comp::<Asset>(id) {
                     Some(a) => format!("{} T{}", a.kind.label(), a.tier),
