@@ -405,6 +405,11 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
+    // 6c. M14 § 10 (`N`): the Virt plane over the ghosted city.
+    if app.show_virt {
+        crate::overlay::draw(world, app);
+    }
+
     // 7. day/night overlay
     let alpha = night_alpha(world.tick);
     if alpha > 0.0 {

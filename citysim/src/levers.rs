@@ -228,6 +228,41 @@ pub enum PlayerCommand {
         track: crate::virt::Track,
         units: u32,
     },
+    // --- M14 levers and god commands (plan V42, phase 4).
+    /// The Treasury's and the Precinct's ICE tier (`0..=3`), installed or
+    /// lowered until both match; the upkeep is the Treasury's.
+    SetCityIce(u8),
+    /// An extra share (`0.0..=1.0`) of every Data sale paid to the Treasury.
+    SetDataTax(f32),
+    /// The sentence for Intrusion or Data Theft, in days (replaces the
+    /// config's base; the sentence multiplier still applies).
+    SetHackSentence {
+        crime: Crime,
+        days: u16,
+    },
+    /// Give an agent a Deck of `tier`, free (`assets::grant`).
+    GrantDeck {
+        agent: EntityId,
+        tier: u8,
+    },
+    /// A building node's ICE to `tier` (`0..=3`), the city's own, free.
+    SetIce {
+        building: EntityId,
+        tier: u8,
+    },
+    /// A jacked-in agent is fried at once, at command time: a lost contest
+    /// at its next contested node with no save (`virt::god_fry`); the kill
+    /// roll uses `p_flatline` only at ICE 3, else `p_fry_kill`.
+    Fry(EntityId),
+    /// Pin a run for an agent with a deck: `target` is a building (a Lab,
+    /// a Hideout, a robot's or camera's building) or, for `Purpose::Ledger`,
+    /// a building or corp whose owner's Ledger is the target. The contest
+    /// rules apply.
+    RunNow {
+        agent: EntityId,
+        target: EntityId,
+        purpose: crate::virt::Purpose,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -310,6 +345,13 @@ pub struct Levers {
     /// M14 V42: the city's own nodes' ICE (`[levers] city_ice`).
     #[serde(default = "default_city_ice")]
     pub city_ice: u8,
+    /// M14 V42: an extra share of every Data sale to the Treasury.
+    #[serde(default)]
+    pub data_tax: f32,
+    /// M14 V42: the sentence in days for `[Intrusion, DataTheft]`; `None`
+    /// reads `[crime] sentence_days_ext`.
+    #[serde(default)]
+    pub hack_sentence_days: [Option<u16>; 2],
 }
 
 fn default_city_ice() -> u8 {
@@ -375,6 +417,8 @@ impl Levers {
             impound: true,
             asset_tax: [0.0; crate::components::AssetClass::ALL.len()],
             city_ice: cfg.levers.city_ice,
+            data_tax: 0.0,
+            hack_sentence_days: [None; 2],
         }
     }
 }
@@ -549,6 +593,44 @@ impl World {
                 let text = if *on { "The city impounds unregistered vehicles" } else { "The city stops impounding" };
                 self.push_event(EventKind::PlayerAction, &[], text);
             }
+            PlayerCommand::SetCityIce(n) => {
+                self.levers.city_ice = (*n).min(3);
+                crate::systems::virt::set_city_ice(self);
+                self.push_event(
+                    EventKind::PlayerAction,
+                    &[],
+                    format!("City ICE set to {} (Treasury and Precinct)", self.levers.city_ice),
+                );
+            }
+            PlayerCommand::SetDataTax(r) => {
+                self.levers.data_tax = r.clamp(0.0, 1.0);
+                self.push_event(
+                    EventKind::PlayerAction,
+                    &[],
+                    format!("Data tax set to {:.0} %", self.levers.data_tax * 100.0),
+                );
+            }
+            PlayerCommand::SetHackSentence { crime, days } => {
+                let slot = match crime {
+                    Crime::Intrusion => 0,
+                    Crime::DataTheft => 1,
+                    _ => {
+                        self.push_event(
+                            EventKind::PlayerActionFailed,
+                            &[],
+                            "SetHackSentence: only Intrusion and Data Theft".to_string(),
+                        );
+                        return;
+                    }
+                };
+                let d = (*days).clamp(1, 365);
+                self.levers.hack_sentence_days[slot] = Some(d);
+                self.push_event(
+                    EventKind::PlayerAction,
+                    &[],
+                    format!("Sentence for {} set to {d} days", crime.label()),
+                );
+            }
             PlayerCommand::SetRiotResponse(r) => {
                 self.levers.riot_response = *r;
                 let text = match r {
@@ -605,7 +687,11 @@ impl World {
             | PlayerCommand::Chase(_)
             | PlayerCommand::WipeData(_)
             | PlayerCommand::SetTech { .. }
-            | PlayerCommand::GrantData { .. } => {
+            | PlayerCommand::GrantData { .. }
+            | PlayerCommand::GrantDeck { .. }
+            | PlayerCommand::SetIce { .. }
+            | PlayerCommand::Fry(_)
+            | PlayerCommand::RunNow { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -770,9 +856,13 @@ impl World {
             | PlayerCommand::FloodStims { .. }
             | PlayerCommand::Brick(_)
             | PlayerCommand::Chase(_) => self.cmd_god_assets(cmd),
-            PlayerCommand::WipeData(_) | PlayerCommand::SetTech { .. } | PlayerCommand::GrantData { .. } => {
-                self.cmd_god_virt(cmd)
-            }
+            PlayerCommand::WipeData(_)
+            | PlayerCommand::SetTech { .. }
+            | PlayerCommand::GrantData { .. }
+            | PlayerCommand::GrantDeck { .. }
+            | PlayerCommand::SetIce { .. }
+            | PlayerCommand::Fry(_)
+            | PlayerCommand::RunNow { .. } => self.cmd_god_virt(cmd),
             _ => self.cmd_god_corp(cmd),
         }
     }
@@ -804,6 +894,33 @@ impl World {
             PlayerCommand::GrantData { faction, track, units } => {
                 tech::grant_data(self, faction, track, units).map_err(|e| format!("GrantData: {e}"))?;
                 Ok((vec![faction], format!("gave {} {units} {track} Data", self.owner_label(Some(faction)))))
+            }
+            PlayerCommand::GrantDeck { agent, tier } => {
+                if !self.has::<Brain>(agent) {
+                    return Err("GrantDeck: no such agent".into());
+                }
+                let a = crate::systems::assets::grant(self, agent, crate::components::AssetKind::Deck, tier)
+                    .map_err(|e| format!("GrantDeck: {e}"))?;
+                Ok((vec![agent, a], format!("granted {} a tier-{tier} Deck", self.name_of(agent))))
+            }
+            PlayerCommand::SetIce { building, tier } => {
+                virt::relink(self);
+                let n = virt::node_of_building(self, building).ok_or("SetIce: the building has no node")?;
+                let tier = tier.min(3);
+                let p = virt::profile_mut(self, n).ok_or("SetIce: the node has no ICE")?;
+                p.ice = tier;
+                p.ice_maker = None;
+                p.ice_arrears = 0;
+                virt::bump_epoch(self);
+                Ok((vec![building], format!("set {} to ICE {tier}", self.name_of(building))))
+            }
+            PlayerCommand::Fry(agent) => {
+                let text = virt::god_fry(self, agent).map_err(|e| format!("Fry: {e}"))?;
+                Ok((vec![agent], text))
+            }
+            PlayerCommand::RunNow { agent, target, purpose } => {
+                let text = virt::god_run_now(self, agent, target, purpose).map_err(|e| format!("RunNow: {e}"))?;
+                Ok((vec![agent, target], text))
             }
             _ => Err("not a Virt god command".into()),
         }

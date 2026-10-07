@@ -162,6 +162,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             }
         });
 
+        tech_block(ui, app, world, id, c);
+
         let mut by_kind: Vec<(BuildingKind, Vec<EntityId>)> = Vec::new();
         for &b in &c.buildings {
             let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
@@ -252,4 +254,102 @@ fn cashflow_sparkline(ui: &mut Ui, c: &Corp) {
         );
     }
     ui.small(format!("14 days · max |{max:.0}|¢/day"));
+}
+
+/// M14 § 10: the Tech block: per track the tier, the progress bar toward the
+/// next tier's `tier_cost`, the days of lapse and the Data held; the focus,
+/// the Labs with their stores, and 30 days of ICE spend.
+fn tech_block(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, c: &Corp) {
+    use citysim::systems::virt;
+    use citysim::virt::Track;
+    if !virt::enabled(world) || c.tech.is_unset() {
+        return;
+    }
+    section(ui, "Tech", |ui| {
+        let cost = &world.config.tech.tier_cost;
+        egui::Grid::new("corp_tech").striped(true).show(ui, |ui| {
+            ui.strong("track");
+            ui.strong("tier");
+            ui.strong("toward next");
+            ui.strong("lapse");
+            ui.strong("Data held");
+            ui.end_row();
+            for t in Track::ALL {
+                let tier = c.tech.tier_of(t);
+                let focus = if c.tech.focus == t { " (focus)" } else { "" };
+                ui.label(format!("{}{focus}", t.label()));
+                ui.label(format!("T{tier}"));
+                match cost.get(usize::from(tier) + 1).copied().filter(|_| tier < 3) {
+                    Some(need) if need > 0 => {
+                        let have = c.tech.progress[t.index()];
+                        ui.add(
+                            egui::ProgressBar::new((have as f32 / need as f32).clamp(0.0, 1.0))
+                                .text(format!("{have}/{need}"))
+                                .desired_width(120.0),
+                        );
+                    }
+                    _ => {
+                        ui.label("max");
+                    }
+                }
+                let lapse = c.tech.lapse[t.index()];
+                if lapse > 0 {
+                    ui.colored_label(RED, format!("{lapse} d"));
+                } else {
+                    ui.label("-");
+                }
+                ui.label(format!("{}", virt::holding(world, id, t)));
+                ui.end_row();
+            }
+        });
+        let labs: Vec<EntityId> = c
+            .buildings
+            .iter()
+            .copied()
+            .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Lab && !bd.demolished))
+            .collect();
+        ui.label(format!("Labs ({})", labs.len()));
+        for b in labs {
+            let Some(bd) = world.comp::<Building>(b) else { continue };
+            let held = virt::node_of_building(world, b).and_then(|n| world.virt.node(n)).map_or(0, |n| n.store.total());
+            ui.horizontal(|ui| {
+                if ui.link(format!("Lab#{}", b.index)).clicked() {
+                    select(app, b);
+                }
+                ui.small(format!(
+                    "focus {} · {held} Data",
+                    bd.focus.map_or("none".to_string(), |t| t.label().to_string())
+                ));
+            });
+        }
+        let spend: i64 = c.ice_spend.iter().sum::<i64>() + c.ice_spend_today;
+        ui.label(format!("ICE spend, last {} days: {spend}¢", c.ice_spend.len() + 1));
+        ice_sparkline(ui, c);
+    });
+}
+
+/// Coins spent on ICE per day over the window, bars from a zero line.
+fn ice_sparkline(ui: &mut Ui, c: &Corp) {
+    let days: Vec<f32> = c.ice_spend.iter().map(|&v| v as f32).collect();
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(320.0, 30.0), egui::Sense::hover());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 2.0, Color32::from_gray(30));
+    if days.is_empty() {
+        return;
+    }
+    let max = days.iter().fold(1.0f32, |m, v| m.max(*v));
+    let bar_w = rect.width() / days.len().max(30) as f32;
+    for (i, &v) in days.iter().enumerate() {
+        let x = rect.left() + i as f32 * bar_w;
+        let h = v / max * (rect.height() - 2.0);
+        painter.rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(x + 0.5, rect.bottom() - h),
+                egui::pos2(x + bar_w - 0.5, rect.bottom()),
+            ),
+            0.0,
+            Color32::from_rgb(180, 140, 255),
+        );
+    }
+    ui.small(format!("max {max:.0}¢/day"));
 }

@@ -658,6 +658,12 @@ pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, 
     if let Some(c) = world.comp_mut::<Corp>(buyer) {
         c.data_bought_today += coins;
     }
+    // V42 `SetDataTax`: an extra share of the sale to the Treasury, from the
+    // seller's take (0 by default).
+    let extra = (coins as f32 * world.levers.data_tax).floor() as i64;
+    if extra > 0 {
+        ownership::pay(world, Some(seller), None, extra, Flow::Tax);
+    }
     if let Some(x) = world.virt.node_mut(node) {
         x.store.units[track.index()] = x.store.units[track.index()].saturating_add(n);
     }

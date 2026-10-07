@@ -49,13 +49,30 @@ pub fn handle(app: &mut App, world: &mut World) {
         app.camera.zoom_about(mouse, factor);
     }
 
+    // --- select: with the Virt overlay on, a live run's dot or a node first
+    let mut virt_hit = false;
+    if app.show_virt && map_mouse && is_mouse_button_pressed(MouseButton::Left) && mouse.y > HUD_H {
+        if let Some(run) = crate::overlay::run_at(world, &app.camera, mouse) {
+            app.clear_selection();
+            app.selected_run = Some(run);
+            app.selected = world.runs.get(&run).map(|r| r.runner);
+            virt_hit = true;
+        } else if let Some(n) = crate::overlay::node_at(world, &app.camera, mouse) {
+            app.clear_selection();
+            app.selected_node = Some(n);
+            virt_hit = true;
+        }
+    }
     // --- select: a Full agent on the tile, else the building there
-    if map_mouse && is_mouse_button_pressed(MouseButton::Left) && mouse.y > HUD_H {
+    if !virt_hit && map_mouse && is_mouse_button_pressed(MouseButton::Left) && mouse.y > HUD_H {
         if let Some(tile) = app.camera.tile_at(mouse) {
             let on_tile = world.citizens().into_iter().find(|&id| {
                 world.comp::<Position>(id).is_some_and(|p| p.tile == tile)
                     && world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Full)
             });
+            app.selected_node = None;
+            app.selected_run = None;
+            app.selected_mission = None;
             app.selected = on_tile.or_else(|| {
                 world
                     .with::<citysim::Building>()
@@ -70,9 +87,10 @@ pub fn handle(app: &mut App, world: &mut World) {
         }
     }
     if is_key_pressed(KeyCode::Escape) {
-        app.selected = None;
-        app.selected_district = None;
-        app.follow = false;
+        app.clear_selection();
+    }
+    if is_key_pressed(KeyCode::N) {
+        app.show_virt = !app.show_virt;
     }
     if is_key_pressed(KeyCode::B) {
         app.show_districts = !app.show_districts;

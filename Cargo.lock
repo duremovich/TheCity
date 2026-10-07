@@ -313,6 +313,7 @@ dependencies = [
  "citysim",
  "egui-macroquad",
  "macroquad",
+ "smallvec 1.16.2",
 ]
 
 [[package]]

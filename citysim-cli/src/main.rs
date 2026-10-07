@@ -194,6 +194,22 @@ enum Lever {
     SetTech(u8, citysim::virt::Track, u8),
     /// M14 god: `grant_data=<corp slot>|gang<i>:<track>:<units>`.
     GrantData(Faction, citysim::virt::Track, u32),
+    /// M14 god: `grant_deck=<agent index>:<tier>`.
+    GrantDeck(u32, u8),
+    /// M14 god: `set_ice=<building index>:<tier>`.
+    SetIce(u32, u8),
+    /// M14 god: `fry=<agent index>`.
+    Fry(u32),
+    /// M14 god: `run_now=<agent index>:<building index|corp<slot>>:<data|wipe|ledger|door>`.
+    RunNow(u32, RunTarget, citysim::virt::Purpose),
+}
+
+/// The target of `run_now`: a building by entity index, or a corp by slot
+/// (for a `ledger` run).
+#[derive(Clone, Copy, Debug)]
+enum RunTarget {
+    Building(u32),
+    Corp(u8),
 }
 
 /// A corp by its seeding slot or a gang by its index (`grant_data`).
@@ -357,6 +373,17 @@ impl Lever {
             Lever::Chase(a) => PlayerCommand::Chase(agent_at(world, a)?),
             Lever::WipeData(b) => PlayerCommand::WipeData(building_at(world, b)?),
             Lever::SetTech(s, track, tier) => PlayerCommand::SetTech { corp: corp_in_slot(world, s)?, track, tier },
+            Lever::GrantDeck(a, tier) => PlayerCommand::GrantDeck { agent: agent_at(world, a)?, tier },
+            Lever::SetIce(b, tier) => PlayerCommand::SetIce { building: building_at(world, b)?, tier },
+            Lever::Fry(a) => PlayerCommand::Fry(agent_at(world, a)?),
+            Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
+                agent: agent_at(world, a)?,
+                target: match t {
+                    RunTarget::Building(b) => building_at(world, b)?,
+                    RunTarget::Corp(s) => corp_in_slot(world, s)?,
+                },
+                purpose,
+            },
             Lever::GrantData(f, track, units) => PlayerCommand::GrantData {
                 faction: match f {
                     Faction::Corp(s) => corp_in_slot(world, s)?,
@@ -391,7 +418,12 @@ impl Lever {
 /// `flood_stims=<district>:<n>`, `brick=<corp slot>|agent:<index>`,
 /// `chase=<agent index>`. M14 god levers (plan V42, phase 1):
 /// `wipe_data=<building index>`, `set_tech=<corp slot>:<chrome|deck|industry>:<tier>`,
-/// `grant_data=<corp slot>|gang<i>:<chrome|deck|industry>:<units>`.
+/// `grant_data=<corp slot>|gang<i>:<chrome|deck|industry>:<units>`. M14
+/// levers (phase 4): `city_ice=<0..3>` (the Treasury's and Precinct's ICE),
+/// `data_tax=<0..1>` (an extra share of Data sales to the Treasury),
+/// `hack_sentence=intrusion|data_theft:<days>`; god `grant_deck=<agent
+/// index>:<tier>`, `set_ice=<building index>:<tier>`, `fry=<agent index>`,
+/// `run_now=<agent index>:<building index|corp<slot>>:<data|wipe|ledger|door>`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -521,6 +553,40 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 citysim::virt::Track::parse(t).ok_or_else(|| format!("{spec}: unknown track {t}"))?,
                 n.parse::<u32>().map_err(|e| format!("{spec}: bad units: {e}"))?,
             ))
+        }
+        "grant_deck" => {
+            let (a, t) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <agent index>:<tier>"))?;
+            Some(Lever::GrantDeck(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                t.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?,
+            ))
+        }
+        "set_ice" => {
+            let (b, t) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <building index>:<tier>"))?;
+            Some(Lever::SetIce(
+                b.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?,
+                t.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?,
+            ))
+        }
+        "fry" => Some(Lever::Fry(value.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?)),
+        "run_now" => {
+            use citysim::virt::Purpose;
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, t, p] = parts[..] else {
+                return Err(format!("{spec}: expected <agent index>:<building index|corp<slot>>:<purpose>"));
+            };
+            let target = match t.strip_prefix("corp") {
+                Some(s) => RunTarget::Corp(slot(s)?),
+                None => RunTarget::Building(t.parse::<u32>().map_err(|e| format!("{spec}: bad target: {e}"))?),
+            };
+            let purpose = match p.to_ascii_lowercase().as_str() {
+                "data" => Purpose::Data { wipe: false },
+                "wipe" => Purpose::Data { wipe: true },
+                "ledger" => Purpose::Ledger,
+                "door" => Purpose::Door,
+                _ => return Err(format!("{spec}: purpose must be data|wipe|ledger|door")),
+            };
+            Some(Lever::RunNow(a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?, target, purpose))
         }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
@@ -657,6 +723,21 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         }),
         "no_city_evictions" => PlayerCommand::NoCityEvictions(num("flag")? != 0.0),
         "wipe_corps" => PlayerCommand::WipeTreasuries,
+        // M14 V42: `city_ice=<0..3>`, `data_tax=<0..1>`, `hack_sentence=intrusion|data_theft:<days>`.
+        "city_ice" => PlayerCommand::SetCityIce(value.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?),
+        "data_tax" => PlayerCommand::SetDataTax(num("rate")? as f32),
+        "hack_sentence" => {
+            let (c, d) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <crime>:<days>"))?;
+            let crime = match c.to_ascii_lowercase().as_str() {
+                "intrusion" => citysim::Crime::Intrusion,
+                "data_theft" | "datatheft" => citysim::Crime::DataTheft,
+                _ => return Err(format!("{spec}: crime must be intrusion|data_theft")),
+            };
+            PlayerCommand::SetHackSentence {
+                crime,
+                days: d.parse::<u16>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            }
+        }
         other => return Err(format!("{spec}: unknown lever {other}")),
     };
     Ok((day * TICKS_PER_DAY, Lever::Cmd(cmd)))
@@ -1331,6 +1412,38 @@ mod tests {
             Ok((_, Lever::GrantData(Faction::Gang(1), citysim::virt::Track::Deck, 500)))
         ));
         assert!(parse_lever("day=3:set_tech=8:psionics:2").is_err());
+    }
+
+    #[test]
+    fn test_parse_virt_levers_phase_4() {
+        use citysim::virt::Purpose;
+        assert!(matches!(parse_lever("day=3:city_ice=3").unwrap().1, Lever::Cmd(PlayerCommand::SetCityIce(3))));
+        assert!(matches!(
+            parse_lever("day=3:data_tax=0.25").unwrap().1,
+            Lever::Cmd(PlayerCommand::SetDataTax(t)) if (t - 0.25).abs() < 1e-6
+        ));
+        assert!(matches!(
+            parse_lever("day=3:hack_sentence=intrusion:9").unwrap().1,
+            Lever::Cmd(PlayerCommand::SetHackSentence { crime: citysim::Crime::Intrusion, days: 9 })
+        ));
+        assert!(matches!(
+            parse_lever("day=3:hack_sentence=data_theft:20").unwrap().1,
+            Lever::Cmd(PlayerCommand::SetHackSentence { crime: citysim::Crime::DataTheft, days: 20 })
+        ));
+        assert!(parse_lever("day=3:hack_sentence=theft:20").is_err());
+        assert!(matches!(parse_lever("day=3:grant_deck=77:3").unwrap().1, Lever::GrantDeck(77, 3)));
+        assert!(matches!(parse_lever("day=3:set_ice=812:2").unwrap().1, Lever::SetIce(812, 2)));
+        assert!(matches!(parse_lever("day=3:fry=77").unwrap().1, Lever::Fry(77)));
+        assert!(matches!(
+            parse_lever("day=3:run_now=77:812:wipe").unwrap().1,
+            Lever::RunNow(77, RunTarget::Building(812), Purpose::Data { wipe: true })
+        ));
+        assert!(matches!(
+            parse_lever("day=3:run_now=77:corp3:ledger").unwrap().1,
+            Lever::RunNow(77, RunTarget::Corp(3), Purpose::Ledger)
+        ));
+        assert!(parse_lever("day=3:run_now=77:812:hax").is_err());
+        assert!(parse_lever("day=3:city_ice=x").is_err());
     }
 
     #[test]

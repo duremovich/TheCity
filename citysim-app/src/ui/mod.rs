@@ -8,6 +8,9 @@ pub mod corp;
 pub mod district;
 pub mod inspector;
 pub mod log;
+pub mod mission;
+pub mod node;
+pub mod run;
 
 use macroquad::prelude::*;
 
@@ -57,7 +60,16 @@ pub fn draw(app: &mut App, world: &World) {
         egui_macroquad::egui::SidePanel::left("city")
             .exact_width(city::CITY_W)
             .show(ctx, |ui| city::draw(ui, app, world));
-        if let Some(sel) = app.selected {
+        // M14: a run, then a raid, outrank the entity panel; a node sits below it.
+        if let Some(run) = app.selected_run {
+            egui_macroquad::egui::SidePanel::right("inspector")
+                .exact_width(INSPECTOR_W)
+                .show(ctx, |ui| run::draw(ui, app, world, run));
+        } else if let Some(gang) = app.selected_mission {
+            egui_macroquad::egui::SidePanel::right("inspector")
+                .exact_width(INSPECTOR_W)
+                .show(ctx, |ui| mission::draw(ui, app, world, gang));
+        } else if let Some(sel) = app.selected {
             egui_macroquad::egui::SidePanel::right("inspector").exact_width(INSPECTOR_W).show(ctx, |ui| {
                 if world.has::<citysim::Asset>(sel) {
                     asset::draw(ui, app, world, sel);
@@ -69,6 +81,10 @@ pub fn draw(app: &mut App, world: &World) {
                     inspector::draw(ui, app, world);
                 }
             });
+        } else if let Some(n) = app.selected_node {
+            egui_macroquad::egui::SidePanel::right("inspector")
+                .exact_width(INSPECTOR_W)
+                .show(ctx, |ui| node::draw(ui, app, world, n));
         } else if let Some(d) = app.selected_district.filter(|d| d.index() < world.districts.len()) {
             egui_macroquad::egui::SidePanel::right("inspector")
                 .exact_width(INSPECTOR_W)

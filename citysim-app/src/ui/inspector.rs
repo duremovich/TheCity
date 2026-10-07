@@ -148,6 +148,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
             });
         }
         body_kit(ui, app, world, id);
+        hacking(ui, app, world, id);
         buttons(ui, app, world, id);
     });
 }
@@ -255,6 +256,77 @@ fn body_kit(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             ));
         });
     }
+}
+
+/// M14 § 10: hacking skill, the deck and its effective tier, the payload it
+/// carries, "jacked in at X" with the Run panel one click away, dazed, and
+/// the last runs with their outcomes (from `run_log`).
+fn hacking(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    use citysim::systems::virt;
+    use citysim::virt::Track;
+    use citysim::{Asset, Kit, Skills};
+    if !virt::enabled(world) {
+        return;
+    }
+    let deck = world.comp::<Kit>(id).and_then(|k| k.deck.map(|d| (d, k.deck_tier)));
+    let live = world.runner_of.get(&id).copied().and_then(|r| world.runs.get(&r));
+    let past: Vec<&citysim::virt::Run> = world.run_log.iter().rev().filter(|r| r.runner == id).take(6).collect();
+    if deck.is_none() && live.is_none() && past.is_empty() {
+        return;
+    }
+    section(ui, "Hacking", |ui| {
+        if let Some(s) = world.comp::<Skills>(id) {
+            bar(ui, "hacking", s.hacking.max(0.0), None);
+        }
+        match deck.and_then(|(d, eff)| world.comp::<Asset>(d).map(|a| (a, eff))) {
+            Some((a, eff)) => {
+                let capped = if eff != a.tier {
+                    format!(" · effective T{eff} (its maker's tech caps it)")
+                } else {
+                    String::new()
+                };
+                ui.label(format!("deck T{} cond {}{capped}", a.tier, a.condition));
+                let held: Vec<String> = Track::ALL
+                    .iter()
+                    .filter(|t| a.data[t.index()] > 0)
+                    .map(|t| format!("{} {}", a.data[t.index()], t.label()))
+                    .collect();
+                if !held.is_empty() {
+                    ui.colored_label(GOLD, format!("carrying {} (unsold Data)", held.join(", ")));
+                }
+            }
+            None => {
+                ui.label("no deck");
+            }
+        }
+        if let Some(r) = live {
+            ui.horizontal(|ui| {
+                ui.colored_label(GREEN, "LIVE");
+                ui.label(format!("jacked in at {} -> {}", world.name_of(r.chair), virt::node_label(world, r.target)));
+                if ui.link("open run").clicked() {
+                    app.selected_run = Some(r.id);
+                }
+            });
+        }
+        if let Some(t) = world.comp::<Brain>(id).and_then(|b| b.dazed_until).filter(|&t| t > world.tick) {
+            ui.colored_label(RED, format!("dazed for {} more ticks", t - world.tick));
+        }
+        for r in past {
+            ui.horizontal(|ui| {
+                let (text, colour) = r.outcome.map_or(("?", GOLD), super::run::outcome_label);
+                ui.label(format!(
+                    "day {} {}",
+                    time::day(r.log.last().map_or(world.tick, |l| l.0)),
+                    time::clock(r.log.last().map_or(world.tick, |l| l.0))
+                ));
+                ui.colored_label(colour, text);
+                ui.small(super::run::purpose_label(world, r.purpose));
+                if ui.link("run").clicked() {
+                    app.selected_run = Some(r.id);
+                }
+            });
+        }
+    });
 }
 
 /// The biography: life events and folded trace runs, newest first. The same

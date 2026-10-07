@@ -82,8 +82,51 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Harvested
         | EventKind::Stripped
         | EventKind::Overdose => Color32::from_rgb(0x40, 0xc8, 0xe0),
+        // M14 § 10: the Virt plane in violet.
+        k if is_virt(k) => super::run::VIOLET,
         _ => Color32::LIGHT_GRAY,
     }
+}
+
+/// M14's event kinds (the Virt plane): drawn violet.
+fn is_virt(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::JackedIn
+            | EventKind::DataStolen
+            | EventKind::DataWiped
+            | EventKind::DataSold
+            | EventKind::LedgerHacked
+            | EventKind::DoorHacked
+            | EventKind::RobotTurned
+            | EventKind::Blinded
+            | EventKind::Traced
+            | EventKind::Fried
+            | EventKind::Flatlined
+            | EventKind::Dumpshock
+            | EventKind::IceRaised
+            | EventKind::IceLowered
+            | EventKind::TechGained
+            | EventKind::TechLost
+    )
+}
+
+/// The Virt events whose first actor is a runner: a click opens its Run panel.
+fn opens_run(kind: EventKind) -> bool {
+    matches!(
+        kind,
+        EventKind::JackedIn
+            | EventKind::DataStolen
+            | EventKind::DataWiped
+            | EventKind::LedgerHacked
+            | EventKind::DoorHacked
+            | EventKind::RobotTurned
+            | EventKind::Blinded
+            | EventKind::Traced
+            | EventKind::Fried
+            | EventKind::Flatlined
+            | EventKind::Dumpshock
+    )
 }
 
 pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
@@ -118,6 +161,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
     let selected = app.selected;
     let only_selected = app.log.only_selected;
     let mut clicked = None;
+    let mut clicked_run = None;
     if app.log.unattributed {
         // Open holes, newest first: click to bind the hole and select the victim.
         let mut bind = None;
@@ -162,6 +206,11 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 let text = egui::RichText::new(line).monospace().color(kind_colour(e.kind));
                 if ui.selectable_label(highlight, text).clicked() {
                     clicked = e.actors.iter().copied().find(|&a| a != EntityId::NONE);
+                    clicked_run = if opens_run(e.kind) {
+                        e.actors.iter().find_map(|&a| super::run::run_of(world, a))
+                    } else {
+                        None
+                    };
                 }
             }
         });
@@ -169,6 +218,9 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
 
     if let Some(id) = clicked {
         app.selected = Some(id);
+        app.selected_run = clicked_run;
+        app.selected_node = None;
+        app.selected_mission = None;
         app.follow = false;
         // Centre on the agent, or on its building if it is not drawn as a square.
         if let Some(p) = world.comp::<Position>(id) {

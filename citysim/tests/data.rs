@@ -122,3 +122,59 @@ fn test_deck_seller_gate() {
     assert_eq!(tech::street_tier(&w, Track::Deck).0, 3);
     assert!(assets::can_sell(&w, alley, AssetKind::Deck, 3), "the street tier");
 }
+
+/// Plan 4.3 (V42): `SetCityIce` installs and lowers ICE on the Treasury's
+/// Ledger and the Precinct until both match; the lever is read back.
+#[test]
+fn test_city_ice_lever_sets_treasury_and_precinct() {
+    use citysim::PlayerCommand;
+    let mut w = World::new(42, Config::load());
+    let hall = w.building_of_kind(BuildingKind::Hall).expect("hall");
+    let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
+    let (treasury, precinct) = (
+        virt::ledger_of(&w, hall).expect("the Treasury's node"),
+        virt::node_of_building(&w, jail).expect("the Precinct's node"),
+    );
+    let ice = |w: &World, n| virt::profile(w, n).map(|p| p.ice);
+    assert_eq!((ice(&w, treasury), ice(&w, precinct)), (Some(2), Some(2)), "[levers] city_ice seeds 2");
+    let coins = w.purse(None);
+    for want in [3u8, 0, 1] {
+        w.push_command(PlayerCommand::SetCityIce(want));
+        w.apply_commands();
+        assert_eq!(w.levers.city_ice, want);
+        assert_eq!((ice(&w, treasury), ice(&w, precinct)), (Some(want), Some(want)), "tier {want}");
+    }
+    assert!(w.purse(None) < coins, "the city paid for the installs");
+}
+
+/// Plan 4.3 (V42): `SetDataTax` takes an extra share of a Data sale for the
+/// Treasury, out of the seller's take; coins are conserved.
+#[test]
+fn test_data_tax_applies() {
+    use citysim::PlayerCommand;
+    let sell = |tax: f32| {
+        let mut w = World::new(42, Config::load());
+        w.push_command(PlayerCommand::SetDataTax(tax));
+        w.apply_commands();
+        assert!((w.levers.data_tax - tax).abs() < 1e-6);
+        let zeta = corp_named(&w, "Zetatech");
+        w.comp_mut::<Corp>(zeta).expect("corp").treasury = 100_000;
+        let seller = w
+            .citizens()
+            .into_iter()
+            .find(|&a| w.has::<Brain>(a) && citysim::systems::demography::is_adult(&w, a))
+            .expect("an adult");
+        let total = ownership::total_coins(&w);
+        let (wallet, city) = (w.purse(Some(seller)), w.purse(None));
+        let n = tech::sell_data(&mut w, seller, Track::Deck, 200, Some(zeta));
+        assert_eq!(ownership::total_coins(&w), total, "coins are conserved");
+        (n, w.purse(Some(seller)) - wallet, w.purse(None) - city, tech::data_unit_price(&w, zeta) * i64::from(n))
+    };
+    let (n0, take0, city0, price) = sell(0.0);
+    let (n1, take1, city1, _) = sell(0.5);
+    assert!(n0 > 0 && n0 == n1, "the same sale: {n0} and {n1}");
+    let extra = (price as f32 * 0.5).floor() as i64;
+    assert!(extra > 0);
+    assert_eq!(city1 - city0, extra, "the Treasury's extra share");
+    assert_eq!(take0 - take1, extra, "paid out of the seller's take");
+}

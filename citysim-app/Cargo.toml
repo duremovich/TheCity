@@ -7,3 +7,4 @@ edition.workspace = true
 citysim = { path = "../citysim" }
 macroquad = "0.4"
 egui-macroquad = "0.17"
+smallvec = "1"
