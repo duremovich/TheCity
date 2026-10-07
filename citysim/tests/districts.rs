@@ -756,6 +756,8 @@ fn test_raid_gated_by_crackdown_on_raider() {
         virt_p: 0.0,
         hacked: false,
         virt_grudge: false,
+        fear: None,
+        vendetta: None,
     };
     let has = |i: &faction::OrderInputs, o: Order| faction::score_orders(i, &cfg).iter().any(|s| s.order == o);
     for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {

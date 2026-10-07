@@ -324,7 +324,7 @@ pub enum GrudgeCause {
     Inherited(EntityId),
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Grudge {
     /// An agent, or a gang or corp entity when only the faction is known.
     pub target: EntityId,
@@ -345,12 +345,16 @@ pub struct Grudges {
 }
 
 /// An open feud between two factions (plan W18).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Vendetta {
     pub a: EntityId,
     pub b: EntityId,
     pub since: Tick,
     pub kills: [u16; 2],
+    /// Plan field: `[V(a, b), V(b, a)]` at the last midnight, so the gang
+    /// brain and Lobby read the feud's weight between midnights.
+    #[serde(default)]
+    pub w: [f32; 2],
 }
 
 // ---------------------------------------------------------------------------
@@ -387,7 +391,7 @@ pub struct Intel {
 }
 
 /// One hunter's state (plan W20).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HuntState {
     pub target: EntityId,
     pub grudge_target: EntityId,
@@ -397,8 +401,22 @@ pub struct HuntState {
     pub venue: Option<EntityId>,
     pub intel: Option<Intel>,
     pub stakeout_until: Option<Tick>,
+    #[serde(default)]
     pub deceived: bool,
     pub why: HuntWhy,
+    /// Plan field: who sent the hunter the wrong way (a grudge at 0.3 when
+    /// the stake-out finds them out).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub liar: Option<EntityId>,
+    /// Plan field: the grudge weight when the Hunt was adopted (a strike
+    /// at `lethal_min` or more kills at `hunt_kill_p`).
+    #[serde(default)]
+    pub weight: f32,
+    /// Plan field (throughput): the might gap to the target at adoption,
+    /// which a hunter's every think reads instead of walking both
+    /// rosters and edge lists again.
+    #[serde(default)]
+    pub gap: f32,
 }
 
 // ---------------------------------------------------------------------------

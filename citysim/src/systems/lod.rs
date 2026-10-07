@@ -221,6 +221,9 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId]) -> i32 {
     // M14 V13: a runner seated or holding a run order (above the watch).
     let runner =
         !world.run_orders.is_empty() && (world.runner_of.contains_key(&id) || world.run_orders.contains_key(&id));
+    // M15 W22: a hunter and a hunted target rank with the runners.
+    let runner =
+        runner || (!world.hunts.is_empty() && (world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id)));
     if brain.pinned {
         5
     } else if runner {
@@ -245,8 +248,9 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         return;
     }
     if lod == Lod::Statistical {
-        // M14 V13: a body jacked in is never Statistical.
-        if world.runner_of.contains_key(&id) {
+        // M14 V13: a body jacked in is never Statistical; M15 W22: nor a
+        // hunter or a hunted target.
+        if world.runner_of.contains_key(&id) || world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id) {
             return;
         }
         if brain.plan.is_some() {

@@ -25,6 +25,16 @@ pub const SAFE: f32 = 0.4;
 pub const SAVINGS_DAYS: i64 = 7;
 /// `food_count` saturates here.
 pub const FOOD_COUNT_MAX: u8 = 3;
+/// `coin_bucket`'s largest value (`WorldState::bucket`).
+pub const COIN_BUCKET_MAX: u8 = 2;
+/// The first flag bit of `WorldState::pack` (M15 phase 3: after `at`'s
+/// byte and the two two-bit counters).
+pub const FLAG_BASE: u32 = 12;
+// The two counters must fit their two key bits, or release builds would
+// alias states in the planner's closed set.
+const _: () = assert!(FOOD_COUNT_MAX <= 3 && COIN_BUCKET_MAX <= 3);
+/// Flags the packed key can hold (`64 − FLAG_BASE`).
+pub const MAX_FLAGS: u32 = 64 - FLAG_BASE;
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
 pub enum LocationKey {
@@ -87,11 +97,15 @@ pub enum LocationKey {
     /// M14 V29: a Lab of the Tech corp that buys Data (the plan's bound
     /// step target, else the nearest).
     DataBuyer,
+    /// M15 W19: a hunter's place (`World::hunts`): the ask venue while the
+    /// Hunt is in `Ask`, the intel building or tile while in `Watch`.
+    /// Scripted Hunt plans only; never in `PLANNABLE`.
+    Intel,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 27] = [
+    pub const GOTO: [LocationKey; 28] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -119,6 +133,7 @@ impl LocationKey {
         LocationKey::StimSource,
         LocationKey::Chair,
         LocationKey::DataBuyer,
+        LocationKey::Intel,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -256,9 +271,14 @@ pub struct WorldState {
 
 impl WorldState {
     /// An injective 64-bit packing (the planner's closed set keys on it):
-    /// `at` in bits 0-7, `coin_bucket` 8-15, `food_count` 16-23, then one
-    /// bit per flag from 24. The destructuring is exhaustive, so a new field
-    /// fails to compile here until it is packed.
+    /// `at` in bits 0-7, `coin_bucket` 8-9 (0..=2), `food_count` 10-11
+    /// (0..=`FOOD_COUNT_MAX`), then one bit per flag from `FLAG_BASE`. M15
+    /// phase 3 widened the key word: M14 left each counter a byte and 39 of
+    /// 40 flag bits used; two bits per counter free twelve, so the key holds
+    /// `MAX_FLAGS` flags (39 used). The closed set only tests membership,
+    /// so any injective layout finds the same plans (`tests/planner_key.rs`).
+    /// The destructuring is exhaustive, so a new field fails to compile here
+    /// until it is packed.
     pub fn pack(&self) -> u64 {
         let WorldState {
             at,
@@ -345,9 +365,10 @@ impl WorldState {
             run_done,
             has_data,
         ];
-        let mut k = u64::from(at as u8) | (u64::from(coin_bucket) << 8) | (u64::from(food_count) << 16);
+        debug_assert!(coin_bucket <= 3 && food_count <= 3, "a counter outgrew its two key bits");
+        let mut k = u64::from(at as u8) | (u64::from(coin_bucket & 3) << 8) | (u64::from(food_count & 3) << 10);
         for (i, f) in flags.into_iter().enumerate() {
-            k |= u64::from(f) << (24 + i);
+            k |= u64::from(f) << (FLAG_BASE + i as u32);
         }
         k
     }
@@ -419,7 +440,7 @@ impl WorldState {
         } else if coins < 2 * price {
             1
         } else {
-            2
+            COIN_BUCKET_MAX
         }
     }
 

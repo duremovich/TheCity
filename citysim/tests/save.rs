@@ -514,3 +514,70 @@ fn test_pre_m15_save_backfills_skills() {
         assert_eq!(got, seeded[k], "backfilled from the same keyed draw");
     }
 }
+
+/// M15 phase 3 (fix round): a save taken mid-Hunt (a god Hunt under way,
+/// its `HuntState` and the derived `hunted_by`) loads and runs on exactly
+/// as the world it was taken from.
+#[test]
+fn test_save_mid_hunt_continues_identically() {
+    use citysim::systems::{demography, law};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY + 600);
+    let ads: Vec<EntityId> =
+        w.citizens().into_iter().filter(|&a| law::living(&w, a) && demography::is_adult(&w, a)).collect();
+    let (hunter, target) = (ads[3], ads[40]);
+    w.push_command(PlayerCommand::Hunt { hunter, target });
+    w.run_ticks(1);
+    assert!(w.hunts.contains_key(&hunter), "the god Hunt is under way");
+    // Into the Hunt: until it watches (its target marked hunted), at most a day.
+    for _ in 0..TICKS_PER_DAY {
+        if w.hunted_by.contains_key(&target) || !w.hunts.contains_key(&hunter) {
+            break;
+        }
+        w.run_ticks(1);
+    }
+    assert!(!w.hunts.is_empty(), "still hunting at the save");
+    let text = save::to_ron(&w);
+    let mut back = save::from_ron(&text).expect("load");
+    assert_eq!(back.hunted_by, w.hunted_by, "hunted_by rebuilt");
+    w.run_ticks(TICKS_PER_DAY / 2);
+    back.run_ticks(TICKS_PER_DAY / 2);
+    assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
+}
+
+/// M15 phase 3 (fix round): a save taken while a guard stands over a body
+/// (`guards_of_corpse` is not saved: it is rebuilt from the guard's plan)
+/// loads and runs on exactly as the world it was taken from.
+#[test]
+fn test_save_mid_guard_continues_identically() {
+    use citysim::systems::{demography, grudges, law, lod};
+    use citysim::{ActionInstance, ActionKind, Brain, DeathCause, ExecState, GoalKind, Lod, Plan};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY + 600);
+    let ads: Vec<EntityId> =
+        w.citizens().into_iter().filter(|&a| law::living(&w, a) && demography::is_adult(&w, a)).collect();
+    let (dead, guard) = (ads[5], ads[60]);
+    w.edge_entry(guard, dead).kind = RelKind::Family;
+    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
+    for x in [dead, guard] {
+        lod::set_lod(&mut w, x, Lod::Coarse);
+        w.enter_building(x, bar);
+    }
+    w.kill_by(dead, DeathCause::Violence, None);
+    let now = w.tick;
+    let step = ActionInstance { action: ActionKind::StakeOut, target: Some(dead), tile: None };
+    let b = w.comp_mut::<Brain>(guard).expect("brain");
+    b.plan = Some(Plan { goal: GoalKind::GuardBody, target: Some(dead), steps: vec![step], started_tick: now });
+    b.plan_step = 0;
+    b.current_goal = Some(GoalKind::GuardBody);
+    b.exec = ExecState::Use { kind: ActionKind::StakeOut, until: now + 360, started: now };
+    grudges::start_guard(&mut w, guard, dead);
+    // Saved the tick the wait began (a think may end the wait soon after).
+    assert!(grudges::guarding(&w, guard, dead), "still standing over the body");
+    let text = save::to_ron(&w);
+    let mut back = save::from_ron(&text).expect("load");
+    assert_eq!(back.guards_of_corpse, w.guards_of_corpse, "the guard is registered again");
+    w.run_ticks(600);
+    back.run_ticks(600);
+    assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
+}

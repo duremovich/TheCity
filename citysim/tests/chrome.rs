@@ -152,7 +152,7 @@ fn test_arms_raise_p_win_and_skin_lowers_death() {
             w.comp_mut::<Skills>(y).expect("skills").fighting = 0.0;
         }
         // kill_mult so that a bare loser always dies: p × (1 + 0) × m = 1.
-        let mods = law::FightMods { kill_mult: 1.0 / p, a_bonus: 0.0 };
+        let mods = law::FightMods { kill_mult: 1.0 / p, a_bonus: 0.0, kill_p: None };
         let (_, loser, died) = law::resolve_fight_mods(&mut w, x, v, mods);
         if loser == v {
             losses += 1;
@@ -476,6 +476,8 @@ fn test_harvest_scored_only_with_target_and_clinic() {
         virt_p: 0.0,
         hacked: false,
         virt_grudge: false,
+        fear: None,
+        vendetta: None,
     };
     let cfg = Config::load().gangs;
     let has = |i: &OrderInputs| faction::score_orders(i, &cfg).iter().any(|s| s.order == Order::Harvest);

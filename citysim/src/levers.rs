@@ -315,6 +315,26 @@ pub enum PlayerCommand {
         gang: EntityId,
         creed: Option<crate::word::Creed>,
     },
+    // --- M15 god commands (plan W42, phase 3).
+    /// Both factions' leaders (a gang's leader, a corp's exec, the captain)
+    /// hold a grudge of `weight` on the other faction; the vendettas are
+    /// rescored at once.
+    DeclareVendetta {
+        a: EntityId,
+        b: EntityId,
+        weight: f32,
+    },
+    /// The highest-affinity living Friend of `of` is killed by `by`, with
+    /// one witness picked as the binder picks one, so the killing is named.
+    KillFriend {
+        of: EntityId,
+        by: EntityId,
+    },
+    /// `hunter` holds a 1.0 grudge on `target` and hunts it now (past `max_hunts`).
+    Hunt {
+        hunter: EntityId,
+        target: EntityId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -750,7 +770,10 @@ impl World {
             | PlayerCommand::PlantRumour { .. }
             | PlayerCommand::SetReputation { .. }
             | PlayerCommand::GrantSkill { .. }
-            | PlayerCommand::SetCreed { .. } => {
+            | PlayerCommand::SetCreed { .. }
+            | PlayerCommand::DeclareVendetta { .. }
+            | PlayerCommand::KillFriend { .. }
+            | PlayerCommand::Hunt { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -928,7 +951,10 @@ impl World {
             PlayerCommand::PlantRumour { .. }
             | PlayerCommand::SetReputation { .. }
             | PlayerCommand::GrantSkill { .. }
-            | PlayerCommand::SetCreed { .. } => self.cmd_god_word(cmd),
+            | PlayerCommand::SetCreed { .. }
+            | PlayerCommand::DeclareVendetta { .. }
+            | PlayerCommand::KillFriend { .. }
+            | PlayerCommand::Hunt { .. } => self.cmd_god_word(cmd),
             _ => self.cmd_god_corp(cmd),
         }
     }
@@ -1042,10 +1068,115 @@ impl World {
                     format!("pinned {}'s {} at {value:.2} for {days} days", self.name_of(who), axis.label()),
                 ))
             }
+            PlayerCommand::DeclareVendetta { a, b, weight } => {
+                let is_faction =
+                    |w: &World, f: EntityId| w.has::<Gang>(f) || w.has::<Corp>(f) || w.has::<crate::components::Law>(f);
+                if a == b || !is_faction(self, a) || !is_faction(self, b) {
+                    return Err("DeclareVendetta: two different factions".into());
+                }
+                let w = weight.clamp(0.0, 1.0);
+                let mut leaders = Vec::new();
+                for (x, y) in [(a, b), (b, a)] {
+                    let Some(l) = faction_leader(self, x) else {
+                        return Err(format!(
+                            "DeclareVendetta: {} has no leader",
+                            crate::systems::grudges::label(self, x)
+                        ));
+                    };
+                    leaders.push((l, y));
+                }
+                for (l, y) in leaders {
+                    crate::systems::grudges::add(self, l, y, crate::word::GrudgeCause::Betrayed, w, 0);
+                    if let Some(g) = self.comp_mut::<crate::word::Grudges>(l) {
+                        if let Some(x) = g.list.iter_mut().find(|x| x.target == y && x.settled.is_none()) {
+                            x.weight = x.weight.max(w);
+                        }
+                    }
+                }
+                crate::systems::grudges::vendettas(self);
+                let text = format!(
+                    "declared a vendetta between {} and {} ({w:.2})",
+                    crate::systems::grudges::label(self, a),
+                    crate::systems::grudges::label(self, b)
+                );
+                Ok((vec![a, b], text))
+            }
+            PlayerCommand::KillFriend { of, by } => {
+                if !crate::systems::law::living(self, of) || !crate::systems::law::living(self, by) || of == by {
+                    return Err("KillFriend: no such living agents".into());
+                }
+                let friend = self
+                    .neighbours(of)
+                    .filter(|&o| o != by && crate::systems::law::living(self, o))
+                    .filter_map(|o| {
+                        self.edge(of, o)
+                            .filter(|e| e.kind == crate::components::RelKind::Friend)
+                            .map(|e| (o, e.affinity))
+                    })
+                    .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
+                    .map(|(o, _)| o);
+                let Some(victim) = friend else { return Err("KillFriend: no living Friend".into()) };
+                let tile = self.comp::<crate::components::Position>(victim).map(|p| p.tile).unwrap_or_default();
+                let d = self.district_of(tile);
+                self.kill_by(victim, crate::components::DeathCause::Violence, Some(by));
+                // The natural killing's path: witnesses rolled at the death's
+                // tile, the district's crime note, a guard's report, the
+                // pool post naming the killer when anyone noticed.
+                let crime = crate::components::Crime::Murder;
+                crate::systems::law::raise_crime_on(self, by, None, Some(victim), crime, tile);
+                let named = self.rumours.iter().any(|p| {
+                    p.entries
+                        .iter()
+                        .any(|e| e.deed == crate::word::Deed::Killed && e.object == Some(victim) && e.actor == Some(by))
+                });
+                // Nobody noticed: one witness, as the binder picks one (a
+                // living adult whose Home is in the death's district, on the
+                // Hunt stream), so the killing is named.
+                let pool: Vec<EntityId> = self
+                    .citizens()
+                    .into_iter()
+                    .filter(|&w| w != by && w != of && crate::systems::law::living(self, w))
+                    .filter(|&w| crate::systems::demography::is_adult(self, w))
+                    .filter(|&w| crate::systems::gossip::home_district(self, w) == Some(d))
+                    .collect();
+                let mut rng = self.rng.word(crate::word::WordNs::Hunt, self.tick, u64::from(victim.index));
+                let witness =
+                    (!named && !pool.is_empty()).then(|| pool[rand::Rng::random_range(&mut rng, 0..pool.len())]);
+                if let Some(w) = witness {
+                    self.remember_crime(w, by, crime, crate::systems::law::crime_salience(crime), Some(victim));
+                    crate::systems::gossip::name_actor(self, victim, by);
+                    crate::systems::gossip::post_deed(self, d, crate::word::Deed::Killed, Some(by), Some(victim));
+                }
+                let text = format!(
+                    "{} killed {}, {}'s friend{}",
+                    self.name_of(by),
+                    self.name_of(victim),
+                    self.name_of(of),
+                    witness.map(|w| format!(" (seen by {})", self.name_of(w))).unwrap_or_default()
+                );
+                Ok((vec![by, victim, of], text))
+            }
+            PlayerCommand::Hunt { hunter, target } => {
+                crate::systems::hunt::god_hunt(self, hunter, target)?;
+                Ok((vec![hunter, target], format!("{} hunts {}", self.name_of(hunter), self.name_of(target))))
+            }
             _ => Err("not a word command".into()),
         }
     }
+}
 
+/// M15 W42: a faction's leader: a gang's leader, a corp's exec, the captain.
+pub fn faction_leader(world: &World, f: EntityId) -> Option<EntityId> {
+    if let Some(g) = world.comp::<Gang>(f) {
+        return g.leader.filter(|&l| crate::systems::law::living(world, l));
+    }
+    if let Some(c) = world.comp::<Corp>(f) {
+        return c.exec.filter(|&e| crate::systems::law::living(world, e));
+    }
+    world.comp::<crate::components::Law>(f).and_then(|l| l.captain).filter(|&c| crate::systems::law::living(world, c))
+}
+
+impl World {
     /// The M14 god commands on the plane (plan V42, phase 1).
     fn cmd_god_virt(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
         use crate::systems::{tech, virt};

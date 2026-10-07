@@ -304,8 +304,14 @@ pub fn wage_bill(world: &World, corp: EntityId) -> i64 {
         .sum::<i64>()
 }
 
-/// The gang behind the most loss coins in the 14-day log (ties lower id).
-fn culprit(world: &World, c: &Corp) -> Option<EntityId> {
+/// The gang behind the most loss coins in the 14-day log (ties lower id);
+/// M15 W18: first the gang with the heaviest vendetta against the corp.
+fn culprit(world: &World, corp: EntityId, c: &Corp) -> Option<EntityId> {
+    if world.config.gossip.enabled {
+        if let Some(g) = crate::systems::grudges::vendetta_culprit(world, corp) {
+            return Some(g);
+        }
+    }
     let horizon = world.tick.saturating_sub(14 * TICKS_PER_DAY);
     let mut by_gang: BTreeMap<EntityId, i64> = BTreeMap::new();
     for l in c.loss_log.iter().filter(|l| l.tick >= horizon) {
@@ -453,7 +459,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         treasury: c.treasury,
         cooldown_ok: c.last_acquisition_tick.is_none_or(|t| now.saturating_sub(t) >= acquire_cd),
         lobby_ready: c.treasury >= cfg.lobby_min_treasury && c.lobby_until.is_none_or(|t| t <= now),
-        culprit: culprit(world, c),
+        culprit: culprit(world, corp, c),
         niches,
         virt,
     })
@@ -954,6 +960,14 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     let Some((seller, building, _)) = ni.weakest else { return };
     if !(i.cooldown_ok && world.purse(Some(corp)) >= ni.offer) {
         return;
+    }
+    // M15 W33: a seller refuses a dishonoured buyer unless it is going under.
+    if world.config.gossip.enabled {
+        let honour = crate::systems::reputation::rep(world, corp).honour;
+        let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
+        if honour < world.config.reputation.acquire_honour_min && !bankrupt {
+            return;
+        }
     }
     if crate::systems::corps::acquire(world, corp, building, ni.offer, "hostile") {
         let now = world.tick;

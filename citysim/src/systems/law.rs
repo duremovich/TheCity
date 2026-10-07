@@ -170,6 +170,8 @@ pub fn raise_crime_on(
     let mut noticed = 0usize;
     // M15 W28: a guard notices × the law's competence multiplier (1 when off).
     let law_mult = crate::systems::competence::law_mult(world);
+    // M15 W24: a Hunt's strike on its target: the street keeps quiet.
+    let silence = street_silence_on(world, actor, object, crime);
     for w in witnesses {
         let guard = is_guard(world, w);
         let mut p = notice_probability(&cfg, stealth, guard);
@@ -181,6 +183,23 @@ pub fn raise_crime_on(
             continue;
         }
         noticed += 1;
+        if silence && !guard && silent_witness(world, w, actor, object) {
+            // Known, not reported: a heard entry at hops 0 (no SawCrime,
+            // so no ReportCrime), and the actor is not resented for it.
+            if let Some(deed) = crate::systems::gossip::deed_of_crime(crime) {
+                let e = crate::components::MemoryEntry {
+                    subject: Some(actor),
+                    salience,
+                    valence: -salience,
+                    deed: Some(deed),
+                    object,
+                    ..crate::components::MemoryEntry::blank(MemoryKind::Rumour, world.tick)
+                };
+                crate::systems::memory::hear_entry(world, w, e);
+            }
+            world.stats.current.word.silenced += 1;
+            continue;
+        }
         world.remember_crime(w, actor, crime, salience, object);
         crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {
@@ -237,6 +256,23 @@ pub fn raise_crime_on(
             }
         }
     }
+}
+
+/// M15 W24: is this an Attack's crime by a hunter on its Hunt's target,
+/// with `[hunt] street_silence` on?
+pub fn street_silence_on(world: &World, actor: EntityId, object: Option<EntityId>, crime: Crime) -> bool {
+    world.config.gossip.enabled
+        && world.config.hunt.street_silence
+        && matches!(crime, Crime::Murder | Crime::Assault)
+        && object.is_some()
+        && world.hunts.get(&actor).is_some_and(|s| Some(s.target) == object)
+}
+
+/// M15 W24: a witness the street keeps quiet: one holding a grudge on the
+/// victim, or a Friend of the actor.
+pub fn silent_witness(world: &World, w: EntityId, actor: EntityId, victim: Option<EntityId>) -> bool {
+    victim.is_some_and(|v| crate::systems::grudges::holds(world, w, v, 0.0))
+        || world.edge(w, actor).is_some_and(|e| e.kind == crate::components::RelKind::Friend)
 }
 
 /// File (or refresh) the one open report per `(suspect, crime)`.
@@ -392,16 +428,19 @@ pub fn courage(world: &World, id: EntityId) -> f32 {
 
 /// M13 D31: what a fight's caller adds: the death chance × `kill_mult` (a
 /// Crush, a berserker), and `a_bonus` on the attacker's fighting (an
-/// abduction crew's members within 2 tiles).
+/// abduction crew's members within 2 tiles). M15 W22: `kill_p`, when the
+/// attacker wins, replaces `fight_death_p × (1 + fi_winner)` (a lethal
+/// Hunt's strike); `kill_mult` and armour still apply.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FightMods {
     pub kill_mult: f32,
     pub a_bonus: f32,
+    pub kill_p: Option<f32>,
 }
 
 impl Default for FightMods {
     fn default() -> Self {
-        FightMods { kill_mult: 1.0, a_bonus: 0.0 }
+        FightMods { kill_mult: 1.0, a_bonus: 0.0, kill_p: None }
     }
 }
 
@@ -413,7 +452,7 @@ pub fn resolve_fight(world: &mut World, a: EntityId, b: EntityId) -> (EntityId, 
 
 /// M12 D32: [`resolve_fight`] with the death chance × `kill_mult` (a Crush).
 pub fn resolve_fight_with(world: &mut World, a: EntityId, b: EntityId, kill_mult: f32) -> (EntityId, EntityId, bool) {
-    resolve_fight_mods(world, a, b, FightMods { kill_mult, a_bonus: 0.0 })
+    resolve_fight_mods(world, a, b, FightMods { kill_mult, a_bonus: 0.0, kill_p: None })
 }
 
 /// M13 D31: the fight with its mods and the Kit terms. Only when either
@@ -478,7 +517,11 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
         s.fighting = (s.fighting + 0.01).min(1.0);
     }
     crate::systems::social::fought(world, winner, loser);
-    let mut p_death = world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)) * mods.kill_mult;
+    let base = match mods.kill_p {
+        Some(p) if winner == a => p,
+        _ => world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)),
+    };
+    let mut p_death = base * mods.kill_mult;
     let loser_kit = if loser == a { &kit_a } else { &kit_b };
     let armour = loser_kit.as_ref().map_or(0.0, |k| k.armour);
     if armour > 0.0 {
@@ -571,7 +614,11 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
     let dazed = world.comp::<Brain>(suspect).and_then(|b| b.dazed_until).is_some_and(|t| t > world.tick);
     if (courage > 0.7 || berserk) && !dazed {
         let mods = if berserk {
-            FightMods { kill_mult: crate::systems::chrome::arrest_kill_mult(world, suspect), a_bonus: 0.0 }
+            FightMods {
+                kill_mult: crate::systems::chrome::arrest_kill_mult(world, suspect),
+                a_bonus: 0.0,
+                kill_p: None,
+            }
         } else {
             FightMods::default()
         };

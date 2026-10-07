@@ -595,6 +595,9 @@ pub fn strip(world: &mut World, agent: EntityId, c: EntityId) -> bool {
             && world.comp::<Position>(h).is_some_and(|p| crate::systems::law::chebyshev(p.tile, tile) <= r)
         {
             world.remember(h, MemoryKind::Stripped, Some(agent), 0.7, -0.7, false);
+            // M15 W35: a witnessed strip of a close one's body leaves a grudge.
+            let r = crate::word::DeedRef { deed: crate::word::Deed::Stripped, actor: Some(agent), object: Some(c) };
+            crate::systems::grudges::on_learn(world, h, &r, 1.0, 0);
         }
     }
     world.stats.current.stripped += 1;
@@ -714,7 +717,9 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
     let sighted: Vec<EntityId> = world
         .db
         .get(&gang)
-        .map(|db| db.sightings.iter().map(|s| s.who).filter(|&w| world.gang_of(w).is_none()).collect())
+        .map(|db| {
+            db.sightings.iter().filter(|s| !s.relayed).map(|s| s.who).filter(|&w| world.gang_of(w).is_none()).collect()
+        })
         .unwrap_or_default();
     // scan-ok: per gang rescore (daily, and on shocks)
     for id in world.with::<Kit>() {
@@ -727,6 +732,12 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
             || world.gang_of(id) == Some(gang)
             || world.has::<crate::components::Sentence>(id)
             || !crate::systems::demography::is_adult(world, id)
+        {
+            continue;
+        }
+        // M15 W32: nobody harvests the feared.
+        if world.config.gossip.enabled
+            && crate::systems::reputation::rep(world, id).dread >= world.config.reputation.harvest_dread_max
         {
             continue;
         }
@@ -776,7 +787,7 @@ pub fn abduct(world: &mut World, agent: EntityId, victim: EntityId) -> bool {
         })
         .map(|m| crate::systems::law::fighting(world, m))
         .sum();
-    let mods = crate::systems::law::FightMods { kill_mult: 1.0, a_bonus: bonus };
+    let mods = crate::systems::law::FightMods { kill_mult: 1.0, a_bonus: bonus, kill_p: None };
     let (winner, _, died) = crate::systems::law::resolve_fight_mods(world, agent, victim, mods);
     let tile = world.comp::<Position>(agent).map_or_else(Default::default, |p| p.tile);
     if crate::systems::law::living(world, agent) {

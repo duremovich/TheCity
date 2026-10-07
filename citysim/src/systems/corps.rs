@@ -69,6 +69,32 @@ pub fn cheapest_seller(world: &World, not: Option<EntityId>) -> Option<EntityId>
         .map(|(_, _, c)| c)
 }
 
+/// M15 W33: the renewal's choice for a client of `incumbent`: the Security
+/// corp with room minimising `contract_price × (1.5 − honour)`, the
+/// incumbent included (ties: fewer contracts, then the lower id); `Some`
+/// only for a rival, with whether plain price alone would not have moved
+/// the client (a switch on honour).
+pub fn honour_seller(world: &World, incumbent: EntityId) -> (Option<EntityId>, bool) {
+    let cost = |c: EntityId| {
+        let honour = crate::systems::reputation::rep(world, c).honour;
+        contract_price(world, c) as f32 * (1.5 - honour)
+    };
+    let len = |c: EntityId| world.comp::<Corp>(c).map_or(0, |cc| cc.contracts.len());
+    let best = world
+        .corps()
+        .into_iter()
+        .filter(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&Niche::Security)))
+        .filter(|&c| c == incumbent || has_room(world, c))
+        .min_by(|&a, &b| cost(a).total_cmp(&cost(b)).then(len(a).cmp(&len(b))).then(a.cmp(&b)));
+    match best {
+        Some(r) if r != incumbent && cost(r) < cost(incumbent) => {
+            let by_honour = contract_price(world, r) >= contract_price(world, incumbent);
+            (Some(r), by_honour)
+        }
+        _ => (None, false),
+    }
+}
+
 /// A new weekly contract on `client` with `seller` (D19). Refused when the
 /// client is already secured or the seller is full.
 pub fn buy_contract(world: &mut World, client: EntityId, seller: EntityId) -> bool {
@@ -542,7 +568,12 @@ fn renew_contracts(world: &mut World) {
         for client in due {
             let mine = contract_price(world, seller);
             let owner = world.owner_of(client);
-            let rival = cheapest_seller(world, Some(seller)).filter(|&r| contract_price(world, r) < mine);
+            // M15 W33: with the word on the client weighs price by honour.
+            let (rival, by_honour) = if world.config.gossip.enabled {
+                honour_seller(world, seller)
+            } else {
+                (cheapest_seller(world, Some(seller)).filter(|&r| contract_price(world, r) < mine), false)
+            };
             // A Security corp keeps guarding its own buildings itself.
             let rival = rival.filter(|_| owner != Some(seller));
             match rival {
@@ -550,6 +581,15 @@ fn renew_contracts(world: &mut World) {
                     end_contract(world, client, &format!("moved to {}", world.owner_label(Some(r))));
                     buy_contract(world, client, r);
                     corp_brain::push_shock(world, seller, CorpShock::Undercut);
+                    if world.config.gossip.enabled {
+                        let why = if by_honour { "honour" } else { "price" };
+                        if by_honour {
+                            world.stats.current.word.contracts_lost_honour += 1;
+                        }
+                        let text =
+                            format!("{} dropped {} ({why})", world.name_of(client), world.owner_label(Some(seller)));
+                        world.push_event(EventKind::ContractLost, &[seller, client, r], text);
+                    }
                 }
                 None => {
                     if let Some(c) = world.comp_mut::<Corp>(seller) {

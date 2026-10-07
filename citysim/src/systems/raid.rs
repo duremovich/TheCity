@@ -147,13 +147,28 @@ pub fn jail_tile(world: &World) -> Option<TilePos> {
     world.comp::<Building>(jail).map(|b| world.outside_door(b))
 }
 
-/// D39: the corp building a gang's standing Raid aims at, while it stands.
+/// D39: the corp building a gang's standing Raid aims at, while it stands;
+/// M15 W18: or a standing Retaliate on a corp in vendetta with the gang.
 pub fn corp_target(world: &World, gang: EntityId) -> Option<EntityId> {
     let g = world.comp::<Gang>(gang)?;
-    if g.order != Order::Raid {
+    let retaliate = g.order == Order::Retaliate && g.retaliate_on.is_some_and(|c| world.has::<Corp>(c));
+    if g.order != Order::Raid && !retaliate {
         return None;
     }
     g.raid_target.filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+}
+
+/// M15 W18 (spec "the expedition's rival"): the faction a gang's
+/// expedition fights: a standing Retaliate's named gang or corp
+/// (`Gang.retaliate_on`), else `World::rival_of`. The gang-only readers
+/// keep [`raid_rival`].
+pub fn expedition_rival(world: &World, gang: EntityId) -> Option<EntityId> {
+    let named = world
+        .comp::<Gang>(gang)
+        .filter(|g| g.order == Order::Retaliate)
+        .and_then(|g| g.retaliate_on)
+        .filter(|&r| r != gang && (world.has::<Gang>(r) || world.has::<Corp>(r)));
+    named.or_else(|| world.rival_of(gang))
 }
 
 /// A gang's expedition target under its standing order: the Jail under

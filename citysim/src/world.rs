@@ -608,6 +608,26 @@ pub struct World {
     /// comparisons).
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     pub extort_log: VecDeque<(bool, bool, bool)>,
+    /// M15 W20: the Hunts under way, by hunter (at most `[hunt] max_hunts`
+    /// but for god Hunts).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hunts: BTreeMap<EntityId, crate::word::HuntState>,
+    /// M15 W22: hunted -> hunter for every Hunt in `Watch` (never
+    /// Statistical while here); rebuilt from `hunts` (`hunt::reindex`).
+    #[serde(skip)]
+    pub hunted_by: BTreeMap<EntityId, EntityId>,
+    /// M15 W15: a Hunt's victim -> (the chain its avenger's grudge had + 1,
+    /// when); a grudge over that victim starts at this chain. Pruned after
+    /// 60 days.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub kill_chain: BTreeMap<EntityId, (u8, Tick)>,
+    /// M15 W18: the open feuds between factions.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub vendettas: Vec<crate::word::Vendetta>,
+    /// M15 W35: a body -> the agents standing over it (GuardBody's wait);
+    /// rebuilt from the guards' plans on load.
+    #[serde(skip)]
+    pub guards_of_corpse: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
 }
 
 /// `skip_serializing_if` for a component store with nothing in it.
@@ -896,6 +916,11 @@ impl World {
             skill_quantiles: Vec::new(),
             talent_gone: BTreeMap::new(),
             extort_log: VecDeque::new(),
+            hunts: BTreeMap::new(),
+            hunted_by: BTreeMap::new(),
+            kill_chain: BTreeMap::new(),
+            vendettas: Vec::new(),
+            guards_of_corpse: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -2036,9 +2061,14 @@ impl World {
             }
             cap = 8;
         }
-        let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let entry = MemoryEntry { subject, salience, valence, second_hand, ..MemoryEntry::blank(kind, tick) };
-        systems::memory::insert(m, entry, tick, cap, half_life);
+        // M15 W15: a new deed memory may leave a grudge (never on a merge).
+        let deed = self.config.gossip.enabled.then(|| systems::memory::deed_of(id, &entry)).flatten();
+        let Some(m) = self.comp_mut::<Memory>(id) else { return };
+        let fresh = systems::memory::insert(m, entry, tick, cap, half_life);
+        if let (true, Some(r)) = (fresh, deed) {
+            systems::grudges::on_learn(self, id, &r, 1.0, u8::from(second_hand));
+        }
     }
 
     /// The edge between two agents, if any.
@@ -2205,6 +2235,9 @@ impl World {
         // M14 V1/V10: the plane's indices and the runners.
         systems::virt::rebuild_index(self);
         self.runner_of = self.runs.iter().map(|(&id, r)| (r.runner, id)).collect();
+        // M15 W22/W35: the hunted and the guarded bodies.
+        systems::hunt::reindex(self);
+        systems::grudges::rebuild_guards(self);
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde
@@ -2400,7 +2433,14 @@ impl World {
             object,
             ..MemoryEntry::blank(MemoryKind::SawCrime, tick)
         };
-        systems::memory::insert(m, entry, tick, cap, half_life);
+        // M15 W15: a witness to a wrong done to someone close may hold a
+        // grudge. A victim noticing its own wrong learns it once, through
+        // its own `Lost` / `WasRobbed` (fix round: one deed, one grudge).
+        let deed = object.filter(|&o| o != id).and_then(|_| systems::memory::deed_of(id, &entry));
+        let fresh = systems::memory::insert(m, entry, tick, cap, half_life);
+        if let (true, Some(r)) = (fresh, deed) {
+            systems::grudges::on_learn(self, id, &r, 1.0, 0);
+        }
     }
 
     /// Remove the Job, posting a vacancy at the employer. Returns the old Job.
@@ -2485,6 +2525,9 @@ impl World {
         if cause == DeathCause::Violence && self.config.gossip.enabled {
             systems::gossip::post_killing(self, id);
         }
+        // M15 W16: grudges on the dead settle, the dead's pass to its heirs
+        // (read before `on_death` unlinks the spouse), its Hunts end.
+        systems::grudges::on_death(self, id, killer);
         crate::systems::social::on_death(self, id);
         if cause == DeathCause::Violence && systems::law::is_guard(self, id) {
             systems::law_brain::push_shock(self, LawShock::GuardKilled);

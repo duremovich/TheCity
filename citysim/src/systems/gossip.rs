@@ -864,25 +864,35 @@ pub fn expire_sightings(world: &mut World) {
 // Sightings (W12): memory only in phase 1; the relay to `FactionDb` is phase 3
 // ---------------------------------------------------------------------------
 
-/// W12: does `observer` care where `who` is? `who` is an Enemy of the
-/// observer, or wanted (grudges and vendettas join in phase 3). O(1).
+/// W12: does `observer` care where `who` is? `who` is the target of an
+/// unsettled grudge of the observer, an Enemy, wanted, or (phase 3) a
+/// member of a faction in an open vendetta with the observer's gang. O(1)
+/// (a grudge list of at most 4, a set lookup, the few vendettas).
 pub fn wants_sighting(world: &World, observer: EntityId, who: EntityId) -> bool {
     if observer == who {
         return false;
     }
-    let grudge = world
-        .grudges
-        .get(observer.index as usize)
-        .and_then(Option::as_ref)
-        .is_some_and(|g| g.list.iter().any(|x| x.target == who && x.settled.is_none()));
-    grudge || world.enemies.get(&observer).is_some_and(|s| s.contains(&who)) || crate::systems::law::wanted(world, who)
+    let grudge = crate::systems::grudges::holds(world, observer, who, 0.0);
+    grudge
+        || world.enemies.get(&observer).is_some_and(|s| s.contains(&who))
+        || crate::systems::law::wanted(world, who)
+        || in_vendetta(world, observer, who)
+}
+
+/// Are `a`'s gang and `b`'s gang in an open vendetta?
+fn in_vendetta(world: &World, a: EntityId, b: EntityId) -> bool {
+    if world.vendettas.is_empty() {
+        return false;
+    }
+    let (Some(ga), Some(gb)) = (world.gang_of(a), world.gang_of(b)) else { return false };
+    world.vendettas.iter().any(|v| (v.a, v.b) == (ga, gb) || (v.a, v.b) == (gb, ga))
 }
 
 /// W12: at a co-location event, a body that cares about `who` notes where
 /// it saw them (a heard `Sighting`, refreshed in place). A Statistical
-/// observer has no eyes. `tile` is for phase 3's relay.
+/// observer has no eyes. Phase 3 relays it: a gang member's to its gang's
+/// `FactionDb`, a guard's to the city's, at `conf × relay_conf`.
 pub fn maybe_sight(world: &mut World, observer: EntityId, who: EntityId, at: Option<EntityId>, tile: TilePos) {
-    let _ = tile;
     if !world.config.gossip.enabled {
         return;
     }
@@ -894,5 +904,43 @@ pub fn maybe_sight(world: &mut World, observer: EntityId, who: EntityId, at: Opt
     }
     let entry =
         MemoryEntry { subject: Some(who), salience: 0.5, at, ..MemoryEntry::blank(MemoryKind::Sighting, world.tick) };
+    let conf = entry.conf;
     memory::hear_entry(world, observer, entry);
+    // W12 relay (phase 3).
+    let owner = if let Some(g) = world.gang_of(observer) {
+        Some(Some(g))
+    } else if crate::systems::law::is_city_guard(world, observer) {
+        Some(None)
+    } else {
+        None
+    };
+    if let Some(owner) = owner {
+        let s = crate::virt::Sighting {
+            who,
+            tile,
+            tick: world.tick,
+            confidence: conf * world.config.gossip.relay_conf,
+            relayed: true,
+        };
+        relay_sighting(world, owner.unwrap_or(EntityId::NONE), s);
+    }
+}
+
+/// W12 relay (plan deviation): one relayed sighting per person in a
+/// faction's database (the newer replaces the older, at the back), and
+/// past `[db] db_cap` the oldest relayed one goes before any trace or
+/// camera sighting, so the eyes on the street never push M14's caught
+/// runners out of a 32-entry database.
+fn relay_sighting(world: &mut World, owner: EntityId, s: crate::virt::Sighting) {
+    let cap = world.config.db.db_cap.max(1);
+    let db = world.db.entry(owner).or_default();
+    if let Some(i) = db.sightings.iter().position(|x| x.relayed && x.who == s.who) {
+        db.sightings.remove(i);
+    }
+    db.sightings.push_back(s);
+    while db.sightings.len() > cap {
+        let n = db.sightings.len();
+        let i = db.sightings.iter().take(n - 1).position(|x| x.relayed).unwrap_or(0);
+        db.sightings.remove(i);
+    }
 }

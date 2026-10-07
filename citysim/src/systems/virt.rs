@@ -1740,7 +1740,11 @@ pub fn trace(world: &mut World, r: &Run, n: NodeId) {
     let door = world.comp::<Building>(r.chair).map(|b| b.door).unwrap_or_default();
     world.stats.current.virt.traced += 1;
     if named {
-        record_sighting(world, owner, crate::virt::Sighting { who: r.runner, tile: door, tick: now, confidence });
+        record_sighting(
+            world,
+            owner,
+            crate::virt::Sighting { who: r.runner, tile: door, tick: now, confidence, relayed: false },
+        );
     }
     if r.mode == RunMode::Loud {
         let until = now + Tick::from(world.config.ice.alarm_hours) * TICKS_PER_HOUR;
@@ -2994,8 +2998,11 @@ pub fn record_sighting(world: &mut World, owner: Option<EntityId>, s: crate::vir
     let cap = world.config.db.db_cap.max(1);
     let db = world.db.entry(owner.unwrap_or(EntityId::NONE)).or_default();
     db.sightings.push_back(s);
+    // M15 W12: the oldest relayed street sighting goes before any trace or
+    // camera sighting (none exist with the word off: the M14 rule).
     while db.sightings.len() > cap {
-        db.sightings.pop_front();
+        let i = db.sightings.iter().position(|x| x.relayed).unwrap_or(0);
+        db.sightings.remove(i);
     }
     world.stats.current.virt.sightings += 1;
     let lawful = owner.is_none_or(|o| world.has::<Corp>(o));
@@ -3045,7 +3052,7 @@ pub fn camera_sense(world: &mut World, actor: EntityId, crime: crate::components
         crate::systems::law::file_report(world, crime, actor, None);
     }
     let tick = world.tick;
-    record_sighting(world, owner, crate::virt::Sighting { who: actor, tile, tick, confidence });
+    record_sighting(world, owner, crate::virt::Sighting { who: actor, tile, tick, confidence, relayed: false });
 }
 
 /// V38, daily in `tech::run`: Statistical agents carrying a deck, on

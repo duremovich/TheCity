@@ -455,6 +455,11 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
     };
     match walk_key {
         Some(key) => {
+            // M15 W22: a hunter setting out to its intel promotes a
+            // Statistical target.
+            if key == LocationKey::Intel {
+                crate::systems::hunt::on_goto_intel(world, id);
+            }
             // Escort's target is the suspect, not the destination.
             let walk_target = if matches!(step.action, ActionKind::GoTo(_)) { step.target } else { None };
             let building = world.resolve_building(id, key, walk_target);
@@ -508,11 +513,22 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     return StepResult::Running;
                 }
             }
-            // Replan trigger (b): re-observe; a false precondition fails the step.
-            let ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
-            let ws = crate::goap::WorldState::observe(world, id, ctx.target);
-            if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
-                return StepResult::Failed(FailReason::PreconditionLost);
+            // M15 W19/W35: a scripted Hunt or GuardBody plan checks its
+            // steps' own start conditions, not the planner's symbols.
+            let scripted = world.comp::<Brain>(id).and_then(|b| b.plan_goal()).is_some_and(|g| {
+                matches!(g, crate::components::GoalKind::Hunt | crate::components::GoalKind::GuardBody)
+            });
+            if scripted {
+                if !crate::systems::hunt::can_start(world, id, kind, step.target) {
+                    return StepResult::Failed(FailReason::PreconditionLost);
+                }
+            } else {
+                // Replan trigger (b): re-observe; a false precondition fails the step.
+                let ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
+                let ws = crate::goap::WorldState::observe(world, id, ctx.target);
+                if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
+                    return StepResult::Failed(FailReason::PreconditionLost);
+                }
             }
             let dur = actions::duration(world, id, kind);
             actions::on_start(world, id, kind, step.target);
@@ -828,6 +844,8 @@ impl World {
             LocationKey::DataBuyer => target
                 .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::Lab))
                 .or_else(|| crate::systems::tech::data_buyer_lab(self, agent)),
+            // M15 W19: the Hunt's venue, then its intel building.
+            LocationKey::Intel => crate::systems::hunt::intel_building(self, agent),
             // M13 D26: a vehicle is reached on the street outside its door.
             LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget | LocationKey::Vehicle => None,
         }
@@ -857,6 +875,8 @@ impl World {
                 _ => None,
             },
             LocationKey::Vehicle => target.and_then(|v| crate::systems::vehicles::vehicle_stand(self, v)),
+            // M15 W19: a street intel (a database sighting's tile).
+            LocationKey::Intel => crate::systems::hunt::intel_tile(self, agent),
             _ => None,
         }
     }

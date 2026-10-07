@@ -419,6 +419,12 @@ pub fn gossip(world: &mut World, from: EntityId, to: EntityId) {
         return;
     }
     let i = world.rng.world().random_range(0..candidates.len());
+    // M15 W9 (phase 3): with `legacy_second_hand` off the copy into
+    // `entries` and its edge nudge retire; the draw above stays, so the
+    // world stream keeps its position.
+    if world.config.gossip.enabled && !world.config.gossip.legacy_second_hand {
+        return;
+    }
     let (kind, subject, salience, crime) = candidates[i];
     let already = world
         .comp::<crate::components::Memory>(to)

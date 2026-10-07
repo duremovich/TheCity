@@ -158,6 +158,13 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
                 w *= m;
             }
         }
+        // M15 W34: the feared are blamed (a branch: no word, no term).
+        if world.config.gossip.enabled {
+            let dread = crate::systems::reputation::rep(world, id).dread;
+            if dread > 0.0 {
+                w *= 1.0 + f64::from(world.config.reputation.bind_dread_w * dread);
+            }
+        }
         if w > 0.0 {
             out.push((id, w));
         }
@@ -272,12 +279,15 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     let witnessed = rng.random::<f32>() < p;
     let mut witness = None;
     if let (true, Bound::Actor(actor)) = (witnessed, bound) {
+        // M15 W24: with street silence the pool skips who would keep quiet.
+        let silence = world.config.gossip.enabled && world.config.hunt.street_silence;
         let pool: Vec<EntityId> = pools.with_day(world, day, |pool| {
             pool.iter()
                 .filter(|&&(w, t)| w != actor && w != hole.victim && t.has(trace_flags::ALIVE))
                 .filter(|&&(_, t)| if by_district { t.district == hole.district } else { t.zone == hole.zone })
                 .map(|&(w, _)| w)
                 .filter(|&w| crate::systems::law::living(world, w) && crate::systems::demography::is_adult(world, w))
+                .filter(|&w| !silence || !crate::systems::law::silent_witness(world, w, actor, Some(hole.victim)))
                 .collect()
         });
         if !pool.is_empty() {
@@ -304,12 +314,21 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
             HoleKind::Assaulted | HoleKind::Killed => &[MemoryKind::Fought, MemoryKind::Lost],
             HoleKind::Abducted => &[],
         };
+        let mut named: smallvec::SmallVec<[crate::word::DeedRef; 2]> = smallvec::SmallVec::new();
         if let Some(m) = world.comp_mut::<crate::components::Memory>(victim) {
             for e in m.entries.iter_mut() {
                 if kinds.contains(&e.kind) && e.tick == hole.tick && e.subject.is_none() {
                     e.subject = Some(actor);
+                    if let Some(r) = crate::systems::memory::deed_of(victim, e) {
+                        named.push(r);
+                    }
                 }
             }
+        }
+        // M15 W15 (plan deviation: the binder's rename is a call site too):
+        // the victim now knows who did it.
+        for r in named {
+            crate::systems::grudges::on_learn(world, victim, &r, 1.0, 0);
         }
         // M15 W6: the hole's pool entries and held rumours take the name.
         crate::systems::gossip::name_hole(world, &hole, actor);

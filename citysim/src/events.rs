@@ -185,10 +185,27 @@ pub enum EventKind {
     Expelled,
     /// `[actor, home]`: a failed Intimidate's Shakedown.
     Refused,
+    // --- M15 phase 3 (plan W43; crimson).
+    /// `[holder, target]`.
+    GrudgeFormed,
+    /// `[hunter, target]`.
+    HuntStarted,
+    /// `[hunter, target]`.
+    HuntAbandoned,
+    /// `[hunter, target]`.
+    Avenged,
+    /// `[a, b]`.
+    Vendetta,
+    /// `[a, b]`.
+    VendettaEnded,
+    /// `[seller, client building, new seller]`.
+    ContractLost,
+    /// `[hunter, respondent]`.
+    Deceived,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 98] = [
+    pub const ALL: [EventKind; 106] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -287,6 +304,14 @@ impl EventKind {
         EventKind::TalentLost,
         EventKind::Expelled,
         EventKind::Refused,
+        EventKind::GrudgeFormed,
+        EventKind::HuntStarted,
+        EventKind::HuntAbandoned,
+        EventKind::Avenged,
+        EventKind::Vendetta,
+        EventKind::VendettaEnded,
+        EventKind::ContractLost,
+        EventKind::Deceived,
     ];
 }
 

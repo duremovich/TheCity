@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 23] = [
+pub const GOAL_ORDER: [GoalKind; 25] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -22,6 +22,8 @@ pub const GOAL_ORDER: [GoalKind; 23] = [
     GoalKind::Court,
     GoalKind::Flee,
     GoalKind::Fight,
+    // M15 W19: right after Fight.
+    GoalKind::Hunt,
     GoalKind::ReportCrime,
     GoalKind::Patrol,
     GoalKind::Arrest,
@@ -29,6 +31,8 @@ pub const GOAL_ORDER: [GoalKind; 23] = [
     GoalKind::GangWork,
     GoalKind::Raid,
     GoalKind::Bury,
+    // M15 W35: after Bury.
+    GoalKind::GuardBody,
     // M12 D27: before Found.
     GoalKind::Squat,
     // M13 D47: before Found, in the order Shop, GetHigh, Treat, Loot.
@@ -624,6 +628,10 @@ pub fn considerations(
             }
             cs
         }
+        // M15 W20 (`think` floors it at `hold_score` for a hunter).
+        GoalKind::Hunt => return crate::systems::hunt::considerations(world, id),
+        // M15 W35.
+        GoalKind::GuardBody => return crate::systems::grudges::guard_body_considerations(world, id),
         // M14 V29: the best run's considerations (`think` scores it from
         // its offer; this arm serves other readers).
         GoalKind::Hack => {
@@ -694,6 +702,11 @@ pub fn wronged_by(world: &World, id: EntityId, other: EntityId) -> bool {
     rival
         // M15 W26: the actor of a refused shakedown, for the backlash hour.
         || crate::systems::moves::fight_bonus_on(world, id, other).is_some()
+        // M15 W17: with the legacy second-hand copies retired, a grudge of
+        // `fight_grudge_min` or more is the wrong.
+        || (world.config.gossip.enabled
+            && !world.config.gossip.legacy_second_hand
+            && crate::systems::grudges::holds(world, id, other, world.config.grudges.fight_grudge_min))
         || world.comp::<Memory>(id).is_some_and(|m| {
             let about = |e: &&crate::components::MemoryEntry| e.subject == Some(other);
             let avenged = m.entries.iter().filter(about).filter(|e| e.kind == MemoryKind::Fought).map(|e| e.tick).max();

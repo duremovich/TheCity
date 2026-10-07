@@ -109,6 +109,13 @@ pub struct OrderInputs {
     /// M14 review: the grudge's wipe (the store of whoever that trace named)
     /// is a target for our best runner: VirtRaid gains `order_flat.virt_grudge`.
     pub virt_grudge: bool,
+    /// M15 W32: `Regard(own, rival).fear` (0.5 with no rival); `None` with
+    /// the word off, when the fear terms are not applied at all (so the
+    /// M8-M14 scores are bit-identical).
+    pub fear: Option<f32>,
+    /// M15 W18: the gang's open vendetta of the highest weight against a
+    /// gang or a corp, and that weight.
+    pub vendetta: Option<(EntityId, f32)>,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
@@ -121,8 +128,10 @@ pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
         crate::systems::raid::corp_target(world, gang)
             .or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
     } else {
-        // M14 V34: a standing Retaliate's named gang (`raid::raid_rival`).
-        crate::systems::raid::raid_rival(world, gang).and_then(|r| world.hideout_of(r))
+        // M14 V34: a standing Retaliate's named gang (`raid::raid_rival`);
+        // M15 W18: or its vendetta's corp building.
+        crate::systems::raid::corp_target(world, gang)
+            .or_else(|| crate::systems::raid::raid_rival(world, gang).and_then(|r| world.hideout_of(r)))
     };
     target.map_or(0.0, |t| cover_of(world, gang, t))
 }
@@ -212,7 +221,10 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("1-heat", calm, Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("greed", i.greed, Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.4, b: 0.6 }),
-            ],
+            ]
+            .into_iter()
+            .chain(i.fear.map(|x| Consideration::new("1-fear", 1.0 - x, Curve::Linear { m: 0.4, b: 0.6 })))
+            .collect(),
             f.contest + if i.corp_raids { 0.0 } else { i.hoard_tilt * i.hoard },
         ),
         raid_score(i, cfg, false),
@@ -221,9 +233,13 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
             vec![
                 // Also off the raid cooldown (the spec exempts Retaliate): a
                 // grudge a night is a feud, and the cooldown paces it.
+                // M15 W18: a vendetta is a grudge with its own target.
                 Consideration::new(
                     "grudge",
-                    can(i.grudge && i.rival_exists && i.raid_ready && i.own >= cfg.raid_min_members),
+                    can(i.grudge
+                        && (i.rival_exists || i.vendetta.is_some())
+                        && i.raid_ready
+                        && i.own >= cfg.raid_min_members),
                     GATE,
                 ),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.9, b: 0.1 }),
@@ -238,7 +254,10 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
             vec![
                 Consideration::new("heat", i.heat, Curve::Logistic { k: 10.0, mid: 0.55 }),
                 Consideration::new("weakness", weakness, Curve::Linear { m: 0.6, b: 0.4 }),
-            ],
+            ]
+            .into_iter()
+            .chain(i.fear.map(|x| Consideration::new("fear", x, Curve::Linear { m: 0.5, b: 0.5 })))
+            .collect(),
             f.lielow,
         ),
         score(
@@ -349,6 +368,10 @@ fn raid_score(i: &OrderInputs, cfg: &GangsCfg, corp: bool) -> Option<OrderScore>
     ];
     if corp {
         cs.push(Consideration::new("corp target", 1.0, Curve::Linear { m: 0.0, b: 1.0 }));
+    }
+    // M15 W32: the feared rival is raided less.
+    if let Some(x) = i.fear {
+        cs.push(Consideration::new("1-fear", 1.0 - x, Curve::Linear { m: 0.4, b: 0.6 }));
     }
     score(Order::Raid, cs, flat).map(|s| OrderScore { corp_target: corp, ..s })
 }
@@ -466,11 +489,21 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let corp_guards = corp_prize
         .map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len().min(cfg.corp_raid_posted));
     let rival_hq = rival.and_then(|r| world.hideout_of(r));
+    // M15 W18: the gang's heaviest open vendetta (the word on).
+    let vendetta = if world.config.gossip.enabled { crate::systems::grudges::vendetta_for(world, gang) } else { None };
     // M14 V34: the Retaliate target (a hacker named by a pending shock, a
-    // standing Retaliate's named gang, else the rival).
+    // standing Retaliate's named gang, else the rival); M15 W18: a
+    // vendetta's gang Hideout or corp building before the rival.
     let retaliate_hq = crate::systems::raid::hack_grudge(world, gang)
-        .or_else(|| crate::systems::raid::raid_rival(world, gang))
-        .and_then(|r| world.hideout_of(r));
+        .and_then(|r| world.hideout_of(r))
+        .or_else(|| vendetta.and_then(|(v, _)| vendetta_building(world, gang, v)))
+        .or_else(|| crate::systems::raid::raid_rival(world, gang).and_then(|r| world.hideout_of(r)));
+    // M15 W32: how much this gang fears its rival (0.5 with none).
+    let fear = world
+        .config
+        .gossip
+        .enabled
+        .then(|| rival.map_or(0.5, |r| crate::systems::reputation::regard(world, gang, r).fear));
     let jail = world.building_of_kind(BuildingKind::Jail);
     // M13 D36: the Harvest inputs (the target is cached on the gang by `rescore`).
     let clinic_exists = world
@@ -492,7 +525,9 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         rival: rival_count,
         heat: heat(world, gang),
         prize: rg.map_or(0, |r| r.treasury),
-        grudge: g.shocks.iter().any(|s| s.is_grudge()) || g.retaliate_until.is_some_and(|t| t > now),
+        grudge: g.shocks.iter().any(|s| s.is_grudge())
+            || g.retaliate_until.is_some_and(|t| t > now)
+            || vendetta.is_some(),
         greed: p.greed,
         courage: p.courage,
         pride: p.pride,
@@ -528,7 +563,38 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         virt_p: virt.p,
         hacked: virt.hacked,
         virt_grudge: virt.grudge,
+        fear,
+        vendetta,
     })
+}
+
+/// M15 W18: where a Retaliate on vendetta faction `v` goes: a gang's
+/// Hideout, or a corp's building with the highest 7-day revenue in or next
+/// to a district `gang` holds Homes in (else its highest overall; ties the
+/// lower id).
+pub fn vendetta_building(world: &World, gang: EntityId, v: EntityId) -> Option<EntityId> {
+    if world.has::<Gang>(v) {
+        return world.hideout_of(v);
+    }
+    let c = world.comp::<Corp>(v)?;
+    let mut mask: u16 = 0;
+    if let Some(g) = world.comp::<Gang>(gang) {
+        for &h in &g.territory {
+            mask |= 1 << world.district_of_building(h).index();
+        }
+    }
+    let near = |d: usize| mask & (1 << d) != 0 || world.district_adjacent.get(d).is_some_and(|&adj| adj & mask != 0);
+    let pick = |near_only: bool| {
+        c.buildings
+            .iter()
+            .copied()
+            .filter_map(|b| world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| (b, bd)))
+            .filter(|(_, bd)| !near_only || near(world.district_of(bd.door).index()))
+            .map(|(b, bd)| (bd.revenue.iter().sum::<i64>(), b))
+            .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)))
+            .map(|(_, b)| b)
+    };
+    pick(true).or_else(|| pick(false))
 }
 
 /// M13 D36: [`cover_of`]'s rule for a district by tile (the Harvest target's).
@@ -628,6 +694,14 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     };
     let cfg = world.config.gangs.clone();
     let scores = score_orders(&inputs, &cfg);
+    // M15 W32: would the winner differ with the fear term neutral?
+    if inputs.fear.is_some() {
+        let neutral = OrderInputs { fear: Some(0.5), ..inputs.clone() };
+        let alt = score_orders(&neutral, &cfg);
+        if alt.first().map(|s| s.order) != scores.first().map(|s| s.order) {
+            world.stats.current.word.rep_flips += 1;
+        }
+    }
     // M13 D36: the Harvest target, cached for the members' GangWork.
     let harvest = inputs.harvest_target.map(|(t, _)| t);
     if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -648,7 +722,19 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     // M14 V34: a Retaliate chosen on a pending `Shock::Hacked { by }` naming
     // another gang fights that gang (with three gangs or more it need not be
     // the rival); read before the caller consumes the shocks.
-    let retaliate_on = if order == Order::Retaliate { crate::systems::raid::hack_grudge(world, gang) } else { None };
+    let mut retaliate_on =
+        if order == Order::Retaliate { crate::systems::raid::hack_grudge(world, gang) } else { None };
+    // M15 W18: else the vendetta's faction: a gang fights at its Hideout, a
+    // corp at its best building near the gang's turf (M12 D39's corp raid).
+    let mut corp_target = corp_target;
+    if order == Order::Retaliate && retaliate_on.is_none() {
+        if let Some((v, _)) = inputs.vendetta {
+            retaliate_on = Some(v);
+            if world.has::<Corp>(v) {
+                corp_target = vendetta_building(world, gang, v);
+            }
+        }
+    }
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;
         g.order_since = now;

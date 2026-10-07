@@ -611,7 +611,7 @@ pub fn sighted_runner_home(world: &World, gang: EntityId, own_home: Option<Entit
     let db = world.db.get(&gang)?;
     let r = world.config.crime.sight_day_crime;
     db.sightings.iter().rev().find_map(|s| {
-        if world.gang_of(s.who).is_some() || !law::living(world, s.who) {
+        if s.relayed || world.gang_of(s.who).is_some() || !law::living(world, s.who) {
             return None;
         }
         let h = world.comp::<Household>(s.who).and_then(|h| h.home).filter(|&h| Some(h) != own_home)?;

@@ -22,13 +22,15 @@ pub fn weight(e: &MemoryEntry, now: Tick, half_life_days: f32) -> f32 {
 }
 
 /// Insert an entry into a memory with the spec's merge and eviction rules.
-pub fn insert(mem: &mut Memory, entry: MemoryEntry, now: Tick, cap: usize, half_life_days: f32) {
+/// Returns false when it merged into an entry already there (M15 W15: a
+/// grudge forms on a new memory only).
+pub fn insert(mem: &mut Memory, entry: MemoryEntry, now: Tick, cap: usize, half_life_days: f32) -> bool {
     if let Some(e) = mem.entries.iter_mut().find(|e| {
         e.kind == entry.kind && e.subject == entry.subject && entry.tick.saturating_sub(e.tick) < MERGE_WINDOW
     }) {
         e.salience = e.salience.max(entry.salience);
         e.tick = entry.tick;
-        return;
+        return false;
     }
     if mem.entries.len() >= cap {
         let (worst, _) = mem
@@ -40,6 +42,7 @@ pub fn insert(mem: &mut Memory, entry: MemoryEntry, now: Tick, cap: usize, half_
         mem.entries.swap_remove(worst);
     }
     mem.entries.push(entry);
+    true
 }
 
 /// Daily decay at `tick_of_day == 0`: `salience ×= 0.5^(1/7)`; entries under
@@ -282,8 +285,15 @@ pub fn hear_entry(world: &mut World, id: EntityId, e: MemoryEntry) -> HeardInser
         .then_some(e.deed.zip(e.object))
         .flatten()
         .map(|(d, o)| (d, o, time::day(e.tick)));
+    // M15 W15: a heard deed that goes in may leave a grudge.
+    let learn = (world.config.gossip.enabled && e.kind == MemoryKind::Rumour)
+        .then(|| deed_of(id, &e).map(|r| (r, e.conf, e.hops)))
+        .flatten();
     let Some(m) = world.comp_mut::<Memory>(id) else { return HeardInsert::Dropped };
     let out = insert_heard(m, id, e, now, cap, half_life, contradict);
+    if let (Some((r, conf, hops)), HeardInsert::Inserted | HeardInsert::Contradicted) = (learn, out) {
+        crate::systems::grudges::on_learn(world, id, &r, conf, hops);
+    }
     // An unnamed rumour went in: a later bind renames held copies.
     if let (Some(k), HeardInsert::Inserted | HeardInsert::Contradicted) = (anon, out) {
         world.anon_heard.insert(k);

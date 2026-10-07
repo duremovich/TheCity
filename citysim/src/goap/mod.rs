@@ -41,6 +41,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         // M14 V29: a run made (the sell branch's `(HasData, false)` is
         // built with its plan in `systems::plan`).
         GoalKind::Hack => vec![(Key::RunDone, true)],
-        GoalKind::Idle => return None,
+        // M15 W19/W35: scripted plans (`plan::plan_for`'s bypass).
+        GoalKind::Idle | GoalKind::Hunt | GoalKind::GuardBody => return None,
     })
 }

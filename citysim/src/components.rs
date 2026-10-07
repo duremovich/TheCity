@@ -531,6 +531,12 @@ pub enum GoalKind {
     /// M14 V29: jack in at a chair and run a node for Data or a Ledger
     /// (a game abstraction: a dice contest on the Virt plane).
     Hack,
+    /// M15 W19: go after the target of a heavy grudge (a scripted plan:
+    /// ask around, stake out, attack; `systems::hunt`).
+    Hunt,
+    /// M15 W35: stand over a dead Spouse's, kin's or Friend's body until
+    /// it is buried (a scripted plan; `systems::grudges`).
+    GuardBody,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).

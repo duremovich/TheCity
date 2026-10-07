@@ -417,7 +417,19 @@ pub fn roll(world: &World, m: &SocialMove) -> f32 {
 /// `Threatened` memory); a failed Deceive zeroes the target's trust in the
 /// actor and posts a `Betrayed` deed. Callers check `on` first.
 pub fn resolve(world: &mut World, m: &SocialMove) -> MoveOutcome {
-    let (p, refused) = p_of(world, m);
+    resolve_with(world, m, 0.0)
+}
+
+/// [`resolve`] with `bonus` added to the actor's skill term (M15 W21: an
+/// AskAround's `intel_k × knowledge`); at 0 it is `resolve` exactly.
+pub fn resolve_with(world: &mut World, m: &SocialMove, bonus: f32) -> MoveOutcome {
+    let (p, refused) = if bonus == 0.0 {
+        p_of(world, m)
+    } else {
+        let (mut t, refused) = terms(world, m);
+        t.skill_a += bonus;
+        (move_p(&world.config.moves, m.kind, &t), refused)
+    };
     if refused {
         return MoveOutcome { success: false, p, refused: true, backlash: false };
     }

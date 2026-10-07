@@ -114,6 +114,14 @@ pub enum ActionKind {
     SellData,
     /// M14 V36: at a deck seller, raise the carried deck one tier.
     UpgradeDeck,
+    /// M15 W21: at the ask venue, put a social move to the co-occupant who
+    /// knows the Hunt's target best; the answer is the Hunt's intel.
+    /// Scripted only (never in `PLANNABLE`).
+    AskAround,
+    /// M15 W22/W35: wait at a place for someone (a Hunt's target, within 2
+    /// tiles or in the same building) or over a body (GuardBody). Scripted
+    /// only (never in `PLANNABLE`).
+    StakeOut,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -1500,6 +1508,8 @@ impl ActionKind {
             ActionKind::JackIn => 3.0 + 3.0 * ctx.lawfulness,
             ActionKind::SellData => 2.0,
             ActionKind::UpgradeDeck => 6.0,
+            // M15: scripted steps, never searched.
+            ActionKind::AskAround | ActionKind::StakeOut => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

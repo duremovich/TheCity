@@ -132,6 +132,18 @@ pub fn think_with_offer(
             }
             continue;
         }
+        // M15 W20: a hunter on a Hunt scores it at least `hold_score`, so
+        // only an emergency interrupts it and the plan resumes.
+        if goal == GoalKind::Hunt {
+            let Some((cs, flat)) = crate::systems::hunt::considerations(world, id) else { continue };
+            if let Some(mut s) = score_goal(goal, cs, current, hysteresis, flat) {
+                if world.hunts.contains_key(&id) {
+                    s.score = s.score.max(world.config.hunt.hold_score);
+                }
+                scored.push(s);
+            }
+            continue;
+        }
         // M14 V29: Hack's gate and considerations are its one offer.
         if goal == GoalKind::Hack {
             let Some(o) = crate::systems::virt::hack_choice(world, id) else { continue };
