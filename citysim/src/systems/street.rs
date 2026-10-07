@@ -172,7 +172,13 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
     }
     let from = origin(world, agent)?;
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-    let reach = world.config.street.hotel_reach;
+    // L1: saving for a bed means walking to one (the two Sump Hotels sat
+    // past 48 tiles from most of the street).
+    let reach = if world.config.life.enabled {
+        world.config.street.hotel_reach.max(world.config.life.hotel_reach_homeless)
+    } else {
+        world.config.street.hotel_reach
+    };
     world
         .buildings_of_kind(BuildingKind::Hotel)
         .iter()

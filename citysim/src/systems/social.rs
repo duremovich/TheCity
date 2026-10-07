@@ -115,11 +115,18 @@ pub fn adjust(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32, d_tr
         return;
     }
     let tick = world.tick;
+    let settle = world.config.life.enabled;
     let e = world.edge_entry(a, b);
     e.affinity = (e.affinity + d_affinity).clamp(-1.0, 1.0);
     e.trust = (e.trust + d_trust).clamp(0.0, 1.0);
     e.last_interaction = tick;
     promote(e);
+    // L1: a big step settles in one call (an Enemy at +0.60 took one
+    // promotion per nudge to read Acquaintance again).
+    if settle {
+        promote(e);
+        promote(e);
+    }
     let enemy = e.kind == RelKind::Enemy;
     reindex_kind_as(world, a, b, enemy);
 }
@@ -135,8 +142,14 @@ pub fn make_enemy(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32) 
         return;
     }
     let tick = world.tick;
+    // L1: an Enemy reads as one: affinity at most the Enemy threshold (a
+    // Friend robbed read "Enemy, affinity +0.30").
+    let cap = world.config.life.enabled.then_some(world.config.social.enemy_threshold);
     let e = world.edge_entry(a, b);
     e.affinity = (e.affinity + d_affinity).clamp(-1.0, 1.0);
+    if let Some(c) = cap {
+        e.affinity = e.affinity.min(c);
+    }
     e.trust = 0.0;
     e.kind = RelKind::Enemy;
     e.last_interaction = tick;
@@ -471,6 +484,12 @@ const JAIL_DRIFT_HOURS: u64 = 4;
 fn colocation(world: &mut World) {
     let create_at = Tick::from(edge_create_ticks(world));
     let tick = world.tick;
+    // L1: an arrival meets a few of the room, not all of it (17 strangers
+    // became Acquaintances in one minute in a bar; a Jail arrival met ~140
+    // cellmates and every inmate logged ~40 MetInJail a day), and the
+    // cells hand out no free affinity.
+    let life = world.config.life.enabled;
+    let today = world.day();
     let mut events: Vec<(EntityId, EntityId, EntityId, bool)> = Vec::new(); // (a, b, building, create)
     for a in world.bodies() {
         let Some(pa) = world.comp::<Position>(a) else { continue };
@@ -495,8 +514,43 @@ fn colocation(world: &mut World) {
         if !create && !jail && !works_here(a) {
             continue;
         }
+        // L1: the strangers `a` meets on arrival: the first few by a
+        // per-day pair hash (co-workers and the known always count). In the
+        // cells as many gang members again: the Jail is where gangs recruit.
+        let pitch = world.config.life.jail_pitch;
+        let member = |x: EntityId| pitch && world.has::<crate::components::GangMember>(x);
+        let meet: Option<Vec<EntityId>> = (life && create).then(|| {
+            let cap = if jail { world.config.life.jail_meet_max } else { world.config.life.colocation_new_edges };
+            let mut strangers: Vec<(bool, u64, EntityId)> = bd
+                .occupants
+                .iter()
+                .copied()
+                .filter(|&b| b != a && world.has::<Brain>(b) && world.edge(a, b).is_none())
+                .map(|b| (jail && member(b), crate::systems::life::pair_key(a.min(b), a.max(b), today), b))
+                .collect();
+            strangers.sort_unstable();
+            let mut out: Vec<EntityId> = Vec::new();
+            let (mut plain, mut gang) = (0usize, 0usize);
+            for (m, _, b) in strangers {
+                let n = if m { &mut gang } else { &mut plain };
+                if *n < cap {
+                    *n += 1;
+                    out.push(b);
+                }
+            }
+            out
+        });
         for &b in &bd.occupants {
+            if let Some(m) = &meet {
+                if world.edge(a, b).is_none() && !m.contains(&b) {
+                    continue;
+                }
+            }
             if b == a || !world.has::<Brain>(b) {
+                continue;
+            }
+            // L1: no free affinity in the cells, but for a gang member's pitch.
+            if life && !create && jail && !member(a) && !member(b) {
                 continue;
             }
             if !create && !jail && !works_here(b) {
@@ -533,7 +587,7 @@ fn colocation(world: &mut World) {
                 let look = first_look(world, a, b);
                 first_meeting(world, a, b, first_affinity_with(sa, sb, u1, u2, look));
             }
-            if jail {
+            if jail && !(life && world.edge(a, b).is_some_and(|e| e.last_interaction != tick)) {
                 world.remember(a, MemoryKind::MetInJail, Some(b), 0.5, 0.0, false);
                 world.remember(b, MemoryKind::MetInJail, Some(a), 0.5, 0.0, false);
             }

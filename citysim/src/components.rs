@@ -1560,6 +1560,19 @@ pub struct Brain {
     /// the Fight goal's flat against that actor until the tick.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fight_bonus: Option<(EntityId, f32, Tick)>,
+    /// L1: a guard's re-chases of a suspect seen moving, this plan.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub chase_hops: u8,
+    /// L1: the day an exec last kept office hours at the HQ.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub office_day: Option<u64>,
+    /// L1: `(employer, until)`: quit there; not rehired there before the tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub quit_from: Option<(EntityId, Tick)>,
+    /// L1: the day a Statistical agent last decided on the dole (with or
+    /// without a visit; `last_dole_day` is the last collection).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stat_dole_day: Option<u64>,
 }
 
 impl Default for Brain {
@@ -1600,6 +1613,10 @@ impl Default for Brain {
             abducted_by: None,
             dazed_until: None,
             fight_bonus: None,
+            chase_hops: 0,
+            office_day: None,
+            quit_from: None,
+            stat_dole_day: None,
         }
     }
 }
@@ -1616,6 +1633,7 @@ impl Brain {
         self.plan_step = 0;
         self.exec = ExecState::Idle;
         self.following_order = None;
+        self.chase_hops = 0;
     }
 
     /// The current plan's goal, if any.

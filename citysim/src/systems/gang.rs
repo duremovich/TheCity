@@ -162,6 +162,25 @@ pub fn on_watch(world: &World, id: EntityId) -> bool {
         .filter(|&&m| !world.has::<Sentence>(m))
         .map(|&m| (world.comp::<GangMember>(m).map_or(0, |gm| gm.joined_tick), m))
         .collect();
+    // L1: the watch is stood by members who live within a walk of the
+    // Hideout (or have no Home): a Spire member walked 5.5 h each way to it.
+    if world.config.life.enabled {
+        let reach = 2 * world.config.life.commute_cap_tiles;
+        let door = world.comp::<Building>(g.hideout).map(|b| b.door);
+        let near: Vec<(Tick, EntityId)> = roster
+            .iter()
+            .copied()
+            .filter(|&(_, m)| {
+                match world.comp::<Household>(m).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)) {
+                    Some(b) => door.is_some_and(|d| d.manhattan(b.door) <= reach),
+                    None => true,
+                }
+            })
+            .collect();
+        if !near.is_empty() {
+            roster = near;
+        }
+    }
     let n = roster.len();
     let watch = world.config.gangs.night_watch.min(n / 2);
     if watch == 0 {
@@ -551,11 +570,14 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
             let guards: Vec<TilePos> =
                 world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
             let r = world.config.crime.sight_day_crime;
+            // L1: near the Hideout and near the member (the derelict nearest
+            // the Hideout sat a 6 h walk from where the member stood).
+            let own = if world.config.life.enabled { Some(actor_tile) } else { None };
             return squat_targets(world, gang)
                 .into_iter()
                 .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door, b)))
                 .filter(|&(door, _)| !guards.iter().any(|&gt| law::chebyshev(gt, door) <= r))
-                .map(|(door, b)| (door.manhattan(hideout_door), b.index, b))
+                .map(|(door, b)| (door.manhattan(hideout_door) + own.map_or(0, |t| door.manhattan(t)), b.index, b))
                 .min()
                 .map(|(_, _, b)| (b, Some(Order::Squat)));
         }
@@ -577,6 +599,8 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let guarded = |door: TilePos| guards.iter().any(|&gt| law::chebyshev(gt, door) <= r);
     // M15 W31: a Purist gang shakes down the chromed's Homes first.
     let purist = crate::systems::creeds::is_purist(world, gang);
+    // L1: an order's Home is near the Hideout and near the member.
+    let own = if world.config.life.enabled && from != actor_tile { Some(actor_tile) } else { None };
     let mut best: Option<((bool, u32, u32), EntityId)> = None;
     for &h in homes {
         if Some(h) == own_home {
@@ -587,7 +611,7 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         if b.demolished || b.derelict || b.occupants.is_empty() {
             continue;
         }
-        let dist = b.door.manhattan(from);
+        let dist = b.door.manhattan(from) + own.map_or(0, |t| b.door.manhattan(t));
         // The best this Home could key (chromed) cannot beat the best so far:
         // skip before the filters (for a creedless gang, the original test).
         if best.is_some_and(|(k, _)| (false, dist, h.index) >= k) || !pick(h) || guarded(b.door) {

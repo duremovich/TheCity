@@ -185,7 +185,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // Goals that bypass the planner.
     let bypass = match goal {
         GoalKind::Idle => routine::idle_plan(world, id),
-        GoalKind::Work => routine::commute_plan(world, id),
+        // L1: an exec's office hours (no Job, so no commute plan).
+        GoalKind::Work => routine::commute_plan(world, id).or_else(|| crate::systems::life::exec_plan(world, id)),
         // M12 phase 4: the expedition chain, built directly.
         GoalKind::Raid => routine::raid_plan(world, id),
         _ => None,
@@ -313,7 +314,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     }
     // A shift is worked even when today's wage trip is blocked (short payment
     // already attempted): drop the HasWageDue key rather than skip the shift.
-    let goal_state: crate::goap::GoalState = if goal == GoalKind::Work && !ctx.wage_collectable {
+    // L1: wages are paid at the shift's end: the Work plan is the shift.
+    let goal_state: crate::goap::GoalState = if goal == GoalKind::Work && (!ctx.wage_collectable || ctx.life) {
         goal_state.into_iter().filter(|&(k, _)| k != crate::goap::Key::HasWageDue).collect()
     } else if goal == GoalKind::Court && !start.has_partner_candidate {
         // Courtship in two visits: Flirt until affinity and trust clear the
@@ -407,6 +409,7 @@ fn install(world: &mut World, id: EntityId, plan: Plan) {
         b.plan = Some(plan);
         b.plan_step = 0;
         b.exec = ExecState::Idle;
+        b.chase_hops = 0;
     }
 }
 

@@ -115,7 +115,9 @@ fn assign(world: &mut World) {
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
         if world.has::<Sentence>(id) || brain.emigrating {
-            set_lod(world, id, Lod::Coarse);
+            // L1: a pinned prisoner keeps its pin (the shadow went blind in the cells).
+            let pinned = brain.pinned && world.config.life.enabled;
+            set_lod(world, id, if pinned { Lod::Full } else { Lod::Coarse });
             continue;
         }
         // A wanted agent counts as a story step: a reported thief must stay on
@@ -820,7 +822,16 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
         let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
         let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
         let saving = coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price);
-        let undecided = world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day != Some(day));
+        // L1: the dole accrues from the last collection (`life::dole_days`),
+        // so a day decided without a visit is marked apart from it.
+        let life = world.config.life.enabled;
+        let undecided = world.comp::<Brain>(id).is_some_and(|b| {
+            if life {
+                b.stat_dole_day != Some(day)
+            } else {
+                b.last_dole_day != Some(day)
+            }
+        });
         if phase == DayPhase::Work && !saving && undecided && crate::systems::demography::is_adult(world, id) {
             let p = world.stat_table.as_ref().map_or(1.0, |t| t.p_dole_day);
             let u: f32 = world.rng.agent(id).random();
@@ -828,7 +839,11 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
                 economy::collect_dole(world, id);
             }
             if let Some(b) = world.comp_mut::<Brain>(id) {
-                b.last_dole_day = Some(day);
+                if life {
+                    b.stat_dole_day = Some(day);
+                } else {
+                    b.last_dole_day = Some(day);
+                }
             }
         }
         return;

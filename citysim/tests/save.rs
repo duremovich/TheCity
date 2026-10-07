@@ -439,7 +439,9 @@ fn test_pre_m14_save_loads() {
 #[test]
 fn test_pre_m15_save_loads() {
     let mut w = World::new(24, Config::load().scaled_to(300));
-    w.run_ticks(TICKS_PER_DAY + 10);
+    // L1: three days (was one): with the walk to a far Bar weighed, the
+    // first exchanges come after day 1.
+    w.run_ticks(3 * TICKS_PER_DAY + 10);
     assert!(w.citizens().iter().any(|&id| w.comp::<citysim::Memory>(id).is_some_and(|m| !m.heard.is_empty())));
     let mut text = save::to_ron(&w);
     if text.contains("anon_heard:[") {

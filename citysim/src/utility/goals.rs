@@ -118,8 +118,22 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // off shift with no wage due (the in-shift case stays scored, as in
             // the spec's worked example; it loses to Work's hysteresis).
             let day = world.day();
+            let life = world.config.life.enabled;
             let nothing = match world.comp::<Job>(id) {
+                // L1: wages are paid at the shift's end; off shift there is
+                // nothing to earn unless the agent cannot buy a meal.
+                Some(j) if life => !j.on_shift(world.tick_of_day()) && !crate::systems::life::broke(world, id),
                 Some(j) => j.days_unpaid == 0 && !j.on_shift(world.tick_of_day()),
+                // L1: an exec draws a salary; the rest wait for the dole to
+                // accrue (one Hall visit pays up to a week), and the broke
+                // keep Earn alive (Beg, Scavenge).
+                None if life => {
+                    crate::systems::life::exec_corp(world, id).is_some()
+                        || (!crate::systems::life::broke(world, id)
+                            && (!crate::systems::life::dole_trip_due(world, id)
+                                || world.treasury().is_some_and(|t| t.coins < 0)
+                                || world.levers.dole_per_day == 0))
+                }
                 None => {
                     world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day == Some(day))
                         || world.treasury().is_some_and(|t| t.coins < 0)
@@ -137,7 +151,8 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::GangWork => {
             !world.has::<crate::components::GangMember>(id)
                 || world.comp::<Brain>(id).is_some_and(|b| b.gang_task_day == Some(world.day()))
-                || crate::systems::gang::extort_target(world, id).is_none()
+                // L1: `considerations` scans for the target once (it needs the distance).
+                || (!world.config.life.enabled && crate::systems::gang::extort_target(world, id).is_none())
         }
         // A guard never scores JoinGang (`considerations` says None): skip the scan.
         GoalKind::JoinGang => {
@@ -206,19 +221,43 @@ pub fn considerations(
         }
         GoalKind::Sleep => {
             let n = needs?;
+            let life = world.config.life.enabled;
+            let housed = life && world.comp::<Household>(id).is_some_and(|h| h.home.is_some());
             let lo = match phase {
                 DayPhase::Night => 1.0,
                 DayPhase::Evening => 0.7,
+                // L1: the housed sleep at night (sleep came in 4 h chunks at any hour).
+                _ if housed => world.config.life.housed_day_sleep,
                 _ => 0.4,
             };
+            if life {
+                // L1: exhaustion wins (agents sat at energy 0 for a day), and
+                // the night belongs to sleep for anyone off shift.
+                if n.energy < world.config.life.exhausted_energy {
+                    flat += world.config.life.exhausted_flat;
+                }
+                if phase == DayPhase::Night && !world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) {
+                    flat += world.config.life.night_sleep_flat;
+                }
+            }
             vec![
                 Consideration::new("U(energy)", urgency(n.energy), Curve::Logistic { k: 10.0, mid: 0.75 }),
                 Consideration::raw("phase", can(phase == DayPhase::Night), lo),
             ]
         }
         GoalKind::Work => {
-            let job = world.comp::<Job>(id)?;
             let n = needs?;
+            let Some(job) = world.comp::<Job>(id) else {
+                // L1: an exec's office hours at the corp's HQ.
+                crate::systems::life::exec_day_pending(world, id)?;
+                let p = pers?;
+                let cs = vec![
+                    Consideration::new("office hours", 1.0, GATE),
+                    Consideration::new("energy", n.energy, Curve::Linear { m: 0.6, b: 0.4 }),
+                    Consideration::new("greed", p.greed, Curve::Linear { m: 0.3, b: 0.7 }),
+                ];
+                return Some((cs, 0.0));
+            };
             if world.has::<Sentence>(id) {
                 return None;
             }
@@ -253,12 +292,28 @@ pub fn considerations(
             let n = needs?;
             let p = pers?;
             let mood_x = (mood + 1.0) / 2.0;
-            vec![
+            let mut cs = vec![
                 Consideration::new("U(belonging)", urgency(n.belonging), Curve::Logistic { k: 6.0, mid: 0.5 }),
                 Consideration::raw("mood", mood_x, IDENTITY.eval(mood_x) * mm),
                 Consideration::new("sociability", p.sociability, IDENTITY),
                 phase_curve(phase, &[DayPhase::Evening], 0.4),
-            ]
+            ];
+            // L1: a drink two hours' walk off is not worth the walk; company
+            // here is free.
+            if world.config.life.enabled {
+                let here = chat_venue(world, id)
+                    && crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
+                let tiles = if here {
+                    0
+                } else {
+                    world
+                        .local(id, BuildingKind::Bar)
+                        .and_then(|b| crate::systems::life::tiles_to(world, id, b))
+                        .unwrap_or(0)
+                };
+                cs.push(crate::systems::life::travel(world, tiles));
+            }
+            cs
         }
         GoalKind::Court => {
             let n = needs?;
@@ -402,12 +457,21 @@ pub fn considerations(
             if betraying {
                 flat = 0.3;
             }
-            vec![
+            let mut cs = vec![
                 Consideration::new("lawfulness", p.lawfulness, Curve::Logistic { k: 8.0, mid: 0.5 }),
                 Consideration::new("salience", saw.salience, IDENTITY),
                 Consideration::new("hall open", can(hall_open), GATE),
                 Consideration::new("1-affinity(suspect)", (1.0 - affinity).clamp(0.0, 1.0), IDENTITY),
-            ]
+            ];
+            // L1: the walk to the Hall weighs against a report.
+            if world.config.life.enabled {
+                let tiles = world
+                    .building_of_kind(BuildingKind::Hall)
+                    .and_then(|h| crate::systems::life::tiles_to(world, id, h))
+                    .unwrap_or(0);
+                cs.push(crate::systems::life::travel(world, tiles));
+            }
+            cs
         }
         GoalKind::Patrol => {
             let job = world.comp::<Job>(id)?;
@@ -426,7 +490,16 @@ pub fn considerations(
             // idled, never walked a leg and were never owed the shift.
             let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
             let by = crate::systems::law::Pursuer { tile: here, guard: id };
-            let no_warrant = !crate::systems::law::any_located_suspect(world, Some(by));
+            let mut no_warrant = !crate::systems::law::any_located_suspect(world, Some(by));
+            // L1: a chase under way is a warrant (see Arrest).
+            if no_warrant && world.config.life.enabled {
+                no_warrant = !world
+                    .comp::<Brain>(id)
+                    .and_then(|b| b.plan.as_ref())
+                    .filter(|p| p.goal == GoalKind::Arrest)
+                    .and_then(|p| p.target)
+                    .is_some_and(|s| crate::systems::law::is_located_suspect(world, s));
+            }
             vec![
                 Consideration::new("in shift", can(on_duty), GATE),
                 Consideration::new("energy", n.energy, Curve::Linear { m: 0.8, b: 0.2 }),
@@ -442,8 +515,41 @@ pub fn considerations(
             // M10: only warrants within pursuit range of this guard.
             let here = world.comp::<crate::components::Position>(id).map(|p| p.tile).unwrap_or_default();
             let by = crate::systems::law::Pursuer { tile: here, guard: id };
-            let located = crate::systems::law::any_located_suspect(world, Some(by))
-                || world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
+            let escorting = world.comp::<Brain>(id).is_some_and(|b| b.escorting.is_some());
+            if world.config.life.enabled {
+                // L1: on shift only, tired guards less, the nearest warrant
+                // weighed by its walk (unclaimed: one guard per suspect).
+                let n = needs?;
+                // The suspect this guard is already after stays its warrant
+                // while located (the sighting aged past the fresh window
+                // mid-chase and Patrol took the guard off it).
+                let chasing = world
+                    .comp::<Brain>(id)
+                    .and_then(|b| b.plan.as_ref())
+                    .filter(|p| p.goal == GoalKind::Arrest)
+                    .and_then(|p| p.target)
+                    .filter(|&s| crate::systems::law::is_located_suspect(world, s));
+                let dist = |s: EntityId| world.last_seen.get(&s).map(|&(t, _)| t.manhattan(here));
+                let nearest = if escorting {
+                    Some(0)
+                } else if let Some(s) = chasing {
+                    dist(s)
+                } else {
+                    crate::systems::law::located_suspects(world, Some(by)).into_iter().filter_map(dist).min()
+                };
+                let on = if job.on_shift(tod) || escorting { 1.0 } else { world.config.life.arrest_off_shift };
+                return Some((
+                    vec![
+                        Consideration::new("warrant located", can(nearest.is_some()), GATE),
+                        Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
+                        Consideration::raw("in shift", on, on),
+                        Consideration::new("energy", n.energy, Curve::Linear { m: 0.8, b: 0.2 }),
+                        crate::systems::life::travel(world, nearest.unwrap_or(0)),
+                    ],
+                    0.0,
+                ));
+            }
+            let located = crate::systems::law::any_located_suspect(world, Some(by)) || escorting;
             vec![
                 Consideration::new("warrant located", can(located), GATE),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
@@ -478,7 +584,7 @@ pub fn considerations(
             // goal when there is none), so only the cheap order flag is read here.
             let w = world.config.gangs.order_weight;
             let following = crate::systems::gang::following_order(world, id).is_some();
-            vec![
+            let mut cs = vec![
                 Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("greed", p.greed, Curve::Linear { m: 0.7, b: 0.3 }),
                 Consideration::new("not in shift", can(!in_shift), gate_or(0.5)),
@@ -488,7 +594,23 @@ pub fn considerations(
                     if following { p.loyalty } else { 0.0 },
                     Curve::Linear { m: w, b: 1.0 - w },
                 ),
-            ]
+            ];
+            // L1: the target is found here (once), for its walk; a tired or
+            // hungry member works less (GangWork's flat ~0.85 beat Sleep).
+            if world.config.life.enabled {
+                let (target, _) = crate::systems::gang::gang_work_target(world, id)?;
+                let tiles = if world.has::<crate::components::Building>(target) {
+                    crate::systems::life::tiles_to(world, id, target)
+                } else {
+                    world
+                        .comp::<crate::components::Position>(target)
+                        .and_then(|tp| crate::systems::life::tiles_to_tile(world, id, tp.tile))
+                };
+                cs.push(Consideration::new("energy", n.energy, Curve::Logistic { k: 10.0, mid: 0.3 }));
+                cs.push(Consideration::new("hunger", n.hunger, Curve::Linear { m: 0.6, b: 0.4 }));
+                cs.push(crate::systems::life::travel(world, tiles.unwrap_or(0)));
+            }
+            cs
         }
         GoalKind::Raid => {
             // M12 D31: a gang member's muster, or a rioter's (no loyalty bar).
@@ -527,6 +649,13 @@ pub fn considerations(
                     .is_some_and(|e| matches!(e.kind, RelKind::Family | RelKind::Spouse | RelKind::Parent))
             });
             let digger = world.comp::<Job>(id).is_some_and(|j| j.role == Role::Gravedigger);
+            // L1: only those who may carry the body score it (a bystander's
+            // Bury was unplannable while a gravedigger lived, and cooled).
+            if world.config.life.enabled
+                && !(digger || kin || !world.workers(Role::Gravedigger).iter().any(|&c| world.has::<Brain>(c)))
+            {
+                return None;
+            }
             let duty = if kin {
                 1.0
             } else if digger {
@@ -549,13 +678,20 @@ pub fn considerations(
         GoalKind::Squat => {
             let n = needs?;
             let p = pers?;
-            vec![
+            let mut cs = vec![
                 Consideration::new("derelict slot", can(true), GATE),
                 Consideration::new("U(wealth)", urgency(n.wealth), Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("courage", p.courage, Curve::Linear { m: 0.5, b: 0.5 }),
                 Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.4, b: 0.6 }),
                 Consideration::new("night", can(phase == DayPhase::Night), Curve::Step { t: 1.0, lo: 0.3, hi: 1.0 }),
-            ]
+            ];
+            if world.config.life.enabled {
+                let tiles = crate::systems::street::squat_target(world, id)
+                    .and_then(|b| crate::systems::life::tiles_to(world, id, b))
+                    .unwrap_or(0);
+                cs.push(crate::systems::life::travel(world, tiles));
+            }
+            cs
         }
         // M13 D34 (spec § 4 table): `max(edgy − sanity, addiction − hooked
         // + 0.2)`; D39: the price is Detox's when the addiction term drives
@@ -625,6 +761,22 @@ pub fn considerations(
             ];
             if !crate::systems::stims::legal_reach(world, id) {
                 cs.push(Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.5, b: 0.5 }));
+            }
+            // L1: a dose in hand is free; a dealer across town is a walk.
+            if world.config.life.enabled {
+                let held = world.comp::<Inventory>(id).is_some_and(|i| i.stims > 0);
+                let tiles = if held {
+                    0
+                } else {
+                    crate::systems::stims::stim_source(world, id)
+                        .and_then(|b| crate::systems::life::tiles_to(world, id, b))
+                        .unwrap_or(0)
+                };
+                let t = crate::systems::life::travel(world, tiles);
+                // The walk weighs on the flat too: it alone beat Idle, so
+                // every idle hour with coins went to a dealer across town.
+                flat *= t.output;
+                cs.push(t);
             }
             cs
         }

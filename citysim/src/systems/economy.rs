@@ -19,6 +19,10 @@ pub fn price_for_stock(cfg: &EconomyCfg, stock: u32) -> i64 {
 }
 
 pub fn run(world: &mut World) {
+    // L1: the day's dole, paid in place as the Work phase opens.
+    if world.tick_of_day() == 540 {
+        crate::systems::life::dole_in_place(world);
+    }
     if world.tick_of_day() != 0 {
         return;
     }
@@ -418,7 +422,12 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
 /// A worker with `days_unpaid >= 7`, or three Unpaid memories in 7 days, quits.
 pub fn maybe_quit(world: &mut World, agent: EntityId) {
     let Some(job) = world.comp::<Job>(agent) else { return };
-    let week_ago = world.tick.saturating_sub(7 * time::TICKS_PER_DAY);
+    let mut week_ago = world.tick.saturating_sub(7 * time::TICKS_PER_DAY);
+    // L1: only this job's short pays count: the memories of the last one
+    // quit the rehired worker again at its first shift's end, every day.
+    if world.config.life.enabled {
+        week_ago = week_ago.max(job.hired_tick);
+    }
     let unpaid_memories = world
         .comp::<crate::components::Memory>(agent)
         .map_or(0, |m| m.entries.iter().filter(|e| e.kind == MemoryKind::Unpaid && e.tick >= week_ago).count());
@@ -444,6 +453,7 @@ pub fn dismiss(world: &mut World, agent: EntityId, building: Option<EntityId>, t
 /// Remove the Job (posting a vacancy), drop the plan, log the event.
 pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     let Some(job) = world.vacate_job(agent) else { return };
+    crate::systems::life::note_quit(world, agent, job.employer);
     if let Some(b) = world.comp_mut::<Brain>(agent) {
         b.clear_plan();
     }
@@ -454,11 +464,16 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
 /// `CollectDole` at the Hall, once per day, while the Treasury is not negative.
 pub fn collect_dole(world: &mut World, agent: EntityId) -> bool {
     let day = world.day();
-    let dole = i64::from(world.levers.dole_per_day);
+    let mut dole = i64::from(world.levers.dole_per_day);
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let already = world.comp::<Brain>(agent).is_some_and(|b| b.last_dole_day == Some(day));
     if already || treasury < 0 || dole <= 0 || world.has::<Job>(agent) {
         return false;
+    }
+    // L1: the dole accrues: one visit pays the days since the last (up to
+    // `dole_bulk_days`), so the poor walk to the Hall weekly, not daily.
+    if world.config.life.enabled {
+        dole *= crate::systems::life::dole_days(world, agent).max(1) as i64;
     }
     if let Some(t) = world.treasury_mut() {
         t.coins -= dole;

@@ -133,6 +133,11 @@ pub struct Config {
     /// M15 § 7 Feeds and stories (phase 4).
     #[serde(default = "NewsCfg::off")]
     pub news: NewsCfg,
+    /// Life pass L1 (docs/SHADOW_V1.md): travel, sleep, stale targets, the
+    /// poor's fallback, witness and edge spam, order dwell; absent from
+    /// pre-L1 saves: off.
+    #[serde(default = "LifeCfg::off")]
+    pub life: LifeCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -3410,6 +3415,139 @@ impl NewsCfg {
     }
 }
 
+/// Life pass L1 (docs/SHADOW_V1.md "Plan"): the cross-cutting causes that
+/// made every shadowed resident's day a walk. `enabled = false` is the
+/// master switch: every L1 branch reads it, so off is the ab79188 city.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LifeCfg {
+    pub enabled: bool,
+    /// A discretionary goal's travel factor: `1 / (1 + walk / travel_half_ticks)`
+    /// (a walk this long halves the score), floored at `travel_min`.
+    pub travel_half_ticks: f32,
+    pub travel_min: f32,
+    /// A Sleep is not cut by the commute gate before this many ticks.
+    pub sleep_min_ticks: u64,
+    /// Below this energy Sleep takes `exhausted_flat` and may lie down
+    /// where the agent stands when every bed is past `rough_min_tiles`.
+    pub exhausted_energy: f32,
+    pub exhausted_flat: f32,
+    /// Sleep's flat at Night for anyone off shift (with energy below
+    /// `ENERGY_SATISFIED`: the goal is skipped above it).
+    pub night_sleep_flat: f32,
+    pub rough_min_tiles: u32,
+    /// A housed agent's Sleep phase factor outside the Night and Evening
+    /// (was 0.4 for everyone).
+    pub housed_day_sleep: f32,
+    /// A second bed (the Hideout, a Hotel) is taken when it is at least
+    /// this many tiles nearer than Home.
+    pub bed_margin_tiles: u32,
+    /// Coins a housed agent keeps after a Hotel night (in meals).
+    pub hotel_reserve_meals: i64,
+    /// The homeless's Hotel reach (was `[street] hotel_reach`).
+    pub hotel_reach_homeless: u32,
+    /// The daily dole is paid where the agent is at 09:00 (no Hall walk).
+    pub dole_in_place: bool,
+    /// Days of dole paid at one Hall visit (accrued since the last one);
+    /// 1 is the daily dole (off). Read only with `dole_in_place` off.
+    pub dole_bulk_days: u64,
+    /// The Hall is visited for the dole only with this many days accrued,
+    /// unless the agent cannot buy a meal or the Hall is within `near_tiles`.
+    pub dole_trip_days: u64,
+    pub near_tiles: u32,
+    /// An idle housed agent this far from Home idles where it is (or at
+    /// its gang's nearer Hideout) instead of walking home to sit down.
+    pub idle_far_tiles: u32,
+    /// Arrest's "in shift" factor off shift (0: on shift only; was 0.5).
+    pub arrest_off_shift: f32,
+    /// A guard re-chases a suspect seen moving at most this many times per plan.
+    pub chase_hops: u8,
+    /// A suspect seen longer ago than this is chased only within `near_tiles`.
+    pub arrest_fresh_ticks: u64,
+    /// One `SawCrime` per (witness, actor, crime) within this many ticks.
+    pub witness_dedupe_ticks: u64,
+    /// New edges one arrival makes in a building (a Jail arrival: `jail_meet_max`).
+    pub colocation_new_edges: usize,
+    pub jail_meet_max: usize,
+    /// In the cells an arrival also meets `jail_meet_max` gang members, and
+    /// a member's pairs keep the cells' drift: the Jail is where gangs recruit.
+    pub jail_pitch: bool,
+    /// A gang order holds this long against a shock rescore unless the
+    /// pending shocks reach `order_severe` (Retaliate and BreakOut exempt).
+    pub order_dwell_ticks: u64,
+    pub order_severe: f32,
+    /// An employed adult commuting past this many tiles may move nearer.
+    pub commute_cap_tiles: u32,
+    pub relocate_per_day: usize,
+    /// An employer does not rehire an agent who quit it for this many days.
+    pub quit_rehire_days: u64,
+    /// Execs: the youngest pick, the share of the corp's treasury paid as a
+    /// day's salary (floored at `[economy] wage_exec`) and its cap, and the
+    /// office shift at the corp's HQ.
+    pub exec_min_age_years: f32,
+    /// The exec is the greediest of the wealthiest tenth (else the wealthiest).
+    pub exec_greed: bool,
+    pub exec_pay_frac: f32,
+    pub exec_pay_cap: i64,
+    pub exec_shift: (u16, u16),
+    /// Scavenge: coins the Recycler pays per haul (Treasury, `Flow::Sanitation`),
+    /// found on `scavenge_p` of hours.
+    pub scavenge_coins: i64,
+    pub scavenge_p: f32,
+    /// An escort's walk to the Precinct is a van ride of at most this long.
+    pub escort_van_ticks: u64,
+}
+
+impl Default for LifeCfg {
+    fn default() -> Self {
+        LifeCfg::off()
+    }
+}
+
+impl LifeCfg {
+    pub fn off() -> LifeCfg {
+        LifeCfg {
+            enabled: false,
+            travel_half_ticks: 120.0,
+            travel_min: 0.15,
+            sleep_min_ticks: 240,
+            exhausted_energy: 0.12,
+            exhausted_flat: 0.6,
+            night_sleep_flat: 0.2,
+            rough_min_tiles: 45,
+            housed_day_sleep: 0.25,
+            bed_margin_tiles: 20,
+            hotel_reserve_meals: 2,
+            hotel_reach_homeless: 120,
+            dole_in_place: true,
+            dole_bulk_days: 1,
+            dole_trip_days: 1,
+            near_tiles: 30,
+            idle_far_tiles: 30,
+            arrest_off_shift: 0.0,
+            chase_hops: 3,
+            arrest_fresh_ticks: 120,
+            witness_dedupe_ticks: 360,
+            colocation_new_edges: 2,
+            jail_meet_max: 2,
+            jail_pitch: true,
+            order_dwell_ticks: 1440,
+            order_severe: 1.0,
+            commute_cap_tiles: 30,
+            relocate_per_day: 8,
+            quit_rehire_days: 7,
+            exec_min_age_years: 30.0,
+            exec_greed: true,
+            exec_pay_frac: 0.002,
+            exec_pay_cap: 40,
+            exec_shift: (540, 1020),
+            scavenge_coins: 1,
+            scavenge_p: 0.15,
+            escort_van_ticks: 60,
+        }
+    }
+}
+
 impl Config {
     /// Locate the assets directory and parse `config.toml`.
     ///
@@ -3523,6 +3661,10 @@ impl Config {
         self.shop = ShopCfg::off();
         self.stims = StimsCfg::off();
         self.robots = RobotsCfg::off();
+        // L1: the life pass is the 2,000 city's (the v1 gates keep v1 days),
+        // and so is L1b's food price (the v1 economy prices at 3).
+        self.life = LifeCfg::off();
+        self.economy.price_base = 3.0;
         // M14 V44: no Virt plane, Labs, ICE, tech caps; M15 W44: no word.
         self.virt_off().word_off()
     }

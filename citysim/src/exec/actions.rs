@@ -83,6 +83,9 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::JackIn => 2,
         ActionKind::SellData => 10,
         ActionKind::UpgradeDeck => 30,
+        // L1: a haul of scrap; office hours to the shift's end.
+        ActionKind::Scavenge => 60,
+        ActionKind::Meeting => crate::systems::life::exec_shift_left(world),
         // M15 W21/W22/W35.
         ActionKind::AskAround => 20,
         ActionKind::StakeOut => {
@@ -175,6 +178,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
         }
         ActionKind::Wander => true,
+        // L1: out on the street; office hours inside the HQ.
+        ActionKind::Scavenge => world.comp::<Position>(id).is_some_and(|p| p.building.is_none()),
+        ActionKind::Meeting => target.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == target,
         ActionKind::Register => at(world, id, BuildingKind::Hall) && crate::systems::founding::can_found(world, id),
         // M12 D21: inside a standing Hotel (bed and coins re-checked at completion).
         ActionKind::CheckIn => world
@@ -431,12 +437,18 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
 }
 
 /// Some actions end before their nominal duration.
-pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind) -> bool {
+pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Tick) -> bool {
     match kind {
+        // L1: a committed sleep: the commute gate cannot cut the first
+        // `sleep_min_ticks` (a long commute made it true most of the day,
+        // and the worker slept in one-minute fragments at energy 0).
         ActionKind::Sleep => {
             world.comp::<Needs>(id).is_some_and(|n| n.energy >= 0.9)
-                || crate::exec::routine::must_leave_for_work(world, id)
+                || (crate::exec::routine::must_leave_for_work(world, id)
+                    && (!world.config.life.enabled
+                        || world.tick.saturating_sub(started) >= world.config.life.sleep_min_ticks))
         }
+        ActionKind::Meeting => crate::systems::life::exec_shift_over(world),
         ActionKind::Rest => {
             crate::exec::routine::must_leave_for_work(world, id)
                 || world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j))
@@ -533,7 +545,10 @@ pub fn on_complete(
         ActionKind::Sleep => {
             // A gang member holing up at their own Hideout sleeps at home.
             let here = world.comp::<Position>(id).and_then(|p| p.building);
-            let hideout_home = here.is_some() && crate::systems::gang::holes_up_at(world, id) == here;
+            let hideout_home = here.is_some()
+                && (crate::systems::gang::holes_up_at(world, id) == here
+                    // L1: a member bedding down at the Hideout as its nearer bed.
+                    || (world.config.life.enabled && world.gang_of(id).and_then(|g| world.hideout_of(g)) == here));
             // M12 D21: a booked Hotel bed is a bed (and marks HOTEL).
             let hotel = here.is_some() && crate::systems::street::booked_hotel(world, id) == here;
             let squat = here.is_some() && world.comp::<crate::components::Squatter>(id).map(|s| s.building) == here;
@@ -598,6 +613,16 @@ pub fn on_complete(
         }
         ActionKind::CollectDole => {
             economy::collect_dole(world, id);
+            StepResult::Done
+        }
+        // L1: the Recycler buys the haul (the Treasury pays; a broke city pays nothing).
+        ActionKind::Scavenge => scavenge(world, id),
+        // L1: office hours kept today.
+        ActionKind::Meeting => {
+            let today = world.day();
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.office_day = Some(today);
+            }
             StepResult::Done
         }
         // M11 D25: no Lot or coins left by now fails the step.
@@ -1201,15 +1226,20 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
         .filter(|&o| world.comp::<Position>(o).is_some_and(|p| p.tile.manhattan(tile) <= 3))
         .take(4)
         .collect();
+    // L1: a stranger may give too (the broke begged only from friends, and
+    // the street is strangers), at half the odds.
+    let strangers = world.config.life.enabled;
     for other in passers {
         let key = crate::components::edge_key(id, other);
-        let generous = world.edges.get(&key).is_some_and(|e| e.affinity > 0.0)
+        let edge = world.edges.get(&key).map(|e| e.affinity);
+        let generous = (edge.is_some_and(|a| a > 0.0) || (strangers && edge.is_none()))
             && world.comp::<Wallet>(other).is_some_and(|w| w.coins > 10);
         if !generous {
             continue;
         }
         let roll: f32 = world.rng.world().random();
-        if roll < 0.3 + sociability * 0.4 {
+        let odds = (0.3 + sociability * 0.4) * if edge.is_none() { 0.5 } else { 1.0 };
+        if roll < odds {
             let bonus: f32 = world.rng.world().random();
             let coins = 1 + i64::from(bonus < 0.5);
             if let Some(w) = world.comp_mut::<Wallet>(other) {
@@ -1247,6 +1277,13 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
         ActionKind::FleeToHome => {
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 n.safety = n.safety.max(0.5);
+            }
+        }
+        // L1: at the last-seen tile, chase a suspect still in sight; a
+        // sighting gone stale is dropped (the Arrest step then fails).
+        ActionKind::GoTo(crate::goap::LocationKey::SuspectTile) if world.config.life.enabled => {
+            if let Some(s) = step.target {
+                crate::systems::life::arrive_at_suspect(world, id, s);
             }
         }
         _ => {}
@@ -1291,13 +1328,40 @@ fn report_crime(world: &mut World, id: EntityId) -> StepResult {
 /// (`law::credit_guard_shifts`), whichever plan the guard ends the shift on.
 pub fn end_shift(world: &mut World, id: EntityId) {
     let tick = world.tick;
+    let mut owed = false;
     if let Some(j) = world.comp_mut::<Job>(id) {
         j.last_shift_day = Some(j.shift_key_at(tick.saturating_sub(1)));
         if j.role != crate::components::Role::Guard {
             j.days_unpaid = j.days_unpaid.saturating_add(1);
+            owed = true;
         }
     }
+    // L1: paid at the workplace as the shift ends (as the Statistical tier
+    // always was), not on a walk to the Hall; a short payment carries over
+    // to the next shift's.
+    if owed && world.config.life.enabled {
+        economy::collect_wage(world, id);
+        return;
+    }
     economy::maybe_quit(world, id);
+}
+
+/// L1 `Scavenge`: `[life] scavenge_coins` from the Treasury (the Recycler's
+/// scrap price, `Flow::Sanitation`) when it is not negative.
+fn scavenge(world: &mut World, id: EntityId) -> StepResult {
+    use rand::Rng;
+    // An hour turns up something worth selling on `scavenge_p` of tries
+    // (the agent's keyed stream).
+    let p = world.config.life.scavenge_p;
+    let found = world.rng.agent(id).random::<f32>() < p;
+    let treasury = world.treasury().map_or(0, |t| t.coins);
+    let pay = world.config.life.scavenge_coins.min(treasury.max(0));
+    if pay <= 0 || !found {
+        return StepResult::Failed(FailReason::StockGone);
+    }
+    crate::systems::ownership::pay(world, None, Some(id), pay, crate::systems::ownership::Flow::Sanitation);
+    world.remember(id, MemoryKind::Paid, None, 0.1, 0.0, false);
+    StepResult::Done
 }
 
 /// Sleeping at home with a spouse who lives there too. Checked by household
