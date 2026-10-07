@@ -1496,7 +1496,6 @@ fn test_m13_assets_seed_42() {
         (m.stolen_then_chopped >= 1, format!("chopped after a theft {} (thefts {})", m.stolen_then_chopped, m.thefts))
     });
     majority("Episodes in 1..=8", &|m| ((1..=8).contains(&m.episodes), format!("episodes {}", m.episodes)));
-    majority("an episode ended by the law", &|m| (m.episodes_by_law >= 1, format!("by law {}", m.episodes_by_law)));
     majority("a Clinic or Garage founded through Register", &|m| {
         (!m.registered_sellers.is_empty(), format!("registered {}", m.registered_sellers.len()))
     });
@@ -1509,6 +1508,22 @@ fn test_m13_assets_seed_42() {
             format!("vehicles {total} (moto/car/truck/flyer {}/{}/{}/{})", v[0], v[1], v[2], v[3]),
         )
     });
+    // Jail 160 (2026-10-06): dealers serve their sentences instead of being bumped out of a full
+    // 80-bed Jail (Dealing jailings 97 -> 121, doses dealt 1375 -> 910 on seed 42), so the share read
+    // 0.16/0.20/0.23 on 42-44 against 0.21/0.24/0.25 at 80 beds: a majority bullet now.
+    majority("dealing share of gang income >= 0.2", &|m| {
+        (m.dealing_share >= 0.2, format!("dealing share {:.2}", m.dealing_share))
+    });
+    // The law ends 0-2 episodes per 120 days (a cuffing, or a berserker killed resisting); at 160 beds
+    // seeds 43-44 read 0 (1/1/2 at 80). An existence bullet over the three seeds.
+    let by_law: u32 = runs.iter().map(|m| m.episodes_by_law).sum();
+    check(
+        by_law >= 1,
+        format!(
+            "an episode ended by the law on some seed: {by_law} across {:?}",
+            runs.iter().map(|m| m.episodes_by_law).collect::<Vec<_>>()
+        ),
+    );
     // Seed 42.
     check(r.farms_truck_d30 >= 8, format!("Farms running a truck by day 30 {} >= 8", r.farms_truck_d30));
     check(r.truck_share >= 0.5, format!("truck share of hauls after day 30 {:.2} >= 0.5", r.truck_share));
@@ -1527,7 +1542,6 @@ fn test_m13_assets_seed_42() {
         format!("hooked adults on day 120 {:.1} % in 1-8 %", r.hooked_share * 100.0),
     );
     check(r.detoxes >= 1, format!("Detox {} >= 1", r.detoxes));
-    check(r.dealing_share >= 0.2, format!("dealing share of gang income {:.2} >= 0.2", r.dealing_share));
     check(r.repos + r.impounds >= 3, format!("repossessions {} + impounds {} >= 3", r.repos, r.impounds));
     check(r.secure_robots >= 1, format!("robots bought for Secure {} >= 1", r.secure_robots));
     check(r.stripped >= 10, format!("corpses stripped {} >= 10", r.stripped));
