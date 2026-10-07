@@ -42,7 +42,7 @@ The city should read as a place where anything can be bought: a price on a name 
 - the wounded: wounded are 20–50 % of would-be fight deaths; ≥ 1 rescue by a gang member, **≥ 1 `TraumaSave`**, ≥ 1 `BledOut`;
 - governance: ≥ 2 board votes held, **≥ 1 `VoteSwung`** (a member whose vote under coercion differs from their own preference);
 - Assault events per day stay ≤ 42.7, **Murders per 120 days rise by ≤ 25 % over the M15 run** on the same seed (contract killings included), starvation deaths and population stay within the scaled v1 bounds, and the v1, M8–M15 and Full-vs-Statistical parity gates still pass;
-- throughput stays ≥ 8,000 ticks/s with the Statistical tier.
+- throughput is reported per gate; the shared floor is 4,000 ticks/s (2026-10-06: relaxed from 8,000 while systems are still being built; optimisation is a later pass).
 
 ## 1. The contract entity
 

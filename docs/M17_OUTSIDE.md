@@ -38,7 +38,7 @@ The city should read as a branch office of something larger: corps that bleed an
 - abroad: ≥ 1 `Abroad` contract resolved;
 - **god scenarios** (§ 11): a razed branch is retaken (owns a building again) within 30 days; a parent dies through uplink runs plus economic warfare within 120 days, its scrip is wiped and a district riots, while the same parent survives the same razing without the runs; a decapitated gang is reinforced and a second decapitation inside the cooldown is not; a heat spike draws State guards and a Crackdown; a promoted NPC from an Abroad mission arrives with an edge;
 - Assault events per day stay ≤ 42.7, Murders per 120 days rise by ≤ 10 % over the M16 run on the same seed, starvation deaths and population stay within the scaled v1 bounds (Outsiders included), and the v1, M8–M16 and Full-vs-Statistical parity gates still pass;
-- throughput stays ≥ 8,000 ticks/s with the Statistical tier.
+- throughput is reported per gate; the shared floor is 4,000 ticks/s (2026-10-06: relaxed from 8,000 while systems are still being built; optimisation is a later pass).
 
 ## 1. The ledger
 

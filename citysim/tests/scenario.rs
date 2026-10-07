@@ -8,6 +8,13 @@
 
 use citysim::{Config, World, TICKS_PER_DAY};
 
+/// The ticks/s floor every gate shares (release only). 2026-10-06 (Dylan): the gates were
+/// pinned at 8,000 while M9-M14 landed and flipped on box load more often than on code
+/// (seed 42 alone reads ~10.7k idle); while systems are still being built the floor only has
+/// to catch a catastrophic regression (a sim half as fast), so it sits at 4,000 and every gate
+/// still prints its number. Optimisation is a later pass once the game is more complete.
+const TPS_FLOOR: f64 = 4000.0;
+
 /// `run --days 30 --seed 42`: the M1 gate. Hunger stays up, nobody much
 /// starves, the price stays sane and the Market is not empty for long.
 #[test]
@@ -417,7 +424,7 @@ fn test_m10_scale_seed_42() {
     let wall = started.elapsed().as_secs_f64();
     let ticks = 120 * TICKS_PER_DAY;
     let tps = ticks as f64 / wall;
-    eprintln!("throughput {tps:.0} ticks/s over 120 days (gate 8,000 release, target 12,000), {wall:.1} s wall");
+    eprintln!("throughput {tps:.0} ticks/s over 120 days (floor {TPS_FLOOR:.0} release; idle seed 42 ~10.7k), {wall:.1} s wall");
 
     let h = &w.stats.history;
     let sum = |f: fn(&citysim::DayRow) -> u32| h.iter().map(f).sum::<u32>();
@@ -443,7 +450,7 @@ fn test_m10_scale_seed_42() {
         }
     };
     if !cfg!(debug_assertions) {
-        check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
+        check(tps >= TPS_FLOOR, format!("ticks/s {tps:.0} >= {TPS_FLOOR:.0}"));
     }
     check(offscreen_kills >= 20, format!("off-screen killings {offscreen_kills} >= 20"));
     // The binder runs on a day's first tick and the run stops just before
@@ -651,7 +658,7 @@ fn test_m11_ownership_seed_42() {
     check(starvation <= 200, format!("starvation {starvation} <= 200"));
     check((1333..=2667).contains(&pop), format!("population {pop} in 1333..=2667"));
     if !cfg!(debug_assertions) {
-        check(tps >= 8000.0, format!("ticks/s {tps:.0} >= 8000"));
+        check(tps >= TPS_FLOOR, format!("ticks/s {tps:.0} >= {TPS_FLOOR:.0}"));
     }
     assert!(failures.is_empty(), "M11 gate failures: {failures:?}");
 }
@@ -1187,7 +1194,7 @@ fn test_m12_districts_seed_42() {
     check(r.starvation <= 200, format!("starvation {} <= 200", r.starvation));
     check((1333..=2667).contains(&r.pop), format!("population {} in 1333..=2667", r.pop));
     if !cfg!(debug_assertions) {
-        check(r.tps >= 8000.0, format!("ticks/s {:.0} >= 8000", r.tps));
+        check(r.tps >= TPS_FLOOR, format!("ticks/s {:.0} >= {TPS_FLOOR:.0}", r.tps));
     }
     assert!(failures.is_empty(), "M12 gate failures: {failures:?}");
 }
@@ -1555,7 +1562,7 @@ fn test_m13_assets_seed_42() {
     check(r.starvation <= 200, format!("starvation {} <= 200", r.starvation));
     check((1333..=2667).contains(&r.pop), format!("population {} in 1333..=2667", r.pop));
     if !cfg!(debug_assertions) {
-        check(r.tps >= 8000.0, format!("ticks/s {:.0} >= 8000", r.tps));
+        check(r.tps >= TPS_FLOOR, format!("ticks/s {:.0} >= {TPS_FLOOR:.0}", r.tps));
     }
     assert!(failures.is_empty(), "M13 gate failures: {failures:?}");
 }

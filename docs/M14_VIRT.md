@@ -39,7 +39,7 @@ The city should read as one with a second economy behind the first: Labs humming
 - ICE: ≥ 10 `IceRaised`; on day 120 the Spearman correlation across corps between 30-day ICE spend and mean node ICE ≥ 0.6; after a Virt loss on a corp node, its ICE rises within 7 days in ≥ 50 % of cases;
 - decks owned on day 120: 30–150;
 - Assault events per day stay ≤ 42.7, Murders per 120 days rise by ≤ 15 % over the M13 run on the same seed (Flatlines count separately), starvation deaths and population stay within the scaled v1 bounds, and the v1, M8–M13 and Full-vs-Statistical parity gates still pass;
-- throughput stays ≥ 8,000 ticks/s with the Statistical tier.
+- throughput is reported per gate; the shared floor is 4,000 ticks/s (2026-10-06: relaxed from 8,000 while systems are still being built; optimisation is a later pass).
 
 ## 1. The Virt plane
 

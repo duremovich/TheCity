@@ -363,7 +363,9 @@ fn test_kitted_vs_unkitted_parity() {
 }
 
 #[test]
-fn test_headless_throughput_8000_tps() {
+/// The shared floor (4,000 since 2026-10-06; see `TPS_FLOOR` in `scenario.rs`): a
+/// catastrophic-regression check, not a target. Seed 42 reads ~10.7k idle.
+fn test_headless_throughput_floor() {
     if cfg!(debug_assertions) {
         eprintln!("release only");
         return;
@@ -372,7 +374,8 @@ fn test_headless_throughput_8000_tps() {
     let t0 = std::time::Instant::now();
     w.run_ticks(10 * TICKS_PER_DAY);
     let tps = (10 * TICKS_PER_DAY) as f64 / t0.elapsed().as_secs_f64();
-    assert!(tps >= 8000.0, "{tps:.0} ticks/s");
+    eprintln!("{tps:.0} ticks/s (floor 4000)");
+    assert!(tps >= 4000.0, "{tps:.0} ticks/s");
 }
 
 #[test]

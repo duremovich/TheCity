@@ -64,7 +64,7 @@ cargo test --workspace --release --no-fail-fast
 # Full-vs-Statistical parity, binder, median tick);
 # each scenario is 25-60 s at 2,000 residents, so run them one at a time if you want readable output
 cargo test --release -p citysim --test scenario --test lod --test scale --test bind -- --ignored --nocapture
-# the M10 scale gate alone: throughput (release only, gate 8,000 ticks/s, target 12,000), off-screen violence,
+# the M10 scale gate alone: throughput (release only, floor 4,000 ticks/s since 2026-10-06, idle seed 42 reads ~10.7k), off-screen violence,
 # hole ledger, Unknown share, save size and time
 cargo test --release -p citysim --test scenario test_m10_scale_seed_42 -- --ignored --nocapture
 # the M11 ownership gate alone: every corp changes order, Squeeze and Undercut held, a corp-payer bribe, evictions,

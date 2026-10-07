@@ -39,7 +39,7 @@ The city should read as a place that remembers: names that clear a Bar when they
 - social moves: extortion success is higher for members with `dread ≥ 0.5` than below it and higher against targets with no ally within 8 tiles; adults with any social skill ≥ 0.8 on day 120 are 3–8 %; ≥ 3 `Poached`; ≥ 1 `TalentLost` after a killing;
 - news: ≥ 2 Feeds on day 120; ≥ 150 stories; ≥ 1 `Spin` order held ≥ 3 days with ≥ 1 `Planted` and ≥ 1 `Buried`; after a plant against corp C, C's employees' mean `opinion(·, C)` falls by ≥ 0.05 within 7 days in ≥ 50 % of plants; ≥ 1 Purist expulsion;
 - Assault events per day stay ≤ 42.7, Murders per 120 days rise by ≤ 25 % over the M14 run on the same seed (revenge killings included), starvation deaths and population stay within the scaled v1 bounds, and the v1, M8–M14 and Full-vs-Statistical parity gates still pass;
-- throughput stays ≥ 8,000 ticks/s with the Statistical tier.
+- throughput is reported per gate; the shared floor is 4,000 ticks/s (2026-10-06: relaxed from 8,000 while systems are still being built; optimisation is a later pass).
 
 ## 1. Deeds, rumours and sightings
 

@@ -40,7 +40,7 @@ The city should read the same with a person in it as without, and the person sho
 - **replay**: the command log replays the pilot run byte-identically with the dialogue writer disabled; a property test shows that no `DialogueOption` changes world state except through its `PlayerCommand`;
 - **god scenarios** (§ 9) run, and each one shows the world reacting;
 - Assault events per day stay ≤ 42.7; Murders per 120 days stay within +10 % of the M17 run on the same seed, excluding the character's own deeds; starvation deaths and population stay within the scaled v1 bounds; the v1, M8–M17 and Full-vs-Statistical parity gates still pass;
-- throughput stays **≥ 8,000 ticks/s** with the character pinned and a full circle.
+- throughput is reported per gate with the character pinned and a full circle; the shared floor is 4,000 ticks/s (2026-10-06: relaxed from 8,000 while systems are still being built; optimisation is a later pass).
 
 ## 1. The character
 
