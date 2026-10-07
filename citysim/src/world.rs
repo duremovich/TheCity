@@ -536,7 +536,9 @@ pub struct World {
     #[serde(default)]
     pub virt: crate::virt::VirtPlane,
     /// M14 V4: a hook changed an owner or a kind; `virt::run` relinks.
-    #[serde(skip)]
+    /// Saved (M14 review): a save taken after a hook and before the next
+    /// tick's relink would otherwise load clean and skip it.
+    #[serde(default)]
     pub virt_dirty: bool,
     /// M14 V28: faction databases (the city under `EntityId::NONE`).
     #[serde(default)]
@@ -2312,7 +2314,13 @@ impl World {
 
     /// Drop the agent from its building's occupant list; the Position is left
     /// to the caller (a leaver moves to the street, a corpse stays put).
+    /// M14 V12 (review): a seated runner taken off the list (put out at the
+    /// door by a sack or a demolition, moved by an arrest) is out of the
+    /// chair, so its run is dumped first; a no-op for anyone not on a run.
     pub fn remove_from_building(&mut self, id: EntityId) {
+        if self.runner_of.contains_key(&id) {
+            systems::virt::dump(self, id, "pulled from the chair");
+        }
         let Some(here) = self.comp::<Position>(id).and_then(|p| p.building) else { return };
         if let Some(b) = self.comp_mut::<Building>(here) {
             if let Ok(i) = b.occupants.binary_search(&id) {

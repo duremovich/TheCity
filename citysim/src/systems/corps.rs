@@ -26,6 +26,13 @@ pub fn is_monopoly(world: &World, corp: EntityId, niche: Niche) -> bool {
     corp_brain::shares(world, niche).get(&corp).is_some_and(|&s| s >= MONOPOLY_SHARE)
 }
 
+/// M13's fleet reserve, `treasury_ref / 4`: the floor a corp's fleet buys,
+/// and every M14 spend (ICE, cameras, fleet decks, Data purchases, coin
+/// upkeep, Hunker's trigger), keep in the treasury. 0 for a non-corp.
+pub fn fleet_reserve(world: &World, corp: EntityId) -> i64 {
+    world.comp::<Corp>(corp).map_or(0, |c| c.treasury_ref / 4)
+}
+
 /// What one contract costs a day from this seller (D19).
 pub fn contract_price(world: &World, seller: EntityId) -> i64 {
     let level = world.comp::<Corp>(seller).map_or(1.0, |c| c.level(Niche::Security));

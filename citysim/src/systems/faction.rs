@@ -106,6 +106,9 @@ pub struct OrderInputs {
     pub virt_p: f32,
     /// M14 V30: a traced run on our nodes named someone lately.
     pub hacked: bool,
+    /// M14 review: the grudge's wipe (the store of whoever that trace named)
+    /// is a target for our best runner: VirtRaid gains `order_flat.virt_grudge`.
+    pub virt_grudge: bool,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
@@ -280,7 +283,8 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("1-heat", calm, Curve::Linear { m: 0.6, b: 0.4 }),
                 Consideration::new("hacked", if i.hacked { 1.0 } else { 0.0 }, Curve::Linear { m: 0.5, b: 0.5 }),
             ],
-            f.virt_raid,
+            // M14 review: a grudge with its wipe in reach lifts the order.
+            f.virt_raid + if i.virt_grudge { f.virt_grudge } else { 0.0 },
         ),
         score(
             Order::BreakOut,
@@ -519,10 +523,11 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         harvest_cover,
         lawfulness: p.lawfulness,
         treasury_x: (g.treasury as f32 / heat_ref as f32).clamp(0.0, 1.0),
-        runner: virt.0,
-        virt_ev: virt.1,
-        virt_p: virt.2,
-        hacked: virt.3,
+        runner: virt.runner,
+        virt_ev: virt.ev,
+        virt_p: virt.p,
+        hacked: virt.hacked,
+        virt_grudge: virt.grudge,
     })
 }
 

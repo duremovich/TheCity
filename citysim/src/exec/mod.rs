@@ -243,6 +243,7 @@ fn step_agent(world: &mut World, id: EntityId) {
 
     // M14 V12: a runner dazed by a lost contest sits it out in the chair.
     let dazed = brain.dazed_until.is_some_and(|t| t > tick);
+    let daze_end = brain.dazed_until;
     // Replan trigger (d): a plan that has run too long.
     if tick.saturating_sub(started) > world.config.brain.plan_timeout_ticks && !dazed {
         world.fail_plan(id);
@@ -288,6 +289,13 @@ fn step_agent(world: &mut World, id: EntityId) {
                 }
             }
             StepResult::Running
+        }
+        // M14 review: a `JackIn` waiting on an order that is gone (expired,
+        // dropped with its raid) fails; it used to finish the wait as done.
+        // The post-run daze in the chair is the wait that ends at
+        // `dazed_until`, and completes the step as before.
+        ExecState::Wait { until } if step.action == ActionKind::JackIn && !dazed && daze_end != Some(until) => {
+            StepResult::Failed(FailReason::PreconditionLost)
         }
         ExecState::Wait { until } => {
             if tick >= until || (!dazed && routine::must_leave_for_work(world, id)) {

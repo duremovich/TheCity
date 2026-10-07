@@ -145,9 +145,8 @@ fn test_choose_keeps_the_standing_order_within_hysteresis() {
 /// order at an equal score (within 1e-6); a real margin still switches.
 #[test]
 fn test_shock_rescore_keeps_the_standing_order_at_equal_scores() {
-    let cfg = Config::load().corps;
     let row = |order, score| citysim::CorpOrderScore { order, niche: Niche::Food, score, considerations: Vec::new() };
-    let h = corp_brain::shock_hysteresis(&cfg);
+    let h = corp_brain::SHOCK_HYSTERESIS;
     assert!(h > 0.0 && h < 1e-5, "ties only");
     for best in [0.45, 0.450_000_5] {
         let scores = vec![row(CorpOrder::Research, best), row(CorpOrder::Secure, 0.45)];
@@ -756,6 +755,7 @@ fn test_hoard_tilts_contest() {
         virt_ev: 0.0,
         virt_p: 0.0,
         hacked: false,
+        virt_grudge: false,
     };
     let contest = |i: &faction::OrderInputs| {
         faction::score_orders(i, &w.config.gangs)

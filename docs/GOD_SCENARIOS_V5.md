@@ -142,7 +142,19 @@ measured just before it).
 7. **A hack grudge never orders a wipe** (the M14 gate's DataWiped, a printed finding): gang-on-gang runs
    are traced and name the runner (1-5 a seed on 42-49), but the grudge's wipe is a candidate only under
    VirtRaid, so a gang not already in VirtRaid never wipes (0 wipe runs, DataWiped 0 on all eight seeds). For
-   the M14 review fix pass.
+   the M14 review fix pass. **M14 review (thinly closed):** the premise was wrong. A probe of every grudge on
+   42-49 at 16b9efe (eleven, all naming a gang) found the hacked gang already in VirtRaid at ten; the wipe was
+   missing because the named gang's Hideout store was empty (0 at nine, 1 and 12 units at two): gangs sell
+   every unit at midnight (`gang_data_keep` 0) before `gang_daily` writes the day's orders, and the robbing
+   gangs are the have-nots (on seed 46, 63 steals were freelance, the Data going to the runner's deck,
+   against 13 for a gang). The fix pass makes a grudge whose wipe is in reach lift VirtRaid
+   (`[gangs.order_flat] virt_grudge` 0.2) and send the wipe first
+   (`virt_review::test_hack_grudge_lifts_virtraid_and_orders_the_wipe_first`). On 42-49 it brings two wipe
+   runs (seeds 44 and 46) and one wipe (seed 44, day 117: 10 units still unsold in the rival's
+   Hideout#220), so DataWiped is an asserted existence bullet again, on one seed in eight; Data sold reads a
+   six-seed mean of 211 (16b9efe: 343.5; seed 46's 931 fell to 221 after its day-88 grudge kept The Hollow in
+   VirtRaid). `gang_data_keep` 20 was tried with it and rejected: 0 wipes on 42-49, Data sold 198.5. Still
+   thin: a gang grudge has little to wipe while gangs keep no Data.
 8. **ICE spend tracks portfolios, not robberies** (the gate's Spearman, a printed finding, 0.53 pooled over 20
    corp-seed pairs): Nutrix's 40-60 tier-1 nodes take the most spend at a mean ICE of 1.1-1.3, while Arasaka and
    Militech sit at 2.0 on seeded tier-2 Offices paying upkeep only. And **IceRaised** (8.0 a seed, spec ≥ 10)

@@ -797,6 +797,17 @@ fn run(args: RunArgs) -> Result<(), String> {
             w.config.lod.force = config.lod.force;
             w.config.assets_dir = config.assets_dir;
             if args.virt_off {
+                // M14 review: a save with runs in progress would leave its
+                // seated runners `JackedIn` for good (no run step pops with
+                // the plane off): dump them and drop the orders first.
+                if !w.runs.is_empty() || !w.run_orders.is_empty() {
+                    eprintln!(
+                        "note: --virt-off on a save with {} run(s) and {} order(s) in progress: dumped",
+                        w.runs.len(),
+                        w.run_orders.len()
+                    );
+                }
+                citysim::systems::virt::plane_off(&mut w);
                 w.config = w.config.clone().virt_off();
             }
             w

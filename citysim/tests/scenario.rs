@@ -2195,16 +2195,22 @@ fn test_m14_virt_seed_42() {
         ((30..=150).contains(&m.decks), format!("decks {}", m.decks))
     });
     check(ok, what);
-    // FINDING (not asserted): DataWiped (spec >= 1) over 42-49. A gang-on-gang trace that names the runner
-    // forms a grudge, but the grudge's wipe is only a candidate under the VirtRaid order, so a gang not
-    // already in VirtRaid never orders it (a mechanism gap for the M14 review fix pass).
+    // DataWiped (spec >= 1) on some seed of 42-49. A gang-on-gang trace that names the runner forms a
+    // grudge; since the M14 review a grudge whose wipe is in reach lifts VirtRaid (`order_flat.virt_grudge`)
+    // and sends the wipe first. Thin: the named gang's Hideout store is empty at most grudges (gangs sell
+    // all their Data at midnight, `gang_data_keep` 0), so one seed in eight wipes (seed 44, 10 units, d117).
     let wiped: Vec<u32> = eight.iter().map(|m| m.wiped_events).collect();
     let traces: Vec<u32> = eight.iter().map(|m| m.gang_traces).collect();
     let grudges: Vec<u32> = eight.iter().map(|m| m.gang_grudges).collect();
     let wipes: Vec<u32> = eight.iter().map(|m| m.wipe_runs).collect();
-    eprintln!(
-        "FINDING DataWiped on 42-49 {wiped:?} (spec >= 1 on some seed; traced runs on gang nodes {traces:?}, grudges {grudges:?}, wipe runs {wipes:?})"
+    // The assert is the mechanism (a grudge orders a wipe run, on 2 of 8 seeds); a landed wipe (1 of 8,
+    // on day 117) is too thin to assert without flipping on the next behaviour change.
+    check(
+        wipes.iter().any(|&x| x >= 1),
+        format!("a grudge ordered a wipe run on some seed of 42-49 {wipes:?} (traced runs on gang nodes {traces:?}, grudges {grudges:?})"),
     );
+    // FINDING (not asserted): landed wipes.
+    eprintln!("FINDING DataWiped on 42-49 {wiped:?} (spec >= 1)");
     let (ok, what) = some("a runner traced and arrested at the chair", &|m| m.chair_arrests);
     check(ok, what);
     let (ok, what) = some("a Door hack then a corp raid departing inside its window", &|m| m.door_pairs);

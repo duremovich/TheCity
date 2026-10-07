@@ -290,6 +290,9 @@ harvest = 0.0   # M13 D36: abduct the city's visible chrome for parts
 # 5,000, so the product is ~0.03 and the order is its flat: at 0.2-0.3 no gang took VirtRaid in 120 days
 # (the standing orders score 0.4-1.1); at 0.45 seed 42's gangs hold it on ~50 days, at 0.55 Murders hit 219.
 virt_raid = 0.45
+# M14 review: VirtRaid's flat rises by this while a hack grudge's wipe (the store of the gang or
+# corp a trace named) is in the best runner's reach; the order then sends that wipe first.
+virt_grudge = 0.2
 
 # M9: the law as a faction (docs/M9_LAW.md). A captain (the most lawful guard) scores Patrol,
 # Crackdown (on the most-reported gang: patrol loops through its turf, one guard in three holds the

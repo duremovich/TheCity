@@ -243,7 +243,7 @@ pub fn research_upkeep(world: &mut World, corp: EntityId) {
             continue;
         }
         let (coins, units) = (world.config.tech.upkeep_coins_at(tier), world.config.tech.upkeep_data_at(tier));
-        let floor = if coins > 0 { world.comp::<Corp>(corp).map_or(0, |c| c.treasury_ref / 4) } else { 0 };
+        let floor = if coins > 0 { crate::systems::corps::fleet_reserve(world, corp) } else { 0 };
         let ok = world.purse(Some(corp)) - coins >= floor && virt::holding(world, corp, track) >= units;
         if ok {
             ownership::charge(world, Some(corp), None, coins, Flow::Research);
@@ -326,6 +326,19 @@ fn expire(world: &mut World) {
         .filter(|(_, o)| o.expires <= now && o.why == crate::virt::RunWhy::CorpOrder)
         .map(|(&a, _)| a)
         .collect();
+    // V37 (M14 review): an Overwatch order that lapsed untaken ends its stream.
+    let watch: Vec<(EntityId, EntityId)> = world
+        .run_orders
+        .iter()
+        .filter(|(a, o)| o.expires <= now && !world.runner_of.contains_key(a))
+        .filter_map(|(&a, o)| match o.purpose {
+            crate::virt::Purpose::Overwatch(g) => Some((g, a)),
+            _ => None,
+        })
+        .collect();
+    for (g, a) in watch {
+        virt::clear_stream(world, g, a);
+    }
     world.run_orders.retain(|_, o| o.expires > now);
     for a in lent {
         crate::systems::assets::rekit(world, a);
@@ -619,6 +632,16 @@ pub fn labs_of(world: &World, faction: EntityId) -> Vec<EntityId> {
         .collect()
 }
 
+/// Where `corp` keeps Data of `track` (V17, a sale's units; a corp run's
+/// payload): its Lab of that focus, else its first Lab (ascending).
+pub fn data_lab_for(world: &World, corp: EntityId, track: Track) -> Option<EntityId> {
+    let labs = labs_of(world, corp);
+    labs.iter()
+        .copied()
+        .find(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.focus == Some(track)))
+        .or_else(|| labs.first().copied())
+}
+
 // ---------------------------------------------------------------------------
 // The Data market (V17, V29, V30; phase 2)
 // ---------------------------------------------------------------------------
@@ -653,7 +676,7 @@ pub fn data_unit_price(world: &World, buyer: EntityId) -> i64 {
 pub fn data_budget(world: &World, corp: EntityId) -> i64 {
     let Some(c) = world.comp::<Corp>(corp) else { return 0 };
     let cap = (world.config.data.buy_budget_frac * c.closing.max(0) as f32).floor() as i64 - c.data_bought_today;
-    let reserve = world.purse(Some(corp)) - c.treasury_ref / 4;
+    let reserve = world.purse(Some(corp)) - crate::systems::corps::fleet_reserve(world, corp);
     cap.min(reserve).max(0)
 }
 
@@ -696,13 +719,9 @@ pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, 
     if n == 0 {
         return 0;
     }
-    let labs = labs_of(world, buyer);
-    let lab = labs
-        .iter()
-        .copied()
-        .find(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.focus == Some(track)))
-        .or_else(|| labs.first().copied());
-    let Some(node) = lab.and_then(|b| virt::node_of_building(world, b)) else { return 0 };
+    let Some(node) = data_lab_for(world, buyer, track).and_then(|b| virt::node_of_building(world, b)) else {
+        return 0;
+    };
     let coins = i64::from(n) * price;
     ownership::charge(world, Some(buyer), Some(seller), coins, Flow::Data);
     if let Some(c) = world.comp_mut::<Corp>(buyer) {
