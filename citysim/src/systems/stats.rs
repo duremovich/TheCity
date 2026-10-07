@@ -280,7 +280,15 @@ fn word_snapshot(world: &mut World, citizens: &[EntityId]) {
         }
     }
     let law_comp = if crate::systems::competence::on(world) { world.law().map_or(0.0, |l| l.competence) } else { 0.0 };
+    // M15 phase 3: the Hunts under way, the longest chain among them (a
+    // length: chain + 1), the open vendettas.
+    let hunts_active = world.hunts.len() as u32;
+    let chain_now = world.hunts.values().map(|s| u32::from(s.chain) + 1).max().unwrap_or(0);
+    let vendettas_open = world.vendettas.len() as u32;
     let w = &mut world.stats.current.word;
+    w.hunts_active = hunts_active;
+    w.chain_max = w.chain_max.max(chain_now);
+    w.vendettas_open = vendettas_open;
     w.second_hand_share = if all > 0 { heard as f32 / all as f32 } else { 0.0 };
     w.rumour_hops_max = w.rumour_hops_max.max(hops);
     w.pool_reach = reach;

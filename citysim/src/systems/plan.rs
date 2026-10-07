@@ -71,9 +71,16 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         // Arrest binds the located warrant suspect nearest the guard.
         GoalKind::Arrest => {
             let tile = world.comp::<Position>(id)?.tile;
-            crate::systems::law::located_suspects(world, Some(crate::systems::law::Pursuer { tile, guard: id }))
-                .into_iter()
-                .min_by_key(|&s| (world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile)), s.index))
+            let located =
+                crate::systems::law::located_suspects(world, Some(crate::systems::law::Pursuer { tile, guard: id }));
+            let dist = |s: EntityId| world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile));
+            if world.config.gossip.enabled {
+                // M15 W34: the hottest first, then the nearest.
+                let heat = |s: EntityId| (crate::systems::reputation::rep(world, s).heat * 10.0).round() as i32;
+                located.into_iter().min_by_key(|&s| (-heat(s), dist(s), s.index))
+            } else {
+                located.into_iter().min_by_key(|&s| (dist(s), s.index))
+            }
         }
         // Socialise and Court bind the co-located agent with the highest affinity
         // who has no Partner reservation (Court: unmarried, known candidate first).
@@ -186,6 +193,25 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     if let Some(plan) = bypass {
         install(world, id, plan);
         return 0;
+    }
+    // M15 W19/W35: the Hunt's and Guard the body's scripted plans.
+    if matches!(goal, GoalKind::Hunt | GoalKind::GuardBody) {
+        let plan = if goal == GoalKind::Hunt {
+            crate::systems::hunt::plan(world, id)
+        } else {
+            crate::systems::grudges::guard_body_plan(world, id)
+        };
+        match plan {
+            Some(plan) => {
+                let n = plan.steps.len();
+                install(world, id, plan);
+                return n;
+            }
+            None => {
+                world.cool_goal(id, goal);
+                return 0;
+            }
+        }
     }
     // M14 V29: the Hack chain is built directly (`[GoTo(Chair)] -> JackIn`,
     // the freelance `RunOrder` written at bind; or `[GoTo(DataBuyer)] ->

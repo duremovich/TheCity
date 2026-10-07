@@ -1191,7 +1191,9 @@ relay_conf = 0.8
 reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.1, poached = 0.3 }
 deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4 }
 deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1 }
-legacy_second_hand = true          # W9: today's social::gossip runs exactly; phase 3 sets false
+# W9 (phase 3): the legacy second-hand copies in Memory.entries retire (social::gossip still draws);
+# the word's exchange nudges an existing edge to the actor instead.
+legacy_second_hand = false
 kin_cap = 12                       # W10: kin captured at death
 
 [reputation]
@@ -1255,20 +1257,25 @@ vendetta_close = 0.2
 fight_grudge_min = 0.5             # W17
 
 [hunt]
-hunt_min = 0.5
+# Phase 3 calibration (plan 3.9, knobs in order hunt_min, then stat_hunt_min and hunt_kill_p; seeds
+# 42-44, 120 days). Spec hunt_min 0.5 / stat 0.2 / kill 0.5: 826 Hunts on seed 42, the 16 slots always
+# full, revenge kills 38 and Murders +28 % over M14. hunt_min 0.75: revenge kills 19-30. hunt_min 0.85,
+# stat_hunt_min 0.45, hunt_kill_p 0.3: Hunts 74-88, revenge kills 7-9, chain length 2-3, Murders
+# x0.96-1.11 of M14.
+hunt_min = 0.85
 max_hunts = 16
 hunt_flat = 0.0
 fresh_sighting_hours = 48
 intel_k = 0.5
 stakeout_hours = 3
 lethal_min = 0.75
-hunt_kill_p = 0.5
+hunt_kill_p = 0.3
 hunt_cooldown_days = 3
 hunt_days = 10
 street_silence = true
 enabled = true
 hold_score = 0.6                   # W20
-stat_hunt_min = 0.2                # W23
+stat_hunt_min = 0.45               # W23 (spec-plan 0.2; see hunt_min)
 
 [skills]
 skill_scale = 1.0

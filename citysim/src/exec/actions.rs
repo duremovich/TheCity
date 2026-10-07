@@ -83,6 +83,17 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::JackIn => 2,
         ActionKind::SellData => 10,
         ActionKind::UpgradeDeck => 30,
+        // M15 W21/W22/W35.
+        ActionKind::AskAround => 20,
+        ActionKind::StakeOut => {
+            let guard =
+                world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::GuardBody);
+            if guard {
+                Tick::from(world.config.grudges.guard_hours) * crate::time::TICKS_PER_HOUR
+            } else {
+                Tick::from(world.config.hunt.stakeout_hours) * crate::time::TICKS_PER_HOUR
+            }
+        }
         k if k.is_work() => {
             world.comp::<Job>(id).and_then(|j| j.shift_end(world.tick)).map_or(0, |end| end.saturating_sub(world.tick))
         }
@@ -358,6 +369,18 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         // M14 V5: a public terminal's fee to the Bar's or Hotel's owner
         // (`Flow::Terminal`, taxed), at the start (money moves at start).
         ActionKind::JackIn => crate::systems::virt::pay_terminal(world, id),
+        // M15 W22/W35: the stake-out's timeout; a guard stands over the body.
+        ActionKind::StakeOut => {
+            let guard =
+                world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::GuardBody);
+            match (guard, target) {
+                (true, Some(c)) => crate::systems::grudges::start_guard(world, id, c),
+                _ => {
+                    let until = world.tick + duration(world, id, kind);
+                    crate::systems::hunt::start_stakeout(world, id, until);
+                }
+            }
+        }
         // M13 D38: the dealer is registered at the Bar for the shift.
         ActionKind::Deal => {
             if let Some(bar) = target {
@@ -396,6 +419,13 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         }
         // M13 D38: a dealer who leaves the Bar is no longer dealing there.
         ActionKind::Deal => crate::systems::stims::end_deal(world, id),
+        // M15 W35: a guard who walks away stands over the body no more.
+        ActionKind::StakeOut => {
+            let c = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target);
+            if let Some(c) = c {
+                crate::systems::grudges::end_guard(world, id, c);
+            }
+        }
         _ => {}
     }
 }
@@ -415,6 +445,20 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind) -> bool {
         ActionKind::Wander => world.comp::<Job>(id).is_some_and(|j| can_work_now(world, id, j)),
         // The order changed: the muster breaks up (on_complete then fails the step).
         ActionKind::Muster => crate::systems::raid::raid_done(world, id),
+        // M15 W22: the target came into reach; W35: the body is gone or buried.
+        ActionKind::StakeOut => {
+            let guard = world
+                .comp::<Brain>(id)
+                .and_then(|b| b.plan.as_ref())
+                .filter(|p| p.goal == crate::components::GoalKind::GuardBody);
+            match guard {
+                Some(p) => p.target.is_none_or(|c| {
+                    world.comp::<crate::components::Corpse>(c).is_none_or(|k| k.buried || k.stripped)
+                        || !crate::systems::law::near(world, id, c, 1)
+                }),
+                None => crate::systems::hunt::contact(world, id),
+            }
+        }
         _ => false,
     }
 }
@@ -901,6 +945,10 @@ pub fn on_complete(
         // M13 D35: a body with chrome left is ripped next by one who may.
         ActionKind::Strip => {
             let Some(c) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            // M15 W35: a guard standing over the body fights for it first.
+            if !crate::systems::grudges::guard_contests(world, id, c) {
+                return StepResult::Failed(FailReason::PreconditionLost);
+            }
             if !crate::systems::chrome::strip(world, id, c) {
                 return StepResult::Failed(FailReason::StockGone);
             }
@@ -920,6 +968,10 @@ pub fn on_complete(
         }
         ActionKind::Rip => {
             let Some(b) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            // M15 W35: a guard standing over the body fights for it first.
+            if !crate::systems::grudges::guard_contests(world, id, b) {
+                return StepResult::Failed(FailReason::PreconditionLost);
+            }
             let live = crate::systems::law::living(world, b);
             let n = crate::systems::chrome::rip(world, id, b);
             // A Harvest crew's job is done once the take is home.
@@ -973,11 +1025,13 @@ pub fn on_complete(
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
             // M13 D33: a berserker's blows kill at `berserk_kill_mult`.
+            // M15 W22: a lethal Hunt's strike kills at `hunt_kill_p`.
             let mods = crate::systems::law::FightMods {
                 kill_mult: crate::systems::chrome::attack_kill_mult(world, id),
                 a_bonus: 0.0,
+                kill_p: crate::systems::hunt::strike_kill_p(world, id, victim),
             };
-            let (_, loser, died) = crate::systems::law::resolve_fight_mods(world, id, victim, mods);
+            let (winner, loser, died) = crate::systems::law::resolve_fight_mods(world, id, victim, mods);
             // The attacker's crime: Murder only when the victim died. An attacker
             // who died resisting is charged with nothing (the dead cannot be).
             let murder = died && loser == victim;
@@ -997,7 +1051,32 @@ pub fn on_complete(
             if crate::systems::law::living(world, id) {
                 crate::systems::law::raise_crime_on(world, id, (!murder).then_some(victim), Some(victim), crime, tile);
             }
+            // M15 W22: the Hunt's strike (after the crime: street silence reads the Hunt).
+            crate::systems::hunt::on_strike(world, id, victim, winner, died);
             StepResult::Done
+        }
+        // M15 W21: the answer to the Hunt's question.
+        ActionKind::AskAround => crate::systems::hunt::ask_around(world, id),
+        // M15 W22: contact (Done, the Attack next) or the timeout; W35: the
+        // guard's wait is over (cooled a day: the body is not stood over
+        // around the clock).
+        ActionKind::StakeOut => {
+            let guard =
+                world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::GuardBody);
+            if guard {
+                if let Some(c) = target {
+                    crate::systems::grudges::end_guard(world, id, c);
+                }
+                let until = world.tick + crate::time::TICKS_PER_DAY;
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.cooldowns.insert(crate::components::GoalKind::GuardBody, until);
+                }
+                StepResult::Done
+            } else if crate::systems::hunt::contact(world, id) {
+                StepResult::Done
+            } else {
+                crate::systems::hunt::stakeout_failed(world, id)
+            }
         }
         ActionKind::CarryCorpse => {
             let Some(c) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };

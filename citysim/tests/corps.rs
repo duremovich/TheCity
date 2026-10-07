@@ -756,6 +756,8 @@ fn test_hoard_tilts_contest() {
         virt_p: 0.0,
         hacked: false,
         virt_grudge: false,
+        fear: None,
+        vendetta: None,
     };
     let contest = |i: &faction::OrderInputs| {
         faction::score_orders(i, &w.config.gangs)

@@ -479,6 +479,11 @@ pub struct Sighting {
     pub tile: TilePos,
     pub tick: Tick,
     pub confidence: f32,
+    /// M15 W12 (plan deviation): relayed from a member's or a guard's eyes
+    /// (`gossip::maybe_sight`), not a trace or a camera; the M14 readers of
+    /// "a runner we caught" skip it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub relayed: bool,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

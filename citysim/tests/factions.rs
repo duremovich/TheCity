@@ -78,6 +78,8 @@ fn inputs() -> OrderInputs {
         virt_p: 0.0,
         hacked: false,
         virt_grudge: false,
+        fear: None,
+        vendetta: None,
     }
 }
 
@@ -847,6 +849,8 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         virt_p: 0.0,
         hacked: false,
         virt_grudge: false,
+        fear: None,
+        vendetta: None,
         hoard: 0.5,
         hoard_tilt: 0.2,
         courage: 0.8,

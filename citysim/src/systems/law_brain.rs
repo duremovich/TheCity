@@ -144,7 +144,19 @@ pub fn reports_by_gang(world: &World) -> BTreeMap<EntityId, usize> {
 /// target is kept unless a challenger leads it by `target_margin` reports.
 pub fn wanted_gang(world: &World) -> Option<(EntityId, usize)> {
     let now = world.tick;
-    let counts: BTreeMap<EntityId, usize> = reports_by_gang(world)
+    let mut counts: BTreeMap<EntityId, usize> = reports_by_gang(world);
+    // M15 W34: ranked by gang heat, in reports-equivalents (`heat ×
+    // crackdown_reports`, never below the reports themselves).
+    if world.config.gossip.enabled {
+        let full = crackdown_reports(world) as f32;
+        for &g in world.gang_list() {
+            let heat = crate::systems::reputation::rep(world, g).heat;
+            let eq = (heat * full).round() as usize;
+            let n = counts.entry(g).or_insert(0);
+            *n = (*n).max(eq);
+        }
+    }
+    let counts: BTreeMap<EntityId, usize> = counts
         .into_iter()
         .filter(|&(g, n)| {
             n > 0 && world.comp::<crate::components::Gang>(g).is_some_and(|gg| gg.paid_until.is_none_or(|t| t <= now))
@@ -565,7 +577,15 @@ pub fn gather_stance_inputs(world: &World, d: DistrictId) -> Option<StanceInputs
     let reported = top_gang(world, d);
     let landlord = gang_landlord(world, d);
     let top = reported.map(|(g, _)| g).or(landlord);
-    let pressure = reported.map_or(0.0, |(_, n)| (n as f32 / crackdown_reports_in(world, d) as f32).clamp(0.0, 1.0));
+    let mut pressure =
+        reported.map_or(0.0, |(_, n)| (n as f32 / crackdown_reports_in(world, d) as f32).clamp(0.0, 1.0));
+    // M15 W34: a hot gang (a landlord too) draws pressure without reports.
+    if world.config.gossip.enabled {
+        if let Some(g) = top {
+            let heat = crate::systems::reputation::rep(world, g).heat;
+            pressure = pressure.max((heat * world.config.reputation.heat_pressure_w).clamp(0.0, 1.0));
+        }
+    }
     let mean = mean_crime_rate(world);
     let crime = if mean > 0.0 { (dist.crime_rate / mean).min(2.0) / 2.0 } else { 0.0 };
     Some(StanceInputs {
