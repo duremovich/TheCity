@@ -229,6 +229,36 @@ fn test_turned_robot_fights_for_patron() {
     assert_eq!(theirs, vec![member], "it fights for its patron only");
 }
 
+/// Phase 5 (the gate's robot bullet became a finding): a god `RunNow` Door
+/// on a robot-guarded corp building is a Robot run, as the Raid prelude's,
+/// and at ICE 0 (no contest, so no dice) its Out turns the robot for the
+/// runner: `RobotTurned`, `Asset.turned`, the counter.
+#[test]
+fn test_god_door_run_on_robot_building_turns_the_robot() {
+    use citysim::PlayerCommand;
+    let mut w = world();
+    let (b, corp) = corp_building(&w, BuildingKind::Farm);
+    let via = adult(&mut w, &[]);
+    let robot = post(&mut w, via, AssetKind::Robot, 2, corp, b);
+    assert_eq!(robots::powered_robot(&w, b), Some(robot));
+    let n = virt::node_of_building(&w, b).expect("node");
+    set_ice(&mut w, n, 0);
+    let a = adult(&mut w, &[via]);
+    arm(&mut w, a, 3, 0.9);
+    w.push_command(PlayerCommand::RunNow { agent: a, target: b, purpose: Purpose::Door });
+    w.apply_commands();
+    let o = w.run_orders.get(&a).cloned().expect("a RunNow order");
+    assert_eq!((o.purpose, o.target, o.why), (Purpose::Robot(robot), n, RunWhy::God));
+    seat(&mut w, a, o.chair);
+    virt::start_run(&mut w, a).expect("the run starts");
+    finish(&mut w);
+    let r = w.run_log.back().expect("logged");
+    assert_eq!(r.outcome, Some(RunOutcome::Success));
+    assert_eq!(w.comp::<citysim::Asset>(robot).and_then(|x| x.turned).map(|(side, _)| side), Some(a));
+    assert_eq!(w.stats.current.virt.robots_turned, 1);
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::RobotTurned));
+}
+
 /// Plan 3.6 (V28, V33): a T3 camera against a tier-1 thief: a sighting in
 /// the owner's database and a report with no witness; under Blind nothing,
 /// under DoorOpen the camera still contests.

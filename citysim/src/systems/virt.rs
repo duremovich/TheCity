@@ -776,6 +776,12 @@ pub fn god_run_now(world: &mut World, agent: EntityId, target: EntityId, purpose
         }
         _ => node_of_building(world, target).ok_or("the target has no node")?,
     };
+    // Phase 5: a Door on a building with a powered robot posted takes the
+    // robot, as the Raid prelude does (V32).
+    let purpose = match (purpose, crate::systems::robots::powered_robot(world, target)) {
+        (Purpose::Door, Some(r)) => Purpose::Robot(r),
+        (p, _) => p,
+    };
     let patron = None;
     let chair = chair_for(world, agent, patron).ok_or("no chair")?.building;
     let now = world.tick;
@@ -2727,6 +2733,54 @@ pub fn secure_ice(world: &mut World, corp: EntityId) {
         }
         if install_ice(world, Some(corp), n) {
             raised += 1;
+        }
+    }
+}
+
+/// Days a Virt loss keeps its node on [`harden_robbed`]'s list (spec: "the
+/// node that was robbed last week").
+const HARDEN_DAYS: Tick = 7;
+
+/// Phase 5 (calibration; plan V27 deviation): whatever its order, a corp
+/// raises ICE one tier a day on a node it was robbed on: first a node with
+/// a Virt loss since the last midnight (the newest first) while it is below
+/// ICE 3 (the robbery is the evidence, so the value target does not bind:
+/// a drained Lab's value falls with its store), then a node with a loss
+/// within `HARDEN_DAYS` still below its `ice_target` (the loss term lifts
+/// it). Paid only from above M13's fleet reserve (`treasury_ref / 4`), and
+/// without Secure's cash multiple; under Secure it follows Secure's own pass
+/// ([`secure_ice`], whose value target can leave a drained Lab alone). Before it, ICE moved only under Secure, which a
+/// robbed corp seldom held (the losses consideration reads a Lab's 90-coin
+/// theft against a treasury of thousands): on seeds 42-44 a Virt loss saw
+/// its node's ICE rise within 7 days in 3 of 11 episodes.
+pub fn harden_robbed(world: &mut World, corp: EntityId) {
+    if !enabled(world) {
+        return;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return };
+    let now = world.tick;
+    let horizon = now.saturating_sub(HARDEN_DAYS * TICKS_PER_DAY);
+    let fresh = now.saturating_sub(TICKS_PER_DAY);
+    let reserve = c.treasury_ref / 4;
+    let mut recent: Vec<(bool, NodeId)> = Vec::new();
+    for &(t, n) in c.virt_losses.iter().rev().filter(|&&(t, _)| t >= horizon) {
+        if !recent.iter().any(|&(_, m)| m == n) {
+            recent.push((t >= fresh, n));
+        }
+    }
+    // Fresh losses first (stable: newest first within each group).
+    recent.sort_by_key(|&(f, _)| !f);
+    for (f, n) in recent {
+        if owner_of(world, n) != Some(corp) {
+            continue;
+        }
+        let want = if f { 3 } else { ice_target(world, n) };
+        if ice_eff(world, n) >= want {
+            continue;
+        }
+        let Some((cost, ..)) = ice_quote(world, Some(corp), n) else { continue };
+        if world.purse(Some(corp)) - cost >= reserve && install_ice(world, Some(corp), n) {
+            return;
         }
     }
 }

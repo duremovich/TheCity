@@ -263,6 +263,23 @@ pub enum PlayerCommand {
         target: EntityId,
         purpose: crate::virt::Purpose,
     },
+    // --- M14 god commands (plan V42, phase 5: the god scenarios' plurals).
+    /// Wipe the Data on every node the corp owns (`tech::wipe_store` each,
+    /// ascending; the wipe rule drops a tier when no backup is left).
+    WipeCorpData(EntityId),
+    /// `GrantDeck` to the `n` adults living in the district with the best
+    /// hacking (ties the lower id) who carry no deck.
+    GrantDecks {
+        district: crate::components::DistrictId,
+        n: u16,
+        tier: u8,
+    },
+    /// `SetIce` on every node the corp owns (building nodes and its
+    /// Ledger), the city's own (maker `None`), free.
+    SetCorpIce {
+        corp: EntityId,
+        tier: u8,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -691,7 +708,10 @@ impl World {
             | PlayerCommand::GrantDeck { .. }
             | PlayerCommand::SetIce { .. }
             | PlayerCommand::Fry(_)
-            | PlayerCommand::RunNow { .. } => {
+            | PlayerCommand::RunNow { .. }
+            | PlayerCommand::WipeCorpData(_)
+            | PlayerCommand::GrantDecks { .. }
+            | PlayerCommand::SetCorpIce { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -862,7 +882,10 @@ impl World {
             | PlayerCommand::GrantDeck { .. }
             | PlayerCommand::SetIce { .. }
             | PlayerCommand::Fry(_)
-            | PlayerCommand::RunNow { .. } => self.cmd_god_virt(cmd),
+            | PlayerCommand::RunNow { .. }
+            | PlayerCommand::WipeCorpData(_)
+            | PlayerCommand::GrantDecks { .. }
+            | PlayerCommand::SetCorpIce { .. } => self.cmd_god_virt(cmd),
             _ => self.cmd_god_corp(cmd),
         }
     }
@@ -921,6 +944,67 @@ impl World {
             PlayerCommand::RunNow { agent, target, purpose } => {
                 let text = virt::god_run_now(self, agent, target, purpose).map_err(|e| format!("RunNow: {e}"))?;
                 Ok((vec![agent, target], text))
+            }
+            PlayerCommand::WipeCorpData(corp) => {
+                if !self.has::<Corp>(corp) {
+                    return Err("WipeCorpData: no such corp".into());
+                }
+                virt::relink(self);
+                let nodes: Vec<crate::virt::NodeId> = (0..self.virt.nodes.len())
+                    .map(|i| crate::virt::NodeId(i as u16))
+                    .filter(|&n| self.virt.node(n).is_some_and(|x| x.alive && x.owner == Some(corp)))
+                    .collect();
+                let units: u32 = nodes.into_iter().map(|n| tech::wipe_store(self, n, None)).sum();
+                Ok((vec![corp], format!("wiped {units} Data across {}", self.owner_label(Some(corp)))))
+            }
+            PlayerCommand::GrantDecks { district, n, tier } => {
+                let mut picks: Vec<(f32, EntityId)> = self
+                    .citizens()
+                    .into_iter()
+                    .filter(|&a| crate::systems::demography::is_adult(self, a))
+                    .filter(|&a| self.comp::<crate::components::Kit>(a).is_none_or(|k| k.deck.is_none()))
+                    .filter(|&a| {
+                        self.comp::<crate::components::Household>(a)
+                            .and_then(|h| h.home)
+                            .is_some_and(|h| self.district_of_building(h) == district)
+                    })
+                    .map(|a| (self.comp::<crate::components::Skills>(a).map_or(0.0, |s| s.hacking), a))
+                    .collect();
+                picks.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+                let mut given = Vec::new();
+                for (_, a) in picks.into_iter().take(usize::from(n)) {
+                    if crate::systems::assets::grant(self, a, crate::components::AssetKind::Deck, tier).is_ok() {
+                        given.push(a);
+                    }
+                }
+                if given.is_empty() {
+                    return Err(format!("GrantDecks: no adult without a deck lives in district {}", district.index()));
+                }
+                let text =
+                    format!("granted {} adults of district {} a tier-{tier} Deck", given.len(), district.index());
+                Ok((given, text))
+            }
+            PlayerCommand::SetCorpIce { corp, tier } => {
+                if !self.has::<Corp>(corp) {
+                    return Err("SetCorpIce: no such corp".into());
+                }
+                virt::relink(self);
+                let tier = tier.min(3);
+                let nodes: Vec<crate::virt::NodeId> = (0..self.virt.nodes.len())
+                    .map(|i| crate::virt::NodeId(i as u16))
+                    .filter(|&n| self.virt.node(n).is_some_and(|x| x.alive && x.owner == Some(corp)))
+                    .collect();
+                let mut set = 0;
+                for n in nodes {
+                    if let Some(p) = virt::profile_mut(self, n) {
+                        p.ice = tier;
+                        p.ice_maker = None;
+                        p.ice_arrears = 0;
+                        set += 1;
+                    }
+                }
+                virt::bump_epoch(self);
+                Ok((vec![corp], format!("set {set} of {}'s nodes to ICE {tier}", self.owner_label(Some(corp)))))
             }
             _ => Err("not a Virt god command".into()),
         }

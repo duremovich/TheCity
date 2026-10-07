@@ -203,6 +203,11 @@ pub fn ice_upkeep(world: &mut World) {
             }
             OwnerKind::Corp(_) => {
                 ownership::charge(world, owner, None, cost, Flow::IceUpkeep);
+                // Phase 5: a corp's ICE spend (the panel's and the gate's
+                // 30-day window) counts its upkeep as well as its installs.
+                if let Some(c) = owner.and_then(|o| world.comp_mut::<Corp>(o)) {
+                    c.ice_spend_today += cost;
+                }
                 true
             }
             OwnerKind::Gang(_) | OwnerKind::Agent(_) => {
@@ -220,6 +225,17 @@ pub fn ice_upkeep(world: &mut World) {
 /// and `upkeep_data[tier]` units from the holding: both available, both are
 /// paid and the lapse resets; short on either, nothing is paid and the
 /// lapse grows; at `decay_days` the track drops a tier. Tier 1 never decays.
+///
+/// Phase 5 (calibration, the handoff's "upkeep teeth"): the coins count as
+/// available only while paying them leaves M13's fleet reserve
+/// (`treasury_ref / 4`, the floor every M14 corp spend keeps) in the
+/// treasury. A corp sliding toward bankruptcy stops paying its licences
+/// before anything else and lapses: the spec's "a corp that let its Lab
+/// budget slide", without the upkeep itself pushing anyone under. With no
+/// coins due the floor is 0 (a corp in the red still lapses, as before):
+/// the shipped `upkeep_coins` is 0 (every coin cost Zetatech, at
+/// break-even, about a day of life; see `assets/config.toml`), so the rule
+/// waits for an economy that carries licences.
 pub fn research_upkeep(world: &mut World, corp: EntityId) {
     for track in Track::ALL {
         let Some(tier) = world.comp::<Corp>(corp).map(|c| c.tech.tier_of(track)) else { return };
@@ -227,7 +243,8 @@ pub fn research_upkeep(world: &mut World, corp: EntityId) {
             continue;
         }
         let (coins, units) = (world.config.tech.upkeep_coins_at(tier), world.config.tech.upkeep_data_at(tier));
-        let ok = world.purse(Some(corp)) >= coins && virt::holding(world, corp, track) >= units;
+        let floor = if coins > 0 { world.comp::<Corp>(corp).map_or(0, |c| c.treasury_ref / 4) } else { 0 };
+        let ok = world.purse(Some(corp)) - coins >= floor && virt::holding(world, corp, track) >= units;
         if ok {
             ownership::charge(world, Some(corp), None, coins, Flow::Research);
             take_data(world, corp, track, units);
@@ -553,7 +570,8 @@ pub fn reset_focus(world: &mut World, corp: EntityId) {
 }
 
 /// V31 inputs: `(tech_gap, max_lapse)`: the largest rival tier lead in the
-/// focus track ÷ 2, and the largest `lapse ÷ decay_days`.
+/// focus track ÷ 2, and the largest `lapse ÷ decay_days`. VirtRaid reads
+/// this gap; Research reads [`research_gap`].
 pub fn research_inputs(world: &World, corp: EntityId) -> (f32, f32) {
     let Some(c) = world.comp::<Corp>(corp) else { return (0.0, 0.0) };
     let focus = c.tech.focus;
@@ -570,6 +588,25 @@ pub fn research_inputs(world: &World, corp: EntityId) -> (f32, f32) {
     let decay = f32::from(world.config.tech.decay_days.max(1));
     let lapse = c.tech.lapse.iter().map(|&l| f32::from(l) / decay).fold(0.0f32, f32::max);
     (gap.clamp(0.0, 1.0), lapse.clamp(0.0, 1.0))
+}
+
+/// M14 phase 5 (deviation from the spec's Research score): Research's tech
+/// gap, `(best − own tier in focus) ÷ 2` clamped to 0..=1, where `best` is
+/// the niche rivals' best and, with `[tech] research_gap_street`, also the
+/// street tier ([`street_tier`]: the best living corp's tier in the track).
+/// In the spec only niche rivals count, and the only rival lead in the city
+/// at seed is Militech's Deck 2 against Arasaka's 3, so no other corp ever
+/// had a reason to research.
+pub fn research_gap(world: &World, corp: EntityId) -> f32 {
+    let (niche_gap, _) = research_inputs(world, corp);
+    if !world.config.tech.research_gap_street {
+        return niche_gap;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return niche_gap };
+    let focus = c.tech.focus;
+    let street = street_tier(world, focus).0;
+    let gap = ((f32::from(street) - f32::from(c.tech.tier_of(focus))) / 2.0).clamp(0.0, 1.0);
+    gap.max(niche_gap)
 }
 
 /// A faction's Lab nodes (alive), ascending.
@@ -589,6 +626,19 @@ pub fn labs_of(world: &World, faction: EntityId) -> Vec<EntityId> {
 /// Is `corp` a Tech-niche corp (M13 D17)?
 fn is_tech(world: &World, corp: EntityId) -> bool {
     world.comp::<Corp>(corp).is_some_and(|c| c.niches.contains(&crate::components::Niche::Tech))
+}
+
+/// Does `corp` buy Data in `track` (V17 plus the phase 5 calibration)? A
+/// Tech-niche corp owning a Lab buys every track (the spec); any corp
+/// buys the track one of its Labs researches (`Building.focus`), for its
+/// own tree. Phase 5: with Zetatech the only buyer the market died with
+/// Zetatech's treasury (below its reserve from day ~50, bankrupt day
+/// 89-101 with the plane on or off) and `data_sold` read 20/0/0 on seeds
+/// 42-44 while gangs moved 600+ units Hideout to Hideout after day 80.
+pub fn buys_track(world: &World, corp: EntityId, track: Track) -> bool {
+    let labs = labs_of(world, corp);
+    (is_tech(world, corp) && !labs.is_empty())
+        || labs.iter().any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.focus == Some(track)))
 }
 
 /// V17: a unit's price at `buyer`: `data_price × level(Tech)`, at least 1.
@@ -613,16 +663,16 @@ fn can_buy_data(world: &World, corp: EntityId) -> bool {
     world.purse(Some(corp)) >= price && data_budget(world, corp) >= price
 }
 
-/// V17: the Data buyer for `track`: the Tech-niche corp owning a Lab with
-/// the lowest holding in the track that can pay for a unit within its
-/// procurement budget ([`data_budget`]; ties the lower id), never `seller`;
-/// `only` restricts it to one corp (an agent selling at that corp's Lab).
+/// V17: the Data buyer for `track`: the corp buying the track
+/// ([`buys_track`]) with the lowest holding in it that can pay for a unit
+/// within its procurement budget ([`data_budget`]; ties the lower id), never
+/// `seller`; `only` restricts it to one corp (an agent selling at that
+/// corp's Lab).
 fn data_buyer(world: &World, track: Track, seller: EntityId, only: Option<EntityId>) -> Option<EntityId> {
     world
         .corps()
         .into_iter()
-        .filter(|&c| c != seller && only.is_none_or(|o| o == c) && is_tech(world, c))
-        .filter(|&c| !labs_of(world, c).is_empty())
+        .filter(|&c| c != seller && only.is_none_or(|o| o == c) && buys_track(world, c, track))
         .filter(|&c| can_buy_data(world, c))
         .map(|c| (virt::holding(world, c, track), c))
         .min()
@@ -677,23 +727,37 @@ pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, 
     n
 }
 
-/// V29: is `b` a Lab of a Tech-niche corp (where a runner sells Data)?
+/// V29: is `b` a corp's Lab whose owner buys Data in some track
+/// ([`buys_track`]: a Tech corp's, or a Lab with a focus): where a runner
+/// sells Data.
 pub fn is_data_buyer_lab(world: &World, b: EntityId) -> bool {
-    world
-        .comp::<Building>(b)
-        .is_some_and(|bd| bd.kind == BuildingKind::Lab && !bd.demolished && bd.owner.is_some_and(|o| is_tech(world, o)))
+    world.comp::<Building>(b).is_some_and(|bd| {
+        bd.kind == BuildingKind::Lab
+            && !bd.demolished
+            && bd.owner.is_some_and(|o| world.has::<Corp>(o) && Track::ALL.into_iter().any(|t| buys_track(world, o, t)))
+    })
 }
 
-/// V29 (`LocationKey::DataBuyer`): the open Lab of a Tech corp that can pay
-/// for a unit nearest the agent (Manhattan, ties the lower id).
+/// V29 (`LocationKey::DataBuyer`): the open buyer Lab nearest the agent
+/// (Manhattan, ties the lower id) whose owner buys a track the agent's deck
+/// holds and can pay for a unit.
 pub fn data_buyer_lab(world: &World, agent: EntityId) -> Option<EntityId> {
     let tile = world.comp::<crate::components::Position>(agent)?.tile;
+    let held = world
+        .comp::<crate::components::Kit>(agent)
+        .and_then(|k| k.deck)
+        .and_then(|d| world.comp::<crate::components::Asset>(d))
+        .map_or([0; 3], |a| a.data);
     world
         .buildings_of_kind(BuildingKind::Lab)
         .iter()
         .copied()
         .filter(|&b| is_data_buyer_lab(world, b) && !world.is_closed(b))
-        .filter(|&b| world.owner_of(b).is_some_and(|o| can_buy_data(world, o)))
+        .filter(|&b| {
+            world.owner_of(b).is_some_and(|o| {
+                can_buy_data(world, o) && Track::ALL.into_iter().any(|t| held[t.index()] > 0 && buys_track(world, o, t))
+            })
+        })
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(tile), b)))
         .min()
         .map(|(_, b)| b)

@@ -69,6 +69,12 @@ pub struct VirtInputs {
     pub tech_gap: f32,
     /// The largest `lapse / decay_days`.
     pub max_lapse: f32,
+    /// M14 phase 5: Research's gap (`tech::research_gap`, the street tier
+    /// with `[tech] research_gap_street`) and the floor under its lapse term.
+    pub research_gap: f32,
+    pub lapse_floor: f32,
+    /// M14 phase 5: `[tech] research_min_days` of cashflow on the books.
+    pub research_ready: bool,
     pub has_lab: bool,
     /// Vacant Lots while the treasury holds `found_cost.lab`.
     pub lab_lots: usize,
@@ -421,6 +427,9 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
             enabled: true,
             tech_gap,
             max_lapse,
+            research_gap: crate::systems::tech::research_gap(world, corp),
+            lapse_floor: world.config.tech.research_lapse_floor.clamp(0.0, 1.0),
+            research_ready: c.cashflow.len() >= world.config.tech.research_min_days as usize,
             has_lab: !crate::systems::tech::labs_of(world, corp).is_empty(),
             lab_lots: if lab_cost > 0 && c.treasury >= lab_cost { lots_total } else { 0 },
             run_ready: run.is_some(),
@@ -607,11 +616,17 @@ fn score_corp_wide(i: &CorpInputs, n: Niche, cfg: &CorpsCfg) -> Vec<CorpOrderSco
                     vec![
                         Consideration::new(
                             "lab & cash",
-                            can((i.virt.has_lab || i.virt.lab_lots > 0) && i.cash >= 0.3),
+                            can((i.virt.has_lab || i.virt.lab_lots > 0) && i.cash >= 0.3 && i.virt.research_ready),
                             GATE,
                         ),
-                        Consideration::new("tech gap", i.virt.tech_gap, Curve::Linear { m: 0.6, b: 0.4 }),
-                        Consideration::new("max lapse", i.virt.max_lapse, Curve::Logistic { k: 8.0, mid: 0.4 }),
+                        Consideration::new("tech gap", i.virt.research_gap, Curve::Linear { m: 0.6, b: 0.4 }),
+                        {
+                            // M14 phase 5: the lapse term floored at `[tech] research_lapse_floor`.
+                            let mut c =
+                                Consideration::new("max lapse", i.virt.max_lapse, Curve::Logistic { k: 8.0, mid: 0.4 });
+                            c.output = c.output.max(i.virt.lapse_floor);
+                            c
+                        },
                         Consideration::new("cash", i.cash, Curve::Linear { m: 0.5, b: 0.5 }),
                         Consideration::new("greed", i.greed, Curve::Linear { m: 0.4, b: 0.6 }),
                     ],
@@ -748,9 +763,25 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
     }
 }
 
-/// An immediate rescoring with no hysteresis; the pending shocks are consumed.
+/// The margin a shock rescore needs to replace the standing order: the
+/// standing order wins exact ties only (scores within 1e-6).
+///
+/// M14 phase 5: with the Research change Nutrix scored Research and Secure
+/// at the same value and flipped between them on every shock from day 47.
+/// A real margin (the daily `[corps] hysteresis`) also moved plane-off
+/// shock rescores at margins 0.04-0.09, an M11 rule change, so only ties.
+pub fn shock_hysteresis(_cfg: &crate::config::CorpsCfg) -> f32 {
+    SHOCK_TIE
+}
+
+/// Scores this close are a tie on a shock rescore (the standing order stays).
+const SHOCK_TIE: f32 = 1e-6;
+
+/// An immediate rescoring in which the standing order wins exact ties
+/// ([`shock_hysteresis`]); the pending shocks are consumed.
 pub fn rethink(world: &mut World, corp: EntityId) {
-    rescore(world, corp, 0.0, "shock");
+    let h = shock_hysteresis(&world.config.corps);
+    rescore(world, corp, h, "shock");
     if let Some(c) = world.comp_mut::<Corp>(corp) {
         c.shocks.clear();
     }
@@ -1086,7 +1117,11 @@ fn research(world: &mut World, corp: EntityId) {
         .iter()
         .any(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.focus == Some(focus)));
     let cost = world.config.corps.found_cost.lab;
-    if !has && cost > 0 && world.purse(Some(corp)) >= cost {
+    // M14 phase 5: a Lab only after `[tech] research_build_days` of Research
+    // (a one-day flip into Research, as every corp's day-0 pick, builds none).
+    let held = world.comp::<Corp>(corp).map_or(0, |c| world.tick.saturating_sub(c.order_since));
+    let committed = held >= u64::from(world.config.tech.research_build_days) * TICKS_PER_DAY;
+    if !has && committed && cost > 0 && world.purse(Some(corp)) >= cost {
         if let Some(lot) = lot_near(world, corp) {
             if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Lab, Some(corp)).is_ok() {
                 ownership::pay(world, Some(corp), None, cost, Flow::Found);
@@ -1132,6 +1167,8 @@ pub fn run(world: &mut World) {
         }
         for &c in &corps {
             act(world, c);
+            // M14 phase 5: the node robbed last week hardens under any order.
+            crate::systems::virt::harden_robbed(world, c);
             // M13 D44: one fleet purchase (or a Hunker sale) inside the order.
             crate::systems::vehicles::corp_fleet(world, c);
         }

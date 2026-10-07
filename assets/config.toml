@@ -1014,6 +1014,9 @@ gang_decks_max = 3
 
 [ice]
 hack_w = 1.0
+# M14 phase 5: tried [0, 60, 250, 800] and [0, 80, 600, 2000] (the dole-city price cut decks and implants
+# had). Cheap ICE made Secure buy a tier for every node with a gap, and Zetatech, which dies near day 84 on
+# seeds 42-49 at main (97 with the plane off), went bankrupt 8-10 days earlier on average. Kept at the plan's.
 ice_price = [0, 150, 600, 2000]
 self_install_frac = 0.5
 # V47 (phase 1, second knob): [0, 3, 8, 20] -> [0, 0, 1, 2]. The plan's table cost the nine corps
@@ -1025,17 +1028,26 @@ ice_off_days = 2
 # it put every Farm and Garage at target 2, Secure spent 600 a tier and the Food corps bought 1 truck by
 # day 30 against M13's 8 (the M13 gate's truck bullets failed). Kept at the plan's steps.
 ice_value_steps = [200, 1500, 6000]
-ice_seed = { lab = 2, security_office = 2, farm = 1, market = 1, hideout = 0, clinic = 1, garage = 1, bar = 0, hotel = 0 }
+# M14 phase 5: hideout 0 -> 1. At 0 a gang-on-gang run rolled no contest, so it was never traced, no gang
+# learnt who robbed it (`Shock::Hacked { by }`) and no grudge wipe was ever ordered (DataWiped 0 on seeds
+# 42-44). Seeded ICE is the city's own (no upkeep at tier 1); a broke gang still could not buy it at 150.
+ice_seed = { lab = 2, security_office = 2, farm = 1, market = 1, hideout = 1, clinic = 1, garage = 1, bar = 0, hotel = 0 }
 alarm_hours = 48
 fry_base = [0.0, 0.05, 0.25, 0.6]
 fry_gap = 1.0
 fry_sanity = 0.3
 fry_energy = 0.5
-p_fry_kill = [0.0, 0.0, 0.05, 0.3]
+# M14 phase 5: [0, 0, 0.05, 0.3] -> [0, 0, 0.15, 0.3]. Flatlines need ICE 3 at a gap of 1.5 (rare: few nodes
+# reach ICE 3) or the ICE-2 kill roll; at 0.05 seeds 42-44 flatlined 0/0/1 with 6-19 fried (band 1-10); at
+# 0.15, 0/1/2 (1-6 over seeds 42-49) and fried unchanged in 3-30.
+p_fry_kill = [0.0, 0.0, 0.15, 0.3]
 flatline_gap = 1.5
 p_flatline = 0.8
 fry_wear = 20
-trace_p = [0.0, 0.2, 0.45, 0.7]
+# M14 phase 5: tier 1 0.2 -> 0.35. With Hideouts at ICE 1 (ice_seed) a lost gang-on-gang contest is traced
+# often enough to name the robbing gang: seed 44's three grudge wipes appear at 0.35, none at 0.2. The traced
+# share of lost runs reads 0.19-0.34 over seeds 42-47 (band 20-50 %; 0.33, 0.196, 0.29 on 42-44).
+trace_p = [0.0, 0.35, 0.45, 0.7]
 stealth_w = 0.5
 daze_ticks = 30
 act_ticks = { data = 30, ledger = 30, door = 10, robot = 15, camera = 5 }
@@ -1066,11 +1078,20 @@ buy_budget_frac = 0.05
 
 [tech]
 requires = { implant = [1, 2, 3], deck = [1, 2, 3], robot = [1, 2, 3], camera = [1, 2, 3], motorcycle = [1], car = [1, 2], truck = [2], flyer = [3], pack = [1, 1] }
-tier_cost = [0, 0, 400, 1200]      # Data to reach tier i
+# M14 phase 5 (with the Research change below): tier 2 400 -> 200. A Research-built Lab makes ~10 units a
+# day and a corp holds Research a few days at a time; at 400 no corp gained a tier on seeds 42-49 (labs built
+# on 5 of 8), at 200 Nutrix reaches Industry 2 on seeds 43 and 45 of the gate's 42-47. Tier 3 stays at 1,200.
+tier_cost = [0, 0, 200, 1200]      # Data to reach tier i
 tier_coins = [0, 0, 800, 2500]
 upkeep_data = [0, 0, 3, 8]
 # V47 (phase 1, first knob): [0, 0, 15, 40] -> 0. Zetatech's 80 a day of licences (Chrome 3 and
 # Industry 3) bankrupted it on day 44 (M13: 80). The Data upkeep and the lapse rule stand.
+# M14 phase 5 (the handoff's "upkeep teeth"): coins now count as paid only above the fleet reserve
+# (`tech::research_upkeep`), so a sliding corp lapses before the licences sink it. Tried [0, 0, 3, 8] and
+# [0, 0, 0, 8] with that floor at treasury_ref / 4 and / 8: every coin still costs Zetatech, which is at
+# break-even, about a day of life (bankrupt on day 75 against 84 at 0, mean of seeds 42-49), and the tier-3
+# losses run 2-6 a seed. Kept at 0: TechLost (one a seed on 6 of seeds 42-49, Militech's Deck 2) comes from
+# Data (Arasaka's nightly VirtRaid drains Militech's Lab below upkeep: seed 43, day 33) or a corp in the red.
 upkeep_coins = [0, 0, 0, 0]
 decay_days = 7
 research_rate = 40
@@ -1081,6 +1102,27 @@ seed = { Zetatech = [3, 1, 3], Arasaka = [1, 3, 1], Militech = [1, 2, 1] }   # [
 # Plan V47. Measured: a bigger grant does not help (6,000 a Lab left Militech bankrupt on day 69):
 # Secure spends it at once on robots (seed 42: 7 robots on days 1-5 against M13's 4).
 seed_lab_grant = 2000
+# M14 phase 5 (deviation from the spec's Research score; orchestrator decision): the spec scored Research as
+# a product with the `max lapse` logistic (0.04 at lapse 0) and a tech gap over niche rivals only (the only lead
+# at seed is Arasaka's Deck 3 over Militech), so the best Research score on seeds 42-49 was 0.07-0.09 against
+# standing orders at 0.3-0.6 and the tree only went down.
+# research_gap_street: the gap reads the best living corp's tier in the corp's focus track (Zetatech's
+# Industry 3 for the Food and Housing corps) as well as niche rivals.
+research_gap_street = true
+# research_lapse_floor: the lapse term never reads below this. 0.25: Research won only the day-0 pick; 0.4:
+# Nutrix holds it 1-21 corp-days a run (with the gates below) and scores 0.45 against its 0.43-0.50 standing order.
+research_lapse_floor = 0.4
+# research_build_days: Research must be held this many days before it builds a Lab. At 0 with the floor every
+# Housing corp took Research for the day-0 pick and built a Lab (800) at ICE 0, a free Data mine: stolen
+# Data ran 3,000-8,400 units a run and Zetatech died 9 days earlier. At 3: 0-2 Labs a seed, by Nutrix or an
+# incorporated corp.
+research_build_days = 3
+# research_min_days: Research is gated shut until the corp has this many days of cashflow on its books. At 0
+# the floor made Research the day-0 pick of every Housing corp and Militech (0.44 against Hunker's 0.18),
+# displacing Militech's day-0 Undercut in Security: Arasaka alone undercut and held a Security monopoly from
+# day 1 (the M11 gate's bullet), and Nutrix and Vatra spent day 0 in Research (seed 42's Farms with a truck by
+# day 30 fell 8 -> 4, the M13 bullet). At 14 both read as at 36f4715 (no monopoly before day 60; 8 trucks).
+research_min_days = 14
 
 [hack]
 hack_min = 0.3

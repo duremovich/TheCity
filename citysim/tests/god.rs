@@ -771,3 +771,480 @@ fn god_chase_civic_core() {
     );
     r.report_m13(control());
 }
+
+// ---------------------------------------------------------------------------
+// M14 god scenarios (docs/GOD_SCENARIOS_V5.md, plan 5.2): the Virt plane.
+// Seed 42, 105 days, each against its own unshocked control (`v5_control`).
+// Findings are printed; a world that fails to react goes into V5's gaps
+// list, not an assert. Each scenario asserts only that its god command
+// applied (a `PlayerAction`, not a `PlayerActionFailed`), and the door
+// scenario that its door runs were ordered.
+// ---------------------------------------------------------------------------
+
+/// One finished day of an M14 god run.
+#[derive(Clone, Debug, Default)]
+struct V5Day {
+    day: u64,
+    runs: u32,
+    runs_ok: u32,
+    stolen: u32,
+    sold: u32,
+    wiped: u32,
+    fried: u32,
+    flatlined: u32,
+    traced: u32,
+    ice_raised: u32,
+    ice_lowered: u32,
+    /// Ledger hacks on the Treasury, and the coins they took.
+    treasury_hits: u32,
+    treasury_taken: i64,
+    city_treasury: i64,
+    /// Thefts (Data or Ledger) on a named corp's nodes, keyed by corp name.
+    hits_on: std::collections::BTreeMap<String, u32>,
+    /// Living corps: treasury and `[chrome, deck, industry]` tiers, by name.
+    corps: std::collections::BTreeMap<String, (i64, [u8; 3])>,
+    /// Corps under `Research` at the day's end.
+    researching: Vec<String>,
+    /// Implant installs at tier 2 and tier 3 at a Clinic the named corp owns, by name.
+    implants_t23: std::collections::BTreeMap<String, u32>,
+    /// Corp-building raids won and lost (`raid::corp_raid`'s event).
+    corp_raids_won: u32,
+    corp_raids_lost: u32,
+}
+
+struct V5Run {
+    name: &'static str,
+    days: Vec<V5Day>,
+    /// `(tick, kind, text)` of the Virt, tech and raid story.
+    story: Vec<(u64, EventKind, String)>,
+    /// God commands that failed.
+    failed: Vec<String>,
+}
+
+const V5_END: u64 = 105;
+
+/// A named per-day reading of an M14 god run.
+type V5Series = (String, Box<dyn Fn(&V5Day) -> f64>);
+
+/// The corp named `name`, if alive.
+fn corp_named(w: &World, name: &str) -> Option<EntityId> {
+    w.corps().into_iter().find(|&c| w.comp::<citysim::Corp>(c).is_some_and(|cc| cc.name == name))
+}
+
+/// Seed 42 to `V5_END`, `hourly` called before every game hour (day, hour).
+fn run_v5(name: &'static str, mut hourly: impl FnMut(&mut World, u64, u64)) -> V5Run {
+    use citysim::TICKS_PER_HOUR;
+    let mut w = World::new(SEED, Config::load());
+    let mut days = Vec::new();
+    let mut story = Vec::new();
+    let mut failed = Vec::new();
+    let mut next_id = 0u64;
+    for day in 0..V5_END {
+        let mut d = V5Day { day, ..V5Day::default() };
+        for hour in 0..24 {
+            hourly(&mut w, day, hour);
+            w.run_ticks(TICKS_PER_HOUR);
+            let fresh: Vec<&citysim::Event> = w.events.iter().rev().take_while(|e| e.id >= next_id).collect();
+            for e in fresh.into_iter().rev() {
+                let corp_of =
+                    |x: Option<&EntityId>| x.and_then(|&c| w.comp::<citysim::Corp>(c)).map(|cc| cc.name.clone());
+                match e.kind {
+                    EventKind::LedgerHacked => {
+                        if e.actors.get(1).is_some_and(|&c| c == EntityId::NONE) {
+                            d.treasury_hits += 1;
+                            d.treasury_taken += e
+                                .text
+                                .split(" took ")
+                                .nth(1)
+                                .and_then(|t| t.split(' ').next())
+                                .and_then(|n| n.parse::<i64>().ok())
+                                .unwrap_or(0);
+                        } else if let Some(n) = corp_of(e.actors.get(1)) {
+                            *d.hits_on.entry(n).or_default() += 1;
+                        }
+                    }
+                    EventKind::DataStolen => {
+                        // `[runner, owner, …]`: the owner's name when a corp.
+                        if let Some(n) = corp_of(e.actors.get(1)) {
+                            *d.hits_on.entry(n).or_default() += 1;
+                        }
+                    }
+                    EventKind::Installed if e.text.contains(" T2 ") || e.text.contains(" T3 ") => {
+                        // `[agent, clinic, implant]` (`chrome::install`).
+                        let clinic = (e.actors.len() == 3).then(|| e.actors[1]);
+                        if let Some(n) = clinic.and_then(|b| w.owner_of(b)).and_then(|o| corp_of(Some(&o))) {
+                            *d.implants_t23.entry(n).or_default() += 1;
+                        }
+                    }
+                    EventKind::Raid if e.text.contains(" raided ") && e.text.contains("'s ") => {
+                        if e.text.contains(": Won") || e.text.contains(": Sacked") {
+                            d.corp_raids_won += 1;
+                        } else {
+                            d.corp_raids_lost += 1;
+                        }
+                    }
+                    EventKind::PlayerActionFailed => failed.push(format!("d{day} {}", e.text)),
+                    _ => {}
+                }
+                let told = matches!(
+                    e.kind,
+                    EventKind::TechLost
+                        | EventKind::TechGained
+                        | EventKind::DataWiped
+                        | EventKind::LedgerHacked
+                        | EventKind::DoorHacked
+                        | EventKind::RobotTurned
+                        | EventKind::Flatlined
+                        | EventKind::IceRaised
+                        | EventKind::IceLowered
+                        | EventKind::Bankrupt
+                        | EventKind::PlayerAction
+                        | EventKind::PlayerActionFailed
+                ) || (e.kind == EventKind::CorpOrder && e.text.contains("Research"))
+                    || (e.kind == EventKind::Raid && (e.text.contains("'s ") || e.text.contains("open doors")))
+                    || (e.kind == EventKind::JackedIn && e.text.contains("(a door on "));
+                if told {
+                    story.push((e.tick, e.kind, e.text.clone()));
+                }
+            }
+            next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        }
+        let row = w.stats.history.back().expect("a finished day").clone();
+        let v = &row.virt;
+        d.runs = v.runs;
+        d.runs_ok = v.runs_ok;
+        d.stolen = v.data_stolen;
+        d.sold = v.data_sold;
+        d.wiped = v.data_wiped;
+        d.fried = v.fried;
+        d.flatlined = v.flatlined;
+        d.traced = v.traced;
+        d.ice_raised = v.ice_raised;
+        d.ice_lowered = v.ice_lowered;
+        d.city_treasury = row.treasury;
+        for c in w.corps() {
+            let Some(cc) = w.comp::<citysim::Corp>(c) else { continue };
+            d.corps.insert(cc.name.clone(), (w.purse(Some(c)), cc.tech.tier));
+            if cc.order == citysim::CorpOrder::Research {
+                d.researching.push(cc.name.clone());
+            }
+        }
+        days.push(d);
+    }
+    V5Run { name, days, story, failed }
+}
+
+/// The unshocked M14 control, computed once per test process.
+fn v5_control() -> &'static V5Run {
+    static CONTROL: OnceLock<V5Run> = OnceLock::new();
+    CONTROL.get_or_init(|| run_v5("v5_control", |_, _, _| {}))
+}
+
+impl V5Run {
+    fn window(&self, from: u64, to: u64) -> impl Iterator<Item = &V5Day> {
+        self.days.iter().filter(move |d| d.day >= from && d.day < to)
+    }
+
+    fn sum(&self, from: u64, to: u64, f: impl Fn(&V5Day) -> f64) -> f64 {
+        self.window(from, to).map(f).sum()
+    }
+
+    /// The day a corp's row is last seen (its bankruptcy or dissolution), `None` while alive at the end.
+    fn gone(&self, corp: &str) -> Option<u64> {
+        let last = self.days.iter().rev().find(|d| d.corps.contains_key(corp))?;
+        (last.day + 1 < V5_END).then_some(last.day + 1)
+    }
+
+    fn tiers(&self, corp: &str, day: u64) -> Option<[u8; 3]> {
+        self.days.get(day as usize).and_then(|d| d.corps.get(corp)).map(|&(_, t)| t)
+    }
+
+    /// The side-by-side table against the control over `windows`, then the story from `from`.
+    fn print_v5(&self, control: &V5Run, windows: &[(u64, u64)], from: u64, extra: &[V5Series]) {
+        let mut o = String::new();
+        outln!(o, "\n================ {} ================", self.name);
+        out!(o, "{:<22}", "sum over days");
+        for (a, b) in windows {
+            out!(o, "{:>16}", format!("{a}-{b} / ctl"));
+        }
+        outln!(o);
+        let rows: Vec<V5Series> = vec![
+            ("runs".into(), Box::new(|d: &V5Day| f64::from(d.runs))),
+            ("runs ok".into(), Box::new(|d: &V5Day| f64::from(d.runs_ok))),
+            ("Data stolen".into(), Box::new(|d: &V5Day| f64::from(d.stolen))),
+            ("Data sold".into(), Box::new(|d: &V5Day| f64::from(d.sold))),
+            ("Data wiped".into(), Box::new(|d: &V5Day| f64::from(d.wiped))),
+            ("fried".into(), Box::new(|d: &V5Day| f64::from(d.fried))),
+            ("flatlined".into(), Box::new(|d: &V5Day| f64::from(d.flatlined))),
+            ("traced".into(), Box::new(|d: &V5Day| f64::from(d.traced))),
+            ("IceRaised".into(), Box::new(|d: &V5Day| f64::from(d.ice_raised))),
+            ("IceLowered".into(), Box::new(|d: &V5Day| f64::from(d.ice_lowered))),
+            ("Treasury hits".into(), Box::new(|d: &V5Day| f64::from(d.treasury_hits))),
+            ("Treasury taken".into(), Box::new(|d: &V5Day| d.treasury_taken as f64)),
+            ("corp raids won".into(), Box::new(|d: &V5Day| f64::from(d.corp_raids_won))),
+            ("corp raids lost".into(), Box::new(|d: &V5Day| f64::from(d.corp_raids_lost))),
+        ];
+        for (name, f) in rows.iter().chain(extra) {
+            out!(o, "{name:<22}");
+            for &(a, b) in windows {
+                out!(o, "{:>16}", format!("{:.0} / {:.0}", self.sum(a, b, f), control.sum(a, b, f)));
+            }
+            outln!(o);
+        }
+        for d in self.days.iter().filter(|d| d.day % 10 == 9) {
+            let c = control.days.get(d.day as usize);
+            let fmt = |x: &std::collections::BTreeMap<String, (i64, [u8; 3])>| {
+                x.iter()
+                    .map(|(n, (t, tier))| format!("{n} {t} [{}{}{}]", tier[0], tier[1], tier[2]))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            outln!(o, "  d{:<3} city {:>7} | {}", d.day, d.city_treasury, fmt(&d.corps));
+            if let Some(c) = c {
+                outln!(o, "   ctl city {:>7} | {}", c.city_treasury, fmt(&c.corps));
+            }
+        }
+        outln!(o, "story from day {from}:");
+        let told: Vec<_> = self.story.iter().filter(|(t, _, _)| t / TICKS_PER_DAY >= from).collect();
+        for (t, k, text) in told.iter().take(80) {
+            outln!(o, "  d{:<3} {k:?}: {text}", t / TICKS_PER_DAY);
+        }
+        if told.len() > 80 {
+            outln!(o, "  ... {} more", told.len() - 80);
+        }
+        if !self.failed.is_empty() {
+            outln!(o, "failed god commands: {:?}", self.failed);
+        }
+        eprint!("{o}");
+    }
+
+    fn assert_applied(&self) {
+        assert!(self.failed.is_empty(), "{}: a god command failed: {:?}", self.name, self.failed);
+        assert!(
+            self.story.iter().any(|(_, k, t)| *k == EventKind::PlayerAction && t.starts_with("God: ")
+                || *k == EventKind::PlayerAction && t.starts_with("City ICE")),
+            "{}: no god command applied",
+            self.name
+        );
+    }
+}
+
+/// Zetatech's Data wiped on day 20 (every node it owns). Does it lose
+/// Chrome 3 and Industry 3, do its Clinics' tier-2/3 installs stop, does a
+/// rival take `Research`?
+#[test]
+#[ignore]
+fn god_wipe_zetatech_day_20() {
+    const DAY: u64 = 20;
+    let r = run_v5("god_wipe_zetatech_day_20", |w, day, hour| {
+        if day == DAY && hour == 0 {
+            match corp_named(w, "Zetatech") {
+                Some(z) => w.push_command(PlayerCommand::WipeCorpData(z)),
+                None => eprintln!("no Zetatech on day {DAY}"),
+            }
+        }
+    });
+    let c = v5_control();
+    let implants = |name: &'static str| -> V5Series {
+        (
+            format!("{name} T2/T3 installs"),
+            Box::new(move |d: &V5Day| f64::from(d.implants_t23.get(name).copied().unwrap_or(0))),
+        )
+    };
+    let research = |d: &V5Day| d.researching.len() as f64;
+    r.print_v5(
+        c,
+        &[(0, DAY), (DAY, DAY + 7), (DAY, DAY + 30), (DAY + 30, V5_END)],
+        DAY,
+        &[implants("Zetatech"), ("corps in Research".into(), Box::new(research))],
+    );
+    let t = |run: &V5Run, d: u64| run.tiers("Zetatech", d);
+    eprintln!(
+        "Zetatech tiers [chrome deck industry]: day {} {:?} (control {:?}), day {} {:?} (control {:?}); gone on day {:?} (control {:?})",
+        DAY + 1,
+        t(&r, DAY + 1),
+        t(c, DAY + 1),
+        DAY + 30,
+        t(&r, DAY + 30),
+        t(c, DAY + 30),
+        r.gone("Zetatech"),
+        c.gone("Zetatech"),
+    );
+    let rivals: std::collections::BTreeSet<&String> =
+        r.window(DAY, V5_END).flat_map(|d| d.researching.iter()).collect();
+    eprintln!("corps that took Research after the wipe: {rivals:?}");
+    r.assert_applied();
+}
+
+/// Ten Sump Central adults (district 6) with the best hacking get tier-3
+/// decks on day 45. Is the Treasury hacked, does the city raise ICE, how
+/// many flatline?
+#[test]
+#[ignore]
+fn god_grant_decks_sump() {
+    let r = run_v5("god_grant_decks_sump", |w, day, hour| {
+        if day == SHOCK_DAY && hour == 0 {
+            w.push_command(PlayerCommand::GrantDecks { district: citysim::DistrictId(6), n: 10, tier: 3 });
+        }
+    });
+    let c = v5_control();
+    r.print_v5(c, &[(30, SHOCK_DAY), (SHOCK_DAY, SHOCK_DAY + 7), (SHOCK_DAY, 75), (75, V5_END)], SHOCK_DAY, &[]);
+    let city_raises = r
+        .story
+        .iter()
+        .filter(|(t, k, x)| *k == EventKind::IceRaised && t / TICKS_PER_DAY >= SHOCK_DAY && x.starts_with("the city "))
+        .count();
+    eprintln!("city ICE raises after the grant: {city_raises}");
+    r.assert_applied();
+}
+
+/// Every Arasaka node to ICE 0 on day 45. How fast is it bled, and does it
+/// buy its ICE back?
+#[test]
+#[ignore]
+fn god_arasaka_ice_0() {
+    let r = run_v5("god_arasaka_ice_0", |w, day, hour| {
+        if day == SHOCK_DAY && hour == 0 {
+            match corp_named(w, "Arasaka") {
+                Some(a) => w.push_command(PlayerCommand::SetCorpIce { corp: a, tier: 0 }),
+                None => eprintln!("no Arasaka on day {SHOCK_DAY}"),
+            }
+        }
+    });
+    let c = v5_control();
+    let hits: V5Series = (
+        "hits on Arasaka".to_string(),
+        Box::new(|d: &V5Day| f64::from(d.hits_on.get("Arasaka").copied().unwrap_or(0))),
+    );
+    let purse: V5Series = (
+        "Arasaka treasury (sum)".to_string(),
+        Box::new(|d: &V5Day| d.corps.get("Arasaka").map_or(0.0, |x| x.0 as f64)),
+    );
+    r.print_v5(
+        c,
+        &[(30, SHOCK_DAY), (SHOCK_DAY, SHOCK_DAY + 7), (SHOCK_DAY, 75), (75, V5_END)],
+        SHOCK_DAY,
+        &[hits, purse],
+    );
+    let first = r
+        .story
+        .iter()
+        .find(|(t, k, x)| {
+            t / TICKS_PER_DAY >= SHOCK_DAY
+                && matches!(k, EventKind::LedgerHacked | EventKind::DataWiped)
+                && x.contains("Arasaka")
+        })
+        .map(|(t, _, x)| format!("d{} {x}", t / TICKS_PER_DAY));
+    let rebuys = r
+        .story
+        .iter()
+        .filter(|(t, k, x)| *k == EventKind::IceRaised && t / TICKS_PER_DAY >= SHOCK_DAY && x.starts_with("Arasaka "))
+        .count();
+    eprintln!(
+        "first Ledger hit or wipe on Arasaka after the shock: {first:?}; Arasaka ICE re-raises: {rebuys}; Arasaka gone on day {:?} (control {:?})",
+        r.gone("Arasaka"),
+        c.gone("Arasaka")
+    );
+    r.assert_applied();
+}
+
+/// The city's ICE to 0 on day 45 (the hacker-army test from VISION.md):
+/// can a gang drain the Treasury?
+#[test]
+#[ignore]
+fn god_city_ice_0() {
+    let r = run_v5("god_city_ice_0", |w, day, hour| {
+        if day == SHOCK_DAY && hour == 0 {
+            w.push_command(PlayerCommand::SetCityIce(0));
+        }
+    });
+    let c = v5_control();
+    r.print_v5(c, &[(30, SHOCK_DAY), (SHOCK_DAY, SHOCK_DAY + 7), (SHOCK_DAY, 75), (75, V5_END)], SHOCK_DAY, &[]);
+    let by_gang = r
+        .story
+        .iter()
+        .filter(|(t, k, x)| {
+            *k == EventKind::LedgerHacked && t / TICKS_PER_DAY >= SHOCK_DAY && x.ends_with("the city's ledger")
+        })
+        .count();
+    eprintln!(
+        "Treasury hits from day {SHOCK_DAY}: {by_gang}; city treasury on day {}: {} (control {})",
+        V5_END - 1,
+        r.days.last().map_or(0, |d| d.city_treasury),
+        c.days.last().map_or(0, |d| d.city_treasury)
+    );
+    r.assert_applied();
+}
+
+/// From day 45, every gang corp raid gets a god `RunNow Door` on its target
+/// the hour its muster is scheduled (its best member is given a tier-3 deck
+/// first when the gang has no runner). Does the raid win more often than in
+/// the paired control? Vat Farms (the Vats, district 2) are named.
+#[test]
+#[ignore]
+fn god_door_before_raid() {
+    let mut ordered: Vec<String> = Vec::new();
+    let mut seen: std::collections::BTreeSet<(EntityId, u64)> = std::collections::BTreeSet::new();
+    let r = run_v5("god_door_before_raid", |w, day, _| {
+        if day < SHOCK_DAY {
+            return;
+        }
+        for g in w.gangs() {
+            let Some((target, at)) = w.comp::<Gang>(g).and_then(|gg| {
+                (gg.order == Order::Raid).then_some(())?;
+                Some((gg.raid_target?, gg.raid_at?))
+            }) else {
+                continue;
+            };
+            if at <= w.tick
+                || !seen.insert((target, at))
+                || w.owner_of(target).is_none_or(|o| !w.has::<citysim::Corp>(o))
+            {
+                continue;
+            }
+            let members = w.comp::<Gang>(g).map(|gg| gg.members.clone()).unwrap_or_default();
+            let hacking = |w: &World, m: EntityId| w.comp::<citysim::Skills>(m).map_or(0.0, |s| s.hacking);
+            let with_deck = members
+                .iter()
+                .copied()
+                .filter(|&m| w.comp::<citysim::Kit>(m).is_some_and(|k| k.deck.is_some()))
+                .max_by(|&a, &b| hacking(w, a).total_cmp(&hacking(w, b)).then(b.cmp(&a)));
+            let runner = match with_deck {
+                Some(m) => m,
+                None => {
+                    let Some(m) = members
+                        .iter()
+                        .copied()
+                        .filter(|&m| !w.has::<citysim::Sentence>(m))
+                        .max_by(|&a, &b| hacking(w, a).total_cmp(&hacking(w, b)).then(b.cmp(&a)))
+                    else {
+                        continue;
+                    };
+                    w.push_command(PlayerCommand::GrantDeck { agent: m, tier: 3 });
+                    m
+                }
+            };
+            w.push_command(PlayerCommand::RunNow { agent: runner, target, purpose: citysim::virt::Purpose::Door });
+            let vats = w.district_of_building(target).index() == 2;
+            ordered.push(format!(
+                "d{day} {} on {}{}",
+                w.name_of(runner),
+                w.name_of(target),
+                if vats { " (Vats)" } else { "" }
+            ));
+        }
+    });
+    let c = v5_control();
+    r.print_v5(c, &[(30, SHOCK_DAY), (SHOCK_DAY, 75), (75, V5_END), (SHOCK_DAY, V5_END)], SHOCK_DAY, &[]);
+    let share = |run: &V5Run| {
+        let won = run.sum(SHOCK_DAY, V5_END, |d| f64::from(d.corp_raids_won));
+        let lost = run.sum(SHOCK_DAY, V5_END, |d| f64::from(d.corp_raids_lost));
+        (won, lost, won / (won + lost).max(1.0))
+    };
+    let (rw, rl, rs) = share(&r);
+    let (cw, cl, cs) = share(c);
+    eprintln!("door runs ordered: {ordered:?}");
+    eprintln!("corp raids from day {SHOCK_DAY}: won {rw} lost {rl} ({rs:.2}) vs control won {cw} lost {cl} ({cs:.2})");
+    r.assert_applied();
+    assert!(!ordered.is_empty(), "god_door_before_raid: no corp raid was scheduled after day {SHOCK_DAY}");
+}

@@ -141,6 +141,26 @@ fn test_choose_keeps_the_standing_order_within_hysteresis() {
     assert_eq!(from_hunker, Some((CorpOrder::Undercut, Niche::Food)));
 }
 
+/// M14 phase 5: a shock rescore keeps the standing order against a rival
+/// order at an equal score (within 1e-6); a real margin still switches.
+#[test]
+fn test_shock_rescore_keeps_the_standing_order_at_equal_scores() {
+    let cfg = Config::load().corps;
+    let row = |order, score| citysim::CorpOrderScore { order, niche: Niche::Food, score, considerations: Vec::new() };
+    let h = corp_brain::shock_hysteresis(&cfg);
+    assert!(h > 0.0 && h < 1e-5, "ties only");
+    for best in [0.45, 0.450_000_5] {
+        let scores = vec![row(CorpOrder::Research, best), row(CorpOrder::Secure, 0.45)];
+        assert_eq!(corp_brain::choose(&scores, (CorpOrder::Secure, Some(Niche::Food)), h), None, "{best}");
+    }
+    // A real margin (0.04, as on seed 42's shocks) still replaces it.
+    let scores = vec![row(CorpOrder::Research, 0.49), row(CorpOrder::Secure, 0.45)];
+    assert_eq!(
+        corp_brain::choose(&scores, (CorpOrder::Secure, Some(Niche::Food)), h),
+        Some((CorpOrder::Research, Niche::Food))
+    );
+}
+
 // ---------------------------------------------------------------------------
 // Worlds
 // ---------------------------------------------------------------------------

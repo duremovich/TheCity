@@ -22,6 +22,16 @@ as a share of adults) and, with an events file, riots, strikes and splits by dis
 raids won/lost. Flags: a district above unrest 0.8 for 30+ days running with no riot there,
 district litter above 0.5, no Dregs (`class_dreg`) for 30+ days running, corp raids never lost.
 The events file is optional; without it the event-based parts are skipped.
+
+M14: a "Virt" section (the plane's snapshots `nodes, labs, decks, cameras, ice_mean_corp, data_held`
+on the last day; run totals of `runs, runs_ok` and the outcome columns, `data_made, data_stolen,
+data_wiped, data_sold`, `ledger_hacks, doors_hacked, robots_turned, blinded`, `traced, fried, flatlined,
+hack_arrests(_chair)`, `ice_raised, ice_lowered, ice_spend`, `tech_gained, tech_lost, research_spent`;
+the success share, traced share of lost runs and stolen / made; each corp slot's tiers on the first and
+last day; the M14 flows) and, with an events file, the violet event counts and the TechLost / TechGained
+/ DataWiped / DoorHacked / RobotTurned / Flatlined lines. Flags: the spec § 12 bands (runs 40-400,
+success 30-70 %, fried 3-30, flatlines 1-10, traced 20-50 %, stolen / made 5-30 %, decks 30-150 on the
+last day, mean corp ICE 1.0-2.2).
 """
 import argparse
 import csv
@@ -52,6 +62,16 @@ ASSET_TOTALS = ["truck_hauls", "walk_hauls", "crashes", "crash_deaths", "vehicle
 ASSET_FLOWS = ["flow_asset", "flow_asset_upkeep", "flow_finance", "flow_import", "flow_stims",
                "flow_parts", "flow_treatment"]
 ASSET_COLS = (ASSET_SNAPSHOT + ASSET_TOTALS + ASSET_FLOWS + ["commute_tpt_walk", "commute_tpt_drive"])
+VIRT_EVENTS = ["JackedIn", "DataStolen", "DataWiped", "DataSold", "LedgerHacked", "DoorHacked", "RobotTurned",
+               "Blinded", "Traced", "Fried", "Flatlined", "Dumpshock", "IceRaised", "IceLowered", "TechGained",
+               "TechLost"]
+VIRT_STORY = ["TechLost", "TechGained", "DataWiped", "DoorHacked", "RobotTurned", "Flatlined"]
+VIRT_SNAPSHOT = ["nodes", "labs", "decks", "cameras", "ice_mean_corp", "data_held"]
+VIRT_TOTALS = ["runs", "runs_ok", "runs_bounced", "runs_captured", "runs_dumped", "data_made", "data_stolen",
+               "data_wiped", "data_sold", "ledger_hacks", "doors_hacked", "robots_turned", "blinded", "traced",
+               "fried", "flatlined", "hack_arrests", "hack_arrests_chair", "sightings", "ice_raised",
+               "ice_lowered", "ice_spend", "tech_gained", "tech_lost", "research_spent"]
+VIRT_FLOWS = ["flow_data", "flow_hack", "flow_ice_upkeep", "flow_research", "flow_terminal"]
 ASSAULT_PER_DAY_FLAG = 42.7  # the scenario gate's assault bound (M8 gate, HANDOFF)
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
 DISTRICTS = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
@@ -196,6 +216,7 @@ def analyze(rows, events, jail_cap=None):
     ownership(rows, events, out, flags)
     districts(rows, events, out, flags)
     assets(rows, events, out, flags)
+    virt(rows, events, out, flags)
     out["flags"] = flags
     return out
 
@@ -426,6 +447,44 @@ def assets(rows, events, out, flags):
         flags.append(f"assaults+murders {apd:.2f}/day > {ASSAULT_PER_DAY_FLAG:g}")
 
 
+def virt(rows, events, out, flags):
+    """M14: the Virt plane, Data and the tech tree; only when the columns exist and the plane ran."""
+    if not rows or "nodes" not in rows[0] or not any(v for v in col(rows, "nodes")):
+        return
+    total = lambda k: sum(col(rows, k))
+    v = {"snapshot_last_day": {k: col(rows, k)[-1] for k in VIRT_SNAPSHOT if col(rows, k)}}
+    v["totals"] = {k: total(k) for k in VIRT_TOTALS if k in rows[0]}
+    t = v["totals"]
+    runs, ok = t.get("runs", 0), t.get("runs_ok", 0)
+    v["success_share"] = ok / runs if runs else None
+    v["traced_share_of_lost"] = t.get("traced", 0) / (runs - ok) if runs > ok else None
+    v["stolen_over_made"] = t.get("data_stolen", 0) / t["data_made"] if t.get("data_made") else None
+    tiers = {}
+    for i in range(1, 10):
+        ks = [f"corp{i}_tier_chrome", f"corp{i}_tier_deck", f"corp{i}_tier_industry"]
+        if all(k in rows[0] for k in ks):
+            first = "".join(f"{rows[0][k]:.0f}" for k in ks)
+            last = "".join(f"{rows[-1][k]:.0f}" for k in ks)
+            if first != "000" or last != "000":
+                tiers[f"corp{i}"] = f"{first} -> {last}"
+    v["tiers_first_last"] = tiers
+    v["flows_total"] = {k[5:]: total(k) for k in VIRT_FLOWS if k in rows[0]}
+    if events:
+        ek = Counter(k for _, k, _ in events)
+        v["events"] = {k: ek[k] for k in VIRT_EVENTS if ek[k]}
+        v["story"] = [f"day {tk // TICKS_PER_DAY}: {k}: {x}" for tk, k, x in events if k in VIRT_STORY][:40]
+    out["virt"] = v
+    bands = [("runs", runs, 40, 400), ("fried", t.get("fried", 0), 3, 30), ("flatlined", t.get("flatlined", 0), 1, 10),
+             ("decks on the last day", v["snapshot_last_day"].get("decks", 0), 30, 150),
+             ("mean corp ICE on the last day", v["snapshot_last_day"].get("ice_mean_corp", 0), 1.0, 2.2)]
+    for share, lo, hi in (("success_share", 0.3, 0.7), ("traced_share_of_lost", 0.2, 0.5), ("stolen_over_made", 0.05, 0.3)):
+        if v[share] is not None:
+            bands.append((share, v[share], lo, hi))
+    for name, x, lo, hi in bands:
+        if not lo <= x <= hi:
+            flags.append(f"Virt: {name} {x:.3g} outside {lo:g}-{hi:g} (spec section 12)")
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -492,6 +551,20 @@ def fmt(o):
         L.append("asset flows (run totals): " + f(w["flows_total"]))
         if w.get("events"):
             L.append("asset events: " + f(w["events"]))
+    if "virt" in o:
+        w = o["virt"]
+        pct = lambda x: "n/a" if x is None else f"{x:.1%}"
+        L.append("-- Virt (M14) --")
+        L.append("last day: " + f(w["snapshot_last_day"]))
+        L.append("run totals: " + f(w["totals"]))
+        L.append(f"success {pct(w['success_share'])}, traced of lost {pct(w['traced_share_of_lost'])}, "
+                 f"stolen / made {pct(w['stolen_over_made'])}")
+        if w["tiers_first_last"]:
+            L.append("tiers [chrome deck industry] first -> last: " + f(w["tiers_first_last"]))
+        L.append("Virt flows (run totals): " + f(w["flows_total"]))
+        if w.get("events"):
+            L.append("violet events: " + f(w["events"]))
+        L += [f"  {x}" for x in w.get("story", [])]
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)
