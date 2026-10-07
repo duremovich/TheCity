@@ -299,6 +299,22 @@ pub enum PlayerCommand {
         value: f32,
         days: u16,
     },
+    // --- M15 god commands (plan W42, phase 2).
+    /// Set one social skill of an agent; `suit` also dresses them at 3
+    /// (the Spire suit), pinned so the daily appearance pass keeps it.
+    GrantSkill {
+        agent: EntityId,
+        skill: crate::word::SocialSkill,
+        value: f32,
+        #[serde(default)]
+        suit: bool,
+    },
+    /// Set or clear a gang's creed; a Purist gang expels its members above
+    /// `creed_tolerance` at once.
+    SetCreed {
+        gang: EntityId,
+        creed: Option<crate::word::Creed>,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -732,7 +748,9 @@ impl World {
             | PlayerCommand::GrantDecks { .. }
             | PlayerCommand::SetCorpIce { .. }
             | PlayerCommand::PlantRumour { .. }
-            | PlayerCommand::SetReputation { .. } => {
+            | PlayerCommand::SetReputation { .. }
+            | PlayerCommand::GrantSkill { .. }
+            | PlayerCommand::SetCreed { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -907,7 +925,10 @@ impl World {
             | PlayerCommand::WipeCorpData(_)
             | PlayerCommand::GrantDecks { .. }
             | PlayerCommand::SetCorpIce { .. } => self.cmd_god_virt(cmd),
-            PlayerCommand::PlantRumour { .. } | PlayerCommand::SetReputation { .. } => self.cmd_god_word(cmd),
+            PlayerCommand::PlantRumour { .. }
+            | PlayerCommand::SetReputation { .. }
+            | PlayerCommand::GrantSkill { .. }
+            | PlayerCommand::SetCreed { .. } => self.cmd_god_word(cmd),
             _ => self.cmd_god_corp(cmd),
         }
     }
@@ -979,6 +1000,31 @@ impl World {
                     self.district_name(district)
                 );
                 Ok((vec![about], text))
+            }
+            PlayerCommand::GrantSkill { agent, skill, value, suit } => {
+                if !crate::systems::law::living(self, agent) || !self.has::<crate::components::Skills>(agent) {
+                    return Err("GrantSkill: no such living agent".into());
+                }
+                let v = value.clamp(0.0, 1.0);
+                if let Some(s) = self.comp_mut::<crate::components::Skills>(agent) {
+                    *s.social_mut(skill) = v;
+                }
+                if suit {
+                    let mut a = crate::systems::reputation::appearance_of(self, agent);
+                    a.dress = 3;
+                    a.dress_pin = Some(3);
+                    self.insert(agent, a);
+                }
+                let dress = if suit { " (in a suit)" } else { "" };
+                Ok((vec![agent], format!("set {}'s {} to {v:.2}{dress}", self.name_of(agent), skill.label())))
+            }
+            PlayerCommand::SetCreed { gang, creed } => {
+                let Some(g) = self.comp_mut::<Gang>(gang) else { return Err("SetCreed: no such gang".into()) };
+                g.creed = creed;
+                let name = g.name.clone();
+                crate::systems::creeds::enforce(self, gang);
+                let what = creed.map_or("no creed", |c| c.label());
+                Ok((vec![gang], format!("{name} now holds {what}")))
             }
             PlayerCommand::SetReputation { who, axis, value, days } => {
                 let i = who.index as usize;
@@ -1625,6 +1671,7 @@ impl World {
                 focus: None,
                 hacked: None,
                 last_door_open: None,
+                label: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

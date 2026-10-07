@@ -263,7 +263,12 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     // M12 D18: a dirty street sees less.
     let dirt =
         if by_district && crate::systems::litter::enabled(world) { world.district(hole.district).litter } else { 0.0 };
-    let p = cfg.p_witness * coverage * (1.0 - 0.3 * dirt);
+    let mut p = cfg.p_witness * coverage * (1.0 - 0.3 * dirt);
+    // M15 W28: × the law's competence multiplier (1 when off).
+    let m = crate::systems::competence::law_mult(world);
+    if m != 1.0 {
+        p *= m;
+    }
     let witnessed = rng.random::<f32>() < p;
     let mut witness = None;
     if let (true, Bound::Actor(actor)) = (witnessed, bound) {

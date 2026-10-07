@@ -199,6 +199,13 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
             per_hour *= 1.0 + p;
         }
     }
+    // M15 W28: a corp's Farm yields × its competence multiplier (1 when off).
+    if let Some(c) = world.corp_of_building(farm) {
+        let m = crate::systems::competence::comp_mult(world, c);
+        if m != 1.0 {
+            per_hour *= m;
+        }
+    }
     // Fractional hours: whole units leave the accumulator, the rest carries, so
     // a shift that starts a few ticks late loses a few ticks, not an hour.
     let hours = ticks as f32 / time::TICKS_PER_HOUR as f32;
@@ -351,7 +358,8 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     }
     let payer = job.employer.and_then(|e| world.owner_of(e));
     // D22: a Food corp in Squeeze pays 0.9.
-    let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| c.wage_mult);
+    // M15 W29: a poached hire's premium multiplies too.
+    let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| c.wage_mult) * job.premium;
     let per_day = if mult == 1.0 { job.wage_per_day } else { (job.wage_per_day as f32 * mult).round() as i64 };
     let due = per_day * i64::from(job.days_unpaid);
     let available = world.purse(payer).max(0);

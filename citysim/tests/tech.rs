@@ -50,6 +50,9 @@ fn jobless(w: &World, n: usize) -> Vec<EntityId> {
 #[test]
 fn test_lab_produces_from_shift_ledger_at_every_tier() {
     let mut w = world();
+    // M15 W28: Lab Data × the owner's competence multiplier (tests/moves.rs);
+    // this checks V16's ledger at a multiplier of 1.
+    w.config.competence.enabled = false;
     let z = corp_named(&w, "Zetatech");
     let lab = lab_of(&w, z, Track::Chrome);
     let n = node(&w, lab);

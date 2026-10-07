@@ -932,7 +932,9 @@ fn squeeze(world: &mut World, corp: EntityId, n: Niche) {
     let cap =
         if crate::systems::corps::is_monopoly(world, corp, n) { cfg.monopoly_markup_cap } else { cfg.squeeze_cap };
     let level = world.comp::<Corp>(corp).map_or(1.0, |c| c.level(n));
-    set_level(world, corp, n, (level + 0.1).min(cap));
+    // M15 W28: the step × the competence multiplier (1 when off).
+    let step = 0.1 * crate::systems::competence::comp_mult(world, corp);
+    set_level(world, corp, n, (level + step).min(cap));
 }
 
 fn undercut(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
@@ -941,7 +943,9 @@ fn undercut(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     let rival = i.niches.get(&n).map_or(level, |ni| ni.rival_price);
     let target = floor.max(rival - 0.1);
     if level > target {
-        set_level(world, corp, n, (level - 0.1).max(target));
+        // M15 W28: the step × the competence multiplier (1 when off).
+        let step = 0.1 * crate::systems::competence::comp_mult(world, corp);
+        set_level(world, corp, n, (level - step).max(target));
     }
 }
 
@@ -1095,6 +1099,9 @@ pub fn act(world: &mut World, corp: EntityId) {
         (CorpOrder::VirtRaid, _) => crate::systems::virt::corp_virt_raid(world, corp),
         _ => {}
     }
+    // M15 W29: under Grow, Research or Secure, one poach for the first
+    // skilled vacancy (before `job_search` fills it tonight).
+    crate::systems::competence::poach_daily(world, corp);
 }
 
 /// M14 V31 (phase 1 part), daily under `Research` (the research itself is

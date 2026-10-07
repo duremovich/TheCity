@@ -167,7 +167,14 @@ pub fn produce(world: &mut World) {
         let hacking = world.comp::<Skills>(r).map_or(0.0, |s| s.hacking.max(0.0));
         *by_lab.entry(lab).or_default() += (cfg.data_per_shift * (0.5 + hacking)).round().max(0.0) as u32;
     }
-    for (lab, units) in by_lab {
+    for (lab, mut units) in by_lab {
+        // M15 W28: × the owner's competence multiplier (1 when off).
+        if let Some(c) = world.corp_of_building(lab) {
+            let m = crate::systems::competence::comp_mult(world, c);
+            if m != 1.0 {
+                units = (units as f32 * m).round().max(0.0) as u32;
+            }
+        }
         let Some(focus) =
             world.comp::<Building>(lab).filter(|b| b.kind == BuildingKind::Lab && !b.demolished).map(|b| b.focus)
         else {

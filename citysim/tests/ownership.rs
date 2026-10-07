@@ -289,7 +289,11 @@ fn test_wage_collected_at_workplace_for_corp_job() {
 
 #[test]
 fn test_seeding_matches_table() {
-    let w = World::new(42, Config::load());
+    // M15 W31: The Unplugged's Chapel takes one of the City's Sump Blocks;
+    // the table is M11's (tests/moves.rs checks the Chapel).
+    let mut cfg = Config::load();
+    cfg.creeds.seed_purist = false;
+    let w = World::new(42, cfg);
     let corps = w.corps();
     // M13 D17: the ninth row, Zetatech (Tech), owns the seeded Civic Garage.
     assert_eq!(corps.len(), 9);

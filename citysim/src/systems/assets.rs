@@ -1450,7 +1450,10 @@ fn appearance(world: &mut World) {
         let colours = world
             .gang_of(id)
             .or_else(|| world.comp::<Job>(id).and_then(|j| j.employer).and_then(|e| world.corp_of_building(e)));
-        let a = Appearance { dress, chrome, colours };
+        // M15: a pinned dress (a god's suit) holds.
+        let dress_pin = world.comp::<Appearance>(id).and_then(|a| a.dress_pin);
+        let dress = dress_pin.unwrap_or(dress);
+        let a = Appearance { dress, chrome, colours, dress_pin };
         if world.comp::<Appearance>(id) != Some(&a) {
             world.insert(id, a);
         }

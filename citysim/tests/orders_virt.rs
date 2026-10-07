@@ -476,9 +476,11 @@ fn test_retaliate_targets_the_traced_runners_gang() {
     w.config.gangs.order_flat.retaliate = 10.0;
     let (ga, gb) = (w.gang_list()[0], w.gang_list()[1]);
     let third_base = w.buildings_of_kind(BuildingKind::Home)[0];
+    // M15 W31: The Unplugged is seeded too (no territory, never the rival here).
+    let before = w.gang_list().len();
     let gc = w.spawn();
     w.insert(gc, Gang::new("Third".into(), third_base, 0));
-    assert_eq!(w.gang_list().len(), 3);
+    assert_eq!(w.gang_list().len(), before + 1);
     assert_eq!(w.rival_of(ga), Some(gb), "the rival is not the hacker");
     // Enough fit members for a Retaliate.
     for _ in 0..3 {

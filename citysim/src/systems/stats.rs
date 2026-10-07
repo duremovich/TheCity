@@ -230,7 +230,17 @@ pub fn snapshot(world: &mut World) {
 /// heat, per corp slot honour and standing (the last midnight's rebuild).
 fn word_snapshot(world: &mut World, citizens: &[EntityId]) {
     let (mut heard, mut all, mut hops) = (0u32, 0u32, 0u32);
+    // M15 W43 (phase 2): adults with any social skill ≥ 0.8.
+    let (mut adults, mut rare) = (0u32, 0u32);
     for &id in citizens {
+        if crate::systems::demography::is_adult(world, id) {
+            if let Some(s) = world.comp::<crate::components::Skills>(id) {
+                adults += 1;
+                if s.social_all().iter().any(|&v| v >= 0.8) {
+                    rare += 1;
+                }
+            }
+        }
         let Some(m) = world.comp::<crate::components::Memory>(id) else { continue };
         for e in &m.entries {
             if crate::systems::memory::deed_of(id, e).is_some() {
@@ -261,15 +271,23 @@ fn word_snapshot(world: &mut World, citizens: &[EntityId]) {
         };
         if s < corps.len() {
             let r = crate::systems::reputation::rep(world, c);
-            corps[s] = [r.honour, r.standing, 0.0];
+            let comp = if crate::systems::competence::on(world) {
+                world.comp::<crate::components::Corp>(c).map_or(0.0, |cc| cc.competence)
+            } else {
+                0.0
+            };
+            corps[s] = [r.honour, r.standing, comp];
         }
     }
+    let law_comp = if crate::systems::competence::on(world) { world.law().map_or(0.0, |l| l.competence) } else { 0.0 };
     let w = &mut world.stats.current.word;
     w.second_hand_share = if all > 0 { heard as f32 / all as f32 } else { 0.0 };
     w.rumour_hops_max = w.rumour_hops_max.max(hops);
     w.pool_reach = reach;
     w.gangs = gangs;
     w.corps = corps;
+    w.skill_rare_share = if adults > 0 { rare as f32 / adults as f32 } else { 0.0 };
+    w.law_competence = law_comp;
 }
 
 /// M14 V43: alive nodes, standing Labs, the mean effective ICE over alive

@@ -6,7 +6,9 @@
 //! The daily chain (plan "Daily pass"): decay and leak the pools, the
 //! Statistical hearing and post-back, the kin channel, the reputation
 //! rebuild (axes, `known_by`, factions, regard, the kill-watch sample),
-//! then expiry. With `[gossip] enabled = false` nothing runs.
+//! competence (phase 2: the Lab shifts' knowledge, the rust, every corp's
+//! and the Law's competence, `TalentLost`), then expiry. With `[gossip]
+//! enabled = false` nothing runs.
 
 use crate::world::World;
 
@@ -22,6 +24,7 @@ pub fn run(world: &mut World) {
     crate::systems::gossip::hear(world);
     crate::systems::gossip::kin(world);
     crate::systems::reputation::rebuild(world);
+    crate::systems::competence::daily(world);
     crate::systems::gossip::expire_sightings(world);
     crate::systems::gossip::prune_anon(world);
 }

@@ -39,7 +39,11 @@ fn count(w: &World, kind: EventKind) -> usize {
 
 #[test]
 fn test_district_of_matches_cuts_on_v2_map() {
-    let w = v2_world();
+    // M15 W31: The Unplugged's Chapel takes a Sump Central derelict Block;
+    // the cuts table is the map's (tests/moves.rs checks the Chapel).
+    let mut cfg = Config::load().scaled_to(400);
+    cfg.creeds.seed_purist = false;
+    let w = World::new(42, cfg);
     assert_eq!(w.districts.len(), 8);
     let spots = [
         ((63, 100), 3),

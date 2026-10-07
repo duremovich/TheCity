@@ -168,9 +168,14 @@ pub fn raise_crime_on(
         .collect();
 
     let mut noticed = 0usize;
+    // M15 W28: a guard notices × the law's competence multiplier (1 when off).
+    let law_mult = crate::systems::competence::law_mult(world);
     for w in witnesses {
         let guard = is_guard(world, w);
-        let p = notice_probability(&cfg, stealth, guard);
+        let mut p = notice_probability(&cfg, stealth, guard);
+        if guard && law_mult != 1.0 {
+            p = (p * law_mult).clamp(0.0, 1.0);
+        }
         let roll: f32 = world.rng.world().random();
         if roll >= p {
             continue;

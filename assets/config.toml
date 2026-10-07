@@ -1165,8 +1165,10 @@ sighting_days = 14
 # ---------------------------------------------------------------------------
 # M15 Word and blood (docs/M15_WORD_AND_BLOOD.md; plan ~/.claude/plans/m15-word-and-blood.md).
 # The spec's blocks verbatim, then the plan keys of each table, each commented with its Decisions row
-# (one table per section: TOML allows no second [gossip]). Phase 1 turns on the knowledge layer only:
-# pools, exchange, hearing, the kin channel and a daily reputation rebuild that nothing reads yet.
+# (one table per section: TOML allows no second [gossip]). Phase 1 turned on the knowledge layer:
+# pools, exchange, hearing, the kin channel and a daily reputation rebuild. Phase 2 reads it: social
+# skills, the move resolver (extortion as Intimidate), taste and first impressions, competence and
+# poaching, The Unplugged ([moves], [skills], [taste], [competence], [creeds]).
 # ---------------------------------------------------------------------------
 
 [gossip]
@@ -1230,6 +1232,11 @@ purist_treasury = 50
 creed_tolerance = 0
 purist_chrome = 0.3
 tithe_frac = 0.6
+# Plan deviation (phase 2 review): a creed spreads through people. Past its first `founders` members a
+# Purist gang recruits only along a Friend/Family/Parent/Spouse edge to a member. With the nearest-Hideout
+# path open to it, the Chapel (central in the Sump) took the city's desperate recruits: 45 members by
+# day 60 on seed 42, and the two rivals' district control fell (M12 gate 2/6 seeds).
+founders = 3
 
 [grudges]
 grudge_min = 0.15
@@ -1274,7 +1281,11 @@ secondary_scale = 0.6              # W25
 
 [moves]
 move_k = 4.0
-bias = { persuade = 0.0, intimidate = 0.8, deceive = 0.0, charm = 0.2 }   # W27: spec intimidate 0.5
+# W27: spec intimidate 0.5. Phase 2 measured 0.8 (kept): extortion success 0.79-0.84 on seeds 42,
+# 1-3, 43, 44; Σ gang_income against M14: seed 42 +16 %, the 42-44 mean +5.5 %, the six-seed mean
+# -8 % (seeds 1 and 2 -26 %, 44 +23 %: the seed spread; refusals take ~17 % of shakedowns and The
+# Unplugged tithe at 60 %).
+bias = { persuade = 0.0, intimidate = 0.8, deceive = 0.0, charm = 0.2 }
 w_m = 0.5
 w_r = 0.6
 w_l = 0.3
@@ -1298,6 +1309,11 @@ talent_drop = 0.05
 poach_min = 0.5
 poach_gap = 0.2
 poach_premium = 1.3
+# Phase 2 review: each skill term is 2 x its percentile among the city's adults at seed, so the median
+# corp sits at comp_ref (multiplier 1). The plan's skill / city mean put the median corp near 0.21 (the
+# exec term is a heavy-tailed skill): Nutrix's Farms ran at 0.89-0.94 on half the seeds and its early
+# trucks fell (day-30 trucks over seeds 42-49: 4.6 against 6.5 with competence off).
+rank_norm = true
 enabled = true
 
 [news]

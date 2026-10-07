@@ -705,6 +705,8 @@ pub enum LawShock {
     /// A guard lost a fight (a contested arrest, a breach).
     GuardBeaten,
     BribeRefused,
+    /// M15 W28: competence fell by `talent_drop` in a day.
+    TalentLost,
 }
 
 impl LawShock {
@@ -714,6 +716,7 @@ impl LawShock {
             LawShock::GuardKilled => 0.8,
             LawShock::GuardBeaten => 0.4,
             LawShock::BribeRefused => 0.5,
+            LawShock::TalentLost => 0.3,
         }
     }
 }
@@ -727,7 +730,7 @@ pub struct PostureScore {
 }
 
 /// M9: the law as a faction. One per city, on the Jail building.
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct Law {
     #[serde(default)]
     pub posture: Posture,
@@ -754,8 +757,12 @@ pub struct Law {
     /// Every posture's score from the last rescoring, best first. Not saved.
     #[serde(skip)]
     pub posture_trace: Vec<PostureScore>,
-    /// Pending since the last rescoring. Not saved.
-    #[serde(skip)]
+    /// Pending since the last rescoring. M15 phase 2 (determinism): saved,
+    /// so a save taken between a shock and the rethink it would trigger
+    /// re-deals the same beats after the load (`virt_review`'s mid-hour save
+    /// diverged on a lost pending shock once M15 moved the trajectory; the
+    /// word-off city diverged the same way from another save point).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shocks: Vec<LawShock>,
     /// M11 D21: a corp's bought Crackdown (phase 3).
     #[serde(default)]
@@ -765,6 +772,35 @@ pub struct Law {
     /// first allocation: those guards walk the M11 route).
     #[serde(default)]
     pub beats: BTreeMap<EntityId, DistrictId>,
+    /// M15 W28: the captain's knowledge and the guards' fighting against
+    /// the city means (`competence::daily`); `comp_ref` until the first pass.
+    #[serde(default = "default_competence")]
+    pub competence: f32,
+}
+
+/// M15 W28: `[competence] comp_ref`'s default, the neutral competence.
+pub fn default_competence() -> f32 {
+    0.25
+}
+
+impl Default for Law {
+    fn default() -> Self {
+        Law {
+            posture: Posture::default(),
+            posture_since: 0,
+            target: None,
+            captain: None,
+            pinned: None,
+            last_breakout_tick: None,
+            hardened_until: None,
+            report_log: VecDeque::new(),
+            posture_trace: Vec::new(),
+            shocks: Vec::new(),
+            lobby: None,
+            beats: BTreeMap::new(),
+            competence: default_competence(),
+        }
+    }
 }
 
 /// M12 D12: one district stance's score from the last rescoring.
@@ -897,6 +933,10 @@ pub enum CorpShock {
     RiotNearby,
     /// M14 (plan V34): a tech track dropped a tier.
     TechLost,
+    /// M15 W28: competence fell by `talent_drop` in a day.
+    TalentLost,
+    /// M15 W29: a rival corp poached one of its staff.
+    Poached,
 }
 
 impl CorpShock {
@@ -915,6 +955,8 @@ impl CorpShock {
             CorpShock::Rioted => 0.9,
             CorpShock::RiotNearby => 0.45,
             CorpShock::TechLost => 0.6,
+            CorpShock::TalentLost => 0.4,
+            CorpShock::Poached => 0.3,
         }
     }
 }
@@ -962,7 +1004,9 @@ pub struct Corp {
     pub order_since: Tick,
     #[serde(skip)]
     pub order_trace: Vec<CorpOrderScore>,
-    #[serde(skip)]
+    /// Pending since the last rescoring. M15 phase 2 (determinism): saved,
+    /// as `Law.shocks` (with `World::corp_rethink`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shocks: Vec<CorpShock>,
     /// Per niche: Food markup, Housing rent level, Security contract price.
     #[serde(default)]
@@ -1047,6 +1091,10 @@ pub struct Corp {
     /// M14 phase 3 (procurement budget): coins spent on Data today.
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub data_bought_today: i64,
+    /// M15 W28: the exec's and staff's skills against the city means
+    /// (`competence::daily`); `comp_ref` until the first pass.
+    #[serde(default = "default_competence")]
+    pub competence: f32,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1102,6 +1150,7 @@ impl Corp {
             virt_losses: VecDeque::new(),
             data_bought_today: 0,
             ice_spend_today: 0,
+            competence: default_competence(),
         }
     }
 
@@ -1248,6 +1297,10 @@ pub struct Job {
     /// work, no wage, a guard's shift clock included.
     #[serde(default)]
     pub struck_shift: Option<i64>,
+    /// M15 W29: a poached hire's wage multiplier (`poach_premium`), read at
+    /// `economy::collect_wage`; 1 otherwise (a new Job resets it).
+    #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
+    pub premium: f32,
 }
 
 impl Job {
@@ -1463,6 +1516,10 @@ pub struct Brain {
     /// wait is not interrupted, an arrest is not contested.
     #[serde(default)]
     pub dazed_until: Option<Tick>,
+    /// M15 W26: a failed Intimidate's backlash: `(actor, bonus, until)`,
+    /// the Fight goal's flat against that actor until the tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fight_bonus: Option<(EntityId, f32, Tick)>,
 }
 
 impl Default for Brain {
@@ -1502,6 +1559,7 @@ impl Default for Brain {
             shop_pick: None,
             abducted_by: None,
             dazed_until: None,
+            fight_bonus: None,
         }
     }
 }
@@ -1686,11 +1744,76 @@ pub struct Skills {
     /// `migrate_legacy`.
     #[serde(default = "Skills::unset_hacking")]
     pub hacking: f32,
+    /// M15 W25: the four social skills (`0..=1`), one primary per adult,
+    /// from the Skill word stream; a pre-M15 save reads 0 and is backfilled
+    /// by `migrate_legacy` (all four 0).
+    #[serde(default)]
+    pub persuasion: f32,
+    #[serde(default)]
+    pub intimidation: f32,
+    #[serde(default)]
+    pub knowledge: f32,
+    #[serde(default)]
+    pub deception: f32,
+    /// M15 W25: the day each social skill was last used (`SocialSkill`
+    /// order), for the 30-day rust.
+    #[serde(default, skip_serializing_if = "is_zero_days")]
+    pub last_used: [u16; 4],
+}
+
+fn is_zero_days(v: &[u16; 4]) -> bool {
+    *v == [0; 4]
 }
 
 impl Skills {
     pub fn unset_hacking() -> f32 {
         -1.0
+    }
+
+    /// M15: a fresh `Skills` with the three v1 skills and hacking given;
+    /// the social four 0 (seeded by `moves::give_social`).
+    pub fn basic(stealth: f32, fighting: f32, farming: f32, hacking: f32) -> Skills {
+        Skills {
+            stealth,
+            fighting,
+            farming,
+            hacking,
+            persuasion: 0.0,
+            intimidation: 0.0,
+            knowledge: 0.0,
+            deception: 0.0,
+            last_used: [0; 4],
+        }
+    }
+
+    /// M15: one social skill.
+    pub fn social(&self, s: crate::word::SocialSkill) -> f32 {
+        use crate::word::SocialSkill as S;
+        match s {
+            S::Persuasion => self.persuasion,
+            S::Intimidation => self.intimidation,
+            S::Knowledge => self.knowledge,
+            S::Deception => self.deception,
+        }
+    }
+
+    pub fn social_mut(&mut self, s: crate::word::SocialSkill) -> &mut f32 {
+        use crate::word::SocialSkill as S;
+        match s {
+            S::Persuasion => &mut self.persuasion,
+            S::Intimidation => &mut self.intimidation,
+            S::Knowledge => &mut self.knowledge,
+            S::Deception => &mut self.deception,
+        }
+    }
+
+    /// The social four in `SocialSkill` order.
+    pub fn social_all(&self) -> [f32; 4] {
+        [self.persuasion, self.intimidation, self.knowledge, self.deception]
+    }
+
+    pub fn set_social_all(&mut self, v: [f32; 4]) {
+        [self.persuasion, self.intimidation, self.knowledge, self.deception] = v;
     }
 }
 
@@ -1822,6 +1945,9 @@ pub struct Building {
     /// M14 V32: the last DoorOpen on it (one per `door_cooldown_days`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_door_open: Option<Tick>,
+    /// M15 W31: a display label over the kind's ("Chapel" for The Unplugged's Hideout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
 }
 
 pub fn default_tier() -> u8 {
@@ -1874,8 +2000,9 @@ pub struct Gang {
     /// The Hideout is unusable until this tick.
     #[serde(default)]
     pub sacked_until: Option<Tick>,
-    /// Pending since the last rescoring; drained by the brain. Not saved.
-    #[serde(skip)]
+    /// Pending since the last rescoring; drained by the brain. M15 phase 2
+    /// (determinism): saved, as `Law.shocks`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub shocks: Vec<Shock>,
     /// `(tick, member)` arrested or killed, newest last, capped at 64.
     #[serde(default)]
@@ -1932,6 +2059,9 @@ pub struct Gang {
     /// rival (`World::rival_of`). See `raid::raid_rival`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retaliate_on: Option<EntityId>,
+    /// M15 W31: a creed (The Unplugged are Purist).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub creed: Option<crate::word::Creed>,
 }
 
 impl Gang {
@@ -1967,6 +2097,7 @@ impl Gang {
             stream_by: None,
             hacked_by: None,
             retaliate_on: None,
+            creed: None,
         }
     }
 
@@ -3101,6 +3232,10 @@ pub struct Appearance {
     pub dress: u8,
     pub chrome: u8,
     pub colours: Option<EntityId>,
+    /// M15 (god `GrantSkill` with `suit`): a dress the daily appearance
+    /// pass keeps instead of deriving it from class and wealth.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dress_pin: Option<u8>,
 }
 
 /// What a corpse carried (plan D13).
