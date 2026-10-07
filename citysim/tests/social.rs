@@ -151,7 +151,7 @@ fn test_gossip_copies_second_hand() {
     let mut w = world(36);
     let (teller, listener) = two_civilians(&w);
     let thief = w.citizens().into_iter().find(|&c| c != teller && c != listener).expect("thief");
-    w.remember_crime(teller, thief, Crime::Theft, 0.8);
+    w.remember_crime(teller, thief, Crime::Theft, 0.8, None);
     social::gossip(&mut w, teller, listener);
     let copy = w
         .comp::<Memory>(listener)

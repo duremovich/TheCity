@@ -342,5 +342,13 @@ pub fn strike(world: &mut World) {
             format!("{} workers of {cname} in {name} walk out (unrest {unrest:.2})", strikers.len()),
         );
         crate::systems::corp_brain::push_shock(world, corp, CorpShock::Strike);
+        // M15: the walk-out is talked about in the strikers' district (actor the corp).
+        crate::systems::gossip::post_deed(
+            world,
+            crate::components::DistrictId(i as u8),
+            crate::word::Deed::Struck,
+            Some(corp),
+            None,
+        );
     }
 }

@@ -292,6 +292,10 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
     let (name, what) = (world.name_of(agent), world.name_of(lot));
     world.push_event(EventKind::Founded, &[agent, lot], format!("{name} registered {what} on a Lot for {cost}"));
     world.stats.current.foundings += 1;
+    if world.config.gossip.enabled {
+        let d = world.district_of_building(lot);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Founded, Some(agent), Some(lot));
+    }
     maybe_incorporate(world, agent);
     Ok(lot)
 }

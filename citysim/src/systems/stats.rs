@@ -219,6 +219,57 @@ pub fn snapshot(world: &mut World) {
     if world.config.virt.enabled {
         virt_snapshot(world);
     }
+    // M15 W43 snapshots (0 with the word off, W44).
+    if world.config.gossip.enabled {
+        word_snapshot(world, &citizens);
+    }
+}
+
+/// M15 W43: the second-hand share of held deed memories (heard ÷ all), the
+/// longest rumour held, the pools' summed reach, per gang slot dread and
+/// heat, per corp slot honour and standing (the last midnight's rebuild).
+fn word_snapshot(world: &mut World, citizens: &[EntityId]) {
+    let (mut heard, mut all, mut hops) = (0u32, 0u32, 0u32);
+    for &id in citizens {
+        let Some(m) = world.comp::<crate::components::Memory>(id) else { continue };
+        for e in &m.entries {
+            if crate::systems::memory::deed_of(id, e).is_some() {
+                all += 1;
+            }
+        }
+        for e in &m.heard {
+            if crate::systems::memory::deed_of(id, e).is_some() {
+                all += 1;
+                heard += 1;
+                hops = hops.max(u32::from(e.hops));
+            }
+        }
+    }
+    let reach: f32 = world.rumours.iter().flat_map(|p| p.entries.iter()).map(|e| e.reach).sum();
+    let mut gangs = vec![[0.0f32; 2]; crate::stats::GANG_SLOTS];
+    for g in world.gang_list().to_vec() {
+        let i = world.gang_index(g);
+        if i < gangs.len() {
+            let r = crate::systems::reputation::rep(world, g);
+            gangs[i] = [r.dread, r.heat];
+        }
+    }
+    let mut corps = vec![[0.0f32; 3]; crate::stats::CORP_SLOTS];
+    for c in world.corps() {
+        let Some(s) = world.comp::<crate::components::Corp>(c).and_then(|cc| cc.slot).map(usize::from) else {
+            continue;
+        };
+        if s < corps.len() {
+            let r = crate::systems::reputation::rep(world, c);
+            corps[s] = [r.honour, r.standing, 0.0];
+        }
+    }
+    let w = &mut world.stats.current.word;
+    w.second_hand_share = if all > 0 { heard as f32 / all as f32 } else { 0.0 };
+    w.rumour_hops_max = w.rumour_hops_max.max(hops);
+    w.pool_reach = reach;
+    w.gangs = gangs;
+    w.corps = corps;
 }
 
 /// M14 V43: alive nodes, standing Labs, the mean effective ICE over alive

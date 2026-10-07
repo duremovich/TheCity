@@ -1048,8 +1048,14 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
             h.rent_due = 0.0;
             h.evicted_by = Some((owner, tick));
         }
-        let subject = owner.filter(|&o| world.has::<Identity>(o));
+        // M15 W5: with the word on a corp landlord is the memory's subject too.
+        let word = world.config.gossip.enabled;
+        let subject = owner.filter(|&o| world.has::<Identity>(o) || (word && world.has::<Corp>(o)));
         world.remember(a, MemoryKind::Evicted, subject, 0.8, -0.8, false);
+        if word {
+            let d = world.district_of_building(home);
+            crate::systems::gossip::post_deed(world, d, crate::word::Deed::Evicted, subject, Some(a));
+        }
         if let OwnerKind::Agent(o) = owner_kind(world, owner) {
             crate::systems::social::adjust(world, a, o, -0.3, 0.0);
         }

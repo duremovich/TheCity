@@ -42,6 +42,9 @@ pub struct App {
     pub inspector_tab: ui::inspector::InspectorTab,
     /// The agent whose open victim holes the inspector last bound.
     pub bound_for: Option<EntityId>,
+    /// M15: the Known tab's holder scan (agent, day, rows), computed once
+    /// per agent and day (UI only).
+    pub known_cache: Option<ui::inspector::KnownCache>,
     pub follow: bool,
     pub show_fps: bool,
     pub fps_avg: f32,
@@ -87,6 +90,7 @@ impl App {
             selected: None,
             inspector_tab: ui::inspector::InspectorTab::default(),
             bound_for: None,
+            known_cache: None,
             follow: false,
             show_fps,
             fps_avg: 60.0,
@@ -153,6 +157,8 @@ struct Args {
     select_kind: Option<citysim::BuildingKind>,
     /// Open the inspector on its Story tab (`--tab story`).
     story_tab: bool,
+    /// M15: open the inspector on its Known tab (`--tab known`).
+    known_tab: bool,
     /// Select the selected building's owning corp instead (`--tab corp`).
     corp_tab: bool,
     /// Do not bind the selected agent's open holes on open (screenshots of an unbound line).
@@ -190,6 +196,7 @@ fn parse_args() -> Args {
         select_kind: None,
         select_name: None,
         story_tab: false,
+        known_tab: false,
         corp_tab: false,
         no_autobind: false,
         fit: false,
@@ -241,8 +248,9 @@ fn parse_args() -> Args {
             "--no-autobind" => args.no_autobind = true,
             "--tab" => match it.next().as_deref() {
                 Some("story") => args.story_tab = true,
+                Some("known") => args.known_tab = true,
                 Some("corp") => args.corp_tab = true,
-                other => panic!("--tab story|corp, got {other:?}"),
+                other => panic!("--tab story|known|corp, got {other:?}"),
             },
             other => panic!("unknown argument {other}"),
         }
@@ -286,6 +294,9 @@ async fn main() {
     }
     if args.story_tab {
         app.inspector_tab = ui::inspector::InspectorTab::Story;
+    }
+    if args.known_tab {
+        app.inspector_tab = ui::inspector::InspectorTab::Known;
     }
     if let Some(kind) = args.select_kind {
         app.selected = world.building_of_kind(kind);

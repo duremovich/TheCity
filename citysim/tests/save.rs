@@ -432,3 +432,61 @@ fn test_pre_m14_save_loads() {
     back.run_ticks(TICKS_PER_DAY);
     assert!(back.population() > 0);
 }
+
+/// M15 (plan W44): a save from before the word has no heard stores, pools,
+/// reputation or regard: it loads with the stores sized, and one day with
+/// the word on fills the pools.
+#[test]
+fn test_pre_m15_save_loads() {
+    let mut w = World::new(24, Config::load().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY + 10);
+    assert!(w.citizens().iter().any(|&id| w.comp::<citysim::Memory>(id).is_some_and(|m| !m.heard.is_empty())));
+    let mut text = save::to_ron(&w);
+    if text.contains("anon_heard:[") {
+        text = strip_list_field(&text, "anon_heard:[");
+    }
+    while text.contains("heard:[") {
+        text = strip_list_field(&text, "heard:[");
+    }
+    for token in ["rumours:[", "reputation:[", "kill_watch:[", "kill_known:[", "arrest_log:["] {
+        text = strip_list_field(&text, token);
+    }
+    let text = strip_map_field(&text, "regard:{");
+    assert!(
+        !text.contains("heard:[")
+            && !text.contains("rumours:[")
+            && !text.contains("reputation:[")
+            && !text.contains("regard:{"),
+        "the M15 keys are stripped"
+    );
+    let mut back = save::from_ron(&text).expect("a pre-M15 save loads");
+    assert_eq!(back.reputation.len(), back.alive.len(), "the reputation store is sized");
+    assert_eq!(back.rumours.len(), back.districts.len(), "one pool per district");
+    assert!(back.rumours.iter().all(|p| p.entries.is_empty()));
+    back.check_indices().expect("indices in step");
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.rumours.iter().any(|p| !p.entries.is_empty()), "the pools fill");
+    assert!(back.reputation.iter().flatten().count() > 0, "reputation built at the first midnight");
+}
+
+/// M15 (plan Risks, determinism): with the word on, a save taken mid-day
+/// (pools, heard stores and the last midnight's reputation in it) loads and
+/// runs on bit for bit, and two runs of a seed agree.
+#[test]
+fn test_word_save_mid_day_bit_identical() {
+    let mut original = World::new(25, Config::load().scaled_to(300));
+    assert!(original.config.gossip.enabled);
+    original.run_ticks(2 * TICKS_PER_DAY + 700);
+    assert!(original.rumours.iter().any(|p| !p.entries.is_empty()));
+    assert!(original.reputation.iter().flatten().count() > 0);
+    let saved = save::to_ron(&original);
+    let mut loaded = save::from_ron(&saved).expect("load");
+    original.run_ticks(TICKS_PER_DAY);
+    loaded.run_ticks(TICKS_PER_DAY);
+    let a = blake3::hash(save::to_ron(&original).as_bytes());
+    let b = blake3::hash(save::to_ron(&loaded).as_bytes());
+    assert_eq!(a, b, "save/load mid-day diverged with the word on");
+    let mut again = World::new(25, Config::load().scaled_to(300));
+    again.run_ticks(3 * TICKS_PER_DAY + 700);
+    assert_eq!(a, blake3::hash(save::to_ron(&again).as_bytes()), "two runs of a seed agree");
+}

@@ -97,6 +97,24 @@ pub fn wanted(world: &World, suspect: EntityId) -> bool {
 /// victims their memory, file a report if a guard saw it, and sharpen the
 /// actor's stealth if nobody did.
 pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>, crime: Crime, tile: TilePos) {
+    raise_crime_on(world, actor, victim, victim, crime, tile);
+}
+
+/// M15 W5: `raise_crime` with the deed's object apart from the living
+/// victim who gets the memory (a Murder's victim is dead: `victim None,
+/// object Some(dead)`). The witnesses' `SawCrime` carries the object, and
+/// a deed someone knows (a noticing witness, or the living victim) goes into
+/// the crime district's pool named; a noticed Murder names the killing
+/// `kill_by` posted unnamed (W10). Nothing here draws or reads a word
+/// stream: the posts are state no decision reads in phase 1.
+pub fn raise_crime_on(
+    world: &mut World,
+    actor: EntityId,
+    victim: Option<EntityId>,
+    object: Option<EntityId>,
+    crime: Crime,
+    tile: TilePos,
+) {
     let cfg = world.config.crime.clone();
     let r = if world.is_dark() { cfg.sight_night_crime } else { cfg.sight_day_crime };
     let stealth = stealth(world, actor);
@@ -158,7 +176,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
             continue;
         }
         noticed += 1;
-        world.remember_crime(w, actor, crime, salience);
+        world.remember_crime(w, actor, crime, salience, object);
         crate::systems::social::witnessed_crime_of(world, w, actor);
         if let Some(n) = world.comp_mut::<Needs>(w) {
             n.safety = (n.safety - 0.2).max(0.0);
@@ -173,6 +191,7 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         }
     }
     // M13 D41: a robot victim has no memory, edges or needs.
+    let living_victim = victim.is_some_and(|v| !crate::systems::robots::is_robot(world, v) && living(world, v));
     if let Some(v) = victim.filter(|&v| !crate::systems::robots::is_robot(world, v)) {
         let kind = match crime {
             Crime::Assault | Crime::Murder | Crime::Manslaughter | Crime::Abduction => MemoryKind::Fought,
@@ -196,6 +215,21 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
     if noticed == 0 && !detained {
         if let Some(s) = world.comp_mut::<Skills>(actor) {
             s.stealth = (s.stealth + 0.01).min(1.0);
+        }
+    }
+    // M15 W5/W10: what someone knows goes into the crime district's pool.
+    if world.config.gossip.enabled {
+        if let Some(deed) = crate::systems::gossip::deed_of_crime(crime) {
+            if noticed > 0 || living_victim {
+                if crime == Crime::Murder && noticed > 0 {
+                    match object {
+                        Some(o) => crate::systems::gossip::name_actor(world, o, actor),
+                        None => crate::systems::gossip::watch_killer(world, actor),
+                    }
+                }
+                let d = world.district_of(tile);
+                crate::systems::gossip::post_deed(world, d, deed, Some(actor), object);
+            }
         }
     }
 }
@@ -548,7 +582,7 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
                 // The suspect killed the guard: a Murder, witnessed by whoever is near.
                 let tile = world.comp::<Position>(suspect).map_or(TilePos::default(), |p| p.tile);
                 file_report(world, Crime::Murder, suspect, None);
-                raise_crime(world, suspect, None, Crime::Murder, tile);
+                raise_crime_on(world, suspect, None, Some(guard), Crime::Murder, tile);
             }
             return false;
         }
@@ -763,6 +797,15 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;
+    // M15: an arrest is public: talked about where the suspect lives (the
+    // Precinct's district for the homeless), and on the law's own record.
+    if world.config.gossip.enabled {
+        let d =
+            crate::systems::gossip::home_district(world, suspect).unwrap_or_else(|| world.district_of_building(jail));
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Arrested, Some(suspect), None);
+        let t = world.tick;
+        world.arrest_log.push_back((t, suspect));
+    }
 }
 
 fn resolve_reports(world: &mut World, suspect: EntityId) {
@@ -1117,6 +1160,10 @@ fn sightings(world: &mut World) {
         })
         .collect();
     let tick = world.tick;
+    // M15 W12 (plan deviation: hourly, not every tick): the guards who see a
+    // suspect hold a Sighting of them.
+    let note = world.config.gossip.enabled && tick.is_multiple_of(crate::time::TICKS_PER_HOUR);
+    let ids: Vec<EntityId> = if note { world.guards().to_vec() } else { Vec::new() };
     for s in suspects {
         let Some(ps) = world.comp::<Position>(s) else { continue };
         let (tile, building) = (ps.tile, ps.building);
@@ -1124,6 +1171,21 @@ fn sightings(world: &mut World) {
             guards.iter().any(|&(t, b, extra)| (b.is_some() && b == building) || chebyshev(t, tile) <= sight + extra);
         if seen {
             world.last_seen.insert(s, (tile, tick));
+            if note {
+                let seers: Vec<EntityId> = ids
+                    .iter()
+                    .copied()
+                    .filter(|&g| {
+                        let extra = world.comp::<Kit>(g).map_or(0, |k| u32::from(k.sight));
+                        world.comp::<Position>(g).is_some_and(|p| {
+                            (p.building.is_some() && p.building == building) || chebyshev(p.tile, tile) <= sight + extra
+                        })
+                    })
+                    .collect();
+                for g in seers {
+                    crate::systems::gossip::maybe_sight(world, g, s, building, tile);
+                }
+            }
         }
     }
 }

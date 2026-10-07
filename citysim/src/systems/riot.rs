@@ -359,6 +359,8 @@ pub fn clash(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let (n, m) = (rioters.len(), defenders.len());
     let all_defenders = defenders.clone();
     let place = format!("{tname} in {}", world.district_name(d));
+    let owner = world.owner_of(target).or(Some(target));
+    crate::systems::gossip::post_raid(world, None, owner, door);
     let tally = raid::fight_out(world, &mut rioters, &mut defenders, door, &place, kill_mult, Some(d));
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
     let now = world.tick;

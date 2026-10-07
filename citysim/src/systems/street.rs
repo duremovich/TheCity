@@ -642,6 +642,11 @@ pub fn evict_squatter(world: &mut World, a: EntityId, why: &str) {
         h.squat_ban = Some((b, until));
     }
     world.remember(a, MemoryKind::Evicted, None, 0.6, -0.6, false);
+    // M15: the squat eviction is talked about (actor the building's owner, if any).
+    if world.config.gossip.enabled {
+        let (d, owner) = (world.district_of_building(b), world.owner_of(b));
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Evicted, owner, Some(a));
+    }
     if world.comp::<Position>(a).is_some_and(|p| p.building == Some(b)) {
         if world.has::<Brain>(a) {
             world.abort_plan(a);

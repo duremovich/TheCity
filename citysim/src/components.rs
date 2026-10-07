@@ -487,6 +487,14 @@ pub enum MemoryKind {
     Fried,
     /// M14 (plan 3.1): a gang member whose Hideout was robbed on the plane.
     Hacked,
+    /// M15 W1: a deed heard (in `Memory.heard`, never in `entries`).
+    Rumour,
+    /// M15 W12: a hunted, wanted or hated person seen (in `Memory.heard`).
+    Sighting,
+    /// M15 § 6: a failed Intimidate suffered (phase 2; in `Memory.heard`).
+    Threatened,
+    /// M15 § 6: a successful Persuade or Charm suffered (phase 2; in `Memory.heard`).
+    Persuaded,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1532,12 +1540,139 @@ pub struct MemoryEntry {
     /// For SawCrime: which crime, so a report names it after salience has decayed.
     #[serde(default)]
     pub crime: Option<Crime>,
+    /// M15 W1: a Rumour's (or Threatened's) deed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deed: Option<crate::word::Deed>,
+    /// M15 W1/W5: the deed's object (the victim; a corp for Struck), on a
+    /// Rumour and on a first-hand `SawCrime` or `Stripped`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub object: Option<EntityId>,
+    /// M15 W1: 0 seen, 1 told by a witness, 2+ rumour.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub hops: u8,
+    /// M15 W1: `0..=1`.
+    #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
+    pub conf: f32,
+    /// M15 W12: a Sighting's building.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub at: Option<EntityId>,
+    /// M15 W38: a story's `slant × 100` (0 = not from a Feed).
+    #[serde(default, skip_serializing_if = "is_zero_i8")]
+    pub press: i8,
+}
+
+fn is_zero_i8(v: &i8) -> bool {
+    *v == 0
+}
+
+fn is_one_f32(v: &f32) -> bool {
+    *v == 1.0
+}
+
+impl MemoryEntry {
+    /// An entry of `kind` at `tick` with every other field at its default
+    /// (no subject, salience 0, first-hand, conf 1): the base for struct
+    /// update syntax.
+    pub fn blank(kind: MemoryKind, tick: Tick) -> MemoryEntry {
+        MemoryEntry {
+            kind,
+            subject: None,
+            tick,
+            salience: 0.0,
+            valence: 0.0,
+            second_hand: false,
+            crime: None,
+            deed: None,
+            object: None,
+            hops: 0,
+            conf: 1.0,
+            at: None,
+            press: 0,
+        }
+    }
 }
 
 /// Cap 24; evict lowest `salience * recency`.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Memory {
     pub entries: Vec<MemoryEntry>,
+    /// M15 W1/W2: rumours and sightings, apart from the first-hand
+    /// `entries` (which no talk can evict), capped at `[gossip] rumour_cap`
+    /// (`rumour_cap_statistical` off screen).
+    #[serde(default, skip_serializing_if = "Vec::is_empty", with = "heard_wire")]
+    pub heard: Vec<MemoryEntry>,
+}
+
+/// M15 save size: the heard store on disk as compact tuples `(kind,
+/// subject, tick, salience, valence, second_hand, deed, object, hops, conf,
+/// at, press)` with ids as `(index, generation)` (a heard entry never
+/// carries a crime). At ~7k entries in a 2,000 city the named-field form was
+/// ~185 bytes an entry, 1.4 MB of a 29 MB save.
+mod heard_wire {
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    use super::{MemoryEntry, MemoryKind};
+    use crate::entity::EntityId;
+    use crate::time::Tick;
+    use crate::word::Deed;
+
+    type Id = Option<(u32, u32)>;
+
+    #[derive(Serialize, Deserialize)]
+    struct Wire(MemoryKind, Id, Tick, f32, f32, bool, Option<Deed>, Id, u8, f32, Id, i8);
+
+    fn to(id: Option<EntityId>) -> Id {
+        id.map(|e| (e.index, e.generation))
+    }
+
+    fn from(id: Id) -> Option<EntityId> {
+        id.map(|(index, generation)| EntityId { index, generation })
+    }
+
+    pub fn serialize<S: Serializer>(v: &[MemoryEntry], s: S) -> Result<S::Ok, S::Error> {
+        let wire: Vec<Wire> = v
+            .iter()
+            .map(|e| {
+                Wire(
+                    e.kind,
+                    to(e.subject),
+                    e.tick,
+                    e.salience,
+                    e.valence,
+                    e.second_hand,
+                    e.deed,
+                    to(e.object),
+                    e.hops,
+                    e.conf,
+                    to(e.at),
+                    e.press,
+                )
+            })
+            .collect();
+        wire.serialize(s)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<MemoryEntry>, D::Error> {
+        let wire = Vec::<Wire>::deserialize(d)?;
+        Ok(wire
+            .into_iter()
+            .map(|Wire(kind, subject, tick, salience, valence, second_hand, deed, object, hops, conf, at, press)| {
+                MemoryEntry {
+                    subject: from(subject),
+                    salience,
+                    valence,
+                    second_hand,
+                    deed,
+                    object: from(object),
+                    hops,
+                    conf,
+                    at: from(at),
+                    press,
+                    ..MemoryEntry::blank(kind, tick)
+                }
+            })
+            .collect())
+    }
 }
 
 /// `f32 0.0..=1.0`, initial `U(0.1, 0.4)`.

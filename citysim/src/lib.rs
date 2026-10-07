@@ -28,6 +28,7 @@ pub mod time;
 pub mod util;
 pub mod utility;
 pub mod virt;
+pub mod word;
 pub mod world;
 
 pub use components::*;

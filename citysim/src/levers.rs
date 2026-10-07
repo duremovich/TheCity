@@ -280,6 +280,25 @@ pub enum PlayerCommand {
         corp: EntityId,
         tier: u8,
     },
+    // --- M15 god commands (plan W42, phase 1).
+    /// A deed is talked about: a pool entry at `reach` in `district`, plus
+    /// one first-hand holder (a heard entry at hops 0, conf 1) on the living
+    /// adult of that district nearest `about`.
+    PlantRumour {
+        about: EntityId,
+        deed: crate::word::Deed,
+        object: Option<EntityId>,
+        district: crate::components::DistrictId,
+        reach: f32,
+    },
+    /// Pin one reputation axis of an agent or faction for `days` (the
+    /// daily rebuild leaves a pin alone until it runs out).
+    SetReputation {
+        who: EntityId,
+        axis: crate::word::Axis,
+        value: f32,
+        days: u16,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -711,7 +730,9 @@ impl World {
             | PlayerCommand::RunNow { .. }
             | PlayerCommand::WipeCorpData(_)
             | PlayerCommand::GrantDecks { .. }
-            | PlayerCommand::SetCorpIce { .. } => {
+            | PlayerCommand::SetCorpIce { .. }
+            | PlayerCommand::PlantRumour { .. }
+            | PlayerCommand::SetReputation { .. } => {
                 let _ = match self.cmd_god(cmd) {
                     Ok((actors, text)) => self.push_event(EventKind::PlayerAction, &actors, format!("God: {text}")),
                     Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
@@ -886,7 +907,96 @@ impl World {
             | PlayerCommand::WipeCorpData(_)
             | PlayerCommand::GrantDecks { .. }
             | PlayerCommand::SetCorpIce { .. } => self.cmd_god_virt(cmd),
+            PlayerCommand::PlantRumour { .. } | PlayerCommand::SetReputation { .. } => self.cmd_god_word(cmd),
             _ => self.cmd_god_corp(cmd),
+        }
+    }
+
+    /// The M15 god commands (plan W42, phase 1).
+    fn cmd_god_word(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
+        if !self.config.gossip.enabled {
+            return Err("the word is off".into());
+        }
+        match *cmd {
+            PlayerCommand::PlantRumour { about, deed, object, district, reach } => {
+                if !self.has::<crate::components::Identity>(about)
+                    && !self.has::<Gang>(about)
+                    && !self.has::<Corp>(about)
+                {
+                    return Err("PlantRumour: no such agent or faction".into());
+                }
+                if district.index() >= self.rumours.len() {
+                    return Err(format!("PlantRumour: no district {}", district.index()));
+                }
+                let reach = reach.clamp(0.0, 1.0);
+                let e = crate::word::PoolEntry {
+                    deed,
+                    actor: Some(about),
+                    object,
+                    tick: self.tick,
+                    hops: 0,
+                    reach,
+                    hole: None,
+                    story: None,
+                    kin: Default::default(),
+                    told: Default::default(),
+                    district,
+                };
+                crate::systems::gossip::post(self, district, e);
+                // One first-hand holder: the living adult of the district nearest `about`.
+                let from = self.comp::<crate::components::Position>(about).map(|p| p.tile);
+                let holder = self
+                    .citizens()
+                    .into_iter()
+                    .filter(|&a| a != about && crate::systems::demography::is_adult(self, a))
+                    .filter(|&a| self.has::<crate::components::Memory>(a))
+                    .filter(|&a| crate::systems::gossip::home_district(self, a) == Some(district))
+                    .min_by_key(|&a| {
+                        let d = match (from, self.comp::<crate::components::Position>(a)) {
+                            (Some(f), Some(p)) => f.manhattan(p.tile),
+                            _ => u32::MAX,
+                        };
+                        (d, a)
+                    });
+                if let Some(h) = holder {
+                    let sal = self.config.gossip.deed_sal.get(deed);
+                    let sev = self.config.gossip.deed_sev.get(deed);
+                    let entry = crate::components::MemoryEntry {
+                        subject: Some(about),
+                        salience: sal,
+                        valence: -sev * sal,
+                        deed: Some(deed),
+                        object,
+                        ..crate::components::MemoryEntry::blank(crate::components::MemoryKind::Rumour, self.tick)
+                    };
+                    crate::systems::memory::hear_entry(self, h, entry);
+                }
+                let what = object.map(|o| format!(" {}", self.name_of(o))).unwrap_or_default();
+                let text = format!(
+                    "planted \"{} {}{what}\" in {} at reach {reach:.2}",
+                    self.name_of(about),
+                    deed.label(),
+                    self.district_name(district)
+                );
+                Ok((vec![about], text))
+            }
+            PlayerCommand::SetReputation { who, axis, value, days } => {
+                let i = who.index as usize;
+                if i >= self.reputation.len() || !self.is_alive(who) {
+                    return Err("SetReputation: no such agent or faction".into());
+                }
+                let until = self.tick + u64::from(days) * crate::time::TICKS_PER_DAY;
+                let r = self.reputation[i].get_or_insert_with(Default::default);
+                let mut axes = r.pinned.filter(|&(_, t)| t > self.tick).map_or_else(|| r.axes(), |(a, _)| a);
+                axes[axis.index()] = value.clamp(0.0, 1.0);
+                r.set_axes(axes);
+                r.pinned = Some((axes, until));
+                Ok((
+                    vec![who],
+                    format!("pinned {}'s {} at {value:.2} for {days} days", self.name_of(who), axis.label()),
+                ))
+            }
+            _ => Err("not a word command".into()),
         }
     }
 
