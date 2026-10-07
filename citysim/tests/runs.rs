@@ -206,6 +206,9 @@ fn test_ledger_route_enters_through_weakest_building() {
 #[test]
 fn test_unguarded_nodes_roll_nothing() {
     let mut w = world();
+    // A tier-1 deck's quiet take, read from the config (the store holds more).
+    let take = (w.config.data.steal_units[0] as f32 * w.config.hack.quiet_take).round() as u32;
+    assert!(take > 0 && take <= 100);
     let gang = w.gang_list()[0];
     let hideout = w.hideout_of(gang).expect("hideout");
     let n = virt::node_of_building(&w, hideout).expect("node");
@@ -221,7 +224,11 @@ fn test_unguarded_nodes_roll_nothing() {
     assert_eq!((r.id, r.outcome, r.contests), (id, Some(RunOutcome::Success), 0));
     assert!(r.log.is_empty());
     let deck = w.comp::<Kit>(a).and_then(|k| k.deck).expect("deck");
-    assert_eq!(w.comp::<citysim::Asset>(deck).map(|x| x.data[Track::Deck.index()]), Some(30), "60 x quiet 0.5");
+    assert_eq!(
+        w.comp::<citysim::Asset>(deck).map(|x| x.data[Track::Deck.index()]),
+        Some(take),
+        "steal_units[0] x quiet_take"
+    );
 }
 
 /// V6: one search per scorer, whatever the number of targets; an ICE write
@@ -450,7 +457,9 @@ fn test_extract_loss_returns_payload() {
     let n = virt::node_of_building(&w, lab).expect("node");
     set_ice(&mut w, n, 0);
     let store = w.virt.node(n).expect("node").store.clone();
-    assert!(store.total() > 0);
+    // A tier-2 deck's quiet take, read from the config (the store holds more).
+    let take = (w.config.data.steal_units[1] as f32 * w.config.hack.quiet_take).round() as u32;
+    assert!(take > 0 && store.total() >= take);
     let a = runner(&mut w, &[]);
     arm(&mut w, a, 2, 0.5);
     let bar = first_bar(&w);
@@ -462,7 +471,7 @@ fn test_extract_loss_returns_payload() {
         virt::run(&mut w);
     }
     let r = w.runs[&id].clone();
-    assert_eq!(r.payload.iter().sum::<u32>(), 75, "150 x quiet 0.5 in the payload");
+    assert_eq!(r.payload.iter().sum::<u32>(), take, "steal_units[1] x quiet_take in the payload");
     assert_ne!(w.virt.node(n).expect("node").store, store);
     set_ice(&mut w, n, 2);
     let gap = 2.0 - r.att;

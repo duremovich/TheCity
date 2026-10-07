@@ -80,7 +80,14 @@ pub fn raid_pending(world: &World, agent: EntityId) -> bool {
         Some(Expedition::Riot(id)) => riot_by_id(world, id).is_some_and(|r| r.muster_at <= world.tick + window),
         Some(Expedition::Gang(_)) => {
             let Some(g) = own_gang(world, agent) else { return false };
-            g.order.is_raid() && g.raid_at.is_some_and(|t| t <= world.tick + window)
+            // M14 V32/V37: the member running the prelude or streaming the
+            // raid stays in the chair, not in the march.
+            let seated = !world.run_orders.is_empty()
+                && world
+                    .run_orders
+                    .get(&agent)
+                    .is_some_and(|o| matches!(o.why, crate::virt::RunWhy::Prelude | crate::virt::RunWhy::Overwatch));
+            !seated && g.order.is_raid() && g.raid_at.is_some_and(|t| t <= world.tick + window)
         }
         None => false,
     }
@@ -100,10 +107,36 @@ pub fn mustered(world: &World, agent: EntityId) -> bool {
     departure(world, agent).is_some_and(|t| world.tick >= t)
 }
 
+/// M14 V34: the newest pending `Shock::Hacked { by }` on `gang` naming
+/// another living gang (a traced run on its nodes): the gang a Retaliate
+/// chosen now fights. Read whenever Retaliate is chosen, whatever shock
+/// triggered it, so a stale pending `Hacked` naming a third gang outranks
+/// the `Raided` that set the order off (newest Hacked wins; deterministic,
+/// accepted).
+pub fn hack_grudge(world: &World, gang: EntityId) -> Option<EntityId> {
+    let g = world.comp::<Gang>(gang)?;
+    g.shocks.iter().rev().find_map(|s| match *s {
+        Shock::Hacked { by: Some(b) } if b != gang && world.has::<Gang>(b) => Some(b),
+        _ => None,
+    })
+}
+
+/// The gang a raid of `gang`'s fights: under Retaliate the gang a traced
+/// run named when the order was chosen (`Gang.retaliate_on`, M14 V34), else
+/// `World::rival_of`.
+pub fn raid_rival(world: &World, gang: EntityId) -> Option<EntityId> {
+    let named = world
+        .comp::<Gang>(gang)
+        .filter(|g| g.order == Order::Retaliate)
+        .and_then(|g| g.retaliate_on)
+        .filter(|&r| r != gang && world.has::<Gang>(r));
+    named.or_else(|| world.rival_of(gang))
+}
+
 /// The street tile outside the rival Hideout's door.
 pub fn rival_hideout_tile(world: &World, agent: EntityId) -> Option<TilePos> {
     let gang = world.gang_of(agent)?;
-    let rival = world.rival_of(gang)?;
+    let rival = raid_rival(world, gang)?;
     let hideout = world.hideout_of(rival)?;
     world.comp::<Building>(hideout).map(|b| world.outside_door(b))
 }
@@ -130,7 +163,7 @@ pub fn gang_target(world: &World, gang: EntityId) -> Option<EntityId> {
     if g.order.target_is_jail() {
         return world.building_of_kind(BuildingKind::Jail);
     }
-    corp_target(world, gang).or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
+    corp_target(world, gang).or_else(|| raid_rival(world, gang).and_then(|r| world.hideout_of(r)))
 }
 
 /// The building this agent's expedition ends at (the plan's bound target).
@@ -228,12 +261,19 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
         return false;
     }
     // The first member out the door stamps the departure; the rest follow it.
+    let mut first = false;
     if g.order.target_is_jail() {
         if g.last_breakout_tick.is_none_or(|t| t + TICKS_PER_DAY < now) {
             g.last_breakout_tick = Some(now);
+            first = true;
         }
     } else if g.last_raid_tick.is_none_or(|t| t + TICKS_PER_DAY < now) {
         g.last_raid_tick = Some(now);
+        first = true;
+    }
+    // M14 V37: the stream (and the V32 door-then-departure log).
+    if first {
+        crate::systems::virt::on_raid_departed(world, gid);
     }
     true
 }
@@ -625,6 +665,45 @@ pub fn robots_first(world: &World, b: EntityId, defenders: &mut Vec<EntityId>) {
     defenders.splice(0..0, robots);
 }
 
+/// M14 V32: of `cands` (in removal order: robots, then summoned guards
+/// weakest first), those a DoorOpen keeps from the door: taken while the
+/// removed strength stays within `cap × total`; the first that would pass
+/// it stops the strip (so the door at most halves the defence at 0.5).
+pub fn door_strip(total: f32, cands: &[(EntityId, f32)], cap: f32) -> Vec<EntityId> {
+    let limit = cap * total;
+    let mut removed = Vec::new();
+    let mut sum = 0.0f32;
+    for &(id, s) in cands {
+        if sum + s > limit {
+            break;
+        }
+        sum += s;
+        removed.push(id);
+    }
+    removed
+}
+
+/// M14 V33: robots at `b` turned for `gang` join its raiders, first.
+pub fn turned_join(world: &World, b: EntityId, gang: EntityId, raiders: &mut Vec<EntityId>) {
+    let now = world.tick;
+    let turned: Vec<EntityId> = crate::systems::assets::assets_at(world, b)
+        .iter()
+        .copied()
+        .filter(|&a| {
+            world.comp::<crate::components::Asset>(a).is_some_and(|x| {
+                x.kind == crate::components::AssetKind::Robot
+                    && x.loc == crate::components::AssetLoc::Posted(b)
+                    && x.condition > 0
+                    && x.turned.is_some_and(|(side, until)| side == gang && until > now)
+            })
+        })
+        .collect();
+    if !turned.is_empty() {
+        raiders.retain(|r| !turned.contains(r));
+        raiders.splice(0..0, turned);
+    }
+}
+
 /// `fighting + 0.25 × courage`: the brawl's pairing order.
 pub fn strength(world: &World, id: EntityId) -> f32 {
     law::fighting(world, id) + 0.25 * law::courage(world, id)
@@ -638,7 +717,7 @@ pub fn by_strength(world: &World, ids: &mut [EntityId]) {
 /// `raid_at` cleared and return `None`.
 pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let gid = world.gang_of(actor)?;
-    let rival = world.rival_of(gid)?;
+    let rival = raid_rival(world, gid)?;
     if world.comp::<Gang>(gid).is_none_or(|g| g.raid_at.is_none()) {
         return None;
     }
@@ -647,6 +726,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let gname = world.comp::<Gang>(gid).map(|g| g.name.clone())?;
 
     let mut raiders = raiders_at(world, gid, actor, door);
+    turned_join(world, rival_hideout, gid, &mut raiders);
     let mut defenders: Vec<EntityId> = world
         .comp::<Gang>(rival)
         .map(|g| g.members.clone())
@@ -817,12 +897,12 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     };
     let mut defenders: Vec<EntityId> =
         private_guards_of(world, target).into_iter().filter(|&g| law::living(world, g) && near(world, g)).collect();
+    // M14 V32: the guards summoned to the door (posted, then answering) are
+    // stood there after the DoorOpen strip, so a stripped one never comes.
+    let mut summoned: Vec<EntityId> = Vec::new();
     for g in posted_guards(world, target) {
         if !defenders.contains(&g) {
-            if world.has::<Brain>(g) {
-                world.abort_plan(g);
-            }
-            world.stand_at_door(g, target);
+            summoned.push(g);
             defenders.push(g);
         }
     }
@@ -840,15 +920,41 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
             defenders.push(g);
         }
     }
+    let posted_n = summoned.len();
     for g in answering_guards(world, d, door, &defenders) {
-        world.abort_plan(g);
-        world.stand_at_door(g, target);
+        summoned.push(g);
         defenders.push(g);
     }
+    // M14 V32: under DoorOpen the robots and then the summoned guards
+    // (weakest first) stay away while the removed strength is within
+    // `door_strip_cap` of the whole defence.
+    let stripped = if crate::systems::virt::hack_live(world, target, crate::virt::HackEffect::DoorOpen) {
+        let robots = crate::systems::robots::defenders_at(world, target);
+        let all: Vec<EntityId> = defenders.iter().chain(robots.iter()).copied().collect();
+        let total: f32 = all.iter().map(|&x| strength(world, x)).sum();
+        let mut weak: Vec<(EntityId, f32)> = summoned.iter().map(|&g| (g, strength(world, g))).collect();
+        weak.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+        let cands: Vec<(EntityId, f32)> = robots.iter().map(|&r| (r, strength(world, r))).chain(weak).collect();
+        door_strip(total, &cands, world.config.ice.door_strip_cap)
+    } else {
+        Vec::new()
+    };
+    for (i, &g) in summoned.iter().enumerate() {
+        if stripped.contains(&g) {
+            continue;
+        }
+        if i >= posted_n || world.has::<Brain>(g) {
+            world.abort_plan(g);
+        }
+        world.stand_at_door(g, target);
+    }
+    defenders.retain(|&x| !stripped.contains(&x));
     defenders.retain(|&x| !world.has::<Sentence>(x) && x != actor && world.gang_of(x) != Some(gid));
     by_strength(world, &mut defenders);
     robots_first(world, target, &mut defenders);
+    defenders.retain(|x| !stripped.contains(x));
     let mut raiders = raiders_at(world, gid, actor, door);
+    turned_join(world, target, gid, &mut raiders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let what = world.name_of(target);
     let owner = world.owner_label(corp);
@@ -972,6 +1078,8 @@ fn settle(world: &mut World, gid: EntityId, rival: EntityId, outcome: Outcome) {
             world.gang_credit(gid, loot);
             // M13 D38: the sacked Hideout's Stims and Parts.
             crate::systems::stims::loot_goods(world, rival_hideout, gid);
+            // M14 V19: its Data moves to the winner's Hideout node (not wiped).
+            crate::systems::virt::move_store(world, rival_hideout, gid);
             // Everyone inside is put out on the street.
             let inside = world.comp::<Building>(rival_hideout).map(|b| b.occupants.clone()).unwrap_or_default();
             for o in inside {

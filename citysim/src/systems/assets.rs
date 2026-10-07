@@ -591,6 +591,18 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
         k.deck = Some(d);
         k.deck_tier = eff_tier_of(world, x).max(1);
     }
+    // M14 V31: else the fleet deck a corp's run order lends at its Lab chair.
+    if k.deck.is_none() {
+        let lent = world
+            .run_orders
+            .get(&agent)
+            .filter(|o| o.why == crate::virt::RunWhy::CorpOrder)
+            .and_then(|o| crate::systems::virt::fleet_deck_at(world, o.chair));
+        if let Some((d, x)) = lent.and_then(|d| world.comp::<Asset>(d).map(|x| (d, x))) {
+            k.deck = Some(d);
+            k.deck_tier = eff_tier_of(world, x).max(1);
+        }
+    }
     k.vehicle = vehicle_of(world, agent);
     k.driving = world.trips.get(&agent).and_then(|t| world.comp::<Asset>(t.vehicle)).map(|x| x.kind);
     let vehicle_tier = k.vehicle.and_then(|v| world.comp::<Asset>(v)).map_or(0, |x| {

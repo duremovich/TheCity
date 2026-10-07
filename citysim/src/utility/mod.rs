@@ -116,7 +116,9 @@ pub fn think_with_offer(
         // A cooled goal scores 0 (skipped). M14 V29: Hack's sale of a deck's
         // Data is not cooled by the run that took it.
         if brain.cooldowns.get(&goal).is_some_and(|&until| until > tick)
-            && !(goal == GoalKind::Hack && crate::systems::virt::deck_data(world, id) > 0)
+            && !(goal == GoalKind::Hack
+                && (crate::systems::virt::deck_data(world, id) > 0
+                    || crate::systems::virt::standing_order(world, id).is_some()))
         {
             continue;
         }

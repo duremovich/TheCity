@@ -55,11 +55,15 @@ pub struct OrderInputs {
     pub hoard: f32,
     pub hoard_corp: Option<EntityId>,
     pub hoard_tilt: f32,
-    /// M12 D38: how covered the rival Hideout's district is (Raid,
-    /// Retaliate): 1 under a `Crackdown(self)` or `Cordon` stance there,
+    /// M12 D38: how covered the rival Hideout's district is (Raid; Retaliate
+    /// reads `retaliate_cover`): 1 under a `Crackdown(self)` or `Cordon` stance there,
     /// else `(coverage − 0.5) ÷ 1.5` clamped to 0..0.95. 0 with `[law]
     /// district_beats` off (the M11 brain).
     pub target_cover: f32,
+    /// M14 V34: the same over the Retaliate target: the gang a pending
+    /// `Shock::Hacked` names (`raid::hack_grudge`), else `raid::raid_rival`
+    /// (a standing Retaliate's named gang, else the rival: `target_cover`).
+    pub retaliate_cover: f32,
     /// M12 D38: the same for the Jail's district (BreakOut); 1 under
     /// Garrison. Plan deviation: one field per target, since BreakOut and
     /// the raids aim at different districts.
@@ -92,6 +96,16 @@ pub struct OrderInputs {
     pub lawfulness: f32,
     /// M13 D36: the gang's treasury ÷ `[corps] hoard_heat`, clamped 0..1.
     pub treasury_x: f32,
+    /// M14 V30: the member with a deck and the best hacking (ties the lower
+    /// id); `None` with the plane off.
+    pub runner: Option<EntityId>,
+    /// M14 V30: the best target's EV ÷ `[corps] hoard_heat` (0..1) and its
+    /// `p_success` (0 unless it clears `min_route_p`), from one search at
+    /// the Hideout node.
+    pub virt_ev: f32,
+    pub virt_p: f32,
+    /// M14 V30: a traced run on our nodes named someone lately.
+    pub hacked: bool,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
@@ -104,7 +118,8 @@ pub fn target_cover(world: &World, gang: EntityId, order: Order) -> f32 {
         crate::systems::raid::corp_target(world, gang)
             .or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
     } else {
-        world.rival_of(gang).and_then(|r| world.hideout_of(r))
+        // M14 V34: a standing Retaliate's named gang (`raid::raid_rival`).
+        crate::systems::raid::raid_rival(world, gang).and_then(|r| world.hideout_of(r))
     };
     target.map_or(0.0, |t| cover_of(world, gang, t))
 }
@@ -210,8 +225,8 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 ),
                 Consideration::new("pride", i.pride, Curve::Linear { m: 0.9, b: 0.1 }),
                 Consideration::new("courage", i.courage, Curve::Linear { m: 0.5, b: 0.5 }),
-                Consideration::new("open target", can(i.target_cover < 1.0), GATE),
-                Consideration::new("target cover", 1.0 - i.target_cover, Curve::Linear { m: 0.8, b: 0.2 }),
+                Consideration::new("open target", can(i.retaliate_cover < 1.0), GATE),
+                Consideration::new("target cover", 1.0 - i.retaliate_cover, Curve::Linear { m: 0.8, b: 0.2 }),
             ],
             f.retaliate,
         ),
@@ -253,6 +268,19 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
                 Consideration::new("1-target cover", 1.0 - i.harvest_cover, Curve::Linear { m: 0.8, b: 0.2 }),
             ],
             f.harvest,
+        ),
+        // M14 V30 (spec § 6 table).
+        score(
+            Order::VirtRaid,
+            vec![
+                Consideration::new("runner & target", can(i.runner.is_some() && i.virt_p > 0.0), GATE),
+                Consideration::new("greed", i.greed, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("U(EV/hoard_heat)", i.virt_ev, Curve::Logistic { k: 8.0, mid: 0.3 }),
+                Consideration::new("1-U(treasury/hoard_heat)", 1.0 - i.treasury_x, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("1-heat", calm, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("hacked", if i.hacked { 1.0 } else { 0.0 }, Curve::Linear { m: 0.5, b: 0.5 }),
+            ],
+            f.virt_raid,
         ),
         score(
             Order::BreakOut,
@@ -434,6 +462,11 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
     let corp_guards = corp_prize
         .map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len().min(cfg.corp_raid_posted));
     let rival_hq = rival.and_then(|r| world.hideout_of(r));
+    // M14 V34: the Retaliate target (a hacker named by a pending shock, a
+    // standing Retaliate's named gang, else the rival).
+    let retaliate_hq = crate::systems::raid::hack_grudge(world, gang)
+        .or_else(|| crate::systems::raid::raid_rival(world, gang))
+        .and_then(|r| world.hideout_of(r));
     let jail = world.building_of_kind(BuildingKind::Jail);
     // M13 D36: the Harvest inputs (the target is cached on the gang by `rescore`).
     let clinic_exists = world
@@ -445,6 +478,8 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         .and_then(|(t, _)| world.comp::<crate::components::Position>(t))
         .map_or(0.0, |p| tile_cover(world, gang, p.tile));
     let heat_ref = world.config.corps.hoard_heat.max(1);
+    // M14 V30: the gang's runner and best target (nothing with the plane off).
+    let virt = crate::systems::virt::gang_virt_inputs(world, gang, corp_prize.map(|(b, _)| b));
     Some(OrderInputs {
         frontier,
         frontier_total,
@@ -470,6 +505,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         hoard_corp,
         hoard_tilt: world.config.corps.hoard_tilt,
         target_cover: rival_hq.map_or(0.0, |h| cover_of(world, gang, h)),
+        retaliate_cover: retaliate_hq.map_or(0.0, |h| cover_of(world, gang, h)),
         jail_cover: jail.map_or(0.0, |j| cover_of(world, gang, j)),
         derelicts: crate::systems::gang::squat_targets(world, gang).len(),
         districts_held,
@@ -483,6 +519,10 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         harvest_cover,
         lawfulness: p.lawfulness,
         treasury_x: (g.treasury as f32 / heat_ref as f32).clamp(0.0, 1.0),
+        runner: virt.0,
+        virt_ev: virt.1,
+        virt_p: virt.2,
+        hacked: virt.3,
     })
 }
 
@@ -600,14 +640,23 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     let muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
     // M12 D39: a Raid chosen for the corp prize names the corp building.
     let corp_target = inputs.corp_prize.map(|(b, _)| b).filter(|_| order == Order::Raid && corp_raid_best);
+    // M14 V34: a Retaliate chosen on a pending `Shock::Hacked { by }` naming
+    // another gang fights that gang (with three gangs or more it need not be
+    // the rival); read before the caller consumes the shocks.
+    let retaliate_on = if order == Order::Retaliate { crate::systems::raid::hack_grudge(world, gang) } else { None };
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.order = order;
         g.order_since = now;
         g.raid_at = muster;
         g.raid_target = corp_target;
+        g.retaliate_on = retaliate_on;
         if order == Order::Retaliate {
             g.retaliate_until = Some(now + cfg.retaliate_days * TICKS_PER_DAY);
         }
+    }
+    // M14 V32: the Raid prelude, timed off the corp raid's muster.
+    if let (Some(t), Some(at)) = (corp_target, muster) {
+        crate::systems::virt::raid_prelude(world, gang, t, at);
     }
     let why = if hysteresis == 0.0 { "shock" } else { "daily" };
     world.push_event(

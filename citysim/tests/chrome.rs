@@ -456,6 +456,8 @@ fn test_harvest_scored_only_with_target_and_clinic() {
         hoard_corp: None,
         hoard_tilt: 0.1,
         target_cover: 0.0,
+        // M14 V34: the Retaliate target's cover, here the rival's (no hack grudge).
+        retaliate_cover: 0.0,
         jail_cover: 0.0,
         derelicts: 0,
         districts_held: 0,
@@ -469,6 +471,10 @@ fn test_harvest_scored_only_with_target_and_clinic() {
         harvest_cover: 0.0,
         lawfulness: 0.2,
         treasury_x: 0.5,
+        runner: None,
+        virt_ev: 0.0,
+        virt_p: 0.0,
+        hacked: false,
     };
     let cfg = Config::load().gangs;
     let has = |i: &OrderInputs| faction::score_orders(i, &cfg).iter().any(|s| s.order == Order::Harvest);
