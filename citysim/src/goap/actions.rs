@@ -122,10 +122,16 @@ pub enum ActionKind {
     /// tiles or in the same building) or over a body (GuardBody). Scripted
     /// only (never in `PLANNABLE`).
     StakeOut,
+    /// L1: on the street, pick scrap and litter for the Recycler's coins
+    /// (`[life] scavenge_coins`, paid by the Treasury): the broke's Earn.
+    Scavenge,
+    /// L1: an exec's office hours at the corp's HQ (a scripted Work plan,
+    /// never in `PLANNABLE`): until `[life] exec_shift` ends.
+    Meeting,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 84] = [
+pub const PLANNABLE: [ActionKind; 85] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -217,6 +223,8 @@ pub const PLANNABLE: [ActionKind; 84] = [
     ActionKind::JackIn,
     ActionKind::SellData,
     ActionKind::UpgradeDeck,
+    // L1.
+    ActionKind::Scavenge,
 ];
 
 impl ActionKind {
@@ -315,6 +323,8 @@ impl ActionKind {
                 | ActionKind::JackIn
                 | ActionKind::SellData
                 | ActionKind::UpgradeDeck
+                | ActionKind::Scavenge
+                | ActionKind::Meeting
         )
     }
 }
@@ -484,6 +494,18 @@ pub struct PlanCtx {
     pub has_data: bool,
     /// M14 V36: the shop pick is an `UpgradeDeck`.
     pub shop_upgrade: bool,
+    /// L1: `[life] enabled`.
+    pub life: bool,
+    /// L1: a member's Hideout is a bed nearer than Home (`life::hideout_bed`).
+    pub hideout_bed: bool,
+    /// L1: a housed agent far from Home can take a Hotel bed (`life::away_hotel`).
+    pub away_hotel: bool,
+    /// L1: exhausted with every bed far: Sleep where the agent stands.
+    pub rough_ok: bool,
+    /// L1: where Flee runs without a Home (`life::refuge`).
+    pub refuge: Option<LocationKey>,
+    /// L1: below a meal (`life::broke`): Beg and Scavenge are income.
+    pub poor: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -671,7 +693,25 @@ impl PlanCtx {
         // M12 D21/D27: the street's rungs (homeless agents only; cheap scans
         // over the few Hotels and derelicts).
         let homeless = home.is_none();
-        let hotel = if homeless { crate::systems::street::hotel_for(world, agent) } else { None };
+        // L1: a bed nearer than Home (planning only: the step re-check
+        // reads the symbols, and a walk under way keeps its target).
+        let life = world.config.life.enabled;
+        let sleeping = life && !light && wants(&[GoalKind::Sleep]);
+        let away_hotel = if sleeping && !homeless { crate::systems::life::away_hotel(world, agent) } else { None };
+        let hideout_bed = sleeping && crate::systems::life::hideout_bed(world, agent).is_some();
+        let rough_ok = life && wants(&[GoalKind::Sleep]) && crate::systems::life::rough_ok(world, agent);
+        let hotel = if homeless {
+            crate::systems::street::hotel_for(world, agent)
+        } else if life && !light && wants(&[GoalKind::Sleep]) {
+            away_hotel.or_else(|| crate::systems::street::booked_hotel(world, agent))
+        } else {
+            None
+        };
+        let refuge = if life && home.is_none() && wants(&[GoalKind::Flee]) {
+            crate::systems::life::refuge(world, agent)
+        } else {
+            None
+        };
         let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
         let derelict_target = target.filter(|&t| crate::systems::street::is_derelict(world, t));
         let gang_squat = derelict_target.is_some()
@@ -737,6 +777,13 @@ impl PlanCtx {
             }
         }
 
+        // L1: a homeless agent's refuge (its own key's distance).
+        if let (Some(o), false, Some((k, b))) = (origin, light, refuge) {
+            if let Some(door) = world.comp::<Building>(b).map(|bd| bd.door) {
+                dist.entry(k).or_insert(o.manhattan(door));
+            }
+        }
+
         let (target_pantry, target_occupied) = target
             .and_then(|t| world.comp::<Building>(t))
             .map_or((0, false), |b| (b.stock_food, !b.occupants.is_empty()));
@@ -749,7 +796,7 @@ impl PlanCtx {
             .and_then(|g| world.comp::<crate::components::Gang>(g))
             .is_some_and(|g| g.is_sacked(world.tick));
 
-        PlanCtx {
+        let mut ctx = PlanCtx {
             agent,
             target,
             goal,
@@ -777,7 +824,9 @@ impl PlanCtx {
             dole_available: job.is_none()
                 && world.levers.dole_per_day > 0
                 && world.treasury().is_some_and(|t| t.coins >= 0)
-                && world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.last_dole_day != Some(day)),
+                && world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.last_dole_day != Some(day))
+                // L1: a Hall trip only once the dole has accrued (or broke, or near).
+                && (!life || crate::systems::life::dole_trip_due(world, agent)),
             on_shift: job.is_some_and(|j| j.on_shift(tod)),
             evening: world.phase() == crate::time::DayPhase::Evening,
             homeless: home.is_none(),
@@ -868,7 +917,8 @@ impl PlanCtx {
             hideout_sacked,
             holes_up: crate::systems::gang::holes_up_at(world, agent).is_some(),
             can_found: crate::systems::founding::can_found(world, agent),
-            hotel_available: homeless && hotel.is_some() && crate::systems::demography::is_adult(world, agent),
+            hotel_available: (homeless && hotel.is_some() && crate::systems::demography::is_adult(world, agent))
+                || away_hotel.is_some(),
             squatter: squat.is_some(),
             squat_ok,
             gang_squat,
@@ -913,8 +963,19 @@ impl PlanCtx {
                 && world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.deck.is_some()),
             has_data: hack_on && crate::systems::virt::deck_data(world, agent) > 0,
             shop_upgrade,
+            life,
+            hideout_bed,
+            away_hotel: away_hotel.is_some(),
+            rough_ok,
+            refuge: refuge.map(|(k, _)| k),
+            poor: life && wants(&[GoalKind::Earn]) && crate::systems::life::broke(world, agent),
             dist,
-        }
+        };
+        // L1: with a week of dole waiting at the Hall, scrap and begging are
+        // not the plan (the cheap street chores won every broke Earn, and the
+        // dole was never fetched).
+        ctx.poor &= !ctx.dole_available;
+        ctx
     }
 
     fn is(&self, role: Role) -> bool {
@@ -1027,7 +1088,10 @@ impl ActionKind {
             ActionKind::JoinGang => !ctx.in_gang && !ctx.is(Role::Guard) && ctx.adult && ctx.gang_eligible,
             ActionKind::Flirt | ActionKind::Propose => ctx.adult,
             ActionKind::Register => ctx.adult && !ctx.in_gang,
-            ActionKind::CheckIn => ctx.adult && ctx.homeless,
+            ActionKind::CheckIn => ctx.adult && (ctx.homeless || ctx.away_hotel),
+            // L1: the broke's Earn (off: never).
+            ActionKind::Scavenge => ctx.life && ctx.adult && ctx.poor && ctx.serves(&[GoalKind::Earn]),
+            ActionKind::Meeting => false,
             ActionKind::Occupy => ctx.adult && (ctx.homeless || ctx.gang_squat),
             ActionKind::ServeTime => false,
             _ => true,
@@ -1063,6 +1127,9 @@ impl ActionKind {
                     || (ctx.holes_up && at(LocationKey::Hideout))
                     || (ws.checked_in && at(LocationKey::Hotel))
                     || (ctx.squatter && at(LocationKey::Squat))
+                    // L1: the Hideout nearer than Home; lying down where one stands.
+                    || (ctx.hideout_bed && at(LocationKey::Hideout))
+                    || (ctx.rough_ok && at(LocationKey::Street))
             }
             // Rest at Bar or Home; also at the workplace while waiting for a
             // shift, and at the Hideout for a gang member.
@@ -1094,7 +1161,13 @@ impl ActionKind {
             ActionKind::Arrest => at(LocationKey::SuspectTile) && ws.known_suspect_location && !ws.suspect_cuffed,
             ActionKind::Escort => ws.suspect_cuffed && ctx.dist.contains_key(&LocationKey::Jail),
             ActionKind::HideFromLaw => (at(LocationKey::Hideout) || at(LocationKey::Home)) && ctx.wanted,
-            ActionKind::FleeToHome => !ws.is_safe && ctx.dist.contains_key(&LocationKey::Home),
+            ActionKind::FleeToHome => {
+                !ws.is_safe
+                    && (ctx.dist.contains_key(&LocationKey::Home)
+                        || ctx.refuge.is_some_and(|k| ctx.dist.contains_key(&k)))
+            }
+            ActionKind::Scavenge => at(LocationKey::Street) && ctx.poor,
+            ActionKind::Meeting => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1188,7 +1261,10 @@ impl ActionKind {
             ActionKind::PatrolLeg => ctx.patrol_pending && ctx.dist.contains_key(&LocationKey::PatrolWaypoint),
             ActionKind::Arrest => ctx.suspect_located,
             ActionKind::HideFromLaw => ctx.wanted,
-            ActionKind::FleeToHome => ctx.dist.contains_key(&LocationKey::Home),
+            ActionKind::FleeToHome => {
+                ctx.dist.contains_key(&LocationKey::Home) || ctx.refuge.is_some_and(|k| ctx.dist.contains_key(&k))
+            }
+            ActionKind::Scavenge => ctx.poor,
             ActionKind::Chat => ctx.partner.is_some(),
             ActionKind::Flirt | ActionKind::Propose => ctx.partner_reachable,
             ActionKind::JoinGang => ctx.gang_eligible && ctx.dist.contains_key(&LocationKey::Hideout),
@@ -1270,6 +1346,8 @@ impl ActionKind {
                 n.carrying_stolen = true;
             }
             ActionKind::Forage => gain_food(&mut n, 1),
+            // L1: for the broke's Earn, a coin or two is the income there is.
+            ActionKind::Beg | ActionKind::Scavenge if _ctx.poor && _ctx.goal == Some(GoalKind::Earn) => income(&mut n),
             ActionKind::Beg => {
                 // Yields 1-2 coins at best: only a meal's worth when the price is that low.
                 if _ctx.price <= 2 {
@@ -1459,7 +1537,7 @@ impl ActionKind {
             ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0,
             ActionKind::Forage => 6.0 + if ctx.hunger < 0.3 { 2.0 } else { 0.0 },
             ActionKind::Beg => 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0,
-            ActionKind::Sleep => 1.0 + if ctx.homeless { 6.0 } else { 0.0 },
+            ActionKind::Sleep => 1.0 + if ctx.homeless || ctx.rough_ok { 6.0 } else { 0.0 },
             ActionKind::Rest => 4.0,
             ActionKind::FarmWork => 3.0 - ctx.farming * 2.0,
             ActionKind::HaulToMarket => 3.0,
@@ -1516,6 +1594,9 @@ impl ActionKind {
             ActionKind::UpgradeDeck => 6.0,
             // M15: scripted steps, never searched.
             ActionKind::AskAround | ActionKind::StakeOut => 60.0,
+            // L1: a pride-weighted chore, dearer than the dole, cheaper than begging.
+            ActionKind::Scavenge => 4.0 + ctx.pride * 4.0,
+            ActionKind::Meeting => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

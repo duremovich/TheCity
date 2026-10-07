@@ -708,7 +708,24 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         g.harvest_target = harvest;
     }
     let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return false };
-    let next = choose(&scores, current, hysteresis);
+    // L1: a shock rescore needs the daily margin too, and an order holds
+    // `order_dwell_ticks` unless it went infeasible, the shocks are severe,
+    // or the winner is Retaliate or BreakOut (orders flipped 9 times in 6
+    // days after a leader's arrest, and no GangWork walk ever finished).
+    let life = world.config.life.enabled;
+    let h = if life && hysteresis == 0.0 { cfg.hysteresis } else { hysteresis };
+    let mut next = choose(&scores, current, h);
+    if life {
+        let (since, pending) = world
+            .comp::<Gang>(gang)
+            .map_or((0, 0.0), |g| (g.order_since, g.shocks.iter().map(|s| s.severity()).sum::<f32>()));
+        let feasible = scores.iter().any(|s| s.order == current && s.score > 0.0);
+        let young = now.saturating_sub(since) < world.config.life.order_dwell_ticks;
+        let exempt = matches!(next, Some(Order::Retaliate | Order::BreakOut));
+        if young && feasible && !exempt && pending < world.config.life.order_severe {
+            next = None;
+        }
+    }
     let best_score = scores.first().map_or(0.0, |s| s.score);
     let current_score = scores.iter().find(|s| s.order == current).map_or(0.0, |s| s.score);
     let corp_raid_best = scores.iter().find(|s| s.order == Order::Raid).is_some_and(is_corp_raid);

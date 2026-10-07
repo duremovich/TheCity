@@ -102,6 +102,9 @@ struct RunArgs {
     /// exchange, hearing, kin channel or reputation; the M14 city.
     #[arg(long)]
     word_off: bool,
+    /// L1: the life pass off (`Config::life_off`): the ab79188 days.
+    #[arg(long)]
+    life_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -1064,6 +1067,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     if args.word_off {
         config = config.word_off();
     }
+    if args.life_off {
+        config.life = citysim::config::LifeCfg::off();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -1085,6 +1091,9 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             if args.word_off {
                 w.config = w.config.clone().word_off();
+            }
+            if args.life_off {
+                w.config.life = citysim::config::LifeCfg::off();
             }
             w
         }

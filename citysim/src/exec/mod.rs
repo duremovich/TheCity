@@ -272,7 +272,7 @@ fn step_agent(world: &mut World, id: EntityId) {
             }
         }
         ExecState::Use { kind, until, started } => {
-            if tick >= until || actions::finishes_early(world, id, kind) {
+            if tick >= until || actions::finishes_early(world, id, kind, started) {
                 actions::on_complete(world, id, kind, step.target, started, tick)
             } else {
                 StepResult::Running
@@ -450,7 +450,8 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
     let walk_key = match step.action {
         ActionKind::GoTo(key) => Some(key),
         ActionKind::Escort => Some(LocationKey::Jail),
-        ActionKind::FleeToHome => Some(LocationKey::Home),
+        // L1: without a Home, the nearest refuge (`life::refuge`).
+        ActionKind::FleeToHome => Some(crate::systems::life::refuge(world, id).map_or(LocationKey::Home, |(k, _)| k)),
         _ => None,
     };
     match walk_key {
@@ -484,6 +485,18 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             } else {
                 None
             };
+            // L1: an escort is a van ride of at most `escort_van_ticks` (the
+            // suspect walked the guard's whole walk in cuffs, hours at a time).
+            if step.action == ActionKind::Escort && world.config.life.enabled {
+                let mut timed = timed_goto(world, id, target.clone());
+                if let ExecState::GotoTimed { arrive_tick, .. } = &mut timed {
+                    *arrive_tick = (*arrive_tick).min(tick + world.config.life.escort_van_ticks);
+                }
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = timed;
+                }
+                return StepResult::Running;
+            }
             let state = match (driving, lod) {
                 (Some(crate::components::AssetKind::Flyer), _) => crate::systems::vehicles::fly(world, id, target),
                 (_, Lod::Coarse | Lod::Statistical) => timed_goto(world, id, target),
@@ -502,6 +515,18 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
         }
         None => {
             let kind = step.action;
+            // L1: the partner a Chat or Flirt walked to may have left: talk to
+            // whoever is here instead (the shadowed walked 2 h to a 1-minute
+            // chat with nobody).
+            let rebound;
+            let step = if world.config.life.enabled
+                && matches!(kind, ActionKind::Chat | ActionKind::Flirt | ActionKind::Propose)
+            {
+                rebound = rebind_partner(world, id, step);
+                &rebound
+            } else {
+                step
+            };
             // M14 V11: a `JackIn` begun before its order's `not_before` waits
             // in the chair (then the step is retried).
             if kind == ActionKind::JackIn {
@@ -539,6 +564,36 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             StepResult::Running
         }
     }
+}
+
+/// L1: a social step whose partner is not in the room is re-bound to the
+/// best co-located partner (unmarried for Flirt and Propose), the plan's
+/// target with it; unchanged when the partner is here or nobody is.
+fn rebind_partner(
+    world: &mut World,
+    id: EntityId,
+    step: &crate::components::ActionInstance,
+) -> crate::components::ActionInstance {
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let present =
+        step.target.is_some_and(|t| here.is_some() && world.comp::<Position>(t).and_then(|p| p.building) == here);
+    if present || here.is_none() {
+        return step.clone();
+    }
+    let unmarried = step.action != ActionKind::Chat;
+    let Some(new) = crate::systems::social::best_colocated_partner(world, id, -1.0, unmarried) else {
+        return step.clone();
+    };
+    let old = step.target;
+    if let Some(plan) = world.comp_mut::<Brain>(id).and_then(|b| b.plan.as_mut()) {
+        if plan.target == old {
+            plan.target = Some(new);
+        }
+        for s in plan.steps.iter_mut().filter(|s| s.target == old) {
+            s.target = Some(new);
+        }
+    }
+    crate::components::ActionInstance { target: Some(new), ..step.clone() }
 }
 
 fn plan_target_of(world: &World, id: EntityId) -> Option<EntityId> {

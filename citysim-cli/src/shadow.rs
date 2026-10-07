@@ -53,6 +53,10 @@ pub struct ShadowArgs {
     /// Print the candidate count per archetype at `--start-day` and exit.
     #[arg(long)]
     pub list: bool,
+    /// L1: the life pass off (`[life] enabled = false`): the ab79188 days,
+    /// for a before/after on one build.
+    #[arg(long)]
+    pub life_off: bool,
 }
 
 const ARCHETYPES: [&str; 13] = [
@@ -602,7 +606,10 @@ fn flow_kind(action: Option<ActionKind>, midnight: bool) -> &'static str {
         return "daily pass (wage/rent/upkeep/tax)";
     }
     match action {
-        Some(A::CollectWage) => "wage",
+        // L1: a shift's wage is paid as the shift ends.
+        Some(A::CollectWage | A::ClerkWork | A::FarmWork | A::BartendWork | A::TendGraves | A::GuardJail) => "wage",
+        Some(A::Scavenge) => "scavenging",
+        Some(A::Meeting) => "office",
         Some(A::BuyFood) => "food purchase",
         Some(A::SellFood | A::HaulToMarket) => "food sale",
         Some(A::Fence) => "fenced goods",
@@ -955,6 +962,23 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     "other" => flow_kind(action_now, midnight),
                     k => k,
                 };
+                // L1: a guard's shift clock pays at the shift's end, whatever the step.
+                let shift_end = world.comp::<citysim::components::Job>(id).is_some_and(|j| {
+                    let tod = (now % TICKS_PER_DAY) as u16;
+                    let last = if tod == 0 { 1439 } else { tod - 1 };
+                    j.on_shift(last) && !j.on_shift(tod)
+                });
+                let kind = if kind == "other" && d > 0 && shift_end { "wage" } else { kind };
+                // L1: the dole paid in place at 09:00.
+                let kind = if kind == "other"
+                    && d > 0
+                    && now % TICKS_PER_DAY == 540
+                    && world.comp::<citysim::components::Job>(id).is_none()
+                {
+                    "dole"
+                } else {
+                    kind
+                };
                 let owner = bld.and_then(|b| owner_name(world, b));
                 let cp = owner.map_or(String::new(), |o| format!("; place owner {o}"));
                 let ev =
@@ -1262,7 +1286,11 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     if !args.list && args.out.is_none() {
         return Err("--out <dir> is required (or use --list)".into());
     }
-    let mut world = World::new(args.seed, Config::load());
+    let mut config = Config::load();
+    if args.life_off {
+        config.life = citysim::config::LifeCfg::off();
+    }
+    let mut world = World::new(args.seed, config);
     let start_tick = args.start_day * TICKS_PER_DAY;
     while world.tick < start_tick {
         citysim::tick(&mut world);
@@ -1291,6 +1319,11 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
                 }
                 Ok(c) => {
                     let ordered = if arch == "ceo" { c } else { shuffled(c, args.seed, arch) };
+                    // L1 (the V1 tool note): free agents first; a jailed pick's
+                    // week is the cells (V1's dealer and leader were inside).
+                    let (free, jailed): (Vec<EntityId>, Vec<EntityId>) =
+                        ordered.into_iter().partition(|&id| !world.has::<Sentence>(id));
+                    let ordered: Vec<EntityId> = free.into_iter().chain(jailed).collect();
                     let mut n = 0;
                     for id in ordered {
                         if n >= args.count {
@@ -1388,6 +1421,7 @@ mod tests {
             count: 1,
             out: Some(dir.clone()),
             list: false,
+            life_off: false,
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)

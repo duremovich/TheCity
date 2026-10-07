@@ -32,6 +32,7 @@ pub mod grudges;
 pub mod hunt;
 pub mod law;
 pub mod law_brain;
+pub mod life;
 pub mod litter;
 pub mod lod;
 pub mod memory;

@@ -89,7 +89,9 @@ pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
 
 /// The Work goal's gate: a shift to work, or wages to collect for one.
 pub fn work_pending(world: &World, id: EntityId, job: &Job) -> bool {
-    shift_pending(world, id, job) || wage_pending(world, job)
+    // L1: wages are paid at the shift's end; nothing to walk to off shift
+    // (the Ripperdoc's Work scored ~0.95 off shift for a few coins owed).
+    shift_pending(world, id, job) || (!world.config.life.enabled && wage_pending(world, job))
 }
 
 /// Should this agent drop what it is doing and head to work now?
@@ -179,12 +181,51 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
         return Some(plan(goal, Some(h), steps, tick));
     }
     let here = pos.building.and_then(|b| world.comp::<Building>(b)).map(|b| b.kind);
+    // L1: idle at Home at night is bed, not a chair (90-minute Rests kept
+    // energy up, so Sleep never scored and the night was spent sitting).
+    let night = world.phase() == crate::time::DayPhase::Night || world.tick_of_day() >= 22 * 60;
+    let off_shift = world.comp::<Job>(id).is_none_or(|j| !j.on_shift(world.tick_of_day()));
+    if world.config.life.enabled
+        && at_home
+        && night
+        && off_shift
+        && world.comp::<crate::components::Needs>(id).is_some_and(|n| n.energy < 0.9)
+    {
+        return Some(plan(goal, None, vec![step(ActionKind::Sleep, None)], tick));
+    }
     if at_home || here == Some(BuildingKind::Bar) {
         return Some(plan(goal, None, vec![step(ActionKind::Rest, None)], tick));
+    }
+    // L1: far from Home, idle at the nearer Bar (or a member's Hideout)
+    // rather than walk hours home to sit down.
+    if world.config.life.enabled {
+        if let Some(plan) = idle_near(world, id, home) {
+            return Some(plan);
+        }
     }
     if home.is_some() {
         let steps = vec![step(ActionKind::GoTo(LocationKey::Home), None), step(ActionKind::Rest, None)];
         return Some(plan(goal, home, steps, tick));
     }
     Some(plan(goal, None, vec![step(ActionKind::Wander, None)], tick))
+}
+
+/// L1: a housed idle agent past `[life] near_tiles` from Home does not walk
+/// hours home to sit down (26 h of the shadowed week): a member rests at
+/// its Hideout when that is nearer by `bed_margin_tiles`; anyone else
+/// idles where they are.
+fn idle_near(world: &World, id: EntityId, home: Option<EntityId>) -> Option<Plan> {
+    use crate::systems::life;
+    let home_t = home.and_then(|h| life::tiles_to(world, id, h))?;
+    if home_t <= world.config.life.idle_far_tiles {
+        return None;
+    }
+    let margin = world.config.life.bed_margin_tiles;
+    if let Some(h) = world.gang_of(id).and_then(|g| world.hideout_of(g)) {
+        if life::tiles_to(world, id, h).is_some_and(|t| t + margin <= home_t) {
+            let steps = vec![step(ActionKind::GoTo(LocationKey::Hideout), Some(h)), step(ActionKind::Rest, None)];
+            return Some(plan(GoalKind::Idle, Some(h), steps, world.tick));
+        }
+    }
+    Some(plan(GoalKind::Idle, None, vec![step(ActionKind::Wander, None)], world.tick))
 }

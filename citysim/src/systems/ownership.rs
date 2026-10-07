@@ -757,17 +757,36 @@ pub fn seed(world: &mut World) {
     // 6. Execs (D12): the greediest jobless adult per corp, config order.
     let mut execs: BTreeSet<EntityId> = BTreeSet::new();
     for &c in &corps {
-        let pick = world
-            .citizens()
-            .into_iter()
-            .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
-            .filter(|&a| !execs.contains(&a) && !owners.contains(&a))
-            .filter(|&a| crate::systems::demography::is_adult(world, a))
-            .filter_map(|a| world.comp::<Personality>(a).map(|p| (p.greed, a)))
-            .max_by(|x, y| x.0.total_cmp(&y.0).then(y.1.cmp(&x.1)))
-            .map(|(_, a)| a);
+        // L1: by age (`exec_min_age_years`), persuasion + knowledge, then
+        // coins (the greediest jobless adult over 18 made a 19-year-old on
+        // the dole Zetatech's exec); the M11 pick when nobody qualifies.
+        let seasoned = if crate::systems::life::on(world) {
+            world
+                .citizens()
+                .into_iter()
+                .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
+                .filter(|&a| !execs.contains(&a) && !owners.contains(&a))
+                .filter_map(|a| crate::systems::life::exec_score(world, a).map(|k| (k, a)))
+                .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
+                .map(|(_, a)| a)
+        } else {
+            None
+        };
+        let pick = seasoned.or_else(|| {
+            world
+                .citizens()
+                .into_iter()
+                .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
+                .filter(|&a| !execs.contains(&a) && !owners.contains(&a))
+                .filter(|&a| crate::systems::demography::is_adult(world, a))
+                .filter_map(|a| world.comp::<Personality>(a).map(|p| (p.greed, a)))
+                .max_by(|x, y| x.0.total_cmp(&y.0).then(y.1.cmp(&x.1)))
+                .map(|(_, a)| a)
+        });
         if let Some(a) = pick {
             execs.insert(a);
+            // L1: the exec lives in the Spire when a Block there has room.
+            crate::systems::life::house_exec(world, a);
         }
         if let Some(cc) = world.comp_mut::<Corp>(c) {
             cc.exec = pick;
@@ -1199,8 +1218,9 @@ fn upkeep(world: &mut World) {
 /// D27/D12: each exec draws their wage; a missing exec is replaced by the
 /// corp's greediest adult employee.
 fn exec_wages(world: &mut World) {
-    let wage = world.config.economy.wage_exec;
     for c in world.corps() {
+        // L1: a salary scaled to the corp (`life::exec_pay`; the flat wage when off).
+        let wage = crate::systems::life::exec_pay(world, c);
         let exec = world.comp::<Corp>(c).and_then(|cc| cc.exec);
         let living = exec.filter(|&e| world.has::<Wallet>(e) && world.has::<Brain>(e) && !world.has::<Corpse>(e));
         let exec = match living {
@@ -1209,6 +1229,9 @@ fn exec_wages(world: &mut World) {
                 let next = replacement_exec(world, c);
                 if let Some(cc) = world.comp_mut::<Corp>(c) {
                     cc.exec = next;
+                }
+                if let Some(e) = next {
+                    crate::systems::life::house_exec(world, e);
                 }
                 next
             }
@@ -1224,6 +1247,18 @@ fn exec_wages(world: &mut World) {
 fn replacement_exec(world: &World, corp: EntityId) -> Option<EntityId> {
     let execs: BTreeSet<EntityId> =
         world.corps().into_iter().filter_map(|c| world.comp::<Corp>(c).and_then(|c| c.exec)).collect();
+    // L1: the most seasoned employee first (as at seed), else the greediest.
+    if crate::systems::life::on(world) {
+        let seasoned = employees_of(world, corp)
+            .into_iter()
+            .filter(|a| !execs.contains(a))
+            .filter_map(|a| crate::systems::life::exec_score(world, a).map(|k| (k, a)))
+            .max_by(|x, y| x.0.cmp(&y.0).then(y.1.cmp(&x.1)))
+            .map(|(_, a)| a);
+        if seasoned.is_some() {
+            return seasoned;
+        }
+    }
     let mut best: Option<(f32, EntityId)> = None;
     for a in employees_of(world, corp) {
         if execs.contains(&a) || !crate::systems::demography::is_adult(world, a) {

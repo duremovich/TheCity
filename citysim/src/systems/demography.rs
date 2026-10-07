@@ -38,6 +38,8 @@ pub fn run(world: &mut World) {
     corpses(world);
     gravedigger_notices(world);
     job_search(world);
+    // L1: a long commute moves nearer work (a few households a night).
+    crate::systems::life::relocate(world);
     emigration(world);
     if world.tick > 0 && world.day().is_multiple_of(7) {
         immigration(world);
@@ -550,7 +552,7 @@ fn job_search(world: &mut World) {
             continue;
         };
         for role in roles {
-            let Some(id) = pick_candidate(world, workplace_door, role) else { continue };
+            let Some(id) = pick_candidate(world, employer, workplace_door, role) else { continue };
             hire(world, id, employer, role);
             if let Some(v) = world.vacancies.get_mut(&employer) {
                 if let Some(i) = v.iter().position(|&r| r == role) {
@@ -568,11 +570,13 @@ fn job_search(world: &mut World) {
 /// nearest unemployed, free adult (home door, else tile; ties by id), a
 /// guard lawful (≥ 0.4); a Lab the best hacker, a Feed the most
 /// knowledgeable (ties lower id).
-fn pick_candidate(world: &World, workplace_door: TilePos, role: Role) -> Option<EntityId> {
+fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
     world
         .citizens()
         .into_iter()
         .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
+        // L1: not the worker who just quit this employer (rehired at midnight, daily).
+        .filter(|&id| !crate::systems::life::quit_blocks(world, id, employer))
         .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
         .filter(|&id| is_adult(world, id))
         .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
@@ -605,7 +609,7 @@ fn pick_candidate(world: &World, workplace_door: TilePos, role: Role) -> Option<
 /// (poaching compares a rival's worker with this one).
 pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<EntityId> {
     let door = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door)?;
-    pick_candidate(world, door, role)
+    pick_candidate(world, employer, door, role)
 }
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {

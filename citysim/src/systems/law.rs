@@ -172,7 +172,15 @@ pub fn raise_crime_on(
     let law_mult = crate::systems::competence::law_mult(world);
     // M15 W24: a Hunt's strike on its target: the street keeps quiet.
     let silence = street_silence_on(world, actor, object, crime);
+    let dedupe = world.config.life.enabled;
     for w in witnesses {
+        // L1: one record per crime and witness: a multi-minute crime (a
+        // Deal's every sale) was seen afresh each minute, each sighting
+        // another -0.2 of affinity, so a stranger was an Enemy in 32 minutes.
+        if dedupe && crate::systems::life::saw_recently(world, w, actor, crime) {
+            noticed += 1;
+            continue;
+        }
         let guard = is_guard(world, w);
         let mut p = notice_probability(&cfg, stealth, guard);
         if guard && law_mult != 1.0 {
@@ -305,7 +313,9 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
 fn located(world: &World, s: EntityId) -> bool {
     let window = world.config.crime.suspect_seen_ticks;
     let tick = world.tick;
-    world.is_alive(s)
+    // L1: a corpse keeps its Position and Identity (`is_alive`), and guards
+    // walked hours to arrest the dead.
+    (if world.config.life.enabled { living(world, s) } else { world.is_alive(s) })
         && !world.has::<Sentence>(s)
         && world.comp::<Brain>(s).is_some_and(|b| b.cuffed_by.is_none())
         && world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
@@ -352,7 +362,13 @@ pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
 fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>) -> bool {
     let near = |p: Pursuer| {
         let radius = pursuit_radius_for(world, p.guard);
-        s != p.guard && world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(p.tile) <= radius)
+        s != p.guard
+            && world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(p.tile) <= radius)
+            // L1: a stale sighting is chased only from near by, and a
+            // suspect another guard is after is theirs.
+            && (!world.config.life.enabled
+                || (crate::systems::life::sighting_fresh(world, s, p.tile)
+                    && !crate::systems::life::arrest_claimed(world, p.guard, s)))
     };
     // The cheap reach test first (the same conjunction, reordered).
     by.is_none_or(near) && located(world, s)
@@ -1143,7 +1159,12 @@ fn credit_guard_shifts(world: &mut World) {
             b.patrol_route.clear();
         }
         if owed {
-            crate::systems::economy::maybe_quit(world, g);
+            // L1: the shift's wage at its end, not on a walk to the Hall.
+            if world.config.life.enabled {
+                crate::systems::economy::collect_wage(world, g);
+            } else {
+                crate::systems::economy::maybe_quit(world, g);
+            }
         }
     }
 }
@@ -1195,8 +1216,11 @@ pub fn reconcile_guards(world: &mut World) {
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.
 fn sightings(world: &mut World) {
-    let suspects: Vec<EntityId> =
-        world.open_suspects().filter(|&s| world.is_alive(s) && !world.has::<Sentence>(s)).collect();
+    let life = world.config.life.enabled;
+    let suspects: Vec<EntityId> = world
+        .open_suspects()
+        .filter(|&s| (if life { living(world, s) } else { world.is_alive(s) }) && !world.has::<Sentence>(s))
+        .collect();
     if suspects.is_empty() {
         return;
     }

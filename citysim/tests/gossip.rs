@@ -396,7 +396,9 @@ fn test_word_streams_untouch_world_and_agent() {
         if !on {
             w.config.gossip.enabled = false;
         }
-        w.run_ticks(2 * TICKS_PER_DAY + 5);
+        // L1: four days (was two): with the walk to a far Bar weighed, the
+        // first drinks and chats come later and the 2-day window heard nothing.
+        w.run_ticks(4 * TICKS_PER_DAY + 5);
         let heard = w.stats.history.iter().map(|r| r.word.rumours_heard).sum::<u32>();
         let probe = adults(&w)[0];
         let world_next: u64 = w.rng.world().random();
