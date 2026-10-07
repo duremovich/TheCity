@@ -843,7 +843,9 @@ pub enum CorpOrder {
     /// M14 (plan V31): research the focus track, build and staff Labs.
     Research,
     /// M14 (plan V31): one run a day from a Lab against the niche rival's
-    /// Data (a dice contest on the Virt plane).
+    /// Data (a dice contest on the Virt plane). Spends: a tier-2 fleet deck
+    /// for the Lab when it has none (above the fleet reserve), logged as
+    /// `AssetBought` "for {Lab} (VirtRaid)".
     VirtRaid,
 }
 
@@ -1790,6 +1792,11 @@ pub struct Gang {
     /// outlive the pending `Shock::Hacked` the daily rescore consumes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hacked_by: Option<(EntityId, Tick)>,
+    /// M14 V34: the gang a standing Retaliate fights, set when it was chosen
+    /// on a pending `Shock::Hacked { by }` naming another gang; `None`: the
+    /// rival (`World::rival_of`). See `raid::raid_rival`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub retaliate_on: Option<EntityId>,
 }
 
 impl Gang {
@@ -1824,6 +1831,7 @@ impl Gang {
             harvest_target: None,
             stream_by: None,
             hacked_by: None,
+            retaliate_on: None,
         }
     }
 

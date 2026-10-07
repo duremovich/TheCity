@@ -72,8 +72,11 @@ pub struct VirtInputs {
     pub has_lab: bool,
     /// Vacant Lots while the treasury holds `found_cost.lab`.
     pub lab_lots: usize,
-    /// Phase 3: a Lab with a fleet deck and a Researcher to run it.
-    pub fleet_deck: bool,
+    /// Phase 3: the corp has a run for today (`virt::corp_run`): a Lab with
+    /// a Researcher and a niche rival's Lab holding Data in focus. The Lab
+    /// need not hold a fleet deck yet: the VirtRaid act buys one (tier
+    /// `RAID_DECK_TIER`, above the fleet reserve) before the order goes out.
+    pub run_ready: bool,
     /// Phase 3: `p_success` of the day's run against the niche rival's Lab
     /// (0 below `min_route_p`).
     pub virt_p: f32,
@@ -420,7 +423,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
             max_lapse,
             has_lab: !crate::systems::tech::labs_of(world, corp).is_empty(),
             lab_lots: if lab_cost > 0 && c.treasury >= lab_cost { lots_total } else { 0 },
-            fleet_deck: run.is_some(),
+            run_ready: run.is_some(),
             virt_p: run.as_ref().map(|r| r.p).filter(|&p| p >= world.config.virt.min_route_p).unwrap_or(0.0),
             share: niches.values().next().map_or(0.0, |n: &NicheInputs| n.share),
         }
@@ -624,7 +627,7 @@ fn score_corp_wide(i: &CorpInputs, n: Niche, cfg: &CorpsCfg) -> Vec<CorpOrderSco
                     CorpOrder::VirtRaid,
                     n,
                     vec![
-                        Consideration::new("fleet deck & target", can(i.virt.fleet_deck && i.virt.virt_p > 0.0), GATE),
+                        Consideration::new("staffed Lab & target", can(i.virt.run_ready && i.virt.virt_p > 0.0), GATE),
                         Consideration::new("tech gap", i.virt.tech_gap, Curve::Linear { m: 0.7, b: 0.3 }),
                         Consideration::new(
                             "1-lawfulness",

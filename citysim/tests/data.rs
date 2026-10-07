@@ -17,15 +17,16 @@ fn lab_of(w: &World, corp: EntityId, focus: Track) -> EntityId {
         .expect("a seeded Lab")
 }
 
-/// V17/V29: a steal of 150 units lands on the deck; `SellData` at
-/// Zetatech's Lab pays `150 × data_price × level` (`Flow::Data`, taxed) and
+/// V17/V29: a steal of `steal_units[1]` units lands on the deck; `SellData` at
+/// Zetatech's Lab pays `units × data_price × level` (`Flow::Data`, taxed) and
 /// moves the units into Zetatech's store.
 #[test]
 fn test_theft_moves_units_and_sale_pays_tech_corp() {
     let mut cfg = Config::load();
     cfg.hack.quiet_take = 1.0;
-    // The plan's take (phase 3 lowered `[data] steal_units`; the numbers here are the plan's).
-    cfg.data.steal_units = vec![60, 150, 400];
+    // A tier-2 deck's take, read from `[data] steal_units` (the store holds more).
+    let units = cfg.data.steal_units[1];
+    assert!(units > 0 && units < 500);
     let mut w = World::new(42, cfg);
     let (arasaka, zeta) = (corp_named(&w, "Arasaka"), corp_named(&w, "Zetatech"));
     let lab = lab_of(&w, arasaka, Track::Deck);
@@ -68,9 +69,9 @@ fn test_theft_moves_units_and_sale_pays_tech_corp() {
         virt::run(&mut w);
     }
     assert_eq!(w.run_log.back().and_then(|r| r.outcome), Some(RunOutcome::Success));
-    assert_eq!(virt::deck_data(&w, a), 150);
-    assert_eq!(w.virt.node(n).expect("node").store.get(Track::Deck), 350);
-    assert_eq!(w.stats.current.virt.data_stolen, 150);
+    assert_eq!(virt::deck_data(&w, a), units);
+    assert_eq!(w.virt.node(n).expect("node").store.get(Track::Deck), 500 - units);
+    assert_eq!(w.stats.current.virt.data_stolen, units);
     // The sale, inside Zetatech's Lab.
     let zlab = lab_of(&w, zeta, Track::Chrome);
     assert!(tech::is_data_buyer_lab(&w, zlab));
@@ -78,21 +79,21 @@ fn test_theft_moves_units_and_sale_pays_tech_corp() {
     w.leave_building(a);
     w.enter_building(a, zlab);
     w.comp_mut::<Corp>(zeta).expect("corp").treasury = 10_000;
-    let price = tech::data_unit_price(&w, zeta) * 150;
+    let price = tech::data_unit_price(&w, zeta) * i64::from(units);
     let (wallet, purse, city, held) =
         (w.purse(Some(a)), w.purse(Some(zeta)), w.purse(None), virt::holding(&w, zeta, Track::Deck));
     let total = ownership::total_coins(&w);
     let flow = w.stats.current.virt.flow_data;
-    assert_eq!(tech::sell_deck_data(&mut w, a), 150);
+    assert_eq!(tech::sell_deck_data(&mut w, a), units);
     let tax = w.purse(None) - city;
     assert_eq!(w.purse(Some(a)) - wallet + tax, price, "the seller's take plus the tax");
     assert_eq!(purse - w.purse(Some(zeta)), price);
-    assert_eq!(virt::holding(&w, zeta, Track::Deck), held + 150, "the units went to Zetatech's Lab");
+    assert_eq!(virt::holding(&w, zeta, Track::Deck), held + units, "the units went to Zetatech's Lab");
     assert_eq!(virt::deck_data(&w, a), 0);
     assert_eq!(w.stats.current.virt.flow_data - flow, price);
-    assert_eq!(w.stats.current.virt.data_sold, 150);
+    assert_eq!(w.stats.current.virt.data_sold, units);
     assert_eq!(ownership::total_coins(&w), total);
-    println!("sold 150 for {price} (tax {tax})");
+    println!("sold {units} for {price} (tax {tax})");
 }
 
 /// V22/V24: decks at Security Offices by the owner's Deck tier, and at a

@@ -58,6 +58,8 @@ fn inputs() -> OrderInputs {
         hoard_corp: None,
         hoard_tilt: 0.1,
         target_cover: 0.0,
+        // M14 V34: the Retaliate target's cover, here the rival's (no hack grudge).
+        retaliate_cover: 0.0,
         jail_cover: 0.0,
         derelicts: 0,
         districts_held: 0,

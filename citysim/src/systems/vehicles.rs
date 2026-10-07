@@ -72,9 +72,23 @@ pub fn nearest_parking(world: &World, from: TilePos) -> Option<EntityId> {
         .map(|(_, b)| b)
 }
 
-/// The Garage nearest `from` (standing, not derelict), ties the lower id.
-fn nearest_garage(world: &World, from: TilePos) -> Option<EntityId> {
-    assets::nearest_building(world, BuildingKind::Garage, from, None)
+/// The Garage nearest `from` (standing, not derelict) that can sell `kind`
+/// at tier 1 (M14 V22's tech gate; with the plane off every Garage, so the
+/// plain nearest), ties the lower id. Every vehicle purchase and the Hunker
+/// sale go through it. M14 phase 3 fix round: the nearest Garage was taken
+/// whatever it could sell, so an NPC Garage registered next to a
+/// Food corp's Farms (no tech: no trucks) failed every truck buy until it
+/// closed, and the day's fleet purchase fell through to the exec's flyer
+/// (seed 42: Farms with a truck by day 30 went 8 -> 2).
+pub fn garage_selling(world: &World, from: TilePos, kind: AssetKind) -> Option<EntityId> {
+    world
+        .buildings_of_kind(BuildingKind::Garage)
+        .iter()
+        .filter_map(|&b| world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| (bd, b)))
+        .filter(|&(_, b)| assets::can_sell(world, b, kind, 1))
+        .map(|(bd, b)| (bd.door.manhattan(from), b))
+        .min()
+        .map(|(_, b)| b)
 }
 
 fn door_of(world: &World, b: EntityId) -> Option<TilePos> {
@@ -568,11 +582,12 @@ fn corp_buildings(world: &World, corp: EntityId, kind: BuildingKind) -> Vec<Enti
         .unwrap_or_default()
 }
 
-/// Buy `kind` T1 for `corp` at the Garage nearest `home` (a used one in its
-/// stock first) and park it at `home`. Needs the list price in the purse.
+/// Buy `kind` T1 for `corp` at the Garage nearest `home` that can sell it
+/// (a used one in its stock first) and park it at `home`. Needs the list
+/// price in the purse.
 fn corp_buy(world: &mut World, corp: EntityId, kind: AssetKind, home: EntityId, why: &str) -> bool {
     let Some(from) = door_of(world, home) else { return false };
-    let Some(g) = nearest_garage(world, from) else { return false };
+    let Some(g) = garage_selling(world, from, kind) else { return false };
     let used = assets_at(world, g)
         .iter()
         .copied()
@@ -643,7 +658,9 @@ fn sell_newest(world: &mut World, corp: EntityId) -> bool {
         .max();
     let Some((_, v)) = newest else { return false };
     let Some(from) = assets::asset_tile(world, v) else { return false };
-    let Some(g) = nearest_garage(world, from) else { return false };
+    // Phase 3 fix round: a Garage that can sell the kind (it restocks it).
+    let kind = asset(world, v).map_or(AssetKind::Truck, |x| x.kind);
+    let Some(g) = garage_selling(world, from, kind) else { return false };
     let buyer = world.owner_of(g);
     if buyer == Some(corp) {
         return false;
@@ -760,7 +777,7 @@ fn exec_flyer(world: &mut World, corp: EntityId) -> bool {
     if world.purse(Some(corp)).min(closing) < need.saturating_add(reserve) {
         return false;
     }
-    let Some(g) = door_of(world, home).and_then(|d| nearest_garage(world, d)) else { return false };
+    let Some(g) = door_of(world, home).and_then(|d| garage_selling(world, d, AssetKind::Flyer)) else { return false };
     let pick = ShopPick { kind: AssetKind::Flyer, tier: 1, used: None, upgrade: false };
     let note = format!("for {}", world.name_of(exec));
     match assets::buy_noted(world, corp, g, &pick, Some(&note)) {
@@ -1260,7 +1277,7 @@ pub fn gang_bikes(world: &mut World, gang: EntityId) {
     }
     let Some(member) = rider_wanted(world, gang) else { return };
     let Some(from) = door_of(world, h) else { return };
-    let Some(g) = nearest_garage(world, from) else { return };
+    let Some(g) = garage_selling(world, from, AssetKind::Motorcycle) else { return };
     let pick = ShopPick { kind: AssetKind::Motorcycle, tier: 1, used: None, upgrade: false };
     let note = format!("for {}", world.name_of(member));
     if let Ok(v) = assets::buy_noted(world, gang, g, &pick, Some(&note)) {

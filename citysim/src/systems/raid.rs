@@ -107,10 +107,36 @@ pub fn mustered(world: &World, agent: EntityId) -> bool {
     departure(world, agent).is_some_and(|t| world.tick >= t)
 }
 
+/// M14 V34: the newest pending `Shock::Hacked { by }` on `gang` naming
+/// another living gang (a traced run on its nodes): the gang a Retaliate
+/// chosen now fights. Read whenever Retaliate is chosen, whatever shock
+/// triggered it, so a stale pending `Hacked` naming a third gang outranks
+/// the `Raided` that set the order off (newest Hacked wins; deterministic,
+/// accepted).
+pub fn hack_grudge(world: &World, gang: EntityId) -> Option<EntityId> {
+    let g = world.comp::<Gang>(gang)?;
+    g.shocks.iter().rev().find_map(|s| match *s {
+        Shock::Hacked { by: Some(b) } if b != gang && world.has::<Gang>(b) => Some(b),
+        _ => None,
+    })
+}
+
+/// The gang a raid of `gang`'s fights: under Retaliate the gang a traced
+/// run named when the order was chosen (`Gang.retaliate_on`, M14 V34), else
+/// `World::rival_of`.
+pub fn raid_rival(world: &World, gang: EntityId) -> Option<EntityId> {
+    let named = world
+        .comp::<Gang>(gang)
+        .filter(|g| g.order == Order::Retaliate)
+        .and_then(|g| g.retaliate_on)
+        .filter(|&r| r != gang && world.has::<Gang>(r));
+    named.or_else(|| world.rival_of(gang))
+}
+
 /// The street tile outside the rival Hideout's door.
 pub fn rival_hideout_tile(world: &World, agent: EntityId) -> Option<TilePos> {
     let gang = world.gang_of(agent)?;
-    let rival = world.rival_of(gang)?;
+    let rival = raid_rival(world, gang)?;
     let hideout = world.hideout_of(rival)?;
     world.comp::<Building>(hideout).map(|b| world.outside_door(b))
 }
@@ -137,7 +163,7 @@ pub fn gang_target(world: &World, gang: EntityId) -> Option<EntityId> {
     if g.order.target_is_jail() {
         return world.building_of_kind(BuildingKind::Jail);
     }
-    corp_target(world, gang).or_else(|| world.rival_of(gang).and_then(|r| world.hideout_of(r)))
+    corp_target(world, gang).or_else(|| raid_rival(world, gang).and_then(|r| world.hideout_of(r)))
 }
 
 /// The building this agent's expedition ends at (the plan's bound target).
@@ -691,7 +717,7 @@ pub fn by_strength(world: &World, ids: &mut [EntityId]) {
 /// `raid_at` cleared and return `None`.
 pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let gid = world.gang_of(actor)?;
-    let rival = world.rival_of(gid)?;
+    let rival = raid_rival(world, gid)?;
     if world.comp::<Gang>(gid).is_none_or(|g| g.raid_at.is_none()) {
         return None;
     }

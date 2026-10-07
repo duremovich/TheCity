@@ -184,7 +184,8 @@ fn test_raid_prelude_opens_door_in_window() {
     let hacked = w.comp::<Building>(b).and_then(|x| x.hacked);
     let until = raid_at + 60 * u64::from(w.config.hack.door_hours);
     assert_eq!(hacked, Some((HackEffect::DoorOpen, until)));
-    assert!(virt::sensors_off(&w, b));
+    assert!(virt::robot_sensors_off(&w, b));
+    assert!(!virt::cameras_off(&w, b), "DoorOpen leaves the cameras on");
 }
 
 /// Plan 3.6 (V32): robot 0.75, summoned guards 0.5 and 0.6, staff 0.3;
@@ -229,7 +230,8 @@ fn test_turned_robot_fights_for_patron() {
 }
 
 /// Plan 3.6 (V28, V33): a T3 camera against a tier-1 thief: a sighting in
-/// the owner's database and a report with no witness; under Blind nothing.
+/// the owner's database and a report with no witness; under Blind nothing,
+/// under DoorOpen the camera still contests.
 #[test]
 fn test_blind_skips_camera_and_camera_writes_sighting() {
     let mut w = world();
@@ -248,7 +250,8 @@ fn test_blind_skips_camera_and_camera_writes_sighting() {
     }
     assert!(w.db.get(&corp).is_none_or(|d| d.sightings.is_empty()), "Blind: no sighting");
     assert!(!law::wanted(&w, thief));
-    w.comp_mut::<Building>(b).expect("b").hacked = None;
+    // DoorOpen opens the door and leaves the cameras on (plan V32/V33).
+    w.comp_mut::<Building>(b).expect("b").hacked = Some((HackEffect::DoorOpen, until));
     for _ in 0..40 {
         virt::camera_sense(&mut w, thief, Crime::Theft, b);
         if w.db.get(&corp).is_some_and(|d| !d.sightings.is_empty()) {
@@ -285,10 +288,15 @@ fn test_secure_raises_largest_gap_newest_virt_loss_first() {
     assert_eq!(virt::profile(&w, lo).map(|p| p.ice), Some(0), "one a day");
 }
 
-/// Plan 3.6 (V27): ICE 3 on a node with `ice_target` 1 is lowered a tier.
+/// Plan 3.6 (V27): ICE 3 on a node with `ice_target` 1 is lowered a tier
+/// once the corp is below its fleet reserve (and kept above it) when the
+/// upkeep saved repays the rebuy; at the shipped upkeep it is kept.
 #[test]
 fn test_hunker_lowers_excess_ice() {
-    let mut w = world();
+    let mut cfg = Config::load();
+    // Upkeep with teeth: a shed of tier 3 repays its rebuy within 30 days.
+    cfg.ice.ice_upkeep = vec![0, 0, 10, 60];
+    let mut w = World::new(42, cfg);
     let z = corp_named(&w, "Zetatech");
     // Every other node of the corp at its target: no excess elsewhere.
     let nodes: Vec<NodeId> = (0..w.virt.nodes.len() as u16)
@@ -306,8 +314,26 @@ fn test_hunker_lowers_excess_ice() {
     w.virt.node_mut(n).expect("node").store.units = [100, 0, 0];
     assert_eq!(virt::ice_target(&w, n), 1);
     set_ice(&mut w, n, 3);
+    // Phase 3 fix round: a solvent corp keeps the ICE it paid for (no churn
+    // when a target falls); below the fleet reserve it sheds a tier.
+    w.comp_mut::<Corp>(z).expect("z").treasury = 50_000;
+    virt::hunker_ice(&mut w, z);
+    assert_eq!(virt::profile(&w, n).map(|p| p.ice), Some(3), "above the reserve: kept");
+    w.comp_mut::<Corp>(z).expect("z").treasury = 0;
+    // The Ledger's target follows the purse: put the others back at target.
+    for &m in nodes.iter().filter(|&&m| m != n) {
+        let t = virt::ice_target(&w, m);
+        if let Some(p) = virt::profile_mut(&mut w, m) {
+            p.ice = t;
+        }
+    }
     virt::hunker_ice(&mut w, z);
     assert_eq!(virt::profile(&w, n).map(|p| p.ice), Some(2));
+    // At the shipped upkeep no shed repays its rebuy: the tier stays.
+    w.config.ice.ice_upkeep = Config::load().ice.ice_upkeep;
+    set_ice(&mut w, n, 3);
+    virt::hunker_ice(&mut w, z);
+    assert_eq!(virt::profile(&w, n).map(|p| p.ice), Some(3), "no paid churn");
 }
 
 /// A day on: the Labs have hired their Researchers.
@@ -408,4 +434,135 @@ fn test_hacked_shock_targets_runners_gang() {
     assert!(shock.is_grudge());
     assert_eq!(g.hacked_by.map(|(by, _)| by), Some(ga));
     assert!(faction::gather_inputs(&w, gb).is_none_or(|i| i.hacked));
+}
+
+/// V34: three gangs. A runner of the third gang is traced on the first
+/// gang's Hideout node: the Retaliate the first gang chooses on that shock
+/// fights the third gang (the traced run's owner), not `rival_of` (the
+/// second); a Retaliate on a grudge that names nobody fights the rival.
+#[test]
+fn test_retaliate_targets_the_traced_runners_gang() {
+    let mut w = world();
+    w.config.gangs.order_flat.retaliate = 10.0;
+    let (ga, gb) = (w.gang_list()[0], w.gang_list()[1]);
+    let third_base = w.buildings_of_kind(BuildingKind::Home)[0];
+    let gc = w.spawn();
+    w.insert(gc, Gang::new("Third".into(), third_base, 0));
+    assert_eq!(w.gang_list().len(), 3);
+    assert_eq!(w.rival_of(ga), Some(gb), "the rival is not the hacker");
+    // Enough fit members for a Retaliate.
+    for _ in 0..3 {
+        let m = adult(&mut w, &[]);
+        citysim::systems::gang::enlist(&mut w, m, ga);
+    }
+    let hideout = w.hideout_of(ga).expect("hideout");
+    let n = virt::node_of_building(&w, hideout).expect("node");
+    w.virt.node_mut(n).expect("node").store.units = [200, 0, 0];
+    set_ice(&mut w, n, 1);
+    let a = gang_runner(&mut w, gc, 2, 0.5);
+    let chair = w.buildings_of_kind(BuildingKind::Bar)[0];
+    let now = w.tick;
+    w.run_orders.insert(
+        a,
+        RunOrder {
+            patron: None,
+            purpose: Purpose::Data { wipe: false },
+            target: n,
+            chair,
+            not_before: now,
+            expires: now + 1440,
+            why: RunWhy::Freelance,
+            mode: RunMode::Quiet,
+        },
+    );
+    let id = virt::start_run(&mut w, a).expect("run");
+    let r = w.runs[&id].clone();
+    let gap = f32::from(virt::def(&w, n)) - r.att;
+    w.comp_mut::<Gang>(ga).expect("gang").shocks.clear();
+    virt::lose(&mut w, r, n, LossRolls { gap, fry: 1.0, dodge: 0.0, kill: 1.0, trace: 0.0 });
+    assert!(w.comp::<Gang>(ga).expect("gang").shocks.contains(&Shock::Hacked { by: Some(gc) }));
+    assert_eq!(raid::hack_grudge(&w, ga), Some(gc));
+    assert!(faction::rescore(&mut w, ga, 0.0));
+    let g = w.comp::<Gang>(ga).expect("gang");
+    assert_eq!(g.order, Order::Retaliate, "{:?}", g.order_trace);
+    assert_eq!(g.retaliate_on, Some(gc));
+    assert_eq!(raid::raid_rival(&w, ga), Some(gc));
+    assert_eq!(raid::gang_target(&w, ga), w.hideout_of(gc), "the march goes to the hacker");
+    // A grudge naming nobody: the Retaliate fights the rival.
+    {
+        let g = w.comp_mut::<Gang>(ga).expect("gang");
+        g.order = Order::Expand;
+        g.retaliate_on = None;
+        g.shocks.clear();
+        g.shocks.push(Shock::Raided);
+    }
+    assert!(faction::rescore(&mut w, ga, 0.0));
+    let g = w.comp::<Gang>(ga).expect("gang");
+    assert_eq!(g.order, Order::Retaliate, "{:?}", g.order_trace);
+    assert_eq!(g.retaliate_on, None);
+    assert_eq!(raid::raid_rival(&w, ga), Some(gb));
+}
+
+/// Phase 3 fix round: Secure spends (ICE, cameras) need `mult × cost` in
+/// the purse and keep the fleet reserve (`treasury_ref / 4`) after paying.
+#[test]
+fn test_secure_affords_keeps_the_fleet_reserve() {
+    let mut w = world();
+    let z = corp_named(&w, "Zetatech");
+    {
+        let c = w.comp_mut::<Corp>(z).expect("z");
+        c.treasury_ref = 4000;
+        c.treasury = 1200;
+    }
+    assert!(virt::secure_affords(&w, z, 150, 2.0), "1,050 left over a 1,000 reserve");
+    assert!(!virt::secure_affords(&w, z, 150, 9.0), "the purse holds less than 9 x the price");
+    w.comp_mut::<Corp>(z).expect("z").treasury = 1100;
+    assert!(!virt::secure_affords(&w, z, 150, 2.0), "950 left: under the reserve");
+}
+
+/// Phase 3 fix round: a vehicle buy skips a nearer Garage that cannot sell
+/// the kind (V22's tech gate) for a farther one that can; with the plane off
+/// every Garage sells, so the nearest is picked.
+#[test]
+fn test_garage_selling_skips_garages_that_cannot_sell() {
+    let mut w = world();
+    // Zetatech's Garages lose the truck tier (Industry 1); another corp keeps
+    // Industry 2, so the street (an NPC Garage) still sells trucks.
+    let z = corp_named(&w, "Zetatech");
+    w.comp_mut::<Corp>(z).expect("z").tech.tier[Track::Industry.index()] = 1;
+    let other = w.corps().into_iter().find(|&c| c != z).expect("another corp");
+    w.comp_mut::<Corp>(other).expect("corp").tech.tier[Track::Industry.index()] = 2;
+    let garages: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Garage).to_vec();
+    let blocked = garages
+        .iter()
+        .copied()
+        .find(|&g| !assets::can_sell(&w, g, AssetKind::Truck, 1))
+        .expect("a Garage without the truck tier");
+    let from = w.comp::<Building>(blocked).expect("garage").door;
+    let pick = citysim::systems::vehicles::garage_selling(&w, from, AssetKind::Truck).expect("a truck seller");
+    assert_ne!(pick, blocked);
+    assert!(assets::can_sell(&w, pick, AssetKind::Truck, 1));
+    let dist = |g: EntityId| w.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(from));
+    assert!(dist(pick) > dist(blocked), "the nearer one was skipped");
+    w.config.virt.enabled = false;
+    assert_eq!(citysim::systems::vehicles::garage_selling(&w, from, AssetKind::Truck), Some(blocked));
+}
+
+/// Phase 3 fix round (deviation A): a Farm's value at risk is its building
+/// value only (a posted asset adds nothing); a Lab's is its store.
+#[test]
+fn test_value_at_risk_ignores_posted_assets() {
+    let mut w = world();
+    let (farm, corp) = corp_building(&w, BuildingKind::Farm);
+    let n = virt::node_of_building(&w, farm).expect("node");
+    let before = virt::value_at_risk(&w, n);
+    assert_eq!(before, citysim::systems::ownership::value(&w, BuildingKind::Farm));
+    let via = adult(&mut w, &[]);
+    post(&mut w, via, AssetKind::Robot, 1, corp, farm);
+    assert_eq!(virt::value_at_risk(&w, n), before, "the posted robot adds nothing");
+    let z = corp_named(&w, "Zetatech");
+    let lab = lab_of(&w, z, Track::Chrome);
+    let ln = virt::node_of_building(&w, lab).expect("lab node");
+    w.virt.node_mut(ln).expect("node").store.units = [100, 0, 0];
+    assert_eq!(virt::value_at_risk(&w, ln), 100 * w.config.data.data_price);
 }

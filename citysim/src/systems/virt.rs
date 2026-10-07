@@ -530,8 +530,14 @@ pub fn def(world: &World, n: NodeId) -> u8 {
 }
 
 /// V27: a Lab's or Hideout's `Σ store × data_price`, a Ledger's purse, any
-/// other building's `ownership::value` plus the value of the assets posted
-/// there. A Public node risks nothing.
+/// other building's `ownership::value`. A Public node risks nothing.
+///
+/// Plan deviation (phase 3 fix round): the plan adds the value of the
+/// assets posted at an "other" building. Runs only target Labs, Hideouts,
+/// Ledgers and robots, so a Farm's posted truck lifted its target to 2 and
+/// Secure spent 600 on ICE nobody contests: the Food corps' truck money in
+/// days 0-30 (the M13 gate's truck bullets). A robbed building is still
+/// raised through the loss term of [`ice_target`].
 pub fn value_at_risk(world: &World, n: NodeId) -> i64 {
     let Some(node) = world.virt.node(n) else { return 0 };
     match node.kind {
@@ -543,13 +549,7 @@ pub fn value_at_risk(world: &World, n: NodeId) -> i64 {
             if matches!(bd.kind, BuildingKind::Lab | BuildingKind::Hideout) {
                 return i64::from(node.store.total()) * world.config.data.data_price;
             }
-            let posted: i64 = crate::systems::assets::assets_at(world, b)
-                .iter()
-                .filter_map(|&a| world.comp::<crate::components::Asset>(a))
-                .filter(|x| x.loc == AssetLoc::Posted(b))
-                .map(|x| x.value)
-                .sum();
-            ownership::value(world, bd.kind) + posted
+            ownership::value(world, bd.kind)
         }
     }
 }
@@ -2506,7 +2506,10 @@ pub fn corp_run(world: &World, corp: EntityId) -> Option<CorpRun> {
 }
 
 /// V31, daily under `VirtRaid`: one `RunOrder` from the Lab chair (the
-/// fleet deck is lent through the Kit while the order stands).
+/// fleet deck is lent through the Kit while the order stands). The order's
+/// one spend: a fleet deck up to `RAID_DECK_TIER` for a Lab without one,
+/// paid from above the fleet reserve (`treasury_ref / 4`, as Secure's ICE
+/// and cameras), logged "for {Lab} (VirtRaid)".
 pub fn corp_virt_raid(world: &mut World, corp: EntityId) {
     let Some(run) = corp_run(world, corp) else { return };
     if world.run_orders.contains_key(&run.runner) {
@@ -2515,10 +2518,11 @@ pub fn corp_virt_raid(world: &mut World, corp: EntityId) {
     // The order equips its Lab: a fleet deck up to `RAID_DECK_TIER`.
     if run.deck.is_none() {
         let from = world.comp::<Building>(run.lab).map(|b| b.door).unwrap_or_default();
-        let budget = world.purse(Some(corp));
+        let reserve = world.comp::<Corp>(corp).map_or(0, |c| c.treasury_ref / 4);
+        let budget = world.purse(Some(corp)) - reserve;
         let Some((seller, tier, _)) = deck_offer(world, from, budget, RAID_DECK_TIER) else { return };
         let pick = crate::components::ShopPick { kind: AssetKind::Deck, tier, used: None, upgrade: false };
-        let note = format!("for {}", world.name_of(run.lab));
+        let note = format!("for {} (VirtRaid)", world.name_of(run.lab));
         match crate::systems::assets::buy_noted(world, corp, seller, &pick, Some(&note)) {
             Ok(a) => crate::systems::assets::set_loc(world, a, AssetLoc::Posted(run.lab)),
             Err(_) => return,
@@ -2551,10 +2555,22 @@ fn corp_nodes(world: &World, corp: EntityId) -> Vec<NodeId> {
         .collect()
 }
 
+/// Phase 3 fix round: can `corp` pay `cost` for a Secure spend (ICE, a
+/// camera) while its purse holds `mult × cost` and keeps M13's fleet-buy
+/// reserve (`treasury_ref / 4`, the reserve the Data budget keeps) after
+/// it? Without the reserve Secure's ICE and cameras ate the Food corps'
+/// truck money in days 0-30 (the M13 gate's truck bullets).
+pub fn secure_affords(world: &World, corp: EntityId, cost: i64, mult: f32) -> bool {
+    let purse = world.purse(Some(corp));
+    let reserve = world.comp::<Corp>(corp).map_or(0, |c| c.treasury_ref / 4);
+    purse as f32 >= mult * cost as f32 && purse - cost >= reserve
+}
+
 /// V27 Secure (after the contract and robot pass): raise ICE one tier on
 /// up to `secure_per_day` owned nodes with `ice_target − ice_eff > 0`:
 /// nodes with a Virt loss in 14 days first (newest first), then the
-/// largest gap (ties the lower id).
+/// largest gap (ties the lower id). Nodes the corp cannot afford
+/// ([`secure_affords`]) are skipped before the `secure_per_day` take.
 pub fn secure_ice(world: &mut World, corp: EntityId) {
     if !enabled(world) {
         return;
@@ -2585,12 +2601,18 @@ pub fn secure_ice(world: &mut World, corp: EntityId) {
     // term in `ice_target`, Militech bought ICE 3 for its robbed Lab from
     // Arasaka (2,000) on day 7 and went bankrupt on day 11 (HEAD: 89).
     let mult = world.config.robots.robot_cash_mult;
-    for n in order.into_iter().take(per_day) {
+    let mut raised = 0;
+    for n in order {
+        if raised >= per_day {
+            break;
+        }
         let Some((cost, ..)) = ice_quote(world, Some(corp), n) else { continue };
-        if (world.purse(Some(corp)) as f32) < mult * cost as f32 {
+        if !secure_affords(world, corp, cost, mult) {
             continue;
         }
-        install_ice(world, Some(corp), n);
+        if install_ice(world, Some(corp), n) {
+            raised += 1;
+        }
     }
 }
 
@@ -2606,7 +2628,7 @@ pub fn camera_at(world: &World, b: EntityId) -> Option<EntityId> {
 /// V27/V28 Secure: a tier-1 camera for the owned building (lowest id) with
 /// no sensor (no robot, no camera) and `ice_target ≥ 1`, from the cheapest
 /// Security Office that can sell it, while the treasury holds twice the
-/// price.
+/// price and keeps the fleet reserve after it ([`secure_affords`]).
 pub fn buy_camera(world: &mut World, corp: EntityId) {
     if !enabled(world) || !world.config.assets.enabled {
         return;
@@ -2628,7 +2650,7 @@ pub fn buy_camera(world: &mut World, corp: EntityId) {
         .map(|o| ((list as f32 * crate::systems::assets::seller_level(world, o)).round() as i64, o))
         .min();
     let Some((price, office)) = office else { return };
-    if world.purse(Some(corp)) < 2 * price {
+    if !secure_affords(world, corp, price, 2.0) {
         return;
     }
     let pick = crate::components::ShopPick { kind: AssetKind::Camera, tier: 1, used: None, upgrade: false };
@@ -2638,18 +2660,45 @@ pub fn buy_camera(world: &mut World, corp: EntityId) {
     }
 }
 
-/// V27 Hunker: lower ICE one tier on the owned node with the most excess
-/// over `ice_target` (ties the lower id).
+/// Days of upkeep a Hunker shed must save to repay re-buying the tier
+/// (the corp's `ice_spend` window).
+const HUNKER_PAYBACK_DAYS: i64 = 30;
+
+/// V27 Hunker: while the purse is below the fleet reserve (`treasury_ref /
+/// 4`), lower ICE one tier on an owned node whose tier saves, over
+/// `HUNKER_PAYBACK_DAYS`, at least what re-installing it would cost
+/// (`ice_price × self_install_frac`, the cheapest rebuy): the most excess
+/// over `ice_target` first, then the largest saving, ties the lower id.
+///
+/// Plan deviation (phase 3 fix round): the plan sheds the node with the
+/// most excess over `ice_target`, cash or not. With the loss term in
+/// `ice_target` (14 days) and a Ledger's target following its purse, a
+/// target fell, Hunker shed the tier and Secure bought it back days later:
+/// on seed 42 Greenline's seeded Ledger ICE 2 was shed on day 1 (saving 1
+/// coin a day), re-bought for 600 on day 5 and shed again on day 8, the
+/// money its day-5 truck took at HEAD. `ice_target` now governs buys only;
+/// at today's `ice_upkeep` [0, 0, 1, 2] no shed repays itself, so Hunker
+/// keeps its ICE until phase 5 gives upkeep teeth.
 pub fn hunker_ice(world: &mut World, corp: EntityId) {
     if !enabled(world) {
         return;
     }
+    let reserve = world.comp::<Corp>(corp).map_or(0, |c| c.treasury_ref / 4);
+    if world.purse(Some(corp)) >= reserve {
+        return;
+    }
+    let cfg = &world.config.ice;
     let pick = corp_nodes(world, corp)
         .into_iter()
-        .filter_map(|n| profile(world, n).map(|p| (i32::from(p.ice) - i32::from(ice_target(world, n)), n)))
-        .filter(|&(x, _)| x > 0)
-        .max_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
-    if let Some((_, n)) = pick {
+        .filter_map(|n| {
+            let ice = profile(world, n).map(|p| p.ice).filter(|&i| i > 0)?;
+            let saving = cfg.upkeep(ice) - cfg.upkeep(ice - 1);
+            let rebuy = (cfg.price(ice).unwrap_or(0) as f32 * cfg.self_install_frac).round() as i64;
+            let excess = i32::from(ice) - i32::from(ice_target(world, n));
+            (saving > 0 && saving * HUNKER_PAYBACK_DAYS >= rebuy).then_some((excess, saving, std::cmp::Reverse(n)))
+        })
+        .max();
+    if let Some((_, _, std::cmp::Reverse(n))) = pick {
         lower_ice(world, n);
     }
 }
@@ -2659,11 +2708,18 @@ pub fn hack_live(world: &World, b: EntityId, effect: crate::virt::HackEffect) ->
     world.comp::<Building>(b).and_then(|bd| bd.hacked).is_some_and(|(e, until)| e == effect && until > world.tick)
 }
 
-/// V32/V33: the building's sensors are off (Blind, or DoorOpen).
-pub fn sensors_off(world: &World, b: EntityId) -> bool {
+/// V32/V33: the building's robot sensors are off (Blind, or DoorOpen: a
+/// robot posted at an open door neither defends nor senses).
+pub fn robot_sensors_off(world: &World, b: EntityId) -> bool {
     enabled(world)
         && (hack_live(world, b, crate::virt::HackEffect::Blind)
             || hack_live(world, b, crate::virt::HackEffect::DoorOpen))
+}
+
+/// V33: the building's cameras are off (Blind only; DoorOpen opens the
+/// door and leaves the cameras on).
+pub fn cameras_off(world: &World, b: EntityId) -> bool {
+    enabled(world) && hack_live(world, b, crate::virt::HackEffect::Blind)
 }
 
 /// V28: a sighting into `owner`'s database (`None` = the city), capped at
@@ -2687,8 +2743,10 @@ pub fn record_sighting(world: &mut World, owner: Option<EntityId>, s: crate::vir
 }
 
 /// V28, from `law::raise_crime`: a Theft, Shakedown or Grand Theft inside a
-/// building with a camera (sensors on) rolls `security::contest` (the
-/// thief's tier against the camera's effective tier) on the world stream.
+/// building with a camera (not Blind) rolls the thief's tier against the
+/// camera's effective tier on the world stream (`security::contest_p`, one
+/// draw), the camera's side scaled by the owner's `alertness_mult` (the M16
+/// hook every detection roll reads; at 1.0 the draw is `security::contest`'s).
 /// The camera wins: a sighting (confidence the camera's odds) and, for a
 /// corp or the city, a report with no witness.
 pub fn camera_sense(world: &mut World, actor: EntityId, crime: crate::components::Crime, b: EntityId) {
@@ -2697,18 +2755,27 @@ pub fn camera_sense(world: &mut World, actor: EntityId, crime: crate::components
         return;
     }
     let Some(cam) = camera_at(world, b) else { return };
-    if sensors_off(world, b) {
+    if cameras_off(world, b) {
         return;
     }
     let cam_tier = world.comp::<Asset>(cam).map_or(1, |x| crate::systems::assets::eff_tier_of(world, x));
     let thief = crate::systems::security::thief_tier(crate::systems::law::stealth(world, actor));
     let step = contest_step(world);
-    if crate::systems::security::contest(thief, cam_tier, step, world.rng.world()) {
+    let owner = world.owner_of(b);
+    let p_thief = crate::systems::security::contest_p(f32::from(thief), f32::from(cam_tier), step);
+    let alert = alertness_mult(world, owner);
+    // The thief slips by on `roll < p_thief` (M13's draw); alertness widens
+    // or narrows the camera's side from the top. At exactly 1.0 the compare
+    // is against `p_thief` itself, so `1 − (1 − p)` cannot differ from M13's
+    // draw by an ulp.
+    let roll: f32 = world.rng.world().random();
+    #[allow(clippy::float_cmp)]
+    let slips = if alert == 1.0 { roll < p_thief } else { roll < 1.0 - ((1.0 - p_thief) * alert).clamp(0.0, 1.0) };
+    if slips {
         return;
     }
-    let confidence = 1.0 - crate::systems::security::contest_p(f32::from(thief), f32::from(cam_tier), step);
+    let confidence = 1.0 - p_thief;
     let tile = world.comp::<Position>(actor).map(|p| p.tile).unwrap_or_default();
-    let owner = world.owner_of(b);
     if owner.is_none_or(|o| world.has::<Corp>(o)) {
         crate::systems::law::file_report(world, crime, actor, None);
     }

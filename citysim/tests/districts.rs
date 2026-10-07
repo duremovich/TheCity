@@ -732,6 +732,8 @@ fn test_raid_gated_by_crackdown_on_raider() {
         hoard_corp: None,
         hoard_tilt: 0.0,
         target_cover: 0.3,
+        // M14 V34: the Retaliate target's cover, here the rival's (no hack grudge).
+        retaliate_cover: 0.3,
         jail_cover: 0.3,
         derelicts: 0,
         districts_held: 0,
@@ -754,12 +756,12 @@ fn test_raid_gated_by_crackdown_on_raider() {
     for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {
         assert!(has(&base, o), "{o:?} scores under partial cover");
     }
-    let covered = faction::OrderInputs { target_cover: 1.0, jail_cover: 1.0, ..base.clone() };
+    let covered = faction::OrderInputs { target_cover: 1.0, retaliate_cover: 1.0, jail_cover: 1.0, ..base.clone() };
     for o in [Order::Raid, Order::Retaliate, Order::BreakOut] {
         assert!(!has(&covered, o), "{o:?} is gated under full cover");
     }
     // The cover term lowers the score below full cover.
-    let open = faction::OrderInputs { target_cover: 0.0, jail_cover: 0.0, ..base.clone() };
+    let open = faction::OrderInputs { target_cover: 0.0, retaliate_cover: 0.0, jail_cover: 0.0, ..base.clone() };
     let score = |i: &faction::OrderInputs| {
         faction::score_orders(i, &cfg).iter().find(|s| s.order == Order::Raid).map(|s| s.score).expect("Raid")
     };

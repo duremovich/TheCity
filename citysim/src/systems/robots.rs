@@ -108,7 +108,7 @@ pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> S
     }
     let Some(robot) = powered_robot(world, b) else { return Sensed::Unseen };
     // M14 V32/V33: a Blind or DoorOpen hack keeps the sensor off.
-    if crate::systems::virt::sensors_off(world, b) {
+    if crate::systems::virt::robot_sensors_off(world, b) {
         return Sensed::Unseen;
     }
     // M14 V23: the sensor contests at the robot's effective tier.

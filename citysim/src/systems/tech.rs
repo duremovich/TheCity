@@ -597,10 +597,6 @@ pub fn data_unit_price(world: &World, buyer: EntityId) -> i64 {
     ((world.config.data.data_price as f32 * level).round() as i64).max(1)
 }
 
-/// V17: the Data buyer for `track`: the Tech-niche corp owning a Lab with
-/// the lowest holding in the track that can pay for a unit (ties the lower
-/// id), never `seller`; `only` restricts it to one corp (an agent selling
-/// at that corp's Lab).
 /// Phase 3 (procurement budget): what `corp` may still spend on Data
 /// today: `buy_budget_frac × closing treasury` less today's purchases, and
 /// never below `treasury_ref / 4` of treasury (M13's fleet-buy reserve).
@@ -617,6 +613,10 @@ fn can_buy_data(world: &World, corp: EntityId) -> bool {
     world.purse(Some(corp)) >= price && data_budget(world, corp) >= price
 }
 
+/// V17: the Data buyer for `track`: the Tech-niche corp owning a Lab with
+/// the lowest holding in the track that can pay for a unit within its
+/// procurement budget ([`data_budget`]; ties the lower id), never `seller`;
+/// `only` restricts it to one corp (an agent selling at that corp's Lab).
 fn data_buyer(world: &World, track: Track, seller: EntityId, only: Option<EntityId>) -> Option<EntityId> {
     world
         .corps()
