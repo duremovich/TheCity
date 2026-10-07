@@ -3041,6 +3041,11 @@ pub struct CreedsCfg {
     pub creed_tolerance: u8,
     pub purist_chrome: f32,
     pub tithe_frac: f32,
+    /// Plan deviation (phase 2 review): a creed spreads through people. A
+    /// Purist gang takes a recruit only along a Friend, Family, Parent or
+    /// Spouse edge to a member, except its first `founders` members, who
+    /// may come as any gang's bootstrap recruits do (nearest Hideout).
+    pub founders: usize,
 }
 
 impl Default for CreedsCfg {
@@ -3058,6 +3063,7 @@ impl CreedsCfg {
             creed_tolerance: 0,
             purist_chrome: 0.3,
             tithe_frac: 0.6,
+            founders: 3,
         }
     }
 }
@@ -3285,6 +3291,11 @@ pub struct CompetenceCfg {
     pub poach_min: f32,
     pub poach_gap: f32,
     pub poach_premium: f32,
+    /// Phase 2 review: a skill's competence term is `2 ×` its percentile
+    /// among the city's adults at seed (the median corp at multiplier 1);
+    /// false: the plan's `skill ÷ city mean` (W28; the median corp near 0.85
+    /// of `comp_ref`, the exec term being a heavy-tailed skill).
+    pub rank_norm: bool,
 }
 
 impl Default for CompetenceCfg {
@@ -3306,6 +3317,7 @@ impl CompetenceCfg {
             poach_min: 0.5,
             poach_gap: 0.2,
             poach_premium: 1.3,
+            rank_norm: true,
         }
     }
 }

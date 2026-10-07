@@ -13,7 +13,7 @@ use crate::components::{Appearance, Building, Class, Corp, Gang, GangMember, Job
 use crate::entity::EntityId;
 use crate::systems::memory;
 use crate::time::{self, TICKS_PER_DAY};
-use crate::word::{Deed, Reputation};
+use crate::word::{Audience, Creed, Deed, Reputation, Taste};
 use crate::world::World;
 
 /// `1 − e^(−D ÷ scale)`.
@@ -78,7 +78,76 @@ pub fn appearance_of(world: &World, id: EntityId) -> Appearance {
         Class::Dreg => 0,
     };
     let colours = world.gang_of(id).or_else(|| world.corp_of_agent(id));
-    Appearance { dress, chrome: 0, colours }
+    Appearance { dress, chrome: 0, colours, dress_pin: None }
+}
+
+/// W30: whose eyes an agent sees with: its class (Corp, Street, Dreg),
+/// overridden by gang membership (a Purist gang's members: `Purist`).
+pub fn audience_of(world: &World, id: EntityId) -> Audience {
+    if let Some(g) = world.gang_of(id).and_then(|g| world.comp::<Gang>(g)) {
+        return if g.creed == Some(Creed::Purist) { Audience::Purist } else { Audience::Gang };
+    }
+    match crate::systems::classes::class_of(world, id) {
+        Class::Corp => Audience::Corp,
+        Class::Street => Audience::Street,
+        Class::Dreg => Audience::Dreg,
+    }
+}
+
+/// The audience's taste weights (`[taste]`).
+pub fn taste_weights(world: &World, a: Audience) -> Taste {
+    let t = &world.config.taste;
+    match a {
+        Audience::Corp => t.corp,
+        Audience::Street => t.street,
+        Audience::Dreg => t.dreg,
+        Audience::Gang => t.gang,
+        Audience::Purist => t.purist,
+    }
+}
+
+/// Are `a` and `b` rival colours to the observer's gang (`rival_of`)?
+fn rival_colours(world: &World, observer: EntityId, colours: Option<EntityId>) -> bool {
+    let (Some(g), Some(c)) = (world.gang_of(observer), colours) else { return false };
+    world.rival_of(g) == Some(c)
+}
+
+/// W30, spec § 2: how `observer` sees `target`: `dress × (2 × dress_t ÷ 3
+/// − 1) + chrome × min(chrome_t ÷ chrome_ref, 1) + own_colours × [same
+/// colours] + rival_colours × [rival colours]`, clamped −1..1. A Purist
+/// audience reads `chrome = −1` for a target above `creed_tolerance`
+/// (`Kit.visible`) and nothing for one within it (the tolerance rule).
+pub fn taste(world: &World, observer: EntityId, target: EntityId) -> f32 {
+    let aud = audience_of(world, observer);
+    let w = taste_weights(world, aud);
+    let app = appearance_of(world, target);
+    let dress = w.dress * (2.0 * f32::from(app.dress) / 3.0 - 1.0);
+    let chrome = if aud == Audience::Purist {
+        let visible = world.comp::<crate::components::Kit>(target).map_or(app.chrome, |k| k.visible);
+        if visible > world.config.creeds.creed_tolerance {
+            -1.0
+        } else {
+            0.0
+        }
+    } else {
+        let r = f32::from(world.config.taste.chrome_ref.max(1));
+        w.chrome * (f32::from(app.chrome) / r).min(1.0)
+    };
+    let mine = world.gang_of(observer).or_else(|| world.corp_of_agent(observer));
+    let own = if app.colours.is_some() && app.colours == mine { w.own_colours } else { 0.0 };
+    let rival = if rival_colours(world, observer, app.colours) { w.rival_colours } else { 0.0 };
+    (dress + chrome + own + rival).clamp(-1.0, 1.0)
+}
+
+/// W14's taste term of `opinion`: the observer's audience on a faction's
+/// colours (its own: `own_colours`; the observer's gang's rival:
+/// `rival_colours`).
+pub fn colours_taste(world: &World, observer: EntityId, faction: EntityId) -> f32 {
+    let w = taste_weights(world, audience_of(world, observer));
+    let mine = world.gang_of(observer).or_else(|| world.corp_of_agent(observer));
+    let own = if mine == Some(faction) { w.own_colours } else { 0.0 };
+    let rival = if rival_colours(world, observer, Some(faction)) { w.rival_colours } else { 0.0 };
+    (own + rival).clamp(-1.0, 1.0)
 }
 
 /// Every live faction: gangs, corps, then the Law (the Jail's entity), ascending within each.
@@ -112,9 +181,9 @@ pub fn members_of(world: &World, faction: EntityId) -> Vec<EntityId> {
 
 /// W14: an agent's opinion of a faction, on demand: `0.4 × mean affinity
 /// to its members the agent has edges with + 0.3 × own deed memories about
-/// it (valence-weighted) + 0.2 × (honour − 0.5) × 2 + 0.1 × taste (0 before
-/// phase 2) + press_w × press`, plus `own_bias` for the employer and the
-/// gang, clamped −1..1.
+/// it (valence-weighted) + 0.2 × (honour − 0.5) × 2 + 0.1 × taste (W30:
+/// `colours_taste`, 0 with moves off) + press_w × press`, plus `own_bias`
+/// for the employer and the gang, clamped −1..1.
 pub fn opinion(world: &World, agent: EntityId, faction: EntityId) -> f32 {
     let members = members_of(world, faction);
     let affs: Vec<f32> = members.iter().filter_map(|&m| world.edge(agent, m).map(|e| e.affinity)).collect();
@@ -134,12 +203,13 @@ pub fn opinion(world: &World, agent: EntityId, faction: EntityId) -> f32 {
         .clamp(-1.0, 1.0);
     let honour = rep(world, faction).honour;
     let press = world.config.news.press_w * rep(world, agent).press;
+    let taste = if crate::systems::moves::on(world) { colours_taste(world, agent, faction) } else { 0.0 };
     let bias = if world.gang_of(agent) == Some(faction) || world.corp_of_agent(agent) == Some(faction) {
         world.config.reputation.own_bias
     } else {
         0.0
     };
-    (0.4 * aff + 0.3 * own + 0.2 * (honour - 0.5) * 2.0 + press + bias).clamp(-1.0, 1.0)
+    (0.4 * aff + 0.3 * own + 0.2 * (honour - 0.5) * 2.0 + 0.1 * taste + press + bias).clamp(-1.0, 1.0)
 }
 
 /// Per-actor accumulators of one rebuild.

@@ -115,10 +115,22 @@ pub fn post(world: &mut World, d: DistrictId, e: PoolEntry) {
 
 /// A first telling of a deed done now: `reach0[deed]`, hops 0.
 pub fn post_deed(world: &mut World, d: DistrictId, deed: Deed, actor: Option<EntityId>, object: Option<EntityId>) {
+    post_deed_at(world, d, deed, actor, object, 1.0);
+}
+
+/// `post_deed` at `reach0[deed] × mult` (W26: a failed Deceive's Betrayed at half).
+pub fn post_deed_at(
+    world: &mut World,
+    d: DistrictId,
+    deed: Deed,
+    actor: Option<EntityId>,
+    object: Option<EntityId>,
+    mult: f32,
+) {
     if !world.config.gossip.enabled {
         return;
     }
-    let reach = world.config.gossip.reach0.get(deed);
+    let reach = (world.config.gossip.reach0.get(deed) * mult).clamp(0.0, 1.0);
     let e = PoolEntry {
         deed,
         actor,
@@ -343,9 +355,10 @@ pub enum Venue {
     Ask,
 }
 
-/// The speaker's knowledge before phase 2's social skills (W8: 0.5 for everyone).
-pub fn knowledge(_world: &World, _id: EntityId) -> f32 {
-    0.5
+/// The speaker's knowledge (W8): its social skill, 0.5 for everyone while
+/// moves are off (`moves::knowledge`).
+pub fn knowledge(world: &World, id: EntityId) -> f32 {
+    crate::systems::moves::knowledge(world, id)
 }
 
 /// W8: one exchange, `from` telling `to`. The pick: of the speaker's deed
@@ -390,6 +403,12 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     let mut rng = world.rng.word(WordNs::Exchange, now, (u64::from(from.index) << 32) | u64::from(to.index));
     let d = talk_district(world, from);
     distort(world, from, &mut r, d, &mut rng);
+    // W8 (phase 2): a speaker telling of their own deed lies with `p =
+    // deception × 0.5`, naming an Enemy instead (one more draw on the same
+    // stream; a lie the listener may later meet as a contradiction).
+    if r.actor == Some(from) && crate::systems::moves::on(world) {
+        lie(world, from, &mut r, d, &mut rng);
+    }
     let entry = MemoryEntry {
         subject: r.actor,
         salience: src.salience * hop_salience,
@@ -456,6 +475,24 @@ pub fn distort(world: &mut World, speaker: EntityId, r: &mut DeedRef, d: Distric
         world.stats.current.word.distorted += 1;
     }
     swapped
+}
+
+/// W8 (phase 2): the speaker's lie about its own deed: with `p = deception
+/// × 0.5` the actor becomes an Enemy of the speaker, the one whose Home is
+/// in the deed's district first, else the lowest id. Counts `distorted`.
+pub fn lie(world: &mut World, speaker: EntityId, r: &mut DeedRef, d: DistrictId, rng: &mut ChaCha8Rng) -> bool {
+    let p = 0.5 * world.comp::<crate::components::Skills>(speaker).map_or(0.0, |s| s.deception);
+    let roll: f32 = rng.random();
+    if roll >= p {
+        return false;
+    }
+    let object = r.object;
+    let candidate = |e: &EntityId| *e != speaker && Some(*e) != object;
+    let local = world.enemies_of(speaker).filter(candidate).find(|&e| home_district(world, e) == Some(d));
+    let Some(swap) = local.or_else(|| world.enemies_of(speaker).find(candidate)) else { return false };
+    r.actor = Some(swap);
+    world.stats.current.word.distorted += 1;
+    true
 }
 
 /// `distort` at a given speaker knowledge (no counter): at knowledge 1 it

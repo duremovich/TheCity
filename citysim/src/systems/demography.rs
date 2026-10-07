@@ -245,10 +245,13 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
         Identity { name: format!("{first} {last}"), age_days: 0, sex, born_tick: tick as i64, spouse_died_tick: None },
     );
     world.insert(id, personality);
-    world.insert(id, Skills { stealth: 0.0, fighting: 0.0, farming: 0.0, hacking: 0.0 });
+    world.insert(id, Skills::basic(0.0, 0.0, 0.0, 0.0));
     // M14 V35: half the parents' mean, half the child's keyed draw.
     let hacking = crate::systems::tech::child_hacking(world, id, mother, father);
     crate::systems::tech::give_hacking(world, id, hacking);
+    // M15 W25: the parents' social skills blended with the child's own draw.
+    let social = crate::systems::moves::child_social(world, id, mother, father);
+    crate::systems::moves::give_social(world, id, social);
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
@@ -547,31 +550,7 @@ fn job_search(world: &mut World) {
             continue;
         };
         for role in roles {
-            let candidate = world
-                .citizens()
-                .into_iter()
-                .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
-                .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
-                .filter(|&id| is_adult(world, id))
-                .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
-                .map(|id| {
-                    // M14 V16: a Lab hires the best hacker (ties lower id),
-                    // so Labs collect the city's runners.
-                    if role == Role::Researcher {
-                        let h = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
-                        return (u32::MAX - (h.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
-                    }
-                    let from = world
-                        .comp::<Household>(id)
-                        .and_then(|h| h.home)
-                        .and_then(|h| world.comp::<Building>(h))
-                        .map(|b| b.door)
-                        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
-                        .unwrap_or_default();
-                    (from.manhattan(workplace_door), id)
-                })
-                .min();
-            let Some((_, id)) = candidate else { continue };
+            let Some(id) = pick_candidate(world, workplace_door, role) else { continue };
             hire(world, id, employer, role);
             if let Some(v) = world.vacancies.get_mut(&employer) {
                 if let Some(i) = v.iter().position(|&r| r == role) {
@@ -583,6 +562,44 @@ fn job_search(world: &mut World) {
             }
         }
     }
+}
+
+/// The adult `job_search` would hire for `role` at a workplace door: the
+/// nearest unemployed, free adult (home door, else tile; ties by id), a
+/// guard lawful (≥ 0.4); a Lab the best hacker (ties lower id).
+fn pick_candidate(world: &World, workplace_door: TilePos, role: Role) -> Option<EntityId> {
+    world
+        .citizens()
+        .into_iter()
+        .filter(|&id| world.comp::<Brain>(id).is_some_and(|b| !b.emigrating))
+        .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
+        .filter(|&id| is_adult(world, id))
+        .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
+        .map(|id| {
+            // M14 V16: a Lab hires the best hacker (ties lower id),
+            // so Labs collect the city's runners.
+            if role == Role::Researcher {
+                let h = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
+                return (u32::MAX - (h.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
+            }
+            let from = world
+                .comp::<Household>(id)
+                .and_then(|h| h.home)
+                .and_then(|h| world.comp::<Building>(h))
+                .map(|b| b.door)
+                .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
+                .unwrap_or_default();
+            (from.manhattan(workplace_door), id)
+        })
+        .min()
+        .map(|(_, id)| id)
+}
+
+/// M15 W29: the adult the vacancy at `employer` would hire for `role` now
+/// (poaching compares a rival's worker with this one).
+pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<EntityId> {
+    let door = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door)?;
+    pick_candidate(world, door, role)
 }
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
@@ -604,6 +621,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             duty_ticks: 0,
             hired_tick: world.tick,
             struck_shift: None,
+            premium: 1.0,
         },
     );
     world.abort_plan(id);
@@ -724,11 +742,14 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
         },
     );
     world.insert(id, personality);
-    world.insert(id, Skills { stealth: 0.1, fighting: 0.1, farming: 0.1, hacking: 0.0 });
+    world.insert(id, Skills::basic(0.1, 0.1, 0.1, 0.0));
     // M14 V35: an immigrant's keyed draw.
     let hacking = crate::systems::tech::draw_hacking(world, id);
     crate::systems::tech::give_hacking(world, id, hacking);
     world.insert(id, Wallet { coins: 15 });
+    // M15 W25: an immigrant's own draw (after the Personality it tilts on).
+    let social = crate::systems::moves::seed_skills(world, id);
+    crate::systems::moves::give_social(world, id, social);
     world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
     world.insert(
         id,

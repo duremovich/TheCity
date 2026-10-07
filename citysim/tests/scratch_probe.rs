@@ -1505,3 +1505,294 @@ fn probe_m13_think_by_goal() {
         eprintln!("{g:?}: {:.1} us per pass over {} agents", s * 1e6, agents.len());
     }
 }
+
+/// M15 phase 2: The Unplugged's size and Chapel, the Purist tolerance at
+/// each day end, the corps' and the Law's competence, and the farm output
+/// with competence on or `comp_w = 0` (`SEED`, `DAYS`, `COMP_W`).
+#[test]
+#[ignore]
+fn probe_m15_stats_and_moves() {
+    use citysim::{Building, BuildingKind, Corp, Gang, Kit};
+    let seed: u64 = std::env::var("SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let days: u64 = std::env::var("DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(60);
+    let mut c = Config::load();
+    if let Some(w) = std::env::var("COMP_W").ok().and_then(|s| s.parse().ok()) {
+        c.competence.comp_w = w;
+    }
+    let mut w = World::new(seed, c);
+    let purist = w.gang_list().iter().copied().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.creed.is_some()));
+    if let Some(g) = purist {
+        let h = w.comp::<Gang>(g).map(|x| x.hideout).expect("hideout");
+        let b = w.comp::<Building>(h).expect("chapel");
+        eprintln!(
+            "Unplugged {} at {} ({:?}, label {:?}) in {}",
+            g,
+            h,
+            b.kind,
+            b.label,
+            w.district_name(w.district_of_building(h))
+        );
+    }
+    let farms: Vec<_> = w.buildings_of_kind(BuildingKind::Farm).to_vec();
+    let level = |w: &World| -> f64 {
+        farms
+            .iter()
+            .filter_map(|&f| w.comp::<Building>(f))
+            .map(|b| f64::from(b.stock_food) + f64::from(b.production_accum))
+            .sum()
+    };
+    let mut made = 0.0f64;
+    let mut worst_visible = 0u8;
+    for day in 0..days {
+        for _ in 0..TICKS_PER_DAY {
+            let before: Vec<f64> = farms
+                .iter()
+                .map(|&f| {
+                    w.comp::<Building>(f).map_or(0.0, |b| f64::from(b.stock_food) + f64::from(b.production_accum))
+                })
+                .collect();
+            w.tick();
+            for (i, &f) in farms.iter().enumerate() {
+                let now =
+                    w.comp::<Building>(f).map_or(0.0, |b| f64::from(b.stock_food) + f64::from(b.production_accum));
+                if now > before[i] {
+                    made += now - before[i];
+                }
+            }
+        }
+        let _ = level(&w);
+        if let Some(g) = purist {
+            let members = w.comp::<Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
+            let vis = members.iter().map(|&m| w.comp::<Kit>(m).map_or(0, |k| k.visible)).max().unwrap_or(0);
+            worst_visible = worst_visible.max(vis);
+            if day % 10 == 9 || day == days - 1 {
+                eprintln!("day {}: Unplugged members {} max visible {vis}", day + 1, members.len());
+            }
+        }
+        if day == 0 || day == days - 1 {
+            let comps: Vec<String> = w
+                .corps()
+                .into_iter()
+                .filter_map(|c| w.comp::<Corp>(c).map(|cc| format!("{} {:.2}", cc.name, cc.competence)))
+                .collect();
+            eprintln!(
+                "day {}: competence {} | law {:.2}",
+                day + 1,
+                comps.join(", "),
+                w.law().map_or(0.0, |l| l.competence)
+            );
+        }
+    }
+    eprintln!("farm output over {days} days: {made:.0}; worst Purist visible at a day end {worst_visible}");
+    eprintln!("skill means {:?}", w.skill_means);
+}
+
+/// M15 phase 2: the farm-weighted mean competence multiplier at seed over `N` seeds.
+#[test]
+#[ignore]
+fn probe_m15_landing_mult() {
+    use citysim::{Building, BuildingKind};
+    let n: u64 = std::env::var("N").ok().and_then(|s| s.parse().ok()).unwrap_or(20);
+    let mut all = Vec::new();
+    for seed in 0..n {
+        let w = World::new(1000 + seed, Config::load());
+        let farms: Vec<_> = w.buildings_of_kind(BuildingKind::Farm).to_vec();
+        let m: f32 = farms
+            .iter()
+            .map(|&f| {
+                let staff = 1.0;
+                let _ = w.comp::<Building>(f);
+                staff * w.corp_of_building(f).map_or(1.0, |c| citysim::systems::competence::comp_mult(&w, c))
+            })
+            .sum::<f32>()
+            / farms.len() as f32;
+        all.push(m);
+        eprintln!("seed {}: farm-weighted mult {m:.4}", 1000 + seed);
+    }
+    eprintln!("mean {:.4}", all.iter().sum::<f32>() / all.len() as f32);
+}
+
+/// M15 phase 2: the M12 gate's "a gang controls a district >= 14 days",
+/// TechGained and Farms with a truck by day 30 over seeds 42-49 under
+/// `VARIANT` = on | off (word off) | nopurist | nomoves | nocomp.
+#[test]
+#[ignore]
+fn probe_m15_gate_mechanisms() {
+    use citysim::{Controller, EventKind};
+    let variant = std::env::var("VARIANT").unwrap_or_else(|_| "on".into());
+    let from: u64 = std::env::var("FROM").ok().and_then(|s| s.parse().ok()).unwrap_or(42);
+    let count: u64 = std::env::var("COUNT").ok().and_then(|s| s.parse().ok()).unwrap_or(8);
+    let seeds: Vec<u64> = (from..from + count).collect();
+    let rows: Vec<String> = seeds
+        .into_iter()
+        .map(|seed| {
+            let variant = variant.clone();
+            std::thread::spawn(move || {
+                let mut c = Config::load();
+                match variant.as_str() {
+                    "off" => c = c.word_off(),
+                    "nopurist" => c.creeds.seed_purist = false,
+                    "nomoves" => c.moves.enabled = false,
+                    "nocomp" => c.competence.enabled = false,
+                    _ => {}
+                }
+                let mut w = World::new(seed, c);
+                let n = w.districts.len();
+                let mut run = vec![(None::<citysim::EntityId>, 0u32); n];
+                let mut best = 0u32;
+                let mut tech = 0u32;
+                let mut next = 0u64;
+                let mut claims_held = 0usize;
+                for _day in 0..120u64 {
+                    w.run_ticks(TICKS_PER_DAY);
+                    for (i, d) in w.districts.iter().enumerate() {
+                        let g = match d.control {
+                            Controller::Gang(g) => Some(g),
+                            _ => None,
+                        };
+                        run[i] = match (g, run[i]) {
+                            (Some(g), (Some(h), k)) if g == h => (Some(g), k + 1),
+                            (Some(g), _) => (Some(g), 1),
+                            (None, _) => (None, 0),
+                        };
+                        best = best.max(run[i].1);
+                    }
+                    for e in w.events.iter().filter(|e| e.id >= next) {
+                        if e.kind == EventKind::TechGained {
+                            tech += 1;
+                        }
+                    }
+                    next = w.next_event_id;
+                    claims_held = claims_held.max(
+                        w.gang_list().iter().filter_map(|&g| w.comp::<citysim::Gang>(g)).map(|g| g.territory.len()).sum(),
+                    );
+                }
+                let last = w.stats.history.back().expect("a row");
+                let d30 = w.stats.history.get(29).map_or(0, |r| r.vehicles_truck);
+                format!(
+                    "seed {seed}: longest gang control {best} d, TechGained {tech}, peak territory {claims_held}, vehicles d120 {} (trucks {}, d30 trucks {d30}), gang_income {}",
+                    last.vehicles_moto + last.vehicles_car + last.vehicles_truck + last.vehicles_flyer,
+                    last.vehicles_truck,
+                    w.stats.history.iter().map(|r| r.gang_income).sum::<i64>()
+                )
+            })
+        })
+        .collect::<Vec<_>>()
+        .into_iter()
+        .map(|h| h.join().expect("seed"))
+        .collect();
+    for r in rows {
+        eprintln!("{variant}: {r}");
+    }
+}
+
+/// A named view of part of a world, for `probe_save_divergence`.
+type Part = (&'static str, Box<dyn Fn(&World) -> String>);
+
+/// Save/load divergence finder: save at `TICKS` (`ARM`: thirty armed
+/// freelancers first, as virt_review's mid-hour save; `WORDOFF`, `NORANK`,
+/// `NOCOMP` variants), run both on tick by tick, print the first differing
+/// region of the RON and which parts of the world differ.
+#[test]
+#[ignore]
+fn probe_save_divergence() {
+    let ticks: u64 = std::env::var("TICKS").ok().and_then(|s| s.parse().ok()).unwrap_or(2 * TICKS_PER_DAY + 545);
+    let mut cfg = Config::load();
+    if std::env::var("WORDOFF").is_ok() {
+        cfg = cfg.word_off();
+    }
+    if std::env::var("NORANK").is_ok() {
+        cfg.competence.rank_norm = false;
+    }
+    if std::env::var("NOCOMP").is_ok() {
+        cfg.competence.enabled = false;
+    }
+    let mut w = World::new(42, cfg);
+    w.run_ticks(ticks);
+    // As virt_review's mid-hour save: thirty armed freelancers at Coarse.
+    if std::env::var("ARM").is_ok() {
+        use citysim::systems::{assets, demography, law, lod};
+        let mut armed: Vec<citysim::EntityId> = Vec::new();
+        for i in 0..30usize {
+            let a = w
+                .citizens()
+                .into_iter()
+                .find(|&a| {
+                    w.has::<citysim::Brain>(a)
+                        && demography::is_adult(&w, a)
+                        && !w.has::<citysim::GangMember>(a)
+                        && !armed.contains(&a)
+                        && w.comp::<citysim::Kit>(a).is_some_and(|k| k.deck.is_none() && !k.chrome)
+                        && !law::is_guard(&w, a)
+                })
+                .expect("adult");
+            lod::set_lod(&mut w, a, citysim::Lod::Coarse);
+            assets::grant(&mut w, a, citysim::AssetKind::Deck, 1 + (i % 2) as u8).expect("deck");
+            w.comp_mut::<citysim::Skills>(a).expect("s").hacking = 0.3 + 0.67 * (i as f32 / 29.0);
+            armed.push(a);
+        }
+        w.run_ticks(5);
+    }
+    // `SHOCK=corp|gang`: run on to the first tick a corp (gang) holds a
+    // pending shock, and save there.
+    if let Ok(kind) = std::env::var("SHOCK") {
+        let pending = |w: &World| match kind.as_str() {
+            "corp" => w.corps().into_iter().any(|c| w.comp::<citysim::Corp>(c).is_some_and(|x| !x.shocks.is_empty())),
+            _ => w.gangs().into_iter().any(|g| w.comp::<citysim::Gang>(g).is_some_and(|x| !x.shocks.is_empty())),
+        };
+        let mut n = 0;
+        while !pending(&w) && n < 5 * TICKS_PER_DAY {
+            w.run_ticks(1);
+            n += 1;
+        }
+        assert!(pending(&w), "no pending {kind} shock found");
+        eprintln!("saving at tick {} with a pending {kind} shock", w.tick);
+    }
+    let mut loaded = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("load");
+    let show = |a: &str, b: &str, what: &str| {
+        let i = a.bytes().zip(b.bytes()).position(|(x, y)| x != y).unwrap_or(0);
+        let lo = i.saturating_sub(300);
+        eprintln!("{what} at {i}: {} ||| {}", &a[lo..(i + 100).min(a.len())], &b[lo..(i + 100).min(b.len())]);
+    };
+    let (a0, b0) = (citysim::save::to_ron(&w), citysim::save::to_ron(&loaded));
+    if a0 != b0 {
+        show(&a0, &b0, "differs right after load");
+        return;
+    }
+    for step in 0..1440 {
+        w.run_ticks(1);
+        loaded.run_ticks(1);
+        let (a, b) = (citysim::save::to_ron(&w), citysim::save::to_ron(&loaded));
+        if a != b {
+            show(&a, &b, &format!("diverged after {step} ticks"));
+            let parts: Vec<Part> = vec![
+                ("districts", Box::new(|w: &World| format!("{:?}", w.districts))),
+                ("reputation", Box::new(|w: &World| format!("{:?}", w.reputation))),
+                ("rumours", Box::new(|w: &World| format!("{:?}", w.rumours))),
+                ("events", Box::new(|w: &World| format!("{:?}", w.events.iter().rev().take(50).collect::<Vec<_>>()))),
+                ("stats", Box::new(|w: &World| format!("{:?}", w.stats.current))),
+                ("rng", Box::new(|w: &World| format!("{:?}", w.rng))),
+                ("memory", Box::new(|w: &World| format!("{:?}", w.memory))),
+                ("brain", Box::new(|w: &World| format!("{:?}", w.brain))),
+                ("position", Box::new(|w: &World| format!("{:?}", w.position))),
+                ("skills", Box::new(|w: &World| format!("{:?}", w.skills))),
+                ("corp", Box::new(|w: &World| format!("{:?}", w.corp))),
+                ("appearance", Box::new(|w: &World| format!("{:?}", w.appearance))),
+            ];
+            for (name, f) in parts {
+                let (x, y) = (f(&w), f(&loaded));
+                if x != y {
+                    let i = x.bytes().zip(y.bytes()).position(|(p, q)| p != q).unwrap_or(0);
+                    let lo = i.saturating_sub(200);
+                    eprintln!(
+                        "  {name} differs: {} ||| {}",
+                        &x[lo..(i + 80).min(x.len())],
+                        &y[lo..(i + 80).min(y.len())]
+                    );
+                }
+            }
+            return;
+        }
+    }
+    eprintln!("no divergence");
+}

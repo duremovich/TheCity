@@ -259,6 +259,42 @@ pub enum SocialSkill {
     Deception,
 }
 
+impl SocialSkill {
+    pub const ALL: [SocialSkill; 4] =
+        [SocialSkill::Persuasion, SocialSkill::Intimidation, SocialSkill::Knowledge, SocialSkill::Deception];
+
+    /// Position in [`SocialSkill::ALL`] (and in `Skills::last_used`).
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SocialSkill::Persuasion => "persuasion",
+            SocialSkill::Intimidation => "intimidation",
+            SocialSkill::Knowledge => "knowledge",
+            SocialSkill::Deception => "deception",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<SocialSkill> {
+        let s = s.to_ascii_lowercase();
+        SocialSkill::ALL.iter().copied().find(|k| k.label() == s)
+    }
+}
+
+/// M15 W28 (plan deviation: the plan kept `(EntityId, Tick)`): who left a
+/// group today with the largest share of its competence, for the
+/// `TalentLost` event's text: the agent, when, its share and the skill
+/// read (killed or left is read at midnight: a corpse or a living agent).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TalentGone {
+    pub who: EntityId,
+    pub tick: Tick,
+    pub share: f32,
+    pub skill: String,
+}
+
 /// The keyed-stream namespaces of M15's rolls (plan W8, `SimRng::word`).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum WordNs {

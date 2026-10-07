@@ -216,6 +216,18 @@ enum Lever {
     PlantRumour(u32, citysim::word::Deed, Option<u32>, u8, f32),
     /// M15 god (W42): `set_reputation=<agent>:<dread|standing|honour|heat>:<v>:<days>`.
     SetReputation(u32, citysim::word::Axis, f32, u16),
+    /// M15 god (W42, phase 2): `grant_skill=<agent>:<skill>:<v>` or
+    /// `grant_skill=dregs<n>:<skill>:<v>[:suit]` (the n lowest-wealth Dregs).
+    GrantSkill(SkillTarget, citysim::word::SocialSkill, f32, bool),
+    /// M15 god (W42, phase 2): `set_creed=<gang i>:purist|none`.
+    SetCreed(usize, Option<citysim::word::Creed>),
+}
+
+/// Who `grant_skill=` names: an agent by index, or the n poorest Dregs.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum SkillTarget {
+    Agent(u32),
+    Dregs(u32),
 }
 
 /// The target of `run_now`: a building by entity index, or a corp by slot
@@ -326,6 +338,33 @@ fn corp_in_slot(world: &World, slot: u8) -> Result<citysim::EntityId, String> {
 }
 
 impl Lever {
+    /// Every command a lever stands for (one, or a `dregs<n>` form's n).
+    fn resolve_all(&self, world: &World) -> Result<Vec<PlayerCommand>, String> {
+        match *self {
+            Lever::GrantSkill(SkillTarget::Dregs(n), skill, value, suit) => {
+                // The n lowest-wealth living Dreg adults (no Home), ties the lower index.
+                let mut dregs: Vec<(i64, citysim::EntityId)> = world
+                    .citizens()
+                    .into_iter()
+                    .filter(|&a| citysim::systems::law::living(world, a))
+                    .filter(|&a| citysim::systems::demography::is_adult(world, a))
+                    .filter(|&a| citysim::systems::classes::class_of(world, a) == citysim::components::Class::Dreg)
+                    .map(|a| (world.comp::<citysim::components::Wallet>(a).map_or(0, |w| w.coins), a))
+                    .collect();
+                dregs.sort();
+                if dregs.is_empty() {
+                    return Err("no Dregs".into());
+                }
+                Ok(dregs
+                    .into_iter()
+                    .take(n as usize)
+                    .map(|(_, agent)| PlayerCommand::GrantSkill { agent, skill, value, suit })
+                    .collect())
+            }
+            _ => self.resolve(world).map(|c| vec![c]),
+        }
+    }
+
     fn resolve(&self, world: &World) -> Result<PlayerCommand, String> {
         let gang = |i: usize| world.gangs().get(i).copied().ok_or_else(|| format!("no gang {i}"));
         Ok(match *self {
@@ -406,6 +445,11 @@ impl Lever {
             Lever::SetReputation(a, axis, value, days) => {
                 PlayerCommand::SetReputation { who: agent_at(world, a)?, axis, value, days }
             }
+            Lever::GrantSkill(SkillTarget::Agent(a), skill, value, suit) => {
+                PlayerCommand::GrantSkill { agent: agent_at(world, a)?, skill, value, suit }
+            }
+            Lever::GrantSkill(SkillTarget::Dregs(_), ..) => return Err("dregs<n> resolves to many".into()),
+            Lever::SetCreed(i, creed) => PlayerCommand::SetCreed { gang: gang(i)?, creed },
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -458,7 +502,9 @@ impl Lever {
 /// `grant_decks=<district>:<n>:<tier>`, `set_corp_ice=<corp slot>:<tier>`.
 /// M15 god levers (plan W42, phase 1):
 /// `plant_rumour=<agent>:<deed>:<object agent|none>:<district>:<reach>`,
-/// `set_reputation=<agent>:<dread|standing|honour|heat>:<value>:<days>`.
+/// `set_reputation=<agent>:<dread|standing|honour|heat>:<value>:<days>`;
+/// phase 2: `grant_skill=<agent>:<skill>:<v>`,
+/// `grant_skill=dregs<n>:<skill>:<v>:suit`, `set_creed=<gang i>:purist|none`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -670,6 +716,37 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 v.parse::<f32>().map_err(|e| format!("{spec}: bad value: {e}"))?,
                 d.parse::<u16>().map_err(|e| format!("{spec}: bad days: {e}"))?,
             ))
+        }
+        "grant_skill" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let (who, sk, v, suit) = match parts[..] {
+                [w, s, v] => (w, s, v, false),
+                [w, s, v, "suit"] => (w, s, v, true),
+                _ => return Err(format!("{spec}: expected <agent|dregs<n>>:<skill>:<v>[:suit]")),
+            };
+            let skill = citysim::word::SocialSkill::parse(sk).ok_or_else(|| format!("{spec}: unknown skill {sk}"))?;
+            let target = match who.strip_prefix("dregs") {
+                Some(n) => SkillTarget::Dregs(n.parse::<u32>().map_err(|e| format!("{spec}: bad dregs count: {e}"))?),
+                None => SkillTarget::Agent(who.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?),
+            };
+            if suit && matches!(target, SkillTarget::Agent(_)) {
+                return Err(format!("{spec}: :suit goes with dregs<n>"));
+            }
+            Some(Lever::GrantSkill(
+                target,
+                skill,
+                v.parse::<f32>().map_err(|e| format!("{spec}: bad value: {e}"))?,
+                suit,
+            ))
+        }
+        "set_creed" => {
+            let (g, c) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <gang>:purist|none"))?;
+            let creed = match c.to_ascii_lowercase().as_str() {
+                "purist" => Some(citysim::word::Creed::Purist),
+                "none" => None,
+                _ => return Err(format!("{spec}: unknown creed {c}")),
+            };
+            Some(Lever::SetCreed(g.parse::<usize>().map_err(|e| format!("{spec}: bad gang: {e}"))?, creed))
         }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
@@ -920,8 +997,12 @@ fn run(args: RunArgs) -> Result<(), String> {
         let chunk_ticks = day_end - world.tick;
         while world.tick < day_end {
             while next_lever < levers.len() && levers[next_lever].0 <= world.tick {
-                match levers[next_lever].1.resolve(&world) {
-                    Ok(cmd) => world.push_command(cmd),
+                match levers[next_lever].1.resolve_all(&world) {
+                    Ok(cmds) => {
+                        for cmd in cmds {
+                            world.push_command(cmd);
+                        }
+                    }
                     Err(e) => {
                         eprintln!("warning: lever {:?} at tick {}: {e}; skipped", levers[next_lever].1, world.tick)
                     }
@@ -1561,6 +1642,20 @@ mod tests {
             Lever::SetReputation(12, citysim::word::Axis::Dread, _, 5)
         ));
         assert!(parse_lever("day=10:plant_rumour=12:kissed:none:3:1.0").is_err());
+        assert!(matches!(
+            parse_lever("day=5:grant_skill=12:persuasion:1.0").unwrap().1,
+            Lever::GrantSkill(SkillTarget::Agent(12), citysim::word::SocialSkill::Persuasion, _, false)
+        ));
+        assert!(matches!(
+            parse_lever("day=5:grant_skill=dregs10:persuasion:1.0:suit").unwrap().1,
+            Lever::GrantSkill(SkillTarget::Dregs(10), citysim::word::SocialSkill::Persuasion, _, true)
+        ));
+        assert!(matches!(
+            parse_lever("day=5:set_creed=1:purist").unwrap().1,
+            Lever::SetCreed(1, Some(citysim::word::Creed::Purist))
+        ));
+        assert!(parse_lever("day=5:set_creed=1:monk").is_err());
+        assert!(parse_lever("day=5:grant_skill=12:charisma:1.0").is_err());
         assert!(parse_lever("day=3:city_ice=x").is_err());
     }
 

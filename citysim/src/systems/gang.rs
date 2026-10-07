@@ -58,7 +58,11 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         for m in world.neighbours(id) {
             let Some(gid) = world.comp::<GangMember>(m).map(|gm| gm.gang) else { continue };
             let Some(gi) = gangs.iter().position(|&g| g == gid) else { continue };
-            if !open[gi] {
+            // M15 W31: a Purist gang refuses the chromed.
+            if !open[gi]
+                || !crate::systems::creeds::tolerated(world, gid, id)
+                || !crate::systems::creeds::edge_recruits(world, gid, id, m)
+            {
                 continue;
             }
             let Some(e) = world.edge(id, m) else { continue };
@@ -97,6 +101,8 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         .filter_map(|gid| world.comp::<Gang>(gid).map(|g| (gid, g)))
         .filter(|(_, g)| !g.is_sacked(world.tick))
         .filter(|&(gid, _)| may_reform(world, gid))
+        .filter(|&(gid, _)| crate::systems::creeds::tolerated(world, gid, id))
+        .filter(|&(gid, _)| crate::systems::creeds::open_to_strangers(world, gid))
         .filter(|(_, g)| {
             (desperate && recruiting(world, g))
                 || (arrested && g.members.is_empty() && world.config.gangs.max_members > 0)
@@ -569,7 +575,9 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
     let r = world.config.crime.sight_day_crime;
     let guarded = |door: TilePos| guards.iter().any(|&gt| law::chebyshev(gt, door) <= r);
-    let mut best: Option<((u32, u32), EntityId)> = None;
+    // M15 W31: a Purist gang shakes down the chromed's Homes first.
+    let purist = crate::systems::creeds::is_purist(world, gang);
+    let mut best: Option<((bool, u32, u32), EntityId)> = None;
     for &h in homes {
         if Some(h) == own_home {
             continue;
@@ -579,8 +587,16 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         if b.demolished || b.derelict || b.occupants.is_empty() {
             continue;
         }
-        let key = (b.door.manhattan(from), h.index);
-        if best.is_some_and(|(k, _)| key >= k) || !pick(h) || guarded(b.door) {
+        let dist = b.door.manhattan(from);
+        // The best this Home could key (chromed) cannot beat the best so far:
+        // skip before the filters (for a creedless gang, the original test).
+        if best.is_some_and(|(k, _)| (false, dist, h.index) >= k) || !pick(h) || guarded(b.door) {
+            continue;
+        }
+        // The resident scan runs only for a Home that passed the cheap rejects.
+        let plain = purist && !crate::systems::creeds::chromed_home(world, h);
+        let key = (plain, dist, h.index);
+        if best.is_some_and(|(k, _)| key >= k) {
             continue;
         }
         best = Some((key, h));
@@ -648,11 +664,21 @@ pub fn note_gang_work(world: &mut World, id: EntityId) {
 /// into the actor's wallet; the Home's claim advances (`claim`); victims
 /// remember WasRobbed and become enemies.
 pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
-    let amount = world.config.social.extort_amount;
+    let mut amount = world.config.social.extort_amount;
+    // M15 W31: a Purist tithes.
+    if world.gang_of(actor).is_some_and(|g| crate::systems::creeds::is_purist(world, g)) {
+        amount = (world.config.creeds.tithe_frac * amount as f32).round() as i64;
+    }
     let occupants: Vec<EntityId> = world
         .comp::<Building>(home)
         .map(|b| b.occupants.iter().copied().filter(|&o| o != actor && world.has::<Wallet>(o)).collect())
         .unwrap_or_default();
+    // M15 W27: with moves on, the shakedown is an Intimidate against the
+    // strongest occupant; a refusal takes nothing and advances no claim.
+    if crate::systems::moves::on(world) && !occupants.is_empty() && !intimidate(world, actor, home, &occupants, amount)
+    {
+        return 0;
+    }
     let total: i64 = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
     let take = amount.min(total);
     let mut taken = 0;
@@ -714,6 +740,48 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
     law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
     taken
+}
+
+/// M15 W27: the Shakedown's Intimidate against the strongest occupant
+/// (max `might`, ties the lower id) for `Stake::Coins(take)`; logs the try
+/// (`extort_log`, `extort_tries`, `extort_success`). A refusal: no coins,
+/// no claim, no crime raised, the task done for the day (one try a day),
+/// the `Refused` event (the backlash, if any, is the resolver's). Returns
+/// whether the occupants pay.
+fn intimidate(world: &mut World, actor: EntityId, home: EntityId, occupants: &[EntityId], amount: i64) -> bool {
+    use crate::systems::moves;
+    let target = occupants
+        .iter()
+        .map(|&o| (moves::might(world, o), o))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+        .map(|(_, o)| o);
+    let Some(target) = target else { return true };
+    let feared = crate::systems::reputation::rep(world, actor).dread >= 0.5;
+    let allied = moves::allies_within(world, target, 8) > 0;
+    let m = crate::word::SocialMove {
+        actor,
+        target,
+        kind: crate::word::MoveKind::Intimidate,
+        stake: crate::word::Stake::Coins(amount),
+    };
+    let out = moves::resolve(world, &m);
+    if world.extort_log.len() >= 4096 {
+        world.extort_log.pop_front();
+    }
+    world.extort_log.push_back((feared, allied, out.success));
+    world.stats.current.word.extort_tries += 1;
+    if out.success {
+        world.stats.current.word.extort_success += 1;
+        return true;
+    }
+    let today = world.day();
+    if let Some(b) = world.comp_mut::<Brain>(actor) {
+        b.gang_task_day = Some(today);
+    }
+    let name = world.name_of(actor);
+    let back = if out.backlash { ", and fought back" } else { "" };
+    world.push_event(EventKind::Refused, &[actor, home], format!("Block#{} would not pay {name}{back}", home.index));
+    false
 }
 
 /// The claim rules (spec › Contested Homes): own blows count up, a rival's
@@ -943,10 +1011,16 @@ fn daily_economy(world: &mut World) {
         // M13 D27: the chop shop, then D44: a bike for a member.
         crate::systems::vehicles::chop_daily(world, gang);
         crate::systems::vehicles::gang_bikes(world, gang);
+        // M15 W31: a Purist gang buys no chrome and no decks.
+        let purist = crate::systems::creeds::is_purist(world, gang);
         // M13 D44 (phase 3): then an Arms implant for the strongest member.
-        crate::systems::chrome::gang_arms(world, gang);
+        if !purist {
+            crate::systems::chrome::gang_arms(world, gang);
+        }
         // M14 V30: then a deck for the best hacker.
-        crate::systems::virt::gang_deck(world, gang);
+        if !purist {
+            crate::systems::virt::gang_deck(world, gang);
+        }
         // M14 V30 (phase 3): Hideout ICE, then VirtRaid's run orders.
         crate::systems::virt::gang_daily(world, gang);
     }
@@ -1165,6 +1239,8 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
     }
     recompute_leader(world, splinter);
     recompute_leader(world, gang);
+    // M15 W31: an unchromed, lawful lieutenant's splinter is Purist.
+    crate::systems::creeds::splinter_creed(world, splinter, lt);
     // The halves are enemies: 30 pairs each way at most.
     let rest = world.comp::<Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
     let mut pairs = 0;
@@ -1237,7 +1313,7 @@ fn splinter_hideout(world: &mut World, gang: EntityId, d: DistrictId) -> Option<
 /// A held derelict becomes a Hideout: its squatters put out, its claim and
 /// its place in the old gang's territory dropped, its kind and capacity
 /// changed, the district lists rebuilt.
-fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
+pub fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
     crate::systems::street::evict_squatters(world, b, "a gang's new Hideout");
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.territory.retain(|&h| h != b);

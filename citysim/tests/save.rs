@@ -490,3 +490,27 @@ fn test_word_save_mid_day_bit_identical() {
     again.run_ticks(3 * TICKS_PER_DAY + 700);
     assert_eq!(a, blake3::hash(save::to_ron(&again).as_bytes()), "two runs of a seed agree");
 }
+
+/// M15 (plan W25, W28, W44): a save from before the social skills (all four
+/// 0, no skill means) loads with each agent's skills re-drawn from its own
+/// Skill stream and the city means computed.
+#[test]
+fn test_pre_m15_save_backfills_skills() {
+    let mut w = World::new(26, Config::load().scaled_to(300));
+    let ids: Vec<citysim::EntityId> = w.with::<citysim::Skills>();
+    let seeded: Vec<[f32; 4]> =
+        ids.iter().map(|&id| w.comp::<citysim::Skills>(id).map(|s| s.social_all()).unwrap_or_default()).collect();
+    assert!(seeded.iter().any(|s| s.iter().any(|&v| v > 0.0)), "seeded at World::new");
+    for &id in &ids {
+        if let Some(s) = w.comp_mut::<citysim::Skills>(id) {
+            s.set_social_all([0.0; 4]);
+        }
+    }
+    w.skill_means = [0.0; 8];
+    let back = save::from_ron(&save::to_ron(&w)).expect("loads");
+    assert!(back.skill_means.iter().all(|&m| m > 0.0), "means computed: {:?}", back.skill_means);
+    for (k, &id) in ids.iter().enumerate() {
+        let got = back.comp::<citysim::Skills>(id).map(|s| s.social_all()).unwrap_or_default();
+        assert_eq!(got, seeded[k], "backfilled from the same keyed draw");
+    }
+}

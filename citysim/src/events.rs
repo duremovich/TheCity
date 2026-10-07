@@ -176,10 +176,19 @@ pub enum EventKind {
     TechGained,
     /// `[corp]`.
     TechLost,
+    // --- M15 (plan W43; crimson). Phase 2.
+    /// `[poacher corp, agent, old corp]`.
+    Poached,
+    /// `[group, gone or NONE]`.
+    TalentLost,
+    /// `[agent, gang]`.
+    Expelled,
+    /// `[actor, home]`: a failed Intimidate's Shakedown.
+    Refused,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 94] = [
+    pub const ALL: [EventKind; 98] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -274,6 +283,10 @@ impl EventKind {
         EventKind::IceLowered,
         EventKind::TechGained,
         EventKind::TechLost,
+        EventKind::Poached,
+        EventKind::TalentLost,
+        EventKind::Expelled,
+        EventKind::Refused,
     ];
 }
 

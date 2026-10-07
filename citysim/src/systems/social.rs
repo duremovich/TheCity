@@ -106,6 +106,9 @@ fn reindex_kind_as(world: &mut World, a: EntityId, b: EntityId, enemy: bool) {
     }
 }
 
+/// M15 W26: the social move resolver (spec's `social::resolve`).
+pub use crate::systems::moves::resolve;
+
 /// Nudge an edge (creating it at affinity 0 if absent) and re-promote.
 pub fn adjust(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32, d_trust: f32) {
     if a == b {
@@ -520,7 +523,9 @@ fn colocation(world: &mut World) {
                 );
                 let u1: f32 = world.rng.world().random::<f32>();
                 let u2: f32 = world.rng.world().random();
-                first_meeting(world, a, b, first_affinity(sa, sb, u1, u2));
+                // M15 W30: first impressions (the noise draws unchanged).
+                let look = first_look(world, a, b);
+                first_meeting(world, a, b, first_affinity_with(sa, sb, u1, u2, look));
             }
             if jail {
                 world.remember(a, MemoryKind::MetInJail, Some(b), 0.5, 0.0, false);
@@ -543,8 +548,38 @@ fn colocation(world: &mut World) {
 /// The v1 first-meeting affinity: the pair's mean sociability x 0.1 plus
 /// N(0, 0.05) noise (Box-Muller from two uniforms), clamped to ±0.15.
 pub fn first_affinity(sa: f32, sb: f32, u1: f32, u2: f32) -> f32 {
+    first_affinity_with(sa, sb, u1, u2, 0.0)
+}
+
+/// `first_affinity` with `extra` added before the clamp (M15 W30's look).
+pub fn first_affinity_with(sa: f32, sb: f32, u1: f32, u2: f32, extra: f32) -> f32 {
     let noise = (-2.0 * u1.max(1e-6).ln()).sqrt() * (2.0 * std::f32::consts::PI * u2).cos() * 0.05;
-    ((sa + sb) / 2.0 * 0.1 + noise).clamp(-0.15, 0.15)
+    let base = (sa + sb) / 2.0 * 0.1 + noise;
+    if extra == 0.0 {
+        base.clamp(-0.15, 0.15)
+    } else {
+        (base + extra).clamp(-0.15, 0.15)
+    }
+}
+
+/// M15 W30 (spec § 2): what the pair's first look adds: `first_look_w ×
+/// (taste(a→b) + taste(b→a)) ÷ 2`, and a Purist member's `−purist_chrome ×
+/// visible ÷ 3` toward a chromed agent above tolerance. 0 with moves off.
+pub fn first_look(world: &World, a: EntityId, b: EntityId) -> f32 {
+    use crate::systems::{creeds, reputation};
+    if !crate::systems::moves::on(world) {
+        return 0.0;
+    }
+    let w = world.config.taste.first_look_w;
+    let mut x = w * (reputation::taste(world, a, b) + reputation::taste(world, b, a)) / 2.0;
+    let pc = world.config.creeds.purist_chrome;
+    for (m, o) in [(a, b), (b, a)] {
+        if world.gang_of(m).is_some_and(|g| creeds::is_purist(world, g)) && creeds::chromed(world, o) {
+            let v = world.comp::<crate::components::Kit>(o).map_or(0, |k| k.visible);
+            x -= pc * f32::from(v) / 3.0;
+        }
+    }
+    x
 }
 
 /// A new Acquaintance edge at `affinity`, trust 0.3 (`colocation`'s first

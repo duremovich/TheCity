@@ -152,6 +152,8 @@ fn installed_now(world: &mut World, agent: EntityId, clinic: Option<EntityId>, i
     };
     let actors: Vec<EntityId> = [Some(agent), clinic, Some(implant)].into_iter().flatten().collect();
     world.push_event(EventKind::Installed, &actors, text);
+    // M15 W31: a Purist member now above tolerance is cast out.
+    crate::systems::creeds::on_install(world, agent);
 }
 
 /// D34: buy `pick` (an implant, new or used) at `clinic` and install it in
@@ -617,8 +619,23 @@ pub fn rip(world: &mut World, agent: EntityId, body: EntityId) -> usize {
     let gang = world.gang_of(agent);
     let hideout = gang.and_then(|g| world.hideout_of(g));
     let per = world.config.assets.parts_per.implant;
+    // M15 W31: a Purist destroys what it rips: Parts to the Recycler.
+    let purist = gang.is_some_and(|g| crate::systems::creeds::is_purist(world, g));
+    let recycler = if purist {
+        let from = world.comp::<Position>(agent).map(|p| p.tile).unwrap_or_default();
+        world.nearest_of_kind(crate::components::BuildingKind::Cemetery, from)
+    } else {
+        None
+    };
     for &a in &implants {
         match (gang, hideout) {
+            _ if purist => {
+                assets::despawn(world, a);
+                if let Some(r) = recycler.and_then(|r| world.comp_mut::<crate::components::Building>(r)) {
+                    let i = crate::components::Good::Parts as usize - 1;
+                    r.stock_goods[i] = r.stock_goods[i].saturating_add(per);
+                }
+            }
             (Some(g), Some(h)) => assets::into_gang_stock(world, a, g, h),
             _ => {
                 assets::despawn(world, a);

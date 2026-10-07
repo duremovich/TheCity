@@ -383,8 +383,9 @@ pub struct World {
     pub shop_offers: BTreeMap<EntityId, (Tick, Option<crate::systems::assets::ShopOffer>)>,
     /// M11: a corp's pending shocks reached `[corps] shock_severity_rethink`
     /// (set by `ownership::push_corp_shock`), so `corp_brain::run` scans the
-    /// corps this tick. Shocks are not saved, so neither is this.
-    #[serde(skip)]
+    /// corps this tick. M15 phase 2 (determinism): saved with the corps'
+    /// pending shocks.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub corp_rethink: bool,
     pub buildings_by_kind: BTreeMap<BuildingKind, Vec<EntityId>>,
     /// Rebuilt each tick for Full agents.
@@ -589,6 +590,24 @@ pub struct World {
     /// (a bind after a load must rename the same copies).
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub anon_heard: BTreeSet<(crate::word::Deed, EntityId, u64)>,
+    /// M15 W28: the adult city means of the skills competence reads
+    /// (`moves::MEAN_*` order), computed at seed and by `migrate_legacy`,
+    /// never updated (so drift and deaths move competence).
+    #[serde(default)]
+    pub skill_means: [f32; 8],
+    /// Phase 2 review: per `MEAN_*` slot, the adults' 101 percentiles at
+    /// seed (`competence::norm`); computed at seed and by `migrate_legacy`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skill_quantiles: Vec<Vec<f32>>,
+    /// M15 W28: per corp or the Law, today's departure with the largest
+    /// competence share (`kill_by`, `vacate_job`), read by the TalentLost text.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub talent_gone: BTreeMap<EntityId, crate::word::TalentGone>,
+    /// M15 W27: per extortion attempt `(actor dread >= 0.5, target has an
+    /// ally within 8, succeeded)`, newest last, cap 4,096 (the gate's two
+    /// comparisons).
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub extort_log: VecDeque<(bool, bool, bool)>,
 }
 
 /// `skip_serializing_if` for a component store with nothing in it.
@@ -873,6 +892,10 @@ impl World {
             kill_known: Vec::new(),
             arrest_log: VecDeque::new(),
             anon_heard: BTreeSet::new(),
+            skill_means: [0.0; 8],
+            skill_quantiles: Vec::new(),
+            talent_gone: BTreeMap::new(),
+            extort_log: VecDeque::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -880,6 +903,9 @@ impl World {
         w.rumours = vec![Default::default(); w.districts.len()];
         w.spawn_gangs();
         w.spawn_population(&names);
+        // M15 W25/W28: the social skills from each agent's Skill word stream
+        // (the world stream is untouched), then the city means competence reads.
+        systems::moves::seed_population(&mut w);
         // M12 D26: the derelicts are cut after the population is dealt (the
         // world stream is untouched) and before ownership skips them; the
         // Hotels go up on Lots once the Bar owners are dealt.
@@ -893,8 +919,13 @@ impl World {
         // plane and its opening ICE.
         systems::tech::seed_corps(&mut w, false);
         systems::virt::seed_labs(&mut w);
+        // M15 W31: The Unplugged on a Sump Central derelict (no RNG), before
+        // the plane links, so its Chapel has a node from the start.
+        systems::creeds::seed_unplugged(&mut w);
         systems::virt::relink(&mut w);
         systems::virt::seed_ice(&mut w);
+        // M15 W28: every corp's and the Law's opening competence.
+        systems::competence::seed(&mut w);
         w
     }
 
@@ -948,6 +979,7 @@ impl World {
                     focus: None,
                     hacked: None,
                     last_door_open: None,
+                    label: None,
                 },
             );
             match def.kind {
@@ -1000,12 +1032,10 @@ impl World {
             let coins = rng.random_range(wc.initial_coins_min..=wc.initial_coins_max);
             let food = rng.random_range(wc.initial_food_min..=wc.initial_food_max);
             let personality = Personality::random(rng);
-            let skills = Skills {
-                stealth: rng.random_range(wc.skill_min..wc.skill_max),
-                fighting: rng.random_range(wc.skill_min..wc.skill_max),
-                farming: rng.random_range(wc.skill_min..wc.skill_max),
-                hacking: Skills::unset_hacking(),
-            };
+            let stealth = rng.random_range(wc.skill_min..wc.skill_max);
+            let fighting = rng.random_range(wc.skill_min..wc.skill_max);
+            let farming = rng.random_range(wc.skill_min..wc.skill_max);
+            let skills = Skills::basic(stealth, fighting, farming, Skills::unset_hacking());
 
             self.insert(
                 id,
@@ -1171,6 +1201,7 @@ impl World {
                         duty_ticks: 0,
                         hired_tick: 0,
                         struck_shift: None,
+                        premium: 1.0,
                     },
                 );
             }
@@ -2249,6 +2280,9 @@ impl World {
             systems::tech::give_hacking(self, id, h);
         }
         systems::tech::seed_corps(self, true);
+        // M15 W25/W28/W44: a pre-M15 save's social skills (all four 0) from
+        // each agent's Skill word stream, then the city means.
+        systems::moves::backfill(self);
         if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
             if !self.has::<Law>(jail) {
                 self.insert(jail, Law::default());
@@ -2371,6 +2405,8 @@ impl World {
 
     /// Remove the Job, posting a vacancy at the employer. Returns the old Job.
     pub fn vacate_job(&mut self, id: EntityId) -> Option<Job> {
+        // M15 W28: a departure's share of its group's competence.
+        systems::competence::note_departure(self, id);
         let job = self.remove::<Job>(id)?;
         if let Some(employer) = job.employer {
             self.vacancies.entry(employer).or_default().push(job.role);
@@ -2459,6 +2495,8 @@ impl World {
                 systems::ownership::push_corp_shock(self, corp, CorpShock::EmployeeKilled);
             }
         }
+        // M15 W28: a corp exec or the captain takes their competence share along.
+        systems::competence::note_exec_death(self, id);
         self.vacate_job(id);
         self.remove_from_building(id);
         if self.has::<GangMember>(id) {

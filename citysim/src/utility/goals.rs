@@ -359,6 +359,14 @@ pub fn considerations(
             if robbed_by_enemy {
                 flat += 0.2;
             }
+            // M15 W26: a refused shakedown's backlash, while the actor is near.
+            if let Some((actor, bonus, _)) = world.comp::<crate::components::Brain>(id).and_then(|b| b.fight_bonus) {
+                if crate::systems::moves::fight_bonus_on(world, id, actor).is_some()
+                    && crate::systems::law::near(world, id, actor, 4)
+                {
+                    flat += bonus;
+                }
+            }
             vec![
                 Consideration::new("enemy near", can(fresh_enemy), GATE),
                 Consideration::new("courage", p.courage, IDENTITY),
@@ -684,6 +692,8 @@ pub fn wronged_by(world: &World, id: EntityId, other: EntityId) -> bool {
         _ => false,
     };
     rival
+        // M15 W26: the actor of a refused shakedown, for the backlash hour.
+        || crate::systems::moves::fight_bonus_on(world, id, other).is_some()
         || world.comp::<Memory>(id).is_some_and(|m| {
             let about = |e: &&crate::components::MemoryEntry| e.subject == Some(other);
             let avenged = m.entries.iter().filter(about).filter(|e| e.kind == MemoryKind::Fought).map(|e| e.tick).max();

@@ -12,10 +12,18 @@ pub fn to_ron(world: &World) -> String {
 
 pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     let mut world: World = ron::from_str(text)?;
+    // M15 W44: a pre-M15 save has no skill means.
+    let pre_m15 = world.skill_means == [0.0; 8];
     world.rebuild_indices();
     world.migrate_legacy();
     // M14 V44: a pre-M14 save with the plane on gets its plane and ICE.
     crate::systems::virt::migrate(&mut world);
+    // M15 W44: a pre-M15 save with the word on gets The Unplugged and its
+    // corps' opening competence.
+    if pre_m15 {
+        crate::systems::creeds::migrate(&mut world);
+        crate::systems::competence::seed(&mut world);
+    }
     world.reload_names();
     Ok(world)
 }

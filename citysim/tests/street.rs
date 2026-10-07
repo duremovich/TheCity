@@ -407,6 +407,8 @@ fn test_bankruptcy_below_floor_leaves_derelict() {
 fn test_seed_derelicts_spread_over_sump() {
     let mut cfg = Config::load();
     cfg.street.seed_derelict_blocks = 8;
+    // M15 W31: The Unplugged's Chapel would take one of the eight.
+    cfg.creeds.seed_purist = false;
     let mut w = World::new(42, cfg.clone());
     let derelicts = street::derelicts(&w);
     assert_eq!(derelicts.len(), 8);

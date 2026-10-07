@@ -3,7 +3,8 @@
 //! `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
 //! ownership, assets, tech, classes, districts, economy, bind, word, law,
 //! social, gang, corp_brain, demography, stats` (M15 W47: `word` after
-//! `bind`, its midnight chain of pools, hearing, kin and reputation). `districts` also runs the street's nightly pass at
+//! `bind`, its midnight chain of pools, hearing, kin, reputation and
+//! competence). `districts` also runs the street's nightly pass at
 //! 03:00 (`street::nightly`, M12 D6); `law` deals the district beats and
 //! scores the stances right after the captain's daily posture (D10, D12).
 //!
@@ -15,8 +16,10 @@ pub mod assets;
 pub mod bind;
 pub mod chrome;
 pub mod classes;
+pub mod competence;
 pub mod corp_brain;
 pub mod corps;
+pub mod creeds;
 pub mod demography;
 pub mod districts;
 pub mod economy;
@@ -29,6 +32,7 @@ pub mod law_brain;
 pub mod litter;
 pub mod lod;
 pub mod memory;
+pub mod moves;
 pub mod ownership;
 pub mod plan;
 pub mod raid;
