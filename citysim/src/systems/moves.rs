@@ -423,6 +423,15 @@ pub fn resolve(world: &mut World, m: &SocialMove) -> MoveOutcome {
 /// [`resolve`] with `bonus` added to the actor's skill term (M15 W21: an
 /// AskAround's `intel_k × knowledge`); at 0 it is `resolve` exactly.
 pub fn resolve_with(world: &mut World, m: &SocialMove, bonus: f32) -> MoveOutcome {
+    let out = resolve_inner(world, m, bonus);
+    let tick = world.tick;
+    if let Some(log) = world.shadow_notes.as_mut() {
+        log.push(crate::word::ShadowNote::Move { tick, m: *m, out });
+    }
+    out
+}
+
+fn resolve_inner(world: &mut World, m: &SocialMove, bonus: f32) -> MoveOutcome {
     let (p, refused) = if bonus == 0.0 {
         p_of(world, m)
     } else {

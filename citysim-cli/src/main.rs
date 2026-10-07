@@ -20,6 +20,8 @@
 use std::path::PathBuf;
 use std::time::Instant;
 
+mod shadow;
+
 use clap::{Parser, Subcommand, ValueEnum};
 
 use citysim::{save, stats, Config, Lod, PlayerCommand, Posture, World, TICKS_PER_DAY};
@@ -37,6 +39,8 @@ enum Command {
     Run(RunArgs),
     /// Calibrate the Statistical-LOD table (M7).
     Calibrate(CalibrateArgs),
+    /// Follow individual residents through their days (diaries).
+    Shadow(shadow::ShadowArgs),
 }
 
 #[derive(clap::Args)]
@@ -1496,6 +1500,7 @@ fn main() {
     let result = match cli.command {
         Command::Run(args) => run(args),
         Command::Calibrate(args) => calibrate(args),
+        Command::Shadow(args) => shadow::shadow(args),
     };
     if let Err(e) = result {
         eprintln!("error: {e}");

@@ -595,6 +595,9 @@ pub struct World {
     /// never updated (so drift and deaths move competence).
     #[serde(default)]
     pub skill_means: [f32; 8],
+    /// The `shadow` tool's notes: `None` unless the tool turned it on.
+    #[serde(skip)]
+    pub shadow_notes: Option<Vec<crate::word::ShadowNote>>,
     /// Phase 2 review: per `MEAN_*` slot, the adults' 101 percentiles at
     /// seed (`competence::norm`); computed at seed and by `migrate_legacy`.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -913,6 +916,7 @@ impl World {
             arrest_log: VecDeque::new(),
             anon_heard: BTreeSet::new(),
             skill_means: [0.0; 8],
+            shadow_notes: None,
             skill_quantiles: Vec::new(),
             talent_gone: BTreeMap::new(),
             extort_log: VecDeque::new(),
