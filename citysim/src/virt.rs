@@ -151,7 +151,8 @@ pub struct VirtPlane {
     /// By `DistrictId`.
     #[serde(skip)]
     pub public_of: Vec<NodeId>,
-    /// Bumped by every relink and every ICE write (plan V6).
+    /// Bumped by every relink and every ICE, alarm or hack write (plan V6);
+    /// the route cache's stamp.
     #[serde(skip)]
     pub epoch: u64,
     /// Plan V6's route trees (deviation: `Arc`, not `Rc`, so `World` stays
@@ -161,10 +162,16 @@ pub struct VirtPlane {
     pub cache: RouteCache,
 }
 
-/// Plan V6: the route trees of the current epoch-hour, keyed by
-/// `RouteKey`. A pure function of the saved state (never saved, cloned
-/// empty); `searches` counts the Dijkstra runs (the one-search-per-scorer
-/// test reads it).
+/// Plan V6: the route trees of the current stamp, keyed by `RouteKey`. A
+/// pure function of the saved state (never saved, cloned empty); `searches`
+/// counts the Dijkstra runs (the one-search-per-scorer test reads it).
+///
+/// The stamp is the plane's `epoch` plus a validity bound: the next hour
+/// boundary or the earliest alarm or hack expiry after the build, whichever
+/// comes first (M14 review). An alarm or a DoorOpen lapses mid-hour with no
+/// write (`def` reads `until > tick`), so a tree built while one stood must
+/// not outlive it: a save taken after the lapse loads with an empty cache
+/// and rebuilds without it.
 #[derive(Debug, Default)]
 pub struct RouteCache {
     inner: Mutex<CacheInner>,
@@ -172,7 +179,9 @@ pub struct RouteCache {
 
 #[derive(Debug, Default)]
 struct CacheInner {
-    hour: Tick,
+    epoch: u64,
+    /// The trees are valid while `tick < until`.
+    until: Tick,
     trees: BTreeMap<RouteKey, Arc<RouteTree>>,
     searches: u64,
 }
@@ -191,12 +200,21 @@ impl RouteCache {
         }
     }
 
-    /// The tree for `key` in hour `hour`, built by `build` on a miss. A new
-    /// hour drops the old trees first (alarm and hack expiries need no hook).
-    pub fn get_or_build(&self, hour: Tick, key: RouteKey, build: impl FnOnce() -> RouteTree) -> Arc<RouteTree> {
+    /// The tree for `key` at tick `now` and plane epoch `epoch`, built by
+    /// `build` on a miss. Another epoch or a passed validity bound drops the
+    /// old trees first, and `until` (called only then) gives the new bound.
+    pub fn get_or_build(
+        &self,
+        now: Tick,
+        epoch: u64,
+        until: impl FnOnce() -> Tick,
+        key: RouteKey,
+        build: impl FnOnce() -> RouteTree,
+    ) -> Arc<RouteTree> {
         let Ok(mut c) = self.inner.lock() else { return Arc::new(build()) };
-        if c.hour != hour {
-            c.hour = hour;
+        if c.epoch != epoch || now >= c.until {
+            c.epoch = epoch;
+            c.until = until();
             c.trees.clear();
         }
         if let Some(t) = c.trees.get(&key) {
@@ -428,7 +446,6 @@ pub struct Run {
     pub phase: RunPhase,
     pub next_at: Tick,
     pub payload: [u32; 3],
-    pub stream: bool,
     pub log: SmallVec<[(Tick, NodeId, bool); 8]>,
     #[serde(default)]
     pub portal: NodeId,

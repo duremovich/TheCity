@@ -619,6 +619,10 @@ pub struct OrderFlatCfg {
     /// M14 V30 (phase 3): the gang's VirtRaid order.
     #[serde(default)]
     pub virt_raid: f32,
+    /// M14 review: added to VirtRaid's flat while the gang holds a hack
+    /// grudge whose wipe is in its best runner's reach.
+    #[serde(default)]
+    pub virt_grudge: f32,
 }
 
 impl OrderFlatCfg {

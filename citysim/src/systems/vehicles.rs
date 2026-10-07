@@ -593,7 +593,8 @@ fn corp_buy(world: &mut World, corp: EntityId, kind: AssetKind, home: EntityId, 
         .copied()
         .find(|&a| asset(world, a).is_some_and(|x| x.kind == kind && x.loc == AssetLoc::Stock(g) && x.condition > 0));
     let list = assets::list_price(world, kind, 1).unwrap_or(i64::MAX);
-    let (closing, reserve) = world.comp::<Corp>(corp).map_or((0, 0), |c| (c.closing, c.treasury_ref / 4));
+    let (closing, reserve) =
+        (world.comp::<Corp>(corp).map_or(0, |c| c.closing), crate::systems::corps::fleet_reserve(world, corp));
     if world.purse(Some(corp)).min(closing) < list.saturating_add(reserve) {
         return false;
     }
@@ -772,7 +773,8 @@ fn exec_flyer(world: &mut World, corp: EntityId) -> bool {
         return false;
     }
     let list = assets::list_price(world, AssetKind::Flyer, 1).unwrap_or(i64::MAX);
-    let (closing, reserve) = world.comp::<Corp>(corp).map_or((0, 0), |c| (c.closing, c.treasury_ref / 4));
+    let (closing, reserve) =
+        (world.comp::<Corp>(corp).map_or(0, |c| c.closing), crate::systems::corps::fleet_reserve(world, corp));
     let need = (list as f32 * mult).round() as i64;
     if world.purse(Some(corp)).min(closing) < need.saturating_add(reserve) {
         return false;

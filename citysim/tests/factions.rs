@@ -77,6 +77,7 @@ fn inputs() -> OrderInputs {
         virt_ev: 0.0,
         virt_p: 0.0,
         hacked: false,
+        virt_grudge: false,
     }
 }
 
@@ -845,6 +846,7 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         virt_ev: 0.0,
         virt_p: 0.0,
         hacked: false,
+        virt_grudge: false,
         hoard: 0.5,
         hoard_tilt: 0.2,
         courage: 0.8,

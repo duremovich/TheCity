@@ -763,25 +763,20 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
     }
 }
 
-/// The margin a shock rescore needs to replace the standing order: the
-/// standing order wins exact ties only (scores within 1e-6).
+/// The margin a shock rescore needs to replace the standing order: scores
+/// this close are a tie, and the standing order wins exact ties only.
 ///
 /// M14 phase 5: with the Research change Nutrix scored Research and Secure
 /// at the same value and flipped between them on every shock from day 47.
 /// A real margin (the daily `[corps] hysteresis`) also moved plane-off
-/// shock rescores at margins 0.04-0.09, an M11 rule change, so only ties.
-pub fn shock_hysteresis(_cfg: &crate::config::CorpsCfg) -> f32 {
-    SHOCK_TIE
-}
-
-/// Scores this close are a tie on a shock rescore (the standing order stays).
-const SHOCK_TIE: f32 = 1e-6;
+/// shock rescores at margins 0.04-0.09, an M11 rule change, so only ties
+/// (a constant, not a knob: M14 review).
+pub const SHOCK_HYSTERESIS: f32 = 1e-6;
 
 /// An immediate rescoring in which the standing order wins exact ties
-/// ([`shock_hysteresis`]); the pending shocks are consumed.
+/// ([`SHOCK_HYSTERESIS`]); the pending shocks are consumed.
 pub fn rethink(world: &mut World, corp: EntityId) {
-    let h = shock_hysteresis(&world.config.corps);
-    rescore(world, corp, h, "shock");
+    rescore(world, corp, SHOCK_HYSTERESIS, "shock");
     if let Some(c) = world.comp_mut::<Corp>(corp) {
         c.shocks.clear();
     }
