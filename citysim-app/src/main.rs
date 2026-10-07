@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind] [--select-name NAME] [--tab story|corp]
+//!             [--overlay virt] [--select-node INDEX] [--select-runner]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the v2 256 x 192 map by default).
@@ -10,6 +11,8 @@
 
 mod camera;
 mod input;
+mod mission;
+mod overlay;
 mod render;
 mod ui;
 
@@ -63,6 +66,15 @@ pub struct App {
     pub show_litter: bool,
     /// M13 D47: `K` heats districts by hooked adults (`A` pans).
     pub show_hooked: bool,
+    /// M14 § 10: `N` draws the Virt plane over a ghosted city; a click
+    /// selects a node.
+    pub show_virt: bool,
+    /// M14: the node shown in the Node panel.
+    pub selected_node: Option<citysim::virt::NodeId>,
+    /// M14: the run shown in the Run panel (live in `world.runs`, else `run_log`).
+    pub selected_run: Option<citysim::virt::RunId>,
+    /// M14 § 7: the gang whose raid the Mission panel shows.
+    pub selected_mission: Option<EntityId>,
 }
 
 impl App {
@@ -91,7 +103,21 @@ impl App {
             selected_district: None,
             show_litter: false,
             show_hooked: false,
+            show_virt: false,
+            selected_node: None,
+            selected_run: None,
+            selected_mission: None,
         }
+    }
+
+    /// Clear every panel selection (Escape).
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+        self.selected_district = None;
+        self.selected_node = None;
+        self.selected_run = None;
+        self.selected_mission = None;
+        self.follow = false;
     }
 
     /// Show a line in the HUD for a few seconds.
@@ -143,6 +169,14 @@ struct Args {
     litter: bool,
     /// M13: start with the hooked-adults heat on (`K`).
     hooked: bool,
+    /// M14: `--overlay virt` starts with the Virt overlay on (`N`).
+    overlay_virt: bool,
+    /// M14: open the Node panel on this node index at start.
+    select_node: Option<u16>,
+    /// M14: select the first jacked-in agent and open its Run panel.
+    select_runner: bool,
+    /// M14: open the Mission panel of the first streamed raid (else the first raid).
+    select_raid: bool,
 }
 
 fn parse_args() -> Args {
@@ -164,6 +198,10 @@ fn parse_args() -> Args {
         select_district: None,
         litter: false,
         hooked: false,
+        overlay_virt: false,
+        select_node: None,
+        select_runner: false,
+        select_raid: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -188,6 +226,15 @@ fn parse_args() -> Args {
             "--districts" => args.districts = true,
             "--litter" => args.litter = true,
             "--hooked" => args.hooked = true,
+            "--overlay" => match it.next().as_deref() {
+                Some("virt") => args.overlay_virt = true,
+                other => panic!("--overlay virt, got {other:?}"),
+            },
+            "--select-node" => {
+                args.select_node = Some(it.next().and_then(|s| s.parse().ok()).expect("--select-node <INDEX>"))
+            }
+            "--select-runner" => args.select_runner = true,
+            "--select-raid" => args.select_raid = true,
             "--select-district" => {
                 args.select_district = Some(it.next().and_then(|s| s.parse().ok()).expect("--select-district <INDEX>"))
             }
@@ -263,14 +310,75 @@ async fn main() {
         app.camera.px_per_tile = camera::MIN_PX_PER_TILE;
         app.camera.centre_on(d.centroid);
     }
+    app.show_virt = args.overlay_virt;
+    // A run lasts tens of ticks: freeze the frames the M14 screenshots are taken in.
+    app.paused = args.select_runner || args.select_raid || args.select_node.is_some();
+    if let Some(i) = args.select_node.filter(|&i| usize::from(i) < world.virt.nodes.len()) {
+        let n = citysim::virt::NodeId(i);
+        app.selected_node = Some(n);
+        if let Some(node) = world.virt.node(n) {
+            app.camera.px_per_tile = 14.0;
+            app.camera.centre_on(node.pos);
+        }
+    }
+    if args.select_runner {
+        // The first jacked-in agent (ascending id) and its run, else the newest logged run.
+        let pick = world
+            .runner_of
+            .iter()
+            .next()
+            .map(|(&a, &r)| (a, r))
+            .or_else(|| world.run_log.back().map(|r| (r.runner, r.id)));
+        if let Some((agent, run)) = pick {
+            app.selected = Some(agent);
+            app.selected_run = Some(run);
+            // A live run: centred on the middle of its route; a finished one on
+            // its last contest. Zoomed to read it.
+            let live = world.runs.contains_key(&run);
+            if let Some(r) = world.runs.get(&run).or_else(|| world.run_log.iter().find(|r| r.id == run)) {
+                let nodes: Vec<citysim::virt::NodeId> = match r.log.last() {
+                    Some(&(_, n, _)) if !live => vec![n],
+                    _ => r.route.to_vec(),
+                };
+                let pts: Vec<(f32, f32)> = nodes
+                    .iter()
+                    .filter_map(|&n| world.virt.node(n))
+                    .map(|n| (f32::from(n.pos.x), f32::from(n.pos.y)))
+                    .collect();
+                if !pts.is_empty() {
+                    let (x0, x1) = pts.iter().fold((f32::MAX, f32::MIN), |m, p| (m.0.min(p.0), m.1.max(p.0)));
+                    let (y0, y1) = pts.iter().fold((f32::MAX, f32::MIN), |m, p| (m.0.min(p.1), m.1.max(p.1)));
+                    app.camera.px_per_tile = 12.0;
+                    app.camera.centre = vec2((x0 + x1) / 2.0 + 0.5, (y0 + y1) / 2.0 + 0.5);
+                }
+            }
+        }
+    }
+    if args.select_raid {
+        let streamed = world.gangs().into_iter().find(|&g| mission::build(&world, g).is_some());
+        app.selected_mission = streamed.or_else(|| mission::raids(&world).first().copied());
+        // Centred on the raid's target.
+        let door = app
+            .selected_mission
+            .and_then(|g| mission::target(&world, g))
+            .and_then(|b| world.comp::<citysim::Building>(b))
+            .map(|b| b.door);
+        if let Some(door) = door {
+            app.camera.px_per_tile = 10.0;
+            app.camera.centre_on(door);
+        }
+    }
     // Screenshots with no selection frame the whole map, as `--fit` does anywhere.
     let unselected = args.select.is_none()
         && args.select_name.is_none()
         && args.select_kind.is_none()
-        && args.select_district.is_none();
+        && args.select_district.is_none()
+        && args.select_node.is_none()
+        && !(args.select_runner && app.selected_run.is_some())
+        && !(args.select_raid && app.selected_mission.is_some());
     app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
-        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · F5 save · F9 load",
+        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · N virt · F5 save · F9 load",
         world.seed()
     ));
 

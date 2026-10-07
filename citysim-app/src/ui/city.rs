@@ -40,6 +40,10 @@ pub struct CityState {
     pub stims_legal: bool,
     pub impound: bool,
     pub asset_tax: [f32; citysim::AssetClass::ALL.len()],
+    /// M14 V42: the Virt levers (city ICE 0-3, the Data tax, the hack sentences in days).
+    pub city_ice: u8,
+    pub data_tax: f32,
+    pub hack_sentence_days: [u16; 2],
     pub synced: bool,
 }
 
@@ -66,6 +70,9 @@ impl Default for CityState {
             stims_legal: false,
             impound: true,
             asset_tax: [0.0; citysim::AssetClass::ALL.len()],
+            city_ice: 2,
+            data_tax: 0.0,
+            hack_sentence_days: [2, 5],
             synced: false,
         }
     }
@@ -95,6 +102,13 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.stims_legal = world.levers.stims_legal;
         app.city.impound = world.levers.impound;
         app.city.asset_tax = world.levers.asset_tax;
+        app.city.city_ice = world.levers.city_ice;
+        app.city.data_tax = world.levers.data_tax;
+        let ext = &world.config.crime.sentence_days_ext;
+        app.city.hack_sentence_days = [
+            world.levers.hack_sentence_days[0].unwrap_or(ext.intrusion as u16),
+            world.levers.hack_sentence_days[1].unwrap_or(ext.data_theft as u16),
+        ];
         app.city.synced = true;
     }
     egui::ScrollArea::vertical().show(ui, |ui| {
@@ -179,6 +193,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         classes_section(ui, world);
         districts_section(ui, app, world);
         assets_section(ui, app, world);
+        virt_section(ui, app, world);
 
         ui.separator();
         ui.strong("Food");
@@ -538,6 +553,123 @@ fn assets_section(ui: &mut Ui, app: &mut App, world: &World) {
             app.cmds.push(PlayerCommand::SetAssetTax { kind: class, rate: *slot });
         }
     }
+}
+
+/// M14 § 10: runs, Data and the dead today and yesterday, the mean ICE by
+/// owner type, the raids (LIVE when streamed), then the levers.
+fn virt_section(ui: &mut Ui, app: &mut App, world: &World) {
+    use citysim::systems::virt;
+    use citysim::virt::{NodeId, NodeKind, OwnerTag};
+    if !virt::enabled(world) {
+        return;
+    }
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.strong("Virt");
+        ui.small(if app.show_virt { "overlay on (N)" } else { "N draws the plane" });
+    });
+    let today = &world.stats.current.virt;
+    let yday = world.stats.history.back().map(|r| r.virt.clone()).unwrap_or_default();
+    let share = |v: &citysim::stats::VirtCols| {
+        if v.runs == 0 {
+            "-".to_string()
+        } else {
+            format!("{:.0}%", 100.0 * v.runs_ok as f32 / v.runs as f32)
+        }
+    };
+    egui::Grid::new("city_virt").striped(true).show(ui, |ui| {
+        ui.strong("");
+        ui.strong("today");
+        ui.strong("yesterday");
+        ui.end_row();
+        let rows: [(&str, String, String); 6] = [
+            ("Runs", today.runs.to_string(), yday.runs.to_string()),
+            ("Success share", share(today), share(&yday)),
+            (
+                "Data made / stolen",
+                format!("{} / {}", today.data_made, today.data_stolen),
+                format!("{} / {}", yday.data_made, yday.data_stolen),
+            ),
+            ("Data sold", today.data_sold.to_string(), yday.data_sold.to_string()),
+            ("Fried", today.fried.to_string(), yday.fried.to_string()),
+            ("Flatlined", today.flatlined.to_string(), yday.flatlined.to_string()),
+        ];
+        for (k, a, b) in rows {
+            ui.label(k);
+            ui.label(a);
+            ui.label(b);
+            ui.end_row();
+        }
+    });
+    // Mean effective ICE over the alive guardable nodes, by owner type.
+    let mut sum = [0u32; 3];
+    let mut count = [0u32; 3];
+    for (i, n) in world.virt.nodes.iter().enumerate().filter(|(_, n)| n.alive) {
+        if matches!(n.kind, NodeKind::Public(_)) {
+            continue;
+        }
+        let k = match n.owner_kind {
+            OwnerTag::City => 0,
+            OwnerTag::Corp => 1,
+            OwnerTag::Gang => 2,
+        };
+        sum[k] += u32::from(virt::ice_eff(world, NodeId(i as u16)));
+        count[k] += 1;
+    }
+    let mean =
+        |k: usize| if count[k] == 0 { "-".to_string() } else { format!("{:.2}", sum[k] as f32 / count[k] as f32) };
+    ui.label(format!(
+        "Mean ICE: city {} · corps {} · gangs {} ({} nodes)",
+        mean(0),
+        mean(1),
+        mean(2),
+        world.virt.alive_count()
+    ));
+    let raids = crate::mission::raids(world);
+    if !raids.is_empty() {
+        ui.small("Raids");
+        for g in raids {
+            ui.horizontal(|ui| {
+                let name = world.comp::<citysim::Gang>(g).map_or(String::new(), |x| x.name.clone());
+                if ui.link(name).clicked() {
+                    app.selected = None;
+                    app.selected_run = None;
+                    app.selected_mission = Some(g);
+                }
+                if crate::mission::build(world, g).is_some() {
+                    ui.colored_label(Color32::from_rgb(80, 170, 90), "LIVE");
+                }
+            });
+        }
+    }
+    ui.small("Levers");
+    let r = ui.add(egui::Slider::new(&mut app.city.city_ice, 0..=3).text("City ICE (Treasury, Precinct)"));
+    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+        app.cmds.push(PlayerCommand::SetCityIce(app.city.city_ice));
+    }
+    let r = ui.add(egui::Slider::new(&mut app.city.data_tax, 0.0..=1.0).text("Data tax"));
+    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+        app.cmds.push(PlayerCommand::SetDataTax(app.city.data_tax));
+    }
+    ui.horizontal(|ui| {
+        ui.add(egui::DragValue::new(&mut app.city.hack_sentence_days[0]).range(1..=365).suffix(" d"));
+        ui.label("Intrusion");
+        ui.add(egui::DragValue::new(&mut app.city.hack_sentence_days[1]).range(1..=365).suffix(" d"));
+        ui.label("Data Theft");
+        if ui.button("Set").clicked() {
+            // Only a changed sentence is sent (an untouched crime stays unpinned).
+            let ext = &world.config.crime.sentence_days_ext;
+            let current = [
+                world.levers.hack_sentence_days[0].unwrap_or(ext.intrusion as u16),
+                world.levers.hack_sentence_days[1].unwrap_or(ext.data_theft as u16),
+            ];
+            for (i, crime) in [citysim::Crime::Intrusion, citysim::Crime::DataTheft].into_iter().enumerate() {
+                if app.city.hack_sentence_days[i] != current[i] {
+                    app.cmds.push(PlayerCommand::SetHackSentence { crime, days: app.city.hack_sentence_days[i] });
+                }
+            }
+        }
+    });
 }
 
 /// The riot response combo's text.

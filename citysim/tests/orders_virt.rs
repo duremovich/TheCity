@@ -566,3 +566,71 @@ fn test_value_at_risk_ignores_posted_assets() {
     w.virt.node_mut(ln).expect("node").store.units = [100, 0, 0];
     assert_eq!(virt::value_at_risk(&w, ln), 100 * w.config.data.data_price);
 }
+
+/// Plan 4.3 (V37): a departing raid with a deck member at the Hideout sets
+/// `Gang.stream_by` and writes an `Overwatch` order; the stream runs on its
+/// portal (no contest) and clears the flag when the raid is over.
+#[test]
+fn test_stream_flag_set_on_departure() {
+    let mut w = world();
+    let gang = w.gang_list()[0];
+    let hideout = w.hideout_of(gang).expect("hideout");
+    let m = gang_runner(&mut w, gang, 2, 0.9);
+    assert!(w.config.hack.stream_min <= 0.9);
+    seat(&mut w, m, hideout);
+    let now = w.tick;
+    w.comp_mut::<Gang>(gang).expect("gang").raid_at = Some(now);
+    assert_eq!(w.comp::<Gang>(gang).expect("gang").stream_by, None);
+    virt::on_raid_departed(&mut w, gang);
+    assert_eq!(w.comp::<Gang>(gang).expect("gang").stream_by, Some(m), "the streamer is set at departure");
+    let o = w.run_orders.get(&m).cloned().expect("an Overwatch order");
+    assert_eq!((o.purpose, o.why, o.chair), (Purpose::Overwatch(gang), RunWhy::Overwatch, hideout));
+    let id = virt::start_run(&mut w, m).expect("the stream starts");
+    assert_eq!(w.runs.get(&id).map(|r| r.contests), Some(0));
+    // The raid resolves (raid_at cleared): the hourly check ends the stream.
+    w.comp_mut::<Gang>(gang).expect("gang").raid_at = None;
+    finish(&mut w);
+    assert_eq!(w.comp::<Gang>(gang).expect("gang").stream_by, None, "cleared at resolve");
+    assert!(!w.runner_of.contains_key(&m));
+}
+
+/// Plan 4.1 (V42): the remaining god commands and levers act: `GrantDeck`,
+/// `SetIce`, `SetHackSentence` (read by `sentence_ticks`), `RunNow` (a God
+/// order) and `Fry` (a seated runner loses its contest with no save).
+#[test]
+fn test_god_virt_commands_act() {
+    use citysim::PlayerCommand;
+    let mut w = world();
+    let lab = lab_of(&w, corp_named(&w, "Zetatech"), Track::Chrome);
+    let n = virt::node_of_building(&w, lab).expect("node");
+    let a = adult(&mut w, &[]);
+    w.push_command(PlayerCommand::GrantDeck { agent: a, tier: 2 });
+    w.push_command(PlayerCommand::SetIce { building: lab, tier: 3 });
+    w.push_command(PlayerCommand::SetHackSentence { crime: Crime::DataTheft, days: 40 });
+    w.apply_commands();
+    assert_eq!(w.comp::<Kit>(a).map(|k| k.deck_tier), Some(2));
+    assert_eq!(virt::profile(&w, n).map(|p| p.ice), Some(3));
+    assert_eq!(law::sentence_ticks(&w, Crime::DataTheft), 40 * 1440 * w.levers.sentence_mult.ceil() as u64);
+    // RunNow writes a God order the Hack goal takes up.
+    w.comp_mut::<Skills>(a).expect("skills").hacking = 0.5;
+    w.push_command(PlayerCommand::RunNow { agent: a, target: lab, purpose: Purpose::Data { wipe: false } });
+    w.apply_commands();
+    let o = w.run_orders.get(&a).cloned().expect("a RunNow order");
+    assert_eq!((o.why, o.target), (RunWhy::God, n));
+    // Fry: seated, mid-run, the contest is lost with no save.
+    let chair = o.chair;
+    seat(&mut w, a, chair);
+    virt::start_run(&mut w, a).expect("the run starts");
+    w.push_command(PlayerCommand::Fry(a));
+    w.apply_commands();
+    assert!(!w.runner_of.contains_key(&a), "the run ended");
+    let outcome = w.run_log.back().and_then(|r| r.outcome);
+    assert!(matches!(outcome, Some(RunOutcome::Fried | RunOutcome::Flatlined)), "{outcome:?}");
+    assert!(w.stats.current.virt.fried >= 1);
+    assert!(w.run_log.back().is_some_and(|r| matches!(r.log.last(), Some(&(_, _, false)))), "logged as a lost contest");
+    // Fry on an agent who is not jacked in is refused.
+    let b = adult(&mut w, &[a]);
+    w.push_command(PlayerCommand::Fry(b));
+    w.apply_commands();
+    assert!(w.events.iter().any(|e| e.text.contains("God: Fry: not jacked in")));
+}

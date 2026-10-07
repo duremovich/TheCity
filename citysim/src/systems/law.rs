@@ -313,8 +313,9 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         Crime::Abduction => ext.abduction,
         Crime::Dealing => ext.dealing,
         // M14 V18.
-        Crime::Intrusion => ext.intrusion,
-        Crime::DataTheft => ext.data_theft,
+        // V42 `SetHackSentence` replaces the base.
+        Crime::Intrusion => world.levers.hack_sentence_days[0].map_or(ext.intrusion, u32::from),
+        Crime::DataTheft => world.levers.hack_sentence_days[1].map_or(ext.data_theft, u32::from),
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;

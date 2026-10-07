@@ -678,6 +678,121 @@ pub fn lower_ice(world: &mut World, n: NodeId) -> bool {
     true
 }
 
+/// M14 V42 `SetCityIce`: the Treasury's and the Precinct's ICE moved to
+/// `levers.city_ice` one tier at a time (`install_ice` pays the Security
+/// corp's price from the Treasury; `lower_ice` refunds nothing). An install
+/// that finds no seller sets the tier directly (the city's own, free). The
+/// plane off: nothing to do.
+pub fn set_city_ice(world: &mut World) {
+    if !enabled(world) {
+        return;
+    }
+    virt_relink_if_dirty(world);
+    let want = world.levers.city_ice.min(3);
+    let mut nodes: SmallVec<[NodeId; 2]> = SmallVec::new();
+    nodes.extend(world.building_of_kind(BuildingKind::Hall).and_then(|h| ledger_of(world, h)));
+    nodes.extend(world.building_of_kind(BuildingKind::Jail).and_then(|j| node_of_building(world, j)));
+    for n in nodes {
+        for _ in 0..3 {
+            let Some(cur) = profile(world, n).map(|p| p.ice) else { break };
+            if cur == want {
+                break;
+            }
+            if cur > want {
+                if !lower_ice(world, n) {
+                    break;
+                }
+            } else if !install_ice(world, None, n) {
+                if let Some(p) = profile_mut(world, n) {
+                    p.ice = cur + 1;
+                    p.ice_maker = None;
+                    p.ice_arrears = 0;
+                }
+                bump_epoch(world);
+            }
+        }
+    }
+}
+
+/// `relink` when the plane's index is stale (a lever read before the first
+/// tick).
+fn virt_relink_if_dirty(world: &mut World) {
+    if world.virt_dirty || world.virt.nodes.is_empty() {
+        relink(world);
+    }
+}
+
+/// M14 V42 god `Fry`: resolved at once, at command time. The seated agent
+/// loses a contest at the next node of its route that is contested (ICE and
+/// not its patron's own; the target once past the hops), logged like a
+/// natural loss, with no dodge, no trace and a certain fry; `lose` then
+/// rolls the kill on the run's own stream (`p_flatline` at ICE 3 with the
+/// gap forced to `flatline_gap`, else `p_fry_kill[ice]`).
+pub fn god_fry(world: &mut World, agent: EntityId) -> Result<String, String> {
+    let id = *world.runner_of.get(&agent).ok_or("not jacked in")?;
+    let mut r = world.runs.get(&id).cloned().ok_or("not jacked in")?;
+    if matches!(r.purpose, Purpose::Overwatch(_)) {
+        return Err("an overwatch stream meets no ICE".into());
+    }
+    let n = if r.phase == RunPhase::Hop {
+        let ahead = r.route.iter().skip(usize::from(r.at) + 1).copied();
+        ahead.chain([r.target]).find(|&x| ice_eff(world, x) > 0 && contested(world, x, r.patron)).unwrap_or(r.target)
+    } else {
+        r.target
+    };
+    if ice_eff(world, n) == 0 || !contested(world, n, r.patron) {
+        return Err(format!("no contest at {}", node_label(world, n)));
+    }
+    let gap = (f32::from(def(world, n)) - r.att).max(world.config.ice.flatline_gap);
+    let (_, draws) = contest_draws(world, r.id, r.contests, gap);
+    let rolls = LossRolls { gap, fry: 0.0, dodge: 2.0, kill: draws.kill, trace: 2.0 };
+    let what = node_label(world, n);
+    let name = world.name_of(agent);
+    r.log.push((world.tick, n, false));
+    r.contests = r.contests.saturating_add(1);
+    lose(world, r, n, rolls);
+    Ok(format!("fried {name} in {what}"))
+}
+
+/// M14 V42 god `RunNow`: a `RunOrder { why: God }` for an agent with a deck
+/// (promoted to Coarse); the Hack goal takes a standing order up at once and
+/// the contest rules apply. `target` is a building (or, for a Ledger, a
+/// building or corp whose owner's Ledger is meant).
+pub fn god_run_now(world: &mut World, agent: EntityId, target: EntityId, purpose: Purpose) -> Result<String, String> {
+    if !crate::systems::law::living(world, agent) || !world.has::<Brain>(agent) {
+        return Err("no such agent".into());
+    }
+    if world.runner_of.contains_key(&agent) {
+        return Err("already jacked in".into());
+    }
+    if !world.comp::<Kit>(agent).is_some_and(|k| k.deck.is_some() && k.deck_tier > 0) {
+        return Err("no deck".into());
+    }
+    virt_relink_if_dirty(world);
+    let node = match purpose {
+        Purpose::Ledger => {
+            let owner = if world.has::<Corp>(target) { Some(target) } else { world.owner_of(target) };
+            owner.and_then(|o| ledger_of(world, o)).ok_or("the target has no Ledger")?
+        }
+        _ => node_of_building(world, target).ok_or("the target has no node")?,
+    };
+    let patron = None;
+    let chair = chair_for(world, agent, patron).ok_or("no chair")?.building;
+    let now = world.tick;
+    let order = RunOrder {
+        patron,
+        purpose,
+        target: node,
+        chair,
+        not_before: now,
+        expires: now + TICKS_PER_DAY,
+        why: RunWhy::God,
+        mode: mode_of(world, agent),
+    };
+    give_order(world, agent, order);
+    Ok(format!("ordered {} onto {}", world.name_of(agent), node_label(world, node)))
+}
+
 /// "Vat Farm#12", "Zetatech's Ledger", "the Treasury", "Spire Public".
 pub fn node_label(world: &World, n: NodeId) -> String {
     let Some(node) = world.virt.node(n) else { return format!("node {}", n.0) };

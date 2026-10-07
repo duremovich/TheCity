@@ -152,3 +152,41 @@ fn test_cli_bad_lever_exits_2() {
     let out = cli().args(["run", "--days", "1", "--seed", "1", "--lever", "nope"]).output().expect("run cli");
     assert_eq!(out.status.code(), Some(2));
 }
+
+/// M14 phase 4: every new lever parses and the plain ones apply (the
+/// index-based god levers resolve against a live world: an index that names
+/// nothing is skipped with a warning, not a parse error).
+#[test]
+fn test_cli_virt_levers_parse_and_apply() {
+    let levers = [
+        "day=1:city_ice=3",
+        "day=1:data_tax=0.2",
+        "day=1:hack_sentence=intrusion:9",
+        "day=1:hack_sentence=data_theft:20",
+        "day=1:wipe_data=0",
+        "day=1:set_tech=0:chrome:2",
+        "day=1:grant_data=0:deck:10",
+        "day=1:grant_deck=0:2",
+        "day=1:set_ice=0:2",
+        "day=1:fry=0",
+        "day=1:run_now=0:0:data",
+        "day=1:run_now=0:corp0:ledger",
+    ];
+    let mut c = cli();
+    c.args(["run", "--days", "3", "--seed", "42", "--events"]);
+    for l in levers {
+        c.args(["--lever", l]);
+    }
+    let out = c.output().expect("run cli");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(out.status.success(), "stderr: {err}");
+    for want in [
+        "City ICE set to 3",
+        "Data tax set to 20 %",
+        "Sentence for Intrusion set to 9 days",
+        "Sentence for Data Theft set to 20 days",
+    ] {
+        assert!(err.contains(want), "missing {want:?} in the events:\n{err}");
+    }
+    assert!(!err.contains("unknown lever") && !err.contains("expected <"), "a lever failed to parse:\n{err}");
+}
