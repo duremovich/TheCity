@@ -3,7 +3,7 @@
 //!
 //! M10: every gate runs the 2,000-resident city on the v2 map. Population
 //! bounds scale by 2000/300, per-capita caps likewise, capacity-bound caps
-//! use the capacity (Jail 80), and event-count minimums are unchanged
+//! use the capacity (`buildings.jail.capacity`), and event-count minimums are unchanged
 //! (M10 plan D38).
 
 use citysim::{Config, World, TICKS_PER_DAY};
@@ -13,6 +13,7 @@ use citysim::{Config, World, TICKS_PER_DAY};
 #[test]
 fn test_m1_thirty_days_seed_42() {
     let mut w = World::new(42, Config::load());
+    let jail_cap = u32::from(w.config.buildings.jail.capacity);
     for _ in 0..30 {
         w.run_ticks(TICKS_PER_DAY);
     }
@@ -40,8 +41,8 @@ fn test_m1_thirty_days_seed_42() {
             row.day,
             row.goal_changes_per_agent
         );
-        // M10: the Jail's capacity (80), not 16 x 2000/300.
-        assert!(row.jailed <= 80, "day {}: jailed {}", row.day, row.jailed);
+        // M10: the Jail's capacity (the config value), not 16 x 2000/300.
+        assert!(row.jailed <= jail_cap, "day {}: jailed {}", row.day, row.jailed);
         // M10: `food_market` is the sum over the three Markets, so this is "all empty".
         if row.food_market == 0 {
             empty_streak += 1;
@@ -64,6 +65,7 @@ fn test_m1_thirty_days_seed_42() {
 fn test_m5_sixty_days_seed_42() {
     use citysim::EventKind;
     let mut w = World::new(42, Config::load());
+    let jail_cap = u32::from(w.config.buildings.jail.capacity);
     let (mut joins, mut marriages) = (0, 0);
     let mut seen_tick = 0;
     for _ in 0..60 {
@@ -90,7 +92,8 @@ fn test_m5_sixty_days_seed_42() {
     assert!(arrests >= 1, "no arrest in 60 days");
     assert!(w.population() >= 1667, "population {}", w.population()); // v1 250
     for row in &w.stats.history {
-        assert!(row.jailed <= 80, "day {}: jailed {}", row.day, row.jailed); // Jail capacity
+        assert!(row.jailed <= jail_cap, "day {}: jailed {}", row.day, row.jailed);
+        // Jail capacity
     }
 }
 
@@ -1037,7 +1040,7 @@ struct M12 {
 /// the cause: dealers diverted from Expand/Contest (dealing off: control
 /// at least 14 d on 4 of 6 seeds either way) and M13 pushing the law into
 /// Garrison (assets off, i.e. M12: Garrison 57/80/85 d on 42-44 with ~40
-/// gang members in the 80-bed Jail; dealing off lowers it, dealing on
+/// gang members in the Jail; dealing off lowers it, dealing on
 /// restores it). So, judged over seeds 42-47: riots by the six-seed mean in
 /// 1..=4; a gang controlling a district >= 14 days and a Sanitation
 /// reallocation in every 30 days on at least half the seeds; gang

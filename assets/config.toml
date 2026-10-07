@@ -50,14 +50,14 @@ intimacy = 0.5
 # Capacity = max agents inside at once; stock_cap = food units the building can hold.
 [buildings]
 home = { capacity = 6, stock_cap = 30 }
-# M10: farm 16 (160 farmers / 12 farms; v1 12), jail 80 (v1 16), hideout 30 (60 members; v1 12),
+# M10: farm 16 (160 farmers / 12 farms; v1 12), jail 80 (v1 16; 160 since 2026-10-06), hideout 30 (60 members; v1 12),
 # warehouse stock_cap 20,000 (v1 3000). Lots and Security Offices are inert until M11.
 # M11 D17: staff = full staff of an owned niche building (Grow tops vacancies up to it; an
 # agent-owned Bar below it posts a bartender vacancy daily).
 farm = { capacity = 16, stock_cap = 400, staff = 14 }
 market = { capacity = 20, stock_cap = 2000, staff = 4 }
 bar = { capacity = 24, stock_cap = 0, staff = 3 }
-jail = { capacity = 80, stock_cap = 0 }
+jail = { capacity = 160, stock_cap = 0 }  # 2026-10-06: 80 -> 160 (pinned at its cap from ~day 28 since M12 p5; 160 beds read -28 % violence)
 cemetery = { capacity = 8, stock_cap = 0 }
 hall = { capacity = 20, stock_cap = 0 }
 hideout = { capacity = 30, stock_cap = 200 }
