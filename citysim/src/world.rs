@@ -560,6 +560,40 @@ pub struct World {
     /// M14 V10: runner -> run, rebuilt from `runs`.
     #[serde(skip)]
     pub runner_of: BTreeMap<EntityId, crate::virt::RunId>,
+    /// M15 W13: every living adult's and faction's reputation, rebuilt at
+    /// midnight by `reputation::rebuild`; saved, so a load mid-day reads
+    /// what the last midnight wrote.
+    #[serde(default)]
+    pub reputation: Vec<Option<crate::word::Reputation>>,
+    /// M15 W15: grudges (phase 3); empty stores are not written.
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub grudges: Vec<Option<crate::word::Grudges>>,
+    /// M15 W6: one rumour pool per district (`DistrictId` order).
+    #[serde(default)]
+    pub rumours: Vec<crate::word::RumourPool>,
+    /// M15 W14: faction x faction regard, rebuilt daily.
+    #[serde(default)]
+    pub regard: BTreeMap<(EntityId, EntityId), crate::word::Regard>,
+    /// M15 W48: `(tick, actor)` of each noticed Murder and bound killing (cap 256).
+    #[serde(default)]
+    pub kill_watch: VecDeque<(Tick, EntityId)>,
+    /// M15 W48: `known_by` of each watched killer seven days on (the gate's whole-run median).
+    #[serde(default)]
+    pub kill_known: Vec<u16>,
+    /// M15 § 2 `law_heat`: `(tick, suspect)` of each sentence, 30 days (the law's own records).
+    #[serde(default)]
+    pub arrest_log: VecDeque<(Tick, EntityId)>,
+    /// M15: `(deed, object, deed day)` of every unnamed rumour handed to a
+    /// heard store, so `gossip::name_hole` walks the heard stores only when
+    /// there is something to rename; pruned daily past the hole TTL. Saved
+    /// (a bind after a load must rename the same copies).
+    #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
+    pub anon_heard: BTreeSet<(crate::word::Deed, EntityId, u64)>,
+}
+
+/// `skip_serializing_if` for a component store with nothing in it.
+fn all_none<T>(v: &[Option<T>]) -> bool {
+    v.iter().all(Option::is_none)
 }
 
 use crate::components::{Law, LawShock};
@@ -615,6 +649,8 @@ components! {
     body: Body,
     appearance: Appearance,
     kit: Kit,
+    reputation: crate::word::Reputation,
+    grudges: crate::word::Grudges,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -829,10 +865,19 @@ impl World {
             run_log: VecDeque::new(),
             last_trace: BTreeMap::new(),
             runner_of: BTreeMap::new(),
+            reputation: Vec::new(),
+            grudges: Vec::new(),
+            rumours: Vec::new(),
+            regard: BTreeMap::new(),
+            kill_watch: VecDeque::new(),
+            kill_known: Vec::new(),
+            arrest_log: VecDeque::new(),
+            anon_heard: BTreeSet::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
         systems::districts::rebuild(&mut w);
+        w.rumours = vec![Default::default(); w.districts.len()];
         w.spawn_gangs();
         w.spawn_population(&names);
         // M12 D26: the derelicts are cut after the population is dealt (the
@@ -1880,9 +1925,10 @@ impl World {
 
     /// One in-game minute, systems in the fixed order
     /// `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
-    /// ownership, assets, tech, classes, districts, economy, bind, law, social,
-    /// gang, corp_brain, demography, stats` (M14 V39: `virt` relinks when
-    /// dirty and pops run steps; `tech` is the plane's midnight pass). The assets pass (M13 D9) runs at
+    /// ownership, assets, tech, classes, districts, economy, bind, word, law,
+    /// social, gang, corp_brain, demography, stats` (M14 V39: `virt` relinks
+    /// when dirty and pops run steps; `tech` is the plane's midnight pass;
+    /// M15 W47: `word`'s midnight chain after the binder names its holes). The assets pass (M13 D9) runs at
     /// midnight right after ownership's, so upkeep and finance see the same
     /// purses the rent pass left. The district aggregates read the class pass's
     /// midnight state (M12 D6). The binder runs
@@ -1907,6 +1953,7 @@ impl World {
         systems::districts::run(self);
         systems::economy::run(self);
         systems::bind::run(self);
+        systems::word::run(self);
         systems::law::run(self);
         systems::social::run(self);
         systems::gang::run(self);
@@ -1959,7 +2006,7 @@ impl World {
             cap = 8;
         }
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
-        let entry = MemoryEntry { kind, subject, tick, salience, valence, second_hand, crime: None };
+        let entry = MemoryEntry { subject, salience, valence, second_hand, ..MemoryEntry::blank(kind, tick) };
         systems::memory::insert(m, entry, tick, cap, half_life);
     }
 
@@ -2146,6 +2193,13 @@ impl World {
         if self.law.len() < n {
             self.law.resize_with(n, || None);
         }
+        // M15 W44: a pre-M15 save has no reputation or grudge store.
+        if self.reputation.len() < n {
+            self.reputation.resize_with(n, || None);
+        }
+        if self.grudges.len() < n {
+            self.grudges.resize_with(n, || None);
+        }
         if self.trace.len() < n {
             self.trace.resize_with(n, || None);
         }
@@ -2205,6 +2259,9 @@ impl World {
         // and the zone watch to the district watch.
         systems::districts::rebuild(self);
         self.migrate_district_ids();
+        // M15 W6: one pool per district (a pre-M15 save has none).
+        let nd = self.districts.len();
+        self.rumours.resize_with(nd, Default::default);
         let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
         for (i, gang) in self.gangs().into_iter().enumerate() {
             let Some(g) = self.comp::<Gang>(gang) else { continue };
@@ -2285,20 +2342,29 @@ impl World {
         self.enemies.get(&id).into_iter().flat_map(|s| s.iter().copied())
     }
 
-    /// A SawCrime memory that also records which crime was seen.
-    pub fn remember_crime(&mut self, id: EntityId, subject: EntityId, crime: Crime, salience: f32) {
+    /// A SawCrime memory that also records which crime was seen and (M15
+    /// W5) on whom: `object` is written only while `[gossip]` is on, so
+    /// `--word-off` keeps the M14 entry byte for byte.
+    pub fn remember_crime(
+        &mut self,
+        id: EntityId,
+        subject: EntityId,
+        crime: Crime,
+        salience: f32,
+        object: Option<EntityId>,
+    ) {
         let tick = self.tick;
         let cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;
+        let object = object.filter(|_| self.config.gossip.enabled);
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let entry = MemoryEntry {
-            kind: MemoryKind::SawCrime,
             subject: Some(subject),
-            tick,
             salience,
             valence: -salience,
-            second_hand: false,
             crime: Some(crime),
+            object,
+            ..MemoryEntry::blank(MemoryKind::SawCrime, tick)
         };
         systems::memory::insert(m, entry, tick, cap, half_life);
     }
@@ -2377,6 +2443,12 @@ impl World {
         // Witnesses, grief, widowhood and inheritance read the living state.
         // M13 D13: with a loot window the coins and goods stay on the body.
         let loot = systems::demography::on_death(self, id);
+        // M15 W10: the kin are read before `on_death` unlinks the dead, and
+        // the killing goes into the death's pool unnamed; a noticing
+        // witness (`law::raise_crime_on`) or the binder names it.
+        if cause == DeathCause::Violence && self.config.gossip.enabled {
+            systems::gossip::post_killing(self, id);
+        }
         crate::systems::social::on_death(self, id);
         if cause == DeathCause::Violence && systems::law::is_guard(self, id) {
             systems::law_brain::push_shock(self, LawShock::GuardKilled);

@@ -969,6 +969,10 @@ pub fn betrayal_filed(world: &mut World, betrayer: EntityId) {
     }
     let name = world.name_of(betrayer);
     world.push_event(EventKind::Betrayal, &[betrayer], format!("{name} betrayed the gang"));
+    if world.config.gossip.enabled {
+        let d = crate::systems::gossip::talk_district(world, betrayer);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Betrayed, Some(betrayer), Some(gang));
+    }
 }
 
 // ---------------------------------------------------------------------------

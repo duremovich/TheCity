@@ -94,6 +94,10 @@ struct RunArgs {
     /// ICE or tech caps; the M13 city.
     #[arg(long)]
     virt_off: bool,
+    /// M15 W46: every M15 section off (`Config::word_off`): no pools,
+    /// exchange, hearing, kin channel or reputation; the M14 city.
+    #[arg(long)]
+    word_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -208,6 +212,10 @@ enum Lever {
     GrantDecks(u8, u16, u8),
     /// M14 god (phase 5): `set_corp_ice=<corp slot>:<tier>`.
     SetCorpIce(u8, u8),
+    /// M15 god (W42): `plant_rumour=<agent>:<deed>:<object agent|none>:<district>:<reach>`.
+    PlantRumour(u32, citysim::word::Deed, Option<u32>, u8, f32),
+    /// M15 god (W42): `set_reputation=<agent>:<dread|standing|honour|heat>:<v>:<days>`.
+    SetReputation(u32, citysim::word::Axis, f32, u16),
 }
 
 /// The target of `run_now`: a building by entity index, or a corp by slot
@@ -385,6 +393,19 @@ impl Lever {
             Lever::WipeCorpData(s) => PlayerCommand::WipeCorpData(corp_in_slot(world, s)?),
             Lever::GrantDecks(d, n, tier) => PlayerCommand::GrantDecks { district: citysim::DistrictId(d), n, tier },
             Lever::SetCorpIce(s, tier) => PlayerCommand::SetCorpIce { corp: corp_in_slot(world, s)?, tier },
+            Lever::PlantRumour(a, deed, o, d, reach) => PlayerCommand::PlantRumour {
+                about: agent_at(world, a)?,
+                deed,
+                object: match o {
+                    Some(o) => Some(agent_at(world, o)?),
+                    None => None,
+                },
+                district: citysim::DistrictId(d),
+                reach,
+            },
+            Lever::SetReputation(a, axis, value, days) => {
+                PlayerCommand::SetReputation { who: agent_at(world, a)?, axis, value, days }
+            }
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -435,6 +456,9 @@ impl Lever {
 /// `run_now=<agent index>:<building index|corp<slot>>:<data|wipe|ledger|door>`;
 /// phase 5's plurals `wipe_corp_data=<corp slot>`,
 /// `grant_decks=<district>:<n>:<tier>`, `set_corp_ice=<corp slot>:<tier>`.
+/// M15 god levers (plan W42, phase 1):
+/// `plant_rumour=<agent>:<deed>:<object agent|none>:<district>:<reach>`,
+/// `set_reputation=<agent>:<dread|standing|honour|heat>:<value>:<days>`.
 fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let (day_part, cmd_part) =
         spec.split_once(':').ok_or_else(|| format!("{spec}: expected day=<D>:<lever>=<value>"))?;
@@ -615,6 +639,38 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             };
             Some(Lever::RunNow(a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?, target, purpose))
         }
+        "plant_rumour" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, d, o, di, r] = parts[..] else {
+                return Err(format!("{spec}: expected <agent>:<deed>:<object agent|none>:<district>:<reach>"));
+            };
+            let deed = citysim::word::Deed::parse(d).ok_or_else(|| format!("{spec}: unknown deed {d}"))?;
+            let object = if o.eq_ignore_ascii_case("none") {
+                None
+            } else {
+                Some(o.parse::<u32>().map_err(|e| format!("{spec}: bad object: {e}"))?)
+            };
+            Some(Lever::PlantRumour(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                deed,
+                object,
+                di.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?,
+                r.parse::<f32>().map_err(|e| format!("{spec}: bad reach: {e}"))?,
+            ))
+        }
+        "set_reputation" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, x, v, d] = parts[..] else {
+                return Err(format!("{spec}: expected <agent>:<dread|standing|honour|heat>:<v>:<days>"));
+            };
+            let axis = citysim::word::Axis::parse(x).ok_or_else(|| format!("{spec}: unknown axis {x}"))?;
+            Some(Lever::SetReputation(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                axis,
+                v.parse::<f32>().map_err(|e| format!("{spec}: bad value: {e}"))?,
+                d.parse::<u16>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            ))
+        }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -791,6 +847,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     if args.virt_off {
         config = config.virt_off();
     }
+    if args.word_off {
+        config = config.word_off();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -809,6 +868,9 @@ fn run(args: RunArgs) -> Result<(), String> {
                 }
                 citysim::systems::virt::plane_off(&mut w);
                 w.config = w.config.clone().virt_off();
+            }
+            if args.word_off {
+                w.config = w.config.clone().word_off();
             }
             w
         }
@@ -1490,6 +1552,15 @@ mod tests {
         assert!(matches!(parse_lever("day=45:set_corp_ice=6:0").unwrap().1, Lever::SetCorpIce(6, 0)));
         assert!(parse_lever("day=45:grant_decks=6:10").is_err());
         assert!(parse_lever("day=45:set_corp_ice=x:0").is_err());
+        assert!(matches!(
+            parse_lever("day=10:plant_rumour=12:killed:none:3:1.0").unwrap().1,
+            Lever::PlantRumour(12, citysim::word::Deed::Killed, None, 3, _)
+        ));
+        assert!(matches!(
+            parse_lever("day=10:set_reputation=12:dread:0.9:5").unwrap().1,
+            Lever::SetReputation(12, citysim::word::Axis::Dread, _, 5)
+        ));
+        assert!(parse_lever("day=10:plant_rumour=12:kissed:none:3:1.0").is_err());
         assert!(parse_lever("day=3:city_ice=x").is_err());
     }
 

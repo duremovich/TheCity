@@ -22,6 +22,19 @@ pub enum InspectorTab {
     #[default]
     Now,
     Story,
+    /// M15: what the city knows about the agent.
+    Known,
+}
+
+/// M15: the Known tab's holder scan: the agent, the day it was taken, up
+/// to 20 holders `(holder, hops, conf)` of a memory whose subject is the agent,
+/// and how many holders there were in all.
+#[derive(Clone, Debug)]
+pub struct KnownCache {
+    pub agent: EntityId,
+    pub day: u64,
+    pub rows: Vec<(EntityId, u8, f32)>,
+    pub total: usize,
 }
 
 fn section(ui: &mut Ui, title: &str, body: impl FnOnce(&mut Ui)) {
@@ -81,9 +94,14 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         ui.horizontal(|ui| {
             ui.selectable_value(&mut app.inspector_tab, InspectorTab::Now, "Now");
             ui.selectable_value(&mut app.inspector_tab, InspectorTab::Story, "Story");
+            ui.selectable_value(&mut app.inspector_tab, InspectorTab::Known, "Known");
         });
         if app.inspector_tab == InspectorTab::Story {
             story_tab(ui, app, world, id);
+            return;
+        }
+        if app.inspector_tab == InspectorTab::Known {
+            known_tab(ui, app, world, id);
             return;
         }
         if let Some(n) = world.comp::<Needs>(id) {
@@ -365,6 +383,124 @@ fn story_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             }
         });
     }
+}
+
+/// M15 § 10: the four axes with their largest contributing deeds,
+/// `known_by`, up to 20 holders of a memory whose subject is the agent (hops,
+/// conf; one scan of every memory per agent and day), and the agent's own
+/// heard store.
+fn known_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    use citysim::systems::{memory, reputation};
+    if !world.config.gossip.enabled {
+        ui.label("The word is off.");
+        return;
+    }
+    let r = reputation::rep(world, id);
+    section(ui, "Reputation", |ui| {
+        bar(ui, "dread", r.dread, None);
+        bar(ui, "standing", r.standing, None);
+        bar(ui, "honour", r.honour, None);
+        bar(ui, "heat", r.heat, None);
+        ui.label(format!("known by {}", r.known_by));
+        if let Some((_, until)) = r.pinned.filter(|&(_, t)| t > world.tick) {
+            ui.colored_label(GOLD, format!("pinned by god until day {}", until / TICKS_PER_DAY));
+        }
+        if r.top.is_empty() {
+            ui.label("no deeds known");
+        } else {
+            for (deed, w) in &r.top {
+                ui.label(format!("{:<10} {w:.2}", deed.label()));
+            }
+        }
+    });
+    let today = world.day();
+    let fresh = app.known_cache.as_ref().is_some_and(|c| c.agent == id && c.day == today);
+    if !fresh {
+        let mut rows: Vec<(EntityId, u8, f32)> = Vec::new();
+        for h in world.citizens() {
+            let Some(m) = world.comp::<Memory>(h) else { continue };
+            if h == id {
+                continue;
+            }
+            let best = m
+                .entries
+                .iter()
+                .chain(m.heard.iter())
+                .filter(|e| e.subject == Some(id))
+                .map(|e| (memory::hops_of(e), e.conf))
+                .min_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)));
+            if let Some((hops, conf)) = best {
+                rows.push((h, hops, conf));
+            }
+        }
+        rows.sort_by(|a, b| a.1.cmp(&b.1).then(b.2.total_cmp(&a.2)).then(a.0.cmp(&b.0)));
+        let total = rows.len();
+        rows.truncate(20);
+        app.known_cache = Some(KnownCache { agent: id, day: today, rows, total });
+    }
+    let cache = app.known_cache.clone();
+    section(ui, "Who knows", |ui| {
+        let Some(c) = cache else { return };
+        if c.rows.is_empty() {
+            ui.label("nobody holds a memory about them");
+            return;
+        }
+        ui.label(format!("{} holders of a memory about them (first 20)", c.total));
+        egui::Grid::new("known_holders").striped(true).show(ui, |ui| {
+            ui.strong("holder");
+            ui.strong("hops");
+            ui.strong("conf");
+            ui.end_row();
+            for (h, hops, conf) in c.rows {
+                if ui.link(world.name_of(h)).clicked() {
+                    app.selected = Some(h);
+                }
+                ui.label(format!("{hops}"));
+                ui.label(format!("{conf:.2}"));
+                ui.end_row();
+            }
+        });
+    });
+    if let Some(mem) = world.comp::<Memory>(id) {
+        heard(ui, world, mem);
+    }
+}
+
+/// M15 § 10: the agent's own rumours and sightings.
+fn heard(ui: &mut Ui, world: &World, mem: &Memory) {
+    section(ui, "Heard", |ui| {
+        if mem.heard.is_empty() {
+            ui.label("nothing");
+            return;
+        }
+        egui::Grid::new("heard").striped(true).show(ui, |ui| {
+            ui.strong("what");
+            ui.strong("who");
+            ui.strong("whom");
+            ui.strong("age");
+            ui.strong("hops");
+            ui.strong("conf");
+            ui.end_row();
+            for e in &mem.heard {
+                let what = match (e.kind, e.deed) {
+                    (citysim::MemoryKind::Sighting, _) => "seen".to_string(),
+                    (_, Some(d)) => d.label().to_string(),
+                    (k, None) => format!("{k:?}"),
+                };
+                ui.label(what);
+                ui.label(e.subject.map_or("someone".to_string(), |s| world.name_of(s)));
+                let whom = match e.kind {
+                    citysim::MemoryKind::Sighting => e.at.map_or("-".to_string(), |b| building_label(world, b)),
+                    _ => e.object.map_or("-".to_string(), |o| world.name_of(o)),
+                };
+                ui.label(whom);
+                ui.label(format!("{:.1}d", (world.tick.saturating_sub(e.tick)) as f32 / TICKS_PER_DAY as f32));
+                ui.label(format!("{}", e.hops));
+                ui.label(format!("{:.2}", e.conf));
+                ui.end_row();
+            }
+        });
+    });
 }
 
 fn identity(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {

@@ -14,10 +14,16 @@ pub const CSV_HEADER: &str = "day,season,population,employed,homeless,jailed,gan
 nodes,labs,decks,runs,runs_ok,data_made,data_stolen,data_wiped,data_sold,ledger_hacks,doors_hacked,traced,fried,flatlined,hack_arrests,ice_mean_corp,ice_spend,\
 runs_bounced,runs_captured,runs_dumped,hack_arrests_chair,robots_turned,blinded,cameras,sightings,ice_raised,ice_lowered,tech_gained,tech_lost,research_spent,data_held,\
 corp1_tier_chrome,corp1_tier_deck,corp1_tier_industry,corp1_data,corp2_tier_chrome,corp2_tier_deck,corp2_tier_industry,corp2_data,corp3_tier_chrome,corp3_tier_deck,corp3_tier_industry,corp3_data,corp4_tier_chrome,corp4_tier_deck,corp4_tier_industry,corp4_data,corp5_tier_chrome,corp5_tier_deck,corp5_tier_industry,corp5_data,corp6_tier_chrome,corp6_tier_deck,corp6_tier_industry,corp6_data,corp7_tier_chrome,corp7_tier_deck,corp7_tier_industry,corp7_data,corp8_tier_chrome,corp8_tier_deck,corp8_tier_industry,corp8_data,corp9_tier_chrome,corp9_tier_deck,corp9_tier_industry,corp9_data,\
-flow_data,flow_hack,flow_ice_upkeep,flow_research,flow_terminal,ticks_per_sec";
+flow_data,flow_hack,flow_ice_upkeep,flow_research,flow_terminal,\
+rumours_heard,second_hand_share,known_by_killers_median,distorted,grudges,grudges_inherited,hunts,hunts_active,avenged,revenge_kills,chain_max,vendettas_open,stories,planted,buried,poached,talent_lost,skill_rare_share,extort_success,rep_flips,rumour_hops_max,pool_reach,contradicted,silenced,hunts_failed,hunts_abandoned,guard_body,expelled,contracts_lost_honour,extort_tries,\
+g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
+c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
+
+/// M15 W43: gang CSV slots (`World::gang_index` order).
+pub const GANG_SLOTS: usize = 4;
 
 /// M12 D45: district CSV slots (`[districts]` row order); a 9th-12th
 /// district is not printed.
@@ -276,8 +282,116 @@ pub struct DayRow {
     /// M14 V43: the Virt columns (zero with the plane off).
     #[serde(default)]
     pub virt: VirtCols,
+    /// M15 W43: the word's columns (zero with `[gossip]` off).
+    #[serde(default)]
+    pub word: WordCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
+}
+
+/// M15 W43: the word's CSV columns, in header order: the spec's § 10 list,
+/// the plan's additions, per gang slot dread and heat, per corp slot
+/// honour, standing and competence, the Law's competence, the two ledger
+/// flows. Phase 1 fills `rumours_heard`, `second_hand_share`,
+/// `known_by_killers_median`, `distorted`, `contradicted`,
+/// `rumour_hops_max`, `pool_reach`, the gang axes and the corp honour and
+/// standing; the rest are zero until their phase.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WordCols {
+    pub rumours_heard: u32,
+    pub second_hand_share: f32,
+    pub known_by_killers_median: f32,
+    pub distorted: u32,
+    pub grudges: u32,
+    pub grudges_inherited: u32,
+    pub hunts: u32,
+    pub hunts_active: u32,
+    pub avenged: u32,
+    pub revenge_kills: u32,
+    pub chain_max: u32,
+    pub vendettas_open: u32,
+    pub stories: u32,
+    pub planted: u32,
+    pub buried: u32,
+    pub poached: u32,
+    pub talent_lost: u32,
+    pub skill_rare_share: f32,
+    pub extort_success: u32,
+    pub rep_flips: u32,
+    pub rumour_hops_max: u32,
+    pub pool_reach: f32,
+    pub contradicted: u32,
+    pub silenced: u32,
+    pub hunts_failed: u32,
+    pub hunts_abandoned: u32,
+    pub guard_body: u32,
+    pub expelled: u32,
+    pub contracts_lost_honour: u32,
+    pub extort_tries: u32,
+    /// Per gang slot (`GANG_SLOTS`): dread, heat.
+    pub gangs: Vec<[f32; 2]>,
+    /// Per corp slot (`CORP_SLOTS`): honour, standing, competence.
+    pub corps: Vec<[f32; 3]>,
+    pub law_competence: f32,
+    pub flow_ads: i64,
+    pub flow_plant: i64,
+}
+
+impl WordCols {
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        let gangs: Vec<String> = (0..GANG_SLOTS)
+            .map(|i| {
+                let [d, h] = self.gangs.get(i).copied().unwrap_or_default();
+                format!("{d:.3},{h:.3}")
+            })
+            .collect();
+        let corps: Vec<String> = (0..CORP_SLOTS)
+            .map(|i| {
+                let [h, s, c] = self.corps.get(i).copied().unwrap_or_default();
+                format!("{h:.3},{s:.3},{c:.3}")
+            })
+            .collect();
+        format!(
+            "{},{:.3},{:.1},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{:.3},{},{}",
+            self.rumours_heard,
+            self.second_hand_share,
+            self.known_by_killers_median,
+            self.distorted,
+            self.grudges,
+            self.grudges_inherited,
+            self.hunts,
+            self.hunts_active,
+            self.avenged,
+            self.revenge_kills,
+            self.chain_max,
+            self.vendettas_open,
+            self.stories,
+            self.planted,
+            self.buried,
+            self.poached,
+            self.talent_lost,
+            self.skill_rare_share,
+            self.extort_success,
+            self.rep_flips,
+            self.rumour_hops_max,
+            self.pool_reach,
+            self.contradicted,
+            self.silenced,
+            self.hunts_failed,
+            self.hunts_abandoned,
+            self.guard_body,
+            self.expelled,
+            self.contracts_lost_honour,
+            self.extort_tries,
+            gangs.join(","),
+            corps.join(","),
+            self.law_competence,
+            self.flow_ads,
+            self.flow_plant,
+        )
+    }
 }
 
 /// M14 V43: the plane's CSV columns, in header order. `nodes`, `labs`,
@@ -498,6 +612,7 @@ impl DayRow {
             treatments: 0,
             detoxes: 0,
             virt: VirtCols::default(),
+            word: WordCols::default(),
             ticks_per_sec: 0.0,
         }
     }
@@ -517,7 +632,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -632,6 +747,7 @@ impl DayRow {
             self.treatments,
             self.detoxes,
             self.virt.csv(),
+            self.word.csv(),
             self.ticks_per_sec,
         )
     }

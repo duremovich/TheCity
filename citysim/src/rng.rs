@@ -112,10 +112,36 @@ impl SimRng {
         r
     }
 
+    /// M15 W8: one roll of the word (an exchange, a day's hearing, the kin
+    /// channel, a move, a story) on its own fresh stream, never stored, so
+    /// the world and agent streams are never touched and call order,
+    /// save/load and LOD cannot move it. Stream layout (see `run` and
+    /// `keyed`): agents `index + 1 < 2^33`, holes bit 63, keyed draws bit 62
+    /// with keys below 2^60, runs bits 62 and 61, **words bits 62 and 60**
+    /// with bit 61 clear (plan deviation: the plan's `WORD_KEY` was bit 61,
+    /// which M14's run streams took), the namespace in bits 52-55 and a
+    /// 52-bit hash of `(a, b)` below.
+    pub fn word(&self, ns: crate::word::WordNs, a: u64, b: u64) -> ChaCha8Rng {
+        let mut r = ChaCha8Rng::seed_from_u64(self.seed);
+        r.set_stream(WORD_KEY | (1 << 62) | ((ns as u64) << 52) | (splitmix64(a ^ b.rotate_left(29)) >> 12));
+        r
+    }
+
     /// Drop an agent's stream when the entity is despawned.
     pub fn forget_agent(&mut self, id: EntityId) {
         if let Some(r) = self.agents.get_mut(id.index as usize) {
             *r = None;
         }
     }
+}
+
+/// M15 W8: bit 60 marks a word stream (`SimRng::word`).
+pub const WORD_KEY: u64 = 1 << 60;
+
+/// SplitMix64's finaliser: a cheap, well-mixed 64-bit hash.
+pub fn splitmix64(x: u64) -> u64 {
+    let mut z = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
+    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+    z ^ (z >> 31)
 }

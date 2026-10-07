@@ -544,6 +544,8 @@ pub fn on_complete(
                 n.belonging = (n.belonging + 0.15).min(1.0);
             }
             world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
+            // M15 W7: the rumour mill, one exchange each way with a co-drinker.
+            crate::systems::gossip::drink(world, id);
             StepResult::Done
         }
         ActionKind::CollectWage => {
@@ -689,8 +691,12 @@ pub fn on_complete(
             let m = crate::systems::social::similarity_mult(world, id, partner);
             let step = world.config.social.affinity_per_hour * m * if halved { 0.5 } else { 1.0 };
             crate::systems::social::adjust(world, id, partner, step, 0.02);
+            // M15 W7: each legacy gossip is followed by the new exchange
+            // (heard only; no edge, no world draw).
             crate::systems::social::gossip(world, id, partner);
+            crate::systems::gossip::exchange(world, id, partner, crate::systems::gossip::Venue::Chat);
             crate::systems::social::gossip(world, partner, id);
+            crate::systems::gossip::exchange(world, partner, id, crate::systems::gossip::Venue::Chat);
             world.release_all(id);
             StepResult::Done
         }
@@ -989,7 +995,7 @@ pub fn on_complete(
                 text,
             );
             if crate::systems::law::living(world, id) {
-                crate::systems::law::raise_crime(world, id, (!murder).then_some(victim), crime, tile);
+                crate::systems::law::raise_crime_on(world, id, (!murder).then_some(victim), Some(victim), crime, tile);
             }
             StepResult::Done
         }

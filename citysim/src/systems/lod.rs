@@ -265,6 +265,8 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         world.retier(id);
         world.plan_queue.retain(|&(_, who), _| who != id);
         snap_to_phase_door(world, id, false);
+        // M15 W2: off screen the heard store holds 3 rumours and no sighting.
+        crate::systems::gossip::on_demoted(world, id);
         return;
     }
     if from == Lod::Statistical {

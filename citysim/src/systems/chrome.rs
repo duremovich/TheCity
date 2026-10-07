@@ -649,7 +649,7 @@ pub fn rip(world: &mut World, agent: EntityId, body: EntityId) -> usize {
         if world.rng.world().random_bool(p) {
             let tile = world.comp::<Position>(body).map_or_else(Default::default, |p| p.tile);
             world.kill_by(body, crate::components::DeathCause::Violence, Some(agent));
-            crate::systems::law::raise_crime(world, agent, None, crate::components::Crime::Murder, tile);
+            crate::systems::law::raise_crime_on(world, agent, None, Some(body), crate::components::Crime::Murder, tile);
         } else {
             if let Some(b) = world.comp_mut::<Body>(body) {
                 b.sanity = 0.1;

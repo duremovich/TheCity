@@ -437,7 +437,7 @@ pub fn fight_out_until(
         let text = format!("{rn} attacked {dn} at {place}{fell}");
         world.push_event(kind, &[r, d], text);
         if law::living(world, r) {
-            law::raise_crime(world, r, (!murder).then_some(d), crime, door);
+            law::raise_crime_on(world, r, (!murder).then_some(d), Some(d), crime, door);
         }
         if loser == d {
             defenders.remove(0);
@@ -555,7 +555,7 @@ pub fn crossfire(
         // report, a warrant, Murder when it kills), raised after the death.
         if law::living(world, attacker) {
             let crime = if died { Crime::Murder } else { Crime::Assault };
-            law::raise_crime(world, attacker, (!died).then_some(b), crime, door);
+            law::raise_crime_on(world, attacker, (!died).then_some(b), Some(b), crime, door);
         }
     }
     hits
@@ -579,6 +579,7 @@ pub fn breach(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let mut defenders = jail_defenders(world, jail, door);
     robots_first(world, jail, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
+    crate::systems::gossip::post_raid(world, Some(gid), Some(jail), door);
     let tally = fight_out(world, &mut raiders, &mut defenders, door, "the Precinct", 1.0, None);
     let (deaths, beaten) = (tally.deaths, tally.defenders_beaten);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
@@ -739,6 +740,7 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     robots_first(world, rival_hideout, &mut defenders);
     let (n_raiders, n_defenders) = (raiders.len(), defenders.len());
     let place = format!("the {rival_name} Hideout");
+    crate::systems::gossip::post_raid(world, Some(gid), Some(rival), door);
     let tally = fight_out(world, &mut raiders, &mut defenders, door, &place, 1.0, None);
     let (raider_losses, deaths) = (tally.raider_losses, tally.deaths);
     let outcome = if n_defenders == 0 || (defenders.is_empty() && raider_losses == 0) {
@@ -963,6 +965,7 @@ pub fn corp_brawl(world: &mut World, actor: EntityId) -> Option<Outcome> {
     // least one pairing lost); 0 fights to the last raider (phase 4).
     let brk = world.config.gangs.corp_raid_break;
     let max_losses = if brk > 0.0 { ((n_raiders as f32 * brk).ceil() as usize).max(1) } else { usize::MAX };
+    crate::systems::gossip::post_raid(world, Some(gid), corp.or(Some(target)), door);
     let tally = fight_out_until(world, &mut raiders, &mut defenders, door, &place, 1.0, None, max_losses);
     let outcome = if defenders.is_empty() { Outcome::Won } else { Outcome::Lost };
     let mut took = (0i64, 0u32);

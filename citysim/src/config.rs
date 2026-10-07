@@ -101,6 +101,38 @@ pub struct Config {
     /// M14 faction databases (§ 6); read only while `[virt]` is on.
     #[serde(default = "DbCfg::off")]
     pub db: DbCfg,
+    /// M15 § 1 the word (pools, exchange, hearing, kin, reputation);
+    /// absent from pre-M15 saves: off (plan W44). `enabled = false` is the
+    /// master switch for every M15 system.
+    #[serde(default = "GossipCfg::off")]
+    pub gossip: GossipCfg,
+    /// M15 § 2 reputation; read only while `[gossip]` is on.
+    #[serde(default = "ReputationCfg::off")]
+    pub reputation: ReputationCfg,
+    /// M15 § 2 appearance and taste (phase 2).
+    #[serde(default = "TasteCfg::off")]
+    pub taste: TasteCfg,
+    /// M15 § 2 the Purist creed (phase 2).
+    #[serde(default = "CreedsCfg::off")]
+    pub creeds: CreedsCfg,
+    /// M15 § 3 grudges (phase 3).
+    #[serde(default = "GrudgesCfg::off")]
+    pub grudges: GrudgesCfg,
+    /// M15 § 4 the Hunt (phase 3).
+    #[serde(default = "HuntCfg::off")]
+    pub hunt: HuntCfg,
+    /// M15 § 5 social skills (phase 2).
+    #[serde(default = "SkillsCfg::off")]
+    pub skills: SkillsCfg,
+    /// M15 § 6 the social move (phase 2; `contradict_conf` from phase 1).
+    #[serde(default = "MovesCfg::off")]
+    pub moves: MovesCfg,
+    /// M15 § 6 competence and poaching (phase 2).
+    #[serde(default = "CompetenceCfg::off")]
+    pub competence: CompetenceCfg,
+    /// M15 § 7 Feeds and stories (phase 4).
+    #[serde(default = "NewsCfg::off")]
+    pub news: NewsCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -305,6 +337,9 @@ pub struct EconomyCfg {
     /// M14 (plan V16): a Lab's staff.
     #[serde(default = "default_wage_researcher")]
     pub wage_researcher: i64,
+    /// M15 W36: a Feed's staff (phase 4 reads it).
+    #[serde(default = "default_wage_reporter")]
+    pub wage_reporter: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -353,6 +388,10 @@ fn default_wage_mechanic() -> i64 {
 
 fn default_wage_researcher() -> i64 {
     4
+}
+
+fn default_wage_reporter() -> i64 {
+    8
 }
 
 impl EconomyCfg {
@@ -2759,6 +2798,563 @@ impl DbCfg {
     }
 }
 
+// ---------------------------------------------------------------------------
+// M15 Word and blood (docs/M15_WORD_AND_BLOOD.md; plan phase 1.2)
+// ---------------------------------------------------------------------------
+
+/// A value per `Deed` (spec deed-keyed tables); a missing key reads 0.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct DeedTable {
+    pub killed: f32,
+    pub assaulted: f32,
+    pub robbed: f32,
+    pub extorted: f32,
+    pub stripped: f32,
+    pub arrested: f32,
+    pub married: f32,
+    pub evicted: f32,
+    pub struck: f32,
+    pub raided: f32,
+    pub founded: f32,
+    pub avenged: f32,
+    pub betrayed: f32,
+    pub repaid: f32,
+    pub poached: f32,
+}
+
+impl DeedTable {
+    pub fn get(&self, d: crate::word::Deed) -> f32 {
+        use crate::word::Deed;
+        match d {
+            Deed::Killed => self.killed,
+            Deed::Assaulted => self.assaulted,
+            Deed::Robbed => self.robbed,
+            Deed::Extorted => self.extorted,
+            Deed::Stripped => self.stripped,
+            Deed::Arrested => self.arrested,
+            Deed::Married => self.married,
+            Deed::Evicted => self.evicted,
+            Deed::Struck => self.struck,
+            Deed::Raided => self.raided,
+            Deed::Founded => self.founded,
+            Deed::Avenged => self.avenged,
+            Deed::Betrayed => self.betrayed,
+            Deed::Repaid => self.repaid,
+            Deed::Poached => self.poached,
+        }
+    }
+
+    /// The table from values in `Deed::ALL` order.
+    pub fn of(v: [f32; 15]) -> DeedTable {
+        let [killed, assaulted, robbed, extorted, stripped, arrested, married, evicted, struck, raided, founded, avenged, betrayed, repaid, poached] =
+            v;
+        DeedTable {
+            killed,
+            assaulted,
+            robbed,
+            extorted,
+            stripped,
+            arrested,
+            married,
+            evicted,
+            struck,
+            raided,
+            founded,
+            avenged,
+            betrayed,
+            repaid,
+            poached,
+        }
+    }
+}
+
+/// M15 § 1: the word.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GossipCfg {
+    pub enabled: bool,
+    pub gossip_min: f32,
+    pub max_hops: u8,
+    pub hop_salience: f32,
+    pub distort_base: f32,
+    pub pool_cap: usize,
+    pub pool_decay: f32,
+    pub leak_min: f32,
+    pub leak_frac: f32,
+    pub reach_min: f32,
+    pub hear_p: f32,
+    pub pool_conf: f32,
+    pub kin_p: [f32; 4],
+    pub rumour_cap: usize,
+    pub rumour_cap_statistical: usize,
+    pub relay_conf: f32,
+    pub reach0: DeedTable,
+    pub deed_sal: DeedTable,
+    pub deed_sev: DeedTable,
+    /// W9: today's `social::gossip` runs exactly; the new channel writes
+    /// `heard` only and touches no edge.
+    pub legacy_second_hand: bool,
+    /// W10: kin captured at death.
+    pub kin_cap: usize,
+}
+
+impl Default for GossipCfg {
+    fn default() -> Self {
+        GossipCfg::off()
+    }
+}
+
+impl GossipCfg {
+    pub fn off() -> GossipCfg {
+        GossipCfg {
+            enabled: false,
+            gossip_min: 0.3,
+            max_hops: 6,
+            hop_salience: 0.7,
+            distort_base: 0.15,
+            pool_cap: 64,
+            pool_decay: 0.8,
+            leak_min: 0.4,
+            leak_frac: 0.4,
+            reach_min: 0.05,
+            hear_p: 0.5,
+            pool_conf: 0.6,
+            kin_p: [0.9, 0.7, 0.5, 0.3],
+            rumour_cap: 8,
+            rumour_cap_statistical: 3,
+            relay_conf: 0.8,
+            reach0: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3]),
+            deed_sal: DeedTable::of([0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4]),
+            deed_sev: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1]),
+            legacy_second_hand: true,
+            kin_cap: 12,
+        }
+    }
+}
+
+/// M15 § 2: reputation.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ReputationCfg {
+    pub half_life_days: f32,
+    pub hop_w: [f32; 4],
+    pub pool_w: f32,
+    pub dread_scale: f32,
+    pub honour_scale: f32,
+    pub heat_scale: f32,
+    pub fame_scale: f32,
+    pub heat_wanted: f32,
+    pub heat_arrest: f32,
+    pub bribe_honour: f32,
+    pub dread_w: DeedTable,
+    pub honour_w: DeedTable,
+    pub heat_w: DeedTable,
+    pub own_bias: f32,
+    pub heat_pressure_w: f32,
+    pub harvest_dread_max: f32,
+    pub acquire_honour_min: f32,
+    pub bind_dread_w: f32,
+}
+
+impl Default for ReputationCfg {
+    fn default() -> Self {
+        ReputationCfg::off()
+    }
+}
+
+impl ReputationCfg {
+    pub fn off() -> ReputationCfg {
+        //                        kil  ass  rob   ext  str  arr  mar  evi   stk  rai  fou  ave  bet   rep  poa
+        let dread_w = DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0]);
+        let honour_w = DeedTable::of([0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1]);
+        let heat_w = DeedTable::of([0.5, 0.2, 0.2, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        ReputationCfg {
+            half_life_days: 7.0,
+            hop_w: [1.0, 0.8, 0.6, 0.4],
+            pool_w: 2.0,
+            dread_scale: 3.0,
+            honour_scale: 3.0,
+            heat_scale: 2.0,
+            fame_scale: 20.0,
+            heat_wanted: 0.6,
+            heat_arrest: 0.2,
+            bribe_honour: 0.5,
+            dread_w,
+            honour_w,
+            heat_w,
+            own_bias: 0.3,
+            heat_pressure_w: 0.8,
+            harvest_dread_max: 0.6,
+            acquire_honour_min: 0.3,
+            bind_dread_w: 0.5,
+        }
+    }
+}
+
+/// M15 § 2: appearance and taste per audience (phase 2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TasteCfg {
+    pub chrome_ref: u8,
+    pub first_look_w: f32,
+    pub meet_gap: f32,
+    pub meet_taste_w: f32,
+    pub corp: crate::word::Taste,
+    pub street: crate::word::Taste,
+    pub dreg: crate::word::Taste,
+    pub gang: crate::word::Taste,
+    pub purist: crate::word::Taste,
+}
+
+impl Default for TasteCfg {
+    fn default() -> Self {
+        TasteCfg::off()
+    }
+}
+
+impl TasteCfg {
+    pub fn off() -> TasteCfg {
+        use crate::word::Taste;
+        let t = |dress, chrome, own_colours, rival_colours| Taste { dress, chrome, own_colours, rival_colours };
+        TasteCfg {
+            chrome_ref: 3,
+            first_look_w: 0.1,
+            meet_gap: 0.5,
+            meet_taste_w: 0.3,
+            corp: t(0.6, 0.0, 0.3, -0.3),
+            street: t(0.1, 0.2, 0.2, -0.2),
+            dreg: t(-0.2, 0.1, 0.0, 0.0),
+            gang: t(0.0, 0.3, 0.5, -0.8),
+            purist: t(-0.2, -1.0, 0.5, -0.5),
+        }
+    }
+}
+
+/// M15 § 2: the Purist creed (phase 2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CreedsCfg {
+    pub seed_purist: bool,
+    pub purist_name: String,
+    pub purist_treasury: i64,
+    pub creed_tolerance: u8,
+    pub purist_chrome: f32,
+    pub tithe_frac: f32,
+}
+
+impl Default for CreedsCfg {
+    fn default() -> Self {
+        CreedsCfg::off()
+    }
+}
+
+impl CreedsCfg {
+    pub fn off() -> CreedsCfg {
+        CreedsCfg {
+            seed_purist: false,
+            purist_name: "The Unplugged".to_string(),
+            purist_treasury: 50,
+            creed_tolerance: 0,
+            purist_chrome: 0.3,
+            tithe_frac: 0.6,
+        }
+    }
+}
+
+/// M15 § 3 `rel_w` plus plan rows `leader`, `comrade` (W15).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct RelWeights {
+    pub spouse: f32,
+    pub parent: f32,
+    pub family: f32,
+    pub friend: f32,
+    pub own: f32,
+    pub leader: f32,
+    pub comrade: f32,
+}
+
+impl Default for RelWeights {
+    fn default() -> Self {
+        RelWeights { spouse: 1.0, parent: 1.0, family: 0.9, friend: 0.6, own: 0.8, leader: 0.7, comrade: 0.0 }
+    }
+}
+
+/// M15 § 3: grudges (phase 3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GrudgesCfg {
+    pub grudge_min: f32,
+    pub grudge_decay: f32,
+    pub beat_settle: f32,
+    pub inherit_min: f32,
+    pub inherit_frac: f32,
+    pub settle_keep_days: u32,
+    pub rel_w: RelWeights,
+    pub guard_hours: u32,
+    pub vendetta_norm: f32,
+    pub vendetta_open: f32,
+    pub vendetta_close: f32,
+    /// W17.
+    pub fight_grudge_min: f32,
+}
+
+impl Default for GrudgesCfg {
+    fn default() -> Self {
+        GrudgesCfg::off()
+    }
+}
+
+impl GrudgesCfg {
+    pub fn off() -> GrudgesCfg {
+        GrudgesCfg {
+            grudge_min: 0.15,
+            grudge_decay: 0.01,
+            beat_settle: 0.5,
+            inherit_min: 0.4,
+            inherit_frac: 0.6,
+            settle_keep_days: 30,
+            rel_w: RelWeights::default(),
+            guard_hours: 6,
+            vendetta_norm: 3.0,
+            vendetta_open: 0.5,
+            vendetta_close: 0.2,
+            fight_grudge_min: 0.5,
+        }
+    }
+}
+
+/// M15 § 4: the Hunt (phase 3).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HuntCfg {
+    pub enabled: bool,
+    pub hunt_min: f32,
+    pub max_hunts: usize,
+    pub hunt_flat: f32,
+    pub fresh_sighting_hours: u32,
+    pub intel_k: f32,
+    pub stakeout_hours: u32,
+    pub lethal_min: f32,
+    pub hunt_kill_p: f32,
+    pub hunt_cooldown_days: u32,
+    pub hunt_days: u32,
+    pub street_silence: bool,
+    /// W20.
+    pub hold_score: f32,
+    /// W23.
+    pub stat_hunt_min: f32,
+}
+
+impl Default for HuntCfg {
+    fn default() -> Self {
+        HuntCfg::off()
+    }
+}
+
+impl HuntCfg {
+    pub fn off() -> HuntCfg {
+        HuntCfg {
+            enabled: false,
+            hunt_min: 0.5,
+            max_hunts: 16,
+            hunt_flat: 0.0,
+            fresh_sighting_hours: 48,
+            intel_k: 0.5,
+            stakeout_hours: 3,
+            lethal_min: 0.75,
+            hunt_kill_p: 0.5,
+            hunt_cooldown_days: 3,
+            hunt_days: 10,
+            street_silence: true,
+            hold_score: 0.6,
+            stat_hunt_min: 0.2,
+        }
+    }
+}
+
+/// M15 § 5: social skills (phase 2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SkillsCfg {
+    pub skill_scale: f32,
+    pub rarity_exp: f32,
+    pub inherit_skill: f32,
+    pub skill_drift: f32,
+    pub skill_rust: f32,
+    pub knowledge_work: f32,
+    /// W25.
+    pub secondary_scale: f32,
+}
+
+impl Default for SkillsCfg {
+    fn default() -> Self {
+        SkillsCfg::off()
+    }
+}
+
+impl SkillsCfg {
+    pub fn off() -> SkillsCfg {
+        SkillsCfg {
+            skill_scale: 1.0,
+            rarity_exp: 4.0,
+            inherit_skill: 0.5,
+            skill_drift: 0.005,
+            skill_rust: 0.001,
+            knowledge_work: 0.0005,
+            secondary_scale: 0.6,
+        }
+    }
+}
+
+/// M15 § 6: the move kinds' biases.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MoveBias {
+    pub persuade: f32,
+    pub intimidate: f32,
+    pub deceive: f32,
+    pub charm: f32,
+}
+
+impl Default for MoveBias {
+    fn default() -> Self {
+        MoveBias { persuade: 0.0, intimidate: 0.8, deceive: 0.0, charm: 0.2 }
+    }
+}
+
+/// M15 § 6: the social move (phase 2; `contradict_conf` is read from phase 1).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MovesCfg {
+    pub enabled: bool,
+    pub move_k: f32,
+    pub bias: MoveBias,
+    pub w_m: f32,
+    pub w_r: f32,
+    pub w_l: f32,
+    pub p_min: f32,
+    pub p_max: f32,
+    pub chrome_might: f32,
+    pub ally_might: f32,
+    pub ally_cap: f32,
+    pub backlash_courage: f32,
+    pub backlash_fight: f32,
+    pub contradict_conf: f32,
+}
+
+impl Default for MovesCfg {
+    fn default() -> Self {
+        MovesCfg::off()
+    }
+}
+
+impl MovesCfg {
+    pub fn off() -> MovesCfg {
+        MovesCfg {
+            enabled: false,
+            move_k: 4.0,
+            bias: MoveBias::default(),
+            w_m: 0.5,
+            w_r: 0.6,
+            w_l: 0.3,
+            p_min: 0.05,
+            p_max: 0.95,
+            chrome_might: 0.2,
+            ally_might: 0.1,
+            ally_cap: 0.5,
+            backlash_courage: 0.6,
+            backlash_fight: 0.3,
+            contradict_conf: 0.3,
+        }
+    }
+}
+
+/// M15 § 6: competence and poaching (phase 2).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CompetenceCfg {
+    pub enabled: bool,
+    pub exec_w: f32,
+    pub comp_w: f32,
+    pub comp_ref: f32,
+    pub comp_min: f32,
+    pub comp_max: f32,
+    pub talent_drop: f32,
+    pub poach_min: f32,
+    pub poach_gap: f32,
+    pub poach_premium: f32,
+}
+
+impl Default for CompetenceCfg {
+    fn default() -> Self {
+        CompetenceCfg::off()
+    }
+}
+
+impl CompetenceCfg {
+    pub fn off() -> CompetenceCfg {
+        CompetenceCfg {
+            enabled: false,
+            exec_w: 0.4,
+            comp_w: 1.0,
+            comp_ref: 0.25,
+            comp_min: 0.75,
+            comp_max: 1.35,
+            talent_drop: 0.05,
+            poach_min: 0.5,
+            poach_gap: 0.2,
+            poach_premium: 1.3,
+        }
+    }
+}
+
+/// M15 § 7: Feeds, stories and Spin (phase 4).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NewsCfg {
+    pub enabled: bool,
+    pub reach_base: f32,
+    pub reach_per_reporter: f32,
+    pub story_reach: f32,
+    pub stories_per_day: u8,
+    pub ad_rate: i64,
+    pub plant_price: i64,
+    pub bury_price: i64,
+    pub bury_days: u32,
+    pub press_w: f32,
+    pub press_loyalty: f32,
+    pub press_cap: f32,
+    pub censor_lawfulness: f32,
+}
+
+impl Default for NewsCfg {
+    fn default() -> Self {
+        NewsCfg::off()
+    }
+}
+
+impl NewsCfg {
+    pub fn off() -> NewsCfg {
+        NewsCfg {
+            enabled: false,
+            reach_base: 0.2,
+            reach_per_reporter: 0.15,
+            story_reach: 0.8,
+            stories_per_day: 3,
+            ad_rate: 3,
+            plant_price: 120,
+            bury_price: 60,
+            bury_days: 3,
+            press_w: 0.3,
+            press_loyalty: 0.1,
+            press_cap: 0.15,
+            censor_lawfulness: 0.3,
+        }
+    }
+}
+
 impl Config {
     /// Locate the assets directory and parse `config.toml`.
     ///
@@ -2872,8 +3468,8 @@ impl Config {
         self.shop = ShopCfg::off();
         self.stims = StimsCfg::off();
         self.robots = RobotsCfg::off();
-        // M14 V44: no Virt plane, Labs, ICE, tech caps.
-        self.virt_off()
+        // M14 V44: no Virt plane, Labs, ICE, tech caps; M15 W44: no word.
+        self.virt_off().word_off()
     }
 
     /// M14 (plan V44, V46): every M14 section `off()`: no relink, runs, ICE
@@ -2886,6 +3482,23 @@ impl Config {
         self.tech = TechCfg::off();
         self.hack = HackCfg::off();
         self.db = DbCfg::off();
+        self
+    }
+
+    /// M15 (plan W44, W46): every M15 section `off()`: no pools, exchange,
+    /// hearing, kin channel or reputation, and today's `social::gossip`
+    /// (`--word-off`).
+    pub fn word_off(mut self) -> Config {
+        self.gossip = GossipCfg::off();
+        self.reputation = ReputationCfg::off();
+        self.taste = TasteCfg::off();
+        self.creeds = CreedsCfg::off();
+        self.grudges = GrudgesCfg::off();
+        self.hunt = HuntCfg::off();
+        self.skills = SkillsCfg::off();
+        self.moves = MovesCfg::off();
+        self.competence = CompetenceCfg::off();
+        self.news = NewsCfg::off();
         self
     }
 
@@ -2927,8 +3540,9 @@ impl Config {
         c.shop = ShopCfg::off();
         c.stims = StimsCfg::off();
         c.robots = RobotsCfg::off();
-        // M14 V44: the parity table never saw a Researcher or a runner.
-        c.virt_off()
+        // M14 V44: the parity table never saw a Researcher or a runner;
+        // M15 W44: nor a rumour.
+        c.virt_off().word_off()
     }
 
     /// The same city at `n` residents: jobs, opening stocks, the Treasury, the

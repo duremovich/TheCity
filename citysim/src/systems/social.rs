@@ -392,6 +392,10 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
     }
     let (na, nb) = (world.name_of(a), world.name_of(b));
     world.push_event(EventKind::Marriage, &[a, b], format!("{na} married {nb}"));
+    if world.config.gossip.enabled {
+        let d = crate::systems::gossip::talk_district(world, a);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Married, Some(a), Some(b));
+    }
 }
 
 /// Gossip on Chat completion: each party copies one own SawCrime/WasRobbed
@@ -431,6 +435,7 @@ pub fn gossip(world: &mut World, from: EntityId, to: EntityId) {
             valence: -salience * 0.6,
             second_hand: true,
             crime,
+            ..crate::components::MemoryEntry::blank(kind, tick)
         };
         crate::systems::memory::insert(m, entry, tick, cap, half_life);
     }
@@ -499,6 +504,14 @@ fn colocation(world: &mut World) {
     }
     for (a, b, building, create) in events {
         let jail = world.comp::<Building>(building).is_some_and(|bd| bd.kind == BuildingKind::Jail);
+        // M15 W12: each body of the pair may note where it saw the other
+        // (not inside the Precinct: where an inmate is is no news, and its
+        // ~160 cellmates' pairs were most of the calls).
+        if world.config.gossip.enabled && !jail {
+            let tile = world.comp::<Position>(b).map_or_else(Default::default, |p| p.tile);
+            crate::systems::gossip::maybe_sight(world, a, b, Some(building), tile);
+            crate::systems::gossip::maybe_sight(world, b, a, Some(building), tile);
+        }
         if create {
             if world.edge(a, b).is_none() {
                 let (sa, sb) = (
@@ -630,10 +643,16 @@ pub fn repay_debts(world: &mut World, id: EntityId) {
         let (lo, _) = crate::components::edge_key(id, creditor);
         let e = world.edge_entry(id, creditor);
         e.debt += if lo == id { -(pay as i32) } else { pay as i32 };
-        if e.debt == 0 {
+        let repaid = e.debt == 0;
+        if repaid {
             e.debt_since = None;
         }
         adjust(world, id, creditor, 0.1, 0.1);
+        // M15: a debt repaid in full is talked about.
+        if repaid && world.config.gossip.enabled {
+            let d = crate::systems::gossip::talk_district(world, id);
+            crate::systems::gossip::post_deed(world, d, crate::word::Deed::Repaid, Some(id), Some(creditor));
+        }
     }
 }
 

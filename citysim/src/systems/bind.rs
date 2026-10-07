@@ -39,6 +39,8 @@ pub fn open_hole(world: &mut World, hole: Hole) -> HoleId {
     if let Some((a, r)) = amount {
         crate::systems::litter::deposit_in_district(world, hole.district, a, r, hole.id);
     }
+    // M15 W6: the crime goes into the hole's district's pool unnamed.
+    crate::systems::gossip::post_hole(world, &hole);
     world.holes.insert(id, hole);
     let list = world.holes_by_agent.entry(victim).or_default();
     if let Err(i) = list.binary_search(&id) {
@@ -304,6 +306,8 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
                 }
             }
         }
+        // M15 W6: the hole's pool entries and held rumours take the name.
+        crate::systems::gossip::name_hole(world, &hole, actor);
         // Only a living victim gets the Enemy edge: a corpse's edges are
         // dropped when it is freed, and nobody should come to hate the dead.
         if crate::systems::law::living(world, victim) {
@@ -312,7 +316,7 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         // 6. A witness reports it: a cold case on the normal arrest path.
         if let Some(w) = witness {
             let crime = hole.kind.crime();
-            world.remember_crime(w, actor, crime, crate::systems::law::crime_salience(crime));
+            world.remember_crime(w, actor, crime, crate::systems::law::crime_salience(crime), Some(victim));
             crate::systems::law::file_report(world, crime, actor, Some(w));
             if world.comp::<crate::components::Brain>(actor).is_some_and(|b| b.lod == Lod::Statistical) {
                 crate::systems::lod::set_lod(world, actor, Lod::Coarse);

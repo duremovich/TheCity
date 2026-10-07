@@ -105,6 +105,7 @@ fn test_memory_cap_24_evicts_lowest_weight() {
             valence: 0.0,
             second_hand: false,
             crime: None,
+            ..MemoryEntry::blank(MemoryKind::Ate, tick)
         };
         memory::insert(&mut mem, entry, now, 24, 7.0);
     }
@@ -119,6 +120,7 @@ fn test_memory_cap_24_evicts_lowest_weight() {
         valence: -0.6,
         second_hand: false,
         crime: None,
+        ..MemoryEntry::blank(MemoryKind::WasRobbed, t)
     };
     memory::insert(&mut mem, dup(now), now, 24, 7.0);
     memory::insert(&mut mem, dup(now + 10), now + 10, 24, 7.0);
