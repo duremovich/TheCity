@@ -616,6 +616,9 @@ pub struct OrderFlatCfg {
     /// M13 D36 (phase 3): the gang's Harvest order.
     #[serde(default)]
     pub harvest: f32,
+    /// M14 V30 (phase 3): the gang's VirtRaid order.
+    #[serde(default)]
+    pub virt_raid: f32,
 }
 
 impl OrderFlatCfg {
@@ -2483,6 +2486,10 @@ pub struct DataCfg {
     pub door_loss: i64,
     /// Plan: a seeded Lab's opening store in its focus track.
     pub seed_store: u32,
+    /// M14 phase 3 (procurement budget): a corp's Data purchases in a day
+    /// are capped at this × its closing treasury, and never take the
+    /// treasury below `treasury_ref / 4` (M13's fleet-buy reserve).
+    pub buy_budget_frac: f32,
 }
 
 impl Default for DataCfg {
@@ -2504,6 +2511,7 @@ impl DataCfg {
             ledger_cap: vec![0, 400, 1500],
             door_loss: 100,
             seed_store: 300,
+            buy_budget_frac: 0.05,
         }
     }
 }

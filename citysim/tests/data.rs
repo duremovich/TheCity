@@ -24,6 +24,8 @@ fn lab_of(w: &World, corp: EntityId, focus: Track) -> EntityId {
 fn test_theft_moves_units_and_sale_pays_tech_corp() {
     let mut cfg = Config::load();
     cfg.hack.quiet_take = 1.0;
+    // The plan's take (phase 3 lowered `[data] steal_units`; the numbers here are the plan's).
+    cfg.data.steal_units = vec![60, 150, 400];
     let mut w = World::new(42, cfg);
     let (arasaka, zeta) = (corp_named(&w, "Arasaka"), corp_named(&w, "Zetatech"));
     let lab = lab_of(&w, arasaka, Track::Deck);

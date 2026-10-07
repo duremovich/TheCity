@@ -692,10 +692,18 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
     let ground = harvest_ground(world, gang);
     let in_ground = |t: crate::components::TilePos| ground.get(world.district_of(t).index()).copied().unwrap_or(false);
     let mut best: Option<(i64, std::cmp::Reverse<EntityId>)> = None;
+    // M14 V30: freelance runners the gang's database sighted are candidates
+    // wherever they are and whatever shows.
+    let sighted: Vec<EntityId> = world
+        .db
+        .get(&gang)
+        .map(|db| db.sightings.iter().map(|s| s.who).filter(|&w| world.gang_of(w).is_none()).collect())
+        .unwrap_or_default();
     // scan-ok: per gang rescore (daily, and on shocks)
     for id in world.with::<Kit>() {
         let Some(k) = world.comp::<Kit>(id) else { continue };
-        if k.visible < min || k.chrome_value <= 0 {
+        let seen = !sighted.is_empty() && sighted.contains(&id);
+        if (k.visible < min && !seen) || k.chrome_value <= 0 {
             continue;
         }
         if !crate::systems::law::living(world, id)
@@ -711,7 +719,7 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
             .and_then(|h| world.comp::<Building>(h))
             .map(|b| b.door);
         let tile = world.comp::<Position>(id).map(|p| p.tile);
-        if !home.is_some_and(in_ground) && !tile.is_some_and(in_ground) {
+        if !seen && !home.is_some_and(in_ground) && !tile.is_some_and(in_ground) {
             continue;
         }
         let key = (k.chrome_value, std::cmp::Reverse(id));

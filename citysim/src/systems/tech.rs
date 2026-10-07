@@ -128,6 +128,12 @@ pub fn run(world: &mut World) {
     if world.tick_of_day() != 0 || !virt::enabled(world) {
         return;
     }
+    // Phase 3: a new day's Data budget for every corp.
+    for c in world.corps() {
+        if let Some(cc) = world.comp_mut::<Corp>(c) {
+            cc.data_bought_today = 0;
+        }
+    }
     virt::relink(world);
     produce(world);
     ice_upkeep(world);
@@ -139,6 +145,8 @@ pub fn run(world: &mut World) {
         }
     }
     gang_sales(world);
+    // V38: the Statistical hack pass, after production and the sales.
+    virt::stat_pass(world);
     expire(world);
     roll(world);
 }
@@ -294,7 +302,25 @@ fn expire(world: &mut World) {
             db.sightings.pop_front();
         }
     }
+    // V31: a lapsed corp order returns its lent fleet deck (re-kit).
+    let lent: Vec<EntityId> = world
+        .run_orders
+        .iter()
+        .filter(|(_, o)| o.expires <= now && o.why == crate::virt::RunWhy::CorpOrder)
+        .map(|(&a, _)| a)
+        .collect();
     world.run_orders.retain(|_, o| o.expires > now);
+    for a in lent {
+        crate::systems::assets::rekit(world, a);
+    }
+    // V33: turned robots come back.
+    for a in crate::systems::assets::all_assets(world) {
+        if let Some(x) = world.comp_mut::<crate::components::Asset>(a) {
+            if x.turned.is_some_and(|(_, t)| t <= now) {
+                x.turned = None;
+            }
+        }
+    }
     if touched {
         virt::bump_epoch(world);
     }
@@ -575,13 +601,29 @@ pub fn data_unit_price(world: &World, buyer: EntityId) -> i64 {
 /// the lowest holding in the track that can pay for a unit (ties the lower
 /// id), never `seller`; `only` restricts it to one corp (an agent selling
 /// at that corp's Lab).
+/// Phase 3 (procurement budget): what `corp` may still spend on Data
+/// today: `buy_budget_frac × closing treasury` less today's purchases, and
+/// never below `treasury_ref / 4` of treasury (M13's fleet-buy reserve).
+pub fn data_budget(world: &World, corp: EntityId) -> i64 {
+    let Some(c) = world.comp::<Corp>(corp) else { return 0 };
+    let cap = (world.config.data.buy_budget_frac * c.closing.max(0) as f32).floor() as i64 - c.data_bought_today;
+    let reserve = world.purse(Some(corp)) - c.treasury_ref / 4;
+    cap.min(reserve).max(0)
+}
+
+/// Can `corp` pay for a Data unit now, within its budget (V17)?
+fn can_buy_data(world: &World, corp: EntityId) -> bool {
+    let price = data_unit_price(world, corp);
+    world.purse(Some(corp)) >= price && data_budget(world, corp) >= price
+}
+
 fn data_buyer(world: &World, track: Track, seller: EntityId, only: Option<EntityId>) -> Option<EntityId> {
     world
         .corps()
         .into_iter()
         .filter(|&c| c != seller && only.is_none_or(|o| o == c) && is_tech(world, c))
         .filter(|&c| !labs_of(world, c).is_empty())
-        .filter(|&c| world.purse(Some(c)) >= data_unit_price(world, c))
+        .filter(|&c| can_buy_data(world, c))
         .map(|c| (virt::holding(world, c, track), c))
         .min()
         .map(|(_, c)| c)
@@ -598,7 +640,8 @@ pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, 
     }
     let Some(buyer) = data_buyer(world, track, seller, only) else { return 0 };
     let price = data_unit_price(world, buyer);
-    let afford = u32::try_from(world.purse(Some(buyer)).max(0) / price).unwrap_or(u32::MAX);
+    let funds = world.purse(Some(buyer)).min(data_budget(world, buyer)).max(0);
+    let afford = u32::try_from(funds / price).unwrap_or(u32::MAX);
     let n = units.min(afford);
     if n == 0 {
         return 0;
@@ -612,6 +655,9 @@ pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, 
     let Some(node) = lab.and_then(|b| virt::node_of_building(world, b)) else { return 0 };
     let coins = i64::from(n) * price;
     ownership::charge(world, Some(buyer), Some(seller), coins, Flow::Data);
+    if let Some(c) = world.comp_mut::<Corp>(buyer) {
+        c.data_bought_today += coins;
+    }
     if let Some(x) = world.virt.node_mut(node) {
         x.store.units[track.index()] = x.store.units[track.index()].saturating_add(n);
     }
@@ -641,7 +687,7 @@ pub fn data_buyer_lab(world: &World, agent: EntityId) -> Option<EntityId> {
         .iter()
         .copied()
         .filter(|&b| is_data_buyer_lab(world, b) && !world.is_closed(b))
-        .filter(|&b| world.owner_of(b).is_some_and(|o| world.purse(Some(o)) >= data_unit_price(world, o)))
+        .filter(|&b| world.owner_of(b).is_some_and(|o| can_buy_data(world, o)))
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(tile), b)))
         .min()
         .map(|(_, b)| b)

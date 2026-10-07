@@ -206,6 +206,8 @@ fn test_ledger_route_enters_through_weakest_building() {
 #[test]
 fn test_unguarded_nodes_roll_nothing() {
     let mut w = world();
+    // The plan's take (phase 3 lowered `[data] steal_units`).
+    w.config.data.steal_units = vec![60, 150, 400];
     let gang = w.gang_list()[0];
     let hideout = w.hideout_of(gang).expect("hideout");
     let n = virt::node_of_building(&w, hideout).expect("node");
@@ -446,6 +448,8 @@ fn test_gang_trace_pushes_hacked_shock() {
 #[test]
 fn test_extract_loss_returns_payload() {
     let mut w = world();
+    // The plan's take (phase 3 lowered `[data] steal_units`).
+    w.config.data.steal_units = vec![60, 150, 400];
     let lab = lab_of(&w, corp_named(&w, "Zetatech"), Track::Chrome);
     let n = virt::node_of_building(&w, lab).expect("node");
     set_ice(&mut w, n, 0);

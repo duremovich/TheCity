@@ -129,6 +129,10 @@ pub fn raise_crime(world: &mut World, actor: EntityId, victim: Option<EntityId>,
         return;
     }
     let detained = sensed == crate::systems::robots::Sensed::Detained;
+    // M14 V28: a camera at the building contests what the robot did not book.
+    if let (false, Some(b)) = (detained, actor_building) {
+        crate::systems::virt::camera_sense(world, actor, crime, b);
+    }
     let witnesses: Vec<EntityId> = world
         .bodies()
         .into_iter()

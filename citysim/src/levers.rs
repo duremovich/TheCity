@@ -1313,6 +1313,7 @@ impl World {
                 security: Default::default(),
                 focus: None,
                 hacked: None,
+                last_door_open: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

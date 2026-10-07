@@ -415,7 +415,9 @@ pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
     if loyalty < world.config.gangs.freelance_loyalty {
         return None;
     }
-    matches!(g.order, Order::Expand | Order::Contest | Order::Squat | Order::Harvest).then_some(g.order)
+    // M14 V30: under VirtRaid the members not running keep GangWork.
+    matches!(g.order, Order::Expand | Order::Contest | Order::Squat | Order::Harvest | Order::VirtRaid)
+        .then_some(g.order)
 }
 
 /// M12 D38 (phase 3): the derelict Blocks a gang's Squat order may take:
@@ -517,9 +519,15 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
             (actor_tile, None)
         }
         None => return None,
-        Some(Order::Expand) => {
+        // M14 V30: VirtRaid's walkers work as Expand's.
+        Some(o @ (Order::Expand | Order::VirtRaid)) => {
+            // M14 V30: a freelance runner the gang's database sighted lately
+            // is shaken down at Home first.
+            if let Some(h) = sighted_runner_home(world, gang, own_home) {
+                return Some((h, Some(o)));
+            }
             theirs = None;
-            (hideout_door, Some(Order::Expand))
+            (hideout_door, Some(o))
         }
         Some(Order::Contest) => {
             let rival = world.rival_of(gang)?;
@@ -578,6 +586,26 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         best = Some((key, h));
     }
     best.map(|(_, h)| (h, order))
+}
+
+/// M14 V30: the Home of the newest freelance runner (no gang) the gang's
+/// database sighted within `sighting_days`: inhabited, standing, not the
+/// actor's own, no guard within `sight_day_crime` of its door.
+pub fn sighted_runner_home(world: &World, gang: EntityId, own_home: Option<EntityId>) -> Option<EntityId> {
+    let db = world.db.get(&gang)?;
+    let r = world.config.crime.sight_day_crime;
+    db.sightings.iter().rev().find_map(|s| {
+        if world.gang_of(s.who).is_some() || !law::living(world, s.who) {
+            return None;
+        }
+        let h = world.comp::<Household>(s.who).and_then(|h| h.home).filter(|&h| Some(h) != own_home)?;
+        let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict && !b.occupants.is_empty())?;
+        let guarded = world
+            .guards()
+            .iter()
+            .any(|&g| world.comp::<Position>(g).is_some_and(|p| law::chebyshev(p.tile, b.door) <= r));
+        (!guarded).then_some(h)
+    })
 }
 
 /// The Home a GangWork plan extorts.
@@ -919,6 +947,8 @@ fn daily_economy(world: &mut World) {
         crate::systems::chrome::gang_arms(world, gang);
         // M14 V30: then a deck for the best hacker.
         crate::systems::virt::gang_deck(world, gang);
+        // M14 V30 (phase 3): Hideout ICE, then VirtRaid's run orders.
+        crate::systems::virt::gang_daily(world, gang);
     }
 }
 

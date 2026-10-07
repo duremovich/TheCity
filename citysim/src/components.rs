@@ -485,6 +485,8 @@ pub enum MemoryKind {
     Abducted,
     /// M14 V14: fried by a node's ICE on a run.
     Fried,
+    /// M14 (plan 3.1): a gang member whose Hideout was robbed on the plane.
+    Hacked,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -539,10 +541,14 @@ pub enum Order {
     Squat,
     /// M13 D36: abduct the city's most visible chrome and rip it at the Hideout.
     Harvest,
+    /// M14 V30: up to `virt_runners` members run nodes from the Hideout
+    /// chair each day (a dice contest on the Virt plane); the rest keep
+    /// GangWork. Not a muster order.
+    VirtRaid,
 }
 
 impl Order {
-    pub const ALL: [Order; 8] = [
+    pub const ALL: [Order; 9] = [
         Order::Expand,
         Order::Contest,
         Order::Raid,
@@ -551,6 +557,7 @@ impl Order {
         Order::BreakOut,
         Order::Squat,
         Order::Harvest,
+        Order::VirtRaid,
     ];
 
     /// Members muster and march under these.
@@ -835,10 +842,13 @@ pub enum CorpOrder {
     Lobby,
     /// M14 (plan V31): research the focus track, build and staff Labs.
     Research,
+    /// M14 (plan V31): one run a day from a Lab against the niche rival's
+    /// Data (a dice contest on the Virt plane).
+    VirtRaid,
 }
 
 impl CorpOrder {
-    pub const ALL: [CorpOrder; 8] = [
+    pub const ALL: [CorpOrder; 9] = [
         CorpOrder::Grow,
         CorpOrder::Squeeze,
         CorpOrder::Undercut,
@@ -847,6 +857,7 @@ impl CorpOrder {
         CorpOrder::Hunker,
         CorpOrder::Lobby,
         CorpOrder::Research,
+        CorpOrder::VirtRaid,
     ];
 }
 
@@ -1019,6 +1030,17 @@ pub struct Corp {
     pub ice_spend: VecDeque<i64>,
     #[serde(default)]
     pub ice_spend_today: i64,
+    /// M14 (plan V27, phase 3): Virt losses on its nodes, `(tick, node)`,
+    /// last 14 days, newest last (Secure raises those first).
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub virt_losses: VecDeque<(Tick, crate::virt::NodeId)>,
+    /// M14 phase 3 (procurement budget): coins spent on Data today.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub data_bought_today: i64,
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
 }
 
 impl Corp {
@@ -1067,6 +1089,8 @@ impl Corp {
             tech: crate::virt::Tech::default(),
             ledger_ice: crate::virt::SecurityProfile::default(),
             ice_spend: VecDeque::new(),
+            virt_losses: VecDeque::new(),
+            data_bought_today: 0,
             ice_spend_today: 0,
         }
     }
@@ -1658,6 +1682,9 @@ pub struct Building {
     /// M14 (plan V32/V33, phase 3 writes it): a hack on its node, until.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hacked: Option<(crate::virt::HackEffect, Tick)>,
+    /// M14 V32: the last DoorOpen on it (one per `door_cooldown_days`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_door_open: Option<Tick>,
 }
 
 pub fn default_tier() -> u8 {
@@ -1758,6 +1785,11 @@ pub struct Gang {
     /// M14 V37 (phase 3 sets it): the member streaming a departed raid.
     #[serde(default)]
     pub stream_by: Option<EntityId>,
+    /// M14 V30 (plan deviation): the last traced run on our nodes that named
+    /// someone, `(by, tick)`: the VirtRaid `hacked` input and its wipe target
+    /// outlive the pending `Shock::Hacked` the daily rescore consumes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hacked_by: Option<(EntityId, Tick)>,
 }
 
 impl Gang {
@@ -1791,6 +1823,7 @@ impl Gang {
             split_from: None,
             harvest_target: None,
             stream_by: None,
+            hacked_by: None,
         }
     }
 

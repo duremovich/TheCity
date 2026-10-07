@@ -72,6 +72,13 @@ pub struct VirtInputs {
     pub has_lab: bool,
     /// Vacant Lots while the treasury holds `found_cost.lab`.
     pub lab_lots: usize,
+    /// Phase 3: a Lab with a fleet deck and a Researcher to run it.
+    pub fleet_deck: bool,
+    /// Phase 3: `p_success` of the day's run against the niche rival's Lab
+    /// (0 below `min_route_p`).
+    pub virt_p: f32,
+    /// Phase 3: the share of the first niche (VirtRaid's `1 - share`).
+    pub share: f32,
 }
 
 /// The building kinds that make up a niche.
@@ -406,12 +413,16 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
     let virt = if world.config.virt.enabled {
         let (tech_gap, max_lapse) = crate::systems::tech::research_inputs(world, corp);
         let lab_cost = cfg.found_cost.lab;
+        let run = crate::systems::virt::corp_run(world, corp);
         VirtInputs {
             enabled: true,
             tech_gap,
             max_lapse,
             has_lab: !crate::systems::tech::labs_of(world, corp).is_empty(),
             lab_lots: if lab_cost > 0 && c.treasury >= lab_cost { lots_total } else { 0 },
+            fleet_deck: run.is_some(),
+            virt_p: run.as_ref().map(|r| r.p).filter(|&p| p >= world.config.virt.min_route_p).unwrap_or(0.0),
+            share: niches.values().next().map_or(0.0, |n: &NicheInputs| n.share),
         }
     } else {
         VirtInputs::default()
@@ -605,6 +616,28 @@ fn score_corp_wide(i: &CorpInputs, n: Niche, cfg: &CorpsCfg) -> Vec<CorpOrderSco
                 )
             })
             .flatten(),
+        // M14 V31 (phase 3).
+        i.virt
+            .enabled
+            .then(|| {
+                score(
+                    CorpOrder::VirtRaid,
+                    n,
+                    vec![
+                        Consideration::new("fleet deck & target", can(i.virt.fleet_deck && i.virt.virt_p > 0.0), GATE),
+                        Consideration::new("tech gap", i.virt.tech_gap, Curve::Linear { m: 0.7, b: 0.3 }),
+                        Consideration::new(
+                            "1-lawfulness",
+                            1.0 - i.lawfulness,
+                            Curve::Quadratic { k: 2.0, m: 1.0, c: 0.0, b: 0.0 },
+                        ),
+                        Consideration::new("1-share", 1.0 - i.virt.share, Curve::Linear { m: 0.5, b: 0.5 }),
+                        Consideration::new("cash", i.cash, Curve::Linear { m: 0.4, b: 0.6 }),
+                    ],
+                    f.virt_raid,
+                )
+            })
+            .flatten(),
     ]
     .into_iter()
     .flatten()
@@ -623,7 +656,10 @@ pub fn score_all(i: &CorpInputs, cfg: &CorpsCfg) -> Vec<CorpOrderScore> {
 
 /// Secure, Hunker and Lobby are scored once for the whole corp.
 fn corp_wide(order: CorpOrder) -> bool {
-    matches!(order, CorpOrder::Secure | CorpOrder::Hunker | CorpOrder::Lobby | CorpOrder::Research)
+    matches!(
+        order,
+        CorpOrder::Secure | CorpOrder::Hunker | CorpOrder::Lobby | CorpOrder::Research | CorpOrder::VirtRaid
+    )
 }
 
 /// Does a score row stand for the order `current`? An unset niche matches
@@ -950,6 +986,9 @@ fn secure(world: &mut World, corp: EntityId) {
             crate::systems::corps::buy_contract(world, b, s);
         }
     }
+    // M14 V27 (phase 3): ICE by the largest gap (Virt losses first), a camera.
+    crate::systems::virt::secure_ice(world, corp);
+    crate::systems::virt::buy_camera(world, corp);
 }
 
 fn hunker(world: &mut World, corp: EntityId, i: &CorpInputs) {
@@ -965,6 +1004,8 @@ fn hunker(world: &mut World, corp: EntityId, i: &CorpInputs) {
     // that laid off a Vat Tech a day from day 0 starved the city by Winter.
     // Open vacancies close at once (item 13: the gate had hidden that).
     hunker_vacancies(world, corp);
+    // M14 V27 (phase 3): shed one tier of ICE beyond the value at risk.
+    crate::systems::virt::hunker_ice(world, corp);
     let evidence = world.comp::<Corp>(corp).map_or(0, |c| c.cashflow.len());
     let losing = i.flow < 0.0 && evidence >= 7;
     if losing {
@@ -1022,6 +1063,7 @@ pub fn act(world: &mut World, corp: EntityId) {
         (CorpOrder::Hunker, _) => hunker(world, corp, &i),
         (CorpOrder::Lobby, _) => lobby(world, corp, &i),
         (CorpOrder::Research, _) => research(world, corp),
+        (CorpOrder::VirtRaid, _) => crate::systems::virt::corp_virt_raid(world, corp),
         _ => {}
     }
 }
@@ -1062,6 +1104,9 @@ fn research(world: &mut World, corp: EntityId) {
         }
     }
     staff_up(world, corp);
+    // M14 V31: one fleet deck per Lab without one (the plan's Research row;
+    // phase 2 placed it under Grow, where it stays).
+    crate::systems::virt::fleet_decks(world, corp);
 }
 
 /// Per tick: a corp whose pending shocks reached the threshold rescores at
