@@ -661,7 +661,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             hired_tick: world.tick,
             struck_shift: None,
             premium: 1.0,
-            // L2 fix round: on the dole until the first wage (L2 on only).
+            // L2 fix round: unpaid until the first wage (L2 on only).
             paid_once: !crate::systems::jobs::on(world),
             duty_fixed: None,
         },

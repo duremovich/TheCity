@@ -1,5 +1,6 @@
 //! L2 shadow fixes (docs/SHADOW_V2.md, "L2 shadow fixes (what landed)"):
-//! the helpers the 21 `[bug]` items of the V2 re-shadow share. Every caller
+//! the helpers the 21 `[bug]` items of the V2 re-shadow share (and item 22,
+//! the gravedigger's burial shift, added 2026-10-08 with addendum 17). Every caller
 //! reads `on` (or `item`, or a sub-switch through it) first: with `[life]
 //! l2_fixes = false` (`--l2-off`, `--life-off`) or `[living] enabled = false`
 //! nothing here runs, and no item draws a roll of its own on any stream.
@@ -229,9 +230,33 @@ pub fn missed_workdays(world: &World, job: &Job) -> i64 {
     (from + 1..current).filter(|&k| crate::exec::routine::is_workday(k) && job.struck_shift != Some(k)).count() as i64
 }
 
-/// Item 11: an employee absent `noshow_dole_days` workdays draws the dole.
-pub fn absentee(world: &World, job: &Job) -> bool {
-    item(world, 11) && missed_workdays(world, job) >= world.config.life.noshow_dole_days
+// ---------------------------------------------------------------------------
+// Item 22: a burial is the gravedigger's shift
+// ---------------------------------------------------------------------------
+
+/// Item 22: a Gravedigger's completed burial (`BuryCorpse`) on a workday
+/// whose shift is not yet worked counts as that day's worked shift, paid
+/// as a shift's end pays (`economy::collect_wage`). Wages only accrued on
+/// the `TendGraves` shift, which a digger out burying the day's dead missed
+/// every 1-5 days: on 42-44, with the unpaid-worker dole gone (addendum
+/// 17), six of seven starved were gravediggers with `days_unpaid` 0.
+pub fn burial_shift(world: &mut World, id: EntityId) {
+    if !item(world, 22) {
+        return;
+    }
+    let Some(job) = world.comp::<Job>(id) else { return };
+    if job.role != Role::Gravedigger {
+        return;
+    }
+    let key = job.shift_key_at(world.tick);
+    if job.last_shift_day.is_some_and(|d| d >= key) || !crate::exec::routine::workday_of(world, id, job, key) {
+        return;
+    }
+    if let Some(j) = world.comp_mut::<Job>(id) {
+        j.last_shift_day = Some(key);
+        j.days_unpaid = j.days_unpaid.saturating_add(1);
+    }
+    crate::systems::economy::collect_wage(world, id);
 }
 
 // ---------------------------------------------------------------------------
@@ -246,7 +271,8 @@ pub fn daily(world: &mut World) {
         return;
     }
     // Item 11: a week of workdays missed ends the job (a Feed's reporter
-    // never reached her desk and was never paid, dismissed or on the dole).
+    // never reached her desk and was never paid or dismissed; the absentee
+    // never draws the dole: addendum 17).
     let fire = world.config.life.noshow_fire_days;
     let mut out: Vec<EntityId> = Vec::new();
     // scan-ok: daily: no-show dismissals

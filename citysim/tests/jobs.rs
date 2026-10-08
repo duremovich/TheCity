@@ -341,10 +341,12 @@ fn test_l2_off_world_has_no_venues_and_same_first_day() {
     assert!(a.outside.is_empty() && a.scrap == 0 && a.budget.is_default());
 }
 
-/// L2 fix round: a fresh hire draws the dole on its hire day, and not after
-/// the job's first wage.
+/// Roadmap addendum 17 (2026-10-08): a fresh hire does not draw the dole,
+/// before or after its first wage, nor while owed wages (the L2 dole until
+/// the first wage and the owed-days dole are gone); `paid_once` still flips
+/// on the first wage.
 #[test]
-fn test_new_hire_draws_dole_until_first_wage() {
+fn test_new_hire_draws_no_dole() {
     use citysim::systems::economy;
     let mut w = World::new(42, Config::load());
     let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("Recycler");
@@ -356,8 +358,12 @@ fn test_new_hire_draws_dole_until_first_wage() {
     citysim::systems::demography::hire(&mut w, a, recycler, Role::Sanitation);
     assert!(!w.comp::<Job>(a).expect("job").paid_once);
     let coins = w.comp::<Wallet>(a).expect("wallet").coins;
-    assert!(economy::collect_dole(&mut w, a), "the hire draws the dole on its hire day");
-    assert!(w.comp::<Wallet>(a).expect("wallet").coins > coins);
+    assert!(!economy::dole_eligible(&w, a));
+    assert!(!economy::collect_dole(&mut w, a), "no dole on the hire day");
+    assert_eq!(w.comp::<Wallet>(a).expect("wallet").coins, coins);
+    // Owed wages do not open the dole either.
+    w.comp_mut::<Job>(a).expect("job").days_unpaid = 3;
+    assert!(!economy::collect_dole(&mut w, a), "no dole while owed wages");
     // The first wage.
     w.comp_mut::<Job>(a).expect("job").days_unpaid = 1;
     assert!(economy::collect_wage(&mut w, a) > 0);
@@ -379,13 +385,11 @@ fn test_new_hire_draws_dole_until_first_wage() {
     assert!(!economy::collect_dole(&mut off, b));
 }
 
-/// Review fix: the planner reads `economy::dole_eligible`, so with
-/// `dole_in_place` off a fresh unpaid hire, broke at the Hall, plans
-/// `CollectDole` (before, only `life::dole_in_place` paid it).
+/// Addendum 17: a broke fresh hire at the Hall with `dole_in_place` off has
+/// no dole to plan for (`dole_available` false, `CollectDole` not allowed).
 #[test]
-fn test_unpaid_hire_plans_collect_dole() {
-    use citysim::goap::planner::{self, Limits};
-    use citysim::{ActionKind, Key, PlanCtx, WorldState};
+fn test_unpaid_hire_plans_no_dole() {
+    use citysim::{ActionKind, PlanCtx};
     let mut cfg = Config::load();
     cfg.life.dole_in_place = false;
     let mut w = World::new(42, cfg);
@@ -402,9 +406,6 @@ fn test_unpaid_hire_plans_collect_dole() {
     w.leave_building(a);
     w.enter_building(a, hall);
     let ctx = PlanCtx::build(&w, a, None);
-    assert!(ctx.dole_available, "the dole is due to an unpaid hire");
-    let start = WorldState::observe(&w, a, None);
-    let limits = Limits { max_expansions: w.config.brain.plan_max_expansions, max_len: w.config.brain.plan_max_len };
-    let found = planner::plan(&ctx, start, &vec![(Key::HasSavings, true)], limits).expect("a plan");
-    assert!(found.steps.contains(&ActionKind::CollectDole), "plan {:?}", found.steps);
+    assert!(!ctx.dole_available, "no dole for a Job holder");
+    assert!(!ActionKind::CollectDole.allowed(&ctx), "CollectDole is not open to a hire");
 }

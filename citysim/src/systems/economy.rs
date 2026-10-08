@@ -439,7 +439,7 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     };
     let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
-    // L2 fix round: the first wage ends the hire's dole.
+    // L2 fix round: the first wage marks the job paid (`gang::desist` reads it).
     if paid > 0 {
         if let Some(j) = world.comp_mut::<Job>(agent).filter(|j| !j.paid_once) {
             j.paid_once = true;
@@ -539,30 +539,13 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     world.push_event(EventKind::Quit, &[agent], format!("{name} quit as {} ({reason})", job.role.label()));
 }
 
-/// Who may draw the dole: the jobless; with `jobs::on` also a Job holder
-/// whose job has not yet paid its first wage (L2 fix round) or whose
-/// employer owes it `UNPAID_DOLE_DAYS` days or more (L2 phase 5: the dole
-/// is the floor under a wage, not a penalty for holding an unpaid job; on
-/// seed 42 a third of the starved were Fighters and Attendants of venues
-/// that stopped paying, off the dole until they quit at 7 days). With jobs
-/// off every Job is `paid_once` and nothing else is read, so this is "has
-/// no Job".
+/// Who may draw the dole: the jobless. A Job holder never does, paid or not
+/// (roadmap addendum 17, 2026-10-08: the city has no social safety net; the
+/// L2 rules that paid it to an unpaid hire, a holder owed 2+ days' wages and
+/// an absentee were removed).
 pub fn dole_eligible(world: &World, agent: EntityId) -> bool {
-    match world.comp::<Job>(agent) {
-        None => true,
-        Some(j) => {
-            (crate::systems::jobs::on(world) && (!j.paid_once || j.days_unpaid >= UNPAID_DOLE_DAYS))
-                // L2 shadow fixes item 11: an absentee (two workdays missed).
-                || crate::systems::fixes::absentee(world, j)
-        }
-    }
+    !world.has::<Job>(agent)
 }
-
-/// L2 phase 5: days of owed wages after which a Job holder draws the dole.
-/// Intended: such a holder may draw it every day until it quits at 7 unpaid
-/// days, and nothing claws it back when the employer later pays the
-/// arrears: bounded at about 7 x `dole_per_day` per unpaid episode.
-pub const UNPAID_DOLE_DAYS: u8 = 2;
 
 /// `CollectDole` at the Hall, once per day, while the Treasury is not negative.
 pub fn collect_dole(world: &mut World, agent: EntityId) -> bool {

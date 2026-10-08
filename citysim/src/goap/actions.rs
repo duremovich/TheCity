@@ -922,9 +922,7 @@ impl PlanCtx {
             // Whether wages are owed is symbolic (`has_wage_due`); the context
             // carries only today's short-payment block.
             wage_collectable: job.is_some_and(|j| j.last_wage_attempt_day != Some(day)),
-            // Review fix: `economy::dole_eligible` (a fresh unpaid hire, or
-            // one owed 2+ days' wages, draws the dole; with jobs off it is
-            // "has no Job").
+            // `economy::dole_eligible`: has no Job (addendum 17).
             dole_available: crate::systems::economy::dole_eligible(world, agent)
                 && world.levers.dole_per_day > 0
                 && world.treasury().is_some_and(|t| t.coins >= 0)
@@ -1192,9 +1190,7 @@ impl ActionKind {
             ActionKind::Sweep => ctx.is(Role::Sanitation) && ctx.sweep,
             ActionKind::CarryCorpse | ActionKind::BuryCorpse => ctx.adult && ctx.may_bury,
             ActionKind::CollectWage => ctx.role.is_some(),
-            // Review fix: a Job holder the dole is due to too (`dole_available`
-            // implies no Job with jobs off).
-            ActionKind::CollectDole => (ctx.role.is_none() || ctx.dole_available) && ctx.adult,
+            ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
             ActionKind::Beg => !ctx.is(Role::Guard),
             ActionKind::Extort | ActionKind::SplitLoot => ctx.in_gang,
             // M13 D26: anyone fences a stolen vehicle at a Hideout: one

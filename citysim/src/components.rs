@@ -1489,10 +1489,10 @@ pub struct Job {
     /// `economy::collect_wage`; 1 otherwise (a new Job resets it).
     #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
     pub premium: f32,
-    /// L2 fix round: this job has paid a wage. A hire with `jobs::on`
-    /// starts false and keeps drawing the dole until its first wage (a
-    /// starving new guard died ten days in, unpaid and off the dole); with
-    /// L2 off, and in a pre-L2 save, it is true from the start.
+    /// L2 fix round: this job has paid a wage (read by `gang::desist`'s
+    /// employed factor). A hire with `jobs::on` starts false; with L2 off,
+    /// and in a pre-L2 save, it is true from the start. It no longer gates
+    /// the dole (roadmap addendum 17: a Job holder never draws it).
     #[serde(default = "true_", skip_serializing_if = "is_true")]
     pub paid_once: bool,
     /// L2 shadow fixes item 10: a guard's duty fixed for a shift key

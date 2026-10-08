@@ -519,3 +519,49 @@ fn test_stat_multipliers_only_for_kitted() {
     let flash = w.comp::<Kit>(kitted).expect("kit").flash;
     assert!((r - row.p_robbed * m * (1.0 + 0.5 * flash)).abs() < 1e-6);
 }
+
+/// Addendum 17 follow-up (2026-10-08): the law-ends-an-episode mechanism,
+/// end to end through the tick loop (the M13 gate's city count is a rare
+/// event, printed). A berserker started within sight of an on-duty guard
+/// (`start_episode`, what the midnight roll calls; there is no god lever
+/// for an episode) is cuffed or killed by `law` before the episode runs out.
+#[test]
+fn test_episode_near_on_duty_guard_ended_by_law() {
+    let mut w = World::new(42, Config::load().scaled_to(300));
+    w.run_ticks(600);
+    let tod = w.tick_of_day();
+    let guard = w
+        .workers(Role::Guard)
+        .iter()
+        .copied()
+        .find(|&g| {
+            w.has::<Brain>(g)
+                && law::living(&w, g)
+                && !w.has::<citysim::Sentence>(g)
+                && w.comp::<Job>(g).is_some_and(|j| {
+                    j.on_shift(tod) && citysim::exec::routine::workday_of(&w, g, j, j.shift_key_at(w.tick))
+                })
+        })
+        .expect("a guard on shift at 10:00");
+    let who = free(&w)[0];
+    place(&mut w, guard, TilePos { x: 102, y: 100 });
+    place(&mut w, who, TilePos { x: 100, y: 100 });
+    w.comp_mut::<Skills>(guard).expect("skills").fighting = 1.0;
+    let by_law0 = w.stats.current.episodes_by_law;
+    chrome::start_episode(&mut w, who);
+    assert!(chrome::in_episode(&w, who), "berserk");
+    // The guard thinks again now (a fresh warrant within sight), as a
+    // guard whose plan just ended would.
+    w.abort_plan(guard);
+    let hours = u64::from(w.config.chrome.episode_hours);
+    let mut ended_at = None;
+    for h in 0..hours {
+        w.run_ticks(60);
+        if !chrome::in_episode(&w, who) {
+            ended_at = Some(h + 1);
+            break;
+        }
+    }
+    assert!(ended_at.is_some(), "the episode ended within {hours} h");
+    assert_eq!(w.stats.current.episodes_by_law - by_law0, 1, "ended by the law (cuffed or killed), not spent");
+}

@@ -4084,9 +4084,8 @@ pub struct LifeCfg {
     pub stat_sleep_futile_eat: bool,
     /// Item 10: guard-prisoner affinity in the cells stops at this.
     pub jail_affinity_cap: f32,
-    /// Item 11: an employee who has missed this many workdays draws the
-    /// dole, and is dismissed at `noshow_fire_days`.
-    pub noshow_dole_days: i64,
+    /// Item 11: an employee who has missed this many workdays is dismissed
+    /// (the absentee's dole at 2 was removed by roadmap addendum 17).
     pub noshow_fire_days: i64,
     /// Item 15: a Muster is held for the farthest member's walk (capped).
     pub muster_walk_cap_ticks: u64,
@@ -4170,7 +4169,6 @@ impl LifeCfg {
             lod_dwell_ticks: 180,
             stat_sleep_futile_eat: true,
             jail_affinity_cap: 0.3,
-            noshow_dole_days: 2,
             noshow_fire_days: 7,
             muster_walk_cap_ticks: 480,
             deal_busy_from: 720,
