@@ -35,7 +35,7 @@ last day, mean corp ICE 1.0-2.2).
 
 L2 (the living city): an "L2" section from the `LivingCols` and `BudgetCols` columns: wages / dole on day 60
 and by 30-day window, the employed share, the Treasury against the budget band (days inside it, the works roster,
-`upkeep_mult`), the leisure flows (`flow_leisure`, `flow_gamble`, `flow_gamble_win`, `flow_tribute`), fun (mean,
+`upkeep_mult`), the leisure flows (`flow_leisure`, `flow_gamble`, `flow_gamble_win`, `flow_tribute`, `flow_street_dice`), fun (mean,
 satisfied share), venues and visits by kind, HangOuts and their known-contact mean, fronts, Collects, Preaches,
 the Parts chain (`fab_parts`, `scrap_parts`, `parts_imported`), faction violence off screen (`fv_*` totals, the
 off-screen share of violent deaths, kill rates by tier), the tiers with the held prisoners, and aborts by cause.
@@ -83,7 +83,8 @@ VIRT_TOTALS = ["runs", "runs_ok", "runs_bounced", "runs_captured", "runs_dumped"
                "ice_lowered", "ice_spend", "tech_gained", "tech_lost", "research_spent"]
 VIRT_FLOWS = ["flow_data", "flow_hack", "flow_ice_upkeep", "flow_research", "flow_terminal"]
 LEISURE_KINDS = ["club", "arcade", "noodle_bar", "fight_pit", "den", "lounge"]
-L2_FLOWS = ["flow_leisure", "flow_gamble", "flow_gamble_win", "flow_tribute", "flow_export", "flow_public_works"]
+L2_FLOWS = ["flow_leisure", "flow_gamble", "flow_gamble_win", "flow_tribute", "flow_export", "flow_public_works",
+            "flow_street_dice"]
 L2_TOTALS = ["fab_parts", "scrap_parts", "parts_imported", "hangouts", "collected", "preached", "fv_killed",
              "fv_assaulted", "fv_robbed", "fv_abducted", "fv_bound", "fv_unknown", "fv_capped", "fv_bound_wrong",
              "stat_extorts", "stat_claims", "stat_deals", "aborts", "aborts_scavenge", "aborts_sleep",

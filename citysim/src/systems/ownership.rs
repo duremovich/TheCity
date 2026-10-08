@@ -196,13 +196,16 @@ pub enum Flow {
     Leisure,
     /// L2 L12: a gambling loss or a bout's bet, loser -> house (taxed).
     Gamble,
-    /// L2 L12 (plan): a house paying a win, street dice (untaxed).
+    /// L2 L12 (plan): a house paying a win (untaxed).
     GambleWin,
     /// L2 L12: a gang's weekly cut to its members (untaxed).
     Tribute,
     /// L2 L11: the World account's purchase (untaxed at the crossing; the
     /// owner pays the sale's tax explicitly).
     Export,
+    /// L2 L12: street dice, agent to agent (untaxed; review fix: not a
+    /// house's pay-out, so out of `flow_gamble`).
+    StreetDice,
 }
 
 impl Flow {
@@ -282,6 +285,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         }
         Flow::Tribute => row.living.flow_tribute += coins,
         Flow::Export => row.living.flow_export += coins,
+        Flow::StreetDice => row.living.flow_street_dice += coins,
     }
 }
 
@@ -413,6 +417,20 @@ pub fn refund(world: &mut World, agent: EntityId, owner: Option<EntityId>, amoun
         world.stats.current.flow_tax -= tax;
     }
     world.purse_add(Some(agent), amount);
+}
+
+/// Undo a `pay(owner -> Treasury, amount, Flow::Tax)` surcharge (the
+/// `SetLeisureTax` cut on an abandoned purchase or a refunded bet): the
+/// Treasury returns `amount` to `owner` and `flow_tax` falls by it.
+/// Conserves coins; the Treasury may dip below zero.
+pub fn refund_tax(world: &mut World, owner: Option<EntityId>, amount: i64) {
+    if amount <= 0 || owner.is_none() {
+        return;
+    }
+    shadow_flow(world, None, owner, amount, Flow::Tax, true);
+    world.purse_add(None, -amount);
+    world.purse_add(owner, amount);
+    world.stats.current.flow_tax -= amount;
 }
 
 /// L2 L11 (M17 plan O6): coins cross into the city from an outside

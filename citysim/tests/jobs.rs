@@ -375,3 +375,33 @@ fn test_new_hire_draws_dole_until_first_wage() {
     assert!(off.comp::<Job>(b).expect("job").paid_once);
     assert!(!economy::collect_dole(&mut off, b));
 }
+
+/// Review fix: the planner reads `economy::dole_eligible`, so with
+/// `dole_in_place` off a fresh unpaid hire, broke at the Hall, plans
+/// `CollectDole` (before, only `life::dole_in_place` paid it).
+#[test]
+fn test_unpaid_hire_plans_collect_dole() {
+    use citysim::goap::planner::{self, Limits};
+    use citysim::{ActionKind, Key, PlanCtx, WorldState};
+    let mut cfg = Config::load();
+    cfg.life.dole_in_place = false;
+    let mut w = World::new(42, cfg);
+    let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("Recycler");
+    let hall = w.building_of_kind(BuildingKind::Hall).expect("Hall");
+    let a = w
+        .citizens()
+        .into_iter()
+        .find(|&a| !w.has::<Job>(a) && w.has::<citysim::Brain>(a) && citysim::systems::demography::is_adult(&w, a))
+        .expect("a jobless adult");
+    citysim::systems::demography::hire(&mut w, a, recycler, Role::Sanitation);
+    assert!(!w.comp::<Job>(a).expect("job").paid_once, "a fresh hire is unpaid");
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 0;
+    w.leave_building(a);
+    w.enter_building(a, hall);
+    let ctx = PlanCtx::build(&w, a, None);
+    assert!(ctx.dole_available, "the dole is due to an unpaid hire");
+    let start = WorldState::observe(&w, a, None);
+    let limits = Limits { max_expansions: w.config.brain.plan_max_expansions, max_len: w.config.brain.plan_max_len };
+    let found = planner::plan(&ctx, start, &vec![(Key::HasSavings, true)], limits).expect("a plan");
+    assert!(found.steps.contains(&ActionKind::CollectDole), "plan {:?}", found.steps);
+}

@@ -183,7 +183,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         ActionKind::CollectDole => {
             at(world, id, BuildingKind::Hall)
-                && !world.has::<Job>(id)
+                // Review fix: `economy::dole_eligible`, the planner's reading
+                // (with jobs off: has no Job).
+                && crate::systems::economy::dole_eligible(world, id)
                 && world.comp::<Brain>(id).is_some_and(|b| b.last_dole_day != Some(world.day()))
                 && world.treasury().is_some_and(|t| t.coins >= 0)
         }
