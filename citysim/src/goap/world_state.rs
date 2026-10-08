@@ -104,6 +104,9 @@ pub enum LocationKey {
     /// L2 L8: a sweeper's beat: the dirtiest street tile of its
     /// `sweep_beats` district (observed anywhere on the beat's streets).
     Beat,
+    /// L2 L14: the street spot of the agent's leisure pick
+    /// (`World::unwind`): scripted plans only, never in `GOTO`.
+    Spot,
 }
 
 impl LocationKey {
@@ -488,6 +491,7 @@ impl WorldState {
             belonging: 1.0,
             intimacy: 1.0,
             starving_since: None,
+            fun: 1.0,
         });
         let inv = world.comp::<Inventory>(agent).cloned().unwrap_or_default();
         let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);

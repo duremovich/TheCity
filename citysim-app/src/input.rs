@@ -105,6 +105,10 @@ pub fn handle(app: &mut App, world: &mut World) {
     if is_key_pressed(KeyCode::J) {
         app.show_word = !app.show_word;
     }
+    // L2 § 8: street life (`H`: N B L K J F are taken).
+    if is_key_pressed(KeyCode::H) {
+        app.show_leisure = !app.show_leisure;
+    }
     if is_key_pressed(KeyCode::F) {
         app.follow = app.selected.is_some() && !app.follow;
     }

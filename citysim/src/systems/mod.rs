@@ -36,6 +36,7 @@ pub mod hunt;
 pub mod jobs;
 pub mod law;
 pub mod law_brain;
+pub mod leisure;
 pub mod life;
 pub mod litter;
 pub mod living;

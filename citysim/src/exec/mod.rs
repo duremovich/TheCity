@@ -1080,7 +1080,8 @@ impl World {
             | LocationKey::Street
             | LocationKey::RaidTarget
             | LocationKey::Vehicle
-            | LocationKey::Beat => None,
+            | LocationKey::Beat
+            | LocationKey::Spot => None,
         }
     }
 
@@ -1112,6 +1113,8 @@ impl World {
             LocationKey::Intel => crate::systems::hunt::intel_tile(self, agent),
             // L2 L8: the beat's dirtiest street tile.
             LocationKey::Beat => crate::systems::jobs::beat_tile(self, agent),
+            // L2 L14: the leisure pick's street spot.
+            LocationKey::Spot => crate::systems::leisure::spot_of(self, agent),
             _ => None,
         }
     }

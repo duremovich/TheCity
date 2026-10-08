@@ -175,6 +175,27 @@ fn seed_owner(world: &World, kind: BuildingKind, i: usize) -> Option<(Option<Ent
     })
 }
 
+/// L2 phase 2 (the Seeding table's owners): the Lounge's heir is the corp
+/// row with the largest `treasury_initial`, copy `i` of the Clubs the corps
+/// round-robin by row; `None` for the other kinds or without corps.
+fn seed_heir(world: &World, kind: BuildingKind, i: usize) -> Option<EntityId> {
+    let rows = corps_by_row(world);
+    if rows.is_empty() {
+        return None;
+    }
+    match kind {
+        BuildingKind::Lounge => rows
+            .iter()
+            .map(|&(s, c)| {
+                (world.config.corps.treasury_initial.get(usize::from(s)).copied().unwrap_or(0), std::cmp::Reverse(s), c)
+            })
+            .max()
+            .map(|(_, _, c)| c),
+        BuildingKind::Club => Some(rows[i % rows.len()].1),
+        _ => None,
+    }
+}
+
 /// The vacant Lot for the next copy of `kind`: an allowed door tier, an
 /// interior of at least `min(capacity, 6)` tiles; least `(copies of the kind
 /// in its district, door distance to the district's centroid, id)`.
@@ -219,8 +240,12 @@ pub fn seed_venues(world: &mut World) -> Vec<EntityId> {
             if crate::systems::founding::build_on_lot(world, lot, kind, owner).is_err() {
                 continue;
             }
+            // L2 phase 2: the owner a city-deeded Club or Lounge passes to
+            // once it earns (`leisure::hand_over`; a front's is its gang).
+            let heir = seed_heir(world, kind, i);
             if let Some(v) = world.comp_mut::<Building>(lot).and_then(|bd| bd.venue.as_mut()) {
                 v.front_of = front;
+                v.heir = heir;
             }
             if front.is_some() {
                 let (tier, o) = world.comp::<Building>(lot).map_or((0, None), |bd| (bd.tier, bd.owner));

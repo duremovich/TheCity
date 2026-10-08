@@ -600,6 +600,9 @@ pub enum MemoryKind {
     Threatened,
     /// M15 § 6: a successful Persuade or Charm suffered (phase 2; in `Memory.heard`).
     Persuaded,
+    /// L2 § 2: had fun at a venue or the street (the drink's `Socialised`
+    /// analogue for "had fun today").
+    Enjoyed,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -642,6 +645,12 @@ pub enum GoalKind {
     /// M15 W35: stand over a dead Spouse's, kin's or Friend's body until
     /// it is buried (a scripted plan; `systems::grudges`).
     GuardBody,
+    /// L2 § 2 (plan L14): satisfy `fun` on the rung ladder (a scripted
+    /// plan; `systems::leisure`).
+    Unwind,
+    /// L2 § 2 (plan L14, L20): a gang leader's weekly Collect and Call (a
+    /// scripted plan; `systems::leisure`).
+    Lead,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -1353,6 +1362,11 @@ pub struct Needs {
     pub intimacy: f32,
     /// `Some(t)` while `hunger == 0.0`.
     pub starving_since: Option<Tick>,
+    /// L2 § 2 (plan L13): 1.0 at seed and in a pre-L2 save; only
+    /// `systems::leisure` writes it (with `leisure::on`), so a city with L2
+    /// off saves without it.
+    #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
+    pub fun: f32,
 }
 
 /// All `f32` in `0.0..=1.0`.
@@ -2237,6 +2251,20 @@ pub struct Gang {
     /// M15 W31: a creed (The Unplugged are Purist).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub creed: Option<crate::word::Creed>,
+    // --- L2 phase 2 (plan L20): written only with `leisure::on`.
+    /// The leader's Call: the Hideout is the members' top HangOut spot
+    /// until this tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_until: Option<Tick>,
+    /// Plan field: the order (by its `order_since`) the leader last Called for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub called_for: Option<Tick>,
+    /// Plan field: the day of the leader's last Collect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collected_day: Option<u64>,
+    /// Plan field: territory tribute since the last Collect (`daily_economy`).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub tribute_week: i64,
 }
 
 impl Gang {
@@ -2273,6 +2301,10 @@ impl Gang {
             hacked_by: None,
             retaliate_on: None,
             creed: None,
+            call_until: None,
+            called_for: None,
+            collected_day: None,
+            tribute_week: 0,
         }
     }
 

@@ -575,6 +575,8 @@ pub fn run_statistical(world: &mut World) {
     let season = world.season().index();
     let season_energy_mult = world.config.economy.energy_decay_mult[season];
     let phase = world.phase();
+    // L2 L13: the hour's `fun` decay off screen (the exec set once).
+    let fun_execs = crate::systems::leisure::on(world).then(|| crate::systems::classes::exec_set(world));
     for id in agents {
         let Some(row) = stat_row(world, id) else { continue };
         // 1. An hour of decay in one step.
@@ -590,6 +592,9 @@ pub fn run_statistical(world: &mut World) {
                 ..crate::needs::DecayCtx::plain()
             };
             crate::needs::decay(n, &cfg, &ctx, TICKS_PER_HOUR as u32);
+        }
+        if let Some(execs) = &fun_execs {
+            crate::systems::leisure::stat_hour(world, id, execs);
         }
         crate::needs::starvation(world, id);
         if !world.has::<Brain>(id) {

@@ -78,6 +78,7 @@ pub fn mature(world: &mut World, id: EntityId) {
             belonging: initial.belonging,
             intimacy: initial.intimacy,
             starving_since: None,
+            fun: 1.0,
         },
     );
     world.insert(id, Mood::default());
@@ -621,8 +622,15 @@ pub fn hire_candidate(world: &World, employer: EntityId, role: Role) -> Option<E
 
 pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     let wc = &world.config.world;
-    let shifts =
+    let mut shifts =
         if role == Role::Guard && id.index.is_multiple_of(2) { wc.shift_night.clone() } else { wc.shift_day.clone() };
+    // L2 (plan key `[leisure] evening_shift`): the night venues' staff work
+    // the evening, so a bout at `bout_hour` has its Fighters on shift.
+    if crate::systems::leisure::on(world)
+        && matches!(role, Role::Host | Role::Fighter | Role::Croupier | Role::Concierge)
+    {
+        shifts = world.config.leisure.evening_shift.clone();
+    }
     let wage_per_day = world.config.economy.wage(role);
     world.insert(
         id,
@@ -712,6 +720,8 @@ pub fn emigrate(world: &mut World, id: EntityId) {
     let name = world.name_of(id);
     world.stats.current.emigrants += 1;
     world.push_event(EventKind::Emigration, &[id], format!("{name} emigrated"));
+    // L2 L15 (review fix): off the HangOut registry (empty with leisure off).
+    crate::systems::leisure::leave_spot(world, id);
     world.remove_agent(id);
 }
 
@@ -780,6 +790,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
             belonging: initial.belonging,
             intimacy: initial.intimacy,
             starving_since: None,
+            fun: 1.0,
         },
     );
     world.insert(id, Mood::default());

@@ -195,6 +195,37 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         install(world, id, plan);
         return 0;
     }
+    // L2 L14, L16, L20: the leisure plans are scripted (as the Hunt's).
+    if matches!(goal, GoalKind::Unwind | GoalKind::Lead) {
+        let plan = if goal == GoalKind::Unwind {
+            crate::systems::leisure::unwind_plan(world, id)
+        } else {
+            crate::systems::leisure::lead_plan(world, id)
+        };
+        match plan {
+            Some(plan) => {
+                let n = plan.steps.len();
+                install(world, id, plan);
+                return n;
+            }
+            None => {
+                world.cool_goal(id, goal);
+                return 0;
+            }
+        }
+    }
+    if crate::systems::leisure::on(world) {
+        let scripted = match goal {
+            GoalKind::Socialise => crate::systems::leisure::hangout_plan(world, id),
+            GoalKind::GangWork => crate::systems::leisure::preach_plan(world, id),
+            _ => None,
+        };
+        if let Some(plan) = scripted {
+            let n = plan.steps.len();
+            install(world, id, plan);
+            return n;
+        }
+    }
     // M15 W19/W35: the Hunt's and Guard the body's scripted plans.
     if matches!(goal, GoalKind::Hunt | GoalKind::GuardBody) {
         let plan = if goal == GoalKind::Hunt {

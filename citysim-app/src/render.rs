@@ -47,6 +47,10 @@ const C_BED: u32 = 0xd8cfe8;
 const C_VEHICLE: [u32; 4] = [0xe0c040, 0x40c8e0, 0xc87840, 0xe040c0];
 /// M13: the hooked-adults heat and the episode flash.
 const C_HOOKED: u32 = 0xd02040;
+/// L2 § 8: street life (amber, as the log's L2 events).
+const C_LEISURE: u32 = 0xe0a030;
+/// L2 L15: a Sump fire barrel.
+const C_BARREL: u32 = 0xff5a1e;
 const C_EPISODE: u32 = 0xff1010;
 /// M12 D43: the district overlay's controller fill (the City's grey fainter).
 const DISTRICT_ALPHA: f32 = 0.22;
@@ -183,6 +187,62 @@ pub fn draw(world: &World, app: &App) {
     // 1e. M15 § 10 (`J`): each district's talk (Σ pool reach) in crimson.
     if app.show_word {
         crate::word_overlay::fill(world, app, (vx0, vy0, x1, y1));
+    }
+
+    // 1f. L2 § 8 (`H`): street life in amber: each district by its HangOut
+    // and venue crowd now (alpha by the busiest), every venue's door ringed,
+    // and the fire barrels.
+    if app.show_leisure && !world.districts.is_empty() {
+        let mut crowd = vec![0u32; world.districts.len()];
+        for (t, v) in &world.hangouts {
+            if let Some(n) = crowd.get_mut(world.district_of(*t).index()) {
+                *n += v.len() as u32;
+            }
+        }
+        let mut venues: Vec<(TilePos, BuildingKind)> = Vec::new();
+        for kind in BuildingKind::LEISURE {
+            for &b in world.buildings_of_kind(kind) {
+                let Some(bd) = world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict) else { continue };
+                if let Some(n) = crowd.get_mut(world.district_of(bd.door).index()) {
+                    *n += bd.occupants.len() as u32;
+                }
+                venues.push((bd.door, kind));
+            }
+        }
+        let busiest = crowd.iter().copied().max().unwrap_or(0).max(1) as f32;
+        let (w, h) = (world.map.w() as u16, world.map.h() as u16);
+        for y in vy0..y1.min(h) {
+            for x in vx0..x1.min(w) {
+                let t = TilePos { x: x as u8, y: y as u8 };
+                if !world.is_street(t) {
+                    continue;
+                }
+                let n = crowd.get(world.district_of(t).index()).copied().unwrap_or(0);
+                if n == 0 {
+                    continue;
+                }
+                let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
+                let c = Color { a: 0.08 + 0.35 * n as f32 / busiest, ..hex(C_LEISURE) };
+                draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, c);
+            }
+        }
+        for (door, kind) in venues {
+            if !in_view(door) {
+                continue;
+            }
+            let p = cam.tile_to_screen(vec2(f32::from(door.x), f32::from(door.y)));
+            let r = if kind == BuildingKind::Lounge { 1.6 } else { 1.2 };
+            draw_circle_lines(p.x + ppt / 2.0, p.y + ppt / 2.0, r * ppt, 2.0, hex(C_LEISURE));
+        }
+        for spots in &world.spots {
+            for s in spots.iter().filter(|s| matches!(s.kind, citysim::living::SpotKind::Barrel)) {
+                if !in_view(s.tile) {
+                    continue;
+                }
+                let p = cam.tile_to_screen(vec2(f32::from(s.tile.x), f32::from(s.tile.y)));
+                draw_circle(p.x + ppt / 2.0, p.y + ppt / 2.0, (ppt * 0.4).max(2.0), hex(C_BARREL));
+            }
+        }
     }
 
     // One pass over citizens: badge counts for non-Full agents inside

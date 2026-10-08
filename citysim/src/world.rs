@@ -682,6 +682,31 @@ pub struct World {
     /// L2 L7: seeding deferred to the next midnight (`living::run`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub venues_due: bool,
+    // --- Life pass L2 phase 2 (plan L14-L16): written only with `leisure::on`.
+    /// L2 L14: the leisure pick an `Unwind`, HangOut or Preach plan was
+    /// built for (its spot is `LocationKey::Spot`); pruned at midnight.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub unwind: BTreeMap<EntityId, crate::living::UnwindPick>,
+    /// L2 L15: who is hanging out (or preaching) at each spot now; rebuilt
+    /// in `rebuild_indices` from the bodies' running steps.
+    #[serde(skip)]
+    pub hangouts: BTreeMap<TilePos, SmallVec<[EntityId; 8]>>,
+    /// L2 L15: the HangOut spots per district (`leisure::spots`, midnight).
+    /// Saved (deviation: the plan's `serde(skip)` would rebuild them on load
+    /// from a later state than the midnight's).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub spots: Vec<Vec<crate::living::Spot>>,
+    /// L2 L16: the day two kin last met (HangOut, co-location), `(lo, hi)`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub last_met: BTreeMap<(EntityId, EntityId), u64>,
+    /// L2 L14: the 90th-percentile wallet at the last midnight (the Lounge
+    /// rung's "top wealth decile").
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub wealth_p90: i64,
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -998,6 +1023,11 @@ impl World {
             works_vacancies: 0,
             venues_seeded: false,
             venues_due: false,
+            unwind: BTreeMap::new(),
+            hangouts: BTreeMap::new(),
+            spots: Vec::new(),
+            last_met: BTreeMap::new(),
+            wealth_p90: 0,
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1161,6 +1191,7 @@ impl World {
                     belonging: wc.needs_initial.belonging,
                     intimacy: wc.needs_initial.intimacy,
                     starving_since: None,
+                    fun: 1.0,
                 },
             );
             self.insert(id, personality);
@@ -2328,6 +2359,8 @@ impl World {
         // M15 W22/W35: the hunted and the guarded bodies.
         systems::hunt::reindex(self);
         systems::grudges::rebuild_guards(self);
+        // L2 L15: who hangs out where.
+        systems::leisure::rebuild_hangouts(self);
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde
@@ -2584,6 +2617,8 @@ impl World {
         systems::vehicles::end_trip(self, id, false);
         // M13 D38: a dead dealer deals no more.
         systems::stims::end_deal(self, id);
+        // L2 L15 (review fix): nor hangs out at a spot.
+        systems::leisure::leave_spot(self, id);
         // M12 D17: a violent death leaves its mark on the street.
         if cause == DeathCause::Violence {
             if let Some((t, b)) = self.comp::<Position>(id).map(|p| (p.tile, p.building)) {

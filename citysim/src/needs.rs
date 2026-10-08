@@ -150,6 +150,8 @@ pub fn run(world: &mut World) {
         for id in world.bodies() {
             world.recompute_wealth_for(id);
         }
+        // L2 L13: an hour of `fun` at every body (a no-op with leisure off).
+        crate::systems::leisure::bodies_hourly(world);
     }
 }
 

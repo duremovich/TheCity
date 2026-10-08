@@ -43,5 +43,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Hack => vec![(Key::RunDone, true)],
         // M15 W19/W35: scripted plans (`plan::plan_for`'s bypass).
         GoalKind::Idle | GoalKind::Hunt | GoalKind::GuardBody => return None,
+        // L2 L14: scripted plans (`leisure::{unwind_plan, lead_plan}`).
+        GoalKind::Unwind | GoalKind::Lead => return None,
     })
 }

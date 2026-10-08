@@ -126,7 +126,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 super::feed::draw(ui, app, world, id);
                 staff(ui, app, world, id, "Reporters");
             }
-            // L2 phase 1: a venue's price and visits (the full panel is phase 2).
+            // L2 § 8: a venue's price, 7-day visits, take, front gang, staff on shift.
             BuildingKind::Club
             | BuildingKind::Arcade
             | BuildingKind::NoodleBar
@@ -136,13 +136,36 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 if let Some(v) = &b.venue {
                     let week: u32 = v.visits.iter().map(|&x| u32::from(x)).sum();
                     ui.label(format!("price {}¢ · visits today {} · 7 days {week}", v.price, v.visits_today));
+                    ui.label(format!("take today {}¢ · since the last Collect {}¢", v.take_today, v.take_week));
                     if let Some(g) = v.front_of {
                         ui.label(format!("a front of {}", world.owner_label(Some(g))));
                     }
+                    if let Some(h) = v.heir {
+                        ui.label(format!("passes to {} once it earns", world.owner_label(Some(h))));
+                    }
+                    if !v.bets.is_empty() {
+                        let pot: i64 = v.bets.iter().map(|&(_, s, _)| s).sum();
+                        ui.label(format!("tonight's bets {} ({pot}¢)", v.bets.len()));
+                    }
+                    if v.table_shut_day == Some(world.day()) {
+                        ui.label("table shut today (the house could not pay)");
+                    }
+                    let tod = world.tick_of_day();
+                    let on = citysim::systems::ownership::staff_at(world, id)
+                        .into_iter()
+                        .filter(|&s| world.comp::<citysim::Job>(s).is_some_and(|j| j.on_shift(tod)))
+                        .count();
+                    let open = if citysim::systems::leisure::open(world, id) { "open" } else { "closed" };
+                    ui.label(format!("{open} · staff on shift {on}"));
                 }
                 staff(ui, app, world, id, "Staff");
             }
-            BuildingKind::Fab => staff(ui, app, world, id, "Fab Techs"),
+            BuildingKind::Fab => {
+                // L2 § 8: the Fab's Parts made (city-wide today) and held.
+                let held = b.stock_goods.get(citysim::Good::Parts as usize - 1).copied().unwrap_or(0);
+                ui.label(format!("Parts held {held} · made today (all Fabs) {}", world.stats.current.living.fab_parts));
+                staff(ui, app, world, id, "Fab Techs");
+            }
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);

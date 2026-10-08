@@ -117,6 +117,10 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
     if body != 0.0 {
         bias += body;
     }
+    // L2 L13: `fun_mood × (fun − 0.5)` (a branch: leisure off adds nothing).
+    if crate::systems::leisure::on(world) {
+        bias += crate::systems::leisure::mood_bias(world, id);
+    }
     update_biased(&mut mood, needs, memory, pride, w_need, w_memory, low_mood, now, bias);
     if let Some(m) = world.comp_mut::<Mood>(id) {
         *m = mood;

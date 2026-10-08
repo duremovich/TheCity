@@ -194,6 +194,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         });
 
         corps_section(ui, app, world);
+        living_section(ui, world);
         classes_section(ui, world);
         districts_section(ui, app, world);
         assets_section(ui, app, world);
@@ -717,4 +718,71 @@ fn districts_section(ui: &mut Ui, app: &mut App, world: &World) {
         }
     });
     ui.small("! a riot under way · unrest red over the riot threshold");
+}
+
+/// L2 § 8: the Economy section (wages, dole, their ratio, employed share,
+/// the Treasury against its band, `upkeep_mult`, public works, export) and
+/// the Leisure section (fun, satisfied share, visits by kind, the week's
+/// biggest win). From the last closed day.
+fn living_section(ui: &mut Ui, world: &World) {
+    if !world.config.living.enabled {
+        return;
+    }
+    let s = world.stats.history.back().unwrap_or(&world.stats.current);
+    let l = &s.living;
+    ui.separator();
+    ui.strong("Economy");
+    egui::Grid::new("city_economy").striped(true).show(ui, |ui| {
+        ui.label("Wages / dole");
+        ui.label(format!("{}¢ / {}¢ ({:.2})", s.flow_wages, s.flow_dole, l.wage_dole_ratio));
+        ui.end_row();
+        ui.label("Employed share");
+        ui.label(format!("{:.0} %", 100.0 * l.employed_share));
+        ui.end_row();
+        let band = world.config.budget.band;
+        ui.label("Treasury (band)");
+        ui.label(format!("{}¢ ({}-{})", world.treasury().map_or(0, |t| t.coins), band[0], band[1]));
+        ui.end_row();
+        ui.label("Upkeep mult");
+        ui.label(format!("{:.2}", l.upkeep_mult));
+        ui.end_row();
+        ui.label("Public works");
+        ui.label(format!("{} jobs, {}¢ a day", l.works_jobs, l.flow_public_works));
+        ui.end_row();
+        ui.label("Export in / minted");
+        ui.label(format!("{}¢ / {}¢", l.outside_inbound, l.outside_minted));
+        ui.end_row();
+    });
+    if !citysim::systems::leisure::on(world) {
+        return;
+    }
+    ui.strong("Leisure");
+    egui::Grid::new("city_leisure").striped(true).show(ui, |ui| {
+        ui.label("Fun (mean, satisfied)");
+        ui.label(format!("{:.2}, {:.0} %", l.fun_mean, 100.0 * l.fun_satisfied_share));
+        ui.end_row();
+        ui.label("Spent");
+        ui.label(format!(
+            "{}¢ on venues, {}¢ net to the tables, {}¢ in tribute",
+            l.flow_leisure, l.flow_gamble, l.flow_tribute
+        ));
+        ui.end_row();
+        for (i, k) in citysim::stats::LEISURE_SLOTS.iter().enumerate() {
+            ui.label(format!("visits {k}"));
+            ui.label(format!("{} ({} standing)", l.visits[i], l.venues[i]));
+            ui.end_row();
+        }
+        ui.label("HangOuts");
+        ui.label(format!("{} (known faces {:.2})", l.hangouts, l.hangout_contacts_mean));
+        ui.end_row();
+        let week = world.tick.saturating_sub(7 * citysim::TICKS_PER_DAY);
+        let best = world
+            .events
+            .iter()
+            .filter(|e| e.kind == citysim::EventKind::Gambled && e.tick >= week)
+            .max_by_key(|e| e.text.split_whitespace().find_map(|w| w.parse::<i64>().ok()).unwrap_or(0));
+        ui.label("Biggest win (7 days)");
+        ui.label(best.map_or("-".to_string(), |e| e.text.clone()));
+        ui.end_row();
+    });
 }

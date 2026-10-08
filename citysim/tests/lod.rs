@@ -108,6 +108,7 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
         belonging: 0.5,
         intimacy: 0.4,
         starving_since: None,
+        fun: 1.0,
     };
     let mut hourly = start.clone();
     citysim::needs::decay(&mut hourly, &cfg, &ctx, TICKS_PER_HOUR as u32);
@@ -445,4 +446,39 @@ fn bench_stat_policy_row() {
     }
     let us = t0.elapsed().as_secs_f64() * 1e6 / (REPS * x.len()) as f64;
     eprintln!("{:22} {us:.3} us per agent-hour (checksum {acc:.3})", "mlp nets only");
+}
+
+/// L2 phase 2 (plan L17): the seventh rate. Leisure coins per agent-day
+/// (entries and meals, `flow_leisure`, plus stakes lost at the tables,
+/// `flow_gamble + flow_gamble_win`), Full against forced Statistical, on
+/// the leisure calibration city (`calibration_city(500).with_leisure()`:
+/// venues seeded on the city's deed), seeds 2000-2005 pooled, 30 days,
+/// within 15 %. Run with `--ignored`.
+#[test]
+#[ignore]
+fn test_full_vs_statistical_leisure_within_15pct() {
+    const AGENTS: u32 = 500;
+    const DAYS: u64 = 30;
+    const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
+    fn run(force: Lod, seed: u64) -> f64 {
+        let mut cfg = Config::load().calibration_city(AGENTS).with_leisure();
+        cfg.lod.force = Some(force);
+        let mut w = World::new(seed, cfg);
+        w.run_ticks(DAYS * TICKS_PER_DAY);
+        let coins: i64 = w
+            .stats
+            .history
+            .iter()
+            .map(|r| r.living.flow_leisure + r.living.flow_gamble + r.living.flow_gamble_win)
+            .sum();
+        let rate = coins as f64 / (f64::from(AGENTS) * DAYS as f64);
+        eprintln!("{force:?} seed {seed}: leisure coins {coins}, {rate:.4} per agent-day");
+        rate
+    }
+    let pooled = |force: Lod| SEEDS.iter().map(|&s| run(force, s)).sum::<f64>() / SEEDS.len() as f64;
+    let full = pooled(Lod::Full);
+    let stat = pooled(Lod::Statistical);
+    eprintln!("leisure coins per agent-day: Full {full:.4}  Statistical {stat:.4}  ratio {:.3}", stat / full.max(1e-9));
+    assert!(full > 0.0, "Full agents spent on leisure");
+    assert!((full - stat).abs() <= 0.15 * full, "Full {full:.4} vs Statistical {stat:.4}");
 }

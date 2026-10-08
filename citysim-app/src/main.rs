@@ -76,6 +76,9 @@ pub struct App {
     /// M15 § 10: `J` draws the word: each district's talk (Σ pool reach),
     /// hunters on a stake-out, red lines between factions in a vendetta.
     pub show_word: bool,
+    /// L2 § 8 (`H`, free of every map key): street life: each district's
+    /// HangOut and venue crowd, the venues ringed by kind, the fire barrels.
+    pub show_leisure: bool,
     /// M15: keep the City panel scrolled to its Word section (`--scroll-word`, screenshots).
     pub scroll_word: bool,
     /// M14: the node shown in the Node panel.
@@ -115,6 +118,7 @@ impl App {
             show_hooked: false,
             show_virt: false,
             show_word: false,
+            show_leisure: false,
             scroll_word: false,
             selected_node: None,
             selected_run: None,
@@ -187,6 +191,8 @@ struct Args {
     overlay_virt: bool,
     /// M15: `--overlay word` starts with the Word overlay on (`J`).
     overlay_word: bool,
+    /// L2: `--overlay leisure` starts with the street-life overlay on (`H`).
+    overlay_leisure: bool,
     /// M15: select the first hunter (a stake-out first) on its Known tab.
     select_hunter: bool,
     /// M15: scroll the City panel to its Word section.
@@ -221,6 +227,7 @@ fn parse_args() -> Args {
         hooked: false,
         overlay_virt: false,
         overlay_word: false,
+        overlay_leisure: false,
         select_hunter: false,
         scroll_word: false,
         select_node: None,
@@ -253,7 +260,8 @@ fn parse_args() -> Args {
             "--overlay" => match it.next().as_deref() {
                 Some("virt") => args.overlay_virt = true,
                 Some("word") => args.overlay_word = true,
-                other => panic!("--overlay virt|word, got {other:?}"),
+                Some("leisure") => args.overlay_leisure = true,
+                other => panic!("--overlay virt|word|leisure, got {other:?}"),
             },
             "--select-hunter" => args.select_hunter = true,
             "--scroll-word" => args.scroll_word = true,
@@ -343,6 +351,7 @@ async fn main() {
     }
     app.show_virt = args.overlay_virt;
     app.show_word = args.overlay_word;
+    app.show_leisure = args.overlay_leisure;
     app.scroll_word = args.scroll_word;
     if args.select_hunter {
         // A hunter on a stake-out first, else the first hunter (ascending id).

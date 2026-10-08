@@ -216,10 +216,21 @@ pub enum EventKind {
     Exported,
     /// `[recycler]`: the budget band posted public-works jobs.
     WorksPosted,
+    // --- Life pass L2 phase 2 (plan L35; amber).
+    /// `[winner, house]`: a win above `[leisure] big_win`.
+    Gambled,
+    /// `[winner, loser, pit]`: a FightPit's nightly bout.
+    Bout,
+    /// `[leader, gang]`: the weekly Collect paid the members.
+    Collected,
+    /// `[preacher, listener]`: a Purist's Preach landed.
+    Preached,
+    /// `[leader, gang]`: the leader's Call after an order change.
+    Called,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 112] = [
+    pub const ALL: [EventKind; 117] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -332,6 +343,11 @@ impl EventKind {
         EventKind::Refit,
         EventKind::Exported,
         EventKind::WorksPosted,
+        EventKind::Gambled,
+        EventKind::Bout,
+        EventKind::Collected,
+        EventKind::Preached,
+        EventKind::Called,
     ];
 }
 

@@ -13,7 +13,7 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 25] = [
+pub const GOAL_ORDER: [GoalKind; 27] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
@@ -30,6 +30,8 @@ pub const GOAL_ORDER: [GoalKind; 25] = [
     GoalKind::JoinGang,
     GoalKind::GangWork,
     GoalKind::Raid,
+    // L2 L14: the leader's Collect and Call, after Raid.
+    GoalKind::Lead,
     GoalKind::Bury,
     // M15 W35: after Bury.
     GoalKind::GuardBody,
@@ -42,6 +44,8 @@ pub const GOAL_ORDER: [GoalKind; 25] = [
     GoalKind::Loot,
     // M14 V41: before Found.
     GoalKind::Hack,
+    // L2 L14: after Hack, before Found.
+    GoalKind::Unwind,
     // M11 D26: just before Idle.
     GoalKind::Found,
     GoalKind::Idle,
@@ -101,11 +105,13 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
             // Satisfied, or nothing to do for it: no Chat partner here and no drink possible.
             let chat_possible = chat_venue(world, id)
                 && crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some();
+            // L2 L16: a HangOut spot in reach is something to do.
             needs.is_some_and(|n| n.belonging >= BELONGING_SATISFIED)
                 || (!chat_possible
                     && (world.comp::<Wallet>(id).is_some_and(|w| w.coins < 2)
                         || bar_full_for(world, id)
-                        || drank_today(world, id)))
+                        || drank_today(world, id))
+                    && !crate::systems::leisure::spot_in_reach(world, id))
         }
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
@@ -180,6 +186,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Loot => crate::systems::chrome::loot_target(world, id).is_none(),
         // M14 V29: no deck, chair or target worth the risk.
         GoalKind::Hack => crate::systems::virt::hack_choice(world, id).is_none(),
+        // L2 L14: fun at `fun_satisfied` (or leisure off); the leader's
+        // Collect or Call not due.
+        GoalKind::Unwind => crate::systems::leisure::unwind_satisfied(world, id),
+        GoalKind::Lead => crate::systems::leisure::lead_satisfied(world, id),
         _ => false,
     }
 }
@@ -782,6 +792,9 @@ pub fn considerations(
         }
         // M15 W20 (`think` floors it at `hold_score` for a hunter).
         GoalKind::Hunt => return crate::systems::hunt::considerations(world, id),
+        // L2 L14, L20.
+        GoalKind::Unwind => return crate::systems::leisure::considerations(world, id),
+        GoalKind::Lead => return crate::systems::leisure::lead_considerations(world, id),
         // M15 W35.
         GoalKind::GuardBody => return crate::systems::grudges::guard_body_considerations(world, id),
         // M14 V29: the best run's considerations (`think` scores it from
