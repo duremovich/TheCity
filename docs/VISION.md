@@ -30,6 +30,10 @@ The city must run on an average PC. Realism is bought with design, not CPU: ever
 
 The sim is numerical. Whether it is working is decided from data first: the CSV report, the event log, the scenario gates and the parity tests. A story that cannot be seen in the numbers is not yet in the sim. Watching it live in the app is the second check, not the first.
 
+## The view (corrected 2026-10-08, Dylan)
+
+The game will ultimately **follow a single character, maybe a squad, in isometric RPG fashion**. Earlier passages said "first person"; that was misstated. Everything those passages derive from the player being one agent among the 2,000 (the dialogue range, story LOD around the player's circle, the ambient density the camera sees, combat as rolls and targeting) stands unchanged; what changes is the renderer and the camera, which follow the character from above rather than from behind its eyes.
+
 ## The world outside the city (added 2026-10-05, Dylan)
 
 There is an economy beyond the city. **Megacorps exist as an economic idea outside it**: the whole outside world runs at a very low LOD, a ledger of resources and intents, never bodies. A megacorp's presence in the city (its buildings, its exec, its guards) is a branch, not the whole. That has two consequences:
@@ -37,7 +41,7 @@ There is an economy beyond the city. **Megacorps exist as an economic idea outsi
 - **Destroying a megacorp completely is hard.** Wipe out its city holdings and the parent can send agents in from abroad to take territory back, fund a new branch, or buy up what is left. Driving it out is a campaign, not a raid.
 - **There are still ways to kill one.** Cyber attacks (Virt, M14: Data theft, ICE, decks) and economic warfare (undercutting, strikes, monopolies broken, supply cut off) hit the ledger the parent runs on. A megacorp dies when its outside resources run dry, not when its last city building falls.
 
-The same is probably true of every faction: gangs can have brothers in the next city, the law has a state behind it. Since the game will ultimately be first person, all of this is abstracted. It enters a player's game only through its effects: groups having more or fewer resources, more or fewer bodies, a branch that is or is not reinforced. Nothing outside the city is ever simulated per agent.
+The same is probably true of every faction: gangs can have brothers in the next city, the law has a state behind it. Since the game will ultimately follow a single character (maybe a squad) in isometric RPG fashion, all of this is abstracted. It enters a player's game only through its effects: groups having more or fewer resources, more or fewer bodies, a branch that is or is not reinforced. Nothing outside the city is ever simulated per agent.
 
 Design implications for the milestones: the M11 corp needs room for a parent (an outside treasury and a reinforcement rule), M12 districts give the parent territory to retake, M14 Virt gives the player and rival corps the only weapon that reaches the ledger directly. A later milestone (after M14) gives the outside world its own daily tick.
 
@@ -251,7 +255,7 @@ The LOD transition the player sees most is the street itself. As the camera (or 
 
 ## Life-path playtests (added 2026-10-06, Dylan)
 
-When the first-person phase arrives, the test is to **write a bunch of desired life paths and have agents play through them**. An agent is given a goal, big or small (take over a megacorp; run a successful ripperdoc business; become a drug lord; pull a heist to steal a weapon; run a strip club; complete ten fixer contracts) and plays the city through the same controls a human would. To move fast the agents get more than a player would: more resources, and either the inability to die (with everything that *would* have killed them tracked) or death with a restore, so a run never restarts from zero.
+When the player phase arrives (the isometric, single-character view), the test is to **write a bunch of desired life paths and have agents play through them**. An agent is given a goal, big or small (take over a megacorp; run a successful ripperdoc business; become a drug lord; pull a heist to steal a weapon; run a strip club; complete ten fixer contracts) and plays the city through the same controls a human would. To move fast the agents get more than a player would: more resources, and either the inability to die (with everything that *would* have killed them tracked) or death with a restore, so a run never restarts from zero.
 
 The goal is twofold: make sure the mechanics work end to end, and find what the simulation is missing. Players must be able to live how they want and find many ways to power and glory, so each objective must have many possible solutions, and the city must keep offering interesting scenarios and opportunities on its own. A life path that can be completed only one way, or whose agent sits idle because nothing came to it, is a gap in the same sense the god scenarios' gaps are.
 

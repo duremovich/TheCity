@@ -346,7 +346,7 @@ spare_disp = 0.5
   - number keys pick stance, `P` toggles autopilot, `Q` opens Quests, `M` the inbox, `J` the Board filtered to the character.
 - **HUD**: needs bars, coins, `pc_rung`, stance, autopilot, the current plan's steps (`hud_plan_steps`), the advice trace and the clock.
 - **Inspector** opens on the character. Its tabs are Now, **Story** (M10; the full Life at `life_cap_player`), **Known** (M15: what the city knows of the character; in Character mode only the tallies the character could infer: `dread`, `standing`, `honour` bands and the faction opinions cached for pinned agents), **Kit** (M13 inventory, chrome, assets, vehicle), **Holdings** (buildings, gang or corp, scrip), **Contracts** (theirs, both sides, plus coercions) and **Grudges** (their own; others' grudges on them only as far as their memories show).
-- **First person** is out of scope. It needs map layers and interiors (the verticality milestone), a raycast renderer over tile and room geometry, and per-frame agent interpolation. The sim already supplies everything else: the holder's tile, facing from the last step, sight from Kit, and the overheard ring as speech.
+- **The isometric character view** (corrected from "first person" 2026-10-08: the game follows a single character, maybe a squad, in isometric RPG fashion) is out of scope. It needs map layers and interiors (the verticality milestone), a raycast renderer over tile and room geometry, and per-frame agent interpolation. The sim already supplies everything else: the holder's tile, facing from the last step, sight from Kit, and the overheard ring as speech.
 
 ## 7. Commands, levers, CLI, events
 
@@ -465,7 +465,7 @@ Agents are named by index or by `--select-name` names, as the existing levers do
 
 ## 12. Out of scope (after M18)
 
-First-person rendering and the camera beyond Follow, Free and Mission (§ 6 lists what it needs); real model-generated text and voice (the `DialogueWriter` trait is the hook, and only the template writer ships); generated combat maps for `Abroad` and anything drawn of the outside beyond the cast panel; multiplayer, and more than one holder per world; a scripted main story; haggling beyond the fixed M16 price; daemons beyond M17's Blackwall cap; Power and Water as goods; map layers, verticality, interiors and room-level security; climbing and jumping between buildings; a dedicated bunker goal beyond saved plans and Alarms; inventory management beyond the M13 Kit panel.
+The isometric character renderer and the camera beyond Follow, Free and Mission (§ 6 lists what it needs); real model-generated text and voice (the `DialogueWriter` trait is the hook, and only the template writer ships); generated combat maps for `Abroad` and anything drawn of the outside beyond the cast panel; multiplayer, and more than one holder per world; a scripted main story; haggling beyond the fixed M16 price; daemons beyond M17's Blackwall cap; Power and Water as goods; map layers, verticality, interiors and room-level security; climbing and jumping between buildings; a dedicated bunker goal beyond saved plans and Alarms; inventory management beyond the M13 Kit panel.
 
 ## Addendum (2026-10-05, Dylan): the majordomo and the squad
 
