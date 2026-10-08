@@ -384,6 +384,14 @@ pub enum PlayerCommand {
         district: crate::components::DistrictId,
         value: f32,
     },
+    // --- Life pass L2 phase 4 (plan L37).
+    /// God: the gang's order pinned to Contest for `days`, the district
+    /// touched by its faction violence off screen until then.
+    FactionStrike {
+        gang: EntityId,
+        district: crate::components::DistrictId,
+        days: u64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -901,6 +909,16 @@ impl World {
             PlayerCommand::HireAll { kind } => {
                 let n = crate::systems::jobs::hire_all(self, *kind);
                 self.push_event(EventKind::PlayerAction, &[], format!("God filled {n} {} vacancies", kind.label()));
+            }
+            PlayerCommand::FactionStrike { gang, district, days } => {
+                if crate::systems::fviolence::faction_strike(self, *gang, *district, *days) {
+                    let name = crate::systems::grudges::label(self, *gang);
+                    let place = self.district_name(*district).to_string();
+                    let text = format!("God sent {name} to strike {place} for {days} days");
+                    self.push_event(EventKind::PlayerAction, &[*gang], text);
+                } else {
+                    self.push_event(EventKind::PlayerActionFailed, &[*gang], "FactionStrike: not a gang".to_string());
+                }
             }
             PlayerCommand::SetRiotResponse(r) => {
                 self.levers.riot_response = *r;

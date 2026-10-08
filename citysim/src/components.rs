@@ -2235,6 +2235,10 @@ pub struct Gang {
     /// rescore so a member's GangWork never rescans the chromed.
     #[serde(default)]
     pub harvest_target: Option<EntityId>,
+    /// L2 (plan L37) god `FactionStrike`: the order pinned to Contest on this
+    /// district until the tick (faction violence touches it off screen).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub strike: Option<(DistrictId, Tick)>,
     /// M14 V37 (phase 3 sets it): the member streaming a departed raid.
     #[serde(default)]
     pub stream_by: Option<EntityId>,
@@ -2297,6 +2301,7 @@ impl Gang {
             claims_cleared: false,
             split_from: None,
             harvest_target: None,
+            strike: None,
             stream_by: None,
             hacked_by: None,
             retaliate_on: None,
@@ -2513,6 +2518,17 @@ pub struct Hole {
     pub home: Option<EntityId>,
     #[serde(default)]
     pub gang: Option<EntityId>,
+    /// L2 (plan L27): a faction-violence hole's source (`fviolence::daily`);
+    /// `None` for the hourly table's and M13's holes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<crate::ledger::ViolenceSource>,
+    /// L2 (L27): the acting faction (a gang, a corp, the Law, or the episode
+    /// agent itself): the binder draws only among its members.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub faction: Option<EntityId>,
+    /// L2 (L27): a riot hole's riot (the binder draws among its rioters).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub riot: Option<u32>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

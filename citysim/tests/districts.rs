@@ -849,6 +849,9 @@ fn test_binder_draws_from_district() {
         loot: 0,
         home: None,
         gang: None,
+        source: None,
+        faction: None,
+        riot: None,
     };
     let cands = bind::candidates(&w, &hole);
     let weight = |a: EntityId| cands.iter().find(|&&(c, _)| c == a).map(|&(_, x)| x).expect("a candidate");

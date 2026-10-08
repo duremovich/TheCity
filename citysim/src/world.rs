@@ -640,9 +640,18 @@ pub struct World {
     /// L2 (L24): the order-rates ledger (phase 3 the actor side).
     #[serde(default, skip_serializing_if = "crate::ledger::OrderRates::is_empty")]
     pub order_rates: crate::ledger::OrderRates,
-    /// L2 (L24): the sources touching each district today (phase 4).
-    #[serde(skip)]
+    /// L2 (L24): the order and vendetta sources touching each district
+    /// today (phase 4: rebuilt at 01:00, after the midnight rescore; live
+    /// riots and episodes are read live). Saved (deviation from L24's
+    /// `serde(skip)`): rebuilt from a loaded mid-day state it would read
+    /// that state's orders and territory, not the 01:00 ones, and the
+    /// save/load identity would break.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fv_active: Vec<crate::ledger::ActiveSource>,
+    /// L2 phase 4: the day's kill tallies by tier and the parity tallies
+    /// (`ledger::FvTally`); zero with `[fviolence]` off.
+    #[serde(default, skip_serializing_if = "crate::ledger::FvTally::is_zero")]
+    pub fv_tally: crate::ledger::FvTally,
     /// L2 (L21): when each held prisoner's needs were last settled (it was
     /// demoted into the hold, or the last midnight pass).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -1013,6 +1022,7 @@ impl World {
             next_story_id: 0,
             order_rates: Default::default(),
             fv_active: Vec::new(),
+            fv_tally: Default::default(),
             held_since: BTreeMap::new(),
             feeds_seeded: false,
             save_version: crate::save::SAVE_VERSION,
@@ -2606,6 +2616,9 @@ impl World {
         if !self.has::<Identity>(id) || self.has::<Corpse>(id) {
             return;
         }
+        // L2 phase 4 (plan L25): the ledger and the kill-rate tally read the
+        // victim's tier, class and gang before anything is unlinked.
+        systems::fviolence::note_death(self, id, cause, killer);
         // M14 V12: a body jacked in is dumped from its run first.
         systems::virt::dump(self, id, "died in the chair");
         let tick = self.tick;

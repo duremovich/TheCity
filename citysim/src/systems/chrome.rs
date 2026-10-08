@@ -828,8 +828,13 @@ pub fn dragging(world: &World, agent: EntityId) -> Option<EntityId> {
 /// adult with `Kit.visible ≥ harvest_min_visible` (ascending) rolls
 /// `abduct_base × chrome_value ÷ 1000 × (2 − coverage)` on its own stream.
 /// A hit: its coins into the hole's loot, its implants into limbo, the
-/// victim killed, a consequential `Abducted` hole opened.
+/// victim killed, a consequential `Abducted` hole opened. L2 (plan L26):
+/// with `[fviolence]` on this returns at once: the `Order(Harvest)` ×
+/// `Abducted` cell of `fviolence::daily` replaces it.
 pub fn abduction_daily(world: &mut World) {
+    if crate::systems::fviolence::on(world) {
+        return;
+    }
     if !world
         .gangs()
         .into_iter()
@@ -856,17 +861,21 @@ pub fn abduction_daily(world: &mut World) {
         let p = (base * value as f32 / 1000.0 * (2.0 - cover)).clamp(0.0, 1.0);
         let u: f32 = world.rng.agent(id).random();
         if u < p {
-            abduct_offscreen(world, id);
+            abduct_offscreen(world, id, None);
         }
     }
 }
 
-/// The off-screen abduction of `id` (D37).
-pub fn abduct_offscreen(world: &mut World, id: EntityId) {
-    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return };
+/// The off-screen abduction of `id` (D37). `src` (L2 plan L28): the
+/// faction-violence source of `fviolence::daily`'s Harvest cell (the hole
+/// carries it and is filed in its district); `None`: M13's roll.
+pub fn abduct_offscreen(world: &mut World, id: EntityId, src: Option<&crate::ledger::ActiveSource>) -> bool {
+    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return false };
     let tick = world.tick;
-    let zone = world.map.zone(tile);
-    let district = world.district_of(tile);
+    let (zone, district) = match src {
+        Some(s) => (world.district(s.district).zone, s.district),
+        None => (world.map.zone(tile), world.district_of(tile)),
+    };
     let place = world.district_name(district).to_string();
     let hid = crate::components::hole_id(tick, id, HoleKind::Abducted);
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins.max(0));
@@ -889,6 +898,9 @@ pub fn abduct_offscreen(world: &mut World, id: EntityId) {
         loot: coins,
         home: world.comp::<crate::components::Household>(id).and_then(|h| h.home),
         gang: world.gang_of(id),
+        source: src.map(|s| s.source),
+        faction: src.and_then(|s| s.faction),
+        riot: src.and_then(|s| s.riot),
     };
     let name = world.name_of(id);
     let ev = world.push_event(
@@ -903,6 +915,7 @@ pub fn abduct_offscreen(world: &mut World, id: EntityId) {
         c.stripped = true;
     }
     crate::systems::bind::open_hole(world, Hole { event_id: ev, ..hole });
+    true
 }
 
 /// D37: a bound `Abducted` hole's limbo implants go to the actor's gang's

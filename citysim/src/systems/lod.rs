@@ -49,11 +49,22 @@ pub fn story_relevant(kind: ActionKind) -> bool {
 pub fn run(world: &mut World) {
     if world.tick.is_multiple_of(TICKS_PER_HOUR) {
         // L2 (L23): yesterday's member-days into the ledger, before this
-        // hour's assignment overwrites `body_day`.
-        if budget_on(world) && world.tick_of_day() == 0 {
+        // hour's assignment overwrites `body_day` (phase 4: the windows roll
+        // for the victim side too).
+        let fv = crate::systems::fviolence::on(world);
+        if (budget_on(world) || fv) && world.tick_of_day() == 0 {
             crate::systems::fviolence::daily_actor(world);
         }
+        // L2 phase 4: the day's order and vendetta sources, after the
+        // midnight rescore.
+        if fv && world.tick_of_day() == TICKS_PER_HOUR as u16 {
+            crate::systems::fviolence::rebuild_active(world);
+        }
         assign_hour(world);
+        // L2 phase 4 (Ledger maths): the hour's body exposure.
+        if fv {
+            crate::systems::fviolence::tally_exposure(world);
+        }
         #[cfg(debug_assertions)]
         {
             let checked = world.check_indices();
@@ -750,78 +761,18 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     }
     let (p_killed, p_assaulted, p_robbed, p_steal) = stat_probs(world, id, row);
     let adult = crate::systems::demography::is_adult(world, id);
-    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return };
-    let zone = world.map.zone(tile);
-    let district = world.district_of(tile);
-    let place = world.district_name(district).to_string();
-    let tick = world.tick;
-    let consequential = crate::systems::law::is_guard(world, id) || world.has::<crate::components::GangMember>(id);
-    let base = |kind: HoleKind, event_id: u64, consequential: bool, loot: i64, w: &World| Hole {
-        id: hole_id(tick, id, kind),
-        kind,
-        victim: id,
-        zone,
-        district,
-        tick,
-        event_id,
-        consequential,
-        spouse: w.spouse_of(id),
-        loot,
-        home: w.comp::<Household>(id).and_then(|h| h.home),
-        gang: w.gang_of(id),
-    };
-
+    if !world.has::<Position>(id) {
+        return;
+    }
     if adult && u_killed < p_killed {
-        let hole = base(HoleKind::Killed, 0, true, 0, world);
-        let name = world.name_of(id);
-        let ev = world.push_event(
-            EventKind::Murder,
-            &[EntityId::NONE, id],
-            format!("{name} was killed in {place} (assailant unknown)"),
-        );
-        world.kill_by(id, DeathCause::Violence, None);
-        world.stats.current.deaths_violence_offscreen += 1;
-        bind::open_hole(world, Hole { event_id: ev, ..hole });
+        stat_hit(world, id, HoleKind::Killed, None);
         return;
     }
     if u_assaulted < p_assaulted {
-        world.remember(id, MemoryKind::Fought, None, 0.7, -0.7, false);
-        world.remember(id, MemoryKind::Lost, None, 0.6, -0.6, false);
-        if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
-            n.safety = (n.safety - 0.6).max(0.0);
-            n.energy = (n.energy - 0.2).max(0.0);
-        }
-        // As `law::raise_crime` drifts a Full victim.
-        if let Some(p) = world.comp_mut::<Personality>(id) {
-            p.drift(crate::personality::Drift::Robbed);
-        }
-        let name = world.name_of(id);
-        let ev = world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in {place}"));
-        let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
-        bind::open_hole(world, hole);
+        stat_hit(world, id, HoleKind::Assaulted, None);
     }
     if u_robbed < p_robbed {
-        let extort = world.config.social.extort_amount;
-        let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
-        let loot = extort.min(coins.max(0));
-        if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
-            w.coins -= loot;
-        }
-        world.remember(id, MemoryKind::WasRobbed, None, 0.6, -0.6, false);
-        if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
-            n.safety = (n.safety - 0.4).max(0.0);
-        }
-        if let Some(p) = world.comp_mut::<Personality>(id) {
-            p.drift(crate::personality::Drift::Robbed);
-        }
-        let name = world.name_of(id);
-        let ev = world.push_event(
-            EventKind::Robbed,
-            &[EntityId::NONE, id],
-            format!("{name} was robbed of {loot} in {place}"),
-        );
-        let hole = base(HoleKind::Robbed, ev, consequential, loot, world);
-        bind::open_hole(world, hole);
+        stat_hit(world, id, HoleKind::Robbed, None);
     }
     // Meet before courting: Full agents court the people they meet.
     if u_meet < row.p_meet {
@@ -835,6 +786,102 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     }
     if u_steal < p_steal {
         stat_theft(world, id);
+    }
+}
+
+/// One off-screen hit on a Statistical agent (the hourly table's three hole
+/// branches, plan L27): Killed (the death, `deaths_violence_offscreen`),
+/// Assaulted (the beating's memories and needs) or Robbed (up to
+/// `extort_amount` coins as the hole's loot), each with its event and a hole
+/// for the binder. `src`: L2's faction violence (`fviolence::daily`): the
+/// hole carries the source, the acting faction and the riot, is filed in
+/// the source's district and is consequential. `None`: the table's hole,
+/// as M10-M15 opened it. Abducted is `chrome::abduct_offscreen`'s.
+pub fn stat_hit(world: &mut World, id: EntityId, kind: HoleKind, src: Option<&crate::ledger::ActiveSource>) -> bool {
+    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return false };
+    let (zone, district) = match src {
+        Some(s) => (world.district(s.district).zone, s.district),
+        None => (world.map.zone(tile), world.district_of(tile)),
+    };
+    let place = world.district_name(district).to_string();
+    let tick = world.tick;
+    let consequential =
+        src.is_some() || crate::systems::law::is_guard(world, id) || world.has::<crate::components::GangMember>(id);
+    let (source, faction, riot) = src.map_or((None, None, None), |s| (Some(s.source), s.faction, s.riot));
+    let base = |kind: HoleKind, event_id: u64, consequential: bool, loot: i64, w: &World| Hole {
+        id: hole_id(tick, id, kind),
+        kind,
+        victim: id,
+        zone,
+        district,
+        tick,
+        event_id,
+        consequential,
+        spouse: w.spouse_of(id),
+        loot,
+        home: w.comp::<Household>(id).and_then(|h| h.home),
+        gang: w.gang_of(id),
+        source,
+        faction,
+        riot,
+    };
+    match kind {
+        HoleKind::Killed => {
+            let hole = base(HoleKind::Killed, 0, true, 0, world);
+            let name = world.name_of(id);
+            let ev = world.push_event(
+                EventKind::Murder,
+                &[EntityId::NONE, id],
+                format!("{name} was killed in {place} (assailant unknown)"),
+            );
+            world.kill_by(id, DeathCause::Violence, None);
+            world.stats.current.deaths_violence_offscreen += 1;
+            bind::open_hole(world, Hole { event_id: ev, ..hole });
+            true
+        }
+        HoleKind::Assaulted => {
+            world.remember(id, MemoryKind::Fought, None, 0.7, -0.7, false);
+            world.remember(id, MemoryKind::Lost, None, 0.6, -0.6, false);
+            if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+                n.safety = (n.safety - 0.6).max(0.0);
+                n.energy = (n.energy - 0.2).max(0.0);
+            }
+            // As `law::raise_crime` drifts a Full victim.
+            if let Some(p) = world.comp_mut::<Personality>(id) {
+                p.drift(crate::personality::Drift::Robbed);
+            }
+            let name = world.name_of(id);
+            let ev =
+                world.push_event(EventKind::Assaulted, &[EntityId::NONE, id], format!("{name} was beaten in {place}"));
+            let hole = base(HoleKind::Assaulted, ev, consequential, 0, world);
+            bind::open_hole(world, hole);
+            true
+        }
+        HoleKind::Robbed => {
+            let extort = world.config.social.extort_amount;
+            let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+            let loot = extort.min(coins.max(0));
+            if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
+                w.coins -= loot;
+            }
+            world.remember(id, MemoryKind::WasRobbed, None, 0.6, -0.6, false);
+            if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+                n.safety = (n.safety - 0.4).max(0.0);
+            }
+            if let Some(p) = world.comp_mut::<Personality>(id) {
+                p.drift(crate::personality::Drift::Robbed);
+            }
+            let name = world.name_of(id);
+            let ev = world.push_event(
+                EventKind::Robbed,
+                &[EntityId::NONE, id],
+                format!("{name} was robbed of {loot} in {place}"),
+            );
+            let hole = base(HoleKind::Robbed, ev, consequential, loot, world);
+            bind::open_hole(world, hole);
+            true
+        }
+        HoleKind::Abducted => false,
     }
 }
 

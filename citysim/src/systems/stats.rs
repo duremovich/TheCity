@@ -259,6 +259,8 @@ pub fn snapshot(world: &mut World) {
     if world.config.living.enabled {
         living_snapshot(world, &citizens);
     }
+    // L2 phase 4: the kill rates by tier (0 with `[fviolence]` off).
+    crate::systems::fviolence::snapshot(world);
 }
 
 /// L2 phase 1: the day's wage/dole ratio, the employed share of adults,

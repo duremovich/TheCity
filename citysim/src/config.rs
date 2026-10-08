@@ -155,6 +155,9 @@ pub struct Config {
     /// L2 § 1 the export hook (off by default).
     #[serde(default = "ExportCfg::off")]
     pub export: ExportCfg,
+    /// L2 § 3 faction violence off screen (phase 4; plan L24-L28).
+    #[serde(default = "FviolenceCfg::off")]
+    pub fviolence: FviolenceCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -4296,6 +4299,88 @@ impl ExportCfg {
     }
 }
 
+/// L2 § 3 `[fviolence]` (phase 4): the ledger's victim side and the daily
+/// pass that applies it to the Statistical tier. Every number a placeholder
+/// (phase 5 calibrates; `fv_mult` is the first knob).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FviolenceCfg {
+    pub enabled: bool,
+    /// Days of the cells' windows the rates read (at most `ledger::RATE_DAYS`).
+    pub rate_days: usize,
+    /// Body-days of evidence the prior is worth.
+    pub prior_weight: f32,
+    pub fv_mult: f32,
+    pub day_cap: FvKindsCfg,
+    pub prior: FvPriorCfg,
+}
+
+/// Per-kind day caps, city-wide (Killed, Assaulted, Robbed, Abducted).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FvKindsCfg {
+    pub killed: u32,
+    pub assaulted: u32,
+    pub robbed: u32,
+    pub abducted: u32,
+}
+
+impl Default for FvKindsCfg {
+    fn default() -> Self {
+        FvKindsCfg { killed: 3, assaulted: 12, robbed: 20, abducted: 2 }
+    }
+}
+
+impl FvKindsCfg {
+    /// In the ledger's order: Killed, Assaulted, Robbed, Abducted.
+    pub fn get(&self, k: usize) -> u32 {
+        [self.killed, self.assaulted, self.robbed, self.abducted][k.min(3)]
+    }
+}
+
+/// The per-source priors per agent-day, `[Killed, Assaulted, Robbed,
+/// Abducted]`; `harvest_abducted` is `Order(Harvest)`'s Abducted prior.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FvPriorCfg {
+    pub order: [f32; 4],
+    pub vendetta: [f32; 4],
+    pub riot: [f32; 4],
+    pub episode: [f32; 4],
+    pub harvest_abducted: f32,
+}
+
+impl Default for FvPriorCfg {
+    fn default() -> Self {
+        FvPriorCfg {
+            order: [0.0003, 0.002, 0.003, 0.0],
+            vendetta: [0.0004, 0.002, 0.0, 0.0],
+            riot: [0.001, 0.01, 0.01, 0.0],
+            episode: [0.0005, 0.003, 0.0, 0.0],
+            harvest_abducted: 0.0004,
+        }
+    }
+}
+
+impl Default for FviolenceCfg {
+    fn default() -> Self {
+        FviolenceCfg::off()
+    }
+}
+
+impl FviolenceCfg {
+    pub fn off() -> FviolenceCfg {
+        FviolenceCfg {
+            enabled: false,
+            rate_days: 14,
+            prior_weight: 48.0,
+            fv_mult: 1.0,
+            day_cap: FvKindsCfg::default(),
+            prior: FvPriorCfg::default(),
+        }
+    }
+}
+
 impl Config {
     /// Locate the assets directory and parse `config.toml`.
     ///
@@ -4513,6 +4598,7 @@ impl Config {
         self.leisure = LeisureCfg::off();
         self.budget = BudgetCfg::off();
         self.export = ExportCfg::off();
+        self.fviolence = FviolenceCfg::off();
         self
     }
 

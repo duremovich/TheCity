@@ -1548,6 +1548,21 @@ export_floor = 200
 parts_floor = 20                     # plan key (L11): a Fab's Parts kept back
 data_floor = 100                     # plan key (L11; deviation: M14 has no Data sell floor)
 
+# L2 § 3 faction violence off screen (phase 4). Every number is a placeholder (phase 5 calibrates;
+# if Murders break the bound, fv_mult falls first, never an M8-M15 knob).
+[fviolence]
+enabled = true
+rate_days = 14                       # days of the ledger's windows the rates read
+prior_weight = 48.0                  # body-days of evidence the prior is worth (placeholder)
+# fv_mult: the knob the Murder bound pulls (placeholder, a phase-4 finding). At the spec's 1.0 the
+# priors drive the off-screen tier: on 42-47 (120 days) Murders summed 598 against the M15 bound of
+# 1.25 x 315 = 394 (0.5: 450; 0.3: 352), and civilians were hit off screen 5-6x as often as civilian
+# bodies were by on-screen faction violence (2.2 vs 0.4 per 1,000 agent-days; 0.3: 0.63 vs 0.52).
+fv_mult = 0.3
+day_cap = { killed = 3, assaulted = 12, robbed = 20, abducted = 2 }   # city-wide per day (placeholders)
+# per agent-day [Killed, Assaulted, Robbed, Abducted] (placeholders, the spec's)
+prior = { order = [0.0003, 0.002, 0.003, 0.0], vendetta = [0.0004, 0.002, 0.0, 0.0], riot = [0.001, 0.01, 0.01, 0.0], episode = [0.0005, 0.003, 0.0, 0.0], harvest_abducted = 0.0004 }
+
 [buildings.club]
 capacity = 40
 stock_cap = 0

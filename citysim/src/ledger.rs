@@ -137,3 +137,38 @@ pub struct ActiveSource {
     pub riot: Option<u32>,
     pub episode: Option<EntityId>,
 }
+
+/// L2 phase 4: the faction-violence tallies. `day_kills`: today's violent
+/// deaths by the victim's tier at death (bodies, Statistical, bodies who
+/// were civilians, Statistical civilians), read and reset by the CSV
+/// snapshot. The rest accumulate over the run for
+/// `test_faction_violence_parity`: civilian victims (Killed + Assaulted) of
+/// on-screen faction violence and the civilian body-hours in touched
+/// districts, against the daily pass's civilian Killed + Assaulted hits and
+/// the Statistical civilian agent-days it rolled.
+///
+/// `day_sources`: the riots and episodes live at any hourly tally since the
+/// last midnight (both end within hours, so the midnight pass would
+/// otherwise never apply the rates their cells learn); read and cleared by
+/// `fviolence::daily`. `riot_rosters`: each such riot's rioters and the
+/// tick it was last live, so its holes bind among them after it ends;
+/// pruned past `[bind] hole_ttl_days`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FvTally {
+    pub day_kills: [u32; 4],
+    pub body_civ_victims: u64,
+    pub body_civ_hours: u64,
+    pub stat_civ_hits: u64,
+    pub stat_civ_days: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub day_sources: Vec<ActiveSource>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub riot_rosters: BTreeMap<u32, (crate::time::Tick, Vec<EntityId>)>,
+}
+
+impl FvTally {
+    pub fn is_zero(&self) -> bool {
+        *self == FvTally::default()
+    }
+}
