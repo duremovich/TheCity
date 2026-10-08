@@ -122,7 +122,6 @@ pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     if !on(world) {
         return built;
     }
-    world.feeds_seeded = true;
     for (name, corp_name, district) in SEED_FEEDS {
         let owner = match corp_name {
             Some(cn) => {
@@ -160,6 +159,9 @@ pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
         actors.push(lot);
         world.push_event(EventKind::Founded, &actors, text);
     }
+    // Review fix: seeded only once a Feed stands, so a city with no Lot at
+    // seed gets its Feeds from `migrate` on a later load.
+    world.feeds_seeded = !built.is_empty();
     built
 }
 
@@ -287,10 +289,11 @@ pub fn buryable(world: &World, corp: EntityId) -> bool {
         .iter()
         .rev()
         .take_while(|s| s.tick >= horizon)
-        .any(|s| s.paid_by != Some(corp) && live.contains(&s.feed) && about(world, s.actor, corp))
+        .any(|s| s.paid_by != Some(corp) && live.contains(&s.feed) && about(world, s.deed_actor(), corp))
 }
 
-/// Did `feed` run this deed within `RECENT_DAYS`?
+/// Did `feed` run this deed (by its own actor, distorted or not) within
+/// `RECENT_DAYS`?
 fn ran_recently(world: &World, feed: EntityId, deed: Deed, actor: EntityId, object: Option<EntityId>) -> bool {
     let horizon = world.tick.saturating_sub(RECENT_DAYS * TICKS_PER_DAY);
     world
@@ -298,25 +301,13 @@ fn ran_recently(world: &World, feed: EntityId, deed: Deed, actor: EntityId, obje
         .iter()
         .rev()
         .take_while(|s| s.tick >= horizon)
-        .any(|s| s.feed == feed && s.deed == deed && s.actor == actor && s.object == object)
+        .any(|s| s.feed == feed && s.deed == deed && s.deed_actor() == actor && s.object == object)
 }
 
 /// Is `id` the faction `f` or one of its people (a gang's member, a corp's
 /// exec or staff, a city guard or the captain for the Law)?
 fn about(world: &World, id: EntityId, f: EntityId) -> bool {
-    if id == f {
-        return true;
-    }
-    if world.has::<crate::components::Gang>(f) {
-        return world.gang_of(id) == Some(f);
-    }
-    if let Some(c) = world.comp::<Corp>(f) {
-        return c.exec == Some(id) || world.corp_of_agent(id) == Some(f);
-    }
-    if world.has::<crate::components::Law>(f) {
-        return crate::systems::law::is_city_guard(world, id) || world.law().is_some_and(|l| l.captain == Some(id));
-    }
-    false
+    crate::systems::grudges::member_of(world, id, f)
 }
 
 /// The factions the Civic Wire buries today: the `CensorStories` lever's,
@@ -571,10 +562,11 @@ fn spin(world: &mut World, mut known: BTreeMap<EntityId, Misdeeds>) -> Vec<Plant
         let horizon = now.saturating_sub(RECENT_DAYS * TICKS_PER_DAY);
         let mut per_feed: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
         for s in world.stories.iter().filter(|s| s.tick >= horizon && s.paid_by != Some(corp)) {
-            if about(world, s.actor, corp) && live.contains(&s.feed) {
+            let who = s.deed_actor();
+            if about(world, who, corp) && live.contains(&s.feed) {
                 let v = per_feed.entry(s.feed).or_default();
-                if !v.contains(&s.actor) {
-                    v.push(s.actor);
+                if !v.contains(&who) {
+                    v.push(who);
                 }
             }
         }
@@ -743,6 +735,7 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                 feed,
                 deed: r.deed,
                 actor,
+                source: e.actor.filter(|&a| a != actor),
                 object: r.object,
                 tick: now,
                 slant,

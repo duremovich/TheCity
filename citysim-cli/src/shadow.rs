@@ -137,7 +137,7 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         "worker" => adults().filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role != Role::Guard)).collect(),
         "runner" => adults().filter(|&a| world.comp::<Kit>(a).is_some_and(|k| k.deck.is_some())).collect(),
         "purist" => adults().filter(|&a| world.has::<GangMember>(a) && is_purist(world, a)).collect(),
-        "reporter" => return Err("reporter: Role::Reporter does not exist at this commit; skipped".into()),
+        "reporter" => adults().filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == Role::Reporter)).collect(),
         "child" => {
             let kids: Vec<EntityId> = all
                 .iter()
@@ -174,20 +174,14 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
     Ok(out)
 }
 
-fn splitmix(x: &mut u64) -> u64 {
-    *x = x.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut z = *x;
-    z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    z ^ (z >> 31)
-}
-
-/// Fisher-Yates keyed on the seed and the archetype name.
+/// Fisher-Yates keyed on the seed and the archetype name: the library's
+/// `rng::splitmix64` over an FNV key and the swap index (no second copy of
+/// the hash constants here).
 fn shuffled(mut v: Vec<EntityId>, seed: u64, arch: &str) -> Vec<EntityId> {
-    let mut s =
+    let key =
         seed ^ arch.bytes().fold(0xcbf2_9ce4_8422_2325u64, |h, b| (h ^ u64::from(b)).wrapping_mul(0x100_0000_01b3));
     for i in (1..v.len()).rev() {
-        let j = (splitmix(&mut s) % (i as u64 + 1)) as usize;
+        let j = (citysim::rng::splitmix64(key ^ ((i as u64) << 32)) % (i as u64 + 1)) as usize;
         v.swap(i, j);
     }
     v
@@ -1464,6 +1458,6 @@ mod tests {
     fn test_unknown_archetype_is_an_error_not_a_panic() {
         let world = World::new(42, Config::load());
         assert!(candidates(&world, "astronaut").is_err());
-        assert!(candidates(&world, "reporter").is_err());
+        assert!(candidates(&world, "reporter").is_ok());
     }
 }

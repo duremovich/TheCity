@@ -181,6 +181,7 @@ fn test_spin_buries_own_story_for_bury_days() {
         feed: civic,
         deed: Deed::Evicted,
         actor: exec,
+        source: None,
         object: None,
         tick: now,
         slant: -0.3,

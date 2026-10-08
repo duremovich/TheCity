@@ -295,6 +295,31 @@ pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
     crate::systems::hunt::on_death(world, dead);
 }
 
+/// Is `id` the faction `f` or one of its people (a gang's member, a corp's
+/// exec or staff, a city guard or the captain for the Law)? O(1), no
+/// allocation (unlike `corp_of_agent`, a daily query): safe on the
+/// co-location path (`gossip::wants_sighting`).
+pub fn member_of(world: &World, id: EntityId, f: EntityId) -> bool {
+    if id == f {
+        return true;
+    }
+    if world.has::<Gang>(f) {
+        return world.gang_of(id) == Some(f);
+    }
+    if let Some(c) = world.comp::<Corp>(f) {
+        return c.exec == Some(id)
+            || world
+                .comp::<crate::components::Job>(id)
+                .and_then(|j| j.employer)
+                .and_then(|e| world.corp_of_building(e))
+                == Some(f);
+    }
+    if world.has::<Law>(f) {
+        return crate::systems::law::is_city_guard(world, id) || world.law().is_some_and(|l| l.captain == Some(id));
+    }
+    false
+}
+
 /// The factions an agent belongs to: its gang, its corp (exec or
 /// employee) and the Law (a city guard).
 pub fn factions_of(world: &World, id: EntityId) -> SmallVec<[EntityId; 3]> {
@@ -324,6 +349,7 @@ pub fn factions_of(world: &World, id: EntityId) -> SmallVec<[EntityId; 3]> {
 /// after `settle_keep_days`; `kill_chain` drops entries past 60 days; then
 /// the vendettas.
 pub fn daily(world: &mut World) {
+    prune_guards(world);
     if !on(world) {
         return;
     }
@@ -586,6 +612,22 @@ pub fn guard_contests(world: &mut World, stripper: EntityId, corpse: EntityId) -
     };
     let (winner, _, _) = crate::systems::law::resolve_fight(world, g, stripper);
     winner == stripper
+}
+
+/// Review fix, daily: drop the guards whose wait ended without `end_guard`
+/// (killed mid-wait: `kill_by` runs no `on_abort`) and the bodies nobody
+/// stands over any more (buried or gone), so the map does not grow for the
+/// run's length. `guard_contests` reads it through `guarding` either way.
+fn prune_guards(world: &mut World) {
+    if world.guards_of_corpse.is_empty() {
+        return;
+    }
+    let mut map = std::mem::take(&mut world.guards_of_corpse);
+    map.retain(|&c, v| {
+        v.retain(|g| guarding(world, *g, c));
+        !v.is_empty()
+    });
+    world.guards_of_corpse = map;
 }
 
 /// After a load: the guards whose GuardBody wait is running, by body.

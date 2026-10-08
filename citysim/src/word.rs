@@ -472,12 +472,25 @@ pub struct Story {
     pub id: u32,
     pub feed: EntityId,
     pub deed: Deed,
+    /// Who the story names (the actor's gang when distorted).
     pub actor: EntityId,
+    /// Review fix: the deed's actor when the story was distorted (`actor` is
+    /// then the gang), so the three-day dedupe and the buries read the deed,
+    /// not the headline. `None` when undistorted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<EntityId>,
     pub object: Option<EntityId>,
     pub tick: Tick,
     /// `-1..=1`.
     pub slant: f32,
     pub paid_by: Option<EntityId>,
+}
+
+impl Story {
+    /// The deed's own actor: `source` when distorted, else `actor`.
+    pub fn deed_actor(&self) -> EntityId {
+        self.source.unwrap_or(self.actor)
+    }
 }
 
 /// On a Feed building (plan W36).

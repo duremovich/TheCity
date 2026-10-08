@@ -567,8 +567,11 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
 }
 
 /// L1: a social step whose partner is not in the room is re-bound to the
-/// best co-located partner (unmarried for Flirt and Propose), the plan's
-/// target with it; unchanged when the partner is here or nobody is.
+/// best co-located partner, the plan's target with it; unchanged when the
+/// partner is here or nobody fits. The floors are the planner's own
+/// (`court_target`): a Chat to anyone not disliked, a Flirt at 0.3
+/// unmarried, a Propose only to someone `propose_allowed` (review fix: at
+/// -1.0 a Propose went to a stranger, who then "rejected" it for a week).
 fn rebind_partner(
     world: &mut World,
     id: EntityId,
@@ -580,8 +583,15 @@ fn rebind_partner(
     if present || here.is_none() {
         return step.clone();
     }
-    let unmarried = step.action != ActionKind::Chat;
-    let Some(new) = crate::systems::social::best_colocated_partner(world, id, -1.0, unmarried) else {
+    use crate::systems::social;
+    let (min, unmarried) = match step.action {
+        ActionKind::Chat => (0.0, false),
+        ActionKind::Flirt => (0.3, true),
+        _ => (world.config.social.propose_affinity, true),
+    };
+    let Some(new) = social::best_colocated_partner(world, id, min, unmarried)
+        .filter(|&t| step.action != ActionKind::Propose || social::propose_allowed(world, id, t))
+    else {
         return step.clone();
     };
     let old = step.target;

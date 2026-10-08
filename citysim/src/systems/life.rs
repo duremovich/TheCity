@@ -230,16 +230,22 @@ pub fn broke(world: &World, id: EntityId) -> bool {
 // The law
 // ---------------------------------------------------------------------------
 
-/// Another guard already chases `suspect` (an Arrest plan bound to it, or
-/// the escort).
-pub fn arrest_claimed(world: &World, guard: EntityId, suspect: EntityId) -> bool {
-    world.guards().iter().any(|&g| {
-        g != guard
-            && world.comp::<Brain>(g).is_some_and(|b| {
-                b.escorting == Some(suspect)
-                    || b.plan.as_ref().is_some_and(|p| p.goal == GoalKind::Arrest && p.target == Some(suspect))
-            })
-    })
+/// The suspects another guard than `guard` already chases (an Arrest plan
+/// bound to them, or the escort): one pass over the guards' Brains, so a
+/// scoring round tests membership per suspect instead of re-walking every
+/// guard per (guard, suspect) pair (review fix).
+pub fn claimed_suspects(world: &World, guard: EntityId) -> std::collections::BTreeSet<EntityId> {
+    let mut out = std::collections::BTreeSet::new();
+    for &g in world.guards().iter().filter(|&&g| g != guard) {
+        let Some(b) = world.comp::<Brain>(g) else { continue };
+        if let Some(s) = b.escorting {
+            out.insert(s);
+        }
+        if let Some(s) = b.plan.as_ref().filter(|p| p.goal == GoalKind::Arrest).and_then(|p| p.target) {
+            out.insert(s);
+        }
+    }
+    out
 }
 
 /// A sighting fresh enough to chase from `from`: seen within

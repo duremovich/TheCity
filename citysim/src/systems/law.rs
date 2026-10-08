@@ -14,6 +14,7 @@ use crate::goap::ActionKind;
 use crate::personality::Drift;
 use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
+use std::collections::BTreeSet;
 
 /// Chebyshev distance between two tiles.
 pub fn chebyshev(a: TilePos, b: TilePos) -> u32 {
@@ -359,7 +360,9 @@ pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
     world.comp::<Job>(guard).is_some_and(|j| j.role == Role::Guard && !job_is_private_guard(world, j))
 }
 
-fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>) -> bool {
+/// `claimed`: the suspects other guards already chase (L1), built once per
+/// scoring call by `claim_set`.
+fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>, claimed: &BTreeSet<EntityId>) -> bool {
     let near = |p: Pursuer| {
         let radius = pursuit_radius_for(world, p.guard);
         s != p.guard
@@ -367,22 +370,31 @@ fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>) -> bool {
             // L1: a stale sighting is chased only from near by, and a
             // suspect another guard is after is theirs.
             && (!world.config.life.enabled
-                || (crate::systems::life::sighting_fresh(world, s, p.tile)
-                    && !crate::systems::life::arrest_claimed(world, p.guard, s)))
+                || (crate::systems::life::sighting_fresh(world, s, p.tile) && !claimed.contains(&s)))
     };
     // The cheap reach test first (the same conjunction, reordered).
     by.is_none_or(near) && located(world, s)
 }
 
+/// The L1 claim set for `by` (empty for the whole city, or with life off).
+fn claim_set(world: &World, by: Option<Pursuer>) -> BTreeSet<EntityId> {
+    match by {
+        Some(p) if world.config.life.enabled => crate::systems::life::claimed_suspects(world, p.guard),
+        _ => BTreeSet::new(),
+    }
+}
+
 /// Open-warrant suspects that are located (and in reach of `by`), ascending.
 pub fn located_suspects(world: &World, by: Option<Pursuer>) -> Vec<EntityId> {
+    let claimed = claim_set(world, by);
     // `open_suspects` is ascending and deduplicated.
-    world.open_suspects().filter(|&s| chaseable(world, s, by)).collect()
+    world.open_suspects().filter(|&s| chaseable(world, s, by, &claimed)).collect()
 }
 
 /// Is `located_suspects(world, by)` non-empty?
 pub fn any_located_suspect(world: &World, by: Option<Pursuer>) -> bool {
-    world.open_suspects().any(|s| chaseable(world, s, by))
+    let claimed = claim_set(world, by);
+    world.open_suspects().any(|s| chaseable(world, s, by, &claimed))
 }
 
 /// Is `s` a wanted, located suspect (anywhere)?

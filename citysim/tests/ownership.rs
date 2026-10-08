@@ -941,6 +941,7 @@ fn test_news_day_conserves_coins() {
         feed,
         deed: Deed::Evicted,
         actor: exec,
+        source: None,
         object: None,
         tick: now,
         slant: -0.3,

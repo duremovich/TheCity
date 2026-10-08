@@ -1,10 +1,27 @@
-# Handoff — 2026-10-07 (close of the third orchestrator session)
+# Handoff — 2026-10-07 (close of the Fable review session)
 
-**Dylan's plan for the next two sessions** (memory `thecity-next-sessions-plan.md`):
-1. **Next session: a code review with Fable.** `/code-review` over `49d2689..HEAD` (everything since the M14 review fixes: M15 phases 1-4, the shadow tool, Life pass L1/L1b), then apply the findings with a fix coder, gates serialized, push.
-2. **The session after: a big-picture review** of the project against `docs/VISION.md` and `docs/ROADMAP_POST_M14.md`: is the path right (M15 phase 5 and review, Life pass L2, M16-M18, a late calibration milestone)?
+**Dylan's plan** (memory `thecity-next-sessions-plan.md`):
+1. ~~A code review with Fable~~ **done this session**: `/code-review high` (Fable 5.1) over `49d2689..HEAD` (M15 phases 1-4, the shadow tool, Life pass L1/L1b) returned ten findings, all verified against the code and fixed in one commit (see "Fable review fixes" below); every gate green serialized, pushed.
+2. **Next session: a big-picture review** of the project against `docs/VISION.md` and `docs/ROADMAP_POST_M14.md`: is the path right (M15 phase 5 and review, Life pass L2, M16-M18, a late calibration milestone)?
 
-Do **not** start M15 phase 5 or Life pass L2 before those two sessions unless Dylan says so. `main` is pushed; every gate passes.
+Do **not** start M15 phase 5 or Life pass L2 before the big-picture session unless Dylan says so. `main` is pushed; every gate passes.
+
+## Fable review fixes (this session)
+
+Four bugs, two leaks/omissions, one perf, three cleanups; no knob touched, no gate band moved:
+
+- **L1 `rebind_partner`** re-pointed a Propose (or Flirt) at any co-located body with affinity ≥ −1.0, so a Propose whose partner had left went to a stranger who "rejected" it (a week's `Rejected` block, −0.1 affinity). Now the planner's own floors: Chat ≥ 0, Flirt ≥ 0.3 unmarried, Propose only `propose_allowed`.
+- **News dedupe/bury on the headline, not the deed**: a distorted story logged the gang as `Story.actor`, so `ran_recently` missed it the next day (the deed ran twice, `distorted` counted twice) and the Spin buries aimed at the gang. `Story.source` (the deed's actor when distorted; `#[serde(default)]`), `Story::deed_actor()` used by `ran_recently` and the bury list.
+- **`feeds_seeded` was set before any Feed stood**: a city with no vacant Lot at seed never got Feeds from `news::migrate`. Now `feeds_seeded = !built.is_empty()`.
+- **Shadow `reporter` archetype** was a hard-coded error from before phase 4; now `Role::Reporter` holders (the unit test pins `is_ok`).
+- **`guards_of_corpse` leaked** guards killed mid-wait (`kill_by` runs no `on_abort`) and buried bodies for the run's length: `grudges::prune_guards` at the daily pass keeps only `guarding()` entries.
+- **`wants_sighting`'s vendetta test was gang-vs-gang only**; corp and Law vendettas (which `grudges::vendettas` opens) held no Sightings. New `grudges::member_of(id, faction)` (O(1), no allocation; `news::about` now delegates to it) and `in_vendetta` over every faction of both sides. Deliberately not `factions_of`/`corp_of_agent` (a corps-vector clone) on the co-location path.
+- **`arrest_claimed` was O(guards² × suspects) per think round** (every guard's Brain walked per (guard, suspect) pair from inside `law::chaseable`): `life::claimed_suspects` builds the set once per `located_suspects`/`any_located_suspect` call.
+- Cleanups: the shadow tool's private SplitMix64 copy → `citysim::rng::splitmix64` (shadow picks for a seed change, nothing pins them); `competence::role_skill`/`role_term` share one `role_slots` table (numerically identical: `(a+b)/2` for the Lab); the pre-M15 save detector (`skill_means == [0; 8]`) → an explicit `World::save_version` (`save::SAVE_VERSION = 1`, old saves read 0, set after migration).
+
+**One gate flipped, by the doctrine**: with the vendetta sightings reaching corps and the Law the days diverge, and `test_m14_virt_seed_42`'s "six-seed mean Data sold ≥ 200" read 180.5 (per seed [335, 288, 77, 161, 15, 207]; on 77f1a1f [504, 268, 62, 109, 608, 117], where seed 46's 608 is one gang sale of 202 Deck Data to Arasaka; Zetatech, the steady buyer, goes bankrupt on day 69 vs 60 and the market dies with it, V17). A lumpy calibration band, not a mechanism: now a printed `FINDING` with "a sale on every seed" as the sanity assert; Data made, DataStolen and the runs stay asserted. **Dylan has not signed off on this conversion**: revert it in `scenario.rs` if the band should stay asserted. Side observation for the big-picture session: `HuntStarted` rose on 5 of 6 seeds with the wider sightings (42: 34 → 50, 43: 47 → 58, 44: 28 → 47, 45: 25 → 31, 46: 30 → 21, 47: 31 → 38; a CLI A/B, 120 days), as the spec's intel channel intends; the grudge-volume item in the M15 phase 5 queue now matters more.
+
+Measured after the fixes (serialized): the scenario suite 12/12, god 20/20, god_corps 12/12, god_districts 11/11; seed 42 6.9-7.1k ticks/s on the box, floor 4,000.
 
 ## Where the code stands
 
@@ -17,6 +34,7 @@ Do **not** start M15 phase 5 or Life pass L2 before those two sessions unless Dy
 | M15 phase 4 News, UI, levers (Feeds and Reporters, stories, ads, Spin as a side spend, press, the J overlay) | merged | fdb62d6 / ab79188 |
 | Shadow tool and pass V1 | merged | `citysim-cli shadow`, d2262c3; `docs/SHADOW_V1.md` + `docs/shadow_v1/` |
 | Life pass L1 + L1b (residents' days fixed; brutality restored through pressure) | merged | 9473f37 / 77f1a1f |
+| Fable code review of 49d2689..77f1a1f (ten findings, all fixed) | merged | the commit after b605f25 |
 | M15 phase 5 (gate, god scenarios, calibration, docs) and the M15 review | **open** | plan `~/.claude/plans/m15-word-and-blood.md` |
 | Life pass L2 (street hang-outs toward known contacts, an entertainment need, leisure businesses; the role features from the shadow pass) | **designed, not spec'd** | `docs/ROADMAP_POST_M14.md` addendum 15; `docs/SHADOW_V1.md` per-archetype table |
 | M16 … M18 | specs and plans written | `docs/M16_CONTRACTS.md` … `M18_PLAYER.md` |
@@ -30,7 +48,7 @@ Do **not** start M15 phase 5 or Life pass L2 before those two sessions unless Dy
 - **Printed findings** (calibration, not asserted): M10 off-screen killings (≥ 1 asserted) and bound killers arrested; M11 Squeeze on most seeds and no monopoly before day 60; M12 litter band, corp raids on seed 42, allocation (majority device); M13 vehicles six-seed floor (≥ 50 asserted); M14 IceRaised, the ICE-spend Spearman, DataWiped, node count, Door-then-raid, TechGained, robot turned, grudge-ordered wipe runs; M15's plant-opinion drop (few plants target corps).
 - **M15 phase 5 queue**: the gate (`test_m15_word_seed_42`), god scenarios, docs ("Implemented: deviations" for W-rows and every phase's recorded deviations, in the commit messages 8db658c, 367153b, 50963ac, fdb62d6), throughput (M15 cost ~4-8 % per phase before L1 gained it back), the plant targeting question, grudge volume (~20k formed per run, every Lost/WasRobbed forms one), `hunt_min` above `lethal_min` (every Hunt lethal: kin revenge only), The Unplugged's size (20-55 members), Poached on seed 42.
 - **Shadow-pass role features** (Life pass L2 candidates): gang leader goals (Muster, Collect, Parley, retinue), creed goals (Preach, Patrol, Gather), Clinic customers and fees, a runner archetype with fixer-fed run orders, household and spouse goals, guard corruption, child routines (children have no Brain), rich-agent off-hours, a tribute flow that pays, sleep beyond 4-6 h for some archetypes; plus addendum 15.
-- **Shadow tool V2**: dealer pick (deal_log holds one dealer per bar), a runner pick requiring Virt activity, gossip told about the agent, children unpinnable.
+- **Shadow tool V2**: dealer pick (deal_log holds one dealer per bar), a runner pick requiring Virt activity, gossip told about the agent, children unpinnable; the `reporter` pick works since the review fixes (never shadowed yet: follow one next pass).
 
 ## The pattern that works (refined this session)
 

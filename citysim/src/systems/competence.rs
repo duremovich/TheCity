@@ -27,23 +27,40 @@ pub fn on(world: &World) -> bool {
     world.config.gossip.enabled && world.config.competence.enabled
 }
 
-/// A role's skill on `id`, against its city mean, and its label (spec
-/// roles: Farm farming; Market, Bar, Clinic, Garage persuasion; a guard
-/// fighting; a Lab knowledge and hacking; a Feed knowledge). `None` for an
-/// unskilled role.
-pub fn role_skill(world: &World, id: EntityId, role: Role) -> Option<(f32, f32, &'static str)> {
-    let s = world.comp::<Skills>(id)?;
-    let m = &world.skill_means;
+/// A role's `(MEAN_* slot, value)` pairs (one, or two for a Lab).
+type RoleSlots = smallvec::SmallVec<[(usize, f32); 2]>;
+
+/// The one role → skill table (review fix: `role_skill` and `role_term`
+/// each carried a copy): a role's scored skills on `s` as `(MEAN_* slot,
+/// value)` pairs, one, or two for a Lab's knowledge and hacking, and the
+/// label. Spec roles: Farm farming; Market, Bar, Clinic, Garage
+/// persuasion; a guard fighting; a Lab knowledge and hacking; a Feed
+/// knowledge. `None` for an unskilled role.
+fn role_slots(role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
+    use smallvec::smallvec;
     let k = SocialSkill::Knowledge.index();
     let p = SocialSkill::Persuasion.index();
     Some(match role {
-        Role::Farmer => (s.farming, m[MEAN_FARMING], "farming"),
-        Role::Guard => (s.fighting, m[MEAN_FIGHTING], "fighting"),
-        Role::Clerk | Role::Bartender | Role::Ripperdoc | Role::Mechanic => (s.persuasion, m[p], "persuasion"),
-        Role::Researcher => (0.5 * (s.knowledge + s.hacking.max(0.0)), 0.5 * (m[k] + m[MEAN_HACKING]), "knowledge"),
-        Role::Reporter => (s.knowledge, m[k], "knowledge"),
+        Role::Farmer => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
+        Role::Guard => (smallvec![(MEAN_FIGHTING, s.fighting)], "fighting"),
+        Role::Clerk | Role::Bartender | Role::Ripperdoc | Role::Mechanic => {
+            (smallvec![(p, s.persuasion)], "persuasion")
+        }
+        Role::Researcher => (smallvec![(k, s.knowledge), (MEAN_HACKING, s.hacking.max(0.0))], "knowledge"),
+        Role::Reporter => (smallvec![(k, s.knowledge)], "knowledge"),
         Role::Gravedigger | Role::Sanitation => return None,
     })
+}
+
+/// A role's skill on `id` (the mean over its slots), against its city
+/// mean, and its label. `None` for an unskilled role.
+pub fn role_skill(world: &World, id: EntityId, role: Role) -> Option<(f32, f32, &'static str)> {
+    let s = world.comp::<Skills>(id)?;
+    let (pairs, label) = role_slots(role, s)?;
+    let n = pairs.len() as f32;
+    let v = pairs.iter().map(|&(_, v)| v).sum::<f32>() / n;
+    let m = pairs.iter().map(|&(slot, _)| world.skill_means[slot]).sum::<f32>() / n;
+    Some((v, m, label))
 }
 
 /// One skill's competence term (centred on 1): with `rank_norm`, `2 ×` its
@@ -64,16 +81,8 @@ pub fn norm(world: &World, slot: usize, v: f32) -> f32 {
 /// Lab the mean of knowledge's and hacking's.
 pub fn role_term(world: &World, id: EntityId, role: Role) -> Option<f32> {
     let s = world.comp::<Skills>(id)?;
-    let k = SocialSkill::Knowledge.index();
-    let p = SocialSkill::Persuasion.index();
-    Some(match role {
-        Role::Farmer => norm(world, MEAN_FARMING, s.farming),
-        Role::Guard => norm(world, MEAN_FIGHTING, s.fighting),
-        Role::Clerk | Role::Bartender | Role::Ripperdoc | Role::Mechanic => norm(world, p, s.persuasion),
-        Role::Researcher => 0.5 * (norm(world, k, s.knowledge) + norm(world, MEAN_HACKING, s.hacking.max(0.0))),
-        Role::Reporter => norm(world, k, s.knowledge),
-        Role::Gravedigger | Role::Sanitation => return None,
-    })
+    let (pairs, _) = role_slots(role, s)?;
+    Some(pairs.iter().map(|&(slot, v)| norm(world, slot, v)).sum::<f32>() / pairs.len() as f32)
 }
 
 /// The exec's term of `e = mean(knowledge, persuasion)`; 0 without one.

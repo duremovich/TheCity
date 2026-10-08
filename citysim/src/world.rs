@@ -641,6 +641,12 @@ pub struct World {
     /// `news::migrate` on the first load of an older save).
     #[serde(default)]
     pub feeds_seeded: bool,
+    /// Review fix: the save format this world was last written or migrated
+    /// at (`save::SAVE_VERSION`); 0 in a save from before the field, which
+    /// `save::from_ron` reads to pick the migrations to run, rather than a
+    /// sentinel on the data.
+    #[serde(default)]
+    pub save_version: u8,
 }
 
 /// `skip_serializing_if` for a component store with nothing in it.
@@ -938,6 +944,7 @@ impl World {
             stories: VecDeque::new(),
             next_story_id: 0,
             feeds_seeded: false,
+            save_version: crate::save::SAVE_VERSION,
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];

@@ -890,13 +890,14 @@ pub fn wants_sighting(world: &World, observer: EntityId, who: EntityId) -> bool 
         || in_vendetta(world, observer, who)
 }
 
-/// Are `a`'s gang and `b`'s gang in an open vendetta?
+/// Is a faction of `a` in an open vendetta with a faction of `b` (gangs,
+/// corps and the Law alike, as `grudges::vendettas` opens them)?
 fn in_vendetta(world: &World, a: EntityId, b: EntityId) -> bool {
     if world.vendettas.is_empty() {
         return false;
     }
-    let (Some(ga), Some(gb)) = (world.gang_of(a), world.gang_of(b)) else { return false };
-    world.vendettas.iter().any(|v| (v.a, v.b) == (ga, gb) || (v.a, v.b) == (gb, ga))
+    let member = |id, f| crate::systems::grudges::member_of(world, id, f);
+    world.vendettas.iter().any(|v| (member(a, v.a) && member(b, v.b)) || (member(a, v.b) && member(b, v.a)))
 }
 
 /// W12: at a co-location event, a body that cares about `who` notes where
