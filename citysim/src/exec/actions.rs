@@ -363,6 +363,14 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             let market = world.local(id, BuildingKind::Market);
             let units = economy::buy_quantity(world, id, market);
             let paid = economy::pay_for_food(world, id, market, units);
+            // L2 shadow fixes item 4: the units move with the coins (an
+            // interrupted purchase was refunded and bought again: 12 food
+            // flows for 6 meals); `(0, 0)` marks a shelf found empty.
+            if crate::systems::fixes::item(world, 4) {
+                let taken = economy::take_food(world, id, market, units, paid);
+                world.pending_purchase.insert(id, if taken { (units, 0) } else { (0, 0) });
+                return;
+            }
             world.pending_purchase.insert(id, (units, paid));
         }
         ActionKind::Wander => {
@@ -433,6 +441,19 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
 /// Effects of abandoning a step mid-way: hours already farmed still count,
 /// a paid-for purchase is refunded; everything else is simply dropped.
 pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick) {
+    // L2 shadow fixes item 2: a shift cut past half is paid pro rata.
+    crate::systems::fixes::work_aborted(world, id, kind, started);
+    // Item 4: a started purchase is atomic: nothing is refunded; a meal out
+    // is eaten, an entry's fun is had for the time spent.
+    if crate::systems::fixes::item(world, 4) && crate::systems::fixes::paid_step(kind) {
+        match kind {
+            ActionKind::BuyFood => {
+                world.pending_purchase.remove(&id);
+            }
+            _ => crate::systems::leisure::abort_paid(world, id, kind, started),
+        }
+        return;
+    }
     match kind {
         ActionKind::FarmWork => {
             if let Some(farm) = world.comp::<Job>(id).and_then(|j| j.employer) {
@@ -479,7 +500,10 @@ pub fn finishes_early(world: &World, id: EntityId, kind: ActionKind, started: Ti
         // `sleep_min_ticks` (a long commute made it true most of the day,
         // and the worker slept in one-minute fragments at energy 0).
         ActionKind::Sleep => {
-            world.comp::<Needs>(id).is_some_and(|n| n.energy >= 0.9)
+            // L2 shadow fixes item 3: a sleep runs to `sleep_wake_energy`.
+            let wake =
+                if crate::systems::fixes::sleep_commit(world) { world.config.life.sleep_wake_energy } else { 0.9 };
+            world.comp::<Needs>(id).is_some_and(|n| n.energy >= wake)
                 || (crate::exec::routine::must_leave_for_work(world, id)
                     && (!world.config.life.enabled
                         || world.tick.saturating_sub(started) >= world.config.life.sleep_min_ticks))
@@ -571,6 +595,10 @@ pub fn on_complete(
         ActionKind::BuyFood => {
             let (units, paid) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
             world.release_all(id);
+            // L2 shadow fixes item 4: taken at the start already.
+            if crate::systems::fixes::item(world, 4) {
+                return if units > 0 { StepResult::Done } else { StepResult::Failed(FailReason::StockGone) };
+            }
             let market = world.local(id, BuildingKind::Market);
             if economy::take_food(world, id, market, units, paid) {
                 StepResult::Done
@@ -1341,6 +1369,17 @@ pub fn on_arrive(world: &mut World, id: EntityId, step: &crate::components::Acti
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 n.safety = n.safety.max(0.5);
             }
+            // L2 shadow fixes item 6: the flight holds a while: no leisure
+            // or company out on the street for `flee_clear_ticks`.
+            if crate::systems::fixes::item(world, 6) {
+                let until = world.tick + world.config.life.flee_clear_ticks;
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    for g in [crate::components::GoalKind::Unwind, crate::components::GoalKind::Socialise] {
+                        let c = b.cooldowns.entry(g).or_insert(0);
+                        *c = (*c).max(until);
+                    }
+                }
+            }
         }
         // L1: at the last-seen tile, chase a suspect still in sight; a
         // sighting gone stale is dropped (the Arrest step then fails).
@@ -1440,7 +1479,14 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
         }
         return StepResult::Failed(FailReason::StockGone);
     }
-    crate::systems::ownership::pay(world, None, Some(id), pay, crate::systems::ownership::Flow::Sanitation);
+    // L2 shadow fixes item 21: booked as Scavenge (it read "Sanitation +1
+    // from the City" in the diaries).
+    let flow = if crate::systems::fixes::item(world, 21) {
+        crate::systems::ownership::Flow::Scavenge
+    } else {
+        crate::systems::ownership::Flow::Sanitation
+    };
+    crate::systems::ownership::pay(world, None, Some(id), pay, flow);
     world.remember(id, MemoryKind::Paid, None, 0.1, 0.0, false);
     // L2 L9: the find is scrap for the Recycler's Parts.
     crate::systems::jobs::add_scrap(world);

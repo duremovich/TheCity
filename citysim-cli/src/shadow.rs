@@ -1279,6 +1279,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                             | MemoryKind::Fought
                             | MemoryKind::Won
                             | MemoryKind::Lost
+                            | MemoryKind::Bout
                             | MemoryKind::Courted
                     ) {
                         t.contact(world, s);
@@ -1560,10 +1561,11 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
     let _ = writeln!(
         md,
         "- coins spent: leisure {} (venues {}, gambling {} less {} won back), drink {}, food {}, rent {}",
-        money(out_of(&["Leisure", "Gamble"]) - in_of(&["Leisure", "Gamble", "GambleWin"])),
+        // Street dice are gambling too: stakes lost out, winnings back.
+        money(out_of(&["Leisure", "Gamble", "StreetDice"]) - in_of(&["Leisure", "Gamble", "GambleWin", "StreetDice"])),
         money(out_of(&["Leisure"]) - in_of(&["Leisure"])),
-        money(out_of(&["Gamble"]) - in_of(&["Gamble"])),
-        money(in_of(&["GambleWin"])),
+        money(out_of(&["Gamble", "StreetDice"]) - in_of(&["Gamble"])),
+        money(in_of(&["GambleWin", "StreetDice"])),
         money(out_of(&["Drink"])),
         money(out_of(&["Food"]) - in_of(&["Food"])),
         money(out_of(&["Rent"]))

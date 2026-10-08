@@ -224,10 +224,19 @@ pub fn considerations(
             // Only Eat reads the local price: one Market scan per think, not per goal.
             let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
             let can_eat = inv.food > 0 || wallet.coins >= price || pantry > 0 || lawfulness < 0.3;
-            vec![
+            let mut cs = vec![
                 Consideration::new("U(hunger)", urgency(n.hunger), SQUARE),
                 Consideration::new("can afford/obtain", can(can_eat), GATE),
-            ]
+            ];
+            // L2 shadow fixes item 3: the tired sleep before they shop
+            // (Eat cut the Friday worker's sleep at 06:15 three days
+            // running), unless the hunger is real.
+            if n.hunger >= 0.25 {
+                if let Some(c) = energy_brake(world, n) {
+                    cs.push(c);
+                }
+            }
+            cs
         }
         GoalKind::Sleep => {
             let n = needs?;
@@ -291,12 +300,18 @@ pub fn considerations(
             world.comp::<Skills>(id)?;
             let p = pers?;
             let in_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod));
-            vec![
+            let mut cs = vec![
                 Consideration::new("U(wealth)", urgency(n.wealth), SQUARE),
                 Consideration::new("U(hunger)", urgency(n.hunger), IDENTITY),
                 Consideration::new("not in shift", can(!in_shift), gate_or(0.3)),
                 Consideration::new("greed", p.greed, Curve::Linear { m: 0.5, b: 0.5 }),
-            ]
+            ];
+            // L2 shadow fixes item 3 (the worker slept in 25-min pieces while
+            // Earn held 0.899).
+            if let Some(c) = energy_brake(world, n) {
+                cs.push(c);
+            }
+            cs
         }
         GoalKind::Socialise => {
             let n = needs?;
@@ -493,7 +508,12 @@ pub fn considerations(
             let patrol_day = !crate::systems::law::jail_duty(world, id, key);
             let legs_left =
                 world.comp::<Brain>(id).is_some_and(|b| b.patrol_legs < world.config.crime.patrol_legs_per_shift);
-            let on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;
+            let mut on_duty = job.on_shift(tod) && patrol_day && job.last_shift_day != Some(key) && legs_left;
+            // L2 shadow fixes item 10: no patrol on the rest day (unpaid:
+            // `law::credit_guard_shifts` reads the workday).
+            if crate::systems::fixes::item(world, 10) {
+                on_duty &= crate::exec::routine::workday_of(world, id, job, key);
+            }
             // The same reach as Arrest's gate (M10 phase 5c review): a
             // located warrant across the city scaled every guard's Patrol by
             // 0.3 while only the guards in range could Arrest, so the rest
@@ -547,7 +567,11 @@ pub fn considerations(
                 } else {
                     crate::systems::law::located_suspects(world, Some(by)).into_iter().filter_map(dist).min()
                 };
-                let on = if job.on_shift(tod) || escorting { 1.0 } else { world.config.life.arrest_off_shift };
+                // L2 shadow fixes item 10: the shift is a workday's.
+                let working = job.on_shift(tod)
+                    && (!crate::systems::fixes::item(world, 10)
+                        || crate::exec::routine::workday_of(world, id, job, job.shift_key_at(world.tick)));
+                let on = if working || escorting { 1.0 } else { world.config.life.arrest_off_shift };
                 return Some((
                     vec![
                         Consideration::new("warrant located", can(nearest.is_some()), GATE),
@@ -830,6 +854,16 @@ pub fn considerations(
         }
     };
     Some((cs, flat))
+}
+
+/// L2 shadow fixes item 3: below `[life] energy_brake` a discretionary
+/// goal weighs `0.5 + energy` (energy 0: half; at the brake: 1). `None`
+/// with the fixes off or above the brake.
+pub fn energy_brake(world: &World, n: &Needs) -> Option<Consideration> {
+    if !crate::systems::fixes::sleep_commit(world) || n.energy >= world.config.life.energy_brake {
+        return None;
+    }
+    Some(Consideration::raw("energy brake", n.energy, (0.5 + n.energy).min(1.0)))
 }
 
 /// Chat is allowed at the Market, Bar, Farm and one's own Home.

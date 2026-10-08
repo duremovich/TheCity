@@ -273,7 +273,19 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
         let needs_route =
             world.comp::<Brain>(id).is_some_and(|b| b.patrol_route.is_empty() || b.patrol_shift_key != key);
         if needs_route {
-            let route = crate::systems::law::new_patrol_route(world, id);
+            let mut route = crate::systems::law::new_patrol_route(world, id);
+            // L2 shadow fixes item 10: the round starts at the stop nearest
+            // the guard (it walked 3.7-3.9 h from her door to the first).
+            if crate::systems::fixes::item(world, 10) && route.len() > 1 {
+                let from = crate::exec::walk_origin(world, id).unwrap_or_default();
+                let first = route
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, &b)| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), i)))
+                    .min()
+                    .map_or(0, |(_, i)| i);
+                route.rotate_left(first);
+            }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.patrol_route = route;
                 b.patrol_legs = 0;

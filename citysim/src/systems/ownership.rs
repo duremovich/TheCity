@@ -206,6 +206,9 @@ pub enum Flow {
     /// L2 L12: street dice, agent to agent (untaxed; review fix: not a
     /// house's pay-out, so out of `flow_gamble`).
     StreetDice,
+    /// L2 shadow fixes item 21: the Recycler's coin for a scavenged haul,
+    /// Treasury -> agent (untaxed; in `flow_other` as `Sanitation` was).
+    Scavenge,
 }
 
 impl Flow {
@@ -261,6 +264,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         | Flow::Fine
         | Flow::Hotel
         | Flow::Sanitation
+        | Flow::Scavenge
         | Flow::Robbery => row.flow_other += coins,
         Flow::Asset => row.flow_asset += coins,
         Flow::AssetUpkeep => row.flow_asset_upkeep += coins,

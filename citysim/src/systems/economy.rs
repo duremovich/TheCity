@@ -402,6 +402,12 @@ pub fn take_food(world: &mut World, agent: EntityId, market: Option<EntityId>, u
 /// building's owner pays; nobody pays from a negative purse. Returns the net
 /// coins paid.
 pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
+    collect_wage_scaled(world, agent, 1.0)
+}
+
+/// `collect_wage` with the day's wage scaled by `scale` (L2 shadow fixes
+/// item 2: a cut shift paid pro rata; 1.0 is `collect_wage` exactly).
+pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i64 {
     let tax_rate = world.levers.tax_rate;
     let day = world.day();
     let Some(job) = world.comp::<Job>(agent).cloned() else { return 0 };
@@ -411,7 +417,7 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     let payer = job.employer.and_then(|e| world.owner_of(e));
     // D22: a Food corp in Squeeze pays 0.9.
     // M15 W29: a poached hire's premium multiplies too.
-    let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| c.wage_mult) * job.premium;
+    let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| c.wage_mult) * job.premium * scale;
     let per_day = if mult == 1.0 { job.wage_per_day } else { (job.wage_per_day as f32 * mult).round() as i64 };
     let due = per_day * i64::from(job.days_unpaid);
     let available = world.purse(payer).max(0);
@@ -544,7 +550,11 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
 pub fn dole_eligible(world: &World, agent: EntityId) -> bool {
     match world.comp::<Job>(agent) {
         None => true,
-        Some(j) => crate::systems::jobs::on(world) && (!j.paid_once || j.days_unpaid >= UNPAID_DOLE_DAYS),
+        Some(j) => {
+            (crate::systems::jobs::on(world) && (!j.paid_once || j.days_unpaid >= UNPAID_DOLE_DAYS))
+                // L2 shadow fixes item 11: an absentee (two workdays missed).
+                || crate::systems::fixes::absentee(world, j)
+        }
     }
 }
 

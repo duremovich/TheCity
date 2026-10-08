@@ -384,12 +384,19 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     let half_life = world.config.brain.memory_half_life_days;
     // The listener's deeds once (≤ 32), not one walk per candidate.
     let known: SmallVec<[(DeedRef, u64); 32]> = memory::deeds(to, ml).map(|(x, xr)| (xr, time::day(x.tick))).collect();
+    // L2 shadow fixes item 17: what this teller told this listener lately
+    // is not told again (the same teller told one listener a deed four
+    // times; 64 % of 307 tellings were "already known").
+    let told = crate::systems::fixes::item(world, 17) && !world.told.is_empty();
     let mut best: Option<(f32, u32, Tick, MemoryEntry, DeedRef)> = None;
     for (e, r) in memory::deeds(from, ms) {
         if e.salience < g.gossip_min || memory::hops_of(e) >= g.max_hops || r.actor == Some(to) {
             continue;
         }
         let day = time::day(e.tick);
+        if told && world.told.contains_key(&crate::systems::fixes::told_key(from, to, &r, day)) {
+            continue;
+        }
         let novelty = if known.iter().any(|&(k, kd)| k == r && kd == day) { 0.3 } else { 1.0 };
         let score = memory::weight(e, now, half_life) * e.conf * novelty;
         let key = r.actor.map_or(u32::MAX, |a| a.index);
@@ -404,6 +411,10 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     let trust = world.edge(to, from).map_or(0.0, |e| e.trust);
     let hop_salience = g.hop_salience;
     let legacy = g.legacy_second_hand;
+    if crate::systems::fixes::item(world, 17) {
+        let key = crate::systems::fixes::told_key(from, to, &r, time::day(src.tick));
+        world.told.insert(key, now);
+    }
     let mut rng = world.rng.word(WordNs::Exchange, now, (u64::from(from.index) << 32) | u64::from(to.index));
     let d = talk_district(world, from);
     distort(world, from, &mut r, d, &mut rng);

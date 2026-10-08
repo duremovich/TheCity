@@ -1789,6 +1789,12 @@ pub fn seller_open(world: &World, b: EntityId) -> bool {
         return false;
     }
     let Some(role) = ownership::role_for(bd.kind) else { return false };
+    // L2 shadow fixes item 12: a Clinic sells only with its doctor at the
+    // counter on a working shift (Ripperdoc#443 sold three Therapy sessions
+    // while its doctor wandered Civic on her rest day).
+    if bd.kind == BuildingKind::Clinic && crate::systems::fixes::item(world, 12) {
+        return crate::systems::fixes::staff_present(world, b, role);
+    }
     let tod = world.tick_of_day();
     world.workers(role).iter().any(|&w| world.comp::<Job>(w).is_some_and(|j| j.employer == Some(b) && j.on_shift(tod)))
 }

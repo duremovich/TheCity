@@ -116,6 +116,20 @@ pub fn raise_crime_on(
     crime: Crime,
     tile: TilePos,
 ) {
+    raise_crime_except(world, actor, victim, object, crime, tile, None);
+}
+
+/// `raise_crime_on` with one party who is no witness (L2 shadow fixes item
+/// 16: a buyer is not a witness of the sale it made).
+pub fn raise_crime_except(
+    world: &mut World,
+    actor: EntityId,
+    victim: Option<EntityId>,
+    object: Option<EntityId>,
+    crime: Crime,
+    tile: TilePos,
+    except: Option<EntityId>,
+) {
     // L2 phase 4 (plan L25): the ledger's on-screen victims.
     if let Some(v) = victim {
         let kind = match crime {
@@ -168,7 +182,7 @@ pub fn raise_crime_on(
         .bodies()
         .into_iter()
         .filter(|_| !detained)
-        .filter(|&w| w != actor)
+        .filter(|&w| w != actor && Some(w) != except)
         // M14 V12: a body jacked in sees nothing.
         .filter(|w| world.runner_of.is_empty() || !world.runner_of.contains_key(w))
         .filter(|&w| {
@@ -1042,6 +1056,21 @@ pub fn garrisoned(world: &World) -> bool {
 /// guard's place among the guards by entity index, so a small roster never
 /// leaves the Jail empty: when no rank matches the shift, the first guard holds it.
 pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
+    // L2 shadow fixes item 10: the duty is fixed for a shift as its key
+    // comes due (it flipped from Patrol to the desk at 13:13 and the guard
+    // walked 100 min back).
+    if crate::systems::fixes::item(world, 10) {
+        if let Some((k, v)) = world.comp::<Job>(guard).and_then(|j| j.duty_fixed) {
+            if k == shift_key {
+                return v;
+            }
+        }
+    }
+    jail_duty_now(world, guard, shift_key)
+}
+
+/// `jail_duty` as the roster and posture read now.
+fn jail_duty_now(world: &World, guard: EntityId, shift_key: i64) -> bool {
     // M11 D18: only the city's guards hold the Jail, Garrison included. The
     // roster is read off the role index without a copy: this runs per guard
     // per tick (`credit_guard_shifts`) and in every guard's think.
@@ -1160,7 +1189,19 @@ fn credit_guard_shifts(world: &mut World) {
     let share = world.config.law.shift_duty_share;
     // A copy: `maybe_quit` can take a guard off the roster mid-loop.
     let guards = world.guards().to_vec();
+    let fix = crate::systems::fixes::item(world, 10);
     for g in guards {
+        // L2 shadow fixes item 10: fix the coming shift's duty once.
+        if fix {
+            let key = world.comp::<Job>(g).map(|j| j.next_shift_key(world.tick));
+            let stale = world.comp::<Job>(g).is_some_and(|j| j.duty_fixed.map(|d| d.0) != key);
+            if let (true, Some(key)) = (stale, key) {
+                let v = jail_duty_now(world, g, key);
+                if let Some(j) = world.comp_mut::<Job>(g) {
+                    j.duty_fixed = Some((key, v));
+                }
+            }
+        }
         let Some(job) = world.comp::<Job>(g) else { continue };
         let (on_now, ended) = (job.on_shift(tod), job.on_shift(last) && !job.on_shift(tod));
         if on_now {
@@ -1187,7 +1228,8 @@ fn credit_guard_shifts(world: &mut World) {
         let worked = job.last_shift_day == Some(key) || f32::from(job.duty_ticks) >= share * length as f32;
         // A struck shift (M11 D35) is marked worked but owes nothing.
         let struck = job.struck_shift == Some(key);
-        let owed = worked && !struck && crate::exec::routine::is_workday(key) && !world.has::<Sentence>(g);
+        let owed =
+            worked && !struck && crate::exec::routine::workday_of(world, g, job, key) && !world.has::<Sentence>(g);
         if let Some(j) = world.comp_mut::<Job>(g) {
             j.duty_ticks = 0;
             if owed {

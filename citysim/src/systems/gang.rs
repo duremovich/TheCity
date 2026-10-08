@@ -541,7 +541,14 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     let g = world.comp::<Gang>(gang)?;
     let own_home = world.comp::<Household>(id).and_then(|h| h.home);
     let actor_tile = world.comp::<Position>(id)?.tile;
-    if let Some(bar) = crate::systems::stims::dealer_target(world, id) {
+    // L2 shadow fixes item 16: a dealer off its busy hours has no GangWork
+    // (it fell through to the order's shakedowns and fights: Murders on
+    // 42-47 rose 215 -> 364 with the hours gate alone).
+    if crate::systems::fixes::item(world, 16) && !crate::systems::fixes::deal_hours(world) {
+        if crate::systems::stims::deals_today(world, id).is_some() {
+            return None;
+        }
+    } else if let Some(bar) = crate::systems::stims::dealer_target(world, id) {
         return Some((bar, following_order(world, id)));
     }
     let hideout_door = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
@@ -703,9 +710,19 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     if world.gang_of(actor).is_some_and(|g| crate::systems::creeds::is_purist(world, g)) {
         amount = (world.config.creeds.tithe_frac * amount as f32).round() as i64;
     }
+    // L2 shadow fixes item 15: a gang-mate at home is not squeezed (the
+    // leader shook down her own dealer and made him an Enemy).
+    let mates = crate::systems::fixes::item(world, 15).then(|| world.gang_of(actor)).flatten();
     let occupants: Vec<EntityId> = world
         .comp::<Building>(home)
-        .map(|b| b.occupants.iter().copied().filter(|&o| o != actor && world.has::<Wallet>(o)).collect())
+        .map(|b| {
+            b.occupants
+                .iter()
+                .copied()
+                .filter(|&o| o != actor && world.has::<Wallet>(o))
+                .filter(|&o| mates.is_none() || world.gang_of(o) != mates)
+                .collect()
+        })
         .unwrap_or_default();
     // M15 W27: with moves on, the shakedown is an Intimidate against the
     // strongest occupant; a refusal takes nothing and advances no claim.

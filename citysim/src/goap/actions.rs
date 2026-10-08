@@ -564,6 +564,9 @@ pub struct PlanCtx {
     pub refuge: Option<LocationKey>,
     /// L1: below a meal (`life::broke`): Beg and Scavenge are income.
     pub poor: bool,
+    /// L2 shadow fixes item 19: on the street at a HangOut spot with
+    /// company: Beg here.
+    pub beg_spot: bool,
     /// Door-to-door Manhattan distance from the agent to each reachable key.
     pub dist: BTreeMap<LocationKey, u32>,
 }
@@ -660,7 +663,16 @@ impl PlanCtx {
             add(LocationKey::Hideout, crate::systems::gang::hideout_for(world, agent));
             if wage_at == LocationKey::Workplace {
                 add(LocationKey::Workplace, world.wage_desk(agent));
-            } else if job.and_then(|j| j.employer).is_some_and(|e| crate::systems::jobs::is_l2_building(world, e)) {
+            } else if job.and_then(|j| j.employer).is_some_and(|e| {
+                crate::systems::jobs::is_l2_building(world, e)
+                    // L2 shadow fixes item 11: a city-owned Feed's or Lab's
+                    // staff work at it too (the Civic Wire's reporter was
+                    // sent to the Hall: Work "Unreachable" all week).
+                    || (crate::systems::fixes::item(world, 11)
+                        && world
+                            .comp::<Building>(e)
+                            .is_some_and(|b| LocationKey::of_building(b.kind) == LocationKey::Workplace))
+            }) {
                 // L2: a city-owned venue's or Fab's staff work at it (the
                 // wage desk is the Hall).
                 add(LocationKey::Workplace, job.and_then(|j| j.employer));
@@ -909,7 +921,20 @@ impl PlanCtx {
             workplace: job
                 .filter(|j| crate::exec::routine::shift_pending(world, agent, j))
                 .map(|j| crate::exec::routine::workplace_key_for(world, agent, j)),
-            pantry: home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food),
+            pantry: {
+                let stock = home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food);
+                // L2 shadow fixes item 20: at plan time, less what housemates
+                // reserved on the way (several walked home to one meal).
+                match home {
+                    Some(h) if !light && wants(&[GoalKind::Eat]) && crate::systems::fixes::item(world, 20) => stock
+                        .saturating_sub(crate::goap::world_state::WorldState::reserved_by_others(
+                            world,
+                            h,
+                            Some(agent),
+                        )),
+                    _ => stock,
+                }
+            },
             target_pantry,
             target_occupied,
             market_stock: stock_of(BuildingKind::Market),
@@ -1048,6 +1073,9 @@ impl PlanCtx {
             rough_ok,
             refuge: refuge.map(|(k, _)| k),
             poor: life && wants(&[GoalKind::Earn]) && crate::systems::life::broke(world, agent),
+            beg_spot: wants(&[GoalKind::Earn])
+                && crate::systems::fixes::beg_at_spot(world)
+                && crate::systems::fixes::at_spot_with_company(world, agent),
             dist,
         };
         // L1: with a week of dole waiting at the Hall, scrap and begging are
@@ -1210,7 +1238,11 @@ impl ActionKind {
             }
             ActionKind::Forage => at(LocationKey::Farm) && ws.forage_available,
             // `bar_full` is a plan-time hint only: once inside, the agent counts as an occupant.
-            ActionKind::Beg => at(LocationKey::Market) || (at(LocationKey::Bar) && !ctx.bar_full),
+            ActionKind::Beg => {
+                at(LocationKey::Market)
+                    || (at(LocationKey::Bar) && !ctx.bar_full)
+                    || (ctx.beg_spot && at(LocationKey::Street))
+            }
             // A member on watch, lying low or homeless beds down at the Hideout.
             // M12 D21: one who can afford a bed never plans the street; a
             // booked guest sleeps at the Hotel, a squatter in the squat.
@@ -1643,7 +1675,12 @@ impl ActionKind {
             ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0,
             ActionKind::Forage => 6.0 + if ctx.hunger < 0.3 { 2.0 } else { 0.0 },
             ActionKind::Beg => {
-                let c = 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0;
+                let mut c = 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0;
+                // L2 shadow fixes item 19: a corner with company is an
+                // audience: half the cost (else Scavenge always won).
+                if ctx.beg_spot {
+                    c *= 0.5;
+                }
                 if ctx.fun_term > 0.0 {
                     c * (1.0 - 0.5 * ctx.fun_term)
                 } else {

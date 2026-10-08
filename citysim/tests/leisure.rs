@@ -48,7 +48,11 @@ fn coins(w: &World, id: EntityId) -> i64 {
 /// refunded; coins are conserved throughout.
 #[test]
 fn test_enjoy_charges_price_and_refunds_on_abort() {
-    let mut w = World::new(42, Config::load());
+    // The refund is the L2 path; the L2 shadow fixes (item 4) make a started
+    // purchase atomic: checked at the end.
+    let mut cfg = Config::load();
+    cfg.life.l2_fixes = false;
+    let mut w = World::new(42, cfg);
     assert!(leisure::on(&w));
     let club = standing(&w, BuildingKind::Arcade)[0];
     let a = civilian(&w, &[]);
@@ -68,6 +72,16 @@ fn test_enjoy_charges_price_and_refunds_on_abort() {
     // Broke: no start, nothing moves.
     set_coins(&mut w, a, 0);
     assert!(!actions::can_start(&w, a, ActionKind::Enjoy, Some(club)));
+    // L2 shadow fixes item 4: with the fixes on, an abandoned entry is kept
+    // (no refund), coins still conserved.
+    w.config.life.l2_fixes = true;
+    set_coins(&mut w, a, 100);
+    let total = ownership::total_coins(&w);
+    actions::on_start(&mut w, a, ActionKind::Enjoy, Some(club));
+    let now = w.tick;
+    actions::on_abort(&mut w, a, ActionKind::Enjoy, now);
+    assert_eq!(coins(&w, a), 100 - price, "a started entry is not refunded");
+    assert_eq!(ownership::total_coins(&w), total, "conserved");
 }
 
 /// L18: table games conserve coins; a house that cannot pay a win shuts

@@ -357,6 +357,47 @@ fn assign(world: &mut World) {
             }
         }
     }
+    // L2 shadow fixes item 7: a body within its tier dwell (or mid-purchase)
+    // keeps a Coarse slot against an equal-priority newcomer, the lowest
+    // ranked first (an unpinned stand-in flapped Coarse/Statistical every
+    // ~3 h: each demotion aborted a paid Enjoy and snapped her home).
+    if crate::systems::fixes::lod_dwell(world) {
+        let boundary = (max_full + max_coarse).min(ids.len());
+        for rank in boundary..ids.len() {
+            if tier[rank] != Lod::Statistical || current[rank] == Lod::Statistical {
+                continue;
+            }
+            if !crate::systems::fixes::dwell_holds(world, ids[rank]) {
+                continue;
+            }
+            let newcomer = (0..boundary)
+                .rev()
+                .find(|&r| tier[r] == Lod::Coarse && current[r] == Lod::Statistical && prio[r] == prio[rank]);
+            if let Some(r) = newcomer {
+                tier[r] = Lod::Statistical;
+                tier[rank] = Lod::Coarse;
+                world.stats.current.living.fix_dwell += 1;
+            }
+        }
+        // ... and one demoted within its dwell is not promoted back over an
+        // equal-priority incumbent (she was Statistical for an hour, then a
+        // body again, a dozen times a week).
+        for r in (0..boundary).rev() {
+            if tier[r] != Lod::Coarse || current[r] != Lod::Statistical {
+                continue;
+            }
+            if !crate::systems::fixes::dwell_recent(world, ids[r]) {
+                continue;
+            }
+            let incumbent = (boundary..ids.len())
+                .find(|&k| tier[k] == Lod::Statistical && current[k] != Lod::Statistical && prio[k] == prio[r]);
+            if let Some(k) = incumbent {
+                tier[k] = Lod::Coarse;
+                tier[r] = Lod::Statistical;
+                world.stats.current.living.fix_dwell += 1;
+            }
+        }
+    }
     for (i, &id) in ids.iter().enumerate() {
         set_lod(world, id, tier[i]);
     }
@@ -441,12 +482,23 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     if from == lod {
         return;
     }
-    if lod == Lod::Statistical {
-        // M14 V13: a body jacked in is never Statistical; M15 W22: nor a
-        // hunter or a hunted target.
-        if world.runner_of.contains_key(&id) || world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id) {
-            return;
+    // M14 V13: a body jacked in is never Statistical; M15 W22: nor a
+    // hunter or a hunted target.
+    if lod == Lod::Statistical
+        && (world.runner_of.contains_key(&id) || world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id))
+    {
+        return;
+    }
+    // L2 shadow fixes item 7: the tier's start, for the dwell (after the
+    // refusal above: a refused body has not changed tier).
+    if crate::systems::fixes::lod_dwell(world) {
+        let now = world.tick;
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.lod_since = now;
         }
+    }
+    let Some(brain) = world.comp::<Brain>(id) else { return };
+    if lod == Lod::Statistical {
         if brain.plan.is_some() {
             let goal = brain.plan_goal();
             world.abort_plan(id);
@@ -635,29 +687,20 @@ pub fn run_statistical(world: &mut World) {
             Outcome::Idle
         };
         match outcome {
-            Outcome::Eat => stat_eat(world, id),
+            Outcome::Eat => {
+                stat_eat(world, id);
+                // L2 shadow fixes item 8: a hungry hour whose Eat came to
+                // nothing sleeps at night (two Statistical workers read
+                // energy 0.00 for 92 and 122 h: every night hour drew Eat).
+                let after = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
+                if hungry && phase == DayPhase::Night && after <= hunger && crate::systems::fixes::stat_sleep(world) {
+                    stat_sleep_night(world, id);
+                }
+            }
             Outcome::Social => stat_social(world, id),
             Outcome::Sleep => {
                 if phase == DayPhase::Night {
-                    // As a Full agent's Sleep at home: energy back, and a
-                    // cohabiting spouse keeps the marriage warm.
-                    let home = world.comp::<Household>(id).and_then(|h| h.home);
-                    if home.is_some() {
-                        world.mark_day(id, trace_flags::SLEPT_AT_HOME);
-                    } else if crate::systems::street::booked_hotel(world, id).is_some() {
-                        // M12 D21: a booked bed is a bed.
-                        world.mark_day(id, trace_flags::SLEPT_AT_HOME | trace_flags::HOTEL);
-                    } else if world.has::<crate::components::Squatter>(id) {
-                        world.mark_day(id, trace_flags::SQUAT);
-                    }
-                    let with_spouse = home.is_some()
-                        && world.spouse_of(id).is_some_and(|s| world.comp::<Household>(s).and_then(|h| h.home) == home);
-                    if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
-                        n.energy = 1.0;
-                        if with_spouse {
-                            n.intimacy = (n.intimacy + 0.4).min(1.0);
-                        }
-                    }
+                    stat_sleep_night(world, id);
                 }
             }
             Outcome::Idle => {}
@@ -667,6 +710,28 @@ pub fn run_statistical(world: &mut World) {
         stat_rolls(world, id, &row);
         if world.has::<Brain>(id) {
             world.recompute_wealth_for(id);
+        }
+    }
+}
+
+/// A Statistical night's Sleep: as a Full agent's Sleep at home: energy
+/// back, and a cohabiting spouse keeps the marriage warm.
+fn stat_sleep_night(world: &mut World, id: EntityId) {
+    let home = world.comp::<Household>(id).and_then(|h| h.home);
+    if home.is_some() {
+        world.mark_day(id, trace_flags::SLEPT_AT_HOME);
+    } else if crate::systems::street::booked_hotel(world, id).is_some() {
+        // M12 D21: a booked bed is a bed.
+        world.mark_day(id, trace_flags::SLEPT_AT_HOME | trace_flags::HOTEL);
+    } else if world.has::<crate::components::Squatter>(id) {
+        world.mark_day(id, trace_flags::SQUAT);
+    }
+    let with_spouse =
+        home.is_some() && world.spouse_of(id).is_some_and(|s| world.comp::<Household>(s).and_then(|h| h.home) == home);
+    if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+        n.energy = 1.0;
+        if with_spouse {
+            n.intimacy = (n.intimacy + 0.4).min(1.0);
         }
     }
 }
@@ -1109,7 +1174,8 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     }
     let Some(job) = job else { return };
     let key = job.shift_key_at(tick);
-    if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::is_workday(key) {
+    // L2 shadow fixes item 10: a guard's own (staggered) workday.
+    if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::workday_of(world, id, &job, key) {
         return;
     }
     // This shift is already done, or struck (M11 D35): no work, no wage.

@@ -708,6 +708,10 @@ pub struct World {
     /// L2 L16: the day two kin last met (HangOut, co-location), `(lo, hi)`.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub last_met: BTreeMap<(EntityId, EntityId), u64>,
+    /// L2 shadow fixes item 17: the tick a teller last told a listener a
+    /// deed, keyed `(teller, listener, deed hash)` (`fixes::told_key`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub told: BTreeMap<(EntityId, EntityId, u64), Tick>,
     /// L2 L14: the 90th-percentile wallet at the last midnight (the Lounge
     /// rung's "top wealth decile").
     #[serde(default, skip_serializing_if = "is_zero_i64")]
@@ -1037,6 +1041,7 @@ impl World {
             hangouts: BTreeMap::new(),
             spots: Vec::new(),
             last_met: BTreeMap::new(),
+            told: BTreeMap::new(),
             wealth_p90: 0,
         };
         w.spawn_buildings();
@@ -1356,6 +1361,7 @@ impl World {
                         struck_shift: None,
                         premium: 1.0,
                         paid_once: true,
+                        duty_fixed: None,
                     },
                 );
             }
@@ -2185,6 +2191,8 @@ impl World {
                     | MemoryKind::Fought
                     | MemoryKind::Lost
                     | MemoryKind::Won
+                    // L2 shadow fixes item 9: a Statistical fighter's bout.
+                    | MemoryKind::Bout
                     | MemoryKind::Courted
                     | MemoryKind::Rejected
                     | MemoryKind::RentShort

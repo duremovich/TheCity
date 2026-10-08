@@ -574,6 +574,13 @@ fn job_search(world: &mut World) {
 /// guard lawful (≥ 0.4); a Lab the best hacker, a Feed the most
 /// knowledgeable (ties lower id).
 fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
+    // L2 shadow fixes item 13: a corp's exec is not in the labour pool
+    // (Zetatech's exec was hired as a Militech Fab Tech and laid off).
+    let execs = if crate::systems::fixes::item(world, 13) {
+        crate::systems::classes::exec_set(world)
+    } else {
+        std::collections::BTreeSet::new()
+    };
     world
         .citizens()
         .into_iter()
@@ -582,6 +589,7 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         .filter(|&id| !crate::systems::life::quit_blocks(world, id, employer))
         .filter(|&id| !world.has::<Job>(id) && !world.has::<Sentence>(id))
         .filter(|&id| is_adult(world, id))
+        .filter(|id| !execs.contains(id))
         .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
         .map(|id| {
             // M14 V16: a Lab hires the best hacker (ties lower id),
@@ -649,6 +657,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             premium: 1.0,
             // L2 fix round: on the dole until the first wage (L2 on only).
             paid_once: !crate::systems::jobs::on(world),
+            duty_fixed: None,
         },
     );
     world.abort_plan(id);

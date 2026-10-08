@@ -225,6 +225,16 @@ pub fn deal_bar(world: &World, gang: EntityId) -> Option<EntityId> {
 /// today: loyal (`following_order`), a dealer by the hash, and the gang's
 /// stock holds a batch (or the member still carries doses).
 pub fn dealer_target(world: &World, agent: EntityId) -> Option<EntityId> {
+    // L2 shadow fixes item 16: a Deal shift starts in the busy hours (four
+    // pre-dawn shifts, 00:57-05:37, sold nothing).
+    if crate::systems::fixes::item(world, 16) && !crate::systems::fixes::deal_hours(world) {
+        return None;
+    }
+    deals_today(world, agent)
+}
+
+/// `dealer_target` at any hour: the deal Bar when this member deals today.
+pub fn deals_today(world: &World, agent: EntityId) -> Option<EntityId> {
     if !on(world) || crate::systems::gang::following_order(world, agent).is_none() || !is_dealer(world, agent) {
         return None;
     }
@@ -395,7 +405,10 @@ pub fn buy_stims(world: &mut World, buyer: EntityId, source: EntityId) -> u32 {
         ownership::pay(world, Some(gang), Some(dealer), n * world.config.stims.dealer_cut, Flow::Stims);
         world.stats.current.stims_dealt += units;
         let tile = world.comp::<Position>(dealer).map_or_else(Default::default, |p| p.tile);
-        crate::systems::law::raise_crime(world, dealer, None, Crime::Dealing, tile);
+        // L2 shadow fixes item 16: the buyer is no witness (each sale made
+        // the customer, often a Friend, a Dealing witness: 1.00 to 0.80).
+        let except = crate::systems::fixes::item(world, 16).then_some(buyer);
+        crate::systems::law::raise_crime_except(world, dealer, None, None, Crime::Dealing, tile, except);
         return units;
     }
     if !legal_market(world, source) {
