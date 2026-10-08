@@ -390,3 +390,9 @@ M17's parents, syndicates, the State, remittances, reinforcement, scrip, sanctio
 | L2 shadow fixes | item 11 the absentee dole; item 21 `Flow::Scavenge` | the absentee dole removed; scavenging paid by the Recycler, not the Treasury |
 | M17 (spec) | § 1 the ledger, the World account, `minted`/`inbound`/`outbound`, the identity, `import_to_outside` | built for the World only; M17 appends the rest |
 | Addenda 17, 18 | no safety net; charities on donations; no magic money; the outside's supply and demand as levers | §§ 2-4 |
+
+## Addendum (2026-10-08, Dylan, after the draft): sequencing, no school meals, the child work camp
+
+- **Built next**, after M16a phase 1 merges and before M16a's phases 2-5 (roadmap addendum 19).
+- **Decision 16 overturned: no school meals.** The Treasury makes no transfer to any wallet or pantry.
+- **In their place, in phase 3: a child protective service and work camps.** A daily pass takes a child whose hunger has stayed below `[camp] take_hunger` for `take_days` (`ChildTaken`: a Life row, a Grief-class memory and a grudge on the service for the parents, a Feed story) to a `BuildingKind::Camp` owned by a corp or the city (one seeded, foundable by corps), which feeds and houses the children from the revenue of a `CampWork` shift (a low-yield good the owner sells: Parts or Food processing; no magic coins) and releases them at adulthood with a `CampRaised` trait (skills from the work, low family affinity). A camp that cannot feed its children is a Feed scandal and the law may close it; freeing children is M16b's Rescue (a hook only). Acceptance: no child starvation death with camps on (asserted); ≥ 1 child taken on some seed, the camp's output sold, a release at adulthood in the year run (existence); `children_taken`, `camp_children`, `camp_output` columns.
