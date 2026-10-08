@@ -14,14 +14,21 @@ use crate::world::World;
 /// The kinds an agent can found, in tie-break order (D25: tie -> Bar; M12
 /// D20 appends the Hotel, foundable only with `[street] enabled`; M13 D16
 /// the Clinic and Garage, each foundable only with its `[assets]
-/// found_clinic` / `found_garage` flag; M15 W36 the Feed, with `[news]` on).
-const FOUNDABLE: [BuildingKind; 6] = [
+/// found_clinic` / `found_garage` flag; M15 W36 the Feed, with `[news]` on;
+/// L2 L6 the six leisure kinds, priced only with `jobs::on`).
+const FOUNDABLE: [BuildingKind; 12] = [
     BuildingKind::Bar,
     BuildingKind::Home,
     BuildingKind::Hotel,
     BuildingKind::Clinic,
     BuildingKind::Garage,
     BuildingKind::Feed,
+    BuildingKind::Club,
+    BuildingKind::Arcade,
+    BuildingKind::NoodleBar,
+    BuildingKind::FightPit,
+    BuildingKind::Den,
+    BuildingKind::Lounge,
 ];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
@@ -47,6 +54,14 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         BuildingKind::Clinic if a.enabled && a.found_clinic => Some(c.clinic),
         BuildingKind::Garage if a.enabled && a.found_garage => Some(c.garage),
         BuildingKind::Feed if crate::systems::news::on(world) && c.feed > 0 => Some(c.feed),
+        // L2 L6: the venues and the Fab (corps only), with jobs on.
+        BuildingKind::Club if crate::systems::jobs::on(world) => Some(c.club),
+        BuildingKind::Arcade if crate::systems::jobs::on(world) => Some(c.arcade),
+        BuildingKind::NoodleBar if crate::systems::jobs::on(world) => Some(c.noodle_bar),
+        BuildingKind::FightPit if crate::systems::jobs::on(world) => Some(c.fight_pit),
+        BuildingKind::Den if crate::systems::jobs::on(world) => Some(c.den),
+        BuildingKind::Lounge if crate::systems::jobs::on(world) => Some(c.lounge),
+        BuildingKind::Fab if crate::systems::jobs::on(world) => Some(c.fab),
         _ => None,
     }
 }
@@ -62,6 +77,18 @@ pub fn agent_found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         BuildingKind::Garage => a.found_cost_garage.unwrap_or(cost),
         _ => cost,
     })
+}
+
+/// L2 review fix: the vacant Lot nearest `from` whose door's tier allows
+/// `kind` (`tier_ok`), ties lower id.
+pub fn nearest_lot_for(world: &World, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
+    vacant_lots(world)
+        .into_iter()
+        .filter_map(|l| world.comp::<Building>(l).map(|b| (b.door, l)))
+        .filter(|&(door, _)| tier_ok(kind, door_tier(world, door)))
+        .map(|(door, l)| (door.manhattan(from), l))
+        .min()
+        .map(|(_, l)| l)
 }
 
 /// The vacant Lot whose door is nearest `from` (Manhattan, ties lower id).
@@ -87,6 +114,7 @@ pub fn build_on_lot(
 ) -> Result<EntityId, String> {
     // M12 D36: a splinter gang builds its Hideout on a Lot.
     // M13 D16: and the Clinic and Garage.
+    // L2 L6: and the seven L2 kinds.
     if !matches!(
         kind,
         BuildingKind::Bar
@@ -97,6 +125,13 @@ pub fn build_on_lot(
             | BuildingKind::Garage
             | BuildingKind::Lab
             | BuildingKind::Feed
+            | BuildingKind::Club
+            | BuildingKind::Arcade
+            | BuildingKind::NoodleBar
+            | BuildingKind::FightPit
+            | BuildingKind::Den
+            | BuildingKind::Lounge
+            | BuildingKind::Fab
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -129,6 +164,26 @@ pub fn build_on_lot(
             p.entered = tick;
         }
     }
+    let tier = door_tier(world, door);
+    convert(world, lot, kind, owner, tier);
+    Ok(lot)
+}
+
+/// The tier of a door's zone (Spire 2, Sump 0, else 1), as `build_on_lot`.
+pub fn door_tier(world: &World, door: TilePos) -> u8 {
+    match world.map.zone(door) {
+        Zone::Spire => 2,
+        Zone::Sump => 0,
+        _ => 1,
+    }
+}
+
+/// L2 L6: `build_on_lot`'s tail after the walls, shared with `refit`: the
+/// kind, capacity `min(cfg, interior)` (a Hotel's beds), `tier`, the
+/// `buildings_by_kind` move, the owner, rent, the full staff posted as
+/// vacancies, a leisure kind's `Venue`, the flow fields and the districts.
+pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option<EntityId>, tier: u8) {
+    let Some((rect, old)) = world.comp::<Building>(b).map(|bd| (bd.rect, bd.kind)) else { return };
     let cfg = world.config.buildings.for_kind(kind).clone();
     let interior = usize::from(rect.w.saturating_sub(2)) * usize::from(rect.h.saturating_sub(2));
     let mut capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cfg.capacity);
@@ -136,39 +191,118 @@ pub fn build_on_lot(
         // M12 D20: a bed per `[street] hotel_beds`, as the interior allows.
         capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(world.config.street.hotel_beds);
     }
-    let tier = match world.map.zone(door) {
-        Zone::Spire => 2,
-        Zone::Sump => 0,
-        _ => 1,
-    };
-    if let Some(bd) = world.comp_mut::<Building>(lot) {
+    if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.kind = kind;
         bd.capacity = capacity;
         bd.tier = tier;
         bd.stock_food = 0;
     }
-    if let Some(v) = world.buildings_by_kind.get_mut(&BuildingKind::Lot) {
-        v.retain(|&x| x != lot);
+    if let Some(v) = world.buildings_by_kind.get_mut(&old) {
+        v.retain(|&x| x != b);
     }
     // Kept ascending, as every other `buildings_by_kind` list.
     let list = world.buildings_by_kind.entry(kind).or_default();
-    if let Err(i) = list.binary_search(&lot) {
-        list.insert(i, lot);
+    if let Err(i) = list.binary_search(&b) {
+        list.insert(i, b);
     }
-    crate::systems::ownership::transfer_building(world, lot, owner);
-    let rent = crate::systems::ownership::rent_for(world, lot);
-    if let Some(bd) = world.comp_mut::<Building>(lot) {
+    crate::systems::ownership::transfer_building(world, b, owner);
+    let rent = crate::systems::ownership::rent_for(world, b);
+    if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.rent_per_day = if kind == BuildingKind::Home { rent } else { 0 };
     }
     if let Some(role) = crate::systems::ownership::role_for(kind) {
         if cfg.staff > 0 {
-            world.vacancies.entry(lot).or_default().extend(std::iter::repeat_n(role, cfg.staff as usize));
+            world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, cfg.staff as usize));
+        }
+    }
+    // L2 L4: a leisure kind opens with today's price (no building of these
+    // kinds stands with L2 off).
+    if kind.is_leisure() {
+        let price = crate::systems::jobs::venue_price(world, b, kind, tier, owner);
+        if let Some(bd) = world.comp_mut::<Building>(b) {
+            bd.venue = Some(crate::living::Venue { price, ..Default::default() });
         }
     }
     world.invalidate_flow_fields_for_lot(rect);
     // M12 D1: a new Block joins its district's `homes`.
     crate::systems::districts::rebuild(world);
-    Ok(lot)
+}
+
+/// L2 L6: may a derelict in district tier `tier` be refitted as `kind`?
+/// The venue tier rule of the seeding table (Spire 2, Mid 1, Sump 0).
+pub fn tier_ok(kind: BuildingKind, tier: u8) -> bool {
+    match kind {
+        BuildingKind::Lounge => tier == 2,
+        BuildingKind::Club => tier >= 1,
+        BuildingKind::FightPit => tier == 0,
+        BuildingKind::Den | BuildingKind::NoodleBar => tier <= 1,
+        _ => true,
+    }
+}
+
+/// L2 L6: the derelict Block nearest `from` that may become `kind` (the
+/// tier rule; ties lower id), with jobs on.
+pub fn refit_ok(world: &World, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
+    if !crate::systems::jobs::on(world) || !kind.is_leisure() {
+        return None;
+    }
+    crate::systems::street::derelicts(world)
+        .into_iter()
+        .filter_map(|d| {
+            let bd = world.comp::<Building>(d)?;
+            (bd.kind == BuildingKind::Home && !bd.demolished && tier_ok(kind, bd.tier))
+                .then(|| (bd.door.manhattan(from), d))
+        })
+        .min()
+        .map(|(_, d)| d)
+}
+
+/// L2 L6: a derelict Block becomes a leisure kind owned by `owner`:
+/// squatters out, no longer derelict, tier kept; the owner pays
+/// `refit_frac × found_cost` to the Treasury (`Flow::Found`) once it
+/// stands. `Refit` is logged.
+pub fn refit(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option<EntityId>) -> Result<EntityId, String> {
+    refit_with(world, b, kind, owner, true)
+}
+
+/// `refit`, with the owner paying (`charge`) or not (a god's `OpenVenue`).
+pub fn refit_with(
+    world: &mut World,
+    b: EntityId,
+    kind: BuildingKind,
+    owner: Option<EntityId>,
+    charge: bool,
+) -> Result<EntityId, String> {
+    if !kind.is_leisure() {
+        return Err(format!("cannot refit as a {}", kind.label()));
+    }
+    let cost = if charge { found_cost(world, kind).ok_or("not foundable")? } else { 0 };
+    let Some(bd) = world.comp::<Building>(b) else { return Err("no such building".into()) };
+    if !bd.derelict || bd.kind != BuildingKind::Home || bd.demolished {
+        return Err(format!("{} is not a derelict Block", world.name_of(b)));
+    }
+    let tier = bd.tier;
+    let price = (world.config.jobs.refit_frac * cost as f32).round() as i64;
+    if owner.is_some() && world.purse(owner) < price {
+        return Err(format!("{} cannot pay {price}", world.owner_label(owner)));
+    }
+    crate::systems::street::evict_squatters(world, b, "refitted");
+    if let Some(bd) = world.comp_mut::<Building>(b) {
+        bd.derelict = false;
+        bd.full_capacity = None;
+        bd.empty_since = None;
+    }
+    convert(world, b, kind, owner, tier);
+    let paid = if owner.is_some() && price > 0 { ownership::pay(world, owner, None, price, Flow::Found) } else { 0 };
+    let (who, what) = (world.owner_label(owner), world.name_of(b));
+    let mut actors: Vec<EntityId> = owner.into_iter().collect();
+    actors.push(b);
+    world.push_event(
+        EventKind::Refit,
+        &actors,
+        format!("{who} refitted {what} (a derelict Block) as a {} for {paid}", kind.label()),
+    );
+    Ok(b)
 }
 
 /// Agents with a Brain (every tier): the per-capita denominator, O(1).
@@ -180,6 +314,12 @@ pub fn living(world: &World) -> usize {
 /// `target(Bar) = population ÷ residents_per_bar` and `target(Home) =
 /// population ÷ residents_per_home`; ties to the Bar.
 pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
+    choose_kind_for(world, coins, false)
+}
+
+/// L2 L6: `choose_kind` for a founder; the Lounge only for a Corp-class
+/// founder (`lounge_ok`), the leisure kinds by their `residents_per_*`.
+pub fn choose_kind_for(world: &World, coins: i64, lounge_ok: bool) -> Option<BuildingKind> {
     let pop = living(world).max(1) as f32;
     let per = |kind: BuildingKind| -> f32 {
         match kind {
@@ -198,13 +338,19 @@ pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
                 .unwrap_or(world.config.corps.residents_per_garage)
                 .max(1) as f32,
             BuildingKind::Feed => world.config.news.residents_per_feed.max(1) as f32,
+            BuildingKind::Club => world.config.corps.residents_per_club.max(1) as f32,
+            BuildingKind::Arcade => world.config.corps.residents_per_arcade.max(1) as f32,
+            BuildingKind::NoodleBar => world.config.corps.residents_per_noodle.max(1) as f32,
+            BuildingKind::FightPit => world.config.corps.residents_per_pit.max(1) as f32,
+            BuildingKind::Den => world.config.corps.residents_per_den.max(1) as f32,
+            BuildingKind::Lounge => world.config.corps.residents_per_lounge.max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };
     let mut best: Option<(f32, BuildingKind)> = None;
     for kind in FOUNDABLE {
         let Some(cost) = agent_found_cost(world, kind) else { continue };
-        if coins < cost {
+        if coins < cost || (kind == BuildingKind::Lounge && !lounge_ok) {
             continue;
         }
         let count = world
@@ -232,7 +378,9 @@ pub fn is_exec(world: &World, agent: EntityId) -> bool {
 pub fn can_found(world: &World, agent: EntityId) -> bool {
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let c = &world.config.corps.found_cost;
-    if coins < c.bar.min(c.home) {
+    // L2 L6: with jobs on, the NoodleBar is the cheapest foundable rung.
+    let floor = if crate::systems::jobs::on(world) { c.bar.min(c.home).min(c.noodle_bar) } else { c.bar.min(c.home) };
+    if coins < floor {
         return false;
     }
     let Some(brain) = world.comp::<Brain>(agent) else { return false };
@@ -257,7 +405,27 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
     // The city-wide gates before the per-kind scan (`choose_kind` counts
     // every Bar and Home): this runs per think, per plan and per hourly
     // LOD assignment. All three are pure, so the order changes nothing.
-    any_vacant_lot(world) && !is_exec(world, agent) && choose_kind(world, coins).is_some()
+    if is_exec(world, agent) {
+        return false;
+    }
+    let kind = || choose_kind_for(world, coins, lounge_ok(world, agent, coins));
+    if any_vacant_lot(world) {
+        return kind().is_some();
+    }
+    // L2 L6: no Lot left: only a leisure kind, refitted from a derelict.
+    refit_room(world) && kind().is_some_and(|k| k.is_leisure())
+}
+
+/// L2 L6: with jobs on, a derelict Block may take a refit when no Lot is left.
+fn refit_room(world: &World) -> bool {
+    crate::systems::jobs::on(world) && !crate::systems::street::derelicts(world).is_empty()
+}
+
+/// L2 L6: the Lounge is for the wealthiest: a Corp-class founder who can pay it.
+fn lounge_ok(world: &World, agent: EntityId, coins: i64) -> bool {
+    crate::systems::jobs::on(world)
+        && coins >= world.config.corps.found_cost.lounge
+        && crate::systems::classes::class_of(world, agent) == crate::components::Class::Corp
 }
 
 /// Is any Lot vacant? `vacant_lots` without the list.
@@ -279,7 +447,7 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
         return Err("cannot found".into());
     }
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-    let kind = choose_kind(world, coins).ok_or("nothing affordable")?;
+    let kind = choose_kind_for(world, coins, lounge_ok(world, agent, coins)).ok_or("nothing affordable")?;
     let cost = agent_found_cost(world, kind).ok_or("not foundable")?;
     let from = world
         .comp::<Household>(agent)
@@ -288,7 +456,26 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
         .map(|b| b.door)
         .or_else(|| world.comp::<Position>(agent).map(|p| p.tile))
         .ok_or("nowhere")?;
-    let lot = nearest_lot(world, from).ok_or("no vacant Lot")?;
+    // L2 L6: no Lot left (or a kind no Lot takes): a derelict Block is
+    // refitted at `refit_frac` of the cost instead.
+    // Review fix: a leisure kind takes only a Lot its tier allows (a
+    // Lounge off the Spire priced at 0).
+    let lot = if kind.is_leisure() { nearest_lot_for(world, kind, from) } else { nearest_lot(world, from) };
+    let Some(lot) = lot else {
+        let d = refit_ok(world, kind, from).ok_or("no vacant Lot")?;
+        let b = refit(world, d, kind, Some(agent))?;
+        let today = world.day();
+        if let Some(br) = world.comp_mut::<Brain>(agent) {
+            br.last_found_day = Some(today);
+        }
+        world.stats.current.foundings += 1;
+        if world.config.gossip.enabled {
+            let dd = world.district_of_building(b);
+            crate::systems::gossip::post_deed(world, dd, crate::word::Deed::Founded, Some(agent), Some(b));
+        }
+        maybe_incorporate(world, agent);
+        return Ok(b);
+    };
     // Paid once the building stands (a failed build costs nothing), as a
     // corp's `Grow`.
     build_on_lot(world, lot, kind, Some(agent))?;

@@ -554,6 +554,8 @@ fn job_search(world: &mut World) {
         for role in roles {
             let Some(id) = pick_candidate(world, employer, workplace_door, role) else { continue };
             hire(world, id, employer, role);
+            // L2 L10: a public-works vacancy's hire joins the works roster.
+            crate::systems::budget::note_hire(world, id, employer, role);
             if let Some(v) = world.vacancies.get_mut(&employer) {
                 if let Some(i) = v.iter().position(|&r| r == role) {
                     v.remove(i);
@@ -586,6 +588,11 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             if role == Role::Researcher {
                 let h = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
                 return (u32::MAX - (h.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
+            }
+            // L2 L2: a FightPit hires the best fighter (ties lower id).
+            if role == Role::Fighter {
+                let f = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.fighting);
+                return (u32::MAX - (f.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
             }
             // M15 W36: a Feed hires the most knowledgeable (ties lower id).
             if role == Role::Reporter {
@@ -632,6 +639,8 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             hired_tick: world.tick,
             struck_shift: None,
             premium: 1.0,
+            // L2 fix round: on the dole until the first wage (L2 on only).
+            paid_once: !crate::systems::jobs::on(world),
         },
     );
     world.abort_plan(id);

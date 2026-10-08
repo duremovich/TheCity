@@ -583,3 +583,30 @@ fn test_save_mid_guard_continues_identically() {
     back.run_ticks(600);
     assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
 }
+
+/// L2 (plan L33): a version-1 save (no L2 keys) loads as the M15 city; with
+/// its config's L2 turned on, the venues and Fabs are seeded at the first
+/// midnight (when Lots exist) and the save reads version 2.
+#[test]
+fn test_pre_l2_save_loads() {
+    let mut w = World::new(26, Config::load().living_off().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY / 2);
+    let text = save::to_ron(&w);
+    assert!(text.contains(",save_version:2"), "the current format is 2");
+    let v1 = text.replace(",save_version:2", ",save_version:1");
+    let back = save::from_ron(&v1).expect("a version-1 save loads");
+    assert_eq!(back.save_version, 2, "migrated to the current format");
+    assert!(!back.config.living.enabled && !back.venues_due, "L2 stays off");
+    // The same save with L2 switched on in its config.
+    let on = v1
+        .replace("living:(enabled:false)", "living:(enabled:true)")
+        .replace("jobs:(enabled:false", "jobs:(enabled:true");
+    assert_ne!(on, v1, "the L2 switches are in the saved config");
+    let mut back = save::from_ron(&on).expect("loads with L2 on");
+    assert!(back.venues_due && !back.venues_seeded, "seeding deferred to the first midnight");
+    assert!(back.buildings_of_kind(BuildingKind::NoodleBar).is_empty());
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.venues_seeded && !back.venues_due);
+    assert!(!back.buildings_of_kind(BuildingKind::NoodleBar).is_empty(), "the venues stand");
+    back.check_indices().expect("indices in step");
+}

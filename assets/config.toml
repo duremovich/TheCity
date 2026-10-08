@@ -1430,3 +1430,94 @@ scavenge_coins = 1                  # a coin for an hour of scrap (only while br
 scavenge_p = 0.15
 escort_van_ticks = 60
 enabled = true
+
+# ---------------------------------------------------------------------------
+# Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a
+# placeholder for phase 5's calibration. `[living] enabled = false` (CLI `--l2-off`) is the M15-closing
+# city byte for byte. Kept as new sections at the end of the file (plan "Parallel phases"): the seven
+# kinds' buildings are sub-tables below; their wages (`[economy] wage_host` 6, `wage_attendant` 5,
+# `wage_cook` 5, `wage_fighter` 7, `wage_croupier` 6, `wage_concierge` 8, `wage_fabber` 7), their
+# `[corps] found_cost` (club 400, arcade 200, noodle_bar 120, fight_pit 300, den 250, lounge 900,
+# fab 900), `value` (600, 300, 180, 400, 350, 1400, 1500), `upkeep` (10, 4, 2, 4, 4, 20, 15) and the
+# plan's flat `residents_per_club` 600, `_arcade` 600, `_noodle` 120, `_pit` 1000, `_den` 800,
+# `_lounge` 2000 (L5) are the spec's values as serde defaults in config.rs (set them in their sections
+# to override). `[buildings] market.staff` / `bar.staff` stay 4 / 3 (L3: the identity).
+[living]
+enabled = true
+
+[jobs]
+enabled = true
+seed_venues = { club = 3, arcade = 3, noodle_bar = 10, fight_pit = 2, den = 2, lounge = 1, fab = 2 }
+refit_frac = 0.5                     # of found_cost
+fab_yield = 0.6
+fab_skill_floor = 0.6
+fab_skill_slope = 0.8
+fab_import_trigger = 300             # coins imported in 14 days by the corp's own sellers
+scrap_per_part = 4
+sweep_per_hour = 6
+market_staff = 12                    # L3: [buildings] market.staff stays 4 (identity)
+bar_staff = 5                        # L3
+sweep = true                         # L8: Sanitation sweeps the beat (false: TendGraves + the D23 ledger)
+
+[leisure]                            # phase 1 needs only the price table (venue prices are set daily from phase 1)
+enabled = false                      # phase 2 (fun, Unwind, HangOut) turns it on
+price_base = { club = [0, 5, 12], arcade = [2, 3, 6], noodle_bar_markup = 1, fight_pit = [3, 0, 0], den = [2, 3, 0], lounge = [0, 0, 25] }
+front_markup = 1.2
+
+[budget]
+enabled = true
+band = [30000, 60000]
+# Fix round: every step (a cut or a restore) waits band_hold_days on its side, not only the first; no upkeep
+# cut while the Treasury < hi + 7 x yesterday's dole; a restore is 2 x upkeep_step and lays off works_step
+# public-works hires at once. Before (a cut every day while above hi, single restores): seed 42 Treasury 76k
+# (day 14) -> 63 coins (day 61), upkeep_mult 0.30, seed 43 min 1,022. After: min after day 30 73.5k / 66.0k /
+# 55.9k on 42 / 43 / 44, upkeep_mult min 0.65 / 0.90 / 0.95.
+band_hold_days = 3                   # plan key (L10): the spec's 3-day hysteresis, now on every step
+works_step = 10
+works_max = 120
+upkeep_step = 0.05
+upkeep_floor = 0.3                   # kept: the steps above alone hold the trough (the floor is never reached)
+
+[export]
+enabled = false
+treasury_ref = 20000
+cap_per_day = { food = 50, parts = 20, data = 5 }
+price = { food = 3, parts = 18, data = 40 }
+export_floor = 200
+parts_floor = 20                     # plan key (L11): a Fab's Parts kept back
+data_floor = 100                     # plan key (L11; deviation: M14 has no Data sell floor)
+
+[buildings.club]
+capacity = 40
+stock_cap = 0
+staff = 10
+
+[buildings.arcade]
+capacity = 16
+stock_cap = 0
+staff = 3
+
+[buildings.noodle_bar]
+capacity = 10
+stock_cap = 60
+staff = 3
+
+[buildings.fight_pit]
+capacity = 40
+stock_cap = 0
+staff = 4
+
+[buildings.den]
+capacity = 20
+stock_cap = 0
+staff = 4
+
+[buildings.lounge]
+capacity = 16
+stock_cap = 0
+staff = 6
+
+[buildings.fab]
+capacity = 14
+stock_cap = 400
+staff = 12

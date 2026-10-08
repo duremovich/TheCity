@@ -223,6 +223,45 @@ pub fn snapshot(world: &mut World) {
     if world.config.gossip.enabled {
         word_snapshot(world, &citizens);
     }
+    // L2 (plan L34) snapshots (0 with `[living]` off).
+    if world.config.living.enabled {
+        living_snapshot(world, &citizens);
+    }
+}
+
+/// L2 phase 1: the day's wage/dole ratio, the employed share of adults,
+/// standing venues per kind, the public works, the band and the outside.
+fn living_snapshot(world: &mut World, citizens: &[EntityId]) {
+    let (mut adults, mut employed) = (0u32, 0u32);
+    for &id in citizens {
+        if world.has::<Brain>(id) && crate::systems::demography::is_adult(world, id) {
+            adults += 1;
+            if world.has::<Job>(id) {
+                employed += 1;
+            }
+        }
+    }
+    let mut venues = [0u32; 6];
+    for (i, kind) in BuildingKind::LEISURE.into_iter().enumerate() {
+        venues[i] = world
+            .buildings_of_kind(kind)
+            .iter()
+            .filter(|&&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+            .count() as u32;
+    }
+    let works = world.jobs_book.works.len() as u32;
+    let works_bill: i64 =
+        world.jobs_book.works.iter().filter_map(|&a| world.comp::<Job>(a)).map(|j| j.wage_per_day).sum();
+    let (mult, inbound, minted) = (world.budget.upkeep_mult, world.outside.inbound, world.outside.minted);
+    let row = &mut world.stats.current;
+    row.living.wage_dole_ratio = row.flow_wages as f32 / row.flow_dole.max(1) as f32;
+    row.living.employed_share = employed as f32 / adults.max(1) as f32;
+    row.living.venues = venues;
+    row.living.works_jobs = works;
+    row.living.flow_public_works = works_bill;
+    row.living.upkeep_mult = mult;
+    row.living.outside_inbound = inbound;
+    row.living.outside_minted = minted;
 }
 
 /// M15 W43: the second-hand share of held deed memories (heard ÷ all), the

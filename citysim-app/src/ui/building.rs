@@ -126,6 +126,23 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 super::feed::draw(ui, app, world, id);
                 staff(ui, app, world, id, "Reporters");
             }
+            // L2 phase 1: a venue's price and visits (the full panel is phase 2).
+            BuildingKind::Club
+            | BuildingKind::Arcade
+            | BuildingKind::NoodleBar
+            | BuildingKind::FightPit
+            | BuildingKind::Den
+            | BuildingKind::Lounge => {
+                if let Some(v) = &b.venue {
+                    let week: u32 = v.visits.iter().map(|&x| u32::from(x)).sum();
+                    ui.label(format!("price {}¢ · visits today {} · 7 days {week}", v.price, v.visits_today));
+                    if let Some(g) = v.front_of {
+                        ui.label(format!("a front of {}", world.owner_label(Some(g))));
+                    }
+                }
+                staff(ui, app, world, id, "Staff");
+            }
+            BuildingKind::Fab => staff(ui, app, world, id, "Fab Techs"),
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);

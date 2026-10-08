@@ -17,7 +17,8 @@ corp1_tier_chrome,corp1_tier_deck,corp1_tier_industry,corp1_data,corp2_tier_chro
 flow_data,flow_hack,flow_ice_upkeep,flow_research,flow_terminal,\
 rumours_heard,second_hand_share,known_by_killers_median,distorted,grudges,grudges_inherited,hunts,hunts_active,avenged,revenge_kills,chain_max,vendettas_open,stories,planted,buried,poached,talent_lost,skill_rare_share,extort_success,rep_flips,rumour_hops_max,pool_reach,contradicted,silenced,hunts_failed,hunts_abandoned,guard_body,expelled,contracts_lost_honour,extort_tries,\
 g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
-c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,ticks_per_sec";
+c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
+flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
@@ -285,8 +286,179 @@ pub struct DayRow {
     /// M15 W43: the word's columns (zero with `[gossip]` off).
     #[serde(default)]
     pub word: WordCols,
+    /// L2 (plan L34): the living city's columns (zero with `[living]` off,
+    /// but for `parts_imported`).
+    #[serde(default)]
+    pub living: LivingCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
+}
+
+/// L2 (plan L34): the six leisure kinds' CSV names (`BuildingKind::LEISURE` order).
+pub const LEISURE_SLOTS: [&str; 6] = ["club", "arcade", "noodle_bar", "fight_pit", "den", "lounge"];
+
+/// L2 (plan L34): the living city's CSV columns, in header order: spec
+/// §§ 1-3 and the plan's additions. Phase 1 fills the § 1 columns; the
+/// rest stay zero until their phase.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LivingCols {
+    pub flow_leisure: i64,
+    /// Net to houses: losses minus wins.
+    pub flow_gamble: i64,
+    pub flow_gamble_win: i64,
+    pub flow_tribute: i64,
+    pub flow_export: i64,
+    /// The day's wage bill of the public-works hires.
+    pub flow_public_works: i64,
+    /// Σ `flow_wages` ÷ max(Σ `flow_dole`, 1), the day's.
+    pub wage_dole_ratio: f32,
+    /// Employed adults ÷ adults.
+    pub employed_share: f32,
+    /// Standing venues per leisure kind (`LEISURE_SLOTS`).
+    pub venues: [u32; 6],
+    /// Visits today per leisure kind.
+    pub visits: [u32; 6],
+    pub fab_parts: u32,
+    pub scrap_parts: u32,
+    /// Σ the asset sellers' `Flow::Import` coins today.
+    pub parts_imported: i64,
+    pub works_jobs: u32,
+    pub upkeep_mult: f32,
+    pub outside_inbound: i64,
+    pub outside_minted: i64,
+    // § 2 (phase 2).
+    pub fun_mean: f32,
+    pub fun_satisfied_share: f32,
+    pub hangouts: u32,
+    pub hangout_contacts_mean: f32,
+    pub fronts: u32,
+    pub collected: u32,
+    pub preached: u32,
+    /// Per district slot (`DISTRICT_SLOTS`).
+    pub street_density: Vec<f32>,
+    // § 3 (phase 4).
+    pub fv_killed: u32,
+    pub fv_assaulted: u32,
+    pub fv_robbed: u32,
+    pub fv_abducted: u32,
+    pub fv_bound: u32,
+    pub fv_unknown: u32,
+    pub fv_capped: u32,
+    pub fv_bound_wrong: u32,
+    pub kill_rate_body: f32,
+    pub kill_rate_stat: f32,
+    pub kill_rate_body_civ: f32,
+    pub kill_rate_stat_civ: f32,
+}
+
+impl LivingCols {
+    /// The header's names, comma-separated, in column order.
+    pub fn header() -> String {
+        let mut h: Vec<String> = [
+            "flow_leisure",
+            "flow_gamble",
+            "flow_gamble_win",
+            "flow_tribute",
+            "flow_export",
+            "flow_public_works",
+            "wage_dole_ratio",
+            "employed_share",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        h.extend(LEISURE_SLOTS.iter().map(|k| format!("venues_{k}")));
+        h.extend(LEISURE_SLOTS.iter().map(|k| format!("visits_{k}")));
+        h.extend(
+            [
+                "fab_parts",
+                "scrap_parts",
+                "parts_imported",
+                "works_jobs",
+                "upkeep_mult",
+                "outside_inbound",
+                "outside_minted",
+                "fun_mean",
+                "fun_satisfied_share",
+                "hangouts",
+                "hangout_contacts_mean",
+                "fronts",
+                "collected",
+                "preached",
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        );
+        h.extend((1..=DISTRICT_SLOTS).map(|i| format!("d{i}_street_density")));
+        h.extend(
+            [
+                "fv_killed",
+                "fv_assaulted",
+                "fv_robbed",
+                "fv_abducted",
+                "fv_bound",
+                "fv_unknown",
+                "fv_capped",
+                "fv_bound_wrong",
+                "kill_rate_body",
+                "kill_rate_stat",
+                "kill_rate_body_civ",
+                "kill_rate_stat_civ",
+            ]
+            .iter()
+            .map(|s| s.to_string()),
+        );
+        h.join(",")
+    }
+
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        let mut v: Vec<String> = vec![
+            self.flow_leisure.to_string(),
+            self.flow_gamble.to_string(),
+            self.flow_gamble_win.to_string(),
+            self.flow_tribute.to_string(),
+            self.flow_export.to_string(),
+            self.flow_public_works.to_string(),
+            format!("{:.3}", self.wage_dole_ratio),
+            format!("{:.3}", self.employed_share),
+        ];
+        v.extend(self.venues.iter().map(|x| x.to_string()));
+        v.extend(self.visits.iter().map(|x| x.to_string()));
+        v.extend([
+            self.fab_parts.to_string(),
+            self.scrap_parts.to_string(),
+            self.parts_imported.to_string(),
+            self.works_jobs.to_string(),
+            format!("{:.2}", self.upkeep_mult),
+            self.outside_inbound.to_string(),
+            self.outside_minted.to_string(),
+            format!("{:.3}", self.fun_mean),
+            format!("{:.3}", self.fun_satisfied_share),
+            self.hangouts.to_string(),
+            format!("{:.3}", self.hangout_contacts_mean),
+            self.fronts.to_string(),
+            self.collected.to_string(),
+            self.preached.to_string(),
+        ]);
+        v.extend((0..DISTRICT_SLOTS).map(|i| format!("{:.3}", self.street_density.get(i).copied().unwrap_or(0.0))));
+        v.extend([
+            self.fv_killed.to_string(),
+            self.fv_assaulted.to_string(),
+            self.fv_robbed.to_string(),
+            self.fv_abducted.to_string(),
+            self.fv_bound.to_string(),
+            self.fv_unknown.to_string(),
+            self.fv_capped.to_string(),
+            self.fv_bound_wrong.to_string(),
+            format!("{:.3}", self.kill_rate_body),
+            format!("{:.3}", self.kill_rate_stat),
+            format!("{:.3}", self.kill_rate_body_civ),
+            format!("{:.3}", self.kill_rate_stat_civ),
+        ]);
+        v.join(",")
+    }
 }
 
 /// M15 W43: the word's CSV columns, in header order: the spec's § 10 list,
@@ -613,6 +785,7 @@ impl DayRow {
             detoxes: 0,
             virt: VirtCols::default(),
             word: WordCols::default(),
+            living: LivingCols::default(),
             ticks_per_sec: 0.0,
         }
     }
@@ -632,7 +805,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -748,6 +921,7 @@ impl DayRow {
             self.detoxes,
             self.virt.csv(),
             self.word.csv(),
+            self.living.csv(),
             self.ticks_per_sec,
         )
     }

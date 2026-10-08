@@ -232,8 +232,10 @@ fn farm_credit(mut w: World, days: u64) -> f64 {
 /// 44 read +2.8 %, −3.0 %, +0.3 %: a weak Food exec still costs output).
 #[test]
 fn test_competence_landing_farm_credit_seed_42() {
-    let on = farm_credit(World::new(42, Config::load()), 10);
-    let mut flat = Config::load();
+    // L2: the W28 landing is the M15 city's (`living_off`): with L2 on a
+    // Food corp's NoodleBar Cooks join its competence (seed 42 read -3.2 %).
+    let on = farm_credit(World::new(42, Config::load().living_off()), 10);
+    let mut flat = Config::load().living_off();
     flat.competence.comp_w = 0.0;
     let off = farm_credit(World::new(42, flat), 10);
     let r = on / off;

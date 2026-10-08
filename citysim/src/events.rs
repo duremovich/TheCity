@@ -209,10 +209,17 @@ pub enum EventKind {
     Planted,
     /// `[corp, feed]`.
     Buried,
+    // --- Life pass L2 phase 1 (plan L35; amber).
+    /// `[owner?, building]`: a derelict Block refitted as a leisure kind.
+    Refit,
+    /// `[]`: the World account's purchases today (one a day, the totals).
+    Exported,
+    /// `[recycler]`: the budget band posted public-works jobs.
+    WorksPosted,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 109] = [
+    pub const ALL: [EventKind; 112] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -322,6 +329,9 @@ impl EventKind {
         EventKind::Story,
         EventKind::Planted,
         EventKind::Buried,
+        EventKind::Refit,
+        EventKind::Exported,
+        EventKind::WorksPosted,
     ];
 }
 

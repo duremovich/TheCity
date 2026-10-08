@@ -30,7 +30,9 @@ fn test_seed_plane_shape() {
     let w = world();
     let p = &w.virt;
     let alive = p.alive_count();
-    assert!((40..=60).contains(&alive), "{alive} nodes at seed");
+    // L2 L7: the seeded venues and Fabs get their nodes too (63 on seed 42;
+    // 40-60 with L2 off).
+    assert!((40..=75).contains(&alive), "{alive} nodes at seed");
     let districts = w.districts.len();
     for d in 0..districts {
         assert_eq!(p.nodes[d].kind, NodeKind::Public(citysim::DistrictId(d as u8)), "NodeId({d}) = Public({d})");

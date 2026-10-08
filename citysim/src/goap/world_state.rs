@@ -101,11 +101,14 @@ pub enum LocationKey {
     /// Hunt is in `Ask`, the intel building or tile while in `Watch`.
     /// Scripted Hunt plans only; never in `PLANNABLE`.
     Intel,
+    /// L2 L8: a sweeper's beat: the dirtiest street tile of its
+    /// `sweep_beats` district (observed anywhere on the beat's streets).
+    Beat,
 }
 
 impl LocationKey {
     /// Keys a `GoTo` may target, in enum (tie-break) order.
-    pub const GOTO: [LocationKey; 28] = [
+    pub const GOTO: [LocationKey; 29] = [
         LocationKey::Home,
         LocationKey::Farm,
         LocationKey::Market,
@@ -134,6 +137,7 @@ impl LocationKey {
         LocationKey::Chair,
         LocationKey::DataBuyer,
         LocationKey::Intel,
+        LocationKey::Beat,
     ];
 
     pub fn of_building(kind: BuildingKind) -> LocationKey {
@@ -157,6 +161,14 @@ impl LocationKey {
             BuildingKind::Lab => LocationKey::Workplace,
             // M15 W36: and a Reporter inside its Feed.
             BuildingKind::Feed => LocationKey::Workplace,
+            // L2 L2: and the staff inside a venue or a Fab.
+            BuildingKind::Club
+            | BuildingKind::Arcade
+            | BuildingKind::NoodleBar
+            | BuildingKind::FightPit
+            | BuildingKind::Den
+            | BuildingKind::Lounge
+            | BuildingKind::Fab => LocationKey::Workplace,
         }
     }
 }
@@ -573,6 +585,10 @@ impl WorldState {
             },
             None if raid_tile.is_some() && raid_tile == pos.map(|p| p.tile) => LocationKey::RaidTarget,
             None if vehicle_tile.is_some() && vehicle_tile == pos.map(|p| p.tile) => LocationKey::Vehicle,
+            // L2 L8: a sweeper at work on its beat's streets.
+            None if goal == Some(crate::components::GoalKind::Work) && crate::systems::jobs::on_beat(world, agent) => {
+                LocationKey::Beat
+            }
             None => LocationKey::Street,
         };
 

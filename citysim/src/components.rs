@@ -171,10 +171,24 @@ pub enum BuildingKind {
     /// M15 W36: a news outlet; its Reporters turn the day's deed records
     /// into story records posted into the pools it covers.
     Feed,
+    /// L2 (plan L1): a night club (Hosts; `Enjoy`, `Drink`).
+    Club,
+    /// L2 (plan L1): a braindance parlour (Attendants; `Enjoy`).
+    Arcade,
+    /// L2 (plan L1): the street food stall (Cooks; `EatOut`).
+    NoodleBar,
+    /// L2 (plan L1): the fight pit (Fighters; `Enjoy`, bouts).
+    FightPit,
+    /// L2 (plan L1): the gambling den (Croupiers; `Gamble`, `Drink`).
+    Den,
+    /// L2 (plan L1): the Spire lounge (Concierges; `Enjoy`).
+    Lounge,
+    /// L2 (plan L1): the parts fab (Fabbers; `FabWork` makes Parts).
+    Fab,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 16] = [
+    pub const ALL: [BuildingKind; 23] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -191,7 +205,29 @@ impl BuildingKind {
         BuildingKind::Garage,
         BuildingKind::Lab,
         BuildingKind::Feed,
+        BuildingKind::Club,
+        BuildingKind::Arcade,
+        BuildingKind::NoodleBar,
+        BuildingKind::FightPit,
+        BuildingKind::Den,
+        BuildingKind::Lounge,
+        BuildingKind::Fab,
     ];
+
+    /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
+    pub const LEISURE: [BuildingKind; 6] = [
+        BuildingKind::Club,
+        BuildingKind::Arcade,
+        BuildingKind::NoodleBar,
+        BuildingKind::FightPit,
+        BuildingKind::Den,
+        BuildingKind::Lounge,
+    ];
+
+    /// L2: one of the six leisure kinds.
+    pub fn is_leisure(self) -> bool {
+        BuildingKind::LEISURE.contains(&self)
+    }
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
         Some(match s {
@@ -211,6 +247,13 @@ impl BuildingKind {
             "Garage" => BuildingKind::Garage,
             "Lab" => BuildingKind::Lab,
             "Feed" => BuildingKind::Feed,
+            "Club" => BuildingKind::Club,
+            "Arcade" => BuildingKind::Arcade,
+            "NoodleBar" => BuildingKind::NoodleBar,
+            "FightPit" => BuildingKind::FightPit,
+            "Den" => BuildingKind::Den,
+            "Lounge" => BuildingKind::Lounge,
+            "Fab" => BuildingKind::Fab,
             _ => return None,
         })
     }
@@ -234,6 +277,13 @@ impl BuildingKind {
             BuildingKind::Garage => "Garage",
             BuildingKind::Lab => "Lab",
             BuildingKind::Feed => "Feed",
+            BuildingKind::Club => "Club",
+            BuildingKind::Arcade => "Braindance Parlour",
+            BuildingKind::NoodleBar => "Noodle Bar",
+            BuildingKind::FightPit => "Fight Pit",
+            BuildingKind::Den => "Gambling Den",
+            BuildingKind::Lounge => "Spire Lounge",
+            BuildingKind::Fab => "Parts Fab",
         }
     }
 
@@ -256,6 +306,14 @@ impl BuildingKind {
             BuildingKind::Garage => 'V',
             BuildingKind::Lab => 'Q',
             BuildingKind::Feed => 'P',
+            // L2 (plan L1): `X` and `Z` are claimed by M16 (Fixer, Prison).
+            BuildingKind::Club => 'K',
+            BuildingKind::Arcade => 'A',
+            BuildingKind::NoodleBar => 'S',
+            BuildingKind::FightPit => 'I',
+            BuildingKind::Den => 'D',
+            BuildingKind::Lounge => 'U',
+            BuildingKind::Fab => 'E',
         }
     }
 }
@@ -296,10 +354,24 @@ pub enum Role {
     Researcher,
     /// M15 W36: staff of a Feed.
     Reporter,
+    /// L2 (plan L2): staff of a Club ("Club Staff").
+    Host,
+    /// L2: staff of an Arcade.
+    Attendant,
+    /// L2: staff of a NoodleBar.
+    Cook,
+    /// L2: staff of a FightPit.
+    Fighter,
+    /// L2: staff of a Den.
+    Croupier,
+    /// L2: staff of a Lounge.
+    Concierge,
+    /// L2: staff of a Fab ("Fab Tech").
+    Fabber,
 }
 
 impl Role {
-    pub const ALL: [Role; 10] = [
+    pub const ALL: [Role; 17] = [
         Role::Farmer,
         Role::Guard,
         Role::Clerk,
@@ -310,6 +382,13 @@ impl Role {
         Role::Mechanic,
         Role::Researcher,
         Role::Reporter,
+        Role::Host,
+        Role::Attendant,
+        Role::Cook,
+        Role::Fighter,
+        Role::Croupier,
+        Role::Concierge,
+        Role::Fabber,
     ];
 
     /// The display name (M11 section 1).
@@ -325,6 +404,13 @@ impl Role {
             Role::Mechanic => "Mechanic",
             Role::Researcher => "Researcher",
             Role::Reporter => "Reporter",
+            Role::Host => "Club Staff",
+            Role::Attendant => "Attendant",
+            Role::Cook => "Cook",
+            Role::Fighter => "Fighter",
+            Role::Croupier => "Croupier",
+            Role::Concierge => "Concierge",
+            Role::Fabber => "Fab Tech",
         }
     }
 
@@ -341,6 +427,13 @@ impl Role {
             Role::Mechanic => BuildingKind::Garage,
             Role::Researcher => BuildingKind::Lab,
             Role::Reporter => BuildingKind::Feed,
+            Role::Host => BuildingKind::Club,
+            Role::Attendant => BuildingKind::Arcade,
+            Role::Cook => BuildingKind::NoodleBar,
+            Role::Fighter => BuildingKind::FightPit,
+            Role::Croupier => BuildingKind::Den,
+            Role::Concierge => BuildingKind::Lounge,
+            Role::Fabber => BuildingKind::Fab,
         }
     }
 }
@@ -1341,6 +1434,20 @@ pub struct Job {
     /// `economy::collect_wage`; 1 otherwise (a new Job resets it).
     #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
     pub premium: f32,
+    /// L2 fix round: this job has paid a wage. A hire with `jobs::on`
+    /// starts false and keeps drawing the dole until its first wage (a
+    /// starving new guard died ten days in, unpaid and off the dole); with
+    /// L2 off, and in a pre-L2 save, it is true from the start.
+    #[serde(default = "true_", skip_serializing_if = "is_true")]
+    pub paid_once: bool,
+}
+
+fn true_() -> bool {
+    true
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 impl Job {
@@ -2009,6 +2116,9 @@ pub struct Building {
     /// M15 W36: a Feed's state (name, reach, covered districts, buried actors).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub feed: Option<crate::word::FeedState>,
+    /// L2 (plan L4): a leisure venue's day (price, visits, take, front).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub venue: Option<crate::living::Venue>,
 }
 
 pub fn default_tier() -> u8 {

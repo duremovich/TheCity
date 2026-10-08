@@ -134,7 +134,12 @@ fn home_pantry(world: &World, id: EntityId) -> u32 {
 pub fn can_work_now(world: &World, id: EntityId, job: &Job) -> bool {
     job.on_shift(world.tick_of_day())
         && job.last_shift_day != Some(job.shift_key_at(world.tick))
-        && job.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
+        && if job.role == crate::components::Role::Sanitation && crate::systems::jobs::sweep_on(world) {
+            // L2 L8: a sweeper works out on its beat's streets.
+            crate::systems::jobs::on_beat(world, id)
+        } else {
+            job.employer.is_some_and(|e| world.comp::<Position>(id).is_some_and(|p| p.building == Some(e)))
+        }
 }
 
 pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> bool {
@@ -175,7 +180,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         k if k.is_work() => {
             let Some(job) = world.comp::<Job>(id) else { return false };
-            can_work_now(world, id, job) && ActionKind::work_for(job.role) == k
+            can_work_now(world, id, job) && crate::exec::routine::work_action(world, job.role) == k
         }
         ActionKind::Wander => true,
         // L1: out on the street; office hours inside the HQ.
@@ -416,6 +421,17 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
                 let now = world.tick;
                 economy::accrue_farm_work(world, id, farm, now.saturating_sub(started));
             }
+        }
+        // L2 L8: the hours worked count, as FarmWork's.
+        ActionKind::FabWork => {
+            if let Some(fab) = world.comp::<Job>(id).and_then(|j| j.employer) {
+                let now = world.tick;
+                crate::systems::jobs::accrue_fab_work(world, id, fab, now.saturating_sub(started));
+            }
+        }
+        ActionKind::Sweep => {
+            let now = world.tick;
+            crate::systems::jobs::sweep_done(world, id, now.saturating_sub(started));
         }
         ActionKind::BuyFood => {
             if let Some((_, paid)) = world.pending_purchase.remove(&id) {
@@ -698,6 +714,23 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::GuardJail | ActionKind::ClerkWork | ActionKind::BartendWork | ActionKind::TendGraves => {
+            end_shift(world, id);
+            StepResult::Done
+        }
+        // L2 L8: Parts into the Fab, then the shift's end.
+        ActionKind::FabWork => {
+            if let Some(fab) = world.comp::<Job>(id).and_then(|j| j.employer) {
+                crate::systems::jobs::accrue_fab_work(world, id, fab, now.saturating_sub(started));
+            }
+            if let Some(s) = world.comp_mut::<Skills>(id) {
+                s.farming = (s.farming + 0.002).min(1.0);
+            }
+            end_shift(world, id);
+            StepResult::Done
+        }
+        // L2 L8: the beat's dirtiest streets cleaned, then the shift's end.
+        ActionKind::Sweep => {
+            crate::systems::jobs::sweep_done(world, id, now.saturating_sub(started));
             end_shift(world, id);
             StepResult::Done
         }
@@ -1352,7 +1385,9 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     use rand::Rng;
     // An hour turns up something worth selling on `scavenge_p` of tries
     // (the agent's keyed stream).
-    let p = world.config.life.scavenge_p;
+    // L2 L9: with jobs on, the district's litter scales the find (the
+    // same draw on the same stream).
+    let p = crate::systems::jobs::scavenge_p(world, id);
     let found = world.rng.agent(id).random::<f32>() < p;
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let pay = world.config.life.scavenge_coins.min(treasury.max(0));
@@ -1361,6 +1396,8 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     }
     crate::systems::ownership::pay(world, None, Some(id), pay, crate::systems::ownership::Flow::Sanitation);
     world.remember(id, MemoryKind::Paid, None, 0.1, 0.0, false);
+    // L2 L9: the find is scrap for the Recycler's Parts.
+    crate::systems::jobs::add_scrap(world);
     StepResult::Done
 }
 

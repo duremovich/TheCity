@@ -1148,6 +1148,8 @@ fn repairs(world: &mut World) {
         let missing = i64::from(need - have);
         if missing > 0 {
             ownership::charge(world, garage_owner, None, missing * cfg.part_credit, Flow::Import);
+            // L2 L9: the Fab trigger's tally.
+            crate::systems::jobs::note_import(world, garage_owner, missing * cfg.part_credit);
         }
         if let Some(m) = world.comp_mut::<Asset>(a) {
             m.condition = 100;
@@ -1368,7 +1370,7 @@ pub fn loot_to_gang(world: &mut World, gang: EntityId, coins: i64) {
 /// Every Clinic and Garage below `parts_floor` buys up to `parts_batch` at
 /// `parts_price` (`Flow::Parts`), from gang Hideouts first (ascending gang
 /// id), then the Recycler (revenue to the City).
-fn parts_market(world: &mut World) {
+pub fn parts_market(world: &mut World) {
     let (floor, batch, price) =
         (world.config.assets.parts_floor, world.config.assets.parts_batch, world.config.assets.parts_price.max(1));
     let mut buyers: Vec<EntityId> = world
@@ -1388,14 +1390,28 @@ fn parts_market(world: &mut World) {
         let mut want = batch.min(room);
         let mut sources: Vec<(Option<EntityId>, EntityId)> =
             world.gangs().into_iter().filter_map(|g| world.hideout_of(g).map(|h| (Some(g), h))).collect();
+        // L2 L9: the Fabs after the gangs, the buyer's own corp's first (a
+        // transfer to oneself moves no coin), then ascending id; none
+        // stands with L2 off.
+        let mut fabs: Vec<(bool, EntityId)> = world
+            .buildings_of_kind(BuildingKind::Fab)
+            .iter()
+            .copied()
+            .filter(|&f| world.comp::<Building>(f).is_some_and(|bd| !bd.demolished && !bd.derelict))
+            .map(|f| (world.owner_of(f) != buyer || buyer.is_none(), f))
+            .collect();
+        fabs.sort_unstable();
+        let first_fab = sources.len();
+        sources.extend(fabs.into_iter().map(|(_, f)| (world.owner_of(f), f)));
         if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
             sources.push((None, r));
         }
-        for (seller, src) in sources {
+        for (i, (seller, src)) in sources.into_iter().enumerate() {
             if want == 0 {
                 break;
             }
-            if seller == buyer && seller.is_some() {
+            let fab = i >= first_fab && world.comp::<Building>(src).is_some_and(|bd| bd.kind == BuildingKind::Fab);
+            if seller == buyer && seller.is_some() && !fab {
                 continue;
             }
             let have = world.stock(src, Good::Parts);
@@ -1622,6 +1638,8 @@ pub fn buy_noted(
         }
         world.take_stock(seller, Good::Parts, parts);
         ownership::charge(world, seller_owner, None, import, Flow::Import);
+        // L2 L9: the Fab trigger's tally.
+        crate::systems::jobs::note_import(world, seller_owner, import);
     }
     let paid = ownership::charge(world, Some(buyer), seller_owner, down, Flow::Asset);
     ownership::credit(world, seller, paid);

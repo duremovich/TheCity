@@ -348,6 +348,27 @@ pub enum PlayerCommand {
         faction: EntityId,
         on: bool,
     },
+    // --- Life pass L2 phase 1 (plan L37).
+    /// The budget band's hiring arm (public works) on or off.
+    SetPublicWorks(bool),
+    /// The World account buys (or stops buying) exports.
+    SetExport(bool),
+    /// God: a venue (or a Fab) on the Lot nearest the district's centroid,
+    /// else a refitted derelict there, free; a gang owner makes it a front.
+    OpenVenue {
+        kind: BuildingKind,
+        district: crate::components::DistrictId,
+        owner: Option<EntityId>,
+    },
+    /// God: the World's price per unit of a good.
+    SetExportPrice {
+        good: crate::outside::ExportGood,
+        price: i64,
+    },
+    /// God: fill every open vacancy at buildings of a kind now.
+    HireAll {
+        kind: BuildingKind,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -446,6 +467,16 @@ pub struct Levers {
     /// M15 W42: the factions the Civic Wire buries (`CensorStories`).
     #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
     pub censored: std::collections::BTreeSet<EntityId>,
+    /// L2 L37: the band may post public works (`SetPublicWorks`).
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub public_works: bool,
+    /// L2 L37: the World account buys (`[export] enabled` at seed, `SetExport`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub export_open: bool,
+}
+
+fn is_true(v: &bool) -> bool {
+    *v
 }
 
 fn default_city_ice() -> u8 {
@@ -516,6 +547,8 @@ impl Levers {
             press_licence: true,
             news_tax: 0.0,
             censored: Default::default(),
+            public_works: true,
+            export_open: cfg.living.enabled && cfg.export.enabled,
         }
     }
 }
@@ -762,6 +795,40 @@ impl World {
                     format!("The Civic Wire may run stories about {name} again")
                 };
                 self.push_event(EventKind::PlayerAction, &[*faction], text);
+            }
+            PlayerCommand::SetPublicWorks(on) => {
+                self.levers.public_works = *on;
+                let text = if *on { "Public works open" } else { "Public works closed" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetExport(on) => {
+                self.levers.export_open = *on;
+                let text = if *on { "Exports open to the World" } else { "Exports closed" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetExportPrice { good, price } => {
+                let price = (*price).max(0);
+                self.outside.export.price.insert(*good, price);
+                self.push_event(
+                    EventKind::PlayerAction,
+                    &[],
+                    format!("Export price of {} set to {price}", good.label()),
+                );
+            }
+            PlayerCommand::OpenVenue { kind, district, owner } => {
+                match crate::systems::jobs::open_venue(self, *kind, *district, *owner) {
+                    Ok(b) => {
+                        let text = format!("God opened {} ({})", self.name_of(b), kind.label());
+                        self.push_event(EventKind::PlayerAction, &[b], text);
+                    }
+                    Err(e) => {
+                        self.push_event(EventKind::PlayerActionFailed, &[], format!("OpenVenue: {e}"));
+                    }
+                }
+            }
+            PlayerCommand::HireAll { kind } => {
+                let n = crate::systems::jobs::hire_all(self, *kind);
+                self.push_event(EventKind::PlayerAction, &[], format!("God filled {n} {} vacancies", kind.label()));
             }
             PlayerCommand::SetRiotResponse(r) => {
                 self.levers.riot_response = *r;
@@ -1856,6 +1923,7 @@ impl World {
                 last_door_open: None,
                 label: None,
                 feed: None,
+                venue: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

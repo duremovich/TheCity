@@ -105,6 +105,10 @@ struct RunArgs {
     /// L1: the life pass off (`Config::life_off`): the ab79188 days.
     #[arg(long)]
     life_off: bool,
+    /// L2 (plan L32): every L2 section off (`Config::living_off`): the
+    /// M15-closing city byte for byte.
+    #[arg(long)]
+    l2_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -236,6 +240,8 @@ enum Lever {
     Hunt(u32, u32),
     /// M15 lever (W42, phase 4): `censor=gang<i>|corp<slot>|law[:off]`.
     Censor(FactionRef, bool),
+    /// L2 god (L37): `open_venue=<kind>:<district>:<city|corp<slot>|gang<i>>`.
+    OpenVenue(citysim::BuildingKind, u8, Option<FactionRef>),
 }
 
 /// A faction on the command line: `gang<i>`, `corp<slot>` or `law`.
@@ -548,6 +554,14 @@ impl Lever {
             Lever::KillFriend(of, by) => PlayerCommand::KillFriend { of: of.resolve(world)?, by: by.resolve(world)? },
             Lever::Hunt(h, t) => PlayerCommand::Hunt { hunter: agent_at(world, h)?, target: agent_at(world, t)? },
             Lever::Censor(f, on) => PlayerCommand::CensorStories { faction: f.resolve(world)?, on },
+            Lever::OpenVenue(kind, d, owner) => PlayerCommand::OpenVenue {
+                kind,
+                district: citysim::DistrictId(d),
+                owner: match owner {
+                    Some(f) => Some(f.resolve(world)?),
+                    None => None,
+                },
+            },
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -883,6 +897,20 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             };
             Some(Lever::Censor(parse_faction(f).map_err(|e| format!("{spec}: {e}"))?, on))
         }
+        // L2 (L37): `open_venue=<kind>:<district>:<city|corp<slot>|gang<i>>`.
+        "open_venue" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [k, d, o] = parts[..] else {
+                return Err(format!("{spec}: expected <kind>:<district>:<city|corp<slot>|gang<i>>"));
+            };
+            let kind = citysim::BuildingKind::parse(k).ok_or_else(|| format!("{spec}: unknown kind {k}"))?;
+            let owner = if o.eq_ignore_ascii_case("city") {
+                None
+            } else {
+                Some(parse_faction(o).map_err(|e| format!("{spec}: {e}"))?)
+            };
+            Some(Lever::OpenVenue(kind, d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?, owner))
+        }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -1026,6 +1054,22 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             on_off(value).ok_or_else(|| format!("{spec}: press_licence must be on|off"))?,
         ),
         "news_tax" => PlayerCommand::SetNewsTax(num("rate")? as f32),
+        // L2 (L37): `public_works=on|off`, `export=on|off`,
+        // `export_price=<food|parts|data>:<n>`, `hire_all=<kind>`.
+        "public_works" => {
+            PlayerCommand::SetPublicWorks(on_off(value).ok_or_else(|| format!("{spec}: public_works must be on|off"))?)
+        }
+        "export" => PlayerCommand::SetExport(on_off(value).ok_or_else(|| format!("{spec}: export must be on|off"))?),
+        "export_price" => {
+            let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<n>"))?;
+            PlayerCommand::SetExportPrice {
+                good: citysim::outside::ExportGood::parse(g).ok_or_else(|| format!("{spec}: unknown good {g}"))?,
+                price: n.parse::<i64>().map_err(|e| format!("{spec}: bad price: {e}"))?,
+            }
+        }
+        "hire_all" => PlayerCommand::HireAll {
+            kind: citysim::BuildingKind::parse(value).ok_or_else(|| format!("{spec}: unknown kind {value}"))?,
+        },
         "hack_sentence" => {
             let (c, d) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <crime>:<days>"))?;
             let crime = match c.to_ascii_lowercase().as_str() {
@@ -1070,6 +1114,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     if args.life_off {
         config.life = citysim::config::LifeCfg::off();
     }
+    if args.l2_off {
+        config = config.living_off();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -1094,6 +1141,9 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             if args.life_off {
                 w.config.life = citysim::config::LifeCfg::off();
+            }
+            if args.l2_off {
+                w.config = w.config.clone().living_off();
             }
             w
         }
