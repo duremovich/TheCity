@@ -32,6 +32,16 @@ last day; the M14 flows) and, with an events file, the violet event counts and t
 / DataWiped / DoorHacked / RobotTurned / Flatlined lines. Flags: the spec § 12 bands (runs 40-400,
 success 30-70 %, fried 3-30, flatlines 1-10, traced 20-50 %, stolen / made 5-30 %, decks 30-150 on the
 last day, mean corp ICE 1.0-2.2).
+
+L2 (the living city): an "L2" section from the `LivingCols` and `BudgetCols` columns: wages / dole on day 60
+and by 30-day window, the employed share, the Treasury against the budget band (days inside it, the works roster,
+`upkeep_mult`), the leisure flows (`flow_leisure`, `flow_gamble`, `flow_gamble_win`, `flow_tribute`), fun (mean,
+satisfied share), venues and visits by kind, HangOuts and their known-contact mean, fronts, Collects, Preaches,
+the Parts chain (`fab_parts`, `scrap_parts`, `parts_imported`), faction violence off screen (`fv_*` totals, the
+off-screen share of violent deaths, kill rates by tier), the tiers with the held prisoners, and aborts by cause.
+Flags: the spec's printed bands (wages / dole on day 60 >= 1.0, employed share 30-40 %, Gini on the last day
+0.50-0.70, wallets >= 20k, fun satisfied 40-70 %, the off-screen share of killings 0.3-0.7) and `fv_bound_wrong`
+above 0.
 """
 import argparse
 import csv
@@ -72,6 +82,12 @@ VIRT_TOTALS = ["runs", "runs_ok", "runs_bounced", "runs_captured", "runs_dumped"
                "fried", "flatlined", "hack_arrests", "hack_arrests_chair", "sightings", "ice_raised",
                "ice_lowered", "ice_spend", "tech_gained", "tech_lost", "research_spent"]
 VIRT_FLOWS = ["flow_data", "flow_hack", "flow_ice_upkeep", "flow_research", "flow_terminal"]
+LEISURE_KINDS = ["club", "arcade", "noodle_bar", "fight_pit", "den", "lounge"]
+L2_FLOWS = ["flow_leisure", "flow_gamble", "flow_gamble_win", "flow_tribute", "flow_export", "flow_public_works"]
+L2_TOTALS = ["fab_parts", "scrap_parts", "parts_imported", "hangouts", "collected", "preached", "fv_killed",
+             "fv_assaulted", "fv_robbed", "fv_abducted", "fv_bound", "fv_unknown", "fv_capped", "fv_bound_wrong",
+             "stat_extorts", "stat_claims", "stat_deals", "aborts", "aborts_scavenge", "aborts_sleep",
+             "aborts_checkin", "aborts_seat", "rough_sleeps", "scavenge_dry"]
 ASSAULT_PER_DAY_FLAG = 42.7  # the scenario gate's assault bound (M8 gate, HANDOFF)
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
 DISTRICTS = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
@@ -217,6 +233,7 @@ def analyze(rows, events, jail_cap=None):
     districts(rows, events, out, flags)
     assets(rows, events, out, flags)
     virt(rows, events, out, flags)
+    living(rows, events, out, flags)
     out["flags"] = flags
     return out
 
@@ -485,6 +502,55 @@ def virt(rows, events, out, flags):
             flags.append(f"Virt: {name} {x:.3g} outside {lo:g}-{hi:g} (spec section 12)")
 
 
+def living(rows, events, out, flags):
+    """L2: the living city's columns; only when they exist and the jobs economy ran."""
+    if not rows or "employed_share" not in rows[0] or not any(v for v in col(rows, "employed_share")):
+        return
+    total = lambda k: sum(col(rows, k))
+    at = lambda d, k: rows[min(d, len(rows)) - 1][k]
+    L = {}
+    wd = lambda r: r["flow_wages"] / max(1.0, r["flow_dole"])
+    L["wage_dole_day60"] = wd(rows[min(60, len(rows)) - 1])
+    L["wage_dole_by_30d"] = [round(sum(r["flow_wages"] for r in rows[i:i + 30]) /
+                                   max(1.0, sum(r["flow_dole"] for r in rows[i:i + 30])), 2)
+                             for i in range(0, len(rows), 30)]
+    L["employed_share_day60"] = at(60, "employed_share")
+    band = (30000, 60000)
+    late = rows[29:]
+    L["treasury_in_band_after_day30"] = f"{sum(1 for r in late if band[0] <= r['treasury'] <= band[1])}/{len(late)}"
+    L["treasury_min_max_after_day30"] = (min(col(late, "treasury"), default=0), max(col(late, "treasury"), default=0))
+    L["works_jobs_last"] = at(len(rows), "works_jobs")
+    L["upkeep_mult_min"] = min(col(rows, "upkeep_mult"), default=1.0)
+    L["flows_total"] = {k[5:]: total(k) for k in L2_FLOWS if k in rows[0]}
+    L["flow_leisure_per_day_after_day30"] = mean(col(late, "flow_leisure"))
+    L["fun_mean_last"] = at(len(rows), "fun_mean")
+    L["fun_satisfied_mean_after_day30"] = mean(col(late, "fun_satisfied_share"))
+    L["venues_last"] = {k: at(len(rows), f"venues_{k}") for k in LEISURE_KINDS if f"venues_{k}" in rows[0]}
+    L["visits_total"] = {k: total(f"visits_{k}") for k in LEISURE_KINDS if f"visits_{k}" in rows[0]}
+    L["hangout_contacts_mean"] = mean([r["hangout_contacts_mean"] for r in rows if r.get("hangouts")])
+    L["fronts_max"] = max(col(rows, "fronts"), default=0)
+    L["totals"] = {k: total(k) for k in L2_TOTALS if k in rows[0]}
+    vd, vo = total("deaths_violence"), total("deaths_violence_offscreen")
+    L["offscreen_share_of_killings"] = vo / vd if vd else None
+    L["kill_rates_mean"] = {k: mean(col(rows, k)) for k in ("kill_rate_body", "kill_rate_stat", "kill_rate_body_civ",
+                                                           "kill_rate_stat_civ") if k in rows[0]}
+    L["tiers_last"] = {k: at(len(rows), k) for k in ("tier_full", "tier_coarse", "tier_stat", "tier_held",
+                                                      "gang_bodies", "gang_stat") if k in rows[0]}
+    out["living"] = L
+    bands = [("wages / dole on day 60", L["wage_dole_day60"], 1.0, 2.0),
+             ("employed share on day 60", L["employed_share_day60"], 0.30, 0.40),
+             ("wallet Gini on the last day", at(len(rows), "wallet_gini"), 0.50, 0.70),
+             ("wallets on the last day", at(len(rows), "wallets"), 20000, float("inf")),
+             ("fun satisfied after day 30", L["fun_satisfied_mean_after_day30"], 0.40, 0.70)]
+    if L["offscreen_share_of_killings"] is not None:
+        bands.append(("off-screen share of killings", L["offscreen_share_of_killings"], 0.3, 0.7))
+    for name, x, lo, hi in bands:
+        if not lo <= x <= hi:
+            flags.append(f"L2: {name} {x:.3g} outside {lo:g}-{hi:g} (spec Goals, printed findings)")
+    if L["totals"].get("fv_bound_wrong", 0) > 0:
+        flags.append(f"L2: fv_bound_wrong {L['totals']['fv_bound_wrong']:g} > 0 (a faction hole bound outside its faction)")
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -565,6 +631,24 @@ def fmt(o):
         if w.get("events"):
             L.append("violet events: " + f(w["events"]))
         L += [f"  {x}" for x in w.get("story", [])]
+    if "living" in o:
+        w = o["living"]
+        L.append("-- L2 (the living city) --")
+        L.append(f"wages / dole day 60 {w['wage_dole_day60']:.2f}, by 30 days {w['wage_dole_by_30d']}; employed share "
+                 f"day 60 {w['employed_share_day60']:.3f}")
+        L.append(f"Treasury in band [30k, 60k] after day 30 {w['treasury_in_band_after_day30']}, min/max "
+                 f"{w['treasury_min_max_after_day30']}, works jobs {w['works_jobs_last']:g}, upkeep_mult min "
+                 f"{w['upkeep_mult_min']:.2f}")
+        L.append("flows (run totals): " + f(w["flows_total"]) +
+                 f"; flow_leisure/day after day 30 {w['flow_leisure_per_day_after_day30']:.0f}")
+        L.append(f"fun mean (last) {w['fun_mean_last']:.3f}, satisfied after day 30 {w['fun_satisfied_mean_after_day30']:.2f}; "
+                 f"HangOut known contacts {w['hangout_contacts_mean']:.3f}; fronts max {w['fronts_max']:g}")
+        L.append("venues (last): " + f(w["venues_last"]) + "; visits: " + f(w["visits_total"]))
+        L.append("run totals: " + f(w["totals"]))
+        share = w["offscreen_share_of_killings"]
+        L.append(f"off-screen share of killings {'n/a' if share is None else f'{share:.2f}'}; kill rates per 1,000: " +
+                 f(w["kill_rates_mean"]))
+        L.append("tiers (last): " + f(w["tiers_last"]))
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

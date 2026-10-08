@@ -321,6 +321,13 @@ fn test_fun_decays_at_every_tier_equally() {
             free_stat: 0.0,
         };
         let mut w = World::new(7, cfg);
+        // L2 phase 5 seeds a spread of opening fun; this test compares the decay alone from a full need
+        // (below 1.0 a tier's small gains, which 1.0 clamped away, show).
+        for a in w.citizens() {
+            if let Some(n) = w.comp_mut::<Needs>(a) {
+                n.fun = 1.0;
+            }
+        }
         w.run_ticks(TICKS_PER_DAY);
         // The jobless off corp payrolls keep one class all day.
         w.citizens()

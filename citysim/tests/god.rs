@@ -1545,7 +1545,18 @@ fn god_kill_friend_of_leaders_day_10() {
         let gs = w.gangs();
         for (a, b) in [(0usize, 1usize), (1, 0)] {
             let (Some(&ga), Some(&gb)) = (gs.get(a), gs.get(b)) else { continue };
+            // L2 phase 5: the leader if it has a living Friend, else the gang's highest-ranked member with
+            // one (gang turnover changed who is friends with whom by day 10); none: the command is skipped.
+            let has_friend = |w: &World, x: EntityId| {
+                w.neighbours(x).any(|o| {
+                    citysim::systems::law::living(w, o)
+                        && w.edge(x, o).is_some_and(|e| e.kind == citysim::components::RelKind::Friend)
+                })
+            };
             let leader = w.comp::<Gang>(ga).and_then(|g| g.leader);
+            let leader = leader
+                .filter(|&l| has_friend(w, l))
+                .or_else(|| citysim::systems::gang::leader_ranking(w, ga).into_iter().find(|&m| has_friend(w, m)));
             match (leader, best_fighter(w, gb)) {
                 (Some(of), Some(by)) => {
                     names.push(format!(
@@ -1832,4 +1843,445 @@ fn god_purist_ninefold() {
     }
     eprint!("{o}");
     r.assert_applied(1);
+}
+
+// ---------------------------------------------------------------------------
+// God scenarios v7: the living city (Life pass L2 phase 5, docs/LIFE_L2.md
+// § 5, docs/GOD_SCENARIOS_V7.md). Every wage, bet, killing and arrest is a
+// seeded dice roll over structs; the tests assert only that the commands
+// applied and print what the city did.
+// ---------------------------------------------------------------------------
+
+const V7_END: u64 = 90;
+
+/// One finished day of an L2 god run.
+#[derive(Clone)]
+struct V7Day {
+    row: citysim::DayRow,
+    /// Living corps: name -> (treasury, order).
+    corps: std::collections::BTreeMap<String, (i64, citysim::CorpOrder)>,
+    /// Faction holes opened today in the watched district: (faction label or "-", source).
+    holes: Vec<(String, String)>,
+    /// The watched district's adults (by Home): mean fun, and visits to its venues today.
+    fun: f32,
+    venue_visits: u32,
+    /// Fabbers employed, Parts in Fab stock.
+    fabbers: u32,
+    fab_stock: u32,
+}
+
+struct V7Run {
+    name: &'static str,
+    days: Vec<V7Day>,
+    /// `(day, kind, text)` of the L2 story (God actions, Founded/Refit, Exported, WorksPosted, CorpOrder).
+    story: Vec<(u64, EventKind, String)>,
+    failed: Vec<String>,
+}
+
+/// Seed 42 to `V7_END`; `daily` fires at the start of every day and may
+/// set the watched district.
+fn run_v7(name: &'static str, mut daily: impl FnMut(&mut World, u64, &mut Option<citysim::DistrictId>)) -> V7Run {
+    use citysim::{Building, Household, Needs};
+    let mut w = World::new(SEED, Config::load());
+    let mut days = Vec::new();
+    let mut story = Vec::new();
+    let mut failed = Vec::new();
+    let mut next_id = 0u64;
+    let mut watch: Option<citysim::DistrictId> = None;
+    let mut seen_holes: std::collections::BTreeSet<citysim::HoleId> = Default::default();
+    for day in 0..V7_END {
+        daily(&mut w, day, &mut watch);
+        w.run_ticks(TICKS_PER_DAY);
+        let mut d = V7Day {
+            row: w.stats.history.back().expect("a finished day").clone(),
+            corps: Default::default(),
+            holes: Vec::new(),
+            fun: 0.0,
+            venue_visits: 0,
+            fabbers: 0,
+            fab_stock: 0,
+        };
+        let events: Vec<&citysim::Event> = w.events.iter().rev().take_while(|e| e.id >= next_id).collect();
+        for e in events.into_iter().rev() {
+            match e.kind {
+                EventKind::PlayerActionFailed => failed.push(format!("d{day} {}", e.text)),
+                EventKind::PlayerAction
+                | EventKind::Founded
+                | EventKind::Refit
+                | EventKind::Exported
+                | EventKind::WorksPosted => story.push((day, e.kind, e.text.clone())),
+                EventKind::CorpOrder if e.text.contains("Grow") => story.push((day, e.kind, e.text.clone())),
+                _ => {}
+            }
+        }
+        next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        for c in w.corps() {
+            if let Some(cc) = w.comp::<citysim::Corp>(c) {
+                d.corps.insert(cc.name.clone(), (cc.treasury, cc.order));
+            }
+        }
+        let fresh: Vec<citysim::HoleId> = w.holes.keys().copied().filter(|h| !seen_holes.contains(h)).collect();
+        for h in fresh {
+            seen_holes.insert(h);
+            let Some(x) = w.holes.get(&h) else { continue };
+            if let Some(src) = x.source.filter(|_| Some(x.district) == watch) {
+                let f = x.faction.map_or("-".to_string(), |f| citysim::systems::grudges::label(&w, f));
+                d.holes.push((f, format!("{src:?} {:?}", x.kind)));
+            }
+        }
+        if let Some(dd) = watch {
+            let (mut n, mut fun) = (0u32, 0.0f32);
+            for a in w.citizens() {
+                let home = w.comp::<Household>(a).and_then(|h| h.home);
+                if home.is_some_and(|h| w.district_of_building(h) == dd)
+                    && citysim::systems::demography::is_adult(&w, a)
+                {
+                    n += 1;
+                    fun += w.comp::<Needs>(a).map_or(0.0, |x| x.fun);
+                }
+            }
+            d.fun = fun / n.max(1) as f32;
+            for k in citysim::BuildingKind::LEISURE {
+                for &b in w.buildings_of_kind(k) {
+                    if w.district_of_building(b) == dd {
+                        d.venue_visits += w
+                            .comp::<Building>(b)
+                            .and_then(|x| x.venue.as_ref())
+                            .map_or(0, |v| u32::from(v.visits_today));
+                    }
+                }
+            }
+        }
+        d.fabbers = w
+            .with::<citysim::Job>()
+            .iter()
+            .filter(|&&a| w.comp::<citysim::Job>(a).is_some_and(|j| j.role == citysim::Role::Fabber))
+            .count() as u32;
+        d.fab_stock =
+            w.buildings_of_kind(citysim::BuildingKind::Fab).iter().map(|&f| w.stock(f, citysim::Good::Parts)).sum();
+        days.push(d);
+    }
+    V7Run { name, days, story, failed }
+}
+
+/// An unshocked L2 control run, recomputed by each scenario that calls it
+/// (it watches the district the scenario names).
+fn v7_control(watch_name: &'static str) -> V7Run {
+    run_v7("v7_control", |w, day, watch| {
+        if day == 0 {
+            *watch = district_named(w, watch_name);
+        }
+    })
+}
+
+/// Mid West if a Club stands there, else the district with the most leisure
+/// venues holding a Club (ties the lower id).
+fn club_district(w: &World) -> Option<citysim::DistrictId> {
+    let clubs: Vec<citysim::DistrictId> =
+        w.buildings_of_kind(citysim::BuildingKind::Club).iter().map(|&b| w.district_of_building(b)).collect();
+    if let Some(mw) = district_named(w, "Mid West").filter(|d| clubs.contains(d)) {
+        return Some(mw);
+    }
+    let venues = |d: citysim::DistrictId| {
+        citysim::BuildingKind::LEISURE
+            .iter()
+            .flat_map(|&k| w.buildings_of_kind(k).iter())
+            .filter(|&&b| w.district_of_building(b) == d)
+            .count()
+    };
+    clubs.into_iter().max_by_key(|&d| (venues(d), std::cmp::Reverse(d)))
+}
+
+fn district_named(w: &World, name: &str) -> Option<citysim::DistrictId> {
+    (0..w.districts.len()).map(|i| citysim::DistrictId(i as u8)).find(|&d| w.district_name(d) == name)
+}
+
+/// A named per-day reading of an L2 god run.
+type V7Series = (&'static str, Box<dyn Fn(&V7Day) -> f64>);
+
+impl V7Run {
+    fn sum(&self, from: u64, to: u64, f: &dyn Fn(&V7Day) -> f64) -> f64 {
+        self.days.iter().skip(from as usize).take((to - from) as usize).map(f).sum()
+    }
+
+    fn print_v7(&self, control: &V7Run, windows: &[(u64, u64)], rows: Vec<V7Series>) {
+        let mut o = String::new();
+        outln!(o, "\n================ {} ================", self.name);
+        out!(o, "{:<26}", "sum over days");
+        for (a, b) in windows {
+            out!(o, "{:>20}", format!("{a}-{b} / ctl"));
+        }
+        outln!(o);
+        for (name, f) in &rows {
+            out!(o, "{name:<26}");
+            for &(a, b) in windows {
+                // A "(mean)" row is the window's daily mean, the rest sums.
+                let n = if name.contains("(mean)") { (b - a) as f64 } else { 1.0 };
+                out!(o, "{:>20}", format!("{:.0} / {:.0}", self.sum(a, b, f) / n, control.sum(a, b, f) / n));
+            }
+            outln!(o);
+        }
+        let from = windows.first().map_or(0, |w| w.0);
+        outln!(o, "story from day {from}:");
+        for (d, k, t) in self.story.iter().filter(|(d, k, _)| *k != EventKind::WorksPosted && *d >= from).take(40) {
+            outln!(o, "  d{d:<3} {k:?}: {t}");
+        }
+        if !self.failed.is_empty() {
+            outln!(o, "failed god commands: {:?}", self.failed);
+        }
+        eprint!("{o}");
+    }
+
+    fn assert_applied(&self, n: usize) {
+        assert!(self.failed.is_empty(), "{}: a god command failed: {:?}", self.name, self.failed);
+        let applied = self.story.iter().filter(|(_, k, _)| *k == EventKind::PlayerAction).count();
+        assert!(applied >= n, "{}: {applied} god commands applied, {n} expected", self.name);
+    }
+}
+
+fn v7_rows_city() -> Vec<V7Series> {
+    vec![
+        ("thefts", Box::new(|d: &V7Day| f64::from(d.row.thefts))),
+        ("violent deaths", Box::new(|d: &V7Day| f64::from(d.row.deaths_violence))),
+        ("starvation", Box::new(|d: &V7Day| f64::from(d.row.deaths_starvation))),
+        ("employed (mean)", Box::new(|d: &V7Day| f64::from(d.row.employed))),
+        ("wages", Box::new(|d: &V7Day| d.row.flow_wages as f64)),
+        ("dole", Box::new(|d: &V7Day| d.row.flow_dole as f64)),
+        ("flow_leisure", Box::new(|d: &V7Day| d.row.living.flow_leisure as f64)),
+        ("visits (all kinds)", Box::new(|d: &V7Day| f64::from(d.row.living.visits.iter().sum::<u32>()))),
+    ]
+}
+
+/// L2 god 1: every leisure venue in Mid West closed for 14 days on day 45
+/// (`close_leisure=<Mid West>:14`): does fun fall there, do theft and
+/// assaults rise, does the street fill?
+#[test]
+#[ignore]
+fn god_close_mid_west_clubs() {
+    const DAY: u64 = 45;
+    let r = run_v7("god_close_mid_west_clubs", |w, day, watch| {
+        if day == 0 {
+            *watch = club_district(w);
+        }
+        if day == DAY {
+            if let Some(d) = *watch {
+                w.push_command(PlayerCommand::CloseLeisure { district: d, days: 14 });
+            }
+        }
+    });
+    let w0 = World::new(SEED, Config::load());
+    let dd = club_district(&w0).expect("a district with a Club");
+    let i = dd.index();
+    eprintln!(
+        "god_close_mid_west_clubs: Mid West holds no Club on seed 42 (Clubs stand in Civic, Vats and Spire); the shock closes {} (its leisure venues, the Club among them)",
+        w0.district_name(dd)
+    );
+    let c = run_v7("v7_control_clubs", |w, day, watch| {
+        if day == 0 {
+            *watch = club_district(w);
+        }
+    });
+    let mut rows = v7_rows_city();
+    rows.push(("district venue visits", Box::new(|d: &V7Day| f64::from(d.venue_visits))));
+    // Civic has no Homes: the city's fun, the district's street.
+    rows.push(("city fun x1000 (mean)", Box::new(|d: &V7Day| f64::from(d.row.living.fun_mean) * 1000.0)));
+    rows.push((
+        "street density x100 (mean)",
+        Box::new(move |d: &V7Day| f64::from(d.row.living.street_density.get(i).copied().unwrap_or(0.0)) * 100.0),
+    ));
+    rows.push(("HangOuts", Box::new(|d: &V7Day| f64::from(d.row.living.hangouts))));
+    r.print_v7(&c, &[(30, DAY), (DAY, DAY + 14), (DAY + 14, V7_END)], rows);
+    r.assert_applied(1);
+}
+
+/// L2 god 2: the dole doubled (4 -> 8) from day 20 to day 50: do jobs
+/// empty, do venues gain, does the band move upkeep?
+#[test]
+#[ignore]
+fn god_double_dole_30() {
+    let r = run_v7("god_double_dole_30", |w, day, _| {
+        if day == 20 {
+            let n = w.levers.dole_per_day.saturating_mul(2);
+            w.push_command(PlayerCommand::SetDolePerDay(n));
+        }
+        if day == 50 {
+            w.push_command(PlayerCommand::SetDolePerDay(4));
+        }
+    });
+    let c = v7_control("Mid West");
+    let mut rows = v7_rows_city();
+    rows.push(("Treasury (mean)", Box::new(|d: &V7Day| d.row.treasury as f64)));
+    rows.push(("public works (mean)", Box::new(|d: &V7Day| f64::from(d.row.living.works_jobs))));
+    rows.push(("upkeep_mult x100 (mean)", Box::new(|d: &V7Day| f64::from(d.row.living.upkeep_mult) * 100.0)));
+    rows.push(("fun satisfied x100 (mean)", Box::new(|d: &V7Day| f64::from(d.row.living.fun_satisfied_share) * 100.0)));
+    r.print_v7(&c, &[(10, 20), (20, 50), (50, V7_END)], rows);
+    let quits = |run: &V7Run| run.days.iter().skip(20).take(30).map(|d| f64::from(d.row.employed)).sum::<f64>() / 30.0;
+    eprintln!("god_double_dole_30: employed mean days 20-50 {:.0} (control {:.0})", quits(&r), quits(&c));
+    r.assert_applied(2);
+}
+
+/// L2 god 3: every Fabber killed on day 20: do imports and the Treasury's
+/// customs rise, do the Fabs rehire?
+#[test]
+#[ignore]
+fn god_kill_fab_staff() {
+    let mut n = 0usize;
+    let r = run_v7("god_kill_fab_staff", |w, day, _| {
+        if day == 20 {
+            let fabbers: Vec<citysim::EntityId> = w
+                .with::<citysim::Job>()
+                .into_iter()
+                .filter(|&a| w.comp::<citysim::Job>(a).is_some_and(|j| j.role == citysim::Role::Fabber))
+                .collect();
+            n = fabbers.len();
+            for a in fabbers {
+                w.push_command(PlayerCommand::KillAgent(a));
+            }
+        }
+    });
+    let c = v7_control("Mid West");
+    let rows: Vec<V7Series> = vec![
+        ("Fabbers employed (mean)", Box::new(|d: &V7Day| f64::from(d.fabbers))),
+        ("Fab Parts made", Box::new(|d: &V7Day| f64::from(d.row.living.fab_parts))),
+        ("Parts sold from Fabs", Box::new(|d: &V7Day| f64::from(d.row.living.parts_sold_fab))),
+        ("Parts sold from Recycler", Box::new(|d: &V7Day| f64::from(d.row.living.parts_sold_recycler))),
+        ("Fab stock (mean)", Box::new(|d: &V7Day| f64::from(d.fab_stock))),
+        ("parts_imported", Box::new(|d: &V7Day| d.row.living.parts_imported as f64)),
+        ("flow_import (customs)", Box::new(|d: &V7Day| d.row.flow_import as f64)),
+        ("Treasury (mean)", Box::new(|d: &V7Day| d.row.treasury as f64)),
+    ];
+    r.print_v7(&c, &[(10, 20), (20, 35), (35, V7_END)], rows);
+    eprintln!("god_kill_fab_staff: {n} Fabbers struck dead on day 20");
+    // No Fabber on day 20: nothing was issued, so nothing to assert applied.
+    if n > 0 {
+        r.assert_applied(n);
+    }
+}
+
+/// L2 god 4: `faction_strike=<Ninefold>:<Stackwell's district>:14` on day
+/// 45: do off-screen holes appear there, bound to Ninefold or Unknown?
+#[test]
+#[ignore]
+fn god_faction_strike_stackwell() {
+    const DAY: u64 = 45;
+    let mut what = String::new();
+    let mut picked: Option<citysim::DistrictId> = None;
+    let r = run_v7("god_faction_strike_stackwell", |w, day, watch| {
+        if day != DAY {
+            return;
+        }
+        // Stackwell (a Housing corp): the district where it owns the most Homes (ties the lower id).
+        let d = corp_named(w, "Stackwell").and_then(|c| {
+            let mut n: std::collections::BTreeMap<citysim::DistrictId, usize> = Default::default();
+            for &h in w.buildings_of_kind(citysim::BuildingKind::Home) {
+                if w.owner_of(h) == Some(c) {
+                    *n.entry(w.district_of_building(h)).or_default() += 1;
+                }
+            }
+            n.into_iter().max_by_key(|x| (x.1, std::cmp::Reverse(x.0))).map(|x| x.0)
+        });
+        let d = d.or_else(|| {
+            // Else a Sump district Ninefold does not hold.
+            let held: Vec<citysim::DistrictId> = gang_named(w, "Ninefold")
+                .map(|g| citysim::systems::gang::held_districts(w, g).into_iter().map(|x| x.0).collect())
+                .unwrap_or_default();
+            (0..w.districts.len())
+                .map(|i| citysim::DistrictId(i as u8))
+                .find(|&x| w.district_name(x).contains("Sump") && !held.contains(&x))
+        });
+        match (gang_named(w, "Ninefold"), d) {
+            (Some(g), Some(d)) => {
+                what = format!("Ninefold strikes {}", w.district_name(d));
+                *watch = Some(d);
+                picked = Some(d);
+                w.push_command(PlayerCommand::FactionStrike { gang: g, district: d, days: 14 });
+            }
+            (g, d) => what = format!("Ninefold {g:?}, district {d:?} on day {DAY}"),
+        }
+    });
+    let pd = picked;
+    let c = run_v7("v7_control_strike", |_, day, watch| {
+        if day == DAY {
+            *watch = pd;
+        }
+    });
+    let rows: Vec<V7Series> = vec![
+        ("faction holes in the district", Box::new(|d: &V7Day| d.holes.len() as f64)),
+        ("  of them Ninefold's", Box::new(|d: &V7Day| d.holes.iter().filter(|h| h.0 == "Ninefold").count() as f64)),
+        ("fv_killed (city)", Box::new(|d: &V7Day| f64::from(d.row.living.fv_killed))),
+        ("fv_assaulted (city)", Box::new(|d: &V7Day| f64::from(d.row.living.fv_assaulted))),
+        ("fv_bound (city)", Box::new(|d: &V7Day| f64::from(d.row.living.fv_bound))),
+        ("fv_unknown (city)", Box::new(|d: &V7Day| f64::from(d.row.living.fv_unknown))),
+        ("fv_bound_wrong", Box::new(|d: &V7Day| f64::from(d.row.living.fv_bound_wrong))),
+        ("violent deaths", Box::new(|d: &V7Day| f64::from(d.row.deaths_violence))),
+    ];
+    r.print_v7(&c, &[(30, DAY), (DAY, DAY + 14), (DAY + 14, V7_END)], rows);
+    let by: std::collections::BTreeMap<String, usize> =
+        r.days.iter().skip(DAY as usize).take(15).flat_map(|d| d.holes.iter()).fold(Default::default(), |mut m, h| {
+            *m.entry(format!("{} {}", h.0, h.1)).or_default() += 1;
+            m
+        });
+    eprintln!(
+        "god_faction_strike_stackwell: {what}; faction holes there days {DAY}-{} by faction and source: {by:?}",
+        DAY + 14
+    );
+    r.assert_applied(1);
+}
+
+/// L2 god 5: the export open at ten times the price on day 20
+/// (`export=on`, `export_price=food:30`, `parts:180`, `data:400`): do the
+/// Food and Tech corps Grow?
+#[test]
+#[ignore]
+fn god_export_10x() {
+    use citysim::outside::ExportGood;
+    let r = run_v7("god_export_10x", |w, day, _| {
+        if day == 20 {
+            w.push_command(PlayerCommand::SetExport(true));
+            for (good, price) in [(ExportGood::Food, 30), (ExportGood::Parts, 180), (ExportGood::Data, 400)] {
+                w.push_command(PlayerCommand::SetExportPrice { good, price });
+            }
+        }
+    });
+    let c = v7_control("Mid West");
+    let rows: Vec<V7Series> = vec![
+        ("flow_export", Box::new(|d: &V7Day| d.row.living.flow_export as f64)),
+        ("outside inbound (end)", Box::new(|d: &V7Day| d.row.living.outside_inbound as f64 / 1000.0)),
+        ("foundings", Box::new(|d: &V7Day| f64::from(d.row.foundings))),
+        ("employed (mean)", Box::new(|d: &V7Day| f64::from(d.row.employed))),
+        ("food price (mean)", Box::new(|d: &V7Day| d.row.price as f64)),
+        ("starvation", Box::new(|d: &V7Day| f64::from(d.row.deaths_starvation))),
+        ("thefts", Box::new(|d: &V7Day| f64::from(d.row.thefts))),
+    ];
+    r.print_v7(&c, &[(10, 20), (20, 50), (50, V7_END)], rows);
+    let mut o = String::new();
+    outln!(o, "corp treasury / order on days 20, 50, 89 (control)");
+    for name in r.days[19].corps.keys() {
+        let at = |run: &V7Run, d: usize| {
+            run.days.get(d).and_then(|x| x.corps.get(name)).map_or("gone".to_string(), |v| format!("{} {:?}", v.0, v.1))
+        };
+        outln!(
+            o,
+            "  {name:<12} {} ({}) | {} ({}) | {} ({})",
+            at(&r, 19),
+            at(&c, 19),
+            at(&r, 49),
+            at(&c, 49),
+            at(&r, 88),
+            at(&c, 88)
+        );
+    }
+    let grow = |run: &V7Run| -> std::collections::BTreeMap<String, usize> {
+        run.days.iter().skip(20).fold(Default::default(), |mut m, d| {
+            for (n, v) in &d.corps {
+                if v.1 == citysim::CorpOrder::Grow {
+                    *m.entry(n.clone()).or_default() += 1;
+                }
+            }
+            m
+        })
+    };
+    outln!(o, "days on Grow from day 20: {:?} (control {:?})", grow(&r), grow(&c));
+    eprint!("{o}");
+    r.assert_applied(4);
 }

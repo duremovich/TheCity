@@ -114,6 +114,54 @@ fn daily_restock(world: &mut World) {
             ),
         );
     }
+    reserve_release(world, wh);
+}
+
+/// L2 phase 5 (seed 43's year-3 famine: a bankrupt Food corp's Market went
+/// to an agent with an empty purse, so `daily_restock` sold it nothing, its
+/// shelf stood empty at price 30 for weeks while the Reserve Depot held
+/// 20,000 units, and 164 starved): with `[living]` on, a Market whose price
+/// is above `reserve_release_price` and whose shelf is under
+/// `restock_floor` gets up to `reserve_release_batch` units a day from the
+/// Reserve free (the `ReleaseReserve` lever's transfer, aimed at that
+/// Market).
+fn reserve_release(world: &mut World, wh: EntityId) {
+    let cfg = &world.config.living;
+    if !cfg.enabled || cfg.reserve_release_price <= 0 {
+        return;
+    }
+    let (threshold, batch, floor) =
+        (cfg.reserve_release_price, cfg.reserve_release_batch, world.config.economy.restock_floor);
+    for mk in world.buildings_of_kind(BuildingKind::Market).to_vec() {
+        let Some(stock) =
+            world.comp::<Building>(mk).filter(|b| !b.demolished && !world.is_closed(mk)).map(|b| b.stock_food)
+        else {
+            continue;
+        };
+        let price = world.comp::<Market>(mk).map_or(0, |m| m.price_food);
+        if price <= threshold || stock >= floor {
+            continue;
+        }
+        let available = world.comp::<Building>(wh).map_or(0, |b| b.stock_food);
+        let moved = batch.min(floor - stock).min(available);
+        if moved == 0 {
+            continue;
+        }
+        if let Some(b) = world.comp_mut::<Building>(wh) {
+            b.stock_food -= moved;
+        }
+        if let Some(b) = world.comp_mut::<Building>(mk) {
+            b.stock_food += moved;
+        }
+        world.push_event(
+            EventKind::Restock,
+            &[mk],
+            format!(
+                "The city released {moved} food from the Reserve Depot to Street Market#{} (price {price}, stock {stock})",
+                mk.index
+            ),
+        );
+    }
 }
 
 /// Each Market prices from its own stock and keeps its own history. M11: a
@@ -486,14 +534,25 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
 }
 
 /// Who may draw the dole: the jobless; with `jobs::on` also a Job holder
-/// whose job has not yet paid its first wage (L2 fix round). With jobs off
-/// every Job is `paid_once`, so this is "has no Job".
+/// whose job has not yet paid its first wage (L2 fix round) or whose
+/// employer owes it `UNPAID_DOLE_DAYS` days or more (L2 phase 5: the dole
+/// is the floor under a wage, not a penalty for holding an unpaid job; on
+/// seed 42 a third of the starved were Fighters and Attendants of venues
+/// that stopped paying, off the dole until they quit at 7 days). With jobs
+/// off every Job is `paid_once` and nothing else is read, so this is "has
+/// no Job".
 pub fn dole_eligible(world: &World, agent: EntityId) -> bool {
     match world.comp::<Job>(agent) {
         None => true,
-        Some(j) => crate::systems::jobs::on(world) && !j.paid_once,
+        Some(j) => crate::systems::jobs::on(world) && (!j.paid_once || j.days_unpaid >= UNPAID_DOLE_DAYS),
     }
 }
+
+/// L2 phase 5: days of owed wages after which a Job holder draws the dole.
+/// Intended: such a holder may draw it every day until it quits at 7 unpaid
+/// days, and nothing claws it back when the employer later pays the
+/// arrears: bounded at about 7 x `dole_per_day` per unpaid episode.
+pub const UNPAID_DOLE_DAYS: u8 = 2;
 
 /// `CollectDole` at the Hall, once per day, while the Treasury is not negative.
 pub fn collect_dole(world: &mut World, agent: EntityId) -> bool {

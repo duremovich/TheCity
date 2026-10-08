@@ -859,6 +859,14 @@ where `skill_a` is the actor's social skill for the kind, `resist_t` the target'
 
 The rules are in [M15_WORD_AND_BLOOD.md](M15_WORD_AND_BLOOD.md): deeds, rumours and sightings § 1, reputation § 2, grudges § 3, the Hunt § 4, social stats § 5, the social move § 6, the news and propaganda § 7, the psychological LOD table § 8, levers § 9, UI, events and CSV § 10, and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city turn every M15 section off.
 
+### The living city (Life pass L2)
+
+Since L2 the tick order is `commands, lod, needs, memory, mood, think, plan, exec, virt, ownership, assets, tech, classes, districts, economy, [bind], word, law, social, gang, corp_brain, living, demography, stats`. `living::run` holds L2's own passes: at midnight the venues' prices and visit windows, `jobs::daily` (scrap into Recycler Parts, the Noodle Bars' restock from the nearest Market, the import tally), `jobs::top_up` (one vacancy a day at every Market and Bar below `[jobs] market_staff`/`bar_staff`), `budget::daily` (the Treasury band: public works and `upkeep_mult`), `outside::export_daily` (the World account, `[export]`), deferred venue seeding after a pre-L2 load, `leisure::spots` (the day's HangOut spots); every hour the bout at `bout_hour`; at 21:00 `leisure::stat_daily` (the Statistical evening: one rung per agent below `fun_satisfied`, paid as on screen); at 18:00 an off-screen leader's Collect and Call. Elsewhere: `needs::run`'s hourly branch decays `fun` for bodies (`run_statistical` for the Statistical tier, `law::held_hourly` for held prisoners); `gang::daily_economy` builds fronts and `gang::desist` lets ordinary members walk away; `law::run` settles held prisoners hourly (decay, a cell meal for a starving one, the starvation check) before `jail_upkeep`; `lod::run` rolls the ledger's actor side at midnight (`fviolence::daily_actor`), rebuilds the active sources at 01:00 and tallies body exposure after each hourly assignment; **the daily faction pass `fviolence::daily` runs at the top of `bind::run`'s midnight branch**, before the binder (its holes are bound the next midnight).
+
+**The Statistical tier's second roll.** Beside the table's hourly outcome (the M10 victim and actor rolls), each Statistical adult (not jailed, emigrating or pinned, not already a victim since the last midnight) in a district a source touches (a gang's order over its held districts, the rival's for Contest, the door's for a raid, a god `FactionStrike`, each side of a vendetta where both hold Homes, a live riot, an episode) draws once a day on `WordNs::FViolence` keyed `(day, id.index)`, in the fixed order Killed, Assaulted, Robbed, Abducted (Harvest, kitted adults only), against `rate[k] = fv_mult × (Σ victims[k] + prior[k] × prior_weight) ÷ (Σ exposure ÷ 24 + prior_weight)` summed over the sources that may strike it: the victims and body-hours the on-screen tier recorded in that `(source, district, victim class)` cell over the last `rate_days`, shrunk toward the source's prior times the class's `class_mult`. At most one hit per agent, city-wide `day_cap` per kind; a hit opens a consequential hole naming the source and its faction, and the binder draws only among that faction's members (else Unknown). The sixth dice rule: like the brawl, the lock, the run and the move, one seeded draw over counters.
+
+The rules are in [LIFE_L2.md](LIFE_L2.md) (§ 1 jobs and venues, § 2 fun and the street, § 3 faction violence, § 4 the LOD budget and the churn, § 5 levers, § 6 the year run) and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city call `living_off()`; `--l2-off` (`[living] enabled = false`) reproduces the M15 city.
+
 ### Economy
 
 Daily at `tick_of_day == 0` plus per-event hooks. Inputs: building stocks, Market, Treasury, Jobs, lever `tax_rate`, season. Outputs: stock changes, `price_food`, `price_history` (cap 120), Wallet changes, `days_unpaid`.
@@ -1025,6 +1033,22 @@ priority = (on_screen ? 3 : 0) + (pinned ? 2 : 0) + (story_relevant_step ? 1 : 0
 - Tie-break: ascending Manhattan distance to the view centre (map centre `(48, 32)` headless), then ascending `EntityId.index`.
 
 Stable-sort by `(priority desc, dist asc, index asc)`. First `MAX_FULL = 50` → Full, next `MAX_COARSE = 100` → Coarse, rest → Statistical. Jailed agents are always Coarse and do not consume slots. Hysteresis: a Full agent ranked 51–60 stays Full and the agent that would displace it is held at Coarse; the same 10-rank band applies at the Coarse/Statistical boundary.
+
+Since M10 the priority adds a rank class (`lod::class_with`) and the caps are `[lod] max_full` 50 and `max_coarse` 150. Since Life L2 (`[lod] budget`) each forced class has a quota inside them and held agents cost no body:
+
+| Class | Who | Quota / rule | Slots |
+| --- | --- | --- | --- |
+| 5 | pinned | uncapped | ranked (Full first) |
+| 4 | runners, hunters, hunted | `set_lod` refuses their demotion | ranked |
+| 3 | public guards and gravediggers | all (`watch_on_shift_only = false` keeps M10 D20: off shift too) | ranked |
+| 2 | per gang: leader, two lieutenants, members with a story step, the order's front line (`front_tiles`), then a daily rotation | `gang_quota` 25, `raid_quota` 40 from `raid_promote_hours` before a raid muster | ranked |
+| 2 | private guards | the first `private_quota` 12 by id | ranked |
+| 2 | rioters, abductees in tow, Harvest targets, episodes | as M12/M13 | ranked |
+| 0 | civilians, members over their quota | screen distance, story, M11 bonus | ranked |
+| held | sentenced, unpinned, not release-soon, cuffed or in a BreakOut window | Statistical in the cells, decayed hourly, fed at midnight (and at once when starving) | none |
+| outside the rank | release within `release_soon_hours`, cuffed, a BreakOut gang's prisoners, emigrating | Coarse | none (few) |
+
+So the ranked bodies are exactly `max_full + max_coarse`; Coarse outside the held class exceeds `max_coarse` only by the pinned, class-4 refusals and the bodies promoted after the assignment in the same tick (a released prisoner's walk out, a runner given an order, a week's immigrants, a thief caught by the Statistical pass), which the next assignment ranks.
 
 ### Transitions
 

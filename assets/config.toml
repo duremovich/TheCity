@@ -1479,6 +1479,38 @@ enabled = true
 # daily rescore keeps [corps] hysteresis (0.10). Placeholders.
 corp_order_dwell_days = 3
 corp_order_margin = 0.05
+# Gang desistance (L2 phase 5, `gang::desist`; the year runs' diagnosis: the roster cap had no exit, four
+# gangs filled to [gangs] max_members 60 by ~day 150 and stayed there, 0-18 leaves a month, every death
+# refilled). Daily, an ordinary member (not the leader or the two lieutenants; not during a raid or BreakOut
+# muster, jailed, cuffed, hunting or hunted) walks away with p = desist_base x the terms below. Placeholders.
+# Measured on 42 / 43, 365 days (members on day 365 of 240 cap; population day 365; violent deaths days
+# 241-360; leaves a month in year 3): base 0 -> 233 / 238, 1,625 / 1,636, 299 / 266, 8-16; 0.004 -> 238 /
+# 240, 1,683 / 1,572, 284 / 283, ~30-50; 0.008 -> 238 / 237, 1,722 / 1,584, 226 / 273, ~70-85; 0.02 -> 184 /
+# 198 (75-85 % of the cap, 160-205 through year 2-3), 1,758 / 1,779, 250 / 203, ~110-140; 0.05 -> 134 / 170,
+# 1,868 / 1,795, 217 / 238, ~200. Recruitment refills any rate near the 1-3 a week a gang the orchestrator
+# asked first, so only a monthly turnover of about half a roster holds the plateau below the cap; 0.03 broke
+# seed 42's Treasury in year 3 (0 from day ~270, 138 emigrants in a month), so 0.02.
+desist_base = 0.02
+desist_employed = 4.0                # x while holding a Job that has paid a wage
+desist_unpaid_days = 14              # no gang stipend or tribute for this many days ...
+desist_unpaid = 3.0                  # ... x this
+desist_settled = 2.0                 # x when married or housed outside the Sump
+desist_age = 35                      # from this age (sim years) ...
+desist_aged = 2.0                    # ... x this
+desist_jailed = 2.0                  # x when released from a sentence in the last 30 days
+desist_feud = 0.25                   # x (a brake) with an unsettled grudge on a rival gang or the gang in a vendetta
+# x (a brake) for a member the gang invested in or earns through: the keeper of an asset its gang owns (the
+# gang's Arms implants and decks), or a deal in the last 7 days (deal_log). Without it the ~250 leavers per 120 days walked the gangs' runners, armed members
+# and dealers out: on seed 42 Ledger thefts 5 -> 0, Flatlines 4 -> 0, Detox 1 -> 0, off-screen killings 4 -> 0.
+desist_invested = 0.25
+desist_cooldown_days = 60            # a leaver's JoinGang cooldown
+# The Reserve's release (L2 phase 5, `economy::reserve_release`). Seed 43's year 3: Greenline went bankrupt
+# on day 228 and an agent bought its Street Market with no coins left for wholesale, so the daily restock
+# sold it nothing; the shelf stood at 0 and price 30 from ~day 285 while the Reserve Depot sat full at 20,000,
+# and starvation per year read 12 / 9 / 164 (population 1,498 on day 365). The release sends Reserve food
+# free to a Market priced above reserve_release_price (twice price_base) and under restock_floor.
+reserve_release_price = 8
+reserve_release_batch = 200
 
 [jobs]
 enabled = true
@@ -1534,8 +1566,19 @@ band = [30000, 60000]
 # (day 14) -> 63 coins (day 61), upkeep_mult 0.30, seed 43 min 1,022. After: min after day 30 73.5k / 66.0k /
 # 55.9k on 42 / 43 / 44, upkeep_mult min 0.65 / 0.90 / 0.95.
 band_hold_days = 3                   # plan key (L10): the spec's 3-day hysteresis, now on every step
+# L2 phase 5 calibration (a), wages over the dole (seeds 42-44, 120 days, day 60): at works_max 120 and
+# the sweeper's M12 wage 5 Σwages ÷ Σdole read 0.47/0.47/0.47 (employed 531/525/514, 26 % of adults).
+# works_max 400 at works_wage 7 met the target (0.99-1.07 on 42-47, 40 % employed) but only by spending the
+# Treasury's opening hoard: from ~day 150 the band laid the works off in waves (the 365-day runs). That is a
+# jobs programme masking the private-jobs gap, not the wage economy the spec means, so the roster stays at
+# 120 (orchestrator, 2026-10-08) and the ratio is a printed finding: private jobs hold ~530 of the ~650 the
+# spec's arithmetic needed; the rest needs recurring income (M17's export sink, or more founded employers).
 works_step = 10
 works_max = 120
+# Kept: a public-works hire's wage 7 (0: wage_sanitation 5). At 5, less the 12 % wage tax over six shifts a
+# week, a sweeper earns less than the dole's 4 a day: with 550 hires at 5 starvation rose 14/15/12 ->
+# 21/33/28 on 42-44; at 7 it read 6/7/10.
+works_wage = 7                       # plan key (phase 5)
 upkeep_step = 0.05
 upkeep_floor = 0.3                   # kept: the steps above alone hold the trough (the floor is never reached)
 
@@ -1558,10 +1601,20 @@ prior_weight = 48.0                  # body-days of evidence the prior is worth 
 # priors drive the off-screen tier: on 42-47 (120 days) Murders summed 598 against the M15 bound of
 # 1.25 x 315 = 394 (0.5: 450; 0.3: 352), and civilians were hit off screen 5-6x as often as civilian
 # bodies were by on-screen faction violence (2.2 vs 0.4 per 1,000 agent-days; 0.3: 0.63 vs 0.52).
-fv_mult = 0.3
+fv_mult = 1.0                        # phase 5: 0.3 -> 1.0, the per-class priors below carry it
 day_cap = { killed = 3, assaulted = 12, robbed = 20, abducted = 2 }   # city-wide per day (placeholders)
 # per agent-day [Killed, Assaulted, Robbed, Abducted] (placeholders, the spec's)
 prior = { order = [0.0003, 0.002, 0.003, 0.0], vendetta = [0.0004, 0.002, 0.0, 0.0], riot = [0.001, 0.01, 0.01, 0.0], episode = [0.0005, 0.003, 0.0, 0.0], harvest_abducted = 0.0004 }
+# L2 phase 5 calibration (b): a prior per VictimClass, as per-kind multipliers [K, A, R, Ab] of every
+# source's prior, from the on-screen ledger pooled over 42-47 (120 days, the calibrated wage city, fv_mult
+# 0.3): civilians K 3 / A 24 / R 2 victims over 87,335 body-days (0.034 / 0.27 / 0.023 per 1,000: the
+# order prior's 0.3 / 2 / 3 is 9x / 7x / 130x too high), members K 185 / A 3,961 / R 113 over 152,190
+# (1.22 / 26.0 / 0.74: 4x / 13x / 0.25x), the watch K 26 / A 492 / R 5 over 40,322 (0.65 / 12.2 / 0.12:
+# 2.2x / 6.1x / 0.04x). Abducted keeps the Harvest prior (only Harvest abducts).
+# Members' Assaulted 13 -> 6.5: at the ledger's 13x the off-screen beatings of members fed grudges into
+# vendettas until seed 44 held 14 of 66 faction pairs open on day 120, over the M15 gate's sanity fifth
+# (6.5: 10/78, 6/55, 11/66; Murders on 42-47 257). Placeholders for the late calibration.
+class_mult = { civilian = [0.11, 0.14, 0.008, 1.0], member = [4.05, 6.5, 0.25, 1.0], watch = [2.15, 6.1, 0.04, 1.0] }
 
 [buildings.club]
 capacity = 40

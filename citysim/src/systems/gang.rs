@@ -7,8 +7,8 @@
 use rand::Rng;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Claim, DistrictId, Gang, GangMember, Household, Memory, MemoryKind, Needs, Order,
-    Personality, Position, Sentence, Shock, TilePos, Wallet,
+    Brain, Building, BuildingKind, Claim, DistrictId, Gang, GangMember, GoalKind, Household, Identity, Job, Memory,
+    MemoryKind, Needs, Order, Personality, Position, Sentence, Shock, TilePos, Wallet,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -1088,6 +1088,129 @@ pub fn run(world: &mut World) {
     }
     if daily {
         daily_economy(world);
+        desist(world);
+    }
+}
+
+/// L2 phase 5: a gang stipend or tribute reached `id` today.
+pub fn note_paid(world: &mut World, id: EntityId) {
+    if !world.config.living.enabled {
+        return;
+    }
+    let today = world.day();
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.gang_paid_day = Some(today);
+    }
+}
+
+/// L2 phase 5 (the year runs' diagnosis: the roster cap had no exit; four
+/// gangs filled to `max_members` by ~day 150 and the violence followed):
+/// gang desistance. Daily, every ordinary member (not the leader nor
+/// `leader_ranking`'s two lieutenants; not while its gang musters a raid
+/// or a BreakOut; not jailed, cuffed, hunting or hunted) walks away with
+/// `p = desist_base x` the terms `[living]` names (employed, unpaid,
+/// settled, aged, lately jailed; a feud brakes it), one draw from a
+/// `splitmix64` hash of the seed, the member and the day (no stream). A
+/// leaver keeps its grudges and memories and cools `JoinGang` for
+/// `desist_cooldown_days`.
+pub fn desist(world: &mut World) {
+    let cfg = world.config.living.clone();
+    if !cfg.enabled || cfg.desist_base <= 0.0 {
+        return;
+    }
+    let today = world.day();
+    let now = world.tick;
+    let seed = world.seed();
+    let mut leaving: Vec<EntityId> = Vec::new();
+    // Dealers with a deal in the last 7 days. `deal_log` keeps only the
+    // latest dealer per venue, so a second dealer at the same bar that week
+    // is missed (undercounted: it rolls without the brake).
+    let dealers: std::collections::BTreeSet<EntityId> =
+        world.deal_log.values().filter(|&&(_, d)| d + 7 >= today).map(|&(m, _)| m).collect();
+    // Members keeping an asset their gang owns (the gang's Arms implants and decks).
+    let mut kept: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
+    // scan-ok: daily, assets only
+    for a in world.with::<crate::components::Asset>() {
+        let Some(x) = world.comp::<crate::components::Asset>(a) else { continue };
+        if let (Some(k), Some(o)) = (x.keeper, x.owner) {
+            if world.comp::<Gang>(o).is_some() {
+                kept.insert(k);
+            }
+        }
+    }
+    for gang in world.gangs() {
+        let Some(g) = world.comp::<Gang>(gang) else { continue };
+        if (g.order.is_raid() || g.order == Order::BreakOut) && g.raid_at.is_some() {
+            continue;
+        }
+        let mut core: Vec<EntityId> = g.leader.into_iter().collect();
+        core.extend(leader_ranking(world, gang).into_iter().filter(|&m| Some(m) != g.leader).take(2));
+        let feud_gang = world.vendettas.iter().any(|v| v.a == gang || v.b == gang);
+        for &m in &g.members {
+            if core.contains(&m) || world.has::<Sentence>(m) {
+                continue;
+            }
+            let Some(b) = world.comp::<Brain>(m) else { continue };
+            if b.cuffed_by.is_some() || world.hunts.contains_key(&m) || world.hunted_by.contains_key(&m) {
+                continue;
+            }
+            let mut p = cfg.desist_base;
+            if world.comp::<Job>(m).is_some_and(|j| j.paid_once) {
+                p *= cfg.desist_employed;
+            }
+            let joined = world.comp::<GangMember>(m).map_or(0, |x| x.joined_tick / TICKS_PER_DAY);
+            let paid = b.gang_paid_day.unwrap_or(joined).max(joined);
+            if today.saturating_sub(paid) >= cfg.desist_unpaid_days {
+                p *= cfg.desist_unpaid;
+            }
+            let sump_home = world
+                .comp::<Household>(m)
+                .and_then(|h| h.home)
+                .map(|h| world.district_name(world.district_of_building(h)).contains("Sump"));
+            if world.spouse_of(m).is_some() || sump_home == Some(false) {
+                p *= cfg.desist_settled;
+            }
+            if world.comp::<Identity>(m).is_some_and(|i| i.age_years() >= cfg.desist_age) {
+                p *= cfg.desist_aged;
+            }
+            // Released from a sentence in the last 30 days: the biography's
+            // `Released` row (a `WasArrested` memory is written at the
+            // arrest as well as at the release; an escape writes neither).
+            let lately_released = world.life.get(m.index as usize).and_then(|l| l.as_ref()).is_some_and(|l| {
+                l.events.iter().any(|e| {
+                    e.kind == crate::components::LifeKind::Released && now.saturating_sub(e.tick) <= 30 * TICKS_PER_DAY
+                })
+            });
+            if lately_released {
+                p *= cfg.desist_jailed;
+            }
+            let grudge_on_rival = world.comp::<crate::word::Grudges>(m).is_some_and(|gr| {
+                gr.list.iter().any(|x| {
+                    x.settled.is_none() && world.gang_of(x.target).is_some_and(|tg| tg != gang)
+                        || (x.settled.is_none() && x.target != gang && world.comp::<Gang>(x.target).is_some())
+                })
+            });
+            if feud_gang || grudge_on_rival {
+                p *= cfg.desist_feud;
+            }
+            // Investment and income hold a member: an asset the gang owns
+            // in its keeping (the gang's Arms, its deck) or a deal this week.
+            if kept.contains(&m) || dealers.contains(&m) {
+                p *= cfg.desist_invested;
+            }
+            let h = crate::rng::splitmix64(seed ^ 0x6465_7369_7374 ^ u64::from(m.index) ^ today.rotate_left(32));
+            let u = (h >> 11) as f32 / (1u64 << 53) as f32;
+            if u < p {
+                leaving.push(m);
+            }
+        }
+    }
+    let until = now + cfg.desist_cooldown_days * TICKS_PER_DAY;
+    for m in leaving {
+        leave(world, m, "walked away");
+        if let Some(b) = world.comp_mut::<Brain>(m) {
+            b.cooldowns.insert(GoalKind::JoinGang, until);
+        }
     }
 }
 
@@ -1147,6 +1270,7 @@ fn daily_economy(world: &mut World) {
                 if let Some(w) = world.comp_mut::<Wallet>(m) {
                     w.coins += stipend;
                 }
+                note_paid(world, m);
             }
         }
         // L2 L20: fronts (Crackdown closures, a new front under Expand).

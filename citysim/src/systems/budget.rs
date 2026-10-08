@@ -34,6 +34,13 @@ pub fn note_hire(world: &mut World, id: EntityId, employer: EntityId, role: Role
     }
     world.works_vacancies -= 1;
     world.jobs_book.works.push(id);
+    // L2 phase 5: public works pay `[budget] works_wage` when set.
+    let wage = world.config.budget.works_wage;
+    if wage > 0 {
+        if let Some(j) = world.comp_mut::<Job>(id) {
+            j.wage_per_day = wage;
+        }
+    }
 }
 
 /// Open public-works vacancies withdrawn (below the band, or the lever off).

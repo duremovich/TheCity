@@ -3946,6 +3946,35 @@ pub struct LivingCfg {
     /// ... unless the challenger beats it by this margin, or the pending
     /// shocks reach `[life] order_severe` (the gangs' dwell rule, L1).
     pub corp_order_margin: f32,
+    /// L2 phase 5 (gang desistance, `gang::desist`): an ordinary member's
+    /// daily chance to walk away, times the terms below (0: no desistance).
+    pub desist_base: f32,
+    /// x this while the member holds a Job that has paid a wage.
+    pub desist_employed: f32,
+    /// x `desist_unpaid` when no stipend or tribute reached it for this many days.
+    pub desist_unpaid_days: u64,
+    pub desist_unpaid: f32,
+    /// x this when married or housed outside the Sump districts.
+    pub desist_settled: f32,
+    /// x `desist_aged` from this age (sim years).
+    pub desist_age: u32,
+    pub desist_aged: f32,
+    /// x this when released from a sentence in the last 30 days.
+    pub desist_jailed: f32,
+    /// x this (a brake) with an unsettled grudge on a rival gang's member or
+    /// the gang in an open vendetta.
+    pub desist_feud: f32,
+    /// x this (a brake) for a member the gang has invested in or earns
+    /// through: the keeper of an asset its gang owns (Arms, a deck), or a
+    /// deal in the last 7 days.
+    pub desist_invested: f32,
+    /// A leaver's `JoinGang` cooldown, days.
+    pub desist_cooldown_days: u64,
+    /// L2 phase 5 (`economy::reserve_release`): a Market priced above this
+    /// and under `restock_floor` gets Reserve food free (0: off) ...
+    pub reserve_release_price: i64,
+    /// ... up to this many units a day.
+    pub reserve_release_batch: u32,
 }
 
 impl Default for LivingCfg {
@@ -3956,7 +3985,24 @@ impl Default for LivingCfg {
 
 impl LivingCfg {
     pub fn off() -> LivingCfg {
-        LivingCfg { enabled: false, corp_order_dwell_days: 3, corp_order_margin: 0.05 }
+        LivingCfg {
+            enabled: false,
+            corp_order_dwell_days: 3,
+            corp_order_margin: 0.05,
+            desist_base: 0.0,
+            desist_employed: 4.0,
+            desist_unpaid_days: 14,
+            desist_unpaid: 3.0,
+            desist_settled: 2.0,
+            desist_age: 35,
+            desist_aged: 2.0,
+            desist_jailed: 2.0,
+            desist_feud: 0.25,
+            desist_invested: 0.25,
+            desist_cooldown_days: 60,
+            reserve_release_price: 0,
+            reserve_release_batch: 200,
+        }
     }
 }
 
@@ -4232,6 +4278,9 @@ pub struct BudgetCfg {
     pub works_max: u16,
     pub upkeep_step: f32,
     pub upkeep_floor: f32,
+    /// L2 phase 5 (plan key): a public-works hire's daily wage; 0 keeps
+    /// `[economy] wage_sanitation` (the M12 sweeper's wage).
+    pub works_wage: i64,
 }
 
 impl Default for BudgetCfg {
@@ -4250,6 +4299,7 @@ impl BudgetCfg {
             works_max: 120,
             upkeep_step: 0.05,
             upkeep_floor: 0.3,
+            works_wage: 0,
         }
     }
 }
@@ -4313,6 +4363,25 @@ pub struct FviolenceCfg {
     pub fv_mult: f32,
     pub day_cap: FvKindsCfg,
     pub prior: FvPriorCfg,
+    /// L2 phase 5: a prior per victim class, as a multiplier per kind
+    /// (Killed, Assaulted, Robbed, Abducted) on every source's prior.
+    pub class_mult: FvClassCfg,
+}
+
+/// L2 phase 5 (calibration (b)): per `VictimClass`, the per-kind
+/// multipliers of the source priors (1.0: the spec's priors as they are).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FvClassCfg {
+    pub civilian: [f32; 4],
+    pub member: [f32; 4],
+    pub watch: [f32; 4],
+}
+
+impl Default for FvClassCfg {
+    fn default() -> Self {
+        FvClassCfg { civilian: [1.0; 4], member: [1.0; 4], watch: [1.0; 4] }
+    }
 }
 
 /// Per-kind day caps, city-wide (Killed, Assaulted, Robbed, Abducted).
@@ -4377,6 +4446,7 @@ impl FviolenceCfg {
             fv_mult: 1.0,
             day_cap: FvKindsCfg::default(),
             prior: FvPriorCfg::default(),
+            class_mult: FvClassCfg::default(),
         }
     }
 }

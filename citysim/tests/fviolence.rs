@@ -105,6 +105,7 @@ fn test_rate_matches_worked_numbers() {
     w.config.fviolence.fv_mult = 1.0;
     w.config.fviolence.rate_days = 14;
     w.config.fviolence.prior.order = [0.0003, 0.002, 0.003, 0.0];
+    w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     let key = (ViolenceSource::Order(Order::Contest), DistrictId(2), VictimClass::Civilian);
     w.order_rates.cells.clear();
     let cell = w.order_rates.cell_mut(key);
@@ -152,6 +153,8 @@ fn test_daily_pass_opens_killed_hole_in_contested_district() {
     w.config.fviolence.prior.order = [1.0, 0.0, 0.0, 0.0];
     w.config.fviolence.prior_weight = 1e6;
     w.config.fviolence.fv_mult = 1.0;
+    // L2 phase 5: the per-class multipliers off (these priors are the test's own).
+    w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     fviolence::daily(&mut w);
     let holes: Vec<&Hole> = w
         .holes
@@ -297,6 +300,8 @@ fn test_harvest_folds_abduction_daily() {
     on.config.fviolence.prior.harvest_abducted = 1.0;
     on.config.fviolence.prior_weight = 1e6;
     on.config.fviolence.fv_mult = 1.0;
+    // L2 phase 5: the per-class multipliers off (these priors are the test's own).
+    on.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     on.config.fviolence.day_cap.abducted = 1000;
     fviolence::rebuild_active(&mut on);
     fviolence::daily(&mut on);
@@ -357,6 +362,8 @@ fn test_riot_gone_by_midnight_still_rolls_and_binds_a_rioter() {
     w.config.fviolence.prior.riot = [1.0, 0.0, 0.0, 0.0];
     w.config.fviolence.prior_weight = 1e6;
     w.config.fviolence.fv_mult = 1.0;
+    // L2 phase 5: the per-class multipliers off (these priors are the test's own).
+    w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     fviolence::daily(&mut w);
     let holes: Vec<u64> = w
         .holes
@@ -390,6 +397,8 @@ fn test_yesterdays_pass_hole_does_not_shield_today() {
     w.config.fviolence.prior.order = [0.0, 0.0, 1.0, 0.0];
     w.config.fviolence.prior_weight = 1e6;
     w.config.fviolence.fv_mult = 1.0;
+    // L2 phase 5: the per-class multipliers off (these priors are the test's own).
+    w.config.fviolence.class_mult = citysim::config::FvClassCfg::default();
     w.config.fviolence.day_cap.robbed = 1;
     w.tick = (w.tick / citysim::TICKS_PER_DAY + 1) * citysim::TICKS_PER_DAY;
     fviolence::daily(&mut w);

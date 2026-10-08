@@ -530,8 +530,19 @@ pub fn tally_exposure(world: &mut World) {
 
 /// A source's prior per agent-day (`[fviolence] prior`), Killed,
 /// Assaulted, Robbed, Abducted; `Order(Harvest)`'s Abducted is
-/// `harvest_abducted`.
-fn prior_of(world: &World, source: ViolenceSource) -> [f32; 4] {
+/// `harvest_abducted`; times the victim class's `class_mult` (phase 5).
+fn prior_of(world: &World, source: ViolenceSource, class: VictimClass) -> [f32; 4] {
+    let m = &world.config.fviolence.class_mult;
+    let mult = match class {
+        VictimClass::Civilian => m.civilian,
+        VictimClass::Member => m.member,
+        VictimClass::Watch => m.watch,
+    };
+    let p = source_prior(world, source);
+    std::array::from_fn(|k| p[k] * mult[k])
+}
+
+fn source_prior(world: &World, source: ViolenceSource) -> [f32; 4] {
     let p = &world.config.fviolence.prior;
     match source {
         ViolenceSource::Order(crate::components::Order::Harvest) => {
@@ -556,7 +567,7 @@ pub fn cell_rates(world: &World, source: ViolenceSource, d: DistrictId, class: V
         let v = std::array::from_fn(|k| c.victims[k].iter().rev().take(days).map(|&x| u64::from(x)).sum());
         (v, c.exposure.iter().rev().take(days).map(|&x| u64::from(x)).sum())
     });
-    let prior = prior_of(world, source);
+    let prior = prior_of(world, source, class);
     let pw = cfg.prior_weight.max(0.0);
     let denom = exposure as f32 / 24.0 + pw;
     std::array::from_fn(|k| {
