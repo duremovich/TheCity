@@ -378,8 +378,14 @@ pub fn add_scrap(world: &mut World) {
     }
 }
 
-/// Plan L9: the scavenge find's chance: `scavenge_p × (0.5 + litter(d))`
-/// with jobs on (`d` the agent's district, litter its dirty share 0..1).
+/// Plan L9: the scavenge find's chance: `scavenge_p × max(1, 0.5 +
+/// litter(d))` with jobs on (`d` the agent's district, litter its dirty
+/// share 0..1). L2 phase 5: floored at `scavenge_p` (the spec's `0.5 +
+/// litter` halved the L1 find rate where streets are clean; measured litter
+/// after day 30 sits at 0.00-0.22 by district with L2 on and 0.00-0.41
+/// with it off, so the poorest, released prisoners first, lost half their
+/// last income: 10 of seed 42's 26 starvation deaths had left the Precinct
+/// within 20 days). Dirty streets still pay more.
 pub fn scavenge_p(world: &World, id: EntityId) -> f32 {
     let p = world.config.life.scavenge_p;
     if !on(world) {
@@ -390,7 +396,7 @@ pub fn scavenge_p(world: &World, id: EntityId) -> f32 {
         .map(|pos| world.district_of(pos.tile))
         .and_then(|d| world.districts.get(d.index()))
         .map_or(0.0, |d| d.litter.clamp(0.0, 1.0));
-    p * (0.5 + litter)
+    p * (0.5 + litter).max(1.0)
 }
 
 /// Plan L9: a seller owner's `Flow::Import` coins go into its 14-day tally

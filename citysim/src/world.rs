@@ -1070,6 +1070,8 @@ impl World {
         // L2 (plan L7): the venues and Fabs on the Lots left (no RNG), after
         // the Chapel and before the plane links, so each has a node.
         systems::jobs::seed_venues(&mut w);
+        // L2 phase 5 (the day-1 leisure pulse): opening fun spread (no RNG).
+        systems::leisure::seed_fun(&mut w);
         systems::virt::relink(&mut w);
         systems::virt::seed_ice(&mut w);
         // M15 W28: every corp's and the Law's opening competence.

@@ -29,8 +29,13 @@ python tools/compare_runs.py a.csv b.csv
   flatlines, arrests, ICE raised/lowered/spend and tiers gained/lost, the success share, traced share
   of lost runs and stolen / made, each corp slot's tiers first and last day, the M14 flows and, with
   events, the violet event counts and the tier, wipe, door, robot and flatline lines; flags for the
-  spec section 12 bands. The events file is optional: `analyze_run.py run.csv` skips the
-  event-based parts.
+  spec section 12 bands. L2 adds an "L2" section (skipped when the jobs economy did not run): wages /
+  dole on day 60 and per 30 days, the employed share, the Treasury against the budget band with the
+  works roster and `upkeep_mult`, the leisure, gamble, tribute, export and public-works flows, fun,
+  venues and visits by kind, HangOut contacts, fronts, the Parts chain, the faction-violence totals
+  and the off-screen share of killings, kill rates by tier, the tiers with the held prisoners and the
+  aborts by cause; flags for the spec's printed bands and `fv_bound_wrong`. The events file is
+  optional: `analyze_run.py run.csv` skips the event-based parts.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.
 - `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`):

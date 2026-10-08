@@ -1392,7 +1392,10 @@ pub fn parts_market(world: &mut World) {
             world.gangs().into_iter().filter_map(|g| world.hideout_of(g).map(|h| (Some(g), h))).collect();
         // L2 L9: the Fabs after the gangs, the buyer's own corp's first (a
         // transfer to oneself moves no coin), then ascending id; none
-        // stands with L2 off.
+        // stands with L2 off. L2 phase 5: the Recycler's scrap before a
+        // rival's Fab (at one `parts_price` the city's scrap clears first;
+        // with the Fabs first their surplus took every sale and the scrap
+        // chain sold nothing on 42-47, 0 of ~950 scrap Parts).
         let mut fabs: Vec<(bool, EntityId)> = world
             .buildings_of_kind(BuildingKind::Fab)
             .iter()
@@ -1402,10 +1405,13 @@ pub fn parts_market(world: &mut World) {
             .collect();
         fabs.sort_unstable();
         let first_fab = sources.len();
+        let own = fabs.iter().take_while(|(rival, _)| !rival).count();
+        let rivals = fabs.split_off(own);
         sources.extend(fabs.into_iter().map(|(_, f)| (world.owner_of(f), f)));
         if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
             sources.push((None, r));
         }
+        sources.extend(rivals.into_iter().map(|(_, f)| (world.owner_of(f), f)));
         for (i, (seller, src)) in sources.into_iter().enumerate() {
             if want == 0 {
                 break;
@@ -1427,6 +1433,12 @@ pub fn parts_market(world: &mut World) {
             world.take_stock(src, Good::Parts, n);
             world.add_stock(b, Good::Parts, n);
             want -= n;
+            // L2 phase 5: the gate's probe (not a CSV column).
+            match world.comp::<Building>(src).map(|bd| bd.kind) {
+                Some(BuildingKind::Fab) => world.stats.current.living.parts_sold_fab += n,
+                Some(BuildingKind::Cemetery) => world.stats.current.living.parts_sold_recycler += n,
+                _ => {}
+            }
         }
     }
 }

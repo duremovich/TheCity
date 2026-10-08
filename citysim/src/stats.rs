@@ -354,6 +354,23 @@ pub struct LivingCols {
     pub kill_rate_stat: f32,
     pub kill_rate_body_civ: f32,
     pub kill_rate_stat_civ: f32,
+    // Phase 5 gate probes (not CSV columns; the L2 gate reads them).
+    /// Coins the Statistical leisure pass (`leisure::stat_daily`) paid today.
+    #[serde(skip_serializing_if = "is_zero_i64")]
+    pub stat_spend: i64,
+    /// Parts `assets::parts_market` moved today from a Fab, from the Recycler.
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub parts_sold_fab: u32,
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub parts_sold_recycler: u32,
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 impl LivingCols {

@@ -140,6 +140,29 @@ pub fn fun_per_hour(world: &World, id: EntityId, execs: &std::collections::BTree
     world.config.needs.fun_decay_per_tick * TICKS_PER_HOUR as f32 * (0.6 + 0.4 * soc) * mult
 }
 
+/// L2 phase 5 (the day-1 leisure pulse): every resident used to open at
+/// `fun` 1.0 and decay in step, so the whole city crossed `fun_satisfied`
+/// on the same evening (seed 42: 8,125 coins of leisure on day 1, 1.7k on
+/// day 2, 4.8k on day 3, the cohort ringing every other day). At seed each
+/// adult's `fun` is spread uniformly over `[fun_satisfied, 1]` by a
+/// `splitmix64` hash of the seed and its id (no RNG draw); with leisure
+/// off nothing changes.
+pub fn seed_fun(world: &mut World) {
+    if !on(world) {
+        return;
+    }
+    let lo = world.config.needs.fun_satisfied.clamp(0.0, 1.0);
+    let seed = world.seed();
+    // scan-ok: once, at seed
+    for id in world.citizens() {
+        let h = splitmix64(seed ^ 0x6675_6e5f_7365_6564 ^ u64::from(id.index));
+        let u = (h >> 11) as f32 / (1u64 << 53) as f32;
+        if let Some(n) = world.comp_mut::<Needs>(id) {
+            n.fun = lo + (1.0 - lo) * u;
+        }
+    }
+}
+
 /// Plan L13: `hours` of decay at `rate` per hour (outside `needs::decay`,
 /// which stays byte-identical).
 pub fn decay_fun(n: &mut Needs, rate: f32, hours: f32) {
@@ -1365,11 +1388,15 @@ pub fn stat_daily(world: &mut World) {
         };
         let Some(b) = c.venue else { continue };
         let mut rng = world.rng.word(WordNs::Leisure, day, u64::from(id.index));
+        // Phase 5: the gate's probe (not a CSV column): the evening's gross
+        // spend, entries, meals, drinks and stakes.
+        let mut gross = 0i64;
         match c.act {
             ActionKind::Drink => {
                 let owner = world.owner_of(b);
                 let paid = ownership::pay(world, Some(id), owner, 2, Flow::Drink);
                 ownership::credit(world, b, paid);
+                gross += paid;
                 add_fun(world, id, gain_at(world, b));
                 add_belonging(world, id, 0.15);
                 world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
@@ -1378,12 +1405,14 @@ pub fn stat_daily(world: &mut World) {
                 let stake = stake_of(world, purse);
                 let u: f32 = rng.random();
                 play_table(world, id, b, stake, u);
+                gross += stake;
                 add_fun(world, id, gain_at(world, b));
                 crate::systems::jobs::note_visit(world, b);
             }
             ActionKind::EatOut => {
                 let price = price_of(world, b);
                 let paid = pay_venue(world, id, b, price, Flow::Leisure);
+                gross += paid;
                 if paid > 0 && world.take_stock(b, crate::components::Good::Food, 1) == 1 {
                     let cfg = world.config.needs.clone();
                     if let Some(n) = world.comp_mut::<Needs>(id) {
@@ -1395,7 +1424,7 @@ pub fn stat_daily(world: &mut World) {
             }
             _ => {
                 let price = price_of(world, b);
-                pay_venue(world, id, b, price, Flow::Leisure);
+                gross += pay_venue(world, id, b, price, Flow::Leisure);
                 add_fun(world, id, gain_at(world, b));
                 add_belonging(world, id, belonging_at(world, b));
                 // A FightPit evening off screen bets as a table (the
@@ -1409,12 +1438,14 @@ pub fn stat_daily(world: &mut World) {
                         let stake = stake_of(world, left);
                         let u: f32 = rng.random();
                         play_table(world, id, b, stake, u);
+                        gross += stake;
                     }
                 }
                 world.remember(id, MemoryKind::Enjoyed, None, 0.2, 0.3, false);
                 crate::systems::jobs::note_visit(world, b);
             }
         }
+        world.stats.current.living.stat_spend += gross;
     }
 }
 
@@ -1713,6 +1744,7 @@ pub fn payout(world: &mut World, gang: EntityId, leader: Option<EntityId>) -> u3
             }
             let p = ownership::pay(world, Some(gang), Some(*m), amount, Flow::Tribute);
             if p > 0 {
+                crate::systems::gang::note_paid(world, *m);
                 paid_members += 1;
                 paid_total += p;
             }

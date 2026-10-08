@@ -1330,44 +1330,58 @@ fn expire_warrants(world: &mut World) {
 /// coins used to vanish), and a full night's sleep.
 fn jail_upkeep(world: &mut World) {
     let price = world.mean_price();
-    let market = world
-        .building_of_kind(BuildingKind::Jail)
-        .and_then(|j| world.comp::<Building>(j).map(|b| b.door))
-        .and_then(|door| world.nearest_of_kind(BuildingKind::Market, door));
+    let market = jail_market(world);
     let cfg = world.config.needs.clone();
     for who in world.with::<Sentence>() {
-        let fed = market.and_then(|m| world.comp_mut::<Building>(m)).is_some_and(|b| {
-            if b.stock_food > 0 {
-                b.stock_food -= 1;
-                true
-            } else {
-                false
-            }
-        });
-        if fed && crate::systems::lod::is_held(world, who) {
-            world.stats.current.budget.held_fed += 1;
-        }
-        if fed {
-            if let Some(m) = market {
-                let owner = world.owner_of(m);
-                let paid = crate::systems::ownership::charge(
-                    world,
-                    None,
-                    owner,
-                    price,
-                    crate::systems::ownership::Flow::JailFood,
-                );
-                crate::systems::ownership::credit(world, m, paid);
-            }
-            if let Some(n) = world.comp_mut::<Needs>(who) {
-                crate::needs::eat(n, &cfg);
-            }
-            world.mark_day(who, crate::components::trace_flags::ATE);
-        }
+        jail_meal(world, who, market, price, &cfg);
         if let Some(n) = world.comp_mut::<Needs>(who) {
             n.energy = 1.0;
         }
     }
+}
+
+/// The Market nearest the Jail's door (the cells' kitchen).
+fn jail_market(world: &World) -> Option<EntityId> {
+    world
+        .building_of_kind(BuildingKind::Jail)
+        .and_then(|j| world.comp::<Building>(j).map(|b| b.door))
+        .and_then(|door| world.nearest_of_kind(BuildingKind::Market, door))
+}
+
+/// One Jail meal for a prisoner from `market`'s shelf, the Treasury paying
+/// (`Flow::JailFood`). False when the shelf is empty.
+fn jail_meal(
+    world: &mut World,
+    who: EntityId,
+    market: Option<EntityId>,
+    price: i64,
+    cfg: &crate::config::NeedsCfg,
+) -> bool {
+    let fed = market.and_then(|m| world.comp_mut::<Building>(m)).is_some_and(|b| {
+        if b.stock_food > 0 {
+            b.stock_food -= 1;
+            true
+        } else {
+            false
+        }
+    });
+    if !fed {
+        return false;
+    }
+    if crate::systems::lod::is_held(world, who) {
+        world.stats.current.budget.held_fed += 1;
+    }
+    if let Some(m) = market {
+        let owner = world.owner_of(m);
+        let paid =
+            crate::systems::ownership::charge(world, None, owner, price, crate::systems::ownership::Flow::JailFood);
+        crate::systems::ownership::credit(world, m, paid);
+    }
+    if let Some(n) = world.comp_mut::<Needs>(who) {
+        crate::needs::eat(n, cfg);
+    }
+    world.mark_day(who, crate::components::trace_flags::ATE);
+    true
 }
 
 /// L2 (L21): the held prisoners' day, at midnight before `jail_upkeep`
@@ -1464,8 +1478,19 @@ fn held_hourly(world: &mut World) {
     }
     let held: Vec<EntityId> =
         world.sentenced().iter().copied().filter(|&p| crate::systems::lod::is_held(world, p)).collect();
+    let mut kitchen: Option<(Option<EntityId>, i64, crate::config::NeedsCfg)> = None;
     for id in held {
         settle_held(world, id);
+        // L2 phase 5: a held prisoner who is starving (an arrest of the
+        // starving: thieves of food arrive at hunger 0) gets the cell's
+        // meal now, not at midnight: on 42-47 one or two a run died within
+        // the hour of arrival (the gate's "no held prisoner starves").
+        if world.comp::<Needs>(id).is_some_and(|n| n.starving_since.is_some()) {
+            let (market, price, cfg) = kitchen
+                .get_or_insert_with(|| (jail_market(world), world.mean_price(), world.config.needs.clone()))
+                .clone();
+            jail_meal(world, id, market, price, &cfg);
+        }
         crate::needs::starvation(world, id);
     }
 }
