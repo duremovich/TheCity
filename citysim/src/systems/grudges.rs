@@ -95,6 +95,8 @@ fn cause_of(deed: Deed, rel: Rel, object: Option<EntityId>) -> GrudgeCause {
         Deed::Stripped => GrudgeCause::Stripped(o),
         Deed::Evicted => GrudgeCause::Evicted,
         Deed::Betrayed | Deed::Poached => GrudgeCause::Betrayed,
+        // M16a (plan C21): the buyer behind a contract record on the object.
+        Deed::Hired => GrudgeCause::Hired,
         Deed::Arrested | Deed::Married | Deed::Struck | Deed::Founded | Deed::Repaid => GrudgeCause::Assaulted,
     }
 }
@@ -142,6 +144,7 @@ fn cause_label(c: GrudgeCause) -> &'static str {
         GrudgeCause::Evicted => "an eviction",
         GrudgeCause::Betrayed => "a betrayal",
         GrudgeCause::Inherited(_) => "inherited",
+        GrudgeCause::Hired => "a contract",
     }
 }
 

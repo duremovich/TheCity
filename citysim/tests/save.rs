@@ -612,10 +612,11 @@ fn test_pre_l2_save_loads() {
     let mut w = World::new(26, Config::load().living_off().scaled_to(300));
     w.run_ticks(TICKS_PER_DAY / 2);
     let text = save::to_ron(&w);
-    assert!(text.contains(",save_version:2"), "the current format is 2");
-    let v1 = text.replace(",save_version:2", ",save_version:1");
+    // M16a: the current format is 3 (C40).
+    assert!(text.contains(",save_version:3"), "the current format is 3");
+    let v1 = text.replace(",save_version:3", ",save_version:1");
     let back = save::from_ron(&v1).expect("a version-1 save loads");
-    assert_eq!(back.save_version, 2, "migrated to the current format");
+    assert_eq!(back.save_version, 3, "migrated to the current format");
     assert!(!back.config.living.enabled && !back.venues_due, "L2 stays off");
     // The same save with L2 switched on in its config.
     let on = v1
@@ -629,4 +630,74 @@ fn test_pre_l2_save_loads() {
     assert!(back.venues_seeded && !back.venues_due);
     assert!(!back.buildings_of_kind(BuildingKind::NoodleBar).is_empty(), "the venues stand");
     back.check_indices().expect("indices in step");
+}
+
+/// M16a (plan C40): a version-2 save (no M16a keys) loads as the L2 city;
+/// with its config's contracts turned on, the Fixers are seeded at the
+/// first midnight (when Lots or derelicts exist), and a day runs.
+#[test]
+fn test_version2_save_loads() {
+    let mut w = World::new(26, Config::load().contracts_off().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY / 2);
+    let text = save::to_ron(&w);
+    assert!(text.contains(",save_version:3"), "the current format is 3");
+    let v2 = text.replace(",save_version:3", ",save_version:2");
+    let back = save::from_ron(&v2).expect("a version-2 save loads");
+    assert_eq!(back.save_version, 3, "migrated to the current format");
+    assert!(!back.config.contracts.enabled && !back.fixers_due, "contracts stay off");
+    let on = v2.replace("contracts:(enabled:false", "contracts:(enabled:true");
+    assert_ne!(on, v2, "the switch is in the saved config");
+    let mut back = save::from_ron(&on).expect("loads with contracts on");
+    assert!(back.fixers_due && !back.fixers_seeded, "seeding deferred to the first midnight");
+    assert!(back.buildings_of_kind(BuildingKind::Fixer).is_empty());
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.fixers_seeded && !back.fixers_due);
+    assert!(!back.buildings_of_kind(BuildingKind::Fixer).is_empty(), "the Fixers stand");
+    back.check_indices().expect("indices in step");
+}
+
+/// M16a (plan C5, C40): escrow is inside `total_coins`, so L2's identity
+/// holds across a save and load with a brokered record open, and the
+/// loaded world runs on byte for byte.
+#[test]
+fn test_save_mid_contract_keeps_identity() {
+    use citysim::contract::{ContractKind, Origin, Posting, Target};
+    use citysim::systems::{contracts, ownership};
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(TICKS_PER_DAY / 2);
+    let ids: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| citysim::systems::law::living(&w, a) && citysim::systems::demography::is_adult(&w, a))
+        .take(2)
+        .collect();
+    let (buyer, t) = (ids[0], ids[1]);
+    if let Some(x) = w.comp_mut::<citysim::Wallet>(buyer) {
+        x.coins = 5000;
+    }
+    let f = contracts::open_fixers(&w)[0];
+    let id = contracts::post(
+        &mut w,
+        Posting {
+            buyer: Some(buyer),
+            agent: Some(buyer),
+            kind: ContractKind::Beat,
+            target: Target::Agent(t),
+            broker: Some(f),
+            deadline_days: 7,
+            origin: Origin::God,
+            price: None,
+        },
+    )
+    .expect("posted");
+    assert!(w.contracts[&id].escrow > 0);
+    let ident = |w: &World| ownership::total_coins(w) + w.outside.treasuries() - w.outside.minted;
+    let text = save::to_ron(&w);
+    let mut back = save::from_ron(&text).expect("load");
+    assert_eq!(ident(&back), ident(&w), "the identity across the load");
+    assert_eq!(back.escrow_held, w.escrow_held);
+    assert_eq!(back.by_party, w.by_party, "the indices rebuilt");
+    w.run_ticks(600);
+    back.run_ticks(600);
+    assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
 }

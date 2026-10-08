@@ -166,6 +166,19 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 ui.label(format!("Parts held {held} · made today (all Fabs) {}", world.stats.current.living.fab_parts));
                 staff(ui, app, world, id, "Fab Techs");
             }
+            // M16a (plan C42; the full panel is phase 4): the record book's size.
+            BuildingKind::Fixer => {
+                if let Some(k) = world.comp::<citysim::contract::Broker>(id) {
+                    ui.label(format!(
+                        "book {} · regulars {} · cut {:.0}% · heat {:.2}",
+                        k.book.len(),
+                        k.regulars.len(),
+                        k.cut * 100.0,
+                        k.heat
+                    ));
+                }
+                staff(ui, app, world, id, "Staff");
+            }
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);

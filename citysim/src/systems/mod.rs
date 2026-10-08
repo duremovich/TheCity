@@ -2,7 +2,10 @@
 //! calls them in the fixed order
 //! `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
 //! ownership, assets, tech, classes, districts, economy, bind, word, law,
-//! social, gang, corp_brain, living, demography, stats` (L2 L36: `living`
+//! social, gang, corp_brain, living, contracts, demography, stats` (M16a
+//! C36: `contracts` keeps the record board: the ledger's due ticks per
+//! tick, the matching at `match_hour`, expiries and regulars at midnight;
+//! L2 L36: `living`
 //! holds every L2 daily and hourly pass; M15 W47: `word` after
 //! `bind`, its midnight chain of pools, hearing, kin, reputation,
 //! competence, grudges and vendettas, and the Hunt's daily pass; phase 3:
@@ -20,6 +23,7 @@ pub mod budget;
 pub mod chrome;
 pub mod classes;
 pub mod competence;
+pub mod contracts;
 pub mod corp_brain;
 pub mod corps;
 pub mod creeds;
@@ -43,6 +47,7 @@ pub mod litter;
 pub mod living;
 pub mod lod;
 pub mod memory;
+pub mod missions;
 pub mod moves;
 pub mod news;
 pub mod outside;

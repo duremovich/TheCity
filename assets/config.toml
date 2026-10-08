@@ -1230,13 +1230,13 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3 }
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4 }
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3 }  # M16a C21: hired
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7 }  # M16a C21: hired
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
 # (seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939; robberies ~55 %).
-deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1 }
+deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1, hired = 0.7 }  # M16a C21: hired
 # W9 (phase 3): the legacy second-hand copies in Memory.entries retire (social::gossip still draws);
 # the word's exchange nudges an existing edge to the actor instead.
 legacy_second_hand = false
@@ -1257,9 +1257,9 @@ fame_scale = 20.0
 heat_wanted = 0.4
 heat_arrest = 0.2
 bribe_honour = 0.5
-dread_w = { killed = 1.0, assaulted = 0.4, avenged = 0.8, raided = 0.6, extorted = 0.3, robbed = 0.15, stripped = 0.2 }
-honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1 }
-heat_w = { arrested = 1.0, killed = 0.5, assaulted = 0.2, robbed = 0.2, extorted = 0.1 }
+dread_w = { killed = 1.0, assaulted = 0.4, avenged = 0.8, raided = 0.6, extorted = 0.3, robbed = 0.15, stripped = 0.2, hired = 0.3 }  # M16a C21: hired
+honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2 }  # M16a C21: hired
+heat_w = { arrested = 1.0, killed = 0.5, assaulted = 0.2, robbed = 0.2, extorted = 0.1, hired = 0.4 }  # M16a C21: hired
 own_bias = 0.3
 heat_pressure_w = 0.8
 harvest_dread_max = 0.6
@@ -1679,3 +1679,72 @@ staff = 6
 capacity = 14
 stock_cap = 400
 staff = 12
+
+# ---------------------------------------------------------------------------
+# M16a contracts (docs/M16_CONTRACTS.md; plan ~/.claude/plans/m16a-contracts.md).
+# A contract is a record (buyer, kind, target, price, deadline, broker, taker,
+# status) matched by a score and resolved by a seeded dice roll between
+# fictional agents; escrow is coins held between purses. `enabled = false`
+# (`--contracts-off`, and `--l2-off`) is the L2-closing city byte for byte.
+# Spec values; keys marked "plan" are placeholders (calibrated late, never in M16a).
+# Defaults (code; override here if needed): [buildings] fixer = { capacity = 8,
+# stock_cap = 0, staff = 1 }; [economy] wage_fixer = 6; [corps] found_cost.fixer
+# 400, value.fixer 500, upkeep.fixer 8; [lod] contract_quota = 24, fixer_quota = 4
+# (phase 4); [gangs.order_flat] job = 0.0 (phase 2); [law] interrogate_days = 30,
+# interrogate_bias = 0.0, accessory_conf = 0.5, accessory_mult = 0.75,
+# heat_per_hit = 0.15, heat_per_named = 0.3, heat_decay = 0.02, warrant_heat = 0.8,
+# close_days = 7, bribe_cool = 0.3, fixer_talk = 0.3, accessory_days = 60,
+# corrupt_lawfulness = 0.3, corrupt_heat = 0.3 (phase 3).
+[contracts]
+enabled = true
+max_open = 256
+closed_keep_days = 30
+price_base = { hit = 400, beat = 120, guard = 25, locate = 20 }
+deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14 }
+risk_w = 1.5
+standing_w = 1.0
+max_attempts = 2
+accept_min = 0.35
+contract_flat = 0.0
+renege_base = 0.3
+renege_grudge = 0.6
+hire_gap = -0.1
+hire_ratio = 0.7                   # phase 3 (C33)
+dirty_lobby = 0.3                  # phase 3 (C33)
+law_bounty_days = 3                # phase 3 (C33)
+death_squad_lawfulness = 0.2       # phase 3 (C33)
+hire_min = 0.3                     # plan C20: the hire pass's Hunt score without the might term
+
+[fixers]
+fixer_cut = 0.2
+fixer_lawfulness = 0.35
+fixer_skill = 0.8
+regular_days = 14
+gun_skill_min = 0.45
+gun_lawfulness = { hit = 0.3, beat = 0.4 }
+run_offers_per_day = 1             # phase 3 (C34)
+match_hour = 18
+offers_per_day = 4
+crew_max = 4                       # phase 2 (C25)
+fixers_per_pop = 800               # plan C8: open Fixers <= residents / this, for NPC founding
+network_flat = -0.1                # plan C13 mode B
+hire_reach_tiles = 64              # plan C20: a Fixer within reach of the holder's Home door
+bribe_min = 0.5                    # plan C30 (phase 3)
+guard_hours = 8                    # plan C15: a Guard taker's daily post
+
+[missions]
+max_missions = 12
+squad_below = 0.6
+strike_k = 3.0
+loss_w = 0.5                       # phase 2 (C24)
+pol_w = 1.0                        # phase 2 (C24)
+hold_days = 2                      # phase 2 (C24)
+sell_premium = 1.5                 # phase 2 (C26)
+sell_regard = 0.0                  # phase 2 (C26)
+ledger_death_p = 0.15
+ally_cap_n = 3                     # plan C23: expected allies at the target's door
+
+[bounty]
+per_sighting = 15
+cap_sightings = 10
+min_gap_hours = 6

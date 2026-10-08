@@ -525,7 +525,7 @@ pub struct World {
     pub by_tier: [Vec<EntityId>; 3],
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; 17],
+    pub by_role: [Vec<EntityId>; Role::ALL.len()],
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -569,6 +569,10 @@ pub struct World {
     /// M15 W15: grudges (phase 3); empty stores are not written.
     #[serde(default, skip_serializing_if = "all_none")]
     pub grudges: Vec<Option<crate::word::Grudges>>,
+    /// M16a (plan C2): a Fixer office's record book; empty stores are not
+    /// written (`migrate_legacy` sizes it for an older save).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub broker: Vec<Option<crate::contract::Broker>>,
     /// M15 W6: one rumour pool per district (`DistrictId` order).
     #[serde(default)]
     pub rumours: Vec<crate::word::RumourPool>,
@@ -716,9 +720,72 @@ pub struct World {
     /// rung's "top wealth decile").
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub wealth_p90: i64,
+    // --- M16a (plan C2): contract records, a game abstraction (records
+    // with a price and a deadline, matched by a score, resolved by a seeded
+    // roll). Written only behind `contracts::on`; at its default not saved.
+    /// C2: every record, open, taken and recently closed, by id.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub contracts: BTreeMap<crate::contract::ContractId, crate::contract::Contract>,
+    /// C22 (phase 2): live missions by record.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub missions: BTreeMap<crate::contract::MissionId, crate::contract::Mission>,
+    /// C14: live takers' chases, by taker.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub contract_runs: BTreeMap<EntityId, crate::contract::ContractRun>,
+    /// C2: one-line outcomes, newest last (cap 512).
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub contract_log: VecDeque<(Tick, crate::contract::ContractId, String)>,
+    /// C2: the next record id (ids from 1).
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub next_contract: u64,
+    /// C9: the Fixers were seeded (at `World::new`, or at the first midnight
+    /// after loading an older save with contracts on).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixers_seeded: bool,
+    /// C40: seeding deferred to the next midnight (`contracts::daily`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fixers_due: bool,
+    /// C34 (phase 3): runner -> (Fixer, offered).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub fixer_runs: BTreeMap<EntityId, (EntityId, Tick)>,
+    /// C5: the coins `escrow_in`/`escrow_out` moved into escrow, net (the
+    /// `escrow_leak` probe compares it with Σ `Contract.escrow`).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub escrow_held: i64,
+    /// C13: the median Job wage at the last midnight (the gun gate's
+    /// "paid below 0.7 × the median").
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub median_wage: i64,
+    /// C14: chased target -> taker for every contract run in `Watch`;
+    /// rebuilt from `contract_runs` (`hunt::reindex`).
+    #[serde(skip)]
+    pub chased_by: BTreeMap<EntityId, EntityId>,
+    /// C2: every record by party (buyer, agent, taker, crew, target),
+    /// rebuilt from `contracts` (`contracts::rebuild_index`).
+    #[serde(skip)]
+    pub by_party: BTreeMap<EntityId, SmallVec<[crate::contract::ContractId; 4]>>,
+    /// C18: the ledger records' due ticks.
+    #[serde(skip)]
+    pub ledger_due: BTreeSet<(Tick, crate::contract::ContractId)>,
+    /// C22 (phase 2): crew member -> mission.
+    #[serde(skip)]
+    pub mission_of: BTreeMap<EntityId, crate::contract::MissionId>,
+    /// C27: Open or Taken Locate records by target.
+    #[serde(skip)]
+    pub locate_targets: BTreeMap<EntityId, SmallVec<[crate::contract::ContractId; 2]>>,
+    /// C31 (phase 3): a city guard on the take -> its buyers.
+    #[serde(skip)]
+    pub on_take: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
+    /// C32: client (agent or building) -> the agents standing a Guard post on it now.
+    #[serde(skip)]
+    pub contract_guards: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+
+fn is_zero_u64(v: &u64) -> bool {
     *v == 0
 }
 
@@ -790,6 +857,7 @@ components! {
     kit: Kit,
     reputation: crate::word::Reputation,
     grudges: crate::word::Grudges,
+    broker: crate::contract::Broker,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -1006,6 +1074,7 @@ impl World {
             runner_of: BTreeMap::new(),
             reputation: Vec::new(),
             grudges: Vec::new(),
+            broker: Vec::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
             kill_watch: VecDeque::new(),
@@ -1043,6 +1112,23 @@ impl World {
             last_met: BTreeMap::new(),
             told: BTreeMap::new(),
             wealth_p90: 0,
+            contracts: BTreeMap::new(),
+            missions: BTreeMap::new(),
+            contract_runs: BTreeMap::new(),
+            contract_log: VecDeque::new(),
+            next_contract: 0,
+            fixers_seeded: false,
+            fixers_due: false,
+            fixer_runs: BTreeMap::new(),
+            escrow_held: 0,
+            median_wage: 0,
+            chased_by: BTreeMap::new(),
+            by_party: BTreeMap::new(),
+            ledger_due: BTreeSet::new(),
+            mission_of: BTreeMap::new(),
+            locate_targets: BTreeMap::new(),
+            on_take: BTreeMap::new(),
+            contract_guards: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1075,6 +1161,9 @@ impl World {
         // L2 (plan L7): the venues and Fabs on the Lots left (no RNG), after
         // the Chapel and before the plane links, so each has a node.
         systems::jobs::seed_venues(&mut w);
+        // M16a (plan C9): the seeded Fixer on the Lots left (no RNG), after
+        // the venues and before the plane links, so each has a node.
+        systems::contracts::seed_fixers(&mut w);
         // L2 phase 5 (the day-1 leisure pulse): opening fun spread (no RNG).
         systems::leisure::seed_fun(&mut w);
         systems::virt::relink(&mut w);
@@ -1663,9 +1752,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 17], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; Role::ALL.len()], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; 17] = Default::default();
+        let mut roles: [Vec<EntityId>; Role::ALL.len()] = Default::default();
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -2153,6 +2242,7 @@ impl World {
         systems::gang::run(self);
         systems::corp_brain::run(self);
         systems::living::run(self);
+        systems::contracts::run(self);
         systems::demography::run(self);
         systems::stats::run(self);
         self.tick += 1;
@@ -2295,6 +2385,9 @@ impl World {
         }
         // M13 D20: a trip ends first, so the vehicle is parked, not lost.
         systems::vehicles::end_trip(self, id, false);
+        // M16a (plan C16): an emigrant's records settle as a death's (a
+        // refund lands in the wallet it leaves with).
+        systems::contracts::on_death(self, id, None);
         // M11 D45: an emigrant's buildings pass to their heirs.
         systems::ownership::on_owner_gone(self, id);
         // M13 D13/D45: its parked vehicles too; an unsettled corpse settles
@@ -2381,6 +2474,8 @@ impl World {
         systems::grudges::rebuild_guards(self);
         // L2 L15: who hangs out where.
         systems::leisure::rebuild_hangouts(self);
+        // M16a (plan C2): the record indices.
+        systems::contracts::rebuild_index(self);
     }
 
     /// Fix up a save written before M8: a gang without a Hideout (the serde
@@ -2406,6 +2501,11 @@ impl World {
         }
         if self.grudges.len() < n {
             self.grudges.resize_with(n, || None);
+        }
+        // M16a (plan C2): a pre-M16a save (or one with no Fixer) has no
+        // `broker` store.
+        if self.broker.len() < n {
+            self.broker.resize_with(n, || None);
         }
         if self.trace.len() < n {
             self.trace.resize_with(n, || None);
@@ -2629,6 +2729,9 @@ impl World {
         // L2 phase 4 (plan L25): the ledger and the kill-rate tally read the
         // victim's tier, class and gang before anything is unlinked.
         systems::fviolence::note_death(self, id, cause, killer);
+        // M16a (plan C16): the dead's records settle while its wallet is
+        // still its own (a refund to a dead buyer is its estate's).
+        systems::contracts::on_death(self, id, killer);
         // M14 V12: a body jacked in is dumped from its run first.
         systems::virt::dump(self, id, "died in the chair");
         let tick = self.tick;

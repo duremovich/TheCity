@@ -256,6 +256,11 @@ pub fn source_of(
     if world.hunts.contains_key(&actor) {
         return None;
     }
+    // M16a (plan C19): a live contract job on the victim is not counted
+    // (the Hunt precedent): the ledger never doubles it off screen.
+    if crate::systems::contracts::live_job_on(world, actor, victim) {
+        return None;
+    }
     let goal = world.comp::<Brain>(actor)?.plan_goal();
     if matches!(goal, Some(GoalKind::GangWork | GoalKind::Raid)) {
         if let Some(g) = world.gang_of(actor) {
@@ -554,6 +559,8 @@ fn source_prior(world: &World, source: ViolenceSource) -> [f32; 4] {
         ViolenceSource::Vendetta => p.vendetta,
         ViolenceSource::Riot => p.riot,
         ViolenceSource::Episode => p.episode,
+        // M16a (plan C19): a contract record's holes never enter the ledger.
+        ViolenceSource::Contract(_) => [0.0; 4],
     }
 }
 

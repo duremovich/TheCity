@@ -53,6 +53,7 @@ fn why_label(w: RunWhy) -> &'static str {
         RunWhy::Overwatch => "stream",
         RunWhy::Stat => "off-screen pass",
         RunWhy::God => "god order",
+        RunWhy::Fixer => "Fixer order",
     }
 }
 

@@ -705,11 +705,23 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             }
             // M15 W19/W35: a scripted Hunt or GuardBody plan checks its
             // steps' own start conditions, not the planner's symbols.
-            let scripted = world.comp::<Brain>(id).and_then(|b| b.plan_goal()).is_some_and(|g| {
-                matches!(g, crate::components::GoalKind::Hunt | crate::components::GoalKind::GuardBody)
+            let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
+            let scripted = goal.is_some_and(|g| {
+                matches!(
+                    g,
+                    crate::components::GoalKind::Hunt
+                        | crate::components::GoalKind::GuardBody
+                        | crate::components::GoalKind::Contract
+                )
             });
             if scripted {
-                if !crate::systems::hunt::can_start(world, id, kind, step.target) {
+                // M16a (plan C13): a Contract step's own start check.
+                let ok = if goal == Some(crate::components::GoalKind::Contract) {
+                    crate::systems::contracts::can_start(world, id, kind, step.target)
+                } else {
+                    crate::systems::hunt::can_start(world, id, kind, step.target)
+                };
+                if !ok {
                     return StepResult::Failed(FailReason::PreconditionLost);
                 }
             } else {

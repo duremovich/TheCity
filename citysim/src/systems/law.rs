@@ -67,6 +67,8 @@ pub fn crime_salience(crime: Crime) -> f32 {
         // M14 V18.
         Crime::Intrusion => 0.4,
         Crime::DataTheft => 0.6,
+        // M16a (plan C29).
+        Crime::Conspiracy => 0.8,
     }
 }
 
@@ -160,7 +162,9 @@ pub fn raise_crime_except(
         | Crime::Manslaughter
         | Crime::Dealing
         | Crime::Intrusion
-        | Crime::DataTheft => {}
+        | Crime::DataTheft
+        // M16a (plan C29): never raised on the street.
+        | Crime::Conspiracy => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -260,7 +264,8 @@ pub fn raise_crime_except(
             | Crime::GrandTheft
             | Crime::Dealing
             | Crime::Intrusion
-            | Crime::DataTheft => MemoryKind::WasRobbed,
+            | Crime::DataTheft
+            | Crime::Conspiracy => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -433,6 +438,12 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
     if crime == Crime::Vagrancy {
         return world.config.law.vagrancy_sentence_ticks.max(1);
+    }
+    // M16a (plan C29): Conspiracy is `accessory_mult` (or the lever's) of Murder's.
+    if crime == Crime::Conspiracy {
+        let mult = world.levers.accessory_mult.unwrap_or(world.config.law.accessory_mult);
+        let murder = sentence_ticks(world, Crime::Murder);
+        return ((murder as f32 * mult).ceil() as Tick).max(TICKS_PER_DAY);
     }
     // M13 D47: the crimes appended after Vagrancy read `sentence_days_ext`.
     let ext = &world.config.crime.sentence_days_ext;

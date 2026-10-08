@@ -9,6 +9,7 @@
 
 pub mod components;
 pub mod config;
+pub mod contract;
 pub mod edge_map;
 pub mod entity;
 pub mod events;

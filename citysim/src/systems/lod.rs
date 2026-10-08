@@ -459,6 +459,11 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
     // M15 W22: a hunter and a hunted target rank with the runners.
     let runner =
         runner || (!world.hunts.is_empty() && (world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id)));
+    // M16a (plan C35, phase 1's form): a live contract's taker and chased
+    // target too (bounded by `max_missions` runs; phase 4's quota).
+    let runner = runner
+        || (!world.contract_runs.is_empty()
+            && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)));
     if brain.pinned {
         5
     } else if runner {
@@ -487,6 +492,10 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     if lod == Lod::Statistical
         && (world.runner_of.contains_key(&id) || world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id))
     {
+        return;
+    }
+    // M16a (plan C17): nor a live contract's taker or chased target.
+    if lod == Lod::Statistical && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)) {
         return;
     }
     // L2 shadow fixes item 7: the tier's start, for the dwell (after the
@@ -551,6 +560,8 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             let hs = hs.clone();
             world.bind_queue.extend(hs);
         }
+        // M16a (plan C17): a ledger record whose party became a body turns live.
+        crate::systems::contracts::on_promoted(world, id);
         return;
     }
     let exec = brain.exec.clone();

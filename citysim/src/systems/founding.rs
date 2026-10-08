@@ -15,8 +15,10 @@ use crate::world::World;
 /// D20 appends the Hotel, foundable only with `[street] enabled`; M13 D16
 /// the Clinic and Garage, each foundable only with its `[assets]
 /// found_clinic` / `found_garage` flag; M15 W36 the Feed, with `[news]` on;
-/// L2 L6 the six leisure kinds, priced only with `jobs::on`).
-const FOUNDABLE: [BuildingKind; 12] = [
+/// L2 L6 the six leisure kinds, priced only with `jobs::on`; M16a C8 the
+/// Fixer, priced only with `contracts::on` and chosen only by a founder
+/// who could run one, `fixer_ok`).
+const FOUNDABLE: [BuildingKind; 13] = [
     BuildingKind::Bar,
     BuildingKind::Home,
     BuildingKind::Hotel,
@@ -29,6 +31,7 @@ const FOUNDABLE: [BuildingKind; 12] = [
     BuildingKind::FightPit,
     BuildingKind::Den,
     BuildingKind::Lounge,
+    BuildingKind::Fixer,
 ];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
@@ -62,6 +65,8 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         BuildingKind::Den if crate::systems::jobs::on(world) => Some(c.den),
         BuildingKind::Lounge if crate::systems::jobs::on(world) => Some(c.lounge),
         BuildingKind::Fab if crate::systems::jobs::on(world) => Some(c.fab),
+        // M16a (plan C8): a Fixer's office, with contracts on.
+        BuildingKind::Fixer if crate::systems::contracts::on(world) => Some(c.fixer),
         _ => None,
     }
 }
@@ -132,6 +137,8 @@ pub fn build_on_lot(
             | BuildingKind::Den
             | BuildingKind::Lounge
             | BuildingKind::Fab
+            // M16a (plan C8).
+            | BuildingKind::Fixer
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -223,6 +230,11 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
             bd.venue = Some(crate::living::Venue { price, ..Default::default() });
         }
     }
+    // M16a (plan C8): a Fixer's office opens its record book at the cut.
+    if kind == BuildingKind::Fixer {
+        let cut = world.config.fixers.fixer_cut;
+        world.insert(b, crate::contract::Broker { cut, ..Default::default() });
+    }
     world.invalidate_flow_fields_for_lot(rect);
     // M12 D1: a new Block joins its district's `homes`.
     crate::systems::districts::rebuild(world);
@@ -273,7 +285,8 @@ pub fn refit_with(
     owner: Option<EntityId>,
     charge: bool,
 ) -> Result<EntityId, String> {
-    if !kind.is_leisure() {
+    // M16a (plan C9): a seeded Fixer may stand in a refitted derelict.
+    if !kind.is_leisure() && kind != BuildingKind::Fixer {
         return Err(format!("cannot refit as a {}", kind.label()));
     }
     let cost = if charge { found_cost(world, kind).ok_or("not foundable")? } else { 0 };
@@ -320,6 +333,29 @@ pub fn choose_kind(world: &World, coins: i64) -> Option<BuildingKind> {
 /// L2 L6: `choose_kind` for a founder; the Lounge only for a Corp-class
 /// founder (`lounge_ok`), the leisure kinds by their `residents_per_*`.
 pub fn choose_kind_for(world: &World, coins: i64, lounge_ok: bool) -> Option<BuildingKind> {
+    choose_kind_with(world, coins, lounge_ok, false)
+}
+
+/// M16a (plan C8): may `agent` open a Fixer's office: contracts on and
+/// Fixers licensed, lawfulness under `fixer_lawfulness`, persuasion +
+/// knowledge at least `fixer_skill`, and open Fixers under `residents ÷
+/// fixers_per_pop`.
+pub fn fixer_ok(world: &World, agent: EntityId) -> bool {
+    if !crate::systems::contracts::on(world) || !world.levers.fixer_licence {
+        return false;
+    }
+    let f = &world.config.fixers;
+    let Some(p) = world.comp::<crate::components::Personality>(agent) else { return false };
+    let Some(s) = world.comp::<crate::components::Skills>(agent) else { return false };
+    if p.lawfulness >= f.fixer_lawfulness || s.persuasion + s.knowledge < f.fixer_skill {
+        return false;
+    }
+    let cap = living(world) / (f.fixers_per_pop.max(1) as usize);
+    crate::systems::contracts::open_fixers(world).len() < cap
+}
+
+/// `choose_kind_for` with the Fixer among the kinds when `fixer` (C8).
+pub fn choose_kind_with(world: &World, coins: i64, lounge_ok: bool, fixer: bool) -> Option<BuildingKind> {
     let pop = living(world).max(1) as f32;
     let per = |kind: BuildingKind| -> f32 {
         match kind {
@@ -344,13 +380,14 @@ pub fn choose_kind_for(world: &World, coins: i64, lounge_ok: bool) -> Option<Bui
             BuildingKind::FightPit => world.config.corps.residents_per_pit.max(1) as f32,
             BuildingKind::Den => world.config.corps.residents_per_den.max(1) as f32,
             BuildingKind::Lounge => world.config.corps.residents_per_lounge.max(1) as f32,
+            BuildingKind::Fixer => world.config.fixers.fixers_per_pop.max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };
     let mut best: Option<(f32, BuildingKind)> = None;
     for kind in FOUNDABLE {
         let Some(cost) = agent_found_cost(world, kind) else { continue };
-        if coins < cost || (kind == BuildingKind::Lounge && !lounge_ok) {
+        if coins < cost || (kind == BuildingKind::Lounge && !lounge_ok) || (kind == BuildingKind::Fixer && !fixer) {
             continue;
         }
         let count = world
@@ -408,7 +445,7 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
     if is_exec(world, agent) {
         return false;
     }
-    let kind = || choose_kind_for(world, coins, lounge_ok(world, agent, coins));
+    let kind = || choose_kind_with(world, coins, lounge_ok(world, agent, coins), fixer_ok(world, agent));
     if any_vacant_lot(world) {
         return kind().is_some();
     }
@@ -447,7 +484,8 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
         return Err("cannot found".into());
     }
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-    let kind = choose_kind_for(world, coins, lounge_ok(world, agent, coins)).ok_or("nothing affordable")?;
+    let kind = choose_kind_with(world, coins, lounge_ok(world, agent, coins), fixer_ok(world, agent))
+        .ok_or("nothing affordable")?;
     let cost = agent_found_cost(world, kind).ok_or("not foundable")?;
     let from = world
         .comp::<Household>(agent)

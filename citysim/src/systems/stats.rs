@@ -80,6 +80,8 @@ pub fn record_traces(world: &mut World) {
 
 /// Fill the snapshot columns of the current day from live world state.
 pub fn snapshot(world: &mut World) {
+    // M16a (plan C38): the contract board's snapshot columns.
+    crate::systems::contracts::snapshot(world);
     let citizens = world.citizens();
     let mut employed = 0;
     let mut homeless = 0;

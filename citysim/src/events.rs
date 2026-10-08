@@ -227,10 +227,35 @@ pub enum EventKind {
     Preached,
     /// `[leader, gang]`: the leader's Call after an order change.
     Called,
+    // --- M16a (plan C37; amber): contract records, a game abstraction.
+    /// `[agent or NONE, target, broker or NONE]`: a record put on the board.
+    ContractPosted,
+    /// `[taker, target]`: a record taken.
+    ContractTaken,
+    /// `[taker or NONE, target]`: a record fulfilled.
+    ContractFulfilled,
+    /// `[taker or NONE, target]`: an attempt failed (or the record did).
+    ContractFailed,
+    /// `[taker or NONE, target]`: a record ran past its deadline.
+    ContractExpired,
+    /// `[buyer, taker]`: a direct buyer did not pay.
+    Reneged,
+    /// `[gang, target, previous taker]` (phase 2).
+    SoldOut,
+    /// `[taker, target]` (phase 2).
+    StrikeDeclined,
+    /// `[writer, target]`: a sighting paid under a Locate record.
+    BountyPaid,
+    /// `[agent, target, holder]` (phase 3).
+    Accessory,
+    /// `[fixer, owner]` (phase 3).
+    FixerBusted,
+    /// `[guard, buyer]` (phase 3).
+    GuardTaken,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 117] = [
+    pub const ALL: [EventKind; 129] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -348,6 +373,18 @@ impl EventKind {
         EventKind::Collected,
         EventKind::Preached,
         EventKind::Called,
+        EventKind::ContractPosted,
+        EventKind::ContractTaken,
+        EventKind::ContractFulfilled,
+        EventKind::ContractFailed,
+        EventKind::ContractExpired,
+        EventKind::Reneged,
+        EventKind::SoldOut,
+        EventKind::StrikeDeclined,
+        EventKind::BountyPaid,
+        EventKind::Accessory,
+        EventKind::FixerBusted,
+        EventKind::GuardTaken,
     ];
 }
 

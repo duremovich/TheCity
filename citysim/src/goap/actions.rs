@@ -147,6 +147,12 @@ pub enum ActionKind {
     Collect,
     /// A Purist member works the busiest spot: a Persuade on a co-hanger.
     Preach,
+    // --- M16a (plan C10, C15): the Contract goal's scripted steps; never in
+    // `PLANNABLE`, `allowed` false, started by `contracts::can_start`.
+    /// At an open Fixer's office: become its regular (a stamp on its book).
+    Network,
+    /// At a Guard record's client: stand the day's post.
+    Guard,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -273,6 +279,8 @@ impl ActionKind {
                 ActionKind::ClerkWork
             }
             Role::Fabber => ActionKind::FabWork,
+            // M16a (plan C8): the Fixer's staff clerk at its office.
+            Role::Fixer => ActionKind::ClerkWork,
         }
     }
 
@@ -362,7 +370,15 @@ impl ActionKind {
                 | ActionKind::HangOut
                 | ActionKind::Collect
                 | ActionKind::Preach
+                | ActionKind::Network
+                | ActionKind::Guard
         )
+    }
+
+    /// M16a (plan C10, C15): a Contract plan's own scripted step (never
+    /// planned; started by `contracts::can_start`).
+    pub fn is_contract_step(self) -> bool {
+        matches!(self, ActionKind::Network | ActionKind::Guard)
     }
 
     /// L2 L14: a leisure plan's scripted step (never planned; started by
@@ -1165,6 +1181,8 @@ impl ActionKind {
                     || ctx.is(Role::Fighter)
                     || ctx.is(Role::Croupier)
                     || ctx.is(Role::Concierge)
+                    // M16a (plan C8): the Fixer's staff.
+                    || ctx.is(Role::Fixer)
             }
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
@@ -1215,6 +1233,8 @@ impl ActionKind {
             ActionKind::ServeTime => false,
             // L2 L14: scripted only.
             k if k.is_leisure_step() => false,
+            // M16a (plan C10): scripted only.
+            k if k.is_contract_step() => false,
             _ => true,
         }
     }
@@ -1303,6 +1323,8 @@ impl ActionKind {
             // L2 L14: the step re-check is `leisure::can_start` (through
             // `actions::can_start`), not the planner's symbols.
             k if k.is_leisure_step() => true,
+            // M16a (plan C10): likewise `contracts::can_start`.
+            k if k.is_contract_step() => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1766,6 +1788,9 @@ impl ActionKind {
             | ActionKind::HangOut
             | ActionKind::Collect
             | ActionKind::Preach => 60.0,
+            // M16a (plan C10, C15): scripted, never planned.
+            ActionKind::Network => 4.0,
+            ActionKind::Guard => 2.0,
         };
         c.clamp(0.5, 60.0)
     }

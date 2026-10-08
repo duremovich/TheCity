@@ -56,6 +56,10 @@ const FILES: &[&str] = &[
     "systems/leisure.rs",
     // L2 phase 4 (the daily pass runs from the binder's midnight).
     "systems/bind.rs",
+    // M16a phase 1 (plan C43).
+    "contract.rs",
+    "systems/contracts.rs",
+    "systems/missions.rs",
 ];
 
 #[test]

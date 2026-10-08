@@ -172,6 +172,8 @@ impl LocationKey {
             | BuildingKind::Den
             | BuildingKind::Lounge
             | BuildingKind::Fab => LocationKey::Workplace,
+            // M16a (plan C8): and a Fixer's staff inside its office.
+            BuildingKind::Fixer => LocationKey::Workplace,
         }
     }
 }

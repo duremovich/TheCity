@@ -1698,15 +1698,18 @@ fn m13_run(seed: u64) -> M13 {
 /// or Garage, the dealing share, the hooked share) by majority over seeds
 /// 42-44; vehicles and episodes by the six-seed mean over 42-47 (M14 phase
 /// 5), the device the M12 gate uses for its riots; the law ending an
-/// episode by existence over 42-49 (L2 phase 4). Seed 42 runs first and
-/// alone (its ticks/s), 43-49 in parallel threads. `#[ignore]`: eight runs.
+/// episode by existence over 42-53 (L2 phase 4; M16a phase 1 widened it
+/// from 42-49). Seed 42 runs first and alone (its ticks/s), 43-53 in
+/// parallel threads. `#[ignore]`: twelve runs.
 #[test]
 #[ignore]
 fn test_m13_assets_seed_42() {
     let first = m13_run(42);
     let rest: Vec<M13> = std::thread::scope(|s| {
-        let handles: Vec<_> =
-            [43u64, 44, 45, 46, 47, 48, 49].into_iter().map(|seed| s.spawn(move || m13_run(seed))).collect();
+        let handles: Vec<_> = [43u64, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53]
+            .into_iter()
+            .map(|seed| s.spawn(move || m13_run(seed)))
+            .collect();
         handles.into_iter().map(|h| h.join().expect("an M13 run")).collect()
     });
     let all: Vec<M13> = std::iter::once(first).chain(rest).collect();
@@ -1798,11 +1801,15 @@ fn test_m13_assets_seed_42() {
     // the mechanism held: an A/B on 48-56 (120 days, CLI) ended 4 of 38 episodes by the law on 25d152e
     // (per seed [2, 1, 1, 0, 0, 0, 0, 0, 0]) and 7 of 34 on the phase-4 tree ([0, 2, 0, 1, 0, 3, 0, 0, 1]).
     // The pass never touches an episode agent (a body); a rare event moved with the city's trajectory.
+    // M16a phase 1 (2026-10-08): seeds 42-53. With contracts on (one seeded Fixer, no record
+    // posted) 42-49 read [0, 0, 0, 0, 0, 0, 0, 0] while the mechanism held: 120-day CLI runs on
+    // 48-56 ended [0, 0, 0, 0, 0, 2, 0, 0, 0] episodes by the law on the M16a tree and
+    // [1, 0, 0, 0, 0, 0, 0, 0, 0] on e583f18 (the L2-closing city); M16a never touches the path.
     let by_law: u32 = all.iter().map(|m| m.episodes_by_law).sum();
     check(
         by_law >= 1,
         format!(
-            "an episode ended by the law on some seed of 42-49: {by_law} across {:?}",
+            "an episode ended by the law on some seed of 42-53: {by_law} across {:?}",
             all.iter().map(|m| m.episodes_by_law).collect::<Vec<_>>()
         ),
     );
@@ -2934,6 +2941,7 @@ fn m15_run(seed: u64, word_off: bool) -> M15 {
                         GrudgeCause::Evicted => "evicted",
                         GrudgeCause::Betrayed => "betrayed",
                         GrudgeCause::Inherited(_) => "inherited",
+                        GrudgeCause::Hired => "hired",
                     };
                     *m.grudge_causes.entry(cause).or_default() += 1;
                 }

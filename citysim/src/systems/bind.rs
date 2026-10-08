@@ -251,9 +251,23 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     let mut rng = world.rng.hole(id);
     let cfg = world.config.bind.clone();
     // 3. Unknown first (D11), else a weighted draw over the candidates.
-    let unknown = rng.random::<f64>() < cfg.p_unknown;
-    let mut bound = Bound::Unknown;
     let day = time::day(hole.tick);
+    let mut bound = Bound::Unknown;
+    // M16a (plan C19): a contract record's hole is pre-bound to its
+    // `faction` (the taker, or the target for a taker's death): the Unknown
+    // and candidate draws are made and discarded, so the witness roll reads
+    // the offset an ordinary hole binding one actor reads.
+    let contract = matches!(hole.source, Some(crate::ledger::ViolenceSource::Contract(_)));
+    let unknown = if contract {
+        let _ = rng.random::<f64>();
+        let _ = rng.random::<f64>();
+        if let Some(f) = hole.faction.filter(|&f| prebound_ok(world, f, day)) {
+            bound = Bound::Actor(f);
+        }
+        true
+    } else {
+        rng.random::<f64>() < cfg.p_unknown
+    };
     if !unknown {
         let cands = pools.with_day(world, day, |pool| candidates_in(world, &hole, pool));
         let total: f64 = cands.iter().map(|&(_, w)| w).sum();
@@ -387,9 +401,16 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         Bound::Actor(_) => world.stats.current.holes_bound += 1,
         Bound::Unknown => world.stats.current.holes_unknown += 1,
     }
+    // M16a (plan C19): a contract hole's binding is its own count (the
+    // probe `contract_hole_wrong`: bound to anyone but its faction, 0).
+    if contract {
+        let c = &mut world.stats.current.contract;
+        c.contract_holes += 1;
+        c.contract_hole_wrong += u32::from(matches!(bound, Bound::Actor(a) if Some(a) != hole.faction));
+    }
     // L2 (L27): a faction hole's binding; an actor outside its faction or
     // riot is `fv_bound_wrong` (the gate asserts 0).
-    if hole.source.is_some() {
+    if hole.source.is_some() && !contract {
         let wrong = match bound {
             Bound::Actor(a) => {
                 hole.faction.is_some_and(|f| !crate::systems::grudges::member_of(world, a, f))
@@ -407,6 +428,19 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     }
     attributed_event(world, &hole, bound, witness);
     Some(bound)
+}
+
+/// M16a (plan C19): a pre-bound actor binds while living and not jailed
+/// on the hole's day (else the hole is Unknown).
+fn prebound_ok(world: &World, f: EntityId, day: u64) -> bool {
+    if !crate::systems::law::living(world, f) {
+        return false;
+    }
+    let jailed = world
+        .comp::<crate::components::Trace>(f)
+        .and_then(|t| t.on_day(day))
+        .is_some_and(|t| t.has(trace_flags::JAILED));
+    !jailed
 }
 
 fn rewrite_event(world: &mut World, hole: &Hole, bound: Bound) {
