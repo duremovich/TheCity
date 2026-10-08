@@ -78,6 +78,17 @@ pub fn is_workday(shift_key: i64) -> bool {
     shift_key.rem_euclid(7) != 6
 }
 
+/// `is_workday` for `id`'s `job`. L2 shadow fixes item 10: a guard's rest
+/// day is staggered by its index (the whole watch shared the city's rest
+/// day, so with Patrol and Arrest gated on the workday no guard worked one
+/// day in seven: arrests on that weekday fell 8,226 -> 1,121 over 42-53).
+pub fn workday_of(world: &World, id: EntityId, job: &Job, shift_key: i64) -> bool {
+    if job.role == Role::Guard && crate::systems::fixes::item(world, 10) {
+        return (shift_key + i64::from(id.index % 7)).rem_euclid(7) != 6;
+    }
+    is_workday(shift_key)
+}
+
 /// A worked shift whose wages have not been collected today: the tail of the
 /// Work plan (haul, Hall visit) is still pending.
 pub fn wage_pending(world: &World, job: &Job) -> bool {
@@ -88,7 +99,7 @@ pub fn wage_pending(world: &World, job: &Job) -> bool {
 /// that starts soon, or time to set off.
 pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
     let key = job.next_shift_key(world.tick);
-    if !is_workday(key) || job.last_shift_day == Some(key) {
+    if !workday_of(world, id, job, key) || job.last_shift_day == Some(key) {
         return false;
     }
     // A guard's Patrol day is the Patrol goal's business.
@@ -115,7 +126,7 @@ pub fn work_pending(world: &World, id: EntityId, job: &Job) -> bool {
 pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     let Some(job) = world.comp::<Job>(id) else { return false };
     let key = job.next_shift_key(world.tick);
-    if !is_workday(key) || job.last_shift_day == Some(key) {
+    if !workday_of(world, id, job, key) || job.last_shift_day == Some(key) {
         return false;
     }
     if job.role == Role::Guard && !crate::systems::law::jail_duty(world, id, key) {
@@ -129,6 +140,15 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     let tod = world.tick_of_day();
     let until = u64::from(job.ticks_until_shift(tod));
     let door = world.comp::<Building>(employer).map_or(pos.tile, |b| b.door);
+    // L2 shadow fixes item 1: a commute under way holds until arrival (the
+    // gate went false after a leg and Idle or Unwind took her home), and
+    // the walk is read at the speed it is walked.
+    if crate::systems::fixes::commute_latch(world) {
+        if crate::systems::fixes::commuting(world, id, job) {
+            return true;
+        }
+        return until <= crate::systems::fixes::walk_estimate(world, id, door) + DEPARTURE_MARGIN;
+    }
     until <= travel_estimate(world, pos.tile, door) + DEPARTURE_MARGIN
 }
 
@@ -202,11 +222,15 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     // energy up, so Sleep never scored and the night was spent sitting).
     let night = world.phase() == crate::time::DayPhase::Night || world.tick_of_day() >= 22 * 60;
     let off_shift = world.comp::<Job>(id).is_none_or(|j| !j.on_shift(world.tick_of_day()));
+    // L2 shadow fixes item 3: not above `idle_sleep_energy` (a guard logged
+    // ten 1-6 min Sleeps at energy 0.89-0.97 from this plan).
+    let idle_sleep_below =
+        if crate::systems::fixes::sleep_commit(world) { world.config.life.idle_sleep_energy } else { 0.9 };
     if world.config.life.enabled
         && at_home
         && night
         && off_shift
-        && world.comp::<crate::components::Needs>(id).is_some_and(|n| n.energy < 0.9)
+        && world.comp::<crate::components::Needs>(id).is_some_and(|n| n.energy < idle_sleep_below)
     {
         return Some(plan(goal, None, vec![step(ActionKind::Sleep, None)], tick));
     }

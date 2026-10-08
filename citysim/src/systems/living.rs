@@ -26,6 +26,8 @@ pub fn run(world: &mut World) {
     crate::systems::jobs::daily(world);
     crate::systems::jobs::top_up(world);
     crate::systems::budget::daily(world);
+    // L2 shadow fixes: no-shows, the sweepers' wage, the told-memory.
+    crate::systems::fixes::daily(world);
     crate::systems::outside::export_daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);

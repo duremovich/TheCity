@@ -635,6 +635,14 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 return StepResult::Done;
             }
             let target = GotoTarget { dest: key, tile, building };
+            // L2 shadow fixes item 6: the street fled from is avoided by the
+            // spot pick for `avoid_spot_ticks`.
+            if step.action == ActionKind::FleeToHome && crate::systems::fixes::item(world, 6) {
+                let until = tick + world.config.life.avoid_spot_ticks;
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.avoid_spot = Some((pos.tile, until));
+                }
+            }
             // M13 D20: a GoTo rides when a vehicle is to hand (D22: a flyer hops).
             let driving = if matches!(step.action, ActionKind::GoTo(_)) {
                 commute_started(world, id, &target);
@@ -783,14 +791,22 @@ pub fn walk_origin(world: &World, id: EntityId) -> Option<TilePos> {
 /// exactly 1.0 the integer formula runs unchanged (a branch, not a multiply).
 pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState {
     let from = walk_origin(world, id).unwrap_or(target.tile);
-    let base = Tick::from(from.manhattan(target.tile)) * world.config.exec.move_ticks_full;
+    let walk = timed_walk(world, id, from, target.tile);
+    let arrive_tick = world.tick + walk;
+    ExecState::GotoTimed { target, arrive_tick, blocked_since: None }
+}
+
+/// The ticks of a timed walk from `from` to `to` (`timed_goto`'s; the L2
+/// shadow fixes' commute estimate, `fixes::walk_estimate`).
+pub fn timed_walk(world: &World, id: EntityId, from: TilePos, to: TilePos) -> Tick {
+    let base = Tick::from(from.manhattan(to)) * world.config.exec.move_ticks_full;
     let m = crate::systems::vehicles::timed_mult(world, id);
     let mut litter = 1.0;
     if crate::systems::litter::enabled(world) {
-        let dirt = world.district(world.district_of(target.tile)).litter;
+        let dirt = world.district(world.district_of(to)).litter;
         litter = 1.0 + world.config.litter.timed_mult * dirt;
     }
-    let walk = if m == 1.0 {
+    if m == 1.0 {
         if litter > 1.0 {
             (base as f32 * litter).round() as Tick
         } else {
@@ -798,9 +814,7 @@ pub fn timed_goto(world: &World, id: EntityId, target: GotoTarget) -> ExecState 
         }
     } else {
         (base as f32 * m * litter.max(1.0)).round() as Tick
-    };
-    let arrive_tick = world.tick + walk;
-    ExecState::GotoTimed { target, arrive_tick, blocked_since: None }
+    }
 }
 
 /// M12 D18: the extra ticks before a Full mover's next step off `tile`,

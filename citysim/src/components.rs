@@ -603,6 +603,9 @@ pub enum MemoryKind {
     /// L2 § 2: had fun at a venue or the street (the drink's `Socialised`
     /// analogue for "had fun today").
     Enjoyed,
+    /// L2 shadow fixes item 9: a sanctioned bout at a Fight Pit, won
+    /// (valence > 0) or lost; not a deed (`memory::deed_of` skips it).
+    Bout,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1454,6 +1457,10 @@ pub struct Job {
     /// L2 off, and in a pre-L2 save, it is true from the start.
     #[serde(default = "true_", skip_serializing_if = "is_true")]
     pub paid_once: bool,
+    /// L2 shadow fixes item 10: a guard's duty fixed for a shift key
+    /// (`(key, jail)`), set as the key comes due (`law::credit_guard_shifts`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duty_fixed: Option<(i64, bool)>,
 }
 
 fn true_() -> bool {
@@ -1701,6 +1708,18 @@ pub struct Brain {
     /// reached this member (written only with `[living]` on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gang_paid_day: Option<u64>,
+    /// L2 shadow fixes item 7: when the tier last changed (written only
+    /// with the fixes on).
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub lod_since: Tick,
+    /// L2 shadow fixes item 6: a tile fled from and until when the spot
+    /// pick avoids it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avoid_spot: Option<(TilePos, Tick)>,
+}
+
+fn is_zero_u64(v: &u64) -> bool {
+    *v == 0
 }
 
 impl Default for Brain {
@@ -1747,6 +1766,8 @@ impl Default for Brain {
             stat_dole_day: None,
             scavenge_dry: 0,
             gang_paid_day: None,
+            lod_since: 0,
+            avoid_spot: None,
         }
     }
 }

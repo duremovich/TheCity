@@ -747,7 +747,12 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         g.order_trace = scores;
     }
     let Some(order) = next else { return true };
-    let muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
+    let mut muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
+    // L2 shadow fixes item 15: the muster waits for the farthest member's
+    // walk (a Purist walked 291 min to a Muster and missed it by 14).
+    if let Some(m) = muster.filter(|_| crate::systems::fixes::item(world, 15)) {
+        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang)));
+    }
     // M12 D39: a Raid chosen for the corp prize names the corp building.
     let corp_target = inputs.corp_prize.map(|(b, _)| b).filter(|_| order == Order::Raid && corp_raid_best);
     // M14 V34: a Retaliate chosen on a pending `Shock::Hacked { by }` naming

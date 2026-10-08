@@ -672,7 +672,15 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
     let spot = if scored { best_spot(world, id, from) } else { nearest_spot(world, id, from) };
     if let Some((t, social)) = spot {
         let hours = world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
-        let score = (g.hangout_hour * hours + 0.1 * social.min(1.0)) * travel(world, t.manhattan(from));
+        // L2 shadow fixes item 5: a lone hour is not a full hour's fun (11
+        // of 15 HangOuts were "nobody there"); company scales it up.
+        let company = if crate::systems::fixes::item(world, 5) {
+            let lone = world.config.life.spot_lone_fun;
+            lone + (1.0 - lone) * social.clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        let score = (g.hangout_hour * hours * company + 0.1 * social.min(1.0)) * travel(world, t.manhattan(from));
         cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: None, spot: Some(t), score });
     }
     let best = cands.iter().max_by(|a, b| {
@@ -762,6 +770,10 @@ pub fn spots_daily(world: &mut World) {
 
 /// May `id` hang out at `s` (a Hideout's door is its members' only)?
 fn spot_ok(world: &World, id: EntityId, s: &Spot) -> bool {
+    // L2 shadow fixes item 6: not the street just fled.
+    if crate::systems::fixes::item(world, 6) && crate::systems::fixes::avoided(world, id, s.tile) {
+        return false;
+    }
     match s.kind {
         SpotKind::Hideout(g) => world.gang_of(id) == Some(g),
         _ => true,
@@ -829,10 +841,24 @@ fn pair(a: EntityId, b: EntityId) -> (EntityId, EntityId) {
 /// term `kin_w × min(7, days since they met) × P`, a Call's `call_w` on the
 /// own Hideout's spot, times the walk; ties the nearer, then the lower tile.
 pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos, f32)> {
-    let spots = spots_near(world, id, from);
+    let mut spots = spots_near(world, id, from);
     if spots.is_empty() {
         return None;
     }
+    // L2 shadow fixes item 5: a spot past `spot_walk_cap_tiles` is not worth
+    // the walk (195 min at midnight to an empty corner): within the cap,
+    // else the nearest alone.
+    let fix = crate::systems::fixes::item(world, 5);
+    if fix {
+        let cap = world.config.life.spot_walk_cap_tiles;
+        let near: Vec<Spot> = spots.iter().copied().filter(|s| s.tile.manhattan(from) <= cap).collect();
+        spots = if near.is_empty() {
+            spots.iter().copied().min_by_key(|s| (s.tile.manhattan(from), s.tile)).into_iter().collect()
+        } else {
+            near
+        };
+    }
+    let enemies = if fix { crate::systems::fixes::enemy_tiles(world, id) } else { Vec::new() };
     let now = world.tick;
     let today = world.day();
     let cs = contacts(world, id);
@@ -876,8 +902,17 @@ pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos,
             {
                 social += cfg.call_w;
             }
+            // L2 shadow fixes item 5: the hour's company on the corner now
+            // (strangers too, a little), less a strong term per Enemy near
+            // it (a runner went back 18 times to the street where six beat
+            // him).
+            if fix {
+                let others = present.map_or(0, |v| v.iter().filter(|&&o| o != id).count());
+                social += (0.1 * others as f32).min(0.5);
+                social -= cfg_life_penalty(world) * crate::systems::fixes::enemies_near(&enemies, s.tile) as f32;
+            }
             let d = s.tile.manhattan(from);
-            ((0.5 + social) * travel(world, d), d, s.tile, social)
+            ((0.5 + social).max(0.0) * travel(world, d), d, s.tile, social)
         })
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)).then(b.2.cmp(&a.2)))
         .map(|(_, _, t, social)| (t, social))
@@ -886,6 +921,11 @@ pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos,
 // ---------------------------------------------------------------------------
 // Unwind: considerations and plans (plan L14, L16)
 // ---------------------------------------------------------------------------
+
+/// `[life] spot_enemy_penalty` (L2 shadow fixes item 5).
+fn cfg_life_penalty(world: &World) -> f32 {
+    world.config.life.spot_enemy_penalty
+}
 
 fn adult_free(world: &World, id: EntityId) -> bool {
     crate::systems::demography::is_adult(world, id)
@@ -932,6 +972,11 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         // seed 42/43 starvation 22/16; on: 23-45; e8355d4 12/25).
         Consideration::new("fed", n.hunger, Curve::Logistic { k: 12.0, mid: 0.4 }),
     ];
+    // L2 shadow fixes item 3: the tired go to bed, not to a corner.
+    let mut cs = cs;
+    if let Some(c) = crate::utility::goals::energy_brake(world, n) {
+        cs.push(c);
+    }
     Some((cs, 0.0))
 }
 
@@ -1175,6 +1220,35 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind) {
     }
 }
 
+/// L2 shadow fixes item 4: an abandoned paid step keeps its purchase (no
+/// refund): a meal out is eaten, an entry gives its fun for the share of
+/// the visit had; a bet stands.
+pub fn abort_paid(world: &mut World, id: EntityId, kind: ActionKind, started: Tick) {
+    let b = world.comp::<Brain>(id).and_then(|b| b.current_step()).and_then(|s| s.target).or_else(|| here(world, id));
+    match kind {
+        ActionKind::EatOut => {
+            let (units, _) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
+            if units > 0 {
+                let cfg = world.config.needs.clone();
+                if let Some(n) = world.comp_mut::<Needs>(id) {
+                    crate::needs::eat(n, &cfg);
+                }
+                world.mark_day(id, crate::components::trace_flags::ATE);
+                world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
+            }
+        }
+        ActionKind::Enjoy => {
+            world.pending_purchase.remove(&id);
+            if let Some(b) = b {
+                let share = (world.tick.saturating_sub(started) as f32 / 90.0).min(1.0);
+                let gain = gain_at(world, b) * share;
+                add_fun(world, id, gain);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Plan L14, L15, L20: completion effects.
 pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Option<EntityId>, started: Tick) {
     match kind {
@@ -1229,14 +1303,19 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
 fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
     let tile = world.comp::<Position>(id).map(|p| p.tile);
     let hours = world.tick.saturating_sub(started) as f32 / TICKS_PER_HOUR as f32;
-    let gain = world.config.leisure.gain.hangout_hour * hours.max(0.5);
-    add_fun(world, id, gain);
-    let chat = world.config.needs.chat_belonging;
-    add_belonging(world, id, chat);
     let others: Vec<EntityId> = tile
         .and_then(|t| world.hangouts.get(&t))
         .map(|v| v.iter().copied().filter(|&o| o != id && world.has::<Brain>(o)).collect())
         .unwrap_or_default();
+    let mut gain = world.config.leisure.gain.hangout_hour * hours.max(0.5);
+    // L2 shadow fixes item 5: an hour alone on the corner is `spot_lone_fun`
+    // of one in company.
+    if crate::systems::fixes::item(world, 5) && others.is_empty() {
+        gain *= world.config.life.spot_lone_fun;
+    }
+    add_fun(world, id, gain);
+    let chat = world.config.needs.chat_belonging;
+    add_belonging(world, id, chat);
     leave_spot(world, id);
     let known = others.iter().filter(|&&o| world.edge(id, o).is_some()).count();
     let row = &mut world.stats.current.living;
@@ -1333,10 +1412,21 @@ pub fn bouts(world: &mut World) {
         let bets =
             world.comp_mut::<Building>(pit).and_then(|bd| bd.venue.as_mut()).map(|v| std::mem::take(&mut v.bets));
         let bets = bets.unwrap_or_default();
+        // L2 shadow fixes item 9: a working day's shift, and in the pit (a
+        // body inside, or a Statistical one credited by the clock): a
+        // fighter won a bout while wandering Mid East on her rest day.
+        let fix = crate::systems::fixes::item(world, 9);
+        let present = |f: EntityId| {
+            !fix || (world.comp::<Job>(f).is_some_and(|j| crate::exec::routine::is_workday(j.shift_key_at(world.tick)))
+                && world.comp::<Brain>(f).is_some_and(|b| {
+                    b.lod == Lod::Statistical || world.comp::<Position>(f).is_some_and(|p| p.building == Some(pit))
+                }))
+        };
         let mut fighters: Vec<(f32, EntityId)> = ownership::staff_at(world, pit)
             .into_iter()
             .filter(|&f| world.comp::<Job>(f).is_some_and(|j| j.role == Role::Fighter && j.on_shift(tod)))
             .filter(|&f| crate::systems::law::living(world, f) && !world.has::<Sentence>(f))
+            .filter(|&f| present(f))
             .map(|f| (crate::systems::law::fighting(world, f), f))
             .collect();
         fighters.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
@@ -1364,8 +1454,16 @@ pub fn bouts(world: &mut World) {
             n.energy = (n.energy - 0.3).max(0.0);
             n.safety = (n.safety - 0.3).max(0.0);
         }
-        world.remember(winner, MemoryKind::Won, Some(loser), 0.4, 0.3, false);
-        world.remember(loser, MemoryKind::Lost, Some(winner), 0.5, -0.4, false);
+        // L2 shadow fixes item 9: a bout is sanctioned, not an assault (its
+        // `Lost` was read as Assaulted: rumours, news Stories, dread 0.82,
+        // a best friend turned Enemy).
+        if crate::systems::fixes::item(world, 9) {
+            world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
+            world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
+        } else {
+            world.remember(winner, MemoryKind::Won, Some(loser), 0.4, 0.3, false);
+            world.remember(loser, MemoryKind::Lost, Some(winner), 0.5, -0.4, false);
+        }
         if let Some(s) = world.comp_mut::<crate::components::Skills>(winner) {
             s.fighting = (s.fighting + 0.01).min(1.0);
         }
@@ -1677,20 +1775,40 @@ fn is_leader(world: &World, id: EntityId) -> Option<EntityId> {
     world.comp::<Gang>(gang).filter(|g| g.leader == Some(id)).map(|_| gang)
 }
 
-/// Plan L20: the leader's Collect is due (the weekday, not done today).
-fn collect_due(world: &World, gang: EntityId) -> bool {
-    let today = world.day();
-    today % 7 == world.config.leisure.collect_weekday % 7
-        && world.comp::<Gang>(gang).is_some_and(|g| g.collected_day != Some(today))
+/// L2 shadow fixes item 15: the start tick of the leader's running Lead
+/// plan (`None` with the fixes off or no Lead under way).
+fn lead_started(world: &World, gang: EntityId) -> Option<Tick> {
+    if !crate::systems::fixes::item(world, 15) {
+        return None;
+    }
+    let leader = world.comp::<Gang>(gang)?.leader?;
+    world.comp::<Brain>(leader)?.plan.as_ref().filter(|p| p.goal == GoalKind::Lead).map(|p| p.started_tick)
 }
 
-/// Plan L20: a Call is due the evening after an order change.
+/// Plan L20: the leader's Collect is due (the weekday, not done today).
+/// L2 shadow fixes item 15: a round started on the collect day stays due
+/// past midnight until its Collect runs.
+fn collect_due(world: &World, gang: EntityId) -> bool {
+    let today = world.day();
+    let weekday = world.config.leisure.collect_weekday % 7;
+    if let Some(t) = lead_started(world, gang) {
+        let day = t / TICKS_PER_DAY;
+        if day % 7 == weekday && world.comp::<Gang>(gang).is_some_and(|g| g.collected_day.is_none_or(|c| c < day)) {
+            return true;
+        }
+    }
+    today % 7 == weekday && world.comp::<Gang>(gang).is_some_and(|g| g.collected_day != Some(today))
+}
+
+/// Plan L20: a Call is due the evening after an order change. L2 shadow
+/// fixes item 15: it stays due for a Lead plan's life (the leader walked
+/// 330 min to the Hideout and dropped the Lead on the doorstep at night).
 fn call_due(world: &World, gang: EntityId) -> bool {
     let Some(g) = world.comp::<Gang>(gang) else { return false };
-    g.order_since > 0
+    let pending = g.order_since > 0
         && g.called_for != Some(g.order_since)
-        && world.tick.saturating_sub(g.order_since) < TICKS_PER_DAY
-        && world.phase() == DayPhase::Evening
+        && world.tick.saturating_sub(g.order_since) < TICKS_PER_DAY;
+    pending && (world.phase() == DayPhase::Evening || lead_started(world, gang).is_some())
 }
 
 /// Plan L20: the leader's `Lead` gate (`None`: not the leader, or nothing due).

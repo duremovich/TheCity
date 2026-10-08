@@ -454,12 +454,49 @@ pub fn sanitation(world: &mut World) {
         .collect();
     let alloc = crate::util::largest_remainder(workers.len() as u32, &weights);
     let old: Vec<u8> = world.districts.iter().map(|d| d.sweepers).collect();
+    // L2 shadow fixes item 14: the same allocation, each sweeper dealt its
+    // home district's slot first (else yesterday's beat), the rest in order
+    // (the beat moved nightly: Spire one night, Civic the next, 130-265 min
+    // each way, never a full shift).
+    let pinned = crate::systems::fixes::item(world, 14).then(|| {
+        let prefer = |w: &World, s: EntityId| {
+            w.comp::<crate::components::Household>(s)
+                .and_then(|h| h.home)
+                .map(|h| w.district_of_building(h))
+                .or_else(|| w.sweep_beats.get(&s).copied())
+        };
+        let mut left: Vec<u8> = alloc.clone();
+        let mut out: Vec<(EntityId, DistrictId)> = Vec::new();
+        let mut rest: Vec<EntityId> = Vec::new();
+        for &s in &workers {
+            match prefer(world, s).filter(|d| left.get(d.index()).is_some_and(|&k| k > 0)) {
+                Some(d) => {
+                    left[d.index()] -= 1;
+                    out.push((s, d));
+                }
+                None => rest.push(s),
+            }
+        }
+        let mut it = rest.into_iter();
+        for (i, k) in left.iter().enumerate() {
+            for _ in 0..*k {
+                if let Some(s) = it.next() {
+                    out.push((s, DistrictId(i as u8)));
+                }
+            }
+        }
+        out
+    });
     world.sweep_beats.clear();
-    let mut it = workers.iter();
-    for (i, &k) in alloc.iter().enumerate() {
-        for _ in 0..k {
-            if let Some(&s) = it.next() {
-                world.sweep_beats.insert(s, DistrictId(i as u8));
+    if let Some(out) = pinned {
+        world.sweep_beats.extend(out);
+    } else {
+        let mut it = workers.iter();
+        for (i, &k) in alloc.iter().enumerate() {
+            for _ in 0..k {
+                if let Some(&s) = it.next() {
+                    world.sweep_beats.insert(s, DistrictId(i as u8));
+                }
             }
         }
     }

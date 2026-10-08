@@ -97,8 +97,12 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let t = tiles_to(world, id, h)?;
+    // L2 shadow fixes item 20: the nearer of Home and the Hideout, no margin
+    // (a dealer walked 160 min to sleep at Home past her Hideout).
+    let fix = crate::systems::fixes::item(world, 20);
+    let margin = if fix { 0 } else { world.config.life.bed_margin_tiles };
     match home_of(world, id).and_then(|home| tiles_to(world, id, home)) {
-        Some(home) => (t + world.config.life.bed_margin_tiles <= home).then_some(h),
+        Some(home) => (t + margin <= home && (!fix || t < home)).then_some(h),
         None => Some(h),
     }
 }
@@ -544,6 +548,21 @@ pub fn exec_day_pending(world: &World, id: EntityId) -> Option<EntityId> {
     let tod = u64::from(world.tick_of_day());
     if !crate::exec::routine::is_workday(today as i64) || tod >= u64::from(e) {
         return None;
+    }
+    // L2 shadow fixes item 1: the walk to the office, once started today,
+    // holds (the CEO set out and turned back up to four times a morning).
+    if crate::systems::fixes::commute_latch(world) {
+        let started = world
+            .comp::<Brain>(id)
+            .and_then(|b| b.plan.as_ref())
+            .filter(|p| p.goal == GoalKind::Work && p.target == Some(hq))
+            .is_some_and(|p| p.started_tick / TICKS_PER_DAY == today);
+        if started {
+            return Some(hq);
+        }
+        let door = world.comp::<Building>(hq).map_or_else(Default::default, |b| b.door);
+        let walk = crate::systems::fixes::walk_estimate(world, id, door);
+        return (tod + walk + 30 >= u64::from(s)).then_some(hq);
     }
     let walk = tiles_to(world, id, hq).map_or(0, |t| walk_ticks(world, t));
     (tod + walk + 30 >= u64::from(s)).then_some(hq)

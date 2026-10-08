@@ -27,6 +27,7 @@ pub mod demography;
 pub mod districts;
 pub mod economy;
 pub mod faction;
+pub mod fixes;
 pub mod founding;
 pub mod fviolence;
 pub mod gang;

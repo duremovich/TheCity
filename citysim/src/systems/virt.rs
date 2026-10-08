@@ -1294,6 +1294,16 @@ pub fn hack_offer(world: &World, id: EntityId, stat: bool) -> Option<HackOffer> 
         return None;
     }
     let (portal, target, purpose, ev, route) = best_target(world, id, None)?;
+    // L2 shadow fixes item 18: the gap guard: no freelance run where the
+    // target's ICE beats the attack by `[ice] flatline_gap` unless the
+    // runner is desperate (a T1 deck, courage 0.18, jacked into a hardened
+    // Lab and flatlined in 24 min).
+    if crate::systems::fixes::item(world, 18) && wealth < world.config.life.hack_gap_wealth {
+        let o = odds_of(world, id, kit.deck_tier, None, mode_of(world, id));
+        if f32::from(def(world, target)) - o.att >= world.config.ice.flatline_gap {
+            return None;
+        }
+    }
     let p = world.comp::<Personality>(id);
     let (law, greed, courage) = p.map_or((0.5, 0.5, 0.5), |p| (p.lawfulness, p.greed, p.courage));
     let x = (ev as f32 / world.config.hack.hack_ref.max(1) as f32).min(1.0);

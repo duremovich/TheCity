@@ -3881,6 +3881,66 @@ pub struct LifeCfg {
     /// `Earn` cools for `scavenge_cool_hours`.
     pub scavenge_dry_max: u8,
     pub scavenge_cool_hours: u64,
+    /// L2 shadow fixes (docs/SHADOW_V2.md "L2 shadow fixes (what landed)"):
+    /// the master switch of the 21 `[bug]` items. Off (`LifeCfg::off`, a
+    /// pre-fix save, `--life-off`, and `--l2-off` through
+    /// `Config::living_off`) is the 56f3110 city byte for byte. The
+    /// sub-switches below are read only with it on.
+    pub l2_fixes: bool,
+    /// Item 1: a commute once started holds until arrival (the Work plan
+    /// owns the walk for its shift, as `raid_plan` owns its chain), and the
+    /// leave-for-work gate reads the walk at the real speed.
+    pub commute_latch: bool,
+    /// Item 2: an in-shift work step is not outbid (only starvation below
+    /// `starving_hunger` or danger interrupts) ...
+    pub shift_commit: bool,
+    /// ... and a shift cut short pays pro rata from this share of it.
+    pub shift_pro_rata: f32,
+    pub starving_hunger: f32,
+    /// Item 3: a Sleep is held from its first tick (starvation or danger
+    /// excepted) and runs to `sleep_wake_energy` (it ended at 0.9 and Idle
+    /// planned the next a few minutes later: 1-6 min Sleeps all night);
+    /// Idle plans Sleep only below `idle_sleep_energy`; Unwind, Eat and
+    /// Earn carry an energy term below `energy_brake`.
+    pub sleep_commit: bool,
+    pub sleep_wake_energy: f32,
+    pub idle_sleep_energy: f32,
+    pub energy_brake: f32,
+    /// Item 5: the free spot's walk cap (else the nearest spot), the lone
+    /// hour's share of a HangOut's fun, the penalty per Enemy near a spot.
+    pub spot_walk_cap_tiles: u32,
+    pub spot_lone_fun: f32,
+    pub spot_enemy_penalty: f32,
+    /// Item 6: a fled-from tile is avoided by the spot pick this long, and
+    /// Unwind and Socialise cool this long after the flight.
+    pub avoid_spot_ticks: u64,
+    pub flee_clear_ticks: u64,
+    /// Item 7: an agent keeps its tier at least this long (an equal-priority
+    /// newcomer waits), and a demotion waits for a paid step to end.
+    pub lod_dwell: bool,
+    pub lod_dwell_ticks: u64,
+    /// Item 8: a Statistical hungry hour whose Eat fails sleeps at night.
+    pub stat_sleep_futile_eat: bool,
+    /// Item 10: guard-prisoner affinity in the cells stops at this.
+    pub jail_affinity_cap: f32,
+    /// Item 11: an employee who has missed this many workdays draws the
+    /// dole, and is dismissed at `noshow_fire_days`.
+    pub noshow_dole_days: i64,
+    pub noshow_fire_days: i64,
+    /// Item 15: a Muster is held for the farthest member's walk (capped).
+    pub muster_walk_cap_ticks: u64,
+    /// Item 16: a Deal shift starts only from `deal_busy_from` to
+    /// `deal_busy_to` (ticks of day, wrapping past midnight).
+    pub deal_busy_from: u16,
+    pub deal_busy_to: u16,
+    /// Item 17: a teller does not tell the same listener the same deed
+    /// again within this many days.
+    pub told_cooldown_days: u64,
+    /// Item 18: no freelance run where the target's ICE beats the attack by
+    /// `[ice] flatline_gap` unless `U(wealth)` is at least this.
+    pub hack_gap_wealth: f32,
+    /// Item 19: Beg at a HangOut spot with company.
+    pub beg_at_spot: bool,
 }
 
 impl Default for LifeCfg {
@@ -3931,6 +3991,32 @@ impl LifeCfg {
             escort_van_ticks: 60,
             scavenge_dry_max: 3,
             scavenge_cool_hours: 4,
+            l2_fixes: false,
+            commute_latch: true,
+            shift_commit: true,
+            shift_pro_rata: 0.5,
+            starving_hunger: 0.1,
+            sleep_commit: true,
+            sleep_wake_energy: 0.99,
+            idle_sleep_energy: 0.9,
+            energy_brake: 0.5,
+            spot_walk_cap_tiles: 22,
+            spot_lone_fun: 0.4,
+            spot_enemy_penalty: 0.5,
+            avoid_spot_ticks: 1440,
+            flee_clear_ticks: 30,
+            lod_dwell: true,
+            lod_dwell_ticks: 180,
+            stat_sleep_futile_eat: true,
+            jail_affinity_cap: 0.3,
+            noshow_dole_days: 2,
+            noshow_fire_days: 7,
+            muster_walk_cap_ticks: 480,
+            deal_busy_from: 720,
+            deal_busy_to: 120,
+            told_cooldown_days: 3,
+            hack_gap_wealth: 0.9,
+            beg_at_spot: true,
         }
     }
 }
@@ -4663,6 +4749,8 @@ impl Config {
     /// 3) no LOD budget.
     pub fn living_off(mut self) -> Config {
         self.lod.budget = false;
+        // The L2 shadow fixes ride `[life]` but are L2's: off with it.
+        self.life.l2_fixes = false;
         self.living = LivingCfg::off();
         self.jobs = LivingJobsCfg::off();
         self.leisure = LeisureCfg::off();

@@ -184,3 +184,91 @@ Then re-run the day-19 and day-90 windows on the fix commit and compare against 
 - **The late calibration milestone:** dealing margins and consignment, stim sleep (a crash after a stimmed run), gossip volume, wages scaled by employer and class against food at 4 c, the leader's cut, `scavenge_p`.
 
 The next re-shadow runs at M18 (Dylan's directive), over many NPC kinds, with the V3 tool notes above.
+
+## L2 shadow fixes (what landed)
+
+2026-10-08, on 56f3110. The Plan's 21 `[bug]` items, each a mechanism fix, behind one master: `[life] l2_fixes = true` (`systems::fixes::on`, which also needs `[life] enabled` and `[living] enabled`; `--l2-off` and `--life-off` turn it off, and the off city is 56f3110's byte for byte). Behaviour choices carry a sub-switch in `[life]`; plain bugs ride the master alone. The helpers are in `citysim/src/systems/fixes.rs`; every call site names its item. No item draws a roll of its own on any stream. `CITYSIM_L2FIX_OFF=7,16` leaves single items off (the bisection device used below).
+
+1. **Commute latch and the real walk** (`commute_latch`): `routine::must_leave_for_work` holds while the Work plan made for the pending shift walks (`fixes::commuting`), and reads the walk as `exec::timed_walk` (Manhattan x `move_ticks_full` x vehicle x litter: the `commute_tpt_walk` column reads 2.05 ticks a tile; the old Manhattan x 3 shrank faster than the clock); the exec's office walk is latched in `life::exec_day_pending`; think holds a latched commute against any non-emergency winner (`fixes::committed`). The fighter's 12 Work/Unwind flips before an 18:00 shift are gone (she now leaves at 09:34 for a 419-min walk and waits at the pit: the distance is cause 1's `[feature]`).
+2. **Shift commitment and pro-rata pay** (`shift_commit`, `shift_pro_rata` 0.5, `starving_hunger` 0.1): an in-shift work step is outbid only by an emergency (Flee, Fight, Arrest, Eat below hunger 0.1); a work step cut after half the shift is a worked shift paid pro rata (`economy::collect_wage_scaled`, arrears in full; guards keep the shift clock). The fighter's Sleep at 23:54 no longer costs the day.
+3. **Committed sleep** (`sleep_commit`, `sleep_wake_energy` 0.99, `idle_sleep_energy` 0.9, `energy_brake` 0.5): a Sleep is held from its first tick (it was held only after 60 min) and runs to 0.99 energy (it ended at 0.9 and Idle planned the next minutes later: the cook's 1-6 min Sleeps from 01:22 to 06:00); Eat (above hunger 0.25), Earn and Unwind take `0.5 + energy` below energy 0.5. `idle_sleep_energy` stays 0.9: at 0.7 the nights went back to 90-min Rests (L1's bug). "Sleep -> X" interruptions on 42-44: 14.1k -> 2.7k a run.
+4. **Atomic purchases** (master): `BuyFood` takes its units with its coins at the start; an aborted `BuyFood`, `EatOut`, `Enjoy` or `Gamble` keeps its purchase (the meal is eaten, the entry's fun pro rata, the bet stands), and think holds a paid step. Refunds in the diaries 6 -> 0; no-pin `homeless_825` 65 -> 0.
+5. **The Unwind spot** (master; `spot_walk_cap_tiles` 22, `spot_lone_fun` 0.4, `spot_enemy_penalty` 0.5): `best_spot` keeps spots within ~45 min (else the nearest alone), adds the hour's company on the corner (strangers 0.1 each, to 0.5), subtracts 0.5 per Enemy body within 3 tiles; the free rung's score and a HangOut's fun scale with company (`spot_lone_fun` alone).
+6. **Flee persists** (master; `avoid_spot_ticks` 1440, `flee_clear_ticks` 30): `FleeToHome` writes `Brain.avoid_spot` (the tile fled, for a day; `spot_ok` skips spots within 3 tiles of it) and cools Unwind and Socialise for 30 min on arrival.
+7. **LOD tier dwell** (`lod_dwell`, `lod_dwell_ticks` 180): in `lod::assign`, a body within 3 h of its last tier change (to its plan's end, at most 6 h) or mid-purchase keeps its Coarse slot against an equal-priority newcomer, and one demoted within the dwell is not promoted back over an equal-priority incumbent; the counts are conserved (`Brain.lod_since`). No-pin `homeless_825` over days 19-26: tier changes 86 -> 0, LodDemotion aborts 43 -> 0; LodDemotion events on 42-44 -32 %.
+8. **Statistical Sleep when Eat is futile** (`stat_sleep_futile_eat`): a hungry night hour whose Eat came to nothing sleeps (`lod::stat_sleep_night`). No-pin `worker_1340` / `worker_1686` energy-0.00 snapshots over days 19-26: 46 / 61 -> 0 / 0.
+9. **The bout** (master): the fighters must be in the pit (a body inside, or Statistical) on a working shift; both remember `MemoryKind::Bout` (`deed_of` reads no deed: no rumour, Story, grudge or dread from a bout).
+10. **Patrol** (master; `jail_affinity_cap` 0.3): Patrol and Arrest on the guard's workday, with a guard's rest day staggered by its index (`routine::workday_of`): the whole watch shared the city's rest day, so the gate alone left no guard at work one day in seven (arrests on that weekday over 42-53: 8,226 on main, the unpaid rest-day chase; 1,121 with the gate alone; 4,373 staggered, the other weekdays 4,119-4,790). The round starts at the stop nearest the guard (`plan::plan_for` rotates the drawn route; deviation: from where she stands, not from the Precinct). The desk/patrol duty is fixed per shift key as it comes due (`Job.duty_fixed`, `law::credit_guard_shifts`). A guard and a prisoner warm to at most 0.3 in the cells. Rest-day PatrolLegs in the diaries 5 -> 0.
+11. **Absentees** (master; `noshow_dole_days` 2, `noshow_fire_days` 7): a city-owned Feed's or Lab's staff get the `Workplace` distance (the Civic Wire's reporter was sent to the Hall: "Unreachable" all week); an employee with two missed workdays draws the dole (`economy::dole_eligible`, `fixes::missed_workdays`: shifts over and not worked since the last worked or the hire); seven is a no-show dismissal at midnight (`fixes::daily`; the vacancy is posted).
+12. **The Clinic's counter** (master): `assets::seller_open` for a Clinic needs a doctor on a working shift at the counter (a body inside, or Statistical).
+13. **Execs out of the labour pool** (master): `demography::pick_candidate` skips the exec set.
+14. **Sweepers** (master): `districts::sanitation` deals each sweeper its home district's slot first (else yesterday's beat), the allocation unchanged; at midnight every Recycler sweeper is raised to `[budget] works_wage` 7.
+15. **The leader** (master; `muster_walk_cap_ticks` 480): a started Lead holds against non-emergencies; `call_due` and `collect_due` stay due for a running Lead's life (past the Evening, past midnight); a raid's muster waits for its farthest member's walk to the Hideout (up to 8 h); Extort skips gang-mates at the door. Called events on 42-44: 102 -> 135.
+16. **Dealing** (master; `deal_busy_from` 12:00, `deal_busy_to` 02:00): the buyer is no witness of its sale (`law::raise_crime_except`); a Deal shift starts only in the busy hours, and off them a dealer has no GangWork (the first cut let it fall through to its gang's shakedowns: Murders on 42-47 rose 215 -> 364 with the hours gate alone; with the fall-through closed, 255). Dealing witness lines on 42-44: 18.6k -> 13.4k.
+17. **Gossip told-memory** (master; `told_cooldown_days` 3): `gossip::exchange` skips a deed this teller told this listener in the last 3 days (`World.told`, pruned at midnight).
+18. **Hack gap guard** (master; `hack_gap_wealth` 0.9): no freelance run when the target's defence beats the attack by `[ice] flatline_gap` unless `U(wealth)` is 0.9 or more.
+19. **Beg at a spot** (`beg_at_spot`): Beg's precondition takes the street within 2 tiles of a spot where someone else hangs out, at half cost there (else Scavenge always won). Beg actions in the twelve diaries: 0 -> 16.
+20. **Beds and the pantry** (master): the Hideout is a bed whenever nearer than Home (no `bed_margin_tiles`; the Hotel keeps its margin, it costs); EatAtHome's pantry at plan time is the stock less the housemates' reservations.
+21. **The Scavenge ledger** (master): `Flow::Scavenge` (in `flow_other`, as `Sanitation` was; the CSV is unchanged).
+
+Also: the shadow tool's "won back" counts `StreetDice` winnings (and street-dice stakes as gambling).
+
+**Identity.** `--l2-off` against 56f3110's CLI (built from `git archive 56f3110`), 120 days, seeds 42 and 43: every report column but ticks/s and every event identical; `calibrate --agents 500` writes the identical table. Every item masked (`CITYSIM_L2FIX_OFF`, the master on) reproduces main's six-seed Murders, starvation and assaults exactly.
+
+### Shadow before/after
+
+`citysim-cli shadow --seed 42 --start-day 19 --days 3 --count 2 --pick guard,worker,cook,fighter,homeless,gang_member` on 56f3110 (before) and on the fix tree (after). The picks are drawn on day 19 of each city, so the after picks are partly other people; the third table re-shadows the before's twelve (`--agent`) on the fix tree. Per archetype (two diaries a row): hours per free day averaged, longest is the longest single Sleep, counts summed. "Work interrupted" counts `plan interrupted: Work ->`; paid counts Wage flows; rest days are the shift key's (staggered for guards after).
+
+Before (56f3110):
+
+| archetype | walk h/d | sleep h/d | longest h | work h/d | shifts / paid | Work interrupted | refunds | Bout/Won/Lost mem | arrests (rest day) | rest-day PatrolLeg | energy-0 h | Beg | scavenge booked Scavenge / Sanitation |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cook | 4.7 | 4.4 | 5.6 | 4.5 | 3 / 3 | 2 | 0 | 0 | 0 (0) | 0 | 0 | 0 | 0 / 0 |
+| fighter | 7.2 | 5.7 | 7.2 | 3.5 | 4 / 0 | 11 | 0 | 0 | 0 (0) | 0 | 2 | 0 | 0 / 1 |
+| gang member | 7.2 | 3.9 | 4.6 | 3.0 | 2 / 3 | 3 | 0 | 0 | 0 (0) | 0 | 0 | 0 | 0 / 0 |
+| guard | 8.5 | 4.8 | 6.8 | 6.2 | 4 / 4 | 10 | 0 | 0 | 0 (0) | 5 | 0 | 0 | 0 / 0 |
+| homeless | 5.7 | 7.2 | 8.0 | 3.0 | 2 / 2 | 1 | 4 | 0 | 0 (0) | 0 | 0 | 0 | 0 / 1 |
+| worker | 4.9 | 7.4 | 8.0 | 3.8 | 3 / 2 | 4 | 2 | 0 | 0 (0) | 0 | 2 | 0 | 0 / 8 |
+
+After (the same command on the fix tree):
+
+| archetype | walk h/d | sleep h/d | longest h | work h/d | shifts / paid | Work interrupted | refunds | Bout/Won/Lost mem | arrests (rest day) | rest-day PatrolLeg | energy-0 h | Beg | scavenge booked Scavenge / Sanitation |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cook | 5.4 | 5.0 | 5.8 | 6.0 | 4 / 4 | 0 | 0 | 0 | 0 (0) | 0 | 0 | 5 | 0 / 0 |
+| fighter | 4.3 | 4.7 | 7.8 | 4.0 | 4 / 2 | 0 | 0 | 2 | 0 (0) | 0 | 0 | 0 | 0 / 0 |
+| gang member | 8.3 | 5.3 | 6.0 | 0.4 | 0 / 0 | 0 | 0 | 2 | 0 (0) | 0 | 0 | 0 | 1 / 0 |
+| guard | 10.4 | 5.5 | 6.5 | 1.8 | 1 / 5 | 0 | 0 | 1 | 4 (0) | 0 | 0 | 0 | 1 / 0 |
+| homeless | 9.7 | 4.8 | 6.7 | 3.5 | 2 / 3 | 0 | 0 | 1 | 0 (0) | 0 | 0 | 9 | 1 / 0 |
+| worker | 5.7 | 5.5 | 6.0 | 5.9 | 4 / 4 | 0 | 0 | 0 | 0 (0) | 0 | 0 | 2 | 0 / 0 |
+
+After, the before's twelve people (`--agent`):
+
+| archetype | walk h/d | sleep h/d | longest h | work h/d | shifts / paid | Work interrupted | refunds | Bout/Won/Lost mem | arrests (rest day) | rest-day PatrolLeg | energy-0 h | Beg | scavenge booked Scavenge / Sanitation |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| cook | 4.7 | 5.2 | 6.0 | 4.5 | 3 / 3 | 0 | 0 | 1 | 0 (0) | 0 | 0 | 4 | 0 / 0 |
+| fighter | 3.8 | 4.9 | 7.0 | 3.1 | 3 / 2 | 0 | 0 | 1 | 0 (0) | 0 | 0 | 2 | 1 / 0 |
+| gang member | 7.4 | 4.5 | 7.3 | 2.8 | 2 / 2 | 2 | 0 | 0 | 0 (0) | 0 | 0 | 0 | 3 / 0 |
+| guard | 11.0 | 5.9 | 7.0 | 2.0 | 1 / 5 | 0 | 0 | 2 | 4 (0) | 0 | 0 | 0 | 0 / 0 |
+| homeless | 6.0 | 5.7 | 7.4 | 3.0 | 2 / 2 | 0 | 0 | 0 | 0 (0) | 0 | 0 | 0 | 1 / 0 |
+| worker | 5.6 | 6.0 | 6.6 | 5.6 | 4 / 4 | 2 | 0 | 0 | 0 (0) | 0 | 0 | 8 | 0 / 0 |
+
+Read with care: three days, two diaries a row. What moved by mechanism: Work interruptions 31 -> 0 (the picks) and 4 (the same twelve); refunds 6 -> 0; worked shifts are paid (fighters 4 / 0 -> 4 / 2: the second shift ends after the run); rest-day patrol legs 5 -> 0; Beg 0 -> 16; energy-0 hours 4 -> 0; scavenged coins booked as Scavenge. The worker and homeless rows sleep less per day because the before worker was out of work (1.6 h/d) and slept 8 h a day; the energy model sets a working day's sleep near 5-6 h (16 h awake at 0.042 an hour, refilled at 0.125 an hour). Guards walk more: patrol days are walking days (the round now starts near the guard; distance stays cause 1's `[feature]`). Not fixed here (features): the homeless dealer's 13 h a day between the Hideout and a Mid East Bar (cause 1), staff with no customers (cause 5), the idle menu (cause 8).
+
+### The city (120 days)
+
+56f3110 against the fix tree, seeds 42-44 (`run --days 120 --report --events`; Murders and assaults from the events, assaults include Murders; Coarse is `tier_coarse`, mean / max):
+
+| seed | starved | thefts | Murders | assaults/day | employed d120 (mean) | wages / dole | gang income | Coarse mean / max |
+|---|---|---|---|---|---|---|---|---|
+| 42 main | 8 | 10,603 | 22 | 13.27 | 555 (515) | 292,377 / 678,612 = 0.43 | 27,886 | 151 / 155 |
+| 42 fixes | 1 | 12,070 | 43 | 17.71 | 558 (527) | 304,097 / 670,620 = 0.45 | 45,868 | 151 / 156 |
+| 43 main | 14 | 12,319 | 43 | 19.82 | 556 (520) | 293,347 / 659,540 = 0.44 | 44,049 | 151 / 157 |
+| 43 fixes | 0 | 11,590 | 30 | 15.31 | 537 (512) | 297,971 / 681,388 = 0.44 | 39,812 | 151 / 165 |
+| 44 main | 13 | 13,047 | 54 | 20.02 | 541 (506) | 285,749 / 670,608 = 0.43 | 42,698 | 151 / 157 |
+| 44 fixes | 0 | 12,313 | 35 | 16.17 | 553 (521) | 305,401 / 667,152 = 0.46 | 45,990 | 151 / 156 |
+
+Over 42-47: Murders 215 -> 251 (the M15 bound is 394), assaults/day 16.99 -> 16.43, starvation 60 -> 4, gang income 38.3k -> 42.0k a seed. Over twenty seeds (7-14, 42-53): Murders 795 -> 841, starvation 193 -> 15, evictions 191 -> 23 (an evictee joins a gang within 14 days at the same rate), episodes ended by the law 8 of ~41 -> 2 of ~33 (rest-day guards no longer chase; the M13 bullet's existence over 42-49 holds on seed 49). PlanAborted -20 %, `Work ->` interruptions -44 %, `Sleep ->` -81 % (42-44). Over a year (seed 42) assaults/day 24.5 -> 29.4 and the peak 30-day window 34.0 -> 43.3, with 62 more people alive on day 365 (starvation 25 -> 4); seed 43's peak 36.1.
+
+### Gates
+
+Trio green; `--test god` 30/30, `god_corps` 12/12, `god_districts` 11/11; `--test lod` 11/12 with `test_kitted_vs_unkitted_parity` red as on 56f3110 (identical numbers; its city is `calibration_city`, where the fixes are off); the serialized scenario suite 18/18 after four conversions, each with its per-seed data in the comment: M11 "Evicted on every seed of 42-44" -> on some seed of 42-47, and the eviction spiral's joins judged over 42-47 (>= 3: 4); M12 Crossfire on seed 42 -> on some seed of 42-47 (seed 42 read 1 on main); M14 the Research-built Lab -> on some seed of 42-53 (main built one on 47 alone of 42-47); the L2 year runs' assault windows -> the 42.7 band printed, 1.5x asserted. Unit-test touch-ups: `leisure::test_enjoy_charges_price_and_refunds_on_abort` runs the refund with the fixes off and asserts the kept purchase with them on; `jobs::test_l2_off_world_has_no_venues_and_same_first_day` strips `l2_fixes` from the pre-L2 config cut (it sits in `[life]`, above the cut).

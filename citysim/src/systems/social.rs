@@ -597,6 +597,20 @@ fn colocation(world: &mut World) {
             if jail {
                 let step = world.config.social.affinity_per_hour * similarity_mult(world, a, b);
                 let hours = JAIL_DRIFT_HOURS as f32;
+                // L2 shadow fixes item 10: a guard and a prisoner warm to
+                // each other only to `jail_affinity_cap` (desk days took a
+                // gang leader in the cells to +1.00 with the guard).
+                if crate::systems::fixes::item(world, 10)
+                    && crate::systems::fixes::guard_and_prisoner(world, a, b, building)
+                {
+                    let cap = world.config.life.jail_affinity_cap;
+                    let now = world.edge(a, b).map_or(0.0, |e| e.affinity);
+                    if now >= cap {
+                        continue;
+                    }
+                    adjust(world, a, b, (hours * step).min(cap - now), hours * 0.02);
+                    continue;
+                }
                 adjust(world, a, b, hours * step, hours * 0.02);
             } else if cowork {
                 interacted(world, a, b);

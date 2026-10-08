@@ -1456,6 +1456,35 @@ scavenge_p = 0.15
 scavenge_dry_max = 3                # L2 (L29, [lod] budget): three dry hours in a row ...
 scavenge_cool_hours = 4             # ... cool Earn for four
 escort_van_ticks = 60
+# L2 shadow fixes (docs/SHADOW_V2.md "L2 shadow fixes (what landed)"): the 21 [bug] items of the V2
+# re-shadow. Master switch; `--l2-off` (and `--life-off`) turn it off, the 56f3110 city byte for byte.
+# The sub-switches are behaviour choices; the plain bugs ride the master alone.
+l2_fixes = true
+commute_latch = true                # 1: a started commute holds; the gate reads the walk at the real speed
+shift_commit = true                 # 2: an in-shift step is outbid only by starvation or danger ...
+shift_pro_rata = 0.5                # ... and a cut shift pays pro rata from half of it
+starving_hunger = 0.1               # the starvation that breaks a commitment
+sleep_commit = true                 # 3: a Sleep is held from its first tick ...
+sleep_wake_energy = 0.99            # ... and runs to here (it ended at 0.9: 1-6 min Sleeps all night)
+idle_sleep_energy = 0.9             # Idle plans Sleep only below this (0.7 left nights to 90-min Rests)
+energy_brake = 0.5                  # Unwind / Eat / Earn carry an energy term below this
+spot_walk_cap_tiles = 22            # 5: ~45 min: a farther free spot gives way to the nearest
+spot_lone_fun = 0.4                 # a HangOut's fun alone (company scales it to 1)
+spot_enemy_penalty = 0.5            # per Enemy near a spot
+avoid_spot_ticks = 1440             # 6: a fled-from tile is avoided a day ...
+flee_clear_ticks = 30               # ... and leisure cools 30 min after the flight
+lod_dwell = true                    # 7: a tier is kept 3 h against an equal-priority newcomer
+lod_dwell_ticks = 180
+stat_sleep_futile_eat = true        # 8: a failed hungry Eat sleeps at night off screen
+jail_affinity_cap = 0.3             # 10: a guard and a prisoner warm to each other this far at most
+noshow_dole_days = 2                # 11: two missed workdays draw the dole ...
+noshow_fire_days = 7                # ... seven end the job
+muster_walk_cap_ticks = 480         # 15: a Muster waits for the farthest member's walk, up to 8 h
+deal_busy_from = 720                # 16: Deal shifts start 12:00 ...
+deal_busy_to = 120                  # ... to 02:00
+told_cooldown_days = 3              # 17: one telling per teller, listener and deed in 3 days
+hack_gap_wealth = 0.9               # 18: a run past the flatline gap only this desperate
+beg_at_spot = true                  # 19: Beg at a HangOut spot with company
 enabled = true
 
 # ---------------------------------------------------------------------------

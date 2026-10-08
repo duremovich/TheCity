@@ -104,10 +104,18 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     let march_over =
         brain.plan.as_ref().is_some_and(|p| p.goal == GoalKind::Raid) && crate::systems::raid::raid_done(world, id);
     let held = brain.plan.is_some() && uninterruptible(brain, tick) && !march_over;
+    // L2 shadow fixes items 1-4, 15: a latched commute, an in-shift work
+    // step, a Sleep, a paid step and a started Lead give way only to
+    // starvation or danger.
+    let committed = !held && crate::systems::fixes::committed(world, id, brain, winner);
+    let held = held || committed;
     let changed = brain.current_goal != Some(winner) && !held;
     let abort = changed && brain.plan.is_some();
     let old = brain.current_goal;
 
+    if committed {
+        world.stats.current.living.fix_held += 1;
+    }
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.last_think = Some(trace);
         if scheduled {
