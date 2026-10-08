@@ -299,21 +299,12 @@ pub fn top_up(world: &mut World) {
             if !standing(world, b) {
                 continue;
             }
-            // A hunkering corp staffs to half (Hunker's own floor), so the
-            // top-up and Hunker's layoffs do not churn a hire a day.
-            let owner = world.owner_of(b);
-            let hunker = owner.and_then(|o| world.comp::<Corp>(o)).is_some_and(|c| c.order == CorpOrder::Hunker);
-            let full = if hunker { full.div_ceil(2) } else { full };
-            let working = ownership::staff_at(world, b)
-                .into_iter()
-                .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == role))
-                .count();
-            let open = world.vacancies.get(&b).map_or(0, |v| v.iter().filter(|&&r| r == role).count());
             // Deviation (Seeding section: "Markets and Bars get their top-up
             // vacancies the first midnight"): the whole deficit is posted,
             // not one a day.
-            if working + open < full {
-                world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, full - working - open));
+            let short = deficit(world, b, role, full);
+            if short > 0 {
+                world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, short));
             }
         }
     }
@@ -330,19 +321,26 @@ pub fn top_up(world: &mut World) {
             if !standing(world, b) {
                 continue;
             }
-            let owner = world.owner_of(b);
-            let hunker = owner.and_then(|o| world.comp::<Corp>(o)).is_some_and(|c| c.order == CorpOrder::Hunker);
-            let full = if hunker { full.div_ceil(2) } else { full };
-            let working = ownership::staff_at(world, b)
-                .into_iter()
-                .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == role))
-                .count();
-            let open = world.vacancies.get(&b).map_or(0, |v| v.iter().filter(|&&r| r == role).count());
-            if working + open < full && world.purse(owner) >= wage {
+            if deficit(world, b, role, full) > 0 && world.purse(world.owner_of(b)) >= wage {
                 world.vacancies.entry(b).or_default().push(role);
             }
         }
     }
+}
+
+/// `b`'s unfilled `role` places below `full` (a hunkering corp's building
+/// staffs to half, Hunker's own floor, so the top-up and Hunker's layoffs
+/// do not churn a hire a day): `full` less the staff in `role` and the
+/// vacancies already posted for it.
+fn deficit(world: &World, b: EntityId, role: Role, full: usize) -> usize {
+    let hunker = world.owner_of(b).and_then(|o| world.comp::<Corp>(o)).is_some_and(|c| c.order == CorpOrder::Hunker);
+    let full = if hunker { full.div_ceil(2) } else { full };
+    let working = ownership::staff_at(world, b)
+        .into_iter()
+        .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == role))
+        .count();
+    let open = world.vacancies.get(&b).map_or(0, |v| v.iter().filter(|&&r| r == role).count());
+    full.saturating_sub(working + open)
 }
 
 // ---------------------------------------------------------------------------

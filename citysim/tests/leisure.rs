@@ -287,6 +287,14 @@ fn test_front_built_under_expand_in_held_district() {
         g.treasury = 5000;
         g.territory.push(home);
     }
+    // Review fix: the cap counts the seeded fronts on the city's deed that
+    // name the gang too; room for one more above them.
+    let seeded = [BuildingKind::FightPit, BuildingKind::Den, BuildingKind::Club]
+        .iter()
+        .flat_map(|&k| w.buildings_of_kind(k).iter().copied())
+        .filter(|&b| w.comp::<Building>(b).and_then(|bd| bd.venue.as_ref()).is_some_and(|v| v.front_of == Some(gang)))
+        .count() as u32;
+    w.config.leisure.fronts_max = seeded + 1;
     let total = ownership::total_coins(&w);
     let before = leisure::fronts_of(&w, gang);
     leisure::fronts_daily(&mut w, gang);

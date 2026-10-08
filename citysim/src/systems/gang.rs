@@ -8,7 +8,7 @@ use rand::Rng;
 
 use crate::components::{
     Brain, Building, BuildingKind, Claim, DistrictId, Gang, GangMember, GoalKind, Household, Identity, Job, Memory,
-    MemoryKind, Needs, Order, Personality, Position, Sentence, Shock, TilePos, Wallet,
+    MemoryKind, Needs, Order, Personality, Position, Sentence, Shock, TilePos, Wallet, Zone,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -1166,7 +1166,10 @@ pub fn desist(world: &mut World) {
             let sump_home = world
                 .comp::<Household>(m)
                 .and_then(|h| h.home)
-                .map(|h| world.district_name(world.district_of_building(h)).contains("Sump"));
+                // Review fix: the district's zone, as `leisure::spots_daily` reads it.
+                .map(|h| {
+                    world.districts.get(world.district_of_building(h).index()).is_some_and(|d| d.zone == Zone::Sump)
+                });
             if world.spouse_of(m).is_some() || sump_home == Some(false) {
                 p *= cfg.desist_settled;
             }

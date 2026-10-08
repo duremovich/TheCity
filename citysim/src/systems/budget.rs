@@ -101,7 +101,9 @@ pub fn daily(world: &mut World) {
     let hold = cfg.band_hold_days.max(1);
     let held = world.budget.band_days >= hold && world.budget.band_days.is_multiple_of(hold);
     // Fix round (b): the forward guard: no upkeep cut while the Treasury
-    // is under `hi` plus a week of yesterday's dole bill.
+    // is under `hi` plus a week of yesterday's dole bill. `history.back()`
+    // is yesterday: `stats::run` rolls the row at 23:59, this pass runs at
+    // 00:00 (`current` is the new day, its dole still 0).
     let dole = world.stats.history.back().map_or(0, |r| r.flow_dole);
     let cut_ok = t >= cfg.band[1] + 7 * dole;
     if !world.levers.public_works && world.works_vacancies > 0 {

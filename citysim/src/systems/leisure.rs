@@ -10,6 +10,8 @@
 //! `Leisure`) or a `splitmix64` hash; nothing here draws on `rng.world()` or
 //! `rng.agent()`.
 
+use std::collections::BTreeMap;
+
 use rand::Rng;
 use smallvec::SmallVec;
 
@@ -19,7 +21,7 @@ use crate::components::{
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::exec::ExecState;
+use crate::exec::{ExecState, ReservationKind};
 use crate::goap::{ActionKind, LocationKey, Plan};
 use crate::living::{Rung, Spot, SpotKind, UnwindPick};
 use crate::rng::splitmix64;
@@ -93,11 +95,15 @@ pub fn spendable(world: &World, id: EntityId) -> i64 {
 
 /// The daily wage bill of everyone employed at `owner`'s staffed buildings.
 fn owner_payroll(world: &World, owner: Option<EntityId>) -> i64 {
-    let mut kinds = vec![BuildingKind::Bar, BuildingKind::Clinic, BuildingKind::Garage, BuildingKind::Hotel];
-    kinds.extend(BuildingKind::LEISURE);
+    const STAFFED: [BuildingKind; 4] =
+        [BuildingKind::Bar, BuildingKind::Clinic, BuildingKind::Garage, BuildingKind::Hotel];
+    // Review fix (perf): one allocation-free pass over the staffed kinds'
+    // lists (`owned_of_kind`'s filter, same order); an owner of nothing,
+    // nearly every agent, never reaches the staff scan.
+    let owned = |b: EntityId| world.comp::<Building>(b).is_some_and(|bd| bd.owner == owner && !bd.demolished);
     let mut bill = 0;
-    for kind in kinds {
-        for b in ownership::owned_of_kind(world, owner, kind) {
+    for kind in STAFFED.into_iter().chain(BuildingKind::LEISURE) {
+        for b in world.buildings_of_kind(kind).iter().copied().filter(|&b| owned(b)) {
             bill += ownership::staff_at(world, b)
                 .into_iter()
                 .filter_map(|s| world.comp::<Job>(s).map(|j| j.wage_per_day))
@@ -241,11 +247,35 @@ pub fn open(world: &World, b: EntityId) -> bool {
 }
 
 /// Room for `id`: inside already, or fewer occupants than the capacity.
-fn has_room(world: &World, id: EntityId, b: EntityId) -> bool {
+/// `held` is [`held_by_others`] for `id`.
+fn has_room(world: &World, id: EntityId, b: EntityId, held: &BTreeMap<EntityId, usize>) -> bool {
     // Plan L19, L30: the live Seat (and Bed) reservations of others count.
     world.comp::<Building>(b).is_some_and(|bd| {
-        bd.occupants.contains(&id) || bd.occupants.len() + world.reserved_at(b, id) < usize::from(bd.capacity)
+        bd.occupants.contains(&id) || bd.occupants.len() + held.get(&b).copied().unwrap_or(0) < usize::from(bd.capacity)
     })
+}
+
+/// `World::reserved_at(b, exclude)` for every building at once (review fix,
+/// perf: one pass over the reservations per ladder walk, not one per
+/// venue): live `Bed` and `Seat` reservations by holders other than
+/// `exclude`, per building, a holder already inside it not counted.
+fn held_by_others(world: &World, exclude: EntityId) -> BTreeMap<EntityId, usize> {
+    let tick = world.tick;
+    let mut out: BTreeMap<EntityId, usize> = BTreeMap::new();
+    for (&h, rs) in &world.reservations {
+        if h == exclude {
+            continue;
+        }
+        let inside = world.comp::<Position>(h).and_then(|p| p.building);
+        for r in rs {
+            if let ReservationKind::Bed { home: b } | ReservationKind::Seat { building: b } = r.kind {
+                if r.expires > tick && inside != Some(b) {
+                    *out.entry(b).or_default() += 1;
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Plan L19: the door policy. A Lounge refuses a Dreg or a dress below 2; a
@@ -357,6 +387,16 @@ fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: i64, flow: 
     }
     book_take(world, b, paid, flow == Flow::Gamble);
     paid
+}
+
+/// Undo `pay_venue`'s `SetLeisureTax` surcharge on `paid` (plan L37): the
+/// Treasury hands `owner` back the surcharge (`ownership::refund_tax`).
+fn refund_surcharge(world: &mut World, owner: Option<EntityId>, paid: i64) {
+    let tax = world.levers.leisure_tax;
+    if tax > 0.0 && owner.is_some() && paid > 0 {
+        let extra = (tax * paid as f32).round() as i64;
+        ownership::refund_tax(world, owner, extra);
+    }
 }
 
 /// The house's take: `take_today` (a table's margin) and, on a front its
@@ -514,6 +554,7 @@ fn nearest_venue(
     kind: BuildingKind,
     from: TilePos,
     district: Option<DistrictId>,
+    held: &BTreeMap<EntityId, usize>,
 ) -> Option<(u32, EntityId)> {
     world
         .buildings_of_kind(kind)
@@ -524,7 +565,7 @@ fn nearest_venue(
                 && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
         })
         .filter(|&b| district.is_none_or(|d| world.district_of_building(b) == d))
-        .filter(|&b| open(world, b) && door_ok(world, id, b) && has_room(world, id, b))
+        .filter(|&b| open(world, b) && door_ok(world, id, b) && has_room(world, id, b, held))
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
         .min()
 }
@@ -538,6 +579,7 @@ fn paid_candidates(world: &World, id: EntityId, from: TilePos, purse: i64, distr
     let drank = crate::utility::goals::drank_today(world, id);
     let hungry = world.comp::<Needs>(id).is_some_and(|n| n.hunger < 0.5);
     let high = high_ok(world, id);
+    let held = held_by_others(world, id);
     for kind in LADDER {
         if kind == BuildingKind::Bar && drank {
             continue;
@@ -545,8 +587,8 @@ fn paid_candidates(world: &World, id: EntityId, from: TilePos, purse: i64, distr
         if kind == BuildingKind::NoodleBar && !hungry {
             continue;
         }
-        let pick = nearest_venue(world, id, kind, from, district)
-            .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None)));
+        let pick = nearest_venue(world, id, kind, from, district, &held)
+            .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None, &held)));
         let Some((tiles, b)) = pick else { continue };
         let price = price_of(world, b);
         // The rung's affordability (spec § 2's brake): at most half the purse above
@@ -1123,12 +1165,7 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind) {
             ownership::credit(world, b, -paid);
             book_take(world, b, -paid, false);
             // Review fix: the `SetLeisureTax` surcharge comes back too.
-            let tax = world.levers.leisure_tax;
-            if tax > 0.0 && owner.is_some() && paid > 0 {
-                let extra = (tax * paid as f32).round() as i64;
-                let back = ownership::charge(world, None, owner, extra, Flow::Tax);
-                world.stats.current.flow_tax -= 2 * back;
-            }
+            refund_surcharge(world, owner, paid);
             if units > 0 {
                 world.add_stock(b, crate::components::Good::Food, units);
             }
@@ -1243,7 +1280,7 @@ fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
 
 /// Spec § 2: street dice: two co-hangers with fun below 0.5 and a coin each
 /// play for 1 coin (`WordNs::Gamble`, key `(tick, a << 32 | b)`; agent to
-/// agent, `Flow::GambleWin`).
+/// agent, `Flow::StreetDice`).
 fn street_dice(world: &mut World, a: EntityId, b: EntityId) {
     let bored = |w: &World, x: EntityId| w.comp::<Needs>(x).is_some_and(|n| n.fun < 0.5) && coins(w, x) >= 1;
     if !bored(world, a) || !bored(world, b) {
@@ -1252,7 +1289,7 @@ fn street_dice(world: &mut World, a: EntityId, b: EntityId) {
     let (lo, hi) = pair(a, b);
     let u: f32 = world.rng.word(WordNs::Gamble, world.tick, u64::from(lo.index) << 32 | u64::from(hi.index)).random();
     let (winner, loser) = if u < 0.5 { (lo, hi) } else { (hi, lo) };
-    ownership::pay(world, Some(loser), Some(winner), 1, Flow::GambleWin);
+    ownership::pay(world, Some(loser), Some(winner), 1, Flow::StreetDice);
     for x in [a, b] {
         add_fun(world, x, 0.05);
     }
@@ -1310,6 +1347,8 @@ pub fn bouts(world: &mut World) {
                     ownership::refund(world, who, owner, stake, Flow::Gamble);
                     ownership::credit(world, pit, -stake);
                     book_take(world, pit, -stake, true);
+                    // Review fix: the bet's `SetLeisureTax` surcharge comes back, as `on_abort`.
+                    refund_surcharge(world, owner, stake);
                 }
             }
             continue;
@@ -1410,14 +1449,21 @@ pub fn stat_daily(world: &mut World) {
                 crate::systems::jobs::note_visit(world, b);
             }
             ActionKind::EatOut => {
+                // Review fix: the shelf first (emptied earlier in this pass,
+                // there is no meal: no pay, no fun, no visit), then the pay.
+                if world.comp::<Building>(b).is_none_or(|bd| bd.stock_food == 0) {
+                    continue;
+                }
                 let price = price_of(world, b);
                 let paid = pay_venue(world, id, b, price, Flow::Leisure);
+                if paid <= 0 {
+                    continue;
+                }
                 gross += paid;
-                if paid > 0 && world.take_stock(b, crate::components::Good::Food, 1) == 1 {
-                    let cfg = world.config.needs.clone();
-                    if let Some(n) = world.comp_mut::<Needs>(id) {
-                        crate::needs::eat(n, &cfg);
-                    }
+                world.take_stock(b, crate::components::Good::Food, 1);
+                let cfg = world.config.needs.clone();
+                if let Some(n) = world.comp_mut::<Needs>(id) {
+                    crate::needs::eat(n, &cfg);
                 }
                 add_fun(world, id, gain_at(world, b));
                 crate::systems::jobs::note_visit(world, b);
@@ -1505,9 +1551,8 @@ pub fn fronts_daily(world: &mut World, gang: EntityId) {
     if !on(world) || !crate::systems::jobs::on(world) {
         return;
     }
-    let fronts = fronts_of(world, gang);
     // Fronts on the city's deed that still name this gang close too.
-    let mut named: Vec<EntityId> = fronts.clone();
+    let mut named: Vec<EntityId> = fronts_of(world, gang);
     for k in [BuildingKind::FightPit, BuildingKind::Den] {
         for &b in world.buildings_of_kind(k) {
             if standing(world, b)
@@ -1518,6 +1563,7 @@ pub fn fronts_daily(world: &mut World, gang: EntityId) {
             }
         }
     }
+    let named_count = named.len() as u32;
     if crate::systems::law::cracking_down_on(world, gang) {
         use crate::components::{Posture, Stance};
         let city = world.law().is_some_and(|l| l.posture == Posture::Crackdown && l.target == Some(gang));
@@ -1535,7 +1581,9 @@ pub fn fronts_daily(world: &mut World, gang: EntityId) {
     }
     let cfg = world.config.leisure.clone();
     let Some(g) = world.comp::<Gang>(gang) else { return };
-    if g.order != crate::components::Order::Expand || fronts.len() as u32 >= cfg.fronts_max || g.members.is_empty() {
+    // Review fix: the cap counts every front naming the gang, the seeded
+    // ones still on the city's deed too.
+    if g.order != crate::components::Order::Expand || named_count >= cfg.fronts_max || g.members.is_empty() {
         return;
     }
     let treasury = g.treasury;
