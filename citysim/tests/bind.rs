@@ -62,6 +62,9 @@ fn manual_hole(w: &mut World, victim: EntityId, kind: HoleKind, tick: Tick) -> H
         loot: 0,
         home: w.comp::<Household>(victim).and_then(|h| h.home),
         gang: w.gang_of(victim),
+        source: None,
+        faction: None,
+        riot: None,
     };
     bind::open_hole(w, hole)
 }

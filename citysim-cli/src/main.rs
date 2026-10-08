@@ -242,6 +242,8 @@ enum Lever {
     Censor(FactionRef, bool),
     /// L2 god (L37): `open_venue=<kind>:<district>:<city|corp<slot>|gang<i>>`.
     OpenVenue(citysim::BuildingKind, u8, Option<FactionRef>),
+    /// L2 god (L37, phase 4): `faction_strike=<gang i>:<district>:<days>`.
+    FactionStrike(usize, u8, u64),
 }
 
 /// A faction on the command line: `gang<i>`, `corp<slot>` or `law`.
@@ -562,6 +564,9 @@ impl Lever {
                     None => None,
                 },
             },
+            Lever::FactionStrike(i, d, days) => {
+                PlayerCommand::FactionStrike { gang: gang(i)?, district: citysim::DistrictId(d), days }
+            }
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -910,6 +915,18 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 Some(parse_faction(o).map_err(|e| format!("{spec}: {e}"))?)
             };
             Some(Lever::OpenVenue(kind, d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?, owner))
+        }
+        // L2 (L37, phase 4): `faction_strike=<gang i>:<district>:<days>`.
+        "faction_strike" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [g, d, n] = parts[..] else {
+                return Err(format!("{spec}: expected <gang i>:<district>:<days>"));
+            };
+            Some(Lever::FactionStrike(
+                g.parse::<usize>().map_err(|e| format!("{spec}: bad gang: {e}"))?,
+                d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?,
+                n.parse::<u64>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            ))
         }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),

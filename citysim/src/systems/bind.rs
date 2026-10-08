@@ -125,6 +125,17 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
         if id == hole.victim || Some(id) == hole.spouse {
             continue;
         }
+        // L2 (plan L27): a faction hole binds only to that faction's
+        // members (the episode agent for an episode's), a riot hole only to
+        // that riot's rioters; an empty pool binds Unknown.
+        if hole.faction.is_some_and(|f| !crate::systems::grudges::member_of(world, id, f)) {
+            continue;
+        }
+        if hole.source == Some(crate::ledger::ViolenceSource::Riot)
+            && !crate::systems::fviolence::rioter_in(world, id, hole.riot)
+        {
+            continue;
+        }
         if !t.has(trace_flags::ALIVE) || t.has(trace_flags::JAILED) {
             continue;
         }
@@ -376,6 +387,24 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
         Bound::Actor(_) => world.stats.current.holes_bound += 1,
         Bound::Unknown => world.stats.current.holes_unknown += 1,
     }
+    // L2 (L27): a faction hole's binding; an actor outside its faction or
+    // riot is `fv_bound_wrong` (the gate asserts 0).
+    if hole.source.is_some() {
+        let wrong = match bound {
+            Bound::Actor(a) => {
+                hole.faction.is_some_and(|f| !crate::systems::grudges::member_of(world, a, f))
+                    || (hole.source == Some(crate::ledger::ViolenceSource::Riot)
+                        && !crate::systems::fviolence::rioter_in(world, a, hole.riot))
+            }
+            Bound::Unknown => false,
+        };
+        let l = &mut world.stats.current.living;
+        match bound {
+            Bound::Actor(_) => l.fv_bound += 1,
+            Bound::Unknown => l.fv_unknown += 1,
+        }
+        l.fv_bound_wrong += u32::from(wrong);
+    }
     attributed_event(world, &hole, bound, witness);
     Some(bound)
 }
@@ -406,7 +435,19 @@ fn attributed_event(world: &mut World, hole: &Hole, bound: Bound, witness: Optio
     match bound {
         Bound::Actor(a) => {
             let seen = witness.map(|w| format!(", seen by {}", world.name_of(w))).unwrap_or_default();
-            let text = format!("{what} is laid to {}{seen}", world.name_of(a));
+            // L2 (plan L35): a faction hole names the faction.
+            let of = hole
+                .faction
+                .filter(|&f| f != a)
+                .map(|f| {
+                    let name = crate::systems::grudges::label(world, f);
+                    match name.strip_prefix("The ") {
+                        Some(rest) => format!(" (a {rest} member)"),
+                        None => format!(" (a {name} member)"),
+                    }
+                })
+                .unwrap_or_default();
+            let text = format!("{what} is laid to {}{of}{seen}", world.name_of(a));
             world.push_event(EventKind::Attributed, &[a, hole.victim], text);
         }
         Bound::Unknown => {
@@ -449,6 +490,9 @@ pub fn run(world: &mut World) {
     if world.tick_of_day() != 0 {
         return;
     }
+    // L2 (plan L26): faction violence off screen; its holes open now and
+    // bind at the next midnight, as the hourly table's.
+    crate::systems::fviolence::daily(world);
     let now = world.tick;
     let day_start = time::day(now) * TICKS_PER_DAY;
     let due: Vec<HoleId> =

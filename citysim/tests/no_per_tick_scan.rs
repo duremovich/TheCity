@@ -54,6 +54,8 @@ const FILES: &[&str] = &[
     "systems/fviolence.rs",
     // L2 phase 2.
     "systems/leisure.rs",
+    // L2 phase 4 (the daily pass runs from the binder's midnight).
+    "systems/bind.rs",
 ];
 
 #[test]

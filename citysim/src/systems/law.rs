@@ -116,6 +116,18 @@ pub fn raise_crime_on(
     crime: Crime,
     tile: TilePos,
 ) {
+    // L2 phase 4 (plan L25): the ledger's on-screen victims.
+    if let Some(v) = victim {
+        let kind = match crime {
+            Crime::Assault => Some(crate::components::HoleKind::Assaulted),
+            Crime::Theft => Some(crate::components::HoleKind::Robbed),
+            Crime::Abduction => Some(crate::components::HoleKind::Abducted),
+            _ => None,
+        };
+        if let Some(k) = kind {
+            crate::systems::fviolence::note_victim(world, actor, v, k);
+        }
+    }
     let cfg = world.config.crime.clone();
     let r = if world.is_dark() { cfg.sight_night_crime } else { cfg.sight_day_crime };
     let stealth = stealth(world, actor);

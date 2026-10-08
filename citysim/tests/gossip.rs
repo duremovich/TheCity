@@ -174,6 +174,9 @@ fn test_anonymous_rumour_takes_name_when_hole_binds() {
         loot: 0,
         home: None,
         gang: None,
+        source: None,
+        faction: None,
+        riot: None,
     };
     let hid = citysim::systems::bind::open_hole(&mut w, hole);
     let pooled = w.rumours[0].entries.iter().find(|p| p.hole == Some(hid)).expect("posted at open_hole");

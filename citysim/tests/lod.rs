@@ -482,3 +482,50 @@ fn test_full_vs_statistical_leisure_within_15pct() {
     assert!(full > 0.0, "Full agents spent on leisure");
     assert!((full - stat).abs() <= 0.15 * full, "Full {full:.4} vs Statistical {stat:.4}");
 }
+
+/// L2 phase 4 (spec § 10, plan 4.7): faction violence parity. The 2,000
+/// city with gangs (the shipped config, `[fviolence]` on), seeds 2000-2005,
+/// 120 days, one thread per seed. Per 1,000 civilian agent-days under a
+/// faction source: the Statistical tier's faction-sourced `Killed` +
+/// `Assaulted` hits (the daily pass, over the Statistical civilian
+/// agent-days it rolled) against the Full and Coarse civilian victims of
+/// on-screen faction violence (over the civilian body-hours in touched
+/// districts ÷ 24), pooled over the seeds (`World::fv_tally`). Asserted
+/// within a factor of 4 (the sanity bound), printed against the factor-2
+/// band. Run with `--ignored`.
+#[test]
+#[ignore]
+fn test_faction_violence_parity() {
+    const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
+    const DAYS: u64 = 120;
+    let handles: Vec<_> = SEEDS
+        .iter()
+        .map(|&seed| {
+            std::thread::spawn(move || {
+                let mut w = World::new(seed, Config::load());
+                assert!(citysim::systems::fviolence::on(&w), "[fviolence] on");
+                w.run_ticks(DAYS * TICKS_PER_DAY);
+                let t = w.fv_tally.clone();
+                eprintln!(
+                    "seed {seed}: bodies {} civilian victims over {:.0} body-days, Statistical {} hits over {} agent-days",
+                    t.body_civ_victims,
+                    t.body_civ_hours as f64 / 24.0,
+                    t.stat_civ_hits,
+                    t.stat_civ_days
+                );
+                t
+            })
+        })
+        .collect();
+    let tallies: Vec<citysim::ledger::FvTally> = handles.into_iter().map(|h| h.join().expect("seed run")).collect();
+    let sum = |f: fn(&citysim::ledger::FvTally) -> u64| tallies.iter().map(f).sum::<u64>() as f64;
+    let body = sum(|t| t.body_civ_victims) * 1000.0 / (sum(|t| t.body_civ_hours) / 24.0).max(1.0);
+    let stat = sum(|t| t.stat_civ_hits) * 1000.0 / sum(|t| t.stat_civ_days).max(1.0);
+    let ratio = body.max(stat) / body.min(stat).max(1e-9);
+    eprintln!(
+        "civilian Killed+Assaulted per 1,000 agent-days under a faction source: bodies {body:.3}, Statistical {stat:.3}, factor {ratio:.2}"
+    );
+    eprintln!("FINDING faction-violence parity factor {ratio:.2} (band <= 2; asserted <= 4)");
+    assert!(body > 0.0 && stat > 0.0, "both tiers see faction violence: bodies {body:.3}, Statistical {stat:.3}");
+    assert!(ratio <= 4.0, "bodies {body:.3} vs Statistical {stat:.3}: factor {ratio:.2} > 4");
+}

@@ -362,6 +362,8 @@ fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
         let mut cfg = Config::load().scaled_to(300);
         cfg.chrome.abduct_base = 1.0e6;
         cfg.bind.p_unknown = if unknown { 1.0 } else { 0.0 };
+        // M13's roll (L2 phase 4: with `[fviolence]` on the Harvest cell replaces it).
+        cfg.fviolence.enabled = false;
         let mut w = World::new(42, cfg);
         let people = free(&w);
         let (victim, crew) = (people[0], people[1]);

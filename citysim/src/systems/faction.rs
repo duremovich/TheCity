@@ -673,6 +673,20 @@ pub const RAID_MARCH_TICKS: Tick = 6 * TICKS_PER_HOUR;
 /// shocks only then: a shock that lands mid-march waits for the brawl).
 pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     let now = world.tick;
+    // L2 (plan L37): a god `FactionStrike` pins the order to Contest until
+    // it lapses (`Gang.strike`; `None` in every city without one).
+    if let Some((_, until)) = world.comp::<Gang>(gang).and_then(|g| g.strike) {
+        if now < until {
+            if let Some(g) = world.comp_mut::<Gang>(gang) {
+                g.order = Order::Contest;
+                g.raid_at = None;
+            }
+            return true;
+        }
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.strike = None;
+        }
+    }
     if let Some(t) = world.comp::<Gang>(gang).and_then(|g| g.raid_at).filter(|&t| t <= now) {
         if now < t + RAID_MARCH_TICKS {
             return false; // marching
