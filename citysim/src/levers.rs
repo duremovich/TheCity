@@ -1155,6 +1155,10 @@ impl World {
                     }
                 }
                 crate::systems::grudges::vendettas(self);
+                // M15 phase 5: the feud is declared open (and held for
+                // `declared_days`): with `vendetta_norm` 10 the two leaders'
+                // grudges alone no longer reach `vendetta_open`.
+                crate::systems::grudges::declare(self, a, b, w);
                 let text = format!(
                     "declared a vendetta between {} and {} ({w:.2})",
                     crate::systems::grudges::label(self, a),

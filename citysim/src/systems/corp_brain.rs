@@ -969,7 +969,15 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
             return;
         }
     }
+    let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
     if crate::systems::corps::acquire(world, corp, building, ni.offer, "hostile") {
+        // M15 phase 5: a hostile buy-out of a solvent rival is told as a
+        // betrayal, so honour moves on acquisitions and the next seller may
+        // refuse a dishonoured buyer (W33).
+        if !bankrupt {
+            let d = world.district_of_building(building);
+            crate::systems::gossip::post_deed(world, d, crate::word::Deed::Betrayed, Some(corp), Some(seller));
+        }
         let now = world.tick;
         if let Some(c) = world.comp_mut::<Corp>(corp) {
             c.last_acquisition_tick = Some(now);

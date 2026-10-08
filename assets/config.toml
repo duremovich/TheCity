@@ -1203,9 +1203,15 @@ kin_p = [0.9, 0.7, 0.5, 0.3]
 rumour_cap = 8
 rumour_cap_statistical = 3
 relay_conf = 0.8
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.1, poached = 0.3 }
+# M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
+# honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3 }
 deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4 }
-deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1 }
+# M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
+# dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
+# seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
+# (seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939; robberies ~55 %).
+deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1 }
 # W9 (phase 3): the legacy second-hand copies in Memory.entries retire (social::gossip still draws);
 # the word's exchange nudges an existing edge to the actor instead.
 legacy_second_hand = false
@@ -1217,9 +1223,13 @@ hop_w = [1.0, 0.8, 0.6, 0.4]
 pool_w = 2.0
 dread_scale = 3.0
 honour_scale = 3.0
-heat_scale = 2.0
+# M15 phase 5: heat_scale 2 -> 10 and heat_wanted 0.6 -> 0.4. Any open report made an adult wanted
+# (heat 0.6), and a beating known by fifty people saturated X at scale 2: 37-44 % of adults read heat
+# >= 0.5 on seeds 42-43 (spec band 0.5-4 %) and every gang's heat was 0.83-1.00. Now heat >= 0.5 for
+# 3.3 / 2.6 / 2.0 % of adults on 42-44 and the gangs' heat 0.39-1.00 (with the gangs' mean in reputation.rs).
+heat_scale = 10.0
 fame_scale = 20.0
-heat_wanted = 0.6
+heat_wanted = 0.4
 heat_arrest = 0.2
 bribe_honour = 0.5
 dread_w = { killed = 1.0, assaulted = 0.4, avenged = 0.8, raided = 0.6, extorted = 0.3, robbed = 0.15, stripped = 0.2 }
@@ -1256,7 +1266,12 @@ tithe_frac = 0.6
 founders = 3
 
 [grudges]
-grudge_min = 0.15
+# M15 phase 5: grudge_min 0.15 -> 0.35, rel_w.own 0.8 -> 0.6, aggressor_grudge_off (see deed_sev.robbed):
+# grudges come from killings (kin and friends), robberies and kin seeing a beating, not from every
+# beating heard of or lost. Formed on seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939;
+# Murders 61 / 49 / 59 -> 47 / 44 / 46 against 41 / 48 / 47 with the word off.
+grudge_min = 0.35
+aggressor_grudge_off = true
 grudge_decay = 0.01
 beat_settle = 0.5
 inherit_min = 0.4
@@ -1264,10 +1279,14 @@ inherit_frac = 0.6
 settle_keep_days = 30
 # W15: the spec's rel_w plus plan rows leader (a member learning their own leader was killed or beaten)
 # and comrade (off; a calibration knob).
-rel_w = { spouse = 1.0, parent = 1.0, family = 0.9, friend = 0.6, own = 0.8, leader = 0.7, comrade = 0.0 }
+rel_w = { spouse = 1.0, parent = 1.0, family = 0.9, friend = 0.6, own = 0.6, leader = 0.7, comrade = 0.0 }
 guard_hours = 6
-vendetta_norm = 3.0
-vendetta_open = 0.5
+# M15 phase 5: vendetta_norm 3 -> 10 and vendetta_open 0.5 -> 1.0. Three grudge-weights saturated V
+# for a 40-member gang: 48-58 vendettas opened per run and 25-28 open on day 120 among 12-14 factions
+# (a third of all pairs in blood at once). Now 8 / 8 / 7 opened and 7 / 8 / 7 open on seeds 42-44.
+vendetta_norm = 10.0
+vendetta_open = 1.0
+declared_days = 30                 # a god DeclareVendetta holds the feud open this long (phase 5)
 vendetta_close = 0.2
 fight_grudge_min = 0.5             # W17
 
@@ -1277,13 +1296,17 @@ fight_grudge_min = 0.5             # W17
 # full, revenge kills 38 and Murders +28 % over M14. hunt_min 0.75: revenge kills 19-30. hunt_min 0.85,
 # stat_hunt_min 0.45, hunt_kill_p 0.3: Hunts 74-88, revenge kills 7-9, chain length 2-3, Murders
 # x0.96-1.11 of M14.
-hunt_min = 0.85
+# M15 phase 5: hunt_min 0.85 -> 0.75 and lethal_min 0.75 -> 0.85. With hunt_min above lethal_min every
+# Hunt was lethal and only kin killings (1.0 x conf) hunted; now a heavy grudge (a friend's killing, a
+# robbery twice) hunts for a beating and a kin killing still hunts to kill. Hunts 50 / 58 / 47 ->
+# 49 / 45 / 61 on seeds 42-44, Avenged 5 / 12 / 6 -> 18 / 9 / 9, revenge kills 2 / 5 / 1 -> 1 / 2 / 2.
+hunt_min = 0.75
 max_hunts = 16
 hunt_flat = 0.0
 fresh_sighting_hours = 48
 intel_k = 0.5
 stakeout_hours = 3
-lethal_min = 0.75
+lethal_min = 0.85
 hunt_kill_p = 0.3
 hunt_cooldown_days = 3
 hunt_days = 10

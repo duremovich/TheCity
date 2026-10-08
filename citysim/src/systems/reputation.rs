@@ -419,9 +419,13 @@ pub fn rebuild(world: &mut World) {
     let by_id: BTreeMap<EntityId, Reputation> = out.iter().cloned().collect();
     let get_r = |id: EntityId| by_id.get(&id).cloned().unwrap_or_default();
 
-    // Gangs: dread from their three most feared members and the deeds told
-    // of the gang itself; honour the members' mean; heat the M9 pressure or
-    // the three hottest members; standing from turf and treasury.
+    // Gangs: dread from their members' mean dread and the deeds told of the
+    // gang itself; honour the members' mean; heat the M9 pressure or the
+    // members' mean heat; standing from turf and treasury. M15 phase 5: the
+    // spec's three most feared (hottest) members read 0.9-1.0 for every
+    // gang by day 30 (each gang has three known killers), so the brains'
+    // fear and pressure terms saw no difference between gangs; the mean
+    // reads how violent (wanted) the gang is per head, which spreads them.
     let reports = crate::systems::law_brain::reports_by_gang(world);
     let full = crate::systems::law_brain::crackdown_reports(world).max(1) as f32;
     let homes = world.buildings_of_kind(crate::components::BuildingKind::Home).len().max(1) as f32;
@@ -429,21 +433,22 @@ pub fn rebuild(world: &mut World) {
     for g in world.gang_list().to_vec() {
         let Some(gg) = world.comp::<Gang>(g) else { continue };
         let members: Vec<Reputation> = gg.members.iter().map(|&m| get_r(m)).collect();
-        let mut dreads: Vec<f32> = members.iter().map(|r| r.dread).collect();
-        dreads.sort_by(|a, b| b.total_cmp(a));
-        let top3 = |v: &[f32]| if v.is_empty() { 0.0 } else { v.iter().take(3).sum::<f32>() / v.len().min(3) as f32 };
-        let mut heats: Vec<f32> = members.iter().map(|r| r.heat).collect();
-        heats.sort_by(|a, b| b.total_cmp(a));
-        let honour =
-            if members.is_empty() { 0.5 } else { members.iter().map(|r| r.honour).sum::<f32>() / members.len() as f32 };
+        let mean = |f: fn(&Reputation) -> f32| {
+            if members.is_empty() {
+                0.0
+            } else {
+                members.iter().map(f).sum::<f32>() / members.len() as f32
+            }
+        };
+        let honour = if members.is_empty() { 0.5 } else { mean(|r| r.honour) };
         let pressure = reports.get(&g).copied().unwrap_or(0) as f32 / full;
         let standing =
             (0.3 + 0.4 * gg.territory.len() as f32 / homes + 0.3 * gg.treasury.max(0) as f32 / hoard).clamp(0.0, 1.0);
         let r = Reputation {
-            dread: 0.5 * top3(&dreads) + 0.5 * dread_of(Acc::get(&acc.d, g), cfg.dread_scale),
+            dread: 0.5 * mean(|r| r.dread) + 0.5 * dread_of(Acc::get(&acc.d, g), cfg.dread_scale),
             standing,
             honour,
-            heat: pressure.max(top3(&heats)).clamp(0.0, 1.0),
+            heat: pressure.max(mean(|r| r.heat)).clamp(0.0, 1.0),
             known_by: Acc::get(&acc.known, g),
             top: top_of(&acc, g),
             pinned: None,

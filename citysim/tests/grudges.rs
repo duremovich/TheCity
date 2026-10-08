@@ -456,7 +456,8 @@ fn test_guard_body_turns_strip_into_fight() {
 
 /// Fix round: one deed leaves one grudge. A noticing victim is also a
 /// witness (`SawCrime` with itself as the object) and keeps its
-/// `WasRobbed`; only the latter may form the grudge: sev 0.3 × own 0.8.
+/// `WasRobbed`; only the latter may form the grudge: sev 0.6 × own 0.6
+/// (M15 phase 5; it was 0.3 × 0.8).
 #[test]
 fn test_noticing_victim_holds_one_grudge_per_deed() {
     let mut cfg = Config::load();
@@ -475,5 +476,5 @@ fn test_noticing_victim_holds_one_grudge_per_deed() {
     });
     assert!(saw, "the victim noticed its own robbery");
     let g = grudge(&w, victim, thief).expect("a grudge on the thief");
-    assert!((g.weight - 0.24).abs() < 1e-5, "one deed, one grudge: {}", g.weight);
+    assert!((g.weight - 0.36).abs() < 1e-5, "one deed, one grudge: {}", g.weight);
 }

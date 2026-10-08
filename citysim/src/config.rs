@@ -3143,6 +3143,11 @@ pub struct GrudgesCfg {
     pub vendetta_close: f32,
     /// W17.
     pub fight_grudge_min: f32,
+    /// M15 phase 5: a fight's aggressor who loses forms no grudge on the
+    /// one who fought back (`World::remember_no_grudge`).
+    pub aggressor_grudge_off: bool,
+    /// M15 phase 5: days a god `DeclareVendetta` holds the feud open.
+    pub declared_days: u32,
 }
 
 impl Default for GrudgesCfg {
@@ -3166,6 +3171,8 @@ impl GrudgesCfg {
             vendetta_open: 0.5,
             vendetta_close: 0.2,
             fight_grudge_min: 0.5,
+            aggressor_grudge_off: false,
+            declared_days: 30,
         }
     }
 }

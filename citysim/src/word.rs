@@ -363,6 +363,10 @@ pub struct Vendetta {
     /// brain and Lobby read the feud's weight between midnights.
     #[serde(default)]
     pub w: [f32; 2],
+    /// M15 phase 5: a god `DeclareVendetta` holds the feud open until the
+    /// tick, each side's weight at least the declared one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub declared: Option<(Tick, f32)>,
 }
 
 // ---------------------------------------------------------------------------
