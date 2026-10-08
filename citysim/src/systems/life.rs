@@ -89,6 +89,13 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
     if b.is_full() && !b.occupants.contains(&id) {
         return None;
     }
+    // L2 (L30): a bed another member reserved on the way is taken.
+    if crate::systems::lod::budget_on(world)
+        && !b.occupants.contains(&id)
+        && b.occupants.len() + world.reserved_at(h, id) >= usize::from(b.capacity)
+    {
+        return None;
+    }
     let t = tiles_to(world, id, h)?;
     match home_of(world, id).and_then(|home| tiles_to(world, id, home)) {
         Some(home) => (t + world.config.life.bed_margin_tiles <= home).then_some(h),
@@ -117,7 +124,7 @@ pub fn away_hotel(world: &World, id: EntityId) -> Option<EntityId> {
         .filter(|&h| {
             crate::systems::street::is_hotel(world, h)
                 && crate::systems::street::hotel_price(world, h) <= budget
-                && crate::systems::street::free_beds(world, h) > 0
+                && crate::systems::street::free_beds_for(world, h, id) > 0
         })
         .filter_map(|h| tiles_to(world, id, h).map(|t| (t, h)))
         .filter(|&(t, _)| t + margin <= home_t)

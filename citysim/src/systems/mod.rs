@@ -28,6 +28,7 @@ pub mod districts;
 pub mod economy;
 pub mod faction;
 pub mod founding;
+pub mod fviolence;
 pub mod gang;
 pub mod gossip;
 pub mod grudges;

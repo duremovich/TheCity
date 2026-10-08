@@ -605,9 +605,48 @@ fn test_breach_against_three_guards_fails_and_shocks() {
     assert!(!w.events.iter().any(|e| e.kind == EventKind::Jailbreak));
 }
 
+/// L2 (L22): with `[lod] budget` on, each gang holds class 2 for its first
+/// `gang_quota` members only (the leader always), and the rotation hands
+/// the slots round from day to day.
 #[test]
-fn test_gang_members_are_never_statistical() {
+fn test_gang_quota_holds_and_rotates() {
+    let mut cfg = Config::load().v1_profile();
+    cfg.lod.budget = true;
+    cfg.living.enabled = true; // the master switch (`v1_profile` turns L2 off)
+    cfg.gangs.max_members = 200;
+    let mut w = World::new(53, cfg);
+    let (g0, _) = gangs(&w);
+    let members = civilians(&w, 60);
+    assert_eq!(members.len(), 60);
+    for &m in &members {
+        gang::enlist(&mut w, m, g0);
+    }
+    let quota = w.config.lod.gang_quota;
+    let leader = w.comp::<Gang>(g0).and_then(|g| g.leader).expect("a leader");
+    w.tick = 600;
+    citysim::systems::lod::run(&mut w);
+    let class2 = |w: &World| -> Vec<EntityId> {
+        members.iter().copied().filter(|&m| citysim::systems::lod::rank_class(w, m) == 2).collect()
+    };
+    let today = class2(&w);
+    assert!(today.len() <= quota, "{} class-2 members over the quota {quota}", today.len());
+    assert_eq!(today.len(), quota);
+    assert!(today.contains(&leader), "the leader always ranks");
+    let stat =
+        members.iter().filter(|&&m| w.comp::<Brain>(m).is_some_and(|b| b.lod == citysim::Lod::Statistical)).count();
+    assert!(stat > 0, "members over the quota may be Statistical");
+    w.tick = 600 + citysim::TICKS_PER_DAY;
+    let tomorrow = class2(&w);
+    assert_eq!(tomorrow.len(), quota);
+    assert!(tomorrow.contains(&leader));
+    assert_ne!(today, tomorrow, "the rotation hands the slots round");
+}
+
+/// M10 D20 as before L2: without the budget gang members are never Statistical.
+#[test]
+fn test_gang_members_are_never_statistical_without_budget() {
     let mut w = world(53);
+    assert!(!w.config.lod.budget);
     let (g0, _) = gangs(&w);
     let members = civilians(&w, 3);
     for &m in &members {

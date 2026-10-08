@@ -800,9 +800,30 @@ pub const SHOCK_HYSTERESIS: f32 = 1e-6;
 /// An immediate rescoring in which the standing order wins exact ties
 /// ([`SHOCK_HYSTERESIS`]); the pending shocks are consumed.
 pub fn rethink(world: &mut World, corp: EntityId) {
-    rescore(world, corp, SHOCK_HYSTERESIS, "shock");
+    let margin = shock_margin(world, corp);
+    rescore(world, corp, margin, "shock");
     if let Some(c) = world.comp_mut::<Corp>(corp) {
         c.shocks.clear();
+    }
+}
+
+/// The margin a shock rescore needs: [`SHOCK_HYSTERESIS`] (ties only), or
+/// with the living city on (L2, `[living] corp_order_dwell_days`) within the
+/// dwell after the corp took its order `[living] corp_order_margin`, unless
+/// the pending shocks reach `[life] order_severe`.
+pub fn shock_margin(world: &World, corp: EntityId) -> f32 {
+    let cfg = &world.config.living;
+    if !cfg.enabled {
+        return SHOCK_HYSTERESIS;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return SHOCK_HYSTERESIS };
+    let held = world.tick.saturating_sub(c.order_since);
+    let pending: f32 = c.shocks.iter().map(|s| s.severity()).sum();
+    let dwell = held < cfg.corp_order_dwell_days * TICKS_PER_DAY;
+    if dwell && pending < world.config.life.order_severe {
+        cfg.corp_order_margin.max(SHOCK_HYSTERESIS)
+    } else {
+        SHOCK_HYSTERESIS
     }
 }
 

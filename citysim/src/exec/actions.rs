@@ -963,6 +963,8 @@ pub fn on_complete(
         // M13 D38: the shift is over; the gang's task is done for the day.
         ActionKind::Deal => {
             crate::systems::stims::end_deal(world, id);
+            // L2 (L25): a deal shift is the order's act on the ledger.
+            crate::systems::fviolence::note_act(world, id, crate::ledger::ActKind::Deal);
             let today = world.day();
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.gang_task_day = Some(today);
@@ -1392,12 +1394,31 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let pay = world.config.life.scavenge_coins.min(treasury.max(0));
     if pay <= 0 || !found {
+        // L2 (L29, `[lod] budget`): a dry hour is an hour honestly spent,
+        // not an abort; `scavenge_dry_max` of them in a row cool Earn.
+        if crate::systems::lod::budget_on(world) {
+            let now = world.tick;
+            let max = world.config.life.scavenge_dry_max.max(1);
+            let cool = now + world.config.life.scavenge_cool_hours * crate::time::TICKS_PER_HOUR;
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.scavenge_dry = b.scavenge_dry.saturating_add(1);
+                if b.scavenge_dry >= max {
+                    b.scavenge_dry = 0;
+                    b.cooldowns.insert(crate::components::GoalKind::Earn, cool);
+                }
+            }
+            world.stats.current.budget.scavenge_dry += 1;
+            return StepResult::Done;
+        }
         return StepResult::Failed(FailReason::StockGone);
     }
     crate::systems::ownership::pay(world, None, Some(id), pay, crate::systems::ownership::Flow::Sanitation);
     world.remember(id, MemoryKind::Paid, None, 0.1, 0.0, false);
     // L2 L9: the find is scrap for the Recycler's Parts.
     crate::systems::jobs::add_scrap(world);
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.scavenge_dry = 0;
+    }
     StepResult::Done
 }
 

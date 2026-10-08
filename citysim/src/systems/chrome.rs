@@ -845,6 +845,8 @@ pub fn abduction_daily(world: &mut World) {
         .copied()
         .filter(|&id| world.comp::<Kit>(id).is_some_and(|k| k.visible >= min && k.chrome_value > 0))
         .filter(|&id| crate::systems::demography::is_adult(world, id))
+        // L2 (L21): nobody is abducted out of the cells.
+        .filter(|&id| !world.has::<crate::components::Sentence>(id))
         .collect();
     for id in due {
         let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { continue };

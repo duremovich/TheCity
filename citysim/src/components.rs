@@ -1680,6 +1680,9 @@ pub struct Brain {
     /// without a visit; `last_dole_day` is the last collection).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stat_dole_day: Option<u64>,
+    /// L2 (L29): dry Scavenge hours in a row (saved: a streak survives a load).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub scavenge_dry: u8,
 }
 
 impl Default for Brain {
@@ -1724,6 +1727,7 @@ impl Default for Brain {
             office_day: None,
             quit_from: None,
             stat_dole_day: None,
+            scavenge_dry: 0,
         }
     }
 }

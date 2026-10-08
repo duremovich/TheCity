@@ -637,6 +637,16 @@ pub struct World {
     /// M15 W37: the next `Story.id`.
     #[serde(default)]
     pub next_story_id: u32,
+    /// L2 (L24): the order-rates ledger (phase 3 the actor side).
+    #[serde(default, skip_serializing_if = "crate::ledger::OrderRates::is_empty")]
+    pub order_rates: crate::ledger::OrderRates,
+    /// L2 (L24): the sources touching each district today (phase 4).
+    #[serde(skip)]
+    pub fv_active: Vec<crate::ledger::ActiveSource>,
+    /// L2 (L21): when each held prisoner's needs were last settled (it was
+    /// demoted into the hold, or the last midnight pass).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub held_since: BTreeMap<EntityId, Tick>,
     /// M15 W41: the opening Feeds were seeded (at `World::new`, or by
     /// `news::migrate` on the first load of an older save).
     #[serde(default)]
@@ -976,6 +986,9 @@ impl World {
             guards_of_corpse: BTreeMap::new(),
             stories: VecDeque::new(),
             next_story_id: 0,
+            order_rates: Default::default(),
+            fv_active: Vec::new(),
+            held_since: BTreeMap::new(),
             feeds_seeded: false,
             save_version: crate::save::SAVE_VERSION,
             budget: Default::default(),

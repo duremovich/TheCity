@@ -20,6 +20,26 @@ fn test_save_load_bit_identical() {
     assert_eq!(a, b);
 }
 
+/// L2 (L29): a dry Scavenge streak is saved (the spec's `#[serde(skip)]`
+/// would make a loaded world diverge mid-streak).
+#[test]
+fn test_scavenge_dry_survives_save_load() {
+    let mut cfg = Config::load().v1_profile();
+    cfg.lod.budget = true;
+    cfg.living.enabled = true; // the master switch (`v1_profile` turns L2 off)
+    let mut w = World::new(42, cfg);
+    w.run_ticks(600);
+    let a = w.citizens()[3];
+    w.comp_mut::<citysim::Brain>(a).expect("brain").scavenge_dry = 2;
+    let text = save::to_ron(&w);
+    let mut back = save::from_ron(&text).expect("load");
+    assert_eq!(back.comp::<citysim::Brain>(a).expect("brain").scavenge_dry, 2);
+    assert_eq!(save::to_ron(&back), text);
+    w.run_ticks(600);
+    back.run_ticks(600);
+    assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
+}
+
 #[test]
 fn test_save_round_trips_commands_and_events() {
     let mut w = World::new(5, Config::load().v1_profile());
@@ -599,7 +619,7 @@ fn test_pre_l2_save_loads() {
     assert!(!back.config.living.enabled && !back.venues_due, "L2 stays off");
     // The same save with L2 switched on in its config.
     let on = v1
-        .replace("living:(enabled:false)", "living:(enabled:true)")
+        .replace("living:(enabled:false", "living:(enabled:true")
         .replace("jobs:(enabled:false", "jobs:(enabled:true");
     assert_ne!(on, v1, "the L2 switches are in the saved config");
     let mut back = save::from_ron(&on).expect("loads with L2 on");

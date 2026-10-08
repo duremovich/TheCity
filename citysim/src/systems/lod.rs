@@ -22,7 +22,7 @@ use crate::events::EventKind;
 use crate::exec::{self, ExecState};
 use crate::goap::ActionKind;
 use crate::systems::{bind, economy};
-use crate::time::{DayPhase, TICKS_PER_HOUR};
+use crate::time::{DayPhase, Tick, TICKS_PER_HOUR};
 use crate::world::{StatRow, World};
 
 /// Tiles beyond the view rect that still count as on screen.
@@ -48,6 +48,11 @@ pub fn story_relevant(kind: ActionKind) -> bool {
 
 pub fn run(world: &mut World) {
     if world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        // L2 (L23): yesterday's member-days into the ledger, before this
+        // hour's assignment overwrites `body_day`.
+        if budget_on(world) && world.tick_of_day() == 0 {
+            crate::systems::fviolence::daily_actor(world);
+        }
         assign_hour(world);
         #[cfg(debug_assertions)]
         {
@@ -92,8 +97,166 @@ fn body_role(world: &World, id: EntityId) -> bool {
     world.comp::<Job>(id).is_some_and(|j| matches!(j.role, Role::Guard | Role::Gravedigger))
 }
 
+/// L2 phase 3 (plan L5, L21-L23, L29-L30): the LOD budget and the churn,
+/// `[living] enabled && [lod] budget`.
+pub fn budget_on(world: &World) -> bool {
+    world.config.living.enabled && world.config.lod.budget
+}
+
+/// L2 (L21): sentenced agents are held Statistical.
+pub fn held_on(world: &World) -> bool {
+    budget_on(world) && world.config.lod.held_prisoners
+}
+
+/// L2 (L21): a held prisoner: sentenced and Statistical.
+pub fn is_held(world: &World, id: EntityId) -> bool {
+    world.has::<Sentence>(id) && world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical)
+}
+
+/// L2 (L21, L22): a gang's raid window: a raid order whose muster is
+/// within `raid_promote_hours` (or past), until the raid resolves and
+/// clears `raid_at`.
+pub fn raid_window(world: &World, gang: EntityId) -> bool {
+    let hours = Tick::from(world.config.lod.raid_promote_hours) * TICKS_PER_HOUR;
+    world
+        .comp::<crate::components::Gang>(gang)
+        .is_some_and(|g| g.order.is_raid() && g.raid_at.is_some_and(|t| world.tick + hours >= t))
+}
+
+/// L2 (L21): a sentenced agent who holds a body outside the rank: release
+/// within `release_soon_hours` (the walk out is real), in cuffs, or of a
+/// gang whose BreakOut musters within the raid window (the freed walk).
+pub fn prisoner_body(world: &World, id: EntityId) -> bool {
+    let Some(s) = world.comp::<Sentence>(id) else { return false };
+    let soon = Tick::from(world.config.lod.release_soon_hours) * TICKS_PER_HOUR;
+    if s.until_tick.saturating_sub(world.tick) <= soon {
+        return true;
+    }
+    if world.comp::<Brain>(id).is_some_and(|b| b.cuffed_by.is_some()) {
+        return true;
+    }
+    world.gang_of(id).is_some_and(|g| {
+        world.comp::<crate::components::Gang>(g).is_some_and(|x| x.order == crate::components::Order::BreakOut)
+            && raid_window(world, g)
+    })
+}
+
+/// L2 (L22): the hour's class-2 sets: per gang its first `quota` members
+/// (leader, the next two of `leader_ranking`, story steps, the front line,
+/// then the daily rotation), and the first `private_quota` private guards
+/// by id.
+#[derive(Clone, Debug, Default)]
+pub struct BudgetSets {
+    pub gang: std::collections::BTreeSet<EntityId>,
+    pub private: std::collections::BTreeSet<EntityId>,
+}
+
+/// The tile a gang's front line stands near: under Contest the rival's
+/// held Home door nearest the Hideout; under a raid order the target's
+/// door; under Harvest the target. `None` otherwise.
+fn front_tile(world: &World, gang: EntityId) -> Option<TilePos> {
+    use crate::components::{Gang, Order};
+    let g = world.comp::<Gang>(gang)?;
+    let hideout = world.comp::<Building>(g.hideout).map(|b| b.door)?;
+    match g.order {
+        Order::Contest => {
+            let rival = world.rival_of(gang)?;
+            world
+                .comp::<Gang>(rival)?
+                .territory
+                .iter()
+                .filter_map(|&h| world.comp::<Building>(h).map(|b| (b.door.manhattan(hideout), h.index, b.door)))
+                .min()
+                .map(|(_, _, t)| t)
+        }
+        o if o.is_raid() => {
+            crate::systems::raid::gang_target(world, gang).and_then(|b| world.comp::<Building>(b)).map(|b| b.door)
+        }
+        Order::Harvest => g.harvest_target.and_then(|t| world.comp::<Position>(t)).map(|p| p.tile),
+        _ => None,
+    }
+}
+
+/// L2 (L22): the members of one gang holding class 2 this hour, in rank
+/// order: the leader, the next two of `leader_ranking`, members with a
+/// `story_relevant` step, members within `front_tiles` of the order's
+/// target (nearest first), then the daily rotation
+/// (`splitmix64(seed ^ id ^ day)` ascending); `raid_quota` of them in a
+/// raid window, else `gang_quota`.
+pub fn gang_quota_members(world: &World, gang: EntityId) -> Vec<EntityId> {
+    use crate::components::Gang;
+    let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
+    let quota = if raid_window(world, gang) { world.config.lod.raid_quota } else { world.config.lod.gang_quota };
+    let free: Vec<EntityId> =
+        g.members.iter().copied().filter(|&m| world.has::<Brain>(m) && !world.has::<Sentence>(m)).collect();
+    let mut out: Vec<EntityId> = Vec::with_capacity(quota.min(free.len()));
+    let push = |out: &mut Vec<EntityId>, m: EntityId| {
+        if out.len() < quota && !out.contains(&m) {
+            out.push(m);
+        }
+    };
+    if let Some(l) = g.leader.filter(|l| free.contains(l)) {
+        push(&mut out, l);
+    }
+    for m in crate::systems::gang::leader_ranking(world, gang).into_iter().filter(|&m| Some(m) != g.leader).take(2) {
+        push(&mut out, m);
+    }
+    for &m in &free {
+        if world.comp::<Brain>(m).and_then(|b| b.current_step()).is_some_and(|s| story_relevant(s.action)) {
+            push(&mut out, m);
+        }
+    }
+    if let Some(front) = front_tile(world, gang) {
+        let reach = world.config.lod.front_tiles;
+        let mut near: Vec<(u32, EntityId)> = free
+            .iter()
+            .filter_map(|&m| world.comp::<Position>(m).map(|p| (p.tile.manhattan(front), m)))
+            .filter(|&(d, _)| d <= reach)
+            .collect();
+        near.sort_unstable();
+        for (_, m) in near {
+            push(&mut out, m);
+        }
+    }
+    let seed = world.seed();
+    let day = world.day();
+    let mut rest: Vec<(u64, EntityId)> =
+        free.iter().map(|&m| (crate::rng::splitmix64(seed ^ u64::from(m.index) ^ day.rotate_left(32)), m)).collect();
+    rest.sort_unstable();
+    for (_, m) in rest {
+        push(&mut out, m);
+    }
+    out
+}
+
+/// L2 (L22): the hour's class-2 sets (`assign` computes them once).
+pub fn budget_sets(world: &World) -> BudgetSets {
+    let mut sets = BudgetSets::default();
+    for gang in world.gangs() {
+        sets.gang.extend(gang_quota_members(world, gang));
+    }
+    let quota = world.config.lod.private_quota;
+    sets.private.extend(
+        world.guards().iter().copied().filter(|&g| crate::systems::law::is_private_guard(world, g)).take(quota),
+    );
+    sets
+}
+
+/// L2 (L22): the public watch ranks 3 only on shift (or within the hour
+/// before it, so the commute is a body's), or while making an arrest.
+fn watch_on_duty(world: &World, id: EntityId) -> bool {
+    let tod = world.tick_of_day();
+    let lead = ((u64::from(tod) + TICKS_PER_HOUR) % crate::time::TICKS_PER_DAY) as u16;
+    world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod) || j.on_shift(lead))
+        || world.comp::<Brain>(id).is_some_and(|b| {
+            b.escorting.is_some()
+                || b.current_step().is_some_and(|s| matches!(s.action, ActionKind::Arrest | ActionKind::Escort))
+        })
+}
+
 /// Rank every living adult and hand out the tiers with hysteresis. Jailed
-/// and emigrating agents are Coarse without taking a slot.
+/// and emigrating agents are Coarse without taking a slot (L2 `[lod]
+/// budget`: a sentenced agent is held Statistical unless `prisoner_body`).
 fn assign(world: &mut World) {
     let view = world.view_rect;
     let centre = match view {
@@ -111,13 +274,23 @@ fn assign(world: &mut World) {
 
     let mut ranked: Vec<(i32, u32, u32, EntityId)> = Vec::new();
     let harvest = harvest_targets(world);
+    let sets = budget_on(world).then(|| budget_sets(world));
+    let held = held_on(world);
     // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
         if world.has::<Sentence>(id) || brain.emigrating {
             // L1: a pinned prisoner keeps its pin (the shadow went blind in the cells).
             let pinned = brain.pinned && world.config.life.enabled;
-            set_lod(world, id, if pinned { Lod::Full } else { Lod::Coarse });
+            let lod = if pinned {
+                Lod::Full
+            } else if held && world.has::<Sentence>(id) && !prisoner_body(world, id) {
+                // L2 (L21): held in the cells, no slot.
+                Lod::Statistical
+            } else {
+                Lod::Coarse
+            };
+            set_lod(world, id, lod);
             continue;
         }
         // A wanted agent counts as a story step: a reported thief must stay on
@@ -125,7 +298,7 @@ fn assign(world: &mut World) {
         let story = brain.current_step().is_some_and(|s| story_relevant(s.action))
             || crate::systems::law::wanted(world, id)
             || world.runner_of.contains_key(&id);
-        let class = class_with(world, id, &harvest);
+        let class = class_with(world, id, &harvest, sets.as_ref());
         // M11: a fresh lawless evictee (D36: so the spiral's first link,
         // JoinGang, can be planned) and an agent able to found (D25) get a
         // body; neither can happen in the hourly table.
@@ -193,16 +366,21 @@ fn harvest_targets(world: &World) -> Vec<EntityId> {
 /// An agent's rank class in the hourly LOD assignment: pinned 5, the
 /// watch 3, gang members (and those ranked with them) 2, else 0.
 pub fn rank_class(world: &World, id: EntityId) -> i32 {
-    class_with(world, id, &harvest_targets(world))
+    let sets = budget_on(world).then(|| budget_sets(world));
+    class_with(world, id, &harvest_targets(world), sets.as_ref())
 }
 
-fn class_with(world: &World, id: EntityId, harvest: &[EntityId]) -> i32 {
+/// `sets`: L2 (L22) under `[lod] budget`, a gang member outside its gang's
+/// quota and a private guard outside `private_quota` rank 0, and the
+/// public watch ranks 3 only on duty (`watch_on_duty`).
+fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&BudgetSets>) -> i32 {
     let Some(brain) = world.comp::<Brain>(id) else { return 0 };
     // Gang members are never Statistical: the hourly table has no orders,
     // claims or raids, and two gangs fit inside the Coarse budget.
     // M12 D31 (plan risk 3): a rioter of a live riot ranks with them,
     // from `riot_promote_hours` before the muster.
-    let gang = world.has::<crate::components::GangMember>(id) || crate::systems::riot::promoted(world, id);
+    let member = world.has::<crate::components::GangMember>(id) && sets.is_none_or(|s| s.gang.contains(&id));
+    let gang = member || crate::systems::riot::promoted(world, id);
     // M13 D46: a berserker, an abductee in tow and a gang's Harvest target
     // (while that gang's order is Harvest) too.
     let gang = gang
@@ -218,6 +396,9 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId]) -> i32 {
     // watch's rank the twelve took Full slots and walked their corp's
     // Blocks tile by tile (-800 ticks/s at 2,000).
     let private = guard && crate::systems::law::is_private_guard(world, id);
+    let private_ranked = private && sets.is_none_or(|s| s.private.contains(&id));
+    let watch =
+        guard && !private && (sets.is_none() || !world.config.lod.watch_on_shift_only || watch_on_duty(world, id));
     // Pinned tops the ladder, then the watch (3), then gang members (2):
     // at the Coarse cap the farthest gang member falls first, not a guard.
     // M14 V13: a runner seated or holding a run order (above the watch).
@@ -230,9 +411,9 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId]) -> i32 {
         5
     } else if runner {
         4
-    } else if guard && !private {
+    } else if watch {
         3
-    } else if gang || private {
+    } else if gang || private_ranked {
         2
     } else {
         0
@@ -270,12 +451,25 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
         }
         world.retier(id);
         world.plan_queue.retain(|&(_, who), _| who != id);
-        snap_to_phase_door(world, id, false);
+        // L2 (L21): a held prisoner stays in the cells; its day is decayed
+        // from here (`law::settle_held`).
+        if held_on(world) && world.has::<Sentence>(id) {
+            let now = world.tick;
+            world.held_since.insert(id, now);
+        } else {
+            snap_to_phase_door(world, id, false);
+        }
         // M15 W2: off screen the heard store holds 3 rumours and no sighting.
         crate::systems::gossip::on_demoted(world, id);
         return;
     }
     if from == Lod::Statistical {
+        // L2 (L21): the held hours since the last settlement, before the
+        // body's per-tick decay takes over.
+        if world.held_since.contains_key(&id) {
+            crate::systems::law::settle_held(world, id);
+            world.held_since.remove(&id);
+        }
         let today = world.day();
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.lod = lod;
@@ -284,7 +478,10 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
             b.body_day = Some(today);
         }
         world.retier(id);
-        snap_to_phase_door(world, id, true);
+        // L2 (L21): a prisoner promoted out of the hold is still inside.
+        if !(held_on(world) && world.has::<Sentence>(id)) {
+            snap_to_phase_door(world, id, true);
+        }
         // A body's memories are never half-filled: its open victim holes bind
         // at the end of this tick's `lod::run`.
         if let Some(hs) = world.holes_by_agent.get(&id) {
@@ -496,7 +693,11 @@ fn stranger_in_zone(world: &mut World, id: EntityId) -> Option<EntityId> {
         if zone_of(world, o) != Some(zone) {
             continue;
         }
-        let ok = o != id && crate::systems::demography::is_adult(world, o) && world.edge(id, o).is_none();
+        // L2 (L21): a held prisoner is in the cells, nobody's stranger.
+        let ok = o != id
+            && crate::systems::demography::is_adult(world, o)
+            && world.edge(id, o).is_none()
+            && !world.has::<Sentence>(o);
         return ok.then_some(o);
     }
     None
@@ -850,6 +1051,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
             }
         }
     }
+    // L2 (L23): a jobless Statistical member's GangWork day.
+    if job.is_none() && budget_on(world) && phase == DayPhase::Work {
+        crate::systems::fviolence::stat_gang_day(world, id);
+    }
     let Some(job) = job else { return };
     let key = job.shift_key_at(tick);
     if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::is_workday(key) {
@@ -953,6 +1158,8 @@ fn stat_chat(world: &mut World, id: EntityId, row: &StatRow) {
             .iter()
             .copied()
             .filter(|&o| o != id && world.comp::<Brain>(o).is_some_and(|b| b.lod == Lod::Statistical))
+            // L2 (L21): a held housemate is in the cells.
+            .filter(|&o| !world.has::<Sentence>(o))
             .collect();
         if !mates.is_empty() {
             let k = world.rng.agent(id).random_range(0..mates.len());

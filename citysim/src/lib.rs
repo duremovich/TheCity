@@ -14,6 +14,7 @@ pub mod entity;
 pub mod events;
 pub mod exec;
 pub mod goap;
+pub mod ledger;
 pub mod levers;
 pub mod living;
 pub mod map;

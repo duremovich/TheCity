@@ -148,10 +148,18 @@ pub fn booked_hotel(world: &World, a: EntityId) -> Option<EntityId> {
 
 /// Beds at `h` not booked by a live booking.
 pub fn free_beds(world: &World, h: EntityId) -> usize {
+    free_beds_for(world, h, EntityId::NONE)
+}
+
+/// `free_beds` as `who` sees them: L2 (L30, `[lod] budget`) also minus
+/// the live `Bed` reservations there by others not yet booked (a guest on
+/// the way holds the bed it planned for).
+pub fn free_beds_for(world: &World, h: EntityId, who: EntityId) -> usize {
     let beds = world.comp::<Building>(h).map_or(0, |b| usize::from(b.capacity));
     let now = world.tick;
     let taken = world.hotel_beds.values().filter(|&&(x, until)| x == h && until > now).count();
-    beds.saturating_sub(taken)
+    let reserved = if crate::systems::lod::budget_on(world) { world.bed_reservations_unbooked(h, who) } else { 0 };
+    beds.saturating_sub(taken + reserved)
 }
 
 /// Drop bookings whose night is over (03:00, and before any count).
@@ -183,7 +191,7 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
         .buildings_of_kind(BuildingKind::Hotel)
         .iter()
         .copied()
-        .filter(|&h| is_hotel(world, h) && hotel_price(world, h) <= coins && free_beds(world, h) > 0)
+        .filter(|&h| is_hotel(world, h) && hotel_price(world, h) <= coins && free_beds_for(world, h, agent) > 0)
         .filter_map(|h| door_of(world, h).map(|d| (d.manhattan(from), h)))
         .filter(|&(d, _)| d <= reach)
         .min()
@@ -207,7 +215,7 @@ fn book(world: &mut World, a: EntityId, h: EntityId) -> bool {
     }
     let price = hotel_price(world, h);
     let coins = world.comp::<Wallet>(a).map_or(0, |w| w.coins);
-    if !is_hotel(world, h) || free_beds(world, h) == 0 || coins < price {
+    if !is_hotel(world, h) || free_beds_for(world, h, a) == 0 || coins < price {
         return false;
     }
     let owner = world.owner_of(h);

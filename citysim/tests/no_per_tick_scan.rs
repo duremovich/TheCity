@@ -50,6 +50,8 @@ const FILES: &[&str] = &[
     "systems/jobs.rs",
     "systems/budget.rs",
     "systems/outside.rs",
+    // L2 phase 3.
+    "systems/fviolence.rs",
 ];
 
 #[test]
