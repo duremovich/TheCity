@@ -16,6 +16,28 @@ Companion to `VISION.md`, `M10_SCALE.md` and `M11_OWNERSHIP.md`. Drafted 2026-10
 | **M17 The outside world** | Parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent. |
 | **M18 The player** | The player as one more pinned agent, founding through the NPC entry points, the dialogue layer as a renderer over social state, story LOD following the player's circle. |
 
+### Between M15 and M16, and the split (2026-10-08, addendum 16)
+
+| Milestone | Scope |
+| --- | --- |
+| **Life pass L2 "the living city"** | `docs/LIFE_L2.md`: the jobs economy (seven leisure kinds and a Parts Fab, wages over the dole, the Treasury budget band, the export hook for M17), the fun need and the street (Unwind, HangOut toward known contacts, venues, bouts, gang fronts, Collect/Call/Preach), the LOD budget (held prisoners, per-class quotas, the Statistical GangWork day, the churn fixes), off-screen faction violence (the order-rates ledger, faction-bound holes), a 365-day sanity run, the re-shadow. Phases 1-4 merged 2026-10-08. |
+| **M16a Contracts** | the contract entity, the Fixer, Hit/Beat/Guard/Locate, missions at three LODs, the accessory rule, the board (`docs/M16_CONTRACTS.md` "M16a and M16b"). |
+| **M16b Leverage** | coercion, blackmail, hostages and private prisons, the wounded and Rescue and Trauma Team, boards and votes, tags and scanners, fraud, protection, the remaining contract kinds. |
+
+### After M18 (the addenda that have no milestone yet; the order is a sketch)
+
+| Milestone | Scope | From |
+| --- | --- | --- |
+| The late calibration milestone | a knob census (51 config sections), the printed findings judged together, prices and bands reset on the wage economy, the god and shadow gaps triaged | addendum 16, `docs/BIG_PICTURE_2026-10-07.md` |
+| Ambient LOD and the player view | the density ledger per district and hour, promotion with real errands, travel mode and company as a unit, the local disturbance field, the camera | addendum 13 |
+| Goods, Power and Water | typed goods with production chains, generators by tier, a per-building powered state read by security and ICE, water as a Farm input and a need; corp scrip valued by the outside ledger | addenda 2, 9 |
+| Interiors and verticality | room templates per kind, capacity from room area, upgrades as the physical Security and Power profiles, stairs and elevators as layer portals, a `z` on tile positions | addendum 10 |
+| Destruction, wreckage and the news | a `Damage` tile state generalising litter, rails, projectile misses, repair as a posted job; news outlets already stand (M15) | addendum 6 |
+| The dialogue layer | the generated dialogue tree as a renderer over the social state (M18 ships the template writer) | VISION "Dialogue, leverage and the social stats" |
+| Daemons and the Blackwall | bodiless brains on Virt nodes gated by servers, rogue by cheapness, the Blackwall owned by the outside world | addendum 11 (candidate) |
+| World state and cataclysms | the `WorldState` ledger, cataclysms as a trigger-and-effect table composed from god commands, a chronicle | addendum 12 |
+| First person | the eventual view; the life-path playtests run against it | VISION, addendum 14 |
+
 ### Dependencies
 
 **Reputation precedes contracts** because every contract is priced and accepted on it: a hitman takes the job of a buyer whose `honour` says they pay, a blackmail works only while the secret is not yet public, a threat is credible in proportion to the threatener's `dread`, and the law names the buyer of a hit only when word of the contract gets around. Without gossip there is nothing for a contract to be known by. Grudges also give contracts their first and commonest buyer: the avenger too weak to hunt alone. **The outside world needs corps, districts and Virt** (M11, M12, M14): a parent has nothing to fund without a branch, nothing to retake without territory, and nothing that can wound it without the one weapon that reaches a ledger. It sits after M16 rather than before it because a corp's campaign against a rival parent is a string of contracts (a data heist, a strike-breaking crew, sabotage of a Vat Farm), so it reuses the contract board instead of growing bespoke orders; it is otherwise independent of M15 and could run in parallel with it. **The player is last** because the player adds no mechanics of their own: they found through `Register` and the gang bootstrap (M11), they speak through the social move (M15), they take and post jobs on the board (M16), and they can break a megacorp only through M14 and M17. Building the player first would mean building those systems twice, once for the player and once for the city.
