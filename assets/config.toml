@@ -286,6 +286,12 @@ corp_raid_break = 0.5
 # Phase 4 (plan addition): Raid and Retaliate need 3 fit members. Early gangs of 4-10 and fresh
 # splinters raided with 1-2 at the door (seed 43: 9 of 17 expeditions); a raid is a crew's job.
 raid_min_members = 3
+# L2 (plan L23): the Statistical GangWork day's priors per member-day (placeholders), shrunk toward
+# the ledger's on-screen acts with stat_prior_days member-days of weight.
+stat_extort_prior = 0.02
+stat_claim_prior = 0.02
+stat_deal_prior = 0.01
+stat_prior_days = 30.0
 
 # Flat terms on each order's score (product of considerations + flat). Retaliate's 0.6 lets a
 # grudge beat Expand for any leader with greed < 1; LieLow's 0.15 keeps it always available;
@@ -433,6 +439,22 @@ stat_violence_mult = 1.0
 # Assaulted/Killed candidate weight x (1 + chrome_bind_w x Kit.fighting).
 flash_w = 0.5
 chrome_bind_w = 1.0
+# L2 phase 3 (docs/LIFE_L2.md § 4, plan L21-L23, L29-L30): the LOD budget and the churn. Sentenced,
+# unpinned agents are held Statistical in the Jail (a daily cell pass); each forced class has a quota
+# inside max_coarse; the watch ranks only on shift; scavenge's dry hour is Done; beds are reserved.
+budget = true
+held_prisoners = true
+gang_quota = 25                     # class-2 bodies per gang: leader, two lieutenants, story, front line, rotation
+private_quota = 12                  # private guards keeping class 2, by id
+raid_quota = 40                     # a gang's class-2 bodies from raid_promote_hours before its muster to the raid's end
+raid_promote_hours = 4
+front_tiles = 30                    # members this close to the order's target rank in the front line
+release_soon_hours = 2              # a prisoner this close to release holds a body (the walk out is real)
+# The spec's watch rule (off-shift guards and gravediggers rank as civilians) is off: measured on
+# seeds 42-44 (120 days, against 7f392db) it raised Murders 137 -> 216 (+58 %) and broke the M15
+# gate's Murders bound (192.5); with it off (M10 D20 kept) Murders 160 and violent deaths 485 vs
+# 446 base, while the Coarse budget still holds (the watch is ~50 of the 200 ranked bodies).
+watch_on_shift_only = false
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
 # (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),
@@ -1428,6 +1450,8 @@ scavenge_coins = 1                  # a coin for an hour of scrap (only while br
 # 0.5, 921 at 0.15, 1,388 at 0); at 0.15 it is a last resort, not a living (seeds 42-44 with
 # price_base 4: thefts 9.2-14.6k at 0.15, 10.7-13.4k at 0.3, riots 4-6 vs 2-5).
 scavenge_p = 0.15
+scavenge_dry_max = 3                # L2 (L29, [lod] budget): three dry hours in a row ...
+scavenge_cool_hours = 4             # ... cool Earn for four
 escort_van_ticks = 60
 enabled = true
 
@@ -1444,6 +1468,14 @@ enabled = true
 # to override). `[buildings] market.staff` / `bar.staff` stay 4 / 3 (L3: the identity).
 [living]
 enabled = true
+# A corp's order dwell (L2, the M14 ruling of 2026-10-08): corps flipped orders on shock rescores at a
+# 0.02 margin (Nutrix Research -> Secure within a day, 0.46 vs 0.44, on every seed of 42-47), so
+# Research never lasted [tech] research_build_days (3) and no Lab was built under it. For this many
+# days after taking an order a shock rescore needs the challenger to win by corp_order_margin, unless
+# the pending shocks reach [life] order_severe; after it shocks rescore as in M11/M14 (ties only). The
+# daily rescore keeps [corps] hysteresis (0.10). Placeholders.
+corp_order_dwell_days = 3
+corp_order_margin = 0.05
 
 [jobs]
 enabled = true

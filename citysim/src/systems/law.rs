@@ -965,6 +965,10 @@ fn release_at_jail_door(world: &mut World, who: EntityId, _why: &str) {
 
 /// Release a prisoner: `full` means the sentence was served to the end.
 pub fn release(world: &mut World, who: EntityId, full: bool) {
+    // L2 (L21): a held prisoner gets its body back inside, then walks out.
+    if crate::systems::lod::is_held(world, who) {
+        crate::systems::lod::set_lod(world, who, crate::components::Lod::Coarse);
+    }
     let Some(_) = world.remove::<Sentence>(who) else { return };
     world.leave_building(who);
     world.remember(who, MemoryKind::WasArrested, None, 0.7, -0.5, false);
@@ -986,6 +990,10 @@ pub fn release(world: &mut World, who: EntityId, full: bool) {
 /// door hunted (`safety` 0.3) and glad of it (`Escaped`), and the warrant
 /// **reopens** for the sentence's crime, so a re-arrest sentences them afresh.
 pub fn escape(world: &mut World, who: EntityId) {
+    // L2 (L21): a held prisoner broken out is promoted to Coarse first.
+    if crate::systems::lod::is_held(world, who) {
+        crate::systems::lod::set_lod(world, who, crate::components::Lod::Coarse);
+    }
     let Some(s) = world.remove::<Sentence>(who) else { return };
     world.leave_building(who);
     world.remember(who, MemoryKind::Escaped, None, 0.7, 0.4, false);
@@ -1049,8 +1057,17 @@ pub fn run(world: &mut World) {
     tally_watch(world);
     credit_guard_shifts(world);
     sightings(world);
+    // L2 (L21): the held prisoners' needs decay hour by hour, as a body's
+    // do through the day (a day's decay at once left them fed and rested
+    // all day, and their mood lifted their districts' unrest off the riot
+    // line: riots on 42-47 read 0.17 a seed against 2.67 with the budget off).
+    if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
+        held_hourly(world);
+    }
     if world.tick_of_day() == 0 {
         expire_warrants(world);
+        // L2 (L21): the held prisoners' day (meetings, the pitch), before their meal.
+        held_daily(world);
         jail_upkeep(world);
         reconcile_guards(world);
         // M12 D23: the city's sweepers, toward `levers.sanitation_count`.
@@ -1315,6 +1332,9 @@ fn jail_upkeep(world: &mut World) {
                 false
             }
         });
+        if fed && crate::systems::lod::is_held(world, who) {
+            world.stats.current.budget.held_fed += 1;
+        }
         if fed {
             if let Some(m) = market {
                 let owner = world.owner_of(m);
@@ -1335,6 +1355,134 @@ fn jail_upkeep(world: &mut World) {
         if let Some(n) = world.comp_mut::<Needs>(who) {
             n.energy = 1.0;
         }
+    }
+}
+
+/// L2 (L21): the held prisoners' day, at midnight before `jail_upkeep`
+/// feeds them: the decay not yet settled and a starvation check. By intent
+/// both also run every hour (`held_hourly`, as the Statistical tier's hourly
+/// loop: `needs::starvation` kills on `starving_since` plus the grace and
+/// remembers once a day), so this pass settles at most the midnight tick.
+/// Then, for each held prisoner who arrived in the last day,
+/// `jail_meet_max` first meetings among the held (and as many gang members
+/// with `jail_pitch`), drawn on `WordNs::Held` keyed `(day, id.index)`
+/// (`stat_meet`'s first meeting: a bare edge, `MetInJail` both ways); and
+/// the cells' pitch: each held member drifts with every other held
+/// prisoner by a day of the Jail's co-location drift.
+pub fn held_daily(world: &mut World) {
+    use crate::systems::{lod, social};
+    if !lod::held_on(world) {
+        return;
+    }
+    let held: Vec<EntityId> = world.sentenced().iter().copied().filter(|&p| lod::is_held(world, p)).collect();
+    // Entries for prisoners no longer held (dead, released) go.
+    world.held_since.retain(|p, _| held.binary_search(p).is_ok());
+    if held.is_empty() {
+        return;
+    }
+    for &id in &held {
+        settle_held(world, id);
+        crate::needs::starvation(world, id);
+    }
+    let held: Vec<EntityId> = held.into_iter().filter(|&p| living(world, p)).collect();
+    let now = world.tick;
+    let today = world.day();
+    let cap = world.config.life.jail_meet_max;
+    let pitch = world.config.life.jail_pitch;
+    let member = |w: &World, x: EntityId| pitch && w.has::<crate::components::GangMember>(x);
+    let arrivals: Vec<EntityId> = held
+        .iter()
+        .copied()
+        .filter(|&p| world.comp::<Position>(p).is_some_and(|pos| pos.entered + TICKS_PER_DAY >= now))
+        // One arrival, one round of meetings: a prisoner who met the cells
+        // as a body (`social::colocation`'s arrival) meets nobody again.
+        .filter(|&p| {
+            let since = world.comp::<Position>(p).map_or(now, |pos| pos.entered);
+            !world
+                .comp::<crate::components::Memory>(p)
+                .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::MetInJail && e.tick >= since))
+        })
+        .collect();
+    for a in arrivals {
+        let mut rng = world.rng.word(crate::word::WordNs::Held, today, u64::from(a.index));
+        let mut strangers: Vec<(bool, u64, EntityId)> = held
+            .iter()
+            .copied()
+            .filter(|&b| b != a && world.edge(a, b).is_none())
+            .map(|b| (member(world, b), rng.random::<u64>(), b))
+            .collect();
+        strangers.sort_unstable();
+        let (mut plain, mut gang) = (0usize, 0usize);
+        for (m, _, b) in strangers {
+            let n = if m { &mut gang } else { &mut plain };
+            if *n >= cap {
+                continue;
+            }
+            *n += 1;
+            let sa = world.comp::<Personality>(a).map_or(0.5, |p| p.sociability);
+            let sb = world.comp::<Personality>(b).map_or(0.5, |p| p.sociability);
+            let (u1, u2): (f32, f32) = (rng.random(), rng.random());
+            social::first_meeting(world, a, b, social::first_affinity(sa, sb, u1, u2));
+            world.remember(a, MemoryKind::MetInJail, Some(b), 0.5, 0.0, false);
+            world.remember(b, MemoryKind::MetInJail, Some(a), 0.5, 0.0, false);
+        }
+    }
+    if pitch {
+        let hours = 24.0;
+        let members: Vec<EntityId> = held.iter().copied().filter(|&m| member(world, m)).collect();
+        for &m in &members {
+            for &p in &held {
+                // Each pair once: a member with a non-member, or the lower id of two members.
+                if p == m || (member(world, p) && p < m) {
+                    continue;
+                }
+                let step = world.config.social.affinity_per_hour * social::similarity_mult(world, m, p);
+                social::adjust(world, m, p, hours * step, hours * 0.02);
+            }
+        }
+    }
+}
+
+/// L2 (L21): hourly, every held prisoner's jailed decay since its last
+/// settlement and the starvation check, hourly by intent (the Statistical
+/// tier's hourly step; ~150 prisoners an hour).
+fn held_hourly(world: &mut World) {
+    if !crate::systems::lod::held_on(world) {
+        return;
+    }
+    let held: Vec<EntityId> =
+        world.sentenced().iter().copied().filter(|&p| crate::systems::lod::is_held(world, p)).collect();
+    for id in held {
+        settle_held(world, id);
+        crate::needs::starvation(world, id);
+    }
+}
+
+/// L2 (L21): a held prisoner's jailed decay for the ticks since it was last
+/// settled (`World::held_since`: its demotion into the hold, or the last
+/// midnight pass), at most a day; the body's per-tick decay covered the
+/// rest of the day. Restarts the clock.
+pub fn settle_held(world: &mut World, id: EntityId) {
+    let now = world.tick;
+    let since = world.held_since.get(&id).copied().unwrap_or(now.saturating_sub(TICKS_PER_DAY));
+    let ticks = now.saturating_sub(since).min(TICKS_PER_DAY) as u32;
+    world.held_since.insert(id, now);
+    if ticks == 0 {
+        return;
+    }
+    let cfg = world.config.needs.clone();
+    let season_energy_mult = world.config.economy.energy_decay_mult[world.season().index()];
+    let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
+    let under_18 = !crate::systems::demography::is_adult(world, id);
+    if let Some(n) = world.comp_mut::<Needs>(id) {
+        let ctx = crate::needs::DecayCtx {
+            jailed: true,
+            season_energy_mult,
+            sociability,
+            under_18,
+            ..crate::needs::DecayCtx::plain()
+        };
+        crate::needs::decay(n, &cfg, &ctx, ticks);
     }
 }
 

@@ -3073,6 +3073,8 @@ pub fn stat_pass(world: &mut World) {
         })
         .filter(|h| (u64::from(h.index) + day).is_multiple_of(7))
         .filter(|&h| world.comp::<Brain>(h).is_some_and(|b| b.lod == crate::components::Lod::Statistical))
+        // L2 (L21): no run from the cells.
+        .filter(|&h| !world.has::<crate::components::Sentence>(h))
         .collect();
     who.sort_unstable();
     who.dedup();

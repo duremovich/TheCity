@@ -134,9 +134,41 @@ pub fn snapshot(world: &mut World) {
         })
         .count()
         .max(1) as f32;
-    let (holes_open, tiers) =
+    let (holes_open, mut tiers) =
         (world.holes.len() as u32, [Lod::Full, Lod::Coarse, Lod::Statistical].map(|l| world.tier(l).len() as u32));
+    // L2 phase 3 (L21, L34): the sentenced by tier; with the budget on they
+    // count in `tier_held`, not in the three tiers.
+    let mut held_by_tier = [0u32; 3];
+    for &p in world.sentenced() {
+        if let Some(b) = world.comp::<Brain>(p) {
+            held_by_tier[b.lod as usize] += 1;
+        }
+    }
+    if crate::systems::lod::budget_on(world) {
+        for (t, h) in tiers.iter_mut().zip(held_by_tier) {
+            *t = t.saturating_sub(h);
+        }
+    }
+    let (mut gang_bodies, mut gang_stat) = (0u32, 0u32);
+    for g in world.gangs() {
+        for &m in world.comp::<crate::components::Gang>(g).map(|x| x.members.as_slice()).unwrap_or_default() {
+            match world.comp::<Brain>(m) {
+                Some(_) if world.has::<Sentence>(m) => {}
+                Some(b) if b.lod == Lod::Statistical => gang_stat += 1,
+                Some(_) => gang_bodies += 1,
+                None => {}
+            }
+        }
+    }
+    let budget = crate::systems::lod::budget_on(world);
     let row = &mut world.stats.current;
+    // With the budget off the columns stay zero (the M15 row).
+    if budget {
+        row.budget.tier_held = held_by_tier.iter().sum();
+        row.budget.tier_held_body = held_by_tier[Lod::Full as usize] + held_by_tier[Lod::Coarse as usize];
+        row.budget.gang_bodies = gang_bodies;
+        row.budget.gang_stat = gang_stat;
+    }
     row.population = population;
     row.employed = employed;
     row.homeless = homeless;

@@ -18,7 +18,8 @@ flow_data,flow_hack,flow_ice_upkeep,flow_research,flow_terminal,\
 rumours_heard,second_hand_share,known_by_killers_median,distorted,grudges,grudges_inherited,hunts,hunts_active,avenged,revenge_kills,chain_max,vendettas_open,stories,planted,buried,poached,talent_lost,skill_rare_share,extort_success,rep_flips,rumour_hops_max,pool_reach,contradicted,silenced,hunts_failed,hunts_abandoned,guard_body,expelled,contracts_lost_honour,extort_tries,\
 g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
 c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
-flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,ticks_per_sec";
+flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,\
+tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
@@ -290,6 +291,9 @@ pub struct DayRow {
     /// but for `parts_imported`).
     #[serde(default)]
     pub living: LivingCols,
+    /// L2 phase 3 (L34): the LOD budget's and the churn's columns.
+    #[serde(default, skip_serializing_if = "BudgetCols::is_zero")]
+    pub budget: BudgetCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -566,6 +570,64 @@ impl WordCols {
     }
 }
 
+/// L2 phase 3 (L34, spec § 4): the LOD budget's and the churn's columns.
+/// `tier_held` is every sentenced agent and `tier_held_body` those of them
+/// with a body; with `[lod] budget` on, `tier_full`, `tier_coarse` and
+/// `tier_stat` exclude the sentenced (off: as M15). `gang_bodies` and
+/// `gang_stat` are free members by tier at the day's end; `stat_*` the
+/// Statistical GangWork days that acted; `aborts` the plan failures
+/// (`step_agent`'s `Failed`, `plan_for`'s unplannable), by the failing
+/// step: Scavenge, Sleep, CheckIn, a full non-bed door (`aborts_seat`);
+/// `rough_sleeps` the failed bed steps turned into a street Sleep (L30);
+/// `scavenge_dry` the dry Scavenge hours made `Done` (L29).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BudgetCols {
+    pub tier_held: u32,
+    pub tier_held_body: u32,
+    pub held_fed: u32,
+    pub gang_bodies: u32,
+    pub gang_stat: u32,
+    pub stat_extorts: u32,
+    pub stat_claims: u32,
+    pub stat_deals: u32,
+    pub aborts: u32,
+    pub aborts_scavenge: u32,
+    pub aborts_sleep: u32,
+    pub aborts_checkin: u32,
+    pub aborts_seat: u32,
+    pub rough_sleeps: u32,
+    pub scavenge_dry: u32,
+}
+
+impl BudgetCols {
+    pub fn is_zero(&self) -> bool {
+        *self == BudgetCols::default()
+    }
+
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            self.tier_held,
+            self.tier_held_body,
+            self.held_fed,
+            self.gang_bodies,
+            self.gang_stat,
+            self.stat_extorts,
+            self.stat_claims,
+            self.stat_deals,
+            self.aborts,
+            self.aborts_scavenge,
+            self.aborts_sleep,
+            self.aborts_checkin,
+            self.aborts_seat,
+            self.rough_sleeps,
+            self.scavenge_dry,
+        )
+    }
+}
+
 /// M14 V43: the plane's CSV columns, in header order. `nodes`, `labs`,
 /// `decks`, `cameras`, `ice_mean_corp`, `data_held` and the per-corp tiers
 /// and Data are day-end snapshots; the rest are daily counters (zero until
@@ -786,6 +848,7 @@ impl DayRow {
             virt: VirtCols::default(),
             word: WordCols::default(),
             living: LivingCols::default(),
+            budget: BudgetCols::default(),
             ticks_per_sec: 0.0,
         }
     }
@@ -805,7 +868,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -922,6 +985,7 @@ impl DayRow {
             self.virt.csv(),
             self.word.csv(),
             self.living.csv(),
+            self.budget.csv(),
             self.ticks_per_sec,
         )
     }

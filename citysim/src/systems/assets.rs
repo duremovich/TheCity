@@ -2262,6 +2262,8 @@ fn stat_shop(world: &mut World) {
         .iter()
         .copied()
         .filter(|id| (u64::from(id.index) + day).is_multiple_of(7))
+        // L2 (L21): a held prisoner does not shop from the cells.
+        .filter(|&id| !world.has::<crate::components::Sentence>(id))
         .collect();
     for id in due {
         let Some(o) = shop_choice(world, id, false) else { continue };

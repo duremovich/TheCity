@@ -332,6 +332,9 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             && !crate::goap::actions::PLANNABLE.iter().any(|a| a.feasible(&ctx) && a.produces(key, value, &ctx))
     });
     if hopeless {
+        if crate::systems::lod::budget_on(world) {
+            world.stats.current.budget.aborts += 1;
+        }
         world.push_event(
             crate::events::EventKind::PlanAborted,
             &[id],
@@ -351,6 +354,9 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             found.expansions
         }
         Err((err, used)) => {
+            if crate::systems::lod::budget_on(world) {
+                world.stats.current.budget.aborts += 1;
+            }
             world.push_event(crate::events::EventKind::PlanAborted, &[id], format!("{goal:?} unplannable: {err:?}"));
             world.cool_goal(id, goal);
             used
@@ -442,4 +448,31 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
             world.reserve(id, kind, expires);
         }
     }
+    // L2 (L30): a second bed is held from plan to arrival: the Hideout a
+    // Sleep plan walks to, or the Hotel a `CheckIn` (or a walk to one) books.
+    if crate::systems::lod::budget_on(world) {
+        if let Some(home) = bed_of(world, id, plan) {
+            let until = world.tick + world.config.brain.plan_timeout_ticks;
+            world.reserve(id, ReservationKind::Bed { home }, until);
+        }
+    }
+}
+
+/// L2 (L30): the second bed a plan sleeps in: `GoTo(Hideout)` before a
+/// `Sleep` (the Hideout), or a `CheckIn` or `GoTo(Hotel)` (the Hotel it
+/// resolves to). `None` for a plan without one (Home and the street need
+/// no reservation).
+fn bed_of(world: &World, id: EntityId, plan: &Plan) -> Option<EntityId> {
+    use crate::goap::LocationKey;
+    let sleeps = plan.steps.iter().any(|s| s.action == ActionKind::Sleep);
+    let has = |k: ActionKind| plan.steps.iter().any(|s| s.action == k);
+    if sleeps && has(ActionKind::GoTo(LocationKey::Hideout)) {
+        return world.resolve_building(id, LocationKey::Hideout, None);
+    }
+    if has(ActionKind::CheckIn) || (sleeps && has(ActionKind::GoTo(LocationKey::Hotel))) {
+        let target =
+            plan.steps.iter().find(|s| s.action == ActionKind::GoTo(LocationKey::Hotel)).and_then(|s| s.target);
+        return world.resolve_building(id, LocationKey::Hotel, target);
+    }
+    None
 }

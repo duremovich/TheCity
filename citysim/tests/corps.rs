@@ -1064,3 +1064,45 @@ fn test_zombie_corp_at_zero_goes_bankrupt() {
     w.run_ticks(TICKS_PER_DAY * (w.config.corps.bankrupt_days + 2));
     assert!(!w.is_alive(home), "a corp with no income and nothing left dies");
 }
+
+/// L2 (the M14 ruling, 2026-10-08): with the living city on, a corp holds
+/// its order for `[living] corp_order_dwell_days` against a shock rescore
+/// by a challenger inside `corp_order_margin`, yields to one past it, and
+/// rescores on ties only again after the dwell or on severe shocks.
+#[test]
+fn test_corp_order_dwell_holds_against_a_small_margin() {
+    let mut w = world();
+    let (food, _, _) = three(&w);
+    w.config.living.enabled = true;
+    w.config.living.corp_order_dwell_days = 3;
+    w.config.living.corp_order_margin = 0.05;
+    let now = w.tick;
+    {
+        let c = w.comp_mut::<Corp>(food).expect("c");
+        c.order = CorpOrder::Secure;
+        c.order_niche = Some(Niche::Food);
+        c.order_since = now;
+        c.shocks.clear();
+    }
+    let row = |order, score| citysim::CorpOrderScore { order, niche: Niche::Food, score, considerations: Vec::new() };
+    let standing = (CorpOrder::Secure, Some(Niche::Food));
+    let close = vec![row(CorpOrder::Research, 0.46), row(CorpOrder::Secure, 0.44)];
+    let far = vec![row(CorpOrder::Research, 0.50), row(CorpOrder::Secure, 0.44)];
+    let m = corp_brain::shock_margin(&w, food);
+    assert!((m - 0.05).abs() < 1e-6, "inside the dwell: the margin ({m})");
+    assert_eq!(corp_brain::choose(&close, standing, m), None, "holds against a 0.02 challenger");
+    assert_eq!(corp_brain::choose(&far, standing, m), Some((CorpOrder::Research, Niche::Food)), "yields to 0.06");
+    // Severe shocks pending (>= `[life] order_severe`): ties only, as M11/M14.
+    w.comp_mut::<Corp>(food).expect("c").shocks = vec![CorpShock::Rioted, CorpShock::Raided];
+    assert_eq!(corp_brain::shock_margin(&w, food), corp_brain::SHOCK_HYSTERESIS);
+    w.comp_mut::<Corp>(food).expect("c").shocks.clear();
+    // After the dwell: ties only again.
+    w.tick = now + 3 * TICKS_PER_DAY;
+    let m = corp_brain::shock_margin(&w, food);
+    assert_eq!(m, corp_brain::SHOCK_HYSTERESIS);
+    assert_eq!(corp_brain::choose(&close, standing, m), Some((CorpOrder::Research, Niche::Food)));
+    // The living city off: M11/M14 unchanged.
+    w.tick = now;
+    w.config.living.enabled = false;
+    assert_eq!(corp_brain::shock_margin(&w, food), corp_brain::SHOCK_HYSTERESIS);
+}

@@ -327,15 +327,172 @@ fn step_agent(world: &mut World, id: EntityId) {
             actions::on_arrive(world, id, &step);
         }
         StepResult::Failed(reason) => {
+            // L2 (L30): a bed lost at the step sleeps rough where it stands.
+            if rough_fallback(world, id, &step, reason) {
+                return;
+            }
+            let budget = crate::systems::lod::budget_on(world);
+            if budget {
+                count_abort(world, &step, reason);
+            }
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
+            // L2 (L30, instrumentation): a bed step's abort names the bed
+            // kind and the failing check.
+            let detail = if budget { abort_detail(world, id, &step) } else { String::new() };
             world.push_event(
                 EventKind::PlanAborted,
                 &[id],
-                format!("{goal:?} failed at {:?}: {reason:?}", step.action),
+                format!("{goal:?} failed at {:?}: {reason:?}{detail}", step.action),
             );
             world.fail_plan(id);
         }
     }
+}
+
+/// The context a step's re-check reads (`PlanCtx::build_light`). L2 (L30,
+/// `[lod] budget`): the light context leaves out the second beds the plan
+/// was made for (`life::hideout_bed`, `life::away_hotel`), so every Hideout
+/// Sleep and every housed CheckIn failed its re-check (phase 3's
+/// instrumentation: 2,489 of 2,533 bed aborts in 30 days on seed 42); a
+/// `Sleep` or `CheckIn` step re-reads them.
+fn step_ctx(world: &World, id: EntityId, kind: ActionKind) -> crate::goap::PlanCtx {
+    let mut ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
+    if crate::systems::lod::budget_on(world) && matches!(kind, ActionKind::Sleep | ActionKind::CheckIn) {
+        ctx.hideout_bed = crate::systems::life::hideout_bed(world, id).is_some();
+        if !ctx.homeless {
+            let away = crate::systems::life::away_hotel(world, id).is_some();
+            ctx.away_hotel = away;
+            ctx.hotel_available |= away;
+        }
+    }
+    ctx
+}
+
+/// A bed's location key (Home, Hideout, Hotel, Squat).
+fn bed_key(key: LocationKey) -> bool {
+    matches!(key, LocationKey::Home | LocationKey::Hideout | LocationKey::Hotel | LocationKey::Squat)
+}
+
+/// L2 (L34): the day's plan failures by the failing step.
+fn count_abort(world: &mut World, step: &crate::components::ActionInstance, reason: FailReason) {
+    let c = &mut world.stats.current.budget;
+    c.aborts += 1;
+    match step.action {
+        ActionKind::Scavenge => c.aborts_scavenge += 1,
+        ActionKind::Sleep => c.aborts_sleep += 1,
+        ActionKind::CheckIn => c.aborts_checkin += 1,
+        ActionKind::GoTo(k) if reason == FailReason::BuildingFull && !bed_key(k) => c.aborts_seat += 1,
+        _ => {}
+    }
+}
+
+/// L2 (L30): with `[lod] budget`, a Sleep plan whose `Sleep` step fails its
+/// re-check, or whose walk to a bed finds it full, lies down where the
+/// agent stands (`ExecState::Use { Sleep }` started now, the plan moved to
+/// its `Sleep` step) when `life::rough_ok` or the agent is exhausted.
+fn rough_fallback(
+    world: &mut World,
+    id: EntityId,
+    step: &crate::components::ActionInstance,
+    reason: FailReason,
+) -> bool {
+    if !crate::systems::lod::budget_on(world) {
+        return false;
+    }
+    let lost = match step.action {
+        ActionKind::Sleep => reason == FailReason::PreconditionLost,
+        ActionKind::GoTo(k) => reason == FailReason::BuildingFull && bed_key(k),
+        _ => false,
+    };
+    if !lost {
+        return false;
+    }
+    let Some(sleep_at) = world.comp::<Brain>(id).and_then(|b| {
+        let plan = b.plan.as_ref().filter(|p| p.goal == crate::components::GoalKind::Sleep)?;
+        plan.steps.iter().position(|s| s.action == ActionKind::Sleep)
+    }) else {
+        return false;
+    };
+    let exhausted =
+        world.comp::<crate::components::Needs>(id).is_some_and(|n| n.energy < world.config.life.exhausted_energy);
+    if !(exhausted || crate::systems::life::rough_ok(world, id)) {
+        return false;
+    }
+    let tick = world.tick;
+    let target = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.steps[sleep_at].target);
+    let dur = actions::duration(world, id, ActionKind::Sleep);
+    actions::on_start(world, id, ActionKind::Sleep, target);
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.plan_step = u8::try_from(sleep_at).unwrap_or(u8::MAX);
+        b.exec = ExecState::Use { kind: ActionKind::Sleep, until: tick + dur, started: tick };
+        b.action_until = tick + dur;
+    }
+    world.stats.current.budget.rough_sleeps += 1;
+    true
+}
+
+/// L2 (L30, instrumentation): the bed a failed `Sleep` or `CheckIn` step
+/// stood at (`Home`, `Hideout`, `Hotel`, `Squat`, `street`, else the
+/// building's kind) and the check that failed, read as `start_step` reads
+/// it (`PlanCtx::build_light`); the planning-time value of a second bed
+/// (`life::hideout_bed`, `life::away_hotel`) beside it. Empty for any other
+/// step. Pure reads, no draw.
+fn abort_detail(world: &World, id: EntityId, step: &crate::components::ActionInstance) -> String {
+    use crate::systems::{life, street};
+    if !matches!(step.action, ActionKind::Sleep | ActionKind::CheckIn) {
+        return String::new();
+    }
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let home = world.comp::<Household>(id).and_then(|h| h.home);
+    let hideout = world.gang_of(id).and_then(|g| world.hideout_of(g));
+    let squat = world.comp::<crate::components::Squatter>(id).map(|s| s.building);
+    let bed = match here {
+        None => "street".to_string(),
+        Some(b) if Some(b) == home => "Home".to_string(),
+        Some(b) if Some(b) == hideout => "Hideout".to_string(),
+        Some(b) if street::is_hotel(world, b) => "Hotel".to_string(),
+        Some(b) if Some(b) == squat => "Squat".to_string(),
+        Some(b) => world.comp::<Building>(b).map_or("gone".to_string(), |bd| format!("{:?}", bd.kind)),
+    };
+    let ctx = step_ctx(world, id, step.action);
+    let ws = crate::goap::WorldState::observe(world, id, ctx.target);
+    let mut why: Vec<&str> = Vec::new();
+    let mut flag = |cond: bool, name: &'static str| {
+        if cond {
+            why.push(name);
+        }
+    };
+    match step.action {
+        ActionKind::Sleep => match bed.as_str() {
+            "Home" => flag(ctx.holes_up, "holes_up"),
+            "Hideout" => {
+                flag(!ctx.holes_up, "!holes_up");
+                flag(!ctx.hideout_bed, "!hideout_bed(step)");
+                flag(life::hideout_bed(world, id).is_some(), "hideout_bed(plan)");
+            }
+            "Hotel" => {
+                flag(!ws.checked_in, "!checked_in");
+                flag(street::booked_hotel(world, id).is_some_and(|h| Some(h) != here), "booked_elsewhere");
+            }
+            "Squat" => flag(!ctx.squatter, "!squatter"),
+            "street" => {
+                flag(!ctx.homeless, "!homeless");
+                flag(ctx.homeless && ctx.hotel_available, "hotel_available");
+                flag(ctx.homeless && ctx.squatter, "squatter");
+                flag(!ctx.rough_ok, "!rough_ok");
+            }
+            _ => flag(true, "not_a_bed"),
+        },
+        _ => {
+            flag(here.is_none_or(|b| !street::is_hotel(world, b)), "!in_hotel");
+            flag(!ctx.adult, "!adult");
+            flag(!ctx.hotel_available, "!hotel_available(step)");
+            flag(ws.checked_in, "checked_in");
+            flag(!ctx.homeless && life::away_hotel(world, id).is_some(), "away_hotel(plan)");
+            flag(here.is_some_and(|b| street::is_hotel(world, b) && street::free_beds(world, b) == 0), "no_free_bed");
+        }
+    }
+    format!(" [bed {bed}: {}]", why.join(","))
 }
 
 impl World {
@@ -549,7 +706,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                 }
             } else {
                 // Replan trigger (b): re-observe; a false precondition fails the step.
-                let ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
+                let ctx = step_ctx(world, id, kind);
                 let ws = crate::goap::WorldState::observe(world, id, ctx.target);
                 if !kind.preconditions(&ws, &ctx) || !actions::can_start(world, id, kind, step.target) {
                     return StepResult::Failed(FailReason::PreconditionLost);

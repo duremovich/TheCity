@@ -478,6 +478,12 @@ pub fn serving_squat(world: &World, id: EntityId) -> bool {
 /// non-member squatters go: one with courage > 0.6 fights the claimant
 /// (and stays if they win), the rest are evicted (ban, `SquatEvicted`).
 pub fn squat_claim(world: &mut World, actor: EntityId, b: EntityId) {
+    squat_claim_with(world, actor, b, true);
+}
+
+/// `squat_claim`; L2 (L23): `fights` false for a Statistical member's
+/// claim off screen (no fight is drawn: a brave squatter simply stays).
+pub fn squat_claim_with(world: &mut World, actor: EntityId, b: EntityId, fights: bool) {
     let today = world.day();
     if let Some(br) = world.comp_mut::<Brain>(actor) {
         br.gang_task_day = Some(today);
@@ -491,6 +497,7 @@ pub fn squat_claim(world: &mut World, actor: EntityId, b: EntityId) {
     let was_held =
         world.comp::<Building>(b).and_then(|bd| bd.claim).is_some_and(|c| c.gang == gang && c.count >= CLAIM_HELD);
     claim(world, actor, b);
+    crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Claim);
     let held =
         world.comp::<Building>(b).and_then(|bd| bd.claim).is_some_and(|c| c.gang == gang && c.count >= CLAIM_HELD);
     if !held || was_held {
@@ -504,6 +511,9 @@ pub fn squat_claim(world: &mut World, actor: EntityId, b: EntityId) {
         world.squatters_of(b).iter().copied().filter(|s| members.binary_search(s).is_err()).collect();
     for s in squatters {
         let brave = world.comp::<Personality>(s).is_some_and(|p| p.courage > 0.6);
+        if brave && !fights {
+            continue;
+        }
         if brave && world.has::<Brain>(s) && world.has::<Brain>(actor) {
             let (winner, _, _) = law::resolve_fight(world, s, actor);
             if winner == s {
@@ -763,6 +773,138 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     );
     let tile = world.comp::<Position>(actor).map_or(TilePos::default(), |p| p.tile);
     law::raise_crime(world, actor, None, crate::components::Crime::Extortion, tile);
+    crate::systems::fviolence::note_act(world, actor, crate::ledger::ActKind::Extort);
+    taken
+}
+
+/// L2 (L23): the Home a Statistical member's GangWork day extorts under
+/// order `o` (Expand, VirtRaid: unclaimed; Contest: the rival's), as
+/// `gang_work_target` picks for a body but "inhabited" read off the
+/// residents (a Statistical household stands at no door inside): the
+/// nearest to the Hideout plus the member's own door, not its own Home,
+/// not derelict, no guard within `sight_day_crime` (a Purist gang's
+/// chromed Homes first).
+pub fn stat_extort_target(world: &World, id: EntityId, o: Order) -> Option<EntityId> {
+    let gang = world.gang_of(id)?;
+    let g = world.comp::<Gang>(gang)?;
+    let own_home = world.comp::<Household>(id).and_then(|h| h.home);
+    let actor_tile = world.comp::<Position>(id)?.tile;
+    let from = world.comp::<Building>(g.hideout).map_or(actor_tile, |b| b.door);
+    let theirs: Option<&[EntityId]> = match o {
+        Order::Expand | Order::VirtRaid => None,
+        Order::Contest => Some(world.comp::<Gang>(world.rival_of(gang)?)?.territory.as_slice()),
+        _ => return None,
+    };
+    let guards: Vec<TilePos> =
+        world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
+    let r = world.config.crime.sight_day_crime;
+    let purist = crate::systems::creeds::is_purist(world, gang);
+    let mut best: Option<((bool, u32, u32), EntityId)> = None;
+    for &h in world.buildings_by_kind.get(&BuildingKind::Home)? {
+        if Some(h) == own_home {
+            continue;
+        }
+        let Some(b) = world.comp::<Building>(h) else { continue };
+        if b.demolished || b.derelict || world.residents_of(h).is_empty() {
+            continue;
+        }
+        let dist = b.door.manhattan(from) + b.door.manhattan(actor_tile);
+        if best.is_some_and(|(k, _)| (false, dist, h.index) >= k) {
+            continue;
+        }
+        let ok = match theirs {
+            Some(t) => t.binary_search(&h).is_ok(),
+            None => holder_of(world, h).is_none(),
+        };
+        if !ok || guards.iter().any(|&gt| law::chebyshev(gt, b.door) <= r) {
+            continue;
+        }
+        let key = (purist && !crate::systems::creeds::chromed_home(world, h), dist, h.index);
+        if best.is_some_and(|(k, _)| key >= k) {
+            continue;
+        }
+        best = Some((key, h));
+    }
+    best.map(|(_, h)| h)
+}
+
+/// L2 (L23): an extortion off screen by a Statistical member: no
+/// Intimidate and no witness roll (nobody holds a body), the residents of
+/// `home` pay `extort_amount` (a Purist's tithe) in proportion to their
+/// coins, remember it and turn enemies, the claim advances, the
+/// district's shakedown is logged and half the take goes straight to the
+/// gang treasury (the SplitLoot a body walks to the Hideout for). Returns
+/// the coins taken.
+pub fn stat_extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
+    let mut amount = world.config.social.extort_amount;
+    let gang = world.gang_of(actor);
+    if gang.is_some_and(|g| crate::systems::creeds::is_purist(world, g)) {
+        amount = (world.config.creeds.tithe_frac * amount as f32).round() as i64;
+    }
+    let payers: Vec<EntityId> = world
+        .residents_of(home)
+        .iter()
+        .copied()
+        .filter(|&o| o != actor && world.has::<Wallet>(o) && world.has::<Brain>(o) && !world.has::<Sentence>(o))
+        .collect();
+    let total: i64 = payers.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
+    let take = amount.min(total);
+    let mut taken = 0;
+    for &o in &payers {
+        let coins = world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0));
+        let share = if total > 0 { (take * coins) / total } else { 0 };
+        if let Some(w) = world.comp_mut::<Wallet>(o) {
+            w.coins -= share;
+        }
+        taken += share;
+        world.remember(o, MemoryKind::WasRobbed, Some(actor), 0.7, -0.7, false);
+        social::robbed_by(world, o, actor);
+    }
+    let mut guard = 0;
+    while taken < take && guard < 64 {
+        guard += 1;
+        let Some(&payer) = payers.iter().max_by_key(|&&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins)) else {
+            break;
+        };
+        if world.comp::<Wallet>(payer).is_none_or(|w| w.coins <= 0) {
+            break;
+        }
+        if let Some(w) = world.comp_mut::<Wallet>(payer) {
+            w.coins -= 1;
+        }
+        taken += 1;
+    }
+    let to_gang = taken / 2;
+    if let Some(w) = world.comp_mut::<Wallet>(actor) {
+        w.coins += taken - to_gang;
+    }
+    if let Some(g) = gang {
+        world.gang_credit(g, to_gang);
+    }
+    let today = world.day();
+    if let Some(b) = world.comp_mut::<Brain>(actor) {
+        b.gang_task_day = Some(today);
+    }
+    if taken > 0 {
+        crate::systems::ownership::note_loss(world, home, taken, Some(actor));
+    }
+    if let Some(g) = gang {
+        let d = world.district_of_building(home);
+        let now = world.tick;
+        if let Some(x) = world.districts.get_mut(d.index()) {
+            if x.shakedowns.len() >= 64 {
+                x.shakedowns.pop_front();
+            }
+            x.shakedowns.push_back((now, g));
+        }
+    }
+    let suffix = claim(world, actor, home).unwrap_or_default();
+    let name = world.name_of(actor);
+    world.push_event(
+        EventKind::Extortion,
+        &[actor, home],
+        format!("{name} extorted {taken} coins from Block#{} (off screen){suffix}", home.index),
+    );
     taken
 }
 

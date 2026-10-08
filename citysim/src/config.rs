@@ -716,6 +716,16 @@ pub struct GangsCfg {
     /// for the door); 0 = any (M11).
     #[serde(default)]
     pub raid_min_members: usize,
+    /// L2 (L23): the Statistical GangWork day's priors per member-day and
+    /// the member-days of evidence they are worth (ledger maths).
+    #[serde(default = "GangsCfg::default_stat_extort_prior")]
+    pub stat_extort_prior: f32,
+    #[serde(default = "GangsCfg::default_stat_claim_prior")]
+    pub stat_claim_prior: f32,
+    #[serde(default = "GangsCfg::default_stat_deal_prior")]
+    pub stat_deal_prior: f32,
+    #[serde(default = "GangsCfg::default_stat_prior_days")]
+    pub stat_prior_days: f32,
 }
 
 impl GangsCfg {
@@ -733,6 +743,18 @@ impl GangsCfg {
     }
     fn default_reform_max_coverage() -> f32 {
         f32::MAX
+    }
+    fn default_stat_extort_prior() -> f32 {
+        0.02
+    }
+    fn default_stat_claim_prior() -> f32 {
+        0.02
+    }
+    fn default_stat_deal_prior() -> f32 {
+        0.01
+    }
+    fn default_stat_prior_days() -> f32 {
+        30.0
     }
     fn default_split_strength_ratio() -> f32 {
         0.8
@@ -1064,6 +1086,57 @@ pub struct LodCfg {
     /// `1 + chrome_bind_w × Kit.fighting`.
     #[serde(default)]
     pub chrome_bind_w: f32,
+    /// L2 phase 3 (plan L21-L23, L29-L30): the LOD budget and the churn;
+    /// `false` (the default, and every pre-L2 config) is the M15 city.
+    #[serde(default)]
+    pub budget: bool,
+    /// L2 (L21): sentenced, unpinned agents are held Statistical.
+    #[serde(default = "LodCfg::default_true")]
+    pub held_prisoners: bool,
+    /// L2 (L22): class-2 bodies per gang, and in a raid window.
+    #[serde(default = "LodCfg::default_gang_quota")]
+    pub gang_quota: usize,
+    #[serde(default = "LodCfg::default_private_quota")]
+    pub private_quota: usize,
+    #[serde(default = "LodCfg::default_raid_quota")]
+    pub raid_quota: usize,
+    /// L2 (L21, L22): the raid window opens this many hours before the muster.
+    #[serde(default = "LodCfg::default_raid_promote_hours")]
+    pub raid_promote_hours: u16,
+    /// L2 (L22): members this close to the order's target rank in the front line.
+    #[serde(default = "LodCfg::default_front_tiles")]
+    pub front_tiles: u32,
+    /// L2 (L21): a prisoner this close to release holds a body (the walk out).
+    #[serde(default = "LodCfg::default_release_soon_hours")]
+    pub release_soon_hours: u16,
+    /// L2 (L22, spec § 4): the public watch ranks 3 only on shift (off
+    /// shift it ranks as a civilian); `false` keeps M10 D20 (always 3).
+    #[serde(default = "LodCfg::default_true")]
+    pub watch_on_shift_only: bool,
+}
+
+impl LodCfg {
+    fn default_true() -> bool {
+        true
+    }
+    fn default_gang_quota() -> usize {
+        25
+    }
+    fn default_private_quota() -> usize {
+        12
+    }
+    fn default_raid_quota() -> usize {
+        40
+    }
+    fn default_raid_promote_hours() -> u16 {
+        4
+    }
+    fn default_front_tiles() -> u32 {
+        30
+    }
+    fn default_release_soon_hours() -> u16 {
+        2
+    }
 }
 
 fn default_stat_policy() -> String {
@@ -3779,6 +3852,10 @@ pub struct LifeCfg {
     pub scavenge_p: f32,
     /// An escort's walk to the Precinct is a van ride of at most this long.
     pub escort_van_ticks: u64,
+    /// L2 (L29, `[lod] budget`): after this many dry Scavenge hours in a row
+    /// `Earn` cools for `scavenge_cool_hours`.
+    pub scavenge_dry_max: u8,
+    pub scavenge_cool_hours: u64,
 }
 
 impl Default for LifeCfg {
@@ -3827,6 +3904,8 @@ impl LifeCfg {
             scavenge_coins: 1,
             scavenge_p: 0.15,
             escort_van_ticks: 60,
+            scavenge_dry_max: 3,
+            scavenge_cool_hours: 4,
         }
     }
 }
@@ -3836,6 +3915,12 @@ impl LifeCfg {
 #[serde(default)]
 pub struct LivingCfg {
     pub enabled: bool,
+    /// L2 (coordinator ruling on M14, 2026-10-08): a corp keeps its standing
+    /// order this many days after taking it against a shock rescore ...
+    pub corp_order_dwell_days: u64,
+    /// ... unless the challenger beats it by this margin, or the pending
+    /// shocks reach `[life] order_severe` (the gangs' dwell rule, L1).
+    pub corp_order_margin: f32,
 }
 
 impl Default for LivingCfg {
@@ -3846,7 +3931,7 @@ impl Default for LivingCfg {
 
 impl LivingCfg {
     pub fn off() -> LivingCfg {
-        LivingCfg { enabled: false }
+        LivingCfg { enabled: false, corp_order_dwell_days: 3, corp_order_margin: 0.05 }
     }
 }
 
@@ -4275,8 +4360,10 @@ impl Config {
     }
 
     /// L2 (plan L5, L32): every L2 section `off()` (`--l2-off`): no
-    /// venues, Fabs, staffing overrides, Sweep, band or export.
+    /// venues, Fabs, staffing overrides, Sweep, band or export, and (phase
+    /// 3) no LOD budget.
     pub fn living_off(mut self) -> Config {
+        self.lod.budget = false;
         self.living = LivingCfg::off();
         self.jobs = LivingJobsCfg::off();
         self.leisure = LeisureCfg::off();
