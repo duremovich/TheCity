@@ -1266,12 +1266,11 @@ tithe_frac = 0.6
 founders = 3
 
 [grudges]
-# M15 phase 5: grudge_min 0.15 -> 0.35, rel_w.own 0.8 -> 0.6, aggressor_grudge_off (see deed_sev.robbed):
+# M15 phase 5: grudge_min 0.15 -> 0.35, rel_w.own 0.8 -> 0.6 (see deed_sev.robbed):
 # grudges come from killings (kin and friends), robberies and kin seeing a beating, not from every
-# beating heard of or lost. Formed on seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939;
+# beating heard of or lost (a lost fight's own view weighs 0.5 x 0.6 = 0.30 < 0.35). Formed on seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939;
 # Murders 61 / 49 / 59 -> 47 / 44 / 46 against 41 / 48 / 47 with the word off.
 grudge_min = 0.35
-aggressor_grudge_off = true
 grudge_decay = 0.01
 beat_settle = 0.5
 inherit_min = 0.4

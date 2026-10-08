@@ -528,13 +528,7 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     world.remember(a, MemoryKind::Fought, Some(b), 0.7, -0.5, false);
     world.remember(b, MemoryKind::Fought, Some(a), 0.7, -0.5, false);
     world.remember(winner, MemoryKind::Won, Some(loser), 0.6, 0.4, false);
-    // M15 phase 5: the aggressor (`a`) who lost keeps the memory but forms
-    // no grudge on the one who fought back (the grudge flood's main source).
-    if loser == a && world.config.grudges.aggressor_grudge_off {
-        world.remember_no_grudge(loser, MemoryKind::Lost, Some(winner), 0.6, -0.6);
-    } else {
-        world.remember(loser, MemoryKind::Lost, Some(winner), 0.6, -0.6, false);
-    }
+    world.remember(loser, MemoryKind::Lost, Some(winner), 0.6, -0.6, false);
     if let Some(p) = world.comp_mut::<Personality>(winner) {
         p.drift(Drift::WonFight);
     }

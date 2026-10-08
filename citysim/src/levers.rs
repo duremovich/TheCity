@@ -1136,28 +1136,15 @@ impl World {
                     return Err("DeclareVendetta: two different factions".into());
                 }
                 let w = weight.clamp(0.0, 1.0);
-                let mut leaders = Vec::new();
-                for (x, y) in [(a, b), (b, a)] {
-                    let Some(l) = faction_leader(self, x) else {
+                for x in [a, b] {
+                    if faction_leader(self, x).is_none() {
                         return Err(format!(
                             "DeclareVendetta: {} has no leader",
                             crate::systems::grudges::label(self, x)
                         ));
-                    };
-                    leaders.push((l, y));
-                }
-                for (l, y) in leaders {
-                    crate::systems::grudges::add(self, l, y, crate::word::GrudgeCause::Betrayed, w, 0);
-                    if let Some(g) = self.comp_mut::<crate::word::Grudges>(l) {
-                        if let Some(x) = g.list.iter_mut().find(|x| x.target == y && x.settled.is_none()) {
-                            x.weight = x.weight.max(w);
-                        }
                     }
                 }
-                crate::systems::grudges::vendettas(self);
-                // M15 phase 5: the feud is declared open (and held for
-                // `declared_days`): with `vendetta_norm` 10 the two leaders'
-                // grudges alone no longer reach `vendetta_open`.
+                // The feud is declared open and held for `declared_days`.
                 crate::systems::grudges::declare(self, a, b, w);
                 let text = format!(
                     "declared a vendetta between {} and {} ({w:.2})",

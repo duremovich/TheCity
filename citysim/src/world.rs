@@ -2063,34 +2063,6 @@ impl World {
         valence: f32,
         second_hand: bool,
     ) {
-        self.remember_with(id, kind, subject, salience, valence, second_hand, true);
-    }
-
-    /// M15 phase 5: [`World::remember`] that never forms a grudge (the
-    /// memory is identical). The fight's aggressor who lost: a beating it
-    /// went looking for is no wrong done to it (W15's `Lost` source).
-    pub fn remember_no_grudge(
-        &mut self,
-        id: EntityId,
-        kind: MemoryKind,
-        subject: Option<EntityId>,
-        salience: f32,
-        valence: f32,
-    ) {
-        self.remember_with(id, kind, subject, salience, valence, false, false);
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    fn remember_with(
-        &mut self,
-        id: EntityId,
-        kind: MemoryKind,
-        subject: Option<EntityId>,
-        salience: f32,
-        valence: f32,
-        second_hand: bool,
-        grudge: bool,
-    ) {
         let tick = self.tick;
         let mut cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;
@@ -2121,7 +2093,7 @@ impl World {
         }
         let entry = MemoryEntry { subject, salience, valence, second_hand, ..MemoryEntry::blank(kind, tick) };
         // M15 W15: a new deed memory may leave a grudge (never on a merge).
-        let deed = (grudge && self.config.gossip.enabled).then(|| systems::memory::deed_of(id, &entry)).flatten();
+        let deed = self.config.gossip.enabled.then(|| systems::memory::deed_of(id, &entry)).flatten();
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let fresh = systems::memory::insert(m, entry, tick, cap, half_life);
         if let (true, Some(r)) = (fresh, deed) {

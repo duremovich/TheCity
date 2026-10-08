@@ -961,15 +961,14 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     if !(i.cooldown_ok && world.purse(Some(corp)) >= ni.offer) {
         return;
     }
+    let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
     // M15 W33: a seller refuses a dishonoured buyer unless it is going under.
     if world.config.gossip.enabled {
         let honour = crate::systems::reputation::rep(world, corp).honour;
-        let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
         if honour < world.config.reputation.acquire_honour_min && !bankrupt {
             return;
         }
     }
-    let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
     if crate::systems::corps::acquire(world, corp, building, ni.offer, "hostile") {
         // M15 phase 5: a hostile buy-out of a solvent rival is told as a
         // betrayal, so honour moves on acquisitions and the next seller may
