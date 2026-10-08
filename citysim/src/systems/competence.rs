@@ -48,6 +48,11 @@ fn role_slots(role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
         }
         Role::Researcher => (smallvec![(k, s.knowledge), (MEAN_HACKING, s.hacking.max(0.0))], "knowledge"),
         Role::Reporter => (smallvec![(k, s.knowledge)], "knowledge"),
+        // L2 L2: the door and the ring fight; the floor persuades; the Fab
+        // Tech's production skill is farming (deviation: no mechanical slot).
+        Role::Host | Role::Fighter => (smallvec![(MEAN_FIGHTING, s.fighting)], "fighting"),
+        Role::Attendant | Role::Cook | Role::Croupier | Role::Concierge => (smallvec![(p, s.persuasion)], "persuasion"),
+        Role::Fabber => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
         Role::Gravedigger | Role::Sanitation => return None,
     })
 }

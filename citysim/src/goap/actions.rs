@@ -128,10 +128,14 @@ pub enum ActionKind {
     /// L1: an exec's office hours at the corp's HQ (a scripted Work plan,
     /// never in `PLANNABLE`): until `[life] exec_shift` ends.
     Meeting,
+    /// L2 L8: a Fab Tech's shift at its Fab (the `FarmWork` shape): Parts.
+    FabWork,
+    /// L2 L8: a sweeper's shift on its beat's streets (`[jobs] sweep`).
+    Sweep,
 }
 
 /// Every action the planner may consider, in tie-break order.
-pub const PLANNABLE: [ActionKind; 85] = [
+pub const PLANNABLE: [ActionKind; 87] = [
     ActionKind::GoTo(LocationKey::Home),
     ActionKind::GoTo(LocationKey::Farm),
     ActionKind::GoTo(LocationKey::Market),
@@ -225,6 +229,9 @@ pub const PLANNABLE: [ActionKind; 85] = [
     ActionKind::UpgradeDeck,
     // L1.
     ActionKind::Scavenge,
+    // L2 L8: planned after `commute_plan`'s walk, as every shift action.
+    ActionKind::FabWork,
+    ActionKind::Sweep,
 ];
 
 impl ActionKind {
@@ -246,6 +253,11 @@ impl ActionKind {
             Role::Researcher => ActionKind::ClerkWork,
             // M15 W36: a Reporter's shift is the clerk's at its own Feed.
             Role::Reporter => ActionKind::ClerkWork,
+            // L2 L2: the leisure staff clerk at their venue; the Fab Tech fabs.
+            Role::Host | Role::Attendant | Role::Cook | Role::Fighter | Role::Croupier | Role::Concierge => {
+                ActionKind::ClerkWork
+            }
+            Role::Fabber => ActionKind::FabWork,
         }
     }
 
@@ -257,6 +269,8 @@ impl ActionKind {
                 | ActionKind::ClerkWork
                 | ActionKind::BartendWork
                 | ActionKind::TendGraves
+                | ActionKind::FabWork
+                | ActionKind::Sweep
         )
     }
 
@@ -325,6 +339,8 @@ impl ActionKind {
                 | ActionKind::UpgradeDeck
                 | ActionKind::Scavenge
                 | ActionKind::Meeting
+                | ActionKind::FabWork
+                | ActionKind::Sweep
         )
     }
 }
@@ -418,6 +434,8 @@ pub struct PlanCtx {
     pub suspect_located: bool,
     /// Guards: today's shift is a Jail day (else Patrol).
     pub jail_day: bool,
+    /// L2 L8: Sanitation sweeps the beat (`jobs::sweep_on`).
+    pub sweep: bool,
     /// Guards on a Patrol shift with legs left.
     pub patrol_pending: bool,
     pub hall_open: bool,
@@ -602,7 +620,12 @@ impl PlanCtx {
             add(LocationKey::Hideout, crate::systems::gang::hideout_for(world, agent));
             if wage_at == LocationKey::Workplace {
                 add(LocationKey::Workplace, world.wage_desk(agent));
+            } else if job.and_then(|j| j.employer).is_some_and(|e| crate::systems::jobs::is_l2_building(world, e)) {
+                // L2: a city-owned venue's or Fab's staff work at it (the
+                // wage desk is the Hall).
+                add(LocationKey::Workplace, job.and_then(|j| j.employer));
             }
+
             // M13 D47: a Mechanic's Garage (its employer).
             if job.is_some_and(|j| j.role == Role::Mechanic) {
                 add(LocationKey::Garage, world.resolve_building(agent, LocationKey::Garage, None));
@@ -633,6 +656,12 @@ impl PlanCtx {
                 };
                 if let Some(t) = there {
                     dist.insert(LocationKey::MusterPoint, o.manhattan(t));
+                }
+            }
+            // L2 L8: a sweeper's beat (the dirtiest street tile of it).
+            if job.is_some_and(|j| j.role == Role::Sanitation) && crate::systems::jobs::sweep_on(world) {
+                if let Some(t) = crate::systems::jobs::beat_tile(world, agent) {
+                    dist.insert(LocationKey::Beat, o.manhattan(t));
                 }
             }
         }
@@ -898,6 +927,7 @@ impl PlanCtx {
             wanted: crate::systems::law::wanted(world, agent),
             suspect_located: target.is_some_and(|t| crate::systems::law::is_located_suspect(world, t)),
             jail_day: job.is_some_and(|j| crate::systems::law::jail_duty(world, agent, j.next_shift_key(world.tick))),
+            sweep: crate::systems::jobs::sweep_on(world),
             patrol_pending: job.is_some_and(|j| {
                 j.role == Role::Guard
                     && j.on_shift(tod)
@@ -1051,10 +1081,20 @@ impl ActionKind {
                     || ctx.is(Role::Mechanic)
                     || ctx.is(Role::Researcher)
                     || ctx.is(Role::Reporter)
+                    // L2 L2: the six leisure roles.
+                    || ctx.is(Role::Host)
+                    || ctx.is(Role::Attendant)
+                    || ctx.is(Role::Cook)
+                    || ctx.is(Role::Fighter)
+                    || ctx.is(Role::Croupier)
+                    || ctx.is(Role::Concierge)
             }
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,
-            ActionKind::TendGraves => ctx.is(Role::Gravedigger) || ctx.is(Role::Sanitation),
+            // L2 L8: a sweeper tends graves only with Sweep off.
+            ActionKind::TendGraves => ctx.is(Role::Gravedigger) || (ctx.is(Role::Sanitation) && !ctx.sweep),
+            ActionKind::FabWork => ctx.is(Role::Fabber),
+            ActionKind::Sweep => ctx.is(Role::Sanitation) && ctx.sweep,
             ActionKind::CarryCorpse | ActionKind::BuryCorpse => ctx.adult && ctx.may_bury,
             ActionKind::CollectWage => ctx.role.is_some(),
             ActionKind::CollectDole => ctx.role.is_none() && ctx.adult,
@@ -1149,6 +1189,9 @@ impl ActionKind {
             ActionKind::BartendWork => at(LocationKey::Bar) && !ws.shift_done && (ctx.on_shift || ctx.evening),
             ActionKind::GuardJail => at(LocationKey::Jail) && !ws.shift_done && ctx.on_shift,
             ActionKind::TendGraves => at(LocationKey::Cemetery) && !ws.shift_done && ctx.on_shift,
+            ActionKind::FabWork => ctx.workplace.is_some_and(at) && !ws.shift_done && ctx.on_shift,
+            // L2 L8: on the beat (`observe` reports `Beat` on its streets under Work).
+            ActionKind::Sweep => at(LocationKey::Beat) && !ws.shift_done && ctx.on_shift,
             ActionKind::HaulToMarket => at(LocationKey::Farm) && ctx.farm_stock >= ctx.haul_min_stock,
             ActionKind::CollectWage => at(ctx.wage_at) && ws.has_wage_due && ctx.wage_collectable,
             ActionKind::CollectDole => at(LocationKey::Hall) && ctx.dole_available,
@@ -1248,9 +1291,12 @@ impl ActionKind {
             ActionKind::StealFood(StealSource::Home) => ctx.target_pantry > 0,
             ActionKind::StealFood(StealSource::Warehouse) => ctx.warehouse_stock > 0 && ctx.stealth >= 0.4,
             ActionKind::Forage => matches!(ctx.season, Season::Summer | Season::Autumn) && !ctx.dark,
-            ActionKind::FarmWork | ActionKind::ClerkWork | ActionKind::GuardJail | ActionKind::TendGraves => {
-                ctx.on_shift
-            }
+            ActionKind::FarmWork
+            | ActionKind::ClerkWork
+            | ActionKind::GuardJail
+            | ActionKind::TendGraves
+            | ActionKind::FabWork
+            | ActionKind::Sweep => ctx.on_shift,
             ActionKind::BartendWork => ctx.on_shift || ctx.evening,
             ActionKind::HaulToMarket => ctx.farm_stock >= ctx.haul_min_stock,
             ActionKind::CollectWage => ctx.wage_collectable,
@@ -1541,7 +1587,12 @@ impl ActionKind {
             ActionKind::Rest => 4.0,
             ActionKind::FarmWork => 3.0 - ctx.farming * 2.0,
             ActionKind::HaulToMarket => 3.0,
-            ActionKind::ClerkWork | ActionKind::BartendWork | ActionKind::GuardJail | ActionKind::TendGraves => 3.0,
+            ActionKind::ClerkWork
+            | ActionKind::BartendWork
+            | ActionKind::GuardJail
+            | ActionKind::TendGraves
+            | ActionKind::FabWork
+            | ActionKind::Sweep => 3.0,
             ActionKind::CollectWage => 2.0 + if ctx.payer_negative { 4.0 } else { 0.0 },
             ActionKind::SellFood => 3.0 - ctx.greed * 2.0,
             ActionKind::Fence => 3.0 + ctx.lawfulness * 8.0,

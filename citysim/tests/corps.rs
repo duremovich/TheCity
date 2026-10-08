@@ -312,7 +312,15 @@ fn test_hostile_bid_never_takes_a_rivals_last_niche_building() {
     let i = corp_brain::gather_inputs(&w, nutrix).expect("inputs");
     let (who, _, value) = i.niches[&Niche::Food].weakest.expect("a weak rival");
     assert_eq!(who, greenline);
-    assert_eq!(value, w.config.corps.value.farm);
+    // The cheapest of its Food buildings (L2 L9: a seeded NoodleBar joins
+    // the Food niche at `value.noodle_bar`; with L2 off, a Farm).
+    let cheapest = corp_brain::niche_buildings(&w, greenline, Niche::Food)
+        .into_iter()
+        .filter_map(|b| w.comp::<citysim::Building>(b).map(|bd| ownership::value(&w, bd.kind)))
+        .filter(|&v| v > 0)
+        .min()
+        .expect("a Food building");
+    assert_eq!(value, cheapest);
 }
 
 #[test]

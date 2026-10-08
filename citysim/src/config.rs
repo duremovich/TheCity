@@ -138,6 +138,23 @@ pub struct Config {
     /// pre-L1 saves: off.
     #[serde(default = "LifeCfg::off")]
     pub life: LifeCfg,
+    /// Life pass L2 (docs/LIFE_L2.md, plan L5): the master switch; absent
+    /// from pre-L2 saves: off. `enabled = false` (`--l2-off`) is the
+    /// M15-closing city byte for byte.
+    #[serde(default = "LivingCfg::off")]
+    pub living: LivingCfg,
+    /// L2 § 1 jobs (plan L5: `LivingJobsCfg`, as `JobsCfg` is `[world.jobs]`).
+    #[serde(default = "LivingJobsCfg::off")]
+    pub jobs: LivingJobsCfg,
+    /// L2 § 1-2 leisure (phase 1 reads only the price table).
+    #[serde(default = "LeisureCfg::off")]
+    pub leisure: LeisureCfg,
+    /// L2 § 1 the Treasury budget band.
+    #[serde(default = "BudgetCfg::off")]
+    pub budget: BudgetCfg,
+    /// L2 § 1 the export hook (off by default).
+    #[serde(default = "ExportCfg::off")]
+    pub export: ExportCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
@@ -212,6 +229,14 @@ impl JobsCfg {
             // M14: likewise the Labs' Researchers.
             // M15 W36: and the Feeds' Reporters.
             Role::Ripperdoc | Role::Mechanic | Role::Researcher | Role::Reporter => 0,
+            // L2 (plan L2): the venues' and Fabs' staff are hired, never seeded.
+            Role::Host
+            | Role::Attendant
+            | Role::Cook
+            | Role::Fighter
+            | Role::Croupier
+            | Role::Concierge
+            | Role::Fabber => 0,
         }
     }
 }
@@ -256,6 +281,29 @@ impl BuildingCfg {
     pub fn feed() -> BuildingCfg {
         BuildingCfg { capacity: 6, stock_cap: 0, staff: 1 }
     }
+
+    /// L2 § 1 (spec values; `[buildings.club]` … in `assets/config.toml`).
+    pub fn club() -> BuildingCfg {
+        BuildingCfg { capacity: 40, stock_cap: 0, staff: 10 }
+    }
+    pub fn arcade() -> BuildingCfg {
+        BuildingCfg { capacity: 16, stock_cap: 0, staff: 3 }
+    }
+    pub fn noodle_bar() -> BuildingCfg {
+        BuildingCfg { capacity: 10, stock_cap: 60, staff: 3 }
+    }
+    pub fn fight_pit() -> BuildingCfg {
+        BuildingCfg { capacity: 40, stock_cap: 0, staff: 4 }
+    }
+    pub fn den() -> BuildingCfg {
+        BuildingCfg { capacity: 20, stock_cap: 0, staff: 4 }
+    }
+    pub fn lounge() -> BuildingCfg {
+        BuildingCfg { capacity: 16, stock_cap: 0, staff: 6 }
+    }
+    pub fn fab() -> BuildingCfg {
+        BuildingCfg { capacity: 14, stock_cap: 400, staff: 12 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -290,6 +338,21 @@ pub struct BuildingsCfg {
     /// M15 W36.
     #[serde(default = "BuildingCfg::feed")]
     pub feed: BuildingCfg,
+    /// L2 § 1: the seven new kinds (none stands with L2 off).
+    #[serde(default = "BuildingCfg::club")]
+    pub club: BuildingCfg,
+    #[serde(default = "BuildingCfg::arcade")]
+    pub arcade: BuildingCfg,
+    #[serde(default = "BuildingCfg::noodle_bar")]
+    pub noodle_bar: BuildingCfg,
+    #[serde(default = "BuildingCfg::fight_pit")]
+    pub fight_pit: BuildingCfg,
+    #[serde(default = "BuildingCfg::den")]
+    pub den: BuildingCfg,
+    #[serde(default = "BuildingCfg::lounge")]
+    pub lounge: BuildingCfg,
+    #[serde(default = "BuildingCfg::fab")]
+    pub fab: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -311,6 +374,13 @@ impl BuildingsCfg {
             BuildingKind::Garage => &self.garage,
             BuildingKind::Lab => &self.lab,
             BuildingKind::Feed => &self.feed,
+            BuildingKind::Club => &self.club,
+            BuildingKind::Arcade => &self.arcade,
+            BuildingKind::NoodleBar => &self.noodle_bar,
+            BuildingKind::FightPit => &self.fight_pit,
+            BuildingKind::Den => &self.den,
+            BuildingKind::Lounge => &self.lounge,
+            BuildingKind::Fab => &self.fab,
         }
     }
 }
@@ -355,6 +425,22 @@ pub struct EconomyCfg {
     /// M15 W36: a Feed's staff (phase 4 reads it).
     #[serde(default = "default_wage_reporter")]
     pub wage_reporter: i64,
+    /// L2 § 1: the seven new roles' wages (spec values as serde defaults;
+    /// read only by hires at L2 buildings, which stand only with `jobs::on`).
+    #[serde(default = "default_wage_host")]
+    pub wage_host: i64,
+    #[serde(default = "default_wage_attendant")]
+    pub wage_attendant: i64,
+    #[serde(default = "default_wage_cook")]
+    pub wage_cook: i64,
+    #[serde(default = "default_wage_fighter")]
+    pub wage_fighter: i64,
+    #[serde(default = "default_wage_croupier")]
+    pub wage_croupier: i64,
+    #[serde(default = "default_wage_concierge")]
+    pub wage_concierge: i64,
+    #[serde(default = "default_wage_fabber")]
+    pub wage_fabber: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -409,6 +495,28 @@ fn default_wage_reporter() -> i64 {
     8
 }
 
+fn default_wage_host() -> i64 {
+    6
+}
+fn default_wage_attendant() -> i64 {
+    5
+}
+fn default_wage_cook() -> i64 {
+    5
+}
+fn default_wage_fighter() -> i64 {
+    7
+}
+fn default_wage_croupier() -> i64 {
+    6
+}
+fn default_wage_concierge() -> i64 {
+    8
+}
+fn default_wage_fabber() -> i64 {
+    7
+}
+
 impl EconomyCfg {
     pub fn wage(&self, role: Role) -> i64 {
         match role {
@@ -422,6 +530,13 @@ impl EconomyCfg {
             Role::Mechanic => self.wage_mechanic,
             Role::Researcher => self.wage_researcher,
             Role::Reporter => self.wage_reporter,
+            Role::Host => self.wage_host,
+            Role::Attendant => self.wage_attendant,
+            Role::Cook => self.wage_cook,
+            Role::Fighter => self.wage_fighter,
+            Role::Croupier => self.wage_croupier,
+            Role::Concierge => self.wage_concierge,
+            Role::Fabber => self.wage_fabber,
         }
     }
 }
@@ -1072,11 +1187,49 @@ pub struct FoundCostCfg {
     /// M15 § 7: a Feed (foundable through `Register` with `[news]` on).
     #[serde(default)]
     pub feed: i64,
+    /// L2 § 1 (spec values as defaults; `founding::found_cost` prices them
+    /// only with `jobs::on`).
+    #[serde(default = "FoundCostCfg::default_club")]
+    pub club: i64,
+    #[serde(default = "FoundCostCfg::default_arcade")]
+    pub arcade: i64,
+    #[serde(default = "FoundCostCfg::default_noodle_bar")]
+    pub noodle_bar: i64,
+    #[serde(default = "FoundCostCfg::default_fight_pit")]
+    pub fight_pit: i64,
+    #[serde(default = "FoundCostCfg::default_den")]
+    pub den: i64,
+    #[serde(default = "FoundCostCfg::default_lounge")]
+    pub lounge: i64,
+    /// Corps only (the Fab is never `Register`ed).
+    #[serde(default = "FoundCostCfg::default_fab")]
+    pub fab: i64,
 }
 
 impl FoundCostCfg {
     fn default_hotel() -> i64 {
         250
+    }
+    fn default_club() -> i64 {
+        400
+    }
+    fn default_arcade() -> i64 {
+        200
+    }
+    fn default_noodle_bar() -> i64 {
+        120
+    }
+    fn default_fight_pit() -> i64 {
+        300
+    }
+    fn default_den() -> i64 {
+        250
+    }
+    fn default_lounge() -> i64 {
+        900
+    }
+    fn default_fab() -> i64 {
+        900
     }
 }
 
@@ -1105,6 +1258,22 @@ pub struct UpkeepCfg {
     /// M15 § 7.
     #[serde(default)]
     pub feed: i64,
+    /// L2 § 1 (spec values as defaults; no building of these kinds stands
+    /// with L2 off).
+    #[serde(default = "UpkeepCfg::default_club")]
+    pub club: i64,
+    #[serde(default = "UpkeepCfg::default_arcade")]
+    pub arcade: i64,
+    #[serde(default = "UpkeepCfg::default_noodle_bar")]
+    pub noodle_bar: i64,
+    #[serde(default = "UpkeepCfg::default_fight_pit")]
+    pub fight_pit: i64,
+    #[serde(default = "UpkeepCfg::default_den")]
+    pub den: i64,
+    #[serde(default = "UpkeepCfg::default_lounge")]
+    pub lounge: i64,
+    #[serde(default = "UpkeepCfg::default_fab")]
+    pub fab: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -1125,6 +1294,27 @@ impl UpkeepCfg {
     fn default_hotel() -> i64 {
         10
     }
+    fn default_club() -> i64 {
+        10
+    }
+    fn default_arcade() -> i64 {
+        4
+    }
+    fn default_noodle_bar() -> i64 {
+        2
+    }
+    fn default_fight_pit() -> i64 {
+        4
+    }
+    fn default_den() -> i64 {
+        4
+    }
+    fn default_lounge() -> i64 {
+        20
+    }
+    fn default_fab() -> i64 {
+        15
+    }
 
     /// A building's daily upkeep; a Block's by its tier.
     pub fn for_building(&self, kind: BuildingKind, tier: u8) -> i64 {
@@ -1139,6 +1329,13 @@ impl UpkeepCfg {
             BuildingKind::Garage => self.garage,
             BuildingKind::Lab => self.lab,
             BuildingKind::Feed => self.feed,
+            BuildingKind::Club => self.club,
+            BuildingKind::Arcade => self.arcade,
+            BuildingKind::NoodleBar => self.noodle_bar,
+            BuildingKind::FightPit => self.fight_pit,
+            BuildingKind::Den => self.den,
+            BuildingKind::Lounge => self.lounge,
+            BuildingKind::Fab => self.fab,
             _ => 0,
         }
     }
@@ -1161,6 +1358,45 @@ pub struct ValueCfg {
     /// M15 § 7.
     #[serde(default)]
     pub feed: i64,
+    /// L2 § 1 (spec values as defaults).
+    #[serde(default = "ValueCfg::default_club")]
+    pub club: i64,
+    #[serde(default = "ValueCfg::default_arcade")]
+    pub arcade: i64,
+    #[serde(default = "ValueCfg::default_noodle_bar")]
+    pub noodle_bar: i64,
+    #[serde(default = "ValueCfg::default_fight_pit")]
+    pub fight_pit: i64,
+    #[serde(default = "ValueCfg::default_den")]
+    pub den: i64,
+    #[serde(default = "ValueCfg::default_lounge")]
+    pub lounge: i64,
+    #[serde(default = "ValueCfg::default_fab")]
+    pub fab: i64,
+}
+
+impl ValueCfg {
+    fn default_club() -> i64 {
+        600
+    }
+    fn default_arcade() -> i64 {
+        300
+    }
+    fn default_noodle_bar() -> i64 {
+        180
+    }
+    fn default_fight_pit() -> i64 {
+        400
+    }
+    fn default_den() -> i64 {
+        350
+    }
+    fn default_lounge() -> i64 {
+        1400
+    }
+    fn default_fab() -> i64 {
+        1500
+    }
 }
 
 /// D48: flat terms on each corp order's score.
@@ -1228,6 +1464,15 @@ pub struct CorpsCfg {
     pub residents_per_clinic: u32,
     /// M13 D16: likewise Garages.
     pub residents_per_garage: u32,
+    /// L2 (plan L5): `Register`'s per-capita targets of the leisure kinds
+    /// (the spec's `residents_per` table as flat keys), read only with
+    /// `jobs::on`.
+    pub residents_per_club: u32,
+    pub residents_per_arcade: u32,
+    pub residents_per_noodle: u32,
+    pub residents_per_pit: u32,
+    pub residents_per_den: u32,
+    pub residents_per_lounge: u32,
     /// M11 phase 4: a flat term on the Found goal's score (calibration knob).
     #[serde(default)]
     pub found_flat: f32,
@@ -1298,7 +1543,22 @@ impl CorpsCfg {
             shock_severity_rethink: 0.5,
             bankrupt_days: 14,
             incorporate_buildings: 2,
-            found_cost: FoundCostCfg { bar: 300, home: 400, hotel: 250, clinic: 500, garage: 600, lab: 800, feed: 500 },
+            found_cost: FoundCostCfg {
+                bar: 300,
+                home: 400,
+                hotel: 250,
+                clinic: 500,
+                garage: 600,
+                lab: 800,
+                feed: 500,
+                club: 400,
+                arcade: 200,
+                noodle_bar: 120,
+                fight_pit: 300,
+                den: 250,
+                lounge: 900,
+                fab: 900,
+            },
             wholesale: 2,
             contract_per_guard_day: 10,
             security_guards: 6,
@@ -1317,6 +1577,13 @@ impl CorpsCfg {
                 garage: 10,
                 lab: 0,
                 feed: 0,
+                club: 10,
+                arcade: 4,
+                noodle_bar: 2,
+                fight_pit: 4,
+                den: 4,
+                lounge: 20,
+                fab: 15,
             },
             value: ValueCfg {
                 farm: 1000,
@@ -1326,6 +1593,13 @@ impl CorpsCfg {
                 garage: 800,
                 lab: 1200,
                 feed: 800,
+                club: 600,
+                arcade: 300,
+                noodle_bar: 180,
+                fight_pit: 400,
+                den: 350,
+                lounge: 1400,
+                fab: 1500,
             },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
@@ -1337,6 +1611,12 @@ impl CorpsCfg {
             residents_per_hotel: 800,
             residents_per_clinic: 700,
             residents_per_garage: 700,
+            residents_per_club: 600,
+            residents_per_arcade: 600,
+            residents_per_noodle: 120,
+            residents_per_pit: 1000,
+            residents_per_den: 800,
+            residents_per_lounge: 2000,
             found_flat: 0.0,
             hoard_tilt: 0.1,
             megacorp: Vec::new(),
@@ -3551,6 +3831,254 @@ impl LifeCfg {
     }
 }
 
+/// L2 (plan L5): the master switch of the living city.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LivingCfg {
+    pub enabled: bool,
+}
+
+impl Default for LivingCfg {
+    fn default() -> Self {
+        LivingCfg::off()
+    }
+}
+
+impl LivingCfg {
+    pub fn off() -> LivingCfg {
+        LivingCfg { enabled: false }
+    }
+}
+
+/// L2 § 1: the venues and Fabs seeded at day 0 (`jobs::seed_venues`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SeedVenuesCfg {
+    pub club: u32,
+    pub arcade: u32,
+    pub noodle_bar: u32,
+    pub fight_pit: u32,
+    pub den: u32,
+    pub lounge: u32,
+    pub fab: u32,
+}
+
+impl Default for SeedVenuesCfg {
+    fn default() -> Self {
+        SeedVenuesCfg { club: 3, arcade: 3, noodle_bar: 10, fight_pit: 2, den: 2, lounge: 1, fab: 2 }
+    }
+}
+
+impl SeedVenuesCfg {
+    pub fn count(&self, kind: BuildingKind) -> u32 {
+        match kind {
+            BuildingKind::Club => self.club,
+            BuildingKind::Arcade => self.arcade,
+            BuildingKind::NoodleBar => self.noodle_bar,
+            BuildingKind::FightPit => self.fight_pit,
+            BuildingKind::Den => self.den,
+            BuildingKind::Lounge => self.lounge,
+            BuildingKind::Fab => self.fab,
+            _ => 0,
+        }
+    }
+}
+
+/// L2 § 1 `[jobs]` (plan L5: `LivingJobsCfg`; `JobsCfg` is `[world.jobs]`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LivingJobsCfg {
+    pub enabled: bool,
+    pub seed_venues: SeedVenuesCfg,
+    /// Of `found_cost`: a refit of a derelict Block.
+    pub refit_frac: f32,
+    pub fab_yield: f32,
+    pub fab_skill_floor: f32,
+    pub fab_skill_slope: f32,
+    /// Coins imported in 14 days by a Tech corp's own sellers before its
+    /// `Grow` builds a Fab.
+    pub fab_import_trigger: i64,
+    pub scrap_per_part: u32,
+    /// Litter units a sweeper clears per hour of `Sweep`.
+    pub sweep_per_hour: u32,
+    /// Plan L3: a Market's full staff with jobs on (`[buildings]
+    /// market.staff` stays the off value).
+    pub market_staff: u32,
+    /// Plan L3: a Bar's.
+    pub bar_staff: u32,
+    /// Plan L8: Sanitation sweeps its beat (false: TendGraves and the D23 ledger).
+    pub sweep: bool,
+}
+
+impl Default for LivingJobsCfg {
+    fn default() -> Self {
+        LivingJobsCfg::off()
+    }
+}
+
+impl LivingJobsCfg {
+    pub fn off() -> LivingJobsCfg {
+        LivingJobsCfg {
+            enabled: false,
+            seed_venues: SeedVenuesCfg::default(),
+            refit_frac: 0.5,
+            fab_yield: 0.6,
+            fab_skill_floor: 0.6,
+            fab_skill_slope: 0.8,
+            fab_import_trigger: 300,
+            scrap_per_part: 4,
+            sweep_per_hour: 6,
+            market_staff: 12,
+            bar_staff: 5,
+            sweep: true,
+        }
+    }
+}
+
+/// L2 § 1: a venue's price by tier (Sump, Mid, Spire); 0 = not sold there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PriceBaseCfg {
+    pub club: [i64; 3],
+    pub arcade: [i64; 3],
+    /// A NoodleBar meal: the Market's price plus this.
+    pub noodle_bar_markup: i64,
+    pub fight_pit: [i64; 3],
+    pub den: [i64; 3],
+    pub lounge: [i64; 3],
+}
+
+impl Default for PriceBaseCfg {
+    fn default() -> Self {
+        PriceBaseCfg {
+            club: [0, 5, 12],
+            arcade: [2, 3, 6],
+            noodle_bar_markup: 1,
+            fight_pit: [3, 0, 0],
+            den: [2, 3, 0],
+            lounge: [0, 0, 25],
+        }
+    }
+}
+
+impl PriceBaseCfg {
+    /// The tier price of a leisure kind (a NoodleBar's is its markup).
+    pub fn of(&self, kind: BuildingKind, tier: u8) -> i64 {
+        let t = usize::from(tier.min(2));
+        match kind {
+            BuildingKind::Club => self.club[t],
+            BuildingKind::Arcade => self.arcade[t],
+            BuildingKind::NoodleBar => self.noodle_bar_markup,
+            BuildingKind::FightPit => self.fight_pit[t],
+            BuildingKind::Den => self.den[t],
+            BuildingKind::Lounge => self.lounge[t],
+            _ => 0,
+        }
+    }
+}
+
+/// L2 § 1-2 `[leisure]`. Phase 1 reads the price table and the front
+/// markup; phase 2 owns `enabled` and the rest.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LeisureCfg {
+    pub enabled: bool,
+    pub price_base: PriceBaseCfg,
+    pub front_markup: f32,
+}
+
+impl Default for LeisureCfg {
+    fn default() -> Self {
+        LeisureCfg::off()
+    }
+}
+
+impl LeisureCfg {
+    pub fn off() -> LeisureCfg {
+        LeisureCfg { enabled: false, price_base: PriceBaseCfg::default(), front_markup: 1.2 }
+    }
+}
+
+/// L2 § 1 `[budget]`: the Treasury's band and public works.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BudgetCfg {
+    pub enabled: bool,
+    /// `[lo, hi]` Treasury coins.
+    pub band: [i64; 2],
+    /// Plan key: days in a row on one side before the band acts (spec 3).
+    pub band_hold_days: u16,
+    pub works_step: u16,
+    pub works_max: u16,
+    pub upkeep_step: f32,
+    pub upkeep_floor: f32,
+}
+
+impl Default for BudgetCfg {
+    fn default() -> Self {
+        BudgetCfg::off()
+    }
+}
+
+impl BudgetCfg {
+    pub fn off() -> BudgetCfg {
+        BudgetCfg {
+            enabled: false,
+            band: [30_000, 60_000],
+            band_hold_days: 3,
+            works_step: 10,
+            works_max: 120,
+            upkeep_step: 0.05,
+            upkeep_floor: 0.3,
+        }
+    }
+}
+
+/// L2 § 1 the export hook's per-good numbers (Food, Parts, Data).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExportGoodsCfg {
+    pub food: i64,
+    pub parts: i64,
+    pub data: i64,
+}
+
+/// L2 § 1 `[export]`: the World account buys a slice of Food, Parts, Data.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ExportCfg {
+    pub enabled: bool,
+    pub treasury_ref: i64,
+    pub cap_per_day: ExportGoodsCfg,
+    pub price: ExportGoodsCfg,
+    /// A corp Farm's food kept back from export.
+    pub export_floor: u32,
+    /// Plan key: a Fab's Parts kept back.
+    pub parts_floor: u32,
+    /// Plan key (deviation: M14 has no Data sell floor): a Lab's Data kept back.
+    pub data_floor: u32,
+}
+
+impl Default for ExportCfg {
+    fn default() -> Self {
+        ExportCfg::off()
+    }
+}
+
+impl ExportCfg {
+    pub fn off() -> ExportCfg {
+        ExportCfg {
+            enabled: false,
+            treasury_ref: 20_000,
+            cap_per_day: ExportGoodsCfg { food: 50, parts: 20, data: 5 },
+            price: ExportGoodsCfg { food: 3, parts: 18, data: 40 },
+            export_floor: 200,
+            parts_floor: 20,
+            data_floor: 100,
+        }
+    }
+}
+
 impl Config {
     /// Locate the assets directory and parse `config.toml`.
     ///
@@ -3668,8 +4196,9 @@ impl Config {
         // and so is L1b's food price (the v1 economy prices at 3).
         self.life = LifeCfg::off();
         self.economy.price_base = 3.0;
-        // M14 V44: no Virt plane, Labs, ICE, tech caps; M15 W44: no word.
-        self.virt_off().word_off()
+        // M14 V44: no Virt plane, Labs, ICE, tech caps; M15 W44: no word;
+        // L2 (plan L5): no living city.
+        self.virt_off().word_off().living_off()
     }
 
     /// M14 (plan V44, V46): every M14 section `off()`: no relink, runs, ICE
@@ -3741,8 +4270,19 @@ impl Config {
         c.stims = StimsCfg::off();
         c.robots = RobotsCfg::off();
         // M14 V44: the parity table never saw a Researcher or a runner;
-        // M15 W44: nor a rumour.
-        c.virt_off().word_off()
+        // M15 W44: nor a rumour; L2 (plan L17): nor a venue.
+        c.virt_off().word_off().living_off()
+    }
+
+    /// L2 (plan L5, L32): every L2 section `off()` (`--l2-off`): no
+    /// venues, Fabs, staffing overrides, Sweep, band or export.
+    pub fn living_off(mut self) -> Config {
+        self.living = LivingCfg::off();
+        self.jobs = LivingJobsCfg::off();
+        self.leisure = LeisureCfg::off();
+        self.budget = BudgetCfg::off();
+        self.export = ExportCfg::off();
+        self
     }
 
     /// The same city at `n` residents: jobs, opening stocks, the Treasury, the

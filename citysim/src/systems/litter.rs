@@ -223,6 +223,24 @@ pub fn clean_dirtiest(world: &mut World, d: DistrictId, units: u32) -> u32 {
     clean_tiles(world, tiles, units)
 }
 
+/// L2 L8 (pure): district `d`'s dirtiest street tile, ties nearest its
+/// centroid, then the lower grid index; with no litter, the street tile
+/// nearest the centroid.
+pub fn dirtiest_tile(world: &World, d: DistrictId) -> Option<TilePos> {
+    let dist = world.districts.get(d.index())?;
+    let w = world.map.w();
+    let centroid = dist.centroid;
+    dist.streets
+        .iter()
+        .map(|&i| {
+            let p = TilePos { x: (i as usize % w) as u8, y: (i as usize / w) as u8 };
+            let v = world.litter.get(i as usize).copied().unwrap_or(0);
+            (std::cmp::Reverse(v), p.manhattan(centroid), i, p)
+        })
+        .min()
+        .map(|(_, _, _, p)| p)
+}
+
 /// D24: `units` off the street tiles within Chebyshev `r` of `door`.
 pub fn clean_around(world: &mut World, door: TilePos, r: u8, units: u32) -> u32 {
     if units == 0 {

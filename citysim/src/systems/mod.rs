@@ -2,7 +2,8 @@
 //! calls them in the fixed order
 //! `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
 //! ownership, assets, tech, classes, districts, economy, bind, word, law,
-//! social, gang, corp_brain, demography, stats` (M15 W47: `word` after
+//! social, gang, corp_brain, living, demography, stats` (L2 L36: `living`
+//! holds every L2 daily and hourly pass; M15 W47: `word` after
 //! `bind`, its midnight chain of pools, hearing, kin, reputation,
 //! competence, grudges and vendettas, and the Hunt's daily pass; phase 3:
 //! `hunt::tick` every tick over the Hunts). `districts` also runs the street's nightly pass at
@@ -15,6 +16,7 @@
 
 pub mod assets;
 pub mod bind;
+pub mod budget;
 pub mod chrome;
 pub mod classes;
 pub mod competence;
@@ -30,14 +32,17 @@ pub mod gang;
 pub mod gossip;
 pub mod grudges;
 pub mod hunt;
+pub mod jobs;
 pub mod law;
 pub mod law_brain;
 pub mod life;
 pub mod litter;
+pub mod living;
 pub mod lod;
 pub mod memory;
 pub mod moves;
 pub mod news;
+pub mod outside;
 pub mod ownership;
 pub mod plan;
 pub mod raid;

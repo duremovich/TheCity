@@ -525,7 +525,7 @@ pub struct World {
     pub by_tier: [Vec<EntityId>; 3],
     /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; 10],
+    pub by_role: [Vec<EntityId>; 17],
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -647,6 +647,39 @@ pub struct World {
     /// sentinel on the data.
     #[serde(default)]
     pub save_version: u8,
+    // --- Life pass L2 phase 1 (plan L4, L10, L11): every field below is
+    // written only behind an L2 `on()`; at its default it is not saved.
+    /// L2 L10: the Treasury band's state.
+    #[serde(default, skip_serializing_if = "crate::living::CityBudget::is_default")]
+    pub budget: crate::living::CityBudget,
+    /// L2 L11: the outside world's account book (the World account).
+    #[serde(default, skip_serializing_if = "crate::outside::Outside::is_empty")]
+    pub outside: crate::outside::Outside,
+    /// L2 L9: scrap picked by scavengers, turned into Recycler Parts at midnight.
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub scrap: u32,
+    /// L2 L4: imports by corp, public-works hires, today's sweepers.
+    #[serde(default, skip_serializing_if = "crate::living::JobsBook::is_empty")]
+    pub jobs_book: crate::living::JobsBook,
+    /// L2 L10: open public-works vacancies at the Recycler (a hire into one
+    /// joins `jobs_book.works`).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub works_vacancies: u16,
+    /// L2 L7: the venues and Fabs were seeded (at `World::new`, or at the
+    /// first midnight after loading an older save with L2 on).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub venues_seeded: bool,
+    /// L2 L7: seeding deferred to the next midnight (`living::run`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub venues_due: bool,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }
 
 /// `skip_serializing_if` for a component store with nothing in it.
@@ -945,6 +978,13 @@ impl World {
             next_story_id: 0,
             feeds_seeded: false,
             save_version: crate::save::SAVE_VERSION,
+            budget: Default::default(),
+            outside: Default::default(),
+            scrap: 0,
+            jobs_book: Default::default(),
+            works_vacancies: 0,
+            venues_seeded: false,
+            venues_due: false,
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -974,6 +1014,9 @@ impl World {
         // M15 W31: The Unplugged on a Sump Central derelict (no RNG), before
         // the plane links, so its Chapel has a node from the start.
         systems::creeds::seed_unplugged(&mut w);
+        // L2 (plan L7): the venues and Fabs on the Lots left (no RNG), after
+        // the Chapel and before the plane links, so each has a node.
+        systems::jobs::seed_venues(&mut w);
         systems::virt::relink(&mut w);
         systems::virt::seed_ice(&mut w);
         // M15 W28: every corp's and the Law's opening competence.
@@ -1033,6 +1076,7 @@ impl World {
                     last_door_open: None,
                     label: None,
                     feed: None,
+                    venue: None,
                 },
             );
             match def.kind {
@@ -1255,6 +1299,7 @@ impl World {
                         hired_tick: 0,
                         struck_shift: None,
                         premium: 1.0,
+                        paid_once: true,
                     },
                 );
             }
@@ -1556,9 +1601,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 10], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; 17], StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; 10] = Default::default();
+        let mut roles: [Vec<EntityId>; 17] = Default::default();
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -2012,7 +2057,8 @@ impl World {
     /// One in-game minute, systems in the fixed order
     /// `commands, time, lod, needs, memory, mood, think, plan, exec, virt,
     /// ownership, assets, tech, classes, districts, economy, bind, word, law,
-    /// social, gang, corp_brain, demography, stats` (M14 V39: `virt` relinks
+    /// social, gang, corp_brain, living, demography, stats` (L2 L36: `living`
+    /// holds every L2 daily and hourly pass; M14 V39: `virt` relinks
     /// when dirty and pops run steps; `tech` is the plane's midnight pass;
     /// M15 W47: `word`'s midnight chain after the binder names its holes). The assets pass (M13 D9) runs at
     /// midnight right after ownership's, so upkeep and finance see the same
@@ -2044,6 +2090,7 @@ impl World {
         systems::social::run(self);
         systems::gang::run(self);
         systems::corp_brain::run(self);
+        systems::living::run(self);
         systems::demography::run(self);
         systems::stats::run(self);
         self.tick += 1;

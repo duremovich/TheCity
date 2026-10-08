@@ -21,6 +21,9 @@ pub struct LogState {
     pub unattributed: bool,
 }
 
+/// L2 (plan L35): the living city's events.
+pub const AMBER: Color32 = Color32::from_rgb(0xE0, 0xA0, 0x30);
+
 fn kind_colour(kind: EventKind) -> Color32 {
     match kind {
         EventKind::Theft
@@ -100,6 +103,8 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Story
         | EventKind::Planted
         | EventKind::Buried => super::word::CRIMSON,
+        // L2 (plan L35): every L2 kind in amber.
+        EventKind::Refit | EventKind::Exported | EventKind::WorksPosted => AMBER,
         _ => Color32::LIGHT_GRAY,
     }
 }

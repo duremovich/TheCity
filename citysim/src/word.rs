@@ -314,6 +314,18 @@ pub enum WordNs {
     Hunt,
     Skill,
     Story,
+    /// L2 (plan L31): Statistical leisure (phase 2).
+    Leisure,
+    /// L2: a Gamble at a venue, street dice (phase 2).
+    Gamble,
+    /// L2: a bout's winner and the spectators' sides (phase 2).
+    Bout,
+    /// L2: faction violence per agent-day (phase 4).
+    FViolence,
+    /// L2: the Statistical GangWork day (phase 3).
+    GangHour,
+    /// L2: held prisoners' meetings and pitch (phase 3).
+    Held,
 }
 
 // ---------------------------------------------------------------------------

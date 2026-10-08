@@ -809,7 +809,10 @@ fn stat_store_food(world: &mut World, id: EntityId) {
 
 fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     let tick = world.tick;
-    let Some(job) = world.comp::<Job>(id).cloned() else {
+    let job = world.comp::<Job>(id).cloned();
+    // L2 fix round: a hire whose job has not paid yet still decides the dole
+    // (`economy::dole_eligible`; with L2 off, only the jobless).
+    if job.is_none() || economy::dole_eligible(world, id) {
         // The dole, paid directly, decided once a day in the Work phase as a
         // Full agent decides it (M10; drawing it daily regardless drained the
         // Treasury and left the wages unpaid): its Earn goal is satisfied
@@ -846,8 +849,8 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
                 }
             }
         }
-        return;
-    };
+    }
+    let Some(job) = job else { return };
     let key = job.shift_key_at(tick);
     if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::is_workday(key) {
         return;
@@ -859,6 +862,12 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     if job.role == Role::Farmer {
         if let Some(farm) = job.employer {
             economy::accrue_farm_work(world, id, farm, u64::from(TICKS_PER_HOUR as u32));
+        }
+    }
+    // L2 L9: a Statistical Fab Tech's hour on shift.
+    if job.role == Role::Fabber {
+        if let Some(fab) = job.employer {
+            crate::systems::jobs::accrue_fab_work(world, id, fab, u64::from(TICKS_PER_HOUR as u32));
         }
     }
     // An hour of co-work drifts each pair of co-workers as `social`'s

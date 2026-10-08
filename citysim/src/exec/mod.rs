@@ -867,6 +867,13 @@ impl World {
             // M11 D13: the wage desk (the Hall for a city job).
             LocationKey::Workplace => target
                 .filter(|&t| self.comp::<Building>(t).is_some_and(|b| b.kind == K::SecurityOffice))
+                // L2: a venue's or Fab's staff work at their employer (a
+                // city-owned one's wage desk is the Hall).
+                .or_else(|| {
+                    self.comp::<crate::components::Job>(agent)
+                        .and_then(|j| j.employer)
+                        .filter(|&e| crate::systems::jobs::is_l2_building(self, e))
+                })
                 .or_else(|| self.wage_desk(agent)),
             // M12 D21: the booked Hotel, else the one the agent can reach and pay.
             LocationKey::Hotel => target
@@ -912,7 +919,11 @@ impl World {
             // M15 W19: the Hunt's venue, then its intel building.
             LocationKey::Intel => crate::systems::hunt::intel_building(self, agent),
             // M13 D26: a vehicle is reached on the street outside its door.
-            LocationKey::Anywhere | LocationKey::Street | LocationKey::RaidTarget | LocationKey::Vehicle => None,
+            LocationKey::Anywhere
+            | LocationKey::Street
+            | LocationKey::RaidTarget
+            | LocationKey::Vehicle
+            | LocationKey::Beat => None,
         }
     }
 
@@ -942,6 +953,8 @@ impl World {
             LocationKey::Vehicle => target.and_then(|v| crate::systems::vehicles::vehicle_stand(self, v)),
             // M15 W19: a street intel (a database sighting's tile).
             LocationKey::Intel => crate::systems::hunt::intel_tile(self, agent),
+            // L2 L8: the beat's dirtiest street tile.
+            LocationKey::Beat => crate::systems::jobs::beat_tile(self, agent),
             _ => None,
         }
     }

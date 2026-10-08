@@ -663,7 +663,7 @@ pub fn dole_in_place(world: &mut World) {
         .filter(|&a| {
             world.comp::<Brain>(a).is_some_and(|b| {
                 b.lod != crate::components::Lod::Statistical && !b.emigrating && b.last_dole_day != Some(today)
-            }) && !world.has::<Job>(a)
+            }) && crate::systems::economy::dole_eligible(world, a)
                 && !world.has::<Sentence>(a)
                 && !execs.contains(&a)
                 && crate::systems::demography::is_adult(world, a)

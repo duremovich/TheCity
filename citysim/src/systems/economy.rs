@@ -385,6 +385,12 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
     };
     let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
+    // L2 fix round: the first wage ends the hire's dole.
+    if paid > 0 {
+        if let Some(j) = world.comp_mut::<Job>(agent).filter(|j| !j.paid_once) {
+            j.paid_once = true;
+        }
+    }
     if payer.is_some() && tax > 0 {
         ownership::pay(world, payer, None, tax, Flow::Tax);
     }
@@ -453,6 +459,24 @@ pub fn dismiss(world: &mut World, agent: EntityId, building: Option<EntityId>, t
 /// Remove the Job (posting a vacancy), drop the plan, log the event.
 pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     let Some(job) = world.vacate_job(agent) else { return };
+    // L2 (phase 1 deviation): with jobs on, an employer who cannot cover a
+    // day's wage posts no vacancy for the unpaid quitter (a business that
+    // cannot pay does not hire: phase 1's venues earned nothing yet, and
+    // every rehire went a week unpaid without the dole).
+    if reason == "unpaid" && crate::systems::jobs::on(world) {
+        if let Some(e) = job.employer {
+            if world.purse(world.owner_of(e)) < job.wage_per_day {
+                if let Some(v) = world.vacancies.get_mut(&e) {
+                    if let Some(i) = v.iter().rposition(|&r| r == job.role) {
+                        v.remove(i);
+                    }
+                    if v.is_empty() {
+                        world.vacancies.remove(&e);
+                    }
+                }
+            }
+        }
+    }
     crate::systems::life::note_quit(world, agent, job.employer);
     if let Some(b) = world.comp_mut::<Brain>(agent) {
         b.clear_plan();
@@ -461,13 +485,23 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     world.push_event(EventKind::Quit, &[agent], format!("{name} quit as {} ({reason})", job.role.label()));
 }
 
+/// Who may draw the dole: the jobless; with `jobs::on` also a Job holder
+/// whose job has not yet paid its first wage (L2 fix round). With jobs off
+/// every Job is `paid_once`, so this is "has no Job".
+pub fn dole_eligible(world: &World, agent: EntityId) -> bool {
+    match world.comp::<Job>(agent) {
+        None => true,
+        Some(j) => crate::systems::jobs::on(world) && !j.paid_once,
+    }
+}
+
 /// `CollectDole` at the Hall, once per day, while the Treasury is not negative.
 pub fn collect_dole(world: &mut World, agent: EntityId) -> bool {
     let day = world.day();
     let mut dole = i64::from(world.levers.dole_per_day);
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let already = world.comp::<Brain>(agent).is_some_and(|b| b.last_dole_day == Some(day));
-    if already || treasury < 0 || dole <= 0 || world.has::<Job>(agent) {
+    if already || treasury < 0 || dole <= 0 || !dole_eligible(world, agent) {
         return false;
     }
     // L1: the dole accrues: one visit pays the days since the last (up to

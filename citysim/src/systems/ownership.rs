@@ -192,6 +192,17 @@ pub enum Flow {
     Ads,
     /// M15 W40: a Spin corp's plant or bury payment to a Feed's owner (taxed).
     Plant,
+    /// L2 L12: a venue's entry or meal, visitor -> owner (taxed).
+    Leisure,
+    /// L2 L12: a gambling loss or a bout's bet, loser -> house (taxed).
+    Gamble,
+    /// L2 L12 (plan): a house paying a win, street dice (untaxed).
+    GambleWin,
+    /// L2 L12: a gang's weekly cut to its members (untaxed).
+    Tribute,
+    /// L2 L11: the World account's purchase (untaxed at the crossing; the
+    /// owner pays the sale's tax explicitly).
+    Export,
 }
 
 impl Flow {
@@ -221,6 +232,8 @@ impl Flow {
                 | Flow::Terminal
                 | Flow::Ads
                 | Flow::Plant
+                | Flow::Leisure
+                | Flow::Gamble
         )
     }
 }
@@ -260,6 +273,15 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Terminal => row.virt.flow_terminal += coins,
         Flow::Ads => row.word.flow_ads += coins,
         Flow::Plant => row.word.flow_plant += coins,
+        // L2 L12, L34: `flow_gamble` is net to houses (losses - wins).
+        Flow::Leisure => row.living.flow_leisure += coins,
+        Flow::Gamble => row.living.flow_gamble += coins,
+        Flow::GambleWin => {
+            row.living.flow_gamble -= coins;
+            row.living.flow_gamble_win += coins;
+        }
+        Flow::Tribute => row.living.flow_tribute += coins,
+        Flow::Export => row.living.flow_export += coins,
     }
 }
 
@@ -375,6 +397,36 @@ pub fn refund(world: &mut World, agent: EntityId, owner: Option<EntityId>, amoun
     world.purse_add(Some(agent), amount);
 }
 
+/// L2 L11 (M17 plan O6): coins cross into the city from an outside
+/// account: `from`'s treasury pays (never below 0), `to`'s purse gains,
+/// the ledger column moves, `outside.inbound` grows. Untaxed (an export's
+/// tax is the seller's explicit `pay`). Returns the coins moved.
+pub fn cross_in(
+    world: &mut World,
+    from: crate::outside::OutsideId,
+    to: Option<EntityId>,
+    amount: i64,
+    flow: Flow,
+) -> i64 {
+    if amount <= 0 {
+        return 0;
+    }
+    let Some(f) = world.outside.faction_mut(from) else { return 0 };
+    let moved = amount.min(f.treasury.max(0));
+    if moved <= 0 {
+        return 0;
+    }
+    f.treasury -= moved;
+    f.income_today -= moved;
+    world.outside.inbound += moved;
+    ledger(world, flow, moved);
+    world.purse_add(to, moved);
+    if to.is_some_and(|g| world.config.assets.enabled && world.has::<Gang>(g)) {
+        world.stats.current.gang_income += moved;
+    }
+    moved
+}
+
 /// Gross coins earned through a building today.
 pub fn credit(world: &mut World, building: EntityId, coins: i64) {
     if let Some(b) = world.comp_mut::<Building>(building) {
@@ -410,6 +462,13 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         BuildingKind::Garage => c.value.garage,
         BuildingKind::Lab => c.value.lab,
         BuildingKind::Feed => c.value.feed,
+        BuildingKind::Club => c.value.club,
+        BuildingKind::Arcade => c.value.arcade,
+        BuildingKind::NoodleBar => c.value.noodle_bar,
+        BuildingKind::FightPit => c.value.fight_pit,
+        BuildingKind::Den => c.value.den,
+        BuildingKind::Lounge => c.value.lounge,
+        BuildingKind::Fab => c.value.fab,
         _ => 0,
     }
 }
@@ -425,6 +484,14 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
         BuildingKind::Garage => Some(Role::Mechanic),
         BuildingKind::Lab => Some(Role::Researcher),
         BuildingKind::Feed => Some(Role::Reporter),
+        // L2 L2: one role per kind.
+        BuildingKind::Club => Some(Role::Host),
+        BuildingKind::Arcade => Some(Role::Attendant),
+        BuildingKind::NoodleBar => Some(Role::Cook),
+        BuildingKind::FightPit => Some(Role::Fighter),
+        BuildingKind::Den => Some(Role::Croupier),
+        BuildingKind::Lounge => Some(Role::Concierge),
+        BuildingKind::Fab => Some(Role::Fabber),
         _ => None,
     }
 }
@@ -1203,9 +1270,13 @@ fn upkeep(world: &mut World) {
         else {
             continue;
         };
-        let cost = up.for_building(kind, tier);
+        let mut cost = up.for_building(kind, tier);
         if owner.is_none() || cost <= 0 {
             continue;
+        }
+        // L2 L10: the band scales corp upkeep (a branch: off reads `cost`).
+        if owner.is_some_and(|o| world.has::<Corp>(o)) {
+            cost = crate::systems::budget::upkeep_cost(world, cost);
         }
         let now = world.tick;
         if owner.and_then(|o| world.comp::<Corp>(o)).and_then(|c| c.upkeep_grace_until).is_some_and(|t| now < t) {
@@ -1272,7 +1343,8 @@ fn replacement_exec(world: &World, corp: EntityId) -> Option<EntityId> {
 
 /// D17: an agent-owned Bar short of bartenders posts one vacancy a day.
 fn bar_vacancies(world: &mut World) {
-    let staff = world.config.buildings.bar.staff as usize;
+    // L2 L3: `[jobs] bar_staff` with jobs on.
+    let staff = crate::systems::jobs::full_staff(world, BuildingKind::Bar);
     if staff == 0 {
         return;
     }

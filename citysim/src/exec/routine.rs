@@ -37,6 +37,20 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Researcher => LocationKey::Workplace,
         // M15 W36: a Feed's staff likewise.
         Role::Reporter => LocationKey::Workplace,
+        // L2 L2: the venues' and Fabs' staff likewise.
+        Role::Host | Role::Attendant | Role::Cook | Role::Fighter | Role::Croupier | Role::Concierge | Role::Fabber => {
+            LocationKey::Workplace
+        }
+    }
+}
+
+/// L2 L8: the on-shift action of a role: `Sweep` for Sanitation with
+/// `jobs::sweep_on`, else `ActionKind::work_for`.
+pub fn work_action(world: &World, role: Role) -> ActionKind {
+    if role == Role::Sanitation && crate::systems::jobs::sweep_on(world) {
+        ActionKind::Sweep
+    } else {
+        ActionKind::work_for(role)
     }
 }
 
@@ -45,6 +59,9 @@ pub fn workplace_key(role: Role) -> LocationKey {
 pub fn workplace_key_for(world: &World, _agent: EntityId, job: &Job) -> LocationKey {
     if crate::systems::law::job_is_private_guard(world, job) {
         LocationKey::Workplace
+    } else if job.role == Role::Sanitation && crate::systems::jobs::sweep_on(world) {
+        // L2 L8: a sweeper's shift is on its beat.
+        LocationKey::Beat
     } else {
         workplace_key(job.role)
     }

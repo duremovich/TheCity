@@ -423,7 +423,13 @@ pub fn sanitation(world: &mut World) {
     // The credit: yesterday's beats, yesterday's shifts.
     let per = world.config.litter.clean_per_shift;
     let mut units = vec![0u32; n];
+    // L2 L8: a sweeper whose Sweep already cleaned its beat yesterday is
+    // not credited again (Statistical sweepers keep the ledger credit).
+    let swept = std::mem::take(&mut world.jobs_book.swept);
     for &s in &workers {
+        if swept.contains(&s) {
+            continue;
+        }
         let Some(&d) = world.sweep_beats.get(&s) else { continue };
         let worked = world.comp::<Job>(s).is_some_and(|j| {
             let yesterday = j.shift_key_at(world.tick.saturating_sub(1));
@@ -568,7 +574,8 @@ pub fn gang_cleaning(world: &mut World) {
 /// day, toward `levers.sanitation_count`; the Recycler employs them, the
 /// Treasury pays them.
 pub fn reconcile_sanitation(world: &mut World) {
-    let want = usize::from(world.levers.sanitation_count);
+    // L2 L10: public works add on top of the M12 headcount.
+    let want = usize::from(world.levers.sanitation_count) + world.jobs_book.works.len();
     let have = sweepers(world);
     let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
     if have.len() < want {

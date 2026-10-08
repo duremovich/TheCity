@@ -9,7 +9,9 @@ use crate::world::World;
 /// older saves (`World::save_version`, 0 before the field existed).
 /// 1: M15 (The Unplugged, corp competence); every save from M14 or
 /// earlier reads 0.
-pub const SAVE_VERSION: u8 = 1;
+/// 1: M15 (the review's explicit version); 2: L2 (venues, the Fab, the
+/// budget band, the export hook; phase 3 adds held prisoners and the ledger).
+pub const SAVE_VERSION: u8 = 2;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
@@ -35,6 +37,8 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     }
     // M15 W41: a save from before the Feeds (news on) gets the opening two.
     crate::systems::news::migrate(&mut world);
+    // L2 L7, L33: venues for an older save whose config turns jobs on.
+    crate::systems::jobs::migrate(&mut world);
     world.save_version = SAVE_VERSION;
     world.reload_names();
     Ok(world)

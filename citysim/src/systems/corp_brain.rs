@@ -93,11 +93,13 @@ pub struct VirtInputs {
 /// The building kinds that make up a niche.
 pub fn niche_kinds(n: Niche) -> &'static [BuildingKind] {
     match n {
-        Niche::Food => &[BuildingKind::Farm, BuildingKind::Market, BuildingKind::Bar],
+        // L2 L9: the NoodleBar rides the Food chain (static: none stands
+        // with L2 off, so every reader is unchanged then).
+        Niche::Food => &[BuildingKind::Farm, BuildingKind::Market, BuildingKind::Bar, BuildingKind::NoodleBar],
         Niche::Housing => &[BuildingKind::Home],
         Niche::Security => &[BuildingKind::SecurityOffice],
-        // M13 D17.
-        Niche::Tech => &[BuildingKind::Clinic, BuildingKind::Garage],
+        // M13 D17; L2 L9 the Fab.
+        Niche::Tech => &[BuildingKind::Clinic, BuildingKind::Garage, BuildingKind::Fab],
     }
 }
 
@@ -157,6 +159,15 @@ pub fn build_kind_in(world: &World, n: Niche) -> Option<BuildingKind> {
         Niche::Tech => Some(tech_build_kind(world)),
         _ => build_kind(n),
     }
+}
+
+/// L2 L9: `build_kind_in` for one corp: a Tech corp with no Fab whose own
+/// sellers imported over `fab_import_trigger` in 14 days builds a Fab.
+pub fn build_kind_for(world: &World, corp: EntityId, n: Niche) -> Option<BuildingKind> {
+    if n == Niche::Tech && crate::systems::jobs::wants_fab(world, corp) {
+        return Some(BuildingKind::Fab);
+    }
+    build_kind_in(world, n)
 }
 
 /// M13 D17: the city has fewer of the kind Tech would build than
@@ -233,6 +244,8 @@ pub fn shares(world: &World, niche: Niche) -> BTreeMap<EntityId, f32> {
         Niche::Tech => {
             let tech: Vec<EntityId> = niche_kinds(Niche::Tech)
                 .iter()
+                // L2: the Fab makes Parts, it sells no assets.
+                .filter(|&&k| k != BuildingKind::Fab)
                 .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
                 .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
                 .collect();
@@ -358,12 +371,15 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
             Niche::Security => sold_contracts(world, c, corp) as f32 / cfg.security_guards.max(1) as f32,
             // M13 D17: own 7-day sales ÷ (7 × tech_demand_ref × own Tech buildings).
             Niche::Tech => {
-                let sold: u32 = own_buildings
+                // L2: asset sellers only (a Fab sells no assets).
+                let sellers: Vec<&Building> = own_buildings
                     .iter()
                     .filter_map(|&b| world.comp::<Building>(b))
-                    .map(|bd| bd.asset_sales.iter().map(|&s| u32::from(s)).sum::<u32>())
-                    .sum();
-                let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * own_buildings.len().max(1) as f32;
+                    .filter(|bd| bd.kind != BuildingKind::Fab)
+                    .collect();
+                let sold: u32 =
+                    sellers.iter().map(|bd| bd.asset_sales.iter().map(|&s| u32::from(s)).sum::<u32>()).sum();
+                let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * sellers.len().max(1) as f32;
                 sold as f32 / reference
             }
         }
@@ -402,12 +418,14 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
                 .map(|(v, b)| (r, b, v))
         });
         let offer = weakest.map_or(0, |(_, _, v)| (v as f32 * cfg.acquire_premium).round() as i64);
-        let lots = match build_kind_in(world, n).and_then(|k| crate::systems::founding::found_cost(world, k)) {
+        let grow_kind = build_kind_for(world, corp, n);
+        let lots = match grow_kind.and_then(|k| crate::systems::founding::found_cost(world, k)) {
             // M13 D17 (phase 2): Tech grows only while its kind is under the
             // per-capita target `choose_kind` uses (`population ÷
             // residents_per_garage`); without it Zetatech built two idle
             // Garages in the first month on the corps' fleet orders.
-            Some(_) if n == Niche::Tech && !tech_room(world) => 0,
+            // L2 L9: a wanted Fab is not a seller: no per-capita gate.
+            Some(_) if n == Niche::Tech && grow_kind != Some(BuildingKind::Fab) && !tech_room(world) => 0,
             Some(cost) if c.treasury >= cost => lots_total,
             _ => 0,
         };
@@ -823,7 +841,8 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
     if kind == BuildingKind::SecurityOffice {
         world.config.corps.security_guards as usize
     } else {
-        world.config.buildings.for_kind(kind).staff as usize
+        // L2 L3: `[jobs] market_staff` / `bar_staff` with jobs on.
+        crate::systems::jobs::full_staff(world, kind)
     }
 }
 
@@ -906,7 +925,7 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     let now = world.tick;
     let cd = world.config.corps.grow_cooldown_days * TICKS_PER_DAY;
     let ready = world.comp::<Corp>(corp).is_some_and(|c| c.last_build_tick.is_none_or(|t| now.saturating_sub(t) >= cd));
-    let kind = build_kind_in(world, n);
+    let kind = build_kind_for(world, corp, n);
     let cost = kind.and_then(|k| crate::systems::founding::found_cost(world, k));
     let lots = i.niches.get(&n).map_or(0, |ni| ni.lots);
     if let (true, Some(kind), Some(cost), true) = (ready, kind, cost, lots > 0) {
