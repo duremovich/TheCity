@@ -536,3 +536,77 @@ Every new field is `#[serde(default)]` and the memory fields skip at their defau
 ## 15. Out of scope (M16 and later)
 
 Contracts, Fixers and hired guns, hits bought by an avenger too weak to hunt, hit squads on sightings, bounties and tracking tags, threats, extortion, blackmail, hostage-taking and fraud as leverage moves, fabricated stories and propaganda paid by gangs, poaching by threat, the law's accessory rule for a contract killing (M16); outside parents, scrip valued by reputation, reinforcements and the outside's view of a corp's honour (M17); the player, the dialogue layer as a renderer over the social state, story LOD following the player's circle and player × faction reputation beyond the pinned-agent cache (M18); Power and Water as goods, map layers and interiors, daemons, romance beyond the existing Court, and family feuds as a faction of their own.
+
+## Implemented: deviations
+
+Where the build departs from the text above. The numbered rows are the plan's Decisions table (`~/.claude/plans/m15-word-and-blood.md`, W1-W49); the rest are the phase commits' recorded deviations (8db658c, 367153b, 50963ac, fdb62d6) and phase 5's calibration calls (each changed value carries its reason and its before/after numbers as a comment in `assets/config.toml`). One line each. Every killing, beating, hunt, threat and story here is an abstract event between fictional agents: a seeded dice roll over structs, considerations and counters.
+
+### Decisions that changed the spec
+
+- **W1:** a rumour is a `MemoryEntry` with the spec's `deed`, `object`, `hops`, `conf`, `at` and a plan field `press` (a story's slant × 100), but rumours and sightings live in their own vector, `Memory.heard`; first-hand kinds stay in `Memory.entries`, so no M5-M14 reader ever sees a rumour.
+- **W2:** split caps, not shared: `entries` keeps 24 (8 Statistical) with the old eviction; `heard` holds 8 (3 Statistical), evicting the lowest `weight × conf`. Phase 1: `heard` is trimmed eagerly on a demotion to Statistical (the lazy rule left 8).
+- **W3:** `memory::deed_of(holder, entry)`; `Lost` alone is the Assaulted deed (no Fought/Lost pairing scan).
+- **W4:** `insert_heard` merges on `(deed, actor, object, day)`; phase 1: **only a killing contradicts** (other deeds with different actors are separate deeds: false contradictions ran 900-1,500 a day).
+- **W5:** `law::raise_crime_on` carries the deed's object apart from the living victim; a corp landlord is the subject of an eviction memory.
+- **W6:** pools per district as planned; `PoolEntry` gains `kin`, `told` and `district`.
+- **W7:** propagation at Chat, Drink, AskAround and the kin channel; never on `stat_chat` (parity).
+- **W8:** every M15 roll on a keyed word stream, never the world or agent streams; phase 1: the word streams use bits 62|60 (M14's runs use 62|61); distortion's district is the speaker's Home's.
+- **W9:** the legacy second-hand copies in `entries` retired in phase 3 (`legacy_second_hand = false`; `social::gossip` still draws to keep the stream); a rumour nudges an existing edge, never creates one.
+- **W10:** no `kin_cache`: kin ride the pool entry with a `told` list; a beating's kin capped at `kin_cap`.
+- **W11:** bodies hear one story entry a day too (W39); post-back from first-hand memories only.
+- **W12:** sightings in memory from phase 1, the `FactionDb` relay from phase 3; none inside the Precinct; guard sightings hourly. Relayed sightings are tagged, skipped by M14's runner readers and evicted first.
+- **W13:** `Reputation` saved; the rebuild skips stale entity ids (a reused index inherits nothing); a saved 30-day arrest log feeds the law's heat; `known_by` counts every memory with the agent as subject (the spec's reading; it reads higher than "who knows the deed"). Phase 5: **a gang's dread and heat read its members' mean**, not the spec's three most feared (hottest): every gang had three known killers by day 30, so all four read 0.83-1.00 and the fear and pressure terms saw no difference (below).
+- **W14:** the regard matrix over every live faction pair (up to 16 factions, not the spec's 12).
+- **W15:** grudges as a component, `rel_w` with the plan's `leader` 0.7 and `comrade` 0; phase 3 review: a noticing victim no longer learns its own wrong twice (`remember_crime` skips `on_learn` when the object is the holder). Phase 5: a fight's aggressor who loses forms no grudge on the one who fought back (`[grudges] aggressor_grudge_off`, `World::remember_no_grudge`; the memory is unchanged).
+- **W16:** inheritance and settlement as written; no `grudge_targets` index (one scan of the grudge store per death).
+- **W17:** `wronged_by` reads grudges ≥ `fight_grudge_min` from phase 3.
+- **W18:** vendettas generalise Retaliate (and M14's `retaliate_on`); `raid::expedition_rival` new. Phase 5: the god `DeclareVendetta` holds its feud open (`Vendetta.declared`, `[grudges] declared_days` 30): at `vendetta_norm` 10 two leaders' grudges no longer reach `vendetta_open`.
+- **W19:** Hunt and GuardBody bypass the planner; GuardBody waits with `StakeOut`.
+- **W20:** `HuntState.gap` cached at adoption (−2.5 % ticks/s otherwise); a Hunt on a dead target is kept until the next tick.
+- **W21:** intel as written.
+- **W22:** the strike, promotion and abandonment as written; `hunted_by` and `guards_of_corpse` derived and rebuilt on load.
+- **W23:** the Statistical pass as written (`stat_hunt_min` 0.45, phase 3).
+- **W24:** street silence as written.
+- **W25:** one primary social skill per adult (the spec's four independent draws gave ~20 % of adults a skill ≥ 0.8); the Skill stream keyed by index and generation; rust re-derives with the current personality, downward only.
+- **W26:** the resolver as written; the move kind is in the roll key; a refused brave target makes the actor an Enemy.
+- **W27:** extortion through Intimidate with `bias.intimidate` 0.8 (spec 0.5): success 0.76-0.84 by seed.
+- **W28:** competence terms **rank-normalised** (2 × the skill's percentile among adults at seed, `[competence] rank_norm`) instead of skill ÷ city mean, so the median corp reads multiplier 1.0 (the mean ratio left most corps below 1 and cost seed 42's Farm trucks); `TalentLost` needs a recorded departure (captain churn fired 15 a run).
+- **W29:** poaching as written; the gap is against the adult `job_search` would hire.
+- **W30:** taste and first impressions as written.
+- **W31:** The Unplugged seeded with its Chapel; past `[creeds] founders` 3 a Purist gang recruits only along a Friend, Family, Parent or Spouse edge (the open rule took the rivals' desperate recruits: 45 members by day 60 and M12's gang control broke). Membership runs 15-60 by seed and day.
+- **W32:** fear in Raid, Contest and LieLow only with the word on; `rep_flips` as written.
+- **W33:** honour in `renew_contracts` and `acquire` as written. Phase 5: honour now moves on contracts and acquisitions (below).
+- **W34:** `wanted_gang` ranks by `max(reports, round(heat × crackdown_reports))`.
+- **W35:** GuardBody as written; `grudges::prune_guards` daily (review).
+- **W36:** the Feed as written; Feed economics to break-even (phase 4: `wage_reporter` 4, `feed.staff` 1, `upkeep.feed` 0).
+- **W37:** stories as written; a Feed never runs its own owner's deeds (or its people's) unpaid; ads only from corps with cash ≥ 0.3 (charged to all, they bankrupted the thin NPC Holdings: 36 → 47); `Story.source` keeps a distorted story's deed actor (review).
+- **W38:** `press` saved (the spec said not).
+- **W39:** bodies read one story a day.
+- **W40:** **Spin is a side spend scored at midnight** (`Corp.spin_since`, `[news] spin_min` 0.2, gated on cash above the fleet reserve and work to do), not a tenth `CorpOrder`: as an order it took Research's slot (Research-built Labs 3/8 → 0-2/8). Plants pass the bury and censor filters; `plant_price` 60, `bury_price` 30. Phase 5: one plant per deed a day across all spinners (three corps had paid to plant the same story about the same man on the same day: 11-19 such plants a run, now 0-1).
+- **W41:** Feeds seeded as written; `feeds_seeded` set only when a Feed stood (review).
+- **W42:** the CLI keeps `--lever day=D:name=value`; the god commands as listed plus `grant_skill=dregs<n>:<skill>:<v>:suit`.
+- **W43:** the CSV columns as listed; `chain_max` reports a chain's length (chain + 1); `grudges` counts formed per day.
+- **W44:** saves as written; Law, Corp and Gang pending shocks and `World::corp_rethink` are now saved (phase 2: a save between a shock and its rethink diverged on load; present in the M14 city too); `World::save_version` 1 replaces the pre-M15 save detector (review).
+- **W45:** throughput: −4 to −7.5 % per phase by A/B; the gates read 5.0-7.9k ticks/s on the shared box (floor 4,000).
+- **W46:** `--word-off` reproduced the previous phase byte for byte at every phase (phase 4: 38,040 CSV cells, 174,493 event lines).
+- **W47:** the tick order as written.
+- **W48:** the kill watch as written.
+- **W49:** as written; the vendetta's god hold (W18) is new.
+
+### Phase deviations and knobs
+
+- Phase 1: heard stored as compact tuples; seed 42 hops max 4, second-hand 0.60, known_by of killers median 49; throughput −5.9 %, save +4.0 %.
+- Phase 2: seeds 42/1/2/3/43/44 gang income vs M14 +46/+9/−25/+42/+2/+15 % (The Unplugged spreads through families); Murders within 1.16× of M14; determinism fix (pending shocks saved).
+- Phase 3: `hunt_min` 0.5 → 0.85, `stat_hunt_min` 0.2 → 0.45, `hunt_kill_p` 0.5 → 0.3 (the spec values gave 826 Hunts, 38 revenge kills, Murders +28 %); the planner key widened (`coin_bucket` and `food_count` in 2 bits each). Gate devices: the M13 vehicles floor 140 → 130, the M13 episode-ended-by-law over 42-47, M14 TechGained a printed finding.
+- Phase 4: the overlay is on `J`; gate devices: the M14 day-120 node mean and Door-then-raid printed findings; M12 "allocation 2× ≥ 60 % outside Garrison" by majority over 42-47.
+- **Phase 5 calibration, scoped to dynamic range** (an axis or counter that reads the same for every faction carries no signal to its reader; bands stay printed findings under the 2026-10-07 gate doctrine). Measured on seeds 42/43/44, 120 days, before → after:
+  - grudges formed 20,728 / 19,185 / 18,125 → 5,236 / 5,183 / 5,939: every beating heard of formed one (friends hearing of a beating: 30,870 grudge hits on seed 42; beatings lost by the aggressor: 3,412). `[grudges] grudge_min` 0.15 → 0.35, `rel_w.own` 0.8 → 0.6, `[gossip] deed_sev.robbed` 0.3 → 0.6, `aggressor_grudge_off` on. Grudges now come from robberies (own, 0.36), killings (kin and friends) and kin told of a beating (the kin channel, conf ~1); a victim's own beating (0.30) no longer forms one.
+  - vendettas opened 54 / 48 / 58 → 8 / 8 / 7, open on day 120 28 / 25 / 27 → 7 / 8 / 7 (of 11-15 factions): `vendetta_norm` 3 → 10, `vendetta_open` 0.5 → 1.0.
+  - gang dread on day 120 0.63-0.94 / 0.50-0.98 / 0.83-0.98 → 0.07-0.71 / 0.15-0.68 / 0.30-0.66; gang heat 0.83-1.00 → 0.39-1.00 / 0.50-0.91 / 0.39-0.82: the members' mean (W13) and `[reputation] heat_scale` 2 → 10, `heat_wanted` 0.6 → 0.4 (any open report made an adult wanted at 0.6: heat ≥ 0.5 for 37 / 42 / 14 % of adults → 3.3 / 2.6 / 2.0 %, the spec band 0.5-4 %).
+  - honour: a kept Security contract is told as `Repaid` by the seller (`reach0.repaid` 0.1 → 0.3), an unpaid one as `Betrayed` by the client's owner, and a hostile buy-out of a solvent rival as `Betrayed` by the buyer. Corp honour spread over the run (mean / max) 0.18 / 0.40, 0.12 / 0.39, 0.25 / 0.67; on day 120 0.07-0.09 (before 0.00-0.15, at most one corp off 0.50). Contracts are few (30-50 bought a run, most cancelled by the buyer's Hunker), so `ContractLost` on honour stays 0 (a finding).
+  - Hunts: `hunt_min` 0.85 → 0.75 and `lethal_min` 0.75 → 0.85: with `hunt_min` above `lethal_min` every Hunt was lethal and only kin killings hunted; now a heavy grudge (a friend's killing, two robberies) hunts for a beating and a kin killing hunts to kill. Hunts 50 / 58 / 47 → 49 / 45 / 61, Avenged 5 / 12 / 6 → 18 / 9 / 9, revenge kills 2 / 5 / 1 → 1 / 2 / 2 (band 3-20, a finding).
+  - Spin: plants of a deed already planted that day 17 / 11 / 19 → 0-1; plants not against a corp 102 / 58 / 67 → 28 / 3 / 5 (the vendetta gangs had been the plant targets); the plant-opinion rule 7/13, 3/17, 6/23 → 33/55, 4/20, 13/27 (spec ≥ 50 %, a finding).
+  - Not changed, with the reason: the Feeds' score already prefers deeds (stories on 42-44: assaulted ~550, raided ~100, killed ~70-90, married 10-32, founded 2 of ~800); the distorted share stays 1.2 % (spec 3-15 %: the swap needs a gang or an Enemy in the district, and Statistical hearing, most of the denominator, never distorts; no reader); The Unplugged's size (`[creeds]` is outside phase 5's sections); `deed_sev.assaulted` 0.5 → 0.4 was tried and left (kin hear beatings at conf ~1, so it moved nothing).
+  - Murders against the `--word-off` run of the same binary: 47 / 44 / 46 against 41 / 48 / 47 (1.01× on the 42-44 sum; before 61 / 49 / 59, 1.24×); assaults 20.8-23.3 a day.
+- Phase 5 gate (`test_m15_word_seed_42`, the 2026-10-07 doctrine): seed 42 alone (ticks/s and the mechanism checks), 43-47 and the `--word-off` runs of 42-44 in threads. Asserted: a rumour at hops ≥ 4, a distorted rumour, watched killers sampled, `rep_flips`, dread reading deeds (Spearman > 0), the positional adults in the top decile of standing (**deviation**: the spec's "top decile ≥ 70 % execs, owners, leaders and the captain" needs ≥ 10 % of adults in a position; the city has ~20 of ~1,900, so it is asserted the other way round, ≥ 50 % of them in the top decile: 20/22), grudges, a Hunt, an Avenged, an inherited grudge, a Vendetta, extortion higher at dread ≥ 0.5, a Poached on 42-44, a `TalentLost` after a killing on 42-47, Feeds ≥ 2, stories, a Spin held ≥ 3 days with a plant and a bury on 42-44, an expulsion on 42-47, the gang dread and heat spread ≥ 0.1 (majority of 42-44), vendettas open under a fifth of the faction pairs, and the sanity bounds (Murders on the 42-44 sum ≤ 1.25× the `--word-off` sum, assaults ≤ 42.7 a day on 42-44, starvation, population, grudges ≤ 10,000, revenge kills ≤ 60, rare skills in (0, 0.2), ticks/s ≥ 4,000). Printed findings: the spec § 12 bands, Spearman ≥ 0.6, the top decile's composition, contracts lost on honour, extortion alone vs with an ally, the plant-opinion rule.
+- Phase 5 stat table, **not regenerated**: `calibrate` (the calibration city runs with the word off, so phase 5 changes nothing in it) writes a table that differs from the committed one in every row, and main's own source (4a6a396) writes the same new table: the committed table predates a later behaviour change, not phase 5. With the regenerated table the M10 gate's off-screen killings read 0 (≥ 1 asserted) and the M12 gate's gang control 0/6 seeds (≥ 3 asserted), and the `--word-off` Murders on 42-44 rose 41/48/47 → 53/50/62, so the committed table is kept; the regeneration is a base-city question (`docs/BIG_PICTURE_2026-10-07.md` § 4: off-screen residents are no longer murdered) for the next phase. `lod::test_kitted_vs_unkitted_parity` fails on main as on this phase (Full ratio 0.619 against Statistical 1.000: 4 and 4 Statistical violent deaths of 750, the same off-screen violence drought).

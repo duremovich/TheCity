@@ -433,6 +433,17 @@ pub fn vendettas(world: &mut World) {
     for (i, vd) in world.vendettas.iter_mut().enumerate() {
         vd.w = [get(vd.a, vd.b), get(vd.b, vd.a)];
         let gone = !live.contains(&vd.a) || !live.contains(&vd.b);
+        // A declared feud holds (at its declared weight) until its tick.
+        match vd.declared {
+            Some((until, dw)) if now < until => {
+                vd.w = [vd.w[0].max(dw), vd.w[1].max(dw)];
+                if !gone {
+                    continue;
+                }
+            }
+            Some(_) => vd.declared = None,
+            None => {}
+        }
         if gone || vd.w[0] + vd.w[1] < cfg.vendetta_close {
             ended.push(i);
         }
@@ -452,7 +463,14 @@ pub fn vendettas(world: &mut World) {
         let sum = get(lo, hi) + get(hi, lo);
         let open = world.vendettas.iter().any(|x| (x.a, x.b) == (lo, hi) || (x.a, x.b) == (hi, lo));
         if !open && sum >= cfg.vendetta_open && !opened.iter().any(|x: &Vendetta| (x.a, x.b) == (lo, hi)) {
-            opened.push(Vendetta { a: lo, b: hi, since: now, kills: [0, 0], w: [get(lo, hi), get(hi, lo)] });
+            opened.push(Vendetta {
+                a: lo,
+                b: hi,
+                since: now,
+                kills: [0, 0],
+                w: [get(lo, hi), get(hi, lo)],
+                declared: None,
+            });
         }
     }
     for vd in opened {
@@ -460,6 +478,24 @@ pub fn vendettas(world: &mut World) {
         world.push_event(EventKind::Vendetta, &[vd.a, vd.b], text);
         world.vendettas.push(vd);
     }
+}
+
+/// M15 phase 5 (god `DeclareVendetta`): open the feud between `a` and `b`
+/// now (the `Vendetta` event when new) and hold it at weight `w` or more
+/// for `[grudges] declared_days`, whatever the members' grudges say.
+pub fn declare(world: &mut World, a: EntityId, b: EntityId, w: f32) {
+    let now = world.tick;
+    let until = now + u64::from(world.config.grudges.declared_days) * TICKS_PER_DAY;
+    let (lo, hi) = if a < b { (a, b) } else { (b, a) };
+    if let Some(vd) = world.vendettas.iter_mut().find(|v| (v.a, v.b) == (lo, hi)) {
+        vd.declared = Some((until, w));
+        vd.w = [vd.w[0].max(w), vd.w[1].max(w)];
+        return;
+    }
+    let vd = Vendetta { a: lo, b: hi, since: now, kills: [0, 0], w: [w, w], declared: Some((until, w)) };
+    let text = format!("blood between {} and {}", label(world, lo), label(world, hi));
+    world.push_event(EventKind::Vendetta, &[lo, hi], text);
+    world.vendettas.push(vd);
 }
 
 /// W18: `gang`'s open vendetta of the highest `V(gang, ·)` against a gang

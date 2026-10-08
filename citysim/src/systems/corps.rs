@@ -547,6 +547,10 @@ fn bill_contracts(world: &mut World) {
                     let paid = ownership::pay(world, Some(o), Some(seller), price, Flow::Contract);
                     if paid < price {
                         end_contract(world, client, "unpaid");
+                        // M15 phase 5: a reneged contract is told (the owner
+                        // betrayed the seller), so honour moves on contracts.
+                        let d = world.district_of_building(client);
+                        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Betrayed, Some(o), Some(seller));
                     }
                 }
             }
@@ -596,6 +600,12 @@ fn renew_contracts(world: &mut World) {
                         for e in c.contracts.iter_mut().filter(|e| e.0 == client) {
                             e.1 = now + CONTRACT_DAYS * TICKS_PER_DAY;
                         }
+                    }
+                    // M15 phase 5: a week's contract kept is told (the seller
+                    // repaid the client's trust), so honour moves on contracts.
+                    if owner.is_some_and(|o| o != seller) {
+                        let d = world.district_of_building(client);
+                        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Repaid, Some(seller), owner);
                     }
                 }
             }

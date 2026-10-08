@@ -1254,3 +1254,582 @@ fn god_door_before_raid() {
     }
     r.assert_applied();
 }
+
+// ---------------------------------------------------------------------------
+// M15 god scenarios (docs/GOD_SCENARIOS_V6.md, plan 5.2): the word and the
+// blood. Seed 42, 105 days, each against its own unshocked control
+// (`v6_control`). Findings are printed; a world that fails to react goes into
+// V6's gaps list, not an assert. Each scenario asserts only that its god
+// commands applied (a `PlayerAction`, not a `PlayerActionFailed`).
+// ---------------------------------------------------------------------------
+
+/// One finished day of an M15 god run.
+#[derive(Clone, Debug, Default)]
+struct V6Day {
+    day: u64,
+    /// The day's M15 counters (the CSV row's word columns).
+    word: citysim::stats::WordCols,
+    violence: u32,
+    murders: u32,
+    /// Per gang `(name, order, Retaliate's target, dread, heat, members)`.
+    gangs: Vec<(String, Order, Option<String>, f32, f32, usize)>,
+    posture: Option<Posture>,
+    /// The Crackdown's gang and a Lobby hold `(corp, gang)`.
+    crackdown: Option<String>,
+    lobby: Option<(String, String)>,
+    /// Living corps: `(honour, dread, employees' mean opinion of it, contracts sold)` by name.
+    corps: std::collections::BTreeMap<String, (f32, f32, f32, usize)>,
+    vendettas: Vec<String>,
+    /// Adults whose Home is in a Sump district: how many, how many with visible chrome, mean `Kit.visible`.
+    sump: (u32, u32, f32),
+    /// The tracked agents (a scenario's subjects): `(employed, Corp-class edges, standing)`, by agent.
+    tracked: std::collections::BTreeMap<EntityId, (bool, u32, f32)>,
+}
+
+struct V6Run {
+    name: &'static str,
+    days: Vec<V6Day>,
+    /// `(tick, kind, text)` of the word and blood story.
+    story: Vec<(u64, EventKind, String)>,
+    failed: Vec<String>,
+}
+
+const V6_END: u64 = 105;
+
+/// A named per-day reading of an M15 god run.
+type V6Series = (&'static str, Box<dyn Fn(&V6Day) -> f64>);
+
+/// Seed 42 to `V6_END`; `daily` fires at the start of every day and returns
+/// the agents to track from then on (an empty list keeps the old ones).
+fn run_v6(name: &'static str, mut daily: impl FnMut(&mut World, u64) -> Vec<EntityId>) -> V6Run {
+    use citysim::systems::reputation;
+    let mut w = World::new(SEED, Config::load());
+    let mut days = Vec::new();
+    let mut story = Vec::new();
+    let mut failed = Vec::new();
+    let mut tracked: Vec<EntityId> = Vec::new();
+    let mut next_id = 0u64;
+    for day in 0..V6_END {
+        let fresh = daily(&mut w, day);
+        if !fresh.is_empty() {
+            tracked = fresh;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+        let mut d = V6Day { day, ..V6Day::default() };
+        let events: Vec<&citysim::Event> = w.events.iter().rev().take_while(|e| e.id >= next_id).collect();
+        for e in events.into_iter().rev() {
+            match e.kind {
+                EventKind::Assault => d.violence += 1,
+                EventKind::Murder => {
+                    d.violence += 1;
+                    d.murders += 1;
+                }
+                EventKind::PlayerActionFailed => failed.push(format!("d{day} {}", e.text)),
+                _ => {}
+            }
+            let told = matches!(
+                e.kind,
+                EventKind::Vendetta
+                    | EventKind::VendettaEnded
+                    | EventKind::HuntStarted
+                    | EventKind::HuntAbandoned
+                    | EventKind::Avenged
+                    | EventKind::Planted
+                    | EventKind::Buried
+                    | EventKind::Poached
+                    | EventKind::Expelled
+                    | EventKind::ContractLost
+                    | EventKind::PlayerAction
+                    | EventKind::PlayerActionFailed
+                    | EventKind::Posture
+                    | EventKind::Bribe
+            ) || (e.kind == EventKind::OrderChanged && e.text.contains("Retaliate"))
+                || (e.kind == EventKind::CorpOrder && e.text.contains("Lobby"))
+                || (e.kind == EventKind::Raid && e.text.contains("'s "))
+                || (e.kind == EventKind::Story && (e.text.contains("(paid by") || e.text.contains(" killed ")));
+            if told {
+                story.push((e.tick, e.kind, e.text.clone()));
+            }
+        }
+        next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        let row = w.stats.history.back().expect("a finished day").clone();
+        d.word = row.word.clone();
+        for g in w.gangs() {
+            let Some(gg) = w.comp::<Gang>(g) else { continue };
+            let r = reputation::rep(&w, g);
+            let on = gg.retaliate_on.map(|t| citysim::systems::grudges::label(&w, t));
+            d.gangs.push((gg.name.clone(), gg.order, on, r.dread, r.heat, gg.members.len()));
+        }
+        if let Some(l) = w.law() {
+            d.posture = Some(l.posture);
+            d.crackdown = l.target.map(|g| citysim::systems::grudges::label(&w, g));
+            d.lobby = l.lobby.map(|h| (w.owner_label(Some(h.corp)), citysim::systems::grudges::label(&w, h.gang)));
+        }
+        for c in w.corps() {
+            let Some(cc) = w.comp::<citysim::Corp>(c) else { continue };
+            let r = reputation::rep(&w, c);
+            let staff = reputation::members_of(&w, c);
+            let op = if staff.is_empty() {
+                0.0
+            } else {
+                staff.iter().map(|&m| reputation::opinion(&w, m, c)).sum::<f32>() / staff.len() as f32
+            };
+            d.corps.insert(cc.name.clone(), (r.honour, r.dread, op, cc.contracts.len()));
+        }
+        d.vendettas = w
+            .vendettas
+            .iter()
+            .map(|v| {
+                format!("{}-{}", citysim::systems::grudges::label(&w, v.a), citysim::systems::grudges::label(&w, v.b))
+            })
+            .collect();
+        let (mut n, mut chromed, mut vis) = (0u32, 0u32, 0u32);
+        for a in w.citizens() {
+            if !citysim::systems::demography::is_adult(&w, a) || !citysim::systems::law::living(&w, a) {
+                continue;
+            }
+            let Some(home) = w.comp::<citysim::Household>(a).and_then(|h| h.home) else { continue };
+            if !w.district_name(w.district_of_building(home)).contains("Sump") {
+                continue;
+            }
+            let v = w.comp::<citysim::Kit>(a).map_or(0, |k| k.visible);
+            n += 1;
+            chromed += u32::from(v > 0);
+            vis += u32::from(v);
+        }
+        d.sump = (n, chromed, vis as f32 / n.max(1) as f32);
+        let execs = citysim::systems::classes::exec_set(&w);
+        for &a in &tracked {
+            let employed = w.has::<citysim::Job>(a) && citysim::systems::law::living(&w, a);
+            let corp_edges = w
+                .neighbours(a)
+                .filter(|&o| citysim::systems::classes::class_in(&w, o, &execs) == citysim::components::Class::Corp)
+                .count() as u32;
+            d.tracked.insert(a, (employed, corp_edges, reputation::rep(&w, a).standing));
+        }
+        days.push(d);
+    }
+    V6Run { name, days, story, failed }
+}
+
+/// The unshocked M15 control, computed once per test process.
+fn v6_control() -> &'static V6Run {
+    static CONTROL: OnceLock<V6Run> = OnceLock::new();
+    CONTROL.get_or_init(|| run_v6("v6_control", |_, _| Vec::new()))
+}
+
+impl V6Run {
+    fn window(&self, from: u64, to: u64) -> impl Iterator<Item = &V6Day> {
+        self.days.iter().filter(move |d| d.day >= from && d.day < to)
+    }
+
+    fn sum(&self, from: u64, to: u64, f: &dyn Fn(&V6Day) -> f64) -> f64 {
+        self.window(from, to).map(f).sum()
+    }
+
+    /// Days a gang held Retaliate against `target` (by label) in the window.
+    fn retaliate_days(&self, gang: &str, target: &str, from: u64, to: u64) -> usize {
+        self.window(from, to)
+            .filter(|d| {
+                d.gangs.iter().any(|g| g.0 == gang && g.1 == Order::Retaliate && g.2.as_deref() == Some(target))
+            })
+            .count()
+    }
+
+    /// The word table against the control over `windows`, the gangs and the law every ten days, then the
+    /// story from `from`.
+    fn print_v6(&self, control: &V6Run, windows: &[(u64, u64)], from: u64) {
+        let mut o = String::new();
+        outln!(o, "\n================ {} ================", self.name);
+        out!(o, "{:<22}", "sum over days");
+        for (a, b) in windows {
+            out!(o, "{:>16}", format!("{a}-{b} / ctl"));
+        }
+        outln!(o);
+        let rows: Vec<V6Series> = vec![
+            ("violence", Box::new(|d: &V6Day| f64::from(d.violence))),
+            ("Murders", Box::new(|d: &V6Day| f64::from(d.murders))),
+            ("grudges formed", Box::new(|d: &V6Day| f64::from(d.word.grudges))),
+            ("Hunts", Box::new(|d: &V6Day| f64::from(d.word.hunts))),
+            ("Avenged", Box::new(|d: &V6Day| f64::from(d.word.avenged))),
+            ("revenge kills", Box::new(|d: &V6Day| f64::from(d.word.revenge_kills))),
+            ("stories", Box::new(|d: &V6Day| f64::from(d.word.stories))),
+            ("Planted", Box::new(|d: &V6Day| f64::from(d.word.planted))),
+            ("Buried", Box::new(|d: &V6Day| f64::from(d.word.buried))),
+            ("Poached", Box::new(|d: &V6Day| f64::from(d.word.poached))),
+            ("Expelled", Box::new(|d: &V6Day| f64::from(d.word.expelled))),
+            ("contracts lost (hon)", Box::new(|d: &V6Day| f64::from(d.word.contracts_lost_honour))),
+        ];
+        for (name, f) in &rows {
+            out!(o, "{name:<22}");
+            for &(a, b) in windows {
+                out!(o, "{:>16}", format!("{:.0} / {:.0}", self.sum(a, b, f), control.sum(a, b, f)));
+            }
+            outln!(o);
+        }
+        for d in self.days.iter().filter(|d| d.day >= from.saturating_sub(1) && d.day % 10 == 9) {
+            let c = control.days.get(d.day as usize);
+            let gangs = |x: &V6Day| {
+                x.gangs
+                    .iter()
+                    .map(|g| {
+                        let on =
+                            g.2.as_ref()
+                                .filter(|_| g.1 == Order::Retaliate)
+                                .map_or(String::new(), |t| format!(" on {t}"));
+                        format!("{} {:?}{on} d{:.2} h{:.2} n{}", g.0, g.1, g.3, g.4, g.5)
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let law = |x: &V6Day| format!("{:?} crackdown {:?} lobby {:?}", x.posture, x.crackdown, x.lobby);
+            outln!(o, "  d{:<3} {} | {} | vendettas {:?}", d.day, gangs(d), law(d), d.vendettas);
+            if let Some(c) = c {
+                outln!(o, "   ctl {} | {} | vendettas {:?}", gangs(c), law(c), c.vendettas);
+            }
+        }
+        outln!(o, "story from day {from}:");
+        let told: Vec<_> = self.story.iter().filter(|(t, _, _)| t / TICKS_PER_DAY >= from).collect();
+        for (t, k, text) in told.iter().take(80) {
+            outln!(o, "  d{:<3} {k:?}: {text}", t / TICKS_PER_DAY);
+        }
+        if told.len() > 80 {
+            outln!(o, "  ... {} more", told.len() - 80);
+        }
+        if !self.failed.is_empty() {
+            outln!(o, "failed god commands: {:?}", self.failed);
+        }
+        eprint!("{o}");
+    }
+
+    fn assert_applied(&self, n: usize) {
+        assert!(self.failed.is_empty(), "{}: a god command failed: {:?}", self.name, self.failed);
+        let applied =
+            self.story.iter().filter(|(_, k, t)| *k == EventKind::PlayerAction && t.starts_with("God: ")).count();
+        assert!(applied >= n, "{}: {applied} god commands applied, {n} expected", self.name);
+    }
+}
+
+/// Gang `name`'s entity, if alive.
+fn gang_named(w: &World, name: &str) -> Option<EntityId> {
+    w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|gg| gg.name == name))
+}
+
+/// The CLI's `member<g>`: the gang's living member with the best fighting (ties the lower id).
+fn best_fighter(w: &World, g: EntityId) -> Option<EntityId> {
+    w.comp::<Gang>(g)?
+        .members
+        .iter()
+        .copied()
+        .filter(|&m| citysim::systems::law::living(w, m))
+        .map(|m| (citysim::systems::law::fighting(w, m), m))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+        .map(|(_, m)| m)
+}
+
+/// `kill_friend=leader0:member1` and `leader1:member0` on day 10: each gang leader's closest Friend is
+/// killed by the rival's best fighter. Do they hunt, does a vendetta open between the gangs, does the
+/// law's Crackdown move to the avenger's gang?
+#[test]
+#[ignore]
+fn god_kill_friend_of_leaders_day_10() {
+    const DAY: u64 = 10;
+    let mut names: Vec<String> = Vec::new();
+    let mut leaders: Vec<EntityId> = Vec::new();
+    // `(leader, killer)` names, for the Hunt texts ("X went looking for Y").
+    let mut who: Vec<(String, String)> = Vec::new();
+    let r = run_v6("god_kill_friend_of_leaders_day_10", |w, day| {
+        if day != DAY {
+            return Vec::new();
+        }
+        let gs = w.gangs();
+        for (a, b) in [(0usize, 1usize), (1, 0)] {
+            let (Some(&ga), Some(&gb)) = (gs.get(a), gs.get(b)) else { continue };
+            let leader = w.comp::<Gang>(ga).and_then(|g| g.leader);
+            match (leader, best_fighter(w, gb)) {
+                (Some(of), Some(by)) => {
+                    names.push(format!(
+                        "{} (leader of {}) loses a Friend to {} of {}",
+                        w.name_of(of),
+                        w.comp::<Gang>(ga).map_or(String::new(), |g| g.name.clone()),
+                        w.name_of(by),
+                        w.comp::<Gang>(gb).map_or(String::new(), |g| g.name.clone())
+                    ));
+                    who.push((w.name_of(of), w.name_of(by)));
+                    leaders.push(of);
+                    w.push_command(PlayerCommand::KillFriend { of, by });
+                }
+                _ => names.push(format!("gang {a} has no leader or gang {b} no member on day {DAY}")),
+            }
+        }
+        leaders.clone()
+    });
+    let c = v6_control();
+    r.print_v6(c, &[(0, DAY), (DAY, DAY + 7), (DAY, DAY + 30), (DAY + 30, V6_END)], DAY);
+    eprintln!("god_kill_friend_of_leaders_day_10: {names:?}");
+    let hunts: Vec<String> = r
+        .story
+        .iter()
+        .filter(|(t, k, x)| {
+            *k == EventKind::HuntStarted
+                && t / TICKS_PER_DAY >= DAY
+                && who.iter().any(|(l, by)| x.starts_with(l.as_str()) || x.ends_with(&format!(" for {by}")))
+        })
+        .map(|(t, _, x)| format!("d{} {x}", t / TICKS_PER_DAY))
+        .collect();
+    eprintln!("Hunts by the two leaders or on the two killers: {hunts:?}");
+    let opened: Vec<String> = r
+        .story
+        .iter()
+        .filter(|(t, k, _)| *k == EventKind::Vendetta && t / TICKS_PER_DAY >= DAY)
+        .map(|(t, _, x)| format!("d{} {x}", t / TICKS_PER_DAY))
+        .collect();
+    let opened_c = c.story.iter().filter(|(t, k, _)| *k == EventKind::Vendetta && t / TICKS_PER_DAY >= DAY).count();
+    eprintln!("vendettas opened from day {DAY}: {opened:?} (control {opened_c})");
+    let crack = |run: &V6Run| -> Vec<(u64, Option<String>)> {
+        let mut v: Vec<(u64, Option<String>)> = Vec::new();
+        for d in run.window(DAY, V6_END) {
+            if v.last().is_none_or(|x| x.1 != d.crackdown) {
+                v.push((d.day, d.crackdown.clone()));
+            }
+        }
+        v
+    };
+    eprintln!("Crackdown target from day {DAY}: {:?} (control {:?})", crack(&r), crack(c));
+    r.assert_applied(names.iter().filter(|n| n.contains(" loses a Friend ")).count());
+}
+
+/// `declare_vendetta=corp<Arasaka>:gang<The Hollow>:1.0` on day 45. Does Retaliate raid an Arasaka
+/// building, does Arasaka's Lobby name The Hollow?
+#[test]
+#[ignore]
+fn god_vendetta_arasaka_hollow() {
+    let mut what = String::new();
+    let r = run_v6("god_vendetta_arasaka_hollow", |w, day| {
+        if day == SHOCK_DAY {
+            match (corp_named(w, "Arasaka"), gang_named(w, "The Hollow")) {
+                (Some(a), Some(b)) => w.push_command(PlayerCommand::DeclareVendetta { a, b, weight: 1.0 }),
+                (a, b) => what = format!("Arasaka {a:?}, The Hollow {b:?} on day {SHOCK_DAY}"),
+            }
+        }
+        Vec::new()
+    });
+    let c = v6_control();
+    r.print_v6(c, &[(30, SHOCK_DAY), (SHOCK_DAY, SHOCK_DAY + 7), (SHOCK_DAY, 75), (75, V6_END)], SHOCK_DAY);
+    if !what.is_empty() {
+        eprintln!("god_vendetta_arasaka_hollow: {what}");
+    }
+    let ret = r.retaliate_days("The Hollow", "Arasaka", SHOCK_DAY, V6_END);
+    let ret_c = c.retaliate_days("The Hollow", "Arasaka", SHOCK_DAY, V6_END);
+    let raids: Vec<String> = r
+        .story
+        .iter()
+        .filter(|(t, k, x)| {
+            *k == EventKind::Raid
+                && t / TICKS_PER_DAY >= SHOCK_DAY
+                && x.starts_with("The Hollow")
+                && x.contains("Arasaka")
+        })
+        .map(|(t, _, x)| format!("d{} {x}", t / TICKS_PER_DAY))
+        .collect();
+    let lobby = |run: &V6Run| {
+        run.window(SHOCK_DAY, V6_END)
+            .filter(|d| d.lobby.as_ref().is_some_and(|(c, g)| c == "Arasaka" && g == "The Hollow"))
+            .count()
+    };
+    let open = r
+        .window(SHOCK_DAY, V6_END)
+        .filter(|d| d.vendettas.iter().any(|v| v.contains("Arasaka") && v.contains("The Hollow")))
+        .count();
+    eprintln!(
+        "The Hollow on Retaliate against Arasaka {ret} days (control {ret_c}); Hollow raids on Arasaka buildings {raids:?}; \
+         Arasaka's Lobby naming The Hollow {} days (control {}); the vendetta open {open} days",
+        lobby(&r),
+        lobby(c)
+    );
+    r.assert_applied(1);
+}
+
+/// `plant_rumour=<Zetatech exec>:killed:<a Sump child>:6:1.0` on day 30 (before Zetatech's usual
+/// bankruptcy). Does Zetatech's honour fall, its Security contracts move, its employees' loyalty sag, its
+/// Spin bury the story?
+#[test]
+#[ignore]
+fn god_plant_zetatech_exec() {
+    const DAY: u64 = 30;
+    let mut what = String::new();
+    let r = run_v6("god_plant_zetatech_exec", |w, day| {
+        if day != DAY {
+            return Vec::new();
+        }
+        let exec = corp_named(w, "Zetatech").and_then(|z| w.comp::<citysim::Corp>(z).and_then(|c| c.exec));
+        // A child of a Sump Home (Sump Central first, then any Sump district), else any child.
+        let sump = |w: &World, a: EntityId| -> Option<usize> {
+            let h = w.comp::<citysim::Household>(a).and_then(|h| h.home)?;
+            let d = w.district_of_building(h);
+            if d.index() == 6 {
+                Some(0)
+            } else if w.district_name(d).contains("Sump") {
+                Some(1)
+            } else {
+                None
+            }
+        };
+        let child = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| !citysim::systems::demography::is_adult(w, a))
+            .min_by_key(|&a| (sump(w, a).unwrap_or(2), a));
+        match (exec, child) {
+            (Some(about), Some(o)) => {
+                let home = w
+                    .comp::<citysim::Household>(o)
+                    .and_then(|h| h.home)
+                    .map(|h| w.district_name(w.district_of_building(h)).to_string());
+                what = format!("{} killed {} (home {home:?})", w.name_of(about), w.name_of(o));
+                w.push_command(PlayerCommand::PlantRumour {
+                    about,
+                    deed: citysim::word::Deed::Killed,
+                    object: Some(o),
+                    district: citysim::DistrictId(6),
+                    reach: 1.0,
+                });
+            }
+            (e, ch) => what = format!("no Zetatech exec ({e:?}) or child ({ch:?}) on day {DAY}"),
+        }
+        Vec::new()
+    });
+    let c = v6_control();
+    r.print_v6(c, &[(0, DAY), (DAY, DAY + 7), (DAY, DAY + 30), (DAY + 30, V6_END)], DAY);
+    eprintln!("god_plant_zetatech_exec: {what}");
+    let mut o = String::new();
+    outln!(o, "Zetatech day: honour / dread / employees' opinion / contracts sold (control)");
+    for d in r.window(DAY - 2, DAY + 21) {
+        let x = d.corps.get("Zetatech");
+        let y = c.days.get(d.day as usize).and_then(|cd| cd.corps.get("Zetatech"));
+        let f = |v: Option<&(f32, f32, f32, usize)>| {
+            v.map_or("gone".to_string(), |v| format!("{:.2} / {:.2} / {:.3} / {}", v.0, v.1, v.2, v.3))
+        };
+        outln!(o, "  d{:<3} {} ({})", d.day, f(x), f(y));
+    }
+    eprint!("{o}");
+    let zeta = |run: &V6Run, k: EventKind| {
+        run.story
+            .iter()
+            .filter(|(t, kk, x)| *kk == k && t / TICKS_PER_DAY >= DAY && x.starts_with("Zetatech"))
+            .map(|(t, _, x)| format!("d{} {x}", t / TICKS_PER_DAY))
+            .collect::<Vec<_>>()
+    };
+    let exec_name = what.split(" killed ").next().unwrap_or_default().to_string();
+    let stories: Vec<String> = r
+        .story
+        .iter()
+        .filter(|(t, k, x)| *k == EventKind::Story && t / TICKS_PER_DAY >= DAY && x.contains(&exec_name))
+        .map(|(t, _, x)| format!("d{} {x}", t / TICKS_PER_DAY))
+        .collect();
+    eprintln!("Feed stories naming {exec_name}: {stories:?}");
+    eprintln!("Zetatech buries {:?} (control {:?})", zeta(&r, EventKind::Buried), zeta(c, EventKind::Buried));
+    eprintln!("Zetatech plants {:?} (control {:?})", zeta(&r, EventKind::Planted), zeta(c, EventKind::Planted));
+    let lost: Vec<&String> = r
+        .story
+        .iter()
+        .filter(|(_, k, x)| *k == EventKind::ContractLost && x.contains("Zetatech"))
+        .map(|(_, _, x)| x)
+        .collect();
+    eprintln!("ContractLost naming Zetatech: {lost:?}");
+    r.assert_applied(1);
+}
+
+/// `grant_skill=dregs10:persuasion:1.0:suit` on day 45: the ten poorest Dreg adults get persuasion 1.0 and
+/// a Spire suit. Do they get meetings (edges to Corp-class agents), jobs, poached?
+#[test]
+#[ignore]
+fn god_suited_dregs() {
+    let mut chosen: Vec<EntityId> = Vec::new();
+    let r = run_v6("god_suited_dregs", |w, day| {
+        if day != SHOCK_DAY {
+            return Vec::new();
+        }
+        let mut dregs: Vec<(i64, EntityId)> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| citysim::systems::law::living(w, a) && citysim::systems::demography::is_adult(w, a))
+            .filter(|&a| citysim::systems::classes::class_of(w, a) == citysim::components::Class::Dreg)
+            .map(|a| (w.comp::<citysim::components::Wallet>(a).map_or(0, |x| x.coins), a))
+            .collect();
+        dregs.sort();
+        chosen = dregs.into_iter().take(10).map(|(_, a)| a).collect();
+        for &agent in &chosen {
+            w.push_command(PlayerCommand::GrantSkill {
+                agent,
+                skill: citysim::word::SocialSkill::Persuasion,
+                value: 1.0,
+                suit: true,
+            });
+        }
+        chosen.clone()
+    });
+    // The control tracks nobody; its readings of the same ten come from a run tracking them from day 45.
+    let c = run_v6("god_suited_dregs_control", |_, day| if day == SHOCK_DAY { chosen.clone() } else { Vec::new() });
+    r.print_v6(&c, &[(30, SHOCK_DAY), (SHOCK_DAY, SHOCK_DAY + 7), (SHOCK_DAY, 75), (75, V6_END)], SHOCK_DAY);
+    let mut o = String::new();
+    outln!(o, "the ten: employed / edges to Corp-class agents / standing, shocked (control)");
+    for day in [SHOCK_DAY, SHOCK_DAY + 7, SHOCK_DAY + 30, V6_END - 1] {
+        let at = |run: &V6Run| run.days.get(day as usize).map(|d| d.tracked.clone()).unwrap_or_default();
+        let (a, b) = (at(&r), at(&c));
+        let sum = |m: &std::collections::BTreeMap<EntityId, (bool, u32, f32)>| {
+            let emp = m.values().filter(|v| v.0).count();
+            let edges: u32 = m.values().map(|v| v.1).sum();
+            let st = m.values().map(|v| v.2).sum::<f32>() / m.len().max(1) as f32;
+            format!("{emp} / {edges} / {st:.2}")
+        };
+        outln!(o, "  d{day:<3} {} ({})", sum(&a), sum(&b));
+    }
+    eprint!("{o}");
+    let names: Vec<String> = chosen.iter().map(|&a| format!("{a:?}")).collect();
+    let poached: Vec<&String> = r
+        .story
+        .iter()
+        .filter(|(t, k, _)| *k == EventKind::Poached && t / TICKS_PER_DAY >= SHOCK_DAY)
+        .map(|(_, _, x)| x)
+        .collect();
+    eprintln!("god_suited_dregs: the ten {names:?}; Poached from day {SHOCK_DAY}: {poached:?}");
+    r.assert_applied(10);
+}
+
+/// `set_creed=<Ninefold>:purist` on day 45. Does the Sump's chrome fall, do the chromed move out, how
+/// many are expelled?
+#[test]
+#[ignore]
+fn god_purist_ninefold() {
+    let mut what = String::new();
+    let r = run_v6("god_purist_ninefold", |w, day| {
+        if day == SHOCK_DAY {
+            match gang_named(w, "Ninefold") {
+                Some(g) => {
+                    w.push_command(PlayerCommand::SetCreed { gang: g, creed: Some(citysim::word::Creed::Purist) })
+                }
+                None => what = format!("no Ninefold on day {SHOCK_DAY}"),
+            }
+        }
+        Vec::new()
+    });
+    let c = v6_control();
+    r.print_v6(c, &[(30, SHOCK_DAY), (SHOCK_DAY, SHOCK_DAY + 7), (SHOCK_DAY, 75), (75, V6_END)], SHOCK_DAY);
+    if !what.is_empty() {
+        eprintln!("god_purist_ninefold: {what}");
+    }
+    let mut o = String::new();
+    outln!(o, "Sump adults: housed / chromed / mean Kit.visible, shocked (control); Ninefold members");
+    for day in [SHOCK_DAY - 1, SHOCK_DAY, SHOCK_DAY + 7, SHOCK_DAY + 30, V6_END - 1] {
+        let f = |run: &V6Run| {
+            run.days.get(day as usize).map_or(String::new(), |d| {
+                let nf = d.gangs.iter().find(|g| g.0 == "Ninefold").map_or(0, |g| g.5);
+                format!("{} / {} / {:.3}; Ninefold {nf}", d.sump.0, d.sump.1, d.sump.2)
+            })
+        };
+        outln!(o, "  d{day:<3} {} ({})", f(&r), f(c));
+    }
+    eprint!("{o}");
+    r.assert_applied(1);
+}

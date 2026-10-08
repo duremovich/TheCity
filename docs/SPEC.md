@@ -833,6 +833,32 @@ Labs make Data in three tracks (Chrome, Deck, Industry) from the shift ledger; c
 
 The rules are in [M14_VIRT.md](M14_VIRT.md): the plane § 1, decks § 2, runs, ICE and the contest § 3, Data and Labs § 4, the tech tree § 5, goals, orders and the law § 6, watching live § 7, the Statistical tier § 8, levers § 9, UI, events and CSV § 10, and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city turn every M14 section off (`--virt-off` does the same for a run): no relink, run, upkeep, production or tier cap.
 
+### Word and blood (M15)
+
+Since M15 the tick order is `commands, lod, needs, memory, mood, think, plan, exec, virt, ownership, assets, tech, classes, districts, economy, [bind], word, law, social, gang, corp_brain, demography, stats`: `word` runs after the binder (so a bound hole names its rumours before the pools decay) and before the law, gang and corp brains, which read heat, fear, vendettas and honour. `word::run` does `hunt::tick` every tick (the Hunts' validity, at most `max_hunts`) and, at midnight, the **daily word chain**:
+
+| Step | Does |
+| --- | --- |
+| `gossip::decay_and_leak` | every district pool's reach × `pool_decay`, the strong entries leaked to adjacent districts, entries under `reach_min` dropped |
+| `news::daily` | the Feeds' reach from yesterday's Reporter shifts, Spin (plants and buries), the stories (posted into the covered pools at hops 1 with a slant), the ads |
+| `gossip::hear` | each Statistical adult hears one entry of its district's pool (`hear_p × (0.5 + sociability)`, picked by reach); bodies hear one story; the post-back of first-hand deeds |
+| `gossip::kin` | a killing's or beating's kin are told (`kin_p` by hops), at any tier |
+| `reputation::rebuild` | the four axes and `known_by` of every adult and faction from the held deed memories and the pools, the regard matrix, the kill-watch sample, each corp's honour history |
+| `competence::daily` | knowledge from yesterday's Lab, Feed and Hall shifts, rust, every corp's and the Law's competence, `TalentLost` |
+| `grudges::daily` | decay, settlement, `kill_chain` expiry, the vendettas opened and closed |
+| `hunt::daily` | Hunts abandoned after `hunt_days`, the Statistical hunters' pass |
+| expiry | old sightings, renamed anonymous rumours |
+
+On screen a deed travels at Chat (`gossip::exchange` after `social::gossip`), at a Bar's Drink and at a Hunt's AskAround; every roll of the word is on a keyed word stream (`SimRng::word`), never the world or agent streams. A grudge forms when an adult learns a deed whose object is itself or someone close (`deed_sev × rel_w × conf ≥ grudge_min`). With `[gossip] enabled = false` (`--word-off`) nothing above runs.
+
+**The fifth dice rule: the social move.** After the witness's notice roll, the fight (`law::resolve_fight`), the tier contest (`security::contest_f`, shared by M13's locks and M14's runs) and the Statistical hourly table, `moves::resolve` is the one roll behind every social move (Intimidate in a Shakedown, Persuade in a poach, Deceive in an AskAround answer, Charm):
+
+`p = clamp(logistic(move_k × (bias[kind] + skill_a − resist_t + w_m × (might_a − might_t) + w_r × rep_gap + w_l × taste(target → actor))), p_min, p_max)`
+
+where `skill_a` is the actor's social skill for the kind, `resist_t` the target's (Intimidate: courage + 0.3 × fighting; Persuade by the stake: 1 − greed for coins, loyalty and the tie to its exec for a job; Deceive: knowledge; Charm: 0.5 − affinity), `might` is fighting plus visible chrome plus allies within 8 tiles (capped), `rep_gap` reads dread (Intimidate), standing (Persuade) or honour (Deceive, Charm). One draw on the Move word stream keyed by the tick, the two agents and the kind, so the callers' order never changes an outcome. A failed Intimidate on a brave target backlashes (a Fight bonus for an hour, an Enemy edge); a failed Deceive zeroes trust and is told as Betrayed; a Persuade across too wide a standing gap is refused at the door.
+
+The rules are in [M15_WORD_AND_BLOOD.md](M15_WORD_AND_BLOOD.md): deeds, rumours and sightings § 1, reputation § 2, grudges § 3, the Hunt § 4, social stats § 5, the social move § 6, the news and propaganda § 7, the psychological LOD table § 8, levers § 9, UI, events and CSV § 10, and what the build changed under "Implemented: deviations". `Config::v1_profile()` and the calibration city turn every M15 section off.
+
 ### Economy
 
 Daily at `tick_of_day == 0` plus per-event hooks. Inputs: building stocks, Market, Treasury, Jobs, lever `tax_rate`, season. Outputs: stock changes, `price_food`, `price_history` (cap 120), Wallet changes, `days_unpaid`.

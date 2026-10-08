@@ -2342,6 +2342,10 @@ struct M15News {
     flow_plant: i64,
     expelled: u32,
     mean_reach: f32,
+    /// Stories run, by deed (phase 5: what the Feeds' score prefers).
+    story_deeds: std::collections::BTreeMap<&'static str, u32>,
+    /// Plants of a deed another corp (or the same) already planted that day.
+    plants_same_story: u32,
 }
 
 /// The mean `opinion(·, C)` over C's employees and exec, per corp.
@@ -2370,107 +2374,155 @@ fn plant_corp(w: &World, actor: citysim::EntityId) -> Option<citysim::EntityId> 
 
 type DayLists = std::collections::BTreeMap<String, Vec<u64>>;
 
-fn m15_news_run(seed: u64, days: u64) -> M15News {
-    use citysim::EventKind;
-    let mut w = World::new(seed, Config::load());
-    let mut out = M15News::default();
-    let mut cursor = 0u64;
-    let mut opinions: Vec<std::collections::BTreeMap<citysim::EntityId, f32>> = Vec::new();
-    // Plants as (day, corp target and its name then).
-    let mut plants: Vec<(u64, Option<(citysim::EntityId, String)>)> = Vec::new();
-    let mut planted_days: DayLists = Default::default();
-    let mut buried_days: DayLists = Default::default();
-    // Per corp name, the days it held Spin.
-    let mut spin_days: DayLists = Default::default();
-    let mut reach_sum = (0.0f32, 0u32);
-    for day in 0..days {
-        w.run_ticks(TICKS_PER_DAY);
-        opinions.push(employee_opinions(&w));
+/// The news numbers' day-by-day bookkeeping (plan 4.8), shared by
+/// `m15_news_run` and the M15 gate's `m15_run`: after each day's ticks,
+/// `day` (opinions, Spin days, reach), then `event` for the day's events,
+/// then `end_day` (the day's CSV counters); `finish` on day 120.
+#[derive(Default)]
+struct NewsTrack {
+    out: M15News,
+    opinions: Vec<std::collections::BTreeMap<citysim::EntityId, f32>>,
+    /// Plants as (day, corp target and its name then).
+    plants: Vec<(u64, Option<(citysim::EntityId, String)>)>,
+    planted_days: DayLists,
+    buried_days: DayLists,
+    /// Per corp name, the days it held Spin.
+    spin_days: DayLists,
+    reach_sum: (f32, u32),
+    /// The planted deeds `(day, deed, actor, object)`, for the same-story count.
+    plant_keys: Vec<(u64, citysim::word::Deed, citysim::EntityId, Option<citysim::EntityId>)>,
+    last_story: Option<u32>,
+}
+
+impl NewsTrack {
+    fn day(&mut self, w: &World, day: u64) {
+        self.opinions.push(employee_opinions(w));
         for c in w.corps() {
             let cc = w.comp::<citysim::Corp>(c).expect("corp");
             if cc.spin_since.is_some() {
-                spin_days.entry(cc.name.clone()).or_default().push(day);
+                self.spin_days.entry(cc.name.clone()).or_default().push(day);
             }
         }
-        for f in citysim::systems::news::all_feeds(&w) {
-            reach_sum.0 += citysim::systems::news::feed_state(&w, f).map_or(0.0, |s| s.reach);
-            reach_sum.1 += 1;
+        for f in citysim::systems::news::all_feeds(w) {
+            self.reach_sum.0 += citysim::systems::news::feed_state(w, f).map_or(0.0, |s| s.reach);
+            self.reach_sum.1 += 1;
         }
+        // The stories run since yesterday, by deed (the ring holds 256).
+        for s in w.stories.iter().filter(|s| self.last_story.is_none_or(|l| s.id > l)) {
+            *self.out.story_deeds.entry(s.deed.label()).or_default() += 1;
+            if s.paid_by.is_some() {
+                let key = (s.tick / TICKS_PER_DAY, s.deed, s.deed_actor(), s.object);
+                if self.plant_keys.contains(&key) {
+                    self.out.plants_same_story += 1;
+                }
+                self.plant_keys.push(key);
+            }
+        }
+        if let Some(s) = w.stories.back() {
+            self.last_story = Some(s.id);
+        }
+    }
+
+    fn event(&mut self, w: &World, e: &citysim::Event) {
+        use citysim::EventKind;
+        let d = e.tick / TICKS_PER_DAY;
+        match e.kind {
+            EventKind::Planted => {
+                let corp = w.owner_label(e.actors.first().copied());
+                self.planted_days.entry(corp).or_default().push(d);
+                // The story this plant paid for: same day, paid by the corp.
+                let story = w
+                    .stories
+                    .iter()
+                    .rev()
+                    .find(|s| s.paid_by == e.actors.first().copied() && s.tick / TICKS_PER_DAY == d);
+                let target = story.and_then(|s| plant_corp(w, s.actor)).map(|c| (c, w.owner_label(Some(c))));
+                self.plants.push((d, target));
+            }
+            EventKind::Buried => {
+                let corp = w.owner_label(e.actors.first().copied());
+                self.buried_days.entry(corp).or_default().push(d);
+            }
+            EventKind::Bankrupt if e.text.starts_with("Nutrix ") => {
+                self.out.nutrix_bankrupt_day.get_or_insert(d);
+            }
+            _ => {}
+        }
+    }
+
+    fn end_day(&mut self, w: &World) {
+        let r = w.stats.history.back().map(|r| r.word.clone()).unwrap_or_default();
+        self.out.stories += r.stories;
+        self.out.planted += r.planted;
+        self.out.buried += r.buried;
+        self.out.flow_ads += r.flow_ads;
+        self.out.flow_plant += r.flow_plant;
+        self.out.expelled += r.expelled;
+    }
+
+    fn finish(self, w: &World) -> M15News {
+        let NewsTrack { mut out, opinions, plants, planted_days, buried_days, spin_days, reach_sum, .. } = self;
+        out.feeds_day120 = citysim::systems::news::all_feeds(w).len();
+        out.treasury_day120 = w.treasury().map_or(0, |t| t.coins);
+        out.mean_reach = reach_sum.0 / reach_sum.1.max(1) as f32;
+        // Spin stretches: consecutive days held (a plant or bury on the day
+        // after the last counts: the act runs at the next midnight).
+        for (name, ds) in &spin_days {
+            let mut i = 0;
+            while i < ds.len() {
+                let mut j = i;
+                while j + 1 < ds.len() && ds[j + 1] == ds[j] + 1 {
+                    j += 1;
+                }
+                let (a, b) = (ds[i], ds[j]);
+                let n_in = |m: &DayLists| {
+                    m.get(name).map_or(0, |v| v.iter().filter(|&&d| d >= a && d <= b + 1).count() as u32)
+                };
+                out.spins.push((name.clone(), a, b - a + 1, n_in(&planted_days), n_in(&buried_days)));
+                i = j + 1;
+            }
+        }
+        for (d, corp) in plants {
+            let Some((c, name)) = corp else {
+                out.plants_not_corp += 1;
+                continue;
+            };
+            let day = d as usize;
+            let get = |i: usize| opinions.get(i).and_then(|m| m.get(&c)).copied();
+            let (Some(before), Some(after)) = (get(day.saturating_sub(1)), get(day + 7)) else { continue };
+            let low = (day..=day + 7).filter_map(get).fold(before, f32::min);
+            out.plant_opinion.push((d, name, before, after, low));
+        }
+        out
+    }
+}
+
+fn m15_news_run(seed: u64, days: u64) -> M15News {
+    let mut w = World::new(seed, Config::load());
+    let mut track = NewsTrack::default();
+    let mut cursor = 0u64;
+    for day in 0..days {
+        w.run_ticks(TICKS_PER_DAY);
+        track.day(&w, day);
         let fresh: Vec<citysim::Event> = w.events.iter().filter(|e| e.id >= cursor).cloned().collect();
         if let Some(e) = w.events.back() {
             cursor = e.id + 1;
         }
-        for e in fresh {
-            let d = e.tick / TICKS_PER_DAY;
-            match e.kind {
-                EventKind::Planted => {
-                    let corp = w.owner_label(e.actors.first().copied());
-                    planted_days.entry(corp).or_default().push(d);
-                    // The story this plant paid for: same day, paid by the corp.
-                    let story = w
-                        .stories
-                        .iter()
-                        .rev()
-                        .find(|s| s.paid_by == e.actors.first().copied() && s.tick / TICKS_PER_DAY == d);
-                    let target = story.and_then(|s| plant_corp(&w, s.actor)).map(|c| (c, w.owner_label(Some(c))));
-                    plants.push((d, target));
-                }
-                EventKind::Buried => {
-                    let corp = w.owner_label(e.actors.first().copied());
-                    buried_days.entry(corp).or_default().push(d);
-                }
-                EventKind::Bankrupt if e.text.starts_with("Nutrix ") => {
-                    out.nutrix_bankrupt_day.get_or_insert(d);
-                }
-                _ => {}
-            }
+        for e in &fresh {
+            track.event(&w, e);
         }
-        let r = w.stats.history.back().map(|r| r.word.clone()).unwrap_or_default();
-        out.stories += r.stories;
-        out.planted += r.planted;
-        out.buried += r.buried;
-        out.flow_ads += r.flow_ads;
-        out.flow_plant += r.flow_plant;
-        out.expelled += r.expelled;
+        track.end_day(&w);
     }
-    out.feeds_day120 = citysim::systems::news::all_feeds(&w).len();
-    out.treasury_day120 = w.treasury().map_or(0, |t| t.coins);
-    out.mean_reach = reach_sum.0 / reach_sum.1.max(1) as f32;
-    // Spin stretches: consecutive days held (a plant or bury on the day
-    // after the last counts: the act runs at the next midnight).
-    for (name, ds) in &spin_days {
-        let mut i = 0;
-        while i < ds.len() {
-            let mut j = i;
-            while j + 1 < ds.len() && ds[j + 1] == ds[j] + 1 {
-                j += 1;
-            }
-            let (a, b) = (ds[i], ds[j]);
-            let n_in =
-                |m: &DayLists| m.get(name).map_or(0, |v| v.iter().filter(|&&d| d >= a && d <= b + 1).count() as u32);
-            out.spins.push((name.clone(), a, b - a + 1, n_in(&planted_days), n_in(&buried_days)));
-            i = j + 1;
-        }
-    }
-    for (d, corp) in plants {
-        let Some((c, name)) = corp else {
-            out.plants_not_corp += 1;
-            continue;
-        };
-        let day = d as usize;
-        let get = |i: usize| opinions.get(i).and_then(|m| m.get(&c)).copied();
-        let (Some(before), Some(after)) = (get(day.saturating_sub(1)), get(day + 7)) else { continue };
-        let low = (day..=day + 7).filter_map(get).fold(before, f32::min);
-        out.plant_opinion.push((d, name, before, after, low));
-    }
-    out
+    track.finish(&w)
 }
 
-fn print_m15_news(seed: u64, n: &M15News) {
+fn fmt_m15_news(seed: u64, n: &M15News) -> String {
+    use std::fmt::Write;
+    let mut o = String::new();
     let held = n.spins.iter().filter(|s| s.2 >= 3 && s.3 >= 1 && s.4 >= 1).count();
     let drops = n.plant_opinion.iter().filter(|p| p.2 - p.3 >= 0.05).count();
     let drops_low = n.plant_opinion.iter().filter(|p| p.2 - p.4 >= 0.05).count();
-    eprintln!(
+    let _ = writeln!(o,
         "seed {seed}: feeds {} · stories {} · planted {} (not a corp {}) · buried {} · Spin held >= 3 d with a plant and a bury: {held} · plant-opinion drop >= 0.05 at day 7: {drops}/{} (within 7 days: {drops_low}) · Treasury {} · Nutrix bankrupt {:?} · ads {} · plant flow {} · expelled {} · mean reach {:.2}",
         n.feeds_day120,
         n.stories,
@@ -2486,11 +2538,16 @@ fn print_m15_news(seed: u64, n: &M15News) {
         n.mean_reach
     );
     for s in &n.spins {
-        eprintln!("  Spin {} from day {} for {} d: {} plants, {} buries", s.0, s.1, s.2, s.3, s.4);
+        let _ = writeln!(o, "  Spin {} from day {} for {} d: {} plants, {} buries", s.0, s.1, s.2, s.3, s.4);
     }
     for p in &n.plant_opinion {
-        eprintln!("  plant day {} vs {}: {:.3} -> {:.3} (low {:.3})", p.0, p.1, p.2, p.3, p.4);
+        let _ = writeln!(o, "  plant day {} vs {}: {:.3} -> {:.3} (low {:.3})", p.0, p.1, p.2, p.3, p.4);
     }
+    o
+}
+
+fn print_m15_news(seed: u64, n: &M15News) {
+    eprint!("{}", fmt_m15_news(seed, n));
 }
 
 /// The news numbers on `SEEDS` (default 42,43,44), 120 days each (`DAYS`).
@@ -2506,5 +2563,682 @@ fn probe_m15_news() {
     for seed in seeds {
         let n = m15_news_run(seed, days);
         print_m15_news(seed, &n);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M15 phase 5: the gate (plan 5.1, docs/M15_WORD_AND_BLOOD.md › Goals and acceptance, § 12)
+// ---------------------------------------------------------------------------
+
+/// What one M15 run measured (`m15_run`). `word_off` runs the same binary
+/// with every M15 section off (`Config::word_off`, the CLI's `--word-off`):
+/// the M14 city the Murder bound compares against.
+#[derive(Default)]
+struct M15 {
+    seed: u64,
+    word_off: bool,
+    tps: f64,
+    assaults: u32,
+    murders: u32,
+    starvation: u32,
+    pop: usize,
+    /// The longest rumour chain (`rumour_hops_max`, running max), rumours heard, distorted.
+    hops_max: u32,
+    heard: u32,
+    distorted: u32,
+    /// Day 120's share of deed memories held second-hand.
+    second_hand: f32,
+    /// `World::kill_known`: every watched killer's `known_by` seven days on.
+    kill_known: Vec<u16>,
+    /// Spearman across living adults of (`dread`, held deed memories naming them actor of Killed or Assaulted).
+    spearman_dread: f64,
+    /// The top decile of `standing` among living adults: (execs, owners, gang leaders, the captain; size).
+    top_decile: (usize, usize),
+    /// The positional adults (execs, owners, gang leaders, the captain): in the top decile, all of them.
+    positional: (usize, usize),
+    /// Adults with `dread >= 0.5` and `heat >= 0.5` on day 120, of adults.
+    dread_hi: (usize, usize),
+    heat_hi: usize,
+    rep_flips: u32,
+    contracts_lost_honour: u32,
+    grudges: u32,
+    inherited: u32,
+    /// Grudges formed, by cause (a daily snapshot of the stores: entries whose `since` is that day).
+    grudge_causes: std::collections::BTreeMap<&'static str, u32>,
+    hunts: u32,
+    avenged: u32,
+    revenge_kills: u32,
+    chain_max: u32,
+    /// `Vendetta` events, open on day 120 (labels), live factions on day 120.
+    vendettas_opened: u32,
+    vendettas_open: Vec<String>,
+    factions: usize,
+    /// From `extort_log`: (successes, tries) with the extorter's dread >= 0.5 and below; target with an ally
+    /// within 8 and without.
+    extort_feared: (u32, u32),
+    extort_unfeared: (u32, u32),
+    extort_allied: (u32, u32),
+    extort_alone: (u32, u32),
+    rare_share: f32,
+    poached: u32,
+    /// `TalentLost` texts naming a killed agent, and every `TalentLost`.
+    talent_killed: Vec<String>,
+    talent_lost: u32,
+    news: M15News,
+    /// Day 120: `(gang, dread, heat, members)` and `(corp, honour)`.
+    gangs: Vec<(String, f32, f32, usize)>,
+    corps: Vec<(String, f32)>,
+    /// Per gang slot, `(dread, heat)` on days 30, 60, 90 and 120 (the CSV columns).
+    gang_axes: Vec<(u64, Vec<[f32; 2]>)>,
+    /// Per day, the corp honour spread (max - min over living corps).
+    honour_spread: Vec<f32>,
+}
+
+/// One M15 run: the 2,000-resident v2 city, 120 days, events walked daily by
+/// `Event.id` cursor (the ring holds 50,000), the news bookkeeping of phase
+/// 4, the grudge stores snapshotted daily for the causes, the day-120
+/// reputation readings.
+fn m15_run(seed: u64, word_off: bool) -> M15 {
+    use citysim::systems::{demography, memory, reputation};
+    use citysim::word::{Deed, GrudgeCause, Grudges};
+    use citysim::{Building, Corp, EventKind, Gang, Memory};
+    use std::collections::BTreeMap;
+    use std::time::Instant;
+
+    let config = if word_off { Config::load().word_off() } else { Config::load() };
+    let mut w = World::new(seed, config);
+    let mut m = M15 { seed, word_off, ..M15::default() };
+    let mut track = NewsTrack::default();
+    let mut cursor = 0u64;
+    let started = Instant::now();
+    for day in 0..120u64 {
+        let day_start = w.tick;
+        w.run_ticks(TICKS_PER_DAY);
+        track.day(&w, day);
+        let fresh: Vec<citysim::Event> = w.events.iter().rev().take_while(|e| e.id >= cursor).cloned().collect();
+        if let Some(e) = w.events.back() {
+            cursor = e.id + 1;
+        }
+        for e in fresh.iter().rev() {
+            track.event(&w, e);
+            match e.kind {
+                EventKind::Assault => m.assaults += 1,
+                EventKind::Murder => {
+                    m.assaults += 1;
+                    m.murders += 1;
+                }
+                EventKind::Vendetta => m.vendettas_opened += 1,
+                EventKind::TalentLost => {
+                    m.talent_lost += 1;
+                    if e.text.contains("(killed)") {
+                        m.talent_killed.push(format!("d{day} {}", e.text));
+                    }
+                }
+                _ => {}
+            }
+        }
+        track.end_day(&w);
+        for h in w.with::<Grudges>() {
+            for x in w.comp::<Grudges>(h).map(|g| g.list.as_slice()).unwrap_or_default() {
+                if x.since >= day_start && x.since < w.tick {
+                    let cause = match x.cause {
+                        GrudgeCause::KilledKin(_) => "killed kin",
+                        GrudgeCause::KilledFriend(_) => "killed friend",
+                        GrudgeCause::Assaulted => "assaulted",
+                        GrudgeCause::Robbed => "robbed",
+                        GrudgeCause::Stripped(_) => "stripped",
+                        GrudgeCause::Evicted => "evicted",
+                        GrudgeCause::Betrayed => "betrayed",
+                        GrudgeCause::Inherited(_) => "inherited",
+                    };
+                    *m.grudge_causes.entry(cause).or_default() += 1;
+                }
+            }
+        }
+        let hs: Vec<f32> = w.corps().into_iter().map(|c| reputation::rep(&w, c).honour).collect();
+        let (lo, hi) = hs.iter().fold((1.0f32, 0.0f32), |(a, b), &h| (a.min(h), b.max(h)));
+        m.honour_spread.push(if hs.is_empty() { 0.0 } else { hi - lo });
+        if [29, 59, 89, 119].contains(&day) {
+            let g = w.stats.history.back().map(|r| r.word.gangs.clone()).unwrap_or_default();
+            m.gang_axes.push((day + 1, g));
+        }
+    }
+    m.tps = (120 * TICKS_PER_DAY) as f64 / started.elapsed().as_secs_f64();
+    let h = &w.stats.history;
+    let sum = |f: fn(&citysim::stats::WordCols) -> u32| h.iter().map(|r| f(&r.word)).sum::<u32>();
+    let last = h.back().expect("a day row");
+    m.starvation = h.iter().map(|r| r.deaths_starvation).sum();
+    m.pop = w.population();
+    m.hops_max = h.iter().map(|r| r.word.rumour_hops_max).max().unwrap_or(0);
+    m.heard = sum(|x| x.rumours_heard);
+    m.distorted = sum(|x| x.distorted);
+    m.second_hand = last.word.second_hand_share;
+    m.kill_known = w.kill_known.clone();
+    m.rep_flips = sum(|x| x.rep_flips);
+    m.contracts_lost_honour = sum(|x| x.contracts_lost_honour);
+    m.grudges = sum(|x| x.grudges);
+    m.inherited = sum(|x| x.grudges_inherited);
+    m.hunts = sum(|x| x.hunts);
+    m.avenged = sum(|x| x.avenged);
+    m.revenge_kills = sum(|x| x.revenge_kills);
+    m.chain_max = h.iter().map(|r| r.word.chain_max).max().unwrap_or(0);
+    m.rare_share = last.word.skill_rare_share;
+    m.poached = sum(|x| x.poached);
+    m.news = track.finish(&w);
+    for &(feared, allied, ok) in &w.extort_log {
+        let s = u32::from(ok);
+        let f = if feared { &mut m.extort_feared } else { &mut m.extort_unfeared };
+        f.0 += s;
+        f.1 += 1;
+        let a = if allied { &mut m.extort_allied } else { &mut m.extort_alone };
+        a.0 += s;
+        a.1 += 1;
+    }
+    // Day 120's reputation: the Spearman, the axes' shares, the top decile of standing.
+    let adults: Vec<citysim::EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| demography::is_adult(&w, a) && citysim::systems::law::living(&w, a))
+        .collect();
+    let mut told: BTreeMap<citysim::EntityId, u32> = BTreeMap::new();
+    for hd in w.citizens() {
+        let Some(mem) = w.comp::<Memory>(hd) else { continue };
+        for (_, r) in memory::deeds(hd, mem) {
+            if matches!(r.deed, Deed::Killed | Deed::Assaulted) {
+                if let Some(a) = r.actor.filter(|&a| a != hd) {
+                    *told.entry(a).or_default() += 1;
+                }
+            }
+        }
+    }
+    let reps: Vec<citysim::word::Reputation> = adults.iter().map(|&a| reputation::rep(&w, a)).collect();
+    let dreads: Vec<f64> = reps.iter().map(|r| f64::from(r.dread)).collect();
+    let deeds: Vec<f64> = adults.iter().map(|a| f64::from(told.get(a).copied().unwrap_or(0))).collect();
+    m.spearman_dread = spearman(&dreads, &deeds);
+    m.dread_hi = (reps.iter().filter(|r| r.dread >= 0.5).count(), adults.len());
+    m.heat_hi = reps.iter().filter(|r| r.heat >= 0.5).count();
+    let execs = citysim::systems::classes::exec_set(&w);
+    let mut owners: std::collections::BTreeSet<citysim::EntityId> = Default::default();
+    for b in w.with::<Building>() {
+        if let Some(o) = w.comp::<Building>(b).filter(|x| !x.demolished).and_then(|x| x.owner) {
+            owners.insert(o);
+        }
+    }
+    let leaders: Vec<citysim::EntityId> =
+        w.gang_list().iter().filter_map(|&g| w.comp::<Gang>(g).and_then(|x| x.leader)).collect();
+    let captain = w.law().and_then(|l| l.captain);
+    let mut by_standing: Vec<(f32, citysim::EntityId)> =
+        adults.iter().zip(&reps).map(|(&a, r)| (r.standing, a)).collect();
+    by_standing.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    let k = (by_standing.len() / 10).max(1);
+    let placed = by_standing
+        .iter()
+        .take(k)
+        .filter(|(_, a)| execs.contains(a) || owners.contains(a) || leaders.contains(a) || captain == Some(*a))
+        .count();
+    m.top_decile = (placed, k);
+    let is_pos =
+        |a: &citysim::EntityId| execs.contains(a) || owners.contains(a) || leaders.contains(a) || captain == Some(*a);
+    let pos_all = adults.iter().filter(|a| is_pos(a)).count();
+    let pos_top = by_standing.iter().take(k).filter(|(_, a)| is_pos(a)).count();
+    m.positional = (pos_top, pos_all);
+    for &g in w.gang_list() {
+        let Some(gg) = w.comp::<Gang>(g) else { continue };
+        let r = reputation::rep(&w, g);
+        m.gangs.push((gg.name.clone(), r.dread, r.heat, gg.members.len()));
+    }
+    for c in w.corps() {
+        let Some(cc) = w.comp::<Corp>(c) else { continue };
+        m.corps.push((cc.name.clone(), reputation::rep(&w, c).honour));
+    }
+    m.vendettas_open = w
+        .vendettas
+        .iter()
+        .map(|v| {
+            format!(
+                "{}-{} ({:.2}/{:.2})",
+                citysim::systems::grudges::label(&w, v.a),
+                citysim::systems::grudges::label(&w, v.b),
+                v.w[0],
+                v.w[1]
+            )
+        })
+        .collect();
+    m.factions = reputation::factions(&w).len();
+    print_m15(&m);
+    m
+}
+
+fn share(x: (u32, u32)) -> f64 {
+    f64::from(x.0) / f64::from(x.1.max(1))
+}
+
+fn median_u16(v: &[u16]) -> f64 {
+    if v.is_empty() {
+        return -1.0;
+    }
+    let mut s = v.to_vec();
+    s.sort_unstable();
+    f64::from(s[s.len() / 2])
+}
+
+/// One M15 run's numbers and its calibration table (spec § 12).
+fn print_m15(m: &M15) {
+    use std::fmt::Write;
+    let mut o = String::new();
+    let seed = m.seed;
+    let off = if m.word_off { " (--word-off)" } else { "" };
+    let _ = writeln!(
+        o,
+        "M15 seed {seed}{off}: assaults/day {:.2}, Murders {}, starvation {}, pop {}, {:.0} ticks/s",
+        f64::from(m.assaults) / 120.0,
+        m.murders,
+        m.starvation,
+        m.pop,
+        m.tps
+    );
+    if m.word_off {
+        eprint!("{o}");
+        return;
+    }
+    let n = &m.news;
+    let _ = writeln!(o,
+        "  word: hops max {}, heard {}, distorted {}, second-hand d120 {:.3}, killers watched {} (median known_by {:.0}, > 150: {}), \
+         Spearman(dread, deeds) {:.2}, top decile of standing placed {}/{} (positional adults in it {}/{}), rep_flips {}, contracts lost on honour {}",
+        m.hops_max,
+        m.heard,
+        m.distorted,
+        m.second_hand,
+        m.kill_known.len(),
+        median_u16(&m.kill_known),
+        m.kill_known.iter().filter(|&&k| k > 150).count(),
+        m.spearman_dread,
+        m.top_decile.0,
+        m.top_decile.1,
+        m.positional.0,
+        m.positional.1,
+        m.rep_flips,
+        m.contracts_lost_honour
+    );
+    let _ = writeln!(
+        o,
+        "  blood: grudges {} (inherited {}; by cause {:?}), hunts {}, avenged {}, revenge kills {}, chain max {}, \
+         vendettas opened {} open d120 {} of {} factions {:?}",
+        m.grudges,
+        m.inherited,
+        m.grudge_causes,
+        m.hunts,
+        m.avenged,
+        m.revenge_kills,
+        m.chain_max,
+        m.vendettas_opened,
+        m.vendettas_open.len(),
+        m.factions,
+        m.vendettas_open
+    );
+    let _ = writeln!(o,
+        "  moves: extortion feared {}/{} ({:.2}) unfeared {}/{} ({:.2}), alone {}/{} ({:.2}) allied {}/{} ({:.2}), rare skill d120 {:.3}, \
+         poached {}, TalentLost {} (after a killing {})",
+        m.extort_feared.0,
+        m.extort_feared.1,
+        share(m.extort_feared),
+        m.extort_unfeared.0,
+        m.extort_unfeared.1,
+        share(m.extort_unfeared),
+        m.extort_alone.0,
+        m.extort_alone.1,
+        share(m.extort_alone),
+        m.extort_allied.0,
+        m.extort_allied.1,
+        share(m.extort_allied),
+        m.rare_share,
+        m.poached,
+        m.talent_lost,
+        m.talent_killed.len()
+    );
+    for t in m.talent_killed.iter().take(3) {
+        let _ = writeln!(o, "    {t}");
+    }
+    o.push_str(&fmt_m15_news(seed, n));
+    let _ = writeln!(
+        o,
+        "  stories by deed {:?}, plants of a story already planted that day {}",
+        n.story_deeds, n.plants_same_story
+    );
+    let gangs: Vec<String> =
+        m.gangs.iter().map(|(g, d, h, k)| format!("{g} dread {d:.2} heat {h:.2} ({k} members)")).collect();
+    let _ = writeln!(o, "  gangs d120: {}", gangs.join(", "));
+    for (d, g) in &m.gang_axes {
+        let v: Vec<String> = g.iter().map(|[d, h]| format!("{d:.2}/{h:.2}")).collect();
+        let _ = writeln!(o, "    day {d} gang slots dread/heat: {}", v.join(" "));
+    }
+    let corps: Vec<String> = m.corps.iter().map(|(c, h)| format!("{c} {h:.2}")).collect();
+    let _ = writeln!(o, "  corp honour d120: {}", corps.join(", "));
+    let hsm = m.honour_spread.iter().sum::<f32>() / m.honour_spread.len().max(1) as f32;
+    let hsx = m.honour_spread.iter().copied().fold(0.0f32, f32::max);
+    let _ = writeln!(o, "  corp honour spread over the run: mean {hsm:.2}, max {hsx:.2}");
+    let band = |ok: bool| if ok { "in" } else { "OUT" };
+    let kb = median_u16(&m.kill_known);
+    let ds = f64::from(m.distorted) / f64::from(m.heard.max(1));
+    let stories_day = f64::from(n.stories) / 120.0;
+    let drops = n.plant_opinion.iter().filter(|p| p.2 - p.4 >= 0.05).count();
+    let plant_share = drops as f64 / n.plant_opinion.len().max(1) as f64;
+    let (hmin, hmax) = m.corps.iter().fold((1.0f32, 0.0f32), |(a, b), c| (a.min(c.1), b.max(c.1)));
+    let spread = if m.corps.is_empty() { 0.0 } else { hmax - hmin };
+    let dread_share = m.dread_hi.0 as f64 / m.dread_hi.1.max(1) as f64;
+    let heat_share = m.heat_hi as f64 / m.dread_hi.1.max(1) as f64;
+    let ext = share((m.extort_feared.0 + m.extort_unfeared.0, m.extort_feared.1 + m.extort_unfeared.1));
+    let _ = writeln!(o, "calibration (spec § 12), seed {seed}:");
+    let _ =
+        writeln!(o, "  median known_by of a killer +7d {kb:>7.0}   25-150   {}", band((25.0..=150.0).contains(&kb)));
+    let sh = f64::from(m.second_hand);
+    let _ =
+        writeln!(o, "  second-hand share d120     {:>6.1}%   30-70 %  {}", sh * 100.0, band((0.3..=0.7).contains(&sh)));
+    let _ = writeln!(
+        o,
+        "  distorted share            {:>6.1}%   3-15 %   {}",
+        ds * 100.0,
+        band((0.03..=0.15).contains(&ds))
+    );
+    let _ = writeln!(
+        o,
+        "  grudges formed             {:>7}   60-400   {}",
+        m.grudges,
+        band((60..=400).contains(&m.grudges))
+    );
+    let _ =
+        writeln!(o, "  hunts adopted              {:>7}   10-60    {}", m.hunts, band((10..=60).contains(&m.hunts)));
+    let _ = writeln!(
+        o,
+        "  revenge killings           {:>7}   3-20     {}",
+        m.revenge_kills,
+        band((3..=20).contains(&m.revenge_kills))
+    );
+    let _ = writeln!(
+        o,
+        "  longest chain              {:>7}   2-5      {}",
+        m.chain_max,
+        band((2..=5).contains(&m.chain_max))
+    );
+    let _ = writeln!(
+        o,
+        "  dread >= 0.5 of adults     {:>6.1}%   1-5 %    {}",
+        dread_share * 100.0,
+        band((0.01..=0.05).contains(&dread_share))
+    );
+    let _ = writeln!(
+        o,
+        "  heat >= 0.5 of adults      {:>6.1}%   0.5-4 %  {}",
+        heat_share * 100.0,
+        band((0.005..=0.04).contains(&heat_share))
+    );
+    let _ =
+        writeln!(o, "  corp honour spread         {spread:>7.2}   0.15-0.6 {}", band((0.15..=0.6).contains(&spread)));
+    let _ = writeln!(
+        o,
+        "  extortion success share    {:>6.1}%   55-85 %  {}",
+        ext * 100.0,
+        band((0.55..=0.85).contains(&ext))
+    );
+    let _ =
+        writeln!(o, "  poached                    {:>7}   3-20     {}", m.poached, band((3..=20).contains(&m.poached)));
+    let rare = f64::from(m.rare_share);
+    let _ = writeln!(
+        o,
+        "  social skill >= 0.8 d120   {:>6.1}%   3-8 %    {}",
+        rare * 100.0,
+        band((0.03..=0.08).contains(&rare))
+    );
+    let _ = writeln!(
+        o,
+        "  stories per day            {stories_day:>7.1}   3-12     {}",
+        band((3.0..=12.0).contains(&stories_day))
+    );
+    let _ = writeln!(
+        o,
+        "  plant-opinion drop         {:>4}/{:<3}  >= 50 %  {}",
+        drops,
+        n.plant_opinion.len(),
+        band(!n.plant_opinion.is_empty() && plant_share >= 0.5)
+    );
+    eprint!("{o}");
+}
+
+/// The M15 gate (docs/M15_WORD_AND_BLOOD.md › Goals and acceptance, plan
+/// 5.1), under the gate doctrine (2026-10-07): mechanism and existence
+/// bullets asserted, calibration bands printed as findings with a wide
+/// sanity assert beside them, the v1 sanity bounds and the ticks/s floor
+/// asserted. Seed 42 runs alone (its ticks/s is the throughput reading);
+/// seeds 43-47 and the `--word-off` runs of 42-44 (the M14 city on the same
+/// binary, the Murder bound's reference) in parallel threads. `#[ignore]`:
+/// nine runs.
+#[test]
+#[ignore]
+fn test_m15_word_seed_42() {
+    let first = m15_run(42, false);
+    let handles: Vec<_> =
+        [(43u64, false), (44, false), (45, false), (46, false), (47, false), (42, true), (43, true), (44, true)]
+            .into_iter()
+            .map(|(s, off)| std::thread::spawn(move || m15_run(s, off)))
+            .collect();
+    let mut rest: Vec<M15> = handles.into_iter().map(|h| h.join().expect("a seed run")).collect();
+    let offs: Vec<M15> = rest.split_off(5);
+    let all: Vec<M15> = std::iter::once(first).chain(rest).collect();
+    let three = &all[..3];
+    let r = &all[0];
+    let mut failures: Vec<String> = Vec::new();
+    let mut check = |ok: bool, what: String| {
+        eprintln!("{} {what}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failures.push(what);
+        }
+    };
+    let per = |f: &dyn Fn(&M15) -> u32| -> Vec<u32> { all.iter().map(f).collect() };
+    let per3 = |f: &dyn Fn(&M15) -> u32| -> Vec<u32> { three.iter().map(f).collect() };
+
+    // The word (mechanism, seed 42).
+    check(r.hops_max >= 4, format!("a rumour with hops >= 4 (max {})", r.hops_max));
+    check(r.distorted >= 1, format!("a distorted rumour ({})", r.distorted));
+    check(!r.kill_known.is_empty(), format!("watched killers sampled seven days on ({})", r.kill_known.len()));
+    check(r.second_hand > 0.0 && r.second_hand < 1.0, format!("second-hand share d120 {:.3} in (0, 1)", r.second_hand));
+    // Reputation.
+    check(r.rep_flips >= 1, format!("rep_flips {} >= 1 (a rescoring the fear input decided)", r.rep_flips));
+    check(
+        r.spearman_dread > 0.0,
+        format!("dread reads the deeds known: Spearman(dread, deeds as actor) {:.2} > 0", r.spearman_dread),
+    );
+    // Phase 5 deviation: the spec's "top decile of standing >= 70 % execs, owners, gang leaders and the
+    // captain" needs >= 10 % of adults in a position; the city has ~20 of ~1,900 (execs, agent owners,
+    // four leaders, the captain), so at most ~11 % of the decile can be theirs. Asserted the other way
+    // round: the positional adults rank at the top (most of them sit in the top decile); the spec's
+    // share is printed.
+    let placed = r.positional.0 as f64 / r.positional.1.max(1) as f64;
+    check(
+        r.positional.1 > 0 && placed >= 0.5,
+        format!(
+            "positional adults (execs, owners, gang leaders, the captain) in the top decile of standing {}/{} = {placed:.2} >= 0.50",
+            r.positional.0, r.positional.1
+        ),
+    );
+    eprintln!(
+        "FINDING top decile of standing that is positional {}/{} (spec >= 70 %; positional adults {})",
+        r.top_decile.0, r.top_decile.1, r.positional.1
+    );
+    // Blood.
+    check(r.grudges >= 1, format!("grudges formed {}", r.grudges));
+    check(r.hunts >= 1, format!("a Hunt adopted ({})", r.hunts));
+    check(r.avenged >= 1, format!("an Avenged ({})", r.avenged));
+    check(r.inherited >= 1, format!("an inherited grudge ({})", r.inherited));
+    check(r.vendettas_opened >= 1, format!("a Vendetta opened ({})", r.vendettas_opened));
+    // Moves.
+    let (f, u) = (share(r.extort_feared), share(r.extort_unfeared));
+    check(
+        r.extort_feared.1 > 0 && f > u,
+        format!(
+            "extortion succeeds more at dread >= 0.5: {}/{} = {f:.2} > {}/{} = {u:.2}",
+            r.extort_feared.0, r.extort_feared.1, r.extort_unfeared.0, r.extort_unfeared.1
+        ),
+    );
+    let poached = per3(&|m| m.poached);
+    check(poached.iter().any(|&p| p >= 1), format!("a Poached on some seed of 42-44 {poached:?}"));
+    let talent = per(&|m| m.talent_killed.len() as u32);
+    check(
+        talent.iter().any(|&t| t >= 1),
+        format!("a TalentLost naming a killed agent on some seed of 42-47 {talent:?}"),
+    );
+    // News.
+    let n = &r.news;
+    check(n.feeds_day120 >= 2, format!("Feeds on day 120 {} >= 2", n.feeds_day120));
+    check(n.stories >= 1, format!("stories run ({})", n.stories));
+    // A Spin held >= 3 days with a plant and a bury: on some seed of 42-44 (phase 5: with vendettas rare
+    // the plants target rival corps, which do fewer misdeeds; 0-7 such stretches a seed).
+    let held = per3(&|m| m.news.spins.iter().filter(|s| s.2 >= 3 && s.3 >= 1 && s.4 >= 1).count() as u32);
+    check(
+        held.iter().any(|&x| x >= 1),
+        format!("a Spin held >= 3 days with a plant and a bury on some seed of 42-44 {held:?}"),
+    );
+    let planted = per3(&|m| m.news.planted);
+    let buried = per3(&|m| m.news.buried);
+    check(
+        planted.iter().any(|&x| x >= 1) && buried.iter().any(|&x| x >= 1),
+        format!("Planted {planted:?} and Buried {buried:?} on 42-44"),
+    );
+    let expelled = per(&|m| m.news.expelled);
+    check(expelled.iter().any(|&x| x >= 1), format!("a Purist expulsion on some seed of 42-47 {expelled:?}"));
+
+    // Sanity (the v1 bounds; the Murder bound against the --word-off runs of the same seeds on the same
+    // binary). Murders on one seed move +-20 % with any behaviour change (seed 42 read 44-64 across phase
+    // 5's calibration variants against 41 off), so the bound is judged on the 42-44 sum; per seed printed.
+    for (m, o) in three.iter().zip(&offs) {
+        eprintln!(
+            "FINDING seed {}: Murders {} against the --word-off run's {} (x{:.2})",
+            m.seed,
+            m.murders,
+            o.murders,
+            f64::from(m.murders) / f64::from(o.murders.max(1))
+        );
+    }
+    let (on, off): (u32, u32) = (three.iter().map(|m| m.murders).sum(), offs.iter().map(|m| m.murders).sum());
+    check(
+        f64::from(on) <= 1.25 * f64::from(off),
+        format!("Murders on 42-44 {on} <= 1.25 x the --word-off runs' {off} = {:.1}", 1.25 * f64::from(off)),
+    );
+    let asl: Vec<f64> = three.iter().map(|m| f64::from(m.assaults) / 120.0).collect();
+    check(asl.iter().all(|&a| a <= 42.7), format!("assaults/day {asl:.2?} <= 42.7 on 42-44"));
+    check(r.starvation <= 200, format!("starvation {} <= 200", r.starvation));
+    check((1333..=2667).contains(&r.pop), format!("population {} in 1333..=2667", r.pop));
+    if !cfg!(debug_assertions) {
+        check(r.tps >= TPS_FLOOR, format!("ticks/s {:.0} >= {TPS_FLOOR:.0} (seed 42 alone)", r.tps));
+    }
+
+    // Phase 5 (dynamic range): the gangs' dread and heat carry a difference the brains can read (the fear
+    // and pressure terms), majority of 42-44.
+    let spread = |v: &[f32]| v.iter().copied().fold(0.0f32, f32::max) - v.iter().copied().fold(1.0f32, f32::min);
+    let mut ok = 0;
+    for m in three {
+        let d: Vec<f32> = m.gangs.iter().map(|g| g.1).collect();
+        let h: Vec<f32> = m.gangs.iter().map(|g| g.2).collect();
+        let pass = d.len() >= 2 && spread(&d) >= 0.1 && spread(&h) >= 0.1;
+        eprintln!("  seed {}: gang dread {d:.2?} heat {h:.2?}: {}", m.seed, if pass { "pass" } else { "fail" });
+        ok += usize::from(pass);
+    }
+    check(ok * 2 > three.len(), format!("majority {ok}/3 seeds: gang dread and heat spread >= 0.1 on day 120"));
+    // Vendettas are events between a few pairs, not the ambient state (sanity: fewer than a fifth of the
+    // live faction pairs open on day 120 on every seed of 42-44).
+    let vo: Vec<(usize, usize)> =
+        three.iter().map(|m| (m.vendettas_open.len(), m.factions * m.factions.saturating_sub(1) / 2)).collect();
+    check(
+        vo.iter().all(|&(o, p)| o * 5 < p.max(1)),
+        format!("vendettas open on day 120 under a fifth of the faction pairs on 42-44 {vo:?}"),
+    );
+
+    // FINDINGS (calibration, not asserted): spec § 12's bands, per seed of 42-44, with the wide sanity
+    // asserts beside them.
+    let kb: Vec<f64> = three.iter().map(|m| median_u16(&m.kill_known)).collect();
+    eprintln!("FINDING median known_by of a killer +7 d {kb:?} (band 25-150)");
+    let sh: Vec<f32> = three.iter().map(|m| m.second_hand).collect();
+    eprintln!("FINDING second-hand share d120 {sh:.3?} (band 0.30-0.70)");
+    let ds: Vec<f64> = three.iter().map(|m| f64::from(m.distorted) / f64::from(m.heard.max(1))).collect();
+    eprintln!("FINDING distorted share of rumours heard {ds:.3?} (band 0.03-0.15)");
+    let sp: Vec<f64> = three.iter().map(|m| m.spearman_dread).collect();
+    eprintln!("FINDING Spearman(dread, deeds as actor) {sp:.2?} (spec >= 0.6)");
+    let g = per3(&|m| m.grudges);
+    eprintln!("FINDING grudges formed {g:?} (band 60-400)");
+    // Sanity: no grudge flood (before phase 5's calibration every beating heard of formed one: 18-21k a run).
+    check(g.iter().all(|&x| x <= 10_000), format!("grudges formed {g:?} <= 10,000 on 42-44 (sanity: no grudge flood)"));
+    let hu = per3(&|m| m.hunts);
+    eprintln!("FINDING hunts adopted {hu:?} (band 10-60)");
+    let rk = per3(&|m| m.revenge_kills);
+    eprintln!("FINDING revenge killings {rk:?} (band 3-20)");
+    let av = per3(&|m| m.avenged);
+    eprintln!("FINDING Avenged {av:?} (spec >= 3)");
+    let ch = per3(&|m| m.chain_max);
+    eprintln!("FINDING longest chain {ch:?} (band 2-5)");
+    let vo = per3(&|m| m.vendettas_open.len() as u32);
+    let vf = per3(&|m| m.factions as u32);
+    let ve = per3(&|m| m.vendettas_opened);
+    eprintln!("FINDING vendettas opened {ve:?}, open on day 120 {vo:?} of {vf:?} live factions");
+    let dr: Vec<f64> = three.iter().map(|m| m.dread_hi.0 as f64 / m.dread_hi.1.max(1) as f64).collect();
+    let he: Vec<f64> = three.iter().map(|m| m.heat_hi as f64 / m.dread_hi.1.max(1) as f64).collect();
+    eprintln!("FINDING adults with dread >= 0.5 {dr:.3?} (band 0.01-0.05), heat >= 0.5 {he:.3?} (band 0.005-0.04)");
+    let spread_d120: Vec<f32> = three
+        .iter()
+        .map(|m| {
+            let (lo, hi) = m.corps.iter().fold((1.0f32, 0.0f32), |(a, b), c| (a.min(c.1), b.max(c.1)));
+            if m.corps.is_empty() {
+                0.0
+            } else {
+                hi - lo
+            }
+        })
+        .collect();
+    let run_max: Vec<f32> = three.iter().map(|m| m.honour_spread.iter().copied().fold(0.0f32, f32::max)).collect();
+    eprintln!("FINDING corp honour spread d120 {spread_d120:.2?} (band 0.15-0.6; the run's max {run_max:.2?})");
+    let cl = per3(&|m| m.contracts_lost_honour);
+    eprintln!("FINDING Security contracts lost on honour {cl:?} (spec >= 1)");
+    let ext: Vec<f64> = three
+        .iter()
+        .map(|m| share((m.extort_feared.0 + m.extort_unfeared.0, m.extort_feared.1 + m.extort_unfeared.1)))
+        .collect();
+    eprintln!("FINDING extortion success share {ext:.2?} (band 0.55-0.85)");
+    let alone: Vec<(f64, f64)> = three.iter().map(|m| (share(m.extort_alone), share(m.extort_allied))).collect();
+    eprintln!("FINDING extortion success alone vs with an ally within 8 {alone:.2?} (spec: alone higher)");
+    eprintln!("FINDING poached {poached:?} (band 3-20)");
+    let rare: Vec<f32> = three.iter().map(|m| m.rare_share).collect();
+    eprintln!("FINDING adults with a social skill >= 0.8 d120 {rare:.3?} (band 0.03-0.08)");
+    check(
+        rare.iter().all(|&x| x > 0.0 && x < 0.2),
+        format!("rare social skills {rare:.3?} in (0, 0.2) on 42-44 (sanity: rarity holds)"),
+    );
+    let st: Vec<f64> = three.iter().map(|m| f64::from(m.news.stories) / 120.0).collect();
+    eprintln!("FINDING stories per day {st:.1?} (band 3-12)");
+    let po: Vec<(usize, usize)> = three
+        .iter()
+        .map(|m| (m.news.plant_opinion.iter().filter(|p| p.2 - p.4 >= 0.05).count(), m.news.plant_opinion.len()))
+        .collect();
+    eprintln!(
+        "FINDING plants against a corp whose employees' opinion fell >= 0.05 within 7 days {po:?} (spec >= 50 %; plants \
+         not against a corp {:?})",
+        three.iter().map(|m| m.news.plants_not_corp).collect::<Vec<_>>()
+    );
+    let cl_rk = per3(&|m| m.revenge_kills);
+    check(cl_rk.iter().all(|&x| x <= 60), format!("revenge killings {cl_rk:?} <= 60 on 42-44 (sanity: no spiral)"));
+    assert!(failures.is_empty(), "M15 gate failures: {failures:?}");
+}
+
+/// One M15 run for calibration by hand (`SEEDS`, default 42; `WORD_OFF=1`
+/// for the M14 city).
+#[test]
+#[ignore]
+fn probe_m15_run() {
+    let seeds: Vec<u64> = std::env::var("SEEDS")
+        .unwrap_or_else(|_| "42".into())
+        .split(',')
+        .filter_map(|s| s.trim().parse().ok())
+        .collect();
+    let off = std::env::var("WORD_OFF").is_ok_and(|v| v == "1");
+    let handles: Vec<_> = seeds.into_iter().map(|s| std::thread::spawn(move || m15_run(s, off))).collect();
+    for h in handles {
+        let _ = h.join().expect("a seed run");
     }
 }

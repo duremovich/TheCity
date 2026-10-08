@@ -79,8 +79,8 @@ fn test_reputation_numbers() {
     let h = 2.0 * 0.3 * cfg.honour_w.get(Deed::Robbed);
     assert!((h + 0.18).abs() < 1e-6);
     assert!((reputation::honour_of(h, cfg.honour_scale) - 0.47).abs() < 1e-3);
-    // Wanted, no deeds.
-    assert!((reputation::heat_of(0.0, cfg.heat_scale, cfg.heat_wanted) - 0.6).abs() < 1e-6);
+    // Wanted, no deeds (M15 phase 5: `heat_wanted` 0.6 -> 0.4, so being wanted alone reads under 0.5).
+    assert!((reputation::heat_of(0.0, cfg.heat_scale, cfg.heat_wanted) - 0.4).abs() < 1e-6);
     // Corp exec known by 40.
     assert!((reputation::standing_of(0.9, 40, cfg.fame_scale) - 0.827).abs() < 1e-3);
     // Dreg known by 3, rags.

@@ -526,6 +526,9 @@ fn spin(world: &mut World, mut known: BTreeMap<EntityId, Misdeeds>) -> Vec<Plant
         .filter(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.spin_since.is_some()))
         .collect();
     let censor = censored(world);
+    // M15 phase 5: one plant per deed a day. Every spinner read the same
+    // pools, so three corps paid to run the same story about the same man.
+    let mut taken: Vec<(Deed, EntityId, Option<EntityId>, u64)> = Vec::new();
     for corp in spinners {
         let reach_of = |w: &World, f: EntityId| feed_state(w, f).map_or(0.0, |s| s.reach);
         // The plant: the largest reach not owned (ties lower id), else its own.
@@ -537,7 +540,9 @@ fn spin(world: &mut World, mut known: BTreeMap<EntityId, Misdeeds>) -> Vec<Plant
             // buried and censor filters, as an organic story does.
             let pick = known.remove(&corp).unwrap_or_default().into_iter().find(|(e, _)| {
                 e.actor.is_some_and(|a| {
-                    !ran_recently(world, feed, e.deed, a, e.object) && !silenced(world, feed, &censor, a, e.object)
+                    !taken.contains(&(e.deed, a, e.object, time::day(e.tick)))
+                        && !ran_recently(world, feed, e.deed, a, e.object)
+                        && !silenced(world, feed, &censor, a, e.object)
                 })
             });
             if let Some((e, _)) = pick {
@@ -545,6 +550,9 @@ fn spin(world: &mut World, mut known: BTreeMap<EntityId, Misdeeds>) -> Vec<Plant
                 let price = if own { 0 } else { (cfg.plant_price as f32 * reach).round() as i64 };
                 let cash = world.comp::<Corp>(corp).map_or(0, |c| c.treasury);
                 if price == 0 || cash >= price {
+                    if let Some(a) = e.actor {
+                        taken.push((e.deed, a, e.object, time::day(e.tick)));
+                    }
                     pay_feed(world, corp, feed, price, Flow::Plant);
                     let (cn, fname) = (world.owner_label(Some(corp)), feed_name(world, feed));
                     let actor = e.actor.map_or_else(String::new, |a| crate::systems::grudges::label(world, a));
