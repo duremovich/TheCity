@@ -1139,9 +1139,8 @@ fn stat_store_food(world: &mut World, id: EntityId) {
 fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     let tick = world.tick;
     let job = world.comp::<Job>(id).cloned();
-    // L2 fix round: a hire whose job has not paid yet still decides the dole
-    // (`economy::dole_eligible`; with L2 off, only the jobless).
-    if job.is_none() || economy::dole_eligible(world, id) {
+    // Only the jobless decide the dole (`economy::dole_eligible`; addendum 17).
+    if job.is_none() {
         // The dole, paid directly, decided once a day in the Work phase as a
         // Full agent decides it (M10; drawing it daily regardless drained the
         // Treasury and left the wages unpaid): its Earn goal is satisfied
