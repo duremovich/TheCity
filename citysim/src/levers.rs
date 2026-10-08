@@ -369,6 +369,21 @@ pub enum PlayerCommand {
     HireAll {
         kind: BuildingKind,
     },
+    // --- Life pass L2 phase 2 (plan L37).
+    /// An extra tax on `Flow::Leisure` and `Flow::Gamble` (a fraction).
+    SetLeisureTax(f32),
+    /// Dens close and FightPit bets stop.
+    BanGambling(bool),
+    /// God: every leisure venue in a district closed for `days`.
+    CloseLeisure {
+        district: crate::components::DistrictId,
+        days: u32,
+    },
+    /// God: every adult's `fun` in a district set to `value`.
+    SetFun {
+        district: crate::components::DistrictId,
+        value: f32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -473,6 +488,16 @@ pub struct Levers {
     /// L2 L37: the World account buys (`[export] enabled` at seed, `SetExport`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub export_open: bool,
+    /// L2 L37: the extra tax on leisure and gambling (`SetLeisureTax`).
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub leisure_tax: f32,
+    /// L2 L37: gambling banned (`BanGambling`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub ban_gambling: bool,
+}
+
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.0
 }
 
 fn is_true(v: &bool) -> bool {
@@ -549,6 +574,8 @@ impl Levers {
             censored: Default::default(),
             public_works: true,
             export_open: cfg.living.enabled && cfg.export.enabled,
+            leisure_tax: 0.0,
+            ban_gambling: false,
         }
     }
 }
@@ -795,6 +822,51 @@ impl World {
                     format!("The Civic Wire may run stories about {name} again")
                 };
                 self.push_event(EventKind::PlayerAction, &[*faction], text);
+            }
+            PlayerCommand::SetLeisureTax(rate) => {
+                self.levers.leisure_tax = rate.clamp(0.0, 1.0);
+                let text = format!("Leisure tax set to {:.0}%", self.levers.leisure_tax * 100.0);
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::BanGambling(on) => {
+                self.levers.ban_gambling = *on;
+                let text = if *on { "Gambling banned" } else { "Gambling legal again" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::CloseLeisure { district, days } => {
+                let until = self.tick + u64::from(*days) * crate::time::TICKS_PER_DAY;
+                let mut n = 0;
+                for kind in BuildingKind::LEISURE {
+                    for b in self.buildings_of_kind(kind).to_vec() {
+                        if self.district_of_building(b) != *district {
+                            continue;
+                        }
+                        if let Some(bd) = self.comp_mut::<crate::components::Building>(b) {
+                            bd.closed_until = Some(bd.closed_until.unwrap_or(0).max(until));
+                            n += 1;
+                        }
+                    }
+                }
+                let text = format!("God closed {n} leisure venues in district {} for {days} days", district.index());
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetFun { district, value } => {
+                let v = value.clamp(0.0, 1.0);
+                // scan-ok: a god command
+                for id in self.citizens() {
+                    let home_d = self
+                        .comp::<crate::components::Household>(id)
+                        .and_then(|h| h.home)
+                        .map(|h| self.district_of_building(h))
+                        .or_else(|| self.comp::<crate::components::Position>(id).map(|p| self.district_of(p.tile)));
+                    if home_d == Some(*district) {
+                        if let Some(n) = self.comp_mut::<crate::components::Needs>(id) {
+                            n.fun = v;
+                        }
+                    }
+                }
+                let text = format!("God set fun to {v:.2} in district {}", district.index());
+                self.push_event(EventKind::PlayerAction, &[], text);
             }
             PlayerCommand::SetPublicWorks(on) => {
                 self.levers.public_works = *on;

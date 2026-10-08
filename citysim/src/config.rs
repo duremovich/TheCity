@@ -397,6 +397,28 @@ pub struct NeedsCfg {
     pub sleep_ticks_full: u32,
     pub chat_belonging: f32,
     pub starvation_grace_ticks: u64,
+    /// L2 § 2 (plan L13): `fun`'s decay per tick at sociability 0.5 before
+    /// `(0.6 + 0.4 × sociability) × class_mult` (read only with `leisure::on`).
+    #[serde(default = "default_fun_decay")]
+    pub fun_decay_per_tick: f32,
+    /// L2 L13: mood's `fun_mood × (fun − 0.5)` bias.
+    #[serde(default = "default_fun_mood")]
+    pub fun_mood: f32,
+    /// L2 L13: `Unwind` is satisfied at this `fun`.
+    #[serde(default = "default_fun_satisfied")]
+    pub fun_satisfied: f32,
+}
+
+fn default_fun_decay() -> f32 {
+    0.00023
+}
+
+fn default_fun_mood() -> f32 {
+    0.3
+}
+
+fn default_fun_satisfied() -> f32 {
+    0.6
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -4062,6 +4084,47 @@ impl PriceBaseCfg {
     }
 }
 
+/// L2 § 2: the fun a satisfier gives (plan keys; the spec's leisure-kinds
+/// table and rung ladder).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FunGainCfg {
+    pub club: f32,
+    /// A Club priced at the Spire tier (the high rung).
+    pub club_spire: f32,
+    pub arcade: f32,
+    pub noodle_bar: f32,
+    pub fight_pit: f32,
+    pub den: f32,
+    pub lounge: f32,
+    /// A drink (a Bar, a Club, a Den).
+    pub drink: f32,
+    /// An hour of HangOut.
+    pub hangout_hour: f32,
+    /// Watching a raid or a bout from the door (an hour).
+    pub watch: f32,
+    /// The free rung off screen (`stat_daily`).
+    pub free_stat: f32,
+}
+
+impl Default for FunGainCfg {
+    fn default() -> Self {
+        FunGainCfg {
+            club: 0.6,
+            club_spire: 0.7,
+            arcade: 0.35,
+            noodle_bar: 0.1,
+            fight_pit: 0.5,
+            den: 0.5,
+            lounge: 0.9,
+            drink: 0.1,
+            hangout_hour: 0.1,
+            watch: 0.3,
+            free_stat: 0.3,
+        }
+    }
+}
+
 /// L2 § 1-2 `[leisure]`. Phase 1 reads the price table and the front
 /// markup; phase 2 owns `enabled` and the rest.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -4070,6 +4133,46 @@ pub struct LeisureCfg {
     pub enabled: bool,
     pub price_base: PriceBaseCfg,
     pub front_markup: f32,
+    // --- phase 2 (spec § 1-2 and plan keys).
+    pub house_edge: f32,
+    pub stake_frac: f32,
+    pub stake_cap: i64,
+    /// A win above this posts `Gambled`.
+    pub big_win: i64,
+    pub bout_hour: u16,
+    /// A Club's door Host refuses a visitor with `rep.heat` at least this
+    /// when the Host's courage beats the heat.
+    pub door_heat: f32,
+    /// Corp, Street, Dreg.
+    pub class_mult: [f32; 3],
+    pub hangout_ticks: u64,
+    /// Socialise's "no drink possible" clause is dropped with a spot this near.
+    pub hangout_reach: u32,
+    pub barrels_per_sump: u32,
+    pub kin_w: f32,
+    pub watch_tiles: u32,
+    pub fronts_max: u32,
+    pub crackdown_close_days: u64,
+    /// 0 = day 0 of the week (`day % 7`).
+    pub collect_weekday: u64,
+    pub tribute_share: f32,
+    pub call_tiles: u32,
+    pub call_hours: u64,
+    pub preach_share: f32,
+    pub preach_opinion: f32,
+    /// Plan key (L20): the Hideout spot's score bonus during a Call.
+    pub call_w: f32,
+    /// Plan key: courage above which the mid rung's FightPit and Den
+    /// outscore the Club (`(0.5 + courage)` below it is halved).
+    pub gamble_rung_courage: f32,
+    /// Plan key: the fun each satisfier gives.
+    pub gain: FunGainCfg,
+    /// Plan key (deviation): the evening shift of the Hosts, Fighters,
+    /// Croupiers and Concierges (so a bout at `bout_hour` has Fighters on
+    /// shift); Attendants and Cooks keep `[world] shift_day`.
+    pub evening_shift: Vec<(u16, u16)>,
+    /// Plan key: hours before `bout_hour` a FightPit takes bets.
+    pub bet_window_hours: u16,
 }
 
 impl Default for LeisureCfg {
@@ -4080,7 +4183,36 @@ impl Default for LeisureCfg {
 
 impl LeisureCfg {
     pub fn off() -> LeisureCfg {
-        LeisureCfg { enabled: false, price_base: PriceBaseCfg::default(), front_markup: 1.2 }
+        LeisureCfg {
+            enabled: false,
+            price_base: PriceBaseCfg::default(),
+            front_markup: 1.2,
+            house_edge: 0.08,
+            stake_frac: 0.3,
+            stake_cap: 20,
+            big_win: 40,
+            bout_hour: 23,
+            door_heat: 0.6,
+            class_mult: [1.3, 1.0, 0.8],
+            hangout_ticks: 60,
+            hangout_reach: 40,
+            barrels_per_sump: 3,
+            kin_w: 0.1,
+            watch_tiles: 12,
+            fronts_max: 2,
+            crackdown_close_days: 3,
+            collect_weekday: 6,
+            tribute_share: 0.5,
+            call_tiles: 120,
+            call_hours: 3,
+            preach_share: 0.5,
+            preach_opinion: 0.05,
+            call_w: 2.0,
+            gamble_rung_courage: 0.5,
+            gain: FunGainCfg::default(),
+            evening_shift: vec![(1080, 1440)],
+            bet_window_hours: 2,
+        }
     }
 }
 
@@ -4357,6 +4489,18 @@ impl Config {
         // M14 V44: the parity table never saw a Researcher or a runner;
         // M15 W44: nor a rumour; L2 (plan L17): nor a venue.
         c.virt_off().word_off().living_off()
+    }
+
+    /// L2 (plan L17): the leisure calibration city: `[living]`, `[jobs]`
+    /// and `[leisure]` on (their spec values), the band, the export and
+    /// the rest of L2 off; venues seed on the city's deed (no corps).
+    pub fn with_leisure(mut self) -> Config {
+        self.living.enabled = true;
+        self.jobs.enabled = true;
+        self.leisure.enabled = true;
+        self.budget = BudgetCfg::off();
+        self.export = ExportCfg::off();
+        self
     }
 
     /// L2 (plan L5, L32): every L2 section `off()` (`--l2-off`): no

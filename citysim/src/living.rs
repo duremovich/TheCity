@@ -40,6 +40,59 @@ pub struct Venue {
     /// the day (phase 2).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub table_shut_day: Option<u64>,
+    /// Phase 2 (the phase 1 deviation's hand-over): the owner a seeded
+    /// venue standing on the city's deed passes to once it earns (a front's
+    /// gang, a Club's or the Lounge's megacorp).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub heir: Option<EntityId>,
+    /// Phase 2 (L18): tonight's bets on a FightPit's bout, `(bettor, stake,
+    /// side)` (side `true` backs the fitter Fighter); settled at `bout_hour`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub bets: Vec<(EntityId, i64, bool)>,
+}
+
+/// L2 § 2 (plan L14): the rung ladder, by coins after `hotel_reserve_meals`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Rung {
+    Free,
+    Cheap,
+    Mid,
+    High,
+}
+
+/// L2 L14: what an `Unwind` (or a Socialise's HangOut, or a Preach) was
+/// planned for: `World::unwind`, written when the plan is built and read
+/// by the executor (`LocationKey::Spot`) and the HangOut registry.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct UnwindPick {
+    pub rung: Rung,
+    /// The satisfier: `Enjoy`, `Gamble`, `EatOut`, `Drink`, `HangOut` or `Preach`.
+    pub act: crate::goap::ActionKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub venue: Option<EntityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spot: Option<crate::components::TilePos>,
+    /// The pick's score (the inspector shows it).
+    #[serde(default)]
+    pub score: f32,
+}
+
+/// L2 L15: where a street spot stands.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum SpotKind {
+    /// The street outside a Bar's, Market's, Club's or NoodleBar's door.
+    Door(EntityId),
+    /// A gang's Hideout door (its members only).
+    Hideout(EntityId),
+    /// A Sump fire barrel.
+    Barrel,
+}
+
+/// L2 L15: a HangOut spot (`World::spots`, per district, rebuilt daily).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Spot {
+    pub tile: crate::components::TilePos,
+    pub kind: SpotKind,
 }
 
 /// `World::budget` (spec § 1, plan L10): the Treasury band's state.

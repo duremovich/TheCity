@@ -1484,6 +1484,14 @@ pub fn settle_held(world: &mut World, id: EntityId) {
         };
         crate::needs::decay(n, &cfg, &ctx, ticks);
     }
+    // L2 L13 (phase 2): the hold's `fun` decay too (a no-op with leisure off).
+    if crate::systems::leisure::on(world) {
+        let execs = crate::systems::classes::exec_set(world);
+        let rate = crate::systems::leisure::fun_per_hour(world, id, &execs);
+        if let Some(n) = world.comp_mut::<Needs>(id) {
+            crate::systems::leisure::decay_fun(n, rate, ticks as f32 / crate::time::TICKS_PER_HOUR as f32);
+        }
+    }
 }
 
 fn releases(world: &mut World) {

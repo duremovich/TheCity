@@ -112,11 +112,43 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 bar(ui, "wealth", n.wealth, Some(0.25));
                 bar(ui, "belonging", n.belonging, Some(0.25));
                 bar(ui, "intimacy", n.intimacy, Some(0.25));
+                // L2 § 8: fun (with leisure on).
+                if citysim::systems::leisure::on(world) {
+                    bar(ui, "fun", n.fun, Some(0.25));
+                }
                 if let Some(t) = n.starving_since {
                     ui.colored_label(
                         RED,
                         format!("starving for {:.1} days", (world.tick - t) as f32 / TICKS_PER_DAY as f32),
                     );
+                }
+            });
+        }
+        // L2 § 8: the last Enjoyed, the leisure pick (a HangOut's spot) and
+        // the contacts a HangOut looks for.
+        if citysim::systems::leisure::on(world) && world.comp::<Needs>(id).is_some() {
+            section(ui, "Leisure", |ui| {
+                let last = world.comp::<citysim::Memory>(id).and_then(|m| {
+                    m.entries.iter().filter(|e| e.kind == citysim::MemoryKind::Enjoyed).map(|e| e.tick).max()
+                });
+                match last {
+                    Some(t) => {
+                        ui.label(format!("last Enjoyed {:.1} days ago", (world.tick - t) as f32 / TICKS_PER_DAY as f32))
+                    }
+                    None => ui.label("nothing Enjoyed lately"),
+                };
+                if let Some(p) = citysim::systems::leisure::pick_of_agent(world, id) {
+                    let at = match (p.venue, p.spot) {
+                        (Some(v), _) => world.name_of(v),
+                        (None, Some(t)) => format!("the street at {t}"),
+                        _ => "-".to_string(),
+                    };
+                    ui.label(format!("pick: {:?} {:?} at {at} (score {:.2})", p.rung, p.act, p.score));
+                }
+                let contacts = citysim::systems::leisure::expected_contacts(world, id);
+                if !contacts.is_empty() {
+                    let names: Vec<String> = contacts.iter().map(|&c| world.name_of(c)).collect();
+                    ui.label(format!("looks for: {}", names.join(", ")));
                 }
             });
         }

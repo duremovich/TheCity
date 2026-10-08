@@ -7,7 +7,13 @@
 use crate::world::World;
 
 pub fn run(world: &mut World) {
-    if !world.config.living.enabled || world.tick_of_day() != 0 {
+    if !world.config.living.enabled {
+        return;
+    }
+    // L2 phase 2 (L17, L18, L20): the hourly leisure passes (the bout, the
+    // 21:00 Statistical evening, the off-screen leaders, street density).
+    crate::systems::leisure::hourly(world);
+    if world.tick_of_day() != 0 {
         return;
     }
     // Plan L7: an older save's venues, at the first midnight with Lots.
@@ -21,4 +27,6 @@ pub fn run(world: &mut World) {
     crate::systems::jobs::top_up(world);
     crate::systems::budget::daily(world);
     crate::systems::outside::export_daily(world);
+    // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
+    crate::systems::leisure::daily(world);
 }

@@ -86,6 +86,11 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         // L1: a haul of scrap; office hours to the shift's end.
         ActionKind::Scavenge => 60,
         ActionKind::Meeting => crate::systems::life::exec_shift_left(world),
+        // L2 L14 (plan 2.1): the leisure steps.
+        ActionKind::Enjoy => 90,
+        ActionKind::Gamble | ActionKind::EatOut | ActionKind::Preach => 30,
+        ActionKind::HangOut => world.config.leisure.hangout_ticks,
+        ActionKind::Collect => 10,
         // M15 W21/W22/W35.
         ActionKind::AskAround => 20,
         ActionKind::StakeOut => {
@@ -160,7 +165,17 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             // Sleep on the street is allowed (homeless); Rest anywhere indoors.
             true
         }
-        ActionKind::Drink => at(world, id, BuildingKind::Bar) && coins >= 2 && !closed_here(),
+        // L2 L14: a Club's or Den's bar too, with leisure on (open, door kept).
+        ActionKind::Drink => {
+            (at(world, id, BuildingKind::Bar) && coins >= 2 && !closed_here())
+                || (crate::systems::leisure::drink_venue(world, id)
+                    && coins >= 2
+                    && world.comp::<Position>(id).and_then(|p| p.building).is_some_and(|b| {
+                        crate::systems::leisure::open(world, b) && crate::systems::leisure::door_ok(world, id, b)
+                    }))
+        }
+        // L2 L14: the scripted leisure steps.
+        k if k.is_leisure_step() => crate::systems::leisure::can_start(world, id, k, target),
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -398,6 +413,7 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
                 crate::systems::stims::start_deal(world, id, bar);
             }
         }
+        k if k.is_leisure_step() => crate::systems::leisure::on_start(world, id, k, target),
         ActionKind::Drink => {
             // M11: the Bar's owner takes the 2 coins (the Treasury owns a city Bar).
             let bar = world.comp::<Position>(id).and_then(|p| p.building);
@@ -441,6 +457,8 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         }
         // M13 D38: a dealer who leaves the Bar is no longer dealing there.
         ActionKind::Deal => crate::systems::stims::end_deal(world, id),
+        // L2 L14: a paid entry or meal refunded; a HangOut leaves its spot.
+        k if k.is_leisure_step() => crate::systems::leisure::on_abort(world, id, k),
         // M15 W35: a guard who walks away stands over the body no more.
         ActionKind::StakeOut => {
             let c = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target);
@@ -621,6 +639,14 @@ pub fn on_complete(
             world.remember(id, MemoryKind::Socialised, None, 0.2, 0.3, false);
             // M15 W7: the rumour mill, one exchange each way with a co-drinker.
             crate::systems::gossip::drink(world, id);
+            // L2 L14: a drink's fun; a Club's or Den's visit.
+            crate::systems::leisure::drink_fun(world, id);
+            crate::systems::leisure::note_drink(world, id);
+            StepResult::Done
+        }
+        // L2 L14: the leisure steps' completions.
+        k if k.is_leisure_step() => {
+            crate::systems::leisure::on_complete(world, id, k, target, started);
             StepResult::Done
         }
         ActionKind::CollectWage => {

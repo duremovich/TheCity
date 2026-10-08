@@ -1056,6 +1056,26 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         "news_tax" => PlayerCommand::SetNewsTax(num("rate")? as f32),
         // L2 (L37): `public_works=on|off`, `export=on|off`,
         // `export_price=<food|parts|data>:<n>`, `hire_all=<kind>`.
+        // L2 phase 2 (L37): `leisure_tax=<f>`, `ban_gambling=on|off`,
+        // `close_leisure=<district>:<days>`, `set_fun=<district>:<v>`.
+        "leisure_tax" => PlayerCommand::SetLeisureTax(num("rate")? as f32),
+        "ban_gambling" => {
+            PlayerCommand::BanGambling(on_off(value).ok_or_else(|| format!("{spec}: ban_gambling must be on|off"))?)
+        }
+        "close_leisure" => {
+            let (d, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<days>"))?;
+            PlayerCommand::CloseLeisure {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                days: n.parse::<u32>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            }
+        }
+        "set_fun" => {
+            let (d, v) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<v>"))?;
+            PlayerCommand::SetFun {
+                district: citysim::DistrictId(d.parse::<u8>().map_err(|e| format!("{spec}: bad district: {e}"))?),
+                value: v.parse::<f32>().map_err(|e| format!("{spec}: bad value: {e}"))?,
+            }
+        }
         "public_works" => {
             PlayerCommand::SetPublicWorks(on_off(value).ok_or_else(|| format!("{spec}: public_works must be on|off"))?)
         }

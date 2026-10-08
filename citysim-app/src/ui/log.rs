@@ -104,7 +104,14 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Planted
         | EventKind::Buried => super::word::CRIMSON,
         // L2 (plan L35): every L2 kind in amber.
-        EventKind::Refit | EventKind::Exported | EventKind::WorksPosted => AMBER,
+        EventKind::Refit
+        | EventKind::Exported
+        | EventKind::WorksPosted
+        | EventKind::Gambled
+        | EventKind::Bout
+        | EventKind::Collected
+        | EventKind::Preached
+        | EventKind::Called => AMBER,
         _ => Color32::LIGHT_GRAY,
     }
 }

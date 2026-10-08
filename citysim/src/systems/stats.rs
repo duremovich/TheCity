@@ -285,7 +285,13 @@ fn living_snapshot(world: &mut World, citizens: &[EntityId]) {
     let works_bill: i64 =
         world.jobs_book.works.iter().filter_map(|&a| world.comp::<Job>(a)).map(|j| j.wage_per_day).sum();
     let (mult, inbound, minted) = (world.budget.upkeep_mult, world.outside.inbound, world.outside.minted);
+    // L2 phase 2: the fun columns and the standing fronts.
+    let (fun_mean, fun_share) = crate::systems::leisure::fun_columns(world);
+    let fronts: u32 = world.gangs().iter().map(|&g| crate::systems::leisure::fronts_of(world, g).len() as u32).sum();
     let row = &mut world.stats.current;
+    row.living.fun_mean = fun_mean;
+    row.living.fun_satisfied_share = fun_share;
+    row.living.fronts = fronts;
     row.living.wage_dole_ratio = row.flow_wages as f32 / row.flow_dole.max(1) as f32;
     row.living.employed_share = employed as f32 / adults.max(1) as f32;
     row.living.venues = venues;

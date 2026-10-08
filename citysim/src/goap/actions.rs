@@ -132,6 +132,21 @@ pub enum ActionKind {
     FabWork,
     /// L2 L8: a sweeper's shift on its beat's streets (`[jobs] sweep`).
     Sweep,
+    // --- L2 phase 2 (plan L14): scripted steps of the Unwind, Socialise
+    // (HangOut) and Lead plans and Preach's GangWork; never in `PLANNABLE`,
+    // `allowed` false, started by `leisure::can_start`.
+    /// At a Club, Arcade, FightPit or Lounge: the entry paid at start.
+    Enjoy,
+    /// At a Den (a table) or a FightPit (a bet on the bout).
+    Gamble,
+    /// At a NoodleBar: a meal paid at start.
+    EatOut,
+    /// At a street spot (`World::unwind`'s spot): an hour with whoever is there.
+    HangOut,
+    /// A gang leader's round: a front's week booked, then the Hideout's pay-out.
+    Collect,
+    /// A Purist member works the busiest spot: a Persuade on a co-hanger.
+    Preach,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -341,6 +356,26 @@ impl ActionKind {
                 | ActionKind::Meeting
                 | ActionKind::FabWork
                 | ActionKind::Sweep
+                | ActionKind::Enjoy
+                | ActionKind::Gamble
+                | ActionKind::EatOut
+                | ActionKind::HangOut
+                | ActionKind::Collect
+                | ActionKind::Preach
+        )
+    }
+
+    /// L2 L14: a leisure plan's scripted step (never planned; started by
+    /// `leisure::can_start`).
+    pub fn is_leisure_step(self) -> bool {
+        matches!(
+            self,
+            ActionKind::Enjoy
+                | ActionKind::Gamble
+                | ActionKind::EatOut
+                | ActionKind::HangOut
+                | ActionKind::Collect
+                | ActionKind::Preach
         )
     }
 }
@@ -436,6 +471,11 @@ pub struct PlanCtx {
     pub jail_day: bool,
     /// L2 L8: Sanitation sweeps the beat (`jobs::sweep_on`).
     pub sweep: bool,
+    /// L2 L14: inside a Club or Den with `leisure::on` (a Drink there).
+    pub leisure_drink: bool,
+    /// L2 L14 (spec § 2): bored and broke, `U(fun)` (0 otherwise): Beg and
+    /// Scavenge are cheaper by half of it (cheap fun is a reason to beg).
+    pub fun_term: f32,
     /// Guards on a Patrol shift with legs left.
     pub patrol_pending: bool,
     pub hall_open: bool,
@@ -772,6 +812,10 @@ impl PlanCtx {
                         | BuildingKind::Bar
                         // M14 V24: a deck bought at a Security Office.
                         | BuildingKind::SecurityOffice
+                        // L2 L20: a dealer's front or Club.
+                        | BuildingKind::Club
+                        | BuildingKind::Den
+                        | BuildingKind::FightPit
                 )
             }) {
                 add(LocationKey::Seller, target);
@@ -928,6 +972,8 @@ impl PlanCtx {
             suspect_located: target.is_some_and(|t| crate::systems::law::is_located_suspect(world, t)),
             jail_day: job.is_some_and(|j| crate::systems::law::jail_duty(world, agent, j.next_shift_key(world.tick))),
             sweep: crate::systems::jobs::sweep_on(world),
+            leisure_drink: crate::systems::leisure::drink_venue(world, agent),
+            fun_term: crate::systems::leisure::earn_fun_term(world, agent).unwrap_or(0.0),
             patrol_pending: job.is_some_and(|j| {
                 j.role == Role::Guard
                     && j.on_shift(tod)
@@ -1134,6 +1180,8 @@ impl ActionKind {
             ActionKind::Meeting => false,
             ActionKind::Occupy => ctx.adult && (ctx.homeless || ctx.gang_squat),
             ActionKind::ServeTime => false,
+            // L2 L14: scripted only.
+            k if k.is_leisure_step() => false,
             _ => true,
         }
     }
@@ -1196,7 +1244,11 @@ impl ActionKind {
             ActionKind::CollectWage => at(ctx.wage_at) && ws.has_wage_due && ctx.wage_collectable,
             ActionKind::CollectDole => at(LocationKey::Hall) && ctx.dole_available,
             ActionKind::SellFood => at(LocationKey::Market) && ws.has_food && !ws.carrying_stolen,
-            ActionKind::Drink => at(LocationKey::Bar) && ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full,
+            // L2 L14: also inside a Club or Den with leisure on (`leisure_drink`).
+            ActionKind::Drink => {
+                (at(LocationKey::Bar) && ctx.coins >= 2 && !ctx.drank_today && !ctx.bar_full)
+                    || (ctx.leisure_drink && ctx.coins >= 2 && !ctx.drank_today)
+            }
             ActionKind::StoreFood => at(LocationKey::Home) && ctx.food_unstolen,
             ActionKind::Wander => true,
             ActionKind::ReportCrime => at(LocationKey::Hall) && !ws.crime_reported && ctx.hall_open,
@@ -1211,6 +1263,9 @@ impl ActionKind {
             }
             ActionKind::Scavenge => at(LocationKey::Street) && ctx.poor,
             ActionKind::Meeting => true,
+            // L2 L14: the step re-check is `leisure::can_start` (through
+            // `actions::can_start`), not the planner's symbols.
+            k if k.is_leisure_step() => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1582,7 +1637,14 @@ impl ActionKind {
             ActionKind::StealFood(StealSource::Home) => steal_mods(7.0) + if ctx.target_occupied { 5.0 } else { 0.0 },
             ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0,
             ActionKind::Forage => 6.0 + if ctx.hunger < 0.3 { 2.0 } else { 0.0 },
-            ActionKind::Beg => 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0,
+            ActionKind::Beg => {
+                let c = 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0;
+                if ctx.fun_term > 0.0 {
+                    c * (1.0 - 0.5 * ctx.fun_term)
+                } else {
+                    c
+                }
+            }
             ActionKind::Sleep => 1.0 + if ctx.homeless || ctx.rough_ok { 6.0 } else { 0.0 },
             ActionKind::Rest => 4.0,
             ActionKind::FarmWork => 3.0 - ctx.farming * 2.0,
@@ -1646,8 +1708,22 @@ impl ActionKind {
             // M15: scripted steps, never searched.
             ActionKind::AskAround | ActionKind::StakeOut => 60.0,
             // L1: a pride-weighted chore, dearer than the dole, cheaper than begging.
-            ActionKind::Scavenge => 4.0 + ctx.pride * 4.0,
+            ActionKind::Scavenge => {
+                let c = 4.0 + ctx.pride * 4.0;
+                if ctx.fun_term > 0.0 {
+                    c * (1.0 - 0.5 * ctx.fun_term)
+                } else {
+                    c
+                }
+            }
             ActionKind::Meeting => 60.0,
+            // L2 L14: scripted steps, never searched.
+            ActionKind::Enjoy
+            | ActionKind::Gamble
+            | ActionKind::EatOut
+            | ActionKind::HangOut
+            | ActionKind::Collect
+            | ActionKind::Preach => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

@@ -206,6 +206,10 @@ pub fn deal_bar(world: &World, gang: EntityId) -> Option<EntityId> {
         Some(&(d, _)) => d,
         None => world.district_of_building(world.hideout_of(gang)?),
     };
+    // L2 L20: with leisure on, the gang's open front (or a Club there) first.
+    if let Some(b) = crate::systems::leisure::deal_venue(world, gang, d) {
+        return Some(b);
+    }
     let centroid = world.district(d).centroid;
     world
         .buildings_of_kind(BuildingKind::Bar)

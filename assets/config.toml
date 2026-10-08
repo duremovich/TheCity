@@ -88,6 +88,9 @@ food_satisfy = 0.5
 sleep_ticks_full = 480
 chat_belonging = 0.3
 starvation_grace_ticks = 4320
+fun_decay_per_tick = 0.00023         # L2 § 2: ~3 days full to empty at sociability 0.5
+fun_mood = 0.3
+fun_satisfied = 0.6
 
 [economy]
 # L1b (the pressure calibration, Dylan 2026-10-07): 3.0 -> 4.0. Once L1 paid wages and the dole in place
@@ -1491,10 +1494,36 @@ market_staff = 12                    # L3: [buildings] market.staff stays 4 (ide
 bar_staff = 5                        # L3
 sweep = true                         # L8: Sanitation sweeps the beat (false: TendGraves + the D23 ledger)
 
-[leisure]                            # phase 1 needs only the price table (venue prices are set daily from phase 1)
-enabled = false                      # phase 2 (fun, Unwind, HangOut) turns it on
+[leisure]                            # L2 § 1-2; placeholders
+enabled = true                       # L13: phase 2 (fun, Unwind, HangOut, venues, fronts, the leader)
 price_base = { club = [0, 5, 12], arcade = [2, 3, 6], noodle_bar_markup = 1, fight_pit = [3, 0, 0], den = [2, 3, 0], lounge = [0, 0, 25] }
 front_markup = 1.2
+house_edge = 0.08
+stake_frac = 0.3
+stake_cap = 20
+big_win = 40
+bout_hour = 23
+door_heat = 0.6
+class_mult = [1.3, 1.0, 0.8]         # Corp, Street, Dreg
+hangout_ticks = 60
+hangout_reach = 40
+barrels_per_sump = 3
+kin_w = 0.1
+watch_tiles = 12
+fronts_max = 2
+crackdown_close_days = 3
+collect_weekday = 6
+tribute_share = 0.5
+call_tiles = 120
+call_hours = 3
+preach_share = 0.5
+preach_opinion = 0.05
+call_w = 2.0                         # plan key (L20): the Hideout spot's bonus during a Call
+gamble_rung_courage = 0.5            # plan key (2.1): below it the FightPit and Den score halved
+bet_window_hours = 2                 # plan key (L18): a FightPit takes bets this long before the bout
+evening_shift = [[1080, 1440]]       # plan key (deviation): Hosts, Fighters, Croupiers, Concierges work evenings
+# plan key: the fun of each satisfier (spec leisure-kinds table and rung ladder)
+gain = { club = 0.6, club_spire = 0.7, arcade = 0.35, noodle_bar = 0.1, fight_pit = 0.5, den = 0.5, lounge = 0.9, drink = 0.1, hangout_hour = 0.1, watch = 0.3, free_stat = 0.3 }
 
 [budget]
 enabled = true

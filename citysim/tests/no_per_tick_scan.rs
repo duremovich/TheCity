@@ -52,6 +52,8 @@ const FILES: &[&str] = &[
     "systems/outside.rs",
     // L2 phase 3.
     "systems/fviolence.rs",
+    // L2 phase 2.
+    "systems/leisure.rs",
 ];
 
 #[test]

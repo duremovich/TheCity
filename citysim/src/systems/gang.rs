@@ -1123,6 +1123,8 @@ fn daily_economy(world: &mut World) {
                 }
             }
             world.gang_credit(gang, 2 - owed);
+            // L2 L20: the week's tribute, for the leader's Collect.
+            crate::systems::leisure::note_tribute(world, gang, 2 - owed);
         }
         // Stipend while the treasury holds it, leader first; none while sacked.
         let sacked = world.comp::<Gang>(gang).is_some_and(|g| g.is_sacked(now));
@@ -1133,8 +1135,10 @@ fn daily_economy(world: &mut World) {
                 members.retain(|&m| m != l);
                 members.insert(0, l);
             }
+            // L2 L20: the week's Collect is set aside (0 with leisure off).
+            let set_aside = crate::systems::leisure::set_aside(world, gang);
             for m in members {
-                if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury >= stipend) {
+                if !world.comp::<Gang>(gang).is_some_and(|g| g.treasury - set_aside >= stipend) {
                     break;
                 }
                 if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -1145,6 +1149,8 @@ fn daily_economy(world: &mut World) {
                 }
             }
         }
+        // L2 L20: fronts (Crackdown closures, a new front under Expand).
+        crate::systems::leisure::fronts_daily(world, gang);
         // M12 D40: an empty gang's claims lapse after `empty_claims_days`.
         clear_claims_if_empty(world, gang);
         // Disband after 30 days with no members: treasury and territory go, the name stays.
