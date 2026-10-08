@@ -1482,6 +1482,9 @@ pub fn settle_held(world: &mut World, id: EntityId) {
     if ticks == 0 {
         return;
     }
+    if let Some(log) = world.shadow_notes.as_mut() {
+        log.push(crate::word::ShadowNote::Settled { tick: now, id, ticks });
+    }
     let cfg = world.config.needs.clone();
     let season_energy_mult = world.config.economy.energy_decay_mult[world.season().index()];
     let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);

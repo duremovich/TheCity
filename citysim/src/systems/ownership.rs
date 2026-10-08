@@ -307,6 +307,22 @@ fn withhold(world: &mut World, payee: EntityId, amount: i64) -> i64 {
     tax
 }
 
+/// The `shadow` tool's flow note (L2 shadow V2): a no-op unless the log is on
+/// and an end of the transfer is an agent.
+fn shadow_flow(world: &mut World, from: Option<EntityId>, to: Option<EntityId>, coins: i64, flow: Flow, refund: bool) {
+    if world.shadow_notes.is_none() {
+        return;
+    }
+    let agent = |e: Option<EntityId>| e.is_some_and(|e| world.has::<crate::components::Identity>(e));
+    if !(agent(from) || agent(to)) {
+        return;
+    }
+    let tick = world.tick;
+    if let Some(log) = world.shadow_notes.as_mut() {
+        log.push(crate::word::ShadowNote::Flow { tick, from, to, coins, flow, refund });
+    }
+}
+
 fn transfer(
     world: &mut World,
     from: Option<EntityId>,
@@ -324,6 +340,7 @@ fn transfer(
         return moved.max(0);
     }
     ledger(world, flow, moved);
+    shadow_flow(world, from, to, moved, flow, false);
     world.purse_add(from, -moved);
     let tax = match to {
         Some(payee) if flow.taxed() => withhold(world, payee, moved),
@@ -378,6 +395,7 @@ pub fn refund(world: &mut World, agent: EntityId, owner: Option<EntityId>, amoun
         return;
     }
     ledger(world, flow, -amount);
+    shadow_flow(world, owner, Some(agent), amount, flow, true);
     let rate = world.levers.tax_rate;
     let tax = match owner {
         Some(payee) if flow.taxed() && rate > 0.0 => {

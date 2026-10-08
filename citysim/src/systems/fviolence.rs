@@ -182,12 +182,21 @@ pub fn stat_gang_day(world: &mut World, id: EntityId) {
             Some(Crime::Extortion)
         }
     };
-    let Some(crime) = crime else { return };
+    let tick = world.tick;
+    let Some(crime) = crime else {
+        if let Some(log) = world.shadow_notes.as_mut() {
+            log.push(crate::word::ShadowNote::StatGang { tick, id, act: kind, caught: false });
+        }
+        return;
+    };
     let p_caught = world
         .stat_table
         .as_ref()
         .and_then(|t| t.p_theft_caught)
         .map_or(world.config.crime.stat_theft_caught_p, f64::from);
+    if let Some(log) = world.shadow_notes.as_mut() {
+        log.push(crate::word::ShadowNote::StatGang { tick, id, act: kind, caught: caught_u < p_caught });
+    }
     if caught_u < p_caught {
         crate::systems::law::file_report(world, crime, id, None);
         crate::systems::lod::set_lod(world, id, Lod::Coarse);

@@ -567,4 +567,20 @@ pub enum ShadowNote {
     /// One gossip telling (`gossip::exchange`): `heard` when the listener
     /// took it in.
     Told { tick: Tick, from: EntityId, to: EntityId, r: DeedRef, heard: bool },
+    /// L2 (shadow V2): one coin transfer with an agent at an end
+    /// (`ownership::transfer`; `refund` for an `ownership::refund`, where
+    /// `from` is the owner paying back to `to`).
+    Flow {
+        tick: Tick,
+        from: Option<EntityId>,
+        to: Option<EntityId>,
+        coins: i64,
+        flow: crate::systems::ownership::Flow,
+        refund: bool,
+    },
+    /// L2 (shadow V2): a Statistical gang member's GangWork day hit
+    /// (`fviolence::stat_gang_day`); `caught` when the deed was reported.
+    StatGang { tick: Tick, id: EntityId, act: crate::ledger::ActKind, caught: bool },
+    /// L2 (shadow V2): a held prisoner's cell settlement (`law::settle_held`).
+    Settled { tick: Tick, id: EntityId, ticks: u32 },
 }

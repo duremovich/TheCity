@@ -38,7 +38,8 @@ pub struct ShadowArgs {
     #[arg(long, default_value_t = 0)]
     pub start_day: u64,
     /// Comma-separated archetypes: gang_member, gang_leader, ripperdoc, homeless, ceo, exec, guard,
-    /// worker, runner, purist, reporter, child, dealer.
+    /// worker, runner, purist, reporter, child, dealer, cook, club_staff, fighter, fabber, sweeper,
+    /// worker_friday (a child is unpinnable: no Brain).
     #[arg(long)]
     pub pick: Option<String>,
     /// Shadow this entity index (repeatable).
@@ -57,9 +58,13 @@ pub struct ShadowArgs {
     /// for a before/after on one build.
     #[arg(long)]
     pub life_off: bool,
+    /// V2: observe without pinning, so the diary shows the Statistical (and held) stretches and
+    /// what the stand-in did.
+    #[arg(long)]
+    pub no_pin: bool,
 }
 
-const ARCHETYPES: [&str; 13] = [
+const ARCHETYPES: [&str; 19] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -73,10 +78,17 @@ const ARCHETYPES: [&str; 13] = [
     "reporter",
     "child",
     "dealer",
+    "cook",
+    "club_staff",
+    "fighter",
+    "fabber",
+    "sweeper",
+    "worker_friday",
 ];
 
 /// Activity classes of the time-use table, in print order.
-const CLASSES: [&str; 9] = ["sleep", "work", "eat", "social", "travel", "crime", "idle", "jail", "other"];
+const CLASSES: [&str; 11] =
+    ["sleep", "work", "eat", "social", "leisure", "travel", "crime", "idle", "jail", "stat", "other"];
 
 // ---------------------------------------------------------------------------
 // Candidates
@@ -84,6 +96,11 @@ const CLASSES: [&str; 9] = ["sleep", "work", "eat", "social", "travel", "crime",
 
 fn adult_alive(world: &World, id: EntityId) -> bool {
     world.has::<Brain>(id) && world.has::<Identity>(id) && !world.has::<Child>(id) && !world.has::<Corpse>(id)
+}
+
+/// V2: free on the start day: not jailed, not emigrating.
+fn is_free(world: &World, id: EntityId) -> bool {
+    !world.has::<Sentence>(id) && !world.comp::<Brain>(id).is_some_and(|b| b.emigrating)
 }
 
 fn is_purist(world: &World, id: EntityId) -> bool {
@@ -96,6 +113,9 @@ fn is_purist(world: &World, id: EntityId) -> bool {
 fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
     let all = world.citizens();
     let adults = || all.iter().copied().filter(|&a| adult_alive(world, a));
+    let by_role = |roles: &[Role]| -> Vec<EntityId> {
+        adults().filter(|&a| world.comp::<Job>(a).is_some_and(|j| roles.contains(&j.role))).collect()
+    };
     let mut out: Vec<EntityId> = match arch {
         "gang_member" => adults()
             .filter(|&a| {
@@ -135,7 +155,32 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
             .collect(),
         "guard" => world.guards().iter().copied().filter(|&a| adult_alive(world, a)).collect(),
         "worker" => adults().filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role != Role::Guard)).collect(),
-        "runner" => adults().filter(|&a| world.comp::<Kit>(a).is_some_and(|k| k.deck.is_some())).collect(),
+        // V2: a deck is not a run. A `JackedIn` event naming the agent in the 7 days before today
+        // (or a run seated now) qualifies; an agent with a deck and no runs does not.
+        "runner" => {
+            let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
+            let mut ran: BTreeSet<EntityId> = world
+                .events
+                .iter()
+                .rev()
+                .take_while(|e| e.tick >= from)
+                .filter(|e| e.kind == EventKind::JackedIn)
+                .filter_map(|e| e.actors.first().copied())
+                .collect();
+            ran.extend(world.runner_of.keys().copied());
+            adults().filter(|a| ran.contains(a)).collect()
+        }
+        "cook" => by_role(&[Role::Cook]),
+        "club_staff" => by_role(&[Role::Host, Role::Attendant, Role::Croupier, Role::Concierge]),
+        "fighter" => by_role(&[Role::Fighter]),
+        "fabber" => by_role(&[Role::Fabber]),
+        "sweeper" => by_role(&[Role::Sanitation]),
+        // V2: the diary should start on the weekday before `[leisure] collect_weekday` (Friday on
+        // the shipped config: weekday 5 of `day % 7`, the last workday before the rest day 6).
+        "worker_friday" => adults()
+            .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role != Role::Guard))
+            .filter(|&a| class_of(world, a) == citysim::Class::Street)
+            .collect(),
         "purist" => adults().filter(|&a| world.has::<GangMember>(a) && is_purist(world, a)).collect(),
         "reporter" => adults().filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == Role::Reporter)).collect(),
         "child" => {
@@ -156,16 +201,15 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 grown
             }
         }
+        // V2: one candidate per dealer, not per Bar: every dealer in a `deal_log` row (a Bar's
+        // last dealer, within 7 days, Statistical hits included) and every dealer registered at a
+        // Bar now. No gang-member fallback: a "dealer" who never dealt is no dealer.
         "dealer" => {
             let today = world.day();
-            let recent: BTreeSet<EntityId> =
-                world.deal_log.values().filter(|&&(_, d)| d + 3 >= today).map(|&(a, _)| a).collect();
-            let hit: Vec<EntityId> = adults().filter(|a| recent.contains(a) && world.has::<GangMember>(*a)).collect();
-            if hit.is_empty() {
-                adults().filter(|&a| world.has::<GangMember>(a)).collect()
-            } else {
-                hit
-            }
+            let mut dealers: BTreeSet<EntityId> =
+                world.deal_log.values().filter(|&&(_, d)| d + 7 >= today).map(|&(a, _)| a).collect();
+            dealers.extend(world.dealers.values().flatten().copied());
+            adults().filter(|a| dealers.contains(a) && world.has::<GangMember>(*a)).collect()
         }
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
@@ -335,6 +379,22 @@ struct Track {
     notable: Vec<(Tick, String)>,
     pinned_lod_noted: bool,
     last_action: Option<ActionKind>,
+    // V2: the L2 life
+    pinned: bool,
+    last_lod: Option<Lod>,
+    last_pick: Option<String>,
+    holes_seen: BTreeSet<u64>,
+    hang_others: BTreeSet<EntityId>,
+    hangouts: u32,
+    hang_known: BTreeSet<EntityId>,
+    /// Flow name -> (coins out, coins in, count), from the sim's flow notes.
+    flow_kinds: BTreeMap<String, (i64, i64, u32)>,
+    tribute_in: i64,
+    gossip_about: u32,
+    stat_notes: Vec<(Tick, String)>,
+    stat_minutes: u32,
+    held_settles: u32,
+    held_minutes: u64,
 }
 
 impl Track {
@@ -380,6 +440,20 @@ impl Track {
             notable: Vec::new(),
             pinned_lod_noted: false,
             last_action: None,
+            pinned: true,
+            last_lod: None,
+            last_pick: None,
+            holes_seen: BTreeSet::new(),
+            hang_others: BTreeSet::new(),
+            hangouts: 0,
+            hang_known: BTreeSet::new(),
+            flow_kinds: BTreeMap::new(),
+            tribute_in: 0,
+            gossip_about: 0,
+            stat_notes: Vec::new(),
+            stat_minutes: 0,
+            held_settles: 0,
+            held_minutes: 0,
         }
     }
 
@@ -403,6 +477,10 @@ fn activity(world: &World, id: EntityId) -> &'static str {
         return "jail";
     }
     let Some(b) = world.comp::<Brain>(id) else { return "idle" };
+    // V2: a Statistical stand-in (an unpinned run) has no step to classify.
+    if b.lod == Lod::Statistical {
+        return "stat";
+    }
     if matches!(b.exec, ExecState::JackedIn { .. }) {
         return "crime";
     }
@@ -432,9 +510,13 @@ fn activity(world: &World, id: EntityId) -> &'static str {
         | A::Deal
         | A::PickUp
         | A::SellData
-        | A::Register => "work",
+        | A::Register
+        | A::FabWork
+        | A::Sweep
+        | A::Collect => "work",
+        A::Enjoy | A::Gamble | A::EatOut | A::HangOut => "leisure",
         A::EatFromInventory | A::EatAtHome | A::BuyFood | A::Forage | A::StoreFood => "eat",
-        A::Chat | A::Drink | A::Flirt | A::Propose | A::AskAround => "social",
+        A::Chat | A::Drink | A::Flirt | A::Propose | A::AskAround | A::Preach => "social",
         A::StealFood(_)
         | A::Attack
         | A::Extort
@@ -601,7 +683,20 @@ fn flow_kind(action: Option<ActionKind>, midnight: bool) -> &'static str {
     }
     match action {
         // L1: a shift's wage is paid as the shift ends.
-        Some(A::CollectWage | A::ClerkWork | A::FarmWork | A::BartendWork | A::TendGraves | A::GuardJail) => "wage",
+        Some(
+            A::CollectWage
+            | A::ClerkWork
+            | A::FarmWork
+            | A::BartendWork
+            | A::TendGraves
+            | A::GuardJail
+            | A::FabWork
+            | A::Sweep,
+        ) => "wage",
+        Some(A::Enjoy) => "venue entry",
+        Some(A::EatOut) => "venue meal",
+        Some(A::Gamble) => "gambling",
+        Some(A::Collect) => "collect (tribute/fronts)",
         Some(A::Scavenge) => "scavenging",
         Some(A::Meeting) => "office",
         Some(A::BuyFood) => "food purchase",
@@ -764,6 +859,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         let label = if e.text.contains(" failed at ") { "PLAN FAILED" } else { "plan interrupted" };
         t.log(e.tick, "plan", format!("{label}: {}", e.text));
     }
+    let mut flow_ctx: Vec<String> = Vec::new();
     for n in notes {
         match n {
             ShadowNote::Move { tick, m, out } if m.actor == id || m.target == id => {
@@ -802,6 +898,68 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     ),
                 );
             }
+            // V2: gossip told ABOUT the agent (as actor or object), heard by others.
+            ShadowNote::Told { tick, from, to, r, heard } if r.actor == Some(id) || r.object == Some(id) => {
+                t.gossip_about += 1;
+                let role = if r.actor == Some(id) { "as the doer" } else { "as the object" };
+                t.log(
+                    *tick,
+                    "gossip",
+                    format!(
+                        "GOSSIP ABOUT ME ({role}): {} told {}: {:?} by {} on {}{}",
+                        nm(world, *from),
+                        nm(world, *to),
+                        r.deed,
+                        r.actor.map_or("someone unnamed".into(), |a| nm(world, a)),
+                        r.object.map_or("?".into(), |o| nm(world, o)),
+                        if *heard { "" } else { " (already known / dropped)" }
+                    ),
+                );
+            }
+            ShadowNote::Flow { tick, from, to, coins, flow, refund } if *from == Some(id) || *to == Some(id) => {
+                let other = if *from == Some(id) { *to } else { *from };
+                let who = other.map_or("the City".to_string(), |o| nm(world, o));
+                // A refund is already oriented owner -> agent: the agent's `in`.
+                let (out, inn) = if *from == Some(id) { (*coins, 0) } else { (0, *coins) };
+                let e = t.flow_kinds.entry(format!("{flow:?}")).or_insert((0, 0, 0));
+                e.0 += out;
+                e.1 += inn;
+                e.2 += 1;
+                if matches!(flow, citysim::systems::ownership::Flow::Tribute) && *to == Some(id) {
+                    t.tribute_in += *coins;
+                    t.log(
+                        *tick,
+                        "tribute",
+                        format!("TRIBUTE received +{coins}c from {who} (the weekly Collect pay-out)"),
+                    );
+                }
+                let sign = if inn > 0 { "+" } else { "-" };
+                flow_ctx.push(format!(
+                    "{flow:?} {sign}{}{} {} {who}",
+                    coins,
+                    if *refund { " (refund)" } else { "" },
+                    if sign == "+" { "from" } else { "to" }
+                ));
+            }
+            ShadowNote::StatGang { tick, id: who, act, caught } if *who == id => {
+                let text = format!(
+                    "STATISTICAL GangWork day hit: {act:?}{} (no body, no walk, no witness)",
+                    if *caught { ", reported (a body for the arrest path)" } else { "" }
+                );
+                t.stat_notes.push((*tick, text.clone()));
+                t.log(*tick, "stat", text);
+            }
+            ShadowNote::Settled { tick, id: who, ticks } if *who == id => {
+                t.held_settles += 1;
+                t.held_minutes += u64::from(*ticks);
+                t.log(
+                    *tick,
+                    "jail",
+                    format!(
+                        "cell settlement (the hold, or the promotion out of it): {ticks} min of jailed decay settled"
+                    ),
+                );
+            }
             _ => {}
         }
     }
@@ -830,6 +988,10 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     let act = activity(world, id);
     *t.day_use.entry(act).or_insert(0) += 1;
     *t.total_use.entry(act).or_insert(0) += 1;
+    // A held prisoner classes as "jail" but is just as much a stand-in.
+    if world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical) {
+        t.stat_minutes += 1;
+    }
     *t.use_by_day.entry(day).or_default().entry(act).or_insert(0) += 1;
     *t.day_places.entry(here.clone()).or_insert(0) += 1;
     *t.total_places.entry(here.clone()).or_insert(0) += 1;
@@ -838,6 +1000,57 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         if !t.pinned_lod_noted && b.lod == Lod::Full {
             t.pinned_lod_noted = true;
             t.log(now, "info", "at Full LOD (pinned)".into());
+        }
+        // V2: LOD changes. A pinned pick must stay Full, jailed or not (L1's rule under L2's held
+        // prisoners); an unpinned run shows its Statistical and held stretches.
+        if t.last_lod != Some(b.lod) {
+            if let Some(prev) = t.last_lod {
+                let jailed = world.has::<Sentence>(id);
+                // Sentencing sets Coarse; the hourly assignment re-pins to Full (up to 59 min
+                // later). Statistical is the held tier: a pinned prisoner must never reach it.
+                let warn = if t.pinned && b.lod == Lod::Statistical {
+                    " **PIN BROKEN: a pinned pick became Statistical (held)**"
+                } else if t.pinned && b.lod != Lod::Full {
+                    " (sentencing sets Coarse until the next hourly assignment re-pins it)"
+                } else {
+                    ""
+                };
+                t.log(
+                    now,
+                    "lod",
+                    format!(
+                        "LOD {prev:?} -> {:?}{}{warn}",
+                        b.lod,
+                        if jailed && b.lod == Lod::Statistical { " (held in the cells)" } else { "" }
+                    ),
+                );
+            }
+            t.last_lod = Some(b.lod);
+        }
+        // V2: the Unwind pick (rung, satisfier, venue or spot).
+        let pick = world.unwind.get(&id).map(|p| {
+            format!(
+                "rung {:?}, {:?}{}{} (score {:.2})",
+                p.rung,
+                p.act,
+                p.venue.map_or(String::new(), |v| format!(" at {}", nm(world, v))),
+                p.spot.map_or(String::new(), |s| format!(" at spot ({},{})", s.x, s.y)),
+                p.score
+            )
+        });
+        if pick != t.last_pick {
+            if let Some(p) = &pick {
+                t.log(now, "unwind", format!("UNWIND pick: {p}"));
+            }
+            t.last_pick = pick;
+        }
+        // V2: who is at the HangOut spot (the registry empties as the step completes).
+        if action_now == Some(ActionKind::HangOut) {
+            if let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) {
+                if let Some(list) = world.hangouts.get(&tile) {
+                    t.hang_others.extend(list.iter().copied().filter(|&o| o != id));
+                }
+            }
         }
         // Goal choice.
         if b.current_goal != t.last_goal {
@@ -936,8 +1149,8 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                     now,
                     "needs",
                     format!(
-                        "needs hunger {:.2} energy {:.2} safety {:.2} wealth {:.2} belonging {:.2} intimacy {:.2} mood {:.2}{} | {:?} | {:?} | {}",
-                        n.hunger, n.energy, n.safety, n.wealth, n.belonging, n.intimacy, m.value, body, b.lod, b.current_goal, here
+                        "needs hunger {:.2} energy {:.2} safety {:.2} wealth {:.2} belonging {:.2} intimacy {:.2} fun {:.2} mood {:.2}{} | {:?} | {:?} | {}",
+                        n.hunger, n.energy, n.safety, n.wealth, n.belonging, n.intimacy, n.fun, m.value, body, b.lod, b.current_goal, here
                     ),
                 );
             }
@@ -945,6 +1158,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     }
 
     // Money.
+    let mut money_logged = false;
     if let Some(w) = world.comp::<Wallet>(id) {
         if let Some(prev) = t.wallet {
             let d = w.coins - prev;
@@ -977,10 +1191,23 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 let cp = owner.map_or(String::new(), |o| format!("; place owner {o}"));
                 let ev =
                     if event_ctx.is_empty() { String::new() } else { format!("; events: {}", event_ctx.join(" | ")) };
+                let fl = if flow_ctx.is_empty() { String::new() } else { format!("; flows: {}", flow_ctx.join(", ")) };
+                money_logged = true;
+                if world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical) {
+                    t.stat_notes.push((
+                        now,
+                        format!("stand-in purse {}{} ({kind}){fl}", if d > 0 { "+" } else { "" }, money(d)),
+                    ));
+                }
                 t.log(
                     now,
                     "money",
-                    format!("{}{} ({kind}), purse {}{cp}{ev}", if d > 0 { "+" } else { "" }, money(d), money(w.coins)),
+                    format!(
+                        "{}{} ({kind}), purse {}{cp}{ev}{fl}",
+                        if d > 0 { "+" } else { "" },
+                        money(d),
+                        money(w.coins)
+                    ),
                 );
                 t.day_net += d;
                 t.total_net += d;
@@ -990,6 +1217,34 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             }
         }
         t.wallet = Some(w.coins);
+    }
+    if !money_logged && !flow_ctx.is_empty() {
+        t.log(now, "money", format!("(net 0c) flows: {}", flow_ctx.join(", ")));
+    }
+    // V2: off-screen holes against the agent (a Statistical victim's crimes, actor not yet drawn).
+    // `Hole.source`/`faction`/`riot` come from the daily off-screen faction pass (L2 phase 4).
+    if let Some(hs) = world.holes_by_agent.get(&id) {
+        for hid in hs.iter() {
+            if !t.holes_seen.insert(*hid) {
+                continue;
+            }
+            if let Some(h) = world.holes.get(hid).filter(|h| h.tick + 2 >= now) {
+                t.log(
+                    h.tick,
+                    "hole",
+                    format!(
+                        "OFF-SCREEN {:?} against me in {}{}{}{}{}{}",
+                        h.kind,
+                        world.district_name(h.district),
+                        if h.loot > 0 { format!(" (loot {}c)", h.loot) } else { String::new() },
+                        h.gang.map_or(String::new(), |g| format!(", my gang {}", nm(world, g))),
+                        h.source.map_or(String::new(), |s| format!(", source {s:?}")),
+                        h.faction.map_or(String::new(), |f| format!(", by {}", nm(world, f))),
+                        h.riot.map_or(String::new(), |r| format!(", riot #{r}"))
+                    ),
+                );
+            }
+        }
     }
     // Inventory.
     if let Some(i) = world.comp::<Inventory>(id) {
@@ -1132,6 +1387,38 @@ fn close_action(world: &World, t: &mut Track, now: Tick, status: &str) {
     let dur = now.saturating_sub(o.start);
     let end_place = t.last_place.clone();
     let tgt = o.target.map_or(String::new(), |x| format!(" [target {}]", nm(world, x)));
+    if o.action == ActionKind::HangOut {
+        // V2: who was at the spot, the known contacts named.
+        let others: Vec<EntityId> = std::mem::take(&mut t.hang_others).into_iter().collect();
+        t.hangouts += 1;
+        let mut parts: Vec<String> = Vec::new();
+        let mut known = 0;
+        let mut strangers = 0;
+        for &x in &others {
+            match world.edge(t.id, x) {
+                Some(e) => {
+                    known += 1;
+                    t.hang_known.insert(x);
+                    t.contact(world, x);
+                    parts.push(format!("{} (known, {:?}, affinity {:+.2})", nm(world, x), e.kind, e.affinity));
+                }
+                None => strangers += 1,
+            }
+        }
+        if strangers > 0 {
+            parts.push(format!("{strangers} stranger(s)"));
+        }
+        t.log(
+            o.start,
+            "hangout",
+            format!(
+                "HANGOUT at {} for {dur} min ({status}): {} there{}",
+                t.last_place,
+                if others.is_empty() { "nobody".to_string() } else { format!("{} other(s)", others.len()) },
+                if parts.is_empty() { String::new() } else { format!(": {} [{known} known]", parts.join(", ")) }
+            ),
+        );
+    }
     let loc = if matches!(o.action, ActionKind::GoTo(_)) {
         if o.start_place == end_place {
             end_place.to_string()
@@ -1255,6 +1542,51 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
     for (k, (sum, n)) in &t.flows {
         let _ = writeln!(md, "- {k}: {}{} over {n} flow(s)", if *sum > 0 { "+" } else { "" }, money(*sum));
     }
+    let _ = writeln!(md, "\n### By flow kind (the sim's own labels; out / in / count)\n");
+    if t.flow_kinds.is_empty() {
+        let _ = writeln!(md, "- none recorded");
+    }
+    for (k, (o, i, n)) in &t.flow_kinds {
+        let _ = writeln!(md, "- {k}: out {}, in {}, x{n}", money(*o), money(*i));
+    }
+    let out_of = |names: &[&str]| -> i64 { names.iter().filter_map(|k| t.flow_kinds.get(*k)).map(|v| v.0).sum() };
+    let in_of = |names: &[&str]| -> i64 { names.iter().filter_map(|k| t.flow_kinds.get(*k)).map(|v| v.1).sum() };
+    let _ = writeln!(md, "\n### Leisure and the street (L2)\n");
+    let _ = writeln!(
+        md,
+        "- fun activities (Enjoy, Gamble, EatOut, HangOut): {:.1} h",
+        f64::from(t.total_use.get("leisure").copied().unwrap_or(0)) / 60.0
+    );
+    let _ = writeln!(
+        md,
+        "- coins spent: leisure {} (venues {}, gambling {} less {} won back), drink {}, food {}, rent {}",
+        money(out_of(&["Leisure", "Gamble"]) - in_of(&["Leisure", "Gamble", "GambleWin"])),
+        money(out_of(&["Leisure"]) - in_of(&["Leisure"])),
+        money(out_of(&["Gamble"]) - in_of(&["Gamble"])),
+        money(in_of(&["GambleWin"])),
+        money(out_of(&["Drink"])),
+        money(out_of(&["Food"]) - in_of(&["Food"])),
+        money(out_of(&["Rent"]))
+    );
+    let _ = writeln!(md, "- HangOuts: {}, distinct known contacts met there: {}", t.hangouts, t.hang_known.len());
+    let _ = writeln!(md, "- tribute received (Flow::Tribute): {}", money(t.tribute_in));
+    let _ = writeln!(md, "- gossip told about me: {} telling(s)", t.gossip_about);
+    if t.held_settles > 0 || t.stat_minutes > 0 || !t.stat_notes.is_empty() {
+        let _ = writeln!(md, "\n### Statistical stretches (what the stand-in did)\n");
+        let _ = writeln!(
+            md,
+            "- {:.1} h Statistical; {} held-cell settlement(s) covering {:.1} h of jailed decay",
+            f64::from(t.stat_minutes) / 60.0,
+            t.held_settles,
+            t.held_minutes as f64 / 60.0
+        );
+        for (tk, text) in t.stat_notes.iter().take(40) {
+            let _ = writeln!(md, "- `{}` {text}", clock(*tk));
+        }
+        if t.stat_notes.len() > 40 {
+            let _ = writeln!(md, "- ... and {} more", t.stat_notes.len() - 40);
+        }
+    }
     let _ = writeln!(md, "\n### Notable events\n");
     let kinds: Vec<String> = t.event_kinds.iter().map(|(k, n)| format!("{k} x{n}")).collect();
     let _ = writeln!(md, "- counts: {}", if kinds.is_empty() { "none".into() } else { kinds.join(", ") });
@@ -1294,10 +1626,24 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
         println!("seed {} day {}: candidates per archetype", args.seed, args.start_day);
         for a in ARCHETYPES {
             match candidates(&world, a) {
-                Ok(v) => println!("  {a:<12} {}", v.len()),
-                Err(e) => println!("  {a:<12} n/a ({e})"),
+                Ok(v) if a == "child" => {
+                    println!("  {a:<13} {} (UNPINNABLE: a child has no Brain, so no Full LOD; not picked)", v.len())
+                }
+                Ok(v) => {
+                    let free = v.iter().filter(|&&id| is_free(&world, id)).count();
+                    println!("  {a:<13} {} ({free} free: not jailed, not emigrating)", v.len());
+                }
+                Err(e) => println!("  {a:<13} n/a ({e})"),
             }
         }
+        let wd = args.start_day % 7;
+        let friday = (world.config.leisure.collect_weekday + 6) % 7;
+        println!(
+            "start day {} is weekday {wd}; worker_friday wants weekday {friday} (the day before [leisure] collect_weekday {}): {}",
+            args.start_day,
+            world.config.leisure.collect_weekday,
+            if wd == friday { "yes".to_string() } else { "no, pick --start-day with day % 7 == that weekday".to_string() }
+        );
         return Ok(());
     }
 
@@ -1311,12 +1657,25 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
                 Ok(c) if c.is_empty() => {
                     eprintln!("note: no {arch} candidates on seed {} at day {}", args.seed, args.start_day)
                 }
+                Ok(_) if arch == "child" => {
+                    eprintln!("note: child is unpinnable (no Brain, no Full LOD); not picked (see --list)")
+                }
                 Ok(c) => {
+                    if arch == "worker_friday" {
+                        let friday = (world.config.leisure.collect_weekday + 6) % 7;
+                        if args.start_day % 7 != friday {
+                            eprintln!(
+                                "note: worker_friday: day {} is weekday {}, not the Friday (weekday {friday}); the diary does not start on the Friday",
+                                args.start_day,
+                                args.start_day % 7
+                            );
+                        }
+                    }
                     let ordered = if arch == "ceo" { c } else { shuffled(c, args.seed, arch) };
                     // L1 (the V1 tool note): free agents first; a jailed pick's
                     // week is the cells (V1's dealer and leader were inside).
                     let (free, jailed): (Vec<EntityId>, Vec<EntityId>) =
-                        ordered.into_iter().partition(|&id| !world.has::<Sentence>(id));
+                        ordered.into_iter().partition(|&id| is_free(&world, id));
                     let ordered: Vec<EntityId> = free.into_iter().chain(jailed).collect();
                     let mut n = 0;
                     for id in ordered {
@@ -1356,6 +1715,7 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
     for (arch, id) in &picked {
         let name = world.comp::<Identity>(*id).map_or("?".into(), |i| i.name.clone());
         let mut t = Track::new(*id, arch, name, start_tick);
+        t.pinned = !args.no_pin;
         t.header = header(&world, &t);
         t.last_place = place(&world, *id);
         eprintln!("shadowing {arch}: {} (#{})", t.name, id.index);
@@ -1364,9 +1724,11 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
 
     let end_tick = start_tick + args.days * TICKS_PER_DAY;
     while world.tick < end_tick {
-        for t in &tracks {
-            if let Some(b) = world.comp_mut::<Brain>(t.id) {
-                b.pinned = true;
+        if !args.no_pin {
+            for t in &tracks {
+                if let Some(b) = world.comp_mut::<Brain>(t.id) {
+                    b.pinned = true;
+                }
             }
         }
         let cursor = world.next_event_id;
@@ -1416,6 +1778,7 @@ mod tests {
             out: Some(dir.clone()),
             list: false,
             life_off: false,
+            no_pin: false,
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)
