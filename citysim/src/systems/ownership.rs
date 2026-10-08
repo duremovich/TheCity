@@ -209,6 +209,15 @@ pub enum Flow {
     /// L2 shadow fixes item 21: the Recycler's coin for a scavenged haul,
     /// Treasury -> agent (untaxed; in `flow_other` as `Sanitation` was).
     Scavenge,
+    /// M16a (plan C5): coins into or out of a contract record's escrow
+    /// (capital, untaxed; `flow_escrow` is the day's net into escrow).
+    Escrow,
+    /// M16a (plan C5): a contract record's pay-out to its taker and crew,
+    /// or a paid sighting (untaxed).
+    Payout,
+    /// M16a (plan C5): a Fixer's cut of a settled record (taxed: a
+    /// registered business's revenue).
+    FixerCut,
 }
 
 impl Flow {
@@ -216,7 +225,7 @@ impl Flow {
     /// subsidy. Kept out of a corp's `cashflow` (the brain's `flow` input),
     /// or one purchase reads as two weeks of losses.
     pub fn capital(self) -> bool {
-        matches!(self, Flow::Sale | Flow::Found | Flow::Subsidy)
+        matches!(self, Flow::Sale | Flow::Found | Flow::Subsidy | Flow::Escrow)
     }
 
     /// Owner revenue taxed at the moment of the flow (spec § 3); wage tax
@@ -240,6 +249,7 @@ impl Flow {
                 | Flow::Plant
                 | Flow::Leisure
                 | Flow::Gamble
+                | Flow::FixerCut
         )
     }
 }
@@ -290,6 +300,10 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Tribute => row.living.flow_tribute += coins,
         Flow::Export => row.living.flow_export += coins,
         Flow::StreetDice => row.living.flow_street_dice += coins,
+        // M16a (plan C38).
+        Flow::Escrow => row.contract.flow_escrow += coins,
+        Flow::Payout => row.contract.flow_payout += coins,
+        Flow::FixerCut => row.contract.flow_fixer_cut += coins,
     }
 }
 
@@ -467,6 +481,72 @@ pub fn cross_in(
     moved
 }
 
+/// M16a (plan C5): coins from `from`'s purse into a contract record's
+/// escrow (a game abstraction: a balance held on the record), capped as
+/// `pay` (`min(amount, max(purse, 0))`). Ledger `Flow::Escrow` (capital: a
+/// corp's posting is not a week of losses). Returns the coins moved.
+pub fn escrow_in(world: &mut World, from: Option<EntityId>, id: crate::contract::ContractId, amount: i64) -> i64 {
+    if amount <= 0 || !world.contracts.contains_key(&id) {
+        return 0;
+    }
+    let moved = amount.min(world.purse(from).max(0));
+    if moved <= 0 {
+        return 0;
+    }
+    ledger(world, Flow::Escrow, moved);
+    shadow_flow(world, from, None, moved, Flow::Escrow, false);
+    world.purse_add(from, -moved);
+    uncount_cashflow(world, from, moved);
+    if let Some(c) = world.contracts.get_mut(&id) {
+        c.escrow += moved;
+    }
+    world.escrow_held += moved;
+    moved
+}
+
+/// M16a (plan C5): coins out of a record's escrow to `to` (`None` the
+/// Treasury), at most what it holds: tax withheld when `flow` is taxed,
+/// ledger `flow` (unless a refund, `Flow::Escrow`) and `Flow::Escrow`
+/// negative; a gang payee's take is gang income. Returns the coins moved.
+pub fn escrow_out(
+    world: &mut World,
+    id: crate::contract::ContractId,
+    to: Option<EntityId>,
+    amount: i64,
+    flow: Flow,
+) -> i64 {
+    let held = world.contracts.get(&id).map_or(0, |c| c.escrow);
+    let moved = amount.min(held);
+    if moved <= 0 {
+        return 0;
+    }
+    if let Some(c) = world.contracts.get_mut(&id) {
+        c.escrow -= moved;
+    }
+    world.escrow_held -= moved;
+    ledger(world, Flow::Escrow, -moved);
+    if flow != Flow::Escrow {
+        ledger(world, flow, moved);
+    }
+    shadow_flow(world, None, to, moved, flow, flow == Flow::Escrow);
+    let tax = match to {
+        Some(payee) if flow.taxed() => withhold(world, payee, moved),
+        _ => 0,
+    };
+    world.purse_add(to, moved - tax);
+    if tax > 0 {
+        world.purse_add(None, tax);
+        world.stats.current.flow_tax += tax;
+    }
+    if to.is_some_and(|g| world.config.assets.enabled && world.has::<Gang>(g)) {
+        world.stats.current.gang_income += moved - tax;
+    }
+    if flow.capital() {
+        uncount_cashflow(world, to, -(moved - tax));
+    }
+    moved
+}
+
 /// Gross coins earned through a building today.
 pub fn credit(world: &mut World, building: EntityId, coins: i64) {
     if let Some(b) = world.comp_mut::<Building>(building) {
@@ -475,14 +555,16 @@ pub fn credit(world: &mut World, building: EntityId, coins: i64) {
 }
 
 /// Coins in every purse: wallets, gang and corp treasuries, the Treasury,
-/// and (M13 D13) the coins on unsettled corpses.
+/// (M13 D13) the coins on unsettled corpses and (M16a C5) the coins held in
+/// contract records' escrow.
 pub fn total_coins(world: &World) -> i64 {
     let wallets: i64 = world.with::<Wallet>().iter().filter_map(|&a| world.comp::<Wallet>(a)).map(|w| w.coins).sum();
     let gangs: i64 = world.gangs().iter().filter_map(|&g| world.comp::<Gang>(g)).map(|g| g.treasury).sum();
     let corps: i64 = world.corps().iter().filter_map(|&c| world.comp::<Corp>(c)).map(|c| c.treasury).sum();
     let city: i64 = world.with::<Treasury>().iter().filter_map(|&t| world.comp::<Treasury>(t)).map(|t| t.coins).sum();
     let loot: i64 = world.loot_corpses.iter().filter_map(|&c| world.comp::<Corpse>(c)).map(|c| c.loot.coins).sum();
-    wallets + gangs + corps + city + loot
+    let escrow: i64 = world.contracts.values().map(|c| c.escrow).sum();
+    wallets + gangs + corps + city + loot + escrow
 }
 
 // ---------------------------------------------------------------------------
@@ -509,6 +591,7 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         BuildingKind::Den => c.value.den,
         BuildingKind::Lounge => c.value.lounge,
         BuildingKind::Fab => c.value.fab,
+        BuildingKind::Fixer => c.value.fixer,
         _ => 0,
     }
 }
@@ -532,6 +615,8 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
         BuildingKind::Den => Some(Role::Croupier),
         BuildingKind::Lounge => Some(Role::Concierge),
         BuildingKind::Fab => Some(Role::Fabber),
+        // M16a (plan C8).
+        BuildingKind::Fixer => Some(Role::Fixer),
         _ => None,
     }
 }

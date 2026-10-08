@@ -41,6 +41,8 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Host | Role::Attendant | Role::Cook | Role::Fighter | Role::Croupier | Role::Concierge | Role::Fabber => {
             LocationKey::Workplace
         }
+        // M16a (plan C8): a Fixer office's staff likewise.
+        Role::Fixer => LocationKey::Workplace,
     }
 }
 

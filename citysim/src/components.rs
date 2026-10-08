@@ -185,10 +185,13 @@ pub enum BuildingKind {
     Lounge,
     /// L2 (plan L1): the parts fab (Fabbers; `FabWork` makes Parts).
     Fab,
+    /// M16a (plan C8): a Fixer's office: its owner keeps a contract record
+    /// book (`Broker`); a game abstraction, never a Den.
+    Fixer,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 23] = [
+    pub const ALL: [BuildingKind; 24] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -212,6 +215,7 @@ impl BuildingKind {
         BuildingKind::Den,
         BuildingKind::Lounge,
         BuildingKind::Fab,
+        BuildingKind::Fixer,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -254,6 +258,7 @@ impl BuildingKind {
             "Den" => BuildingKind::Den,
             "Lounge" => BuildingKind::Lounge,
             "Fab" => BuildingKind::Fab,
+            "Fixer" => BuildingKind::Fixer,
             _ => return None,
         })
     }
@@ -284,6 +289,7 @@ impl BuildingKind {
             BuildingKind::Den => "Gambling Den",
             BuildingKind::Lounge => "Spire Lounge",
             BuildingKind::Fab => "Parts Fab",
+            BuildingKind::Fixer => "Fixer",
         }
     }
 
@@ -314,6 +320,8 @@ impl BuildingKind {
             BuildingKind::Den => 'D',
             BuildingKind::Lounge => 'U',
             BuildingKind::Fab => 'E',
+            // M16a (plan C8): the Fixer's office.
+            BuildingKind::Fixer => 'X',
         }
     }
 }
@@ -368,10 +376,12 @@ pub enum Role {
     Concierge,
     /// L2: staff of a Fab ("Fab Tech").
     Fabber,
+    /// M16a (plan C8): staff of a Fixer's office.
+    Fixer,
 }
 
 impl Role {
-    pub const ALL: [Role; 17] = [
+    pub const ALL: [Role; 18] = [
         Role::Farmer,
         Role::Guard,
         Role::Clerk,
@@ -389,6 +399,7 @@ impl Role {
         Role::Croupier,
         Role::Concierge,
         Role::Fabber,
+        Role::Fixer,
     ];
 
     /// The display name (M11 section 1).
@@ -411,6 +422,7 @@ impl Role {
             Role::Croupier => "Croupier",
             Role::Concierge => "Concierge",
             Role::Fabber => "Fab Tech",
+            Role::Fixer => "Fixer",
         }
     }
 
@@ -434,6 +446,7 @@ impl Role {
             Role::Croupier => BuildingKind::Den,
             Role::Concierge => BuildingKind::Lounge,
             Role::Fabber => BuildingKind::Fab,
+            Role::Fixer => BuildingKind::Fixer,
         }
     }
 }
@@ -466,6 +479,9 @@ pub enum Crime {
     Intrusion,
     /// M14 V18: a traced run for Data or a Ledger.
     DataTheft,
+    /// M16a (plan C29): the placing agent of a fulfilled contract record,
+    /// named to the law (phase 3 files it); ranks just below Murder.
+    Conspiracy,
 }
 
 impl Crime {
@@ -483,15 +499,17 @@ impl Crime {
             Crime::Dealing => "Dealing",
             Crime::Intrusion => "Intrusion",
             Crime::DataTheft => "Data Theft",
+            Crime::Conspiracy => "Conspiracy",
         }
     }
 
     /// The order the law ranks crimes by (the most severe open report sets
     /// a sentence): Vagrancy, Theft, Intrusion, Grand Theft, Data Theft,
-    /// Dealing, Shakedown, Assault, Manslaughter, Abduction, Murder (M14
-    /// V18 inserts Intrusion above Theft and Data Theft above Grand Theft;
-    /// the M13 crimes keep their relative order). Unique per crime (`Ord`
-    /// reads it).
+    /// Dealing, Shakedown, Assault, Manslaughter, Abduction, Conspiracy,
+    /// Murder (M14 V18 inserts Intrusion above Theft and Data Theft above
+    /// Grand Theft; the M13 crimes keep their relative order; M16a C29
+    /// inserts Conspiracy just below Murder, which moves 10 -> 11). Unique
+    /// per crime (`Ord` reads it).
     pub fn severity(self) -> u8 {
         match self {
             Crime::Vagrancy => 0,
@@ -504,7 +522,8 @@ impl Crime {
             Crime::Assault => 7,
             Crime::Manslaughter => 8,
             Crime::Abduction => 9,
-            Crime::Murder => 10,
+            Crime::Conspiracy => 10,
+            Crime::Murder => 11,
         }
     }
 }
@@ -654,6 +673,9 @@ pub enum GoalKind {
     /// L2 § 2 (plan L14, L20): a gang leader's weekly Collect and Call (a
     /// scripted plan; `systems::leisure`).
     Lead,
+    /// M16a (plan C13): work a taken contract record, or network at a
+    /// Fixer for one (a scripted plan; `systems::contracts`).
+    Contract,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
@@ -676,10 +698,14 @@ pub enum Order {
     /// chair each day (a dice contest on the Virt plane); the rest keep
     /// GangWork. Not a muster order.
     VirtRaid,
+    /// M16a (plan C26, phase 2): the gang works a taken contract record as
+    /// a mission (`Expedition::Mission`); not a muster order of the raid
+    /// machinery (`is_raid` false).
+    Job,
 }
 
 impl Order {
-    pub const ALL: [Order; 9] = [
+    pub const ALL: [Order; 10] = [
         Order::Expand,
         Order::Contest,
         Order::Raid,
@@ -689,6 +715,7 @@ impl Order {
         Order::Squat,
         Order::Harvest,
         Order::VirtRaid,
+        Order::Job,
     ];
 
     /// Members muster and march under these.
@@ -740,6 +767,11 @@ pub enum Shock {
     Hacked {
         by: Option<EntityId>,
     },
+    /// M16a (plan C24, phase 2): a contract strike in one of our districts
+    /// by `by` (the buyer's faction).
+    Trespass {
+        by: Option<EntityId>,
+    },
 }
 
 impl Shock {
@@ -761,6 +793,7 @@ impl Shock {
             Shock::LostDistrict => 0.5,
             Shock::Split => 0.8,
             Shock::Hacked { .. } => 0.5,
+            Shock::Trespass { .. } => 0.4,
         }
     }
 
@@ -781,6 +814,8 @@ impl Shock {
                 // M14 V34: a run attributed to someone (in phase 2 only a
                 // runner's gang is ever named).
                 | Shock::Hacked { by: Some(_) }
+                // M16a C24: a strike by a named faction.
+                | Shock::Trespass { by: Some(_) }
         )
     }
 }
@@ -1060,6 +1095,8 @@ pub enum CorpShock {
     TalentLost,
     /// M15 W29: a rival corp poached one of its staff.
     Poached,
+    /// M16a (plan C24, phase 2): a contract strike in one of its districts.
+    Trespass,
 }
 
 impl CorpShock {
@@ -1080,6 +1117,7 @@ impl CorpShock {
             CorpShock::TechLost => 0.6,
             CorpShock::TalentLost => 0.4,
             CorpShock::Poached => 0.3,
+            CorpShock::Trespass => 0.3,
         }
     }
 }

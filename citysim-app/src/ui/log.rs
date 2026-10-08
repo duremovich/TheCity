@@ -111,7 +111,20 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Bout
         | EventKind::Collected
         | EventKind::Preached
-        | EventKind::Called => AMBER,
+        | EventKind::Called
+        // M16a (plan C37): the contract records.
+        | EventKind::ContractPosted
+        | EventKind::ContractTaken
+        | EventKind::ContractFulfilled
+        | EventKind::ContractFailed
+        | EventKind::ContractExpired
+        | EventKind::Reneged
+        | EventKind::SoldOut
+        | EventKind::StrikeDeclined
+        | EventKind::BountyPaid
+        | EventKind::Accessory
+        | EventKind::FixerBusted
+        | EventKind::GuardTaken => AMBER,
         _ => Color32::LIGHT_GRAY,
     }
 }

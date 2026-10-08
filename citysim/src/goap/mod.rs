@@ -45,5 +45,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Idle | GoalKind::Hunt | GoalKind::GuardBody => return None,
         // L2 L14: scripted plans (`leisure::{unwind_plan, lead_plan}`).
         GoalKind::Unwind | GoalKind::Lead => return None,
+        // M16a (plan C13): scripted (`contracts::plan`).
+        GoalKind::Contract => return None,
     })
 }

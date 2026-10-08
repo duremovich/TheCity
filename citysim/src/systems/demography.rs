@@ -603,6 +603,12 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
                 let f = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.fighting);
                 return (u32::MAX - (f.clamp(0.0, 1.0) * 1_000_000.0) as u32, id);
             }
+            // M16a (plan C8): a Fixer's office hires the best talker
+            // (persuasion + knowledge, ties lower id), the Reporter's shape.
+            if role == Role::Fixer {
+                let k = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.persuasion + s.knowledge);
+                return (u32::MAX - (k.clamp(0.0, 2.0) * 500_000.0) as u32, id);
+            }
             // M15 W36: a Feed hires the most knowledgeable (ties lower id).
             if role == Role::Reporter {
                 let k = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.knowledge);

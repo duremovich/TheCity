@@ -109,6 +109,10 @@ struct RunArgs {
     /// M15-closing city byte for byte.
     #[arg(long)]
     l2_off: bool,
+    /// M16a (plan C39, C41): every M16a section off (`Config::contracts_off`):
+    /// no Fixers or contract records; the L2-closing city byte for byte.
+    #[arg(long)]
+    contracts_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -244,6 +248,19 @@ enum Lever {
     OpenVenue(citysim::BuildingKind, u8, Option<FactionRef>),
     /// L2 god (L37, phase 4): `faction_strike=<gang i>:<district>:<days>`.
     FactionStrike(usize, u8, u64),
+    /// M16a god (plan C39): `post_contract=<buyer>:<hit|beat|guard|locate>:<agent i|b<building i>>:<price>:<0|1>:<days>`
+    /// (`buyer` an agent index, `corp<slot>`, `gang<i>` or `city`; price 0 = quoted; days 0 = the kind's).
+    PostContract(Buyer, citysim::contract::ContractKind, ContractTarget, i64, bool, u16),
+    /// M16a god (plan C39): `take_contract=<id>:<agent i>` (gang and corp takers are phase 2).
+    TakeContract(u64, u32),
+}
+
+/// A contract record's target on the command line: an agent's or a
+/// building's entity index (`b<i>`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ContractTarget {
+    Agent(u32),
+    Building(u32),
 }
 
 /// A faction on the command line: `gang<i>`, `corp<slot>` or `law`.
@@ -566,6 +583,25 @@ impl Lever {
             },
             Lever::FactionStrike(i, d, days) => {
                 PlayerCommand::FactionStrike { gang: gang(i)?, district: citysim::DistrictId(d), days }
+            }
+            Lever::PostContract(buyer, kind, target, price, brokered, deadline_days) => PlayerCommand::PostContract {
+                buyer: match buyer {
+                    Buyer::City => None,
+                    Buyer::Gang(i) => Some(gang(i)?),
+                    Buyer::Corp(s) => Some(corp_in_slot(world, s)?),
+                    Buyer::Agent(a) => Some(agent_at(world, a)?),
+                },
+                kind,
+                target: match target {
+                    ContractTarget::Agent(a) => citysim::contract::Target::Agent(agent_at(world, a)?),
+                    ContractTarget::Building(b) => citysim::contract::Target::Building(building_at(world, b)?),
+                },
+                price,
+                brokered,
+                deadline_days,
+            },
+            Lever::TakeContract(contract, taker) => {
+                PlayerCommand::TakeContract { contract, taker: agent_at(world, taker)? }
             }
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
@@ -928,6 +964,44 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 n.parse::<u64>().map_err(|e| format!("{spec}: bad days: {e}"))?,
             ))
         }
+        // M16a (plan C39).
+        "post_contract" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [who, kind, target, price, brokered, days] = parts[..] else {
+                return Err(format!(
+                    "{spec}: expected <buyer>:<hit|beat|guard|locate>:<agent|b<building>>:<price>:<0|1>:<days>"
+                ));
+            };
+            let buyer = match who {
+                "city" => Buyer::City,
+                w if w.starts_with("gang") => Buyer::Gang(idx(&w[4..])?),
+                w if w.starts_with("corp") => Buyer::Corp(slot(&w[4..])?),
+                w => Buyer::Agent(w.parse::<u32>().map_err(|e| format!("{spec}: bad buyer: {e}"))?),
+            };
+            let kind = citysim::contract::ContractKind::parse(kind)
+                .ok_or_else(|| format!("{spec}: kind must be hit|beat|guard|locate"))?;
+            let target = match target.strip_prefix('b') {
+                Some(b) => {
+                    ContractTarget::Building(b.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?)
+                }
+                None => ContractTarget::Agent(target.parse::<u32>().map_err(|e| format!("{spec}: bad target: {e}"))?),
+            };
+            Some(Lever::PostContract(
+                buyer,
+                kind,
+                target,
+                price.parse::<i64>().map_err(|e| format!("{spec}: bad price: {e}"))?,
+                on_off(brokered).ok_or_else(|| format!("{spec}: brokered must be 0|1"))?,
+                days.parse::<u16>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            ))
+        }
+        "take_contract" => {
+            let (c, t) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <id>:<agent>"))?;
+            Some(Lever::TakeContract(
+                c.parse::<u64>().map_err(|e| format!("{spec}: bad contract: {e}"))?,
+                t.parse::<u32>().map_err(|e| format!("{spec}: bad taker: {e}"))?,
+            ))
+        }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
         "kill_staff" => Some(Lever::KillStaff(slot(value)?)),
         "strike" => Some(Lever::Strike(slot(value)?)),
@@ -1154,6 +1228,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     if args.l2_off {
         config = config.living_off();
     }
+    if args.contracts_off {
+        config = config.contracts_off();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -1181,6 +1258,9 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             if args.l2_off {
                 w.config = w.config.clone().living_off();
+            }
+            if args.contracts_off {
+                w.config = w.config.clone().contracts_off();
             }
             w
         }
@@ -1934,6 +2014,25 @@ mod tests {
         assert!(parse_lever("day=10:kill_friend=leaderx:1").is_err());
         assert!(matches!(parse_lever("day=10:hunt=12:34").unwrap().1, Lever::Hunt(12, 34)));
         assert!(parse_lever("day=10:hunt=12").is_err());
+    }
+
+    #[test]
+    fn test_parse_contract_levers() {
+        use citysim::contract::ContractKind;
+        assert!(matches!(
+            parse_lever("day=3:post_contract=12:hit:34:700:1:10").unwrap().1,
+            Lever::PostContract(Buyer::Agent(12), ContractKind::Hit, ContractTarget::Agent(34), 700, true, 10)
+        ));
+        assert!(matches!(
+            parse_lever("day=3:post_contract=corp2:guard:b77:0:0:7").unwrap().1,
+            Lever::PostContract(Buyer::Corp(2), ContractKind::Guard, ContractTarget::Building(77), 0, false, 7)
+        ));
+        assert!(matches!(
+            parse_lever("day=3:post_contract=city:locate:9:0:0:0").unwrap().1,
+            Lever::PostContract(Buyer::City, ContractKind::Locate, ContractTarget::Agent(9), 0, false, 0)
+        ));
+        assert!(parse_lever("day=3:post_contract=12:kill:34:700:1:10").is_err());
+        assert!(matches!(parse_lever("day=4:take_contract=5:21").unwrap().1, Lever::TakeContract(5, 21)));
     }
 
     #[test]

@@ -392,6 +392,25 @@ pub enum PlayerCommand {
         district: crate::components::DistrictId,
         days: u64,
     },
+    // --- M16a phase 1 (plan C39): god contract records (a game abstraction:
+    // a record with a price, matched and resolved by the board's rules).
+    /// God: post a record (`Origin::God`); the price is escrowed (a direct
+    /// record checks the buyer's purse); `brokered` picks the open Fixer
+    /// nearest the target.
+    PostContract {
+        buyer: Option<EntityId>,
+        kind: crate::contract::ContractKind,
+        target: crate::contract::Target,
+        price: i64,
+        brokered: bool,
+        deadline_days: u16,
+    },
+    /// God: force a taker's acceptance of an open record (M18's player
+    /// `TakeContract` is the same call, `contracts::accept`).
+    TakeContract {
+        contract: crate::contract::ContractId,
+        taker: EntityId,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -502,6 +521,16 @@ pub struct Levers {
     /// L2 L37: gambling banned (`BanGambling`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ban_gambling: bool,
+    /// M16a (plan C39; `SetFixerLicence`, phase 4): Fixers are licensed.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub fixer_licence: bool,
+    /// M16a (plan C39; `SetAccessoryMult`, phase 4): overrides `[law] accessory_mult`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub accessory_mult: Option<f32>,
+    /// M16a (plan C39; `PublicBounties`, phase 4): the law posts a Locate
+    /// on every wanted suspect after one day.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub public_bounties: bool,
 }
 
 fn is_zero_f32(v: &f32) -> bool {
@@ -584,6 +613,9 @@ impl Levers {
             export_open: cfg.living.enabled && cfg.export.enabled,
             leisure_tax: 0.0,
             ban_gambling: false,
+            fixer_licence: true,
+            accessory_mult: None,
+            public_bounties: false,
         }
     }
 }
@@ -918,6 +950,39 @@ impl World {
                     self.push_event(EventKind::PlayerAction, &[*gang], text);
                 } else {
                     self.push_event(EventKind::PlayerActionFailed, &[*gang], "FactionStrike: not a gang".to_string());
+                }
+            }
+            PlayerCommand::PostContract { buyer, kind, target, price, brokered, deadline_days } => {
+                match crate::systems::contracts::god_post(
+                    self,
+                    *buyer,
+                    *kind,
+                    *target,
+                    *price,
+                    *brokered,
+                    *deadline_days,
+                ) {
+                    Ok(id) => {
+                        let who = self.owner_label(*buyer);
+                        let on = self.name_of(target.id());
+                        let listed = self.contracts.get(&id).map_or(*price, |c| c.price);
+                        let text = format!("God: {who} posted contract #{id} ({}) on {on} for {listed}", kind.label());
+                        self.push_event(EventKind::PlayerAction, &[target.id()], text);
+                    }
+                    Err(e) => {
+                        self.push_event(EventKind::PlayerActionFailed, &[], format!("PostContract: {e}"));
+                    }
+                }
+            }
+            PlayerCommand::TakeContract { contract, taker } => {
+                match crate::systems::contracts::god_take(self, *contract, *taker) {
+                    Ok(()) => {
+                        let text = format!("God: {} took contract #{contract}", self.owner_label(Some(*taker)));
+                        self.push_event(EventKind::PlayerAction, &[*taker], text);
+                    }
+                    Err(e) => {
+                        self.push_event(EventKind::PlayerActionFailed, &[*taker], format!("TakeContract: {e}"));
+                    }
                 }
             }
             PlayerCommand::SetRiotResponse(r) => {

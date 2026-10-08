@@ -262,13 +262,19 @@ struct Acc {
     h: Vec<f32>,
     x: Vec<f32>,
     /// Per actor, the summed weight per deed (`Deed::ALL` order).
-    by_deed: Vec<[f32; 15]>,
+    by_deed: Vec<[f32; Deed::ALL.len()]>,
     known: Vec<u16>,
 }
 
 impl Acc {
     fn new(n: usize) -> Acc {
-        Acc { d: vec![0.0; n], h: vec![0.0; n], x: vec![0.0; n], by_deed: vec![[0.0; 15]; n], known: vec![0; n] }
+        Acc {
+            d: vec![0.0; n],
+            h: vec![0.0; n],
+            x: vec![0.0; n],
+            by_deed: vec![[0.0; Deed::ALL.len()]; n],
+            known: vec![0; n],
+        }
     }
 
     /// Accumulates on the actor's index only while `actor` is the live
@@ -560,7 +566,7 @@ pub fn rebuild(world: &mut World) {
 /// The four largest per-deed contributions of an actor, biggest first.
 fn top_of(acc: &Acc, id: EntityId) -> SmallVec<[(Deed, f32); 4]> {
     let b = Acc::get(&acc.by_deed, id);
-    let mut v: SmallVec<[(Deed, f32); 15]> =
+    let mut v: SmallVec<[(Deed, f32); Deed::ALL.len()]> =
         Deed::ALL.iter().map(|&d| (d, b[d.index()])).filter(|&(_, w)| w > 0.0).collect();
     v.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
     v.into_iter().take(4).collect()

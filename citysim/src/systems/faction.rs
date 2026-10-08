@@ -829,6 +829,9 @@ pub fn bribe_score(world: &World, gang: EntityId) -> Option<Vec<Consideration>> 
 pub enum Payer {
     Gang(EntityId),
     Corp(EntityId),
+    /// M16a (plan C30): a Fixer's owner paying from its wallet (phase 3;
+    /// `offer_bribe` makes no offer for it until then).
+    Owner(EntityId),
 }
 
 /// M11 D21: what a bribe buys. A gang pays the law to look away; a corp
@@ -878,6 +881,8 @@ pub fn offer_bribe(world: &mut World, payer: Payer, ask: BribeAsk, score: f32) -
             Some(cc) if cc.treasury >= price => (c, cc.name.clone(), cc.exec),
             _ => return false,
         },
+        // M16a C30: phase 3's arm.
+        Payer::Owner(_) => return false,
     };
     let refused = world.comp::<Personality>(captain).is_some_and(|p| p.lawfulness >= cfg.incorruptible);
     match payer {
@@ -891,6 +896,7 @@ pub fn offer_bribe(world: &mut World, payer: Payer, ask: BribeAsk, score: f32) -
                 cc.lobby_until = Some(hold);
             }
         }
+        Payer::Owner(_) => {}
     }
     let mut actors = vec![payer_id, captain];
     actors.extend(decider);
@@ -935,6 +941,7 @@ pub fn offer_bribe(world: &mut World, payer: Payer, ask: BribeAsk, score: f32) -
             }
         }
         (Payer::Corp(_), BribeAsk::LookAway) => {}
+        (Payer::Owner(_), _) => {}
     }
     if let Some(p) = world.comp_mut::<Personality>(captain) {
         p.drift(Drift::TookBribe);

@@ -404,6 +404,8 @@ pub enum RunWhy {
     Overwatch,
     Stat,
     God,
+    /// M16a (plan C34, phase 3): a run order a Fixer handed a regular.
+    Fixer,
 }
 
 /// Plan V66 (the spec addendum's quiet and loud): how a run is made.

@@ -91,6 +91,9 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Gamble | ActionKind::EatOut | ActionKind::Preach => 30,
         ActionKind::HangOut => world.config.leisure.hangout_ticks,
         ActionKind::Collect => 10,
+        // M16a (plan C10, C15).
+        ActionKind::Network => 30,
+        ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
         ActionKind::AskAround => 20,
         ActionKind::StakeOut => {
@@ -176,6 +179,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         // L2 L14: the scripted leisure steps.
         k if k.is_leisure_step() => crate::systems::leisure::can_start(world, id, k, target),
+        // M16a (plan C10): the scripted contract steps.
+        k if k.is_contract_step() => crate::systems::contracts::can_start(world, id, k, target),
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -424,6 +429,8 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
             }
         }
         k if k.is_leisure_step() => crate::systems::leisure::on_start(world, id, k, target),
+        // M16a (plan C32): the guard is on post.
+        ActionKind::Guard => crate::systems::contracts::on_guard_start(world, id, target),
         ActionKind::Drink => {
             // M11: the Bar's owner takes the 2 coins (the Treasury owns a city Bar).
             let bar = world.comp::<Position>(id).and_then(|p| p.building);
@@ -482,6 +489,11 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         ActionKind::Deal => crate::systems::stims::end_deal(world, id),
         // L2 L14: a paid entry or meal refunded; a HangOut leaves its spot.
         k if k.is_leisure_step() => crate::systems::leisure::on_abort(world, id, k),
+        // M16a (plan C32): off post.
+        ActionKind::Guard => {
+            let c = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target);
+            crate::systems::contracts::on_guard_end(world, id, c);
+        }
         // M15 W35: a guard who walks away stands over the body no more.
         ActionKind::StakeOut => {
             let c = world.comp::<Brain>(id).and_then(|b| b.plan.as_ref()).and_then(|p| p.target);
@@ -679,6 +691,9 @@ pub fn on_complete(
             crate::systems::leisure::on_complete(world, id, k, target, started);
             StepResult::Done
         }
+        // M16a (plan C10, C15): a regular's stamp; a Guard's day kept.
+        ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
+        ActionKind::Guard => crate::systems::contracts::on_guard_done(world, id, target),
         ActionKind::CollectWage => {
             economy::collect_wage(world, id);
             StepResult::Done
@@ -1140,6 +1155,25 @@ pub fn on_complete(
             if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, id, victim, 4) {
                 return StepResult::Failed(FailReason::PartnerLeft);
             }
+            // M16a (plan C32): a Guard taker on post beside the client meets
+            // the attack first; a guard's win ends it (the attacker's Assault).
+            if let Some(g) = crate::systems::contracts::guard_for(world, id, victim) {
+                let (winner, _, died) = crate::systems::law::resolve_fight(world, id, g);
+                let tile = world.comp::<Position>(id).map_or(TilePos::default(), |p| p.tile);
+                let text =
+                    format!("{} attacked {}'s guard {}", world.name_of(id), world.name_of(victim), world.name_of(g));
+                world.push_event(crate::events::EventKind::Assault, &[id, g], text);
+                if crate::systems::law::living(world, id) {
+                    let murder = died && winner == id;
+                    let crime =
+                        if murder { crate::components::Crime::Murder } else { crate::components::Crime::Assault };
+                    crate::systems::law::raise_crime_on(world, id, (!murder).then_some(g), Some(g), crime, tile);
+                }
+                if winner != id || !crate::systems::law::living(world, victim) {
+                    crate::systems::hunt::on_strike(world, id, victim, g, false);
+                    return StepResult::Done;
+                }
+            }
             // M13 D33: a berserker's blows kill at `berserk_kill_mult`.
             // M15 W22: a lethal Hunt's strike kills at `hunt_kill_p`.
             let mods = crate::systems::law::FightMods {
@@ -1189,6 +1223,8 @@ pub fn on_complete(
                 }
                 StepResult::Done
             } else if crate::systems::hunt::contact(world, id) {
+                // M16a (plan C27): a Locate tracker's contact is a paid sighting.
+                crate::systems::contracts::on_contact(world, id);
                 StepResult::Done
             } else {
                 crate::systems::hunt::stakeout_failed(world, id)

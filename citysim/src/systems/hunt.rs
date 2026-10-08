@@ -109,15 +109,113 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
     Some((cs, world.config.hunt.hunt_flat))
 }
 
+/// M16a (plan C20): the Hunt's considerations on `target` at `weight`
+/// without the might-gap term (the hire pass's score), at any tier.
+pub fn hire_considerations(
+    world: &World,
+    id: EntityId,
+    target: EntityId,
+    weight: f32,
+) -> Option<(Vec<Consideration>, f32)> {
+    if !on(world) || !hunter_ok(world, id) || !target_ok(world, target) {
+        return None;
+    }
+    let p = world.comp::<Personality>(id)?;
+    let heat = crate::systems::reputation::rep(world, id).heat;
+    let dread = crate::systems::reputation::rep(world, target).dread;
+    let cs = vec![
+        Consideration::new("grudge open", can(true), GATE),
+        Consideration::new("grudge weight", weight, Curve::Linear { m: 0.9, b: 0.1 }),
+        Consideration::new("courage", p.courage, Curve::Linear { m: 0.6, b: 0.4 }),
+        Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.5, b: 0.5 }),
+        Consideration::new("1-heat", 1.0 - heat, Curve::Linear { m: 0.4, b: 0.6 }),
+        Consideration::new("1-dread x fear", 1.0 - dread * (1.0 - p.courage), Curve::Linear { m: 0.5, b: 0.5 }),
+    ];
+    Some((cs, world.config.hunt.hunt_flat))
+}
+
 /// W26's `might(hunter) − might(target)`.
 pub fn might_gap(world: &World, hunter: EntityId, target: EntityId) -> f32 {
     crate::systems::moves::might(world, hunter) - crate::systems::moves::might(world, target)
 }
 
-/// Rebuild `hunted_by` from `hunts` (the targets of Hunts in `Watch`).
+/// Rebuild `hunted_by` from `hunts` (the targets of Hunts in `Watch`),
+/// and M16a's twin `chased_by` from `contract_runs` (C14).
 pub fn reindex(world: &mut World) {
     world.hunted_by =
         world.hunts.iter().filter(|(_, s)| s.phase == HuntPhase::Watch).map(|(&h, s)| (s.target, h)).collect();
+    if !world.contract_runs.is_empty() || !world.chased_by.is_empty() {
+        world.chased_by = world
+            .contract_runs
+            .iter()
+            .filter(|(_, s)| s.phase == HuntPhase::Watch)
+            .map(|(&h, s)| (s.target, h))
+            .collect();
+    }
+}
+
+/// M16a (plan C14): the intel state a chase step reads, from the agent's
+/// Hunt (`World::hunts`) or else its contract run (`World::contract_runs`):
+/// a copy, written back by [`set_chase`]. With no contract run every
+/// reader sees exactly the Hunt's state.
+#[derive(Copy, Clone, PartialEq, Debug)]
+pub struct Chase {
+    pub target: EntityId,
+    pub phase: HuntPhase,
+    pub venue: Option<EntityId>,
+    pub intel: Option<Intel>,
+    pub stakeout_until: Option<Tick>,
+    pub deceived: bool,
+    pub liar: Option<EntityId>,
+}
+
+/// The agent's chase: its Hunt's, else its contract run's.
+pub fn chase(world: &World, id: EntityId) -> Option<Chase> {
+    if let Some(s) = world.hunts.get(&id) {
+        return Some(Chase {
+            target: s.target,
+            phase: s.phase,
+            venue: s.venue,
+            intel: s.intel,
+            stakeout_until: s.stakeout_until,
+            deceived: s.deceived,
+            liar: s.liar,
+        });
+    }
+    if world.contract_runs.is_empty() {
+        return None;
+    }
+    world.contract_runs.get(&id).map(|r| Chase {
+        target: r.target,
+        phase: r.phase,
+        venue: r.venue,
+        intel: r.intel,
+        stakeout_until: r.stakeout_until,
+        deceived: r.deceived,
+        liar: r.liar,
+    })
+}
+
+/// Write a chase back to whichever store holds the agent (the target is
+/// never rewritten).
+pub fn set_chase(world: &mut World, id: EntityId, c: Chase) {
+    if let Some(s) = world.hunts.get_mut(&id) {
+        s.phase = c.phase;
+        s.venue = c.venue;
+        s.intel = c.intel;
+        s.stakeout_until = c.stakeout_until;
+        s.deceived = c.deceived;
+        s.liar = c.liar;
+        return;
+    }
+    if let Some(r) = world.contract_runs.get_mut(&id) {
+        r.phase = c.phase;
+        r.venue = c.venue;
+        r.intel = c.intel;
+        r.stakeout_until = c.stakeout_until;
+        r.deceived = c.deceived;
+        r.liar = c.liar;
+    }
 }
 
 /// W20: take up a Hunt on the heaviest eligible grudge (a god Hunt skips
@@ -130,6 +228,11 @@ pub fn adopt(world: &mut World, id: EntityId, why: HuntWhy) -> bool {
         return false;
     }
     let Some((target, weight, chain)) = heaviest_eligible(world, id) else { return false };
+    // M16a (plan C20): a holder too weak to win who can pay hires instead
+    // (a Goal or Stat Hunt; never a god's).
+    if why != HuntWhy::God && crate::systems::contracts::try_hire(world, id, target, weight) {
+        return false;
+    }
     let now = world.tick;
     let gap = might_gap(world, id, target);
     world.hunts.insert(
@@ -208,7 +311,11 @@ pub fn fresh_intel(world: &World, hunter: EntityId, target: EntityId) -> Option<
 
 /// The district where the hunter last knew the target to be: its newest
 /// sighting's, else the target's Home's, else where it stands.
-fn last_known_district(world: &World, hunter: EntityId, target: EntityId) -> Option<crate::components::DistrictId> {
+pub(crate) fn last_known_district(
+    world: &World,
+    hunter: EntityId,
+    target: EntityId,
+) -> Option<crate::components::DistrictId> {
     if let Some((_, _, tile)) = sightings_of(world, hunter, target) {
         return Some(world.district_of(tile));
     }
@@ -325,7 +432,7 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// `LocationKey::Intel` for `agent`: the venue while asking, the intel
 /// building while watching (`None` for a street intel).
 pub fn intel_building(world: &World, agent: EntityId) -> Option<EntityId> {
-    let s = world.hunts.get(&agent)?;
+    let s = chase(world, agent)?;
     match s.phase {
         HuntPhase::Ask => s.venue,
         HuntPhase::Watch => s.intel.and_then(|i| i.building),
@@ -334,7 +441,7 @@ pub fn intel_building(world: &World, agent: EntityId) -> Option<EntityId> {
 
 /// `LocationKey::Intel`'s tile for `agent` when it is no building.
 pub fn intel_tile(world: &World, agent: EntityId) -> Option<crate::components::TilePos> {
-    let s = world.hunts.get(&agent)?;
+    let s = chase(world, agent)?;
     match s.phase {
         HuntPhase::Ask => None,
         HuntPhase::Watch => s.intel.map(|i| i.tile),
@@ -344,7 +451,7 @@ pub fn intel_tile(world: &World, agent: EntityId) -> Option<crate::components::T
 /// W22: a `GoTo(Intel)` starts: in `Watch` a Statistical target is
 /// promoted to Coarse (it snaps to its phase door) and marked hunted.
 pub fn on_goto_intel(world: &mut World, hunter: EntityId) {
-    let Some(s) = world.hunts.get(&hunter) else { return };
+    let Some(s) = chase(world, hunter) else { return };
     if s.phase != HuntPhase::Watch {
         return;
     }
@@ -357,7 +464,7 @@ pub fn on_goto_intel(world: &mut World, hunter: EntityId) {
 
 /// Is the target within 2 tiles of the hunter or in its building?
 pub fn contact(world: &World, hunter: EntityId) -> bool {
-    world.hunts.get(&hunter).is_some_and(|s| crate::systems::law::near(world, hunter, s.target, 2))
+    chase(world, hunter).is_some_and(|s| crate::systems::law::near(world, hunter, s.target, 2))
 }
 
 /// The scripted steps' start check (in place of the planner's symbolic
@@ -376,8 +483,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
     };
     match kind {
         ActionKind::AskAround => {
-            world.hunts.get(&id).and_then(|s| s.venue).is_some_and(at_building)
-                && world.hunts.get(&id).is_some_and(|s| target_ok(world, s.target))
+            chase(world, id).and_then(|s| s.venue).is_some_and(at_building)
+                && chase(world, id).is_some_and(|s| target_ok(world, s.target))
         }
         ActionKind::StakeOut => {
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
@@ -387,7 +494,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                         && crate::systems::law::near(world, id, c, 1)
                 });
             }
-            let Some(s) = world.hunts.get(&id) else { return false };
+            let Some(s) = chase(world, id) else { return false };
             if !target_ok(world, s.target) {
                 return false;
             }
@@ -406,8 +513,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 
 /// W22: the stake-out begins (its timeout noted).
 pub fn start_stakeout(world: &mut World, hunter: EntityId, until: Tick) {
-    if let Some(s) = world.hunts.get_mut(&hunter) {
+    if let Some(mut s) = chase(world, hunter) {
         s.stakeout_until = Some(until);
+        set_chase(world, hunter, s);
     }
 }
 
@@ -415,7 +523,7 @@ pub fn start_stakeout(world: &mut World, hunter: EntityId, until: Tick) {
 /// asking (intel cleared); a hunter sent the wrong way finds out
 /// (`Deceived`, and a grudge on the liar at 0.3).
 pub fn stakeout_failed(world: &mut World, hunter: EntityId) -> StepResult {
-    let Some(s) = world.hunts.get(&hunter).cloned() else {
+    let Some(s) = chase(world, hunter) else {
         return StepResult::Failed(crate::exec::FailReason::PreconditionLost);
     };
     if s.deceived {
@@ -425,13 +533,14 @@ pub fn stakeout_failed(world: &mut World, hunter: EntityId) -> StepResult {
             crate::systems::grudges::add(world, hunter, liar, GrudgeCause::Betrayed, 0.3, 0);
         }
     }
-    if let Some(x) = world.hunts.get_mut(&hunter) {
+    if let Some(mut x) = chase(world, hunter) {
         x.phase = HuntPhase::Ask;
         x.intel = None;
         x.venue = None;
         x.deceived = false;
         x.liar = None;
         x.stakeout_until = None;
+        set_chase(world, hunter, x);
     }
     reindex(world);
     StepResult::Failed(crate::exec::FailReason::PreconditionLost)
@@ -440,6 +549,11 @@ pub fn stakeout_failed(world: &mut World, hunter: EntityId) -> StepResult {
 /// The kill chance of a strike: `Some(hunt_kill_p)` when `hunter` hunts
 /// `victim` on a grudge of `lethal_min` or more.
 pub fn strike_kill_p(world: &World, hunter: EntityId, victim: EntityId) -> Option<f32> {
+    // M16a (plan C15): a contract Hit's taker strikes its target at
+    // `hunt_kill_p` (a Beat at the base rate).
+    if !world.contract_runs.is_empty() && !world.hunts.contains_key(&hunter) {
+        return crate::systems::contracts::strike_kill_p(world, hunter, victim);
+    }
     let s = world.hunts.get(&hunter).filter(|s| s.target == victim)?;
     let w = crate::systems::grudges::grudge_on(world, hunter, victim).map_or(s.weight, |g| g.weight);
     (w >= world.config.hunt.lethal_min).then_some(world.config.hunt.hunt_kill_p)
@@ -468,7 +582,7 @@ fn respondent(world: &World, hunter: EntityId, target: EntityId, venue: EntityId
 /// the respondent's freshest sighting of the target, else the habit; a
 /// failure leaves the target's Home. The Hunt moves to `Watch`.
 pub fn ask_around(world: &mut World, hunter: EntityId) -> StepResult {
-    let Some(s) = world.hunts.get(&hunter).cloned() else {
+    let Some(s) = chase(world, hunter) else {
         return StepResult::Failed(crate::exec::FailReason::PreconditionLost);
     };
     let target = s.target;
@@ -527,12 +641,13 @@ pub fn ask_around(world: &mut World, hunter: EntityId) -> StepResult {
             }
         }
     };
-    if let Some(x) = world.hunts.get_mut(&hunter) {
+    if let Some(mut x) = chase(world, hunter) {
         x.phase = HuntPhase::Watch;
         x.intel = Some(intel);
         x.stakeout_until = None;
         x.deceived = deceived_by.is_some();
         x.liar = deceived_by;
+        set_chase(world, hunter, x);
     }
     reindex(world);
     StepResult::Done
@@ -563,6 +678,8 @@ fn wrong_bar(world: &World, hunter: EntityId, liar: EntityId, target: EntityId) 
 /// off it; a loss adds 0.1 and cools the Hunt `hunt_cooldown_days`. The
 /// `HuntState` ends either way.
 pub fn on_strike(world: &mut World, hunter: EntityId, target: EntityId, winner: EntityId, died: bool) {
+    // M16a (plan C15): a contract taker's strike (no Hunt: returns below).
+    crate::systems::contracts::on_strike(world, hunter, target, winner, died);
     let Some(s) = world.hunts.get(&hunter).filter(|s| s.target == target).cloned() else { return };
     world.hunts.remove(&hunter);
     reindex(world);

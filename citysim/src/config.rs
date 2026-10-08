@@ -163,6 +163,20 @@ pub struct Config {
     pub exec: ExecCfg,
     pub lod: LodCfg,
     pub levers: LeversCfg,
+    /// M16a (docs/M16_CONTRACTS.md, plan C3): contract records, the
+    /// master switch; absent from pre-M16a saves: off. `enabled = false`
+    /// (`--contracts-off`) is the L2-closing city byte for byte.
+    #[serde(default = "ContractsCfg::off")]
+    pub contracts: ContractsCfg,
+    /// M16a § 2: Fixers and regulars (read only behind `contracts::on`).
+    #[serde(default = "FixersCfg::off")]
+    pub fixers: FixersCfg,
+    /// M16a § 3: missions and the strike (phase 2; read only behind `contracts::on`).
+    #[serde(default = "MissionsCfg::off")]
+    pub missions: MissionsCfg,
+    /// M16a § 3: Locate bounties (16a's three keys; read only behind `contracts::on`).
+    #[serde(default = "BountyCfg::off")]
+    pub bounty: BountyCfg,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -240,6 +254,8 @@ impl JobsCfg {
             | Role::Croupier
             | Role::Concierge
             | Role::Fabber => 0,
+            // M16a (plan C8): a Fixer office's staff are hired, never seeded.
+            Role::Fixer => 0,
         }
     }
 }
@@ -307,6 +323,11 @@ impl BuildingCfg {
     pub fn fab() -> BuildingCfg {
         BuildingCfg { capacity: 14, stock_cap: 400, staff: 12 }
     }
+
+    /// M16a (spec § 2): a Fixer's office of one Fixer.
+    pub fn fixer() -> BuildingCfg {
+        BuildingCfg { capacity: 8, stock_cap: 0, staff: 1 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -356,6 +377,9 @@ pub struct BuildingsCfg {
     pub lounge: BuildingCfg,
     #[serde(default = "BuildingCfg::fab")]
     pub fab: BuildingCfg,
+    /// M16a (plan C8): a Fixer's office (none stands with contracts off).
+    #[serde(default = "BuildingCfg::fixer")]
+    pub fixer: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -384,6 +408,7 @@ impl BuildingsCfg {
             BuildingKind::Den => &self.den,
             BuildingKind::Lounge => &self.lounge,
             BuildingKind::Fab => &self.fab,
+            BuildingKind::Fixer => &self.fixer,
         }
     }
 }
@@ -466,6 +491,9 @@ pub struct EconomyCfg {
     pub wage_concierge: i64,
     #[serde(default = "default_wage_fabber")]
     pub wage_fabber: i64,
+    /// M16a (plan C8): a Fixer office's staff, on L2's wage scale.
+    #[serde(default = "default_wage_fixer")]
+    pub wage_fixer: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -541,6 +569,9 @@ fn default_wage_concierge() -> i64 {
 fn default_wage_fabber() -> i64 {
     7
 }
+fn default_wage_fixer() -> i64 {
+    6
+}
 
 impl EconomyCfg {
     pub fn wage(&self, role: Role) -> i64 {
@@ -562,6 +593,7 @@ impl EconomyCfg {
             Role::Croupier => self.wage_croupier,
             Role::Concierge => self.wage_concierge,
             Role::Fabber => self.wage_fabber,
+            Role::Fixer => self.wage_fixer,
         }
     }
 }
@@ -840,6 +872,9 @@ pub struct OrderFlatCfg {
     /// grudge whose wipe is in its best runner's reach.
     #[serde(default)]
     pub virt_grudge: f32,
+    /// M16a (plan C26, phase 2): the gang's `Order::Job`.
+    #[serde(default)]
+    pub job: f32,
 }
 
 impl OrderFlatCfg {
@@ -935,6 +970,92 @@ pub struct LawCfg {
     pub vagrancy_sentence_ticks: u64,
     #[serde(default)]
     pub stance_flat: StanceFlatCfg,
+    // --- M16a (spec § 3 "the law's view", plan C28-C31): read only behind
+    // `contracts::on`, by phase 3. Spec values as defaults.
+    /// C28: a taker jailed within this many days of a fulfilled Hit or Beat is interrogated.
+    #[serde(default = "LawCfg::d_interrogate_days")]
+    pub interrogate_days: u32,
+    /// C28: added to the interrogation move's bonus.
+    #[serde(default)]
+    pub interrogate_bias: f32,
+    /// C29: a `Hired` rumour this sure names the buyer to the law.
+    #[serde(default = "LawCfg::d_accessory_conf")]
+    pub accessory_conf: f32,
+    /// C29: the Conspiracy sentence is this × Murder's.
+    #[serde(default = "LawCfg::d_accessory_mult")]
+    pub accessory_mult: f32,
+    /// C30: a Fixer's heat per fulfilled brokered Hit.
+    #[serde(default = "LawCfg::d_heat_per_hit")]
+    pub heat_per_hit: f32,
+    /// C30: a Fixer's heat per interrogation naming it.
+    #[serde(default = "LawCfg::d_heat_per_named")]
+    pub heat_per_named: f32,
+    /// C30: a Fixer's heat decay per day.
+    #[serde(default = "LawCfg::d_heat_decay")]
+    pub heat_decay: f32,
+    /// C30: the office is busted at this heat.
+    #[serde(default = "LawCfg::d_warrant_heat")]
+    pub warrant_heat: f32,
+    /// C30: days a busted office stays closed.
+    #[serde(default = "LawCfg::d_close_days")]
+    pub close_days: u32,
+    /// C30, C31: heat a taken bribe or a guard on the take takes off.
+    #[serde(default = "LawCfg::d_bribe_cool")]
+    pub bribe_cool: f32,
+    /// C21: a Fixer passes `Hired` to a regular at `fixer_talk × (1 − heat)`.
+    #[serde(default = "LawCfg::d_fixer_talk")]
+    pub fixer_talk: f32,
+    /// C29: the accessory window after a fulfilment.
+    #[serde(default = "LawCfg::d_accessory_days")]
+    pub accessory_days: u32,
+    /// C31: a city guard below this lawfulness may take a Guard record on a buyer.
+    #[serde(default = "LawCfg::d_corrupt_lawfulness")]
+    pub corrupt_lawfulness: f32,
+    /// C30, C31: a Fixer owner at this heat bribes and may buy a guard.
+    #[serde(default = "LawCfg::d_corrupt_heat")]
+    pub corrupt_heat: f32,
+}
+
+impl LawCfg {
+    fn d_interrogate_days() -> u32 {
+        30
+    }
+    fn d_accessory_conf() -> f32 {
+        0.5
+    }
+    fn d_accessory_mult() -> f32 {
+        0.75
+    }
+    fn d_heat_per_hit() -> f32 {
+        0.15
+    }
+    fn d_heat_per_named() -> f32 {
+        0.3
+    }
+    fn d_heat_decay() -> f32 {
+        0.02
+    }
+    fn d_warrant_heat() -> f32 {
+        0.8
+    }
+    fn d_close_days() -> u32 {
+        7
+    }
+    fn d_bribe_cool() -> f32 {
+        0.3
+    }
+    fn d_fixer_talk() -> f32 {
+        0.3
+    }
+    fn d_accessory_days() -> u32 {
+        60
+    }
+    fn d_corrupt_lawfulness() -> f32 {
+        0.3
+    }
+    fn d_corrupt_heat() -> f32 {
+        0.3
+    }
 }
 
 fn default_target_margin() -> usize {
@@ -1138,11 +1259,24 @@ pub struct LodCfg {
     /// shift it ranks as a civilian); `false` keeps M10 D20 (always 3).
     #[serde(default = "LodCfg::default_true")]
     pub watch_on_shift_only: bool,
+    /// M16a (plan C35, phase 4): live contract parties' bodies (class 4).
+    #[serde(default = "LodCfg::default_contract_quota")]
+    pub contract_quota: usize,
+    /// M16a (plan C35, phase 4): Fixer owners' bodies (class 2) in the
+    /// matching window.
+    #[serde(default = "LodCfg::default_fixer_quota")]
+    pub fixer_quota: usize,
 }
 
 impl LodCfg {
     fn default_true() -> bool {
         true
+    }
+    fn default_contract_quota() -> usize {
+        24
+    }
+    fn default_fixer_quota() -> usize {
+        4
     }
     fn default_gang_quota() -> usize {
         25
@@ -1302,6 +1436,9 @@ pub struct FoundCostCfg {
     /// Corps only (the Fab is never `Register`ed).
     #[serde(default = "FoundCostCfg::default_fab")]
     pub fab: i64,
+    /// M16a (plan C8; `founding::found_cost` prices it only with `contracts::on`).
+    #[serde(default = "FoundCostCfg::default_fixer")]
+    pub fixer: i64,
 }
 
 impl FoundCostCfg {
@@ -1328,6 +1465,9 @@ impl FoundCostCfg {
     }
     fn default_fab() -> i64 {
         900
+    }
+    fn default_fixer() -> i64 {
+        400
     }
 }
 
@@ -1372,6 +1512,9 @@ pub struct UpkeepCfg {
     pub lounge: i64,
     #[serde(default = "UpkeepCfg::default_fab")]
     pub fab: i64,
+    /// M16a (plan C8).
+    #[serde(default = "UpkeepCfg::default_fixer")]
+    pub fixer: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -1413,6 +1556,9 @@ impl UpkeepCfg {
     fn default_fab() -> i64 {
         15
     }
+    fn default_fixer() -> i64 {
+        8
+    }
 
     /// A building's daily upkeep; a Block's by its tier.
     pub fn for_building(&self, kind: BuildingKind, tier: u8) -> i64 {
@@ -1434,6 +1580,7 @@ impl UpkeepCfg {
             BuildingKind::Den => self.den,
             BuildingKind::Lounge => self.lounge,
             BuildingKind::Fab => self.fab,
+            BuildingKind::Fixer => self.fixer,
             _ => 0,
         }
     }
@@ -1471,6 +1618,9 @@ pub struct ValueCfg {
     pub lounge: i64,
     #[serde(default = "ValueCfg::default_fab")]
     pub fab: i64,
+    /// M16a (plan C8).
+    #[serde(default = "ValueCfg::default_fixer")]
+    pub fixer: i64,
 }
 
 impl ValueCfg {
@@ -1494,6 +1644,9 @@ impl ValueCfg {
     }
     fn default_fab() -> i64 {
         1500
+    }
+    fn default_fixer() -> i64 {
+        500
     }
 }
 
@@ -1656,6 +1809,7 @@ impl CorpsCfg {
                 den: 250,
                 lounge: 900,
                 fab: 900,
+                fixer: 400,
             },
             wholesale: 2,
             contract_per_guard_day: 10,
@@ -1682,6 +1836,7 @@ impl CorpsCfg {
                 den: 4,
                 lounge: 20,
                 fab: 15,
+                fixer: 8,
             },
             value: ValueCfg {
                 farm: 1000,
@@ -1698,6 +1853,7 @@ impl CorpsCfg {
                 den: 350,
                 lounge: 1400,
                 fab: 1500,
+                fixer: 500,
             },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
@@ -3238,6 +3394,8 @@ pub struct DeedTable {
     pub betrayed: f32,
     pub repaid: f32,
     pub poached: f32,
+    /// M16a (plan C21): the `Hired` deed (a missing key reads 0).
+    pub hired: f32,
 }
 
 impl DeedTable {
@@ -3259,12 +3417,13 @@ impl DeedTable {
             Deed::Betrayed => self.betrayed,
             Deed::Repaid => self.repaid,
             Deed::Poached => self.poached,
+            Deed::Hired => self.hired,
         }
     }
 
     /// The table from values in `Deed::ALL` order.
-    pub fn of(v: [f32; 15]) -> DeedTable {
-        let [killed, assaulted, robbed, extorted, stripped, arrested, married, evicted, struck, raided, founded, avenged, betrayed, repaid, poached] =
+    pub fn of(v: [f32; 16]) -> DeedTable {
+        let [killed, assaulted, robbed, extorted, stripped, arrested, married, evicted, struck, raided, founded, avenged, betrayed, repaid, poached, hired] =
             v;
         DeedTable {
             killed,
@@ -3282,6 +3441,7 @@ impl DeedTable {
             betrayed,
             repaid,
             poached,
+            hired,
         }
     }
 }
@@ -3341,9 +3501,9 @@ impl GossipCfg {
             rumour_cap: 8,
             rumour_cap_statistical: 3,
             relay_conf: 0.8,
-            reach0: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3]),
-            deed_sal: DeedTable::of([0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4]),
-            deed_sev: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1]),
+            reach0: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3, 0.3]),
+            deed_sal: DeedTable::of([0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4, 0.7]),
+            deed_sev: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1, 0.7]),
             legacy_second_hand: true,
             kin_cap: 12,
         }
@@ -3383,9 +3543,10 @@ impl Default for ReputationCfg {
 impl ReputationCfg {
     pub fn off() -> ReputationCfg {
         //                        kil  ass  rob   ext  str  arr  mar  evi   stk  rai  fou  ave  bet   rep  poa
-        let dread_w = DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0]);
-        let honour_w = DeedTable::of([0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1]);
-        let heat_w = DeedTable::of([0.5, 0.2, 0.2, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        let dread_w = DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0, 0.3]);
+        let honour_w =
+            DeedTable::of([0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1, -0.2]);
+        let heat_w = DeedTable::of([0.5, 0.2, 0.2, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4]);
         ReputationCfg {
             half_life_days: 7.0,
             hop_w: [1.0, 0.8, 0.6, 0.4],
@@ -4757,6 +4918,19 @@ impl Config {
         self.budget = BudgetCfg::off();
         self.export = ExportCfg::off();
         self.fviolence = FviolenceCfg::off();
+        // M16a (plan C3): contracts stand on L2's wages, venues, ledger and
+        // quotas, so `--l2-off` (and with it `v1_profile` and
+        // `calibration_city`) turns them off too.
+        self.contracts_off()
+    }
+
+    /// M16a (plan C3, C39): every M16a section `off()` (`--contracts-off`):
+    /// no Fixers, records, matching, missions or bounties.
+    pub fn contracts_off(mut self) -> Config {
+        self.contracts = ContractsCfg::off();
+        self.fixers = FixersCfg::off();
+        self.missions = MissionsCfg::off();
+        self.bounty = BountyCfg::off();
         self
     }
 
@@ -4802,5 +4976,270 @@ impl Config {
         }
         c.bar_owner_coins = (c.bar_owner_coins as f64 * f).round() as i64;
         self
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M16a contracts (docs/M16_CONTRACTS.md § 1-3; plan C3). Contract records,
+// Fixers, missions and bounties are game state between fictional agents:
+// records with a price and a deadline, matched by a score, resolved by a
+// seeded dice roll. Every section's `off()` carries the spec's values with
+// the master switch off; nothing here is read without `contracts::on`.
+// ---------------------------------------------------------------------------
+
+/// A value per 16a `ContractKind` (spec tables `price_base`,
+/// `deadline_days`); M16b appends its kinds' keys (serde default).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct KindTable<T> {
+    pub hit: T,
+    pub beat: T,
+    pub guard: T,
+    pub locate: T,
+}
+
+impl<T: Default + Copy> KindTable<T> {
+    pub fn get(&self, k: crate::contract::ContractKind) -> T {
+        use crate::contract::ContractKind;
+        match k {
+            ContractKind::Hit => self.hit,
+            ContractKind::Beat => self.beat,
+            ContractKind::Guard => self.guard,
+            ContractKind::Locate => self.locate,
+        }
+    }
+}
+
+/// `[contracts]` (spec § 1-2; plan keys C20).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContractsCfg {
+    /// The master switch (`--contracts-off`).
+    pub enabled: bool,
+    /// Open and taken records at once; a post past it is refused.
+    pub max_open: usize,
+    /// Closed records are dropped at midnight after this many days
+    /// (fulfilled Hits and Beats: `max(this, [law] accessory_days)`, C2).
+    pub closed_keep_days: u32,
+    /// C7: the base price per kind.
+    pub price_base: KindTable<i64>,
+    /// The deadline per kind, in days.
+    pub deadline_days: KindTable<u16>,
+    /// C7: `× (1 + risk_w × risk)`.
+    pub risk_w: f32,
+    /// C7: `× (1 + standing_w × standing)`.
+    pub standing_w: f32,
+    /// C16: failed attempts before `Failed`.
+    pub max_attempts: u8,
+    /// C12, C13: a taker accepts at this `accept_score`.
+    pub accept_min: f32,
+    /// C13: the Contract goal's flat (mode A).
+    pub contract_flat: f32,
+    /// C6: `renege_base × (1 − lawfulness) × (1 − honour)`.
+    pub renege_base: f32,
+    /// C6: the reneged taker's `Betrayed` grudge.
+    pub renege_grudge: f32,
+    /// C20: a Hunt holder with `might_gap` below this hires instead.
+    pub hire_gap: f32,
+    /// C33 (phase 3): a gang below this strength ratio hires a Hit.
+    pub hire_ratio: f32,
+    /// C33 (phase 3): an exec below this lawfulness posts a Beat instead of the bribe.
+    pub dirty_lobby: f32,
+    /// C33 (phase 3): the law's public Locate after this many days unseen.
+    pub law_bounty_days: u32,
+    /// C33 (phase 3): a captain below this lawfulness posts a Hit.
+    pub death_squad_lawfulness: f32,
+    /// C20 (plan key, placeholder): the hire pass's Hunt score without the
+    /// might term.
+    pub hire_min: f32,
+}
+
+impl Default for ContractsCfg {
+    fn default() -> Self {
+        ContractsCfg::off()
+    }
+}
+
+impl ContractsCfg {
+    pub fn off() -> ContractsCfg {
+        ContractsCfg {
+            enabled: false,
+            max_open: 256,
+            closed_keep_days: 30,
+            price_base: KindTable { hit: 400, beat: 120, guard: 25, locate: 20 },
+            deadline_days: KindTable { hit: 10, beat: 7, guard: 7, locate: 14 },
+            risk_w: 1.5,
+            standing_w: 1.0,
+            max_attempts: 2,
+            accept_min: 0.35,
+            contract_flat: 0.0,
+            renege_base: 0.3,
+            renege_grudge: 0.6,
+            hire_gap: -0.1,
+            hire_ratio: 0.7,
+            dirty_lobby: 0.3,
+            law_bounty_days: 3,
+            death_squad_lawfulness: 0.2,
+            hire_min: 0.3,
+        }
+    }
+}
+
+/// `[fixers] gun_lawfulness`: the illegal kinds' lawfulness ceilings (a
+/// missing kind reads 1.0; M16b appends its kinds).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GunLawfulnessCfg {
+    pub hit: f32,
+    pub beat: f32,
+}
+
+impl Default for GunLawfulnessCfg {
+    fn default() -> Self {
+        GunLawfulnessCfg { hit: 0.3, beat: 0.4 }
+    }
+}
+
+impl GunLawfulnessCfg {
+    pub fn get(&self, k: crate::contract::ContractKind) -> f32 {
+        use crate::contract::ContractKind;
+        match k {
+            ContractKind::Hit => self.hit,
+            ContractKind::Beat => self.beat,
+            ContractKind::Guard | ContractKind::Locate => 1.0,
+        }
+    }
+}
+
+/// `[fixers]` (spec § 2; plan keys C8, C13, C15, C20, C30).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FixersCfg {
+    /// C16: the Fixer's share of a settled brokered record.
+    pub fixer_cut: f32,
+    /// C8: a founder below this lawfulness may open a Fixer's office.
+    pub fixer_lawfulness: f32,
+    /// C8: … with `persuasion + knowledge` at least this.
+    pub fixer_skill: f32,
+    /// C10: a regular's stamp lasts this many days.
+    pub regular_days: u32,
+    /// C13: the gun gate's best skill.
+    pub gun_skill_min: f32,
+    pub gun_lawfulness: GunLawfulnessCfg,
+    /// C34 (phase 3): run orders a Fixer hands out a day.
+    pub run_offers_per_day: u8,
+    /// C12: the hour of the daily matching.
+    pub match_hour: u8,
+    /// C12: records a Fixer offers a day.
+    pub offers_per_day: u8,
+    /// C25 (phase 2): a squad's size.
+    pub crew_max: u8,
+    /// C8 (plan key, placeholder): open Fixers ≤ residents ÷ this, for NPC founding.
+    pub fixers_per_pop: u32,
+    /// C13 mode B (plan key, placeholder): the Network goal's flat.
+    pub network_flat: f32,
+    /// C13, C20 (plan key, placeholder): a Fixer within reach of a Home door.
+    pub hire_reach_tiles: u32,
+    /// C30 (plan key, placeholder, phase 3): a Fixer owner bribes at this score.
+    pub bribe_min: f32,
+    /// C15 (plan key, placeholder): a Guard taker's daily post, in hours.
+    pub guard_hours: u32,
+}
+
+impl Default for FixersCfg {
+    fn default() -> Self {
+        FixersCfg::off()
+    }
+}
+
+impl FixersCfg {
+    pub fn off() -> FixersCfg {
+        FixersCfg {
+            fixer_cut: 0.2,
+            fixer_lawfulness: 0.35,
+            fixer_skill: 0.8,
+            regular_days: 14,
+            gun_skill_min: 0.45,
+            gun_lawfulness: GunLawfulnessCfg::default(),
+            run_offers_per_day: 1,
+            match_hour: 18,
+            offers_per_day: 4,
+            crew_max: 4,
+            fixers_per_pop: 800,
+            network_flat: -0.1,
+            hire_reach_tiles: 64,
+            bribe_min: 0.5,
+            guard_hours: 8,
+        }
+    }
+}
+
+/// `[missions]` (spec § 3; plan key C23). Phase 1 reads `max_missions`,
+/// `squad_below`, `strike_k`, `ledger_death_p`, `ally_cap_n`; the rest are
+/// phase 2's.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MissionsCfg {
+    /// C17, C35: live records at once (the rest queue by price).
+    pub max_missions: usize,
+    /// C25: a solo estimate below this calls for a squad (phase 1 counts it).
+    pub squad_below: f32,
+    /// C24: `p_win = logistic(strike_k × (S_crew ÷ S_def − 1))`.
+    pub strike_k: f32,
+    pub loss_w: f32,
+    pub pol_w: f32,
+    pub hold_days: u8,
+    pub sell_premium: f32,
+    pub sell_regard: f32,
+    /// C18: a ledger loss below this `p_win` may cost the taker its life.
+    pub ledger_death_p: f32,
+    /// C23 (plan key, placeholder): allies expected at the target's door.
+    pub ally_cap_n: u8,
+}
+
+impl Default for MissionsCfg {
+    fn default() -> Self {
+        MissionsCfg::off()
+    }
+}
+
+impl MissionsCfg {
+    pub fn off() -> MissionsCfg {
+        MissionsCfg {
+            max_missions: 12,
+            squad_below: 0.6,
+            strike_k: 3.0,
+            loss_w: 0.5,
+            pol_w: 1.0,
+            hold_days: 2,
+            sell_premium: 1.5,
+            sell_regard: 0.0,
+            ledger_death_p: 0.15,
+            ally_cap_n: 3,
+        }
+    }
+}
+
+/// `[bounty]` (spec § 3; 16a's three keys, M16b appends the tag keys).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BountyCfg {
+    /// C27: coins per paid sighting.
+    pub per_sighting: i64,
+    /// C27: paid sightings per Locate record.
+    pub cap_sightings: u8,
+    /// C27: one paid sighting per this many hours.
+    pub min_gap_hours: u32,
+}
+
+impl Default for BountyCfg {
+    fn default() -> Self {
+        BountyCfg::off()
+    }
+}
+
+impl BountyCfg {
+    pub fn off() -> BountyCfg {
+        BountyCfg { per_sighting: 15, cap_sightings: 10, min_gap_hours: 6 }
     }
 }

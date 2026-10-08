@@ -37,10 +37,13 @@ pub enum Deed {
     Betrayed,
     Repaid,
     Poached,
+    /// M16a (plan C21): `actor` (the buyer) put a contract record on
+    /// `object` (the target); known first-hand to the record's `known_by`.
+    Hired,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 15] = [
+    pub const ALL: [Deed; 16] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -56,6 +59,7 @@ impl Deed {
         Deed::Betrayed,
         Deed::Repaid,
         Deed::Poached,
+        Deed::Hired,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -81,6 +85,7 @@ impl Deed {
             Deed::Betrayed => "betrayed",
             Deed::Repaid => "repaid",
             Deed::Poached => "poached",
+            Deed::Hired => "hired",
         }
     }
 
@@ -342,6 +347,9 @@ pub enum GrudgeCause {
     Evicted,
     Betrayed,
     Inherited(EntityId),
+    /// M16a (plan C21): the target's kin, friend, leader or comrade learned
+    /// that the holder's grudge target put a contract record on them.
+    Hired,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

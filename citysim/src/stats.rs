@@ -19,7 +19,8 @@ rumours_heard,second_hand_share,known_by_killers_median,distorted,grudges,grudge
 g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
 c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
 flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,\
-tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,flow_street_dice,ticks_per_sec";
+tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,flow_street_dice,\
+contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,accessory_unfounded,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
@@ -294,6 +295,10 @@ pub struct DayRow {
     /// L2 phase 3 (L34): the LOD budget's and the churn's columns.
     #[serde(default, skip_serializing_if = "BudgetCols::is_zero")]
     pub budget: BudgetCols,
+    /// M16a (plan C38): the contract records' columns (zero with
+    /// `[contracts]` off; created whole in phase 1, zeros until their phase).
+    #[serde(default, skip_serializing_if = "ContractCols::is_zero")]
+    pub contract: ContractCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -661,6 +666,115 @@ impl BudgetCols {
     }
 }
 
+/// M16a (plan C38): the contract records' CSV columns, in header order
+/// (counters of a game abstraction: records posted, taken, settled).
+/// `contracts_open`, `regulars`, `live_parties`, `live_queued`,
+/// `guards_on_take`, `escrow_held`, `escrow_leak`, `escrow_stuck` and the per-Fixer slots
+/// are day-end snapshots; the rest are daily counters (zero until their
+/// phase: `hits_squad`, `strikes_declined_pol`, `sold_out` phase 2;
+/// `contract_cleared`, `accessory*`, `interrogations*`, `guards_on_take`,
+/// `fixer_runs`, `f*_heat` phase 3; `live_queued` phase 4).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ContractCols {
+    pub contracts_open: u32,
+    pub contracts_posted: u32,
+    pub contracts_fulfilled: u32,
+    pub contracts_failed: u32,
+    pub contracts_expired: u32,
+    pub contracts_cancelled: u32,
+    pub reneged: u32,
+    /// Posted per kind (`ContractKind::ALL` order).
+    pub k_posted: [u32; 4],
+    /// Fulfilled per kind.
+    pub k_done: [u32; 4],
+    pub hits_done: u32,
+    pub hits_squad: u32,
+    /// Fulfilled-or-taken solo Hits whose solo estimate was below `squad_below`.
+    pub hits_solo_weak: u32,
+    pub strikes_declined_pol: u32,
+    pub sold_out: u32,
+    /// Hits fulfilled (live and ledger).
+    pub contract_murders: u32,
+    pub contract_cleared: u32,
+    pub contract_holes: u32,
+    pub contract_hole_wrong: u32,
+    pub accessory: u32,
+    pub accessory_unfounded: u32,
+    pub interrogations: u32,
+    pub interrogations_won: u32,
+    pub bounties_paid: u32,
+    pub guards_on_take: u32,
+    pub fixer_runs: u32,
+    pub regulars: u32,
+    pub live_parties: u32,
+    pub live_queued: u32,
+    pub escrow_held: i64,
+    pub escrow_leak: i64,
+    /// Review fix (probe): escrow held by closed records (must be 0).
+    pub escrow_stuck: i64,
+    /// Per Fixer slot (by building id).
+    pub f_heat: [f32; 4],
+    pub f_income: [i64; 4],
+    pub flow_escrow: i64,
+    pub flow_payout: i64,
+    pub flow_fixer_cut: i64,
+}
+
+impl ContractCols {
+    pub fn is_zero(&self) -> bool {
+        *self == ContractCols::default()
+    }
+
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        let mut out = format!(
+            "{},{},{},{},{},{},{}",
+            self.contracts_open,
+            self.contracts_posted,
+            self.contracts_fulfilled,
+            self.contracts_failed,
+            self.contracts_expired,
+            self.contracts_cancelled,
+            self.reneged,
+        );
+        for k in 0..4 {
+            out.push_str(&format!(",{},{}", self.k_posted[k], self.k_done[k]));
+        }
+        out.push_str(&format!(
+            ",{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
+            self.hits_done,
+            self.hits_squad,
+            self.hits_solo_weak,
+            self.strikes_declined_pol,
+            self.sold_out,
+            self.contract_murders,
+            self.contract_cleared,
+            self.contract_holes,
+            self.contract_hole_wrong,
+            self.accessory,
+            self.accessory_unfounded,
+            self.interrogations,
+            self.interrogations_won,
+            self.bounties_paid,
+            self.guards_on_take,
+            self.fixer_runs,
+            self.regulars,
+            self.live_parties,
+            self.live_queued,
+            self.escrow_held,
+            self.escrow_leak,
+            self.escrow_stuck,
+            self.f_heat.iter().map(|h| format!("{h:.3}")).collect::<Vec<_>>().join(","),
+        ));
+        for v in self.f_income {
+            out.push_str(&format!(",{v}"));
+        }
+        out.push_str(&format!(",{},{},{}", self.flow_escrow, self.flow_payout, self.flow_fixer_cut));
+        out
+    }
+}
+
 /// M14 V43: the plane's CSV columns, in header order. `nodes`, `labs`,
 /// `decks`, `cameras`, `ice_mean_corp`, `data_held` and the per-corp tiers
 /// and Data are day-end snapshots; the rest are daily counters (zero until
@@ -882,6 +996,7 @@ impl DayRow {
             word: WordCols::default(),
             living: LivingCols::default(),
             budget: BudgetCols::default(),
+            contract: ContractCols::default(),
             ticks_per_sec: 0.0,
         }
     }
@@ -901,7 +1016,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -1020,6 +1135,7 @@ impl DayRow {
             self.living.csv(),
             self.budget.csv(),
             self.living.flow_street_dice,
+            self.contract.csv(),
             self.ticks_per_sec,
         )
     }

@@ -36,7 +36,9 @@ pub fn deed_of_crime(crime: Crime) -> Option<Deed> {
         | Crime::Dealing
         | Crime::Abduction
         | Crime::Intrusion
-        | Crime::DataTheft => None,
+        | Crime::DataTheft
+        // M16a (plan C29).
+        | Crime::Conspiracy => None,
     }
 }
 
@@ -899,6 +901,8 @@ pub fn wants_sighting(world: &World, observer: EntityId, who: EntityId) -> bool 
         || world.enemies.get(&observer).is_some_and(|s| s.contains(&who))
         || crate::systems::law::wanted(world, who)
         || in_vendetta(world, observer, who)
+        // M16a (plan C27): the target of a Locate the observer sees.
+        || crate::systems::contracts::locate_wants(world, observer, who)
 }
 
 /// Is a faction of `a` in an open vendetta with a faction of `b` (gangs,
@@ -947,6 +951,8 @@ pub fn maybe_sight(world: &mut World, observer: EntityId, who: EntityId, at: Opt
         };
         relay_sighting(world, owner.unwrap_or(EntityId::NONE), s);
     }
+    // M16a (plan C27): a Locate pays for it.
+    crate::systems::contracts::on_sighting(world, observer, who, tile);
 }
 
 /// W12 relay (plan deviation): one relayed sighting per person in a
@@ -954,7 +960,7 @@ pub fn maybe_sight(world: &mut World, observer: EntityId, who: EntityId, at: Opt
 /// past `[db] db_cap` the oldest relayed one goes before any trace or
 /// camera sighting, so the eyes on the street never push M14's caught
 /// runners out of a 32-entry database.
-fn relay_sighting(world: &mut World, owner: EntityId, s: crate::virt::Sighting) {
+pub(crate) fn relay_sighting(world: &mut World, owner: EntityId, s: crate::virt::Sighting) {
     let cap = world.config.db.db_cap.max(1);
     let db = world.db.entry(owner).or_default();
     if let Some(i) = db.sightings.iter().position(|x| x.relayed && x.who == s.who) {

@@ -23,6 +23,9 @@ pub enum ViolenceSource {
     Vendetta,
     Riot,
     Episode,
+    /// M16a (plan C19): a ledger contract record's pre-bound hole (the
+    /// binder binds `Hole.faction`, the taker; never in `order_rates`).
+    Contract(crate::contract::ContractId),
 }
 
 /// The victim's class (`Watch`: public and private guards).

@@ -226,12 +226,13 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             return n;
         }
     }
-    // M15 W19/W35: the Hunt's and Guard the body's scripted plans.
-    if matches!(goal, GoalKind::Hunt | GoalKind::GuardBody) {
-        let plan = if goal == GoalKind::Hunt {
-            crate::systems::hunt::plan(world, id)
-        } else {
-            crate::systems::grudges::guard_body_plan(world, id)
+    // M15 W19/W35: the Hunt's and Guard the body's scripted plans; M16a
+    // (plan C13) the Contract goal's.
+    if matches!(goal, GoalKind::Hunt | GoalKind::GuardBody | GoalKind::Contract) {
+        let plan = match goal {
+            GoalKind::Hunt => crate::systems::hunt::plan(world, id),
+            GoalKind::Contract => crate::systems::contracts::plan(world, id),
+            _ => crate::systems::grudges::guard_body_plan(world, id),
         };
         match plan {
             Some(plan) => {
