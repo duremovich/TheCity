@@ -140,6 +140,9 @@ pub enum PlayerCommand {
     // --- M12 levers (docs/M12_DISTRICTS.md § 7, plan D42) ---
     /// The city's Sanitation headcount (`0..=60`).
     SetSanitation(u8),
+    /// Jobs v2 J17 (P5a): release a `SetGuardCount`/`SetSanitation` pin back
+    /// to the civic budget (CLI `civic=auto`; with `no_safety_net` only).
+    SetCivicAuto,
     /// A district's sweeper weight multiplier (`0.0..=5.0`; 0 sends no sweepers).
     SetSanitationWeight {
         district: crate::components::DistrictId,
@@ -707,6 +710,10 @@ impl World {
             }
             PlayerCommand::SetGuardCount(n) => {
                 self.levers.guard_count = (*n).min(60);
+                // Jobs v2 J17: a set headcount pins against the civic budget.
+                if crate::systems::treasury::on(self) {
+                    self.econ.civic_pinned = true;
+                }
                 self.push_event(
                     EventKind::PlayerAction,
                     &[],
@@ -794,8 +801,24 @@ impl World {
             }
             PlayerCommand::SetSanitation(n) => {
                 self.levers.sanitation_count = (*n).min(60);
+                // Jobs v2 J17: a set headcount pins against the civic budget.
+                if crate::systems::treasury::on(self) {
+                    self.econ.civic_pinned = true;
+                }
                 let text = format!("Sanitation headcount set to {}", self.levers.sanitation_count);
                 self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetCivicAuto => {
+                let text = if crate::systems::treasury::on(self) {
+                    self.econ.civic_pinned = false;
+                    Ok(format!(
+                        "Civic headcounts released to the budget (now {} guards, {} sweepers)",
+                        self.levers.guard_count, self.levers.sanitation_count
+                    ))
+                } else {
+                    Err("SetCivicAuto: no civic budget (no_safety_net is off)".to_string())
+                };
+                self.lever_result(text);
             }
             PlayerCommand::SetSanitationWeight { district, weight } => {
                 let i = district.index();

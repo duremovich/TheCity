@@ -5324,6 +5324,22 @@ pub struct TreasuryCfg {
     /// Phase 3a (plan key, the transition wave): what the Recycler's till
     /// pays a scavenger's find with `no_net` (0: `[life] scavenge_coins`).
     pub scrap_coins: i64,
+    /// Jobs v2 J16 (P5a, `no_net` only): the civic budget's share of the
+    /// trailing receipts (`Flow::{Tax, Fine, Customs, Property}`).
+    pub civic_share: f32,
+    /// J16: days over which the hoard above `band[1]` is paid out.
+    pub payout_days: u32,
+    /// J16: days of receipts the budget averages.
+    pub receipts_days: u32,
+    /// J16: the police ceiling per 1,000 residents.
+    pub police_per_1000: f32,
+    /// J16: the Sanitation ceiling.
+    pub sanitation_max: u8,
+    /// J16: a headcount never drops more than this a day (the reconcilers' pace).
+    pub civic_pace: u8,
+    /// P5a (risk 8): police per Jail bed, the ceiling's cap by Jail room
+    /// (`treasury::police_ceiling`).
+    pub police_per_jail_bed: f32,
 }
 
 impl Default for TreasuryCfg {
@@ -5337,6 +5353,13 @@ impl Default for TreasuryCfg {
             band: [8_000, 25_000],
             tax_initial: -1.0,
             scrap_coins: 0,
+            civic_share: 0.8,
+            payout_days: 60,
+            receipts_days: 14,
+            police_per_1000: 35.0,
+            sanitation_max: 50,
+            civic_pace: 5,
+            police_per_jail_bed: 0.25,
         }
     }
 }

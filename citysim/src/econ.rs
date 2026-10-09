@@ -135,6 +135,13 @@ pub struct EconState {
     /// kept inside the milestone's state so the save skips it with the rest.
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub vacancy_since: BTreeMap<(EntityId, Role), Tick>,
+    /// Jobs v2 J17 (P5a): a god's `SetGuardCount`/`SetSanitation` pins both
+    /// civic headcounts against the budget; `SetCivicAuto` releases them.
+    pub civic_pinned: bool,
+    /// Jobs v2 J16 (P5a): the Treasury's receipts per day (`Flow::{Tax, Fine,
+    /// Customs, Property}`), the last `[treasury] receipts_days`, newest last.
+    #[serde(skip_serializing_if = "VecDeque::is_empty")]
+    pub receipts: VecDeque<i64>,
 }
 
 impl EconState {

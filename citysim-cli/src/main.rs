@@ -1039,6 +1039,8 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         "tax" => PlayerCommand::SetTaxRate(num("rate")? as f32),
         "sentence_mult" => PlayerCommand::SetSentenceMult(num("multiplier")? as f32),
         "guard_count" => PlayerCommand::SetGuardCount(num("count")? as u8),
+        // Jobs v2 J17 (P5a): `civic=auto` releases a guard/Sanitation pin to the budget.
+        "civic" if value.eq_ignore_ascii_case("auto") => PlayerCommand::SetCivicAuto,
         "immigration_per_week" => PlayerCommand::SetImmigrationPerWeek(num("count")? as u8),
         "dole_per_day" => PlayerCommand::SetDolePerDay(num("coins")? as u8),
         "law_posture" => PlayerCommand::SetLawPosture(match value.to_ascii_lowercase().as_str() {
