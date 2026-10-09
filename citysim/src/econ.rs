@@ -13,7 +13,9 @@ use std::collections::{BTreeMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
+use crate::components::Role;
 use crate::entity::EntityId;
+use crate::time::Tick;
 
 /// Days of the World's per-good rings (`WorldBook.{bought, sold, paid, charged, caps}`).
 pub const BOOK_DAYS: usize = 30;
@@ -128,6 +130,12 @@ pub struct EconState {
     /// E47 `SetCustoms`: a god's customs rate over `[world_market] customs_rate`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub customs_pin: Option<f32>,
+    /// E17 (phase 2): when each open `(building, role)` vacancy was first
+    /// seen standing (`wages::daily` keeps it against `world.vacancies`);
+    /// one unfilled `shortage_days` is a shortage. Plan: a `World` field;
+    /// kept inside the milestone's state so the save skips it with the rest.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub vacancy_since: BTreeMap<(EntityId, Role), Tick>,
 }
 
 impl EconState {

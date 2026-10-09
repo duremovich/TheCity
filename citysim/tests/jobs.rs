@@ -117,7 +117,12 @@ fn market_staffing(w: &World) -> Vec<usize> {
 /// (a hunkering corp's to 6); with L2 off a Market keeps its 4.
 #[test]
 fn test_market_staff_tops_up_to_12_only_with_jobs_on() {
-    let mut on = World::new(42, Config::load());
+    // Real economy phase 2 (plan E18): with wages on a corp's Markets are
+    // staffed by the margin rule (`wages::staff`), not the top-up; L2's
+    // rule is read with that switch off.
+    let mut cfg = Config::load();
+    cfg.economy2.wages = false;
+    let mut on = World::new(42, cfg);
     on.run_ticks(TICKS_PER_DAY + 1);
     let hunker = |w: &World, m: EntityId| {
         w.owner_of(m).and_then(|o| w.comp::<citysim::Corp>(o)).is_some_and(|c| c.order == citysim::CorpOrder::Hunker)

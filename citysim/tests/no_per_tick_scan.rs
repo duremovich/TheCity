@@ -66,6 +66,8 @@ const FILES: &[&str] = &[
     // The Real economy phase 3b/3c.
     "systems/charity.rs",
     "systems/camp.rs",
+    // The Real economy phase 2 (the wage and staffing passes from `living::run`).
+    "systems/wages.rs",
 ];
 
 #[test]

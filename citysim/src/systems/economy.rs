@@ -207,6 +207,13 @@ fn daily_price(world: &mut World) {
             price * 10
         };
         let mut price = price;
+        // Real economy phase 2 (plan E12): the owner's unit cost floors the
+        // shelf (`wholesale + ceil(input_per_food)`: a Market never sells
+        // under its own inputs), wages on only.
+        if let Some(floor) = price_floor(world) {
+            price = price.max(floor).min(cap);
+            tenths = tenths.max(floor * 10).min(cap * 10);
+        }
         // Real economy (plan E12): while the World sells, the shelf cannot
         // pass the ask plus the haul margin (a Market imports past it, E11).
         if let Some(ceiling) = price_ceiling(world) {
@@ -238,6 +245,17 @@ fn daily_price(world: &mut World) {
             );
         }
     }
+}
+
+/// Real economy phase 2 (plan E12): the shelf's floor, the owner's unit
+/// cost `[corps] wholesale + ceil(input_per_food)`, with the market and
+/// wages on; `None` otherwise.
+pub fn price_floor(world: &World) -> Option<i64> {
+    if !crate::systems::world_market::on(world) || !crate::systems::wages::on(world) {
+        return None;
+    }
+    let inputs = world.config.economy2.input_per_food.max(0.0).ceil() as i64;
+    Some((world.config.corps.wholesale + inputs).max(1))
 }
 
 /// Real economy (plan E12): the shelf's ceiling, `ask(Food) + haul_margin`,
@@ -305,12 +323,16 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
     // a shift that starts a few ticks late loses a few ticks, not an hour.
     let hours = ticks as f32 / time::TICKS_PER_HOUR as f32;
     let cap = world.config.buildings.farm.stock_cap;
-    if let Some(b) = world.comp_mut::<Building>(farm) {
-        b.production_accum += per_hour * hours;
-        let whole = b.production_accum.floor();
-        b.production_accum -= whole;
-        b.stock_food = (b.stock_food + whole as u32).min(cap);
-    }
+    let Some(b) = world.comp_mut::<Building>(farm) else { return };
+    b.production_accum += per_hour * hours;
+    let whole = b.production_accum.floor();
+    b.production_accum -= whole;
+    let added = (whole as u32).min(cap.saturating_sub(b.stock_food));
+    b.stock_food += added;
+    // Real economy phase 2 (plan E13): inputs to the World per unit that
+    // entered the stock (a full Farm's lost unit buys nothing).
+    let per = world.config.economy2.input_per_food;
+    crate::systems::wages::produce_inputs(world, farm, added, per);
 }
 
 /// Move `min(haul_batch, stock)` food from a farm to its owner's nearest
@@ -594,7 +616,17 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     let payer = job.employer.and_then(|e| world.owner_of(e));
     // D22: a Food corp in Squeeze pays 0.9.
     // M15 W29: a poached hire's premium multiplies too.
-    let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| c.wage_mult) * job.premium * scale;
+    // Real economy phase 2 (plan E15): × the revenue rule's `wage_rev`
+    // (read only with wages on: 1.0 otherwise, the product exact).
+    let wages_on = crate::systems::wages::on(world);
+    let mult = payer.and_then(|p| world.comp::<Corp>(p)).map_or(1.0, |c| {
+        if wages_on {
+            c.wage_mult * c.wage_rev
+        } else {
+            c.wage_mult
+        }
+    }) * job.premium
+        * scale;
     let per_day = if mult == 1.0 { job.wage_per_day } else { (job.wage_per_day as f32 * mult).round() as i64 };
     let due = per_day * i64::from(job.days_unpaid);
     let available = world.purse(payer).max(0);
@@ -616,6 +648,8 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     };
     let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
+    // Real economy phase 2 (plan E16): the gross is the corp's payroll.
+    ownership::note_payroll(world, payer, gross);
     // L2 fix round: the first wage marks the job paid (`gang::desist` reads it).
     if paid > 0 {
         if let Some(j) = world.comp_mut::<Job>(agent).filter(|j| !j.paid_once) {
@@ -679,12 +713,36 @@ pub fn maybe_quit(world: &mut World, agent: EntityId) {
 /// cleared, a running Use is settled, and the Job (with its `duty_ticks`)
 /// goes. `Fire` event with `text`, the building in slot 1 when given.
 pub fn dismiss(world: &mut World, agent: EntityId, building: Option<EntityId>, text: String) -> Option<Job> {
+    dismiss_as(world, agent, building, text, EventKind::Fire)
+}
+
+/// `dismiss` logged as `kind` (Real economy phase 2, plan E44: a layoff on
+/// the revenue rule is a `LaidOff` event, its Life row the `Fired` one).
+pub fn dismiss_as(
+    world: &mut World,
+    agent: EntityId,
+    building: Option<EntityId>,
+    text: String,
+    kind: EventKind,
+) -> Option<Job> {
     world.abort_plan(agent);
     let job = world.remove::<Job>(agent)?;
     let mut actors = vec![agent];
     actors.extend(building);
-    world.push_event(EventKind::Fire, &actors, text);
+    world.push_event(kind, &actors, text);
     Some(job)
+}
+
+/// Take the newest posting of `role` back off `employer`'s vacancies.
+fn withdraw_vacancy(world: &mut World, employer: EntityId, role: crate::components::Role) {
+    if let Some(v) = world.vacancies.get_mut(&employer) {
+        if let Some(i) = v.iter().rposition(|&r| r == role) {
+            v.remove(i);
+        }
+        if v.is_empty() {
+            world.vacancies.remove(&employer);
+        }
+    }
 }
 
 /// Remove the Job (posting a vacancy), drop the plan, log the event.
@@ -697,14 +755,16 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     if reason == "unpaid" && crate::systems::jobs::on(world) {
         if let Some(e) = job.employer {
             if world.purse(world.owner_of(e)) < job.wage_per_day {
-                if let Some(v) = world.vacancies.get_mut(&e) {
-                    if let Some(i) = v.iter().rposition(|&r| r == job.role) {
-                        v.remove(i);
-                    }
-                    if v.is_empty() {
-                        world.vacancies.remove(&e);
-                    }
-                }
+                withdraw_vacancy(world, e, job.role);
+            }
+        }
+    }
+    // Real economy phase 2 (plan E18): a corp over `fire_above × P*`
+    // replaces no quitter.
+    if crate::systems::wages::on(world) {
+        if let Some(e) = job.employer {
+            if world.corp_of_building(e).is_some_and(|c| crate::systems::wages::over_margin(world, c)) {
+                withdraw_vacancy(world, e, job.role);
             }
         }
     }

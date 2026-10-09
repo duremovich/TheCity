@@ -269,10 +269,15 @@ pub enum EventKind {
     CampRaised,
     /// `[camp, owner or NONE]`: the law closed a camp that could not feed.
     CampClosed,
+    // --- The Real economy phase 2 (plan E44; amber): wages from revenue.
+    /// `[corp]`: a corp's `wage_rev` crossed a 0.1 step.
+    WageMoved,
+    /// `[agent, building]`: the revenue rule let the newest hire go.
+    LaidOff,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 136] = [
+    pub const ALL: [EventKind; 138] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -409,6 +414,8 @@ impl EventKind {
         EventKind::ChildTaken,
         EventKind::CampRaised,
         EventKind::CampClosed,
+        EventKind::WageMoved,
+        EventKind::LaidOff,
     ];
 }
 
@@ -490,6 +497,8 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         (E::Death, 1) => row(LifeKind::Widowed),
         (E::Hire, 0) => row(LifeKind::Hired),
         (E::Fire, 0) => row(LifeKind::Fired),
+        // Real economy phase 2 (plan E44): a layoff on the revenue rule.
+        (E::LaidOff, 0) => row(LifeKind::Fired),
         (E::Quit, 0) => row(LifeKind::Quit),
         (E::Starving, 0) => row(LifeKind::Starving),
         (E::Theft, 0) => row(LifeKind::Stole),

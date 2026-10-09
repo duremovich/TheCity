@@ -169,6 +169,12 @@ pub fn sell(
     if owner.is_some() && tax > 0 {
         ownership::pay(world, owner, None, tax, Flow::Tax);
     }
+    // Phase 2 (plan E16): an export is a corp's revenue, net of its tax.
+    if crate::systems::wages::on(world) {
+        if let Some(c) = owner.and_then(|o| world.comp_mut::<crate::components::Corp>(o)) {
+            c.rev_today += moved - tax;
+        }
+    }
     if let Some(b) = building {
         ownership::credit(world, b, moved);
     }
@@ -179,6 +185,79 @@ pub fn sell(
     *world.outside.export.sold.entry(good).or_default() += u64::from(units);
     *world.outside.export.paid.entry(good).or_default() += moved;
     (units, moved)
+}
+
+/// E10: `b`'s Parts above `floor` to the World, the units the bid holds at
+/// `min_price` (a Fab keeps the rest for the city's `parts_market`).
+fn sell_parts_above(world: &mut World, b: EntityId, floor: u32, min_price: f64) -> u32 {
+    let have = world.stock(b, Good::Parts).saturating_sub(floor);
+    if have == 0 {
+        return 0;
+    }
+    let from = book(world, ExportGood::Parts).map_or(0, |bk| bk.bought_today);
+    let (room, _) = quote(world, ExportGood::Parts, have);
+    let units = units_at_least(world, ExportGood::Parts, from, room, min_price);
+    if units == 0 {
+        return 0;
+    }
+    let owner = world.owner_of(b);
+    let (n, _) = sell(world, Some(b), owner, ExportGood::Parts, units);
+    world.take_stock(b, Good::Parts, n);
+    n
+}
+
+/// E10 (phase 2, wages on): the Clinics' and Garages' Parts-equivalents,
+/// ascending id: their Parts above `[assets] parts_floor` at the Parts bid
+/// (the city's `parts_price` held, as a Fab), then the chrome and decks in
+/// their stock beyond `[world_market] asset_floor` per kind, each sold as
+/// `[assets] parts_per[kind]` Parts at the bid and despawned (the owner's
+/// own, in condition, the lowest ids kept).
+fn parts_equivalents(world: &mut World) {
+    use crate::components::{Asset, AssetKind, AssetLoc};
+    if !crate::systems::wages::on(world) {
+        return;
+    }
+    let floor = world.config.assets.parts_floor;
+    let asset_floor = world.config.world_market.asset_floor as usize;
+    let parts_price = world.config.assets.parts_price.max(0) as f64;
+    let mut sellers: Vec<EntityId> = world
+        .buildings_of_kind(BuildingKind::Clinic)
+        .iter()
+        .chain(world.buildings_of_kind(BuildingKind::Garage))
+        .copied()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
+        .collect();
+    sellers.sort_unstable();
+    for b in sellers {
+        sell_parts_above(world, b, floor, parts_price);
+        let owner = world.owner_of(b);
+        let mut by_kind: std::collections::BTreeMap<AssetKind, Vec<EntityId>> = Default::default();
+        for &a in crate::systems::assets::assets_at(world, b) {
+            let Some(x) = world.comp::<Asset>(a) else { continue };
+            let chrome_or_deck = x.kind.is_implant() || x.kind == AssetKind::Deck;
+            if chrome_or_deck && x.loc == AssetLoc::Stock(b) && x.condition > 0 && !x.bricked && x.owner == owner {
+                by_kind.entry(x.kind).or_default().push(a);
+            }
+        }
+        for (kind, mut list) in by_kind {
+            list.sort_unstable();
+            let per = *world.config.assets.parts_per.get(kind);
+            if per == 0 {
+                continue;
+            }
+            for a in list.into_iter().skip(asset_floor) {
+                let (room, _) = quote(world, ExportGood::Parts, per);
+                if room < per {
+                    break;
+                }
+                let (n, _) = sell(world, Some(b), owner, ExportGood::Parts, per);
+                if n < per {
+                    break;
+                }
+                crate::systems::assets::despawn(world, a);
+            }
+        }
+    }
 }
 
 /// E11: the ask, `round_up(bid_ref × market × (1 + spread) × ask_mult × the good's ask_mult)`.
@@ -334,26 +413,18 @@ pub fn daily(world: &mut World) {
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
         .collect();
     sellers.sort_unstable();
-    // Real economy phase 3c (E10, E40): the work camps' Parts, after the Fabs
-    // and before the Recycler (none stands with `[camp]` off).
-    sellers.extend(crate::systems::camp::standing_camps(world));
-    if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
-        sellers.push(r);
-    }
     for b in sellers {
-        let have = world.stock(b, Good::Parts).saturating_sub(parts_floor);
-        if have == 0 {
-            continue;
-        }
-        let from = book(world, ExportGood::Parts).map_or(0, |bk| bk.bought_today);
-        let (room, _) = quote(world, ExportGood::Parts, have);
-        let units = units_at_least(world, ExportGood::Parts, from, room, parts_price);
-        if units == 0 {
-            continue;
-        }
-        let owner = world.owner_of(b);
-        let (n, _) = sell(world, Some(b), owner, ExportGood::Parts, units);
-        world.take_stock(b, Good::Parts, n);
+        sell_parts_above(world, b, parts_floor, parts_price);
+    }
+    // Phase 2 (E10): the Clinics' and Garages' Parts-equivalents.
+    parts_equivalents(world);
+    // Real economy phase 3c (E10, E40): the work camps' Parts, before the
+    // Recycler (none stands with `[camp]` off), as a Fab's.
+    for c in crate::systems::camp::standing_camps(world) {
+        sell_parts_above(world, c, parts_floor, parts_price);
+    }
+    if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
+        sell_parts_above(world, r, parts_floor, parts_price);
     }
     // 5. Data (E10): Labs' stores above `[export] data_floor`, from the fullest track (L2's leg).
     let data_floor = world.config.export.data_floor;

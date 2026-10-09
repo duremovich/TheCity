@@ -374,12 +374,23 @@ fn test_daily_ownership_pass_conserves_coins() {
     w.run_ticks(3 * TICKS_PER_DAY);
     assert_eq!(w.tick_of_day(), 0);
     let before = ownership::total_coins(&w);
+    let ident = citysim::systems::econ::identity(&w);
     let rent0 = w.stats.current.rent_paid;
-    let upkeep0 = w.stats.current.flow_upkeep;
+    let upkeep0 = w.stats.current.flow_upkeep + w.stats.current.econ.flow_property;
     ownership::run(&mut w);
     assert!(w.stats.current.rent_paid > rent0, "rent moved");
-    assert!(w.stats.current.flow_upkeep > upkeep0, "upkeep moved");
-    assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+    // Real economy phase 2 (plan E13): with wages on the property rate
+    // stands where upkeep stood, and the daily power crosses out to the
+    // World, so the conserved quantity is the identity.
+    assert!(
+        w.stats.current.flow_upkeep + w.stats.current.econ.flow_property > upkeep0,
+        "upkeep or the property rate moved"
+    );
+    if citysim::systems::wages::on(&w) {
+        assert_eq!(citysim::systems::econ::identity(&w), ident, "the identity unchanged");
+    } else {
+        assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+    }
 }
 
 #[test]

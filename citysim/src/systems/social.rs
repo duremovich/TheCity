@@ -755,6 +755,8 @@ pub fn repay_debts(world: &mut World, id: EntityId) {
         }
         if let Some(w) = world.comp_mut::<crate::components::Wallet>(creditor) {
             w.coins += pay;
+            // Real economy phase 2 (plan E45): a repaid loan is the lender's inflow.
+            crate::systems::wages::note_inflow_raw(world, pay);
         }
         let (lo, _) = crate::components::edge_key(id, creditor);
         let e = world.edge_entry(id, creditor);

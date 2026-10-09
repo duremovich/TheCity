@@ -187,6 +187,9 @@ pub fn produce(world: &mut World) {
         let added = units.min(cfg.store_cap.saturating_sub(*slot));
         *slot += added;
         world.stats.current.virt.data_made += added;
+        // Real economy phase 2 (plan E13): inputs to the World per Data unit made.
+        let per = world.config.economy2.input_per_data;
+        crate::systems::wages::produce_inputs(world, lab, added, per);
     }
 }
 

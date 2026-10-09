@@ -331,7 +331,11 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
             HoleKind::Robbed | HoleKind::Abducted => {
                 world.probe.loot_bound += hole.loot;
                 match world.comp_mut::<Wallet>(actor) {
-                    Some(w) => w.coins += hole.loot,
+                    Some(w) => {
+                        w.coins += hole.loot;
+                        // Real economy phase 2 (plan E45): a robbery take is a wallet inflow.
+                        crate::systems::wages::note_inflow_raw(world, hole.loot);
+                    }
                     // Real economy (plan E25): an actor killed since the
                     // day has no Wallet; the loot is unclaimed property
                     // (lost at EC_BASE).

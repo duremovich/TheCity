@@ -21,6 +21,52 @@ fn config() -> Config {
     cfg
 }
 
+/// Phase 2 (plan E13, E40): with wages on a camp's Parts pay `input_per_part`
+/// to the World as a Fab's do (the camp is no mint); the identity holds.
+#[test]
+fn test_camp_parts_pay_inputs_with_wages_on() {
+    let mut cfg = config();
+    cfg.economy2.wages = true;
+    let mut w = World::new(42, cfg);
+    assert!(citysim::systems::wages::on(&w));
+    let city = city_camp(&w);
+    for k in children(&mut w, 6) {
+        if let Some(i) = w.comp_mut::<Identity>(k) {
+            i.age_days = 12 * citysim::time::DAYS_PER_YEAR as u32;
+        }
+        if let Some(k2) = w.comp_mut::<Child>(k) {
+            k2.hunger_days = 2;
+        }
+        assert_eq!(camp::take(&mut w, k), Some(city));
+    }
+    let per = w.config.economy2.input_per_part;
+    let (ident, inputs0, world0) = (
+        identity(&w),
+        w.stats.current.econ.flow_inputs,
+        w.outside.faction(citysim::outside::WORLD_ACCOUNT).map_or(0, |f| f.treasury),
+    );
+    let mut made = 0;
+    for _ in 0..12 {
+        let before = w.stock(city, Good::Parts);
+        camp::daily(&mut w);
+        made += w.stock(city, Good::Parts).saturating_sub(before);
+        if made >= 2 {
+            break;
+        }
+    }
+    assert!(made >= 1, "Parts made in the shifts");
+    let expect = (made as f32 * per).floor() as i64;
+    let paid = w.stats.current.econ.flow_inputs - inputs0;
+    assert!(paid >= expect - 1 && paid <= expect + 1, "inputs {paid} for {made} Parts × {per} (expected ~{expect})");
+    assert_eq!(
+        w.outside.faction(citysim::outside::WORLD_ACCOUNT).map_or(0, |f| f.treasury) - world0,
+        paid,
+        "crossed out to the World"
+    );
+    assert_eq!(identity(&w), ident, "the identity holds");
+    assert!(w.comp::<Building>(city).is_some_and(|b| b.input_accum < 1.0), "the fraction carried");
+}
+
 fn world() -> World {
     World::new(42, config())
 }

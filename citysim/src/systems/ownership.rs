@@ -234,6 +234,11 @@ pub enum Flow {
     /// Real economy E39: the city Camp's restock, Treasury -> Market owner
     /// (untaxed; the Jail meal's shape).
     CampFood,
+    // --- Phase 2 (plan E13).
+    /// E13: the property rate, a non-city owner -> Treasury (untaxed; replaces `Upkeep` with wages on).
+    Property,
+    /// E13: production inputs and daily power, a producer (any owner) -> the World (untaxed).
+    Inputs,
 }
 
 impl Flow {
@@ -328,6 +333,8 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Donate => row.econ.flow_donate += coins,
         Flow::Alms => row.econ.flow_alms += coins,
         Flow::CampFood => row.econ.flow_camp_food += coins,
+        Flow::Property => row.econ.flow_property += coins,
+        Flow::Inputs => row.econ.flow_inputs += coins,
     }
 }
 
@@ -422,7 +429,34 @@ fn transfer(
         uncount_cashflow(world, from, moved);
         uncount_cashflow(world, to, -(moved - tax));
     }
+    // Real economy phase 2 (plan E16, E45): a corp payee's revenue window
+    // (net of the withheld tax; capital flows never count), and the
+    // population's other inflows (wages on only).
+    if crate::systems::wages::on(world) {
+        note_revenue(world, to, flow, moved - tax);
+        crate::systems::wages::note_inflow(world, to, flow, moved - tax);
+    }
     moved
+}
+
+/// Plan E16: a taxed flow reaching a corp is revenue (`Corp.rev_today`).
+fn note_revenue(world: &mut World, to: Option<EntityId>, flow: Flow, net: i64) {
+    if !flow.taxed() || net <= 0 {
+        return;
+    }
+    if let Some(c) = to.and_then(|o| world.comp_mut::<Corp>(o)) {
+        c.rev_today += net;
+    }
+}
+
+/// Plan E16: a corp's gross payroll today (`Corp.pay_today`, wages on only).
+pub fn note_payroll(world: &mut World, payer: Option<EntityId>, gross: i64) {
+    if gross <= 0 || !crate::systems::wages::on(world) {
+        return;
+    }
+    if let Some(c) = payer.and_then(|o| world.comp_mut::<Corp>(o)) {
+        c.pay_today += gross;
+    }
 }
 
 /// Take a capital transfer back out of a corp's `cashflow_today`.
@@ -647,6 +681,10 @@ pub fn escrow_out(
     }
     if flow.capital() {
         uncount_cashflow(world, to, -(moved - tax));
+    }
+    if crate::systems::wages::on(world) {
+        note_revenue(world, to, flow, moved - tax);
+        crate::systems::wages::note_inflow(world, to, flow, moved - tax);
     }
     moved
 }
@@ -1557,6 +1595,12 @@ fn rehouse(world: &mut World) {
 
 /// D4: every non-city owner pays its buildings' upkeep to the Treasury.
 fn upkeep(world: &mut World) {
+    // Real economy phase 2 (plan E13): with wages on the property rate and
+    // the daily power replace `[corps] upkeep` and the band's `upkeep_mult`.
+    if crate::systems::wages::on(world) {
+        crate::systems::wages::upkeep(world);
+        return;
+    }
     let up = world.config.corps.upkeep.clone();
     for b in world.with::<Building>() {
         let Some((kind, tier, owner)) =
@@ -1602,7 +1646,9 @@ fn exec_wages(world: &mut World) {
             }
         };
         if let Some(e) = exec {
-            pay(world, Some(c), Some(e), wage, Flow::ExecWage);
+            let paid = pay(world, Some(c), Some(e), wage, Flow::ExecWage);
+            // Real economy phase 2 (plan E16): the exec's wage is payroll.
+            note_payroll(world, Some(c), paid);
         }
     }
 }
@@ -1683,6 +1729,7 @@ fn rolls(world: &mut World) {
     }
     let now = world.tick;
     let horizon = now.saturating_sub(LOSS_DAYS * TICKS_PER_DAY);
+    let wages = crate::systems::wages::on(world);
     for c in world.corps() {
         let Some(cc) = world.comp_mut::<Corp>(c) else { continue };
         let today = std::mem::take(&mut cc.cashflow_today);
@@ -1694,6 +1741,21 @@ fn rolls(world: &mut World) {
         }
         while cc.cashflow.len() > CASHFLOW_DAYS {
             cc.cashflow.pop_front();
+        }
+        // Real economy phase 2 (plan E16): the revenue and payroll windows
+        // (wages on only, so a save and these rolls are untouched off).
+        if wages {
+            let (r, p) = (std::mem::take(&mut cc.rev_today), std::mem::take(&mut cc.pay_today));
+            if now > 0 {
+                cc.rev.push_back(r);
+                cc.pay.push_back(p);
+            }
+            while cc.rev.len() > crate::systems::wages::WINDOW_DAYS {
+                cc.rev.pop_front();
+            }
+            while cc.pay.len() > crate::systems::wages::WINDOW_DAYS {
+                cc.pay.pop_front();
+            }
         }
         // In the red at the close, before the upkeep lump (phase 5; was
         // after it, the intra-day trough). A corp at exactly 0 that took in
