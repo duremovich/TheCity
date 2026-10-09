@@ -274,10 +274,13 @@ pub enum EventKind {
     WageMoved,
     /// `[agent, building]`: the revenue rule let the newest hire go.
     LaidOff,
+    // --- The Real economy phase 3a (plan E21, E44; amber).
+    /// `[]`: the Treasury's tax band moved the tax rate a step.
+    TaxMoved,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 138] = [
+    pub const ALL: [EventKind; 139] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -416,6 +419,7 @@ impl EventKind {
         EventKind::CampClosed,
         EventKind::WageMoved,
         EventKind::LaidOff,
+        EventKind::TaxMoved,
     ];
 }
 

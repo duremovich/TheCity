@@ -134,7 +134,8 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::CampRaised
         | EventKind::CampClosed
         | EventKind::WageMoved
-        | EventKind::LaidOff => AMBER,
+        | EventKind::LaidOff
+        | EventKind::TaxMoved => AMBER,
         _ => Color32::LIGHT_GRAY,
     }
 }

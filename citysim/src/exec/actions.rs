@@ -1494,7 +1494,8 @@ pub fn end_shift(world: &mut World, id: EntityId) {
 }
 
 /// L1 `Scavenge`: `[life] scavenge_coins` from the Treasury (the Recycler's
-/// scrap price, `Flow::Sanitation`) when it is not negative.
+/// scrap price, `Flow::Sanitation`) when it is not negative; with `no_net`
+/// from the Recycler's till (E33).
 fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     use rand::Rng;
     // An hour turns up something worth selling on `scavenge_p` of tries
@@ -1503,8 +1504,20 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     // same draw on the same stream).
     let p = crate::systems::jobs::scavenge_p(world, id);
     let found = world.rng.agent(id).random::<f32>() < p;
-    let treasury = world.treasury().map_or(0, |t| t.coins);
-    let pay = world.config.life.scavenge_coins.min(treasury.max(0));
+    // Real economy E33 (phase 3a): with `no_net` the find is paid from the
+    // Recycler's till alone (an empty till pays 0; the find is still scrap).
+    let till = crate::systems::treasury::till_on(world);
+    let purse = if till { world.econ.recycler_till } else { world.treasury().map_or(0, |t| t.coins) };
+    // The transition wave (phase 3a): the till pays a find at
+    // `[treasury] scrap_coins` (the scrap's resale value) when set.
+    let price = match world.config.treasury.scrap_coins {
+        c if till && c > 0 => c,
+        _ => world.config.life.scavenge_coins,
+    };
+    let pay = price.min(purse.max(0));
+    if till && found && pay <= 0 {
+        crate::systems::jobs::add_scrap(world);
+    }
     if pay <= 0 || !found {
         // L2 (L29, `[lod] budget`): a dry hour is an hour honestly spent,
         // not an abort; `scavenge_dry_max` of them in a row cool Earn.
@@ -1531,7 +1544,11 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     } else {
         crate::systems::ownership::Flow::Sanitation
     };
-    crate::systems::ownership::pay(world, None, Some(id), pay, flow);
+    if till {
+        crate::systems::ownership::till_out(world, Some(id), pay, crate::systems::ownership::Flow::Scavenge);
+    } else {
+        crate::systems::ownership::pay(world, None, Some(id), pay, flow);
+    }
     world.remember(id, MemoryKind::Paid, None, 0.1, 0.0, false);
     // L2 L9: the find is scrap for the Recycler's Parts.
     crate::systems::jobs::add_scrap(world);

@@ -436,7 +436,19 @@ pub fn daily(world: &mut World) {
         sell_parts_above(world, c, parts_floor, parts_price);
     }
     if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
-        sell_parts_above(world, r, parts_floor, parts_price);
+        // Real economy E33 (phase 3a): a city-owned Recycler's export fills
+        // its till (the Treasury took the crossing; no tax on the city).
+        let city = world.owner_of(r).is_none();
+        let before = world.treasury().map_or(0, |t| t.coins);
+        // The transition wave (phase 3a): the till's Recycler is a scrap
+        // dealer, not a Fab holding out for the city's price: it sells at
+        // any bid (the floor holds) so the scrap it bought is paid for.
+        let min = if crate::systems::treasury::till_on(world) { 0.0 } else { parts_price };
+        sell_parts_above(world, r, parts_floor, min);
+        if city {
+            let gained = world.treasury().map_or(0, |t| t.coins) - before;
+            crate::systems::treasury::to_till(world, gained);
+        }
     }
     // 5. Data (E10): Labs' stores above `[export] data_floor`, from the fullest track (L2's leg).
     let data_floor = world.config.export.data_floor;

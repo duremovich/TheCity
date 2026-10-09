@@ -1434,10 +1434,18 @@ pub fn parts_market(world: &mut World) {
             if n == 0 {
                 continue;
             }
+            let before = world.treasury().map_or(0, |t| t.coins);
             ownership::charge(world, buyer, seller, i64::from(n) * price, Flow::Parts);
             world.take_stock(src, Good::Parts, n);
             world.add_stock(b, Good::Parts, n);
             want -= n;
+            // Real economy E33 (phase 3a): the Recycler's sale fills its till
+            // with what the Treasury actually took (a city-owned buyer pays
+            // the city itself: no coin moves, nothing reaches the till).
+            if seller.is_none() && world.building_of_kind(BuildingKind::Cemetery) == Some(src) {
+                let gained = world.treasury().map_or(0, |t| t.coins) - before;
+                crate::systems::treasury::to_till(world, gained);
+            }
             // L2 phase 5: the gate's probe (not a CSV column).
             match world.comp::<Building>(src).map(|bd| bd.kind) {
                 Some(BuildingKind::Fab) => world.stats.current.living.parts_sold_fab += n,

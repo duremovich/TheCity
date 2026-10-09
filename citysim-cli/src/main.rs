@@ -1057,6 +1057,10 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
     let cmd = match name {
         "release_reserve" => PlayerCommand::ReleaseReserve { amount: num("amount")? as u32 },
         "tax_rate" => PlayerCommand::SetTaxRate(num("rate")? as f32),
+        // Real economy E47 (phase 3a): `tax=auto` releases a pin to the band;
+        // `tax=<rate>` is `tax_rate=<rate>`.
+        "tax" if value.eq_ignore_ascii_case("auto") => PlayerCommand::SetTaxAuto,
+        "tax" => PlayerCommand::SetTaxRate(num("rate")? as f32),
         "sentence_mult" => PlayerCommand::SetSentenceMult(num("multiplier")? as f32),
         "guard_count" => PlayerCommand::SetGuardCount(num("count")? as u8),
         "immigration_per_week" => PlayerCommand::SetImmigrationPerWeek(num("count")? as u8),

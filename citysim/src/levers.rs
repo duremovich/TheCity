@@ -438,6 +438,9 @@ pub enum PlayerCommand {
         mission: EntityId,
         amount: i64,
     },
+    /// Real economy E21, E47 (phase 3a): release a `SetTaxRate` pin back to
+    /// the Treasury's tax band (CLI `tax=auto`).
+    SetTaxAuto,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -636,7 +639,9 @@ impl Levers {
             press_licence: true,
             news_tax: 0.0,
             censored: Default::default(),
-            public_works: true,
+            // Real economy E22 (b) (phase 3a): no public works with `no_net`
+            // (`budget::daily` does not run either: `treasury::daily` replaces it).
+            public_works: !crate::systems::econ::no_net_cfg(cfg),
             // Real economy (plan E4, E12; deviation recorded): the market
             // opens the World's buying at seed without `[export] enabled`,
             // whose flat-price hook stays L2's own switch.
@@ -686,6 +691,11 @@ impl World {
             PlayerCommand::ReleaseReserve { amount } => self.cmd_release_reserve(*amount),
             PlayerCommand::SetTaxRate(r) => {
                 self.levers.tax_rate = r.clamp(0.0, 0.3);
+                // Real economy E21: a set rate pins against the band (written
+                // only while the band runs: the state is the milestone's).
+                if crate::systems::treasury::on(self) {
+                    self.econ.tax_pinned = true;
+                }
                 self.push_event(EventKind::PlayerAction, &[], format!("Tax rate set to {:.2}", self.levers.tax_rate));
             }
             PlayerCommand::SetSentenceMult(m) => {
@@ -1010,6 +1020,15 @@ impl World {
                 let rate = rate.clamp(0.0, 1.0);
                 self.econ.customs_pin = Some(rate);
                 self.push_event(EventKind::PlayerAction, &[], format!("Customs rate set to {rate:.2}"));
+            }
+            PlayerCommand::SetTaxAuto => {
+                let text = if crate::systems::treasury::on(self) {
+                    self.econ.tax_pinned = false;
+                    Ok(format!("Tax rate released to the band (now {:.2})", self.levers.tax_rate))
+                } else {
+                    Err("SetTaxAuto: no tax band (no_safety_net is off)".to_string())
+                };
+                self.lever_result(text);
             }
             PlayerCommand::CloseWorld(closed) => {
                 self.econ.world_closed = *closed;
