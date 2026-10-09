@@ -869,7 +869,16 @@ pub fn posted_guards(world: &World, b: EntityId) -> Vec<EntityId> {
         .filter_map(|g| world.comp::<Position>(g).map(|p| (p.tile.manhattan(door), g)))
         .collect();
     out.sort_unstable();
-    out.into_iter().take(cap).map(|(_, g)| g).collect()
+    let mut v: Vec<EntityId> = out.into_iter().take(cap).map(|(_, g)| g).collect();
+    // M16a (plan C32): the agents standing a Guard post on the building.
+    if let Some(posted) = world.contract_guards.get(&b) {
+        for &g in posted {
+            if !v.contains(&g) && crate::systems::law::living(world, g) {
+                v.push(g);
+            }
+        }
+    }
+    v
 }
 
 /// M12 review: can guard `g` answer an alarm at `door`: living, free (no

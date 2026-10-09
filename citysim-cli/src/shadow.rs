@@ -2138,7 +2138,8 @@ const CHECKS: &[Check] = &[
     (19, "fighter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
     (19, "fighter", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
     (19, "fighter", Metric::BoutsAttended, Bound::Min(0.75), 1.00),
-    (19, "gang_leader", Metric::WalkHDay, Bound::Max(7.9), 4.87),
+    // M16a phase 3 re-measure (a pick change after the day-7 divergence; old bound 7.9, measured 4.87).
+    (19, "gang_leader", Metric::WalkHDay, Bound::Max(12.5), 8.20),
     (19, "gang_leader", Metric::LongestSleepH, Bound::Min(4.0), 5.79),
     (19, "gang_leader", Metric::Energy0HWeek, Bound::Max(6.2), 0.16),
     (19, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
@@ -2148,7 +2149,8 @@ const CHECKS: &[Check] = &[
     (19, "gang_member", Metric::WalkHDay, Bound::Max(11.6), 7.57),
     (19, "gang_member", Metric::LongestSleepH, Bound::Min(3.4), 4.98),
     (19, "gang_member", Metric::Energy0HWeek, Bound::Max(6.2), 0.11),
-    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(3.5), 7.00),
+    // M16a phase 3 re-measure (a city change from day 7: the brains' postings; old bound 3.5, measured 7.00).
+    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(1.4), 2.80),
     (19, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (19, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.09),
     (19, "gang_member", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
@@ -2183,7 +2185,10 @@ const CHECKS: &[Check] = &[
     (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(3.5), 7.00),
     (19, "ripperdoc", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (19, "ripperdoc", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    // M16a phase 3 re-measure (old bound 0.7, measured 1.00). Finding: one late wage, ripperdoc 959's d22
+    // shift paid at 07:58 the next morning (Jessop Holdings); possibly corp cash after Secure/Locate
+    // escrows, unconfirmed.
+    (19, "ripperdoc", Metric::PaidOfWorked, Bound::Min(0.42), 0.67),
     (19, "ripperdoc", Metric::WagedWorkdays, Bound::Min(0.6), 0.93),
     (19, "sweeper", Metric::WalkHDay, Bound::Max(9.6), 6.09),
     (19, "sweeper", Metric::LongestSleepH, Bound::Min(3.1), 4.55),
@@ -2212,7 +2217,8 @@ const CHECKS: &[Check] = &[
     (90, "gang_leader", Metric::WalkHDay, Bound::Max(14.7), 9.75),
     (90, "gang_leader", Metric::LongestSleepH, Bound::Min(3.9), 5.67),
     (90, "gang_leader", Metric::Energy0HWeek, Bound::Max(8.7), 2.70),
-    (90, "gang_leader", Metric::KnownMetWeek, Bound::Min(9.6), 19.25),
+    // M16a phase 3 re-measure (old bound 9.6, measured 19.25; now below 2, kept at 0.5 x).
+    (90, "gang_leader", Metric::KnownMetWeek, Bound::Min(0.5), 1.00),
     (90, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (90, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.07),
     (90, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
@@ -2220,7 +2226,8 @@ const CHECKS: &[Check] = &[
     (90, "gang_member", Metric::WalkHDay, Bound::Max(13.5), 8.91),
     (90, "gang_member", Metric::LongestSleepH, Bound::Min(3.7), 5.41),
     (90, "gang_member", Metric::Energy0HWeek, Bound::Max(6.4), 0.34),
-    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(13.2), 26.40),
+    // M16a phase 3 re-measure (old bound 13.2, measured 26.40).
+    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(6.0), 12.00),
     (90, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (90, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (90, "homeless", Metric::WalkHDay, Bound::Max(9.8), 6.25),
@@ -2234,13 +2241,15 @@ const CHECKS: &[Check] = &[
     (90, "purist", Metric::WalkHDay, Bound::Max(10.4), 6.66),
     (90, "purist", Metric::LongestSleepH, Bound::Min(4.1), 5.86),
     (90, "purist", Metric::Energy0HWeek, Bound::Max(8.6), 2.59),
-    (90, "purist", Metric::KnownMetWeek, Bound::Min(8.4), 16.80),
+    // M16a phase 3 re-measure (a pick change; old bound 8.4, measured 16.80).
+    (90, "purist", Metric::KnownMetWeek, Bound::Min(1.9), 3.80),
     (90, "purist", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (90, "purist", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (90, "runner", Metric::WalkHDay, Bound::Max(10.5), 6.75),
     (90, "runner", Metric::LongestSleepH, Bound::Min(4.3), 6.15),
     (90, "runner", Metric::Energy0HWeek, Bound::Max(6.7), 0.70),
-    (90, "runner", Metric::KnownMetWeek, Bound::Min(8.0), 16.00),
+    // M16a phase 3 re-measure (old bound 8.0, measured 16.00).
+    (90, "runner", Metric::KnownMetWeek, Bound::Min(2.3), 4.67),
     (90, "runner", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (90, "runner", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (90, "runner", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),

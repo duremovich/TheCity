@@ -837,6 +837,10 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         &[gang],
         format!("{name}: {current:?} -> {order:?} ({why}, {best_score:.2} vs {current_score:.2})"),
     );
+    // M16a (plan C33): a weak gang also hires a Hit on the rival's leader.
+    if matches!(order, Order::Raid | Order::Retaliate) {
+        crate::systems::contracts::post_gang_hit(world, gang, order);
+    }
     true
 }
 
@@ -927,8 +931,13 @@ pub fn offer_bribe(world: &mut World, payer: Payer, ask: BribeAsk, score: f32) -
             Some(cc) if cc.treasury >= price => (c, cc.name.clone(), cc.exec),
             _ => return false,
         },
-        // M16a C30: phase 3's arm.
-        Payer::Owner(_) => return false,
+        // M16a (plan C30): a Fixer's owner pays from its wallet.
+        Payer::Owner(o) => {
+            if world.purse(Some(o)) < price {
+                return false;
+            }
+            (o, world.name_of(o), None)
+        }
     };
     let refused = world.comp::<Personality>(captain).is_some_and(|p| p.lawfulness >= cfg.incorruptible);
     match payer {
@@ -987,7 +996,8 @@ pub fn offer_bribe(world: &mut World, payer: Payer, ask: BribeAsk, score: f32) -
             }
         }
         (Payer::Corp(_), BribeAsk::LookAway) => {}
-        (Payer::Owner(_), _) => {}
+        // M16a (plan C30): the take cools the owner's Fixers.
+        (Payer::Owner(o), _) => crate::systems::contracts::heat_bribed(world, o),
     }
     if let Some(p) = world.comp_mut::<Personality>(captain) {
         p.drift(Drift::TookBribe);

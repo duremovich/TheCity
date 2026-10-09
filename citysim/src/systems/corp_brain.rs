@@ -1184,15 +1184,32 @@ fn secure(world: &mut World, corp: EntityId) {
         targets.extend(thin.into_iter().take(per_day - targets.len()).map(|(_, b)| b));
     }
     let own_security = c.niches.contains(&Niche::Security);
+    let treasury = c.treasury;
+    // M16a (plan C33): a named culprit (the vendetta's, else the newest
+    // loss's gang) and the loss buildings, for the postings below.
+    let culprit = crate::systems::grudges::vendetta_culprit(world, corp)
+        .or_else(|| c.loss_log.iter().rev().filter(|l| l.tick >= horizon).find_map(|l| l.gang));
+    let lost: BTreeSet<EntityId> = seen.clone();
     for b in targets {
         // M13 D42: a robot instead of a contract when it is cheaper over the horizon.
         if crate::systems::robots::consider_robot(world, corp, b) {
             continue;
         }
         let seller = if own_security { Some(corp) } else { crate::systems::corps::cheapest_seller(world, Some(corp)) };
+        // M16a (plan C33): a loss building with no seller, or a treasury
+        // short of a week of the seller's price, is put on the board as a
+        // Guard record instead.
+        let short = seller.is_some_and(|s| s != corp && treasury < 7 * crate::systems::corps::contract_price(world, s));
+        if lost.contains(&b) && (seller.is_none() || short) && crate::systems::contracts::post_secure(world, corp, b) {
+            continue;
+        }
         if let Some(s) = seller {
             crate::systems::corps::buy_contract(world, b, s);
         }
+    }
+    if let (Some(g), Some(&b)) = (culprit, lost.iter().next()) {
+        let near = world.comp::<Building>(b).map(|bd| bd.door).unwrap_or_default();
+        crate::systems::contracts::post_culprit_locate(world, corp, g, near);
     }
     // M14 V27 (phase 3): ICE by the largest gap (Virt losses first), a camera.
     crate::systems::virt::secure_ice(world, corp);
@@ -1255,6 +1272,10 @@ fn lobby(world: &mut World, corp: EntityId, i: &CorpInputs) {
     }
     let Some(gang) = i.culprit else { return };
     if !i.lobby_ready {
+        return;
+    }
+    // M16a (plan C33): a dirty exec hires on the culprit's leader instead.
+    if crate::systems::contracts::post_lobby(world, corp, gang) {
         return;
     }
     let score = world
