@@ -1910,6 +1910,24 @@ tax_step = 0.01
 band = [8000, 25000]
 tax_initial = 0.05                   # phase 3a (plan key): the rate a no_net city opens with (negative: [levers] tax_rate)
 scrap_coins = 3                      # phase 3a (plan key): a find paid from the Recycler's till with no_net (0: [life] scavenge_coins)
+# Jobs v2 J16 (P5a; read only with [economy2] wages and no_safety_net on): the civic budget. Each midnight
+# target = civic_share x the mean of the last receipts_days days' receipts (tax, fines, customs, property)
+# + max(0, Treasury - band hi) / payout_days, spent only above band lo; allocated in order to the police
+# ([levers] guard_count up to police_per_1000 x population / 1,000) and Sanitation (sanitation_count up to
+# sanitation_max), each x its wage. A headcount drops at most civic_pace a day. Placeholders (spec 5).
+civic_share = 0.8
+payout_days = 60
+receipts_days = 14
+police_per_1000 = 35.0
+sanitation_max = 50
+civic_pace = 5
+# P5a (plan risk 8): uncapped by the Jail, the police went to the population ceiling (70) and pinned the Jail at
+# its 160 (42-44 x 120: days with >= 155 held 85/58/69 vs 13/38/8 on main; arrests +32 % on 42), and a full Jail
+# fines the Vagrancy it cannot hold, so the fines paid for more police. A feedback cap (guard_count x 0.9 x
+# capacity / held) swung the police 70 -> 28 -> 69 and, police first, the sweepers 50 -> 0 -> 40 (213 civic
+# dismissals on seed 42). So the cap is static: police <= police_per_jail_bed x [buildings] jail capacity. The
+# shipped 36 guards hold the Jail at 74-84 % on main's wages city (mean held 119-135 of 160): 0.25 (40) aims at ~90 %.
+police_per_jail_bed = 0.25
 
 # Jobs and room (docs/JOBS_V2.md § 2.3, plan J6-J8): floors. A floor multiplies a workplace's places
 # (jobs::places_of) and a Block's, Hotel's or venue's seats; it costs no pathfinding. A corp at its

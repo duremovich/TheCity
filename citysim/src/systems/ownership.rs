@@ -292,11 +292,15 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         | Flow::Subsidy
         | Flow::SellFood
         | Flow::JailFood
-        | Flow::Fine
         | Flow::Hotel
         | Flow::Sanitation
         | Flow::Scavenge
         | Flow::Robbery => row.flow_other += coins,
+        // Jobs v2 (P5a, J34): fines stay in `flow_other` and have a column.
+        Flow::Fine => {
+            row.flow_other += coins;
+            row.jobs.flow_fines += coins;
+        }
         Flow::Asset => row.flow_asset += coins,
         Flow::AssetUpkeep => row.flow_asset_upkeep += coins,
         Flow::Finance => row.flow_finance += coins,
@@ -424,6 +428,10 @@ fn transfer(
         if flow == Flow::Stims {
             world.stats.current.gang_income_dealing += moved - tax;
         }
+    }
+    // Jobs v2 (P5a, J34): the Treasury's payroll (`civic_payroll`).
+    if from.is_none() && flow == Flow::Wage {
+        world.stats.current.jobs.civic_payroll += moved;
     }
     if flow.capital() {
         uncount_cashflow(world, from, moved);

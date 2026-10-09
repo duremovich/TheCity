@@ -84,6 +84,9 @@ pub fn record_traces(world: &mut World) {
 pub fn snapshot(world: &mut World) {
     // M16a (plan C38): the contract board's snapshot columns.
     crate::systems::contracts::snapshot(world);
+    // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
+    world.stats.current.jobs.guard_count = world.levers.guard_count;
+    world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;
     let citizens = world.citizens();
     let mut employed = 0;
     let mut homeless = 0;
