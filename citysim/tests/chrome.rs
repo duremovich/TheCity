@@ -489,6 +489,7 @@ fn test_harvest_scored_only_with_target_and_clinic() {
         virt_grudge: false,
         fear: None,
         vendetta: None,
+        job: None,
     };
     let cfg = Config::load().gangs;
     let has = |i: &OrderInputs| faction::score_orders(i, &cfg).iter().any(|s| s.order == Order::Harvest);

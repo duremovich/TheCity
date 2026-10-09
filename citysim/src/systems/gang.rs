@@ -438,6 +438,11 @@ pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
     if loyalty < world.config.gangs.freelance_loyalty {
         return None;
     }
+    // M16a (plan C26, phase 2): under Job the members outside the crew keep
+    // Expand's GangWork (the crew marches under the Contract goal).
+    if g.order == Order::Job {
+        return Some(Order::Expand);
+    }
     // M14 V30: under VirtRaid the members not running keep GangWork.
     matches!(g.order, Order::Expand | Order::Contest | Order::Squat | Order::Harvest | Order::VirtRaid)
         .then_some(g.order)
@@ -1101,7 +1106,12 @@ pub fn run(world: &mut World) {
             faction::consider_bribe(world, gang);
         }
         let pending: f32 = world.comp::<Gang>(gang).map_or(0.0, |g| g.shocks.iter().map(|s| s.severity()).sum());
-        if daily {
+        // M16a (plan C26, phase 2): a gang whose job settled rescores at once.
+        let job_done = world.comp::<Gang>(gang).is_some_and(|g| g.order == Order::Job)
+            && !crate::systems::contracts::job_live(world, gang);
+        if job_done {
+            faction::rethink(world, gang);
+        } else if daily {
             if faction::rescore(world, gang, hysteresis) {
                 if let Some(g) = world.comp_mut::<Gang>(gang) {
                     g.shocks.clear();

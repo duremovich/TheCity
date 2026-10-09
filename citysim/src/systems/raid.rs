@@ -29,11 +29,14 @@ pub enum Outcome {
     Sacked,
 }
 
-/// M12 D31: whose march an agent is on: its gang's, or a district riot's.
+/// M12 D31: whose march an agent is on: its gang's, or a district riot's;
+/// M16a (plan C22): or a contract mission's (a crew list marching to a
+/// door, keyed by its record).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Expedition {
     Gang(EntityId),
     Riot(u32),
+    Mission(crate::contract::ContractId),
 }
 
 /// M12 D37: where an expedition gathers.
@@ -51,8 +54,15 @@ pub fn riot_by_id(world: &World, id: u32) -> Option<&crate::components::Riot> {
     world.riots.iter().find(|r| r.id == id)
 }
 
-/// D31: a live riot's rioter marches with the riot; anyone else with its gang.
+/// D31: a live riot's rioter marches with the riot; anyone else with its
+/// gang. M16a (plan C22): a mission's crew member marches with its mission
+/// first (nothing else changes while no mission exists).
 pub fn expedition_of(world: &World, agent: EntityId) -> Option<Expedition> {
+    if !world.missions.is_empty() {
+        if let Some(&m) = world.mission_of.get(&agent) {
+            return Some(Expedition::Mission(m));
+        }
+    }
     if let Some(&id) = world.rioter_of.get(&agent) {
         if riot_by_id(world, id).is_some() {
             return Some(Expedition::Riot(id));
@@ -70,6 +80,8 @@ pub fn departure(world: &World, agent: EntityId) -> Option<Tick> {
     match expedition_of(world, agent)? {
         Expedition::Riot(id) => riot_by_id(world, id).map(|r| r.muster_at),
         Expedition::Gang(g) => world.comp::<Gang>(g).and_then(|g| g.raid_at),
+        // M16a (plan C22): the mission's own muster hour.
+        Expedition::Mission(id) => world.missions.get(&id).map(|m| m.raid_at),
     }
 }
 
@@ -89,6 +101,9 @@ pub fn raid_pending(world: &World, agent: EntityId) -> bool {
                     .is_some_and(|o| matches!(o.why, crate::virt::RunWhy::Prelude | crate::virt::RunWhy::Overwatch));
             !seated && g.order.is_raid() && g.raid_at.is_some_and(|t| t <= world.tick + window)
         }
+        // M16a (plan C22): the Raid goal never adopts a mission (its crew
+        // marches under `GoalKind::Contract`).
+        Some(Expedition::Mission(_)) => false,
         None => false,
     }
 }
@@ -98,6 +113,10 @@ pub fn raid_done(world: &World, agent: EntityId) -> bool {
     match expedition_of(world, agent) {
         Some(Expedition::Riot(_)) => false,
         Some(Expedition::Gang(_)) => own_gang(world, agent).is_none_or(|g| g.raid_at.is_none()),
+        // M16a (plan C22): the mission is over once its record is not Taken.
+        Some(Expedition::Mission(id)) => {
+            world.contracts.get(&id).is_none_or(|c| c.status != crate::contract::ContractStatus::Taken)
+        }
         None => true,
     }
 }
@@ -186,12 +205,18 @@ pub fn target_building(world: &World, agent: EntityId) -> Option<EntityId> {
     match expedition_of(world, agent)? {
         Expedition::Riot(id) => riot_by_id(world, id).map(|r| r.target),
         Expedition::Gang(g) => gang_target(world, g),
+        // M16a (plan C22): the building at the mission's door, if any.
+        Expedition::Mission(id) => world.missions.get(&id).and_then(|m| m.door_building),
     }
 }
 
 /// Where this agent's expedition ends (`LocationKey::RaidTarget`): the
 /// street tile outside the target's door.
 pub fn target_tile(world: &World, agent: EntityId) -> Option<TilePos> {
+    // M16a (plan C22): the street tile outside the mission's door.
+    if let Some(Expedition::Mission(id)) = expedition_of(world, agent) {
+        return world.missions.get(&id).map(|m| m.door);
+    }
     let b = target_building(world, agent)?;
     world.comp::<Building>(b).map(|bd| world.outside_door(bd))
 }
@@ -227,6 +252,8 @@ pub fn muster_point(world: &World, agent: EntityId) -> Option<MusterAt> {
             }
             hideout.map(MusterAt::Inside)
         }
+        // M16a (plan C22): outside the mission's muster.
+        Expedition::Mission(id) => world.missions.get(&id).map(|m| MusterAt::Door(m.muster)),
     }
 }
 
@@ -245,6 +272,8 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
             return true;
         }
         Some(Expedition::Gang(g)) => g,
+        // M16a (plan C22, C24): the strike decision.
+        Some(Expedition::Mission(id)) => return crate::systems::missions::depart(world, agent, id),
         None => return false,
     };
     // M12 D38: no raid departs into a garrisoned Jail or a district cracking
@@ -300,6 +329,8 @@ pub fn resolve(world: &mut World, actor: EntityId) -> Option<Outcome> {
     let gid = match expedition_of(world, actor)? {
         Expedition::Riot(_) => return crate::systems::riot::clash(world, actor),
         Expedition::Gang(g) => g,
+        // M16a (plan C23): the mission's brawl.
+        Expedition::Mission(_) => return crate::systems::missions::brawl(world, actor),
     };
     // M12 D38: count an expedition that reached a door under full cover.
     if let Some(order) = world.comp::<Gang>(gid).filter(|g| g.raid_at.is_some()).map(|g| g.order) {
@@ -333,6 +364,8 @@ pub fn wait_for_crew(world: &World, actor: EntityId) -> bool {
             let Some(t) = gg.raid_at else { return false };
             (gg.members.clone(), gang_target(world, g), t, 3)
         }
+        // M16a (plan C22): the gang arm's rule over the crew, goal Contract.
+        Some(Expedition::Mission(id)) => return crate::systems::missions::wait_for_crew(world, actor, id),
         None => return false,
     };
     if now + TICKS_PER_HOUR >= depart + faction::RAID_MARCH_TICKS {
@@ -361,6 +394,12 @@ fn raiders_at(world: &World, gid: EntityId, actor: EntityId, door: TilePos) -> V
 /// Of `pool`, the actor and every free agent within `raid_gather_radius` of
 /// the door whose goal is Raid, strongest first (riots reuse it, D32).
 pub fn gathered(world: &World, pool: &[EntityId], actor: EntityId, door: TilePos) -> Vec<EntityId> {
+    gathered_for(world, pool, actor, door, GoalKind::Raid)
+}
+
+/// [`gathered`] for an expedition whose marchers pursue `goal` (M16a plan
+/// C22: a mission's crew is under `GoalKind::Contract`).
+pub fn gathered_for(world: &World, pool: &[EntityId], actor: EntityId, door: TilePos, goal: GoalKind) -> Vec<EntityId> {
     let radius = world.config.gangs.raid_gather_radius;
     let mut out: Vec<EntityId> = pool
         .iter()
@@ -369,7 +408,7 @@ pub fn gathered(world: &World, pool: &[EntityId], actor: EntityId, door: TilePos
         .filter(|&m| {
             m == actor
                 || (world.comp::<Position>(m).is_some_and(|p| law::chebyshev(p.tile, door) <= radius)
-                    && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(GoalKind::Raid)))
+                    && world.comp::<Brain>(m).is_some_and(|b| b.current_goal == Some(goal)))
         })
         .collect();
     by_strength(world, &mut out);

@@ -453,6 +453,9 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
     let runner = runner
         || (!world.contract_runs.is_empty()
             && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)));
+    // M16a (plan C22, phase 2): a live mission's crew too (bounded by
+    // `max_missions` × `crew_max`; phase 4's quota).
+    let runner = runner || (!world.missions.is_empty() && world.mission_of.contains_key(&id));
     if brain.pinned {
         5
     } else if runner {
@@ -485,6 +488,10 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     }
     // M16a (plan C17): nor a live contract's taker or chased target.
     if lod == Lod::Statistical && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)) {
+        return;
+    }
+    // M16a (plan C22, phase 2): nor a live mission's crew.
+    if lod == Lod::Statistical && world.mission_of.contains_key(&id) {
         return;
     }
     // L2 shadow fixes item 7: the tier's start, for the dwell (after the

@@ -80,6 +80,7 @@ fn inputs() -> OrderInputs {
         virt_grudge: false,
         fear: None,
         vendetta: None,
+        job: None,
     }
 }
 
@@ -852,6 +853,7 @@ fn test_raid_into_cover_is_not_chosen_or_departed() {
         virt_grudge: false,
         fear: None,
         vendetta: None,
+        job: None,
         hoard: 0.5,
         hoard_tilt: 0.2,
         courage: 0.8,
@@ -1248,4 +1250,74 @@ fn test_expand_frontier_reads_held_and_open_districts() {
     let i = faction::gather_inputs(&w, g0).expect("inputs");
     assert_eq!(i.open_districts, 1);
     assert!(i.frontier_total > held_total, "Sump Central joins the frontier");
+}
+
+/// M16a phase 2 (plan C26): a gang that takes a contract record (a price on
+/// a struct, worked as a mission: a crew list marching to a door) holds
+/// `Order::Job` while the record is Taken; its members outside the crew
+/// follow Expand (GangWork as usual, and L2's ledger reads the Expand cell);
+/// the moment the record settles the brain rescores.
+#[test]
+fn test_order_job_holds_until_settled_and_members_follow_expand() {
+    use citysim::contract::{ContractKind, ContractStatus, Origin, Posting, Target};
+    use citysim::systems::{contracts, demography, fviolence, law};
+    let mut w = world(42);
+    let (g0, _) = gangs(&w);
+    let adults: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&id| w.has::<Brain>(id) && demography::is_adult(&w, id) && !law::is_guard(&w, id))
+        .filter(|&id| !w.has::<citysim::GangMember>(id))
+        .collect();
+    let (buyer, target) = (adults[0], adults[1]);
+    let recruits: Vec<EntityId> = adults[2..]
+        .iter()
+        .copied()
+        .filter(|&r| w.edge(r, target).is_none() && w.spouse_of(r) != Some(target))
+        .take(6)
+        .collect();
+    for &r in &recruits {
+        gang::enlist(&mut w, r, g0);
+        let p = w.comp_mut::<Personality>(r).expect("p");
+        p.lawfulness = 0.0;
+        p.loyalty = 1.0;
+    }
+    gang::recompute_leader(&mut w, g0);
+    w.comp_mut::<Gang>(g0).expect("g").raid_at = None;
+    w.comp_mut::<citysim::Wallet>(buyer).expect("wallet").coins = 5000;
+    let posting = Posting {
+        buyer: Some(buyer),
+        agent: Some(buyer),
+        kind: ContractKind::Beat,
+        target: Target::Agent(target),
+        broker: None,
+        deadline_days: 7,
+        origin: Origin::God,
+        price: None,
+    };
+    let id = contracts::post(&mut w, posting).expect("posted");
+    contracts::god_take(&mut w, id, g0).expect("the gang takes the job");
+    assert_eq!(contracts::job_of(&w, g0), Some(id));
+    assert_eq!(w.comp::<Gang>(g0).map(|g| g.order), Some(Order::Job), "Job at once");
+    assert!(w.missions.contains_key(&id), "the crew marches as a mission");
+    let crew = w.contracts[&id].crew.clone();
+    assert!(!crew.is_empty() && crew.len() <= usize::from(w.config.fixers.crew_max));
+    let outside = recruits.iter().copied().find(|m| !crew.contains(m)).expect("a member outside the crew");
+    assert_eq!(gang::following_order(&w, outside), Some(Order::Expand), "outside the crew: Expand");
+    // The daily rescore holds it (no dwell, no hysteresis can move it).
+    let h = w.config.gangs.hysteresis;
+    faction::rescore(&mut w, g0, h);
+    assert_eq!(w.comp::<Gang>(g0).map(|g| g.order), Some(Order::Job), "held while Taken");
+    assert!(w.comp::<Gang>(g0).is_some_and(|g| g.order_trace.iter().any(|s| s.order == Order::Job)), "Job scored");
+    fviolence::rebuild_active(&mut w);
+    assert!(
+        !w.fv_active.iter().any(|s| s.source == citysim::ledger::ViolenceSource::Order(Order::Job)),
+        "a Job gang reads the Expand cell"
+    );
+    // Settled: the gang rescores the same tick.
+    contracts::settle(&mut w, id, contracts::Settle::Cancelled, "a test");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Cancelled);
+    assert!(!w.missions.contains_key(&id) && crew.iter().all(|m| !w.mission_of.contains_key(m)));
+    gang::run(&mut w);
+    assert_ne!(w.comp::<Gang>(g0).map(|g| g.order), Some(Order::Job), "rescored once the job settled");
 }
