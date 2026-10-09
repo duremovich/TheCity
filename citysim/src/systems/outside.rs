@@ -20,12 +20,13 @@ pub fn export_on(world: &World) -> bool {
     world.config.living.enabled && world.levers.export_open
 }
 
-/// The World account, created on first use.
-fn ensure_world_account(world: &mut World) {
+/// The World account, created on first use (Real economy plan E4: the
+/// market seeds it with `[world_market] treasury_ref`; L2's export hook
+/// with `[export] treasury_ref`).
+pub(crate) fn ensure_world_account(world: &mut World, treasury_ref: i64) {
     if world.outside.faction(WORLD_ACCOUNT).is_some() {
         return;
     }
-    let treasury_ref = world.config.export.treasury_ref;
     world.outside.factions.push(OutsideFaction {
         id: WORLD_ACCOUNT,
         name: "the World".to_string(),
@@ -37,6 +38,7 @@ fn ensure_world_account(world: &mut World) {
         income_today: 0,
         market: 1.0,
         dead: false,
+        books: Default::default(),
     });
     world.outside.next_id = world.outside.next_id.max(WORLD_ACCOUNT + 1);
 }
@@ -89,10 +91,13 @@ fn sell(world: &mut World, owner: Option<EntityId>, good: ExportGood, units: u32
 
 /// The midnight pass (plan L11).
 pub fn export_daily(world: &mut World) {
-    if !export_on(world) {
+    // Real economy (plan E9, E10): with the market on the book's pass
+    // (`world_market::daily`) is the one World path.
+    if !export_on(world) || crate::systems::econ::market_on(world) {
         return;
     }
-    ensure_world_account(world);
+    let treasury_ref = world.config.export.treasury_ref;
+    ensure_world_account(world, treasury_ref);
     if let Some(f) = world.outside.faction_mut(WORLD_ACCOUNT) {
         let refill = (f.treasury_ref - f.treasury).max(0);
         f.treasury += refill;

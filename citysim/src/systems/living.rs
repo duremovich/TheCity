@@ -29,6 +29,9 @@ pub fn run(world: &mut World) {
     // L2 shadow fixes: no-shows, the sweepers' wage, the told-memory.
     crate::systems::fixes::daily(world);
     crate::systems::outside::export_daily(world);
+    // Real economy (plan E6-E10): the World's book, appetite, refill and the
+    // midnight Parts and Data sales (`export_daily` returns at once with it on).
+    crate::systems::world_market::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
 }

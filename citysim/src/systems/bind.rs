@@ -329,8 +329,13 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
             }
             // M13 D37: the abductee's coins go to the actor as a robbery's do.
             HoleKind::Robbed | HoleKind::Abducted => {
-                if let Some(w) = world.comp_mut::<Wallet>(actor) {
-                    w.coins += hole.loot;
+                world.probe.loot_bound += hole.loot;
+                match world.comp_mut::<Wallet>(actor) {
+                    Some(w) => w.coins += hole.loot,
+                    // Real economy (plan E25): an actor killed since the
+                    // day has no Wallet; the loot is unclaimed property
+                    // (lost at EC_BASE).
+                    None => lost_loot(world, &hole),
                 }
             }
         }
@@ -399,7 +404,10 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     // 9. Counters, 10. the Attributed event.
     match bound {
         Bound::Actor(_) => world.stats.current.holes_bound += 1,
-        Bound::Unknown => world.stats.current.holes_unknown += 1,
+        Bound::Unknown => {
+            world.stats.current.holes_unknown += 1;
+            lost_loot(world, &hole);
+        }
     }
     // M16a (plan C19): a contract hole's binding is its own count (the
     // probe `contract_hole_wrong`: bound to anyone but its faction, 0).
@@ -498,6 +506,7 @@ pub fn drop_victim_holes(world: &mut World, victim: EntityId) {
     for id in ids {
         if let Some(hole) = take(world, id) {
             world.stats.current.holes_unknown += 1;
+            lost_loot(world, &hole);
             if hole.kind == HoleKind::Abducted {
                 crate::systems::chrome::settle_limbo(world, id, None);
             }
@@ -506,9 +515,25 @@ pub fn drop_victim_holes(world: &mut World, victim: EntityId) {
     world.holes_by_agent.remove(&victim);
 }
 
+/// Real economy (plan E25a): a hole closing with nobody named loses its
+/// loot at `EC_BASE` (a vanishing coin); with the market on the coins go to
+/// the Treasury as unclaimed property (`Flow::Robbery`, ledger only: the
+/// coins were already off the victim), so the identity holds.
+fn lost_loot(world: &mut World, hole: &Hole) {
+    if hole.loot <= 0 {
+        return;
+    }
+    world.probe.loot_lost += hole.loot;
+    if crate::systems::econ::market_on(world) {
+        world.purse_add(None, hole.loot);
+        crate::systems::ownership::ledger_only(world, crate::systems::ownership::Flow::Robbery, hole.loot);
+    }
+}
+
 /// Close a hole as Unknown without a draw (the per-victim cap).
 pub fn expire(world: &mut World, id: HoleId) {
     let Some(hole) = take(world, id) else { return };
+    lost_loot(world, &hole);
     if hole.kind == HoleKind::Abducted {
         crate::systems::chrome::settle_limbo(world, id, None);
     }

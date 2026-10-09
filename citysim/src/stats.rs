@@ -20,7 +20,7 @@ g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
 c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
 flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,\
 tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,flow_street_dice,\
-contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,accessory_unfounded,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,ticks_per_sec";
+contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,accessory_unfounded,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
@@ -299,6 +299,10 @@ pub struct DayRow {
     /// `[contracts]` off; created whole in phase 1, zeros until their phase).
     #[serde(default, skip_serializing_if = "ContractCols::is_zero")]
     pub contract: ContractCols,
+    /// The Real economy (plan E45): one group after M16a's, created whole
+    /// in phase 1 (zeros until their phase).
+    #[serde(default, skip_serializing_if = "EconCols::is_zero")]
+    pub econ: EconCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -997,6 +1001,7 @@ impl DayRow {
             living: LivingCols::default(),
             budget: BudgetCols::default(),
             contract: ContractCols::default(),
+            econ: EconCols::default(),
             ticks_per_sec: 0.0,
         }
     }
@@ -1016,7 +1021,7 @@ impl DayRow {
             })
             .collect();
         format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{:.3},{},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.3},{:.3},{},{},{:.3},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{:.0}",
             self.day,
             self.season,
             self.population,
@@ -1136,8 +1141,215 @@ impl DayRow {
             self.budget.csv(),
             self.living.flow_street_dice,
             self.contract.csv(),
+            self.econ.csv(),
             self.ticks_per_sec,
         )
+    }
+}
+
+/// The Real economy (docs/ECONOMY_V2.md § 7, plan E45): `EconCols`, after
+/// M16a's `ContractCols` and before `ticks_per_sec`. Phase 1 fills the
+/// market's columns (`flow_import_out`, `flow_customs`, `flow_migrant_*`,
+/// `flow_fence`, `trade_balance(_30)`, `appetite_*`, `bid_food`, `ask_food`,
+/// `food_imported`, `food_exported`, `parts_exported`, `data_exported`,
+/// `export_paid`, `outside_outbound`, `world_treasury`, `coin_identity`,
+/// `city_owned_buildings`, `d*_starving`, `d*_dregs`); the rest stay zero
+/// until their phase (2: inputs, property, wages, hiring, inflows,
+/// `grow_world`; 3a: `tax_rate`, `recycler_till`; 3b: Missions, `d*_meals`;
+/// 3c: the camps). Snapshot columns read at the day's end; flows are the
+/// day's sums.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct EconCols {
+    pub flow_import_out: i64,
+    pub flow_customs: i64,
+    pub flow_inputs: i64,
+    pub flow_property: i64,
+    pub flow_donate: i64,
+    /// `export_paid + flow_migrant_in + flow_fence − flow_import_out − flow_inputs − flow_migrant_out`.
+    pub trade_balance: i64,
+    pub trade_balance_30: i64,
+    pub appetite_food: f32,
+    pub appetite_parts: f32,
+    pub appetite_data: f32,
+    /// Today's first-unit Food bid.
+    pub bid_food: f32,
+    pub ask_food: i64,
+    pub food_imported: u32,
+    pub food_exported: u32,
+    pub wage_mult_mean: f32,
+    pub wage_gross_mean: f32,
+    pub vacancies_open: u32,
+    pub laid_off: u32,
+    pub pop_inflow_wages: i64,
+    pub pop_inflow_other: i64,
+    pub tax_rate: f32,
+    pub mission_meals: u32,
+    pub mission_cots: u32,
+    pub mission_purse: i64,
+    pub flow_migrant_in: i64,
+    pub flow_migrant_out: i64,
+    pub flow_fence: i64,
+    pub flow_alms: i64,
+    pub flow_camp_food: i64,
+    pub outside_outbound: i64,
+    pub world_treasury: i64,
+    /// `total_coins + Σ outside treasuries − minted`: constant to the coin with the market on.
+    pub coin_identity: i64,
+    pub parts_exported: u32,
+    pub data_exported: u32,
+    pub export_paid: i64,
+    pub grow_world: u32,
+    /// Standing niche buildings on the city's deed (foreclosed and seeded).
+    pub city_owned_buildings: u32,
+    pub recycler_till: i64,
+    pub children_taken: u32,
+    pub camp_children: u32,
+    pub camp_output: u32,
+    pub camp_unfed: u32,
+    pub camp_released: u32,
+    pub camp_scandals: u32,
+    /// Per district slot (`DISTRICT_SLOTS`): Mission meals to its residents,
+    /// `Starving` events by the agent's district, Dreg-class adults by Home district.
+    pub d_meals: [u32; DISTRICT_SLOTS],
+    pub d_starving: [u32; DISTRICT_SLOTS],
+    pub d_dregs: [u32; DISTRICT_SLOTS],
+}
+
+impl EconCols {
+    pub fn is_zero(&self) -> bool {
+        *self == EconCols::default()
+    }
+
+    /// The header's names, comma-separated, in column order.
+    pub fn header() -> String {
+        let mut h: Vec<String> = [
+            "flow_import_out",
+            "flow_customs",
+            "flow_inputs",
+            "flow_property",
+            "flow_donate",
+            "trade_balance",
+            "trade_balance_30",
+            "appetite_food",
+            "appetite_parts",
+            "appetite_data",
+            "bid_food",
+            "ask_food",
+            "food_imported",
+            "food_exported",
+            "wage_mult_mean",
+            "wage_gross_mean",
+            "vacancies_open",
+            "laid_off",
+            "pop_inflow_wages",
+            "pop_inflow_other",
+            "tax_rate",
+            "mission_meals",
+            "mission_cots",
+            "mission_purse",
+            "flow_migrant_in",
+            "flow_migrant_out",
+            "flow_fence",
+            "flow_alms",
+            "flow_camp_food",
+            "outside_outbound",
+            "world_treasury",
+            "coin_identity",
+            "parts_exported",
+            "data_exported",
+            "export_paid",
+            "grow_world",
+            "city_owned_buildings",
+            "recycler_till",
+            "children_taken",
+            "camp_children",
+            "camp_output",
+            "camp_unfed",
+            "camp_released",
+            "camp_scandals",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        for i in 1..=DISTRICT_SLOTS {
+            h.push(format!("d{i}_meals"));
+            h.push(format!("d{i}_starving"));
+            h.push(format!("d{i}_dregs"));
+        }
+        h.join(",")
+    }
+
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        let mut v: Vec<String> = vec![
+            self.flow_import_out.to_string(),
+            self.flow_customs.to_string(),
+            self.flow_inputs.to_string(),
+            self.flow_property.to_string(),
+            self.flow_donate.to_string(),
+            self.trade_balance.to_string(),
+            self.trade_balance_30.to_string(),
+            format!("{:.3}", self.appetite_food),
+            format!("{:.3}", self.appetite_parts),
+            format!("{:.3}", self.appetite_data),
+            format!("{:.3}", self.bid_food),
+            self.ask_food.to_string(),
+            self.food_imported.to_string(),
+            self.food_exported.to_string(),
+            format!("{:.3}", self.wage_mult_mean),
+            format!("{:.3}", self.wage_gross_mean),
+            self.vacancies_open.to_string(),
+            self.laid_off.to_string(),
+            self.pop_inflow_wages.to_string(),
+            self.pop_inflow_other.to_string(),
+            format!("{:.3}", self.tax_rate),
+            self.mission_meals.to_string(),
+            self.mission_cots.to_string(),
+            self.mission_purse.to_string(),
+            self.flow_migrant_in.to_string(),
+            self.flow_migrant_out.to_string(),
+            self.flow_fence.to_string(),
+            self.flow_alms.to_string(),
+            self.flow_camp_food.to_string(),
+            self.outside_outbound.to_string(),
+            self.world_treasury.to_string(),
+            self.coin_identity.to_string(),
+            self.parts_exported.to_string(),
+            self.data_exported.to_string(),
+            self.export_paid.to_string(),
+            self.grow_world.to_string(),
+            self.city_owned_buildings.to_string(),
+            self.recycler_till.to_string(),
+            self.children_taken.to_string(),
+            self.camp_children.to_string(),
+            self.camp_output.to_string(),
+            self.camp_unfed.to_string(),
+            self.camp_released.to_string(),
+            self.camp_scandals.to_string(),
+        ];
+        for i in 0..DISTRICT_SLOTS {
+            v.push(self.d_meals[i].to_string());
+            v.push(self.d_starving[i].to_string());
+            v.push(self.d_dregs[i].to_string());
+        }
+        v.join(",")
+    }
+}
+
+#[cfg(test)]
+mod econ_cols_tests {
+    use super::*;
+
+    /// Plan E45: `EconCols` sits after `ContractCols` and before `ticks_per_sec`, 68 columns.
+    #[test]
+    fn test_econ_cols_in_header() {
+        let names = EconCols::header();
+        assert_eq!(names.split(',').count(), 68);
+        assert_eq!(EconCols::default().csv().split(',').count(), 68);
+        let tail = format!("flow_fixer_cut,{names},ticks_per_sec");
+        assert!(CSV_HEADER.ends_with(&tail), "the header ends with the econ columns");
+        assert_eq!(DayRow::new(0).csv_row().split(',').count(), CSV_HEADER.split(',').count());
     }
 }
 

@@ -252,10 +252,15 @@ pub enum EventKind {
     FixerBusted,
     /// `[guard, buyer]` (phase 3).
     GuardTaken,
+    // --- The Real economy phase 1 (plan E44; amber): the World market.
+    /// `[market]`: a Market bought food from the World at the ask.
+    Imported,
+    /// `[]`: a good's appetite walk crossed ±0.25 from 1.0.
+    AppetiteShift,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 129] = [
+    pub const ALL: [EventKind; 131] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -385,6 +390,8 @@ impl EventKind {
         EventKind::Accessory,
         EventKind::FixerBusted,
         EventKind::GuardTaken,
+        EventKind::Imported,
+        EventKind::AppetiteShift,
     ];
 }
 

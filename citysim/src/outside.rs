@@ -42,6 +42,10 @@ pub struct OutsideFaction {
     /// The outside market, mean 1.0 (L2 holds it at 1.0).
     pub market: f32,
     pub dead: bool,
+    /// Real economy (plan E4, spec § 3): the World's book per good (the
+    /// World account only; M17's parents carry none).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub books: BTreeMap<ExportGood, crate::econ::WorldBook>,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

@@ -52,6 +52,9 @@ fn daily_restock(world: &mut World) {
     // split in proportion to the shortfall (floor division, the remainder one
     // unit at a time to the lowest ids), so no Market starves last-in-line.
     let mut budget: std::collections::BTreeMap<EntityId, i64> = std::collections::BTreeMap::new();
+    // Real economy (E11): what the Reserve actually charged each owner today
+    // (the budget above reserves the wanted units, delivered or not).
+    let mut spent: std::collections::BTreeMap<EntityId, i64> = std::collections::BTreeMap::new();
     let mut wants: Vec<(EntityId, u32, u32)> = Vec::new();
     for &mk in world.buildings_of_kind(BuildingKind::Market) {
         // Fix pass (phase 4 review): a Market a riot closed takes no delivery.
@@ -99,9 +102,10 @@ fn daily_restock(world: &mut World) {
             b.stock_food += moved;
         }
         let owner = world.owner_of(mk);
-        if owner.is_some() {
+        if let Some(o) = owner {
             let paid = ownership::charge(world, owner, None, i64::from(moved) * wholesale, Flow::Wholesale);
             world.stats.current.flow_restock += paid;
+            *spent.entry(o).or_default() += paid;
         }
         world.push_event(
             EventKind::Restock,
@@ -113,6 +117,20 @@ fn daily_restock(world: &mut World) {
                 available - moved
             ),
         );
+    }
+    // Real economy (plan E11): the World's food at the ask for a shelf the
+    // Reserve left short, before the free release (phase 3a removes that).
+    // E47: `SetExport` off closes the World's buying only; `CloseWorld`
+    // refuses the imports too (a Market short of food stays short).
+    if crate::systems::world_market::imports_open(world) {
+        // The import budget: the same closing balance, less the Reserve's actual charge.
+        let mut import_budget: std::collections::BTreeMap<EntityId, i64> = std::collections::BTreeMap::new();
+        for &o in budget.keys() {
+            let purse = world.purse(Some(o));
+            let closing = world.comp::<Corp>(o).map_or(purse, |c| c.closing.max(purse));
+            import_budget.insert(o, closing - spent.get(&o).copied().unwrap_or(0));
+        }
+        import_food(world, &mut import_budget, floor, batch);
     }
     reserve_release(world, wh);
 }
@@ -130,8 +148,14 @@ fn reserve_release(world: &mut World, wh: EntityId) {
     if !cfg.enabled || cfg.reserve_release_price <= 0 {
         return;
     }
-    let (threshold, batch, floor) =
+    let (mut threshold, batch, floor) =
         (cfg.reserve_release_price, cfg.reserve_release_batch, world.config.economy.restock_floor);
+    // Real economy (E12): the shelf is capped at `ask + haul_margin`, so a
+    // stranded Market reads "at the ceiling" where L2 read "above 8" (the
+    // release stays until phase 3a removes it).
+    if let Some(ceiling) = price_ceiling(world) {
+        threshold = threshold.min(ceiling - 1);
+    }
     for mk in world.buildings_of_kind(BuildingKind::Market).to_vec() {
         let Some(stock) =
             world.comp::<Building>(mk).filter(|b| !b.demolished && !world.is_closed(mk)).map(|b| b.stock_food)
@@ -177,11 +201,18 @@ fn daily_price(world: &mut World) {
         let base = price_for_stock(&world.config.economy, stock);
         let price = if level == 1.0 { base } else { ((base as f32 * level).round() as i64).clamp(1, cap) };
         // Phase 5: the fraction a whole coin hides (0.9 x 3 = 2.7, not 3).
-        let tenths = if world.config.economy.price_tenths && level != 1.0 {
+        let mut tenths = if world.config.economy.price_tenths && level != 1.0 {
             ((base as f32 * level * 10.0).round() as i64).clamp(10, cap * 10)
         } else {
             price * 10
         };
+        let mut price = price;
+        // Real economy (plan E12): while the World sells, the shelf cannot
+        // pass the ask plus the haul margin (a Market imports past it, E11).
+        if let Some(ceiling) = price_ceiling(world) {
+            price = price.min(ceiling).max(1);
+            tenths = tenths.min(ceiling * 10).max(10);
+        }
         let Some(m) = world.comp_mut::<Market>(market_id) else { continue };
         let old = m.price_food;
         m.price_food = price;
@@ -207,6 +238,18 @@ fn daily_price(world: &mut World) {
             );
         }
     }
+}
+
+/// Real economy (plan E12): the shelf's ceiling, `ask(Food) + haul_margin`,
+/// while the World is open and its Food appetite is above 0; `None` otherwise.
+pub fn price_ceiling(world: &World) -> Option<i64> {
+    use crate::outside::ExportGood;
+    if !crate::systems::world_market::open(world)
+        || crate::systems::world_market::appetite(world, ExportGood::Food) <= 0.0
+    {
+        return None;
+    }
+    Some(crate::systems::world_market::ask(world, ExportGood::Food) + world.config.world_market.haul_margin)
 }
 
 fn daily_spoilage(world: &mut World) {
@@ -304,20 +347,33 @@ pub fn haul(world: &mut World, farm: EntityId, vehicle: Option<u32>) -> u32 {
     let moved = batch.min(b.stock_food);
     b.stock_food -= moved;
     let mut left = moved;
-    if let Some(m) = market {
-        let (room, market_owner) =
-            world.comp::<Building>(m).map_or((0, None), |mb| (market_cap.saturating_sub(mb.stock_food), mb.owner));
-        let mut take = left.min(room);
-        if market_owner != farm_owner && wholesale > 0 {
-            let afford = (world.purse(market_owner).max(0) / wholesale).min(i64::from(u32::MAX)) as u32;
-            take = take.min(afford);
-            let paid = ownership::pay(world, market_owner, farm_owner, i64::from(take) * wholesale, Flow::Wholesale);
-            ownership::credit(world, farm, paid);
+    let target = market.map(|m| (m, world.comp::<Building>(m).and_then(|mb| mb.owner)));
+    let own_target = target.is_some_and(|(_, o)| o == farm_owner);
+    // The owner's own Market first, room permitting (a free transfer).
+    if let Some((m, _)) = target.filter(|_| own_target) {
+        haul_to_market(world, farm, farm_owner, m, &mut left, market_cap, wholesale);
+    }
+    // Real economy (plan E9): with the World open the owner chooses by
+    // price: a rival Market's wholesale against the World's marginal bid,
+    // the higher first (ties: the city's Market); its own Market full, or
+    // none, the World when the bid holds wholesale; the Reserve last.
+    let rival = target.filter(|_| !own_target).map(|(m, _)| m);
+    if left > 0 && crate::systems::world_market::open(world) {
+        let bid = crate::systems::world_market::marginal_bid(world, crate::outside::ExportGood::Food);
+        match rival {
+            Some(m) if bid > wholesale as f64 => {
+                haul_to_world(world, farm, farm_owner, &mut left);
+                haul_to_market(world, farm, farm_owner, m, &mut left, market_cap, wholesale);
+            }
+            Some(m) => {
+                haul_to_market(world, farm, farm_owner, m, &mut left, market_cap, wholesale);
+                haul_to_world(world, farm, farm_owner, &mut left);
+            }
+            None if bid >= wholesale as f64 => haul_to_world(world, farm, farm_owner, &mut left),
+            None => {}
         }
-        if let Some(mb) = world.comp_mut::<Building>(m) {
-            mb.stock_food += take;
-        }
-        left -= take;
+    } else if let Some(m) = rival {
+        haul_to_market(world, farm, farm_owner, m, &mut left, market_cap, wholesale);
     }
     if left > 0 {
         if let Some(w) = world.building_of_kind(BuildingKind::Warehouse) {
@@ -334,6 +390,127 @@ pub fn haul(world: &mut World, farm: EntityId, vehicle: Option<u32>) -> u32 {
         }
     }
     moved
+}
+
+/// The haul's Market leg (M11 D5): room permitting; a rival owner buys at
+/// `wholesale` as far as its purse goes, credited to the Farm.
+fn haul_to_market(
+    world: &mut World,
+    farm: EntityId,
+    farm_owner: Option<EntityId>,
+    m: EntityId,
+    left: &mut u32,
+    market_cap: u32,
+    wholesale: i64,
+) {
+    let (room, market_owner) =
+        world.comp::<Building>(m).map_or((0, None), |mb| (market_cap.saturating_sub(mb.stock_food), mb.owner));
+    let mut take = (*left).min(room);
+    if market_owner != farm_owner && wholesale > 0 {
+        let afford = (world.purse(market_owner).max(0) / wholesale).min(i64::from(u32::MAX)) as u32;
+        take = take.min(afford);
+        let paid = ownership::pay(world, market_owner, farm_owner, i64::from(take) * wholesale, Flow::Wholesale);
+        ownership::credit(world, farm, paid);
+    }
+    if let Some(mb) = world.comp_mut::<Building>(m) {
+        mb.stock_food += take;
+    }
+    *left -= take;
+}
+
+/// Real economy (plan E9): the haul's World leg: the tranche the day's cap
+/// allows at the sloped bid (`world_market::sell`, credited to the Farm).
+fn haul_to_world(world: &mut World, farm: EntityId, farm_owner: Option<EntityId>, left: &mut u32) {
+    if *left == 0 {
+        return;
+    }
+    let (n, _) =
+        crate::systems::world_market::sell(world, Some(farm), farm_owner, crate::outside::ExportGood::Food, *left);
+    *left -= n;
+}
+
+/// Real economy (plan E11): after the Reserve split, a standing Market
+/// still under `restock_floor` whose shelf would price above `ask(Food) +
+/// haul_margin` (the stock price net of a day's expected sales, before
+/// E12's ceiling clamps it) buys
+/// `min(restock_batch, floor − stock)` units it can afford (the same
+/// `Corp.closing` budget as the restock) from the World at the ask:
+/// `ownership::import` (a crossing out plus customs), the book's
+/// `sold_today`, an `Imported` event. A city Market pays from the Treasury.
+fn import_food(world: &mut World, budget: &mut std::collections::BTreeMap<EntityId, i64>, floor: u32, batch: u32) {
+    use crate::outside::ExportGood;
+    let ask = crate::systems::world_market::ask(world, ExportGood::Food);
+    if ask <= 0 {
+        return;
+    }
+    let ceiling = ask + world.config.world_market.haul_margin;
+    let cap = world.config.economy.price_cap;
+    for mk in world.buildings_of_kind(BuildingKind::Market).to_vec() {
+        let Some((stock, owner)) = world
+            .comp::<Building>(mk)
+            .filter(|b| !b.demolished && !world.is_closed(mk))
+            .map(|b| (b.stock_food, b.owner))
+        else {
+            continue;
+        };
+        if stock >= floor {
+            continue;
+        }
+        let level =
+            world.corp_of_building(mk).and_then(|c| world.comp::<Corp>(c)).map_or(1.0, |c| c.level(Niche::Food));
+        // Deviation (the seed-42 Winter of the first 120-day run: the Reserve
+        // drained to 0 on day 119 and 35 starved with no import, the opening
+        // shelf pricing 5-6 under the ceiling 7 and running dry by afternoon):
+        // "the shelf price would exceed the ceiling" is read net of a day's
+        // expected sales (the Market's 7-day mean), since a Market under the
+        // floor that cannot cover its day is short whatever its opening price.
+        let expected = world.comp::<Market>(mk).map_or(0, |m| {
+            if m.sales.is_empty() {
+                0
+            } else {
+                (m.sales.iter().map(|&s| u64::from(s)).sum::<u64>() / m.sales.len() as u64) as u32
+            }
+        });
+        let base = price_for_stock(&world.config.economy, stock.saturating_sub(expected));
+        let would = if level == 1.0 { base } else { ((base as f32 * level).round() as i64).clamp(1, cap) };
+        if would <= ceiling {
+            continue;
+        }
+        let mut want = (floor - stock).min(batch);
+        if let Some(o) = owner {
+            let left = budget.entry(o).or_insert_with(|| {
+                let purse = world.purse(Some(o));
+                world.comp::<Corp>(o).map_or(purse, |c| c.closing.max(purse))
+            });
+            want = want.min(((*left).max(0) / ask).min(i64::from(u32::MAX)) as u32);
+        }
+        if want == 0 {
+            continue;
+        }
+        let paid = ownership::import(world, owner, i64::from(want) * ask, ownership::ImportWhy::Food);
+        let units = u32::try_from(paid / ask).unwrap_or(0).min(want);
+        if units == 0 {
+            continue;
+        }
+        if let Some(o) = owner {
+            if let Some(left) = budget.get_mut(&o) {
+                *left -= i64::from(units) * ask;
+            }
+        }
+        if let Some(b) = world.comp_mut::<Building>(mk) {
+            b.stock_food += units;
+        }
+        crate::systems::world_market::note_sold(world, ExportGood::Food, units, paid);
+        let name = world.name_of(mk);
+        world.push_event(
+            EventKind::Imported,
+            &[mk],
+            format!(
+                "{name} imported {units} food at {ask} from the World (shelf {stock} -> {}, price would be {would})",
+                stock + units
+            ),
+        );
+    }
 }
 
 /// Units `agent` can afford, carry and `market` can supply right now:

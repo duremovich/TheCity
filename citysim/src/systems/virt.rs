@@ -634,7 +634,12 @@ pub fn install_ice(world: &mut World, owner: Option<EntityId>, n: NodeId) -> boo
     if !full && world.purse(owner) < cost {
         return false;
     }
-    ownership::charge(world, owner, payee, cost, flow);
+    if flow == Flow::Import {
+        // Real economy (plan E5): a self-installed tier's import.
+        ownership::import(world, owner, cost, ownership::ImportWhy::Ice);
+    } else {
+        ownership::charge(world, owner, payee, cost, flow);
+    }
     if let Some(p) = profile_mut(world, n) {
         p.ice = tier;
         p.ice_maker = maker;

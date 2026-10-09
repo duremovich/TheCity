@@ -73,7 +73,9 @@ fn couple(w: &World) -> (EntityId, EntityId) {
 
 #[test]
 fn test_purchase_pays_seller_imports_and_conserves() {
-    let mut w = city();
+    // M13 D30's import to the Treasury: the `EC_BASE` path (with the Real
+    // economy's market on it crosses to the World, `tests/econ.rs`).
+    let mut w = World::new(42, Config::load().econ_off());
     // The plan's car and finance terms (phase 5 calibration moved them).
     w.config.assets.price.car = vec![800, 1400];
     w.config.assets.down_frac = 0.25;

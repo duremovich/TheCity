@@ -11,8 +11,9 @@ use crate::world::World;
 /// earlier reads 0.
 /// 1: M15 (the review's explicit version); 2: L2 (venues, the Fab, the
 /// budget band, the export hook; phase 3 adds held prisoners and the ledger);
-/// 3: M16a (contracts, Fixers, missions).
-pub const SAVE_VERSION: u8 = 3;
+/// 3: M16a (contracts, Fixers, missions); 4: the Real economy (the World's
+/// books, `wage_rev` and the revenue windows, Missions, Camps, the till).
+pub const SAVE_VERSION: u8 = 4;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -752,6 +752,22 @@ fn living_section(ui: &mut Ui, world: &World) {
         ui.label("Export in / minted");
         ui.label(format!("{}¢ / {}¢", l.outside_inbound, l.outside_minted));
         ui.end_row();
+        // The Real economy (spec § 3): the one-line trade readout.
+        if citysim::systems::econ::market_on(world) {
+            let e = &s.econ;
+            let coins = citysim::systems::ownership::total_coins(world).max(1);
+            ui.label("Trade");
+            ui.label(format!(
+                "{:+}¢ today, {:+.1}k this month ({:.0} % of coins); World food appetite {:.2}, bid {:.2}, ask {}¢",
+                e.trade_balance,
+                e.trade_balance_30 as f32 / 1000.0,
+                100.0 * e.trade_balance_30 as f32 / coins as f32,
+                e.appetite_food,
+                e.bid_food,
+                e.ask_food
+            ));
+            ui.end_row();
+        }
     });
     if !citysim::systems::leisure::on(world) {
         return;

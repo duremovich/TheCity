@@ -678,7 +678,9 @@ fn test_tax_remainder_of_gone_payee_dropped() {
 
 #[test]
 fn test_full_day_of_flows_conserves_coins() {
-    let mut w = World::new(42, Config::load());
+    // The M11 flows on the `EC_BASE` city (the Reserve buys the haul's
+    // overflow; with the market on the World outbids it, `tests/econ.rs`).
+    let mut w = World::new(42, Config::load().econ_off());
     w.run_ticks(3 * TICKS_PER_DAY);
     assert_eq!(w.tick_of_day(), 0);
     let mut before = ownership::total_coins(&w);

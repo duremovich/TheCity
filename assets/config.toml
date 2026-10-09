@@ -1747,3 +1747,37 @@ ally_cap_n = 3                     # plan C23: expected allies at the target's d
 per_sighting = 15
 cap_sightings = 10
 min_gap_hours = 6
+
+# The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). `enabled = false` (`--econ-off`) is the
+# EC_BASE city (main c53107d) to the column. Every number a placeholder (the late calibration milestone).
+[economy2]
+enabled = true
+market = true                        # E1: phase 1's switch (econ::market_on)
+wages = false                        # E1: phase 2 turns it on
+no_safety_net = false                # E1: phase 3a turns it on (only after the stop rule)
+emigrate_cost = 0                    # E35: contingency, off
+
+# Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
+# (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the
+# shelf cannot pass ask + haul_margin (7, rounded up) while the World sells (E12).
+# Phase 1 calibration (the plan's "Winter export squeeze" risk, seed 42, 120 days): at the spec's cap 450
+# the World outbid the Reserve's wholesale every day, the Reserve drained 20,000 -> 0 by day 119, the one
+# poor Food corp's Market could not afford the ask (purse ~1,500, imports ~250 units a day against ~500
+# short) and 88 starved on days 118-119 (base 3). Cap 350 (the spec's own "~350 units a day" overflow):
+# 0 starved, the Reserve 578 on day 119, export 1,109/day (the spec's 1.1-2.2k band); 250: 3 starved,
+# Reserve 6,002, export 899 (under the band); ask x0.5: 89 (the purse binds, not the price); bid_ref 2:
+# 0 but export 606. The Reserve still drains over a year: phase 2's Farm overtime and the stop rule read it.
+[world_market]
+enabled = true
+treasury_ref = 50000
+revert = 0.05
+sd = 0.03
+appetite_min = 0.3
+appetite_max = 3.0
+food  = { bid_ref = 3.4, bid_floor = 1.5, cap = 350, slope = 0.5, spread = 0.6, season = [0.0, -0.15, 0.0, 0.25] }
+parts = { bid_ref = 16,  bid_floor = 8,   cap = 40,  slope = 0.4, spread = 0.5, season = [0, 0, 0, 0] }
+data  = { bid_ref = 35,  bid_floor = 15,  cap = 12,  slope = 0.5, spread = 0.8, season = [0, 0, 0, 0] }
+haul_margin = 1                      # coins a unit over the ask before a Market imports (E11); the shelf's ceiling (E12)
+customs_rate = 0.1                   # of an import's price, to the Treasury (E5)
+ask_mult = 1.0                       # the famine lever (lower: cheaper imports)
+asset_floor = 2                      # E10 (phase 2): chrome/decks kept in a seller's stock before Parts-equivalent export

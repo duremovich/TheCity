@@ -177,6 +177,15 @@ pub struct Config {
     /// M16a § 3: Locate bounties (16a's three keys; read only behind `contracts::on`).
     #[serde(default = "BountyCfg::off")]
     pub bounty: BountyCfg,
+    /// The Real economy (docs/ECONOMY_V2.md, plan E1): the master switch and
+    /// the phase switches; absent from pre-milestone saves: off.
+    /// `enabled = false` (`--econ-off`) is the `EC_BASE` city to the column.
+    #[serde(default = "Economy2Cfg::off")]
+    pub economy2: Economy2Cfg,
+    /// Spec § 3 `[world_market]`: the World's book per good (phase 1; read
+    /// only behind `econ::market_on`).
+    #[serde(default = "WorldMarketCfg::off")]
+    pub world_market: WorldMarketCfg,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -4919,7 +4928,18 @@ impl Config {
         // M16a (plan C3): contracts stand on L2's wages, venues, ledger and
         // quotas, so `--l2-off` (and with it `v1_profile` and
         // `calibration_city`) turns them off too.
-        self.contracts_off()
+        // Real economy (plan E1): the economy needs `[living]` (the export
+        // hook, the band's state, the jobs), so it goes with it.
+        self.contracts_off().econ_off()
+    }
+
+    /// Real economy (plan E1, E2): every `[economy2]` section `off()`
+    /// (`--econ-off`): no World market, no crossings for migrants or the
+    /// fence, imports to the City as before; the `EC_BASE` city to the column.
+    pub fn econ_off(mut self) -> Config {
+        self.economy2 = Economy2Cfg::off();
+        self.world_market = WorldMarketCfg::off();
+        self
     }
 
     /// M16a (plan C3, C39): every M16a section `off()` (`--contracts-off`):
@@ -5239,5 +5259,130 @@ impl Default for BountyCfg {
 impl BountyCfg {
     pub fn off() -> BountyCfg {
         BountyCfg { per_sighting: 15, cap_sightings: 10, min_gap_hours: 6 }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The Real economy (docs/ECONOMY_V2.md; plan E1, E4, E35)
+// ---------------------------------------------------------------------------
+
+/// `[economy2]` (plan E1): the master switch and the phase switches. Each
+/// part's `on()` reads `living.enabled && economy2.enabled && <its switch>`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Economy2Cfg {
+    /// The master switch (`--econ-off`).
+    pub enabled: bool,
+    /// E1: phase 1's switch (`econ::market_on`, with `[world_market] enabled`).
+    pub market: bool,
+    /// E1: phase 2's switch (`econ::wages_on`).
+    pub wages: bool,
+    /// E1: phase 3a's switch (`econ::no_net`), only after the stop rule.
+    pub no_safety_net: bool,
+    /// E35: a contingency only (0: off): coins an agent needs to start emigrating.
+    pub emigrate_cost: i64,
+}
+
+impl Default for Economy2Cfg {
+    fn default() -> Self {
+        Economy2Cfg::off()
+    }
+}
+
+impl Economy2Cfg {
+    pub fn off() -> Economy2Cfg {
+        Economy2Cfg { enabled: false, market: false, wages: false, no_safety_net: false, emigrate_cost: 0 }
+    }
+}
+
+/// `[world_market] <good>` (spec § 3): one good's bid curve, spread and
+/// season levels (Spring, Summer, Autumn, Winter).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GoodCfg {
+    /// The first unit's bid at appetite and market 1.0.
+    pub bid_ref: f32,
+    /// No unit fetches less.
+    pub bid_floor: f32,
+    /// Units a day at appetite 1.0 (`cap_today = round(cap × appetite)`).
+    pub cap: u32,
+    /// The bid falls by this fraction of `bid_ref` over the day's cap.
+    pub slope: f32,
+    /// The ask over the bid: `ask = bid_ref × market × (1 + spread) × ask_mult`.
+    pub spread: f32,
+    /// E7: a level added to the walk per season.
+    pub season: [f32; 4],
+}
+
+impl Default for GoodCfg {
+    fn default() -> Self {
+        GoodCfg { bid_ref: 1.0, bid_floor: 0.5, cap: 0, slope: 0.5, spread: 0.5, season: [0.0; 4] }
+    }
+}
+
+/// `[world_market]` (spec § 3, plan E4-E12): the World account's book.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorldMarketCfg {
+    pub enabled: bool,
+    /// The World account's treasury, refilled to this both ways each midnight (E6).
+    pub treasury_ref: i64,
+    /// E7: the appetite walk's mean reversion and daily noise.
+    pub revert: f32,
+    pub sd: f32,
+    pub appetite_min: f32,
+    pub appetite_max: f32,
+    pub food: GoodCfg,
+    pub parts: GoodCfg,
+    pub data: GoodCfg,
+    /// E11, E12: coins a unit over the ask before a Market imports; the shelf's ceiling is `ask + this`.
+    pub haul_margin: i64,
+    /// E5: of an import's price, to the Treasury on top.
+    pub customs_rate: f32,
+    /// The famine lever (lower: cheaper imports), over every good's own `ask_mult`.
+    pub ask_mult: f32,
+    /// E10 (phase 2): chrome and decks kept in a seller's stock before Parts-equivalent export.
+    pub asset_floor: u32,
+}
+
+impl Default for WorldMarketCfg {
+    fn default() -> Self {
+        WorldMarketCfg::off()
+    }
+}
+
+impl WorldMarketCfg {
+    pub fn off() -> WorldMarketCfg {
+        WorldMarketCfg {
+            enabled: false,
+            treasury_ref: 50_000,
+            revert: 0.05,
+            sd: 0.03,
+            appetite_min: 0.3,
+            appetite_max: 3.0,
+            food: GoodCfg {
+                bid_ref: 3.4,
+                bid_floor: 1.5,
+                cap: 350,
+                slope: 0.5,
+                spread: 0.6,
+                season: [0.0, -0.15, 0.0, 0.25],
+            },
+            parts: GoodCfg { bid_ref: 16.0, bid_floor: 8.0, cap: 40, slope: 0.4, spread: 0.5, season: [0.0; 4] },
+            data: GoodCfg { bid_ref: 35.0, bid_floor: 15.0, cap: 12, slope: 0.5, spread: 0.8, season: [0.0; 4] },
+            haul_margin: 1,
+            customs_rate: 0.1,
+            ask_mult: 1.0,
+            asset_floor: 2,
+        }
+    }
+
+    /// The good's block.
+    pub fn good(&self, good: crate::outside::ExportGood) -> &GoodCfg {
+        match good {
+            crate::outside::ExportGood::Food => &self.food,
+            crate::outside::ExportGood::Parts => &self.parts,
+            crate::outside::ExportGood::Data => &self.data,
+        }
     }
 }

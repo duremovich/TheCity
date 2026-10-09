@@ -735,6 +735,20 @@ pub fn emigrate(world: &mut World, id: EntityId) {
     let name = world.name_of(id);
     world.stats.current.emigrants += 1;
     world.push_event(EventKind::Emigration, &[id], format!("{name} emigrated"));
+    // Real economy (plan E24): the wallet crosses out to the World (with
+    // the market off it is destroyed with the agent, as before).
+    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins.max(0));
+    world.probe.emigrant_coins += coins;
+    if coins > 0 && crate::systems::econ::market_on(world) {
+        crate::systems::ownership::cross_out(
+            world,
+            Some(id),
+            crate::outside::WORLD_ACCOUNT,
+            coins,
+            crate::systems::ownership::Flow::Migrant,
+            false,
+        );
+    }
     // L2 L15 (review fix): off the HangOut registry (empty with leisure off).
     crate::systems::leisure::leave_spot(world, id);
     world.remove_agent(id);
@@ -790,7 +804,20 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     // M14 V35: an immigrant's keyed draw.
     let hacking = crate::systems::tech::draw_hacking(world, id);
     crate::systems::tech::give_hacking(world, id, hacking);
-    world.insert(id, Wallet { coins: 15 });
+    // Real economy (plan E24): the 15 coins come from the World with the
+    // market on (the wallet is inserted empty and the coins cross in).
+    let market = crate::systems::econ::market_on(world);
+    world.insert(id, Wallet { coins: if market { 0 } else { 15 } });
+    world.probe.immigrant_coins += 15;
+    if market {
+        crate::systems::ownership::cross_in(
+            world,
+            crate::outside::WORLD_ACCOUNT,
+            Some(id),
+            15,
+            crate::systems::ownership::Flow::Migrant,
+        );
+    }
     // M15 W25: an immigrant's own draw (after the Personality it tilts on).
     let social = crate::systems::moves::seed_skills(world, id);
     crate::systems::moves::give_social(world, id, social);

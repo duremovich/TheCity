@@ -779,6 +779,13 @@ pub struct World {
     /// C32: client (agent or building) -> the agents standing a Guard post on it now.
     #[serde(skip)]
     pub contract_guards: BTreeMap<EntityId, SmallVec<[EntityId; 2]>>,
+    // --- The Real economy (docs/ECONOMY_V2.md, plan E3): written only behind
+    // an economy `on()`; at its default it is not saved.
+    #[serde(default, skip_serializing_if = "crate::econ::EconState::is_default")]
+    pub econ: crate::econ::EconState,
+    /// Plan 1.2: the coin census's probe counters (never saved).
+    #[serde(skip)]
+    pub probe: crate::econ::CoinProbe,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1129,6 +1136,8 @@ impl World {
             locate_targets: BTreeMap::new(),
             on_take: BTreeMap::new(),
             contract_guards: BTreeMap::new(),
+            econ: Default::default(),
+            probe: Default::default(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1144,6 +1153,9 @@ impl World {
         // Hotels go up on Lots once the Bar owners are dealt.
         systems::street::seed_derelicts(&mut w);
         systems::ownership::seed(&mut w);
+        // Real economy (plan E4, Seeding): the World account and its books
+        // (no RNG), before any purchase can cross.
+        systems::world_market::seed(&mut w);
         systems::street::seed_hotels(&mut w);
         // M13 D18: the Garages go up last, on the Lots the Hotels left.
         systems::assets::seed_sellers(&mut w);
