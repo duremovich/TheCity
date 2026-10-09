@@ -236,18 +236,58 @@ pub fn parents_of(world: &World, child: EntityId) -> Vec<EntityId> {
     out
 }
 
-/// The camp a take goes to: the open camp with room nearest `from` (city
-/// camps last; ties the lower id), else the city camp over capacity (the
-/// first camp when none is the city's); `(camp, over)`.
+/// The standing Market nearest `from` with at least `units` on its shelf
+/// (ties the lower id); the city's kitchens buy from any Market with stock.
+fn market_with_stock(world: &World, from: TilePos, units: u32) -> Option<EntityId> {
+    world
+        .buildings_of_kind(BuildingKind::Market)
+        .iter()
+        .copied()
+        .filter_map(|m| {
+            let bd = world.comp::<Building>(m).filter(|bd| !bd.demolished && !bd.derelict)?;
+            (bd.stock_food >= units.max(1)).then(|| (bd.door.manhattan(from), m))
+        })
+        .min()
+        .map(|(_, m)| m)
+}
+
+/// Review fix (E38, E39): can `camp` feed its children plus `extra`
+/// tonight: the shelf covers their rations, or the owner can buy the
+/// shortfall (the city's purse is unbounded) from a Market with stock.
+pub fn can_feed_tonight(world: &World, camp: EntityId, extra: usize) -> bool {
+    let n = (children_of(world, camp).len() + extra) as u32;
+    let need = n.div_ceil(2);
+    let stock = world.comp::<Building>(camp).map_or(0, |b| b.stock_food);
+    if stock >= need {
+        return true;
+    }
+    let short = need - stock;
+    let price = world.config.corps.wholesale.max(1);
+    let owner = world.owner_of(camp);
+    let afford = match ownership::owner_kind(world, owner) {
+        ownership::OwnerKind::City => true,
+        _ => world.purse(owner).max(0) >= i64::from(short) * price,
+    };
+    afford && door(world, camp).is_some_and(|d| market_with_stock(world, d, short).is_some())
+}
+
+/// The camp a take goes to: among the open camps with room, one that can
+/// feed tonight first (review fix: a taken child arrives at `take_days`
+/// unfed and the third unfed day kills, before the law's closure), then
+/// corp camps before the city's, then the nearest (ties the lower id);
+/// else the city camp over capacity (the first camp when none is the
+/// city's); `(camp, over)`.
 fn placement(world: &World, from: TilePos) -> Option<(EntityId, bool)> {
     let camps = standing_camps(world);
     let with_room = camps
         .iter()
         .copied()
         .filter(|&c| open(world, c) && children_of(world, c).len() < capacity(world, c))
-        .filter_map(|c| door(world, c).map(|d| (is_city(world, c), d.manhattan(from), c)))
+        .filter_map(|c| {
+            door(world, c).map(|d| (!can_feed_tonight(world, c, 1), is_city(world, c), d.manhattan(from), c))
+        })
         .min()
-        .map(|(_, _, c)| c);
+        .map(|(_, _, _, c)| c);
     if let Some(c) = with_room {
         return Some((c, false));
     }
@@ -426,7 +466,9 @@ fn restock(world: &mut World, camp: EntityId) {
     if want == 0 {
         return;
     }
-    let Some(market) = world.nearest_of_kind(BuildingKind::Market, cd) else { return };
+    // Review fix: the nearest Market with stock (an empty shelf next door
+    // is skipped; nothing in the city: nothing bought, no `CampFood` line).
+    let Some(market) = market_with_stock(world, cd, 1) else { return };
     let price = world.config.corps.wholesale.max(1);
     let have = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
     let owner = world.owner_of(camp);
@@ -516,6 +558,14 @@ fn feed(world: &mut World, camp: EntityId) {
     }
     world.stats.current.econ.camp_unfed += u32::from(unfed);
     for k in starved {
+        // Review fix: a child the service could not feed is a scandal
+        // naming the service (no Treasury-to-pantry path exists to save it).
+        let (name, what) = (world.name_of(k), world.name_of(camp));
+        crate::systems::news::bulletin(
+            world,
+            &[k, camp],
+            format!("the child protective service could not feed {name} at {what}, who starved"),
+        );
         world.kill(k, DeathCause::Starvation);
     }
 }

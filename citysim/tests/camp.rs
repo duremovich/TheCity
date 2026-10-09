@@ -464,3 +464,84 @@ fn test_corps_found_a_camp_when_full() {
     assert_eq!(identity(&w), id0);
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Founded && e.text.contains("a work camp")));
 }
+
+/// Review fix (E38, E39): a corp camp with an empty purse and shelf cannot
+/// feed tonight, so the take goes to the city's camp (which buys from the
+/// Treasury) even when the corp's is nearer; funded, the nearer corp camp
+/// takes the next child and feeds it that night.
+#[test]
+fn test_take_prefers_a_camp_that_can_feed_tonight() {
+    let mut w = world();
+    let (h, c) = family_home(&mut w);
+    let city = city_camp(&w);
+    let corp = w.corps()[0];
+    let door = w.comp::<Building>(h).map(|b| b.door).expect("door");
+    let lot = founding::nearest_lot(&w, door).expect("a Lot");
+    let bad = founding::build_on_lot(&mut w, lot, BuildingKind::Camp, Some(corp)).expect("built");
+    if let Some(cc) = w.comp_mut::<citysim::Corp>(corp) {
+        cc.treasury = 0;
+    }
+    assert!(!camp::can_feed_tonight(&w, bad, 1));
+    assert!(camp::can_feed_tonight(&w, city, 1));
+    if let Some(k) = w.comp_mut::<Child>(c) {
+        k.hunger_days = 2;
+    }
+    assert_eq!(camp::take(&mut w, c), Some(city), "the broke camp is passed over");
+    camp::daily(&mut w);
+    assert_eq!(hunger_days(&w, c), 0, "fed at the city's camp that night");
+    assert!(w.has::<Child>(c));
+    // Funded: the nearer corp camp can feed and takes the next child.
+    if let Some(cc) = w.comp_mut::<citysim::Corp>(corp) {
+        cc.treasury = 5_000;
+    }
+    assert!(camp::can_feed_tonight(&w, bad, 1));
+    let (_, c2) = family_home(&mut w);
+    if let Some(k) = w.comp_mut::<Child>(c2) {
+        k.hunger_days = 2;
+    }
+    let placed = camp::take(&mut w, c2).expect("taken");
+    let d = |b: EntityId| w.comp::<Building>(b).map(|x| x.door.manhattan(door)).unwrap_or(u32::MAX);
+    assert_eq!(placed, if d(bad) <= d(city) { bad } else { city });
+    camp::daily(&mut w);
+    assert_eq!(hunger_days(&w, c2), 0, "fed that night");
+}
+
+/// Review fix: when no camp can feed (every Market empty) the take still
+/// happens, nothing is bought (no `CampFood` line), the child the service
+/// could not feed dies, the day counts it as `camp_unfed` and the Feeds carry
+/// a bulletin naming the service.
+#[test]
+fn test_no_camp_can_feed_counts_the_death_and_tells_the_feeds() {
+    let mut w = world();
+    assert!(citysim::systems::news::on(&w));
+    let (h, c) = family_home(&mut w);
+    let city = city_camp(&w);
+    for m in w.buildings_of_kind(BuildingKind::Market).to_vec() {
+        if let Some(b) = w.comp_mut::<Building>(m) {
+            b.stock_food = 0;
+        }
+    }
+    if let Some(b) = w.comp_mut::<Building>(city) {
+        b.stock_food = 0;
+    }
+    assert!(!camp::can_feed_tonight(&w, city, 1));
+    // Both of the Block's children (a lone child's half ration needs no whole
+    // unit on alternate days, the Block's debt shape).
+    let kids: Vec<EntityId> = w.residents_of(h).iter().copied().filter(|&k| w.has::<Child>(k)).collect();
+    assert_eq!(kids.len(), 2);
+    for &k in &kids {
+        if let Some(x) = w.comp_mut::<Child>(k) {
+            x.hunger_days = 2;
+        }
+        assert_eq!(camp::take(&mut w, k), Some(city), "custody never refuses");
+    }
+    let food0 = w.stats.current.econ.flow_camp_food;
+    camp::daily(&mut w);
+    assert_eq!(w.stats.current.econ.flow_camp_food, food0, "nothing bought from empty shelves");
+    assert!(!w.has::<Child>(c) && w.has::<citysim::Corpse>(c), "the third unfed day killed");
+    assert!(w.stats.current.econ.camp_unfed >= 1);
+    assert!(w
+        .events
+        .iter()
+        .any(|e| e.kind == citysim::EventKind::Story && e.text.contains("could not feed") && e.actors.contains(&c)));
+}
