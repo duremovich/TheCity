@@ -104,6 +104,26 @@ pub fn to_till(world: &mut World, coins: i64) {
     world.econ.recycler_till += coins;
 }
 
+/// Flip readiness (the transition wave; world creation, `no_net` only,
+/// before `econ::seed_capital`, which takes the float out of the corps'
+/// share of the opening hoard): `[treasury] till_initial` coins (at most
+/// the Treasury's) move from the Treasury into the till, the Recycler's
+/// opening float (a purse move). The till otherwise opens empty and the
+/// scrap dealer pays no find until its first Parts sale (three weeks in,
+/// while the city's wallets run dry).
+pub fn seed_till(world: &mut World) {
+    let want = world.config.treasury.till_initial;
+    if want <= 0 || !till_on(world) {
+        return;
+    }
+    let coins = want.min(world.treasury().map_or(0, |t| t.coins));
+    if coins <= 0 {
+        return;
+    }
+    world.purse_add(None, -coins);
+    world.econ.recycler_till += coins;
+}
+
 // ---------------------------------------------------------------------------
 // Jobs v2 P5a (plan J16, J17): the civic budget.
 // ---------------------------------------------------------------------------

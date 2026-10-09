@@ -5015,12 +5015,12 @@ impl Config {
         c.robots = RobotsCfg::off();
         // 2026-10-09 (the off switches retired): the life pass, the Virt
         // plane, the word, the living city, contracts and the World market
-        // run here as in the shipped city. The switches in flight are pinned
-        // off (`[economy2] wages`, `no_safety_net`), so a wages experiment in
-        // `config.toml` never bakes into the stat table; `[life]
-        // violence_fixes` follows the shipped default.
-        c.economy2.wages = false;
-        c.economy2.no_safety_net = false;
+        // run here as in the shipped city. `[economy2] wages` and
+        // `no_safety_net` follow the loaded config too, as `[life]
+        // violence_fixes` does (the flip-readiness round: the table and the
+        // parity test model the off-screen hours of the city the config
+        // ships; on the default config both are off). `v1_profile` still pins
+        // them off.
         c
     }
 
@@ -5065,6 +5065,18 @@ impl Config {
             *b = (f64::from(*b) * f).round() as u32;
         }
         c.bar_owner_coins = (c.bar_owner_coins as f64 * f).round() as i64;
+        // Flip readiness: the no-net Treasury's coin keys (read only with
+        // `[economy2] wages` / `no_safety_net` on) scale too. Unscaled, a
+        // 300-resident city's Treasury sat under the 2,000 city's band, the
+        // civic budget's target read 0 and the first midnight dismissed the
+        // police (the district beats emptied a day later).
+        let t = &mut self.treasury;
+        t.treasury_initial = (t.treasury_initial as f64 * f).round() as i64;
+        t.till_initial = (t.till_initial as f64 * f).round() as i64;
+        for b in &mut t.band {
+            *b = (*b as f64 * f).round() as i64;
+        }
+        t.sanitation_max = (f64::from(t.sanitation_max) * f).round().clamp(0.0, 255.0) as u8;
         self
     }
 }
@@ -5388,6 +5400,12 @@ pub struct Economy2Cfg {
     /// J4: tiles off the hiring key for an adult laid off from the same
     /// role in the last `demography::REHIRE_DAYS` (0: no bonus).
     pub rehire_bonus: u32,
+    /// Flip readiness (the transition wave; read only with wages on): at
+    /// world creation each corp posts its buildings' places up to the
+    /// staffing ceiling while its working capital covers `seed_staff_days`
+    /// days of the added payroll, and the jobless fill them by the hiring
+    /// key before day 0 (`wages::seed_staff`; 0: off, the dole era's seed).
+    pub seed_staff_days: f32,
 }
 
 impl Default for Economy2Cfg {
@@ -5422,6 +5440,7 @@ impl Default for Economy2Cfg {
             raise_on_shortage_only: false,
             skill_w: 0.0,
             rehire_bonus: 0,
+            seed_staff_days: 0.0,
         }
     }
 }
@@ -5570,6 +5589,12 @@ pub struct TreasuryCfg {
     /// Phase 3a (plan key, the transition wave): what the Recycler's till
     /// pays a scavenger's find with `no_net` (0: `[life] scavenge_coins`).
     pub scrap_coins: i64,
+    /// Flip readiness (the transition wave; `no_net` only): coins moved from
+    /// the Treasury into the Recycler's till at world creation (a purse
+    /// move, `treasury::seed_till`): the scrap dealer's opening float, so a
+    /// find pays before its first Parts sale (0: the till opens empty and
+    /// pays nothing until the Recycler has sold, ~day 21-24).
+    pub till_initial: i64,
     /// Jobs v2 J16 (P5a, `no_net` only): the civic budget's share of the
     /// trailing receipts (`Flow::{Tax, Fine, Customs, Property}`).
     pub civic_share: f32,
@@ -5599,6 +5624,7 @@ impl Default for TreasuryCfg {
             band: [8_000, 25_000],
             tax_initial: -1.0,
             scrap_coins: 0,
+            till_initial: 0,
             civic_share: 0.8,
             payout_days: 60,
             receipts_days: 14,

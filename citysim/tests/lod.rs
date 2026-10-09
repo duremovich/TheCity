@@ -368,3 +368,199 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
         }
     }
 }
+
+/// The flip-readiness round's no-net city at day 1, 10:00, and a jobless
+/// homeless Statistical adult in it with nothing to eat and no coins (no
+/// pantry a housemate could refill within the hour). The table's no-net
+/// rates are set by each test.
+fn no_net_stat_agent() -> (World, citysim::EntityId) {
+    use citysim::{Inventory, Job, Wallet};
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    assert!(citysim::systems::econ::no_net(&w));
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let id = w
+        .tier(Lod::Statistical)
+        .iter()
+        .copied()
+        .find(|&a| {
+            citysim::systems::demography::is_adult(&w, a)
+                && !w.has::<Sentence>(a)
+                && w.comp::<Job>(a).and_then(|j| j.employer).is_none()
+        })
+        .expect("a jobless Statistical adult");
+    w.set_home(id, None);
+    w.comp_mut::<Inventory>(id).expect("inv").food = 0;
+    w.comp_mut::<Inventory>(id).expect("inv").stolen_food = 0;
+    w.comp_mut::<Wallet>(id).expect("wallet").coins = 0;
+    if let Some(t) = w.stat_table.as_mut() {
+        t.p_scavenge = Some([0.0; citysim::STAT_ROWS]);
+        t.p_beg = Some([0.0; citysim::STAT_ROWS]);
+        t.p_desperate = Some([0.0; 3]);
+    }
+    (w, id)
+}
+
+/// One hour of the Statistical pass alone (each agent's one turn).
+fn stat_hour(w: &mut World) {
+    for _ in 0..TICKS_PER_HOUR {
+        lod::run_statistical(w);
+        w.tick += 1;
+    }
+}
+
+/// Flip readiness, the no-net income path: a broke jobless Statistical
+/// adult scavenges on its row's `p_scavenge` and the find is paid from the
+/// Recycler's till (`jobs::scavenge_find`, Full's Scavenge); a table without
+/// the rate (the dole city's) never scavenges off screen.
+#[test]
+fn test_no_net_statistical_scavenge_is_paid_from_the_till() {
+    use citysim::Wallet;
+    for rated in [true, false] {
+        let (mut w, id) = no_net_stat_agent();
+        w.config.life.scavenge_p = 1.0;
+        // Every broke jobless Statistical adult scavenges this hour: a till
+        // deep enough for all of them.
+        w.econ.recycler_till = 1_000_000;
+        w.comp_mut::<Needs>(id).expect("needs").hunger = 1.0;
+        if let Some(t) = w.stat_table.as_mut() {
+            t.p_scavenge = rated.then_some([1.0; citysim::STAT_ROWS]);
+        }
+        let till = w.econ.recycler_till;
+        stat_hour(&mut w);
+        let coins = w.comp::<Wallet>(id).map_or(0, |x| x.coins);
+        let paid = w.config.treasury.scrap_coins;
+        if rated {
+            assert_eq!(coins, paid, "the hour's find paid {paid}");
+            assert!(w.econ.recycler_till <= till - paid, "from the till");
+        } else {
+            assert_eq!(coins, 0, "no rate, no off-screen scavenging");
+        }
+    }
+}
+
+/// Flip readiness: with no net a hungry Statistical agent who cannot buy
+/// steals by its lawfulness bucket's `p_desperate` (the lawful go hungry, as
+/// the Full planner's theft cost has them), and a theft takes a Full Market
+/// theft's two units (one eaten at once).
+#[test]
+fn test_no_net_need_theft_follows_lawfulness() {
+    use citysim::{EventKind, Inventory, Personality};
+    for lawful in [false, true] {
+        let (mut w, id) = no_net_stat_agent();
+        w.comp_mut::<Personality>(id).expect("personality").lawfulness = if lawful { 0.9 } else { 0.1 };
+        {
+            let n = w.comp_mut::<Needs>(id).expect("needs");
+            n.hunger = 0.2;
+            n.starving_since = None;
+        }
+        if let Some(t) = w.stat_table.as_mut() {
+            t.p_desperate = Some([1.0, 0.0, 0.0]);
+        }
+        let start = w.events.back().map_or(0, |e| e.id + 1);
+        stat_hour(&mut w);
+        let stole =
+            w.events.iter().any(|e| e.id >= start && e.kind == EventKind::Theft && e.actors.first() == Some(&id));
+        if lawful {
+            assert!(!stole, "a lawful agent goes hungry rather than steal");
+            assert_eq!(w.comp::<Inventory>(id).map(|i| i.food), Some(0));
+        } else {
+            assert!(stole, "the lawless steal the meal they cannot buy");
+            assert!(w.comp::<Needs>(id).is_some_and(|n| n.hunger > 0.2), "and eat it");
+            assert_eq!(w.comp::<Inventory>(id).map(|i| (i.food, i.stolen_food)), Some((1, 1)), "two taken, one eaten");
+        }
+    }
+}
+
+/// Flip readiness (night porter): with wages on, a worker promoted on its
+/// own shift stands at its workplace whatever the phase (a night shift
+/// starts at the Hotel, not across town), and a homeless worker off shift
+/// at night stands at its workplace rather than the cheapest Market.
+#[test]
+fn test_night_shift_worker_promoted_at_the_workplace() {
+    use citysim::{Building, Job, Position, TilePos};
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    let role = w.config.trade_role("night_porter").expect("the Night Porter trade");
+    // Day 1 (a workday), 00:30: the night shift is on.
+    w.run_ticks(TICKS_PER_DAY + 30);
+    let p = w
+        .workers(role)
+        .iter()
+        .copied()
+        .find(|&a| {
+            !w.has::<Sentence>(a)
+                && w.comp::<Job>(a).is_some_and(|j| {
+                    j.on_shift(w.tick_of_day()) && citysim::exec::routine::workday_of(&w, a, j, j.shift_key_at(w.tick))
+                })
+        })
+        .expect("a porter on shift");
+    let hotel = w.comp::<Job>(p).and_then(|j| j.employer).expect("its Hotel");
+    let door = w.comp::<Building>(hotel).expect("hotel").door;
+    let far = TilePos { x: 3, y: 3 };
+    for homeless in [false, true] {
+        if homeless {
+            w.set_home(p, None);
+        }
+        lod::set_lod(&mut w, p, Lod::Statistical);
+        w.leave_building(p);
+        w.comp_mut::<Position>(p).expect("pos").tile = far;
+        lod::set_lod(&mut w, p, Lod::Full);
+        assert_eq!(w.comp::<Position>(p).map(|x| x.tile), Some(door), "homeless {homeless}: at the Hotel on shift");
+    }
+    // Off shift at night (a day worker's hours), a homeless worker sleeps near the work.
+    if let Some(j) = w.comp_mut::<Job>(p) {
+        j.shifts = vec![(600, 1080)];
+    }
+    lod::set_lod(&mut w, p, Lod::Statistical);
+    assert_eq!(w.comp::<Position>(p).map(|x| x.tile), Some(door), "a homeless worker's night at the workplace");
+}
+
+/// Flip readiness (review): `p_desperate` is learned from adults, so a
+/// Statistical minor keeps the M10 rule: hungry is no theft, starving is.
+#[test]
+fn test_no_net_child_keeps_the_starving_theft_rule() {
+    use citysim::{EventKind, Inventory, Wallet};
+    for starving in [false, true] {
+        let mut cfg = Config::load();
+        cfg.economy2.wages = true;
+        cfg.economy2.no_safety_net = true;
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+        let id = w
+            .tier(Lod::Statistical)
+            .iter()
+            .copied()
+            .find(|&a| citysim::systems::demography::is_adult(&w, a) && !w.has::<Sentence>(a))
+            .expect("a Statistical agent");
+        // Under age (a minor with a Brain: the off-screen eat path's child).
+        w.comp_mut::<citysim::Identity>(id).expect("identity").age_days =
+            citysim::systems::demography::ADULT_AGE_DAYS - 1;
+        assert!(!citysim::systems::demography::is_adult(&w, id));
+        w.set_home(id, None);
+        w.comp_mut::<Inventory>(id).expect("inv").food = 0;
+        w.comp_mut::<Inventory>(id).expect("inv").stolen_food = 0;
+        if let Some(x) = w.comp_mut::<Wallet>(id) {
+            x.coins = 0;
+        }
+        if let Some(t) = w.stat_table.as_mut() {
+            t.p_scavenge = Some([0.0; citysim::STAT_ROWS]);
+            t.p_beg = Some([0.0; citysim::STAT_ROWS]);
+            t.p_desperate = Some([1.0; 3]);
+        }
+        {
+            let n = w.comp_mut::<Needs>(id).expect("needs");
+            n.hunger = if starving { 0.0 } else { 0.2 };
+            n.starving_since = None;
+        }
+        let start = w.events.back().map_or(0, |e| e.id + 1);
+        stat_hour(&mut w);
+        let stole =
+            w.events.iter().any(|e| e.id >= start && e.kind == EventKind::Theft && e.actors.first() == Some(&id));
+        assert_eq!(stole, starving, "starving {starving}: a child steals only when starving");
+    }
+}

@@ -229,3 +229,33 @@ fn test_civic_state_survives_a_save() {
     assert_eq!(back.levers.sanitation_count, w.levers.sanitation_count);
     assert_eq!(back.econ, w.econ);
 }
+
+/// Flip readiness: `Config::scaled_to` scales the no-net Treasury's coin
+/// keys (the band, the kept balance, the till float, the Sanitation
+/// ceiling), so a 300-resident no-net city keeps its police: unscaled, its
+/// Treasury sat under the 2,000 city's band, the civic target read 0 and
+/// the first midnight dismissed every guard (the district beats were empty
+/// a day later, with or without a save in between).
+#[test]
+fn test_scaled_no_net_city_keeps_its_police_and_beats() {
+    let full = config();
+    let cfg = config().scaled_to(300);
+    let f = 300.0 / f64::from(full.world.population);
+    let s = |v: i64| (v as f64 * f).round() as i64;
+    assert_eq!(cfg.treasury.band, [s(full.treasury.band[0]), s(full.treasury.band[1])]);
+    assert_eq!(cfg.treasury.treasury_initial, s(full.treasury.treasury_initial));
+    assert_eq!(cfg.treasury.till_initial, s(full.treasury.till_initial));
+    let mut w = World::new(19, cfg);
+    assert!(econ::no_net(&w));
+    w.run_ticks(TICKS_PER_DAY + 10);
+    assert!(w.levers.guard_count > 0, "the first midnight keeps police");
+    assert!(!w.law().expect("law").beats.is_empty(), "the first midnight deals the beats");
+    let mut back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("the save loads");
+    back.run_ticks(TICKS_PER_DAY);
+    w.run_ticks(TICKS_PER_DAY);
+    for x in [&w, &back] {
+        assert!(x.levers.guard_count > 0, "police a day later: lever {}", x.levers.guard_count);
+        assert!(!x.law().expect("law").beats.is_empty(), "beats a day later");
+    }
+    assert_eq!(back.law().map(|l| l.beats.clone()), w.law().map(|l| l.beats.clone()), "the load runs on alike");
+}

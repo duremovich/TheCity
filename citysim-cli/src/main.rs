@@ -1429,6 +1429,18 @@ struct HourTally {
     chats_home: u16,
     /// `stat_policy::features` at the hour's start (`--rows-csv` only).
     features: Option<[f32; citysim::systems::stat_policy::N_FEATURES]>,
+    /// The no-net income path (a no-net city only): a jobless adult below
+    /// its savings line at the hour's start (`p_scavenge`'s and `p_beg`'s
+    /// hours), and the Scavenges and Begs it began this hour.
+    earn: bool,
+    scav: u16,
+    beg: u16,
+    /// An adult below the meal price at the hour's start who was hungry
+    /// (below the table's hunger edge) at some tick of the hour
+    /// (`p_desperate`'s hours), and its thefts while hungry.
+    broke: bool,
+    hungry: bool,
+    desperate: u16,
 }
 
 /// Build a Full-only world (seed 1000, straight-line walks, gangless, the
@@ -1456,6 +1468,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         hunger_edge: 0.4,
         p_dole_day: 1.0,
         p_theft_caught: None,
+        p_scavenge: None,
+        p_beg: None,
+        p_desperate: None,
         rows: Vec::new(),
     };
     let mut counts = [[0u64; 5]; STAT_ROWS];
@@ -1468,6 +1483,14 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let (mut dole_days, mut dole_taken) = (0u64, 0u64);
     // Every Theft, every Arrest, and the arrests of a thief (`p_theft_caught`).
     let (mut thefts_all, mut arrests, mut theft_arrests) = (0u64, 0u64, 0u64);
+    // The no-net income path (flip readiness): written only in a no-net
+    // city, so the dole city's table is unchanged. Per row: earning
+    // agent-hours with a Scavenge, with a Beg, and all earning agent-hours;
+    // per lawfulness bucket: thefts by a hungry thief below the meal price,
+    // and the hungry agent-hours below the meal price.
+    let no_net = citysim::systems::econ::no_net_cfg(&config);
+    let (mut scav, mut beg, mut scav_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    let (mut desp, mut desp_denom) = ([0u64; 3], [0u64; 3]);
     let with_rows = args.rows_csv.is_some();
     let mut rows_out = match &args.rows_csv {
         Some(path) => {
@@ -1497,9 +1520,21 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let hunger = world.comp::<Needs>(id).map_or(1.0, |n| n.hunger);
             let courting = citysim::systems::social::known_candidate(world, id, 0.3).is_some();
             let features = with_rows.then(|| citysim::systems::stat_policy::features(world, id));
+            let adult = no_net && citysim::systems::demography::is_adult(world, id);
+            let earn = adult && !world.has::<citysim::Job>(id) && below_savings(world, id);
+            let broke = adult
+                && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
+                    < citysim::systems::life::meal_price(world, id);
             hour.insert(
                 id,
-                HourTally { row: header.index(world.phase(), law, hunger), courting, features, ..Default::default() },
+                HourTally {
+                    row: header.index(world.phase(), law, hunger),
+                    courting,
+                    features,
+                    earn,
+                    broke,
+                    ..Default::default()
+                },
             );
         }
     };
@@ -1531,6 +1566,22 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     if started == just {
                         t.extra[1] += 1;
                     }
+                }
+                if t.earn {
+                    match brain.exec {
+                        citysim::ExecState::Use { kind: citysim::ActionKind::Scavenge, started, .. }
+                            if started == just =>
+                        {
+                            t.scav += 1
+                        }
+                        citysim::ExecState::Use { kind: citysim::ActionKind::Beg, started, .. } if started == just => {
+                            t.beg += 1
+                        }
+                        _ => {}
+                    }
+                }
+                if t.broke && !t.hungry {
+                    t.hungry = world.comp::<Needs>(id).is_some_and(|n| n.hunger < header.hunger_edge);
                 }
                 if let citysim::ExecState::Use { kind: citysim::ActionKind::Chat, started, .. } = brain.exec {
                     if started == just {
@@ -1565,7 +1616,17 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     EventKind::Theft => {
                         thefts_all += 1;
                         let thief = e.actors.first().copied();
-                        if thief.is_some_and(|a| world.comp::<Needs>(a).is_some_and(|n| n.hunger > 0.0)) {
+                        let hunger = thief.and_then(|a| world.comp::<Needs>(a)).map(|n| n.hunger);
+                        // A no-net city: a theft for the meal the thief cannot
+                        // buy (below the meal price at the hour's start,
+                        // hungry now) is `p_desperate`'s, not `p_steal`'s.
+                        let need = thief.and_then(|a| hour.get(&a)).is_some_and(|t| t.broke)
+                            && hunger.is_some_and(|h| h < header.hunger_edge);
+                        if need {
+                            if let Some(t) = thief.and_then(|a| hour.get_mut(&a)) {
+                                t.desperate += 1;
+                            }
+                        } else if hunger.is_some_and(|h| h > 0.0) {
                             hit(0, thief.as_ref(), &mut hour);
                         }
                     }
@@ -1639,6 +1700,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     }
                     counts[t.row][dominant] += 1;
                     denom[t.row] += 1;
+                    if t.earn {
+                        scav[t.row] += u64::from(t.scav.min(1));
+                        beg[t.row] += u64::from(t.beg.min(1));
+                        scav_denom[t.row] += 1;
+                    }
+                    if t.broke && t.hungry {
+                        desp[(t.row % 6) / 2] += u64::from(t.desperate.min(1));
+                        desp_denom[(t.row % 6) / 2] += 1;
+                    }
                     court_denom[t.row] += u64::from(t.courting);
                     met[t.row] += u64::from(t.met);
                     chats[t.row][0] += u64::from(t.chats);
@@ -1772,7 +1842,20 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let p_dole_day = (dole_taken as f32 / dole_days.max(1) as f32).min(1.0);
     let p_theft_caught = Some((theft_arrests as f32 / thefts_all.max(1) as f32).min(1.0));
     eprintln!("thefts {thefts_all}, arrests {arrests}, of a thief {theft_arrests}");
-    let table = StatTable { rows, p_dole_day, p_theft_caught, ..header };
+    let (p_scavenge, p_beg, p_desperate) = if no_net {
+        eprintln!(
+            "no-net: scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours; desperate {desp:?} of {desp_denom:?} hungry broke hours"
+        );
+        let rate = |n: u64, d: u64| (n as f32 / d.max(1) as f32).min(1.0);
+        (
+            Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i]))),
+            Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i]))),
+            Some(std::array::from_fn(|i| rate(desp[i], desp_denom[i]))),
+        )
+    } else {
+        (None, None, None)
+    };
+    let table = StatTable { rows, p_dole_day, p_theft_caught, p_scavenge, p_beg, p_desperate, ..header };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
     let text = format!(
         "# generated by calibrate v2: seeds {}..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",

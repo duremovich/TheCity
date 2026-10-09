@@ -584,6 +584,62 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
     posted
 }
 
+/// Flip readiness (the transition wave; wages on, `[economy2]
+/// seed_staff_days` > 0): the no-dole city seeded near its own staffing
+/// rather than the dole era's (most adults jobless at day 0, the wallets
+/// spent in a week, half the city on the street by day 35). At world
+/// creation, per corp (ascending), the places [`post`] would offer: per
+/// standing building, every role of the kind up to [`ceiling_at`] (+ Farm
+/// overtime), while the corp's
+/// working capital ÷ `seed_staff_days` covers its payroll plus each added
+/// place's marginal wage (there is no 7-day window to read the margin
+/// from yet, nor the 7-day sales `hire_demand` reads: no niche filter; the
+/// windows' margin rule and demand take over once they fill). Then the
+/// day's job search fills every open post from the jobless by the hiring
+/// key. Returns the places posted.
+pub fn seed_staff(world: &mut World) -> u32 {
+    let days = world.config.economy2.seed_staff_days;
+    if !on(world) || days <= 0.0 {
+        return 0;
+    }
+    let order = food_order(world);
+    let now = world.tick;
+    let mut posted = 0;
+    for corp in world.corps() {
+        let Some(c) = world.comp::<Corp>(corp) else { continue };
+        let (buildings, exec, purse) = (c.buildings.clone(), c.exec, c.treasury);
+        let rev_mult = c.wage_mult * c.wage_rev;
+        let payroll: i64 = ownership::employees_of(world, corp)
+            .into_iter()
+            .filter(|&a| Some(a) != exec)
+            .filter_map(|a| world.comp::<Job>(a).map(|j| gross_wage(world, j)))
+            .sum();
+        let mut room = purse.max(0) as f32 / days - payroll as f32;
+        let overtime = farm_overtime(world, corp, order);
+        for b in buildings {
+            if !standing(world, b) {
+                continue;
+            }
+            let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
+            for (role, _) in ownership::roles_for(world, kind) {
+                let ceiling = ceiling_at(world, b, role) + overtime_of(kind, role, overtime);
+                let (hires, open) = places(world, b, role, exec);
+                let marginal = world.config.wage(role) as f32 * rev_mult;
+                let mut n = hires.len() + open;
+                while n < ceiling && room >= marginal {
+                    world.vacancies.entry(b).or_default().push(role);
+                    world.econ.vacancy_since.entry((b, role)).or_insert(now);
+                    room -= marginal;
+                    n += 1;
+                    posted += 1;
+                }
+            }
+        }
+    }
+    crate::systems::demography::job_search(world);
+    posted
+}
+
 /// E18: the corp's newest hire (ties the higher id), its exec excepted and,
 /// under `[corps] hunker_spares_farms`, its Farm staff (M11's rule for
 /// Hunker: Vat Techs are the city's food; a deviation recorded).

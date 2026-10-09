@@ -571,7 +571,7 @@ pub fn laid_off_from(world: &World, id: EntityId, role: Role) -> bool {
 
 /// Daily, for each vacancy in BTreeMap order: the nearest unemployed adult
 /// (home door to workplace door, ties by id) is hired.
-fn job_search(world: &mut World) {
+pub(crate) fn job_search(world: &mut World) {
     // J4: layoffs older than the bonus's window are forgotten.
     if !world.laid_off.is_empty() {
         let now = world.tick;

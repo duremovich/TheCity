@@ -1498,28 +1498,9 @@ pub fn end_shift(world: &mut World, id: EntityId) {
 /// scrap price, `Flow::Sanitation`) when it is not negative; with `no_net`
 /// from the Recycler's till (E33).
 fn scavenge(world: &mut World, id: EntityId) -> StepResult {
-    use rand::Rng;
-    // An hour turns up something worth selling on `scavenge_p` of tries
-    // (the agent's keyed stream).
-    // L2 L9: with jobs on, the district's litter scales the find (the
-    // same draw on the same stream).
-    let p = crate::systems::jobs::scavenge_p(world, id);
-    let found = world.rng.agent(id).random::<f32>() < p;
-    // Real economy E33 (phase 3a): with `no_net` the find is paid from the
-    // Recycler's till alone (an empty till pays 0; the find is still scrap).
-    let till = crate::systems::treasury::till_on(world);
-    let purse = if till { world.econ.recycler_till } else { world.treasury().map_or(0, |t| t.coins) };
-    // The transition wave (phase 3a): the till pays a find at
-    // `[treasury] scrap_coins` (the scrap's resale value) when set.
-    let price = match world.config.treasury.scrap_coins {
-        c if till && c > 0 => c,
-        _ => world.config.life.scavenge_coins,
-    };
-    let pay = price.min(purse.max(0));
-    if till && found && pay <= 0 {
-        crate::systems::jobs::add_scrap(world);
-    }
-    if pay <= 0 || !found {
+    // The find and its pay (`jobs::scavenge_find`, shared with the
+    // Statistical tier's no-net hour since the flip-readiness round).
+    if !crate::systems::jobs::scavenge_find(world, id) {
         // L2 (L29, `[lod] budget`): a dry hour is an hour honestly spent,
         // not an abort; `scavenge_dry_max` of them in a row cool Earn.
         let now = world.tick;
@@ -1535,17 +1516,6 @@ fn scavenge(world: &mut World, id: EntityId) -> StepResult {
         world.stats.current.budget.scavenge_dry += 1;
         return StepResult::Done;
     }
-    // L2 shadow fixes item 21: booked as Scavenge (it read "Sanitation +1
-    // from the City" in the diaries).
-    let flow = crate::systems::ownership::Flow::Scavenge;
-    if till {
-        crate::systems::ownership::till_out(world, Some(id), pay, crate::systems::ownership::Flow::Scavenge);
-    } else {
-        crate::systems::ownership::pay(world, None, Some(id), pay, flow);
-    }
-    world.remember(id, MemoryKind::Paid, None, 0.1, 0.0, false);
-    // L2 L9: the find is scrap for the Recycler's Parts.
-    crate::systems::jobs::add_scrap(world);
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.scavenge_dry = 0;
     }

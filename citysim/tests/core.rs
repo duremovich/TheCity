@@ -12,8 +12,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use citysim::systems::econ;
-use citysim::{Brain, Config, Controller, Corp, CorpOrder, DayRow, EntityId, EventKind, Lod, Posture, Sentence, World};
+use citysim::systems::{demography, econ};
+use citysim::{
+    Brain, Config, Controller, Corp, CorpOrder, DayRow, EntityId, EventKind, Household, Job, Lod, Posture, Sentence,
+    World,
+};
 use citysim::{TICKS_PER_DAY, TICKS_PER_HOUR};
 
 /// The ticks/s floor (release only; 2026-10-06, Dylan): a catastrophic
@@ -34,6 +37,14 @@ const STARVATION_MAX_120: f64 = 200.0;
 const ASSAULTS_PER_DAY_MAX: f64 = 42.7;
 /// Seeded corps still trading at the run's end (the year gate's number).
 const CORPS_ALIVE_MIN: usize = 4;
+// Jobs and room J24/J25 (overturnable rows; P9a's bounds, carried by the
+// flip-readiness round): from day 30, a jobless majority or a city on the
+// street is broken, not brutal. Asserted only on a no-net city (`[economy2]
+// wages` and `no_safety_net` on): the dole city is jobless by design.
+/// J24: employed free adults over free adults (adults not jailed), every day from day 30.
+const EMPLOYED_MIN_SHARE: f64 = 0.5;
+/// J25: homeless adults over adults, every day from day 30.
+const HOMELESS_MAX_SHARE: f64 = 0.25;
 
 /// One seed's run: the day rows, every event kind's count, the mechanism
 /// marks that need more than a kind, and the sanity readings.
@@ -51,6 +62,10 @@ struct SeedRun {
     corps_seeded: usize,
     corps_alive: usize,
     tps: f64,
+    /// J24/J25 at each day's end: (adults, free adults, employed free adults, homeless adults).
+    adults: Vec<(u32, u32, u32, u32)>,
+    /// The run is a no-net city (J24/J25 asserted).
+    no_net: bool,
 }
 
 impl SeedRun {
@@ -82,6 +97,8 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         corps_seeded: seeded.len(),
         corps_alive: 0,
         tps: 0.0,
+        adults: Vec::new(),
+        no_net: econ::no_net(&w),
     };
     let mut cursor = 0u64;
     // Prisoners at the last hour's end, by their tier then.
@@ -147,11 +164,39 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         *r.marks.entry("Mission meal").or_insert(0) += row.econ.mission_meals;
         r.assaults.push(assaults);
         r.rows.push(row);
+        if r.no_net {
+            r.adults.push(adult_counts(&w));
+        }
     }
     r.tps = (days * TICKS_PER_DAY) as f64 / started.elapsed().as_secs_f64();
     let alive: BTreeSet<EntityId> = w.corps().into_iter().collect();
     r.corps_alive = seeded.iter().filter(|c| alive.contains(c)).count();
     r
+}
+
+/// J24/J25's day-end counts: (adults, free adults, employed free adults,
+/// homeless adults). An adult is a living citizen with a Brain of age; free
+/// is not jailed; homeless is a Household with no home (the `homeless`
+/// column's rule).
+fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
+    let (mut adults, mut free, mut employed, mut homeless) = (0u32, 0u32, 0u32, 0u32);
+    for a in w.citizens() {
+        if !w.has::<Brain>(a) || !demography::is_adult(w, a) {
+            continue;
+        }
+        adults += 1;
+        if matches!(w.comp::<Household>(a), Some(Household { home: None, .. })) {
+            homeless += 1;
+        }
+        if w.has::<Sentence>(a) {
+            continue;
+        }
+        free += 1;
+        if w.has::<Job>(a) {
+            employed += 1;
+        }
+    }
+    (adults, free, employed, homeless)
 }
 
 /// The collapse bounds over days `[from, to)` of one run, as failure lines.
@@ -187,6 +232,31 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
         worst = worst.max(run);
     }
     fail(worst <= 2, format!("every Market empty {worst} days running <= 2"));
+    // J24/J25 from day 30 (the day index 29, as the Treasury's), no-net only.
+    let days: Vec<(u64, (u32, u32, u32, u32))> =
+        (from.max(29)..to).filter_map(|d| r.adults.get(d as usize).map(|&c| (d, c))).collect();
+    let share = |n: u32, of: u32| f64::from(n) / f64::from(of.max(1));
+    if let Some(&(d, (_, free, emp, _))) =
+        days.iter().min_by(|a, b| share(a.1 .2, a.1 .1).total_cmp(&share(b.1 .2, b.1 .1)))
+    {
+        let e = share(emp, free);
+        fail(
+            e >= EMPLOYED_MIN_SHARE,
+            format!("J24 employed {emp} of {free} free adults ({e:.3}) on day {d} >= {EMPLOYED_MIN_SHARE}"),
+        );
+    }
+    if let Some(&(d, (adults, _, _, hl))) =
+        days.iter().max_by(|a, b| share(a.1 .3, a.1 .0).total_cmp(&share(b.1 .3, b.1 .0)))
+    {
+        let h = share(hl, adults);
+        let over = days.iter().filter(|(_, c)| share(c.3, c.0) > HOMELESS_MAX_SHARE).count();
+        fail(
+            h <= HOMELESS_MAX_SHARE,
+            format!(
+                "J25 homeless {hl} of {adults} adults ({h:.3}) on day {d} <= {HOMELESS_MAX_SHARE} ({over} days over)"
+            ),
+        );
+    }
 }
 
 /// A mechanism bullet: its name, and how to count it on one seed.

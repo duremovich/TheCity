@@ -389,6 +389,50 @@ pub fn add_scrap(world: &mut World) {
     world.scrap = world.scrap.saturating_add(1);
 }
 
+/// An hour's scavenge (`exec::actions` Scavenge's find, shared with the
+/// Statistical tier's no-net hour): one draw on the agent's stream against
+/// `scavenge_p`; a find is paid from the Recycler's till with `no_net` (an
+/// empty till pays 0, the find is still scrap), else from the Treasury, at
+/// `[treasury] scrap_coins` (with the till, when set) or `[life]
+/// scavenge_coins`. Returns whether the hour paid.
+pub fn scavenge_find(world: &mut World, id: EntityId) -> bool {
+    use rand::Rng;
+    // An hour turns up something worth selling on `scavenge_p` of tries
+    // (the agent's keyed stream).
+    // L2 L9: with jobs on, the district's litter scales the find (the
+    // same draw on the same stream).
+    let p = scavenge_p(world, id);
+    let found = world.rng.agent(id).random::<f32>() < p;
+    // Real economy E33 (phase 3a): with `no_net` the find is paid from the
+    // Recycler's till alone (an empty till pays 0; the find is still scrap).
+    let till = crate::systems::treasury::till_on(world);
+    let purse = if till { world.econ.recycler_till } else { world.treasury().map_or(0, |t| t.coins) };
+    // The transition wave (phase 3a): the till pays a find at
+    // `[treasury] scrap_coins` (the scrap's resale value) when set.
+    let price = match world.config.treasury.scrap_coins {
+        c if till && c > 0 => c,
+        _ => world.config.life.scavenge_coins,
+    };
+    let pay = price.min(purse.max(0));
+    if till && found && pay <= 0 {
+        add_scrap(world);
+    }
+    if pay <= 0 || !found {
+        return false;
+    }
+    // L2 shadow fixes item 21: booked as Scavenge (it read "Sanitation +1
+    // from the City" in the diaries).
+    if till {
+        ownership::till_out(world, Some(id), pay, Flow::Scavenge);
+    } else {
+        ownership::pay(world, None, Some(id), pay, Flow::Scavenge);
+    }
+    world.remember(id, crate::components::MemoryKind::Paid, None, 0.1, 0.0, false);
+    // L2 L9: the find is scrap for the Recycler's Parts.
+    add_scrap(world);
+    true
+}
+
 /// Plan L9: the scavenge find's chance: `scavenge_p × max(1, 0.5 +
 /// litter(d))` with jobs on (`d` the agent's district, litter its dirty
 /// share 0..1). L2 phase 5: floored at `scavenge_p` (the spec's `0.5 +

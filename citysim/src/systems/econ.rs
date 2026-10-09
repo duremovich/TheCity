@@ -80,11 +80,24 @@ pub fn identity(world: &World) -> i64 {
 /// `Flow::Subsidy` ledger line (capital: no corp reads it as trading);
 /// `Corp.treasury_ref` rises by each share. `total_coins` is unchanged.
 /// Returns the shares. Only with `wages_on`; never on a loaded save (E40).
+/// Flip readiness: the Recycler's opening float (`treasury::seed_till`,
+/// moved just before) comes out of this hoard, so the Treasury still opens
+/// at its working balance (the civic budget's band reads it on day 1).
 pub fn seed_capital(world: &mut World) -> Vec<(crate::entity::EntityId, i64)> {
     if !wages_on(world) {
         return Vec::new();
     }
-    let amount = world.config.world.treasury_initial - world.config.treasury.treasury_initial;
+    let float = if crate::systems::treasury::till_on(world) { world.econ.recycler_till.max(0) } else { 0 };
+    let amount = world.config.world.treasury_initial - world.config.treasury.treasury_initial - float;
+    // The float must come out of a hoard that holds it: `[treasury]
+    // treasury_initial + till_initial` past `[world] treasury_initial` would
+    // leave the corps no working capital (and the Treasury short).
+    debug_assert!(
+        float == 0 || amount >= 0,
+        "[treasury] treasury_initial {} + the till's float {float} exceed [world] treasury_initial {}: the corps get no capital",
+        world.config.treasury.treasury_initial,
+        world.config.world.treasury_initial
+    );
     if amount <= 0 {
         return Vec::new();
     }

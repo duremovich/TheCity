@@ -156,6 +156,27 @@ pub struct StatTable {
     /// `[crime] stat_theft_caught_p`.
     #[serde(default)]
     pub p_theft_caught: Option<f32>,
+    /// The no-net income path (flip readiness, read only with `econ::no_net`):
+    /// the chance a jobless adult below its savings line (`SAVINGS_DAYS`
+    /// meals) spends the hour scavenging, per row (phase, lawfulness and
+    /// hunger at the hour's start, as `rows`). `calibrate` writes it only in
+    /// a no-net city: the share of such Full agent-hours with a Scavenge
+    /// begun. A table without it: no off-screen scavenging (the dole city's
+    /// table).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_scavenge: Option<[f32; STAT_ROWS]>,
+    /// As `p_scavenge`, for the hours the Full agent begs (`lod::stat_beg`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_beg: Option<[f32; STAT_ROWS]>,
+    /// The no-net need theft (flip readiness, read only with
+    /// `econ::no_net`): the chance a hungry adult (below `hunger_edge`) who
+    /// cannot buy a meal steals one in the hour, per lawfulness bucket.
+    /// `calibrate` writes it only in a no-net city: Full thefts by a hungry
+    /// thief below the meal price per such agent-hour (those thefts leave
+    /// `p_steal`). A table without it: the M10 desperation theft (starving,
+    /// whatever the lawfulness).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_desperate: Option<[f32; 3]>,
     pub rows: Vec<StatRow>,
 }
 
@@ -1222,9 +1243,15 @@ impl World {
         systems::virt::seed_ice(&mut w);
         // M15 W28: every corp's and the Law's opening competence.
         systems::competence::seed(&mut w);
+        // Flip readiness (the transition wave; no_net): the Recycler's
+        // opening float, out of the opening hoard (a purse move, no RNG).
+        systems::treasury::seed_till(&mut w);
         // Real economy phase 2 (plan E14, Seeding): the hoard into the
         // corps' working capital, last (no RNG; a plain purse move).
         systems::econ::seed_capital(&mut w);
+        // Flip readiness (the transition wave; wages on): the no-dole city's
+        // staffing before day 0, from the capital just seeded (no RNG).
+        systems::wages::seed_staff(&mut w);
         w
     }
 

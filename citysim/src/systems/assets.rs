@@ -1675,7 +1675,10 @@ pub fn buy_noted(
         if import > 0 && !business && crate::systems::wages::on(world) {
             let cap = world.config.economy2.asset_import_per_day;
             if let Some(c) = seller_owner.and_then(|o| world.comp_mut::<crate::components::Corp>(o)) {
-                if cap > 0 && c.import_today + import > cap {
+                // Flip readiness: the day's first import goes through
+                // whatever its size (a T1 car's 480 against a 300 cap never
+                // sold); the cap refuses the ones after it.
+                if cap > 0 && c.import_today > 0 && c.import_today + import > cap {
                     return Err(format!("{} has spent today's import budget", c.name));
                 }
                 c.import_today += import;

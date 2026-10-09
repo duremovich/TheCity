@@ -1833,6 +1833,13 @@ household_rent = false               # phase 3a (read only with no_safety_net): 
 raise_on_shortage_only = true        # J2 hire before raise: wage_rev steps up only on a shortage (a vacancy unfilled shortage_days)
 skill_w = 0.5                        # J4: the hiring key takes round(skill_w x 100 x the role's skill) tiles off the distance
 rehire_bonus = 40                    # J4: tiles off the key for an adult laid off from the same role in the last 30 days
+# Flip readiness (the transition wave; read only with wages on): at world creation each corp posts its places up to the
+# staffing ceiling while its working capital covers this many days of the added payroll, filled by the hiring key before
+# day 0 (wages::seed_staff; 0: off, the dole era's seed: ~22 % of adults employed at day 0, the wallets spent in a week).
+# A/B on the no-net city with the Statistical no-net income path, 42-47 x 120 (homeless/adults peak; starvation):
+# 0: 0.089-0.123 (the never-hired starve instead: 488-554); 14: 0.062-0.159, 293-380 (820 employed at day 0, the
+# capital binds); 5: 0.070-0.098, 224-281 (1,100 employed at day 0, every corp role at its ceiling: 5 does not bind).
+seed_staff_days = 5
 
 # Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
 # (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the
@@ -1925,6 +1932,13 @@ tax_step = 0.01
 band = [8000, 25000]
 tax_initial = 0.05                   # phase 3a (plan key): the rate a no_net city opens with (negative: [levers] tax_rate)
 scrap_coins = 3                      # phase 3a (plan key): a find paid from the Recycler's till with no_net (0: [life] scavenge_coins)
+# Flip readiness (the transition wave; no_net): the Recycler's opening float, out of the corps' share of the opening hoard
+# (treasury::seed_till before econ::seed_capital; the Treasury keeps its 12,000). Empty, the till pays no find until the
+# Recycler's first Parts sale (day 21-24 on seed 42) while ~900 never-hired adults scavenge. With seed_staff_days 5, 42-47 x
+# 120 starvation: 0: 194-276; 5,000 (from the Treasury): 165-222 (164-208 with the four-passer beg); 10,000 (from the
+# Treasury): 133-187, but the Treasury opened at ~1,850, under the civic band, and the police fell 36 -> 16 on days 2-5;
+# 10,000 out of the hoard (kept): 145-205.
+till_initial = 10000
 # Jobs v2 J16 (P5a; read only with [economy2] wages and no_safety_net on): the civic budget. Each midnight
 # target = civic_share x the mean of the last receipts_days days' receipts (tax, fines, customs, property)
 # + max(0, Treasury - band hi) / payout_days, spent only above band lo; allocated in order to the police
