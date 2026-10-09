@@ -5,6 +5,7 @@
 //! a simulated city.
 
 use citysim::ledger::{ActiveSource, VictimClass, ViolenceSource};
+use citysim::systems::econ::identity;
 use citysim::systems::{assets, demography, fixes, fviolence, law, lod};
 use citysim::{
     ActionInstance, ActionKind, AssetKind, Brain, Config, DeathCause, DistrictId, EntityId, Gang, GoalKind, HoleKind,
@@ -406,10 +407,6 @@ fn test_rent_from_wage_leaves_a_meal_in_arrears() {
 // Fix 5: an immigrant arrives with a seeded adult's savings
 // ---------------------------------------------------------------------------
 
-fn coin_identity(w: &World) -> i64 {
-    citysim::systems::ownership::total_coins(w) + w.outside.treasuries() - w.outside.minted
-}
-
 /// Spawn immigrants until one lands in a Home of `tier` (or homeless with
 /// `None`): its coins, and the coin identity before and after.
 fn immigrant_coins(fix: bool, tier: Option<u8>) -> Option<(i64, i64, i64)> {
@@ -417,9 +414,9 @@ fn immigrant_coins(fix: bool, tier: Option<u8>) -> Option<(i64, i64, i64)> {
     w.config.life.violence_fixes = fix;
     assert!(citysim::systems::econ::market_on(&w), "the World market books the crossing");
     for _ in 0..200 {
-        let before = coin_identity(&w);
+        let before = identity(&w);
         let id = demography::spawn_immigrant(&mut w);
-        let after = coin_identity(&w);
+        let after = identity(&w);
         let t = w
             .comp::<Household>(id)
             .and_then(|h| h.home)

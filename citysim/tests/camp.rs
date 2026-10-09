@@ -5,7 +5,8 @@
 //! a trait on an adult; every coin moves between integer purses.
 
 use citysim::econ::CampRaised;
-use citysim::systems::{assets, camp, demography, founding, grudges, ownership};
+use citysim::systems::econ::identity;
+use citysim::systems::{assets, camp, demography, founding, grudges};
 use citysim::word::{GrudgeCause, Grudges};
 use citysim::{
     Building, BuildingKind, Child, Config, EntityId, Good, Household, Identity, Memory, MemoryKind, Position, Skills,
@@ -69,11 +70,6 @@ fn test_camp_parts_pay_inputs_with_wages_on() {
 
 fn world() -> World {
     World::new(42, config())
-}
-
-/// L2's conservation identity.
-fn identity(w: &World) -> i64 {
-    ownership::total_coins(w) + w.outside.treasuries() - w.outside.minted
 }
 
 fn city_camp(w: &World) -> EntityId {

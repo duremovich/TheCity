@@ -4,6 +4,7 @@
 //! building's purse; the identity `total_coins + Σ outside − minted` holds.
 
 use citysim::goap::ActionKind;
+use citysim::systems::econ::identity;
 use citysim::systems::{charity, demography, lod, ownership, street};
 use citysim::word::Deed;
 use citysim::{
@@ -13,11 +14,6 @@ use citysim::{
 
 fn world() -> World {
     World::new(42, Config::load())
-}
-
-/// L2's conservation identity (`tests/outside.rs`).
-fn identity(w: &World) -> i64 {
-    ownership::total_coins(w) + w.outside.treasuries() - w.outside.minted
 }
 
 fn mission(w: &World) -> EntityId {

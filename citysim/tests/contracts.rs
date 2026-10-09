@@ -7,6 +7,7 @@
 //! by one seeded dice roll; escrow is coins held on a record.
 
 use citysim::contract::{Broker, ContractKind, ContractStatus, Origin, Posting, Render, Target};
+use citysim::systems::econ::identity;
 use citysim::systems::{bind, contracts, demography, fviolence, grudges, hunt, law, lod, missions, ownership};
 use citysim::word::{Deed, GrudgeCause, Grudges, HuntWhy, Reputation};
 use citysim::{
@@ -16,11 +17,6 @@ use citysim::{
 
 fn world() -> World {
     World::new(42, Config::load())
-}
-
-/// L2's conservation identity (`tests/outside.rs`).
-fn identity(w: &World) -> i64 {
-    ownership::total_coins(w) + w.outside.treasuries() - w.outside.minted
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
