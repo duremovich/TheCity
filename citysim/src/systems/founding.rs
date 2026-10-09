@@ -17,8 +17,10 @@ use crate::world::World;
 /// found_clinic` / `found_garage` flag; M15 W36 the Feed, with `[news]` on;
 /// L2 L6 the six leisure kinds, priced only with `jobs::on`; M16a C8 the
 /// Fixer, priced only with `contracts::on` and chosen only by a founder
-/// who could run one, `fixer_ok`).
-const FOUNDABLE: [BuildingKind; 13] = [
+/// who could run one, `fixer_ok`; the Real economy E26 the Mission, priced
+/// only with `charity::on` and chosen only by a lawful, humble founder,
+/// `charity::founder_ok`).
+const FOUNDABLE: [BuildingKind; 14] = [
     BuildingKind::Bar,
     BuildingKind::Home,
     BuildingKind::Hotel,
@@ -32,6 +34,7 @@ const FOUNDABLE: [BuildingKind; 13] = [
     BuildingKind::Den,
     BuildingKind::Lounge,
     BuildingKind::Fixer,
+    BuildingKind::Mission,
 ];
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
@@ -67,6 +70,9 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         BuildingKind::Fab if crate::systems::jobs::on(world) => Some(c.fab),
         // M16a (plan C8): a Fixer's office, with contracts on.
         BuildingKind::Fixer if crate::systems::contracts::on(world) => Some(c.fixer),
+        // Real economy E26, E37: a Mission with charities on, a Camp (corps) with camps on.
+        BuildingKind::Mission if crate::systems::charity::on(world) => Some(c.mission),
+        BuildingKind::Camp if crate::systems::camp::on(world) => Some(c.camp),
         _ => None,
     }
 }
@@ -139,6 +145,9 @@ pub fn build_on_lot(
             | BuildingKind::Fab
             // M16a (plan C8).
             | BuildingKind::Fixer
+            // Real economy E26, E37.
+            | BuildingKind::Mission
+            | BuildingKind::Camp
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -235,6 +244,9 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
         let cut = world.config.fixers.fixer_cut;
         world.insert(b, crate::contract::Broker { cut, ..Default::default() });
     }
+    // Real economy E26, E37: a Mission opens with its purse, a Camp with its state.
+    crate::systems::charity::on_convert(world, b, kind);
+    crate::systems::camp::on_convert(world, b, kind);
     world.invalidate_flow_fields_for_lot(rect);
     // M12 D1: a new Block joins its district's `homes`.
     crate::systems::districts::rebuild(world);
@@ -286,7 +298,8 @@ pub fn refit_with(
     charge: bool,
 ) -> Result<EntityId, String> {
     // M16a (plan C9): a seeded Fixer may stand in a refitted derelict.
-    if !kind.is_leisure() && kind != BuildingKind::Fixer {
+    // Real economy E26, E37: a Mission or a Camp too.
+    if !kind.is_leisure() && !matches!(kind, BuildingKind::Fixer | BuildingKind::Mission | BuildingKind::Camp) {
         return Err(format!("cannot refit as a {}", kind.label()));
     }
     let cost = if charge { found_cost(world, kind).ok_or("not foundable")? } else { 0 };
@@ -356,6 +369,18 @@ pub fn fixer_ok(world: &World, agent: EntityId) -> bool {
 
 /// `choose_kind_for` with the Fixer among the kinds when `fixer` (C8).
 pub fn choose_kind_with(world: &World, coins: i64, lounge_ok: bool, fixer: bool) -> Option<BuildingKind> {
+    choose_kind_full(world, coins, lounge_ok, fixer, false)
+}
+
+/// `choose_kind_with` with the Mission among the kinds when `mission`
+/// (Real economy E26: `charity::founder_ok`).
+pub fn choose_kind_full(
+    world: &World,
+    coins: i64,
+    lounge_ok: bool,
+    fixer: bool,
+    mission: bool,
+) -> Option<BuildingKind> {
     let pop = living(world).max(1) as f32;
     let per = |kind: BuildingKind| -> f32 {
         match kind {
@@ -381,13 +406,18 @@ pub fn choose_kind_with(world: &World, coins: i64, lounge_ok: bool, fixer: bool)
             BuildingKind::Den => world.config.corps.residents_per_den.max(1) as f32,
             BuildingKind::Lounge => world.config.corps.residents_per_lounge.max(1) as f32,
             BuildingKind::Fixer => world.config.fixers.fixers_per_pop.max(1) as f32,
+            BuildingKind::Mission => world.config.charity.residents_per_mission.max(1) as f32,
             _ => world.config.world.residents_per_home.max(1) as f32,
         }
     };
     let mut best: Option<(f32, BuildingKind)> = None;
     for kind in FOUNDABLE {
         let Some(cost) = agent_found_cost(world, kind) else { continue };
-        if coins < cost || (kind == BuildingKind::Lounge && !lounge_ok) || (kind == BuildingKind::Fixer && !fixer) {
+        if coins < cost
+            || (kind == BuildingKind::Lounge && !lounge_ok)
+            || (kind == BuildingKind::Fixer && !fixer)
+            || (kind == BuildingKind::Mission && !mission)
+        {
             continue;
         }
         let count = world
@@ -445,7 +475,15 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
     if is_exec(world, agent) {
         return false;
     }
-    let kind = || choose_kind_with(world, coins, lounge_ok(world, agent, coins), fixer_ok(world, agent));
+    let kind = || {
+        choose_kind_full(
+            world,
+            coins,
+            lounge_ok(world, agent, coins),
+            fixer_ok(world, agent),
+            crate::systems::charity::founder_ok(world, agent),
+        )
+    };
     if any_vacant_lot(world) {
         return kind().is_some();
     }
@@ -484,8 +522,14 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
         return Err("cannot found".into());
     }
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
-    let kind = choose_kind_with(world, coins, lounge_ok(world, agent, coins), fixer_ok(world, agent))
-        .ok_or("nothing affordable")?;
+    let kind = choose_kind_full(
+        world,
+        coins,
+        lounge_ok(world, agent, coins),
+        fixer_ok(world, agent),
+        crate::systems::charity::founder_ok(world, agent),
+    )
+    .ok_or("nothing affordable")?;
     let cost = agent_found_cost(world, kind).ok_or("not foundable")?;
     let from = world
         .comp::<Household>(agent)

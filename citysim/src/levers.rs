@@ -431,6 +431,13 @@ pub enum PlayerCommand {
     SetCustoms(f32),
     /// God: the World neither buys nor sells (`SetExport` closes buying only).
     CloseWorld(bool),
+    /// Real economy E28, E47: a gift into a Mission's purse. With no player
+    /// body yet (M18) the god's gift is an outside donor's (`cross_in` from
+    /// the World account), so the coin identity holds.
+    Donate {
+        mission: EntityId,
+        amount: i64,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1054,6 +1061,17 @@ impl World {
                     }
                     Err(e) => {
                         self.push_event(EventKind::PlayerActionFailed, &[], format!("PostContract: {e}"));
+                    }
+                }
+            }
+            PlayerCommand::Donate { mission, amount } => {
+                match crate::systems::charity::god_donate(self, *mission, *amount) {
+                    Ok(moved) => {
+                        let text = format!("God gave {moved} to {}", self.name_of(*mission));
+                        self.push_event(EventKind::PlayerAction, &[*mission], text);
+                    }
+                    Err(e) => {
+                        self.push_event(EventKind::PlayerActionFailed, &[*mission], format!("Donate: {e}"));
                     }
                 }
             }
@@ -2162,6 +2180,8 @@ impl World {
                 label: None,
                 feed: None,
                 venue: None,
+                charity: None,
+                camp: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

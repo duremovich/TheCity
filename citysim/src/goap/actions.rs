@@ -153,6 +153,12 @@ pub enum ActionKind {
     Network,
     /// At a Guard record's client: stand the day's post.
     Guard,
+    // --- The Real economy (plan E27, E28): the charity's scripted steps;
+    // never in `PLANNABLE`, `allowed` false, started by `charity::can_start`.
+    /// At a Mission with stock: a free meal from the kitchen.
+    EatAlms,
+    /// At a Mission's door: a gift from the surplus into its purse.
+    Donate,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -281,6 +287,8 @@ impl ActionKind {
             Role::Fabber => ActionKind::FabWork,
             // M16a (plan C8): the Fixer's staff clerk at its office.
             Role::Fixer => ActionKind::ClerkWork,
+            // Real economy E26: a Volunteer's shift is the clerk's at its Mission.
+            Role::Volunteer => ActionKind::ClerkWork,
         }
     }
 
@@ -372,6 +380,8 @@ impl ActionKind {
                 | ActionKind::Preach
                 | ActionKind::Network
                 | ActionKind::Guard
+                | ActionKind::EatAlms
+                | ActionKind::Donate
         )
     }
 
@@ -379,6 +389,12 @@ impl ActionKind {
     /// planned; started by `contracts::can_start`).
     pub fn is_contract_step(self) -> bool {
         matches!(self, ActionKind::Network | ActionKind::Guard)
+    }
+
+    /// Real economy E27, E28: a charity plan's scripted step (never
+    /// planned; started by `charity::can_start`).
+    pub fn is_charity_step(self) -> bool {
+        matches!(self, ActionKind::EatAlms | ActionKind::Donate)
     }
 
     /// L2 L14: a leisure plan's scripted step (never planned; started by
@@ -1231,6 +1247,8 @@ impl ActionKind {
             k if k.is_leisure_step() => false,
             // M16a (plan C10): scripted only.
             k if k.is_contract_step() => false,
+            // Real economy E27, E28: scripted only.
+            k if k.is_charity_step() => false,
             _ => true,
         }
     }
@@ -1321,6 +1339,8 @@ impl ActionKind {
             k if k.is_leisure_step() => true,
             // M16a (plan C10): likewise `contracts::can_start`.
             k if k.is_contract_step() => true,
+            // Real economy E27, E28: likewise `charity::can_start`.
+            k if k.is_charity_step() => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1787,6 +1807,8 @@ impl ActionKind {
             // M16a (plan C10, C15): scripted, never planned.
             ActionKind::Network => 4.0,
             ActionKind::Guard => 2.0,
+            // Real economy E27, E28: scripted, never searched.
+            ActionKind::EatAlms | ActionKind::Donate => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

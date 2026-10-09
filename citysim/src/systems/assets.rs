@@ -1408,6 +1408,11 @@ pub fn parts_market(world: &mut World) {
         let own = fabs.iter().take_while(|(rival, _)| !rival).count();
         let rivals = fabs.split_off(own);
         sources.extend(fabs.into_iter().map(|(_, f)| (world.owner_of(f), f)));
+        // Real economy E40: the work camps' Parts, after the buyer's own
+        // Fabs and before the Recycler (none stands with `[camp]` off).
+        for c in crate::systems::camp::standing_camps(world) {
+            sources.push((world.owner_of(c), c));
+        }
         if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
             sources.push((None, r));
         }

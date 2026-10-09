@@ -9,9 +9,11 @@
 //! set of counters and 30-day rings on the outside account; a "crossing" is
 //! coins moved between an integer purse and that account.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
+
+use crate::entity::EntityId;
 
 /// Days of the World's per-good rings (`WorldBook.{bought, sold, paid, charged, caps}`).
 pub const BOOK_DAYS: usize = 30;
@@ -152,4 +154,86 @@ pub struct CoinProbe {
     pub loot_lost: i64,
     /// Coins a god command minted or burned (`FundGang`, `SetTreasury`, …).
     pub god_coins: i64,
+}
+
+// ---------------------------------------------------------------------------
+// Phase 3b/3c (plan E26, E37, E41): the charity's purse, the camp's state, the
+// CampRaised trait.
+// ---------------------------------------------------------------------------
+
+/// Days the `Charity.served` and `CampState.fed_days` rings keep.
+pub const RING_DAYS: usize = 30;
+
+/// E26 (spec § 4): a Mission's (or the Chapel's) kitchen, cots and purse.
+/// `Building.charity`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Charity {
+    /// The Mission's own coins (in `total_coins`).
+    pub purse: i64,
+    /// 30-day sums per donor (the thanks and the god readout); the World's
+    /// (a god `Donate`) is keyed `EntityId::NONE`.
+    pub donors: BTreeMap<EntityId, i64>,
+    pub meals_today: u16,
+    pub cots_today: u16,
+    pub clinic_today: u16,
+    /// Meals served, the last 30 days, newest last.
+    pub served: VecDeque<u16>,
+    /// The hour's meals served (`meals_per_hour`, doubled by a Volunteer on
+    /// shift); cleared on the hour.
+    pub meals_this_hour: u16,
+    pub hour_key: u64,
+}
+
+impl Charity {
+    pub fn is_none(v: &Option<Charity>) -> bool {
+        v.is_none()
+    }
+}
+
+/// E37 (addendum 19): a work camp's state. `Building.camp`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CampState {
+    /// The children housed here, ascending (their `Household.home` is the camp).
+    pub children: Vec<EntityId>,
+    /// Per day, newest last: 1 when every child ate, 0 when one went unfed.
+    pub fed_days: VecDeque<u8>,
+    pub unfed_today: u16,
+    /// Consecutive days with an unfed child; the Feed story at 1, the closure
+    /// at `[camp] close_days`.
+    pub scandal_days: u8,
+    pub closed_by_law: bool,
+    /// Parts made today.
+    pub output_today: u32,
+    /// Days since the camp opened (the `CampRaised` share's denominator for
+    /// a child taken on day 0).
+    pub days_open: u32,
+    /// The day each child arrived, in `children` order (`(child, day)`).
+    pub arrived: Vec<(EntityId, u64)>,
+    /// Days a child was fed here, per child (`(child, fed days)`).
+    pub fed_by_child: Vec<(EntityId, u32)>,
+    /// Unfed child-days in the last 30 days (the scandal's standing hit).
+    pub unfed_days: VecDeque<u16>,
+    /// The last day a take found no place and this camp took over capacity
+    /// (E37: corps found a camp within 7 days of one).
+    pub last_overflow_day: Option<u64>,
+}
+
+impl CampState {
+    pub fn is_none(v: &Option<CampState>) -> bool {
+        v.is_none()
+    }
+}
+
+/// E41: the trait of an adult raised at a camp (saved).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CampRaised {
+    pub camp: EntityId,
+    /// The camp's owner at release (`None` the city).
+    pub owner: Option<EntityId>,
+    /// Days in the camp.
+    pub days: u32,
+    /// Fed days ÷ days in camp.
+    pub fed_share: f32,
 }

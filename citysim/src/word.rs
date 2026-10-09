@@ -40,10 +40,13 @@ pub enum Deed {
     /// M16a (plan C21): `actor` (the buyer) put a contract record on
     /// `object` (the target); known first-hand to the record's `known_by`.
     Hired,
+    /// Real economy E29: `actor` gave to a Mission (`object` the building);
+    /// written first-hand into the donor for gifts of `rep_gift_min`.
+    Gave,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 16] = [
+    pub const ALL: [Deed; 17] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -60,6 +63,7 @@ impl Deed {
         Deed::Repaid,
         Deed::Poached,
         Deed::Hired,
+        Deed::Gave,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -86,6 +90,7 @@ impl Deed {
             Deed::Repaid => "repaid",
             Deed::Poached => "poached",
             Deed::Hired => "hired",
+            Deed::Gave => "gave",
         }
     }
 
@@ -350,6 +355,9 @@ pub enum GrudgeCause {
     /// M16a (plan C21): the target's kin, friend, leader or comrade learned
     /// that the holder's grudge target put a contract record on them.
     Hired,
+    /// Real economy E38, E41: the child protective service (the Law) took
+    /// the holder's child, or the camp (its owner) fed the holder badly.
+    ChildTaken,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

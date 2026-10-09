@@ -321,6 +321,10 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
             if cfg.estate_buyer_cap > 0 && taken.get(&id).is_some_and(|&k| k >= cfg.estate_buyer_cap) {
                 return true;
             }
+            // Real economy E37: agents and gangs never own a Camp.
+            if kind == BuildingKind::Camp && !world.has::<Corp>(id) {
+                return true;
+            }
             let Some(c) = world.comp::<Corp>(id) else { return false };
             let Some(n) = niche else { return false };
             (cfg.estate_niche_only && !c.niches.contains(&n))

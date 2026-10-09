@@ -334,6 +334,9 @@ pub fn daily(world: &mut World) {
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
         .collect();
     sellers.sort_unstable();
+    // Real economy phase 3c (E10, E40): the work camps' Parts, after the Fabs
+    // and before the Recycler (none stands with `[camp]` off).
+    sellers.extend(crate::systems::camp::standing_camps(world));
     if let Some(r) = world.building_of_kind(BuildingKind::Cemetery) {
         sellers.push(r);
     }

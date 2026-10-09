@@ -257,10 +257,22 @@ pub enum EventKind {
     Imported,
     /// `[]`: a good's appetite walk crossed ±0.25 from 1.0.
     AppetiteShift,
+    // --- The Real economy phase 3b/3c (plan E44; amber).
+    /// `[donor or NONE, mission]`: a gift of 5 or more into a Mission's purse.
+    Donated,
+    /// `[mission]`: the day's meals and cots (one a day per Mission).
+    MissionServed,
+    /// `[child, parent, parent]`: the child protective service took a child
+    /// to a work camp (a Life row for the child and each parent).
+    ChildTaken,
+    /// `[adult, camp]`: released from a camp at adulthood (a Life row).
+    CampRaised,
+    /// `[camp, owner or NONE]`: the law closed a camp that could not feed.
+    CampClosed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 131] = [
+    pub const ALL: [EventKind; 136] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -392,6 +404,11 @@ impl EventKind {
         EventKind::GuardTaken,
         EventKind::Imported,
         EventKind::AppetiteShift,
+        EventKind::Donated,
+        EventKind::MissionServed,
+        EventKind::ChildTaken,
+        EventKind::CampRaised,
+        EventKind::CampClosed,
     ];
 }
 
@@ -504,6 +521,10 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         (E::Witness, 0) => row(LifeKind::Witnessed),
         // M14 V14: `Flatlined [runner, owner or NONE]`.
         (E::Flatlined, 0) => row(LifeKind::Flatlined),
+        // Real economy E38, E41: `ChildTaken [child, parents..]`, `CampRaised [adult, camp]`.
+        (E::ChildTaken, 0) => row(LifeKind::Taken),
+        (E::ChildTaken, _) => row(LifeKind::ChildTaken),
+        (E::CampRaised, 0) => row(LifeKind::CampRaised),
         _ => None,
     }
 }

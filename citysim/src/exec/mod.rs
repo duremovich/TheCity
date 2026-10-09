@@ -1055,7 +1055,12 @@ impl World {
                 .or_else(|| {
                     self.comp::<crate::components::Job>(agent)
                         .and_then(|j| j.employer)
-                        .filter(|&e| crate::systems::jobs::is_l2_building(self, e))
+                        // The Real economy E26: a Mission's Volunteers work
+                        // at it (a city deed's wage desk would be the Hall).
+                        .filter(|&e| {
+                            crate::systems::jobs::is_l2_building(self, e)
+                                || crate::systems::charity::is_mission(self, e)
+                        })
                 })
                 .or_else(|| self.wage_desk(agent)),
             // M12 D21: the booked Hotel, else the one the agent can reach and pay.

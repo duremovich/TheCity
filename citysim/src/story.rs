@@ -187,6 +187,13 @@ fn body(world: &World, id: EntityId, e: &LifeEvent) -> Vec<Span> {
         LifeKind::Founded => vec![text("opened a business")],
         LifeKind::Incorporated => vec![text("incorporated a company")],
         LifeKind::Flatlined => vec![text("flatlined in the Virt")],
+        // Real economy E38, E41.
+        LifeKind::Taken => vec![text("was taken to a work camp by the child protective service")],
+        LifeKind::ChildTaken => match e.other {
+            Some(_) => vec![text("lost "), who(""), text(" to the child protective service")],
+            None => vec![text("lost a child to the child protective service")],
+        },
+        LifeKind::CampRaised => vec![text("came of age in a work camp")],
         LifeKind::Immigrated => vec![text("arrived in the city")],
         LifeKind::Buried => match e.other {
             Some(_) => vec![text("was laid to rest by "), who("")],

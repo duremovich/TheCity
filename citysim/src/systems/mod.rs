@@ -20,6 +20,8 @@
 pub mod assets;
 pub mod bind;
 pub mod budget;
+pub mod camp;
+pub mod charity;
 pub mod chrome;
 pub mod classes;
 pub mod competence;

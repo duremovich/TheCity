@@ -179,6 +179,38 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 }
                 staff(ui, app, world, id, "Staff");
             }
+            // Real economy E26 (plan 3b.5): the Mission's purse and service.
+            BuildingKind::Mission => {
+                if let Some(c) = &b.charity {
+                    let served: u32 = c.served.iter().map(|&m| u32::from(m)).sum();
+                    ui.label(format!(
+                        "purse {} · stock {} · meals today {} · cots {} · meals 30 d {served}",
+                        c.purse, b.stock_food, c.meals_today, c.cots_today
+                    ));
+                    let mut donors: Vec<(i64, EntityId)> = c.donors.iter().map(|(&d, &v)| (v, d)).collect();
+                    donors.sort_unstable_by(|a, b| b.cmp(a));
+                    for (v, d) in donors.into_iter().take(3) {
+                        let who = if d == EntityId::NONE { "the World".to_string() } else { world.owner_label(Some(d)) };
+                        ui.label(format!("  {who} gave {v} (30 d)"));
+                    }
+                }
+                staff(ui, app, world, id, "Volunteers");
+            }
+            // Real economy E37: the camp's children and ledger.
+            BuildingKind::Camp => {
+                if let Some(c) = &b.camp {
+                    let held = b.stock_goods.get(citysim::Good::Parts as usize - 1).copied().unwrap_or(0);
+                    let state = if c.closed_by_law { "closed by the law" } else { "open" };
+                    ui.label(format!(
+                        "{state} · children {} · food {} · Parts held {held} · made today {} · unfed today {} · scandal days {}",
+                        c.children.len(),
+                        b.stock_food,
+                        c.output_today,
+                        c.unfed_today,
+                        c.scandal_days
+                    ));
+                }
+            }
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);

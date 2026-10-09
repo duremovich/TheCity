@@ -43,6 +43,8 @@ pub fn workplace_key(role: Role) -> LocationKey {
         }
         // M16a (plan C8): a Fixer office's staff likewise.
         Role::Fixer => LocationKey::Workplace,
+        // Real economy E26: a Mission's Volunteers likewise.
+        Role::Volunteer => LocationKey::Workplace,
     }
 }
 

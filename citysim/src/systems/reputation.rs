@@ -488,9 +488,11 @@ pub fn rebuild(world: &mut World) {
             .sum();
         let arrest_x: f32 =
             staff.iter().map(|&s| Acc::get(&acc.by_deed, s)[Deed::Arrested.index()] * cfg.heat_w.arrested).sum();
+        // The Real economy E42: a camp that could not feed takes standing off its owner.
+        let scandal = crate::systems::camp::scandal_penalty(world, Some(c));
         let r = Reputation {
             dread: dread_of(Acc::get(&acc.d, c) + guard_d, cfg.dread_scale),
-            standing: (0.5 * share + 0.5 * cash / 2.0).clamp(0.0, 1.0),
+            standing: (0.5 * share + 0.5 * cash / 2.0 + scandal).clamp(0.0, 1.0),
             honour: 0.7 * honour_of(Acc::get(&acc.h, c), cfg.honour_scale) + 0.3 * exec_honour,
             heat: heat_of(Acc::get(&acc.x, c) + arrest_x, cfg.heat_scale, 0.0),
             known_by: Acc::get(&acc.known, c),
@@ -511,11 +513,13 @@ pub fn rebuild(world: &mut World) {
                 b[Deed::Killed.index()] * cfg.dread_w.killed + b[Deed::Assaulted.index()] * cfg.dread_w.assaulted
             })
             .sum();
+        // The Real economy E42: the city's camp likewise (the service is the Law's).
+        let scandal = crate::systems::camp::scandal_penalty(world, None);
         out.push((
             jail,
             Reputation {
                 dread: dread_of(d, cfg.dread_scale),
-                standing: 0.8,
+                standing: (0.8 + scandal).clamp(0.0, 1.0),
                 honour: 0.5,
                 heat: 0.0,
                 known_by: Acc::get(&acc.known, jail),

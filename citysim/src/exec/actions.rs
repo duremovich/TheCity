@@ -93,6 +93,9 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Collect => 10,
         // M16a (plan C10, C15).
         ActionKind::Network => 30,
+        // Real economy E27, E28: a meal at the kitchen, a gift at the door.
+        ActionKind::EatAlms => 30,
+        ActionKind::Donate => 5,
         ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
         ActionKind::AskAround => 20,
@@ -181,6 +184,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         k if k.is_leisure_step() => crate::systems::leisure::can_start(world, id, k, target),
         // M16a (plan C10): the scripted contract steps.
         k if k.is_contract_step() => crate::systems::contracts::can_start(world, id, k, target),
+        // Real economy E27, E28: the scripted charity steps.
+        k if k.is_charity_step() => crate::systems::charity::can_start(world, id, k, target),
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -692,6 +697,9 @@ pub fn on_complete(
         }
         // M16a (plan C10, C15): a regular's stamp; a Guard's day kept.
         ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
+        // Real economy E27, E28: the meal served, the gift given.
+        ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
+        ActionKind::Donate => crate::systems::charity::on_donate(world, id, target),
         ActionKind::Guard => crate::systems::contracts::on_guard_done(world, id, target),
         ActionKind::CollectWage => {
             economy::collect_wage(world, id);

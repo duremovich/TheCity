@@ -127,7 +127,12 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::GuardTaken
         // The Real economy (plan E44).
         | EventKind::Imported
-        | EventKind::AppetiteShift => AMBER,
+        | EventKind::AppetiteShift
+        | EventKind::Donated
+        | EventKind::MissionServed
+        | EventKind::ChildTaken
+        | EventKind::CampRaised
+        | EventKind::CampClosed => AMBER,
         _ => Color32::LIGHT_GRAY,
     }
 }

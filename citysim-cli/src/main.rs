@@ -258,6 +258,8 @@ enum Lever {
     PostContract(Buyer, citysim::contract::ContractKind, ContractTarget, i64, bool, u16),
     /// M16a god (plan C39): `take_contract=<id>:<agent i>` (gang and corp takers are phase 2).
     TakeContract(u64, u32),
+    /// Real economy (plan E47): `donate=<mission building i>:<coins>`.
+    Donate(u32, i64),
 }
 
 /// A contract record's target on the command line: an agent's or a
@@ -608,6 +610,7 @@ impl Lever {
             Lever::TakeContract(contract, taker) => {
                 PlayerCommand::TakeContract { contract, taker: agent_at(world, taker)? }
             }
+            Lever::Donate(b, amount) => PlayerCommand::Donate { mission: building_at(world, b)?, amount },
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -1005,6 +1008,14 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             Some(Lever::TakeContract(
                 c.parse::<u64>().map_err(|e| format!("{spec}: bad contract: {e}"))?,
                 t.parse::<u32>().map_err(|e| format!("{spec}: bad taker: {e}"))?,
+            ))
+        }
+        // Real economy (plan E47).
+        "donate" => {
+            let (b, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <mission>:<coins>"))?;
+            Some(Lever::Donate(
+                b.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?,
+                n.parse::<i64>().map_err(|e| format!("{spec}: bad coins: {e}"))?,
             ))
         }
         "kill_exec" => Some(Lever::KillExec(slot(value)?)),
