@@ -13,6 +13,8 @@ pub fn run(world: &mut World) {
     // L2 phase 2 (L17, L18, L20): the hourly leisure passes (the bout, the
     // 21:00 Statistical evening, the off-screen leaders, street density).
     crate::systems::leisure::hourly(world);
+    // The Real economy E27: the Statistical kitchen pass at 12:00.
+    crate::systems::charity::hourly(world);
     if world.tick_of_day() != 0 {
         return;
     }
@@ -34,4 +36,10 @@ pub fn run(world: &mut World) {
     crate::systems::world_market::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
+    // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the
+    // camps' day (before `demography` feeds the Blocks and takes), the
+    // corps' camp founding.
+    crate::systems::charity::daily(world);
+    crate::systems::camp::daily(world);
+    crate::systems::camp::found_daily(world);
 }

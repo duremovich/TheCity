@@ -1127,6 +1127,13 @@ fn hunker(world: &mut World, corp: EntityId, i: &CorpInputs) {
 }
 
 fn lobby(world: &mut World, corp: EntityId, i: &CorpInputs) {
+    // The Real economy E30: philanthropy on the term's first day (the gift
+    // or the founding), whatever the bribe below does.
+    let first_day =
+        world.comp::<Corp>(corp).is_some_and(|c| world.tick.saturating_sub(c.order_since) < crate::time::TICKS_PER_DAY);
+    if first_day {
+        crate::systems::charity::lobby(world, corp);
+    }
     let Some(gang) = i.culprit else { return };
     if !i.lobby_ready {
         return;

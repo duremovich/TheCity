@@ -49,6 +49,25 @@ pub fn on(world: &World) -> bool {
     world.config.gossip.enabled && world.config.news.enabled
 }
 
+/// The Real economy E42 (plan deviation: M15's stories are deed-driven and
+/// no deed fits a child taken or a camp unfed): with the Feeds live, push a
+/// `Story` from the Civic Wire (else the first Feed) with `text`; no deed,
+/// no pool entry. `actors` follow the Feed in the event.
+pub fn bulletin(world: &mut World, actors: &[EntityId], text: String) {
+    if !on(world) {
+        return;
+    }
+    let feeds = all_feeds(world);
+    let Some(feed) = feeds.iter().copied().find(|&f| is_city_feed(world, f)).or_else(|| feeds.first().copied()) else {
+        return;
+    };
+    let name = feed_state(world, feed).map_or_else(|| CIVIC_WIRE.to_string(), |s| s.name.clone());
+    let mut all = vec![feed];
+    all.extend_from_slice(actors);
+    world.push_event(EventKind::Story, &all, format!("{name}: {text}"));
+    world.stats.current.word.stories += 1;
+}
+
 /// Every standing Feed, ascending.
 pub fn all_feeds(world: &World) -> Vec<EntityId> {
     world

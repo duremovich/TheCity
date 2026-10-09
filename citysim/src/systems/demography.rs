@@ -34,6 +34,9 @@ pub fn run(world: &mut World) {
         children(world);
         births(world);
         old_age(world);
+        // The Real economy E38: the child protective service, after the
+        // Blocks fed their children (a child is judged on today's meal).
+        crate::systems::camp::take_daily(world);
     }
     corpses(world);
     gravedigger_notices(world);
@@ -85,6 +88,10 @@ pub fn mature(world: &mut World, id: EntityId) {
     world.insert(id, Memory::default());
     world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
+    // The Real economy E41: a camp's child is released at its door.
+    if crate::systems::camp::on_mature(world, id) {
+        return;
+    }
     // At the door, not pushed in over the cap: a resident may always enter
     // their own Home (see `capacity_exempt`), so they walk in on their own.
     if let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) {
@@ -621,7 +628,10 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
                 .map(|b| b.door)
                 .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
                 .unwrap_or_default();
-            (from.manhattan(workplace_door), id)
+            // The Real economy E41: a `CampRaised` applicant comes first for
+            // a Farm or Fab vacancy (the distance key halved past the map).
+            let first = crate::systems::camp::applicant_first(world, id, role);
+            (if first { from.manhattan(workplace_door) / 2 } else { 1024 + from.manhattan(workplace_door) }, id)
         })
         .min()
         .map(|(_, id)| id)

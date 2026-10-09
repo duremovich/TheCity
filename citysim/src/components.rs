@@ -188,10 +188,16 @@ pub enum BuildingKind {
     /// M16a (plan C8): a Fixer's office: its owner keeps a contract record
     /// book (`Broker`); a game abstraction, never a Den.
     Fixer,
+    /// Real economy E26 (docs/ECONOMY_V2.md § 4): a Mission, a kitchen on
+    /// donations ("Soup Kitchen"); `Building.charity` holds its purse.
+    Mission,
+    /// Real economy E37 (addendum 19): a work camp; `Building.camp` holds
+    /// the children housed there. Owned by a corp or the city, never an agent.
+    Camp,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 24] = [
+    pub const ALL: [BuildingKind; 26] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -216,6 +222,8 @@ impl BuildingKind {
         BuildingKind::Lounge,
         BuildingKind::Fab,
         BuildingKind::Fixer,
+        BuildingKind::Mission,
+        BuildingKind::Camp,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -259,6 +267,8 @@ impl BuildingKind {
             "Lounge" => BuildingKind::Lounge,
             "Fab" => BuildingKind::Fab,
             "Fixer" => BuildingKind::Fixer,
+            "Mission" => BuildingKind::Mission,
+            "Camp" => BuildingKind::Camp,
             _ => return None,
         })
     }
@@ -290,6 +300,8 @@ impl BuildingKind {
             BuildingKind::Lounge => "Spire Lounge",
             BuildingKind::Fab => "Parts Fab",
             BuildingKind::Fixer => "Fixer",
+            BuildingKind::Mission => "Soup Kitchen",
+            BuildingKind::Camp => "Work Camp",
         }
     }
 
@@ -322,6 +334,10 @@ impl BuildingKind {
             BuildingKind::Fab => 'E',
             // M16a (plan C8): the Fixer's office.
             BuildingKind::Fixer => 'X',
+            // Real economy E26, E37: `M` is the Market's and `Y` the one
+            // free capital, so the Mission draws `+` (render only).
+            BuildingKind::Mission => '+',
+            BuildingKind::Camp => 'Y',
         }
     }
 }
@@ -378,10 +394,13 @@ pub enum Role {
     Fabber,
     /// M16a (plan C8): staff of a Fixer's office.
     Fixer,
+    /// Real economy E26: a Mission's unpaid staff (wage 0; a staff meal
+    /// from the kitchen; doubles the hourly service).
+    Volunteer,
 }
 
 impl Role {
-    pub const ALL: [Role; 18] = [
+    pub const ALL: [Role; 19] = [
         Role::Farmer,
         Role::Guard,
         Role::Clerk,
@@ -400,6 +419,7 @@ impl Role {
         Role::Concierge,
         Role::Fabber,
         Role::Fixer,
+        Role::Volunteer,
     ];
 
     /// The display name (M11 section 1).
@@ -423,6 +443,7 @@ impl Role {
             Role::Concierge => "Concierge",
             Role::Fabber => "Fab Tech",
             Role::Fixer => "Fixer",
+            Role::Volunteer => "Volunteer",
         }
     }
 
@@ -447,6 +468,7 @@ impl Role {
             Role::Concierge => BuildingKind::Lounge,
             Role::Fabber => BuildingKind::Fab,
             Role::Fixer => BuildingKind::Fixer,
+            Role::Volunteer => BuildingKind::Mission,
         }
     }
 }
@@ -625,6 +647,10 @@ pub enum MemoryKind {
     /// L2 shadow fixes item 9: a sanctioned bout at a Fight Pit, won
     /// (valence > 0) or lost; not a deed (`memory::deed_of` skips it).
     Bout,
+    /// Real economy E38: a parent's child was taken by the child protective
+    /// service (Grief-class salience and mood; not a deed: `deed_of` reads
+    /// `None`, so no killing rumour spreads).
+    ChildTaken,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1712,6 +1738,11 @@ pub struct Brain {
     /// M11 D26: the day of the last `Register` (the Found cooldown).
     #[serde(default)]
     pub last_found_day: Option<u64>,
+    /// Real economy E28: the day of the last gift to a Mission (one a day:
+    /// the give test is keyed on the day, so a second Socialise would give
+    /// again).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_gave_day: Option<u64>,
     /// M13 D29: what a Shop plan is buying, fixed when the seller is bound.
     #[serde(default)]
     pub shop_pick: Option<ShopPick>,
@@ -1794,6 +1825,7 @@ impl Default for Brain {
             disobeyed_day: None,
             body_day: None,
             last_found_day: None,
+            last_gave_day: None,
             shop_pick: None,
             abducted_by: None,
             dazed_until: None,
@@ -2201,6 +2233,12 @@ pub struct Building {
     /// L2 (plan L4): a leisure venue's day (price, visits, take, front).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub venue: Option<crate::living::Venue>,
+    /// Real economy E26: a Mission's (or the Chapel's) kitchen and purse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub charity: Option<crate::econ::Charity>,
+    /// Real economy E37: a work camp's children and ledger.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub camp: Option<crate::econ::CampState>,
 }
 
 pub fn default_tier() -> u8 {
@@ -3116,6 +3154,13 @@ pub enum LifeKind {
     Incorporated,
     /// M14 V14: died in a node's ICE (`other` = the node's owner).
     Flatlined,
+    /// Real economy E38: taken from the Home by the child protective
+    /// service (`other` = a parent).
+    Taken,
+    /// Real economy E38: a child taken from this parent (`other` = the child).
+    ChildTaken,
+    /// Real economy E41: released from a work camp at adulthood.
+    CampRaised,
 }
 
 impl LifeKind {
@@ -3148,6 +3193,8 @@ impl LifeKind {
             | LifeKind::AssaultedSomeone
             | LifeKind::Founded
             | LifeKind::Incorporated => 0.9,
+            // Real economy E38, E41: a childhood taken is as heavy as a betrayal.
+            LifeKind::Taken | LifeKind::ChildTaken | LifeKind::CampRaised => 0.9,
             LifeKind::Robbed | LifeKind::Assaulted | LifeKind::Arrested | LifeKind::Escaped | LifeKind::JoinedGang => {
                 0.7
             }

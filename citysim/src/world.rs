@@ -573,6 +573,10 @@ pub struct World {
     /// written (`migrate_legacy` sizes it for an older save).
     #[serde(default, skip_serializing_if = "all_none")]
     pub broker: Vec<Option<crate::contract::Broker>>,
+    /// Real economy E41: the `CampRaised` trait of adults raised at a work
+    /// camp; empty stores are not written.
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub camp_raised: Vec<Option<crate::econ::CampRaised>>,
     /// M15 W6: one rumour pool per district (`DistrictId` order).
     #[serde(default)]
     pub rumours: Vec<crate::word::RumourPool>,
@@ -865,6 +869,7 @@ components! {
     reputation: crate::word::Reputation,
     grudges: crate::word::Grudges,
     broker: crate::contract::Broker,
+    camp_raised: crate::econ::CampRaised,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -1082,6 +1087,7 @@ impl World {
             reputation: Vec::new(),
             grudges: Vec::new(),
             broker: Vec::new(),
+            camp_raised: Vec::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
             kill_watch: VecDeque::new(),
@@ -1176,6 +1182,10 @@ impl World {
         // M16a (plan C9): the seeded Fixer on the Lots left (no RNG), after
         // the venues and before the plane links, so each has a node.
         systems::contracts::seed_fixers(&mut w);
+        // Real economy E26, E37 (Seeding table): the Sump Mission and the
+        // Chapel's kitchen, then the city's Camp (no RNG), before the plane links.
+        systems::charity::seed(&mut w);
+        systems::camp::seed(&mut w);
         // L2 phase 5 (the day-1 leisure pulse): opening fun spread (no RNG).
         systems::leisure::seed_fun(&mut w);
         systems::virt::relink(&mut w);
@@ -1238,6 +1248,8 @@ impl World {
                     label: None,
                     feed: None,
                     venue: None,
+                    charity: None,
+                    camp: None,
                 },
             );
             match def.kind {
@@ -2299,6 +2311,8 @@ impl World {
                     | MemoryKind::Rejected
                     | MemoryKind::RentShort
                     | MemoryKind::Evicted
+                    // Real economy E38: a parent's child taken (any tier).
+                    | MemoryKind::ChildTaken
             ) {
                 return;
             }
@@ -2518,6 +2532,10 @@ impl World {
         // `broker` store.
         if self.broker.len() < n {
             self.broker.resize_with(n, || None);
+        }
+        // Real economy E41: likewise the `camp_raised` store.
+        if self.camp_raised.len() < n {
+            self.camp_raised.resize_with(n, || None);
         }
         if self.trace.len() < n {
             self.trace.resize_with(n, || None);

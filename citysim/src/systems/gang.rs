@@ -1310,6 +1310,8 @@ fn daily_economy(world: &mut World) {
         }
         // L2 L20: fronts (Crackdown closures, a new front under Expand).
         crate::systems::leisure::fronts_daily(world, gang);
+        // The Real economy E28: a gang under Expand with a front gives weekly.
+        crate::systems::charity::gang_gift(world, gang);
         // M12 D40: an empty gang's claims lapse after `empty_claims_days`.
         clear_claims_if_empty(world, gang);
         // Disband after 30 days with no members: treasury and territory go, the name stays.

@@ -174,6 +174,9 @@ impl LocationKey {
             | BuildingKind::Fab => LocationKey::Workplace,
             // M16a (plan C8): and a Fixer's staff inside its office.
             BuildingKind::Fixer => LocationKey::Workplace,
+            // Real economy E26, E37: a Volunteer inside its Mission; a Camp
+            // is nobody's workplace (its children have no Brain).
+            BuildingKind::Mission | BuildingKind::Camp => LocationKey::Workplace,
         }
     }
 }
@@ -584,6 +587,16 @@ impl WorldState {
             }
             Some(b) if shopping && Some(b) == target => LocationKey::Seller,
             Some(b) if scoring && Some(b) == target => LocationKey::StimSource,
+            // The Real economy E26, E27: inside a Mission a Volunteer is at
+            // its workplace; anyone else is at the cot house (`CheckIn`'s
+            // `at(Hotel)`).
+            Some(b) if crate::systems::charity::is_mission(world, b) => {
+                if world.comp::<crate::components::Job>(agent).and_then(|j| j.employer) == Some(b) {
+                    LocationKey::Workplace
+                } else {
+                    LocationKey::Hotel
+                }
+            }
             Some(b) => match world.comp::<Building>(b) {
                 Some(bd) if bd.kind == BuildingKind::Home => LocationKey::Street, // someone else's home
                 Some(bd) => LocationKey::of_building(bd.kind),

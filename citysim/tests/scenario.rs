@@ -201,17 +201,28 @@ fn test_v1_acceptance() {
     // its Winter still logged thousands of Starving events), so "a death in
     // the year" is judged by majority over seeds 7-9, as the M12 gate judges
     // its trajectory checks. Seeds 8 and 9 run for this bullet alone.
-    let mut per_seed = vec![(7u64, starvation)];
+    // The Real economy phase 3b (the orchestrator's doctrine, 2026-10-08): the
+    // Missions' meals and cots are what the city has instead of a dole, and on
+    // seed 9 they take its three Winter deaths to 0 (measured at the phase's
+    // tree, 120 days: seed 8 charity off 0 / on 0, seed 9 off 3 / on 0 with 254
+    // meals and 202 cots; seed 7 reads 1 either way), so the majority read 1/3
+    // where EC_BASE read 2/3. The death count is a printed FINDING; the gate
+    // asserts the famine itself: Starving events on every seed (the ring's
+    // last 50,000 events hold Winter's) and a death somewhere over the three
+    // (existence), as the M11 and M13 devices read.
+    let mut per_seed = vec![(7u64, starvation, winter_starving)];
     for seed in [8u64, 9] {
         let mut w = World::new(seed, Config::load());
         w.run_ticks(120 * TICKS_PER_DAY);
-        per_seed.push((seed, sum(&w, |r| r.deaths_starvation)));
+        let starving = w.events.iter().filter(|e| e.kind == EventKind::Starving).count();
+        per_seed.push((seed, sum(&w, |r| r.deaths_starvation), starving));
     }
-    let with_death = per_seed.iter().filter(|&&(_, n)| n >= 1).count();
+    let with_death = per_seed.iter().filter(|&&(_, n, _)| n >= 1).count();
     eprintln!(
-        "starvation deaths per seed {per_seed:?} (seed 7: {winter_starving} Starving events after day 90); {with_death}/3 with a death"
+        "FINDING starvation deaths per seed (seed, deaths, Starving events) {per_seed:?} (seed 7: {winter_starving} Starving events after day 90); {with_death}/3 with a death (EC_BASE 2/3; the Missions' meals and cots, calibration, not asserted)"
     );
-    assert!(with_death * 2 > per_seed.len(), "no starvation death all year on most seeds: {per_seed:?}");
+    assert!(per_seed.iter().all(|&(_, _, s)| s >= 1), "a seed with no famine: {per_seed:?}");
+    assert!(with_death >= 1, "no starvation death on any of seeds 7-9: {per_seed:?}");
     assert!(winter_starving >= 1, "nobody starved in Winter");
     assert!(burials >= 1, "no burial");
     assert!((1333..=2667).contains(&a.population()), "population {}", a.population());
@@ -2957,6 +2968,7 @@ fn m15_run(seed: u64, word_off: bool) -> M15 {
                         GrudgeCause::Betrayed => "betrayed",
                         GrudgeCause::Inherited(_) => "inherited",
                         GrudgeCause::Hired => "hired",
+                        GrudgeCause::ChildTaken => "child taken",
                     };
                     *m.grudge_causes.entry(cause).or_default() += 1;
                 }

@@ -225,6 +225,15 @@ pub enum Flow {
     Migrant,
     /// E25b: the fence's resale credit, the World -> a gang (untaxed; a mint, now visible).
     Fence,
+    /// Real economy E28: a gift into a Mission's purse (untaxed; from an
+    /// agent, a gang, a corp, or the World for a god's gift).
+    Donate,
+    /// Real economy E27: a Mission's meal or cot, ledger-only (the purse
+    /// bought the food; the value reaches the eater in kind).
+    Alms,
+    /// Real economy E39: the city Camp's restock, Treasury -> Market owner
+    /// (untaxed; the Jail meal's shape).
+    CampFood,
 }
 
 impl Flow {
@@ -315,6 +324,10 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Customs => row.econ.flow_customs += coins,
         Flow::Migrant => row.econ.flow_migrant_in += coins,
         Flow::Fence => row.econ.flow_fence += coins,
+        // Real economy phase 3b/3c (E27, E28, E39).
+        Flow::Donate => row.econ.flow_donate += coins,
+        Flow::Alms => row.econ.flow_alms += coins,
+        Flow::CampFood => row.econ.flow_camp_food += coins,
     }
 }
 
@@ -638,6 +651,58 @@ pub fn escrow_out(
     moved
 }
 
+/// Real economy E28 (the escrow precedent): coins from `from`'s purse
+/// (`None` the Treasury) into a Mission's `Charity.purse`, capped as `pay`
+/// for an agent or a gang, the full amount for a corp or the city. Ledger
+/// `Flow::Donate` (untaxed). Returns the coins moved.
+pub fn charity_in(world: &mut World, from: Option<EntityId>, mission: EntityId, amount: i64) -> i64 {
+    if amount <= 0 || world.comp::<Building>(mission).is_none_or(|b| b.charity.is_none()) {
+        return 0;
+    }
+    let full = matches!(owner_kind(world, from), OwnerKind::City | OwnerKind::Corp(_));
+    let moved = if full { amount } else { amount.min(world.purse(from).max(0)) };
+    if moved <= 0 {
+        return 0;
+    }
+    ledger(world, Flow::Donate, moved);
+    shadow_flow(world, from, Some(mission), moved, Flow::Donate, false);
+    world.purse_add(from, -moved);
+    if let Some(c) = world.comp_mut::<Building>(mission).and_then(|b| b.charity.as_mut()) {
+        c.purse += moved;
+    }
+    moved
+}
+
+/// Real economy E27 (the escrow precedent): coins out of a Mission's purse
+/// to `to` (`None` the Treasury), at most what it holds: tax withheld when
+/// `flow` is taxed, the ledger line, a gang payee's take as gang income.
+/// Returns the coins moved.
+pub fn charity_out(world: &mut World, mission: EntityId, to: Option<EntityId>, amount: i64, flow: Flow) -> i64 {
+    let held = world.comp::<Building>(mission).and_then(|b| b.charity.as_ref()).map_or(0, |c| c.purse);
+    let moved = amount.min(held);
+    if moved <= 0 {
+        return 0;
+    }
+    if let Some(c) = world.comp_mut::<Building>(mission).and_then(|b| b.charity.as_mut()) {
+        c.purse -= moved;
+    }
+    ledger(world, flow, moved);
+    shadow_flow(world, Some(mission), to, moved, flow, false);
+    let tax = match to {
+        Some(payee) if flow.taxed() => withhold(world, payee, moved),
+        _ => 0,
+    };
+    world.purse_add(to, moved - tax);
+    if tax > 0 {
+        world.purse_add(None, tax);
+        world.stats.current.flow_tax += tax;
+    }
+    if to.is_some_and(|g| world.config.assets.enabled && world.has::<Gang>(g)) {
+        world.stats.current.gang_income += moved - tax;
+    }
+    moved
+}
+
 /// Gross coins earned through a building today.
 pub fn credit(world: &mut World, building: EntityId, coins: i64) {
     if let Some(b) = world.comp_mut::<Building>(building) {
@@ -661,7 +726,9 @@ pub fn total_coins(world: &World) -> i64 {
     // `--econ-off` quantity is `EC_BASE`'s.
     let holes: i64 =
         if crate::systems::econ::market_on(world) { world.holes.values().map(|h| h.loot).sum() } else { 0 };
-    wallets + gangs + corps + city + loot + escrow + holes
+    // Real economy E26: the Missions' purses are coins held.
+    let purses: i64 = crate::systems::charity::purses(world);
+    wallets + gangs + corps + city + loot + escrow + holes + purses
 }
 
 // ---------------------------------------------------------------------------
@@ -689,6 +756,9 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         BuildingKind::Lounge => c.value.lounge,
         BuildingKind::Fab => c.value.fab,
         BuildingKind::Fixer => c.value.fixer,
+        // Real economy E26, E37.
+        BuildingKind::Mission => c.value.mission,
+        BuildingKind::Camp => c.value.camp,
         _ => 0,
     }
 }
@@ -714,6 +784,8 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
         BuildingKind::Fab => Some(Role::Fabber),
         // M16a (plan C8).
         BuildingKind::Fixer => Some(Role::Fixer),
+        // Real economy E26 (a Camp has no staff role, E37).
+        BuildingKind::Mission => Some(Role::Volunteer),
         _ => None,
     }
 }

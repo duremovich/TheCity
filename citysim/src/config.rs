@@ -186,6 +186,14 @@ pub struct Config {
     /// only behind `econ::market_on`).
     #[serde(default = "WorldMarketCfg::off")]
     pub world_market: WorldMarketCfg,
+    /// Real economy § 4 (plan E26-E30): Missions and donations (read only
+    /// behind `charity::on`).
+    #[serde(default = "CharityCfg::off")]
+    pub charity: CharityCfg,
+    /// Real economy addendum 19 (plan E37-E42): the child protective
+    /// service and the work camps (read only behind `camp::on`).
+    #[serde(default = "CampCfg::off")]
+    pub camp: CampCfg,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -265,6 +273,8 @@ impl JobsCfg {
             | Role::Fabber => 0,
             // M16a (plan C8): a Fixer office's staff are hired, never seeded.
             Role::Fixer => 0,
+            // Real economy E26: a Mission's Volunteers are hired, never seeded.
+            Role::Volunteer => 0,
         }
     }
 }
@@ -337,6 +347,18 @@ impl BuildingCfg {
     pub fn fixer() -> BuildingCfg {
         BuildingCfg { capacity: 8, stock_cap: 0, staff: 1 }
     }
+
+    /// Real economy E26: a Mission's kitchen (12 cots, 60 meals of stock,
+    /// two Volunteers).
+    pub fn mission() -> BuildingCfg {
+        BuildingCfg { capacity: 12, stock_cap: 60, staff: 2 }
+    }
+
+    /// Real economy E37: a work camp (no staff role: the children run the
+    /// shift and the owner is the employer of record).
+    pub fn camp() -> BuildingCfg {
+        BuildingCfg { capacity: 40, stock_cap: 120, staff: 0 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -389,6 +411,12 @@ pub struct BuildingsCfg {
     /// M16a (plan C8): a Fixer's office (none stands with contracts off).
     #[serde(default = "BuildingCfg::fixer")]
     pub fixer: BuildingCfg,
+    /// Real economy E26 (none stands with `[charity]` off).
+    #[serde(default = "BuildingCfg::mission")]
+    pub mission: BuildingCfg,
+    /// Real economy E37 (none stands with `[camp]` off).
+    #[serde(default = "BuildingCfg::camp")]
+    pub camp: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -418,6 +446,8 @@ impl BuildingsCfg {
             BuildingKind::Lounge => &self.lounge,
             BuildingKind::Fab => &self.fab,
             BuildingKind::Fixer => &self.fixer,
+            BuildingKind::Mission => &self.mission,
+            BuildingKind::Camp => &self.camp,
         }
     }
 }
@@ -503,6 +533,9 @@ pub struct EconomyCfg {
     /// M16a (plan C8): a Fixer office's staff, on L2's wage scale.
     #[serde(default = "default_wage_fixer")]
     pub wage_fixer: i64,
+    /// Real economy E26: a Mission's Volunteer (unpaid; a staff meal instead).
+    #[serde(default)]
+    pub wage_volunteer: i64,
     pub farm_yield_base: f32,
     pub farm_skill_floor: f32,
     pub farm_skill_slope: f32,
@@ -603,6 +636,7 @@ impl EconomyCfg {
             Role::Concierge => self.wage_concierge,
             Role::Fabber => self.wage_fabber,
             Role::Fixer => self.wage_fixer,
+            Role::Volunteer => self.wage_volunteer,
         }
     }
 }
@@ -1448,9 +1482,21 @@ pub struct FoundCostCfg {
     /// M16a (plan C8; `founding::found_cost` prices it only with `contracts::on`).
     #[serde(default = "FoundCostCfg::default_fixer")]
     pub fixer: i64,
+    /// Real economy E26 (priced only with `charity::on`).
+    #[serde(default = "FoundCostCfg::default_mission")]
+    pub mission: i64,
+    /// Real economy E37 (corps only, with `camp::on`).
+    #[serde(default = "FoundCostCfg::default_camp")]
+    pub camp: i64,
 }
 
 impl FoundCostCfg {
+    fn default_mission() -> i64 {
+        150
+    }
+    fn default_camp() -> i64 {
+        600
+    }
     fn default_hotel() -> i64 {
         250
     }
@@ -1524,6 +1570,13 @@ pub struct UpkeepCfg {
     /// M16a (plan C8).
     #[serde(default = "UpkeepCfg::default_fixer")]
     pub fixer: i64,
+    /// Real economy E26, E37 (plan deviation: the `[treasury] property_rate`
+    /// of phase 2 mirrors these; at the base a Mission is the city's and
+    /// pays none, a corp's Camp pays 2).
+    #[serde(default)]
+    pub mission: i64,
+    #[serde(default = "UpkeepCfg::default_camp")]
+    pub camp: i64,
 }
 
 /// `home = 1` or `home = [0, 1, 2]`.
@@ -1568,6 +1621,9 @@ impl UpkeepCfg {
     fn default_fixer() -> i64 {
         8
     }
+    fn default_camp() -> i64 {
+        2
+    }
 
     /// A building's daily upkeep; a Block's by its tier.
     pub fn for_building(&self, kind: BuildingKind, tier: u8) -> i64 {
@@ -1590,6 +1646,8 @@ impl UpkeepCfg {
             BuildingKind::Lounge => self.lounge,
             BuildingKind::Fab => self.fab,
             BuildingKind::Fixer => self.fixer,
+            BuildingKind::Mission => self.mission,
+            BuildingKind::Camp => self.camp,
             _ => 0,
         }
     }
@@ -1630,9 +1688,20 @@ pub struct ValueCfg {
     /// M16a (plan C8).
     #[serde(default = "ValueCfg::default_fixer")]
     pub fixer: i64,
+    /// Real economy E26, E37.
+    #[serde(default = "ValueCfg::default_mission")]
+    pub mission: i64,
+    #[serde(default = "ValueCfg::default_camp")]
+    pub camp: i64,
 }
 
 impl ValueCfg {
+    fn default_mission() -> i64 {
+        300
+    }
+    fn default_camp() -> i64 {
+        800
+    }
     fn default_club() -> i64 {
         600
     }
@@ -1819,6 +1888,8 @@ impl CorpsCfg {
                 lounge: 900,
                 fab: 900,
                 fixer: 400,
+                mission: 150,
+                camp: 600,
             },
             wholesale: 2,
             contract_per_guard_day: 10,
@@ -1846,6 +1917,8 @@ impl CorpsCfg {
                 lounge: 20,
                 fab: 15,
                 fixer: 8,
+                mission: 0,
+                camp: 2,
             },
             value: ValueCfg {
                 farm: 1000,
@@ -1863,6 +1936,8 @@ impl CorpsCfg {
                 lounge: 1400,
                 fab: 1500,
                 fixer: 500,
+                mission: 300,
+                camp: 800,
             },
             // A pre-M11 save (and v1_profile) shops at the nearest Market.
             shop_price_tiles: 0,
@@ -3405,6 +3480,8 @@ pub struct DeedTable {
     pub poached: f32,
     /// M16a (plan C21): the `Hired` deed (a missing key reads 0).
     pub hired: f32,
+    /// Real economy E29: the `Gave` deed (a missing key reads 0).
+    pub gave: f32,
 }
 
 impl DeedTable {
@@ -3427,12 +3504,13 @@ impl DeedTable {
             Deed::Repaid => self.repaid,
             Deed::Poached => self.poached,
             Deed::Hired => self.hired,
+            Deed::Gave => self.gave,
         }
     }
 
     /// The table from values in `Deed::ALL` order.
-    pub fn of(v: [f32; 16]) -> DeedTable {
-        let [killed, assaulted, robbed, extorted, stripped, arrested, married, evicted, struck, raided, founded, avenged, betrayed, repaid, poached, hired] =
+    pub fn of(v: [f32; 17]) -> DeedTable {
+        let [killed, assaulted, robbed, extorted, stripped, arrested, married, evicted, struck, raided, founded, avenged, betrayed, repaid, poached, hired, gave] =
             v;
         DeedTable {
             killed,
@@ -3451,6 +3529,7 @@ impl DeedTable {
             repaid,
             poached,
             hired,
+            gave,
         }
     }
 }
@@ -3510,9 +3589,15 @@ impl GossipCfg {
             rumour_cap: 8,
             rumour_cap_statistical: 3,
             relay_conf: 0.8,
-            reach0: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3, 0.3]),
-            deed_sal: DeedTable::of([0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4, 0.7]),
-            deed_sev: DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1, 0.7]),
+            reach0: DeedTable::of([
+                1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3, 0.3, 0.2,
+            ]),
+            deed_sal: DeedTable::of([
+                0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4, 0.7, 0.3,
+            ]),
+            deed_sev: DeedTable::of([
+                1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1, 0.7, 0.0,
+            ]),
             legacy_second_hand: true,
             kin_cap: 12,
         }
@@ -3551,11 +3636,13 @@ impl Default for ReputationCfg {
 
 impl ReputationCfg {
     pub fn off() -> ReputationCfg {
-        //                        kil  ass  rob   ext  str  arr  mar  evi   stk  rai  fou  ave  bet   rep  poa
-        let dread_w = DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0, 0.3]);
+        //                        kil  ass  rob   ext  str  arr  mar  evi   stk  rai  fou  ave  bet   rep  poa  hir  gav
+        let dread_w =
+            DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0, 0.3, 0.0]);
         let honour_w =
-            DeedTable::of([0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1, -0.2]);
-        let heat_w = DeedTable::of([0.5, 0.2, 0.2, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4]);
+            DeedTable::of([0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1, -0.2, 0.2]);
+        let heat_w =
+            DeedTable::of([0.5, 0.2, 0.2, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0]);
         ReputationCfg {
             half_life_days: 7.0,
             hop_w: [1.0, 0.8, 0.6, 0.4],
@@ -4939,6 +5026,8 @@ impl Config {
     pub fn econ_off(mut self) -> Config {
         self.economy2 = Economy2Cfg::off();
         self.world_market = WorldMarketCfg::off();
+        self.charity = CharityCfg::off();
+        self.camp = CampCfg::off();
         self
     }
 
@@ -5383,6 +5472,132 @@ impl WorldMarketCfg {
             crate::outside::ExportGood::Food => &self.food,
             crate::outside::ExportGood::Parts => &self.parts,
             crate::outside::ExportGood::Data => &self.data,
+        }
+    }
+}
+
+/// `[charity]` (spec § 4 verbatim plus the plan keys of E26-E29).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CharityCfg {
+    pub enabled: bool,
+    /// Missions at seed (the Sump first); 0 seeds none.
+    pub seed: u32,
+    /// A Mission serves the hungry poor whose door (Home, else tile) is within this.
+    pub reach_tiles: u32,
+    /// A meal costs the kitchen `wholesale + meal_markup` a unit.
+    pub meal_markup: i64,
+    /// A cot's ledger-only cost a night (the purse pays nobody).
+    pub cot_price: i64,
+    /// A clinic hour's cost (tier ≥ 1; no tier-0 Therapy target at HEAD: unused).
+    pub clinic_price: i64,
+    /// E28: `p = donate_base × (lawfulness + loyalty) ÷ 2 × (1 + creed)`.
+    pub donate_base: f32,
+    /// E28: the share of the surplus a donor gives.
+    pub donate_frac: f32,
+    /// E28, E30: a corp under Lobby gives this to its district's Mission.
+    pub lobby_gift: i64,
+    /// Spec: standing per 100 coins given; carried by the `Gave` deed's
+    /// honour weight (E29), read by nothing directly.
+    pub rep_gift: f32,
+    /// E27 (plan key): served when hunger is below this.
+    pub hunger_below: f32,
+    /// E27 (plan key): the hourly service cap (doubled by a Volunteer on shift).
+    pub meals_per_hour: u16,
+    /// E28 (plan key): a donor keeps this many days of rent and meals.
+    pub give_floor_days: i64,
+    /// E28 (plan key): a gang under Expand with a front gives this a week.
+    pub gang_gift: i64,
+    /// E29 (plan key): a gift of at least this writes the `Gave` deed.
+    pub rep_gift_min: i64,
+    /// E26 (plan key): `Register`'s per-capita target of Missions is
+    /// `population ÷ this` (the founding tie-break's denominator).
+    pub residents_per_mission: u32,
+}
+
+impl Default for CharityCfg {
+    fn default() -> Self {
+        CharityCfg::off()
+    }
+}
+
+impl CharityCfg {
+    pub fn off() -> CharityCfg {
+        CharityCfg {
+            enabled: false,
+            seed: 1,
+            reach_tiles: 40,
+            meal_markup: 1,
+            cot_price: 1,
+            clinic_price: 6,
+            donate_base: 0.02,
+            donate_frac: 0.05,
+            lobby_gift: 40,
+            rep_gift: 0.02,
+            hunger_below: 0.4,
+            meals_per_hour: 10,
+            give_floor_days: 14,
+            gang_gift: 10,
+            rep_gift_min: 20,
+            residents_per_mission: 1000,
+        }
+    }
+}
+
+/// `[camp]` (addendum 19; plan E37-E42; placeholders).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CampCfg {
+    pub enabled: bool,
+    /// E38: `Child.hunger_days` (consecutive unfed days; 3 kills) at which
+    /// the service takes a child (must be ≤ 2).
+    pub take_days: u8,
+    /// E40: sim years; younger children are housed and fed, not worked.
+    pub work_age: u32,
+    /// E40: Parts per child-day at skill 0.
+    pub camp_yield: f32,
+    pub camp_skill_floor: f32,
+    pub camp_skill_slope: f32,
+    /// E40: farming (the production skill) per shift.
+    pub camp_skill_gain: f32,
+    /// E37: corps found a camp when every camp is this full.
+    pub found_full: f32,
+    /// E42: unfed days before the law closes a camp.
+    pub close_days: u8,
+    pub close_ban_days: u32,
+    /// E42: the owner's standing per unfed child-day in the last 30 days.
+    pub scandal_standing: f32,
+    /// E41: the released adult's affinity to each parent.
+    pub family_affinity: f32,
+    /// E41: fed share at or above which the camp earns loyalty.
+    pub loyal_share: f32,
+    /// E41: fed share below which the released adult holds a grudge.
+    pub grudge_share: f32,
+}
+
+impl Default for CampCfg {
+    fn default() -> Self {
+        CampCfg::off()
+    }
+}
+
+impl CampCfg {
+    pub fn off() -> CampCfg {
+        CampCfg {
+            enabled: false,
+            take_days: 2,
+            work_age: 10,
+            camp_yield: 0.15,
+            camp_skill_floor: 0.6,
+            camp_skill_slope: 0.8,
+            camp_skill_gain: 0.002,
+            found_full: 0.8,
+            close_days: 3,
+            close_ban_days: 30,
+            scandal_standing: -0.05,
+            family_affinity: -0.2,
+            loyal_share: 0.9,
+            grudge_share: 0.7,
         }
     }
 }

@@ -55,6 +55,8 @@ fn role_slots(role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
         Role::Fabber => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
         // M16a (plan C8): a Fixer's office trades on persuasion and knowledge.
         Role::Fixer => (smallvec![(p, s.persuasion), (k, s.knowledge)], "persuasion"),
+        // Real economy E26: the kitchen's front persuades.
+        Role::Volunteer => (smallvec![(p, s.persuasion)], "persuasion"),
         Role::Gravedigger | Role::Sanitation => return None,
     })
 }

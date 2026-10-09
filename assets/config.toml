@@ -559,7 +559,7 @@ incorporate_buildings = 2         # an agent owning this many becomes a corp
 # city's coins sit with the employed and the execs): 3 NPC Bars from day 91 and no incorporation. At
 # 200 6 NPC foundings from day 28 and the first incorporation on day 28; at 150 15 foundings (12 Bars
 # by day 80, a third of them in a fortnight). Home stays 400 (its value is the Block sale price, D28).
-found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600, lab = 800, feed = 500 }  # M12 D20: hotel; M13 D16: clinic, garage; M14: lab (Research only); M15: feed
+found_cost = { bar = 200, home = 400, hotel = 250, clinic = 500, garage = 600, lab = 800, feed = 500, mission = 150, camp = 600 }  # M12 D20: hotel; M13 D16: clinic, garage; M14: lab (Research only); M15: feed; Real economy E26, E37: mission, camp
 wholesale = 2                      # coins per unit Farm → Market when owners differ
 # M11 phase 5: 10 -> 20, with upkeep.security_office 30 -> 10. A Security corp costs its Office's
 # upkeep, six guards' wages (48) and its exec (10) a day, ~88 at the old sizes against 6-10 a contract
@@ -597,12 +597,12 @@ bar_owner_count = 2
 # city-wide over 2-3 Hotels, seeds 42-44), ~7 gross and ~6 after tax: at 10 every Hotel owner bled.
 # M14 V47 (phase 1): lab 15 -> 0 (third knob; see wage_researcher).
 # M15 phase 4: feed 10 -> 0 (as the Lab's in M14 V47): with one Reporter a Feed then nets ~0 a day on ads.
-upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10, lab = 0, feed = 0 }
+upkeep = { farm = 245, market = 600, bar = 15, home = [0, 1, 2], security_office = 10, hotel = 4, clinic = 10, garage = 10, lab = 0, feed = 0, mission = 0, camp = 2 }  # Real economy E26, E37: a city Mission pays none; a corp's Camp 2 (phase 2's property_rate.camp mirrors it)
 # M12 fix pass: a corp raided (or looted by a riot) in the last raided_days reads Secure/Lobby
 # `losses` of at least raided_losses: it hardens (contracts the building, or lobbies on the gang).
 raided_days = 7
 raided_losses = 0.5
-value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800, lab = 1200, feed = 800 }  # D28; M13 D16; M14; M15
+value = { farm = 1000, market = 1000, security_office = 500, clinic = 600, garage = 800, lab = 1200, feed = 800, mission = 300, camp = 800 }  # D28; M13 D16; M14; M15; Real economy E26, E37
 shop_price_tiles = 12              # D15: one coin of price is worth 12 tiles of walking
 grow_cooldown_days = 7             # D23
 secure_per_day = 2                 # D24
@@ -1230,8 +1230,8 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3 }  # M16a C21: hired
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7 }  # M16a C21: hired
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2 }  # M16a C21: hired; Real economy E29: gave
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3 }  # M16a C21: hired; Real economy E29: gave
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
@@ -1258,7 +1258,7 @@ heat_wanted = 0.4
 heat_arrest = 0.2
 bribe_honour = 0.5
 dread_w = { killed = 1.0, assaulted = 0.4, avenged = 0.8, raided = 0.6, extorted = 0.3, robbed = 0.15, stripped = 0.2, hired = 0.3 }  # M16a C21: hired
-honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2 }  # M16a C21: hired
+honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2, gave = 0.2 }  # M16a C21: hired; Real economy E29: gave (no standing table at HEAD: honour carries the gift)
 heat_w = { arrested = 1.0, killed = 0.5, assaulted = 0.2, robbed = 0.2, extorted = 0.1, hired = 0.4 }  # M16a C21: hired
 own_bias = 0.3
 heat_pressure_w = 0.8
@@ -1679,6 +1679,19 @@ capacity = 14
 stock_cap = 400
 staff = 12
 
+# The Real economy E26, E37 (docs/ECONOMY_V2.md § 4 and its addendum): a Mission's
+# kitchen (two Volunteers at wage 0, [economy] wage_volunteer; 12 cots; 60 meals of
+# stock) and a work camp (no staff role: the children run the shift; 40 beds).
+[buildings.mission]
+capacity = 12
+stock_cap = 60
+staff = 2
+
+[buildings.camp]
+capacity = 40
+stock_cap = 120
+staff = 0
+
 # ---------------------------------------------------------------------------
 # M16a contracts (docs/M16_CONTRACTS.md; plan ~/.claude/plans/m16a-contracts.md).
 # A contract is a record (buyer, kind, target, price, deadline, broker, taker,
@@ -1781,3 +1794,37 @@ haul_margin = 1                      # coins a unit over the ask before a Market
 customs_rate = 0.1                   # of an import's price, to the Treasury (E5)
 ask_mult = 1.0                       # the famine lever (lower: cheaper imports)
 asset_floor = 2                      # E10 (phase 2): chrome/decks kept in a seller's stock before Parts-equivalent export
+
+[charity]                          # spec § 4 verbatim plus the plan keys (E26-E29); placeholders
+enabled = true
+seed = 1                           # Missions at seed, the Sump first
+reach_tiles = 40
+meal_markup = 1                    # coins over wholesale
+cot_price = 1                      # ledger-only (the cot is the building's capacity)
+clinic_price = 6                   # no tier-0 Therapy target at HEAD: cots and meals only
+donate_base = 0.02
+donate_frac = 0.05
+lobby_gift = 40
+rep_gift = 0.02                    # standing per 100 coins: carried by [reputation] honour_w.gave (E29)
+hunger_below = 0.4                 # E27 (plan key): served when hunger is below this
+meals_per_hour = 10                # E27 (plan key): the hourly cap, doubled by a Volunteer on shift
+give_floor_days = 14               # E28 (plan key): a donor keeps this many days of rent and meals
+gang_gift = 10                     # E28 (plan key): a gang under Expand with a front, weekly
+rep_gift_min = 20                  # E29 (plan key): a gift of at least this writes the Gave deed
+residents_per_mission = 1000       # E26 (plan key): Register's per-capita target of Missions
+
+[camp]                             # addendum 19; placeholders
+enabled = true
+take_days = 2                      # E38: Child.hunger_days (unfed days; 3 kills) at which the service takes a child
+work_age = 10                      # E40: sim years; younger children are housed and fed, not worked
+camp_yield = 0.15                  # E40: Parts per child-day at skill 0 (low yield)
+camp_skill_floor = 0.6
+camp_skill_slope = 0.8
+camp_skill_gain = 0.002            # farming per shift
+found_full = 0.8                   # E37: corps found a camp when every camp is this full
+close_days = 3                     # E42: unfed days before the law closes a camp
+close_ban_days = 30
+scandal_standing = -0.05           # E42: the owner's standing per unfed child-day in the last 30 days
+family_affinity = -0.2             # E41
+loyal_share = 0.9                  # E41
+grudge_share = 0.7                 # E41

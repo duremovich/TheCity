@@ -114,13 +114,19 @@ fn origin(world: &World, agent: EntityId) -> Option<TilePos> {
 
 /// A standing Hotel (not derelict, not demolished, not closed by a riot: M12 D33).
 pub fn is_hotel(world: &World, b: EntityId) -> bool {
-    world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Hotel && !bd.derelict && !bd.demolished)
-        && !world.is_closed(b)
+    (world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Hotel && !bd.derelict && !bd.demolished)
+        && !world.is_closed(b))
+        // Real economy E27: a Mission whose purse covers a cot is a Hotel at price 0.
+        || crate::systems::charity::is_cot_house(world, b)
 }
 
 /// D20: a night's price: `round(night_price × level)`, the owner corp's Food
 /// `price_level` when it is in Food, else 1.0.
 pub fn hotel_price(world: &World, h: EntityId) -> i64 {
+    // Real economy E27: a cot is free to the guest.
+    if crate::systems::charity::is_cot_house(world, h) {
+        return 0;
+    }
     let base = world.config.street.night_price as f32;
     let level = world
         .owner_of(h)
@@ -187,6 +193,21 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
     } else {
         world.config.street.hotel_reach
     };
+    // Real economy E27: a Mission's cot (price 0) within reach comes first.
+    if crate::systems::charity::on(world) {
+        let cot = world
+            .buildings_of_kind(BuildingKind::Mission)
+            .iter()
+            .copied()
+            .filter(|&m| crate::systems::charity::is_cot_house(world, m) && free_beds_for(world, m, agent) > 0)
+            .filter_map(|m| door_of(world, m).map(|d| (d.manhattan(from), m)))
+            .filter(|&(d, _)| d <= reach)
+            .min()
+            .map(|(_, m)| m);
+        if cot.is_some() {
+            return cot;
+        }
+    }
     world
         .buildings_of_kind(BuildingKind::Hotel)
         .iter()
@@ -218,9 +239,14 @@ fn book(world: &mut World, a: EntityId, h: EntityId) -> bool {
     if !is_hotel(world, h) || free_beds_for(world, h, a) == 0 || coins < price {
         return false;
     }
-    let owner = world.owner_of(h);
-    let paid = crate::systems::ownership::pay(world, Some(a), owner, price, crate::systems::ownership::Flow::Hotel);
-    crate::systems::ownership::credit(world, h, paid);
+    // Real economy E27: a cot's night is the purse's ledger line, not a payment.
+    if crate::systems::charity::is_cot_house(world, h) {
+        crate::systems::charity::note_cot(world, h);
+    } else {
+        let owner = world.owner_of(h);
+        let paid = crate::systems::ownership::pay(world, Some(a), owner, price, crate::systems::ownership::Flow::Hotel);
+        crate::systems::ownership::credit(world, h, paid);
+    }
     let until = checkout_after(world.tick);
     world.hotel_beds.insert(a, (h, until));
     world.stats.current.hotel_nights += 1;
