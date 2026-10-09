@@ -953,6 +953,9 @@ impl World {
     /// Build the initial city: map, buildings, gang, 300 citizens with homes
     /// and jobs. Deterministic for a given `(seed, config)`.
     pub fn new(seed: u64, config: Config) -> World {
+        // Real economy E22 (a), E36 (phase 3a): the dole and school meals
+        // resolved off with `no_net` (a no-op otherwise).
+        let config = crate::systems::econ::apply(config);
         let map = Map::load(&config.asset(&config.world.map));
         let names = NameTables::load(&config);
         // Absent until `citysim-cli calibrate` has written it; any other read

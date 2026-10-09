@@ -1822,6 +1822,11 @@ capital_lo_days = 3                  # the band's floor: under it a corp posts n
 fleet_floor_days = 7                 # a corp's fleet purchase (outside the import cap) leaves it this many days of max(revenue, payroll)
 asset_import_per_day = 300           # coins of asset imports a corp may front a day (0: unlimited); keeps the opening burst at home
 overflow_paid_only = true            # the Reserve buys Farm surplus only from a positive Treasury; the rest stays at the Farm
+# household_rent A/B (the wages-on diagnosis's household purse; with the [treasury] 3a keys, 42/43/44): evictions
+# 2,257/2,068/2,072 -> 1,447/1,437/1,448, starvation 6/3/6 -> 1/3/10, population 1,842/1,809/1,800 ->
+# 1,866/1,791/1,824, but Arasaka bankrupt on 43 (d68) and 44 (d48) and Kessler later (d47): off, a lever for the orchestrator.
+# EXPERIMENTAL: measured by the A/B above only, no unit test; test it (conservation, arrears) before turning it on.
+household_rent = false               # phase 3a (read only with no_safety_net): a co-resident spouse covers a short rent share before arrears
 
 # Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
 # (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the
@@ -1896,7 +1901,25 @@ grudge_share = 0.7                 # E41
 enabled = true
 property_rate = { farm = 6, market = 10, bar = 1, home = [0, 0, 1], hotel = 1, clinic = 2, garage = 2, lab = 3, fab = 3, venue = 1 }
 treasury_initial = 12000
-tax_min = 0.05
+# Phase 3a (the net removed; every key below read only with [economy2] wages and no_safety_net on). The
+# transition wave, A/B over 120 days on 42/43/44 (starvation deaths; employed d60; population d120; Treasury d120),
+# 3a as planned (tax_min 0.05, the opening [levers] rate 0.12, a find paid [life] scavenge_coins 1 from the till,
+# the Recycler holding out for parts_price like a Fab): 75/54/86; 676/676/615; 1,801/1,763/1,774; 88k/96k/77k
+# (two seeds over 3 x band hi = 75k). Who starved (seed 42, days 10-24, a probe): never-hired adults, 78 % housed
+# with an empty pantry and no earner at home, 71 % within reach of a Mission whose larder was empty; no child.
+#   tax_initial 0.05 + tax_min 0 alone: 82/70/78; Treasury 47k/48k/35k (the band works; the wave does not move).
+#   emigrate_cost 0 alone: 81/86/104, population 894/861/839 (1,023-1,062 leave): the fare is what holds the city.
+#   capital_payout_days 10 alone: 66/67/93. [charity] donate_base 0.2, donate_frac 0.2, give_floor_days 3,
+#   lobby_gift 400: 24/25/30, meals 16-24 a day, donations 18-20k (ten times the spec's slim band): not kept.
+#   The Recycler sells to the World at any bid (the till's dealer, not a Fab; world_market::daily): 36/26/35,
+#   but the till hoards 38k by day 120 paying 1 a find. + scrap_coins 3 (the scrap's resale value, ~4 scrap to
+#   a 10-16 coin Part): 12/3/1, 680/663/659, 1,809/1,803/1,886, Treasury 109k/115k/101k; scrap_coins 2 + the
+#   tax keys below: 13/10/12. Kept: scrap_coins 3 + tax_initial 0.05 + tax_min 0: 6/3/6, 714/699/733,
+#   1,842/1,809/1,800, Treasury 40k/57k/44k (the rate reaches 0 by day 38-41: fines, customs and the property
+#   rate cover the city's wages); tax_min 0.02 instead: 5/2/6 but Treasury 71k/77k/72k.
+tax_min = 0.0                        # plan 0.05 (see above: at 0.05 the Treasury hoards past 3 x band hi)
 tax_max = 0.20
 tax_step = 0.01
 band = [8000, 25000]
+tax_initial = 0.05                   # phase 3a (plan key): the rate a no_net city opens with (negative: [levers] tax_rate)
+scrap_coins = 3                      # phase 3a (plan key): a find paid from the Recycler's till with no_net (0: [life] scavenge_coins)

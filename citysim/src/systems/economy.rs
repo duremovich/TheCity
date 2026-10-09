@@ -148,6 +148,12 @@ fn reserve_release(world: &mut World, wh: EntityId) {
     if !cfg.enabled || cfg.reserve_release_price <= 0 {
         return;
     }
+    // Real economy E32 (phase 3a): no free release with `no_net` (the ask
+    // ceiling and Market imports, E11, are the famine bound; the
+    // `ReleaseReserve` god lever stays).
+    if crate::systems::econ::no_net(world) {
+        return;
+    }
     let (mut threshold, batch, floor) =
         (cfg.reserve_release_price, cfg.reserve_release_batch, world.config.economy.restock_floor);
     // Real economy (E12): the shelf is capped at `ask + haul_margin`, so a

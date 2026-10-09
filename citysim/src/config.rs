@@ -5428,6 +5428,9 @@ pub struct Economy2Cfg {
     /// The overflow leg: with wages on the Reserve buys a Farm's surplus only
     /// from a positive Treasury, the rest stays at the Farm (false: phase 2).
     pub overflow_paid_only: bool,
+    /// Phase 3a (the transition wave; read only with `no_net`): a
+    /// co-resident spouse covers a short rent share before arrears.
+    pub household_rent: bool,
 }
 
 impl Default for Economy2Cfg {
@@ -5466,6 +5469,7 @@ impl Economy2Cfg {
             fleet_floor_days: 0.0,
             asset_import_per_day: 0,
             overflow_paid_only: false,
+            household_rent: false,
         }
     }
 }
@@ -5611,6 +5615,12 @@ pub struct TreasuryCfg {
     pub tax_max: f32,
     pub tax_step: f32,
     pub band: [i64; 2],
+    /// Phase 3a (plan key, the transition wave): the tax rate a `no_net`
+    /// city opens with (`econ::apply`); negative keeps `[levers] tax_rate`.
+    pub tax_initial: f32,
+    /// Phase 3a (plan key, the transition wave): what the Recycler's till
+    /// pays a scavenger's find with `no_net` (0: `[life] scavenge_coins`).
+    pub scrap_coins: i64,
 }
 
 impl Default for TreasuryCfg {
@@ -5629,6 +5639,8 @@ impl TreasuryCfg {
             tax_max: 0.20,
             tax_step: 0.01,
             band: [8_000, 25_000],
+            tax_initial: -1.0,
+            scrap_coins: 0,
         }
     }
 }

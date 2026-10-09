@@ -68,6 +68,7 @@ pub mod stims;
 pub mod street;
 pub mod tech;
 pub mod think;
+pub mod treasury;
 pub mod vehicles;
 pub mod virt;
 pub mod wages;

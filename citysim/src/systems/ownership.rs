@@ -741,6 +741,24 @@ pub fn charity_out(world: &mut World, mission: EntityId, to: Option<EntityId>, a
     moved
 }
 
+/// Real economy E33 (phase 3a): pay `amount` (capped at the till) from the
+/// Recycler's till to `to`, untaxed, with the ledger line (the escrow and
+/// charity precedent). Returns the coins moved (an empty till pays 0).
+pub fn till_out(world: &mut World, to: Option<EntityId>, amount: i64, flow: Flow) -> i64 {
+    let moved = amount.min(world.econ.recycler_till);
+    if moved <= 0 {
+        return 0;
+    }
+    world.econ.recycler_till -= moved;
+    ledger(world, flow, moved);
+    shadow_flow(world, None, to, moved, flow, false);
+    world.purse_add(to, moved);
+    if crate::systems::wages::on(world) {
+        crate::systems::wages::note_inflow(world, to, flow, moved);
+    }
+    moved
+}
+
 /// Gross coins earned through a building today.
 pub fn credit(world: &mut World, building: EntityId, coins: i64) {
     if let Some(b) = world.comp_mut::<Building>(building) {
@@ -766,7 +784,9 @@ pub fn total_coins(world: &World) -> i64 {
         if crate::systems::econ::market_on(world) { world.holes.values().map(|h| h.loot).sum() } else { 0 };
     // Real economy E26: the Missions' purses are coins held.
     let purses: i64 = crate::systems::charity::purses(world);
-    wallets + gangs + corps + city + loot + escrow + holes + purses
+    // Real economy E33 (phase 3a): the Recycler's till (0 without `no_net`).
+    let till = world.econ.recycler_till;
+    wallets + gangs + corps + city + loot + escrow + holes + purses + till
 }
 
 // ---------------------------------------------------------------------------
@@ -1355,7 +1375,19 @@ fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
         return;
     }
     let owner = world.owner_of(home);
-    let paid = pay(world, Some(a), owner, due, Flow::Rent);
+    let mut paid = pay(world, Some(a), owner, due, Flow::Rent);
+    // The transition wave (phase 3a, `[economy2] household_rent`, no_net
+    // only): a co-resident spouse covers a short share from their own
+    // wallet before it counts as arrears (the household's purse, not a
+    // transfer from outside it).
+    if paid < due && midnight && household_rent(world) {
+        if let Some(s) = world
+            .spouse_of(a)
+            .filter(|&s| !world.has::<Corpse>(s) && world.comp::<Household>(s).and_then(|h| h.home) == Some(home))
+        {
+            paid += pay(world, Some(s), owner, due - paid, Flow::Rent);
+        }
+    }
     credit(world, home, paid);
     world.stats.current.rent_paid += paid;
     let today = world.day();
@@ -1386,6 +1418,12 @@ fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
             format!("{name} could not pay the rent on {} to {label} ({paid} of {due})", world.name_of(home)),
         );
     }
+}
+
+/// The transition wave (phase 3a): a co-resident spouse covers a short
+/// rent share with `[economy2] household_rent` and `no_net`.
+fn household_rent(world: &World) -> bool {
+    world.config.economy2.household_rent && crate::systems::econ::no_net(world)
 }
 
 /// `[rent] pay_from_income`: rent comes out of a wage or the dole the moment

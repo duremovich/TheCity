@@ -31,7 +31,13 @@ pub fn run(world: &mut World) {
     // layoffs on the margin, before the band and `demography`'s hires.
     crate::systems::wages::daily(world);
     crate::systems::wages::staff(world);
-    crate::systems::budget::daily(world);
+    // Real economy E21 (phase 3a): with `no_net` the Treasury's tax band
+    // replaces L2's budget band (no works, no upkeep cut).
+    if crate::systems::econ::no_net(world) {
+        crate::systems::treasury::daily(world);
+    } else {
+        crate::systems::budget::daily(world);
+    }
     // L2 shadow fixes: no-shows, the sweepers' wage, the told-memory.
     crate::systems::fixes::daily(world);
     crate::systems::outside::export_daily(world);
