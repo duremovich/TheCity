@@ -66,7 +66,7 @@ pub struct ShadowArgs {
     pub assert: bool,
 }
 
-const ARCHETYPES: [&str; 19] = [
+const ARCHETYPES: [&str; 25] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -86,6 +86,13 @@ const ARCHETYPES: [&str; 19] = [
     "fabber",
     "sweeper",
     "worker_friday",
+    // Jobs and room P3 (J14): the second roles, by trade.
+    "super",
+    "bouncer",
+    "dancer",
+    "night_shift",
+    "orderly",
+    "camp_warden",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -177,6 +184,17 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
         "fighter" => by_role(&[Role::Fighter]),
         "fabber" => by_role(&[Role::Fabber]),
         "sweeper" => by_role(&[Role::Sanitation]),
+        // Jobs and room P3: a trade by its `[[trades]]` key (the night shift: the Night
+        // Stockers and Night Porters); none when the config lacks the row.
+        "night_shift" => {
+            let roles: Vec<Role> =
+                ["night_stocker", "night_porter"].iter().filter_map(|k| world.config.trade_role(k)).collect();
+            by_role(&roles)
+        }
+        "super" | "bouncer" | "dancer" | "orderly" | "camp_warden" => {
+            let roles: Vec<Role> = world.config.trade_role(arch).into_iter().collect();
+            by_role(&roles)
+        }
         // V2: the diary should start on the weekday before `[leisure] collect_weekday` (Friday on
         // the shipped config: weekday 5 of `day % 7`, the last workday before the rest day 6).
         "worker_friday" => adults()
@@ -1939,7 +1957,7 @@ const BEHAVIOUR_COUNT: usize = 5;
 const BEHAVIOUR_WINDOWS: [(u64, &str); 2] = [
     (
         19,
-        "gang_member,gang_leader,ripperdoc,homeless,ceo,guard,worker,runner,purist,dealer,reporter,cook,club_staff,fighter,fabber,sweeper,worker_friday",
+        "gang_member,gang_leader,ripperdoc,homeless,ceo,guard,worker,runner,purist,dealer,reporter,cook,club_staff,fighter,fabber,sweeper,worker_friday,super,bouncer,dancer,night_shift,orderly,camp_warden",
     ),
     (90, "gang_member,gang_leader,dealer,runner,purist,homeless"),
 ];
@@ -2179,7 +2197,9 @@ const CHECKS: &[Check] = &[
     // Jobs and room P2 re-measure (a reporter hired on skill across town; old bound 8.0, measured 4.98).
     (19, "reporter", Metric::WalkHDay, Bound::Max(13.2), 8.70),
     (19, "reporter", Metric::LongestSleepH, Bound::Min(3.8), 5.44),
-    (19, "reporter", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    // Jobs and room P3 re-measure (pick swap: #848 -> #1245, a Sump Central home 6 h from her Mid West
+    // Feed, at energy 0 on the walk home): was Max(6.0), 0.00.
+    (19, "reporter", Metric::Energy0HWeek, Bound::Max(16.8), 10.75),
     (19, "reporter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (19, "reporter", Metric::CommuteAbortsDay, Bound::Max(0.8), 0.16),
     (19, "reporter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
@@ -2233,7 +2253,8 @@ const CHECKS: &[Check] = &[
     (90, "gang_member", Metric::LongestSleepH, Bound::Min(3.7), 5.41),
     (90, "gang_member", Metric::Energy0HWeek, Bound::Max(6.4), 0.34),
     // M16a phase 3 re-measure (old bound 13.2, measured 26.40).
-    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(6.0), 12.00),
+    // Jobs and room P3 re-measure (pick swap: five other members on the trades city): was Min(6.0), 12.00.
+    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(2.7), 5.43),
     (90, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (90, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (90, "homeless", Metric::WalkHDay, Bound::Max(9.8), 6.25),

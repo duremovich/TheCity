@@ -1954,3 +1954,84 @@ floor_cost_frac = 0.6
 floor_days = 7
 lot_reach = 48
 floors_max = { Farm = 3, Fab = 3, Home = 6, Club = 2, Arcade = 2, NoodleBar = 2, FightPit = 2, Den = 2, Lounge = 2 }
+
+# Jobs and room P3 (docs/JOBS_V2.md § 1.2-1.3, plan J9-J15): trades as data, `Role::Trade(TradeId)` by row.
+# Each row: id (the stable key saves store), label, workplace kinds, staff_per_floor (places per floor; with
+# per_owned > 0, per group of per_owned of a corp's buildings of the kind, at the group's lowest id), wage
+# (paid by the workplace's owner at the shift's end, from its revenue, as any staff), shift (day | evening |
+# night | split: night for even ids), skill (hiring and competence: farming | fighting | persuasion |
+# knowledge | hacking | none), model (what pays: produce | service | handling | contract | civic | overhead |
+# resale | day), duty (post | round: the Super's round of round_stops doors). The seven second roles of P3
+# (J14); wages and skills are placeholders.
+[[trades]]
+id = "super"
+label = "Super"
+workplace = ["Home"]
+staff_per_floor = 1
+per_owned = 15                     # one Super per 15 of a corp's Blocks (blocks_per_super), paid by the landlord
+wage = 6
+shift = "day"
+skill = "persuasion"
+model = "overhead"
+duty = "round"
+round_stops = 6
+
+[[trades]]
+id = "night_stocker"
+label = "Night Stocker"
+workplace = ["Market"]
+staff_per_floor = 4
+wage = 5
+shift = "night"
+skill = "none"
+model = "service"
+
+[[trades]]
+id = "night_porter"
+label = "Night Porter"
+workplace = ["Hotel"]
+staff_per_floor = 1
+wage = 5
+shift = "night"
+skill = "persuasion"
+model = "service"
+
+[[trades]]
+id = "bouncer"
+label = "Bouncer"
+workplace = ["Club", "Den", "FightPit"]
+staff_per_floor = 2
+wage = 6
+shift = "evening"
+skill = "fighting"
+model = "service"
+
+[[trades]]
+id = "dancer"
+label = "Dancer"
+workplace = ["Club"]
+staff_per_floor = 3
+wage = 6
+shift = "evening"
+skill = "persuasion"
+model = "service"
+
+[[trades]]
+id = "orderly"
+label = "Orderly"
+workplace = ["Clinic"]
+staff_per_floor = 2
+wage = 5
+shift = "split"
+skill = "knowledge"
+model = "service"
+
+[[trades]]
+id = "camp_warden"
+label = "Camp Warden"
+workplace = ["Camp"]
+staff_per_floor = 2
+wage = 5
+shift = "day"
+skill = "fighting"
+model = "contract"                 # paid by the camp's owner at shift end (a city camp: the Treasury, in civic_payroll); the model has no code in P3

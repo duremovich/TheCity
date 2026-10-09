@@ -338,8 +338,15 @@ pub fn at_ceiling(world: &World, corp: EntityId) -> bool {
         for (role, _) in ownership::roles_for(world, kind) {
             let extra = overtime_of(kind, role, overtime);
             let (hires, open) = places(world, b, role, c.exec);
+            // Review fix: a role with no place here and nobody in it (a
+            // Block that is not a Super's post) is not counted: it would
+            // read "at its ceiling" vacuously.
+            let ceiling = ceiling_at(world, b, role) + extra;
+            if ceiling == 0 && hires.is_empty() && open == 0 {
+                continue;
+            }
             // Jobs and room J7: the per-building ceiling, floors included.
-            if hires.len() + open < ceiling_at(world, b, role) + extra {
+            if hires.len() + open < ceiling {
                 return false;
             }
             any = true;
@@ -489,7 +496,10 @@ pub fn staff_ceiling(world: &World, kind: BuildingKind) -> usize {
 pub fn ceiling_at(world: &World, b: EntityId, role: Role) -> usize {
     let full = crate::systems::jobs::places_of(world, b, role);
     let mult = world.config.economy2.staff_ceiling_mult;
-    if mult <= 1.0 {
+    // Jobs and room J14: a `per_owned` trade (the Super) is one post per
+    // group of buildings; a busier landlord does not post three.
+    let per_owned = crate::systems::trades::row_of(world, role).is_some_and(|r| r.per_owned > 0);
+    if mult <= 1.0 || per_owned {
         return full;
     }
     ((full as f32 * mult).ceil() as usize).max(full)
@@ -760,8 +770,10 @@ pub fn floor_pass(world: &mut World, corp: EntityId, order: f32, room: f32, r: f
             let at_ceiling = per_floor > 0 && hires.len() + open >= ceiling_at(world, b, role) + extra;
             // Jobs and room J10: a floor's wage bill is every role's places
             // on it (the bespoke role's ceiling still decides).
+            // (A `per_owned` trade's places do not grow with floors.)
             let floor_bill: f32 = ownership::roles_for(world, kind)
                 .into_iter()
+                .filter(|&(r, _)| crate::systems::trades::row_of(world, r).is_none_or(|t| t.per_owned == 0))
                 .map(|(r, n)| n as f32 * (world.config.wage(r) as f32 * rev_mult))
                 .sum();
             let covers = room > 0.0 && room >= floor_bill;

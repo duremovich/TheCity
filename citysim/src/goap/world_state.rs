@@ -575,6 +575,15 @@ impl WorldState {
             _ if at_corpse && !carrying => LocationKey::CorpseTile,
             _ if patrolling => LocationKey::PatrolWaypoint,
             _ if at_muster => LocationKey::MusterPoint,
+            // Jobs and room J13: under Work, a trade's staff inside its own
+            // workplace (a Night Porter in the Hotel, a Super at his post
+            // Block, even his own) are at their workplace.
+            Some(b)
+                if goal == Some(crate::components::GoalKind::Work)
+                    && crate::systems::trades::at_post(world, agent, b) =>
+            {
+                LocationKey::Workplace
+            }
             Some(b) if Some(b) == home => LocationKey::Home,
             Some(b)
                 if Some(b) == target && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home) =>

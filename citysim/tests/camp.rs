@@ -161,7 +161,8 @@ fn test_seed_city_camp() {
     let b = w.comp::<Building>(c).expect("camp");
     assert_eq!(b.kind, BuildingKind::Camp);
     assert!(b.owner.is_none() && b.camp.is_some());
-    assert!(!w.vacancies.contains_key(&c), "no staff role");
+    // Jobs and room J14: no bespoke staff role; its Camp Wardens are a trade.
+    assert!(w.vacancies.get(&c).is_none_or(|v| v.iter().all(|r| r.is_trade())), "no bespoke staff role");
     assert!(camp::children_of(&w, c).is_empty());
 }
 

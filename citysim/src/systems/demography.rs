@@ -694,6 +694,10 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if matches!(role, Role::Host | Role::Fighter | Role::Croupier | Role::Concierge) {
         shifts = world.config.leisure.evening_shift.clone();
     }
+    // Jobs and room J12: a trade's shift is its row's.
+    if let Some(row) = crate::systems::trades::row_of(world, role) {
+        shifts = crate::systems::trades::shifts_for(world, row, id);
+    }
     let wage_per_day = world.config.wage(role);
     world.insert(
         id,
@@ -1178,6 +1182,8 @@ fn floor_role_skill(world: &mut World, id: EntityId, role: Role) {
             Some("fighting") => s.fighting = s.fighting.max(floor),
             Some("persuasion") => s.persuasion = s.persuasion.max(floor),
             Some("knowledge") => s.knowledge = s.knowledge.max(floor),
+            // Jobs and room P3: a trade whose row ranks on hacking.
+            Some("hacking") => s.hacking = s.hacking.max(floor),
             _ => {}
         }
         if role == Role::Researcher {

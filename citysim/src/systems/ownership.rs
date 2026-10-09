@@ -865,11 +865,7 @@ pub fn roles_for(world: &World, kind: BuildingKind) -> Vec<(Role, usize)> {
     if world.config.trades.is_empty() {
         return out;
     }
-    for (role, row) in world.config.trade_roles().into_iter().zip(&world.config.trades) {
-        if row.workplace.contains(&kind) {
-            out.push((role, usize::from(row.staff_per_floor)));
-        }
-    }
+    out.extend_from_slice(world.config.trades_at(kind));
     out
 }
 

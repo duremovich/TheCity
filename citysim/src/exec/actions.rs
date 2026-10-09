@@ -781,6 +781,12 @@ pub fn on_complete(
             StepResult::Done
         }
         ActionKind::GuardJail | ActionKind::ClerkWork | ActionKind::BartendWork | ActionKind::TendGraves => {
+            // Jobs and room J13: a producing trade's shift makes its output.
+            if kind == ActionKind::ClerkWork {
+                if let Some(b) = world.comp::<Job>(id).filter(|j| j.role.is_trade()).and_then(|j| j.employer) {
+                    crate::systems::trades::accrue(world, id, b, now.saturating_sub(started));
+                }
+            }
             end_shift(world, id);
             StepResult::Done
         }

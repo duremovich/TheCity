@@ -41,6 +41,9 @@ pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
     let Some((kind, floors)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.floors.max(1))) else { return 0 };
     if let Role::Trade(t) = role {
         let Some(row) = world.config.trade(t).filter(|r| r.workplace.contains(&kind)) else { return 0 };
+        if row.per_owned > 0 {
+            return crate::systems::trades::owned_places(world, b, row);
+        }
         return usize::from(row.staff_per_floor) * usize::from(floors);
     }
     if ownership::role_for(kind) != Some(role) {
@@ -333,13 +336,15 @@ pub fn top_up(world: &mut World) {
             }
         }
     }
+    // Jobs and room J15: the trades of the kinds no pass above walks.
+    crate::systems::trades::top_up(world);
 }
 
 /// `b`'s unfilled `role` places below `full` (a hunkering corp's building
 /// staffs to half, Hunker's own floor, so the top-up and Hunker's layoffs
 /// do not churn a hire a day): `full` less the staff in `role` and the
 /// vacancies already posted for it.
-fn deficit(world: &World, b: EntityId, role: Role, full: usize) -> usize {
+pub(crate) fn deficit(world: &World, b: EntityId, role: Role, full: usize) -> usize {
     let hunker = world.owner_of(b).and_then(|o| world.comp::<Corp>(o)).is_some_and(|c| c.order == CorpOrder::Hunker);
     let full = if hunker { full.div_ceil(2) } else { full };
     let working = ownership::staff_at(world, b)

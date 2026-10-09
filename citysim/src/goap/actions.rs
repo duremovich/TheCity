@@ -707,6 +707,11 @@ impl PlanCtx {
                 // wage desk is the Hall).
                 add(LocationKey::Workplace, job.and_then(|j| j.employer));
             }
+            // Jobs and room J13: a trade's staff work at their employer
+            // (a Market's, a Hotel's, a Block's), whoever pays.
+            if job.is_some_and(|j| j.role.is_trade()) {
+                add(LocationKey::Workplace, job.and_then(|j| j.employer));
+            }
 
             // M13 D47: a Mechanic's Garage (its employer).
             if job.is_some_and(|j| j.role == Role::Mechanic) {
@@ -1183,6 +1188,8 @@ impl ActionKind {
                     || ctx.is(Role::Concierge)
                     // M16a (plan C8): the Fixer's staff.
                     || ctx.is(Role::Fixer)
+                    // Jobs and room J13: every trade.
+                    || ctx.role.is_some_and(Role::is_trade)
             }
             ActionKind::BartendWork => ctx.is(Role::Bartender),
             ActionKind::GuardJail => ctx.is(Role::Guard) && ctx.jail_day,

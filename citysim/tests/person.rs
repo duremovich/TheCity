@@ -365,3 +365,46 @@ fn probe_offer_migrant_reaches_the_first_shift() {
     assert!(law::living(&w, a), "alive");
     assert!(first.is_some(), "never at the workplace on shift within two days");
 }
+
+/// Jobs and room P3 (spec § 7, plan P3 step 4): a Night Porter on her shift
+/// is at the Hotel at 02:00 and has been paid by 08:00 (the night shift
+/// ends at 06:00 and the wage is paid at its end, from the Hotel's owner).
+#[test]
+fn probe_night_porter_on_shift_at_two_is_paid_by_eight() {
+    let mut w = world();
+    let porter_role = w.config.trade_role("night_porter").expect("the night_porter trade is configured");
+    // Day 2, 00:00: the first midnight's job search hired the porters.
+    w.run_ticks(2 * TICKS_PER_DAY);
+    let p = w
+        .workers(porter_role)
+        .iter()
+        .copied()
+        .find(|&a| {
+            law::living(&w, a)
+                && !w.has::<citysim::Sentence>(a)
+                && w.comp::<Job>(a).is_some_and(|j| routine::workday_of(&w, a, j, j.shift_key_at(w.tick)))
+        })
+        .expect("a free Night Porter on a workday");
+    let hotel = w.comp::<Job>(p).and_then(|j| j.employer).expect("employer");
+    pin(&mut w, p);
+    run_to(&mut w, p, 2 * TICKS_PER_DAY + 2 * TICKS_PER_HOUR, |_| {});
+    let at_two = building(&w, p);
+    let before = coins(&w, p);
+    let mut paid = false;
+    let mut last = before;
+    run_to(&mut w, p, 2 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR, |w| {
+        let c = coins(w, p);
+        paid |= c > last;
+        last = c;
+    });
+    let unpaid = w.comp::<Job>(p).map_or(99, |j| j.days_unpaid);
+    eprintln!(
+        "porter {}: at 02:00 in {:?} (Hotel {:?}); coins {before} -> {}; paid {paid}; days_unpaid {unpaid}",
+        p.index,
+        at_two.map(|b| b.index),
+        hotel.index,
+        coins(&w, p)
+    );
+    assert_eq!(at_two, Some(hotel), "the porter is not at the Hotel at 02:00");
+    assert!(paid && unpaid == 0, "the night shift was not paid by 08:00");
+}

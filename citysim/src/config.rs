@@ -197,6 +197,23 @@ pub struct Config {
     /// `Trade("key")` resolves against.
     #[serde(default, deserialize_with = "trades_de")]
     pub trades: Vec<TradeCfg>,
+    /// J9 review: the trades as roles and per kind, built once on first
+    /// read ([`Config::trade_roles`], [`Config::trades_at`]); not saved. A
+    /// change to `trades` after the first read must call
+    /// [`Config::reset_trade_cache`].
+    #[serde(skip)]
+    pub trade_cache: TradeCache,
+}
+
+/// J9 review: [`Config`]'s cache of the trade roles (row order) and of
+/// each kind's `(role, staff_per_floor)` trades.
+#[derive(Clone, Debug, Default)]
+pub struct TradeCache(std::sync::OnceLock<TradeCacheData>);
+
+#[derive(Clone, Debug)]
+pub struct TradeCacheData {
+    roles: Vec<Role>,
+    by_kind: std::collections::BTreeMap<BuildingKind, Vec<(Role, usize)>>,
 }
 
 /// J9: a trade's shift (`demography::hire`, J12).
@@ -259,6 +276,31 @@ pub struct TradeCfg {
     #[serde(default)]
     pub skill: TradeSkill,
     pub model: TradeModel,
+    /// J14 (the Super): with `n > 0`, a corp owner posts `staff_per_floor`
+    /// places per `n` of its standing buildings of the workplace kind (a
+    /// group started counts), at the lowest-id building of each group of
+    /// `n` (`trades::owned_places`); no other owner posts any. 0: every
+    /// building posts its places per floor.
+    #[serde(default)]
+    pub per_owned: u16,
+    /// J14: how the shift is worked (`post`, or the Super's `round`).
+    #[serde(default)]
+    pub duty: TradeDuty,
+    /// J14 (a `round` duty): the doors a shift's round visits.
+    #[serde(default)]
+    pub round_stops: u8,
+}
+
+/// J14: how a trade works its shift.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TradeDuty {
+    /// At the workplace for the shift (the generic `Work`).
+    #[default]
+    Post,
+    /// The Super's round: `round_stops` of the employer's Blocks in the
+    /// post's district, door to door (`trades::round_plan`), then the post.
+    Round,
 }
 
 /// J9: the `trades` field's reader: the rows, checked (unique keys, at most
@@ -4794,7 +4836,33 @@ impl Config {
 
     /// J9: the configured trades as roles, in row order.
     pub fn trade_roles(&self) -> Vec<Role> {
-        trade_ids_of(&self.trades).into_iter().map(Role::Trade).collect()
+        self.trade_cache_data().roles.clone()
+    }
+
+    /// J10: a kind's trades with their places per floor, in row order
+    /// (cached).
+    pub fn trades_at(&self, kind: BuildingKind) -> &[(Role, usize)] {
+        self.trade_cache_data().by_kind.get(&kind).map_or(&[], Vec::as_slice)
+    }
+
+    /// Drop the trade cache (after editing `trades` in place).
+    pub fn reset_trade_cache(&mut self) {
+        self.trade_cache = TradeCache::default();
+    }
+
+    fn trade_cache_data(&self) -> &TradeCacheData {
+        let data = self.trade_cache.0.get_or_init(|| {
+            let roles: Vec<Role> = trade_ids_of(&self.trades).into_iter().map(Role::Trade).collect();
+            let mut by_kind: std::collections::BTreeMap<BuildingKind, Vec<(Role, usize)>> = Default::default();
+            for (role, row) in roles.iter().zip(&self.trades) {
+                for &k in &row.workplace {
+                    by_kind.entry(k).or_default().push((*role, usize::from(row.staff_per_floor)));
+                }
+            }
+            TradeCacheData { roles, by_kind }
+        });
+        debug_assert_eq!(data.roles.len(), self.trades.len(), "trades edited after the cache was read");
+        data
     }
 
     /// J9: the trade keyed `key`.

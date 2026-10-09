@@ -1213,6 +1213,9 @@ impl World {
         // Chapel's kitchen, then the city's Camp (no RNG), before the plane links.
         systems::charity::seed(&mut w);
         systems::camp::seed(&mut w);
+        // Jobs and room J15: the trade places of every standing building the
+        // map and the seeding passes put up (no RNG).
+        systems::trades::seed(&mut w);
         // L2 phase 5 (the day-1 leisure pulse): opening fun spread (no RNG).
         systems::leisure::seed_fun(&mut w);
         systems::virt::relink(&mut w);

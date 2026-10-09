@@ -443,6 +443,24 @@ fn test_endowed_mission_serves_over_days() {
     let mut w = world();
     let m = mission(&w);
     charity::god_donate(&mut w, m, 2_000).expect("gift");
+    // Jobs and room P3: the trades employ the Mission's nearest poor on the
+    // shipped seed, so the week's guests are made explicit: the five
+    // jobless adults living nearest its door, broke and hungry.
+    let door = w.comp::<Building>(m).expect("mission").door;
+    let mut near: Vec<(u32, EntityId)> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| demography::is_adult(&w, a) && !w.has::<Job>(a))
+        .filter_map(|a| {
+            let h = w.comp::<Household>(a).and_then(|h| h.home)?;
+            Some((w.comp::<Building>(h)?.door.manhattan(door), a))
+        })
+        .collect();
+    near.sort();
+    for &(_, a) in near.iter().take(5) {
+        set_coins(&mut w, a, 0);
+        set_hunger(&mut w, a, 0.2);
+    }
     // (The identity drifts over days at EC_BASE: immigrants, emigrants and
     // the fence are phase 1's census; a Mission's day moves no coin but
     // through `charity_in`/`charity_out`, checked above.)
