@@ -1169,6 +1169,13 @@ fn test_decapitation_splits_with_strong_lieutenant_and_two_districts() {
     all2.extend(&east2);
     hold(&mut w2, h0, &all2);
     w2.comp_mut::<citysim::Household>(leader2).expect("h").home = Some(west2[0]);
+    // Jobs and room J5: the map now carries Lots in Sump East; the premise
+    // (no Lot there) is restored by taking them off the market.
+    for l in citysim::systems::founding::vacant_lots(&w2) {
+        if w2.district_of_building(l) == DistrictId(7) {
+            w2.comp_mut::<Building>(l).expect("lot").demolished = true;
+        }
+    }
     let err = gang::split(&mut w2, h0, None, false).expect_err("no Hideout site");
     assert!(err.contains("no squat or Lot"), "{err}");
 }

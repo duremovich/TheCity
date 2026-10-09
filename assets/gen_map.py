@@ -12,8 +12,9 @@ Zones (per tile, first match wins): x >= 208 Vats; y >= 112 Sump; y < 40 and x >
 Buildings: 400 Blocks (Homes) at 5 residents (60 Spire tier 2, 140 Mid tier 1, 200 Sump tier 0),
 12 Vat Farms in the Vats, 3 Street Markets and 3 Bars (one each Civic, two each Mid), the Precinct
 (Jail) and the Civic Hall in Civic, the Recycler (Cemetery), Reserve Depot (Warehouse) and two
-Security Offices in the Vats, two Hideouts in the SW and SE corners of the Sump, and 60 Lots
-(open plots: no walls, one door) spread over every zone. Double-wide buildings overwrite the road
+Security Offices in the Vats, two Hideouts in the SW and SE corners of the Sump, and 160 Lots
+(open plots: no walls, one door) spread over every zone: the M10 60 plus Jobs and room J5's 100
+on the free ground (Vats 40, 20 of them double-wide yards; Mid 30; Civic 12; Spire 10; Sump 8). Double-wide buildings overwrite the road
 segment between their two cells; the BFS below proves every door is still reachable.
 
 The old 96 x 64 map is assets/map_v1.txt (unit tests only).
@@ -76,7 +77,7 @@ def place(kind, c, r, tier=1):
         rect, door, cells = (8 * c, 8 * r + 1, 7, 6), (8 * c + 3, 8 * r + 6), [(c, r)]
     elif kind == "Cemetery":
         rect, door, cells = (8 * c, 8 * r, 7, 7), (8 * c + 3, 8 * r + 6), [(c, r)]
-    elif kind in ("Market", "Bar"):
+    elif kind in ("Market", "Bar", "Lot2"):
         rect, door, cells = (8 * c, 8 * r + 1, 15, 6), (8 * c + 7, 8 * r + 6), [(c, r), (c + 1, r)]
     elif kind == "Farm":
         rect, door, cells = (8 * c, 8 * r, 15, 7), (8 * c + 7, 8 * r + 6), [(c, r), (c + 1, r)]
@@ -89,7 +90,8 @@ def place(kind, c, r, tier=1):
         raise ValueError(kind)
     take(cells)
     x, y, w, h = rect
-    buildings.append((kind, x, y, w, h, door[0], door[1], tier))
+    # Jobs and room J5: a double-wide Lot is a plain `B Lot` line 15 wide.
+    buildings.append(("Lot" if kind == "Lot2" else kind, x, y, w, h, door[0], door[1], tier))
 
 
 def cell_zone(c, r):
@@ -157,6 +159,26 @@ for (c, r) in stride(mid, 140):
 for (c, r) in stride(sump, 200):
     place("Home", c, r, 0)
 
+# --- Jobs and room J5: Lots on the free ground ----------------------------------
+# docs/JOBS_V2.md § 2.2: +100 Lots by zone quota (placeholders), chosen by `stride` as the Homes are.
+# The Vats take 20 double-wide yards (two adjacent free cells in a row, greedy row-major) and 20
+# single Lots; ~127 free cells stay open ground.
+NEW_LOTS = {"V": 40, "M": 30, "C": 12, "S": 10, "U": 8}
+VATS_DOUBLE = 20
+vats_free = free_cells("V")
+pairs, paired = [], set()
+for (c, r) in vats_free:
+    if (c, r) in paired or (c + 1, r) in paired or (c + 1, r) not in vats_free:
+        continue
+    pairs.append((c, r))
+    paired.update({(c, r), (c + 1, r)})
+for (c, r) in stride(pairs, VATS_DOUBLE):
+    place("Lot2", c, r)
+for zone in "VMCSU":
+    singles = NEW_LOTS[zone] - (VATS_DOUBLE if zone == "V" else 0)
+    for (c, r) in stride(free_cells(zone), singles):
+        place("Lot", c, r)
+
 # --- stamp ---------------------------------------------------------------------
 for (kind, x, y, w, h, dx, dy, tier) in buildings:
     for yy in range(y, y + h):
@@ -214,7 +236,7 @@ for (kind, x, y, w, h, dx, dy, tier) in buildings:
 
 counts = {k: sum(1 for b in buildings if b[0] == k) for k in KIND_ORDER}
 assert counts == {"Home": 400, "Farm": 12, "Market": 3, "Bar": 3, "Jail": 1, "Cemetery": 1, "Hall": 1,
-                  "Hideout": 2, "Warehouse": 1, "SecurityOffice": 2, "Lot": 60}, counts
+                  "Hideout": 2, "Warehouse": 1, "SecurityOffice": 2, "Lot": 160}, counts
 lots_by_zone = {}
 homes_by_zone = {}
 for (kind, x, y, w, h, dx, dy, tier) in buildings:
@@ -225,6 +247,8 @@ for (kind, x, y, w, h, dx, dy, tier) in buildings:
         homes_by_zone[z] = homes_by_zone.get(z, 0) + 1
         assert tier == {"S": 2, "M": 1, "U": 0}[z], (x, y, z, tier)
 assert all(lots_by_zone.get(z, 0) >= 8 for z in "SCVMU"), lots_by_zone
+assert lots_by_zone == {"S": 20, "C": 22, "V": 50, "M": 44, "U": 24}, lots_by_zone
+assert sum(1 for b in buildings if b[0] == "Lot" and b[3] == 15) == VATS_DOUBLE
 assert homes_by_zone == {"S": 60, "M": 140, "U": 200}, homes_by_zone
 
 # --- output -------------------------------------------------------------------

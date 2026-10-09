@@ -1236,7 +1236,8 @@ impl World {
                 BuildingKind::Warehouse => self.config.world.warehouse_initial,
                 _ => 0,
             };
-            let capacity = cfg.capacity;
+            // Jobs and room J7: a map building's seats × its floors.
+            let capacity = crate::systems::founding::with_floors(def.kind, cfg.capacity, def.floors);
             let id = self.spawn();
             self.insert(
                 id,
@@ -1274,6 +1275,8 @@ impl World {
                     charity: None,
                     camp: None,
                     input_accum: 0.0,
+                    floors: def.floors,
+                    floor_days: 0,
                 },
             );
             match def.kind {
@@ -1972,16 +1975,34 @@ impl World {
     /// cheaper Market draws custom from further off. Prices change only at
     /// midnight, so the choice holds from planning to execution. The price is
     /// read in tenths (phase 5), so a 2.7 beats a 3.0 by 1.2 tiles.
+    /// Jobs and room P2 fix: an empty shelf is passed over while any Market
+    /// holds food (seed 44's wages city starved 345 off-screen shoppers and
+    /// thieves next to an empty Market for 37 days while the other two held
+    /// 1,200 each); with every Market empty, the old pick.
     pub fn market_by_price(&self, from: TilePos) -> Option<EntityId> {
         let per_coin = self.config.corps.shop_price_tiles;
         self.buildings_of_kind(BuildingKind::Market)
             .iter()
             .filter_map(|&m| {
                 let b = self.comp::<Building>(m).filter(|b| !b.demolished && !self.is_closed(m))?;
-                Some((10 * i64::from(b.door.manhattan(from)) + per_coin * self.price_tenths_at(m), m))
+                let cost = 10 * i64::from(b.door.manhattan(from)) + per_coin * self.price_tenths_at(m);
+                Some((b.stock_food == 0, cost, m))
             })
             .min()
-            .map(|(_, m)| m)
+            .map(|(_, _, m)| m)
+    }
+
+    /// Jobs and room P2 fix: the Market `agent` eats from: [`World::local`]'s
+    /// while it holds food, else the stocked one [`World::market_by_price`]
+    /// picks from the agent's tile (a Clerk's own empty shop, the empty
+    /// Market it stands in).
+    pub fn food_market(&self, agent: EntityId) -> Option<EntityId> {
+        let local = self.local(agent, BuildingKind::Market);
+        if local.and_then(|m| self.comp::<Building>(m)).is_some_and(|b| b.stock_food > 0) {
+            return local;
+        }
+        let tile = self.comp::<Position>(agent)?.tile;
+        self.market_by_price(tile).filter(|&m| self.comp::<Building>(m).is_some_and(|b| b.stock_food > 0)).or(local)
     }
 
     // -----------------------------------------------------------------------

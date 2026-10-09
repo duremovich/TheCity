@@ -31,6 +31,18 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
     world.config.buildings.for_kind(kind).staff as usize
 }
 
+/// Jobs and room J7: `b`'s places in `role`: the role's per-floor places
+/// (`corp_brain::full_staff(kind)` for the kind's bespoke role, the
+/// Security Office's guards included) × the building's `floors`; 0 for a
+/// role the kind does not employ.
+pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
+    let Some((kind, floors)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.floors.max(1))) else { return 0 };
+    if ownership::role_for(kind) != Some(role) {
+        return 0;
+    }
+    crate::systems::corp_brain::full_staff(world, kind) * usize::from(floors)
+}
+
 /// A standing building (not demolished, not derelict).
 fn standing(world: &World, b: EntityId) -> bool {
     world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict)
@@ -275,11 +287,12 @@ pub fn top_up(world: &mut World) {
     let corp_owned = |world: &World, b: EntityId| wages && world.corp_of_building(b).is_some();
     for kind in [BuildingKind::Market, BuildingKind::Bar] {
         let Some(role) = ownership::role_for(kind) else { continue };
-        let full = full_staff(world, kind);
         for b in world.buildings_of_kind(kind).to_vec() {
             if !standing(world, b) || corp_owned(world, b) {
                 continue;
             }
+            // Jobs and room J7: full staff per floor × floors.
+            let full = places_of(world, b, role);
             // Deviation (Seeding section: "Markets and Bars get their top-up
             // vacancies the first midnight"): the whole deficit is posted,
             // not one a day.
@@ -296,12 +309,13 @@ pub fn top_up(world: &mut World) {
     l2.push(BuildingKind::Fab);
     for kind in l2 {
         let Some(role) = ownership::role_for(kind) else { continue };
-        let full = full_staff(world, kind);
         let wage = world.config.economy.wage(role);
         for b in world.buildings_of_kind(kind).to_vec() {
             if !standing(world, b) || corp_owned(world, b) {
                 continue;
             }
+            // Jobs and room J7: full staff per floor × floors.
+            let full = places_of(world, b, role);
             if deficit(world, b, role, full) > 0 && world.purse(world.owner_of(b)) >= wage {
                 world.vacancies.entry(b).or_default().push(role);
             }

@@ -6,15 +6,15 @@
 //!
 //! v2 format: a `"<w> <h>"` header; `h` tile rows of `w` chars; a blank line;
 //! `h` zone rows of `w` chars from `S C V M U`; a blank line; then
-//! `B <Kind> <x> <y> <w> <h> [<tier>]` lines. v1 has no header and no zone
+//! `B <Kind> <x> <y> <w> <h> [<tier> [<floors>]]` lines. v1 has no header and no zone
 //! grid: `w` is the first row's length, `h` the rows before the first blank.
 
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-use crate::components::{default_tier, BuildingKind, Rect, TileKind, TilePos, Zone};
+use crate::components::{default_tier, is_one_u8, one_u8, BuildingKind, Rect, TileKind, TilePos, Zone};
 
-/// One `B <Kind> <x> <y> <w> <h> [<tier>]` line, with its door derived from the grid.
+/// One `B <Kind> <x> <y> <w> <h> [<tier> [<floors>]]` line, with its door derived from the grid.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MapBuilding {
     pub kind: BuildingKind,
@@ -23,6 +23,9 @@ pub struct MapBuilding {
     /// 0 Sump, 1 Mid, 2 Spire; 1 when the line has no seventh field.
     #[serde(default = "default_tier")]
     pub tier: u8,
+    /// Jobs and room J6: storeys (1 when the line has no eighth field).
+    #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
+    pub floors: u8,
 }
 
 fn v1_w() -> u16 {
@@ -132,8 +135,8 @@ impl Map {
             }
             let parts: Vec<&str> = line.split_whitespace().collect();
             assert!(
-                (parts.len() == 6 || parts.len() == 7) && parts[0] == "B",
-                "line {}: expected `B <Kind> <x> <y> <w> <h> [<tier>]`",
+                (6..=8).contains(&parts.len()) && parts[0] == "B",
+                "line {}: expected `B <Kind> <x> <y> <w> <h> [<tier> [<floors>]]`",
                 n + 1
             );
             let kind = BuildingKind::parse(parts[1])
@@ -142,8 +145,11 @@ impl Map {
             let rect = Rect { x: num(parts[2]), y: num(parts[3]), w: num(parts[4]), h: num(parts[5]) };
             let tier = parts.get(6).map_or(1, |s| num(s));
             assert!(tier <= 2, "line {}: tier {tier} must be 0..=2", n + 1);
+            // Jobs and room J6: the optional eighth field.
+            let floors = parts.get(7).map_or(1, |s| num(s));
+            assert!(floors >= 1, "line {}: floors must be at least 1", n + 1);
             let door = map.validate_building(kind, rect);
-            map.buildings.push(MapBuilding { kind, rect, door, tier });
+            map.buildings.push(MapBuilding { kind, rect, door, tier, floors });
         }
 
         map.validate_orphans();

@@ -184,7 +184,8 @@ fn test_map_v2_loads_with_zones() {
         (BuildingKind::Warehouse, 1),
         (BuildingKind::SecurityOffice, 2),
         (BuildingKind::Hideout, 2),
-        (BuildingKind::Lot, 60),
+        // M10 60 + Jobs and room J5's 100 on the free ground.
+        (BuildingKind::Lot, 160),
     ] {
         assert_eq!(kind_count(&m, kind), n, "{kind}");
     }

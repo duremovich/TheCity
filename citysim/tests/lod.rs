@@ -308,3 +308,63 @@ fn test_command_log_replay_matches() {
     assert_eq!(citysim::save::to_ron(&b), saved, "replay diverged");
     b.tick();
 }
+
+/// Jobs and room P2 fix (seed 44's wages-city wave: 345 Statistical agents
+/// starved beside an empty Market while the other two held 1,200 each): a
+/// hungry Statistical agent whose Market is empty buys, or steals when
+/// starving and broke, at a stocked one, and the price pick passes the empty
+/// shelf over. Only the Statistical pass runs, for one hour (one turn each).
+#[test]
+fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
+    use citysim::{Building, BuildingKind, EventKind, Inventory, Job, Wallet};
+    for broke in [false, true] {
+        let mut w = World::new(42, Config::load());
+        w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+        let id = w
+            .tier(Lod::Statistical)
+            .iter()
+            .copied()
+            .find(|&a| {
+                citysim::systems::demography::is_adult(&w, a)
+                    && !w.has::<Sentence>(a)
+                    && w.comp::<Job>(a).and_then(|j| j.employer).is_none()
+            })
+            .expect("a jobless Statistical adult");
+        let empty = w.local(id, BuildingKind::Market).expect("a Market");
+        w.comp_mut::<Building>(empty).expect("market").stock_food = 0;
+        let other = w.local(id, BuildingKind::Market).expect("a Market");
+        assert_ne!(other, empty, "the price pick passes the empty shelf over");
+        let stock = w.comp::<Building>(other).map_or(0, |b| b.stock_food);
+        assert!(stock > 0);
+        assert_eq!(w.food_market(id), Some(other));
+        // Homeless: no pantry a housemate could refill within the hour.
+        w.set_home(id, None);
+        w.comp_mut::<Inventory>(id).expect("inv").food = 0;
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = if broke { 0 } else { 100 };
+        if broke {
+            // No dole to buy with: the starving agent's only meal is a theft.
+            w.levers.dole_per_day = 0;
+        }
+        {
+            let n = w.comp_mut::<Needs>(id).expect("needs");
+            n.hunger = if broke { 0.0 } else { 0.2 };
+            n.starving_since = None;
+        }
+        let start = w.events.back().map_or(0, |e| e.id + 1);
+        for _ in 0..TICKS_PER_HOUR {
+            lod::run_statistical(&mut w);
+            w.tick += 1;
+        }
+        assert!(w.comp::<Needs>(id).is_some_and(|n| n.hunger > 0.2), "broke {broke}: the agent ate");
+        assert_eq!(w.comp::<Building>(empty).map(|b| b.stock_food), Some(0));
+        let left = w.comp::<Building>(other).map_or(0, |b| b.stock_food);
+        assert!(left < stock, "broke {broke}: the food came from the stocked Market");
+        if broke {
+            let theft = w
+                .events
+                .iter()
+                .any(|e| e.id >= start && e.kind == EventKind::Theft && e.actors.as_slice() == [id, other]);
+            assert!(theft, "the starving thief stole at the stocked Market");
+        }
+    }
+}

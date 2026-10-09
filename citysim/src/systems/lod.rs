@@ -995,7 +995,8 @@ fn stat_flirt(world: &mut World, id: EntityId) {
 /// which the arrest path needs). Shared by the eat path and the `p_steal`
 /// roll. Returns whether anything was taken.
 fn stat_theft(world: &mut World, id: EntityId) -> bool {
-    let Some(market) = world.local(id, BuildingKind::Market) else { return false };
+    // Jobs and room P2 fix: an empty local Market sends the thief to a stocked one.
+    let Some(market) = world.food_market(id) else { return false };
     let Some(b) = world.comp_mut::<Building>(market).filter(|b| b.stock_food > 0) else { return false };
     b.stock_food -= 1;
     // M11 D20: a corp-owned Market books the unit at its price.
@@ -1064,8 +1065,9 @@ fn stat_eat(world: &mut World, id: EntityId) {
         world.mark_day(id, trace_flags::ATE);
         return;
     }
+    // Jobs and room P2 fix: an empty local Market sends the shopper to a stocked one.
     let Some((market, stock, price)) = world
-        .local(id, BuildingKind::Market)
+        .food_market(id)
         .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food, world.price_for(m, id))))
     else {
         return;
