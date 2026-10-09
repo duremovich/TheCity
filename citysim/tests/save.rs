@@ -6,10 +6,7 @@ use citysim::{save, BuildingKind, Config, EntityId, PlayerCommand, RelKind, Worl
 /// would make a loaded world diverge mid-streak).
 #[test]
 fn test_scavenge_dry_survives_save_load() {
-    let mut cfg = Config::load().v1_profile();
-    cfg.lod.budget = true;
-    cfg.living.enabled = true; // the master switch (`v1_profile` turns L2 off)
-    let mut w = World::new(42, cfg);
+    let mut w = World::new(42, Config::load().v1_profile());
     w.run_ticks(600);
     let a = w.citizens()[3];
     w.comp_mut::<citysim::Brain>(a).expect("brain").scavenge_dry = 2;
@@ -118,7 +115,6 @@ fn test_save_edges_round_trip_lossless() {
 #[test]
 fn test_word_save_mid_day_bit_identical() {
     let mut original = World::new(25, Config::load().scaled_to(300));
-    assert!(original.config.gossip.enabled);
     original.run_ticks(2 * TICKS_PER_DAY + 700);
     assert!(original.rumours.iter().any(|p| !p.entries.is_empty()));
     assert!(original.reputation.iter().flatten().count() > 0);

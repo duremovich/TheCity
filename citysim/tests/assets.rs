@@ -73,9 +73,9 @@ fn couple(w: &World) -> (EntityId, EntityId) {
 
 #[test]
 fn test_purchase_pays_seller_imports_and_conserves() {
-    // M13 D30's import to the Treasury: the `EC_BASE` path (with the Real
-    // economy's market on it crosses to the World, `tests/econ.rs`).
-    let mut w = World::new(42, Config::load().econ_off());
+    // M13 D30's import: with the World market it crosses out to the World,
+    // customs to the Treasury (`tests/econ.rs`); the identity holds.
+    let mut w = World::new(42, Config::load());
     // The plan's car and finance terms (phase 5 calibration moved them).
     w.config.assets.price.car = vec![800, 1400];
     w.config.assets.down_frac = 0.25;
@@ -84,16 +84,23 @@ fn test_purchase_pays_seller_imports_and_conserves() {
     let people = adults(&w);
     let (rich, poor) = (people[0], people[1]);
     set_coins(&mut w, rich, 1000);
-    let total = ownership::total_coins(&w);
+    let total = citysim::systems::econ::identity(&w);
     let (corp0, city0, tax0) = (w.purse(Some(corp)), w.purse(None), w.stats.current.flow_tax);
+    let customs0 = w.stats.current.econ.flow_customs;
     let pick = ShopPick { kind: AssetKind::Car, tier: 1, used: None, upgrade: false };
     let car = assets::buy(&mut w, rich, g, &pick).expect("a cash purchase");
     let tax = w.stats.current.flow_tax - tax0;
+    let customs = w.stats.current.econ.flow_customs - customs0;
     assert!(tax > 0, "the sale is taxed");
+    assert!(customs > 0, "the import pays customs");
     assert_eq!(coins(&w, rich), 200);
-    assert_eq!(w.purse(Some(corp)) - corp0, 800 - tax - 480, "the price less the tax and the 0.6 import");
-    assert_eq!(w.purse(None) - city0, tax + 480, "the tax and the import reach the Treasury");
-    assert_eq!(ownership::total_coins(&w), total, "money is conserved");
+    assert_eq!(
+        w.purse(Some(corp)) - corp0,
+        800 - tax - 480 - customs,
+        "the price less the tax, the 0.6 import and its customs"
+    );
+    assert_eq!(w.purse(None) - city0, tax + customs, "the tax and the customs reach the Treasury");
+    assert_eq!(citysim::systems::econ::identity(&w), total, "money is conserved");
     let x = asset(&w, car);
     assert_eq!((x.owner, x.loc, x.condition, x.list), (Some(rich), AssetLoc::Parked(g), 100, 800));
     assert!(x.finance.is_none());
@@ -103,15 +110,15 @@ fn test_purchase_pays_seller_imports_and_conserves() {
     assert_eq!(count(&w, EventKind::AssetBought), 1);
     // Financed: 300 coins buys the 200 down payment.
     set_coins(&mut w, poor, 300);
-    let total = ownership::total_coins(&w);
+    let total = citysim::systems::econ::identity(&w);
     let car2 = assets::buy(&mut w, poor, g, &pick).expect("a financed purchase");
     let f = asset(&w, car2).finance.clone().expect("a finance plan");
     assert_eq!(f, Finance { lender: Some(corp), remaining: 600, per_day: 12, arrears: 0 });
     assert_eq!(coins(&w, poor), 100);
-    assert_eq!(ownership::total_coins(&w), total);
+    assert_eq!(citysim::systems::econ::identity(&w), total);
     // One daily pass with upkeep and finance.
     assets::run(&mut w);
-    assert_eq!(ownership::total_coins(&w), total, "upkeep and finance move coins, never make them");
+    assert_eq!(citysim::systems::econ::identity(&w), total, "upkeep and finance move coins, never make them");
     assert_eq!(asset(&w, car2).finance.as_ref().expect("plan").remaining, 588);
     // Phase 2: parked in the Garage, it pays the Garage its rent (1).
     assert_eq!(coins(&w, poor), 100 - 2 - 12 - 1, "upkeep 2, the day's 12, the Garage's rent");

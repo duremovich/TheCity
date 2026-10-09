@@ -115,7 +115,6 @@ pub fn adjust(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32, d_tr
         return;
     }
     let tick = world.tick;
-    let settle = world.config.life.enabled;
     let e = world.edge_entry(a, b);
     e.affinity = (e.affinity + d_affinity).clamp(-1.0, 1.0);
     e.trust = (e.trust + d_trust).clamp(0.0, 1.0);
@@ -123,10 +122,8 @@ pub fn adjust(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32, d_tr
     promote(e);
     // L1: a big step settles in one call (an Enemy at +0.60 took one
     // promotion per nudge to read Acquaintance again).
-    if settle {
-        promote(e);
-        promote(e);
-    }
+    promote(e);
+    promote(e);
     let enemy = e.kind == RelKind::Enemy;
     reindex_kind_as(world, a, b, enemy);
 }
@@ -144,7 +141,7 @@ pub fn make_enemy(world: &mut World, a: EntityId, b: EntityId, d_affinity: f32) 
     let tick = world.tick;
     // L1: an Enemy reads as one: affinity at most the Enemy threshold (a
     // Friend robbed read "Enemy, affinity +0.30").
-    let cap = world.config.life.enabled.then_some(world.config.social.enemy_threshold);
+    let cap = Some(world.config.social.enemy_threshold);
     let e = world.edge_entry(a, b);
     e.affinity = (e.affinity + d_affinity).clamp(-1.0, 1.0);
     if let Some(c) = cap {
@@ -408,60 +405,27 @@ pub fn marry(world: &mut World, a: EntityId, b: EntityId) {
     }
     let (na, nb) = (world.name_of(a), world.name_of(b));
     world.push_event(EventKind::Marriage, &[a, b], format!("{na} married {nb}"));
-    if world.config.gossip.enabled {
-        let d = crate::systems::gossip::talk_district(world, a);
-        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Married, Some(a), Some(b));
-    }
+    let d = crate::systems::gossip::talk_district(world, a);
+    crate::systems::gossip::post_deed(world, d, crate::word::Deed::Married, Some(a), Some(b));
 }
 
-/// Gossip on Chat completion: each party copies one own SawCrime/WasRobbed
-/// memory (salience >= 0.5, with a subject) to the partner, second-hand at
-/// 0.6 × salience; the receiver's edge to the subject gets affinity −0.1.
-pub fn gossip(world: &mut World, from: EntityId, to: EntityId) {
-    let candidates: Vec<(MemoryKind, EntityId, f32, Option<crate::components::Crime>)> = world
-        .comp::<crate::components::Memory>(from)
-        .map(|m| {
-            m.entries
-                .iter()
-                .filter(|e| matches!(e.kind, MemoryKind::SawCrime | MemoryKind::WasRobbed) && e.salience >= 0.5)
-                .filter_map(|e| e.subject.map(|s| (e.kind, s, e.salience, e.crime)))
-                .collect()
-        })
-        .unwrap_or_default();
-    if candidates.is_empty() {
+/// Chat completion's draw: one of the speaker's own SawCrime/WasRobbed
+/// memories (salience >= 0.5, with a subject) is picked on the world stream.
+/// The second-hand copy it used to make (and its edge nudge) retired with
+/// M15 W9; the word's rumours carry it (`gossip::exchange`). The draw stays,
+/// so the world stream keeps its position.
+pub fn gossip(world: &mut World, from: EntityId, _to: EntityId) {
+    let n = world.comp::<crate::components::Memory>(from).map_or(0, |m| {
+        m.entries
+            .iter()
+            .filter(|e| matches!(e.kind, MemoryKind::SawCrime | MemoryKind::WasRobbed) && e.salience >= 0.5)
+            .filter(|e| e.subject.is_some())
+            .count()
+    });
+    if n == 0 {
         return;
     }
-    let i = world.rng.world().random_range(0..candidates.len());
-    // M15 W9 (phase 3): with `legacy_second_hand` off the copy into
-    // `entries` and its edge nudge retire; the draw above stays, so the
-    // world stream keeps its position.
-    if world.config.gossip.enabled && !world.config.gossip.legacy_second_hand {
-        return;
-    }
-    let (kind, subject, salience, crime) = candidates[i];
-    let already = world
-        .comp::<crate::components::Memory>(to)
-        .is_some_and(|m| m.entries.iter().any(|e| e.kind == kind && e.subject == Some(subject)));
-    if already || subject == to {
-        return;
-    }
-    let tick = world.tick;
-    let cap = world.config.brain.memory_cap;
-    let half_life = world.config.brain.memory_half_life_days;
-    if let Some(m) = world.comp_mut::<crate::components::Memory>(to) {
-        let entry = crate::components::MemoryEntry {
-            kind,
-            subject: Some(subject),
-            tick,
-            salience: salience * 0.6,
-            valence: -salience * 0.6,
-            second_hand: true,
-            crime,
-            ..crate::components::MemoryEntry::blank(kind, tick)
-        };
-        crate::systems::memory::insert(m, entry, tick, cap, half_life);
-    }
-    adjust(world, to, subject, -0.1, 0.0);
+    let _ = world.rng.world().random_range(0..n);
 }
 
 /// Per tick: co-location counting and edge creation; hourly co-work /
@@ -488,7 +452,6 @@ fn colocation(world: &mut World) {
     // became Acquaintances in one minute in a bar; a Jail arrival met ~140
     // cellmates and every inmate logged ~40 MetInJail a day), and the
     // cells hand out no free affinity.
-    let life = world.config.life.enabled;
     let today = world.day();
     let mut events: Vec<(EntityId, EntityId, EntityId, bool)> = Vec::new(); // (a, b, building, create)
     for a in world.bodies() {
@@ -519,7 +482,7 @@ fn colocation(world: &mut World) {
         // cells as many gang members again: the Jail is where gangs recruit.
         let pitch = world.config.life.jail_pitch;
         let member = |x: EntityId| pitch && world.has::<crate::components::GangMember>(x);
-        let meet: Option<Vec<EntityId>> = (life && create).then(|| {
+        let meet: Option<Vec<EntityId>> = (create).then(|| {
             let cap = if jail { world.config.life.jail_meet_max } else { world.config.life.colocation_new_edges };
             let mut strangers: Vec<(bool, u64, EntityId)> = bd
                 .occupants
@@ -550,7 +513,7 @@ fn colocation(world: &mut World) {
                 continue;
             }
             // L1: no free affinity in the cells, but for a gang member's pitch.
-            if life && !create && jail && !member(a) && !member(b) {
+            if !create && jail && !member(a) && !member(b) {
                 continue;
             }
             if !create && !jail && !works_here(b) {
@@ -570,7 +533,7 @@ fn colocation(world: &mut World) {
         // M15 W12: each body of the pair may note where it saw the other
         // (not inside the Precinct: where an inmate is is no news, and its
         // ~160 cellmates' pairs were most of the calls).
-        if world.config.gossip.enabled && !jail {
+        if !jail {
             let tile = world.comp::<Position>(b).map_or_else(Default::default, |p| p.tile);
             crate::systems::gossip::maybe_sight(world, a, b, Some(building), tile);
             crate::systems::gossip::maybe_sight(world, b, a, Some(building), tile);
@@ -587,7 +550,7 @@ fn colocation(world: &mut World) {
                 let look = first_look(world, a, b);
                 first_meeting(world, a, b, first_affinity_with(sa, sb, u1, u2, look));
             }
-            if jail && !(life && world.edge(a, b).is_some_and(|e| e.last_interaction != tick)) {
+            if jail && !(world.edge(a, b).is_some_and(|e| e.last_interaction != tick)) {
                 world.remember(a, MemoryKind::MetInJail, Some(b), 0.5, 0.0, false);
                 world.remember(b, MemoryKind::MetInJail, Some(a), 0.5, 0.0, false);
             }
@@ -600,9 +563,7 @@ fn colocation(world: &mut World) {
                 // L2 shadow fixes item 10: a guard and a prisoner warm to
                 // each other only to `jail_affinity_cap` (desk days took a
                 // gang leader in the cells to +1.00 with the guard).
-                if crate::systems::fixes::item(world, 10)
-                    && crate::systems::fixes::guard_and_prisoner(world, a, b, building)
-                {
+                if crate::systems::fixes::guard_and_prisoner(world, a, b, building) {
                     let cap = world.config.life.jail_affinity_cap;
                     let now = world.edge(a, b).map_or(0.0, |e| e.affinity);
                     if now >= cap {
@@ -641,9 +602,6 @@ pub fn first_affinity_with(sa: f32, sb: f32, u1: f32, u2: f32, extra: f32) -> f3
 /// visible ÷ 3` toward a chromed agent above tolerance. 0 with moves off.
 pub fn first_look(world: &World, a: EntityId, b: EntityId) -> f32 {
     use crate::systems::{creeds, reputation};
-    if !crate::systems::moves::on(world) {
-        return 0.0;
-    }
     let w = world.config.taste.first_look_w;
     let mut x = w * (reputation::taste(world, a, b) + reputation::taste(world, b, a)) / 2.0;
     let pc = world.config.creeds.purist_chrome;
@@ -747,7 +705,7 @@ pub fn repay_debts(world: &mut World, id: EntityId) {
         // a creditor killed since lending keeps its edges until its body is
         // freed but has no Wallet (`kill_by`), so the repayment vanished.
         // With the market on the debt waits (the coins stay with the debtor).
-        if crate::systems::econ::market_on(world) && !world.has::<crate::components::Wallet>(creditor) {
+        if !world.has::<crate::components::Wallet>(creditor) {
             continue;
         }
         if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
@@ -767,7 +725,7 @@ pub fn repay_debts(world: &mut World, id: EntityId) {
         }
         adjust(world, id, creditor, 0.1, 0.1);
         // M15: a debt repaid in full is talked about.
-        if repaid && world.config.gossip.enabled {
+        if repaid {
             let d = crate::systems::gossip::talk_district(world, id);
             crate::systems::gossip::post_deed(world, d, crate::word::Deed::Repaid, Some(id), Some(creditor));
         }

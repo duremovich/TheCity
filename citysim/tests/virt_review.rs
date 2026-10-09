@@ -283,28 +283,6 @@ fn test_put_out_of_the_chair_dumps_the_run() {
 // 4. The plane switched off under runs in progress
 // ---------------------------------------------------------------------------
 
-/// Review 4 (`--load` with `--virt-off`): `plane_off` dumps every seated
-/// runner and drops every order; with the plane then off, the body leaves
-/// `JackedIn` on its next executor tick.
-#[test]
-fn test_plane_off_dumps_runs_in_progress() {
-    let mut w = world();
-    let a = adult(&mut w, &[]);
-    arm(&mut w, a, 2, 0.5);
-    let id = seated_run(&mut w, a);
-    let b = adult(&mut w, &[a]);
-    arm(&mut w, b, 1, 0.5);
-    let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
-    order(&mut w, b, bar, NodeId(0), Purpose::Ledger, RunWhy::Stat);
-    virt::plane_off(&mut w);
-    assert!(w.runs.is_empty() && w.runner_of.is_empty() && w.run_queue.is_empty());
-    assert!(w.run_orders.is_empty());
-    assert!(w.run_log.iter().any(|r| r.id == id && r.outcome == Some(RunOutcome::Dumped)));
-    w.config = w.config.clone().virt_off();
-    w.run_ticks(2);
-    assert!(!matches!(w.comp::<Brain>(a).map(|b| &b.exec), Some(ExecState::JackedIn { .. })), "not frozen");
-}
-
 // ---------------------------------------------------------------------------
 // 5. Gang.stream_by
 // ---------------------------------------------------------------------------

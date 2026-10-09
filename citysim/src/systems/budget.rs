@@ -10,16 +10,8 @@ use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::world::World;
 
-/// `[living] enabled && [budget] enabled` (plan L5).
-pub fn on(world: &World) -> bool {
-    world.config.living.enabled && world.config.budget.enabled
-}
-
 /// Plan L10: corp upkeep × `upkeep_mult` (only with the band on).
 pub fn upkeep_cost(world: &World, cost: i64) -> i64 {
-    if !on(world) {
-        return cost;
-    }
     (cost as f32 * world.budget.upkeep_mult).round() as i64
 }
 
@@ -61,9 +53,6 @@ fn withdraw_vacancies(world: &mut World, recycler: EntityId) {
 
 /// The midnight pass (spec § 1, plan L10).
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
     // The works roster: hires still at the Recycler as Sanitation.
     let works: Vec<EntityId> = world

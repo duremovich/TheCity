@@ -15,9 +15,6 @@
 use crate::world::World;
 
 pub fn run(world: &mut World) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     // Phase 3 (W22): the Hunts' validity, every tick (≤ `max_hunts`).
     crate::systems::hunt::tick(world);
     if world.tick_of_day() != 0 {

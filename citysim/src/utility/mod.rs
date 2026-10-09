@@ -128,12 +128,10 @@ pub fn think_with_offer(
             let mut cs = o.considerations.clone();
             let mut flat = world.config.shop.shop_flat;
             // L1: the walk to the seller weighs on the purchase, flat and all.
-            if world.config.life.enabled {
-                let tiles = crate::systems::life::tiles_to(world, id, o.seller).unwrap_or(0);
-                let t = crate::systems::life::travel(world, tiles);
-                flat *= t.output;
-                cs.push(t);
-            }
+            let tiles = crate::systems::life::tiles_to(world, id, o.seller).unwrap_or(0);
+            let t = crate::systems::life::travel(world, tiles);
+            flat *= t.output;
+            cs.push(t);
             shop = Some(o);
             if let Some(s) = score_goal(goal, cs, current, hysteresis, flat) {
                 scored.push(s);
@@ -159,7 +157,7 @@ pub fn think_with_offer(
             let mut flat = world.config.hack.hack_flat;
             // L1: a freelance run's walk to the chair (or the Data buyer)
             // weighs on it; a standing order is the order's.
-            if world.config.life.enabled && crate::systems::virt::standing_order(world, id).is_none() {
+            if crate::systems::virt::standing_order(world, id).is_none() {
                 let at = if o.sell { o.lab } else { o.portal.map(|p| p.building) };
                 let tiles = at.and_then(|b| crate::systems::life::tiles_to(world, id, b)).unwrap_or(0);
                 let t = crate::systems::life::travel(world, tiles);

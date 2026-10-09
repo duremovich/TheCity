@@ -189,12 +189,6 @@ pub fn rebuild(world: &mut World) {
     world.district_adjacent = adjacent;
 }
 
-/// The first district cut from `zone` (D4: where a pre-M12 trace entry goes);
-/// district 0 when no row has that zone (the one-district v1 city).
-pub fn first_of_zone(world: &World, zone: Zone) -> DistrictId {
-    world.districts.iter().find(|d| d.zone == zone).map_or(DistrictId(0), |d| d.id)
-}
-
 impl World {
     /// D2: the district a tile lies in; one byte read.
     pub fn district_of(&self, p: TilePos) -> DistrictId {
@@ -367,7 +361,7 @@ pub fn unrest(world: &mut World) {
             world.eviction_places.iter().filter(|&&(t, d, _)| t >= horizon && d.index() == i).count() as u32;
         let curfew = if world.districts[i].curfew { c.curfew_fear } else { 0.0 };
         let burden = if renters == 0 { 0.0 } else { burden / renters as f32 };
-        let news = crate::systems::news::on(world).then(|| world.config.news.clone());
+        let news = Some(world.config.news.clone());
         let formula = |m: &[(f32, bool, f32)], p: f32| {
             let mut agg = crate::systems::classes::aggregate(m, evictions);
             if let Some(cfg) = &news {
@@ -458,7 +452,7 @@ pub fn sanitation(world: &mut World) {
     // home district's slot first (else yesterday's beat), the rest in order
     // (the beat moved nightly: Spire one night, Civic the next, 130-265 min
     // each way, never a full shift).
-    let pinned = crate::systems::fixes::item(world, 14).then(|| {
+    let pinned = Some({
         let prefer = |w: &World, s: EntityId| {
             w.comp::<crate::components::Household>(s)
                 .and_then(|h| h.home)

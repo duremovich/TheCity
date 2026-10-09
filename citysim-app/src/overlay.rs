@@ -114,9 +114,6 @@ pub fn run_at(world: &World, cam: &Camera, mouse: Vec2) -> Option<citysim::virt:
 pub fn draw(world: &World, app: &App) {
     // The real city, ghosted.
     draw_rectangle(0.0, 0.0, screen_width(), screen_height(), Color { a: GHOST_ALPHA, ..hex(C_GHOST) });
-    if !virt::enabled(world) {
-        return;
-    }
     let cam = &app.camera;
     let ppt = cam.px_per_tile;
     let nodes = &world.virt.nodes;

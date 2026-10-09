@@ -164,22 +164,20 @@ pub fn on_watch(world: &World, id: EntityId) -> bool {
         .collect();
     // L1: the watch is stood by members who live within a walk of the
     // Hideout (or have no Home): a Spire member walked 5.5 h each way to it.
-    if world.config.life.enabled {
-        let reach = 2 * world.config.life.commute_cap_tiles;
-        let door = world.comp::<Building>(g.hideout).map(|b| b.door);
-        let near: Vec<(Tick, EntityId)> = roster
-            .iter()
-            .copied()
-            .filter(|&(_, m)| {
-                match world.comp::<Household>(m).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)) {
-                    Some(b) => door.is_some_and(|d| d.manhattan(b.door) <= reach),
-                    None => true,
-                }
-            })
-            .collect();
-        if !near.is_empty() {
-            roster = near;
-        }
+    let reach = 2 * world.config.life.commute_cap_tiles;
+    let door = world.comp::<Building>(g.hideout).map(|b| b.door);
+    let near: Vec<(Tick, EntityId)> = roster
+        .iter()
+        .copied()
+        .filter(|&(_, m)| {
+            match world.comp::<Household>(m).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)) {
+                Some(b) => door.is_some_and(|d| d.manhattan(b.door) <= reach),
+                None => true,
+            }
+        })
+        .collect();
+    if !near.is_empty() {
+        roster = near;
     }
     let n = roster.len();
     let watch = world.config.gangs.night_watch.min(n / 2);
@@ -544,7 +542,7 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     // L2 shadow fixes item 16: a dealer off its busy hours has no GangWork
     // (it fell through to the order's shakedowns and fights: Murders on
     // 42-47 rose 215 -> 364 with the hours gate alone).
-    if crate::systems::fixes::item(world, 16) && !crate::systems::fixes::deal_hours(world) {
+    if !crate::systems::fixes::deal_hours(world) {
         if crate::systems::stims::deals_today(world, id).is_some() {
             return None;
         }
@@ -589,7 +587,7 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
             let r = world.config.crime.sight_day_crime;
             // L1: near the Hideout and near the member (the derelict nearest
             // the Hideout sat a 6 h walk from where the member stood).
-            let own = if world.config.life.enabled { Some(actor_tile) } else { None };
+            let own = Some(actor_tile);
             return squat_targets(world, gang)
                 .into_iter()
                 .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door, b)))
@@ -617,7 +615,7 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
     // M15 W31: a Purist gang shakes down the chromed's Homes first.
     let purist = crate::systems::creeds::is_purist(world, gang);
     // L1: an order's Home is near the Hideout and near the member.
-    let own = if world.config.life.enabled && from != actor_tile { Some(actor_tile) } else { None };
+    let own = if from != actor_tile { Some(actor_tile) } else { None };
     let mut best: Option<((bool, u32, u32), EntityId)> = None;
     for &h in homes {
         if Some(h) == own_home {
@@ -712,7 +710,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
     }
     // L2 shadow fixes item 15: a gang-mate at home is not squeezed (the
     // leader shook down her own dealer and made him an Enemy).
-    let mates = crate::systems::fixes::item(world, 15).then(|| world.gang_of(actor)).flatten();
+    let mates = world.gang_of(actor);
     let occupants: Vec<EntityId> = world
         .comp::<Building>(home)
         .map(|b| {
@@ -726,8 +724,7 @@ pub fn extort(world: &mut World, actor: EntityId, home: EntityId) -> i64 {
         .unwrap_or_default();
     // M15 W27: with moves on, the shakedown is an Intimidate against the
     // strongest occupant; a refusal takes nothing and advances no claim.
-    if crate::systems::moves::on(world) && !occupants.is_empty() && !intimidate(world, actor, home, &occupants, amount)
-    {
+    if !occupants.is_empty() && !intimidate(world, actor, home, &occupants, amount) {
         return 0;
     }
     let total: i64 = occupants.iter().map(|&o| world.comp::<Wallet>(o).map_or(0, |w| w.coins.max(0))).sum();
@@ -1067,17 +1064,13 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
     // now visible (a finding for Dylan, E46).
     let credit = i64::from(sold) * price;
     world.probe.fence_credit += credit;
-    if crate::systems::econ::market_on(world) {
-        crate::systems::ownership::cross_in(
-            world,
-            crate::outside::WORLD_ACCOUNT,
-            Some(gang),
-            credit,
-            crate::systems::ownership::Flow::Fence,
-        );
-    } else {
-        world.gang_credit(gang, credit);
-    }
+    crate::systems::ownership::cross_in(
+        world,
+        crate::outside::WORLD_ACCOUNT,
+        Some(gang),
+        credit,
+        crate::systems::ownership::Flow::Fence,
+    );
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins += pay;
     }
@@ -1126,9 +1119,6 @@ pub fn run(world: &mut World) {
 
 /// L2 phase 5: a gang stipend or tribute reached `id` today.
 pub fn note_paid(world: &mut World, id: EntityId) {
-    if !world.config.living.enabled {
-        return;
-    }
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(id) {
         b.gang_paid_day = Some(today);
@@ -1147,7 +1137,7 @@ pub fn note_paid(world: &mut World, id: EntityId) {
 /// `desist_cooldown_days`.
 pub fn desist(world: &mut World) {
     let cfg = world.config.living.clone();
-    if !cfg.enabled || cfg.desist_base <= 0.0 {
+    if cfg.desist_base <= 0.0 {
         return;
     }
     let today = world.day();
@@ -1376,10 +1366,8 @@ pub fn betrayal_filed(world: &mut World, betrayer: EntityId) {
     }
     let name = world.name_of(betrayer);
     world.push_event(EventKind::Betrayal, &[betrayer], format!("{name} betrayed the gang"));
-    if world.config.gossip.enabled {
-        let d = crate::systems::gossip::talk_district(world, betrayer);
-        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Betrayed, Some(betrayer), Some(gang));
-    }
+    let d = crate::systems::gossip::talk_district(world, betrayer);
+    crate::systems::gossip::post_deed(world, d, crate::word::Deed::Betrayed, Some(betrayer), Some(gang));
 }
 
 // ---------------------------------------------------------------------------

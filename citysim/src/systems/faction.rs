@@ -490,7 +490,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         .map_or(0, |(b, _)| crate::systems::raid::private_guards_of(world, b).len().min(cfg.corp_raid_posted));
     let rival_hq = rival.and_then(|r| world.hideout_of(r));
     // M15 W18: the gang's heaviest open vendetta (the word on).
-    let vendetta = if world.config.gossip.enabled { crate::systems::grudges::vendetta_for(world, gang) } else { None };
+    let vendetta = crate::systems::grudges::vendetta_for(world, gang);
     // M14 V34: the Retaliate target (a hacker named by a pending shock, a
     // standing Retaliate's named gang, else the rival); M15 W18: a
     // vendetta's gang Hideout or corp building before the rival.
@@ -499,11 +499,7 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         .or_else(|| vendetta.and_then(|(v, _)| vendetta_building(world, gang, v)))
         .or_else(|| crate::systems::raid::raid_rival(world, gang).and_then(|r| world.hideout_of(r)));
     // M15 W32: how much this gang fears its rival (0.5 with none).
-    let fear = world
-        .config
-        .gossip
-        .enabled
-        .then(|| rival.map_or(0.5, |r| crate::systems::reputation::regard(world, gang, r).fear));
+    let fear = Some(rival.map_or(0.5, |r| crate::systems::reputation::regard(world, gang, r).fear));
     let jail = world.building_of_kind(BuildingKind::Jail);
     // M13 D36: the Harvest inputs (the target is cached on the gang by `rescore`).
     let clinic_exists = world
@@ -726,19 +722,16 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     // `order_dwell_ticks` unless it went infeasible, the shocks are severe,
     // or the winner is Retaliate or BreakOut (orders flipped 9 times in 6
     // days after a leader's arrest, and no GangWork walk ever finished).
-    let life = world.config.life.enabled;
-    let h = if life && hysteresis == 0.0 { cfg.hysteresis } else { hysteresis };
+    let h = if hysteresis == 0.0 { cfg.hysteresis } else { hysteresis };
     let mut next = choose(&scores, current, h);
-    if life {
-        let (since, pending) = world
-            .comp::<Gang>(gang)
-            .map_or((0, 0.0), |g| (g.order_since, g.shocks.iter().map(|s| s.severity()).sum::<f32>()));
-        let feasible = scores.iter().any(|s| s.order == current && s.score > 0.0);
-        let young = now.saturating_sub(since) < world.config.life.order_dwell_ticks;
-        let exempt = matches!(next, Some(Order::Retaliate | Order::BreakOut));
-        if young && feasible && !exempt && pending < world.config.life.order_severe {
-            next = None;
-        }
+    let (since, pending) = world
+        .comp::<Gang>(gang)
+        .map_or((0, 0.0), |g| (g.order_since, g.shocks.iter().map(|s| s.severity()).sum::<f32>()));
+    let feasible = scores.iter().any(|s| s.order == current && s.score > 0.0);
+    let young = now.saturating_sub(since) < world.config.life.order_dwell_ticks;
+    let exempt = matches!(next, Some(Order::Retaliate | Order::BreakOut));
+    if young && feasible && !exempt && pending < world.config.life.order_severe {
+        next = None;
     }
     let best_score = scores.first().map_or(0.0, |s| s.score);
     let current_score = scores.iter().find(|s| s.order == current).map_or(0.0, |s| s.score);
@@ -750,7 +743,7 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     let mut muster = order.is_raid().then(|| next_muster(now, cfg.raid_muster_hour));
     // L2 shadow fixes item 15: the muster waits for the farthest member's
     // walk (a Purist walked 291 min to a Muster and missed it by 14).
-    if let Some(m) = muster.filter(|_| crate::systems::fixes::item(world, 15)) {
+    if let Some(m) = muster {
         muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang)));
     }
     // M12 D39: a Raid chosen for the corp prize names the corp building.

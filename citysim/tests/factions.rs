@@ -217,6 +217,8 @@ fn test_no_leader_no_new_orders() {
 #[test]
 fn test_claim_resets_on_a_rival_blow_and_flips_at_three() {
     let mut w = world(45);
+    // M15 W27: every shakedown is an Intimidate; the claim rules are under test.
+    (w.config.moves.p_min, w.config.moves.p_max) = (1.0, 1.0);
     let (g0, g1) = gangs(&w);
     let (a, b) = two_civilians(&w);
     gang::enlist(&mut w, a, g0);
@@ -277,25 +279,6 @@ fn test_sacked_gang_does_not_recruit() {
     assert_eq!(gang::recruit_gang(&w, recruit), Some(g0));
     w.comp_mut::<Gang>(g0).expect("g").sacked_until = Some(w.tick + 1000);
     assert_eq!(gang::recruit_gang(&w, recruit), None);
-}
-
-#[test]
-fn test_legacy_save_migrates_hideout_and_claims() {
-    let mut w = world(48);
-    let (g0, _) = gangs(&w);
-    let hideout = w.hideout_of(g0).expect("h");
-    let home = w.buildings_by_kind[&BuildingKind::Home][0];
-    {
-        let g = w.comp_mut::<Gang>(g0).expect("g");
-        g.hideout = EntityId::NONE;
-        g.territory = vec![hideout, home];
-        g.territory.sort();
-    }
-    w.migrate_legacy();
-    let g = w.comp::<Gang>(g0).expect("g");
-    assert_eq!(g.hideout, hideout);
-    assert_eq!(g.territory, vec![home]);
-    assert_eq!(w.comp::<Building>(home).expect("b").claim, Some(Claim { gang: g0, count: 3 }));
 }
 
 // ---------------------------------------------------------------------------
@@ -605,14 +588,12 @@ fn test_breach_against_three_guards_fails_and_shocks() {
     assert!(!w.events.iter().any(|e| e.kind == EventKind::Jailbreak));
 }
 
-/// L2 (L22): with `[lod] budget` on, each gang holds class 2 for its first
+/// L2 (L22): each gang holds class 2 for its first
 /// `gang_quota` members only (the leader always), and the rotation hands
 /// the slots round from day to day.
 #[test]
 fn test_gang_quota_holds_and_rotates() {
     let mut cfg = Config::load().v1_profile();
-    cfg.lod.budget = true;
-    cfg.living.enabled = true; // the master switch (`v1_profile` turns L2 off)
     cfg.gangs.max_members = 200;
     let mut w = World::new(53, cfg);
     let (g0, _) = gangs(&w);
@@ -642,32 +623,11 @@ fn test_gang_quota_holds_and_rotates() {
     assert_ne!(today, tomorrow, "the rotation hands the slots round");
 }
 
-/// M10 D20 as before L2: without the budget gang members are never Statistical.
-#[test]
-fn test_gang_members_are_never_statistical_without_budget() {
-    let mut w = world(53);
-    assert!(!w.config.lod.budget);
-    let (g0, _) = gangs(&w);
-    let members = civilians(&w, 3);
-    for &m in &members {
-        gang::enlist(&mut w, m, g0);
-    }
-    w.tick = 60;
-    citysim::systems::lod::run(&mut w);
-    let stat = w
-        .citizens()
-        .into_iter()
-        .filter(|&id| w.comp::<Brain>(id).is_some_and(|b| b.lod == citysim::Lod::Statistical))
-        .count();
-    assert!(stat > 100, "most of the city is Statistical ({stat})");
-    for m in members {
-        assert_ne!(w.comp::<Brain>(m).expect("b").lod, citysim::Lod::Statistical);
-    }
-}
-
 #[test]
 fn test_night_watch_rotates_through_the_grunts() {
     let mut w = world(56);
+    // L1: the watch is stood by members within a walk of the Hideout; here all are.
+    w.config.life.commute_cap_tiles = 10_000;
     let (g0, _) = gangs(&w);
     let members = civilians(&w, 5);
     for (i, &m) in members.iter().enumerate() {
@@ -755,6 +715,8 @@ fn test_lying_low_sleeps_and_idles_at_the_hideout() {
 #[test]
 fn test_contest_keeps_working_a_home_after_the_first_blow() {
     let mut w = world(54);
+    // M15 W27: every shakedown is an Intimidate; the target picker is under test.
+    (w.config.moves.p_min, w.config.moves.p_max) = (1.0, 1.0);
     let (g0, g1) = gangs(&w);
     let (a, b) = two_civilians(&w);
     gang::enlist(&mut w, a, g0);

@@ -120,9 +120,6 @@ pub fn with_press(mut agg: ClassAggregate, mean_press: f32, cfg: &crate::config:
 
 /// M15 W38: an agent's press (0 with the news off).
 pub fn press_of(world: &World, agent: EntityId) -> f32 {
-    if !crate::systems::news::on(world) {
-        return 0.0;
-    }
     world.reputation.get(agent.index as usize).and_then(Option::as_ref).map_or(0.0, |r| r.press)
 }
 
@@ -189,12 +186,10 @@ pub fn compute(world: &mut World) {
     let horizon = world.tick.saturating_sub(EVICTION_WINDOW_DAYS * TICKS_PER_DAY);
     let evictions = world.eviction_log.iter().filter(|&&t| t >= horizon).count() as u32;
     let mut out = [aggregate(&members[0], 0), aggregate(&members[1], evictions), aggregate(&members[2], 0)];
-    if crate::systems::news::on(world) {
-        let cfg = world.config.news.clone();
-        for (i, agg) in out.iter_mut().enumerate() {
-            let mean = press[i] / members[i].len().max(1) as f32;
-            *agg = with_press(std::mem::take(agg), mean, &cfg);
-        }
+    let cfg = world.config.news.clone();
+    for (i, agg) in out.iter_mut().enumerate() {
+        let mean = press[i] / members[i].len().max(1) as f32;
+        *agg = with_press(std::mem::take(agg), mean, &cfg);
     }
     world.classes = out;
 }

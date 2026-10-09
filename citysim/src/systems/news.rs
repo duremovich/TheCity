@@ -44,19 +44,11 @@ const RECENT_DAYS: u64 = 3;
 /// A misdeed older than this is not news to plant (W40).
 const PLANT_MAX_AGE_DAYS: u64 = 14;
 
-/// The Feeds are live: the word's master switch and `[news] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.gossip.enabled && world.config.news.enabled
-}
-
 /// The Real economy E42 (plan deviation: M15's stories are deed-driven and
 /// no deed fits a child taken or a camp unfed): with the Feeds live, push a
 /// `Story` from the Civic Wire (else the first Feed) with `text`; no deed,
 /// no pool entry. `actors` follow the Feed in the event.
 pub fn bulletin(world: &mut World, actors: &[EntityId], text: String) {
-    if !on(world) {
-        return;
-    }
     let feeds = all_feeds(world);
     let Some(feed) = feeds.iter().copied().find(|&f| is_city_feed(world, f)).or_else(|| feeds.first().copied()) else {
         return;
@@ -138,9 +130,6 @@ fn open_feed(world: &mut World, feed: EntityId, name: String) {
 /// three Reporter vacancies (`build_on_lot`). No RNG. A no-op with the news off.
 pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    if !on(world) {
-        return built;
-    }
     for (name, corp_name, district) in SEED_FEEDS {
         let owner = match corp_name {
             Some(cn) => {
@@ -182,14 +171,6 @@ pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     // seed gets its Feeds from `migrate` on a later load.
     world.feeds_seeded = !built.is_empty();
     built
-}
-
-/// W41: a save from before the Feeds (news on, never seeded) gets them on load.
-pub fn migrate(world: &mut World) {
-    if on(world) && !world.feeds_seeded && all_feeds(world).is_empty() {
-        seed_feeds(world);
-        crate::systems::virt::relink(world);
-    }
 }
 
 /// The spec's `news`: `deed_sal × (0.3 + standing(actor) + standing(object))
@@ -836,9 +817,6 @@ fn ads(world: &mut World) {
 /// W37/W40, inside the word's midnight chain: reach and cover, the Spin
 /// plants and buries, the stories, the ads.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     refresh(world);
     let known = rescore_spin(world);
     let plants = spin(world, known);

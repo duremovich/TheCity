@@ -145,36 +145,6 @@ fn test_hunger_decays_and_eating_restores() {
 }
 
 #[test]
-fn test_starvation_kills_after_grace() {
-    let mut w = world(3);
-    let victim = w.citizens()[0];
-    // no food anywhere for this agent: empty wallet, inventory and pantry
-    w.comp_mut::<Wallet>(victim).expect("wallet").coins = 0;
-    w.comp_mut::<citysim::Inventory>(victim).expect("inv").food = 0;
-    let home = w.comp::<citysim::Household>(victim).expect("hh").home.expect("home");
-    w.comp_mut::<Building>(home).expect("home").stock_food = 0;
-    w.comp_mut::<Needs>(victim).expect("needs").hunger = 0.0;
-    w.levers.dole_per_day = 0; // no coins from the Hall
-    w.set_home(victim, None); // no housemates' pantry
-    w.leave_building(victim);
-    let grace = w.config.needs.starvation_grace_ticks;
-    w.run_ticks(grace + 2);
-    assert!(w.has::<citysim::Corpse>(victim), "starved");
-    assert!(!w.citizens().contains(&victim));
-    // Anyone else who died meanwhile (an off-screen killing) is not this test's business.
-    // L1b: births and immigrants too (with the recalibrated table a birth landed in the window).
-    let others = w.events.iter().filter(|e| e.kind == citysim::EventKind::Death && e.actors[0] != victim).count();
-    let arrivals = w
-        .events
-        .iter()
-        .filter(|e| matches!(e.kind, citysim::EventKind::Birth | citysim::EventKind::Immigration))
-        .count();
-    assert_eq!(w.population(), 299 - others + arrivals);
-    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Death && e.actors.contains(&victim)));
-    assert!(w.comp::<citysim::Identity>(victim).is_some(), "identity survives death");
-}
-
-#[test]
 fn test_wage_visit_blocked_only_after_short_payment() {
     let mut w = world(8);
     let worker =

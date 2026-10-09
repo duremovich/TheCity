@@ -1,10 +1,8 @@
 //! L2 shadow fixes (docs/SHADOW_V2.md, "L2 shadow fixes (what landed)"):
 //! the helpers the 21 `[bug]` items of the V2 re-shadow share (and item 22,
-//! the gravedigger's burial shift, added 2026-10-08 with addendum 17). Every caller
-//! reads `on` (or `item`, or a sub-switch through it) first: with `[life]
-//! l2_fixes = false` (`--l2-off`, `--life-off`) or `[living] enabled = false`
-//! nothing here runs, and no item draws a roll of its own on any stream.
-//! `CITYSIM_L2FIX_OFF=1,7` leaves single items off (a bisection device).
+//! the gravedigger's burial shift, added 2026-10-08 with addendum 17), always
+//! on since the switches retired (2026-10-09); and the violence fixes, behind
+//! `[life] violence_fixes` while they are in flight.
 
 use crate::components::{Brain, Building, GoalKind, Job, Lod, Needs, Position, Role, Sentence, TilePos};
 use crate::entity::EntityId;
@@ -13,71 +11,14 @@ use crate::goap::ActionKind;
 use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
 
-/// Are the L2 shadow fixes on (`[life] enabled && l2_fixes`, and the L2
-/// master `[living] enabled`: the L2 gate's "the master alone reproduces
-/// `living_off`")?
-pub fn on(world: &World) -> bool {
-    world.config.life.enabled && world.config.life.l2_fixes && world.config.living.enabled
-}
-
-/// Diagnostics: items to leave off, from `CITYSIM_L2FIX_OFF` (a comma
-/// list of item numbers), read once. Unset (every run but a bisection):
-/// none.
-fn off_mask() -> u32 {
-    static MASK: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
-    *MASK.get_or_init(|| {
-        std::env::var("CITYSIM_L2FIX_OFF")
-            .ok()
-            .map(|v| v.split(',').filter_map(|x| x.trim().parse::<u32>().ok()).fold(0, |m, n| m | (1 << n.min(31))))
-            .unwrap_or(0)
-    })
-}
-
-/// Is fix item `n` (the SHADOW_V2 Plan's numbering) on?
-pub fn item(world: &World, n: u32) -> bool {
-    on(world) && off_mask() & (1 << n.min(31)) == 0
-}
-
-/// Item 1: the commute latch and the real-speed walk estimate.
-pub fn commute_latch(world: &World) -> bool {
-    item(world, 1) && world.config.life.commute_latch
-}
-
-/// Item 2: the shift commitment and pro-rata pay.
-pub fn shift_commit(world: &World) -> bool {
-    item(world, 2) && world.config.life.shift_commit
-}
-
-/// Item 3: the committed sleep, the energy brake, Idle's Sleep cap.
-pub fn sleep_commit(world: &World) -> bool {
-    item(world, 3) && world.config.life.sleep_commit
-}
-
-/// Item 7: the LOD tier dwell.
-pub fn lod_dwell(world: &World) -> bool {
-    item(world, 7) && world.config.life.lod_dwell
-}
-
-/// Item 8: Statistical Sleep when the hungry hour's Eat fails.
-pub fn stat_sleep(world: &World) -> bool {
-    item(world, 8) && world.config.life.stat_sleep_futile_eat
-}
-
-/// Item 19: Beg at a HangOut spot with company.
-pub fn beg_at_spot(world: &World) -> bool {
-    item(world, 19) && world.config.life.beg_at_spot
-}
-
 // ---------------------------------------------------------------------------
 // The violence fixes (2026-10-09, the wages-on diagnosis)
 // ---------------------------------------------------------------------------
 
-/// Are the violence fixes on (`[life] enabled && violence_fixes`, and the
-/// L2 master `[living] enabled`: the L2 gate's "the master alone
-/// reproduces `living_off`")? Off (`--l2-off`, `--life-off`) nothing they
+/// Are the violence fixes on (`[life] violence_fixes`)? Off, nothing they
 /// gate runs.
 pub fn violence_on(world: &World) -> bool {
-    world.config.life.enabled && world.config.life.violence_fixes && world.config.living.enabled
+    world.config.life.violence_fixes
 }
 
 /// Diagnostics: violence-fix items to leave off, from `CITYSIM_VFIX_OFF`
@@ -166,22 +107,22 @@ pub fn paid_step(kind: ActionKind) -> bool {
 /// Sleep, a paid step and a started Lead hold against anything but an
 /// emergency.
 pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -> bool {
-    if !on(world) || brain.current_goal == Some(winner) || emergency(world, id, winner) {
+    if brain.current_goal == Some(winner) || emergency(world, id, winner) {
         return false;
     }
     let Some(plan) = brain.plan.as_ref() else { return false };
     if let ExecState::Use { kind, .. } = &brain.exec {
-        if shift_commit(world) && kind.is_work() && plan.goal == GoalKind::Work {
+        if kind.is_work() && plan.goal == GoalKind::Work {
             return true;
         }
-        if sleep_commit(world) && *kind == ActionKind::Sleep {
+        if *kind == ActionKind::Sleep {
             return true;
         }
-        if item(world, 4) && paid_step(*kind) {
+        if paid_step(*kind) {
             return true;
         }
     }
-    if commute_latch(world) && plan.goal == GoalKind::Work {
+    if plan.goal == GoalKind::Work {
         match world.comp::<Job>(id) {
             Some(job) => {
                 if commuting(world, id, job) {
@@ -197,7 +138,7 @@ pub fn committed(world: &World, id: EntityId, brain: &Brain, winner: GoalKind) -
         }
     }
     // Item 15: a Lead holds until its Collect runs or fails.
-    item(world, 15) && plan.goal == GoalKind::Lead
+    plan.goal == GoalKind::Lead
 }
 
 /// Item 2: the length of `job`'s shift in ticks (the guards' rule,
@@ -210,7 +151,7 @@ fn shift_length(job: &Job) -> u64 {
 /// worked shift paid for the share worked (`economy::collect_wage_scaled`).
 /// A guard is paid by the shift clock already.
 pub fn work_aborted(world: &mut World, id: EntityId, kind: ActionKind, started: Tick) {
-    if !shift_commit(world) || !kind.is_work() {
+    if !kind.is_work() {
         return;
     }
     let Some(job) = world.comp::<Job>(id) else { return };
@@ -275,7 +216,7 @@ pub fn dwell_recent(world: &World, id: EntityId) -> bool {
 /// (a shift is missed once it is over). 0 for a guard (paid by the clock),
 /// a struck shift, or with the item off.
 pub fn missed_workdays(world: &World, job: &Job) -> i64 {
-    if !item(world, 11) || job.role == Role::Guard {
+    if job.role == Role::Guard {
         return 0;
     }
     let current = job.next_shift_key(world.tick);
@@ -295,9 +236,6 @@ pub fn missed_workdays(world: &World, job: &Job) -> i64 {
 /// every 1-5 days: on 42-44, with the unpaid-worker dole gone (addendum
 /// 17), six of seven starved were gravediggers with `days_unpaid` 0.
 pub fn burial_shift(world: &mut World, id: EntityId) {
-    if !item(world, 22) {
-        return;
-    }
     let Some(job) = world.comp::<Job>(id) else { return };
     if job.role != Role::Gravedigger {
         return;
@@ -321,16 +259,13 @@ pub fn burial_shift(world: &mut World, id: EntityId) {
 /// seeded sweepers onto the works wage (item 14), the told-memory pruned
 /// (item 17).
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     // Item 11: a week of workdays missed ends the job (a Feed's reporter
     // never reached her desk and was never paid or dismissed; the absentee
     // never draws the dole: addendum 17).
     let fire = world.config.life.noshow_fire_days;
     let mut out: Vec<EntityId> = Vec::new();
     // scan-ok: daily: no-show dismissals
-    for id in world.citizens().into_iter().filter(|_| item(world, 11)) {
+    for id in world.citizens().into_iter() {
         let Some(job) = world.comp::<Job>(id) else { continue };
         if world.has::<Sentence>(id) || job.employer.is_none() {
             continue;
@@ -355,7 +290,7 @@ pub fn daily(world: &mut World) {
     // Item 14: every sweeper of the Recycler on the works wage (the seeded
     // ones kept `wage_sanitation` 5, under the dole after tax).
     let works = world.config.budget.works_wage;
-    if works > 0 && world.config.budget.enabled && item(world, 14) {
+    if works > 0 {
         if let Some(recycler) = world.building_of_kind(crate::components::BuildingKind::Cemetery) {
             for s in world.workers(Role::Sanitation).to_vec() {
                 if let Some(j) = world.comp_mut::<Job>(s) {

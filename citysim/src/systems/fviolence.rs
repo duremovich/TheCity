@@ -34,9 +34,6 @@ pub fn member_district(world: &World, id: EntityId) -> Option<DistrictId> {
 /// `(Order(o), its district, Member)`. Statistical acts are not counted
 /// (the ledger is what bodies do).
 pub fn note_act(world: &mut World, actor: EntityId, kind: ActKind) {
-    if !crate::systems::lod::budget_on(world) {
-        return;
-    }
     if world.comp::<Brain>(actor).is_none_or(|b| b.lod == Lod::Statistical) {
         return;
     }
@@ -55,7 +52,7 @@ pub fn daily_actor(world: &mut World) {
     let yesterday = world.day().saturating_sub(1);
     let mut days: Vec<(ViolenceSource, DistrictId)> = Vec::new();
     // Phase 4: with the budget off the windows still roll for the victim side.
-    let gangs = if crate::systems::lod::budget_on(world) { world.gangs() } else { Vec::new() };
+    let gangs = world.gangs();
     for gang in gangs {
         let members = world.comp::<crate::components::Gang>(gang).map(|g| g.members.clone()).unwrap_or_default();
         for m in members {
@@ -207,12 +204,6 @@ pub fn stat_gang_day(world: &mut World, id: EntityId) {
 // Phase 4: the victim side (plan L24-L28, "Ledger maths"; spec § 3)
 // ---------------------------------------------------------------------------
 
-/// L2 phase 4 (plan L5): faction violence off screen,
-/// `[living] enabled && [fviolence] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.living.enabled && world.config.fviolence.enabled
-}
-
 /// The ledger's index of a hole kind: Killed 0, Assaulted 1, Robbed 2, Abducted 3.
 pub fn kind_index(kind: HoleKind) -> usize {
     match kind {
@@ -306,7 +297,7 @@ pub fn source_of(
 /// class)` when both sides hold bodies (exposure counts bodies only, L40),
 /// the act has a source and the victim is not of the acting faction.
 pub fn note_victim(world: &mut World, actor: EntityId, victim: EntityId, kind: HoleKind) {
-    if !on(world) || actor == victim || !is_body(world, actor) || !is_body(world, victim) {
+    if actor == victim || !is_body(world, actor) || !is_body(world, victim) {
         return;
     }
     let Some((source, faction, _)) = source_of(world, actor, victim) else { return };
@@ -327,7 +318,7 @@ pub fn note_victim(world: &mut World, actor: EntityId, victim: EntityId, kind: H
 /// From `World::kill_by`, before anything is unlinked: a violent death's
 /// tier tally (the `kill_rate_*` columns) and, with a killer, the ledger.
 pub fn note_death(world: &mut World, victim: EntityId, cause: crate::components::DeathCause, killer: Option<EntityId>) {
-    if cause != crate::components::DeathCause::Violence || !on(world) {
+    if cause != crate::components::DeathCause::Violence {
         return;
     }
     let body = is_body(world, victim);
@@ -519,9 +510,6 @@ fn touching<'a>(world: &World, all: &'a [ActiveSource], d: DistrictId, id: Entit
 /// class)` for each source touching that district (not one of its own
 /// faction's). Bodies only (L40); O(bodies × sources there).
 pub fn tally_exposure(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let all = active_now(world);
     remember_live(world, &all);
     if all.is_empty() {
@@ -635,9 +623,6 @@ pub fn live_share(hours: &[(ActiveSource, u32)], s: &ActiveSource) -> f32 {
 /// city-wide (`fv_capped` counts the hits it stops). A hit is
 /// `lod::stat_hit` or `chrome::abduct_offscreen` with the source.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     // The day's riots and episodes, live now or earlier today.
     let mut all = active_now(world);
     for s in std::mem::take(&mut world.fv_tally.day_sources) {
@@ -765,9 +750,6 @@ pub fn daily(world: &mut World) {
 /// over today's free adults by tier (the sentenced apart); the day's
 /// tallies reset.
 pub fn snapshot(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let mut n = [0u32; 4];
     for (i, lod) in [Lod::Full, Lod::Coarse, Lod::Statistical].into_iter().enumerate() {
         for &id in world.tier(lod) {

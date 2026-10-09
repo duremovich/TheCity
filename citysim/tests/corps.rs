@@ -472,6 +472,8 @@ fn test_monopoly_raises_markup_cap() {
     let base = citysim::systems::economy::price_for_stock(&w.config.economy, *m.stock_hist.back().expect("rolled"));
     let level = w.comp::<Corp>(food).expect("c").level(Niche::Food);
     let want = ((base as f32 * level).round() as i64).clamp(1, w.config.economy.price_cap);
+    // Real economy (E12): the shelf never passes the World's ask plus the haul margin.
+    let want = citysim::systems::economy::price_ceiling(&w).map_or(want, |c| want.min(c).max(1));
     assert!(level > 1.5);
     assert_eq!(m.price_food, want, "base {base} x level {level}");
 }
@@ -796,11 +798,7 @@ fn test_daily_brain_logs_order_changes_and_keeps_conservation() {
     // cross out to the World every day, so the quantity conserved is the
     // identity (`total_coins + Σ outside treasuries − minted`), to the coin.
     let now = ownership::total_coins(&w);
-    if citysim::systems::econ::market_on(&w) {
-        assert_eq!(citysim::systems::econ::identity(&w), identity, "the identity holds (coins {total} -> {now})");
-    } else {
-        assert!((now - total).abs() < 5000, "coins {total} -> {now}");
-    }
+    assert_eq!(citysim::systems::econ::identity(&w), identity, "the identity holds (coins {total} -> {now})");
     w.check_indices().expect("indices in sync");
 }
 
@@ -1074,7 +1072,7 @@ fn test_zombie_corp_at_zero_goes_bankrupt() {
     assert!(!w.is_alive(home), "a corp with no income and nothing left dies");
 }
 
-/// L2 (the M14 ruling, 2026-10-08): with the living city on, a corp holds
+/// L2 (the M14 ruling, 2026-10-08): a corp holds
 /// its order for `[living] corp_order_dwell_days` against a shock rescore
 /// by a challenger inside `corp_order_margin`, yields to one past it, and
 /// rescores on ties only again after the dwell or on severe shocks.
@@ -1082,7 +1080,6 @@ fn test_zombie_corp_at_zero_goes_bankrupt() {
 fn test_corp_order_dwell_holds_against_a_small_margin() {
     let mut w = world();
     let (food, _, _) = three(&w);
-    w.config.living.enabled = true;
     w.config.living.corp_order_dwell_days = 3;
     w.config.living.corp_order_margin = 0.05;
     let now = w.tick;
@@ -1110,8 +1107,4 @@ fn test_corp_order_dwell_holds_against_a_small_margin() {
     let m = corp_brain::shock_margin(&w, food);
     assert_eq!(m, corp_brain::SHOCK_HYSTERESIS);
     assert_eq!(corp_brain::choose(&close, standing, m), Some((CorpOrder::Research, Niche::Food)));
-    // The living city off: M11/M14 unchanged.
-    w.tick = now;
-    w.config.living.enabled = false;
-    assert_eq!(corp_brain::shock_margin(&w, food), corp_brain::SHOCK_HYSTERESIS);
 }

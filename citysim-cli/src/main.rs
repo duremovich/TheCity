@@ -94,30 +94,6 @@ struct RunArgs {
     /// `mlp` (experiment; ignored with `--load`).
     #[arg(long, value_name = "POLICY")]
     stat_policy: Option<String>,
-    /// M14 V46: every M14 section off (`Config::virt_off`): no plane, Labs,
-    /// ICE or tech caps; the M13 city.
-    #[arg(long)]
-    virt_off: bool,
-    /// M15 W46: every M15 section off (`Config::word_off`): no pools,
-    /// exchange, hearing, kin channel or reputation; the M14 city.
-    #[arg(long)]
-    word_off: bool,
-    /// L1: the life pass off (`Config::life_off`): the ab79188 days.
-    #[arg(long)]
-    life_off: bool,
-    /// L2 (plan L32): every L2 section off (`Config::living_off`): the
-    /// M15-closing city byte for byte.
-    #[arg(long)]
-    l2_off: bool,
-    /// M16a (plan C39, C41): every M16a section off (`Config::contracts_off`):
-    /// no Fixers or contract records; the L2-closing city byte for byte.
-    #[arg(long)]
-    contracts_off: bool,
-    /// Real economy (plan E2): every `[economy2]` section off
-    /// (`Config::econ_off`): no World market, crossings or customs; the
-    /// `EC_BASE` city to the column.
-    #[arg(long)]
-    econ_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -1273,61 +1249,11 @@ fn run(args: RunArgs) -> Result<(), String> {
     if let Some(p) = &args.stat_policy {
         config.lod.policy = p.clone();
     }
-    if args.virt_off {
-        config = config.virt_off();
-    }
-    if args.word_off {
-        config = config.word_off();
-    }
-    if args.life_off {
-        config.life = citysim::config::LifeCfg::off();
-    }
-    if args.l2_off {
-        config = config.living_off();
-    }
-    if args.contracts_off {
-        config = config.contracts_off();
-    }
-    if args.econ_off {
-        config = config.econ_off();
-    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
             w.config.lod.force = config.lod.force;
             w.config.assets_dir = config.assets_dir;
-            if args.virt_off {
-                // M14 review: a save with runs in progress would leave its
-                // seated runners `JackedIn` for good (no run step pops with
-                // the plane off): dump them and drop the orders first.
-                if !w.runs.is_empty() || !w.run_orders.is_empty() {
-                    eprintln!(
-                        "note: --virt-off on a save with {} run(s) and {} order(s) in progress: dumped",
-                        w.runs.len(),
-                        w.run_orders.len()
-                    );
-                }
-                citysim::systems::virt::plane_off(&mut w);
-                w.config = w.config.clone().virt_off();
-            }
-            if args.word_off {
-                w.config = w.config.clone().word_off();
-            }
-            if args.life_off {
-                w.config.life = citysim::config::LifeCfg::off();
-            }
-            if args.l2_off {
-                w.config = w.config.clone().living_off();
-            }
-            if args.contracts_off {
-                w.config = w.config.clone().contracts_off();
-            }
-            if args.econ_off {
-                w.config = w.config.clone().econ_off();
-                // The World's buying was opened by the market at seed
-                // (`Levers::from_config`): back to L2's own switch.
-                w.levers.export_open = w.config.living.enabled && w.config.export.enabled;
-            }
             w
         }
         None => World::new(args.seed, config),

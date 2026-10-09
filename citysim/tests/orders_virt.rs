@@ -576,8 +576,6 @@ fn test_garage_selling_skips_garages_that_cannot_sell() {
     assert!(assets::can_sell(&w, pick, AssetKind::Truck, 1));
     let dist = |g: EntityId| w.comp::<Building>(g).map_or(u32::MAX, |b| b.door.manhattan(from));
     assert!(dist(pick) > dist(blocked), "the nearer one was skipped");
-    w.config.virt.enabled = false;
-    assert_eq!(citysim::systems::vehicles::garage_selling(&w, from, AssetKind::Truck), Some(blocked));
 }
 
 /// Phase 3 fix round (deviation A): a Farm's value at risk is its building

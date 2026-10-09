@@ -31,17 +31,9 @@ use crate::virt::{
 };
 use crate::world::World;
 
-/// Is the plane on (`[virt] enabled`)? Every M14 branch starts here.
-pub fn enabled(world: &World) -> bool {
-    world.config.virt.enabled
-}
-
 /// Per tick: relink when a hook marked the plane dirty, then pop the run
 /// steps due (V10; nothing else per tick).
 pub fn run(world: &mut World) {
-    if !enabled(world) {
-        return;
-    }
     if world.virt_dirty {
         relink(world);
     }
@@ -139,10 +131,6 @@ fn wanted(world: &World) -> Vec<Wanted> {
 /// one with no node is appended; a node whose owner changed drops its
 /// breaches and alarm. Links are rebuilt from scratch. Bumps `epoch`.
 pub fn relink(world: &mut World) {
-    if !enabled(world) {
-        world.virt_dirty = false;
-        return;
-    }
     let want = wanted(world);
     let mut index: BTreeMap<NodeKind, NodeId> = BTreeMap::new();
     for (i, n) in world.virt.nodes.iter().enumerate() {
@@ -322,15 +310,6 @@ pub fn bump_epoch(world: &mut World) {
     world.virt.cache.clear();
 }
 
-/// V44: a save from before M14 (enabled, no nodes): relink and seed the
-/// ICE. No Labs (the Research order builds them), empty stores, no runs.
-pub fn migrate(world: &mut World) {
-    if enabled(world) && world.virt.nodes.is_empty() {
-        relink(world);
-        seed_ice(world);
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Seeding (the plan's Seeding table, V26, V47)
 // ---------------------------------------------------------------------------
@@ -352,9 +331,6 @@ const SEED_LABS: [(&str, &str, Track); 4] = [
 /// plane off.
 pub fn seed_labs(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    if !enabled(world) {
-        return built;
-    }
     for (corp_name, district, focus) in SEED_LABS {
         let Some(corp) =
             world.corps().into_iter().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.name == corp_name))
@@ -410,9 +386,6 @@ pub fn seed_labs(world: &mut World) -> Vec<EntityId> {
 /// step their treasury reaches, the Treasury and the Precinct
 /// `levers.city_ice`. Not an event (`ice_raised` counts installs only).
 pub fn seed_ice(world: &mut World) {
-    if !enabled(world) {
-        return;
-    }
     let jail = world.building_of_kind(BuildingKind::Jail);
     let hall = world.building_of_kind(BuildingKind::Hall);
     let city_ice = world.levers.city_ice;
@@ -626,9 +599,6 @@ fn ice_quote(
 }
 
 pub fn install_ice(world: &mut World, owner: Option<EntityId>, n: NodeId) -> bool {
-    if !enabled(world) {
-        return false;
-    }
     let Some((cost, payee, maker, flow, tier)) = ice_quote(world, owner, n) else { return false };
     let full = matches!(ownership::owner_kind(world, owner), OwnerKind::City | OwnerKind::Corp(_));
     if !full && world.purse(owner) < cost {
@@ -664,9 +634,6 @@ pub fn install_ice(world: &mut World, owner: Option<EntityId>, n: NodeId) -> boo
 
 /// V27 Hunker: lower `n`'s ICE one tier (no refund). `IceLowered`.
 pub fn lower_ice(world: &mut World, n: NodeId) -> bool {
-    if !enabled(world) {
-        return false;
-    }
     let Some(p) = profile_mut(world, n).filter(|p| p.ice > 0) else { return false };
     p.ice -= 1;
     let tier = p.ice;
@@ -690,9 +657,6 @@ pub fn lower_ice(world: &mut World, n: NodeId) -> bool {
 /// that finds no seller sets the tier directly (the city's own, free). The
 /// plane off: nothing to do.
 pub fn set_city_ice(world: &mut World) {
-    if !enabled(world) {
-        return;
-    }
     virt_relink_if_dirty(world);
     let want = world.levers.city_ice.min(3);
     let mut nodes: SmallVec<[NodeId; 2]> = SmallVec::new();
@@ -1237,9 +1201,6 @@ fn lead_of(why: RunWhy) -> Tick {
 pub fn hack_offer(world: &World, id: EntityId, stat: bool) -> Option<HackOffer> {
     use crate::utility::curves::{can, urgency, Curve, GATE};
     use crate::utility::Consideration;
-    if !enabled(world) {
-        return None;
-    }
     let kit = world.comp::<Kit>(id)?;
     let deck = kit.deck?;
     let brain = world.comp::<Brain>(id)?;
@@ -1303,7 +1264,7 @@ pub fn hack_offer(world: &World, id: EntityId, stat: bool) -> Option<HackOffer> 
     // target's ICE beats the attack by `[ice] flatline_gap` unless the
     // runner is desperate (a T1 deck, courage 0.18, jacked into a hardened
     // Lab and flatlined in 24 min).
-    if crate::systems::fixes::item(world, 18) && wealth < world.config.life.hack_gap_wealth {
+    if wealth < world.config.life.hack_gap_wealth {
         let o = odds_of(world, id, kit.deck_tier, None, mode_of(world, id));
         if f32::from(def(world, target)) - o.att >= world.config.ice.flatline_gap {
             return None;
@@ -1388,9 +1349,6 @@ pub fn hack_plan(world: &mut World, id: EntityId) -> Option<crate::goap::Plan> {
 /// V5: `JackIn`'s start at a public terminal: `terminal_fee` to the Bar's
 /// or Hotel's owner (`Flow::Terminal`, taxed).
 pub fn pay_terminal(world: &mut World, runner: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let Some(chair) = world.run_orders.get(&runner).map(|o| o.chair) else { return };
     if !is_terminal(world, chair) || world.comp::<Position>(runner).and_then(|p| p.building) != Some(chair) {
         return;
@@ -1439,7 +1397,7 @@ pub fn run_id(tick: Tick, runner: EntityId) -> RunId {
 /// `JackedIn` event pushed.
 pub fn start_run(world: &mut World, runner: EntityId) -> Result<RunId, crate::exec::FailReason> {
     use crate::exec::FailReason;
-    if !enabled(world) || world.runner_of.contains_key(&runner) {
+    if world.runner_of.contains_key(&runner) {
         return Err(FailReason::PreconditionLost);
     }
     let order = world.run_orders.get(&runner).cloned().ok_or(FailReason::PreconditionLost)?;
@@ -2014,9 +1972,6 @@ fn note_virt_loss(world: &mut World, n: NodeId, coins: i64, runner: EntityId) {
 
 /// V19: a sacked Hideout's store moves to `winner`'s Hideout node.
 pub fn move_store(world: &mut World, from: EntityId, winner: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let (Some(a), Some(b)) =
         (node_of_building(world, from), world.hideout_of(winner).and_then(|h| node_of_building(world, h)))
     else {
@@ -2104,31 +2059,6 @@ pub fn dump(world: &mut World, runner: EntityId, why: &str) {
 pub fn clear_stream(world: &mut World, gang: EntityId, runner: EntityId) {
     if let Some(x) = world.comp_mut::<Gang>(gang) {
         if x.stream_by == Some(runner) {
-            x.stream_by = None;
-        }
-    }
-}
-
-/// M14 review (`--load` with `--virt-off`): the plane is switched off under
-/// a world that has runs in progress. Every seated runner is dumped (V12,
-/// ascending), every pending `RunOrder` is dropped (a lent fleet deck goes
-/// back, V31) and every `Gang.stream_by` cleared; with the plane off no run
-/// step pops, so a seated body would otherwise sit `JackedIn` for good.
-/// Call it before switching the config off (the dump reads `[virt]`).
-pub fn plane_off(world: &mut World) {
-    let seated: Vec<EntityId> = world.runner_of.keys().copied().collect();
-    for runner in seated {
-        dump(world, runner, "the plane went dark");
-    }
-    let orders: Vec<(EntityId, RunWhy)> = world.run_orders.iter().map(|(&a, o)| (a, o.why)).collect();
-    world.run_orders.clear();
-    for (a, why) in orders {
-        if why == RunWhy::CorpOrder {
-            crate::systems::assets::rekit(world, a);
-        }
-    }
-    for g in world.gang_list().to_vec() {
-        if let Some(x) = world.comp_mut::<Gang>(g) {
             x.stream_by = None;
         }
     }
@@ -2255,7 +2185,7 @@ pub fn deck_offer(world: &World, from: TilePos, budget: i64, max_tier: u8) -> Op
 /// the best-hacking member without one (at `hack_min` or better; ties the
 /// lower id), owned by the gang, carried and kept by the member.
 pub fn gang_deck(world: &mut World, gang: EntityId) {
-    if !enabled(world) || !world.config.assets.enabled {
+    if !world.config.assets.enabled {
         return;
     }
     let floor = world.config.decks.gang_deck_floor;
@@ -2299,7 +2229,7 @@ pub fn gang_deck(world: &mut World, gang: EntityId) {
 /// the M13 gate's Farm trucks fell from 8 to 4), posted at the Lab
 /// (`Posted`, not `Parked`: M13's street theft never sees it). Phase 3's `VirtRaid` lends it.
 pub fn fleet_decks(world: &mut World, corp: EntityId) {
-    if !enabled(world) || !world.config.assets.enabled {
+    if !world.config.assets.enabled {
         return;
     }
     for lab in crate::systems::tech::labs_of(world, corp) {
@@ -2496,9 +2426,6 @@ pub struct GangVirtInputs {
 /// V30 inputs for the best target of the gang's best runner from its
 /// Hideout node (one search), and whether the grudge's wipe is reachable.
 pub fn gang_virt_inputs(world: &World, gang: EntityId, prize: Option<EntityId>) -> GangVirtInputs {
-    if !enabled(world) {
-        return GangVirtInputs::default();
-    }
     let hacked = gang_hacked(world, gang).is_some();
     let none = GangVirtInputs { hacked, ..Default::default() };
     let Some(runner) = gang_runners(world, gang).first().copied() else { return none };
@@ -2522,9 +2449,6 @@ pub fn gang_virt_inputs(world: &World, gang: EntityId, prize: Option<EntityId>) 
 /// `virt_runners` runners each get a `RunOrder` (chair the Hideout, patron
 /// the gang) on a distinct target, best first.
 pub fn gang_daily(world: &mut World, gang: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let Some(hideout) = world.hideout_of(gang) else { return };
     let Some(from) = node_of_building(world, hideout) else { return };
     let worth = value_at_risk(world, from);
@@ -2573,9 +2497,6 @@ pub fn gang_daily(world: &mut World, gang: EntityId) {
 /// run (ICE ≥ 1 or a contract; not within `door_cooldown_days` of the last
 /// DoorOpen), from the Hideout chair, `door_lead_hours` before the muster.
 pub fn raid_prelude(world: &mut World, gang: EntityId, target: EntityId, raid_at: Tick) {
-    if !enabled(world) {
-        return;
-    }
     let Some(n) = node_of_building(world, target) else { return };
     let Some(hideout) = world.hideout_of(gang) else { return };
     let robot = crate::systems::robots::powered_robot(world, target);
@@ -2609,9 +2530,6 @@ pub fn raid_prelude(world: &mut World, gang: EntityId, target: EntityId, raid_at
 /// `Overwatch` run; `Gang.stream_by`. A corp raid leaving through an open
 /// door logs it (the V32 gate pair).
 pub fn on_raid_departed(world: &mut World, gang: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let now = world.tick;
     if let Some(t) = crate::systems::raid::corp_target(world, gang) {
         if hack_live(world, t, crate::virt::HackEffect::DoorOpen) {
@@ -2682,9 +2600,6 @@ pub fn fleet_deck_at(world: &World, lab: EntityId) -> Option<EntityId> {
 /// a steal. Plan deviation: the runner is the best Researcher employed at
 /// the Lab, on shift or not (the act runs at midnight).
 pub fn corp_run(world: &World, corp: EntityId) -> Option<CorpRun> {
-    if !enabled(world) {
-        return None;
-    }
     let c = world.comp::<Corp>(corp)?;
     let focus = c.tech.focus;
     let staff = |lab: EntityId| {
@@ -2808,9 +2723,6 @@ pub fn secure_affords(world: &World, corp: EntityId, cost: i64, mult: f32) -> bo
 /// largest gap (ties the lower id). Nodes the corp cannot afford
 /// ([`secure_affords`]) are skipped before the `secure_per_day` take.
 pub fn secure_ice(world: &mut World, corp: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let per_day = world.config.corps.secure_per_day;
     let horizon = world.tick.saturating_sub(14 * TICKS_PER_DAY);
     let recent: Vec<NodeId> = world
@@ -2869,9 +2781,6 @@ const HARDEN_DAYS: Tick = 7;
 /// theft against a treasury of thousands): on seeds 42-44 a Virt loss saw
 /// its node's ICE rise within 7 days in 3 of 11 episodes.
 pub fn harden_robbed(world: &mut World, corp: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let now = world.tick;
     let horizon = now.saturating_sub(HARDEN_DAYS * TICKS_PER_DAY);
@@ -2914,7 +2823,7 @@ pub fn camera_at(world: &World, b: EntityId) -> Option<EntityId> {
 /// Security Office that can sell it, while the treasury holds twice the
 /// price and keeps the fleet reserve after it ([`secure_affords`]).
 pub fn buy_camera(world: &mut World, corp: EntityId) {
-    if !enabled(world) || !world.config.assets.enabled {
+    if !world.config.assets.enabled {
         return;
     }
     let Some(c) = world.comp::<Corp>(corp) else { return };
@@ -2964,9 +2873,6 @@ const HUNKER_PAYBACK_DAYS: i64 = 30;
 /// at today's `ice_upkeep` [0, 0, 1, 2] no shed repays itself, so Hunker
 /// keeps its ICE until phase 5 gives upkeep teeth.
 pub fn hunker_ice(world: &mut World, corp: EntityId) {
-    if !enabled(world) {
-        return;
-    }
     let reserve = fleet_reserve(world, corp);
     if world.purse(Some(corp)) >= reserve {
         return;
@@ -2995,15 +2901,13 @@ pub fn hack_live(world: &World, b: EntityId, effect: crate::virt::HackEffect) ->
 /// V32/V33: the building's robot sensors are off (Blind, or DoorOpen: a
 /// robot posted at an open door neither defends nor senses).
 pub fn robot_sensors_off(world: &World, b: EntityId) -> bool {
-    enabled(world)
-        && (hack_live(world, b, crate::virt::HackEffect::Blind)
-            || hack_live(world, b, crate::virt::HackEffect::DoorOpen))
+    hack_live(world, b, crate::virt::HackEffect::Blind) || hack_live(world, b, crate::virt::HackEffect::DoorOpen)
 }
 
 /// V33: the building's cameras are off (Blind only; DoorOpen opens the
 /// door and leaves the cameras on).
 pub fn cameras_off(world: &World, b: EntityId) -> bool {
-    enabled(world) && hack_live(world, b, crate::virt::HackEffect::Blind)
+    hack_live(world, b, crate::virt::HackEffect::Blind)
 }
 
 /// V28: a sighting into `owner`'s database (`None` = the city), capped at
@@ -3038,7 +2942,7 @@ pub fn record_sighting(world: &mut World, owner: Option<EntityId>, s: crate::vir
 /// corp or the city, a report with no witness.
 pub fn camera_sense(world: &mut World, actor: EntityId, crime: crate::components::Crime, b: EntityId) {
     use crate::components::Crime;
-    if !enabled(world) || !matches!(crime, Crime::Theft | Crime::Extortion | Crime::GrandTheft) {
+    if !matches!(crime, Crime::Theft | Crime::Extortion | Crime::GrandTheft) {
         return;
     }
     let Some(cam) = camera_at(world, b) else { return };
@@ -3075,9 +2979,6 @@ pub fn camera_sense(world: &mut World, actor: EntityId, crime: crate::components
 /// freelance considerations; a score at `stat_hack_min` writes a
 /// `RunOrder { why: Stat }` and promotes them to Coarse.
 pub fn stat_pass(world: &mut World) {
-    if !enabled(world) {
-        return;
-    }
     let day = world.day();
     let mut who: Vec<EntityId> = crate::systems::assets::all_assets(world)
         .into_iter()

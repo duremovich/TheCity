@@ -182,10 +182,10 @@ fn test_contest_f_equals_m13_contest() {
 /// ledger column is the sum of the upkeep table over the ICE'd nodes.
 #[test]
 fn test_ice_upkeep_and_install_flows_conserve() {
-    // M14 V26's self-install pays the City: the `EC_BASE` path (with the
-    // market on the import crosses to the World, `tests/econ.rs`).
-    let mut w = World::new(42, Config::load().econ_off());
-    let total = ownership::total_coins(&w);
+    // M14 V26's self-install imports: the coins cross to the World, so the
+    // conservation identity (`econ::identity`) is the check.
+    let mut w = World::new(42, Config::load());
+    let total = citysim::systems::econ::identity(&w);
     let expected: i64 = (0..w.virt.nodes.len())
         .filter(|&i| w.virt.nodes[i].alive)
         .filter_map(|i| virt::profile(&w, NodeId(i as u16)).map(|p| p.ice))
@@ -194,7 +194,7 @@ fn test_ice_upkeep_and_install_flows_conserve() {
     let before = w.stats.current.virt.flow_ice_upkeep;
     tech::ice_upkeep(&mut w);
     assert_eq!(w.stats.current.virt.flow_ice_upkeep - before, expected, "flow_ice_upkeep = the upkeep table");
-    assert_eq!(ownership::total_coins(&w), total, "upkeep conserves coins");
+    assert_eq!(citysim::systems::econ::identity(&w), total, "upkeep conserves coins");
     // An install bought from a Security corp, and a self-install.
     let nutrix = corp_named(&w, "Nutrix");
     let market = ownership::owned_of_kind(&w, Some(nutrix), BuildingKind::Market)[0];
@@ -206,17 +206,14 @@ fn test_ice_upkeep_and_install_flows_conserve() {
     let lab = virt::node_of_building(&w, lab_of(&w, arasaka, Track::Deck)).expect("node");
     assert!(virt::install_ice(&mut w, Some(arasaka), lab), "Arasaka self-installs at Deck 3");
     assert_eq!(virt::profile(&w, lab).and_then(|p| p.ice_maker), Some(arasaka));
-    assert_eq!(ownership::total_coins(&w), total, "installs conserve coins");
+    assert_eq!(citysim::systems::econ::identity(&w), total, "installs conserve coins");
     assert!(w.stats.current.virt.ice_raised >= 2);
 }
 
-/// V35: the hacking draws are keyed: the world stream is the same with the plane on and off.
+/// V35: hacking is seeded in `0..=hack_seed_scale`, about a fifth past the deck shop's floor.
 #[test]
-fn test_hacking_draw_untouches_world_stream() {
-    let mut on = World::new(42, Config::load());
-    let mut off = World::new(42, Config::load().virt_off());
-    let (a, b): (u64, u64) = (on.rng.world().random(), off.rng.world().random());
-    assert_eq!(a, b);
+fn test_hacking_seeded_in_range() {
+    let on = World::new(42, Config::load());
     let h: Vec<f32> = on.citizens().iter().filter_map(|&c| on.comp::<citysim::Skills>(c)).map(|s| s.hacking).collect();
     assert!(h.iter().all(|&x| (0.0..=0.8).contains(&x)), "hacking in 0..=hack_seed_scale");
     let clear = h.iter().filter(|&&x| x >= 0.4).count() as f32 / h.len() as f32;

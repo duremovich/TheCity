@@ -1,9 +1,8 @@
 //! The Real economy (docs/ECONOMY_V2.md, plan E3): the milestone's types.
 //! Logic lives in `systems::{econ, world_market}` (phase 1) and, later,
-//! `systems::{wages, treasury, charity, camp}`; every path runs behind its
-//! section's `on()` (plan E1), so with `[economy2] enabled = false`
-//! (`--econ-off`) none of these is ever written and the `EC_BASE` city is
-//! reproduced to the column.
+//! `systems::{wages, treasury, charity, camp}`. The World market, Missions and
+//! the camps are always on; wages from revenue and the safety net's removal
+//! run behind `[economy2] wages` and `no_safety_net` (in flight).
 //!
 //! Everything here is a ledger abstraction: the World's book per good is a
 //! set of counters and 30-day rings on the outside account; a "crossing" is

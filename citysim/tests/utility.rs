@@ -211,7 +211,9 @@ fn test_worked_example_through_goal_table() {
     assert!((score(GoalKind::Work) - 0.855).abs() < 0.005, "work {}", score(GoalKind::Work));
     assert!((score(GoalKind::Eat) - 0.823).abs() < 0.005, "eat {}", score(GoalKind::Eat));
     assert!((score(GoalKind::Earn) - 0.240).abs() < 0.005, "earn {}", score(GoalKind::Earn));
-    assert!((score(GoalKind::Socialise) - 0.072).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
+    // The spec's example reads 0.072; the life pass (always on since 2026-10-09)
+    // weighs the walk to company, 0.034 on this seed's farmer.
+    assert!((score(GoalKind::Socialise) - 0.034).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
     assert_eq!(
         goals::GOAL_ORDER.len(),
         28,

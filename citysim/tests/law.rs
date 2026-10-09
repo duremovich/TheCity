@@ -33,10 +33,17 @@ fn test_witness_notice_formula() {
 fn test_theft_witnessed_by_guard_leads_to_jail_within_1_day() {
     let mut w = world(21);
     w.config.lod.force = Some(citysim::Lod::Full); // an arbitrary agent must be simulated in full
+                                                   // A certain roll for the guard: `witness_base` 0.6 + the guard's bonus
+                                                   // at 0.4 (0.3 shipped: 0.9 was a lucky draw), the law's competence
+                                                   // multiplier (M15 W28) at 1.
+    w.config.crime.witness_guard_bonus = 0.4;
+    w.config.competence.comp_w = 0.0;
     let thief = civilian(&w);
     let g = guard(&w);
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
     w.run_ticks(700); // noon, day 0
+                      // L2's staffing fills the Market (12 clerks): room for the two of them.
+    w.comp_mut::<citysim::Building>(market).expect("market").capacity = 255;
     for id in [thief, g] {
         w.leave_building(id);
         w.enter_building(id, market);
@@ -295,53 +302,65 @@ fn test_guard_on_duty_at_shift_end_is_owed_the_day() {
     let key = loop {
         let tick = day * TICKS_PER_DAY + u64::from(end % 1440) + if end == 1440 { TICKS_PER_DAY } else { 0 };
         let key = job.shift_key_at(tick - 1);
-        if citysim::exec::routine::is_workday(key) {
+        // L2 shadow fixes item 10: a guard's rest day is staggered by its index.
+        if citysim::exec::routine::workday_of(&w, g, &job, key) {
             w.tick = tick;
             break key;
         }
         day += 1;
     };
-    let before = w.comp::<Job>(g).expect("job").days_unpaid;
+    // L1: an owed shift's wage is paid at its end (`economy::collect_wage`),
+    // so the owed day shows as coins in the purse and the shift's key marked.
+    let coins = |w: &World, id| w.comp::<citysim::Wallet>(id).map_or(0, |x| x.coins);
+    let workday = |w: &World, o| w.comp::<Job>(o).is_some_and(|j| citysim::exec::routine::workday_of(w, o, j, key));
+    let before = coins(&w, g);
     // On duty all shift, eating at its end.
     w.comp_mut::<Job>(g).expect("job").duty_ticks = 400;
     w.comp_mut::<Brain>(g).expect("brain").current_goal = Some(GoalKind::Eat);
     law::run(&mut w);
-    let j = w.comp::<Job>(g).expect("job");
-    assert_eq!(j.days_unpaid, before + 1, "one day owed");
-    assert_eq!(j.last_shift_day, Some(key));
+    let paid = coins(&w, g);
+    assert!(paid > before, "the day owed and paid");
+    assert_eq!(w.comp::<Job>(g).expect("job").last_shift_day, Some(key));
     // The next tick is not a shift end; a GuardJail or PatrolLeg finishing
     // now (`end_shift`) owes a guard nothing more.
     w.tick += 1;
     law::run(&mut w);
     citysim::exec::actions::end_shift(&mut w, g);
-    assert_eq!(w.comp::<Job>(g).expect("job").days_unpaid, before + 1, "not owed twice");
+    assert_eq!(coins(&w, g), paid, "not owed twice");
 
     // Another guard, asleep when the same shift ends, is owed nothing.
     let other = w
         .citizens()
         .into_iter()
-        .find(|&o| o != g && w.comp::<Job>(o).is_some_and(|j| j.role == Role::Guard && j.shifts == job.shifts))
+        .find(|&o| {
+            o != g
+                && w.comp::<Job>(o).is_some_and(|j| j.role == Role::Guard && j.shifts == job.shifts)
+                && workday(&w, o)
+        })
         .expect("a guard on the same shift");
-    let before = w.comp::<Job>(other).expect("job").days_unpaid;
+    let before = coins(&w, other);
     w.comp_mut::<Brain>(other).expect("brain").current_goal = Some(GoalKind::Sleep);
     w.comp_mut::<Job>(other).expect("job").last_shift_day = None;
     w.comp_mut::<Job>(other).expect("job").duty_ticks = 60;
     w.tick -= 1;
     law::run(&mut w);
-    assert_eq!(w.comp::<Job>(other).expect("job").days_unpaid, before);
+    assert_eq!(coins(&w, other), before);
 
     // A guard who completed the shift (five legs) and went to bed is owed it.
     let third = w
         .citizens()
         .into_iter()
         .find(|&o| {
-            o != g && o != other && w.comp::<Job>(o).is_some_and(|j| j.role == Role::Guard && j.shifts == job.shifts)
+            o != g
+                && o != other
+                && w.comp::<Job>(o).is_some_and(|j| j.role == Role::Guard && j.shifts == job.shifts)
+                && workday(&w, o)
         })
         .expect("a third guard on the same shift");
-    let before = w.comp::<Job>(third).expect("job").days_unpaid;
+    let before = coins(&w, third);
     w.comp_mut::<Brain>(third).expect("brain").current_goal = Some(GoalKind::Sleep);
     w.comp_mut::<Job>(third).expect("job").last_shift_day = Some(key);
     w.comp_mut::<Job>(third).expect("job").duty_ticks = 0;
     law::run(&mut w);
-    assert_eq!(w.comp::<Job>(third).expect("job").days_unpaid, before + 1);
+    assert!(coins(&w, third) > before, "owed and paid");
 }

@@ -71,12 +71,6 @@ pub fn workplace_key_for(world: &World, _agent: EntityId, job: &Job) -> Location
     }
 }
 
-/// Ticks to walk between two tiles: Manhattan distance at Full speed, padded
-/// by half for the detours a road grid forces.
-fn travel_estimate(world: &World, from: crate::components::TilePos, to: crate::components::TilePos) -> u64 {
-    u64::from(from.manhattan(to)) * world.config.exec.move_ticks_full * 3 / 2
-}
-
 /// Is a shift key a working day (6 days in 7)?
 pub fn is_workday(shift_key: i64) -> bool {
     shift_key.rem_euclid(7) != 6
@@ -86,8 +80,8 @@ pub fn is_workday(shift_key: i64) -> bool {
 /// day is staggered by its index (the whole watch shared the city's rest
 /// day, so with Patrol and Arrest gated on the workday no guard worked one
 /// day in seven: arrests on that weekday fell 8,226 -> 1,121 over 42-53).
-pub fn workday_of(world: &World, id: EntityId, job: &Job, shift_key: i64) -> bool {
-    if job.role == Role::Guard && crate::systems::fixes::item(world, 10) {
+pub fn workday_of(_world: &World, id: EntityId, job: &Job, shift_key: i64) -> bool {
+    if job.role == Role::Guard {
         return (shift_key + i64::from(id.index % 7)).rem_euclid(7) != 6;
     }
     is_workday(shift_key)
@@ -123,7 +117,7 @@ pub fn shift_pending(world: &World, id: EntityId, job: &Job) -> bool {
 pub fn work_pending(world: &World, id: EntityId, job: &Job) -> bool {
     // L1: wages are paid at the shift's end; nothing to walk to off shift
     // (the Ripperdoc's Work scored ~0.95 off shift for a few coins owed).
-    shift_pending(world, id, job) || (!world.config.life.enabled && wage_pending(world, job))
+    shift_pending(world, id, job)
 }
 
 /// Should this agent drop what it is doing and head to work now?
@@ -147,13 +141,10 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     // L2 shadow fixes item 1: a commute under way holds until arrival (the
     // gate went false after a leg and Idle or Unwind took her home), and
     // the walk is read at the speed it is walked.
-    if crate::systems::fixes::commute_latch(world) {
-        if crate::systems::fixes::commuting(world, id, job) {
-            return true;
-        }
-        return until <= crate::systems::fixes::walk_estimate(world, id, door) + DEPARTURE_MARGIN;
+    if crate::systems::fixes::commuting(world, id, job) {
+        return true;
     }
-    until <= travel_estimate(world, pos.tile, door) + DEPARTURE_MARGIN
+    until <= crate::systems::fixes::walk_estimate(world, id, door) + DEPARTURE_MARGIN
 }
 
 /// Work before the shift starts: head to the workplace and rest inside until
@@ -228,10 +219,8 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     let off_shift = world.comp::<Job>(id).is_none_or(|j| !j.on_shift(world.tick_of_day()));
     // L2 shadow fixes item 3: not above `idle_sleep_energy` (a guard logged
     // ten 1-6 min Sleeps at energy 0.89-0.97 from this plan).
-    let idle_sleep_below =
-        if crate::systems::fixes::sleep_commit(world) { world.config.life.idle_sleep_energy } else { 0.9 };
-    if world.config.life.enabled
-        && at_home
+    let idle_sleep_below = world.config.life.idle_sleep_energy;
+    if at_home
         && night
         && off_shift
         && world.comp::<crate::components::Needs>(id).is_some_and(|n| n.energy < idle_sleep_below)
@@ -243,10 +232,8 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     // L1: far from Home, idle at the nearer Bar (or a member's Hideout)
     // rather than walk hours home to sit down.
-    if world.config.life.enabled {
-        if let Some(plan) = idle_near(world, id, home) {
-            return Some(plan);
-        }
+    if let Some(plan) = idle_near(world, id, home) {
+        return Some(plan);
     }
     if home.is_some() {
         let steps = vec![step(ActionKind::GoTo(LocationKey::Home), None), step(ActionKind::Rest, None)];

@@ -50,9 +50,6 @@ pub fn axes(ui: &mut Ui, world: &World, id: EntityId) {
 /// the Regard row against every other faction, open vendettas with their
 /// kills, a corp's plants and buries, a gang's creed.
 pub fn faction(ui: &mut Ui, app: &mut App, world: &World, f: EntityId) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     section(ui, "Word", |ui| {
         axes(ui, world, f);
         if let Some(c) = world.comp::<Corp>(f) {
@@ -136,9 +133,6 @@ pub fn faction(ui: &mut Ui, app: &mut App, world: &World, f: EntityId) {
 /// The inspector's word sections (spec § 10): the active Hunt (and who
 /// hunts this agent), the grudges, the social skills.
 pub fn agent(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     if let Some(h) = world.hunts.get(&id) {
         section(ui, "Hunt", |ui| {
             ui.horizontal(|ui| {
@@ -261,9 +255,6 @@ fn story_line(world: &World, s: &citysim::word::Story) -> String {
 /// second-hand share, the top five stories, open vendettas, Hunts under
 /// way, the longest chain; and the three news levers.
 pub fn city(ui: &mut Ui, app: &mut App, world: &World) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     ui.separator();
     // `--scroll-word` (screenshots): keep the section in view.
     if app.scroll_word {
@@ -321,9 +312,6 @@ pub fn city(ui: &mut Ui, app: &mut App, world: &World) {
     }
     if feuds.len() > 6 {
         ui.small(format!("and {} more feuds", feuds.len() - 6));
-    }
-    if !world.config.news.enabled {
-        return;
     }
     ui.small("Levers");
     let mut licence = world.levers.press_licence;

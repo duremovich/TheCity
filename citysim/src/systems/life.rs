@@ -13,11 +13,6 @@ use crate::time::{Tick, TICKS_PER_DAY};
 use crate::utility::Consideration;
 use crate::world::World;
 
-/// Is the life pass on?
-pub fn on(world: &World) -> bool {
-    world.config.life.enabled
-}
-
 /// Ticks to walk `tiles` (Manhattan) on foot: `move_ticks_full` a tile,
 /// padded by half for the detours a road grid forces (as the commute gate).
 pub fn walk_ticks(world: &World, tiles: u32) -> u64 {
@@ -76,9 +71,6 @@ fn home_of(world: &World, id: EntityId) -> Option<EntityId> {
 /// A member's own Hideout as a bed: not sacked, room (or already inside),
 /// and nearer than Home by `bed_margin_tiles` (any distance when homeless).
 pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
-    if !on(world) {
-        return None;
-    }
     let gang = world.gang_of(id)?;
     let g = world.comp::<Gang>(gang)?;
     if g.is_sacked(world.tick) {
@@ -90,19 +82,14 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     // L2 (L30): a bed another member reserved on the way is taken.
-    if crate::systems::lod::budget_on(world)
-        && !b.occupants.contains(&id)
-        && b.occupants.len() + world.reserved_at(h, id) >= usize::from(b.capacity)
-    {
+    if !b.occupants.contains(&id) && b.occupants.len() + world.reserved_at(h, id) >= usize::from(b.capacity) {
         return None;
     }
     let t = tiles_to(world, id, h)?;
     // L2 shadow fixes item 20: the nearer of Home and the Hideout, no margin
     // (a dealer walked 160 min to sleep at Home past her Hideout).
-    let fix = crate::systems::fixes::item(world, 20);
-    let margin = if fix { 0 } else { world.config.life.bed_margin_tiles };
     match home_of(world, id).and_then(|home| tiles_to(world, id, home)) {
-        Some(home) => (t + margin <= home && (!fix || t < home)).then_some(h),
+        Some(home) => (t < home).then_some(h),
         None => Some(h),
     }
 }
@@ -111,7 +98,7 @@ pub fn hideout_bed(world: &World, id: EntityId) -> Option<EntityId> {
 /// bed it can pay for and keep `hotel_reserve_meals` meals, nearer than
 /// Home by `bed_margin_tiles`. Its booking, if it holds one.
 pub fn away_hotel(world: &World, id: EntityId) -> Option<EntityId> {
-    if !on(world) || !crate::systems::street::enabled(world) || !crate::systems::demography::is_adult(world, id) {
+    if !crate::systems::street::enabled(world) || !crate::systems::demography::is_adult(world, id) {
         return None;
     }
     let home = home_of(world, id)?;
@@ -156,8 +143,7 @@ pub fn nearest_bed_tiles(world: &World, id: EntityId) -> Option<u32> {
 
 /// Exhausted, and every bed past `rough_min_tiles`: lie down where you are.
 pub fn rough_ok(world: &World, id: EntityId) -> bool {
-    on(world)
-        && world.comp::<Needs>(id).is_some_and(|n| n.energy < world.config.life.exhausted_energy)
+    world.comp::<Needs>(id).is_some_and(|n| n.energy < world.config.life.exhausted_energy)
         && nearest_bed_tiles(world, id).is_none_or(|t| t > world.config.life.rough_min_tiles)
 }
 
@@ -170,9 +156,6 @@ pub fn rough_ok(world: &World, id: EntityId) -> bool {
 pub fn refuge(world: &World, id: EntityId) -> Option<(LocationKey, EntityId)> {
     if let Some(h) = home_of(world, id) {
         return Some((LocationKey::Home, h));
-    }
-    if !on(world) {
-        return None;
     }
     let mut cands: Vec<(LocationKey, EntityId)> = Vec::new();
     if let Some(s) = world.comp::<crate::components::Squatter>(id) {
@@ -346,9 +329,6 @@ pub fn pair_key(a: EntityId, b: EntityId, day: u64) -> u64 {
 /// `[rent] rehouse_coins_mult` x rent for, when it is nearer by the margin.
 /// Longest commutes first (ties lower id). A guard's workplace is the Precinct.
 pub fn relocate(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let cap = world.config.life.commute_cap_tiles;
     let margin = world.config.life.bed_margin_tiles;
     let mult = world.config.rent.rehouse_coins_mult;
@@ -454,9 +434,6 @@ pub fn relocate(world: &mut World) {
 /// `[economy] wage_exec` and capped at `exec_pay_cap` (the flat wage when off).
 pub fn exec_pay(world: &World, corp: EntityId) -> i64 {
     let floor = world.config.economy.wage_exec;
-    if !on(world) {
-        return floor;
-    }
     let t = world.comp::<Corp>(corp).map_or(0, |c| c.treasury);
     let scaled = (t.max(0) as f32 * world.config.life.exec_pay_frac).round() as i64;
     scaled.clamp(floor, world.config.life.exec_pay_cap.max(floor))
@@ -535,7 +512,7 @@ pub fn exec_corp(world: &World, id: EntityId) -> Option<EntityId> {
 /// jailed, today's office hours not yet kept, and the shift on (or about to
 /// start within the walk).
 pub fn exec_day_pending(world: &World, id: EntityId) -> Option<EntityId> {
-    if !on(world) || world.has::<Sentence>(id) || world.has::<Job>(id) {
+    if world.has::<Sentence>(id) || world.has::<Job>(id) {
         return None;
     }
     let today = world.day();
@@ -551,29 +528,22 @@ pub fn exec_day_pending(world: &World, id: EntityId) -> Option<EntityId> {
     }
     // L2 shadow fixes item 1: the walk to the office, once started today,
     // holds (the CEO set out and turned back up to four times a morning).
-    if crate::systems::fixes::commute_latch(world) {
-        let started = world
-            .comp::<Brain>(id)
-            .and_then(|b| b.plan.as_ref())
-            .filter(|p| p.goal == GoalKind::Work && p.target == Some(hq))
-            .is_some_and(|p| p.started_tick / TICKS_PER_DAY == today);
-        if started {
-            return Some(hq);
-        }
-        let door = world.comp::<Building>(hq).map_or_else(Default::default, |b| b.door);
-        let walk = crate::systems::fixes::walk_estimate(world, id, door);
-        return (tod + walk + 30 >= u64::from(s)).then_some(hq);
+    let started = world
+        .comp::<Brain>(id)
+        .and_then(|b| b.plan.as_ref())
+        .filter(|p| p.goal == GoalKind::Work && p.target == Some(hq))
+        .is_some_and(|p| p.started_tick / TICKS_PER_DAY == today);
+    if started {
+        return Some(hq);
     }
-    let walk = tiles_to(world, id, hq).map_or(0, |t| walk_ticks(world, t));
+    let door = world.comp::<Building>(hq).map_or_else(Default::default, |b| b.door);
+    let walk = crate::systems::fixes::walk_estimate(world, id, door);
     (tod + walk + 30 >= u64::from(s)).then_some(hq)
 }
 
 /// Move an exec (with a spouse and children sharing the Home) into a free
 /// Spire Home (tier 2) when they live lower down and one has room.
 pub fn house_exec(world: &mut World, exec: EntityId) {
-    if !on(world) {
-        return;
-    }
     let Some(home) = home_of(world, exec) else { return };
     if world.comp::<Building>(home).is_some_and(|b| b.tier >= 2) {
         return;
@@ -652,18 +622,11 @@ pub fn exec_shift_over(world: &World) -> bool {
 
 /// Days a quitter is not rehired by the employer it left.
 pub fn quit_blocks(world: &World, a: EntityId, employer: EntityId) -> bool {
-    on(world)
-        && world
-            .comp::<Brain>(a)
-            .and_then(|b| b.quit_from)
-            .is_some_and(|(e, until)| e == employer && world.tick < until)
+    world.comp::<Brain>(a).and_then(|b| b.quit_from).is_some_and(|(e, until)| e == employer && world.tick < until)
 }
 
 /// Record a quit (`quit_rehire_days` before that employer hires them again).
 pub fn note_quit(world: &mut World, a: EntityId, employer: Option<EntityId>) {
-    if !on(world) {
-        return;
-    }
     let until = world.tick + world.config.life.quit_rehire_days * TICKS_PER_DAY;
     if let (Some(e), Some(b)) = (employer, world.comp_mut::<Brain>(a)) {
         b.quit_from = Some((e, until));
@@ -677,7 +640,7 @@ pub fn note_quit(world: &mut World, a: EntityId, employer: Option<EntityId>) {
 /// amount, same day: `economy::collect_dole` pays it (treasury not negative,
 /// once a day). The Hall walk it replaces was 2-4 h a day for 4 coins.
 pub fn dole_in_place(world: &mut World) {
-    if !on(world) || !world.config.life.dole_in_place {
+    if !world.config.life.dole_in_place {
         return;
     }
     let execs: std::collections::BTreeSet<EntityId> =

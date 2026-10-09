@@ -31,12 +31,6 @@ pub const GRUDGE_CAP: usize = 4;
 /// `kill_chain` entries are kept this long (spec § 3).
 pub const CHAIN_DAYS: u64 = 60;
 
-/// Grudges, vendettas and Guard the body run with the word (`[gossip]
-/// enabled`).
-pub fn on(world: &World) -> bool {
-    world.config.gossip.enabled
-}
-
 /// How a holder stands to a deed's object (spec `rel_w`, plan W15).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Rel {
@@ -159,9 +153,6 @@ fn cause_label(c: GrudgeCause) -> &'static str {
 /// `memory::hear_entry`, the binder's rename), never on a merge.
 pub fn on_learn(world: &mut World, holder: EntityId, r: &DeedRef, conf: f32, hops: u8) {
     let _ = hops;
-    if !on(world) {
-        return;
-    }
     let Some(actor) = r.actor else { return };
     if actor == holder || !world.is_alive(actor) {
         return;
@@ -254,9 +245,6 @@ pub fn add(world: &mut World, holder: EntityId, target: EntityId, cause: GrudgeC
 /// killer's and the dead's factions counts the kill, and the Hunts the dead
 /// was part of end.
 pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
-    if !on(world) {
-        return;
-    }
     let now = world.tick;
     // scan-ok: per death, the grudge store (no per-tick work).
     for h in world.with::<Grudges>() {
@@ -356,9 +344,6 @@ pub fn factions_of(world: &World, id: EntityId) -> SmallVec<[EntityId; 3]> {
 /// the vendettas.
 pub fn daily(world: &mut World) {
     prune_guards(world);
-    if !on(world) {
-        return;
-    }
     let now = world.tick;
     let cfg = world.config.grudges.clone();
     let keep = Tick::from(cfg.settle_keep_days) * TICKS_PER_DAY;
@@ -404,9 +389,6 @@ pub fn daily(world: &mut World) {
 /// `vendetta_open` opens a vendetta (`Vendetta`); an open one below
 /// `vendetta_close` ends (`VendettaEnded`). O(grudges).
 pub fn vendettas(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let cfg = world.config.grudges.clone();
     let live = crate::systems::reputation::factions(world);
     let mut v: std::collections::BTreeMap<(EntityId, EntityId), f32> = std::collections::BTreeMap::new();
@@ -584,7 +566,7 @@ pub fn guard_target(world: &World, id: EntityId) -> Option<(EntityId, f32)> {
 /// W35's considerations (spec § 3): the gate, `rel_w` Linear{0.8, 0.2},
 /// `courage` Linear{0.5, 0.5}. `None` off, at Statistical, or with no body.
 pub fn guard_body_considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
-    if !on(world) || !crate::systems::demography::is_adult(world, id) {
+    if !crate::systems::demography::is_adult(world, id) {
         return None;
     }
     if world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
@@ -642,9 +624,6 @@ pub fn end_guard(world: &mut World, guard: EntityId, corpse: EntityId) {
 /// body and adjacent to the stripper fights it (`resolve_fight(guard,
 /// stripper)`); true when the stripper may go on (no guard, or it won).
 pub fn guard_contests(world: &mut World, stripper: EntityId, corpse: EntityId) -> bool {
-    if !on(world) {
-        return true;
-    }
     let guards: SmallVec<[EntityId; 2]> = world.guards_of_corpse.get(&corpse).cloned().unwrap_or_default();
     let Some(g) = guards
         .into_iter()

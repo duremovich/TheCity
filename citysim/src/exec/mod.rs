@@ -331,14 +331,11 @@ fn step_agent(world: &mut World, id: EntityId) {
             if rough_fallback(world, id, &step, reason) {
                 return;
             }
-            let budget = crate::systems::lod::budget_on(world);
-            if budget {
-                count_abort(world, &step, reason);
-            }
+            count_abort(world, &step, reason);
             let goal = world.comp::<Brain>(id).and_then(|b| b.plan_goal());
             // L2 (L30, instrumentation): a bed step's abort names the bed
             // kind and the failing check.
-            let detail = if budget { abort_detail(world, id, &step) } else { String::new() };
+            let detail = abort_detail(world, id, &step);
             world.push_event(
                 EventKind::PlanAborted,
                 &[id],
@@ -357,7 +354,7 @@ fn step_agent(world: &mut World, id: EntityId) {
 /// `Sleep` or `CheckIn` step re-reads them.
 fn step_ctx(world: &World, id: EntityId, kind: ActionKind) -> crate::goap::PlanCtx {
     let mut ctx = crate::goap::PlanCtx::build_light(world, id, plan_target_of(world, id));
-    if crate::systems::lod::budget_on(world) && matches!(kind, ActionKind::Sleep | ActionKind::CheckIn) {
+    if matches!(kind, ActionKind::Sleep | ActionKind::CheckIn) {
         ctx.hideout_bed = crate::systems::life::hideout_bed(world, id).is_some();
         if !ctx.homeless {
             let away = crate::systems::life::away_hotel(world, id).is_some();
@@ -396,9 +393,6 @@ fn rough_fallback(
     step: &crate::components::ActionInstance,
     reason: FailReason,
 ) -> bool {
-    if !crate::systems::lod::budget_on(world) {
-        return false;
-    }
     let lost = match step.action {
         ActionKind::Sleep => reason == FailReason::PreconditionLost,
         ActionKind::GoTo(k) => reason == FailReason::BuildingFull && bed_key(k),
@@ -637,7 +631,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             let target = GotoTarget { dest: key, tile, building };
             // L2 shadow fixes item 6: the street fled from is avoided by the
             // spot pick for `avoid_spot_ticks`.
-            if step.action == ActionKind::FleeToHome && crate::systems::fixes::item(world, 6) {
+            if step.action == ActionKind::FleeToHome {
                 let until = tick + world.config.life.avoid_spot_ticks;
                 if let Some(b) = world.comp_mut::<Brain>(id) {
                     b.avoid_spot = Some((pos.tile, until));
@@ -652,7 +646,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             };
             // L1: an escort is a van ride of at most `escort_van_ticks` (the
             // suspect walked the guard's whole walk in cuffs, hours at a time).
-            if step.action == ActionKind::Escort && world.config.life.enabled {
+            if step.action == ActionKind::Escort {
                 let mut timed = timed_goto(world, id, target.clone());
                 if let ExecState::GotoTimed { arrive_tick, .. } = &mut timed {
                     *arrive_tick = (*arrive_tick).min(tick + world.config.life.escort_van_ticks);
@@ -684,9 +678,7 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
             // whoever is here instead (the shadowed walked 2 h to a 1-minute
             // chat with nobody).
             let rebound;
-            let step = if world.config.life.enabled
-                && matches!(kind, ActionKind::Chat | ActionKind::Flirt | ActionKind::Propose)
-            {
+            let step = if matches!(kind, ActionKind::Chat | ActionKind::Flirt | ActionKind::Propose) {
                 rebound = rebind_partner(world, id, step);
                 &rebound
             } else {

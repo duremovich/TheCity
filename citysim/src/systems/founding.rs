@@ -59,20 +59,20 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         BuildingKind::Hotel if world.config.street.enabled => Some(c.hotel),
         BuildingKind::Clinic if a.enabled && a.found_clinic => Some(c.clinic),
         BuildingKind::Garage if a.enabled && a.found_garage => Some(c.garage),
-        BuildingKind::Feed if crate::systems::news::on(world) && c.feed > 0 => Some(c.feed),
+        BuildingKind::Feed if c.feed > 0 => Some(c.feed),
         // L2 L6: the venues and the Fab (corps only), with jobs on.
-        BuildingKind::Club if crate::systems::jobs::on(world) => Some(c.club),
-        BuildingKind::Arcade if crate::systems::jobs::on(world) => Some(c.arcade),
-        BuildingKind::NoodleBar if crate::systems::jobs::on(world) => Some(c.noodle_bar),
-        BuildingKind::FightPit if crate::systems::jobs::on(world) => Some(c.fight_pit),
-        BuildingKind::Den if crate::systems::jobs::on(world) => Some(c.den),
-        BuildingKind::Lounge if crate::systems::jobs::on(world) => Some(c.lounge),
-        BuildingKind::Fab if crate::systems::jobs::on(world) => Some(c.fab),
+        BuildingKind::Club => Some(c.club),
+        BuildingKind::Arcade => Some(c.arcade),
+        BuildingKind::NoodleBar => Some(c.noodle_bar),
+        BuildingKind::FightPit => Some(c.fight_pit),
+        BuildingKind::Den => Some(c.den),
+        BuildingKind::Lounge => Some(c.lounge),
+        BuildingKind::Fab => Some(c.fab),
         // M16a (plan C8): a Fixer's office, with contracts on.
-        BuildingKind::Fixer if crate::systems::contracts::on(world) => Some(c.fixer),
+        BuildingKind::Fixer => Some(c.fixer),
         // Real economy E26, E37: a Mission with charities on, a Camp (corps) with camps on.
-        BuildingKind::Mission if crate::systems::charity::on(world) => Some(c.mission),
-        BuildingKind::Camp if crate::systems::camp::on(world) => Some(c.camp),
+        BuildingKind::Mission => Some(c.mission),
+        BuildingKind::Camp => Some(c.camp),
         // Real economy phase 2 (plan E19 deviation): a corp's Farm on the
         // World's demand, with wages on (`[economy2] farm_found_cost`).
         BuildingKind::Farm if crate::systems::wages::on(world) => Some(world.config.economy2.farm_found_cost),
@@ -272,7 +272,7 @@ pub fn tier_ok(kind: BuildingKind, tier: u8) -> bool {
 /// L2 L6: the derelict Block nearest `from` that may become `kind` (the
 /// tier rule; ties lower id), with jobs on.
 pub fn refit_ok(world: &World, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
-    if !crate::systems::jobs::on(world) || !kind.is_leisure() {
+    if !kind.is_leisure() {
         return None;
     }
     crate::systems::street::derelicts(world)
@@ -302,9 +302,6 @@ pub fn grow_refit_kind(world: &World, kind: BuildingKind) -> bool {
 pub fn refit_ok_for(world: &World, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
     if !grow_refit_kind(world, kind) {
         return refit_ok(world, kind, from);
-    }
-    if !crate::systems::jobs::on(world) {
-        return None;
     }
     crate::systems::street::derelicts(world)
         .into_iter()
@@ -392,7 +389,7 @@ pub fn choose_kind_for(world: &World, coins: i64, lounge_ok: bool) -> Option<Bui
 /// knowledge at least `fixer_skill`, and open Fixers under `residents ÷
 /// fixers_per_pop`.
 pub fn fixer_ok(world: &World, agent: EntityId) -> bool {
-    if !crate::systems::contracts::on(world) || !world.levers.fixer_licence {
+    if !world.levers.fixer_licence {
         return false;
     }
     let f = &world.config.fixers;
@@ -484,7 +481,7 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let c = &world.config.corps.found_cost;
     // L2 L6: with jobs on, the NoodleBar is the cheapest foundable rung.
-    let floor = if crate::systems::jobs::on(world) { c.bar.min(c.home).min(c.noodle_bar) } else { c.bar.min(c.home) };
+    let floor = c.bar.min(c.home).min(c.noodle_bar);
     if coins < floor {
         return false;
     }
@@ -531,13 +528,12 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
 
 /// L2 L6: with jobs on, a derelict Block may take a refit when no Lot is left.
 fn refit_room(world: &World) -> bool {
-    crate::systems::jobs::on(world) && !crate::systems::street::derelicts(world).is_empty()
+    !crate::systems::street::derelicts(world).is_empty()
 }
 
 /// L2 L6: the Lounge is for the wealthiest: a Corp-class founder who can pay it.
 fn lounge_ok(world: &World, agent: EntityId, coins: i64) -> bool {
-    crate::systems::jobs::on(world)
-        && coins >= world.config.corps.found_cost.lounge
+    coins >= world.config.corps.found_cost.lounge
         && crate::systems::classes::class_of(world, agent) == crate::components::Class::Corp
 }
 
@@ -589,10 +585,8 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
             br.last_found_day = Some(today);
         }
         world.stats.current.foundings += 1;
-        if world.config.gossip.enabled {
-            let dd = world.district_of_building(b);
-            crate::systems::gossip::post_deed(world, dd, crate::word::Deed::Founded, Some(agent), Some(b));
-        }
+        let dd = world.district_of_building(b);
+        crate::systems::gossip::post_deed(world, dd, crate::word::Deed::Founded, Some(agent), Some(b));
         maybe_incorporate(world, agent);
         return Ok(b);
     };
@@ -608,10 +602,8 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
     let (name, what) = (world.name_of(agent), world.name_of(lot));
     world.push_event(EventKind::Founded, &[agent, lot], format!("{name} registered {what} on a Lot for {cost}"));
     world.stats.current.foundings += 1;
-    if world.config.gossip.enabled {
-        let d = world.district_of_building(lot);
-        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Founded, Some(agent), Some(lot));
-    }
+    let d = world.district_of_building(lot);
+    crate::systems::gossip::post_deed(world, d, crate::word::Deed::Founded, Some(agent), Some(lot));
     maybe_incorporate(world, agent);
     Ok(lot)
 }

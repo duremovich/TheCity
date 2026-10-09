@@ -51,20 +51,17 @@ pub fn run(world: &mut World) {
         // L2 (L23): yesterday's member-days into the ledger, before this
         // hour's assignment overwrites `body_day` (phase 4: the windows roll
         // for the victim side too).
-        let fv = crate::systems::fviolence::on(world);
-        if (budget_on(world) || fv) && world.tick_of_day() == 0 {
+        if world.tick_of_day() == 0 {
             crate::systems::fviolence::daily_actor(world);
         }
         // L2 phase 4: the day's order and vendetta sources, after the
         // midnight rescore.
-        if fv && world.tick_of_day() == TICKS_PER_HOUR as u16 {
+        if world.tick_of_day() == TICKS_PER_HOUR as u16 {
             crate::systems::fviolence::rebuild_active(world);
         }
         assign_hour(world);
         // L2 phase 4 (Ledger maths): the hour's body exposure.
-        if fv {
-            crate::systems::fviolence::tally_exposure(world);
-        }
+        crate::systems::fviolence::tally_exposure(world);
         #[cfg(debug_assertions)]
         {
             let checked = world.check_indices();
@@ -108,15 +105,9 @@ fn body_role(world: &World, id: EntityId) -> bool {
     world.comp::<Job>(id).is_some_and(|j| matches!(j.role, Role::Guard | Role::Gravedigger))
 }
 
-/// L2 phase 3 (plan L5, L21-L23, L29-L30): the LOD budget and the churn,
-/// `[living] enabled && [lod] budget`.
-pub fn budget_on(world: &World) -> bool {
-    world.config.living.enabled && world.config.lod.budget
-}
-
 /// L2 (L21): sentenced agents are held Statistical.
 pub fn held_on(world: &World) -> bool {
-    budget_on(world) && world.config.lod.held_prisoners
+    world.config.lod.held_prisoners
 }
 
 /// L2 (L21): a held prisoner: sentenced and Statistical.
@@ -285,14 +276,14 @@ fn assign(world: &mut World) {
 
     let mut ranked: Vec<(i32, u32, u32, EntityId)> = Vec::new();
     let harvest = harvest_targets(world);
-    let sets = budget_on(world).then(|| budget_sets(world));
+    let sets = Some(budget_sets(world));
     let held = held_on(world);
     // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
         if world.has::<Sentence>(id) || brain.emigrating {
             // L1: a pinned prisoner keeps its pin (the shadow went blind in the cells).
-            let pinned = brain.pinned && world.config.life.enabled;
+            let pinned = brain.pinned;
             let lod = if pinned {
                 Lod::Full
             } else if held && world.has::<Sentence>(id) && !prisoner_body(world, id) {
@@ -361,41 +352,39 @@ fn assign(world: &mut World) {
     // keeps a Coarse slot against an equal-priority newcomer, the lowest
     // ranked first (an unpinned stand-in flapped Coarse/Statistical every
     // ~3 h: each demotion aborted a paid Enjoy and snapped her home).
-    if crate::systems::fixes::lod_dwell(world) {
-        let boundary = (max_full + max_coarse).min(ids.len());
-        for rank in boundary..ids.len() {
-            if tier[rank] != Lod::Statistical || current[rank] == Lod::Statistical {
-                continue;
-            }
-            if !crate::systems::fixes::dwell_holds(world, ids[rank]) {
-                continue;
-            }
-            let newcomer = (0..boundary)
-                .rev()
-                .find(|&r| tier[r] == Lod::Coarse && current[r] == Lod::Statistical && prio[r] == prio[rank]);
-            if let Some(r) = newcomer {
-                tier[r] = Lod::Statistical;
-                tier[rank] = Lod::Coarse;
-                world.stats.current.living.fix_dwell += 1;
-            }
+    let boundary = (max_full + max_coarse).min(ids.len());
+    for rank in boundary..ids.len() {
+        if tier[rank] != Lod::Statistical || current[rank] == Lod::Statistical {
+            continue;
         }
-        // ... and one demoted within its dwell is not promoted back over an
-        // equal-priority incumbent (she was Statistical for an hour, then a
-        // body again, a dozen times a week).
-        for r in (0..boundary).rev() {
-            if tier[r] != Lod::Coarse || current[r] != Lod::Statistical {
-                continue;
-            }
-            if !crate::systems::fixes::dwell_recent(world, ids[r]) {
-                continue;
-            }
-            let incumbent = (boundary..ids.len())
-                .find(|&k| tier[k] == Lod::Statistical && current[k] != Lod::Statistical && prio[k] == prio[r]);
-            if let Some(k) = incumbent {
-                tier[k] = Lod::Coarse;
-                tier[r] = Lod::Statistical;
-                world.stats.current.living.fix_dwell += 1;
-            }
+        if !crate::systems::fixes::dwell_holds(world, ids[rank]) {
+            continue;
+        }
+        let newcomer = (0..boundary)
+            .rev()
+            .find(|&r| tier[r] == Lod::Coarse && current[r] == Lod::Statistical && prio[r] == prio[rank]);
+        if let Some(r) = newcomer {
+            tier[r] = Lod::Statistical;
+            tier[rank] = Lod::Coarse;
+            world.stats.current.living.fix_dwell += 1;
+        }
+    }
+    // ... and one demoted within its dwell is not promoted back over an
+    // equal-priority incumbent (she was Statistical for an hour, then a
+    // body again, a dozen times a week).
+    for r in (0..boundary).rev() {
+        if tier[r] != Lod::Coarse || current[r] != Lod::Statistical {
+            continue;
+        }
+        if !crate::systems::fixes::dwell_recent(world, ids[r]) {
+            continue;
+        }
+        let incumbent = (boundary..ids.len())
+            .find(|&k| tier[k] == Lod::Statistical && current[k] != Lod::Statistical && prio[k] == prio[r]);
+        if let Some(k) = incumbent {
+            tier[k] = Lod::Coarse;
+            tier[r] = Lod::Statistical;
+            world.stats.current.living.fix_dwell += 1;
         }
     }
     for (i, &id) in ids.iter().enumerate() {
@@ -418,7 +407,7 @@ fn harvest_targets(world: &World) -> Vec<EntityId> {
 /// An agent's rank class in the hourly LOD assignment: pinned 5, the
 /// watch 3, gang members (and those ranked with them) 2, else 0.
 pub fn rank_class(world: &World, id: EntityId) -> i32 {
-    let sets = budget_on(world).then(|| budget_sets(world));
+    let sets = Some(budget_sets(world));
     class_with(world, id, &harvest_targets(world), sets.as_ref())
 }
 
@@ -500,11 +489,9 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     }
     // L2 shadow fixes item 7: the tier's start, for the dwell (after the
     // refusal above: a refused body has not changed tier).
-    if crate::systems::fixes::lod_dwell(world) {
-        let now = world.tick;
-        if let Some(b) = world.comp_mut::<Brain>(id) {
-            b.lod_since = now;
-        }
+    let now = world.tick;
+    if let Some(b) = world.comp_mut::<Brain>(id) {
+        b.lod_since = now;
     }
     let Some(brain) = world.comp::<Brain>(id) else { return };
     if lod == Lod::Statistical {
@@ -650,7 +637,7 @@ pub fn run_statistical(world: &mut World) {
     let season_energy_mult = world.config.economy.energy_decay_mult[season];
     let phase = world.phase();
     // L2 L13: the hour's `fun` decay off screen (the exec set once).
-    let fun_execs = crate::systems::leisure::on(world).then(|| crate::systems::classes::exec_set(world));
+    let fun_execs = Some(crate::systems::classes::exec_set(world));
     for id in agents {
         let Some(row) = stat_row(world, id) else { continue };
         // 1. An hour of decay in one step.
@@ -704,7 +691,7 @@ pub fn run_statistical(world: &mut World) {
                 // nothing sleeps at night (two Statistical workers read
                 // energy 0.00 for 92 and 122 h: every night hour drew Eat).
                 let after = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
-                if hungry && phase == DayPhase::Night && after <= hunger && crate::systems::fixes::stat_sleep(world) {
+                if hungry && phase == DayPhase::Night && after <= hunger {
                     stat_sleep_night(world, id);
                 }
             }
@@ -1155,14 +1142,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
         let saving = coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price);
         // L1: the dole accrues from the last collection (`life::dole_days`),
         // so a day decided without a visit is marked apart from it.
-        let life = world.config.life.enabled;
-        let undecided = world.comp::<Brain>(id).is_some_and(|b| {
-            if life {
-                b.stat_dole_day != Some(day)
-            } else {
-                b.last_dole_day != Some(day)
-            }
-        });
+        let undecided = world.comp::<Brain>(id).is_some_and(|b| b.stat_dole_day != Some(day));
         if phase == DayPhase::Work && !saving && undecided && crate::systems::demography::is_adult(world, id) {
             let p = world.stat_table.as_ref().map_or(1.0, |t| t.p_dole_day);
             let u: f32 = world.rng.agent(id).random();
@@ -1170,16 +1150,12 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
                 economy::collect_dole(world, id);
             }
             if let Some(b) = world.comp_mut::<Brain>(id) {
-                if life {
-                    b.stat_dole_day = Some(day);
-                } else {
-                    b.last_dole_day = Some(day);
-                }
+                b.stat_dole_day = Some(day);
             }
         }
     }
     // L2 (L23): a jobless Statistical member's GangWork day.
-    if job.is_none() && budget_on(world) && phase == DayPhase::Work {
+    if job.is_none() && phase == DayPhase::Work {
         crate::systems::fviolence::stat_gang_day(world, id);
     }
     let Some(job) = job else { return };

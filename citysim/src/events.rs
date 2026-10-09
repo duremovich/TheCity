@@ -24,8 +24,7 @@ pub const DEBUG_EVENT_ID: u64 = u64::MAX;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Event {
-    /// Contiguous over the run (M10 D12); `0` in a pre-M10 save until
-    /// `World::migrate_legacy` renumbers the ring.
+    /// Contiguous over the run (M10 D12).
     #[serde(default)]
     pub id: u64,
     pub tick: Tick,

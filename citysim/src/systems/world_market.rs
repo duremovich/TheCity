@@ -21,20 +21,16 @@ use crate::world::World;
 /// Days of the rings the fill ratio and the unfilled order read (E18, E19).
 pub const FILL_DAYS: usize = 7;
 
-pub fn on(world: &World) -> bool {
-    econ::market_on(world)
-}
-
 /// The World buys and sells: the market on, `SetExport` open (L2's lever,
 /// set from `[export] enabled` or the market at seed) and not `CloseWorld`.
 pub fn open(world: &World) -> bool {
-    on(world) && world.levers.export_open && !world.econ.world_closed
+    world.levers.export_open && !world.econ.world_closed
 }
 
 /// E47: a Market may import: the market on and not `CloseWorld` (`SetExport`
 /// closes the World's buying only; the ceiling, E12, follows `open`).
 pub fn imports_open(world: &World) -> bool {
-    on(world) && !world.econ.world_closed
+    !world.econ.world_closed
 }
 
 pub fn book(world: &World, good: ExportGood) -> Option<&WorldBook> {
@@ -308,9 +304,6 @@ pub fn fill(world: &World, good: ExportGood) -> f32 {
 /// (`minted` += it, so the identity's base is taken after seeding) and a
 /// book per good at appetite 1.0. No RNG.
 pub fn seed(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     ensure(world);
 }
 
@@ -351,9 +344,6 @@ pub fn appetite_step(
 /// midnight imports (`economy::run`) run before `living::run` in the tick,
 /// and the day's snapshot must see the counters whole.
 pub fn close_day(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     for g in ExportGood::ALL {
         let cap = cap_today(world, g);
         let Some(b) = book(world, g) else { continue };
@@ -374,9 +364,6 @@ pub fn close_day(world: &mut World) {
 
 /// The midnight pass (E6, E7, E10, E44).
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     ensure(world);
     let cfg = world.config.world_market.clone();
     let (seed, day, season) = (world.seed(), world.day(), world.season().index());

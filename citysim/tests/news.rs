@@ -101,9 +101,6 @@ fn test_feeds_seeded_with_owner_district_and_vacancies() {
         let staff = w.config.buildings.feed.staff as usize;
         assert_eq!(w.vacancies.get(&f).map_or(0, Vec::len), staff, "a Reporter vacancy per [buildings] feed.staff");
     }
-    // With the word off nothing is seeded.
-    let off = World::new(42, Config::load().word_off());
-    assert!(news::all_feeds(&off).is_empty());
 }
 
 #[test]

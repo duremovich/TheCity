@@ -264,7 +264,7 @@ fn cashflow_sparkline(ui: &mut Ui, c: &Corp) {
 fn tech_block(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, c: &Corp) {
     use citysim::systems::virt;
     use citysim::virt::Track;
-    if !virt::enabled(world) || c.tech.is_unset() {
+    if c.tech.is_unset() {
         return;
     }
     section(ui, "Tech", |ui| {

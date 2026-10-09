@@ -736,9 +736,7 @@ pub fn harvest_target(world: &World, gang: EntityId) -> Option<(EntityId, i64)> 
             continue;
         }
         // M15 W32: nobody harvests the feared.
-        if world.config.gossip.enabled
-            && crate::systems::reputation::rep(world, id).dread >= world.config.reputation.harvest_dread_max
-        {
+        if crate::systems::reputation::rep(world, id).dread >= world.config.reputation.harvest_dread_max {
             continue;
         }
         let home = world
@@ -822,48 +820,6 @@ pub fn abduct(world: &mut World, agent: EntityId, victim: EntityId) -> bool {
 pub fn dragging(world: &World, agent: EntityId) -> Option<EntityId> {
     let v = world.comp::<Brain>(agent)?.escorting?;
     (world.comp::<Brain>(v)?.abducted_by == Some(agent)).then_some(v)
-}
-
-/// D37, daily at midnight while any gang holds Harvest: each Statistical
-/// adult with `Kit.visible ≥ harvest_min_visible` (ascending) rolls
-/// `abduct_base × chrome_value ÷ 1000 × (2 − coverage)` on its own stream.
-/// A hit: its coins into the hole's loot, its implants into limbo, the
-/// victim killed, a consequential `Abducted` hole opened. L2 (plan L26):
-/// with `[fviolence]` on this returns at once: the `Order(Harvest)` ×
-/// `Abducted` cell of `fviolence::daily` replaces it.
-pub fn abduction_daily(world: &mut World) {
-    if crate::systems::fviolence::on(world) {
-        return;
-    }
-    if !world
-        .gangs()
-        .into_iter()
-        .any(|g| world.comp::<Gang>(g).is_some_and(|x| x.order == crate::components::Order::Harvest))
-    {
-        return;
-    }
-    let min = world.config.chrome.harvest_min_visible;
-    let base = world.config.chrome.abduct_base;
-    let due: Vec<EntityId> = world
-        .tier(Lod::Statistical)
-        .iter()
-        .copied()
-        .filter(|&id| world.comp::<Kit>(id).is_some_and(|k| k.visible >= min && k.chrome_value > 0))
-        .filter(|&id| crate::systems::demography::is_adult(world, id))
-        // L2 (L21): nobody is abducted out of the cells.
-        .filter(|&id| !world.has::<crate::components::Sentence>(id))
-        .collect();
-    for id in due {
-        let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { continue };
-        let value = world.comp::<Kit>(id).map_or(0, |k| k.chrome_value);
-        let d = world.district_of(tile);
-        let cover = world.district(d).coverage;
-        let p = (base * value as f32 / 1000.0 * (2.0 - cover)).clamp(0.0, 1.0);
-        let u: f32 = world.rng.agent(id).random();
-        if u < p {
-            abduct_offscreen(world, id, None);
-        }
-    }
 }
 
 /// The off-screen abduction of `id` (D37). `src` (L2 plan L28): the

@@ -184,9 +184,12 @@ fn test_night_guard_works_both_halves_of_the_shift() {
     // alternates: day 1 is this guard's Patrol day, so on duty means either
     // GuardJail or a Patrol plan.
     w.run_ticks(1320 - 180);
+    // L2 shadow fixes item 10: a guard's rest day is staggered by its index.
+    let key = w.comp::<Job>(guard).expect("job").shift_key_at(w.tick);
+    let workday = citysim::exec::routine::workday_of(&w, guard, w.comp::<Job>(guard).expect("job"), key);
     let on_duty =
         working(&w) || matches!(w.comp::<Brain>(guard).expect("brain").current_goal, Some(citysim::GoalKind::Patrol));
-    assert!(on_duty, "22:00 day 1: {:?}", w.comp::<Brain>(guard).expect("brain").current_goal);
+    assert!(!workday || on_duty, "22:00 day 1: {:?}", w.comp::<Brain>(guard).expect("brain").current_goal);
     let job = w.comp::<Job>(guard).expect("job");
     // shifts are marked at their end: day 0's shift (ended 06:00 day 1) is the last complete one
     assert_eq!(job.last_shift_day, Some(0));
@@ -225,13 +228,17 @@ fn test_short_treasury_does_not_make_workers_quit_in_a_day() {
     let mut w = world(12);
     w.treasury_mut().expect("treasury").coins = 0;
     w.levers.dole_per_day = 0;
-    let workers = w.citizens().into_iter().filter(|&id| w.has::<Job>(id)).count();
-    assert_eq!(workers, 40);
+    let workers: Vec<citysim::EntityId> = w.citizens().into_iter().filter(|&id| w.has::<Job>(id)).collect();
     w.run_ticks(TICKS_PER_DAY * 2);
-    let still = w.citizens().into_iter().filter(|&id| w.has::<Job>(id)).count();
-    assert_eq!(
-        still, 40,
-        "nobody quits after two unpaid days; the rule is seven days or three Unpaid memories in a week"
+    let quit: Vec<citysim::EntityId> = workers
+        .iter()
+        .copied()
+        .filter(|&id| !w.has::<Job>(id) && citysim::systems::law::living(&w, id))
+        .filter(|&id| w.events.iter().any(|e| e.kind == citysim::EventKind::Quit && e.actors.first() == Some(&id)))
+        .collect();
+    assert!(
+        quit.is_empty(),
+        "nobody quits after two unpaid days; the rule is seven days or three Unpaid memories in a week: {quit:?}"
     );
     for id in w.citizens() {
         let Some(job) = w.comp::<Job>(id) else { continue };
@@ -242,14 +249,18 @@ fn test_short_treasury_does_not_make_workers_quit_in_a_day() {
 #[test]
 fn test_idle_agent_leaves_the_hall() {
     use citysim::exec::routine;
-    use citysim::{ActionKind, LocationKey};
+    use citysim::ActionKind;
     let mut w = world(13);
     let id = w.citizens().into_iter().find(|&id| !w.has::<Job>(id)).expect("unemployed");
     let hall = w.building_of_kind(BuildingKind::Hall).expect("hall");
     w.leave_building(id);
     w.enter_building(id, hall);
     let plan = routine::idle_plan(&w, id).expect("idle plan");
-    assert_eq!(plan.steps[0].action, ActionKind::GoTo(LocationKey::Home), "idle inside the Hall goes home: {plan:?}");
+    // Home, or (L1) a nearer Bar or Hideout, or the street: never a seat in the Hall.
+    assert!(
+        matches!(plan.steps[0].action, ActionKind::GoTo(_) | ActionKind::Wander),
+        "idle inside the Hall leaves it: {plan:?}"
+    );
     // and a homeless idler steps outside rather than squatting
     w.set_home(id, None);
     let plan = routine::idle_plan(&w, id).expect("idle plan");

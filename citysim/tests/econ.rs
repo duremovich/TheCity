@@ -12,7 +12,7 @@ use citysim::{Building, BuildingKind, Config, Corp, Market, Wallet, World, TICKS
 
 fn city() -> World {
     let w = World::new(42, Config::load());
-    assert!(econ::market_on(&w) && wm::open(&w), "the market is on and open by the config");
+    assert!(wm::open(&w), "the market is on and open by the config");
     w
 }
 
@@ -269,21 +269,10 @@ fn test_cross_out_and_identity_with_imports_and_migrants() {
     assert!(last.econ.appetite_food > 0.0 && last.econ.bid_food > 0.0 && last.econ.ask_food > 0);
 }
 
-/// E5: with the market off the six sites charge the City exactly; with it
-/// on the coins cross out and customs land in the Treasury.
+/// E5: an import's coins cross out to the World and the customs land in
+/// the Treasury.
 #[test]
-fn test_import_off_is_charge_to_city() {
-    let mut off = World::new(42, Config::load().econ_off());
-    assert!(!econ::market_on(&off));
-    let corp = off.corps()[0];
-    let (purse, treasury) = (off.purse(Some(corp)), off.purse(None));
-    let moved = ownership::import(&mut off, Some(corp), 100, ImportWhy::Asset);
-    assert_eq!(moved, 100);
-    assert_eq!(off.purse(Some(corp)), purse - 100);
-    assert_eq!(off.purse(None), treasury + 100, "the City's customs, M13 D8");
-    assert_eq!(off.stats.current.flow_import, 100);
-    assert_eq!(off.stats.current.econ.flow_import_out, 0);
-    assert!(off.outside.is_empty());
+fn test_import_crosses_out_with_customs() {
     let mut on = city();
     let corp = on.corps()[0];
     let (purse, treasury, world_t, ident) =
@@ -349,31 +338,6 @@ fn test_unknown_hole_loot_goes_to_treasury() {
     assert_eq!(ownership::total_coins(&w), before.0 + loot);
     assert_eq!(econ::identity(&w), before.2 + loot, "the coins left the wallet before the probe's base");
     assert_eq!(w.probe.loot_lost, loot);
-    // With the market off the coin vanishes, as at EC_BASE.
-    let mut off = World::new(42, Config::load().econ_off());
-    let tick = off.tick;
-    let hole = Hole {
-        id: hole_id(tick, victim, HoleKind::Robbed),
-        kind: HoleKind::Robbed,
-        victim,
-        zone,
-        district,
-        tick,
-        event_id: 0,
-        consequential: false,
-        spouse: None,
-        loot,
-        home: None,
-        gang: None,
-        source: None,
-        faction: None,
-        riot: None,
-    };
-    let treasury = off.purse(None);
-    let id = bind::open_hole(&mut off, hole);
-    bind::expire(&mut off, id);
-    assert_eq!(off.purse(None), treasury, "EC_BASE: lost");
-    assert_eq!(off.probe.loot_lost, loot);
 }
 
 /// E25b: the fence's resale credit crosses in from the World (`flow_fence`),
@@ -406,27 +370,6 @@ fn test_fence_resale_crosses_in() {
     assert_eq!(w.stats.current.gang_income, income + credit, "gang income unchanged in kind");
     assert_eq!(econ::identity(&w), ident);
     assert_eq!(w.probe.fence_credit, credit);
-}
-
-/// E1, E2: with every section off nothing is seeded and no account exists.
-#[test]
-fn test_econ_off_world_has_no_outside_account() {
-    let mut w = World::new(42, Config::load().econ_off());
-    assert!(!econ::market_on(&w) && !wm::open(&w));
-    assert!(w.outside.is_empty(), "no World account at seed");
-    w.run_ticks(3 * TICKS_PER_DAY);
-    assert!(w.outside.is_empty());
-    assert!(w.stats.history.iter().all(|r| r.econ.is_zero() && r.living.flow_export == 0));
-    assert!(w.econ.is_default());
-    assert!(!citysim::save::to_ron(&w).contains("outside:"));
-    assert!(!citysim::save::to_ron(&w).contains("econ:"));
-    // The master switch alone is the same off world.
-    let mut master = Config::load();
-    master.economy2.enabled = false;
-    let m = World::new(42, master);
-    assert!(!econ::market_on(&m) && m.outside.is_empty());
-    // `[living]` off turns the economy off with it (E1).
-    assert!(!econ::market_on_cfg(&Config::load().living_off()));
 }
 
 /// E4: the World account stands at seed with its books at appetite 1.0, and

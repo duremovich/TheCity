@@ -605,9 +605,6 @@ pub enum ImportWhy {
 /// `flow_import_out`) and customs `round(customs_rate × moved)` go to the
 /// Treasury on top (`Flow::Customs`). Returns the coins that left for the good.
 pub fn import(world: &mut World, from: Option<EntityId>, amount: i64, _why: ImportWhy) -> i64 {
-    if !crate::systems::econ::market_on(world) {
-        return charge(world, from, None, amount, Flow::Import);
-    }
     let full = matches!(owner_kind(world, from), OwnerKind::City | OwnerKind::Corp(_));
     let moved = cross_out(world, from, crate::outside::WORLD_ACCOUNT, amount, Flow::Import, full);
     if moved > 0 {
@@ -778,10 +775,8 @@ pub fn total_coins(world: &World) -> i64 {
     let loot: i64 = world.loot_corpses.iter().filter_map(|&c| world.comp::<Corpse>(c)).map(|c| c.loot.coins).sum();
     let escrow: i64 = world.contracts.values().map(|c| c.escrow).sum();
     // Real economy (plan E25a): a robbery's coins in flight on an open hole
-    // are coins held (as escrow is); counted with the market on, so the
-    // `--econ-off` quantity is `EC_BASE`'s.
-    let holes: i64 =
-        if crate::systems::econ::market_on(world) { world.holes.values().map(|h| h.loot).sum() } else { 0 };
+    // are coins held (as escrow is).
+    let holes: i64 = world.holes.values().map(|h| h.loot).sum();
     // Real economy E26: the Missions' purses are coins held.
     let purses: i64 = crate::systems::charity::purses(world);
     // Real economy E33 (phase 3a): the Recycler's till (0 without `no_net`).
@@ -1179,18 +1174,14 @@ pub fn seed(world: &mut World) {
         // L1: by age (`exec_min_age_years`), persuasion + knowledge, then
         // coins (the greediest jobless adult over 18 made a 19-year-old on
         // the dole Zetatech's exec); the M11 pick when nobody qualifies.
-        let seasoned = if crate::systems::life::on(world) {
-            crate::systems::life::pick_exec(
-                world,
-                world
-                    .citizens()
-                    .into_iter()
-                    .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
-                    .filter(|&a| !execs.contains(&a) && !owners.contains(&a)),
-            )
-        } else {
-            None
-        };
+        let seasoned = crate::systems::life::pick_exec(
+            world,
+            world
+                .citizens()
+                .into_iter()
+                .filter(|&a| world.has::<Brain>(a) && !world.has::<Job>(a))
+                .filter(|&a| !execs.contains(&a) && !owners.contains(&a)),
+        );
         let pick = seasoned.or_else(|| {
             world
                 .citizens()
@@ -1539,13 +1530,10 @@ pub fn evict(world: &mut World, agent: EntityId, reason: &str) {
             h.evicted_by = Some((owner, tick));
         }
         // M15 W5: with the word on a corp landlord is the memory's subject too.
-        let word = world.config.gossip.enabled;
-        let subject = owner.filter(|&o| world.has::<Identity>(o) || (word && world.has::<Corp>(o)));
+        let subject = owner.filter(|&o| world.has::<Identity>(o) || world.has::<Corp>(o));
         world.remember(a, MemoryKind::Evicted, subject, 0.8, -0.8, false);
-        if word {
-            let d = world.district_of_building(home);
-            crate::systems::gossip::post_deed(world, d, crate::word::Deed::Evicted, subject, Some(a));
-        }
+        let d = world.district_of_building(home);
+        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Evicted, subject, Some(a));
         if let OwnerKind::Agent(o) = owner_kind(world, owner) {
             crate::systems::social::adjust(world, a, o, -0.3, 0.0);
         }
@@ -1720,14 +1708,10 @@ fn replacement_exec(world: &World, corp: EntityId) -> Option<EntityId> {
     let execs: BTreeSet<EntityId> =
         world.corps().into_iter().filter_map(|c| world.comp::<Corp>(c).and_then(|c| c.exec)).collect();
     // L1: the most seasoned employee first (as at seed), else the greediest.
-    if crate::systems::life::on(world) {
-        let seasoned = crate::systems::life::pick_exec(
-            world,
-            employees_of(world, corp).into_iter().filter(|a| !execs.contains(a)),
-        );
-        if seasoned.is_some() {
-            return seasoned;
-        }
+    let seasoned =
+        crate::systems::life::pick_exec(world, employees_of(world, corp).into_iter().filter(|a| !execs.contains(a)));
+    if seasoned.is_some() {
+        return seasoned;
     }
     let mut best: Option<(f32, EntityId)> = None;
     for a in employees_of(world, corp) {

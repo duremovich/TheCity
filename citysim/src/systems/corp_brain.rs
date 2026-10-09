@@ -394,10 +394,8 @@ pub fn wage_bill(world: &World, corp: EntityId) -> i64 {
 /// The gang behind the most loss coins in the 14-day log (ties lower id);
 /// M15 W18: first the gang with the heaviest vendetta against the corp.
 fn culprit(world: &World, corp: EntityId, c: &Corp) -> Option<EntityId> {
-    if world.config.gossip.enabled {
-        if let Some(g) = crate::systems::grudges::vendetta_culprit(world, corp) {
-            return Some(g);
-        }
+    if let Some(g) = crate::systems::grudges::vendetta_culprit(world, corp) {
+        return Some(g);
     }
     let horizon = world.tick.saturating_sub(14 * TICKS_PER_DAY);
     let mut by_gang: BTreeMap<EntityId, i64> = BTreeMap::new();
@@ -514,7 +512,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         );
     }
     let acquire_cd = cfg.acquire_cooldown_days * TICKS_PER_DAY;
-    let virt = if world.config.virt.enabled {
+    let virt = {
         let (tech_gap, max_lapse) = crate::systems::tech::research_inputs(world, corp);
         let lab_cost = cfg.found_cost.lab;
         let run = crate::systems::virt::corp_run(world, corp);
@@ -531,8 +529,6 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
             virt_p: run.as_ref().map(|r| r.p).filter(|&p| p >= world.config.virt.min_route_p).unwrap_or(0.0),
             share: niches.values().next().map_or(0.0, |n: &NicheInputs| n.share),
         }
-    } else {
-        VirtInputs::default()
     };
     Some(CorpInputs {
         cash: cash_of(c),
@@ -884,9 +880,6 @@ pub fn rethink(world: &mut World, corp: EntityId) {
 /// the pending shocks reach `[life] order_severe`.
 pub fn shock_margin(world: &World, corp: EntityId) -> f32 {
     let cfg = &world.config.living;
-    if !cfg.enabled {
-        return SHOCK_HYSTERESIS;
-    }
     let Some(c) = world.comp::<Corp>(corp) else { return SHOCK_HYSTERESIS };
     let held = world.tick.saturating_sub(c.order_since);
     let pending: f32 = c.shocks.iter().map(|s| s.severity()).sum();
@@ -1126,11 +1119,9 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     }
     let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
     // M15 W33: a seller refuses a dishonoured buyer unless it is going under.
-    if world.config.gossip.enabled {
-        let honour = crate::systems::reputation::rep(world, corp).honour;
-        if honour < world.config.reputation.acquire_honour_min && !bankrupt {
-            return;
-        }
+    let honour = crate::systems::reputation::rep(world, corp).honour;
+    if honour < world.config.reputation.acquire_honour_min && !bankrupt {
+        return;
     }
     if crate::systems::corps::acquire(world, corp, building, ni.offer, "hostile") {
         // M15 phase 5: a hostile buy-out of a solvent rival is told as a
@@ -1306,9 +1297,6 @@ pub fn act(world: &mut World, corp: EntityId) {
 /// the Lot nearest an owned building when it owns none there
 /// (`found_cost.lab`, `Flow::Found`); staff every building up.
 fn research(world: &mut World, corp: EntityId) {
-    if !world.config.virt.enabled {
-        return;
-    }
     crate::systems::tech::reset_focus(world, corp);
     let Some(focus) = world.comp::<Corp>(corp).map(|c| c.tech.focus) else { return };
     let has = crate::systems::tech::labs_of(world, corp)

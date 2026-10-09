@@ -574,14 +574,9 @@ fn renew_contracts(world: &mut World) {
             continue;
         };
         for client in due {
-            let mine = contract_price(world, seller);
             let owner = world.owner_of(client);
             // M15 W33: with the word on the client weighs price by honour.
-            let (rival, by_honour) = if world.config.gossip.enabled {
-                honour_seller(world, seller)
-            } else {
-                (cheapest_seller(world, Some(seller)).filter(|&r| contract_price(world, r) < mine), false)
-            };
+            let (rival, by_honour) = honour_seller(world, seller);
             // A Security corp keeps guarding its own buildings itself.
             let rival = rival.filter(|_| owner != Some(seller));
             match rival {
@@ -589,15 +584,12 @@ fn renew_contracts(world: &mut World) {
                     end_contract(world, client, &format!("moved to {}", world.owner_label(Some(r))));
                     buy_contract(world, client, r);
                     corp_brain::push_shock(world, seller, CorpShock::Undercut);
-                    if world.config.gossip.enabled {
-                        let why = if by_honour { "honour" } else { "price" };
-                        if by_honour {
-                            world.stats.current.word.contracts_lost_honour += 1;
-                        }
-                        let text =
-                            format!("{} dropped {} ({why})", world.name_of(client), world.owner_label(Some(seller)));
-                        world.push_event(EventKind::ContractLost, &[seller, client, r], text);
+                    let why = if by_honour { "honour" } else { "price" };
+                    if by_honour {
+                        world.stats.current.word.contracts_lost_honour += 1;
                     }
+                    let text = format!("{} dropped {} ({why})", world.name_of(client), world.owner_label(Some(seller)));
+                    world.push_event(EventKind::ContractLost, &[seller, client, r], text);
                 }
                 None => {
                     if let Some(c) = world.comp_mut::<Corp>(seller) {

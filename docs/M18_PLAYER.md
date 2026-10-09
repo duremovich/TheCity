@@ -30,6 +30,8 @@ Decisions taken by the drafting agent (overturnable, listed so they are cheap to
 
 ## Goals and acceptance
 
+(2026-10-09: how these bullets are judged is docs/TESTING.md: existence bullets, sanity bounds, person probes, behaviour bounds and god reactions; every band, majority or six-seed device below is a printed report, not an assert. See *Acceptance, revised 2026-10-09* under the testing section.)
+
 The city should read the same with a person in it as without, and the person should feel it. The target spiral is: **a scripted character climbs from the street to a deed through hotel nights, a squat, a lease and a founded Capsule Hotel → takes and fulfils a Beat from the Stack Bar Fixer → is arrested at least once → kills a Hollow runner in a scripted fight, is witnessed, gains `dread`, and the runner's brother hunts them or posts a Hit within 30 days → overhears it all at the Bar → dies on day 100, and the city does not notice beyond its usual grief and gossip.** On seed 42, 2,000 residents, 120 days:
 
 - **dormant**: with `mode = Mayor` and no character, the 120-day CSV is byte-identical to M17 outside the new columns;
@@ -425,7 +427,9 @@ Agents are named by index or by `--select-name` names, as the existing levers do
 5. `Register` the cheapest foundable kind as soon as coins allow.
 6. On day 30, `Goal(Fight)` against the nearest Hollow member until one dies, the scripted killing.
 
-**Scenario** (`citysim/tests/scenario.rs`, `#[ignore]` `test_m18_player_seed_42`): the bullets under *Goals and acceptance*, with the pilot from tick 0 and a god `KillAgent` on day 100.
+**Acceptance, revised 2026-10-09 (docs/TESTING.md; supersedes the scenario gate below and the bands, majority, six-seed and pinned-run devices in the Goals bullets).** No milestone scenario gate: `tests/scenario.rs` is gone. The Goals bullets map onto the tiers: (1) every mechanism that must exist is a `core_sanity` bullet (`citysim/tests/core.rs`, `mechanisms()`: fired on at least one of seeds 42-44 in 120 days), or, when it fires on 2 or fewer of seeds 42-47, a unit test in a seeded world; (2) the sanity bounds (coin identity, population, starvation, assaults a day, Treasury, corps alive, held prisoners fed) are `core_sanity`'s and `core_year`'s and need nothing new; (3) every bullet about what a person does becomes a person probe (`citysim/tests/person.rs`: one pinned agent, one stimulus) or a `shadow --assert` bound on an archetype (`citysim-cli/src/shadow.rs`, a new archetype where the milestone adds one, its bounds measured with a margin); (4) each shock question is one god scenario per reaction class, 60 days, asserting that the world reacted. Calibration bands, Murders against a pinned run and per-seed trajectories are printed by `tools/analyze_run.py`, never asserted. For M18 the player is one more pinned agent: the scripted pilot is a person-probe file (`tests/player.rs`) asserting each step's outcome on the character's own state, `core_sanity` runs with a pilot from tick 0 (the city's bounds hold with a player in it), and the life-path playtests (roadmap addendum 14) are the behaviour tier's player-side judge.
+
+*Superseded:* **Scenario** (`citysim/tests/scenario.rs`, `#[ignore]` `test_m18_player_seed_42`): the bullets under *Goals and acceptance*, with the pilot from tick 0 and a god `KillAgent` on day 100.
 
 **God scenarios** (`tests/god.rs`, the VISION questions asked with a character holding the best stats, unlimited money and every tool). Each runs from `NewCharacter custom` with skills at 1.0, Body at 0.9, `GrantCoins 100000` and `GrantGear` tier 3:
 

@@ -153,21 +153,16 @@ fn run_days_starving(w: &mut World, days: u64, home: Option<EntityId>) {
 }
 
 /// E37: the service's own Camp stands at seed on the city's deed with its
-/// state and no staff role; with the switch off none stands.
+/// state and no staff role.
 #[test]
 fn test_seed_city_camp() {
     let w = world();
-    assert!(camp::on(&w));
     let c = city_camp(&w);
     let b = w.comp::<Building>(c).expect("camp");
     assert_eq!(b.kind, BuildingKind::Camp);
     assert!(b.owner.is_none() && b.camp.is_some());
     assert!(!w.vacancies.contains_key(&c), "no staff role");
     assert!(camp::children_of(&w, c).is_empty());
-    let mut cfg = config();
-    cfg.camp.enabled = false;
-    let off = World::new(42, cfg);
-    assert!(off.buildings_of_kind(BuildingKind::Camp).is_empty());
 }
 
 /// E38 (plan 3c.6): a Block with an empty pantry: the child is at the Camp
@@ -328,7 +323,6 @@ fn test_camp_shift_makes_parts_and_owner_sells_them() {
 #[test]
 fn test_unfed_camp_is_scandal_then_closed_and_children_moved() {
     let mut w = world();
-    assert!(citysim::systems::news::on(&w));
     let city = city_camp(&w);
     let corp = w.corps()[0];
     let door = w.comp::<Building>(city).map(|b| b.door).expect("door");
@@ -467,22 +461,6 @@ fn test_child_taken_memory_spreads_no_killed_deed() {
     assert!(e.salience >= 0.9 && e.valence <= -0.9, "Grief-class");
 }
 
-/// E36 (plan 3c.6): with camps off (and school meals off) the third unfed
-/// day kills, as EC_BASE with `school_meals = false`.
-#[test]
-fn test_camp_off_children_starve_as_before() {
-    let mut cfg = config();
-    cfg.camp.enabled = false;
-    let mut w = World::new(42, cfg);
-    let (h, c) = family_home(&mut w);
-    run_days_starving(&mut w, 2, Some(h));
-    assert_eq!(hunger_days(&w, c), 2);
-    assert_eq!(home_of(&w, c), Some(h), "nobody takes them");
-    run_days_starving(&mut w, 1, Some(h));
-    assert!(!w.has::<Child>(c) && w.has::<citysim::Corpse>(c), "the third day killed");
-    assert!(w.stats.current.deaths_starvation + w.stats.history.iter().map(|r| r.deaths_starvation).sum::<u32>() >= 1);
-}
-
 /// E37: corps found a camp when every camp is `found_full` full (the
 /// richest Tech or Food corp with `3 × found_cost.camp`), paying the cost.
 #[test]
@@ -555,7 +533,6 @@ fn test_take_prefers_a_camp_that_can_feed_tonight() {
 #[test]
 fn test_no_camp_can_feed_counts_the_death_and_tells_the_feeds() {
     let mut w = world();
-    assert!(citysim::systems::news::on(&w));
     let (h, c) = family_home(&mut w);
     let city = city_camp(&w);
     for m in w.buildings_of_kind(BuildingKind::Market).to_vec() {

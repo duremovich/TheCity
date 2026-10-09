@@ -227,7 +227,7 @@ pub fn deal_bar(world: &World, gang: EntityId) -> Option<EntityId> {
 pub fn dealer_target(world: &World, agent: EntityId) -> Option<EntityId> {
     // L2 shadow fixes item 16: a Deal shift starts in the busy hours (four
     // pre-dawn shifts, 00:57-05:37, sold nothing).
-    if crate::systems::fixes::item(world, 16) && !crate::systems::fixes::deal_hours(world) {
+    if !crate::systems::fixes::deal_hours(world) {
         return None;
     }
     deals_today(world, agent)
@@ -407,7 +407,7 @@ pub fn buy_stims(world: &mut World, buyer: EntityId, source: EntityId) -> u32 {
         let tile = world.comp::<Position>(dealer).map_or_else(Default::default, |p| p.tile);
         // L2 shadow fixes item 16: the buyer is no witness (each sale made
         // the customer, often a Friend, a Dealing witness: 1.00 to 0.80).
-        let except = crate::systems::fixes::item(world, 16).then_some(buyer);
+        let except = Some(buyer);
         crate::systems::law::raise_crime_except(world, dealer, None, None, Crime::Dealing, tile, except);
         return units;
     }

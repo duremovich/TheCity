@@ -74,13 +74,9 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
             let located =
                 crate::systems::law::located_suspects(world, Some(crate::systems::law::Pursuer { tile, guard: id }));
             let dist = |s: EntityId| world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile));
-            if world.config.gossip.enabled {
-                // M15 W34: the hottest first, then the nearest.
-                let heat = |s: EntityId| (crate::systems::reputation::rep(world, s).heat * 10.0).round() as i32;
-                located.into_iter().min_by_key(|&s| (-heat(s), dist(s), s.index))
-            } else {
-                located.into_iter().min_by_key(|&s| (dist(s), s.index))
-            }
+            // M15 W34: the hottest first, then the nearest.
+            let heat = |s: EntityId| (crate::systems::reputation::rep(world, s).heat * 10.0).round() as i32;
+            located.into_iter().min_by_key(|&s| (-heat(s), dist(s), s.index))
         }
         // Socialise and Court bind the co-located agent with the highest affinity
         // who has no Partner reservation (Court: unmarried, known candidate first).
@@ -216,29 +212,25 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     }
     // The Real economy E27, E28: a meal at a Mission for the hungry poor, a
     // gift at its door from a donor; scripted as the leisure plans.
-    if crate::systems::charity::on(world) {
-        let scripted = match goal {
-            GoalKind::Eat => crate::systems::charity::alms_plan(world, id),
-            GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
-            _ => None,
-        };
-        if let Some(plan) = scripted {
-            let n = plan.steps.len();
-            install(world, id, plan);
-            return n;
-        }
+    let scripted = match goal {
+        GoalKind::Eat => crate::systems::charity::alms_plan(world, id),
+        GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
+        _ => None,
+    };
+    if let Some(plan) = scripted {
+        let n = plan.steps.len();
+        install(world, id, plan);
+        return n;
     }
-    if crate::systems::leisure::on(world) {
-        let scripted = match goal {
-            GoalKind::Socialise => crate::systems::leisure::hangout_plan(world, id),
-            GoalKind::GangWork => crate::systems::leisure::preach_plan(world, id),
-            _ => None,
-        };
-        if let Some(plan) = scripted {
-            let n = plan.steps.len();
-            install(world, id, plan);
-            return n;
-        }
+    let scripted = match goal {
+        GoalKind::Socialise => crate::systems::leisure::hangout_plan(world, id),
+        GoalKind::GangWork => crate::systems::leisure::preach_plan(world, id),
+        _ => None,
+    };
+    if let Some(plan) = scripted {
+        let n = plan.steps.len();
+        install(world, id, plan);
+        return n;
     }
     // M15 W19/W35: the Hunt's and Guard the body's scripted plans; M16a
     // (plan C13) the Contract goal's.
@@ -291,7 +283,7 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             let mut route = crate::systems::law::new_patrol_route(world, id);
             // L2 shadow fixes item 10: the round starts at the stop nearest
             // the guard (it walked 3.7-3.9 h from her door to the first).
-            if crate::systems::fixes::item(world, 10) && route.len() > 1 {
+            if route.len() > 1 {
                 let from = crate::exec::walk_origin(world, id).unwrap_or_default();
                 let first = route
                     .iter()
@@ -373,7 +365,7 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // A shift is worked even when today's wage trip is blocked (short payment
     // already attempted): drop the HasWageDue key rather than skip the shift.
     // L1: wages are paid at the shift's end: the Work plan is the shift.
-    let goal_state: crate::goap::GoalState = if goal == GoalKind::Work && (!ctx.wage_collectable || ctx.life) {
+    let goal_state: crate::goap::GoalState = if goal == GoalKind::Work {
         goal_state.into_iter().filter(|&(k, _)| k != crate::goap::Key::HasWageDue).collect()
     } else if goal == GoalKind::Court && !start.has_partner_candidate {
         // Courtship in two visits: Flirt until affinity and trust clear the
@@ -390,9 +382,7 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             && !crate::goap::actions::PLANNABLE.iter().any(|a| a.feasible(&ctx) && a.produces(key, value, &ctx))
     });
     if hopeless {
-        if crate::systems::lod::budget_on(world) {
-            world.stats.current.budget.aborts += 1;
-        }
+        world.stats.current.budget.aborts += 1;
         world.push_event(
             crate::events::EventKind::PlanAborted,
             &[id],
@@ -412,9 +402,7 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             found.expansions
         }
         Err((err, used)) => {
-            if crate::systems::lod::budget_on(world) {
-                world.stats.current.budget.aborts += 1;
-            }
+            world.stats.current.budget.aborts += 1;
             world.push_event(crate::events::EventKind::PlanAborted, &[id], format!("{goal:?} unplannable: {err:?}"));
             world.cool_goal(id, goal);
             used
@@ -508,11 +496,9 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
     }
     // L2 (L30): a second bed is held from plan to arrival: the Hideout a
     // Sleep plan walks to, or the Hotel a `CheckIn` (or a walk to one) books.
-    if crate::systems::lod::budget_on(world) {
-        if let Some(home) = bed_of(world, id, plan) {
-            let until = world.tick + world.config.brain.plan_timeout_ticks;
-            world.reserve(id, ReservationKind::Bed { home }, until);
-        }
+    if let Some(home) = bed_of(world, id, plan) {
+        let until = world.tick + world.config.brain.plan_timeout_ticks;
+        world.reserve(id, ReservationKind::Bed { home }, until);
     }
 }
 

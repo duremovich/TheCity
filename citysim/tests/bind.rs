@@ -440,14 +440,15 @@ fn test_trace_runs_fold_into_one_line() {
 
 #[test]
 fn test_life_same_richness_full_vs_statistical() {
-    // Same seed, whole city forced to one tier each, 15 days: every kind of
+    // Same seed, whole city forced to one tier each, 30 days: every kind of
     // entry one tier writes, the other writes too. (10 days left the Full
-    // city's best biography at 2-3 kinds, on the threshold; M10 phase 5b.)
+    // city's best biography at 2-3 kinds, on the threshold; M10 phase 5b.
+    // 15 days were enough until the life pass's calmer days, 2026-10-09.)
     let kinds = |tier: Lod| {
         let mut cfg = Config::load().v1_profile();
         cfg.lod.force = Some(tier);
         let mut w = World::new(408, cfg);
-        w.run_ticks(15 * TICKS_PER_DAY);
+        w.run_ticks(30 * TICKS_PER_DAY);
         let mut seen = std::collections::BTreeSet::new();
         let mut best = 0;
         for id in w.with::<Life>() {
@@ -579,6 +580,10 @@ fn test_stat_meet_and_home_chat_rolls() {
     let w = run(false);
     let home = |x| w.comp::<Household>(x).and_then(|h| h.home);
     assert!(!w.edges.is_empty(), "nobody chatted");
-    assert!(w.edges.keys().all(|&(a, b)| home(a).is_some() && home(a) == home(b)), "a home chat left the Home");
-    assert!(w.edges.values().any(|e| e.affinity > 0.0));
+    // Since the life pass is always on, co-workers' co-location adds edges
+    // too: the home chat is judged by a housemate edge that drifted up.
+    assert!(
+        w.edges.iter().any(|(&(a, b), e)| home(a).is_some() && home(a) == home(b) && e.affinity > 0.0),
+        "no housemate edge drifted"
+    );
 }

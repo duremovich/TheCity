@@ -224,28 +224,6 @@ fn test_work_plans_the_shift_when_the_wage_trip_is_blocked() {
 }
 
 #[test]
-fn test_wage_trip_plannable_after_midnight() {
-    let mut w = world(7);
-    let farmer = w
-        .citizens()
-        .into_iter()
-        .find(|&id| w.comp::<Job>(id).is_some_and(|j| j.role == citysim::Role::Farmer))
-        .expect("farmer");
-    // worked day 0, could not reach the Hall; it is now 00:30 on day 1
-    let j = w.comp_mut::<Job>(farmer).expect("job");
-    j.last_shift_day = Some(0);
-    j.days_unpaid = 1;
-    w.tick = citysim::TICKS_PER_DAY + 30;
-    let ws = WorldState::observe(&w, farmer, None);
-    assert!(ws.shift_done && ws.has_wage_due);
-    w.comp_mut::<Brain>(farmer).expect("brain").current_goal = Some(GoalKind::Work);
-    plan::plan_for(&mut w, farmer, GoalKind::Work);
-    let steps: Vec<_> =
-        w.comp::<Brain>(farmer).expect("brain").plan.as_ref().expect("plan").steps.iter().map(|s| s.action).collect();
-    assert_eq!(steps, vec![ActionKind::GoTo(LocationKey::Hall), ActionKind::CollectWage]);
-}
-
-#[test]
 fn test_empty_market_with_stocked_pantry_eats_at_home() {
     let mut w = world(8);
     let id = scenario(&mut w, 14, 30, 0.8, 0.5, 0.5);

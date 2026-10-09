@@ -203,12 +203,11 @@ pub fn raise_crime_except(
     let law_mult = crate::systems::competence::law_mult(world);
     // M15 W24: a Hunt's strike on its target: the street keeps quiet.
     let silence = street_silence_on(world, actor, object, crime);
-    let dedupe = world.config.life.enabled;
     for w in witnesses {
         // L1: one record per crime and witness: a multi-minute crime (a
         // Deal's every sale) was seen afresh each minute, each sighting
         // another -0.2 of affinity, so a stranger was an Enemy in 32 minutes.
-        if dedupe && crate::systems::life::saw_recently(world, w, actor, crime) {
+        if crate::systems::life::saw_recently(world, w, actor, crime) {
             noticed += 1;
             continue;
         }
@@ -282,18 +281,16 @@ pub fn raise_crime_except(
         }
     }
     // M15 W5/W10: what someone knows goes into the crime district's pool.
-    if world.config.gossip.enabled {
-        if let Some(deed) = crate::systems::gossip::deed_of_crime(crime) {
-            if noticed > 0 || living_victim {
-                if crime == Crime::Murder && noticed > 0 {
-                    match object {
-                        Some(o) => crate::systems::gossip::name_actor(world, o, actor),
-                        None => crate::systems::gossip::watch_killer(world, actor),
-                    }
+    if let Some(deed) = crate::systems::gossip::deed_of_crime(crime) {
+        if noticed > 0 || living_victim {
+            if crime == Crime::Murder && noticed > 0 {
+                match object {
+                    Some(o) => crate::systems::gossip::name_actor(world, o, actor),
+                    None => crate::systems::gossip::watch_killer(world, actor),
                 }
-                let d = world.district_of(tile);
-                crate::systems::gossip::post_deed(world, d, deed, Some(actor), object);
             }
+            let d = world.district_of(tile);
+            crate::systems::gossip::post_deed(world, d, deed, Some(actor), object);
         }
     }
 }
@@ -301,8 +298,7 @@ pub fn raise_crime_except(
 /// M15 W24: is this an Attack's crime by a hunter on its Hunt's target,
 /// with `[hunt] street_silence` on?
 pub fn street_silence_on(world: &World, actor: EntityId, object: Option<EntityId>, crime: Crime) -> bool {
-    world.config.gossip.enabled
-        && world.config.hunt.street_silence
+    world.config.hunt.street_silence
         && matches!(crime, Crime::Murder | Crime::Assault)
         && object.is_some()
         && world.hunts.get(&actor).is_some_and(|s| Some(s.target) == object)
@@ -347,7 +343,7 @@ fn located(world: &World, s: EntityId) -> bool {
     let tick = world.tick;
     // L1: a corpse keeps its Position and Identity (`is_alive`), and guards
     // walked hours to arrest the dead.
-    (if world.config.life.enabled { living(world, s) } else { world.is_alive(s) })
+    (living(world, s))
         && !world.has::<Sentence>(s)
         && world.comp::<Brain>(s).is_some_and(|b| b.cuffed_by.is_none())
         && world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
@@ -400,8 +396,8 @@ fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>, claimed: &BTreeSet
             && world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(p.tile) <= radius)
             // L1: a stale sighting is chased only from near by, and a
             // suspect another guard is after is theirs.
-            && (!world.config.life.enabled
-                || (crate::systems::life::sighting_fresh(world, s, p.tile) && !claimed.contains(&s)))
+            && crate::systems::life::sighting_fresh(world, s, p.tile)
+            && !claimed.contains(&s)
     };
     // The cheap reach test first (the same conjunction, reordered).
     by.is_none_or(near) && located(world, s)
@@ -410,7 +406,7 @@ fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>, claimed: &BTreeSet
 /// The L1 claim set for `by` (empty for the whole city, or with life off).
 fn claim_set(world: &World, by: Option<Pursuer>) -> BTreeSet<EntityId> {
     match by {
-        Some(p) if world.config.life.enabled => crate::systems::life::claimed_suspects(world, p.guard),
+        Some(p) => crate::systems::life::claimed_suspects(world, p.guard),
         _ => BTreeSet::new(),
     }
 }
@@ -916,13 +912,10 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     world.stats.current.arrests += 1;
     // M15: an arrest is public: talked about where the suspect lives (the
     // Precinct's district for the homeless), and on the law's own record.
-    if world.config.gossip.enabled {
-        let d =
-            crate::systems::gossip::home_district(world, suspect).unwrap_or_else(|| world.district_of_building(jail));
-        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Arrested, Some(suspect), None);
-        let t = world.tick;
-        world.arrest_log.push_back((t, suspect));
-    }
+    let d = crate::systems::gossip::home_district(world, suspect).unwrap_or_else(|| world.district_of_building(jail));
+    crate::systems::gossip::post_deed(world, d, crate::word::Deed::Arrested, Some(suspect), None);
+    let t = world.tick;
+    world.arrest_log.push_back((t, suspect));
 }
 
 fn resolve_reports(world: &mut World, suspect: EntityId) {
@@ -1070,11 +1063,9 @@ pub fn jail_duty(world: &World, guard: EntityId, shift_key: i64) -> bool {
     // L2 shadow fixes item 10: the duty is fixed for a shift as its key
     // comes due (it flipped from Patrol to the desk at 13:13 and the guard
     // walked 100 min back).
-    if crate::systems::fixes::item(world, 10) {
-        if let Some((k, v)) = world.comp::<Job>(guard).and_then(|j| j.duty_fixed) {
-            if k == shift_key {
-                return v;
-            }
+    if let Some((k, v)) = world.comp::<Job>(guard).and_then(|j| j.duty_fixed) {
+        if k == shift_key {
+            return v;
         }
     }
     jail_duty_now(world, guard, shift_key)
@@ -1200,17 +1191,14 @@ fn credit_guard_shifts(world: &mut World) {
     let share = world.config.law.shift_duty_share;
     // A copy: `maybe_quit` can take a guard off the roster mid-loop.
     let guards = world.guards().to_vec();
-    let fix = crate::systems::fixes::item(world, 10);
     for g in guards {
         // L2 shadow fixes item 10: fix the coming shift's duty once.
-        if fix {
-            let key = world.comp::<Job>(g).map(|j| j.next_shift_key(world.tick));
-            let stale = world.comp::<Job>(g).is_some_and(|j| j.duty_fixed.map(|d| d.0) != key);
-            if let (true, Some(key)) = (stale, key) {
-                let v = jail_duty_now(world, g, key);
-                if let Some(j) = world.comp_mut::<Job>(g) {
-                    j.duty_fixed = Some((key, v));
-                }
+        let key = world.comp::<Job>(g).map(|j| j.next_shift_key(world.tick));
+        let stale = world.comp::<Job>(g).is_some_and(|j| j.duty_fixed.map(|d| d.0) != key);
+        if let (true, Some(key)) = (stale, key) {
+            let v = jail_duty_now(world, g, key);
+            if let Some(j) = world.comp_mut::<Job>(g) {
+                j.duty_fixed = Some((key, v));
             }
         }
         let Some(job) = world.comp::<Job>(g) else { continue };
@@ -1254,11 +1242,7 @@ fn credit_guard_shifts(world: &mut World) {
         }
         if owed {
             // L1: the shift's wage at its end, not on a walk to the Hall.
-            if world.config.life.enabled {
-                crate::systems::economy::collect_wage(world, g);
-            } else {
-                crate::systems::economy::maybe_quit(world, g);
-            }
+            crate::systems::economy::collect_wage(world, g);
         }
     }
 }
@@ -1310,11 +1294,8 @@ pub fn reconcile_guards(world: &mut World) {
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.
 fn sightings(world: &mut World) {
-    let life = world.config.life.enabled;
-    let suspects: Vec<EntityId> = world
-        .open_suspects()
-        .filter(|&s| (if life { living(world, s) } else { world.is_alive(s) }) && !world.has::<Sentence>(s))
-        .collect();
+    let suspects: Vec<EntityId> =
+        world.open_suspects().filter(|&s| (living(world, s)) && !world.has::<Sentence>(s)).collect();
     if suspects.is_empty() {
         return;
     }
@@ -1332,7 +1313,7 @@ fn sightings(world: &mut World) {
     let tick = world.tick;
     // M15 W12 (plan deviation: hourly, not every tick): the guards who see a
     // suspect hold a Sighting of them.
-    let note = world.config.gossip.enabled && tick.is_multiple_of(crate::time::TICKS_PER_HOUR);
+    let note = tick.is_multiple_of(crate::time::TICKS_PER_HOUR);
     let ids: Vec<EntityId> = if note { world.guards().to_vec() } else { Vec::new() };
     for s in suspects {
         let Some(ps) = world.comp::<Position>(s) else { continue };
@@ -1578,12 +1559,10 @@ pub fn settle_held(world: &mut World, id: EntityId) {
         crate::needs::decay(n, &cfg, &ctx, ticks);
     }
     // L2 L13 (phase 2): the hold's `fun` decay too (a no-op with leisure off).
-    if crate::systems::leisure::on(world) {
-        let execs = crate::systems::classes::exec_set(world);
-        let rate = crate::systems::leisure::fun_per_hour(world, id, &execs);
-        if let Some(n) = world.comp_mut::<Needs>(id) {
-            crate::systems::leisure::decay_fun(n, rate, ticks as f32 / crate::time::TICKS_PER_HOUR as f32);
-        }
+    let execs = crate::systems::classes::exec_set(world);
+    let rate = crate::systems::leisure::fun_per_hour(world, id, &execs);
+    if let Some(n) = world.comp_mut::<Needs>(id) {
+        crate::systems::leisure::decay_fun(n, rate, ticks as f32 / crate::time::TICKS_PER_HOUR as f32);
     }
 }
 

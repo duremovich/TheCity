@@ -262,7 +262,7 @@ pub struct World {
     pub gang_member: Vec<Option<GangMember>>,
     pub corpse: Vec<Option<Corpse>>,
     pub child: Vec<Option<Child>>,
-    /// M12 D27: absent from older saves; `migrate_legacy` fills it.
+    /// M12 D27.
     #[serde(default)]
     pub squatter: Vec<Option<Squatter>>,
     // non-agent components
@@ -270,23 +270,22 @@ pub struct World {
     pub gang: Vec<Option<Gang>>,
     pub market: Vec<Option<Market>>,
     pub treasury: Vec<Option<Treasury>>,
-    /// M9: on the Jail. Absent from older saves; `migrate_legacy` fills it.
+    /// M9: on the Jail.
     #[serde(default)]
     pub law: Vec<Option<Law>>,
-    /// M10: per adult, kept after death. Absent from older saves; `migrate_legacy` fills it.
+    /// M10: per adult, kept after death.
     #[serde(default)]
     pub trace: Vec<Option<Trace>>,
-    /// M10: per agent, kept after death. Absent from older saves; `migrate_legacy` fills it.
+    /// M10: per agent, kept after death.
     #[serde(default)]
     pub life: Vec<Option<Life>>,
-    /// M11: corps, each its own entity. Absent from older saves; `migrate_legacy` fills it.
+    /// M11: corps, each its own entity.
     #[serde(default)]
     pub corp: Vec<Option<Corp>>,
-    /// M13 D1: assets, each its own entity carrying only this. Absent from
-    /// older saves; `migrate_legacy` fills it.
+    /// M13 D1: assets, each its own entity carrying only this.
     #[serde(default)]
     pub asset: Vec<Option<Asset>>,
-    /// M13 D4: every agent's Body. Absent from older saves; `migrate_legacy` backfills it.
+    /// M13 D4: every agent's Body.
     #[serde(default)]
     pub body: Vec<Option<Body>>,
     /// M13 D5: stored daily for M15.
@@ -488,8 +487,7 @@ pub struct World {
     #[serde(default)]
     pub vagrancy_places: BTreeMap<EntityId, crate::components::DistrictId>,
     /// M12 D16: litter, one byte per tile, row-major like `Map::tiles`
-    /// (`systems::litter`); saved run-length encoded, zero-filled for a
-    /// pre-M12 save by `migrate_legacy`.
+    /// (`systems::litter`); saved run-length encoded.
     #[serde(default, with = "crate::systems::litter::rle")]
     pub litter: Vec<u8>,
     /// M12 D20: Hotel bookings, guest -> (hotel, the tick the bed is theirs until).
@@ -570,7 +568,7 @@ pub struct World {
     #[serde(default, skip_serializing_if = "all_none")]
     pub grudges: Vec<Option<crate::word::Grudges>>,
     /// M16a (plan C2): a Fixer office's record book; empty stores are not
-    /// written (`migrate_legacy` sizes it for an older save).
+    /// written (`resize_stores` sizes it on load).
     #[serde(default, skip_serializing_if = "all_none")]
     pub broker: Vec<Option<crate::contract::Broker>>,
     /// Real economy E41: the `CampRaised` trait of adults raised at a work
@@ -599,7 +597,7 @@ pub struct World {
     #[serde(default, skip_serializing_if = "BTreeSet::is_empty")]
     pub anon_heard: BTreeSet<(crate::word::Deed, EntityId, u64)>,
     /// M15 W28: the adult city means of the skills competence reads
-    /// (`moves::MEAN_*` order), computed at seed and by `migrate_legacy`,
+    /// (`moves::MEAN_*` order), computed at seed,
     /// never updated (so drift and deaths move competence).
     #[serde(default)]
     pub skill_means: [f32; 8],
@@ -607,7 +605,7 @@ pub struct World {
     #[serde(skip)]
     pub shadow_notes: Option<Vec<crate::word::ShadowNote>>,
     /// Phase 2 review: per `MEAN_*` slot, the adults' 101 percentiles at
-    /// seed (`competence::norm`); computed at seed and by `migrate_legacy`.
+    /// seed (`competence::norm`); computed at seed.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skill_quantiles: Vec<Vec<f32>>,
     /// M15 W28: per corp or the Law, today's departure with the largest
@@ -2327,7 +2325,7 @@ impl World {
         }
         let entry = MemoryEntry { subject, salience, valence, second_hand, ..MemoryEntry::blank(kind, tick) };
         // M15 W15: a new deed memory may leave a grudge (never on a merge).
-        let deed = self.config.gossip.enabled.then(|| systems::memory::deed_of(id, &entry)).flatten();
+        let deed = systems::memory::deed_of(id, &entry);
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let fresh = systems::memory::insert(m, entry, tick, cap, half_life);
         if let (true, Some(r)) = (fresh, deed) {
@@ -2469,6 +2467,30 @@ impl World {
         self.despawn(id);
     }
 
+    /// After a load: the arena stores a save leaves out when empty
+    /// (`grudges`, `broker`, `camp_raised` are not written while all `None`)
+    /// or defaults (`#[serde(default)]`) are sized to the arena, and the
+    /// litter grid to the map.
+    pub fn resize_stores(&mut self) {
+        let n = self.alive.len();
+        self.law.resize_with(n.max(self.law.len()), || None);
+        self.reputation.resize_with(n.max(self.reputation.len()), || None);
+        self.grudges.resize_with(n.max(self.grudges.len()), || None);
+        self.broker.resize_with(n.max(self.broker.len()), || None);
+        self.camp_raised.resize_with(n.max(self.camp_raised.len()), || None);
+        self.trace.resize_with(n.max(self.trace.len()), || None);
+        self.life.resize_with(n.max(self.life.len()), || None);
+        self.corp.resize_with(n.max(self.corp.len()), || None);
+        self.squatter.resize_with(n.max(self.squatter.len()), || None);
+        self.asset.resize_with(n.max(self.asset.len()), || None);
+        self.body.resize_with(n.max(self.body.len()), || None);
+        self.appearance.resize_with(n.max(self.appearance.len()), || None);
+        let tiles = self.map.w() * self.map.h();
+        if self.litter.len() != tiles {
+            self.litter.resize(tiles, 0);
+        }
+    }
+
     /// Rebuild `neighbours`, `spouses` and `enemies` from `edges` (after a
     /// load; the indices are not saved).
     pub fn rebuild_indices(&mut self) {
@@ -2511,160 +2533,6 @@ impl World {
         systems::contracts::rebuild_index(self);
     }
 
-    /// Fix up a save written before M8: a gang without a Hideout (the serde
-    /// default) takes the Hideouts in map order, its territory keeps Homes
-    /// only, and every held Home gets a full claim. A gang that already has a
-    /// Hideout is left alone: its claims are live state.
-    pub fn migrate_legacy(&mut self) {
-        // M10: a pre-M10 ring has no event ids; number it 0..n.
-        if self.next_event_id == 0 && !self.events.is_empty() {
-            for (i, e) in self.events.iter_mut().enumerate() {
-                e.id = i as u64;
-            }
-            self.next_event_id = self.events.len() as u64;
-        }
-        // M9: a save from before the law had a brain has no `law` store.
-        let n = self.alive.len();
-        if self.law.len() < n {
-            self.law.resize_with(n, || None);
-        }
-        // M15 W44: a pre-M15 save has no reputation or grudge store.
-        if self.reputation.len() < n {
-            self.reputation.resize_with(n, || None);
-        }
-        if self.grudges.len() < n {
-            self.grudges.resize_with(n, || None);
-        }
-        // M16a (plan C2): a pre-M16a save (or one with no Fixer) has no
-        // `broker` store.
-        if self.broker.len() < n {
-            self.broker.resize_with(n, || None);
-        }
-        // Real economy E41: likewise the `camp_raised` store.
-        if self.camp_raised.len() < n {
-            self.camp_raised.resize_with(n, || None);
-        }
-        if self.trace.len() < n {
-            self.trace.resize_with(n, || None);
-        }
-        if self.life.len() < n {
-            self.life.resize_with(n, || None);
-        }
-        // M11: a save from before corps has no `corp` store (no corps, city
-        // ownership, rent 0 through `RentCfg::off`).
-        if self.corp.len() < n {
-            self.corp.resize_with(n, || None);
-        }
-        // M12 D27: a pre-M12 save has no squatter store; D16: nor litter.
-        if self.squatter.len() < n {
-            self.squatter.resize_with(n, || None);
-        }
-        let tiles = self.map.w() * self.map.h();
-        if self.litter.len() != tiles {
-            self.litter.resize(tiles, 0);
-        }
-        // M13 D50: a pre-M13 save has no asset, body or appearance store;
-        // every agent gets a Body from its keyed stream (D4), then the Kits.
-        let short = self.asset.len() < n || self.body.len() < n || self.appearance.len() < n;
-        if self.asset.len() < n {
-            self.asset.resize_with(n, || None);
-        }
-        if self.body.len() < n {
-            self.body.resize_with(n, || None);
-        }
-        if self.appearance.len() < n {
-            self.appearance.resize_with(n, || None);
-        }
-        let bodiless: Vec<EntityId> =
-            self.entities().filter(|&id| self.has::<Identity>(id) && !self.has::<Body>(id)).collect();
-        for id in &bodiless {
-            let body = systems::assets::new_body(self, *id);
-            self.insert(*id, body);
-        }
-        if short || !bodiless.is_empty() {
-            systems::assets::rebuild(self);
-        }
-        // M14 V35/V44: hacking from each agent's keyed stream; the corps'
-        // trees from `[tech] seed` by name.
-        let unset: Vec<EntityId> =
-            self.entities().filter(|&id| self.comp::<Skills>(id).is_some_and(|s| s.hacking < 0.0)).collect();
-        for id in unset {
-            let h = systems::tech::draw_hacking(self, id);
-            systems::tech::give_hacking(self, id, h);
-        }
-        systems::tech::seed_corps(self, true);
-        // M15 W25/W28/W44: a pre-M15 save's social skills (all four 0) from
-        // each agent's Skill word stream, then the city means.
-        systems::moves::backfill(self);
-        if let Some(jail) = self.building_of_kind(BuildingKind::Jail) {
-            if !self.has::<Law>(jail) {
-                self.insert(jail, Law::default());
-            }
-        }
-        // M12 D1/D46: the district grid and rows (a pre-M12 save has none),
-        // then every UNSET trace entry and hole to its zone's first district,
-        // and the zone watch to the district watch.
-        systems::districts::rebuild(self);
-        self.migrate_district_ids();
-        // M15 W6: one pool per district (a pre-M15 save has none).
-        let nd = self.districts.len();
-        self.rumours.resize_with(nd, Default::default);
-        let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
-        for (i, gang) in self.gangs().into_iter().enumerate() {
-            let Some(g) = self.comp::<Gang>(gang) else { continue };
-            if self.has::<Building>(g.hideout) {
-                continue;
-            }
-            let hideout = hideouts.get(i).or(hideouts.first()).copied().unwrap_or(EntityId::NONE);
-            let territory: Vec<EntityId> = g
-                .territory
-                .iter()
-                .copied()
-                .filter(|&b| self.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Home))
-                .collect();
-            if let Some(g) = self.comp_mut::<Gang>(gang) {
-                g.hideout = hideout;
-                g.territory = territory.clone();
-            }
-            for home in territory {
-                if let Some(b) = self.comp_mut::<Building>(home) {
-                    b.claim = Some(Claim { gang, count: systems::gang::CLAIM_HELD });
-                }
-            }
-        }
-    }
-
-    /// M12 D4/D5/D46: a pre-M12 save's trace entries and holes carry no
-    /// district: each takes its zone's first district. A zone watch with no
-    /// district watch moves each zone's count to its first district.
-    /// Idempotent.
-    fn migrate_district_ids(&mut self) {
-        let first: [crate::components::DistrictId; 5] =
-            std::array::from_fn(|z| systems::districts::first_of_zone(self, crate::components::Zone::ALL[z]));
-        for tr in self.trace.iter_mut().flatten() {
-            for t in tr.days.iter_mut() {
-                if t.district.is_unset() {
-                    t.district = first[t.zone.index()];
-                }
-            }
-        }
-        for h in self.holes.values_mut() {
-            if h.district.is_unset() {
-                h.district = first[h.zone.index()];
-            }
-        }
-        let dw = &self.district_watch;
-        let empty = dw.today.iter().chain(dw.yesterday.iter()).all(|&v| v == 0);
-        if empty {
-            let zw = self.zone_watch.clone();
-            for (z, f) in first.iter().enumerate() {
-                let d = f.index().min(crate::components::MAX_DISTRICTS - 1);
-                self.district_watch.today[d] += zw.today[z];
-                self.district_watch.yesterday[d] += zw.yesterday[z];
-            }
-        }
-    }
-
     /// Everyone `id` has an edge with, ascending.
     pub fn neighbours(&self, id: EntityId) -> impl Iterator<Item = EntityId> + '_ {
         self.neighbours.get(&id).into_iter().flat_map(|s| s.iter().copied())
@@ -2690,8 +2558,7 @@ impl World {
     }
 
     /// A SawCrime memory that also records which crime was seen and (M15
-    /// W5) on whom: `object` is written only while `[gossip]` is on, so
-    /// `--word-off` keeps the M14 entry byte for byte.
+    /// W5) on whom (`object`).
     pub fn remember_crime(
         &mut self,
         id: EntityId,
@@ -2703,7 +2570,6 @@ impl World {
         let tick = self.tick;
         let cap = self.config.brain.memory_cap;
         let half_life = self.config.brain.memory_half_life_days;
-        let object = object.filter(|_| self.config.gossip.enabled);
         let Some(m) = self.comp_mut::<Memory>(id) else { return };
         let entry = MemoryEntry {
             subject: Some(subject),
@@ -2810,7 +2676,7 @@ impl World {
         // M15 W10: the kin are read before `on_death` unlinks the dead, and
         // the killing goes into the death's pool unnamed; a noticing
         // witness (`law::raise_crime_on`) or the binder names it.
-        if cause == DeathCause::Violence && self.config.gossip.enabled {
+        if cause == DeathCause::Violence {
             systems::gossip::post_killing(self, id);
         }
         // M15 W16: grudges on the dead settle, the dead's pass to its heirs

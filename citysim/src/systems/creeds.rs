@@ -66,7 +66,7 @@ pub fn open_to_strangers(world: &World, gang: EntityId) -> bool {
 /// creed Purist, no members). No derelict there: the vacant Lot nearest
 /// the centroid, built as a Hideout. Neither: no Unplugged. No RNG.
 pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
-    if !world.config.gossip.enabled || !world.config.creeds.seed_purist {
+    if !world.config.creeds.seed_purist {
         return None;
     }
     if world.gang_list().iter().any(|&g| is_purist(world, g)) {
@@ -126,12 +126,6 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
     Some(gang)
 }
 
-/// W44 (a pre-M15 save, `migrate_legacy`): The Unplugged founded on load
-/// when the word and `seed_purist` are on and no Purist gang exists.
-pub fn migrate(world: &mut World) {
-    seed_unplugged(world);
-}
-
 /// W31: cast `id` out of its gang for chrome (`Expelled` event, `LeftGang`).
 fn expel(world: &mut World, id: EntityId, gang: EntityId) {
     let gname = world.comp::<Gang>(gang).map_or_else(String::new, |g| g.name.clone());
@@ -167,9 +161,6 @@ pub fn enforce(world: &mut World, gang: EntityId) {
 /// Spec § 2: a splinter gains the creed when its lieutenant shows no
 /// chrome (`Kit.visible == 0`) and has `lawfulness ≥ 0.5` (with the word on).
 pub fn splinter_creed(world: &mut World, splinter: EntityId, lieutenant: EntityId) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let lawful = world.comp::<Personality>(lieutenant).is_some_and(|p| p.lawfulness >= 0.5);
     if visible(world, lieutenant) == 0 && lawful {
         if let Some(g) = world.comp_mut::<Gang>(splinter) {

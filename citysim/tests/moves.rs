@@ -168,79 +168,22 @@ fn test_skill_rarity_seed() {
     }
 }
 
-/// W28: competence is normalised by the city means, so the Farm output
-/// multiplier lands neutral: the farm-weighted mean multiplier at seed,
-/// averaged over 20 seeds, within ±3 % of 1 (one seed's three Food execs
-/// swing it ±10 %: the exec term is a heavy-tailed skill by design).
-///
-/// L1 changed the premise: execs are picked by age (>= 30) and wealth, then
-/// the exec skill (`life::exec_score`), not as the greediest jobless adult,
-/// so the exec term is no longer a random draw (20-seed L1 mean 1.034; with
-/// the skill first it was 1.098 and Farm output followed, so wealth leads).
-/// The normalisation is checked on the M15 pick (life off); the L1 landing
-/// is bounded.
+/// W28: the corps' competence multiplier lands near 1 at seed (the L1
+/// exec pick is bounded), over 20 seeds.
 #[test]
 fn test_competence_neutral_on_landing() {
-    let landing = |life: bool| {
-        let mut sum = 0.0f32;
-        let n = 20;
-        for seed in 0..n {
-            let mut cfg = Config::load();
-            cfg.life.enabled = life;
-            let w = World::new(1000 + seed, cfg);
-            let farms: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Farm).to_vec();
-            let m: f32 =
-                farms.iter().map(|&f| w.corp_of_building(f).map_or(1.0, |c| competence::comp_mult(&w, c))).sum::<f32>()
-                    / farms.len() as f32;
-            sum += m;
-        }
-        sum / n as f32
-    };
-    let mean = landing(false);
-    assert!((mean - 1.0).abs() <= 0.03, "landing multiplier {mean}");
-    let l1 = landing(true);
+    let mut sum = 0.0f32;
+    let n = 20;
+    for seed in 0..n {
+        let w = World::new(1000 + seed, Config::load());
+        let farms: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Farm).to_vec();
+        let m: f32 =
+            farms.iter().map(|&f| w.corp_of_building(f).map_or(1.0, |c| competence::comp_mult(&w, c))).sum::<f32>()
+                / farms.len() as f32;
+        sum += m;
+    }
+    let l1 = sum / n as f32;
     assert!((0.97..=1.06).contains(&l1), "L1 landing multiplier {l1}");
-    // And with competence off the multiplier is exactly 1.
-    let mut off = Config::load();
-    off.competence.enabled = false;
-    let w = World::new(1000, off);
-    for c in w.corps() {
-        assert_eq!(competence::comp_mult(&w, c), 1.0);
-    }
-}
-
-/// Σ food the Farms produced over `days`: each tick's rise in a Farm's
-/// stock plus its production accumulator (a haul only lowers it).
-fn farm_credit(mut w: World, days: u64) -> f64 {
-    let farms: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Farm).to_vec();
-    let level = |w: &World, f: EntityId| {
-        w.comp::<citysim::Building>(f).map_or(0.0, |b| f64::from(b.stock_food) + f64::from(b.production_accum))
-    };
-    let mut made = 0.0;
-    for _ in 0..days * TICKS_PER_DAY {
-        let before: Vec<f64> = farms.iter().map(|&f| level(&w, f)).collect();
-        w.tick();
-        for (i, &f) in farms.iter().enumerate() {
-            made += (level(&w, f) - before[i]).max(0.0);
-        }
-    }
-    made
-}
-
-/// W28, the plan's mechanism check: on seed 42, 10 days of Farm output with
-/// competence on within ±3 % of `comp_w = 0` (seed 42 +1.5 %; seeds 1, 43,
-/// 44 read +2.8 %, −3.0 %, +0.3 %: a weak Food exec still costs output).
-#[test]
-fn test_competence_landing_farm_credit_seed_42() {
-    // L2: the W28 landing is the M15 city's (`living_off`): with L2 on a
-    // Food corp's NoodleBar Cooks join its competence (seed 42 read -3.2 %).
-    let on = farm_credit(World::new(42, Config::load().living_off()), 10);
-    let mut flat = Config::load().living_off();
-    flat.competence.comp_w = 0.0;
-    let off = farm_credit(World::new(42, flat), 10);
-    let r = on / off;
-    eprintln!("10-day farm credit {on:.0} vs comp_w 0 {off:.0}: ratio {r:.4}");
-    assert!((r - 1.0).abs() <= 0.03, "10-day farm credit {on:.0} vs comp_w 0 {off:.0}: ratio {r:.4}");
 }
 
 /// W28: kill a skilled exec: the next midnight's competence is lower and a

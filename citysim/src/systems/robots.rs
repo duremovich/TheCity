@@ -199,7 +199,7 @@ fn robot_offer(
     let first = robot_seller(world, corp)?;
     let at = |s: EntityId| office_of(world, s, Some(door));
     let sells = |s: EntityId, t: u8| at(s).is_some_and(|o| assets::can_sell(world, o, AssetKind::Robot, t));
-    if !world.config.virt.enabled || sells(first, want) {
+    if sells(first, want) {
         return Some((first, at(first)?, want));
     }
     let other = world

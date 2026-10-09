@@ -164,7 +164,7 @@ pub fn free_beds_for(world: &World, h: EntityId, who: EntityId) -> usize {
     let beds = world.comp::<Building>(h).map_or(0, |b| usize::from(b.capacity));
     let now = world.tick;
     let taken = world.hotel_beds.values().filter(|&&(x, until)| x == h && until > now).count();
-    let reserved = if crate::systems::lod::budget_on(world) { world.bed_reservations_unbooked(h, who) } else { 0 };
+    let reserved = world.bed_reservations_unbooked(h, who);
     beds.saturating_sub(taken + reserved)
 }
 
@@ -188,25 +188,19 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     // L1: saving for a bed means walking to one (the two Sump Hotels sat
     // past 48 tiles from most of the street).
-    let reach = if world.config.life.enabled {
-        world.config.street.hotel_reach.max(world.config.life.hotel_reach_homeless)
-    } else {
-        world.config.street.hotel_reach
-    };
+    let reach = world.config.street.hotel_reach.max(world.config.life.hotel_reach_homeless);
     // Real economy E27: a Mission's cot (price 0) within reach comes first.
-    if crate::systems::charity::on(world) {
-        let cot = world
-            .buildings_of_kind(BuildingKind::Mission)
-            .iter()
-            .copied()
-            .filter(|&m| crate::systems::charity::is_cot_house(world, m) && free_beds_for(world, m, agent) > 0)
-            .filter_map(|m| door_of(world, m).map(|d| (d.manhattan(from), m)))
-            .filter(|&(d, _)| d <= reach)
-            .min()
-            .map(|(_, m)| m);
-        if cot.is_some() {
-            return cot;
-        }
+    let cot = world
+        .buildings_of_kind(BuildingKind::Mission)
+        .iter()
+        .copied()
+        .filter(|&m| crate::systems::charity::is_cot_house(world, m) && free_beds_for(world, m, agent) > 0)
+        .filter_map(|m| door_of(world, m).map(|d| (d.manhattan(from), m)))
+        .filter(|&(d, _)| d <= reach)
+        .min()
+        .map(|(_, m)| m);
+    if cot.is_some() {
+        return cot;
     }
     world
         .buildings_of_kind(BuildingKind::Hotel)
@@ -683,10 +677,8 @@ pub fn evict_squatter(world: &mut World, a: EntityId, why: &str) {
     }
     world.remember(a, MemoryKind::Evicted, None, 0.6, -0.6, false);
     // M15: the squat eviction is talked about (actor the building's owner, if any).
-    if world.config.gossip.enabled {
-        let (d, owner) = (world.district_of_building(b), world.owner_of(b));
-        crate::systems::gossip::post_deed(world, d, crate::word::Deed::Evicted, owner, Some(a));
-    }
+    let (d, owner) = (world.district_of_building(b), world.owner_of(b));
+    crate::systems::gossip::post_deed(world, d, crate::word::Deed::Evicted, owner, Some(a));
     if world.comp::<Position>(a).is_some_and(|p| p.building == Some(b)) {
         if world.has::<Brain>(a) {
             world.abort_plan(a);

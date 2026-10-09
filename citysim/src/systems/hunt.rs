@@ -32,11 +32,6 @@ use crate::word::{
 };
 use crate::world::World;
 
-/// The Hunt runs with the word and `[hunt] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.gossip.enabled && world.config.hunt.enabled
-}
-
 /// May `h` hunt at all: a living adult, free, not leaving.
 pub fn hunter_ok(world: &World, h: EntityId) -> bool {
     crate::systems::law::living(world, h)
@@ -74,7 +69,7 @@ fn cooled(world: &World, id: EntityId) -> bool {
 /// `HuntState` is scored on its target whatever the cap; anyone else needs
 /// an eligible grudge and a free slot under `max_hunts`.
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
-    if !on(world) || !hunter_ok(world, id) {
+    if !hunter_ok(world, id) {
         return None;
     }
     let (target, weight, gap) = match world.hunts.get(&id) {
@@ -117,7 +112,7 @@ pub fn hire_considerations(
     target: EntityId,
     weight: f32,
 ) -> Option<(Vec<Consideration>, f32)> {
-    if !on(world) || !hunter_ok(world, id) || !target_ok(world, target) {
+    if !hunter_ok(world, id) || !target_ok(world, target) {
         return None;
     }
     let p = world.comp::<Personality>(id)?;
@@ -386,9 +381,6 @@ pub fn habit(world: &World, target: EntityId, now: Tick) -> Intel {
 /// W19: the hunter's scripted plan (taking up the Hunt first when there is
 /// none): a fresh sighting skips the asking.
 pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
-    if !on(world) {
-        return None;
-    }
     if !world.hunts.contains_key(&id) && !adopt(world, id, HuntWhy::Goal) {
         return None;
     }
@@ -599,8 +591,7 @@ pub fn ask_around(world: &mut World, hunter: EntityId) -> StepResult {
             crate::systems::gossip::exchange(world, r, hunter, crate::systems::gossip::Venue::Ask);
             crate::systems::gossip::exchange(world, hunter, r, crate::systems::gossip::Venue::Ask);
             let friend = world.edge(r, target).is_some_and(|e| e.kind == RelKind::Friend);
-            let moves = crate::systems::moves::on(world);
-            let lie = friend && moves && {
+            let lie = friend && {
                 let m = SocialMove {
                     actor: r,
                     target: hunter,
@@ -613,7 +604,7 @@ pub fn ask_around(world: &mut World, hunter: EntityId) -> StepResult {
                 deceived_by = Some(r);
                 wrong_bar(world, hunter, r, target)
             } else {
-                let success = !moves || {
+                let success = {
                     let kind = if world.edge(hunter, r).is_some_and(|e| e.kind == RelKind::Friend) {
                         MoveKind::Charm
                     } else if crate::systems::reputation::rep(world, hunter).dread
@@ -802,9 +793,6 @@ pub fn tick(world: &mut World) {
 /// W22/W23 at midnight: a Hunt past `hunt_days` is abandoned (`weight ×=
 /// 0.7`, `HuntAbandoned`, cooled); then the Statistical pass.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     tick(world);
     let now = world.tick;
     let limit = Tick::from(world.config.hunt.hunt_days) * TICKS_PER_DAY;
@@ -831,7 +819,7 @@ pub fn daily(world: &mut World) {
 /// those at `stat_hunt_min` or more, heaviest grudge first (ties the lower
 /// id), are promoted to Coarse and take up the Hunt while slots last.
 pub fn stat_pass(world: &mut World) {
-    if !on(world) || world.hunts.len() >= world.config.hunt.max_hunts {
+    if world.hunts.len() >= world.config.hunt.max_hunts {
         return;
     }
     let day = world.day();
@@ -868,9 +856,6 @@ pub fn stat_pass(world: &mut World) {
 /// W42 god `Hunt`: `hunter` holds a 1.0 grudge on `target` and hunts it
 /// now, past the cap (promoted from Statistical).
 pub fn god_hunt(world: &mut World, hunter: EntityId, target: EntityId) -> Result<(), String> {
-    if !on(world) {
-        return Err("the Hunt is off".into());
-    }
     if !hunter_ok(world, hunter) {
         return Err("Hunt: the hunter cannot hunt".into());
     }

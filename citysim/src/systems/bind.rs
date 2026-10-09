@@ -170,11 +170,9 @@ fn candidates_in(world: &World, hole: &Hole, pool: &[(EntityId, DayTrace)]) -> V
             }
         }
         // M15 W34: the feared are blamed (a branch: no word, no term).
-        if world.config.gossip.enabled {
-            let dread = crate::systems::reputation::rep(world, id).dread;
-            if dread > 0.0 {
-                w *= 1.0 + f64::from(world.config.reputation.bind_dread_w * dread);
-            }
+        let dread = crate::systems::reputation::rep(world, id).dread;
+        if dread > 0.0 {
+            w *= 1.0 + f64::from(world.config.reputation.bind_dread_w * dread);
         }
         if w > 0.0 {
             out.push((id, w));
@@ -305,7 +303,7 @@ fn bind_in(world: &mut World, id: HoleId, pools: &mut DayPools) -> Option<Bound>
     let mut witness = None;
     if let (true, Bound::Actor(actor)) = (witnessed, bound) {
         // M15 W24: with street silence the pool skips who would keep quiet.
-        let silence = world.config.gossip.enabled && world.config.hunt.street_silence;
+        let silence = world.config.hunt.street_silence;
         let pool: Vec<EntityId> = pools.with_day(world, day, |pool| {
             pool.iter()
                 .filter(|&&(w, t)| w != actor && w != hole.victim && t.has(trace_flags::ALIVE))
@@ -528,10 +526,8 @@ fn lost_loot(world: &mut World, hole: &Hole) {
         return;
     }
     world.probe.loot_lost += hole.loot;
-    if crate::systems::econ::market_on(world) {
-        world.purse_add(None, hole.loot);
-        crate::systems::ownership::ledger_only(world, crate::systems::ownership::Flow::Robbery, hole.loot);
-    }
+    world.purse_add(None, hole.loot);
+    crate::systems::ownership::ledger_only(world, crate::systems::ownership::Flow::Robbery, hole.loot);
 }
 
 /// Close a hole as Unknown without a draw (the per-victim cap).

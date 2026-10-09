@@ -5,14 +5,10 @@ use std::path::{Path, PathBuf};
 
 use crate::world::World;
 
-/// The save format: bumped when a load must run a one-off migration on
-/// older saves (`World::save_version`, 0 before the field existed).
-/// 1: M15 (The Unplugged, corp competence); every save from M14 or
-/// earlier reads 0.
-/// 1: M15 (the review's explicit version); 2: L2 (venues, the Fab, the
-/// budget band, the export hook; phase 3 adds held prisoners and the ledger);
-/// 3: M16a (contracts, Fixers, missions); 4: the Real economy (the World's
-/// books, `wage_rev` and the revenue windows, Missions, Camps, the till).
+/// The save format, bumped when the saved shape changes (`World::save_version`).
+/// 4: the Real economy (the World's books, `wage_rev` and the revenue windows,
+/// Missions, Camps, the till). Older saves are not loaded: the legacy
+/// migrations retired with the off switches (2026-10-09).
 pub const SAVE_VERSION: u8 = 4;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
@@ -22,27 +18,10 @@ pub fn to_ron(world: &World) -> String {
 
 pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     let mut world: World = ron::from_str(text)?;
-    // M15 W44: a pre-M15 save (format 0) has no skill means, no Unplugged
-    // and no corp competence. Review fix: the version, not a sentinel on
-    // `skill_means`, so a world whose means are zero is not re-seeded on
-    // every load.
-    let pre_m15 = world.save_version < 1;
+    world.resize_stores();
     world.rebuild_indices();
-    world.migrate_legacy();
-    // M14 V44: a pre-M14 save with the plane on gets its plane and ICE.
-    crate::systems::virt::migrate(&mut world);
-    // M15 W44: a pre-M15 save with the word on gets The Unplugged and its
-    // corps' opening competence.
-    if pre_m15 {
-        crate::systems::creeds::migrate(&mut world);
-        crate::systems::competence::seed(&mut world);
-    }
-    // M15 W41: a save from before the Feeds (news on) gets the opening two.
-    crate::systems::news::migrate(&mut world);
-    // L2 L7, L33: venues for an older save whose config turns jobs on.
-    crate::systems::jobs::migrate(&mut world);
-    // M16a (plan C40): a version-2 save's Fixers at the first midnight.
-    crate::systems::contracts::migrate(&mut world);
+    // M12 D1: the district grid and adjacency are not saved.
+    crate::systems::districts::rebuild(&mut world);
     world.save_version = SAVE_VERSION;
     world.reload_names();
     Ok(world)

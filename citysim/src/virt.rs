@@ -318,8 +318,7 @@ impl std::fmt::Display for Track {
 }
 
 /// A corp's tech tree (spec § 5, plan V21). Tier 0 is never a live tier:
-/// it marks a field absent from a pre-M14 save (`Tech::unset`), which
-/// `World::migrate_legacy` seeds.
+/// it marks an unset tree (`Tech::unset`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Tech {
     /// 1..=3 per track.

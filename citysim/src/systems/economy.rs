@@ -145,7 +145,7 @@ fn daily_restock(world: &mut World) {
 /// Market).
 fn reserve_release(world: &mut World, wh: EntityId) {
     let cfg = &world.config.living;
-    if !cfg.enabled || cfg.reserve_release_price <= 0 {
+    if cfg.reserve_release_price <= 0 {
         return;
     }
     // Real economy E32 (phase 3a): no free release with `no_net` (the ask
@@ -257,7 +257,7 @@ fn daily_price(world: &mut World) {
 /// cost `[corps] wholesale + ceil(input_per_food)`, with the market and
 /// wages on; `None` otherwise.
 pub fn price_floor(world: &World) -> Option<i64> {
-    if !crate::systems::world_market::on(world) || !crate::systems::wages::on(world) {
+    if !crate::systems::wages::on(world) {
         return None;
     }
     let inputs = world.config.economy2.input_per_food.max(0.0).ceil() as i64;
@@ -308,15 +308,13 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
     let mut per_hour = cfg.farm_yield_base * (cfg.farm_skill_floor + cfg.farm_skill_slope * farming) * mult;
     // M14 (spec § 5): a corp-owned Farm yields `x (1 + industry_prod[tier])`
     // of its owner's Industry tier (a branch: tier 1 multiplies nothing).
-    if world.config.virt.enabled {
-        let tier = world
-            .corp_of_building(farm)
-            .and_then(|c| world.comp::<crate::components::Corp>(c))
-            .map_or(1, |c| c.tech.tier_of(crate::virt::Track::Industry));
-        if tier >= 2 {
-            let p = world.config.tech.industry_prod.get(usize::from(tier)).copied().unwrap_or(0.0);
-            per_hour *= 1.0 + p;
-        }
+    let tier = world
+        .corp_of_building(farm)
+        .and_then(|c| world.comp::<crate::components::Corp>(c))
+        .map_or(1, |c| c.tech.tier_of(crate::virt::Track::Industry));
+    if tier >= 2 {
+        let p = world.config.tech.industry_prod.get(usize::from(tier)).copied().unwrap_or(0.0);
+        per_hour *= 1.0 + p;
     }
     // M15 W28: a corp's Farm yields × its competence multiplier (1 when off).
     if let Some(c) = world.corp_of_building(farm) {
@@ -722,9 +720,7 @@ pub fn maybe_quit(world: &mut World, agent: EntityId) {
     let mut week_ago = world.tick.saturating_sub(7 * time::TICKS_PER_DAY);
     // L1: only this job's short pays count: the memories of the last one
     // quit the rehired worker again at its first shift's end, every day.
-    if world.config.life.enabled {
-        week_ago = week_ago.max(job.hired_tick);
-    }
+    week_ago = week_ago.max(job.hired_tick);
     let unpaid_memories = world
         .comp::<crate::components::Memory>(agent)
         .map_or(0, |m| m.entries.iter().filter(|e| e.kind == MemoryKind::Unpaid && e.tick >= week_ago).count());
@@ -778,7 +774,7 @@ pub fn quit_job(world: &mut World, agent: EntityId, reason: &str) {
     // day's wage posts no vacancy for the unpaid quitter (a business that
     // cannot pay does not hire: phase 1's venues earned nothing yet, and
     // every rehire went a week unpaid without the dole).
-    if reason == "unpaid" && crate::systems::jobs::on(world) {
+    if reason == "unpaid" {
         if let Some(e) = job.employer {
             if world.purse(world.owner_of(e)) < job.wage_per_day {
                 withdraw_vacancy(world, e, job.role);
@@ -821,9 +817,7 @@ pub fn collect_dole(world: &mut World, agent: EntityId) -> bool {
     }
     // L1: the dole accrues: one visit pays the days since the last (up to
     // `dole_bulk_days`), so the poor walk to the Hall weekly, not daily.
-    if world.config.life.enabled {
-        dole *= crate::systems::life::dole_days(world, agent).max(1) as i64;
-    }
+    dole *= crate::systems::life::dole_days(world, agent).max(1) as i64;
     if let Some(t) = world.treasury_mut() {
         t.coins -= dole;
     }

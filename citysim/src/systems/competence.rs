@@ -22,11 +22,6 @@ use crate::systems::{law, ownership};
 use crate::word::{MoveKind, SocialMove, SocialSkill, Stake, TalentGone};
 use crate::world::World;
 
-/// Competence is live: the word's master switch and `[competence] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.gossip.enabled && world.config.competence.enabled
-}
-
 /// A role's `(MEAN_* slot, value)` pairs (one, or two for a Lab).
 type RoleSlots = smallvec::SmallVec<[(usize, f32); 2]>;
 
@@ -164,9 +159,6 @@ pub fn mult_of(world: &World, c: f32) -> f32 {
 /// W28: the multiplier of a corp or the Law (the Jail's entity); 1 when
 /// competence is off or `group` is neither.
 pub fn comp_mult(world: &World, group: EntityId) -> f32 {
-    if !on(world) {
-        return 1.0;
-    }
     if let Some(c) = world.comp::<Corp>(group) {
         return mult_of(world, c.competence);
     }
@@ -178,18 +170,12 @@ pub fn comp_mult(world: &World, group: EntityId) -> f32 {
 
 /// The Law's multiplier (the Jail's), 1 with no Jail.
 pub fn law_mult(world: &World) -> f32 {
-    if !on(world) {
-        return 1.0;
-    }
     world.building_of_kind(BuildingKind::Jail).map_or(1.0, |j| comp_mult(world, j))
 }
 
 /// W28: every corp's and the Law's competence set from their people now,
 /// with no `TalentLost` (`World::new`, a pre-M15 load).
 pub fn seed(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     for c in world.corps() {
         let v = corp_competence(world, c);
         if let Some(cc) = world.comp_mut::<Corp>(c) {
@@ -220,9 +206,6 @@ fn note(world: &mut World, group: EntityId, who: EntityId, share: f32, skill: &s
 /// W28 (`World::vacate_job`): a worker leaving a corp or the Law notes its
 /// share of the staff term, `(1 − exec_w) × skill ÷ mean ÷ staff`.
 pub fn note_departure(world: &mut World, id: EntityId) {
-    if !on(world) {
-        return;
-    }
     let Some(job) = world.comp::<Job>(id) else { return };
     let role = job.role;
     let Some(employer) = job.employer else { return };
@@ -244,9 +227,6 @@ pub fn note_departure(world: &mut World, id: EntityId) {
 /// W28 (`World::kill_by`): a dying corp exec or captain notes its share
 /// (`exec_w × e ÷ ē`, the captain's `0.4 × knowledge ÷ ē_k`).
 pub fn note_exec_death(world: &mut World, id: EntityId) {
-    if !on(world) {
-        return;
-    }
     let Some(s) = world.comp::<Skills>(id).cloned() else { return };
     let corps: Vec<EntityId> =
         world.corps().into_iter().filter(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.exec == Some(id))).collect();
@@ -273,9 +253,6 @@ pub fn note_exec_death(world: &mut World, id: EntityId) {
 pub fn daily(world: &mut World) {
     knowledge_work(world);
     rust(world);
-    if !on(world) {
-        return;
-    }
     let drop = world.config.competence.talent_drop;
     for c in world.corps() {
         let new = corp_competence(world, c);
@@ -327,9 +304,6 @@ fn talent_lost(world: &mut World, group: EntityId, old: f32, new: f32) {
 /// W25: `+knowledge_work` per Lab or Feed shift worked yesterday (the
 /// shift ledger), at Full and Coarse.
 fn knowledge_work(world: &mut World) {
-    if !crate::systems::moves::on(world) {
-        return;
-    }
     let step = world.config.skills.knowledge_work;
     let day = u16::try_from(world.day()).unwrap_or(u16::MAX);
     let k = SocialSkill::Knowledge.index();
@@ -355,9 +329,6 @@ fn knowledge_work(world: &mut World) {
 /// `skill_rust` a day down toward its seed (`moves::seed_skills`; plan
 /// deviation: never up, so an inherited skill keeps its blend).
 fn rust(world: &mut World) {
-    if !crate::systems::moves::on(world) {
-        return;
-    }
     let step = world.config.skills.skill_rust;
     let day = world.day();
     let mut ids: Vec<EntityId> = world.tier(Lod::Full).to_vec();
@@ -401,9 +372,6 @@ fn poachable(world: &World, building: EntityId, role: Role) -> bool {
 /// W29, daily after the order's act: a corp holding Grow, Research or
 /// Secure tries one poach for its first open vacancy in a skilled role.
 pub fn poach_daily(world: &mut World, corp: EntityId) {
-    if !on(world) || !crate::systems::moves::on(world) {
-        return;
-    }
     let Some(c) = world.comp::<Corp>(corp) else { return };
     if !matches!(c.order, CorpOrder::Grow | CorpOrder::Research | CorpOrder::Secure) {
         return;
@@ -477,18 +445,16 @@ pub fn try_poach(world: &mut World, corp: EntityId, vacancy: EntityId, role: Rol
     crate::systems::gossip::post_deed(world, d, crate::word::Deed::Poached, Some(corp), Some(old));
     // The old employer's exec knows first-hand.
     if let Some(oe) = world.comp::<Corp>(old).and_then(|c| c.exec).filter(|&e| law::living(world, e)) {
-        if world.config.gossip.enabled {
-            let deed = crate::word::Deed::Poached;
-            let e = crate::components::MemoryEntry {
-                subject: Some(corp),
-                salience: world.config.gossip.deed_sal.get(deed),
-                valence: -world.config.gossip.deed_sev.get(deed),
-                deed: Some(deed),
-                object: Some(old),
-                ..crate::components::MemoryEntry::blank(crate::components::MemoryKind::Rumour, world.tick)
-            };
-            crate::systems::memory::hear_entry(world, oe, e);
-        }
+        let deed = crate::word::Deed::Poached;
+        let e = crate::components::MemoryEntry {
+            subject: Some(corp),
+            salience: world.config.gossip.deed_sal.get(deed),
+            valence: -world.config.gossip.deed_sev.get(deed),
+            deed: Some(deed),
+            object: Some(old),
+            ..crate::components::MemoryEntry::blank(crate::components::MemoryKind::Rumour, world.tick)
+        };
+        crate::systems::memory::hear_entry(world, oe, e);
     }
     ownership::push_corp_shock(world, old, CorpShock::Poached);
     world.stats.current.word.poached += 1;
