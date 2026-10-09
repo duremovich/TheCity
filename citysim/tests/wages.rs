@@ -30,6 +30,11 @@ fn config() -> Config {
     cfg.economy2.overflow_paid_only = false;
     cfg.economy2.emigrate_cost = 0;
     cfg.world_market.cap_wages = [0; 3];
+    // Jobs and room P1's keys at their off values too (the P1 tests below
+    // turn each on).
+    cfg.economy2.raise_on_shortage_only = false;
+    cfg.economy2.skill_w = 0.0;
+    cfg.economy2.rehire_bonus = 0;
     cfg
 }
 
@@ -998,4 +1003,274 @@ fn test_fleet_purchase_needs_coins_above_the_floor() {
     assets::buy(&mut w, buyer, g, &pick).expect("leaves exactly the floor");
     assert_eq!(w.purse(Some(buyer)), floor);
     assert_eq!(w.comp::<Corp>(seller).map(|c| c.import_today), Some(0));
+}
+
+// ---------------------------------------------------------------------------
+// Jobs and room P1 (docs/JOBS_V2.md § 3; plan J2-J4): hire before raise,
+// the employer index, the hiring key.
+// ---------------------------------------------------------------------------
+
+/// J2: a slack market never raises `wage_rev` (payroll far under `0.9 P*`,
+/// no vacancy stood `shortage_days`); the same corp under the jobs round's
+/// rule climbs. A vacancy unfilled `shortage_days` does raise it.
+#[test]
+fn test_hire_before_raise_slack_never_raises_a_shortage_does() {
+    let run = |only: bool| -> f32 {
+        // Room to hire: the ceiling at 3 × full staff.
+        let mut w = round_city(|c| {
+            c.economy2.raise_on_shortage_only = only;
+            c.economy2.staff_ceiling_mult = 3.0;
+        });
+        let corp = corp_named(&w, "Nutrix");
+        assert!(!wages::at_ceiling(&w, corp), "places left to post");
+        for _ in 0..20 {
+            pin_windows(&mut w, corp, 3000, 100);
+            // No vacancy ages into a shortage: the slack market fills every post.
+            w.vacancies.clear();
+            wages::daily(&mut w);
+        }
+        w.comp::<Corp>(corp).map_or(0.0, |c| c.wage_rev)
+    };
+    assert_eq!(run(true), 1.0, "hire before raise: under target with places to post, pay never rises");
+    assert!(run(false) > 1.5, "the jobs round's rule climbs on the same windows");
+    // A shortage: a vacancy at one of the corp's buildings stood `shortage_days`.
+    let mut w = round_city(|c| c.economy2.raise_on_shortage_only = true);
+    let cfg = w.config.economy2.clone();
+    let corp = corp_named(&w, "Nutrix");
+    let b = ownership::owned_of_kind(&w, Some(corp), BuildingKind::Market)[0];
+    let role = ownership::role_for(BuildingKind::Market).expect("a role");
+    w.tick = cfg.shortage_days * TICKS_PER_DAY;
+    w.vacancies.clear();
+    w.vacancies.entry(b).or_default().push(role);
+    w.econ.vacancy_since.clear();
+    w.econ.vacancy_since.insert((b, role), 0);
+    // Payroll on target (no step down): only the shortage moves it.
+    let share = wages::labour_share(&w, corp);
+    pin_windows(&mut w, corp, 1000, (share * 1000.0) as i64);
+    wages::daily(&mut w);
+    let wr = w.comp::<Corp>(corp).map_or(0.0, |c| c.wage_rev);
+    assert!((wr - (1.0 + cfg.wage_step)).abs() < 1e-4, "a shortage steps wage_rev up ({wr})");
+    assert!(w.econ.vacancy_since.contains_key(&(b, role)), "the vacancy's age kept");
+}
+
+/// The home door (else the tile) to a workplace door, as `pick_candidate`.
+fn distance_to(w: &World, a: EntityId, door: citysim::TilePos) -> u32 {
+    w.comp::<citysim::Household>(a)
+        .and_then(|h| h.home)
+        .and_then(|h| w.comp::<Building>(h))
+        .map(|b| b.door)
+        .or_else(|| w.comp::<citysim::Position>(a).map(|p| p.tile))
+        .unwrap_or_default()
+        .manhattan(door)
+}
+
+/// J4: the rehire bonus: an adult laid off as a Vat Tech (through the
+/// layoff path, `dismiss_as`) outranks a nearer stranger for a Farm post
+/// when the gap is under `rehire_bonus`; without the bonus the stranger is
+/// hired. The note is written only with wages on and spent by the hire.
+#[test]
+fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
+    let setup = |bonus: u32| -> (World, EntityId, EntityId, EntityId) {
+        let mut w = round_city(|c| {
+            c.economy2.rehire_bonus = bonus;
+            c.economy2.skill_w = 0.0;
+        });
+        let farm = w.buildings_by_kind.get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
+        let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
+        let stranger =
+            citysim::systems::demography::hire_candidate(&w, farm, citysim::Role::Farmer).expect("a candidate");
+        let ds = distance_to(&w, stranger, door);
+        // A jobless adult a little farther off (inside the bonus's 40 tiles).
+        let laid = jobless(&w)
+            .into_iter()
+            .filter(|&a| a != stranger && !w.has::<citysim::econ::CampRaised>(a))
+            .find(|&a| (ds + 5..ds + 35).contains(&distance_to(&w, a, door)))
+            .expect("a farther jobless adult");
+        // Hired and laid off through the layoff path.
+        citysim::systems::demography::hire(&mut w, laid, farm, citysim::Role::Farmer);
+        citysim::systems::economy::dismiss_as(&mut w, laid, Some(farm), "laid off".into(), EventKind::LaidOff);
+        (w, farm, stranger, laid)
+    };
+    let (w, farm, stranger, laid) = setup(40);
+    assert!(citysim::systems::demography::laid_off_from(&w, laid, citysim::Role::Farmer), "the layoff is noted");
+    assert!(!citysim::systems::demography::laid_off_from(&w, laid, citysim::Role::Cook), "for its role only");
+    assert_eq!(
+        citysim::systems::demography::hire_candidate(&w, farm, citysim::Role::Farmer),
+        Some(laid),
+        "the laid-off Vat Tech outranks the nearer stranger"
+    );
+    let (w, farm, stranger0, _) = setup(0);
+    assert_eq!(stranger0, stranger);
+    assert_eq!(
+        citysim::systems::demography::hire_candidate(&w, farm, citysim::Role::Farmer),
+        Some(stranger),
+        "no bonus: the nearest"
+    );
+    // The hire spends the note; the window closes after 30 days.
+    let (mut w, farm, _, laid) = setup(40);
+    let mut later = w.clone();
+    later.tick += citysim::systems::demography::REHIRE_DAYS * TICKS_PER_DAY;
+    assert!(!citysim::systems::demography::laid_off_from(&later, laid, citysim::Role::Farmer), "30 days on");
+    citysim::systems::demography::hire(&mut w, laid, farm, citysim::Role::Farmer);
+    assert!(!w.laid_off.contains_key(&laid), "the hire spends the note");
+    // Wages off never writes one.
+    let mut off = World::new(42, Config::load());
+    assert!(!wages::on(&off));
+    let worker = ownership::staff_at(&off, farm)[0];
+    citysim::systems::economy::dismiss_as(&mut off, worker, Some(farm), "laid off".into(), EventKind::LaidOff);
+    assert!(off.laid_off.is_empty(), "wages off: no note");
+}
+
+/// J4: the skill term: with `skill_w` on, a better farmer a few tiles
+/// farther off is hired over the nearest applicant.
+#[test]
+fn test_hiring_key_weighs_the_roles_skill() {
+    let mut w = round_city(|c| c.economy2.skill_w = 0.5);
+    let farm = w.buildings_by_kind.get(&BuildingKind::Farm).and_then(|v| v.first().copied()).expect("a Farm");
+    let door = w.comp::<Building>(farm).map(|b| b.door).expect("door");
+    for a in jobless(&w) {
+        if let Some(s) = w.comp_mut::<citysim::Skills>(a) {
+            s.farming = 0.0;
+        }
+    }
+    let nearest = citysim::systems::demography::hire_candidate(&w, farm, citysim::Role::Farmer).expect("a candidate");
+    let dn = distance_to(&w, nearest, door);
+    let skilled = jobless(&w)
+        .into_iter()
+        .filter(|&a| a != nearest && !w.has::<citysim::econ::CampRaised>(a))
+        .find(|&a| (dn + 5..dn + 40).contains(&distance_to(&w, a, door)))
+        .expect("a farther jobless adult");
+    w.comp_mut::<citysim::Skills>(skilled).expect("skills").farming = 1.0;
+    assert_eq!(
+        citysim::systems::demography::hire_candidate(&w, farm, citysim::Role::Farmer),
+        Some(skilled),
+        "farming 1.0 is worth 50 tiles"
+    );
+}
+
+/// J3: the employer index matches a scan of every Job holder after 30 days
+/// of the wages + no-net city (hires, layoffs, quits, arrests, deaths), and
+/// `check_indices` holds every day.
+#[test]
+fn test_employer_index_matches_a_scan_after_30_days() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    for day in 1..=30 {
+        w.run_ticks(TICKS_PER_DAY);
+        if let Err(e) = w.check_indices() {
+            panic!("day {day}: {e}");
+        }
+    }
+    let mut scan: std::collections::BTreeMap<EntityId, Vec<EntityId>> = Default::default();
+    for a in w.entities() {
+        if let Some(b) = w.comp::<Job>(a).and_then(|j| j.employer) {
+            scan.entry(b).or_default().push(a);
+        }
+    }
+    assert!(scan.len() > 50, "a staffed city ({} workplaces)", scan.len());
+    for (b, staff) in &scan {
+        assert_eq!(&ownership::staff_at(&w, *b), staff, "workplace {b:?}");
+    }
+    assert_eq!(w.employers, scan);
+    let laid = w.events.iter().filter(|e| e.kind == EventKind::LaidOff).count();
+    eprintln!("30 days: {} workplaces, {} LaidOff, {} layoff notes", scan.len(), laid, w.laid_off.len());
+    assert!(laid > 0 && !w.laid_off.is_empty(), "layoffs happened and were noted");
+}
+
+/// J2 (ruling): hire first, raise when it can't hire: a corp under `0.9 P*`
+/// with every staffed building at its ceiling (staff + open places) raises
+/// pay; open one place and it posts instead of raising.
+#[test]
+fn test_hire_before_raise_raises_at_the_ceiling() {
+    let mut w = round_city(|c| c.economy2.raise_on_shortage_only = true);
+    let cfg = w.config.economy2.clone();
+    let corp = corp_named(&w, "Nutrix");
+    pin_food_demand(&mut w, corp);
+    let last = fill_to_ceiling(&mut w, corp);
+    assert!(wages::at_ceiling(&w, corp), "every building at its ceiling");
+    w.econ.vacancy_since.clear();
+    let open = w.vacancies.clone();
+    pin_windows(&mut w, corp, 3000, 100);
+    // Keep the vacancies young (no shortage): daily stamps them now.
+    wages::daily(&mut w);
+    let wr = w.comp::<Corp>(corp).map_or(0.0, |c| c.wage_rev);
+    assert!((wr - (1.0 + cfg.wage_step)).abs() < 1e-4, "no place to post: pay rises ({wr})");
+    // One place short of the ceiling: no raise.
+    let (b, role) = last.expect("a staffed building");
+    w.vacancies = open;
+    if let Some(v) = w.vacancies.get_mut(&b) {
+        if let Some(i) = v.iter().position(|&r| r == role) {
+            v.remove(i);
+        }
+        if v.is_empty() {
+            w.vacancies.remove(&b);
+        }
+    }
+    assert!(!wages::at_ceiling(&w, corp));
+    pin_windows(&mut w, corp, 3000, 100);
+    wages::daily(&mut w);
+    let wr2 = w.comp::<Corp>(corp).map_or(0.0, |c| c.wage_rev);
+    assert_eq!(wr2, wr, "a place left to post: no raise");
+}
+
+/// Every standing staffed building of `corp` posted to its ceiling with open
+/// places (vacancies cleared first); returns the last (building, role) that
+/// got one.
+fn fill_to_ceiling(w: &mut World, corp: EntityId) -> Option<(EntityId, citysim::Role)> {
+    let exec = w.comp::<Corp>(corp).and_then(|c| c.exec);
+    let buildings = w.comp::<Corp>(corp).expect("corp").buildings.clone();
+    w.vacancies.clear();
+    let mut last = None;
+    for &b in &buildings {
+        let Some(kind) = w.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| bd.kind) else {
+            continue;
+        };
+        let Some(role) = ownership::role_for(kind) else { continue };
+        let have = ownership::staff_at(w, b)
+            .into_iter()
+            .filter(|&a| Some(a) != exec && w.comp::<Job>(a).is_some_and(|j| j.role == role))
+            .count();
+        let ceiling = wages::staff_ceiling(w, kind);
+        if have < ceiling {
+            for _ in have..ceiling {
+                w.vacancies.entry(b).or_default().push(role);
+            }
+            last = Some((b, role));
+        }
+    }
+    last
+}
+
+/// J2 review fix: a building `post` would never post to (its niche's
+/// demand under `hire_demand`) does not hold the corp off its ceiling: a
+/// low-demand Garage below its ceiling, the Food buildings at theirs, under
+/// target: pay rises.
+#[test]
+fn test_at_ceiling_skips_buildings_without_demand() {
+    let mut w = round_city(|c| c.economy2.raise_on_shortage_only = true);
+    let cfg = w.config.economy2.clone();
+    let corp = corp_named(&w, "Nutrix");
+    pin_food_demand(&mut w, corp);
+    let garage = w.buildings_by_kind.get(&BuildingKind::Garage).and_then(|v| v.first().copied()).expect("a Garage");
+    ownership::transfer_building(&mut w, garage, Some(corp));
+    if let Some(c) = w.comp_mut::<Corp>(corp) {
+        c.niches.insert(Niche::Tech);
+    }
+    if let Some(bd) = w.comp_mut::<Building>(garage) {
+        bd.asset_sales.clear();
+    }
+    assert!(corp_brain::demand_of(&w, corp, Niche::Tech).0 < cfg.hire_demand, "the Garage has no demand");
+    fill_to_ceiling(&mut w, corp);
+    // The Garage below its ceiling: no open places there.
+    w.vacancies.remove(&garage);
+    let garage_staff = ownership::staff_at(&w, garage).len();
+    assert!(garage_staff < wages::staff_ceiling(&w, BuildingKind::Garage), "the Garage has room");
+    assert!(wages::at_ceiling(&w, corp), "the low-demand Garage is not counted");
+    w.econ.vacancy_since.clear();
+    pin_windows(&mut w, corp, 3000, 100);
+    wages::daily(&mut w);
+    let wr = w.comp::<Corp>(corp).map_or(0.0, |c| c.wage_rev);
+    assert!((wr - (1.0 + cfg.wage_step)).abs() < 1e-4, "under target, nowhere to post: pay rises ({wr})");
 }

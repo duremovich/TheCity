@@ -749,6 +749,8 @@ pub fn dismiss_as(
 ) -> Option<Job> {
     world.abort_plan(agent);
     let job = world.remove::<Job>(agent)?;
+    // Jobs and room J4: the rehire bonus remembers the role (wages on).
+    crate::systems::demography::note_laid_off(world, agent, job.role);
     let mut actors = vec![agent];
     actors.extend(building);
     world.push_event(kind, &actors, text);

@@ -269,3 +269,49 @@ fn probe_guard_eats_on_a_long_shift() {
     assert!(ate, "no meal in a twelve-hour shift started hungry (lowest hunger {low:.2})");
     assert!(low > 0.0, "starving on shift (hunger reached 0)");
 }
+
+/// Jobs and room P1 (spec § 7, plan P1 step 5): a Vat Tech laid off at
+/// midnight in the wages + no-net city, with at least three posts open
+/// city-wide, holds a Job again within 14 days (the rehire bonus and the
+/// skill key put the laid-off hand back to work). Ignored until the flip
+/// (J31): it needs `[economy2] wages` and `no_safety_net` on.
+#[test]
+#[ignore]
+fn probe_laid_off_farm_worker_finds_work_within_14_days() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    // Day 20, a minute to midnight: the layoff lands just before the
+    // midnight job search, as `wages::staff`'s do.
+    w.run_ticks(21 * TICKS_PER_DAY - 1);
+    let a = w
+        .workers(Role::Farmer)
+        .iter()
+        .copied()
+        .filter(|&a| law::living(&w, a) && !w.has::<citysim::Sentence>(a) && w.gang_of(a).is_none())
+        .find(|&a| {
+            w.comp::<Job>(a)
+                .and_then(|j| j.employer)
+                .and_then(|b| w.corp_of_building(b))
+                .is_some_and(|c| w.comp::<citysim::Corp>(c).is_some_and(|cc| cc.exec != Some(a)))
+        })
+        .expect("a corp's Vat Tech");
+    pin(&mut w, a);
+    let farm = w.comp::<Job>(a).and_then(|j| j.employer);
+    let text = format!("{} laid off as Vat Tech (probe)", w.name_of(a));
+    citysim::systems::economy::dismiss_as(&mut w, a, farm, text, citysim::EventKind::LaidOff);
+    assert!(!w.has::<Job>(a));
+    let posts_open = w.vacancies.values().map(Vec::len).sum::<usize>();
+    assert!(posts_open >= 3, "the stimulus needs three posts open city-wide ({posts_open})");
+    let (mut hired_on, start) = (None, w.tick);
+    run_to(&mut w, a, start + 14 * TICKS_PER_DAY, |w| {
+        if hired_on.is_none() && w.has::<Job>(a) {
+            hired_on = Some((w.tick - start) / TICKS_PER_DAY);
+        }
+    });
+    let job = w.comp::<Job>(a).map(|j| (j.role.label(), j.employer));
+    eprintln!("laid off on day 20: hired after {hired_on:?} days as {job:?} (posts open at the search: {posts_open})");
+    assert!(law::living(&w, a), "alive");
+    assert!(hired_on.is_some(), "no Job within 14 days of the layoff");
+}

@@ -240,6 +240,11 @@ fn tidy(x: f32) -> f32 {
 /// `P < 0.9 P*` or a vacancy stood unfilled `shortage_days`, down when
 /// `P > 1.1 P*`, clamped `[wage_floor_mult, wage_cap_mult]`; `WageMoved`
 /// when it crosses a 0.1 step. Before the windows fill it holds 1.0.
+/// Jobs and room J2 (`[economy2] raise_on_shortage_only`): hire before
+/// raise: a corp under its target posts places ([`staff`]) instead of
+/// raising pay; pay steps up on a shortage, or under `0.9 P*` only when
+/// every standing staffed building is at its ceiling ([`at_ceiling`]: no
+/// place left to post). The down step is unchanged.
 pub fn daily(world: &mut World) {
     if !on(world) {
         return;
@@ -256,7 +261,10 @@ pub fn daily(world: &mut World) {
         let Some(c) = world.comp::<Corp>(corp) else { continue };
         let old = c.wage_rev;
         let mut new = old;
-        if p < 0.9 * target || short {
+        // J2 (ruling): hire first, raise when it can't hire: under the
+        // target with every building at its ceiling, pay goes up.
+        let under = p < 0.9 * target && (!cfg.raise_on_shortage_only || at_ceiling(world, corp));
+        if under || short {
             new += cfg.wage_step;
         } else if p > 1.1 * target {
             new -= cfg.wage_step;
@@ -279,6 +287,62 @@ pub fn daily(world: &mut World) {
             );
         }
     }
+}
+
+/// E18: a corp's niche demand as [`post`] reads it: per niche of the corp,
+/// and the max over them for a kind outside its niches.
+struct HiringDemand {
+    by_niche: BTreeMap<Niche, f32>,
+    any: f32,
+}
+
+impl HiringDemand {
+    fn of(world: &World, corp: EntityId) -> HiringDemand {
+        let by_niche: BTreeMap<Niche, f32> = world.comp::<Corp>(corp).map_or_else(BTreeMap::new, |c| {
+            c.niches.iter().map(|&n| (n, crate::systems::corp_brain::demand_of(world, corp, n).0)).collect()
+        });
+        let any = by_niche.values().copied().fold(0.0f32, f32::max);
+        HiringDemand { by_niche, any }
+    }
+
+    /// Would [`post`] staff a building of `kind` (its niche's demand holds `floor`)?
+    fn wants(&self, kind: BuildingKind, floor: f32) -> bool {
+        let d = crate::systems::corp_brain::niche_of_kind(kind)
+            .and_then(|n| self.by_niche.get(&n).copied())
+            .unwrap_or(self.any);
+        d >= floor
+    }
+}
+
+/// J2 (ruling 2026-10-09): every standing staffed building the corp would
+/// post to ([`post`]'s demand predicate, `hire_demand`) holds its ceiling
+/// ([`staff_ceiling`] + Farm overtime) in staff (the exec not counted) and
+/// open places: hiring has nowhere left to go. A building whose niche
+/// lacks demand is not counted (it would never post, and would freeze the
+/// corp's pay). False when no building counts.
+pub fn at_ceiling(world: &World, corp: EntityId) -> bool {
+    let Some(c) = world.comp::<Corp>(corp) else { return false };
+    let overtime = farm_overtime(world, corp, food_order(world));
+    let demand = HiringDemand::of(world, corp);
+    let floor = world.config.economy2.hire_demand;
+    let mut any = false;
+    for &b in &c.buildings {
+        if !standing(world, b) {
+            continue;
+        }
+        let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
+        let Some(role) = ownership::role_for(kind) else { continue };
+        if !demand.wants(kind, floor) {
+            continue;
+        }
+        let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
+        let (hires, open) = places(world, b, role, c.exec);
+        if hires.len() + open < staff_ceiling(world, kind) + extra {
+            return false;
+        }
+        any = true;
+    }
+    any
 }
 
 /// E20, E45: the payroll-weighted mean `wage_rev` over the corps (each
@@ -444,10 +508,7 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
     let cfg = world.config.economy2.clone();
     let Some(c) = world.comp::<Corp>(corp) else { return 0 };
     let (buildings, exec) = (c.buildings.clone(), c.exec);
-    let niches: Vec<Niche> = c.niches.iter().copied().collect();
-    let demand: BTreeMap<Niche, f32> =
-        niches.iter().map(|&n| (n, crate::systems::corp_brain::demand_of(world, corp, n).0)).collect();
-    let any = demand.values().copied().fold(0.0f32, f32::max);
+    let demand = HiringDemand::of(world, corp);
     let overtime = farm_overtime(world, corp, order);
     let now = world.tick;
     let since = now.saturating_sub(WINDOW_DAYS as u64 * TICKS_PER_DAY);
@@ -465,8 +526,7 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
         let (hires, open) = places(world, b, role, exec);
         let marginal = world.config.economy.wage(role) as f32 * rev_mult;
         room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
-        let d = crate::systems::corp_brain::niche_of_kind(kind).and_then(|n| demand.get(&n).copied()).unwrap_or(any);
-        if d >= cfg.hire_demand {
+        if demand.wants(kind, cfg.hire_demand) {
             rows.push((b, role, cap, ceiling, hires.len(), open, marginal));
         }
     }

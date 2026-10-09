@@ -5128,6 +5128,17 @@ pub struct Economy2Cfg {
     /// Phase 3a (the transition wave; read only with `no_net`): a
     /// co-resident spouse covers a short rent share before arrears.
     pub household_rent: bool,
+    // --- Jobs and room P1 (docs/JOBS_V2.md § 3; plan J2, J4; read only
+    // with wages on; each off value reproduces the jobs round).
+    /// J2: hire before raise: `wage_rev` steps up only on a shortage (a
+    /// vacancy unfilled `shortage_days`), not on `P < 0.9 P*` (false: both).
+    pub raise_on_shortage_only: bool,
+    /// J4: the hiring key's skill weight: `round(skill_w × 100 × skill)`
+    /// tiles off the distance for the role's skill (0: distance only).
+    pub skill_w: f32,
+    /// J4: tiles off the hiring key for an adult laid off from the same
+    /// role in the last `demography::REHIRE_DAYS` (0: no bonus).
+    pub rehire_bonus: u32,
 }
 
 impl Default for Economy2Cfg {
@@ -5159,6 +5170,9 @@ impl Default for Economy2Cfg {
             asset_import_per_day: 0,
             overflow_paid_only: false,
             household_rent: false,
+            raise_on_shortage_only: false,
+            skill_w: 0.0,
+            rehire_bonus: 0,
         }
     }
 }

@@ -550,9 +550,31 @@ pub fn free_corpse(world: &mut World, corpse: EntityId) {
 // Job search
 // ---------------------------------------------------------------------------
 
+/// Jobs and room J4: a layoff earns the rehire bonus for this many days.
+pub const REHIRE_DAYS: u64 = 30;
+
+/// J4: note a layoff (`economy::dismiss_as`, every employer-side dismissal)
+/// for the rehire bonus. Written only with wages on.
+pub fn note_laid_off(world: &mut World, id: EntityId, role: Role) {
+    if crate::systems::wages::on(world) {
+        let now = world.tick;
+        world.laid_off.insert(id, (role, now));
+    }
+}
+
+/// J4: was `id` laid off from `role` in the last [`REHIRE_DAYS`]?
+pub fn laid_off_from(world: &World, id: EntityId, role: Role) -> bool {
+    world.laid_off.get(&id).is_some_and(|&(r, t)| r == role && t + REHIRE_DAYS * TICKS_PER_DAY > world.tick)
+}
+
 /// Daily, for each vacancy in BTreeMap order: the nearest unemployed adult
 /// (home door to workplace door, ties by id) is hired.
 fn job_search(world: &mut World) {
+    // J4: layoffs older than the bonus's window are forgotten.
+    if !world.laid_off.is_empty() {
+        let now = world.tick;
+        world.laid_off.retain(|_, &mut (_, t)| t + REHIRE_DAYS * TICKS_PER_DAY > now);
+    }
     let vacancies: Vec<(EntityId, Vec<Role>)> = world.vacancies.iter().map(|(&e, r)| (e, r.clone())).collect();
     for (employer, roles) in vacancies {
         let Some(workplace_door) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else {
@@ -579,11 +601,19 @@ fn job_search(world: &mut World) {
 /// The adult `job_search` would hire for `role` at a workplace door: the
 /// nearest unemployed, free adult (home door, else tile; ties by id), a
 /// guard lawful (≥ 0.4); a Lab the best hacker, a Feed the most
-/// knowledgeable (ties lower id).
+/// knowledgeable (ties lower id). Jobs and room J4 (wages on): the default
+/// key is `1024 + distance − round(skill_w × 100 × skill) − rehire_bonus`
+/// (the role's `competence::role_skill`; the bonus for an adult laid off
+/// from the same role in the last 30 days).
 fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
     // L2 shadow fixes item 13: a corp's exec is not in the labour pool
     // (Zetatech's exec was hired as a Militech Fab Tech and laid off).
     let execs = crate::systems::classes::exec_set(world);
+    let (skill_w, rehire) = if crate::systems::wages::on(world) {
+        (world.config.economy2.skill_w.max(0.0), world.config.economy2.rehire_bonus)
+    } else {
+        (0.0, 0)
+    };
     world
         .citizens()
         .into_iter()
@@ -627,7 +657,20 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             // The Real economy E41: a `CampRaised` applicant comes first for
             // a Farm or Fab vacancy (the distance key halved past the map).
             let first = crate::systems::camp::applicant_first(world, id, role);
-            (if first { from.manhattan(workplace_door) / 2 } else { 1024 + from.manhattan(workplace_door) }, id)
+            if first {
+                return (from.manhattan(workplace_door) / 2, id);
+            }
+            // J4: skill and the rehire bonus come off the distance, capped
+            // at 512 so the key stays above the `CampRaised` band (a halved
+            // distance, at most 224 on the 256 x 192 map).
+            let skill = if skill_w > 0.0 {
+                crate::systems::competence::role_skill(world, id, role).map_or(0.0, |(v, _, _)| v.clamp(0.0, 1.0))
+            } else {
+                0.0
+            };
+            let off = (skill_w * 100.0 * skill).round() as u32
+                + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
+            ((1024 + from.manhattan(workplace_door)).saturating_sub(off.min(512)), id)
         })
         .min()
         .map(|(_, id)| id)
@@ -671,6 +714,8 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
         },
     );
     world.abort_plan(id);
+    // J4: a rehire spends the bonus.
+    world.laid_off.remove(&id);
     let name = world.name_of(id);
     world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {}", role.label()));
 }

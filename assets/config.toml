@@ -1813,6 +1813,11 @@ overflow_paid_only = true            # the Reserve buys Farm surplus only from a
 # 1,866/1,791/1,824, but Arasaka bankrupt on 43 (d68) and 44 (d48) and Kessler later (d47): off, a lever for the orchestrator.
 # EXPERIMENTAL: measured by the A/B above only, no unit test; test it (conservation, arrears) before turning it on.
 household_rent = false               # phase 3a (read only with no_safety_net): a co-resident spouse covers a short rent share before arrears
+# Jobs and room P1 (docs/JOBS_V2.md § 3; plan ~/.claude/plans/jobs-v2.md J2, J4; read only with wages on; the off values
+# false / 0 / 0 reproduce the jobs round). Placeholders.
+raise_on_shortage_only = true        # J2 hire before raise: wage_rev steps up only on a shortage (a vacancy unfilled shortage_days)
+skill_w = 0.5                        # J4: the hiring key takes round(skill_w x 100 x the role's skill) tiles off the distance
+rehire_bonus = 40                    # J4: tiles off the key for an adult laid off from the same role in the last 30 days
 
 # Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
 # (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the
