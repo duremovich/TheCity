@@ -35,6 +35,8 @@ fn config() -> Config {
     cfg.economy2.raise_on_shortage_only = false;
     cfg.economy2.skill_w = 0.0;
     cfg.economy2.rehire_bonus = 0;
+    // The flip-readiness round's seeding off too (its own tests turn it on).
+    cfg.economy2.seed_staff_days = 0.0;
     cfg
 }
 
@@ -725,6 +727,60 @@ fn test_asset_import_budget_refuses_past_the_day_cap() {
     assets::buy(&mut w, buyers[1], g, &pick).expect("a sale the next day");
 }
 
+/// Flip readiness: a single import over the day's cap (a T1 car's import
+/// against a smaller budget) is the day's first and goes through; a second
+/// sale that day is refused, and the next day the big one sells again.
+#[test]
+fn test_asset_import_over_the_cap_sells_once_a_day() {
+    use citysim::systems::assets;
+    use citysim::ShopPick;
+    let mut w = round_city(|_| {});
+    let g = w
+        .buildings_of_kind(BuildingKind::Garage)
+        .iter()
+        .copied()
+        .find(|&b| w.corp_of_building(b).is_some())
+        .expect("a corp Garage");
+    let corp = w.corp_of_building(g).expect("its corp");
+    let buyers: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| w.has::<citysim::Brain>(a) && w.has::<Wallet>(a))
+        .filter(|&a| citysim::systems::demography::is_adult(&w, a))
+        .take(3)
+        .collect();
+    for &b in &buyers {
+        w.comp_mut::<Wallet>(b).expect("wallet").coins = 50_000;
+    }
+    let pick = ShopPick { kind: AssetKind::Car, tier: 1, used: None, upgrade: false };
+    let drain = |w: &mut World| {
+        let parts = w.stock(g, Good::Parts);
+        w.take_stock(g, Good::Parts, parts);
+    };
+    // The car's import alone, measured uncapped, then a cap below it.
+    drain(&mut w);
+    w.comp_mut::<Corp>(corp).expect("corp").import_today = 0;
+    assets::buy(&mut w, buyers[0], g, &pick).expect("an uncapped car sale");
+    let car = w.comp::<Corp>(corp).map_or(0, |c| c.import_today);
+    assert!(car > 1, "the car fronted an import: {car}");
+    w.config.economy2.asset_import_per_day = car / 2;
+    // The day's first import, over the cap: sold.
+    drain(&mut w);
+    w.comp_mut::<Corp>(corp).expect("corp").import_today = 0;
+    assets::buy(&mut w, buyers[1], g, &pick).expect("the day's first import goes through over the cap");
+    assert_eq!(w.comp::<Corp>(corp).map(|c| c.import_today), Some(car));
+    // A second today: refused, the buyer keeps the coins.
+    drain(&mut w);
+    let coins = w.comp::<Wallet>(buyers[2]).map_or(0, |x| x.coins);
+    let err = assets::buy(&mut w, buyers[2], g, &pick).expect_err("past the day's import budget");
+    assert!(err.contains("import budget"), "{err}");
+    assert_eq!(w.comp::<Wallet>(buyers[2]).map(|x| x.coins), Some(coins));
+    // The next day (the roll reset): the car sells again.
+    w.comp_mut::<Corp>(corp).expect("corp").import_today = 0;
+    drain(&mut w);
+    assets::buy(&mut w, buyers[2], g, &pick).expect("the next day's first import");
+}
+
 /// E35 `emigrate_cost` (the jobs round, wages on): an agent with fewer
 /// coins cannot start emigrating; 0 or wages off, everyone may.
 #[test]
@@ -1296,4 +1352,72 @@ fn test_at_ceiling_skips_vacuous_roles() {
     assert!(ownership::staff_at(&w, bar).is_empty());
     assert_eq!(citysim::systems::jobs::places_of(&w, bar, citysim::Role::Bartender), 0);
     assert!(!wages::at_ceiling(&w, corp), "a corp with no place anywhere is not at its ceiling");
+}
+
+/// Flip readiness (the transition wave): with `seed_staff_days` the no-dole
+/// city opens staffed. Every corp building's roles stand at their ceiling
+/// (the capital covers it at 5 days), nothing is left open, the hires are
+/// the job search's (Hire events at tick 0), and the city's coins are those
+/// of the unseeded city (hiring moves none).
+#[test]
+fn test_seed_staff_fills_the_ceilings_before_day_0() {
+    let off = World::new(42, config());
+    let mut cfg = config();
+    cfg.economy2.staff_ceiling_mult = 3.0;
+    cfg.economy2.seed_staff_days = 5.0;
+    let w = World::new(42, cfg.clone());
+    let employed = |w: &World| w.citizens().into_iter().filter(|&a| w.has::<Job>(a)).count();
+    assert!(employed(&w) > employed(&off) + 300, "{} vs {}", employed(&w), employed(&off));
+    assert!(w.vacancies.is_empty(), "every post filled before day 0: {:?}", w.vacancies);
+    assert!(w.events.iter().any(|e| e.kind == EventKind::Hire && e.tick == 0));
+    for corp in w.corps() {
+        let c = w.comp::<Corp>(corp).expect("corp");
+        for &b in &c.buildings {
+            let Some(kind) = w.comp::<Building>(b).map(|bd| bd.kind) else { continue };
+            for (role, _) in ownership::roles_for(&w, kind) {
+                let staff = ownership::staff_at(&w, b)
+                    .into_iter()
+                    .filter(|&a| Some(a) != c.exec)
+                    .filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.role == role))
+                    .count();
+                assert!(staff <= wages::ceiling_at(&w, b, role) + 1, "{role:?} at {b:?}: {staff}");
+            }
+        }
+    }
+    assert_eq!(
+        ownership::total_coins(&w),
+        ownership::total_coins(&World::new(42, {
+            let mut c = cfg.clone();
+            c.economy2.seed_staff_days = 0.0;
+            c
+        }))
+    );
+    // A thin purse posts less: at 10,000 days of capital nothing past the payroll.
+    let mut thin = cfg;
+    thin.economy2.seed_staff_days = 10_000.0;
+    let t = World::new(42, thin);
+    assert!(employed(&t) < employed(&w));
+}
+
+/// Flip readiness: the Recycler's opening float (`[treasury] till_initial`,
+/// no-net only) comes out of the corps' share of the opening hoard, so the
+/// Treasury opens at its working balance either way; without no-net nothing
+/// moves.
+#[test]
+fn test_seed_till_comes_out_of_the_hoard() {
+    let mut cfg = config();
+    cfg.economy2.no_safety_net = true;
+    cfg.economy2.seed_staff_days = 0.0;
+    cfg.treasury.till_initial = 0;
+    let none = World::new(42, cfg.clone());
+    cfg.treasury.till_initial = 4_000;
+    let w = World::new(42, cfg.clone());
+    assert_eq!(w.econ.recycler_till, 4_000);
+    assert_eq!(none.econ.recycler_till, 0);
+    assert_eq!(w.treasury().map(|t| t.coins), none.treasury().map(|t| t.coins), "the Treasury's balance kept");
+    let capital = |w: &World| w.corps().into_iter().filter_map(|c| w.comp::<Corp>(c)).map(|c| c.treasury).sum::<i64>();
+    assert_eq!(capital(&w), capital(&none) - 4_000, "the float out of the corps' capital");
+    assert_eq!(ownership::total_coins(&w), ownership::total_coins(&none));
+    cfg.economy2.no_safety_net = false;
+    assert_eq!(World::new(42, cfg).econ.recycler_till, 0, "no till without no-net");
 }

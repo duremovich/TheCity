@@ -584,19 +584,34 @@ fn snap_to_phase_door(world: &mut World, id: EntityId, promotion: bool) {
     let home = world.comp::<Household>(id).and_then(|h| h.home);
     let workplace = world.comp::<Job>(id).and_then(|j| j.employer);
     let sociable = world.comp::<Personality>(id).is_some_and(|p| p.sociability >= 0.5);
-    let building = match phase {
-        DayPhase::Night | DayPhase::Morning => home,
-        DayPhase::Work => workplace.or(home),
-        DayPhase::Evening if promotion => {
-            if sociable {
-                world.local(id, BuildingKind::Bar)
-            } else {
-                world.local(id, BuildingKind::Market)
+    // Flip readiness (wages on; a base-city bug the P10 retirement ungates):
+    // a worker on its own shift stands at the workplace whatever the phase
+    // (a Night Porter promoted at 00:00 stood at a Market 140 tiles off and
+    // walked the shift away), and a homeless worker's night is spent near
+    // the workplace, not at the cheapest Market across town.
+    let wages = crate::systems::wages::on(world);
+    let on_shift = wages
+        && world.comp::<Job>(id).is_some_and(|j| {
+            j.employer.is_some()
+                && j.on_shift(world.tick_of_day())
+                && crate::exec::routine::workday_of(world, id, j, j.shift_key_at(world.tick))
+        });
+    let rough_worker = if wages && home.is_none() { workplace } else { None };
+    let building = if on_shift { workplace } else { None }
+        .or(match phase {
+            DayPhase::Night | DayPhase::Morning => home,
+            DayPhase::Work => workplace.or(home),
+            DayPhase::Evening if promotion => {
+                if sociable {
+                    world.local(id, BuildingKind::Bar)
+                } else {
+                    world.local(id, BuildingKind::Market)
+                }
             }
-        }
-        DayPhase::Evening => home,
-    }
-    .or_else(|| world.local(id, BuildingKind::Market));
+            DayPhase::Evening => home,
+        })
+        .or(rough_worker)
+        .or_else(|| world.local(id, BuildingKind::Market));
     if let Some(b) = building {
         world.stand_at_door(id, b);
     }
@@ -645,8 +660,12 @@ pub fn run_statistical(world: &mut World) {
     let phase = world.phase();
     // L2 L13: the hour's `fun` decay off screen (the exec set once).
     let fun_execs = Some(crate::systems::classes::exec_set(world));
+    let no_net = crate::systems::econ::no_net(world);
     for id in agents {
         let Some(row) = stat_row(world, id) else { continue };
+        // Flip readiness (no safety net): the table row's index at the hour's
+        // start, for the no-net income path's per-row rates.
+        let no_net_row = if no_net { stat_row_index(world, id) } else { None };
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
@@ -672,7 +691,7 @@ pub fn run_statistical(world: &mut World) {
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
         // idle hours of the employed.
-        stat_work(world, id, phase);
+        stat_work(world, id, phase, no_net_row);
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
         // hungry Statistical agent eats if it can and the draw covers the
         // discretionary meals of the fed.
@@ -993,18 +1012,23 @@ fn stat_flirt(world: &mut World, id: EntityId) {
 /// inventory as stolen food, the `Theft` event and counter, and a
 /// `stat_theft_caught_p` report with no witness (the thief then gets a body,
 /// which the arrest path needs). Shared by the eat path and the `p_steal`
-/// roll. Returns whether anything was taken.
+/// roll. Returns whether anything was taken. Flip readiness: with
+/// `econ::no_net` the haul is a Full Market theft's (`exec::actions`
+/// StealFood: two units where the shelf holds them): off screen it is the
+/// only meal a broke thief gets, and one unit sent it back a few hours later.
 fn stat_theft(world: &mut World, id: EntityId) -> bool {
+    let per = if crate::systems::econ::no_net(world) { 2 } else { 1 };
     // Jobs and room P2 fix: an empty local Market sends the thief to a stocked one.
     let Some(market) = world.food_market(id) else { return false };
     let Some(b) = world.comp_mut::<Building>(market).filter(|b| b.stock_food > 0) else { return false };
-    b.stock_food -= 1;
+    let units = per.min(b.stock_food);
+    b.stock_food -= units;
     // M11 D20: a corp-owned Market books the unit at its price.
-    let coins = world.price_at(market);
+    let coins = world.price_at(market) * i64::from(units);
     crate::systems::ownership::note_loss(world, market, coins, Some(id));
     if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-        i.food += 1;
-        i.stolen_food += 1;
+        i.food += units;
+        i.stolen_food += units;
     }
     world.stats.current.thefts += 1;
     // M12 D17: an off-screen theft's litter, in the Market's district, at a
@@ -1100,9 +1124,32 @@ fn stat_eat(world: &mut World, id: EntityId) {
     // agent's only Eat plan). Every other theft is the table's `p_steal`,
     // calibrated on all Full thefts but these (M10; replaces the v1
     // lawless-and-hungry gate, D29).
-    let starving = world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger <= 0.0);
-    if !starving {
-        return;
+    let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
+    // Flip readiness (no safety net): a hungry agent who cannot buy steals
+    // the meal by lawfulness, as the Full planner's theft cost reads it
+    // (`p_desperate`, calibrated on the Full tier's hungry thieves below the
+    // meal price); a lawful agent mostly goes hungry (the noon Mission, the
+    // next hour's scavenge or beg). The dole city's table has no
+    // `p_desperate`: the M10 rule (starving, whatever the lawfulness). Adults
+    // only (`calibrate` learns it from adults); a child keeps the M10 rule.
+    let need = if crate::systems::econ::no_net(world) && crate::systems::demography::is_adult(world, id) {
+        let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
+        world.stat_table.as_ref().and_then(|t| t.p_desperate.map(|d| (d[t.lawfulness_bucket(law)], t.hunger_edge)))
+    } else {
+        None
+    };
+    match need {
+        Some((p, edge)) => {
+            if hunger >= edge {
+                return;
+            }
+            let u: f32 = world.rng.agent(id).random();
+            if u >= p {
+                return;
+            }
+        }
+        None if hunger > 0.0 => return,
+        None => {}
     }
     if !stat_theft(world, id) {
         return;
@@ -1132,7 +1179,7 @@ fn stat_store_food(world: &mut World, id: EntityId) {
     }
 }
 
-fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
+fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Option<usize>) {
     let tick = world.tick;
     let job = world.comp::<Job>(id).cloned();
     // Only the jobless decide the dole (`economy::dole_eligible`; addendum 17).
@@ -1166,6 +1213,9 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
     // L2 (L23): a jobless Statistical member's GangWork day.
     if job.is_none() && phase == DayPhase::Work {
         crate::systems::fviolence::stat_gang_day(world, id);
+    }
+    if let (None, Some(i)) = (&job, no_net_row) {
+        stat_earn(world, id, i);
     }
     let Some(job) = job else { return };
     let key = job.shift_key_at(tick);
@@ -1233,6 +1283,109 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
                 }
             }
         }
+    }
+}
+
+/// The table row index of `id`'s hour (`calibrate`'s buckets: the phase,
+/// lawfulness and hunger now), `None` without a table.
+fn stat_row_index(world: &World, id: EntityId) -> Option<usize> {
+    let t = world.stat_table.as_ref()?;
+    let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
+    let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
+    Some(t.index(world.phase(), law, hunger))
+}
+
+/// Flip readiness (no safety net): the Full tier's broke jobless hour off
+/// screen. With `no_net` and a table holding `p_scavenge`/`p_beg`, a jobless
+/// adult below its savings line (`SAVINGS_DAYS` meals, the Full Earn goal's
+/// gate) scavenges on its row's `p_scavenge` of hours (the same find, paid
+/// from the Recycler's till: `jobs::scavenge_find`) and begs on its row's
+/// `p_beg` (`stat_beg`), one draw on the agent's stream.
+fn stat_earn(world: &mut World, id: EntityId, row: usize) {
+    let Some((p_scav, p_beg)) =
+        world.stat_table.as_ref().map(|t| (t.p_scavenge.map_or(0.0, |p| p[row]), t.p_beg.map_or(0.0, |p| p[row])))
+    else {
+        return;
+    };
+    if p_scav + p_beg <= 0.0 || !crate::systems::demography::is_adult(world, id) {
+        return;
+    }
+    let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
+    let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+    if coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price) {
+        return;
+    }
+    let u: f32 = world.rng.agent(id).random();
+    if u < p_scav {
+        crate::systems::jobs::scavenge_find(world, id);
+    } else if u < p_scav + p_beg {
+        stat_beg(world, id);
+    }
+}
+
+/// An off-screen Beg (the no-net income path): up to four Statistical
+/// adults drawn in the agent's zone (from up to `STRANGER_TRIES` uniform
+/// draws, as `stranger_in_zone`) are the passers a Full beggar asks
+/// (`exec::actions` Beg takes four within three tiles), each as a Full
+/// passer gives: not an enemy (affinity > 0, or a stranger), more than 10
+/// coins, on `0.3 + 0.4 × sociability` (half for a stranger), one or two
+/// coins, the first who gives ends it. A known edge carries the debt as
+/// Full's; a stranger's gift opens no edge (the off-screen street keeps no
+/// ledger of passers).
+fn stat_beg(world: &mut World, id: EntityId) {
+    const STRANGER_TRIES: usize = 16;
+    const PASSERS: usize = 4;
+    let mut asked = 0;
+    let zone_of = |w: &World, o: EntityId| w.comp::<Position>(o).map(|p| w.map.zone(p.tile));
+    let Some(zone) = zone_of(world, id) else { return };
+    let n = world.tier(Lod::Statistical).len();
+    if n == 0 {
+        return;
+    }
+    for _ in 0..STRANGER_TRIES {
+        let k = world.rng.agent(id).random_range(0..n);
+        let o = world.tier(Lod::Statistical)[k];
+        if o == id
+            || zone_of(world, o) != Some(zone)
+            || world.has::<Sentence>(o)
+            || !crate::systems::demography::is_adult(world, o)
+        {
+            continue;
+        }
+        if asked == PASSERS {
+            return;
+        }
+        asked += 1;
+        let edge = world.edge(id, o).map(|e| e.affinity);
+        let generous =
+            edge.is_none_or(|a| a > 0.0) && world.comp::<crate::components::Wallet>(o).is_some_and(|w| w.coins > 10);
+        if !generous {
+            continue;
+        }
+        let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
+        let odds = (0.3 + sociability * 0.4) * if edge.is_none() { 0.5 } else { 1.0 };
+        let rng = world.rng.agent(id);
+        let (roll, bonus): (f32, f32) = (rng.random(), rng.random());
+        if roll >= odds {
+            continue;
+        }
+        let coins = 1 + i64::from(bonus < 0.5);
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(o) {
+            w.coins -= coins;
+        }
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
+            w.coins += coins;
+        }
+        if edge.is_some() {
+            // The lower id owes the higher id, as Full's Beg books it.
+            let lo = crate::components::edge_key(id, o).0;
+            let tick = world.tick;
+            let e = world.edge_entry(id, o);
+            e.debt += if lo == id { coins as i32 } else { -(coins as i32) };
+            e.debt_since.get_or_insert(tick);
+            e.last_interaction = tick;
+        }
+        return;
     }
 }
 
