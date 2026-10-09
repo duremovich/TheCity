@@ -77,65 +77,22 @@ Display names differ from code names: Block (`Home`), Vat Farm (`Farm`), Street 
 
 ## Verify
 
+The tiers, what each asserts and when to run it: [docs/TESTING.md](docs/TESTING.md). Asserts catch broken; behaviour judges alive; numbers are reports, not gates.
+
 ```
+# every change (~1.5 min after compile): unit tests, determinism, saves, the person probes and core_sanity
+# (seeds 42-44 x 120 days: coin identity, collapse bounds, mechanism existence, the ticks/s floor)
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace --release --no-fail-fast
-# long scenario gates (v1 acceptance, M8, M9, M10 scale, M11 ownership, M12 districts and the three-seed split,
-# Full-vs-Statistical parity, binder, median tick);
-# each scenario is 25-60 s at 2,000 residents, so run them one at a time if you want readable output
-cargo test --release -p citysim --test scenario --test lod --test scale --test bind -- --ignored --nocapture
-# the M10 scale gate alone: throughput (release only, floor 4,000 ticks/s since 2026-10-06, idle seed 42 reads ~10.7k), off-screen violence,
-# hole ledger, Unknown share, save size and time
-cargo test --release -p citysim --test scenario test_m10_scale_seed_42 -- --ignored --nocapture
-# the M11 ownership gate alone: every corp changes order, Squeeze and Undercut held, a corp-payer bribe, evictions,
-# evicted gang recruits, an NPC founding and an incorporation, a hostile acquisition, no monopoly before day 60,
-# a strike, immigration that moves, the M10 bounds and throughput (release only); prints the calibration readings
-cargo test --release -p citysim --test scenario test_m11_ownership_seed_42 -- --ignored --nocapture
-# the M12 districts gate alone: district traces, control, allocation and Crackdowns, gang landlords, litter bands and
-# the sweepers, Vagrancy, Hotel nights, squats, the Dreg share, riots with loot and crossfire, raids that muster,
-# hit corps and never depart into cover, the M10 bounds and throughput; prints the calibration table (spec § 10).
-# Seeds 42-47 (M13 phase 5): riots by the six-seed mean, gang control and sanitation on half the seeds, gang
-# landlords pooled >= 2/3, the split bullet on any seed; seed 42 alone for the mechanism checks and ticks/s
-cargo test --release -p citysim --test scenario test_m12_districts_seed_42 -- --ignored --nocapture
-# the M13 assets gate alone: vehicles and trucks, the commute, chrome and harvests, an NPC Clinic or Garage,
-# episodes and Therapy, dealing, addiction and Detox, repossessions, crashes, theft and the chop, Secure robots,
-# strips, the M10 bounds and throughput; prints the calibration table (spec § 11). Seed 42, with the coin-flip
-# bullets (crash deaths, a chop after a theft, one ended by the law, an NPC seller, dealing and hooked shares) by
-# majority of 42-44, vehicles and episodes by the six-seed mean of 42-47 (M14 phase 5)
-cargo test --release -p citysim --test scenario test_m13_assets_seed_42 -- --ignored --nocapture
-# the M14 Virt gate alone: the plane (nodes, links, a tier-1 deck's reach), Labs and Data made, stolen, wiped and
-# sold, runs and their success share, fried and flatlined, a chair arrest, a door before a raid (a robot turned is
-# printed), a Ledger theft, a Lab built under Research, tiers gained and lost with the effective-tier probe, ICE raised and after a loss, the Spearman of
-# ICE spend against node ICE, decks, the M10 bounds and throughput; prints the calibration table (spec § 12).
-# Seed 42 alone, then 43-47: bands by majority of 42-44, the Spearman by the six-seed mean, existence on any seed
-cargo test --release -p citysim --test scenario test_m14_virt_seed_42 -- --ignored --nocapture
-# the M15 word gate alone: a rumour at hops >= 4, a distorted rumour, rep_flips, dread reading known deeds, the
-# positional adults at the top of standing, grudges, Hunts, Avenged, inherited grudges, a vendetta, extortion by
-# dread, a Poached, a TalentLost after a killing, Feeds and stories, a Spin with a plant and a bury, an expulsion,
-# the gangs' dread and heat spread, vendettas between few pairs, Murders against the --word-off runs, the M10
-# bounds and throughput; prints the calibration table (spec § 12) as findings. Seed 42 alone, then 43-47 and the
-# --word-off runs of 42-44 in threads
-cargo test --release -p citysim --test scenario test_m15_word_seed_42 -- --ignored --nocapture
-# the L2 living-city gate alone: every new kind seeded and paid, venues with revenue, Unwind at Full and Coarse,
-# Statistical leisure every day, fronts, Collect, dealers at Dens and Clubs, HangOut toward known contacts, the
-# export side of conservation, the LOD budget and gang quotas, no held prisoner starving, the churn against the
-# --l2-off runs, faction holes bound to their faction, the identity device (--l2-off fingerprint, the master
-# switch alone, the calibration city), the v1 bounds, Murders against the M15-closing run and throughput; prints
-# the calibration table and the M13 price print as findings. Seed 42 alone, then 43-47 and --l2-off 42-44
-cargo test --release -p citysim --test scenario test_l2_living_city_seed_42 -- --ignored --nocapture
-# the L2 365-day runs (three sim years each; run one at a time): bounds per year, the Winter wave, the save size
-cargo test --release -p citysim --test scenario test_l2_year_seed_42 -- --ignored --nocapture
-cargo test --release -p citysim --test scenario test_l2_year_seed_43 -- --ignored --nocapture
-# the whole scenario suite, serialized (the multi-seed gates spawn their own threads)
-cargo test --release -p citysim --test scenario -- --ignored --test-threads=1
-# the god suites: the player-lever scenarios (v1, gangs and the law, the M13 assets scenarios of
-# docs/GOD_SCENARIOS_V4.md, the M14 Virt scenarios of docs/GOD_SCENARIOS_V5.md, the M15 word scenarios of
-# docs/GOD_SCENARIOS_V6.md and the L2 living-city scenarios of docs/GOD_SCENARIOS_V7.md), v2 (corps, classes, the
-# economy) and v3 (districts, the street, riots)
-cargo test --release -p citysim --test god -- --ignored --nocapture
-cargo test --release -p citysim --test god_corps -- --ignored --nocapture
-cargo test --release -p citysim --test god_districts -- --ignored --nocapture
+cargo test --workspace --release
+# every merge, one at a time: the year (seed 42 x 365 days, ~2 min), the behaviour tier (the archetypes'
+# diary metrics, ~30 s) and the 13 god scenarios (~1 min)
+cargo test --release -p citysim --test core -- --ignored core_year --nocapture
+cargo test --release -p citysim-cli -- --ignored behaviour --nocapture
+cargo test --release -p citysim --test god --test god_corps --test god_districts -- --ignored --nocapture
+# every milestone or nightly: Full-vs-Statistical parity, and the diaries for a critic's read
+cargo test --release -p citysim --test lod -- --ignored --nocapture
+cargo run --release -p citysim-cli -- shadow --assert --out shadow_out
 # M12 unit tests: districts, the law in districts, litter, the street, riots and splits
 cargo test --release -p citysim --test districts --test street --test factions
 # M11 unit tests: ownership and rent, the corp brain, founding and classes
@@ -146,7 +103,7 @@ cargo test --release -p citysim --test virt --test runs --test data --test tech 
 cargo test --release -p citysim --test gossip --test reputation --test grudges --test moves --test news
 # L2 unit tests: jobs and venues, leisure, the LOD budget, faction violence, the export hook
 cargo test --release -p citysim --test jobs --test leisure --test lod_budget --test fviolence --test outside
-# criterion bench (tick_300_agents, tick_2000_agents); the median gate is a test in tests/scale.rs
+# criterion bench (tick_300_agents, tick_2000_agents)
 cargo bench -p citysim --bench tick
 # regenerate the Statistical tier's table (assets/stat_table.toml): calibrate v2, 500 agents, gangless, 3 seeds
 cargo run --release -p citysim-cli -- calibrate

@@ -1,4 +1,5 @@
-//! M7: level of detail, the Statistical tick, replay and throughput.
+//! M7: level of detail, the Statistical tick and replay (the ticks/s floor is
+//! `core_sanity`'s, tests/core.rs).
 
 use citysim::systems::lod;
 use citysim::{
@@ -132,7 +133,7 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
 /// assaults, violent deaths and marriages per 100 agent-days within 15%
 /// (floor 0.5); then, with every hole bound, the share of attributed crimes
 /// per actor lawfulness bucket within `max(0.15 x share, 0.05)`. Run with
-/// `--ignored`.
+/// `--ignored` (nightly, docs/TESTING.md: the one parity test kept).
 #[test]
 #[ignore]
 fn test_full_vs_statistical_within_15pct() {
@@ -278,107 +279,6 @@ fn test_full_vs_statistical_within_15pct() {
     assert!(failures.is_empty(), "{failures:?}");
 }
 
-/// M13 phase 3 (plan 3.9, D46): the parity harness at 500 agents, 30 days,
-/// seeds 2000-2002, one arm per tier (Full, Statistical). In each, every
-/// other adult (even `id.index`) is granted Nerves T2 and Skin T2 on day 0,
-/// so kitted and bare live side by side and a Full fight's reflex term is
-/// not cancelled by a kitted opponent on every side. Within each arm the
-/// kitted adults' violent-death rate ÷ the bare adults' is the kill ratio;
-/// the Statistical ratio is within 0.25 of the Full one. The calibration
-/// city kills too few for a ratio, so the fight's death chance is ×10 and
-/// the table's violence ×5 in both arms, and sanity is held at 1 (no drift,
-/// no unpaid-upkeep drift:
-/// no Treat trips, no edgy mood; the D46 multipliers have no sanity
-/// reading). Run with `--ignored`.
-#[test]
-#[ignore]
-fn test_kitted_vs_unkitted_parity() {
-    use citysim::systems::{assets, demography};
-    use citysim::{AssetKind, EntityId, EventKind, Slot};
-    use std::collections::BTreeSet;
-    const AGENTS: u32 = 500;
-    const DAYS: u64 = 30;
-    const SEEDS: [u64; 3] = [2000, 2001, 2002];
-    // (kitted adults, kitted violent deaths, bare adults, bare violent deaths)
-    fn run(force: Lod, seed: u64) -> [u64; 4] {
-        let mut cfg = Config::load().calibration_city(AGENTS);
-        // Assets on (the Kit terms read nothing while off), nothing for sale.
-        let full = Config::load();
-        cfg.assets = full.assets.clone();
-        cfg.chrome = full.chrome.clone();
-        cfg.chrome.sanity_drift = 0.0;
-        // M13 phase 5: and no unpaid-upkeep drift. With `psycho` at 0.8 the
-        // T2 implants' unpaid upkeep (0.02 a day each) brought kitted bodies
-        // to episodes in days, and berserkers die resisting arrest.
-        cfg.chrome.unmedicated_drift = 0.0;
-        cfg.lod.flash_w = full.lod.flash_w;
-        cfg.lod.force = Some(force);
-        cfg.lod.stat_violence_mult = 5.0;
-        cfg.crime.fight_death_p *= 10.0;
-        let mut w = World::new(seed, cfg);
-        let adults: Vec<EntityId> =
-            w.citizens().into_iter().filter(|&a| w.has::<Brain>(a) && demography::is_adult(&w, a)).collect();
-        let kitted: BTreeSet<EntityId> = adults.iter().copied().filter(|a| a.index % 2 == 0).collect();
-        let bare: BTreeSet<EntityId> = adults.iter().copied().filter(|a| a.index % 2 == 1).collect();
-        for &a in &kitted {
-            for slot in [Slot::Nerves, Slot::Skin] {
-                assets::grant(&mut w, a, AssetKind::Implant(slot), 2).expect("granted");
-            }
-        }
-        // Nothing to buy: no list prices.
-        w.config.assets.price = Default::default();
-        let (mut dk, mut db, mut cursor) = (0u64, 0u64, 0u64);
-        for _ in 0..DAYS {
-            w.run_ticks(TICKS_PER_DAY);
-            for e in w.events.iter().filter(|e| e.id >= cursor) {
-                if e.kind == EventKind::Death && e.text.contains("died of Violence") {
-                    if let Some(&who) = e.actors.first() {
-                        dk += u64::from(kitted.contains(&who));
-                        db += u64::from(bare.contains(&who));
-                    }
-                }
-            }
-            cursor = w.next_event_id;
-        }
-        [kitted.len() as u64, dk, bare.len() as u64, db]
-    }
-    let pooled = |force: Lod| -> [u64; 4] {
-        let runs: Vec<[u64; 4]> = SEEDS.iter().map(|&s| run(force, s)).collect();
-        std::array::from_fn(|i| runs.iter().map(|r| r[i]).sum())
-    };
-    let ratio = |c: [u64; 4]| {
-        let k = c[1] as f64 / c[0].max(1) as f64;
-        let b = c[3] as f64 / c[2].max(1) as f64;
-        if b > 0.0 {
-            k / b
-        } else {
-            1.0
-        }
-    };
-    let (f, s) = (pooled(Lod::Full), pooled(Lod::Statistical));
-    let (rf, rs) = (ratio(f), ratio(s));
-    eprintln!("Full: kitted {} deaths of {}, bare {} of {}: ratio {rf:.3}", f[1], f[0], f[3], f[2]);
-    eprintln!("Statistical: kitted {} deaths of {}, bare {} of {}: ratio {rs:.3}", s[1], s[0], s[3], s[2]);
-    eprintln!("kill ratio difference {:.3} (tolerance 0.25)", (rf - rs).abs());
-    assert!((rf - rs).abs() <= 0.25, "kill ratio Full {rf:.3} vs Statistical {rs:.3}");
-}
-
-#[test]
-/// The shared floor (4,000 since 2026-10-06; see `TPS_FLOOR` in `scenario.rs`): a
-/// catastrophic-regression check, not a target. Seed 42 reads ~10.7k idle.
-fn test_headless_throughput_floor() {
-    if cfg!(debug_assertions) {
-        eprintln!("release only");
-        return;
-    }
-    let mut w = world(42);
-    let t0 = std::time::Instant::now();
-    w.run_ticks(10 * TICKS_PER_DAY);
-    let tps = (10 * TICKS_PER_DAY) as f64 / t0.elapsed().as_secs_f64();
-    eprintln!("{tps:.0} ticks/s (floor 4000)");
-    assert!(tps >= 4000.0, "{tps:.0} ticks/s");
-}
-
 #[test]
 fn test_command_log_replay_matches() {
     let mut a = world(65);
@@ -407,125 +307,4 @@ fn test_command_log_replay_matches() {
     assert_eq!(b.tick, end);
     assert_eq!(citysim::save::to_ron(&b), saved, "replay diverged");
     b.tick();
-}
-
-/// The learned-policy experiment: microseconds per agent-hour row, table vs
-/// MLP (features + both forward passes), over the 2,000 city's agents after a
-/// day. Needs `assets/stat_mlp.toml`. Run with `--ignored`.
-#[test]
-#[ignore]
-fn bench_stat_policy_row() {
-    use citysim::systems::stat_policy::{features, MlpPolicy, StatMlp, StatPolicy, TablePolicy};
-    let mut w = World::new(42, Config::load());
-    w.run_ticks(TICKS_PER_DAY + 7 * TICKS_PER_HOUR);
-    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| w.has::<Brain>(id)).collect();
-    let mlp = StatMlp::load(&w.config);
-    let table = w.stat_table.clone().expect("table");
-    const REPS: usize = 200;
-    let time = |name: &str, f: &dyn Fn(citysim::EntityId) -> f32| {
-        let t0 = std::time::Instant::now();
-        let mut acc = 0.0f32;
-        for _ in 0..REPS {
-            for &id in &ids {
-                acc += f(id);
-            }
-        }
-        let us = t0.elapsed().as_secs_f64() * 1e6 / (REPS * ids.len()) as f64;
-        eprintln!("{name:22} {us:.3} us per agent-hour ({} agents, checksum {acc:.1})", ids.len());
-    };
-    time("table", &|id| TablePolicy(&table).row(&w, id).p_eat);
-    time("features only", &|id| features(&w, id)[6]);
-    time("mlp (features + nets)", &|id| MlpPolicy(&mlp).row(&w, id).p_eat);
-    let x: Vec<_> = ids.iter().map(|&id| features(&w, id)).collect();
-    let t0 = std::time::Instant::now();
-    let mut acc = 0.0f32;
-    for _ in 0..REPS {
-        for f in &x {
-            acc += mlp.row_for(f).p_steal;
-        }
-    }
-    let us = t0.elapsed().as_secs_f64() * 1e6 / (REPS * x.len()) as f64;
-    eprintln!("{:22} {us:.3} us per agent-hour (checksum {acc:.3})", "mlp nets only");
-}
-
-/// L2 phase 2 (plan L17): the seventh rate. Leisure coins per agent-day
-/// (entries and meals, `flow_leisure`, plus stakes lost at the tables,
-/// `flow_gamble + flow_gamble_win`), Full against forced Statistical, on
-/// the leisure calibration city (`calibration_city(500).with_leisure()`:
-/// venues seeded on the city's deed), seeds 2000-2005 pooled, 30 days,
-/// within 15 %. Run with `--ignored`.
-#[test]
-#[ignore]
-fn test_full_vs_statistical_leisure_within_15pct() {
-    const AGENTS: u32 = 500;
-    const DAYS: u64 = 30;
-    const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
-    fn run(force: Lod, seed: u64) -> f64 {
-        let mut cfg = Config::load().calibration_city(AGENTS).with_leisure();
-        cfg.lod.force = Some(force);
-        let mut w = World::new(seed, cfg);
-        w.run_ticks(DAYS * TICKS_PER_DAY);
-        let coins: i64 = w
-            .stats
-            .history
-            .iter()
-            .map(|r| r.living.flow_leisure + r.living.flow_gamble + r.living.flow_gamble_win)
-            .sum();
-        let rate = coins as f64 / (f64::from(AGENTS) * DAYS as f64);
-        eprintln!("{force:?} seed {seed}: leisure coins {coins}, {rate:.4} per agent-day");
-        rate
-    }
-    let pooled = |force: Lod| SEEDS.iter().map(|&s| run(force, s)).sum::<f64>() / SEEDS.len() as f64;
-    let full = pooled(Lod::Full);
-    let stat = pooled(Lod::Statistical);
-    eprintln!("leisure coins per agent-day: Full {full:.4}  Statistical {stat:.4}  ratio {:.3}", stat / full.max(1e-9));
-    assert!(full > 0.0, "Full agents spent on leisure");
-    assert!((full - stat).abs() <= 0.15 * full, "Full {full:.4} vs Statistical {stat:.4}");
-}
-
-/// L2 phase 4 (spec § 10, plan 4.7): faction violence parity. The 2,000
-/// city with gangs (the shipped config, `[fviolence]` on), seeds 2000-2005,
-/// 120 days, one thread per seed. Per 1,000 civilian agent-days under a
-/// faction source: the Statistical tier's faction-sourced `Killed` +
-/// `Assaulted` hits (the daily pass, over the Statistical civilian
-/// agent-days it rolled) against the Full and Coarse civilian victims of
-/// on-screen faction violence (over the civilian body-hours in touched
-/// districts ÷ 24), pooled over the seeds (`World::fv_tally`). Asserted
-/// within a factor of 4 (the sanity bound), printed against the factor-2
-/// band. Run with `--ignored`.
-#[test]
-#[ignore]
-fn test_faction_violence_parity() {
-    const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
-    const DAYS: u64 = 120;
-    let handles: Vec<_> = SEEDS
-        .iter()
-        .map(|&seed| {
-            std::thread::spawn(move || {
-                let mut w = World::new(seed, Config::load());
-                assert!(citysim::systems::fviolence::on(&w), "[fviolence] on");
-                w.run_ticks(DAYS * TICKS_PER_DAY);
-                let t = w.fv_tally.clone();
-                eprintln!(
-                    "seed {seed}: bodies {} civilian victims over {:.0} body-days, Statistical {} hits over {} agent-days",
-                    t.body_civ_victims,
-                    t.body_civ_hours as f64 / 24.0,
-                    t.stat_civ_hits,
-                    t.stat_civ_days
-                );
-                t
-            })
-        })
-        .collect();
-    let tallies: Vec<citysim::ledger::FvTally> = handles.into_iter().map(|h| h.join().expect("seed run")).collect();
-    let sum = |f: fn(&citysim::ledger::FvTally) -> u64| tallies.iter().map(f).sum::<u64>() as f64;
-    let body = sum(|t| t.body_civ_victims) * 1000.0 / (sum(|t| t.body_civ_hours) / 24.0).max(1.0);
-    let stat = sum(|t| t.stat_civ_hits) * 1000.0 / sum(|t| t.stat_civ_days).max(1.0);
-    let ratio = body.max(stat) / body.min(stat).max(1e-9);
-    eprintln!(
-        "civilian Killed+Assaulted per 1,000 agent-days under a faction source: bodies {body:.3}, Statistical {stat:.3}, factor {ratio:.2}"
-    );
-    eprintln!("FINDING faction-violence parity factor {ratio:.2} (band <= 2; asserted <= 4)");
-    assert!(body > 0.0 && stat > 0.0, "both tiers see faction violence: bodies {body:.3}, Statistical {stat:.3}");
-    assert!(ratio <= 4.0, "bodies {body:.3} vs Statistical {stat:.3}: factor {ratio:.2} > 4");
 }

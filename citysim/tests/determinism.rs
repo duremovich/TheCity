@@ -1,19 +1,22 @@
-//! Same seed, same bytes.
+//! Same seed, same bytes: the shipped city (`Config::load()`, 2,000
+//! residents) hashed at the first day boundary (the midnight passes have
+//! run). The mid-day save that runs on identically is `save.rs`'s
+//! `test_word_save_mid_day_bit_identical`.
 
-use citysim::{save, Config, World};
+use citysim::{save, Config, World, TICKS_PER_DAY};
 
 fn hash_after(seed: u64, ticks: u64) -> blake3::Hash {
-    let mut w = World::new(seed, Config::load().v1_profile());
+    let mut w = World::new(seed, Config::load());
     w.run_ticks(ticks);
     blake3::hash(save::to_ron(&w).as_bytes())
 }
 
 #[test]
 fn test_determinism_same_seed_same_hash() {
-    assert_eq!(hash_after(42, 2000), hash_after(42, 2000));
+    assert_eq!(hash_after(42, TICKS_PER_DAY + 1), hash_after(42, TICKS_PER_DAY + 1));
 }
 
 #[test]
 fn test_different_seed_different_hash() {
-    assert_ne!(hash_after(42, 2000), hash_after(43, 2000));
+    assert_ne!(hash_after(42, 600), hash_after(43, 600));
 }

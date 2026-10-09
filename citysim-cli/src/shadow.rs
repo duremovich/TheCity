@@ -4,6 +4,7 @@
 //! citysim-cli shadow --seed S --days N [--start-day D] [--pick a,b,..]
 //!                    [--agent INDEX]... [--count K] --out DIR
 //! citysim-cli shadow --seed S --start-day D --list
+//! citysim-cli shadow --assert [--out DIR]
 //! ```
 //!
 //! An observation tool. The world runs normally to `--start-day`; the chosen
@@ -29,7 +30,7 @@ use citysim::{
 #[derive(clap::Args)]
 pub struct ShadowArgs {
     /// World seed.
-    #[arg(long)]
+    #[arg(long, default_value_t = 42)]
     pub seed: u64,
     /// Shadowed days (counted from `--start-day`).
     #[arg(long, default_value_t = 7)]
@@ -62,6 +63,11 @@ pub struct ShadowArgs {
     /// what the stand-in did.
     #[arg(long)]
     pub no_pin: bool,
+    /// The behaviour tier (docs/TESTING.md): run the fixed windows (seed 42, days 19 and 90,
+    /// 7 days, 3 per archetype), print each archetype's metrics and judge them against the
+    /// bounds in `CHECKS`; exit non-zero on a failure. `--out` keeps the diaries.
+    #[arg(long)]
+    pub assert: bool,
 }
 
 const ARCHETYPES: [&str; 19] = [
@@ -395,6 +401,42 @@ struct Track {
     stat_minutes: u32,
     held_settles: u32,
     held_minutes: u64,
+    // The behaviour tier (`--assert`, docs/TESTING.md): the diary's numbers as metrics.
+    alive_min: u32,
+    work_min: u32,
+    sleep_run: u32,
+    /// `(end tick, minutes)` of every finished block of sleep-class minutes.
+    sleep_blocks: Vec<(Tick, u32)>,
+    energy0_min: u32,
+    /// The job's shift under way, and the shifts seen whole.
+    shift: Option<ShiftObs>,
+    shifts: Vec<ShiftObs>,
+    /// Ticks of every wage paid to the agent (`Flow::Wage`, `Flow::ExecWage`).
+    wages: Vec<Tick>,
+    /// Coins handed back to the agent by `ownership::refund` (a purchase undone).
+    refunds: u32,
+    /// The Work goal under way: a work-class minute reached in it.
+    work_plan: Option<bool>,
+    /// Work goals dropped before a single work-class minute (a commute turned back).
+    commute_aborts: u32,
+    /// Bouts naming the agent, and those with the agent inside the pit.
+    bouts: u32,
+    bouts_present: u32,
+}
+
+/// One shift of the agent's job, as observed.
+#[derive(Clone, Copy)]
+struct ShiftObs {
+    start: Tick,
+    end: Tick,
+    len: u32,
+    work: u32,
+    /// A working day of the job (`routine::workday_of`), not a rest day.
+    workday: bool,
+    /// Opened at the shift's first minute (not mid-shift at the window's start).
+    whole: bool,
+    /// Never jailed during the shift.
+    free: bool,
 }
 
 impl Track {
@@ -454,6 +496,19 @@ impl Track {
             stat_minutes: 0,
             held_settles: 0,
             held_minutes: 0,
+            alive_min: 0,
+            work_min: 0,
+            sleep_run: 0,
+            sleep_blocks: Vec::new(),
+            energy0_min: 0,
+            shift: None,
+            shifts: Vec::new(),
+            wages: Vec::new(),
+            refunds: 0,
+            work_plan: None,
+            commute_aborts: 0,
+            bouts: 0,
+            bouts_present: 0,
         }
     }
 
@@ -850,6 +905,14 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         if matches!(e.kind, EventKind::Death) && e.actors.first() == Some(&id) && t.died.is_none() {
             t.died = Some(e.tick);
         }
+        // `[winner, loser, pit]`: a fighter's bout, and whether she was inside the pit for it.
+        if e.kind == EventKind::Bout && e.actors.iter().take(2).any(|&a| a == id) {
+            t.bouts += 1;
+            let pit = e.actors.get(2).copied();
+            if pit.is_some() && world.comp::<Position>(id).and_then(|p| p.building) == pit {
+                t.bouts_present += 1;
+            }
+        }
     }
     for e in dbg {
         if e.actors.first() != Some(&id) {
@@ -925,6 +988,13 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
                 e.0 += out;
                 e.1 += inn;
                 e.2 += 1;
+                use citysim::systems::ownership::Flow as F;
+                if *to == Some(id) && !*refund && matches!(flow, F::Wage | F::ExecWage) && *coins > 0 {
+                    t.wages.push(*tick);
+                }
+                if *to == Some(id) && *refund {
+                    t.refunds += 1;
+                }
                 if matches!(flow, citysim::systems::ownership::Flow::Tribute) && *to == Some(id) {
                     t.tribute_in += *coins;
                     t.log(
@@ -972,6 +1042,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
             t.log(now, "event", "died (corpse present)".into());
         }
         close_action(world, t, now, "agent died");
+        end_sleep_block(t, now);
         return;
     }
 
@@ -995,6 +1066,7 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     *t.use_by_day.entry(day).or_default().entry(act).or_insert(0) += 1;
     *t.day_places.entry(here.clone()).or_insert(0) += 1;
     *t.total_places.entry(here.clone()).or_insert(0) += 1;
+    behaviour_minute(world, t, now, act);
 
     if let Some(b) = world.comp::<Brain>(id) {
         if !t.pinned_lod_noted && b.lod == Lod::Full {
@@ -1371,6 +1443,65 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
     }
 }
 
+/// The behaviour tier's per-minute tallies (sleep blocks, energy 0, shifts,
+/// the Work plan's commute). Reads only; no RNG.
+fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) {
+    let id = t.id;
+    t.alive_min += 1;
+    if act == "work" {
+        t.work_min += 1;
+    }
+    if act == "sleep" {
+        t.sleep_run += 1;
+    } else {
+        end_sleep_block(t, now);
+    }
+    if world.comp::<Needs>(id).is_some_and(|n| n.energy <= 0.001) {
+        t.energy0_min += 1;
+    }
+    let jailed = world.has::<Sentence>(id);
+    let tod = (now % TICKS_PER_DAY) as u16;
+    match world.comp::<Job>(id) {
+        Some(j) if j.on_shift(tod) => {
+            let s = t.shift.get_or_insert_with(|| ShiftObs {
+                start: now,
+                end: now,
+                len: 0,
+                work: 0,
+                workday: citysim::exec::routine::workday_of(world, id, j, j.shift_key_at(now)),
+                whole: j.shifts.iter().any(|&(s, _)| s == tod),
+                free: true,
+            });
+            s.len += 1;
+            s.work += u32::from(act == "work");
+            s.free &= !jailed;
+            s.end = now;
+        }
+        _ => {
+            if let Some(s) = t.shift.take() {
+                t.shifts.push(s);
+            }
+        }
+    }
+    let Some(b) = world.comp::<Brain>(id) else { return };
+    // A run of the Work goal (successive Work plans included: the walk and the
+    // wait at the door, then the shift's own plan) that ends before a single
+    // work-class minute is a commute turned back.
+    if b.current_goal == Some(GoalKind::Work) {
+        let reached = t.work_plan.get_or_insert(false);
+        *reached |= act == "work";
+    } else if let Some(reached) = t.work_plan.take() {
+        t.commute_aborts += u32::from(!reached);
+    }
+}
+
+fn end_sleep_block(t: &mut Track, now: Tick) {
+    if t.sleep_run > 0 {
+        t.sleep_blocks.push((now, t.sleep_run));
+        t.sleep_run = 0;
+    }
+}
+
 /// Log up to three lines, then one line counting the rest (a gang-wide feud
 /// adjustment touches dozens of edges in one minute).
 fn log_grouped(t: &mut Track, now: Tick, cat: &'static str, msgs: Vec<String>, noun: &str) {
@@ -1611,18 +1742,19 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
 // ---------------------------------------------------------------------------
 
 pub fn shadow(args: ShadowArgs) -> Result<(), String> {
+    if args.assert {
+        let report = behaviour(args.out.as_deref())?;
+        print!("{}", report.text);
+        return if report.failures.is_empty() {
+            Ok(())
+        } else {
+            Err(format!("behaviour tier: {} failure(s): {:?}", report.failures.len(), report.failures))
+        };
+    }
     if !args.list && args.out.is_none() {
-        return Err("--out <dir> is required (or use --list)".into());
+        return Err("--out <dir> is required (or use --list or --assert)".into());
     }
-    let mut config = Config::load();
-    if args.life_off {
-        config.life = citysim::config::LifeCfg::off();
-    }
-    let mut world = World::new(args.seed, config);
-    let start_tick = args.start_day * TICKS_PER_DAY;
-    while world.tick < start_tick {
-        citysim::tick(&mut world);
-    }
+    let mut world = start_world(args.seed, args.start_day, args.life_off);
 
     if args.list {
         println!("seed {} day {}: candidates per archetype", args.seed, args.start_day);
@@ -1649,39 +1781,78 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
         return Ok(());
     }
 
-    // Picks.
+    let picked = pick(&world, args.seed, args.start_day, args.pick.as_deref(), args.count, &args.agents);
+    if picked.is_empty() {
+        return Err("nothing to shadow: no --pick candidates and no live --agent".into());
+    }
+    let dir = args.out.clone().unwrap_or_default();
+    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let mut tracks = follow(&mut world, &picked, args.days, !args.no_pin, true);
+    let end = world.tick;
+    let mut total = 0u64;
+    for t in &mut tracks {
+        let (md, jl) = write_diary(&world, t, &dir, end)?;
+        total += md + jl;
+        println!("{}_{}: {} ({} KB md, {} KB jsonl)", t.arch, t.id.index, t.name, md / 1024, jl / 1024);
+    }
+    println!("wrote {} diaries to {} ({} KB)", tracks.len(), dir.display(), total / 1024);
+    Ok(())
+}
+
+/// The world of `seed` run normally to the start of `start_day`.
+fn start_world(seed: u64, start_day: u64, life_off: bool) -> World {
+    let mut config = Config::load();
+    if life_off {
+        config.life = citysim::config::LifeCfg::off();
+    }
+    let mut world = World::new(seed, config);
+    let start_tick = start_day * TICKS_PER_DAY;
+    while world.tick < start_tick {
+        citysim::tick(&mut world);
+    }
+    world
+}
+
+/// The picks: `count` per archetype of the comma-separated `list` (free
+/// agents first, shuffled by the seed; the CEO list by treasury), then every
+/// live `--agent` index.
+fn pick(
+    world: &World,
+    seed: u64,
+    start_day: u64,
+    list: Option<&str>,
+    count: usize,
+    agents: &[u32],
+) -> Vec<(String, EntityId)> {
     let mut picked: Vec<(String, EntityId)> = Vec::new();
     let mut taken: BTreeSet<EntityId> = BTreeSet::new();
-    if let Some(list) = &args.pick {
+    if let Some(list) = list {
         for arch in list.split(',').map(str::trim).filter(|s| !s.is_empty()) {
-            match candidates(&world, arch) {
+            match candidates(world, arch) {
                 Err(e) => eprintln!("note: {e}"),
-                Ok(c) if c.is_empty() => {
-                    eprintln!("note: no {arch} candidates on seed {} at day {}", args.seed, args.start_day)
-                }
+                Ok(c) if c.is_empty() => eprintln!("note: no {arch} candidates on seed {seed} at day {start_day}"),
                 Ok(_) if arch == "child" => {
                     eprintln!("note: child is unpinnable (no Brain, no Full LOD); not picked (see --list)")
                 }
                 Ok(c) => {
                     if arch == "worker_friday" {
                         let friday = (world.config.leisure.collect_weekday + 6) % 7;
-                        if args.start_day % 7 != friday {
+                        if start_day % 7 != friday {
                             eprintln!(
-                                "note: worker_friday: day {} is weekday {}, not the Friday (weekday {friday}); the diary does not start on the Friday",
-                                args.start_day,
-                                args.start_day % 7
+                                "note: worker_friday: day {start_day} is weekday {}, not the Friday (weekday {friday}); the diary does not start on the Friday",
+                                start_day % 7
                             );
                         }
                     }
-                    let ordered = if arch == "ceo" { c } else { shuffled(c, args.seed, arch) };
+                    let ordered = if arch == "ceo" { c } else { shuffled(c, seed, arch) };
                     // L1 (the V1 tool note): free agents first; a jailed pick's
                     // week is the cells (V1's dealer and leader were inside).
                     let (free, jailed): (Vec<EntityId>, Vec<EntityId>) =
-                        ordered.into_iter().partition(|&id| is_free(&world, id));
+                        ordered.into_iter().partition(|&id| is_free(world, id));
                     let ordered: Vec<EntityId> = free.into_iter().chain(jailed).collect();
                     let mut n = 0;
                     for id in ordered {
-                        if n >= args.count {
+                        if n >= count {
                             break;
                         }
                         if taken.insert(id) {
@@ -1689,44 +1860,46 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
                             n += 1;
                         }
                     }
-                    if n < args.count {
-                        eprintln!("note: only {n} distinct {arch} candidate(s) (asked for {})", args.count);
+                    if n < count {
+                        eprintln!("note: only {n} distinct {arch} candidate(s) (asked for {count})");
                     }
                 }
             }
         }
     }
-    for &ix in &args.agents {
+    for &ix in agents {
         match world.citizens().into_iter().find(|c| c.index == ix) {
             Some(id) if world.has::<Identity>(id) && !world.has::<Corpse>(id) => {
                 if taken.insert(id) {
                     picked.push(("agent".into(), id));
                 }
             }
-            _ => eprintln!("note: agent {ix} is not alive at day {}", args.start_day),
+            _ => eprintln!("note: agent {ix} is not alive at day {start_day}"),
         }
     }
-    if picked.is_empty() {
-        return Err("nothing to shadow: no --pick candidates and no live --agent".into());
-    }
-    let dir = args.out.clone().unwrap_or_default();
-    std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    picked
+}
 
+/// Follow the picks for `days` from the world's tick, pinned unless
+/// `pin` is false; the tracks come back closed (the last day flushed).
+fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool, verbose: bool) -> Vec<Track> {
+    let start_tick = world.tick;
     world.shadow_notes = Some(Vec::new());
     let mut tracks: Vec<Track> = Vec::new();
-    for (arch, id) in &picked {
+    for (arch, id) in picked {
         let name = world.comp::<Identity>(*id).map_or("?".into(), |i| i.name.clone());
         let mut t = Track::new(*id, arch, name, start_tick);
-        t.pinned = !args.no_pin;
-        t.header = header(&world, &t);
-        t.last_place = place(&world, *id);
-        eprintln!("shadowing {arch}: {} (#{})", t.name, id.index);
+        t.pinned = pin;
+        t.header = header(world, &t);
+        t.last_place = place(world, *id);
+        if verbose {
+            eprintln!("shadowing {arch}: {} (#{})", t.name, id.index);
+        }
         tracks.push(t);
     }
-
-    let end_tick = start_tick + args.days * TICKS_PER_DAY;
+    let end_tick = start_tick + days * TICKS_PER_DAY;
     while world.tick < end_tick {
-        if !args.no_pin {
+        if pin {
             for t in &tracks {
                 if let Some(b) = world.comp_mut::<Brain>(t.id) {
                     b.pinned = true;
@@ -1737,29 +1910,463 @@ pub fn shadow(args: ShadowArgs) -> Result<(), String> {
         if let Some(n) = world.shadow_notes.as_mut() {
             n.clear();
         }
-        citysim::tick(&mut world);
+        citysim::tick(world);
         let now = world.tick - 1;
         let mut events: Vec<&Event> = world.events.iter().rev().take_while(|e| e.id >= cursor).collect();
         events.reverse();
         let dbg: Vec<&Event> = world.debug_events.iter().rev().take_while(|e| e.tick == now).collect();
         let notes: Vec<ShadowNote> = world.shadow_notes.clone().unwrap_or_default();
         for t in &mut tracks {
-            observe(&world, t, now, &events, &dbg, &notes);
+            observe(world, t, now, &events, &dbg, &notes);
         }
     }
     let end = world.tick;
-    let mut total = 0u64;
     for t in &mut tracks {
         // The last day's summary and any open action.
-        let now = end;
-        close_action(&world, t, now, "run ended");
-        flush_day(t, now);
-        let (md, jl) = write_diary(&world, t, &dir, end)?;
-        total += md + jl;
-        println!("{}_{}: {} ({} KB md, {} KB jsonl)", t.arch, t.id.index, t.name, md / 1024, jl / 1024);
+        close_action(world, t, end, "run ended");
+        flush_day(t, end);
+        end_sleep_block(t, end);
     }
-    println!("wrote {} diaries to {} ({} KB)", tracks.len(), dir.display(), total / 1024);
-    Ok(())
+    tracks
+}
+
+// ---------------------------------------------------------------------------
+// The behaviour tier (`shadow --assert`; docs/TESTING.md)
+// ---------------------------------------------------------------------------
+
+/// The behaviour tier's windows: seed 42, 7 days from day 19 (a Friday, so
+/// `worker_friday` starts on its Friday) with 3 of each archetype, and from
+/// day 90 (the gangs full) with 3 of each gang archetype: the V2 shadow
+/// pass's three commands' pinned rows (docs/SHADOW_V2.md).
+pub const BEHAVIOUR_SEED: u64 = 42;
+const BEHAVIOUR_DAYS: u64 = 7;
+const BEHAVIOUR_COUNT: usize = 3;
+const BEHAVIOUR_WINDOWS: [(u64, &str); 2] = [
+    (
+        19,
+        "gang_member,gang_leader,ripperdoc,homeless,ceo,guard,worker,runner,purist,dealer,reporter,cook,club_staff,fighter,fabber,sweeper,worker_friday",
+    ),
+    (90, "gang_member,gang_leader,dealer,runner,purist,homeless"),
+];
+
+/// One archetype's numbers over its picks in one window (sums, then rates).
+#[derive(Clone, Default)]
+struct Agg {
+    agents: u32,
+    alive_min: u64,
+    travel_min: u64,
+    sleep_min: u64,
+    work_min: u64,
+    energy0_min: u64,
+    /// The longest sleep block of each agent-night (noon to noon), minutes.
+    nights: Vec<u32>,
+    /// Whole workday shifts while free; of those worked (half the shift at work-class
+    /// steps); paid (a wage by two hours after the end); worked and paid.
+    shifts: u32,
+    worked: u32,
+    paid: u32,
+    worked_paid: u32,
+    hangouts: u32,
+    known_met: u32,
+    refunds: u32,
+    commute_aborts: u32,
+    bouts: u32,
+    bouts_present: u32,
+}
+
+impl Agg {
+    fn add(&mut self, t: &Track) {
+        self.agents += 1;
+        self.alive_min += u64::from(t.alive_min);
+        self.travel_min += u64::from(t.total_use.get("travel").copied().unwrap_or(0));
+        self.sleep_min += u64::from(t.total_use.get("sleep").copied().unwrap_or(0));
+        self.work_min += u64::from(t.work_min);
+        self.energy0_min += u64::from(t.energy0_min);
+        let mut by_night: BTreeMap<u64, u32> = BTreeMap::new();
+        for &(end, len) in &t.sleep_blocks {
+            let night = end.saturating_sub(TICKS_PER_DAY / 2) / TICKS_PER_DAY;
+            let e = by_night.entry(night).or_insert(0);
+            *e = (*e).max(len);
+        }
+        self.nights.extend(by_night.values());
+        for s in t.shifts.iter().filter(|s| s.whole && s.workday && s.free) {
+            let worked = s.work * 2 >= s.len;
+            let paid = t.wages.iter().any(|&w| w >= s.start && w <= s.end + 2 * TICKS_PER_HOUR);
+            self.shifts += 1;
+            self.worked += u32::from(worked);
+            self.paid += u32::from(paid);
+            self.worked_paid += u32::from(worked && paid);
+        }
+        self.hangouts += t.hangouts;
+        self.known_met += t.hang_known.len() as u32;
+        self.refunds += t.refunds;
+        self.commute_aborts += t.commute_aborts;
+        self.bouts += t.bouts;
+        self.bouts_present += t.bouts_present;
+    }
+
+    fn agent_days(&self) -> f64 {
+        self.alive_min as f64 / TICKS_PER_DAY as f64
+    }
+
+    /// The metric's value; `None` when the window gave it nothing to read
+    /// (no shifts, no nights, no bouts).
+    fn get(&self, m: Metric) -> Option<f64> {
+        let days = self.agent_days();
+        if days <= 0.0 {
+            return None;
+        }
+        let ratio = |a: u32, b: u32| (b > 0).then(|| f64::from(a) / f64::from(b));
+        match m {
+            Metric::WalkHDay => Some(self.travel_min as f64 / 60.0 / days),
+            Metric::SleepHDay => Some(self.sleep_min as f64 / 60.0 / days),
+            Metric::LongestSleepH => (!self.nights.is_empty())
+                .then(|| self.nights.iter().map(|&n| f64::from(n)).sum::<f64>() / 60.0 / self.nights.len() as f64),
+            Metric::Energy0HWeek => Some(self.energy0_min as f64 / 60.0 / days * 7.0),
+            Metric::WorkHDay => Some(self.work_min as f64 / 60.0 / days),
+            Metric::ShiftsWorkedShare => ratio(self.worked, self.shifts),
+            Metric::PaidOfWorked => ratio(self.worked_paid, self.worked),
+            Metric::WagedWorkdays => ratio(self.paid, self.shifts),
+            Metric::HangoutsWeek => Some(f64::from(self.hangouts) / days * 7.0),
+            Metric::KnownMetWeek => Some(f64::from(self.known_met) / days * 7.0),
+            Metric::RefundsWeek => Some(f64::from(self.refunds) / days * 7.0),
+            Metric::CommuteAbortsDay => Some(f64::from(self.commute_aborts) / days),
+            Metric::BoutsAttended => ratio(self.bouts_present, self.bouts),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Metric {
+    /// Travel-class hours a day.
+    WalkHDay,
+    /// Sleep-class hours a day.
+    SleepHDay,
+    /// The mean over agent-nights (noon to noon) of the night's longest sleep block, hours.
+    LongestSleepH,
+    /// Hours at energy 0 per agent-week.
+    Energy0HWeek,
+    /// Work-class hours a day.
+    WorkHDay,
+    /// Whole workday shifts (free) with half the shift at work-class steps.
+    ShiftsWorkedShare,
+    /// Worked shifts paid a wage by two hours after the shift's end.
+    PaidOfWorked,
+    /// Whole workday shifts (free) with a wage.
+    WagedWorkdays,
+    /// HangOut steps per agent-week.
+    HangoutsWeek,
+    /// Distinct known contacts met at a HangOut per agent-week.
+    KnownMetWeek,
+    /// Purchases refunded (a started buy undone) per agent-week.
+    RefundsWeek,
+    /// Work goals dropped before any work-class minute (a commute turned back), per agent-day.
+    CommuteAbortsDay,
+    /// Bouts with the fighter inside the pit, of the bouts naming her.
+    BoutsAttended,
+}
+
+const METRICS: [Metric; 13] = [
+    Metric::WalkHDay,
+    Metric::SleepHDay,
+    Metric::LongestSleepH,
+    Metric::Energy0HWeek,
+    Metric::WorkHDay,
+    Metric::ShiftsWorkedShare,
+    Metric::PaidOfWorked,
+    Metric::WagedWorkdays,
+    Metric::HangoutsWeek,
+    Metric::KnownMetWeek,
+    Metric::RefundsWeek,
+    Metric::CommuteAbortsDay,
+    Metric::BoutsAttended,
+];
+
+/// A bound: the value must be at least (`Min`) or at most (`Max`) it.
+#[derive(Clone, Copy)]
+enum Bound {
+    Min(f64),
+    Max(f64),
+}
+
+/// One behaviour check: (window start day, archetype, metric, bound, the
+/// value measured on main when the bound was set). Bounds are set so
+/// today's city passes with a margin: they catch a regression in "acts like
+/// a person", they are not targets.
+type Check = (u64, &'static str, Metric, Bound, f64);
+
+const CHECKS: &[Check] = &[
+    // Measured on main 38210ce (the violence fixes merged), 2026-10-09. Bounds: walking
+    // <= 1.4 x + 1 h, the longest nightly block >= 0.7 x, energy 0 <= measured + 6 h a week,
+    // known contacts met >= 0.5 x (where >= 2), refunds <= 1 a week, commute aborts <= 1.5 x
+    // + 0.5 a day, paid of worked shifts >= measured - 0.25, waged workdays >= measured - 0.3,
+    // the reporter at her desk >= 1 h a day, the fighter inside the pit for >= 3 bouts in 4.
+    // Archetypes with one pick (d19's runner, dead on day 19) are not judged.
+    (19, "ceo", Metric::WalkHDay, Bound::Max(6.7), 4.05),
+    (19, "ceo", Metric::LongestSleepH, Bound::Min(3.5), 5.11),
+    (19, "ceo", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "ceo", Metric::KnownMetWeek, Bound::Min(2.0), 4.00),
+    (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(1.8), 0.86),
+    (19, "club_staff", Metric::WalkHDay, Bound::Max(6.9), 4.17),
+    (19, "club_staff", Metric::LongestSleepH, Bound::Min(3.8), 5.52),
+    (19, "club_staff", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "club_staff", Metric::KnownMetWeek, Bound::Min(5.1), 10.33),
+    (19, "club_staff", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "club_staff", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "club_staff", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "club_staff", Metric::WagedWorkdays, Bound::Min(0.6), 0.93),
+    (19, "cook", Metric::WalkHDay, Bound::Max(8.4), 5.22),
+    (19, "cook", Metric::LongestSleepH, Bound::Min(3.3), 4.77),
+    (19, "cook", Metric::Energy0HWeek, Bound::Max(8.4), 2.38),
+    (19, "cook", Metric::KnownMetWeek, Bound::Min(12.8), 25.67),
+    (19, "cook", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "cook", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "cook", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "cook", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "fabber", Metric::WalkHDay, Bound::Max(7.5), 4.63),
+    (19, "fabber", Metric::LongestSleepH, Bound::Min(3.9), 5.64),
+    (19, "fabber", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "fabber", Metric::KnownMetWeek, Bound::Min(4.8), 9.67),
+    (19, "fabber", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "fabber", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "fabber", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "fabber", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "fighter", Metric::WalkHDay, Bound::Max(11.5), 7.47),
+    (19, "fighter", Metric::LongestSleepH, Bound::Min(3.5), 5.02),
+    (19, "fighter", Metric::Energy0HWeek, Bound::Max(7.6), 1.56),
+    (19, "fighter", Metric::KnownMetWeek, Bound::Min(4.5), 9.00),
+    (19, "fighter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "fighter", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.10),
+    (19, "fighter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "fighter", Metric::WagedWorkdays, Bound::Min(0.6), 0.93),
+    (19, "fighter", Metric::BoutsAttended, Bound::Min(0.75), 1.00),
+    (19, "gang_leader", Metric::WalkHDay, Bound::Max(9.5), 6.03),
+    (19, "gang_leader", Metric::LongestSleepH, Bound::Min(3.1), 4.44),
+    (19, "gang_leader", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "gang_leader", Metric::KnownMetWeek, Bound::Min(7.2), 14.50),
+    (19, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "gang_member", Metric::WalkHDay, Bound::Max(4.8), 2.70),
+    (19, "gang_member", Metric::LongestSleepH, Bound::Min(3.1), 4.51),
+    (19, "gang_member", Metric::Energy0HWeek, Bound::Max(10.6), 4.59),
+    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(1.8), 3.67),
+    (19, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.6), 0.05),
+    (19, "gang_member", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "gang_member", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "guard", Metric::WalkHDay, Bound::Max(11.9), 7.78),
+    (19, "guard", Metric::LongestSleepH, Bound::Min(3.5), 5.14),
+    (19, "guard", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "guard", Metric::KnownMetWeek, Bound::Min(5.5), 11.00),
+    (19, "guard", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "guard", Metric::CommuteAbortsDay, Bound::Max(0.6), 0.05),
+    (19, "guard", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "guard", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "homeless", Metric::WalkHDay, Bound::Max(8.4), 5.26),
+    (19, "homeless", Metric::LongestSleepH, Bound::Min(3.4), 4.98),
+    (19, "homeless", Metric::Energy0HWeek, Bound::Max(6.6), 0.59),
+    (19, "homeless", Metric::KnownMetWeek, Bound::Min(4.6), 9.33),
+    (19, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.8), 0.19),
+    (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.5), 0.88),
+    (19, "purist", Metric::WalkHDay, Bound::Max(7.0), 4.22),
+    (19, "purist", Metric::LongestSleepH, Bound::Min(3.6), 5.25),
+    (19, "purist", Metric::Energy0HWeek, Bound::Max(6.3), 0.23),
+    (19, "purist", Metric::KnownMetWeek, Bound::Min(2.7), 5.50),
+    (19, "purist", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "purist", Metric::CommuteAbortsDay, Bound::Max(0.8), 0.14),
+    (19, "purist", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "purist", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "reporter", Metric::WalkHDay, Bound::Max(7.7), 4.77),
+    (19, "reporter", Metric::LongestSleepH, Bound::Min(4.2), 6.05),
+    (19, "reporter", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "reporter", Metric::KnownMetWeek, Bound::Min(1.3), 2.63),
+    (19, "reporter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "reporter", Metric::CommuteAbortsDay, Bound::Max(1.0), 0.30),
+    (19, "reporter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "reporter", Metric::WagedWorkdays, Bound::Min(0.2), 0.55),
+    (19, "reporter", Metric::WorkHDay, Bound::Min(1.0), 4.07),
+    (19, "ripperdoc", Metric::WalkHDay, Bound::Max(10.3), 6.63),
+    (19, "ripperdoc", Metric::LongestSleepH, Bound::Min(3.9), 5.61),
+    (19, "ripperdoc", Metric::Energy0HWeek, Bound::Max(6.2), 0.19),
+    (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(6.1), 12.33),
+    (19, "ripperdoc", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "ripperdoc", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "ripperdoc", Metric::WagedWorkdays, Bound::Min(0.5), 0.89),
+    (19, "sweeper", Metric::WalkHDay, Bound::Max(10.4), 6.67),
+    (19, "sweeper", Metric::LongestSleepH, Bound::Min(3.1), 4.57),
+    (19, "sweeper", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (19, "sweeper", Metric::KnownMetWeek, Bound::Min(4.3), 8.67),
+    (19, "sweeper", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "sweeper", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "sweeper", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "sweeper", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (19, "worker", Metric::WalkHDay, Bound::Max(8.7), 5.45),
+    (19, "worker", Metric::LongestSleepH, Bound::Min(3.5), 5.09),
+    (19, "worker", Metric::Energy0HWeek, Bound::Max(6.1), 0.09),
+    (19, "worker", Metric::KnownMetWeek, Bound::Min(4.6), 9.33),
+    (19, "worker", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "worker", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (19, "worker", Metric::PaidOfWorked, Bound::Min(0.5), 0.82),
+    (19, "worker", Metric::WagedWorkdays, Bound::Min(0.5), 0.83),
+    (19, "worker_friday", Metric::WalkHDay, Bound::Max(11.5), 7.46),
+    (19, "worker_friday", Metric::LongestSleepH, Bound::Min(3.6), 5.20),
+    (19, "worker_friday", Metric::Energy0HWeek, Bound::Max(6.8), 0.78),
+    (19, "worker_friday", Metric::KnownMetWeek, Bound::Min(5.1), 10.33),
+    (19, "worker_friday", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (19, "worker_friday", Metric::CommuteAbortsDay, Bound::Max(1.2), 0.43),
+    (19, "worker_friday", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (19, "worker_friday", Metric::WagedWorkdays, Bound::Min(0.5), 0.88),
+    (90, "dealer", Metric::WalkHDay, Bound::Max(12.1), 7.89),
+    (90, "dealer", Metric::LongestSleepH, Bound::Min(3.7), 5.42),
+    (90, "dealer", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
+    (90, "dealer", Metric::KnownMetWeek, Bound::Min(4.7), 9.50),
+    (90, "dealer", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (90, "dealer", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (90, "gang_leader", Metric::WalkHDay, Bound::Max(15.9), 10.59),
+    (90, "gang_leader", Metric::LongestSleepH, Bound::Min(4.1), 5.94),
+    (90, "gang_leader", Metric::Energy0HWeek, Bound::Max(6.4), 0.32),
+    (90, "gang_leader", Metric::KnownMetWeek, Bound::Min(10.1), 20.33),
+    (90, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (90, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (90, "gang_member", Metric::WalkHDay, Bound::Max(14.5), 9.61),
+    (90, "gang_member", Metric::LongestSleepH, Bound::Min(4.2), 6.03),
+    (90, "gang_member", Metric::Energy0HWeek, Bound::Max(7.3), 1.28),
+    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(1.6), 3.33),
+    (90, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (90, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (90, "homeless", Metric::WalkHDay, Bound::Max(7.8), 4.83),
+    (90, "homeless", Metric::LongestSleepH, Bound::Min(4.0), 5.80),
+    (90, "homeless", Metric::Energy0HWeek, Bound::Max(7.8), 1.72),
+    (90, "homeless", Metric::KnownMetWeek, Bound::Min(7.6), 15.33),
+    (90, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (90, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (90, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (90, "homeless", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+    (90, "purist", Metric::WalkHDay, Bound::Max(11.8), 7.65),
+    (90, "purist", Metric::LongestSleepH, Bound::Min(4.0), 5.76),
+    (90, "purist", Metric::Energy0HWeek, Bound::Max(6.7), 0.64),
+    (90, "purist", Metric::KnownMetWeek, Bound::Min(12.3), 24.67),
+    (90, "purist", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (90, "purist", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (90, "runner", Metric::WalkHDay, Bound::Max(11.7), 7.62),
+    (90, "runner", Metric::LongestSleepH, Bound::Min(4.1), 5.92),
+    (90, "runner", Metric::Energy0HWeek, Bound::Max(7.1), 1.01),
+    (90, "runner", Metric::KnownMetWeek, Bound::Min(7.1), 14.33),
+    (90, "runner", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
+    (90, "runner", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
+    (90, "runner", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
+    (90, "runner", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
+];
+
+/// One behaviour window's result: its start day, the closed tracks, the world at its end.
+type WindowRun = Result<(u64, Vec<Track>, World), String>;
+
+/// What `behaviour` found: the printed table and the failed checks.
+pub struct BehaviourReport {
+    pub text: String,
+    pub failures: Vec<String>,
+}
+
+/// Run the behaviour tier's windows (in parallel threads), write the
+/// diaries under `out` if given, and judge `CHECKS`.
+pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, String> {
+    let runs: Vec<WindowRun> = std::thread::scope(|s| {
+        let hs: Vec<_> = BEHAVIOUR_WINDOWS
+            .iter()
+            .map(|&(day, list)| {
+                s.spawn(move || {
+                    let mut world = start_world(BEHAVIOUR_SEED, day, false);
+                    let picked = pick(&world, BEHAVIOUR_SEED, day, Some(list), BEHAVIOUR_COUNT, &[]);
+                    let tracks = follow(&mut world, &picked, BEHAVIOUR_DAYS, true, false);
+                    Ok((day, tracks, world))
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("a behaviour window panicked".into()))).collect()
+    });
+    let mut aggs: BTreeMap<(u64, String), Agg> = BTreeMap::new();
+    for r in runs {
+        let (day, mut tracks, world) = r?;
+        if let Some(dir) = out {
+            let dir = dir.join(format!("d{day}"));
+            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+            for t in &mut tracks {
+                write_diary(&world, t, &dir, world.tick)?;
+            }
+        }
+        for t in &tracks {
+            aggs.entry((day, t.arch.clone())).or_default().add(t);
+        }
+    }
+    let mut text = String::new();
+    let _ = writeln!(
+        text,
+        "behaviour tier: seed {BEHAVIOUR_SEED}, {BEHAVIOUR_DAYS} days, {BEHAVIOUR_COUNT} per archetype, pinned at Full"
+    );
+    let _ = write!(text, "{:<4} {:<14} {:>2}", "day", "archetype", "n");
+    for m in METRICS {
+        let _ = write!(text, " {:>9}", short(m));
+    }
+    let _ = writeln!(text);
+    for ((day, arch), a) in &aggs {
+        let _ = write!(text, "d{day:<3} {arch:<14} {:>2}", a.agents);
+        for m in METRICS {
+            match a.get(m) {
+                Some(v) => {
+                    let _ = write!(text, " {v:>9.2}");
+                }
+                None => {
+                    let _ = write!(text, " {:>9}", "-");
+                }
+            }
+        }
+        let _ = writeln!(text);
+    }
+    let mut failures = Vec::new();
+    for &(day, arch, m, bound, measured) in CHECKS {
+        let Some(a) = aggs.get(&(day, arch.to_string())) else {
+            let _ = writeln!(text, "SKIP d{day} {arch} {m:?}: no candidate in the window");
+            continue;
+        };
+        let Some(v) = a.get(m) else {
+            let _ = writeln!(text, "SKIP d{day} {arch} {m:?}: nothing to read");
+            continue;
+        };
+        let (ok, rule) = match bound {
+            Bound::Min(b) => (v >= b, format!(">= {b}")),
+            Bound::Max(b) => (v <= b, format!("<= {b}")),
+        };
+        let line = format!("d{day} {arch} {m:?} {v:.2} {rule} (measured {measured})");
+        let _ = writeln!(text, "{} {line}", if ok { "PASS" } else { "FAIL" });
+        if !ok {
+            failures.push(line);
+        }
+    }
+    Ok(BehaviourReport { text, failures })
+}
+
+fn short(m: Metric) -> &'static str {
+    match m {
+        Metric::WalkHDay => "walk_h/d",
+        Metric::SleepHDay => "sleep_h/d",
+        Metric::LongestSleepH => "longest_h",
+        Metric::Energy0HWeek => "e0_h/wk",
+        Metric::WorkHDay => "work_h/d",
+        Metric::ShiftsWorkedShare => "worked",
+        Metric::PaidOfWorked => "paid/wkd",
+        Metric::WagedWorkdays => "waged_wd",
+        Metric::HangoutsWeek => "hang/wk",
+        Metric::KnownMetWeek => "known/wk",
+        Metric::RefundsWeek => "refund/wk",
+        Metric::CommuteAbortsDay => "abort/d",
+        Metric::BoutsAttended => "bouts_at",
+    }
 }
 
 #[cfg(test)]
@@ -1781,6 +2388,7 @@ mod tests {
             list: false,
             life_off: false,
             no_pin: false,
+            assert: false,
         };
         shadow(args).expect("shadow runs");
         let md = std::fs::read_dir(&dir)
@@ -1817,6 +2425,18 @@ mod tests {
             assert!(text.contains(needle), "diary lacks {needle:?}");
         }
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The behaviour tier (docs/TESTING.md): the archetypes' diary metrics
+    /// against `CHECKS`. `#[ignore]` (two 2,000-resident windows, ~30 s
+    /// release): `cargo test --release -p citysim-cli -- --ignored behaviour`,
+    /// or `citysim-cli shadow --assert`.
+    #[test]
+    #[ignore]
+    fn test_behaviour_tier() {
+        let r = behaviour(None).expect("the behaviour windows run");
+        eprint!("{}", r.text);
+        assert!(r.failures.is_empty(), "behaviour tier failures: {:?}", r.failures);
     }
 
     #[test]

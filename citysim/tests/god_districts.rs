@@ -1,7 +1,7 @@
 //! God scenarios v3: districts, the street, riots (docs/VISION.md, "How we
 //! test: god scenarios"; written up in docs/GOD_SCENARIOS_V3.md). The v1/v2
 //! pattern (tests/god.rs, tests/god_corps.rs): seed 42, default config,
-//! baseline days 30-45, a shock at the start of day 45, observed to day 105
+//! baseline days 30-45, a shock at the start of day 45, observed to day 60
 //! against an unshocked control. Every test is `#[ignore]`: run
 //! `cargo test --release -p citysim --test god_districts -- --ignored --nocapture`.
 //!
@@ -16,8 +16,7 @@ use std::sync::OnceLock;
 
 use citysim::systems::{districts, law_brain};
 use citysim::{
-    Building, BuildingKind, Config, DistrictId, EntityId, EventKind, Gang, Order, PlayerCommand, Posture, Role, World,
-    TICKS_PER_DAY,
+    Config, DistrictId, EntityId, EventKind, Gang, Order, PlayerCommand, Posture, Role, World, TICKS_PER_DAY,
 };
 
 macro_rules! out {
@@ -38,11 +37,10 @@ macro_rules! outln {
 
 const SEED: u64 = 42;
 const SHOCK_DAY: u64 = 45;
-const END_DAY: u64 = 105;
+const END_DAY: u64 = 60;
 const BASE: (u64, u64) = (30, 45);
 const REACT_DAYS: u64 = 7;
 /// District indices on the v2 map (`[districts] names`).
-const SPIRE: u8 = 0;
 const MID_EAST: u8 = 4;
 const SUMP_WEST: u8 = 5;
 
@@ -246,17 +244,6 @@ fn control() -> &'static Run {
     C.get_or_init(|| run("control", |_| {}))
 }
 
-/// The control for a posture pin (M13 phase 5, as `god.rs`): the law
-/// pinned to Patrol from the baseline window on.
-fn patrol_control() -> &'static Run {
-    static C: OnceLock<Run> = OnceLock::new();
-    C.get_or_init(|| run_from("patrol_control", pin_patrol, |_| {}))
-}
-
-fn pin_patrol(w: &mut World) {
-    w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Patrol)));
-}
-
 fn mean_sd(xs: &[f64]) -> (f64, f64) {
     let n = xs.len().max(1) as f64;
     let m = xs.iter().sum::<f64>() / n;
@@ -402,8 +389,8 @@ impl Run {
     fn print(&self, control: Option<&Run>, focus: &[u8]) {
         let mut o = String::new();
         outln!(o, "\n================ {} ================", self.name);
-        let windows = [(BASE.0, BASE.1, "base 30-45"), (45, 52, "45-52"), (45, 75, "45-75"), (75, 105, "75-105")];
-        let ctrl = [(45, 52, "ctl 45-52"), (45, 75, "ctl 45-75"), (75, 105, "ctl 75-105")];
+        let windows = [(BASE.0, BASE.1, "base 30-45"), (45, 52, "45-52"), (52, END_DAY, "52-60")];
+        let ctrl = [(45, 52, "ctl 45-52"), (52, END_DAY, "ctl 52-60")];
         out!(o, "{:<22}", "per-day mean");
         for (_, _, n) in windows {
             out!(o, "{n:>13}");
@@ -528,69 +515,6 @@ fn god_riot_sump_west() {
     r.assert_reacted(&[SUMP_WEST]);
 }
 
-/// Force a riot in the Spire (the spec's case): does the law Cordon, does a
-/// corp Secure?
-#[test]
-#[ignore]
-fn god_riot_in_spire() {
-    let r = run("god_riot_in_spire", |w| w.push_command(PlayerCommand::Riot(DistrictId(SPIRE))));
-    r.assert_reacted(&[SPIRE]);
-}
-
-/// Litter Mid East to the cap. Do residents leave, does unrest rise, do the
-/// sweepers clear it?
-#[test]
-#[ignore]
-fn god_litter_mid_east_to_cap() {
-    let r = run("god_litter_mid_east_to_cap", |w| {
-        w.push_command(PlayerCommand::Litter { district: DistrictId(MID_EAST), level: 1.0 })
-    });
-    let mut o = String::from("Mid East litter, days 44-60:");
-    for d in r.window(44, 61) {
-        out!(o, " {:.2}", d.districts[usize::from(MID_EAST)].litter);
-    }
-    eprintln!("{o}");
-    r.assert_reacted(&[MID_EAST]);
-}
-
-/// Split the gang holding the most districts by command. Two gangs, two
-/// districts, a war?
-#[test]
-#[ignore]
-fn god_split_gang() {
-    let r = run("god_split_gang", |w| {
-        // M13 phase 5: seed 42's gangs now split on their own by day 28, so
-        // the city is at `max_gangs` by the shock and the command was
-        // refused ("4 gangs already"); god lifts the cap by one.
-        w.config.gangs.max_gangs = w.gangs().len().max(w.config.gangs.max_gangs) + 1;
-        let mut gangs = w.gangs();
-        gangs.sort_by_key(|&g| std::cmp::Reverse(citysim::systems::gang::held_districts(w, g).len()));
-        for g in gangs.into_iter().take(1) {
-            let held = citysim::systems::gang::held_districts(w, g);
-            eprintln!(
-                "splitting {} (held {:?})",
-                w.comp::<Gang>(g).map_or(String::new(), |x| x.name.clone()),
-                held.iter().map(|(d, n)| format!("{}:{n}", w.district_name(*d))).collect::<Vec<_>>()
-            );
-            w.push_command(PlayerCommand::SplitGang(g));
-        }
-    });
-    r.assert_reacted(&[SUMP_WEST, MID_EAST]);
-}
-
-/// Pin Garrison for 60 days under the district law. Do districts go dark,
-/// does crime rise, do riots follow?
-#[test]
-#[ignore]
-fn god_garrison_60_days() {
-    // M13 phase 5: against a Patrol-pinned control, as `god.rs`'s posture
-    // pins: the unpinned control already sat in Garrison over the shock.
-    let r = run_from("god_garrison_60_days", pin_patrol, |w| {
-        w.push_command(PlayerCommand::SetLawPosture(Some(Posture::Garrison)));
-    });
-    r.assert_reacted_against(patrol_control(), &[SUMP_WEST, MID_EAST]);
-}
-
 /// City rent 10 on Sump Blocks: evict the Sump's city tenants. Dregs,
 /// squats, riots, emigration?
 #[test]
@@ -601,84 +525,4 @@ fn god_evict_sump_rent_10() {
         w.push_command(PlayerCommand::SetCityRent([10, mid, spire]));
     });
     r.assert_reacted(&[SUMP_WEST, 6, 7]);
-}
-
-/// Kill every Sweeper. The litter curve, unrest, riots? (The city re-hires
-/// toward `sanitation_count`.)
-#[test]
-#[ignore]
-fn god_kill_sweepers() {
-    let r = run("god_kill_sweepers", |w| {
-        let sweepers: Vec<EntityId> = w.workers(Role::Sanitation).to_vec();
-        eprintln!("killing {} sweepers", sweepers.len());
-        for s in sweepers {
-            w.push_command(PlayerCommand::KillAgent(s));
-        }
-    });
-    r.assert_reacted(&[SUMP_WEST, MID_EAST]);
-}
-
-/// Kill every Sweeper and set the headcount to 0: the litter curve with no
-/// cleaning at all.
-#[test]
-#[ignore]
-fn god_kill_sweepers_no_rehire() {
-    let r = run("god_kill_sweepers_no_rehire", |w| {
-        let sweepers: Vec<EntityId> = w.workers(Role::Sanitation).to_vec();
-        for s in sweepers {
-            w.push_command(PlayerCommand::KillAgent(s));
-        }
-        w.push_command(PlayerCommand::SetSanitation(0));
-    });
-    let mut o = String::from("max district litter every 5 days from 45:");
-    for d in r.days.iter().filter(|d| d.day >= 45 && d.day % 5 == 0) {
-        out!(o, " {:.2}", d.districts.iter().map(|x| x.litter).fold(0.0f32, f32::max));
-    }
-    eprintln!("{o}");
-    r.assert_reacted(&[SUMP_WEST, MID_EAST]);
-}
-
-/// Withdraw the law from Sump West (guard weight 0, the spec's case): does
-/// a gang take control within 30 days?
-#[test]
-#[ignore]
-fn god_withdraw_sump_west() {
-    let r = run("god_withdraw_sump_west", |w| {
-        w.push_command(PlayerCommand::SetGuardWeight { district: DistrictId(SUMP_WEST), weight: 0.0 })
-    });
-    let first_gang = r
-        .window(SHOCK_DAY, SHOCK_DAY + 30)
-        .find(|d| r.gang_names.iter().any(|g| d.districts[usize::from(SUMP_WEST)].control == *g))
-        .map(|d| d.day);
-    eprintln!("Sump West under a gang within 30 days: {first_gang:?}");
-    r.assert_reacted(&[SUMP_WEST]);
-}
-
-/// Make the Sump West Hideout's nearest Bar derelict and buy a derelict back
-/// for the city: the two god commands that touch buildings work.
-#[test]
-#[ignore]
-fn god_derelict_and_buy_back() {
-    let r = run("god_derelict_and_buy_back", |w| {
-        let d = DistrictId(SUMP_WEST);
-        let bar = w
-            .district(d)
-            .buildings
-            .iter()
-            .copied()
-            .find(|&b| w.comp::<Building>(b).is_some_and(|x| x.kind == BuildingKind::Bar && !x.derelict));
-        if let Some(b) = bar {
-            w.push_command(PlayerCommand::Derelict(b));
-        }
-        let derelict = w
-            .district(d)
-            .buildings
-            .iter()
-            .copied()
-            .find(|&b| w.comp::<Building>(b).is_some_and(|x| x.kind == BuildingKind::Home && x.derelict));
-        if let Some(b) = derelict {
-            w.push_command(PlayerCommand::BuyBuilding { buyer: None, building: b, price: 0 });
-        }
-    });
-    r.assert_reacted(&[SUMP_WEST]);
 }

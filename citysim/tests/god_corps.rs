@@ -1,7 +1,7 @@
 //! God scenarios v2: corps, classes, the economy (docs/VISION.md, "How we
 //! test: god scenarios"; written up in docs/GOD_SCENARIOS_V2.md). The v1
 //! pattern (tests/god.rs): seed 42, default config, baseline days 30-45, a
-//! shock at the start of day 45, observed to day 105 against an unshocked
+//! shock at the start of day 45, observed to day 60 against an unshocked
 //! control. Every test is `#[ignore]`: run
 //! `cargo test --release -p citysim --test god_corps -- --ignored --nocapture`.
 //!
@@ -14,10 +14,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::OnceLock;
 
-use citysim::systems::{demography, founding, ownership};
+use citysim::systems::ownership;
 use citysim::{
-    Brain, Building, BuildingKind, Config, Corp, CorpOrder, EntityId, EventKind, Gang, GangMember, Job, Niche, Order,
-    Personality, PlayerCommand, Posture, Role, Sentence, Wallet, World, TICKS_PER_DAY,
+    Building, BuildingKind, Config, Corp, CorpOrder, EntityId, EventKind, Gang, Job, Niche, Order, Personality,
+    PlayerCommand, Posture, Role, World, TICKS_PER_DAY,
 };
 
 macro_rules! out {
@@ -38,7 +38,7 @@ macro_rules! outln {
 
 const SEED: u64 = 42;
 const SHOCK_DAY: u64 = 45;
-const END_DAY: u64 = 105;
+const END_DAY: u64 = 60;
 const BASE: (u64, u64) = (30, 45);
 const REACT_DAYS: u64 = 7;
 /// The seeded corps (`[corps]` rows).
@@ -57,14 +57,6 @@ struct CorpDay {
     exec_p: Option<(f32, f32, f32)>,
     /// The highest `price_level` over its niches.
     level: f32,
-}
-
-/// What the scenario's subject (an agent) holds at the end of a day.
-#[derive(Clone, Debug, Default)]
-struct Watch {
-    wallet: i64,
-    owned: usize,
-    corp: Option<(String, i64, usize, CorpOrder)>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -113,7 +105,6 @@ struct Day {
     lobbies: u32,
     undercuts: u32,
     city_treasury: i64,
-    watch: Option<Watch>,
 }
 
 type Series = (String, Box<dyn Fn(&Day) -> f64>);
@@ -211,16 +202,6 @@ fn snapshot(w: &World, d: &mut Day, gangs: &[EntityId]) {
     d.city_treasury = row.treasury;
 }
 
-fn watch(w: &World, a: EntityId) -> Watch {
-    let owned = w.with::<Building>().into_iter().filter(|&b| w.owner_of(b) == Some(a)).count();
-    let corp = w.corps().into_iter().find_map(|c| {
-        w.comp::<Corp>(c)
-            .filter(|cc| cc.exec == Some(a))
-            .map(|cc| (cc.name.clone(), cc.treasury, cc.buildings.len(), cc.order))
-    });
-    Watch { wallet: w.comp::<Wallet>(a).map_or(0, |x| x.coins), owned, corp }
-}
-
 /// Seed 42 to `END_DAY`; `setup` fires at the start of `BASE.0`, `shock` at
 /// the start of `SHOCK_DAY` and may name an agent to watch.
 fn run_from(
@@ -238,7 +219,6 @@ fn run_from(
         }
     }
     let (mut setup, mut shock) = (Some(setup), Some(shock));
-    let mut watched = None;
     let mut evicted: BTreeSet<EntityId> = BTreeSet::new();
     let (mut days, mut story) = (Vec::new(), Vec::new());
     let mut seen = 0;
@@ -247,7 +227,7 @@ fn run_from(
             (setup.take().expect("once"))(&mut w);
         }
         if day == SHOCK_DAY {
-            watched = (shock.take().expect("once"))(&mut w);
+            let _ = (shock.take().expect("once"))(&mut w);
         }
         w.run_ticks(TICKS_PER_DAY);
         let mut d = Day { day, ..Day::default() };
@@ -292,7 +272,6 @@ fn run_from(
         }
         seen = w.tick;
         snapshot(&w, &mut d, &gangs);
-        d.watch = watched.map(|a| watch(&w, a));
         days.push(d);
     }
     Run { name, corp_names, gang_names, days, story }
@@ -455,8 +434,8 @@ impl Run {
     fn print(&self, control: Option<&Run>) {
         let mut o = String::new();
         outln!(o, "\n================ {} ================", self.name);
-        let windows = [(BASE.0, BASE.1, "base 30-45"), (45, 52, "45-52"), (45, 75, "45-75"), (75, 105, "75-105")];
-        let ctrl = [(45, 52, "ctl 45-52"), (45, 75, "ctl 45-75"), (75, 105, "ctl 75-105")];
+        let windows = [(BASE.0, BASE.1, "base 30-45"), (45, 52, "45-52"), (52, END_DAY, "52-60")];
+        let ctrl = [(45, 52, "ctl 45-52"), (52, END_DAY, "ctl 52-60")];
         out!(o, "{:<18}", "per-day mean");
         for (_, _, n) in windows {
             out!(o, "{n:>13}");
@@ -557,17 +536,6 @@ impl Run {
         let r = self.reactions(c, REACT_DAYS);
         assert!(!r.is_empty(), "{}: nothing reacted within {REACT_DAYS} days of the shock", self.name);
     }
-
-    /// `name`: the shocked run's 45-75 mean against the control's, and
-    /// whether it moved by more than twice the baseline sd (a spiral link).
-    fn link(&self, name: &str, f: impl Fn(&Day) -> f64) -> String {
-        let c = control();
-        let (_, bsd) = mean_sd(&self.window(BASE.0, BASE.1).map(&f).collect::<Vec<_>>());
-        let (pm, _) = mean_sd(&self.window(45, 75).map(&f).collect::<Vec<_>>());
-        let (cm, _) = mean_sd(&c.window(45, 75).map(&f).collect::<Vec<_>>());
-        let moved = (pm - cm).abs() > 2.0 * bsd && (pm - cm).abs() > 1e-9;
-        format!("  {name:<28} {pm:>9.2} vs control {cm:>9.2} (base sd {bsd:.2}) {}", if moved { "MOVED" } else { "-" })
-    }
 }
 
 fn control() -> &'static Run {
@@ -607,42 +575,6 @@ fn god_corps_control() {
     control().print(None);
 }
 
-/// Bankrupt the largest Food corp. Who buys the Farms? Price spike? Famine?
-/// Do rivals Grow or Acquire? Does the law or a gang react?
-#[test]
-#[ignore]
-fn god_bankrupt_food_leader() {
-    let r = run("god_bankrupt_food_leader", |w| {
-        let c = by_holdings(w, Niche::Food, BuildingKind::Farm)[0];
-        eprintln!("bankrupting {}", describe(w, c));
-        w.push_command(PlayerCommand::BankruptCorp(c));
-        None
-    });
-    let mut o = String::from("Farm owners at day 46 / 60 / 104:\n");
-    for day in [46, 60, 104] {
-        let d = &r.days[day];
-        outln!(o, "  d{day}: markets {:?}", d.markets);
-    }
-    eprint!("{o}");
-    r.assert_reacted();
-}
-
-/// Give the smallest Food corp 200,000. Does it Acquire everything? A
-/// monopoly? Does anyone Undercut it? Do strikes or gangs answer a Squeeze?
-#[test]
-#[ignore]
-fn god_fund_corp_to_monopoly() {
-    let r = run("god_fund_corp_to_monopoly", |w| {
-        let c = *by_holdings(w, Niche::Food, BuildingKind::Farm).last().expect("a Food corp");
-        eprintln!("funding {}", describe(w, c));
-        w.push_command(PlayerCommand::FundCorp { corp: c, amount: 200_000 });
-        None
-    });
-    let first = r.days.iter().find(|d| d.day >= SHOCK_DAY && d.monopolies > 0).map(|d| d.day);
-    eprintln!("first monopoly day after the shock: {first:?}");
-    r.assert_reacted();
-}
-
 /// Kill the largest Food corp's exec. A new exec? A different personality,
 /// different orders? Does the corp read the loss as a shock?
 #[test]
@@ -673,76 +605,6 @@ fn god_kill_exec() {
     r.assert_reacted();
 }
 
-/// Kill every employee of the largest Food corp. Re-hire? Does the Market
-/// empty? Price?
-#[test]
-#[ignore]
-fn god_kill_staff() {
-    let r = run("god_kill_staff", |w| {
-        let c = by_holdings(w, Niche::Food, BuildingKind::Farm)[0];
-        eprintln!("killing the staff of {}", describe(w, c));
-        w.push_command(PlayerCommand::KillStaff(c));
-        None
-    });
-    let mut o = String::from("markets (price, stock, owner) days 44-52:\n");
-    for d in r.window(44, 53) {
-        outln!(o, "  d{}: {:?}", d.day, d.markets);
-    }
-    eprint!("{o}");
-    r.assert_reacted();
-}
-
-/// Give gang 0 every Block of the largest pure-Housing corp. Rent to the
-/// gang? Extortion? Law? Corp shock?
-#[test]
-#[ignore]
-fn god_seize_to_gang() {
-    let r = run("god_seize_to_gang", |w| {
-        let c = by_holdings(w, Niche::Housing, BuildingKind::Home)
-            .into_iter()
-            .find(|&c| w.comp::<Corp>(c).is_some_and(|cc| cc.niches.len() == 1))
-            .expect("a pure Housing corp");
-        let g = w.gangs()[0];
-        eprintln!("seizing every building of {} for {}", describe(w, c), w.owner_label(Some(g)));
-        w.push_command(PlayerCommand::SeizeBuildings { owner: Some(c), to: Some(g) });
-        None
-    });
-    r.assert_reacted();
-}
-
-/// City rent 4 on every tier, every Housing corp pinned to Squeeze in
-/// Housing for 30 days. Does the failure spiral close?
-#[test]
-#[ignore]
-fn god_rent_shock() {
-    let r = run("god_rent_shock", |w| {
-        w.push_command(PlayerCommand::SetCityRent([4, 4, 4]));
-        for c in w.corps() {
-            if w.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&Niche::Housing)) {
-                let (order, niche, days) = (CorpOrder::Squeeze, Some(Niche::Housing), 30);
-                w.push_command(PlayerCommand::SetCorpOrder { corp: c, order, niche, days });
-            }
-        }
-        None
-    });
-    let mut o = String::from("the spiral, 45-75 mean vs control:\n");
-    outln!(o, "{}", r.link("1 evictions", |d| f64::from(d.evictions)));
-    outln!(o, "{}", r.link("  rent short", |d| f64::from(d.rent_short)));
-    outln!(o, "{}", r.link("2 Dregs", |d| f64::from(d.classes[2].3)));
-    outln!(o, "{}", r.link("3 gang joins by evictees", |d| f64::from(d.evictee_joins)));
-    outln!(o, "{}", r.link("  gang members (all)", |d| d.gang_members.iter().sum::<usize>() as f64));
-    outln!(o, "{}", r.link("4 raids", |d| f64::from(d.raids)));
-    outln!(o, "{}", r.link("4 thefts", |d| f64::from(d.thefts)));
-    outln!(o, "{}", r.link("5 price mean", |d| d.price_mean));
-    outln!(o, "{}", r.link("6 Street unrest", |d| f64::from(d.classes[1].0)));
-    outln!(o, "{}", r.link("6 strikes", |d| f64::from(d.strikes)));
-    outln!(o, "{}", r.link("7 Lobby orders", |d| f64::from(d.lobbies)));
-    outln!(o, "{}", r.link("  emigrants", |d| f64::from(d.emigrants)));
-    outln!(o, "{}", r.link("  population", |d| f64::from(d.population)));
-    eprint!("{o}");
-    r.assert_reacted();
-}
-
 /// Every corp's treasury to 0 on the same day.
 #[test]
 #[ignore]
@@ -752,95 +614,4 @@ fn god_wipe_corps() {
         None
     });
     r.assert_reacted();
-}
-
-/// The city buys every Farm and Market (the Treasury is topped up by their
-/// value first, so it ends where it was).
-#[test]
-#[ignore]
-fn god_nationalise_food() {
-    let r = run("god_nationalise_food", |w| {
-        let targets: Vec<EntityId> = [BuildingKind::Farm, BuildingKind::Market]
-            .iter()
-            .flat_map(|&k| w.buildings_of_kind(k).to_vec())
-            .filter(|&b| w.owner_of(b).is_some())
-            .collect();
-        let cost: i64 =
-            targets.iter().filter_map(|&b| w.comp::<Building>(b).map(|bd| ownership::value(w, bd.kind))).sum();
-        let t = w.treasury().map_or(0, |t| t.coins);
-        eprintln!("nationalising {} buildings for {cost} (Treasury {t})", targets.len());
-        w.push_command(PlayerCommand::SetTreasury(t + cost));
-        for b in targets {
-            w.push_command(PlayerCommand::Nationalise(b));
-        }
-        None
-    });
-    r.assert_reacted();
-}
-
-/// The city never evicts, and every Block's rent is capped at 1.
-#[test]
-#[ignore]
-fn god_no_evictions_forever() {
-    let r = run("god_no_evictions_forever", |w| {
-        w.push_command(PlayerCommand::NoCityEvictions(true));
-        w.push_command(PlayerCommand::SetRentCap(Some(1)));
-        None
-    });
-    r.assert_reacted();
-}
-
-/// Can a player buy the city? An adult who may found (not an exec, not in
-/// a gang or the Jail, jobless or paid no more than the dole), picked by
-/// `key` (highest first), gets 1,000,000 coins (the Treasury is topped up
-/// first) and is pinned to Full detail, as a player character would be.
-/// Report the climb; nothing about its size is asserted.
-fn takeover(name: &'static str, key: fn(&World, EntityId) -> i64) {
-    let r = run(name, |w| {
-        let dole = i64::from(w.levers.dole_per_day);
-        let a = w
-            .citizens()
-            .into_iter()
-            .filter(|&a| w.has::<Brain>(a) && demography::is_adult(w, a))
-            .filter(|&a| !w.has::<GangMember>(a) && !w.has::<Sentence>(a) && !founding::is_exec(w, a))
-            .filter(|&a| w.comp::<Job>(a).is_none_or(|j| j.wage_per_day <= dole))
-            .max_by_key(|&a| (key(w, a), std::cmp::Reverse(a)))
-            .expect("someone");
-        let t = w.treasury().map_or(0, |t| t.coins);
-        eprintln!(
-            "{name}: granting 1,000,000 to {} (wallet {}, job {:?}, lod {:?}, {:?})",
-            w.name_of(a),
-            w.comp::<Wallet>(a).map_or(0, |x| x.coins),
-            w.comp::<Job>(a).map(|j| j.role),
-            w.comp::<Brain>(a).map(|b| b.lod),
-            w.comp::<Personality>(a)
-        );
-        w.push_command(PlayerCommand::SetTreasury(t + 1_000_000));
-        w.push_command(PlayerCommand::GrantCoins { agent: a, amount: 1_000_000 });
-        // A Statistical agent never thinks, so never takes up Found.
-        w.push_command(PlayerCommand::Pin(a, true));
-        Some(a)
-    });
-    let mut o = format!("{name}: the climb (wallet, buildings owned, corp: name/treasury/buildings/order):\n");
-    for d in r.days.iter().filter(|d| d.day >= SHOCK_DAY) {
-        if let Some(w) = &d.watch {
-            outln!(o, "  d{:<3} {:>8} {:>2} {:?}", d.day, w.wallet, w.owned, w.corp);
-        }
-    }
-    eprint!("{o}");
-    r.assert_reacted();
-}
-
-/// The richest eligible adult.
-#[test]
-#[ignore]
-fn god_takeover_by_wealth() {
-    takeover("god_takeover_by_wealth", |w, a| w.comp::<Wallet>(a).map_or(0, |x| x.coins));
-}
-
-/// The greediest eligible adult (the Found goal scores greed squared).
-#[test]
-#[ignore]
-fn god_takeover_by_wealth_greedy() {
-    takeover("god_takeover_by_wealth_greedy", |w, a| w.comp::<Personality>(a).map_or(0, |p| (p.greed * 1e6) as i64));
 }

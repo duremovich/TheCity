@@ -276,3 +276,35 @@ fn test_caps_on_change_no_kit_at_seed() {
     assert!(made > 0, "the guard compared Kits with at least one maker-capped asset");
     println!("{n} Kits compared; {made} assets with a maker");
 }
+
+/// M14 V31 (the core tier's rare-mechanism rule: a Lab built under Research
+/// fired on 2 of 6 seeds in 120 days, so it is judged here, not as an
+/// existence bullet): a corp that has held Research `research_build_days`
+/// with the cost in its purse and no Lab in its focus builds one on a Lot
+/// (`Founded ... (researching)`), owned by it, with the focus set.
+#[test]
+fn test_research_held_builds_a_lab_in_the_focus() {
+    let mut w = world();
+    let days = u64::from(w.config.tech.research_build_days);
+    w.run_ticks((days + 1) * TICKS_PER_DAY);
+    let c = w.corps().into_iter().find(|&c| tech::labs_of(&w, c).is_empty()).expect("a seeded corp without a Lab");
+    let cost = w.config.corps.found_cost.lab;
+    {
+        let k = w.comp_mut::<Corp>(c).expect("corp");
+        k.order = CorpOrder::Research;
+        k.order_since = 0;
+        k.treasury = k.treasury.max(cost + 1000);
+    }
+    let before = w.next_event_id;
+    citysim::systems::corp_brain::act(&mut w, c);
+    let built = w
+        .events
+        .iter()
+        .find(|e| e.id >= before && e.kind == EventKind::Founded && e.text.contains("(researching)"))
+        .expect("a Lab built under Research");
+    let lab = built.actors[1];
+    let bd = w.comp::<Building>(lab).expect("the Lab");
+    assert_eq!(bd.kind, BuildingKind::Lab);
+    assert_eq!(bd.owner, Some(c));
+    assert_eq!(bd.focus, Some(w.comp::<Corp>(c).expect("corp").tech.focus));
+}
