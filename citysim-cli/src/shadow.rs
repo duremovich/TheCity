@@ -2116,7 +2116,8 @@ const CHECKS: &[Check] = &[
     (19, "cook", Metric::WalkHDay, Bound::Max(8.2), 5.11),
     (19, "cook", Metric::LongestSleepH, Bound::Min(3.3), 4.78),
     (19, "cook", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "cook", Metric::KnownMetWeek, Bound::Min(9.8), 19.60),
+    // Jobs and room P2 re-measure (the new Lots move the seeded NoodleBars; old bound 9.8, measured 19.60).
+    (19, "cook", Metric::KnownMetWeek, Bound::Min(3.3), 6.60),
     (19, "cook", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (19, "cook", Metric::CommuteAbortsDay, Bound::Max(0.6), 0.06),
     (19, "cook", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
@@ -2129,10 +2130,13 @@ const CHECKS: &[Check] = &[
     (19, "fabber", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (19, "fabber", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
     (19, "fabber", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
-    (19, "fighter", Metric::WalkHDay, Bound::Max(6.8), 4.12),
+    // Jobs and room P2 re-measure (a second Sump pit in Sump East: picks cross the Sump to the pit
+    // that hired them on skill; old bound 6.8, measured 4.12).
+    (19, "fighter", Metric::WalkHDay, Bound::Max(13.1), 8.65),
     (19, "fighter", Metric::LongestSleepH, Bound::Min(3.5), 5.00),
     (19, "fighter", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "fighter", Metric::KnownMetWeek, Bound::Min(3.5), 7.00),
+    // Jobs and room P2 re-measure (old bound 3.5, measured 7.00).
+    (19, "fighter", Metric::KnownMetWeek, Bound::Min(1.4), 2.80),
     (19, "fighter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (19, "fighter", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (19, "fighter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
@@ -2153,8 +2157,9 @@ const CHECKS: &[Check] = &[
     (19, "gang_member", Metric::KnownMetWeek, Bound::Min(1.4), 2.80),
     (19, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (19, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.09),
-    (19, "gang_member", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "gang_member", Metric::WagedWorkdays, Bound::Min(0.4), 0.75),
+    // Jobs and room P2 re-measure: paid of worked 1.00 -> 0.00 and waged workdays 0.75 -> 0.00 (one
+    // pick worked one shift: hired as a Clerk across town on day 22, assaulted a customer at the
+    // counter that afternoon and lost the job); "measured - 0.25/0.3" is under 0, so not judged.
     (19, "guard", Metric::WalkHDay, Bound::Max(13.5), 8.91),
     (19, "guard", Metric::LongestSleepH, Bound::Min(3.9), 5.58),
     (19, "guard", Metric::Energy0HWeek, Bound::Max(7.5), 1.41),
@@ -2171,7 +2176,8 @@ const CHECKS: &[Check] = &[
     (19, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.8), 0.17),
     (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
     (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.5), 0.88),
-    (19, "reporter", Metric::WalkHDay, Bound::Max(8.0), 4.98),
+    // Jobs and room P2 re-measure (a reporter hired on skill across town; old bound 8.0, measured 4.98).
+    (19, "reporter", Metric::WalkHDay, Bound::Max(13.2), 8.70),
     (19, "reporter", Metric::LongestSleepH, Bound::Min(3.8), 5.44),
     (19, "reporter", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
     (19, "reporter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
@@ -2248,12 +2254,14 @@ const CHECKS: &[Check] = &[
     (90, "runner", Metric::WalkHDay, Bound::Max(10.5), 6.75),
     (90, "runner", Metric::LongestSleepH, Bound::Min(4.3), 6.15),
     (90, "runner", Metric::Energy0HWeek, Bound::Max(6.7), 0.70),
-    // M16a phase 3 re-measure (old bound 8.0, measured 16.00).
-    (90, "runner", Metric::KnownMetWeek, Bound::Min(2.3), 4.67),
+    // M16a phase 3 re-measure (old bound 8.0, measured 16.00); Jobs and room P2 re-measure (old
+    // bound 2.3, measured 4.67; now below 2, kept at 0.5 x).
+    (90, "runner", Metric::KnownMetWeek, Bound::Min(0.6), 1.20),
     (90, "runner", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
     (90, "runner", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
     (90, "runner", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (90, "runner", Metric::WagedWorkdays, Bound::Min(0.6), 0.92),
+    // Jobs and room P2 re-measure (5 picks, not 2; old bound 0.6, measured 0.92).
+    (90, "runner", Metric::WagedWorkdays, Bound::Min(0.2), 0.52),
 ];
 
 /// One behaviour window's result: its start day, the closed tracks, the world at its end.

@@ -312,6 +312,17 @@ pub fn draw(world: &World, app: &App) {
                     size,
                     hex(C_OUTLINE),
                 );
+                // Jobs and room J33: the floor count as a superscript beside the letter.
+                if b.floors > 1 {
+                    let floors = b.floors.to_string();
+                    draw_text(
+                        &floors,
+                        tl.x + w / 2.0 + dims.width / 2.0 + 1.0,
+                        tl.y + h / 2.0 - dims.height / 4.0,
+                        size * 0.55,
+                        hex(C_OUTLINE),
+                    );
+                }
             }
         }
         let n = inside.get(id.index as usize).copied().unwrap_or(0);

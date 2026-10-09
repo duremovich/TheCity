@@ -276,10 +276,13 @@ pub enum EventKind {
     // --- The Real economy phase 3a (plan E21, E44; amber).
     /// `[]`: the Treasury's tax band moved the tax rate a step.
     TaxMoved,
+    // --- Jobs and room P2 (plan J8; amber).
+    /// `[payer?, building]`: a storey added (`founding::add_floor`).
+    FloorAdded,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 139] = [
+    pub const ALL: [EventKind; 140] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -419,6 +422,7 @@ impl EventKind {
         EventKind::WageMoved,
         EventKind::LaidOff,
         EventKind::TaxMoved,
+        EventKind::FloorAdded,
     ];
 }
 

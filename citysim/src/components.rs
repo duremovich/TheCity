@@ -2273,10 +2273,29 @@ pub struct Building {
     /// unit produced, `wages::produce_inputs`).
     #[serde(default, skip_serializing_if = "is_zero_f32_c")]
     pub input_accum: f32,
+    /// Jobs and room J6: storeys. Floors multiply a workplace's places
+    /// (`jobs::places_of`) and a Home's, Hotel's or venue's seats
+    /// (`capacity`); they cost no pathfinding (the door is the one portal).
+    #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
+    pub floors: u8,
+    /// Jobs and room J8: consecutive midnights this building stood at its
+    /// staffing ceiling with its corp's room covering another floor's
+    /// staff (`wages::floor_pass`).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub floor_days: u8,
 }
 
 pub fn default_tier() -> u8 {
     1
+}
+
+/// Jobs and room J6: the serde default of `floors`.
+pub fn one_u8() -> u8 {
+    1
+}
+
+pub fn is_one_u8(v: &u8) -> bool {
+    *v == 1
 }
 
 impl Building {

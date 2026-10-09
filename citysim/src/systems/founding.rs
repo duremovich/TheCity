@@ -203,8 +203,12 @@ pub fn door_tier(world: &World, door: TilePos) -> u8 {
 /// kind, capacity `min(cfg, interior)` (a Hotel's beds), `tier`, the
 /// `buildings_by_kind` move, the owner, rent, the full staff posted as
 /// vacancies, a leisure kind's `Venue`, the flow fields and the districts.
+/// Jobs and room J7: the seats (`floor_seats` kinds) and the staff posted
+/// are per floor, × the building's `floors`.
 pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option<EntityId>, tier: u8) {
-    let Some((rect, old)) = world.comp::<Building>(b).map(|bd| (bd.rect, bd.kind)) else { return };
+    let Some((rect, old, floors)) = world.comp::<Building>(b).map(|bd| (bd.rect, bd.kind, bd.floors.max(1))) else {
+        return;
+    };
     let cfg = world.config.buildings.for_kind(kind).clone();
     let interior = usize::from(rect.w.saturating_sub(2)) * usize::from(rect.h.saturating_sub(2));
     let mut capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cfg.capacity);
@@ -212,6 +216,7 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
         // M12 D20: a bed per `[street] hotel_beds`, as the interior allows.
         capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(world.config.street.hotel_beds);
     }
+    let capacity = with_floors(kind, capacity, floors);
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.kind = kind;
         bd.capacity = capacity;
@@ -233,7 +238,8 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
     }
     if let Some(role) = crate::systems::ownership::role_for(kind) {
         if cfg.staff > 0 {
-            world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, cfg.staff as usize));
+            let n = cfg.staff as usize * usize::from(floors);
+            world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, n));
         }
     }
     // L2 L4: a leisure kind opens with today's price (no building of these
@@ -255,6 +261,72 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
     world.invalidate_flow_fields_for_lot(rect);
     // M12 D1: a new Block joins its district's `homes`.
     crate::systems::districts::rebuild(world);
+}
+
+// ---------------------------------------------------------------------------
+// Floors (Jobs and room § 2.3, plan J6-J8)
+// ---------------------------------------------------------------------------
+
+/// J7: the kinds whose seats or beds floors multiply: Blocks, Hotels and
+/// the leisure venues (a Farm's or Market's `capacity` is its visitors'
+/// room and its stock cap is not multiplied).
+pub fn floor_seats(kind: BuildingKind) -> bool {
+    matches!(kind, BuildingKind::Home | BuildingKind::Hotel) || kind.is_leisure()
+}
+
+/// J7: one floor's `capacity` × `floors` for a [`floor_seats`] kind,
+/// clamped at 255 (`capacity` is a `u8`); `per_floor` otherwise.
+pub fn with_floors(kind: BuildingKind, per_floor: u8, floors: u8) -> u8 {
+    if !floor_seats(kind) || floors <= 1 {
+        return per_floor;
+    }
+    u8::try_from(usize::from(per_floor) * usize::from(floors)).unwrap_or(u8::MAX)
+}
+
+/// J8: what a floor on a `kind` costs: `floor_cost_frac × found_cost`
+/// (`None` for a kind no one can found, so no one can build up).
+pub fn floor_cost(world: &World, kind: BuildingKind) -> Option<i64> {
+    let cost = found_cost(world, kind)?;
+    Some((world.config.floors.floor_cost_frac * cost as f32).round() as i64)
+}
+
+/// J8 `AddFloor`: `b` gains a storey paid by `payer` ([`floor_cost`] to
+/// the Treasury, `Flow::Found`, until P4's Construction Yard). The
+/// building must stand (not demolished, derelict or a Lot), be under its
+/// kind's `[floors] floors_max` and the payer must hold the cost. Seats
+/// grow by one floor's worth (clamped at 255); the new floor's places are
+/// posted by the staffing passes (`jobs::places_of`). `FloorAdded` is logged.
+pub fn add_floor(world: &mut World, b: EntityId, payer: Option<EntityId>) -> Result<(), String> {
+    let Some(bd) = world.comp::<Building>(b) else { return Err("no such building".into()) };
+    if bd.demolished || bd.derelict || bd.kind == BuildingKind::Lot {
+        return Err(format!("{} is not a standing building", world.name_of(b)));
+    }
+    let (kind, floors, capacity) = (bd.kind, bd.floors.max(1), bd.capacity);
+    let max = world.config.floors.max_for(kind);
+    if floors >= max {
+        return Err(format!("{} already has {floors} floors (max {max})", world.name_of(b)));
+    }
+    let cost = floor_cost(world, kind).ok_or_else(|| format!("no one builds up a {}", kind.label()))?;
+    if payer.is_some() && world.purse(payer) < cost {
+        return Err(format!("{} cannot pay {cost}", world.owner_label(payer)));
+    }
+    let per_floor = capacity / floors;
+    let new_capacity = with_floors(kind, per_floor, floors + 1).max(capacity);
+    if let Some(bd) = world.comp_mut::<Building>(b) {
+        bd.floors = floors + 1;
+        bd.capacity = new_capacity;
+        bd.floor_days = 0;
+    }
+    let paid = if payer.is_some() && cost > 0 { ownership::pay(world, payer, None, cost, Flow::Found) } else { 0 };
+    let (who, what) = (world.owner_label(payer), world.name_of(b));
+    let mut actors: Vec<EntityId> = payer.into_iter().collect();
+    actors.push(b);
+    world.push_event(
+        EventKind::FloorAdded,
+        &actors,
+        format!("{who} added a floor to {what} (now {} floors) for {paid}", floors + 1),
+    );
+    Ok(())
 }
 
 /// L2 L6: may a derelict in district tier `tier` be refitted as `kind`?

@@ -316,7 +316,7 @@ impl HiringDemand {
 
 /// J2 (ruling 2026-10-09): every standing staffed building the corp would
 /// post to ([`post`]'s demand predicate, `hire_demand`) holds its ceiling
-/// ([`staff_ceiling`] + Farm overtime) in staff (the exec not counted) and
+/// ([`ceiling_at`] + Farm overtime) in staff (the exec not counted) and
 /// open places: hiring has nowhere left to go. A building whose niche
 /// lacks demand is not counted (it would never post, and would freeze the
 /// corp's pay). False when no building counts.
@@ -337,7 +337,8 @@ pub fn at_ceiling(world: &World, corp: EntityId) -> bool {
         }
         let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
         let (hires, open) = places(world, b, role, c.exec);
-        if hires.len() + open < staff_ceiling(world, kind) + extra {
+        // Jobs and room J7: the per-building ceiling, floors included.
+        if hires.len() + open < ceiling_at(world, b, role) + extra {
             return false;
         }
         any = true;
@@ -469,6 +470,19 @@ pub fn staff_ceiling(world: &World, kind: BuildingKind) -> usize {
     ((full as f32 * mult).ceil() as usize).max(full)
 }
 
+/// Jobs and room J7: `b`'s staffing ceiling in `role`, per building:
+/// `ceil(places_of × staff_ceiling_mult)` (never under `places_of`), so a
+/// building's floors raise its ceiling as they raise its full staff.
+/// [`staff_ceiling`] stays the one-floor figure of a kind.
+pub fn ceiling_at(world: &World, b: EntityId, role: Role) -> usize {
+    let full = crate::systems::jobs::places_of(world, b, role);
+    let mult = world.config.economy2.staff_ceiling_mult;
+    if mult <= 1.0 {
+        return full;
+    }
+    ((full as f32 * mult).ceil() as usize).max(full)
+}
+
 /// The jobs round: a building's `role` staff as the margin rule counts it
 /// (the corp's exec never counted, in [`post`] and [`shed_extra`] alike),
 /// oldest first, and its open `role` vacancies.
@@ -521,8 +535,9 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
         let Some(role) = ownership::role_for(kind) else { continue };
         let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
-        let cap = crate::systems::corp_brain::full_staff(world, kind) + extra;
-        let ceiling = staff_ceiling(world, kind) + extra;
+        // Jobs and room J7: per building, floors included.
+        let cap = crate::systems::jobs::places_of(world, b, role) + extra;
+        let ceiling = ceiling_at(world, b, role) + extra;
         let (hires, open) = places(world, b, role, exec);
         let marginal = world.config.economy.wage(role) as f32 * rev_mult;
         room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
@@ -613,8 +628,9 @@ fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: boo
         }
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
         let Some(role) = ownership::role_for(kind) else { continue };
+        // Jobs and room J7: per building, floors included.
         let cap =
-            crate::systems::corp_brain::full_staff(world, kind) + if kind == BuildingKind::Farm { overtime } else { 0 };
+            crate::systems::jobs::places_of(world, b, role) + if kind == BuildingKind::Farm { overtime } else { 0 };
         let (hires, _) = places(world, b, role, exec);
         withdraw_past_cap(world, b, role, cap, hires.len());
         if !lay_off_one || hires.len() <= cap {
@@ -664,6 +680,11 @@ pub fn staff(world: &mut World) {
         c.hire_days = if below { c.hire_days.saturating_add(1) } else { 0 };
         c.fire_days = if above { c.fire_days.saturating_add(1) } else { 0 };
         let (hire_days, fire_days, wage_rev) = (c.hire_days, c.fire_days, c.wage_rev);
+        // Jobs and room J8: a corp at a building's ceiling with room for
+        // another floor's staff builds up (a lean corp's counts reset).
+        let lean_now = lean(world, corp, r, p);
+        let room = if lean_now { 0.0 } else { cfg.hire_below * target - p };
+        floor_pass(world, corp, order, room, r, p);
         // The jobs round: a lean corp posts nothing and closes its open
         // past-cap places at once; over the margin for `HIRE_DAYS` (the
         // debounce: the 7-day P lags its own layoffs) it sheds a past-cap
@@ -686,6 +707,78 @@ pub fn staff(world: &mut World) {
             lay_off(world, corp);
         }
     }
+}
+
+/// Jobs and room J8, the `AddFloor` trigger (from [`staff`], per corp at
+/// midnight): each standing building of the corp counts the midnights it
+/// stands at its ceiling ([`ceiling_at`] + Farm overtime, the exec not
+/// counted) while `room` covers one more floor's places at the marginal
+/// wage and its kind may go higher (`[floors] floors_max`, a
+/// `founding::floor_cost`); any other midnight resets the count. Once a
+/// building's count reaches `[floors] floor_days`, the corp (lowest id
+/// first, one building a pass) adds a floor when its construction
+/// cooldown (`Corp.last_build_tick`, Grow's, `[corps] grow_cooldown_days`)
+/// has run, its purse holds the cost plus `capital_lo_days × max(R, P)`,
+/// and no vacant Lot lies within `[floors] lot_reach` of the door (else
+/// Grow builds on the Lot). Returns whether a floor went up.
+pub fn floor_pass(world: &mut World, corp: EntityId, order: f32, room: f32, r: f32, p: f32) -> bool {
+    let Some(c) = world.comp::<Corp>(corp) else { return false };
+    let (buildings, exec, last_build) = (c.buildings.clone(), c.exec, c.last_build_tick);
+    let rev_mult = c.wage_mult * c.wage_rev;
+    let fcfg = world.config.floors.clone();
+    let overtime = farm_overtime(world, corp, order);
+    let mut ready = Vec::new();
+    for b in buildings {
+        let Some((kind, floors)) =
+            world.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| (bd.kind, bd.floors.max(1)))
+        else {
+            continue;
+        };
+        let mut grows = false;
+        if let Some(role) = ownership::role_for(kind) {
+            let per_floor = crate::systems::corp_brain::full_staff(world, kind);
+            let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
+            let (hires, open) = places(world, b, role, exec);
+            let at_ceiling = per_floor > 0 && hires.len() + open >= ceiling_at(world, b, role) + extra;
+            let marginal = world.config.economy.wage(role) as f32 * rev_mult;
+            let covers = room > 0.0 && room >= per_floor as f32 * marginal;
+            let higher = floors < fcfg.max_for(kind) && crate::systems::founding::floor_cost(world, kind).is_some();
+            grows = at_ceiling && covers && higher;
+        }
+        let Some(bd) = world.comp_mut::<Building>(b) else { continue };
+        bd.floor_days = if grows { bd.floor_days.saturating_add(1) } else { 0 };
+        if grows && bd.floor_days >= fcfg.floor_days {
+            ready.push((b, kind, bd.door));
+        }
+    }
+    if ready.is_empty() {
+        return false;
+    }
+    let now = world.tick;
+    let cd = world.config.corps.grow_cooldown_days * TICKS_PER_DAY;
+    if last_build.is_some_and(|t| now.saturating_sub(t) < cd) {
+        return false;
+    }
+    let reserve = (world.config.economy2.capital_lo_days.max(0.0) * r.max(p).max(0.0)).ceil() as i64;
+    let lots: Vec<crate::components::TilePos> = crate::systems::founding::vacant_lots(world)
+        .into_iter()
+        .filter_map(|l| world.comp::<Building>(l).map(|bd| bd.door))
+        .collect();
+    // The first ready building (lowest id) with no vacant Lot in reach that
+    // the purse covers.
+    let pick = ready.into_iter().find(|&(_, kind, door)| {
+        let cost = crate::systems::founding::floor_cost(world, kind).unwrap_or(i64::MAX);
+        world.purse(Some(corp)) >= cost.saturating_add(reserve)
+            && lots.iter().all(|l| l.manhattan(door) > fcfg.lot_reach)
+    });
+    let Some((b, _, _)) = pick else { return false };
+    if crate::systems::founding::add_floor(world, b, Some(corp)).is_err() {
+        return false;
+    }
+    if let Some(c) = world.comp_mut::<Corp>(corp) {
+        c.last_build_tick = Some(now);
+    }
+    true
 }
 
 /// E20: the venues' price pass: `× (1 + venue_wage_pass × (mean wage_rev − 1))`.

@@ -188,6 +188,9 @@ pub struct Config {
     /// the tax band (phase 3a).
     #[serde(default)]
     pub treasury: TreasuryCfg,
+    /// Jobs and room (docs/JOBS_V2.md § 2.3, plan J6-J8): floors.
+    #[serde(default)]
+    pub floors: FloorsCfg,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5536,5 +5539,51 @@ impl Default for CampCfg {
             loyal_share: 0.9,
             grudge_share: 0.7,
         }
+    }
+}
+
+/// Jobs and room § 2.3 (plan J7, J8) `[floors]`: what a floor costs, when a
+/// corp adds one, and how high each kind may go.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FloorsCfg {
+    /// J8: a floor costs this × the kind's `found_cost`.
+    pub floor_cost_frac: f32,
+    /// J8: midnights at the ceiling with room for a floor's staff before a corp adds one.
+    pub floor_days: u8,
+    /// J8: a corp adds a floor only with no vacant Lot within this many
+    /// tiles (Manhattan, door to door) of the building.
+    pub lot_reach: u32,
+    /// J8: the highest a kind may go, keyed by the map's kind names
+    /// (`BuildingKind::parse`); a kind not listed stays at one floor.
+    pub floors_max: std::collections::BTreeMap<String, u8>,
+}
+
+impl Default for FloorsCfg {
+    fn default() -> Self {
+        let max = [
+            ("Farm", 3),
+            ("Fab", 3),
+            ("Home", 6),
+            ("Club", 2),
+            ("Arcade", 2),
+            ("NoodleBar", 2),
+            ("FightPit", 2),
+            ("Den", 2),
+            ("Lounge", 2),
+        ];
+        FloorsCfg {
+            floor_cost_frac: 0.6,
+            floor_days: 7,
+            lot_reach: 48,
+            floors_max: max.into_iter().map(|(k, v)| (k.to_string(), v)).collect(),
+        }
+    }
+}
+
+impl FloorsCfg {
+    /// J8: the most floors a `kind` may have (1 when not listed).
+    pub fn max_for(&self, kind: BuildingKind) -> u8 {
+        self.floors_max.iter().find(|(k, _)| BuildingKind::parse(k) == Some(kind)).map_or(1, |(_, &v)| v.max(1))
     }
 }

@@ -917,7 +917,8 @@ fn staff_up(world: &mut World, corp: EntityId) {
     for b in buildings {
         let Some(kind) = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| bd.kind) else { continue };
         let Some(role) = ownership::role_for(kind) else { continue };
-        let staff = full_staff(world, kind);
+        // Jobs and room J7: full staff per floor × the building's floors.
+        let staff = crate::systems::jobs::places_of(world, b, role);
         let open = world.vacancies.get(&b).map_or(0, |v| v.len());
         let have = employed.get(&b).copied().unwrap_or(0) + open;
         if have < staff {
@@ -949,8 +950,9 @@ fn hunker_vacancies(world: &mut World, corp: EntityId) {
         ownership::staff_by_building(world, &buildings).into_iter().map(|(b, v)| (b, v.len())).collect();
     for b in buildings {
         let Some(open) = world.vacancies.get(&b).map(|v| v.len()) else { continue };
-        let kind = world.comp::<Building>(b).map(|bd| bd.kind);
-        let half = kind.map_or(0, |k| full_staff(world, k).div_ceil(2));
+        // Jobs and room J7: half of every floor's places.
+        let role = world.comp::<Building>(b).and_then(|bd| ownership::role_for(bd.kind));
+        let half = role.map_or(0, |r| crate::systems::jobs::places_of(world, b, r).div_ceil(2));
         let keep = half.saturating_sub(employed.get(&b).copied().unwrap_or(0)).min(open);
         if keep == 0 {
             world.vacancies.remove(&b);
@@ -978,7 +980,8 @@ fn hunker_staff(world: &mut World, corp: EntityId) {
         if kind == BuildingKind::Farm && world.config.corps.hunker_spares_farms {
             continue;
         }
-        let full = full_staff(world, kind);
+        // Jobs and room J7: half of every floor's places.
+        let full = ownership::role_for(kind).map_or(0, |r| crate::systems::jobs::places_of(world, b, r));
         if full == 0 || list.len() <= full / 2 {
             continue;
         }

@@ -8,8 +8,9 @@ use crate::world::World;
 /// The save format, bumped when the saved shape changes (`World::save_version`).
 /// 4: the Real economy (the World's books, `wage_rev` and the revenue windows,
 /// Missions, Camps, the till). Older saves are not loaded: the legacy
-/// migrations retired with the off switches (2026-10-09).
-pub const SAVE_VERSION: u8 = 4;
+/// migrations retired with the off switches (2026-10-09). 5: Jobs and room P2
+/// (`Building.floors`, `floor_days`, `MapBuilding.floors`; serde defaults).
+pub const SAVE_VERSION: u8 = 5;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -1910,3 +1910,14 @@ tax_step = 0.01
 band = [8000, 25000]
 tax_initial = 0.05                   # phase 3a (plan key): the rate a no_net city opens with (negative: [levers] tax_rate)
 scrap_coins = 3                      # phase 3a (plan key): a find paid from the Recycler's till with no_net (0: [life] scavenge_coins)
+
+# Jobs and room (docs/JOBS_V2.md § 2.3, plan J6-J8): floors. A floor multiplies a workplace's places
+# (jobs::places_of) and a Block's, Hotel's or venue's seats; it costs no pathfinding. A corp at its
+# staffing ceiling whose room covers another floor's staff for floor_days midnights, with no vacant
+# Lot within lot_reach tiles of the building, adds one (wages::staff; paid to the Treasury as
+# Flow::Found until P4's Construction Yard). Placeholders.
+[floors]
+floor_cost_frac = 0.6
+floor_days = 7
+lot_reach = 48
+floors_max = { Farm = 3, Fab = 3, Home = 6, Club = 2, Arcade = 2, NoodleBar = 2, FightPit = 2, Den = 2, Lounge = 2 }

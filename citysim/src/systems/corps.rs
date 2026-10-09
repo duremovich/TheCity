@@ -242,7 +242,8 @@ fn close_office(world: &mut World, office: EntityId) {
 /// stay with it (D30) and the new owner posts the rest.
 fn staff_moved(world: &mut World, b: EntityId, kind: BuildingKind) {
     let Some(role) = ownership::role_for(kind) else { return };
-    let full = corp_brain::full_staff(world, kind);
+    // Jobs and room J7: full staff per floor × the building's floors.
+    let full = crate::systems::jobs::places_of(world, b, role);
     let employed = ownership::staff_at(world, b).len();
     let open = world.vacancies.get(&b).map_or(0, |v| v.len());
     if employed + open < full {
