@@ -4202,6 +4202,33 @@ pub struct LifeCfg {
     pub hack_gap_wealth: f32,
     /// Item 19: Beg at a HangOut spot with company.
     pub beg_at_spot: bool,
+    /// The violence fixes (2026-10-09, the wages-on diagnosis): three
+    /// missing mechanisms that inflated off-screen killings and chrome
+    /// episodes. Master switch; off (`LifeCfg::off`, a pre-fix save,
+    /// `--life-off`, and `--l2-off` through `Config::living_off`) is the
+    /// 644eb10 city byte for byte. The sub-switches are read only with it
+    /// on; `CITYSIM_VFIX_OFF=1,3` leaves single items off.
+    pub violence_fixes: bool,
+    /// Item 1: the ledger's `VictimClass::Street` (no Home): what evictees
+    /// suffer on screen is learned and applied to the homeless only, not
+    /// to every housed civilian of the district.
+    pub vf_street_class: bool,
+    /// ... its prior: the civilian class's (`[fviolence] class_mult`
+    /// civilian) times this, per kind.
+    pub vf_street_prior_mult: f32,
+    /// Item 2: a riot's or an episode's rates are scaled by the hours it
+    /// was live that day ÷ 24 (exposure is learned per 24 body-hours).
+    pub vf_short_sources: bool,
+    /// Item 3: no chrome purchase whose projected load takes the target
+    /// sanity under `[chrome] psycho` (gang members, guards and Fighters
+    /// excepted), and courage alone no longer unlocks the five-slot list.
+    pub vf_chrome_cap: bool,
+    /// Item 4: rent taken from a wage or the dole (`[rent] pay_from_income`)
+    /// leaves an agent in arrears a meal's worth (`mean_price`) first.
+    pub vf_rent_meal: bool,
+    /// Item 5: an immigrant arrives with a seeded adult's savings for its
+    /// Home's tier (`demography::spawn_immigrant`), crossed in from the World.
+    pub vf_arrival: bool,
 }
 
 impl Default for LifeCfg {
@@ -4277,6 +4304,13 @@ impl LifeCfg {
             told_cooldown_days: 3,
             hack_gap_wealth: 0.9,
             beg_at_spot: true,
+            violence_fixes: false,
+            vf_street_class: true,
+            vf_street_prior_mult: 3.0,
+            vf_short_sources: true,
+            vf_chrome_cap: true,
+            vf_rent_meal: true,
+            vf_arrival: true,
         }
     }
 }
@@ -5011,6 +5045,9 @@ impl Config {
         self.lod.budget = false;
         // The L2 shadow fixes ride `[life]` but are L2's: off with it.
         self.life.l2_fixes = false;
+        // So do the violence fixes (the ledger is L2's; the chrome cap
+        // keeps `--l2-off` the M15 city byte for byte).
+        self.life.violence_fixes = false;
         self.living = LivingCfg::off();
         self.jobs = LivingJobsCfg::off();
         self.leisure = LeisureCfg::off();

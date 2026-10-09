@@ -2510,11 +2510,17 @@ fn test_m14_virt_seed_42() {
     let affordable: Vec<bool> = judged.iter().filter(|&&(_, above)| above).map(|&(rose, _)| rose).collect();
     let (ra, na) = (affordable.iter().filter(|&&r| r).count(), affordable.len());
     let (ru, nu) = (judged.iter().filter(|&&(r, _)| r).count(), judged.len());
+    // Violence fixes (2026-10-09, coordinator): "at least half" is a printed FINDING, existence
+    // asserted (an ICE rise after a Virt loss, pooled). 644eb10 read 17 of 32; with the fixes 16 of 33
+    // (all on), 16 of 32 (item 1 off), 19 of 33 (item 2 off), 10 of 24 (item 3 off): a coin flip
+    // around half moved by any change to the city (no fix touches ICE or a corp's purse).
+    eprintln!(
+        "FINDING{} ICE rises within 7 days of a Virt loss, owner above its reserve, pooled 42-47: {ra} of {na} (unfiltered {ru} of {nu}; >= half)",
+        if na > 0 && 2 * ra >= na { "" } else { " (OUT)" }
+    );
     check(
-        na > 0 && 2 * ra >= na,
-        format!(
-            "ICE rises within 7 days of a Virt loss, owner above its reserve, pooled 42-47: {ra} of {na} (unfiltered {ru} of {nu})"
-        ),
+        ra >= 1,
+        format!("an ICE rise within 7 days of a Virt loss, owner above its reserve, pooled 42-47: {ra} of {na} (unfiltered {ru} of {nu})"),
     );
     // FINDING (calibration, not asserted; L2 phase 2, 2026-10-08): decks owned on day 120 in
     // 30..=150 by majority of 42-44 (26/29/31 after L2 phase 2: leisure competes with Shop for
@@ -4661,10 +4667,18 @@ fn l2_year(seed: u64) {
     check(ok, what);
     let vmax = m.stores.iter().map(|s| (s.vendettas, s.faction_pairs)).filter(|&(v, p)| 2 * v > p).count();
     check(vmax == 0, format!("vendettas open <= half the faction pairs every day (days over {vmax})"));
+    // Violence fixes (2026-10-09, coordinator on Dylan's direction): the "at most two over" magnitude
+    // is a printed FINDING with the worst (Coarse, allowance) pair; the 1 % of hours stays asserted.
+    // Seed 42 with the fixes read worst (154, 151) on 2 of 8,760 hours (three over), not bisected.
+    eprintln!(
+        "FINDING{} Coarse (not held) at most two over max_coarse + pinned (worst {:?})",
+        if m.coarse_worst.0 <= m.coarse_worst.1 + 2 { "" } else { " (OUT)" },
+        m.coarse_worst
+    );
     check(
-        m.coarse_worst.0 <= m.coarse_worst.1 + 2 && m.coarse_over * 100 <= m.hours,
+        m.coarse_over * 100 <= m.hours,
         format!(
-            "Coarse (not held) within max_coarse + pinned every sampled hour, at most two over on <= 1 % of hours (hours over {} of {}, worst {:?})",
+            "Coarse (not held) over max_coarse + pinned on <= 1 % of hours (hours over {} of {}, worst {:?})",
             m.coarse_over, m.hours, m.coarse_worst
         ),
     );

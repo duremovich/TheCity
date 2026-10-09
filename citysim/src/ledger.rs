@@ -34,6 +34,9 @@ pub enum VictimClass {
     Civilian,
     Member,
     Watch,
+    /// Violence fix 1 (`[life] vf_street_class`): a civilian with no Home.
+    /// Never filed with the fix off.
+    Street,
 }
 
 /// The actor side's acts (phase 3): an extortion, a claim blow, a deal shift.
@@ -168,6 +171,10 @@ pub struct FvTally {
     pub day_sources: Vec<ActiveSource>,
     #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub riot_rosters: BTreeMap<u32, (crate::time::Tick, Vec<EntityId>)>,
+    /// Violence fix 2 (`[life] vf_short_sources`): the hourly tallies each
+    /// of the day's riots and episodes was live at (empty with the fix off).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub source_hours: Vec<(ActiveSource, u32)>,
 }
 
 impl FvTally {

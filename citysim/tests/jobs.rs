@@ -326,6 +326,8 @@ fn test_l2_off_world_has_no_venues_and_same_first_day() {
     // The L2 shadow fixes' master rides `[life]` (above the cut) but is an
     // L2 key: `living_off` turns it off, and so does a pre-L2 config.
     old.life.l2_fixes = false;
+    // So do the violence fixes (`[life] violence_fixes`, 2026-10-09).
+    old.life.violence_fixes = false;
     assert!(!old.living.enabled && !old.jobs.enabled && !old.budget.enabled);
     let mut a = World::new(42, Config::load().living_off());
     let mut b = World::new(42, old);

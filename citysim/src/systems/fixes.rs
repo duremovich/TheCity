@@ -69,6 +69,60 @@ pub fn beg_at_spot(world: &World) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// The violence fixes (2026-10-09, the wages-on diagnosis)
+// ---------------------------------------------------------------------------
+
+/// Are the violence fixes on (`[life] enabled && violence_fixes`, and the
+/// L2 master `[living] enabled`: the L2 gate's "the master alone
+/// reproduces `living_off`")? Off (`--l2-off`, `--life-off`) nothing they
+/// gate runs.
+pub fn violence_on(world: &World) -> bool {
+    world.config.life.enabled && world.config.life.violence_fixes && world.config.living.enabled
+}
+
+/// Diagnostics: violence-fix items to leave off, from `CITYSIM_VFIX_OFF`
+/// (a comma list of item numbers), read once.
+fn vfix_off_mask() -> u32 {
+    static MASK: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MASK.get_or_init(|| {
+        std::env::var("CITYSIM_VFIX_OFF")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse::<u32>().ok()).fold(0, |m, n| m | (1 << n.min(31))))
+            .unwrap_or(0)
+    })
+}
+
+/// Is violence-fix item `n` on?
+pub fn vfix_item(world: &World, n: u32) -> bool {
+    violence_on(world) && vfix_off_mask() & (1 << n.min(31)) == 0
+}
+
+/// Violence fix 1: the ledger's `VictimClass::Street`.
+pub fn street_class(world: &World) -> bool {
+    vfix_item(world, 1) && world.config.life.vf_street_class
+}
+
+/// Violence fix 2: short sources (riots, episodes) roll for their live hours.
+pub fn short_sources(world: &World) -> bool {
+    vfix_item(world, 2) && world.config.life.vf_short_sources
+}
+
+/// Violence fix 3: the chrome humanity cap and the fighter list by role.
+pub fn chrome_cap(world: &World) -> bool {
+    vfix_item(world, 3) && world.config.life.vf_chrome_cap
+}
+
+/// Violence fix 5: an immigrant arrives with a seeded adult's savings.
+pub fn arrival(world: &World) -> bool {
+    vfix_item(world, 5) && world.config.life.vf_arrival
+}
+
+/// Violence fix 4: rent from income leaves an agent in arrears a meal.
+pub fn rent_meal(world: &World) -> bool {
+    vfix_item(world, 4) && world.config.life.vf_rent_meal
+}
+
+// ---------------------------------------------------------------------------
 // Items 1-4, 15: what a goal change may not abort
 // ---------------------------------------------------------------------------
 
