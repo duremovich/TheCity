@@ -131,3 +131,150 @@ fn live_block(ui: &mut Ui, app: &mut App, world: &World, v: &MissionView) {
         ui.colored_label(RED, format!("{dead} of the march are dead"));
     }
 }
+
+/// M16a § 9 (plan C42): a contract mission (a squad's or a gang's job,
+/// marched by the raid machinery): the record, the crew and where each
+/// stands, the door, the last strike decision's terms (`StrikeTerms`) and
+/// the brawl's result lines. The M14 stream for a mission is deferred
+/// (`Mission.stream_by` stays `None` in 16a): no streamed view.
+pub fn draw_contract(ui: &mut Ui, app: &mut App, world: &World, id: citysim::contract::ContractId) {
+    let Some(c) = world.contracts.get(&id) else {
+        ui.label("This contract is gone.");
+        app.selected_contract = None;
+        return;
+    };
+    let m = world.missions.get(&id);
+    egui::ScrollArea::vertical().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            ui.heading(RichText::new(format!("Contract #{id}: {}", c.kind.label())).color(crate::ui::board::AMBER));
+            let tag = citysim::systems::contracts::render_tag(world, c);
+            ui.colored_label(crate::ui::board::tag_colour(tag), RichText::new(tag).strong());
+        });
+        ui.label(crate::ui::board::line(world, c, None));
+        ui.horizontal(|ui| {
+            ui.label("Target");
+            if ui.link(world.name_of(c.target.id())).clicked() {
+                go_contract_agent(app, c.target.id());
+            }
+        });
+        match m {
+            Some(m) => {
+                let when = if m.raid_at > world.tick {
+                    format!(
+                        "musters to leave in {} ticks (day {} {})",
+                        m.raid_at - world.tick,
+                        time::day(m.raid_at),
+                        time::clock(m.raid_at)
+                    )
+                } else {
+                    format!("left at day {} {}", time::day(m.raid_at), time::clock(m.raid_at))
+                };
+                ui.label(when);
+                let door = m.door_building.map_or(format!("({}, {})", m.door.x, m.door.y), |b| world.name_of(b));
+                ui.label(format!(
+                    "door {door} · muster ({}, {}) · defenders expected {}",
+                    m.muster.x, m.muster.y, m.defenders_hint
+                ));
+                ui.separator();
+                ui.strong(format!("Crew ({})", m.crew.len()));
+                egui::Grid::new("contract_crew").striped(true).show(ui, |ui| {
+                    for &a in &m.crew {
+                        if ui.link(world.name_of(a)).clicked() {
+                            go_contract_agent(app, a);
+                        }
+                        ui.label(mission::whereabouts(world, a));
+                        let step = world
+                            .comp::<Brain>(a)
+                            .and_then(|b| b.current_step().map(|s| format!("{:?}", s.action)))
+                            .unwrap_or_default();
+                        ui.small(step);
+                        ui.end_row();
+                    }
+                });
+            }
+            None => {
+                ui.colored_label(GOLD, "Not marching (a solo run, queued, or closed).");
+            }
+        }
+        ui.separator();
+        ui.strong("Strike decision");
+        match c.strike {
+            Some(s) => {
+                let controller = match s.controller {
+                    0 => "contested",
+                    1 => "the city",
+                    2 => "a gang",
+                    3 => "a corp",
+                    _ => "?",
+                };
+                let colour = match s.decision {
+                    citysim::contract::Decision::Strike => GREEN,
+                    citysim::contract::Decision::Hold => GOLD,
+                    _ => RED,
+                };
+                ui.colored_label(colour, format!("{:?}", s.decision));
+                ui.label(format!(
+                    "p_win {:.2} · door held by {controller} · political cost {:.2} · EV {:.2} · holds {}",
+                    s.p_win, s.political, s.ev, c.holds
+                ));
+            }
+            None => {
+                ui.small("no decision yet");
+            }
+        }
+        ui.separator();
+        ui.strong("Result lines");
+        let crew: Vec<EntityId> = m.map(|m| m.crew.to_vec()).unwrap_or_default();
+        let since = c.taken.unwrap_or(c.posted);
+        let tag = format!("#{id}");
+        let rows = world
+            .events
+            .iter()
+            .rev()
+            .take_while(|e| e.tick >= since)
+            .filter(|e| {
+                matches!(
+                    e.kind,
+                    EventKind::Assault
+                        | EventKind::Murder
+                        | EventKind::Death
+                        | EventKind::Raid
+                        | EventKind::StrikeDeclined
+                        | EventKind::SoldOut
+                        | EventKind::ContractTaken
+                        | EventKind::ContractFulfilled
+                        | EventKind::ContractFailed
+                        | EventKind::ContractExpired
+                )
+            })
+            .filter(|e| {
+                e.actors.iter().any(|a| crew.contains(a) || *a == c.target.id() || Some(*a) == c.taker)
+                    || e.text.contains(&tag)
+            })
+            .take(40)
+            .collect::<Vec<_>>();
+        if rows.is_empty() {
+            ui.small("nothing yet");
+        }
+        for e in rows {
+            let text = format!("{} {} | {:?} | {}", time::day(e.tick), time::clock(e.tick), e.kind, e.text);
+            ui.label(RichText::new(text).monospace().small());
+        }
+        let log: Vec<&(u64, citysim::contract::ContractId, String)> =
+            world.contract_log.iter().filter(|(_, x, _)| *x == id).collect();
+        if !log.is_empty() {
+            ui.small("Record log");
+            for (t, _, text) in log {
+                ui.label(RichText::new(format!("{} {} | {text}", time::day(*t), time::clock(*t))).monospace().small());
+            }
+        }
+        if ui.button("Close").clicked() {
+            app.selected_contract = None;
+        }
+    });
+}
+
+fn go_contract_agent(app: &mut App, who: EntityId) {
+    app.selected_contract = None;
+    go_agent(app, who);
+}

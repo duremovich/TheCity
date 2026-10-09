@@ -151,6 +151,12 @@ pub fn prisoner_body(world: &World, id: EntityId) -> bool {
 pub struct BudgetSets {
     pub gang: std::collections::BTreeSet<EntityId>,
     pub private: std::collections::BTreeSet<EntityId>,
+    /// M16a (plan C35, phase 4): the parties of the records worked live,
+    /// whole records by price inside `contract_quota` (class 4).
+    pub contract: std::collections::BTreeSet<EntityId>,
+    /// M16a (plan C35, phase 4): Fixer owners in the matching window, by
+    /// book size inside `fixer_quota` (class 2).
+    pub fixer: std::collections::BTreeSet<EntityId>,
 }
 
 /// The tile a gang's front line stands near: under Contest the rival's
@@ -241,6 +247,9 @@ pub fn budget_sets(world: &World) -> BudgetSets {
     sets.private.extend(
         world.guards().iter().copied().filter(|&g| crate::systems::law::is_private_guard(world, g)).take(quota),
     );
+    // M16a (plan C35, phase 4).
+    sets.contract = crate::systems::contracts::contract_set(world);
+    sets.fixer = crate::systems::contracts::fixer_set(world);
     sets
 }
 
@@ -448,21 +457,28 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
     // M15 W22: a hunter and a hunted target rank with the runners.
     let runner =
         runner || (!world.hunts.is_empty() && (world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id)));
-    // M16a (plan C35, phase 1's form): a live contract's taker and chased
-    // target too (bounded by `max_missions` runs; phase 4's quota).
-    let runner = runner
-        || (!world.contract_runs.is_empty()
-            && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)));
-    // M16a (plan C22, phase 2): a live mission's crew too (bounded by
-    // `max_missions` × `crew_max`; phase 4's quota).
-    let runner = runner || (!world.missions.is_empty() && world.mission_of.contains_key(&id));
+    // M16a (plan C35, phase 4): the parties of a record worked live (its
+    // taker, crew and target) inside `contract_quota`; without the hour's
+    // sets, every running taker, chased target and mission crew.
+    let contract = match sets {
+        Some(s) => s.contract.contains(&id),
+        None => {
+            (!world.contract_runs.is_empty()
+                && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)))
+                || (!world.missions.is_empty() && world.mission_of.contains_key(&id))
+        }
+    };
+    let runner = runner || contract;
+    // M16a (plan C35, phase 4): a Fixer's owner in the matching window,
+    // inside `fixer_quota` (ranked with the gangs).
+    let fixer = sets.is_some_and(|s| s.fixer.contains(&id));
     if brain.pinned {
         5
     } else if runner {
         4
     } else if watch {
         3
-    } else if gang || private_ranked {
+    } else if gang || private_ranked || fixer {
         2
     } else {
         0
@@ -486,12 +502,9 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     {
         return;
     }
-    // M16a (plan C17): nor a live contract's taker or chased target.
-    if lod == Lod::Statistical && (world.contract_runs.contains_key(&id) || world.chased_by.contains_key(&id)) {
-        return;
-    }
-    // M16a (plan C22, phase 2): nor a live mission's crew.
-    if lod == Lod::Statistical && world.mission_of.contains_key(&id) {
+    // M16a (plan C17, C35 phase 4): nor a party of a record worked live
+    // (the contract set: taker, crew, target, inside `contract_quota`).
+    if lod == Lod::Statistical && crate::systems::contracts::holds_body(world, id) {
         return;
     }
     // L2 shadow fixes item 7: the tier's start, for the dwell (after the

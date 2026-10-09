@@ -176,17 +176,10 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 ui.label(format!("Parts held {held} · made today (all Fabs) {}", world.stats.current.living.fab_parts));
                 staff(ui, app, world, id, "Fab Techs");
             }
-            // M16a (plan C42; the full panel is phase 4): the record book's size.
+            // M16a § 9 (plan C42): the Fixer's book, regulars, cut, heat,
+            // income and closed-until.
             BuildingKind::Fixer => {
-                if let Some(k) = world.comp::<citysim::contract::Broker>(id) {
-                    ui.label(format!(
-                        "book {} · regulars {} · cut {:.0}% · heat {:.2}",
-                        k.book.len(),
-                        k.regulars.len(),
-                        k.cut * 100.0,
-                        k.heat
-                    ));
-                }
+                fixer(ui, app, world, id);
                 staff(ui, app, world, id, "Staff");
             }
             // Real economy E26 (plan 3b.5): the Mission's purse and service.
@@ -228,6 +221,76 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
         derelict(ui, app, world, id, b);
         occupants(ui, app, world, b);
         buttons(ui, app, world, id, b);
+    });
+}
+
+/// M16a § 9 (plan C42): a Fixer's office. Its record book (each record a
+/// price on a struct between fictional agents), its regulars, the networked
+/// gangs, the cut, the law's heat, the income and the closing.
+fn fixer(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    let Some(k) = world.comp::<citysim::contract::Broker>(id) else { return };
+    section(ui, "Fixer", |ui| {
+        let open = citysim::systems::contracts::fixer_open(world, id);
+        match k.closed_until.filter(|&t| t > world.tick) {
+            Some(t) => {
+                ui.colored_label(RED, format!("closed by the law until day {} {}", time::day(t), time::clock(t)));
+            }
+            None if open => {
+                ui.label("open for business");
+            }
+            None => {
+                ui.colored_label(RED, "not trading");
+            }
+        }
+        let licence = if world.levers.fixer_licence { "licensed" } else { "unlicensed (heat floored at 0.5)" };
+        ui.label(format!("cut {:.0}% · {licence}", k.cut * 100.0));
+        let warrant = world.config.law.warrant_heat;
+        let colour = if k.heat >= world.config.law.corrupt_heat { RED } else { GOLD };
+        ui.horizontal(|ui| {
+            ui.label("heat");
+            ui.add(
+                ProgressBar::new(k.heat.clamp(0.0, 1.0))
+                    .fill(colour)
+                    .text(format!("{:.2} (bust at {warrant:.2})", k.heat))
+                    .desired_width(200.0),
+            );
+        });
+        let week: i64 = k.income.iter().rev().take(7).sum();
+        let fortnight: i64 = k.income.iter().sum();
+        ui.label(format!("income today {}¢ · 7 d {week}¢ · {} d {fortnight}¢", k.income_today, k.income.len()));
+    });
+    section(ui, &format!("Book ({})", k.book.len()), |ui| {
+        let live: Vec<&citysim::contract::Contract> =
+            k.book.iter().filter_map(|c| world.contracts.get(c)).filter(|c| c.is_live()).collect();
+        if live.is_empty() {
+            ui.small("no open or taken records");
+        }
+        for c in live.into_iter().take(20) {
+            super::board::row(ui, app, world, c, None);
+        }
+        let closed = k.book.iter().filter_map(|c| world.contracts.get(c)).filter(|c| !c.is_live()).count();
+        if closed > 0 {
+            ui.small(format!("and {closed} closed records kept"));
+        }
+    });
+    section(ui, &format!("Regulars ({})", k.regulars.len()), |ui| {
+        let mut regs: Vec<(u64, EntityId)> = k.regulars.iter().map(|(&a, &t)| (t, a)).collect();
+        regs.sort_unstable_by(|a, b| b.cmp(a));
+        egui::Grid::new("fixer_regulars").striped(true).show(ui, |ui| {
+            for (t, a) in regs.into_iter().take(12) {
+                agent_link(ui, app, world, a);
+                ui.label(lod_tag(world, a));
+                ui.small(format!("last in day {}", time::day(t)));
+                ui.end_row();
+            }
+        });
+        if k.regulars.len() > 12 {
+            ui.small(format!("and {} more", k.regulars.len() - 12));
+        }
+        if !k.gangs.is_empty() {
+            let names: Vec<String> = k.gangs.iter().map(|&g| world.owner_label(Some(g))).collect();
+            ui.label(format!("gangs networked: {}", names.join(", ")));
+        }
     });
 }
 

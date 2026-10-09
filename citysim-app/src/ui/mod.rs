@@ -2,6 +2,7 @@
 //! the event log (bottom) and the city panel (left) are egui.
 
 pub mod asset;
+pub mod board;
 pub mod building;
 pub mod city;
 pub mod corp;
@@ -71,6 +72,11 @@ pub fn draw(app: &mut App, world: &World) {
             egui_macroquad::egui::SidePanel::right("inspector")
                 .exact_width(INSPECTOR_W)
                 .show(ctx, |ui| mission::draw(ui, app, world, gang));
+        } else if let Some(id) = app.selected_contract {
+            // M16a § 9: a contract mission.
+            egui_macroquad::egui::SidePanel::right("inspector")
+                .exact_width(INSPECTOR_W)
+                .show(ctx, |ui| mission::draw_contract(ui, app, world, id));
         } else if let Some(sel) = app.selected {
             egui_macroquad::egui::SidePanel::right("inspector").exact_width(INSPECTOR_W).show(ctx, |ui| {
                 if world.has::<citysim::Asset>(sel) {
@@ -91,6 +97,10 @@ pub fn draw(app: &mut App, world: &World) {
             egui_macroquad::egui::SidePanel::right("inspector")
                 .exact_width(INSPECTOR_W)
                 .show(ctx, |ui| district::draw(ui, app, world, d));
+        }
+        // M16a § 9 (Shift+C): the Board panel floats over the map.
+        if app.show_board {
+            board::window(ctx, app, world);
         }
         egui_macroquad::egui::TopBottomPanel::bottom("log")
             .resizable(true)

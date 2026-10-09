@@ -424,3 +424,325 @@ fn test_held_decay_counts_only_held_hours() {
     assert!((got - expect).abs() < 1e-4, "8 held hours decayed: {got} vs {expect}");
     assert_eq!(w.held_since.get(&p).copied(), Some(TICKS_PER_DAY), "the clock restarts");
 }
+
+// ---------------------------------------------------------------------------
+// M16a phase 4 (plan C35, 4.5): the contract and Fixer quotas. A contract is
+// a record with a price between fictional agents; a live one is worked by
+// its taker's scripted plan, and its parties hold bodies inside the quota.
+// ---------------------------------------------------------------------------
+
+use citysim::contract::{ContractId, ContractKind, ContractStatus, Origin, Posting, Render, Target};
+use citysim::systems::contracts;
+
+/// The shipped city (the seeded Fixers stand in Mid East and Sump Central).
+fn shipped(seed: u64) -> World {
+    World::new(seed, Config::load())
+}
+
+/// `n` free adults with no edge between any two, no gang, no guard's job.
+fn strangers(w: &World, n: usize) -> Vec<EntityId> {
+    let mut out: Vec<EntityId> = Vec::new();
+    for a in w.citizens() {
+        if !law::living(w, a) || !citysim::systems::demography::is_adult(w, a) {
+            continue;
+        }
+        if w.has::<citysim::GangMember>(a) || law::is_guard(w, a) || w.has::<citysim::Sentence>(a) {
+            continue;
+        }
+        if contracts::holds_taken(w, a) || w.by_party.contains_key(&a) || w.contract_runs.contains_key(&a) {
+            continue;
+        }
+        if out.iter().any(|&o| w.edge(o, a).is_some()) {
+            continue;
+        }
+        out.push(a);
+        if out.len() == n {
+            return out;
+        }
+    }
+    panic!("{n} strangers");
+}
+
+/// A direct Guard the client buys on itself at `price` (a record whose
+/// taker always works it live), taken by `taker`.
+fn guard_record(w: &mut World, client: EntityId, taker: EntityId, price: i64, days: u16) -> ContractId {
+    if let Some(x) = w.comp_mut::<Wallet>(client) {
+        x.coins = x.coins.max(price + 10);
+    }
+    let id = contracts::post(
+        w,
+        Posting {
+            buyer: Some(client),
+            agent: Some(client),
+            kind: ContractKind::Guard,
+            target: Target::Agent(client),
+            broker: None,
+            deadline_days: days,
+            origin: Origin::God,
+            price: Some(price),
+        },
+    )
+    .expect("posted");
+    assert!(contracts::accept(w, id, taker, &[]), "taken");
+    id
+}
+
+fn queued(w: &World, id: ContractId) -> bool {
+    w.contracts.get(&id).is_some_and(|c| {
+        c.status == ContractStatus::Taken
+            && c.render == Render::Live
+            && c.due.is_none()
+            && contracts::render_tag(w, c) == "QUEUED"
+    })
+}
+
+fn running(w: &World, id: ContractId) -> bool {
+    w.contract_runs.values().any(|r| r.contract == id)
+}
+
+/// Run to the tick after the next hour boundary (the hour's `lod::run`
+/// and `contracts::run`'s `start_queued` have both run).
+fn past_next_hour(w: &mut World) {
+    let next = (w.tick / TICKS_PER_HOUR + 1) * TICKS_PER_HOUR + 1;
+    w.run_ticks(next - w.tick);
+}
+
+/// 4.5: 15 live Guards wanted (30 parties: a taker and a client each) with
+/// `max_missions` out of the way: at most `contract_quota` (24) bodies, the
+/// rest Taken with no `due`, queued by price; a freed slot goes to the
+/// highest price queued.
+#[test]
+fn test_contract_quota_holds_and_queues_by_price() {
+    let mut w = shipped(42);
+    w.run_ticks(9 * TICKS_PER_HOUR + 5);
+    w.config.missions.max_missions = 100;
+    assert_eq!(w.config.lod.contract_quota, 24);
+    let people = strangers(&w, 30);
+    // Ascending price: the cheap records fill the room first.
+    let ids: Vec<ContractId> =
+        (0..15).map(|i| guard_record(&mut w, people[2 * i], people[2 * i + 1], 100 + i as i64, 20)).collect();
+    let set = contracts::contract_set(&w);
+    assert!(set.len() <= 24, "bodies {}", set.len());
+    assert_eq!(set.len(), 24, "twelve records' parties fill the quota");
+    for &id in &ids[..12] {
+        assert!(running(&w, id), "#{id} worked live");
+    }
+    for &id in &ids[12..] {
+        assert!(queued(&w, id), "#{id} queued (Taken, no due)");
+        assert!(!running(&w, id));
+    }
+    assert_eq!(lod::budget_sets(&w).contract, set, "the hour's class-4 set");
+    // A running record closes: its two bodies free, and the next hour's
+    // queue starts the highest price first (114), not the oldest (112).
+    contracts::settle(&mut w, ids[0], contracts::Settle::Cancelled, "test");
+    past_next_hour(&mut w);
+    assert!(running(&w, ids[14]), "the highest price queued starts");
+    assert!(queued(&w, ids[12]) && queued(&w, ids[13]), "the rest still queued");
+    assert!(contracts::contract_set(&w).len() <= 24);
+    let taker = people[29];
+    assert_ne!(lod_of(&w, taker), Lod::Statistical, "the started taker holds a body");
+}
+
+/// 4.5: a Fixer's owner ranks 2 from `match_hour − 2` to midnight only, the
+/// fullest book first inside `fixer_quota`.
+#[test]
+fn test_fixer_owner_class_two_in_window_only() {
+    let mut w = shipped(42);
+    // The seeded Fixer (one on seed 42, C9's deviation) and a second built
+    // on a vacant Lot for a stranger.
+    let lot = citysim::systems::founding::vacant_lots(&w)[0];
+    let second = strangers(&w, 3)[2];
+    citysim::systems::founding::build_on_lot(&mut w, lot, BuildingKind::Fixer, Some(second)).expect("built");
+    let fixers = contracts::open_fixers(&w);
+    assert_eq!(fixers.len(), 2, "two open Fixers");
+    let owners: Vec<EntityId> = fixers.iter().map(|&f| w.owner_of(f).expect("an owner")).collect();
+    let hour = u64::from(w.config.fixers.match_hour);
+    // The morning: outside the window.
+    w.tick = 10 * TICKS_PER_HOUR;
+    let sets = lod::budget_sets(&w);
+    assert!(sets.fixer.is_empty(), "no Fixer bodies before {}:00", hour - 2);
+    for &o in &owners {
+        let other = sets.gang.contains(&o) || sets.private.contains(&o) || law::is_guard(&w, o);
+        if !other {
+            assert_eq!(lod::rank_class(&w, o), 0, "a civilian's rank outside the window");
+        }
+    }
+    // The window: both owners rank 2.
+    w.tick = (hour - 2) * TICKS_PER_HOUR;
+    let sets = lod::budget_sets(&w);
+    for &o in &owners {
+        assert!(sets.fixer.contains(&o), "the owner holds a Fixer body");
+        assert!(lod::rank_class(&w, o) >= 2, "ranked with the gangs");
+    }
+    w.tick = 23 * TICKS_PER_HOUR + 59;
+    assert_eq!(lod::budget_sets(&w).fixer.len(), owners.len().min(w.config.lod.fixer_quota), "until midnight");
+    // The quota: one body, to the fuller book (the second Fixer gets a record).
+    w.config.lod.fixer_quota = 1;
+    let people: Vec<EntityId> = strangers(&w, 4).into_iter().filter(|p| !owners.contains(p)).take(2).collect();
+    if let Some(x) = w.comp_mut::<Wallet>(people[0]) {
+        x.coins = 5_000;
+    }
+    contracts::post(
+        &mut w,
+        Posting {
+            buyer: Some(people[0]),
+            agent: Some(people[0]),
+            kind: ContractKind::Beat,
+            target: Target::Agent(people[1]),
+            broker: Some(fixers[1]),
+            deadline_days: 7,
+            origin: Origin::God,
+            price: None,
+        },
+    )
+    .expect("posted");
+    let sets = lod::budget_sets(&w);
+    assert_eq!(sets.fixer.len(), 1);
+    assert!(sets.fixer.contains(&owners[1]), "the fuller book wins the one body");
+}
+
+/// 4.5: a live record's taker and target are never demoted to Statistical
+/// while it is Taken; once it closes they may be.
+#[test]
+fn test_live_party_never_demoted_while_taken() {
+    let mut w = shipped(43);
+    w.run_ticks(9 * TICKS_PER_HOUR + 5);
+    let people = strangers(&w, 2);
+    let (client, taker) = (people[0], people[1]);
+    let id = guard_record(&mut w, client, taker, 150, 20);
+    assert!(running(&w, id));
+    assert_ne!(lod_of(&w, taker), Lod::Statistical, "promoted at the start");
+    lod::set_lod(&mut w, client, Lod::Coarse);
+    for who in [taker, client] {
+        lod::set_lod(&mut w, who, Lod::Statistical);
+        assert_ne!(lod_of(&w, who), Lod::Statistical, "set_lod refuses the demotion");
+        assert_eq!(lod::rank_class(&w, who), 4, "a live party ranks 4");
+    }
+    for _ in 0..6 {
+        past_next_hour(&mut w);
+        if !running(&w, id) {
+            break;
+        }
+        assert_ne!(lod_of(&w, taker), Lod::Statistical, "never demoted while Taken");
+        assert_ne!(lod_of(&w, client), Lod::Statistical, "never demoted while Taken");
+    }
+    contracts::settle(&mut w, id, contracts::Settle::Cancelled, "test");
+    lod::set_lod(&mut w, taker, Lod::Statistical);
+    assert_eq!(lod_of(&w, taker), Lod::Statistical, "free to demote once closed");
+}
+
+/// 4.5: L2's bound over a 10-day run with a forced 24 live parties (twelve
+/// live Guards, three more queued), sampled right after each hour's
+/// assignment with L2's gate device (the retired `scenario.rs` `lod_probe`):
+/// Coarse bodies (not held, not emigrating) ≤ `max_coarse` + the pinned +
+/// the class-4 bodies (runners, hunters, hunted and now the live contract
+/// parties, whose demotion `set_lod` refuses) + prisoners released since
+/// the last sample + bodies the assignment never saw (`body_day` not
+/// today); what is left is `run_statistical`'s same-tick promotions, so the
+/// gate allowed an excess of 3 in at most 1 % of the hours. The contract
+/// set never passes `contract_quota`; Full never passes `max_full` + pinned.
+#[test]
+fn test_tier_bound_holds_with_contracts() {
+    let mut w = shipped(44);
+    w.run_ticks(9 * TICKS_PER_HOUR + 5);
+    w.config.missions.max_missions = 100;
+    let people = strangers(&w, 30);
+    for i in 0..15 {
+        guard_record(&mut w, people[2 * i], people[2 * i + 1], 100 + i as i64, 20);
+    }
+    assert_eq!(contracts::contract_set(&w).len(), 24);
+    let (max_full, max_coarse) = (w.config.lod.max_full, w.config.lod.max_coarse);
+    let (mut hours, mut over, mut worst, mut parties_max) = (0u32, 0u32, 0usize, 0usize);
+    let mut was_sentenced: std::collections::BTreeSet<EntityId> =
+        w.citizens().into_iter().filter(|&id| w.has::<citysim::Sentence>(id)).collect();
+    let end = w.tick + 10 * TICKS_PER_DAY;
+    while w.tick < end {
+        past_next_hour(&mut w);
+        let set = contracts::contract_set(&w);
+        assert!(set.len() <= w.config.lod.contract_quota, "the quota at tick {}", w.tick);
+        parties_max = parties_max.max(set.len());
+        let today = w.day();
+        let (mut full, mut coarse, mut pinned, mut extra) = (0usize, 0usize, 0usize, 0usize);
+        for id in w.citizens() {
+            let Some(b) = w.comp::<Brain>(id) else { continue };
+            if b.lod == Lod::Statistical {
+                continue;
+            }
+            let sentenced = w.has::<citysim::Sentence>(id);
+            if b.pinned {
+                pinned += 1;
+                extra += 1;
+            }
+            let released = b.lod == Lod::Coarse && !sentenced && was_sentenced.contains(&id);
+            let unseen = b.lod == Lod::Coarse && b.body_day != Some(today);
+            if lod::rank_class(&w, id) == 4 || released || unseen {
+                extra += 1;
+            }
+            if sentenced || b.emigrating {
+                continue;
+            }
+            match b.lod {
+                Lod::Full => full += 1,
+                Lod::Coarse => coarse += 1,
+                Lod::Statistical => {}
+            }
+        }
+        assert!(full <= max_full + pinned, "full {full} at tick {}", w.tick);
+        if coarse > max_coarse + extra {
+            over += 1;
+            worst = worst.max(coarse - max_coarse - extra);
+        }
+        was_sentenced = w.citizens().into_iter().filter(|&id| w.has::<citysim::Sentence>(id)).collect();
+        hours += 1;
+    }
+    println!("hours {hours}, over {over}, worst +{worst}, contract set max {parties_max}");
+    assert!(hours >= 240, "{hours} hours checked");
+    assert!(parties_max >= 20, "the forced parties held bodies: max {parties_max}");
+    assert!(worst <= 3 && over * 100 <= hours, "L2's bound: over {over} of {hours} hours, worst +{worst}");
+}
+
+/// Phase 4 review: a Guard queued behind a full quota and never started by
+/// its deadline expires: the buyer refunded, the taker unpaid (it was paid
+/// for a post it never stood through `guard_kept`).
+#[test]
+fn test_queued_guard_never_started_expires_unpaid() {
+    let mut w = shipped(42);
+    w.run_ticks(9 * TICKS_PER_HOUR + 5);
+    w.config.missions.max_missions = 100;
+    let people = strangers(&w, 26);
+    for i in 0..12 {
+        guard_record(&mut w, people[2 * i], people[2 * i + 1], 200 + i as i64, 20);
+    }
+    let (client, taker) = (people[24], people[25]);
+    let fixer = contracts::open_fixers(&w)[0];
+    if let Some(x) = w.comp_mut::<Wallet>(client) {
+        x.coins = 510;
+    }
+    if let Some(x) = w.comp_mut::<Wallet>(taker) {
+        x.coins = 0;
+    }
+    let id = contracts::post(
+        &mut w,
+        Posting {
+            buyer: Some(client),
+            agent: Some(client),
+            kind: ContractKind::Guard,
+            target: Target::Agent(client),
+            broker: Some(fixer),
+            deadline_days: 1,
+            origin: Origin::God,
+            price: Some(500),
+        },
+    )
+    .expect("posted");
+    assert_eq!(w.purse(Some(client)), 10, "escrowed");
+    assert!(contracts::accept(&mut w, id, taker, &[]));
+    assert!(queued(&w, id), "queued behind the full quota");
+    assert!(w.contracts[&id].started.is_none());
+    w.run_ticks(2 * TICKS_PER_DAY + 5 - w.tick);
+    let c = &w.contracts[&id];
+    assert_eq!(c.status, ContractStatus::Expired, "never stood: expired");
+    assert_eq!(c.escrow, 0);
+    assert!(w.purse(Some(client)) >= 400, "the buyer refunded: {}", w.purse(Some(client)));
+    assert!(w.purse(Some(taker)) < 300, "the taker unpaid: {}", w.purse(Some(taker)));
+}

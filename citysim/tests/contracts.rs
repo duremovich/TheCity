@@ -1401,3 +1401,41 @@ fn test_fixer_run_order_runs_to_selldata_with_cut() {
     assert!(w.comp::<citysim::Building>(f).map_or(0, |b| b.revenue_today) > rev0, "credited to the Fixer");
     assert!(!w.fixer_runs.contains_key(&r), "the order's cut is taken once");
 }
+
+/// M16a phase 4 (plan C39, 4.5): `SetFixerLicence(false)` floors every
+/// office's heat at 0.5 at once and through the midnight decay, and no
+/// agent may register a new office (`founding::fixer_ok`, `Register`'s
+/// gate); on again, the floor lifts.
+#[test]
+fn test_fixer_licence_off_floors_heat_and_blocks_register() {
+    let mut w = world();
+    // Room for another office under the per-capita rule.
+    w.config.fixers.fixers_per_pop = 100;
+    let f = fixer(&w);
+    let founder = strangers(&w, 1)[0];
+    if let Some(p) = w.comp_mut::<Personality>(founder) {
+        p.lawfulness = 0.0;
+    }
+    if let Some(s) = w.comp_mut::<Skills>(founder) {
+        s.persuasion = 1.0;
+        s.knowledge = 1.0;
+    }
+    assert!(citysim::systems::founding::fixer_ok(&w, founder), "licensed: a lawless talker may open one");
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.heat = 0.1;
+    }
+    w.push_command(citysim::PlayerCommand::SetFixerLicence(false));
+    w.tick();
+    assert!(!w.levers.fixer_licence);
+    assert!(w.comp::<Broker>(f).is_some_and(|k| k.heat >= 0.5), "heat floored at once");
+    assert!(!citysim::systems::founding::fixer_ok(&w, founder), "no new office registers");
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::PlayerAction && e.text.starts_with("Lever: Fixers")));
+    contracts::heat_daily(&mut w);
+    assert!(w.comp::<Broker>(f).is_some_and(|k| k.heat >= 0.5), "the decay stops at the floor");
+    assert!(contracts::fixer_open(&w, f), "0.5 is under warrant_heat: still open");
+    w.push_command(citysim::PlayerCommand::SetFixerLicence(true));
+    w.tick();
+    assert!(citysim::systems::founding::fixer_ok(&w, founder), "licensed again");
+    contracts::heat_daily(&mut w);
+    assert!(w.comp::<Broker>(f).is_some_and(|k| k.heat < 0.5), "the floor lifts");
+}

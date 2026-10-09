@@ -1213,6 +1213,15 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             }
         }
         "customs" => PlayerCommand::SetCustoms(num("rate")? as f32),
+        // M16a phase 4 (plan C39): `fixer_licence=on|off`, `accessory_mult=<f>`,
+        // `public_bounties=on|off`.
+        "fixer_licence" => PlayerCommand::SetFixerLicence(
+            on_off(value).ok_or_else(|| format!("{spec}: fixer_licence must be on|off"))?,
+        ),
+        "accessory_mult" => PlayerCommand::SetAccessoryMult(num("mult")? as f32),
+        "public_bounties" => PlayerCommand::PublicBounties(
+            on_off(value).ok_or_else(|| format!("{spec}: public_bounties must be on|off"))?,
+        ),
         // Jobs and room J19 (P6): the Harris-Todaro outside wage.
         "outside_wage" => PlayerCommand::SetOutsideWage(num("coins")? as f32),
         "close_world" => {
@@ -2112,6 +2121,23 @@ mod tests {
         ));
         assert!(parse_lever("day=3:post_contract=12:kill:34:700:1:10").is_err());
         assert!(matches!(parse_lever("day=4:take_contract=5:21").unwrap().1, Lever::TakeContract(5, 21)));
+    }
+
+    #[test]
+    fn test_parse_contract_board_levers() {
+        assert!(matches!(
+            parse_lever("day=20:fixer_licence=off").unwrap().1,
+            Lever::Cmd(PlayerCommand::SetFixerLicence(false))
+        ));
+        assert!(matches!(
+            parse_lever("day=20:public_bounties=on").unwrap().1,
+            Lever::Cmd(PlayerCommand::PublicBounties(true))
+        ));
+        assert!(matches!(
+            parse_lever("day=20:accessory_mult=1.5").unwrap().1,
+            Lever::Cmd(PlayerCommand::SetAccessoryMult(m)) if (m - 1.5).abs() < 1e-6
+        ));
+        assert!(parse_lever("day=20:fixer_licence=maybe").is_err());
     }
 
     #[test]

@@ -56,12 +56,6 @@ fn civilian(w: &World, skip: &[EntityId]) -> EntityId {
         .expect("a civilian")
 }
 
-fn run_days(w: &mut World, days: u64) {
-    for _ in 0..days * TICKS_PER_DAY {
-        citysim::tick(w);
-    }
-}
-
 /// E26: a Mission stands at seed in a Sump district on the city's deed
 /// with its purse, two Volunteer vacancies and the Chapel has a kitchen.
 #[test]
@@ -457,14 +451,28 @@ fn test_endowed_mission_serves_over_days() {
         })
         .collect();
     near.sort();
-    for &(_, a) in near.iter().take(5) {
-        set_coins(&mut w, a, 0);
-        set_hunger(&mut w, a, 0.2);
-    }
+    let guests: Vec<EntityId> = near.iter().take(5).map(|&(_, a)| a).collect();
     // (The identity drifts over days at EC_BASE: immigrants, emigrants and
     // the fence are phase 1's census; a Mission's day moves no coin but
     // through `charity_in`/`charity_out`, checked above.)
-    run_days(&mut w, 7);
+    // M16a phase 4: the guests are kept broke and hungry each day just
+    // before the Statistical noon pass (`charity::stat_daily`): a guest
+    // made broke once had a day's coins again by the next noon, so the
+    // week's meals hung on who else happened to be hungry and poor (the
+    // phase's LOD quotas moved the city and this Mission served nobody).
+    for day in 0..7 {
+        let noon = day * TICKS_PER_DAY + 12 * citysim::TICKS_PER_HOUR - 1;
+        while w.tick < noon {
+            citysim::tick(&mut w);
+        }
+        for &a in &guests {
+            set_coins(&mut w, a, 0);
+            set_hunger(&mut w, a, 0.2);
+        }
+        while w.tick < (day + 1) * TICKS_PER_DAY {
+            citysim::tick(&mut w);
+        }
+    }
     let meals: u32 = w.stats.history.iter().map(|r| r.econ.mission_meals).sum();
     assert!(meals > 0, "meals served over a week: {meals}");
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::MissionServed));
