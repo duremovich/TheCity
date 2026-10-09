@@ -113,6 +113,11 @@ struct RunArgs {
     /// no Fixers or contract records; the L2-closing city byte for byte.
     #[arg(long)]
     contracts_off: bool,
+    /// Real economy (plan E2): every `[economy2]` section off
+    /// (`Config::econ_off`): no World market, crossings or customs; the
+    /// `EC_BASE` city to the column.
+    #[arg(long)]
+    econ_off: bool,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -1181,6 +1186,43 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         "hire_all" => PlayerCommand::HireAll {
             kind: citysim::BuildingKind::parse(value).ok_or_else(|| format!("{spec}: unknown kind {value}"))?,
         },
+        // Real economy phase 1 (plan E47): `appetite=<good>:<mult|auto>`,
+        // `export_cap=<good>:<n|auto>`, `ask=<good>:<mult>`, `customs=<rate>`,
+        // `close_world=on|off`.
+        "appetite" => {
+            let (g, m) =
+                value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<mult|auto>"))?;
+            PlayerCommand::SetAppetite {
+                good: citysim::outside::ExportGood::parse(g).ok_or_else(|| format!("{spec}: unknown good {g}"))?,
+                mult: if m.eq_ignore_ascii_case("auto") {
+                    None
+                } else {
+                    Some(m.parse::<f32>().map_err(|e| format!("{spec}: bad mult: {e}"))?)
+                },
+            }
+        }
+        "export_cap" => {
+            let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<n|auto>"))?;
+            PlayerCommand::SetExportCap {
+                good: citysim::outside::ExportGood::parse(g).ok_or_else(|| format!("{spec}: unknown good {g}"))?,
+                cap: if n.eq_ignore_ascii_case("auto") {
+                    None
+                } else {
+                    Some(n.parse::<u32>().map_err(|e| format!("{spec}: bad cap: {e}"))?)
+                },
+            }
+        }
+        "ask" => {
+            let (g, m) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<mult>"))?;
+            PlayerCommand::SetImportAsk {
+                good: citysim::outside::ExportGood::parse(g).ok_or_else(|| format!("{spec}: unknown good {g}"))?,
+                mult: m.parse::<f32>().map_err(|e| format!("{spec}: bad mult: {e}"))?,
+            }
+        }
+        "customs" => PlayerCommand::SetCustoms(num("rate")? as f32),
+        "close_world" => {
+            PlayerCommand::CloseWorld(on_off(value).ok_or_else(|| format!("{spec}: close_world must be on|off"))?)
+        }
         "hack_sentence" => {
             let (c, d) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <crime>:<days>"))?;
             let crime = match c.to_ascii_lowercase().as_str() {
@@ -1231,6 +1273,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     if args.contracts_off {
         config = config.contracts_off();
     }
+    if args.econ_off {
+        config = config.econ_off();
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -1261,6 +1306,12 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
             if args.contracts_off {
                 w.config = w.config.clone().contracts_off();
+            }
+            if args.econ_off {
+                w.config = w.config.clone().econ_off();
+                // The World's buying was opened by the market at seed
+                // (`Levers::from_config`): back to L2's own switch.
+                w.levers.export_open = w.config.living.enabled && w.config.export.enabled;
             }
             w
         }

@@ -60,6 +60,9 @@ const FILES: &[&str] = &[
     "contract.rs",
     "systems/contracts.rs",
     "systems/missions.rs",
+    // The Real economy phase 1 (daily passes from `living::run`).
+    "systems/econ.rs",
+    "systems/world_market.rs",
 ];
 
 #[test]

@@ -182,7 +182,9 @@ fn test_contest_f_equals_m13_contest() {
 /// ledger column is the sum of the upkeep table over the ICE'd nodes.
 #[test]
 fn test_ice_upkeep_and_install_flows_conserve() {
-    let mut w = world();
+    // M14 V26's self-install pays the City: the `EC_BASE` path (with the
+    // market on the import crosses to the World, `tests/econ.rs`).
+    let mut w = World::new(42, Config::load().econ_off());
     let total = ownership::total_coins(&w);
     let expected: i64 = (0..w.virt.nodes.len())
         .filter(|&i| w.virt.nodes[i].alive)

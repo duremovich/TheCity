@@ -18,6 +18,8 @@ pub fn run(world: &mut World) {
     snapshot(world);
     let next_day = time::day(world.tick) + 1;
     world.stats.roll(next_day);
+    // Real economy (plan E44): the World's books close with the day.
+    crate::systems::world_market::close_day(world);
 }
 
 /// Today's trace entry for a living agent, from live state and today's marks.
@@ -261,6 +263,10 @@ pub fn snapshot(world: &mut World) {
     if world.config.living.enabled {
         living_snapshot(world, &citizens);
     }
+    // Real economy (plan E45) snapshots (0 with the market off).
+    if crate::systems::econ::market_on(world) {
+        econ_snapshot(world, &citizens);
+    }
     // L2 phase 4: the kill rates by tier (0 with `[fviolence]` off).
     crate::systems::fviolence::snapshot(world);
 }
@@ -304,6 +310,74 @@ fn living_snapshot(world: &mut World, citizens: &[EntityId]) {
     row.living.upkeep_mult = mult;
     row.living.outside_inbound = inbound;
     row.living.outside_minted = minted;
+}
+
+/// The Real economy phase 1 (plan E45): the market's columns: the
+/// balance of trade and its 30-day ring, the books (appetite, today's
+/// first-unit bid, the ask, units in and out), the account, the identity,
+/// the city's deeds, and the per-district Dreg count (E34).
+fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
+    use crate::econ::TRADE_DAYS;
+    use crate::outside::ExportGood;
+    use crate::systems::world_market as wm;
+    let book = |g: ExportGood| wm::book(world, g).cloned().unwrap_or_default();
+    let (food, parts, data) = (book(ExportGood::Food), book(ExportGood::Parts), book(ExportGood::Data));
+    let bid_food = wm::bid(world, ExportGood::Food, 0) as f32;
+    let ask_food = wm::ask(world, ExportGood::Food);
+    let world_treasury = world.outside.faction(crate::outside::WORLD_ACCOUNT).map_or(0, |f| f.treasury);
+    let identity = crate::systems::econ::identity(world);
+    let outbound = world.outside.outbound;
+    let city_owned = world
+        .with::<Building>()
+        .into_iter()
+        .filter_map(|b| world.comp::<Building>(b))
+        .filter(|bd| !bd.demolished && !bd.derelict && bd.owner.is_none())
+        .filter(|bd| crate::systems::ownership::role_for(bd.kind).is_some())
+        .count() as u32;
+    let execs = crate::systems::classes::exec_set(world);
+    let mut dregs = [0u32; crate::stats::DISTRICT_SLOTS];
+    for &id in citizens {
+        if !world.has::<Brain>(id) || !crate::systems::demography::is_adult(world, id) {
+            continue;
+        }
+        if crate::systems::classes::class_in(world, id, &execs) != crate::components::Class::Dreg {
+            continue;
+        }
+        let d = match world.comp::<Household>(id).and_then(|h| h.home) {
+            Some(h) => world.district_of_building(h),
+            None => world
+                .comp::<crate::components::Position>(id)
+                .map_or(crate::components::DistrictId(0), |p| world.district_of(p.tile)),
+        };
+        if let Some(n) = dregs.get_mut(d.index()) {
+            *n += 1;
+        }
+    }
+    let row = &mut world.stats.current;
+    let e = &mut row.econ;
+    e.export_paid = row.living.flow_export;
+    e.trade_balance =
+        e.export_paid + e.flow_migrant_in + e.flow_fence - e.flow_import_out - e.flow_inputs - e.flow_migrant_out;
+    let ring = &mut world.econ.trade_ring;
+    if ring.len() >= TRADE_DAYS {
+        ring.pop_front();
+    }
+    ring.push_back(e.trade_balance);
+    e.trade_balance_30 = ring.iter().sum();
+    e.appetite_food = food.appetite;
+    e.appetite_parts = parts.appetite;
+    e.appetite_data = data.appetite;
+    e.bid_food = bid_food;
+    e.ask_food = ask_food;
+    e.food_imported = food.sold_today;
+    e.food_exported = food.bought_today;
+    e.parts_exported = parts.bought_today;
+    e.data_exported = data.bought_today;
+    e.outside_outbound = outbound;
+    e.world_treasury = world_treasury;
+    e.coin_identity = identity;
+    e.city_owned_buildings = city_owned;
+    e.d_dregs = dregs;
 }
 
 /// M15 W43: the second-hand share of held deed memories (heard ÷ all), the

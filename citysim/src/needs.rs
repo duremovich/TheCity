@@ -170,6 +170,18 @@ pub fn starvation(world: &mut World, id: EntityId) {
     if started {
         let name = world.name_of(id);
         world.push_event(EventKind::Starving, &[id], format!("{name} is starving"));
+        // Real economy (plan E34): by the agent's Home district, else its tile's.
+        if crate::systems::econ::market_on(world) {
+            let d = match world.comp::<crate::components::Household>(id).and_then(|h| h.home) {
+                Some(h) => world.district_of_building(h),
+                None => world
+                    .comp::<crate::components::Position>(id)
+                    .map_or(crate::components::DistrictId(0), |p| world.district_of(p.tile)),
+            };
+            if let Some(n) = world.stats.current.econ.d_starving.get_mut(d.index()) {
+                *n += 1;
+            }
+        }
     }
     // One Starved memory and one trait drift per day of starvation.
     let today = time::day(tick);

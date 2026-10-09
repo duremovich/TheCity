@@ -218,6 +218,13 @@ pub enum Flow {
     /// M16a (plan C5): a Fixer's cut of a settled record (taxed: a
     /// registered business's revenue).
     FixerCut,
+    // --- The Real economy (docs/ECONOMY_V2.md, plan E5, E24, E25).
+    /// E5: customs on an import to the World, importer -> Treasury (untaxed).
+    Customs,
+    /// E24: an immigrant's pocket from the World, an emigrant's wallet to it (untaxed).
+    Migrant,
+    /// E25b: the fence's resale credit, the World -> a gang (untaxed; a mint, now visible).
+    Fence,
 }
 
 impl Flow {
@@ -304,6 +311,24 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Escrow => row.contract.flow_escrow += coins,
         Flow::Payout => row.contract.flow_payout += coins,
         Flow::FixerCut => row.contract.flow_fixer_cut += coins,
+        // Real economy (plan E45).
+        Flow::Customs => row.econ.flow_customs += coins,
+        Flow::Migrant => row.econ.flow_migrant_in += coins,
+        Flow::Fence => row.econ.flow_fence += coins,
+    }
+}
+
+/// The ledger line of a crossing out of the city (`cross_out`): the flows
+/// with an outbound column of their own, else `ledger`.
+fn ledger_out(world: &mut World, flow: Flow, coins: i64) {
+    let row = &mut world.stats.current;
+    match flow {
+        Flow::Migrant => row.econ.flow_migrant_out += coins,
+        Flow::Import => {
+            row.flow_import += coins;
+            row.econ.flow_import_out += coins;
+        }
+        other => ledger(world, other, coins),
     }
 }
 
@@ -481,6 +506,72 @@ pub fn cross_in(
     moved
 }
 
+/// Real economy (plan E5): coins cross out of the city to an outside
+/// account: `from`'s purse pays (`amount` in full for a corp or the city
+/// with `full`, else capped at the purse), the account's treasury and
+/// `income_today` gain, `outside.outbound` grows, the ledger column moves
+/// (`ledger_out`). Untaxed. Returns the coins moved.
+pub fn cross_out(
+    world: &mut World,
+    from: Option<EntityId>,
+    to: crate::outside::OutsideId,
+    amount: i64,
+    flow: Flow,
+    full: bool,
+) -> i64 {
+    if amount <= 0 || world.outside.faction(to).is_none() {
+        return 0;
+    }
+    let moved = if full { amount } else { amount.min(world.purse(from).max(0)) };
+    if moved <= 0 {
+        return 0;
+    }
+    ledger_out(world, flow, moved);
+    shadow_flow(world, from, None, moved, flow, false);
+    world.purse_add(from, -moved);
+    if let Some(f) = world.outside.faction_mut(to) {
+        f.treasury += moved;
+        f.income_today += moved;
+    }
+    world.outside.outbound += moved;
+    moved
+}
+
+/// Plan E5: why a purse imports (the `Imported` event names the Food case).
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum ImportWhy {
+    /// `assets::buy`'s D30 import of a new asset, a robot included.
+    Asset,
+    /// `assets::repairs`' missing Parts.
+    Repair,
+    /// A gang's cook or a Market's legal Stims restock.
+    Stims,
+    /// A self-installed ICE tier.
+    Ice,
+    /// E11: a Market's food from the World at the ask.
+    Food,
+}
+
+/// Plan E5: an import, paid by `from`. With the market off it is
+/// `charge(from, None, amount, Flow::Import)` exactly (the City's customs,
+/// M13 D8); with it on the coins cross out to the World (`Flow::Import`,
+/// `flow_import_out`) and customs `round(customs_rate × moved)` go to the
+/// Treasury on top (`Flow::Customs`). Returns the coins that left for the good.
+pub fn import(world: &mut World, from: Option<EntityId>, amount: i64, _why: ImportWhy) -> i64 {
+    if !crate::systems::econ::market_on(world) {
+        return charge(world, from, None, amount, Flow::Import);
+    }
+    let full = matches!(owner_kind(world, from), OwnerKind::City | OwnerKind::Corp(_));
+    let moved = cross_out(world, from, crate::outside::WORLD_ACCOUNT, amount, Flow::Import, full);
+    if moved > 0 {
+        let customs = (crate::systems::world_market::customs_rate(world) * moved as f32).round() as i64;
+        if customs > 0 {
+            charge(world, from, None, customs, Flow::Customs);
+        }
+    }
+    moved
+}
+
 /// M16a (plan C5): coins from `from`'s purse into a contract record's
 /// escrow (a game abstraction: a balance held on the record), capped as
 /// `pay` (`min(amount, max(purse, 0))`). Ledger `Flow::Escrow` (capital: a
@@ -555,8 +646,9 @@ pub fn credit(world: &mut World, building: EntityId, coins: i64) {
 }
 
 /// Coins in every purse: wallets, gang and corp treasuries, the Treasury,
-/// (M13 D13) the coins on unsettled corpses and (M16a C5) the coins held in
-/// contract records' escrow.
+/// (M13 D13) the coins on unsettled corpses, (M16a C5) the coins held in
+/// contract records' escrow and (Real economy E25a, market on) a robbery's
+/// loot in flight on an open hole.
 pub fn total_coins(world: &World) -> i64 {
     let wallets: i64 = world.with::<Wallet>().iter().filter_map(|&a| world.comp::<Wallet>(a)).map(|w| w.coins).sum();
     let gangs: i64 = world.gangs().iter().filter_map(|&g| world.comp::<Gang>(g)).map(|g| g.treasury).sum();
@@ -564,7 +656,12 @@ pub fn total_coins(world: &World) -> i64 {
     let city: i64 = world.with::<Treasury>().iter().filter_map(|&t| world.comp::<Treasury>(t)).map(|t| t.coins).sum();
     let loot: i64 = world.loot_corpses.iter().filter_map(|&c| world.comp::<Corpse>(c)).map(|c| c.loot.coins).sum();
     let escrow: i64 = world.contracts.values().map(|c| c.escrow).sum();
-    wallets + gangs + corps + city + loot + escrow
+    // Real economy (plan E25a): a robbery's coins in flight on an open hole
+    // are coins held (as escrow is); counted with the market on, so the
+    // `--econ-off` quantity is `EC_BASE`'s.
+    let holes: i64 =
+        if crate::systems::econ::market_on(world) { world.holes.values().map(|h| h.loot).sum() } else { 0 };
+    wallets + gangs + corps + city + loot + escrow + holes
 }
 
 // ---------------------------------------------------------------------------

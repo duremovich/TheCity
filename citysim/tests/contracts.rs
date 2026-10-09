@@ -700,7 +700,10 @@ fn test_contracts_off_world_matches_l2() {
         w.run_ticks(3 * TICKS_PER_DAY);
         w.stats.history.iter().map(|r| r.csv_row()).collect::<Vec<_>>()
     };
-    assert_eq!(rows(Config::load().contracts_off()), rows(bare));
+    // Real economy (plan E2): the bare file lacks `[economy2]` too, so the
+    // L2-closing city is `contracts_off().econ_off()` (`--contracts-off
+    // --econ-off`); `--contracts-off` alone keeps the market.
+    assert_eq!(rows(Config::load().contracts_off().econ_off()), rows(bare));
 }
 
 /// Review fix: only a Guard may name a building; a Hit, Beat or Locate on

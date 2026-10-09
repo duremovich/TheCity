@@ -612,11 +612,11 @@ fn test_pre_l2_save_loads() {
     let mut w = World::new(26, Config::load().living_off().scaled_to(300));
     w.run_ticks(TICKS_PER_DAY / 2);
     let text = save::to_ron(&w);
-    // M16a: the current format is 3 (C40).
-    assert!(text.contains(",save_version:3"), "the current format is 3");
-    let v1 = text.replace(",save_version:3", ",save_version:1");
+    // M16a: the format was 3 (C40); the Real economy: 4 (E48).
+    assert!(text.contains(",save_version:4"), "the current format is 4");
+    let v1 = text.replace(",save_version:4", ",save_version:1");
     let back = save::from_ron(&v1).expect("a version-1 save loads");
-    assert_eq!(back.save_version, 3, "migrated to the current format");
+    assert_eq!(back.save_version, 4, "migrated to the current format");
     assert!(!back.config.living.enabled && !back.venues_due, "L2 stays off");
     // The same save with L2 switched on in its config.
     let on = v1
@@ -640,10 +640,10 @@ fn test_version2_save_loads() {
     let mut w = World::new(26, Config::load().contracts_off().scaled_to(300));
     w.run_ticks(TICKS_PER_DAY / 2);
     let text = save::to_ron(&w);
-    assert!(text.contains(",save_version:3"), "the current format is 3");
-    let v2 = text.replace(",save_version:3", ",save_version:2");
+    assert!(text.contains(",save_version:4"), "the current format is 4 (the Real economy)");
+    let v2 = text.replace(",save_version:4", ",save_version:2");
     let back = save::from_ron(&v2).expect("a version-2 save loads");
-    assert_eq!(back.save_version, 3, "migrated to the current format");
+    assert_eq!(back.save_version, 4, "migrated to the current format");
     assert!(!back.config.contracts.enabled && !back.fixers_due, "contracts stay off");
     let on = v2.replace("contracts:(enabled:false", "contracts:(enabled:true");
     assert_ne!(on, v2, "the switch is in the saved config");
@@ -697,6 +697,56 @@ fn test_save_mid_contract_keeps_identity() {
     assert_eq!(ident(&back), ident(&w), "the identity across the load");
     assert_eq!(back.escrow_held, w.escrow_held);
     assert_eq!(back.by_party, w.by_party, "the indices rebuilt");
+    w.run_ticks(600);
+    back.run_ticks(600);
+    assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
+}
+
+/// Real economy (plan E48): a version-3 RON (M16a's, no `[economy2]` key)
+/// loads as the `EC_BASE` city: the economy stays off, no World account or
+/// book is seeded on load, and a day runs; a version-4 world with the
+/// market on round-trips (the books, `econ`, the identity) and runs on
+/// byte for byte.
+#[test]
+fn test_v3_save_loads_as_ec_base() {
+    use citysim::systems::{econ, ownership};
+    let mut w = World::new(26, Config::load().econ_off().scaled_to(300));
+    w.run_ticks(TICKS_PER_DAY / 2);
+    let text = save::to_ron(&w);
+    assert!(!text.contains("economy2:(enabled:true"), "the saved config has the economy off");
+    assert!(!text.contains("econ:(") && !text.contains("books:"), "nothing of the milestone is saved");
+    // A real version-3 RON has neither `[economy2]` nor `[world_market]`:
+    // the keys are stripped so the serde defaults (`off()`) are what loads.
+    let v3 =
+        strip_field(&strip_field(&text, "economy2:("), "world_market:(").replace(",save_version:4", ",save_version:3");
+    assert_ne!(v3, text);
+    assert!(!v3.contains("economy2:") && !v3.contains("world_market:"), "the keys are absent");
+    let mut back = save::from_ron(&v3).expect("a version-3 save loads");
+    assert_eq!(back.save_version, 4, "migrated to the current format");
+    assert_eq!(back.config.economy2, citysim::config::Economy2Cfg::off());
+    assert_eq!(back.config.world_market, citysim::config::WorldMarketCfg::off());
+    assert!(!econ::market_on(&back) && back.outside.is_empty(), "the economy stays off, no account seeded");
+    back.run_ticks(TICKS_PER_DAY);
+    assert!(back.outside.is_empty() && back.econ.is_default());
+    back.check_indices().expect("indices in step");
+    // A version-4 world with the market on round-trips.
+    let mut w = World::new(42, Config::load());
+    assert!(econ::market_on(&w));
+    w.run_ticks(TICKS_PER_DAY + 600);
+    w.push_command(citysim::PlayerCommand::SetAppetite { good: citysim::outside::ExportGood::Parts, mult: Some(1.7) });
+    w.run_ticks(1);
+    let text = save::to_ron(&w);
+    assert!(text.contains("books:") && text.contains("save_version:4"));
+    let mut back = save::from_ron(&text).expect("load");
+    let ident = |w: &World| ownership::total_coins(w) + w.outside.treasuries() - w.outside.minted;
+    assert_eq!(ident(&back), ident(&w), "the identity across the load");
+    assert_eq!(back.outside, w.outside, "the account and its books");
+    assert_eq!(back.econ, w.econ);
+    assert_eq!(
+        citysim::systems::world_market::appetite(&back, citysim::outside::ExportGood::Parts),
+        1.7,
+        "the pin survives"
+    );
     w.run_ticks(600);
     back.run_ticks(600);
     assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));

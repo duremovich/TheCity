@@ -1061,8 +1061,23 @@ pub fn fence(world: &mut World, actor: EntityId) -> i64 {
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.treasury -= pay;
     }
-    // The gang resells at market price.
-    world.gang_credit(gang, i64::from(sold) * price);
+    // The gang resells at market price. Real economy (plan E25b): booked as
+    // a crossing from the World with the market on (`flow_fence`), so the
+    // identity holds without changing gang income: the fence stays a mint,
+    // now visible (a finding for Dylan, E46).
+    let credit = i64::from(sold) * price;
+    world.probe.fence_credit += credit;
+    if crate::systems::econ::market_on(world) {
+        crate::systems::ownership::cross_in(
+            world,
+            crate::outside::WORLD_ACCOUNT,
+            Some(gang),
+            credit,
+            crate::systems::ownership::Flow::Fence,
+        );
+    } else {
+        world.gang_credit(gang, credit);
+    }
     if let Some(w) = world.comp_mut::<Wallet>(actor) {
         w.coins += pay;
     }

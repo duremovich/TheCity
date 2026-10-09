@@ -167,7 +167,7 @@ pub fn cook(world: &mut World, gang: EntityId) {
     if n == 0 {
         return;
     }
-    let paid = ownership::pay(world, Some(gang), None, i64::from(n) * cost, Flow::Import);
+    let paid = ownership::import(world, Some(gang), i64::from(n) * cost, ownership::ImportWhy::Stims);
     let n = u32::try_from(paid / cost).unwrap_or(0);
     world.add_stock(h, Good::Stims, n);
 }
@@ -671,7 +671,7 @@ pub fn restock_legal(world: &mut World) {
         if n == 0 {
             continue;
         }
-        ownership::charge(world, owner, None, i64::from(n) * cost, Flow::Import);
+        ownership::import(world, owner, i64::from(n) * cost, ownership::ImportWhy::Stims);
         world.add_stock(m, Good::Stims, n);
     }
 }

@@ -124,7 +124,10 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::BountyPaid
         | EventKind::Accessory
         | EventKind::FixerBusted
-        | EventKind::GuardTaken => AMBER,
+        | EventKind::GuardTaken
+        // The Real economy (plan E44).
+        | EventKind::Imported
+        | EventKind::AppetiteShift => AMBER,
         _ => Color32::LIGHT_GRAY,
     }
 }

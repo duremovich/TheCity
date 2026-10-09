@@ -1147,7 +1147,7 @@ fn repairs(world: &mut World) {
         let have = world.take_stock(g, Good::Parts, need);
         let missing = i64::from(need - have);
         if missing > 0 {
-            ownership::charge(world, garage_owner, None, missing * cfg.part_credit, Flow::Import);
+            ownership::import(world, garage_owner, missing * cfg.part_credit, ownership::ImportWhy::Repair);
             // L2 L9: the Fab trigger's tally.
             crate::systems::jobs::note_import(world, garage_owner, missing * cfg.part_credit);
         }
@@ -1649,7 +1649,7 @@ pub fn buy_noted(
             return Err(format!("{} cannot pay the import", world.owner_label(seller_owner)));
         }
         world.take_stock(seller, Good::Parts, parts);
-        ownership::charge(world, seller_owner, None, import, Flow::Import);
+        ownership::import(world, seller_owner, import, ownership::ImportWhy::Asset);
         // L2 L9: the Fab trigger's tally.
         crate::systems::jobs::note_import(world, seller_owner, import);
     }

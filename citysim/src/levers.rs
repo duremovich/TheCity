@@ -411,6 +411,26 @@ pub enum PlayerCommand {
         contract: crate::contract::ContractId,
         taker: EntityId,
     },
+    // --- The Real economy phase 1 (plan E47): the World's levers.
+    /// God: pin a good's appetite (`None` releases it to the walk).
+    SetAppetite {
+        good: crate::outside::ExportGood,
+        mult: Option<f32>,
+    },
+    /// God: pin a good's daily cap (`None` releases it to `cap × appetite`).
+    SetExportCap {
+        good: crate::outside::ExportGood,
+        cap: Option<u32>,
+    },
+    /// The famine lever: a good's ask multiplier (lower: cheaper imports).
+    SetImportAsk {
+        good: crate::outside::ExportGood,
+        mult: f32,
+    },
+    /// The customs rate on imports (over `[world_market] customs_rate`).
+    SetCustoms(f32),
+    /// God: the World neither buys nor sells (`SetExport` closes buying only).
+    CloseWorld(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -610,7 +630,10 @@ impl Levers {
             news_tax: 0.0,
             censored: Default::default(),
             public_works: true,
-            export_open: cfg.living.enabled && cfg.export.enabled,
+            // Real economy (plan E4, E12; deviation recorded): the market
+            // opens the World's buying at seed without `[export] enabled`,
+            // whose flat-price hook stays L2's own switch.
+            export_open: cfg.living.enabled && (cfg.export.enabled || crate::systems::econ::market_on_cfg(cfg)),
             leisure_tax: 0.0,
             ban_gambling: false,
             fixer_licence: true,
@@ -621,6 +644,14 @@ impl Levers {
 }
 
 impl World {
+    /// A lever's outcome as an event (Real economy phase 1).
+    fn lever_result(&mut self, r: Result<String, String>) {
+        match r {
+            Ok(text) => self.push_event(EventKind::PlayerAction, &[], text),
+            Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], e),
+        };
+    }
+
     /// Queue a command for the start of the next tick.
     pub fn push_command(&mut self, cmd: PlayerCommand) {
         self.command_queue.push(cmd);
@@ -926,6 +957,58 @@ impl World {
                     &[],
                     format!("Export price of {} set to {price}", good.label()),
                 );
+            }
+            // Real economy phase 1 (plan E47).
+            PlayerCommand::SetAppetite { good, mult } => {
+                let text = match crate::systems::world_market::book_mut(self, *good) {
+                    Some(b) => {
+                        b.appetite_pin = mult.map(|m| m.max(0.0));
+                        if let Some(m) = b.appetite_pin {
+                            b.appetite = m;
+                        }
+                        Ok(match mult {
+                            Some(m) => format!("World appetite for {} pinned at {m:.2}", good.label()),
+                            None => format!("World appetite for {} released to the walk", good.label()),
+                        })
+                    }
+                    None => Err("SetAppetite: no World book (the market is off)".to_string()),
+                };
+                self.lever_result(text);
+            }
+            PlayerCommand::SetExportCap { good, cap } => {
+                let text = match crate::systems::world_market::book_mut(self, *good) {
+                    Some(b) => {
+                        b.cap_pin = *cap;
+                        Ok(match cap {
+                            Some(c) => format!("World daily cap for {} pinned at {c}", good.label()),
+                            None => format!("World daily cap for {} released", good.label()),
+                        })
+                    }
+                    None => Err("SetExportCap: no World book (the market is off)".to_string()),
+                };
+                self.lever_result(text);
+            }
+            PlayerCommand::SetImportAsk { good, mult } => {
+                let mult = mult.max(0.0);
+                let text = match crate::systems::world_market::book_mut(self, *good) {
+                    Some(b) => {
+                        b.ask_mult = mult;
+                        Ok(format!("World ask multiplier for {} set to {mult:.2}", good.label()))
+                    }
+                    None => Err("SetImportAsk: no World book (the market is off)".to_string()),
+                };
+                self.lever_result(text);
+            }
+            PlayerCommand::SetCustoms(rate) => {
+                let rate = rate.clamp(0.0, 1.0);
+                self.econ.customs_pin = Some(rate);
+                self.push_event(EventKind::PlayerAction, &[], format!("Customs rate set to {rate:.2}"));
+            }
+            PlayerCommand::CloseWorld(closed) => {
+                self.econ.world_closed = *closed;
+                let text =
+                    if *closed { "The World is closed: no exports, no imports" } else { "The World is open again" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
             }
             PlayerCommand::OpenVenue { kind, district, owner } => {
                 match crate::systems::jobs::open_venue(self, *kind, *district, *owner) {

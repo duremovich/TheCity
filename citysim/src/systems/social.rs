@@ -743,6 +743,13 @@ pub fn repay_debts(world: &mut World, id: EntityId) {
         if pay <= 0 {
             break;
         }
+        // Real economy (plan E25, the census's late find: seed 44, day 25):
+        // a creditor killed since lending keeps its edges until its body is
+        // freed but has no Wallet (`kill_by`), so the repayment vanished.
+        // With the market on the debt waits (the coins stay with the debtor).
+        if crate::systems::econ::market_on(world) && !world.has::<crate::components::Wallet>(creditor) {
+            continue;
+        }
         if let Some(w) = world.comp_mut::<crate::components::Wallet>(id) {
             w.coins -= pay;
         }
