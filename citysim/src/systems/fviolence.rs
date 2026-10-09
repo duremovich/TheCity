@@ -226,15 +226,27 @@ pub fn kind_index(kind: HoleKind) -> usize {
 const KINDS: [HoleKind; 4] = [HoleKind::Killed, HoleKind::Assaulted, HoleKind::Robbed, HoleKind::Abducted];
 
 /// A victim's class: a guard (public or private) is the Watch, a gang
-/// member a Member, anyone else a Civilian.
+/// member a Member, anyone else a Civilian; with violence fix 1 a civilian
+/// with no Home is Street (`lod` promotes the fresh evictees to bodies, so
+/// what they suffer fighting the gangs over squats would otherwise be
+/// learned as every housed civilian's rate).
 pub fn victim_class(world: &World, id: EntityId) -> VictimClass {
     if crate::systems::law::is_guard(world, id) {
         VictimClass::Watch
     } else if world.has::<crate::components::GangMember>(id) {
         VictimClass::Member
+    } else if crate::systems::fixes::street_class(world) && world.comp::<Household>(id).is_none_or(|h| h.home.is_none())
+    {
+        VictimClass::Street
     } else {
         VictimClass::Civilian
     }
+}
+
+/// A civilian for the parity tallies and the `kill_rate_*_civ` columns:
+/// Civilian or (fix 1) Street.
+fn is_civ(class: VictimClass) -> bool {
+    matches!(class, VictimClass::Civilian | VictimClass::Street)
 }
 
 fn is_body(world: &World, id: EntityId) -> bool {
@@ -307,7 +319,7 @@ pub fn note_victim(world: &mut World, actor: EntityId, victim: EntityId, kind: H
     let k = kind_index(kind);
     let cell = world.order_rates.cell_mut((source, d, class));
     cell.victims_today[k] = cell.victims_today[k].saturating_add(1);
-    if class == VictimClass::Civilian && k <= 1 {
+    if is_civ(class) && k <= 1 {
         world.fv_tally.body_civ_victims += 1;
     }
 }
@@ -319,7 +331,7 @@ pub fn note_death(world: &mut World, victim: EntityId, cause: crate::components:
         return;
     }
     let body = is_body(world, victim);
-    let civ = victim_class(world, victim) == VictimClass::Civilian;
+    let civ = is_civ(victim_class(world, victim));
     let t = &mut world.fv_tally.day_kills;
     t[usize::from(!body)] += 1;
     if civ {
@@ -461,13 +473,22 @@ fn may_strike(world: &World, s: &ActiveSource, id: EntityId) -> bool {
     world.vendettas.iter().any(|v| (v.a == f && member_of(world, id, v.b)) || (v.b == f && member_of(world, id, v.a)))
 }
 
-/// The day's live riots and episodes (`FvTally::day_sources`) and the
-/// riots' rosters (`FvTally::riot_rosters`), from the hourly tally.
+/// The day's live riots and episodes (`FvTally::day_sources`), with fix 2
+/// the hours each was live (`FvTally::source_hours`), and the riots'
+/// rosters (`FvTally::riot_rosters`), from the hourly tally.
 fn remember_live(world: &mut World, all: &[ActiveSource]) {
     let now = world.tick;
-    for s in all.iter().filter(|s| matches!(s.source, ViolenceSource::Riot | ViolenceSource::Episode)) {
+    let hours = crate::systems::fixes::short_sources(world);
+    for s in all.iter().filter(|s| is_short(s.source)) {
         if !world.fv_tally.day_sources.contains(s) {
             world.fv_tally.day_sources.push(*s);
+        }
+        if hours {
+            let t = &mut world.fv_tally.source_hours;
+            match t.iter_mut().find(|(x, _)| x == s) {
+                Some((_, h)) => *h += 1,
+                None => t.push((*s, 1)),
+            }
         }
     }
     for r in &world.riots {
@@ -522,7 +543,7 @@ pub fn tally_exposure(world: &mut World) {
         for s in srcs {
             *adds.entry((s.source, d, class)).or_default() += 1;
         }
-        if class == VictimClass::Civilian {
+        if is_civ(class) {
             civ_hours += 1;
         }
     }
@@ -542,6 +563,8 @@ fn prior_of(world: &World, source: ViolenceSource, class: VictimClass) -> [f32; 
         VictimClass::Civilian => m.civilian,
         VictimClass::Member => m.member,
         VictimClass::Watch => m.watch,
+        // Violence fix 1: the civilian prior times `vf_street_prior_mult`.
+        VictimClass::Street => m.civilian.map(|x| x * world.config.life.vf_street_prior_mult.max(0.0)),
     };
     let p = source_prior(world, source);
     std::array::from_fn(|k| p[k] * mult[k])
@@ -585,6 +608,21 @@ pub fn cell_rates(world: &World, source: ViolenceSource, d: DistrictId, class: V
     })
 }
 
+/// A source that ends within hours (a riot, an episode): the midnight pass
+/// reads it from `day_sources`, and fix 2 scales it by its live hours.
+fn is_short(source: ViolenceSource) -> bool {
+    matches!(source, ViolenceSource::Riot | ViolenceSource::Episode)
+}
+
+/// Violence fix 2: the share of the day short source `s` was live, its
+/// hourly tallies / 24 (at least one: a source live at midnight but not yet
+/// tallied), at most 1. Exposure is learned per 24 body-hours, so a 6-hour
+/// riot rolled as a full day over-applies its rate about 4x.
+pub fn live_share(hours: &[(ActiveSource, u32)], s: &ActiveSource) -> f32 {
+    let h = hours.iter().find(|(x, _)| x == s).map_or(0, |&(_, h)| h);
+    (h.max(1) as f32 / 24.0).min(1.0)
+}
+
 /// L26, L28: the daily pass, at the top of `bind::run`'s midnight branch.
 /// Each Statistical adult (ascending; not jailed, emigrating, pinned, nor a
 /// victim of a hole opened since the last midnight) in a district a source
@@ -607,6 +645,9 @@ pub fn daily(world: &mut World) {
             all.push(s);
         }
     }
+    // Fix 2: the share of the day each riot and episode was live.
+    let hours = std::mem::take(&mut world.fv_tally.source_hours);
+    let short = crate::systems::fixes::short_sources(world);
     let ttl = (world.config.bind.hole_ttl_days + 1) * crate::time::TICKS_PER_DAY;
     let now = world.tick;
     world.fv_tally.riot_rosters.retain(|_, (t, _)| *t + ttl > now);
@@ -650,11 +691,22 @@ pub fn daily(world: &mut World) {
             continue;
         }
         let class = victim_class(world, id);
-        let rates: Vec<[f32; 4]> = srcs.iter().map(|s| cell_rates(world, s.source, d, class)).collect();
+        let rates: Vec<[f32; 4]> = srcs
+            .iter()
+            .map(|s| {
+                let r = cell_rates(world, s.source, d, class);
+                if short && is_short(s.source) {
+                    let f = live_share(&hours, s);
+                    r.map(|x| x * f)
+                } else {
+                    r
+                }
+            })
+            .collect();
         let sum = |k: usize| rates.iter().map(|r| r[k]).sum::<f32>();
         let mut rng = world.rng.word(crate::word::WordNs::FViolence, today, u64::from(id.index));
         let u: [f32; 5] = std::array::from_fn(|_| rng.random());
-        if class == VictimClass::Civilian {
+        if is_civ(class) {
             world.fv_tally.stat_civ_days += 1;
         }
         let kitted =
@@ -702,7 +754,7 @@ pub fn daily(world: &mut World) {
             2 => l.fv_robbed += 1,
             _ => l.fv_abducted += 1,
         }
-        if class == VictimClass::Civilian && kind <= 1 {
+        if is_civ(class) && kind <= 1 {
             world.fv_tally.stat_civ_hits += 1;
         }
     }
@@ -724,7 +776,7 @@ pub fn snapshot(world: &mut World) {
             }
             let stat = usize::from(i == 2);
             n[stat] += 1;
-            if victim_class(world, id) == VictimClass::Civilian {
+            if is_civ(victim_class(world, id)) {
                 n[2 + stat] += 1;
             }
         }

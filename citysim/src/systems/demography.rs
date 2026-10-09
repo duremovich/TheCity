@@ -869,6 +869,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     crate::systems::assets::give_body(world, id, body);
     let home = emptiest_home(world);
     world.insert(id, Household::new(home));
+    arrival_savings(world, id, home, market);
     world.stats.current.immigrants += 1;
     let name = world.name_of(id);
     let where_ = match home {
@@ -880,6 +881,41 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
         world.push_event(EventKind::Homeless, &[id], format!("{name} has no home"));
     }
     id
+}
+
+/// Violence fix 5 (`[life] vf_arrival`): an immigrant arrives with the
+/// savings of a seeded adult of its Home's tier, the mean of
+/// `[world] initial_coins_min..=max` times `coins_by_tier` (the homeless:
+/// times 1, as the seeded homeless keep their draw), not a flat 15. The 15
+/// put a newcomer in the emptiest Home (often a Spire block at rent 4) three
+/// days from broke: on seed 43 nearly every year-3 immigrant was starving
+/// within two weeks of arriving. The top-up crosses in from the World
+/// (`Flow::Migrant`) with the market on, as the 15 does; no draw.
+fn arrival_savings(world: &mut World, id: EntityId, home: Option<EntityId>, market: bool) {
+    if !crate::systems::fixes::arrival(world) {
+        return;
+    }
+    let wc = &world.config.world;
+    let mean = (wc.initial_coins_min + wc.initial_coins_max) as f32 / 2.0;
+    let mult = home
+        .and_then(|h| world.comp::<crate::components::Building>(h))
+        .map_or(1.0, |b| wc.coins_by_tier[usize::from(b.tier.min(2))]);
+    let extra = ((mean * mult).round() as i64 - 15).max(0);
+    if extra == 0 {
+        return;
+    }
+    world.probe.immigrant_coins += extra;
+    if market {
+        crate::systems::ownership::cross_in(
+            world,
+            crate::outside::WORLD_ACCOUNT,
+            Some(id),
+            extra,
+            crate::systems::ownership::Flow::Migrant,
+        );
+    } else if let Some(w) = world.comp_mut::<Wallet>(id) {
+        w.coins += extra;
+    }
 }
 
 /// The Home with the fewest residents among those under 6 (ties by id).

@@ -1429,12 +1429,35 @@ fn household_rent(world: &World) -> bool {
 /// `[rent] pay_from_income`: rent comes out of a wage or the dole the moment
 /// it is collected, before it can go on food (`economy::collect_wage`,
 /// `collect_dole`).
+///
+/// Violence fix 4 (`[life] vf_rent_meal`): an agent in arrears keeps a
+/// meal's worth (`World::mean_price`) of its purse; the rest pays. Arrears
+/// built over unpaid first days swallowed a new guard's whole wage before
+/// food, and the guard starved housed (seed 43, year 3).
 pub fn pay_rent_from_income(world: &mut World, agent: EntityId) {
     if !world.config.rent.pay_from_income {
         return;
     }
     let Some(home) = world.comp::<Household>(agent).and_then(|h| h.home) else { return };
+    let in_arrears = world.comp::<Household>(agent).is_some_and(|h| h.arrears > 0);
+    let keep = if in_arrears && crate::systems::fixes::rent_meal(world) {
+        world.mean_price().max(0).min(world.comp::<crate::components::Wallet>(agent).map_or(0, |w| w.coins.max(0)))
+    } else {
+        0
+    };
+    // The meal is held aside while the rent settles (no flow: the coins
+    // never leave the purse).
+    if keep > 0 {
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(agent) {
+            w.coins -= keep;
+        }
+    }
     settle_rent(world, agent, home, false);
+    if keep > 0 {
+        if let Some(w) = world.comp_mut::<crate::components::Wallet>(agent) {
+            w.coins += keep;
+        }
+    }
 }
 
 fn evictions(world: &mut World) {

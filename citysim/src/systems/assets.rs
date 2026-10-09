@@ -2028,10 +2028,13 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // Phase 3 (D43): the first empty slot of the agent's list, while a T1
     // is within reach at the cheapest Clinic (a used one may be cheaper).
     let chrome_slot = chrome_slot(world, id);
-    let want_chrome = chrome_slot.is_some_and(|s| {
-        lowest(BuildingKind::Clinic)
-            .is_some_and(|l| affordable_at(world, l, &[(AssetKind::Implant(s), 1)], coins, room).is_some())
-    });
+    // Violence fix 3: the dearest tier the agent's humanity still takes.
+    let max_tier = chrome_max_tier(world, id);
+    let want_chrome = max_tier >= 1
+        && chrome_slot.is_some_and(|s| {
+            lowest(BuildingKind::Clinic)
+                .is_some_and(|l| affordable_at(world, l, &[(AssetKind::Implant(s), 1)], coins, room).is_some())
+        });
     // M14 V36: a deck for a hacker without one (GATE `hacking >= deck_shop_min`),
     // or the carried deck one tier up; at Clinics and Security Offices (V24).
     let hacking = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
@@ -2094,7 +2097,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // Chrome: the dearest affordable tier of the slot, new or used.
     if let (true, Some(slot)) = (want_chrome, chrome_slot) {
         if let Some(c) = nearest_seller(world, BuildingKind::Clinic, from, require_open) {
-            if let Some((pick, price, financed)) = chrome_pick(world, c, slot, coins, room) {
+            if let Some((pick, price, financed)) = chrome_pick(world, c, slot, coins, room, max_tier) {
                 let load = kit.map_or(0.0, |k| k.load);
                 let courage = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.courage);
                 let cs = vec![
@@ -2225,15 +2228,44 @@ pub fn upgrade_deck(world: &mut World, agent: EntityId, seller: EntityId, pick: 
     Ok(())
 }
 
+/// Violence fix 3: a gang member, a guard or a pit Fighter: the roles that
+/// fight for a living (the five-slot list, and no humanity cap).
+fn fights_for_a_living(world: &World, id: EntityId) -> bool {
+    world.has::<crate::components::GangMember>(id)
+        || crate::systems::law::is_guard(world, id)
+        || world.comp::<Job>(id).is_some_and(|j| j.role == crate::components::Role::Fighter)
+}
+
+/// Violence fix 3: the dearest implant tier `id` may buy: 3 (no cap) with
+/// the fix off or for a gang member, a guard or a Fighter; else the
+/// dearest tier whose `[chrome] sanity_cost` added to `Kit.load` keeps the
+/// target sanity (`1 - load`) at or above `psycho`, 0 when none does. Two
+/// T1s (load 0.16) stay over 0.8; a third (0.24) would cross it.
+pub fn chrome_max_tier(world: &World, id: EntityId) -> u8 {
+    if !crate::systems::fixes::chrome_cap(world) || fights_for_a_living(world, id) {
+        return 3;
+    }
+    let cfg = &world.config.chrome;
+    let load = world.comp::<Kit>(id).map_or(0.0, |k| k.load);
+    // A float margin: 1 - (0.08 + 0.08 + 0.04) is not exactly 0.8.
+    let room = 1.0 - cfg.psycho - load + 1e-4;
+    (1..=3u8).rev().find(|&t| cfg.sanity_cost.get(usize::from(t - 1)).copied().unwrap_or(0.0) <= room).unwrap_or(0)
+}
+
 /// Phase 3 (D43): the slot an agent would chrome next: the first empty one
 /// of `Arms, Nerves, Skin, Eyes, Legs` for a gang member, a guard or
-/// `courage >= 0.6`, else of `Legs, Eyes`.
+/// `courage >= 0.6` (violence fix 3: a Fighter instead of the courage),
+/// else of `Legs, Eyes`.
 pub fn chrome_slot(world: &World, id: EntityId) -> Option<Slot> {
     const FIGHTER: [Slot; 5] = [Slot::Arms, Slot::Nerves, Slot::Skin, Slot::Eyes, Slot::Legs];
     const CIVILIAN: [Slot; 2] = [Slot::Legs, Slot::Eyes];
-    let fighter = world.has::<crate::components::GangMember>(id)
-        || crate::systems::law::is_guard(world, id)
-        || world.comp::<crate::components::Personality>(id).is_some_and(|p| p.courage >= 0.6);
+    let fighter = if crate::systems::fixes::chrome_cap(world) {
+        fights_for_a_living(world, id)
+    } else {
+        world.has::<crate::components::GangMember>(id)
+            || crate::systems::law::is_guard(world, id)
+            || world.comp::<crate::components::Personality>(id).is_some_and(|p| p.courage >= 0.6)
+    };
     let list: &[Slot] = if fighter { &FIGHTER } else { &CIVILIAN };
     let taken: SmallVec<[Slot; 5]> = assets_at(world, id)
         .iter()
@@ -2249,10 +2281,19 @@ pub fn chrome_slot(world: &World, id: EntityId) -> Option<Slot> {
 
 /// Phase 3 (D43): the dearest implant for `slot` at Clinic `c` the agent
 /// can buy: a new tier (`dearest_affordable`'s rules), or a used one in the
-/// Clinic's stock at `used_frac × list × condition / 100`.
-fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, cap: f32) -> Option<(ShopPick, i64, bool)> {
+/// Clinic's stock at `used_frac × list × condition / 100`; no tier above
+/// `max_tier` (violence fix 3, `chrome_max_tier`).
+fn chrome_pick(
+    world: &World,
+    c: EntityId,
+    slot: Slot,
+    coins: i64,
+    cap: f32,
+    max_tier: u8,
+) -> Option<(ShopPick, i64, bool)> {
     let kind = AssetKind::Implant(slot);
-    let new = dearest_affordable(world, c, &[(kind, 1), (kind, 2), (kind, 3)], coins, cap)
+    let tiers = [(kind, 1), (kind, 2), (kind, 3)];
+    let new = dearest_affordable(world, c, &tiers[..usize::from(max_tier.min(3))], coins, cap)
         .map(|(k, t, price, fin)| (ShopPick { kind: k, tier: t, used: None, upgrade: false }, price, fin));
     let down_frac = world.config.assets.down_frac_of(kind);
     let used = assets_at(world, c)
@@ -2260,7 +2301,11 @@ fn chrome_pick(world: &World, c: EntityId, slot: Slot, coins: i64, cap: f32) -> 
         .copied()
         .filter_map(|a| world.comp::<Asset>(a).map(|x| (a, x)))
         .filter(|(_, x)| {
-            x.kind == kind && x.loc == AssetLoc::Stock(c) && x.condition > 0 && x.owner == world.owner_of(c)
+            x.kind == kind
+                && x.tier <= max_tier
+                && x.loc == AssetLoc::Stock(c)
+                && x.condition > 0
+                && x.owner == world.owner_of(c)
         })
         .filter_map(|(a, x)| {
             let price = (world.config.chrome.used_frac * x.list as f32 * f32::from(x.condition) / 100.0).round() as i64;
