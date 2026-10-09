@@ -197,7 +197,70 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         }
         body_kit(ui, app, world, id);
         hacking(ui, app, world, id);
+        contracts(ui, app, world, id);
         buttons(ui, app, world, id);
+    });
+}
+
+/// M16a § 9 (plan C42): an agent's contract records on both sides (a
+/// record is a price on a struct between fictional agents): bought or
+/// placed, taken or crewed, and on them; its chase (the contract run); the
+/// buyers it is on the take for (a city guard); the Fixers it is a regular
+/// at. Hidden when there is nothing to show.
+fn contracts(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
+    use citysim::contract::Broker;
+    let ids = world.by_party.get(&id).map(|v| v.to_vec()).unwrap_or_default();
+    let run = world.contract_runs.get(&id);
+    let take = world.on_take.get(&id);
+    let fixers: Vec<(EntityId, u64)> = world
+        .buildings_of_kind(citysim::BuildingKind::Fixer)
+        .iter()
+        .filter_map(|&f| world.comp::<Broker>(f).and_then(|k| k.regulars.get(&id).map(|&t| (f, t))))
+        .collect();
+    if ids.is_empty() && run.is_none() && take.is_none() && fixers.is_empty() {
+        return;
+    }
+    section(ui, "Contracts", |ui| {
+        let group = |pred: &dyn Fn(&citysim::contract::Contract) -> bool| -> Vec<&citysim::contract::Contract> {
+            ids.iter().filter_map(|c| world.contracts.get(c)).filter(|c| pred(c)).collect()
+        };
+        let bought = group(&|c| c.buyer == Some(id) || c.agent == Some(id));
+        let taken = group(&|c| c.taker == Some(id) || c.crew.contains(&id));
+        let on_them = group(&|c| c.target.id() == id);
+        for (title, rows) in [("Bought or placed", bought), ("Taken", taken), ("On them", on_them)] {
+            if rows.is_empty() {
+                continue;
+            }
+            ui.small(title);
+            for c in rows {
+                // The agent sees its own records named; others' buyers as god.
+                super::board::row(ui, app, world, c, None);
+            }
+        }
+        if let Some(r) = run {
+            let intel = r.intel.map_or("no intel yet".to_string(), |i| match i.building {
+                Some(b) => format!("intel: {} ({:?})", world.name_of(b), i.source),
+                None => format!("intel: ({}, {}) ({:?})", i.tile.x, i.tile.y, i.source),
+            });
+            let stake = r
+                .stakeout_until
+                .map_or(String::new(), |t| format!(" · staked out until day {} {}", time::day(t), time::clock(t)));
+            ui.label(format!(
+                "Chase on #{}: {:?} for {} since day {} · {intel}{stake}{}",
+                r.contract,
+                r.phase,
+                world.name_of(r.target),
+                time::day(r.since),
+                if r.deceived { " · deceived" } else { "" }
+            ));
+        }
+        if let Some(buyers) = take {
+            let names: Vec<String> = buyers.iter().map(|&b| world.owner_label(Some(b))).collect();
+            ui.colored_label(RED, format!("On the take for {}", names.join(", ")));
+        }
+        for (f, t) in fixers {
+            ui.label(format!("Regular at {} (last in day {})", world.name_of(f), time::day(t)));
+        }
     });
 }
 

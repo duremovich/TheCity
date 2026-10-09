@@ -73,6 +73,7 @@ pub fn handle(app: &mut App, world: &mut World) {
             app.selected_node = None;
             app.selected_run = None;
             app.selected_mission = None;
+            app.selected_contract = None;
             app.selected = on_tile.or_else(|| {
                 world
                     .with::<citysim::Building>()
@@ -108,6 +109,15 @@ pub fn handle(app: &mut App, world: &mut World) {
     // L2 § 8: street life (`H`: N B L K J F are taken).
     if is_key_pressed(KeyCode::H) {
         app.show_leisure = !app.show_leisure;
+    }
+    // M16a § 9 (plan C42; `C` is free of every map key): the contracts
+    // overlay; Shift+C the Board panel.
+    if is_key_pressed(KeyCode::C) {
+        if is_key_down(KeyCode::LeftShift) || is_key_down(KeyCode::RightShift) {
+            app.show_board = !app.show_board;
+        } else {
+            app.show_contracts = !app.show_contracts;
+        }
     }
     if is_key_pressed(KeyCode::F) {
         app.follow = app.selected.is_some() && !app.follow;

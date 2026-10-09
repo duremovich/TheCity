@@ -46,6 +46,8 @@ pub struct CityState {
     pub hack_sentence_days: [u16; 2],
     /// M15 W42: the news tax slider.
     pub news_tax: f32,
+    /// M16a C39: the Conspiracy sentence multiplier slider.
+    pub accessory_mult: f32,
     pub synced: bool,
 }
 
@@ -76,6 +78,7 @@ impl Default for CityState {
             data_tax: 0.0,
             hack_sentence_days: [2, 5],
             news_tax: 0.0,
+            accessory_mult: 0.75,
             synced: false,
         }
     }
@@ -108,6 +111,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         app.city.city_ice = world.levers.city_ice;
         app.city.data_tax = world.levers.data_tax;
         app.city.news_tax = world.levers.news_tax;
+        app.city.accessory_mult = world.levers.accessory_mult.unwrap_or(world.config.law.accessory_mult);
         let ext = &world.config.crime.sentence_days_ext;
         app.city.hack_sentence_days = [
             world.levers.hack_sentence_days[0].unwrap_or(ext.intrusion as u16),
@@ -200,6 +204,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         assets_section(ui, app, world);
         virt_section(ui, app, world);
         super::word::city(ui, app, world);
+        contracts_section(ui, app, world);
 
         ui.separator();
         ui.strong("Food");
@@ -673,6 +678,91 @@ fn virt_section(ui: &mut Ui, app: &mut App, world: &World) {
             }
         }
     });
+}
+
+/// M16a § 9 (plan C42): the Contracts section (a contract is a record with
+/// a price between fictional agents): open records by kind, fulfilled
+/// today, Hits, the live runs and the queue, each Fixer and its heat; the
+/// three levers (C39).
+fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
+    use citysim::contract::{Broker, ContractKind};
+    ui.separator();
+    ui.horizontal(|ui| {
+        ui.strong("Contracts");
+        ui.small(if app.show_contracts { "overlay on (C)" } else { "C draws them" });
+        if ui.small_button(if app.show_board { "Board (open)" } else { "Board (Shift+C)" }).clicked() {
+            app.show_board = !app.show_board;
+        }
+    });
+    let mut open = [0u32; 4];
+    let mut taken = [0u32; 4];
+    for c in world.contracts.values() {
+        let i = c.kind.index();
+        if c.is_open() {
+            open[i] += 1;
+        } else if c.is_live() {
+            taken[i] += 1;
+        }
+    }
+    let today = &world.stats.current.contract;
+    let yday = world.stats.history.back().map(|r| r.contract.clone()).unwrap_or_default();
+    egui::Grid::new("city_contracts").striped(true).show(ui, |ui| {
+        ui.strong("kind");
+        ui.strong("open");
+        ui.strong("taken");
+        ui.strong("done today");
+        ui.strong("yesterday");
+        ui.end_row();
+        for k in ContractKind::ALL {
+            let i = k.index();
+            ui.label(k.label());
+            ui.label(open[i].to_string());
+            ui.label(taken[i].to_string());
+            ui.label(today.k_done[i].to_string());
+            ui.label(yday.k_done[i].to_string());
+            ui.end_row();
+        }
+    });
+    let hits_30 = sum_last_30(world, |r| r.contract.hits_done);
+    ui.label(format!(
+        "Hits: {} today, {hits_30} in 30 days ({} by a squad today) · live runs {} · missions {} · queued {}",
+        today.hits_done,
+        today.hits_squad,
+        world.contract_runs.len(),
+        world.missions.len(),
+        yday.live_queued
+    ));
+    ui.label(format!(
+        "Bounties paid today {} · guards on the take {} · escrow {}¢",
+        today.bounties_paid,
+        world.on_take.len(),
+        world.escrow_held
+    ));
+    for &f in world.buildings_of_kind(BuildingKind::Fixer) {
+        let Some(k) = world.comp::<Broker>(f) else { continue };
+        ui.horizontal(|ui| {
+            if ui.link(world.name_of(f)).clicked() {
+                app.selected = Some(f);
+                app.follow = false;
+            }
+            let state = if citysim::systems::contracts::fixer_open(world, f) { "open" } else { "closed" };
+            let live = k.book.iter().filter(|id| world.contracts.get(id).is_some_and(|c| c.is_live())).count();
+            ui.small(format!("{state} · book {live} · {} regulars · heat {:.2}", k.regulars.len(), k.heat));
+        });
+    }
+    ui.small("Levers");
+    let mut licence = world.levers.fixer_licence;
+    if ui.checkbox(&mut licence, "Fixer licence (off: heat floored at 0.5, no new offices)").changed() {
+        app.cmds.push(PlayerCommand::SetFixerLicence(licence));
+    }
+    let mut public = world.levers.public_bounties;
+    if ui.checkbox(&mut public, "Public bounties (the law posts a Locate after one day)").changed() {
+        app.cmds.push(PlayerCommand::PublicBounties(public));
+    }
+    let r = ui.add(egui::Slider::new(&mut app.city.accessory_mult, 0.0..=3.0).text("Conspiracy x Murder"));
+    if r.drag_stopped() || (r.changed() && !r.dragged()) {
+        app.cmds.push(PlayerCommand::SetAccessoryMult(app.city.accessory_mult));
+    }
 }
 
 /// The riot response combo's text.

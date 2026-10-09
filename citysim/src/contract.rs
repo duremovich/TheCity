@@ -252,6 +252,13 @@ pub struct Contract {
     /// building's `loss_log` check at the deadline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub guard_since: Option<Tick>,
+    /// Phase 4 review: the tick the record was first worked live (its run
+    /// or mission opened, or a city guard went on the take); `None` while
+    /// it sits queued. A Guard never started by its deadline expires
+    /// (refunded, the taker unpaid) instead of being paid for a post it
+    /// never stood.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started: Option<Tick>,
 }
 
 impl Contract {

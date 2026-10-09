@@ -491,6 +491,11 @@ pub fn draw(world: &World, app: &App) {
         crate::word_overlay::marks(world, app);
     }
 
+    // 6e. M16a § 9 (`C`): Fixers sized by their book, live mission doors.
+    if app.show_contracts {
+        crate::contract_overlay::draw(world, app);
+    }
+
     // 7. day/night overlay
     let alpha = night_alpha(world.tick);
     if alpha > 0.0 {

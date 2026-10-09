@@ -448,6 +448,18 @@ pub enum PlayerCommand {
     /// `[demography] outside_wage` (CLI `outside_wage=<coins>`; M17's outside
     /// moves it). Read only with wages on.
     SetOutsideWage(f32),
+    // --- M16a phase 4 (plan C39): the contract board's levers.
+    /// Off: Fixers are unlicensed: every office's heat is floored at 0.5
+    /// (`contracts::heat_add`) and no agent registers a new one
+    /// (`founding::fixer_ok`). On: licensed again (the floor lifts; heat
+    /// decays as before).
+    SetFixerLicence(bool),
+    /// The Conspiracy sentence as a multiple of Murder's (over `[law]
+    /// accessory_mult`).
+    SetAccessoryMult(f32),
+    /// On: the law posts a public Locate on every wanted suspect after one
+    /// day instead of `[contracts] law_bounty_days`.
+    PublicBounties(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1055,6 +1067,39 @@ impl World {
                     Err("SetTaxAuto: no tax band (no_safety_net is off)".to_string())
                 };
                 self.lever_result(text);
+            }
+            PlayerCommand::SetFixerLicence(on) => {
+                self.levers.fixer_licence = *on;
+                // C39: off floors every office's heat at 0.5 now (`heat_add`
+                // clamps to the floor); on lifts the floor.
+                for f in self.buildings_of_kind(BuildingKind::Fixer).to_vec() {
+                    crate::systems::contracts::heat_add(self, f, 0.0);
+                }
+                let text = if *on {
+                    "Lever: Fixers licensed again"
+                } else {
+                    "Lever: Fixers unlicensed: every office's heat floored at 0.5, no new office registers"
+                };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetAccessoryMult(m) => {
+                if !m.is_finite() {
+                    self.push_event(EventKind::PlayerActionFailed, &[], "SetAccessoryMult: not a number".to_string());
+                    return;
+                }
+                let m = m.clamp(0.0, 5.0);
+                self.levers.accessory_mult = Some(m);
+                let text = format!("Lever: the Conspiracy sentence set to {m:.2} x Murder's");
+                self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::PublicBounties(on) => {
+                self.levers.public_bounties = *on;
+                let text = if *on {
+                    "Lever: the law posts a public bounty on every wanted suspect after one day"
+                } else {
+                    "Lever: public bounties back to the law's own delay"
+                };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
             }
             PlayerCommand::SetOutsideWage(w) => {
                 let w = if w.is_finite() { w.clamp(0.1, 1000.0) } else { 0.1 };

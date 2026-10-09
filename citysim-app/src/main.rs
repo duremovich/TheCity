@@ -2,7 +2,8 @@
 //!
 //! ```text
 //! citysim-app [--seed N] [--map FILE] [--load FILE] [--fps] [--select INDEX | --select-kind Kind] [--select-name NAME] [--tab story|corp]
-//!             [--overlay virt|word] [--select-node INDEX] [--select-runner] [--select-hunter]
+//!             [--overlay virt|word|leisure|contracts] [--select-node INDEX] [--select-runner] [--select-hunter]
+//!             [--board] [--select-mission]
 //! ```
 //!
 //! `--map` overrides `[world] map` (the v2 256 x 192 map by default).
@@ -10,6 +11,7 @@
 //! corp's panel (M11 screenshots of the Corp panel).
 
 mod camera;
+mod contract_overlay;
 mod input;
 mod mission;
 mod overlay;
@@ -87,6 +89,15 @@ pub struct App {
     pub selected_run: Option<citysim::virt::RunId>,
     /// M14 § 7: the gang whose raid the Mission panel shows.
     pub selected_mission: Option<EntityId>,
+    /// M16a § 9 (plan C42): `C` draws the contracts overlay (Fixers sized
+    /// by their book, live mission doors).
+    pub show_contracts: bool,
+    /// M16a § 9: Shift+C opens the Board panel.
+    pub show_board: bool,
+    /// M16a § 9: the Board's viewer (god, or the selected agent).
+    pub board_view: ui::board::BoardView,
+    /// M16a § 9: the contract mission the Mission panel shows.
+    pub selected_contract: Option<citysim::contract::ContractId>,
 }
 
 impl App {
@@ -123,6 +134,10 @@ impl App {
             selected_node: None,
             selected_run: None,
             selected_mission: None,
+            show_contracts: false,
+            show_board: false,
+            board_view: ui::board::BoardView::default(),
+            selected_contract: None,
         }
     }
 
@@ -133,6 +148,7 @@ impl App {
         self.selected_node = None;
         self.selected_run = None;
         self.selected_mission = None;
+        self.selected_contract = None;
         self.follow = false;
     }
 
@@ -203,6 +219,12 @@ struct Args {
     select_runner: bool,
     /// M14: open the Mission panel of the first streamed raid (else the first raid).
     select_raid: bool,
+    /// M16a: `--overlay contracts` starts with the contracts overlay on (`C`).
+    overlay_contracts: bool,
+    /// M16a: open the Board panel (Shift+C).
+    board: bool,
+    /// M16a: open the Mission panel of the first live contract mission.
+    select_mission: bool,
 }
 
 fn parse_args() -> Args {
@@ -233,6 +255,9 @@ fn parse_args() -> Args {
         select_node: None,
         select_runner: false,
         select_raid: false,
+        overlay_contracts: false,
+        board: false,
+        select_mission: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
@@ -261,7 +286,8 @@ fn parse_args() -> Args {
                 Some("virt") => args.overlay_virt = true,
                 Some("word") => args.overlay_word = true,
                 Some("leisure") => args.overlay_leisure = true,
-                other => panic!("--overlay virt|word|leisure, got {other:?}"),
+                Some("contracts") => args.overlay_contracts = true,
+                other => panic!("--overlay virt|word|leisure|contracts, got {other:?}"),
             },
             "--select-hunter" => args.select_hunter = true,
             "--scroll-word" => args.scroll_word = true,
@@ -270,6 +296,8 @@ fn parse_args() -> Args {
             }
             "--select-runner" => args.select_runner = true,
             "--select-raid" => args.select_raid = true,
+            "--board" => args.board = true,
+            "--select-mission" => args.select_mission = true,
             "--select-district" => {
                 args.select_district = Some(it.next().and_then(|s| s.parse().ok()).expect("--select-district <INDEX>"))
             }
@@ -352,6 +380,8 @@ async fn main() {
     app.show_virt = args.overlay_virt;
     app.show_word = args.overlay_word;
     app.show_leisure = args.overlay_leisure;
+    app.show_contracts = args.overlay_contracts;
+    app.show_board = args.board;
     app.scroll_word = args.scroll_word;
     if args.select_hunter {
         // A hunter on a stake-out first, else the first hunter (ascending id).
@@ -372,7 +402,11 @@ async fn main() {
         }
     }
     // A run lasts tens of ticks: freeze the frames the M14 screenshots are taken in.
-    app.paused = args.select_runner || args.select_raid || args.select_node.is_some() || args.select_hunter;
+    app.paused = args.select_runner
+        || args.select_raid
+        || args.select_node.is_some()
+        || args.select_hunter
+        || args.select_mission;
     if let Some(i) = args.select_node.filter(|&i| usize::from(i) < world.virt.nodes.len()) {
         let n = citysim::virt::NodeId(i);
         app.selected_node = Some(n);
@@ -428,6 +462,14 @@ async fn main() {
             app.camera.centre_on(door);
         }
     }
+    if args.select_mission {
+        // M16a: the first live contract mission (ascending id), centred on its door.
+        if let Some((&id, m)) = world.missions.iter().next() {
+            app.selected_contract = Some(id);
+            app.camera.px_per_tile = 10.0;
+            app.camera.centre_on(m.door);
+        }
+    }
     // Screenshots with no selection frame the whole map, as `--fit` does anywhere.
     let unselected = args.select.is_none()
         && args.select_name.is_none()
@@ -436,10 +478,11 @@ async fn main() {
         && args.select_node.is_none()
         && !(args.select_hunter && app.selected.is_some())
         && !(args.select_runner && app.selected_run.is_some())
-        && !(args.select_raid && app.selected_mission.is_some());
+        && !(args.select_raid && app.selected_mission.is_some())
+        && !(args.select_mission && app.selected_contract.is_some());
     app.fit_pending = args.fit || (args.screenshot.is_some() && unselected);
     app.notify(format!(
-        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · N virt · J word · F5 save · F9 load",
+        "seed {} · WASD/drag pan · wheel zoom · Space pause · 1-7 speed · B districts · L litter · K hooked · N virt · J word · C contracts (Shift+C board) · F5 save · F9 load",
         world.seed()
     ));
 

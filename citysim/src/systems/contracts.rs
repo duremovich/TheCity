@@ -180,6 +180,37 @@ pub fn open_fixers(world: &World) -> Vec<EntityId> {
     world.buildings_of_kind(BuildingKind::Fixer).iter().copied().filter(|&b| fixer_open(world, b)).collect()
 }
 
+/// C35 (phase 4): `lod::BudgetSets.fixer`: from `match_hour − 2` to
+/// midnight, the owners (living, free agents) of open Fixers by book size
+/// descending (ties the lower owner id), up to `[lod] fixer_quota`; empty
+/// outside the window (matching runs at any tier).
+pub fn fixer_set(world: &World) -> std::collections::BTreeSet<EntityId> {
+    let mut set = std::collections::BTreeSet::new();
+    let quota = world.config.lod.fixer_quota;
+    let from = u64::from(world.config.fixers.match_hour.saturating_sub(2)) * TICKS_PER_HOUR;
+    if quota == 0 || u64::from(world.tick_of_day()) < from {
+        return set;
+    }
+    let mut owners: Vec<(std::cmp::Reverse<usize>, EntityId)> = open_fixers(world)
+        .into_iter()
+        .filter_map(|f| {
+            let owner = world.owner_of(f).filter(|&o| world.has::<Identity>(o))?;
+            if !crate::systems::law::living(world, owner) || world.has::<Sentence>(owner) {
+                return None;
+            }
+            Some((std::cmp::Reverse(world.comp::<Broker>(f).map_or(0, |k| k.book.len())), owner))
+        })
+        .collect();
+    owners.sort_unstable();
+    for (_, o) in owners {
+        if set.len() >= quota {
+            break;
+        }
+        set.insert(o);
+    }
+    set
+}
+
 /// A home door, else where the agent stands.
 fn home_door(world: &World, id: EntityId) -> Option<TilePos> {
     world
@@ -498,6 +529,7 @@ pub fn post(world: &mut World, p: Posting) -> Result<ContractId, Refusal> {
             charged: false,
             interrogated: SmallVec::new(),
             guard_since: None,
+            started: None,
         },
     );
     if p.broker.is_some() {
@@ -769,6 +801,87 @@ fn live_count(world: &World) -> usize {
     world.contract_runs.len() + world.missions.len()
 }
 
+/// C35 (phase 4): the bodies a record holds while it is worked live: an
+/// agent taker, the crew and a living agent target.
+pub fn bodies_of(world: &World, c: &Contract) -> SmallVec<[EntityId; 6]> {
+    let mut v: SmallVec<[EntityId; 6]> = SmallVec::new();
+    let mut add = |e: EntityId| {
+        if !v.contains(&e) {
+            v.push(e);
+        }
+    };
+    if let Some(t) = c.taker.filter(|&t| world.has::<Identity>(t)) {
+        add(t);
+    }
+    for &m in &c.crew {
+        add(m);
+    }
+    if let Some(t) = c.target_agent().filter(|&t| crate::systems::law::living(world, t)) {
+        add(t);
+    }
+    v
+}
+
+/// C35: the records being worked now (a run or a mission), by price
+/// descending (ties the lower id).
+fn running_by_price(world: &World) -> Vec<ContractId> {
+    let mut ids: Vec<(i64, ContractId)> = world
+        .contract_runs
+        .values()
+        .map(|r| r.contract)
+        .chain(world.missions.keys().copied())
+        .filter_map(|id| world.contracts.get(&id).map(|c| (-c.price, id)))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    ids.into_iter().map(|(_, id)| id).collect()
+}
+
+/// C35 (phase 4): `lod::BudgetSets.contract`: the parties (taker, crew,
+/// target) of the records worked live, whole records by price descending
+/// (ties the lower id) while the set stays within `[lod] contract_quota`.
+/// Admission (`has_room`) keeps every running record inside it.
+pub fn contract_set(world: &World) -> std::collections::BTreeSet<EntityId> {
+    let mut set = std::collections::BTreeSet::new();
+    if world.contract_runs.is_empty() && world.missions.is_empty() {
+        return set;
+    }
+    let quota = world.config.lod.contract_quota;
+    for id in running_by_price(world) {
+        let Some(c) = world.contracts.get(&id) else { continue };
+        let bodies = bodies_of(world, c);
+        let fresh = bodies.iter().filter(|b| !set.contains(*b)).count();
+        if set.len() + fresh > quota {
+            continue;
+        }
+        set.extend(bodies);
+    }
+    set
+}
+
+/// C35 (phase 4): `lod::set_lod` refuses to demote a member of the
+/// contract set (as runners and hunters).
+pub fn holds_body(world: &World, id: EntityId) -> bool {
+    if world.contract_runs.is_empty() && world.missions.is_empty() {
+        return false;
+    }
+    // Phase 4 review: a running record's taker or crew is never demoted
+    // mid-run, even should `contract_set` skip its record.
+    world.contract_runs.contains_key(&id) || world.mission_of.contains_key(&id) || contract_set(world).contains(&id)
+}
+
+/// C17, C35: may record `c` start being worked live now: fewer than
+/// `max_missions` running, and its bodies fit inside `contract_quota`
+/// beside the running records' (else it stays queued by price).
+fn has_room(world: &World, c: &Contract) -> bool {
+    if live_count(world) >= world.config.missions.max_missions {
+        return false;
+    }
+    let set = contract_set(world);
+    let fresh = bodies_of(world, c).iter().filter(|b| !set.contains(*b)).count();
+    set.len() + fresh <= world.config.lod.contract_quota
+}
+
 /// C17: start a live record's run: the taker promoted to Coarse, its
 /// chase opened (`Ask` for Hit, Beat and Locate; `Watch` at the client for
 /// a Guard). `false` when `max_missions` runs are going (it stays queued).
@@ -782,13 +895,15 @@ fn start_live(world: &mut World, id: ContractId) -> bool {
     if world.contract_runs.contains_key(&taker) {
         return true;
     }
-    if live_count(world) >= world.config.missions.max_missions {
+    // C35 (phase 4): the run count and the bodies' quota.
+    if !has_room(world, &c) {
         return false;
     }
     let now = world.tick;
     if let Some(x) = world.contracts.get_mut(&id) {
         x.render = Render::Live;
         x.due = None;
+        x.started = x.started.or(Some(now));
     }
     let (phase, intel) = match (c.kind, c.target) {
         (ContractKind::Guard, Target::Building(b)) => (
@@ -1365,6 +1480,7 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
         x.due = None;
         x.render = Render::Ledger;
         x.guard_since = None;
+        x.started = None;
         x.holds = 0;
     }
     if c.kind == ContractKind::Guard {
@@ -2094,10 +2210,14 @@ fn start_queued(world: &mut World) {
         return;
     }
     queued.sort();
+    // Phase 4 review: a record that cannot start (its bodies over the
+    // quota, a lost taker or crew) is passed over, not a wall for the
+    // cheaper ones behind it; only the run count stops the pass.
     for (_, id) in queued {
-        if !start_live(world, id) {
+        if live_count(world) >= world.config.missions.max_missions {
             break;
         }
+        start_live(world, id);
     }
 }
 
@@ -2117,8 +2237,12 @@ pub fn on_promoted(world: &mut World, id: EntityId) {
         if c.taker != Some(id) && c.target.id() != id {
             continue;
         }
+        // C35 (phase 4): only into a set with room (else it stays a ledger record).
         if live_count(world) >= world.config.missions.max_missions {
             return;
+        }
+        if !has_room(world, c) {
+            continue;
         }
         world.ledger_due.remove(&(due, cid));
         if let Some(x) = world.contracts.get_mut(&cid) {
@@ -2168,6 +2292,11 @@ pub fn daily(world: &mut World) {
             continue;
         }
         match (c.kind, c.status) {
+            // Phase 4 review: a Guard still queued at its deadline never
+            // stood its post: expired (the buyer refunded, the taker unpaid).
+            (ContractKind::Guard, ContractStatus::Taken) if c.started.is_none() => {
+                settle(world, id, Settle::Expired, "the post was never stood")
+            }
             (ContractKind::Guard, ContractStatus::Taken) => {
                 if guard_kept(world, &c) {
                     settle(world, id, Settle::Fulfilled, "");
@@ -2200,6 +2329,10 @@ pub fn daily(world: &mut World) {
 /// C32: a Guard's client is safe at the deadline: an agent alive, a
 /// building with no corp loss logged since the taking.
 fn guard_kept(world: &World, c: &Contract) -> bool {
+    // Phase 4 review: a post never stood is never kept.
+    if c.started.is_none() {
+        return false;
+    }
     match c.target {
         Target::Agent(a) => crate::systems::law::living(world, a),
         Target::Building(b) => {
@@ -2598,9 +2731,12 @@ pub fn reindex_take(world: &mut World) {
 /// `GuardTaken` (god log).
 fn take_on(world: &mut World, id: ContractId, guard: EntityId) {
     let Some(c) = world.contracts.get(&id).cloned() else { return };
+    let now = world.tick;
     if let Some(x) = world.contracts.get_mut(&id) {
         x.render = Render::Ledger;
         x.due = None;
+        // The guard stands the post by keeping its shift.
+        x.started = x.started.or(Some(now));
     }
     reindex_take(world);
     // The take's knowledge: the placing agent holds it as a rumour (its
@@ -3248,6 +3384,18 @@ fn running(world: &World, c: &Contract) -> bool {
         || c.taker.is_some_and(|t| world.contract_runs.get(&t).is_some_and(|r| r.contract == c.id))
 }
 
+/// C42 (phase 4): the Board's render tag: `-` for an open record, QUEUED
+/// for a live record waiting for room (C35), else LEDGER, LIVE or PLAYED.
+pub fn render_tag(world: &World, c: &Contract) -> &'static str {
+    if c.is_open() {
+        return "-";
+    }
+    if c.status == ContractStatus::Taken && c.render == Render::Live && !running(world, c) {
+        return "QUEUED";
+    }
+    c.render.label()
+}
+
 /// The people on a record: an agent taker and the crew (`hits_squad`
 /// counts fulfilled Hits with two or more, C25).
 fn squad_size(world: &World, c: &Contract) -> usize {
@@ -3462,7 +3610,8 @@ pub fn open_mission(world: &mut World, id: ContractId) -> bool {
     if c.status != ContractStatus::Taken || c.target_agent().is_none() {
         return false;
     }
-    if live_count(world) >= world.config.missions.max_missions {
+    // C35 (phase 4): the run count and the bodies' quota.
+    if !has_room(world, &c) {
         return false;
     }
     let now = world.tick;
@@ -3498,6 +3647,7 @@ pub fn open_mission(world: &mut World, id: ContractId) -> bool {
         x.due = None;
         x.strike = None;
         x.holds = 0;
+        x.started = x.started.or(Some(now));
     }
     if let Some(d) = c.due {
         world.ledger_due.remove(&(d, id));
