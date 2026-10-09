@@ -1204,6 +1204,68 @@ pub struct DemographyCfg {
     /// M11 phase 5: a child whose Home pantry is empty eats from the Reserve.
     #[serde(default)]
     pub school_meals: bool,
+    // --- Jobs and room P6 (docs/JOBS_V2.md § 4, plan J19-J21): immigration
+    // that answers the city. Read only with `[economy2] wages` on.
+    /// J19: the wage a migrant would earn outside (the Harris-Todaro `R`);
+    /// the `SetOutsideWage` lever (`EconState.outside_wage_pin`) overrides it.
+    #[serde(default = "default_outside_wage")]
+    pub outside_wage: f32,
+    /// J19: `pull = clamp((E − R) ÷ R, 0, pull_cap)`.
+    #[serde(default = "default_pull_cap")]
+    pub pull_cap: f32,
+    /// J19: migrants a week at full pull, full beds and a factor of 1.
+    #[serde(default = "default_migrants_max")]
+    pub migrants_max: u32,
+    /// J19: empty Block beds at which the beds term reads 1 (floored at 0.25).
+    #[serde(default = "default_beds_ref")]
+    pub beds_ref: f32,
+    /// J20: a vacancy open this many days draws a recruited migrant.
+    #[serde(default = "default_offer_days")]
+    pub offer_days: u64,
+    /// J20: recruited migrants a week at most (on top of the pull's week).
+    #[serde(default = "default_offers_max")]
+    pub offers_max: u32,
+    /// J21: a migrant's age in years, `[lo, hi)`.
+    #[serde(default = "default_migrant_age")]
+    pub migrant_age: [f32; 2],
+    /// J21: an offer's role skill is at least this.
+    #[serde(default = "default_offer_skill")]
+    pub offer_skill: f32,
+    /// J21: the chance a migrant brings a spouse (into the same Block).
+    #[serde(default = "default_p_spouse")]
+    pub p_spouse: f64,
+    /// Dylan's open question (spec, "Immigrant families"): children a
+    /// couple may bring, at most (0: spouse only, the plan's J21).
+    #[serde(default)]
+    pub migrant_children: u8,
+}
+
+fn default_outside_wage() -> f32 {
+    3.5
+}
+fn default_pull_cap() -> f32 {
+    1.0
+}
+fn default_migrants_max() -> u32 {
+    20
+}
+fn default_beds_ref() -> f32 {
+    60.0
+}
+fn default_offer_days() -> u64 {
+    3
+}
+fn default_offers_max() -> u32 {
+    6
+}
+fn default_migrant_age() -> [f32; 2] {
+    [18.0, 45.0]
+}
+fn default_offer_skill() -> f32 {
+    0.4
+}
+fn default_p_spouse() -> f64 {
+    0.2
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

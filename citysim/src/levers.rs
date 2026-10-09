@@ -444,6 +444,10 @@ pub enum PlayerCommand {
     /// Real economy E21, E47 (phase 3a): release a `SetTaxRate` pin back to
     /// the Treasury's tax band (CLI `tax=auto`).
     SetTaxAuto,
+    /// Jobs and room J19 (P6): the wage a migrant would earn outside, over
+    /// `[demography] outside_wage` (CLI `outside_wage=<coins>`; M17's outside
+    /// moves it). Read only with wages on.
+    SetOutsideWage(f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1051,6 +1055,11 @@ impl World {
                     Err("SetTaxAuto: no tax band (no_safety_net is off)".to_string())
                 };
                 self.lever_result(text);
+            }
+            PlayerCommand::SetOutsideWage(w) => {
+                let w = if w.is_finite() { w.clamp(0.1, 1000.0) } else { 0.1 };
+                self.econ.outside_wage_pin = Some(w);
+                self.push_event(EventKind::PlayerAction, &[], format!("Outside wage set to {w:.2}"));
             }
             PlayerCommand::CloseWorld(closed) => {
                 self.econ.world_closed = *closed;

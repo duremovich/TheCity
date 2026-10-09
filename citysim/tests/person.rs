@@ -315,3 +315,53 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
     assert!(law::living(&w, a), "alive");
     assert!(hired_on.is_some(), "no Job within 14 days of the layoff");
 }
+
+/// Jobs and room P6 (spec § 7, "the offer is real"): a migrant spawned with
+/// an offer at the weekly midnight is at that workplace on shift within two
+/// days. Ignored until the flip (J31): it needs `[economy2] wages` and
+/// `no_safety_net` on.
+#[test]
+#[ignore]
+fn probe_offer_migrant_reaches_the_first_shift() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    cfg.demography.p_spouse = 0.0;
+    let mut w = World::new(42, cfg);
+    // Day 14's midnight, when the week's offers spawn.
+    w.run_ticks(14 * TICKS_PER_DAY);
+    // A Vat Farm's post open five days (the stimulus; the city's own posts
+    // are mostly filled within the day).
+    let farm = w
+        .buildings_of_kind(citysim::BuildingKind::Farm)
+        .iter()
+        .copied()
+        .find(|&b| w.comp::<Building>(b).is_some_and(|bd| !bd.demolished))
+        .expect("a Farm");
+    w.vacancies.entry(farm).or_default().push(Role::Farmer);
+    let since = w.tick - 5 * TICKS_PER_DAY;
+    w.econ.vacancy_since.insert((farm, Role::Farmer), since);
+    let a = demography::spawn_immigrant_for(&mut w, farm, Role::Farmer).expect("an offer migrant");
+    pin(&mut w, a);
+    let mut first = None;
+    let start = w.tick;
+    run_to(&mut w, a, start + 2 * TICKS_PER_DAY, |w| {
+        if first.is_some() {
+            return;
+        }
+        let Some(j) = w.comp::<Job>(a) else { return };
+        let tod = (w.tick % TICKS_PER_DAY) as u16;
+        let on_shift = j.shifts.iter().any(|&(s, e)| (s..e).contains(&tod))
+            && routine::workday_of(w, a, j, j.shift_key_at(w.tick));
+        if on_shift && building(w, a) == Some(farm) {
+            first = Some(w.tick - start);
+        }
+    });
+    eprintln!(
+        "offer migrant: at the Farm on shift after {:?} ticks; job {:?}",
+        first,
+        w.comp::<Job>(a).map(|j| j.role.label())
+    );
+    assert!(law::living(&w, a), "alive");
+    assert!(first.is_some(), "never at the workplace on shift within two days");
+}
