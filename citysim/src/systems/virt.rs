@@ -1112,6 +1112,21 @@ pub fn best_target(
     agent: EntityId,
     patron: Option<EntityId>,
 ) -> Option<(Portal, NodeId, Purpose, i64, Route)> {
+    best_target_where(world, agent, patron, false)
+}
+
+/// M16a (plan C34): [`best_target`] among the Data targets only (a Fixer
+/// brokers the city's Data demand, spec § 2).
+pub fn best_data_target(world: &World, agent: EntityId) -> Option<(Portal, NodeId, Purpose, i64, Route)> {
+    best_target_where(world, agent, None, true)
+}
+
+fn best_target_where(
+    world: &World,
+    agent: EntityId,
+    patron: Option<EntityId>,
+    data_only: bool,
+) -> Option<(Portal, NodeId, Purpose, i64, Route)> {
     let deck_eff = world.comp::<Kit>(agent).filter(|k| k.deck.is_some()).map(|k| k.deck_tier)?;
     if deck_eff == 0 {
         return None;
@@ -1119,7 +1134,10 @@ pub fn best_target(
     let chair = chair_for(world, agent, patron)?;
     let mode = mode_of(world, agent);
     let o = odds_of(world, agent, deck_eff, patron, mode);
-    let cands = targets(world, agent, patron, deck_eff, mode);
+    let mut cands = targets(world, agent, patron, deck_eff, mode);
+    if data_only {
+        cands.retain(|c| matches!(c.1, Purpose::Data { .. }));
+    }
     let (_, n, purpose, ev, _) = rank(world, chair.node, &o, deck_eff, &cands).into_iter().next()?;
     // The same tree `rank` searched (a cache hit): the route for the offer.
     let tree = routes_from(world, chair.node, deck_eff, o.att, patron);
@@ -1417,7 +1435,8 @@ pub fn start_run(world: &mut World, runner: EntityId) -> Result<RunId, crate::ex
         let tree = routes_from(world, from, deck_eff, o.att, order.patron);
         route_to(world, &tree, from, order.target, &o).ok_or(FailReason::PreconditionLost)?
     };
-    let free = matches!(order.why, RunWhy::Freelance | RunWhy::Stat);
+    // M16a (plan C34): a Fixer's order is the freelance scorer's run.
+    let free = matches!(order.why, RunWhy::Freelance | RunWhy::Stat | RunWhy::Fixer);
     if free && route.p_success < world.config.virt.min_route_p {
         return Err(FailReason::PreconditionLost);
     }
@@ -2108,7 +2127,7 @@ pub fn end_run(world: &mut World, mut r: Run, outcome: RunOutcome) {
         world.config.hack.hack_cooldown_days
     };
     let cool = now + Tick::from(days) * TICKS_PER_DAY;
-    let free = matches!(r.why, RunWhy::Freelance | RunWhy::Stat);
+    let free = matches!(r.why, RunWhy::Freelance | RunWhy::Stat | RunWhy::Fixer);
     let data = free && outcome == RunOutcome::Success && deck_data(world, r.runner) > 0;
     let lab = if data { crate::systems::tech::data_buyer_lab(world, r.runner) } else { None };
     if let Some(b) = world.comp_mut::<Brain>(r.runner) {

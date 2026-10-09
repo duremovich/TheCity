@@ -359,7 +359,16 @@ pub fn knowledge(world: &World, id: EntityId) -> f32 {
 /// speaker), with the distortion roll; on the Exchange stream keyed by
 /// `(tick, from, to)`.
 pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
-    let _ = venue;
+    exchange_one(world, from, to);
+    // M16a (plan C21): at a Drink, a Fixer talks to its regulars after the
+    // ordinary exchange.
+    if venue == Venue::Drink {
+        crate::systems::contracts::fixer_talk(world, from, to);
+    }
+}
+
+/// The ordinary exchange (W8), `exchange` without the venue's extras.
+fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
     if from == to {
         return;
     }

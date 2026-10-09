@@ -146,6 +146,8 @@ pub fn rebuild_index(world: &mut World) {
     for (client, guard) in posts {
         world.contract_guards.entry(client).or_default().push(guard);
     }
+    // C31: the guards on the take.
+    reindex_take(world);
 }
 
 fn log(world: &mut World, id: ContractId, text: String) {
@@ -575,6 +577,10 @@ pub fn sees(world: &World, viewer: EntityId, id: ContractId) -> bool {
             .iter()
             .any(|&(hd, _)| hd.index() == d || mask & (1 << hd.index()) != 0);
     }
+    // C31: the on-shift city guards of the buyer's district see a corruption record.
+    if c.kind == ContractKind::Guard && guard_viewer(world, c, viewer) {
+        return true;
+    }
     let Some(buyer) = c.buyer else { return true };
     if viewer == buyer || member(world, viewer, buyer) {
         return true;
@@ -624,7 +630,18 @@ pub fn eligible(world: &World, c: &Contract, cand: EntityId) -> bool {
     if cand == t || Some(cand) == c.buyer || Some(cand) == c.agent {
         return false;
     }
-    if !free_adult(world, cand) || crate::systems::law::is_guard(world, cand) {
+    if !free_adult(world, cand) {
+        return false;
+    }
+    // C31: a corruption record is a bribe: only a city guard under
+    // `corrupt_lawfulness` takes it (plan deviation: the spec lets the usual
+    // direct viewers see it, and its buyer's friends took it as a week of
+    // bodyguarding, walking off their own jobs); no guard takes anything else.
+    if is_corruption(world, c) {
+        if !corrupt_ok(world, c, cand) {
+            return false;
+        }
+    } else if crate::systems::law::is_guard(world, cand) {
         return false;
     }
     if world
@@ -821,6 +838,13 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
         }
     }
     index_parties(world, id);
+    // C31: a city guard on the take keeps its shift: no run, no ledger.
+    if crate::systems::law::is_city_guard(world, taker)
+        && world.contracts.get(&id).is_some_and(|c| is_corruption(world, c))
+    {
+        take_on(world, id, taker);
+        return true;
+    }
     hear_hired(world, id, taker);
     for &m in crew {
         hear_hired(world, id, m);
@@ -950,8 +974,14 @@ pub fn match_day(world: &mut World) {
         book.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
         let gangs: Vec<EntityId> = k.gangs.iter().copied().collect();
         for &(_, id) in book.iter().take(usize::from(world.config.fixers.offers_per_day)) {
+            // C32: a Security corp converts a Guard on a building first.
+            if corp_take(world, id) {
+                continue;
+            }
             offer(world, id, regulars.clone(), gangs.clone(), &mut taken_today);
         }
+        // C34: the Fixer's run orders, after its book.
+        run_offers(world, f);
     }
     let direct: Vec<ContractId> = world
         .contracts
@@ -961,6 +991,9 @@ pub fn match_day(world: &mut World) {
         .map(|c| c.id)
         .collect();
     for id in direct {
+        if corp_take(world, id) {
+            continue;
+        }
         let cands = direct_candidates(world, id);
         // Phase 2 (C26): a direct record's gang candidate is the buyer's gang.
         let gangs: Vec<EntityId> = world
@@ -993,6 +1026,10 @@ fn direct_candidates(world: &World, id: ContractId) -> Vec<EntityId> {
     }
     if world.has::<crate::components::Corp>(buyer) {
         out.extend(crate::systems::ownership::employees_of(world, buyer));
+    }
+    // C31: the on-shift city guards of the buyer's district.
+    if is_corruption(world, c) {
+        out.extend(crate::systems::law_brain::guards(world).into_iter().filter(|&g| guard_viewer(world, c, g)));
     }
     out.sort();
     out.dedup();
@@ -1071,6 +1108,17 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         ContractStatus::Expired => row.contracts_expired += 1,
         ContractStatus::Cancelled => row.contracts_cancelled += 1,
         ContractStatus::Open | ContractStatus::Taken => {}
+    }
+    // C30: a fulfilled brokered Hit warms its Fixer.
+    if status == ContractStatus::Fulfilled && kind == ContractKind::Hit {
+        if let Some(b) = c.broker {
+            let by = world.config.law.heat_per_hit;
+            heat_add(world, b, by);
+        }
+    }
+    // C31: a corruption record leaving Taken takes its guard off the take.
+    if kind == ContractKind::Guard && c.status == ContractStatus::Taken {
+        reindex_take(world);
     }
     let target = c.target.id();
     let tname = world.name_of(target);
@@ -1318,6 +1366,9 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
         x.render = Render::Ledger;
         x.guard_since = None;
         x.holds = 0;
+    }
+    if c.kind == ContractKind::Guard {
+        reindex_take(world);
     }
     let text = format!("{} on {}: attempt {attempts} failed ({why})", c.kind.label(), world.name_of(c.target.id()));
     world.push_event(EventKind::ContractFailed, &[c.taker.unwrap_or(EntityId::NONE), c.target.id()], text.clone());
@@ -1680,7 +1731,9 @@ pub fn try_hire(world: &mut World, holder: EntityId, target: EntityId, weight: f
         origin: Origin::Hunt,
         price: None,
     };
-    if post(world, posting).is_err() {
+    let r = post(world, posting);
+    note_refused(world, &r);
+    if r.is_err() {
         return false;
     }
     let until = world.tick + Tick::from(world.config.hunt.hunt_cooldown_days) * TICKS_PER_DAY;
@@ -2129,6 +2182,8 @@ pub fn daily(world: &mut World) {
     prune_regulars(world);
     stat_regulars(world);
     hire_pass(world);
+    // Phase 3 (C30, C31, C33, C34).
+    law_and_street_daily(world);
     for f in world.buildings_of_kind(BuildingKind::Fixer).to_vec() {
         if let Some(k) = world.comp_mut::<Broker>(f) {
             let today = k.income_today;
@@ -2235,6 +2290,816 @@ fn drop_closed(world: &mut World) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3: the law and the street (C21's talk, C27's public bounty,
+// C28-C34). Game state only: a heat value on a record book, a record a city
+// guard holds, a rumour copied between memories by a keyed roll.
+// ---------------------------------------------------------------------------
+
+/// C21: a first-hand-style `Hired` rumour (actor `actor`, object `object`)
+/// written into `holder` at `hops` and conf 1 (interrogation's naming, the
+/// take's knowledge); `holder` joins record `id`'s `known_by`.
+pub fn hear_named(world: &mut World, id: ContractId, holder: EntityId, actor: EntityId, object: EntityId, hops: u8) {
+    if let Some(c) = world.contracts.get_mut(&id) {
+        if !c.known_by.contains(&holder) {
+            c.known_by.push(holder);
+        }
+    }
+    if !world.has::<Memory>(holder) {
+        return;
+    }
+    let sal = world.config.gossip.deed_sal.get(Deed::Hired);
+    let e = MemoryEntry {
+        subject: Some(actor),
+        salience: sal,
+        valence: -world.config.gossip.deed_sev.get(Deed::Hired) * sal,
+        second_hand: hops > 0,
+        deed: Some(Deed::Hired),
+        object: Some(object),
+        hops,
+        conf: 1.0,
+        ..MemoryEntry::blank(MemoryKind::Rumour, world.tick)
+    };
+    crate::systems::memory::hear_entry(world, holder, e);
+}
+
+/// C21, the Fixer's talk (from `gossip::exchange` at `Venue::Drink`, after
+/// the ordinary exchange): when `from` owns an open Fixer and `to` is one of
+/// its regulars, each `Hired` rumour `from` holds passes with `p =
+/// fixer_talk × (1 − heat)`, one draw per rumour on `ContractNs::Talk`
+/// (key `tick, from << 32 | to`). The listener's copy is a telling as the
+/// exchange writes one (hops + 1, salience × `hop_salience`, conf × (0.5 +
+/// 0.5 × trust in the speaker)).
+pub fn fixer_talk(world: &mut World, from: EntityId, to: EntityId) {
+    if from == to {
+        return;
+    }
+    let office = world.buildings_of_kind(BuildingKind::Fixer).iter().copied().find(|&f| {
+        world.owner_of(f) == Some(from)
+            && fixer_open(world, f)
+            && world.comp::<Broker>(f).is_some_and(|k| k.regulars.contains_key(&to))
+    });
+    let Some(f) = office else { return };
+    let heat = world.comp::<Broker>(f).map_or(0.0, |k| k.heat);
+    let p = world.config.law.fixer_talk * (1.0 - heat);
+    if p <= 0.0 {
+        return;
+    }
+    let Some(ms) = world.comp::<Memory>(from) else { return };
+    let held: Vec<MemoryEntry> = crate::systems::memory::deeds(from, ms)
+        .filter(|(_, r)| r.deed == Deed::Hired && r.actor != Some(to))
+        .map(|(e, _)| e.clone())
+        .collect();
+    if held.is_empty() || !world.has::<Memory>(to) {
+        return;
+    }
+    let trust = world.edge(to, from).map_or(0.0, |e| e.trust);
+    let hop_salience = world.config.gossip.hop_salience;
+    let now = world.tick;
+    let mut rng = world.rng.contract(ContractNs::Talk, now, (u64::from(from.index) << 32) | u64::from(to.index));
+    for src in held {
+        if rng.random::<f32>() >= p {
+            continue;
+        }
+        let entry = MemoryEntry {
+            subject: src.subject,
+            salience: src.salience * hop_salience,
+            valence: src.valence * hop_salience,
+            second_hand: true,
+            deed: Some(Deed::Hired),
+            object: src.object,
+            hops: crate::systems::memory::hops_of(&src).saturating_add(1),
+            conf: src.conf * (0.5 + 0.5 * trust),
+            ..MemoryEntry::blank(MemoryKind::Rumour, src.tick)
+        };
+        crate::systems::memory::hear_entry(world, to, entry);
+    }
+}
+
+/// C29: does `holder` hold a `Hired` rumour about record `c` (object its
+/// target, actor its buyer or placing agent) at `conf ≥ accessory_conf`?
+/// What the accessory rule reads, and the `accessory_unfounded` probe's
+/// re-check: nothing here reads `known_by`.
+pub fn holds_hired(world: &World, holder: EntityId, c: &Contract) -> bool {
+    let Some(m) = world.comp::<Memory>(holder) else { return false };
+    let min = world.config.law.accessory_conf;
+    let target = c.target.id();
+    crate::systems::memory::deeds(holder, m).any(|(e, r)| {
+        r.deed == Deed::Hired
+            && r.object == Some(target)
+            && r.actor.is_some()
+            && (r.actor == c.buyer || r.actor == c.agent)
+            && e.conf >= min
+    })
+}
+
+// --- Fixer heat, the bust, the bribe (C30) ---
+
+/// C30: a Fixer's heat moves by `by` (clamped 0..1; floored at 0.5 while the
+/// licence lever is off).
+pub fn heat_add(world: &mut World, fixer: EntityId, by: f32) {
+    let floor = if world.levers.fixer_licence { 0.0 } else { 0.5 };
+    if let Some(k) = world.comp_mut::<Broker>(fixer) {
+        k.heat = (k.heat + by).clamp(floor, 1.0);
+    }
+}
+
+/// C30, from `faction::offer_bribe`'s `Payer::Owner` arm on a taken bribe:
+/// every Fixer `owner` owns cools by `bribe_cool`.
+pub fn heat_bribed(world: &mut World, owner: EntityId) {
+    let cool = world.config.law.bribe_cool;
+    let mine: Vec<EntityId> = world
+        .buildings_of_kind(BuildingKind::Fixer)
+        .iter()
+        .copied()
+        .filter(|&f| world.owner_of(f) == Some(owner))
+        .collect();
+    for f in mine {
+        heat_add(world, f, -cool);
+    }
+}
+
+/// C30: the law closes a Fixer's office: a Conspiracy report on the owner,
+/// the owner last seen at the door, `closed_until = now + close_days`, every
+/// Open record in the book cancelled with its refund (Taken ones run on).
+/// `FixerBusted`.
+pub fn heat_bust(world: &mut World, fixer: EntityId) {
+    let now = world.tick;
+    let days = world.config.law.close_days;
+    let owner = world.owner_of(fixer).filter(|&o| world.has::<Identity>(o));
+    let door = world.comp::<Building>(fixer).map(|b| b.door).unwrap_or_default();
+    if let Some(o) = owner.filter(|&o| crate::systems::law::living(world, o)) {
+        crate::systems::law::file_report(world, crate::components::Crime::Conspiracy, o, None);
+        world.last_seen.insert(o, (door, now));
+    }
+    let open: Vec<ContractId> = world
+        .comp::<Broker>(fixer)
+        .map(|k| k.book.iter().copied().filter(|id| world.contracts.get(id).is_some_and(|c| c.is_open())).collect())
+        .unwrap_or_default();
+    if let Some(k) = world.comp_mut::<Broker>(fixer) {
+        k.closed_until = Some(now + Tick::from(days) * TICKS_PER_DAY);
+    }
+    for id in open {
+        settle(world, id, Settle::Cancelled, "the Fixer was closed by the law");
+    }
+    let d = world.district_name(world.district_of_building(fixer)).to_string();
+    let text = format!("the {d} Fixer office was closed by the law for {days} days");
+    world.push_event(EventKind::FixerBusted, &[fixer, owner.unwrap_or(EntityId::NONE)], text.clone());
+    log(world, 0, text);
+}
+
+/// C30, at midnight: every Fixer's heat decays `heat_decay` (floored at 0.5
+/// while `levers.fixer_licence` is off); an open office at `warrant_heat`
+/// is busted; an owner at `corrupt_heat` or more scores a bribe (`heat` →
+/// Linear{0.8, 0.2} × `1 − lawfulness` → Linear{0.5, 0.5}) and at
+/// `bribe_min` offers it (`Payer::Owner`). Plan deviation: no offer while
+/// the law is hardened (`Law.hardened_until`; a refused captain would
+/// refuse again, and each refusal is a `BribeRefused` shock).
+pub fn heat_daily(world: &mut World) {
+    let fixers: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Fixer).to_vec();
+    let decay = world.config.law.heat_decay;
+    for &f in &fixers {
+        heat_add(world, f, -decay);
+    }
+    let warrant = world.config.law.warrant_heat;
+    for &f in &fixers {
+        if fixer_open(world, f) && world.comp::<Broker>(f).is_some_and(|k| k.heat >= warrant) {
+            heat_bust(world, f);
+        }
+    }
+    let now = world.tick;
+    let hardened = world.law().and_then(|l| l.hardened_until).is_some_and(|t| t > now);
+    if hardened {
+        return;
+    }
+    let (corrupt, min) = (world.config.law.corrupt_heat, world.config.fixers.bribe_min);
+    let mut offered: Vec<EntityId> = Vec::new();
+    for &f in &fixers {
+        let Some(owner) = world.owner_of(f).filter(|&o| world.has::<Identity>(o)) else { continue };
+        if offered.contains(&owner) || !crate::systems::law::living(world, owner) || world.has::<Sentence>(owner) {
+            continue;
+        }
+        let heat = world.comp::<Broker>(f).map_or(0.0, |k| k.heat);
+        if heat < corrupt {
+            continue;
+        }
+        let law = world.comp::<Personality>(owner).map_or(1.0, |p| p.lawfulness);
+        let score = Curve::Linear { m: 0.8, b: 0.2 }.eval(heat) * Curve::Linear { m: 0.5, b: 0.5 }.eval(1.0 - law);
+        if score < min {
+            continue;
+        }
+        offered.push(owner);
+        crate::systems::faction::offer_bribe(
+            world,
+            crate::systems::faction::Payer::Owner(owner),
+            crate::systems::faction::BribeAsk::LookAway,
+            score,
+        );
+        if world.law().and_then(|l| l.hardened_until).is_some_and(|t| t > now) {
+            break;
+        }
+    }
+}
+
+// --- Guard corruption (C31) ---
+
+/// C31: a direct `Guard` its buyer bought on itself (or its placing agent,
+/// or the placing agent's Fixer office): the record a city guard may take.
+/// Deviation: `corruption_daily` posts on agents only (the buyer or its
+/// placing agent); the Fixer-office branch is never produced in 16a.
+pub fn is_corruption(world: &World, c: &Contract) -> bool {
+    if c.kind != ContractKind::Guard || c.broker.is_some() {
+        return false;
+    }
+    let t = c.target.id();
+    Some(t) == c.buyer
+        || Some(t) == c.agent
+        || (world.comp::<Building>(t).is_some_and(|b| b.kind == BuildingKind::Fixer)
+            && world.owner_of(t).is_some_and(|o| Some(o) == c.agent))
+}
+
+/// The district a corruption record's buyer is in: the placing agent's (or
+/// the buyer's) Home district, else where it stands.
+fn buyer_district(world: &World, c: &Contract) -> Option<crate::components::DistrictId> {
+    let who = c.agent.or(c.buyer)?;
+    crate::systems::gossip::home_district(world, who)
+        .or_else(|| world.comp::<Position>(who).map(|p| world.district_of(p.tile)))
+}
+
+/// C11, C31: a city guard on shift whose beat (else where it stands) is the
+/// buyer's district sees a corruption record.
+fn guard_viewer(world: &World, c: &Contract, viewer: EntityId) -> bool {
+    if !crate::systems::law::is_city_guard(world, viewer) || !is_corruption(world, c) {
+        return false;
+    }
+    let tod = time::tick_of_day(world.tick);
+    if !world.comp::<Job>(viewer).is_some_and(|j| j.on_shift(tod)) {
+        return false;
+    }
+    let beat = world
+        .law()
+        .and_then(|l| l.beats.get(&viewer).copied())
+        .or_else(|| world.comp::<Position>(viewer).map(|p| world.district_of(p.tile)));
+    beat.is_some() && beat == buyer_district(world, c)
+}
+
+/// C31: a city guard may take a corruption record: lawfulness under
+/// `corrupt_lawfulness`, and not escorting the buyer (a live arrest).
+fn corrupt_ok(world: &World, c: &Contract, guard: EntityId) -> bool {
+    if !crate::systems::law::is_city_guard(world, guard) || !is_corruption(world, c) {
+        return false;
+    }
+    let law = world.comp::<Personality>(guard).map_or(1.0, |p| p.lawfulness);
+    let escorting = world.comp::<Brain>(guard).and_then(|b| b.escorting);
+    law < world.config.law.corrupt_lawfulness
+        && escorting.is_none_or(|e| Some(e) != c.buyer && Some(e) != c.agent && !buyer_member(world, c, e))
+}
+
+/// Is `id` a member of a gang buyer?
+fn buyer_member(world: &World, c: &Contract, id: EntityId) -> bool {
+    c.buyer.is_some_and(|b| world.has::<crate::components::Gang>(b) && world.gang_of(id) == Some(b))
+}
+
+/// C31: is `guard` on the take for `suspect` (the suspect, or a member of a
+/// gang buyer)?
+pub fn on_take_of(world: &World, guard: EntityId, suspect: EntityId) -> bool {
+    if world.on_take.is_empty() {
+        return false;
+    }
+    world.on_take.get(&guard).is_some_and(|l| {
+        l.iter()
+            .any(|&b| b == suspect || (world.has::<crate::components::Gang>(b) && world.gang_of(suspect) == Some(b)))
+    })
+}
+
+/// C31: `World::on_take` from the Taken corruption records held by city
+/// guards (after a load, and whenever a Guard record changes hands).
+pub fn reindex_take(world: &mut World) {
+    let mut take: std::collections::BTreeMap<EntityId, SmallVec<[EntityId; 2]>> = std::collections::BTreeMap::new();
+    for c in world.contracts.values() {
+        if c.status != ContractStatus::Taken || !is_corruption(world, c) {
+            continue;
+        }
+        let Some(g) = c.taker.filter(|&t| crate::systems::law::is_city_guard(world, t)) else { continue };
+        let list = take.entry(g).or_default();
+        for b in [c.buyer, c.agent].into_iter().flatten() {
+            if !list.contains(&b) {
+                list.push(b);
+            }
+        }
+    }
+    world.on_take = take;
+}
+
+/// C31: a city guard takes a corruption record: no plan (it keeps its
+/// shift), no ledger draw; on the take until the record settles. The take
+/// is known as `Hired` (actor the buyer, object the guard) to the placing
+/// agent, and the guard is in `known_by`; a Fixer buyer's heat falls by
+/// `bribe_cool` once.
+/// `GuardTaken` (god log).
+fn take_on(world: &mut World, id: ContractId, guard: EntityId) {
+    let Some(c) = world.contracts.get(&id).cloned() else { return };
+    if let Some(x) = world.contracts.get_mut(&id) {
+        x.render = Render::Ledger;
+        x.due = None;
+    }
+    reindex_take(world);
+    // The take's knowledge: the placing agent holds it as a rumour (its
+    // telling can expose it); the guard joins `known_by` without one (a
+    // rumour with itself as the object would leave it a grudge on its payer).
+    if let Some(x) = world.contracts.get_mut(&id) {
+        if !x.known_by.contains(&guard) {
+            x.known_by.push(guard);
+        }
+    }
+    if let (Some(actor), Some(a)) = (c.buyer.or(c.agent), c.agent) {
+        hear_named(world, id, a, actor, guard, 0);
+    }
+    if let Some(a) = c.agent {
+        let cool = world.config.law.bribe_cool;
+        let mine: Vec<EntityId> = world
+            .buildings_of_kind(BuildingKind::Fixer)
+            .iter()
+            .copied()
+            .filter(|&f| world.owner_of(f) == Some(a))
+            .collect();
+        for f in mine {
+            heat_add(world, f, -cool);
+        }
+    }
+    let text = format!("{} is on {}'s payroll", world.name_of(guard), world.owner_label(c.buyer.or(c.agent)));
+    world.push_event(EventKind::GuardTaken, &[guard, c.buyer.or(c.agent).unwrap_or(EntityId::NONE)], text.clone());
+    log(world, id, text);
+}
+
+/// C31, from `law::jail_suspect`: a guard on the take that arrested its
+/// buyer fails the record (refunded).
+pub fn on_arrest(world: &mut World, guard: EntityId, suspect: EntityId) {
+    if !on_take_of(world, guard, suspect) {
+        return;
+    }
+    let ids: Vec<ContractId> = world
+        .contracts
+        .values()
+        .filter(|c| c.status == ContractStatus::Taken && c.taker == Some(guard) && is_corruption(world, c))
+        .filter(|c| c.buyer == Some(suspect) || c.agent == Some(suspect) || buyer_member(world, c, suspect))
+        .map(|c| c.id)
+        .collect();
+    for id in ids {
+        settle(world, id, Settle::Failed, "the guard made the arrest");
+    }
+}
+
+/// C31, at midnight: at most one open corruption record per buyer, posted
+/// by a Fixer owner at `corrupt_heat` or more, a gang (its leader placing
+/// it) under a Crackdown, or a suspect with an open report who can pay.
+/// Plan deviations: a suspect posts only below `corrupt_lawfulness` (the
+/// spec's "may post" needs a decision; the guard's own bar is reused); the
+/// record's origin is `Origin::Law` (16a has no corruption origin: "a bribe
+/// to a guard is a contract on the law").
+pub fn corruption_daily(world: &mut World) {
+    let corrupt = world.config.law.corrupt_heat;
+    let mut posts: Vec<(Option<EntityId>, Option<EntityId>)> = Vec::new();
+    for f in world.buildings_of_kind(BuildingKind::Fixer).to_vec() {
+        let Some(o) = world.owner_of(f).filter(|&o| world.has::<Identity>(o)) else { continue };
+        if world.comp::<Broker>(f).is_some_and(|k| k.heat >= corrupt) {
+            posts.push((Some(o), Some(o)));
+        }
+    }
+    for g in world.gangs() {
+        if !crate::systems::law::cracking_down_on(world, g) {
+            continue;
+        }
+        let leader = world.comp::<crate::components::Gang>(g).and_then(|x| x.leader);
+        if leader.is_some() {
+            posts.push((Some(g), leader));
+        }
+    }
+    let lawless = world.config.law.corrupt_lawfulness;
+    let suspects: Vec<EntityId> = world.open_suspects().collect();
+    for s in suspects {
+        if world.comp::<Personality>(s).is_some_and(|p| p.lawfulness < lawless) {
+            posts.push((Some(s), Some(s)));
+        }
+    }
+    for (buyer, agent) in posts {
+        let Some(a) = agent else { continue };
+        if !crate::systems::law::living(world, a) || world.has::<Sentence>(a) {
+            continue;
+        }
+        let held = world.by_party.get(&a).is_some_and(|l| {
+            l.iter().any(|id| world.contracts.get(id).is_some_and(|c| c.is_live() && is_corruption(world, c)))
+        });
+        if held {
+            continue;
+        }
+        let target = Target::Agent(a);
+        if world.purse(buyer) < quote(world, ContractKind::Guard, &target, None) {
+            continue;
+        }
+        let days = world.config.contracts.deadline_days.get(ContractKind::Guard);
+        let r = post(
+            world,
+            Posting {
+                buyer,
+                agent: Some(a),
+                kind: ContractKind::Guard,
+                target,
+                broker: None,
+                deadline_days: days,
+                origin: Origin::Law,
+                price: None,
+            },
+        );
+        note_refused(world, &r);
+    }
+}
+
+// --- The Security-corp Guard (C32) ---
+
+/// C32: an Open Guard on a building converts into an M11 guard contract
+/// with the cheapest Security corp that has room (not the client's own
+/// owner) when the record pays at least a day of its price: the escrow back
+/// to the buyer less the Fixer's cut (the placement fee, `FixerCut`), the
+/// record `Fulfilled` at once; the corp bills the client's owner daily under
+/// M11 from then on.
+pub fn corp_take(world: &mut World, id: ContractId) -> bool {
+    let Some(c) = world.contracts.get(&id).cloned() else { return false };
+    let Target::Building(b) = c.target else { return false };
+    if c.kind != ContractKind::Guard || !c.is_open() {
+        return false;
+    }
+    if world.comp::<Building>(b).is_none_or(|bd| bd.secured_by.is_some() || bd.demolished) {
+        return false;
+    }
+    let owner = world.owner_of(b);
+    let Some(corp) = crate::systems::corps::cheapest_seller(world, owner) else { return false };
+    if c.price < crate::systems::corps::contract_price(world, corp) {
+        return false;
+    }
+    if !crate::systems::corps::buy_contract(world, b, corp) {
+        return false;
+    }
+    let now = world.tick;
+    if let Some(x) = world.contracts.get_mut(&id) {
+        x.taker = Some(corp);
+        x.taken = Some(now);
+    }
+    index_parties(world, id);
+    if let Some(f) = c.broker {
+        let cut = ((c.escrow as f32) * c_cut(world, f)).round() as i64;
+        let to = world.owner_of(f);
+        let paid = ownership::escrow_out(world, id, to, cut, Flow::FixerCut);
+        note_cut(world, f, paid);
+    }
+    refund(world, id);
+    let text = format!("{} took the guard on {} (an M11 contract)", world.owner_label(Some(corp)), world.name_of(b));
+    world.push_event(EventKind::ContractTaken, &[corp, b], text.clone());
+    log(world, id, text);
+    set_status(world, id, ContractStatus::Fulfilled, "");
+    true
+}
+
+// --- The brains' postings (C33) ---
+
+/// A brain's posting at the quoted price and the kind's deadline; never a
+/// violent record or a Locate on the buyer's own member.
+fn brain_post(
+    world: &mut World,
+    buyer: Option<EntityId>,
+    agent: Option<EntityId>,
+    kind: ContractKind,
+    target: Target,
+    broker: Option<EntityId>,
+    origin: Origin,
+) -> Result<ContractId, Refusal> {
+    if let (Some(b), Target::Agent(t)) = (buyer, target) {
+        if kind != ContractKind::Guard && crate::systems::grudges::member_of(world, t, b) {
+            return Err(Refusal::NoTarget);
+        }
+    }
+    let deadline_days = world.config.contracts.deadline_days.get(kind);
+    let r = post(world, Posting { buyer, agent, kind, target, broker, deadline_days, origin, price: None });
+    note_refused(world, &r);
+    r
+}
+
+/// Review fix: a brain's posting refused at `max_open` is counted
+/// (`contracts_refused_full`).
+fn note_refused(world: &mut World, r: &Result<ContractId, Refusal>) {
+    if matches!(r, Err(Refusal::MaxOpen)) {
+        world.stats.current.contract.contracts_refused_full += 1;
+    }
+}
+
+/// An open Fixer in a district the gang holds (lowest id).
+fn fixer_in_held(world: &World, gang: EntityId) -> Option<EntityId> {
+    let held: Vec<usize> = crate::systems::gang::held_districts(world, gang).iter().map(|&(d, _)| d.index()).collect();
+    open_fixers(world).into_iter().find(|&f| held.contains(&world.district_of_building(f).index()))
+}
+
+/// A faction's head: a gang's leader, a corp's exec (living, free).
+fn head_of(world: &World, f: EntityId) -> Option<EntityId> {
+    let h = world
+        .comp::<crate::components::Gang>(f)
+        .and_then(|g| g.leader)
+        .or_else(|| world.comp::<crate::components::Corp>(f).and_then(|c| c.exec))?;
+    (crate::systems::law::living(world, h) && !world.has::<Sentence>(h)).then_some(h)
+}
+
+/// C33, from `faction::rescore` when it chooses Raid or Retaliate: a gang
+/// weaker than its rival gang (`own ÷ rival` members below `hire_ratio`)
+/// whose treasury holds the quote posts a Hit on the rival's leader,
+/// brokered with an open Fixer in a held district, else direct. The raid
+/// still goes. Plan deviation: gang rivals only (a corp rival has no member
+/// count to weigh against).
+pub fn post_gang_hit(world: &mut World, gang: EntityId, order: crate::components::Order) {
+    let Some(rival) = crate::systems::raid::expedition_rival(world, gang) else { return };
+    let (Some(own), Some(theirs)) = (
+        world.comp::<crate::components::Gang>(gang).map(|g| g.members.len()),
+        world.comp::<crate::components::Gang>(rival).map(|g| g.members.len()),
+    ) else {
+        return;
+    };
+    if theirs == 0 || (own as f32 / theirs as f32) >= world.config.contracts.hire_ratio {
+        return;
+    }
+    let Some(leader) = head_of(world, rival) else { return };
+    let target = Target::Agent(leader);
+    let broker = fixer_in_held(world, gang);
+    if world.purse(Some(gang)) < quote(world, ContractKind::Hit, &target, broker) {
+        return;
+    }
+    let agent = world.comp::<crate::components::Gang>(gang).and_then(|g| g.leader);
+    let _ = brain_post(world, Some(gang), agent, ContractKind::Hit, target, broker, Origin::GangOrder(order));
+}
+
+/// C33, at midnight: a gang in an open vendetta with no sighting of the
+/// other side's head (a gang's leader, a corp's exec) younger than
+/// `fresh_sighting_hours` in its database posts a Locate on it (direct).
+pub fn post_vendetta_locates(world: &mut World) {
+    if world.vendettas.is_empty() {
+        return;
+    }
+    let horizon = world.tick.saturating_sub(Tick::from(world.config.hunt.fresh_sighting_hours) * TICKS_PER_HOUR);
+    let pairs: Vec<(EntityId, EntityId)> = world.vendettas.iter().flat_map(|v| [(v.a, v.b), (v.b, v.a)]).collect();
+    for (g, f) in pairs {
+        if !world.has::<crate::components::Gang>(g) {
+            continue;
+        }
+        let Some(head) = head_of(world, f) else { continue };
+        let fresh = world.db.get(&g).is_some_and(|db| db.sightings.iter().any(|s| s.who == head && s.tick >= horizon));
+        if fresh {
+            continue;
+        }
+        let target = Target::Agent(head);
+        if world.purse(Some(g)) < quote(world, ContractKind::Locate, &target, None) {
+            continue;
+        }
+        let (agent, order) = world
+            .comp::<crate::components::Gang>(g)
+            .map_or((None, crate::components::Order::Retaliate), |x| (x.leader, x.order));
+        let _ = brain_post(world, Some(g), agent, ContractKind::Locate, target, None, Origin::GangOrder(order));
+    }
+}
+
+/// C33, from `corp_brain::secure`: a loss building it cannot cover with a
+/// guard contract gets a `Guard` record, brokered with the open Fixer
+/// nearest its door (else direct). True when posted (or already open).
+pub fn post_secure(world: &mut World, corp: EntityId, building: EntityId) -> bool {
+    let Some(door) = world.comp::<Building>(building).map(|b| b.door) else { return false };
+    let broker = nearest_fixer_to(world, door);
+    let exec = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec);
+    let target = Target::Building(building);
+    let origin = Origin::CorpOrder(crate::components::CorpOrder::Secure);
+    matches!(
+        brain_post(world, Some(corp), exec, ContractKind::Guard, target, broker, origin),
+        Ok(_) | Err(Refusal::Duplicate)
+    )
+}
+
+/// C33, from `corp_brain::secure`: a named culprit gang's leader gets a
+/// Locate, brokered with the open Fixer nearest `near` (else direct).
+pub fn post_culprit_locate(world: &mut World, corp: EntityId, culprit: EntityId, near: TilePos) {
+    let Some(head) = head_of(world, culprit) else { return };
+    let broker = nearest_fixer_to(world, near);
+    let exec = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec);
+    let origin = Origin::CorpOrder(crate::components::CorpOrder::Secure);
+    let _ = brain_post(world, Some(corp), exec, ContractKind::Locate, Target::Agent(head), broker, origin);
+}
+
+/// C33, from `corp_brain::lobby`: an exec below `dirty_lobby` posts a Beat
+/// (a Hit below `dirty_lobby ÷ 2`) on the culprit gang's leader instead of
+/// the bribe, brokered with the open Fixer nearest the leader. True when
+/// the record stands (posted now or already open): the bribe is skipped.
+pub fn post_lobby(world: &mut World, corp: EntityId, gang: EntityId) -> bool {
+    let Some(exec) = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec) else { return false };
+    let law = world.comp::<Personality>(exec).map_or(1.0, |p| p.lawfulness);
+    let dirty = world.config.contracts.dirty_lobby;
+    if law >= dirty {
+        return false;
+    }
+    let kind = if law < dirty / 2.0 { ContractKind::Hit } else { ContractKind::Beat };
+    let Some(head) = head_of(world, gang) else { return false };
+    let Some(at) = world.comp::<Position>(head).map(|p| p.tile) else { return false };
+    let Some(broker) = nearest_fixer_to(world, at) else { return false };
+    let origin = Origin::CorpOrder(crate::components::CorpOrder::Lobby);
+    matches!(
+        brain_post(world, Some(corp), Some(exec), kind, Target::Agent(head), Some(broker), origin),
+        Ok(_) | Err(Refusal::Duplicate)
+    )
+}
+
+/// C33, from `law_brain::run`'s daily pass: the law's public Locates
+/// (buyer `None`, placed by the captain, paid from the Treasury) on a
+/// wanted suspect unseen (`World::last_seen`, else its oldest open report)
+/// for `law_bounty_days` (1 under `levers.public_bounties`), or an escaped
+/// convict (an `Escaped` memory within two days); and, under a captain
+/// below `death_squad_lawfulness`, a brokered Hit on the hottest gang's
+/// leader (`faction::heat`, ties the lower id), escrowed from the Treasury.
+/// Plan deviations: one new public Locate a day (the most severe open
+/// crime first, then the longest unseen; every wanted thief unseen for
+/// three days put ~11 a day on the board by day 100 and filled
+/// `max_open`). Treasury cover (`cover = cap_sightings × per_sighting`,
+/// what one public bounty can still charge): a new public Locate only
+/// while the purse is at least `(open public Locates + 1) × cover`, a
+/// death-squad Hit only while it is at least its price plus `open public
+/// Locates × cover` (the Hit's escrow leaves the purse when posted, and so
+/// has every open Law Hit's). Not checked: the city's other spending
+/// between postings.
+pub fn post_law(world: &mut World) {
+    let Some(captain) = world.law().and_then(|l| l.captain).filter(|&c| crate::systems::law::living(world, c)) else {
+        return;
+    };
+    let now = world.tick;
+    let days = if world.levers.public_bounties { 1 } else { world.config.contracts.law_bounty_days };
+    let unseen = Tick::from(days) * TICKS_PER_DAY;
+    // Per suspect: the most severe open crime and the oldest open report.
+    let mut open: std::collections::BTreeMap<EntityId, (crate::components::Crime, Tick)> =
+        std::collections::BTreeMap::new();
+    for r in world.crime_reports().iter().filter(|r| !r.resolved) {
+        let e = open.entry(r.suspect).or_insert((r.crime, r.tick));
+        *e = (e.0.max(r.crime), e.1.min(r.tick));
+    }
+    let mut due: Vec<(std::cmp::Reverse<crate::components::Crime>, Tick, EntityId)> = Vec::new();
+    for (s, (crime, reported)) in open {
+        if !crate::systems::law::living(world, s) || world.has::<Sentence>(s) || !world.has::<Brain>(s) {
+            continue;
+        }
+        let seen = world.last_seen.get(&s).map_or(reported, |&(_, t)| t.max(reported));
+        let escaped = world.comp::<Memory>(s).is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == MemoryKind::Escaped && now.saturating_sub(e.tick) < 2 * TICKS_PER_DAY)
+        });
+        if escaped || now.saturating_sub(seen) >= unseen {
+            due.push((std::cmp::Reverse(crime), seen, s));
+        }
+    }
+    // One new public bounty a day: the most severe crime, then the longest
+    // unseen, then the lower id.
+    due.sort_unstable();
+    let cover = i64::from(world.config.bounty.cap_sightings) * world.config.bounty.per_sighting;
+    let public =
+        world.contracts.values().filter(|c| c.is_live() && c.buyer.is_none() && c.kind == ContractKind::Locate).count()
+            as i64;
+    if world.purse(None) >= (public + 1) * cover {
+        for (_, _, s) in due {
+            let posted =
+                brain_post(world, None, Some(captain), ContractKind::Locate, Target::Agent(s), None, Origin::Law);
+            if posted.is_ok() {
+                break;
+            }
+        }
+    }
+    let law = world.comp::<Personality>(captain).map_or(1.0, |p| p.lawfulness);
+    if law >= world.config.contracts.death_squad_lawfulness {
+        return;
+    }
+    let hottest = world
+        .gangs()
+        .into_iter()
+        .filter_map(|g| head_of(world, g).map(|h| (crate::systems::faction::heat(world, g), g, h)))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)));
+    let Some((heat, _, head)) = hottest else { return };
+    if heat <= 0.0 {
+        return;
+    }
+    let Some(at) = world.comp::<Position>(head).map(|p| p.tile) else { return };
+    let Some(broker) = nearest_fixer_to(world, at) else { return };
+    // Review fix: the Hit's escrow leaves the Treasury at once; it is posted
+    // only while the Treasury still covers the open public bounties after
+    // it (open Law Hits' escrow has already left the purse).
+    let target = Target::Agent(head);
+    let price = quote(world, ContractKind::Hit, &target, Some(broker));
+    let public =
+        world.contracts.values().filter(|c| c.is_live() && c.buyer.is_none() && c.kind == ContractKind::Locate).count()
+            as i64;
+    if world.purse(None) < price + public * cover {
+        return;
+    }
+    let _ = brain_post(world, None, Some(captain), ContractKind::Hit, target, Some(broker), Origin::Law);
+}
+
+// --- Fixer-fed run orders (C34) ---
+
+/// C34, in `match_day` after a Fixer's book: at most `run_offers_per_day`
+/// run orders to its regulars (ascending id) with hacking ≥ `gun_skill_min`,
+/// a deck in the Kit (plan deviation: `hack_offer` needs `Kit.deck`), no
+/// `RunOrder`, and a freelance offer from M14's scorer
+/// (`virt::hack_offer(.., true)`, not a sale) and the scorer's best Data
+/// target (`virt::best_data_target`; deviation: the plan takes the
+/// scorer's purpose, the spec says `Purpose::Data`, and a Ledger run has no
+/// `SellData` for the cut): `RunOrder { patron: None, .., why:
+/// RunWhy::Fixer }` through `virt::give_order`;
+/// `World::fixer_runs[runner] = (fixer, now)`.
+pub fn run_offers(world: &mut World, fixer: EntityId) {
+    let n = usize::from(world.config.fixers.run_offers_per_day);
+    if n == 0 {
+        return;
+    }
+    let Some(k) = world.comp::<Broker>(fixer) else { return };
+    let regulars: Vec<EntityId> = k.regulars.keys().copied().collect();
+    let min = world.config.fixers.gun_skill_min;
+    let now = world.tick;
+    let mut given = 0;
+    for r in regulars {
+        if given >= n {
+            break;
+        }
+        if world.run_orders.contains_key(&r) || world.fixer_runs.contains_key(&r) {
+            continue;
+        }
+        if !world.comp::<crate::components::Kit>(r).is_some_and(|k| k.deck.is_some()) {
+            continue;
+        }
+        if world.comp::<Skills>(r).is_none_or(|s| s.hacking < min) {
+            continue;
+        }
+        // M14's scorer gates the runner (cooldown, a run on, the skill, the
+        // gap guard); spec § 2: the run is a Data run (the Fixer brokers the
+        // city's Data demand), the scorer's best Data target.
+        let Some(offer) = crate::systems::virt::hack_offer(world, r, true).filter(|o| !o.sell) else { continue };
+        let Some((portal, target, purpose, _, _)) = crate::systems::virt::best_data_target(world, r) else { continue };
+        let order = crate::virt::RunOrder {
+            patron: None,
+            purpose,
+            target,
+            chair: portal.building,
+            not_before: now,
+            expires: now + TICKS_PER_DAY,
+            why: crate::virt::RunWhy::Fixer,
+            mode: offer.mode,
+        };
+        crate::systems::virt::give_order(world, r, order);
+        world.fixer_runs.insert(r, (fixer, now));
+        let text = format!("{} handed {} a run order", world.name_of(fixer), world.name_of(r));
+        log(world, 0, text);
+        given += 1;
+    }
+}
+
+/// C34, from the `SellData` completion: a runner who sold within 3 days
+/// of a Fixer's order pays the owner `fixer_cut` of `sale` (`FixerCut`,
+/// taxed; the Fixer credited), and stays a regular from now.
+pub fn on_sell_data(world: &mut World, runner: EntityId, sale: i64) {
+    if world.fixer_runs.is_empty() {
+        return;
+    }
+    let Some(&(f, offered)) = world.fixer_runs.get(&runner) else { return };
+    let now = world.tick;
+    if now > offered + 3 * TICKS_PER_DAY {
+        world.fixer_runs.remove(&runner);
+        return;
+    }
+    if sale <= 0 {
+        return;
+    }
+    world.fixer_runs.remove(&runner);
+    let owner = world.owner_of(f);
+    let cut = ((sale as f32) * c_cut(world, f)).round() as i64;
+    let paid = ownership::pay(world, Some(runner), owner, cut, Flow::FixerCut);
+    note_cut(world, f, paid);
+    if let Some(k) = world.comp_mut::<Broker>(f) {
+        k.regulars.insert(runner, now);
+    }
+    world.stats.current.contract.fixer_runs += 1;
+    let text = format!("{} paid {} a cut of {paid} on a run", world.name_of(runner), world.name_of(f));
+    log(world, 0, text);
+}
+
+/// C34, at midnight: Fixer orders older than 3 days lapse.
+fn prune_fixer_runs(world: &mut World) {
+    let now = world.tick;
+    world.fixer_runs.retain(|_, &mut (_, t)| now <= t + 3 * TICKS_PER_DAY);
+}
+
+/// Phase 3's midnight steps (C30, C31, C33, C34), from `daily`.
+fn law_and_street_daily(world: &mut World) {
+    heat_daily(world);
+    corruption_daily(world);
+    post_vendetta_locates(world);
+    prune_fixer_runs(world);
+}
+
+// ---------------------------------------------------------------------------
 // The day's snapshot (C38)
 // ---------------------------------------------------------------------------
 
@@ -2283,6 +3148,7 @@ pub fn snapshot(world: &mut World) {
     row.escrow_held = held;
     row.escrow_leak = escrow - held;
     row.escrow_stuck = stuck;
+    row.guards_on_take = world.on_take.len() as u32;
     row.f_heat = heat;
     row.f_income = income;
 }

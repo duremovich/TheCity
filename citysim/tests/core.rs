@@ -243,6 +243,9 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a Bout", k(EventKind::Bout)),                  // [150, 182, 223]
         ("a gang front", m("gang front")),               // [0, 0, 74] days; 3 of 6 (the rarest bullet)
         ("a Mission meal", k(EventKind::MissionServed)), // [166, 250, 146]
+        // M16a phase 3 (seeds 42-47 at phase 3, 120 days: each on 6 of 6).
+        ("a BountyPaid", k(EventKind::BountyPaid)), // [729, 744, 731]; 45-47 [642, 725, 654]
+        ("a city guard on the take", k(EventKind::GuardTaken)), // [23, 8, 37]; 45-47 [22, 27, 26]
     ]
 }
 

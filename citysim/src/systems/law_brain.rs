@@ -351,6 +351,8 @@ pub fn run(world: &mut World) {
         if let Some(l) = world.law_mut() {
             l.shocks.clear();
         }
+        // M16a (plan C33): the law's public Locates and the death squad.
+        crate::systems::contracts::post_law(world);
     } else if pending >= world.config.law.shock_severity_rethink {
         rethink(world);
     }

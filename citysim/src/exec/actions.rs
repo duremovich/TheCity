@@ -975,7 +975,11 @@ pub fn on_complete(
         },
         // M14 V17/V29: the deck's Data to the buyer here.
         ActionKind::SellData => {
+            let before = world.purse(Some(id));
             if crate::systems::tech::sell_deck_data(world, id) > 0 {
+                // M16a (plan C34): a Fixer's run order takes its cut.
+                let sale = world.purse(Some(id)) - before;
+                crate::systems::contracts::on_sell_data(world, id, sale);
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::StockGone)

@@ -13,7 +13,7 @@
 | tier | what | where | asserts | wall time (this box, release, alone) |
 |---|---|---|---|---|
 | unit | every hand-built test (one mechanism, a small or seeded world) | `citysim/tests/*.rs`, `citysim-cli` | the mechanism does what it says | ~40 s summed over the binaries (all non-ignored but `core_sanity`) |
-| core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity every day, collapse bounds, 31 mechanism-existence bullets, the ticks/s floor on seed 42 | ~30 s |
+| core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity every day, collapse bounds, 33 mechanism-existence bullets, the ticks/s floor on seed 42 | ~30 s |
 | core | `core_year` (`#[ignore]`) | `citysim/tests/core.rs` | seed 42 x 365 days, the collapse bounds per 30-day window | ~100 s |
 | core | determinism and saves | `determinism.rs`, `save.rs` | same seed same hash at a day boundary; a mid-day save runs on byte for byte (plus the hunt, guard and contract rebuilds) | seconds |
 | behaviour | `shadow --assert` / `test_behaviour_tier` (`#[ignore]`) | `citysim-cli/src/shadow.rs` | 146 per-archetype bounds on the diary metrics (seed 42, days 19 and 90, 5 picks each) | ~25 s |
@@ -55,7 +55,7 @@ Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --
 
 The bounds are the v1 sanity trio scaled to 2,000 residents (M10 plan D38), unchanged since M8. `core_year` runs the same bounds over each 30-day window of a 365-day seed-42 run, the Assault bound at 1.5 x (a 30-day window is noisier than 120 days; seed 42 peaks at 36.3).
 
-The mechanism bullets (31, one per milestone's core mechanism, measured on 42-47; each fired on 4-6 of the 6 seeds): a Marriage, a GangJoin, a Birth, a Burial (M5, M6); a raid resolved, a Home flipped (M8); a Jailbreak, a day in Crackdown (M9); a hole bound (M10); an eviction, an NPC founding, a hostile takeover, a Strike (M11); a Riot, a gang Split, a Squat (M12); a Crash, a chrome Install, a Dealing report (M13); a run, a Data sale, a Flatline (M14); a Feed Story, a Hunt, a Vendetta, a Purist expulsion (M15); a World export, a Collect, a Bout, a gang front, a Mission meal (L2, the Real economy).
+The mechanism bullets (33, one per milestone's core mechanism, measured on 42-47; each fired on 4-6 of the 6 seeds): a Marriage, a GangJoin, a Birth, a Burial (M5, M6); a raid resolved, a Home flipped (M8); a Jailbreak, a day in Crackdown (M9); a hole bound (M10); an eviction, an NPC founding, a hostile takeover, a Strike (M11); a Riot, a gang Split, a Squat (M12); a Crash, a chrome Install, a Dealing report (M13); a run, a Data sale, a Flatline (M14); a Feed Story, a Hunt, a Vendetta, a Purist expulsion (M15); a World export, a Collect, a Bout, a gang front, a Mission meal (L2, the Real economy); a BountyPaid, a city guard on the take (M16a phase 3).
 
 ### Adding a mechanism-existence bullet
 

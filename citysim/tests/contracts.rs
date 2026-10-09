@@ -830,3 +830,574 @@ fn test_chase_reads_hunt_state_without_a_contract_run() {
     assert!(!a.0.is_empty(), "the Hunt ran");
     assert_eq!(a, run(), "deterministic");
 }
+
+// ---------------------------------------------------------------------------
+// M16a phase 3 (plan 3.8): the law and the street. Game state only: a
+// rumour copied between memories, a report filed against a record's placing
+// agent, a heat value on a record book, a record a city guard holds.
+// ---------------------------------------------------------------------------
+
+/// A guard on the city payroll, not the captain, made lawless (`law` < the
+/// corruption bar), on the street.
+fn city_guard(w: &mut World, skip: &[EntityId], law: f32) -> EntityId {
+    let captain = w.law().and_then(|l| l.captain);
+    let g = citysim::systems::law_brain::guards(w)
+        .into_iter()
+        .find(|&g| Some(g) != captain && !skip.contains(&g) && law::living(w, g) && !w.has::<citysim::Sentence>(g))
+        .expect("a city guard");
+    if let Some(p) = w.comp_mut::<Personality>(g) {
+        p.lawfulness = law;
+    }
+    g
+}
+
+/// A fulfilled brokered Hit by `taker` on `t` for `buyer` (settled without a
+/// death: the status machine is what the law reads).
+fn fulfilled_hit(w: &mut World, buyer: EntityId, t: EntityId, taker: EntityId) -> citysim::contract::ContractId {
+    gun(w, taker);
+    set_coins(w, buyer, 5000);
+    let f = fixer(w);
+    let id = contracts::post(w, posting(buyer, ContractKind::Hit, t, Some(f))).expect("posted");
+    assert!(contracts::accept(w, id, taker, &[]));
+    contracts::settle(w, id, contracts::Settle::Fulfilled, "");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+    id
+}
+
+fn holds_hired_about(w: &World, holder: EntityId, actor: EntityId, object: EntityId) -> bool {
+    w.comp::<citysim::Memory>(holder).is_some_and(|m| {
+        m.entries.iter().chain(m.heard.iter()).any(|e| {
+            e.kind == MemoryKind::Rumour
+                && e.deed == Some(Deed::Hired)
+                && e.subject == Some(actor)
+                && e.object == Some(object)
+        })
+    })
+}
+
+fn conspiracy_on(w: &World, who: EntityId) -> bool {
+    w.crime_reports().iter().any(|r| r.crime == citysim::Crime::Conspiracy && r.suspect == who)
+}
+
+#[test]
+fn test_hired_reaches_target_kin_and_forms_hired_grudge_on_buyer() {
+    let mut w = world();
+    let [buyer, t, taker, kin] = strangers(&w, 4)[..] else { unreachable!() };
+    w.edge_entry(t, kin).kind = RelKind::Family;
+    w.edge_entry(kin, t).kind = RelKind::Family;
+    // The kin trusts the teller (the copy keeps its confidence).
+    w.edge_entry(kin, taker).trust = 1.0;
+    gun(&mut w, taker);
+    // The teller knows the city (no distortion) and holds nothing else.
+    if let Some(s) = w.comp_mut::<Skills>(taker) {
+        s.knowledge = 1.0;
+    }
+    if let Some(m) = w.comp_mut::<citysim::Memory>(taker) {
+        m.entries.clear();
+        m.heard.clear();
+    }
+    set_coins(&mut w, buyer, 5000);
+    let f = fixer(&w);
+    let id = contracts::post(&mut w, posting(buyer, ContractKind::Hit, t, Some(f))).expect("posted");
+    assert!(contracts::accept(&mut w, id, taker, &[]));
+    assert!(holds_hired_about(&w, taker, buyer, t), "the taker knows first-hand");
+    assert!(!grudges::holds(&w, kin, buyer, 0.0));
+    citysim::systems::gossip::exchange(&mut w, taker, kin, citysim::systems::gossip::Venue::Chat);
+    assert!(holds_hired_about(&w, kin, buyer, t), "the deed travelled to the target's kin");
+    let g = w.comp::<Grudges>(kin).and_then(|g| g.list.iter().find(|x| x.target == buyer).cloned());
+    let g = g.expect("the kin's grudge on the buyer");
+    assert_eq!(g.cause, GrudgeCause::Hired, "revenge can reach the buyer");
+}
+
+#[test]
+fn test_fixer_talks_hired_only_to_regulars() {
+    let mut w = world();
+    w.config.law.fixer_talk = 1.0;
+    let [buyer, t, regular, other] = strangers(&w, 4)[..] else { unreachable!() };
+    set_coins(&mut w, buyer, 5000);
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.heat = 0.0;
+    }
+    contracts::post(&mut w, posting(buyer, ContractKind::Hit, t, Some(f))).expect("posted");
+    assert!(holds_hired_about(&w, owner, buyer, t), "the broker knows");
+    let now = w.tick;
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.regulars.insert(regular, now);
+        k.regulars.remove(&other);
+    }
+    contracts::fixer_talk(&mut w, owner, regular);
+    contracts::fixer_talk(&mut w, owner, other);
+    assert!(holds_hired_about(&w, regular, buyer, t), "a regular hears it at p = 1");
+    assert!(!holds_hired_about(&w, other, buyer, t), "a co-drinker who is no regular does not");
+    // At full heat the Fixer keeps quiet.
+    let [late] = strangers(&w, 5)[4..] else { unreachable!() };
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.regulars.insert(late, now);
+        k.heat = 1.0;
+    }
+    contracts::fixer_talk(&mut w, owner, late);
+    assert!(!holds_hired_about(&w, late, buyer, t), "p = fixer_talk x (1 - heat)");
+}
+
+#[test]
+fn test_interrogation_names_buyer_then_conspiracy_filed() {
+    let mut w = world();
+    // Forced success: the move's probability pinned to 1.
+    w.config.moves.p_max = 1.0;
+    w.config.law.interrogate_bias = 50.0;
+    let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
+    let id = fulfilled_hit(&mut w, buyer, t, taker);
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    let heat0 = w.comp::<Broker>(f).map_or(0.0, |k| k.heat);
+    let guard = city_guard(&mut w, &[buyer, t, taker], 0.9);
+    assert!(!holds_hired_about(&w, guard, buyer, t));
+    // The taker is jailed on another charge.
+    law::file_report(&mut w, citysim::Crime::Theft, taker, None);
+    law::jail_suspect(&mut w, guard, taker);
+    assert!(w.has::<citysim::Sentence>(taker), "sentenced");
+    assert_eq!(w.stats.current.contract.interrogations, 1);
+    assert_eq!(w.stats.current.contract.interrogations_won, 1);
+    assert!(holds_hired_about(&w, guard, buyer, t), "the guard holds the buyer's name");
+    assert!(holds_hired_about(&w, guard, owner, t), "and the broker's");
+    let heat1 = w.comp::<Broker>(f).map_or(0.0, |k| k.heat);
+    assert!(heat1 > heat0, "naming the Fixer warms it ({heat0} -> {heat1})");
+    assert_eq!(w.contracts[&id].interrogated.len(), 1, "one interrogation per arrest");
+    // The next midnight's check files Conspiracy against the placing agent.
+    w.tick += TICKS_PER_DAY;
+    law::accessory_check(&mut w);
+    assert!(conspiracy_on(&w, buyer), "Conspiracy against the placing agent");
+    assert!(w.contracts[&id].charged);
+    assert_eq!(w.stats.current.contract.accessory, 1);
+    assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Accessory && e.actors.first() == Some(&buyer)));
+    // Not twice.
+    w.tick += TICKS_PER_DAY;
+    law::accessory_check(&mut w);
+    assert_eq!(w.stats.current.contract.accessory, 1, "charged once");
+}
+
+#[test]
+fn test_unknown_buyer_never_charged() {
+    let mut w = world();
+    let [buyer, t, taker, witness] = strangers(&w, 4)[..] else { unreachable!() };
+    let id = fulfilled_hit(&mut w, buyer, t, taker);
+    // A witness of the strike who knows nothing of the buyer.
+    let closed = w.contracts[&id].closed.expect("closed");
+    if let Some(m) = w.comp_mut::<citysim::Memory>(witness) {
+        m.entries.push(citysim::MemoryEntry {
+            subject: Some(taker),
+            crime: Some(citysim::Crime::Murder),
+            object: Some(t),
+            salience: 1.0,
+            ..citysim::MemoryEntry::blank(MemoryKind::SawCrime, closed)
+        });
+    }
+    // Review fix: the witness and a city guard are in `known_by` (the
+    // system's own bookkeeping) with no `Hired` memory: still no charge.
+    let guard = city_guard(&mut w, &[buyer, t, taker, witness], 0.9);
+    if let Some(c) = w.contracts.get_mut(&id) {
+        c.known_by.push(witness);
+        c.known_by.push(guard);
+    }
+    assert!(!holds_hired_about(&w, witness, buyer, t) && !holds_hired_about(&w, guard, buyer, t));
+    for _ in 0..60 {
+        w.tick += TICKS_PER_DAY;
+        law::accessory_check(&mut w);
+    }
+    assert!(!conspiracy_on(&w, buyer), "nobody told the law: no charge");
+    assert!(!w.contracts[&id].charged);
+    assert_eq!(w.stats.current.contract.accessory, 0);
+    assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
+}
+
+/// Review fix: the law's own record (a death-squad Hit: buyer `None`,
+/// `Origin::Law`, placed by the captain) is never charged, even with a
+/// guard holding the captain's name.
+#[test]
+fn test_law_death_squad_never_charged() {
+    let mut w = world();
+    w.config.moves.p_max = 1.0;
+    let captain = citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
+    let [t, taker] = strangers(&w, 2)[..] else { unreachable!() };
+    gun(&mut w, taker);
+    if let Some(tr) = w.treasury_mut() {
+        tr.coins = 100_000;
+    }
+    let f = fixer(&w);
+    let p = Posting {
+        buyer: None,
+        agent: Some(captain),
+        kind: ContractKind::Hit,
+        target: Target::Agent(t),
+        broker: Some(f),
+        deadline_days: 10,
+        origin: Origin::Law,
+        price: None,
+    };
+    let id = contracts::post(&mut w, p).expect("posted");
+    assert!(contracts::accept(&mut w, id, taker, &[]));
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    let guard = city_guard(&mut w, &[captain, t, taker], 0.9);
+    contracts::hear_named(&mut w, id, guard, captain, t, 1);
+    assert!(holds_hired_about(&w, guard, captain, t), "a guard knows the captain placed it");
+    for _ in 0..3 {
+        w.tick += TICKS_PER_DAY;
+        law::accessory_check(&mut w);
+    }
+    assert!(!conspiracy_on(&w, captain), "the law does not charge its own policy");
+    assert!(!w.contracts[&id].charged);
+    assert_eq!(w.stats.current.contract.accessory, 0);
+}
+
+#[test]
+fn test_conspiracy_sentence_is_mult_of_murder() {
+    let mut w = world();
+    let murder = law::sentence_ticks(&w, citysim::Crime::Murder);
+    let mult = w.config.law.accessory_mult;
+    let want = ((murder as f32 * mult).ceil() as u64).max(TICKS_PER_DAY);
+    assert_eq!(law::sentence_ticks(&w, citysim::Crime::Conspiracy), want);
+    // The lever overrides the key.
+    w.levers.accessory_mult = Some(1.0);
+    assert_eq!(law::sentence_ticks(&w, citysim::Crime::Conspiracy), murder.max(TICKS_PER_DAY));
+}
+
+#[test]
+fn test_conspiracy_ranks_below_murder() {
+    use citysim::Crime;
+    assert!(Crime::Conspiracy < Crime::Murder, "just below Murder");
+    assert!(Crime::Conspiracy > Crime::Abduction);
+    assert_eq!(Crime::Murder.severity(), 11);
+    assert_eq!(Crime::Conspiracy.severity(), 10);
+    // Murder stays the top of every crime.
+    let all = [
+        Crime::Theft,
+        Crime::Extortion,
+        Crime::Assault,
+        Crime::Vagrancy,
+        Crime::GrandTheft,
+        Crime::Manslaughter,
+        Crime::Dealing,
+        Crime::Intrusion,
+        Crime::DataTheft,
+        Crime::Abduction,
+        Crime::Conspiracy,
+    ];
+    assert!(all.iter().all(|&c| c < Crime::Murder));
+}
+
+#[test]
+fn test_fixer_closes_at_warrant_heat_and_refunds_open_book() {
+    let mut w = world();
+    let [buyer, t] = strangers(&w, 2)[..] else { unreachable!() };
+    set_coins(&mut w, buyer, 2000);
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    let total = ownership::total_coins(&w);
+    let id = contracts::post(&mut w, posting(buyer, ContractKind::Beat, t, Some(f))).expect("posted");
+    assert!(coins(&w, buyer) < 2000);
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.heat = 0.95;
+    }
+    contracts::heat_daily(&mut w);
+    let k = w.comp::<Broker>(f).expect("broker");
+    assert!(k.closed_until.is_some_and(|t| t > w.tick), "closed by the law");
+    assert!(!contracts::fixer_open(&w, f));
+    assert_eq!(w.contracts[&id].status, ContractStatus::Cancelled, "the open book cancelled");
+    assert_eq!(coins(&w, buyer), 2000, "every coin back");
+    assert_eq!(w.escrow_held, 0);
+    assert_eq!(ownership::total_coins(&w), total);
+    assert!(conspiracy_on(&w, owner), "the owner is a Conspiracy suspect");
+    assert!(w.last_seen.contains_key(&owner), "last seen at the office door");
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::FixerBusted));
+    // A closed office takes no posting.
+    let r = contracts::post(&mut w, posting(buyer, ContractKind::Beat, t, Some(f)));
+    assert_eq!(r, Err(citysim::contract::Refusal::BrokerClosed));
+}
+
+#[test]
+fn test_fixer_bribe_lowers_heat_payer_owner() {
+    let mut w = world();
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    let captain = citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
+    if let Some(p) = w.comp_mut::<Personality>(captain) {
+        p.lawfulness = 0.0;
+    }
+    if let Some(p) = w.comp_mut::<Personality>(owner) {
+        p.lawfulness = 0.0;
+    }
+    set_coins(&mut w, owner, 10_000);
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.heat = 0.7;
+    }
+    let (o0, c0) = (coins(&w, owner), coins(&w, captain));
+    let total = ownership::total_coins(&w);
+    contracts::heat_daily(&mut w);
+    let heat = w.comp::<Broker>(f).map_or(1.0, |k| k.heat);
+    let want = 0.7 - w.config.law.heat_decay - w.config.law.bribe_cool;
+    assert!((heat - want).abs() < 1e-4, "decayed, then cooled by the bribe: {heat} vs {want}");
+    assert!(coins(&w, owner) < o0, "the owner paid from its wallet");
+    assert!(coins(&w, captain) > c0, "the captain took it");
+    assert_eq!(ownership::total_coins(&w), total);
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Bribe && e.actors.first() == Some(&owner)));
+    // `Payer::Owner` with an empty wallet makes no offer.
+    set_coins(&mut w, owner, 0);
+    let p = citysim::systems::faction::Payer::Owner(owner);
+    assert!(!citysim::systems::faction::offer_bribe(&mut w, p, citysim::systems::faction::BribeAsk::LookAway, 1.0));
+}
+
+#[test]
+fn test_guard_on_take_skips_buyer_in_chase_and_report() {
+    let mut w = world();
+    w.config.crime.witness_base = 1.0;
+    w.config.crime.witness_guard_bonus = 1.0;
+    let [buyer, victim] = strangers(&w, 2)[..] else { unreachable!() };
+    let g = city_guard(&mut w, &[buyer, victim], 0.1);
+    let g2 = city_guard(&mut w, &[buyer, victim, g], 0.9);
+    set_coins(&mut w, buyer, 5000);
+    // A Guard the buyer bought on itself: a corruption record.
+    let id = contracts::post(&mut w, posting(buyer, ContractKind::Guard, buyer, None)).expect("posted");
+    assert!(contracts::is_corruption(&w, &w.contracts[&id]));
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    assert!(contracts::on_take_of(&w, g, buyer), "on the take");
+    assert!(!contracts::on_take_of(&w, g2, buyer));
+    assert!(contracts::run_of(&w, g).is_none(), "a guard on the take keeps its shift: no run");
+    assert_eq!(w.contracts[&id].due, None, "and no ledger draw");
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::GuardTaken));
+    // Both guards see the buyer's Assault.
+    let tile = w.comp::<Position>(buyer).map(|p| p.tile).unwrap_or_default();
+    for a in [g, g2, victim, buyer] {
+        w.leave_building(a);
+        if let Some(p) = w.comp_mut::<Position>(a) {
+            p.tile = tile;
+            p.building = None;
+        }
+        lod::set_lod(&mut w, a, Lod::Coarse);
+    }
+    law::raise_crime(&mut w, buyer, Some(victim), citysim::Crime::Assault, tile);
+    let saw = |w: &World, x: EntityId| {
+        w.comp::<citysim::Memory>(x)
+            .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::SawCrime && e.subject == Some(buyer)))
+    };
+    assert!(saw(&w, g), "the memory is still written");
+    let filed = |w: &World, x: EntityId| w.crime_reports().iter().any(|r| r.suspect == buyer && r.witness == Some(x));
+    assert!(!filed(&w, g), "the guard on the take files nothing");
+    assert!(filed(&w, g2), "another guard reports it");
+    // The chase: the guard on the take never pursues its buyer.
+    let now = w.tick;
+    w.last_seen.insert(buyer, (tile, now));
+    let mine = law::located_suspects(&w, Some(law::Pursuer { tile, guard: g }));
+    assert!(!mine.contains(&buyer), "skipped by the guard on the take");
+    let theirs = law::located_suspects(&w, Some(law::Pursuer { tile, guard: g2 }));
+    assert!(theirs.contains(&buyer), "chased by the honest guard");
+    // Settled: off the take.
+    contracts::settle(&mut w, id, contracts::Settle::Cancelled, "test");
+    assert!(!contracts::on_take_of(&w, g, buyer));
+}
+
+#[test]
+fn test_security_corp_guard_converts_to_m11_contract_and_refunds_less_cut() {
+    let mut w = world();
+    // A building of a corp with no Security niche, unsecured.
+    let (corp, b) = w
+        .corps()
+        .into_iter()
+        .filter(|&c| w.comp::<citysim::Corp>(c).is_some_and(|x| !x.niches.contains(&citysim::Niche::Security)))
+        .find_map(|c| {
+            let b = w.comp::<citysim::Corp>(c)?.buildings.iter().copied().find(|&b| {
+                w.comp::<citysim::Building>(b).is_some_and(|bd| bd.secured_by.is_none() && !bd.demolished)
+            })?;
+            Some((c, b))
+        })
+        .expect("an unsecured corp building");
+    if let Some(c) = w.comp_mut::<citysim::Corp>(corp) {
+        c.treasury = 10_000;
+    }
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    let total = ownership::total_coins(&w);
+    let p = Posting {
+        buyer: Some(corp),
+        agent: None,
+        kind: ContractKind::Guard,
+        target: Target::Building(b),
+        broker: Some(f),
+        deadline_days: 7,
+        origin: Origin::God,
+        price: Some(100),
+    };
+    let id = contracts::post(&mut w, p).expect("posted");
+    let after_post = w.purse(Some(corp));
+    let (owner0, city0) = (w.purse(Some(owner)), w.purse(None));
+    assert!(contracts::corp_take(&mut w, id), "a Security corp converts it");
+    let seller = w.comp::<citysim::Building>(b).and_then(|bd| bd.secured_by).expect("secured");
+    assert!(
+        w.comp::<citysim::Corp>(seller).is_some_and(|c| c.contracts.iter().any(|&(x, _)| x == b)),
+        "an M11 contract"
+    );
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+    assert_eq!(w.contracts[&id].taker, Some(seller));
+    let cut = (100.0 * w.config.fixers.fixer_cut).round() as i64;
+    assert_eq!(w.purse(Some(corp)) - after_post, 100 - cut, "refunded less the cut");
+    let tax = w.purse(None) - city0;
+    assert_eq!(w.purse(Some(owner)) - owner0 + tax, cut, "the placement fee, taxed");
+    assert_eq!(w.escrow_held, 0);
+    assert_eq!(ownership::total_coins(&w), total);
+}
+
+#[test]
+fn test_public_locate_paid_by_treasury_sets_last_seen() {
+    let mut w = world();
+    let [s, observer] = strangers(&w, 2)[..] else { unreachable!() };
+    // A wanted suspect, unseen for law_bounty_days: the law posts.
+    citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
+    law::file_report(&mut w, citysim::Crime::Assault, s, None);
+    w.last_seen.remove(&s);
+    w.tick += u64::from(w.config.contracts.law_bounty_days + 1) * TICKS_PER_DAY;
+    if let Some(t) = w.treasury_mut() {
+        t.coins = 100_000;
+    }
+    contracts::post_law(&mut w);
+    let id = w
+        .contracts
+        .values()
+        .find(|c| c.buyer.is_none() && c.kind == ContractKind::Locate && c.target == Target::Agent(s))
+        .map(|c| c.id)
+        .expect("a public Locate");
+    assert_eq!(w.contracts[&id].origin, Origin::Law);
+    assert!(contracts::sees(&w, observer, id), "public: everyone sees it");
+    let (city0, obs0) = (w.purse(None), coins(&w, observer));
+    let total = ownership::total_coins(&w);
+    let tile = w.comp::<Position>(s).map(|p| p.tile).unwrap_or_default();
+    contracts::on_sighting(&mut w, observer, s, tile);
+    let per = w.config.bounty.per_sighting;
+    assert_eq!(coins(&w, observer) - obs0, per, "paid per sighting");
+    assert_eq!(city0 - w.purse(None), per, "by the Treasury");
+    assert_eq!(w.last_seen.get(&s).map(|&(t, _)| t), Some(tile), "the law knows where");
+    assert_eq!(ownership::total_coins(&w), total);
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::BountyPaid));
+}
+
+#[test]
+fn test_gang_retaliate_posts_hit_on_rival_leader_when_weak() {
+    use citysim::systems::gang;
+    // Two gangs, `a` with one member against `b` with six.
+    let setup = |w: &mut World, a_n: usize, b_n: usize| -> (EntityId, EntityId) {
+        let gangs = w.gangs();
+        let (a, b) = (gangs[0], gangs[1]);
+        let people = strangers(w, a_n + b_n);
+        for g in [a, b] {
+            let old: Vec<EntityId> = w.comp::<citysim::Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
+            for m in old {
+                gang::leave(w, m, "test");
+            }
+        }
+        for (i, &m) in people.iter().enumerate() {
+            gang::enlist(w, m, if i < a_n { a } else { b });
+        }
+        for g in [a, b] {
+            gang::recompute_leader(w, g);
+        }
+        if let Some(g) = w.comp_mut::<citysim::Gang>(a) {
+            g.treasury = 50_000;
+            g.order = citysim::Order::Retaliate;
+            g.retaliate_on = Some(b);
+        }
+        (a, b)
+    };
+    let mut w = world();
+    let (a, b) = setup(&mut w, 1, 6);
+    let rival_leader = w.comp::<citysim::Gang>(b).and_then(|g| g.leader).expect("a rival leader");
+    contracts::post_gang_hit(&mut w, a, citysim::Order::Retaliate);
+    let c = w
+        .contracts
+        .values()
+        .find(|c| c.buyer == Some(a) && c.kind == ContractKind::Hit)
+        .cloned()
+        .expect("a Hit posted");
+    assert_eq!(c.target, Target::Agent(rival_leader), "on the rival's leader");
+    assert_eq!(c.origin, Origin::GangOrder(citysim::Order::Retaliate));
+    assert_eq!(c.agent, w.comp::<citysim::Gang>(a).and_then(|g| g.leader), "placed by the leader");
+    // A gang as strong as its rival raids alone.
+    let mut w2 = world();
+    let (a2, _) = setup(&mut w2, 6, 6);
+    contracts::post_gang_hit(&mut w2, a2, citysim::Order::Retaliate);
+    assert!(!w2.contracts.values().any(|c| c.buyer == Some(a2)), "own >= hire_ratio x rival: the raid alone");
+}
+
+#[test]
+fn test_fixer_run_order_runs_to_selldata_with_cut() {
+    use citysim::virt::{RunOutcome, RunWhy};
+    let mut w = world();
+    // Every node open: the run the scorer picks gets through.
+    let nodes: Vec<citysim::virt::NodeId> = (0..w.virt.nodes.len()).map(|i| citysim::virt::NodeId(i as u16)).collect();
+    for n in nodes {
+        if let Some(p) = citysim::systems::virt::profile_mut(&mut w, n) {
+            p.ice = 0;
+        }
+    }
+    // Data in every Lab's store (a run's take).
+    for b in w.buildings_of_kind(BuildingKind::Lab).to_vec() {
+        if let Some(n) = citysim::systems::virt::node_of_building(&w, b) {
+            if let Some(x) = w.virt.node_mut(n) {
+                x.store.units[citysim::virt::Track::Deck.index()] = 500;
+            }
+        }
+    }
+    citysim::systems::virt::bump_epoch(&mut w);
+    let [r] = strangers(&w, 1)[..] else { unreachable!() };
+    lod::set_lod(&mut w, r, Lod::Coarse);
+    citysim::systems::assets::grant(&mut w, r, citysim::AssetKind::Deck, 2).expect("a deck");
+    if let Some(s) = w.comp_mut::<Skills>(r) {
+        s.hacking = 1.0;
+    }
+    if let Some(p) = w.comp_mut::<Personality>(r) {
+        p.lawfulness = 0.0;
+        p.greed = 1.0;
+    }
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    let now = w.tick;
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.regulars.clear();
+        k.regulars.insert(r, now);
+    }
+    contracts::run_offers(&mut w, f);
+    let o = w.run_orders.get(&r).cloned().expect("a run order");
+    assert_eq!(o.why, RunWhy::Fixer);
+    assert_eq!(o.patron, None);
+    assert!(matches!(o.purpose, citysim::virt::Purpose::Data { .. }), "a Data run");
+    assert_eq!(w.fixer_runs.get(&r).map(|&(x, _)| x), Some(f));
+    // The run (M14's, unchanged).
+    citysim::systems::virt::start_run(&mut w, r).expect("the run starts");
+    while let Some(&(t, _)) = w.run_queue.first() {
+        w.tick = w.tick.max(t);
+        citysim::systems::virt::run(&mut w);
+    }
+    assert_eq!(w.run_log.back().and_then(|x| x.outcome), Some(RunOutcome::Success));
+    let held = citysim::systems::virt::deck_data(&w, r);
+    assert!(held > 0, "Data on the deck");
+    // The sale at a buyer's Lab, through the SellData completion.
+    let lab = citysim::systems::tech::data_buyer_lab(&w, r).expect("a buyer");
+    let buyer = w.owner_of(lab).expect("a corp");
+    if let Some(c) = w.comp_mut::<citysim::Corp>(buyer) {
+        c.treasury = 100_000;
+    }
+    w.leave_building(r);
+    w.enter_building(r, lab);
+    let (r0, o0, city0) = (coins(&w, r), w.purse(Some(owner)), w.purse(None));
+    let rev0 = w.comp::<citysim::Building>(f).map_or(0, |b| b.revenue_today);
+    let now = w.tick;
+    let res = citysim::exec::actions::on_complete(&mut w, r, ActionKind::SellData, Some(lab), now, now);
+    assert_eq!(res, citysim::exec::StepResult::Done);
+    let cut_paid = w.purse(Some(owner)) - o0;
+    assert!(cut_paid > 0, "the owner took a cut");
+    let gross = coins(&w, r) - r0 + cut_paid + (w.purse(None) - city0);
+    assert!(gross > 0);
+    assert_eq!(w.stats.current.contract.fixer_runs, 1);
+    assert!(w.comp::<citysim::Building>(f).map_or(0, |b| b.revenue_today) > rev0, "credited to the Fixer");
+    assert!(!w.fixer_runs.contains_key(&r), "the order's cut is taken once");
+}

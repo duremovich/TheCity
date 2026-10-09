@@ -248,7 +248,8 @@ pub fn raise_crime_except(
             &[w, actor],
             format!("{} saw {} commit {}", world.name_of(w), world.name_of(actor), crime.label()),
         );
-        if guard {
+        // M16a (plan C31): a guard on the take keeps the memory, files nothing.
+        if guard && !crate::systems::contracts::on_take_of(world, w, actor) {
             file_report(world, crime, actor, Some(w));
         }
     }
@@ -398,6 +399,8 @@ fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>, claimed: &BTreeSet
             // suspect another guard is after is theirs.
             && crate::systems::life::sighting_fresh(world, s, p.tile)
             && !claimed.contains(&s)
+            // M16a (plan C31): never the buyer of a guard on the take.
+            && !crate::systems::contracts::on_take_of(world, p.guard, s)
     };
     // The cheap reach test first (the same conjunction, reordered).
     by.is_none_or(near) && located(world, s)
@@ -910,12 +913,163 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;
+    // M16a (plan C28, C31): the take ends with an arrest by the guard on
+    // it; the arresting guard interrogates a recent taker.
+    if !world.contracts.is_empty() {
+        crate::systems::contracts::on_arrest(world, guard, suspect);
+        interrogate(world, guard, suspect);
+    }
     // M15: an arrest is public: talked about where the suspect lives (the
     // Precinct's district for the homeless), and on the law's own record.
     let d = crate::systems::gossip::home_district(world, suspect).unwrap_or_else(|| world.district_of_building(jail));
     crate::systems::gossip::post_deed(world, d, crate::word::Deed::Arrested, Some(suspect), None);
     let t = world.tick;
     world.arrest_log.push_back((t, suspect));
+}
+
+/// M16a (plan C28): the arresting guard interrogates a taker (or crew) of
+/// a Hit or Beat fulfilled within `interrogate_days`, once per record per
+/// arrest: an Intimidate move (`moves::resolve_with`, the move's own
+/// `WordNs::Move` draw) with the bonus `0.3 × Law.competence +
+/// interrogate_bias`, the stake the buyer's name. A win puts `Hired` (actor
+/// the buyer, object the target, hops 1, conf 1) in the guard and, for a
+/// brokered record, a second naming the Fixer's owner; the Fixer warms by
+/// `heat_per_named`. `contract_cleared` counts a Hit's taker jailed within
+/// 30 days of the killing (once per record).
+fn interrogate(world: &mut World, guard: EntityId, suspect: EntityId) {
+    use crate::contract::{ContractKind, ContractStatus};
+    let Some(ids) = world.by_party.get(&suspect).cloned() else { return };
+    let now = world.tick;
+    let window = Tick::from(world.config.law.interrogate_days) * TICKS_PER_DAY;
+    for id in ids {
+        let Some(c) = world.contracts.get(&id).cloned() else { continue };
+        let took = c.taker == Some(suspect) || c.crew.contains(&suspect);
+        let done = matches!(c.status, ContractStatus::Fulfilled | ContractStatus::Reneged);
+        if !took || !done || !c.kind.violent() {
+            continue;
+        }
+        let Some(closed) = c.closed else { continue };
+        if c.kind == ContractKind::Hit && c.interrogated.is_empty() && now.saturating_sub(closed) <= 30 * TICKS_PER_DAY
+        {
+            world.stats.current.contract.contract_cleared += 1;
+        }
+        if now.saturating_sub(closed) > window || c.interrogated.contains(&now) {
+            continue;
+        }
+        if let Some(x) = world.contracts.get_mut(&id) {
+            x.interrogated.push(now);
+        }
+        world.stats.current.contract.interrogations += 1;
+        let Some(buyer) = c.buyer.or(c.agent) else { continue };
+        let competence = world.law().map_or(0.0, |l| l.competence);
+        let bonus = 0.3 * competence + world.config.law.interrogate_bias;
+        let m = crate::word::SocialMove {
+            actor: guard,
+            target: suspect,
+            kind: crate::word::MoveKind::Intimidate,
+            stake: crate::word::Stake::Info { about: buyer },
+        };
+        let out = crate::systems::moves::resolve_with(world, &m, bonus);
+        if !out.success || out.refused {
+            continue;
+        }
+        world.stats.current.contract.interrogations_won += 1;
+        let target = c.target.id();
+        crate::systems::contracts::hear_named(world, id, guard, buyer, target, 1);
+        if let Some(f) = c.broker {
+            if let Some(owner) = world.owner_of(f).filter(|&o| world.has::<crate::components::Identity>(o)) {
+                crate::systems::contracts::hear_named(world, id, guard, owner, target, 1);
+            }
+            let by = world.config.law.heat_per_named;
+            crate::systems::contracts::heat_add(world, f, by);
+        }
+    }
+}
+
+/// M16a (plan C29), at midnight: for each Hit or Beat fulfilled within
+/// `accessory_days` whose placing agent is living, free and not yet
+/// charged, a city guard or a witness of the strike (a `SawCrime` of the
+/// taker or crew within an hour of the killing) holding `Hired` about it at
+/// `conf ≥ accessory_conf` (`contracts::holds_hired`: the memory, never
+/// `known_by`) files `Crime::Conspiracy` against the placing agent (the
+/// lowest holder id). The law's own records (buyer `None`, `Origin::Law`:
+/// the death squad) are never charged. `Accessory` with the days since the killing;
+/// `accessory_unfounded` re-checks the holder's memory at the filing.
+pub fn accessory_check(world: &mut World) {
+    use crate::contract::{ContractKind, ContractStatus};
+    if world.contracts.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let window = Tick::from(world.config.law.accessory_days) * TICKS_PER_DAY;
+    let cands: Vec<crate::contract::Contract> = world
+        .contracts
+        .values()
+        .filter(|c| c.kind.violent() && matches!(c.status, ContractStatus::Fulfilled | ContractStatus::Reneged))
+        // Review fix: the law does not prosecute its own records (the death
+        // squad: buyer `None`, `Origin::Law`).
+        .filter(|c| c.buyer.is_some() && c.origin != crate::contract::Origin::Law)
+        .filter(|c| !c.charged && c.closed.is_some_and(|t| now.saturating_sub(t) <= window))
+        .filter(|c| {
+            c.agent.is_some_and(|a| {
+                living(world, a)
+                    && !world.has::<Sentence>(a)
+                    && world.comp::<Brain>(a).is_some_and(|b| b.cuffed_by.is_none())
+            })
+        })
+        .cloned()
+        .collect();
+    if cands.is_empty() {
+        return;
+    }
+    let guards: BTreeSet<EntityId> = crate::systems::law_brain::guards(world).into_iter().collect();
+    let mut found: Vec<(crate::contract::ContractId, EntityId)> = Vec::new();
+    // scan-ok: daily, the memory holders, only while a fulfilled record waits.
+    for holder in world.with::<crate::components::Memory>() {
+        if found.len() == cands.len() {
+            break;
+        }
+        let Some(m) = world.comp::<crate::components::Memory>(holder) else { continue };
+        let guard = guards.contains(&holder);
+        for c in &cands {
+            if found.iter().any(|&(id, _)| id == c.id) || Some(holder) == c.agent {
+                continue;
+            }
+            let witness = !guard && {
+                let closed = c.closed.unwrap_or(0);
+                m.entries.iter().any(|e| {
+                    e.kind == MemoryKind::SawCrime
+                        && e.subject.is_some_and(|s| Some(s) == c.taker || c.crew.contains(&s))
+                        && e.tick.abs_diff(closed) <= 60
+                })
+            };
+            if (guard || witness) && crate::systems::contracts::holds_hired(world, holder, c) {
+                found.push((c.id, holder));
+            }
+        }
+    }
+    found.sort_unstable();
+    for (id, holder) in found {
+        let Some(c) = world.contracts.get(&id).cloned() else { continue };
+        let Some(agent) = c.agent else { continue };
+        if !crate::systems::contracts::holds_hired(world, holder, &c) {
+            world.stats.current.contract.accessory_unfounded += 1;
+        }
+        file_report(world, Crime::Conspiracy, agent, Some(holder));
+        if let Some(x) = world.contracts.get_mut(&id) {
+            x.charged = true;
+        }
+        world.stats.current.contract.accessory += 1;
+        let days = now.saturating_sub(c.closed.unwrap_or(now)) / TICKS_PER_DAY;
+        let what = if c.kind == ContractKind::Hit { "killing" } else { "beating" };
+        let target = c.target.id();
+        let text = format!(
+            "{} charged with Conspiracy in the {what} of {} ({days} days after)",
+            world.name_of(agent),
+            world.name_of(target)
+        );
+        world.push_event(EventKind::Accessory, &[agent, target, holder], text);
+    }
 }
 
 fn resolve_reports(world: &mut World, suspect: EntityId) {
@@ -1115,6 +1269,8 @@ pub fn run(world: &mut World) {
         reconcile_guards(world);
         // M12 D23: the city's sweepers, toward `levers.sanitation_count`.
         crate::systems::districts::reconcile_sanitation(world);
+        // M16a (plan C29): after `word::run`'s pass.
+        accessory_check(world);
     }
     // The captain's daily rescoring, after the guard roster is reconciled.
     crate::systems::law_brain::run(world);
