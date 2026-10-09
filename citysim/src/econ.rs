@@ -142,6 +142,26 @@ pub struct EconState {
     /// Customs, Property}`), the last `[treasury] receipts_days`, newest last.
     #[serde(skip_serializing_if = "VecDeque::is_empty")]
     pub receipts: VecDeque<i64>,
+    /// Jobs and room J19 (P6): the last [`MIGRANT_DAYS`] days' labour
+    /// market as the Harris-Todaro rule reads it, newest last (wages on).
+    #[serde(skip_serializing_if = "VecDeque::is_empty")]
+    pub migrant_days: VecDeque<MigrantDay>,
+    /// J19: `SetOutsideWage` pins the outside wage over `[demography] outside_wage`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub outside_wage_pin: Option<f32>,
+}
+
+/// J19: days of `EconState.migrant_days` (the 7-day means).
+pub const MIGRANT_DAYS: usize = 7;
+
+/// J19: one day's labour market at midnight, after the job search: the
+/// mean gross daily wage over Job holders, the employed free adults and
+/// the free adults (adults not jailed).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct MigrantDay {
+    pub gross_mean: f32,
+    pub employed: u32,
+    pub free_adults: u32,
 }
 
 impl EconState {

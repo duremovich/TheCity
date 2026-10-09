@@ -11,7 +11,7 @@ use crate::components::{
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::time::{DAYS_PER_YEAR, TICKS_PER_DAY};
+use crate::time::{Tick, DAYS_PER_YEAR, TICKS_PER_DAY};
 use crate::world::World;
 
 /// 18 years.
@@ -41,6 +41,8 @@ pub fn run(world: &mut World) {
     corpses(world);
     gravedigger_notices(world);
     job_search(world);
+    // Jobs and room J19: the day's labour market for the migrants' means.
+    note_labour_market(world);
     // L1: a long commute moves nearer work (a few households a night).
     crate::systems::life::relocate(world);
     emigration(world);
@@ -819,8 +821,21 @@ pub fn emigrate(world: &mut World, id: EntityId) {
 }
 
 /// Weekly: `immigration_per_week` newcomers at the map edge; M11 § 7 scales
-/// the lever by Street happiness (`classes::immigrants_this_week`).
+/// the lever by Street happiness (`classes::immigrants_this_week`). Jobs
+/// and room P6 (wages on): the offers first ([`offers_due`], J20), then the
+/// Harris-Todaro week ([`pull_week`], J19); `immigration_per_week` stays the
+/// wages-off rule.
 fn immigration(world: &mut World) {
+    if crate::systems::wages::on(world) {
+        for (b, role) in offers_due(world) {
+            spawn_immigrant_for(world, b, role);
+        }
+        for _ in 0..pull_week(world) {
+            let (_, n) = spawn_migrant(world, None);
+            world.stats.current.jobs.migrants_pull += n;
+        }
+        return;
+    }
     let n = crate::systems::classes::immigrants_this_week(world);
     for _ in 0..n {
         spawn_immigrant(world);
@@ -829,14 +844,76 @@ fn immigration(world: &mut World) {
 
 /// One immigrant: adult of random age, uniform Personality, Skills 0.1,
 /// 15 coins, Coarse, at a random edge road; housed in the emptiest Home
-/// under 6 residents, else homeless.
+/// under 6 residents, else homeless. With wages on, a J21 migrant alone
+/// (18-45, the seeding skill draw, the emptiest Block with room).
 pub fn spawn_immigrant(world: &mut World) -> EntityId {
+    if crate::systems::wages::on(world) {
+        let home = emptiest_home_near(world, None, 1);
+        return arrive(world, Arrival { home, kind: ArrivalKind::Migrant, sex: None, surname: None, tile: None }, None);
+    }
+    let home = emptiest_home(world);
+    arrive(world, Arrival { home, kind: ArrivalKind::Legacy, sex: None, surname: None, tile: None }, None)
+}
+
+/// Who an arrival is: M11's immigrant (any adult age, Skills 0.1) or a
+/// Jobs and room J21 migrant (`[demography] migrant_age`, the seeding
+/// draw of the three v1 skills on a keyed stream).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum ArrivalKind {
+    Legacy,
+    Migrant,
+}
+
+/// One arrival's givens: the Home (already chosen), the sex and surname
+/// (a spouse's), the tile (an offer's nearest edge road; else a random one).
+struct Arrival {
+    home: Option<EntityId>,
+    kind: ArrivalKind,
+    sex: Option<Sex>,
+    surname: Option<String>,
+    tile: Option<TilePos>,
+}
+
+/// J21: the keyed stream of a migrant's own draws (skills, the household's
+/// size, a child's age), never stored: the world stream keeps M11's draws.
+/// Keys: `salt` (1 skills, 2 household, 3 child), `key` (an entity index,
+/// or the day's arrival ordinal) and the tick.
+pub const MIGRANT_KEY: u64 = 0x1A16 << 44;
+
+fn migrant_rng(world: &World, salt: u64, key: u64) -> rand_chacha::ChaCha8Rng {
+    world.rng.keyed(MIGRANT_KEY ^ (salt << 40) ^ ((key & 0xF_FFFF) << 20) ^ world.tick)
+}
+
+/// Spawn one arrival at the map edge. The world-stream draws are M11's
+/// (sex unless given, the name, the age, the Personality, the edge tile
+/// unless given), in M11's order, so the wages-off city is unchanged.
+/// `with`: the partner a spouse arrives with (the event's text).
+fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     let tick = world.tick;
-    let sex = if world.rng.world().random_bool(0.5) { Sex::Male } else { Sex::Female };
-    let name = world.random_name(sex);
+    let sex = match a.sex {
+        Some(s) => s,
+        None => {
+            if world.rng.world().random_bool(0.5) {
+                Sex::Male
+            } else {
+                Sex::Female
+            }
+        }
+    };
+    let name = match &a.surname {
+        Some(last) => format!("{} {last}", world.random_first_name(sex)),
+        None => world.random_name(sex),
+    };
     let (age_days, personality, tile) = {
         let edge_roads = world.edge_roads.clone();
-        let (lo, hi) = (world.config.world.age_min_years, world.config.world.age_max_years);
+        let (lo, hi) = match a.kind {
+            ArrivalKind::Legacy => (world.config.world.age_min_years, world.config.world.age_max_years),
+            ArrivalKind::Migrant => {
+                let [lo, hi] = world.config.demography.migrant_age;
+                let lo = lo.max(18.0);
+                (lo, hi.max(lo + 0.01))
+            }
+        };
         let rng = world.rng.world();
         let years: f32 = rng.random_range(lo..hi);
         let age_days = ((years * DAYS_PER_YEAR as f32) as u32).max(ADULT_AGE_DAYS);
@@ -848,7 +925,10 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
             courage: rng.random(),
             loyalty: rng.random(),
         };
-        let tile = edge_roads.choose(rng).copied().unwrap_or_default();
+        let tile = match a.tile {
+            Some(t) => t,
+            None => edge_roads.choose(rng).copied().unwrap_or_default(),
+        };
         (age_days, personality, tile)
     };
     let initial = world.config.world.needs_initial.clone();
@@ -864,7 +944,18 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
         },
     );
     world.insert(id, personality);
-    world.insert(id, Skills::basic(0.1, 0.1, 0.1, 0.0));
+    let skills = match a.kind {
+        ArrivalKind::Legacy => Skills::basic(0.1, 0.1, 0.1, 0.0),
+        ArrivalKind::Migrant => {
+            // J21: the seeded residents' draw (`World::spawn_population`).
+            let (lo, hi) = (world.config.world.skill_min, world.config.world.skill_max);
+            let mut r = migrant_rng(world, 1, u64::from(id.index));
+            let mut draw = || if hi > lo { r.random_range(lo..hi) } else { lo };
+            let (stealth, fighting, farming) = (draw(), draw(), draw());
+            Skills::basic(stealth, fighting, farming, 0.0)
+        }
+    };
+    world.insert(id, skills);
     // M14 V35: an immigrant's keyed draw.
     let hacking = crate::systems::tech::draw_hacking(world, id);
     crate::systems::tech::give_hacking(world, id, hacking);
@@ -903,7 +994,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     // M13 D4: a keyed Body (the world stream is untouched).
     let body = crate::systems::assets::new_body(world, id);
     crate::systems::assets::give_body(world, id, body);
-    let home = emptiest_home(world);
+    let home = a.home;
     world.insert(id, Household::new(home));
     arrival_savings(world, id, home);
     world.stats.current.immigrants += 1;
@@ -912,11 +1003,329 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
         Some(h) => format!("housed in Block#{}", h.index),
         None => "homeless".to_string(),
     };
-    world.push_event(EventKind::Immigration, &[id], format!("{name} arrived, {where_}"));
+    let text = match with {
+        Some(p) => format!("{name} arrived with {}, {where_}", world.name_of(p)),
+        None => format!("{name} arrived, {where_}"),
+    };
+    world.push_event(EventKind::Immigration, &[id], text);
     if home.is_none() {
         world.push_event(EventKind::Homeless, &[id], format!("{name} has no home"));
     }
     id
+}
+
+// ---------------------------------------------------------------------------
+// Jobs and room P6: immigration that answers the city (docs/JOBS_V2.md § 4,
+// plan J19-J21). Every arrival is an abstract event: an entity spawned at
+// the map edge whose coins cross in from the World account. Read only with
+// `[economy2] wages` on.
+// ---------------------------------------------------------------------------
+
+/// J19: today's labour market into `EconState.migrant_days` (midnight,
+/// after the job search; wages on): the mean gross wage over Job holders,
+/// the employed free adults and the free adults (adults not jailed).
+fn note_labour_market(world: &mut World) {
+    if !crate::systems::wages::on(world) {
+        return;
+    }
+    let gross_mean = crate::systems::wages::gross_mean(world);
+    let (mut employed, mut free) = (0u32, 0u32);
+    // scan-ok: daily: the Harris-Todaro means
+    for id in world.citizens() {
+        if !world.has::<Brain>(id) || !is_adult(world, id) || world.has::<Sentence>(id) {
+            continue;
+        }
+        free += 1;
+        if world.has::<Job>(id) {
+            employed += 1;
+        }
+    }
+    let ring = &mut world.econ.migrant_days;
+    if ring.len() >= crate::econ::MIGRANT_DAYS {
+        ring.pop_front();
+    }
+    ring.push_back(crate::econ::MigrantDay { gross_mean, employed, free_adults: free });
+}
+
+/// J19: the outside wage `R` (the `SetOutsideWage` pin, else `[demography]
+/// outside_wage`), at least 0.1.
+pub fn outside_wage(world: &World) -> f32 {
+    world.econ.outside_wage_pin.unwrap_or(world.config.demography.outside_wage).max(0.1)
+}
+
+/// J19: the expected wage `E = gross_mean × employed ÷ free adults` over the
+/// 7-day means (0 before the first midnight's note or with no free adult).
+pub fn expected_wage(world: &World) -> f32 {
+    let ring = &world.econ.migrant_days;
+    if ring.is_empty() {
+        return 0.0;
+    }
+    let n = ring.len() as f32;
+    let gross = ring.iter().map(|d| d.gross_mean).sum::<f32>() / n;
+    let employed = ring.iter().map(|d| d.employed as f32).sum::<f32>() / n;
+    let free = ring.iter().map(|d| d.free_adults as f32).sum::<f32>() / n;
+    if free <= 0.0 {
+        return 0.0;
+    }
+    gross * employed / free
+}
+
+/// J19: `pull = clamp((E − R) ÷ R, 0, pull_cap)`.
+pub fn pull(world: &World) -> f32 {
+    let r = outside_wage(world);
+    let cap = world.config.demography.pull_cap.max(0.0);
+    ((expected_wage(world) - r) / r).clamp(0.0, cap)
+}
+
+/// J19: empty beds in standing Blocks (capacity, floors included, minus
+/// residents).
+pub fn empty_beds(world: &World) -> usize {
+    world
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .filter_map(|&h| {
+            world
+                .comp::<Building>(h)
+                .filter(|b| !b.demolished && !b.derelict)
+                .map(|b| usize::from(b.capacity).saturating_sub(world.residents_of(h).len()))
+        })
+        .sum()
+}
+
+/// J19: the Harris-Todaro week: `round(migrants_max × pull ÷ pull_cap ×
+/// beds × immigration_factor)`, `beds = clamp(empty beds ÷ beds_ref, 0.25, 1)`.
+pub fn pull_week(world: &World) -> u32 {
+    let c = &world.config.demography;
+    if c.pull_cap <= 0.0 || c.migrants_max == 0 {
+        return 0;
+    }
+    let p = pull(world) / c.pull_cap;
+    if p <= 0.0 {
+        return 0;
+    }
+    let beds = (empty_beds(world) as f32 / c.beds_ref.max(1.0)).clamp(0.25, 1.0);
+    let factor = crate::systems::classes::immigration_factor(world);
+    (c.migrants_max as f32 * p * beds * factor).round().max(0.0) as u32
+}
+
+/// J20: the vacancies an offer answers this week: every open place (a
+/// role's slot in `world.vacancies`) at a standing building whose `(building,
+/// role)` has stood `offer_days` (`EconState.vacancy_since`, stamped for
+/// every vacancy by `wages::daily`), oldest first (ties by building, role),
+/// at most `offers_max`.
+pub fn offers_due(world: &World) -> Vec<(EntityId, Role)> {
+    let c = &world.config.demography;
+    let (now, days) = (world.tick, c.offer_days);
+    let mut due: Vec<(Tick, EntityId, Role)> = Vec::new();
+    for (&b, roles) in &world.vacancies {
+        if !world.comp::<Building>(b).is_some_and(|bd| !bd.demolished) {
+            continue;
+        }
+        for &role in roles {
+            let Some(&since) = world.econ.vacancy_since.get(&(b, role)) else { continue };
+            if since + days * TICKS_PER_DAY <= now {
+                due.push((since, b, role));
+            }
+        }
+    }
+    due.sort();
+    due.into_iter().take(c.offers_max as usize).map(|(_, b, r)| (b, r)).collect()
+}
+
+/// J20: a recruited migrant for the open `role` at `b`: hired at spawn
+/// (`hire`; the vacancy closes), housed in the Block with room nearest the
+/// workplace door ([`emptiest_home_near`]), crossing in at the edge road
+/// nearest the workplace; the role's skill floored at `offer_skill` (and a
+/// guard lawful, as `pick_candidate` requires). `None` when the place is no
+/// longer open or the workplace no longer stands.
+pub fn spawn_immigrant_for(world: &mut World, b: EntityId, role: Role) -> Option<EntityId> {
+    let door = world.comp::<Building>(b).filter(|bd| !bd.demolished).map(|bd| bd.door)?;
+    if !world.vacancies.get(&b).is_some_and(|v| v.contains(&role)) {
+        return None;
+    }
+    let (id, n) = spawn_migrant(world, Some(door));
+    floor_role_skill(world, id, role);
+    hire(world, id, b, role);
+    crate::systems::budget::note_hire(world, id, b, role);
+    if let Some(v) = world.vacancies.get_mut(&b) {
+        if let Some(i) = v.iter().position(|&r| r == role) {
+            v.remove(i);
+        }
+        let still = v.contains(&role);
+        if v.is_empty() {
+            world.vacancies.remove(&b);
+        }
+        if !still {
+            world.econ.vacancy_since.remove(&(b, role));
+        }
+    }
+    world.stats.current.jobs.migrants_offer += n;
+    let (name, place) = (world.name_of(id), world.name_of(b));
+    world.push_event(EventKind::Immigration, &[id, b], format!("{name} arrived for a {} job at {place}", role.label()));
+    Some(id)
+}
+
+/// J21: an offer's role skill at least `offer_skill` (the skill
+/// `competence::role_skill` names; a Lab's hacking and a Fixer's knowledge
+/// too, their other slots); a guard's lawfulness at least 0.4
+/// (`pick_candidate`'s rule).
+fn floor_role_skill(world: &mut World, id: EntityId, role: Role) {
+    let floor = world.config.demography.offer_skill.clamp(0.0, 1.0);
+    let label = crate::systems::competence::role_skill(world, id, role).map(|(_, _, l)| l);
+    if let Some(s) = world.comp_mut::<Skills>(id) {
+        match label {
+            Some("farming") => s.farming = s.farming.max(floor),
+            Some("fighting") => s.fighting = s.fighting.max(floor),
+            Some("persuasion") => s.persuasion = s.persuasion.max(floor),
+            Some("knowledge") => s.knowledge = s.knowledge.max(floor),
+            _ => {}
+        }
+        if role == Role::Researcher {
+            s.hacking = s.hacking.max(floor);
+        }
+        if role == Role::Fixer {
+            s.knowledge = s.knowledge.max(floor);
+        }
+    }
+    if role == Role::Guard {
+        if let Some(p) = world.comp_mut::<Personality>(id) {
+            p.lawfulness = p.lawfulness.max(0.4);
+        }
+    }
+}
+
+/// J19-J21: one migrant household: the migrant (18-45, the seeding skill
+/// draw); with `p_spouse` a spouse of the other sex (the same surname and
+/// Block, a Spouse edge at 0.6 as seeded couples); with `[demography]
+/// migrant_children` > 0 (Dylan's open question; 0 by default) up to that
+/// many children. Housed together: nearest `work` (an offer) else the
+/// emptiest Block, with room for the household (with no room for the
+/// children, the couple comes alone), else homeless; an offer
+/// crosses in at the edge road nearest `work`. Returns the migrant and the
+/// arrivals counted.
+pub fn spawn_migrant(world: &mut World, work: Option<TilePos>) -> (EntityId, u32) {
+    // The household's size first, keyed on the day's arrival ordinal and
+    // the tick (unique per arrival; the world stream is untouched).
+    let c = world.config.demography.clone();
+    let mut r = migrant_rng(world, 2, u64::from(world.stats.current.immigrants));
+    let spouse = c.p_spouse > 0.0 && r.random_bool(c.p_spouse.min(1.0));
+    let mut kids = if spouse && c.migrant_children > 0 { r.random_range(0..=c.migrant_children) } else { 0 };
+    let adults = 1 + usize::from(spouse);
+    let mut home = emptiest_home_near(world, work, adults + usize::from(kids));
+    if home.is_none() && kids > 0 {
+        // No Block holds the family: the couple comes without the children.
+        kids = 0;
+        home = emptiest_home_near(world, work, adults);
+    }
+    let tile = work.and_then(|w| nearest_edge_road(world, w));
+    let id = arrive(world, Arrival { home, kind: ArrivalKind::Migrant, sex: None, surname: None, tile }, None);
+    let mut n = 1;
+    if spouse {
+        let sex = match world.comp::<Identity>(id).map(|i| i.sex) {
+            Some(Sex::Male) => Sex::Female,
+            _ => Sex::Male,
+        };
+        let surname = world.comp::<Identity>(id).and_then(|i| i.name.rsplit(' ').next().map(str::to_string));
+        let at = world.comp::<Position>(id).map(|p| p.tile);
+        let s =
+            arrive(world, Arrival { home, kind: ArrivalKind::Migrant, sex: Some(sex), surname, tile: at }, Some(id));
+        world.set_spouse(id, s);
+        let e = world.edge_entry(id, s);
+        e.affinity = 0.6;
+        e.trust = 0.6;
+        n += 1;
+        if let Some(h) = home {
+            let (mother, father) = if sex == Sex::Female { (s, id) } else { (id, s) };
+            for _ in 0..kids {
+                spawn_migrant_child(world, mother, father, h);
+                n += 1;
+            }
+        }
+    }
+    (id, n)
+}
+
+/// Dylan's open question (immigrant families; `[demography]
+/// migrant_children`, 0 by default): a child arriving with migrant parents,
+/// under 18 (a keyed age), in their Block as a born child is (no
+/// occupant's place taken), with Parent and sibling edges as `spawn_child`
+/// writes; no coins cross (an empty wallet), no Birth.
+fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, home: EntityId) -> EntityId {
+    let tick = world.tick;
+    let id = world.spawn();
+    let mut r = migrant_rng(world, 3, u64::from(id.index));
+    let sex = if r.random_bool(0.5) { Sex::Male } else { Sex::Female };
+    let years: f32 = r.random_range(1.0..17.5);
+    let age_days = ((years * DAYS_PER_YEAR as f32) as u32).min(ADULT_AGE_DAYS - 1);
+    let personality = {
+        let m = world.comp::<Personality>(mother).cloned();
+        let f = world.comp::<Personality>(father).cloned();
+        Personality::inherit(m.as_ref(), f.as_ref(), &mut r)
+    };
+    let last = world
+        .comp::<Identity>(father)
+        .or_else(|| world.comp::<Identity>(mother))
+        .map(|i| i.name.rsplit(' ').next().unwrap_or("Doe").to_string())
+        .unwrap_or_else(|| "Doe".to_string());
+    let first = world.random_first_name(sex);
+    world.insert(
+        id,
+        Identity {
+            name: format!("{first} {last}"),
+            age_days,
+            sex,
+            born_tick: tick as i64 - i64::from(age_days) * TICKS_PER_DAY as i64,
+            spouse_died_tick: None,
+        },
+    );
+    world.insert(id, personality);
+    world.insert(id, Skills::basic(0.0, 0.0, 0.0, 0.0));
+    let hacking = crate::systems::tech::child_hacking(world, id, mother, father);
+    crate::systems::tech::give_hacking(world, id, hacking);
+    let social = crate::systems::moves::child_social(world, id, mother, father);
+    crate::systems::moves::give_social(world, id, social);
+    world.insert(id, Wallet { coins: 0 });
+    world.insert(id, Household::new(Some(home)));
+    world.insert(id, Child { hunger_days: 0 });
+    let body = crate::systems::assets::child_body(world, id, mother, father);
+    crate::systems::assets::give_body(world, id, body);
+    let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);
+    world.insert(id, Position { tile: door, building: Some(home), entered: tick });
+    let siblings: Vec<EntityId> = children_of_agent(world, mother).into_iter().filter(|&o| o != id).collect();
+    for parent in [mother, father] {
+        let e = world.edge_entry(parent, id);
+        e.kind = RelKind::Parent;
+        e.affinity = 0.6;
+        e.trust = 0.8;
+        e.last_interaction = tick;
+    }
+    for s in siblings {
+        let e = world.edge_entry(s, id);
+        e.kind = RelKind::Family;
+        e.affinity = 0.3;
+        e.last_interaction = tick;
+    }
+    world.stats.current.immigrants += 1;
+    let (name, parent) = (world.name_of(id), world.name_of(mother));
+    world.push_event(EventKind::Immigration, &[id, mother], format!("{name} arrived with {parent}, a child"));
+    id
+}
+
+/// J20: the Block with room for `need` (residents + need ≤ capacity,
+/// floors included) nearest `near` (door to door; ties fewer residents,
+/// then id), or with no `near` the emptiest (fewest residents, then id).
+/// Standing, not derelict.
+pub fn emptiest_home_near(world: &World, near: Option<TilePos>, need: usize) -> Option<EntityId> {
+    world
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .filter_map(|&h| {
+            let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict)?;
+            let n = world.residents_of(h).len();
+            (n + need <= usize::from(b.capacity)).then(|| (near.map_or(0, |t| t.manhattan(b.door)), n, h))
+        })
+        .min()
+        .map(|(_, _, h)| h)
 }
 
 /// Violence fix 5 (`[life] vf_arrival`): an immigrant arrives with the

@@ -1213,6 +1213,8 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             }
         }
         "customs" => PlayerCommand::SetCustoms(num("rate")? as f32),
+        // Jobs and room J19 (P6): the Harris-Todaro outside wage.
+        "outside_wage" => PlayerCommand::SetOutsideWage(num("coins")? as f32),
         "close_world" => {
             PlayerCommand::CloseWorld(on_off(value).ok_or_else(|| format!("{spec}: close_world must be on|off"))?)
         }

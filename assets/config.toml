@@ -399,6 +399,21 @@ emigrate_days = 7
 # pantry and the dole is per adult, so the poor's children starved (~70 deaths in 120 days on seeds 42,
 # 43, 44 at HEAD; 0 with school meals in the diagnosis).
 school_meals = true
+# Jobs and room P6 (docs/JOBS_V2.md § 4, plan J19-J21; placeholders): read only with [economy2] wages on.
+# Harris-Todaro: E = gross_mean x employed / free adults (7-day means); pull = clamp((E - outside_wage) /
+# outside_wage, 0, pull_cap); beds = clamp(empty Block beds / beds_ref, 0.25, 1); a week brings
+# round(migrants_max x pull / pull_cap x beds x immigration_factor). On top, each vacancy open
+# offer_days draws one recruited migrant who arrives holding it (at most offers_max a week).
+outside_wage = 3.5
+pull_cap = 1.0
+migrants_max = 20
+beds_ref = 60.0
+offer_days = 3
+offers_max = 6
+migrant_age = [18.0, 45.0]          # years, [lo, hi)
+offer_skill = 0.4                    # an offer's role skill is at least this
+p_spouse = 0.2                       # a migrant brings a spouse into the same Block
+migrant_children = 0                 # children a migrant couple may bring (0: spouse only; Dylan's open question)
 
 [brain]
 memory_cap = 24
