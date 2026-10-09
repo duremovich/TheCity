@@ -844,28 +844,19 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
 }
 
 /// Everyone employed at one of `buildings` (ascending, as `Corp.buildings`),
-/// by workplace, each list ascending. The one employer-membership scan the
-/// corp code shares (staffing, layoffs, the wage bill, execs, strikes).
+/// by workplace, each list ascending; a building with no staff has no
+/// entry. Jobs and room J3: read from the employer index
+/// (`World::employers`), not a scan of every worker per call.
 pub fn staff_by_building(world: &World, buildings: &[EntityId]) -> BTreeMap<EntityId, Vec<EntityId>> {
-    let mut out: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
-    for role in Role::ALL {
-        for &a in world.workers(role) {
-            if let Some(e) = world.comp::<Job>(a).and_then(|j| j.employer) {
-                if buildings.binary_search(&e).is_ok() {
-                    out.entry(e).or_default().push(a);
-                }
-            }
-        }
-    }
-    for v in out.values_mut() {
-        v.sort_unstable();
-    }
-    out
+    buildings
+        .iter()
+        .filter_map(|&b| world.employers.get(&b).filter(|v| !v.is_empty()).map(|v| (b, v.clone())))
+        .collect()
 }
 
-/// Everyone employed at `building`, ascending.
+/// Everyone employed at `building`, ascending (J3: the employer index).
 pub fn staff_at(world: &World, building: EntityId) -> Vec<EntityId> {
-    staff_by_building(world, &[building]).remove(&building).unwrap_or_default()
+    world.staff_of(building).to_vec()
 }
 
 /// Everyone employed at one of a corp's buildings (its exec too, if they

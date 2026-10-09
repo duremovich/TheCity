@@ -242,3 +242,24 @@ fn test_save_mid_contract_keeps_identity() {
     back.run_ticks(600);
     assert_eq!(blake3::hash(save::to_ron(&w).as_bytes()), blake3::hash(save::to_ron(&back).as_bytes()));
 }
+
+/// Jobs and room P1 (J3, J4): the layoff notes (`World::laid_off`) survive a
+/// save round trip, and the employer index (not saved) is rebuilt on load:
+/// `check_indices` is clean and the index equals the saved world's.
+#[test]
+fn test_save_round_trips_layoff_notes_and_rebuilds_the_employer_index() {
+    let mut w = World::new(42, Config::load().v1_profile());
+    w.run_ticks(TICKS_PER_DAY + 600);
+    let jobless: Vec<EntityId> = w.citizens().into_iter().filter(|&a| !w.has::<citysim::Job>(a)).take(3).collect();
+    assert_eq!(jobless.len(), 3);
+    for (i, &a) in jobless.iter().enumerate() {
+        w.laid_off.insert(a, (citysim::Role::Farmer, w.tick - i as u64 * 60));
+    }
+    let text = save::to_ron(&w);
+    let back = save::from_ron(&text).expect("load");
+    assert_eq!(back.laid_off, w.laid_off, "the notes survive");
+    back.check_indices().expect("indices clean after load");
+    assert!(!back.employers.is_empty());
+    assert_eq!(back.employers, w.employers, "the employer index rebuilt");
+    assert_eq!(save::to_ron(&back), text);
+}

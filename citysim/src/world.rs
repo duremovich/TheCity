@@ -788,6 +788,22 @@ pub struct World {
     /// Plan 1.2: the coin census's probe counters (never saved).
     #[serde(skip)]
     pub probe: crate::econ::CoinProbe,
+    // --- Jobs and room P1 (docs/JOBS_V2.md; plan J3, J4).
+    /// J3: workplace -> its staff (every Job holder whose `employer` is the
+    /// building), each list ascending, no empty lists. Kept by the Job hooks
+    /// (`index_job`/`unindex_job`) with `employer_of`; rebuilt on load and
+    /// checked by `check_indices`. Read through [`World::staff_of`].
+    #[serde(skip)]
+    pub employers: BTreeMap<EntityId, Vec<EntityId>>,
+    /// J3: the reverse of `employers` (the Job hook runs after the old Job
+    /// is gone, so the old workplace is looked up here).
+    #[serde(skip)]
+    pub(crate) employer_of: BTreeMap<EntityId, EntityId>,
+    /// J4: agent -> (role, tick) of its last layoff (`economy::dismiss_as`),
+    /// written only with wages on, pruned after `demography::REHIRE_DAYS`;
+    /// `pick_candidate`'s rehire bonus reads it.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub laid_off: BTreeMap<EntityId, (Role, Tick)>,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1145,6 +1161,9 @@ impl World {
             contract_guards: BTreeMap::new(),
             econ: Default::default(),
             probe: Default::default(),
+            employers: BTreeMap::new(),
+            employer_of: BTreeMap::new(),
+            laid_off: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1693,12 +1712,16 @@ impl World {
         self.index_brain(id);
     }
 
-    /// File the agent under its Job's role.
+    /// File the agent under its Job's role (and, J3, its workplace).
     pub fn index_job(&mut self, id: EntityId) {
         self.unindex_job(id);
         if let Some(j) = self.comp::<Job>(id) {
-            let r = role_index(j.role);
+            let (r, employer) = (role_index(j.role), j.employer);
             Self::list_insert(&mut self.by_role[r], id);
+            if let Some(b) = employer {
+                Self::list_insert(self.employers.entry(b).or_default(), id);
+                self.employer_of.insert(id, b);
+            }
         }
     }
 
@@ -1706,6 +1729,19 @@ impl World {
         for list in &mut self.by_role {
             Self::list_remove(list, id);
         }
+        if let Some(b) = self.employer_of.remove(&id) {
+            if let Some(list) = self.employers.get_mut(&b) {
+                Self::list_remove(list, id);
+                if list.is_empty() {
+                    self.employers.remove(&b);
+                }
+            }
+        }
+    }
+
+    /// J3: everyone employed at `building`, ascending (the employer index).
+    pub fn staff_of(&self, building: EntityId) -> &[EntityId] {
+        self.employers.get(&building).map_or(&[], Vec::as_slice)
     }
 
     /// Agents with a Brain at this LOD, ascending.
@@ -1748,6 +1784,7 @@ impl World {
         self.by_tier = tiers;
         self.by_role = roles;
         self.stat_slots = slots;
+        (self.employers, self.employer_of) = self.employers_from_stores();
         self.gang_ids = self.with::<Gang>();
         self.sentenced_ids = self.with::<Sentence>();
         self.corp_ids = self.with::<Corp>();
@@ -1766,6 +1803,20 @@ impl World {
             }
         }
         out
+    }
+
+    /// J3: the employer index and its reverse from the Job store.
+    #[allow(clippy::type_complexity)]
+    fn employers_from_stores(&self) -> (BTreeMap<EntityId, Vec<EntityId>>, BTreeMap<EntityId, EntityId>) {
+        let mut by_b: BTreeMap<EntityId, Vec<EntityId>> = BTreeMap::new();
+        let mut back = BTreeMap::new();
+        for id in self.entities() {
+            if let Some(b) = self.comp::<Job>(id).and_then(|j| j.employer) {
+                by_b.entry(b).or_default().push(id);
+                back.insert(id, b);
+            }
+        }
+        (by_b, back)
     }
 
     #[allow(clippy::type_complexity)]
@@ -1817,6 +1868,16 @@ impl World {
                 "by_role out of sync: have {:?}, stores say {:?}",
                 self.by_role.iter().map(Vec::len).collect::<Vec<_>>(),
                 roles.iter().map(Vec::len).collect::<Vec<_>>()
+            ));
+        }
+        let (employers, employer_of) = self.employers_from_stores();
+        if employers != self.employers || employer_of != self.employer_of {
+            return Err(format!(
+                "employers out of sync: have {} workplaces / {} workers, stores say {} / {}",
+                self.employers.len(),
+                self.employer_of.len(),
+                employers.len(),
+                employer_of.len()
             ));
         }
         let (residents, resident_home) = self.residents_from_stores();
