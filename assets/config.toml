@@ -1768,7 +1768,7 @@ enabled = true
 market = true                        # E1: phase 1's switch (econ::market_on)
 wages = false                        # E1: phase 2's switch (econ::wages_on): off until the stop rule is answered (see the phase 2 record)
 no_safety_net = false                # E1: phase 3a turns it on (only after the stop rule)
-emigrate_cost = 0                    # E35: contingency, off
+emigrate_cost = 20                   # E35 (the jobs round, read only with wages on): fewer coins cannot start emigrating (spec § 10's 20)
 # Spec § 5 (phase 2, plan E13-E20): wages from revenue. Each corp's payroll tracks labour_share x its
 # 7-day revenue through wage_rev (E17), clamped [wage_floor_mult, wage_cap_mult] and moving wage_step a
 # day; a corp under hire_below x the target for 3 days posts a vacancy a building a day while its niche
@@ -1797,6 +1797,31 @@ input_per_data = 4                   # spec 8
 power = { market = 20, bar = 3, club = 8, arcade = 4, lounge = 15, clinic = 6, garage = 6, lab = 10, fab = 12 }  # E13: a day, to the World
 venue_wage_pass = 0.5                # E20: venue prices follow the mean wage_rev at half strength
 farm_found_cost = 1000               # E19 (plan deviation): a corp's Farm on World demand (= [corps] value.farm)
+# The jobs round (after phase 2's stop rule, option (a): is the wages-on city a no-dole city that holds?). Every
+# key read only with wages on; the off values (1.0 / 0 / 30 / 0 / 0 / false, emigrate_cost 0, cap_wages 0)
+# reproduce phase 2's wages-on city byte for byte. A/B, 120 days, wages on, `--lever day=0:dole_per_day=0`
+# (employed d60 / population d120 / starvation deaths), seed 42 first (base phase 2: 474 / 619 / 60):
+#   overflow_paid_only alone 502 / 664 / 57; capital_hi_days 14 alone 499 / 674 / 57; + staff_ceiling_mult 2
+#   667 / 783 / 53; asset_import_per_day 300 alone 497 / 678 / 37 (corps hoard 94k); emigrate_cost 20 alone
+#   465 / 1,788 / 42 (2 emigrants). All five (hi 14, mult 2): 688 / 1,813 / 41; mult 3: 709 / 1,843 / 36;
+#   hi 7 + mult 3: 809 / 1,833 / 32 but Zetatech (d28) and Arasaka (d44) bankrupt: hires made on the payout
+#   outlived it (payroll 437-511 against a target of 187-219) -> the shifts past full staff shed first
+#   (wages::shed_extra): 777 / 1,859 / 27. Hiring on partial windows from day 1: no gain (757 / 1,854 / 50,
+#   Zetatech d24), dropped. The band's floor capital_lo_days 3 (42/43/44): 720-745 / 1,780-1,824 / 31-45,
+#   Militech no longer dies; + cap_wages parts 100 / data 30: 767 / 774 / 747, 1,869 / 1,821 / 1,804,
+#   33 / 32 / 44, Zetatech survives on 43-44; payout_days 20 (kept): 822 / 909 / 850, 1,796 / 1,823 / 1,821,
+#   37 / 31 / 31; mult 4 instead: 744 / 825 / 749; asset cap 200 instead: 732 / 846 / 755.
+staff_ceiling_mult = 3.0             # a corp under its margin posts past full_staff up to ceil(full_staff x this) while its target covers the hire
+capital_hi_days = 7                  # counter-cyclical capital: working capital above this many days of max(revenue, payroll) ...
+capital_payout_days = 20             # ... adds excess / this a day to the payroll target (0 hi days: off)
+capital_lo_days = 3                  # the band's floor: under it a corp posts nothing and lays off at once over fire_above (0: off)
+# Fleet floor A/B (review round, 42/43/44, dole zeroed; employed d60 / starvation / Farm trucks d30): no floor (corp
+# fleets exempt) 565-663 / 56-74 / 12-15; 3: 601-674 / 43-65 / 12-15; 7 (kept): 646-676 / 22-36 / 14-16; 14: 673-745 /
+# 25-45 / 11-13; 28: 735-771 / 27-39 / 3 (truck share 0.15: M13's fleet dies). Fleet capped as households (items 1-6):
+# 756-787 / 17-33 / 0. The floor trades jobs for trucks; 7 keeps the fleet and the starvation.
+fleet_floor_days = 7                 # a corp's fleet purchase (outside the import cap) leaves it this many days of max(revenue, payroll)
+asset_import_per_day = 300           # coins of asset imports a corp may front a day (0: unlimited); keeps the opening burst at home
+overflow_paid_only = true            # the Reserve buys Farm surplus only from a positive Treasury; the rest stays at the Farm
 
 # Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
 # (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the
@@ -1822,6 +1847,11 @@ haul_margin = 1                      # coins a unit over the ask before a Market
 customs_rate = 0.1                   # of an import's price, to the Treasury (E5)
 ask_mult = 1.0                       # the famine lever (lower: cheaper imports)
 asset_floor = 2                      # E10 (phase 2): chrome/decks kept in a seller's stock before Parts-equivalent export
+# The jobs round (export demand; read only with wages on; 0 = the good's own cap): the outside drives demand,
+# so a wages city with no dole is carried by what the World buys. Parts 40 -> 100 and Data 12 -> 30 (the Fabs,
+# Clinics, Garages and Labs; Food stays 350, phase 1's Winter-squeeze cap) lift export_paid from ~1.05-1.42k
+# to 1.67-2.08k a day (inside the spec's 1.1-2.2k band) and keep the Tech corps alive (A/B in [economy2]).
+cap_wages = [0, 100, 30]             # [food, parts, data]
 
 [charity]                          # spec § 4 verbatim plus the plan keys (E26-E29); placeholders
 enabled = true

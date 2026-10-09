@@ -5405,6 +5405,29 @@ pub struct Economy2Cfg {
     /// Food demand came from the World (`[corps] found_cost` has no Farm:
     /// Farms are map-placed before this milestone).
     pub farm_found_cost: i64,
+    // --- The jobs round (after phase 2's stop rule; read only behind
+    // `econ::wages_on`; every key's off value reproduces phase 2).
+    /// Staffing from revenue: a corp under its margin may post past
+    /// `full_staff` up to `ceil(full_staff × staff_ceiling_mult)` per
+    /// building while its target covers the marginal hire (1.0: phase 2's cap).
+    pub staff_ceiling_mult: f32,
+    /// Counter-cyclical capital: a corp holding more than `capital_hi_days`
+    /// × max(7-day revenue, 7-day payroll) adds the excess ÷
+    /// `capital_payout_days` a day to its payroll target (0: off).
+    pub capital_hi_days: f32,
+    pub capital_payout_days: f32,
+    /// The band's floor: under `capital_lo_days` × max(R, P) a corp posts
+    /// nothing and lays off at once when over `fire_above × P*` (0: off).
+    pub capital_lo_days: f32,
+    /// A corp's business-fleet purchase (outside `asset_import_per_day`)
+    /// must leave it `fleet_floor_days` × max(R, P) (0: no floor).
+    pub fleet_floor_days: f32,
+    /// The first-week asset burst: coins of asset imports (`ImportWhy::Asset`)
+    /// a corp may front a day (0: unlimited, phase 2).
+    pub asset_import_per_day: i64,
+    /// The overflow leg: with wages on the Reserve buys a Farm's surplus only
+    /// from a positive Treasury, the rest stays at the Farm (false: phase 2).
+    pub overflow_paid_only: bool,
 }
 
 impl Default for Economy2Cfg {
@@ -5436,6 +5459,13 @@ impl Economy2Cfg {
             power: PowerCfg::default(),
             venue_wage_pass: 0.5,
             farm_found_cost: 1000,
+            staff_ceiling_mult: 1.0,
+            capital_hi_days: 0.0,
+            capital_payout_days: 30.0,
+            capital_lo_days: 0.0,
+            fleet_floor_days: 0.0,
+            asset_import_per_day: 0,
+            overflow_paid_only: false,
         }
     }
 }
@@ -5651,6 +5681,10 @@ pub struct WorldMarketCfg {
     pub ask_mult: f32,
     /// E10 (phase 2): chrome and decks kept in a seller's stock before Parts-equivalent export.
     pub asset_floor: u32,
+    /// The jobs round (export demand, read only with `econ::wages_on`): the
+    /// World's daily cap per good `[food, parts, data]` in a wages city
+    /// (0: the good's own `cap`).
+    pub cap_wages: [u32; 3],
 }
 
 impl Default for WorldMarketCfg {
@@ -5682,6 +5716,7 @@ impl WorldMarketCfg {
             customs_rate: 0.1,
             ask_mult: 1.0,
             asset_floor: 2,
+            cap_wages: [0; 3],
         }
     }
 

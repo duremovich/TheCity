@@ -59,7 +59,19 @@ pub fn cap_today(world: &World, good: ExportGood) -> u32 {
     if let Some(c) = book(world, good).and_then(|b| b.cap_pin) {
         return c;
     }
-    let cap = world.config.world_market.good(good).cap;
+    let mut cap = world.config.world_market.good(good).cap;
+    // The jobs round: the wages city's export demand (`[world_market] cap_wages`).
+    if crate::systems::wages::on(world) {
+        let i = match good {
+            ExportGood::Food => 0,
+            ExportGood::Parts => 1,
+            ExportGood::Data => 2,
+        };
+        let w = world.config.world_market.cap_wages[i];
+        if w > 0 {
+            cap = w;
+        }
+    }
     (cap as f32 * appetite(world, good)).round().max(0.0) as u32
 }
 

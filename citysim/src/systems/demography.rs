@@ -713,8 +713,23 @@ fn emigration(world: &mut World) {
             .collect()
     };
     for id in leaving {
+        if !can_buy_passage(world, id) {
+            continue;
+        }
         start_emigrating(world, id, "");
     }
+}
+
+/// Plan E35 (`[economy2] emigrate_cost`, the jobs round: read only with
+/// wages on): leaving costs passage, so an agent holding fewer coins cannot
+/// start emigrating (the wallet still crosses out whole at the edge). 0 or
+/// wages off: everyone may leave.
+pub fn can_buy_passage(world: &World, id: EntityId) -> bool {
+    let cost = world.config.economy2.emigrate_cost;
+    if cost <= 0 || !crate::systems::wages::on(world) {
+        return true;
+    }
+    world.comp::<Wallet>(id).map_or(0, |w| w.coins) >= cost
 }
 
 /// Mark an agent as leaving: the plan is dropped and the executor walks them

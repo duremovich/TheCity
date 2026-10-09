@@ -255,6 +255,7 @@ fn miserable_dregs(world: &mut World) {
             && !world.has::<Job>(a)
             && !world.has::<Sentence>(a)
             && world.comp::<Brain>(a).is_some_and(|b| !b.emigrating && b.cuffed_by.is_none())
+            && crate::systems::demography::can_buy_passage(world, a)
         {
             leaving.push(a);
         }

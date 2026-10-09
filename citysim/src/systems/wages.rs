@@ -17,7 +17,7 @@ use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::outside::{ExportGood, WORLD_ACCOUNT};
 use crate::systems::ownership::{self, Flow, OwnerKind};
-use crate::time::TICKS_PER_DAY;
+use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
 
 /// Days of `Corp.{rev, pay}` (E16).
@@ -145,9 +145,60 @@ pub fn windows(world: &World, corp: EntityId) -> Option<(f32, f32)> {
     (c.rev.len() >= WINDOW_DAYS && c.pay.len() >= WINDOW_DAYS).then(|| (mean(&c.rev), mean(&c.pay)))
 }
 
-/// The payroll target `P* = labour_share × R` (`None` before the windows fill).
+/// The payroll target `P* = labour_share × R + payout` (`None` before the
+/// windows fill; the payout is [`capital_payout`]).
 pub fn target(world: &World, corp: EntityId) -> Option<f32> {
-    windows(world, corp).map(|(r, _)| labour_share(world, corp) * r)
+    windows(world, corp).map(|(r, p)| target_of(world, corp, r, p))
+}
+
+/// The jobs round (counter-cyclical capital): the coins a day a corp's
+/// working capital above its band adds to its payroll target: `(purse −
+/// capital_hi_days × max(R, P)) ÷ capital_payout_days`, 0 inside the band
+/// or with `capital_hi_days` 0 (phase 2). The band's floor is phase 2's own
+/// rule (under it the margin lays off at the wage floor).
+pub fn capital_payout(world: &World, corp: EntityId, r: f32, p: f32) -> f32 {
+    let cfg = &world.config.economy2;
+    if cfg.capital_hi_days <= 0.0 {
+        return 0.0;
+    }
+    let band = cfg.capital_hi_days * r.max(p).max(0.0);
+    let excess = world.purse(Some(corp)) as f32 - band;
+    if excess <= 0.0 {
+        return 0.0;
+    }
+    excess / cfg.capital_payout_days.max(1.0)
+}
+
+/// The jobs round: the band's floor. A corp holding less than
+/// `capital_lo_days × max(R, P)` (with `capital_hi_days` and this key > 0)
+/// is lean: it posts nothing, and over `fire_above × P*` it lays off at
+/// once instead of waiting for the wage floor (a payout it could not keep
+/// would otherwise run it into bankruptcy at 0.03 a day).
+pub fn lean(world: &World, corp: EntityId, r: f32, p: f32) -> bool {
+    let cfg = &world.config.economy2;
+    if cfg.capital_hi_days <= 0.0 || cfg.capital_lo_days <= 0.0 {
+        return false;
+    }
+    (world.purse(Some(corp)) as f32) < cfg.capital_lo_days * r.max(p).max(0.0)
+}
+
+/// The jobs round: the coins a corp keeps when it buys for its business
+/// fleet (vehicles, robots, decks): `fleet_floor_days × max(R, P)` (the
+/// windows' means; before they fill, the days it has, with `P` at least
+/// its day's wage bill). 0 with the key 0.
+pub fn fleet_floor(world: &World, corp: EntityId) -> i64 {
+    let days = world.config.economy2.fleet_floor_days;
+    if days <= 0.0 {
+        return 0;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return 0 };
+    let p = mean(&c.pay).max(crate::systems::corp_brain::wage_bill(world, corp) as f32);
+    (days * mean(&c.rev).max(p).max(0.0)).ceil() as i64
+}
+
+/// `P*` from the windows' means: `labour_share × R` plus the capital payout.
+fn target_of(world: &World, corp: EntityId, r: f32, p: f32) -> f32 {
+    labour_share(world, corp) * r + capital_payout(world, corp, r, p)
 }
 
 /// E17: `EconState.vacancy_since` against the open vacancies: a `(building,
@@ -200,7 +251,7 @@ pub fn daily(world: &mut World) {
         if ownership::employees_of(world, corp).is_empty() {
             continue;
         }
-        let target = labour_share(world, corp) * r;
+        let target = target_of(world, corp, r, p);
         let short = shortage(world, corp, cfg.shortage_days);
         let Some(c) = world.comp::<Corp>(corp) else { continue };
         let old = c.wage_rev;
@@ -339,37 +390,93 @@ fn standing(world: &World, b: EntityId) -> bool {
     world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict)
 }
 
+/// The jobs round: a building's staffing ceiling under the margin rule,
+/// `ceil(full_staff × staff_ceiling_mult)` (never under `full_staff`; at
+/// 1.0 phase 2's cap). Chosen over a capacity/room-area ceiling because
+/// `[buildings] capacity` is the visitors' room, not the shifts' (a Market
+/// seats 20 with 12 staff, a Farm 16 with 14): the multiplier reads as
+/// more shifts per building and keeps every kind's staffing in proportion.
+pub fn staff_ceiling(world: &World, kind: BuildingKind) -> usize {
+    let full = crate::systems::corp_brain::full_staff(world, kind);
+    let mult = world.config.economy2.staff_ceiling_mult;
+    if mult <= 1.0 {
+        return full;
+    }
+    ((full as f32 * mult).ceil() as usize).max(full)
+}
+
+/// The jobs round: a building's `role` staff as the margin rule counts it
+/// (the corp's exec never counted, in [`post`] and [`shed_extra`] alike),
+/// oldest first, and its open `role` vacancies.
+fn places(world: &World, b: EntityId, role: Role, exec: Option<EntityId>) -> (Vec<(Tick, EntityId)>, usize) {
+    let mut hires: Vec<(Tick, EntityId)> = ownership::staff_at(world, b)
+        .into_iter()
+        .filter(|&a| Some(a) != exec)
+        .filter_map(|a| world.comp::<Job>(a).filter(|j| j.role == role).map(|j| (j.hired_tick, a)))
+        .collect();
+    hires.sort();
+    let open = world.vacancies.get(&b).map_or(0, |v| v.iter().filter(|&&r| r == role).count());
+    (hires, open)
+}
+
+/// The jobs round: the past-cap places the 7-day payroll has not absorbed
+/// yet: every open vacancy past `cap` (open places count as the newest) and
+/// every past-cap hire made since `since`.
+fn unabsorbed_past_cap(hires: &[(Tick, EntityId)], open: usize, cap: usize, since: Tick) -> usize {
+    let excess = (hires.len() + open).saturating_sub(cap);
+    let open_past = open.min(excess);
+    let hire_past = excess - open_past;
+    open_past + hires.iter().rev().take(hire_past).filter(|&&(t, _)| t >= since).count()
+}
+
 /// E18: one vacancy per owned standing building whose niche demand holds
-/// `hire_demand`, up to `full_staff` (+ Farm overtime). Returns the vacancies posted.
-fn post(world: &mut World, corp: EntityId, order: f32) -> u32 {
+/// `hire_demand`, up to `full_staff` (+ Farm overtime). The jobs round:
+/// past `full_staff`, up to [`staff_ceiling`], only while `room` (the
+/// coins a day the target leaves over the payroll, `hire_below × P* − P`)
+/// covers the marginal hire's wage at the corp's `wage_rev`. The 7-day `P`
+/// lags, so `room` first pays for every past-cap place it has not absorbed
+/// (open past-cap vacancies, past-cap hires of the last 7 days: review
+/// fix, the overshoot that bankrupted corps), and each new posting past
+/// full staff spends its wage. Returns the vacancies posted.
+fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
+    let mut room = room;
+    let rev_mult = world.comp::<Corp>(corp).map_or(1.0, |c| c.wage_mult * c.wage_rev);
     let cfg = world.config.economy2.clone();
     let Some(c) = world.comp::<Corp>(corp) else { return 0 };
-    let buildings = c.buildings.clone();
+    let (buildings, exec) = (c.buildings.clone(), c.exec);
     let niches: Vec<Niche> = c.niches.iter().copied().collect();
     let demand: BTreeMap<Niche, f32> =
         niches.iter().map(|&n| (n, crate::systems::corp_brain::demand_of(world, corp, n).0)).collect();
     let any = demand.values().copied().fold(0.0f32, f32::max);
     let overtime = farm_overtime(world, corp, order);
     let now = world.tick;
-    let mut posted = 0;
+    let since = now.saturating_sub(WINDOW_DAYS as u64 * TICKS_PER_DAY);
+    // (building, role, cap, ceiling, working, open, marginal wage)
+    let mut rows = Vec::new();
     for b in buildings {
         if !standing(world, b) {
             continue;
         }
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
         let Some(role) = ownership::role_for(kind) else { continue };
+        let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
+        let cap = crate::systems::corp_brain::full_staff(world, kind) + extra;
+        let ceiling = staff_ceiling(world, kind) + extra;
+        let (hires, open) = places(world, b, role, exec);
+        let marginal = world.config.economy.wage(role) as f32 * rev_mult;
+        room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
         let d = crate::systems::corp_brain::niche_of_kind(kind).and_then(|n| demand.get(&n).copied()).unwrap_or(any);
-        if d < cfg.hire_demand {
-            continue;
+        if d >= cfg.hire_demand {
+            rows.push((b, role, cap, ceiling, hires.len(), open, marginal));
         }
-        let cap =
-            crate::systems::corp_brain::full_staff(world, kind) + if kind == BuildingKind::Farm { overtime } else { 0 };
-        let working = ownership::staff_at(world, b)
-            .into_iter()
-            .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == role))
-            .count();
-        let open = world.vacancies.get(&b).map_or(0, |v| v.iter().filter(|&&r| r == role).count());
-        if working + open < cap {
+    }
+    let mut posted = 0;
+    for (b, role, cap, ceiling, working, open, marginal) in rows {
+        let beyond = working + open >= cap && working + open < ceiling && room >= marginal;
+        if beyond {
+            room -= marginal;
+        }
+        if working + open < cap || beyond {
             world.vacancies.entry(b).or_default().push(role);
             world.econ.vacancy_since.entry((b, role)).or_insert(now);
             posted += 1;
@@ -408,6 +515,71 @@ fn lay_off(world: &mut World, corp: EntityId) -> bool {
     true
 }
 
+/// The jobs round: close a building's open `role` vacancies past `cap`
+/// (counting its `working` staff first).
+fn withdraw_past_cap(world: &mut World, b: EntityId, role: Role, cap: usize, working: usize) {
+    let keep = cap.saturating_sub(working);
+    if let Some(v) = world.vacancies.get_mut(&b) {
+        let mut seen = 0;
+        v.retain(|&r| {
+            if r != role {
+                return true;
+            }
+            seen += 1;
+            seen <= keep
+        });
+        if v.is_empty() {
+            world.vacancies.remove(&b);
+        }
+    }
+}
+
+/// The jobs round: per standing building, the open vacancies past its cap
+/// (`full_staff` + Farm overtime) close and, with `lay_off_one`, the newest
+/// hire past the cap (ties the higher id; never the exec, counted as in
+/// [`post`]) is laid off, one per building a day. Returns the layoffs. A
+/// no-op at `staff_ceiling_mult` 1.0.
+fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: bool) -> u32 {
+    if world.config.economy2.staff_ceiling_mult <= 1.0 {
+        return 0;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return 0 };
+    let (buildings, exec) = (c.buildings.clone(), c.exec);
+    let overtime = farm_overtime(world, corp, order);
+    let mut shed = 0;
+    for b in buildings {
+        if !standing(world, b) {
+            continue;
+        }
+        let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
+        let Some(role) = ownership::role_for(kind) else { continue };
+        let cap =
+            crate::systems::corp_brain::full_staff(world, kind) + if kind == BuildingKind::Farm { overtime } else { 0 };
+        let (hires, _) = places(world, b, role, exec);
+        withdraw_past_cap(world, b, role, cap, hires.len());
+        if !lay_off_one || hires.len() <= cap {
+            continue;
+        }
+        let Some(&(_, who)) = hires.last() else { continue };
+        let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
+        let text =
+            format!("{name} laid off as {} by {cname} (laid off: revenue, a shift past full staff)", role.label());
+        crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
+        world.stats.current.econ.laid_off += 1;
+        shed += 1;
+    }
+    shed
+}
+
+/// The jobs round: the shifts posted past full staff are the first to go.
+/// A corp over `fire_above × P*` for `HIRE_DAYS` (not phase 2's seven days
+/// at the wage floor: these places were hired on a payout that has ended)
+/// closes its open past-cap places and lays off its past-cap hires first,
+/// one per building a day ([`past_cap_pass`]).
+pub fn shed_extra(world: &mut World, corp: EntityId, order: f32) -> u32 {
+    past_cap_pass(world, corp, order, true)
+}
+
 /// E18: is the corp over `fire_above × P*` now (it replaces no quitter)?
 pub fn over_margin(world: &World, corp: EntityId) -> bool {
     world.comp::<Corp>(corp).is_some_and(|c| c.fire_days >= 1)
@@ -425,15 +597,30 @@ pub fn staff(world: &mut World) {
     let order = food_order(world);
     for corp in world.corps() {
         let Some((r, p)) = windows(world, corp) else { continue };
-        let target = labour_share(world, corp) * r;
+        let target = target_of(world, corp, r, p);
         let below = p < cfg.hire_below * target;
         let above = p > cfg.fire_above * target;
         let Some(c) = world.comp_mut::<Corp>(corp) else { continue };
         c.hire_days = if below { c.hire_days.saturating_add(1) } else { 0 };
         c.fire_days = if above { c.fire_days.saturating_add(1) } else { 0 };
         let (hire_days, fire_days, wage_rev) = (c.hire_days, c.fire_days, c.wage_rev);
+        // The jobs round: a lean corp posts nothing and closes its open
+        // past-cap places at once; over the margin for `HIRE_DAYS` (the
+        // debounce: the 7-day P lags its own layoffs) it sheds a past-cap
+        // hire per building, else its newest, one a day.
+        if lean(world, corp, r, p) {
+            past_cap_pass(world, corp, order, false);
+            if fire_days >= HIRE_DAYS && shed_extra(world, corp, order) == 0 {
+                lay_off(world, corp);
+            }
+            continue;
+        }
         if hire_days >= HIRE_DAYS {
-            post(world, corp, order);
+            post(world, corp, order, cfg.hire_below * target - p);
+        }
+        // The jobs round: the shifts past full staff go first, and fast.
+        if fire_days >= HIRE_DAYS && shed_extra(world, corp, order) > 0 {
+            continue;
         }
         if fire_days >= FIRE_DAYS && wage_rev <= cfg.wage_floor_mult + 1e-6 {
             lay_off(world, corp);

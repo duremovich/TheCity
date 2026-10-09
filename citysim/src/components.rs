@@ -1317,6 +1317,10 @@ pub struct Corp {
     pub hire_days: u8,
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub fire_days: u8,
+    /// The jobs round: asset imports fronted today (`[economy2]
+    /// asset_import_per_day`), zeroed at the midnight roll; wages on only.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub import_today: i64,
 }
 
 fn is_zero_f32_c(v: &f32) -> bool {
@@ -1388,6 +1392,7 @@ impl Corp {
             pay: VecDeque::new(),
             hire_days: 0,
             fire_days: 0,
+            import_today: 0,
         }
     }
 
