@@ -15,25 +15,18 @@ use crate::world::World;
 /// Units a NoodleBar orders from the Market (seeding and the restock, L38).
 const NOODLE_ORDER: u32 = 30;
 
-/// `[living] enabled && [jobs] enabled` (plan L5).
-pub fn on(world: &World) -> bool {
-    world.config.living.enabled && world.config.jobs.enabled
-}
-
 /// Plan L8: Sanitation sweeps the beat (`Sweep`), not `TendGraves`.
 pub fn sweep_on(world: &World) -> bool {
-    on(world) && world.config.jobs.sweep
+    world.config.jobs.sweep
 }
 
 /// Plan L3: a building's full staff: `[jobs] market_staff` / `bar_staff`
 /// with jobs on, else `[buildings] <kind>.staff`.
 pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
-    if on(world) {
-        match kind {
-            BuildingKind::Market => return world.config.jobs.market_staff as usize,
-            BuildingKind::Bar => return world.config.jobs.bar_staff as usize,
-            _ => {}
-        }
+    match kind {
+        BuildingKind::Market => return world.config.jobs.market_staff as usize,
+        BuildingKind::Bar => return world.config.jobs.bar_staff as usize,
+        _ => {}
     }
     world.config.buildings.for_kind(kind).staff as usize
 }
@@ -229,9 +222,6 @@ fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
 /// seeding order. A no-op unless [`on`].
 pub fn seed_venues(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    if !on(world) {
-        return built;
-    }
     for kind in SEED_ORDER {
         let n = world.config.jobs.seed_venues.count(kind) as usize;
         for i in 0..n {
@@ -270,17 +260,6 @@ pub fn seed_venues(world: &mut World) -> Vec<EntityId> {
     built
 }
 
-/// Plan L7, L33: a save from before L2 whose config turns jobs on gets its
-/// venues at the first midnight (`living::run`), when Lots exist.
-pub fn migrate(world: &mut World) {
-    // Review fix: only a save written before L2 (format < 2) is seeded; a
-    // current save is never re-seeded. Called before `save_version` is
-    // bumped, so it reads the file's format.
-    if on(world) && !world.venues_seeded && world.save_version < 2 {
-        world.venues_due = true;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Staffing (plan L3)
 // ---------------------------------------------------------------------------
@@ -289,9 +268,6 @@ pub fn migrate(world: &mut World) {
 /// too) below [`full_staff`] posts its deficit; a hunkering corp's staffs
 /// to half (its order's floor). Then the venues' and Fabs' recovery.
 pub fn top_up(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     // Real economy phase 2 (plan E18): with wages on a corp's buildings are
     // staffed by the margin rule (`wages::staff`); the top-up keeps the
     // city's and agents' buildings only.
@@ -379,9 +355,7 @@ pub fn accrue_fab_work(world: &mut World, worker: EntityId, fab: EntityId, ticks
 
 /// Plan L9: a scavenger's find adds a scrap with jobs on.
 pub fn add_scrap(world: &mut World) {
-    if on(world) {
-        world.scrap = world.scrap.saturating_add(1);
-    }
+    world.scrap = world.scrap.saturating_add(1);
 }
 
 /// Plan L9: the scavenge find's chance: `scavenge_p × max(1, 0.5 +
@@ -394,9 +368,6 @@ pub fn add_scrap(world: &mut World) {
 /// within 20 days). Dirty streets still pay more.
 pub fn scavenge_p(world: &World, id: EntityId) -> f32 {
     let p = world.config.life.scavenge_p;
-    if !on(world) {
-        return p;
-    }
     let litter = world
         .comp::<crate::components::Position>(id)
         .map(|pos| world.district_of(pos.tile))
@@ -412,9 +383,6 @@ pub fn note_import(world: &mut World, owner: Option<EntityId>, coins: i64) {
         return;
     }
     world.stats.current.living.parts_imported += coins;
-    if !on(world) {
-        return;
-    }
     let Some(c) = owner.filter(|&o| world.has::<Corp>(o)) else { return };
     let v = world.jobs_book.corp_imports.entry(c).or_default();
     if v.is_empty() {
@@ -428,8 +396,7 @@ pub fn note_import(world: &mut World, owner: Option<EntityId>, coins: i64) {
 /// Plan L9: does this Tech corp want a Fab (none owned, 14-day imports over
 /// the trigger)?
 pub fn wants_fab(world: &World, corp: EntityId) -> bool {
-    on(world)
-        && ownership::owned_of_kind(world, Some(corp), BuildingKind::Fab).is_empty()
+    ownership::owned_of_kind(world, Some(corp), BuildingKind::Fab).is_empty()
         && world.jobs_book.imports_of(corp) > world.config.jobs.fab_import_trigger
 }
 
@@ -469,9 +436,6 @@ fn recycler(world: &World) -> Option<EntityId> {
 /// Plan L4, L9, L38, midnight: scrap into Recycler Parts, the NoodleBars'
 /// restock, the venues' prices and visit windows, the import windows.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     // Scrap -> Parts at the Recycler, the remainder kept.
     let per = world.config.jobs.scrap_per_part.max(1);
     if let Some(r) = recycler(world) {

@@ -42,6 +42,17 @@ off-screen share of violent deaths, kill rates by tier), the tiers with the held
 Flags: the spec's printed bands (wages / dole on day 60 >= 1.0, employed share 30-40 %, Gini on the last day
 0.50-0.70, wallets >= 20k, fun satisfied 40-70 %, the off-screen share of killings 0.3-0.7) and `fv_bound_wrong`
 above 0.
+
+M15 (the word and the blood): a "word" section from the `WordCols` columns, replacing the scenario
+gate's `print_m15` (2026-10-09): run totals of the counters (`rumours_heard`, `distorted`, `grudges` formed,
+`grudges_inherited`, `hunts`, `avenged`, `revenge_kills`, `stories`, `planted`, `buried`, `poached`,
+`talent_lost`, `extort_tries` / `extort_success`, `rep_flips`, `contradicted`, `silenced`, `hunts_failed`,
+`hunts_abandoned`, `guard_body`, `expelled`, `contracts_lost_honour`), the extortion success share, the
+snapshots on the last day and their run max (`hunts_active`, `vendettas_open`, `chain_max`,
+`rumour_hops_max`, `second_hand_share`, `known_by_killers_median`, `pool_reach`, `skill_rare_share`,
+`law_competence`), each gang slot's dread and heat (first, last, max) and each corp slot's honour,
+standing and competence on the last day, and, with an events file, the crimson event counts. No flags:
+numbers are reports, not gates (docs/TESTING.md).
 """
 import argparse
 import csv
@@ -90,6 +101,14 @@ L2_TOTALS = ["fab_parts", "scrap_parts", "parts_imported", "hangouts", "collecte
              "stat_extorts", "stat_claims", "stat_deals", "aborts", "aborts_scavenge", "aborts_sleep",
              "aborts_checkin", "aborts_seat", "rough_sleeps", "scavenge_dry"]
 ASSAULT_PER_DAY_FLAG = 42.7  # the scenario gate's assault bound (M8 gate, HANDOFF)
+WORD_TOTALS = ["rumours_heard", "distorted", "grudges", "grudges_inherited", "hunts", "avenged", "revenge_kills",
+               "stories", "planted", "buried", "poached", "talent_lost", "extort_tries", "extort_success", "rep_flips",
+               "contradicted", "silenced", "hunts_failed", "hunts_abandoned", "guard_body", "expelled",
+               "contracts_lost_honour"]
+WORD_SNAPSHOT = ["hunts_active", "vendettas_open", "chain_max", "rumour_hops_max", "second_hand_share",
+                 "known_by_killers_median", "pool_reach", "skill_rare_share", "law_competence"]
+WORD_EVENTS = ["GrudgeFormed", "HuntStarted", "HuntAbandoned", "Avenged", "Vendetta", "VendettaEnded", "Deceived",
+               "Story", "Planted", "Buried", "Poached", "TalentLost", "Expelled", "Refused", "ContractLost"]
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
 DISTRICTS = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
 CONTROLLERS = {0: "Contested", 1: "City", 2: "Gang", 3: "Corp"}
@@ -235,6 +254,7 @@ def analyze(rows, events, jail_cap=None):
     assets(rows, events, out, flags)
     virt(rows, events, out, flags)
     living(rows, events, out, flags)
+    word(rows, events, out)
     out["flags"] = flags
     return out
 
@@ -552,6 +572,38 @@ def living(rows, events, out, flags):
         flags.append(f"L2: fv_bound_wrong {L['totals']['fv_bound_wrong']:g} > 0 (a faction hole bound outside its faction)")
 
 
+def word(rows, events, out):
+    """M15: the word and the blood's columns; only when they exist."""
+    if not rows or "rumours_heard" not in rows[0]:
+        return
+    last = rows[-1]
+    W = {"totals": {k: sum(col(rows, k)) for k in WORD_TOTALS if k in rows[0]}}
+    tries = W["totals"].get("extort_tries", 0)
+    W["extort_success_share"] = W["totals"].get("extort_success", 0) / tries if tries else None
+    W["snapshot_last_day"] = {k: last[k] for k in WORD_SNAPSHOT if k in last}
+    W["snapshot_max"] = {k: max(col(rows, k), default=0) for k in WORD_SNAPSHOT if k in rows[0]}
+    gangs = {}
+    for g in range(1, 10):
+        dk, hk = f"g{g}_dread", f"g{g}_heat"
+        if dk not in rows[0] or not any(col(rows, dk)) and not any(col(rows, hk)):
+            continue
+        gangs[f"g{g}"] = {"dread": (rows[0][dk], last[dk], max(col(rows, dk), default=0)),
+                          "heat": (rows[0][hk], last[hk], max(col(rows, hk), default=0))}
+    W["gangs_first_last_max"] = gangs
+    corps = {}
+    for c in range(1, 10):
+        if f"c{c}_honour" not in last:
+            continue
+        v = (last[f"c{c}_honour"], last[f"c{c}_standing"], last[f"c{c}_competence"])
+        if any(v):
+            corps[f"c{c}"] = v
+    W["corps_last_honour_standing_competence"] = corps
+    if events:
+        counts = Counter(k for _, k, _ in events)
+        W["events"] = {k: counts[k] for k in WORD_EVENTS if counts[k]}
+    out["word"] = W
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -650,6 +702,23 @@ def fmt(o):
         L.append(f"off-screen share of killings {'n/a' if share is None else f'{share:.2f}'}; kill rates per 1,000: " +
                  f(w["kill_rates_mean"]))
         L.append("tiers (last): " + f(w["tiers_last"]))
+    if "word" in o:
+        w = o["word"]
+        L.append("-- the word and the blood (M15) --")
+        L.append("run totals: " + f(w["totals"]))
+        share = w["extort_success_share"]
+        L.append(f"extortion success {'n/a' if share is None else f'{share:.1%}'}")
+        L.append("last day: " + f(w["snapshot_last_day"]))
+        L.append("run max: " + f(w["snapshot_max"]))
+        for g, v in w["gangs_first_last_max"].items():
+            L.append(f"  {g}: dread first/last/max {v['dread'][0]:.2f}/{v['dread'][1]:.2f}/{v['dread'][2]:.2f}, "
+                     f"heat {v['heat'][0]:.2f}/{v['heat'][1]:.2f}/{v['heat'][2]:.2f}")
+        if w["corps_last_honour_standing_competence"]:
+            L.append("corps (last day, honour/standing/competence): " +
+                     ", ".join(f"{c} {h:.2f}/{s:.2f}/{k:.2f}" for c, (h, s, k) in
+                               w["corps_last_honour_standing_competence"].items()))
+        if w.get("events"):
+            L.append("crimson events: " + f(w["events"]))
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

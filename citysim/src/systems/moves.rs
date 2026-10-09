@@ -32,11 +32,6 @@ pub const MEAN_FIGHTING: usize = 5;
 pub const MEAN_HACKING: usize = 6;
 pub const MEAN_EXEC: usize = 7;
 
-/// Moves are live: the word's master switch and `[moves] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.gossip.enabled && world.config.moves.enabled
-}
-
 // ---------------------------------------------------------------------------
 // Skills (W25)
 // ---------------------------------------------------------------------------
@@ -114,26 +109,6 @@ pub fn seed_population(world: &mut World) {
     }
     world.skill_means = compute_means(world);
     world.skill_quantiles = compute_quantiles(world);
-}
-
-/// W44 (`migrate_legacy`): a pre-M15 save's social skills (all four 0)
-/// and the means (all 0).
-pub fn backfill(world: &mut World) {
-    let unset: Vec<EntityId> = world
-        .with::<Skills>()
-        .into_iter()
-        .filter(|&id| world.comp::<Skills>(id).is_some_and(|s| s.social_all() == [0.0; 4]))
-        .collect();
-    for id in unset {
-        let v = seed_skills(world, id);
-        give_social(world, id, v);
-    }
-    if world.skill_means == [0.0; 8] {
-        world.skill_means = compute_means(world);
-    }
-    if world.skill_quantiles.is_empty() {
-        world.skill_quantiles = compute_quantiles(world);
-    }
 }
 
 /// The values of one adult's eight `MEAN_*` slots.
@@ -229,9 +204,6 @@ pub fn compute_means(world: &World) -> [f32; 8] {
 
 /// W8: the speaker's knowledge, 0.5 for everyone while moves are off.
 pub fn knowledge(world: &World, id: EntityId) -> f32 {
-    if !on(world) {
-        return 0.5;
-    }
     world.comp::<Skills>(id).map_or(0.5, |s| s.knowledge)
 }
 
@@ -470,18 +442,16 @@ fn resolve_inner(world: &mut World, m: &SocialMove, bonus: f32) -> MoveOutcome {
                 if world.edge(m.target, m.actor).is_some() {
                     world.edge_entry(m.target, m.actor).trust = 0.0;
                 }
-                if world.config.gossip.enabled {
-                    let d = crate::systems::gossip::home_district(world, m.actor)
-                        .unwrap_or_else(|| crate::systems::gossip::talk_district(world, m.actor));
-                    crate::systems::gossip::post_deed_at(
-                        world,
-                        d,
-                        crate::word::Deed::Betrayed,
-                        Some(m.actor),
-                        Some(m.target),
-                        0.5,
-                    );
-                }
+                let d = crate::systems::gossip::home_district(world, m.actor)
+                    .unwrap_or_else(|| crate::systems::gossip::talk_district(world, m.actor));
+                crate::systems::gossip::post_deed_at(
+                    world,
+                    d,
+                    crate::word::Deed::Betrayed,
+                    Some(m.actor),
+                    Some(m.target),
+                    0.5,
+                );
             }
             MoveKind::Persuade | MoveKind::Charm => {}
         }

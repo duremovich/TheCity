@@ -6,26 +6,16 @@ use crate::config::Config;
 use crate::rng::splitmix64;
 use crate::world::World;
 
-/// Plan E1: phase 1's switch: the World market (books, bids, asks, imports
-/// to the World, migrants and the fence booked).
-pub fn market_on_cfg(cfg: &Config) -> bool {
-    cfg.living.enabled && cfg.economy2.enabled && cfg.economy2.market && cfg.world_market.enabled
-}
-
-pub fn market_on(world: &World) -> bool {
-    market_on_cfg(&world.config)
-}
-
 /// Plan E1: phase 2's switch (wages from revenue). Nothing reads it in phase 1.
 pub fn wages_on(world: &World) -> bool {
-    world.config.living.enabled && world.config.economy2.enabled && world.config.economy2.wages
+    world.config.economy2.wages
 }
 
 /// Plan E1: phase 3a's switch (no safety net): `[economy2] no_safety_net`,
 /// read only with wages on (a city with no dole and no wages from revenue is
 /// § 0's dole-off city, not the milestone's).
 pub fn no_net_cfg(cfg: &Config) -> bool {
-    cfg.living.enabled && cfg.economy2.enabled && cfg.economy2.wages && cfg.economy2.no_safety_net
+    cfg.economy2.wages && cfg.economy2.no_safety_net
 }
 
 pub fn no_net(world: &World) -> bool {

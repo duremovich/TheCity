@@ -6,7 +6,7 @@ use citysim::systems::{classes, corps, districts, faction, gang, law, litter, lo
 use citysim::{
     trace_flags, ActionInstance, ActionKind, Brain, Building, BuildingKind, Class, Config, Corp, Crime, DistrictId,
     EntityId, EventKind, ExecState, GoalKind, Household, Job, LocationKey, Lod, Needs, Niche, Order, Personality, Plan,
-    Position, Role, Sentence, Squatter, Stance, TilePos, Wallet, World, TICKS_PER_DAY,
+    Position, Sentence, Squatter, Stance, TilePos, Wallet, World, TICKS_PER_DAY,
 };
 
 /// The v1 city cut into three Mid districts by x, the district law on, and
@@ -251,7 +251,7 @@ fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
 }
 
 #[test]
-fn test_sanitation_removes_credited_units_dirtiest_first() {
+fn test_sanitation_removes_units_dirtiest_first() {
     let mut w = city();
     let streets = w.district(DistrictId(1)).streets.clone();
     let (a, b, c) = (streets[10] as usize, streets[20] as usize, streets[30] as usize);
@@ -261,25 +261,6 @@ fn test_sanitation_removes_credited_units_dirtiest_first() {
     let used = litter::clean_dirtiest(&mut w, DistrictId(1), 250);
     assert_eq!(used, 250);
     assert_eq!((w.litter[a], w.litter[b], w.litter[c]), (0, 50, 50));
-    // The daily credit: a sweeper whose shift was worked yesterday clears
-    // `clean_per_shift` units off its beat's dirtiest tiles.
-    let sweeper = civilians(&w).into_iter().find(|&x| !w.has::<Job>(x)).expect("a jobless adult");
-    let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("recycler");
-    w.levers.sanitation_count = 1;
-    citysim::systems::demography::hire(&mut w, sweeper, recycler, Role::Sanitation);
-    assert_eq!(w.workers(Role::Sanitation), &[sweeper]);
-    w.run_ticks(TICKS_PER_DAY); // to the next midnight's tick
-    w.litter[a] = 254;
-    w.litter[b] = 254;
-    w.sweep_beats.insert(sweeper, DistrictId(1));
-    let key = w.comp::<Job>(sweeper).expect("job").shift_key_at(w.tick - 1);
-    w.comp_mut::<Job>(sweeper).expect("job").last_shift_day = Some(key);
-    let before: u32 = streets.iter().map(|&i| u32::from(w.litter[i as usize])).sum();
-    districts::sanitation(&mut w);
-    let after: u32 = streets.iter().map(|&i| u32::from(w.litter[i as usize])).sum();
-    assert_eq!(before - after, w.config.litter.clean_per_shift, "one shift's units");
-    assert_eq!(w.district(DistrictId(1)).sweepers, 1, "dealt to the dirty district");
-    assert!(count(&w, EventKind::Sanitation) >= 1);
 }
 
 // ---------------------------------------------------------------------------

@@ -376,8 +376,7 @@ pub struct LivingCols {
     /// column after the budget columns (appended; not in `csv()`).
     #[serde(skip_serializing_if = "is_zero_i64")]
     pub flow_street_dice: i64,
-    /// L2 shadow fixes (not CSV columns, so `--l2-off` reports stay byte
-    /// for byte): shifts paid pro rata after a cut (item 2), no-show
+    /// L2 shadow fixes (not CSV columns): shifts paid pro rata after a cut (item 2), no-show
     /// dismissals (item 11), commitments that held a plan against a new
     /// winner (items 1-4, 15), tier dwells that kept a body (item 7).
     #[serde(skip_serializing_if = "is_zero_u32")]

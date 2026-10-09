@@ -689,12 +689,12 @@ fn test_tax_remainder_of_gone_payee_dropped() {
 
 #[test]
 fn test_full_day_of_flows_conserves_coins() {
-    // The M11 flows on the `EC_BASE` city (the Reserve buys the haul's
-    // overflow; with the market on the World outbids it, `tests/econ.rs`).
-    let mut w = World::new(42, Config::load().econ_off());
+    // The M11 flows on the shipped city: every crossing is booked, so the
+    // conservation identity (`econ::identity`) is the check.
+    let mut w = World::new(42, Config::load());
     w.run_ticks(3 * TICKS_PER_DAY);
     assert_eq!(w.tick_of_day(), 0);
-    let mut before = ownership::total_coins(&w);
+    let mut before = citysim::systems::econ::identity(&w);
     // Midnight: rent, upkeep (closing balance), exec wages; restock and price.
     ownership::run(&mut w);
     economy::run(&mut w);
@@ -714,7 +714,7 @@ fn test_full_day_of_flows_conserves_coins() {
             assert!(economy::take_food(&mut w, a, Some(m), 3, paid));
         }
     }
-    // A drink, a wage with tax, a haul that overflows into the Reserve.
+    // A drink, a wage with tax, a haul that overflows.
     if let Some(bar) = w.buildings_of_kind(BuildingKind::Bar).first().copied() {
         let d = jobless_adult(&w, &shoppers);
         before += 10 - coins(&w, d);
@@ -736,10 +736,10 @@ fn test_full_day_of_flows_conserves_coins() {
     for m in &markets {
         w.comp_mut::<Building>(*m).expect("m").stock_food = 2000;
     }
-    let overflow0 = w.stats.current.flow_overflow;
+    // The Markets full: the overflow sells to the World (the Real economy's
+    // book outbids the Reserve), a crossing the identity books.
     assert!(economy::haul(&mut w, farm, None) > 0);
-    assert!(w.stats.current.flow_overflow > overflow0, "the Market was full: the Reserve bought the haul");
-    assert_eq!(ownership::total_coins(&w), before, "wallets + gangs + corps + Treasury unchanged");
+    assert_eq!(citysim::systems::econ::identity(&w), before, "wallets + gangs + corps + Treasury unchanged");
 }
 
 #[test]

@@ -14,14 +14,14 @@
 |---|---|---|---|---|
 | unit | every hand-built test (one mechanism, a small or seeded world) | `citysim/tests/*.rs`, `citysim-cli` | the mechanism does what it says | ~40 s summed over the binaries (all non-ignored but `core_sanity`) |
 | core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity every day, collapse bounds, 31 mechanism-existence bullets, the ticks/s floor on seed 42 | ~30 s |
-| core | `core_year` (`#[ignore]`) | `citysim/tests/core.rs` | seed 42 x 365 days, the collapse bounds per 30-day window | ~110 s |
+| core | `core_year` (`#[ignore]`) | `citysim/tests/core.rs` | seed 42 x 365 days, the collapse bounds per 30-day window | ~100 s |
 | core | determinism and saves | `determinism.rs`, `save.rs` | same seed same hash at a day boundary; a mid-day save runs on byte for byte (plus the hunt, guard and contract rebuilds) | seconds |
-| behaviour | `shadow --assert` / `test_behaviour_tier` (`#[ignore]`) | `citysim-cli/src/shadow.rs` | 160 per-archetype bounds on the diary metrics (seed 42, days 19 and 90) | ~30 s |
+| behaviour | `shadow --assert` / `test_behaviour_tier` (`#[ignore]`) | `citysim-cli/src/shadow.rs` | 146 per-archetype bounds on the diary metrics (seed 42, days 19 and 90, 5 picks each) | ~25 s |
 | behaviour | person probes | `citysim/tests/person.rs` | one pinned agent, one stimulus, what a person would do | ~2 s |
-| god | 13 scenarios + 3 controls (`#[ignore]`) | `god.rs`, `god_corps.rs`, `god_districts.rs` | the world reacted to the shock (or the command applied), 60 days | ~50 s |
-| nightly | Full-vs-Statistical parity (`#[ignore]`) | `lod.rs::test_full_vs_statistical_within_15pct` | the Statistical tier's rates within 15 % of Full | ~20 s |
+| god | 13 scenarios + 3 controls (`#[ignore]`) | `god.rs`, `god_corps.rs`, `god_districts.rs` | the world reacted to the shock (or the command applied), 60 days | ~55 s |
+| nightly | Full-vs-Statistical parity (`#[ignore]`) | `lod.rs::test_full_vs_statistical_within_15pct` | the Statistical tier's rates within 15 % of Full | ~25 s |
 
-Measured 2026-10-09 on main 38210ce plus this change: `cargo test --workspace --release` (every non-ignored test, `core_sanity` included) ran in **1 min 23 s** after compile (672 passed, 19 ignored).
+Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --release` (every non-ignored test, `core_sanity` included) ran in **1 min 17 s** after compile (653 passed, 19 ignored).
 
 ## When to run what
 
@@ -69,7 +69,7 @@ Never add a band. If a number matters, print it in `run --report` and read it wi
 
 ### `shadow --assert`
 
-`citysim-cli shadow --assert [--out DIR]` (or `test_behaviour_tier`) runs the V2 shadow pass's pinned windows: seed 42, 7 days from day 19 (a Friday) with 3 of each of 17 archetypes, and 7 days from day 90 with 3 of each gang archetype, the two windows in parallel. Each pinned agent's diary metrics are summed per archetype:
+`citysim-cli shadow --assert [--out DIR]` (or `test_behaviour_tier`) runs the V2 shadow pass's pinned windows: seed 42, 7 days from day 19 (a Friday) with 5 of each of 17 archetypes, and 7 days from day 90 with 5 of each gang archetype, the two windows in parallel. Each pinned agent's diary metrics are summed per archetype:
 
 | metric | what |
 |---|---|
@@ -87,7 +87,7 @@ Never add a band. If a number matters, print it in `run --report` and read it wi
 | `abort/d` | Work goals dropped before a single work-class minute (a commute turned back) per agent-day |
 | `bouts_at` | bouts with the fighter inside the pit, of the bouts naming her |
 
-The bounds (`CHECKS` in `shadow.rs`, each with the value measured on main 38210ce beside it) are set so today's city passes with a margin: walking ≤ 1.4 x + 1 h, the longest nightly block ≥ 0.7 x, energy 0 ≤ measured + 6 h a week, known contacts ≥ 0.5 x (where ≥ 2), refunds ≤ 1 a week, commute aborts ≤ 1.5 x + 0.5 a day, paid of worked ≥ measured − 0.25, waged workdays ≥ measured − 0.3, the reporter at her desk ≥ 1 h a day, the fighter in the pit for ≥ 3 bouts in 4. They catch a regression in "acts like a person" (V2 causes 4, 6, 7, 10, 18, 20 come back); they are not targets. An archetype with no candidate in a window is a SKIP, not a failure. When a behaviour fix moves a number for the better, re-measure (`shadow --assert` prints the table) and tighten the bound in the same change.
+The bounds (`CHECKS` in `shadow.rs`, each with the value measured beside it, last on the city with the off switches retired and the stat table regenerated) are set so today's city passes with a margin: walking ≤ 1.4 x + 1 h, the longest nightly block ≥ 0.7 x, energy 0 ≤ measured + 6 h a week, known contacts ≥ 0.5 x (where ≥ 2), refunds ≤ 1 a week, commute aborts ≤ 1.5 x + 0.5 a day, paid of worked ≥ measured − 0.25, waged workdays ≥ measured − 0.3, the reporter at her desk ≥ 1 h a day, the fighter in the pit for ≥ 3 bouts in 4. They catch a regression in "acts like a person" (V2 causes 4, 6, 7, 10, 18, 20 come back); they are not targets. An archetype with no candidate in a window is a SKIP, not a failure. When a behaviour fix moves a number for the better, re-measure (`shadow --assert` prints the table) and tighten the bound in the same change. Five picks per archetype (three until 2026-10-09: a regenerated stat table swapped the picks and moved several rows both ways at once) is still a small sample. Read the diaries of a failing row before calling it a regression; a re-measure after a deliberate city change is recorded with the old and new values in the commit message.
 
 ### Person probes
 
@@ -110,4 +110,8 @@ The 13 kept, one per reaction class, seed 42, 60 days (the shock at day 45, or d
 
 ## What was retired (2026-10-09)
 
-`tests/scenario.rs` (4,746 lines: 12 milestone gates re-running the same city ~50 times, ~50 calibration and trajectory bullets, the pinned murders/starvation/FNV constants, the majority and six-seed devices, eight copies of the sanity trio and the floor, the M1/M0/M5/M6 short scenarios), `tests/scratch_probe.rs` (33 ignored print-only probes), the 13 legacy-save loaders and the v1-profile bit-identical save in `save.rs`, four of the five `lod.rs` ignored tests (kitted parity, leisure parity, faction-violence parity, the stat-policy bench) and its non-ignored throughput copy, `scale::test_tick_2000_median_under_250us`, `outside::probe_coin_census`, 40 god scenarios. The `*_off` identity tests stay until their switches are retired (Phase B).
+`tests/scenario.rs` (4,746 lines: 12 milestone gates re-running the same city ~50 times, ~50 calibration and trajectory bullets, the pinned murders/starvation/FNV constants, the majority and six-seed devices, eight copies of the sanity trio and the floor, the M1/M0/M5/M6 short scenarios), `tests/scratch_probe.rs` (33 ignored print-only probes), the 13 legacy-save loaders and the v1-profile bit-identical save in `save.rs`, four of the five `lod.rs` ignored tests (kitted parity, leisure parity, faction-violence parity, the stat-policy bench) and its non-ignored throughput copy, `scale::test_tick_2000_median_under_250us`, `outside::probe_coin_census`, 40 god scenarios.
+
+## The switches retired (2026-10-09)
+
+Every feature is always on except the work in flight: `[economy2] wages` and `no_safety_net` (off by default), and `[life] violence_fixes` with its `vf_*` items and `CITYSIM_VFIX_OFF`. Gone: `--virt-off`, `--word-off`, `--life-off`, `--l2-off`, `--contracts-off`, `--econ-off` (and `shadow --life-off`), `Config::{virt_off, word_off, living_off, econ_off, contracts_off, with_leisure}`, the `enabled` master of `[life]`, `[living]`, `[jobs]`, `[leisure]`, `[budget]`, `[fviolence]`, `[gossip]`, `[hunt]`, `[moves]`, `[competence]`, `[news]`, `[virt]`, `[contracts]`, `[economy2]` (and its `market`), `[world_market]`, `[charity]`, `[camp]`, `[treasury]` and `[export]` (with L2's flat-price export hook the market replaced), `[lod] budget`, `[gossip] legacy_second_hand`, `[life] l2_fixes` with its six sub-switches and `CITYSIM_L2FIX_OFF`, every off branch behind them, their identity tests, and the legacy-save migrations (`World::migrate_legacy`, the per-system `migrate` hooks, the `RivalHideout` alias): a save from before format 4 no longer loads. `v1_profile` (the 300-resident unit-test city) and `calibration_city` now run the life pass, the plane, the word, the living city, contracts and the World market; they keep only their own cuts (the v1 map and economy; gangless, rent-free, no riots or assets), pin the in-flight `[economy2] wages` and `no_safety_net` off (an experiment in `config.toml` never reaches the unit-test city or the stat table), and follow the shipped default for `[life] violence_fixes`. `calibrate` builds `assets/stat_table.toml` in that city: regenerate it (`cargo run --release -p citysim-cli -- calibrate`, deterministic, ~15 s) when the Full tier's hourly behaviour moves, then re-run `core_sanity`, `core_year` and the behaviour tier on it.

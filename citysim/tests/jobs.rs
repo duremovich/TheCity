@@ -1,6 +1,6 @@
 //! Life pass L2 phase 1 (docs/LIFE_L2.md § 1, § 10; plan phase 1): the
 //! seven new kinds, staffing, the Fab and the scrap chain, the budget band,
-//! Sweep and the `--l2-off` identity.
+//! Sweep.
 
 use citysim::systems::{budget, districts, founding, jobs, ownership};
 use citysim::{Building, BuildingKind, Config, EntityId, Good, Job, Role, Wallet, World, TICKS_PER_DAY};
@@ -22,7 +22,6 @@ fn standing(w: &World, kind: BuildingKind) -> Vec<EntityId> {
 #[test]
 fn test_each_new_kind_seeds_and_pays_a_shift() {
     let mut w = World::new(42, Config::load());
-    assert!(jobs::on(&w));
     for kind in [
         BuildingKind::Club,
         BuildingKind::Arcade,
@@ -60,9 +59,6 @@ fn test_each_new_kind_seeds_and_pays_a_shift() {
 fn test_register_chooses_noodle_bar_at_120() {
     let w = World::new(42, Config::load());
     assert_eq!(founding::choose_kind_for(&w, 130, false), Some(BuildingKind::NoodleBar));
-    // With L2 off nothing is affordable at 130 (the floor is the Bar's).
-    let off = World::new(42, Config::load().living_off());
-    assert_eq!(founding::choose_kind_for(&off, 130, false), None);
 }
 
 /// L6: a derelict Block refitted as a Den at `refit_frac` of its cost;
@@ -113,10 +109,10 @@ fn market_staffing(w: &World) -> Vec<usize> {
         .collect()
 }
 
-/// L3: with jobs on, the first midnight posts every Market's deficit to 12
-/// (a hunkering corp's to 6); with L2 off a Market keeps its 4.
+/// L3: the first midnight posts every Market's deficit to 12 (a hunkering
+/// corp's to 6).
 #[test]
-fn test_market_staff_tops_up_to_12_only_with_jobs_on() {
+fn test_market_staff_tops_up_to_12() {
     // Real economy phase 2 (plan E18): with wages on a corp's Markets are
     // staffed by the margin rule (`wages::staff`), not the top-up; L2's
     // rule is read with that switch off.
@@ -136,10 +132,6 @@ fn test_market_staff_tops_up_to_12_only_with_jobs_on() {
     );
     assert_eq!(jobs::full_staff(&on, BuildingKind::Market), 12);
     assert_eq!(jobs::full_staff(&on, BuildingKind::Bar), 5);
-    let mut off = World::new(42, Config::load().living_off());
-    off.run_ticks(TICKS_PER_DAY + 1);
-    assert!(market_staffing(&off).iter().all(|&n| n <= 4), "off: {:?}", market_staffing(&off));
-    assert_eq!(jobs::full_staff(&off, BuildingKind::Market), 4);
 }
 
 /// L9: a Fab accrues Parts from labour; the parts market sources a corp's
@@ -206,10 +198,6 @@ fn test_scrap_becomes_recycler_part_at_scrap_per_part() {
     jobs::daily(&mut w);
     assert_eq!(w.stock(recycler, Good::Parts), before + 2);
     assert_eq!(w.scrap, 1);
-    // With L2 off a find adds no scrap.
-    let mut off = World::new(42, Config::load().living_off());
-    jobs::add_scrap(&mut off);
-    assert_eq!(off.scrap, 0);
 }
 
 /// L10: above `hi` for three days the band posts `works_step` public works;
@@ -314,40 +302,6 @@ fn test_sweep_cleans_beat_and_skips_d23_credit() {
     assert!(w.jobs_book.swept.is_empty(), "the day's list is cleared");
 }
 
-/// L32: an L2 build with `living_off` has no venues and runs its first day
-/// as a config without any L2 key (the serde defaults are all off).
-#[test]
-fn test_l2_off_world_has_no_venues_and_same_first_day() {
-    let text = std::fs::read_to_string(Config::load().asset("config.toml")).expect("config.toml");
-    // The config before any L2 key existed: the L2 tail cut off.
-    let cut = text.find("# Life pass L2").expect("the L2 block");
-    let mut old: Config = toml::from_str(&text[..cut]).expect("the pre-L2 config parses");
-    old.assets_dir = Config::load().assets_dir;
-    // The L2 shadow fixes' master rides `[life]` (above the cut) but is an
-    // L2 key: `living_off` turns it off, and so does a pre-L2 config.
-    old.life.l2_fixes = false;
-    // So do the violence fixes (`[life] violence_fixes`, 2026-10-09).
-    old.life.violence_fixes = false;
-    assert!(!old.living.enabled && !old.jobs.enabled && !old.budget.enabled);
-    let mut a = World::new(42, Config::load().living_off());
-    let mut b = World::new(42, old);
-    for kind in [BuildingKind::Club, BuildingKind::NoodleBar, BuildingKind::Fab] {
-        assert!(a.buildings_of_kind(kind).is_empty() && b.buildings_of_kind(kind).is_empty());
-    }
-    a.run_ticks(TICKS_PER_DAY);
-    b.run_ticks(TICKS_PER_DAY);
-    let row = |w: &World| {
-        let mut r = w.stats.history.back().expect("a day").clone();
-        r.ticks_per_sec = 0.0;
-        r.csv_row()
-    };
-    assert_eq!(row(&a), row(&b), "the same first day");
-    // The worlds match too, once their configs are made equal.
-    b.config = a.config.clone();
-    assert_eq!(citysim::save::to_ron(&a), citysim::save::to_ron(&b));
-    assert!(a.outside.is_empty() && a.scrap == 0 && a.budget.is_default());
-}
-
 /// Roadmap addendum 17 (2026-10-08): a fresh hire does not draw the dole,
 /// before or after its first wage, nor while owed wages (the L2 dole until
 /// the first wage and the owed-days dole are gone); `paid_once` still flips
@@ -377,19 +331,6 @@ fn test_new_hire_draws_no_dole() {
     assert!(w.comp::<Job>(a).expect("job").paid_once);
     w.comp_mut::<citysim::Brain>(a).expect("brain").last_dole_day = None;
     assert!(!economy::collect_dole(&mut w, a), "no dole after the first wage");
-    // With L2 off a hire is paid_once from the start: never on the dole.
-    let mut off = World::new(42, Config::load().living_off());
-    let r = off.building_of_kind(BuildingKind::Cemetery).expect("Recycler");
-    let b = off
-        .citizens()
-        .into_iter()
-        .find(|&b| {
-            !off.has::<Job>(b) && off.has::<citysim::Brain>(b) && citysim::systems::demography::is_adult(&off, b)
-        })
-        .expect("a jobless adult");
-    citysim::systems::demography::hire(&mut off, b, r, Role::Sanitation);
-    assert!(off.comp::<Job>(b).expect("job").paid_once);
-    assert!(!economy::collect_dole(&mut off, b));
 }
 
 /// Addendum 17: a broke fresh hire at the Hall with `dole_in_place` off has

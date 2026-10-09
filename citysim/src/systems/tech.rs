@@ -76,8 +76,7 @@ pub fn seeded_tech(world: &World, corp: EntityId) -> Tech {
     Tech::seeded(tiers, focus)
 }
 
-/// Seed every corp's tree (`World::new`) or every unset one (a pre-M14
-/// save, `migrate_legacy`). No RNG.
+/// Seed every corp's tree (`World::new`), or every unset one. No RNG.
 pub fn seed_corps(world: &mut World, only_unset: bool) {
     for c in world.corps() {
         if only_unset && world.comp::<Corp>(c).is_some_and(|cc| !cc.tech.is_unset()) {
@@ -125,7 +124,7 @@ pub fn street_tier(world: &World, track: Track) -> (u8, Option<EntityId>) {
 /// Midnight, with the plane on: relink, production, ICE upkeep, research
 /// upkeep and decay, research, the expiries and the rolls.
 pub fn run(world: &mut World) {
-    if world.tick_of_day() != 0 || !virt::enabled(world) {
+    if world.tick_of_day() != 0 {
         return;
     }
     // Phase 3: a new day's Data budget for every corp.
@@ -456,9 +455,6 @@ pub fn on_tier_change(world: &mut World, corp: EntityId, track: Track) {
 /// V23: the maker corp is gone: every agent holding something it made is
 /// re-kitted (it now runs at `orphan_cap`). A no-op with the plane off.
 pub fn on_maker_gone(world: &mut World, corp: EntityId) {
-    if !virt::enabled(world) {
-        return;
-    }
     for track in Track::ALL {
         on_tier_change(world, corp, track);
     }
@@ -540,9 +536,6 @@ pub fn wipe_store(world: &mut World, n: NodeId, by: Option<EntityId>) -> u32 {
 /// God `GrantData`: `units` into the faction's first Lab (ascending), else
 /// its Hideout's node. Returns the node, or why not.
 pub fn grant_data(world: &mut World, faction: EntityId, track: Track, units: u32) -> Result<NodeId, String> {
-    if !virt::enabled(world) {
-        return Err("the plane is off".into());
-    }
     let lab = world.virt.nodes.iter().enumerate().find_map(|(i, n)| {
         let NodeKind::Building(b) = n.kind else { return None };
         (n.alive
@@ -718,7 +711,7 @@ fn data_buyer(world: &World, track: Track, seller: EntityId, only: Option<Entity
 /// to its Lab of that focus (else its first Lab). Returns the units sold;
 /// the caller takes them from where they were. No buyer, no sale.
 pub fn sell_data(world: &mut World, seller: EntityId, track: Track, units: u32, only: Option<EntityId>) -> u32 {
-    if !virt::enabled(world) || units == 0 {
+    if units == 0 {
         return 0;
     }
     let Some(buyer) = data_buyer(world, track, seller, only) else { return 0 };

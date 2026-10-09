@@ -76,7 +76,8 @@ impl ExportGood {
 pub struct ExportBook {
     pub sold: BTreeMap<ExportGood, u64>,
     pub paid: BTreeMap<ExportGood, i64>,
-    /// Plan field (L37 `SetExportPrice`): a god price per good, over `[export] price`.
+    /// Plan field (L37 `SetExportPrice`): a god price per good, the World's
+    /// reference-bid pin (`world_market::bid_ref`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub price: BTreeMap<ExportGood, i64>,
 }

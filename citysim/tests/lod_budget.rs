@@ -11,12 +11,9 @@ use citysim::{
     Order, Personality, Position, StepResult, Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
-/// The v1 city with the budget on.
+/// The v1 city (the LOD budget is always on since 2026-10-09).
 fn budget_cfg() -> Config {
-    let mut c = Config::load().v1_profile();
-    c.lod.budget = true;
-    c.living.enabled = true; // the master switch (`v1_profile` turns L2 off)
-    c
+    Config::load().v1_profile()
 }
 
 fn world(seed: u64) -> World {
@@ -63,7 +60,8 @@ fn test_held_prisoner_fed_daily_and_never_leaves_jail() {
     assert_eq!(w.comp::<Position>(p).and_then(|q| q.building), Some(jail), "never snapped out of the Jail");
     let n = w.comp::<Needs>(p).expect("needs");
     assert!(n.hunger > 0.2 && n.starving_since.is_none(), "fed: hunger {}", n.hunger);
-    let fed: u32 = w.stats.history.iter().map(|r| r.budget.held_fed).sum();
+    // Three midnights in the window; the last one's meal is in today's open row.
+    let fed: u32 = w.stats.history.iter().map(|r| r.budget.held_fed).sum::<u32>() + w.stats.current.budget.held_fed;
     assert!(fed >= 3, "jail_upkeep fed the held prisoner each midnight ({fed})");
     assert!(w.stats.history.iter().all(|r| r.budget.tier_held >= 1));
 }
@@ -165,9 +163,6 @@ fn test_off_shift_guard_ranks_as_civilian() {
     assert_eq!(lod::rank_class(&w, guard), 0, "off shift: a civilian");
     w.config.lod.watch_on_shift_only = false;
     assert_eq!(lod::rank_class(&w, guard), 3, "the rule off (the shipped config): the M10 watch");
-    w.config.lod.watch_on_shift_only = true;
-    w.config.lod.budget = false;
-    assert_eq!(lod::rank_class(&w, guard), 3, "without the budget: the M10 watch");
 }
 
 #[test]
@@ -264,20 +259,12 @@ fn test_dry_scavenge_is_done_and_cools_earn() {
     assert_eq!(b.scavenge_dry, 0, "the streak resets at the cooldown");
     let cool = w.tick + w.config.life.scavenge_cool_hours * TICKS_PER_HOUR;
     assert_eq!(b.cooldowns.get(&GoalKind::Earn).copied(), Some(cool), "Earn cools");
-    // Without the budget a dry hour is the old abort.
-    w.config.lod.budget = false;
-    let r = {
-        let t = w.tick;
-        actions::on_complete(&mut w, a, ActionKind::Scavenge, None, t, t)
-    };
-    assert_eq!(r, StepResult::Failed(citysim::FailReason::StockGone));
 }
 
 #[test]
 fn test_reserved_bed_cannot_be_taken() {
     // The 2,000 city: Hotels, the life pass and the budget on.
     let mut w = World::new(42, Config::load());
-    assert!(lod::budget_on(&w));
     let hotels: Vec<EntityId> =
         w.buildings_of_kind(BuildingKind::Hotel).iter().copied().filter(|&h| street::is_hotel(&w, h)).collect();
     let h = hotels[0];
@@ -393,7 +380,6 @@ fn test_held_prisoner_is_no_partner_or_runner() {
     let mut cfg = Config::load();
     cfg.hack.stat_hack_min = 0.0;
     let mut v = World::new(42, cfg);
-    assert!(lod::budget_on(&v));
     let a = v
         .citizens()
         .into_iter()

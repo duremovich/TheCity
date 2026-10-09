@@ -566,9 +566,6 @@ fn assets_section(ui: &mut Ui, app: &mut App, world: &World) {
 fn virt_section(ui: &mut Ui, app: &mut App, world: &World) {
     use citysim::systems::virt;
     use citysim::virt::{NodeId, NodeKind, OwnerTag};
-    if !virt::enabled(world) {
-        return;
-    }
     ui.separator();
     ui.horizontal(|ui| {
         ui.strong("Virt");
@@ -725,9 +722,6 @@ fn districts_section(ui: &mut Ui, app: &mut App, world: &World) {
 /// the Leisure section (fun, satisfied share, visits by kind, the week's
 /// biggest win). From the last closed day.
 fn living_section(ui: &mut Ui, world: &World) {
-    if !world.config.living.enabled {
-        return;
-    }
     let s = world.stats.history.back().unwrap_or(&world.stats.current);
     let l = &s.living;
     ui.separator();
@@ -753,25 +747,20 @@ fn living_section(ui: &mut Ui, world: &World) {
         ui.label(format!("{}¢ / {}¢", l.outside_inbound, l.outside_minted));
         ui.end_row();
         // The Real economy (spec § 3): the one-line trade readout.
-        if citysim::systems::econ::market_on(world) {
-            let e = &s.econ;
-            let coins = citysim::systems::ownership::total_coins(world).max(1);
-            ui.label("Trade");
-            ui.label(format!(
-                "{:+}¢ today, {:+.1}k this month ({:.0} % of coins); World food appetite {:.2}, bid {:.2}, ask {}¢",
-                e.trade_balance,
-                e.trade_balance_30 as f32 / 1000.0,
-                100.0 * e.trade_balance_30 as f32 / coins as f32,
-                e.appetite_food,
-                e.bid_food,
-                e.ask_food
-            ));
-            ui.end_row();
-        }
+        let e = &s.econ;
+        let coins = citysim::systems::ownership::total_coins(world).max(1);
+        ui.label("Trade");
+        ui.label(format!(
+            "{:+}¢ today, {:+.1}k this month ({:.0} % of coins); World food appetite {:.2}, bid {:.2}, ask {}¢",
+            e.trade_balance,
+            e.trade_balance_30 as f32 / 1000.0,
+            100.0 * e.trade_balance_30 as f32 / coins as f32,
+            e.appetite_food,
+            e.bid_food,
+            e.ask_food
+        ));
+        ui.end_row();
     });
-    if !citysim::systems::leisure::on(world) {
-        return;
-    }
     ui.strong("Leisure");
     egui::Grid::new("city_leisure").striped(true).show(ui, |ui| {
         ui.label("Fun (mean, satisfied)");

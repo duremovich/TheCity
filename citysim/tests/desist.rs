@@ -105,13 +105,3 @@ fn test_member_in_a_feud_rarely_walks_away() {
     let (calm, feud) = (run(false), run(true));
     assert!(feud * 2 < calm, "in a feud {feud} walked away, without one {calm}");
 }
-
-/// With `[living]` off nothing runs.
-#[test]
-fn test_no_desistance_with_living_off() {
-    let (mut w, g, recruits) = setup(10, |_, _| true);
-    w.config.living.desist_base = 1.0;
-    w.config.living.enabled = false;
-    desist_days(&mut w, 5);
-    assert_eq!(left(&w, g, &recruits), 0);
-}

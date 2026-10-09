@@ -9,16 +9,10 @@ use citysim::{
     hole_id, Brain, Config, Crime, DistrictId, EntityId, Hole, HoleKind, Lod, Memory, MemoryEntry, MemoryKind, RelKind,
     World, Zone, TICKS_PER_DAY,
 };
-use rand::Rng;
 
-/// The v1 city with the word on (v1_profile turns every M15 section off).
+/// The v1 city (the word always on since 2026-10-09).
 fn word_world(seed: u64) -> World {
-    let full = Config::load();
-    let mut c = full.clone().v1_profile();
-    c.gossip = full.gossip.clone();
-    c.reputation = full.reputation.clone();
-    c.moves.contradict_conf = full.moves.contradict_conf;
-    World::new(seed, c)
+    World::new(seed, Config::load().v1_profile())
 }
 
 /// Adults with a Brain and a Memory, ascending.
@@ -392,29 +386,17 @@ fn test_distortion_never_at_knowledge_one() {
     assert!(swaps[1] > 200, "knowledge 0 distorts at distort_base: {}", swaps[1]);
 }
 
+/// Four days of the word hear rumours, and a word stream is its own: keyed,
+/// repeatable, apart from another namespace's.
 #[test]
-fn test_word_streams_untouch_world_and_agent() {
-    let run = |on: bool| {
-        let mut w = word_world(57);
-        if !on {
-            w.config.gossip.enabled = false;
-        }
-        // L1: four days (was two): with the walk to a far Bar weighed, the
-        // first drinks and chats come later and the 2-day window heard nothing.
-        w.run_ticks(4 * TICKS_PER_DAY + 5);
-        let heard = w.stats.history.iter().map(|r| r.word.rumours_heard).sum::<u32>();
-        let probe = adults(&w)[0];
-        let world_next: u64 = w.rng.world().random();
-        let agent_next: u64 = w.rng.agent(probe).random();
-        (heard, world_next, agent_next)
-    };
-    let (heard_on, w_on, a_on) = run(true);
-    let (heard_off, w_off, a_off) = run(false);
-    assert!(heard_on > 0, "the day had exchanges and hearing");
-    assert_eq!(heard_off, 0);
-    assert_eq!(w_on, w_off, "the world stream is untouched");
-    assert_eq!(a_on, a_off, "the agent stream is untouched");
-    // And a word stream is its own: keyed, repeatable, apart from the world's.
+fn test_word_hears_and_streams_are_keyed() {
+    use rand::Rng;
+    let mut w = word_world(57);
+    // L1: four days (was two): with the walk to a far Bar weighed, the
+    // first drinks and chats come later and the 2-day window heard nothing.
+    w.run_ticks(4 * TICKS_PER_DAY + 5);
+    let heard = w.stats.history.iter().map(|r| r.word.rumours_heard).sum::<u32>();
+    assert!(heard > 0, "the days had exchanges and hearing");
     let w = word_world(57);
     let a: u64 = w.rng.word(WordNs::Exchange, 5, 6).random();
     let b: u64 = w.rng.word(WordNs::Exchange, 5, 6).random();

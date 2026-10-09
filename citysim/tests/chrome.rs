@@ -362,8 +362,14 @@ fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
         let mut cfg = Config::load().scaled_to(300);
         cfg.chrome.abduct_base = 1.0e6;
         cfg.bind.p_unknown = if unknown { 1.0 } else { 0.0 };
-        // M13's roll (L2 phase 4: with `[fviolence]` on the Harvest cell replaces it).
-        cfg.fviolence.enabled = false;
+        // The Harvest cell of `fviolence::daily` (M13's own roll retired with it).
+        cfg.fviolence.prior = Default::default();
+        cfg.fviolence.prior.order = [0.0; 4];
+        cfg.fviolence.prior.harvest_abducted = 1.0;
+        cfg.fviolence.prior_weight = 1e6;
+        cfg.fviolence.fv_mult = 1.0;
+        cfg.fviolence.class_mult = citysim::config::FvClassCfg::default();
+        cfg.fviolence.day_cap.abducted = 1000;
         let mut w = World::new(42, cfg);
         let people = free(&w);
         let (victim, crew) = (people[0], people[1]);
@@ -383,9 +389,12 @@ fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
             .collect();
         assert!(w.comp::<Kit>(victim).expect("kit").visible >= 3);
         lod::set_lod(&mut w, victim, Lod::Statistical);
+        let home = w.comp::<citysim::Household>(victim).and_then(|h| h.home).expect("a home");
+        w.comp_mut::<Gang>(g).expect("gang").territory.push(home);
         set_coins(&mut w, victim, 30);
         let crew_coins = coins(&w, crew);
-        chrome::abduction_daily(&mut w);
+        citysim::systems::fviolence::rebuild_active(&mut w);
+        citysim::systems::fviolence::daily(&mut w);
         assert!(w.has::<citysim::Corpse>(victim), "taken");
         let hole = *w.holes.keys().find(|&&h| w.holes[&h].kind == citysim::HoleKind::Abducted).expect("a hole");
         for &a in &implants {
@@ -547,6 +556,11 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
     place(&mut w, guard, TilePos { x: 102, y: 100 });
     place(&mut w, who, TilePos { x: 100, y: 100 });
     w.comp_mut::<Skills>(guard).expect("skills").fighting = 1.0;
+    // Both on screen for the episode (the LOD budget may demote a body; an
+    // episode off screen is the ledger's, not the law's).
+    for id in [guard, who] {
+        w.comp_mut::<Brain>(id).expect("brain").pinned = true;
+    }
     let by_law0 = w.stats.current.episodes_by_law;
     chrome::start_episode(&mut w, who);
     assert!(chrome::in_episode(&w, who), "berserk");
@@ -563,5 +577,14 @@ fn test_episode_near_on_duty_guard_ended_by_law() {
         }
     }
     assert!(ended_at.is_some(), "the episode ended within {hours} h");
-    assert_eq!(w.stats.current.episodes_by_law - by_law0, 1, "ended by the law (cuffed or killed), not spent");
+    // Ended by the law: cuffed or killed resisting (`ended_by_law`), or dead
+    // in the fight it started on the guard itself; never spent.
+    let by_law = w.stats.current.episodes_by_law - by_law0 == 1;
+    let died_on_guard = !law::living(&w, who)
+        && w.events.iter().any(|e| {
+            matches!(e.kind, citysim::EventKind::Assault | citysim::EventKind::Murder)
+                && e.actors.first() == Some(&who)
+                && e.actors.get(1) == Some(&guard)
+        });
+    assert!(by_law || died_on_guard, "ended by the law (cuffed or killed), not spent");
 }

@@ -51,8 +51,8 @@ fn jobless(w: &World, n: usize) -> Vec<EntityId> {
 fn test_lab_produces_from_shift_ledger_at_every_tier() {
     let mut w = world();
     // M15 W28: Lab Data × the owner's competence multiplier (tests/moves.rs);
-    // this checks V16's ledger at a multiplier of 1.
-    w.config.competence.enabled = false;
+    // this checks V16's ledger at a multiplier of 1 (`comp_w` 0).
+    w.config.competence.comp_w = 0.0;
     let z = corp_named(&w, "Zetatech");
     let lab = lab_of(&w, z, Track::Chrome);
     let n = node(&w, lab);
@@ -252,29 +252,34 @@ fn test_maker_tier_loss_lowers_kit() {
     w.check_indices().expect("every Kit current after the rekit");
 }
 
-/// V23 calibration guard: after ten days with the caps on, every Kit equals
-/// the Kit with every effective tier forced to the nominal one.
+/// V23 calibration guard: after ten days with the tier caps live, every Kit
+/// equals the Kit with every asset at its nominal tier (the makers cleared:
+/// an asset with no maker works at its nominal tier).
 #[test]
 fn test_caps_on_change_no_kit_at_seed() {
     let mut w = world();
     w.run_ticks(10 * TICKS_PER_DAY);
-    let mut uncapped = w.clone();
-    uncapped.config.virt.enabled = false;
+    let made: Vec<EntityId> = assets::all_assets(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<citysim::Asset>(a).is_some_and(|x| x.maker.is_some()))
+        .collect();
+    assert!(!made.is_empty(), "the guard compares Kits with at least one maker-capped asset");
+    let mut nominal = w.clone();
+    for &a in &made {
+        if let Some(x) = nominal.comp_mut::<citysim::Asset>(a) {
+            x.maker = None;
+        }
+    }
     let mut n = 0;
     for id in w.citizens() {
         if w.comp::<Kit>(id).is_none() {
             continue;
         }
-        assert_eq!(assets::compute_kit(&w, id), assets::compute_kit(&uncapped, id), "agent {id}");
+        assert_eq!(assets::compute_kit(&w, id), assets::compute_kit(&nominal, id), "agent {id}");
         n += 1;
     }
     assert!(n > 1000);
-    let made = assets::all_assets(&w)
-        .iter()
-        .filter(|&&a| w.comp::<citysim::Asset>(a).is_some_and(|x| x.maker.is_some()))
-        .count();
-    assert!(made > 0, "the guard compared Kits with at least one maker-capped asset");
-    println!("{n} Kits compared; {made} assets with a maker");
+    println!("{n} Kits compared; {} assets with a maker", made.len());
 }
 
 /// M14 V31 (the core tier's rare-mechanism rule: a Lab built under Research

@@ -642,10 +642,9 @@ impl Levers {
             // Real economy E22 (b) (phase 3a): no public works with `no_net`
             // (`budget::daily` does not run either: `treasury::daily` replaces it).
             public_works: !crate::systems::econ::no_net_cfg(cfg),
-            // Real economy (plan E4, E12; deviation recorded): the market
-            // opens the World's buying at seed without `[export] enabled`,
-            // whose flat-price hook stays L2's own switch.
-            export_open: cfg.living.enabled && (cfg.export.enabled || crate::systems::econ::market_on_cfg(cfg)),
+            // Real economy (plan E4, E12): the World market buys from seed;
+            // `SetExport` closes and reopens it.
+            export_open: true,
             leisure_tax: 0.0,
             ban_gambling: false,
             fixer_licence: true,
@@ -1363,9 +1362,6 @@ impl World {
 
     /// The M15 god commands (plan W42, phase 1).
     fn cmd_god_word(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
-        if !self.config.gossip.enabled {
-            return Err("the word is off".into());
-        }
         match *cmd {
             PlayerCommand::PlantRumour { about, deed, object, district, reach } => {
                 if !self.has::<crate::components::Identity>(about)
@@ -1574,9 +1570,6 @@ impl World {
     /// The M14 god commands on the plane (plan V42, phase 1).
     fn cmd_god_virt(&mut self, cmd: &PlayerCommand) -> Result<(Vec<EntityId>, String), String> {
         use crate::systems::{tech, virt};
-        if !virt::enabled(self) {
-            return Err("the Virt plane is off".into());
-        }
         match *cmd {
             PlayerCommand::WipeData(b) => {
                 if !self.has::<Building>(b) {

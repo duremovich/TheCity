@@ -148,10 +148,8 @@ pub fn snapshot(world: &mut World) {
             held_by_tier[b.lod as usize] += 1;
         }
     }
-    if crate::systems::lod::budget_on(world) {
-        for (t, h) in tiers.iter_mut().zip(held_by_tier) {
-            *t = t.saturating_sub(h);
-        }
+    for (t, h) in tiers.iter_mut().zip(held_by_tier) {
+        *t = t.saturating_sub(h);
     }
     let (mut gang_bodies, mut gang_stat) = (0u32, 0u32);
     for g in world.gangs() {
@@ -164,15 +162,12 @@ pub fn snapshot(world: &mut World) {
             }
         }
     }
-    let budget = crate::systems::lod::budget_on(world);
     let row = &mut world.stats.current;
     // With the budget off the columns stay zero (the M15 row).
-    if budget {
-        row.budget.tier_held = held_by_tier.iter().sum();
-        row.budget.tier_held_body = held_by_tier[Lod::Full as usize] + held_by_tier[Lod::Coarse as usize];
-        row.budget.gang_bodies = gang_bodies;
-        row.budget.gang_stat = gang_stat;
-    }
+    row.budget.tier_held = held_by_tier.iter().sum();
+    row.budget.tier_held_body = held_by_tier[Lod::Full as usize] + held_by_tier[Lod::Coarse as usize];
+    row.budget.gang_bodies = gang_bodies;
+    row.budget.gang_stat = gang_stat;
     row.population = population;
     row.employed = employed;
     row.homeless = homeless;
@@ -252,21 +247,13 @@ pub fn snapshot(world: &mut World) {
         row.commute_tpt_drive = tpt(acc[2], acc[3]);
     }
     // M14 V43 snapshots (0 with the plane off, V44).
-    if world.config.virt.enabled {
-        virt_snapshot(world);
-    }
+    virt_snapshot(world);
     // M15 W43 snapshots (0 with the word off, W44).
-    if world.config.gossip.enabled {
-        word_snapshot(world, &citizens);
-    }
+    word_snapshot(world, &citizens);
     // L2 (plan L34) snapshots (0 with `[living]` off).
-    if world.config.living.enabled {
-        living_snapshot(world, &citizens);
-    }
+    living_snapshot(world, &citizens);
     // Real economy (plan E45) snapshots (0 with the market off).
-    if crate::systems::econ::market_on(world) {
-        econ_snapshot(world, &citizens);
-    }
+    econ_snapshot(world, &citizens);
     // L2 phase 4: the kill rates by tier (0 with `[fviolence]` off).
     crate::systems::fviolence::snapshot(world);
 }
@@ -450,15 +437,11 @@ fn word_snapshot(world: &mut World, citizens: &[EntityId]) {
         };
         if s < corps.len() {
             let r = crate::systems::reputation::rep(world, c);
-            let comp = if crate::systems::competence::on(world) {
-                world.comp::<crate::components::Corp>(c).map_or(0.0, |cc| cc.competence)
-            } else {
-                0.0
-            };
+            let comp = world.comp::<crate::components::Corp>(c).map_or(0.0, |cc| cc.competence);
             corps[s] = [r.honour, r.standing, comp];
         }
     }
-    let law_comp = if crate::systems::competence::on(world) { world.law().map_or(0.0, |l| l.competence) } else { 0.0 };
+    let law_comp = world.law().map_or(0.0, |l| l.competence);
     // M15 phase 3: the Hunts under way, the longest chain among them (a
     // length: chain + 1), the open vendettas.
     let hunts_active = world.hunts.len() as u32;

@@ -39,11 +39,6 @@ const MAX_CONTACTS: usize = 6;
 /// Tiles of a Sump street from a Home door a fire barrel may stand on.
 const BARREL_REACH: u32 = 6;
 
-/// `[living] enabled && [leisure] enabled` (plan L5, L13).
-pub fn on(world: &World) -> bool {
-    world.config.living.enabled && world.config.leisure.enabled
-}
-
 fn coins(world: &World, id: EntityId) -> i64 {
     world.comp::<Wallet>(id).map_or(0, |w| w.coins)
 }
@@ -154,9 +149,6 @@ pub fn fun_per_hour(world: &World, id: EntityId, execs: &std::collections::BTree
 /// `splitmix64` hash of the seed and its id (no RNG draw); with leisure
 /// off nothing changes.
 pub fn seed_fun(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let lo = world.config.needs.fun_satisfied.clamp(0.0, 1.0);
     let seed = world.seed();
     // scan-ok: once, at seed
@@ -178,9 +170,6 @@ pub fn decay_fun(n: &mut Needs, rate: f32, hours: f32) {
 /// Plan L13, bodies: an hour of decay for every Full and Coarse agent (from
 /// `needs::run`'s hourly branch).
 pub fn bodies_hourly(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let execs = crate::systems::classes::exec_set(world);
     for id in world.bodies() {
         if world.comp::<Brain>(id).is_none_or(|b| b.lod == Lod::Statistical) {
@@ -203,9 +192,6 @@ pub fn stat_hour(world: &mut World, id: EntityId, execs: &std::collections::BTre
 
 /// Plan L13: mood's `fun_mood × (fun − 0.5)` bias (0 with leisure off).
 pub fn mood_bias(world: &World, id: EntityId) -> f32 {
-    if !on(world) {
-        return 0.0;
-    }
     world.comp::<Needs>(id).map_or(0.0, |n| world.config.needs.fun_mood * (n.fun - 0.5))
 }
 
@@ -318,10 +304,7 @@ pub fn price_of(world: &World, b: EntityId) -> i64 {
 
 /// L2 L14: inside a Club or Den with leisure on (a Drink there).
 pub fn drink_venue(world: &World, id: EntityId) -> bool {
-    on(world)
-        && here(world, id)
-            .and_then(|b| kind_of(world, b))
-            .is_some_and(|k| matches!(k, BuildingKind::Club | BuildingKind::Den))
+    here(world, id).and_then(|b| kind_of(world, b)).is_some_and(|k| matches!(k, BuildingKind::Club | BuildingKind::Den))
 }
 
 /// A Drink at a Club or Den: the visit is the venue's (a Bar's is not),
@@ -341,7 +324,7 @@ pub fn note_drink(world: &mut World, id: EntityId) {
 
 /// A Bar drink also lifts `fun` (the cheap rung) with leisure on.
 pub fn drink_fun(world: &mut World, id: EntityId) {
-    if on(world) && here(world, id).and_then(|b| kind_of(world, b)) == Some(BuildingKind::Bar) {
+    if here(world, id).and_then(|b| kind_of(world, b)) == Some(BuildingKind::Bar) {
         add_fun(world, id, world.config.leisure.gain.drink);
     }
 }
@@ -512,9 +495,6 @@ fn high_ok(world: &World, id: EntityId) -> bool {
 
 /// The walk's factor (`life::travel_factor`; 1 with the life pass off).
 fn travel(world: &World, tiles: u32) -> f32 {
-    if !crate::systems::life::on(world) {
-        return 1.0;
-    }
     crate::systems::life::travel_factor(world, crate::systems::life::walk_ticks(world, tiles))
 }
 
@@ -674,12 +654,8 @@ pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
         let hours = world.config.leisure.hangout_ticks as f32 / TICKS_PER_HOUR as f32;
         // L2 shadow fixes item 5: a lone hour is not a full hour's fun (11
         // of 15 HangOuts were "nobody there"); company scales it up.
-        let company = if crate::systems::fixes::item(world, 5) {
-            let lone = world.config.life.spot_lone_fun;
-            lone + (1.0 - lone) * social.clamp(0.0, 1.0)
-        } else {
-            1.0
-        };
+        let lone = world.config.life.spot_lone_fun;
+        let company = lone + (1.0 - lone) * social.clamp(0.0, 1.0);
         let score = (g.hangout_hour * hours * company + 0.1 * social.min(1.0)) * travel(world, t.manhattan(from));
         cands.push(Cand { rung: Rung::Free, act: ActionKind::HangOut, venue: None, spot: Some(t), score });
     }
@@ -702,9 +678,6 @@ fn pick_of(c: &Cand) -> UnwindPick {
 /// gang's Hideout door, and in a Sump district `barrels_per_sump` fire
 /// barrels on street tiles within 6 of a Home door (`splitmix64`).
 pub fn spots_daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let n = world.districts.len();
     let mut all: Vec<Vec<Spot>> = vec![Vec::new(); n];
     for kind in [BuildingKind::Bar, BuildingKind::Market, BuildingKind::Club, BuildingKind::NoodleBar] {
@@ -771,7 +744,7 @@ pub fn spots_daily(world: &mut World) {
 /// May `id` hang out at `s` (a Hideout's door is its members' only)?
 fn spot_ok(world: &World, id: EntityId, s: &Spot) -> bool {
     // L2 shadow fixes item 6: not the street just fled.
-    if crate::systems::fixes::item(world, 6) && crate::systems::fixes::avoided(world, id, s.tile) {
+    if crate::systems::fixes::avoided(world, id, s.tile) {
         return false;
     }
     match s.kind {
@@ -848,17 +821,14 @@ pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos,
     // L2 shadow fixes item 5: a spot past `spot_walk_cap_tiles` is not worth
     // the walk (195 min at midnight to an empty corner): within the cap,
     // else the nearest alone.
-    let fix = crate::systems::fixes::item(world, 5);
-    if fix {
-        let cap = world.config.life.spot_walk_cap_tiles;
-        let near: Vec<Spot> = spots.iter().copied().filter(|s| s.tile.manhattan(from) <= cap).collect();
-        spots = if near.is_empty() {
-            spots.iter().copied().min_by_key(|s| (s.tile.manhattan(from), s.tile)).into_iter().collect()
-        } else {
-            near
-        };
-    }
-    let enemies = if fix { crate::systems::fixes::enemy_tiles(world, id) } else { Vec::new() };
+    let cap = world.config.life.spot_walk_cap_tiles;
+    let near: Vec<Spot> = spots.iter().copied().filter(|s| s.tile.manhattan(from) <= cap).collect();
+    spots = if near.is_empty() {
+        spots.iter().copied().min_by_key(|s| (s.tile.manhattan(from), s.tile)).into_iter().collect()
+    } else {
+        near
+    };
+    let enemies = crate::systems::fixes::enemy_tiles(world, id);
     let now = world.tick;
     let today = world.day();
     let cs = contacts(world, id);
@@ -906,11 +876,9 @@ pub fn best_spot(world: &World, id: EntityId, from: TilePos) -> Option<(TilePos,
             // (strangers too, a little), less a strong term per Enemy near
             // it (a runner went back 18 times to the street where six beat
             // him).
-            if fix {
-                let others = present.map_or(0, |v| v.iter().filter(|&&o| o != id).count());
-                social += (0.1 * others as f32).min(0.5);
-                social -= cfg_life_penalty(world) * crate::systems::fixes::enemies_near(&enemies, s.tile) as f32;
-            }
+            let others = present.map_or(0, |v| v.iter().filter(|&&o| o != id).count());
+            social += (0.1 * others as f32).min(0.5);
+            social -= cfg_life_penalty(world) * crate::systems::fixes::enemies_near(&enemies, s.tile) as f32;
             let d = s.tile.manhattan(from);
             ((0.5 + social).max(0.0) * travel(world, d), d, s.tile, social)
         })
@@ -936,9 +904,7 @@ fn adult_free(world: &World, id: EntityId) -> bool {
 /// Spec § 2: Unwind is satisfied at `fun_satisfied` (and off for a child,
 /// a prisoner, or with leisure off).
 pub fn unwind_satisfied(world: &World, id: EntityId) -> bool {
-    !on(world)
-        || !adult_free(world, id)
-        || world.comp::<Needs>(id).is_none_or(|n| n.fun >= world.config.needs.fun_satisfied)
+    !adult_free(world, id) || world.comp::<Needs>(id).is_none_or(|n| n.fun >= world.config.needs.fun_satisfied)
 }
 
 /// Off shift in the Evening or Night (an exec once the office has shut).
@@ -1031,7 +997,7 @@ pub fn unwind_plan(world: &mut World, id: EntityId) -> Option<Plan> {
     world.unwind.insert(id, pick);
     // Plan L30: with the LOD budget on, a Seat at the venue is held from the
     // plan to the arrival (`unwind_plan` installs without `reserve_for`).
-    if let Some(v) = target.filter(|_| crate::systems::lod::budget_on(world)) {
+    if let Some(v) = target {
         let expires = world.tick + world.config.exec.reservation_ttl;
         world.reserve(id, crate::exec::ReservationKind::Seat { building: v }, expires);
     }
@@ -1042,7 +1008,7 @@ pub fn unwind_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// when broke (< 2 coins) or when the best spot outscores the local Bar's
 /// walk-weighted 1.0. `None`: the planner as before.
 pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
-    if !on(world) || crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some() {
+    if crate::systems::social::best_colocated_partner(world, id, -1.0, false).is_some() {
         return None;
     }
     let from = origin(world, id)?;
@@ -1063,10 +1029,9 @@ pub fn hangout_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// Plan L16: `already_satisfied(Socialise)`'s "no drink possible" clause is
 /// dropped when a spot is within `hangout_reach`.
 pub fn spot_in_reach(world: &World, id: EntityId) -> bool {
-    on(world)
-        && origin(world, id).is_some_and(|from| {
-            spots_near(world, id, from).iter().any(|s| s.tile.manhattan(from) <= world.config.leisure.hangout_reach)
-        })
+    origin(world, id).is_some_and(|from| {
+        spots_near(world, id, from).iter().any(|s| s.tile.manhattan(from) <= world.config.leisure.hangout_reach)
+    })
 }
 
 /// `LocationKey::Spot`: the spot of the agent's pick.
@@ -1078,9 +1043,6 @@ pub fn spot_of(world: &World, id: EntityId) -> Option<TilePos> {
 /// Scavenge when fun is below 0.3 and the purse below the cheap rung (the
 /// two actions' plan cost, `PlanCtx::fun_term`; review fix: not the goal).
 pub fn earn_fun_term(world: &World, id: EntityId) -> Option<f32> {
-    if !on(world) {
-        return None;
-    }
     let fun = world.comp::<Needs>(id)?.fun;
     (fun < 0.3 && coins(world, id) < 2).then(|| urgency(fun))
 }
@@ -1092,9 +1054,6 @@ pub fn earn_fun_term(world: &World, id: EntityId) -> Option<f32> {
 /// Plan L14: a leisure step may start (money is re-checked here, so a
 /// refusal moves none).
 pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> bool {
-    if !on(world) {
-        return false;
-    }
     let inside = here(world, id);
     let at_venue = |b: EntityId| inside == Some(b) && open(world, b) && door_ok(world, id, b);
     match kind {
@@ -1310,7 +1269,7 @@ fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
     let mut gain = world.config.leisure.gain.hangout_hour * hours.max(0.5);
     // L2 shadow fixes item 5: an hour alone on the corner is `spot_lone_fun`
     // of one in company.
-    if crate::systems::fixes::item(world, 5) && others.is_empty() {
+    if others.is_empty() {
         gain *= world.config.life.spot_lone_fun;
     }
     add_fun(world, id, gain);
@@ -1344,10 +1303,6 @@ fn hangout_done(world: &mut World, id: EntityId, started: Tick) {
         crate::systems::social::first_meeting(world, id, p, aff);
     } else {
         crate::systems::social::interacted(world, id, p);
-    }
-    let legacy = !world.config.gossip.enabled || world.config.gossip.legacy_second_hand;
-    if legacy {
-        crate::systems::social::gossip(world, id, p);
     }
     crate::systems::gossip::exchange(world, id, p, crate::systems::gossip::Venue::Chat);
     if world.edge(id, p).is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent)) {
@@ -1415,12 +1370,11 @@ pub fn bouts(world: &mut World) {
         // L2 shadow fixes item 9: a working day's shift, and in the pit (a
         // body inside, or a Statistical one credited by the clock): a
         // fighter won a bout while wandering Mid East on her rest day.
-        let fix = crate::systems::fixes::item(world, 9);
         let present = |f: EntityId| {
-            !fix || (world.comp::<Job>(f).is_some_and(|j| crate::exec::routine::is_workday(j.shift_key_at(world.tick)))
+            world.comp::<Job>(f).is_some_and(|j| crate::exec::routine::is_workday(j.shift_key_at(world.tick)))
                 && world.comp::<Brain>(f).is_some_and(|b| {
                     b.lod == Lod::Statistical || world.comp::<Position>(f).is_some_and(|p| p.building == Some(pit))
-                }))
+                })
         };
         let mut fighters: Vec<(f32, EntityId)> = ownership::staff_at(world, pit)
             .into_iter()
@@ -1457,13 +1411,8 @@ pub fn bouts(world: &mut World) {
         // L2 shadow fixes item 9: a bout is sanctioned, not an assault (its
         // `Lost` was read as Assaulted: rumours, news Stories, dread 0.82,
         // a best friend turned Enemy).
-        if crate::systems::fixes::item(world, 9) {
-            world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
-            world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
-        } else {
-            world.remember(winner, MemoryKind::Won, Some(loser), 0.4, 0.3, false);
-            world.remember(loser, MemoryKind::Lost, Some(winner), 0.5, -0.4, false);
-        }
+        world.remember(winner, MemoryKind::Bout, Some(loser), 0.4, 0.3, false);
+        world.remember(loser, MemoryKind::Bout, Some(winner), 0.5, -0.4, false);
         if let Some(s) = world.comp_mut::<crate::components::Skills>(winner) {
             s.fighting = (s.fighting + 0.01).min(1.0);
         }
@@ -1495,9 +1444,6 @@ pub fn bouts(world: &mut World) {
 /// visit; a table game's draw on `WordNs::Leisure` keyed `(day, id)`; the
 /// free rung adds `free_stat`.
 pub fn stat_daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let day = world.day();
     let ids: Vec<EntityId> = world.tier(Lod::Statistical).to_vec();
     for id in ids {
@@ -1616,9 +1562,6 @@ pub fn fronts_of(world: &World, gang: EntityId) -> Vec<EntityId> {
 /// Plan L20: the coins a gang keeps back from the daily stipends for the
 /// leader's Collect (`tribute_share` of the week's tribute and take).
 pub fn set_aside(world: &World, gang: EntityId) -> i64 {
-    if !on(world) {
-        return 0;
-    }
     let take: i64 = fronts_of(world, gang)
         .iter()
         .filter_map(|&b| world.comp::<Building>(b).and_then(|bd| bd.venue.as_ref()))
@@ -1632,7 +1575,7 @@ pub fn set_aside(world: &World, gang: EntityId) -> i64 {
 
 /// Plan L20: territory tribute credited today (`gang::daily_economy`).
 pub fn note_tribute(world: &mut World, gang: EntityId, coins: i64) {
-    if !on(world) || coins <= 0 {
+    if coins <= 0 {
         return;
     }
     if let Some(g) = world.comp_mut::<Gang>(gang) {
@@ -1646,9 +1589,6 @@ pub fn note_tribute(world: &mut World, gang: EntityId, coins: i64) {
 /// builds one, ≤ `fronts_max`, on a vacant Lot in a held district, else
 /// refits a derelict there.
 pub fn fronts_daily(world: &mut World, gang: EntityId) {
-    if !on(world) || !crate::systems::jobs::on(world) {
-        return;
-    }
     // Fronts on the city's deed that still name this gang close too.
     let mut named: Vec<EntityId> = fronts_of(world, gang);
     for k in [BuildingKind::FightPit, BuildingKind::Den] {
@@ -1748,9 +1688,6 @@ pub fn fronts_daily(world: &mut World, gang: EntityId) {
 /// `stims::deal_bar` with leisure on: the gang's open front (or a Club in
 /// its most-held district) nearest that district's centroid.
 pub fn deal_venue(world: &World, gang: EntityId, d: DistrictId) -> Option<EntityId> {
-    if !on(world) {
-        return None;
-    }
     let centroid = world.district(d).centroid;
     let front = fronts_of(world, gang)
         .into_iter()
@@ -1778,9 +1715,6 @@ fn is_leader(world: &World, id: EntityId) -> Option<EntityId> {
 /// L2 shadow fixes item 15: the start tick of the leader's running Lead
 /// plan (`None` with the fixes off or no Lead under way).
 fn lead_started(world: &World, gang: EntityId) -> Option<Tick> {
-    if !crate::systems::fixes::item(world, 15) {
-        return None;
-    }
     let leader = world.comp::<Gang>(gang)?.leader?;
     world.comp::<Brain>(leader)?.plan.as_ref().filter(|p| p.goal == GoalKind::Lead).map(|p| p.started_tick)
 }
@@ -1813,7 +1747,7 @@ fn call_due(world: &World, gang: EntityId) -> bool {
 
 /// Plan L20: the leader's `Lead` gate (`None`: not the leader, or nothing due).
 pub fn lead_considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
-    if !on(world) || world.has::<Sentence>(id) {
+    if world.has::<Sentence>(id) {
         return None;
     }
     let gang = is_leader(world, id)?;
@@ -1826,15 +1760,12 @@ pub fn lead_considerations(world: &World, id: EntityId) -> Option<(Vec<Considera
 
 /// `already_satisfied(Lead)`.
 pub fn lead_satisfied(world: &World, id: EntityId) -> bool {
-    !on(world) || is_leader(world, id).is_none_or(|g| !collect_due(world, g) && !call_due(world, g))
+    is_leader(world, id).is_none_or(|g| !collect_due(world, g) && !call_due(world, g))
 }
 
 /// Plan L20: the round: `GoTo(front) → Collect` per front on a collect day,
 /// then `GoTo(Hideout) → Collect` (the pay-out and the Call).
 pub fn lead_plan(world: &mut World, id: EntityId) -> Option<Plan> {
-    if !on(world) {
-        return None;
-    }
     let gang = is_leader(world, id)?;
     let hideout = world.hideout_of(gang)?;
     let mut steps = Vec::new();
@@ -1958,9 +1889,6 @@ pub fn stat_leaders(world: &mut World) {
 /// Plan L20: a Purist gang's preacher today: under Expand, `preach_share`
 /// of the members by `id.index % 100`, a busiest spot in a held district.
 pub fn preacher(world: &World, id: EntityId) -> bool {
-    if !on(world) {
-        return false;
-    }
     let Some(gang) = world.gang_of(id) else { return false };
     crate::systems::creeds::is_purist(world, gang)
         && world.comp::<Gang>(gang).is_some_and(|g| g.order == crate::components::Order::Expand)
@@ -2026,9 +1954,6 @@ fn preach_done(world: &mut World, id: EntityId) {
         .max_by(|a, b| a.1.total_cmp(&b.1).then(b.0.cmp(&a.0)))
         .map(|(o, _)| o);
     let Some(t) = listener else { return };
-    if !crate::systems::moves::on(world) {
-        return;
-    }
     let m = crate::word::SocialMove {
         actor: id,
         target: t,
@@ -2111,9 +2036,6 @@ pub fn hand_over(world: &mut World) {
 /// Midnight: the spots, the wealth decile, stale picks pruned, the hand-over,
 /// the fun columns of the closing day.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     spots_daily(world);
     let mut purses: Vec<i64> =
         world.with::<Wallet>().iter().filter_map(|&a| world.comp::<Wallet>(a)).map(|w| w.coins).collect();
@@ -2146,7 +2068,7 @@ pub fn daily(world: &mut World) {
 /// Hourly: the street density sample; 18:00 the off-screen leaders; the
 /// bouts at `bout_hour`; 21:00 the Statistical evening.
 pub fn hourly(world: &mut World) {
-    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    if !world.tick.is_multiple_of(TICKS_PER_HOUR) {
         return;
     }
     if world.spots.is_empty() {
@@ -2198,9 +2120,6 @@ fn sample_density(world: &mut World) {
 
 /// The day's fun columns (from `systems::stats` at midnight).
 pub fn fun_columns(world: &World) -> (f32, f32) {
-    if !on(world) {
-        return (0.0, 0.0);
-    }
     let sat = world.config.needs.fun_satisfied;
     let (mut sum, mut n, mut ok) = (0.0f32, 0u32, 0u32);
     for lod in [Lod::Full, Lod::Coarse, Lod::Statistical] {

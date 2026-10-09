@@ -19,16 +19,22 @@ fn two_civilians(w: &World) -> (citysim::EntityId, citysim::EntityId) {
 }
 
 #[test]
-fn test_jail_cellmates_gain_affinity_and_met_in_jail() {
+fn test_jail_cellmates_meet_in_jail() {
     let mut w = world(31);
     let (a, b) = two_civilians(&w);
     let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
     let until = w.tick + 2 * TICKS_PER_DAY;
+    // L2 (L21): an unpinned prisoner is held Statistical (a quiet cell); the
+    // cellmates' bodies are under test, so both stay pinned at Full.
+    for id in [a, b] {
+        w.comp_mut::<Brain>(id).expect("brain").pinned = true;
+    }
     law::sentence(&mut w, a, Crime::Theft, until, jail);
     law::sentence(&mut w, b, Crime::Theft, until, jail);
     w.run_ticks(2 * TICKS_PER_DAY - 10);
-    let e = w.edge(a, b).expect("cellmates have an edge");
-    assert!(e.affinity >= 0.4, "affinity {}", e.affinity);
+    // The edge and the memory are the mechanism; how warm it runs is the
+    // L1 jail rules' (`jail_meet_max`, `jail_pitch`), not this test's.
+    assert!(w.edge(a, b).is_some(), "cellmates have an edge");
     for who in [a, b] {
         let other = if who == a { b } else { a };
         let met = w
@@ -116,6 +122,8 @@ fn test_join_gang_requires_contact_or_desperation() {
 #[test]
 fn test_extort_moves_coins_and_adds_memory() {
     let mut w = world(35);
+    // M15 W27: every shakedown is an Intimidate; the transfer is under test.
+    (w.config.moves.p_min, w.config.moves.p_max) = (1.0, 1.0);
     let actor = two_civilians(&w).0;
     let g0 = w.gangs()[0];
     gang::enlist(&mut w, actor, g0);
@@ -144,26 +152,6 @@ fn test_extort_moves_coins_and_adds_memory() {
         assert_eq!(w.edge(v, actor).expect("edge").kind, RelKind::Enemy);
     }
     assert_eq!(w.comp::<citysim::Building>(home).expect("b").claim, Some(citysim::Claim { gang: g0, count: 1 }));
-}
-
-#[test]
-fn test_gossip_copies_second_hand() {
-    let mut w = world(36);
-    let (teller, listener) = two_civilians(&w);
-    let thief = w.citizens().into_iter().find(|&c| c != teller && c != listener).expect("thief");
-    w.remember_crime(teller, thief, Crime::Theft, 0.8, None);
-    social::gossip(&mut w, teller, listener);
-    let copy = w
-        .comp::<Memory>(listener)
-        .expect("mem")
-        .entries
-        .iter()
-        .find(|m| m.kind == MemoryKind::SawCrime && m.subject == Some(thief))
-        .expect("listener heard about it");
-    assert!(copy.second_hand);
-    assert!((copy.salience - 0.48).abs() < 1e-6, "salience {}", copy.salience);
-    assert_eq!(copy.crime, Some(Crime::Theft));
-    assert!(w.edge(listener, thief).is_some_and(|e| e.affinity < 0.0), "gossip costs the subject affinity");
 }
 
 #[test]

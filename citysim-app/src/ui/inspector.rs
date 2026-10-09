@@ -113,9 +113,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 bar(ui, "belonging", n.belonging, Some(0.25));
                 bar(ui, "intimacy", n.intimacy, Some(0.25));
                 // L2 § 8: fun (with leisure on).
-                if citysim::systems::leisure::on(world) {
-                    bar(ui, "fun", n.fun, Some(0.25));
-                }
+                bar(ui, "fun", n.fun, Some(0.25));
                 if let Some(t) = n.starving_since {
                     ui.colored_label(
                         RED,
@@ -126,7 +124,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         }
         // L2 § 8: the last Enjoyed, the leisure pick (a HangOut's spot) and
         // the contacts a HangOut looks for.
-        if citysim::systems::leisure::on(world) && world.comp::<Needs>(id).is_some() {
+        if world.comp::<Needs>(id).is_some() {
             section(ui, "Leisure", |ui| {
                 let last = world.comp::<citysim::Memory>(id).and_then(|m| {
                     m.entries.iter().filter(|e| e.kind == citysim::MemoryKind::Enjoyed).map(|e| e.tick).max()
@@ -315,9 +313,6 @@ fn hacking(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     use citysim::systems::virt;
     use citysim::virt::Track;
     use citysim::{Asset, Kit, Skills};
-    if !virt::enabled(world) {
-        return;
-    }
     let deck = world.comp::<Kit>(id).and_then(|k| k.deck.map(|d| (d, k.deck_tier)));
     let live = world.runner_of.get(&id).copied().and_then(|r| world.runs.get(&r));
     let past: Vec<&citysim::virt::Run> = world.run_log.iter().rev().filter(|r| r.runner == id).take(6).collect();
@@ -423,10 +418,6 @@ fn story_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
 /// heard store.
 fn known_tab(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     use citysim::systems::{memory, reputation};
-    if !world.config.gossip.enabled {
-        ui.label("The word is off.");
-        return;
-    }
     let r = reputation::rep(world, id);
     section(ui, "Reputation", |ui| {
         bar(ui, "dread", r.dread, None);

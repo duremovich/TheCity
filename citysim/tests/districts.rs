@@ -367,16 +367,6 @@ fn test_daytrace_legacy_decode() {
     let now =
         DayTrace { district: DistrictId(7), flags: citysim::trace_flags::ALIVE | citysim::trace_flags::SQUAT, ..t };
     assert_eq!(DayTrace::from(u32::from(now)), now);
-    // Load fixes UNSET to the zone's first district.
-    let mut w = v2_world();
-    let a = w.citizens().into_iter().find(|&a| w.has::<Brain>(a)).expect("agent");
-    w.insert(a, Trace::default());
-    w.comp_mut::<Trace>(a).expect("trace").push(0, t, 30);
-    w.migrate_legacy();
-    let fixed = w.comp::<Trace>(a).expect("trace").on_day(0).expect("day 0");
-    assert_eq!(fixed.district, DistrictId(5), "Sump West is the Sump's first district");
-    assert_eq!(districts::first_of_zone(&w, Zone::Mid), DistrictId(3));
-    assert_eq!(districts::first_of_zone(&w, Zone::Vats), DistrictId(2));
 }
 
 #[test]

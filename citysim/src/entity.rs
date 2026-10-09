@@ -20,8 +20,7 @@ impl fmt::Display for EntityId {
 }
 
 impl EntityId {
-    /// A sentinel that is never alive: the serde default for ids a v1 save
-    /// lacks, fixed up by `World::migrate_legacy`.
+    /// A sentinel that is never alive.
     pub const NONE: EntityId = EntityId { index: u32::MAX, generation: u32::MAX };
 
     pub fn none() -> EntityId {

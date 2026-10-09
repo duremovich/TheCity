@@ -23,7 +23,7 @@ use crate::world::World;
 
 /// E21: the band runs with `no_net` and `[treasury] enabled`.
 pub fn on(world: &World) -> bool {
-    crate::systems::econ::no_net(world) && world.config.treasury.enabled
+    crate::systems::econ::no_net(world)
 }
 
 /// E21: the midnight pass (in `living::run` in `budget::daily`'s slot).

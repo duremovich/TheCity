@@ -247,7 +247,7 @@ pub fn opinion(world: &World, agent: EntityId, faction: EntityId) -> f32 {
     } else {
         0.0
     };
-    let taste = if crate::systems::moves::on(world) { colours_taste(world, agent, faction) } else { 0.0 };
+    let taste = colours_taste(world, agent, faction);
     let bias = if world.gang_of(agent) == Some(faction) || world.corp_of_agent(agent) == Some(faction) {
         world.config.reputation.own_bias
     } else {
@@ -305,9 +305,6 @@ impl Acc {
 /// subject is the agent (spec). Then the axes of every living adult, every
 /// gang, corp and the Law, the regard matrix, and the W48 sample.
 pub fn rebuild(world: &mut World) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let cfg = world.config.reputation.clone();
     let now = world.tick;
     let n = world.alive.len();
@@ -377,7 +374,6 @@ pub fn rebuild(world: &mut World) {
         }
     }
     let captain = world.law().and_then(|l| l.captain);
-    let news = crate::systems::news::on(world);
     let mut out: Vec<(EntityId, Reputation)> = Vec::with_capacity(adults.len() + 32);
     for &a in &adults {
         let kb = Acc::get(&acc.known, a);
@@ -418,7 +414,7 @@ pub fn rebuild(world: &mut World) {
             known_by: kb,
             top: top_of(&acc, a),
             pinned: None,
-            press: if news { press_of(world, a) } else { 0.0 },
+            press: press_of(world, a),
         };
         out.push((a, r));
     }
@@ -554,14 +550,12 @@ pub fn rebuild(world: &mut World) {
     rebuild_regard(world);
     sample_kill_watch(world, &acc.known);
     // W40: each corp's honour at this midnight, 14 kept (Spin's honour drop).
-    if news {
-        for c in world.corps() {
-            let h = rep(world, c).honour;
-            if let Some(cc) = world.comp_mut::<Corp>(c) {
-                cc.honour_hist.push_back(h);
-                while cc.honour_hist.len() > 14 {
-                    cc.honour_hist.pop_front();
-                }
+    for c in world.corps() {
+        let h = rep(world, c).honour;
+        if let Some(cc) = world.comp_mut::<Corp>(c) {
+            cc.honour_hist.push_back(h);
+            while cc.honour_hist.len() > 14 {
+                cc.honour_hist.pop_front();
             }
         }
     }

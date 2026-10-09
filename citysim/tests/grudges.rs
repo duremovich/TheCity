@@ -354,32 +354,6 @@ fn test_vendetta_opens_and_retaliate_targets_it() {
 }
 
 #[test]
-fn test_fear_term_off_is_bit_identical() {
-    let mut w = World::new(42, Config::load().word_off());
-    w.run_ticks(TICKS_PER_DAY + 10);
-    let gang = led_gang(&mut w);
-    let i = faction::gather_inputs(&w, gang).expect("a leader");
-    assert_eq!(i.fear, None, "no word, no fear term");
-    assert_eq!(i.vendetta, None);
-    let off = faction::score_orders(&i, &w.config.gangs);
-    assert!(off.iter().all(|s| s.considerations.iter().all(|c| c.name != "1-fear" && c.name != "fear")));
-    // With the word on, the terms multiply in exactly.
-    let on = faction::score_orders(&faction::OrderInputs { fear: Some(0.5), ..i.clone() }, &w.config.gangs);
-    for s in &off {
-        if let Some(t) = on.iter().find(|x| x.order == s.order && x.corp_target == s.corp_target) {
-            let f = match s.order {
-                Order::Raid | Order::Contest => 0.8,
-                Order::LieLow => 0.75,
-                _ => 1.0,
-            };
-            let flat = t.score - t.considerations.iter().map(|c| c.output).product::<f32>();
-            let raw_off = s.score - flat;
-            assert!((t.score - flat - raw_off * f).abs() < 1e-5, "{:?}", s.order);
-        }
-    }
-}
-
-#[test]
 fn test_contract_lost_on_honour() {
     let mut w = World::new(42, Config::load());
     let sec: Vec<EntityId> = w

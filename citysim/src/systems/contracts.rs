@@ -42,13 +42,6 @@ use crate::utility::Consideration;
 use crate::word::{Deed, HuntPhase, Intel, IntelSource};
 use crate::world::World;
 
-/// The board runs with `[contracts] enabled` and L2's master switch (plan
-/// C3: M16a stands on L2's wages, venues, ledger and quotas, so `[living]
-/// enabled = false` alone is `living_off()`'s city, the L2 gate's device).
-pub fn on(world: &World) -> bool {
-    world.config.contracts.enabled && world.config.living.enabled
-}
-
 /// C10: the Statistical regular day's hash salt ("REGULAR!").
 const REGULAR_SALT: u64 = 0x5245_4755_4C41_5221;
 /// C20: the hire pass day's hash salt ("HIREPASS").
@@ -240,9 +233,6 @@ pub const SEEDED_FIXERS: [&str; 1] = ["Mid East"];
 /// then the lower id). No coin is minted.
 pub fn seed_fixers(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    if !on(world) {
-        return built;
-    }
     for name in SEEDED_FIXERS {
         let Some(d) = world.districts.iter().position(|x| x.name == name) else {
             log(world, 0, format!("no {name} district: Fixer not seeded"));
@@ -332,15 +322,6 @@ fn seed_owner(world: &World, door: TilePos) -> Option<EntityId> {
         .map(|(_, _, a)| a)
 }
 
-/// C40: a save written before M16a (format < 3) with contracts on gets its
-/// Fixers at the first midnight (`daily`), when Lots or derelicts exist.
-/// Called before `save_version` is bumped.
-pub fn migrate(world: &mut World) {
-    if on(world) && !world.fixers_seeded && world.save_version < 3 {
-        world.fixers_due = true;
-    }
-}
-
 // ---------------------------------------------------------------------------
 // Price, posting, visibility
 // ---------------------------------------------------------------------------
@@ -421,7 +402,7 @@ fn hear_hired(world: &mut World, id: ContractId, holder: EntityId) {
             c.known_by.push(holder);
         }
     }
-    if !world.has::<Memory>(holder) || !world.config.gossip.enabled {
+    if !world.has::<Memory>(holder) {
         return;
     }
     let sal = world.config.gossip.deed_sal.get(Deed::Hired);
@@ -444,9 +425,6 @@ fn hear_hired(world: &mut World, id: ContractId, holder: EntityId) {
 /// purse only), the renege draw, the `Hired` first-hand writes, the
 /// Fixer's book, the log and `ContractPosted`.
 pub fn post(world: &mut World, p: Posting) -> Result<ContractId, Refusal> {
-    if !on(world) {
-        return Err(Refusal::Disabled);
-    }
     let live = world.contracts.values().filter(|c| c.is_live()).count();
     if live >= world.config.contracts.max_open {
         return Err(Refusal::MaxOpen);
@@ -1213,24 +1191,22 @@ fn renege(world: &mut World, id: ContractId, c: &Contract) {
     set_status(world, id, ContractStatus::Reneged, "");
     let Some(taker) = c.taker else { return };
     let Some(buyer) = c.buyer.or(c.agent) else { return };
-    if world.config.gossip.enabled {
-        let d = crate::systems::gossip::home_district(world, taker)
-            .or_else(|| world.comp::<Position>(taker).map(|p| world.district_of(p.tile)));
-        if let Some(d) = d {
-            crate::systems::gossip::post_deed(world, d, Deed::Betrayed, Some(buyer), Some(taker));
-        }
-        if crate::systems::law::living(world, taker) && world.has::<Memory>(taker) {
-            let sal = world.config.gossip.deed_sal.get(Deed::Betrayed);
-            let e = MemoryEntry {
-                subject: Some(buyer),
-                salience: sal,
-                valence: -world.config.gossip.deed_sev.get(Deed::Betrayed) * sal,
-                deed: Some(Deed::Betrayed),
-                object: Some(taker),
-                ..MemoryEntry::blank(MemoryKind::Rumour, world.tick)
-            };
-            crate::systems::memory::hear_entry(world, taker, e);
-        }
+    let d = crate::systems::gossip::home_district(world, taker)
+        .or_else(|| world.comp::<Position>(taker).map(|p| world.district_of(p.tile)));
+    if let Some(d) = d {
+        crate::systems::gossip::post_deed(world, d, Deed::Betrayed, Some(buyer), Some(taker));
+    }
+    if crate::systems::law::living(world, taker) && world.has::<Memory>(taker) {
+        let sal = world.config.gossip.deed_sal.get(Deed::Betrayed);
+        let e = MemoryEntry {
+            subject: Some(buyer),
+            salience: sal,
+            valence: -world.config.gossip.deed_sev.get(Deed::Betrayed) * sal,
+            deed: Some(Deed::Betrayed),
+            object: Some(taker),
+            ..MemoryEntry::blank(MemoryKind::Rumour, world.tick)
+        };
+        crate::systems::memory::hear_entry(world, taker, e);
     }
     let w = world.config.contracts.renege_grudge;
     if crate::systems::law::living(world, taker) {
@@ -1297,7 +1273,7 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
 /// attempt; a dead buyer cancels (the refund lands in its wallet, its
 /// estate's).
 pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
-    if !on(world) || world.contracts.is_empty() {
+    if world.contracts.is_empty() {
         return;
     }
     let Some(ids) = world.by_party.get(&dead).cloned() else { return };
@@ -1343,9 +1319,6 @@ pub fn strike_kill_p(world: &World, taker: EntityId, victim: EntityId) -> Option
 /// fulfilled, a strike lost fails the attempt; a Hit won whose target
 /// lives sends the run back to asking (a death settled at `on_death`).
 pub fn on_strike(world: &mut World, taker: EntityId, victim: EntityId, winner: EntityId, died: bool) {
-    if !on(world) {
-        return;
-    }
     let Some(r) = world.contract_runs.get(&taker).filter(|r| r.target == victim).cloned() else { return };
     let Some(c) = world.contracts.get(&r.contract).cloned() else { return };
     if c.status != ContractStatus::Taken {
@@ -1543,7 +1516,7 @@ fn pay_sighting(
 /// live Locate on `who` that `observer` sees pays it (at most one per
 /// `min_gap_hours`, `cap_sightings` in all).
 pub fn on_sighting(world: &mut World, observer: EntityId, who: EntityId, tile: TilePos) {
-    if !on(world) || world.locate_targets.is_empty() {
+    if world.locate_targets.is_empty() {
         return;
     }
     let Some(ids) = world.locate_targets.get(&who).cloned() else { return };
@@ -1558,9 +1531,6 @@ pub fn on_sighting(world: &mut World, observer: EntityId, who: EntityId, tile: T
 /// run goes back to asking (the tracker keeps tracking until the cap or
 /// the deadline). No-op for any other run.
 pub fn on_contact(world: &mut World, taker: EntityId) {
-    if !on(world) {
-        return;
-    }
     let Some(r) = world.contract_runs.get(&taker).cloned() else { return };
     let Some(c) = world.contracts.get(&r.contract) else { return };
     if c.kind != ContractKind::Locate || c.status != ContractStatus::Taken {
@@ -1588,9 +1558,6 @@ pub fn on_contact(world: &mut World, taker: EntityId) {
 /// `hire_reach_tiles` of its Home door, else direct; the Hunt cools for
 /// `hunt_cooldown_days`. Tier-neutral: a Statistical holder posts at once.
 pub fn try_hire(world: &mut World, holder: EntityId, target: EntityId, weight: f32) -> bool {
-    if !on(world) {
-        return false;
-    }
     if crate::systems::hunt::might_gap(world, holder, target) >= world.config.contracts.hire_gap {
         return false;
     }
@@ -1636,9 +1603,6 @@ pub fn try_hire(world: &mut World, holder: EntityId, target: EntityId, weight: f
 /// whose heaviest eligible grudge passes the gap test and whose Hunt
 /// considerations without the might term score `hire_min` or more, hire.
 pub fn hire_pass(world: &mut World) {
-    if !on(world) || !crate::systems::hunt::on(world) {
-        return;
-    }
     let day = world.day();
     let seed = world.seed();
     let now = world.tick;
@@ -1698,9 +1662,6 @@ pub fn gun_gate(world: &World, id: EntityId) -> bool {
 /// run) and mode B (network at a Fixer within reach: not a regular, or
 /// lapsing within 2 days, and through the gun gate).
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
-    if !on(world) {
-        return None;
-    }
     if let Some(r) = world.contract_runs.get(&id) {
         let c = world.contracts.get(&r.contract)?;
         if c.status != ContractStatus::Taken || !free_adult(world, id) {
@@ -1737,9 +1698,6 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
 /// same without the Attack, a Guard `GoTo(client) → Guard`. No run:
 /// `GoTo(Fixer) → Network`.
 pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
-    if !on(world) {
-        return None;
-    }
     let step = |action, target| ActionInstance { action, target, tile: None };
     let now = world.tick;
     let Some(r) = world.contract_runs.get(&id).cloned() else {
@@ -1923,9 +1881,6 @@ pub fn on_guard_done(world: &mut World, id: EntityId, client: Option<EntityId>) 
 /// runs' validity (a dead, jailed or cuffed taker), the queued live
 /// records hourly, the matching at `match_hour`, the midnight pass.
 pub fn run(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let now = world.tick;
     while let Some(&(t, id)) = world.ledger_due.first() {
         if t > now {
@@ -1981,7 +1936,7 @@ fn start_queued(world: &mut World) {
 /// C17: `lod::set_lod`'s promotion branch: a ledger record whose taker or
 /// target became a body before `due` turns live (room permitting).
 pub fn on_promoted(world: &mut World, id: EntityId) {
-    if !on(world) || world.ledger_due.is_empty() {
+    if world.ledger_due.is_empty() {
         return;
     }
     let Some(ids) = world.by_party.get(&id).cloned() else { return };
@@ -2178,9 +2133,6 @@ pub fn escrow_stuck(world: &World) -> i64 {
 
 /// C38's snapshot columns, from `stats::snapshot`.
 pub fn snapshot(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let open = world.contracts.values().filter(|c| c.is_live()).count() as u32;
     let fixers: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Fixer).to_vec();
     let regulars: u32 = fixers.iter().filter_map(|&f| world.comp::<Broker>(f)).map(|k| k.regulars.len() as u32).sum();
@@ -2259,9 +2211,6 @@ pub fn god_post(
 /// record now, past the matching (a living agent; gang and corp takers are
 /// phase 2).
 pub fn god_take(world: &mut World, id: ContractId, taker: EntityId) -> Result<(), String> {
-    if !on(world) {
-        return Err("contracts are off".into());
-    }
     let c = world.contracts.get(&id).ok_or("no such contract")?;
     if !c.is_open() {
         return Err("the contract is not open".into());

@@ -6,16 +6,14 @@
 //! and hole records between fictional agents of a simulated city.
 
 use citysim::ledger::{ActiveSource, VictimClass, ViolenceSource};
-use citysim::systems::{bind, chrome, demography, fviolence, law, lod};
+use citysim::systems::{bind, demography, fviolence, law, lod};
 use citysim::{
     ActionInstance, ActionKind, Bound, Brain, Config, DeathCause, DistrictId, EntityId, Gang, GoalKind, Hole, HoleKind,
     Household, Lod, Order, Personality, Plan, PlayerCommand, Position, World, TICKS_PER_HOUR,
 };
 
 fn world(seed: u64) -> World {
-    let w = World::new(seed, Config::load().scaled_to(300));
-    assert!(fviolence::on(&w), "[living] and [fviolence] on in the shipped config");
-    w
+    World::new(seed, Config::load().scaled_to(300))
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -259,12 +257,11 @@ fn test_riot_hole_binds_a_rioter() {
 }
 
 #[test]
-fn test_harvest_folds_abduction_daily() {
+fn test_harvest_cell_abducts() {
     use citysim::{AssetKind, Kit, Slot};
-    // Two cities: [fviolence] on (the Harvest cell) and off (M13's roll as control).
-    let build = |fv: bool| -> (World, EntityId, EntityId) {
-        let mut cfg = Config::load().scaled_to(300);
-        cfg.fviolence.enabled = fv;
+    // The Harvest cell of `fviolence::daily` (M13's own abduction roll is gone).
+    let build = || -> (World, EntityId, EntityId) {
+        let cfg = Config::load().scaled_to(300);
         let mut w = World::new(47, cfg);
         w.run_ticks(TICKS_PER_HOUR + 1);
         let (g, _) = gang_and_member(&mut w);
@@ -287,13 +284,7 @@ fn test_harvest_folds_abduction_daily() {
         w.config.chrome.abduct_base = 1e9;
         (w, g, v)
     };
-    let (mut off, _, v_off) = build(false);
-    chrome::abduction_daily(&mut off);
-    assert!(!law::living(&off, v_off), "control: M13's roll takes the visible chrome with fviolence off");
-
-    let (mut on, g, v) = build(true);
-    chrome::abduction_daily(&mut on);
-    assert!(law::living(&on, v), "with fviolence on abduction_daily draws nothing");
+    let (mut on, g, v) = build();
     assert!(on.holes.values().all(|h| h.kind != HoleKind::Abducted));
     on.config.fviolence.prior = Default::default();
     on.config.fviolence.prior.order = [0.0; 4];

@@ -35,7 +35,7 @@ fn config() -> Config {
 
 fn city() -> World {
     let w = World::new(42, config());
-    assert!(wages::on(&w) && econ::market_on(&w), "wages and the market are on for the tests");
+    assert!(wages::on(&w), "wages and the market are on for the tests");
     w
 }
 
@@ -480,7 +480,7 @@ fn test_wages_off_identical() {
     let mut cfg = Config::load();
     cfg.economy2.wages = false;
     let mut w = World::new(42, cfg);
-    assert!(!wages::on(&w) && econ::market_on(&w));
+    assert!(!wages::on(&w));
     assert!(w.treasury().map_or(0, |t| t.coins) > w.config.world.treasury_initial - 1_000, "no capital moved");
     w.run_ticks(3 * TICKS_PER_DAY);
     for r in &w.stats.history {

@@ -78,126 +78,115 @@ pub struct Config {
     /// M13 phase 4 the security robot (§ 5); absent from pre-M13 saves likewise.
     #[serde(default = "RobotsCfg::off")]
     pub robots: RobotsCfg,
-    /// M14 the Virt plane (§ 1); absent from pre-M14 saves: off (plan V44).
-    /// `enabled = false` turns off relink, runs, ICE upkeep, Lab production,
-    /// research upkeep and every tier cap.
-    #[serde(default = "VirtCfg::off")]
+    /// M14 the Virt plane (§ 1).
+    #[serde(default)]
     pub virt: VirtCfg,
-    /// M14 decks (§ 2); read only while `[virt]` is on.
-    #[serde(default = "DecksCfg::off")]
+    /// M14 decks (§ 2).
+    #[serde(default)]
     pub decks: DecksCfg,
-    /// M14 ICE and the contest (§ 3); read only while `[virt]` is on.
-    #[serde(default = "IceCfg::off")]
+    /// M14 ICE and the contest (§ 3).
+    #[serde(default)]
     pub ice: IceCfg,
-    /// M14 Data and Labs (§ 4); read only while `[virt]` is on.
-    #[serde(default = "DataCfg::off")]
+    /// M14 Data and Labs (§ 4).
+    #[serde(default)]
     pub data: DataCfg,
-    /// M14 the tech tree (§ 5); read only while `[virt]` is on.
-    #[serde(default = "TechCfg::off")]
+    /// M14 the tech tree (§ 5).
+    #[serde(default)]
     pub tech: TechCfg,
-    /// M14 hacking goals and orders (§ 6); read only while `[virt]` is on.
-    #[serde(default = "HackCfg::off")]
+    /// M14 hacking goals and orders (§ 6).
+    #[serde(default)]
     pub hack: HackCfg,
-    /// M14 faction databases (§ 6); read only while `[virt]` is on.
-    #[serde(default = "DbCfg::off")]
+    /// M14 faction databases (§ 6).
+    #[serde(default)]
     pub db: DbCfg,
-    /// M15 § 1 the word (pools, exchange, hearing, kin, reputation);
-    /// absent from pre-M15 saves: off (plan W44). `enabled = false` is the
-    /// master switch for every M15 system.
-    #[serde(default = "GossipCfg::off")]
+    /// M15 § 1 the word (pools, exchange, hearing, kin, reputation).
+    #[serde(default)]
     pub gossip: GossipCfg,
-    /// M15 § 2 reputation; read only while `[gossip]` is on.
-    #[serde(default = "ReputationCfg::off")]
+    /// M15 § 2 reputation.
+    #[serde(default)]
     pub reputation: ReputationCfg,
     /// M15 § 2 appearance and taste (phase 2).
-    #[serde(default = "TasteCfg::off")]
+    #[serde(default)]
     pub taste: TasteCfg,
     /// M15 § 2 the Purist creed (phase 2).
-    #[serde(default = "CreedsCfg::off")]
+    #[serde(default)]
     pub creeds: CreedsCfg,
     /// M15 § 3 grudges (phase 3).
-    #[serde(default = "GrudgesCfg::off")]
+    #[serde(default)]
     pub grudges: GrudgesCfg,
     /// M15 § 4 the Hunt (phase 3).
-    #[serde(default = "HuntCfg::off")]
+    #[serde(default)]
     pub hunt: HuntCfg,
     /// M15 § 5 social skills (phase 2).
-    #[serde(default = "SkillsCfg::off")]
+    #[serde(default)]
     pub skills: SkillsCfg,
     /// M15 § 6 the social move (phase 2; `contradict_conf` from phase 1).
-    #[serde(default = "MovesCfg::off")]
+    #[serde(default)]
     pub moves: MovesCfg,
     /// M15 § 6 competence and poaching (phase 2).
-    #[serde(default = "CompetenceCfg::off")]
+    #[serde(default)]
     pub competence: CompetenceCfg,
     /// M15 § 7 Feeds and stories (phase 4).
-    #[serde(default = "NewsCfg::off")]
+    #[serde(default)]
     pub news: NewsCfg,
     /// Life pass L1 (docs/SHADOW_V1.md): travel, sleep, stale targets, the
-    /// poor's fallback, witness and edge spam, order dwell; absent from
-    /// pre-L1 saves: off.
-    #[serde(default = "LifeCfg::off")]
+    /// poor's fallback, witness and edge spam, order dwell; the L2 shadow
+    /// fixes' keys; the violence fixes (`violence_fixes`, in flight).
+    #[serde(default)]
     pub life: LifeCfg,
-    /// Life pass L2 (docs/LIFE_L2.md, plan L5): the master switch; absent
-    /// from pre-L2 saves: off. `enabled = false` (`--l2-off`) is the
-    /// M15-closing city byte for byte.
-    #[serde(default = "LivingCfg::off")]
+    /// Life pass L2 (docs/LIFE_L2.md, plan L5).
+    #[serde(default)]
     pub living: LivingCfg,
     /// L2 § 1 jobs (plan L5: `LivingJobsCfg`, as `JobsCfg` is `[world.jobs]`).
-    #[serde(default = "LivingJobsCfg::off")]
+    #[serde(default)]
     pub jobs: LivingJobsCfg,
     /// L2 § 1-2 leisure (phase 1 reads only the price table).
-    #[serde(default = "LeisureCfg::off")]
+    #[serde(default)]
     pub leisure: LeisureCfg,
     /// L2 § 1 the Treasury budget band.
-    #[serde(default = "BudgetCfg::off")]
+    #[serde(default)]
     pub budget: BudgetCfg,
     /// L2 § 1 the export hook (off by default).
     #[serde(default = "ExportCfg::off")]
     pub export: ExportCfg,
     /// L2 § 3 faction violence off screen (phase 4; plan L24-L28).
-    #[serde(default = "FviolenceCfg::off")]
+    #[serde(default)]
     pub fviolence: FviolenceCfg,
     pub demography: DemographyCfg,
     pub brain: BrainCfg,
     pub exec: ExecCfg,
     pub lod: LodCfg,
     pub levers: LeversCfg,
-    /// M16a (docs/M16_CONTRACTS.md, plan C3): contract records, the
-    /// master switch; absent from pre-M16a saves: off. `enabled = false`
-    /// (`--contracts-off`) is the L2-closing city byte for byte.
-    #[serde(default = "ContractsCfg::off")]
+    /// M16a (docs/M16_CONTRACTS.md, plan C3): contract records.
+    #[serde(default)]
     pub contracts: ContractsCfg,
-    /// M16a § 2: Fixers and regulars (read only behind `contracts::on`).
-    #[serde(default = "FixersCfg::off")]
+    /// M16a § 2: Fixers and regulars .
+    #[serde(default)]
     pub fixers: FixersCfg,
-    /// M16a § 3: missions and the strike (phase 2; read only behind `contracts::on`).
-    #[serde(default = "MissionsCfg::off")]
+    /// M16a § 3: missions and the strike (phase 2).
+    #[serde(default)]
     pub missions: MissionsCfg,
-    /// M16a § 3: Locate bounties (16a's three keys; read only behind `contracts::on`).
-    #[serde(default = "BountyCfg::off")]
+    /// M16a § 3: Locate bounties (16a's three keys).
+    #[serde(default)]
     pub bounty: BountyCfg,
-    /// The Real economy (docs/ECONOMY_V2.md, plan E1): the master switch and
-    /// the phase switches; absent from pre-milestone saves: off.
-    /// `enabled = false` (`--econ-off`) is the `EC_BASE` city to the column.
-    #[serde(default = "Economy2Cfg::off")]
+    /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
+    /// always on; `wages` and `no_safety_net` are the phase switches in flight.
+    #[serde(default)]
     pub economy2: Economy2Cfg,
-    /// Spec § 3 `[world_market]`: the World's book per good (phase 1; read
-    /// only behind `econ::market_on`).
-    #[serde(default = "WorldMarketCfg::off")]
+    /// Spec § 3 `[world_market]`: the World's book per good (phase 1).
+    #[serde(default)]
     pub world_market: WorldMarketCfg,
-    /// Real economy § 4 (plan E26-E30): Missions and donations (read only
-    /// behind `charity::on`).
-    #[serde(default = "CharityCfg::off")]
+    /// Real economy § 4 (plan E26-E30): Missions and donations.
+    #[serde(default)]
     pub charity: CharityCfg,
     /// Real economy addendum 19 (plan E37-E42): the child protective
-    /// service and the work camps (read only behind `camp::on`).
-    #[serde(default = "CampCfg::off")]
+    /// service and the work camps.
+    #[serde(default)]
     pub camp: CampCfg,
     /// Spec § 5 `[treasury]` (plan E13, E14, E21): the property rate and
     /// the working balance (phase 2; read only behind `econ::wages_on`),
     /// the tax band (phase 3a).
-    #[serde(default = "TreasuryCfg::off")]
+    #[serde(default)]
     pub treasury: TreasuryCfg,
 }
 
@@ -1280,10 +1269,6 @@ pub struct LodCfg {
     /// `1 + chrome_bind_w × Kit.fighting`.
     #[serde(default)]
     pub chrome_bind_w: f32,
-    /// L2 phase 3 (plan L21-L23, L29-L30): the LOD budget and the churn;
-    /// `false` (the default, and every pre-L2 config) is the M15 city.
-    #[serde(default)]
-    pub budget: bool,
     /// L2 (L21): sentenced, unpinned agents are held Statistical.
     #[serde(default = "LodCfg::default_true")]
     pub held_prisoners: bool,
@@ -2963,7 +2948,6 @@ fn default_city_ice() -> u8 {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct VirtCfg {
-    pub enabled: bool,
     pub terminal_fee: i64,
     pub jacked_fight_mult: f32,
     pub dump_sanity: f32,
@@ -2980,14 +2964,7 @@ pub struct VirtCfg {
 
 impl Default for VirtCfg {
     fn default() -> Self {
-        VirtCfg::off()
-    }
-}
-
-impl VirtCfg {
-    pub fn off() -> VirtCfg {
         VirtCfg {
-            enabled: false,
             terminal_fee: 3,
             jacked_fight_mult: 0.3,
             dump_sanity: 0.1,
@@ -3017,12 +2994,6 @@ pub struct DecksCfg {
 
 impl Default for DecksCfg {
     fn default() -> Self {
-        DecksCfg::off()
-    }
-}
-
-impl DecksCfg {
-    pub fn off() -> DecksCfg {
         DecksCfg {
             deck_shop_min: 0.4,
             hack_seed_scale: 0.8,
@@ -3116,12 +3087,6 @@ pub struct IceCfg {
 
 impl Default for IceCfg {
     fn default() -> Self {
-        IceCfg::off()
-    }
-}
-
-impl IceCfg {
-    pub fn off() -> IceCfg {
         IceCfg {
             hack_w: 1.0,
             ice_price: vec![0, 150, 600, 2000],
@@ -3159,7 +3124,9 @@ impl IceCfg {
             trace_floor: 0.15,
         }
     }
+}
 
+impl IceCfg {
     /// `fry_base[ice]`, `p_fry_kill[ice]`, `trace_p[ice]` (0 past the table).
     pub fn at(v: &[f32], ice: u8) -> f32 {
         v.get(usize::from(ice)).copied().unwrap_or(0.0)
@@ -3199,12 +3166,6 @@ pub struct DataCfg {
 
 impl Default for DataCfg {
     fn default() -> Self {
-        DataCfg::off()
-    }
-}
-
-impl DataCfg {
-    pub fn off() -> DataCfg {
         DataCfg {
             data_per_shift: 3.0,
             store_cap: 2000,
@@ -3325,12 +3286,6 @@ pub struct TechCfg {
 
 impl Default for TechCfg {
     fn default() -> Self {
-        TechCfg::off()
-    }
-}
-
-impl TechCfg {
-    pub fn off() -> TechCfg {
         TechCfg {
             requires: TechRequires {
                 implant: vec![1, 2, 3],
@@ -3364,7 +3319,9 @@ impl TechCfg {
             research_min_days: 0,
         }
     }
+}
 
+impl TechCfg {
     pub fn upkeep_data_at(&self, tier: u8) -> u32 {
         self.upkeep_data.get(usize::from(tier)).copied().unwrap_or(0)
     }
@@ -3409,12 +3366,6 @@ pub struct HackCfg {
 
 impl Default for HackCfg {
     fn default() -> Self {
-        HackCfg::off()
-    }
-}
-
-impl HackCfg {
-    pub fn off() -> HackCfg {
         HackCfg {
             hack_min: 0.3,
             hack_ref: 500,
@@ -3450,12 +3401,6 @@ pub struct DbCfg {
 
 impl Default for DbCfg {
     fn default() -> Self {
-        DbCfg::off()
-    }
-}
-
-impl DbCfg {
-    pub fn off() -> DbCfg {
         DbCfg { db_cap: 32, sighting_days: 14 }
     }
 }
@@ -3543,7 +3488,6 @@ impl DeedTable {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GossipCfg {
-    pub enabled: bool,
     pub gossip_min: f32,
     pub max_hops: u8,
     pub hop_salience: f32,
@@ -3562,23 +3506,13 @@ pub struct GossipCfg {
     pub reach0: DeedTable,
     pub deed_sal: DeedTable,
     pub deed_sev: DeedTable,
-    /// W9: today's `social::gossip` runs exactly; the new channel writes
-    /// `heard` only and touches no edge.
-    pub legacy_second_hand: bool,
     /// W10: kin captured at death.
     pub kin_cap: usize,
 }
 
 impl Default for GossipCfg {
     fn default() -> Self {
-        GossipCfg::off()
-    }
-}
-
-impl GossipCfg {
-    pub fn off() -> GossipCfg {
         GossipCfg {
-            enabled: false,
             gossip_min: 0.3,
             max_hops: 6,
             hop_salience: 0.7,
@@ -3603,7 +3537,6 @@ impl GossipCfg {
             deed_sev: DeedTable::of([
                 1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1, 0.7, 0.0,
             ]),
-            legacy_second_hand: true,
             kin_cap: 12,
         }
     }
@@ -3635,12 +3568,6 @@ pub struct ReputationCfg {
 
 impl Default for ReputationCfg {
     fn default() -> Self {
-        ReputationCfg::off()
-    }
-}
-
-impl ReputationCfg {
-    pub fn off() -> ReputationCfg {
         //                        kil  ass  rob   ext  str  arr  mar  evi   stk  rai  fou  ave  bet   rep  poa  hir  gav
         let dread_w =
             DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0, 0.3, 0.0]);
@@ -3688,12 +3615,6 @@ pub struct TasteCfg {
 
 impl Default for TasteCfg {
     fn default() -> Self {
-        TasteCfg::off()
-    }
-}
-
-impl TasteCfg {
-    pub fn off() -> TasteCfg {
         use crate::word::Taste;
         let t = |dress, chrome, own_colours, rival_colours| Taste { dress, chrome, own_colours, rival_colours };
         TasteCfg {
@@ -3729,12 +3650,6 @@ pub struct CreedsCfg {
 
 impl Default for CreedsCfg {
     fn default() -> Self {
-        CreedsCfg::off()
-    }
-}
-
-impl CreedsCfg {
-    pub fn off() -> CreedsCfg {
         CreedsCfg {
             seed_purist: false,
             purist_name: "The Unplugged".to_string(),
@@ -3789,12 +3704,6 @@ pub struct GrudgesCfg {
 
 impl Default for GrudgesCfg {
     fn default() -> Self {
-        GrudgesCfg::off()
-    }
-}
-
-impl GrudgesCfg {
-    pub fn off() -> GrudgesCfg {
         GrudgesCfg {
             grudge_min: 0.15,
             grudge_decay: 0.01,
@@ -3817,7 +3726,6 @@ impl GrudgesCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct HuntCfg {
-    pub enabled: bool,
     pub hunt_min: f32,
     pub max_hunts: usize,
     pub hunt_flat: f32,
@@ -3837,14 +3745,7 @@ pub struct HuntCfg {
 
 impl Default for HuntCfg {
     fn default() -> Self {
-        HuntCfg::off()
-    }
-}
-
-impl HuntCfg {
-    pub fn off() -> HuntCfg {
         HuntCfg {
-            enabled: false,
             hunt_min: 0.5,
             max_hunts: 16,
             hunt_flat: 0.0,
@@ -3878,12 +3779,6 @@ pub struct SkillsCfg {
 
 impl Default for SkillsCfg {
     fn default() -> Self {
-        SkillsCfg::off()
-    }
-}
-
-impl SkillsCfg {
-    pub fn off() -> SkillsCfg {
         SkillsCfg {
             skill_scale: 1.0,
             rarity_exp: 4.0,
@@ -3916,7 +3811,6 @@ impl Default for MoveBias {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MovesCfg {
-    pub enabled: bool,
     pub move_k: f32,
     pub bias: MoveBias,
     pub w_m: f32,
@@ -3934,14 +3828,7 @@ pub struct MovesCfg {
 
 impl Default for MovesCfg {
     fn default() -> Self {
-        MovesCfg::off()
-    }
-}
-
-impl MovesCfg {
-    pub fn off() -> MovesCfg {
         MovesCfg {
-            enabled: false,
             move_k: 4.0,
             bias: MoveBias::default(),
             w_m: 0.5,
@@ -3963,7 +3850,6 @@ impl MovesCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CompetenceCfg {
-    pub enabled: bool,
     pub exec_w: f32,
     pub comp_w: f32,
     pub comp_ref: f32,
@@ -3982,14 +3868,7 @@ pub struct CompetenceCfg {
 
 impl Default for CompetenceCfg {
     fn default() -> Self {
-        CompetenceCfg::off()
-    }
-}
-
-impl CompetenceCfg {
-    pub fn off() -> CompetenceCfg {
         CompetenceCfg {
-            enabled: false,
             exec_w: 0.4,
             comp_w: 1.0,
             comp_ref: 0.25,
@@ -4008,7 +3887,6 @@ impl CompetenceCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NewsCfg {
-    pub enabled: bool,
     pub reach_base: f32,
     pub reach_per_reporter: f32,
     pub story_reach: f32,
@@ -4032,14 +3910,7 @@ pub struct NewsCfg {
 
 impl Default for NewsCfg {
     fn default() -> Self {
-        NewsCfg::off()
-    }
-}
-
-impl NewsCfg {
-    pub fn off() -> NewsCfg {
         NewsCfg {
-            enabled: false,
             reach_base: 0.2,
             reach_per_reporter: 0.15,
             story_reach: 0.8,
@@ -4064,7 +3935,6 @@ impl NewsCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LifeCfg {
-    pub enabled: bool,
     /// A discretionary goal's travel factor: `1 / (1 + walk / travel_half_ticks)`
     /// (a walk this long halves the score), floored at `travel_min`.
     pub travel_half_ticks: f32,
@@ -4143,28 +4013,9 @@ pub struct LifeCfg {
     /// `Earn` cools for `scavenge_cool_hours`.
     pub scavenge_dry_max: u8,
     pub scavenge_cool_hours: u64,
-    /// L2 shadow fixes (docs/SHADOW_V2.md "L2 shadow fixes (what landed)"):
-    /// the master switch of the 21 `[bug]` items. Off (`LifeCfg::off`, a
-    /// pre-fix save, `--life-off`, and `--l2-off` through
-    /// `Config::living_off`) is the 56f3110 city byte for byte. The
-    /// sub-switches below are read only with it on.
-    pub l2_fixes: bool,
-    /// Item 1: a commute once started holds until arrival (the Work plan
-    /// owns the walk for its shift, as `raid_plan` owns its chain), and the
-    /// leave-for-work gate reads the walk at the real speed.
-    pub commute_latch: bool,
-    /// Item 2: an in-shift work step is not outbid (only starvation below
-    /// `starving_hunger` or danger interrupts) ...
-    pub shift_commit: bool,
     /// ... and a shift cut short pays pro rata from this share of it.
     pub shift_pro_rata: f32,
     pub starving_hunger: f32,
-    /// Item 3: a Sleep is held from its first tick (starvation or danger
-    /// excepted) and runs to `sleep_wake_energy` (it ended at 0.9 and Idle
-    /// planned the next a few minutes later: 1-6 min Sleeps all night);
-    /// Idle plans Sleep only below `idle_sleep_energy`; Unwind, Eat and
-    /// Earn carry an energy term below `energy_brake`.
-    pub sleep_commit: bool,
     pub sleep_wake_energy: f32,
     pub idle_sleep_energy: f32,
     pub energy_brake: f32,
@@ -4177,12 +4028,7 @@ pub struct LifeCfg {
     /// Unwind and Socialise cool this long after the flight.
     pub avoid_spot_ticks: u64,
     pub flee_clear_ticks: u64,
-    /// Item 7: an agent keeps its tier at least this long (an equal-priority
-    /// newcomer waits), and a demotion waits for a paid step to end.
-    pub lod_dwell: bool,
     pub lod_dwell_ticks: u64,
-    /// Item 8: a Statistical hungry hour whose Eat fails sleeps at night.
-    pub stat_sleep_futile_eat: bool,
     /// Item 10: guard-prisoner affinity in the cells stops at this.
     pub jail_affinity_cap: f32,
     /// Item 11: an employee who has missed this many workdays is dismissed
@@ -4200,14 +4046,11 @@ pub struct LifeCfg {
     /// Item 18: no freelance run where the target's ICE beats the attack by
     /// `[ice] flatline_gap` unless `U(wealth)` is at least this.
     pub hack_gap_wealth: f32,
-    /// Item 19: Beg at a HangOut spot with company.
-    pub beg_at_spot: bool,
     /// The violence fixes (2026-10-09, the wages-on diagnosis): three
     /// missing mechanisms that inflated off-screen killings and chrome
-    /// episodes. Master switch; off (`LifeCfg::off`, a pre-fix save,
-    /// `--life-off`, and `--l2-off` through `Config::living_off`) is the
-    /// 644eb10 city byte for byte. The sub-switches are read only with it
-    /// on; `CITYSIM_VFIX_OFF=1,3` leaves single items off.
+    /// episodes. Master switch (in flight); off is the 644eb10 city byte for
+    /// byte. The sub-switches are read only with it on;
+    /// `CITYSIM_VFIX_OFF=1,3` leaves single items off.
     pub violence_fixes: bool,
     /// Item 1: the ledger's `VictimClass::Street` (no Home): what evictees
     /// suffer on screen is learned and applied to the homeless only, not
@@ -4233,14 +4076,7 @@ pub struct LifeCfg {
 
 impl Default for LifeCfg {
     fn default() -> Self {
-        LifeCfg::off()
-    }
-}
-
-impl LifeCfg {
-    pub fn off() -> LifeCfg {
         LifeCfg {
-            enabled: false,
             travel_half_ticks: 120.0,
             travel_min: 0.15,
             sleep_min_ticks: 240,
@@ -4279,12 +4115,8 @@ impl LifeCfg {
             escort_van_ticks: 60,
             scavenge_dry_max: 3,
             scavenge_cool_hours: 4,
-            l2_fixes: false,
-            commute_latch: true,
-            shift_commit: true,
             shift_pro_rata: 0.5,
             starving_hunger: 0.1,
-            sleep_commit: true,
             sleep_wake_energy: 0.99,
             idle_sleep_energy: 0.9,
             energy_brake: 0.5,
@@ -4293,9 +4125,7 @@ impl LifeCfg {
             spot_enemy_penalty: 0.5,
             avoid_spot_ticks: 1440,
             flee_clear_ticks: 30,
-            lod_dwell: true,
             lod_dwell_ticks: 180,
-            stat_sleep_futile_eat: true,
             jail_affinity_cap: 0.3,
             noshow_fire_days: 7,
             muster_walk_cap_ticks: 480,
@@ -4303,7 +4133,6 @@ impl LifeCfg {
             deal_busy_to: 120,
             told_cooldown_days: 3,
             hack_gap_wealth: 0.9,
-            beg_at_spot: true,
             violence_fixes: false,
             vf_street_class: true,
             vf_street_prior_mult: 3.0,
@@ -4319,7 +4148,6 @@ impl LifeCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LivingCfg {
-    pub enabled: bool,
     /// L2 (coordinator ruling on M14, 2026-10-08): a corp keeps its standing
     /// order this many days after taking it against a shock rescore ...
     pub corp_order_dwell_days: u64,
@@ -4359,14 +4187,7 @@ pub struct LivingCfg {
 
 impl Default for LivingCfg {
     fn default() -> Self {
-        LivingCfg::off()
-    }
-}
-
-impl LivingCfg {
-    pub fn off() -> LivingCfg {
         LivingCfg {
-            enabled: false,
             corp_order_dwell_days: 3,
             corp_order_margin: 0.05,
             desist_base: 0.0,
@@ -4424,7 +4245,6 @@ impl SeedVenuesCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LivingJobsCfg {
-    pub enabled: bool,
     pub seed_venues: SeedVenuesCfg,
     /// Of `found_cost`: a refit of a derelict Block.
     pub refit_frac: f32,
@@ -4448,14 +4268,7 @@ pub struct LivingJobsCfg {
 
 impl Default for LivingJobsCfg {
     fn default() -> Self {
-        LivingJobsCfg::off()
-    }
-}
-
-impl LivingJobsCfg {
-    pub fn off() -> LivingJobsCfg {
         LivingJobsCfg {
-            enabled: false,
             seed_venues: SeedVenuesCfg::default(),
             refit_frac: 0.5,
             fab_yield: 0.6,
@@ -4559,7 +4372,6 @@ impl Default for FunGainCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct LeisureCfg {
-    pub enabled: bool,
     pub price_base: PriceBaseCfg,
     pub front_markup: f32,
     // --- phase 2 (spec § 1-2 and plan keys).
@@ -4606,14 +4418,7 @@ pub struct LeisureCfg {
 
 impl Default for LeisureCfg {
     fn default() -> Self {
-        LeisureCfg::off()
-    }
-}
-
-impl LeisureCfg {
-    pub fn off() -> LeisureCfg {
         LeisureCfg {
-            enabled: false,
             price_base: PriceBaseCfg::default(),
             front_markup: 1.2,
             house_edge: 0.08,
@@ -4649,7 +4454,6 @@ impl LeisureCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct BudgetCfg {
-    pub enabled: bool,
     /// `[lo, hi]` Treasury coins.
     pub band: [i64; 2],
     /// Plan key: days in a row on one side before the band acts (spec 3).
@@ -4665,14 +4469,7 @@ pub struct BudgetCfg {
 
 impl Default for BudgetCfg {
     fn default() -> Self {
-        BudgetCfg::off()
-    }
-}
-
-impl BudgetCfg {
-    pub fn off() -> BudgetCfg {
         BudgetCfg {
-            enabled: false,
             band: [30_000, 60_000],
             band_hold_days: 3,
             works_step: 10,
@@ -4684,25 +4481,13 @@ impl BudgetCfg {
     }
 }
 
-/// L2 § 1 the export hook's per-good numbers (Food, Parts, Data).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
-pub struct ExportGoodsCfg {
-    pub food: i64,
-    pub parts: i64,
-    pub data: i64,
-}
-
-/// L2 § 1 `[export]`: the World account buys a slice of Food, Parts, Data.
+/// L2 § 1 `[export]`: what is left of L2's export hook under the World
+/// market (2026-10-09: the flat-price hook and its switch retired).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ExportCfg {
-    pub enabled: bool,
+    /// The World account's opening treasury when a donation creates it first.
     pub treasury_ref: i64,
-    pub cap_per_day: ExportGoodsCfg,
-    pub price: ExportGoodsCfg,
-    /// A corp Farm's food kept back from export.
-    pub export_floor: u32,
     /// Plan key: a Fab's Parts kept back.
     pub parts_floor: u32,
     /// Plan key (deviation: M14 has no Data sell floor): a Lab's Data kept back.
@@ -4717,15 +4502,7 @@ impl Default for ExportCfg {
 
 impl ExportCfg {
     pub fn off() -> ExportCfg {
-        ExportCfg {
-            enabled: false,
-            treasury_ref: 20_000,
-            cap_per_day: ExportGoodsCfg { food: 50, parts: 20, data: 5 },
-            price: ExportGoodsCfg { food: 3, parts: 18, data: 40 },
-            export_floor: 200,
-            parts_floor: 20,
-            data_floor: 100,
-        }
+        ExportCfg { treasury_ref: 20_000, parts_floor: 20, data_floor: 100 }
     }
 }
 
@@ -4735,7 +4512,6 @@ impl ExportCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct FviolenceCfg {
-    pub enabled: bool,
     /// Days of the cells' windows the rates read (at most `ledger::RATE_DAYS`).
     pub rate_days: usize,
     /// Body-days of evidence the prior is worth.
@@ -4813,14 +4589,7 @@ impl Default for FvPriorCfg {
 
 impl Default for FviolenceCfg {
     fn default() -> Self {
-        FviolenceCfg::off()
-    }
-}
-
-impl FviolenceCfg {
-    pub fn off() -> FviolenceCfg {
         FviolenceCfg {
-            enabled: false,
             rate_days: 14,
             prior_weight: 48.0,
             fv_mult: 1.0,
@@ -4944,42 +4713,16 @@ impl Config {
         self.shop = ShopCfg::off();
         self.stims = StimsCfg::off();
         self.robots = RobotsCfg::off();
-        // L1: the life pass is the 2,000 city's (the v1 gates keep v1 days),
-        // and so is L1b's food price (the v1 economy prices at 3).
-        self.life = LifeCfg::off();
+        // L1b's food price is the 2,000 city's (the v1 economy prices at 3).
+        // Since 2026-10-09 the life pass, the plane, the word, the living
+        // city, contracts and the World market run here too: their off
+        // switches are retired. The switches in flight are pinned off here
+        // (`[economy2] wages`, `no_safety_net`), so an experiment in
+        // `config.toml` never reaches the unit-test city; `[life]
+        // violence_fixes` follows the shipped default.
         self.economy.price_base = 3.0;
-        // M14 V44: no Virt plane, Labs, ICE, tech caps; M15 W44: no word;
-        // L2 (plan L5): no living city.
-        self.virt_off().word_off().living_off()
-    }
-
-    /// M14 (plan V44, V46): every M14 section `off()`: no relink, runs, ICE
-    /// upkeep, Lab production, research upkeep or tier cap (`--virt-off`).
-    pub fn virt_off(mut self) -> Config {
-        self.virt = VirtCfg::off();
-        self.decks = DecksCfg::off();
-        self.ice = IceCfg::off();
-        self.data = DataCfg::off();
-        self.tech = TechCfg::off();
-        self.hack = HackCfg::off();
-        self.db = DbCfg::off();
-        self
-    }
-
-    /// M15 (plan W44, W46): every M15 section `off()`: no pools, exchange,
-    /// hearing, kin channel or reputation, and today's `social::gossip`
-    /// (`--word-off`).
-    pub fn word_off(mut self) -> Config {
-        self.gossip = GossipCfg::off();
-        self.reputation = ReputationCfg::off();
-        self.taste = TasteCfg::off();
-        self.creeds = CreedsCfg::off();
-        self.grudges = GrudgesCfg::off();
-        self.hunt = HuntCfg::off();
-        self.skills = SkillsCfg::off();
-        self.moves = MovesCfg::off();
-        self.competence = CompetenceCfg::off();
-        self.news = NewsCfg::off();
+        self.economy2.wages = false;
+        self.economy2.no_safety_net = false;
         self
     }
 
@@ -5021,67 +4764,15 @@ impl Config {
         c.shop = ShopCfg::off();
         c.stims = StimsCfg::off();
         c.robots = RobotsCfg::off();
-        // M14 V44: the parity table never saw a Researcher or a runner;
-        // M15 W44: nor a rumour; L2 (plan L17): nor a venue.
-        c.virt_off().word_off().living_off()
-    }
-
-    /// L2 (plan L17): the leisure calibration city: `[living]`, `[jobs]`
-    /// and `[leisure]` on (their spec values), the band, the export and
-    /// the rest of L2 off; venues seed on the city's deed (no corps).
-    pub fn with_leisure(mut self) -> Config {
-        self.living.enabled = true;
-        self.jobs.enabled = true;
-        self.leisure.enabled = true;
-        self.budget = BudgetCfg::off();
-        self.export = ExportCfg::off();
-        self
-    }
-
-    /// L2 (plan L5, L32): every L2 section `off()` (`--l2-off`): no
-    /// venues, Fabs, staffing overrides, Sweep, band or export, and (phase
-    /// 3) no LOD budget.
-    pub fn living_off(mut self) -> Config {
-        self.lod.budget = false;
-        // The L2 shadow fixes ride `[life]` but are L2's: off with it.
-        self.life.l2_fixes = false;
-        // So do the violence fixes (the ledger is L2's; the chrome cap
-        // keeps `--l2-off` the M15 city byte for byte).
-        self.life.violence_fixes = false;
-        self.living = LivingCfg::off();
-        self.jobs = LivingJobsCfg::off();
-        self.leisure = LeisureCfg::off();
-        self.budget = BudgetCfg::off();
-        self.export = ExportCfg::off();
-        self.fviolence = FviolenceCfg::off();
-        // M16a (plan C3): contracts stand on L2's wages, venues, ledger and
-        // quotas, so `--l2-off` (and with it `v1_profile` and
-        // `calibration_city`) turns them off too.
-        // Real economy (plan E1): the economy needs `[living]` (the export
-        // hook, the band's state, the jobs), so it goes with it.
-        self.contracts_off().econ_off()
-    }
-
-    /// Real economy (plan E1, E2): every `[economy2]` section `off()`
-    /// (`--econ-off`): no World market, no crossings for migrants or the
-    /// fence, imports to the City as before; the `EC_BASE` city to the column.
-    pub fn econ_off(mut self) -> Config {
-        self.economy2 = Economy2Cfg::off();
-        self.world_market = WorldMarketCfg::off();
-        self.charity = CharityCfg::off();
-        self.camp = CampCfg::off();
-        self.treasury = TreasuryCfg::off();
-        self
-    }
-
-    /// M16a (plan C3, C39): every M16a section `off()` (`--contracts-off`):
-    /// no Fixers, records, matching, missions or bounties.
-    pub fn contracts_off(mut self) -> Config {
-        self.contracts = ContractsCfg::off();
-        self.fixers = FixersCfg::off();
-        self.missions = MissionsCfg::off();
-        self.bounty = BountyCfg::off();
-        self
+        // 2026-10-09 (the off switches retired): the life pass, the Virt
+        // plane, the word, the living city, contracts and the World market
+        // run here as in the shipped city. The switches in flight are pinned
+        // off (`[economy2] wages`, `no_safety_net`), so a wages experiment in
+        // `config.toml` never bakes into the stat table; `[life]
+        // violence_fixes` follows the shipped default.
+        c.economy2.wages = false;
+        c.economy2.no_safety_net = false;
+        c
     }
 
     /// The same city at `n` residents: jobs, opening stocks, the Treasury, the
@@ -5164,8 +4855,6 @@ impl<T: Default + Copy> KindTable<T> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ContractsCfg {
-    /// The master switch (`--contracts-off`).
-    pub enabled: bool,
     /// Open and taken records at once; a post past it is refused.
     pub max_open: usize,
     /// Closed records are dropped at midnight after this many days
@@ -5206,14 +4895,7 @@ pub struct ContractsCfg {
 
 impl Default for ContractsCfg {
     fn default() -> Self {
-        ContractsCfg::off()
-    }
-}
-
-impl ContractsCfg {
-    pub fn off() -> ContractsCfg {
         ContractsCfg {
-            enabled: false,
             max_open: 256,
             closed_keep_days: 30,
             price_base: KindTable { hit: 400, beat: 120, guard: 25, locate: 20 },
@@ -5298,12 +4980,6 @@ pub struct FixersCfg {
 
 impl Default for FixersCfg {
     fn default() -> Self {
-        FixersCfg::off()
-    }
-}
-
-impl FixersCfg {
-    pub fn off() -> FixersCfg {
         FixersCfg {
             fixer_cut: 0.2,
             fixer_lawfulness: 0.35,
@@ -5349,12 +5025,6 @@ pub struct MissionsCfg {
 
 impl Default for MissionsCfg {
     fn default() -> Self {
-        MissionsCfg::off()
-    }
-}
-
-impl MissionsCfg {
-    pub fn off() -> MissionsCfg {
         MissionsCfg {
             max_missions: 12,
             squad_below: 0.6,
@@ -5384,12 +5054,6 @@ pub struct BountyCfg {
 
 impl Default for BountyCfg {
     fn default() -> Self {
-        BountyCfg::off()
-    }
-}
-
-impl BountyCfg {
-    pub fn off() -> BountyCfg {
         BountyCfg { per_sighting: 15, cap_sightings: 10, min_gap_hours: 6 }
     }
 }
@@ -5403,10 +5067,6 @@ impl BountyCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Economy2Cfg {
-    /// The master switch (`--econ-off`).
-    pub enabled: bool,
-    /// E1: phase 1's switch (`econ::market_on`, with `[world_market] enabled`).
-    pub market: bool,
     /// E1: phase 2's switch (`econ::wages_on`).
     pub wages: bool,
     /// E1: phase 3a's switch (`econ::no_net`), only after the stop rule.
@@ -5472,15 +5132,7 @@ pub struct Economy2Cfg {
 
 impl Default for Economy2Cfg {
     fn default() -> Self {
-        Economy2Cfg::off()
-    }
-}
-
-impl Economy2Cfg {
-    pub fn off() -> Economy2Cfg {
         Economy2Cfg {
-            enabled: false,
-            market: false,
             wages: false,
             no_safety_net: false,
             emigrate_cost: 0,
@@ -5643,9 +5295,6 @@ impl PropertyRateCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TreasuryCfg {
-    /// E1: phase 3a's band switch (phase 2 reads `property_rate` and
-    /// `treasury_initial` behind `econ::wages_on` alone).
-    pub enabled: bool,
     pub property_rate: PropertyRateCfg,
     pub treasury_initial: i64,
     pub tax_min: f32,
@@ -5662,14 +5311,7 @@ pub struct TreasuryCfg {
 
 impl Default for TreasuryCfg {
     fn default() -> Self {
-        TreasuryCfg::off()
-    }
-}
-
-impl TreasuryCfg {
-    pub fn off() -> TreasuryCfg {
         TreasuryCfg {
-            enabled: false,
             property_rate: PropertyRateCfg::default(),
             treasury_initial: 12_000,
             tax_min: 0.05,
@@ -5711,7 +5353,6 @@ impl Default for GoodCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct WorldMarketCfg {
-    pub enabled: bool,
     /// The World account's treasury, refilled to this both ways each midnight (E6).
     pub treasury_ref: i64,
     /// E7: the appetite walk's mean reversion and daily noise.
@@ -5738,14 +5379,7 @@ pub struct WorldMarketCfg {
 
 impl Default for WorldMarketCfg {
     fn default() -> Self {
-        WorldMarketCfg::off()
-    }
-}
-
-impl WorldMarketCfg {
-    pub fn off() -> WorldMarketCfg {
         WorldMarketCfg {
-            enabled: false,
             treasury_ref: 50_000,
             revert: 0.05,
             sd: 0.03,
@@ -5768,7 +5402,9 @@ impl WorldMarketCfg {
             cap_wages: [0; 3],
         }
     }
+}
 
+impl WorldMarketCfg {
     /// The good's block.
     pub fn good(&self, good: crate::outside::ExportGood) -> &GoodCfg {
         match good {
@@ -5783,7 +5419,6 @@ impl WorldMarketCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CharityCfg {
-    pub enabled: bool,
     /// Missions at seed (the Sump first); 0 seeds none.
     pub seed: u32,
     /// A Mission serves the hungry poor whose door (Home, else tile) is within this.
@@ -5820,14 +5455,7 @@ pub struct CharityCfg {
 
 impl Default for CharityCfg {
     fn default() -> Self {
-        CharityCfg::off()
-    }
-}
-
-impl CharityCfg {
-    pub fn off() -> CharityCfg {
         CharityCfg {
-            enabled: false,
             seed: 1,
             reach_tiles: 40,
             meal_markup: 1,
@@ -5851,7 +5479,6 @@ impl CharityCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CampCfg {
-    pub enabled: bool,
     /// E38: `Child.hunger_days` (consecutive unfed days; 3 kills) at which
     /// the service takes a child (must be ≤ 2).
     pub take_days: u8,
@@ -5880,14 +5507,7 @@ pub struct CampCfg {
 
 impl Default for CampCfg {
     fn default() -> Self {
-        CampCfg::off()
-    }
-}
-
-impl CampCfg {
-    pub fn off() -> CampCfg {
         CampCfg {
-            enabled: false,
             take_days: 2,
             work_age: 10,
             camp_yield: 0.15,

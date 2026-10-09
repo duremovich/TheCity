@@ -4,9 +4,7 @@
 //! or a Drink, a per-district pool that the Statistical tier draws from once
 //! a day, and the kin channel that hands a killing or a beating to the
 //! victim's family and friends. Every roll is on a keyed word stream
-//! (`SimRng::word`), never the world or an agent stream, and nothing here
-//! writes `Memory.entries` or an edge while `[gossip] legacy_second_hand`
-//! holds (plan W9, W46): phase 1 adds knowledge that no decision reads.
+//! (`SimRng::word`), never the world or an agent stream.
 
 use rand::Rng;
 use rand_chacha::ChaCha8Rng;
@@ -78,7 +76,7 @@ fn same_key(a: &PoolEntry, b: &PoolEntry) -> bool {
 /// hole, kin or story it lacked; past `pool_cap` the lowest-reach entry
 /// goes (ties: the oldest, then the lowest object index).
 pub fn post(world: &mut World, d: DistrictId, e: PoolEntry) {
-    if !world.config.gossip.enabled || world.rumours.is_empty() {
+    if world.rumours.is_empty() {
         return;
     }
     let cap = world.config.gossip.pool_cap.max(1);
@@ -130,9 +128,6 @@ pub fn post_deed_at(
     object: Option<EntityId>,
     mult: f32,
 ) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let reach = (world.config.gossip.reach0.get(deed) * mult).clamp(0.0, 1.0);
     let e = PoolEntry {
         deed,
@@ -154,9 +149,6 @@ pub fn post_deed_at(
 /// A raid or a riot at a door (actor the gang, or `None` for a riot's
 /// crowd; object the target's owner), talked about in the door's district.
 pub fn post_raid(world: &mut World, actor: Option<EntityId>, object: Option<EntityId>, door: TilePos) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let d = world.district_of(door);
     post_deed(world, d, Deed::Raided, actor, object);
 }
@@ -245,9 +237,6 @@ fn dedupe(pool: &mut Vec<PoolEntry>) {
 /// W10: a noticed Murder names today's anonymous killing of `object` in
 /// every pool, and the killer goes on the watch list.
 pub fn name_actor(world: &mut World, object: EntityId, actor: EntityId) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let today = world.day();
     for pool in world.rumours.iter_mut() {
         let mut hit = false;
@@ -269,9 +258,6 @@ pub fn name_actor(world: &mut World, object: EntityId, actor: EntityId) {
 /// rumour of it; a bound killing goes on the watch list. Plan deviation:
 /// takes the hole (already out of `World::holes` at bind), not its id.
 pub fn name_hole(world: &mut World, hole: &Hole, actor: EntityId) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let Some(deed) = deed_of_hole(hole.kind) else { return };
     let day = time::day(hole.tick);
     let victim = Some(hole.victim);
@@ -326,9 +312,6 @@ pub fn prune_anon(world: &mut World) {
 /// W6 (`bind::open_hole`): an off-screen crime goes into the hole's
 /// district's pool unnamed, carrying the hole id.
 pub fn post_hole(world: &mut World, hole: &Hole) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let Some(deed) = deed_of_hole(hole.kind) else { return };
     let d = if hole.district.is_unset() { DistrictId(0) } else { hole.district };
     let reach = world.config.gossip.reach0.get(deed);
@@ -374,10 +357,10 @@ pub fn knowledge(world: &World, id: EntityId) -> f32 {
 /// the lower actor index, then the older tick. The listener gets a Rumour
 /// at hops + 1, salience × `hop_salience`, conf × (0.5 + 0.5 × trust in the
 /// speaker), with the distortion roll; on the Exchange stream keyed by
-/// `(tick, from, to)`. While `legacy_second_hand` no edge changes.
+/// `(tick, from, to)`.
 pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     let _ = venue;
-    if !world.config.gossip.enabled || from == to {
+    if from == to {
         return;
     }
     let (Some(ms), Some(ml)) = (world.comp::<Memory>(from), world.comp::<Memory>(to)) else { return };
@@ -389,7 +372,7 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     // L2 shadow fixes item 17: what this teller told this listener lately
     // is not told again (the same teller told one listener a deed four
     // times; 64 % of 307 tellings were "already known").
-    let told = crate::systems::fixes::item(world, 17) && !world.told.is_empty();
+    let told = !world.told.is_empty();
     let mut best: Option<(f32, u32, Tick, MemoryEntry, DeedRef)> = None;
     for (e, r) in memory::deeds(from, ms) {
         if e.salience < g.gossip_min || memory::hops_of(e) >= g.max_hops || r.actor == Some(to) {
@@ -412,18 +395,15 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     let Some((_, _, _, src, mut r)) = best else { return };
     let trust = world.edge(to, from).map_or(0.0, |e| e.trust);
     let hop_salience = g.hop_salience;
-    let legacy = g.legacy_second_hand;
-    if crate::systems::fixes::item(world, 17) {
-        let key = crate::systems::fixes::told_key(from, to, &r, time::day(src.tick));
-        world.told.insert(key, now);
-    }
+    let key = crate::systems::fixes::told_key(from, to, &r, time::day(src.tick));
+    world.told.insert(key, now);
     let mut rng = world.rng.word(WordNs::Exchange, now, (u64::from(from.index) << 32) | u64::from(to.index));
     let d = talk_district(world, from);
     distort(world, from, &mut r, d, &mut rng);
     // W8 (phase 2): a speaker telling of their own deed lies with `p =
     // deception × 0.5`, naming an Enemy instead (one more draw on the same
     // stream; a lie the listener may later meet as a contradiction).
-    if r.actor == Some(from) && crate::systems::moves::on(world) {
+    if r.actor == Some(from) {
         lie(world, from, &mut r, d, &mut rng);
     }
     let entry = MemoryEntry {
@@ -450,12 +430,10 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
         w.rumour_hops_max = w.rumour_hops_max.max(u32::from(hops));
         // W9: from phase 3 the listener's existing edge to the actor takes
         // the hit; never a new edge.
-        if !legacy {
-            if let Some(a) = r.actor {
-                if world.edge(to, a).is_some() {
-                    let sev = world.config.gossip.deed_sev.get(r.deed);
-                    crate::systems::social::adjust(world, to, a, -0.1 * sev, 0.0);
-                }
+        if let Some(a) = r.actor {
+            if world.edge(to, a).is_some() {
+                let sev = world.config.gossip.deed_sev.get(r.deed);
+                crate::systems::social::adjust(world, to, a, -0.1 * sev, 0.0);
             }
         }
     }
@@ -465,9 +443,6 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
 /// drinker and the highest affinity (ties the lower id; no draw) trades one
 /// exchange each way.
 pub fn drink(world: &mut World, drinker: EntityId) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     let Some(bar) = world.comp::<Position>(drinker).and_then(|p| p.building) else { return };
     let Some(b) = world.comp::<crate::components::Building>(bar) else { return };
     let partner = b
@@ -920,9 +895,6 @@ fn in_vendetta(world: &World, a: EntityId, b: EntityId) -> bool {
 /// observer has no eyes. Phase 3 relays it: a gang member's to its gang's
 /// `FactionDb`, a guard's to the city's, at `conf × relay_conf`.
 pub fn maybe_sight(world: &mut World, observer: EntityId, who: EntityId, at: Option<EntityId>, tile: TilePos) {
-    if !world.config.gossip.enabled {
-        return;
-    }
     if world.comp::<Brain>(observer).is_none_or(|b| b.lod == Lod::Statistical) || !world.has::<Memory>(observer) {
         return;
     }

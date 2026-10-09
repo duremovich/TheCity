@@ -23,11 +23,6 @@ use crate::time::TICKS_PER_DAY;
 use crate::word::GrudgeCause;
 use crate::world::World;
 
-/// E1: `[living] enabled && [economy2] enabled && [camp] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.living.enabled && world.config.economy2.enabled && world.config.camp.enabled
-}
-
 /// Why a child leaves a camp (`release`).
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum ReleaseWhy {
@@ -160,9 +155,6 @@ pub fn on_convert(world: &mut World, b: EntityId, kind: BuildingKind) {
 /// on the vacant Lot nearest the Vats (a Vats Lot first), else a derelict
 /// refitted free, on the city's deed.
 pub fn seed(world: &mut World) -> Option<EntityId> {
-    if !on(world) {
-        return None;
-    }
     let from = vats_centroid(world);
     let (site, on_lot) = site_near(world, from)?;
     let b = open_camp(world, site, on_lot, None)?;
@@ -178,9 +170,6 @@ pub fn seed(world: &mut World) -> Option<EntityId> {
 /// Food corp with `3 × found_cost.camp` builds one (a Lot near its
 /// buildings, else a derelict); not a corp order.
 pub fn found_daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let camps = standing_camps(world);
     let full = world.config.camp.found_full;
     let all_full = !camps.is_empty()
@@ -343,9 +332,6 @@ fn unhouse(world: &mut World, child: EntityId, camp: EntityId) -> (u32, u32) {
 /// E38 (`demography::run`, after `children`): every `Child` in a Block
 /// with `hunger_days ≥ take_days` is taken, ascending id.
 pub fn take_daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let take_days = world.config.camp.take_days;
     for c in standing_camps(world) {
         prune(world, c);
@@ -372,7 +358,7 @@ pub fn take_daily(world: &mut World) {
 /// `ChildTaken` for the child and each living parent (a Grief-class
 /// `ChildTaken` memory, no deed; a grudge on the Law), a Feed bulletin.
 pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
-    if !on(world) || !world.has::<Child>(child) {
+    if !world.has::<Child>(child) {
         return None;
     }
     let home = world.comp::<Household>(child).and_then(|h| h.home);
@@ -418,9 +404,6 @@ pub fn take(world: &mut World, child: EntityId) -> Option<EntityId> {
 /// home and the third kills), the rings, the scandal and the closure, the
 /// shift (Parts from the older children's days), the reopening.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let now = world.tick;
     for camp in standing_camps(world) {
         prune(world, camp);
@@ -687,9 +670,6 @@ pub fn close(world: &mut World, camp: EntityId) {
 /// the last 30 days` over its camps (negative; read at the reputation
 /// rebuild: the store is rebuilt nightly, so a direct write would not last).
 pub fn scandal_penalty(world: &World, owner: Option<EntityId>) -> f32 {
-    if !on(world) {
-        return 0.0;
-    }
     let per = world.config.camp.scandal_standing;
     standing_camps(world)
         .into_iter()
@@ -776,5 +756,5 @@ pub fn release(world: &mut World, id: EntityId, why: ReleaseWhy) {
 /// E41: a `CampRaised` applicant comes first for a Farm or Fab vacancy
 /// (`demography::pick_candidate`'s key).
 pub fn applicant_first(world: &World, id: EntityId, role: Role) -> bool {
-    on(world) && matches!(role, Role::Farmer | Role::Fabber) && world.has::<CampRaised>(id)
+    matches!(role, Role::Farmer | Role::Fabber) && world.has::<CampRaised>(id)
 }

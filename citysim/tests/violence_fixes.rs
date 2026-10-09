@@ -15,7 +15,6 @@ use citysim::{
 fn world(seed: u64) -> World {
     let w = World::new(seed, Config::load().scaled_to(300));
     assert!(fixes::violence_on(&w), "[life] violence_fixes on in the shipped config");
-    assert!(fviolence::on(&w));
     w
 }
 
@@ -37,23 +36,6 @@ fn housed(w: &World, a: EntityId) -> bool {
 
 fn unhome(w: &mut World, a: EntityId) {
     w.comp_mut::<Household>(a).expect("household").home = None;
-}
-
-#[test]
-fn test_the_living_master_alone_turns_every_item_off() {
-    let mut w = world(42);
-    for on in [true, false] {
-        w.config.living.enabled = on;
-        let items = [
-            fixes::street_class(&w),
-            fixes::short_sources(&w),
-            fixes::chrome_cap(&w),
-            fixes::rent_meal(&w),
-            fixes::arrival(&w),
-        ];
-        assert_eq!(fixes::violence_on(&w), on);
-        assert!(items.iter().all(|&x| x == on), "[living] enabled = {on}: items {items:?}");
-    }
 }
 
 // ---------------------------------------------------------------------------
@@ -412,7 +394,6 @@ fn test_rent_from_wage_leaves_a_meal_in_arrears() {
 fn immigrant_coins(fix: bool, tier: Option<u8>) -> Option<(i64, i64, i64)> {
     let mut w = world(42);
     w.config.life.violence_fixes = fix;
-    assert!(citysim::systems::econ::market_on(&w), "the World market books the crossing");
     for _ in 0..200 {
         let before = identity(&w);
         let id = demography::spawn_immigrant(&mut w);

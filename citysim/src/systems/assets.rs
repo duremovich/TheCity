@@ -140,8 +140,8 @@ pub fn seller_level(world: &World, seller: EntityId) -> f32 {
 // Tech gates and effective tiers (M14 V22, V23)
 // ---------------------------------------------------------------------------
 
-/// M14 V23: the tier an asset works at: `tier` when it has no maker (a
-/// pre-M14 asset, a god grant) or the plane is off; `min(tier, orphan_cap)`
+/// M14 V23: the tier an asset works at: `tier` when it has no maker (a god
+/// grant); `min(tier, orphan_cap)`
 /// when the maker corp is gone; else `min(tier, maker's tier in the
 /// kind's track)`. Prices, upkeep, value and the sanity `load` keep the
 /// nominal tier.
@@ -151,7 +151,7 @@ pub fn eff_tier(world: &World, a: EntityId) -> u8 {
 
 /// [`eff_tier`] of an asset in hand.
 pub fn eff_tier_of(world: &World, x: &Asset) -> u8 {
-    let Some(m) = x.maker.filter(|_| world.config.virt.enabled) else { return x.tier };
+    let Some(m) = x.maker else { return x.tier };
     x.tier.min(crate::systems::virt::maker_tier(world, m, crate::systems::tech::track_of(x.kind)))
 }
 
@@ -171,9 +171,6 @@ fn seller_tech(world: &World, seller: EntityId, kind: AssetKind) -> (u8, Option<
 /// past the list is not gated). Always with the plane off. Used and
 /// repossessed stock is exempt (made already): callers gate new stock only.
 pub fn can_sell(world: &World, seller: EntityId, kind: AssetKind, tier: u8) -> bool {
-    if !world.config.virt.enabled {
-        return true;
-    }
     let Some(&need) = world.config.tech.requires.of(kind).get(usize::from(tier.saturating_sub(1))) else {
         return true;
     };
@@ -182,9 +179,6 @@ pub fn can_sell(world: &World, seller: EntityId, kind: AssetKind, tier: u8) -> b
 
 /// M14 V22: the maker a new asset from `seller` records (`None` with the plane off).
 pub fn maker_for(world: &World, seller: EntityId, kind: AssetKind) -> Option<EntityId> {
-    if !world.config.virt.enabled {
-        return None;
-    }
     seller_tech(world, seller, kind).1
 }
 
@@ -482,7 +476,7 @@ fn indices_from_stores(
 
 /// After a load (plan D2, D3, D50): the indices from the stores, a Kit on
 /// every agent with a Body, each rebuilt. Tolerates stores shorter than the
-/// arena (a pre-M13 save before `migrate_legacy` resizes them).
+/// arena.
 pub fn rebuild(world: &mut World) {
     let n = world.generations.len();
     if world.kit.len() < n {
@@ -783,7 +777,6 @@ pub fn run(world: &mut World) {
     crate::systems::vehicles::recover_abandoned(world);
     crate::systems::vehicles::fleet_recall(world);
     crate::systems::vehicles::theft_daily(world);
-    crate::systems::chrome::abduction_daily(world);
     // Phase 4 (D39): addiction decay and the Statistical addict pass.
     crate::systems::stims::addiction_daily(world);
     stat_shop(world);
@@ -1832,7 +1825,7 @@ pub fn seller_open(world: &World, b: EntityId) -> bool {
     // L2 shadow fixes item 12: a Clinic sells only with its doctor at the
     // counter on a working shift (Ripperdoc#443 sold three Therapy sessions
     // while its doctor wandered Civic on her rest day).
-    if bd.kind == BuildingKind::Clinic && crate::systems::fixes::item(world, 12) {
+    if bd.kind == BuildingKind::Clinic {
         return crate::systems::fixes::staff_present(world, b, role);
     }
     let tod = world.tick_of_day();
@@ -2038,7 +2031,7 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
     // M14 V36: a deck for a hacker without one (GATE `hacking >= deck_shop_min`),
     // or the carried deck one tier up; at Clinics and Security Offices (V24).
     let hacking = world.comp::<crate::components::Skills>(id).map_or(0.0, |s| s.hacking);
-    let deck_on = cfg.virt.enabled && hacking >= cfg.decks.deck_shop_min;
+    let deck_on = hacking >= cfg.decks.deck_shop_min;
     const DECKS: [(AssetKind, u8); 3] = [(AssetKind::Deck, 1), (AssetKind::Deck, 2), (AssetKind::Deck, 3)];
     let deck_level = || {
         [BuildingKind::Clinic, BuildingKind::SecurityOffice]

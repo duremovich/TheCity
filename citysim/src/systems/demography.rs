@@ -583,11 +583,7 @@ fn job_search(world: &mut World) {
 fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
     // L2 shadow fixes item 13: a corp's exec is not in the labour pool
     // (Zetatech's exec was hired as a Militech Fab Tech and laid off).
-    let execs = if crate::systems::fixes::item(world, 13) {
-        crate::systems::classes::exec_set(world)
-    } else {
-        std::collections::BTreeSet::new()
-    };
+    let execs = crate::systems::classes::exec_set(world);
     world
         .citizens()
         .into_iter()
@@ -650,9 +646,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
         if role == Role::Guard && id.index.is_multiple_of(2) { wc.shift_night.clone() } else { wc.shift_day.clone() };
     // L2 (plan key `[leisure] evening_shift`): the night venues' staff work
     // the evening, so a bout at `bout_hour` has its Fighters on shift.
-    if crate::systems::leisure::on(world)
-        && matches!(role, Role::Host | Role::Fighter | Role::Croupier | Role::Concierge)
-    {
+    if matches!(role, Role::Host | Role::Fighter | Role::Croupier | Role::Concierge) {
         shifts = world.config.leisure.evening_shift.clone();
     }
     let wage_per_day = world.config.economy.wage(role);
@@ -672,7 +666,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             struck_shift: None,
             premium: 1.0,
             // L2 fix round: unpaid until the first wage (L2 on only).
-            paid_once: !crate::systems::jobs::on(world),
+            paid_once: false,
             duty_fixed: None,
         },
     );
@@ -764,7 +758,7 @@ pub fn emigrate(world: &mut World, id: EntityId) {
     // the market off it is destroyed with the agent, as before).
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins.max(0));
     world.probe.emigrant_coins += coins;
-    if coins > 0 && crate::systems::econ::market_on(world) {
+    if coins > 0 {
         crate::systems::ownership::cross_out(
             world,
             Some(id),
@@ -831,18 +825,15 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     crate::systems::tech::give_hacking(world, id, hacking);
     // Real economy (plan E24): the 15 coins come from the World with the
     // market on (the wallet is inserted empty and the coins cross in).
-    let market = crate::systems::econ::market_on(world);
-    world.insert(id, Wallet { coins: if market { 0 } else { 15 } });
+    world.insert(id, Wallet { coins: 0 });
     world.probe.immigrant_coins += 15;
-    if market {
-        crate::systems::ownership::cross_in(
-            world,
-            crate::outside::WORLD_ACCOUNT,
-            Some(id),
-            15,
-            crate::systems::ownership::Flow::Migrant,
-        );
-    }
+    crate::systems::ownership::cross_in(
+        world,
+        crate::outside::WORLD_ACCOUNT,
+        Some(id),
+        15,
+        crate::systems::ownership::Flow::Migrant,
+    );
     // M15 W25: an immigrant's own draw (after the Personality it tilts on).
     let social = crate::systems::moves::seed_skills(world, id);
     crate::systems::moves::give_social(world, id, social);
@@ -869,7 +860,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
     crate::systems::assets::give_body(world, id, body);
     let home = emptiest_home(world);
     world.insert(id, Household::new(home));
-    arrival_savings(world, id, home, market);
+    arrival_savings(world, id, home);
     world.stats.current.immigrants += 1;
     let name = world.name_of(id);
     let where_ = match home {
@@ -891,7 +882,7 @@ pub fn spawn_immigrant(world: &mut World) -> EntityId {
 /// days from broke: on seed 43 nearly every year-3 immigrant was starving
 /// within two weeks of arriving. The top-up crosses in from the World
 /// (`Flow::Migrant`) with the market on, as the 15 does; no draw.
-fn arrival_savings(world: &mut World, id: EntityId, home: Option<EntityId>, market: bool) {
+fn arrival_savings(world: &mut World, id: EntityId, home: Option<EntityId>) {
     if !crate::systems::fixes::arrival(world) {
         return;
     }
@@ -905,17 +896,13 @@ fn arrival_savings(world: &mut World, id: EntityId, home: Option<EntityId>, mark
         return;
     }
     world.probe.immigrant_coins += extra;
-    if market {
-        crate::systems::ownership::cross_in(
-            world,
-            crate::outside::WORLD_ACCOUNT,
-            Some(id),
-            extra,
-            crate::systems::ownership::Flow::Migrant,
-        );
-    } else if let Some(w) = world.comp_mut::<Wallet>(id) {
-        w.coins += extra;
-    }
+    crate::systems::ownership::cross_in(
+        world,
+        crate::outside::WORLD_ACCOUNT,
+        Some(id),
+        extra,
+        crate::systems::ownership::Flow::Migrant,
+    );
 }
 
 /// The Home with the fewest residents among those under 6 (ties by id).

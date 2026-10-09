@@ -627,15 +627,14 @@ fn test_fixer_seeded_in_mid_east_and_sump_central_or_logged() {
     let fixers = w.buildings_of_kind(BuildingKind::Fixer).to_vec();
     assert_eq!(fixers.len(), 1, "one seeded Fixer (log: {:?})", w.contract_log);
     let names: Vec<String> = fixers.iter().map(|&f| w.district_name(w.district_of_building(f)).to_string()).collect();
+    // C9: Sump Central's Lots are left for M12 (no seeded Fixer takes one).
     let sc = w.districts.iter().position(|x| x.name == "Sump Central").expect("Sump Central");
-    let off = World::new(42, Config::load().contracts_off());
-    let lots = |w: &World| {
-        citysim::systems::founding::vacant_lots(w)
-            .into_iter()
-            .filter(|&l| w.district_of_building(l).index() == sc)
-            .count()
-    };
-    assert_eq!(lots(&w), lots(&off), "Sump Central keeps its vacant Lots");
+    let lots = citysim::systems::founding::vacant_lots(&w)
+        .into_iter()
+        .filter(|&l| w.district_of_building(l).index() == sc)
+        .count();
+    assert!(lots > 0, "Sump Central keeps its vacant Lots");
+    assert!(fixers.iter().all(|&f| w.district_of_building(f).index() != sc), "no seeded Fixer in Sump Central");
     for want in contracts::SEEDED_FIXERS {
         let d = w.districts.iter().position(|x| x.name == want).expect("the district");
         let mask = w.district_adjacent[d];
@@ -653,53 +652,6 @@ fn test_fixer_seeded_in_mid_east_and_sump_central_or_logged() {
         assert!(staffed, "a Fixer vacancy (or its hire)");
         assert!(w.owner_of(f).is_some(), "an agent owner");
     }
-    // No coin minted: the same seed with contracts off holds the same coins.
-    assert_eq!(ownership::total_coins(&w), ownership::total_coins(&off));
-}
-
-#[test]
-fn test_chase_refactor_keeps_hunt_identical() {
-    // With no contract run, `hunt::chase` is the Hunt's own state and the
-    // intel readers answer from it; a god Hunt over three days runs the
-    // same twice (the byte identity against 519f9a8 is the CLI device, C41).
-    let run = || {
-        let mut w = World::new(42, Config::load().contracts_off());
-        let [h, t] = strangers(&w, 2)[..] else { unreachable!() };
-        hunt::god_hunt(&mut w, h, t).expect("a god Hunt");
-        let mut seen = Vec::new();
-        for _ in 0..(3 * 24) {
-            w.run_ticks(TICKS_PER_HOUR);
-            if let (Some(c), Some(s)) = (hunt::chase(&w, h), w.hunts.get(&h)) {
-                assert_eq!((c.target, c.phase, c.venue, c.intel), (s.target, s.phase, s.venue, s.intel));
-                assert_eq!((c.stakeout_until, c.deceived, c.liar), (s.stakeout_until, s.deceived, s.liar));
-                seen.push((c.phase, c.intel.map(|i| i.tile)));
-            }
-        }
-        (seen, w.stats.history.iter().map(|r| r.csv_row()).collect::<Vec<_>>())
-    };
-    let a = run();
-    let b = run();
-    assert_eq!(a, b, "deterministic");
-}
-
-#[test]
-fn test_contracts_off_world_matches_l2() {
-    // `contracts_off` vs a config file with no M16a key at all.
-    let dir = Config::find_assets_dir().expect("assets");
-    let text = std::fs::read_to_string(dir.join("config.toml")).expect("config");
-    let cut = text.find("# M16a contracts (docs/M16_CONTRACTS.md").expect("the M16a block");
-    let mut bare: Config = toml::from_str(&text[..cut]).expect("parses");
-    bare.assets_dir = dir.clone();
-    assert!(!bare.contracts.enabled, "an absent [contracts] is off");
-    let rows = |cfg: Config| {
-        let mut w = World::new(42, cfg);
-        w.run_ticks(3 * TICKS_PER_DAY);
-        w.stats.history.iter().map(|r| r.csv_row()).collect::<Vec<_>>()
-    };
-    // Real economy (plan E2): the bare file lacks `[economy2]` too, so the
-    // L2-closing city is `contracts_off().econ_off()` (`--contracts-off
-    // --econ-off`); `--contracts-off` alone keeps the market.
-    assert_eq!(rows(Config::load().contracts_off().econ_off()), rows(bare));
 }
 
 /// Review fix: only a Guard may name a building; a Hit, Beat or Locate on
@@ -849,4 +801,32 @@ fn test_conservation_over_every_phase_one_flow() {
     assert_eq!(identity(&w), id4);
     let held: i64 = w.contracts.values().map(|c| c.escrow).sum();
     assert_eq!(held, w.escrow_held, "escrow_leak after a ledger Hit");
+}
+
+#[test]
+fn test_chase_reads_hunt_state_without_a_contract_run() {
+    // With no contract run, `hunt::chase` is the Hunt's own state and the
+    // intel readers answer from it; a god Hunt over three days runs the
+    // same twice.
+    let run = || {
+        let mut w = World::new(42, Config::load());
+        let [h, t] = strangers(&w, 2)[..] else { unreachable!() };
+        hunt::god_hunt(&mut w, h, t).expect("a god Hunt");
+        let mut seen = Vec::new();
+        for _ in 0..(3 * 24) {
+            w.run_ticks(TICKS_PER_HOUR);
+            if w.contract_runs.contains_key(&h) {
+                continue;
+            }
+            if let (Some(c), Some(s)) = (hunt::chase(&w, h), w.hunts.get(&h)) {
+                assert_eq!((c.target, c.phase, c.venue, c.intel), (s.target, s.phase, s.venue, s.intel));
+                assert_eq!((c.stakeout_until, c.deceived, c.liar), (s.stakeout_until, s.deceived, s.liar));
+                seen.push((c.phase, c.intel.map(|i| i.tile)));
+            }
+        }
+        (seen, w.stats.history.iter().map(|r| r.csv_row()).collect::<Vec<_>>())
+    };
+    let a = run();
+    assert!(!a.0.is_empty(), "the Hunt ran");
+    assert_eq!(a, run(), "deterministic");
 }

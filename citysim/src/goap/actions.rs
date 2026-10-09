@@ -584,8 +584,6 @@ pub struct PlanCtx {
     pub has_data: bool,
     /// M14 V36: the shop pick is an `UpgradeDeck`.
     pub shop_upgrade: bool,
-    /// L1: `[life] enabled`.
-    pub life: bool,
     /// L1: a member's Hideout is a bed nearer than Home (`life::hideout_bed`).
     pub hideout_bed: bool,
     /// L1: a housed agent far from Home can take a Hotel bed (`life::away_hotel`).
@@ -700,10 +698,7 @@ impl PlanCtx {
                     // L2 shadow fixes item 11: a city-owned Feed's or Lab's
                     // staff work at it too (the Civic Wire's reporter was
                     // sent to the Hall: Work "Unreachable" all week).
-                    || (crate::systems::fixes::item(world, 11)
-                        && world
-                            .comp::<Building>(e)
-                            .is_some_and(|b| LocationKey::of_building(b.kind) == LocationKey::Workplace))
+                    || world.comp::<Building>(e).is_some_and(|b| LocationKey::of_building(b.kind) == LocationKey::Workplace)
             }) {
                 // L2: a city-owned venue's or Fab's staff work at it (the
                 // wage desk is the Hall).
@@ -777,7 +772,6 @@ impl PlanCtx {
         // M13 D38-D40: dealing, buying and Detox.
         let stims_on = world.config.assets.enabled;
         // M14: every Virt input reads false with the plane off.
-        let hack_on = world.config.virt.enabled;
         let gang_hideout = world.gang_of(agent).and_then(|g| world.hideout_of(g));
         let dealer = stims_on
             && wants(&[GoalKind::GangWork])
@@ -808,23 +802,19 @@ impl PlanCtx {
         let homeless = home.is_none();
         // L1: a bed nearer than Home (planning only: the step re-check
         // reads the symbols, and a walk under way keeps its target).
-        let life = world.config.life.enabled;
-        let sleeping = life && !light && wants(&[GoalKind::Sleep]);
+        let sleeping = !light && wants(&[GoalKind::Sleep]);
         let away_hotel = if sleeping && !homeless { crate::systems::life::away_hotel(world, agent) } else { None };
         let hideout_bed = sleeping && crate::systems::life::hideout_bed(world, agent).is_some();
-        let rough_ok = life && wants(&[GoalKind::Sleep]) && crate::systems::life::rough_ok(world, agent);
+        let rough_ok = wants(&[GoalKind::Sleep]) && crate::systems::life::rough_ok(world, agent);
         let hotel = if homeless {
             crate::systems::street::hotel_for(world, agent)
-        } else if life && !light && wants(&[GoalKind::Sleep]) {
+        } else if !light && wants(&[GoalKind::Sleep]) {
             away_hotel.or_else(|| crate::systems::street::booked_hotel(world, agent))
         } else {
             None
         };
-        let refuge = if life && home.is_none() && wants(&[GoalKind::Flee]) {
-            crate::systems::life::refuge(world, agent)
-        } else {
-            None
-        };
+        let refuge =
+            if home.is_none() && wants(&[GoalKind::Flee]) { crate::systems::life::refuge(world, agent) } else { None };
         let squat = world.comp::<crate::components::Squatter>(agent).map(|s| s.building);
         let derelict_target = target.filter(|&t| crate::systems::street::is_derelict(world, t));
         let gang_squat = derelict_target.is_some()
@@ -865,7 +855,7 @@ impl PlanCtx {
                 add(LocationKey::Seller, target);
             }
             // M14 V5/V29: the run order's chair and a Data buyer, under Hack only.
-            if hack_on && wants(&[GoalKind::Hack]) {
+            if wants(&[GoalKind::Hack]) {
                 add(LocationKey::Chair, world.run_orders.get(&agent).map(|o| o.chair));
                 add(LocationKey::DataBuyer, crate::systems::tech::data_buyer_lab(world, agent));
             }
@@ -944,7 +934,7 @@ impl PlanCtx {
                 && world.treasury().is_some_and(|t| t.coins >= 0)
                 && world.comp::<crate::components::Brain>(agent).is_some_and(|b| b.last_dole_day != Some(day))
                 // L1: a Hall trip only once the dole has accrued (or broke, or near).
-                && (!life || crate::systems::life::dole_trip_due(world, agent)),
+                && (crate::systems::life::dole_trip_due(world, agent)),
             on_shift: job.is_some_and(|j| j.on_shift(tod)),
             evening: world.phase() == crate::time::DayPhase::Evening,
             homeless: home.is_none(),
@@ -956,12 +946,9 @@ impl PlanCtx {
                 // L2 shadow fixes item 20: at plan time, less what housemates
                 // reserved on the way (several walked home to one meal).
                 match home {
-                    Some(h) if !light && wants(&[GoalKind::Eat]) && crate::systems::fixes::item(world, 20) => stock
-                        .saturating_sub(crate::goap::world_state::WorldState::reserved_by_others(
-                            world,
-                            h,
-                            Some(agent),
-                        )),
+                    Some(h) if !light && wants(&[GoalKind::Eat]) => stock.saturating_sub(
+                        crate::goap::world_state::WorldState::reserved_by_others(world, h, Some(agent)),
+                    ),
                     _ => stock,
                 }
             },
@@ -1092,20 +1079,16 @@ impl PlanCtx {
             detox_affordable: detox_pick
                 && target_clinic.is_some_and(|c| coins_now >= crate::systems::stims::detox_price(world, c)),
             withdrawal_bonus,
-            run_order: hack_on
-                && world.run_orders.contains_key(&agent)
+            run_order: world.run_orders.contains_key(&agent)
                 && world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.deck.is_some()),
-            has_data: hack_on && crate::systems::virt::deck_data(world, agent) > 0,
+            has_data: crate::systems::virt::deck_data(world, agent) > 0,
             shop_upgrade,
-            life,
             hideout_bed,
             away_hotel: away_hotel.is_some(),
             rough_ok,
             refuge: refuge.map(|(k, _)| k),
-            poor: life && wants(&[GoalKind::Earn]) && crate::systems::life::broke(world, agent),
-            beg_spot: wants(&[GoalKind::Earn])
-                && crate::systems::fixes::beg_at_spot(world)
-                && crate::systems::fixes::at_spot_with_company(world, agent),
+            poor: wants(&[GoalKind::Earn]) && crate::systems::life::broke(world, agent),
+            beg_spot: wants(&[GoalKind::Earn]) && crate::systems::fixes::at_spot_with_company(world, agent),
             dist,
         };
         // L1: with a week of dole waiting at the Hall, scrap and begging are
@@ -1239,7 +1222,7 @@ impl ActionKind {
             ActionKind::Register => ctx.adult && !ctx.in_gang,
             ActionKind::CheckIn => ctx.adult && (ctx.homeless || ctx.away_hotel),
             // L1: the broke's Earn (off: never).
-            ActionKind::Scavenge => ctx.life && ctx.adult && ctx.poor && ctx.serves(&[GoalKind::Earn]),
+            ActionKind::Scavenge => ctx.adult && ctx.poor && ctx.serves(&[GoalKind::Earn]),
             ActionKind::Meeting => false,
             ActionKind::Occupy => ctx.adult && (ctx.homeless || ctx.gang_squat),
             ActionKind::ServeTime => false,

@@ -445,7 +445,6 @@ chrome_bind_w = 1.0
 # L2 phase 3 (docs/LIFE_L2.md § 4, plan L21-L23, L29-L30): the LOD budget and the churn. Sentenced,
 # unpinned agents are held Statistical in the Jail (a daily cell pass); each forced class has a quota
 # inside max_coarse; the watch ranks only on shift; scavenge's dry hour is Done; beds are reserved.
-budget = true
 held_prisoners = true
 gang_quota = 25                     # class-2 bodies per gang: leader, two lieutenants, story, front line, rotation
 private_quota = 12                  # private guards keeping class 2, by id
@@ -1023,9 +1022,8 @@ hack_hours = 24                    # M14
 
 # --- M14 Data and Virt (docs/M14_VIRT.md, plan ~/.claude/plans/m14-virt.md) ---
 # A second board of abstract nodes and links over the city map; every contest on it is a seeded dice
-# roll between fictional parties. `--virt-off` (CLI) and `Config::virt_off` turn every section off.
+# roll between fictional parties.
 [virt]
-enabled = true
 terminal_fee = 3
 jacked_fight_mult = 0.3
 dump_sanity = 0.1
@@ -1212,7 +1210,6 @@ sighting_days = 14
 # ---------------------------------------------------------------------------
 
 [gossip]
-enabled = true
 gossip_min = 0.3
 max_hops = 6
 hop_salience = 0.7
@@ -1239,7 +1236,6 @@ deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripp
 deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1, hired = 0.7 }  # M16a C21: hired
 # W9 (phase 3): the legacy second-hand copies in Memory.entries retire (social::gossip still draws);
 # the word's exchange nudges an existing edge to the actor instead.
-legacy_second_hand = false
 kin_cap = 12                       # W10: kin captured at death
 
 [reputation]
@@ -1335,7 +1331,6 @@ hunt_kill_p = 0.3
 hunt_cooldown_days = 3
 hunt_days = 10
 street_silence = true
-enabled = true
 hold_score = 0.6                   # W20
 stat_hunt_min = 0.45               # W23 (spec-plan 0.2; see hunt_min)
 
@@ -1366,7 +1361,6 @@ ally_cap = 0.5
 backlash_courage = 0.6
 backlash_fight = 0.3
 contradict_conf = 0.3
-enabled = true
 
 [competence]
 exec_w = 0.4
@@ -1383,7 +1377,6 @@ poach_premium = 1.3
 # exec term is a heavy-tailed skill): Nutrix's Farms ran at 0.89-0.94 on half the seeds and its early
 # trucks fell (day-30 trucks over seeds 42-49: 4.6 against 6.5 with competence off).
 rank_norm = true
-enabled = true
 
 [news]
 reach_base = 0.2
@@ -1403,10 +1396,8 @@ residents_per_feed = 1000           # plan key (W36): Register's per-capita Feed
 # Orchestrator deviation (W40): Spin is a side spend, not a corp-wide order (as an order it took Nutrix's
 # corp-wide slot from Research, M14's Research-built Lab); a corp spins while its Spin score >= spin_min.
 spin_min = 0.2
-enabled = true
 
 # Life pass L1 (docs/SHADOW_V1.md): the shadowed residents' days were walks, broken sleep and idling.
-# Off (`--life-off`, absent from pre-L1 saves) is the ab79188 city.
 [life]
 travel_half_ticks = 120.0           # a discretionary goal's score halves at a 2 h walk
 travel_min = 0.15
@@ -1457,14 +1448,9 @@ scavenge_dry_max = 3                # L2 (L29, [lod] budget): three dry hours in
 scavenge_cool_hours = 4             # ... cool Earn for four
 escort_van_ticks = 60
 # L2 shadow fixes (docs/SHADOW_V2.md "L2 shadow fixes (what landed)"): the 21 [bug] items of the V2
-# re-shadow. Master switch; `--l2-off` (and `--life-off`) turn it off, the 56f3110 city byte for byte.
-# The sub-switches are behaviour choices; the plain bugs ride the master alone.
-l2_fixes = true
-commute_latch = true                # 1: a started commute holds; the gate reads the walk at the real speed
-shift_commit = true                 # 2: an in-shift step is outbid only by starvation or danger ...
+# re-shadow. Always on since 2026-10-09 (the switches retired; docs/TESTING.md).
 shift_pro_rata = 0.5                # ... and a cut shift pays pro rata from half of it
 starving_hunger = 0.1               # the starvation that breaks a commitment
-sleep_commit = true                 # 3: a Sleep is held from its first tick ...
 sleep_wake_energy = 0.99            # ... and runs to here (it ended at 0.9: 1-6 min Sleeps all night)
 idle_sleep_energy = 0.9             # Idle plans Sleep only below this (0.7 left nights to 90-min Rests)
 energy_brake = 0.5                  # Unwind / Eat / Earn carry an energy term below this
@@ -1473,9 +1459,7 @@ spot_lone_fun = 0.4                 # a HangOut's fun alone (company scales it t
 spot_enemy_penalty = 0.5            # per Enemy near a spot
 avoid_spot_ticks = 1440             # 6: a fled-from tile is avoided a day ...
 flee_clear_ticks = 30               # ... and leisure cools 30 min after the flight
-lod_dwell = true                    # 7: a tier is kept 3 h against an equal-priority newcomer
 lod_dwell_ticks = 180
-stat_sleep_futile_eat = true        # 8: a failed hungry Eat sleeps at night off screen
 jail_affinity_cap = 0.3             # 10: a guard and a prisoner warm to each other this far at most
 noshow_fire_days = 7                # 11: seven missed workdays end the job (no dole: addendum 17)
 muster_walk_cap_ticks = 480         # 15: a Muster waits for the farthest member's walk, up to 8 h
@@ -1483,10 +1467,9 @@ deal_busy_from = 720                # 16: Deal shifts start 12:00 ...
 deal_busy_to = 120                  # ... to 02:00
 told_cooldown_days = 3              # 17: one telling per teller, listener and deed in 3 days
 hack_gap_wealth = 0.9               # 18: a run past the flatline gap only this desperate
-beg_at_spot = true                  # 19: Beg at a HangOut spot with company
 # The violence fixes (2026-10-09, the wages-on diagnosis): three missing mechanisms that inflated
 # off-screen killings and chrome episodes (worst with [economy2] wages on, present in the base city).
-# Master switch; `--l2-off` (and `--life-off`) turn it off; off is the 644eb10 city byte for byte.
+# Master switch (in flight; off is the 644eb10 city byte for byte).
 # `CITYSIM_VFIX_OFF=1,3` leaves single items off (a bisection device).
 violence_fixes = true
 vf_street_class = true              # 1: the ledger's Street class (no Home): evictees' rates stay theirs
@@ -1502,12 +1485,10 @@ vf_rent_meal = true                 # 4: rent from income leaves an agent in arr
 # coins_by_tier (Sump 12 -> keeps 15, Mid 25, Spire 75, homeless 25), crossed in from the World, not a flat
 # 15 (three days of Spire rent: nearly every year-3 immigrant on seed 43 was starving within two weeks).
 vf_arrival = true
-enabled = true
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a
-# placeholder for phase 5's calibration. `[living] enabled = false` (CLI `--l2-off`) is the M15-closing
-# city byte for byte. Kept as new sections at the end of the file (plan "Parallel phases"): the seven
+# placeholder for phase 5's calibration. Kept as new sections at the end of the file (plan "Parallel phases"): the seven
 # kinds' buildings are sub-tables below; their wages (`[economy] wage_host` 6, `wage_attendant` 5,
 # `wage_cook` 5, `wage_fighter` 7, `wage_croupier` 6, `wage_concierge` 8, `wage_fabber` 7), their
 # `[corps] found_cost` (club 400, arcade 200, noodle_bar 120, fight_pit 300, den 250, lounge 900,
@@ -1516,7 +1497,6 @@ enabled = true
 # `_lounge` 2000 (L5) are the spec's values as serde defaults in config.rs (set them in their sections
 # to override). `[buildings] market.staff` / `bar.staff` stay 4 / 3 (L3: the identity).
 [living]
-enabled = true
 # A corp's order dwell (L2, the M14 ruling of 2026-10-08): corps flipped orders on shock rescores at a
 # 0.02 margin (Nutrix Research -> Secure within a day, 0.46 vs 0.44, on every seed of 42-47), so
 # Research never lasted [tech] research_build_days (3) and no Lab was built under it. For this many
@@ -1559,7 +1539,6 @@ reserve_release_price = 8
 reserve_release_batch = 200
 
 [jobs]
-enabled = true
 seed_venues = { club = 3, arcade = 3, noodle_bar = 10, fight_pit = 2, den = 2, lounge = 1, fab = 2 }
 refit_frac = 0.5                     # of found_cost
 fab_yield = 0.6
@@ -1573,7 +1552,6 @@ bar_staff = 5                        # L3
 sweep = true                         # L8: Sanitation sweeps the beat (false: TendGraves + the D23 ledger)
 
 [leisure]                            # L2 § 1-2; placeholders
-enabled = true                       # L13: phase 2 (fun, Unwind, HangOut, venues, fronts, the leader)
 price_base = { club = [0, 5, 12], arcade = [2, 3, 6], noodle_bar_markup = 1, fight_pit = [3, 0, 0], den = [2, 3, 0], lounge = [0, 0, 25] }
 front_markup = 1.2
 house_edge = 0.08
@@ -1604,7 +1582,6 @@ evening_shift = [[1080, 1440]]       # plan key (deviation): Hosts, Fighters, Cr
 gain = { club = 0.6, club_spire = 0.7, arcade = 0.35, noodle_bar = 0.1, fight_pit = 0.5, den = 0.5, lounge = 0.9, drink = 0.1, hangout_hour = 0.1, watch = 0.3, free_stat = 0.3 }
 
 [budget]
-enabled = true
 band = [30000, 60000]
 # Fix round: every step (a cut or a restore) waits band_hold_days on its side, not only the first; no upkeep
 # cut while the Treasury < hi + 7 x yesterday's dole; a restore is 2 x upkeep_step and lays off works_step
@@ -1629,18 +1606,13 @@ upkeep_step = 0.05
 upkeep_floor = 0.3                   # kept: the steps above alone hold the trough (the floor is never reached)
 
 [export]
-enabled = false
 treasury_ref = 20000
-cap_per_day = { food = 50, parts = 20, data = 5 }
-price = { food = 3, parts = 18, data = 40 }
-export_floor = 200
 parts_floor = 20                     # plan key (L11): a Fab's Parts kept back
 data_floor = 100                     # plan key (L11; deviation: M14 has no Data sell floor)
 
 # L2 § 3 faction violence off screen (phase 4). Every number is a placeholder (phase 5 calibrates;
 # if Murders break the bound, fv_mult falls first, never an M8-M15 knob).
 [fviolence]
-enabled = true
 rate_days = 14                       # days of the ledger's windows the rates read
 prior_weight = 48.0                  # body-days of evidence the prior is worth (placeholder)
 # fv_mult: the knob the Murder bound pulls (placeholder, a phase-4 finding). At the spec's 1.0 the
@@ -1714,8 +1686,7 @@ staff = 0
 # M16a contracts (docs/M16_CONTRACTS.md; plan ~/.claude/plans/m16a-contracts.md).
 # A contract is a record (buyer, kind, target, price, deadline, broker, taker,
 # status) matched by a score and resolved by a seeded dice roll between
-# fictional agents; escrow is coins held between purses. `enabled = false`
-# (`--contracts-off`, and `--l2-off`) is the L2-closing city byte for byte.
+# fictional agents; escrow is coins held between purses.
 # Spec values; keys marked "plan" are placeholders (calibrated late, never in M16a).
 # Defaults (code; override here if needed): [buildings] fixer = { capacity = 8,
 # stock_cap = 0, staff = 1 }; [economy] wage_fixer = 6; [corps] found_cost.fixer
@@ -1726,7 +1697,6 @@ staff = 0
 # close_days = 7, bribe_cool = 0.3, fixer_talk = 0.3, accessory_days = 60,
 # corrupt_lawfulness = 0.3, corrupt_heat = 0.3 (phase 3).
 [contracts]
-enabled = true
 max_open = 256
 closed_keep_days = 30
 price_base = { hit = 400, beat = 120, guard = 25, locate = 20 }
@@ -1779,11 +1749,9 @@ per_sighting = 15
 cap_sightings = 10
 min_gap_hours = 6
 
-# The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). `enabled = false` (`--econ-off`) is the
-# EC_BASE city (main c53107d) to the column. Every number a placeholder (the late calibration milestone).
+# The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
+# `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).
 [economy2]
-enabled = true
-market = true                        # E1: phase 1's switch (econ::market_on)
 wages = false                        # E1: phase 2's switch (econ::wages_on): off until the stop rule is answered (see the phase 2 record)
 no_safety_net = false                # E1: phase 3a turns it on (only after the stop rule)
 emigrate_cost = 20                   # E35 (the jobs round, read only with wages on): fewer coins cannot start emigrating (spec § 10's 20)
@@ -1857,7 +1825,6 @@ household_rent = false               # phase 3a (read only with no_safety_net): 
 # Reserve 6,002, export 899 (under the band); ask x0.5: 89 (the purse binds, not the price); bid_ref 2:
 # 0 but export 606. The Reserve still drains over a year: phase 2's Farm overtime and the stop rule read it.
 [world_market]
-enabled = true
 treasury_ref = 50000
 revert = 0.05
 sd = 0.03
@@ -1877,7 +1844,6 @@ asset_floor = 2                      # E10 (phase 2): chrome/decks kept in a sel
 cap_wages = [0, 100, 30]             # [food, parts, data]
 
 [charity]                          # spec § 4 verbatim plus the plan keys (E26-E29); placeholders
-enabled = true
 seed = 1                           # Missions at seed, the Sump first
 reach_tiles = 40
 meal_markup = 1                    # coins over wholesale
@@ -1895,7 +1861,6 @@ rep_gift_min = 20                  # E29 (plan key): a gift of at least this wri
 residents_per_mission = 1000       # E26 (plan key): Register's per-capita target of Missions
 
 [camp]                             # addendum 19; placeholders
-enabled = true
 take_days = 2                      # E38: Child.hunger_days (unfed days; 3 kills) at which the service takes a child
 work_age = 10                      # E40: sim years; younger children are housed and fed, not worked
 camp_yield = 0.15                  # E40: Parts per child-day at skill 0 (low yield)
@@ -1916,7 +1881,6 @@ grudge_share = 0.7                 # E41
 # corps' working capital (econ::seed_capital, pro rata to the day-0 wage bill). tax_* and band are
 # phase 3a's tax band (read behind econ::no_net).
 [treasury]
-enabled = true
 property_rate = { farm = 6, market = 10, bar = 1, home = [0, 0, 1], hotel = 1, clinic = 2, garage = 2, lab = 3, fab = 3, venue = 1 }
 treasury_initial = 12000
 # Phase 3a (the net removed; every key below read only with [economy2] wages and no_safety_net on). The

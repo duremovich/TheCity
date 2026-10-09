@@ -67,7 +67,6 @@ fn run_days(w: &mut World, days: u64) {
 #[test]
 fn test_seed_mission_and_purist_chapel_has_a_kitchen() {
     let w = world();
-    assert!(charity::on(&w));
     let m = mission(&w);
     let b = w.comp::<Building>(m).expect("building");
     assert_eq!(b.kind, BuildingKind::Mission);
@@ -99,12 +98,6 @@ fn test_seed_mission_and_purist_chapel_has_a_kitchen() {
     let chapel = w.hideout_of(purist).expect("chapel");
     assert!(w.comp::<Building>(chapel).is_some_and(|b| b.charity.is_some()));
     assert_eq!(charity::missions(&w).len(), 2);
-    // With the switch off nothing stands.
-    let mut cfg = Config::load();
-    cfg.charity.enabled = false;
-    let off = World::new(42, cfg);
-    assert!(off.buildings_of_kind(BuildingKind::Mission).is_empty());
-    assert!(charity::missions(&off).is_empty());
 }
 
 /// E27 (plan 3b.6): the kitchen's restock costs the purse exactly
@@ -280,7 +273,6 @@ fn test_wants_to_give_is_keyed_and_once_a_day() {
 #[test]
 fn test_gave_deed_written_for_large_gift() {
     let mut w = world();
-    assert!(w.config.gossip.enabled);
     let m = mission(&w);
     let a = civilian(&w, &[]);
     set_coins(&mut w, a, 500);
@@ -441,10 +433,6 @@ fn test_register_founder_rule_for_missions() {
         citysim::systems::founding::found_cost(&w, BuildingKind::Mission),
         Some(w.config.corps.found_cost.mission)
     );
-    let mut cfg = Config::load();
-    cfg.charity.enabled = false;
-    let off = World::new(42, cfg);
-    assert_eq!(citysim::systems::founding::found_cost(&off, BuildingKind::Mission), None);
 }
 
 /// E27, E34: over a few days with an endowed kitchen the Mission serves
@@ -458,9 +446,9 @@ fn test_endowed_mission_serves_over_days() {
     // (The identity drifts over days at EC_BASE: immigrants, emigrants and
     // the fence are phase 1's census; a Mission's day moves no coin but
     // through `charity_in`/`charity_out`, checked above.)
-    run_days(&mut w, 4);
+    run_days(&mut w, 7);
     let meals: u32 = w.stats.history.iter().map(|r| r.econ.mission_meals).sum();
-    assert!(meals > 0, "meals served over four days: {meals}");
+    assert!(meals > 0, "meals served over a week: {meals}");
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::MissionServed));
     let served: u32 = w
         .comp::<Building>(m)

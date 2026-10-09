@@ -1259,8 +1259,7 @@ pub struct Corp {
     /// `losses` floors at `raided_losses` (the raided corp hardens).
     #[serde(default)]
     pub raided_at: Option<Tick>,
-    /// M14 (plan V21): the tech tree. A pre-M14 save reads `Tech::unset`
-    /// (tier 0), which `migrate_legacy` seeds by name.
+    /// M14 (plan V21): the tech tree.
     #[serde(default = "crate::virt::Tech::unset")]
     pub tech: crate::virt::Tech,
     /// M14 (plan V25): the ICE on this corp's Ledger node.
@@ -2051,14 +2050,11 @@ pub struct Skills {
     pub stealth: f32,
     pub fighting: f32,
     pub farming: f32,
-    /// M14 (plan V35): `hack_seed_scale x U(0,1)^3` from a keyed stream. A
-    /// pre-M14 save reads -1 (`Skills::unset_hacking`), backfilled by
-    /// `migrate_legacy`.
+    /// M14 (plan V35): `hack_seed_scale x U(0,1)^3` from a keyed stream.
     #[serde(default = "Skills::unset_hacking")]
     pub hacking: f32,
     /// M15 W25: the four social skills (`0..=1`), one primary per adult,
-    /// from the Skill word stream; a pre-M15 save reads 0 and is backfilled
-    /// by `migrate_legacy` (all four 0).
+    /// from the Skill word stream.
     #[serde(default)]
     pub persuasion: f32,
     #[serde(default)]
@@ -2637,8 +2633,7 @@ pub struct Hole {
     pub kind: HoleKind,
     pub victim: EntityId,
     pub zone: Zone,
-    /// M12 D5: the district of the victim's tile; UNSET in a pre-M12 save
-    /// until `migrate_legacy` sets the zone's first district.
+    /// M12 D5: the district of the victim's tile.
     #[serde(default = "DistrictId::unset")]
     pub district: DistrictId,
     pub tick: Tick,
@@ -2903,7 +2898,7 @@ pub const MAX_DISTRICTS: usize = 12;
 pub struct DistrictId(pub u8);
 
 impl DistrictId {
-    /// Not yet known: a pre-M12 trace entry or hole, fixed by `World::migrate_legacy`.
+    /// Not yet known (a district not set).
     pub const UNSET: DistrictId = DistrictId(255);
 
     pub fn unset() -> DistrictId {

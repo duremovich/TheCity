@@ -22,11 +22,6 @@ use crate::time::TICKS_PER_HOUR;
 use crate::word::Deed;
 use crate::world::World;
 
-/// E1: `[living] enabled && [economy2] enabled && [charity] enabled`.
-pub fn on(world: &World) -> bool {
-    world.config.living.enabled && world.config.economy2.enabled && world.config.charity.enabled
-}
-
 /// A gift of at least this is logged (`Donated`).
 const EVENT_MIN: i64 = 5;
 
@@ -40,7 +35,7 @@ fn standing(world: &World, b: EntityId) -> bool {
 
 /// A standing Mission (the Volunteers' workplace; `exec::resolve_building`).
 pub fn is_mission(world: &World, b: EntityId) -> bool {
-    on(world) && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Mission) && standing(world, b)
+    world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Mission) && standing(world, b)
 }
 
 /// Every standing building with a kitchen (Missions, then Hideouts with a
@@ -201,9 +196,6 @@ fn open_mission(world: &mut World, site: EntityId, on_lot: bool, owner: Option<E
 /// Unplugged's Hideout) gains a kitchen. Returns the Missions built.
 pub fn seed(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    if !on(world) {
-        return built;
-    }
     let n = world.config.charity.seed;
     let Some(d) = sump_district(world) else {
         return built;
@@ -235,7 +227,7 @@ pub fn seed(world: &mut World) -> Vec<EntityId> {
 /// E26: may `agent` choose a Mission at `Register`: lawful (`≥ 0.6`) and
 /// not proud (`< 0.5`).
 pub fn founder_ok(world: &World, agent: EntityId) -> bool {
-    on(world) && world.comp::<Personality>(agent).is_some_and(|p| p.lawfulness >= 0.6 && p.pride < 0.5)
+    world.comp::<Personality>(agent).is_some_and(|p| p.lawfulness >= 0.6 && p.pride < 0.5)
 }
 
 /// `founding::convert`'s hook: a Mission opens with its purse.
@@ -303,9 +295,6 @@ fn staff_daily(world: &mut World, m: EntityId, cost: i64) {
 /// else, with a treasury of `10 × found_cost.mission`, the corp builds one
 /// there on the city's deed (`Founded` "(philanthropy)").
 pub fn lobby(world: &mut World, corp: EntityId) {
-    if !on(world) {
-        return;
-    }
     let Some(largest) = world.comp::<crate::components::Corp>(corp).and_then(|c| {
         c.buildings
             .iter()
@@ -347,7 +336,7 @@ pub fn lobby(world: &mut World, corp: EntityId) {
 /// `Donated` at `EVENT_MIN`; the `Gave` deed at `rep_gift_min` for an
 /// agent donor. Returns the coins moved.
 pub fn donate(world: &mut World, from: Option<EntityId>, mission: EntityId, amount: i64) -> i64 {
-    if !on(world) || !standing(world, mission) {
+    if !standing(world, mission) {
         return 0;
     }
     let moved = ownership::charity_in(world, from, mission, amount);
@@ -378,7 +367,7 @@ pub fn donate(world: &mut World, from: Option<EntityId>, mission: EntityId, amou
 /// donor's reputation through the M15 path; there is no standing weight at
 /// HEAD, so the spec's `rep_gift` is carried by `honour_w.gave`).
 fn gave_deed(world: &mut World, donor: EntityId, mission: EntityId) {
-    if !world.config.gossip.enabled || !world.has::<crate::components::Memory>(donor) {
+    if !world.has::<crate::components::Memory>(donor) {
         return;
     }
     let sal = world.config.gossip.deed_sal.get(Deed::Gave);
@@ -412,9 +401,6 @@ pub fn spend(world: &mut World, mission: EntityId, to: Option<EntityId>, amount:
 /// it) and the coins cross in (`outside.inbound`), so
 /// `total_coins + Σ outside − minted` holds to the coin.
 pub fn god_donate(world: &mut World, mission: EntityId, amount: i64) -> Result<i64, String> {
-    if !on(world) {
-        return Err("charities are off".into());
-    }
     if !standing(world, mission) {
         return Err(format!("{} is no Mission", world.name_of(mission)));
     }
@@ -486,7 +472,7 @@ fn give_floor(world: &World, id: EntityId) -> i64 {
 /// `donate_base × (lawfulness + loyalty) ÷ 2 × (1 + creed)`, `creed` 1
 /// for a Purist), `donate_frac` of the surplus (at least 1), once a day.
 pub fn wants_to_give(world: &World, id: EntityId) -> Option<i64> {
-    if !on(world) || !crate::systems::demography::is_adult(world, id) {
+    if !crate::systems::demography::is_adult(world, id) {
         return None;
     }
     let day = world.day();
@@ -531,7 +517,7 @@ pub fn donate_plan(world: &mut World, id: EntityId) -> Option<Plan> {
 /// Expand with an open front gives `gang_gift` to the Mission in its
 /// Hideout's district, else the nearest.
 pub fn gang_gift(world: &mut World, gang: EntityId) {
-    if !on(world) || !world.day().is_multiple_of(7) {
+    if !world.day().is_multiple_of(7) {
         return;
     }
     let expand =
@@ -562,7 +548,7 @@ pub fn gang_gift(world: &mut World, gang: EntityId) {
 /// `[GoTo(Seller = mission)] -> EatAlms`. A Volunteer at its own Mission
 /// eats there on shift whatever its coins (the staff meal).
 pub fn alms_plan(world: &World, id: EntityId) -> Option<Plan> {
-    if !on(world) || !crate::systems::demography::is_adult(world, id) {
+    if !crate::systems::demography::is_adult(world, id) {
         return None;
     }
     let hunger = world.comp::<Needs>(id)?.hunger;
@@ -617,9 +603,6 @@ fn hour_cap(world: &World, m: EntityId) -> u16 {
 
 /// E27: the scripted steps' start check (through `actions::can_start`).
 pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> bool {
-    if !on(world) {
-        return false;
-    }
     let Some(m) = target.filter(|&m| standing(world, m)) else { return false };
     let here = world.comp::<Position>(id).and_then(|p| p.building);
     match kind {
@@ -709,9 +692,6 @@ pub fn on_donate(world: &mut World, id: EntityId, target: Option<EntityId>) -> c
 /// ascending hunger then id, served from the stock; then every Statistical
 /// adult who would give today gives to the nearest Mission.
 pub fn stat_daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let reach = world.config.charity.reach_tiles;
     let below = world.config.charity.hunger_below;
     let stat: Vec<EntityId> = world.tier(Lod::Statistical).to_vec();
@@ -763,8 +743,7 @@ pub fn stat_daily(world: &mut World) {
 
 /// E27: a standing Mission whose purse covers a cot is a Hotel at price 0.
 pub fn is_cot_house(world: &World, b: EntityId) -> bool {
-    on(world)
-        && world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Mission)
+    world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Mission)
         && standing(world, b)
         && !world.is_closed(b)
         && charity(world, b).is_some_and(|c| c.purse >= world.config.charity.cot_price)
@@ -787,7 +766,7 @@ pub fn note_cot(world: &mut World, m: EntityId) {
 
 /// Hourly (from `living::run`): the Statistical pass at 12:00.
 pub fn hourly(world: &mut World) {
-    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    if !world.tick.is_multiple_of(TICKS_PER_HOUR) {
         return;
     }
     if world.tick_of_day() == 12 * TICKS_PER_HOUR as u16 {
@@ -799,9 +778,6 @@ pub fn hourly(world: &mut World) {
 /// the kitchens' restock from the nearest Market at `wholesale +
 /// meal_markup` (`Flow::Wholesale` from the purse), the Dreg column.
 pub fn daily(world: &mut World) {
-    if !on(world) {
-        return;
-    }
     let cost = meal_cost(world);
     for m in missions(world) {
         let (meals, cots) = charity(world, m).map_or((0, 0), |c| (c.meals_today, c.cots_today));

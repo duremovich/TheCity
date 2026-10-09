@@ -51,7 +51,6 @@ pub enum LocationKey {
     Hideout,
     /// The street tile outside the current expedition's door: the rival
     /// Hideout under Raid / Retaliate, the Jail under BreakOut (raiders stop there).
-    #[serde(alias = "RivalHideout")]
     RaidTarget,
     Warehouse,
     /// On a non-building tile.

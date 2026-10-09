@@ -68,8 +68,6 @@ impl SeedRun {
 
 fn run_seed(seed: u64, days: u64) -> SeedRun {
     let mut w = World::new(seed, Config::load());
-    let market = econ::market_on(&w);
-    assert!(market, "the shipped config books every crossing: the identity is exact");
     let base = econ::identity(&w);
     let seeded: Vec<EntityId> = w.corps();
     let mut r = SeedRun {
@@ -200,50 +198,51 @@ type Mechanism = (&'static str, Box<dyn Fn(&SeedRun) -> u32>);
 fn mechanisms() -> Vec<Mechanism> {
     let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
     let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
-    // Measured on main 38210ce, 120 days, seeds 42-47 (fired on 4-6 of 6 seeds each; the
-    // 42-44 counts in brackets).
+    // Chosen on main 38210ce, 120 days, seeds 42-47 (each fired on 3-6 of 6 seeds); the 42-44
+    // counts in brackets are the city after the off switches retired and the stat table was
+    // regenerated in the full city (2026-10-09).
     vec![
         // M5, M6: the social and the vital.
-        ("a Marriage", k(EventKind::Marriage)), // [635, 637, 613]
-        ("a GangJoin", k(EventKind::GangJoin)), // [532, 580, 430]
-        ("a Birth", k(EventKind::Birth)),       // [93, 90, 94]
-        ("a Burial", k(EventKind::Burial)),     // [108, 103, 104]
+        ("a Marriage", k(EventKind::Marriage)), // [591, 605, 607]
+        ("a GangJoin", k(EventKind::GangJoin)), // [475, 525, 557]
+        ("a Birth", k(EventKind::Birth)),       // [75, 71, 78]
+        ("a Burial", k(EventKind::Burial)),     // [123, 119, 122]
         // M8 factions.
-        ("a raid resolved", m("raid resolved")),            // [11, 14, 10]
-        ("a Home flipped", k(EventKind::TerritoryFlipped)), // [77, 14, 91]
+        ("a raid resolved", m("raid resolved")),            // [12, 13, 15]
+        ("a Home flipped", k(EventKind::TerritoryFlipped)), // [35, 33, 95]
         // M9 the law.
-        ("a Jailbreak", k(EventKind::Jailbreak)),    // [7, 3, 5]
-        ("a day in Crackdown", m("Crackdown held")), // [25, 38, 43]
+        ("a Jailbreak", k(EventKind::Jailbreak)),    // [5, 4, 2]
+        ("a day in Crackdown", m("Crackdown held")), // [47, 31, 44]
         // M10 off-screen lives.
-        ("a hole bound", k(EventKind::Attributed)), // [493, 437, 470]
+        ("a hole bound", k(EventKind::Attributed)), // [905, 1007, 993]
         // M11 ownership and corps.
-        ("an eviction", k(EventKind::Evicted)),        // [191, 212, 224]
-        ("an NPC founding", m("NPC founding")),        // [12, 7, 10]
-        ("a hostile takeover", m("hostile takeover")), // [9, 11, 7]
-        ("a Strike", k(EventKind::Strike)),            // [11, 10, 10]
+        ("an eviction", k(EventKind::Evicted)),        // [173, 216, 244]
+        ("an NPC founding", m("NPC founding")),        // [9, 12, 8]
+        ("a hostile takeover", m("hostile takeover")), // [9, 10, 9]
+        ("a Strike", k(EventKind::Strike)),            // [10, 9, 9]
         // M12 districts.
-        ("a Riot", k(EventKind::Riot)),        // [12, 4, 10]
-        ("a gang Split", k(EventKind::Split)), // [1, 1, 0]; 4 of 6
-        ("a Squat", k(EventKind::Squatted)),   // [101, 51, 79]
+        ("a Riot", k(EventKind::Riot)),        // [2, 10, 2]
+        ("a gang Split", k(EventKind::Split)), // [1, 1, 1]; 5 of 6
+        ("a Squat", k(EventKind::Squatted)),   // [93, 82, 94]
         // M13 assets.
-        ("a Crash", k(EventKind::Crash)),              // [2, 6, 4]
-        ("a chrome Install", k(EventKind::Installed)), // [172, 157, 284]
-        ("a Dealing report", m("Dealing report")),     // [168, 239, 190]
+        ("a Crash", k(EventKind::Crash)),              // [4, 3, 3]
+        ("a chrome Install", k(EventKind::Installed)), // [252, 176, 263]
+        ("a Dealing report", m("Dealing report")),     // [197, 238, 222]
         // M14 the Virt plane.
-        ("a run (JackedIn)", k(EventKind::JackedIn)), // [160, 97, 56]
-        ("a Data sale", k(EventKind::DataSold)),      // [15, 13, 0]; 5 of 6
-        ("a Flatline", k(EventKind::Flatlined)),      // [4, 3, 1]
+        ("a run (JackedIn)", k(EventKind::JackedIn)), // [133, 70, 61]
+        ("a Data sale", k(EventKind::DataSold)),      // [8, 1, 0]; 5 of 6
+        ("a Flatline", k(EventKind::Flatlined)),      // [3, 2, 3]
         // M15 the word and the blood.
-        ("a Feed Story", k(EventKind::Story)),          // [782, 788, 783]
-        ("a Hunt", k(EventKind::HuntStarted)),          // [94, 65, 132]
-        ("a Vendetta", k(EventKind::Vendetta)),         // [5, 5, 4]
-        ("a Purist expulsion", k(EventKind::Expelled)), // [3, 1, 6]; 5 of 6
+        ("a Feed Story", k(EventKind::Story)),          // [810, 790, 789]
+        ("a Hunt", k(EventKind::HuntStarted)),          // [94, 63, 66]
+        ("a Vendetta", k(EventKind::Vendetta)),         // [7, 7, 6]
+        ("a Purist expulsion", k(EventKind::Expelled)), // [0, 4, 5]; 5 of 6
         // L2 the living city, the Real economy.
-        ("a World export", k(EventKind::Exported)),      // [301, 329, 318]
-        ("a Collect", k(EventKind::Collected)),          // [55, 57, 47]
-        ("a Bout", k(EventKind::Bout)),                  // [181, 157, 188]
-        ("a gang front", m("gang front")),               // [0, 105, 0] days; 4 of 6
-        ("a Mission meal", k(EventKind::MissionServed)), // [186, 212, 221]
+        ("a World export", k(EventKind::Exported)),      // [294, 328, 319]
+        ("a Collect", k(EventKind::Collected)),          // [57, 57, 58]
+        ("a Bout", k(EventKind::Bout)),                  // [150, 182, 223]
+        ("a gang front", m("gang front")),               // [0, 0, 74] days; 3 of 6 (the rarest bullet)
+        ("a Mission meal", k(EventKind::MissionServed)), // [166, 250, 146]
     ]
 }
 
