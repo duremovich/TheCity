@@ -1227,17 +1227,19 @@ fn fill_to_ceiling(w: &mut World, corp: EntityId) -> Option<(EntityId, citysim::
         let Some(kind) = w.comp::<Building>(b).filter(|bd| !bd.demolished && !bd.derelict).map(|bd| bd.kind) else {
             continue;
         };
-        let Some(role) = ownership::role_for(kind) else { continue };
-        let have = ownership::staff_at(w, b)
-            .into_iter()
-            .filter(|&a| Some(a) != exec && w.comp::<Job>(a).is_some_and(|j| j.role == role))
-            .count();
-        let ceiling = wages::staff_ceiling(w, kind);
-        if have < ceiling {
-            for _ in have..ceiling {
-                w.vacancies.entry(b).or_default().push(role);
+        // Jobs and room J10: every role of the kind (the trades too).
+        for (role, _) in ownership::roles_for(w, kind) {
+            let have = ownership::staff_at(w, b)
+                .into_iter()
+                .filter(|&a| Some(a) != exec && w.comp::<Job>(a).is_some_and(|j| j.role == role))
+                .count();
+            let ceiling = wages::ceiling_at(w, b, role);
+            if have < ceiling {
+                for _ in have..ceiling {
+                    w.vacancies.entry(b).or_default().push(role);
+                }
+                last = Some((b, role));
             }
-            last = Some((b, role));
         }
     }
     last
@@ -1273,4 +1275,25 @@ fn test_at_ceiling_skips_buildings_without_demand() {
     wages::daily(&mut w);
     let wr = w.comp::<Corp>(corp).map_or(0.0, |c| c.wage_rev);
     assert!((wr - (1.0 + cfg.wage_step)).abs() < 1e-4, "under target, nowhere to post: pay rises ({wr})");
+}
+
+/// P3 review: a role with no place at a building and nobody in it is not
+/// counted by `at_ceiling` (it would read "at its ceiling" vacuously): a
+/// corp whose only building is a staffless Bar (`[jobs] bar_staff` 0) has
+/// nowhere it counts, so it is not at its ceiling.
+#[test]
+fn test_at_ceiling_skips_vacuous_roles() {
+    let mut w = round_city(|c| {
+        c.economy2.raise_on_shortage_only = true;
+        c.economy2.hire_demand = 0.0;
+        c.jobs.bar_staff = 0;
+    });
+    let niches: std::collections::BTreeSet<Niche> = [Niche::Food].into_iter().collect();
+    let corp = ownership::spawn_corp(&mut w, "Vacuous".to_string(), niches, 1_000, None);
+    let lot = citysim::systems::founding::vacant_lots(&w).first().copied().expect("a vacant Lot");
+    let bar = citysim::systems::founding::build_on_lot(&mut w, lot, BuildingKind::Bar, Some(corp)).expect("built");
+    w.vacancies.remove(&bar);
+    assert!(ownership::staff_at(&w, bar).is_empty());
+    assert_eq!(citysim::systems::jobs::places_of(&w, bar, citysim::Role::Bartender), 0);
+    assert!(!wages::at_ceiling(&w, corp), "a corp with no place anywhere is not at its ceiling");
 }

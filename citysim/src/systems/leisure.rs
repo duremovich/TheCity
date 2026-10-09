@@ -279,9 +279,12 @@ pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
                 return true;
             }
             let tod = world.tick_of_day();
+            // Jobs and room J13 (`service`): the trade staff on duty at the
+            // door (a fighting trade: the Bouncers) stand with the Hosts.
             let bouncer = ownership::staff_at(world, b)
                 .into_iter()
                 .filter(|&s| world.comp::<Job>(s).is_some_and(|j| j.role == Role::Host && j.on_shift(tod)))
+                .chain(crate::systems::trades::door_staff(world, b))
                 .max_by(|&x, &y| {
                     crate::systems::law::fighting(world, x)
                         .total_cmp(&crate::systems::law::fighting(world, y))

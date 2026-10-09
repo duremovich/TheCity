@@ -100,7 +100,13 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
     egui::ScrollArea::vertical().show(ui, |ui| {
         header(ui, app, world, id, b);
         match b.kind {
-            BuildingKind::Home => home(ui, app, world, id, b),
+            BuildingKind::Home => {
+                home(ui, app, world, id, b);
+                // Jobs and room P3: a corp Block that posts the Super.
+                if !world.staff_of(id).is_empty() {
+                    staff(ui, app, world, id, "Super");
+                }
+            }
             BuildingKind::Farm => farm(ui, app, world, id, b),
             BuildingKind::Market => market(ui, app, world, id, b),
             BuildingKind::Bar => staff(ui, app, world, id, "Staff"),
@@ -116,7 +122,11 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                     world.district_name(world.district_of(b.door))
                 ));
             }
-            BuildingKind::Hotel => hotel(ui, app, world, id),
+            BuildingKind::Hotel => {
+                hotel(ui, app, world, id);
+                // Jobs and room P3: the Night Porters.
+                staff(ui, app, world, id, "Staff");
+            }
             // M13: sales and stock are in the Assets section below.
             BuildingKind::Clinic | BuildingKind::Garage => staff(ui, app, world, id, "Staff"),
             // M14 V16: the Lab's Researchers (its panel is phase 4).
@@ -210,6 +220,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                         c.scandal_days
                     ));
                 }
+                // Jobs and room P3: the Camp Wardens.
+                staff(ui, app, world, id, "Wardens");
             }
         }
         super::asset::building_section(ui, app, world, id, b);

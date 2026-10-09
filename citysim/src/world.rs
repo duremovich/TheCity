@@ -20,9 +20,13 @@ use crate::stats::DailyStats;
 use crate::systems;
 use crate::time::{self, Tick, DAYS_PER_YEAR, TICKS_PER_DAY};
 
-/// Position of a role in `Role::ALL`.
+/// Position of a role in [`World::roles`]: a bespoke role's in `Role::ALL`,
+/// a trade's `19 + its row` (J11).
 fn role_index(role: Role) -> usize {
-    Role::ALL.iter().position(|&r| r == role).expect("every role is in Role::ALL")
+    match role {
+        Role::Trade(t) => Role::ALL.len() + t.index(),
+        _ => Role::ALL.iter().position(|&r| r == role).expect("every bespoke role is in Role::ALL"),
+    }
 }
 
 /// Plan-queue key: highest urgency first, then lowest id. `Reverse` has no
@@ -521,9 +525,10 @@ pub struct World {
     /// Agents by LOD (`Lod as usize`), ascending. Kept by the Brain hooks and `retier`; rebuilt on load.
     #[serde(skip)]
     pub by_tier: [Vec<EntityId>; 3],
-    /// Job holders by `Role` (index in `Role::ALL`), ascending. Kept by the Job hooks; rebuilt on load.
+    /// Job holders by `Role` (index in [`World::roles`]: `Role::ALL`, then
+    /// the configured trades, J11), ascending. Kept by the Job hooks; rebuilt on load.
     #[serde(skip)]
-    pub by_role: [Vec<EntityId>; Role::ALL.len()],
+    pub by_role: Vec<Vec<EntityId>>,
     /// The Statistical tier bucketed by hourly slot (`id.index % 60`), each
     /// ascending: the spread tick reads one bucket per tick. Kept with `by_tier`.
     #[serde(skip)]
@@ -976,6 +981,8 @@ impl World {
         // failure is a broken checkout and must not pass silently.
         let (stat_table, stat_table_legacy) = load_stat_table(&config);
         let stat_mlp = load_stat_mlp(&config);
+        // J11: `by_role` holds the 19 bespoke roles and the configured trades.
+        let config_trades = config.trades.len();
 
         let edge_roads = map.edge_roads();
         let levers = Levers::from_config(&config);
@@ -1089,7 +1096,7 @@ impl World {
             spouses: BTreeMap::new(),
             enemies: BTreeMap::new(),
             by_tier: Default::default(),
-            by_role: Default::default(),
+            by_role: vec![Vec::new(); Role::ALL.len() + config_trades],
             stat_slots: StatSlots::default(),
             names: names.clone(),
             virt: Default::default(),
@@ -1206,6 +1213,9 @@ impl World {
         // Chapel's kitchen, then the city's Camp (no RNG), before the plane links.
         systems::charity::seed(&mut w);
         systems::camp::seed(&mut w);
+        // Jobs and room J15: the trade places of every standing building the
+        // map and the seeding passes put up (no RNG).
+        systems::trades::seed(&mut w);
         // L2 phase 5 (the day-1 leisure pulse): opening fun spread (no RNG).
         systems::leisure::seed_fun(&mut w);
         systems::virt::relink(&mut w);
@@ -1460,7 +1470,7 @@ impl World {
         let mut taken = vec![false; pool.len()];
         for role in Role::ALL {
             let count = wc.jobs.count(role) as usize;
-            let workplaces = self.buildings_by_kind.get(&role.workplace()).cloned().unwrap_or_default();
+            let workplaces = role.workplace().and_then(|k| self.buildings_by_kind.get(&k)).cloned().unwrap_or_default();
             for k in 0..count {
                 let employer = workplaces.get(k % workplaces.len().max(1)).copied();
                 let work_door = employer.and_then(|e| self.comp::<Building>(e)).map(|b| b.door);
@@ -1484,7 +1494,7 @@ impl World {
                 } else {
                     wc.shift_day.clone()
                 };
-                let wage_per_day = self.config.economy.wage(role);
+                let wage_per_day = self.config.wage(role);
                 self.insert(
                     id,
                     Job {
@@ -1720,6 +1730,9 @@ impl World {
         self.unindex_job(id);
         if let Some(j) = self.comp::<Job>(id) {
             let (r, employer) = (role_index(j.role), j.employer);
+            if r >= self.by_role.len() {
+                self.by_role.resize(r + 1, Vec::new());
+            }
             Self::list_insert(&mut self.by_role[r], id);
             if let Some(b) = employer {
                 Self::list_insert(self.employers.entry(b).or_default(), id);
@@ -1773,7 +1786,15 @@ impl World {
 
     /// Job holders of one role, ascending.
     pub fn workers(&self, role: Role) -> &[EntityId] {
-        &self.by_role[role_index(role)]
+        self.by_role.get(role_index(role)).map_or(&[], Vec::as_slice)
+    }
+
+    /// J11: every role a Job can hold: the 19 bespoke roles (`Role::ALL`)
+    /// and the configured trades, in [`World::workers`]' index order.
+    pub fn roles(&self) -> Vec<Role> {
+        let mut out = Role::ALL.to_vec();
+        out.extend(self.config.trade_roles());
+        out
     }
 
     /// Every guard (a Job holder with `Role::Guard`), ascending.
@@ -1835,9 +1856,9 @@ impl World {
         (residents, back)
     }
 
-    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], [Vec<EntityId>; Role::ALL.len()], StatSlots) {
+    fn indices_from_stores(&self) -> ([Vec<EntityId>; 3], Vec<Vec<EntityId>>, StatSlots) {
         let mut tiers: [Vec<EntityId>; 3] = Default::default();
-        let mut roles: [Vec<EntityId>; Role::ALL.len()] = Default::default();
+        let mut roles: Vec<Vec<EntityId>> = vec![Vec::new(); Role::ALL.len() + self.config.trades.len()];
         let mut slots = StatSlots::default();
         for id in self.entities() {
             if let Some(b) = self.comp::<Brain>(id) {
@@ -1847,7 +1868,11 @@ impl World {
                 }
             }
             if let Some(j) = self.comp::<Job>(id) {
-                roles[role_index(j.role)].push(id);
+                let r = role_index(j.role);
+                if r >= roles.len() {
+                    roles.resize(r + 1, Vec::new());
+                }
+                roles[r].push(id);
             }
         }
         (tiers, roles, slots)

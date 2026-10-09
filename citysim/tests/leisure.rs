@@ -316,6 +316,9 @@ fn test_fun_decays_at_every_tier_equally() {
     let run = |force: Lod| -> Vec<(EntityId, f32, citysim::Class)> {
         let mut cfg = Config::load().scaled_to(300);
         cfg.lod.force = Some(force);
+        // Jobs and room P3: no trades (their hires shrink the jobless pool compared here).
+        cfg.trades.clear();
+        cfg.reset_trade_cache();
         cfg.leisure.gain = citysim::config::FunGainCfg {
             club: 0.0,
             club_spire: 0.0,

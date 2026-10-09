@@ -87,6 +87,9 @@ pub fn snapshot(world: &mut World) {
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;
+    // Jobs v2 (P3): the trades' Job holders.
+    world.stats.current.jobs.trades_employed =
+        world.config.trade_roles().into_iter().map(|r| world.workers(r).len() as u32).sum();
     let citizens = world.citizens();
     let mut employed = 0;
     let mut homeless = 0;

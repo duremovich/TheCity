@@ -279,10 +279,13 @@ pub enum EventKind {
     // --- Jobs and room P2 (plan J8; amber).
     /// `[payer?, building]`: a storey added (`founding::add_floor`).
     FloorAdded,
+    // --- Jobs and room P3 (plan J14; amber).
+    /// `[super, post]`: a Super walked the round of his Blocks (`trades::round_plan`).
+    SuperRound,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 140] = [
+    pub const ALL: [EventKind; 141] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -423,6 +426,7 @@ impl EventKind {
         EventKind::LaidOff,
         EventKind::TaxMoved,
         EventKind::FloorAdded,
+        EventKind::SuperRound,
     ];
 }
 

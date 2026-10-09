@@ -1188,6 +1188,12 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase) {
             crate::systems::jobs::accrue_fab_work(world, id, fab, u64::from(TICKS_PER_HOUR as u32));
         }
     }
+    // Jobs and room J13: a Statistical producing trade's hour on shift.
+    if job.role.is_trade() {
+        if let Some(b) = job.employer {
+            crate::systems::trades::accrue(world, id, b, u64::from(TICKS_PER_HOUR as u32));
+        }
+    }
     // An hour of co-work drifts each pair of co-workers as `social`'s
     // co-location does for bodies (bodies never see a Statistical agent in
     // their building). Each Statistical pair once an hour: the lower id drives.

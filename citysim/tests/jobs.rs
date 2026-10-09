@@ -91,7 +91,11 @@ fn test_refit_turns_derelict_into_den_at_half_cost() {
     assert!(!bd.derelict && bd.venue.is_some() && bd.owner == Some(founder));
     assert!(w.buildings_of_kind(BuildingKind::Den).contains(&d));
     assert!(!w.buildings_of_kind(BuildingKind::Home).contains(&d));
-    assert!(w.vacancies.get(&d).is_some_and(|v| v.iter().all(|&r| r == Role::Croupier) && !v.is_empty()));
+    // Jobs and room J15: its Croupiers and its trades (the Bouncers).
+    assert!(w
+        .vacancies
+        .get(&d)
+        .is_some_and(|v| v.iter().all(|&r| r == Role::Croupier || r.is_trade()) && v.contains(&Role::Croupier)));
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Refit));
 }
 

@@ -851,6 +851,24 @@ pub fn role_for(kind: BuildingKind) -> Option<Role> {
     }
 }
 
+/// Jobs and room J10: every role a `kind` employs with its places per floor:
+/// the bespoke role first ([`role_for`], `corp_brain::full_staff`), then
+/// each configured trade whose `workplace` lists the kind (its
+/// `staff_per_floor`), in row order. Empty for a kind that employs nobody.
+/// A `per_owned` trade's places are per owner group, not per floor
+/// (`jobs::places_of` reads them).
+pub fn roles_for(world: &World, kind: BuildingKind) -> Vec<(Role, usize)> {
+    let mut out = Vec::new();
+    if let Some(r) = role_for(kind) {
+        out.push((r, crate::systems::corp_brain::full_staff(world, kind)));
+    }
+    if world.config.trades.is_empty() {
+        return out;
+    }
+    out.extend_from_slice(world.config.trades_at(kind));
+    out
+}
+
 /// Everyone employed at one of `buildings` (ascending, as `Corp.buildings`),
 /// by workplace, each list ascending; a building with no staff has no
 /// entry. Jobs and room J3: read from the employer index

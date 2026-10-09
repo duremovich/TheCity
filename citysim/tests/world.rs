@@ -74,7 +74,10 @@ fn test_spawn_300_with_jobs() {
     for &id in &citizens {
         let Some(job) = w.comp::<Job>(id) else { continue };
         let employer = job.employer.expect("employer");
-        assert_eq!(w.comp::<citysim::Building>(employer).expect("workplace").kind, job.role.workplace());
+        assert_eq!(
+            w.comp::<citysim::Building>(employer).expect("workplace").kind,
+            job.role.workplace().expect("a seeded bespoke role")
+        );
     }
     // each home holds exactly 5 residents
     for home in w.buildings_by_kind[&BuildingKind::Home].iter() {

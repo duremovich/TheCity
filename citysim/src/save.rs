@@ -10,7 +10,10 @@ use crate::world::World;
 /// Missions, Camps, the till). Older saves are not loaded: the legacy
 /// migrations retired with the off switches (2026-10-09). 5: Jobs and room P2
 /// (`Building.floors`, `floor_days`, `MapBuilding.floors`; serde defaults).
-pub const SAVE_VERSION: u8 = 5;
+/// 6: Jobs and room P3 (J32): `Role::Trade` by key (`Trade("night_porter")`,
+/// resolved against the save's own `Config::trades`; an unknown key fails
+/// the load) and the `trades` rows in the saved config.
+pub const SAVE_VERSION: u8 = 6;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
@@ -18,6 +21,9 @@ pub fn to_ron(world: &World) -> String {
 }
 
 pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
+    // J32: a `Trade("key")` resolves against the trades of the config this
+    // save carries (read before any Job): none until that config is read.
+    crate::components::TradeId::set_keys(Vec::new());
     let mut world: World = ron::from_str(text)?;
     world.resize_stores();
     world.rebuild_indices();

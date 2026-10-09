@@ -45,6 +45,8 @@ pub fn workplace_key(role: Role) -> LocationKey {
         Role::Fixer => LocationKey::Workplace,
         // Real economy E26: a Mission's Volunteers likewise.
         Role::Volunteer => LocationKey::Workplace,
+        // Jobs and room J13: a trade's staff work at their employer.
+        Role::Trade(_) => LocationKey::Workplace,
     }
 }
 

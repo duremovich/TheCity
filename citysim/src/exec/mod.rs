@@ -1052,6 +1052,9 @@ impl World {
                         .filter(|&e| {
                             crate::systems::jobs::is_l2_building(self, e)
                                 || crate::systems::charity::is_mission(self, e)
+                                // Jobs and room J13: a trade's staff work at
+                                // their employer, whoever pays.
+                                || crate::systems::trades::at_post(self, agent, e)
                         })
                 })
                 .or_else(|| self.wage_desk(agent)),
@@ -1169,7 +1172,9 @@ impl World {
         let sweeper = self
             .comp::<crate::components::Job>(agent)
             .is_some_and(|j| j.role == crate::components::Role::Sanitation && j.employer == Some(b));
-        guard_at_jail || own_home || own_bed || sweeper
+        // Jobs and room J13: a trade's staff into their workplace, a Super
+        // into the Blocks of his round.
+        guard_at_jail || own_home || own_bed || sweeper || crate::systems::trades::capacity_exempt(self, agent, b)
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

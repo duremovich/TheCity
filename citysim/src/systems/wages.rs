@@ -331,19 +331,38 @@ pub fn at_ceiling(world: &World, corp: EntityId) -> bool {
             continue;
         }
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
-        let Some(role) = ownership::role_for(kind) else { continue };
         if !demand.wants(kind, floor) {
             continue;
         }
-        let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
-        let (hires, open) = places(world, b, role, c.exec);
-        // Jobs and room J7: the per-building ceiling, floors included.
-        if hires.len() + open < ceiling_at(world, b, role) + extra {
-            return false;
+        // Jobs and room J10: every role of the kind.
+        for (role, _) in ownership::roles_for(world, kind) {
+            let extra = overtime_of(kind, role, overtime);
+            let (hires, open) = places(world, b, role, c.exec);
+            // Review fix: a role with no place here and nobody in it (a
+            // Block that is not a Super's post) is not counted: it would
+            // read "at its ceiling" vacuously.
+            let ceiling = ceiling_at(world, b, role) + extra;
+            if ceiling == 0 && hires.is_empty() && open == 0 {
+                continue;
+            }
+            // Jobs and room J7: the per-building ceiling, floors included.
+            if hires.len() + open < ceiling {
+                return false;
+            }
+            any = true;
         }
-        any = true;
     }
     any
+}
+
+/// E18, J10: the Farm overtime places a role at a `kind` takes: the Farm's
+/// bespoke role (the Vat Techs) only.
+fn overtime_of(kind: BuildingKind, role: Role, overtime: usize) -> usize {
+    if kind == BuildingKind::Farm && ownership::role_for(kind) == Some(role) {
+        overtime
+    } else {
+        0
+    }
 }
 
 /// E20, E45: the payroll-weighted mean `wage_rev` over the corps (each
@@ -386,7 +405,7 @@ pub fn gross_wage(world: &World, job: &Job) -> i64 {
 /// E45: the mean gross daily wage over every Job holder (0 with none).
 pub fn gross_mean(world: &World) -> f32 {
     let (mut sum, mut n) = (0i64, 0usize);
-    for role in Role::ALL {
+    for role in world.roles() {
         for &a in world.workers(role) {
             if let Some(j) = world.comp::<Job>(a) {
                 sum += gross_wage(world, j);
@@ -477,7 +496,10 @@ pub fn staff_ceiling(world: &World, kind: BuildingKind) -> usize {
 pub fn ceiling_at(world: &World, b: EntityId, role: Role) -> usize {
     let full = crate::systems::jobs::places_of(world, b, role);
     let mult = world.config.economy2.staff_ceiling_mult;
-    if mult <= 1.0 {
+    // Jobs and room J14: a `per_owned` trade (the Super) is one post per
+    // group of buildings; a busier landlord does not post three.
+    let per_owned = crate::systems::trades::row_of(world, role).is_some_and(|r| r.per_owned > 0);
+    if mult <= 1.0 || per_owned {
         return full;
     }
     ((full as f32 * mult).ceil() as usize).max(full)
@@ -533,16 +555,18 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
             continue;
         }
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
-        let Some(role) = ownership::role_for(kind) else { continue };
-        let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
-        // Jobs and room J7: per building, floors included.
-        let cap = crate::systems::jobs::places_of(world, b, role) + extra;
-        let ceiling = ceiling_at(world, b, role) + extra;
-        let (hires, open) = places(world, b, role, exec);
-        let marginal = world.config.economy.wage(role) as f32 * rev_mult;
-        room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
-        if demand.wants(kind, cfg.hire_demand) {
-            rows.push((b, role, cap, ceiling, hires.len(), open, marginal));
+        // Jobs and room J10: every role of the kind, the bespoke first.
+        for (role, _) in ownership::roles_for(world, kind) {
+            let extra = overtime_of(kind, role, overtime);
+            // Jobs and room J7: per building, floors included.
+            let cap = crate::systems::jobs::places_of(world, b, role) + extra;
+            let ceiling = ceiling_at(world, b, role) + extra;
+            let (hires, open) = places(world, b, role, exec);
+            let marginal = world.config.wage(role) as f32 * rev_mult;
+            room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
+            if demand.wants(kind, cfg.hire_demand) {
+                rows.push((b, role, cap, ceiling, hires.len(), open, marginal));
+            }
         }
     }
     let mut posted = 0;
@@ -627,22 +651,26 @@ fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: boo
             continue;
         }
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
-        let Some(role) = ownership::role_for(kind) else { continue };
-        // Jobs and room J7: per building, floors included.
-        let cap =
-            crate::systems::jobs::places_of(world, b, role) + if kind == BuildingKind::Farm { overtime } else { 0 };
-        let (hires, _) = places(world, b, role, exec);
-        withdraw_past_cap(world, b, role, cap, hires.len());
-        if !lay_off_one || hires.len() <= cap {
-            continue;
+        // Jobs and room J10: every role of the kind, the bespoke first; one
+        // layoff per building a day, the first role past its cap.
+        let mut laid = false;
+        for (role, _) in ownership::roles_for(world, kind) {
+            // Jobs and room J7: per building, floors included.
+            let cap = crate::systems::jobs::places_of(world, b, role) + overtime_of(kind, role, overtime);
+            let (hires, _) = places(world, b, role, exec);
+            withdraw_past_cap(world, b, role, cap, hires.len());
+            if laid || !lay_off_one || hires.len() <= cap {
+                continue;
+            }
+            let Some(&(_, who)) = hires.last() else { continue };
+            let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
+            let text =
+                format!("{name} laid off as {} by {cname} (laid off: revenue, a shift past full staff)", role.label());
+            crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
+            world.stats.current.econ.laid_off += 1;
+            shed += 1;
+            laid = true;
         }
-        let Some(&(_, who)) = hires.last() else { continue };
-        let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
-        let text =
-            format!("{name} laid off as {} by {cname} (laid off: revenue, a shift past full staff)", role.label());
-        crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
-        world.stats.current.econ.laid_off += 1;
-        shed += 1;
     }
     shed
 }
@@ -740,8 +768,15 @@ pub fn floor_pass(world: &mut World, corp: EntityId, order: f32, room: f32, r: f
             let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
             let (hires, open) = places(world, b, role, exec);
             let at_ceiling = per_floor > 0 && hires.len() + open >= ceiling_at(world, b, role) + extra;
-            let marginal = world.config.economy.wage(role) as f32 * rev_mult;
-            let covers = room > 0.0 && room >= per_floor as f32 * marginal;
+            // Jobs and room J10: a floor's wage bill is every role's places
+            // on it (the bespoke role's ceiling still decides).
+            // (A `per_owned` trade's places do not grow with floors.)
+            let floor_bill: f32 = ownership::roles_for(world, kind)
+                .into_iter()
+                .filter(|&(r, _)| crate::systems::trades::row_of(world, r).is_none_or(|t| t.per_owned == 0))
+                .map(|(r, n)| n as f32 * (world.config.wage(r) as f32 * rev_mult))
+                .sum();
+            let covers = room > 0.0 && room >= floor_bill;
             let higher = floors < fcfg.max_for(kind) && crate::systems::founding::floor_cost(world, kind).is_some();
             grows = at_ceiling && covers && higher;
         }
