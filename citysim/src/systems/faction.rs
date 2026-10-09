@@ -116,6 +116,14 @@ pub struct OrderInputs {
     /// M15 W18: the gang's open vendetta of the highest weight against a
     /// gang or a corp, and that weight.
     pub vendetta: Option<(EntityId, f32)>,
+    /// M16a (plan C26, phase 2): the contract record the gang holds as its
+    /// job (`Taken`, the gang the taker), its price ÷ `[corps] hoard_heat`
+    /// (clamped 0..1), and the cover over its target's district
+    /// (`tile_cover`'s rule). Deviation: the plan's `(id, price)` carries
+    /// the price already over `hoard_heat` (as `treasury_x`) and the cover,
+    /// so Job's `1 − target_cover` reads the job's own target, not the
+    /// rival Hideout's. `None` in every city without one.
+    pub job: Option<(crate::contract::ContractId, f32, f32)>,
 }
 
 /// M12 D38: the cover over `gang`'s target under `order` (the Jail for
@@ -291,6 +299,20 @@ pub fn score_orders(i: &OrderInputs, cfg: &GangsCfg) -> Vec<OrderScore> {
             ],
             f.harvest,
         ),
+        // M16a (plan C26, spec § 3): the job a gang holds (the row only
+        // while it holds one: the `Can(job)` gate as the row's presence).
+        i.job.and_then(|(_, price_x, cover)| {
+            score(
+                Order::Job,
+                vec![
+                    Consideration::new("job", can(true), GATE),
+                    Consideration::new("price/hoard_heat", price_x, Curve::Logistic { k: 8.0, mid: 0.3 }),
+                    Consideration::new("greed", i.greed, Curve::Linear { m: 0.5, b: 0.5 }),
+                    Consideration::new("1-target cover", 1.0 - cover, Curve::Linear { m: 0.8, b: 0.2 }),
+                ],
+                f.job,
+            )
+        }),
         // M14 V30 (spec § 6 table).
         score(
             Order::VirtRaid,
@@ -561,6 +583,14 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         virt_grudge: virt.grudge,
         fear,
         vendetta,
+        job: crate::systems::contracts::job_of(world, gang).and_then(|id| {
+            let c = world.contracts.get(&id)?;
+            let cover = c
+                .target_agent()
+                .and_then(|t| world.comp::<crate::components::Position>(t))
+                .map_or(0.0, |p| tile_cover(world, gang, p.tile));
+            Some((id, (c.price as f32 / heat_ref as f32).clamp(0.0, 1.0), cover))
+        }),
     })
 }
 
@@ -682,6 +712,29 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         if let Some(g) = world.comp_mut::<Gang>(gang) {
             g.strike = None;
         }
+    }
+    // M16a (plan C26, phase 2): a gang holding a taken contract works it
+    // under Job until it settles (as the strike pin: exempt from dwell and
+    // hysteresis; `gang::run` rescores the moment it settles). The order
+    // trace still shows the scores, Job's among them.
+    if crate::systems::contracts::job_live(world, gang) {
+        let trace = gather_inputs(world, gang).map(|i| score_orders(&i, &world.config.gangs));
+        let Some((current, name)) = world.comp::<Gang>(gang).map(|g| (g.order, g.name.clone())) else { return false };
+        if let Some(g) = world.comp_mut::<Gang>(gang) {
+            g.order = Order::Job;
+            g.raid_at = None;
+            g.raid_target = None;
+            if current != Order::Job {
+                g.order_since = now;
+            }
+            if let Some(t) = trace {
+                g.order_trace = t;
+            }
+        }
+        if current != Order::Job {
+            world.push_event(EventKind::OrderChanged, &[gang], format!("{name}: {current:?} -> Job (a contract)"));
+        }
+        return true;
     }
     if let Some(t) = world.comp::<Gang>(gang).and_then(|g| g.raid_at).filter(|&t| t <= now) {
         if now < t + RAID_MARCH_TICKS {

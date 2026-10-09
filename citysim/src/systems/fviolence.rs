@@ -400,8 +400,12 @@ pub fn rebuild_active(world: &mut World) {
                 .unwrap_or_default(),
             _ => crate::systems::gang::held_districts(world, g).into_iter().map(|(d, _)| d).collect(),
         };
+        // M16a (plan C26, deviation): a gang under Job keeps Expand's cell
+        // over its held districts (its members outside the crew work
+        // Expand's GangWork; the job's own violence is the record's).
+        let cell = if order == Order::Job { Order::Expand } else { order };
         for d in districts {
-            out.push(src(ViolenceSource::Order(order), d, Some(g)));
+            out.push(src(ViolenceSource::Order(cell), d, Some(g)));
         }
         if let Some((d, _)) = strike.filter(|&(_, t)| t > now) {
             out.push(src(ViolenceSource::Order(Order::Contest), d, Some(g)));

@@ -156,6 +156,12 @@ fn log(world: &mut World, id: ContractId, text: String) {
     }
 }
 
+/// A line in `World::contract_log` (the Board's history; phase 2's brawl
+/// and strike lines).
+pub fn note(world: &mut World, id: ContractId, text: String) {
+    log(world, id, text);
+}
+
 // ---------------------------------------------------------------------------
 // Fixers
 // ---------------------------------------------------------------------------
@@ -602,7 +608,7 @@ pub fn holds_taken(world: &World, id: EntityId) -> bool {
 }
 
 /// A free living adult: no Sentence, not cuffed, not leaving.
-fn free_adult(world: &World, id: EntityId) -> bool {
+pub fn free_adult(world: &World, id: EntityId) -> bool {
     crate::systems::law::living(world, id)
         && crate::systems::demography::is_adult(world, id)
         && !world.has::<Sentence>(id)
@@ -719,6 +725,10 @@ pub fn render_for(world: &World, id: ContractId) -> Render {
     if c.kind == ContractKind::Guard && c.taker.is_some_and(|t| world.has::<Identity>(t)) {
         return Render::Live;
     }
+    // Phase 2 (C22, C25, C26): a squad or a gang's job is always live.
+    if is_mission(world, c) {
+        return Render::Live;
+    }
     let shown = |e: EntityId| {
         world.comp::<Brain>(e).is_some_and(|b| b.lod != Lod::Statistical || b.pinned)
             || world.view_rect.zip(world.comp::<Position>(e)).is_some_and(|(r, p)| r.contains(p.tile))
@@ -736,9 +746,10 @@ pub fn render_for(world: &World, id: ContractId) -> Render {
     }
 }
 
-/// Live records being worked now (each one run).
+/// Live records being worked now (each one run or one mission, C17;
+/// phase 2: `max_missions` counts both).
 fn live_count(world: &World) -> usize {
-    world.contract_runs.len()
+    world.contract_runs.len() + world.missions.len()
 }
 
 /// C17: start a live record's run: the taker promoted to Coarse, its
@@ -746,6 +757,10 @@ fn live_count(world: &World) -> usize {
 /// a Guard). `false` when `max_missions` runs are going (it stays queued).
 fn start_live(world: &mut World, id: ContractId) -> bool {
     let Some(c) = world.contracts.get(&id).cloned() else { return false };
+    // Phase 2 (C22): a squad or a gang's job marches as a mission.
+    if is_mission(world, &c) {
+        return open_mission(world, id);
+    }
     let Some(taker) = c.taker.filter(|&t| world.has::<Identity>(t)) else { return false };
     if world.contract_runs.contains_key(&taker) {
         return true;
@@ -866,6 +881,7 @@ fn offer(
     world: &mut World,
     id: ContractId,
     cands: Vec<EntityId>,
+    gangs: Vec<EntityId>,
     taken_today: &mut std::collections::BTreeSet<EntityId>,
 ) -> bool {
     let Some(c) = world.contracts.get(&id).cloned() else { return false };
@@ -876,14 +892,33 @@ fn offer(
         .filter(|&a| eligible(world, &c, a))
         .map(|a| (fit(world, &c, a, s_def), a))
         .collect();
+    // Phase 2 (C12, C26): a gang is a candidate for a Hit or a Beat, scored
+    // by its best member.
+    for g in gangs {
+        if taken_today.contains(&g) || !gang_eligible(world, &c, g) {
+            continue;
+        }
+        let best = job_crew(world, &c, g).iter().map(|&m| fit(world, &c, m, s_def)).fold(0.0f32, f32::max);
+        scored.push((best, g));
+    }
     scored.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
     let min = world.config.contracts.accept_min;
     for (_, a) in scored {
+        if world.has::<crate::components::Gang>(a) {
+            if leader_accepts(world, a, missions::buyer_faction(world, &c)) {
+                taken_today.insert(a);
+                return accept_gang(world, id, a);
+            }
+            continue;
+        }
         let risk = risk_against(world, c.kind, a, s_def);
         let score: f32 = mode_a(world, a, &c, risk, 1.0).iter().map(|x| x.output).product();
         if score >= min {
+            // Phase 2 (C25): a weak gun brings a squad.
+            let crew = squad_crew(world, &c, a);
             taken_today.insert(a);
-            return accept(world, id, a, &[]);
+            taken_today.extend(crew.iter().copied());
+            return accept(world, id, a, &crew);
         }
     }
     false
@@ -913,8 +948,9 @@ pub fn match_day(world: &mut World) {
             })
             .collect();
         book.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+        let gangs: Vec<EntityId> = k.gangs.iter().copied().collect();
         for &(_, id) in book.iter().take(usize::from(world.config.fixers.offers_per_day)) {
-            offer(world, id, regulars.clone(), &mut taken_today);
+            offer(world, id, regulars.clone(), gangs.clone(), &mut taken_today);
         }
     }
     let direct: Vec<ContractId> = world
@@ -926,7 +962,15 @@ pub fn match_day(world: &mut World) {
         .collect();
     for id in direct {
         let cands = direct_candidates(world, id);
-        offer(world, id, cands, &mut taken_today);
+        // Phase 2 (C26): a direct record's gang candidate is the buyer's gang.
+        let gangs: Vec<EntityId> = world
+            .contracts
+            .get(&id)
+            .and_then(|c| c.buyer)
+            .and_then(|b| if world.has::<crate::components::Gang>(b) { Some(b) } else { world.gang_of(b) })
+            .into_iter()
+            .collect();
+        offer(world, id, cands, gangs, &mut taken_today);
     }
 }
 
@@ -982,6 +1026,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         for &m in &c.crew {
             end_run(world, m, id);
         }
+        // Phase 2 (C22): the mission ends with the record's Taken state.
+        end_mission(world, id);
     }
     if !status.is_live() {
         if let Target::Agent(t) = c.target {
@@ -999,6 +1045,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         }
     }
     let kind = c.kind;
+    // Phase 2 (C25): a squad of two or more.
+    let squad = squad_size(world, &c) >= 2;
     let row = &mut world.stats.current.contract;
     match status {
         ContractStatus::Fulfilled => {
@@ -1007,6 +1055,9 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
             if kind == ContractKind::Hit {
                 row.hits_done += 1;
                 row.contract_murders += 1;
+                if squad {
+                    row.hits_squad += 1;
+                }
             }
         }
         ContractStatus::Reneged => {
@@ -1025,9 +1076,13 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
     let tname = world.name_of(target);
     let taker = c.taker.unwrap_or(EntityId::NONE);
     let (ev, text) = match status {
-        ContractStatus::Fulfilled => (
+        ContractStatus::Fulfilled if why.is_empty() => (
             EventKind::ContractFulfilled,
             format!("{} on {tname}: done by {}", kind.label(), world.owner_label(c.taker)),
+        ),
+        ContractStatus::Fulfilled => (
+            EventKind::ContractFulfilled,
+            format!("{} on {tname}: done by {} ({why})", kind.label(), world.owner_label(c.taker)),
         ),
         ContractStatus::Failed => (EventKind::ContractFailed, format!("{} on {tname}: failed ({why})", kind.label())),
         ContractStatus::Expired => (EventKind::ContractExpired, format!("{} on {tname}: expired", kind.label())),
@@ -1098,7 +1153,7 @@ pub fn settle(world: &mut World, id: ContractId, how: Settle, why: &str) {
         return;
     }
     match how {
-        Settle::Fulfilled => fulfil(world, id, &c),
+        Settle::Fulfilled => fulfil(world, id, &c, why),
         Settle::Failed => {
             refund(world, id);
             set_status(world, id, ContractStatus::Failed, why);
@@ -1118,7 +1173,7 @@ pub fn settle(world: &mut World, id: ContractId, how: Settle, why: &str) {
     );
 }
 
-fn fulfil(world: &mut World, id: ContractId, c: &Contract) {
+fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
     let price = c.price;
     if c.kind == ContractKind::Locate {
         // The sightings were paid as they came (C27): the Fixer's cut of
@@ -1145,7 +1200,7 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract) {
         let paid = ownership::escrow_out(world, id, owner, cut, Flow::FixerCut);
         note_cut(world, b, paid);
         refund(world, id);
-        set_status(world, id, ContractStatus::Fulfilled, "");
+        set_status(world, id, ContractStatus::Fulfilled, why);
         return;
     }
     // C6: a direct record pays from the buyer's purse, unless it reneges or
@@ -1165,7 +1220,7 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract) {
     if moved < price {
         renege(world, id, c);
     } else {
-        set_status(world, id, ContractStatus::Fulfilled, "");
+        set_status(world, id, ContractStatus::Fulfilled, why);
     }
 }
 
@@ -1239,6 +1294,8 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
     for &m in &c.crew {
         end_run(world, m, id);
     }
+    // Phase 2 (C22): the mission ends; the record goes back on the board.
+    end_mission(world, id);
     // Review fix: the departing taker and crew are no longer parties.
     for p in c.taker.into_iter().chain(c.crew.iter().copied()) {
         let still = Some(p) == c.buyer || Some(p) == c.agent || p == c.target.id();
@@ -1260,6 +1317,7 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
         x.due = None;
         x.render = Render::Ledger;
         x.guard_since = None;
+        x.holds = 0;
     }
     let text = format!("{} on {}: attempt {attempts} failed ({why})", c.kind.label(), world.name_of(c.target.id()));
     world.push_event(EventKind::ContractFailed, &[c.taker.unwrap_or(EntityId::NONE), c.target.id()], text.clone());
@@ -1295,7 +1353,13 @@ pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
                 _ => settle(world, id, Settle::Cancelled, "the target is dead"),
             }
         } else if c.status == ContractStatus::Taken && (c.taker == Some(dead) || c.crew.contains(&dead)) {
-            fail_attempt(world, id, "the taker died");
+            // Phase 2 (C22): a mission loses one of its crew (the last one
+            // out fails the attempt); a solo taker's death fails it.
+            if world.missions.contains_key(&id) {
+                drop_crew(world, id, dead);
+            } else {
+                fail_attempt(world, id, "the taker died");
+            }
         } else if c.buyer == Some(dead) {
             settle(world, id, Settle::Cancelled, "the buyer is gone");
         }
@@ -1304,6 +1368,14 @@ pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
 
 /// C19: does `actor` work a live record on `victim` (its run's target)?
 pub fn live_job_on(world: &World, actor: EntityId, victim: EntityId) -> bool {
+    // Phase 2 (C19, C23): a mission's crew working it (its target, or
+    // whoever stands at its door in the brawl) does the record's own violence.
+    if let Some(m) = world.mission_of.get(&actor).filter(|_| !world.missions.is_empty()) {
+        let on_target = world.contracts.get(m).and_then(|c| c.target_agent()) == Some(victim);
+        if on_target || world.comp::<Brain>(actor).and_then(|b| b.plan_goal()) == Some(GoalKind::Contract) {
+            return true;
+        }
+    }
     !world.contract_runs.is_empty() && world.contract_runs.get(&actor).is_some_and(|r| r.target == victim)
 }
 
@@ -1410,7 +1482,27 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
         }
         return;
     }
-    let p_win = missions::estimate(world, &[taker], &c.target);
+    // Phase 2 (C18, C24): the strike decision against the habit's district
+    // first: a Hold looks again in a day, a SellOut hands the record to the
+    // district's gang (live), a Fail is a failed attempt.
+    let door = habit.building.and_then(|b| missions::door_of(world, b)).unwrap_or(habit.tile);
+    match missions::decide(world, id, &[taker], door) {
+        crate::contract::Decision::Strike => {}
+        crate::contract::Decision::Hold => {
+            let due = missions::hold_until(now);
+            if let Some(old) = world.contracts.get_mut(&id).and_then(|x| x.due.replace(due)) {
+                world.ledger_due.remove(&(old, id));
+            }
+            world.ledger_due.insert((due, id));
+            return;
+        }
+        _ => return,
+    }
+    let p_win = world
+        .contracts
+        .get(&id)
+        .and_then(|x| x.strike)
+        .map_or_else(|| missions::estimate(world, &[taker], &c.target), |s| s.p_win);
     let attempts = u64::from(c.attempts);
     let win = world.rng.contract(ContractNs::Outcome, id, attempts).random::<f32>() < p_win;
     let src = |faction: EntityId| crate::ledger::ActiveSource {
@@ -1662,16 +1754,31 @@ pub fn gun_gate(world: &World, id: EntityId) -> bool {
 /// run) and mode B (network at a Fixer within reach: not a regular, or
 /// lapsing within 2 days, and through the gun gate).
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
-    if let Some(r) = world.contract_runs.get(&id) {
-        let c = world.contracts.get(&r.contract)?;
+    // Phase 2 (C22): a mission's crew member works its record as a taker does.
+    let mission = if world.missions.is_empty() { None } else { world.mission_of.get(&id).copied() };
+    // The crew goes about its day until the gather window (the Raid goal's
+    // `raid_gather_hours`) opens before the muster.
+    let window = Tick::from(world.config.gangs.raid_gather_hours) * TICKS_PER_HOUR;
+    if mission.and_then(|m| world.missions.get(&m)).is_some_and(|m| world.tick + window < m.raid_at) {
+        return None;
+    }
+    if let Some(cid) = world.contract_runs.get(&id).map(|r| r.contract).or(mission) {
+        let c = world.contracts.get(&cid)?;
         if c.status != ContractStatus::Taken || !free_adult(world, id) {
             return None;
         }
         let total = c.deadline.saturating_sub(c.taken.unwrap_or(c.posted)).max(1) as f32;
         let left = c.deadline.saturating_sub(world.tick) as f32;
-        let risk = risk_for(world, c, id);
+        let risk = match mission.and_then(|m| world.missions.get(&m)) {
+            Some(m) => 1.0 - missions::estimate(world, &m.crew, &c.target),
+            None => risk_for(world, c, id),
+        };
+        // Phase 2 (deviation): a mission's crew reads its muster, not the
+        // deadline: inside the gather window the muster is called (urgency
+        // 1, the Raid goal's "muster called").
+        let urgency_v = if mission.is_some() { 1.0 } else { (1.0 - left / total).clamp(0.0, 1.0) };
         let mut cs = vec![Consideration::new("holds a taken contract", can(true), GATE)];
-        cs.extend(mode_a(world, id, c, risk, (1.0 - left / total).clamp(0.0, 1.0)));
+        cs.extend(mode_a(world, id, c, risk, urgency_v));
         return Some((cs, world.config.contracts.contract_flat));
     }
     if world.buildings_of_kind(BuildingKind::Fixer).is_empty() || !gun_gate(world, id) {
@@ -1698,6 +1805,10 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
 /// same without the Attack, a Guard `GoTo(client) → Guard`. No run:
 /// `GoTo(Fixer) → Network`.
 pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
+    // Phase 2 (C22): a crew member marches with its mission.
+    if !world.missions.is_empty() && world.mission_of.contains_key(&id) {
+        return missions::plan(world, id);
+    }
     let step = |action, target| ActionInstance { action, target, tile: None };
     let now = world.tick;
     let Some(r) = world.contract_runs.get(&id).cloned() else {
@@ -1818,6 +1929,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
                     }
                 })
         }
+        // Phase 2 (C22): the mission's muster and brawl.
+        ActionKind::Muster | ActionKind::Brawl => missions::can_start(world, id, kind),
         _ => crate::systems::hunt::can_start(world, id, kind, target),
     }
 }
@@ -1897,6 +2010,8 @@ pub fn run(world: &mut World) {
             fail_attempt(world, id, "the taker was taken off the street");
         }
     }
+    // Phase 2 (C22): the missions' crews and march windows.
+    missions::check(world);
     let tod = time::tick_of_day(now);
     if u64::from(tod) % TICKS_PER_HOUR == 0 {
         start_queued(world);
@@ -1919,7 +2034,7 @@ fn start_queued(world: &mut World) {
         .contracts
         .values()
         .filter(|c| c.status == ContractStatus::Taken && c.render == Render::Live)
-        .filter(|c| c.taker.is_some_and(|t| !world.contract_runs.contains_key(&t)))
+        .filter(|c| !running(world, c))
         .map(|c| (-c.price, c.id))
         .collect();
     if queued.is_empty() {
@@ -2138,11 +2253,16 @@ pub fn snapshot(world: &mut World) {
     let regulars: u32 = fixers.iter().filter_map(|&f| world.comp::<Broker>(f)).map(|k| k.regulars.len() as u32).sum();
     let mut parties: std::collections::BTreeSet<EntityId> = world.contract_runs.keys().copied().collect();
     parties.extend(world.contract_runs.values().filter_map(|r| world.has::<Identity>(r.target).then_some(r.target)));
+    // Phase 2 (2.5): the missions' crews and targets.
+    for (id, m) in &world.missions {
+        parties.extend(m.crew.iter().copied());
+        parties.extend(world.contracts.get(id).and_then(|c| c.target_agent()));
+    }
     let queued = world
         .contracts
         .values()
         .filter(|c| c.status == ContractStatus::Taken && c.render == Render::Live)
-        .filter(|c| c.taker.is_some_and(|t| !world.contract_runs.contains_key(&t)))
+        .filter(|c| !running(world, c))
         .count() as u32;
     let escrow: i64 = world.contracts.values().map(|c| c.escrow).sum();
     let held = world.escrow_held;
@@ -2215,6 +2335,14 @@ pub fn god_take(world: &mut World, id: ContractId, taker: EntityId) -> Result<()
     if !c.is_open() {
         return Err("the contract is not open".into());
     }
+    // Phase 2 (C26): a gang takes it as a job.
+    if world.has::<crate::components::Gang>(taker) {
+        let c = c.clone();
+        if !gang_eligible(world, &c, taker) {
+            return Err("the gang cannot take it".into());
+        }
+        return if accept_gang(world, id, taker) { Ok(()) } else { Err("not accepted".into()) };
+    }
     if !free_adult(world, taker) || c.target.id() == taker {
         return Err("the taker cannot take it".into());
     }
@@ -2231,4 +2359,482 @@ pub fn god_take(world: &mut World, id: ContractId, taker: EntityId) -> Result<()
 /// The record a body works (for the Inspector and tests).
 pub fn run_of(world: &World, id: EntityId) -> Option<&ContractRun> {
     world.contract_runs.get(&id)
+}
+
+// ---------------------------------------------------------------------------
+// Missions, squads, gang takers and sell-outs (phase 2: C22-C26)
+// ---------------------------------------------------------------------------
+
+/// Is `id` a gang (a faction taker)?
+fn is_gang(world: &World, id: EntityId) -> bool {
+    world.has::<crate::components::Gang>(id)
+}
+
+/// C22, C25, C26: a record worked as a mission: a gang's job, or a squad
+/// (an agent taker with a crew).
+fn is_mission(world: &World, c: &Contract) -> bool {
+    c.taker.is_some_and(|t| is_gang(world, t)) || !c.crew.is_empty()
+}
+
+/// A Taken live record already being worked (a run or a mission).
+fn running(world: &World, c: &Contract) -> bool {
+    world.missions.contains_key(&c.id)
+        || c.taker.is_some_and(|t| world.contract_runs.get(&t).is_some_and(|r| r.contract == c.id))
+}
+
+/// The people on a record: an agent taker and the crew (`hits_squad`
+/// counts fulfilled Hits with two or more, C25).
+fn squad_size(world: &World, c: &Contract) -> usize {
+    usize::from(c.taker.is_some_and(|t| !is_gang(world, t))) + c.crew.len()
+}
+
+/// C26: the record a gang holds as its job (`Taken`, the gang the taker).
+pub fn job_of(world: &World, gang: EntityId) -> Option<ContractId> {
+    world
+        .by_party
+        .get(&gang)?
+        .iter()
+        .copied()
+        .find(|id| world.contracts.get(id).is_some_and(|c| c.status == ContractStatus::Taken && c.taker == Some(gang)))
+}
+
+/// C26 (review fix): the gang's job is marching (its mission open): the
+/// window `faction::rescore` holds `Order::Job` in (a job queued past
+/// `max_missions` does not freeze the gang's order).
+pub fn job_live(world: &World, gang: EntityId) -> bool {
+    !world.missions.is_empty() && job_of(world, gang).is_some_and(|id| world.missions.contains_key(&id))
+}
+
+/// May `m` march on record `c` as crew: eligible as a taker would be (C12),
+/// not in a live riot, not on another mission, and not of a gang mustering
+/// its own raid.
+fn crew_ok(world: &World, c: &Contract, m: EntityId) -> bool {
+    eligible(world, c, m)
+        && !world.rioter_of.contains_key(&m)
+        && !world.mission_of.contains_key(&m)
+        && world.gang_of(m).and_then(|g| world.comp::<crate::components::Gang>(g)).is_none_or(|g| g.raid_at.is_none())
+}
+
+/// C25: a weak gun's crew. When the solo estimate is below `squad_below`:
+/// up to `crew_max − 1` of the taker's gang members who may march (else, a
+/// gangless taker or none fit, its Friends who are regulars of the
+/// record's Fixer), strongest first (ties the lower id), stopping once the
+/// estimate clears `squad_below`. Empty for a strong gun, a Guard or a
+/// Locate.
+pub fn squad_crew(world: &World, c: &Contract, taker: EntityId) -> SmallVec<[EntityId; 4]> {
+    let mut crew: SmallVec<[EntityId; 4]> = SmallVec::new();
+    let below = world.config.missions.squad_below;
+    if !c.kind.violent() || missions::estimate(world, &[taker], &c.target) >= below {
+        return crew;
+    }
+    let ok = |m: EntityId| m != taker && crew_ok(world, c, m);
+    let mut pool: Vec<EntityId> = world
+        .gang_of(taker)
+        .and_then(|g| world.comp::<crate::components::Gang>(g))
+        .map(|g| g.members.iter().copied().filter(|&m| ok(m)).collect())
+        .unwrap_or_default();
+    if pool.is_empty() {
+        let regulars = c.broker.and_then(|b| world.comp::<Broker>(b));
+        pool = world
+            .neighbours(taker)
+            .filter(|&o| world.edge(taker, o).is_some_and(|e| e.kind == RelKind::Friend))
+            .filter(|o| regulars.is_some_and(|k| k.regulars.contains_key(o)))
+            .filter(|&o| ok(o))
+            .collect();
+    }
+    crate::systems::raid::by_strength(world, &mut pool);
+    let max = usize::from(world.config.fixers.crew_max.saturating_sub(1));
+    let mut team: Vec<EntityId> = vec![taker];
+    for m in pool {
+        if crew.len() >= max {
+            break;
+        }
+        crew.push(m);
+        team.push(m);
+        if missions::estimate(world, &team, &c.target) >= below {
+            break;
+        }
+    }
+    crew
+}
+
+/// C26: a gang's crew for a job: its fittest members who may march (C12's
+/// eligibility), strongest first, up to `crew_max`, the leader only if
+/// fewer than two others.
+pub fn job_crew(world: &World, c: &Contract, gang: EntityId) -> SmallVec<[EntityId; 4]> {
+    let Some(g) = world.comp::<crate::components::Gang>(gang) else { return SmallVec::new() };
+    let leader = g.leader;
+    let mut pool: Vec<EntityId> =
+        g.members.iter().copied().filter(|&m| Some(m) != leader && crew_ok(world, c, m)).collect();
+    crate::systems::raid::by_strength(world, &mut pool);
+    let max = usize::from(world.config.fixers.crew_max.max(1));
+    let mut crew: SmallVec<[EntityId; 4]> = pool.into_iter().take(max).collect();
+    if crew.len() < 2 && crew.len() < max {
+        if let Some(l) = leader.filter(|&l| crew_ok(world, c, l)) {
+            crew.push(l);
+        }
+    }
+    crew
+}
+
+/// C26: may `gang` take record `c` as a job: a Hit or a Beat, not the
+/// buyer, not the target's own gang, a free leader, no job, no raid
+/// mustering, no god strike pinned, and a crew to send.
+pub fn gang_eligible(world: &World, c: &Contract, gang: EntityId) -> bool {
+    let Some(g) = world.comp::<crate::components::Gang>(gang) else { return false };
+    let now = world.tick;
+    let t = c.target.id();
+    // Review fix: the leader who accepts is held to `eligible`'s
+    // relationship exclusions (no job on its Spouse, Family, Parent or
+    // Friend), as the crew are.
+    let kin = |l: EntityId| {
+        l == t
+            || Some(l) == c.buyer
+            || Some(l) == c.agent
+            || world.edge(l, t).is_some_and(|e| {
+                matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent | RelKind::Friend)
+            })
+    };
+    c.kind.violent()
+        && c.buyer != Some(gang)
+        && !crate::systems::grudges::member_of(world, t, gang)
+        && g.leader.is_some_and(|l| !world.has::<Sentence>(l) && !kin(l))
+        && job_of(world, gang).is_none()
+        && g.raid_at.is_none()
+        && g.strike.is_none_or(|(_, until)| until <= now)
+        && !job_crew(world, c, gang).is_empty()
+}
+
+/// C26: a gang's leader takes a job: `greed` → Linear{0.6, 0.4} × `1 −
+/// lawfulness` → Linear{0.5, 0.5} × `Regard(gang, buyer's faction).fear` →
+/// Linear{0.5, 0.5} ≥ `accept_min` (the spec's sell-out rule, also the
+/// matched gang's: one rule for a gang's acceptance).
+pub fn leader_accepts(world: &World, gang: EntityId, buyer_faction: EntityId) -> bool {
+    let Some(p) = world
+        .comp::<crate::components::Gang>(gang)
+        .and_then(|g| g.leader)
+        .filter(|&l| !world.has::<Sentence>(l))
+        .and_then(|l| world.comp::<Personality>(l))
+    else {
+        return false;
+    };
+    let fear = crate::systems::reputation::regard(world, gang, buyer_faction).fear;
+    let score = Consideration::new("greed", p.greed, Curve::Linear { m: 0.6, b: 0.4 }).output
+        * Consideration::new("1-lawfulness", 1.0 - p.lawfulness, Curve::Linear { m: 0.5, b: 0.5 }).output
+        * Consideration::new("fear of the buyer", fear, Curve::Linear { m: 0.5, b: 0.5 }).output;
+    score >= world.config.contracts.accept_min
+}
+
+/// C26: `gang` takes Open record `id` as a job: its crew (`job_crew`), the
+/// record Taken and live, the mission opened (or queued); the gang's brain
+/// pins `Order::Job` once the mission opens (`open_mission`).
+pub fn accept_gang(world: &mut World, id: ContractId, gang: EntityId) -> bool {
+    let Some(c) = world.contracts.get(&id).cloned() else { return false };
+    let crew = job_crew(world, &c, gang);
+    !crew.is_empty() && accept(world, id, gang, &crew)
+}
+
+/// C22: the door a mission marches to at `at`: the freshest intel (the
+/// taker's or its first crew member's own and gang's sightings, then the
+/// buyer's database), else the target's habit at `at`; a building's door
+/// is the street tile outside it.
+pub fn mission_door(world: &World, id: ContractId, at: Tick) -> (TilePos, Option<EntityId>) {
+    let Some(c) = world.contracts.get(&id) else { return (TilePos::default(), None) };
+    let Some(t) = c.target_agent() else { return (TilePos::default(), None) };
+    let lead = c.taker.filter(|&x| !is_gang(world, x)).or_else(|| c.crew.first().copied());
+    let intel = lead
+        .and_then(|l| crate::systems::hunt::fresh_intel(world, l, t))
+        .or_else(|| buyer_intel(world, c, t))
+        .unwrap_or_else(|| crate::systems::hunt::habit(world, t, at));
+    match intel.building.and_then(|b| missions::door_of(world, b).map(|d| (d, b))) {
+        Some((d, b)) => (d, Some(b)),
+        None => (intel.tile, None),
+    }
+}
+
+/// C22: where a mission gathers: outside the taker's gang's held Home
+/// nearest the door within `muster_near_tiles`, else outside the record's
+/// Fixer, else outside the taker's Home (a gang's Hideout), else where the
+/// lead stands.
+fn mission_muster(world: &World, c: &Contract, door: TilePos) -> TilePos {
+    let near = world.config.gangs.muster_near_tiles;
+    if let Some(g) = missions::taker_gang(world, c).and_then(|g| world.comp::<crate::components::Gang>(g)) {
+        let best = g
+            .territory
+            .iter()
+            .filter_map(|&h| {
+                world.comp::<Building>(h).filter(|b| !b.demolished).map(|b| (b.door.manhattan(door), h, b))
+            })
+            .filter(|&(d, _, _)| d <= near)
+            .min_by_key(|&(d, h, _)| (d, h));
+        if let Some((_, _, b)) = best {
+            return world.outside_door(b);
+        }
+    }
+    if let Some(d) = c.broker.and_then(|b| missions::door_of(world, b)) {
+        return d;
+    }
+    let taker = c.taker.unwrap_or(EntityId::NONE);
+    let home = if is_gang(world, taker) { world.hideout_of(taker) } else { missions::home_of(world, taker) };
+    if let Some(d) = home.and_then(|h| missions::door_of(world, h)) {
+        return d;
+    }
+    let lead = c.crew.first().copied().unwrap_or(taker);
+    world.comp::<Position>(lead).map_or(door, |p| p.tile)
+}
+
+/// C22: open record `id`'s mission (a squad's or a gang's): the crew (an
+/// agent taker first), the muster, the door, `raid_at` at the next
+/// `raid_muster_hour`, `mission_of`, the record live with a fresh strike;
+/// the crew promoted to bodies. `false` when `max_missions` live records
+/// are going (it stays queued, C17).
+pub fn open_mission(world: &mut World, id: ContractId) -> bool {
+    if world.missions.contains_key(&id) {
+        return true;
+    }
+    let Some(c) = world.contracts.get(&id).cloned() else { return false };
+    if c.status != ContractStatus::Taken || c.target_agent().is_none() {
+        return false;
+    }
+    if live_count(world) >= world.config.missions.max_missions {
+        return false;
+    }
+    let now = world.tick;
+    let mut crew: SmallVec<[EntityId; 6]> = SmallVec::new();
+    crew.extend(c.taker.filter(|&t| !is_gang(world, t)));
+    crew.extend(c.crew.iter().copied());
+    crew.retain(|a| crate::systems::law::living(world, *a));
+    if crew.is_empty() {
+        return false;
+    }
+    let raid_at = crate::systems::faction::next_muster(now, world.config.gangs.raid_muster_hour);
+    let (door, door_building) = mission_door(world, id, raid_at);
+    let muster = mission_muster(world, &c, door);
+    let hint = missions::expected_defenders(world, &c.target).len().saturating_sub(1).min(255) as u8;
+    for &a in &crew {
+        world.mission_of.insert(a, id);
+    }
+    world.missions.insert(
+        id,
+        crate::contract::Mission {
+            contract: id,
+            crew: crew.clone(),
+            muster,
+            door,
+            door_building,
+            raid_at,
+            stream_by: None,
+            defenders_hint: hint,
+        },
+    );
+    if let Some(x) = world.contracts.get_mut(&id) {
+        x.render = Render::Live;
+        x.due = None;
+        x.strike = None;
+        x.holds = 0;
+    }
+    if let Some(d) = c.due {
+        world.ledger_due.remove(&(d, id));
+    }
+    for &a in &crew {
+        if world.comp::<Brain>(a).is_some_and(|b| b.lod == Lod::Statistical) {
+            crate::systems::lod::set_lod(world, a, Lod::Coarse);
+        }
+    }
+    // C26: a gang's job marches: its brain pins `Order::Job` at once (at
+    // acceptance, a sell-out, or when a queued job finds room).
+    if let Some(g) = c.taker.filter(|&t| is_gang(world, t)) {
+        crate::systems::faction::rethink(world, g);
+    }
+    true
+}
+
+/// C22: a mission ends (its record left Taken, failed an attempt or was
+/// sold out): the crew released, `mission_of` cleaned, their Contract plans
+/// dropped.
+pub fn end_mission(world: &mut World, id: ContractId) {
+    let Some(m) = world.missions.remove(&id) else { return };
+    for &a in &m.crew {
+        if world.mission_of.get(&a) == Some(&id) {
+            world.mission_of.remove(&a);
+        }
+        if world.comp::<Brain>(a).and_then(|b| b.plan_goal()) == Some(GoalKind::Contract) {
+            world.abort_plan(a);
+        }
+    }
+}
+
+/// C22: `who` leaves record `id`'s mission (dead, jailed, cuffed, gone):
+/// out of the crew and the record (an agent taker's place goes to the
+/// first of the crew), no longer a party; the last one out fails the
+/// attempt.
+pub fn drop_crew(world: &mut World, id: ContractId, who: EntityId) {
+    let Some(c) = world.contracts.get(&id).cloned() else { return };
+    if let Some(m) = world.missions.get_mut(&id) {
+        m.crew.retain(|a| *a != who);
+    }
+    if world.mission_of.get(&who) == Some(&id) {
+        world.mission_of.remove(&who);
+    }
+    if world.comp::<Brain>(who).and_then(|b| b.plan_goal()) == Some(GoalKind::Contract) {
+        world.abort_plan(who);
+    }
+    let empty = world.missions.get(&id).is_none_or(|m| m.crew.is_empty());
+    if empty {
+        fail_attempt(world, id, "the crew is gone");
+        return;
+    }
+    if let Some(x) = world.contracts.get_mut(&id) {
+        x.crew.retain(|a| *a != who);
+        if x.taker == Some(who) {
+            x.taker = if x.crew.is_empty() { None } else { Some(x.crew.remove(0)) };
+        }
+    }
+    let still = Some(who) == c.buyer || Some(who) == c.agent || who == c.target.id();
+    if !still {
+        if let Some(list) = world.by_party.get_mut(&who) {
+            list.retain(|x| *x != id);
+            if list.is_empty() {
+                world.by_party.remove(&who);
+            }
+        }
+    }
+}
+
+/// C26: would `gang` (the door district's controller) take record `id`
+/// over: a Taken Hit or Beat whose target is not its member, the gang's
+/// `Regard` of the target's faction (its gang, else its corp, else the
+/// target) below `sell_regard`, the gang not its taker or buyer and free to
+/// take a job, its leader accepting (`leader_accepts`). The buyer's purse
+/// is `sell_out`'s check (a short buyer lapses the offer).
+pub fn can_sell_out(world: &World, id: ContractId, gang: EntityId) -> bool {
+    let Some(c) = world.contracts.get(&id) else { return false };
+    let Some(t) = c.target_agent() else { return false };
+    if c.status != ContractStatus::Taken || c.taker == Some(gang) || missions::taker_gang(world, c) == Some(gang) {
+        return false;
+    }
+    let tf = world.gang_of(t).or_else(|| world.corp_of_agent(t)).unwrap_or(t);
+    gang_eligible(world, c, gang)
+        && crate::systems::reputation::regard(world, gang, tf).value < world.config.missions.sell_regard
+        && leader_accepts(world, gang, missions::buyer_faction(world, c))
+}
+
+/// C26: sell record `id` out to `gang` (the same record, one id): the price
+/// raised by `sell_premium` (a brokered buyer tops up the escrow, a direct
+/// buyer's purse is checked; short, the offer lapses: `false`), the old
+/// taker and crew released, the gang the taker with its crew, `sold_out`,
+/// `SoldOut`, the mission opened (or queued) and the gang's brain rethinks.
+pub fn sell_out(world: &mut World, id: ContractId, gang: EntityId) -> bool {
+    if !can_sell_out(world, id, gang) {
+        return false;
+    }
+    let Some(c) = world.contracts.get(&id).cloned() else { return false };
+    let new_price = ((c.price as f32) * world.config.missions.sell_premium).round().max(c.price as f32) as i64;
+    let top = new_price - c.price;
+    if c.brokered() {
+        // Review fix: a short top-up returns only what it took (the record's
+        // own escrow stays for its next taker) and the offer lapses.
+        let moved = if top > 0 { ownership::escrow_in(world, c.buyer, id, top) } else { 0 };
+        if moved < top {
+            if moved > 0 {
+                ownership::escrow_out(world, id, refund_to(world, c.buyer), moved, Flow::Escrow);
+            }
+            return false;
+        }
+    } else if world.purse(c.buyer) < new_price {
+        return false;
+    }
+    let crew = job_crew(world, &c, gang);
+    let prev = c.taker;
+    if let Some(t) = prev {
+        end_run(world, t, id);
+    }
+    for &m in &c.crew {
+        end_run(world, m, id);
+    }
+    end_mission(world, id);
+    if let Some(d) = c.due {
+        world.ledger_due.remove(&(d, id));
+    }
+    for p in prev.into_iter().chain(c.crew.iter().copied()) {
+        let still = Some(p) == c.buyer || Some(p) == c.agent || p == c.target.id();
+        if still {
+            continue;
+        }
+        if let Some(list) = world.by_party.get_mut(&p) {
+            list.retain(|x| *x != id);
+            if list.is_empty() {
+                world.by_party.remove(&p);
+            }
+        }
+    }
+    if let Some(x) = world.contracts.get_mut(&id) {
+        x.taker = Some(gang);
+        x.crew = crew.clone();
+        x.price = new_price;
+        x.terms = Terms::Pay { price: new_price };
+        x.sold_out = true;
+        x.holds = 0;
+        x.due = None;
+        x.render = Render::Live;
+    }
+    index_parties(world, id);
+    for &m in &crew {
+        hear_hired(world, id, m);
+    }
+    world.stats.current.contract.sold_out += 1;
+    let t = c.target.id();
+    let text = format!(
+        "{} took over the job on {} from {}",
+        world.owner_label(Some(gang)),
+        world.name_of(t),
+        world.owner_label(prev)
+    );
+    world.push_event(EventKind::SoldOut, &[gang, t, prev.unwrap_or(EntityId::NONE)], text.clone());
+    log(world, id, text);
+    start_live(world, id);
+    true
+}
+
+/// C24, from `StakeOut`'s contact (exec): a live solo Hit or Beat decides
+/// its strike there (the taker against the target's expected defenders,
+/// the target's district's controller). `true` strikes (the `Attack`
+/// follows; also for anything that is not a contract strike); a Hold sends
+/// the run back to asking and cools the goal a day; a SellOut or a Fail
+/// ends this attempt. No draw.
+pub fn strike_at_contact(world: &mut World, taker: EntityId) -> bool {
+    if world.contract_runs.is_empty() {
+        return true;
+    }
+    let Some(r) = world.contract_runs.get(&taker).cloned() else { return true };
+    let violent = world
+        .contracts
+        .get(&r.contract)
+        .is_some_and(|c| c.status == ContractStatus::Taken && c.kind.violent() && c.target_agent().is_some());
+    if !violent {
+        return true;
+    }
+    let door = world
+        .comp::<Position>(r.target)
+        .or_else(|| world.comp::<Position>(taker))
+        .map_or_else(TilePos::default, |p| p.tile);
+    match missions::decide(world, r.contract, &[taker], door) {
+        crate::contract::Decision::Strike => true,
+        crate::contract::Decision::Hold => {
+            if let Some(mut x) = crate::systems::hunt::chase(world, taker) {
+                x.phase = HuntPhase::Ask;
+                x.intel = None;
+                x.venue = None;
+                x.stakeout_until = None;
+                crate::systems::hunt::set_chase(world, taker, x);
+                crate::systems::hunt::reindex(world);
+            }
+            let until = missions::hold_until(world.tick);
+            if let Some(b) = world.comp_mut::<Brain>(taker) {
+                b.cooldowns.insert(GoalKind::Contract, until);
+            }
+            false
+        }
+        _ => false,
+    }
 }

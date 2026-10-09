@@ -1221,6 +1221,11 @@ pub fn on_complete(
             } else if crate::systems::hunt::contact(world, id) {
                 // M16a (plan C27): a Locate tracker's contact is a paid sighting.
                 crate::systems::contracts::on_contact(world, id);
+                // M16a (plan C24, phase 2): a contract Hit or Beat decides its
+                // strike at contact (a Hold, a sell-out or a Fail ends here).
+                if !crate::systems::contracts::strike_at_contact(world, id) {
+                    return StepResult::Failed(FailReason::PreconditionLost);
+                }
                 StepResult::Done
             } else {
                 crate::systems::hunt::stakeout_failed(world, id)

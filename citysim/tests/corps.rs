@@ -769,6 +769,7 @@ fn test_hoard_tilts_contest() {
         virt_grudge: false,
         fear: None,
         vendetta: None,
+        job: None,
     };
     let contest = |i: &faction::OrderInputs| {
         faction::score_orders(i, &w.config.gangs)
