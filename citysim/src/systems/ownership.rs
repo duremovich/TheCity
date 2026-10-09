@@ -1756,6 +1756,7 @@ fn rolls(world: &mut World) {
             while cc.pay.len() > crate::systems::wages::WINDOW_DAYS {
                 cc.pay.pop_front();
             }
+            cc.import_today = 0;
         }
         // In the red at the close, before the upkeep lump (phase 5; was
         // after it, the intra-day trough). A corp at exactly 0 that took in

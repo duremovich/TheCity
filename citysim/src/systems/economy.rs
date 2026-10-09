@@ -397,10 +397,23 @@ pub fn haul(world: &mut World, farm: EntityId, vehicle: Option<u32>) -> u32 {
     } else if let Some(m) = rival {
         haul_to_market(world, farm, farm_owner, m, &mut left, market_cap, wholesale);
     }
+    // The jobs round (`[economy2] overflow_paid_only`, wages on): the Reserve
+    // buys a Farm's surplus only with coins the Treasury holds (no purchase
+    // from a negative Treasury: the overflow leg was the last magic money),
+    // and what it does not buy stays at the Farm instead of being lost.
+    // Intended: a Farm whose surplus nobody buys fills to its stock cap and
+    // then produces nothing more (`accrue_farm_work` adds only up to the cap,
+    // inputs charged on what enters stock) - the city does not pay for food
+    // it cannot sell or store.
+    let paid_only = world.config.economy2.overflow_paid_only && crate::systems::wages::on(world);
     if left > 0 {
         if let Some(w) = world.building_of_kind(BuildingKind::Warehouse) {
             let room = world.comp::<Building>(w).map_or(0, |wb| wh_cap.saturating_sub(wb.stock_food));
-            let take = left.min(room);
+            let mut take = left.min(room);
+            if paid_only && farm_owner.is_some() && wholesale > 0 {
+                let afford = (world.purse(None).max(0) / wholesale).min(i64::from(u32::MAX)) as u32;
+                take = take.min(afford);
+            }
             if let Some(wb) = world.comp_mut::<Building>(w) {
                 wb.stock_food += take;
             }
@@ -409,7 +422,14 @@ pub fn haul(world: &mut World, farm: EntityId, vehicle: Option<u32>) -> u32 {
                 ownership::credit(world, farm, paid);
                 world.stats.current.flow_overflow += paid;
             }
+            left -= take;
         }
+    }
+    if paid_only && left > 0 {
+        if let Some(b) = world.comp_mut::<Building>(farm) {
+            b.stock_food += left;
+        }
+        return moved - left;
     }
     moved
 }

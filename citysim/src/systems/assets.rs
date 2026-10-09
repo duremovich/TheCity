@@ -1653,6 +1653,33 @@ pub fn buy_noted(
         if !can_pay(world, seller_owner, import) {
             return Err(format!("{} cannot pay the import", world.owner_label(seller_owner)));
         }
+        // The jobs round (`[economy2] asset_import_per_day`, wages on): a
+        // corp fronts at most this much of asset imports a day, so the
+        // opening wallets' burst does not ship the city's coins abroad in a
+        // week (a refused sale keeps the buyer's coins at home). A corp
+        // buyer's purchase (its business fleet: vehicles, robots and decks
+        // for its own buildings) is neither capped nor counted; it is paid
+        // only from coins above the fleet floor (`wages::fleet_floor`).
+        let business = matches!(ownership::owner_kind(world, Some(buyer)), OwnerKind::Corp(_));
+        if business && crate::systems::wages::on(world) {
+            let floor = crate::systems::wages::fleet_floor(world, buyer);
+            if floor > 0 && coins - down < floor {
+                return Err(format!(
+                    "{} keeps its working capital ({} after the purchase, fleet floor {floor})",
+                    world.owner_label(Some(buyer)),
+                    coins - down
+                ));
+            }
+        }
+        if import > 0 && !business && crate::systems::wages::on(world) {
+            let cap = world.config.economy2.asset_import_per_day;
+            if let Some(c) = seller_owner.and_then(|o| world.comp_mut::<crate::components::Corp>(o)) {
+                if cap > 0 && c.import_today + import > cap {
+                    return Err(format!("{} has spent today's import budget", c.name));
+                }
+                c.import_today += import;
+            }
+        }
         world.take_stock(seller, Good::Parts, parts);
         ownership::import(world, seller_owner, import, ownership::ImportWhy::Asset);
         // L2 L9: the Fab trigger's tally.
