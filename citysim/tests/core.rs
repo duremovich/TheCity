@@ -17,10 +17,11 @@ use citysim::{Brain, Config, Controller, Corp, CorpOrder, DayRow, EntityId, Even
 use citysim::{TICKS_PER_DAY, TICKS_PER_HOUR};
 
 /// The ticks/s floor (release only; 2026-10-06, Dylan): a catastrophic
-/// regression (a sim half as fast), not a target. Asserted on seed 42 in
-/// `core_sanity` (the only non-ignored test in this binary, and cargo runs
-/// test binaries one at a time, so it runs alone but for its two sibling
-/// seeds); printed everywhere else.
+/// regression (a sim half as fast), not a target. Asserted only in
+/// `core_throughput` (`#[ignore]`, run alone on a quiet box); printed in
+/// `core_sanity` and `core_year`. It used to be asserted in `core_sanity`,
+/// which failed whenever parallel coders were compiling on the box
+/// (2026-10-09: 3.3-3.6k readings with the sim unchanged).
 const TPS_FLOOR: f64 = 4000.0;
 
 // The collapse bounds: the v1 sanity trio scaled to 2,000 residents (M10
@@ -303,10 +304,7 @@ fn core_sanity() {
     }
     judge_mechanisms(&runs, &mut failures);
     let tps42 = runs[0].tps;
-    eprintln!("ticks/s seed 42 {tps42:.0} (floor {TPS_FLOOR:.0}, release; three seeds in parallel)");
-    if !cfg!(debug_assertions) && tps42 < TPS_FLOOR {
-        failures.push(format!("ticks/s {tps42:.0} >= {TPS_FLOOR:.0} on seed 42"));
-    }
+    eprintln!("ticks/s seed 42 {tps42:.0} (floor {TPS_FLOOR:.0} asserted in core_throughput; printed here)");
     for f in &failures {
         eprintln!("FAIL {f}");
     }
@@ -354,4 +352,17 @@ fn core_year() {
         eprintln!("FAIL {f}");
     }
     assert!(failures.is_empty(), "core_year failures: {failures:?}");
+}
+
+/// The throughput floor: seed 42 alone for 30 days, release only.
+/// `#[ignore]`: run it alone on a quiet box (no other builds or sims):
+/// `cargo test --release -p citysim --test core -- --ignored core_throughput`.
+#[test]
+#[ignore]
+fn core_throughput() {
+    let r = run_seed(42, 30);
+    eprintln!("ticks/s seed 42, 30 days alone: {:.0} (floor {TPS_FLOOR:.0})", r.tps);
+    if !cfg!(debug_assertions) {
+        assert!(r.tps >= TPS_FLOOR, "ticks/s {:.0} under the {TPS_FLOOR:.0} floor", r.tps);
+    }
 }

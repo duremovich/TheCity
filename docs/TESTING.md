@@ -13,7 +13,8 @@
 | tier | what | where | asserts | wall time (this box, release, alone) |
 |---|---|---|---|---|
 | unit | every hand-built test (one mechanism, a small or seeded world) | `citysim/tests/*.rs`, `citysim-cli` | the mechanism does what it says | ~40 s summed over the binaries (all non-ignored but `core_sanity`) |
-| core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity every day, collapse bounds, 33 mechanism-existence bullets, the ticks/s floor on seed 42 | ~30 s |
+| core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity every day, collapse bounds, 33 mechanism-existence bullets; ticks/s printed | ~30 s |
+| core | `core_throughput` (ignored) | `citysim/tests/core.rs` | seed 42 alone x 30 days: the 4,000 ticks/s floor (release). Run it alone on a quiet box: parallel builds make the reading meaningless | ~10 s |
 | core | `core_year` (`#[ignore]`) | `citysim/tests/core.rs` | seed 42 x 365 days, the collapse bounds per 30-day window | ~100 s |
 | core | determinism and saves | `determinism.rs`, `save.rs` | same seed same hash at a day boundary; a mid-day save runs on byte for byte (plus the hunt, guard and contract rebuilds) | seconds |
 | behaviour | `shadow --assert` / `test_behaviour_tier` (`#[ignore]`) | `citysim-cli/src/shadow.rs` | 146 per-archetype bounds on the diary metrics (seed 42, days 19 and 90, 5 picks each) | ~25 s |
