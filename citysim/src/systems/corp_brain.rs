@@ -39,6 +39,10 @@ pub struct NicheInputs {
     pub offer: i64,
     /// D32: every owned Block already at the rent cap (Squeeze cannot bite).
     pub at_cap: bool,
+    /// Real economy phase 2 (plan E19): `demand` came from the World's
+    /// fill ratio (it beat the city's sell-through): a Grow or refit on it
+    /// counts `grow_world`, and in Food builds a Farm.
+    pub world_demand: bool,
 }
 
 /// Gathered once per rescoring.
@@ -168,6 +172,76 @@ pub fn build_kind_for(world: &World, corp: EntityId, n: Niche) -> Option<Buildin
         return Some(BuildingKind::Fab);
     }
     build_kind_in(world, n)
+}
+
+/// Real economy phase 2 (plan E19, a deviation): `build_kind_for`, except
+/// that Food demand that came from the World (`world_demand`) grows a
+/// Farm (what the World buys), not M11's Bar; wages on only.
+pub fn grow_kind(world: &World, corp: EntityId, n: Niche, world_demand: bool) -> Option<BuildingKind> {
+    if n == Niche::Food && world_demand && crate::systems::wages::on(world) {
+        return Some(BuildingKind::Farm);
+    }
+    build_kind_for(world, corp, n)
+}
+
+/// A niche's demand input for `corp` (D16; M13 D17; Real economy phase 2,
+/// plan E19: with wages on Food reads `max(sell-through, fill(Food))` and
+/// Tech `max(asset sell-through, fill(Parts), fill(Data) with a Lab)`),
+/// clamped to `[0, 1]`, and whether the World's fill ratio set it.
+pub fn demand_of(world: &World, corp: EntityId, n: Niche) -> (f32, bool) {
+    let Some(c) = world.comp::<Corp>(corp) else { return (0.0, false) };
+    let cfg = &world.config.corps;
+    let cap = usize::from(world.config.buildings.home.capacity).max(1);
+    let own_buildings = niche_buildings(world, corp, n);
+    let base = match n {
+        Niche::Food => {
+            let (mut sold, mut stock) = (0u32, 0u32);
+            for &b in &own_buildings {
+                if let Some(m) = world.comp::<Market>(b) {
+                    sold += m.sales.iter().sum::<u32>();
+                    stock += m.stock_hist.iter().sum::<u32>();
+                }
+            }
+            sold as f32 / stock.max(1) as f32
+        }
+        Niche::Housing => {
+            let residents: usize = own_buildings.iter().map(|&h| world.residents_of(h).len()).sum();
+            residents as f32 / (own_buildings.len() * cap).max(1) as f32
+        }
+        Niche::Security => sold_contracts(world, c, corp) as f32 / cfg.security_guards.max(1) as f32,
+        // M13 D17: own 7-day sales ÷ (7 × tech_demand_ref × own Tech buildings).
+        Niche::Tech => {
+            // L2: asset sellers only (a Fab sells no assets).
+            let sellers: Vec<&Building> = own_buildings
+                .iter()
+                .filter_map(|&b| world.comp::<Building>(b))
+                .filter(|bd| bd.kind != BuildingKind::Fab)
+                .collect();
+            let sold: u32 = sellers.iter().map(|bd| bd.asset_sales.iter().map(|&s| u32::from(s)).sum::<u32>()).sum();
+            let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * sellers.len().max(1) as f32;
+            sold as f32 / reference
+        }
+    }
+    .clamp(0.0, 1.0);
+    if !crate::systems::wages::on(world) {
+        return (base, false);
+    }
+    use crate::outside::ExportGood;
+    use crate::systems::world_market::fill;
+    let world_fill = match n {
+        Niche::Food => fill(world, ExportGood::Food),
+        Niche::Tech => {
+            let has_lab = !crate::systems::tech::labs_of(world, corp).is_empty();
+            fill(world, ExportGood::Parts).max(if has_lab { fill(world, ExportGood::Data) } else { 0.0 })
+        }
+        Niche::Housing | Niche::Security => 0.0,
+    }
+    .clamp(0.0, 1.0);
+    if world_fill > base {
+        (world_fill, true)
+    } else {
+        (base, false)
+    }
 }
 
 /// M13 D17: the city has fewer of the kind Tech would build than
@@ -347,43 +421,12 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
     let lost: i64 = c.loss_log.iter().filter(|l| l.tick >= horizon).map(|l| l.coins.max(0)).sum();
     let p = c.exec.and_then(|e| world.comp::<Personality>(e));
     let lots_total = crate::systems::founding::vacant_lots(world).len();
-    let cap = usize::from(world.config.buildings.home.capacity).max(1);
     let mut niches = BTreeMap::new();
     for &n in &c.niches {
         let share_map = shares(world, n);
         let share = share_map.get(&corp).copied().unwrap_or(0.0);
         let own_buildings = niche_buildings(world, corp, n);
-        let demand = match n {
-            Niche::Food => {
-                let (mut sold, mut stock) = (0u32, 0u32);
-                for &b in &own_buildings {
-                    if let Some(m) = world.comp::<Market>(b) {
-                        sold += m.sales.iter().sum::<u32>();
-                        stock += m.stock_hist.iter().sum::<u32>();
-                    }
-                }
-                sold as f32 / stock.max(1) as f32
-            }
-            Niche::Housing => {
-                let residents: usize = own_buildings.iter().map(|&h| world.residents_of(h).len()).sum();
-                residents as f32 / (own_buildings.len() * cap).max(1) as f32
-            }
-            Niche::Security => sold_contracts(world, c, corp) as f32 / cfg.security_guards.max(1) as f32,
-            // M13 D17: own 7-day sales ÷ (7 × tech_demand_ref × own Tech buildings).
-            Niche::Tech => {
-                // L2: asset sellers only (a Fab sells no assets).
-                let sellers: Vec<&Building> = own_buildings
-                    .iter()
-                    .filter_map(|&b| world.comp::<Building>(b))
-                    .filter(|bd| bd.kind != BuildingKind::Fab)
-                    .collect();
-                let sold: u32 =
-                    sellers.iter().map(|bd| bd.asset_sales.iter().map(|&s| u32::from(s)).sum::<u32>()).sum();
-                let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * sellers.len().max(1) as f32;
-                sold as f32 / reference
-            }
-        }
-        .clamp(0.0, 1.0);
+        let (demand, world_demand) = demand_of(world, corp, n);
         let rivals = rivals_in(world, corp, n);
         let own_price = c.level(n);
         let rival_price = rivals
@@ -418,7 +461,7 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
                 .map(|(v, b)| (r, b, v))
         });
         let offer = weakest.map_or(0, |(_, _, v)| (v as f32 * cfg.acquire_premium).round() as i64);
-        let grow_kind = build_kind_for(world, corp, n);
+        let grow_kind = grow_kind(world, corp, n, world_demand);
         let lots = match grow_kind.and_then(|k| crate::systems::founding::found_cost(world, k)) {
             // M13 D17 (phase 2): Tech grows only while its kind is under the
             // per-capita target `choose_kind` uses (`population ÷
@@ -428,6 +471,23 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
             Some(_) if n == Niche::Tech && grow_kind != Some(BuildingKind::Fab) && !tech_room(world) => 0,
             Some(cost) if c.treasury >= cost => lots_total,
             _ => 0,
+        };
+        // Real economy phase 2 (plan E19): no Lot left: a derelict Block the
+        // corp can refit for `refit_frac × found_cost` counts as one.
+        let lots = if lots == 0 && lots_total == 0 && crate::systems::wages::on(world) {
+            let ok = grow_kind.and_then(|k| crate::systems::founding::found_cost(world, k).map(|cost| (k, cost)));
+            match ok {
+                Some((k, cost))
+                    if (n != Niche::Tech || k == BuildingKind::Fab || tech_room(world))
+                        && c.treasury >= (world.config.jobs.refit_frac * cost as f32).round() as i64
+                        && refit_target(world, corp, k).is_some() =>
+                {
+                    1
+                }
+                _ => 0,
+            }
+        } else {
+            lots
         };
         let at_cap = n == Niche::Housing
             && world.levers.rent_cap.is_some_and(|cap| {
@@ -439,7 +499,18 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
             });
         niches.insert(
             n,
-            NicheInputs { demand, share, own_price, rival_price, rivals: rivals.len(), weakest, lots, offer, at_cap },
+            NicheInputs {
+                demand,
+                share,
+                own_price,
+                rival_price,
+                rivals: rivals.len(),
+                weakest,
+                lots,
+                offer,
+                at_cap,
+                world_demand,
+            },
         );
     }
     let acquire_cd = cfg.acquire_cooldown_days * TICKS_PER_DAY;
@@ -839,7 +910,13 @@ fn set_level(world: &mut World, corp: EntityId, n: Niche, level: f32) {
 }
 
 /// D17: top every owned niche building's vacancies up to full staff.
+/// Real economy phase 2 (plan E18): with wages on the margin rule staffs
+/// (`wages::staff`), and a building that goes up posts its full staff as
+/// it stands (`founding::convert`), so this pass is skipped.
 fn staff_up(world: &mut World, corp: EntityId) {
+    if crate::systems::wages::on(world) {
+        return;
+    }
     let Some(c) = world.comp::<Corp>(corp) else { return };
     let buildings = c.buildings.clone();
     let employed: BTreeMap<EntityId, usize> =
@@ -924,6 +1001,26 @@ fn hunker_staff(world: &mut World, corp: EntityId) {
     }
 }
 
+/// Real economy phase 2 (plan E19): the derelict Block nearest any owned
+/// building that may be refitted as `kind` (`founding::refit_ok_for`).
+fn refit_target(world: &World, corp: EntityId, kind: BuildingKind) -> Option<EntityId> {
+    let doors: Vec<crate::components::TilePos> = world
+        .comp::<Corp>(corp)?
+        .buildings
+        .iter()
+        .filter_map(|&b| world.comp::<Building>(b).map(|bd| bd.door))
+        .collect();
+    doors
+        .iter()
+        .filter_map(|&d| {
+            let t = crate::systems::founding::refit_ok_for(world, kind, d)?;
+            let td = world.comp::<Building>(t)?.door;
+            Some((d.manhattan(td), t))
+        })
+        .min()
+        .map(|(_, t)| t)
+}
+
 /// The vacant Lot nearest any owned building (door to door, ties lower id).
 fn lot_near(world: &World, corp: EntityId) -> Option<EntityId> {
     let doors: Vec<crate::components::TilePos> = world
@@ -946,9 +1043,13 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     let now = world.tick;
     let cd = world.config.corps.grow_cooldown_days * TICKS_PER_DAY;
     let ready = world.comp::<Corp>(corp).is_some_and(|c| c.last_build_tick.is_none_or(|t| now.saturating_sub(t) >= cd));
-    let kind = build_kind_for(world, corp, n);
+    let world_demand = i.niches.get(&n).is_some_and(|ni| ni.world_demand);
+    let kind = grow_kind(world, corp, n, world_demand);
     let cost = kind.and_then(|k| crate::systems::founding::found_cost(world, k));
     let lots = i.niches.get(&n).map_or(0, |ni| ni.lots);
+    // Real economy phase 2 (plan E19): the demand input that came from the
+    // World's fill ratio is named in the event and counted (`grow_world`).
+    let why = if world_demand { format!("growing in {n}: World demand") } else { format!("growing in {n}") };
     if let (true, Some(kind), Some(cost), true) = (ready, kind, cost, lots > 0) {
         if world.purse(Some(corp)) >= cost {
             if let Some(lot) = lot_near(world, corp) {
@@ -962,8 +1063,30 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
                     world.push_event(
                         EventKind::Founded,
                         &[corp, lot],
-                        format!("{cname} built {what} on a Lot for {cost} (growing in {n})"),
+                        format!("{cname} built {what} on a Lot for {cost} ({why})"),
                     );
+                    if world_demand {
+                        world.stats.current.econ.grow_world += 1;
+                    }
+                }
+            } else if crate::systems::wages::on(world) {
+                // E19: no Lot: a derelict refitted (`founding::refit` charges
+                // `refit_frac × found_cost` and logs `Refit`).
+                if let Some(d) = refit_target(world, corp, kind) {
+                    if crate::systems::founding::refit(world, d, kind, Some(corp)).is_ok() {
+                        if let Some(c) = world.comp_mut::<Corp>(corp) {
+                            c.last_build_tick = Some(now);
+                        }
+                        let (cname, what) = (world.owner_label(Some(corp)), world.name_of(d));
+                        world.push_event(
+                            EventKind::Founded,
+                            &[corp, d],
+                            format!("{cname} refitted {what} as a {} ({why})", kind.label()),
+                        );
+                        if world_demand {
+                            world.stats.current.econ.grow_world += 1;
+                        }
+                    }
                 }
             }
         }
@@ -1097,12 +1220,17 @@ fn hunker(world: &mut World, corp: EntityId, i: &CorpInputs) {
     // is also the quiet default (flat 0.15) and the seed order, and a corp
     // that laid off a Vat Tech a day from day 0 starved the city by Winter.
     // Open vacancies close at once (item 13: the gate had hidden that).
-    hunker_vacancies(world, corp);
+    // Real economy phase 2 (plan E18): with wages on the margin rule posts
+    // and lays off (`wages::staff`); Hunker keeps its spending stance only.
+    let wages = crate::systems::wages::on(world);
+    if !wages {
+        hunker_vacancies(world, corp);
+    }
     // M14 V27 (phase 3): shed one tier of ICE beyond the value at risk.
     crate::systems::virt::hunker_ice(world, corp);
     let evidence = world.comp::<Corp>(corp).map_or(0, |c| c.cashflow.len());
     let losing = i.flow < 0.0 && evidence >= 7;
-    if losing {
+    if losing && !wages {
         hunker_staff(world, corp);
     }
     // Guard contracts are cut by the same evidence (phase 5): the quiet

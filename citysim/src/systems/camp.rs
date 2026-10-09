@@ -573,8 +573,9 @@ fn feed(world: &mut World, camp: EntityId) {
 /// E40: the shift is a daily ledger (children have no Brain): per child
 /// older than `work_age`, `camp_yield × (floor + slope × farming)` Parts
 /// into the camp's accumulator, whole Parts into its stock, `camp_skill_gain`
-/// to the child's farming. (Phase 2's `input_per_part` to the World applies
-/// at its merge.)
+/// to the child's farming. Phase 2 (plan E13, E40): `input_per_part` to the
+/// World per Part that enters the stock (`wages::produce_inputs`, wages on),
+/// so a camp is no mint.
 fn shift(world: &mut World, camp: EntityId) {
     let cfg = world.config.camp.clone();
     let kids = children_of(world, camp).to_vec();
@@ -608,6 +609,8 @@ fn shift(world: &mut World, camp: EntityId) {
         s.output_today += made;
     }
     world.stats.current.econ.camp_output += made;
+    let per = world.config.economy2.input_per_part;
+    crate::systems::wages::produce_inputs(world, camp, made, per);
 }
 
 /// E42: an unfed day adds a scandal day; the first is a Feed story and a

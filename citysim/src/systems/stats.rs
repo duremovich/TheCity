@@ -327,6 +327,17 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
     let world_treasury = world.outside.faction(crate::outside::WORLD_ACCOUNT).map_or(0, |f| f.treasury);
     let identity = crate::systems::econ::identity(world);
     let outbound = world.outside.outbound;
+    // Phase 2 (plan E45): the wage columns, wages on only.
+    let wages = crate::systems::wages::on(world);
+    let (wage_mult_mean, wage_gross_mean, vacancies_open) = if wages {
+        (
+            crate::systems::wages::mean_wage_rev(world),
+            crate::systems::wages::gross_mean(world),
+            crate::systems::wages::vacancies_open(world),
+        )
+    } else {
+        (0.0, 0.0, 0)
+    };
     let city_owned = world
         .with::<Building>()
         .into_iter()
@@ -378,6 +389,12 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
     e.coin_identity = identity;
     e.city_owned_buildings = city_owned;
     e.d_dregs = dregs;
+    if wages {
+        e.wage_mult_mean = wage_mult_mean;
+        e.wage_gross_mean = wage_gross_mean;
+        e.vacancies_open = vacancies_open;
+        e.pop_inflow_wages = row.flow_wages;
+    }
 }
 
 /// M15 W43: the second-hand share of held deed memories (heard ÷ all), the

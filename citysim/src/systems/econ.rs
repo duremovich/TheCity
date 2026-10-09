@@ -59,6 +59,55 @@ pub fn identity(world: &World) -> i64 {
     crate::systems::ownership::total_coins(world) + world.outside.treasuries() - world.outside.minted
 }
 
+/// Plan E14 (phase 2, the last step of `World::new`): the opening hoard
+/// becomes working capital: `[world] treasury_initial − [treasury]
+/// treasury_initial` moves from the Treasury to the seeded corps pro rata
+/// to their day-0 `corp_brain::wage_bill` (floor division, the remainder a
+/// coin at a time to ascending ids), a plain purse move with a
+/// `Flow::Subsidy` ledger line (capital: no corp reads it as trading);
+/// `Corp.treasury_ref` rises by each share. `total_coins` is unchanged.
+/// Returns the shares. Only with `wages_on`; never on a loaded save (E40).
+pub fn seed_capital(world: &mut World) -> Vec<(crate::entity::EntityId, i64)> {
+    if !wages_on(world) {
+        return Vec::new();
+    }
+    let amount = world.config.world.treasury_initial - world.config.treasury.treasury_initial;
+    if amount <= 0 {
+        return Vec::new();
+    }
+    let bills: Vec<(crate::entity::EntityId, i64)> =
+        world.corps().into_iter().map(|c| (c, crate::systems::corp_brain::wage_bill(world, c).max(0))).collect();
+    let total: i64 = bills.iter().map(|&(_, b)| b).sum();
+    if total <= 0 {
+        return Vec::new();
+    }
+    let mut shares: Vec<(crate::entity::EntityId, i64)> =
+        bills.iter().map(|&(c, b)| (c, ((i128::from(amount) * i128::from(b)) / i128::from(total)) as i64)).collect();
+    let mut left = amount - shares.iter().map(|&(_, s)| s).sum::<i64>();
+    let n = shares.len();
+    let mut i = 0;
+    while left > 0 && n > 0 {
+        shares[i % n].1 += 1;
+        left -= 1;
+        i += 1;
+    }
+    for &(c, s) in &shares {
+        if s <= 0 {
+            continue;
+        }
+        world.purse_add(None, -s);
+        world.purse_add(Some(c), s);
+        if let Some(cc) = world.comp_mut::<crate::components::Corp>(c) {
+            // A capital move, not a day of trading.
+            cc.cashflow_today -= s;
+            cc.treasury_ref += s;
+            cc.closing += s;
+        }
+    }
+    crate::systems::ownership::ledger_only(world, crate::systems::ownership::Flow::Subsidy, amount);
+    shares
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

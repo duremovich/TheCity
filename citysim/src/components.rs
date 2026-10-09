@@ -1296,6 +1296,27 @@ pub struct Corp {
     pub spin_score: f32,
     #[serde(skip)]
     pub spin_trace: Vec<Consideration>,
+    // --- The Real economy phase 2 (docs/ECONOMY_V2.md § 5, plan E15-E18):
+    // written only behind `econ::wages_on`.
+    /// E15: the revenue rule's wage multiplier (`wages::daily`), on top of
+    /// M11's Squeeze `wage_mult`.
+    #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
+    pub wage_rev: f32,
+    /// E16: today's revenue (taxed inflows net of tax, exports) and payroll
+    /// (gross wages, the exec's), rolled into 7-day windows at midnight.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub rev_today: i64,
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub pay_today: i64,
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub rev: VecDeque<i64>,
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub pay: VecDeque<i64>,
+    /// E18: days in a row under `hire_below × P*`, and over `fire_above × P*`.
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub hire_days: u8,
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub fire_days: u8,
 }
 
 fn is_zero_f32_c(v: &f32) -> bool {
@@ -1360,6 +1381,13 @@ impl Corp {
             spin_since: None,
             spin_score: 0.0,
             spin_trace: Vec::new(),
+            wage_rev: 1.0,
+            rev_today: 0,
+            pay_today: 0,
+            rev: VecDeque::new(),
+            pay: VecDeque::new(),
+            hire_days: 0,
+            fire_days: 0,
         }
     }
 
@@ -2239,6 +2267,11 @@ pub struct Building {
     /// Real economy E37: a work camp's children and ledger.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub camp: Option<crate::econ::CampState>,
+    /// The Real economy phase 2 (plan E13): the fraction of a coin of
+    /// inputs a producer still owes the World (whole coins cross out per
+    /// unit produced, `wages::produce_inputs`).
+    #[serde(default, skip_serializing_if = "is_zero_f32_c")]
+    pub input_accum: f32,
 }
 
 pub fn default_tier() -> u8 {

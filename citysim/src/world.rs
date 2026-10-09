@@ -1192,6 +1192,9 @@ impl World {
         systems::virt::seed_ice(&mut w);
         // M15 W28: every corp's and the Law's opening competence.
         systems::competence::seed(&mut w);
+        // Real economy phase 2 (plan E14, Seeding): the hoard into the
+        // corps' working capital, last (no RNG; a plain purse move).
+        systems::econ::seed_capital(&mut w);
         w
     }
 
@@ -1250,6 +1253,7 @@ impl World {
                     venue: None,
                     charity: None,
                     camp: None,
+                    input_accum: 0.0,
                 },
             );
             match def.kind {

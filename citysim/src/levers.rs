@@ -2182,6 +2182,7 @@ impl World {
                 venue: None,
                 charity: None,
                 camp: None,
+                input_accum: 0.0,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

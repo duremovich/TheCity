@@ -27,6 +27,7 @@ fn niche() -> NicheInputs {
         lots: 0,
         offer: 0,
         at_cap: false,
+        world_demand: false,
     }
 }
 
@@ -781,6 +782,7 @@ fn test_hoard_tilts_contest() {
 fn test_daily_brain_logs_order_changes_and_keeps_conservation() {
     let mut w = v2_world(9);
     let total = ownership::total_coins(&w);
+    let identity = citysim::systems::econ::identity(&w);
     w.run_ticks(3 * TICKS_PER_DAY);
     assert!(count(&w, EventKind::CorpOrder) >= 1, "some corp chose an order");
     for c in w.corps() {
@@ -790,8 +792,15 @@ fn test_daily_brain_logs_order_changes_and_keeps_conservation() {
     }
     // Coins only change by the documented sources and sinks (immigrants'
     // endowments, emigrants' wallets): within a few thousand of the start.
+    // Real economy phase 2: with the market on inputs, power and imports
+    // cross out to the World every day, so the quantity conserved is the
+    // identity (`total_coins + Σ outside treasuries − minted`), to the coin.
     let now = ownership::total_coins(&w);
-    assert!((now - total).abs() < 5000, "coins {total} -> {now}");
+    if citysim::systems::econ::market_on(&w) {
+        assert_eq!(citysim::systems::econ::identity(&w), identity, "the identity holds (coins {total} -> {now})");
+    } else {
+        assert!((now - total).abs() < 5000, "coins {total} -> {now}");
+    }
     w.check_indices().expect("indices in sync");
 }
 

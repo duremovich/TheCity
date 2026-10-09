@@ -70,5 +70,6 @@ pub mod tech;
 pub mod think;
 pub mod vehicles;
 pub mod virt;
+pub mod wages;
 pub mod word;
 pub mod world_market;

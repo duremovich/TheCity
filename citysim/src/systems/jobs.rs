@@ -292,11 +292,16 @@ pub fn top_up(world: &mut World) {
     if !on(world) {
         return;
     }
+    // Real economy phase 2 (plan E18): with wages on a corp's buildings are
+    // staffed by the margin rule (`wages::staff`); the top-up keeps the
+    // city's and agents' buildings only.
+    let wages = crate::systems::wages::on(world);
+    let corp_owned = |world: &World, b: EntityId| wages && world.corp_of_building(b).is_some();
     for kind in [BuildingKind::Market, BuildingKind::Bar] {
         let Some(role) = ownership::role_for(kind) else { continue };
         let full = full_staff(world, kind);
         for b in world.buildings_of_kind(kind).to_vec() {
-            if !standing(world, b) {
+            if !standing(world, b) || corp_owned(world, b) {
                 continue;
             }
             // Deviation (Seeding section: "Markets and Bars get their top-up
@@ -318,7 +323,7 @@ pub fn top_up(world: &mut World) {
         let full = full_staff(world, kind);
         let wage = world.config.economy.wage(role);
         for b in world.buildings_of_kind(kind).to_vec() {
-            if !standing(world, b) {
+            if !standing(world, b) || corp_owned(world, b) {
                 continue;
             }
             if deficit(world, b, role, full) > 0 && world.purse(world.owner_of(b)) >= wage {
@@ -367,6 +372,9 @@ pub fn accrue_fab_work(world: &mut World, worker: EntityId, fab: EntityId, ticks
     };
     let added = world.add_stock(fab, Good::Parts, whole);
     world.stats.current.living.fab_parts += added;
+    // Real economy phase 2 (plan E13): inputs to the World per Part made.
+    let per = world.config.economy2.input_per_part;
+    crate::systems::wages::produce_inputs(world, fab, added, per);
 }
 
 /// Plan L9: a scavenger's find adds a scrap with jobs on.
@@ -501,6 +509,9 @@ pub fn daily(world: &mut World) {
 
 /// The venues' daily price and visit windows (spec § 1, plan L4).
 fn price_venues(world: &mut World) {
+    // Real economy phase 2 (plan E20): prices follow the payroll-weighted
+    // mean `wage_rev` city-wide at `venue_wage_pass` (1.0 with wages off).
+    let pass = crate::systems::wages::venue_price_mult(world);
     for kind in BuildingKind::LEISURE {
         for b in world.buildings_of_kind(kind).to_vec() {
             let Some((tier, owner)) =
@@ -508,7 +519,10 @@ fn price_venues(world: &mut World) {
             else {
                 continue;
             };
-            let price = venue_price(world, b, kind, tier, owner);
+            let mut price = venue_price(world, b, kind, tier, owner);
+            if pass != 1.0 && price > 0 {
+                price = ((price as f32 * pass).round() as i64).max(1);
+            }
             if let Some(v) = world.comp_mut::<Building>(b).and_then(|bd| bd.venue.as_mut()) {
                 v.price = price;
                 let today = std::mem::take(&mut v.visits_today);

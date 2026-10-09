@@ -73,6 +73,9 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         // Real economy E26, E37: a Mission with charities on, a Camp (corps) with camps on.
         BuildingKind::Mission if crate::systems::charity::on(world) => Some(c.mission),
         BuildingKind::Camp if crate::systems::camp::on(world) => Some(c.camp),
+        // Real economy phase 2 (plan E19 deviation): a corp's Farm on the
+        // World's demand, with wages on (`[economy2] farm_found_cost`).
+        BuildingKind::Farm if crate::systems::wages::on(world) => Some(world.config.economy2.farm_found_cost),
         _ => None,
     }
 }
@@ -148,6 +151,8 @@ pub fn build_on_lot(
             // Real economy E26, E37.
             | BuildingKind::Mission
             | BuildingKind::Camp
+            // Real economy phase 2 (plan E19): a corp's Farm on World demand.
+            | BuildingKind::Farm
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -281,6 +286,36 @@ pub fn refit_ok(world: &World, kind: BuildingKind, from: TilePos) -> Option<Enti
         .map(|(_, d)| d)
 }
 
+/// Real economy phase 2 (plan E19): the kinds a corp's Grow may refit a
+/// derelict Block into with wages on (its niche kinds that `grow_kind`
+/// returns; a Block stays Lots-only).
+pub fn grow_refit_kind(world: &World, kind: BuildingKind) -> bool {
+    crate::systems::wages::on(world)
+        && matches!(
+            kind,
+            BuildingKind::Farm | BuildingKind::Bar | BuildingKind::Garage | BuildingKind::Clinic | BuildingKind::Fab
+        )
+}
+
+/// `refit_ok` for a corp's Grow (plan E19): the leisure kinds as L2, plus
+/// `grow_refit_kind`'s (any tier).
+pub fn refit_ok_for(world: &World, kind: BuildingKind, from: TilePos) -> Option<EntityId> {
+    if !grow_refit_kind(world, kind) {
+        return refit_ok(world, kind, from);
+    }
+    if !crate::systems::jobs::on(world) {
+        return None;
+    }
+    crate::systems::street::derelicts(world)
+        .into_iter()
+        .filter_map(|d| {
+            let bd = world.comp::<Building>(d)?;
+            (bd.kind == BuildingKind::Home && !bd.demolished).then(|| (bd.door.manhattan(from), d))
+        })
+        .min()
+        .map(|(_, d)| d)
+}
+
 /// L2 L6: a derelict Block becomes a leisure kind owned by `owner`:
 /// squatters out, no longer derelict, tier kept; the owner pays
 /// `refit_frac × found_cost` to the Treasury (`Flow::Found`) once it
@@ -298,8 +333,11 @@ pub fn refit_with(
     charge: bool,
 ) -> Result<EntityId, String> {
     // M16a (plan C9): a seeded Fixer may stand in a refitted derelict.
-    // Real economy E26, E37: a Mission or a Camp too.
-    if !kind.is_leisure() && !matches!(kind, BuildingKind::Fixer | BuildingKind::Mission | BuildingKind::Camp) {
+    // Real economy E26, E37: a Mission or a Camp too; phase 2 (plan E19): a corp's Grow kinds with wages on.
+    if !kind.is_leisure()
+        && !matches!(kind, BuildingKind::Fixer | BuildingKind::Mission | BuildingKind::Camp)
+        && !grow_refit_kind(world, kind)
+    {
         return Err(format!("cannot refit as a {}", kind.label()));
     }
     let cost = if charge { found_cost(world, kind).ok_or("not foundable")? } else { 0 };

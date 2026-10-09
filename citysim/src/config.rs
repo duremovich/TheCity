@@ -194,6 +194,11 @@ pub struct Config {
     /// service and the work camps (read only behind `camp::on`).
     #[serde(default = "CampCfg::off")]
     pub camp: CampCfg,
+    /// Spec § 5 `[treasury]` (plan E13, E14, E21): the property rate and
+    /// the working balance (phase 2; read only behind `econ::wages_on`),
+    /// the tax band (phase 3a).
+    #[serde(default = "TreasuryCfg::off")]
+    pub treasury: TreasuryCfg,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -5028,6 +5033,7 @@ impl Config {
         self.world_market = WorldMarketCfg::off();
         self.charity = CharityCfg::off();
         self.camp = CampCfg::off();
+        self.treasury = TreasuryCfg::off();
         self
     }
 
@@ -5370,6 +5376,35 @@ pub struct Economy2Cfg {
     pub no_safety_net: bool,
     /// E35: a contingency only (0: off): coins an agent needs to start emigrating.
     pub emigrate_cost: i64,
+    // --- Phase 2 (spec § 5, plan E13-E20): wages from revenue.
+    /// E17: the labour share of revenue per niche (`P* = share × R`).
+    pub labour_share: LabourShareCfg,
+    /// E17: `wage_rev` moves at most this a day, inside the clamps.
+    pub wage_step: f32,
+    pub wage_floor_mult: f32,
+    pub wage_cap_mult: f32,
+    /// E17: a vacancy unfilled this many days is a shortage (wages up).
+    pub shortage_days: u64,
+    /// E18: post a vacancy a building a day when `P < hire_below × P*` for
+    /// 3 days and the niche demand is at least `hire_demand`.
+    pub hire_below: f32,
+    pub hire_demand: f32,
+    /// E18: above `fire_above × P*` for 7 days (at the wage floor) the newest goes.
+    pub fire_above: f32,
+    /// E18: Farm staff per 100 units of unfilled World Food order a day.
+    pub export_staff: f32,
+    /// E13: coins to the World per unit produced.
+    pub input_per_food: f32,
+    pub input_per_part: f32,
+    pub input_per_data: f32,
+    /// E13: coins a day to the World per standing building of the kind.
+    pub power: PowerCfg,
+    /// E20: venue prices follow the payroll-weighted mean `wage_rev` at this strength.
+    pub venue_wage_pass: f32,
+    /// Plan field (E19 deviation): what a corp pays to build a Farm when its
+    /// Food demand came from the World (`[corps] found_cost` has no Farm:
+    /// Farms are map-placed before this milestone).
+    pub farm_found_cost: i64,
 }
 
 impl Default for Economy2Cfg {
@@ -5380,7 +5415,191 @@ impl Default for Economy2Cfg {
 
 impl Economy2Cfg {
     pub fn off() -> Economy2Cfg {
-        Economy2Cfg { enabled: false, market: false, wages: false, no_safety_net: false, emigrate_cost: 0 }
+        Economy2Cfg {
+            enabled: false,
+            market: false,
+            wages: false,
+            no_safety_net: false,
+            emigrate_cost: 0,
+            labour_share: LabourShareCfg::default(),
+            wage_step: 0.03,
+            wage_floor_mult: 0.8,
+            wage_cap_mult: 2.5,
+            shortage_days: 5,
+            hire_below: 0.85,
+            hire_demand: 0.5,
+            fire_above: 1.25,
+            export_staff: 2.0,
+            input_per_food: 0.5,
+            input_per_part: 4.0,
+            input_per_data: 8.0,
+            power: PowerCfg::default(),
+            venue_wage_pass: 0.5,
+            farm_found_cost: 1000,
+        }
+    }
+}
+
+/// `[economy2] labour_share` (spec § 5, plan E17): the share of a niche's
+/// revenue its payroll targets.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LabourShareCfg {
+    pub food: f32,
+    pub housing: f32,
+    pub security: f32,
+    pub tech: f32,
+}
+
+impl Default for LabourShareCfg {
+    fn default() -> Self {
+        LabourShareCfg { food: 0.6, housing: 0.4, security: 0.7, tech: 0.55 }
+    }
+}
+
+impl LabourShareCfg {
+    pub fn of(&self, niche: crate::components::Niche) -> f32 {
+        use crate::components::Niche;
+        match niche {
+            Niche::Food => self.food,
+            Niche::Housing => self.housing,
+            Niche::Security => self.security,
+            Niche::Tech => self.tech,
+        }
+    }
+}
+
+/// `[economy2] power` (spec § 5, plan E13): coins a day to the World per
+/// standing building of the kind, any owner (a stand-in for a generator
+/// until Power is a good). Kinds absent from the table pay 0.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PowerCfg {
+    pub market: i64,
+    pub bar: i64,
+    pub club: i64,
+    pub arcade: i64,
+    pub lounge: i64,
+    pub clinic: i64,
+    pub garage: i64,
+    pub lab: i64,
+    pub fab: i64,
+}
+
+impl Default for PowerCfg {
+    fn default() -> Self {
+        PowerCfg { market: 20, bar: 3, club: 8, arcade: 4, lounge: 15, clinic: 6, garage: 6, lab: 10, fab: 12 }
+    }
+}
+
+impl PowerCfg {
+    pub fn for_kind(&self, kind: BuildingKind) -> i64 {
+        match kind {
+            BuildingKind::Market => self.market,
+            BuildingKind::Bar => self.bar,
+            BuildingKind::Club => self.club,
+            BuildingKind::Arcade => self.arcade,
+            BuildingKind::Lounge => self.lounge,
+            BuildingKind::Clinic => self.clinic,
+            BuildingKind::Garage => self.garage,
+            BuildingKind::Lab => self.lab,
+            BuildingKind::Fab => self.fab,
+            _ => 0,
+        }
+    }
+}
+
+/// `[treasury] property_rate` (spec § 5, plan E13): the small daily rate a
+/// non-city owner pays the Treasury per standing building (replaces
+/// `[corps] upkeep` with `econ::wages_on`). `venue` covers the six leisure
+/// kinds; kinds absent from the table pay 0.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PropertyRateCfg {
+    pub farm: i64,
+    pub market: i64,
+    pub bar: i64,
+    /// Per Block by tier (Sump, Mid, Spire); a scalar means every tier.
+    #[serde(deserialize_with = "per_tier")]
+    pub home: [i64; 3],
+    pub hotel: i64,
+    pub clinic: i64,
+    pub garage: i64,
+    pub lab: i64,
+    pub fab: i64,
+    pub venue: i64,
+}
+
+impl Default for PropertyRateCfg {
+    fn default() -> Self {
+        PropertyRateCfg {
+            farm: 6,
+            market: 10,
+            bar: 1,
+            home: [0, 0, 1],
+            hotel: 1,
+            clinic: 2,
+            garage: 2,
+            lab: 3,
+            fab: 3,
+            venue: 1,
+        }
+    }
+}
+
+impl PropertyRateCfg {
+    pub fn for_building(&self, kind: BuildingKind, tier: u8) -> i64 {
+        match kind {
+            BuildingKind::Farm => self.farm,
+            BuildingKind::Market => self.market,
+            BuildingKind::Bar => self.bar,
+            BuildingKind::Home => self.home[usize::from(tier.min(2))],
+            BuildingKind::Hotel => self.hotel,
+            BuildingKind::Clinic => self.clinic,
+            BuildingKind::Garage => self.garage,
+            BuildingKind::Lab => self.lab,
+            BuildingKind::Fab => self.fab,
+            k if k.is_leisure() => self.venue,
+            _ => 0,
+        }
+    }
+}
+
+/// `[treasury]` (spec § 5, plan E13, E14, E21): the property rate, the
+/// working balance the Treasury opens with (the rest of `[world]
+/// treasury_initial` is the corps' working capital, `econ::seed_capital`),
+/// and phase 3a's tax band.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TreasuryCfg {
+    /// E1: phase 3a's band switch (phase 2 reads `property_rate` and
+    /// `treasury_initial` behind `econ::wages_on` alone).
+    pub enabled: bool,
+    pub property_rate: PropertyRateCfg,
+    pub treasury_initial: i64,
+    pub tax_min: f32,
+    pub tax_max: f32,
+    pub tax_step: f32,
+    pub band: [i64; 2],
+}
+
+impl Default for TreasuryCfg {
+    fn default() -> Self {
+        TreasuryCfg::off()
+    }
+}
+
+impl TreasuryCfg {
+    pub fn off() -> TreasuryCfg {
+        TreasuryCfg {
+            enabled: false,
+            property_rate: PropertyRateCfg::default(),
+            treasury_initial: 12_000,
+            tax_min: 0.05,
+            tax_max: 0.20,
+            tax_step: 0.01,
+            band: [8_000, 25_000],
+        }
     }
 }
 

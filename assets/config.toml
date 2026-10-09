@@ -1766,9 +1766,37 @@ min_gap_hours = 6
 [economy2]
 enabled = true
 market = true                        # E1: phase 1's switch (econ::market_on)
-wages = false                        # E1: phase 2 turns it on
+wages = false                        # E1: phase 2's switch (econ::wages_on): off until the stop rule is answered (see the phase 2 record)
 no_safety_net = false                # E1: phase 3a turns it on (only after the stop rule)
 emigrate_cost = 0                    # E35: contingency, off
+# Spec § 5 (phase 2, plan E13-E20): wages from revenue. Each corp's payroll tracks labour_share x its
+# 7-day revenue through wage_rev (E17), clamped [wage_floor_mult, wage_cap_mult] and moving wage_step a
+# day; a corp under hire_below x the target for 3 days posts a vacancy a building a day while its niche
+# demand holds hire_demand, one over fire_above for 7 days at the wage floor lays off its newest (E18).
+labour_share = { food = 0.6, housing = 0.4, security = 0.7, tech = 0.55 }
+wage_step = 0.03
+wage_floor_mult = 0.8
+wage_cap_mult = 2.5
+shortage_days = 5
+hire_below = 0.85
+hire_demand = 0.5
+fire_above = 1.25
+export_staff = 2                     # E18: Farm staff per 100 units of unfilled World Food order
+# Phase 2 calibration (the one round the stop rule allows; seed 42, 120 days, the dole on): at the spec's
+# placeholders (0.5 / 4 / 8) inputs ran 1.8-2.0k a day against exports of 1.25k (the spec's own band is
+# 0.7-1.4k against 1.1-2.2k): the trade balance read -118k over 120 days (87 % of the coin stock), 12 of
+# the corps went bankrupt and the city emptied to 280. A/B: inputs off -> pop 826, 5 bankrupt, corps 124k;
+# 0.25 / 4 / 8 -> 1.36k a day, -70k, pop 357; 0.15 / 4 / 8 -> 1.18k, -58k, pop 588; 0.15 with power
+# halved -> 1.05k, -46k, pop 601; 0.1 / 2 / 4 (kept) -> 767 a day, -12.5k (9 %), pop 652, 6 bankrupt;
+# wage_step 0.1 alone -> no gain (the rule overshoots to x1.99 by day 20 and cuts to 0.95 by day 60).
+# The Treasury (12,000, no levy) runs dry on day 12 and the dole stops by day 14-18 on every variant:
+# nothing inside phase 2's keys funds a 5.5k-a-day dole; see the phase 2 report.
+input_per_food = 0.1                 # E13: coins to the World per unit produced (spec 0.5; see above)
+input_per_part = 2                   # spec 4
+input_per_data = 4                   # spec 8
+power = { market = 20, bar = 3, club = 8, arcade = 4, lounge = 15, clinic = 6, garage = 6, lab = 10, fab = 12 }  # E13: a day, to the World
+venue_wage_pass = 0.5                # E20: venue prices follow the mean wage_rev at half strength
+farm_found_cost = 1000               # E19 (plan deviation): a corp's Farm on World demand (= [corps] value.farm)
 
 # Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
 # (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the
@@ -1828,3 +1856,17 @@ scandal_standing = -0.05           # E42: the owner's standing per unfed child-d
 family_affinity = -0.2             # E41
 loyal_share = 0.9                  # E41
 grudge_share = 0.7                 # E41
+
+# Spec § 5 [treasury] (phase 2, plan E13, E14): the property rate replaces [corps] upkeep with wages on
+# (Farm 245 and Market 600 a day were a 70 % levy that funded the dole); the Treasury opens with
+# treasury_initial and the rest of [world] treasury_initial (35,000 - 12,000 = 23,000) is the seeded
+# corps' working capital (econ::seed_capital, pro rata to the day-0 wage bill). tax_* and band are
+# phase 3a's tax band (read behind econ::no_net).
+[treasury]
+enabled = true
+property_rate = { farm = 6, market = 10, bar = 1, home = [0, 0, 1], hotel = 1, clinic = 2, garage = 2, lab = 3, fab = 3, venue = 1 }
+treasury_initial = 12000
+tax_min = 0.05
+tax_max = 0.20
+tax_step = 0.01
+band = [8000, 25000]
