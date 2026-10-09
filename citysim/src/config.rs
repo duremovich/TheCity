@@ -191,6 +191,94 @@ pub struct Config {
     /// Jobs and room (docs/JOBS_V2.md § 2.3, plan J6-J8): floors.
     #[serde(default)]
     pub floors: FloorsCfg,
+    /// Jobs and room J9 (docs/JOBS_V2.md § 1.3): the configured trades
+    /// (`[[trades]]` rows), `Role::Trade(TradeId)` indexing them. Read
+    /// through [`trades_de`], which also makes the keys a save's
+    /// `Trade("key")` resolves against.
+    #[serde(default, deserialize_with = "trades_de")]
+    pub trades: Vec<TradeCfg>,
+}
+
+/// J9: a trade's shift (`demography::hire`, J12).
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TradeShift {
+    /// `[world] shift_day`.
+    Day,
+    /// `[leisure] evening_shift`.
+    Evening,
+    /// `[world] shift_night`.
+    Night,
+    /// Night for even ids, day for odd (the guards' rule).
+    Split,
+}
+
+/// J9, J13: what pays a trade and what its shift makes (docs/JOBS_V2.md
+/// § 1.2). The wage is paid by the workplace's owner at the shift's end
+/// like any staff; `produce` accrues units per on-duty hour
+/// (`trades::accrue`); `service` staff count as the building's on-duty
+/// staff where its service reads them; the others name the flow that pays.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TradeModel {
+    Produce,
+    Service,
+    Handling,
+    Contract,
+    Civic,
+    Overhead,
+    Resale,
+    Day,
+}
+
+/// J9: the skill a trade's hiring ranks on and competence reads.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TradeSkill {
+    #[default]
+    None,
+    Farming,
+    Fighting,
+    Persuasion,
+    Knowledge,
+    Hacking,
+}
+
+/// J9: one `[[trades]]` row.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct TradeCfg {
+    /// The stable key (saves store it, not the index).
+    pub id: String,
+    pub label: String,
+    /// The kinds that employ it.
+    pub workplace: Vec<BuildingKind>,
+    /// Places per floor of a workplace (per group with `per_owned`).
+    pub staff_per_floor: u8,
+    pub wage: i64,
+    pub shift: TradeShift,
+    #[serde(default)]
+    pub skill: TradeSkill,
+    pub model: TradeModel,
+}
+
+/// J9: the `trades` field's reader: the rows, checked (unique keys, at most
+/// 255), and their ids made the keys a save on this thread resolves against.
+fn trades_de<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<TradeCfg>, D::Error> {
+    let rows = Vec::<TradeCfg>::deserialize(d)?;
+    if rows.len() > usize::from(u8::MAX) {
+        return Err(serde::de::Error::custom("[[trades]]: at most 255 rows"));
+    }
+    for (i, r) in rows.iter().enumerate() {
+        if rows[..i].iter().any(|o| o.id == r.id) {
+            return Err(serde::de::Error::custom(format!("[[trades]]: duplicate id {:?}", r.id)));
+        }
+    }
+    crate::components::TradeId::set_keys(trade_ids_of(&rows));
+    Ok(rows)
+}
+
+fn trade_ids_of(rows: &[TradeCfg]) -> Vec<crate::components::TradeId> {
+    rows.iter().enumerate().map(|(i, r)| crate::components::TradeId::new(i as u8, &r.id, &r.label)).collect()
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -272,6 +360,7 @@ impl JobsCfg {
             Role::Fixer => 0,
             // Real economy E26: a Mission's Volunteers are hired, never seeded.
             Role::Volunteer => 0,
+            Role::Trade(_) => 0,
         }
     }
 }
@@ -634,6 +723,8 @@ impl EconomyCfg {
             Role::Fabber => self.wage_fabber,
             Role::Fixer => self.wage_fixer,
             Role::Volunteer => self.wage_volunteer,
+            // J9: a trade's wage is its row's (`Config::wage`).
+            Role::Trade(_) => 0,
         }
     }
 }
@@ -4685,6 +4776,31 @@ impl Config {
         cfg.assets_dir = assets_dir.to_path_buf();
         cfg.districts.row_count();
         cfg
+    }
+
+    /// A role's config wage: a bespoke role's `[economy] wage_*`, a trade's
+    /// row `wage` (J9).
+    pub fn wage(&self, role: Role) -> i64 {
+        match role {
+            Role::Trade(t) => self.trades.get(t.index()).map_or(0, |r| r.wage),
+            _ => self.economy.wage(role),
+        }
+    }
+
+    /// J9: a trade's `[[trades]]` row.
+    pub fn trade(&self, t: crate::components::TradeId) -> Option<&TradeCfg> {
+        self.trades.get(t.index())
+    }
+
+    /// J9: the configured trades as roles, in row order.
+    pub fn trade_roles(&self) -> Vec<Role> {
+        trade_ids_of(&self.trades).into_iter().map(Role::Trade).collect()
+    }
+
+    /// J9: the trade keyed `key`.
+    pub fn trade_role(&self, key: &str) -> Option<Role> {
+        let i = self.trades.iter().position(|r| r.id == key)?;
+        Some(Role::Trade(crate::components::TradeId::new(i as u8, &self.trades[i].id, &self.trades[i].label)))
     }
 
     fn assets_dir_or_empty() -> PathBuf {

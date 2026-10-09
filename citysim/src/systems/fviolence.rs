@@ -348,7 +348,7 @@ fn home_districts(world: &World, f: EntityId) -> std::collections::BTreeSet<Dist
         if let Some(e) = c.exec {
             add(e);
         }
-        for role in crate::components::Role::ALL {
+        for role in world.roles() {
             for &w in world.workers(role) {
                 if world
                     .comp::<crate::components::Job>(w)

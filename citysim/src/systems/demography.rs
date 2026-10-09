@@ -694,7 +694,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if matches!(role, Role::Host | Role::Fighter | Role::Croupier | Role::Concierge) {
         shifts = world.config.leisure.evening_shift.clone();
     }
-    let wage_per_day = world.config.economy.wage(role);
+    let wage_per_day = world.config.wage(role);
     world.insert(
         id,
         Job {

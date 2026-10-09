@@ -242,6 +242,17 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
             world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, n));
         }
     }
+    // Jobs and room J15: and every trade of the kind its places, as full
+    // staff (a `per_owned` trade's group places are the trades pass's).
+    for (role, _) in crate::systems::ownership::roles_for(world, kind) {
+        if !role.is_trade() {
+            continue;
+        }
+        let n = crate::systems::jobs::places_of(world, b, role);
+        if n > 0 {
+            world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, n));
+        }
+    }
     // L2 L4: a leisure kind opens with today's price (no building of these
     // kinds stands with L2 off).
     if kind.is_leisure() {

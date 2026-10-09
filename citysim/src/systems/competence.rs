@@ -31,7 +31,7 @@ type RoleSlots = smallvec::SmallVec<[(usize, f32); 2]>;
 /// label. Spec roles: Farm farming; Market, Bar, Clinic, Garage
 /// persuasion; a guard fighting; a Lab knowledge and hacking; a Feed
 /// knowledge. `None` for an unskilled role.
-fn role_slots(role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
+fn role_slots(world: &World, role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
     use smallvec::smallvec;
     let k = SocialSkill::Knowledge.index();
     let p = SocialSkill::Persuasion.index();
@@ -53,6 +53,18 @@ fn role_slots(role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
         // Real economy E26: the kitchen's front persuades.
         Role::Volunteer => (smallvec![(p, s.persuasion)], "persuasion"),
         Role::Gravedigger | Role::Sanitation => return None,
+        // Jobs and room J9: a trade's row names its skill.
+        Role::Trade(t) => {
+            use crate::config::TradeSkill;
+            match world.config.trade(t).map_or(TradeSkill::None, |r| r.skill) {
+                TradeSkill::None => return None,
+                TradeSkill::Farming => (smallvec![(MEAN_FARMING, s.farming)], "farming"),
+                TradeSkill::Fighting => (smallvec![(MEAN_FIGHTING, s.fighting)], "fighting"),
+                TradeSkill::Persuasion => (smallvec![(p, s.persuasion)], "persuasion"),
+                TradeSkill::Knowledge => (smallvec![(k, s.knowledge)], "knowledge"),
+                TradeSkill::Hacking => (smallvec![(MEAN_HACKING, s.hacking.max(0.0))], "hacking"),
+            }
+        }
     })
 }
 
@@ -60,7 +72,7 @@ fn role_slots(role: Role, s: &Skills) -> Option<(RoleSlots, &'static str)> {
 /// mean, and its label. `None` for an unskilled role.
 pub fn role_skill(world: &World, id: EntityId, role: Role) -> Option<(f32, f32, &'static str)> {
     let s = world.comp::<Skills>(id)?;
-    let (pairs, label) = role_slots(role, s)?;
+    let (pairs, label) = role_slots(world, role, s)?;
     let n = pairs.len() as f32;
     let v = pairs.iter().map(|&(_, v)| v).sum::<f32>() / n;
     let m = pairs.iter().map(|&(slot, _)| world.skill_means[slot]).sum::<f32>() / n;
@@ -85,7 +97,7 @@ pub fn norm(world: &World, slot: usize, v: f32) -> f32 {
 /// Lab the mean of knowledge's and hacking's.
 pub fn role_term(world: &World, id: EntityId, role: Role) -> Option<f32> {
     let s = world.comp::<Skills>(id)?;
-    let (pairs, _) = role_slots(role, s)?;
+    let (pairs, _) = role_slots(world, role, s)?;
     Some(pairs.iter().map(|&(slot, v)| norm(world, slot, v)).sum::<f32>() / pairs.len() as f32)
 }
 
@@ -421,7 +433,7 @@ pub fn try_poach(world: &mut World, corp: EntityId, vacancy: EntityId, role: Rol
     if v < free + cfg.poach_gap {
         return false;
     }
-    let wage = (world.config.economy.wage(role) as f32 * cfg.poach_premium).round() as i64;
+    let wage = (world.config.wage(role) as f32 * cfg.poach_premium).round() as i64;
     let m = SocialMove { actor: exec, target, kind: MoveKind::Persuade, stake: Stake::Job { building: vacancy, wage } };
     if !crate::systems::moves::resolve(world, &m).success {
         return false;

@@ -33,10 +33,16 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
 
 /// Jobs and room J7: `b`'s places in `role`: the role's per-floor places
 /// (`corp_brain::full_staff(kind)` for the kind's bespoke role, the
-/// Security Office's guards included) × the building's `floors`; 0 for a
-/// role the kind does not employ.
+/// Security Office's guards included; a trade's `staff_per_floor`, J10) ×
+/// the building's `floors`; 0 for a role the kind does not employ. A
+/// `per_owned` trade (the Super, J14) reads its owner group's places
+/// (`trades::owned_places`).
 pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
     let Some((kind, floors)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.floors.max(1))) else { return 0 };
+    if let Role::Trade(t) = role {
+        let Some(row) = world.config.trade(t).filter(|r| r.workplace.contains(&kind)) else { return 0 };
+        return usize::from(row.staff_per_floor) * usize::from(floors);
+    }
     if ownership::role_for(kind) != Some(role) {
         return 0;
     }
@@ -286,19 +292,22 @@ pub fn top_up(world: &mut World) {
     let wages = crate::systems::wages::on(world);
     let corp_owned = |world: &World, b: EntityId| wages && world.corp_of_building(b).is_some();
     for kind in [BuildingKind::Market, BuildingKind::Bar] {
-        let Some(role) = ownership::role_for(kind) else { continue };
+        // Jobs and room J10: every role of the kind, the bespoke first.
+        let roles = ownership::roles_for(world, kind);
         for b in world.buildings_of_kind(kind).to_vec() {
             if !standing(world, b) || corp_owned(world, b) {
                 continue;
             }
-            // Jobs and room J7: full staff per floor × floors.
-            let full = places_of(world, b, role);
-            // Deviation (Seeding section: "Markets and Bars get their top-up
-            // vacancies the first midnight"): the whole deficit is posted,
-            // not one a day.
-            let short = deficit(world, b, role, full);
-            if short > 0 {
-                world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, short));
+            for &(role, _) in &roles {
+                // Jobs and room J7: full staff per floor × floors.
+                let full = places_of(world, b, role);
+                // Deviation (Seeding section: "Markets and Bars get their top-up
+                // vacancies the first midnight"): the whole deficit is posted,
+                // not one a day.
+                let short = deficit(world, b, role, full);
+                if short > 0 {
+                    world.vacancies.entry(b).or_default().extend(std::iter::repeat_n(role, short));
+                }
             }
         }
     }
@@ -308,16 +317,19 @@ pub fn top_up(world: &mut World) {
     let mut l2 = BuildingKind::LEISURE.to_vec();
     l2.push(BuildingKind::Fab);
     for kind in l2 {
-        let Some(role) = ownership::role_for(kind) else { continue };
-        let wage = world.config.economy.wage(role);
+        // Jobs and room J10: every role of the kind, the bespoke first.
+        let roles = ownership::roles_for(world, kind);
         for b in world.buildings_of_kind(kind).to_vec() {
             if !standing(world, b) || corp_owned(world, b) {
                 continue;
             }
-            // Jobs and room J7: full staff per floor × floors.
-            let full = places_of(world, b, role);
-            if deficit(world, b, role, full) > 0 && world.purse(world.owner_of(b)) >= wage {
-                world.vacancies.entry(b).or_default().push(role);
+            for &(role, _) in &roles {
+                let wage = world.config.wage(role);
+                // Jobs and room J7: full staff per floor × floors.
+                let full = places_of(world, b, role);
+                if deficit(world, b, role, full) > 0 && world.purse(world.owner_of(b)) >= wage {
+                    world.vacancies.entry(b).or_default().push(role);
+                }
             }
         }
     }

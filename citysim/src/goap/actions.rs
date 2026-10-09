@@ -289,6 +289,9 @@ impl ActionKind {
             Role::Fixer => ActionKind::ClerkWork,
             // Real economy E26: a Volunteer's shift is the clerk's at its Mission.
             Role::Volunteer => ActionKind::ClerkWork,
+            // Jobs and room J13: a trade works the generic shift at its
+            // workplace (no new action).
+            Role::Trade(_) => ActionKind::ClerkWork,
         }
     }
 
