@@ -399,3 +399,86 @@ fn test_switched_off_city_matches_main() {
 
 /// See `test_switched_off_city_matches_main`.
 const MAIN_OFF_HASH: &str = "3229f4eae7b9bba85b0a92e1e83cff02882bf2f7db25c982b4340ec1048073c1";
+
+// ---------------------------------------------------------------------------
+// Measurement (printed findings, never asserted)
+// ---------------------------------------------------------------------------
+
+fn median(v: &mut [u32]) -> u32 {
+    if v.is_empty() {
+        return 0;
+    }
+    v.sort_unstable();
+    v[v.len() / 2]
+}
+
+/// One run: rides, commute medians by mode, ticks/s.
+fn measure(on: bool, full: bool, days: u64) -> String {
+    let mut cfg = Config::load();
+    cfg.transit.enabled = on;
+    if full {
+        cfg.lod.force = Some(Lod::Full);
+    }
+    let mut w = World::new(42, cfg);
+    w.commute_log = Some(Vec::new());
+    let mut rides = (0u32, 0u32, 0i64, 0u32, 0i64);
+    let mut refused = [0u32; 4];
+    let t = std::time::Instant::now();
+    for _ in 0..days {
+        w.run_ticks(TICKS_PER_DAY);
+        let c = &w.stats.history.back().expect("a day").transit;
+        rides.0 += c.rides_full;
+        rides.1 += c.rides_coarse;
+        rides.2 += c.fares;
+        rides.3 += c.fare_dodges;
+        rides.4 += c.transit_power;
+        refused[0] += c.refused_no_route;
+        refused[1] += c.refused_fare;
+        refused[2] += c.refused_slow;
+        refused[3] += c.refused_danger;
+    }
+    let secs = t.elapsed().as_secs_f64();
+    let log = w.commute_log.take().unwrap_or_default();
+    let mut all: Vec<u32> = log.iter().map(|e| e.0).collect();
+    let mut tiles: Vec<u32> = log.iter().map(|e| e.1).collect();
+    let mut walked: Vec<u32> = log.iter().filter(|e| e.2 == 0).map(|e| e.0).collect();
+    let mut rode: Vec<u32> = log.iter().filter(|e| e.2 == 2).map(|e| e.0).collect();
+    let mut rode_tiles: Vec<u32> = log.iter().filter(|e| e.2 == 2).map(|e| e.1).collect();
+    let mut far: Vec<u32> = log.iter().filter(|e| e.1 >= 80).map(|e| e.0).collect();
+    format!(
+        "transit {} {} {days} d: tps {:.0}; rides full {} coarse {}, fares {}, dodges {}, power {}; refused no_route/fare/slow/danger {:?}\n  \
+         commutes {} (median {} tiles): median ticks all {}, walked {} (n {}), rode {} (n {}, median {} tiles), 80+ tiles {} (n {})",
+        if on { "ON " } else { "OFF" },
+        if full { "all-Full" } else { "mixed LOD" },
+        (days * TICKS_PER_DAY) as f64 / secs,
+        rides.0,
+        rides.1,
+        rides.2,
+        rides.3,
+        rides.4,
+        refused,
+        log.len(),
+        median(&mut tiles),
+        median(&mut all),
+        median(&mut walked),
+        walked.len(),
+        median(&mut rode),
+        rode.len(),
+        median(&mut rode_tiles),
+        median(&mut far),
+        far.len(),
+    )
+}
+
+/// Seed 42, transit on vs off: rides, commute medians, ticks/s. Run with
+/// `--ignored --nocapture`; `TRANSIT_DAYS` (default 10), `TRANSIT_FULL=1`
+/// for the all-Full city.
+#[test]
+#[ignore]
+fn measure_transit_on_vs_off() {
+    let days = std::env::var("TRANSIT_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(10);
+    let full = std::env::var("TRANSIT_FULL").is_ok_and(|v| v == "1");
+    for on in [false, true, false, true] {
+        println!("{}", measure(on, full, days));
+    }
+}

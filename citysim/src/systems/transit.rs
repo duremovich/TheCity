@@ -477,11 +477,10 @@ fn candidates(world: &World, tile: TilePos, t: Tick) -> Vec<u16> {
         .iter()
         .enumerate()
         .filter_map(|(i, &s)| u16::try_from(i).ok().map(|i| (s.manhattan(tile), i)))
-        .filter(|&(_, i)| stop_open(world, i, t))
         .collect();
     v.sort_unstable();
-    v.truncate(k);
-    v.into_iter().map(|(_, i)| i).collect()
+    // The open test (a district lookup, the riots) only for the nearest.
+    v.into_iter().filter(|&(_, i)| stop_open(world, i, t)).take(k).map(|(_, i)| i).collect()
 }
 
 /// T7: the fastest ride from `from` to `to` for `who` leaving at `t`, door to
