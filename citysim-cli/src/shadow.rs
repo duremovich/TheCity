@@ -59,9 +59,10 @@ pub struct ShadowArgs {
     /// what the stand-in did.
     #[arg(long)]
     pub no_pin: bool,
-    /// The behaviour tier (docs/TESTING.md): run the fixed windows (seed 42, days 19 and 90,
-    /// 7 days, 5 per archetype), print each archetype's metrics and judge them against the
-    /// bounds in `CHECKS`; exit non-zero on a failure. `--out` keeps the diaries.
+    /// The behaviour tier (docs/TESTING.md): run the fixed windows (days 19 and 90, 7 days,
+    /// seeds 42-44 pooled, up to 30 agents per archetype and seed), print each archetype's
+    /// metrics and judge them against the bounds in `CHECKS`; exit non-zero on a failure.
+    /// `--out` keeps the diaries (5 per archetype and seed).
     #[arg(long)]
     pub assert: bool,
 }
@@ -1946,14 +1947,39 @@ fn follow(world: &mut World, picked: &[(String, EntityId)], days: u64, pin: bool
 // The behaviour tier (`shadow --assert`; docs/TESTING.md)
 // ---------------------------------------------------------------------------
 
-/// The behaviour tier's windows: seed 42, 7 days from day 19 (a Friday, so
-/// `worker_friday` starts on its Friday) with 5 of each archetype, and from
-/// day 90 (the gangs full) with 5 of each gang archetype: the V2 shadow
-/// pass's pinned windows (docs/SHADOW_V2.md), at 5 picks rather than its 3
-/// so a change to who the city holds moves a row less.
+/// The behaviour tier's windows: 7 days from day 19 (a Friday, so
+/// `worker_friday` starts on its Friday) with every archetype, and from day
+/// 90 (the gangs full) with the gang archetypes: the V2 shadow pass's
+/// pinned windows (docs/SHADOW_V2.md), on each of `BEHAVIOUR_SEEDS`.
+///
+/// Each archetype is measured in its own clone of the window's world, with
+/// up to `BEHAVIOUR_SAMPLE` of its free candidates pinned (every one in a
+/// small pool), and a row pools the three seeds: it reads the archetype,
+/// not five people on one city, and another archetype's pins never move
+/// it. The first `BEHAVIOUR_COUNT` of each sample are the diaries (`--out`),
+/// the human-readable judge.
+///
+/// The diary seed (`--out` writes its diaries under `d<day>`, the others under `s<seed>_d<day>`).
 pub const BEHAVIOUR_SEED: u64 = 42;
+/// The seeds pooled into every row: a gang's trajectory or the Law's posture on one seed is one
+/// sample of the city, not the archetype.
+const BEHAVIOUR_SEEDS: [u64; 3] = [BEHAVIOUR_SEED, 43, 44];
 const BEHAVIOUR_DAYS: u64 = 7;
 const BEHAVIOUR_COUNT: usize = 5;
+/// Agents measured per archetype and window: under `[lod] max_full` (50), so
+/// every pinned agent holds a Full slot.
+const BEHAVIOUR_SAMPLE: usize = 30;
+/// The share of agents dropped at each end before a per-agent metric is
+/// averaged (a trimmed mean): one agent's 6 h commute or week at energy 0
+/// does not carry a row; a regression shared by most of them does.
+const BEHAVIOUR_TRIM: f64 = 0.1;
+/// A share (paid of worked, waged workdays, bouts attended) is read over at
+/// least this many shifts or bouts, else it is a SKIP: a share of five shifts
+/// is one person's week.
+const BEHAVIOUR_MIN_SHARE: u32 = 20;
+/// A row is read over at least this many agents (the seeds pooled), else it
+/// is a SKIP: never a smaller sample than the 5-pick tier judged.
+const BEHAVIOUR_MIN_AGENTS: usize = 5;
 const BEHAVIOUR_WINDOWS: [(u64, &str); 2] = [
     (
         19,
@@ -1962,7 +1988,7 @@ const BEHAVIOUR_WINDOWS: [(u64, &str); 2] = [
     (90, "gang_member,gang_leader,dealer,runner,purist,homeless"),
 ];
 
-/// One archetype's numbers over its picks in one window (sums, then rates).
+/// One agent's numbers in one window, or (merged) an archetype's (sums, then rates).
 #[derive(Clone, Default)]
 struct Agg {
     agents: u32,
@@ -2016,6 +2042,27 @@ impl Agg {
         self.commute_aborts += t.commute_aborts;
         self.bouts += t.bouts;
         self.bouts_present += t.bouts_present;
+    }
+
+    /// Pool another agent's sums into these.
+    fn merge(&mut self, o: &Agg) {
+        self.agents += o.agents;
+        self.alive_min += o.alive_min;
+        self.travel_min += o.travel_min;
+        self.sleep_min += o.sleep_min;
+        self.work_min += o.work_min;
+        self.energy0_min += o.energy0_min;
+        self.nights.extend_from_slice(&o.nights);
+        self.shifts += o.shifts;
+        self.worked += o.worked;
+        self.paid += o.paid;
+        self.worked_paid += o.worked_paid;
+        self.hangouts += o.hangouts;
+        self.known_met += o.known_met;
+        self.refunds += o.refunds;
+        self.commute_aborts += o.commute_aborts;
+        self.bouts += o.bouts;
+        self.bouts_present += o.bouts_present;
     }
 
     fn agent_days(&self) -> f64 {
@@ -2079,6 +2126,71 @@ enum Metric {
     BoutsAttended,
 }
 
+impl Metric {
+    /// A share of shifts or bouts: pooled over the sample (one agent's two
+    /// shifts are no rate). Every other metric is a per-agent rate,
+    /// trimmed-mean averaged.
+    fn pooled(self) -> bool {
+        matches!(self, Metric::ShiftsWorkedShare | Metric::PaidOfWorked | Metric::WagedWorkdays | Metric::BoutsAttended)
+    }
+}
+
+/// One archetype in one window: each sampled agent's numbers, and their pool.
+#[derive(Default)]
+struct Row {
+    agents: Vec<Agg>,
+    pooled: Agg,
+}
+
+impl Row {
+    fn add(&mut self, t: &Track) {
+        let mut a = Agg::default();
+        a.add(t);
+        self.pooled.merge(&a);
+        self.agents.push(a);
+    }
+
+    fn extend(&mut self, o: &Row) {
+        self.pooled.merge(&o.pooled);
+        self.agents.extend(o.agents.iter().cloned());
+    }
+
+    /// The row's value of `m`: the pooled share, or the trimmed mean of the
+    /// per-agent rates over the agents alive a whole day of the window.
+    /// `judged`: `None` under `BEHAVIOUR_MIN_AGENTS` agents or (a share)
+    /// `BEHAVIOUR_MIN_SHARE` shifts or bouts; the printed tables read every row.
+    fn get(&self, m: Metric, judged: bool) -> Option<f64> {
+        let floor = |n: usize, min: usize| !judged || n >= min;
+        if m.pooled() {
+            let base = match m {
+                Metric::PaidOfWorked => self.pooled.worked,
+                Metric::BoutsAttended => self.pooled.bouts,
+                _ => self.pooled.shifts,
+            };
+            let enough =
+                floor(self.agents.len(), BEHAVIOUR_MIN_AGENTS) && floor(base as usize, BEHAVIOUR_MIN_SHARE as usize);
+            return if enough { self.pooled.get(m) } else { None };
+        }
+        let v: Vec<f64> =
+            self.agents.iter().filter(|a| a.alive_min >= TICKS_PER_DAY).filter_map(|a| a.get(m)).collect();
+        if !floor(v.len(), BEHAVIOUR_MIN_AGENTS) {
+            return None;
+        }
+        trimmed_mean(v, BEHAVIOUR_TRIM)
+    }
+}
+
+/// The mean of `v` without its `floor(n x trim)` lowest and highest values.
+fn trimmed_mean(mut v: Vec<f64>, trim: f64) -> Option<f64> {
+    if v.is_empty() {
+        return None;
+    }
+    v.sort_by(f64::total_cmp);
+    let k = (v.len() as f64 * trim).floor() as usize;
+    let kept = &v[k..v.len() - k];
+    Some(kept.iter().sum::<f64>() / kept.len() as f64)
+}
+
 const METRICS: [Metric; 13] = [
     Metric::WalkHDay,
     Metric::SleepHDay,
@@ -2102,191 +2214,163 @@ enum Bound {
     Max(f64),
 }
 
-/// One behaviour check: (window start day, archetype, metric, bound, the
-/// value measured on main when the bound was set). Bounds are set so
-/// today's city passes with a margin: they catch a regression in "acts like
-/// a person", they are not targets.
-type Check = (u64, &'static str, Metric, Bound, f64);
+/// One behaviour check: (window start day, archetype, metric, bound, and
+/// the lowest and highest value the row read on the calibration ensemble:
+/// main and seven config butterflies, the noise a city change that is not a
+/// behaviour change makes). Bounds sit a cushion outside that range: they
+/// catch a regression in "acts like a person", they are not targets.
+type Check = (u64, &'static str, Metric, Bound, f64, f64);
 
 const CHECKS: &[Check] = &[
-    // Measured 2026-10-09 at 5 picks per archetype on the city with the off switches retired and
-    // the stat table regenerated in the full city (the first cuts, 3 picks on 38210ce and on the
-    // regenerated table, are in the history). Bounds: walking <= 1.4 x + 1 h, the longest nightly
-    // block >= 0.7 x, energy 0 <= measured + 6 h a week, known contacts met >= 0.5 x (where >= 2),
-    // refunds <= 1 a week, commute aborts <= 1.5 x + 0.5 a day, paid of worked shifts >= measured -
-    // 0.25, waged workdays >= measured - 0.3, the reporter at her desk >= 1 h a day, the fighter
-    // inside the pit for >= 3 bouts in 4. Archetypes with one pick (d19's dealer and Purist, d90's
-    // dealer) are not judged.
-    (19, "ceo", Metric::WalkHDay, Bound::Max(6.7), 4.04),
-    (19, "ceo", Metric::LongestSleepH, Bound::Min(3.2), 4.71),
-    (19, "ceo", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "ceo", Metric::KnownMetWeek, Bound::Min(1.4), 2.80),
-    (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(1.6), 0.69),
-    (19, "club_staff", Metric::WalkHDay, Bound::Max(7.7), 4.75),
-    (19, "club_staff", Metric::LongestSleepH, Bound::Min(3.6), 5.19),
-    (19, "club_staff", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "club_staff", Metric::KnownMetWeek, Bound::Min(4.0), 8.02),
-    (19, "club_staff", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "club_staff", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (19, "club_staff", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "club_staff", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
-    (19, "cook", Metric::WalkHDay, Bound::Max(8.2), 5.11),
-    (19, "cook", Metric::LongestSleepH, Bound::Min(3.3), 4.78),
-    (19, "cook", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    // Jobs and room P2 re-measure (the new Lots move the seeded NoodleBars; old bound 9.8, measured 19.60).
-    (19, "cook", Metric::KnownMetWeek, Bound::Min(3.3), 6.60),
-    (19, "cook", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "cook", Metric::CommuteAbortsDay, Bound::Max(0.6), 0.06),
-    (19, "cook", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "cook", Metric::WagedWorkdays, Bound::Min(0.6), 0.96),
-    (19, "fabber", Metric::WalkHDay, Bound::Max(7.2), 4.37),
-    (19, "fabber", Metric::LongestSleepH, Bound::Min(3.5), 5.08),
-    (19, "fabber", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "fabber", Metric::KnownMetWeek, Bound::Min(5.1), 10.20),
-    (19, "fabber", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "fabber", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (19, "fabber", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "fabber", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
-    // Jobs and room P2 re-measure (a second Sump pit in Sump East: picks cross the Sump to the pit
-    // that hired them on skill; old bound 6.8, measured 4.12).
-    (19, "fighter", Metric::WalkHDay, Bound::Max(13.1), 8.65),
-    (19, "fighter", Metric::LongestSleepH, Bound::Min(3.5), 5.00),
-    (19, "fighter", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    // Jobs and room P2 re-measure (old bound 3.5, measured 7.00).
-    (19, "fighter", Metric::KnownMetWeek, Bound::Min(1.4), 2.80),
-    (19, "fighter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "fighter", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (19, "fighter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "fighter", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
-    (19, "fighter", Metric::BoutsAttended, Bound::Min(0.75), 1.00),
-    // M16a phase 3 re-measure (a pick change after the day-7 divergence; old bound 7.9, measured 4.87).
-    (19, "gang_leader", Metric::WalkHDay, Bound::Max(12.5), 8.20),
-    (19, "gang_leader", Metric::LongestSleepH, Bound::Min(4.0), 5.79),
-    (19, "gang_leader", Metric::Energy0HWeek, Bound::Max(6.2), 0.16),
-    (19, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (19, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.5), 0.80),
-    (19, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.3), 0.67),
-    (19, "gang_member", Metric::WalkHDay, Bound::Max(11.6), 7.57),
-    (19, "gang_member", Metric::LongestSleepH, Bound::Min(3.4), 4.98),
-    (19, "gang_member", Metric::Energy0HWeek, Bound::Max(6.2), 0.11),
-    // M16a phase 3 re-measure (a city change from day 7: the brains' postings; old bound 3.5, measured 7.00).
-    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(1.4), 2.80),
-    (19, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.09),
-    // Jobs and room P2 re-measure: paid of worked 1.00 -> 0.00 and waged workdays 0.75 -> 0.00 (one
-    // pick worked one shift: hired as a Clerk across town on day 22, assaulted a customer at the
-    // counter that afternoon and lost the job); "measured - 0.25/0.3" is under 0, so not judged.
-    (19, "guard", Metric::WalkHDay, Bound::Max(13.5), 8.91),
-    (19, "guard", Metric::LongestSleepH, Bound::Min(3.9), 5.58),
-    (19, "guard", Metric::Energy0HWeek, Bound::Max(7.5), 1.41),
-    (19, "guard", Metric::KnownMetWeek, Bound::Min(5.4), 10.80),
-    (19, "guard", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "guard", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (19, "guard", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "guard", Metric::WagedWorkdays, Bound::Min(0.6), 0.93),
-    (19, "homeless", Metric::WalkHDay, Bound::Max(9.1), 5.78),
-    (19, "homeless", Metric::LongestSleepH, Bound::Min(3.5), 5.10),
-    (19, "homeless", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "homeless", Metric::KnownMetWeek, Bound::Min(8.4), 16.80),
-    (19, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.8), 0.17),
-    (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.5), 0.88),
-    // Jobs and room P2 re-measure (a reporter hired on skill across town; old bound 8.0, measured 4.98).
-    (19, "reporter", Metric::WalkHDay, Bound::Max(13.2), 8.70),
-    (19, "reporter", Metric::LongestSleepH, Bound::Min(3.8), 5.44),
-    // Jobs and room P3 re-measure (pick swap: #848 -> #1245, a Sump Central home 6 h from her Mid West
-    // Feed, at energy 0 on the walk home): was Max(6.0), 0.00.
-    (19, "reporter", Metric::Energy0HWeek, Bound::Max(16.8), 10.75),
-    (19, "reporter", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "reporter", Metric::CommuteAbortsDay, Bound::Max(0.8), 0.16),
-    (19, "reporter", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "reporter", Metric::WagedWorkdays, Bound::Min(0.2), 0.50),
-    (19, "reporter", Metric::WorkHDay, Bound::Min(1.0), 3.68),
-    (19, "ripperdoc", Metric::WalkHDay, Bound::Max(6.9), 4.17),
-    (19, "ripperdoc", Metric::LongestSleepH, Bound::Min(3.7), 5.41),
-    (19, "ripperdoc", Metric::Energy0HWeek, Bound::Max(6.0), 0.00),
-    (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(3.5), 7.00),
-    (19, "ripperdoc", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    // M16a phase 3 re-measure (old bound 0.7, measured 1.00). Finding: one late wage, ripperdoc 959's d22
-    // shift paid at 07:58 the next morning (Jessop Holdings); possibly corp cash after Secure/Locate
-    // escrows, unconfirmed.
-    (19, "ripperdoc", Metric::PaidOfWorked, Bound::Min(0.42), 0.67),
-    (19, "ripperdoc", Metric::WagedWorkdays, Bound::Min(0.6), 0.93),
-    (19, "sweeper", Metric::WalkHDay, Bound::Max(9.6), 6.09),
-    (19, "sweeper", Metric::LongestSleepH, Bound::Min(3.1), 4.55),
-    (19, "sweeper", Metric::Energy0HWeek, Bound::Max(6.1), 0.03),
-    (19, "sweeper", Metric::KnownMetWeek, Bound::Min(6.2), 12.40),
-    (19, "sweeper", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "sweeper", Metric::CommuteAbortsDay, Bound::Max(0.6), 0.03),
-    (19, "sweeper", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "sweeper", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
-    (19, "worker", Metric::WalkHDay, Bound::Max(11.1), 7.20),
-    (19, "worker", Metric::LongestSleepH, Bound::Min(3.5), 5.06),
-    (19, "worker", Metric::Energy0HWeek, Bound::Max(7.7), 1.63),
-    (19, "worker", Metric::KnownMetWeek, Bound::Min(3.4), 6.80),
-    (19, "worker", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "worker", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.11),
-    (19, "worker", Metric::PaidOfWorked, Bound::Min(0.6), 0.91),
-    (19, "worker", Metric::WagedWorkdays, Bound::Min(0.5), 0.81),
-    (19, "worker_friday", Metric::WalkHDay, Bound::Max(12.3), 8.03),
-    (19, "worker_friday", Metric::LongestSleepH, Bound::Min(3.5), 5.12),
-    (19, "worker_friday", Metric::Energy0HWeek, Bound::Max(6.3), 0.28),
-    (19, "worker_friday", Metric::KnownMetWeek, Bound::Min(4.0), 8.00),
-    (19, "worker_friday", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (19, "worker_friday", Metric::CommuteAbortsDay, Bound::Max(1.0), 0.29),
-    (19, "worker_friday", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (19, "worker_friday", Metric::WagedWorkdays, Bound::Min(0.5), 0.86),
-    (90, "gang_leader", Metric::WalkHDay, Bound::Max(14.7), 9.75),
-    (90, "gang_leader", Metric::LongestSleepH, Bound::Min(3.9), 5.67),
-    (90, "gang_leader", Metric::Energy0HWeek, Bound::Max(8.7), 2.70),
-    // M16a phase 3 re-measure (old bound 9.6, measured 19.25; now below 2, kept at 0.5 x).
-    (90, "gang_leader", Metric::KnownMetWeek, Bound::Min(0.5), 1.00),
-    (90, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (90, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.07),
-    (90, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (90, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.7), 1.00),
-    (90, "gang_member", Metric::WalkHDay, Bound::Max(13.5), 8.91),
-    (90, "gang_member", Metric::LongestSleepH, Bound::Min(3.7), 5.41),
-    (90, "gang_member", Metric::Energy0HWeek, Bound::Max(6.4), 0.34),
-    // M16a phase 3 re-measure (old bound 13.2, measured 26.40).
-    // Jobs and room P3 re-measure (pick swap: five other members on the trades city): was Min(6.0), 12.00.
-    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(2.7), 5.43),
-    (90, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (90, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (90, "homeless", Metric::WalkHDay, Bound::Max(9.8), 6.25),
-    (90, "homeless", Metric::LongestSleepH, Bound::Min(4.1), 5.88),
-    (90, "homeless", Metric::Energy0HWeek, Bound::Max(6.9), 0.86),
-    (90, "homeless", Metric::KnownMetWeek, Bound::Min(8.8), 17.60),
-    (90, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (90, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.7), 0.09),
-    (90, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    (90, "homeless", Metric::WagedWorkdays, Bound::Min(0.6), 0.92),
-    (90, "purist", Metric::WalkHDay, Bound::Max(10.4), 6.66),
-    (90, "purist", Metric::LongestSleepH, Bound::Min(4.1), 5.86),
-    (90, "purist", Metric::Energy0HWeek, Bound::Max(8.6), 2.59),
-    // M16a phase 3 re-measure (a pick change; old bound 8.4, measured 16.80).
-    (90, "purist", Metric::KnownMetWeek, Bound::Min(1.9), 3.80),
-    (90, "purist", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (90, "purist", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (90, "runner", Metric::WalkHDay, Bound::Max(10.5), 6.75),
-    (90, "runner", Metric::LongestSleepH, Bound::Min(4.3), 6.15),
-    (90, "runner", Metric::Energy0HWeek, Bound::Max(6.7), 0.70),
-    // M16a phase 3 re-measure (old bound 8.0, measured 16.00); Jobs and room P2 re-measure (old
-    // bound 2.3, measured 4.67; now below 2, kept at 0.5 x).
-    (90, "runner", Metric::KnownMetWeek, Bound::Min(0.6), 1.20),
-    (90, "runner", Metric::RefundsWeek, Bound::Max(1.0), 0.00),
-    (90, "runner", Metric::CommuteAbortsDay, Bound::Max(0.5), 0.00),
-    (90, "runner", Metric::PaidOfWorked, Bound::Min(0.7), 1.00),
-    // Jobs and room P2 re-measure (5 picks, not 2; old bound 0.6, measured 0.92).
-    (90, "runner", Metric::WagedWorkdays, Bound::Min(0.2), 0.52),
+    // Calibrated 2026-10-09 on d11e397: the tier run on main and on seven config butterflies
+    // (`[lod] stat_violence_mult` 0.98, 0.99, 1.01, 1.02, 1.03, `max_coarse` 149, 151: the same rules,
+    // a different week for every pick), the range each row read beside its bound. Cushions outside
+    // the range: walking + max(1 h, 15 %), the longest nightly block - 0.5 h, energy 0 + 2 h a week,
+    // known contacts met x 0.6, commute aborts + 0.05 a day, paid of worked and waged workdays - 0.1,
+    // the reporter's work hours x 0.5; refunds <= 1 a week and the fighter inside the pit for 3 bouts
+    // in 4 as before. A Min is rounded down, a Max up (to 0.01 for aborts and shares, else 0.1).
+    // Not judged: d19 reporter PaidOfWorked (under 20 worked shifts on every run) and d90 runner
+    // (3-10 agents over the three seeds, an archetype defined by a run in the last 7 days: its rows
+    // moved more under the butterflies than any injected regression moved a row).
+    (19, "ceo", Metric::WalkHDay, Bound::Max(5.9), 4.15, 4.90),
+    (19, "ceo", Metric::LongestSleepH, Bound::Min(4.3), 4.86, 5.14),
+    (19, "ceo", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),
+    (19, "ceo", Metric::KnownMetWeek, Bound::Min(0.7), 1.33, 2.62),
+    (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(0.61), 0.50, 0.56),
+    (19, "club_staff", Metric::WalkHDay, Bound::Max(5.5), 3.97, 4.41),
+    (19, "club_staff", Metric::LongestSleepH, Bound::Min(4.4), 4.93, 5.06),
+    (19, "club_staff", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),
+    (19, "club_staff", Metric::KnownMetWeek, Bound::Min(5.1), 8.60, 9.81),
+    (19, "club_staff", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "club_staff", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
+    (19, "club_staff", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
+    (19, "club_staff", Metric::WagedWorkdays, Bound::Min(0.88), 0.98, 1.00),
+    (19, "cook", Metric::WalkHDay, Bound::Max(5.5), 3.90, 4.47),
+    (19, "cook", Metric::LongestSleepH, Bound::Min(4.6), 5.16, 5.24),
+    (19, "cook", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.01),
+    (19, "cook", Metric::KnownMetWeek, Bound::Min(5.9), 9.92, 10.46),
+    (19, "cook", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "cook", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
+    (19, "cook", Metric::PaidOfWorked, Bound::Min(0.89), 0.99, 1.00),
+    (19, "cook", Metric::WagedWorkdays, Bound::Min(0.87), 0.97, 0.99),
+    (19, "fabber", Metric::WalkHDay, Bound::Max(6.6), 5.20, 5.53),
+    (19, "fabber", Metric::LongestSleepH, Bound::Min(4.5), 5.09, 5.26),
+    (19, "fabber", Metric::Energy0HWeek, Bound::Max(2.0), 0.00, 0.00),
+    (19, "fabber", Metric::KnownMetWeek, Bound::Min(5.5), 9.18, 11.80),
+    (19, "fabber", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "fabber", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
+    (19, "fabber", Metric::PaidOfWorked, Bound::Min(0.88), 0.98, 1.00),
+    (19, "fabber", Metric::WagedWorkdays, Bound::Min(0.88), 0.98, 1.00),
+    (19, "fighter", Metric::WalkHDay, Bound::Max(7.6), 5.35, 6.55),
+    (19, "fighter", Metric::LongestSleepH, Bound::Min(5.0), 5.56, 6.02),
+    (19, "fighter", Metric::Energy0HWeek, Bound::Max(2.5), 0.13, 0.41),
+    (19, "fighter", Metric::KnownMetWeek, Bound::Min(3.0), 5.15, 6.55),
+    (19, "fighter", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "fighter", Metric::CommuteAbortsDay, Bound::Max(0.08), 0.00, 0.03),
+    (19, "fighter", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
+    (19, "fighter", Metric::WagedWorkdays, Bound::Min(0.84), 0.94, 1.00),
+    (19, "fighter", Metric::BoutsAttended, Bound::Min(0.75), 1.00, 1.00),
+    (19, "gang_leader", Metric::WalkHDay, Bound::Max(8.6), 5.71, 7.40),
+    (19, "gang_leader", Metric::LongestSleepH, Bound::Min(3.7), 4.24, 5.64),
+    (19, "gang_leader", Metric::Energy0HWeek, Bound::Max(3.2), 0.01, 1.12),
+    (19, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.24), 0.02, 0.19),
+    (19, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
+    (19, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.86), 0.96, 0.96),
+    (19, "gang_member", Metric::WalkHDay, Bound::Max(6.8), 4.74, 5.73),
+    (19, "gang_member", Metric::LongestSleepH, Bound::Min(4.1), 4.68, 5.06),
+    (19, "gang_member", Metric::Energy0HWeek, Bound::Max(2.2), 0.00, 0.14),
+    (19, "gang_member", Metric::KnownMetWeek, Bound::Min(3.9), 6.50, 13.40),
+    (19, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
+    (19, "guard", Metric::WalkHDay, Bound::Max(9.6), 7.16, 8.32),
+    (19, "guard", Metric::LongestSleepH, Bound::Min(4.6), 5.15, 5.45),
+    (19, "guard", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.01),
+    (19, "guard", Metric::KnownMetWeek, Bound::Min(7.1), 11.95, 14.48),
+    (19, "guard", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "guard", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
+    (19, "guard", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
+    (19, "guard", Metric::WagedWorkdays, Bound::Min(0.84), 0.94, 0.98),
+    (19, "homeless", Metric::WalkHDay, Bound::Max(6.6), 5.05, 5.53),
+    (19, "homeless", Metric::LongestSleepH, Bound::Min(4.8), 5.36, 5.54),
+    (19, "homeless", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.04),
+    (19, "homeless", Metric::KnownMetWeek, Bound::Min(6.0), 10.00, 11.85),
+    (19, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
+    (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.89), 0.99, 1.00),
+    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.82), 0.92, 0.94),
+    (19, "reporter", Metric::WalkHDay, Bound::Max(9.0), 5.85, 7.79),
+    (19, "reporter", Metric::LongestSleepH, Bound::Min(4.9), 5.40, 5.64),
+    (19, "reporter", Metric::Energy0HWeek, Bound::Max(5.0), 0.89, 2.94),
+    (19, "reporter", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "reporter", Metric::CommuteAbortsDay, Bound::Max(0.42), 0.21, 0.37),
+    (19, "reporter", Metric::WagedWorkdays, Bound::Min(0.21), 0.31, 0.41),
+    (19, "reporter", Metric::WorkHDay, Bound::Min(1.0), 2.08, 3.01),
+    (19, "ripperdoc", Metric::WalkHDay, Bound::Max(5.5), 3.57, 4.42),
+    (19, "ripperdoc", Metric::LongestSleepH, Bound::Min(4.2), 4.78, 5.22),
+    (19, "ripperdoc", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.04),
+    (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(5.8), 9.75, 17.67),
+    (19, "ripperdoc", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
+    (19, "ripperdoc", Metric::PaidOfWorked, Bound::Min(0.69), 0.79, 0.93),
+    (19, "ripperdoc", Metric::WagedWorkdays, Bound::Min(0.68), 0.78, 0.93),
+    (19, "sweeper", Metric::WalkHDay, Bound::Max(8.8), 6.74, 7.60),
+    (19, "sweeper", Metric::LongestSleepH, Bound::Min(4.0), 4.52, 4.72),
+    (19, "sweeper", Metric::Energy0HWeek, Bound::Max(2.4), 0.06, 0.37),
+    (19, "sweeper", Metric::KnownMetWeek, Bound::Min(7.0), 11.68, 14.03),
+    (19, "sweeper", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "sweeper", Metric::CommuteAbortsDay, Bound::Max(0.25), 0.08, 0.20),
+    (19, "sweeper", Metric::PaidOfWorked, Bound::Min(0.89), 0.99, 1.00),
+    (19, "sweeper", Metric::WagedWorkdays, Bound::Min(0.81), 0.91, 0.95),
+    (19, "worker", Metric::WalkHDay, Bound::Max(7.5), 6.00, 6.50),
+    (19, "worker", Metric::LongestSleepH, Bound::Min(4.6), 5.10, 5.30),
+    (19, "worker", Metric::Energy0HWeek, Bound::Max(2.3), 0.06, 0.28),
+    (19, "worker", Metric::KnownMetWeek, Bound::Min(3.3), 5.62, 7.49),
+    (19, "worker", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "worker", Metric::CommuteAbortsDay, Bound::Max(0.09), 0.02, 0.04),
+    (19, "worker", Metric::PaidOfWorked, Bound::Min(0.88), 0.98, 1.00),
+    (19, "worker", Metric::WagedWorkdays, Bound::Min(0.82), 0.92, 0.97),
+    (19, "worker_friday", Metric::WalkHDay, Bound::Max(6.9), 4.98, 5.87),
+    (19, "worker_friday", Metric::LongestSleepH, Bound::Min(4.3), 4.85, 5.09),
+    (19, "worker_friday", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.07),
+    (19, "worker_friday", Metric::KnownMetWeek, Bound::Min(4.5), 7.54, 9.96),
+    (19, "worker_friday", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (19, "worker_friday", Metric::CommuteAbortsDay, Bound::Max(0.12), 0.02, 0.07),
+    (19, "worker_friday", Metric::PaidOfWorked, Bound::Min(0.87), 0.97, 0.99),
+    (19, "worker_friday", Metric::WagedWorkdays, Bound::Min(0.81), 0.91, 0.95),
+    (90, "gang_leader", Metric::WalkHDay, Bound::Max(9.0), 5.07, 7.80),
+    (90, "gang_leader", Metric::LongestSleepH, Bound::Min(4.7), 5.24, 6.35),
+    (90, "gang_leader", Metric::Energy0HWeek, Bound::Max(3.1), 0.11, 1.10),
+    (90, "gang_leader", Metric::KnownMetWeek, Bound::Min(2.3), 3.89, 10.78),
+    (90, "gang_leader", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (90, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.13), 0.00, 0.08),
+    (90, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.78), 0.88, 0.88),
+    (90, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.76), 0.86, 0.87),
+    (90, "gang_member", Metric::WalkHDay, Bound::Max(8.2), 6.03, 7.13),
+    (90, "gang_member", Metric::LongestSleepH, Bound::Min(5.0), 5.54, 5.88),
+    (90, "gang_member", Metric::Energy0HWeek, Bound::Max(2.3), 0.02, 0.29),
+    (90, "gang_member", Metric::KnownMetWeek, Bound::Min(4.3), 7.33, 10.38),
+    (90, "gang_member", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (90, "gang_member", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
+    (90, "homeless", Metric::WalkHDay, Bound::Max(7.3), 5.26, 6.29),
+    (90, "homeless", Metric::LongestSleepH, Bound::Min(5.5), 6.07, 6.29),
+    (90, "homeless", Metric::Energy0HWeek, Bound::Max(2.7), 0.24, 0.70),
+    (90, "homeless", Metric::KnownMetWeek, Bound::Min(6.5), 10.87, 12.49),
+    (90, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (90, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.08), 0.00, 0.03),
+    (90, "homeless", Metric::PaidOfWorked, Bound::Min(0.87), 0.97, 1.00),
+    (90, "homeless", Metric::WagedWorkdays, Bound::Min(0.74), 0.84, 0.93),
+    (90, "purist", Metric::WalkHDay, Bound::Max(8.1), 4.94, 6.97),
+    (90, "purist", Metric::LongestSleepH, Bound::Min(4.7), 5.28, 5.78),
+    (90, "purist", Metric::Energy0HWeek, Bound::Max(2.3), 0.00, 0.29),
+    (90, "purist", Metric::KnownMetWeek, Bound::Min(6.3), 10.58, 16.61),
+    (90, "purist", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
+    (90, "purist", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
 ];
 
-/// One behaviour window's result: its start day, the closed tracks, the world at its end.
-type WindowRun = Result<(u64, Vec<Track>, World), String>;
+/// One archetype's measured sample in one window of one seed (`None`: no free candidate).
+type SampleRun = Result<(u64, u64, String, Option<Row>), String>;
 
 /// What `behaviour` found: the printed table and the failed checks.
 pub struct BehaviourReport {
@@ -2294,41 +2378,84 @@ pub struct BehaviourReport {
     pub failures: Vec<String>,
 }
 
-/// Run the behaviour tier's windows (in parallel threads), write the
-/// diaries under `out` if given, and judge `CHECKS`.
-pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, String> {
-    let runs: Vec<WindowRun> = std::thread::scope(|s| {
-        let hs: Vec<_> = BEHAVIOUR_WINDOWS
-            .iter()
-            .map(|&(day, list)| {
-                s.spawn(move || {
-                    let mut world = start_world(BEHAVIOUR_SEED, day);
-                    let picked = pick(&world, BEHAVIOUR_SEED, day, Some(list), BEHAVIOUR_COUNT, &[]);
-                    let tracks = follow(&mut world, &picked, BEHAVIOUR_DAYS, true, false);
-                    Ok((day, tracks, world))
+/// The behaviour tier's sample of `arch`: its free candidates in the
+/// shadow's pick order (shuffled by the seed; the CEOs by treasury), at most
+/// `BEHAVIOUR_SAMPLE` of them.
+fn sample(world: &World, seed: u64, arch: &str) -> Result<Vec<EntityId>, String> {
+    let c = candidates(world, arch)?;
+    let ordered = if arch == "ceo" { c } else { shuffled(c, seed, arch) };
+    Ok(ordered.into_iter().filter(|&id| is_free(world, id)).take(BEHAVIOUR_SAMPLE).collect())
+}
+
+/// One window of one seed: the world run to `day` once, then each
+/// archetype's sample followed in its own clone of it (a thread each); the
+/// first `BEHAVIOUR_COUNT` of a sample write their diaries under
+/// `out/d<day>` (seed 42) or `out/s<seed>_d<day>`.
+fn behaviour_window(seed: u64, day: u64, list: &'static str, out: Option<&std::path::Path>) -> Vec<SampleRun> {
+    let world = start_world(seed, day);
+    let jobs: Vec<(&str, Result<Vec<EntityId>, String>)> =
+        list.split(',').map(|arch| (arch, sample(&world, seed, arch))).collect();
+    std::thread::scope(|s| {
+        let hs: Vec<_> = jobs
+            .into_iter()
+            .map(|(arch, ids)| {
+                let mut w = world.clone();
+                s.spawn(move || -> SampleRun {
+                    let ids = ids?;
+                    if ids.is_empty() {
+                        return Ok((seed, day, arch.to_string(), None));
+                    }
+                    let picked: Vec<(String, EntityId)> = ids.iter().map(|&id| (arch.to_string(), id)).collect();
+                    let mut tracks = follow(&mut w, &picked, BEHAVIOUR_DAYS, true, false);
+                    if let Some(dir) = out {
+                        let sub = if seed == BEHAVIOUR_SEED { format!("d{day}") } else { format!("s{seed}_d{day}") };
+                        let dir = dir.join(sub);
+                        std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                        for t in tracks.iter_mut().take(BEHAVIOUR_COUNT) {
+                            write_diary(&w, t, &dir, w.tick)?;
+                        }
+                    }
+                    let mut row = Row::default();
+                    for t in &tracks {
+                        row.add(t);
+                    }
+                    Ok((seed, day, arch.to_string(), Some(row)))
                 })
             })
             .collect();
-        hs.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("a behaviour window panicked".into()))).collect()
+        hs.into_iter()
+            .map(|h| h.join().unwrap_or_else(|_| Err(format!("a seed {seed} d{day} behaviour sample panicked"))))
+            .collect()
+    })
+}
+
+/// Run the behaviour tier's windows (each archetype's sample in its own
+/// thread), write the diaries under `out` if given, and judge `CHECKS`.
+pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, String> {
+    let seeds = BEHAVIOUR_SEEDS;
+    let runs: Vec<Vec<SampleRun>> = std::thread::scope(|s| {
+        let hs: Vec<_> = seeds
+            .iter()
+            .flat_map(|&seed| BEHAVIOUR_WINDOWS.iter().map(move |&(day, list)| (seed, day, list)))
+            .map(|(seed, day, list)| s.spawn(move || behaviour_window(seed, day, list, out)))
+            .collect();
+        hs.into_iter().map(|h| h.join().unwrap_or_else(|_| vec![Err("a behaviour window panicked".into())])).collect()
     });
-    let mut aggs: BTreeMap<(u64, String), Agg> = BTreeMap::new();
-    for r in runs {
-        let (day, mut tracks, world) = r?;
-        if let Some(dir) = out {
-            let dir = dir.join(format!("d{day}"));
-            std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
-            for t in &mut tracks {
-                write_diary(&world, t, &dir, world.tick)?;
-            }
-        }
-        for t in &tracks {
-            aggs.entry((day, t.arch.clone())).or_default().add(t);
+    let mut aggs: BTreeMap<(u64, String), Row> = BTreeMap::new();
+    let mut per_seed: BTreeMap<(u64, String, u64), Row> = BTreeMap::new();
+    for r in runs.into_iter().flatten() {
+        if let (seed, day, arch, Some(row)) = r? {
+            aggs.entry((day, arch.clone())).or_default().extend(&row);
+            per_seed.insert((day, arch, seed), row);
         }
     }
     let mut text = String::new();
     let _ = writeln!(
         text,
-        "behaviour tier: seed {BEHAVIOUR_SEED}, {BEHAVIOUR_DAYS} days, {BEHAVIOUR_COUNT} per archetype, pinned at Full"
+        "behaviour tier: seeds {seeds:?} pooled, {BEHAVIOUR_DAYS} days, up to {BEHAVIOUR_SAMPLE} free agents per archetype \
+         and seed (each archetype in its own clone, pinned at Full); shares pooled (>= {BEHAVIOUR_MIN_SHARE} shifts or \
+         bouts), rates a {:.0} % trimmed mean",
+        BEHAVIOUR_TRIM * 100.0
     );
     let _ = write!(text, "{:<4} {:<14} {:>2}", "day", "archetype", "n");
     for m in METRICS {
@@ -2336,40 +2463,57 @@ pub fn behaviour(out: Option<&std::path::Path>) -> Result<BehaviourReport, Strin
     }
     let _ = writeln!(text);
     for ((day, arch), a) in &aggs {
-        let _ = write!(text, "d{day:<3} {arch:<14} {:>2}", a.agents);
-        for m in METRICS {
-            match a.get(m) {
-                Some(v) => {
-                    let _ = write!(text, " {v:>9.2}");
-                }
-                None => {
-                    let _ = write!(text, " {:>9}", "-");
-                }
-            }
-        }
-        let _ = writeln!(text);
+        row_line(&mut text, *day, arch, a);
+    }
+    // Which seed carried a row: read before the diaries of a failure.
+    let _ = writeln!(text, "per seed (archetype@seed):");
+    for ((day, arch, seed), a) in &per_seed {
+        row_line(&mut text, *day, &format!("{arch}@{seed}"), a);
     }
     let mut failures = Vec::new();
-    for &(day, arch, m, bound, measured) in CHECKS {
+    for &(day, arch, m, bound, lo, hi) in CHECKS {
         let Some(a) = aggs.get(&(day, arch.to_string())) else {
             let _ = writeln!(text, "SKIP d{day} {arch} {m:?}: no candidate in the window");
             continue;
         };
-        let Some(v) = a.get(m) else {
-            let _ = writeln!(text, "SKIP d{day} {arch} {m:?}: nothing to read");
+        let Some(v) = a.get(m, true) else {
+            let _ = writeln!(
+                text,
+                "SKIP d{day} {arch} {m:?}: too little to read ({} agents, {} shifts, {} bouts; the floors are \
+                 {BEHAVIOUR_MIN_AGENTS} agents, {BEHAVIOUR_MIN_SHARE} shifts or bouts for a share)",
+                a.agents.len(),
+                a.pooled.shifts,
+                a.pooled.bouts
+            );
             continue;
         };
         let (ok, rule) = match bound {
             Bound::Min(b) => (v >= b, format!(">= {b}")),
             Bound::Max(b) => (v <= b, format!("<= {b}")),
         };
-        let line = format!("d{day} {arch} {m:?} {v:.2} {rule} (measured {measured})");
+        let line = format!("d{day} {arch} {m:?} {v:.2} {rule} (calibration range {lo:.2}-{hi:.2})");
         let _ = writeln!(text, "{} {line}", if ok { "PASS" } else { "FAIL" });
         if !ok {
             failures.push(line);
         }
     }
     Ok(BehaviourReport { text, failures })
+}
+
+/// One printed row of the behaviour table (every value, the floors aside).
+fn row_line(text: &mut String, day: u64, label: &str, a: &Row) {
+    let _ = write!(text, "d{day:<3} {label:<14} {:>2}", a.agents.len());
+    for m in METRICS {
+        match a.get(m, false) {
+            Some(v) => {
+                let _ = write!(text, " {v:>9.2}");
+            }
+            None => {
+                let _ = write!(text, " {:>9}", "-");
+            }
+        }
+    }
+    let _ = writeln!(text);
 }
 
 fn short(m: Metric) -> &'static str {
@@ -2448,8 +2592,8 @@ mod tests {
     }
 
     /// The behaviour tier (docs/TESTING.md): the archetypes' diary metrics
-    /// against `CHECKS`. `#[ignore]` (two 2,000-resident windows, ~30 s
-    /// release): `cargo test --release -p citysim-cli -- --ignored behaviour`,
+    /// against `CHECKS`. `#[ignore]` (two windows on three seeds, each
+    /// archetype in its own clone: ~1-1.5 min release, ~3 GB):`cargo test --release -p citysim-cli -- --ignored behaviour`,
     /// or `citysim-cli shadow --assert`.
     #[test]
     #[ignore]
