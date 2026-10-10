@@ -2107,8 +2107,10 @@ cancer_mood = 0.3
 frail_old = 2.0
 frail_fight = 0.2
 fertile_mal_max = 0.5
-cancer_tox_min = 0.6
-cancer_p = 0.003           # a day at toxicity 1.0
+# The daily hazard p = cancer_hazard x toxicity x dose (dose = toxicity summed over the days carried). Scale, not
+# a target: 100 days at toxicity 1.0 gives p 0.003 a day (the threshold model's rate at 1.0; that model's 0.6
+# floor was never reached: 0-3 cancers in 120 days, no Disease death in a year).
+cancer_hazard = 0.00003
 cancer_growth = 0.015      # stage a day: ~67 days from onset to death (two seasons)
 cancer_symptom = 0.25
 cancer_treat_price = 240   # ~30-40 days of a wage: the sink (wallet, then spouse/kin, then the gang)

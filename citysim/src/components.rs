@@ -3922,6 +3922,8 @@ pub struct Cancer {
 pub struct Health {
     pub malnutrition: f32,
     pub toxicity: f32,
+    /// § 3: the toxicity summed over the days carried (toxicity-days; a cure halves it).
+    pub tox_dose: f32,
     pub cancer: Option<Cancer>,
     /// Rolled at midnight: no shift, no wage today.
     pub sick_today: bool,

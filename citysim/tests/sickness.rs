@@ -522,35 +522,38 @@ fn diagnosed(stage: f32) -> Health {
     Health { cancer: Some(citysim::Cancer { stage, since: 0, diagnosed: true }), ..Health::default() }
 }
 
-/// The onset rolls only at toxicity >= `cancer_tox_min`, near `cancer_p` a
-/// day at toxicity 1.0.
+/// The cancer's hazard (coordinator call after P5): zero at zero
+/// toxicity, rising with toxicity and with the toxicity-days carried; the
+/// onset counts follow it on a seeded crowd.
 #[test]
-fn test_cancer_rolls_only_above_tox_min() {
+fn test_cancer_hazard_zero_at_zero_and_rising() {
+    let cfg = sick_cfg().sickness;
+    assert_eq!(health::hazard(&cfg, 0.0, 500.0), 0.0, "no toxicity, no hazard");
+    assert_eq!(health::hazard(&cfg, 0.5, 0.0), 0.0, "no exposure yet, no hazard");
+    assert!(health::hazard(&cfg, 0.4, 50.0) < health::hazard(&cfg, 0.8, 50.0), "rising with toxicity");
+    assert!(health::hazard(&cfg, 0.4, 50.0) < health::hazard(&cfg, 0.4, 100.0), "rising with the dose");
     let mut w = world_on();
-    let people = adults(&w);
-    let (hot, cool): (Vec<EntityId>, Vec<EntityId>) = people.iter().take(400).partition(|a| a.index % 2 == 0);
-    let days = 30;
-    for _ in 0..days {
+    let people: Vec<EntityId> = adults(&w).into_iter().take(400).collect();
+    let (hot, clean): (Vec<EntityId>, Vec<EntityId>) = people.iter().partition(|a| a.index % 2 == 0);
+    for _ in 0..30 {
         for &a in &hot {
             let mut h = health(&w, a);
-            if h.cancer.is_none() {
-                h.toxicity = 1.0;
-                w.insert(a, h);
-            }
+            h.toxicity = 1.0;
+            h.tox_dose = h.tox_dose.max(100.0);
+            w.insert(a, h);
         }
-        for &a in &cool {
+        for &a in &clean {
             let mut h = health(&w, a);
-            h.toxicity = 0.55;
+            h.toxicity = 0.0;
             w.insert(a, h);
         }
         health::daily(&mut w);
     }
     let n_hot = hot.iter().filter(|&&a| cancer(&w, a).is_some()).count();
-    let n_cool = cool.iter().filter(|&&a| cancer(&w, a).is_some()).count();
-    let want = w.config.sickness.cancer_p as f64 * hot.len() as f64 * days as f64;
-    eprintln!("cancers at toxicity 1.0: {n_hot} (expected ~{want:.1}); at 0.55: {n_cool}");
-    assert_eq!(n_cool, 0, "no onset under cancer_tox_min");
-    assert!(n_hot > 0 && (n_hot as f64) < want * 3.0 + 3.0, "{n_hot} vs ~{want:.1}");
+    let n_clean = clean.iter().filter(|&&a| cancer(&w, a).is_some()).count();
+    eprintln!("cancers in 30 days: toxicity 1.0 after 100 toxicity-days {n_hot} of {}; clean {n_clean}", hot.len());
+    assert_eq!(n_clean, 0, "no onset at zero toxicity");
+    assert!(n_hot > 0, "a chronic exposure carries a real risk");
 }
 
 /// The stage grows `cancer_growth` a day, turns symptomatic (diagnosed: the

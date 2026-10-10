@@ -6019,8 +6019,11 @@ pub struct SicknessCfg {
     pub frail_fight: f32,
     /// No conception at or above this malnutrition.
     pub fertile_mal_max: f32,
-    pub cancer_tox_min: f32,
-    pub cancer_p: f32,
+    /// The cancer's daily hazard per toxicity-day of exposure: p = this x
+    /// toxicity x dose, dose the toxicity summed over the days carried
+    /// (coordinator call after P5: a threshold at 0.6 nobody reached was a
+    /// mechanism that never fired). Zero at zero toxicity, rising with both.
+    pub cancer_hazard: f32,
     pub cancer_growth: f32,
     pub cancer_symptom: f32,
     pub cancer_treat_price: i64,
@@ -6081,8 +6084,7 @@ impl Default for SicknessCfg {
             frail_old: 2.0,
             frail_fight: 0.2,
             fertile_mal_max: 0.5,
-            cancer_tox_min: 0.6,
-            cancer_p: 0.003,
+            cancer_hazard: 0.00003,
             cancer_growth: 0.015,
             cancer_symptom: 0.25,
             cancer_treat_price: 240,

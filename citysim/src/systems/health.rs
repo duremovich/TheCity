@@ -164,12 +164,13 @@ pub fn daily(world: &mut World) {
             h.toxicity + cfg.tox_synth * (f32::from(t.synth) + f32::from(t.alms)) + cfg.tox_dive * f32::from(t.dive)
                 - cfg.tox_clear;
         h.toxicity = tox.clamp(0.0, 1.0);
+        h.tox_dose += h.toxicity;
         // § 3: the cancer's onset and course (adults only, decision 6).
         if cfg.cancer {
             match h.cancer.as_mut() {
                 Some(c) => c.stage = (c.stage + cfg.cancer_growth).min(1.0),
-                None if h.toxicity >= cfg.cancer_tox_min => {
-                    let p = cfg.cancer_p * (h.toxicity - cfg.cancer_tox_min) / (1.0 - cfg.cancer_tox_min).max(1e-6);
+                None if h.toxicity > 0.0 => {
+                    let p = hazard(&cfg, h.toxicity, h.tox_dose);
                     let roll = crate::systems::econ::hash_unit(seed, ROLL_CANCER, u64::from(id.index), day);
                     if roll < p {
                         h.cancer = Some(crate::components::Cancer { stage: 0.0, since: tick, diagnosed: false });
@@ -239,6 +240,12 @@ pub fn daily(world: &mut World) {
     row.sick_days = sick;
     row.mean_malnutrition = if n > 0 { sum_m / n as f32 } else { 0.0 };
     row.mean_toxicity = if n > 0 { sum_t / n as f32 } else { 0.0 };
+}
+
+/// § 3: the cancer's daily hazard at `toxicity` after `dose` toxicity-days
+/// (0 at zero toxicity; rising with both).
+pub fn hazard(cfg: &crate::config::SicknessCfg, toxicity: f32, dose: f32) -> f32 {
+    (cfg.cancer_hazard * toxicity.max(0.0) * dose.max(0.0)).min(1.0)
 }
 
 /// `max(0, x − onset) / (1 − onset)`.
@@ -458,6 +465,7 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
     if cured {
         h.cancer = None;
         h.toxicity *= cfg.treat_tox_mult;
+        h.tox_dose *= cfg.treat_tox_mult;
     } else {
         c.stage = (c.stage - cfg.remission).max(0.0);
     }

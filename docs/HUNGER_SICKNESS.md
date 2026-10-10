@@ -69,7 +69,7 @@ The daily update (`s = synth + alms + dive` meals, `n = s + real`):
 
 ## 3. Cancer and the Clinic (H3)
 
-- **Onset**: at midnight, with `toxicity ≥ cancer_tox_min`, p = `cancer_p × (t − cancer_tox_min) / (1 − cancer_tox_min)`, rolled on the agent's stream.
+- **Onset**: at midnight, p = `cancer_hazard × toxicity × dose`, where dose is the toxicity summed over the days carried (a pure hash roll). This replaced the original threshold (`cancer_tox_min` 0.6, which nobody reached) after P5.
 - **Course**: `stage += cancer_growth` a day. At `stage ≥ cancer_symptom` it becomes **diagnosed**: a `Diagnosed` event, a `MemoryKind::Diagnosed` (salience 0.9, valence −0.8), a diary line and gossip about the person. At `stage ≥ 1` the agent dies of `DeathCause::Disease`.
 - **Treatment**: a new `Oncology` step under the existing **Treat** goal, at a Clinic (`nearest_seller(Clinic)`). Its price is `cancer_treat_price`, paid as `Flow::Treatment` to the Clinic's owner (a money sink, and Clinic revenue). Below `cure_stage` the treatment cures: the cancer is removed and toxicity × `treat_tox_mult`. At or above it the patient goes into remission, `stage −= remission`. Treat's utility for a diagnosed patient is U(stage); the price gates it. The Earn goal's savings line is raised to the price while the patient is diagnosed and untreated. Saving for treatment is the hook: it pushes people to work, beg, steal, join a gang or take contracts. Off screen, a diagnosed Statistical patient with the coins treats on `p_stat_treat` of days, the `p_stat_detox` pattern: too rare for `calibrate` to learn.
 
@@ -144,8 +144,7 @@ cancer_mood = 0.3
 frail_old = 2.0
 frail_fight = 0.2
 fertile_mal_max = 0.5
-cancer_tox_min = 0.6
-cancer_p = 0.003           # a day at toxicity 1.0
+cancer_hazard = 0.00003    # p a day = this x toxicity x toxicity-days (after P5)
 cancer_growth = 0.015      # stage a day: ~67 days from onset to death (two seasons)
 cancer_symptom = 0.25
 cancer_treat_price = 240   # ~30-40 days of a wage: the sink
