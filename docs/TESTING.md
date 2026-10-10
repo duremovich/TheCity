@@ -13,13 +13,13 @@
 | tier | what | where | asserts | wall time (this box, release, alone) |
 |---|---|---|---|---|
 | unit | every hand-built test (one mechanism, a small or seeded world) | `citysim/tests/*.rs`, `citysim-cli` | the mechanism does what it says | ~40 s summed over the binaries (all non-ignored but `core_sanity`) |
-| core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity every day, collapse bounds, 33 mechanism-existence bullets; ticks/s printed | ~30 s |
+| core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity and `escrow_leak` every day, collapse bounds, 37 mechanism-existence bullets; ticks/s printed | ~30 s |
 | core | `core_throughput` (ignored) | `citysim/tests/core.rs` | seed 42 alone x 30 days: the 4,000 ticks/s floor (release). Run it alone on a quiet box: parallel builds make the reading meaningless | ~10 s |
 | core | `core_year` (`#[ignore]`) | `citysim/tests/core.rs` | seed 42 x 365 days, the collapse bounds per 30-day window | ~100 s |
 | core | determinism and saves | `determinism.rs`, `save.rs` | same seed same hash at a day boundary; a mid-day save runs on byte for byte (plus the hunt, guard and contract rebuilds) | seconds |
 | behaviour | `shadow --assert` / `test_behaviour_tier` (`#[ignore]`) | `citysim-cli/src/shadow.rs` | 146 per-archetype bounds on the diary metrics (seed 42, days 19 and 90, 5 picks each) | ~25 s |
 | behaviour | person probes | `citysim/tests/person.rs` | one pinned agent, one stimulus, what a person would do | ~2 s |
-| god | 13 scenarios + 3 controls (`#[ignore]`) | `god.rs`, `god_corps.rs`, `god_districts.rs` | the world reacted to the shock (or the command applied), 60 days | ~55 s |
+| god | 17 scenarios + 3 controls (`#[ignore]`) | `god.rs`, `god_corps.rs`, `god_districts.rs` | the world reacted to the shock (or the command applied), 60 days | ~55 s |
 | nightly | Full-vs-Statistical parity (`#[ignore]`) | `lod.rs::test_full_vs_statistical_within_15pct` | the Statistical tier's rates within 15 % of Full | ~25 s |
 
 Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --release` (every non-ignored test, `core_sanity` included) ran in **1 min 17 s** after compile (653 passed, 19 ignored).
@@ -50,13 +50,14 @@ Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --
 `core_sanity` runs the shipped config (`Config::load()`) on seeds 42, 43 and 44 for 120 days, each in its own thread, and walks every event by id cursor once an hour into one collector per seed. It fails on:
 
 - **the coin identity** (`econ::identity`: `total_coins + Σ outside treasuries − minted`) moving on any day;
+- **escrow** (M16a): `escrow_leak` (Σ `Contract.escrow` − `World::escrow_held`) non-zero on any day (also judged per window in `core_year`);
 - **collapse**: population outside 1,333..=2,667 on any day; starvation over 200 in 120 days; Assault + Murder events over 42.7 a day; the Treasury below 0 from day 30; the Jail over capacity; every Market empty three days running; fewer than 4 seeded corps alive at the end; any prisoner held at the Statistical tier starving;
 - **a mechanism that never fired** on any of the three seeds (the list below);
 - **ticks/s** under 4,000 on seed 42 (release only). The core binary holds one non-ignored test and cargo runs test binaries one at a time, so the seed runs alone but for its two sibling threads (it reads ~6,000 there; ~10,700 truly alone and idle).
 
 The bounds are the v1 sanity trio scaled to 2,000 residents (M10 plan D38), unchanged since M8. `core_year` runs the same bounds over each 30-day window of a 365-day seed-42 run, the Assault bound at 1.5 x (a 30-day window is noisier than 120 days; seed 42 peaks at 36.3).
 
-The mechanism bullets (33, one per milestone's core mechanism, measured on 42-47; each fired on 4-6 of the 6 seeds): a Marriage, a GangJoin, a Birth, a Burial (M5, M6); a raid resolved, a Home flipped (M8); a Jailbreak, a day in Crackdown (M9); a hole bound (M10); an eviction, an NPC founding, a hostile takeover, a Strike (M11); a Riot, a gang Split, a Squat (M12); a Crash, a chrome Install, a Dealing report (M13); a run, a Data sale, a Flatline (M14); a Feed Story, a Hunt, a Vendetta, a Purist expulsion (M15); a World export, a Collect, a Bout, a gang front, a Mission meal (L2, the Real economy); a BountyPaid, a city guard on the take (M16a phase 3).
+The mechanism bullets (37, one per milestone's core mechanism, measured on 42-47; each fired on 4-6 of the 6 seeds): a Marriage, a GangJoin, a Birth, a Burial (M5, M6); a raid resolved, a Home flipped (M8); a Jailbreak, a day in Crackdown (M9); a hole bound (M10); an eviction, an NPC founding, a hostile takeover, a Strike (M11); a Riot, a gang Split, a Squat (M12); a Crash, a chrome Install, a Dealing report (M13); a run, a Data sale, a Flatline (M14); a Feed Story, a Hunt, a Vendetta, a Purist expulsion (M15); a World export, a Collect, a Bout, a gang front, a Mission meal (L2, the Real economy); a BountyPaid, a city guard on the take (M16a phase 3); a Guard fulfilled, a Locate fulfilled, a Fixer in business (open, a record brokered there within 7 days), a Reneged (M16a phase 5, each on 6 of 6; the Hit chain fired on 0 of 6 and is unit-tested: `core.rs`'s comment lists the tests).
 
 ### Adding a mechanism-existence bullet
 
@@ -92,14 +93,20 @@ The bounds (`CHECKS` in `shadow.rs`, each with the value measured beside it, las
 
 ### Person probes
 
-`citysim/tests/person.rs`: the shipped seed-42 city, one agent pinned at Full LOD, one stimulus, and an assert on what a person would do. Today's six (all pass):
+`citysim/tests/person.rs`: the shipped seed-42 city, one agent pinned at Full LOD, one stimulus, and an assert on what a person would do. The always-on probes (all pass; the Jobs probes that need the wages switches are `#[ignore]`d until the flip):
 
 - hungry, broke, an empty larder at 15:00: paid at 18:00, buys food before midnight's rent;
 - married, across town at 20:00, tired: at home at 03:00;
 - an Enemy standing at the nearer HangOut spot: the other spot;
 - at the counter at 17:45, a little hungry: stays to 18:00 and is paid;
 - an immigrant with no coins and no food: eats or is hired within five days, alive;
-- a guard starting a twelve-hour shift hungry: eats on shift, never at hunger 0.
+- a guard starting a twelve-hour shift hungry: eats on shift, never at hunger 0;
+- a Night Porter on shift at 02:00 at the Hotel, paid by 08:00;
+- M16a: a gun alone on a Fixer's books never takes a Hit on his own wife (the control: he takes the same Hit on a stranger);
+- M16a: the buyer of a fulfilled Hit nobody else knew of is never charged before somebody holds the `Hired` deed (30 days);
+- M16a: a broke jobless hand with a skill a Fixer can sell networks at the Fixer within a week.
+
+Gap probes (`#[ignore]`d, for the behaviour round): `probe_buyer_keeps_his_own_hit_quiet` (a buyer tells his own Hit to city guards within the day: `gossip::exchange_one` passes on the teller's own deed; `docs/GOD_SCENARIOS_V8.md` gap 5).
 
 ### Adding a person probe
 
@@ -107,7 +114,7 @@ Copy a probe: build `World::new(42, Config::load())`, run to the hour you need, 
 
 ## God scenarios
 
-The 13 kept, one per reaction class, seed 42, 60 days (the shock at day 45, or day 10/20 in the v5/v6/v7 harnesses), each against its unshocked control: `god_decapitate_gang` (succession), `god_kill_gang` (a gang wiped), `god_city_takeover_by_force` (unlimited resources), `god_bankrupt_city` (the city's money), `god_crackdown_forever` (the law pinned), `god_chrome_everyone_2` (chrome and violence), `god_wipe_zetatech_day_20` (the Virt plane and the tech tree), `god_kill_friend_of_leaders_day_10` (grudges, Hunts, vendettas), `god_export_10x` (the outside world's demand), `god_kill_exec` (corp succession), `god_wipe_corps` (the corps' money), `god_riot_sump_west` (a district riot), `god_evict_sump_rent_10` (housing). The other 40 were near-duplicates of these (the same lever class, or a lever with its own unit test). Write-ups: `docs/GOD_SCENARIOS_V1..V7.md`.
+The 13 kept, one per reaction class, seed 42, 60 days (the shock at day 45, or day 10/20 in the v5/v6/v7 harnesses), each against its unshocked control: `god_decapitate_gang` (succession), `god_kill_gang` (a gang wiped), `god_city_takeover_by_force` (unlimited resources), `god_bankrupt_city` (the city's money), `god_crackdown_forever` (the law pinned), `god_chrome_everyone_2` (chrome and violence), `god_wipe_zetatech_day_20` (the Virt plane and the tech tree), `god_kill_friend_of_leaders_day_10` (grudges, Hunts, vendettas), `god_export_10x` (the outside world's demand), `god_kill_exec` (corp succession), `god_wipe_corps` (the corps' money), `god_riot_sump_west` (a district riot), `god_evict_sump_rent_10` (housing); M16a's four (v8, `docs/GOD_SCENARIOS_V8.md`): `god_hit_each_exec_day_10` (a Hit on every exec), `god_hit_hollow_leader_from_arasaka` (a corp's Hit on a gang's leader), `god_fixer_licence_off` (the board's lever), `god_law_locate_on_gang_leader` (a public bounty), which assert only that the commands applied. The other 40 were near-duplicates of these (the same lever class, or a lever with its own unit test). Write-ups: `docs/GOD_SCENARIOS_V1..V8.md`.
 
 ## What was retired (2026-10-09)
 

@@ -53,6 +53,17 @@ snapshots on the last day and their run max (`hunts_active`, `vendettas_open`, `
 `law_competence`), each gang slot's dread and heat (first, last, max) and each corp slot's honour,
 standing and competence on the last day, and, with an events file, the crimson event counts. No flags:
 numbers are reports, not gates (docs/TESTING.md).
+
+M16a (the contract board): a "contracts" section from the `ContractCols` columns, replacing the retired
+scenario gate's devices (2026-10-09): posted and fulfilled by kind, closed by status and the fulfilled
+share of closed, Hits done (by a squad, solo-weak), strikes declined on political cost, sell-outs,
+`Reneged`, contract killings against all Murders (with an events file) and their clearance, `Accessory`
+and interrogations, bounties paid per Locate posted, guards on the take, Fixer-fed runs, the Fixer slots'
+heat and `FixerCut` income per week, the LOD's live parties and queue (max), escrow held, and the probes
+that must read 0 (`escrow_leak`, `escrow_stuck`, `contract_hole_wrong`, `accessory_unfounded`); with an
+events file, Hits taken by render (`LIVE`, `LEDGER`, `QUEUED`) and the amber event counts. The spec's
+bands (`docs/M16_CONTRACTS.md`, the M16a printed findings) are printed beside their numbers. One flag: a
+probe above 0 (a broken record, not a calibration miss).
 """
 import argparse
 import csv
@@ -109,6 +120,15 @@ WORD_SNAPSHOT = ["hunts_active", "vendettas_open", "chain_max", "rumour_hops_max
                  "known_by_killers_median", "pool_reach", "skill_rare_share", "law_competence"]
 WORD_EVENTS = ["GrudgeFormed", "HuntStarted", "HuntAbandoned", "Avenged", "Vendetta", "VendettaEnded", "Deceived",
                "Story", "Planted", "Buried", "Poached", "TalentLost", "Expelled", "Refused", "ContractLost"]
+CONTRACT_KINDS = ["hit", "beat", "guard", "locate"]
+CONTRACT_TOTALS = ["contracts_posted", "contracts_fulfilled", "contracts_failed", "contracts_expired",
+                   "contracts_cancelled", "reneged", "hits_done", "hits_squad", "hits_solo_weak",
+                   "strikes_declined_pol", "sold_out", "contract_murders", "contract_cleared", "contract_holes",
+                   "accessory", "interrogations", "interrogations_won", "bounties_paid", "fixer_runs",
+                   "contracts_refused_full", "flow_escrow", "flow_payout", "flow_fixer_cut"]
+CONTRACT_PROBES = ["escrow_leak", "escrow_stuck", "contract_hole_wrong", "accessory_unfounded"]
+CONTRACT_EVENTS = ["ContractPosted", "ContractTaken", "ContractFulfilled", "ContractFailed", "ContractExpired",
+                   "Reneged", "SoldOut", "StrikeDeclined", "BountyPaid", "Accessory", "FixerBusted", "GuardTaken"]
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]
 DISTRICTS = ["Spire", "Civic", "Vats", "Mid West", "Mid East", "Sump West", "Sump Central", "Sump East"]
 CONTROLLERS = {0: "Contested", 1: "City", 2: "Gang", 3: "Corp"}
@@ -255,6 +275,7 @@ def analyze(rows, events, jail_cap=None):
     virt(rows, events, out, flags)
     living(rows, events, out, flags)
     word(rows, events, out)
+    contracts(rows, events, out, flags)
     out["flags"] = flags
     return out
 
@@ -604,6 +625,55 @@ def word(rows, events, out):
     out["word"] = W
 
 
+def contracts(rows, events, out, flags):
+    """M16a: the contract board's columns; only when they exist."""
+    if not rows or "contracts_posted" not in rows[0]:
+        return
+    total = lambda k: sum(col(rows, k))
+    weeks = max(1.0, len(rows) / 7.0)
+    C = {"totals": {k: total(k) for k in CONTRACT_TOTALS if k in rows[0]}}
+    t = C["totals"]
+    C["by_kind_posted_done"] = {k: (total(f"k_{k}_posted"), total(f"k_{k}_done")) for k in CONTRACT_KINDS
+                                if f"k_{k}_posted" in rows[0]}
+    closed = sum(t.get(k, 0) for k in ("contracts_fulfilled", "contracts_failed", "contracts_expired",
+                                       "contracts_cancelled", "reneged"))
+    ratio = lambda a, b: a / b if b else None
+    C["fulfilled_share_of_closed"] = ratio(t.get("contracts_fulfilled", 0), closed)
+    C["squad_share_of_hits"] = ratio(t.get("hits_squad", 0), t.get("hits_done", 0))
+    C["clearance"] = ratio(t.get("contract_cleared", 0), t.get("contract_murders", 0))
+    C["bounties_per_locate"] = ratio(t.get("bounties_paid", 0), C["by_kind_posted_done"].get("locate", (0, 0))[0])
+    C["guards_on_take_per_week"] = mean(col(rows, "guards_on_take"))
+    C["open_last"] = rows[-1].get("contracts_open")
+    C["regulars_last"] = rows[-1].get("regulars")
+    C["lod_max"] = {k: max(col(rows, k), default=0) for k in ("live_parties", "live_queued") if k in rows[0]}
+    C["escrow_held_last_max"] = (rows[-1].get("escrow_held"), max(col(rows, "escrow_held"), default=0))
+    C["probes_max"] = {k: max((abs(x) for x in col(rows, k)), default=0) for k in CONTRACT_PROBES if k in rows[0]}
+    fixers = {}
+    for i in range(4):
+        hk, ik = f"f{i}_heat", f"f{i}_income"
+        if hk not in rows[0] or not any(col(rows, hk)) and not any(col(rows, ik)):
+            continue
+        fixers[f"f{i}"] = {"heat_last_max": (rows[-1][hk], max(col(rows, hk), default=0)),
+                           "income_per_week": total(ik) / weeks}
+    C["fixers"] = fixers
+    if events:
+        counts = Counter(k for _, k, _ in events)
+        C["events"] = {k: counts[k] for k in CONTRACT_EVENTS if counts[k]}
+        renders = Counter()
+        for _, k, text in events:
+            if k == "ContractTaken" and " the hit on " in text:
+                m = re.search(r"\((LIVE|LEDGER|QUEUED)", text)
+                renders[m.group(1) if m else "?"] += 1
+        C["hits_taken_by_render"] = dict(renders)
+        murders = counts["Murder"]
+        C["murders"] = murders
+        C["contract_share_of_murders"] = ratio(t.get("contract_murders", 0), murders)
+    out["contracts"] = C
+    for k, v in C["probes_max"].items():
+        if v > 0:
+            flags.append(f"M16a: {k} reached {v:g} (must stay 0: a record broke)")
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -719,6 +789,31 @@ def fmt(o):
                                w["corps_last_honour_standing_competence"].items()))
         if w.get("events"):
             L.append("crimson events: " + f(w["events"]))
+    if "contracts" in o:
+        w = o["contracts"]
+        pct = lambda x: "n/a" if x is None else f"{x:.1%}"
+        L.append("-- the contract board (M16a) --")
+        L.append("posted/done by kind: " + ", ".join(f"{k} {a:g}/{b:g}" for k, (a, b) in w["by_kind_posted_done"].items())
+                 + f"; open on the last day {w['open_last']}, regulars {w['regulars_last']}")
+        L.append("run totals: " + f(w["totals"]))
+        L.append(f"posted {w['totals'].get('contracts_posted', 0):g} (band 30-150 per 120 days); fulfilled of closed "
+                 f"{pct(w['fulfilled_share_of_closed'])} (band 35-70 %); Hits done {w['totals'].get('hits_done', 0):g} "
+                 f"(band 4-20); clearance {pct(w['clearance'])} (band 20-60 %); squads of Hits "
+                 f"{pct(w['squad_share_of_hits'])}")
+        if "murders" in w:
+            L.append(f"contract killings / Murders {pct(w['contract_share_of_murders'])} of {w['murders']} "
+                     "(band 5-25 %)")
+        bpl = w["bounties_per_locate"]
+        L.append(f"bounties per Locate posted {'n/a' if bpl is None else f'{bpl:.2f}'}; guards on the take "
+                 f"(mean) {w['guards_on_take_per_week']:.2f}; LOD max " + f(w["lod_max"]))
+        L.append(f"escrow held last/max {w['escrow_held_last_max']}; probes (max, must be 0): " + f(w["probes_max"]))
+        for k, v in w["fixers"].items():
+            L.append(f"  {k}: heat last/max {v['heat_last_max'][0]:.2f}/{v['heat_last_max'][1]:.2f}, FixerCut "
+                     f"{v['income_per_week']:.1f}/week")
+        if w.get("hits_taken_by_render"):
+            L.append("Hits taken by render: " + f(w["hits_taken_by_render"]))
+        if w.get("events"):
+            L.append("amber events: " + f(w["events"]))
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

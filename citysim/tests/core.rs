@@ -12,10 +12,11 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
-use citysim::systems::{demography, econ};
+use citysim::contract::{Broker, ContractKind};
+use citysim::systems::{contracts, demography, econ};
 use citysim::{
-    Brain, Config, Controller, Corp, CorpOrder, DayRow, EntityId, EventKind, Household, Job, Lod, Posture, Sentence,
-    World,
+    Brain, Building, BuildingKind, Config, Controller, Corp, CorpOrder, DayRow, EntityId, EventKind, Household, Job,
+    Lod, Posture, Sentence, World,
 };
 use citysim::{TICKS_PER_DAY, TICKS_PER_HOUR};
 
@@ -45,6 +46,9 @@ const CORPS_ALIVE_MIN: usize = 4;
 const EMPLOYED_MIN_SHARE: f64 = 0.5;
 /// J25: homeless adults over adults, every day from day 30.
 const HOMELESS_MAX_SHARE: f64 = 0.25;
+
+/// The fulfilled-contract marks, by `ContractKind::index`.
+const DONE_MARKS: [&str; 4] = ["Hit fulfilled", "Beat fulfilled", "Guard fulfilled", "Locate fulfilled"];
 
 /// One seed's run: the day rows, every event kind's count, the mechanism
 /// marks that need more than a kind, and the sanity readings.
@@ -119,7 +123,18 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
                     EventKind::Raid if t.contains(" raided ") => Some("raid resolved"),
                     EventKind::Raid if t.contains("stormed the Precinct") => Some("Precinct stormed"),
                     EventKind::OrderChanged if t.contains("-> BreakOut") => Some("BreakOut order"),
+                    EventKind::Founded
+                        if t.contains(" registered ")
+                            && e.actors.get(1).and_then(|&b| w.comp::<Building>(b)).map(|b| b.kind)
+                                == Some(BuildingKind::Fixer) =>
+                    {
+                        *r.marks.entry("NPC-founded Fixer").or_insert(0) += 1;
+                        Some("NPC founding")
+                    }
                     EventKind::Founded if t.contains(" registered ") => Some("NPC founding"),
+                    EventKind::Accessory if t.contains(" killing ") && !t.contains("(0 days after)") => {
+                        Some("Hit later attributed")
+                    }
                     EventKind::Founded if t.contains("(researching)") => Some("Lab under Research"),
                     EventKind::Acquired if t.contains("(hostile)") => Some("hostile takeover"),
                     EventKind::Death if t.contains("died of Starvation") => {
@@ -162,6 +177,23 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
         *r.marks.entry("crash death").or_insert(0) += row.crash_deaths;
         *r.marks.entry("Mission meal").or_insert(0) += row.econ.mission_meals;
+        // M16a: the contract columns (printed; the bullets read the
+        // Guard and Locate rows), and a Fixer in business (open, a record
+        // brokered there in the last 7 days: the spec's definition).
+        let c = &row.contract;
+        for k in ContractKind::ALL {
+            *r.marks.entry(DONE_MARKS[k.index()]).or_insert(0) += c.k_done[k.index()];
+        }
+        *r.marks.entry("squad Hit").or_insert(0) += c.hits_squad;
+        *r.marks.entry("StrikeDeclined political").or_insert(0) += c.strikes_declined_pol;
+        *r.marks.entry("Fixer run").or_insert(0) += c.fixer_runs;
+        *r.marks.entry("escrow leak days").or_insert(0) += u32::from(c.escrow_leak != 0);
+        *r.marks.entry("escrow stuck days").or_insert(0) += u32::from(c.escrow_stuck != 0);
+        let week = w.tick.saturating_sub(7 * TICKS_PER_DAY);
+        let in_business = contracts::open_fixers(&w)
+            .into_iter()
+            .any(|f| w.has::<Broker>(f) && w.contracts.values().any(|x| x.broker == Some(f) && x.posted >= week));
+        *r.marks.entry("Fixer in business").or_insert(0) += u32::from(in_business);
         r.assaults.push(assaults);
         r.rows.push(row);
         if r.no_net {
@@ -232,6 +264,10 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
         worst = worst.max(run);
     }
     fail(worst <= 2, format!("every Market empty {worst} days running <= 2"));
+    // M16a (5.1 b): a contract closes only by paying or refunding its
+    // escrow: Σ `Contract.escrow` equals `escrow_held` every day.
+    let leaks: Vec<u64> = rows.iter().filter(|x| x.contract.escrow_leak != 0).map(|x| x.day).collect();
+    fail(leaks.is_empty(), format!("escrow_leak == 0 every day (non-zero on days {leaks:?})"));
     // J24/J25 from day 30 (the day index 29, as the Treasury's), no-net only.
     let days: Vec<(u64, (u32, u32, u32, u32))> =
         (from.max(29)..to).filter_map(|d| r.adults.get(d as usize).map(|&c| (d, c))).collect();
@@ -317,6 +353,20 @@ fn mechanisms() -> Vec<Mechanism> {
         // M16a phase 3 (seeds 42-47 at phase 3, 120 days: each on 6 of 6).
         ("a BountyPaid", k(EventKind::BountyPaid)), // [729, 744, 731]; 45-47 [642, 725, 654]
         ("a city guard on the take", k(EventKind::GuardTaken)), // [23, 8, 37]; 45-47 [22, 27, 26]
+        // M16a phase 5 (5.1 a; seeds 42-47 on ba516f2, 120 days). Fired on 6 of 6: a Guard and a
+        // Locate fulfilled, a Fixer in business (days), a Reneged. On 0 of 6, so unit tests in
+        // a seeded world instead (docs/TESTING.md): a Hit fulfilled (contracts.rs
+        // test_fulfilled_pays_taker_and_fixer_at_cut), a Beat fulfilled (test_conservation_over_
+        // every_phase_one_flow), a squad Hit (missions.rs test_squad_when_solo_estimate_below_
+        // squad_below), a SoldOut and a StrikeDeclined on political cost (test_gang_sells_out_
+        // non_member_refuses_member), an Accessory a day after the killing (contracts.rs
+        // test_interrogation_names_buyer_then_conspiracy_filed), an NPC-founded Fixer
+        // (test_npc_registers_a_fixer); a Fixer run to SellData on 2 of 6 ([1, 0, 4, 0, 0, 0]:
+        // test_fixer_run_order_runs_to_selldata_with_cut).
+        ("a Guard fulfilled", m("Guard fulfilled")), // [11, 4, 12]; 45-47 [16, 11, 8]
+        ("a Locate fulfilled", m("Locate fulfilled")), // [167, 166, 155]; 45-47 [145, 137, 133]
+        ("a Fixer in business", m("Fixer in business")), // [111, 107, 112] days; 45-47 [106, 111, 109]
+        ("a Reneged", k(EventKind::Reneged)),        // [22, 6, 12]; 45-47 [23, 6, 12]
     ]
 }
 

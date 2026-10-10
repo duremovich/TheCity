@@ -40,7 +40,8 @@ pub struct ShadowArgs {
     pub start_day: u64,
     /// Comma-separated archetypes: gang_member, gang_leader, ripperdoc, homeless, ceo, exec, guard,
     /// worker, runner, purist, reporter, child, dealer, cook, club_staff, fighter, fabber, sweeper,
-    /// worker_friday (a child is unpinnable: no Brain).
+    /// worker_friday, super, bouncer, dancer, night_shift, orderly, camp_warden, fixer, gun (a child
+    /// is unpinnable: no Brain).
     #[arg(long)]
     pub pick: Option<String>,
     /// Shadow this entity index (repeatable).
@@ -66,7 +67,7 @@ pub struct ShadowArgs {
     pub assert: bool,
 }
 
-const ARCHETYPES: [&str; 25] = [
+const ARCHETYPES: [&str; 27] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -93,6 +94,11 @@ const ARCHETYPES: [&str; 25] = [
     "night_shift",
     "orderly",
     "camp_warden",
+    // M16a phase 5 (5.3): a Fixer's owner (or its hired Fixer), and a gun (an agent holding a
+    // contract or one fulfilled in the last 7 days). No `CHECKS` rows yet: measured on the
+    // behaviour tier after the pick rework.
+    "fixer",
+    "gun",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -230,6 +236,33 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 world.deal_log.values().filter(|&&(_, d)| d + 7 >= today).map(|&(a, _)| a).collect();
             dealers.extend(world.dealers.values().flatten().copied());
             adults().filter(|a| dealers.contains(a) && world.has::<GangMember>(*a)).collect()
+        }
+        // M16a 5.3: whoever runs a Fixer's office: its owner (an agent) or a hired Fixer.
+        "fixer" => {
+            let owners: BTreeSet<EntityId> = world
+                .buildings_of_kind(BuildingKind::Fixer)
+                .iter()
+                .filter_map(|&b| world.comp::<Building>(b).and_then(|b| b.owner))
+                .collect();
+            adults()
+                .filter(|a| owners.contains(a) || world.comp::<Job>(*a).is_some_and(|j| j.role == Role::Fixer))
+                .collect()
+        }
+        // M16a 5.3: an agent holding a taken contract (its taker or a crew member) or one that
+        // fulfilled a contract in the 7 days before today (closed records stay 30 days).
+        "gun" => {
+            let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
+            let mut guns: BTreeSet<EntityId> = BTreeSet::new();
+            for c in world.contracts.values() {
+                let held = c.status == citysim::contract::ContractStatus::Taken;
+                let done =
+                    c.status == citysim::contract::ContractStatus::Fulfilled && c.closed.is_some_and(|t| t >= from);
+                if held || done {
+                    guns.extend(c.taker);
+                    guns.extend(c.crew.iter().copied());
+                }
+            }
+            adults().filter(|a| guns.contains(a)).collect()
         }
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
@@ -1607,6 +1640,65 @@ fn flush_day(t: &mut Track, now: Tick) {
 // Output
 // ---------------------------------------------------------------------------
 
+/// M16a 5.3: the agent's contracts (bought, placed, held or worked, records
+/// still on the books: closed ones stay `closed_keep_days`), its regular
+/// stamps at the Fixers and the heat of any Fixer it owns, at the run's end.
+fn contracts_section(world: &World, id: EntityId, md: &mut String) {
+    use citysim::contract::Broker;
+    let _ = writeln!(md, "\n### Contracts (M16a)\n");
+    let mine: Vec<&citysim::contract::Contract> = world
+        .contracts
+        .values()
+        .filter(|c| c.buyer == Some(id) || c.agent == Some(id) || c.taker == Some(id) || c.crew.contains(&id))
+        .collect();
+    if mine.is_empty() {
+        let _ = writeln!(md, "- records: none");
+    }
+    for c in mine {
+        let role = if c.taker == Some(id) {
+            "taker"
+        } else if c.crew.contains(&id) {
+            "crew"
+        } else {
+            "buyer"
+        };
+        let _ = writeln!(
+            md,
+            "- #{} {} on {} for {} ({role}, {:?}, {:?}, posted {}{})",
+            c.id,
+            c.kind.label(),
+            nm(world, c.target.id()),
+            money(c.price),
+            c.status,
+            c.render,
+            clock(c.posted),
+            c.broker.map(|b| format!(" at {}", bname(world, b))).unwrap_or_default()
+        );
+    }
+    let fixers: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Fixer).to_vec();
+    let stamps: Vec<String> = fixers
+        .iter()
+        .filter_map(|&f| world.comp::<Broker>(f).and_then(|k| k.regulars.get(&id)).map(|&t| (f, t)))
+        .map(|(f, t)| format!("{} (last {})", bname(world, f), clock(t)))
+        .collect();
+    let _ = writeln!(md, "- regular at: {}", if stamps.is_empty() { "none".into() } else { stamps.join(", ") });
+    for f in fixers {
+        if world.comp::<Building>(f).is_some_and(|b| b.owner == Some(id)) {
+            if let Some(k) = world.comp::<Broker>(f) {
+                let _ = writeln!(
+                    md,
+                    "- owns {}: heat {:.2}, book {}, regulars {}, closed until {}",
+                    bname(world, f),
+                    k.heat,
+                    k.book.len(),
+                    k.regulars.len(),
+                    k.closed_until.map_or("-".into(), clock)
+                );
+            }
+        }
+    }
+}
+
 fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -> Result<(u64, u64), String> {
     t.entries.sort_by_key(|e| (e.tick, e.seq));
     let stem = format!("{}_{}", t.arch, t.id.index);
@@ -1720,6 +1812,7 @@ fn write_diary(world: &World, t: &mut Track, dir: &std::path::Path, end: Tick) -
     let _ = writeln!(md, "- HangOuts: {}, distinct known contacts met there: {}", t.hangouts, t.hang_known.len());
     let _ = writeln!(md, "- tribute received (Flow::Tribute): {}", money(t.tribute_in));
     let _ = writeln!(md, "- gossip told about me: {} telling(s)", t.gossip_about);
+    contracts_section(world, t.id, &mut md);
     if t.held_settles > 0 || t.stat_minutes > 0 || !t.stat_notes.is_empty() {
         let _ = writeln!(md, "\n### Statistical stretches (what the stand-in did)\n");
         let _ = writeln!(
