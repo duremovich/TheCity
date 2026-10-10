@@ -340,6 +340,10 @@ fn test_squad_when_solo_estimate_below_squad_below() {
     assert!(!raid::raid_done(&w, taker));
     assert_eq!(raid::target_tile(&w, taker), Some(m.door));
     assert_eq!(raid::muster_point(&w, taker), Some(raid::MusterAt::Door(m.muster)));
+    // M16a 5.1 (a): fulfilled, it counts as a squad Hit (0 of seeds 42-47 in 120 days).
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+    assert_eq!((w.stats.current.contract.hits_done, w.stats.current.contract.hits_squad), (1, 1), "a squad Hit");
     // A strong gun goes alone.
     let mut w = world();
     let [buyer, t, gun] = strangers(&w, 3)[..] else { unreachable!() };

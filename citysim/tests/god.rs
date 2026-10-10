@@ -1,7 +1,7 @@
 //! God scenarios (docs/VISION.md, "How we test: god scenarios"). Shock the
 //! world with a god-mode actor at day 45 and read how the factions react.
 //! Every test is `#[ignore]` (a 2,000-resident city for 60 days each; the
-//! 13 god scenarios kept of 53 across the three files, docs/TESTING.md): run
+//! 13 god scenarios kept of 53 across the three files, plus M16a's four, docs/TESTING.md): run
 //! `cargo test --release -p citysim --test god -- --ignored --nocapture`.
 //!
 //! Assertions say only that the world *reacted* within 7 days of the shock:
@@ -1530,4 +1530,344 @@ fn god_export_10x() {
     outln!(o, "days on Grow from day 20: {:?} (control {:?})", grow(&r), grow(&c));
     eprint!("{o}");
     r.assert_applied(4);
+}
+
+// ---------------------------------------------------------------------------
+// God scenarios v8: the contract board (M16a phase 5, docs/M16_CONTRACTS.md,
+// docs/GOD_SCENARIOS_V8.md). A contract is a record with a price on a struct,
+// matched by a score and resolved by one seeded roll (or a ledger draw)
+// between fictional agents. The tests assert only that the god commands
+// applied; what the city did is printed, and a city that did not react is a
+// gap in the write-up, not a failure.
+// ---------------------------------------------------------------------------
+
+const V8_END: u64 = 60;
+
+/// One finished day of a v8 run.
+#[derive(Clone)]
+struct V8Day {
+    row: citysim::DayRow,
+    /// Every gang's order, by name.
+    gangs: std::collections::BTreeMap<String, Order>,
+    /// Living corps' orders, by name.
+    corps: std::collections::BTreeMap<String, citysim::CorpOrder>,
+    /// Open Fixers, and each Fixer's (heat, book size, closed).
+    fixers_open: usize,
+    fixers: Vec<(f32, usize, bool)>,
+    /// The watched agents still living, and jailed.
+    alive: usize,
+    jailed: usize,
+}
+
+struct V8Run {
+    name: &'static str,
+    days: Vec<V8Day>,
+    /// `(day, kind, text)`: god actions, every event naming a watched entity
+    /// (`BountyPaid` counted, not listed), and the board's rare kinds.
+    story: Vec<(u64, EventKind, String)>,
+    /// `BountyPaid` naming a watched agent, per day.
+    bounties: Vec<u32>,
+    failed: Vec<String>,
+    watched: Vec<EntityId>,
+}
+
+/// Seed 42 to `V8_END`; `daily` fires at the start of every day and may
+/// add to the watched set.
+fn run_v8(name: &'static str, mut daily: impl FnMut(&mut World, u64, &mut Vec<EntityId>)) -> V8Run {
+    use citysim::systems::contracts;
+    let mut w = World::new(SEED, Config::load());
+    let mut days = Vec::new();
+    let mut story = Vec::new();
+    let mut bounties = Vec::new();
+    let mut failed = Vec::new();
+    let mut watched: Vec<EntityId> = Vec::new();
+    let mut next_id = 0u64;
+    for day in 0..V8_END {
+        daily(&mut w, day, &mut watched);
+        w.run_ticks(TICKS_PER_DAY);
+        let mut paid = 0u32;
+        let events: Vec<&citysim::Event> = w.events.iter().rev().take_while(|e| e.id >= next_id).collect();
+        for e in events.into_iter().rev() {
+            let names = e.actors.iter().any(|a| watched.contains(a));
+            match e.kind {
+                EventKind::PlayerActionFailed => failed.push(format!("d{day} {}", e.text)),
+                EventKind::BountyPaid if names => paid += 1,
+                EventKind::BountyPaid => {}
+                EventKind::PlayerAction
+                | EventKind::SoldOut
+                | EventKind::StrikeDeclined
+                | EventKind::Accessory
+                | EventKind::FixerBusted => story.push((day, e.kind, e.text.clone())),
+                EventKind::CorpOrder if e.text.contains("Lobby") => story.push((day, e.kind, e.text.clone())),
+                EventKind::Founded if e.text.contains("Fixer") => story.push((day, e.kind, e.text.clone())),
+                // The noisy kinds stay out of the story.
+                EventKind::Witness | EventKind::AssetBought | EventKind::Installed => {}
+                _ if names => story.push((day, e.kind, e.text.clone())),
+                _ => {}
+            }
+        }
+        next_id = w.events.back().map_or(next_id, |e| e.id + 1);
+        bounties.push(paid);
+        let mut d = V8Day {
+            row: w.stats.history.back().expect("a finished day").clone(),
+            gangs: Default::default(),
+            corps: Default::default(),
+            fixers_open: contracts::open_fixers(&w).len(),
+            fixers: Vec::new(),
+            alive: watched.iter().filter(|&&a| citysim::systems::law::living(&w, a)).count(),
+            jailed: watched.iter().filter(|&&a| w.has::<citysim::Sentence>(a)).count(),
+        };
+        for g in w.gangs() {
+            if let Some(gg) = w.comp::<Gang>(g) {
+                d.gangs.insert(gg.name.clone(), gg.order);
+            }
+        }
+        for c in w.corps() {
+            if let Some(cc) = w.comp::<citysim::Corp>(c) {
+                d.corps.insert(cc.name.clone(), cc.order);
+            }
+        }
+        for &f in w.buildings_of_kind(citysim::BuildingKind::Fixer) {
+            if let Some(k) = w.comp::<citysim::contract::Broker>(f) {
+                d.fixers.push((k.heat, k.book.len(), !contracts::fixer_open(&w, f)));
+            }
+        }
+        days.push(d);
+    }
+    V8Run { name, days, story, bounties, failed, watched }
+}
+
+/// The unshocked v8 run, computed once per test process.
+fn v8_control() -> &'static V8Run {
+    static CONTROL: OnceLock<V8Run> = OnceLock::new();
+    CONTROL.get_or_init(|| run_v8("v8_control", |_, _, _| {}))
+}
+
+fn gang_named(w: &World, name: &str) -> Option<EntityId> {
+    w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == name))
+}
+
+/// A named per-day reading of a v8 run.
+type V8Series = (&'static str, Box<dyn Fn(&V8Day) -> f64>);
+
+impl V8Run {
+    fn sum(&self, from: u64, to: u64, f: &dyn Fn(&V8Day) -> f64) -> f64 {
+        self.days.iter().skip(from as usize).take((to - from) as usize).map(f).sum()
+    }
+
+    /// The board's columns over `windows` against the control, the extra
+    /// `rows`, and the story from the first window.
+    fn print_v8(&self, windows: &[(u64, u64)], extra: Vec<V8Series>) {
+        let c = v8_control();
+        let mut rows: Vec<V8Series> = vec![
+            ("contracts posted", Box::new(|d: &V8Day| f64::from(d.row.contract.contracts_posted))),
+            ("Hits posted", Box::new(|d: &V8Day| f64::from(d.row.contract.k_posted[0]))),
+            ("Locates posted", Box::new(|d: &V8Day| f64::from(d.row.contract.k_posted[3]))),
+            ("contracts fulfilled", Box::new(|d: &V8Day| f64::from(d.row.contract.contracts_fulfilled))),
+            ("Hits done", Box::new(|d: &V8Day| f64::from(d.row.contract.hits_done))),
+            ("Hits by a squad", Box::new(|d: &V8Day| f64::from(d.row.contract.hits_squad))),
+            ("strikes declined (pol)", Box::new(|d: &V8Day| f64::from(d.row.contract.strikes_declined_pol))),
+            ("sold out", Box::new(|d: &V8Day| f64::from(d.row.contract.sold_out))),
+            ("contracts expired", Box::new(|d: &V8Day| f64::from(d.row.contract.contracts_expired))),
+            ("contracts failed", Box::new(|d: &V8Day| f64::from(d.row.contract.contracts_failed))),
+            ("Accessory", Box::new(|d: &V8Day| f64::from(d.row.contract.accessory))),
+            ("bounties paid", Box::new(|d: &V8Day| f64::from(d.row.contract.bounties_paid))),
+            ("violent deaths", Box::new(|d: &V8Day| f64::from(d.row.deaths_violence))),
+            ("open Fixers (mean)", Box::new(|d: &V8Day| d.fixers_open as f64)),
+            ("Fixer heat x100 (mean)", Box::new(|d: &V8Day| f64::from(d.row.contract.f_heat[0]) * 100.0)),
+            ("FixerCut income", Box::new(|d: &V8Day| d.row.contract.flow_fixer_cut as f64)),
+            ("guards on the take (mean)", Box::new(|d: &V8Day| f64::from(d.row.contract.guards_on_take))),
+        ];
+        rows.extend(extra);
+        let mut o = String::new();
+        outln!(o, "\n================ {} ================", self.name);
+        out!(o, "{:<28}", "sum over days");
+        for (a, b) in windows {
+            out!(o, "{:>20}", format!("{a}-{b} / ctl"));
+        }
+        outln!(o);
+        for (name, f) in &rows {
+            out!(o, "{name:<28}");
+            for &(a, b) in windows {
+                let n = if name.contains("(mean)") { (b - a) as f64 } else { 1.0 };
+                out!(o, "{:>20}", format!("{:.0} / {:.0}", self.sum(a, b, f) / n, c.sum(a, b, f) / n));
+            }
+            outln!(o);
+        }
+        let last = self.days.last().expect("a day");
+        outln!(o, "watched {}: living {} jailed {} on day {}", self.watched.len(), last.alive, last.jailed, V8_END - 1);
+        let from = windows.first().map_or(0, |w| w.0);
+        let told: Vec<&(u64, EventKind, String)> = self.story.iter().filter(|(d, _, _)| *d >= from).collect();
+        outln!(o, "story from day {from} ({} lines):", told.len());
+        for (d, k, t) in told.iter().take(120) {
+            outln!(o, "  d{d:<3} {k:?}: {t}");
+        }
+        if told.len() > 120 {
+            outln!(o, "  ... {} more", told.len() - 120);
+        }
+        if !self.failed.is_empty() {
+            outln!(o, "failed god commands: {:?}", self.failed);
+        }
+        eprint!("{o}");
+    }
+
+    /// The day-by-day order of `who` (a gang or a corp) from `from`, as runs.
+    fn orders(&self, from: u64, f: impl Fn(&V8Day) -> String) -> String {
+        let mut runs: Vec<(String, u64, u64)> = Vec::new();
+        for (i, d) in self.days.iter().enumerate().skip(from as usize) {
+            let v = f(d);
+            match runs.last_mut() {
+                Some((x, _, end)) if *x == v => *end = i as u64,
+                _ => runs.push((v, i as u64, i as u64)),
+            }
+        }
+        runs.iter().map(|(v, a, b)| format!("{v} {a}-{b}")).collect::<Vec<_>>().join(", ")
+    }
+
+    fn applied(&self) -> usize {
+        self.story.iter().filter(|(_, k, _)| *k == EventKind::PlayerAction).count()
+    }
+}
+
+/// M16a god 1: on day 10 the city posts a brokered Hit at 2,000 coins on
+/// every corp's exec. Who takes them, does a squad strike in the Spire or
+/// sell out, does a corp's Lobby turn on anyone?
+#[test]
+#[ignore]
+fn god_hit_each_exec_day_10() {
+    let r = run_v8("god_hit_each_exec_day_10", |w, day, watched| {
+        if day == 10 {
+            let execs: Vec<EntityId> =
+                w.corps().into_iter().filter_map(|c| w.comp::<citysim::Corp>(c).and_then(|k| k.exec)).collect();
+            eprintln!("day 10: {} execs; the Treasury holds {}", execs.len(), w.purse(None));
+            for e in execs {
+                watched.push(e);
+                w.push_command(PlayerCommand::PostContract {
+                    buyer: None,
+                    kind: citysim::contract::ContractKind::Hit,
+                    target: citysim::contract::Target::Agent(e),
+                    price: 2000,
+                    brokered: true,
+                    deadline_days: 0,
+                });
+            }
+        }
+    });
+    let extra: Vec<V8Series> = vec![
+        ("execs living (mean)", Box::new(|d: &V8Day| d.alive as f64)),
+        ("execs jailed (mean)", Box::new(|d: &V8Day| d.jailed as f64)),
+    ];
+    r.print_v8(&[(0, 10), (10, 25), (25, V8_END)], extra);
+    let c = v8_control();
+    let lobby = |run: &V8Run| -> usize {
+        run.days.iter().skip(10).map(|d| d.corps.values().filter(|&&o| o == citysim::CorpOrder::Lobby).count()).sum()
+    };
+    eprintln!("corp-days on Lobby from day 10: {} (control {})", lobby(&r), lobby(c));
+    assert!(r.applied() >= 1, "no Hit posted: {:?}", r.failed);
+}
+
+/// M16a god 2: on day 45 (The Hollow has a leader from ~day 40) Arasaka
+/// posts a brokered Hit on The Hollow's leader. Where does he live and who
+/// holds that district; does Ninefold, if it holds it, sell him out?
+#[test]
+#[ignore]
+fn god_hit_hollow_leader_from_arasaka() {
+    let r = run_v8("god_hit_hollow_leader_from_arasaka", |w, day, watched| {
+        if day == 45 {
+            let arasaka = corp_named(w, "Arasaka").expect("Arasaka");
+            let hollow = gang_named(w, "The Hollow").expect("The Hollow");
+            let leader = w.comp::<Gang>(hollow).and_then(|g| g.leader).expect("The Hollow has a leader on day 45");
+            let home = w.comp::<citysim::Household>(leader).and_then(|h| h.home);
+            let d = home.map(|h| w.district_of_building(h));
+            eprintln!(
+                "day 45: the leader {} lives in {:?} ({:?}); Arasaka holds {}",
+                leader.index,
+                d.map(|d| w.district_name(d).to_string()),
+                d.map(|d| w.districts[d.index()].control),
+                w.purse(Some(arasaka))
+            );
+            watched.push(leader);
+            w.push_command(PlayerCommand::PostContract {
+                buyer: Some(arasaka),
+                kind: citysim::contract::ContractKind::Hit,
+                target: citysim::contract::Target::Agent(leader),
+                price: 2000,
+                brokered: true,
+                deadline_days: 0,
+            });
+        }
+    });
+    r.print_v8(&[(30, 45), (45, V8_END)], vec![("the leader living (mean)", Box::new(|d: &V8Day| d.alive as f64))]);
+    let c = v8_control();
+    for g in ["The Hollow", "Ninefold"] {
+        let at = |d: &V8Day| d.gangs.get(g).map_or("-".to_string(), |o| format!("{o:?}"));
+        eprintln!("{g}: {} (control {})", r.orders(40, at), c.orders(40, at));
+    }
+    assert!(r.applied() >= 1 && r.failed.is_empty(), "the Hit was not posted: {:?}", r.failed);
+}
+
+/// M16a god 3: Fixers unlicensed on day 20 (`fixer_licence=off`: every
+/// office's heat floored at 0.5, no new office registers). Do the Fixers
+/// bribe, close, or stop opening?
+#[test]
+#[ignore]
+fn god_fixer_licence_off() {
+    let r = run_v8("god_fixer_licence_off", |w, day, watched| {
+        if day == 20 {
+            for &f in w.buildings_of_kind(citysim::BuildingKind::Fixer) {
+                watched.extend(w.owner_of(f));
+            }
+            w.push_command(PlayerCommand::SetFixerLicence(false));
+        }
+    });
+    let extra: Vec<V8Series> = vec![
+        ("closed Fixers (mean)", Box::new(|d: &V8Day| d.fixers.iter().filter(|x| x.2).count() as f64)),
+        ("book size (mean)", Box::new(|d: &V8Day| d.fixers.iter().map(|x| x.1 as f64).sum::<f64>())),
+    ];
+    r.print_v8(&[(10, 20), (20, 40), (40, V8_END)], extra);
+    let heat = |run: &V8Run, d: usize| run.days.get(d).map(|x| x.fixers.iter().map(|f| f.0).collect::<Vec<_>>());
+    eprintln!(
+        "Fixer heat on days 19, 21, 40, 59: {:?} {:?} {:?} {:?}",
+        heat(&r, 19),
+        heat(&r, 21),
+        heat(&r, 40),
+        heat(&r, 59)
+    );
+    eprintln!(
+        "control: {:?} {:?} {:?} {:?}",
+        heat(v8_control(), 19),
+        heat(v8_control(), 21),
+        heat(v8_control(), 40),
+        heat(v8_control(), 59)
+    );
+    assert!(r.applied() >= 1 && r.failed.is_empty(), "the licence lever did not apply: {:?}", r.failed);
+}
+
+/// M16a god 4: on day 45 the city posts a public Locate on Ninefold's
+/// leader. Does the bounty find him (sightings paid, an arrest), does his
+/// gang Retaliate?
+#[test]
+#[ignore]
+fn god_law_locate_on_gang_leader() {
+    let r = run_v8("god_law_locate_on_gang_leader", |w, day, watched| {
+        if day == 45 {
+            let nine = gang_named(w, "Ninefold").expect("Ninefold");
+            let leader = w.comp::<Gang>(nine).and_then(|g| g.leader).expect("Ninefold has a leader on day 45");
+            watched.push(leader);
+            w.push_command(PlayerCommand::PostContract {
+                buyer: None,
+                kind: citysim::contract::ContractKind::Locate,
+                target: citysim::contract::Target::Agent(leader),
+                price: 0,
+                brokered: false,
+                deadline_days: 0,
+            });
+        }
+    });
+    r.print_v8(&[(30, 45), (45, V8_END)], vec![("the leader jailed (mean)", Box::new(|d: &V8Day| d.jailed as f64))]);
+    eprintln!("sightings of the leader paid, per day from 45: {:?}", &r.bounties[45..]);
+    let c = v8_control();
+    let at = |d: &V8Day| d.gangs.get("Ninefold").map_or("-".to_string(), |o| format!("{o:?}"));
+    eprintln!("Ninefold: {} (control {})", r.orders(40, at), c.orders(40, at));
+    assert!(r.applied() >= 1 && r.failed.is_empty(), "the Locate was not posted: {:?}", r.failed);
 }

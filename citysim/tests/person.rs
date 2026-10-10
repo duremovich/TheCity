@@ -4,8 +4,9 @@
 //! from its own state. A probe that exposes a gap is `#[ignore]`d with the
 //! gap in a comment (the gap is a behaviour fix for a later round).
 
+use citysim::contract::{Broker, ContractId, ContractKind, ContractStatus, Origin, Posting, Target};
 use citysim::exec::routine;
-use citysim::systems::{demography, law, leisure, social};
+use citysim::systems::{contracts, demography, law, leisure, social};
 use citysim::{
     ActionKind, Brain, Building, Config, EntityId, Household, Inventory, Job, Needs, Position, RelKind, Role, Wallet,
     World, TICKS_PER_DAY, TICKS_PER_HOUR,
@@ -407,4 +408,246 @@ fn probe_night_porter_on_shift_at_two_is_paid_by_eight() {
     );
     assert_eq!(at_two, Some(hotel), "the porter is not at the Hotel at 02:00");
     assert!(paid && unpaid == 0, "the night shift was not paid by 08:00");
+}
+
+// ---------------------------------------------------------------------------
+// M16a phase 5 (5.1 c): the contract board's person probes. A contract is a
+// record with a price on a struct, matched by a score and resolved by one
+// seeded roll; the probes read one pinned agent's own state.
+// ---------------------------------------------------------------------------
+
+/// Free civilian adults (no gang, no guard's job, not jailed), ascending.
+fn civilians(w: &World) -> Vec<EntityId> {
+    w.citizens()
+        .into_iter()
+        .filter(|&a| law::living(w, a) && demography::is_adult(w, a) && w.comp::<Brain>(a).is_some())
+        .filter(|&a| w.gang_of(a).is_none() && !law::is_guard(w, a) && !w.has::<citysim::Sentence>(a))
+        .collect()
+}
+
+/// A brokered Hit by `buyer` (also the placing agent) on `t` at the first open
+/// Fixer, priced at `price`.
+fn post_hit(w: &mut World, buyer: EntityId, t: EntityId, price: i64) -> ContractId {
+    let f = contracts::open_fixers(w)[0];
+    w.comp_mut::<Wallet>(buyer).expect("wallet").coins = price + 100;
+    let p = Posting {
+        buyer: Some(buyer),
+        agent: Some(buyer),
+        kind: ContractKind::Hit,
+        target: Target::Agent(t),
+        broker: Some(f),
+        deadline_days: 10,
+        origin: Origin::God,
+        price: Some(price),
+    };
+    contracts::post(w, p).expect("posted")
+}
+
+/// Make `id` the sort who takes a Hit: lawless, brave, a strong fighter,
+/// jobless, and (alone) a regular of the Fixer.
+fn make_gun(w: &mut World, id: EntityId) {
+    if let Some(p) = w.comp_mut::<citysim::Personality>(id) {
+        p.lawfulness = 0.0;
+        p.courage = 0.9;
+    }
+    if let Some(s) = w.comp_mut::<citysim::Skills>(id) {
+        s.fighting = 1.0;
+        s.stealth = 1.0;
+    }
+    w.vacate_job(id);
+    let f = contracts::open_fixers(w)[0];
+    let now = w.tick;
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.regulars.clear();
+        k.regulars.insert(id, now);
+    }
+}
+
+/// Did `who` ever hold record `c` (its taker or crew)?
+fn holds(w: &World, who: EntityId, c: ContractId) -> bool {
+    w.contracts.get(&c).is_some_and(|x| x.taker == Some(who) || x.crew.contains(&who))
+}
+
+/// A gun, alone on the Fixer's books, sees a brokered Hit on his own wife at
+/// a price far above a month's wage: a person never takes it. Control: the
+/// same gun takes the same Hit on a stranger (the setup is one he would take).
+#[test]
+fn probe_gun_never_takes_a_hit_on_kin() {
+    let run = |kin: bool| -> (bool, Option<ContractStatus>) {
+        let mut w = world();
+        w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+        let civ = civilians(&w);
+        let a = civ
+            .iter()
+            .copied()
+            .find(|&a| w.spouses.get(&a).is_some_and(|s| civ.contains(s)))
+            .expect("a married civilian");
+        let wife = w.spouses[&a];
+        let t = if kin {
+            wife
+        } else {
+            civ.iter().copied().find(|&x| x != a && x != wife && w.edge(a, x).is_none()).expect("a stranger")
+        };
+        let buyer = civ
+            .iter()
+            .copied()
+            .find(|&x| ![a, wife, t].contains(&x) && w.edge(x, a).is_none() && w.edge(x, t).is_none())
+            .expect("a buyer");
+        pin(&mut w, a);
+        make_gun(&mut w, a);
+        let id = post_hit(&mut w, buyer, t, 2000);
+        let mut took = false;
+        let end = w.tick + 3 * TICKS_PER_DAY;
+        run_to(&mut w, a, end, |w| took |= holds(w, a, id));
+        let status = w.contracts.get(&id).map(|c| c.status);
+        eprintln!(
+            "gun {} on {} ({}): took {took}, record {status:?}",
+            a.index,
+            t.index,
+            if kin { "wife" } else { "stranger" }
+        );
+        (took, status)
+    };
+    let (control, _) = run(false);
+    assert!(control, "the control: the gun takes the same Hit on a stranger (the probe's setup)");
+    let (took, _) = run(true);
+    assert!(!took, "the gun took the Hit on his own wife");
+}
+
+/// A buyer places a brokered Hit, a gun takes it and the target dies by his
+/// hand (day 2, 12:00); then nobody but the buyer holds the `Hired` deed
+/// (the stimulus: every other memory of it cleared, the broker's and the
+/// gun's included). Returns the world and (buyer, target, gun).
+fn quiet_buyer() -> (World, EntityId, EntityId, EntityId) {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+    let civ = civilians(&w);
+    let buyer = civ[0];
+    let t = civ.iter().copied().find(|&x| x != buyer && w.edge(buyer, x).is_none()).expect("a target");
+    let taker = civ.iter().copied().find(|&x| ![buyer, t].contains(&x) && w.edge(x, t).is_none()).expect("a taker");
+    pin(&mut w, buyer);
+    make_gun(&mut w, taker);
+    let id = post_hit(&mut w, buyer, t, 1000);
+    contracts::god_take(&mut w, id, taker).expect("taken");
+    w.kill_by(t, citysim::DeathCause::Violence, Some(taker));
+    if w.contracts[&id].status != ContractStatus::Fulfilled {
+        contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    }
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+    for who in w.with::<citysim::Memory>() {
+        if who == buyer {
+            continue;
+        }
+        if let Some(m) = w.comp_mut::<citysim::Memory>(who) {
+            let keep = |e: &citysim::MemoryEntry| !is_hired(e, buyer, t);
+            m.entries.retain(keep);
+            m.heard.retain(keep);
+        }
+    }
+    (w, buyer, t, taker)
+}
+
+fn is_hired(e: &citysim::MemoryEntry, buyer: EntityId, t: EntityId) -> bool {
+    e.deed == Some(citysim::word::Deed::Hired) && e.subject == Some(buyer) && e.object == Some(t)
+}
+
+/// Everyone but `buyer` holding the `Hired` deed about (buyer, t).
+fn heard_of(w: &World, buyer: EntityId, t: EntityId) -> Vec<EntityId> {
+    w.with::<citysim::Memory>()
+        .into_iter()
+        .filter(|&h| h != buyer)
+        .filter(|&h| {
+            w.comp::<citysim::Memory>(h)
+                .is_some_and(|m| m.entries.iter().chain(m.heard.iter()).any(|e| is_hired(e, buyer, t)))
+        })
+        .collect()
+}
+
+/// The buyer of a fulfilled Hit whom nobody has heard of: for 30 days the
+/// law never charges him before somebody (a guard, a witness, an
+/// interrogated gun) holds the deed (checked at each day's end; the filing
+/// itself re-checks the holder: `accessory_unfounded`).
+#[test]
+fn probe_buyer_nobody_heard_of_is_never_charged() {
+    let (mut w, buyer, t, taker) = quiet_buyer();
+    let charged =
+        |w: &World| w.crime_reports().iter().any(|r| r.crime == citysim::Crime::Conspiracy && r.suspect == buyer);
+    let (mut heard_on, mut charged_on) = (None, None);
+    let start = w.tick;
+    for day in 0..30u64 {
+        run_to(&mut w, buyer, start + (day + 1) * TICKS_PER_DAY, |_| {});
+        if heard_on.is_none() {
+            let hs = heard_of(&w, buyer, t);
+            if !hs.is_empty() {
+                let guards = hs.iter().filter(|&&h| law::is_guard(&w, h)).count();
+                eprintln!("day {day}: {} hold the deed ({guards} guards)", hs.len());
+                heard_on = Some(day);
+            }
+        }
+        if charged_on.is_none() && charged(&w) {
+            charged_on = Some(day);
+        }
+    }
+    eprintln!(
+        "buyer {}: heard of on day {heard_on:?}, charged on day {charged_on:?}; the gun jailed {}",
+        buyer.index,
+        w.has::<citysim::Sentence>(taker)
+    );
+    if let Some(c) = charged_on {
+        let h = heard_on.expect("charged though nobody but the buyer ever held the deed");
+        assert!(h <= c, "charged on day {c} before anybody heard of him (day {h})");
+    }
+    assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
+}
+
+/// GAP (M16a phase 5; for the behaviour round): the buyer tells his own
+/// Hit. `gossip::exchange_one` lets a teller pass on a deed whose actor he
+/// is (W8: a lie at `deception × 0.5`, else the truth), and `Hired`'s
+/// salience makes it his best story, so within the day two city guards
+/// hold it from him and the next midnight's `accessory_check` charges him
+/// (seed 42: heard on day 0, charged on day 1). A person keeps a bought
+/// killing to himself, above all from the law.
+#[test]
+#[ignore]
+fn probe_buyer_keeps_his_own_hit_quiet() {
+    let (mut w, buyer, t, _) = quiet_buyer();
+    let end = w.tick + 7 * TICKS_PER_DAY;
+    run_to(&mut w, buyer, end, |_| {});
+    let guards: Vec<u32> =
+        heard_of(&w, buyer, t).into_iter().filter(|&h| law::is_guard(&w, h)).map(|h| h.index).collect();
+    eprintln!("guards holding the buyer's own deed after 7 days: {guards:?}");
+    assert!(guards.is_empty(), "the buyer told the law of his own Hit");
+}
+
+/// A jobless agent with a skill a Fixer can sell, broke (no coins: the
+/// wealth need at 0), not on any Fixer's books: within a week a person
+/// goes to the Fixer and becomes a regular.
+#[test]
+fn probe_broke_hand_networks_at_a_fixer_within_a_week() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR);
+    let f = contracts::open_fixers(&w)[0];
+    let regular = |w: &World, a: EntityId| w.comp::<Broker>(f).is_some_and(|k| k.regulars.contains_key(&a));
+    let a = civilians(&w)
+        .into_iter()
+        .filter(|&a| home(&w, a).is_some() && !regular(&w, a))
+        .filter(|&a| w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness < 0.5))
+        .find(|&a| contracts::gun_gate(&w, a) && contracts::nearest_fixer(&w, a) == Some(f))
+        .expect("a jobless hand with a sellable skill near the Fixer");
+    pin(&mut w, a);
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 0;
+    w.comp_mut::<Needs>(a).expect("needs").wealth = 0.0;
+    let (mut on, start) = (None, w.tick);
+    run_to(&mut w, a, start + 7 * TICKS_PER_DAY, |w| {
+        if on.is_none() && regular(w, a) {
+            on = Some(w.tick - start);
+        }
+    });
+    eprintln!(
+        "hand {}: a regular after {:?} ticks (lawfulness {:.2})",
+        a.index,
+        on,
+        w.comp::<citysim::Personality>(a).map_or(0.0, |p| p.lawfulness)
+    );
+    assert!(on.is_some(), "never networked at the Fixer within a week of going broke");
 }

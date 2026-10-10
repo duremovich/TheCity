@@ -973,6 +973,9 @@ fn test_interrogation_names_buyer_then_conspiracy_filed() {
     assert_eq!(w.stats.current.contract.accessory, 1);
     assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Accessory && e.actors.first() == Some(&buyer)));
+    // M16a 5.1 (a): the Hit later attributed: the charge comes a day after the killing.
+    let later = w.events.iter().any(|e| e.kind == citysim::EventKind::Accessory && e.text.ends_with("(1 days after)"));
+    assert!(later, "the Accessory names the days since the killing");
     // Not twice.
     w.tick += TICKS_PER_DAY;
     law::accessory_check(&mut w);
@@ -1438,4 +1441,38 @@ fn test_fixer_licence_off_floors_heat_and_blocks_register() {
     assert!(citysim::systems::founding::fixer_ok(&w, founder), "licensed again");
     contracts::heat_daily(&mut w);
     assert!(w.comp::<Broker>(f).is_some_and(|k| k.heat < 0.5), "the floor lifts");
+}
+
+/// M16a phase 5 (5.1 a): an NPC founds a Fixer's office through `Register`
+/// (0 of seeds 42-47 in 120 days: `choose_kind`'s ratio puts the second
+/// office behind the under-supplied kinds, docs/GOD_SCENARIOS_V8.md). A
+/// lawless talker with the coins, the per-capita room for more offices:
+/// `register` builds a Fixer, owned by the founder, with an open book.
+#[test]
+fn test_npc_registers_a_fixer() {
+    let mut w = world();
+    // Room under the per-capita rule, and the Fixer the least supplied kind.
+    w.config.fixers.fixers_per_pop = 10;
+    let founder = strangers(&w, 1)[0];
+    w.vacate_job(founder);
+    if let Some(p) = w.comp_mut::<Personality>(founder) {
+        p.lawfulness = 0.0;
+    }
+    if let Some(s) = w.comp_mut::<Skills>(founder) {
+        s.persuasion = 1.0;
+        s.knowledge = 1.0;
+    }
+    let cost = citysim::systems::founding::agent_found_cost(&w, BuildingKind::Fixer).expect("a Fixer is foundable");
+    set_coins(&mut w, founder, cost);
+    assert!(citysim::systems::founding::fixer_ok(&w, founder));
+    let before = contracts::open_fixers(&w).len();
+    let b = citysim::systems::founding::register(&mut w, founder).expect("registered");
+    assert_eq!(w.comp::<citysim::Building>(b).map(|x| x.kind), Some(BuildingKind::Fixer), "a Fixer's office");
+    assert_eq!(w.owner_of(b), Some(founder), "owned by its founder");
+    assert!(w.has::<Broker>(b) && contracts::fixer_open(&w, b), "its book open");
+    assert_eq!(contracts::open_fixers(&w).len(), before + 1);
+    let founded = w.events.iter().any(|e| {
+        e.kind == citysim::EventKind::Founded && e.text.contains(" registered ") && e.actors.first() == Some(&founder)
+    });
+    assert!(founded, "Founded names the agent founder");
 }
