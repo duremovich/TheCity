@@ -207,3 +207,61 @@ A second food good or a World book for synth; children's meters (they eat from t
 7. `[life] hunger_fixes` is on by default at merge, as `violence_fixes` was.
 8. A bin fight is intimidation plus a light assault, and it can escalate through the normal combat rolls, so a death is possible but rare.
 9. 20-40 cancer deaths a year at 2,000 is a printed target, not an assert.
+
+## Implemented: deviations (P1-P5, 2026-10-10)
+
+Commits on `worktree-agent-a74ec841dce33aa73`:
+- P1 `3822f66`
+- P2 `0a3447b`
+- the coordinator's calls `f5acf34`
+- P3 `1f46fbd`
+- P4 `92809f5`
+- P5a `4547cf6`
+- P4b `514c162`
+- P5b `20bc867`
+- P5c `5086ba6`
+- P5d `88c5339`
+
+Each commit message holds its numbers.
+
+**The model:**
+- **Synth malnutrition levels off** at `synth_malnut_cap` 0.45 (coordinator call). Hunger hours and bin scraps push past it; real meals heal. Children follow the same rule.
+- **The real-food gate** is `real_meal_reserve` 3 real meals' coins, replacing `real_floor_meals` 10, which kept the working class on synth.
+- **The Full-planner gaps (§ 6), as built:**
+  - G1 also gates Socialise (the paid Drink), and gates the starving whatever they hold. A meal short, the coins are kept for the meal.
+  - G2 also makes Earn wait while a Mission (or a bin) would feed the agent.
+  - G4 is pinned by a mechanism-level probe: begging is too rare in the shipped city for a behavioural one.
+- **The bins:**
+  - The dive is a scripted plan (`[GoTo(Bin), DumpsterDive]`, the Mission's pattern), not a searched action. `LocationKey::Bin` is scripted only. The spec's plan cost (5 + 8 × pride) became a gate: a diver goes under hunger 0.4 − 0.3 × pride.
+  - **The gang's turf** is a gang-held Home within `bin_turf_tiles` 15, else a district the gang controls. Districts are almost never a gang's, so `bin_gang_control` never fired; it was replaced. The toll goes to the gang as `Flow::Tribute`.
+  - **The supply (stop rule, P5a):** spoilage alone left 0-5 stocked bins city-wide. Now:
+    - a Market sale leaves `market_waste` 0.2 scrap meals a unit;
+    - a pantry meal leaves `home_scrap` 0.2;
+    - a Home carries its spoilage fraction (`spoil_carry`);
+    - the off-screen diver reaches from its Home door, a squatter from its squat's door (P5b);
+    - the starving reach `[life] hungry_reach_mult` farther (P5b).
+- **The cancer's treatment** is a scripted Treat plan (`[GoTo(Clinic), Oncology]`). The pool is the wallet, then the spouse and kin, then the gang (decision 3). `life::broke` reads `health::saving_short`, so a diagnosed patient short of the price keeps Earn alive.
+- **Sick days** cost the wage, and the 5th in 14 costs the job (decision 4, `sick_fire_days`).
+
+**The rungs (P4b, Dylan on J25):**
+- `[street] shanties` (in flight, on with the flip). While the rough sleepers outnumber the free squat slots, up to 3 vacant Lots a night go up as shanties: derelict Lots of 24 slots, at most 20 standing at once. A builder clears a shanty, which puts its squatters out.
+- A Hotel booked full adds a floor of beds, paid by its owner, up to 4 floors.
+- **J25 now counts street sleepers only** (Dylan): squats, cots and Hotel beds are rungs. The Dreg definition (`Household.home == None`) is unchanged everywhere else, and core.rs prints the Dregs' split beside J25.
+
+**The gates and the table:**
+- With `[sickness]` on, core_sanity's starvation bound is 20 per 120 days (decision 5), with five sickness bullets.
+- The recal tree's calibration city is ported: the shipped city at 2,000, the income path and `p_desperate` learned everywhere. There is no `--lod all-full` flag. `calibrate` learns `p_dive` with the bins on (a row under 200 eligible hours takes the all-row mean).
+
+**Findings:**
+- **Cancer is near zero at the starting keys.** On the flipped config 0-3 cases start in 120 days; at most 3 people reach toxicity 0.4 in a sickness-only year. The 20-40 Disease deaths a year is a printed target, not tuned.
+- **The parity test on the flipped config** passes thefts, violence and the actor shares (the recal port). It fails the diet rates:
+
+  | rate (per 100 agent-days) | Full | Statistical |
+  |---|---|---|
+  | hunger-days | 20.4 | 4.9 |
+  | synth % of meals | 27.8 | 33.7 |
+  | bin meals | 3.4 | 9.3 |
+  | malnutrition × 100 | 35.8 | 19.3 |
+
+  The off-screen tier eats the hour it is hungry (an old gap, inside the old 0.5 floor) and reaches bins from its Home door, while a body reaches from where it stands. This is the next mechanism to close.
+- **The default city, recalibrated:** off-screen thefts fall (seed 42 × 60: 917 vs 3,675 on the stale table) and starvation rises to the all-Full ground truth (18-33 per 120 days).
