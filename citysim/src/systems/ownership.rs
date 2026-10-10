@@ -412,15 +412,26 @@ fn transfer(
     }
     ledger(world, flow, moved);
     shadow_flow(world, from, to, moved, flow, false);
+    // The Treasury's census (diagnostic, never read by the simulation).
+    let city = |w: &World, o: Option<EntityId>| matches!(owner_kind(w, o), OwnerKind::City);
+    let label = |o: Option<EntityId>| if o.is_some() { format!("{flow:?} (dead owner)") } else { format!("{flow:?}") };
+    if city(world, from) {
+        *world.probe.treasury_out.entry(label(from)).or_insert(0) += moved;
+    }
+    let to_city = city(world, to);
     world.purse_add(from, -moved);
     let tax = match to {
         Some(payee) if flow.taxed() => withhold(world, payee, moved),
         _ => 0,
     };
     world.purse_add(to, moved - tax);
+    if to_city {
+        *world.probe.treasury_in.entry(label(to)).or_insert(0) += moved - tax;
+    }
     if tax > 0 {
         world.purse_add(None, tax);
         world.stats.current.flow_tax += tax;
+        *world.probe.treasury_in.entry(format!("{flow:?} tax withheld")).or_insert(0) += tax;
     }
     // M13 D38: what reaches a gang's purse is gang income (dealing apart).
     if to.is_some_and(|g| world.config.assets.enabled && world.has::<Gang>(g)) {
@@ -537,6 +548,7 @@ pub fn refund_tax(world: &mut World, owner: Option<EntityId>, amount: i64) {
         return;
     }
     shadow_flow(world, None, owner, amount, Flow::Tax, true);
+    *world.probe.treasury_out.entry("Tax refund".to_string()).or_insert(0) += amount;
     world.purse_add(None, -amount);
     world.purse_add(owner, amount);
     world.stats.current.flow_tax -= amount;
@@ -565,6 +577,9 @@ pub fn cross_in(
     f.income_today -= moved;
     world.outside.inbound += moved;
     ledger(world, flow, moved);
+    if matches!(owner_kind(world, to), OwnerKind::City) {
+        *world.probe.treasury_in.entry(format!("{flow:?} (from outside)")).or_insert(0) += moved;
+    }
     world.purse_add(to, moved);
     if to.is_some_and(|g| world.config.assets.enabled && world.has::<Gang>(g)) {
         world.stats.current.gang_income += moved;
@@ -594,6 +609,9 @@ pub fn cross_out(
     }
     ledger_out(world, flow, moved);
     shadow_flow(world, from, None, moved, flow, false);
+    if matches!(owner_kind(world, from), OwnerKind::City) {
+        *world.probe.treasury_out.entry(format!("{flow:?} (to outside)")).or_insert(0) += moved;
+    }
     world.purse_add(from, -moved);
     if let Some(f) = world.outside.faction_mut(to) {
         f.treasury += moved;

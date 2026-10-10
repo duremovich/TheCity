@@ -177,6 +177,11 @@ impl EconState {
 pub struct CoinProbe {
     /// Class pay P3: coins the status pass spent (`classpay::status_daily`).
     pub status_spent: i64,
+    /// The Treasury's inflows and outflows through `ownership::transfer`,
+    /// by flow (`"Rent"`, `"Rent (dead owner)"`: a payee no longer a corp,
+    /// gang or agent books to the city). Diagnostic only.
+    pub treasury_in: std::collections::BTreeMap<String, i64>,
+    pub treasury_out: std::collections::BTreeMap<String, i64>,
     /// Coins minted into immigrants' wallets (E24: crossed in from the World with the market on).
     pub immigrant_coins: i64,
     /// Coins destroyed with emigrants' wallets (E24: crossed out with the market on).

@@ -723,3 +723,95 @@ fn test_status_sink_spends_the_excess_into_owners() {
     let off = &mut World::new(42, Config::load());
     assert_eq!(classpay::status_daily(off), 0, "no status sink without wages");
 }
+
+/// The Treasury's census (diagnostic, `#[ignore]`): seed 42, `CLASSPAY_DAYS`
+/// days on `CITYSIM_ASSETS`, the Treasury's inflows and outflows by flow per
+/// window (from `World::probe`), and the residual no flow explains.
+#[test]
+#[ignore]
+fn treasury_census() {
+    let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(365);
+    let mut w = World::new(42, Config::load());
+    let t0 = w.treasury().map_or(0, |t| t.coins);
+    let mut last = (t0, w.probe.treasury_in.clone(), w.probe.treasury_out.clone());
+    let windows = [0u64, 30, 120, 240, days];
+    for pair in windows.windows(2) {
+        w.run_ticks((pair[1] - pair[0]) * TICKS_PER_DAY);
+        let t = w.treasury().map_or(0, |t| t.coins);
+        let n = (pair[1] - pair[0]) as f64;
+        println!("== days {}-{}: Treasury {} -> {} ({:+.1}/day)", pair[0], pair[1], last.0, t, (t - last.0) as f64 / n);
+        let mut net = 0i64;
+        for (dir, now, then) in [("in", &w.probe.treasury_in, &last.1), ("out", &w.probe.treasury_out, &last.2)] {
+            let mut rows: Vec<(i64, &String)> =
+                now.iter().map(|(k, &v)| (v - then.get(k).copied().unwrap_or(0), k)).filter(|(d, _)| *d != 0).collect();
+            rows.sort_by_key(|r| std::cmp::Reverse(r.0));
+            for (d, k) in rows {
+                println!("  {dir:>3} {k:<36} {:>9.1}/day", d as f64 / n);
+                if !k.contains(": of it") {
+                    net += if dir == "in" { d } else { -d };
+                }
+            }
+        }
+        println!("  residual (no flow) {:+.1}/day", ((t - last.0) - net) as f64 / n);
+        last = (t, w.probe.treasury_in.clone(), w.probe.treasury_out.clone());
+    }
+}
+
+/// The wage rule's census (diagnostic, `#[ignore]`): seed 42, `CLASSPAY_DAYS`
+/// days on `CITYSIM_ASSETS`. Per window: the corps' summed 7-day revenue R,
+/// labour payroll P and target P*, the `WageMoved` steps up by reason (a
+/// vacancy stood unfilled, or payroll under target), the steps down, the
+/// payroll-weighted `wage_rev`, the open vacancies and the jobless adults.
+#[test]
+#[ignore]
+fn wage_rule_census() {
+    let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(365);
+    let mut w = World::new(42, Config::load());
+    let windows = [0u64, 30, 120, 240, days];
+    let mut cursor = 0u64;
+    for pair in windows.windows(2) {
+        let (mut r, mut p, mut t, mut vac, mut jobless) = (0.0f64, 0.0f64, 0.0f64, 0u64, 0u64);
+        let (mut up_short, mut up_pay, mut down) = (0u32, 0u32, 0u32);
+        for _ in pair[0]..pair[1] {
+            w.run_ticks(TICKS_PER_DAY);
+            for e in w.events.iter().filter(|e| e.id >= cursor && e.kind == citysim::EventKind::WageMoved) {
+                let up = e
+                    .text
+                    .split(" (was x")
+                    .next()
+                    .and_then(|s| s.rsplit('x').next())
+                    .and_then(|s| s.parse::<f32>().ok());
+                let was =
+                    e.text.split("(was x").nth(1).and_then(|s| s.split(';').next()).and_then(|s| s.parse::<f32>().ok());
+                match (up, was) {
+                    (Some(n), Some(o)) if n > o && e.text.contains("unfilled") => up_short += 1,
+                    (Some(n), Some(o)) if n > o => up_pay += 1,
+                    _ => down += 1,
+                }
+            }
+            cursor = w.events.back().map_or(cursor, |e| e.id + 1);
+            for c in w.corps() {
+                if let Some((rr, pp)) = wages::windows(&w, c) {
+                    r += f64::from(rr);
+                    p += f64::from(pp);
+                    t += f64::from(wages::target(&w, c).unwrap_or(0.0));
+                }
+            }
+            vac += u64::from(wages::vacancies_open(&w));
+            jobless +=
+                w.citizens().into_iter().filter(|&a| demography::is_adult(&w, a) && !w.has::<Job>(a)).count() as u64;
+        }
+        let n = (pair[1] - pair[0]) as f64;
+        println!(
+            "days {:>3}-{:<3}: R {:>7.0} P {:>7.0} P* {:>7.0} /day | ups: unfilled {up_short}, payroll {up_pay}; downs {down} | wage_rev {:.2} | open vacancies {:.1} | jobless adults {:.0}",
+            pair[0],
+            pair[1],
+            r / n,
+            p / n,
+            t / n,
+            wages::mean_wage_rev(&w),
+            vac as f64 / n,
+            jobless as f64 / n
+        );
+    }
+}

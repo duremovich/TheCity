@@ -119,13 +119,28 @@ Gates: flipped `core_sanity` 42-44 and `core_year` (seed 42) green; the default 
 | 364 | Sump | 56.8 → 43.3 | 16 → 9 | 11.05 → 7.29 | 31.3 → 35.5 |
 | 364 | Dreg | 154.8 → 14.9 | 8 → 3 | 8.57 → 5.90 | 53.5 → 53.4 |
 
-Dreg adults on day 364 (pooled): off 76, P2 406, P3 257. Wallet Gini day 364: off 0.823, P2 0.850, P3 0.791 (day 119: 0.716 / 0.820 / 0.744). Employed day 364: 1,590/1,498/1,633 → 1,581/1,683/1,639. Population 1,773/1,819/1,892 → 1,786/1,882/1,823. Treasury day 364: 60-69k → 136-158k (tax parked at 0; the sources in the CSV move little, unexplained). Status spent ~395-450k a seed-year. By origin at day 364: Spire-born median 16, wage 11.64, 278 graded posts; Mid-born 11, 161; Sump-born 9, 7 (P2: 4); Dreg-born 9, 0.
+Dreg adults on day 364 (pooled): off 76, P2 406, P3 257. Wallet Gini day 364: off 0.823, P2 0.850, P3 0.791 (day 119: 0.716 / 0.820 / 0.744). Employed day 364: 1,590/1,498/1,633 → 1,581/1,683/1,639. Population 1,773/1,819/1,892 → 1,786/1,882/1,823. Treasury day 364: 60-69k → 136-158k (tax parked at 0; explained below). Status spent ~395-450k a seed-year. By origin at day 364: Spire-born median 16, wage 11.64, 278 graded posts; Mid-born 11, 161; Sump-born 9, 7 (P2: 4); Dreg-born 9, 0.
+
+## Why the Treasury doubles (seed 42, 365 days; `treasury_census`)
+
+Every Treasury inflow and outflow through `ownership::transfer`, `cross_in`/`cross_out` and `refund_tax` is booked by flow in `World::probe` (diagnostic, never read by the sim; a payee that is no longer a corp, gang or agent would book as "(dead owner)": none did). The residual the census does not explain (the direct Treasury paths: the civic budget's own spends) is the same in both cities (−563/−588 a day in days 0-30, −74/−61 in days 240-365). The difference in days 240-365 (P3 +722 a day against off +93):
+
+| flow | off | P3 | what |
+|---|---|---|---|
+| in `AssetUpkeep` | 631 | 1,056 | every non-city asset's daily upkeep to the Treasury (M13 D8): the class-pay city owns more assets (day 364 motorcycles 707 vs 555, cars 18 vs 10, robots 160 vs 80, chromed agents 610 vs 434) |
+| in `Sale` | 4 | 236 | all of it dissolved corps' estates (`corps::dissolve`: a bankrupt corp's balance after its sell-off, past the heir cap, goes to the Treasury; M11). The class-pay city founds and incorporates more corps (19/19/12 alive vs 9/13/11) and some fail |
+| in `Found` | 76 | 141 | founding fees (more foundings) |
+| in `Export` (from outside) | 292 | 37 | the off city's foreclosed, city-owned producers selling to the World |
+| out `Hack` | 174 | 0 | a Ledger run on the city in the off run's last window |
+| out `Import`, `GambleWin` | 191 | 29 | |
+
+Over the year the asset upkeep alone is ~+100k against off, the estates ~+32k, less the off city's larger export income. The status sink is not in it: its Leisure payments go to owned venues (`Leisure` into the Treasury is city-owned venues' ordinary visits, 93 vs 45 a day), and no status coin lands on a dead or missing owner. Legitimate flows, no bug: richer graded agents and cash-rich corps buy assets and pay their upkeep to the city, and more corps are founded and dissolved. With the tax rate parked at 0 nothing spends it back (the Treasury's outflow is an open item from JOBS_V2).
 
 ## Open items
 
 - **A corp school or scholarships** (a faster, rarer ladder than night school; a corp buying talent).
 - **Corp HQs** with the bigger map: management's home in the Spire.
 - **Civic grades** (sergeants, Treasury clerks) once the Treasury's budget can carry them.
-- **Labour wages stay under the no-classpay city's at a year** (Sump 7.3 vs 11.1): `wage_rev` climbs to ~1.5 rather than ~1.8 on seed 42 even with the premium off the pool; the Dreg excess shrank (406 → 257) but is still above off's 76.
+- **Labour wages stay under the no-classpay city's at a year** (Sump 7.3 vs 11.1; Dreg adults 257 vs 76). Read-only diagnosis (`wage_rule_census`, seed 42; summed over the corps, a day, days 240-365, off vs P3): revenue R 10,073 vs 11,162 (larger with class pay, not smaller); labour payroll P 6,443 vs 5,880; target P* 13,441 vs 7,003. Labour's revenue share (`labour_share × R`, ~5.5-6k) is the same in both; the gap is the **capital payout**. In the off city the corps' capital above `capital_hi_days` adds ~7.9k a day to P*, which keeps P under 0.9 P* (raises), keeps hiring until the jobless pool runs dry (140 jobless, 49 vacancies open), and then shortage raises follow (55 "a vacancy stood unfilled" steps against 7). Under P3 the graded premium is charged to that payout (profit before premium is near zero, so `labour_payout` hands labour almost nothing of it): P sits over 1.1 P* and `wage_rev` steps down (86 downs against 4). So it is neither a smaller revenue base nor graded hires draining labour; it is that Dylan's "premium from capital" takes exactly the excess capital that, without class pay, was the engine of the labour raises. If labour should keep it, the premium would need its own source (profit only, or a share of the payout).
 - **The Treasury hoard grows** with class pay (to 136-158k at tax 0).
 - **The stat table** must learn `p_attend` for Manager, Engineer, Accountant, Broker, Ripperdoc, Mechanic (the single recalibration on the merged branch).
