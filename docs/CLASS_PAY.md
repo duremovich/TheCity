@@ -70,3 +70,30 @@ Mechanisms are unit tests (`tests/classpay.rs`): the default config is byte-iden
 ## Out of scope
 
 Corp HQs (JOBS_V2 P8), education as a learnable stat (schools, training), wage bargaining, grade-specific behaviour beyond the shift (the manager's office politics), civic grades (sergeants, the Treasury's budget).
+
+## Implemented (P1 `f49e081`, P2 `9957302`; 2026-10-10)
+
+As specified, plus: with class pay on, a role the Statistical table has not learned (the four new trades; Ripperdoc and Mechanic were never in it) works the table's mean `p_attend` instead of a whole paid shift until `calibrate` learns it (P2). Not recalibrated (a single recalibration follows on the merged branch).
+
+**Identity.** The default city: the 60- and 365-day seed-42 CSVs equal `ff60ea6`'s; `test_default_city_identical_with_classpay_keys`. The flipped city with `[classpay] enabled = false` equals `ff60ea6`'s flipped city (30 days, seed 42). `tests/wages.rs` pins class pay off (it pins the revenue rule at flat wages).
+
+**Findings** (flipped config: wages + no_safety_net + sickness + shanties, the P5f flipped table; seeds 42-44 pooled; "off" is this branch with class pay off, identical to `ff60ea6`). By Home tier:
+
+| day | class | mean coins off → on | median | mean wage | synth % |
+|---|---|---|---|---|---|
+| 119 | Spire | 14.0 → 33.7 | 6 → 11 | 7.72 → 9.49 | 52.3 → 35.5 |
+| 119 | Mid | 28.0 → 44.6 | 10 → 9 | 7.54 → 7.47 | 36.7 → 36.5 |
+| 119 | Sump | 14.7 → 24.0 | 9 → 7 | 7.59 → 6.77 | 39.9 → 43.5 |
+| 119 | Dreg | 3.6 → 3.3 | 1 → 1 | 6.58 → 6.26 | 54.2 → 54.8 |
+| 364 | Spire | 59.0 → 66.9 | 16 → 15 | 11.81 → 10.83 | 40.3 → 31.9 |
+| 364 | Mid | 100.6 → 93.4 | 17 → 12 | 11.23 → 8.35 | 30.3 → 32.7 |
+| 364 | Sump | 56.8 → 45.7 | 16 → 11 | 11.05 → 7.59 | 31.3 → 37.1 |
+| 364 | Dreg | 154.8 (76 adults) → 5.6 (406) | 8 → 3 | 8.57 → 6.46 | 53.5 → 54.7 |
+
+City: wallet Gini day 119 0.716 → 0.820, day 364 0.823 → 0.850; employed day 119 1,422/1,656/1,415 → 1,398/1,407/1,339, day 364 1,590/1,498/1,633 → 1,596/1,547/1,662; population day 364 1,773/1,819/1,892 → 1,858/1,844/1,809; corps (alive, founded included) day 364 9/13/11 → 19/19/12; Treasury day 364 60-69k → 62-127k (the tax rate parks at 0 either way).
+
+By origin (`Schooling`), day 364: Spire-born mean 165.7 / median 18, wage 12.16, 305 of the ~440 graded (>= 2) posts; Mid-born 59.2 / 11, 105; Sump-born 35.6 / 10, 4; Dreg-born 31.0 / 8, 0. The skilled grade is the Sump's ladder (182 Sump-born skilled at day 364).
+
+Read: class now persists through income (the Spire's wage edge over the Sump is 1.43x at a year, 1.07x off) and the Spire keeps the best diet, but the pool split costs the labour class: with graded posts in the payroll, the corps' `wage_rev` stays ~1.1 where it climbs to ~1.8 off (the payroll meets `P*` sooner and a bigger jobless pool fills vacancies before a shortage raise), so every class's labour wage is lower over a year and the Dregs are five times as many at day 364. Mobility into graded posts is near zero for the Sump in a year (tenure counts in full at 180 days).
+
+Gates: flipped `core_sanity` 42-44 and `core_year` (seed 42) green; the default trio green (800 passed); god 21 green. The default `core_year` fails one window (days 270-300 starvation 51 > 50) on `ff60ea6` itself (its own CLI reproduces 356 / 51): pre-existing from P5g, not this branch.
