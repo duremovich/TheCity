@@ -191,6 +191,19 @@ pub struct StatTable {
     /// rule (every hungry hour eats, `p_eat` the rest).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_meal: Option<Vec<f32>>,
+    /// P5f (wage parity): by role (`{role:?}`), the share of a Full
+    /// worker's free, healthy workday shift minutes spent at the work
+    /// itself (the commute, a meal, a sleep run over, the guard's patrol
+    /// counted as work). A Statistical worker's shift hour is credited on
+    /// it, and the wage paid pro rata on the hours credited. A role not
+    /// listed, or a table without it: every hour (the M10 rule).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_attend: Option<std::collections::BTreeMap<String, f32>>,
+    /// P5f: Full's wage share of wages owed over its attendance share (a
+    /// cut shift past half is paid pro rata, a whole one in full): the
+    /// Statistical pro rata wage x this, capped at the whole wage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_wage_ratio: Option<f32>,
     pub rows: Vec<StatRow>,
 }
 

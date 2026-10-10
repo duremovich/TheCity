@@ -214,6 +214,10 @@ fn test_sick_day_skips_the_shift_on_both_tiers() {
     let mut accrued = Vec::new();
     for sick in [false, true] {
         let mut v = w.clone();
+        // The sick day's skip, not the learned attendance (`p_attend`).
+        if let Some(t) = v.stat_table.as_mut() {
+            t.p_attend = None;
+        }
         citysim::systems::lod::set_lod(&mut v, farmer, Lod::Statistical);
         v.comp_mut::<Health>(farmer).expect("health").sick_today = sick;
         // Every other farmer off sick too, so only this one can move the farm.

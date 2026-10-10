@@ -683,6 +683,17 @@ pub fn run_statistical(world: &mut World) {
         // Flip readiness (no safety net): the table row's index at the hour's
         // start, for the income path's per-row rates.
         let no_net_row = if earn_path { stat_row_index(world, id) } else { None };
+        // § 4 (parity, after P5): the dive is its own hour, on the row's
+        // `p_dive` (every eligible hour without a learned rate), as `calibrate`
+        // learns it: dives begun per hour with a bin in reach at the hour's
+        // start (before the hour's decay, as `calibrate` reads eligibility).
+        if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
+            let p = match (world.stat_table.as_ref().and_then(|t| t.p_dive), stat_row_index(world, id)) {
+                (Some(rates), Some(r)) => rates[r],
+                _ => 1.0,
+            };
+            crate::systems::bins::stat_dive(world, id, p);
+        }
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
@@ -716,16 +727,6 @@ pub fn run_statistical(world: &mut World) {
         }
         // Hunger as sickness § 2: the hour's hungry mark (bodies: needs::run).
         crate::systems::health::hourly_mark(world, id);
-        // § 4 (parity, after P5): the dive is its own hour, on the row's
-        // `p_dive` (every eligible hour without a learned rate), as `calibrate`
-        // learns it: dives begun per hour with a bin in reach.
-        if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
-            let p = match (world.stat_table.as_ref().and_then(|t| t.p_dive), stat_row_index(world, id)) {
-                (Some(rates), Some(r)) => rates[r],
-                _ => 1.0,
-            };
-            crate::systems::bins::stat_dive(world, id, p);
-        }
         // 2b. Work is not a gamble: an employed agent on shift works the hour
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
@@ -1328,19 +1329,23 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     if job.last_shift_day == Some(key) {
         return;
     }
-    if job.role == Role::Farmer {
+    // P5f (wage parity): the hour is worked on the role's `p_attend` (a
+    // pure hash of the agent and the hour; the wage below reads the same).
+    let attend = stat_attend(world, job.role);
+    let worked = attend.is_none_or(|p| attend_roll(world, id, tick / TICKS_PER_HOUR) < p);
+    if worked && job.role == Role::Farmer {
         if let Some(farm) = job.employer {
             economy::accrue_farm_work(world, id, farm, u64::from(TICKS_PER_HOUR as u32));
         }
     }
     // L2 L9: a Statistical Fab Tech's hour on shift.
-    if job.role == Role::Fabber {
+    if worked && job.role == Role::Fabber {
         if let Some(fab) = job.employer {
             crate::systems::jobs::accrue_fab_work(world, id, fab, u64::from(TICKS_PER_HOUR as u32));
         }
     }
     // Jobs and room J13: a Statistical producing trade's hour on shift.
-    if job.role.is_trade() {
+    if worked && job.role.is_trade() {
         if let Some(b) = job.employer {
             crate::systems::trades::accrue(world, id, b, u64::from(TICKS_PER_HOUR as u32));
         }
@@ -1370,7 +1375,18 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
             j.last_shift_day = Some(key);
             j.days_unpaid = j.days_unpaid.saturating_add(1);
         }
-        economy::collect_wage(world, id);
+        // P5f: pro rata on the shift's hours credited (the whole wage
+        // without a `p_attend`).
+        match attend {
+            Some(p) => {
+                let ratio = world.stat_table.as_ref().and_then(|t| t.p_wage_ratio).unwrap_or(1.0);
+                let share = (stat_shift_share(world, id, &job, tick, p) * ratio).min(1.0);
+                economy::collect_wage_scaled(world, id, share);
+            }
+            None => {
+                economy::collect_wage(world, id);
+            }
+        }
         // A Full farmer hauls to the Market at shift end; so does this one.
         if job.role == Role::Farmer {
             if let Some(farm) = job.employer {
@@ -1385,6 +1401,31 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
             }
         }
     }
+}
+
+/// P5f: the role's learned attendance (`StatTable::p_attend`), if any.
+fn stat_attend(world: &World, role: Role) -> Option<f32> {
+    let t = world.stat_table.as_ref()?.p_attend.as_ref()?;
+    t.get(&format!("{role:?}")).copied()
+}
+
+/// P5f: the hour's attendance roll (a pure hash of the agent and the hour).
+fn attend_roll(world: &World, id: EntityId, hour: u64) -> f32 {
+    crate::systems::econ::hash_unit(world.seed(), 0xa77e_0001, u64::from(id.index), hour)
+}
+
+/// P5f: the share of the shift ending around `tick` whose hours the agent
+/// worked (the same rolls `stat_work` made).
+fn stat_shift_share(world: &World, id: EntityId, job: &Job, tick: Tick, p: f32) -> f32 {
+    let Some(end) = job.shift_end(tick) else { return 1.0 };
+    let tod = (tick % crate::time::TICKS_PER_DAY) as u16;
+    let len = job.shifts.iter().find(|&&(s, e)| tod >= s && tod < e).map_or(0, |&(s, e)| Tick::from(e - s));
+    let len = if job.shifts.iter().any(|&(_, e)| e == 1440) { len.max(end.saturating_sub(tick)) } else { len };
+    let start = end.saturating_sub(len.max(TICKS_PER_HOUR));
+    let (h0, h1) = (start / TICKS_PER_HOUR, end.div_ceil(TICKS_PER_HOUR));
+    let n = h1.saturating_sub(h0).max(1);
+    let worked = (h0..h1).filter(|&h| attend_roll(world, id, h) < p).count() as f32;
+    worked / n as f32
 }
 
 /// The table row index of `id`'s hour (`calibrate`'s buckets: the phase,

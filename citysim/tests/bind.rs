@@ -27,6 +27,8 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         p_desperate: None,
         p_dive: None,
         p_meal: None,
+        p_attend: None,
+        p_wage_ratio: None,
         rows,
     }
 }

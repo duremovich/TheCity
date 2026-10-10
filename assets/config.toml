@@ -1517,6 +1517,7 @@ hf_food_first = true                # 1: starving with a meal in reach: eat befo
 hf_mission = true                   # 2: Eat's can-obtain gate opens on a stocked Mission in reach
 hf_buy_not_steal = true             # 3: a food theft costs steal_can_buy more while a meal is affordable
 hf_beg_retry = true                 # 4: a Beg with no giver is a dry hour (as Scavenge's), not a failure
+hf_shift_first = true               # 5 (P5f): a worker on shift does not leave for leisure (Unwind 0 on shift)
 hungry_reach_mult = 2.0             # 2: a starving agent walks this much further to a Mission
 steal_can_buy = 12.0                # 3
 beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...

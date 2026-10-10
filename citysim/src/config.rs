@@ -4329,6 +4329,10 @@ pub struct LifeCfg {
     pub hf_buy_not_steal: bool,
     /// G4: a Beg with no giver is a dry hour (as Scavenge's), not a failure.
     pub hf_beg_retry: bool,
+    /// P5f: a worker on shift does not leave for leisure (Unwind gated to 0
+    /// on shift; it was `gate_or(0.3)`: 5.2 % of Full shift minutes in the
+    /// all-Full flipped city went to Unwind).
+    pub hf_shift_first: bool,
     /// G2: a starving agent walks this much further to a Mission.
     pub hungry_reach_mult: f32,
     /// G3: the theft cost added while the agent can buy a meal.
@@ -4410,6 +4414,7 @@ impl Default for LifeCfg {
             hf_mission: true,
             hf_buy_not_steal: true,
             hf_beg_retry: true,
+            hf_shift_first: true,
             hungry_reach_mult: 2.0,
             steal_can_buy: 12.0,
             beg_dry_max: 3,

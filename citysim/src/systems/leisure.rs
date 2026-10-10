@@ -931,6 +931,12 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         return None;
     }
     let n = world.comp::<Needs>(id)?;
+    // Hunger fix item 5 (P5f): a worker on shift stays at work.
+    if crate::systems::fixes::shift_first(world)
+        && world.comp::<Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day()))
+    {
+        return None;
+    }
     let pick = choice(world, id, false)?;
     let cs = vec![
         Consideration::new("U(fun)", urgency(n.fun), Curve::Logistic { k: 8.0, mid: 0.5 }),

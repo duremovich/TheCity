@@ -78,6 +78,11 @@ pub fn beg_retry(world: &World) -> bool {
     hfix_item(world, 4) && world.config.life.hf_beg_retry
 }
 
+/// P5f (item 5): no Unwind on shift.
+pub fn shift_first(world: &World) -> bool {
+    hfix_item(world, 5) && world.config.life.hf_shift_first
+}
+
 /// G1: starving (`hunger < starving_hunger`): the optional and paid goals
 /// wait (a meal in reach is eaten first; a meal short keeps its coins for
 /// the meal: the diaries' beggar drank the two coins a meal cost three).
