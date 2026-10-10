@@ -189,6 +189,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             .or_else(|| crate::systems::life::exec_plan(world, id)),
         // M12 phase 4: the expedition chain, built directly.
         GoalKind::Raid => routine::raid_plan(world, id),
+        // Hunger fix item 11 (b): a fed worker's Eat is the grocery run.
+        GoalKind::Eat if routine::grocery_due(world, id) => routine::grocery_plan(world, id),
         _ => None,
     };
     if let Some(plan) = bypass {
@@ -492,7 +494,9 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
             ActionKind::StealFood(StealSource::Home) => {
                 plan.target.map(|b| ReservationKind::FoodUnits { building: b, units: 2 })
             }
-            ActionKind::EatAtHome => home.map(|b| ReservationKind::FoodUnits { building: b, units: 1 }),
+            ActionKind::EatAtHome | ActionKind::PackMeal => {
+                home.map(|b| ReservationKind::FoodUnits { building: b, units: 1 })
+            }
             ActionKind::Chat | ActionKind::Flirt | ActionKind::Propose => {
                 plan.target.map(|other| ReservationKind::Partner { other })
             }

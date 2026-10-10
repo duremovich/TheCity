@@ -88,6 +88,11 @@ pub fn hire_near(world: &World) -> bool {
     hfix_item(world, 9) && world.config.life.hf_hire_near
 }
 
+/// P5i (item 11): meals around the shift.
+pub fn shift_meals(world: &World) -> bool {
+    hfix_item(world, 11) && world.config.life.hf_shift_meals
+}
+
 /// P5h (item 10): Homes built toward jobs.
 pub fn grow_housing(world: &World) -> bool {
     hfix_item(world, 10) && world.config.life.hf_grow_housing

@@ -97,7 +97,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
     use crate::goap::world_state::{BELONGING_SATISFIED, ENERGY_SATISFIED, HUNGER_SATISFIED, SAFE, SAVINGS_DAYS};
     let needs = world.comp::<Needs>(id);
     match goal {
-        GoalKind::Eat => needs.is_some_and(|n| n.hunger >= HUNGER_SATISFIED),
+        // Hunger fix item 11 (b): a fed worker's grocery run is Eat's too.
+        GoalKind::Eat => {
+            needs.is_some_and(|n| n.hunger >= HUNGER_SATISFIED) && !crate::exec::routine::grocery_due(world, id)
+        }
         GoalKind::Sleep => needs.is_some_and(|n| n.energy >= ENERGY_SATISFIED),
         GoalKind::Socialise => {
             // Until Chat arrives (M5) a drink is the only satisfier: the goal is
@@ -256,6 +259,12 @@ pub fn considerations(
             let n = needs?;
             world.comp::<Inventory>(id)?;
             world.comp::<Wallet>(id)?;
+            // Hunger fix item 11 (b): fed, the goal is the grocery run, at
+            // `[life] grocery_score` (an errand: below a real need).
+            if n.hunger >= crate::goap::world_state::HUNGER_SATISFIED {
+                let s = world.config.life.grocery_score.clamp(0.01, 1.0);
+                return Some((vec![Consideration::raw("pantry under a shift's meals", s, s)], 0.0));
+            }
             let can_eat = eat_obtainable(world, id);
             let mut cs = vec![
                 Consideration::new("U(hunger)", urgency(n.hunger), SQUARE),

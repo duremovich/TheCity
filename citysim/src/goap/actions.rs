@@ -166,6 +166,9 @@ pub enum ActionKind {
     /// Hunger as sickness § 3: at a Clinic, the cancer treated (the Treat
     /// goal's scripted step; never in `PLANNABLE`).
     Oncology,
+    /// Hunger as sickness P5i: at Home, a pantry meal packed to carry to a
+    /// shift (the commute plan's scripted step; never in `PLANNABLE`).
+    PackMeal,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -394,6 +397,7 @@ impl ActionKind {
                 | ActionKind::Donate
                 | ActionKind::DumpsterDive
                 | ActionKind::Oncology
+                | ActionKind::PackMeal
         )
     }
 
@@ -1262,7 +1266,7 @@ impl ActionKind {
             k if k.is_contract_step() => false,
             // Real economy E27, E28: scripted only.
             k if k.is_charity_step() => false,
-            ActionKind::DumpsterDive | ActionKind::Oncology => false,
+            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal => false,
             _ => true,
         }
     }
@@ -1355,7 +1359,7 @@ impl ActionKind {
             k if k.is_contract_step() => true,
             // Real economy E27, E28: likewise `charity::can_start`.
             k if k.is_charity_step() => true,
-            ActionKind::DumpsterDive | ActionKind::Oncology => true,
+            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1825,7 +1829,11 @@ impl ActionKind {
             ActionKind::Network => 4.0,
             ActionKind::Guard => 2.0,
             // Real economy E27, E28: scripted, never searched.
-            ActionKind::EatAlms | ActionKind::Donate | ActionKind::DumpsterDive | ActionKind::Oncology => 60.0,
+            ActionKind::EatAlms
+            | ActionKind::Donate
+            | ActionKind::DumpsterDive
+            | ActionKind::Oncology
+            | ActionKind::PackMeal => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

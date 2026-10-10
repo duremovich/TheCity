@@ -159,8 +159,115 @@ pub fn commute_plan(world: &World, id: EntityId) -> Option<Plan> {
         return None;
     }
     let key = workplace_key_for(world, id, job);
-    let steps = vec![step(ActionKind::GoTo(key), Some(employer)), step(ActionKind::Rest, None)];
+    // Hunger fix item 11 (P5i): a meal before leaving, one packed to carry.
+    let mut steps = pre_shift_meal(world, id, job);
+    steps.extend([step(ActionKind::GoTo(key), Some(employer)), step(ActionKind::Rest, None)]);
     Some(plan(GoalKind::Work, Some(employer), steps, world.tick))
+}
+
+/// P5i: ticks from now to the end of the next (or current) shift.
+pub fn ticks_to_shift_end(world: &World, job: &Job) -> u64 {
+    let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
+    job.shift_end(world.tick + until).map_or(until, |e| e.saturating_sub(world.tick))
+}
+
+/// P5i: the hunger `n` reaches by the next shift's end with nothing eaten.
+fn hunger_at_shift_end(world: &World, hunger: f32, job: &Job) -> f32 {
+    hunger - world.config.needs.hunger_decay_per_tick * ticks_to_shift_end(world, job) as f32
+}
+
+/// Hunger fix item 11 (a): at Home before a shift whose end finds the
+/// worker under the Eat line (`HUNGER_SATISFIED`, below which Eat can win
+/// on shift), with pantry meals: `EatAtHome` when a meal would not overfill
+/// (hunger + `food_satisfy` <= 1), then `PackMeal` when the shift still
+/// outlasts the hunger and nothing unstolen is carried.
+fn pre_shift_meal(world: &World, id: EntityId, job: &Job) -> Vec<ActionInstance> {
+    use crate::goap::world_state::HUNGER_SATISFIED;
+    let mut steps = Vec::new();
+    if !crate::systems::fixes::shift_meals(world) || job.on_shift(world.tick_of_day()) {
+        return steps;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home);
+    if home.is_none() || world.comp::<Position>(id).map(|p| p.building) != Some(home) {
+        return steps;
+    }
+    let Some(mut hunger) = world.comp::<crate::components::Needs>(id).map(|n| n.hunger) else { return steps };
+    let mut pantry = home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food);
+    let fs = world.config.needs.food_satisfy;
+    if pantry > 0 && hunger_at_shift_end(world, hunger, job) < HUNGER_SATISFIED && hunger + fs <= 1.0 {
+        steps.push(step(ActionKind::EatAtHome, home));
+        hunger = (hunger + fs).min(1.0);
+        pantry -= 1;
+    }
+    let carried = world.comp::<Inventory>(id).is_some_and(|i| i.food > i.stolen_food);
+    if pantry > 0 && !carried && hunger_at_shift_end(world, hunger, job) < HUNGER_SATISFIED {
+        steps.push(step(ActionKind::PackMeal, home));
+    }
+    steps
+}
+
+/// Hunger fix item 11 (b): the meals a shift takes, `ceil(drain over the
+/// shift and an hour's walk each way ÷ food_satisfy)`, at least 1.
+pub fn shift_meals_needed(world: &World, job: &Job) -> u32 {
+    let len: u64 = job.shifts.iter().map(|&(s, e)| u64::from(e.saturating_sub(s))).max().unwrap_or(0) + 120;
+    let drain = world.config.needs.hunger_decay_per_tick * len as f32;
+    (drain / world.config.needs.food_satisfy.max(0.01)).ceil().max(1.0) as u32
+}
+
+/// Hunger fix item 11 (b): an off-shift worker's grocery run, `[GoTo(Market)
+/// m, BuyFood m, GoTo(Home), StoreFood]`, when the household's pantry and
+/// its own carried meals are under `shift_meals_needed` per resident (capped at the pantry), it holds a meal's
+/// coins at `m` (the Market `world.local` gives, stocked), and the round
+/// trip plus `DEPARTURE_MARGIN` ends before it must leave for the shift.
+pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
+    if !crate::systems::fixes::shift_meals(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?;
+    job.employer?;
+    if job.on_shift(world.tick_of_day()) || must_leave_for_work(world, id) {
+        return None;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home)?;
+    let home_door = world.comp::<Building>(home).filter(|b| !b.demolished)?.door;
+    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    let carried = world.comp::<Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
+    // The pantry is the household's: a shift's worth for each resident
+    // (5-6 share a Block's pantry; one worker's meal was eaten by the rest).
+    let residents = world.residents_of(home).len().max(1) as u32;
+    let need = (shift_meals_needed(world, job) * residents).min(world.config.buildings.home.stock_cap);
+    if pantry + carried >= need {
+        return None;
+    }
+    let m = world.local(id, BuildingKind::Market)?;
+    if crate::systems::economy::buy_quantity(world, id, Some(m)) == 0 {
+        return None;
+    }
+    let m_door = world.comp::<Building>(m)?.door;
+    let trip = crate::systems::fixes::walk_estimate(world, id, m_door)
+        + crate::exec::timed_walk(world, id, m_door, home_door)
+        + 20;
+    let employer_door = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
+    let to_work = crate::exec::timed_walk(world, id, home_door, employer_door);
+    let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
+    if trip + to_work + 2 * DEPARTURE_MARGIN > until {
+        return None;
+    }
+    let steps = vec![
+        step(ActionKind::GoTo(LocationKey::Market), Some(m)),
+        step(ActionKind::BuyFood, Some(m)),
+        step(ActionKind::GoTo(LocationKey::Home), Some(home)),
+        step(ActionKind::StoreFood, None),
+    ];
+    Some(plan(GoalKind::Eat, Some(m), steps, world.tick))
+}
+
+/// Hunger fix item 11 (b): a fed worker's Eat goal stands for the grocery
+/// run (`grocery_plan` would plan one now).
+pub fn grocery_due(world: &World, id: EntityId) -> bool {
+    use crate::goap::world_state::HUNGER_SATISFIED;
+    world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger >= HUNGER_SATISFIED)
+        && grocery_plan(world, id).is_some()
 }
 
 /// Idle bypasses the planner: Rest at Home or the Bar; otherwise go home
@@ -205,6 +312,11 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     let goal = GoalKind::Idle;
     if at_home && inv.food > inv.stolen_food && inv.food >= 2 {
         return Some(plan(goal, home, vec![step(ActionKind::StoreFood, None)], tick));
+    }
+    // Hunger fix item 11 (b): the grocery run (as an Eat plan).
+    if let Some(mut p) = grocery_plan(world, id) {
+        p.goal = goal;
+        return Some(p);
     }
     // A member lying low, or without a Home, idles at the Hideout.
     if let Some(h) = crate::systems::gang::holes_up_at(world, id) {

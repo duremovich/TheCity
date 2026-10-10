@@ -4360,6 +4360,16 @@ pub struct LifeCfg {
     /// when it can (company housing), else the Treasury buys it from the
     /// World when it can (keeping `[treasury] band[0]`), else nothing.
     pub hf_grow_housing: bool,
+    /// P5i (coordinator call): meals around the shift. (a) At home before a
+    /// shift its hunger would not last (under the Eat line by the shift's
+    /// end), a worker eats from the pantry first (when a meal would not
+    /// overfill it) and packs a meal to carry; (b) off shift, with the
+    /// household's pantry and its carried meals under a shift's worth and
+    /// coins for a meal, an idle worker makes a grocery run (buy, carry
+    /// home, store) when the round trip ends `DEPARTURE_MARGIN` before the
+    /// next shift's leaving time.
+    pub hf_shift_meals: bool,
+    pub grocery_score: f32,
     pub housing_demand_min: u32,
     pub housing_demand_days: u16,
     pub housing_builds_per_1000: f32,
@@ -4452,6 +4462,8 @@ impl Default for LifeCfg {
             hf_hire_near: true,
             commute_hire_ticks: 80,
             hf_grow_housing: true,
+            hf_shift_meals: true,
+            grocery_score: 0.5,
             housing_demand_min: 6,
             housing_demand_days: 3,
             housing_builds_per_1000: 1.0,

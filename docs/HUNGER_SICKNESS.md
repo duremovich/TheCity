@@ -296,6 +296,13 @@ Dylan's calls: relocation plus a hiring cap (P5g); the city grows toward jobs (P
 - **Measured** (flipped seed 42, all-Full, tiles home door to work door): median / p75 / p90 68 / 124 / 156 on day 0; 36 / 40 / 60 on day 60 (item 10 off: 72 / 136 / 180); farmers 108 → 36; 34 Homes on Lots and 77 floors by day 60, 82 Lots left. The shift-time commute share barely moved (15.7 % → 13.8 %): what is left is mid-shift trips and the planner (P5i).
 - **The calibration harness:** the planner budget scales in `calibration_city` (TESTING.md).
 
+## Implemented: P5i, meals around the shift (2026-10-10)
+
+Item 11 (`hf_shift_meals`, coordinator call). Before it, 10.5 % of Full's shift time was Eat, and 92 % of the on-shift Work → Eat switches had nothing carried and an empty pantry (a walk out 2-4 h+ into the shift).
+- **(a) Before the shift:** the commute plan (`routine::commute_plan`) at Home, when the hunger at the shift's end (`hunger − hunger_decay_per_tick × ticks to the shift's end`) is under the Eat line (`HUNGER_SATISFIED` 0.6), starts with `EatAtHome` (only when a meal would not overfill: hunger + `food_satisfy` ≤ 1), then `PackMeal` (a new scripted step: one pantry unit, synth first, into the carried food) when the shift still outlasts the hunger and nothing unstolen is carried.
+- **(b) Off shift:** a fed worker's Eat goal stands for a grocery run (`routine::grocery_plan`: `[GoTo(Market), BuyFood, GoTo(Home), StoreFood]`) when the household's pantry plus its own carried meals are under a shift's worth per resident (`shift_meals_needed` × residents, capped at the pantry), it holds a meal's coins, and the round trip ends `2 × DEPARTURE_MARGIN` before it must leave for work. Scored at `[life] grocery_score` 0.5 (an errand, below a real need; the Idle plan runs it too).
+- **Measured** (flipped seed 42, all-Full, planner budget scaled): Eat on shift 8.8 % → 7.0 % (days 30-60), working 50.6 % → 51.6 %. What is left: the commute share (~17 %) is late arrivals after Sleep, Idle, Earn and Eat, and farmers asleep on shift (6 %) mostly slept under 4 h the night before (their nights: walking home to sleep ~16 %, Unwind ~13 %, Eat walks ~6 %). Not a shift-scheduling cause (all 09:00-18:00); reported, not fixed.
+
 ## Open items (after P5)
 
 - **Workplace canteens (filed, not built):** food stock at the workplace sold to its staff on shift (a company-store angle: the employer sets the price and keeps the till). Later.

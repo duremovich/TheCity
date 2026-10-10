@@ -1127,3 +1127,120 @@ fn probe_housing_toward_jobs_is_paid() {
     eprintln!("Treasury {t0} -> {} for the build", w.purse(None));
     assert!(w.purse(None) < t0, "the Treasury's build cost it nothing");
 }
+
+// ---------------------------------------------------------------------------
+// P5i (hunger fixes item 11): meals around the shift
+// ---------------------------------------------------------------------------
+
+/// Housed day workers (09:00-18:00, not a guard or sweeper, no gang, free)
+/// whose next shift is a workday.
+fn day_workers(w: &World) -> Vec<EntityId> {
+    w.citizens()
+        .into_iter()
+        .filter(|&a| law::living(w, a) && demography::is_adult(w, a))
+        .filter(|&a| w.gang_of(a).is_none() && !w.has::<citysim::Sentence>(a) && home(w, a).is_some())
+        .filter(|&a| {
+            w.comp::<Job>(a).is_some_and(|j| {
+                !matches!(j.role, Role::Guard | Role::Sanitation)
+                    && j.shifts == vec![(540, 1080)]
+                    && j.employer.is_some()
+                    && routine::workday_of(w, a, j, j.next_shift_key(w.tick))
+            })
+        })
+        .collect()
+}
+
+/// Item 11 (a): at home before a shift its hunger would not last (0.75 at
+/// 06:00 is under the Eat line, 0.6, by mid-shift), with meals in the
+/// pantry, a worker eats or packs a meal before leaving (a meal at 0.72
+/// would overfill: it packs one) and does not walk off the job for food. Measured on the flipped seed 42 (all-Full): 10.5 %
+/// of shift time was Eat, most of it a walk out 2-4 h+ into the shift with
+/// nothing carried and an empty pantry.
+#[test]
+fn probe_worker_eats_before_the_shift_not_during_it() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 6 * TICKS_PER_HOUR);
+    let a =
+        day_workers(&w).into_iter().find(|&a| building(&w, a) == home(&w, a)).expect("a day worker at home at 06:00");
+    pin(&mut w, a);
+    let employer = w.comp::<Job>(a).and_then(|j| j.employer).unwrap();
+    w.comp_mut::<Needs>(a).expect("needs").hunger = 0.75;
+    if let Some(i) = w.comp_mut::<Inventory>(a) {
+        i.food = 0;
+        i.synth = 0;
+        i.stolen_food = 0;
+    }
+    let h = home(&w, a).unwrap();
+    if let Some(b) = w.comp_mut::<Building>(h) {
+        b.stock_food = 8;
+        b.synth_food = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 30;
+    let (mut away_for_food, mut ate, mut packed) = (0u32, false, false);
+    run_to(&mut w, a, 2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR, |w| {
+        let s = step(w, a);
+        ate |= is_eat(s);
+        let on = w.comp::<Job>(a).is_some_and(|j| j.on_shift(w.tick_of_day()));
+        let eat_goal = w.comp::<Brain>(a).is_some_and(|b| b.current_goal == Some(citysim::GoalKind::Eat));
+        if on && eat_goal && building(w, a) != Some(employer) {
+            away_for_food += 1;
+        }
+        if w.tick_of_day() == 540 {
+            packed = w.comp::<Inventory>(a).is_some_and(|i| i.food > i.stolen_food);
+        }
+    });
+    eprintln!(
+        "worker {}: ate {ate}; a meal carried at 09:00 {packed}; on-shift minutes away for food {away_for_food}",
+        a.index
+    );
+    assert!(ate || packed, "no meal before the shift and none carried into it");
+    assert_eq!(away_for_food, 0, "walked off the job for food with a stocked pantry at home");
+}
+
+/// Item 11 (b): off shift, fed, with coins and an empty pantry, a worker
+/// tops the pantry up before the next shift (a grocery run), so the next
+/// shift's meal is at hand.
+#[test]
+fn probe_worker_stocks_the_pantry_off_shift() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
+    let a = day_workers(&w)
+        .into_iter()
+        .find(|&a| {
+            building(&w, a) == home(&w, a)
+                && w.spouse_of(a).is_none()
+                && home(&w, a).is_some_and(|h| w.residents_of(h).len() == 1)
+        })
+        .or_else(|| day_workers(&w).into_iter().find(|&a| building(&w, a) == home(&w, a)))
+        .expect("a day worker at home at 19:00");
+    pin(&mut w, a);
+    let h = home(&w, a).unwrap();
+    w.comp_mut::<Needs>(a).expect("needs").hunger = 0.95;
+    w.comp_mut::<Needs>(a).expect("needs").energy = 0.9;
+    if let Some(i) = w.comp_mut::<Inventory>(a) {
+        i.food = 0;
+        i.synth = 0;
+        i.stolen_food = 0;
+    }
+    if let Some(b) = w.comp_mut::<Building>(h) {
+        b.stock_food = 0;
+        b.synth_food = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 60;
+    let mut most = 0u32;
+    let mut seen: Vec<ActionKind> = Vec::new();
+    run_to(&mut w, a, 2 * TICKS_PER_DAY + 23 * TICKS_PER_HOUR, |w| {
+        let held = w.comp::<Building>(h).map_or(0, |b| b.stock_food)
+            + w.comp::<Inventory>(a).map_or(0, |i| i.food - i.stolen_food);
+        most = most.max(held);
+        if let Some(st) = step(w, a) {
+            if !seen.contains(&st) {
+                seen.push(st);
+            }
+        }
+    });
+    eprintln!("steps {seen:?}; residents {}", w.residents_of(h).len());
+    eprintln!("worker {}: meals at hand (pantry + carried) peaked at {most} by 23:00; coins {}", a.index, coins(&w, a));
+    assert!(seen.contains(&ActionKind::BuyFood), "an empty pantry, coins and an evening off, and no grocery run");
+    assert!(most >= 1, "the run left nothing at hand");
+}

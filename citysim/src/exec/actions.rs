@@ -97,6 +97,7 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::EatAlms => 30,
         ActionKind::DumpsterDive => 20,
         ActionKind::Oncology => 120,
+        ActionKind::PackMeal => 5,
         ActionKind::Donate => 5,
         ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
@@ -191,6 +192,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         // Hunger as sickness § 4: the dive's start check.
         ActionKind::DumpsterDive => crate::systems::bins::can_start(world, id, target),
         ActionKind::Oncology => crate::systems::health::can_start_oncology(world, id, target),
+        ActionKind::PackMeal => at_home(world, id) && home_pantry(world, id) > 0,
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -714,6 +716,23 @@ pub fn on_complete(
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
+        // P5i: one pantry unit (synth first, as eaten) into the carried food.
+        ActionKind::PackMeal => {
+            let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else {
+                return StepResult::Failed(FailReason::NoSuchPlace);
+            };
+            let Some(b) = world.comp_mut::<Building>(home) else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if b.stock_food == 0 {
+                return StepResult::Failed(FailReason::StockGone);
+            }
+            let meal = crate::systems::health::eat_pantry_unit(b);
+            world.release_all(id);
+            let Some(inv) = world.comp_mut::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
+            let synth = inv.synth_held();
+            inv.food += 1;
+            inv.synth = synth + u32::from(meal == crate::components::MealKind::Synth);
+            StepResult::Done
+        }
         ActionKind::Oncology => match target {
             Some(c) if crate::systems::health::oncology(world, id, c) => StepResult::Done,
             _ => StepResult::Failed(FailReason::PreconditionLost),

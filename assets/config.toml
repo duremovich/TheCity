@@ -1535,6 +1535,10 @@ commute_hire_ticks = 80
 # there), its owner corp paying when it can, else the Treasury (an import, keeping band[0]), else nothing
 # that day (no unpaid builds). Relocation then fills it.
 hf_grow_housing = true              # 10
+# P5i (coordinator call, 2026-10-10): 10.5 % of Full's shift time was Eat, mostly a walk out 2-4 h+ into the
+# shift with nothing carried and an empty pantry (92 % of the on-shift Work -> Eat switches).
+hf_shift_meals = true               # 11: eat or pack a meal before a shift; grocery runs off shift
+grocery_score = 0.5                 # 11: the fed worker's Eat (the grocery run) scores this
 housing_demand_min = 6              # 10: one Home's beds
 housing_demand_days = 3
 housing_builds_per_1000 = 1.0       # 10: Homes or floors a day per 1,000 residents (2 at 2,000)
