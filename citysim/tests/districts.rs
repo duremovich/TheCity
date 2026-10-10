@@ -1083,12 +1083,17 @@ fn test_riot_fires_at_streak_and_picks_target() {
     assert_eq!(kind, citysim::RiotTarget::Corp);
     assert!((grievance - 3.0).abs() < 1e-5, "{grievance}");
     // One midnight short of the streak: nothing.
+    let riot_events = |w: &World| w.events.iter().filter(|e| e.kind == citysim::EventKind::Riot).count();
+    let e0 = riot_events(&w);
     w.districts[d].unrest_streak = w.config.riots.riot_days - 1;
     riot::trigger(&mut w);
     assert!(w.riots.is_empty());
+    assert_eq!(riot_events(&w), e0, "no Riot event short of the streak");
     w.districts[d].unrest_streak = w.config.riots.riot_days;
     riot::trigger(&mut w);
     assert_eq!(w.riots.len(), 1);
+    // The core_sanity mechanism (now a printed finding): the Riot event.
+    assert!(riot_events(&w) > e0, "the riot logged a Riot event");
     let r = w.riots[0].clone();
     assert_eq!(r.district, DistrictId(d as u8));
     assert_eq!(r.target, block);

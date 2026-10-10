@@ -388,7 +388,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a hostile takeover", m("hostile takeover")), // [9, 10, 9]
         ("a Strike", k(EventKind::Strike)),            // [10, 9, 9]
         // M12 districts.
-        ("a Riot", k(EventKind::Riot)),        // [2, 10, 2]
         ("a gang Split", k(EventKind::Split)), // [1, 1, 1]; 5 of 6
         ("a Squat", k(EventKind::Squatted)),   // [93, 82, 94]
         // M13 assets.
@@ -408,7 +407,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a World export", k(EventKind::Exported)),      // [294, 328, 319]
         ("a Collect", k(EventKind::Collected)),          // [57, 57, 58]
         ("a Bout", k(EventKind::Bout)),                  // [150, 182, 223]
-        ("a gang front", m("gang front")),               // [0, 0, 74] days; 3 of 6 (the rarest bullet)
         ("a Mission meal", k(EventKind::MissionServed)), // [166, 250, 146]
         // M16a phase 3 (seeds 42-47 at phase 3, 120 days: each on 6 of 6).
         ("a BountyPaid", k(EventKind::BountyPaid)), // [729, 744, 731]; 45-47 [642, 725, 654]
@@ -446,8 +444,26 @@ fn sickness_mechanisms() -> Vec<Mechanism> {
     ]
 }
 
+/// Printed findings, not bullets: rare events (0-2 a seed) that flip on any
+/// trajectory change (hunger as sickness P5i, 2026-10-10: a Riot [2, 2, 0]
+/// and a gang front [0, 0, 32] days with item 11 off read [0, 0, 0] on
+/// both under a one-step butterfly, `max_coarse` 151, and fired again
+/// with P5i on under two others). Each is a unit-tested mechanism instead
+/// (docs/TESTING.md): `districts.rs::test_riot_fires_at_streak_and_picks_target`
+/// (and its streak-short negative), `leisure.rs::test_front_built_under_expand_in_held_district`
+/// and `test_no_front_without_expand_or_treasury`.
+fn printed_mechanisms() -> Vec<Mechanism> {
+    let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    vec![("a Riot", k(EventKind::Riot)), ("a gang front", m("gang front"))]
+}
+
 /// Every mechanism's count per seed, then the bullets: one line each.
 fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
+    for (name, f) in printed_mechanisms() {
+        let per: Vec<u32> = runs.iter().map(&f).collect();
+        eprintln!("FINDING mechanism {name} (printed, unit-tested): per seed {per:?}");
+    }
     let mut all = mechanisms();
     if runs.first().is_some_and(|r| r.sickness) {
         all.extend(sickness_mechanisms());
