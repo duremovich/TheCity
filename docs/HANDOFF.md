@@ -176,3 +176,4 @@ In order:
 2. **Recalibrate** on the fixed planner (rebase the `recal` tree or redo it: calibration city = the shipped city at 2,000, p_desperate/p_scavenge/p_beg learned everywhere), then **the flip** (P9a re-run; Dylan's go), then P10 (retire the switches).
 3. **The organic Hit market** (M16b or before it): grudges/vendettas/business reasons that buy a death, priced against what people hold.
 4. M16b, M17, M18 per the roadmap.
+- **M16a review fixes merged be1f156** (f27cfbf): all ten findings fixed with tests that fail on the old code (the crew never charges its buyer, queued jobs don't take Order::Job, ledger Locates settle, busy-taker ledger records rescheduled, `contract_cleared` once, no double bust, `accessory_unfounded` removed, three cleanups). Trio on main 750 passed. **M16a is closed.** Session ends here (2026-10-10): the next session starts from "Next session (written 2026-10-10)" above.
