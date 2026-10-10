@@ -4270,6 +4270,28 @@ pub struct LifeCfg {
     /// Item 5: an immigrant arrives with a seeded adult's savings for its
     /// Home's tier (`demography::spawn_immigrant`), crossed in from the World.
     pub vf_arrival: bool,
+    /// Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6): the Full
+    /// planner's hunger gaps the recalibration diaries found. Master switch
+    /// (off is the d771073 city byte for byte); the sub-switches are read
+    /// only with it on; `CITYSIM_HFIX_OFF=1,3` leaves single items off.
+    pub hunger_fixes: bool,
+    /// G1: starving with a meal in reach, eat before any paid leisure, a
+    /// bed, a dose or a purchase, and before an exhausted or night sleep.
+    pub hf_food_first: bool,
+    /// G2: Eat's can-obtain gate opens on a stocked Mission in reach.
+    pub hf_mission: bool,
+    /// G3: a theft of food costs `steal_can_buy` more while a meal is affordable.
+    pub hf_buy_not_steal: bool,
+    /// G4: a Beg with no giver is a dry hour (as Scavenge's), not a failure.
+    pub hf_beg_retry: bool,
+    /// G2: a starving agent walks this much further to a Mission.
+    pub hungry_reach_mult: f32,
+    /// G3: the theft cost added while the agent can buy a meal.
+    pub steal_can_buy: f32,
+    /// G4: dry Begs in a row that cool Earn ...
+    pub beg_dry_max: u8,
+    /// ... for this many hours.
+    pub beg_cool_hours: u64,
 }
 
 impl Default for LifeCfg {
@@ -4338,6 +4360,15 @@ impl Default for LifeCfg {
             vf_chrome_cap: true,
             vf_rent_meal: true,
             vf_arrival: true,
+            hunger_fixes: false,
+            hf_food_first: true,
+            hf_mission: true,
+            hf_buy_not_steal: true,
+            hf_beg_retry: true,
+            hungry_reach_mult: 2.0,
+            steal_can_buy: 12.0,
+            beg_dry_max: 3,
+            beg_cool_hours: 1,
         }
     }
 }

@@ -1500,6 +1500,18 @@ vf_rent_meal = true                 # 4: rent from income leaves an agent in arr
 # coins_by_tier (Sump 12 -> keeps 15, Mid 25, Spire 75, homeless 25), crossed in from the World, not a flat
 # 15 (three days of Spire rent: nearly every year-3 immigrant on seed 43 was starving within two weeks).
 vf_arrival = true
+# Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6; plan docs/plans/hunger-sickness.md): the Full planner's
+# hunger gaps the recalibration diaries found, each reproduced by a person probe that failed on d771073.
+# Master switch (off is the d771073 city byte for byte); `CITYSIM_HFIX_OFF=1,3` leaves single items off.
+hunger_fixes = true
+hf_food_first = true                # 1: starving with a meal in reach: eat before paid leisure, a bed, a dose, a sleep
+hf_mission = true                   # 2: Eat's can-obtain gate opens on a stocked Mission in reach
+hf_buy_not_steal = true             # 3: a food theft costs steal_can_buy more while a meal is affordable
+hf_beg_retry = true                 # 4: a Beg with no giver is a dry hour (as Scavenge's), not a failure
+hungry_reach_mult = 2.0             # 2: a starving agent walks this much further to a Mission
+steal_can_buy = 12.0                # 3
+beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...
+beg_cool_hours = 1                  # ... for this many hours
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a

@@ -186,6 +186,26 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
     }
 }
 
+/// Eat's "can afford/obtain" gate: food in hand, a meal's coins, a pantry,
+/// lawless enough to steal, or (hunger fix G2) a stocked Mission in reach
+/// that would serve this agent. Only Eat reads the local price: one Market
+/// scan per think, not per goal.
+pub fn eat_obtainable(world: &World, id: EntityId) -> bool {
+    let food = world.comp::<Inventory>(id).is_some_and(|i| i.food > 0);
+    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+    let pantry = world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<crate::components::Building>(h))
+        .map_or(0, |b| b.stock_food);
+    let lawfulness = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
+    let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
+    food || coins >= price
+        || pantry > 0
+        || lawfulness < 0.3
+        || (crate::systems::fixes::mission_gate(world) && crate::systems::charity::alms_target(world, id).is_some())
+}
+
 /// Considerations and flat bonus for one goal, or `None` if the agent lacks a
 /// required component.
 pub fn considerations(
@@ -202,20 +222,34 @@ pub fn considerations(
     let mm = mood_mult(mood, goal);
 
     let mut flat = 0.0;
+    // Hunger fix G1: starving with a meal in reach, the optional and paid
+    // goals wait for Eat (the diaries' starving beggar spent the begged
+    // coins on a Drink; an exhausted one slept to hunger 0 with 60 coins).
+    if matches!(
+        goal,
+        GoalKind::Socialise
+            | GoalKind::Court
+            | GoalKind::Unwind
+            | GoalKind::Shop
+            | GoalKind::GetHigh
+            | GoalKind::Hack
+            | GoalKind::Found
+            | GoalKind::Squat
+    ) && crate::systems::fixes::starving_first(world, id)
+    {
+        return None;
+    }
+    let eat_first = goal == GoalKind::Sleep && crate::systems::fixes::eat_first(world, id);
+    // Hunger fix G2: a free Mission meal before an hour's scavenging.
+    if goal == GoalKind::Earn && crate::systems::fixes::free_meal_first(world, id) {
+        return None;
+    }
     let cs = match goal {
         GoalKind::Eat => {
             let n = needs?;
-            let inv = world.comp::<Inventory>(id)?;
-            let wallet = world.comp::<Wallet>(id)?;
-            let pantry = world
-                .comp::<Household>(id)
-                .and_then(|h| h.home)
-                .and_then(|h| world.comp::<crate::components::Building>(h))
-                .map_or(0, |b| b.stock_food);
-            let lawfulness = pers.map_or(0.5, |p| p.lawfulness);
-            // Only Eat reads the local price: one Market scan per think, not per goal.
-            let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
-            let can_eat = inv.food > 0 || wallet.coins >= price || pantry > 0 || lawfulness < 0.3;
+            world.comp::<Inventory>(id)?;
+            world.comp::<Wallet>(id)?;
+            let can_eat = eat_obtainable(world, id);
             let mut cs = vec![
                 Consideration::new("U(hunger)", urgency(n.hunger), SQUARE),
                 Consideration::new("can afford/obtain", can(can_eat), GATE),
@@ -242,10 +276,12 @@ pub fn considerations(
             };
             // L1: exhaustion wins (agents sat at energy 0 for a day), and
             // the night belongs to sleep for anyone off shift.
-            if n.energy < world.config.life.exhausted_energy {
+            // Hunger fix G1: starving with a meal in reach, the flats wait
+            // for the meal (Sleep keeps its need and phase terms).
+            if n.energy < world.config.life.exhausted_energy && !eat_first {
                 flat += world.config.life.exhausted_flat;
             }
-            if phase == DayPhase::Night && !world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) {
+            if phase == DayPhase::Night && !world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) && !eat_first {
                 flat += world.config.life.night_sleep_flat;
             }
             vec![

@@ -581,6 +581,9 @@ pub struct PlanCtx {
     /// M13 D39: in withdrawal, `withdrawal_steal_bonus` off a theft's cost
     /// (0 otherwise: a branch).
     pub withdrawal_bonus: f32,
+    /// Hunger fix G3: `[life] steal_can_buy` added to a food theft's cost
+    /// while the agent can buy a meal (0 otherwise: a branch).
+    pub steal_can_buy: f32,
     /// M14 V11: the agent holds a `RunOrder` and a deck.
     pub run_order: bool,
     /// M14 V29: the carried deck holds Data.
@@ -802,6 +805,13 @@ impl PlanCtx {
         let held_vehicle = stims_on && crate::systems::vehicles::stolen_held_by(world, agent).is_some();
         let withdrawal_bonus = if stims_on && crate::systems::stims::in_withdrawal(world, agent) {
             world.config.stims.withdrawal_steal_bonus
+        } else {
+            0.0
+        };
+        let steal_can_buy = if crate::systems::fixes::buy_not_steal(world)
+            && coins_now >= crate::systems::life::meal_price(world, agent)
+        {
+            world.config.life.steal_can_buy
         } else {
             0.0
         };
@@ -1087,6 +1097,7 @@ impl PlanCtx {
             detox_affordable: detox_pick
                 && target_clinic.is_some_and(|c| coins_now >= crate::systems::stims::detox_price(world, c)),
             withdrawal_bonus,
+            steal_can_buy,
             run_order: world.run_orders.contains_key(&agent)
                 && world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.deck.is_some()),
             has_data: crate::systems::virt::deck_data(world, agent) > 0,
@@ -1701,9 +1712,11 @@ impl ActionKind {
             ActionKind::EatFromInventory => 1.0,
             ActionKind::EatAtHome => 2.0 + if ctx.pantry <= 2 { 4.0 } else { 0.0 },
             ActionKind::BuyFood => 3.0 + ctx.greed * 2.0,
-            ActionKind::StealFood(StealSource::Market) => steal_mods(8.0),
-            ActionKind::StealFood(StealSource::Home) => steal_mods(7.0) + if ctx.target_occupied { 5.0 } else { 0.0 },
-            ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0,
+            ActionKind::StealFood(StealSource::Market) => steal_mods(8.0) + ctx.steal_can_buy,
+            ActionKind::StealFood(StealSource::Home) => {
+                steal_mods(7.0) + if ctx.target_occupied { 5.0 } else { 0.0 } + ctx.steal_can_buy
+            }
+            ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0 + ctx.steal_can_buy,
             ActionKind::Forage => 6.0 + if ctx.hunger < 0.3 { 2.0 } else { 0.0 },
             ActionKind::Beg => {
                 let mut c = 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0;

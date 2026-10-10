@@ -1387,6 +1387,9 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
             if let Some(w) = world.comp_mut::<Wallet>(id) {
                 w.coins += coins;
             }
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.beg_dry = 0;
+            }
             {
                 // the lower id owes the higher id
                 let (lo, _) = key;
@@ -1398,6 +1401,20 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
             }
             return StepResult::Done;
         }
+    }
+    // Hunger fix G4: nobody gave; an hour honestly spent (Scavenge's dry
+    // hour), retried, until `beg_dry_max` in a row cool Earn.
+    if crate::systems::fixes::beg_retry(world) {
+        let max = world.config.life.beg_dry_max.max(1);
+        let cool = world.tick + world.config.life.beg_cool_hours * crate::time::TICKS_PER_HOUR;
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.beg_dry = b.beg_dry.saturating_add(1);
+            if b.beg_dry >= max {
+                b.beg_dry = 0;
+                b.cooldowns.insert(crate::components::GoalKind::Earn, cool);
+            }
+        }
+        return StepResult::Done;
     }
     world.remember(id, MemoryKind::Rejected, None, 0.3, -0.3, false);
     StepResult::Failed(FailReason::PreconditionLost)

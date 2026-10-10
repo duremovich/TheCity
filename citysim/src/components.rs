@@ -1933,6 +1933,9 @@ pub struct Brain {
     /// L2 (L29): dry Scavenge hours in a row (saved: a streak survives a load).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub scavenge_dry: u8,
+    /// Hunger fix G4: dry Begs in a row (saved, as `scavenge_dry`).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub beg_dry: u8,
     /// L2 phase 5 (gang desistance): the day a gang stipend or tribute last
     /// reached this member (written only with `[living]` on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1995,6 +1998,7 @@ impl Default for Brain {
             quit_from: None,
             stat_dole_day: None,
             scavenge_dry: 0,
+            beg_dry: 0,
             gang_paid_day: None,
             lod_since: 0,
             avoid_spot: None,

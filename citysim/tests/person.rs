@@ -649,3 +649,189 @@ fn probe_broke_hand_networks_at_a_fixer_within_a_week() {
     );
     assert!(on.is_some(), "never networked at the Fixer within a week of going broke");
 }
+
+// ---------------------------------------------------------------------------
+// Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6): the Full-planner gaps
+// the recalibration diaries found. Each probe failed on main before its fix
+// (`[life] hunger_fixes`).
+// ---------------------------------------------------------------------------
+
+/// The distinct steps an agent began, in order (consecutive repeats folded).
+fn steps_log(log: &mut Vec<ActionKind>, w: &World, id: EntityId) {
+    if let Some(s) = step(w, id) {
+        if log.last() != Some(&s) {
+            log.push(s);
+        }
+    }
+}
+
+fn set_hungry(w: &mut World, a: EntityId, hunger: f32, coins: i64) {
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = coins;
+    w.comp_mut::<Inventory>(a).expect("inventory").food = 0;
+    w.comp_mut::<Inventory>(a).expect("inventory").stolen_food = 0;
+    if let Some(h) = home(w, a) {
+        w.comp_mut::<Building>(h).expect("home").stock_food = 0;
+    }
+    w.comp_mut::<Needs>(a).expect("needs").hunger = hunger;
+}
+
+fn jobless_civilians(w: &World) -> Vec<EntityId> {
+    civilians(w).into_iter().filter(|&a| w.comp::<Job>(a).is_none()).collect()
+}
+
+/// G1 (`hf_food_first`): starving (hunger 0.08) at 18:00, with either a
+/// coin short of a meal or sixty over it: a person eats before spending on
+/// a drink, a game, a bed or a dose, and does not sleep the night through
+/// starving with the coins for a meal. The diaries (and this probe on main)
+/// showed a starving beggar spending the begged coins on a Drink, and an
+/// exhausted one with 60 coins sleeping 8 h to hunger 0.
+#[test]
+fn probe_starving_eats_before_spending_or_sleeping() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
+    let picks: Vec<EntityId> = civilians(&w).into_iter().step_by(37).take(30).collect();
+    let mut bad = Vec::new();
+    for &a in &picks {
+        for extra in [-1i64, 60] {
+            let mut w = w.clone();
+            pin(&mut w, a);
+            let price = citysim::systems::life::meal_price(&w, a);
+            set_hungry(&mut w, a, 0.08, (price + extra).max(0));
+            let mut log = Vec::new();
+            let end = w.tick + 8 * TICKS_PER_HOUR;
+            run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+            let first_eat = log.iter().position(|&s| is_eat(Some(s)) || s == ActionKind::EatAlms);
+            let first_spend = log.iter().position(|&s| {
+                matches!(
+                    s,
+                    ActionKind::CheckIn
+                        | ActionKind::Gamble
+                        | ActionKind::Enjoy
+                        | ActionKind::Drink
+                        | ActionKind::BuyStims
+                        | ActionKind::BuyAsset
+                        | ActionKind::Donate
+                )
+            });
+            let spent_first = match (first_eat, first_spend) {
+                (Some(e), Some(s)) => s < e,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+            let rich_unfed = extra > 0 && first_eat.is_none();
+            if spent_first || rich_unfed {
+                eprintln!("agent {} {extra:+}: {log:?}", a.index);
+                bad.push((a.index, extra));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} of {} starving runs spent first or went unfed with coins: {bad:?}",
+        bad.len(),
+        picks.len() * 2
+    );
+}
+
+/// G2 (`hf_mission`): lawful, broke, an empty larder, hungry, a stocked
+/// Mission within reach: a person walks to the Mission and eats.
+#[test]
+fn probe_broke_lawful_eats_at_the_mission() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let m = citysim::systems::charity::missions(&w)
+        .into_iter()
+        .find(|&m| w.comp::<Building>(m).is_some_and(|b| b.kind == citysim::BuildingKind::Mission))
+        .expect("a Mission");
+    w.comp_mut::<Building>(m).expect("mission").stock_food = 60;
+    let door = w.comp::<Building>(m).expect("mission").door;
+    let reach = w.config.charity.reach_tiles;
+    let picks: Vec<EntityId> = jobless_civilians(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness >= 0.3))
+        .filter(|&a| {
+            home(&w, a).and_then(|h| w.comp::<Building>(h)).is_some_and(|b| {
+                let d = b.door.manhattan(door);
+                (8..=reach.saturating_sub(8)).contains(&d)
+            })
+        })
+        .take(8)
+        .collect();
+    assert!(!picks.is_empty(), "a lawful jobless adult within a Mission's reach");
+    let mut bad = Vec::new();
+    for &a in &picks {
+        let mut w = w.clone();
+        pin(&mut w, a);
+        set_hungry(&mut w, a, 0.3, 0);
+        let mut log = Vec::new();
+        let end = w.tick + 6 * TICKS_PER_HOUR;
+        run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+        eprintln!("lawful broke {}: {:?}, hunger {:.2}", a.index, log, w.comp::<Needs>(a).map_or(0.0, |n| n.hunger));
+        if !log.iter().any(|&s| s == ActionKind::EatAlms || is_eat(Some(s))) {
+            bad.push(a.index);
+        }
+    }
+    assert!(bad.is_empty(), "{} of {} never ate in six hours: {bad:?}", bad.len(), picks.len());
+}
+
+/// G3 (`hf_buy_not_steal`): starving at 22:00, lawless, with coins for three
+/// meals: a person buys; the diaries showed such agents stealing from Homes.
+#[test]
+fn probe_starving_with_coins_buys_not_steals() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 22 * TICKS_PER_HOUR);
+    let (mut stole, mut bought, mut tried) = (0, 0, 0);
+    for a in civilians(&w).into_iter().filter(|&a| home(&w, a).is_some()).take(12) {
+        tried += 1;
+        let mut w = w.clone();
+        if let Some(p) = w.comp_mut::<citysim::Personality>(a) {
+            p.lawfulness = 0.05;
+        }
+        pin(&mut w, a);
+        let price = citysim::systems::life::meal_price(&w, a);
+        set_hungry(&mut w, a, 0.05, 3 * price);
+        let mut log = Vec::new();
+        let end = w.tick + 8 * TICKS_PER_HOUR;
+        run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+        if log.iter().any(|s| matches!(s, ActionKind::StealFood(_))) {
+            stole += 1;
+            eprintln!("agent {} stole with coins: {log:?}", a.index);
+        }
+        bought += usize::from(log.contains(&ActionKind::BuyFood));
+    }
+    eprintln!("of {tried}: stole {stole}, bought {bought}");
+    assert_eq!(stole, 0, "{stole} of {tried} lawless starving agents with coins stole food");
+}
+
+/// G4 (`hf_beg_retry`): a Beg that finds no giver at 03:00 (nobody about
+/// holds more than 10 coins) is an hour honestly spent, as Scavenge's dry
+/// hour: `Done`, not a failure that cools Earn after the second try (the
+/// diaries' beggar gave up after one dry Beg). Three dry Begs in a row cool
+/// Earn for `beg_cool_hours`.
+#[test]
+fn probe_dry_beg_is_an_honest_hour() {
+    use citysim::exec::actions::on_complete;
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 3 * TICKS_PER_HOUR);
+    for o in w.citizens() {
+        if let Some(x) = w.comp_mut::<Wallet>(o) {
+            x.coins = x.coins.min(10);
+        }
+    }
+    let a = jobless_civilians(&w)[0];
+    pin(&mut w, a);
+    set_hungry(&mut w, a, 0.3, 0);
+    let t = w.tick;
+    let first = on_complete(&mut w, a, ActionKind::Beg, None, t, t);
+    eprintln!("a dry Beg: {first:?}");
+    assert!(matches!(first, citysim::StepResult::Done), "a dry Beg failed the plan: {first:?}");
+    let cooled = |w: &World| {
+        w.comp::<Brain>(a).and_then(|b| b.cooldowns.get(&citysim::GoalKind::Earn).copied()).is_some_and(|u| u > w.tick)
+    };
+    assert!(!cooled(&w), "one dry Beg cooled Earn");
+    for _ in 0..w.config.life.beg_dry_max {
+        let t = w.tick;
+        on_complete(&mut w, a, ActionKind::Beg, None, t, t);
+    }
+    assert!(cooled(&w), "beg_dry_max dry Begs in a row did not cool Earn");
+}

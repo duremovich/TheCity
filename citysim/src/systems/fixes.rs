@@ -38,6 +38,66 @@ pub fn vfix_item(world: &World, n: u32) -> bool {
     violence_on(world) && vfix_off_mask() & (1 << n.min(31)) == 0
 }
 
+// ---------------------------------------------------------------------------
+// The hunger fixes (hunger as sickness P1, docs/HUNGER_SICKNESS.md § 6)
+// ---------------------------------------------------------------------------
+
+/// Diagnostics: hunger-fix items to leave off, from `CITYSIM_HFIX_OFF`.
+fn hfix_off_mask() -> u32 {
+    static MASK: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *MASK.get_or_init(|| {
+        std::env::var("CITYSIM_HFIX_OFF")
+            .ok()
+            .map(|v| v.split(',').filter_map(|x| x.trim().parse::<u32>().ok()).fold(0, |m, n| m | (1 << n.min(31))))
+            .unwrap_or(0)
+    })
+}
+
+/// Is hunger-fix item `n` on (`[life] hunger_fixes` and not masked)?
+fn hfix_item(world: &World, n: u32) -> bool {
+    world.config.life.hunger_fixes && hfix_off_mask() & (1 << n.min(31)) == 0
+}
+
+/// G1: eat first while starving.
+pub fn food_first(world: &World) -> bool {
+    hfix_item(world, 1) && world.config.life.hf_food_first
+}
+
+/// G2: the Mission opens Eat's can-obtain gate.
+pub fn mission_gate(world: &World) -> bool {
+    hfix_item(world, 2) && world.config.life.hf_mission
+}
+
+/// G3: no food theft while a meal is affordable (a cost, not a ban).
+pub fn buy_not_steal(world: &World) -> bool {
+    hfix_item(world, 3) && world.config.life.hf_buy_not_steal
+}
+
+/// G4: a Beg with no giver is a dry hour.
+pub fn beg_retry(world: &World) -> bool {
+    hfix_item(world, 4) && world.config.life.hf_beg_retry
+}
+
+/// G1: starving (`hunger < starving_hunger`): the optional and paid goals
+/// wait (a meal in reach is eaten first; a meal short keeps its coins for
+/// the meal: the diaries' beggar drank the two coins a meal cost three).
+pub fn starving_first(world: &World, id: EntityId) -> bool {
+    food_first(world) && world.comp::<Needs>(id).is_some_and(|n| n.hunger < world.config.life.starving_hunger)
+}
+
+/// G1: starving with a meal obtainable (`goals::eat_obtainable`): Sleep's
+/// exhaustion and night flats wait for the meal too.
+pub fn eat_first(world: &World, id: EntityId) -> bool {
+    starving_first(world, id) && crate::utility::goals::eat_obtainable(world, id)
+}
+
+/// G2: a hungry agent a Mission would feed now: Earn waits for the free meal
+/// (the lawful broke scavenged six hours at hunger 0.2 beside a stocked
+/// Mission: Earn's own hunger term outscored Eat).
+pub fn free_meal_first(world: &World, id: EntityId) -> bool {
+    mission_gate(world) && crate::systems::charity::alms_target(world, id).is_some()
+}
+
 /// Violence fix 1: the ledger's `VictimClass::Street`.
 pub fn street_class(world: &World) -> bool {
     vfix_item(world, 1) && world.config.life.vf_street_class

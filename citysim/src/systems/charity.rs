@@ -102,7 +102,11 @@ pub fn meal_cost(world: &World) -> i64 {
 /// The standing Mission with stock nearest `from` within `reach_tiles`
 /// (ties the lower id).
 pub fn mission_in_reach(world: &World, from: TilePos) -> Option<EntityId> {
-    let reach = world.config.charity.reach_tiles;
+    mission_within(world, from, world.config.charity.reach_tiles)
+}
+
+/// The nearest standing, stocked, open Mission within `reach` tiles of `from`.
+pub fn mission_within(world: &World, from: TilePos, reach: u32) -> Option<EntityId> {
     missions(world)
         .into_iter()
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.stock_food > 0) && !world.is_closed(b))
@@ -548,6 +552,22 @@ pub fn gang_gift(world: &mut World, gang: EntityId) {
 /// `[GoTo(Seller = mission)] -> EatAlms`. A Volunteer at its own Mission
 /// eats there on shift whatever its coins (the staff meal).
 pub fn alms_plan(world: &World, id: EntityId) -> Option<Plan> {
+    let m = alms_target(world, id)?;
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
+    let mut steps = Vec::with_capacity(2);
+    if here != Some(m) {
+        steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(m)));
+    }
+    steps.push(step(ActionKind::EatAlms, Some(m)));
+    Some(Plan { goal: crate::components::GoalKind::Eat, target: Some(m), steps, started_tick: world.tick })
+}
+
+/// The Mission that would serve `id` a meal now (`alms_plan`'s test): a
+/// hungry adult who cannot buy a meal, its own Mission for a Volunteer,
+/// else the nearest stocked one within `reach_tiles` of its Home door (else
+/// tile); hunger fix G2: a starving agent's reach x `hungry_reach_mult`.
+pub fn alms_target(world: &World, id: EntityId) -> Option<EntityId> {
     if !crate::systems::demography::is_adult(world, id) {
         return None;
     }
@@ -560,21 +580,19 @@ pub fn alms_plan(world: &World, id: EntityId) -> Option<Plan> {
     if staff.is_none() && coins >= crate::systems::life::meal_price(world, id) {
         return None;
     }
-    let here = world.comp::<Position>(id).and_then(|p| p.building);
-    let m = match staff {
-        Some(m) if world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0) => m,
+    match staff {
+        Some(m) if world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0) => Some(m),
         _ => {
             let from = origin(world, id)?;
-            mission_in_reach(world, from)?
+            let starving = hunger < world.config.life.starving_hunger;
+            if starving && crate::systems::fixes::mission_gate(world) {
+                let reach = (world.config.charity.reach_tiles as f32 * world.config.life.hungry_reach_mult) as u32;
+                mission_within(world, from, reach)
+            } else {
+                mission_in_reach(world, from)
+            }
         }
-    };
-    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
-    let mut steps = Vec::with_capacity(2);
-    if here != Some(m) {
-        steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(m)));
     }
-    steps.push(step(ActionKind::EatAlms, Some(m)));
-    Some(Plan { goal: crate::components::GoalKind::Eat, target: Some(m), steps, started_tick: world.tick })
 }
 
 /// The Mission `id` volunteers at, if any.
