@@ -233,3 +233,11 @@ One line each; the phase commits carry the numbers.
 - **H7 is read only with the market on**; it skips a `Hired` rumour whose actor is the teller or a gang/corp the teller belongs to.
 - **Statistical and Full buyers both post at once** in phase 1 (H9's errand is phase 2).
 - `HitCols` holds 12 columns (no per-motive price columns: `hm_price_sum` ÷ posted).
+
+### Phase 3 (gangs and corps)
+
+- **Protect moves to phase 2.** A gang buying silence for its member needs H14/H15 (cold cases, recanting) to buy anything; it lands with Silence.
+- **`gang_pass`, daily, at most one head a gang a day**: its open vendettas' rival gang leaders first (`Rival`, the whole `gang_spend` share of the treasury when the weaker side by `hire_ratio`, half otherwise), else the heaviest Hunt-eligible grudge its leader holds on an outsider (`Revenge`, by weight). M16a's order-change trigger (`post_gang_hit` from `faction::rescore`) is retired with the market on.
+- **`corp_pass`, daily**: the rival is the latest wrong (`Corp.last_wronged: (corp, tick, Wrong)`, written at the hostile buyout, the poach and both undercut sites) inside `rival_window_days`, then corps in an open vendetta. One Rival record per corp per `corp_cooldown_days` (read off the board, no state); decision 4's city-wide cap counts Rival Hits **posted** in 365 days (`World::hm_corp_hits`, saved); at the cap a dirty exec buys nothing (no downgrade to a Beat).
+- **Factions pay in full at the market price** (no credit); a faction waits `repost_days` before buying the same head again (`bought_lately`, read off the board). Lobby's culprit record is priced at the market with `Motive::Culprit`.
+- **Finding for Dylan: execs are cheap.** The strike estimate sees few defenders around an exec, so a rival exec's market price is 20-60 coins (the same as a nobody's); only gang leaders and a few others hit the `quote` fallback (300-1,500). Decision 1 says hard targets keep the old quote; by the risk estimate an exec is not hard.

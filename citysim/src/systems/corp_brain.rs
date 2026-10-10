@@ -1133,6 +1133,7 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
         if !bankrupt {
             let d = world.district_of_building(building);
             crate::systems::gossip::post_deed(world, d, crate::word::Deed::Betrayed, Some(corp), Some(seller));
+            crate::systems::hitmarket::wronged(world, seller, corp, crate::contract::Wrong::Acquired);
         }
         let now = world.tick;
         if let Some(c) = world.comp_mut::<Corp>(corp) {

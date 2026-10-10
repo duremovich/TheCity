@@ -842,8 +842,9 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         &[gang],
         format!("{name}: {current:?} -> {order:?} ({why}, {best_score:.2} vs {current_score:.2})"),
     );
-    // M16a (plan C33): a weak gang also hires a Hit on the rival's leader.
-    if matches!(order, Order::Raid | Order::Retaliate) {
+    // M16a (plan C33): a weak gang also hires a Hit on the rival's leader
+    // (with the Hit market on, `hitmarket::gang_pass` does it daily, H19).
+    if matches!(order, Order::Raid | Order::Retaliate) && !world.config.hitmarket.enabled {
         crate::systems::contracts::post_gang_hit(world, gang, order);
     }
     true

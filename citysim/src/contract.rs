@@ -318,6 +318,27 @@ impl Motive {
     }
 }
 
+/// The Hit market (H18): how a rival corp wronged a corp (`Corp.last_wronged`).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum Wrong {
+    /// A hostile buyout of one of its buildings.
+    Acquired,
+    /// One of its staff poached.
+    Poached,
+    /// Undercut: a guard client moved, or a niche share taken.
+    Undercut,
+}
+
+impl Wrong {
+    pub fn label(self) -> &'static str {
+        match self {
+            Wrong::Acquired => "the buyout",
+            Wrong::Poached => "the poaching",
+            Wrong::Undercut => "the undercutting",
+        }
+    }
+}
+
 /// The Hit market: what `contracts::post_with` adds to a `Posting`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PostExtra {

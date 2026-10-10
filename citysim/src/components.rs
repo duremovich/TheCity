@@ -1350,6 +1350,10 @@ pub struct Corp {
     pub lobby_until: Option<Tick>,
     #[serde(default)]
     pub last_acquisition_tick: Option<Tick>,
+    /// The Hit market (H18, plan D11): the last rival corp that wronged this
+    /// one (a hostile buyout, a poached hand, an undercut), how and when.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_wronged: Option<(EntityId, Tick, crate::contract::Wrong)>,
     /// D38: the seeding row (CSV columns); spinoffs and incorporations `None`.
     #[serde(default)]
     pub slot: Option<u8>,
@@ -1489,6 +1493,7 @@ impl Corp {
             contracts: Vec::new(),
             lobby_until: None,
             last_acquisition_tick: None,
+            last_wronged: None,
             slot: None,
             treasury_ref: treasury.max(1000),
             cashflow_today: 0,

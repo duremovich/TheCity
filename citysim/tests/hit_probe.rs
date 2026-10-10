@@ -40,6 +40,7 @@ fn hit_market_report() {
             .map(|&seed| {
                 s.spawn(move || {
                     let mut w = World::new(seed, Config::load());
+                    let seeded: Vec<EntityId> = w.corps();
                     let mut seen: BTreeMap<u64, Seen> = BTreeMap::new();
                     let mut stories: Vec<String> = vec![];
                     let (mut cursor, mut violent, mut stiffed, mut unaff, mut refused, mut pooled) = (0u64, 0u32, 0u32, 0u32, 0u32, 0i64);
@@ -136,8 +137,12 @@ fn hit_market_report() {
                         charged += u32::from(s.charged);
                         brokered += u32::from(s.brokered);
                     }
+                    let alive: std::collections::BTreeSet<EntityId> = w.corps().into_iter().collect();
+                    let corps_alive = seeded.iter().filter(|c| alive.contains(c)).count();
                     let mut out = format!(
-                        "seed {seed}: violent deaths {violent}; organic [posted, done, failed, expired, cancelled, live] {:?}; mean price {} deposit {}; brokered {brokered}/{n}; stiffed {stiffed}; buyers charged {charged}; tries short {unaff}; kin refused {refused}; pooled {pooled}\n",
+                        "seed {seed}: violent deaths {violent}; seeded corps alive {corps_alive}/{}; corp exec Hits posted {}; organic [posted, done, failed, expired, cancelled, live] {:?}; mean price {} deposit {}; brokered {brokered}/{n}; stiffed {stiffed}; buyers charged {charged}; tries short {unaff}; kin refused {refused}; pooled {pooled}\n",
+                        seeded.len(),
+                        w.hm_corp_hits.len(),
                         by,
                         if n > 0 { price / n } else { 0 },
                         if n > 0 { dep / n } else { 0 },

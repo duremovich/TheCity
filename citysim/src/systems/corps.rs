@@ -585,6 +585,7 @@ fn renew_contracts(world: &mut World) {
                     end_contract(world, client, &format!("moved to {}", world.owner_label(Some(r))));
                     buy_contract(world, client, r);
                     corp_brain::push_shock(world, seller, CorpShock::Undercut);
+                    crate::systems::hitmarket::wronged(world, seller, r, crate::contract::Wrong::Undercut);
                     let why = if by_honour { "honour" } else { "price" };
                     if by_honour {
                         world.stats.current.word.contracts_lost_honour += 1;
@@ -648,6 +649,7 @@ fn roll_shares(world: &mut World) {
             });
             if fell {
                 corp_brain::push_shock(world, r, CorpShock::Undercut);
+                crate::systems::hitmarket::wronged(world, r, c, crate::contract::Wrong::Undercut);
             }
         }
     }

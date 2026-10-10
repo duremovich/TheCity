@@ -469,6 +469,7 @@ pub fn try_poach(world: &mut World, corp: EntityId, vacancy: EntityId, role: Rol
         crate::systems::memory::hear_entry(world, oe, e);
     }
     ownership::push_corp_shock(world, old, CorpShock::Poached);
+    crate::systems::hitmarket::wronged(world, old, corp, crate::contract::Wrong::Poached);
     world.stats.current.word.poached += 1;
     true
 }

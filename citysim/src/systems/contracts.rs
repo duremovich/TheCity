@@ -238,7 +238,7 @@ pub fn nearest_fixer(world: &World, id: EntityId) -> Option<EntityId> {
 }
 
 /// The open Fixer nearest a tile (any distance; ties the lower id).
-fn nearest_fixer_to(world: &World, from: TilePos) -> Option<EntityId> {
+pub(crate) fn nearest_fixer_to(world: &World, from: TilePos) -> Option<EntityId> {
     open_fixers(world)
         .into_iter()
         .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
@@ -2590,6 +2590,9 @@ pub fn daily(world: &mut World) {
     prune_regulars(world);
     stat_regulars(world);
     hire_pass(world);
+    // The Hit market (H18, H19): the gangs' and corps' business.
+    crate::systems::hitmarket::gang_pass(world);
+    crate::systems::hitmarket::corp_pass(world);
     // Phase 3 (C30, C31, C33, C34).
     law_and_street_daily(world);
     for f in world.buildings_of_kind(BuildingKind::Fixer).to_vec() {
@@ -3181,13 +3184,30 @@ fn brain_post(
     broker: Option<EntityId>,
     origin: Origin,
 ) -> Result<ContractId, Refusal> {
+    brain_post_with(world, buyer, agent, kind, target, broker, origin, None, PostExtra::default())
+}
+
+/// [`brain_post`] at a given price (`None`: quoted) with the Hit market's
+/// extras (a faction pays in full: no deposit).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn brain_post_with(
+    world: &mut World,
+    buyer: Option<EntityId>,
+    agent: Option<EntityId>,
+    kind: ContractKind,
+    target: Target,
+    broker: Option<EntityId>,
+    origin: Origin,
+    price: Option<i64>,
+    extra: PostExtra,
+) -> Result<ContractId, Refusal> {
     if let (Some(b), Target::Agent(t)) = (buyer, target) {
         if kind != ContractKind::Guard && crate::systems::grudges::member_of(world, t, b) {
             return Err(Refusal::NoTarget);
         }
     }
     let deadline_days = world.config.contracts.deadline_days.get(kind);
-    let r = post(world, Posting { buyer, agent, kind, target, broker, deadline_days, origin, price: None });
+    let r = post_with(world, Posting { buyer, agent, kind, target, broker, deadline_days, origin, price }, extra);
     note_refused(world, &r);
     r
 }
@@ -3201,13 +3221,13 @@ fn note_refused(world: &mut World, r: &Result<ContractId, Refusal>) {
 }
 
 /// An open Fixer in a district the gang holds (lowest id).
-fn fixer_in_held(world: &World, gang: EntityId) -> Option<EntityId> {
+pub(crate) fn fixer_in_held(world: &World, gang: EntityId) -> Option<EntityId> {
     let held: Vec<usize> = crate::systems::gang::held_districts(world, gang).iter().map(|&(d, _)| d.index()).collect();
     open_fixers(world).into_iter().find(|&f| held.contains(&world.district_of_building(f).index()))
 }
 
 /// A faction's head: a gang's leader, a corp's exec (living, free).
-fn head_of(world: &World, f: EntityId) -> Option<EntityId> {
+pub(crate) fn head_of(world: &World, f: EntityId) -> Option<EntityId> {
     let h = world
         .comp::<crate::components::Gang>(f)
         .and_then(|g| g.leader)
@@ -3312,8 +3332,16 @@ pub fn post_lobby(world: &mut World, corp: EntityId, gang: EntityId) -> bool {
     let Some(at) = world.comp::<Position>(head).map(|p| p.tile) else { return false };
     let Some(broker) = nearest_fixer_to(world, at) else { return false };
     let origin = Origin::CorpOrder(crate::components::CorpOrder::Lobby);
+    let target = Target::Agent(head);
+    // The Hit market (H18): at the market price, the motive on the record.
+    let (price, extra) = if world.config.hitmarket.enabled {
+        let p = organic_price(world, kind, &target, Some(corp), Some(exec), Some(broker));
+        (Some(p), PostExtra { deposit: None, motive: Motive::Culprit, why: None })
+    } else {
+        (None, PostExtra::default())
+    };
     matches!(
-        brain_post(world, Some(corp), Some(exec), kind, Target::Agent(head), Some(broker), origin),
+        brain_post_with(world, Some(corp), Some(exec), kind, target, Some(broker), origin, price, extra),
         Ok(_) | Err(Refusal::Duplicate)
     )
 }

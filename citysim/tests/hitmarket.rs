@@ -396,3 +396,194 @@ fn test_market_off_keeps_m16a_hire() {
     assert!(!contracts::try_hire(&mut w, h, t, 0.95));
     assert_eq!(coins(&w, k), 1_000);
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3: the gangs' and corps' business (H18, H19, decision 4)
+// ---------------------------------------------------------------------------
+
+fn set_gang_treasury(w: &mut World, g: EntityId, coins_: i64) {
+    if let Some(x) = w.comp_mut::<citysim::Gang>(g) {
+        x.treasury = coins_;
+    }
+}
+
+fn set_corp_treasury(w: &mut World, c: EntityId, coins_: i64) {
+    if let Some(x) = w.comp_mut::<citysim::Corp>(c) {
+        x.treasury = coins_;
+    }
+}
+
+/// The first two gangs, each staffed with three strangers and led.
+fn led_gangs(w: &mut World) -> Vec<EntityId> {
+    use citysim::systems::gang;
+    let gangs = w.gangs();
+    let (a, b) = (gangs[0], gangs[1]);
+    let people = strangers(w, 6);
+    for (i, &m) in people.iter().enumerate() {
+        gang::enlist(w, m, if i < 3 { a } else { b });
+    }
+    for g in [a, b] {
+        gang::recompute_leader(w, g);
+    }
+    vec![a, b]
+}
+
+/// Two gangs with living leaders, in an open vendetta.
+fn feuding_gangs(w: &mut World) -> (EntityId, EntityId) {
+    let gangs = led_gangs(w);
+    let (a, b) = (gangs[0], gangs[1]);
+    let now = w.tick;
+    w.vendettas.push(citysim::word::Vendetta { a, b, since: now, kills: [0, 0], w: [1.0, 1.0], declared: None });
+    (a, b)
+}
+
+fn organic_by(w: &World, buyer: EntityId) -> Vec<citysim::contract::Contract> {
+    w.contracts.values().filter(|c| c.buyer == Some(buyer) && !c.motive.is_none()).cloned().collect()
+}
+
+/// H19: a gang in a vendetta with money buys the rival leader's death.
+#[test]
+fn test_gang_buys_rival_leader_in_a_feud() {
+    let mut w = world();
+    let (a, b) = feuding_gangs(&mut w);
+    set_gang_treasury(&mut w, a, 100_000);
+    hitmarket::gang_pass(&mut w);
+    let lb = w.comp::<citysim::Gang>(b).and_then(|x| x.leader).unwrap();
+    let mine = organic_by(&w, a);
+    assert_eq!(mine.len(), 1, "one head a day");
+    assert_eq!((mine[0].kind, mine[0].target, mine[0].motive), (ContractKind::Hit, Target::Agent(lb), Motive::Rival));
+    assert_eq!(mine[0].deposit, 0, "a faction pays in full");
+    // The next day: already bought.
+    hitmarket::gang_pass(&mut w);
+    assert_eq!(organic_by(&w, a).len(), 1);
+}
+
+/// H19: a broke gang buys nothing.
+#[test]
+fn test_broke_gang_buys_nothing() {
+    let mut w = world();
+    let (a, _) = feuding_gangs(&mut w);
+    set_gang_treasury(&mut w, a, 0);
+    hitmarket::gang_pass(&mut w);
+    assert!(organic_by(&w, a).is_empty());
+}
+
+/// H19: a gang pays for its leader's revenge on an outsider.
+#[test]
+fn test_gang_pays_for_its_leaders_revenge() {
+    let mut w = world();
+    let g = led_gangs(&mut w)[0];
+    let leader = w.comp::<citysim::Gang>(g).and_then(|x| x.leader).unwrap();
+    let t = adults(&w).into_iter().find(|&a| !w.has::<GangMember>(a) && a != leader && !law::is_guard(&w, a)).unwrap();
+    set_grudge(&mut w, leader, t, 0.95);
+    set_gang_treasury(&mut w, g, 100_000);
+    hitmarket::gang_pass(&mut w);
+    let mine = organic_by(&w, g);
+    assert_eq!(mine.len(), 1);
+    assert_eq!((mine[0].kind, mine[0].target, mine[0].motive), (ContractKind::Hit, Target::Agent(t), Motive::Revenge));
+    assert_eq!(mine[0].agent, Some(leader));
+}
+
+/// Two corps with living execs.
+fn two_corps(w: &World) -> (EntityId, EntityId, EntityId) {
+    let cs: Vec<EntityId> = w
+        .corps()
+        .into_iter()
+        .filter(|&c| w.comp::<citysim::Corp>(c).and_then(|x| x.exec).is_some_and(|e| law::living(w, e)))
+        .collect();
+    (cs[0], cs[1], cs[2])
+}
+
+fn set_exec_law(w: &mut World, c: EntityId, law_: f32) {
+    let e = w.comp::<citysim::Corp>(c).and_then(|x| x.exec).unwrap();
+    if let Some(p) = w.comp_mut::<Personality>(e) {
+        p.lawfulness = law_;
+    }
+}
+
+/// H18: a dirty exec wronged by a rival buys the rival exec's death; the
+/// cooldown holds; a clean exec buys nothing.
+#[test]
+fn test_dirty_corp_buys_rival_exec_after_a_wrong() {
+    let mut w = world();
+    let (c, r, r2) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.9);
+    hitmarket::wronged(&mut w, c, r, citysim::contract::Wrong::Acquired);
+    hitmarket::corp_pass(&mut w);
+    assert!(organic_by(&w, c).is_empty(), "a clean exec buys nothing");
+    set_exec_law(&mut w, c, 0.1);
+    hitmarket::corp_pass(&mut w);
+    let er = w.comp::<citysim::Corp>(r).and_then(|x| x.exec).unwrap();
+    let mine = organic_by(&w, c);
+    assert_eq!(mine.len(), 1);
+    assert_eq!((mine[0].kind, mine[0].target, mine[0].motive), (ContractKind::Hit, Target::Agent(er), Motive::Rival));
+    assert_eq!(w.hm_corp_hits.len(), 1);
+    // The cooldown: a second wrong a day later buys nothing more.
+    w.tick += citysim::TICKS_PER_DAY;
+    hitmarket::wronged(&mut w, c, r2, citysim::contract::Wrong::Poached);
+    hitmarket::corp_pass(&mut w);
+    assert_eq!(organic_by(&w, c).len(), 1);
+}
+
+/// Decision 4: past the city-wide cap no corp buys an exec's death; an
+/// exec between `dirty_lobby` and `dirty_beat` buys a beating instead.
+#[test]
+fn test_corp_hit_year_cap_and_beat_band() {
+    let mut w = world();
+    let (c, r, _) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.1);
+    w.config.hitmarket.corp_year_cap = 0;
+    hitmarket::wronged(&mut w, c, r, citysim::contract::Wrong::Undercut);
+    hitmarket::corp_pass(&mut w);
+    assert!(organic_by(&w, c).is_empty(), "the cap holds");
+    set_exec_law(&mut w, c, 0.35);
+    hitmarket::corp_pass(&mut w);
+    let mine = organic_by(&w, c);
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].kind, ContractKind::Beat);
+}
+
+/// H18: a wrong older than `rival_window_days` is forgotten.
+#[test]
+fn test_old_wrong_is_forgotten() {
+    let mut w = world();
+    let (c, r, _) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.1);
+    hitmarket::wronged(&mut w, c, r, citysim::contract::Wrong::Acquired);
+    w.tick += u64::from(w.config.hitmarket.rival_window_days + 1) * citysim::TICKS_PER_DAY;
+    hitmarket::corp_pass(&mut w);
+    assert!(organic_by(&w, c).is_empty());
+}
+
+/// H18: Lobby's culprit record is priced at the market and labelled.
+#[test]
+fn test_lobby_culprit_at_market_price() {
+    let mut w = world();
+    let (c, _, _) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.1);
+    let g = led_gangs(&mut w)[0];
+    let lg = w.comp::<citysim::Gang>(g).and_then(|x| x.leader).unwrap();
+    let f = contracts::open_fixers(&w)[0];
+    let at = w.comp::<citysim::Position>(lg).map(|p| p.tile).unwrap();
+    let _ = at;
+    let kind = ContractKind::Hit;
+    let expect = contracts::organic_price(
+        &w,
+        kind,
+        &Target::Agent(lg),
+        Some(c),
+        w.comp::<citysim::Corp>(c).and_then(|x| x.exec),
+        Some(f),
+    );
+    assert!(contracts::post_lobby(&mut w, c, g));
+    let rec = w.contracts.values().find(|x| x.buyer == Some(c)).cloned().unwrap();
+    assert_eq!(rec.motive, Motive::Culprit);
+    assert_eq!(rec.kind, kind);
+    if rec.broker == Some(f) {
+        assert_eq!(rec.price, expect, "priced at the market (or quote when nobody asks)");
+    }
+}

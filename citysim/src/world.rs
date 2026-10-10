@@ -659,6 +659,10 @@ pub struct World {
     /// M15 W18: the open feuds between factions.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub vendettas: Vec<crate::word::Vendetta>,
+    /// The Hit market (decision 4): the ticks corps posted a Rival Hit on an
+    /// exec, the last 365 days (the city-wide cap).
+    #[serde(default, skip_serializing_if = "std::collections::VecDeque::is_empty")]
+    pub hm_corp_hits: std::collections::VecDeque<Tick>,
     /// M15 W35: a body -> the agents standing over it (GuardBody's wait);
     /// rebuilt from the guards' plans on load.
     #[serde(skip)]
@@ -1148,6 +1152,7 @@ impl World {
             hunted_by: BTreeMap::new(),
             kill_chain: BTreeMap::new(),
             vendettas: Vec::new(),
+            hm_corp_hits: std::collections::VecDeque::new(),
             guards_of_corpse: BTreeMap::new(),
             stories: VecDeque::new(),
             next_story_id: 0,
