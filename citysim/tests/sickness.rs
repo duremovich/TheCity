@@ -705,3 +705,30 @@ fn test_children_roll_no_cancer() {
     }
     assert!(cancer(&w, k).is_none());
 }
+
+/// P5 (a): the bins fill from what is sold and eaten too: a Market's sale
+/// leaves `market_waste` a unit, a pantry meal `home_scrap`, and a small
+/// pantry's spoilage carries its fraction until a unit spoils into the bin.
+#[test]
+fn test_bins_fill_from_sales_meals_and_carried_spoilage() {
+    let mut w = world_on();
+    let m = market(&w);
+    citysim::systems::bins::market_sale(&mut w, m, 10);
+    assert_eq!(bin_of(&w, m), (10.0 * w.config.sickness.market_waste).floor() as u16);
+    let h = *w.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
+    for _ in 0..5 {
+        citysim::systems::bins::home_meal(&mut w, h);
+    }
+    assert_eq!(bin_of(&w, h), (5.0 * w.config.sickness.home_scrap + 1e-4).floor() as u16);
+    // A 4-unit pantry (5 % a day, 7.5 % in the Sump) spoils a unit within
+    // a fortnight with the carry, never without it.
+    let mut v = world_on();
+    let h = *v.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
+    let mut spoiled = false;
+    for _ in 0..14 {
+        v.comp_mut::<Building>(h).expect("home").stock_food = 4;
+        v.run_ticks(TICKS_PER_DAY);
+        spoiled |= v.comp::<Building>(h).is_some_and(|b| b.stock_food < 4 || b.bin > 0);
+    }
+    assert!(spoiled, "the carried fraction spoiled a unit");
+}

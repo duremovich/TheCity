@@ -2110,6 +2110,11 @@ p_stat_treat = 0.2
 bin_cap = 40
 bin_meals_per_unit = 2
 venue_scrap = 0.3
+# P5 (the stop rule's trace, seed 42 flipped): with spoilage alone 0-5 bins held scraps city-wide (a small
+# pantry's 5 % floors to 0; the Markets' 1 % half rots by morning) and the off-screen starving had none in
+# reach. Waste scales with what is sold and eaten, as a city's does:
+market_waste = 0.2         # scrap meals into a Market's bin per shelf unit sold
+home_scrap = 0.2           # scrap meals into a Home's bin per pantry meal eaten
 bin_rot = 0.5
 dive_reach_tiles = 40
 dive_satisfy = 0.6

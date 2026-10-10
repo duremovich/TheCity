@@ -34,6 +34,10 @@ const POP_MIN: u32 = 1333;
 const POP_MAX: u32 = 2667;
 /// Starvation deaths per 120 days.
 const STARVATION_MAX_120: f64 = 200.0;
+/// Hunger as sickness (Dylan, decision 5): with `[sickness]` on, starvation
+/// over 20 per 120 days means synth, the bins and the Missions all failed:
+/// a broken free-food floor, a broken city.
+const STARVATION_MAX_120_SICK: f64 = 20.0;
 /// Assault + Murder events per day (2x the M7 baseline, per capita).
 const ASSAULTS_PER_DAY_MAX: f64 = 42.7;
 /// Seeded corps still trading at the run's end (the year gate's number).
@@ -70,6 +74,8 @@ struct SeedRun {
     adults: Vec<(u32, u32, u32, u32)>,
     /// The run is a no-net city (J24/J25 asserted).
     no_net: bool,
+    /// `[sickness]` on (the tighter starvation bound and its bullets).
+    sickness: bool,
 }
 
 impl SeedRun {
@@ -103,6 +109,7 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         tps: 0.0,
         adults: Vec::new(),
         no_net: econ::no_net(&w),
+        sickness: citysim::systems::health::on(&w),
     };
     let mut cursor = 0u64;
     // Prisoners at the last hour's end, by their tier then.
@@ -174,9 +181,16 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         day_mark("Crackdown held", w.law().is_some_and(|l| l.posture == Posture::Crackdown));
         day_mark("gang controls a district", w.districts.iter().any(|d| matches!(d.control, Controller::Gang(_))));
         day_mark("gang front", row.living.fronts > 0);
+        day_mark("malnourished agent", row.health.malnourished > 0);
+        day_mark("a sick day", row.health.sick_days > 0);
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
         *r.marks.entry("crash death").or_insert(0) += row.crash_deaths;
         *r.marks.entry("Mission meal").or_insert(0) += row.econ.mission_meals;
+        // Hunger as sickness: the day's synth and bin meals, a malnourished
+        // day, the shakedowns (zeros with `[sickness]` off).
+        *r.marks.entry("synth meal").or_insert(0) += row.health.meals_synth;
+        *r.marks.entry("bin meal").or_insert(0) += row.health.meals_dive;
+        *r.marks.entry("bin shakedown").or_insert(0) += row.health.bin_shakedowns;
         // M16a: the contract columns (printed; the bullets read the
         // Guard and Locate rows), and a Fixer in business (open, a record
         // brokered there in the last 7 days: the spec's definition).
@@ -247,7 +261,8 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     let (lo, hi) = (pop.iter().copied().min().unwrap_or(0), pop.iter().copied().max().unwrap_or(0));
     fail((POP_MIN..=POP_MAX).contains(&lo) && hi <= POP_MAX, format!("population {lo}..{hi} in {POP_MIN}..={POP_MAX}"));
     let starv = r.sum(from, to, |x| x.deaths_starvation);
-    let starv_max = STARVATION_MAX_120 * n / 120.0;
+    let per_120 = if r.sickness { STARVATION_MAX_120_SICK } else { STARVATION_MAX_120 };
+    let starv_max = per_120 * n / 120.0;
     fail(starv <= starv_max, format!("starvation {starv:.0} <= {starv_max:.0}"));
     let asl: f64 = r.assaults[from as usize..to as usize].iter().map(|&a| f64::from(a)).sum::<f64>() / n;
     fail(asl <= assaults_max, format!("assaults/day {asl:.2} <= {assaults_max:.2}"));
@@ -370,9 +385,29 @@ fn mechanisms() -> Vec<Mechanism> {
     ]
 }
 
+/// Hunger as sickness: the bullets read only with `[sickness]` on (the
+/// shipped default is off until the flip). Chosen on the flipped city,
+/// 120 days, seeds 42-47 (each on 6 of 6; see the P5 commit). A regular's
+/// bin contest, a diagnosis, a cure and a Disease death fired on 2 or fewer
+/// of 6: unit tests in `sickness.rs` instead.
+fn sickness_mechanisms() -> Vec<Mechanism> {
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    vec![
+        ("a synth meal", m("synth meal")),
+        ("a bin meal", m("bin meal")),
+        ("a bin shakedown", m("bin shakedown")),
+        ("a malnourished agent", m("malnourished agent")),
+        ("a sick day", m("a sick day")),
+    ]
+}
+
 /// Every mechanism's count per seed, then the bullets: one line each.
 fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
-    for (name, f) in mechanisms() {
+    let mut all = mechanisms();
+    if runs.first().is_some_and(|r| r.sickness) {
+        all.extend(sickness_mechanisms());
+    }
+    for (name, f) in all {
         let per: Vec<u32> = runs.iter().map(&f).collect();
         let ok = per.iter().any(|&c| c >= 1);
         eprintln!("{} mechanism {name}: per seed {per:?}", if ok { "PASS" } else { "FAIL" });

@@ -673,12 +673,16 @@ pub fn run_statistical(world: &mut World) {
     let phase = world.phase();
     // L2 L13: the hour's `fun` decay off screen (the exec set once).
     let fun_execs = Some(crate::systems::classes::exec_set(world));
-    let no_net = crate::systems::econ::no_net(world);
+    // The recalibration (2026-10-09, ported with hunger as sickness P5): the
+    // dole city reads the scavenge and beg path too, whenever the table
+    // carries it (`calibrate` learns it in every city; without it the
+    // off-screen broke of the dole city had the dole alone).
+    let earn_path = world.stat_table.as_ref().is_some_and(|t| t.p_scavenge.is_some());
     for id in agents {
         let Some(row) = stat_row(world, id) else { continue };
         // Flip readiness (no safety net): the table row's index at the hour's
-        // start, for the no-net income path's per-row rates.
-        let no_net_row = if no_net { stat_row_index(world, id) } else { None };
+        // start, for the income path's per-row rates.
+        let no_net_row = if earn_path { stat_row_index(world, id) } else { None };
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
@@ -1102,6 +1106,7 @@ fn stat_eat(world: &mut World, id: EntityId) {
         if let Some(b) = world.comp_mut::<Building>(h) {
             meal = crate::systems::health::eat_pantry_unit(b);
         }
+        crate::systems::bins::home_meal(world, h);
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
@@ -1151,9 +1156,7 @@ fn stat_eat(world: &mut World, id: EntityId) {
     // the meal by lawfulness, as the Full planner's theft cost reads it
     // (`p_desperate`, calibrated on the Full tier's hungry thieves below the
     // meal price); a lawful agent mostly goes hungry (the noon Mission, the
-    // next hour's scavenge or beg). The dole city's table has no
-    // `p_desperate`: the M10 rule (starving, whatever the lawfulness). Adults
-    // only (`calibrate` learns it from adults); a child keeps the M10 rule.
+    // next hour's scavenge or beg).
     // Hunger as sickness § 4: a dive on the row's `p_dive` of hours (every
     // hour without a learned rate), the body's bin, contest and meal.
     if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
@@ -1165,7 +1168,16 @@ fn stat_eat(world: &mut World, id: EntityId) {
             return;
         }
     }
-    let need = if crate::systems::econ::no_net(world) && crate::systems::demography::is_adult(world, id) {
+    // The recalibration (2026-10-09, ported
+    // with hunger as sickness P5): the dole city reads it too (`calibrate`
+    // learns it in every city), only where the city it was learned in holds:
+    // a no-net city or a dole that pays. With the dole cut and no no-net path
+    // the off-screen broke have no other meal, so the M10 rule stands. A
+    // table without `p_desperate`: the M10 rule (starving, whatever the
+    // lawfulness). Adults only; a child keeps the M10 rule.
+    let dole_pays = world.levers.dole_per_day > 0 && world.treasury().map_or(0, |t| t.coins) >= 0;
+    let learned_city = crate::systems::econ::no_net(world) || dole_pays;
+    let need = if learned_city && crate::systems::demography::is_adult(world, id) {
         let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
         world.stat_table.as_ref().and_then(|t| t.p_desperate.map(|d| (d[t.lawfulness_bucket(law)], t.hunger_edge)))
     } else {

@@ -2402,7 +2402,7 @@ const CHECKS: &[Check] = &[
     (19, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.24), 0.02, 0.19),
     (19, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
     (19, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.86), 0.96, 0.96),
-    (19, "gang_member", Metric::WalkHDay, Bound::Max(6.8), 4.74, 5.73),
+    (19, "gang_member", Metric::WalkHDay, Bound::Max(7.9), 4.74, 6.84),
     (19, "gang_member", Metric::LongestSleepH, Bound::Min(4.1), 4.68, 5.06),
     (19, "gang_member", Metric::Energy0HWeek, Bound::Max(2.2), 0.00, 0.14),
     (19, "gang_member", Metric::KnownMetWeek, Bound::Min(3.9), 6.50, 13.40),

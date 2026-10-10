@@ -76,10 +76,27 @@ pub fn spoiled(world: &mut World, b: EntityId, units: u32) {
 
 /// A meal served at venue `b` (EatOut): `venue_scrap` of a meal into its bin.
 pub fn venue_meal(world: &mut World, b: EntityId) {
-    if !on(world) {
+    let scrap = world.config.sickness.venue_scrap;
+    waste(world, b, scrap);
+}
+
+/// `units` sold off Market `b`'s shelf: `market_waste` a unit into its bin.
+pub fn market_sale(world: &mut World, b: EntityId, units: u32) {
+    let scrap = world.config.sickness.market_waste * units as f32;
+    waste(world, b, scrap);
+}
+
+/// A meal eaten out of Home `b`'s pantry: `home_scrap` into its bin.
+pub fn home_meal(world: &mut World, b: EntityId) {
+    let scrap = world.config.sickness.home_scrap;
+    waste(world, b, scrap);
+}
+
+/// `scrap` of a meal into `b`'s bin through its fraction (`bin_accum`).
+fn waste(world: &mut World, b: EntityId, scrap: f32) {
+    if !on(world) || scrap <= 0.0 {
         return;
     }
-    let scrap = world.config.sickness.venue_scrap;
     let whole = {
         let Some(bd) = world.comp_mut::<Building>(b) else { return };
         bd.bin_accum += scrap;
@@ -144,7 +161,19 @@ pub fn dive_target(world: &World, id: EntityId) -> Option<EntityId> {
     if coins >= crate::systems::life::meal_price(world, id) {
         return None;
     }
-    let from = world.comp::<Position>(id)?.tile;
+    // A body dives from where it stands; off screen, from its Home's door
+    // (else its tile), as the Mission's reach is read (P5's trace: the
+    // off-screen stand-in stands at the phase's door, rarely near a bin).
+    let body = world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod != Lod::Statistical);
+    let home_door = world
+        .comp::<crate::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door);
+    let from = match home_door {
+        Some(d) if !body => d,
+        _ => world.comp::<Position>(id)?.tile,
+    };
     let reach = world.config.sickness.dive_reach_tiles;
     world
         .bins

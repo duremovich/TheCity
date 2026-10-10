@@ -128,8 +128,10 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
     }
 }
 
-/// Parity v2 (M10 § 7, D37): Full vs Statistical on the 2,000 map's city
-/// scaled to 500, gangless, 30 days, seeds 2000-2005 pooled. Thefts, hunger-days, arrests,
+/// Parity v2 (M10 § 7, D37): Full vs Statistical in `calibrate`'s city
+/// (`Config::calibration_city` at `[world] population`: the shipped city,
+/// gangless, riot- and asset-free; 500 residents until the 2026-10-09
+/// recalibration), 30 days, seeds 2000-2005 pooled. Thefts, hunger-days, arrests,
 /// assaults, violent deaths and marriages per 100 agent-days within 15%
 /// (floor 0.5); then, with every hole bound, the share of attributed crimes
 /// per actor lawfulness bucket within `max(0.15 x share, 0.05)`. Run with
@@ -139,7 +141,7 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
 fn test_full_vs_statistical_within_15pct() {
     use citysim::systems::bind;
     use citysim::{EventKind, Personality};
-    const AGENTS: u32 = 500;
+    let agents: u32 = Config::load().world.population;
     const DAYS: u64 = 30;
     const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
     struct Run {
@@ -156,9 +158,9 @@ fn test_full_vs_statistical_within_15pct() {
             2
         })
     }
-    fn run(force: Lod, seed: u64) -> Run {
+    fn run(force: Lod, seed: u64, agents: u32) -> Run {
         // The city `calibrate` measured: gangless, full Warehouse.
-        let mut cfg = Config::load().calibration_city(AGENTS);
+        let mut cfg = Config::load().calibration_city(agents);
         cfg.lod.force = Some(force);
         cfg.lod.stat_violence_mult = 1.0;
         // The learned-policy experiment: `CITYSIM_STAT_POLICY=mlp`.
@@ -229,7 +231,7 @@ fn test_full_vs_statistical_within_15pct() {
             "{force:?} seed {seed}: thefts by bucket {:?}, violence/attributed by bucket {:?}, population {pop:?}",
             split[0], split[1]
         );
-        let per = f64::from(AGENTS) * DAYS as f64 / 100.0;
+        let per = f64::from(agents) * DAYS as f64 / 100.0;
         let sum = |f: fn(&citysim::DayRow) -> u32| w.stats.history.iter().map(f).sum::<u32>() as f64 / per;
         Run {
             rates: [
@@ -261,7 +263,7 @@ fn test_full_vs_statistical_within_15pct() {
     // on the Full side alone between seeds 2000-2002 and 2003-2005 (law0
     // 0.204 vs 0.242) against a 0.05 tolerance (M10 review fixes).
     let pooled = |force: Lod| {
-        let runs: Vec<Run> = SEEDS.iter().map(|&s| run(force, s)).collect();
+        let runs: Vec<Run> = SEEDS.iter().map(|&s| run(force, s, agents)).collect();
         let n = runs.len() as f64;
         let rates = std::array::from_fn(|i| runs.iter().map(|r| r.rates[i]).sum::<f64>() / n);
         let counts: [f64; 3] = std::array::from_fn(|b| runs.iter().map(|r| r.actors[b]).sum::<f64>());
@@ -366,6 +368,12 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
         if broke {
             // No dole to buy with: the starving agent's only meal is a theft.
             w.levers.dole_per_day = 0;
+            // The M10 rule (a table without `p_desperate`: a starving adult
+            // steals whatever its lawfulness); the table's `p_desperate`
+            // roll is the no-net tests' below.
+            if let Some(t) = w.stat_table.as_mut() {
+                t.p_desperate = None;
+            }
         }
         {
             let n = w.comp_mut::<Needs>(id).expect("needs");

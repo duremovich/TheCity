@@ -2441,6 +2441,9 @@ pub struct Building {
     /// § 4: a venue's fraction of a scrap meal (`venue_scrap` a meal served).
     #[serde(default, skip_serializing_if = "is_zero_f32_c")]
     pub bin_accum: f32,
+    /// § 4 (P5): a Home pantry's fraction of a spoiled unit, carried over.
+    #[serde(default, skip_serializing_if = "is_zero_f32_c")]
+    pub spoil_carry: f32,
     /// § 4: the diver holding the bin, until (one at a time).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bin_diver: Option<(EntityId, Tick)>,

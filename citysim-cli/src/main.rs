@@ -5,7 +5,7 @@
 //!                 [--lever "day=90:release_reserve=1500"]... [--save-at T]
 //!                 [--load FILE] [--force-lod full|coarse|stat] [--population N]
 //!                 [--map FILE]
-//! citysim-cli calibrate [--days 30] [--agents 500] [--seeds 3] [--map assets/map.txt]
+//! citysim-cli calibrate [--days 30] [--agents N] [--seeds 3] [--map assets/map.txt]
 //!                       [--out assets/stat_table.toml] [--straight-lines]
 //! ```
 //!
@@ -125,8 +125,12 @@ impl From<ForceLod> for Lod {
 struct CalibrateArgs {
     #[arg(long, default_value_t = 30)]
     days: u64,
-    #[arg(long, default_value_t = 500)]
-    agents: u32,
+    /// Residents (`[world] population` when absent). The recalibration
+    /// (2026-10-09) moved the default from 500: a 500-resident city on the
+    /// 2,000 map has a quarter of the police per street and four times the
+    /// corps' places per resident (see `Config::calibration_city`).
+    #[arg(long)]
+    agents: Option<u32>,
     #[arg(long, default_value = "assets/map.txt")]
     map: PathBuf,
     #[arg(long, default_value = "assets/stat_table.toml")]
@@ -1468,7 +1472,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         Brain, Corpse, DeathCause, EventKind, MemoryKind, Needs, Personality, StatRow, StatTable, STAT_ROWS,
     };
     use std::collections::BTreeMap;
-    let mut config = Config::load().calibration_city(args.agents);
+    let loaded = Config::load();
+    let agents = args.agents.unwrap_or(loaded.world.population);
+    let mut config = loaded.calibration_city(agents);
     config.world.map = map_path(&args.map)?;
     config.lod.force = Some(Lod::Full);
     config.exec.straight_line_paths = args.straight_lines;
@@ -1477,7 +1483,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         version: 2,
         seed: 1000,
         days: args.days,
-        agents: args.agents,
+        agents,
         lawfulness_edges: [0.3, 0.7],
         hunger_edge: 0.4,
         p_dole_day: 1.0,
@@ -1503,7 +1509,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     // agent-hours with a Scavenge, with a Beg, and all earning agent-hours;
     // per lawfulness bucket: thefts by a hungry thief below the meal price,
     // and the hungry agent-hours below the meal price.
-    let no_net = citysim::systems::econ::no_net_cfg(&config);
+    // The recalibration (2026-10-09): the income path and p_desperate are
+    // learned in every city (the dole city's off-screen broke scavenge, beg
+    // and go hungry as its Full ones do).
     let (mut scav, mut beg, mut scav_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS], [0u64; STAT_ROWS]);
     let (mut dive, mut dive_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS]);
     let (mut desp, mut desp_denom) = ([0u64; 3], [0u64; 3]);
@@ -1536,7 +1544,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let hunger = world.comp::<Needs>(id).map_or(1.0, |n| n.hunger);
             let courting = citysim::systems::social::known_candidate(world, id, 0.3).is_some();
             let features = with_rows.then(|| citysim::systems::stat_policy::features(world, id));
-            let adult = no_net && citysim::systems::demography::is_adult(world, id);
+            let adult = citysim::systems::demography::is_adult(world, id);
             let earn = adult && !world.has::<citysim::Job>(id) && below_savings(world, id);
             let broke = adult
                 && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
@@ -1872,19 +1880,12 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let p_dole_day = (dole_taken as f32 / dole_days.max(1) as f32).min(1.0);
     let p_theft_caught = Some((theft_arrests as f32 / thefts_all.max(1) as f32).min(1.0));
     eprintln!("thefts {thefts_all}, arrests {arrests}, of a thief {theft_arrests}");
-    let (p_scavenge, p_beg, p_desperate) = if no_net {
-        eprintln!(
-            "no-net: scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours; desperate {desp:?} of {desp_denom:?} hungry broke hours"
-        );
-        let rate = |n: u64, d: u64| (n as f32 / d.max(1) as f32).min(1.0);
-        (
-            Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i]))),
-            Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i]))),
-            Some(std::array::from_fn(|i| rate(desp[i], desp_denom[i]))),
-        )
-    } else {
-        (None, None, None)
-    };
+    let rate = |n: u64, d: u64| (n as f32 / d.max(1) as f32).min(1.0);
+    eprintln!("desperate {desp:?} of {desp_denom:?} hungry broke hours");
+    let p_desperate = Some(std::array::from_fn(|i| rate(desp[i], desp_denom[i])));
+    eprintln!("scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours");
+    let p_scavenge = Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i])));
+    let p_beg = Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i])));
     // Hunger as sickness § 5: `p_dive` with the bins on. A row with under
     // 200 eligible hours takes the mean over all rows (plan risk: noisy rows).
     let p_dive = (config.sickness.enabled && config.sickness.diet && config.sickness.bins).then(|| {
@@ -1898,11 +1899,11 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let table = StatTable { rows, p_dole_day, p_theft_caught, p_scavenge, p_beg, p_desperate, p_dive, ..header };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
     let text = format!(
-        "# generated by calibrate v2: seeds {}..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",
+        "# generated by calibrate v2: seeds {}..={}, {} days, {} agents, map {}, gangless, riot- and asset-free, {} walks, DO NOT EDIT\n{body}",
         args.first_seed,
         args.first_seed + args.seeds - 1,
         args.days,
-        args.agents,
+        agents,
         args.map.display(),
         if args.straight_lines { "straight-line" } else { "pathed" }
     );
@@ -1912,7 +1913,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     std::fs::write(&args.out, text).map_err(|e| format!("{}: {e}", args.out.display()))?;
     eprintln!(
         "calibrated {} agents over {} days in {:.1}s -> {} (agent-hours per row: {:?})",
-        args.agents,
+        agents,
         args.days,
         t0.elapsed().as_secs_f32(),
         args.out.display(),

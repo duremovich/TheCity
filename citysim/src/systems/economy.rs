@@ -297,7 +297,14 @@ fn daily_spoilage(world: &mut World) {
         };
         // Hunger as sickness § 1: synth keeps (0 synth with the diet off).
         let synth = b.synth_food.min(b.stock_food);
-        let lost = ((b.stock_food - synth) as f32 * rate).floor() as u32;
+        // Hunger as sickness § 4 (P5): with the bins on a Home carries its
+        // spoilage's fraction (a small pantry's 5 % floored to 0 for good).
+        let due = (b.stock_food - synth) as f32 * rate;
+        let due = if bins && b.kind == BuildingKind::Home { due + b.spoil_carry } else { due };
+        let lost = (due.floor() as u32).min(b.stock_food - synth);
+        if bins && b.kind == BuildingKind::Home {
+            b.spoil_carry = if b.stock_food > synth { (due - lost as f32).clamp(0.0, 1.0) } else { 0.0 };
+        }
         b.stock_food -= lost;
         b.synth_food = synth.min(b.stock_food);
         if bins && lost > 0 && b.kind != BuildingKind::Warehouse {
@@ -664,6 +671,7 @@ pub fn take_food_q(
         mk.sales_today += units;
         mk.synth_frac = frac;
     }
+    crate::systems::bins::market_sale(world, m, units);
     if let Some(i) = world.comp_mut::<Inventory>(agent) {
         i.synth = i.synth_held() + meals;
         i.food += meals;
@@ -707,6 +715,9 @@ pub fn take_food(world: &mut World, agent: EntityId, market: Option<EntityId>, u
     }
     if let Some(m) = market.and_then(|m| world.comp_mut::<Market>(m)) {
         m.sales_today += units;
+    }
+    if let Some(m) = market {
+        crate::systems::bins::market_sale(world, m, units);
     }
     if let Some(i) = world.comp_mut::<Inventory>(agent) {
         i.food += units;

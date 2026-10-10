@@ -2277,6 +2277,7 @@ impl World {
                 synth_food: 0,
                 bin: 0,
                 bin_accum: 0.0,
+                spoil_carry: 0.0,
                 bin_diver: None,
                 bin_regular: None,
             },

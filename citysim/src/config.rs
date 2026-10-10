@@ -5012,39 +5012,41 @@ impl Config {
         self
     }
 
-    /// The city `calibrate` measures and the LOD parity test replays: `n`
-    /// residents (`scaled_to`), gangless (the table never modelled gang
-    /// actions, D26) and a full Warehouse (M10 phase 5b). Full farmers work
-    /// about half the shift hours a Statistical farmer is credited with, so
-    /// an all-Full city runs a food deficit the real, mostly Statistical
-    /// city never sees: at 500 residents it emptied its Warehouse by day 24,
-    /// the price reached 16, and the table learned famine theft as everyday
-    /// theft.
+    /// The city `calibrate` measures and the LOD parity test replays: the
+    /// shipped city at `n` residents (`scaled_to`; both run the shipped
+    /// population since the recalibration, see below) with only the cuts
+    /// whose effect the Statistical tier models elsewhere. Gangless (the
+    /// table never modelled gang actions, D26; off screen a gang's violence
+    /// is `fviolence`'s ledger, L2 phase 4) and a full Warehouse (M10 phase
+    /// 5b). Full farmers work about half the shift hours a Statistical
+    /// farmer is credited with, so an all-Full city runs a food deficit the
+    /// real, mostly Statistical city never sees: at 500 residents it emptied
+    /// its Warehouse by day 24, the price reached 16, and the table learned
+    /// famine theft as everyday theft.
+    ///
+    /// The recalibration (2026-10-09, `recal`; ported with hunger as
+    /// sickness P5 onto the fixed planner): the table's rows condition on
+    /// phase, lawfulness and hunger only, so every off-screen agent rolls the
+    /// calibration city's average hour. That city was corp-less, rent-free,
+    /// with equal wallets, no derelicts and 500 residents on the 2,000 map:
+    /// on the flipped config about half its adults stayed jobless and broke
+    /// while the shipped city is ~93 % employed (p_killed 5.7x, p_steal 3x),
+    /// and at 500 residents a quarter of the police patrolled the same
+    /// streets. The corps (their jobs, private guards, Markets and Blocks),
+    /// rent, the tiered opening wallets, the class coupling and the seeded
+    /// derelicts are the shipped city's now; three pooled seeds average one
+    /// seed's landlords out.
     pub fn calibration_city(self, n: u32) -> Config {
         let mut c = self.scaled_to(n);
         c.gangs.max_members = 0;
         c.world.warehouse_initial = c.buildings.warehouse.stock_cap;
-        // M11: the calibration city stays city-owned and rent-free with equal
-        // wallets, so the table measures behaviour, not one seed's landlords.
-        c.rent.base = [0, 0, 0];
-        // The real city shops by price (D15); keep that walk, not the
-        // corp-free default's nearest Market. The dole, tax and school
-        // meals stay the 2,000 city's.
-        let tiles = c.corps.shop_price_tiles;
-        c.corps = CorpsCfg::none();
-        c.corps.shop_price_tiles = tiles;
-        c.world.coins_by_tier = [1.0, 1.0, 1.0];
-        // M11 phase 4: no class coupling (immigration at the lever, no Dreg
-        // emigration), as v1_profile.
-        c.classes.couple_immigration = false;
-        c.classes.dreg_emigrate_days = 0;
-        // M12 D48: litter and the street on, but no seeded derelicts (the
-        // table measures behaviour, not one seed's housing shortage).
-        c.street.seed_derelict_blocks = 0;
-        // M12 D48 (phase 4): riots off, no splits, no crossfire.
+        // M12 D48 (phase 4): riots off, no splits, no crossfire (off screen
+        // a riot is `fviolence`'s source).
         c.riots = RiotsCfg::off();
         c.gangs.split_base = 0.0;
-        // M13 D46/D50: no assets: the table and the parity test are unchanged.
+        // M13 D46/D50: no assets. `lod::stat_probs` layers a kitted agent's
+        // Kit and a stim withdrawal over the bare row, so the row must not
+        // already hold them.
         c.assets = AssetsCfg::off();
         c.vehicles = VehiclesCfg::off();
         c.shop = ShopCfg::off();
@@ -5988,6 +5990,10 @@ pub struct SicknessCfg {
     pub bin_cap: u16,
     pub bin_meals_per_unit: u16,
     pub venue_scrap: f32,
+    /// Scrap meals into a Market's bin per shelf unit sold (retail waste).
+    pub market_waste: f32,
+    /// Scrap meals into a Home's bin per pantry meal eaten (household waste).
+    pub home_scrap: f32,
     pub bin_rot: f32,
     pub dive_reach_tiles: u32,
     pub dive_satisfy: f32,
@@ -6046,6 +6052,8 @@ impl Default for SicknessCfg {
             bin_cap: 40,
             bin_meals_per_unit: 2,
             venue_scrap: 0.3,
+            market_waste: 0.2,
+            home_scrap: 0.2,
             bin_rot: 0.5,
             dive_reach_tiles: 40,
             dive_satisfy: 0.6,
