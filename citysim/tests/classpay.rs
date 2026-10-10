@@ -556,3 +556,69 @@ fn test_graded_keep_their_tier() {
     let l = holders(&w, |j| j.grade == 0).into_iter().find(|a| housed(a).is_some()).expect("a housed labourer");
     assert_eq!(classpay::min_home_tier(&w, l, housed(&l).expect("home")), 0);
 }
+
+// ---------------------------------------------------------------------------
+// P3 (Dylan 2026-10-10): the premium from capital and profit
+// ---------------------------------------------------------------------------
+
+/// A graded wage pays in full out of the corp's purse (no coin made or
+/// lost), but only its labour-rate part counts in the labour pool's payroll
+/// window: the premium above it is noted apart (`Corp.prem_today`).
+#[test]
+fn test_premium_noted_apart_and_coins_conserved() {
+    let mut w = city_on();
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager)[0];
+    let corp = w.comp::<Job>(m).and_then(|j| j.employer).and_then(|e| w.corp_of_building(e)).expect("corp");
+    if let Some(j) = w.comp_mut::<Job>(m) {
+        j.days_unpaid = 1;
+    }
+    let before = citysim::systems::econ::identity(&w);
+    let (pay0, prem0) = w.comp::<Corp>(corp).map(|c| (c.pay_today, c.prem_today)).expect("corp");
+    let gross = wages::gross_wage(&w, w.comp::<Job>(m).expect("job"));
+    economy::collect_wage(&mut w, m);
+    let (pay1, prem1) = w.comp::<Corp>(corp).map(|c| (c.pay_today, c.prem_today)).expect("corp");
+    let premium = prem1 - prem0;
+    let mult = w.config.classpay.grade_mult[3];
+    assert_eq!(premium, gross - (gross as f32 / mult).round() as i64, "the premium is the part above the labour rate");
+    assert_eq!(pay1 - pay0 + premium, gross, "labour part + premium = the gross paid");
+    assert!(premium > 0 && pay1 - pay0 > 0);
+    assert_eq!(citysim::systems::econ::identity(&w), before, "no coin made or lost");
+}
+
+/// A corp whose profit and capital payout cannot cover its premium posts and
+/// hires no graded place and withdraws the open ones; labour posts go on.
+#[test]
+fn test_unfunded_premium_stops_graded_hiring() {
+    use std::collections::VecDeque;
+    let mut w = city_on();
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager)[0];
+    let post = w.comp::<Job>(m).and_then(|j| j.employer).expect("post");
+    let corp = w.corp_of_building(post).expect("corp");
+    let pin = |w: &mut World, prem: i64, cash: i64| {
+        let c = w.comp_mut::<Corp>(corp).expect("corp");
+        c.rev = VecDeque::from(vec![1_000; wages::WINDOW_DAYS]);
+        c.pay = VecDeque::from(vec![500; wages::WINDOW_DAYS]);
+        c.prem = VecDeque::from(vec![prem; wages::WINDOW_DAYS]);
+        c.cashflow = VecDeque::from(vec![cash; 14]);
+        c.treasury = 0;
+    };
+    // Profitable: 300 a day after a 100 premium.
+    pin(&mut w, 100, 300);
+    assert!(classpay::premium_room(&w, corp).is_some_and(|r| r > 0.0));
+    assert!(classpay::premium_funded(&w, post, manager));
+    // Losing money with no capital: the premium is unfunded.
+    pin(&mut w, 100, -200);
+    assert!(classpay::premium_room(&w, corp).is_some_and(|r| r < 0.0));
+    assert!(!classpay::premium_funded(&w, post, manager));
+    assert!(classpay::premium_funded(&w, post, Role::Farmer), "labour hiring is not gated");
+    w.vacancies.entry(post).or_default().push(manager);
+    w.vacancies.entry(post).or_default().push(Role::Clerk);
+    assert!(classpay::withdraw_unfunded(&mut w, corp) >= 1);
+    let open = w.vacancies.get(&post).cloned().unwrap_or_default();
+    assert!(!open.contains(&manager), "the graded vacancy is withdrawn");
+    assert!(open.contains(&Role::Clerk), "the labour vacancy stands");
+    // The labour pool's target keeps the payout only after profit covers the premium.
+    assert_eq!(classpay::labour_payout(&w, corp, 50.0), 0.0, "an unfunded premium eats the payout first");
+}

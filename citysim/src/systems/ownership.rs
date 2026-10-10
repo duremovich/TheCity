@@ -458,6 +458,17 @@ fn note_revenue(world: &mut World, to: Option<EntityId>, flow: Flow, net: i64) {
 }
 
 /// Plan E16: a corp's gross payroll today (`Corp.pay_today`, wages on only).
+/// Class pay P3: the premium part of a graded wage (out of capital and
+/// profit, not the labour pool), `Corp.prem_today`.
+pub fn note_premium(world: &mut World, payer: Option<EntityId>, premium: i64) {
+    if premium <= 0 || !crate::systems::classpay::on(world) {
+        return;
+    }
+    if let Some(c) = payer.and_then(|o| world.comp_mut::<Corp>(o)) {
+        c.prem_today += premium;
+    }
+}
+
 pub fn note_payroll(world: &mut World, payer: Option<EntityId>, gross: i64) {
     if gross <= 0 || !crate::systems::wages::on(world) {
         return;
@@ -1807,6 +1818,7 @@ fn rolls(world: &mut World) {
     let now = world.tick;
     let horizon = now.saturating_sub(LOSS_DAYS * TICKS_PER_DAY);
     let wages = crate::systems::wages::on(world);
+    let classpay = crate::systems::classpay::on(world);
     for c in world.corps() {
         let Some(cc) = world.comp_mut::<Corp>(c) else { continue };
         let today = std::mem::take(&mut cc.cashflow_today);
@@ -1834,6 +1846,16 @@ fn rolls(world: &mut World) {
                 cc.pay.pop_front();
             }
             cc.import_today = 0;
+        }
+        // Class pay P3: the graded premium's window (class pay on only).
+        if classpay {
+            let q = std::mem::take(&mut cc.prem_today);
+            if now > 0 {
+                cc.prem.push_back(q);
+            }
+            while cc.prem.len() > crate::systems::wages::WINDOW_DAYS {
+                cc.prem.pop_front();
+            }
         }
         // In the red at the close, before the upkeep lump (phase 5; was
         // after it, the intra-day trough). A corp at exactly 0 that took in

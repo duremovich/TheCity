@@ -623,6 +623,10 @@ fn job_search_pass(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass:
                 continue;
             }
             let pick = if graded {
+                // P3: a premium the corp cannot fund is not hired.
+                if !classpay::premium_funded(world, employer, role) {
+                    continue;
+                }
                 classpay::pick_graded(world, employer, role)
             } else {
                 pick_candidate(world, employer, workplace_door, role)

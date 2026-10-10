@@ -398,3 +398,111 @@ pub fn exec_from_ranks(world: &World, corp: EntityId) -> Option<EntityId> {
     }
     None
 }
+
+// ---------------------------------------------------------------------------
+// The graded premium out of capital and profit (P3, Dylan 2026-10-10)
+// ---------------------------------------------------------------------------
+
+/// The premium part of a `gross` graded wage: what it pays above the labour
+/// rate (`gross − gross ÷ grade_mult`); 0 for labour or with class pay off.
+pub fn premium_of(world: &World, job: &Job, gross: i64) -> i64 {
+    if job.grade == 0 || gross <= 0 || !on(world) {
+        return 0;
+    }
+    let m = mult(world, job.grade).max(1.0);
+    (gross - (gross as f32 / m).round() as i64).max(0)
+}
+
+/// A graded `role` place's premium a day at `employer`: the role's wage ×
+/// (multiple − 1) × the corp's wage multipliers.
+pub fn marginal_premium(world: &World, employer: EntityId, role: Role) -> f32 {
+    let g = base_grade(world, Some(employer), role);
+    if g == 0 {
+        return 0.0;
+    }
+    let rev =
+        world.corp_of_building(employer).and_then(|c| world.comp::<Corp>(c)).map_or(1.0, |c| c.wage_mult * c.wage_rev);
+    world.config.wage(role) as f32 * (mult(world, g) - 1.0) * rev
+}
+
+fn ring_mean(r: &std::collections::VecDeque<i64>) -> f32 {
+    if r.is_empty() {
+        0.0
+    } else {
+        r.iter().sum::<i64>() as f32 / r.len() as f32
+    }
+}
+
+/// `(premium a day, profit before it)` of a corp: the premium window's mean
+/// and the cashflow window's mean with the premium added back.
+fn premium_and_profit(c: &Corp) -> (f32, f32) {
+    let prem = ring_mean(&c.prem);
+    (prem, (ring_mean(&c.cashflow) + prem).max(0.0))
+}
+
+/// The coins a day a corp's capital and profit leave for more graded
+/// premium: `profit + capital payout − premium` (`None` before the windows
+/// fill, or with class pay off: no limit; the seeded posts are paid from
+/// the capital `seed_staff` priced them against).
+pub fn premium_room(world: &World, corp: EntityId) -> Option<f32> {
+    if !on(world) {
+        return None;
+    }
+    let (r, p) = crate::systems::wages::windows(world, corp)?;
+    let (prem, profit) = premium_and_profit(world.comp::<Corp>(corp)?);
+    let payout = crate::systems::wages::capital_payout(world, corp, r, p);
+    Some(profit + payout - prem)
+}
+
+/// Can the corp owning `employer` fund one more `role` place's premium?
+/// True for a labour post, a non-corp employer, or before the windows fill.
+pub fn premium_funded(world: &World, employer: EntityId, role: Role) -> bool {
+    let extra = marginal_premium(world, employer, role);
+    if extra <= 0.0 {
+        return true;
+    }
+    let Some(corp) = world.corp_of_building(employer) else { return true };
+    premium_room(world, corp).is_none_or(|room| room >= extra)
+}
+
+/// The capital payout left to the labour pool's target: the premium is
+/// charged to profit first, then to the payout (`payout` with class pay off).
+pub fn labour_payout(world: &World, corp: EntityId, payout: f32) -> f32 {
+    if !on(world) {
+        return payout;
+    }
+    let Some(c) = world.comp::<Corp>(corp) else { return payout };
+    let (prem, profit) = premium_and_profit(c);
+    (payout - (prem - profit).max(0.0)).max(0.0)
+}
+
+/// Midnight (`wages::staff`): a corp that cannot fund its graded premium
+/// withdraws its open graded vacancies (graded hiring stops; nobody is laid
+/// off for it). Returns the vacancies withdrawn.
+pub fn withdraw_unfunded(world: &mut World, corp: EntityId) -> u32 {
+    let Some(room) = premium_room(world, corp) else { return 0 };
+    if room > 0.0 {
+        return 0;
+    }
+    let buildings = world.comp::<Corp>(corp).map(|c| c.buildings.clone()).unwrap_or_default();
+    let mut n = 0;
+    for b in buildings {
+        let graded: Vec<Role> = world
+            .vacancies
+            .get(&b)
+            .map(|v| v.iter().copied().filter(|&r| base_grade(world, Some(b), r) >= PROFESSIONAL).collect())
+            .unwrap_or_default();
+        if graded.is_empty() {
+            continue;
+        }
+        if let Some(v) = world.vacancies.get_mut(&b) {
+            let before = v.len();
+            v.retain(|r| !graded.contains(r));
+            n += (before - v.len()) as u32;
+            if v.is_empty() {
+                world.vacancies.remove(&b);
+            }
+        }
+    }
+    n
+}
