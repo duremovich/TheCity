@@ -6206,6 +6206,10 @@ pub struct ClassPayCfg {
     pub education_spread: f32,
     /// A child's spread around its parents' mean.
     pub child_spread: f32,
+    /// P3, the thin ladder: education gained a day in a skilled or graded post.
+    pub edu_gain_per_day: f32,
+    /// P3: the night school's cap.
+    pub edu_cap: f32,
 }
 
 impl Default for ClassPayCfg {
@@ -6224,6 +6228,8 @@ impl Default for ClassPayCfg {
             education: [0.10, 0.25, 0.50, 0.80],
             education_spread: 0.20,
             child_spread: 0.10,
+            edu_gain_per_day: 0.0003,
+            edu_cap: 0.75,
         }
     }
 }

@@ -276,7 +276,31 @@ pub fn daily(world: &mut World) {
     if !on(world) {
         return;
     }
+    night_school(world);
     promote_skilled(world, false);
+}
+
+/// P3 (Dylan 2026-10-10, the thin ladder): a day held in a skilled or
+/// graded post is a day of night school: `education += edu_gain_per_day`,
+/// up to `edu_cap` (an education already above the cap is kept). A
+/// hard-working Sump-born worker can reach a professional post in a few sim
+/// years: rare, possible, and deterministic (no draw).
+pub fn night_school(world: &mut World) {
+    let (gain, cap) = (world.config.classpay.edu_gain_per_day, world.config.classpay.edu_cap);
+    if gain <= 0.0 {
+        return;
+    }
+    for id in world.with::<Job>() {
+        if world.comp::<Job>(id).is_none_or(|j| j.grade == 0) {
+            continue;
+        }
+        let s = schooling(world, id);
+        if s.education >= cap {
+            continue;
+        }
+        let education = (s.education + gain).min(cap);
+        world.insert(id, Schooling { origin: s.origin, education });
+    }
 }
 
 /// Per standing corp workplace and labour role there: `floor(staff ×

@@ -622,3 +622,70 @@ fn test_unfunded_premium_stops_graded_hiring() {
     // The labour pool's target keeps the payout only after profit covers the premium.
     assert_eq!(classpay::labour_payout(&w, corp, 50.0), 0.0, "an unfunded premium eats the payout first");
 }
+
+/// The thin ladder: a Sump-born skilled worker's night school is slow
+/// (a month moves its education under 0.01, and it is still out-ranked by a
+/// Spire-born outsider for its corp's Manager post), but three sim years in
+/// the post carry it past that outsider. Deterministic: the same days, the
+/// same education.
+#[test]
+fn test_night_school_ladder_exists_and_is_slow() {
+    let mut w = city_on();
+    let manager = role(&w, "manager");
+    let post = holders(&w, |j| j.role == manager)
+        .into_iter()
+        .find_map(|m| w.comp::<Job>(m).and_then(|j| j.employer))
+        .expect("a Manager's workplace");
+    let corp = w.corp_of_building(post).expect("corp");
+    let worker = holders(&w, |j| j.grade <= 1 && j.employer.and_then(|e| w.corp_of_building(e)) == Some(corp))[0];
+    let outsider = w
+        .citizens()
+        .into_iter()
+        .find(|&a| demography::is_adult(&w, a) && !w.has::<Job>(a) && a != worker)
+        .expect("a jobless adult");
+    set_education(&mut w, worker, 1, 0.25);
+    set_education(&mut w, outsider, 3, 0.8);
+    for (a, s) in [(worker, 0.5), (outsider, 0.3)] {
+        if let Some(k) = w.comp_mut::<citysim::Skills>(a) {
+            k.persuasion = s;
+            k.knowledge = s;
+        }
+    }
+    let start = 10 * TICKS_PER_DAY;
+    w.tick = start;
+    if let Some(j) = w.comp_mut::<Job>(worker) {
+        j.grade = 1;
+        j.hired_tick = start;
+    }
+    // A month of night school.
+    for d in 1..=30 {
+        w.tick = start + d * TICKS_PER_DAY;
+        classpay::night_school(&mut w);
+    }
+    let edu = w.comp::<Schooling>(worker).map(|s| s.education).expect("schooling");
+    assert!(edu > 0.25 && edu < 0.26, "a month moves education a little: {edu}");
+    assert!(
+        classpay::merit(&w, worker, post, manager) < classpay::merit(&w, outsider, post, manager),
+        "after a month the Spire-born outsider still ranks first"
+    );
+    // Three sim years.
+    for d in 31..=3 * 365 {
+        w.tick = start + d * TICKS_PER_DAY;
+        classpay::night_school(&mut w);
+    }
+    let edu3 = w.comp::<Schooling>(worker).map(|s| s.education).expect("schooling");
+    assert!(edu3 > 0.5 && edu3 <= w.config.classpay.edu_cap, "three years of night school: {edu3}");
+    assert!(
+        classpay::merit(&w, worker, post, manager) > classpay::merit(&w, outsider, post, manager),
+        "after three years the Sump-born worker ranks first"
+    );
+    // Labour posts learn nothing; the cap holds.
+    let labourer = holders(&w, |j| j.grade == 0)[0];
+    set_education(&mut w, labourer, 1, 0.25);
+    classpay::night_school(&mut w);
+    assert_eq!(w.comp::<Schooling>(labourer).map(|s| s.education), Some(0.25));
+    for _ in 0..5000 {
+        classpay::night_school(&mut w);
+    }
+    assert_eq!(w.comp::<Schooling>(worker).map(|s| s.education), Some(w.config.classpay.edu_cap));
+}
