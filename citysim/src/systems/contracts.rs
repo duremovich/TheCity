@@ -1461,16 +1461,7 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
     end_mission(world, id);
     // Review fix: the departing taker and crew are no longer parties.
     for p in c.taker.into_iter().chain(c.crew.iter().copied()) {
-        let still = Some(p) == c.buyer || Some(p) == c.agent || p == c.target.id();
-        if still {
-            continue;
-        }
-        if let Some(list) = world.by_party.get_mut(&p) {
-            list.retain(|x| *x != id);
-            if list.is_empty() {
-                world.by_party.remove(&p);
-            }
-        }
+        unparty(world, &c, id, p);
     }
     if let Some(x) = world.contracts.get_mut(&id) {
         x.status = ContractStatus::Open;
@@ -1571,16 +1562,7 @@ pub fn on_strike(world: &mut World, taker: EntityId, victim: EntityId, winner: E
     }
     match c.kind {
         ContractKind::Beat => settle(world, c.id, Settle::Fulfilled, ""),
-        ContractKind::Hit if !died => {
-            if let Some(mut x) = crate::systems::hunt::chase(world, taker) {
-                x.phase = HuntPhase::Ask;
-                x.intel = None;
-                x.venue = None;
-                x.stakeout_until = None;
-                crate::systems::hunt::set_chase(world, taker, x);
-                crate::systems::hunt::reindex(world);
-            }
-        }
+        ContractKind::Hit if !died => reset_chase(world, taker),
         _ => {}
     }
 }
@@ -1620,6 +1602,13 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     }
     let Some(taker) = c.taker else { return };
     if world.contract_runs.contains_key(&taker) {
+        // Review fix: the taker is busy on a live run: look again in an
+        // hour (the record stays in the ledger's index).
+        let due = world.tick + TICKS_PER_HOUR;
+        if let Some(old) = world.contracts.get_mut(&id).and_then(|x| x.due.replace(due)) {
+            world.ledger_due.remove(&(old, id));
+        }
+        world.ledger_due.insert((due, id));
         return;
     }
     if !free_adult(world, taker) {
@@ -1638,14 +1627,25 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     let habit = crate::systems::hunt::habit(world, t, now);
     let district = habit.building.map_or_else(|| world.district_of(habit.tile), |b| world.district_of_building(b));
     if c.kind == ContractKind::Locate {
-        let n = world.config.bounty.cap_sightings / 2;
+        let n = (world.config.bounty.cap_sightings / 2).max(1);
         for _ in 0..n {
             if !pay_sighting(world, id, taker, t, habit.tile, true) {
                 break;
             }
         }
-        if let Some(x) = world.contracts.get_mut(&id) {
-            x.due = None;
+        // Review fix: the tracker's report settles the record (the cap
+        // already did, in `pay_sighting`): Fulfilled with a sighting paid;
+        // nothing paid, a direct buyer short is reneged (C6) and any other
+        // payer's record goes back on the board.
+        let Some(x) = world.contracts.get(&id).filter(|x| x.status == ContractStatus::Taken).cloned() else {
+            return;
+        };
+        if x.paid_sightings > 0 {
+            settle(world, id, Settle::Fulfilled, "");
+        } else if x.buyer.is_some() && !x.brokered() {
+            renege(world, id, &x);
+        } else {
+            fail_attempt(world, id, "nothing paid for the sighting");
         }
         return;
     }
@@ -1797,6 +1797,11 @@ pub fn on_contact(world: &mut World, taker: EntityId) {
     }
     let tile = world.comp::<Position>(r.target).map_or_else(Default::default, |p| p.tile);
     pay_sighting(world, r.contract, taker, r.target, tile, false);
+    reset_chase(world, taker);
+}
+
+/// C15: `taker`'s chase back to asking (intel, venue and stakeout cleared).
+fn reset_chase(world: &mut World, taker: EntityId) {
     if let Some(mut x) = crate::systems::hunt::chase(world, taker) {
         x.phase = HuntPhase::Ask;
         x.intel = None;
@@ -2510,8 +2515,7 @@ pub fn fixer_talk(world: &mut World, from: EntityId, to: EntityId) {
 
 /// C29: does `holder` hold a `Hired` rumour about record `c` (object its
 /// target, actor its buyer or placing agent) at `conf ≥ accessory_conf`?
-/// What the accessory rule reads, and the `accessory_unfounded` probe's
-/// re-check: nothing here reads `known_by`.
+/// What the accessory rule reads: nothing here reads `known_by`.
 pub fn holds_hired(world: &World, holder: EntityId, c: &Contract) -> bool {
     let Some(m) = world.comp::<Memory>(holder) else { return false };
     let min = world.config.law.accessory_conf;
@@ -2553,8 +2557,8 @@ pub fn heat_bribed(world: &mut World, owner: EntityId) {
 
 /// C30: the law closes a Fixer's office: a Conspiracy report on the owner,
 /// the owner last seen at the door, `closed_until = now + close_days`, every
-/// Open record in the book cancelled with its refund (Taken ones run on).
-/// `FixerBusted`.
+/// Open record in the book cancelled with its refund (Taken ones run on),
+/// the heat back to the floor. `FixerBusted`.
 pub fn heat_bust(world: &mut World, fixer: EntityId) {
     let now = world.tick;
     let days = world.config.law.close_days;
@@ -2568,8 +2572,12 @@ pub fn heat_bust(world: &mut World, fixer: EntityId) {
         .comp::<Broker>(fixer)
         .map(|k| k.book.iter().copied().filter(|id| world.contracts.get(id).is_some_and(|c| c.is_open())).collect())
         .unwrap_or_default();
+    // Review fix: the bust spends the heat (down to the licence floor), so
+    // the office is not busted again the day it reopens.
+    let floor = if world.levers.fixer_licence { 0.0 } else { 0.5 };
     if let Some(k) = world.comp_mut::<Broker>(fixer) {
         k.closed_until = Some(now + Tick::from(days) * TICKS_PER_DAY);
+        k.heat = k.heat.min(floor);
     }
     for id in open {
         settle(world, id, Settle::Cancelled, "the Fixer was closed by the law");
@@ -2751,16 +2759,7 @@ fn take_on(world: &mut World, id: ContractId, guard: EntityId) {
         hear_named(world, id, a, actor, guard, 0);
     }
     if let Some(a) = c.agent {
-        let cool = world.config.law.bribe_cool;
-        let mine: Vec<EntityId> = world
-            .buildings_of_kind(BuildingKind::Fixer)
-            .iter()
-            .copied()
-            .filter(|&f| world.owner_of(f) == Some(a))
-            .collect();
-        for f in mine {
-            heat_add(world, f, -cool);
-        }
+        heat_bribed(world, a);
     }
     let text = format!("{} is on {}'s payroll", world.name_of(guard), world.owner_label(c.buyer.or(c.agent)));
     world.push_event(EventKind::GuardTaken, &[guard, c.buyer.or(c.agent).unwrap_or(EntityId::NONE)], text.clone());
@@ -3706,13 +3705,20 @@ pub fn drop_crew(world: &mut World, id: ContractId, who: EntityId) {
             x.taker = if x.crew.is_empty() { None } else { Some(x.crew.remove(0)) };
         }
     }
-    let still = Some(who) == c.buyer || Some(who) == c.agent || who == c.target.id();
-    if !still {
-        if let Some(list) = world.by_party.get_mut(&who) {
-            list.retain(|x| *x != id);
-            if list.is_empty() {
-                world.by_party.remove(&who);
-            }
+    unparty(world, &c, id, who);
+}
+
+/// `who` (a departing taker or crew member of record `id`) is no longer
+/// a party to it, unless it is also the buyer, the placing agent or the
+/// target.
+fn unparty(world: &mut World, c: &Contract, id: ContractId, who: EntityId) {
+    if Some(who) == c.buyer || Some(who) == c.agent || who == c.target.id() {
+        return;
+    }
+    if let Some(list) = world.by_party.get_mut(&who) {
+        list.retain(|x| *x != id);
+        if list.is_empty() {
+            world.by_party.remove(&who);
         }
     }
 }
@@ -3773,22 +3779,12 @@ pub fn sell_out(world: &mut World, id: ContractId, gang: EntityId) -> bool {
         world.ledger_due.remove(&(d, id));
     }
     for p in prev.into_iter().chain(c.crew.iter().copied()) {
-        let still = Some(p) == c.buyer || Some(p) == c.agent || p == c.target.id();
-        if still {
-            continue;
-        }
-        if let Some(list) = world.by_party.get_mut(&p) {
-            list.retain(|x| *x != id);
-            if list.is_empty() {
-                world.by_party.remove(&p);
-            }
-        }
+        unparty(world, &c, id, p);
     }
     if let Some(x) = world.contracts.get_mut(&id) {
         x.taker = Some(gang);
         x.crew = crew.clone();
         x.price = new_price;
-        x.terms = Terms::Pay { price: new_price };
         x.sold_out = true;
         x.holds = 0;
         x.due = None;
@@ -3837,14 +3833,7 @@ pub fn strike_at_contact(world: &mut World, taker: EntityId) -> bool {
     match missions::decide(world, r.contract, &[taker], door) {
         crate::contract::Decision::Strike => true,
         crate::contract::Decision::Hold => {
-            if let Some(mut x) = crate::systems::hunt::chase(world, taker) {
-                x.phase = HuntPhase::Ask;
-                x.intel = None;
-                x.venue = None;
-                x.stakeout_until = None;
-                crate::systems::hunt::set_chase(world, taker, x);
-                crate::systems::hunt::reindex(world);
-            }
+            reset_chase(world, taker);
             let until = missions::hold_until(world.tick);
             if let Some(b) = world.comp_mut::<Brain>(taker) {
                 b.cooldowns.insert(GoalKind::Contract, until);
