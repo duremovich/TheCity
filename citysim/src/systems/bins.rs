@@ -170,11 +170,21 @@ pub fn dive_target(world: &World, id: EntityId) -> Option<EntityId> {
         .and_then(|h| h.home)
         .and_then(|h| world.comp::<Building>(h))
         .map(|b| b.door);
-    let from = match home_door {
+    // P5 (the core_year trace: the off-screen starving were mostly squatters
+    // with no Home door, and housed agents of the poor blocks whose nearest
+    // bin stood past 40 tiles): a squatter reaches from its squat's door,
+    // and the starving walk `[life] hungry_reach_mult` further (G2's rule
+    // for a Mission).
+    let squat_door =
+        world.comp::<crate::components::Squatter>(id).and_then(|s| world.comp::<Building>(s.building)).map(|b| b.door);
+    let from = match home_door.or(squat_door) {
         Some(d) if !body => d,
         _ => world.comp::<Position>(id)?.tile,
     };
-    let reach = world.config.sickness.dive_reach_tiles;
+    let mut reach = world.config.sickness.dive_reach_tiles;
+    if hunger < world.config.life.starving_hunger {
+        reach = (reach as f32 * world.config.life.hungry_reach_mult) as u32;
+    }
     world
         .bins
         .iter()
