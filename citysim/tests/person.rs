@@ -970,3 +970,120 @@ fn probe_near_candidate_hired_before_a_far_skilled_one() {
     assert_ne!(pick, Some(far), "the far skilled rehire beat a candidate within the cap");
     assert!(pick.is_some_and(|p| dist(&w, p) <= cap), "a candidate within the cap");
 }
+
+/// Item 10 (`hf_grow_housing`, P5h; Dylan: the city grows toward jobs): the
+/// employer with the most workers past `commute_move_ticks` and no free
+/// beds in range gets beds in range within a few days (a Home on a Lot or a
+/// floor), and relocation moves far workers into them. Measured on the
+/// flipped seed 42: the Farms' 282 beds in range were full for 489-584
+/// farmers and the median commute stayed 116 tiles.
+#[test]
+fn probe_city_grows_homes_toward_jobs() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    let cap = w.config.life.commute_move_ticks;
+    let door_of = |w: &World, b: EntityId| w.comp::<Building>(b).map(|b| b.door);
+    // Beds (capacity) and far workers in range of an employer's door.
+    let beds = |w: &World, door: citysim::TilePos| -> usize {
+        w.buildings_of_kind(citysim::BuildingKind::Home)
+            .iter()
+            .filter_map(|&h| w.comp::<Building>(h))
+            .filter(|b| !b.demolished && !b.derelict && commute_cost(w, b.door, door) <= cap)
+            .map(|b| usize::from(b.capacity))
+            .sum()
+    };
+    let far_at = |w: &World, e: EntityId| -> usize {
+        let Some(door) = door_of(w, e) else { return 0 };
+        civilians(w)
+            .into_iter()
+            .filter(|&a| w.comp::<Job>(a).and_then(|j| j.employer) == Some(e))
+            .filter(|&a| home(w, a).and_then(|h| door_of(w, h)).is_some_and(|hd| commute_cost(w, hd, door) > cap))
+            .count()
+    };
+    // The employer with the most far workers (ties lower id).
+    let employers: Vec<EntityId> =
+        civilians(&w).into_iter().filter_map(|a| w.comp::<Job>(a).and_then(|j| j.employer)).collect();
+    let mut uniq = employers.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    let e = uniq.iter().copied().max_by_key(|&e| (far_at(&w, e), std::cmp::Reverse(e))).expect("an employer");
+    let door = door_of(&w, e).unwrap();
+    let (beds0, far0) = (beds(&w, door), far_at(&w, e));
+    w.run_ticks(6 * TICKS_PER_DAY + TICKS_PER_HOUR);
+    let (beds1, far1) = (beds(&w, door), far_at(&w, e));
+    eprintln!("{}: beds in range {beds0} -> {beds1}; far workers {far0} -> {far1}", w.name_of(e));
+    assert!(far0 >= 6, "the probe needs an employer with far workers");
+    assert!(beds1 > beds0, "no Home or floor went up in range of the employer with the most far workers");
+}
+
+/// Item 8 (P5h, the couple rule): a married pair who both work at the same
+/// far workplace move together into a Home near it (relocation skipped
+/// every worker whose spouse held a job: 39 of the 42 far workers left at
+/// the Farm the new Homes served on day 8, flipped seed 42).
+#[test]
+fn probe_working_couple_moves_near_work() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let cap = w.config.life.commute_move_ticks;
+    let work_of = |w: &World, a: EntityId| {
+        w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+    };
+    let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+    // A married pair sharing a Home, no children there, the first employed
+    // with a commute past twice the cap.
+    let (a, s) = civilians(&w)
+        .into_iter()
+        .filter_map(|a| {
+            let s = w.spouse_of(a)?;
+            let hm = home(&w, a)?;
+            if home(&w, s) != Some(hm) || !w.has::<Brain>(s) || !demography::is_adult(&w, s) {
+                return None;
+            }
+            if demography::children_of_agent(&w, a).iter().any(|&c| home(&w, c) == Some(hm)) {
+                return None;
+            }
+            let work = work_of(&w, a)?;
+            (commute_cost(&w, door_of(&w, a)?, work) > 2 * cap).then_some((a, s))
+        })
+        .next()
+        .expect("a married worker with a long commute");
+    // The spouse works at the same place.
+    let (employer, role) = w.comp::<Job>(a).map(|j| (j.employer.unwrap(), j.role)).unwrap();
+    w.remove::<Job>(s);
+    demography::hire(&mut w, s, employer, role);
+    for m in [a, s] {
+        w.comp_mut::<Wallet>(m).expect("wallet").coins = 1_000;
+    }
+    // Room near work, enough that the longer commutes served first leave
+    // some: Homes and floors
+    // go up in range.
+    let work = work_of(&w, a).unwrap();
+    let free = |w: &World| -> usize {
+        w.buildings_of_kind(citysim::BuildingKind::Home)
+            .iter()
+            .filter(|&&h| w.comp::<Building>(h).is_some_and(|b| !b.derelict && commute_cost(w, b.door, work) <= cap))
+            .map(|&h| usize::from(w.comp::<Building>(h).unwrap().capacity).saturating_sub(w.residents_of(h).len()))
+            .sum()
+    };
+    while free(&w) < 200 && citysim::systems::life::build_housing_near(&mut w, employer) {}
+    // The daily cap out of the way (the pass serves the longest commutes
+    // first; this pair's is not among the city's 40 longest).
+    w.config.life.relocate_per_1000 = 1_000.0;
+    let before = door_of(&w, a).map(|d| commute_cost(&w, d, work));
+    let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
+    run_to(&mut w, a, end, |_| {});
+    let after = door_of(&w, a).map(|d| commute_cost(&w, d, work));
+    eprintln!(
+        "couple {} + {}: commute {before:?} -> {after:?} ticks; same Home {}",
+        a.index,
+        s.index,
+        home(&w, a) == home(&w, s)
+    );
+    assert!(after < before, "a working couple with room near their shared work stayed put");
+    assert_eq!(home(&w, a), home(&w, s), "the couple moved together");
+}

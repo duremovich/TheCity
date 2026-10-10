@@ -88,6 +88,11 @@ pub fn hire_near(world: &World) -> bool {
     hfix_item(world, 9) && world.config.life.hf_hire_near
 }
 
+/// P5h (item 10): Homes built toward jobs.
+pub fn grow_housing(world: &World) -> bool {
+    hfix_item(world, 10) && world.config.life.hf_grow_housing
+}
+
 /// P5f (item 5): no Unwind on shift.
 pub fn shift_first(world: &World) -> bool {
     hfix_item(world, 5) && world.config.life.hf_shift_first

@@ -1529,6 +1529,14 @@ commute_margin_ticks = 40           # 8: ... when the move saves this much
 relocate_per_1000 = 20.0            # 8: movers a day per 1,000 residents (40 at 2,000; was a flat 8)
 hf_hire_near = true                 # 9: a candidate within commute_hire_ticks is hired before any beyond it
 commute_hire_ticks = 80
+# P5h (Dylan, 2026-10-10: the city grows toward jobs; map-agnostic): housing demand at an employer is its
+# workers past commute_move_ticks; with fewer free beds than housing_demand_min in range for
+# housing_demand_days midnights, a Home goes up on the nearest vacant Lot in range (else a floor on a Home
+# there), its owner corp paying when it can, else the city. Relocation then fills it.
+hf_grow_housing = true              # 10
+housing_demand_min = 6              # 10: one Home's beds
+housing_demand_days = 3
+housing_builds_per_1000 = 1.0       # 10: Homes or floors a day per 1,000 residents (2 at 2,000)
 hungry_reach_mult = 2.0             # 2: a starving agent walks this much further to a Mission
 steal_can_buy = 12.0                # 3
 beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...

@@ -356,6 +356,145 @@ pub fn commute_cost(world: &World, home: TilePos, work: TilePos) -> crate::time:
     crate::time::Tick::from(home.manhattan(work)) * world.config.exec.move_ticks_full
 }
 
+/// Hunger fix item 10 (P5h), daily before `relocate`: housing demand at
+/// each employer (its workers whose `commute_cost` is past
+/// `commute_move_ticks`). Demand of at least `housing_demand_min` with
+/// fewer free beds than that within range of the employer's door counts a
+/// midnight; any other midnight resets it. After `housing_demand_days`,
+/// highest demand first (ties lower id), up to `housing_builds_per_1000` a
+/// day per 1,000 residents: a Home on the nearest vacant Lot in range (a
+/// plain Lot before a shanty's, whose squatters `founding::convert` puts
+/// out), else a floor on the nearest Home in range below `[floors]
+/// floors_max`. The employer's owner corp pays `found_cost` / `floor_cost`
+/// (Flow::Found, as Grow and AddFloor) when its purse holds it; else the
+/// city builds (owner None, unpaid, the existing city path). No RNG;
+/// bounded by the Lots and the floor cap.
+pub fn grow_housing(world: &mut World) {
+    if !crate::systems::fixes::grow_housing(world) {
+        if !world.housing_demand.is_empty() {
+            world.housing_demand.clear();
+        }
+        return;
+    }
+    let cfg = world.config.life.clone();
+    let cap = cfg.commute_move_ticks;
+    let mut demand: std::collections::BTreeMap<EntityId, u32> = std::collections::BTreeMap::new();
+    // scan-ok: daily: the housing demand pass
+    for a in world.citizens() {
+        let Some(employer) = world.comp::<Job>(a).and_then(|j| j.employer) else { continue };
+        if world.has::<Sentence>(a) || world.comp::<Brain>(a).is_none_or(|b| b.emigrating) {
+            continue;
+        }
+        let Some(work) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else { continue };
+        let Some(hd) = home_of(world, a).and_then(|h| world.comp::<Building>(h)).map(|b| b.door) else { continue };
+        if commute_cost(world, hd, work) > cap {
+            *demand.entry(employer).or_default() += 1;
+        }
+    }
+    let homes: Vec<(TilePos, usize, usize)> = world
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .filter_map(|&h| {
+            let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict)?;
+            Some((b.door, usize::from(b.capacity), world.residents_of(h).len()))
+        })
+        .collect();
+    let mut ready: Vec<(std::cmp::Reverse<u32>, EntityId)> = Vec::new();
+    let mut next: std::collections::BTreeMap<EntityId, u16> = std::collections::BTreeMap::new();
+    for (&employer, &n) in &demand {
+        if n < cfg.housing_demand_min {
+            continue;
+        }
+        let Some(work) = world.comp::<Building>(employer).map(|b| b.door) else { continue };
+        let free: usize = homes
+            .iter()
+            .filter(|&&(door, _, _)| commute_cost(world, door, work) <= cap)
+            .map(|&(_, c, r)| c.saturating_sub(r))
+            .sum();
+        if free >= cfg.housing_demand_min as usize {
+            continue;
+        }
+        let days = world.housing_demand.get(&employer).copied().unwrap_or(0).saturating_add(1);
+        next.insert(employer, days);
+        if days >= cfg.housing_demand_days {
+            ready.push((std::cmp::Reverse(n), employer));
+        }
+    }
+    world.housing_demand = next;
+    ready.sort_unstable();
+    let pop = world.citizens().len() as f32;
+    let limit = (cfg.housing_builds_per_1000 * pop / 1000.0).round().max(1.0) as usize;
+    let mut built = 0;
+    for (_, employer) in ready {
+        if built >= limit {
+            break;
+        }
+        if build_housing_near(world, employer) {
+            world.housing_demand.remove(&employer);
+            built += 1;
+        }
+    }
+}
+
+/// P5h: one Home (or a floor) within `commute_move_ticks` of `employer`'s
+/// door, as `grow_housing` says. Returns whether anything went up.
+pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
+    let cap = world.config.life.commute_move_ticks;
+    let Some((work, owner)) = world.comp::<Building>(employer).map(|b| (b.door, b.owner)) else { return false };
+    let payer = owner.filter(|&o| world.has::<Corp>(o));
+    let what = world.name_of(employer);
+    // A vacant Lot in range: plain Lots first, then shanties; nearest; ties lower id.
+    let lot = crate::systems::founding::vacant_lots(world)
+        .into_iter()
+        .filter_map(|l| {
+            let d = commute_cost(world, world.comp::<Building>(l)?.door, work);
+            (d <= cap).then(|| (crate::systems::street::is_shanty(world, l), d, l))
+        })
+        .min()
+        .map(|(_, _, l)| l);
+    if let Some(lot) = lot {
+        let cost = crate::systems::founding::found_cost(world, BuildingKind::Home).unwrap_or(0);
+        let by = payer.filter(|&c| world.purse(Some(c)) >= cost);
+        if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Home, by).is_err() {
+            return false;
+        }
+        let paid = match by {
+            Some(c) if cost > 0 => {
+                crate::systems::ownership::pay(world, Some(c), None, cost, crate::systems::ownership::Flow::Found)
+            }
+            _ => 0,
+        };
+        let (who, home) = (world.owner_label(by), world.name_of(lot));
+        let mut actors: Vec<EntityId> = by.into_iter().collect();
+        actors.push(lot);
+        world.push_event(
+            EventKind::Founded,
+            &actors,
+            format!("{who} built {home} on a Lot for {paid}: housing for {what}'s far workers"),
+        );
+        return true;
+    }
+    // Else a floor on the nearest Home in range below its cap.
+    let max = world.config.floors.max_for(BuildingKind::Home);
+    let home = world
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .filter_map(|&h| {
+            let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict && b.floors.max(1) < max)?;
+            let d = commute_cost(world, b.door, work);
+            (d <= cap).then_some((d, h))
+        })
+        .min()
+        .map(|(_, h)| h);
+    let Some(home) = home else { return false };
+    let cost = crate::systems::founding::floor_cost(world, BuildingKind::Home).unwrap_or(0);
+    let by = payer.filter(|&c| world.purse(Some(c)) >= cost);
+    if crate::systems::founding::add_floor(world, home, by).is_err() {
+        return false;
+    }
+    true
+}
+
 pub fn relocate(world: &mut World) {
     let limit = if crate::systems::fixes::relocate_fix(world) {
         let pop = world.citizens().len() as f32;
@@ -435,10 +574,22 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
             continue;
         }
         let spouse = world.spouse_of(a).filter(|&s| home_of(world, s) == Some(home) && world.has::<Brain>(s));
-        // A spouse with a job of their own stays put (two commutes, one Home).
-        if spouse.is_some_and(|s| world.has::<Job>(s)) {
-            continue;
-        }
+        // A spouse with a job of their own stays put (two commutes, one
+        // Home). Hunger fix item 8 (P5h): with the fix the couple moves when the two
+        // commutes together shrink by the margin (39 of the 42 far workers
+        // left at a Farm the new Homes served on day 8 had a working spouse).
+        let spouse_work = spouse
+            .and_then(|s| world.comp::<Job>(s))
+            .map(|j| j.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door));
+        let spouse_work = match spouse_work {
+            Some(None) => continue,
+            Some(Some(_)) if !fix => continue,
+            Some(Some(sw)) => Some(sw),
+            None => None,
+        };
+        let hd = world.comp::<Building>(home).map(|b| b.door).unwrap_or(work);
+        let both = |door: TilePos| spouse_work.map_or(0, |sw| cost(world, door, sw));
+        let d_pair = d + both(hd);
         let kids: Vec<EntityId> = crate::systems::demography::children_of_agent(world, a)
             .into_iter()
             .filter(|&c| world.has::<crate::components::Child>(c) && home_of(world, c) == Some(home))
@@ -454,8 +605,9 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
                     && purse >= mult * crate::systems::ownership::rent_for(world, h)
                     && evicted_by.is_none_or(|o| o != world.owner_of(h))
             })
-            .map(|&(h, door, _)| (cost(world, door, work), h))
-            .filter(|&(dd, _)| dd + margin <= d && (!fix || dd <= cap))
+            .map(|&(h, door, _)| (cost(world, door, work), both(door), h))
+            .filter(|&(dd, sp, _)| dd + sp + margin <= d_pair && (!fix || dd <= cap))
+            .map(|(dd, sp, h)| (dd + sp, h))
             .min();
         // Hunger fix item 8 (P5g): no Home with room near work (the Farms'
         // neighbourhoods are full: 282 beds within 40 tiles of the 12 Farms

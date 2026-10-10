@@ -372,13 +372,15 @@ fn test_daytrace_legacy_decode() {
 #[test]
 fn test_daily_trace_and_crime_counter() {
     let mut w = v2_world();
+    // Civic and Vats are seeded with no Blocks (hunger fix item 10, P5h,
+    // may later build Homes toward their jobs).
+    assert_eq!(w.districts[1].homes.len() + w.districts[2].homes.len(), 0);
     w.run_ticks(citysim::TICKS_PER_DAY * 3 + 1);
     for d in &w.districts {
         assert!(!d.trace.is_empty(), "{} has a trace", d.name);
         assert_eq!(d.crimes.len(), 3, "{}: three finished days rolled", d.name);
     }
-    // Civic and Vats have no Blocks; every Sump and Mid district is inhabited.
-    assert_eq!(w.districts[1].homes.len() + w.districts[2].homes.len(), 0);
+    // Every Sump and Mid district is inhabited.
     for i in [0, 3, 4, 5, 6, 7] {
         assert!(w.districts[i].population > 0, "{} inhabited", w.districts[i].name);
     }

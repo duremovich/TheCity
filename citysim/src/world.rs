@@ -876,6 +876,10 @@ pub struct World {
     /// `pick_candidate`'s rehire bonus reads it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub laid_off: BTreeMap<EntityId, (Role, Tick)>,
+    /// Hunger fix item 10 (P5h): employer -> consecutive midnights its
+    /// housing demand went unmet (`life::grow_housing`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub housing_demand: BTreeMap<EntityId, u16>,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1241,6 +1245,7 @@ impl World {
             employers: BTreeMap::new(),
             employer_of: BTreeMap::new(),
             laid_off: BTreeMap::new(),
+            housing_demand: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];

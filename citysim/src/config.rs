@@ -4350,6 +4350,19 @@ pub struct LifeCfg {
     /// pass, uncapped).
     pub hf_hire_near: bool,
     pub commute_hire_ticks: u64,
+    /// P5h (Dylan: the city grows toward jobs): an employer with at least
+    /// `housing_demand_min` workers past `commute_move_ticks` and fewer free
+    /// beds than that within `commute_move_ticks` of its door, for
+    /// `housing_demand_days` midnights running, gets a Home on the nearest
+    /// vacant Lot in that range (else a floor on the nearest Home there
+    /// below `[floors] floors_max`); up to `housing_builds_per_1000` a day
+    /// per 1,000 residents. Its owner corp pays `found_cost` / `floor_cost`
+    /// when it can (company housing), else the city builds (the city's
+    /// existing unpaid build path).
+    pub hf_grow_housing: bool,
+    pub housing_demand_min: u32,
+    pub housing_demand_days: u16,
+    pub housing_builds_per_1000: f32,
     /// G2: a starving agent walks this much further to a Mission.
     pub hungry_reach_mult: f32,
     /// G3: the theft cost added while the agent can buy a meal.
@@ -4438,6 +4451,10 @@ impl Default for LifeCfg {
             relocate_per_1000: 20.0,
             hf_hire_near: true,
             commute_hire_ticks: 80,
+            hf_grow_housing: true,
+            housing_demand_min: 6,
+            housing_demand_days: 3,
+            housing_builds_per_1000: 1.0,
             hungry_reach_mult: 2.0,
             steal_can_buy: 12.0,
             beg_dry_max: 3,

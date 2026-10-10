@@ -43,6 +43,9 @@ pub fn run(world: &mut World) {
     job_search(world);
     // Jobs and room J19: the day's labour market for the migrants' means.
     note_labour_market(world);
+    // Hunger fix item 10 (P5h): the city grows Homes toward unmet demand,
+    // then relocation fills them.
+    crate::systems::life::grow_housing(world);
     // L1: a long commute moves nearer work (a few households a night).
     crate::systems::life::relocate(world);
     emigration(world);
