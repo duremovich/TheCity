@@ -170,3 +170,11 @@ Train entities, capacity and platform queues; buses and road transit; sabotage, 
 6. **Fare dodging with nobody checking.** In v1 a broke lawless rider rides free and nothing happens to him. OK until inspectors land, or file a Crime from day one?
 7. **Sequencing.** Transit moves attendance and so wages and the money circuit: land it before the recalibration and the flip (one `calibrate`), or after the flip (a second recalibration)? Proposed: after Hunger as sickness (it needs P5f's `p_attend`), before the recalibration.
 8. **Map.** v1 stops are street tiles: no map change. Station buildings (with a door, a Security profile, shops on the concourse) need map cells; take them from the free ground now, or wait for the Interiors milestone?
+
+## Decisions (Dylan, 2026-10-10)
+
+1. Sequencing: the flip goes first (hunger + relocation + recalibrate + flip), and transit lands after it with its own recalibration. Phases 1-2 may be built in parallel, merged off.
+2. Owner: **the city**. Fares go to the Treasury, and power is paid from it. There is no concession and no corp revenue.
+3. Fare: a flat 1 coin a ride.
+4. Fare dodging is a petty crime record from day one, fed to the existing police and witness machinery. Inspectors come later.
+5. (Orchestrator defaults) Elevated rail, not buses; three lines; no service 01:00-05:00, so night workers walk; stations are stops with no buildings until the Interiors milestone.
