@@ -45,7 +45,9 @@ pub fn enabled(world: &World) -> bool {
 pub fn nightly(world: &mut World) {
     if enabled(world) {
         expire_bookings(world);
+        grow_shanties(world);
         book_statistical(world);
+        grow_hotels(world);
         assign_statistical_squats(world);
     }
     if world.config.law.district_beats {
@@ -573,7 +575,8 @@ pub fn relet_daily(world: &mut World) {
     let now = world.tick;
     let pick = derelicts(world)
         .into_iter()
-        .filter(|&h| !gang_held(world, h))
+        // Hunger as sickness P4b: a shanty is a Lot, not a Block to re-let.
+        .filter(|&h| !gang_held(world, h) && !is_shanty(world, h))
         .filter_map(|h| {
             let b = world.comp::<Building>(h)?;
             let since = b.empty_since?;
@@ -602,7 +605,8 @@ pub fn squat_banned(world: &World, a: EntityId, b: EntityId) -> bool {
 
 /// Every derelict building (any kind), ascending.
 pub fn derelicts(world: &World) -> Vec<EntityId> {
-    let mut out: Vec<EntityId> = [BuildingKind::Home, BuildingKind::Bar, BuildingKind::Hotel]
+    // Hunger as sickness P4b: a shanty is a derelict Lot.
+    let mut out: Vec<EntityId> = [BuildingKind::Home, BuildingKind::Bar, BuildingKind::Hotel, BuildingKind::Lot]
         .iter()
         .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.derelict && !bd.demolished))
@@ -696,6 +700,113 @@ pub fn evict_squatters(world: &mut World, b: EntityId, why: &str) -> Vec<EntityI
         evict_squatter(world, a, why);
     }
     out
+}
+
+/// Hunger as sickness P4b (`[street] shanties`): the bed rung grows with
+/// demand. A standing Hotel (not a Mission's cots) booked full after the
+/// night's bookings adds a floor of beds when its owner holds `floor_cost`
+/// (`Flow::Found`, `FloorAdded`), up to `hotel_floors_max` floors.
+pub fn grow_hotels(world: &mut World) {
+    if !world.config.street.shanties {
+        return;
+    }
+    let max = world.config.street.hotel_floors_max;
+    let hotels: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Hotel).to_vec();
+    for h in hotels {
+        if !is_hotel(world, h) || crate::systems::charity::is_cot_house(world, h) || free_beds(world, h) > 0 {
+            continue;
+        }
+        let Some((floors, capacity, owner)) =
+            world.comp::<Building>(h).map(|bd| (bd.floors.max(1), bd.capacity, bd.owner))
+        else {
+            continue;
+        };
+        if floors >= max {
+            continue;
+        }
+        let Some(cost) = crate::systems::founding::floor_cost(world, BuildingKind::Hotel) else { continue };
+        if owner.is_some() && world.purse(owner) < cost {
+            continue;
+        }
+        let per = capacity / floors;
+        let new_capacity = crate::systems::founding::with_floors(BuildingKind::Hotel, per, floors + 1).max(capacity);
+        if let Some(bd) = world.comp_mut::<Building>(h) {
+            bd.floors = floors + 1;
+            bd.capacity = new_capacity;
+        }
+        let paid = if owner.is_some() && cost > 0 {
+            crate::systems::ownership::pay(world, owner, None, cost, crate::systems::ownership::Flow::Found)
+        } else {
+            0
+        };
+        let (who, what) = (world.owner_label(owner), world.name_of(h));
+        let mut actors: Vec<EntityId> = owner.into_iter().collect();
+        actors.push(h);
+        world.push_event(
+            EventKind::FloorAdded,
+            &actors,
+            format!("{who} added a floor of beds to {what} (now {} floors) for {paid}", floors + 1),
+        );
+    }
+}
+
+/// A shanty: a vacant Lot squatted (derelict, still a Lot).
+pub fn is_shanty(world: &World, b: EntityId) -> bool {
+    world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Lot && bd.derelict && !bd.demolished)
+}
+
+/// Hunger as sickness P4b (`[street] shanties`): while the rough sleepers
+/// outnumber the free squat slots, up to `shanties_per_night` vacant Lots
+/// go up as shanties (at most `shanty_lots_max` standing), each in the
+/// district with the most rough sleepers: the vacant Lot nearest their mean
+/// tile turns derelict with `shanty_capacity` slots (`Derelict` "a shanty
+/// went up"), squatted by the night's assignment and the Full Squat goal as
+/// any derelict. It stays a Lot: a builder clears it (`founding::convert`
+/// puts the squatters out).
+pub fn grow_shanties(world: &mut World) {
+    if !world.config.street.shanties {
+        return;
+    }
+    let standing = world.buildings_of_kind(BuildingKind::Lot).iter().filter(|&&l| is_shanty(world, l)).count();
+    let room = world.config.street.shanty_lots_max.saturating_sub(standing);
+    let cap = usize::from(world.config.street.shanty_capacity.max(1));
+    let rough = rough_sleepers(world);
+    let free: usize = derelicts(world).into_iter().map(|b| squat_slots(world, b)).sum();
+    let mut need = rough.len().saturating_sub(free);
+    for _ in 0..world.config.street.shanties_per_night.min(room) {
+        if need == 0 {
+            break;
+        }
+        // The rough sleepers by district (their tile's), the most first.
+        let mut by_d: std::collections::BTreeMap<DistrictId, (u32, i64, i64)> = std::collections::BTreeMap::new();
+        for &a in &rough {
+            let Some(t) = world.comp::<Position>(a).map(|p| p.tile) else { continue };
+            let e = by_d.entry(world.district_of(t)).or_insert((0, 0, 0));
+            e.0 += 1;
+            e.1 += i64::from(t.x);
+            e.2 += i64::from(t.y);
+        }
+        let lots: Vec<EntityId> =
+            crate::systems::founding::vacant_lots(world).into_iter().filter(|&l| !is_shanty(world, l)).collect();
+        let pick = by_d
+            .iter()
+            .map(|(&d, &(n, x, y))| (std::cmp::Reverse(n), d, x / i64::from(n.max(1)), y / i64::from(n.max(1))))
+            .min()
+            .and_then(|(_, _, x, y)| {
+                let at = TilePos { x: x as u8, y: y as u8 };
+                lots.iter().copied().filter_map(|l| door_of(world, l).map(|d| (d.manhattan(at), l))).min()
+            });
+        let Some((_, lot)) = pick else { break };
+        let now = world.tick;
+        if let Some(bd) = world.comp_mut::<Building>(lot) {
+            bd.capacity = u8::try_from(cap).unwrap_or(u8::MAX);
+            bd.derelict = true;
+            bd.empty_since = Some(now);
+        }
+        let name = world.name_of(lot);
+        world.push_event(EventKind::Derelict, &[lot], format!("a shanty went up on {name}"));
+        need = need.saturating_sub(cap);
+    }
 }
 
 /// D22: each Statistical homeless adult with no bed and no squat takes the

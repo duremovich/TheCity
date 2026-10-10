@@ -732,3 +732,107 @@ fn test_bins_fill_from_sales_meals_and_carried_spoilage() {
     }
     assert!(spoiled, "the carried fraction spoiled a unit");
 }
+
+// ---------------------------------------------------------------------------
+// P4b: the rungs grow (Dylan on J25)
+// ---------------------------------------------------------------------------
+
+fn rungs_cfg() -> Config {
+    let mut c = sick_cfg();
+    c.street.shanties = true;
+    c
+}
+
+/// Put `n` adults out on the street (no home), Statistical.
+fn evict_n(w: &mut World, n: usize) -> Vec<EntityId> {
+    let out: Vec<EntityId> = adults(w).into_iter().take(n).collect();
+    for &a in &out {
+        w.comp_mut::<citysim::Household>(a).expect("household").home = None;
+    }
+    out
+}
+
+/// Rough sleepers outnumbering the free squat slots raise shanties on vacant
+/// Lots (at most `shanties_per_night` a night, `shanty_lots_max` standing);
+/// the night's assignment settles the off-screen homeless there.
+#[test]
+fn test_shanties_rise_with_rough_sleepers_and_are_capped() {
+    use citysim::systems::street;
+    let mut cfg = rungs_cfg();
+    cfg.street.shanty_lots_max = 2;
+    let mut w = World::new(42, cfg);
+    let lots_before = citysim::systems::founding::vacant_lots(&w).len();
+    let out = evict_n(&mut w, 200);
+    for &a in &out {
+        citysim::systems::lod::set_lod(&mut w, a, Lod::Statistical);
+    }
+    street::grow_shanties(&mut w);
+    let shanties: Vec<EntityId> =
+        w.buildings_of_kind(BuildingKind::Lot).iter().copied().filter(|&l| street::is_shanty(&w, l)).collect();
+    assert_eq!(shanties.len(), 2, "capped at shanty_lots_max");
+    assert_eq!(citysim::systems::founding::vacant_lots(&w).len(), lots_before, "a shanty stays a buildable Lot");
+    street::grow_shanties(&mut w);
+    let n = w.buildings_of_kind(BuildingKind::Lot).iter().filter(|&&l| street::is_shanty(&w, l)).count();
+    assert_eq!(n, 2, "no more past the cap");
+    street::assign_statistical_squats(&mut w);
+    let in_shanty = out
+        .iter()
+        .filter(|&&a| w.comp::<citysim::Squatter>(a).is_some_and(|s| street::is_shanty(&w, s.building)))
+        .count();
+    assert!(in_shanty > 0, "the off-screen homeless settle in the shanties");
+    // Off, nothing rises.
+    let mut v = World::new(42, sick_cfg());
+    evict_n(&mut v, 200);
+    street::grow_shanties(&mut v);
+    assert!(!v.buildings_of_kind(BuildingKind::Lot).iter().any(|&l| street::is_shanty(&v, l)));
+}
+
+/// Building on a shanty clears it: its squatters are put out (an eviction
+/// story), the Lot stands as the new building.
+#[test]
+fn test_building_on_a_shanty_puts_its_squatters_out() {
+    use citysim::systems::street;
+    let mut w = World::new(42, rungs_cfg());
+    let out = evict_n(&mut w, 60);
+    street::grow_shanties(&mut w);
+    let lot =
+        w.buildings_of_kind(BuildingKind::Lot).iter().copied().find(|&l| street::is_shanty(&w, l)).expect("a shanty");
+    for &a in out.iter().take(3) {
+        street::occupy(&mut w, a, lot).expect("a slot");
+    }
+    assert_eq!(w.squatters_of(lot).len(), 3);
+    citysim::systems::founding::convert(&mut w, lot, BuildingKind::Bar, None, 0);
+    assert!(w.squatters_of(lot).is_empty(), "cleared to build");
+    assert!(out.iter().take(3).all(|&a| !w.has::<citysim::Squatter>(a)));
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::SquatEvicted && e.text.contains("cleared to build")));
+    assert!(!w.comp::<Building>(lot).expect("bar").derelict);
+}
+
+/// A Hotel booked full adds a floor of beds its owner pays for.
+#[test]
+fn test_full_hotel_adds_a_floor_of_beds() {
+    use citysim::systems::street;
+    let mut w = World::new(42, rungs_cfg());
+    let Some(h) = w.buildings_of_kind(BuildingKind::Hotel).iter().copied().find(|&h| {
+        !citysim::systems::charity::is_cot_house(&w, h) && w.comp::<Building>(h).is_some_and(|b| !b.derelict)
+    }) else {
+        eprintln!("no Hotel on seed 42: nothing to check");
+        return;
+    };
+    let beds = usize::from(w.comp::<Building>(h).expect("hotel").capacity);
+    let guests = evict_n(&mut w, beds);
+    for &a in &guests {
+        w.comp_mut::<Wallet>(a).expect("wallet").coins = 50;
+        w.hotel_beds.insert(a, (h, w.tick + TICKS_PER_DAY));
+    }
+    assert_eq!(street::free_beds(&w, h), 0);
+    if let Some(o) = w.comp::<Building>(h).and_then(|b| b.owner) {
+        if let Some(x) = w.comp_mut::<Wallet>(o) {
+            x.coins = 100_000;
+        }
+    }
+    street::grow_hotels(&mut w);
+    let b = w.comp::<Building>(h).expect("hotel");
+    assert_eq!(b.floors, 2);
+    assert!(usize::from(b.capacity) > beds, "a floor of beds");
+}

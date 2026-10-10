@@ -48,7 +48,10 @@ const CORPS_ALIVE_MIN: usize = 4;
 // wages` and `no_safety_net` on): the dole city is jobless by design.
 /// J24: employed free adults over free adults (adults not jailed), every day from day 30.
 const EMPLOYED_MIN_SHARE: f64 = 0.5;
-/// J25: homeless adults over adults, every day from day 30.
+/// J25: adults sleeping on the street over adults, every day from day 30.
+/// Dylan, 2026-10-10 (hunger as sickness P4b): a squat, a cot or a Hotel bed
+/// is a rung, not the street; the Dregs (`Household.home == None`) are
+/// printed with their split beside it.
 const HOMELESS_MAX_SHARE: f64 = 0.25;
 
 /// The fulfilled-contract marks, by `ContractKind::index`.
@@ -70,8 +73,11 @@ struct SeedRun {
     corps_seeded: usize,
     corps_alive: usize,
     tps: f64,
-    /// J24/J25 at each day's end: (adults, free adults, employed free adults, homeless adults).
+    /// J24/J25 at each day's end: (adults, free adults, employed free adults, street sleepers).
     adults: Vec<(u32, u32, u32, u32)>,
+    /// The Dregs' split at each day's end: (Dregs, street, squat, of them in a
+    /// shanty, a Mission cot, a Hotel bed).
+    dregs: Vec<(u32, u32, u32, u32, u32, u32)>,
     /// The run is a no-net city (J24/J25 asserted).
     no_net: bool,
     /// `[sickness]` on (the tighter starvation bound and its bullets).
@@ -108,6 +114,7 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         corps_alive: 0,
         tps: 0.0,
         adults: Vec::new(),
+        dregs: Vec::new(),
         no_net: econ::no_net(&w),
         sickness: citysim::systems::health::on(&w),
     };
@@ -212,6 +219,7 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         r.rows.push(row);
         if r.no_net {
             r.adults.push(adult_counts(&w));
+            r.dregs.push(dreg_split(&w));
         }
     }
     r.tps = (days * TICKS_PER_DAY) as f64 / started.elapsed().as_secs_f64();
@@ -221,9 +229,9 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
 }
 
 /// J24/J25's day-end counts: (adults, free adults, employed free adults,
-/// homeless adults). An adult is a living citizen with a Brain of age; free
-/// is not jailed; homeless is a Household with no home (the `homeless`
-/// column's rule).
+/// street sleepers). An adult is a living citizen with a Brain of age; free
+/// is not jailed; a street sleeper is a Dreg (a Household with no home)
+/// with no Hotel or cot booked and no squat (Dylan, P4b).
 fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
     let (mut adults, mut free, mut employed, mut homeless) = (0u32, 0u32, 0u32, 0u32);
     for a in w.citizens() {
@@ -231,7 +239,10 @@ fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
             continue;
         }
         adults += 1;
-        if matches!(w.comp::<Household>(a), Some(Household { home: None, .. })) {
+        if matches!(w.comp::<Household>(a), Some(Household { home: None, .. }))
+            && !w.has::<citysim::Squatter>(a)
+            && citysim::systems::street::booked_hotel(w, a).is_none()
+        {
             homeless += 1;
         }
         if w.has::<Sentence>(a) {
@@ -243,6 +254,34 @@ fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
         }
     }
     (adults, free, employed, homeless)
+}
+
+/// The Dregs' split (printed beside J25): (Dregs, street, squat, in a
+/// shanty, a Mission cot, a Hotel bed).
+fn dreg_split(w: &World) -> (u32, u32, u32, u32, u32, u32) {
+    let (mut dregs, mut street, mut squat, mut shanty, mut cot, mut hotel) = (0, 0, 0, 0, 0, 0);
+    for a in w.citizens() {
+        if !w.has::<Brain>(a) || !demography::is_adult(w, a) {
+            continue;
+        }
+        if !matches!(w.comp::<Household>(a), Some(Household { home: None, .. })) {
+            continue;
+        }
+        dregs += 1;
+        if let Some(s) = w.comp::<citysim::Squatter>(a) {
+            squat += 1;
+            shanty += u32::from(citysim::systems::street::is_shanty(w, s.building));
+        } else if let Some(h) = citysim::systems::street::booked_hotel(w, a) {
+            if citysim::systems::charity::is_cot_house(w, h) {
+                cot += 1;
+            } else {
+                hotel += 1;
+            }
+        } else {
+            street += 1;
+        }
+    }
+    (dregs, street, squat, shanty, cot, hotel)
 }
 
 /// The collapse bounds over days `[from, to)` of one run, as failure lines.
@@ -301,10 +340,16 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     {
         let h = share(hl, adults);
         let over = days.iter().filter(|(_, c)| share(c.3, c.0) > HOMELESS_MAX_SHARE).count();
+        // The Dregs beside it (printed, not asserted).
+        if let Some(&(dregs, street, squat, shanty, cot, hotel)) = r.dregs.get(d as usize) {
+            eprintln!(
+                "seed {s} J25 peak day {d}: street {street} of {adults} adults ({h:.3}); Dregs {dregs} = street {street}, squat {squat} (shanty {shanty}), cot {cot}, Hotel {hotel}"
+            );
+        }
         fail(
             h <= HOMELESS_MAX_SHARE,
             format!(
-                "J25 homeless {hl} of {adults} adults ({h:.3}) on day {d} <= {HOMELESS_MAX_SHARE} ({over} days over)"
+                "J25 street sleepers {hl} of {adults} adults ({h:.3}) on day {d} <= {HOMELESS_MAX_SHARE} ({over} days over)"
             ),
         );
     }

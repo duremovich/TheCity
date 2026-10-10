@@ -805,6 +805,15 @@ squat_ban_days = 14
 # city_absorb_floor; its squatters are put out (the SquatEvicted path). 30 re-let the whole seed by
 # day 46 and the street dried up; 60 keeps the squats through the season and returns them after.
 relet_days = 60
+# Hunger as sickness P4b (Dylan on J25: the evicted land on the survival ladder's lower rungs, not the
+# street). Traced on the flipped seed 42 (days 30-66): 519-641 rough sleepers, 76-184 squatters in 15-33
+# derelicts, 24 Hotel beds; 412-509 of the homeless held 0 coins (a bed costs 3), so the free rung is the
+# one missing. While the rough sleepers outnumber the free squat slots, vacant Lots go up as shanties.
+shanties = false                   # in flight: on with the flip
+shanty_capacity = 24               # slots a shanty holds
+shanties_per_night = 3             # Lots that can go up a night
+shanty_lots_max = 20               # Lots standing as shanties at once (of ~160; the rest stay for building)
+hotel_floors_max = 4               # a Hotel booked full adds a floor of beds (owner pays floor_cost) up to this
 
 [riots]
 # M12 § 6 (plan D29-D35): district unrest, riots, crossfire.

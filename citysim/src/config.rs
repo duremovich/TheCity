@@ -2419,6 +2419,42 @@ pub struct StreetCfg {
     /// while the Treasury holds `city_absorb_floor` (0 = never).
     #[serde(default)]
     pub relet_days: u64,
+    /// Hunger as sickness P4b (Dylan, J25: the evicted land on the lower
+    /// rungs, not the street): the squat rung grows with demand. Each night
+    /// while the rough sleepers outnumber the free squat slots, up to
+    /// `shanties_per_night` vacant Lots in the districts with the most rough
+    /// sleepers go up as shanties: the Lot stays a Lot (a builder may
+    /// clear it), derelict, ownerless, `shanty_capacity` slots; at most
+    /// `shanty_lots_max` Lots at once, so the construction P2 kept them for
+    /// goes on (in flight: off is the city before it; on with the flip).
+    #[serde(default)]
+    pub shanties: bool,
+    #[serde(default = "default_shanty_capacity")]
+    pub shanty_capacity: u8,
+    #[serde(default = "default_shanties_per_night")]
+    pub shanties_per_night: usize,
+    #[serde(default = "default_shanty_lots_max")]
+    pub shanty_lots_max: usize,
+    /// P4b (with `shanties`): a Hotel booked full at the night's pass adds a
+    /// floor of beds, paid by its owner at `floor_cost`, up to this many floors.
+    #[serde(default = "default_hotel_floors_max")]
+    pub hotel_floors_max: u8,
+}
+
+fn default_hotel_floors_max() -> u8 {
+    4
+}
+
+fn default_shanty_lots_max() -> usize {
+    20
+}
+
+fn default_shanty_capacity() -> u8 {
+    24
+}
+
+fn default_shanties_per_night() -> usize {
+    3
 }
 
 impl StreetCfg {
@@ -2436,6 +2472,11 @@ impl StreetCfg {
             squat_reach: 40,
             squat_ban_days: 14,
             relet_days: 0,
+            shanties: false,
+            shanty_capacity: 24,
+            shanties_per_night: 3,
+            shanty_lots_max: 20,
+            hotel_floors_max: 4,
         }
     }
 }
