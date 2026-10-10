@@ -6216,6 +6216,9 @@ pub struct ClassPayCfg {
     pub status_frac: f32,
     /// P3: the split: a Spire night out, fashion (a corp Market), cosmetic chrome (a corp Clinic).
     pub status_split: [f32; 3],
+    /// P3 (Dylan): the most of the capital payout the graded premium may
+    /// draw on; the rest always goes into labour's P*.
+    pub premium_payout_share: f32,
 }
 
 impl Default for ClassPayCfg {
@@ -6239,6 +6242,7 @@ impl Default for ClassPayCfg {
             status_floor: 60,
             status_frac: 0.05,
             status_split: [0.5, 0.25, 0.25],
+            premium_payout_share: 0.5,
         }
     }
 }

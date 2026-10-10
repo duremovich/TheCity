@@ -44,6 +44,9 @@ struct Acc {
     grades: [u32; 4],
     /// Every wallet (for the median).
     wallets: Vec<i64>,
+    /// Labour-grade (0) holders and their gross wages.
+    lab_n: u32,
+    lab_wage: i64,
 }
 
 fn median(v: &[i64]) -> i64 {
@@ -84,7 +87,7 @@ struct Snap {
 
 fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
     let mut w = World::new(seed, Config::load());
-    let marks = [0u64, 30, 60, 90, days - 1];
+    let marks = [0u64, 30, 60, 90, 119, days - 1];
     // Meals by agent class over the window, read each day before midnight.
     let mut window: Vec<(u32, u32)> = vec![(0, 0); 4];
     let mut out = Vec::new();
@@ -119,6 +122,10 @@ fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
                 if let Some(j) = w.comp::<Job>(id) {
                     a.employed += 1;
                     a.grades[usize::from(j.grade.min(3))] += 1;
+                    if j.grade == 0 {
+                        a.lab_n += 1;
+                        a.lab_wage += wages::gross_wage(&w, j);
+                    }
                     let g = wages::gross_wage(&w, j);
                     a.wage += g;
                     let e = by_tier.entry(j.grade).or_default();
@@ -192,7 +199,7 @@ fn class_table() {
     }
     // Pooled over the seeds: the class means at each mark.
     println!("\n== pooled 42-44 ==");
-    println!("day | class | adults | employed | mean coins | median | mean wage | synth%");
+    println!("day | class | adults | employed | mean coins | median | mean wage | labour wage | synth%");
     let marks = runs[0].1.len();
     for m in 0..marks {
         for c in (0..4).rev() {
@@ -203,6 +210,8 @@ fn class_table() {
                 a.employed += b.employed;
                 a.coins += b.coins;
                 a.wallets.extend_from_slice(&b.wallets);
+                a.lab_n += b.lab_n;
+                a.lab_wage += b.lab_wage;
                 a.wage += b.wage;
                 a.synth += b.synth;
                 a.meals += b.meals;
@@ -212,7 +221,7 @@ fn class_table() {
             }
             let n = a.n.max(1) as f64;
             println!(
-                "{:>3} | {:<5} | {:>5} | {:>5.1}% | {:>8.1} | {:>5} | {:>5.2} | {:>5.1}% | grades {:?}",
+                "{:>3} | {:<5} | {:>5} | {:>5.1}% | {:>8.1} | {:>5} | {:>5.2} | {:>5.2} | {:>5.1}% | grades {:?}",
                 runs[0].1[m].day,
                 CLASS[c],
                 a.n,
@@ -220,6 +229,7 @@ fn class_table() {
                 a.coins as f64 / n,
                 median(&a.wallets),
                 a.wage as f64 / a.employed.max(1) as f64,
+                a.lab_wage as f64 / a.lab_n.max(1) as f64,
                 100.0 * a.synth as f64 / a.meals.max(1) as f64,
                 a.grades
             );
@@ -624,8 +634,9 @@ fn test_unfunded_premium_stops_graded_hiring() {
     let open = w.vacancies.get(&post).cloned().unwrap_or_default();
     assert!(!open.contains(&manager), "the graded vacancy is withdrawn");
     assert!(open.contains(&Role::Clerk), "the labour vacancy stands");
-    // The labour pool's target keeps the payout only after profit covers the premium.
-    assert_eq!(classpay::labour_payout(&w, corp, 50.0), 0.0, "an unfunded premium eats the payout first");
+    // An unfunded premium draws on at most `premium_payout_share` of the payout.
+    let share = w.config.classpay.premium_payout_share;
+    assert_eq!(classpay::labour_payout(&w, corp, 50.0), 50.0 * (1.0 - share), "labour keeps its half of the payout");
 }
 
 /// The thin ladder: a Sump-born skilled worker's night school is slow
@@ -814,4 +825,43 @@ fn wage_rule_census() {
             jobless as f64 / n
         );
     }
+}
+
+/// P3 (Dylan): the graded premium draws on profit plus at most
+/// `premium_payout_share` of the capital payout; the rest always reaches
+/// labour's P*. A premium the profit covers takes nothing from the payout; a
+/// premium past profit plus that share is unfunded (graded hiring pauses).
+#[test]
+fn test_premium_takes_at_most_its_share_of_the_payout() {
+    use std::collections::VecDeque;
+    let mut w = city_on();
+    let share = w.config.classpay.premium_payout_share;
+    assert!(share > 0.0 && share < 1.0, "the shipped share splits the payout");
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager)[0];
+    let post = w.comp::<Job>(m).and_then(|j| j.employer).expect("post");
+    let corp = w.corp_of_building(post).expect("corp");
+    let pin = |w: &mut World, prem: i64, cash: i64| {
+        let c = w.comp_mut::<Corp>(corp).expect("corp");
+        c.prem = VecDeque::from(vec![prem; wages::WINDOW_DAYS]);
+        c.cashflow = VecDeque::from(vec![cash; 14]);
+    };
+    let payout = 400.0f32;
+    // Profit covers the premium: labour keeps the whole payout.
+    pin(&mut w, 100, 50);
+    assert_eq!(classpay::labour_payout(&w, corp, payout), payout);
+    // No profit, a premium of 100: drawn from the payout, labour keeps the rest.
+    pin(&mut w, 100, -100);
+    assert_eq!(classpay::labour_payout(&w, corp, payout), payout - 100.0);
+    // No profit, a premium past the share: the premium takes only its share.
+    pin(&mut w, 1_000, -1_000);
+    assert_eq!(classpay::labour_payout(&w, corp, payout), payout * (1.0 - share), "labour keeps the rest");
+    // And the premium's room counts only that share: here it is unfunded.
+    let c = w.comp_mut::<Corp>(corp).expect("corp");
+    c.rev = VecDeque::from(vec![1_000; wages::WINDOW_DAYS]);
+    c.pay = VecDeque::from(vec![500; wages::WINDOW_DAYS]);
+    let (r, p) = wages::windows(&w, corp).expect("windows");
+    let full = wages::capital_payout(&w, corp, r, p);
+    let room = classpay::premium_room(&w, corp).expect("room");
+    assert!((room - (share * full - 1_000.0)).abs() < 1e-2, "room {room} = share x payout {full} - premium");
 }

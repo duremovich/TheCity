@@ -465,7 +465,8 @@ fn premium_and_profit(c: &Corp) -> (f32, f32) {
 }
 
 /// The coins a day a corp's capital and profit leave for more graded
-/// premium: `profit + capital payout − premium` (`None` before the windows
+/// premium: `profit + premium_payout_share × capital payout − premium`
+/// (`None` before the windows
 /// fill, or with class pay off: no limit; the seeded posts are paid from
 /// the capital `seed_staff` priced them against).
 pub fn premium_room(world: &World, corp: EntityId) -> Option<f32> {
@@ -475,7 +476,10 @@ pub fn premium_room(world: &World, corp: EntityId) -> Option<f32> {
     let (r, p) = crate::systems::wages::windows(world, corp)?;
     let (prem, profit) = premium_and_profit(world.comp::<Corp>(corp)?);
     let payout = crate::systems::wages::capital_payout(world, corp, r, p);
-    Some(profit + payout - prem)
+    // P3 (Dylan): the premium may draw on at most `premium_payout_share` of
+    // the payout; the rest is always labour's.
+    let share = world.config.classpay.premium_payout_share.clamp(0.0, 1.0);
+    Some(profit + share * payout - prem)
 }
 
 /// Can the corp owning `employer` fund one more `role` place's premium?
@@ -490,14 +494,19 @@ pub fn premium_funded(world: &World, employer: EntityId, role: Role) -> bool {
 }
 
 /// The capital payout left to the labour pool's target: the premium is
-/// charged to profit first, then to the payout (`payout` with class pay off).
+/// charged to profit first, then to at most `premium_payout_share` of the
+/// payout (`payout` with class pay off).
 pub fn labour_payout(world: &World, corp: EntityId, payout: f32) -> f32 {
     if !on(world) {
         return payout;
     }
     let Some(c) = world.comp::<Corp>(corp) else { return payout };
     let (prem, profit) = premium_and_profit(c);
-    (payout - (prem - profit).max(0.0)).max(0.0)
+    // P3 (Dylan): at most `premium_payout_share` of the payout goes to the
+    // premium; the rest always reaches labour's P*.
+    let share = world.config.classpay.premium_payout_share.clamp(0.0, 1.0);
+    let drawn = (prem - profit).max(0.0).min(share * payout.max(0.0));
+    (payout - drawn).max(0.0)
 }
 
 /// Midnight (`wages::staff`): a corp that cannot fund its graded premium

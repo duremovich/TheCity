@@ -144,3 +144,22 @@ Over the year the asset upkeep alone is ~+100k against off, the estates ~+32k, l
 - **Labour wages stay under the no-classpay city's at a year** (Sump 7.3 vs 11.1; Dreg adults 257 vs 76). Read-only diagnosis (`wage_rule_census`, seed 42; summed over the corps, a day, days 240-365, off vs P3): revenue R 10,073 vs 11,162 (larger with class pay, not smaller); labour payroll P 6,443 vs 5,880; target P* 13,441 vs 7,003. Labour's revenue share (`labour_share × R`, ~5.5-6k) is the same in both; the gap is the **capital payout**. In the off city the corps' capital above `capital_hi_days` adds ~7.9k a day to P*, which keeps P under 0.9 P* (raises), keeps hiring until the jobless pool runs dry (140 jobless, 49 vacancies open), and then shortage raises follow (55 "a vacancy stood unfilled" steps against 7). Under P3 the graded premium is charged to that payout (profit before premium is near zero, so `labour_payout` hands labour almost nothing of it): P sits over 1.1 P* and `wage_rev` steps down (86 downs against 4). So it is neither a smaller revenue base nor graded hires draining labour; it is that Dylan's "premium from capital" takes exactly the excess capital that, without class pay, was the engine of the labour raises. If labour should keep it, the premium would need its own source (profit only, or a share of the payout).
 - **The Treasury hoard grows** with class pay (to 136-158k at tax 0).
 - **The stat table** must learn `p_attend` for Manager, Engineer, Accountant, Broker, Ripperdoc, Mechanic (the single recalibration on the merged branch).
+
+## P3b2: the premium's share of the payout (Dylan, 2026-10-10)
+
+Labour's share is not to be gutted, and the capital payout was labour's raise engine: the graded premium draws on profit plus at most `[classpay] premium_payout_share` 0.5 of the capital payout; the rest always reaches labour's P* (`classpay::labour_payout`, `premium_room`). Past that the premium is unfunded and graded hiring pauses, as before. Not tuned (`test_premium_takes_at_most_its_share_of_the_payout`).
+
+Flipped, 42-44 pooled (off → P3 with the share):
+
+| day | class | mean coins | median | mean wage | labour-grade wage | synth % |
+|---|---|---|---|---|---|---|
+| 119 | Spire | 14.0 → 43.9 | 6 → 13 | 7.72 → 11.19 | 7.72 → 8.56 | 52.3 → 29.6 |
+| 119 | Mid | 28.0 → 32.8 | 10 → 12 | 7.54 → 8.76 | 7.54 → 7.66 | 36.7 → 29.4 |
+| 119 | Sump | 14.7 → 17.9 | 9 → 9 | 7.59 → 7.70 | 7.59 → 7.29 | 39.9 → 39.3 |
+| 119 | Dreg | 3.6 → 3.9 | 1 → 1 | 6.58 → 6.96 | 6.58 → 6.84 | 54.2 → 53.7 |
+| 364 | Spire | 59.0 → 75.2 | 16 → 17 | 11.81 → 12.90 | 11.81 → 9.24 | 38.8 → 30.6 |
+| 364 | Mid | 100.6 → 49.8 | 17 → 15 | 11.23 → 10.28 | 11.23 → 8.64 | 29.6 → 29.4 |
+| 364 | Sump | 56.8 → 31.1 | 16 → 13 | 11.05 → 9.17 | 11.05 → 8.54 | 30.5 → 33.7 |
+| 364 | Dreg | 154.8 → 6.5 | 8 → 4 | 8.57 → 6.63 | 8.57 → 6.60 | 53.3 → 52.9 |
+
+Dreg adults day 364: off 76, P3 (whole payout) 257, P3 with the share 239. Wallet Gini day 119 0.716 → 0.747, day 364 0.823 → 0.746. Employed day 364 1,590/1,498/1,633 → 1,723/1,631/1,657; population 1,773/1,819/1,892 → 1,943/1,853/1,941. Peak `wage_mult_mean` (payroll-weighted `wage_rev`) over the year, seeds 42/43/44: off 2.37/2.00/2.02, with the share 2.00/1.55/1.63 (day 364: 2.37/1.85/2.01 vs 2.00/1.21/1.54). Treasury day 364 110-166k. Flipped `core_sanity` (starvation 0/0/0) and `core_year` (seed 42, population 1,943, starvation 0) green; default 365-day CSV identical to `ff60ea6`; suite 805 passed.
