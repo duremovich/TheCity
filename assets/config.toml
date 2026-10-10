@@ -2091,9 +2091,15 @@ mal_poor_diet = 0.012      # per day at an all-synth diet (~25 days to the onset
 synth_malnut_cap = 0.45    # ... but a synth diet levels off here (run-down, not sick); hunger and scraps push past it
 mal_real = 0.02            # off per real meal (max 2 a day)
 mal_onset = 0.3
-tox_synth = 0.005          # per synth or Mission meal
-tox_dive = 0.012           # per bin meal
-tox_clear = 0.003          # a day
+# After P5 (Dylan): a share cleared a day, so a diet settles. Steady t* = tox_synth x S / tox_clear_frac, S synth
+# meals a day. The sim's day of food is ~1 meal (food_satisfy 0.5; measured 0.9-1.0 meals per adult-day), so
+# all-synth is S = 1 -> 0.8, and "one synth meal a day" (one of three human meals) is S = 1/3 -> 0.27. Hence
+# tox_synth / tox_clear_frac = 0.8; tox_clear_frac 0.03 (a 23-day half-life toward a cleaner diet) -> tox_synth 0.024.
+tox_synth = 0.024          # per synth or Mission meal
+tox_dive = 0.048           # per bin meal (scraps: twice synth)
+tox_clear_frac = 0.03      # the share cleared a day
+tox_seed_years = 8.0       # world creation: the seeded level approaches the diet's steady one by 1 - exp(-(age - 16) / this)
+tox_seed_jitter = 0.3
 tox_onset = 0.4
 mal_energy = 0.5
 tox_energy = 0.3
@@ -2108,10 +2114,11 @@ cancer_mood = 0.3
 frail_old = 2.0
 frail_fight = 0.2
 fertile_mal_max = 0.5
-# The daily hazard p = cancer_hazard x toxicity x dose (dose = toxicity summed over the days carried). Scale, not
-# a target: 100 days at toxicity 1.0 gives p 0.003 a day (the threshold model's rate at 1.0; that model's 0.6
-# floor was never reached: 0-3 cancers in 120 days, no Disease death in a year).
-cancer_hazard = 0.00003
+# After P5 (Dylan): a stationary daily hazard p = cancer_hazard x toxicity x (1 + max(0, age - 30) / 10). Chosen
+# once from the paper estimate in docs/HUNGER_SICKNESS.md § 3 (the seeded distribution), never against runs.
+cancer_hazard = 0.00017    # = 30 cancers a year (120 days) / (120 x E 1,440): the paper estimate, HUNGER_SICKNESS.md § 3
+cancer_age_from = 30.0     # sim years
+cancer_age_span = 10.0
 cancer_growth = 0.015      # stage a day: ~67 days from onset to death (two seasons)
 cancer_symptom = 0.25
 cancer_treat_price = 240   # ~30-40 days of a wage: the sink (wallet, then spouse/kin, then the gang)

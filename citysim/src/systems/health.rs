@@ -146,6 +146,7 @@ pub fn daily(world: &mut World) {
             continue;
         }
         let employed = world.comp::<Job>(id).is_some() && !world.has::<Sentence>(id);
+        let age = age_years(world, id);
         let Some(h) = health_mut(world, id) else { continue };
         let t = std::mem::take(&mut h.today);
         let synthy = f32::from(t.synth) + f32::from(t.alms);
@@ -160,17 +161,17 @@ pub fn daily(world: &mut World) {
             + cfg.mal_poor_diet * f32::from(t.dive) / meals.max(1.0)
             - cfg.mal_real * f32::from(t.real.min(2));
         h.malnutrition = m.clamp(0.0, 1.0);
+        // A share cleared a day: each diet settles at its steady level.
         let tox =
             h.toxicity + cfg.tox_synth * (f32::from(t.synth) + f32::from(t.alms)) + cfg.tox_dive * f32::from(t.dive)
-                - cfg.tox_clear;
+                - cfg.tox_clear_frac * h.toxicity;
         h.toxicity = tox.clamp(0.0, 1.0);
-        h.tox_dose += h.toxicity;
         // § 3: the cancer's onset and course (adults only, decision 6).
         if cfg.cancer {
             match h.cancer.as_mut() {
                 Some(c) => c.stage = (c.stage + cfg.cancer_growth).min(1.0),
                 None if h.toxicity > 0.0 => {
-                    let p = hazard(&cfg, h.toxicity, h.tox_dose);
+                    let p = hazard(&cfg, h.toxicity, age);
                     let roll = crate::systems::econ::hash_unit(seed, ROLL_CANCER, u64::from(id.index), day);
                     if roll < p {
                         h.cancer = Some(crate::components::Cancer { stage: 0.0, since: tick, diagnosed: false });
@@ -242,10 +243,99 @@ pub fn daily(world: &mut World) {
     row.mean_toxicity = if n > 0 { sum_t / n as f32 } else { 0.0 };
 }
 
-/// § 3: the cancer's daily hazard at `toxicity` after `dose` toxicity-days
-/// (0 at zero toxicity; rising with both).
-pub fn hazard(cfg: &crate::config::SicknessCfg, toxicity: f32, dose: f32) -> f32 {
-    (cfg.cancer_hazard * toxicity.max(0.0) * dose.max(0.0)).min(1.0)
+/// § 3: the cancer's daily hazard at `toxicity` and `age` sim years: 0 at
+/// zero toxicity, rising with toxicity and (past `cancer_age_from`) with age.
+pub fn hazard(cfg: &crate::config::SicknessCfg, toxicity: f32, age: f32) -> f32 {
+    (cfg.cancer_hazard * toxicity.max(0.0) * age_factor(cfg, age)).min(1.0)
+}
+
+/// § 3: `1 + max(0, age - cancer_age_from) / cancer_age_span`.
+pub fn age_factor(cfg: &crate::config::SicknessCfg, age: f32) -> f32 {
+    1.0 + (age - cfg.cancer_age_from).max(0.0) / cfg.cancer_age_span.max(1e-6)
+}
+
+/// The agent's age in sim years.
+pub fn age_years(world: &World, id: EntityId) -> f32 {
+    world.comp::<crate::components::Identity>(id).map_or(0.0, |i| i.age_days as f32 / crate::time::DAYS_PER_YEAR as f32)
+}
+
+/// `econ::hash_unit` purposes of the history seeding.
+const ROLL_SEED_TOX: u64 = 0x51c4_0004;
+const ROLL_SEED_CANCER: u64 = 0x51c4_0005;
+const ROLL_SEED_STAGE: u64 = 0x51c4_0006;
+
+/// The synth share of the diet an adult likely eats (world creation, an
+/// arrival): a Dreg all synth and scraps; housed, by its coins against a
+/// fortnight of real meals, the Spire at most `0.2`.
+fn likely_synth_share(world: &World, id: EntityId) -> f32 {
+    let home = world.comp::<crate::components::Household>(id).and_then(|h| h.home);
+    let Some(home) = home else { return 1.0 };
+    let tier = world.comp::<crate::components::Building>(home).map_or(1, |b| b.tier);
+    let p = crate::systems::life::meal_price(world, id).max(1) as f32;
+    let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins).max(0) as f32;
+    let s = 1.0 - 0.9 * (coins / (14.0 * p)).min(1.0);
+    match tier {
+        0 => s,
+        1 => s * 0.7,
+        _ => (s * 0.3).min(0.2),
+    }
+}
+
+/// The steady toxicity of a synth share `s` at one day's food (one meal a
+/// day, the sim's measured rate): `tox_synth x s / tox_clear_frac`; a Dreg's
+/// scraps add a tenth of a day in bin meals.
+fn steady_tox(cfg: &crate::config::SicknessCfg, s: f32, dreg: bool) -> f32 {
+    let dives = if dreg { 0.1 } else { 0.0 };
+    ((cfg.tox_synth * s + cfg.tox_dive * dives) / cfg.tox_clear_frac.max(1e-6)).min(1.0)
+}
+
+/// Dylan, after P5: people start with a history. An adult's toxicity is the
+/// steady level of its likely diet, approached with age (the young below
+/// it); a Dreg's malnutrition is the synth cap approached the same way; and
+/// a cancer is already in progress on the hazard's share (prevalence =
+/// the daily hazard x the days an early cancer stays silent, its stage
+/// uniform below the symptom). Pure hashes of the seed and the agent:
+/// deterministic, the same at either LOD tier.
+pub fn seed_agent(world: &mut World, id: EntityId) {
+    if !on(world) || !crate::systems::demography::is_adult(world, id) || !world.has::<Needs>(id) {
+        return;
+    }
+    let cfg = world.config.sickness.clone();
+    let seed = world.seed();
+    let key = u64::from(id.index);
+    let dreg = world.comp::<crate::components::Household>(id).is_none_or(|h| h.home.is_none());
+    let s = likely_synth_share(world, id);
+    let age = age_years(world, id);
+    let approach = 1.0 - (-(age - 16.0).max(0.0) / cfg.tox_seed_years.max(1e-6)).exp();
+    let u = crate::systems::econ::hash_unit(seed, ROLL_SEED_TOX, key, 0);
+    let jitter = 1.0 - cfg.tox_seed_jitter / 2.0 + cfg.tox_seed_jitter * u;
+    let tox = (steady_tox(&cfg, s, dreg) * approach * jitter).clamp(0.0, 1.0);
+    let mal = if dreg { (cfg.synth_malnut_cap * approach * jitter).min(1.0) } else { 0.0 };
+    let mut cancer = None;
+    if cfg.cancer {
+        let silent_days = cfg.cancer_symptom / cfg.cancer_growth.max(1e-6);
+        let prevalence = hazard(&cfg, tox, age) * silent_days;
+        if crate::systems::econ::hash_unit(seed, ROLL_SEED_CANCER, key, 0) < prevalence {
+            let stage = cfg.cancer_symptom * crate::systems::econ::hash_unit(seed, ROLL_SEED_STAGE, key, 0);
+            cancer = Some(crate::components::Cancer { stage, since: world.tick, diagnosed: false });
+        }
+    }
+    let Some(h) = health_mut(world, id) else { return };
+    h.toxicity = tox;
+    h.malnutrition = h.malnutrition.max(mal);
+    if h.cancer.is_none() {
+        h.cancer = cancer;
+    }
+}
+
+/// World creation: every adult's history (`seed_agent`).
+pub fn seed_history(world: &mut World) {
+    if !on(world) {
+        return;
+    }
+    for id in world.citizens() {
+        seed_agent(world, id);
+    }
 }
 
 /// `max(0, x − onset) / (1 − onset)`.
@@ -465,7 +555,6 @@ pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
     if cured {
         h.cancer = None;
         h.toxicity *= cfg.treat_tox_mult;
-        h.tox_dose *= cfg.treat_tox_mult;
     } else {
         c.stage = (c.stage - cfg.remission).max(0.0);
     }

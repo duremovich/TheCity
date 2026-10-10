@@ -138,12 +138,12 @@ fn test_meters_daily_from_the_tally() {
     health::daily(&mut w);
     let (ha, hb, hc) = (health(&w, a), health(&w, b), health(&w, c));
     assert!((ha.malnutrition - cfg.mal_poor_diet).abs() < 1e-6, "an all-synth day: {}", ha.malnutrition);
-    assert!((ha.toxicity - (3.0 * cfg.tox_synth - cfg.tox_clear)).abs() < 1e-6);
+    assert!((ha.toxicity - 3.0 * cfg.tox_synth).abs() < 1e-6);
     assert!((hb.malnutrition - cfg.mal_hungry).abs() < 1e-6, "a hungry day: {}", hb.malnutrition);
     assert_eq!(hb.toxicity, 0.0, "toxicity clears to 0, never below");
     let want_m = 0.5 + cfg.mal_poor_diet * 0.25 - 2.0 * cfg.mal_real;
     assert!((hc.malnutrition - want_m).abs() < 1e-6, "real meals heal: {} vs {want_m}", hc.malnutrition);
-    assert!((hc.toxicity - (0.5 + cfg.tox_dive - cfg.tox_clear)).abs() < 1e-6);
+    assert!((hc.toxicity - (0.5 + cfg.tox_dive - cfg.tox_clear_frac * 0.5)).abs() < 1e-6);
     assert_eq!(hc.today, citysim::MealTally::default(), "the tally resets");
 }
 
@@ -182,7 +182,8 @@ fn test_synth_diet_levels_off_at_the_cap() {
 fn test_effects_reach_energy_work_mood_fertility() {
     let mut w = world_on();
     let a = adults(&w)[0];
-    assert_eq!(health::effects(&w, a), health::Effects::NONE);
+    w.insert(a, Health::default());
+    assert_eq!(health::effects(&w, a), health::Effects::NONE, "a clean body");
     w.insert(a, Health { malnutrition: 1.0, toxicity: 1.0, ..Health::default() });
     let e = health::effects(&w, a);
     let cfg = &w.config.sickness;
@@ -530,38 +531,111 @@ fn diagnosed(stage: f32) -> Health {
     Health { cancer: Some(citysim::Cancer { stage, since: 0, diagnosed: true }), ..Health::default() }
 }
 
-/// The cancer's hazard (coordinator call after P5): zero at zero
-/// toxicity, rising with toxicity and with the toxicity-days carried; the
-/// onset counts follow it on a seeded crowd.
+/// Dylan, after P5: a fixed diet's toxicity converges to its steady level
+/// `tox_synth x S / tox_clear_frac` (S synth meals a day): all-synth (one
+/// meal a day, the sim's day of food) near 0.8, real food toward 0.
+#[test]
+fn test_toxicity_converges_to_the_diets_steady_level() {
+    let mut w = world_on();
+    let cfg = w.config.sickness.clone();
+    let (a, b) = (adults(&w)[0], adults(&w)[1]);
+    let tally = |real, synth| citysim::MealTally { real, synth, dive: 0, alms: 0, hungry_hours: 0 };
+    w.insert(a, Health::default());
+    w.insert(b, Health { toxicity: 0.9, ..Health::default() });
+    for _ in 0..400 {
+        let mut h = health(&w, a);
+        h.today = tally(0, 1);
+        w.insert(a, h);
+        let mut h = health(&w, b);
+        h.today = tally(1, 0);
+        w.insert(b, h);
+        health::daily(&mut w);
+    }
+    let steady = cfg.tox_synth / cfg.tox_clear_frac;
+    eprintln!(
+        "after 400 days: all-synth {:.3} (steady {steady:.3}), all-real {:.4}",
+        health(&w, a).toxicity,
+        health(&w, b).toxicity
+    );
+    assert!((health(&w, a).toxicity - steady).abs() < 0.01, "converges to the steady level");
+    assert!((steady - 0.8).abs() < 0.05, "all-synth settles near 0.8");
+    assert!(health(&w, b).toxicity < 0.01, "real food falls toward 0");
+}
+
+/// Dylan, after P5: the stationary hazard is zero at zero toxicity and
+/// rises with toxicity and age; on a seeded crowd onsets follow it.
 #[test]
 fn test_cancer_hazard_zero_at_zero_and_rising() {
     let cfg = sick_cfg().sickness;
-    assert_eq!(health::hazard(&cfg, 0.0, 500.0), 0.0, "no toxicity, no hazard");
-    assert_eq!(health::hazard(&cfg, 0.5, 0.0), 0.0, "no exposure yet, no hazard");
-    assert!(health::hazard(&cfg, 0.4, 50.0) < health::hazard(&cfg, 0.8, 50.0), "rising with toxicity");
-    assert!(health::hazard(&cfg, 0.4, 50.0) < health::hazard(&cfg, 0.4, 100.0), "rising with the dose");
+    assert_eq!(health::hazard(&cfg, 0.0, 60.0), 0.0, "no toxicity, no hazard");
+    assert!(health::hazard(&cfg, 0.4, 40.0) < health::hazard(&cfg, 0.8, 40.0), "rising with toxicity");
+    assert!(health::hazard(&cfg, 0.4, 35.0) < health::hazard(&cfg, 0.4, 60.0), "rising with age");
+    assert_eq!(health::hazard(&cfg, 0.4, 20.0), health::hazard(&cfg, 0.4, 25.0), "flat under cancer_age_from");
     let mut w = world_on();
     let people: Vec<EntityId> = adults(&w).into_iter().take(400).collect();
     let (hot, clean): (Vec<EntityId>, Vec<EntityId>) = people.iter().partition(|a| a.index % 2 == 0);
-    for _ in 0..30 {
+    for _ in 0..60 {
         for &a in &hot {
             let mut h = health(&w, a);
             h.toxicity = 1.0;
-            h.tox_dose = h.tox_dose.max(100.0);
             w.insert(a, h);
         }
         for &a in &clean {
-            let mut h = health(&w, a);
-            h.toxicity = 0.0;
-            w.insert(a, h);
+            w.insert(a, Health::default());
         }
         health::daily(&mut w);
     }
     let n_hot = hot.iter().filter(|&&a| cancer(&w, a).is_some()).count();
     let n_clean = clean.iter().filter(|&&a| cancer(&w, a).is_some()).count();
-    eprintln!("cancers in 30 days: toxicity 1.0 after 100 toxicity-days {n_hot} of {}; clean {n_clean}", hot.len());
+    eprintln!("cancers in 60 days at toxicity 1.0: {n_hot} of {}; clean {n_clean}", hot.len());
     assert_eq!(n_clean, 0, "no onset at zero toxicity");
-    assert!(n_hot > 0, "a chronic exposure carries a real risk");
+    assert!(n_hot > 0, "a high toxicity carries a real risk");
+}
+
+/// Dylan, after P5: people start with a history: the seeding is
+/// deterministic from the seed, and the toxicity it gives is ordered by
+/// class (Dregs over the Sump over Mid over the Spire); the Dregs carry
+/// malnutrition; the young sit below the old.
+#[test]
+fn test_seeded_history_is_deterministic_and_ordered_by_class() {
+    let (w1, w2) = (world_on(), world_on());
+    let tox = |w: &World, a: EntityId| health(w, a).toxicity;
+    for a in adults(&w1) {
+        assert_eq!(tox(&w1, a), tox(&w2, a), "deterministic");
+    }
+    let mut by: std::collections::BTreeMap<i32, (f32, f32, u32)> = Default::default();
+    for a in adults(&w1) {
+        let class = match w1.comp::<citysim::Household>(a).and_then(|h| h.home) {
+            None => -1,
+            Some(h) => i32::from(w1.comp::<Building>(h).map_or(0, |b| b.tier)),
+        };
+        let e = by.entry(class).or_default();
+        e.0 += tox(&w1, a);
+        e.1 += health(&w1, a).malnutrition;
+        e.2 += 1;
+    }
+    let mean = |k: i32| by.get(&k).map(|e| e.0 / e.2 as f32);
+    eprintln!("mean toxicity: Dreg {:?} Sump {:?} Mid {:?} Spire {:?}", mean(-1), mean(0), mean(1), mean(2));
+    let ms: Vec<f32> = [-1, 0, 1, 2].iter().filter_map(|&k| mean(k)).collect();
+    assert!(ms.windows(2).all(|p| p[0] > p[1]), "ordered by class: {ms:?}");
+    assert!(by.get(&-1).is_none_or(|e| e.1 / e.2 as f32 > 0.2), "the Dregs carry malnutrition");
+    // The young below the old (same class).
+    let sump: Vec<(f32, f32)> = adults(&w1)
+        .into_iter()
+        .filter(|&a| {
+            w1.comp::<citysim::Household>(a)
+                .and_then(|h| h.home)
+                .and_then(|h| w1.comp::<Building>(h))
+                .is_some_and(|b| b.tier == 0)
+        })
+        .map(|a| (health::age_years(&w1, a), tox(&w1, a)))
+        .collect();
+    let young: Vec<f32> = sump.iter().filter(|x| x.0 < 22.0).map(|x| x.1).collect();
+    let old: Vec<f32> = sump.iter().filter(|x| x.0 > 40.0).map(|x| x.1).collect();
+    let avg = |v: &[f32]| v.iter().sum::<f32>() / v.len().max(1) as f32;
+    if !young.is_empty() && !old.is_empty() {
+        assert!(avg(&young) < avg(&old), "the young below the old: {} vs {}", avg(&young), avg(&old));
+    }
 }
 
 /// The stage grows `cancer_growth` a day, turns symptomatic (diagnosed: the

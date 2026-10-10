@@ -1298,6 +1298,9 @@ impl World {
         // Real economy phase 2 (plan E14, Seeding): the hoard into the
         // corps' working capital, last (no RNG; a plain purse move).
         systems::econ::seed_capital(&mut w);
+        // Hunger as sickness (after P5): the adults' histories (pure
+        // hashes, no stream draw).
+        systems::health::seed_history(&mut w);
         // Flip readiness (the transition wave; wages on): the no-dole city's
         // staffing before day 0, from the capital just seeded (no RNG).
         systems::wages::seed_staff(&mut w);

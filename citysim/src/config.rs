@@ -6003,8 +6003,15 @@ pub struct SicknessCfg {
     pub tox_synth: f32,
     /// Toxicity per bin meal.
     pub tox_dive: f32,
-    /// Toxicity cleared a day.
-    pub tox_clear: f32,
+    /// The share of toxicity cleared a day (after P5: a flat clearance gave
+    /// no resting level). The steady level of a diet of S synth meals a day
+    /// is `tox_synth x S / tox_clear_frac`.
+    pub tox_clear_frac: f32,
+    /// World creation (and an arrival): an adult's toxicity approaches its
+    /// diet's steady level by `1 - exp(-(age - 16) / tox_seed_years)`.
+    pub tox_seed_years: f32,
+    /// The seeded levels' spread: x `(1 - j/2 + j u)`, `u` a hash.
+    pub tox_seed_jitter: f32,
     pub tox_onset: f32,
     pub mal_energy: f32,
     pub tox_energy: f32,
@@ -6024,11 +6031,13 @@ pub struct SicknessCfg {
     pub frail_fight: f32,
     /// No conception at or above this malnutrition.
     pub fertile_mal_max: f32,
-    /// The cancer's daily hazard per toxicity-day of exposure: p = this x
-    /// toxicity x dose, dose the toxicity summed over the days carried
-    /// (coordinator call after P5: a threshold at 0.6 nobody reached was a
-    /// mechanism that never fired). Zero at zero toxicity, rising with both.
+    /// The cancer's daily hazard: p = this x toxicity x age factor (Dylan,
+    /// after P5: a stationary hazard; no dose term, which compounded).
     pub cancer_hazard: f32,
+    /// The age factor `1 + max(0, age - cancer_age_from) / cancer_age_span`
+    /// (sim years).
+    pub cancer_age_from: f32,
+    pub cancer_age_span: f32,
     pub cancer_growth: f32,
     pub cancer_symptom: f32,
     pub cancer_treat_price: i64,
@@ -6074,7 +6083,9 @@ impl Default for SicknessCfg {
             mal_onset: 0.3,
             tox_synth: 0.005,
             tox_dive: 0.012,
-            tox_clear: 0.003,
+            tox_clear_frac: 0.03,
+            tox_seed_years: 8.0,
+            tox_seed_jitter: 0.3,
             tox_onset: 0.4,
             mal_energy: 0.5,
             tox_energy: 0.3,
@@ -6089,7 +6100,9 @@ impl Default for SicknessCfg {
             frail_old: 2.0,
             frail_fight: 0.2,
             fertile_mal_max: 0.5,
-            cancer_hazard: 0.00003,
+            cancer_hazard: 0.00017,
+            cancer_age_from: 30.0,
+            cancer_age_span: 10.0,
             cancer_growth: 0.015,
             cancer_symptom: 0.25,
             cancer_treat_price: 240,

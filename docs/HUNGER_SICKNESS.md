@@ -54,7 +54,9 @@ pub struct Health {
 The daily update (`s = synth + alms + dive` meals, `n = s + real`):
 
 - `malnutrition += mal_hungry × hungry_hours / 24 + mal_poor_diet × (s / max(n, 1)) − mal_real × min(real, 2)`, clamped to 0..=1.
-- `toxicity += tox_synth × (synth + alms) + tox_dive × dive − tox_clear`, clamped to 0..=1.
+- `toxicity += tox_synth × (synth + alms) + tox_dive × dive − tox_clear_frac × toxicity`, clamped to 0..=1 (after P5, Dylan: a share is cleared, not a flat amount, so every diet has a resting level).
+
+**The resting level, worked through.** With S synth meals a day the steady level solves `tox_synth × S = tox_clear_frac × t*`, so `t* = (tox_synth / tox_clear_frac) × S`. The sim's day of food is about one meal (`food_satisfy` 0.5 against roughly 0.42-0.5 of hunger lost a day; measured at 0.9-1.0 meals per adult-day). So all-synth means S = 1, and the target t* ≈ 0.8 gives `tox_synth / tox_clear_frac = 0.8`. "One synth meal a day" is one of a person's three meals, S = 1/3, giving t* = 0.27 ≈ 0.3. Real food gives S = 0, so t* → 0. The rate is set by the timescale: `tox_clear_frac` = 0.03 (a 23-day half-life toward a cleaner diet), so `tox_synth` = 0.024 and `tox_dive` = 0.048 (scraps count twice).
 
 **Debuffs** are read through one function, `health::effects(world, id) -> Effects`. Every reader is a function both tiers already call. Write `m' = max(0, m − mal_onset) / (1 − mal_onset)`, `t' = max(0, t − tox_onset) / (1 − tox_onset)`, and `c` = the cancer stage (0 without one).
 
@@ -69,7 +71,22 @@ The daily update (`s = synth + alms + dive` meals, `n = s + real`):
 
 ## 3. Cancer and the Clinic (H3)
 
-- **Onset**: at midnight, p = `cancer_hazard × toxicity × dose`, where dose is the toxicity summed over the days carried (a pure hash roll). This replaced the original threshold (`cancer_tox_min` 0.6, which nobody reached) after P5.
+- **Onset** (Dylan, after P5): at midnight, p = `cancer_hazard × toxicity × age_factor`, with `age_factor = 1 + max(0, age − cancer_age_from) / cancer_age_span` (30 and 10 sim years), rolled as a pure hash. The hazard is stationary. Two earlier models were dropped: a threshold at 0.6 that nobody reached, and a dose term that compounded roughly as t⁴.
+- **History** (world creation and every arrival, `health::seed_agent`, pure hashes, so the same at both tiers):
+  - Each adult's toxicity is the steady level of its likely diet, approached with age by `1 − exp(−(age − 16) / tox_seed_years)`, with a ±15 % hash jitter.
+  - The likely synth share is 1 for a Dreg (plus a tenth of a day in bin meals). For the housed it is `1 − 0.9 × min(1, coins / 14 meals)`, scaled ×1 in the Sump, ×0.7 in Mid, and capped at 0.2 in the Spire.
+  - A Dreg's malnutrition is the synth cap, approached the same way.
+  - A silent early cancer is seeded on `hazard × (cancer_symptom / cancer_growth)` (the prevalence of a cancer still under the symptom), with its stage uniform below the symptom.
+- **The paper estimate** (before any run): on the flipped config the seeded distribution gives E = Σ toxicity × age_factor ≈ 1,420-1,460 over the 2,000 adults (seeds 42-44). The mean seeded toxicity by class is Dreg 0.81-0.84, Sump 0.45, Mid 0.22-0.23, Spire 0.025. Expected onsets per sim year (120 days) are `120 × cancer_hazard × E`. For the printed 20-40 (Dylan), 30 gives `cancer_hazard = 30 / (120 × 1,440) ≈ 0.00017`, chosen once. The predicted deaths per sim year roughly equal the onsets, since onset to death takes about 67 days and few patients can pay 240; the first year runs lower because of that lag.
+- **Measured** (flipped core_year, seed 42, the P5f table):
+
+  | days | onsets | diagnosed | cured | Disease deaths |
+  |---|---|---|---|---|
+  | 0-119 | 42 | 40 | 2 | 19 |
+  | 120-239 | 22 | 24 | 4 | 29 |
+  | 240-359 | 16 | 21 | 4 | 11 |
+
+  Mean toxicity falls through the run as the city's real diets settle below the seeded ones. Sump 0.45 → 0.17, Mid 0.22 → 0.16, Dreg 0.82 → 0.33. The Spire rises 0.025 → 0.17, because its wallets thin once wages flow from revenue.
 - **Course**: `stage += cancer_growth` a day. At `stage ≥ cancer_symptom` it becomes **diagnosed**: a `Diagnosed` event, a `MemoryKind::Diagnosed` (salience 0.9, valence −0.8), a diary line and gossip about the person. At `stage ≥ 1` the agent dies of `DeathCause::Disease`.
 - **Treatment**: a new `Oncology` step under the existing **Treat** goal, at a Clinic (`nearest_seller(Clinic)`). Its price is `cancer_treat_price`, paid as `Flow::Treatment` to the Clinic's owner (a money sink, and Clinic revenue). Below `cure_stage` the treatment cures: the cancer is removed and toxicity × `treat_tox_mult`. At or above it the patient goes into remission, `stage −= remission`. Treat's utility for a diagnosed patient is U(stage); the price gates it. The Earn goal's savings line is raised to the price while the patient is diagnosed and untreated. Saving for treatment is the hook: it pushes people to work, beg, steal, join a gang or take contracts. Off screen, a diagnosed Statistical patient with the coins treats on `p_stat_treat` of days, the `p_stat_detox` pattern: too rare for `calibrate` to learn.
 
@@ -128,9 +145,11 @@ mal_hungry = 0.08          # malnutrition per fully hungry day (~12 days to 1.0)
 mal_poor_diet = 0.012      # per day at an all-synth diet (~25 days to the onset)
 mal_real = 0.02            # off per real meal (max 2 a day)
 mal_onset = 0.3
-tox_synth = 0.005          # per synth or Mission meal
-tox_dive = 0.012           # per bin meal
-tox_clear = 0.003          # a day
+tox_synth = 0.024          # per synth or Mission meal (after P5: t* = 0.8 x S)
+tox_dive = 0.048           # per bin meal
+tox_clear_frac = 0.03      # the share cleared a day
+tox_seed_years = 8.0
+tox_seed_jitter = 0.3
 tox_onset = 0.4
 mal_energy = 0.5
 tox_energy = 0.3
@@ -144,7 +163,9 @@ cancer_mood = 0.3
 frail_old = 2.0
 frail_fight = 0.2
 fertile_mal_max = 0.5
-cancer_hazard = 0.00003    # p a day = this x toxicity x toxicity-days (after P5)
+cancer_hazard = 0.00017    # p a day = this x toxicity x age factor (after P5; the paper estimate in § 3)
+cancer_age_from = 30.0
+cancer_age_span = 10.0
 cancer_growth = 0.015      # stage a day: ~67 days from onset to death (two seasons)
 cancer_symptom = 0.25
 cancer_treat_price = 240   # ~30-40 days of a wage: the sink
@@ -264,3 +285,8 @@ Each commit message holds its numbers.
 
   The off-screen tier eats the hour it is hungry (an old gap, inside the old 0.5 floor) and reaches bins from its Home door, while a body reaches from where it stands. This is the next mechanism to close.
 - **The default city, recalibrated:** off-screen thefts fall (seed 42 × 60: 917 vs 3,675 on the stale table) and starvation rises to the all-Full ground truth (18-33 per 120 days).
+
+## Open items (after P5)
+
+- **Marriage parity (default config):** Full 0.86 against Statistical 0.32 marriages per 100 agent-days. This is a density gap from the recalibration's 2,000-resident calibration city (the recal tree saw it too) and predates hunger as sickness. It is filed here, not chased.
+- **P5g (held for Dylan's city-design call):** the median commute is about 90 tiles, roughly 3 hours each way (farmers median 116 tiles, about 400 of them past 60). This is the bulk of Full's missed shift time. The options (a commute cap in hiring, relocation workers can afford, quits for a nearer post, transit) are with Dylan.

@@ -1034,6 +1034,8 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     if home.is_none() {
         world.push_event(EventKind::Homeless, &[id], format!("{name} has no home"));
     }
+    // Hunger as sickness (after P5): an arrival carries a history too.
+    crate::systems::health::seed_agent(world, id);
     id
 }
 
