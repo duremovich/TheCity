@@ -4333,6 +4333,23 @@ pub struct LifeCfg {
     /// on shift; it was `gate_or(0.3)`: 5.2 % of Full shift minutes in the
     /// all-Full flipped city went to Unwind).
     pub hf_shift_first: bool,
+    /// P5g (Dylan: relocation): an employed worker whose commute
+    /// (`life::commute_cost`, travel ticks) is past `commute_move_ticks`
+    /// moves to the nearest Home with room within that of work (or trades
+    /// Homes), needing only the first rent (no `rehouse_coins_mult`
+    /// deposit), when it saves `commute_margin_ticks`; up to
+    /// `relocate_per_1000` a day per 1,000 residents.
+    pub hf_relocate: bool,
+    pub commute_move_ticks: u64,
+    pub commute_margin_ticks: u64,
+    pub relocate_per_1000: f32,
+    /// P5g (Dylan: the hiring cap): a candidate within `commute_hire_ticks`
+    /// (`life::commute_cost`) of the workplace is preferred over any beyond
+    /// it (skill and the rehire bonus rank within each band); world creation
+    /// houses the seeded staff near work where Homes allow (the relocation
+    /// pass, uncapped).
+    pub hf_hire_near: bool,
+    pub commute_hire_ticks: u64,
     /// G2: a starving agent walks this much further to a Mission.
     pub hungry_reach_mult: f32,
     /// G3: the theft cost added while the agent can buy a meal.
@@ -4415,6 +4432,12 @@ impl Default for LifeCfg {
             hf_buy_not_steal: true,
             hf_beg_retry: true,
             hf_shift_first: true,
+            hf_relocate: true,
+            commute_move_ticks: 80,
+            commute_margin_ticks: 40,
+            relocate_per_1000: 20.0,
+            hf_hire_near: true,
+            commute_hire_ticks: 80,
             hungry_reach_mult: 2.0,
             steal_can_buy: 12.0,
             beg_dry_max: 3,

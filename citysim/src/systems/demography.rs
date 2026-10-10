@@ -635,6 +635,7 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
     } else {
         (0.0, 0)
     };
+    let near_cap = crate::systems::fixes::hire_near(world).then_some(world.config.life.commute_hire_ticks);
     world
         .citizens()
         .into_iter()
@@ -691,7 +692,17 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             };
             let off = (skill_w * 100.0 * skill).round() as u32
                 + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
-            ((1024 + from.manhattan(workplace_door)).saturating_sub(off.min(512)), id)
+            let d = from.manhattan(workplace_door);
+            // Hunger fix item 9 (P5g): a candidate within `commute_hire_ticks`
+            // (`life::commute_cost`) before any beyond it (skill and the
+            // rehire bonus rank inside each band).
+            let band = if near_cap.is_some_and(|c| crate::systems::life::commute_cost(world, from, workplace_door) > c)
+            {
+                1024
+            } else {
+                0
+            };
+            ((1024 + band + d).saturating_sub(off.min(512)), id)
         })
         .min()
         .map(|(_, id)| id)

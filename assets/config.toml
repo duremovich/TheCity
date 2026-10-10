@@ -1518,6 +1518,17 @@ hf_mission = true                   # 2: Eat's can-obtain gate opens on a stocke
 hf_buy_not_steal = true             # 3: a food theft costs steal_can_buy more while a meal is affordable
 hf_beg_retry = true                 # 4: a Beg with no giver is a dry hour (as Scavenge's), not a failure
 hf_shift_first = true               # 5 (P5f): a worker on shift does not leave for leisure (Unwind 0 on shift)
+# P5g (Dylan, 2026-10-10: relocation and the hiring cap; transit is its own milestone). Measured on the all-Full
+# flipped city (seed 42): the median commute 84-92 tiles (~3 h each way at ~0.45 tiles a minute), farmers 116;
+# relocation moved 8 a day and only those holding 21x the rent.
+# Every commute measure goes through life::commute_cost (travel ticks; today the walk: tiles x [exec]
+# move_ticks_full; the El will swap its body). 80 ticks = 40 tiles walked.
+hf_relocate = true                  # 8: a worker past commute_move_ticks moves near work on the first rent, not 21x
+commute_move_ticks = 80
+commute_margin_ticks = 40           # 8: ... when the move saves this much
+relocate_per_1000 = 20.0            # 8: movers a day per 1,000 residents (40 at 2,000; was a flat 8)
+hf_hire_near = true                 # 9: a candidate within commute_hire_ticks is hired before any beyond it
+commute_hire_ticks = 80
 hungry_reach_mult = 2.0             # 2: a starving agent walks this much further to a Mission
 steal_can_buy = 12.0                # 3
 beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...

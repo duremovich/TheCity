@@ -6,6 +6,7 @@
 
 use citysim::contract::{Broker, ContractId, ContractKind, ContractStatus, Origin, Posting, Target};
 use citysim::exec::routine;
+use citysim::systems::life::commute_cost;
 use citysim::systems::{contracts, demography, law, leisure, social};
 use citysim::{
     ActionKind, Brain, Building, Config, EntityId, Household, Inventory, Job, Needs, Position, RelKind, Role, Wallet,
@@ -834,4 +835,138 @@ fn probe_dry_beg_is_an_honest_hour() {
         on_complete(&mut w, a, ActionKind::Beg, None, t, t);
     }
     assert!(cooled(&w), "beg_dry_max dry Begs in a row did not cool Earn");
+}
+
+// ---------------------------------------------------------------------------
+// P5g (Dylan: relocation and the hiring cap; hunger fixes items 8-9)
+// ---------------------------------------------------------------------------
+
+/// Item 8 (`hf_relocate`): an employed worker on a long commute, holding the
+/// first rent (not 21 rents), moves nearer work within a day: into a Home
+/// with room, or (the Farms' neighbourhoods are full) by trading Homes with
+/// a single jobless resident there. Measured on the all-Full flipped city:
+/// median commute ~90 tiles, ~3 h each way; relocation moved 8 a day, only
+/// those holding 21x the rent.
+#[test]
+fn probe_far_worker_with_one_rent_moves_near_work() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    // Every commute measure through `life::commute_cost` (travel ticks).
+    let cost = |w: &World, a: citysim::TilePos, b: citysim::TilePos| commute_cost(w, a, b);
+    let cap = w.config.life.commute_move_ticks;
+    let work_of = |w: &World, a: EntityId| {
+        w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+    };
+    let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+    let (far, partner) = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.spouse_of(a).is_none() && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer))
+        .find_map(|a| {
+            let work = work_of(&w, a)?;
+            if cost(&w, door_of(&w, a)?, work) <= 2 * cap {
+                return None;
+            }
+            // A single adult living within 30 tiles of that work, to trade with.
+            let r = civilians(&w).into_iter().find(|&r| {
+                r != a && w.spouse_of(r).is_none() && door_of(&w, r).is_some_and(|d| cost(&w, d, work) <= cap * 3 / 4)
+            })?;
+            Some((a, r))
+        })
+        .expect("a single far farmer and a single adult living near the Farm");
+    let work = work_of(&w, far).unwrap();
+    // The partner has nothing keeping it there: no job, the coins of a rent.
+    w.remove::<Job>(partner);
+    w.comp_mut::<Wallet>(partner).expect("wallet").coins = 20;
+    let rents: i64 = w
+        .buildings_of_kind(citysim::BuildingKind::Home)
+        .iter()
+        .filter(|&&h| w.comp::<Building>(h).is_some_and(|b| cost(&w, b.door, work) <= cap))
+        .map(|&h| citysim::systems::ownership::rent_for(&w, h))
+        .max()
+        .unwrap_or(1);
+    w.comp_mut::<Wallet>(far).expect("wallet").coins = rents.max(1) + 2;
+    let before = door_of(&w, far).map(|d| cost(&w, d, work));
+    let partner_home = home(&w, partner).expect("partner home");
+    let partner_door = w.comp::<Building>(partner_home).expect("home").door;
+    let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
+    run_to(&mut w, far, end, |_| {});
+    let after = door_of(&w, far).map(|d| cost(&w, d, work));
+    // The partner's Home went to a far worker (this farmer, or a farther one
+    // the pass served first): a trade nearer work happened.
+    let traded_in = w.residents_of(partner_home).iter().copied().find(|&r| {
+        r != partner
+            && work_of(&w, r).is_some_and(|wd| cost(&w, partner_door, wd) <= cap)
+            && w.events.iter().any(|e| {
+                e.kind == citysim::EventKind::Housed && e.actors.first() == Some(&r) && e.text.contains("traded")
+            })
+    });
+    eprintln!(
+        "farmer {}: commute {before:?} -> {after:?} ticks; partner {} moved out {}; traded in {:?}",
+        far.index,
+        partner.index,
+        home(&w, partner) != Some(partner_home),
+        traded_in.map(|r| r.index)
+    );
+    assert!(after < before || traded_in.is_some(), "no far worker traded Homes nearer work");
+}
+
+/// Item 9 (`hf_hire_near`): with wages on, a jobless adult living near the
+/// workplace is hired before a far one whose skill and rehire bonus would
+/// have outweighed the walk.
+#[test]
+fn probe_near_candidate_hired_before_a_far_skilled_one() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
+    let door = w.comp::<Building>(farm).unwrap().door;
+    let cap = w.config.life.commute_hire_ticks;
+    // Every adult a candidate (the wages city is staffed at day 0): two are
+    // made jobless below.
+    let jobless: Vec<EntityId> = civilians(&w).into_iter().filter(|&a| home(&w, a).is_some()).collect();
+    let dist = |w: &World, a: EntityId| {
+        home(w, a)
+            .and_then(|h| w.comp::<Building>(h))
+            .map(|b| b.door)
+            .or_else(|| w.comp::<Position>(a).map(|p| p.tile))
+            .map_or(u64::MAX, |t| commute_cost(w, t, door))
+    };
+    let near =
+        jobless.iter().copied().filter(|&a| (cap * 5 / 8..=cap).contains(&dist(&w, a))).max_by_key(|&a| dist(&w, a));
+    let far = jobless
+        .iter()
+        .copied()
+        .filter(|&a| (cap * 9 / 4..=cap * 11 / 4).contains(&dist(&w, a)))
+        .min_by_key(|&a| dist(&w, a));
+    let (Some(near), Some(far)) = (near, far) else {
+        eprintln!("no near/far jobless pair on seed 42 at day 1: nothing to probe");
+        return;
+    };
+    w.remove::<Job>(near);
+    w.remove::<Job>(far);
+    // The far one: the best farmer, laid off from the role yesterday.
+    if let Some(s) = w.comp_mut::<citysim::Skills>(far) {
+        s.farming = 1.0;
+    }
+    if let Some(s) = w.comp_mut::<citysim::Skills>(near) {
+        s.farming = 0.0;
+    }
+    let t = w.tick;
+    w.laid_off.insert(far, (Role::Farmer, t));
+    let pick = citysim::systems::demography::hire_candidate(&w, farm, Role::Farmer);
+    eprintln!(
+        "near {} at {} ticks, far {} at {} ticks: picked {:?}",
+        near.index,
+        dist(&w, near),
+        far.index,
+        dist(&w, far),
+        pick.map(|p| p.index)
+    );
+    assert_ne!(pick, Some(far), "the far skilled rehire beat a candidate within the cap");
+    assert!(pick.is_some_and(|p| dist(&w, p) <= cap), "a candidate within the cap");
 }

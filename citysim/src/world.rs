@@ -1298,12 +1298,17 @@ impl World {
         // Real economy phase 2 (plan E14, Seeding): the hoard into the
         // corps' working capital, last (no RNG; a plain purse move).
         systems::econ::seed_capital(&mut w);
-        // Hunger as sickness (after P5): the adults' histories (pure
-        // hashes, no stream draw).
-        systems::health::seed_history(&mut w);
         // Flip readiness (the transition wave; wages on): the no-dole city's
         // staffing before day 0, from the capital just seeded (no RNG).
         systems::wages::seed_staff(&mut w);
+        // Hunger fix item 9 (P5g): the seeded staff housed near work where
+        // Homes allow (the relocation pass, uncapped; no RNG).
+        if systems::fixes::hire_near(&w) {
+            systems::life::relocate_up_to(&mut w, usize::MAX);
+        }
+        // Hunger as sickness (after P5): the adults' histories (pure
+        // hashes, no stream draw), once they are housed.
+        systems::health::seed_history(&mut w);
         w
     }
 

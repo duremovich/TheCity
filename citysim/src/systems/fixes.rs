@@ -78,6 +78,16 @@ pub fn beg_retry(world: &World) -> bool {
     hfix_item(world, 4) && world.config.life.hf_beg_retry
 }
 
+/// P5g (item 8): relocation workers can afford.
+pub fn relocate_fix(world: &World) -> bool {
+    hfix_item(world, 8) && world.config.life.hf_relocate
+}
+
+/// P5g (item 9): the hiring cap and the seeded staff housed near work.
+pub fn hire_near(world: &World) -> bool {
+    hfix_item(world, 9) && world.config.life.hf_hire_near
+}
+
 /// P5f (item 5): no Unwind on shift.
 pub fn shift_first(world: &World) -> bool {
     hfix_item(world, 5) && world.config.life.hf_shift_first
