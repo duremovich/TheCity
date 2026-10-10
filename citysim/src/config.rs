@@ -5934,8 +5934,9 @@ pub struct SicknessCfg {
     pub cancer: bool,
     /// Synth meals a shelf unit is cut into (each at a `1 / stretch` price).
     pub synth_stretch: u32,
-    /// Buy real at coins >= this many real meals ...
-    pub real_floor_meals: i64,
+    /// Buy real at coins >= this many real meals (coordinator call on P2:
+    /// 10 kept the employed on synth for good) ...
+    pub real_meal_reserve: i64,
     /// ... or this malnourished with two real meals' coins.
     pub mal_seek_real: f32,
     /// An hour below this hunger is a hungry hour.
@@ -5944,6 +5945,9 @@ pub struct SicknessCfg {
     pub mal_hungry: f32,
     /// Malnutrition per day at an all-synth (or scraps) diet.
     pub mal_poor_diet: f32,
+    /// A synth (or Mission) diet raises malnutrition only to here: run-down,
+    /// not sick; hunger and bin scraps push past it (coordinator call on P2).
+    pub synth_malnut_cap: f32,
     /// Malnutrition off per real meal (two a day at most).
     pub mal_real: f32,
     pub mal_onset: f32,
@@ -6004,11 +6008,12 @@ impl Default for SicknessCfg {
             bins: true,
             cancer: true,
             synth_stretch: 3,
-            real_floor_meals: 10,
+            real_meal_reserve: 3,
             mal_seek_real: 0.5,
             mal_hungry_edge: 0.25,
             mal_hungry: 0.08,
             mal_poor_diet: 0.012,
+            synth_malnut_cap: 0.45,
             mal_real: 0.02,
             mal_onset: 0.3,
             tox_synth: 0.005,

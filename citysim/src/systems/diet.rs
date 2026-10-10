@@ -32,7 +32,7 @@ pub fn synth_price(world: &World, p: i64) -> i64 {
 }
 
 /// The meal `id` would buy at real price `p` (§ 1): real with
-/// `real_floor_meals` real meals' coins, or malnourished past
+/// `real_meal_reserve` real meals' coins, or malnourished past
 /// `mal_seek_real` with two; else synth. Real with the diet off.
 pub fn quality(world: &World, id: EntityId, p: i64) -> Quality {
     if !on(world) {
@@ -41,7 +41,7 @@ pub fn quality(world: &World, id: EntityId, p: i64) -> Quality {
     let cfg = &world.config.sickness;
     let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
     let mal = crate::systems::health::malnutrition(world, id);
-    if coins >= cfg.real_floor_meals.saturating_mul(p) || (mal >= cfg.mal_seek_real && coins >= 2 * p) {
+    if coins >= cfg.real_meal_reserve.saturating_mul(p) || (mal >= cfg.mal_seek_real && coins >= 2 * p) {
         Quality::Real
     } else {
         Quality::Synth

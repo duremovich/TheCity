@@ -85,14 +85,14 @@ fn test_synth_meal_costs_a_third_and_drains_a_third() {
     assert_eq!(diet::meals_on_shelf(&w, m, 8, Quality::Synth), 8 * 3 + 2);
 }
 
-/// § 1: coins for `real_floor_meals` real meals buy real (and so does a
+/// § 1: coins for `real_meal_reserve` real meals buy real (and so does a
 /// malnourished agent with two meals' coins).
 #[test]
 fn test_real_bought_above_the_floor() {
     let mut w = world_on();
     let a = adults(&w)[0];
-    let floor = w.config.sickness.real_floor_meals;
-    w.comp_mut::<Wallet>(a).expect("wallet").coins = floor * 4;
+    let reserve = w.config.sickness.real_meal_reserve;
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = reserve * 4;
     assert_eq!(diet::quality(&w, a, 4), Quality::Real);
     w.comp_mut::<Wallet>(a).expect("wallet").coins = 8;
     assert_eq!(diet::quality(&w, a, 4), Quality::Synth);
@@ -145,6 +145,36 @@ fn test_meters_daily_from_the_tally() {
     assert!((hc.malnutrition - want_m).abs() < 1e-6, "real meals heal: {} vs {want_m}", hc.malnutrition);
     assert!((hc.toxicity - (0.5 + cfg.tox_dive - cfg.tox_clear)).abs() < 1e-6);
     assert_eq!(hc.today, citysim::MealTally::default(), "the tally resets");
+}
+
+/// § 2 (coordinator call on P2): a synth diet levels off at
+/// `synth_malnut_cap`; hunger and bin scraps push past it.
+#[test]
+fn test_synth_diet_levels_off_at_the_cap() {
+    let mut w = world_on();
+    let cap = w.config.sickness.synth_malnut_cap;
+    let (a, b, c) = (adults(&w)[0], adults(&w)[1], adults(&w)[2]);
+    let tally = |synth, dive, hungry| citysim::MealTally { real: 0, synth, dive, alms: 0, hungry_hours: hungry };
+    for _ in 0..200 {
+        for (id, t) in [(a, tally(3, 0, 0)), (b, tally(0, 3, 0)), (c, tally(3, 0, 12))] {
+            let mut h = health(&w, id);
+            h.today = t;
+            w.insert(id, h);
+        }
+        health::daily(&mut w);
+    }
+    let (ma, mb, mc) = (health(&w, a).malnutrition, health(&w, b).malnutrition, health(&w, c).malnutrition);
+    eprintln!("200 days: synth {ma:.3}, scraps {mb:.3}, synth and hungry {mc:.3}");
+    assert!((ma - cap).abs() < 1e-5, "an all-synth diet sits at the cap: {ma}");
+    assert!(mb > cap + 0.4, "scraps push past the cap: {mb}");
+    assert!(mc > cap + 0.4, "hunger pushes past the cap: {mc}");
+    // Above the cap, a synth diet does not add (nor heal).
+    let mut h = health(&w, a);
+    h.malnutrition = 0.8;
+    h.today = tally(3, 0, 0);
+    w.insert(a, h);
+    health::daily(&mut w);
+    assert!((health(&w, a).malnutrition - 0.8).abs() < 1e-6);
 }
 
 /// § 2: the debuffs read through `health::effects`.

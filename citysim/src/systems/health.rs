@@ -112,7 +112,7 @@ pub fn child_day(world: &mut World, child: EntityId, fed: bool, synth: bool) {
     let d = if !fed {
         cfg.mal_hungry
     } else if synth {
-        cfg.mal_poor_diet
+        cfg.mal_poor_diet.min((cfg.synth_malnut_cap - h.malnutrition).max(0.0))
     } else {
         -cfg.mal_real
     };
@@ -144,11 +144,16 @@ pub fn daily(world: &mut World) {
         let employed = world.comp::<Job>(id).is_some() && !world.has::<Sentence>(id);
         let Some(h) = health_mut(world, id) else { continue };
         let t = std::mem::take(&mut h.today);
-        let s = f32::from(t.synth) + f32::from(t.alms) + f32::from(t.dive);
-        let meals = s + f32::from(t.real);
+        let synthy = f32::from(t.synth) + f32::from(t.alms);
+        let meals = synthy + f32::from(t.dive) + f32::from(t.real);
+        // A synth diet levels off at `synth_malnut_cap` (coordinator call on
+        // P2); hunger and bin scraps push past it.
+        let synth_rise = cfg.mal_poor_diet * synthy / meals.max(1.0);
+        let synth_rise = synth_rise.min((cfg.synth_malnut_cap - h.malnutrition).max(0.0));
         let m = h.malnutrition
             + cfg.mal_hungry * f32::from(t.hungry_hours.min(24)) / 24.0
-            + cfg.mal_poor_diet * (s / meals.max(1.0))
+            + synth_rise
+            + cfg.mal_poor_diet * f32::from(t.dive) / meals.max(1.0)
             - cfg.mal_real * f32::from(t.real.min(2));
         h.malnutrition = m.clamp(0.0, 1.0);
         let tox =

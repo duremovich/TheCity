@@ -450,14 +450,13 @@ fn test_life_same_richness_full_vs_statistical() {
     let kinds = |tier: Lod| {
         let mut cfg = Config::load().v1_profile();
         cfg.lod.force = Some(tier);
-        // Hunger as sickness P1: the hunger fixes' G3 (no food theft while a
-        // meal is affordable) leaves this all-Full 300-resident dole city
-        // without a theft in 30 days (4-7 before, every one by a thief with
-        // a meal's coins), and so without the crime kinds this test reads
-        // its richness from. The test is about the biography machinery on
-        // both tiers, not the crime rate: it keeps the crime-bearing city.
-        cfg.life.hunger_fixes = false;
         let mut w = World::new(408, cfg);
+        // Hunger as sickness P1: the hunger fixes' G3 (no food theft while a
+        // meal is affordable) left this all-Full dole city without a theft in
+        // 30 days (4-7 before, every one by a thief holding a meal's coins):
+        // the dole fed everyone. No dole here, so the broke steal on both
+        // tiers and the biographies carry crime (pressure, not a switch).
+        w.levers.dole_per_day = 0;
         w.run_ticks(30 * TICKS_PER_DAY);
         let mut seen = std::collections::BTreeSet::new();
         let mut best = 0;

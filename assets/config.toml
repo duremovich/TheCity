@@ -2071,11 +2071,14 @@ diet = true                # § 1-2: synth/real, the meters, the debuffs
 bins = true                # § 4
 cancer = true              # § 3
 synth_stretch = 3          # meals per shelf unit cut with filler (a synth meal ~1 coin at P 3-4)
-real_floor_meals = 10      # buy real at coins >= this many real meals ...
+# P2 measured (seed 42 x 60, flipped): at 10 real meals' coins 64 % of meals were synth and 1,059 of ~1,900
+# malnourished, the working class included; coordinator call: buy real holding 3 meals' worth.
+real_meal_reserve = 3      # buy real at coins >= this many real meals ...
 mal_seek_real = 0.5        # ... or when this malnourished with 2 real meals' coins
 mal_hungry_edge = 0.25     # an hour below this hunger is a hungry hour
 mal_hungry = 0.08          # malnutrition per fully hungry day (~12 days to 1.0)
 mal_poor_diet = 0.012      # per day at an all-synth diet (~25 days to the onset)
+synth_malnut_cap = 0.45    # ... but a synth diet levels off here (run-down, not sick); hunger and scraps push past it
 mal_real = 0.02            # off per real meal (max 2 a day)
 mal_onset = 0.3
 tox_synth = 0.005          # per synth or Mission meal
