@@ -1,0 +1,208 @@
+# The Hit market: deaths people can pay for
+
+Companion to `M16_CONTRACTS.md` (the board, the Fixer, squads, the ledger, the accessory rule: all built in M16a), `M15_WORD_AND_BLOOD.md` (grudges, Hunts, vendettas), `TESTING.md` (the tiers) and `VISION.md`. Plan: `~/.claude/plans/hit-market.md`. Where this document and `M16_CONTRACTS.md` disagree on who buys a Hit or a Beat, at what price, and what happens to the money, this one wins. Sits before M16b; M16b's leverage reads it.
+
+Dylan, 2026-10-10: *"Paying for kills should be a mechanism we add."* After M16a no Hit or Beat is fulfilled naturally on seeds 42-47; the board runs on Locates and Guards. The goal: grudges and vendettas that can be paid for (kin revenge, a rival exec, a debtor, a witness), priced against what people actually hold, plus corps and gangs posting Hits for business reasons. Emergent story first: the judge is Hits fulfilled on most of 42-47 and diaries where someone paid for a death.
+
+As everywhere in this project, a "Hit", a "Beat", a "witness" or a "debt" is a record on a struct, a utility score, an integer purse moved by `ownership::pay`, and a seeded dice roll between fictional agents of a simulated city.
+
+**The short version.** The machinery works (god v8: 11 brokered Hits at 2,000 on execs, 5 done in a week). Nothing buys one because of **the price**: `contracts::quote` is a list price (`price_base × (1 + 1.5 risk) × (1 + standing)`, 300-1,300 for an ordinary target) and the people with a reason to kill hold 0-10 % of it. Meanwhile the guns on the Fixer's books would take the same job for **20-60 coins** (their own acceptance score, solved for price). The list price is 10-30× the market. So: **price a job at what the guns ask, let buyers pay with what they and their kin hold plus a balance on credit, and give four new kinds of people a reason to buy** (the suspect with a witness, the creditor, the dirty exec with a rival, the gang protecting its own). An unpaid balance is a debt; a debt is a motive; the chain closes.
+
+Identifiers marked *new* don't exist at HEAD (`d771073`). Numbers are measured unless marked *placeholder*.
+
+---
+
+## 0. Measured
+
+**How.** A scratch probe (an `#[ignore]` test in this worktree, never committed; source in the session scratchpad as `hit_probe.rs`) ran the shipped config on seeds 42-44 for 120 days and, every 20 days, read every grudge holder, wallet, gang and corp purse, open report and Fixer regular. A gun's **ask** is the closed form of `contracts::accept_score` (mode A at urgency 1, brokered, illegal and violent kinds) solved for the price at `accept_min` 0.35: the lowest price at which that regular would take that Hit.
+
+| seeds 42 / 43 / 44, days 20-120 | measured |
+| --- | --- |
+| adult wallets | p50 2-3, p90 8-11, p99 25-61 (the dole city) |
+| holders with an eligible grudge (`hunt_min` 0.75) at a snapshot | 0-6 (d20-60), 4-17 (d80-120); lethal (≥ 0.85) 0-10; "weak" (`might_gap < hire_gap`) 0-14 |
+| unsettled grudges ≥ 0.5 by cause, d120 | assault 54-79, killed friend 54-97, killed kin 18-28, robbed 4-15, betrayed 0-5, hired 1-5 |
+| the Hit/Beat `quote` on those holders' targets | p50 306-1,203, p90 364-1,301 |
+| holder's own wallet ÷ quote | p50 0-4 %, p90 0-10 %; **afford: 0 holders at any snapshot** |
+| holder + adult kin wallets (Spouse/Parent/Family) | p50 2-18, p90 5-49; **afford: 0** |
+| Fixer regulars / free regulars at lawfulness ≤ 0.3 | 47-83 / 11-46 |
+| **asks of those guns on the lethal targets** | p10 19-38, p50 23-69, p90 25-300; the cheapest gun per target p50 19-43 (one seed 159-247 late: targets with a gang behind them); some targets have no finite ask (defenders) |
+| gang treasuries | 0-509 (d20), 0-351 (d80-120); a Hit on a rival leader quotes 1,100-1,700 |
+| corp treasuries | 0-62k (rich: 8-60k for the big three); an exec Hit quotes 580-1,900; execs below lawfulness 0.3: 2-4 per seed |
+| open Murder reports with a living witness | 0-2 at a snapshot; Assault 2-53 |
+| financed assets in arrears ≥ 3 days | 10-24 at d20, 0-4 after |
+
+**What it says.** (1) The demand exists but is small and broke: a handful of lethal grudges at a time, held by people with 2-10 coins. (2) The supply exists and is cheap: a dozen to four dozen lawless free guns asking 20-60. (3) `quote` sits an order of magnitude above both. (4) Gangs are as broke as people at the list price; corps are rich and lack a reason. (5) Murder witnesses are rare at any instant; assault witnesses are common. (6) Debt barely exists (begging loans of 1-2 coins; chrome finance arrears early only), so the debtor motive needs a source of real debt: the Hit's own balance supplies it.
+
+---
+
+## 1. Decisions (overturnable)
+
+| # | Question | Decision |
+| --- | --- | --- |
+| H1 | The price | *new* `contracts::market_price(world, kind, target, cands) -> Option<i64>`: the ask (H2) of the `ask_rank`-th cheapest eligible candidate (`eligible` as matching reads it), at least `price_floor[kind]`; `None` when fewer than `ask_rank` candidates have a finite ask. Candidates: a Fixer's regulars for a brokered post, `direct_candidates` for a direct one. **Every Hit and Beat posted by an agent, a gang or a corp prices at the market**; on `None` it falls back to `quote` (the record goes to squads and gangs as M16a does). Law, god, Locate and Guard keep `quote`. |
+| H2 | A gun's ask | *new* `contracts::ask(world, gun, kind, target, brokered, buyer) -> Option<i64>`: the lowest price at which mode A's product reaches `accept_min`, solved in closed form (every term but `U(price ÷ week_wage)` is fixed; invert the Logistic{8, 0.3} and `U(x) = x ÷ (1 + x)`). `None` when the other terms cap the product under `accept_min`. Pure; unit-tested against `accept_score` at `ask` and `ask − 1`. No change to the Contract goal or `accept_score`. |
+| H3 | Means | *new* `hitmarket::means(world, buyer, target) -> Means { own, pooled: SmallVec<(EntityId, i64)> }`: the buyer's wallet plus, from each living adult with a Spouse, Parent or Family edge to the buyer (Friends too for a revenge want) **who holds an unsettled grudge ≥ `grudges.grudge_min` on the same target**, `kin_share` of their wallet. A gang's means: `gang_spend` × treasury; a corp's: treasury ÷ `corp_reserve_mult`. |
+| H4 | Credit | A buyer whose means cover `deposit_share` of the price posts at the full price: the deposit is escrowed (brokered) or checked (direct), the rest is a **balance** owed at fulfilment. Agents only (factions pay in full). *new* `Contract.deposit: i64` (`#[serde(default)]`; 0 = paid in full, the M16a record). |
+| H5 | Pooling the money | At posting each contributor pays its share to the buyer (*new* `Flow::Pool`, untaxed, appended) and joins `known_by` with a first-hand `Hired` (`contracts::hear_hired`): more people paid, more people know. |
+| H6 | Paying the balance | At fulfilment `settle` pays the escrowed deposit, then charges the balance from the buyer's purse (`ownership::charge`, `Flow::Payout`), split with the crew as today; the Fixer's cut is taken from what was paid. **Short**: the unpaid part becomes an edge debt buyer → taker (`Edge.debt`, `debt_since` now: the existing `social::repay_debts` takes it out of the buyer's wages when the wallet passes 20) and the taker gains `Grudge { cause: Betrayed, weight: stiff_grudge × unpaid ÷ balance }`; *new* `EventKind::Stiffed` and a `Betrayed` deed as a renege posts. A record never charges a contributor. |
+| H7 | A buyer keeps his own Hit quiet | `gossip::exchange_one` never volunteers a `Hired` rumour whose actor is the teller or the teller's faction (god v8 gap 5: a buyer told two guards within the day and was charged the next midnight). Interrogation, the Fixer's talk and other holders still spread it. `person.rs::probe_buyer_keeps_his_own_hit_quiet` is un-ignored. Without this every organic buyer is in Jail by day 2. |
+| H8 | The Want | *new* `World::wants: BTreeMap<EntityId, Want>` (saved): `Want { target, kind, motive, since, origin, tries: u8 }`, one per agent buyer, written by the daily passes (§ 2) when a motive stands, dropped when it is posted, the target dies or leaves, the motive lapses or `want_days` pass. A want short of means is kept (the buyer may get paid, kin may join) and re-checked daily. Factions post at once and keep no want. |
+| H9 | Posting at Full and Coarse | A buyer at Full or Coarse with a want and a reachable open Fixer (`hire_reach_tiles`) walks there: *new* `GoalKind::Commission` (scripted through `plan::plan_for`'s bypass like the Hunt: `GoTo(Fixer) → Commission`), *new* `ActionKind::Commission` (dur `commission_mins` 30) whose completion calls the posting. Score: want held → GATE; the motive's weight → Linear{0.8, 0.2}; `1 − lawfulness` → Linear{0.5, 0.5}; flat `commission_flat` 0.0. With no Fixer in reach the post is direct, at once (talk to one's own people needs no errand). |
+| H10 | Posting at Statistical | The daily pass posts at once (the Hunt hire precedent: "Tier-neutral: a Statistical holder posts at once"). |
+| H11 | Volume brakes | At most `max_open` organic Hit/Beat records open (*new* `Contract.motive != Motive::None` counts) and `posts_per_day` new ones a day city-wide, wants ordered by motive weight then id. Brakes, not targets: never tuned to a band. |
+| H12 | Who hires instead of hunting | M16a's rule (`might_gap < hire_gap`) **or** courage under `hire_courage`: a coward with a dead brother pays. The Hunt hire path (`try_hire`, `hire_pass`) writes a want instead of posting. |
+| H13 | Motive on the record | *new* `Contract.motive: Motive` (`#[serde(default)]`): `None` (M16a, law, god), `Revenge`, `Silence`, `Debt`, `Rival`, `Culprit`, `Protect` (a gang silencing its member's witness). `Origin` is unchanged (who decided); the motive is why. The event text and the log carry it. |
+| H14 | A dead witness | A report whose witness is dead and no city guard holds a `SawCrime` of it goes **cold** `cold_days` after the death: `resolved = true`, *new* `EventKind::CaseCold`. "No witness, no case." The law has no use for a report's witness today, so without this silencing buys nothing. |
+| H15 | A beaten witness | A fulfilled `Silence` or `Protect` Beat on a report's witness: the witness **recants** with `p = recant_p × (1 − courage)` (`ContractNs::Recant`, *new* purpose), the report resolved, *new* `EventKind::Recanted`. A guard witness never recants and is never a silencing target. |
+| H16 | What the suspect knows | A suspect knows a report's witness when they share an edge (any kind) or the witness lives in a district the suspect's gang holds (the street tells). Nobody else is targeted. |
+| H17 | The buyer after | At fulfilment the placing agent learns the deed first-hand (`Killed` or `Assaulted`, conf 1) so the grudge settles through M15 as for a Hunt win, and remembers it (*new* `MemoryKind::Commissioned`, valence + `closure_val` for Revenge, 0 otherwise): the diary shows the relief, and the guilt is M16b's. |
+| H18 | Corp brains | *new* `hitmarket::corp_pass` daily: a corp whose exec's lawfulness < `contracts.dirty_lobby` (0.3) posts on a **rival** (§ 2) a Hit on its exec (a Beat between 0.3 and `dirty_beat`), brokered at the open Fixer nearest the target, one per `corp_cooldown_days`. Lobby's culprit Hit (`post_lobby`) stays and prices at the market. |
+| H19 | Gang brains | `post_gang_hit` drops the "only on an order change" timing: the gang pass runs daily (*new* `hitmarket::gang_pass`). Rival leader: any open vendetta, not only when weaker (the `hire_ratio` test moves to the score: a weaker gang pays more readily). Plus Protect (H15) and avenging a member (the leader holds a `KilledFriend` grudge through `rel_w.leader` or a comrade's death). All priced at the market from `gang_spend` × treasury. |
+| H20 | Off by switch | *new* `[hitmarket] enabled = true` with `Config::hitmarket_off()` for A/B runs; `CITYSIM_HITMARKET_OFF=1`; retired with the other in-flight switches once the market is stable (TESTING.md's rule). `v1_profile` and `calibration_city` follow the shipped value (the calibration city is gangless and riot-free: the market rarely fires there, and the stat table is not re-run for it). |
+| H21 | Streams | Every new draw on `rng::CONTRACT_KEY` with *new* `ContractNs::{Recant, Want}` appended (M16a C4), never `rng.world()`. The want's daily ordering is by weight then id (no draw). |
+| H22 | Save | `SAVE_VERSION` + 1 (7, or max + 1 at merge if the hunger work bumps it first); every field `#[serde(default)]`; no migration code (TESTING.md). |
+
+---
+
+## 2. Demand: who buys a death
+
+Each row is a daily pass over a store, never a citizen scan. "Kind" is Hit when the motive's weight ≥ `hunt.lethal_min` (or the row says Hit), else Beat.
+
+| Motive | Buyer | Trigger (all tiers) | Kind and target | Pays with |
+| --- | --- | --- | --- | --- |
+| **Revenge** | an adult grudge holder | `hunt::heaviest_eligible` (weight ≥ `hunt_min`) passes H12; not hunting, not cooled; the hire score (`hunt::hire_considerations`) ≥ `contracts.hire_min` | by weight, on the grudge target | means + kin who share the grudge + credit |
+| **Silence** | a suspect with an open report | report crime is Murder (Hit) or Assault, Abduction, GrandTheft (Beat); suspect free, lawfulness < `silence_lawfulness`, knows the witness (H16); witness alive, not a guard | Hit or Beat on the witness | means + credit (no kin pool: kin share a grudge, not a crime) |
+| **Debt** | a creditor | an edge debt owed to it ≥ `debt_min` and older than `debt_days` (`Edge.debt_since`), or a financed asset of which it is the agent or gang lender in arrears ≥ `assets.repo_days` with nothing repossessable; creditor lawfulness < `debt_lawfulness` | Beat on the debtor; a Hit when the same debtor took a Debt Beat ≥ `debt_hit_days` ago and still owes (an example) | means + credit |
+| **Protect** | a gang | an open report against a member (as Silence) with a living non-guard witness the member knows | Beat on the witness (Hit for Murder), direct to the gang's own members first, brokered when none takes | `gang_spend` × treasury |
+| **Rival** (gang) | a gang | an open vendetta with a gang, its leader alive and free | Hit on the rival leader | `gang_spend` × treasury |
+| **Revenge** (gang) | a gang | its leader holds a `KilledFriend`/`KilledKin` grudge ≥ `hunt_min` on an agent | by weight, on that agent | `gang_spend` × treasury |
+| **Rival** (corp) | a dirty-exec corp | a rival corp, the first of: in an open vendetta with it; it took one of our buildings (`CorpShock::BuildingLost` by acquisition), poached our staff (`Poached`) or undercut us (`Undercut`) within `rival_window_days` (*new* `Corp.last_wronged: Option<(EntityId, Tick)>` written where those shocks are pushed with a known culprit) | Hit (Beat in `[dirty_lobby, dirty_beat)`) on the rival's exec | treasury ÷ `corp_reserve_mult` |
+| **Culprit** (corp) | a dirty-exec corp | M16a's Lobby row, unchanged but for the price | as M16a | as above |
+
+**Chains this closes** (the stories the market should tell, none scripted): a widow and her brother pool 31 coins and owe 31 more for the man who killed her husband; the gun kills him, she can't pay, he beats her a month later. A Sump dealer pays 25 for a beating of the neighbour who reported him; she recants. A gun stiffed twice by the same family becomes the next family's target. Militech's exec, undercut by Kiroshi for a month, buys Kiroshi's exec for 900; the strike is declined in the Spire on political cost, retaken by a squad, and the Fixer's heat closes the office for a week.
+
+---
+
+## 3. Pricing in detail
+
+```
+ask(gun) = ceil(week_wage(gun) × x*),  x* = u* ÷ (1 − u*),
+u* = 0.3 + ln(r ÷ (1 − r)) ÷ 8,         r = accept_min ÷ Π(other mode-A terms)
+       (None when r ≥ 1: the gun won't at any price)
+price  = max(price_floor[kind], ask of the ask_rank-th cheapest eligible candidate)
+         (quote() when fewer than ask_rank candidates ask)
+```
+
+`week_wage = max(7 × wage, 50)` as M16a set it, so a jobless gun reads a job as a mean worker would. The cheapest guns are the lawless and brave (the `1 − lawfulness` and `courage` terms), not the weakest (risk raises the ask). A high-standing target costs more only through its defenders' risk; `quote`'s standing term does not apply to market prices. `ask_rank` 2 means a first refusal moves the offer to a second gun at the same price (matching's existing loop). A record sits Open until its deadline when nobody takes it, then the want returns after `repost_days` with `tries + 1`; after `max_tries` it lapses.
+
+**Means vs price.** A want posts when `own + pooled ≥ deposit_share × price` (agents) or `budget ≥ price` (factions). A want short of that is kept, counted `hm_unaffordable`, and re-checked daily.
+
+---
+
+## 4. LOD
+
+| | Full / Coarse | Statistical |
+| --- | --- | --- |
+| Motives and wants | the daily passes (any tier: they read `Grudges`, `Wallet`, edges, reports, purses) | same |
+| Posting | the `Commission` errand at the Fixer (H9); direct at once | at once (H10) |
+| Pooling, credit, settlement | `ownership` flows (tier-free) | same |
+| Taking and executing | M16a's matching, live renders and missions | M16a's ledger draw and pre-bound holes |
+| Recant, case cold | daily, tier-free | same |
+
+Nothing here promotes an agent. Live organic records rank in M16a's `contract_quota` like any record (queued by price: cheap organic records queue behind the corps'). `fviolence` is untouched: a contract killing stays the contract's own (M16a's rule), never counted in `order_rates`.
+
+---
+
+## 5. Diaries, bulletins and the report
+
+- **Event texts** carry the motive and the money: `ContractPosted` "Mara Voss posted a Hit on Dex Kane for 62 (31 down, her brother's killer) at Fixer#531"; `Stiffed` "Mara Voss could not pay Jo Ruiz the 31 she owed"; `Recanted`, `CaseCold`; `ContractFulfilled` names the buyer's motive. Diaries read events naming the agent, so the buyer's week shows the walk to the Fixer, the wait, the news and the debt.
+- **Shadow**: *new* archetype `buyer` (an agent who placed a Hit or Beat that is open, taken or fulfilled within 7 days of the window's start). No bounds until the behaviour tier's next calibration (as `fixer` and `gun`).
+- **News**: a `Hired` rumour is a deed like any other, so Feeds can run it (M15). Not new code; phase 4 checks whether a contract story runs on any seed and lists it as a gap if not.
+- **`tools/analyze_run.py`**: a "Hit market" section from `HitCols` and, with the events file, **the story list**: per organic record, the posting line, taker, outcome, days to kill, stiffed or paid, charged (`Accessory`) or not. This list is the judge's first read.
+
+---
+
+## 6. Config (`[hitmarket]`, *new*; every value a placeholder)
+
+```toml
+[hitmarket]
+enabled = true
+ask_rank = 2
+price_floor = { hit = 20, beat = 8 }
+deposit_share = 0.5
+kin_share = 0.5
+want_days = 30
+repost_days = 7
+max_tries = 2
+max_open = 16
+posts_per_day = 3
+hire_courage = 0.4
+commission_mins = 30
+commission_flat = 0.0
+stiff_grudge = 0.8              # above hunt_min 0.75, under lethal_min 0.85: a stiffed gun hunts to beat
+closure_val = 0.3
+silence_lawfulness = 0.3
+recant_p = 0.5
+cold_days = 3
+debt_min = 15
+debt_days = 21
+debt_lawfulness = 0.35
+debt_hit_days = 30
+gang_spend = 0.5
+corp_reserve_mult = 5
+corp_cooldown_days = 30
+dirty_beat = 0.45
+rival_window_days = 30
+```
+
+`[contracts] hire_min`, `hire_gap`, `dirty_lobby`, `price_base` and the `[hunt]`/`[grudges]` keys are read, never retuned.
+
+## 7. Columns (*new* `HitCols`, after `ContractCols`, before `ticks_per_sec`)
+
+`hm_wants`, `hm_unaffordable`, `hm_posted_revenge`, `hm_posted_silence`, `hm_posted_debt`, `hm_posted_protect`, `hm_posted_rival`, `hm_posted_culprit`, `hm_price_mean`, `hm_deposit_mean`, `hm_pooled` (coins), `hm_hits_done`, `hm_beats_done`, `hm_stiffed`, `hm_recanted`, `hm_cold`, `hm_commissions` (Full errands completed). `citysim-cli/tests/cli.rs`'s header test moves.
+
+## 8. Save impact
+
+New: `World::wants`, `Contract.deposit`, `Contract.motive`, `Corp.last_wronged`, `MemoryKind::Commissioned`, `Flow::Pool`, `GoalKind::Commission`, `ActionKind::Commission`, `EventKind::{Stiffed, Recanted, CaseCold}`, `ContractNs::{Recant, Want}`, `Motive`. All appended or `#[serde(default)]`; `SAVE_VERSION` + 1 (H22); the save tests' mid-contract round trip gains a want and a record with a balance. The derived indices are rebuilt on load as M16a's are.
+
+---
+
+## 9. Acceptance (the TESTING.md tiers)
+
+**Unit tests** (seeded worlds, one per mechanism): `ask` equals the boundary of `accept_score`; `market_price` falls back to `quote` with < `ask_rank` asks; pooling moves only sharers' coins and puts them in `known_by`; credit posts at `deposit_share` and settles the balance; a short buyer is `Stiffed` with an edge debt and a grudge of the unpaid share; `repay_debts` clears it; each motive row posts from its preconditions and not without them (Revenge weak and coward, Silence with and without knowing the witness, Debt from an edge and from a finance plan, Protect, gang Rival, gang Revenge, corp Rival from each wrong); a dead witness's case goes cold unless a guard saw it; a beaten witness recants at `p` and a guard never does; the brakes hold; a buyer never volunteers his own `Hired`.
+
+**Core tier**: `core_sanity`'s coin identity and `escrow_leak` already cover pooling and balances. Measure "an organic Hit fulfilled" on 42-47 × 120 days: **if it fires on 4 or more of 6, it becomes a mechanism bullet** (the TESTING.md rule); else it stays a unit test and the shortfall is a finding for Dylan. The collapse bounds (Assault + Murder ≤ 42.7 a day, population) stay as they are.
+
+**Person probes** (`tests/person.rs`): a widow whose husband was killed by a stronger man, holding 40 coins with a sharing brother, commissions a Hit at the Fixer within 7 days (control: a stronger, braver widow hunts herself); a suspect with a known witness to his assault buys a Beat on her within 7 days (control: an unknown witness is never targeted); a buyer who pays only the deposit is owed by nobody and owes the gun the balance; un-ignore `probe_buyer_keeps_his_own_hit_quiet`.
+
+**Behaviour tier**: unchanged bounds; a failure is read against the diaries first (a few hundred buyers' errands should not move any archetype row). The `buyer` archetype's diaries are read in the phase 4 shadow pass.
+
+**God**: one scenario (v9): `god_kill_ten_fathers_day_10` (ten household heads killed by a named stronger agent each): the world reacted if at least one widow or adult child posts a Hit within 30 days. Control unshocked.
+
+**Printed findings** (numbers, not gates): organic Hits and Beats posted and fulfilled per seed and per motive; price and deposit means; stiffed share; recants and cold cases; accessory charges on organic buyers; contract killings as a share of Murders; Murders vs main (the old M16a "≤ 1.25 ×" is a print); the same on the wages + no-net config.
+
+---
+
+## 10. Interactions
+
+- **Hunger as sickness** (in flight): the market reads `Wallet`, `law::fighting`, `Personality` and the grudge store only. If sickness lowers fighting, the sick hire more (might gap) and ask more (risk). If dumpster diving and cheaper food fatten the poorest wallets a little, means rise a little. A death from disease settles grudges on the dead as any death does. No shared file but `config.rs`/`assets/config.toml` (new sections only) and possibly `plan.rs` (H9's bypass arm): merge after the hunger phase that touches `plan.rs`, or rebase.
+- **The flip** (wages + `no_safety_net` on): wallets grow (×10-50 for the employed), so means and the share of wants that clear rise sharply; the gun gate (`wage < 0.7 × median_wage`) shrinks the pool as employment reaches ~90 % and an employed gun's `week_wage` is real, so asks rise. Demand up, supply down: the market should find a higher price on its own. Every phase reports both configs. The Treasury's police budget (Jobs P5a) makes arrests and so interrogations more likely: more buyers charged.
+- **M16a**: `post_gang_hit`, `post_lobby` and `try_hire` change (H1, H12, H19); matching, missions, the ledger, the accessory rule and settlement keep their code paths (settlement gains the balance). The behaviour of every Locate and Guard is unchanged.
+- **M16b**: its `Debt` leverage and protection should put a threat before H's Debt Beat (a coercion first, the Beat when it fails); its `Crime::Fraud` on renege applies to a stiffing buyer; its Wounded split turns some Hits into wounds. Nothing here names a 16b type.
+- **The calibration milestone**: `price_floor`, `deposit_share`, `kin_share`, `stiff_grudge` and the brakes are its knobs, not this pass's.
+
+## 11. Out of scope
+
+Loan sharks (a gang lending to fund a Hit; an Open question), inheritance killings (an heir buying a parent's death for the estate), love rivals, a Hit on a guard or the captain by an agent, buyers outside the city (M17's ledger), the player as buyer or taker (M18: `PostContract`/`TakeContract` already exist), Fixer competition and prices per Fixer (`price_level_b` stays 1.0), the Fixer seeding gap (god v8 gaps 2-3), fraud and fake jobs (M16b), retuning any M8-M16a knob.
+
+---
+
+## Open questions for Dylan
+
+1. **Cheap death.** At market prices a Hit costs ~20-60 coins in today's dole city (about 1-3 weeks of a jobless gun's floor wage; 7-20 days of the dole). Is that the city you want, or should `price_floor.hit` sit higher (e.g. 100) so a killing stays a saving-up decision even at the bottom? (The market finds its own price after the flip.)
+2. **No witness, no case** (H14) and **recanting** (H15) give silencing teeth and change the law: some Murders and Assaults now go unpunished. OK, or should a dead witness's case only slow down (a lower arrest chance) rather than close?
+3. **Credit** (H4/H6): a buyer can owe half; the unpaid balance becomes a wage-garnished debt and a gun's grudge. Want it, or pay-in-full only (fewer, slower, quieter Hits)?
+4. **Loan sharks**: should gangs lend to would-be buyers at interest (a richer debt chain, and gang income), now or with M16b's leverage?
+5. **Kin pooling** takes half the wallet of every relative who shares the grudge, and every one of them then knows. Should a relative be able to refuse (a lawfulness or honour roll)?
+6. **The exec war** (H18): dirty execs (2-4 per seed) buying rival execs could decapitate the corps (god v8: Militech bankrupt within a month of losing its exec). A cooldown of 30 days is the only brake. Acceptable, or a per-corp cap per run?
+7. **The gun's floor wage** (`week_wage = max(7 × wage, 50)` from M16a) sets the whole scale of asks for jobless guns. Keep it, or tie it to the city's median wage so prices follow the economy?
