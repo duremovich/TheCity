@@ -1406,7 +1406,15 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
 /// P5f: the role's learned attendance (`StatTable::p_attend`), if any.
 fn stat_attend(world: &World, role: Role) -> Option<f32> {
     let t = world.stat_table.as_ref()?.p_attend.as_ref()?;
-    t.get(&format!("{role:?}")).copied()
+    match t.get(&format!("{role:?}")) {
+        Some(&p) => Some(p),
+        // Class pay (docs/CLASS_PAY.md): a role the table has not learned
+        // (the new graded trades, a Ripperdoc) works the table's mean
+        // attendance rather than a whole paid shift, until `calibrate`
+        // learns it (a graded wage would otherwise widen the tiers' gap).
+        None if crate::systems::classpay::on(world) && !t.is_empty() => Some(t.values().sum::<f32>() / t.len() as f32),
+        None => None,
+    }
 }
 
 /// P5f: the hour's attendance roll (a pure hash of the agent and the hour).

@@ -42,6 +42,14 @@ struct Acc {
     meals: u32,
     /// Job holders by grade.
     grades: [u32; 4],
+    /// Every wallet (for the median).
+    wallets: Vec<i64>,
+}
+
+fn median(v: &[i64]) -> i64 {
+    let mut v = v.to_vec();
+    v.sort();
+    v.get(v.len() / 2).copied().unwrap_or(0)
 }
 
 fn gini(mut v: Vec<i64>) -> f64 {
@@ -104,6 +112,7 @@ fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
                 a.n += 1;
                 let k = w.comp::<Wallet>(id).map_or(0, |x| x.coins);
                 a.coins += k;
+                a.wallets.push(k);
                 coins.push(k);
                 if let Some(j) = w.comp::<Job>(id) {
                     a.employed += 1;
@@ -180,7 +189,7 @@ fn class_table() {
     }
     // Pooled over the seeds: the class means at each mark.
     println!("\n== pooled 42-44 ==");
-    println!("day | class | adults | employed | mean coins | mean wage | synth%");
+    println!("day | class | adults | employed | mean coins | median | mean wage | synth%");
     let marks = runs[0].1.len();
     for m in 0..marks {
         for c in (0..4).rev() {
@@ -190,6 +199,7 @@ fn class_table() {
                 a.n += b.n;
                 a.employed += b.employed;
                 a.coins += b.coins;
+                a.wallets.extend_from_slice(&b.wallets);
                 a.wage += b.wage;
                 a.synth += b.synth;
                 a.meals += b.meals;
@@ -199,12 +209,13 @@ fn class_table() {
             }
             let n = a.n.max(1) as f64;
             println!(
-                "{:>3} | {:<5} | {:>5} | {:>5.1}% | {:>8.1} | {:>5.2} | {:>5.1}% | grades {:?}",
+                "{:>3} | {:<5} | {:>5} | {:>5.1}% | {:>8.1} | {:>5} | {:>5.2} | {:>5.1}% | grades {:?}",
                 runs[0].1[m].day,
                 CLASS[c],
                 a.n,
                 100.0 * a.employed as f64 / n,
                 a.coins as f64 / n,
+                median(&a.wallets),
                 a.wage as f64 / a.employed.max(1) as f64,
                 100.0 * a.synth as f64 / a.meals.max(1) as f64,
                 a.grades
