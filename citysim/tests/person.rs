@@ -598,15 +598,13 @@ fn probe_buyer_nobody_heard_of_is_never_charged() {
     }
 }
 
-/// GAP (M16a phase 5; for the behaviour round): the buyer tells his own
-/// Hit. `gossip::exchange_one` lets a teller pass on a deed whose actor he
-/// is (W8: a lie at `deception × 0.5`, else the truth), and `Hired`'s
-/// salience makes it his best story, so within the day two city guards
-/// hold it from him and the next midnight's `accessory_check` charges him
-/// (seed 42: heard on day 0, charged on day 1). A person keeps a bought
+/// The buyer keeps his own Hit quiet (god v8 gap 5, closed by the Hit
+/// market's H7): before it, `gossip::exchange_one` let a teller pass on a
+/// deed whose actor he is, and `Hired`'s salience made it his best story,
+/// so within the day two city guards held it from him and the next
+/// midnight's `accessory_check` charged him. A person keeps a bought
 /// killing to himself, above all from the law.
 #[test]
-#[ignore]
 fn probe_buyer_keeps_his_own_hit_quiet() {
     let (mut w, buyer, t, _) = quiet_buyer();
     let end = w.tick + 7 * TICKS_PER_DAY;

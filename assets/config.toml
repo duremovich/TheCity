@@ -1764,6 +1764,28 @@ per_sighting = 15
 cap_sightings = 10
 min_gap_hours = 6
 
+# The Hit market (docs/HIT_MARKET.md, plan ~/.claude/plans/hit-market.md): Hits and Beats priced at what
+# the guns ask, paid from the buyer's means and kin, half down on credit. Every value a placeholder.
+[hitmarket]
+enabled = true                       # H20: the switch in flight (CITYSIM_HITMARKET_OFF=1 for A/B runs)
+ask_rank = 2                         # H1: the 2nd-cheapest candidate's ask sets the price
+price_floor = { hit = 20, beat = 8 } # H1, Dylan's decision 1
+wage_floor_min = 50                  # decision 7: a gun's week wage floor max(50, 0.5 x 7 x median wage)
+wage_floor_mult = 0.5
+deposit_share = 0.5                  # H4, decision 3: half down
+kin_share = 0.5                      # H3: a sharing relative chips in half its wallet (or refuses, decision 6)
+max_open = 16                        # H11: brakes, not targets
+posts_per_day = 3
+hire_courage = 0.4                   # H12: a coward hires
+stiff_grudge = 0.8                   # H6: x the unpaid share; above hunt_min 0.75 when nothing was paid
+repost_days = 7                      # H8
+gang_spend = 0.5                     # H19
+corp_reserve_mult = 5.0              # H18
+corp_cooldown_days = 30              # H18, decision 4
+corp_year_cap = 2                    # decision 4: corp exec Hits city-wide per 365 days
+dirty_beat = 0.45                    # H18
+rival_window_days = 30               # H18
+
 # The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
 # `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).
 [economy2]

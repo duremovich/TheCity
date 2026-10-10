@@ -367,6 +367,13 @@ pub fn exchange(world: &mut World, from: EntityId, to: EntityId, venue: Venue) {
     }
 }
 
+/// The Hit market (H7): `actor` is `who` or a gang or corp `who` belongs to.
+fn self_or_mine(world: &World, who: EntityId, actor: EntityId) -> bool {
+    actor == who
+        || ((world.has::<crate::components::Gang>(actor) || world.has::<crate::components::Corp>(actor))
+            && crate::systems::grudges::member_of(world, who, actor))
+}
+
 /// The ordinary exchange (W8), `exchange` without the venue's extras.
 fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
     if from == to {
@@ -382,9 +389,15 @@ fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
     // is not told again (the same teller told one listener a deed four
     // times; 64 % of 307 tellings were "already known").
     let told = !world.told.is_empty();
+    let quiet = world.config.hitmarket.enabled;
     let mut best: Option<(f32, u32, Tick, MemoryEntry, DeedRef)> = None;
     for (e, r) in memory::deeds(from, ms) {
         if e.salience < g.gossip_min || memory::hops_of(e) >= g.max_hops || r.actor == Some(to) {
+            continue;
+        }
+        // The Hit market (H7): a buyer never volunteers his own `Hired` (nor
+        // his gang's or corp's); interrogation and the Fixer's talk still can.
+        if quiet && r.deed == crate::word::Deed::Hired && r.actor.is_some_and(|a| self_or_mine(world, from, a)) {
             continue;
         }
         let day = time::day(e.tick);

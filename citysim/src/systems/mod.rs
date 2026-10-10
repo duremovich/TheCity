@@ -40,6 +40,7 @@ pub mod fviolence;
 pub mod gang;
 pub mod gossip;
 pub mod grudges;
+pub mod hitmarket;
 pub mod hunt;
 pub mod jobs;
 pub mod law;

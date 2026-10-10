@@ -216,3 +216,20 @@ Loan sharks (a gang lending to fund a Hit; an Open question), inheritance killin
 5. (Orchestrator default) Gang loan sharks come with M16b, not here.
 6. (Orchestrator default) A relative may refuse to chip in, on a roll against loyalty to the buyer and their own lawfulness.
 7. (Orchestrator default) A gun's weekly-wage floor follows the economy: max(50, the city's median weekly wage × 0.5), so the flip rescales Hit prices on its own.
+
+## Implemented: deviations
+
+One line each; the phase commits carry the numbers.
+
+### Phase 1 (price, means, credit, quiet buyers, Revenge)
+
+- **No `World::wants` store (H8).** The want is re-derived daily from the grudge store by the hire pass (`contracts::hire_pass`, its hash-picked day in three kept), so P1 adds no saved state but two `Contract` fields. A closed-unfulfilled organic record cools its buyer's Hunt for `repost_days` (H8's re-try) instead of a `tries` count; the grudge's decay retires the want. Phase 2's errand may add the store if it needs one.
+- **`ask` by bisection, not the closed form (H2).** `contracts::ask_against` bisects mode A's product over the price (monotonic), so the ask is the exact acceptance boundary at f32; `mode_a` became `mode_a_at` (a pure refactor) so `ask` and matching read one function.
+- **The deposit is exactly `ceil(deposit_share × price)`**, never "all the buyer holds"; own wallet first, kin top it up only to the deposit (minimal transfers). Kin who chip in are refunded if the post is refused.
+- **Decision 6's roll**: `chip_p = (0.5 + 0.5 × edge affinity) × (1.5 − lawfulness)`, clamped (loyalty = the edge's affinity to the buyer), on `ContractNs::Want` keyed `(day, holder << 32 | kin)`.
+- **Decision 7** applies to every record's acceptance with the market on (`week_wage_floor`), not only organic ones; at today's median wages (~6/day default, ~9-10 flipped) the floor is still 50 in both cities.
+- **A stiffed record is `Fulfilled`**, not `Reneged`; `Stiffed` is its event. The edge debt goes to the taker only (not the crew). The gun's grudge merges with the one the first-hand `Betrayed` deed already forms, so it reads ≥ `stiff_grudge`.
+- **A bought revenge Beat takes `grudges.beat_settle` off the buyer's grudge** (a Hunt's beating does the same): without it the same buyer bought the same beating again the next day (seed 46 in the first report).
+- **H7 is read only with the market on**; it skips a `Hired` rumour whose actor is the teller or a gang/corp the teller belongs to.
+- **Statistical and Full buyers both post at once** in phase 1 (H9's errand is phase 2).
+- `HitCols` holds 12 columns (no per-motive price columns: `hm_price_sum` ÷ posted).

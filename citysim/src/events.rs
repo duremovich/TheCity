@@ -282,10 +282,13 @@ pub enum EventKind {
     // --- Jobs and room P3 (plan J14; amber).
     /// `[super, post]`: a Super walked the round of his Blocks (`trades::round_plan`).
     SuperRound,
+    // --- The Hit market (docs/HIT_MARKET.md H6; amber).
+    /// `[buyer, taker]`: a buyer on credit could not pay the balance.
+    Stiffed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 141] = [
+    pub const ALL: [EventKind; 142] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -427,6 +430,7 @@ impl EventKind {
         EventKind::TaxMoved,
         EventKind::FloorAdded,
         EventKind::SuperRound,
+        EventKind::Stiffed,
     ];
 }
 

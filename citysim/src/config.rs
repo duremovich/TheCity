@@ -169,6 +169,9 @@ pub struct Config {
     /// M16a § 3: Locate bounties (16a's three keys).
     #[serde(default)]
     pub bounty: BountyCfg,
+    /// The Hit market (docs/HIT_MARKET.md): organic Hits and Beats.
+    #[serde(default)]
+    pub hitmarket: HitMarketCfg,
     /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
     /// always on; `wages` and `no_safety_net` are the phase switches in flight.
     #[serde(default)]
@@ -4816,6 +4819,10 @@ impl Config {
         let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("cannot read {}: {e}", path.display()));
         let mut cfg: Config = toml::from_str(&text).unwrap_or_else(|e| panic!("bad config {}: {e}", path.display()));
         cfg.assets_dir = assets_dir.to_path_buf();
+        // The Hit market H20: the A/B device.
+        if std::env::var("CITYSIM_HITMARKET_OFF").is_ok_and(|v| v == "1") {
+            cfg.hitmarket.enabled = false;
+        }
         cfg.districts.row_count();
         cfg
     }
@@ -5316,6 +5323,75 @@ pub struct BountyCfg {
 impl Default for BountyCfg {
     fn default() -> Self {
         BountyCfg { per_sighting: 15, cap_sightings: 10, min_gap_hours: 6 }
+    }
+}
+
+/// `[hitmarket]` (docs/HIT_MARKET.md § 6; every value a placeholder): the
+/// organic demand for Hits and Beats, priced at what the guns ask.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HitMarketCfg {
+    /// H20: the switch in flight (off: M16a's hire and brain postings at
+    /// `quote`). `CITYSIM_HITMARKET_OFF=1` turns it off at load.
+    pub enabled: bool,
+    /// H1: the price is the ask of the `ask_rank`-th cheapest candidate.
+    pub ask_rank: usize,
+    /// H1: no market price under this (Hit, Beat).
+    pub price_floor: KindTable<i64>,
+    /// Decision 7: a gun's weekly-wage floor is `max(wage_floor_min,
+    /// wage_floor_mult × 7 × the city's median daily wage)`.
+    pub wage_floor_min: i64,
+    pub wage_floor_mult: f32,
+    /// H4: an agent buyer puts this share down and owes the rest.
+    pub deposit_share: f32,
+    /// H3: a sharing relative's chip-in, a share of its wallet.
+    pub kin_share: f32,
+    /// H11: organic records open at once (`Contract.motive != None`).
+    pub max_open: usize,
+    /// H11: new organic records a day, city-wide.
+    pub posts_per_day: usize,
+    /// H12: a holder under this courage hires even when stronger.
+    pub hire_courage: f32,
+    /// H6: a stiffed taker's grudge on the buyer, × the unpaid share.
+    pub stiff_grudge: f32,
+    /// H8: after an organic record closes unfulfilled, the buyer waits this long.
+    pub repost_days: u32,
+    /// H19: a gang spends at most this share of its treasury on one record.
+    pub gang_spend: f32,
+    /// H18: a corp spends at most treasury ÷ this on one record.
+    pub corp_reserve_mult: f32,
+    /// H18: one corp Rival record per corp per this many days.
+    pub corp_cooldown_days: u32,
+    /// Decision 4: corp Rival Hits on execs, city-wide, per 365 days.
+    pub corp_year_cap: u32,
+    /// H18: an exec in `[dirty_lobby, dirty_beat)` buys a Beat.
+    pub dirty_beat: f32,
+    /// H18: a wrong by a rival corp counts this many days.
+    pub rival_window_days: u32,
+}
+
+impl Default for HitMarketCfg {
+    fn default() -> Self {
+        HitMarketCfg {
+            enabled: true,
+            ask_rank: 2,
+            price_floor: KindTable { hit: 20, beat: 8, guard: 0, locate: 0 },
+            wage_floor_min: 50,
+            wage_floor_mult: 0.5,
+            deposit_share: 0.5,
+            kin_share: 0.5,
+            max_open: 16,
+            posts_per_day: 3,
+            hire_courage: 0.4,
+            stiff_grudge: 0.8,
+            repost_days: 7,
+            gang_spend: 0.5,
+            corp_reserve_mult: 5.0,
+            corp_cooldown_days: 30,
+            corp_year_cap: 2,
+            dirty_beat: 0.45,
+            rival_window_days: 30,
+        }
     }
 }
 

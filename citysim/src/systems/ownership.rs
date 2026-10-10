@@ -239,6 +239,8 @@ pub enum Flow {
     Property,
     /// E13: production inputs and daily power, a producer (any owner) -> the World (untaxed).
     Inputs,
+    /// The Hit market (H5): a relative chips into a buyer's purse (untaxed; counted in `hm_pooled` by the caller).
+    Pool,
 }
 
 impl Flow {
@@ -339,6 +341,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::CampFood => row.econ.flow_camp_food += coins,
         Flow::Property => row.econ.flow_property += coins,
         Flow::Inputs => row.econ.flow_inputs += coins,
+        Flow::Pool => {}
     }
 }
 

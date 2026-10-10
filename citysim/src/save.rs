@@ -13,7 +13,9 @@ use crate::world::World;
 /// 6: Jobs and room P3 (J32): `Role::Trade` by key (`Trade("night_porter")`,
 /// resolved against the save's own `Config::trades`; an unknown key fails
 /// the load) and the `trades` rows in the saved config.
-pub const SAVE_VERSION: u8 = 6;
+/// 7: the Hit market (docs/HIT_MARKET.md H22): `Contract.deposit`,
+/// `Contract.motive`, `[hitmarket]` in the saved config (serde defaults).
+pub const SAVE_VERSION: u8 = 7;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -26,8 +26,8 @@ use crate::components::{
     MemoryKind, Needs, Personality, Position, RelKind, Sentence, Skills, TilePos, Trace,
 };
 use crate::contract::{
-    Broker, Contract, ContractId, ContractKind, ContractNs, ContractRun, ContractStatus, Origin, Posting, Refusal,
-    Render, Target, Terms,
+    Broker, Contract, ContractId, ContractKind, ContractNs, ContractRun, ContractStatus, Motive, Origin, PostExtra,
+    Posting, Refusal, Render, Target, Terms,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -430,7 +430,7 @@ fn renege_draw(world: &World, id: ContractId, agent: Option<EntityId>) -> bool {
 
 /// C21: a first-hand `Hired` rumour (actor the buyer, object the target)
 /// in `holder`, who joins `known_by`.
-fn hear_hired(world: &mut World, id: ContractId, holder: EntityId) {
+pub(crate) fn hear_hired(world: &mut World, id: ContractId, holder: EntityId) {
     let Some(c) = world.contracts.get(&id) else { return };
     if c.kind == ContractKind::Guard {
         return;
@@ -464,6 +464,67 @@ fn hear_hired(world: &mut World, id: ContractId, holder: EntityId) {
 /// purse only), the renege draw, the `Hired` first-hand writes, the
 /// Fixer's book, the log and `ContractPosted`.
 pub fn post(world: &mut World, p: Posting) -> Result<ContractId, Refusal> {
+    post_with(world, p, PostExtra::default())
+}
+
+/// A fresh Open record (no escrow yet), the one constructor: `post` and the
+/// Hit market's price probe build records here.
+#[allow(clippy::too_many_arguments)]
+fn record_of(
+    id: ContractId,
+    buyer: Option<EntityId>,
+    agent: Option<EntityId>,
+    kind: ContractKind,
+    target: Target,
+    broker: Option<EntityId>,
+    origin: Origin,
+    now: Tick,
+    price: i64,
+) -> Contract {
+    Contract {
+        id,
+        buyer,
+        agent,
+        kind,
+        target,
+        terms: Terms::Pay { price },
+        escrow: 0,
+        broker,
+        posted: now,
+        deadline: now,
+        origin,
+        status: ContractStatus::Open,
+        taker: None,
+        crew: SmallVec::new(),
+        attempts: 0,
+        risk: 0.0,
+        political: 0.0,
+        renege: false,
+        due: None,
+        render: Render::Ledger,
+        known_by: SmallVec::new(),
+        price,
+        taken: None,
+        closed: None,
+        paid_sightings: 0,
+        last_paid: None,
+        strike: None,
+        holds: 0,
+        sold_out: false,
+        charged: false,
+        interrogated: SmallVec::new(),
+        guard_since: None,
+        started: None,
+        deposit: 0,
+        motive: Motive::None,
+    }
+}
+
+/// [`post`] with the Hit market's extras (docs/HIT_MARKET.md H4, H13): a
+/// deposit put down now (escrowed when brokered, purse-checked when
+/// direct) with the balance owed at fulfilment, the motive and a few words
+/// for the event text.
+pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<ContractId, Refusal> {
     let live = world.contracts.values().filter(|c| c.is_live()).count();
     if live >= world.config.contracts.max_open {
         return Err(Refusal::MaxOpen);
@@ -485,7 +546,10 @@ pub fn post(world: &mut World, p: Posting) -> Result<ContractId, Refusal> {
         }
     }
     let price = p.price.unwrap_or_else(|| quote(world, p.kind, &p.target, p.broker)).max(1);
-    if world.purse(p.buyer) < price {
+    // H4: a deposit under the price is put down now; the rest is owed.
+    let deposit = extra.deposit.filter(|&d| d > 0 && d < price);
+    let down = deposit.unwrap_or(price);
+    if world.purse(p.buyer) < down {
         return Err(Refusal::CannotPay);
     }
     let now = world.tick;
@@ -494,47 +558,16 @@ pub fn post(world: &mut World, p: Posting) -> Result<ContractId, Refusal> {
     let renege = p.broker.is_none() && renege_draw(world, id, p.agent);
     let deadline = now + Tick::from(p.deadline_days.max(1)) * TICKS_PER_DAY;
     let risk = risk_of(world, p.kind, &p.target);
-    world.contracts.insert(
-        id,
-        Contract {
-            id,
-            buyer: p.buyer,
-            agent: p.agent,
-            kind: p.kind,
-            target: p.target,
-            terms: Terms::Pay { price },
-            escrow: 0,
-            broker: p.broker,
-            posted: now,
-            deadline,
-            origin: p.origin,
-            status: ContractStatus::Open,
-            taker: None,
-            crew: SmallVec::new(),
-            attempts: 0,
-            risk,
-            political: 0.0,
-            renege,
-            due: None,
-            render: Render::Ledger,
-            known_by: SmallVec::new(),
-            price,
-            taken: None,
-            closed: None,
-            paid_sightings: 0,
-            last_paid: None,
-            strike: None,
-            holds: 0,
-            sold_out: false,
-            charged: false,
-            interrogated: SmallVec::new(),
-            guard_since: None,
-            started: None,
-        },
-    );
+    let mut rec = record_of(id, p.buyer, p.agent, p.kind, p.target, p.broker, p.origin, now, price);
+    rec.deadline = deadline;
+    rec.risk = risk;
+    rec.renege = renege;
+    rec.deposit = deposit.unwrap_or(0);
+    rec.motive = extra.motive;
+    world.contracts.insert(id, rec);
     if p.broker.is_some() {
-        let moved = ownership::escrow_in(world, p.buyer, id, price);
-        debug_assert_eq!(moved, price, "the purse was checked");
+        let moved = ownership::escrow_in(world, p.buyer, id, down);
+        debug_assert_eq!(moved, down, "the purse was checked");
     }
     index_parties(world, id);
     if let Some(b) = p.broker {
@@ -562,7 +595,16 @@ pub fn post(world: &mut World, p: Posting) -> Result<ContractId, Refusal> {
     let who = world.owner_label(p.buyer);
     let on = world.name_of(p.target.id());
     let at = p.broker.map(|b| format!(" at {}", world.name_of(b))).unwrap_or_default();
-    let text = format!("{who} posted a {} on {on} for {price}{at}", p.kind.label());
+    let mut text = format!("{who} posted a {} on {on} for {price}{at}", p.kind.label());
+    if !extra.motive.is_none() {
+        let down = deposit.map(|d| format!("{d} down, ")).unwrap_or_default();
+        let why = extra.why.as_deref().map(|w| format!(" {w}")).unwrap_or_default();
+        text.push_str(&format!(" ({down}{}{why})", extra.motive.label()));
+        let h = &mut world.stats.current.hit;
+        h.note_posted(extra.motive);
+        h.hm_price_sum += price;
+        h.hm_deposit_sum += deposit.unwrap_or(price);
+    }
     let actors = [p.agent.unwrap_or(EntityId::NONE), p.target.id(), p.broker.unwrap_or(EntityId::NONE)];
     world.push_event(EventKind::ContractPosted, &actors, text.clone());
     log(world, id, text);
@@ -731,26 +773,50 @@ fn u_of(x: f32) -> f32 {
 /// C13 mode A's considerations for `who` on record `c` (without the gate);
 /// `urgency` is `1 − time_left ÷ total` (1.0 for `accept_score`).
 fn mode_a(world: &World, who: EntityId, c: &Contract, risk: f32, urgency_v: f32) -> Vec<Consideration> {
+    mode_a_at(world, who, c.kind, c.brokered(), c.buyer, c.price, risk, urgency_v)
+}
+
+/// The Hit market (decision 7): a gun's weekly-wage floor, `max(50, 0.5 ×
+/// 7 × the city's median daily wage)` with the market on (M16a's flat 50
+/// off).
+fn week_wage_floor(world: &World) -> i64 {
+    let h = &world.config.hitmarket;
+    if !h.enabled {
+        return 50;
+    }
+    let follow = (h.wage_floor_mult * 7.0 * world.median_wage as f32).round() as i64;
+    h.wage_floor_min.max(follow)
+}
+
+/// Mode A's considerations at a given `price` (the Hit market's `ask`
+/// solves this for the price; `mode_a` reads the record's own).
+#[allow(clippy::too_many_arguments)]
+fn mode_a_at(
+    world: &World,
+    who: EntityId,
+    kind: ContractKind,
+    brokered: bool,
+    buyer: Option<EntityId>,
+    price: i64,
+    risk: f32,
+    urgency_v: f32,
+) -> Vec<Consideration> {
     let wage = world.comp::<Job>(who).map_or(0, |j| j.wage_per_day);
-    let week_wage = (7 * wage).max(50) as f32;
+    let week_wage = (7 * wage).max(week_wage_floor(world)) as f32;
     let p = world.comp::<Personality>(who);
     let mut cs = vec![
-        Consideration::new(
-            "U(price/week wage)",
-            u_of(c.price as f32 / week_wage),
-            Curve::Logistic { k: 8.0, mid: 0.3 },
-        ),
+        Consideration::new("U(price/week wage)", u_of(price as f32 / week_wage), Curve::Logistic { k: 8.0, mid: 0.3 }),
         Consideration::new("1-risk", 1.0 - risk, Curve::Linear { m: 0.7, b: 0.3 }),
     ];
-    if !c.brokered() {
-        let honour = c.buyer.map_or(0.5, |b| crate::systems::reputation::rep(world, b).honour);
+    if !brokered {
+        let honour = buyer.map_or(0.5, |b| crate::systems::reputation::rep(world, b).honour);
         cs.push(Consideration::new("buyer honour", honour, Curve::Linear { m: 0.5, b: 0.5 }));
     }
-    if c.kind.illegal() {
+    if kind.illegal() {
         let law = p.map_or(0.5, |p| p.lawfulness);
         cs.push(Consideration::new("1-lawfulness", 1.0 - law, Curve::Linear { m: 0.6, b: 0.4 }));
     }
-    if c.kind.violent() {
+    if kind.violent() {
         let courage = p.map_or(0.5, |p| p.courage);
         cs.push(Consideration::new("courage", courage, Curve::Linear { m: 0.5, b: 0.5 }));
     }
@@ -765,6 +831,113 @@ pub fn accept_score(world: &World, who: EntityId, id: ContractId) -> f32 {
     let Some(c) = world.contracts.get(&id) else { return 0.0 };
     let risk = risk_for(world, c, who);
     mode_a(world, who, c, risk, 1.0).iter().map(|x| x.output).product()
+}
+
+/// The Hit market's ceiling on an ask: past it a gun is not for hire.
+const ASK_CAP: i64 = 1_000_000;
+
+/// The Hit market (docs/HIT_MARKET.md H2): the lowest whole price at which
+/// `gun` would accept a `kind` record on `target` (mode A's product at
+/// urgency 1 reaching `accept_min`, exactly as matching reads it), against
+/// defenders summing `s_def`. `None` when no price will do (the other terms
+/// cap the product under `accept_min`). The product rises with the price,
+/// so a bisection finds the boundary exactly (no float inversion to drift).
+pub fn ask_against(
+    world: &World,
+    gun: EntityId,
+    kind: ContractKind,
+    brokered: bool,
+    buyer: Option<EntityId>,
+    s_def: f32,
+) -> Option<i64> {
+    let min = world.config.contracts.accept_min;
+    let risk = risk_against(world, kind, gun, s_def);
+    let score = |price: i64| -> f32 {
+        mode_a_at(world, gun, kind, brokered, buyer, price, risk, 1.0).iter().map(|x| x.output).product()
+    };
+    if score(ASK_CAP) < min {
+        return None;
+    }
+    if score(1) >= min {
+        return Some(1);
+    }
+    // Invariant: score(lo) < min <= score(hi).
+    let (mut lo, mut hi) = (1i64, ASK_CAP);
+    while hi - lo > 1 {
+        let mid = lo + (hi - lo) / 2;
+        if score(mid) >= min {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
+}
+
+/// [`ask_against`] on `target`'s expected defenders.
+pub fn ask(
+    world: &World,
+    gun: EntityId,
+    kind: ContractKind,
+    target: &Target,
+    brokered: bool,
+    buyer: Option<EntityId>,
+) -> Option<i64> {
+    let s_def = missions::defender_strength(world, target);
+    ask_against(world, gun, kind, brokered, buyer, s_def)
+}
+
+/// The Hit market (H1): the market price of a `kind` record on `target`:
+/// the ask of the `ask_rank`-th cheapest eligible candidate (the broker's
+/// regulars when brokered, the buyer's own people when direct), at least
+/// `price_floor[kind]`. `None` when fewer than `ask_rank` candidates would
+/// take it at any price (the caller falls back to `quote`).
+pub fn market_price(
+    world: &World,
+    kind: ContractKind,
+    target: &Target,
+    buyer: Option<EntityId>,
+    agent: Option<EntityId>,
+    broker: Option<EntityId>,
+) -> Option<i64> {
+    let mut cands: Vec<EntityId> = match broker {
+        Some(b) => world.comp::<Broker>(b).map(|k| k.regulars.keys().copied().collect()).unwrap_or_default(),
+        None => buyer.map(|b| direct_pool(world, b)).unwrap_or_default(),
+    };
+    cands.sort_unstable();
+    cands.dedup();
+    let probe = record_of(0, buyer, agent, kind, *target, broker, Origin::God, 0, 0);
+    let s_def = missions::defender_strength(world, target);
+    let mut asks: Vec<i64> = cands
+        .into_iter()
+        .filter(|&a| eligible(world, &probe, a))
+        .filter_map(|a| ask_against(world, a, kind, broker.is_some(), buyer, s_def))
+        .collect();
+    let rank = world.config.hitmarket.ask_rank.max(1);
+    if asks.len() < rank {
+        return None;
+    }
+    asks.sort_unstable();
+    Some(asks[rank - 1].max(world.config.hitmarket.price_floor.get(kind)).max(1))
+}
+
+/// The Hit market (H1): what an agent, gang or corp pays for a Hit or a
+/// Beat: the market price, else `quote` (hard targets keep the old price,
+/// Dylan's decision 1). With the market off: `quote`.
+pub fn organic_price(
+    world: &World,
+    kind: ContractKind,
+    target: &Target,
+    buyer: Option<EntityId>,
+    agent: Option<EntityId>,
+    broker: Option<EntityId>,
+) -> i64 {
+    if world.config.hitmarket.enabled && kind.violent() {
+        if let Some(p) = market_price(world, kind, target, buyer, agent, broker) {
+            return p;
+        }
+    }
+    quote(world, kind, target, broker)
 }
 
 /// C17: `Live` when the target or the taker is a body, pinned or on
@@ -1122,15 +1295,9 @@ pub fn match_day(world: &mut World) {
     }
 }
 
-/// C11: a direct record's viewers who could take it: the buyer's edges but
-/// Enemies, its gang's members, its corp's staff (a public record: every
-/// adult).
-fn direct_candidates(world: &World, id: ContractId) -> Vec<EntityId> {
-    let Some(c) = world.contracts.get(&id) else { return Vec::new() };
-    let Some(buyer) = c.buyer else {
-        // scan-ok: daily, a public record (god only in phase 1).
-        return world.citizens();
-    };
+/// C11: a direct record's own people: the buyer's edges but Enemies, its
+/// gang's members, its corp's staff (unsorted; may repeat).
+fn direct_pool(world: &World, buyer: EntityId) -> Vec<EntityId> {
     let mut out: Vec<EntityId> = Vec::new();
     if world.has::<Identity>(buyer) {
         out.extend(world.neighbours(buyer).filter(|&o| world.edge(buyer, o).is_some_and(|e| e.kind != RelKind::Enemy)));
@@ -1142,6 +1309,19 @@ fn direct_candidates(world: &World, id: ContractId) -> Vec<EntityId> {
     if world.has::<crate::components::Corp>(buyer) {
         out.extend(crate::systems::ownership::employees_of(world, buyer));
     }
+    out
+}
+
+/// C11: a direct record's viewers who could take it: the buyer's edges but
+/// Enemies, its gang's members, its corp's staff (a public record: every
+/// adult).
+fn direct_candidates(world: &World, id: ContractId) -> Vec<EntityId> {
+    let Some(c) = world.contracts.get(&id) else { return Vec::new() };
+    let Some(buyer) = c.buyer else {
+        // scan-ok: daily, a public record (god only in phase 1).
+        return world.citizens();
+    };
+    let mut out = direct_pool(world, buyer);
     // C31: the on-shift city guards of the buyer's district.
     if is_corruption(world, c) {
         out.extend(crate::systems::law_brain::guards(world).into_iter().filter(|&g| guard_viewer(world, c, g)));
@@ -1223,6 +1403,40 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         ContractStatus::Expired => row.contracts_expired += 1,
         ContractStatus::Cancelled => row.contracts_cancelled += 1,
         ContractStatus::Open | ContractStatus::Taken => {}
+    }
+    // The Hit market: organic outcomes, and a buyer whose record closed
+    // unfulfilled waits `repost_days` before buying again (H8).
+    if !c.motive.is_none() {
+        match status {
+            ContractStatus::Fulfilled | ContractStatus::Reneged => {
+                let h = &mut world.stats.current.hit;
+                match kind {
+                    ContractKind::Hit => h.hm_hits_done += 1,
+                    _ => h.hm_beats_done += 1,
+                }
+                // A bought beating answers the grudge as a Hunt's beating
+                // does (`beat_settle`; a Hit's death settles it outright),
+                // so the buyer does not buy the same beating twice.
+                if kind == ContractKind::Beat && c.motive == Motive::Revenge {
+                    let settle = world.config.grudges.beat_settle;
+                    let t = c.target.id();
+                    if let Some(g) = c.agent.and_then(|a| world.comp_mut::<crate::word::Grudges>(a)) {
+                        if let Some(x) = g.list.iter_mut().find(|x| x.target == t && x.settled.is_none()) {
+                            x.weight -= settle;
+                        }
+                    }
+                }
+            }
+            ContractStatus::Failed | ContractStatus::Expired | ContractStatus::Cancelled => {
+                let until = now + Tick::from(world.config.hitmarket.repost_days) * TICKS_PER_DAY;
+                let own = c.agent.filter(|&a| c.buyer == Some(a));
+                if let Some(b) = own.and_then(|a| world.comp_mut::<Brain>(a)) {
+                    let t = b.cooldowns.entry(GoalKind::Hunt).or_insert(until);
+                    *t = (*t).max(until);
+                }
+            }
+            ContractStatus::Open | ContractStatus::Taken => {}
+        }
     }
     // C30: a fulfilled brokered Hit warms its Fixer.
     if status == ContractStatus::Fulfilled && kind == ContractKind::Hit {
@@ -1353,6 +1567,10 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
     }
     let pay_to = payees(c);
     if let Some(b) = c.broker {
+        // The Hit market (H6): a record posted on credit charges the
+        // balance now, into escrow, so the cut and the split read one sum.
+        let balance = c.balance();
+        let got = if balance > 0 { ownership::escrow_in(world, c.buyer, id, balance) } else { 0 };
         let held = world.contracts.get(&id).map_or(0, |x| x.escrow);
         let cut = ((held as f32) * c_cut(world, b)).round() as i64;
         let owner = world.owner_of(b);
@@ -1364,6 +1582,9 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
         note_cut(world, b, paid);
         refund(world, id);
         set_status(world, id, ContractStatus::Fulfilled, why);
+        if got < balance {
+            stiff(world, c, balance - got, balance);
+        }
         return;
     }
     // C6: a direct record pays from the buyer's purse, unless it reneges or
@@ -1380,10 +1601,70 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
             ownership::pay(world, c.buyer, Some(*who), share, Flow::Payout)
         };
     }
-    if moved < price {
+    if moved < price && c.deposit > 0 {
+        // The Hit market (P5): a credit buyer short at fulfilment is broke,
+        // not false: the job stands done and the rest is owed.
+        set_status(world, id, ContractStatus::Fulfilled, why);
+        stiff(world, c, price - moved, price);
+    } else if moved < price {
         renege(world, id, c);
     } else {
         set_status(world, id, ContractStatus::Fulfilled, why);
+    }
+}
+
+/// The Hit market (H6): the buyer of a fulfilled record could not pay
+/// `unpaid` of `owed`: the unpaid part is an edge debt buyer → taker (the
+/// existing `social::repay_debts` takes it out of later wages), the taker
+/// holds a `Betrayed` grudge of `stiff_grudge × unpaid ÷ owed` on the
+/// buyer, a `Betrayed` deed goes round, and `Stiffed` is logged.
+fn stiff(world: &mut World, c: &Contract, unpaid: i64, owed: i64) {
+    world.stats.current.hit.hm_stiffed += 1;
+    let Some(taker) = c.taker else { return };
+    let Some(buyer) = c.agent.or(c.buyer) else { return };
+    let person = |e: EntityId| world.has::<Identity>(e) && crate::systems::law::living(world, e);
+    if !person(taker) || !person(buyer) || taker == buyer {
+        return;
+    }
+    let tick = world.tick;
+    let (lo, _) = crate::components::edge_key(buyer, taker);
+    let add = i32::try_from(unpaid).unwrap_or(i32::MAX);
+    let e = world.edge_entry(buyer, taker);
+    // The lower id owes the higher id when `debt > 0`.
+    e.debt = e.debt.saturating_add(if lo == buyer { add } else { -add });
+    e.debt_since.get_or_insert(tick);
+    betrayed(world, buyer, taker);
+    let w = world.config.hitmarket.stiff_grudge * unpaid as f32 / owed.max(1) as f32;
+    crate::systems::grudges::add(world, taker, buyer, crate::word::GrudgeCause::Betrayed, w, 0);
+    let text = format!(
+        "{} could not pay {} the {unpaid} owed for the {}",
+        world.name_of(buyer),
+        world.name_of(taker),
+        c.kind.label()
+    );
+    world.push_event(EventKind::Stiffed, &[buyer, taker], text.clone());
+    log(world, c.id, text);
+}
+
+/// C6 and H6: a `Betrayed` deed (actor `buyer`, object `taker`) in the
+/// taker's talk district and first hand in the taker.
+fn betrayed(world: &mut World, buyer: EntityId, taker: EntityId) {
+    let d = crate::systems::gossip::home_district(world, taker)
+        .or_else(|| world.comp::<Position>(taker).map(|p| world.district_of(p.tile)));
+    if let Some(d) = d {
+        crate::systems::gossip::post_deed(world, d, Deed::Betrayed, Some(buyer), Some(taker));
+    }
+    if crate::systems::law::living(world, taker) && world.has::<Memory>(taker) {
+        let sal = world.config.gossip.deed_sal.get(Deed::Betrayed);
+        let e = MemoryEntry {
+            subject: Some(buyer),
+            salience: sal,
+            valence: -world.config.gossip.deed_sev.get(Deed::Betrayed) * sal,
+            deed: Some(Deed::Betrayed),
+            object: Some(taker),
+            ..MemoryEntry::blank(MemoryKind::Rumour, world.tick)
+        };
+        crate::systems::memory::hear_entry(world, taker, e);
     }
 }
 
@@ -1409,23 +1690,7 @@ fn renege(world: &mut World, id: ContractId, c: &Contract) {
     set_status(world, id, ContractStatus::Reneged, "");
     let Some(taker) = c.taker else { return };
     let Some(buyer) = c.buyer.or(c.agent) else { return };
-    let d = crate::systems::gossip::home_district(world, taker)
-        .or_else(|| world.comp::<Position>(taker).map(|p| world.district_of(p.tile)));
-    if let Some(d) = d {
-        crate::systems::gossip::post_deed(world, d, Deed::Betrayed, Some(buyer), Some(taker));
-    }
-    if crate::systems::law::living(world, taker) && world.has::<Memory>(taker) {
-        let sal = world.config.gossip.deed_sal.get(Deed::Betrayed);
-        let e = MemoryEntry {
-            subject: Some(buyer),
-            salience: sal,
-            valence: -world.config.gossip.deed_sev.get(Deed::Betrayed) * sal,
-            deed: Some(Deed::Betrayed),
-            object: Some(taker),
-            ..MemoryEntry::blank(MemoryKind::Rumour, world.tick)
-        };
-        crate::systems::memory::hear_entry(world, taker, e);
-    }
+    betrayed(world, buyer, taker);
     let w = world.config.contracts.renege_grudge;
     if crate::systems::law::living(world, taker) {
         crate::systems::grudges::add(world, taker, buyer, crate::word::GrudgeCause::Betrayed, w, 0);
@@ -1822,6 +2087,11 @@ fn reset_chase(world: &mut World, taker: EntityId) {
 /// `hire_reach_tiles` of its Home door, else direct; the Hunt cools for
 /// `hunt_cooldown_days`. Tier-neutral: a Statistical holder posts at once.
 pub fn try_hire(world: &mut World, holder: EntityId, target: EntityId, weight: f32) -> bool {
+    // The Hit market (H1-H5, H12): priced at the market, paid with the
+    // holder's means and kin, half down.
+    if world.config.hitmarket.enabled {
+        return crate::systems::hitmarket::try_revenge(world, holder, target, weight);
+    }
     if crate::systems::hunt::might_gap(world, holder, target) >= world.config.contracts.hire_gap {
         return false;
     }
@@ -1889,7 +2159,7 @@ pub fn hire_pass(world: &mut World) {
             continue;
         }
         let Some((t, w, _)) = crate::systems::hunt::heaviest_eligible(world, id) else { continue };
-        if crate::systems::hunt::might_gap(world, id, t) >= world.config.contracts.hire_gap {
+        if !crate::systems::hitmarket::hires(world, id, t) {
             continue;
         }
         let Some((cs, flat)) = crate::systems::hunt::hire_considerations(world, id, t, w) else { continue };
@@ -1897,6 +2167,10 @@ pub fn hire_pass(world: &mut World) {
         if s.score >= min {
             queue.push((id, t, w));
         }
+    }
+    // The Hit market (H11): the heaviest wants first under the day's brake.
+    if world.config.hitmarket.enabled {
+        queue.sort_by(|a, b| b.2.total_cmp(&a.2).then(a.0.cmp(&b.0)));
     }
     for (id, t, w) in queue {
         try_hire(world, id, t, w);

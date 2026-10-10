@@ -261,9 +261,84 @@ pub struct Contract {
     /// never stood.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub started: Option<Tick>,
+    /// The Hit market (docs/HIT_MARKET.md H4): the deposit put down when the
+    /// record was posted on credit; 0 = paid (or owed) in full, the M16a
+    /// record. The balance `price − deposit` is charged at fulfilment.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub deposit: i64,
+    /// The Hit market (H13): why the buyer wanted it; `None` for M16a's
+    /// records, the law's and the god's.
+    #[serde(default, skip_serializing_if = "Motive::is_none")]
+    pub motive: Motive,
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
+}
+
+/// The Hit market (docs/HIT_MARKET.md H13): why a record was bought. A
+/// label on a record, read by the event text, the stats and the brakes.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Default, Serialize, Deserialize)]
+pub enum Motive {
+    /// M16a's records, the law's and the god's.
+    #[default]
+    None,
+    /// A grudge holder pays for what he would not or could not do himself.
+    Revenge,
+    /// A suspect pays to be rid of a witness (phase 2).
+    Silence,
+    /// A creditor pays to collect (phase 2).
+    Debt,
+    /// A gang or corp buys a rival's head.
+    Rival,
+    /// A corp buys the culprit gang's leader (M16a's Lobby row, at the market).
+    Culprit,
+    /// A gang buys silence for its member (phase 2).
+    Protect,
+}
+
+impl Motive {
+    pub const ALL: [Motive; 7] =
+        [Motive::None, Motive::Revenge, Motive::Silence, Motive::Debt, Motive::Rival, Motive::Culprit, Motive::Protect];
+
+    pub fn is_none(&self) -> bool {
+        *self == Motive::None
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Motive::None => "none",
+            Motive::Revenge => "revenge",
+            Motive::Silence => "silence",
+            Motive::Debt => "debt",
+            Motive::Rival => "rival",
+            Motive::Culprit => "culprit",
+            Motive::Protect => "protect",
+        }
+    }
+}
+
+/// The Hit market: what `contracts::post_with` adds to a `Posting`.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct PostExtra {
+    /// H4: put this much down now (escrowed when brokered, checked when
+    /// direct); the rest is owed at fulfilment. `None`: the full price.
+    pub deposit: Option<i64>,
+    pub motive: Motive,
+    /// A few words for the event text (`"for Mara Voss"`).
+    pub why: Option<String>,
 }
 
 impl Contract {
+    /// The Hit market (H4): the part of the price owed at fulfilment.
+    pub fn balance(&self) -> i64 {
+        if self.deposit > 0 {
+            (self.price - self.deposit).max(0)
+        } else {
+            0
+        }
+    }
+
     /// `Open`: on the board, untaken.
     pub fn is_open(&self) -> bool {
         self.status == ContractStatus::Open
@@ -385,6 +460,10 @@ pub enum ContractNs {
     TakerDeath,
     /// The Fixer's talk (phase 3), key `(tick, from << 32 | to)`.
     Talk,
+    /// The Hit market (H21): a relative's chip-in roll, key `(day, holder << 32 | kin)`.
+    Want,
+    /// The Hit market (H15, phase 2): a beaten witness recants.
+    Recant,
 }
 
 /// C38: per-Fixer CSV slots (`f0_heat` … `f3_income`), Fixers by building id.
