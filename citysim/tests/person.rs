@@ -1048,9 +1048,15 @@ fn probe_working_couple_moves_near_work() {
                 return None;
             }
             let work = work_of(&w, a)?;
-            (commute_cost(&w, door_of(&w, a)?, work) > 2 * cap).then_some((a, s))
+            let d = commute_cost(&w, door_of(&w, a)?, work);
+            (d > 2 * cap).then_some((d, std::cmp::Reverse(a), a, s))
         })
-        .next()
+        // The longest such commute: the relocation pass serves the longest
+        // first, and the beds in range are bounded by the Lots and floors
+        // there (after class pay's merge, 65 farther movers took the 72 beds
+        // the first pick had).
+        .max()
+        .map(|(_, _, a, s)| (a, s))
         .expect("a married worker with a long commute");
     // The spouse works at the same place.
     let (employer, role) = w.comp::<Job>(a).map(|j| (j.employer.unwrap(), j.role)).unwrap();
@@ -1070,7 +1076,13 @@ fn probe_working_couple_moves_near_work() {
             .map(|&h| usize::from(w.comp::<Building>(h).unwrap().capacity).saturating_sub(w.residents_of(h).len()))
             .sum()
     };
+    // The builds are paid (P5h): a Treasury that can pay for them.
+    let band = w.config.treasury.band[0];
+    if let Some(t) = w.treasury_mut() {
+        t.coins = t.coins.max(band + 100_000);
+    }
     while free(&w) < 200 && citysim::systems::life::build_housing_near(&mut w, employer) {}
+    eprintln!("free beds in range of work {}", free(&w));
     // The daily cap out of the way (the pass serves the longest commutes
     // first; this pair's is not among the city's 40 longest).
     w.config.life.relocate_per_1000 = 1_000.0;
