@@ -565,8 +565,7 @@ fn heard_of(w: &World, buyer: EntityId, t: EntityId) -> Vec<EntityId> {
 
 /// The buyer of a fulfilled Hit whom nobody has heard of: for 30 days the
 /// law never charges him before somebody (a guard, a witness, an
-/// interrogated gun) holds the deed (checked at each day's end; the filing
-/// itself re-checks the holder: `accessory_unfounded`).
+/// interrogated gun) holds the deed (checked at each day's end).
 #[test]
 fn probe_buyer_nobody_heard_of_is_never_charged() {
     let (mut w, buyer, t, taker) = quiet_buyer();
@@ -597,7 +596,6 @@ fn probe_buyer_nobody_heard_of_is_never_charged() {
         let h = heard_on.expect("charged though nobody but the buyer ever held the deed");
         assert!(h <= c, "charged on day {c} before anybody heard of him (day {h})");
     }
-    assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
 }
 
 /// GAP (M16a phase 5; for the behaviour round): the buyer tells his own

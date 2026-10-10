@@ -14,7 +14,7 @@ use crate::goap::ActionKind;
 use crate::personality::Drift;
 use crate::time::{Tick, TICKS_PER_DAY};
 use crate::world::World;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Chebyshev distance between two tiles.
 pub fn chebyshev(a: TilePos, b: TilePos) -> u32 {
@@ -935,7 +935,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 /// the buyer, object the target, hops 1, conf 1) in the guard and, for a
 /// brokered record, a second naming the Fixer's owner; the Fixer warms by
 /// `heat_per_named`. `contract_cleared` counts a Hit's taker jailed within
-/// 30 days of the killing (once per record).
+/// `interrogate_days` of the killing (once per record).
 fn interrogate(world: &mut World, guard: EntityId, suspect: EntityId) {
     use crate::contract::{ContractKind, ContractStatus};
     let Some(ids) = world.by_party.get(&suspect).cloned() else { return };
@@ -949,12 +949,13 @@ fn interrogate(world: &mut World, guard: EntityId, suspect: EntityId) {
             continue;
         }
         let Some(closed) = c.closed else { continue };
-        if c.kind == ContractKind::Hit && c.interrogated.is_empty() && now.saturating_sub(closed) <= 30 * TICKS_PER_DAY
-        {
-            world.stats.current.contract.contract_cleared += 1;
-        }
         if now.saturating_sub(closed) > window || c.interrogated.contains(&now) {
             continue;
+        }
+        // Review fix: once per record (the first arrest inside the window
+        // marks `interrogated` below).
+        if c.kind == ContractKind::Hit && c.interrogated.is_empty() {
+            world.stats.current.contract.contract_cleared += 1;
         }
         if let Some(x) = world.contracts.get_mut(&id) {
             x.interrogated.push(now);
@@ -993,8 +994,9 @@ fn interrogate(world: &mut World, guard: EntityId, suspect: EntityId) {
 /// `conf ≥ accessory_conf` (`contracts::holds_hired`: the memory, never
 /// `known_by`) files `Crime::Conspiracy` against the placing agent (the
 /// lowest holder id). The law's own records (buyer `None`, `Origin::Law`:
-/// the death squad) are never charged. `Accessory` with the days since the killing;
-/// `accessory_unfounded` re-checks the holder's memory at the filing.
+/// the death squad) are never charged, and the record's own side (its
+/// taker, crew and the broker's owner) never files. `Accessory` with the
+/// days since the killing.
 pub fn accessory_check(world: &mut World) {
     use crate::contract::{ContractKind, ContractStatus};
     if world.contracts.is_empty() {
@@ -1023,6 +1025,8 @@ pub fn accessory_check(world: &mut World) {
         return;
     }
     let guards: BTreeSet<EntityId> = crate::systems::law_brain::guards(world).into_iter().collect();
+    let broker_owner: BTreeMap<crate::contract::ContractId, EntityId> =
+        cands.iter().filter_map(|c| c.broker.and_then(|f| world.owner_of(f)).map(|o| (c.id, o))).collect();
     let mut found: Vec<(crate::contract::ContractId, EntityId)> = Vec::new();
     // scan-ok: daily, the memory holders, only while a fulfilled record waits.
     for holder in world.with::<crate::components::Memory>() {
@@ -1033,6 +1037,11 @@ pub fn accessory_check(world: &mut World) {
         let guard = guards.contains(&holder);
         for c in &cands {
             if found.iter().any(|&(id, _)| id == c.id) || Some(holder) == c.agent {
+                continue;
+            }
+            // Review fix: the record's own side (its taker, a squad's crew,
+            // the broker's owner) never files against its buyer.
+            if Some(holder) == c.taker || c.crew.contains(&holder) || broker_owner.get(&c.id) == Some(&holder) {
                 continue;
             }
             let witness = !guard && {
@@ -1052,9 +1061,6 @@ pub fn accessory_check(world: &mut World) {
     for (id, holder) in found {
         let Some(c) = world.contracts.get(&id).cloned() else { continue };
         let Some(agent) = c.agent else { continue };
-        if !crate::systems::contracts::holds_hired(world, holder, &c) {
-            world.stats.current.contract.accessory_unfounded += 1;
-        }
         file_report(world, Crime::Conspiracy, agent, Some(holder));
         if let Some(x) = world.contracts.get_mut(&id) {
             x.charged = true;

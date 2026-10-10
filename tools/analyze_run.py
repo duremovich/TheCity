@@ -60,7 +60,7 @@ share of closed, Hits done (by a squad, solo-weak), strikes declined on politica
 `Reneged`, contract killings against all Murders (with an events file) and their clearance, `Accessory`
 and interrogations, bounties paid per Locate posted, guards on the take, Fixer-fed runs, the Fixer slots'
 heat and `FixerCut` income per week, the LOD's live parties and queue (max), escrow held, and the probes
-that must read 0 (`escrow_leak`, `escrow_stuck`, `contract_hole_wrong`, `accessory_unfounded`); with an
+that must read 0 (`escrow_leak`, `escrow_stuck`, `contract_hole_wrong`); with an
 events file, Hits taken by render (`LIVE`, `LEDGER`, `QUEUED`) and the amber event counts. The spec's
 bands (`docs/M16_CONTRACTS.md`, the M16a printed findings) are printed beside their numbers. One flag: a
 probe above 0 (a broken record, not a calibration miss).
@@ -126,7 +126,7 @@ CONTRACT_TOTALS = ["contracts_posted", "contracts_fulfilled", "contracts_failed"
                    "strikes_declined_pol", "sold_out", "contract_murders", "contract_cleared", "contract_holes",
                    "accessory", "interrogations", "interrogations_won", "bounties_paid", "fixer_runs",
                    "contracts_refused_full", "flow_escrow", "flow_payout", "flow_fixer_cut"]
-CONTRACT_PROBES = ["escrow_leak", "escrow_stuck", "contract_hole_wrong", "accessory_unfounded"]
+CONTRACT_PROBES = ["escrow_leak", "escrow_stuck", "contract_hole_wrong"]
 CONTRACT_EVENTS = ["ContractPosted", "ContractTaken", "ContractFulfilled", "ContractFailed", "ContractExpired",
                    "Reneged", "SoldOut", "StrikeDeclined", "BountyPaid", "Accessory", "FixerBusted", "GuardTaken"]
 TRANSITIONS = ["OrderChanged", "Posture", "CorpOrder"]

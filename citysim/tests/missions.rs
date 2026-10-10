@@ -729,3 +729,39 @@ fn test_gang_leader_never_takes_a_job_on_kin() {
     w.edge_entry(leader, t).kind = RelKind::Friend;
     assert!(!contracts::gang_eligible(&w, &c, g), "not on the leader's Friend");
 }
+
+/// M16a review: a gang job queued without a mission (no crew to march) is
+/// not offered as `Order::Job`: the gang never takes the order, so
+/// `gang::run` never rethinks it every tick, and a small shock waits for
+/// its rescore instead of being cleared.
+#[test]
+fn test_queued_gang_job_never_takes_order_job_and_keeps_shocks() {
+    let mut w = world();
+    let g = w.gang_list()[0];
+    ready_gang(&mut w, g, 4);
+    // Job wins whenever it is offered; no dwell holds the current order.
+    w.config.gangs.order_flat.job = 10.0;
+    w.config.life.order_dwell_ticks = 0;
+    let [buyer, t] = strangers(&w, 2)[..] else { unreachable!() };
+    set_coins(&mut w, buyer, 5000);
+    let id = contracts::post(&mut w, direct(buyer, ContractKind::Hit, t, None)).expect("posted");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    assert_eq!(contracts::job_of(&w, g), Some(id), "the gang holds the job");
+    assert!(!contracts::job_live(&w, g), "queued: no mission");
+    let i = citysim::systems::faction::gather_inputs(&w, g).expect("inputs");
+    assert!(i.job.is_none(), "a queued job is not offered");
+    w.tick += 1;
+    citysim::systems::faction::rescore(&mut w, g, 0.0);
+    assert_ne!(w.comp::<Gang>(g).map(|x| x.order), Some(citysim::Order::Job));
+    if let Some(x) = w.comp_mut::<Gang>(g) {
+        x.shocks.clear();
+        x.shocks.push(Shock::MemberArrested);
+    }
+    for _ in 0..30 {
+        w.tick += 1;
+        gang::run(&mut w);
+    }
+    let x = w.comp::<Gang>(g).expect("the gang");
+    assert_ne!(x.order, citysim::Order::Job);
+    assert!(x.shocks.contains(&Shock::MemberArrested), "the shock waits for the rescore");
+}

@@ -583,14 +583,19 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         virt_grudge: virt.grudge,
         fear,
         vendetta,
-        job: crate::systems::contracts::job_of(world, gang).and_then(|id| {
-            let c = world.contracts.get(&id)?;
-            let cover = c
-                .target_agent()
-                .and_then(|t| world.comp::<crate::components::Position>(t))
-                .map_or(0.0, |p| tile_cover(world, gang, p.tile));
-            Some((id, (c.price as f32 / heat_ref as f32).clamp(0.0, 1.0), cover))
-        }),
+        // Review fix: only a marching job (its mission open) is offered; a
+        // queued one winning the order would rethink every tick (`gang::run`).
+        job: crate::systems::contracts::job_live(world, gang)
+            .then(|| crate::systems::contracts::job_of(world, gang))
+            .flatten()
+            .and_then(|id| {
+                let c = world.contracts.get(&id)?;
+                let cover = c
+                    .target_agent()
+                    .and_then(|t| world.comp::<crate::components::Position>(t))
+                    .map_or(0.0, |p| tile_cover(world, gang, p.tile));
+                Some((id, (c.price as f32 / heat_ref as f32).clamp(0.0, 1.0), cover))
+            }),
     })
 }
 

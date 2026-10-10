@@ -199,6 +199,8 @@ pub struct Contract {
     pub agent: Option<EntityId>,
     pub kind: ContractKind,
     pub target: Target,
+    /// The terms as posted. The price paid is `price` (the one source: a
+    /// sell-out raises `price` only).
     pub terms: Terms,
     /// Coins held in escrow (inside `ownership::total_coins`); 0 when direct.
     pub escrow: i64,
@@ -224,7 +226,7 @@ pub struct Contract {
     /// Who knows the buyer is behind it (the `Hired` first-hand holders).
     pub known_by: SmallVec<[EntityId; 8]>,
     // --- plan fields (C1), each `#[serde(default)]`.
-    /// The listed price (escrowed or not).
+    /// The listed price (escrowed or not), the one every reader uses.
     #[serde(default)]
     pub price: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -281,13 +283,6 @@ impl Contract {
         match self.target {
             Target::Agent(a) => Some(a),
             Target::Building(_) => None,
-        }
-    }
-
-    /// The listed price.
-    pub fn price(&self) -> i64 {
-        match self.terms {
-            Terms::Pay { price } => price,
         }
     }
 }

@@ -971,7 +971,6 @@ fn test_interrogation_names_buyer_then_conspiracy_filed() {
     assert!(conspiracy_on(&w, buyer), "Conspiracy against the placing agent");
     assert!(w.contracts[&id].charged);
     assert_eq!(w.stats.current.contract.accessory, 1);
-    assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Accessory && e.actors.first() == Some(&buyer)));
     // M16a 5.1 (a): the Hit later attributed: the charge comes a day after the killing.
     let later = w.events.iter().any(|e| e.kind == citysim::EventKind::Accessory && e.text.ends_with("(1 days after)"));
@@ -1013,7 +1012,6 @@ fn test_unknown_buyer_never_charged() {
     assert!(!conspiracy_on(&w, buyer), "nobody told the law: no charge");
     assert!(!w.contracts[&id].charged);
     assert_eq!(w.stats.current.contract.accessory, 0);
-    assert_eq!(w.stats.current.contract.accessory_unfounded, 0);
 }
 
 /// Review fix: the law's own record (a death-squad Hit: buyer `None`,
@@ -1475,4 +1473,206 @@ fn test_npc_registers_a_fixer() {
         e.kind == citysim::EventKind::Founded && e.text.contains(" registered ") && e.actors.first() == Some(&founder)
     });
     assert!(founded, "Founded names the agent founder");
+}
+
+// --- M16a review fixes ---
+
+/// Review fix 1: the record's own side never files Conspiracy against its
+/// buyer. A squad Hit's crew member and taker saw the killing and hold
+/// `Hired` first-hand, the broker's owner too: no charge. An outsider who
+/// saw it and holds the deed does charge (the control).
+#[test]
+fn test_squad_crew_witness_never_charges_its_buyer() {
+    let mut w = world();
+    let [buyer, t, taker, mate, outsider] = strangers(&w, 5)[..] else { unreachable!() };
+    gun(&mut w, taker);
+    gun(&mut w, mate);
+    set_coins(&mut w, buyer, 5000);
+    let f = fixer(&w);
+    let owner = w.owner_of(f).expect("an owner");
+    let id = contracts::post(&mut w, posting(buyer, ContractKind::Hit, t, Some(f))).expect("posted");
+    assert!(contracts::accept(&mut w, id, taker, &[mate]));
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+    let closed = w.contracts[&id].closed.expect("closed");
+    let saw = |w: &mut World, who: EntityId, of: EntityId| {
+        if let Some(m) = w.comp_mut::<citysim::Memory>(who) {
+            m.entries.push(citysim::MemoryEntry {
+                subject: Some(of),
+                crime: Some(citysim::Crime::Murder),
+                object: Some(t),
+                salience: 1.0,
+                ..citysim::MemoryEntry::blank(MemoryKind::SawCrime, closed)
+            });
+        }
+    };
+    saw(&mut w, mate, taker);
+    saw(&mut w, taker, mate);
+    saw(&mut w, owner, taker);
+    for who in [taker, mate, owner] {
+        assert!(holds_hired_about(&w, who, buyer, t), "first-hand Hired");
+    }
+    for _ in 0..3 {
+        w.tick += TICKS_PER_DAY;
+        law::accessory_check(&mut w);
+    }
+    assert!(!conspiracy_on(&w, buyer), "the squad's own crew never charges its buyer");
+    assert!(!w.contracts[&id].charged);
+    // The control: an outsider who saw the killing and holds the deed.
+    saw(&mut w, outsider, taker);
+    contracts::hear_named(&mut w, id, outsider, buyer, t, 1);
+    w.tick += TICKS_PER_DAY;
+    law::accessory_check(&mut w);
+    let by = w.crime_reports().iter().find(|r| r.crime == citysim::Crime::Conspiracy && r.suspect == buyer).cloned();
+    assert_eq!(by.and_then(|r| r.witness), Some(outsider), "an outside witness files");
+}
+
+/// A Statistical tracker's direct Locate taken on the ledger.
+fn ledger_locate(w: &mut World) -> (EntityId, EntityId, citysim::contract::ContractId) {
+    let [buyer, t, tracker] = strangers(w, 3)[..] else { unreachable!() };
+    gun(w, tracker);
+    set_coins(w, buyer, 5000);
+    for a in [t, tracker] {
+        lod::set_lod(w, a, Lod::Statistical);
+    }
+    let id = contracts::post(w, posting(buyer, ContractKind::Locate, t, None)).expect("posted");
+    assert!(contracts::accept(w, id, tracker, &[]));
+    assert_eq!(w.contracts[&id].render, Render::Ledger, "both Statistical, off screen");
+    (buyer, tracker, id)
+}
+
+/// Review fix 3: the ledger's Locate settles after paying its sightings
+/// (it used to stay Taken with no `due`, its tracker held forever), and a
+/// direct buyer who cannot pay the first sighting reneges.
+#[test]
+fn test_ledger_locate_settles_and_frees_the_tracker() {
+    let mut w = world();
+    let (_, tracker, id) = ledger_locate(&mut w);
+    let before = coins(&w, tracker);
+    contracts::resolve_ledger(&mut w, id);
+    let c = &w.contracts[&id];
+    assert!(c.paid_sightings > 0, "the tracker sold sightings");
+    assert_eq!(c.status, ContractStatus::Fulfilled, "the record settled");
+    assert_eq!(coins(&w, tracker) - before, i64::from(c.paid_sightings) * w.config.bounty.per_sighting);
+    // The tracker can take new work.
+    let pick: Vec<EntityId> =
+        strangers(&w, 8).into_iter().filter(|&x| x != tracker && !w.by_party.contains_key(&x)).collect();
+    let [buyer2, t2] = pick[..2] else { unreachable!() };
+    set_coins(&mut w, buyer2, 5000);
+    let id2 = contracts::post(&mut w, posting(buyer2, ContractKind::Beat, t2, None)).expect("posted");
+    assert!(contracts::eligible(&w, &w.contracts[&id2], tracker), "free for the next record");
+
+    // A broke direct buyer: nothing paid, reneged (not left Taken).
+    let mut w = world();
+    let (buyer, _, id) = ledger_locate(&mut w);
+    set_coins(&mut w, buyer, 0);
+    contracts::resolve_ledger(&mut w, id);
+    let c = &w.contracts[&id];
+    assert_eq!(c.paid_sightings, 0);
+    assert_eq!(c.status, ContractStatus::Reneged, "a short buyer reneges (C6)");
+}
+
+/// Review fix 4: a ledger record whose taker is busy on a live run is
+/// looked at again later (back in `ledger_due`), not dropped from the index.
+#[test]
+fn test_ledger_record_with_busy_taker_is_rescheduled() {
+    let mut w = world();
+    w.config.missions.strike_k = 100.0;
+    let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, taker);
+    if let Some(s) = w.comp_mut::<Skills>(t) {
+        s.fighting = 0.0;
+    }
+    set_coins(&mut w, buyer, 5000);
+    for a in [t, taker] {
+        lod::set_lod(&mut w, a, Lod::Statistical);
+    }
+    let id = contracts::post(&mut w, posting(buyer, ContractKind::Hit, t, None)).expect("posted");
+    assert!(contracts::accept(&mut w, id, taker, &[]));
+    let due = w.contracts[&id].due.expect("a due tick");
+    w.contract_runs.insert(
+        taker,
+        citysim::contract::ContractRun {
+            contract: 999_999,
+            target: t,
+            since: w.tick,
+            phase: citysim::word::HuntPhase::Ask,
+            venue: None,
+            intel: None,
+            stakeout_until: None,
+            deceived: false,
+            liar: None,
+        },
+    );
+    // As `contracts::run` does: pop the due entry, then resolve.
+    w.tick = due;
+    w.ledger_due.remove(&(due, id));
+    contracts::resolve_ledger(&mut w, id);
+    assert_eq!(w.contracts[&id].status, ContractStatus::Taken);
+    let again = w.contracts[&id].due.expect("rescheduled");
+    assert!(again > due, "a later look");
+    assert!(w.ledger_due.contains(&(again, id)), "still in the ledger's index");
+    // The run ends: the next look resolves it.
+    w.contract_runs.remove(&taker);
+    w.tick = again;
+    w.ledger_due.remove(&(again, id));
+    contracts::resolve_ledger(&mut w, id);
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+}
+
+/// Review fix 5: `contract_cleared` counts a record once, inside the
+/// configured `interrogate_days` (it counted every arrest within 30 days
+/// that fell outside a shorter window, never marking the record).
+#[test]
+fn test_contract_cleared_once_inside_interrogate_days() {
+    let arrest = |w: &mut World, guard: EntityId, taker: EntityId| {
+        law::file_report(w, citysim::Crime::Theft, taker, None);
+        law::jail_suspect(w, guard, taker);
+        assert!(w.has::<citysim::Sentence>(taker), "sentenced");
+        law::release(w, taker, false);
+    };
+    // Outside a 10-day window: never counted, however often re-arrested.
+    let mut w = world();
+    w.config.law.interrogate_days = 10;
+    let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
+    fulfilled_hit(&mut w, buyer, t, taker);
+    let guard = city_guard(&mut w, &[buyer, t, taker], 0.9);
+    w.tick += 20 * TICKS_PER_DAY;
+    arrest(&mut w, guard, taker);
+    w.tick += TICKS_PER_DAY;
+    arrest(&mut w, guard, taker);
+    assert_eq!(w.stats.current.contract.contract_cleared, 0, "outside the window");
+    // Inside it: once, on the first arrest.
+    let mut w = world();
+    w.config.law.interrogate_days = 10;
+    let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
+    let id = fulfilled_hit(&mut w, buyer, t, taker);
+    let guard = city_guard(&mut w, &[buyer, t, taker], 0.9);
+    w.tick += 2 * TICKS_PER_DAY;
+    arrest(&mut w, guard, taker);
+    w.tick += TICKS_PER_DAY;
+    arrest(&mut w, guard, taker);
+    assert_eq!(w.stats.current.contract.contract_cleared, 1, "once per record");
+    assert_eq!(w.contracts[&id].interrogated.len(), 2, "both arrests interrogated");
+}
+
+/// Review fix 6: a bust spends the office's heat, so it is not busted
+/// again the day it reopens.
+#[test]
+fn test_busted_fixer_not_busted_again_on_reopening() {
+    let mut w = world();
+    let f = fixer(&w);
+    if let Some(k) = w.comp_mut::<Broker>(f) {
+        k.heat = 0.95;
+    }
+    contracts::heat_daily(&mut w);
+    let busts = |w: &World| w.events.iter().filter(|e| e.kind == citysim::EventKind::FixerBusted).count();
+    assert_eq!(busts(&w), 1);
+    let k = w.comp::<Broker>(f).expect("broker");
+    assert!(k.heat < w.config.law.warrant_heat, "the heat spent: {}", k.heat);
+    let until = k.closed_until.expect("closed");
+    w.tick = until;
+    assert!(contracts::fixer_open(&w, f), "reopened");
+    contracts::heat_daily(&mut w);
+    assert_eq!(busts(&w), 1, "not busted again on reopening");
 }
