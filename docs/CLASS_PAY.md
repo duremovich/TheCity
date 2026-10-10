@@ -97,3 +97,35 @@ By origin (`Schooling`), day 364: Spire-born mean 165.7 / median 18, wage 12.16,
 Read: class now persists through income (the Spire's wage edge over the Sump is 1.43x at a year, 1.07x off) and the Spire keeps the best diet, but the pool split costs the labour class: with graded posts in the payroll, the corps' `wage_rev` stays ~1.1 where it climbs to ~1.8 off (the payroll meets `P*` sooner and a bigger jobless pool fills vacancies before a shortage raise), so every class's labour wage is lower over a year and the Dregs are five times as many at day 364. Mobility into graded posts is near zero for the Sump in a year (tenure counts in full at 180 days).
 
 Gates: flipped `core_sanity` 42-44 and `core_year` (seed 42) green; the default trio green (800 passed); god 21 green. The default `core_year` fails one window (days 270-300 starvation 51 > 50) on `ff60ea6` itself (its own CLI reproduces 356 / 51): pre-existing from P5g, not this branch.
+
+## P3 (Dylan's calls, 2026-10-10)
+
+1. **The premium from capital and profit** (P3a `77b16d6`). A graded wage still leaves the corp's purse in full, but only its labour-rate part counts as payroll for the revenue rule; the premium above it (`gross − gross ÷ grade_mult`) goes to a `Corp.prem` window. `P* = labour_share × R + payout`, where the premium is charged to profit (cashflow + premium) first and only then to the capital payout, so labour's share of revenue is the no-classpay city's. A graded place is posted and hired only while `profit + payout − premium` covers its premium; a corp in the red on its premium withdraws its open graded vacancies (no layoffs). An unfilled graded post is no labour shortage. The coin identity holds (unit test; `core_sanity` daily).
+2. **The thin ladder** (P3b `f1e7e95`): a day in a skilled or graded post adds `edu_gain_per_day` 0.0003 education (+0.11 a year), capped at `edu_cap` 0.75; deterministic. A Sump-born skilled worker out-ranks a Spire-born outsider for its corp's Manager post after about three sim years, not after a month (unit test).
+3. **No Corp HQs now**: they come with the bigger map (JOBS_V2 P8); management works at the corp's workplaces until then.
+4. **The status sink** (P3c `3799b72`): a midnight ledger at both tiers. Above `status_floor` 60 coins an adult spends `status_frac` 0.05 of the excess a day: half on a night at the nearest Lounge (else a Spire Club, the door policy and the venue's fun), a quarter on fashion at the nearest corp Market, a quarter on cosmetic chrome at the nearest corp Clinic. Every coin lands in an owner's purse and its building's revenue, which pays the staff through the wage rule. Real food every meal was already the diet's rule above `real_meal_reserve`.
+5. **Civic grades**: later (open items).
+
+**Findings after P3** (flipped config, 42-44 pooled; off = class pay off, identical to `ff60ea6`):
+
+| day | class | mean coins (off → P3) | median | mean wage | synth % |
+|---|---|---|---|---|---|
+| 119 | Spire | 14.0 → 40.9 | 6 → 12 | 7.72 → 10.91 | 52.3 → 32.1 |
+| 119 | Mid | 28.0 → 30.2 | 10 → 11 | 7.54 → 8.65 | 36.7 → 32.3 |
+| 119 | Sump | 14.7 → 19.6 | 9 → 9 | 7.59 → 7.68 | 39.9 → 40.9 |
+| 119 | Dreg | 3.6 → 5.6 | 1 → 1 | 6.58 → 6.98 | 54.2 → 54.3 |
+| 364 | Spire | 59.0 → 73.3 | 16 → 13 | 11.81 → 9.67 | 40.3 → 30.1 |
+| 364 | Mid | 100.6 → 50.8 | 17 → 12 | 11.23 → 8.21 | 30.3 → 29.8 |
+| 364 | Sump | 56.8 → 43.3 | 16 → 9 | 11.05 → 7.29 | 31.3 → 35.5 |
+| 364 | Dreg | 154.8 → 14.9 | 8 → 3 | 8.57 → 5.90 | 53.5 → 53.4 |
+
+Dreg adults on day 364 (pooled): off 76, P2 406, P3 257. Wallet Gini day 364: off 0.823, P2 0.850, P3 0.791 (day 119: 0.716 / 0.820 / 0.744). Employed day 364: 1,590/1,498/1,633 → 1,581/1,683/1,639. Population 1,773/1,819/1,892 → 1,786/1,882/1,823. Treasury day 364: 60-69k → 136-158k (tax parked at 0; the sources in the CSV move little, unexplained). Status spent ~395-450k a seed-year. By origin at day 364: Spire-born median 16, wage 11.64, 278 graded posts; Mid-born 11, 161; Sump-born 9, 7 (P2: 4); Dreg-born 9, 0.
+
+## Open items
+
+- **A corp school or scholarships** (a faster, rarer ladder than night school; a corp buying talent).
+- **Corp HQs** with the bigger map: management's home in the Spire.
+- **Civic grades** (sergeants, Treasury clerks) once the Treasury's budget can carry them.
+- **Labour wages stay under the no-classpay city's at a year** (Sump 7.3 vs 11.1): `wage_rev` climbs to ~1.5 rather than ~1.8 on seed 42 even with the premium off the pool; the Dreg excess shrank (406 → 257) but is still above off's 76.
+- **The Treasury hoard grows** with class pay (to 136-158k at tax 0).
+- **The stat table** must learn `p_attend` for Manager, Engineer, Accountant, Broker, Ripperdoc, Mechanic (the single recalibration on the merged branch).
