@@ -88,7 +88,53 @@ pub fn expected_defenders(world: &World, target: &Target) -> Vec<EntityId> {
     let cap = usize::from(world.config.missions.ally_cap_n);
     let mut out = vec![t];
     out.extend(allies.into_iter().take(cap).map(|(_, a)| a));
+    out.extend(exec_guards(world, t).into_iter().filter(|g| !out.contains(g)).collect::<Vec<_>>());
     out
+}
+
+/// The Hit market (P3 follow-up): an exec's protection. When `t` runs a
+/// corp, up to `[hitmarket] exec_guards` private guards of the corps that
+/// protect it (the corp itself when it runs Security Offices, and every
+/// Security corp holding a guard contract on one of its buildings),
+/// strongest first, counted on or off shift: the bodyguards the roadmap
+/// gives execs, from the guards that exist. Empty with the market off.
+pub fn exec_guards(world: &World, t: EntityId) -> Vec<EntityId> {
+    let n = world.config.hitmarket.exec_guards;
+    if !world.config.hitmarket.enabled || n == 0 {
+        return Vec::new();
+    }
+    let corps = world.corps();
+    let Some(c) =
+        corps.iter().copied().find(|&c| world.comp::<crate::components::Corp>(c).and_then(|x| x.exec) == Some(t))
+    else {
+        return Vec::new();
+    };
+    let mut protectors: Vec<EntityId> = vec![c];
+    for &s in &corps {
+        let covers = world
+            .comp::<crate::components::Corp>(s)
+            .is_some_and(|x| x.contracts.iter().any(|&(b, _)| world.corp_of_building(b) == Some(c)));
+        if covers && !protectors.contains(&s) {
+            protectors.push(s);
+        }
+    }
+    let mut guards: Vec<(f32, EntityId)> = world
+        .guards()
+        .iter()
+        .copied()
+        .filter(|&g| g != t && crate::systems::law::is_private_guard(world, g))
+        .filter(|&g| {
+            world
+                .comp::<crate::components::Job>(g)
+                .and_then(|j| j.employer)
+                .and_then(|e| world.corp_of_building(e))
+                .is_some_and(|corp| protectors.contains(&corp))
+        })
+        .filter(|&g| crate::systems::law::living(world, g) && !world.has::<crate::components::Sentence>(g))
+        .map(|g| (strength_of(world, g), g))
+        .collect();
+    guards.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+    guards.into_iter().take(n).map(|(_, g)| g).collect()
 }
 
 /// C23: the strike's `p_win` for `crew` against `target`'s expected

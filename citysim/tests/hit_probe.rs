@@ -6,7 +6,9 @@
 //!   gang and corp purses, witnesses, finance arrears);
 //! - `hit_market_report`: seeds 42-47 × 120 days, the organic records
 //!   (posted by motive and kind, fulfilled, stiffed, charged), violent
-//!   deaths, and the story lines of the fulfilled ones.
+//!   deaths, and the story lines of the fulfilled ones;
+//! - `exec_protection`: seed 42 at day 30, each corp exec's guards, the
+//!   strike estimate's defenders, the market price and the quote.
 //!
 //! Run alone: `cargo test --release -p citysim --test hit_probe -- --ignored --nocapture`
 //! (with `CITYSIM_ASSETS=<a copy of assets with wages + no_safety_net on>`
@@ -18,6 +20,33 @@ use citysim::systems::{contracts, demography, hunt, law};
 use citysim::word::{GrudgeCause, Grudges};
 use citysim::{Config, Corp, Crime, EntityId, EventKind, Gang, Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR};
 
+#[test]
+#[ignore]
+fn exec_protection() {
+    let mut w = World::new(42, Config::load());
+    w.run_ticks(30 * TICKS_PER_DAY);
+    let f = contracts::open_fixers(&w).first().copied();
+    for c in w.corps() {
+        let Some(e) = w.comp::<Corp>(c).and_then(|x| x.exec) else { continue };
+        let job = w.comp::<citysim::Job>(e).and_then(|j| j.employer);
+        let home = w.comp::<citysim::Household>(e).and_then(|h| h.home);
+        let guards = |b: Option<EntityId>| b.map_or(0, |b| citysim::systems::raid::private_guards_of(&w, b).len());
+        let t = Target::Agent(e);
+        let defs = citysim::systems::missions::expected_defenders(&w, &t).len();
+        let mp = contracts::market_price(&w, ContractKind::Hit, &t, Some(c), None, f);
+        let q = contracts::quote(&w, ContractKind::Hit, &t, f);
+        println!(
+            "{}: exec {} job {:?} ({} guards) home {:?} ({} guards) defenders {defs} market {mp:?} quote {q}",
+            w.owner_label(Some(c)),
+            w.name_of(e),
+            job.map(|b| w.name_of(b)),
+            guards(job),
+            home.map(|b| w.name_of(b)),
+            guards(home),
+        );
+    }
+}
+
 /// One organic record's last seen state.
 #[derive(Clone, Debug)]
 struct Seen {
@@ -28,6 +57,8 @@ struct Seen {
     deposit: i64,
     charged: bool,
     brokered: bool,
+    /// A corp bought it on a corp exec (decided when first seen).
+    exec: bool,
 }
 
 #[test]
@@ -102,6 +133,15 @@ fn hit_market_report() {
                                     deposit: c.deposit,
                                     charged: c.charged,
                                     brokered: c.brokered(),
+                                    exec: seen.get(&c.id).map_or_else(
+                                        || {
+                                            c.buyer.is_some_and(|b| w.has::<Corp>(b))
+                                                && w.corps().iter().any(|&k| {
+                                                    w.comp::<Corp>(k).and_then(|x| x.exec) == Some(c.target.id())
+                                                })
+                                        },
+                                        |s| s.exec,
+                                    ),
                                 },
                             );
                         }
@@ -120,6 +160,7 @@ fn hit_market_report() {
                         }
                     }
                     let mut by: BTreeMap<(String, &str), [u32; 6]> = BTreeMap::new();
+                    let (mut exec_prices, mut exec_done): (Vec<i64>, u32) = (Vec::new(), 0);
                     let (mut price, mut dep, mut n, mut charged, mut brokered) = (0i64, 0i64, 0i64, 0u32, 0u32);
                     for s in seen.values() {
                         let e = by.entry((s.motive.label().to_string(), s.kind.label())).or_default();
@@ -136,11 +177,15 @@ fn hit_market_report() {
                         n += 1;
                         charged += u32::from(s.charged);
                         brokered += u32::from(s.brokered);
+                        if s.exec && s.kind == ContractKind::Hit {
+                            exec_prices.push(s.price);
+                            exec_done += u32::from(matches!(s.status, ContractStatus::Fulfilled | ContractStatus::Reneged));
+                        }
                     }
                     let alive: std::collections::BTreeSet<EntityId> = w.corps().into_iter().collect();
                     let corps_alive = seeded.iter().filter(|c| alive.contains(c)).count();
                     let mut out = format!(
-                        "seed {seed}: violent deaths {violent}; seeded corps alive {corps_alive}/{}; corp exec Hits posted {}; organic [posted, done, failed, expired, cancelled, live] {:?}; mean price {} deposit {}; brokered {brokered}/{n}; stiffed {stiffed}; buyers charged {charged}; tries short {unaff}; kin refused {refused}; pooled {pooled}\n",
+                        "seed {seed}: violent deaths {violent}; seeded corps alive {corps_alive}/{}; corp exec Hits posted {}, prices {exec_prices:?}, fulfilled {exec_done}; organic [posted, done, failed, expired, cancelled, live] {:?}; mean price {} deposit {}; brokered {brokered}/{n}; stiffed {stiffed}; buyers charged {charged}; tries short {unaff}; kin refused {refused}; pooled {pooled}\n",
                         seeded.len(),
                         w.hm_corp_hits.len(),
                         by,

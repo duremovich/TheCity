@@ -1785,6 +1785,8 @@ corp_cooldown_days = 30              # H18, decision 4
 corp_year_cap = 2                    # decision 4: corp exec Hits city-wide per 365 days
 dirty_beat = 0.45                    # H18
 rival_window_days = 30               # H18
+exec_guards = 3                      # P3 follow-up: an exec's defenders add up to 3 of its protecting corps' private guards.
+                                     # A stand-in for real bodyguards (roadmap addendum 13, ambient LOD): retire it when those land.
 
 # The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
 # `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).

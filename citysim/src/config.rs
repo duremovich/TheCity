@@ -5368,6 +5368,12 @@ pub struct HitMarketCfg {
     pub dirty_beat: f32,
     /// H18: a wrong by a rival corp counts this many days.
     pub rival_window_days: u32,
+    /// P3 follow-up: an exec's expected defenders add up to this many
+    /// private guards of the corps protecting its corp
+    /// (`missions::exec_guards`). A stand-in for real bodyguards (roadmap
+    /// addendum 13, ambient LOD: execs travel with company); retire it when
+    /// those land.
+    pub exec_guards: usize,
 }
 
 impl Default for HitMarketCfg {
@@ -5391,6 +5397,7 @@ impl Default for HitMarketCfg {
             corp_year_cap: 2,
             dirty_beat: 0.45,
             rival_window_days: 30,
+            exec_guards: 3,
         }
     }
 }

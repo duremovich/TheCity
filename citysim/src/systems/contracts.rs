@@ -3331,6 +3331,15 @@ pub fn post_lobby(world: &mut World, corp: EntityId, gang: EntityId) -> bool {
     let Some(head) = head_of(world, gang) else { return false };
     let Some(at) = world.comp::<Position>(head).map(|p| p.tile) else { return false };
     let Some(broker) = nearest_fixer_to(world, at) else { return false };
+    // The Hit market (P3 follow-up): the faction repost wait. A record on
+    // this head still live stands (the bribe is skipped); one closed within
+    // `repost_days` is not bought again (the bribe goes ahead).
+    if world.config.hitmarket.enabled && crate::systems::hitmarket::bought_lately(world, corp, head) {
+        return world
+            .contracts
+            .values()
+            .any(|c| c.is_live() && c.buyer == Some(corp) && c.target == Target::Agent(head));
+    }
     let origin = Origin::CorpOrder(crate::components::CorpOrder::Lobby);
     let target = Target::Agent(head);
     // The Hit market (H18): at the market price, the motive on the record.

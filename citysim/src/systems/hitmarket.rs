@@ -224,7 +224,7 @@ pub fn wronged(world: &mut World, victim: EntityId, by: EntityId, how: crate::co
 
 /// An organic record by `buyer` on `target` live now, or closed within
 /// `repost_days` (the faction waits before buying the same head again).
-fn bought_lately(world: &World, buyer: EntityId, target: EntityId) -> bool {
+pub fn bought_lately(world: &World, buyer: EntityId, target: EntityId) -> bool {
     let wait = Tick::from(world.config.hitmarket.repost_days) * TICKS_PER_DAY;
     let now = world.tick;
     world.contracts.values().any(|c| {

@@ -587,3 +587,58 @@ fn test_lobby_culprit_at_market_price() {
         assert_eq!(rec.price, expect, "priced at the market (or quote when nobody asks)");
     }
 }
+
+/// P3 follow-up: Lobby waits `repost_days` before buying the same head
+/// again (the bribe goes ahead meanwhile).
+#[test]
+fn test_lobby_waits_before_rebuying_the_same_head() {
+    let mut w = world();
+    let (c, _, _) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.1);
+    let g = led_gangs(&mut w)[0];
+    assert!(contracts::post_lobby(&mut w, c, g));
+    let id = w.contracts.values().find(|x| x.buyer == Some(c)).map(|x| x.id).unwrap();
+    assert!(contracts::post_lobby(&mut w, c, g), "a live record stands");
+    contracts::settle(&mut w, id, contracts::Settle::Failed, "test");
+    let n = w.contracts.len();
+    assert!(!contracts::post_lobby(&mut w, c, g), "inside the wait: no record, the bribe");
+    assert_eq!(w.contracts.len(), n);
+    w.tick += u64::from(w.config.hitmarket.repost_days + 1) * citysim::TICKS_PER_DAY;
+    assert!(contracts::post_lobby(&mut w, c, g), "after the wait: bought again");
+    assert_eq!(w.contracts.len(), n + 1);
+}
+
+/// P3 follow-up: an exec's expected defenders count up to `exec_guards`
+/// private guards of the corps protecting its corp (a Security corp's
+/// own); none with the market off.
+#[test]
+fn test_exec_defended_by_corp_guards() {
+    use citysim::systems::missions;
+    let mut w = world();
+    // The private guards are hired over the first days.
+    w.run_ticks(3 * citysim::TICKS_PER_DAY);
+    let sec = w
+        .corps()
+        .into_iter()
+        .find(|&c| {
+            w.comp::<citysim::Corp>(c).is_some_and(|x| {
+                x.niches.contains(&citysim::Niche::Security) && x.exec.is_some_and(|e| law::living(&w, e))
+            })
+        })
+        .expect("a Security corp with an exec");
+    let e = w.comp::<citysim::Corp>(sec).and_then(|x| x.exec).unwrap();
+    let guards = missions::exec_guards(&w, e);
+    assert!(!guards.is_empty() && guards.len() <= w.config.hitmarket.exec_guards, "{}", guards.len());
+    let t = Target::Agent(e);
+    let defs = missions::expected_defenders(&w, &t);
+    assert!(guards.iter().all(|g| defs.contains(g)));
+    let s_on = missions::defender_strength(&w, &t);
+    w.config.hitmarket.enabled = false;
+    assert!(missions::exec_guards(&w, e).is_empty());
+    assert!(missions::defender_strength(&w, &t) < s_on);
+    // A nobody has none.
+    w.config.hitmarket.enabled = true;
+    let [p] = strangers(&w, 1)[..] else { unreachable!() };
+    assert!(missions::exec_guards(&w, p).is_empty());
+}
