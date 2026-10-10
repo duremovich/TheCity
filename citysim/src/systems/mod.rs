@@ -19,6 +19,7 @@
 
 pub mod assets;
 pub mod bind;
+pub mod bins;
 pub mod budget;
 pub mod camp;
 pub mod charity;

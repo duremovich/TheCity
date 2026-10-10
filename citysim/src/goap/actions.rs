@@ -159,6 +159,10 @@ pub enum ActionKind {
     EatAlms,
     /// At a Mission's door: a gift from the surplus into its purse.
     Donate,
+    // --- Hunger as sickness § 4: the dive plan's scripted step; never in
+    // `PLANNABLE`, `allowed` false, started by `bins::can_start`.
+    /// At a bin outside a building's door: a meal of scraps, eaten there.
+    DumpsterDive,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -385,6 +389,7 @@ impl ActionKind {
                 | ActionKind::Guard
                 | ActionKind::EatAlms
                 | ActionKind::Donate
+                | ActionKind::DumpsterDive
         )
     }
 
@@ -1253,6 +1258,7 @@ impl ActionKind {
             k if k.is_contract_step() => false,
             // Real economy E27, E28: scripted only.
             k if k.is_charity_step() => false,
+            ActionKind::DumpsterDive => false,
             _ => true,
         }
     }
@@ -1345,6 +1351,7 @@ impl ActionKind {
             k if k.is_contract_step() => true,
             // Real economy E27, E28: likewise `charity::can_start`.
             k if k.is_charity_step() => true,
+            ActionKind::DumpsterDive => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1814,7 +1821,7 @@ impl ActionKind {
             ActionKind::Network => 4.0,
             ActionKind::Guard => 2.0,
             // Real economy E27, E28: scripted, never searched.
-            ActionKind::EatAlms | ActionKind::Donate => 60.0,
+            ActionKind::EatAlms | ActionKind::Donate | ActionKind::DumpsterDive => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

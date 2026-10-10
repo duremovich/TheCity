@@ -282,10 +282,18 @@ pub enum EventKind {
     // --- Jobs and room P3 (plan J14; amber).
     /// `[super, post]`: a Super walked the round of his Blocks (`trades::round_plan`).
     SuperRound,
+    // --- Hunger as sickness (docs/HUNGER_SICKNESS.md § 9).
+    /// `[winner, loser, bin]` or `[gang, diver]`: a bin's regular saw a diver
+    /// off, or a gang shook one down.
+    BinContest,
+    /// `[agent]`: a cancer turned symptomatic.
+    Diagnosed,
+    /// `[agent, clinic]`: a cancer cured at a Clinic.
+    Cured,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 141] = [
+    pub const ALL: [EventKind; 144] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -427,6 +435,9 @@ impl EventKind {
         EventKind::TaxMoved,
         EventKind::FloorAdded,
         EventKind::SuperRound,
+        EventKind::BinContest,
+        EventKind::Diagnosed,
+        EventKind::Cured,
     ];
 }
 

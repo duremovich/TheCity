@@ -34,6 +34,7 @@ pub fn run(world: &mut World) {
     daily_spoilage(world);
     // Hunger as sickness § 2: yesterday's meals into the meters.
     crate::systems::health::daily(world);
+    crate::systems::bins::rot(world);
 }
 
 /// Clerks top each Market up from the Warehouse while it is under
@@ -282,6 +283,9 @@ fn daily_spoilage(world: &mut World) {
     let pantry = world.config.economy.spoilage_pantry;
     let market = world.config.economy.spoilage_market;
     let sump = world.config.rent.sump_spoilage_mult;
+    // Hunger as sickness § 4: the units spoiled at Markets and Homes go to their bins.
+    let bins = crate::systems::bins::on(world);
+    let mut spoiled: Vec<(EntityId, u32)> = Vec::new();
     for id in world.with::<Building>() {
         let Some(b) = world.comp_mut::<Building>(id) else { continue };
         let rate = match b.kind {
@@ -293,8 +297,15 @@ fn daily_spoilage(world: &mut World) {
         };
         // Hunger as sickness § 1: synth keeps (0 synth with the diet off).
         let synth = b.synth_food.min(b.stock_food);
-        b.stock_food -= ((b.stock_food - synth) as f32 * rate).floor() as u32;
+        let lost = ((b.stock_food - synth) as f32 * rate).floor() as u32;
+        b.stock_food -= lost;
         b.synth_food = synth.min(b.stock_food);
+        if bins && lost > 0 && b.kind != BuildingKind::Warehouse {
+            spoiled.push((id, lost));
+        }
+    }
+    for (b, lost) in spoiled {
+        crate::systems::bins::spoiled(world, b, lost);
     }
     for id in world.citizens() {
         let Some(inv) = world.comp_mut::<Inventory>(id) else { continue };

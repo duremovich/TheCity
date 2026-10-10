@@ -106,6 +106,9 @@ pub enum LocationKey {
     /// L2 L14: the street spot of the agent's leisure pick
     /// (`World::unwind`): scripted plans only, never in `GOTO`.
     Spot,
+    /// Hunger as sickness § 4: the street outside the bound building's
+    /// door (its bin). Scripted dive plans only, never in `GOTO`.
+    Bin,
 }
 
 impl LocationKey {

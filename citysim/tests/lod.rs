@@ -143,7 +143,7 @@ fn test_full_vs_statistical_within_15pct() {
     const DAYS: u64 = 30;
     const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
     struct Run {
-        rates: [f64; 6],
+        rates: [f64; 9],
         actors: [f64; 3],
     }
     fn bucket(w: &World, id: citysim::EntityId) -> Option<usize> {
@@ -239,6 +239,18 @@ fn test_full_vs_statistical_within_15pct() {
                 assaults as f64 / per,
                 sum(|r| r.deaths_violence),
                 marriages as f64 / per,
+                // Hunger as sickness § 5 (zeros with `[sickness]` off): the
+                // synth share of meals (percent), bin meals per 100
+                // agent-days, mean malnutrition on the last day (x 100).
+                {
+                    let meals = |f: fn(&citysim::DayRow) -> u32| w.stats.history.iter().map(f).sum::<u32>() as f64;
+                    let all = meals(|r| {
+                        r.health.meals_real + r.health.meals_synth + r.health.meals_dive + r.health.meals_alms
+                    });
+                    100.0 * meals(|r| r.health.meals_synth + r.health.meals_alms) / all.max(1.0)
+                },
+                sum(|r| r.health.meals_dive),
+                100.0 * f64::from(w.stats.history.back().map_or(0.0, |r| r.health.mean_malnutrition)),
             ],
             actors: actors.map(|n| n as f64),
         }
@@ -258,7 +270,17 @@ fn test_full_vs_statistical_within_15pct() {
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
-    let names = ["thefts", "hunger-days", "arrests", "assaults", "violent deaths", "marriages"];
+    let names = [
+        "thefts",
+        "hunger-days",
+        "arrests",
+        "assaults",
+        "violent deaths",
+        "marriages",
+        "synth % meals",
+        "bin meals",
+        "malnutrition x100",
+    ];
     let mut failures = Vec::new();
     for (i, name) in names.iter().enumerate() {
         let (f, s) = (full.rates[i], stat.rates[i]);

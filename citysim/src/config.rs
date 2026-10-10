@@ -5993,7 +5993,8 @@ pub struct SicknessCfg {
     pub dive_satisfy: f32,
     pub dive_sick_p: f32,
     pub regular_days: u8,
-    pub bin_gang_control: f32,
+    /// A held gang Home within this many tiles makes the bin the gang's.
+    pub bin_turf_tiles: u32,
     pub bin_shake_p: f32,
     pub bin_toll: i64,
     /// Days at hunger 0 before a death by starvation.
@@ -6050,7 +6051,7 @@ impl Default for SicknessCfg {
             dive_satisfy: 0.6,
             dive_sick_p: 0.05,
             regular_days: 3,
-            bin_gang_control: 0.5,
+            bin_turf_tiles: 15,
             bin_shake_p: 0.3,
             bin_toll: 1,
             starve_grace_days: 7,

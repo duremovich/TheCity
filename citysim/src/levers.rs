@@ -2275,6 +2275,10 @@ impl World {
                 floors: 1,
                 floor_days: 0,
                 synth_food: 0,
+                bin: 0,
+                bin_accum: 0.0,
+                bin_diver: None,
+                bin_regular: None,
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

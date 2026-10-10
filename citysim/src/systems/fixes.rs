@@ -95,7 +95,9 @@ pub fn eat_first(world: &World, id: EntityId) -> bool {
 /// (the lawful broke scavenged six hours at hunger 0.2 beside a stocked
 /// Mission: Earn's own hunger term outscored Eat).
 pub fn free_meal_first(world: &World, id: EntityId) -> bool {
-    mission_gate(world) && crate::systems::charity::alms_target(world, id).is_some()
+    mission_gate(world)
+        && (crate::systems::charity::alms_target(world, id).is_some()
+            || crate::systems::bins::dive_target(world, id).is_some())
 }
 
 /// Violence fix 1: the ledger's `VictimClass::Street`.

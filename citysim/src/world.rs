@@ -177,6 +177,12 @@ pub struct StatTable {
     /// whatever the lawfulness).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_desperate: Option<[f32; 3]>,
+    /// Hunger as sickness § 5 (read only with `[sickness] bins`): the chance
+    /// an adult who cannot buy a meal, with a bin in reach (`bins::dive_target`
+    /// at the hour's start), dives in the hour, per row. `calibrate` writes it
+    /// with the bins on. A table without it: every such hour dives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_dive: Option<[f32; STAT_ROWS]>,
     pub rows: Vec<StatRow>,
 }
 
@@ -605,6 +611,9 @@ pub struct World {
     /// empty store is not written).
     #[serde(default, skip_serializing_if = "all_none")]
     pub health: Vec<Option<crate::components::Health>>,
+    /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
+    #[serde(skip)]
+    pub bins: BTreeSet<EntityId>,
     /// M15 W6: one rumour pool per district (`DistrictId` order).
     #[serde(default)]
     pub rumours: Vec<crate::word::RumourPool>,
@@ -1139,6 +1148,7 @@ impl World {
             broker: Vec::new(),
             camp_raised: Vec::new(),
             health: Vec::new(),
+            bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
             kill_watch: VecDeque::new(),
@@ -1321,6 +1331,10 @@ impl World {
                     floors: def.floors,
                     floor_days: 0,
                     synth_food: 0,
+                    bin: 0,
+                    bin_accum: 0.0,
+                    bin_diver: None,
+                    bin_regular: None,
                 },
             );
             match def.kind {
@@ -2636,6 +2650,13 @@ impl World {
     /// Rebuild `neighbours`, `spouses` and `enemies` from `edges` (after a
     /// load; the indices are not saved).
     pub fn rebuild_indices(&mut self) {
+        // Hunger as sickness § 4: the stocked bins.
+        let bins: BTreeSet<EntityId> = self
+            .with::<Building>()
+            .into_iter()
+            .filter(|&b| self.comp::<Building>(b).is_some_and(|x| x.bin > 0))
+            .collect();
+        self.bins = bins;
         self.neighbours.clear();
         self.spouses.clear();
         self.enemies.clear();

@@ -326,3 +326,182 @@ fn test_save_round_trip_with_health() {
     back.run_ticks(TICKS_PER_DAY);
     assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w), "the loaded world runs on byte for byte");
 }
+
+// ---------------------------------------------------------------------------
+// P3: the bins (§ 4)
+// ---------------------------------------------------------------------------
+
+fn bin_of(w: &World, b: EntityId) -> u16 {
+    w.comp::<Building>(b).map_or(0, |x| x.bin)
+}
+
+/// A Market's spoiled units fill its bin at `bin_meals_per_unit`, capped,
+/// then the bin rots by `bin_rot`; the midnight pass does both.
+#[test]
+fn test_market_bin_fills_from_spoilage_and_rots() {
+    let mut w = world_on();
+    let m = market(&w);
+    citysim::systems::bins::spoiled(&mut w, m, 10);
+    assert_eq!(bin_of(&w, m), 20, "10 units, 2 meals a unit");
+    assert!(w.bins.contains(&m));
+    citysim::systems::bins::spoiled(&mut w, m, 100);
+    assert_eq!(bin_of(&w, m), w.config.sickness.bin_cap, "capped");
+    citysim::systems::bins::rot(&mut w);
+    assert_eq!(bin_of(&w, m), 20, "half rots");
+    // The midnight pass: a stocked shelf spoils into the bin.
+    let mut v = world_on();
+    let m = market(&v);
+    v.comp_mut::<Building>(m).expect("market").stock_food = 1500;
+    v.run_ticks(TICKS_PER_DAY - v.tick_of_day() as u64);
+    assert!(bin_of(&v, m) > 0, "the shelf's spoilage reached the bin");
+}
+
+/// A Home's pantry spoilage fills its own bin (household waste).
+#[test]
+fn test_home_bin_from_pantry_spoilage() {
+    let mut w = world_on();
+    let h = *w.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
+    w.comp_mut::<Building>(h).expect("home").stock_food = 40;
+    w.run_ticks(TICKS_PER_DAY - w.tick_of_day() as u64);
+    assert!(bin_of(&w, h) > 0, "the pantry's spoiled units reached the bin");
+}
+
+/// A broke, hungry adult with no Mission in reach and a stocked bin 20
+/// tiles off dives and eats within six hours (a person probe).
+#[test]
+fn probe_broke_with_no_mission_dives() {
+    let mut w = world_on();
+    w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    for m in w.buildings_of_kind(BuildingKind::Mission).to_vec() {
+        w.comp_mut::<Building>(m).expect("mission").stock_food = 0;
+    }
+    let m = market(&w);
+    w.comp_mut::<Building>(m).expect("market").bin = 30;
+    w.bins.insert(m);
+    let tile = citysim::systems::bins::bin_tile(&w, m).expect("bin tile");
+    let picks: Vec<EntityId> = adults(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<Job>(a).is_none())
+        .filter(|&a| w.comp::<citysim::Position>(a).is_some_and(|p| (8..=25).contains(&p.tile.manhattan(tile))))
+        .take(6)
+        .collect();
+    assert!(!picks.is_empty(), "an adult 8-25 tiles from the bin");
+    let mut dove = 0;
+    for &a in &picks {
+        let mut v = w.clone();
+        v.comp_mut::<Brain>(a).expect("brain").pinned = true;
+        v.comp_mut::<Wallet>(a).expect("wallet").coins = 0;
+        *v.comp_mut::<Inventory>(a).expect("inv") = Inventory::default();
+        if let Some(h) = v.comp::<citysim::Household>(a).and_then(|h| h.home) {
+            v.comp_mut::<Building>(h).expect("home").stock_food = 0;
+        }
+        v.comp_mut::<Needs>(a).expect("needs").hunger = 0.15;
+        if let Some(p) = v.comp_mut::<citysim::Personality>(a) {
+            p.pride = 0.2;
+        }
+        let end = v.tick + 6 * TICKS_PER_HOUR;
+        while v.tick < end {
+            v.comp_mut::<Brain>(a).expect("brain").pinned = true;
+            v.run_ticks(1);
+        }
+        let d = health(&v, a).today.dive;
+        eprintln!("agent {}: dove {d}", a.index);
+        dove += usize::from(d > 0);
+    }
+    assert!(dove * 2 >= picks.len(), "only {dove} of {} broke hungry adults dove", picks.len());
+}
+
+/// An established regular present at the bin puts an Intimidate to a
+/// newcomer: over many pairs both outcomes happen, and a loss is a
+/// `BinContest` that drifts the pair apart.
+#[test]
+fn test_regular_wins_or_loses_by_intimidate() {
+    use citysim::systems::bins::{contest, Contest};
+    let w = world_on();
+    let m = market(&w);
+    let day = w.day();
+    let people = adults(&w);
+    let (mut lost, mut clear) = (0, 0);
+    for pair in people.chunks(2).take(40) {
+        let [reg, new] = pair else { continue };
+        let mut v = w.clone();
+        citysim::systems::lod::set_lod(&mut v, *reg, Lod::Statistical);
+        citysim::systems::lod::set_lod(&mut v, *new, Lod::Statistical);
+        v.comp_mut::<Building>(m).expect("market").bin_regular =
+            Some(citysim::BinRegular { who: *reg, days: 0b111, last_day: day });
+        match contest(&mut v, *new, m) {
+            Contest::LostToRegular(r) => {
+                assert_eq!(r, *reg);
+                assert!(v.edge(*new, *reg).is_some_and(|e| e.affinity < 0.0), "the loser resents the regular");
+                assert_eq!(v.stats.current.health.bin_contests, 1);
+                lost += 1;
+            }
+            Contest::Clear => clear += 1,
+            Contest::Shaken => {}
+        }
+    }
+    eprintln!("newcomers seen off {lost}, ate {clear}");
+    assert!(lost > 0 && clear > 0, "both outcomes: lost {lost}, clear {clear}");
+}
+
+/// A gang's turf (a held Home within `bin_turf_tiles`): a non-member pays
+/// the toll (once a day), one with nothing to pay goes without (off
+/// screen), a member dives free.
+#[test]
+fn test_gang_turf_shakes_down_a_non_member() {
+    use citysim::systems::bins::{contest, turf, Contest};
+    let mut cfg = sick_cfg();
+    cfg.sickness.bin_shake_p = 1.0;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(5 * TICKS_PER_DAY);
+    let g = w
+        .gangs()
+        .into_iter()
+        .find(|&g| w.comp::<citysim::Gang>(g).is_some_and(|x| !x.members.is_empty()))
+        .expect("a gang with members");
+    // A Home held by the gang; its own bin is on its turf.
+    let h = *w.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
+    w.comp_mut::<Building>(h).expect("home").claim = Some(citysim::Claim { gang: g, count: 3 });
+    assert_eq!(turf(&w, h), Some(g));
+    let diver = adults(&w).into_iter().find(|&a| w.gang_of(a).is_none()).expect("a civilian");
+    citysim::systems::lod::set_lod(&mut w, diver, Lod::Statistical);
+    w.insert(diver, Health::default());
+    w.comp_mut::<Wallet>(diver).expect("wallet").coins = 5;
+    let gang_before = w.comp::<citysim::Gang>(g).expect("gang").treasury;
+    assert_eq!(contest(&mut w, diver, h), Contest::Clear, "the toll paid, the meal had");
+    assert_eq!(w.comp::<Wallet>(diver).expect("wallet").coins, 5 - w.config.sickness.bin_toll);
+    assert!(w.comp::<citysim::Gang>(g).expect("gang").treasury > gang_before, "the toll reached the gang");
+    assert_eq!(w.stats.current.health.bin_shakedowns, 1);
+    assert_eq!(contest(&mut w, diver, h), Contest::Clear, "once a day");
+    assert_eq!(w.stats.current.health.bin_shakedowns, 1);
+    // Broke: run off (off screen, no body to fight).
+    let broke = adults(&w).into_iter().filter(|&a| w.gang_of(a).is_none() && a != diver).nth(1).expect("another");
+    citysim::systems::lod::set_lod(&mut w, broke, Lod::Statistical);
+    w.comp_mut::<Wallet>(broke).expect("wallet").coins = 0;
+    assert_eq!(contest(&mut w, broke, h), Contest::Shaken);
+    assert!(!citysim::systems::bins::stat_dive(&mut w, broke, 1.0), "stat_dive goes through the same contest");
+    // A member dives free.
+    let member = w.comp::<citysim::Gang>(g).expect("gang").members[0];
+    assert_eq!(contest(&mut w, member, h), Contest::Clear);
+}
+
+/// One diver at a time: a bin held by another diver is neither a target
+/// nor startable.
+#[test]
+fn test_one_diver_per_bin() {
+    let mut w = world_on();
+    let m = market(&w);
+    w.comp_mut::<Building>(m).expect("market").bin = 10;
+    w.bins.insert(m);
+    let (a, b) = (adults(&w)[0], adults(&w)[1]);
+    let t = w.tick;
+    citysim::systems::bins::on_start(&mut w, a, Some(m), t + 20);
+    let tile = citysim::systems::bins::bin_tile(&w, m).expect("tile");
+    if let Some(p) = w.comp_mut::<citysim::Position>(b) {
+        p.tile = tile;
+        p.building = None;
+    }
+    assert!(!citysim::systems::bins::can_start(&w, b, Some(m)), "held by a");
+    citysim::systems::bins::release(&mut w, a, Some(m));
+    assert!(citysim::systems::bins::can_start(&w, b, Some(m)));
+}

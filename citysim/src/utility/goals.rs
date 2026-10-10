@@ -205,6 +205,8 @@ pub fn eat_obtainable(world: &World, id: EntityId) -> bool {
         || pantry > 0
         || lawfulness < 0.3
         || (crate::systems::fixes::mission_gate(world) && crate::systems::charity::alms_target(world, id).is_some())
+        // Hunger as sickness § 4: a stocked bin in reach.
+        || crate::systems::bins::dive_target(world, id).is_some()
 }
 
 /// Considerations and flat bonus for one goal, or `None` if the agent lacks a

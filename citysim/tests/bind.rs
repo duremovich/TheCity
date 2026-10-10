@@ -25,6 +25,7 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         p_scavenge: None,
         p_beg: None,
         p_desperate: None,
+        p_dive: None,
         rows,
     }
 }

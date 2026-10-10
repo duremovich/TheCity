@@ -2431,6 +2431,54 @@ pub struct Building {
     /// `stock_food` (a subset, clamped as `Inventory.synth`).
     #[serde(default, skip_serializing_if = "is_zero_u32")]
     pub synth_food: u32,
+    /// Hunger as sickness § 4: meals of scraps in the bin out back.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub bin: u16,
+    /// § 4: a venue's fraction of a scrap meal (`venue_scrap` a meal served).
+    #[serde(default, skip_serializing_if = "is_zero_f32_c")]
+    pub bin_accum: f32,
+    /// § 4: the diver holding the bin, until (one at a time).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bin_diver: Option<(EntityId, Tick)>,
+    /// § 4: the bin's regular (or the diver who may become one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bin_regular: Option<BinRegular>,
+}
+
+/// Hunger as sickness § 4: a bin's regular diver and the days (of the last
+/// seven, bit 0 the last seen) it dove there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinRegular {
+    pub who: EntityId,
+    pub days: u8,
+    pub last_day: u64,
+}
+
+impl BinRegular {
+    pub fn new(who: EntityId, day: u64) -> BinRegular {
+        BinRegular { who, days: 1, last_day: day }
+    }
+
+    /// The dive days of the 7 ending `day`.
+    pub fn days_as_of(&self, day: u64) -> u8 {
+        let gap = day.saturating_sub(self.last_day);
+        if gap >= 7 {
+            0
+        } else {
+            ((u16::from(self.days) << gap) & 0x7f) as u8
+        }
+    }
+
+    /// A diver there on `need` of the last 7 days.
+    pub fn established(&self, day: u64, need: u8) -> bool {
+        self.days_as_of(day).count_ones() >= u32::from(need)
+    }
+
+    /// Another dive by the regular on `day`.
+    pub fn saw(&mut self, day: u64) {
+        self.days = self.days_as_of(day) | 1;
+        self.last_day = day;
+    }
 }
 
 pub fn default_tier() -> u8 {
@@ -3676,6 +3724,10 @@ pub struct Asset {
     pub turned: Option<(EntityId, Tick)>,
 }
 
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
+}
+
 fn is_zero_u32(v: &u32) -> bool {
     *v == 0
 }
@@ -3868,5 +3920,7 @@ pub struct Health {
     pub sick_today: bool,
     /// The last 14 days' sick days, bit 0 today (decision 4: 5 cost the job).
     pub sick_days: u16,
+    /// § 4: the day a gang last shook this diver down at a bin (once a day).
+    pub shaken_day: Option<u64>,
     pub today: MealTally,
 }

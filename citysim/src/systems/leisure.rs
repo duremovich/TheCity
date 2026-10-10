@@ -1228,6 +1228,7 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
             let (units, _) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
             let Some(b) = target else { return };
             if units > 0 {
+                crate::systems::bins::venue_meal(world, b);
                 let cfg = world.config.needs.clone();
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     crate::needs::eat(n, &cfg);

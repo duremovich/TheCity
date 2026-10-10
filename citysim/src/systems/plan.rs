@@ -216,7 +216,10 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // The Real economy E27, E28: a meal at a Mission for the hungry poor, a
     // gift at its door from a donor; scripted as the leisure plans.
     let scripted = match goal {
-        GoalKind::Eat => crate::systems::charity::alms_plan(world, id),
+        // Hunger as sickness § 4: the bin when no Mission serves.
+        GoalKind::Eat => {
+            crate::systems::charity::alms_plan(world, id).or_else(|| crate::systems::bins::dive_plan(world, id))
+        }
         GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
         _ => None,
     };

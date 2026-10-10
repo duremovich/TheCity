@@ -1154,6 +1154,17 @@ fn stat_eat(world: &mut World, id: EntityId) {
     // next hour's scavenge or beg). The dole city's table has no
     // `p_desperate`: the M10 rule (starving, whatever the lawfulness). Adults
     // only (`calibrate` learns it from adults); a child keeps the M10 rule.
+    // Hunger as sickness § 4: a dive on the row's `p_dive` of hours (every
+    // hour without a learned rate), the body's bin, contest and meal.
+    if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
+        let p = match (world.stat_table.as_ref().and_then(|t| t.p_dive), stat_row_index(world, id)) {
+            (Some(rates), Some(row)) => rates[row],
+            _ => 1.0,
+        };
+        if crate::systems::bins::stat_dive(world, id, p) {
+            return;
+        }
+    }
     let need = if crate::systems::econ::no_net(world) && crate::systems::demography::is_adult(world, id) {
         let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
         world.stat_table.as_ref().and_then(|t| t.p_desperate.map(|d| (d[t.lawfulness_bucket(law)], t.hunger_edge)))

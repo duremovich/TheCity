@@ -95,6 +95,7 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Network => 30,
         // Real economy E27, E28: a meal at the kitchen, a gift at the door.
         ActionKind::EatAlms => 30,
+        ActionKind::DumpsterDive => 20,
         ActionKind::Donate => 5,
         ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
@@ -186,6 +187,8 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         k if k.is_contract_step() => crate::systems::contracts::can_start(world, id, k, target),
         // Real economy E27, E28: the scripted charity steps.
         k if k.is_charity_step() => crate::systems::charity::can_start(world, id, k, target),
+        // Hunger as sickness § 4: the dive's start check.
+        ActionKind::DumpsterDive => crate::systems::bins::can_start(world, id, target),
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -433,6 +436,11 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         k if k.is_leisure_step() => crate::systems::leisure::on_start(world, id, k, target),
         // M16a (plan C32): the guard is on post.
         ActionKind::Guard => crate::systems::contracts::on_guard_start(world, id, target),
+        // Hunger as sickness § 4: the diver holds the bin for the dive.
+        ActionKind::DumpsterDive => {
+            let until = world.tick + duration(world, id, kind);
+            crate::systems::bins::on_start(world, id, target, until);
+        }
         ActionKind::Drink => {
             // M11: the Bar's owner takes the 2 coins (the Treasury owns a city Bar).
             let bar = world.comp::<Position>(id).and_then(|p| p.building);
@@ -489,6 +497,11 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         }
         // M13 D38: a dealer who leaves the Bar is no longer dealing there.
         ActionKind::Deal => crate::systems::stims::end_deal(world, id),
+        // Hunger as sickness § 4: the bin is let go.
+        ActionKind::DumpsterDive => {
+            let b = world.comp::<Brain>(id).and_then(|b| b.current_step()).and_then(|s| s.target);
+            crate::systems::bins::release(world, id, b);
+        }
         // L2 L14: a paid entry or meal refunded; a HangOut leaves its spot.
         k if k.is_leisure_step() => crate::systems::leisure::on_abort(world, id, k),
         // M16a (plan C32): off post.
@@ -698,6 +711,7 @@ pub fn on_complete(
         ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
+        ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
         ActionKind::Donate => crate::systems::charity::on_donate(world, id, target),
         ActionKind::Guard => crate::systems::contracts::on_guard_done(world, id, target),
         ActionKind::CollectWage => {
