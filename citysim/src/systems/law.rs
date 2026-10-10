@@ -58,6 +58,8 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::Assault => 0.8,
         Crime::Murder => 1.0,
         Crime::Vagrancy => 0.2,
+        // Transit T10: petty.
+        Crime::FareEvasion => 0.1,
         // M13 D47.
         Crime::GrandTheft => 0.6,
         Crime::Manslaughter => 0.8,
@@ -159,6 +161,7 @@ pub fn raise_crime_except(
         // M14 V18: a run leaves nothing on the street.
         Crime::Murder
         | Crime::Vagrancy
+        | Crime::FareEvasion
         | Crime::Manslaughter
         | Crime::Dealing
         | Crime::Intrusion
@@ -265,7 +268,8 @@ pub fn raise_crime_except(
             | Crime::Dealing
             | Crime::Intrusion
             | Crime::DataTheft
-            | Crime::Conspiracy => MemoryKind::WasRobbed,
+            | Crime::Conspiracy
+            | Crime::FareEvasion => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -332,7 +336,7 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
     // Fix pass (phase 2 review): sleeping rough is not gang business; a
     // Vagrancy report against a member must not feed the wanted-gang log,
     // the pressure or the district's top gang.
-    if crime != Crime::Vagrancy {
+    if crime != Crime::Vagrancy && crime != Crime::FareEvasion {
         crate::systems::law_brain::log_report(world, suspect);
     }
 }
@@ -465,7 +469,8 @@ pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
 /// Sentence length in ticks for a crime at the current lever.
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
-    if crime == Crime::Vagrancy {
+    // Transit T10: fare evasion too.
+    if crime == Crime::Vagrancy || crime == Crime::FareEvasion {
         return world.config.law.vagrancy_sentence_ticks.max(1);
     }
     // M16a (plan C29): Conspiracy is `accessory_mult` (or the lever's) of Murder's.
@@ -858,9 +863,12 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 
     if jailed >= capacity {
         match crime {
-            Crime::Theft | Crime::Vagrancy => {
+            Crime::Theft | Crime::Vagrancy | Crime::FareEvasion => {
                 let fine = if crime == Crime::Vagrancy {
                     world.config.law.vagrancy_fine
+                } else if crime == Crime::FareEvasion {
+                    // Transit T10: the dodger's fine.
+                    world.config.transit.dodge_fine
                 } else {
                     world.config.crime.fine_mult * world.mean_price()
                 };
@@ -869,7 +877,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
                 // fine is: where the vagrant was swept, on the ledger, in the log.
                 let swept = (crime == Crime::Vagrancy).then(|| vagrancy_place(world, suspect));
                 if coins >= fine {
-                    if crime == Crime::Vagrancy {
+                    if crime == Crime::Vagrancy || crime == Crime::FareEvasion {
                         crate::systems::ownership::pay(
                             world,
                             Some(suspect),

@@ -632,6 +632,9 @@ pub enum Crime {
     /// M16a (plan C29): the placing agent of a fulfilled contract record,
     /// named to the law (phase 3 files it); ranks just below Murder.
     Conspiracy,
+    /// Transit (docs/TRANSIT.md T10, Dylan 2026-10-10): jumping the El's
+    /// gate. Petty: a night in the cells as Vagrancy's, ranked just above it.
+    FareEvasion,
 }
 
 impl Crime {
@@ -650,6 +653,7 @@ impl Crime {
             Crime::Intrusion => "Intrusion",
             Crime::DataTheft => "Data Theft",
             Crime::Conspiracy => "Conspiracy",
+            Crime::FareEvasion => "Fare Evasion",
         }
     }
 
@@ -663,17 +667,19 @@ impl Crime {
     pub fn severity(self) -> u8 {
         match self {
             Crime::Vagrancy => 0,
-            Crime::Theft => 1,
-            Crime::Intrusion => 2,
-            Crime::GrandTheft => 3,
-            Crime::DataTheft => 4,
-            Crime::Dealing => 5,
-            Crime::Extortion => 6,
-            Crime::Assault => 7,
-            Crime::Manslaughter => 8,
-            Crime::Abduction => 9,
-            Crime::Conspiracy => 10,
-            Crime::Murder => 11,
+            // Transit (T10): just above Vagrancy; everything above moves up one.
+            Crime::FareEvasion => 1,
+            Crime::Theft => 2,
+            Crime::Intrusion => 3,
+            Crime::GrandTheft => 4,
+            Crime::DataTheft => 5,
+            Crime::Dealing => 6,
+            Crime::Extortion => 7,
+            Crime::Assault => 8,
+            Crime::Manslaughter => 9,
+            Crime::Abduction => 10,
+            Crime::Conspiracy => 11,
+            Crime::Murder => 12,
         }
     }
 }

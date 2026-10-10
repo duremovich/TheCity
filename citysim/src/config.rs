@@ -214,6 +214,105 @@ pub struct Config {
     /// [`Config::reset_trade_cache`].
     #[serde(skip)]
     pub trade_cache: TradeCache,
+    /// Transit (docs/TRANSIT.md): the El. Off by default in phase 1; a
+    /// switched-off config is not written into a save, so an off world's
+    /// save is byte-identical to a world built before transit existed.
+    #[serde(default, skip_serializing_if = "TransitCfg::is_off")]
+    pub transit: TransitCfg,
+}
+
+/// Transit (docs/TRANSIT.md § 2): the El's lines, timetable and the walk-or-
+/// ride rule. Read only while `enabled`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TransitCfg {
+    pub enabled: bool,
+    /// Coins per ride, transfers free (Dylan 2026-10-10: a flat 1).
+    pub fare: i64,
+    /// Ticks between departures from each terminus.
+    pub headway: u32,
+    pub ride_ticks_per_tile: f32,
+    /// Ticks per stop passed.
+    pub dwell_ticks: u32,
+    /// Ticks per transfer (the wait at a transfer, folded into the table).
+    pub transfer_ticks: u32,
+    /// Track tiles between stops.
+    pub stop_spacing: u32,
+    /// The nearest stops tried at each end of a trip.
+    pub stop_candidates: usize,
+    /// No ride under this Manhattan distance.
+    pub min_ride_tiles: u32,
+    pub min_saving_ticks: u32,
+    /// What a coin of fare must save in ticks ...
+    pub ticks_per_coin: u32,
+    /// ... and for a wallet under `poor_meals` meals.
+    pub poor_ticks_per_coin: u32,
+    pub poor_meals: i64,
+    /// A rider who can't pay jumps the gate below this lawfulness ...
+    pub dodge_lawfulness: f32,
+    /// ... and never pays below this.
+    pub dodge_always: f32,
+    /// Service hours, tick of day: from `service_from` to `service_to`
+    /// (wrapping midnight).
+    pub service_from: u16,
+    pub service_to: u16,
+    /// Night, for the danger test (wrapping midnight).
+    pub night_from: u16,
+    pub night_to: u16,
+    /// `crime_rate` at a stop's district above which an average-courage
+    /// rider (courage 0.5) refuses at night; the bar is
+    /// `danger_crime × (0.5 + courage)`.
+    pub danger_crime: f32,
+    /// Coins per open line per day, the Treasury to the World (power).
+    pub power_per_line_day: i64,
+    /// A fare dodger's fine when the Precinct is full (`Flow::Fine`).
+    pub dodge_fine: i64,
+    pub lines: Vec<TransitLineCfg>,
+}
+
+/// One `[[transit.lines]]` row: a name and its waypoints (road tiles, the
+/// track runs straight between consecutive ones).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TransitLineCfg {
+    pub name: String,
+    pub waypoints: Vec<[u8; 2]>,
+}
+
+impl Default for TransitCfg {
+    fn default() -> Self {
+        TransitCfg {
+            enabled: false,
+            fare: 1,
+            headway: 10,
+            ride_ticks_per_tile: 0.25,
+            dwell_ticks: 1,
+            transfer_ticks: 5,
+            stop_spacing: 16,
+            stop_candidates: 3,
+            min_ride_tiles: 24,
+            min_saving_ticks: 15,
+            ticks_per_coin: 20,
+            poor_ticks_per_coin: 60,
+            poor_meals: 2,
+            dodge_lawfulness: 0.25,
+            dodge_always: 0.1,
+            service_from: 300,
+            service_to: 60,
+            night_from: 1260,
+            night_to: 300,
+            danger_crime: 3.0,
+            power_per_line_day: 150,
+            dodge_fine: 5,
+            lines: Vec::new(),
+        }
+    }
+}
+
+impl TransitCfg {
+    /// Not written into a save while off.
+    pub fn is_off(&self) -> bool {
+        !self.enabled
+    }
 }
 
 /// J9 review: [`Config`]'s cache of the trade roles (row order) and of
@@ -5059,6 +5158,13 @@ impl Config {
             cfg.hitmarket.enabled = false;
         }
         cfg.districts.row_count();
+        // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
+        // overrides `[transit] enabled` for A/B runs.
+        match std::env::var("CITYSIM_TRANSIT").as_deref() {
+            Ok("1") | Ok("on") => cfg.transit.enabled = true,
+            Ok("0") | Ok("off") => cfg.transit.enabled = false,
+            _ => {}
+        }
         cfg
     }
 
@@ -5159,6 +5265,8 @@ impl Config {
     pub fn v1_profile(mut self) -> Config {
         self.world.map = "map_v1.txt".to_string();
         self.world.population = 300;
+        // Transit: the v1 map has no lines (a unit test builds its own).
+        self.transit = TransitCfg::default();
         self.world.jobs = JobsCfg { farmer: 24, guard: 10, clerk: 3, bartender: 2, gravedigger: 1, sanitation: 0 };
         self.world.market_initial = 600;
         self.world.warehouse_initial = 1500;

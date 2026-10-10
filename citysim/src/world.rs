@@ -433,6 +433,18 @@ pub struct World {
     /// ticks, driven tiles (`commute_tpt_*` at the day's close).
     #[serde(default)]
     pub commute_acc: [u64; 4],
+    /// Transit (docs/TRANSIT.md): the El's derived network, its closures and
+    /// day ledger (not saved while idle).
+    #[serde(default, skip_serializing_if = "systems::transit::TransitState::is_idle")]
+    pub transit: systems::transit::TransitState,
+    /// Transit T12: rides in progress, by rider (not saved while empty).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub rides: BTreeMap<EntityId, systems::transit::Ride>,
+    /// Measurement only (never saved, read by nothing in the sim): when
+    /// `Some`, every commute arrival `(ticks, Manhattan tiles, mode)` with
+    /// mode 0 walked, 1 drove, 2 rode.
+    #[serde(skip)]
+    pub commute_log: Option<Vec<(u32, u32, u8)>>,
     // graph + blackboard
     pub edges: crate::edge_map::EdgeMap,
     /// Private so every write goes through `reports_mut`, which drops the
@@ -1162,6 +1174,9 @@ impl World {
             episodes: BTreeSet::new(),
             commute_start: BTreeMap::new(),
             commute_acc: [0; 4],
+            transit: Default::default(),
+            rides: BTreeMap::new(),
+            commute_log: None,
             dealers: BTreeMap::new(),
             deal_log: BTreeMap::new(),
             robot_sellers: BTreeMap::new(),
@@ -1385,6 +1400,9 @@ impl World {
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.
         systems::health::seed_history(&mut w);
+        // Transit: the El's network from the config and the map (no RNG;
+        // nothing with transit off).
+        systems::transit::build(&mut w);
         w
     }
 
@@ -2565,6 +2583,7 @@ impl World {
         systems::think::run(self);
         systems::plan::run(self);
         crate::exec::run(self);
+        systems::transit::run(self);
         systems::virt::run(self);
         systems::ownership::run(self);
         systems::assets::run(self);
@@ -2724,6 +2743,7 @@ impl World {
         }
         // M13 D20: a trip ends first, so the vehicle is parked, not lost.
         systems::vehicles::end_trip(self, id, false);
+        systems::transit::end_ride(self, id);
         // M16a (plan C16): an emigrant's records settle as a death's (a
         // refund lands in the wallet it leaves with).
         systems::contracts::on_death(self, id, None);
@@ -2961,6 +2981,7 @@ impl World {
         // so a vehicle being driven is parked and inherited, not lost with
         // the corpse.
         systems::vehicles::end_trip(self, id, false);
+        systems::transit::end_ride(self, id);
         // M13 D38: a dead dealer deals no more.
         systems::stims::end_deal(self, id);
         // L2 L15 (review fix): nor hangs out at a spot.

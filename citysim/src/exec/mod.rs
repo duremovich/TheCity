@@ -77,6 +77,15 @@ pub enum ExecState {
         depart: Tick,
         arrive_tick: Tick,
     },
+    /// Transit (docs/TRANSIT.md T12): on the El's platform until `depart`,
+    /// then aboard until `arrive_tick` (the body stays on the board stop's
+    /// tile, as a flyer stays at its `from`), then the walk on to `target`
+    /// (`World::rides` holds the itinerary).
+    Ride {
+        target: GotoTarget,
+        depart: Tick,
+        arrive_tick: Tick,
+    },
     /// M14 V12: seated at a chair while a run (an event chain of dice
     /// contests on the Virt plane) is in `World::runs`; `Done` once it is
     /// gone. Needs decay as Wait's; the body is no witness.
@@ -209,7 +218,9 @@ fn step_agent(world: &mut World, id: EntityId) {
             && tick.saturating_sub(p.started_tick) <= world.config.brain.plan_timeout_ticks
     }) && match &brain.exec {
         ExecState::Goto { next_move_tick, .. } => tick < *next_move_tick,
-        ExecState::GotoTimed { arrive_tick, .. } | ExecState::Fly { arrive_tick, .. } => tick < *arrive_tick,
+        ExecState::GotoTimed { arrive_tick, .. }
+        | ExecState::Fly { arrive_tick, .. }
+        | ExecState::Ride { arrive_tick, .. } => tick < *arrive_tick,
         _ => false,
     };
     if between_moves {
@@ -271,6 +282,22 @@ fn step_agent(world: &mut World, id: EntityId) {
                 arrive(world, id, target, None)
             }
         }
+        // Transit T12: on the platform, then aboard; off at `arrive_tick`
+        // (`transit::leg_done` alights). A ride gone from `World::rides`
+        // walks on to its target.
+        ExecState::Ride { target, arrive_tick, .. } => {
+            if tick < arrive_tick {
+                StepResult::Running
+            } else if world.rides.contains_key(&id) {
+                StepResult::Done
+            } else {
+                let state = timed_goto(world, id, target);
+                if let Some(b) = world.comp_mut::<Brain>(id) {
+                    b.exec = state;
+                }
+                StepResult::Running
+            }
+        }
         ExecState::Use { kind, until, started } => {
             if tick >= until || actions::finishes_early(world, id, kind, started) {
                 actions::on_complete(world, id, kind, step.target, started, tick)
@@ -311,6 +338,14 @@ fn step_agent(world: &mut World, id: EntityId) {
     match result {
         StepResult::Running => {}
         StepResult::Done => {
+            // Transit T12: a leg of a ride ended (the board stop, the alight
+            // stop), not the GoTo.
+            if matches!(step.action, ActionKind::GoTo(_))
+                && !world.rides.is_empty()
+                && crate::systems::transit::leg_done(world, id, lod)
+            {
+                return;
+            }
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.plan_step = b.plan_step.saturating_add(1);
                 b.exec = ExecState::Idle;
@@ -556,6 +591,7 @@ impl World {
         }
         // M13 D20: a vehicle on the road parks where its driver stands.
         crate::systems::vehicles::end_trip(self, id, false);
+        crate::systems::transit::end_ride(self, id);
         self.commute_start.remove(&id);
         if let Some(b) = self.comp_mut::<Brain>(id) {
             b.clear_plan();
@@ -588,6 +624,17 @@ fn commute_started(world: &mut World, id: EntityId, target: &GotoTarget) {
 fn commute_arrived(world: &mut World, id: EntityId, driving: bool) {
     let Some((start, tiles)) = world.commute_start.remove(&id) else { return };
     let ticks = world.tick.saturating_sub(start);
+    let rode = !world.transit.rode.is_empty() && world.transit.rode.remove(&id);
+    if let Some(log) = world.commute_log.as_mut() {
+        let mode = if rode { 2 } else { u8::from(driving) };
+        log.push((ticks as u32, tiles, mode));
+    }
+    // Transit: a commute that rode goes to its own sums (`commute_tpt_ride`).
+    if rode {
+        world.stats.current.transit.commute_ride_ticks += ticks;
+        world.stats.current.transit.commute_ride_tiles += u64::from(tiles);
+        return;
+    }
     let i = if driving { 2 } else { 0 };
     world.commute_acc[i] += ticks;
     world.commute_acc[i + 1] += u64::from(tiles);
@@ -655,6 +702,16 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     b.exec = timed;
                 }
                 return StepResult::Running;
+            }
+            // Transit T8, T12: on foot, a far GoTo may ride the El (the first
+            // leg, the walk to the board stop, comes back).
+            if driving.is_none() && matches!(step.action, ActionKind::GoTo(_)) {
+                if let Some(state) = crate::systems::transit::try_ride(world, id, &target, lod) {
+                    if let Some(b) = world.comp_mut::<Brain>(id) {
+                        b.exec = state;
+                    }
+                    return StepResult::Running;
+                }
             }
             let state = match (driving, lod) {
                 (Some(crate::components::AssetKind::Flyer), _) => crate::systems::vehicles::fly(world, id, target),

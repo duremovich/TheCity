@@ -460,6 +460,17 @@ pub enum PlayerCommand {
     /// On: the law posts a public Locate on every wanted suspect after one
     /// day instead of `[contracts] law_bounty_days`.
     PublicBounties(bool),
+    // --- Transit (docs/TRANSIT.md T15): god closures of the El.
+    /// God: close a line (by `[[transit.lines]]` row) for `days`; 0 reopens.
+    CutLine {
+        line: u8,
+        days: u32,
+    },
+    /// God: close a stop (by the network's stop index) for `days`; 0 reopens.
+    CloseStop {
+        stop: u16,
+        days: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1012,6 +1023,19 @@ impl World {
                     &[],
                     format!("Export price of {} set to {price}", good.label()),
                 );
+            }
+            // Transit T15.
+            PlayerCommand::CutLine { line, days } => {
+                let _ = match crate::systems::transit::cut_line(self, *line, *days) {
+                    Ok(text) => self.push_event(EventKind::PlayerAction, &[], format!("God: {text}")),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
+                };
+            }
+            PlayerCommand::CloseStop { stop, days } => {
+                let _ = match crate::systems::transit::close_stop(self, *stop, *days) {
+                    Ok(text) => self.push_event(EventKind::PlayerAction, &[], format!("God: {text}")),
+                    Err(e) => self.push_event(EventKind::PlayerActionFailed, &[], format!("God: {e}")),
+                };
             }
             // Real economy phase 1 (plan E47).
             PlayerCommand::SetAppetite { good, mult } => {

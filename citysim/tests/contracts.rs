@@ -1070,8 +1070,9 @@ fn test_conspiracy_ranks_below_murder() {
     use citysim::Crime;
     assert!(Crime::Conspiracy < Crime::Murder, "just below Murder");
     assert!(Crime::Conspiracy > Crime::Abduction);
-    assert_eq!(Crime::Murder.severity(), 11);
-    assert_eq!(Crime::Conspiracy.severity(), 10);
+    // Transit T10 inserted FareEvasion just above Vagrancy: everything above moved up one.
+    assert_eq!(Crime::Murder.severity(), 12);
+    assert_eq!(Crime::Conspiracy.severity(), 11);
     // Murder stays the top of every crime.
     let all = [
         Crime::Theft,

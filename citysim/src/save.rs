@@ -39,6 +39,8 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     world.rebuild_indices();
     // M12 D1: the district grid and adjacency are not saved.
     crate::systems::districts::rebuild(&mut world);
+    // Transit: the derived network (not saved).
+    crate::systems::transit::build(&mut world);
     world.save_version = SAVE_VERSION;
     world.reload_names();
     Ok(world)

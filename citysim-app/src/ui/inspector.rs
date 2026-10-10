@@ -752,6 +752,13 @@ fn plan(ui: &mut Ui, world: &World, b: &Brain) {
             ExecState::Fly { target, arrive_tick, .. } => {
                 format!("Flying to {} lands in {}", target.tile, arrive_tick.saturating_sub(world.tick))
             }
+            ExecState::Ride { target, depart, arrive_tick } => {
+                if world.tick < *depart {
+                    format!("On the El platform, departs in {} (to {})", depart - world.tick, target.tile)
+                } else {
+                    format!("Riding the El, off in {} (to {})", arrive_tick.saturating_sub(world.tick), target.tile)
+                }
+            }
         };
         ui.label(line);
     });

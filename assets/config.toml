@@ -2341,3 +2341,41 @@ status_split = [0.5, 0.25, 0.25]       # night out, fashion, chrome
 # P3 (Dylan 2026-10-10): the graded premium draws on profit plus at most this share of the capital payout; the rest
 # always goes into labour's P* (the payout was labour's raise engine). Not tuned.
 premium_payout_share = 0.5
+[transit]
+# docs/TRANSIT.md (the El). Phase 1: off by default (CITYSIM_TRANSIT=1 turns it on for A/B runs).
+# City-owned (Dylan 2026-10-10): fares go to the Treasury, power is paid from it to the World.
+# Every value a placeholder until measured.
+enabled = false
+fare = 1                       # coins per ride, transfers free
+headway = 10                   # ticks between departures from each terminus
+ride_ticks_per_tile = 0.25     # 4 tiles a minute, ~8x walking
+dwell_ticks = 1                # per stop passed
+transfer_ticks = 5             # per transfer (half a headway)
+stop_spacing = 16              # track tiles between stops
+stop_candidates = 3            # nearest stops tried at each end
+min_ride_tiles = 24            # no ride under this Manhattan distance
+min_saving_ticks = 15
+ticks_per_coin = 20            # what a coin of fare must save in time
+poor_ticks_per_coin = 60       # ... for a wallet under poor_meals meals
+poor_meals = 2
+dodge_lawfulness = 0.25        # a rider who can't pay jumps the gate below this (a FareEvasion crime)
+dodge_always = 0.1             # ... and never pays below this
+service_from = 300             # 05:00
+service_to = 60                # 01:00 (no service 01:00-05:00)
+night_from = 1260              # 21:00
+night_to = 300                 # 05:00
+danger_crime = 3.0             # crime_rate at which an average-courage rider refuses at night
+power_per_line_day = 150       # the Treasury -> the World account, per open line
+dodge_fine = 5                 # a dodger's fine when the Precinct is full
+
+[[transit.lines]]
+name = "Vat Line"
+waypoints = [[7, 127], [231, 127], [231, 15]]
+
+[[transit.lines]]
+name = "Low Line"
+waypoints = [[7, 167], [231, 167], [231, 127]]
+
+[[transit.lines]]
+name = "Crosstown"
+waypoints = [[39, 15], [39, 63], [231, 63]]

@@ -74,6 +74,7 @@ pub mod street;
 pub mod tech;
 pub mod think;
 pub mod trades;
+pub mod transit;
 pub mod treasury;
 pub mod vehicles;
 pub mod virt;

@@ -241,6 +241,8 @@ pub enum Flow {
     Inputs,
     /// The Hit market (H5): a relative chips into a buyer's purse (untaxed; counted in `hm_pooled` by the caller).
     Pool,
+    /// Transit (docs/TRANSIT.md T9): an El fare, rider -> Treasury (untaxed: the city's own).
+    Fare,
 }
 
 impl Flow {
@@ -342,6 +344,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Property => row.econ.flow_property += coins,
         Flow::Inputs => row.econ.flow_inputs += coins,
         Flow::Pool => {}
+        Flow::Fare => row.transit.fares += coins,
     }
 }
 

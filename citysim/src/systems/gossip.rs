@@ -36,7 +36,8 @@ pub fn deed_of_crime(crime: Crime) -> Option<Deed> {
         | Crime::Intrusion
         | Crime::DataTheft
         // M16a (plan C29).
-        | Crime::Conspiracy => None,
+        | Crime::Conspiracy
+        | Crime::FareEvasion => None,
     }
 }
 

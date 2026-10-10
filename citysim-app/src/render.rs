@@ -624,15 +624,17 @@ fn agent_colour(world: &World, id: citysim::EntityId) -> Color {
     let Some(brain) = world.comp::<Brain>(id) else { return hex(C_AGENT_IDLE) };
     let kind = match &brain.exec {
         E::Use { kind, .. } => *kind,
-        E::Goto { .. } | E::GotoTimed { .. } | E::Fly { .. } => match brain.current_step().map(|s| s.action) {
-            // en route: colour by the step after the walk, so a guard heading to an arrest reads as guarding
-            Some(_) => brain
-                .plan
-                .as_ref()
-                .and_then(|p| p.steps.get(usize::from(brain.plan_step) + 1))
-                .map_or(A::Wander, |s| s.action),
-            None => A::Wander,
-        },
+        E::Goto { .. } | E::GotoTimed { .. } | E::Fly { .. } | E::Ride { .. } => {
+            match brain.current_step().map(|s| s.action) {
+                // en route: colour by the step after the walk, so a guard heading to an arrest reads as guarding
+                Some(_) => brain
+                    .plan
+                    .as_ref()
+                    .and_then(|p| p.steps.get(usize::from(brain.plan_step) + 1))
+                    .map_or(A::Wander, |s| s.action),
+                None => A::Wander,
+            }
+        }
         E::Idle | E::Wait { .. } => A::Wander,
         // M14 V12: seated at a chair, coloured as its JackIn.
         E::JackedIn { .. } => A::JackIn,
