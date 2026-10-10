@@ -221,6 +221,8 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             crate::systems::charity::alms_plan(world, id).or_else(|| crate::systems::bins::dive_plan(world, id))
         }
         GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
+        // Hunger as sickness § 3: the cancer's treatment.
+        GoalKind::Treat => crate::systems::health::oncology_plan(world, id),
         _ => None,
     };
     if let Some(plan) = scripted {

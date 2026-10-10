@@ -505,3 +505,203 @@ fn test_one_diver_per_bin() {
     citysim::systems::bins::release(&mut w, a, Some(m));
     assert!(citysim::systems::bins::can_start(&w, b, Some(m)));
 }
+
+// ---------------------------------------------------------------------------
+// P4: cancer and the Clinic (§ 3)
+// ---------------------------------------------------------------------------
+
+fn cancer(w: &World, id: EntityId) -> Option<citysim::Cancer> {
+    w.comp::<Health>(id).and_then(|h| h.cancer)
+}
+
+fn clinic(w: &World) -> EntityId {
+    *w.buildings_of_kind(BuildingKind::Clinic).first().expect("a Clinic")
+}
+
+fn diagnosed(stage: f32) -> Health {
+    Health { cancer: Some(citysim::Cancer { stage, since: 0, diagnosed: true }), ..Health::default() }
+}
+
+/// The onset rolls only at toxicity >= `cancer_tox_min`, near `cancer_p` a
+/// day at toxicity 1.0.
+#[test]
+fn test_cancer_rolls_only_above_tox_min() {
+    let mut w = world_on();
+    let people = adults(&w);
+    let (hot, cool): (Vec<EntityId>, Vec<EntityId>) = people.iter().take(400).partition(|a| a.index % 2 == 0);
+    let days = 30;
+    for _ in 0..days {
+        for &a in &hot {
+            let mut h = health(&w, a);
+            if h.cancer.is_none() {
+                h.toxicity = 1.0;
+                w.insert(a, h);
+            }
+        }
+        for &a in &cool {
+            let mut h = health(&w, a);
+            h.toxicity = 0.55;
+            w.insert(a, h);
+        }
+        health::daily(&mut w);
+    }
+    let n_hot = hot.iter().filter(|&&a| cancer(&w, a).is_some()).count();
+    let n_cool = cool.iter().filter(|&&a| cancer(&w, a).is_some()).count();
+    let want = w.config.sickness.cancer_p as f64 * hot.len() as f64 * days as f64;
+    eprintln!("cancers at toxicity 1.0: {n_hot} (expected ~{want:.1}); at 0.55: {n_cool}");
+    assert_eq!(n_cool, 0, "no onset under cancer_tox_min");
+    assert!(n_hot > 0 && (n_hot as f64) < want * 3.0 + 3.0, "{n_hot} vs ~{want:.1}");
+}
+
+/// The stage grows `cancer_growth` a day, turns symptomatic (diagnosed: the
+/// event and the memory) at `cancer_symptom`, and kills at 1.0 as Disease.
+#[test]
+fn test_cancer_course_diagnosis_and_death() {
+    let mut w = world_on();
+    let (a, b) = (adults(&w)[0], adults(&w)[1]);
+    let symptom = w.config.sickness.cancer_symptom;
+    let growth = w.config.sickness.cancer_growth;
+    w.insert(
+        a,
+        Health {
+            cancer: Some(citysim::Cancer { stage: symptom - growth / 2.0, since: 0, diagnosed: false }),
+            ..Health::default()
+        },
+    );
+    w.insert(b, diagnosed(1.0 - growth / 2.0));
+    let before = w.next_event_id;
+    health::daily(&mut w);
+    assert!(cancer(&w, a).is_some_and(|c| c.diagnosed), "diagnosed at the symptom stage");
+    assert!(w.events.iter().any(|e| e.id >= before && e.kind == citysim::EventKind::Diagnosed && e.actors[0] == a));
+    assert!(w
+        .comp::<citysim::Memory>(a)
+        .is_some_and(|m| m.entries.iter().any(|e| e.kind == citysim::MemoryKind::Diagnosed)));
+    assert!(!law::living(&w, b), "dead at stage 1");
+    assert_eq!(w.comp::<citysim::Corpse>(b).map(|c| c.cause), Some(citysim::DeathCause::Disease));
+    assert_eq!(w.stats.current.health.deaths_disease, 1);
+}
+
+/// Treatment below `cure_stage` cures (toxicity halved); above it buys a
+/// remission; the price leaves the wallet for the Clinic's owner and no
+/// coin is made or lost.
+#[test]
+fn test_treatment_cures_below_cure_stage_and_remits_above() {
+    let mut w = world_on();
+    let c = clinic(&w);
+    let price = w.config.sickness.cancer_treat_price;
+    let (a, b) = (adults(&w)[0], adults(&w)[1]);
+    for &x in &[a, b] {
+        w.comp_mut::<Wallet>(x).expect("wallet").coins = price + 10;
+    }
+    w.insert(a, Health { toxicity: 0.8, ..diagnosed(0.3) });
+    w.insert(b, diagnosed(0.8));
+    let id0 = citysim::systems::econ::identity(&w);
+    assert!(health::oncology(&mut w, a, c), "treated");
+    assert!(cancer(&w, a).is_none(), "cured below cure_stage");
+    assert!((health(&w, a).toxicity - 0.4).abs() < 1e-6, "toxicity halved");
+    assert_eq!(w.comp::<Wallet>(a).expect("wallet").coins, 10);
+    assert!(health::oncology(&mut w, b, c));
+    let left = cancer(&w, b).expect("still ill").stage;
+    assert!((left - (0.8 - w.config.sickness.remission)).abs() < 1e-6, "a remission: {left}");
+    assert_eq!(citysim::systems::econ::identity(&w), id0, "the coin identity holds");
+    assert_eq!(w.stats.current.health.cancer_cured, 1);
+}
+
+/// Decision 3: the wallet first, then the spouse and kin, then the gang.
+#[test]
+fn test_pool_pays_wallet_then_kin_then_gang() {
+    let mut w = world_on();
+    w.run_ticks(5 * TICKS_PER_DAY);
+    let price = w.config.sickness.cancer_treat_price;
+    let a = adults(&w).into_iter().find(|&a| w.spouse_of(a).is_some()).expect("a married adult");
+    let s = w.spouse_of(a).expect("spouse");
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = price / 2;
+    w.comp_mut::<Wallet>(s).expect("wallet").coins = price;
+    w.insert(a, diagnosed(0.3));
+    assert!(!health::wants_oncology(&w, s));
+    assert!(health::pool(&w, a) >= price, "the spouse's coins make up the price");
+    let c = clinic(&w);
+    assert!(health::oncology(&mut w, a, c));
+    assert_eq!(w.comp::<Wallet>(a).expect("wallet").coins, 0, "the patient pays first");
+    assert_eq!(w.comp::<Wallet>(s).expect("wallet").coins, price / 2, "the spouse the rest");
+    // A gang member with an empty wallet: the gang pays.
+    let g = w
+        .gangs()
+        .into_iter()
+        .find(|&g| w.comp::<citysim::Gang>(g).is_some_and(|x| !x.members.is_empty()))
+        .expect("a gang with members");
+    let m = w.comp::<citysim::Gang>(g).expect("gang").members[0];
+    w.comp_mut::<Wallet>(m).expect("wallet").coins = 0;
+    w.comp_mut::<citysim::Gang>(g).expect("gang").treasury = price * 3;
+    w.insert(m, diagnosed(0.3));
+    assert!(health::payers(&w, m).last().is_some_and(|&(p, _)| p == g), "the gang last");
+}
+
+/// A Full patient, diagnosed with the coins, goes to a Clinic and is
+/// treated within two days (a person probe).
+#[test]
+fn probe_diagnosed_patient_with_coins_seeks_the_clinic() {
+    let mut w = world_on();
+    w.run_ticks(2 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR);
+    let price = w.config.sickness.cancer_treat_price;
+    let picks: Vec<EntityId> = adults(&w).into_iter().take(5).collect();
+    let mut treated = 0;
+    for &a in &picks {
+        let mut v = w.clone();
+        v.comp_mut::<Wallet>(a).expect("wallet").coins = price + 60;
+        v.insert(a, diagnosed(0.3));
+        let end = v.tick + 2 * TICKS_PER_DAY;
+        while v.tick < end {
+            v.comp_mut::<Brain>(a).expect("brain").pinned = true;
+            v.run_ticks(1);
+            if cancer(&v, a).is_none() {
+                break;
+            }
+        }
+        eprintln!("patient {}: cancer {:?}", a.index, cancer(&v, a));
+        treated += usize::from(cancer(&v, a).is_none());
+    }
+    assert!(treated * 5 >= picks.len() * 4, "only {treated} of {} treated in two days", picks.len());
+}
+
+/// Off screen: a diagnosed patient whose pool pays treats on `p_stat_treat`.
+#[test]
+fn test_stat_patient_treats_on_p_stat_treat() {
+    let mut cfg = sick_cfg();
+    cfg.sickness.p_stat_treat = 1.0;
+    let mut w = World::new(42, cfg);
+    let a = adults(&w)[0];
+    citysim::systems::lod::set_lod(&mut w, a, Lod::Statistical);
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = w.config.sickness.cancer_treat_price;
+    w.insert(a, diagnosed(0.3));
+    health::daily(&mut w);
+    assert!(cancer(&w, a).is_none(), "treated off screen");
+}
+
+/// A diagnosed patient whose pool falls short saves for the treatment:
+/// Earn is not satisfied at a few days' meals.
+#[test]
+fn test_saving_for_treatment_raises_earn() {
+    let mut w = world_on();
+    let a = adults(&w).into_iter().find(|&a| w.comp::<Job>(a).is_none()).expect("a jobless adult");
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 60;
+    assert!(goals::already_satisfied(&w, a, GoalKind::Earn, false), "60 coins is savings enough");
+    w.insert(a, diagnosed(0.3));
+    assert!(!goals::already_satisfied(&w, a, GoalKind::Earn, false), "but not for a 240-coin treatment");
+}
+
+/// Decision 6: a child carries malnutrition, never a cancer.
+#[test]
+fn test_children_roll_no_cancer() {
+    let mut w = world_on();
+    w.run_ticks(TICKS_PER_DAY);
+    let Some(k) = w.citizens().into_iter().find(|&c| w.has::<citysim::Child>(c)) else {
+        eprintln!("no child at day 1 on seed 42: nothing to check");
+        return;
+    };
+    for _ in 0..200 {
+        w.insert(k, Health { toxicity: 1.0, ..health(&w, k) });
+        health::daily(&mut w);
+    }
+    assert!(cancer(&w, k).is_none());
+}

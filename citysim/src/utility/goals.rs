@@ -118,7 +118,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
             let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
-            if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price)) {
+            // Hunger as sickness § 3: a diagnosed patient saves for the treatment too.
+            let line = SAVINGS_DAYS.saturating_mul(price).max(crate::systems::health::treatment_savings(world, id));
+            if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= line) {
                 return true;
             }
             // Nothing to plan: an unemployed agent whose dole is taken or
@@ -170,7 +172,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         // M13 D34: nothing to treat at `treat_below`; D39: and no addiction
         // within 0.2 of `hooked` to Detox.
         GoalKind::Treat => {
-            !crate::systems::chrome::wants_treatment(world, id) && !crate::systems::stims::wants_detox(world, id)
+            !crate::systems::chrome::wants_treatment(world, id)
+                && !crate::systems::stims::wants_detox(world, id)
+                && !crate::systems::health::wants_oncology(world, id)
         }
         // M13 D39: high already, or no dose in hand and none to buy.
         GoalKind::GetHigh => !crate::systems::stims::wants_high(world, id),
@@ -745,6 +749,18 @@ pub fn considerations(
         GoalKind::Treat => {
             let n = needs?;
             let p = pers?;
+            // Hunger as sickness § 3: a diagnosed cancer the pool can pay for.
+            if crate::systems::health::wants_oncology(world, id) {
+                let stage = world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).map_or(0.0, |c| c.stage);
+                return Some((
+                    vec![
+                        Consideration::new("a Clinic, the pool pays", 1.0, GATE),
+                        Consideration::new("cancer stage", stage, Curve::Linear { m: 0.6, b: 0.4 }),
+                        Consideration::new("lawfulness", p.lawfulness, Curve::Linear { m: 0.2, b: 0.8 }),
+                    ],
+                    0.0,
+                ));
+            }
             let body = world.comp::<crate::components::Body>(id)?;
             let tile = world.comp::<crate::components::Position>(id)?.tile;
             let clinic = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, tile, true);

@@ -221,7 +221,8 @@ pub fn broke(world: &World, id: EntityId) -> bool {
     if home_of(world, id).is_none() && crate::systems::street::enabled(world) {
         need += world.config.street.night_price;
     }
-    coins(world, id) < need
+    // Hunger as sickness § 3: a diagnosed patient short of the treatment.
+    coins(world, id) < need || crate::systems::health::saving_short(world, id)
 }
 
 // ---------------------------------------------------------------------------

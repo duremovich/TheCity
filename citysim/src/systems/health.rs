@@ -14,6 +14,8 @@ use crate::world::World;
 
 /// `econ::hash_unit` purposes.
 const ROLL_SICK: u64 = 0x51c4_0001;
+const ROLL_CANCER: u64 = 0x51c4_0002;
+const ROLL_TREAT: u64 = 0x51c4_0003;
 
 /// The meters and debuffs run (`[sickness] enabled` and `diet`).
 pub fn on(world: &World) -> bool {
@@ -130,6 +132,8 @@ pub fn daily(world: &mut World) {
     let day = world.day();
     let seed = world.seed();
     let mut fire = Vec::new();
+    let tick = world.tick;
+    let (mut dying, mut diagnosed, mut cancer_new) = (Vec::new(), Vec::new(), 0u32);
     let (mut malnourished, mut toxic, mut sick, mut n) = (0u32, 0u32, 0u32, 0u32);
     let (mut sum_m, mut sum_t) = (0.0f32, 0.0f32);
     for id in world.citizens() {
@@ -160,6 +164,29 @@ pub fn daily(world: &mut World) {
             h.toxicity + cfg.tox_synth * (f32::from(t.synth) + f32::from(t.alms)) + cfg.tox_dive * f32::from(t.dive)
                 - cfg.tox_clear;
         h.toxicity = tox.clamp(0.0, 1.0);
+        // § 3: the cancer's onset and course (adults only, decision 6).
+        if cfg.cancer {
+            match h.cancer.as_mut() {
+                Some(c) => c.stage = (c.stage + cfg.cancer_growth).min(1.0),
+                None if h.toxicity >= cfg.cancer_tox_min => {
+                    let p = cfg.cancer_p * (h.toxicity - cfg.cancer_tox_min) / (1.0 - cfg.cancer_tox_min).max(1e-6);
+                    let roll = crate::systems::econ::hash_unit(seed, ROLL_CANCER, u64::from(id.index), day);
+                    if roll < p {
+                        h.cancer = Some(crate::components::Cancer { stage: 0.0, since: tick, diagnosed: false });
+                        cancer_new += 1;
+                    }
+                }
+                None => {}
+            }
+            if let Some(c) = h.cancer.as_mut() {
+                if c.stage >= 1.0 {
+                    dying.push(id);
+                } else if !c.diagnosed && c.stage >= cfg.cancer_symptom {
+                    c.diagnosed = true;
+                    diagnosed.push(id);
+                }
+            }
+        }
         // Today's sick roll (a pure hash: no stream moves).
         let m_on = onset(h.malnutrition, cfg.mal_onset);
         let c = h.cancer.map_or(0.0, |c| c.stage);
@@ -184,7 +211,24 @@ pub fn daily(world: &mut World) {
             fire.push(id);
         }
     }
+    for &id in &diagnosed {
+        let name = world.name_of(id);
+        world.push_event(crate::events::EventKind::Diagnosed, &[id], format!("{name} has a vat-cancer"));
+        world.remember(id, crate::components::MemoryKind::Diagnosed, None, 0.9, -0.8, false);
+    }
+    for id in dying {
+        world.kill(id, crate::components::DeathCause::Disease);
+    }
+    // § 3: a diagnosed patient off screen treats on `p_stat_treat` of days.
+    if cfg.cancer {
+        stat_treat(world, &cfg, seed, day);
+    }
+    world.stats.current.health.cancer_new += cancer_new;
+    world.stats.current.health.cancer_diagnosed += diagnosed.len() as u32;
     for id in fire {
+        if !crate::systems::law::living(world, id) {
+            continue;
+        }
         let building = world.comp::<Job>(id).and_then(|j| j.employer);
         let name = world.name_of(id);
         crate::systems::economy::dismiss(world, id, building, format!("{name} was let go: too sick to work"));
@@ -272,4 +316,189 @@ pub fn energy_mult(world: &World, id: EntityId, prev: Option<f32>) -> Option<f32
 /// Work output x this (1 with the diet off).
 pub fn work_mult(world: &World, id: EntityId) -> f32 {
     effects(world, id).work_mult
+}
+
+// ---------------------------------------------------------------------------
+// § 3: cancer and the Clinic
+// ---------------------------------------------------------------------------
+
+/// The cancer's treatment price (`[sickness] cancer_treat_price`).
+pub fn treat_price(world: &World) -> i64 {
+    world.config.sickness.cancer_treat_price
+}
+
+/// Who pays for `id`'s treatment and how much each holds, in order
+/// (decision 3): the patient's wallet, then the spouse and kin (Spouse,
+/// Parent and Family edges, ascending id), then the patient's gang.
+pub fn payers(world: &World, id: EntityId) -> Vec<(EntityId, i64)> {
+    use crate::components::{RelKind, Wallet};
+    let mut out = vec![(id, world.comp::<Wallet>(id).map_or(0, |w| w.coins.max(0)))];
+    let mut kin: Vec<EntityId> = world
+        .neighbours(id)
+        .filter(|&o| {
+            crate::systems::law::living(world, o)
+                && world
+                    .edge(id, o)
+                    .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Parent | RelKind::Family))
+        })
+        .collect();
+    kin.sort_unstable();
+    if let Some(s) = world.spouse_of(id) {
+        kin.retain(|&k| k != s);
+        kin.insert(0, s);
+    }
+    for k in kin {
+        out.push((k, world.comp::<Wallet>(k).map_or(0, |w| w.coins.max(0))));
+    }
+    if let Some(g) = world.gang_of(id) {
+        out.push((g, world.purse(Some(g)).max(0)));
+    }
+    out
+}
+
+/// The coins the pool can put up for `id`.
+pub fn pool(world: &World, id: EntityId) -> i64 {
+    payers(world, id).iter().map(|&(_, c)| c).sum()
+}
+
+/// A diagnosed cancer the pool can pay for, a Clinic open.
+pub fn wants_oncology(world: &World, id: EntityId) -> bool {
+    if !on(world) || !world.config.sickness.cancer {
+        return false;
+    }
+    let diagnosed = world.comp::<Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed);
+    diagnosed && pool(world, id) >= treat_price(world) && clinic_for(world, id, true).is_some()
+}
+
+/// A diagnosed patient whose pool falls short of the treatment: saving for
+/// it (`life::broke` reads it, so Earn stays alive: work, beg, scavenge).
+pub fn saving_short(world: &World, id: EntityId) -> bool {
+    on(world)
+        && world.config.sickness.cancer
+        && world.comp::<Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed)
+        && pool(world, id) < treat_price(world)
+}
+
+/// The coins a diagnosed patient whose pool falls short saves toward
+/// (Earn's savings line; 0 otherwise).
+pub fn treatment_savings(world: &World, id: EntityId) -> i64 {
+    if !on(world) || !world.config.sickness.cancer {
+        return 0;
+    }
+    let diagnosed = world.comp::<Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed);
+    if diagnosed {
+        treat_price(world)
+    } else {
+        0
+    }
+}
+
+/// The nearest Clinic (`open`: open now, for a body's walk).
+fn clinic_for(world: &World, id: EntityId, open: bool) -> Option<EntityId> {
+    let tile = world.comp::<crate::components::Position>(id)?.tile;
+    crate::systems::assets::nearest_seller(world, crate::components::BuildingKind::Clinic, tile, open)
+}
+
+/// The Treat goal's scripted plan for a cancer: `[GoTo(Clinic) c, Oncology c]`.
+pub fn oncology_plan(world: &World, id: EntityId) -> Option<crate::goap::Plan> {
+    if !wants_oncology(world, id) {
+        return None;
+    }
+    let c = clinic_for(world, id, true)?;
+    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
+    let steps = vec![
+        step(crate::goap::ActionKind::GoTo(crate::goap::LocationKey::Clinic), Some(c)),
+        step(crate::goap::ActionKind::Oncology, Some(c)),
+    ];
+    Some(crate::goap::Plan {
+        goal: crate::components::GoalKind::Treat,
+        target: Some(c),
+        steps,
+        started_tick: world.tick,
+    })
+}
+
+/// `Oncology`'s start check: inside the Clinic, still wanting it.
+pub fn can_start_oncology(world: &World, id: EntityId, target: Option<EntityId>) -> bool {
+    let here = world.comp::<crate::components::Position>(id).and_then(|p| p.building);
+    target.is_some() && here == target && !target.is_some_and(|c| world.is_closed(c)) && wants_oncology(world, id)
+}
+
+/// The treatment at `clinic` (both tiers): the price from the pool in order
+/// (`Flow::Treatment` to the Clinic's owner); below `cure_stage` a cure
+/// (toxicity x `treat_tox_mult`), else remission (`stage - remission`).
+pub fn oncology(world: &mut World, id: EntityId, clinic: EntityId) -> bool {
+    use crate::systems::ownership::{self, Flow};
+    let price = treat_price(world);
+    let diagnosed = world.comp::<Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed);
+    if !on(world) || !diagnosed || pool(world, id) < price {
+        return false;
+    }
+    let to = world.owner_of(clinic);
+    let mut due = price;
+    for (payer, holds) in payers(world, id) {
+        if due <= 0 {
+            break;
+        }
+        let take = holds.min(due);
+        if take > 0 {
+            let paid = ownership::pay(world, Some(payer), to, take, Flow::Treatment);
+            ownership::credit(world, clinic, paid);
+            due -= paid;
+            if payer != id {
+                world.remember(payer, crate::components::MemoryKind::Paid, Some(id), 0.4, -0.1, false);
+            }
+        }
+    }
+    let cfg = world.config.sickness.clone();
+    let (who, at) = (world.name_of(id), world.name_of(clinic));
+    let Some(h) = world.comp_mut::<Health>(id) else { return false };
+    let Some(c) = h.cancer.as_mut() else { return false };
+    let cured = c.stage < cfg.cure_stage;
+    if cured {
+        h.cancer = None;
+        h.toxicity *= cfg.treat_tox_mult;
+    } else {
+        c.stage = (c.stage - cfg.remission).max(0.0);
+    }
+    world.stats.current.treatments += 1;
+    if cured {
+        world.stats.current.health.cancer_cured += 1;
+        world.push_event(
+            crate::events::EventKind::Cured,
+            &[id, clinic],
+            format!("{who} was cured of a vat-cancer at {at}"),
+        );
+    } else {
+        world.push_event(
+            crate::events::EventKind::Treated,
+            &[id, clinic],
+            format!("{who} bought a remission of a vat-cancer at {at}"),
+        );
+    }
+    true
+}
+
+/// Off screen: a diagnosed Statistical patient whose pool pays treats on
+/// `p_stat_treat` of days at the nearest open Clinic (the `p_stat_detox`
+/// pattern: too rare for `calibrate` to learn).
+fn stat_treat(world: &mut World, cfg: &crate::config::SicknessCfg, seed: u64, day: u64) {
+    let due: Vec<EntityId> = world
+        .tier(crate::components::Lod::Statistical)
+        .iter()
+        .copied()
+        .filter(|&id| world.comp::<Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed))
+        .collect();
+    for id in due {
+        if pool(world, id) < treat_price(world) {
+            continue;
+        }
+        let roll = crate::systems::econ::hash_unit(seed, ROLL_TREAT, u64::from(id.index), day);
+        if roll >= cfg.p_stat_treat {
+            continue;
+        }
+        if let Some(c) = clinic_for(world, id, false) {
+            oncology(world, id, c);
+        }
+    }
 }

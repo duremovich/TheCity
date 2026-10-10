@@ -2893,6 +2893,8 @@ impl World {
             DeathCause::Overdose => self.stats.current.overdoses += 1,
             // M14 V14: a Flatline is not violence.
             DeathCause::Flatline => self.stats.current.virt.flatlined += 1,
+            // Hunger as sickness § 3.
+            DeathCause::Disease => self.stats.current.health.deaths_disease += 1,
         }
         // `[dead, spouse?]`, or `[dead, spouse or NONE, killer]` when the
         // killer is known, so the biography names them (an attacker who

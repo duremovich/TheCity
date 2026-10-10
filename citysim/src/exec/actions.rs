@@ -96,6 +96,7 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         // Real economy E27, E28: a meal at the kitchen, a gift at the door.
         ActionKind::EatAlms => 30,
         ActionKind::DumpsterDive => 20,
+        ActionKind::Oncology => 120,
         ActionKind::Donate => 5,
         ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
@@ -189,6 +190,7 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         k if k.is_charity_step() => crate::systems::charity::can_start(world, id, k, target),
         // Hunger as sickness § 4: the dive's start check.
         ActionKind::DumpsterDive => crate::systems::bins::can_start(world, id, target),
+        ActionKind::Oncology => crate::systems::health::can_start_oncology(world, id, target),
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -712,6 +714,10 @@ pub fn on_complete(
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
+        ActionKind::Oncology => match target {
+            Some(c) if crate::systems::health::oncology(world, id, c) => StepResult::Done,
+            _ => StepResult::Failed(FailReason::PreconditionLost),
+        },
         ActionKind::Donate => crate::systems::charity::on_donate(world, id, target),
         ActionKind::Guard => crate::systems::contracts::on_guard_done(world, id, target),
         ActionKind::CollectWage => {

@@ -702,6 +702,8 @@ pub enum DeathCause {
     Overdose,
     /// M14 V14: killed by a node's ICE in a lost contest (not violence).
     Flatline,
+    /// Hunger as sickness § 3: a cancer run its course.
+    Disease,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -779,6 +781,8 @@ pub enum MemoryKind {
     /// service (Grief-class salience and mood; not a deed: `deed_of` reads
     /// `None`, so no killing rumour spreads).
     ChildTaken,
+    /// Hunger as sickness § 3: told the cancer has a name.
+    Diagnosed,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
