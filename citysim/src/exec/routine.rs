@@ -165,6 +165,62 @@ pub fn commute_plan(world: &World, id: EntityId) -> Option<Plan> {
     Some(plan(GoalKind::Work, Some(employer), steps, world.tick))
 }
 
+/// Hunger fix item 12 (P5j): ticks until bedtime before the next workday
+/// shift (negative: past it): the leaving time (the shift's start less the
+/// walk from the Home door to work and `DEPARTURE_MARGIN`) less the night
+/// this body needs to wake full (`[needs] sleep_ticks_full` x the energy it
+/// will lack at bedtime) less the walk home from here. `None` on
+/// shift, on a rest day's eve, homeless or jobless, or with the item off.
+pub fn ticks_to_bedtime(world: &World, id: EntityId) -> Option<i64> {
+    if !crate::systems::fixes::work_night(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?;
+    let tod = world.tick_of_day();
+    if job.on_shift(tod) {
+        return None;
+    }
+    let key = job.next_shift_key(world.tick);
+    if !workday_of(world, id, job, key) || job.last_shift_day == Some(key) {
+        return None;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home)?;
+    let home_door = world.comp::<Building>(home)?.door;
+    let work_door = world.comp::<Building>(job.employer?)?.door;
+    let until = i64::from(job.ticks_until_shift(tod));
+    let leave = until - crate::exec::timed_walk(world, id, home_door, work_door) as i64 - DEPARTURE_MARGIN as i64;
+    let at_home = world.comp::<Position>(id).is_some_and(|p| p.building == Some(home));
+    let walk_home = if at_home { 0 } else { crate::systems::fixes::walk_estimate(world, id, home_door) as i64 };
+    // The night this body needs: a full night (`sleep_ticks_full`) restores
+    // energy 0 to 1, and Sleep ends at 1, so a night is `(1 - energy at
+    // bedtime) x sleep_ticks_full`; the energy at bedtime is today's less
+    // the decay until then (solved for the bedtime). A full 8 h from a
+    // half-rested body put it to bed early and up at 04:00, out again
+    // before the shift (measured on the probe: Unwind after midnight 34 ->
+    // 929 minutes over twelve workers).
+    let full = f64::from(world.config.needs.sleep_ticks_full);
+    let e = f64::from(world.comp::<crate::components::Needs>(id).map_or(0.0, |n| n.energy));
+    let d = f64::from(world.config.needs.energy_decay_per_tick);
+    // bedtime b (ticks from now): leave - walk_home - b = (1 - (e - d b)) full
+    //   => b (1 - d full) = leave - walk_home - (1 - e) full.
+    let num = (leave - walk_home) as f64 - (1.0 - e).max(0.0) * full;
+    let den = (1.0 - d * full).max(0.1);
+    Some((num / den).round() as i64)
+}
+
+/// P5j: Sleep's work-night pressure, 0 at `work_night_ramp_ticks` before
+/// bedtime rising to 1 at it (and after).
+pub fn work_night_pressure(world: &World, id: EntityId) -> f32 {
+    let Some(b) = ticks_to_bedtime(world, id) else { return 0.0 };
+    let ramp = world.config.life.work_night_ramp_ticks.max(1) as f32;
+    (1.0 - b as f32 / ramp).clamp(0.0, 1.0)
+}
+
+/// P5j: past bedtime on a work night (Unwind and the grocery run weigh less).
+pub fn past_bedtime(world: &World, id: EntityId) -> bool {
+    ticks_to_bedtime(world, id).is_some_and(|b| b <= 0)
+}
+
 /// P5i: ticks from now to the end of the next (or current) shift.
 pub fn ticks_to_shift_end(world: &World, job: &Job) -> u64 {
     let until = u64::from(job.ticks_until_shift(world.tick_of_day()));

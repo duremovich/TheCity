@@ -303,7 +303,31 @@ Item 11 (`hf_shift_meals`, coordinator call). Before it, 10.5 % of Full's shift 
 - **(b) Off shift:** a fed worker's Eat goal stands for a grocery run (`routine::grocery_plan`: `[GoTo(Market), BuyFood, GoTo(Home), StoreFood]`) when the household's pantry plus its own carried meals are under a shift's worth per resident (`shift_meals_needed` × residents, capped at the pantry), it holds a meal's coins, and the round trip ends `2 × DEPARTURE_MARGIN` before it must leave for work. Scored at `[life] grocery_score` 0.5 (an errand, below a real need; the Idle plan runs it too).
 - **Measured** (flipped seed 42, all-Full, planner budget scaled): Eat on shift 8.8 % → 7.0 % (days 30-60), working 50.6 % → 51.6 %. What is left: the commute share (~17 %) is late arrivals after Sleep, Idle, Earn and Eat, and farmers asleep on shift (6 %) mostly slept under 4 h the night before (their nights: walking home to sleep ~16 %, Unwind ~13 %, Eat walks ~6 %). Not a shift-scheduling cause (all 09:00-18:00); reported, not fixed.
 
+## Implemented: P5j, work-night sleep (2026-10-10)
+
+Item 12 (`hf_work_night`, coordinator call). The farmers' on-shift sleep (6.2 % of shift time) came from short nights: 60 % of it after a night under 4 h; their nights went ~13 % to Unwind and ~16 % to walking home to bed.
+- **Bedtime** (`routine::ticks_to_bedtime`): before a workday shift, the leaving time (the start less the walk from the Home door to work and `DEPARTURE_MARGIN`) less the night this body needs to wake full, less the walk home from where it stands (so a worker unwinding across town is due home earlier). **Deviation from the call's "a full night":** Sleep ends at energy 1, which a full `sleep_ticks_full` reaches only from 0; a full 8 h from a half-rested body put it to bed early, up at 04:00 and out again before the shift (the first build: Unwind after midnight 34 → 929 minutes over the probe's twelve workers). The night needed is `(1 − energy at bedtime) × sleep_ticks_full`, solved with the energy decay until bedtime.
+- **Scores, not bans:** Sleep gains `work_night_sleep_flat` 0.5 × a pressure rising from 0 at `work_night_ramp_ticks` 120 before bedtime to 1 at it; Unwind weighs `1 − 0.7 × pressure` (to `work_night_unwind_mult` 0.3) and the grocery run × 0.3 past bedtime. Some still stay out.
+- **Probe:** `probe_worker_sleeps_the_night_before_a_shift` (twenty flipped-config farmers due at 09:00: mean energy at 09:00 0.61 with item 12 off, 0.74 on; bound 0.7).
+- **Measured** (flipped seed 42, all-Full, days 30-60): Sleep on shift 8.4 % → 4.2 %; working 51.6 % → 51.9 % (Idle 5.2 → 6.9 %, Earn 5.9 → 7.4 % took the rest); commute 17.5 → 16.5 %. **Stop rule (coordinator):** this working share is accepted; the learned `p_attend` mirrors it, so parity holds.
+
 ## Open items (after P5)
+
+- **Shift attendance (a later planner pass; no more attendance phases before the flip):** on the flipped all-Full city after P5j, working is ~52 % of shift time. What is left: late arrivals 2-4 h+ into the shift after Sleep, Idle, Earn and Eat (~11 % of shift time, the commute rows "since start" 2 h+); Eat on shift with nothing carried and an empty pantry (5.5 %); Idle (6.9 %) and Earn (7.4 %) on shift.
+- **Default-city starvation (the rollback cost, on record):** the flip replaces the default city, but if it is ever rolled back this is what ships. `core_sanity` starvation per 120 days, seeds 42 / 43 / 44, each commit built clean:
+
+  | commit | starvation |
+  |---|---|
+  | main `d771073` | 0 / 1 / 1 |
+  | P1-P4 `92809f5` | 3 / 2 / 2 |
+  | P5a `4547cf6` (the recal table port) | 33 / 18 / 29 |
+  | P5e2 `0bc44de` (diet parity) | 11 / 8 / 7 |
+  | P5f `283e30d` (learned attendance, wage parity) | 74 / 55 / 46 |
+  | P5g `ff60ea6` | 65 / 50 / 60 |
+  | P5h `9770683` | 79 / 87 / 117 |
+  | P5i `264ec36` | 73 / 88 / 68 |
+
+  The steps are P5a's and P5f's off-screen tables (the default city is ~50 Full agents and the rest Statistical: the learned attendance cut the off-screen wages). The default `core_year` window failure (51 against 50 on days 270-300) is the same story; not chased unless the recalibration leaves it.
 
 - **Workplace canteens (filed, not built):** food stock at the workplace sold to its staff on shift (a company-store angle: the employer sets the price and keeps the till). Later.
 

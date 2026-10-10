@@ -4370,6 +4370,18 @@ pub struct LifeCfg {
     /// next shift's leaving time.
     pub hf_shift_meals: bool,
     pub grocery_score: f32,
+    /// P5j (coordinator call): work-night sleep. The bedtime before a
+    /// workday shift is the leaving time (`routine::must_leave_for_work`'s:
+    /// the walk to work and `DEPARTURE_MARGIN` before the start) minus a
+    /// full night (`[needs] sleep_ticks_full`) minus the walk home. Sleep
+    /// gains `work_night_sleep_flat` x a pressure rising from 0 at
+    /// `work_night_ramp_ticks` before bedtime to 1 at bedtime; past it,
+    /// Unwind and the grocery run score x `work_night_unwind_mult` (a
+    /// weight, not a ban: some stay out).
+    pub hf_work_night: bool,
+    pub work_night_sleep_flat: f32,
+    pub work_night_ramp_ticks: u64,
+    pub work_night_unwind_mult: f32,
     pub housing_demand_min: u32,
     pub housing_demand_days: u16,
     pub housing_builds_per_1000: f32,
@@ -4464,6 +4476,10 @@ impl Default for LifeCfg {
             hf_grow_housing: true,
             hf_shift_meals: true,
             grocery_score: 0.5,
+            hf_work_night: true,
+            work_night_sleep_flat: 0.5,
+            work_night_ramp_ticks: 120,
+            work_night_unwind_mult: 0.3,
             housing_demand_min: 6,
             housing_demand_days: 3,
             housing_builds_per_1000: 1.0,

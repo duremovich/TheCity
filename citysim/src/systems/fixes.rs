@@ -88,6 +88,11 @@ pub fn hire_near(world: &World) -> bool {
     hfix_item(world, 9) && world.config.life.hf_hire_near
 }
 
+/// P5j (item 12): work-night sleep.
+pub fn work_night(world: &World) -> bool {
+    hfix_item(world, 12) && world.config.life.hf_work_night
+}
+
 /// P5i (item 11): meals around the shift.
 pub fn shift_meals(world: &World) -> bool {
     hfix_item(world, 11) && world.config.life.hf_shift_meals

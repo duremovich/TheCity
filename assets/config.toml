@@ -1539,6 +1539,12 @@ hf_grow_housing = true              # 10
 # shift with nothing carried and an empty pantry (92 % of the on-shift Work -> Eat switches).
 hf_shift_meals = true               # 11: eat or pack a meal before a shift; grocery runs off shift
 grocery_score = 0.5                 # 11: the fed worker's Eat (the grocery run) scores this
+# P5j (coordinator call): the farmers' on-shift sleep came from short nights (60 % after under 4 h; nights
+# ~13 % Unwind, ~16 % walking home to bed). Bedtime = leaving time - a full night - the walk home.
+hf_work_night = true                # 12
+work_night_sleep_flat = 0.5         # 12: Sleep's flat at bedtime (x the ramp's pressure)
+work_night_ramp_ticks = 120         # 12: the pressure rises over the 2 h before bedtime
+work_night_unwind_mult = 0.3        # 12: Unwind and the grocery run past bedtime
 housing_demand_min = 6              # 10: one Home's beds
 housing_demand_days = 3
 housing_builds_per_1000 = 1.0       # 10: Homes or floors a day per 1,000 residents (2 at 2,000)

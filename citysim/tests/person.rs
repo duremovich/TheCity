@@ -1244,3 +1244,38 @@ fn probe_worker_stocks_the_pantry_off_shift() {
     assert!(seen.contains(&ActionKind::BuyFood), "an empty pantry, coins and an evening off, and no grocery run");
     assert!(most >= 1, "the run left nothing at hand");
 }
+
+/// Item 12 (P5j, work-night sleep): on the flipped config, the farmers due
+/// at 09:00 (twenty, each pinned in its own clone of the city from 18:00)
+/// start the shift rested: the mean energy at 09:00 is at least 0.7, and
+/// none is on Sleep then. Measured on the flipped seed 42 (all-Full): 60 %
+/// of the farmers' on-shift sleep came from a night under 4 h; their nights
+/// went ~13 % to Unwind and ~16 % to walking home to bed.
+#[test]
+fn probe_worker_sleeps_the_night_before_a_shift() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    cfg.sickness.enabled = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(3 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
+    let farmers: Vec<EntityId> = day_workers(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer))
+        .take(20)
+        .collect();
+    let (mut energy, mut asleep, mut n) = (0f32, 0u32, 0u32);
+    for &a in &farmers {
+        let mut c = w.clone();
+        run_to(&mut c, a, 4 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR, |_| {});
+        energy += c.comp::<Needs>(a).map_or(0.0, |x| x.energy);
+        asleep += u32::from(c.comp::<Brain>(a).is_some_and(|b| b.current_goal == Some(citysim::GoalKind::Sleep)));
+        n += 1;
+    }
+    let mean = energy / n.max(1) as f32;
+    eprintln!("{n} farmers at 09:00: mean energy {mean:.2}, on Sleep {asleep}");
+    assert!(n >= 10, "the probe needs farmers");
+    // Item 12 off: 0.61; on: 0.74 (the bound sits between).
+    assert!(mean >= 0.7, "farmers start the shift tired: mean energy {mean:.2}");
+    assert_eq!(asleep, 0, "farmers asleep at the shift's start");
+}

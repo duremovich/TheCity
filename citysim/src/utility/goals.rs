@@ -262,7 +262,11 @@ pub fn considerations(
             // Hunger fix item 11 (b): fed, the goal is the grocery run, at
             // `[life] grocery_score` (an errand: below a real need).
             if n.hunger >= crate::goap::world_state::HUNGER_SATISFIED {
-                let s = world.config.life.grocery_score.clamp(0.01, 1.0);
+                let mut s = world.config.life.grocery_score.clamp(0.01, 1.0);
+                // Hunger fix item 12 (P5j): past a work night's bedtime.
+                if crate::exec::routine::past_bedtime(world, id) {
+                    s *= world.config.life.work_night_unwind_mult.clamp(0.01, 1.0);
+                }
                 return Some((vec![Consideration::raw("pantry under a shift's meals", s, s)], 0.0));
             }
             let can_eat = eat_obtainable(world, id);
@@ -299,6 +303,10 @@ pub fn considerations(
             }
             if phase == DayPhase::Night && !world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) && !eat_first {
                 flat += world.config.life.night_sleep_flat;
+            }
+            // Hunger fix item 12 (P5j): a work night's bedtime presses.
+            if !eat_first {
+                flat += world.config.life.work_night_sleep_flat * crate::exec::routine::work_night_pressure(world, id);
             }
             vec![
                 Consideration::new("U(energy)", urgency(n.energy), Curve::Logistic { k: 10.0, mid: 0.75 }),
@@ -854,7 +862,18 @@ pub fn considerations(
         // M16a (plan C13): work a taken record, or network at a Fixer.
         GoalKind::Contract => return crate::systems::contracts::considerations(world, id),
         // L2 L14, L20.
-        GoalKind::Unwind => return crate::systems::leisure::considerations(world, id),
+        GoalKind::Unwind => {
+            let (mut cs, flat) = crate::systems::leisure::considerations(world, id)?;
+            // Hunger fix item 12 (P5j): nearing a work night's bedtime (or,
+            // up and rested, the morning's leaving time), Unwind weighs
+            // less, down to `work_night_unwind_mult` at it and past it.
+            let p = crate::exec::routine::work_night_pressure(world, id);
+            if p > 0.0 {
+                let m = 1.0 - (1.0 - world.config.life.work_night_unwind_mult.clamp(0.01, 1.0)) * p;
+                cs.push(Consideration::raw("a work night's bedtime", p, m));
+            }
+            return Some((cs, flat));
+        }
         GoalKind::Lead => return crate::systems::leisure::lead_considerations(world, id),
         // M15 W35.
         GoalKind::GuardBody => return crate::systems::grudges::guard_body_considerations(world, id),
