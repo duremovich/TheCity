@@ -683,6 +683,7 @@ pub fn run_statistical(world: &mut World) {
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
         let energy_mult = crate::systems::stims::energy_mult(world, id);
+        let energy_mult = crate::systems::health::energy_mult(world, id, energy_mult);
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             let ctx = crate::needs::DecayCtx {
                 season_energy_mult,
@@ -700,6 +701,8 @@ pub fn run_statistical(world: &mut World) {
         if !world.has::<Brain>(id) {
             continue; // starved this hour
         }
+        // Hunger as sickness § 2: the hour's hungry mark (bodies: needs::run).
+        crate::systems::health::hourly_mark(world, id);
         // 2b. Work is not a gamble: an employed agent on shift works the hour
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
@@ -1077,13 +1080,15 @@ fn stat_eat(world: &mut World, id: EntityId) {
     let cfg = world.config.needs.clone();
     let has_food = world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.food >= 1);
     if has_food {
+        let mut meal = crate::components::MealKind::Real;
         if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-            i.food -= 1;
+            meal = crate::systems::health::eat_inventory_unit(i);
             i.stolen_food = i.stolen_food.min(i.food);
         }
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
+        crate::systems::health::ate(world, id, meal);
         world.mark_day(id, trace_flags::ATE);
         return;
     }
@@ -1093,20 +1098,21 @@ fn stat_eat(world: &mut World, id: EntityId) {
         .and_then(|h| h.home)
         .filter(|&h| world.comp::<Building>(h).is_some_and(|b| b.stock_food > 0));
     if let Some(h) = pantry {
+        let mut meal = crate::components::MealKind::Real;
         if let Some(b) = world.comp_mut::<Building>(h) {
-            b.stock_food -= 1;
+            meal = crate::systems::health::eat_pantry_unit(b);
         }
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
+        crate::systems::health::ate(world, id, meal);
         world.mark_day(id, trace_flags::ATE);
         return;
     }
     // Jobs and room P2 fix: an empty local Market sends the shopper to a stocked one.
-    let Some((market, stock, price)) = world
-        .food_market(id)
-        .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food, world.price_for(m, id))))
-    else {
+    let Some((market, stock, price)) = world.food_market(id).and_then(|m| {
+        world.comp::<Building>(m).map(|b| (m, b.stock_food, crate::systems::diet::price_at(world, id, m)))
+    }) else {
         return;
     };
     if stock == 0 {
@@ -1119,14 +1125,17 @@ fn stat_eat(world: &mut World, id: EntityId) {
         // household eats it. Buying one meal at a time left a broke
         // housemate nothing to eat once the opening pantry was gone (M10).
         let units = economy::buy_quantity(world, id, Some(market)).max(1);
-        let paid = economy::pay_for_food(world, id, Some(market), units);
-        if economy::take_food(world, id, Some(market), units, paid) {
+        let q = economy::quality_at(world, id, Some(market));
+        let paid = economy::pay_for_food_q(world, id, Some(market), units, q);
+        if economy::take_food_q(world, id, Some(market), units, paid, q) {
+            let mut meal = crate::components::MealKind::Real;
             if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-                i.food = i.food.saturating_sub(1);
+                meal = crate::systems::health::eat_inventory_unit(i);
             }
             if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
                 crate::needs::eat(n, &cfg);
             }
+            crate::systems::health::ate(world, id, meal);
             world.mark_day(id, trace_flags::ATE);
             stat_store_food(world, id);
         }
@@ -1168,13 +1177,15 @@ fn stat_eat(world: &mut World, id: EntityId) {
         return;
     }
     // ... and eaten at once.
+    let mut meal = crate::components::MealKind::Real;
     if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-        i.food = i.food.saturating_sub(1);
+        meal = crate::systems::health::eat_inventory_unit(i);
         i.stolen_food = i.stolen_food.min(i.food);
     }
     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
         crate::needs::eat(n, &cfg);
     }
+    crate::systems::health::ate(world, id, meal);
     world.mark_day(id, trace_flags::ATE);
 }
 
@@ -1186,8 +1197,12 @@ fn stat_store_food(world: &mut World, id: EntityId) {
     let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
     let Some(inv) = world.comp_mut::<crate::components::Inventory>(id) else { return };
     let movable = inv.food.saturating_sub(inv.stolen_food).min(room);
+    let synth = inv.synth_held().min(movable);
+    inv.synth = inv.synth_held() - synth;
     inv.food -= movable;
+    inv.synth = inv.synth.min(inv.food);
     if let Some(b) = world.comp_mut::<Building>(home) {
+        b.synth_food = b.synth_food.min(b.stock_food) + synth;
         b.stock_food += movable;
     }
 }
@@ -1231,6 +1246,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         stat_earn(world, id, i);
     }
     let Some(job) = job else { return };
+    // Hunger as sickness § 2: a sick day is no shift and no wage (as Full's).
+    if crate::systems::health::sick(world, id) {
+        return;
+    }
     let key = job.shift_key_at(tick);
     // L2 shadow fixes item 10: a guard's own (staggered) workday.
     if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::workday_of(world, id, &job, key) {

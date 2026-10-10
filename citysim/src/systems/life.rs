@@ -53,6 +53,10 @@ pub fn travel(world: &World, tiles: u32) -> Consideration {
 
 /// The local meal price (the Eat goal's), at least 1.
 pub fn meal_price(world: &World, id: EntityId) -> i64 {
+    // Hunger as sickness § 1: the meal this agent would buy (its own price).
+    if crate::systems::diet::on(world) {
+        return crate::systems::diet::meal_price(world, id);
+    }
     world.local(id, BuildingKind::Market).map_or(3, |m| world.price_for(m, id)).max(1)
 }
 

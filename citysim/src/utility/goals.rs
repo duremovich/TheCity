@@ -199,7 +199,8 @@ pub fn eat_obtainable(world: &World, id: EntityId) -> bool {
         .and_then(|h| world.comp::<crate::components::Building>(h))
         .map_or(0, |b| b.stock_food);
     let lawfulness = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
-    let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
+    let price =
+        world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| crate::systems::diet::price_at(world, id, m));
     food || coins >= price
         || pantry > 0
         || lawfulness < 0.3
@@ -306,7 +307,12 @@ pub fn considerations(
                 return None;
             }
             vec![
-                Consideration::new("in shift", can(shift_reachable(world, id, job)), GATE),
+                // Hunger as sickness § 2: a sick day is no shift.
+                Consideration::new(
+                    "in shift",
+                    can(shift_reachable(world, id, job) && !crate::systems::health::sick(world, id)),
+                    GATE,
+                ),
                 Consideration::new("energy", n.energy, IDENTITY),
                 // Wages owed press too (M10 phase 5c): a guard collects only
                 // by winning Work after a Patrol shift, and a guard with coins

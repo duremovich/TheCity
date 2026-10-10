@@ -68,7 +68,7 @@ pub struct ShadowArgs {
     pub assert: bool,
 }
 
-const ARCHETYPES: [&str; 27] = [
+const ARCHETYPES: [&str; 28] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -100,6 +100,9 @@ const ARCHETYPES: [&str; 27] = [
     // behaviour tier after the pick rework.
     "fixer",
     "gun",
+    // Hunger as sickness (docs/HUNGER_SICKNESS.md § 9): malnutrition >= 0.5 or a cancer. Diaries
+    // only (no `CHECKS` rows); empty with `[sickness]` off.
+    "sick",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -153,6 +156,9 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 .collect()
         }
         "homeless" => adults().filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none())).collect(),
+        "sick" => adults()
+            .filter(|&a| world.comp::<citysim::Health>(a).is_some_and(|h| h.malnutrition >= 0.5 || h.cancer.is_some()))
+            .collect(),
         "ceo" => {
             let mut corps: Vec<(i64, EntityId, EntityId)> = world
                 .corps()
@@ -407,6 +413,8 @@ struct Track {
     cooldowns: BTreeMap<GoalKind, Tick>,
     wallet: Option<i64>,
     inv: Option<(u32, u32, u16, u16)>,
+    /// Hunger as sickness: the day's meal tally last seen (a meal logged on a rise).
+    tally: Option<citysim::MealTally>,
     mem_seen: BTreeSet<(Tick, MemoryKind, Option<EntityId>, bool)>,
     mem_primed: bool,
     edges_primed: bool,
@@ -504,6 +512,7 @@ impl Track {
             last_building: None,
             cooldowns: BTreeMap::new(),
             wallet: None,
+            tally: None,
             inv: None,
             mem_seen: BTreeSet::new(),
             mem_primed: false,
@@ -722,6 +731,9 @@ fn header(world: &World, t: &Track) -> String {
     let wallet = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let inv = world.comp::<Inventory>(id).map(|i| format!("food {}, stims {}, parts {}", i.food, i.stims, i.parts));
     let _ = writeln!(h, "- **Wallet**: {} | inventory: {}", money(wallet), inv.unwrap_or_default());
+    if let Some(hl) = world.comp::<citysim::Health>(id) {
+        let _ = writeln!(h, "- **Health**: {}", health_line(hl));
+    }
     if let Some(k) = world.comp::<Kit>(id) {
         let assets: Vec<String> =
             world.assets_by_owner.get(&id).map(|v| v.iter().map(|&a| world.name_of(a)).collect()).unwrap_or_default();
@@ -1277,6 +1289,25 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         }
     }
 
+    // Hunger as sickness: each meal by kind (the tally rises), and the
+    // meters with the needs line.
+    if let Some(hl) = world.comp::<citysim::Health>(id) {
+        let now_t = hl.today;
+        if let Some(prev) = t.tally {
+            let rises = [
+                (now_t.real > prev.real, "ate a REAL meal"),
+                (now_t.synth > prev.synth, "ate SYNTH"),
+                (now_t.dive > prev.dive, "ate scraps from a BIN"),
+                (now_t.alms > prev.alms, "ate a Mission's SYNTH meal"),
+            ];
+            for (up, what) in rises {
+                if up {
+                    t.log(now, "meal", format!("{what} | {}", health_line(hl)));
+                }
+            }
+        }
+        t.tally = Some(now_t);
+    }
     // Money.
     let mut money_logged = false;
     if let Some(w) = world.comp::<Wallet>(id) {
@@ -2625,6 +2656,20 @@ fn short(m: Metric) -> &'static str {
         Metric::CommuteAbortsDay => "abort/d",
         Metric::BoutsAttended => "bouts_at",
     }
+}
+
+/// Hunger as sickness: the meters on one line (the header and meal lines).
+fn health_line(h: &citysim::Health) -> String {
+    let cancer = h.cancer.map_or(String::from("no cancer"), |c| {
+        format!("cancer stage {:.2}{}", c.stage, if c.diagnosed { " (diagnosed)" } else { " (silent)" })
+    });
+    format!(
+        "malnutrition {:.2} | toxicity {:.2} | {cancer} | sick days {}/14{}",
+        h.malnutrition,
+        h.toxicity,
+        h.sick_days.count_ones(),
+        if h.sick_today { " | OFF SICK TODAY" } else { "" }
+    )
 }
 
 #[cfg(test)]

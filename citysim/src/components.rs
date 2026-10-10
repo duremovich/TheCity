@@ -1639,6 +1639,18 @@ pub struct Inventory {
     /// M13 D7: Parts carried (load 3 each).
     #[serde(default)]
     pub parts: u16,
+    /// Hunger as sickness § 1: the synth meals among `food` (a subset, read
+    /// through `synth_held`: removals take real units first, so a stale
+    /// count is clamped, never trusted).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub synth: u32,
+}
+
+impl Inventory {
+    /// The synth meals carried (`synth` clamped to `food`).
+    pub fn synth_held(&self) -> u32 {
+        self.synth.min(self.food)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -2415,6 +2427,10 @@ pub struct Building {
     /// staff (`wages::floor_pass`).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub floor_days: u8,
+    /// Hunger as sickness § 1: the synth meals among a pantry's
+    /// `stock_food` (a subset, clamped as `Inventory.synth`).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub synth_food: u32,
 }
 
 pub fn default_tier() -> u8 {
@@ -2627,6 +2643,10 @@ pub struct Market {
     /// M13 D6/D40: legal Stims doses sold today (phase 4).
     #[serde(default)]
     pub stim_sales_today: u32,
+    /// Hunger as sickness § 1: synth meals sold out of the shelf unit last
+    /// opened (`0..synth_stretch`).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub synth_frac: u32,
 }
 
 impl Market {
@@ -2648,6 +2668,7 @@ impl Market {
             stock_hist: VecDeque::new(),
             price_tenths: 0,
             stim_sales_today: 0,
+            synth_frac: 0,
         }
     }
 }
@@ -3655,6 +3676,10 @@ pub struct Asset {
     pub turned: Option<(EntityId, Tick)>,
 }
 
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
 fn is_zero_u8(v: &u8) -> bool {
     *v == 0
 }
@@ -3794,4 +3819,54 @@ pub struct Trip {
     pub half: u16,
     pub mid: Option<TilePos>,
     pub chase: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Hunger as sickness (docs/HUNGER_SICKNESS.md § 2-3)
+// ---------------------------------------------------------------------------
+
+/// What a meal was, for the day's tally.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum MealKind {
+    Real,
+    Synth,
+    /// Scraps from a bin.
+    Dive,
+    /// A Mission's synth meal.
+    Alms,
+}
+
+/// The day's meals and hungry hours (reset at midnight by `health::daily`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MealTally {
+    pub real: u8,
+    pub synth: u8,
+    pub dive: u8,
+    pub alms: u8,
+    pub hungry_hours: u8,
+}
+
+/// A cancer rolled from high toxicity (§ 3).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Cancer {
+    /// 0..=1; death at 1.
+    pub stage: f32,
+    pub since: Tick,
+    pub diagnosed: bool,
+}
+
+/// § 2: the meters, kept on every citizen while `[sickness]` is on (the
+/// store is empty, and not saved, while it is off).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Health {
+    pub malnutrition: f32,
+    pub toxicity: f32,
+    pub cancer: Option<Cancer>,
+    /// Rolled at midnight: no shift, no wage today.
+    pub sick_today: bool,
+    /// The last 14 days' sick days, bit 0 today (decision 4: 5 cost the job).
+    pub sick_days: u16,
+    pub today: MealTally,
 }

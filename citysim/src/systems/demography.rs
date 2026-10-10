@@ -88,7 +88,7 @@ pub fn mature(world: &mut World, id: EntityId) {
     );
     world.insert(id, Mood::default());
     world.insert(id, Memory::default());
-    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
+    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     // The Real economy E41: a camp's child is released at its door.
     if crate::systems::camp::on_mature(world, id) {
@@ -108,10 +108,18 @@ pub fn old_age_roll(rng: &mut rand_chacha::ChaCha8Rng, age_days: u32, cfg: &crat
 
 fn old_age(world: &mut World) {
     let cfg = world.config.demography.clone();
+    let sick_on = crate::systems::health::on(world);
     let mut dying = Vec::new();
     for id in world.citizens() {
         let Some(age) = world.comp::<Identity>(id).map(|i| i.age_days) else { continue };
-        if old_age_roll(world.rng.world(), age, &cfg) {
+        // Hunger as sickness § 2: a worn body's hazard (the same one draw).
+        let dies = if sick_on && age >= cfg.old_age_days {
+            let p = (cfg.old_age_p_per_day * f64::from(crate::systems::health::effects(world, id).old_mult)).min(1.0);
+            world.rng.world().random_bool(p)
+        } else {
+            old_age_roll(world.rng.world(), age, &cfg)
+        };
+        if dies {
             dying.push(id);
         }
     }
@@ -140,24 +148,29 @@ fn children(world: &mut World) {
         if kids.is_empty() {
             continue;
         }
-        let fed = {
+        let (fed, synth) = {
             let Some(b) = world.comp_mut::<Building>(home) else { continue };
             b.child_food_debt += CHILD_FOOD_PER_DAY * kids.len() as f32;
             let mut fed = true;
+            let mut synth = false;
             while b.child_food_debt >= 1.0 {
                 if b.stock_food == 0 {
                     fed = false;
                     break;
                 }
-                b.stock_food -= 1;
+                // Hunger as sickness § 2: real first (0 synth with the diet off).
+                synth |= crate::systems::health::eat_pantry_unit(b) == crate::components::MealKind::Synth;
                 b.child_food_debt -= 1.0;
             }
-            fed
+            (fed, synth)
         };
         // M11 phase 5: school meals. A child whose pantry is empty eats from
         // the Reserve (children ate only from the pantry and the dole is per
         // adult: ~70 child starvation deaths in 120 days on seeds 42-44).
         let fed = fed || (school && school_meal(world, home, reserve));
+        for &k in &kids {
+            crate::systems::health::child_day(world, k, fed, synth);
+        }
         for k in kids {
             let Some(c) = world.comp_mut::<Child>(k) else { continue };
             if fed {
@@ -203,6 +216,8 @@ fn births(world: &mut World) {
         let fertile = |id: EntityId| {
             world.comp::<Identity>(id).is_some_and(|i| (ADULT_AGE_DAYS..=FERTILE_UNTIL_DAYS).contains(&i.age_days))
                 && world.comp::<Needs>(id).is_some_and(|n| n.intimacy >= 0.6)
+                // Hunger as sickness § 2 (true with the diet off).
+                && crate::systems::health::effects(world, id).fertile
         };
         if !fertile(a) || !fertile(b) {
             continue;
@@ -218,7 +233,11 @@ fn births(world: &mut World) {
         }
         let happy = world.comp::<Mood>(a).is_some_and(|m| m.value > 0.5)
             && world.comp::<Mood>(b).is_some_and(|m| m.value > 0.5);
-        let p = p_base * if happy { 1.5 } else { 1.0 };
+        let mut p = p_base * if happy { 1.5 } else { 1.0 };
+        if crate::systems::health::on(world) {
+            let (ea, eb) = (crate::systems::health::effects(world, a), crate::systems::health::effects(world, b));
+            p *= f64::from(ea.conceive_mult * eb.conceive_mult);
+        }
         if world.rng.world().random_bool(p.min(1.0)) {
             born.push((a, b, home));
         }
@@ -977,7 +996,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     // M15 W25: an immigrant's own draw (after the Personality it tilts on).
     let social = crate::systems::moves::seed_skills(world, id);
     crate::systems::moves::give_social(world, id, social);
-    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
+    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
     world.insert(
         id,
         Needs {

@@ -370,11 +370,14 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         ActionKind::BuyFood => {
             let market = world.local(id, BuildingKind::Market);
             let units = economy::buy_quantity(world, id, market);
-            let paid = economy::pay_for_food(world, id, market, units);
+            // Hunger as sickness § 1: the meal's quality, chosen before the
+            // coins move (`Real` with the diet off).
+            let q = economy::quality_at(world, id, market);
+            let paid = economy::pay_for_food_q(world, id, market, units, q);
             // L2 shadow fixes item 4: the units move with the coins (an
             // interrupted purchase was refunded and bought again: 12 food
             // flows for 6 meals); `(0, 0)` marks a shelf found empty.
-            let taken = economy::take_food(world, id, market, units, paid);
+            let taken = economy::take_food_q(world, id, market, units, paid, q);
             world.pending_purchase.insert(id, if taken { (units, 0) } else { (0, 0) });
         }
         ActionKind::Wander => {
@@ -561,11 +564,12 @@ pub fn on_complete(
             if inv.food == 0 {
                 return StepResult::Failed(FailReason::StockGone);
             }
-            inv.food -= 1;
+            let meal = crate::systems::health::eat_inventory_unit(inv);
             inv.stolen_food = inv.stolen_food.min(inv.food);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
+            crate::systems::health::ate(world, id, meal);
             world.mark_day(id, crate::components::trace_flags::ATE);
             world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             StepResult::Done
@@ -578,11 +582,12 @@ pub fn on_complete(
             if b.stock_food == 0 {
                 return StepResult::Failed(FailReason::StockGone);
             }
-            b.stock_food -= 1;
+            let meal = crate::systems::health::eat_pantry_unit(b);
             world.release_all(id);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
+            crate::systems::health::ate(world, id, meal);
             world.mark_day(id, crate::components::trace_flags::ATE);
             world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             StepResult::Done
@@ -595,8 +600,13 @@ pub fn on_complete(
             let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
             let Some(inv) = world.comp_mut::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
             let movable = (inv.food - inv.stolen_food).min(room);
+            // Hunger as sickness § 1: the synth meals go in with the rest.
+            let synth = inv.synth_held().min(movable);
+            inv.synth = inv.synth_held() - synth;
             inv.food -= movable;
+            inv.synth = inv.synth.min(inv.food);
             if let Some(b) = world.comp_mut::<Building>(home) {
+                b.synth_food = b.synth_food.min(b.stock_food) + synth;
                 b.stock_food += movable;
             }
             StepResult::Done

@@ -366,6 +366,8 @@ pub fn accrue_fab_work(world: &mut World, worker: EntityId, fab: EntityId, ticks
     let cfg = &world.config.jobs;
     let farming = world.comp::<Skills>(worker).map_or(0.0, |s| s.farming);
     let mut per_hour = cfg.fab_yield * (cfg.fab_skill_floor + cfg.fab_skill_slope * farming);
+    // Hunger as sickness § 2 (x 1.0 off: exact).
+    per_hour *= crate::systems::health::work_mult(world, worker);
     if let Some(c) = world.corp_of_building(fab) {
         per_hour *= crate::systems::competence::comp_mult(world, c);
     }
@@ -448,7 +450,7 @@ pub fn scavenge_p(world: &World, id: EntityId) -> f32 {
         .map(|pos| world.district_of(pos.tile))
         .and_then(|d| world.districts.get(d.index()))
         .map_or(0.0, |d| d.litter.clamp(0.0, 1.0));
-    p * (0.5 + litter).max(1.0)
+    p * (0.5 + litter).max(1.0) * crate::systems::health::work_mult(world, id)
 }
 
 /// Plan L9: a seller owner's `Flow::Import` coins go into its 14-day tally

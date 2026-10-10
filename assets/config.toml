@@ -2061,3 +2061,58 @@ wage = 5
 shift = "day"
 skill = "fighting"
 model = "contract"                 # paid by the camp's owner at shift end (a city camp: the Treasury, in civic_payroll); the model has no code in P3
+
+# ---------------------------------------------------------------------------
+# Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values; every
+# key read only with `enabled`. Dylan 2026-10-10: on with the flip (wages + no_safety_net), off until then.
+[sickness]
+enabled = false            # master; off is the city before it
+diet = true                # § 1-2: synth/real, the meters, the debuffs
+bins = true                # § 4
+cancer = true              # § 3
+synth_stretch = 3          # meals per shelf unit cut with filler (a synth meal ~1 coin at P 3-4)
+real_floor_meals = 10      # buy real at coins >= this many real meals ...
+mal_seek_real = 0.5        # ... or when this malnourished with 2 real meals' coins
+mal_hungry_edge = 0.25     # an hour below this hunger is a hungry hour
+mal_hungry = 0.08          # malnutrition per fully hungry day (~12 days to 1.0)
+mal_poor_diet = 0.012      # per day at an all-synth diet (~25 days to the onset)
+mal_real = 0.02            # off per real meal (max 2 a day)
+mal_onset = 0.3
+tox_synth = 0.005          # per synth or Mission meal
+tox_dive = 0.012           # per bin meal
+tox_clear = 0.003          # a day
+tox_onset = 0.4
+mal_energy = 0.5
+tox_energy = 0.3
+cancer_energy = 1.0
+mal_work = 0.4
+cancer_work = 0.5
+sick_mal = 0.3
+sick_fire_days = 5         # sick days in the last 14 that cost the job (Dylan)
+mal_mood = 0.2
+tox_mood = 0.15
+cancer_mood = 0.3
+frail_old = 2.0
+frail_fight = 0.2
+fertile_mal_max = 0.5
+cancer_tox_min = 0.6
+cancer_p = 0.003           # a day at toxicity 1.0
+cancer_growth = 0.015      # stage a day: ~67 days from onset to death (two seasons)
+cancer_symptom = 0.25
+cancer_treat_price = 240   # ~30-40 days of a wage: the sink (wallet, then spouse/kin, then the gang)
+cure_stage = 0.6
+remission = 0.4
+treat_tox_mult = 0.5
+p_stat_treat = 0.2
+bin_cap = 40
+bin_meals_per_unit = 2
+venue_scrap = 0.3
+bin_rot = 0.5
+dive_reach_tiles = 40
+dive_satisfy = 0.6
+dive_sick_p = 0.05
+regular_days = 3
+bin_gang_control = 0.5
+bin_shake_p = 0.3
+bin_toll = 1
+starve_grace_days = 7

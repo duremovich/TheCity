@@ -117,6 +117,8 @@ pub fn run(world: &mut World) {
         }
         // M13 D39: one Body read (withdrawal is derived from `last_use`).
         let energy_mult = if assets { crate::systems::stims::energy_mult(world, id) } else { None };
+        // Hunger as sickness § 2: the body's energy debuff (None stays None off).
+        let energy_mult = crate::systems::health::energy_mult(world, id, energy_mult);
         let sleeping = matches!(brain.exec, ExecState::Use { kind: ActionKind::Sleep, .. });
         let sleeping_outside = sleeping && world.comp::<Position>(id).is_some_and(|p| p.building.is_none());
         let farm_working = matches!(brain.exec, ExecState::Use { kind: ActionKind::FarmWork, .. });
@@ -149,6 +151,8 @@ pub fn run(world: &mut World) {
     if hourly {
         for id in world.bodies() {
             world.recompute_wealth_for(id);
+            // Hunger as sickness § 2: the hour's hungry mark.
+            crate::systems::health::hourly_mark(world, id);
         }
         // L2 L13: an hour of `fun` at every body (a no-op with leisure off).
         crate::systems::leisure::bodies_hourly(world);
@@ -159,7 +163,12 @@ pub fn run(world: &mut World) {
 /// Coarse agents, hourly for Statistical ones.
 pub fn starvation(world: &mut World, id: EntityId) {
     let tick = world.tick;
-    let grace = world.config.needs.starvation_grace_ticks;
+    // Hunger as sickness § 7: a week at hunger 0, not three days.
+    let grace = if crate::systems::diet::on(world) {
+        world.config.sickness.starve_grace_days * time::TICKS_PER_DAY
+    } else {
+        world.config.needs.starvation_grace_ticks
+    };
     let Some(n) = world.comp_mut::<Needs>(id) else { return };
     if n.hunger > 0.0 {
         n.starving_since = None;

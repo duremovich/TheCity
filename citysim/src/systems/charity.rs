@@ -632,7 +632,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             let served = charity(world, m).map_or(0, |c| if c.hour_key == hour { c.meals_this_hour } else { 0 });
             here == Some(m)
                 && !world.is_closed(m)
-                && world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0)
+                && world
+                    .comp::<Building>(m)
+                    .is_some_and(|bd| bd.stock_food > 0 || bd.charity.as_ref().is_some_and(|c| c.synth_frac > 0))
                 && (staff || (hungry && poor))
                 && served < hour_cap(world, m)
         }
@@ -648,11 +650,20 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 /// ledger-only `Alms` line at the meal's cost, the district's `d_meals`.
 fn serve(world: &mut World, m: EntityId, id: EntityId) -> bool {
     let hour = world.tick / TICKS_PER_HOUR;
+    // Hunger as sickness § 1: the Mission serves synth, `synth_stretch`
+    // meals a shelf unit (the open unit's first).
+    let stretch = if crate::systems::diet::on(world) { crate::systems::diet::stretch(world) } else { 1 };
     let Some(bd) = world.comp_mut::<Building>(m) else { return false };
-    if bd.stock_food == 0 {
-        return false;
+    let frac = bd.charity.as_ref().map_or(0, |c| c.synth_frac);
+    if frac == 0 {
+        if bd.stock_food == 0 {
+            return false;
+        }
+        bd.stock_food -= 1;
     }
-    bd.stock_food -= 1;
+    if let Some(c) = bd.charity.as_mut() {
+        c.synth_frac = (frac + 1) % stretch;
+    }
     if let Some(c) = bd.charity.as_mut() {
         c.meals_today = c.meals_today.saturating_add(1);
         if c.hour_key != hour {
@@ -665,9 +676,11 @@ fn serve(world: &mut World, m: EntityId, id: EntityId) -> bool {
     if let Some(n) = world.comp_mut::<Needs>(id) {
         crate::needs::eat(n, &cfg);
     }
+    crate::systems::health::ate(world, id, crate::components::MealKind::Alms);
     world.mark_day(id, crate::components::trace_flags::ATE);
     world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
-    let cost = meal_cost(world);
+    let cost =
+        if stretch > 1 { (meal_cost(world) + i64::from(stretch) / 2) / i64::from(stretch) } else { meal_cost(world) };
     ownership::ledger_only(world, Flow::Alms, cost);
     let d = district_of_agent(world, id);
     let row = &mut world.stats.current.econ;

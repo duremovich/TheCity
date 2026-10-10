@@ -601,6 +601,10 @@ pub struct World {
     /// camp; empty stores are not written.
     #[serde(default, skip_serializing_if = "all_none")]
     pub camp_raised: Vec<Option<crate::econ::CampRaised>>,
+    /// Hunger as sickness § 2: the meters (only with `[sickness]` on; an
+    /// empty store is not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub health: Vec<Option<crate::components::Health>>,
     /// M15 W6: one rumour pool per district (`DistrictId` order).
     #[serde(default)]
     pub rumours: Vec<crate::word::RumourPool>,
@@ -910,6 +914,7 @@ components! {
     grudges: crate::word::Grudges,
     broker: crate::contract::Broker,
     camp_raised: crate::econ::CampRaised,
+    health: crate::components::Health,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -1133,6 +1138,7 @@ impl World {
             grudges: Vec::new(),
             broker: Vec::new(),
             camp_raised: Vec::new(),
+            health: Vec::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
             kill_watch: VecDeque::new(),
@@ -1314,6 +1320,7 @@ impl World {
                     input_accum: 0.0,
                     floors: def.floors,
                     floor_days: 0,
+                    synth_food: 0,
                 },
             );
             match def.kind {
@@ -1391,7 +1398,7 @@ impl World {
             self.insert(id, personality);
             self.insert(id, Mood::default());
             self.insert(id, Wallet { coins });
-            self.insert(id, Inventory { food, stolen_food: 0, stims: 0, parts: 0 });
+            self.insert(id, Inventory { food, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
             self.insert(id, Brain::default());
             self.insert(id, Memory::default());
             self.insert(id, skills);
@@ -2612,6 +2619,7 @@ impl World {
         self.grudges.resize_with(n.max(self.grudges.len()), || None);
         self.broker.resize_with(n.max(self.broker.len()), || None);
         self.camp_raised.resize_with(n.max(self.camp_raised.len()), || None);
+        self.health.resize_with(n.max(self.health.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);

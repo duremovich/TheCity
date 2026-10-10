@@ -191,6 +191,10 @@ pub struct Config {
     /// Jobs and room (docs/JOBS_V2.md § 2.3, plan J6-J8): floors.
     #[serde(default)]
     pub floors: FloorsCfg,
+    /// Hunger as sickness (docs/HUNGER_SICKNESS.md § 8): synth and real
+    /// meals, the malnutrition and toxicity meters, the bins, cancer.
+    #[serde(default)]
+    pub sickness: SicknessCfg,
     /// Jobs and room J9 (docs/JOBS_V2.md § 1.3): the configured trades
     /// (`[[trades]]` rows), `Role::Trade(TradeId)` indexing them. Read
     /// through [`trades_de`], which also makes the keys a save's
@@ -5003,6 +5007,8 @@ impl Config {
         self.economy.price_base = 3.0;
         self.economy2.wages = false;
         self.economy2.no_safety_net = false;
+        // Hunger as sickness: in flight, pinned off as the wages switches.
+        self.sickness.enabled = false;
         self
     }
 
@@ -5911,5 +5917,138 @@ impl FloorsCfg {
     /// J8: the most floors a `kind` may have (1 when not listed).
     pub fn max_for(&self, kind: BuildingKind) -> u8 {
         self.floors_max.iter().find(|(k, _)| BuildingKind::parse(k) == Some(kind)).map_or(1, |(_, &v)| v.max(1))
+    }
+}
+
+/// `[sickness]` (docs/HUNGER_SICKNESS.md § 8; starting values). Every key
+/// is read only with `enabled` (in flight: off is the city before it).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SicknessCfg {
+    pub enabled: bool,
+    /// § 1-2: synth and real meals, the meters, the debuffs.
+    pub diet: bool,
+    /// § 4: the bins and the dive.
+    pub bins: bool,
+    /// § 3: cancer and its treatment.
+    pub cancer: bool,
+    /// Synth meals a shelf unit is cut into (each at a `1 / stretch` price).
+    pub synth_stretch: u32,
+    /// Buy real at coins >= this many real meals ...
+    pub real_floor_meals: i64,
+    /// ... or this malnourished with two real meals' coins.
+    pub mal_seek_real: f32,
+    /// An hour below this hunger is a hungry hour.
+    pub mal_hungry_edge: f32,
+    /// Malnutrition per fully hungry day.
+    pub mal_hungry: f32,
+    /// Malnutrition per day at an all-synth (or scraps) diet.
+    pub mal_poor_diet: f32,
+    /// Malnutrition off per real meal (two a day at most).
+    pub mal_real: f32,
+    pub mal_onset: f32,
+    /// Toxicity per synth or Mission meal.
+    pub tox_synth: f32,
+    /// Toxicity per bin meal.
+    pub tox_dive: f32,
+    /// Toxicity cleared a day.
+    pub tox_clear: f32,
+    pub tox_onset: f32,
+    pub mal_energy: f32,
+    pub tox_energy: f32,
+    pub cancer_energy: f32,
+    pub mal_work: f32,
+    pub cancer_work: f32,
+    /// A day's sick chance per unit of malnutrition past the onset (scaled).
+    pub sick_mal: f32,
+    /// Sick days in the last 14 that cost the job (Dylan, decision 4).
+    pub sick_fire_days: u32,
+    pub mal_mood: f32,
+    pub tox_mood: f32,
+    pub cancer_mood: f32,
+    /// The old-age hazard x (1 + this x (m + t)).
+    pub frail_old: f32,
+    /// The fight's skill term less this x (m' + c).
+    pub frail_fight: f32,
+    /// No conception at or above this malnutrition.
+    pub fertile_mal_max: f32,
+    pub cancer_tox_min: f32,
+    pub cancer_p: f32,
+    pub cancer_growth: f32,
+    pub cancer_symptom: f32,
+    pub cancer_treat_price: i64,
+    pub cure_stage: f32,
+    pub remission: f32,
+    pub treat_tox_mult: f32,
+    pub p_stat_treat: f32,
+    pub bin_cap: u16,
+    pub bin_meals_per_unit: u16,
+    pub venue_scrap: f32,
+    pub bin_rot: f32,
+    pub dive_reach_tiles: u32,
+    pub dive_satisfy: f32,
+    pub dive_sick_p: f32,
+    pub regular_days: u8,
+    pub bin_gang_control: f32,
+    pub bin_shake_p: f32,
+    pub bin_toll: i64,
+    /// Days at hunger 0 before a death by starvation.
+    pub starve_grace_days: u64,
+}
+
+impl Default for SicknessCfg {
+    fn default() -> Self {
+        SicknessCfg {
+            enabled: false,
+            diet: true,
+            bins: true,
+            cancer: true,
+            synth_stretch: 3,
+            real_floor_meals: 10,
+            mal_seek_real: 0.5,
+            mal_hungry_edge: 0.25,
+            mal_hungry: 0.08,
+            mal_poor_diet: 0.012,
+            mal_real: 0.02,
+            mal_onset: 0.3,
+            tox_synth: 0.005,
+            tox_dive: 0.012,
+            tox_clear: 0.003,
+            tox_onset: 0.4,
+            mal_energy: 0.5,
+            tox_energy: 0.3,
+            cancer_energy: 1.0,
+            mal_work: 0.4,
+            cancer_work: 0.5,
+            sick_mal: 0.3,
+            sick_fire_days: 5,
+            mal_mood: 0.2,
+            tox_mood: 0.15,
+            cancer_mood: 0.3,
+            frail_old: 2.0,
+            frail_fight: 0.2,
+            fertile_mal_max: 0.5,
+            cancer_tox_min: 0.6,
+            cancer_p: 0.003,
+            cancer_growth: 0.015,
+            cancer_symptom: 0.25,
+            cancer_treat_price: 240,
+            cure_stage: 0.6,
+            remission: 0.4,
+            treat_tox_mult: 0.5,
+            p_stat_treat: 0.2,
+            bin_cap: 40,
+            bin_meals_per_unit: 2,
+            venue_scrap: 0.3,
+            bin_rot: 0.5,
+            dive_reach_tiles: 40,
+            dive_satisfy: 0.6,
+            dive_sick_p: 0.05,
+            regular_days: 3,
+            bin_gang_control: 0.5,
+            bin_shake_p: 0.3,
+            bin_toll: 1,
+            starve_grace_days: 7,
+        }
     }
 }

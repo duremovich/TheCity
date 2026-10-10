@@ -1195,6 +1195,7 @@ pub fn abort_paid(world: &mut World, id: EntityId, kind: ActionKind, started: Ti
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     crate::needs::eat(n, &cfg);
                 }
+                crate::systems::health::ate(world, id, crate::components::MealKind::Real);
                 world.mark_day(id, crate::components::trace_flags::ATE);
                 world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             }
@@ -1231,6 +1232,7 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     crate::needs::eat(n, &cfg);
                 }
+                crate::systems::health::ate(world, id, crate::components::MealKind::Real);
                 world.mark_day(id, crate::components::trace_flags::ATE);
                 world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             }

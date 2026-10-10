@@ -546,7 +546,9 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     if crate::systems::robots::is_robot(world, a) || crate::systems::robots::is_robot(world, b) {
         return resolve_robot_fight(world, a, b, mods);
     }
-    let (fi, co) = (fighting, courage);
+    // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
+    let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
+    let co = courage;
     let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
     let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
     let fi_a = if mods.a_bonus != 0.0 { fi(world, a) + mods.a_bonus } else { fi(world, a) };

@@ -217,6 +217,14 @@ pub struct Charity {
     /// shift); cleared on the hour.
     pub meals_this_hour: u16,
     pub hour_key: u64,
+    /// Hunger as sickness § 1: synth meals served out of the shelf unit last
+    /// opened (`0..synth_stretch`).
+    #[serde(skip_serializing_if = "crate::econ::is_zero_u32")]
+    pub synth_frac: u32,
+}
+
+pub fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 impl Charity {
