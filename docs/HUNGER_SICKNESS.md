@@ -195,3 +195,15 @@ A second food good or a World book for synth; children's meters (they eat from t
 7. **`hunger_fixes` on by default at merge** (the `violence_fixes` precedent)? It changes the default city and needs a `calibrate` before the flip. Recommended: yes.
 8. **Bin contests.** Intimidate plus a gang shakedown or light Assault, or may a bin fight escalate to a killing?
 9. **Cancer volume.** The starting keys aim at roughly 20-40 Disease deaths a year at 2,000 residents (violent deaths are ~115-160 per 120 days). More, or less?
+
+## Decisions (Dylan, 2026-10-10)
+
+1. `[sickness]` turns on with the flip (one recalibration); off in the dole city until then.
+2. The stretch model is confirmed: 1 shelf unit = `synth_stretch` 3 synth meals at a third of the price.
+3. Treatment is paid by the patient's wallet first, then a spouse/kin pool, then the gang for its own members.
+4. Sick days cost the wage, and a streak costs the job (starting value: 5 sick days in 14 = fired).
+5. With sickness on, `core_sanity`'s starvation collapse bound tightens from 200 to 20 per 120 days.
+6. Children carry the malnutrition meter in v1 (debuffs only); no toxicity cancer roll for children.
+7. `[life] hunger_fixes` is on by default at merge, as `violence_fixes` was.
+8. A bin fight is intimidation plus a light assault, and it can escalate through the normal combat rolls, so a death is possible but rare.
+9. 20-40 cancer deaths a year at 2,000 is a printed target, not an assert.
