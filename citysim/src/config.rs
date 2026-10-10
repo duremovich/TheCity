@@ -5122,6 +5122,10 @@ impl Config {
     /// rent, the tiered opening wallets, the class coupling and the seeded
     /// derelicts are the shipped city's now; three pooled seeds average one
     /// seed's landlords out.
+    /// The Full city size the shipped planner budgets serve
+    /// (`calibration_city` scales them past it).
+    pub const PLAN_BUDGET_REF_AGENTS: u32 = 500;
+
     pub fn calibration_city(self, n: u32) -> Config {
         let mut c = self.scaled_to(n);
         c.gangs.max_members = 0;
@@ -5146,6 +5150,15 @@ impl Config {
         // parity test model the off-screen hours of the city the config
         // ships; on the default config both are off). `v1_profile` still pins
         // them off.
+        // Hunger as sickness P5h (a harness change): the planner budgets were
+        // tuned for a 500-agent Full city; the all-Full calibration and
+        // parity cities scale them by n / 500 (never below the shipped
+        // values). At 2,000 on budget 12 the queue held ~480 and 12% of
+        // shift time was a Work goal waiting on a plan (1.1% at 4x).
+        let scale = (f64::from(n) / f64::from(Self::PLAN_BUDGET_REF_AGENTS)).max(1.0);
+        c.brain.plan_budget_per_tick = (c.brain.plan_budget_per_tick as f64 * scale).ceil() as usize;
+        c.brain.plan_expansion_budget_per_tick =
+            (c.brain.plan_expansion_budget_per_tick as f64 * scale).ceil() as usize;
         c
     }
 

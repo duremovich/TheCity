@@ -599,3 +599,41 @@ fn test_no_net_child_keeps_the_starving_theft_rule() {
         assert_eq!(stole, starving, "starving {starving}: a child steals only when starving");
     }
 }
+
+/// Hunger as sickness P5h (a harness change): the all-Full calibration and
+/// parity cities scale the planner budgets by n / 500 (never below the
+/// shipped values), so a 2,000-agent Full city is not a planner-starved one.
+#[test]
+fn test_calibration_city_scales_the_planner_budget() {
+    let base = Config::load();
+    let (p, e) = (base.brain.plan_budget_per_tick, base.brain.plan_expansion_budget_per_tick);
+    let at = |n: u32| {
+        let c = Config::load().calibration_city(n);
+        (c.brain.plan_budget_per_tick, c.brain.plan_expansion_budget_per_tick)
+    };
+    assert_eq!(at(500), (p, e));
+    assert_eq!(at(250), (p, e), "never below the shipped budget");
+    assert_eq!(at(2000), (4 * p, 4 * e));
+}
+
+/// Hunger as sickness P5h, a printed finding (not an assert): the planner
+/// queue in the shipped mixed-LOD city on seed 42 (does a busy on-screen
+/// crowd starve the planner in the real game too?). Max and mean queue
+/// length sampled hourly, and the stale drops, over 3 days.
+#[test]
+fn finding_planner_queue_shipped_city() {
+    let mut w = World::new(42, Config::load());
+    let mut lens = Vec::new();
+    let mut full_max = 0;
+    for _ in 0..(3 * 24) {
+        w.run_ticks(TICKS_PER_HOUR);
+        lens.push(w.plan_queue.len());
+        full_max = full_max.max(counts(&w).0);
+    }
+    let max = lens.iter().copied().max().unwrap_or(0);
+    let mean = lens.iter().sum::<usize>() as f64 / lens.len().max(1) as f64;
+    eprintln!(
+        "FINDING planner queue (shipped, seed 42, 3 days): budget {}/tick; queue max {max} mean {mean:.1}; stale drops {}; Full agents max {full_max}",
+        w.config.brain.plan_budget_per_tick, w.plan_stale_drops
+    );
+}

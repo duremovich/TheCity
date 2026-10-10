@@ -286,7 +286,19 @@ Each commit message holds its numbers.
   The off-screen tier eats the hour it is hungry (an old gap, inside the old 0.5 floor) and reaches bins from its Home door, while a body reaches from where it stands. This is the next mechanism to close.
 - **The default city, recalibrated:** off-screen thefts fall (seed 42 × 60: 917 vs 3,675 on the stale table) and starvation rises to the all-Full ground truth (18-33 per 120 days).
 
+## Implemented: P5g-P5h, commute geography (2026-10-10)
+
+Dylan's calls: relocation plus a hiring cap (P5g); the city grows toward jobs (P5h); transit (the El) is its own milestone and the flip does not wait for it. Map-agnostic: nothing reads where today's Farms sit.
+- **One commute measure:** `life::commute_cost(world, home_door, work_door)` in travel ticks (today the walk, tiles x `move_ticks_full`; the El swaps the body). Every rule below reads it.
+- **Item 8, relocation** (`hf_relocate`): a worker past `commute_move_ticks` 80 moves to the nearest Home with room within that of work on the first rent (not `rehouse_coins_mult` 21x), saving `commute_margin_ticks` 40; with no room, it trades Homes with a single resident there whose own day gets no worse. `relocate_per_1000` 20 a day. P5h: a couple with two jobs moves when their commutes together shrink by the margin (before, a working spouse pinned the household).
+- **Item 9, the hiring band** (`hf_hire_near`): a candidate within `commute_hire_ticks` 80 is hired before any beyond it; world creation runs relocation uncapped after `seed_staff`.
+- **Item 10, housing toward jobs** (`hf_grow_housing`): workers past the cap are demand at their employer; with demand >= `housing_demand_min` 6 and fewer free beds than that in range for `housing_demand_days` 3 midnights, a Home goes up on the nearest vacant Lot in range (plain Lots before shanties), else a floor on the nearest Home in range; `housing_builds_per_1000` 1 a day. **Paid, never magic:** the employer's owner corp pays `found_cost` / `floor_cost` (`Flow::Found`); else the Treasury buys it from the World (`ownership::import`, `ImportWhy::Build`) if it keeps `[treasury] band[0]`; else nothing goes up that day.
+- **Measured** (flipped seed 42, all-Full, tiles home door to work door): median / p75 / p90 68 / 124 / 156 on day 0; 36 / 40 / 60 on day 60 (item 10 off: 72 / 136 / 180); farmers 108 → 36; 34 Homes on Lots and 77 floors by day 60, 82 Lots left. The shift-time commute share barely moved (15.7 % → 13.8 %): what is left is mid-shift trips and the planner (P5i).
+- **The calibration harness:** the planner budget scales in `calibration_city` (TESTING.md).
+
 ## Open items (after P5)
 
+- **Workplace canteens (filed, not built):** food stock at the workplace sold to its staff on shift (a company-store angle: the employer sets the price and keeps the till). Later.
+
 - **Marriage parity (default config):** Full 0.86 against Statistical 0.32 marriages per 100 agent-days. This is a density gap from the recalibration's 2,000-resident calibration city (the recal tree saw it too) and predates hunger as sickness. It is filed here, not chased.
-- **P5g (held for Dylan's city-design call):** the median commute is about 90 tiles, roughly 3 hours each way (farmers median 116 tiles, about 400 of them past 60). This is the bulk of Full's missed shift time. The options (a commute cap in hiring, relocation workers can afford, quits for a nearer post, transit) are with Dylan.
+- **Homeless employed** climbs to ~210-260 by day 60 on the flipped city whether items 8-10 are on or off (145 with the planner budget scaled): to look at after the class-tiered pay merge.

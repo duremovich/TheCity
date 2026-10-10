@@ -29,6 +29,7 @@ pub fn run(world: &mut World) {
             b.plan_queued = false;
         }
         if tick.saturating_sub(enqueued) > PLAN_QUEUE_MAX_AGE {
+            world.plan_stale_drops += 1;
             continue; // stale: the agent idles until its next think
         }
         let Some(goal) = world.comp::<Brain>(id).filter(|b| b.plan.is_none()).and_then(|b| b.current_goal) else {

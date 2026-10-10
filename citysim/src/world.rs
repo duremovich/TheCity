@@ -465,6 +465,10 @@ pub struct World {
     pub next_event_id: u64,
     /// Value = enqueue tick.
     pub plan_queue: BTreeMap<(Urgency, EntityId), Tick>,
+    /// Hunger as sickness P5h (a printed finding): queue entries dropped
+    /// stale (`plan::PLAN_QUEUE_MAX_AGE`), counted since world creation.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub plan_stale_drops: u64,
     pub reservations: BTreeMap<EntityId, Vec<Reservation>>,
     pub door_queue: BTreeMap<TilePos, u8>,
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
@@ -1127,6 +1131,7 @@ impl World {
             debug_events: VecDeque::new(),
             next_event_id: 0,
             plan_queue: BTreeMap::new(),
+            plan_stale_drops: 0,
             reservations: BTreeMap::new(),
             door_queue: BTreeMap::new(),
             flow_fields: FlowCache::default(),
