@@ -648,6 +648,10 @@ pub struct World {
     /// empty store is not written).
     #[serde(default, skip_serializing_if = "all_none")]
     pub health: Vec<Option<crate::components::Health>>,
+    /// Class pay (docs/CLASS_PAY.md): backgrounds (only with class pay on;
+    /// an empty store is not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub schooling: Vec<Option<crate::components::Schooling>>,
     /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
     #[serde(skip)]
     pub bins: BTreeSet<EntityId>,
@@ -965,6 +969,7 @@ components! {
     broker: crate::contract::Broker,
     camp_raised: crate::econ::CampRaised,
     health: crate::components::Health,
+    schooling: crate::components::Schooling,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -1190,6 +1195,7 @@ impl World {
             broker: Vec::new(),
             camp_raised: Vec::new(),
             health: Vec::new(),
+            schooling: Vec::new(),
             bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
@@ -1310,7 +1316,12 @@ impl World {
         systems::econ::seed_capital(&mut w);
         // Flip readiness (the transition wave; wages on): the no-dole city's
         // staffing before day 0, from the capital just seeded (no RNG).
+        // Class pay (docs/CLASS_PAY.md): the backgrounds, then the staffing
+        // (graded posts first, by merit), then the posts the graded hires
+        // left and the skilled grade (no RNG).
+        systems::classpay::seed_schooling(&mut w);
         systems::wages::seed_staff(&mut w);
+        systems::classpay::seed_after_staff(&mut w);
         // Hunger fix item 9 (P5g): the seeded staff housed near work where
         // Homes allow (the relocation pass, uncapped; no RNG).
         if systems::fixes::hire_near(&w) {
@@ -1612,6 +1623,7 @@ impl World {
                         premium: 1.0,
                         paid_once: true,
                         duty_fixed: None,
+                        grade: 0,
                     },
                 );
             }
@@ -2686,6 +2698,7 @@ impl World {
         self.broker.resize_with(n.max(self.broker.len()), || None);
         self.camp_raised.resize_with(n.max(self.camp_raised.len()), || None);
         self.health.resize_with(n.max(self.health.len()), || None);
+        self.schooling.resize_with(n.max(self.schooling.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);

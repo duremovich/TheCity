@@ -781,7 +781,11 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
     // Real economy phase 2 (plan E16): the gross is the corp's payroll.
-    ownership::note_payroll(world, payer, gross);
+    // Class pay P3: a graded wage's premium over the labour rate is not the
+    // labour pool's: it is noted apart (paid out of capital and profit).
+    let premium = crate::systems::classpay::premium_of(world, &job, gross);
+    ownership::note_payroll(world, payer, gross - premium);
+    ownership::note_premium(world, payer, premium);
     // L2 fix round: the first wage marks the job paid (`gang::desist` reads it).
     if paid > 0 {
         if let Some(j) = world.comp_mut::<Job>(agent).filter(|j| !j.paid_once) {

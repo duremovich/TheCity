@@ -333,7 +333,7 @@ pub fn drink_fun(world: &mut World, id: EntityId) {
 }
 
 /// The fun an `Enjoy` (or a meal, a table) at `b` gives.
-fn gain_at(world: &World, b: EntityId) -> f32 {
+pub(crate) fn gain_at(world: &World, b: EntityId) -> f32 {
     let g = &world.config.leisure.gain;
     match world.comp::<Building>(b).map(|bd| (bd.kind, bd.tier)) {
         Some((BuildingKind::Club, 2)) => g.club_spire,
@@ -359,7 +359,7 @@ fn belonging_at(world: &World, b: EntityId) -> f32 {
 
 /// A payment into a venue (`Flow::Leisure` or `Flow::Gamble`): `pay` and
 /// `credit`, the `SetLeisureTax` surcharge (plan L37), the front's take.
-fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: i64, flow: Flow) -> i64 {
+pub(crate) fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: i64, flow: Flow) -> i64 {
     let owner = world.owner_of(b);
     let paid = ownership::pay(world, Some(from), owner, amount, flow);
     if paid <= 0 {

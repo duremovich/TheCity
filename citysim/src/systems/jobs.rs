@@ -41,6 +41,11 @@ pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
     let Some((kind, floors)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.floors.max(1))) else { return 0 };
     if let Role::Trade(t) = role {
         let Some(row) = world.config.trade(t).filter(|r| r.workplace.contains(&kind)) else { return 0 };
+        // Class pay: a `classpay` row only with class pay on; a
+        // `corp_only` row only at a corp's workplace.
+        if !world.config.trade_live(row) || (row.corp_only && world.corp_of_building(b).is_none()) {
+            return 0;
+        }
         if row.per_owned > 0 {
             return crate::systems::trades::owned_places(world, b, row);
         }

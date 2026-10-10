@@ -1452,6 +1452,14 @@ pub struct Corp {
     /// asset_import_per_day`), zeroed at the midnight roll; wages on only.
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub import_today: i64,
+    /// Class pay (docs/CLASS_PAY.md P3): today's graded premium (the part of
+    /// a graded wage above the labour rate), paid out of capital and profit,
+    /// not the labour pool; rolled into a 7-day window at midnight. Written
+    /// only with class pay on.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub prem_today: i64,
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub prem: VecDeque<i64>,
 }
 
 fn is_zero_f32_c(v: &f32) -> bool {
@@ -1524,6 +1532,8 @@ impl Corp {
             hire_days: 0,
             fire_days: 0,
             import_today: 0,
+            prem_today: 0,
+            prem: VecDeque::new(),
         }
     }
 
@@ -1701,6 +1711,15 @@ pub struct Job {
     /// (`(key, jail)`), set as the key comes due (`law::credit_guard_shifts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duty_fixed: Option<(i64, bool)>,
+    /// Class pay (docs/CLASS_PAY.md): the post's grade (0 labour, 1
+    /// skilled, 2 professional, 3 management), fixed in `wage_per_day` at
+    /// hire or promotion; always 0 with class pay off (not written).
+    #[serde(default, skip_serializing_if = "is_zero_grade")]
+    pub grade: u8,
+}
+
+fn is_zero_grade(v: &u8) -> bool {
+    *v == 0
 }
 
 fn true_() -> bool {
@@ -3904,6 +3923,16 @@ pub struct MealTally {
     pub dive: u8,
     pub alms: u8,
     pub hungry_hours: u8,
+}
+
+/// Class pay (docs/CLASS_PAY.md): an adult's background, made only with
+/// class pay on. `origin` is the class it was seeded, born or arrived into
+/// (0 Dreg, 1 Sump, 2 Mid, 3 Spire, by Home tier); `education` (0..=1) is
+/// the origin's mean plus a pure-hash spread, a child's its parents' mean.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Schooling {
+    pub origin: u8,
+    pub education: f32,
 }
 
 /// A cancer rolled from high toxicity (§ 3).
