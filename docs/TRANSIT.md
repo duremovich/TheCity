@@ -160,6 +160,20 @@ Train entities, capacity and platform queues; buses and road transit; sabotage, 
 
 ---
 
+## 9. Map port
+
+Dylan is building a much bigger city in a separate layout repo: a Hong Kong-like island, 6 × 3.75 km on 2 m tiles (~3,000 × 1,875 tiles), about 14.5k lots, with **an elevated rail layer of its own**. The three hand-placed lines of § 2 (waypoints on the 256 × 192 map's `7 + 8k` road lines) are scaffolding for this map only. When the city moves to the new layout, **lines and stops come from the map data**, not from `[[transit.lines]]` waypoints.
+
+What keeps that swap cheap (phase 1 already holds to it):
+
+- **One entry point.** `transit::build` turns *some* description of lines into the derived `Net` (stops, per-line stop order and ride offsets, the all-pairs table). Everything downstream (`route`, `choose`, the timetable, the legs, closures, columns, saves) reads only `Net` and stop indices, never waypoints or the config's line rows. The port replaces the front half of `build` (waypoints → track tiles → stops) with a reader of the layout's rail layer (track polylines and station positions as data); the back half (offsets, the table) stays.
+- **Stops are data, not geometry rules.** Spacing every `stop_spacing` tiles, snapping to the nearest Road tile and "a shared tile is a transfer" are the hand-placed fallback. A map that names its stations (and their street access points) gives stops directly; `stop_spacing` and the snap then go unused.
+- **Nothing saved depends on the layout.** The network is derived on creation and on load; saves hold only closures keyed by line and stop index, the day's load, and rides in progress. A map change invalidates those indices as it invalidates every saved position: a new map is a new world.
+- **Scale.** The table is all-pairs over stops (64 stops: 8 KB). On the island, with a few hundred stations, it's still small (300² × 8 bytes ≈ 0.7 MB) and built once; past ~1,000 stations, switch to per-line tables plus a transfer graph searched per query. `candidates` scans all stops linearly; at that size it wants a spatial index (a coarse grid of stop lists). Neither changes the interfaces.
+- **Ride time in metres.** `ride_ticks_per_tile`, `stop_spacing` and `min_ride_tiles` are per tile; on 2 m tiles they must be rescaled (or restated in metres and converted at load), as every distance knob in the config must.
+
+---
+
 ## Open questions for Dylan
 
 1. **Who owns the El?** Proposed: a corp concession (Arasaka: its guards become the inspectors, its cameras the station surveillance, its fares a raid prize). Alternatives: the city (fares fund police and sweepers through P5a's ring; the tax band falls), or a new transit corp (a tenth corp, a Niche the corp brain must learn: more work).
