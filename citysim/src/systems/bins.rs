@@ -86,10 +86,15 @@ pub fn market_sale(world: &mut World, b: EntityId, units: u32) {
     waste(world, b, scrap);
 }
 
-/// A meal eaten out of Home `b`'s pantry: `home_scrap` into its bin.
-pub fn home_meal(world: &mut World, b: EntityId) {
-    let scrap = world.config.sickness.home_scrap;
-    waste(world, b, scrap);
+/// `units` bought by `buyer`: `home_scrap` a unit into its Home's bin
+/// (household waste, booked at the purchase so both tiers make the same:
+/// a Full buyer eats from its hand where a Statistical one eats from the
+/// pantry, and a per-pantry-meal waste filled the off-screen city's bins
+/// three times as fast, parity after P5).
+pub fn household_waste(world: &mut World, buyer: EntityId, units: u32) {
+    let Some(home) = world.comp::<crate::components::Household>(buyer).and_then(|h| h.home) else { return };
+    let scrap = world.config.sickness.home_scrap * units as f32;
+    waste(world, home, scrap);
 }
 
 /// `scrap` of a meal into `b`'s bin through its fraction (`bin_accum`).
@@ -158,28 +163,25 @@ pub fn dive_target(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
-    if coins >= crate::systems::life::meal_price(world, id) {
+    let _ = coins;
+    if crate::systems::life::can_buy_meal(world, id) {
         return None;
     }
-    // A body dives from where it stands; off screen, from its Home's door
-    // (else its tile), as the Mission's reach is read (P5's trace: the
-    // off-screen stand-in stands at the phase's door, rarely near a bin).
-    let body = world.comp::<crate::components::Brain>(id).is_some_and(|b| b.lod != Lod::Statistical);
+    // One origin for both tiers (parity, after P5): the Home's door, else
+    // the squat's, else the tile, as the Mission's reach is read (an
+    // off-screen stand-in stands at its phase's door, so "where it stands"
+    // is no rule both tiers share). The starving walk `[life]
+    // hungry_reach_mult` further, G2's rule.
     let home_door = world
         .comp::<crate::components::Household>(id)
         .and_then(|h| h.home)
         .and_then(|h| world.comp::<Building>(h))
         .map(|b| b.door);
-    // P5 (the core_year trace: the off-screen starving were mostly squatters
-    // with no Home door, and housed agents of the poor blocks whose nearest
-    // bin stood past 40 tiles): a squatter reaches from its squat's door,
-    // and the starving walk `[life] hungry_reach_mult` further (G2's rule
-    // for a Mission).
     let squat_door =
         world.comp::<crate::components::Squatter>(id).and_then(|s| world.comp::<Building>(s.building)).map(|b| b.door);
     let from = match home_door.or(squat_door) {
-        Some(d) if !body => d,
-        _ => world.comp::<Position>(id)?.tile,
+        Some(d) => d,
+        None => world.comp::<Position>(id)?.tile,
     };
     let mut reach = world.config.sickness.dive_reach_tiles;
     if hunger < world.config.life.starving_hunger {

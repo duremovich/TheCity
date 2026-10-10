@@ -577,7 +577,14 @@ pub fn alms_target(world: &World, id: EntityId) -> Option<EntityId> {
     }
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let staff = volunteer_at(world, id);
-    if staff.is_none() && coins >= crate::systems::life::meal_price(world, id) {
+    // Hunger fix G2 (parity, after P5): with the fix on, "cannot buy" is
+    // no stocked Market within its means (`life::can_buy_meal`).
+    let can_buy = if crate::systems::fixes::mission_gate(world) {
+        crate::systems::life::can_buy_meal(world, id)
+    } else {
+        coins >= crate::systems::life::meal_price(world, id)
+    };
+    if staff.is_none() && can_buy {
         return None;
     }
     match staff {

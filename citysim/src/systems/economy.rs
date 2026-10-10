@@ -672,6 +672,7 @@ pub fn take_food_q(
         mk.synth_frac = frac;
     }
     crate::systems::bins::market_sale(world, m, units);
+    crate::systems::bins::household_waste(world, agent, units);
     if let Some(i) = world.comp_mut::<Inventory>(agent) {
         i.synth = i.synth_held() + meals;
         i.food += meals;
@@ -719,6 +720,7 @@ pub fn take_food(world: &mut World, agent: EntityId, market: Option<EntityId>, u
     if let Some(m) = market {
         crate::systems::bins::market_sale(world, m, units);
     }
+    crate::systems::bins::household_waste(world, agent, units);
     if let Some(i) = world.comp_mut::<Inventory>(agent) {
         i.food += units;
     }

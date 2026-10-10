@@ -2125,7 +2125,7 @@ venue_scrap = 0.3
 # pantry's 5 % floors to 0; the Markets' 1 % half rots by morning) and the off-screen starving had none in
 # reach. Waste scales with what is sold and eaten, as a city's does:
 market_waste = 0.2         # scrap meals into a Market's bin per shelf unit sold
-home_scrap = 0.2           # scrap meals into a Home's bin per pantry meal eaten
+home_scrap = 0.2           # scrap meals into the buyer's Home bin per unit bought (household waste; booked at the purchase, both tiers)
 bin_rot = 0.5
 dive_reach_tiles = 40
 dive_satisfy = 0.6

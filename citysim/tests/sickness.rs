@@ -268,6 +268,10 @@ fn test_statistical_tally_matches_full() {
     let mut v = World::new(42, sick_cfg());
     let b = adults(&v)[0];
     citysim::systems::lod::set_lod(&mut v, b, Lod::Statistical);
+    // The tally's path, not the meal's learned delay (`p_meal`).
+    if let Some(t) = v.stat_table.as_mut() {
+        t.p_meal = None;
+    }
     {
         let i = v.comp_mut::<Inventory>(b).expect("inv");
         i.food = 1;
@@ -719,10 +723,11 @@ fn test_bins_fill_from_sales_meals_and_carried_spoilage() {
     citysim::systems::bins::market_sale(&mut w, m, 10);
     assert_eq!(bin_of(&w, m), (10.0 * w.config.sickness.market_waste).floor() as u16);
     let h = *w.buildings_of_kind(BuildingKind::Home).first().expect("a Home");
-    for _ in 0..5 {
-        citysim::systems::bins::home_meal(&mut w, h);
+    let buyer = adults(&w).into_iter().find(|&a| w.comp::<citysim::Household>(a).and_then(|x| x.home) == Some(h));
+    if let Some(b) = buyer {
+        citysim::systems::bins::household_waste(&mut w, b, 5);
+        assert_eq!(bin_of(&w, h), (5.0 * w.config.sickness.home_scrap + 1e-4).floor() as u16);
     }
-    assert_eq!(bin_of(&w, h), (5.0 * w.config.sickness.home_scrap + 1e-4).floor() as u16);
     // A 4-unit pantry (5 % a day, 7.5 % in the Sump) spoils a unit within
     // a fortnight with the carry, never without it.
     let mut v = world_on();

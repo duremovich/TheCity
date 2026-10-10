@@ -52,6 +52,20 @@ pub fn travel(world: &World, tiles: u32) -> Consideration {
 }
 
 /// The local meal price (the Eat goal's), at least 1.
+/// Hunger as sickness (parity, after P5): can `id` buy a meal now: a
+/// stocked food Market (`World::food_market`) whose meal it can pay for. A
+/// city whose shelves are bare is no meal however many coins are held (the
+/// all-Full calibration city starved 199 in 30 days walking to empty
+/// Markets with the coins of a synth meal, never eligible for a bin or a
+/// Mission).
+pub fn can_buy_meal(world: &World, id: EntityId) -> bool {
+    let coins = coins(world, id);
+    world
+        .food_market(id)
+        .filter(|&m| world.comp::<Building>(m).is_some_and(|b| b.stock_food > 0))
+        .is_some_and(|m| coins >= crate::systems::diet::price_at(world, id, m).max(1))
+}
+
 pub fn meal_price(world: &World, id: EntityId) -> i64 {
     // Hunger as sickness § 1: the meal this agent would buy (its own price).
     if crate::systems::diet::on(world) {

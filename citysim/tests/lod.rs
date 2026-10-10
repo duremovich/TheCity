@@ -361,6 +361,11 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
         let stock = w.comp::<Building>(other).map_or(0, |b| b.stock_food);
         assert!(stock > 0);
         assert_eq!(w.food_market(id), Some(other));
+        // The meal's mechanics, not its delay: the M10 rule (every hungry
+        // hour eats), not the table's learned `p_meal`.
+        if let Some(t) = w.stat_table.as_mut() {
+            t.p_meal = None;
+        }
         // Homeless: no pantry a housemate could refill within the hour.
         w.set_home(id, None);
         w.comp_mut::<Inventory>(id).expect("inv").food = 0;

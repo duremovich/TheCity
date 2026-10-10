@@ -688,6 +688,11 @@ pub fn run_statistical(world: &mut World) {
         let under_18 = !crate::systems::demography::is_adult(world, id);
         let energy_mult = crate::systems::stims::energy_mult(world, id);
         let energy_mult = crate::systems::health::energy_mult(world, id, energy_mult);
+        // Parity (after P5): a Full sleeper's hunger decays at half rate; off
+        // screen the hour's sleep is the row's `p_sleep` share, so (with a
+        // table holding `p_meal`, learned with it) the hunger lost is cut by
+        // `0.5 x p_sleep`, as a Full agent sleeping that share would lose.
+        let sleep_share = if world.stat_table.as_ref().is_some_and(|t| t.p_meal.is_some()) { row.p_sleep } else { 0.0 };
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             let ctx = crate::needs::DecayCtx {
                 season_energy_mult,
@@ -696,7 +701,11 @@ pub fn run_statistical(world: &mut World) {
                 energy_mult,
                 ..crate::needs::DecayCtx::plain()
             };
+            let before = n.hunger;
             crate::needs::decay(n, &cfg, &ctx, TICKS_PER_HOUR as u32);
+            if sleep_share > 0.0 {
+                n.hunger = (n.hunger + (before - n.hunger) * 0.5 * sleep_share).min(1.0);
+            }
         }
         if let Some(execs) = &fun_execs {
             crate::systems::leisure::stat_hour(world, id, execs);
@@ -707,6 +716,16 @@ pub fn run_statistical(world: &mut World) {
         }
         // Hunger as sickness § 2: the hour's hungry mark (bodies: needs::run).
         crate::systems::health::hourly_mark(world, id);
+        // § 4 (parity, after P5): the dive is its own hour, on the row's
+        // `p_dive` (every eligible hour without a learned rate), as `calibrate`
+        // learns it: dives begun per hour with a bin in reach.
+        if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
+            let p = match (world.stat_table.as_ref().and_then(|t| t.p_dive), stat_row_index(world, id)) {
+                (Some(rates), Some(r)) => rates[r],
+                _ => 1.0,
+            };
+            crate::systems::bins::stat_dive(world, id, p);
+        }
         // 2b. Work is not a gamble: an employed agent on shift works the hour
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
@@ -719,7 +738,29 @@ pub fn run_statistical(world: &mut World) {
         let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
         let (hungry, sated) = (hunger < 0.4, hunger >= 0.7);
         let u: f32 = world.rng.agent(id).random();
-        let outcome = if hungry || (u < row.p_eat && !sated) {
+        // Parity (hunger as sickness, after P5): a Full agent neither eats
+        // the hour it gets hungry (the walk, the queue, a goal ahead of Eat)
+        // nor only when hungry (a meal bought on the way): with the table's
+        // `p_meal` an agent eats on its phase's and hunger band's share of
+        // hours (a pure hash: no stream moves); without it the M10 rule
+        // (every hungry hour eats, `p_eat` the rest).
+        let meal_p = world
+            .stat_table
+            .as_ref()
+            .and_then(|t| t.p_meal.as_ref().and_then(|p| p.get(t.meal_index(phase, hunger)).copied()));
+        // `p_meal` is the means' rate (food in hand, a pantry, a meal's
+        // coins); the broke eat through their own hourly rolls: the bin
+        // (`p_dive`, above), the noon Mission, and the hungry broke hour's
+        // theft (`p_desperate`, in `stat_eat`), each learned per such hour.
+        let means = meal_p.is_some() && has_means(world, id);
+        let eats = match meal_p {
+            Some(p) if means => {
+                crate::systems::econ::hash_unit(world.seed(), 0x4e47_0001, u64::from(id.index), world.tick) < p
+            }
+            Some(_) => hungry,
+            None => hungry || (u < row.p_eat && !sated),
+        };
+        let outcome = if eats {
             Outcome::Eat
         } else if u < row.p_eat + row.p_work {
             Outcome::Idle
@@ -1080,6 +1121,23 @@ enum Outcome {
     Idle,
 }
 
+/// Parity (after P5): an agent with the means of a meal now: food in hand,
+/// a stocked pantry, or a meal's coins at its food Market (`p_meal`'s
+/// hours; `calibrate` reads it too).
+pub fn has_means(world: &World, id: EntityId) -> bool {
+    if world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.food >= 1) {
+        return true;
+    }
+    let pantry = world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .is_some_and(|h| world.comp::<Building>(h).is_some_and(|b| b.stock_food > 0));
+    if pantry {
+        return true;
+    }
+    crate::systems::life::can_buy_meal(world, id)
+}
+
 fn stat_eat(world: &mut World, id: EntityId) {
     let cfg = world.config.needs.clone();
     let has_food = world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.food >= 1);
@@ -1106,7 +1164,6 @@ fn stat_eat(world: &mut World, id: EntityId) {
         if let Some(b) = world.comp_mut::<Building>(h) {
             meal = crate::systems::health::eat_pantry_unit(b);
         }
-        crate::systems::bins::home_meal(world, h);
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
@@ -1157,17 +1214,6 @@ fn stat_eat(world: &mut World, id: EntityId) {
     // (`p_desperate`, calibrated on the Full tier's hungry thieves below the
     // meal price); a lawful agent mostly goes hungry (the noon Mission, the
     // next hour's scavenge or beg).
-    // Hunger as sickness § 4: a dive on the row's `p_dive` of hours (every
-    // hour without a learned rate), the body's bin, contest and meal.
-    if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
-        let p = match (world.stat_table.as_ref().and_then(|t| t.p_dive), stat_row_index(world, id)) {
-            (Some(rates), Some(row)) => rates[row],
-            _ => 1.0,
-        };
-        if crate::systems::bins::stat_dive(world, id, p) {
-            return;
-        }
-    }
     // The recalibration (2026-10-09, ported
     // with hunger as sickness P5): the dole city reads it too (`calibrate`
     // learns it in every city), only where the city it was learned in holds:

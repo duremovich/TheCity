@@ -183,12 +183,25 @@ pub struct StatTable {
     /// with the bins on. A table without it: every such hour dives.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_dive: Option<[f32; STAT_ROWS]>,
+    /// Parity (hunger as sickness, after P5): the chance an agent eats in
+    /// the hour, by phase and its hunger at the hour's start (`meal_index`:
+    /// 4 phases x `MEAL_BANDS` tenths): Full agent-hours with a meal (hunger
+    /// rose) over agent-hours. A Full agent neither eats the hour it gets
+    /// hungry nor only when hungry; this is both. A table without it: the M10
+    /// rule (every hungry hour eats, `p_eat` the rest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_meal: Option<Vec<f32>>,
     pub rows: Vec<StatRow>,
 }
 
 fn one_f32() -> f32 {
     1.0
 }
+
+/// `StatTable::p_meal`'s hunger bands (tenths of `[0, 1]`).
+pub const MEAL_BANDS: usize = 10;
+/// `StatTable::p_meal`'s cells: 4 phases x `MEAL_BANDS`.
+pub const MEAL_CELLS: usize = 4 * MEAL_BANDS;
 
 impl StatTable {
     /// Morning 0, Work 1, Evening 2, Night 3 (`DayPhase` declares Night first).
@@ -216,6 +229,13 @@ impl StatTable {
     }
 
     /// `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
+    /// `p_meal`'s cell: the phase, and the hunger's band of `[0, 1]` in
+    /// `MEAL_BANDS` equal bands.
+    pub fn meal_index(&self, phase: time::DayPhase, hunger: f32) -> usize {
+        let band = (hunger.max(0.0) * MEAL_BANDS as f32).floor() as usize;
+        Self::phase_index(phase) * MEAL_BANDS + band.min(MEAL_BANDS - 1)
+    }
+
     pub fn index(&self, phase: time::DayPhase, lawfulness: f32, hunger: f32) -> usize {
         Self::phase_index(phase) * 6 + self.lawfulness_bucket(lawfulness) * 2 + self.hunger_bucket(hunger)
     }

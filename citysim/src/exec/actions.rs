@@ -599,7 +599,6 @@ pub fn on_complete(
             }
             let meal = crate::systems::health::eat_pantry_unit(b);
             world.release_all(id);
-            crate::systems::bins::home_meal(world, home);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
