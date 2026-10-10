@@ -78,6 +78,8 @@ struct Snap {
     corps: usize,
     population: u32,
     treasury: i64,
+    /// Coins the status sink spent so far (class pay P3).
+    status: i64,
 }
 
 fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
@@ -138,6 +140,7 @@ fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
                 corps: w.corps().len(),
                 population: w.citizens().len() as u32,
                 treasury: w.treasury().map_or(0, |t| t.coins),
+                status: w.probe.status_spent,
             });
         }
         w.run_ticks(1);
@@ -226,9 +229,11 @@ fn class_table() {
         let p: Vec<String> = runs.iter().map(|(_, s)| s[m].population.to_string()).collect();
         let k: Vec<String> = runs.iter().map(|(_, s)| s[m].corps.to_string()).collect();
         let t: Vec<String> = runs.iter().map(|(_, s)| s[m].treasury.to_string()).collect();
+        let st: Vec<String> = runs.iter().map(|(_, s)| s[m].status.to_string()).collect();
         println!(
-            "{:>3} | gini {:.3} | employed {} | population {} | corps {} | treasury {}",
+            "{:>3} | status spent {} | gini {:.3} | employed {} | population {} | corps {} | treasury {}",
             runs[0].1[m].day,
+            st.join("/"),
             g,
             e.join("/"),
             p.join("/"),
@@ -688,4 +693,33 @@ fn test_night_school_ladder_exists_and_is_slow() {
         classpay::night_school(&mut w);
     }
     assert_eq!(w.comp::<Schooling>(worker).map(|s| s.education), Some(w.config.classpay.edu_cap));
+}
+
+/// The status sink: an adult over `status_floor` spends `status_frac` of the
+/// excess at midnight, at the Spire and in the corps' shops; every coin
+/// lands in an owner's purse (the coin identity holds) and the night out
+/// gives fun. The poor spend nothing; class pay off, nobody does.
+#[test]
+fn test_status_sink_spends_the_excess_into_owners() {
+    let mut w = city_on();
+    let rich = holders(&w, |j| j.grade >= 2)[0];
+    let poor = holders(&w, |j| j.grade == 0)[0];
+    let floor = w.config.classpay.status_floor;
+    for (a, c) in [(rich, 1_000), (poor, floor)] {
+        if let Some(x) = w.comp_mut::<Wallet>(a) {
+            x.coins = c;
+        }
+    }
+    if let Some(n) = w.comp_mut::<citysim::Needs>(rich) {
+        n.fun = 0.0;
+    }
+    let before = citysim::systems::econ::identity(&w);
+    let spent = classpay::status_daily(&mut w);
+    let budget = (w.config.classpay.status_frac * (1_000 - floor) as f32).floor() as i64;
+    let left = w.comp::<Wallet>(rich).map(|x| x.coins).expect("wallet");
+    assert!(spent >= 1_000 - left && 1_000 - left > 0 && 1_000 - left <= budget, "spent {} of {budget}", 1_000 - left);
+    assert_eq!(w.comp::<Wallet>(poor).map(|x| x.coins), Some(floor), "the poor spend nothing");
+    assert_eq!(citysim::systems::econ::identity(&w), before, "every coin reaches an owner");
+    let off = &mut World::new(42, Config::load());
+    assert_eq!(classpay::status_daily(off), 0, "no status sink without wages");
 }

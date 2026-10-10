@@ -175,6 +175,8 @@ impl EconState {
 /// the simulation (`tests/outside.rs::probe_coin_census`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CoinProbe {
+    /// Class pay P3: coins the status pass spent (`classpay::status_daily`).
+    pub status_spent: i64,
     /// Coins minted into immigrants' wallets (E24: crossed in from the World with the market on).
     pub immigrant_coins: i64,
     /// Coins destroyed with emigrants' wallets (E24: crossed out with the market on).

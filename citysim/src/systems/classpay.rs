@@ -530,3 +530,107 @@ pub fn withdraw_unfunded(world: &mut World, corp: EntityId) -> u32 {
     }
     n
 }
+
+// ---------------------------------------------------------------------------
+// The status sink (P3, Dylan 2026-10-10)
+// ---------------------------------------------------------------------------
+
+/// The nearest standing, owned building to `from` among `kinds` that `pred`
+/// accepts (door Manhattan, ties the lower id).
+fn nearest_owned(
+    world: &World,
+    kinds: &[BuildingKind],
+    from: crate::components::TilePos,
+    pred: impl Fn(&Building) -> bool,
+) -> Option<EntityId> {
+    kinds
+        .iter()
+        .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
+        .filter_map(|b| {
+            let bd = world.comp::<Building>(b)?;
+            (!bd.demolished && !bd.derelict && bd.owner.is_some() && pred(bd)).then(|| (bd.door.manhattan(from), b))
+        })
+        .min()
+        .map(|(_, b)| b)
+}
+
+/// Midnight (`living::run`, after the promotions), both tiers alike (a
+/// ledger, as rent): an adult holding more than `status_floor` coins spends
+/// `status_frac` of the excess a day on status, split by `status_split`:
+/// a night out at the Spire (the nearest Lounge, else a Spire Club; paid as
+/// a visit, `Flow::Leisure`, with the venue's fun), fashion at the nearest
+/// corp Market and cosmetic chrome at the nearest corp Clinic (each an
+/// `Flow::Asset` sale to its owner). Every coin reaches an owner's purse and
+/// its building's revenue, so it pays the venues' and the shops' staff
+/// through the wage rule. Returns the coins spent.
+pub fn status_daily(world: &mut World) -> i64 {
+    if !on(world) {
+        return 0;
+    }
+    let cfg = world.config.classpay.clone();
+    if cfg.status_frac <= 0.0 {
+        return 0;
+    }
+    let mut spent = 0;
+    for id in world.citizens() {
+        if !crate::systems::demography::is_adult(world, id)
+            || world.has::<crate::components::Sentence>(id)
+            || world.comp::<crate::components::Brain>(id).is_none_or(|b| b.emigrating)
+        {
+            continue;
+        }
+        let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+        if coins <= cfg.status_floor {
+            continue;
+        }
+        let budget = (cfg.status_frac * (coins - cfg.status_floor) as f32).floor() as i64;
+        if budget <= 0 {
+            continue;
+        }
+        let Some(from) = world
+            .comp::<Household>(id)
+            .and_then(|h| h.home)
+            .and_then(|h| world.comp::<Building>(h))
+            .map(|b| b.door)
+            .or_else(|| world.comp::<crate::components::Position>(id).map(|p| p.tile))
+        else {
+            continue;
+        };
+        let shares = cfg.status_split;
+        let total: f32 = shares.iter().sum::<f32>().max(1e-6);
+        let part = |i: usize| (budget as f32 * shares[i] / total).floor() as i64;
+        // The night out.
+        let venue = nearest_owned(world, &[BuildingKind::Lounge], from, |b| b.venue.is_some())
+            .or_else(|| nearest_owned(world, &[BuildingKind::Club], from, |b| b.venue.is_some() && b.tier >= 2));
+        if let Some(v) = venue {
+            let amount = part(0);
+            if amount > 0 && crate::systems::leisure::door_ok(world, id, v) {
+                let paid = crate::systems::leisure::pay_venue(world, id, v, amount, ownership::Flow::Leisure);
+                if paid > 0 {
+                    let fun = crate::systems::leisure::gain_at(world, v);
+                    if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
+                        n.fun = (n.fun + fun).min(1.0);
+                    }
+                    spent += paid;
+                }
+            }
+        }
+        // Fashion and cosmetic chrome, from the corps' shops.
+        let corp_owned = |world: &World, b: &Building| b.owner.is_some_and(|o| world.has::<Corp>(o));
+        for (i, kind) in [(1usize, BuildingKind::Market), (2, BuildingKind::Clinic)] {
+            let amount = part(i);
+            if amount <= 0 {
+                continue;
+            }
+            let Some(shop) = nearest_owned(world, &[kind], from, |b| corp_owned(world, b)) else { continue };
+            let owner = world.owner_of(shop);
+            let paid = ownership::pay(world, Some(id), owner, amount, ownership::Flow::Asset);
+            if paid > 0 {
+                ownership::credit(world, shop, paid);
+                spent += paid;
+            }
+        }
+    }
+    world.probe.status_spent += spent;
+    spent
+}

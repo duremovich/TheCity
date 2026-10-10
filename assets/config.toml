@@ -2232,3 +2232,10 @@ child_spread = 0.10                  # a newborn: its parents' mean +- this
 # 0.25 reaches 0.58 after three sim years (+0.11 a year), level with a Spire-born outsider once skill and tenure count.
 edu_gain_per_day = 0.0003
 edu_cap = 0.75
+# P3 (Dylan 2026-10-10), the status sink for the rich: a midnight ledger at both tiers. Above status_floor coins, an
+# adult spends status_frac of the excess a day: a Spire night out (the nearest Lounge, else a Spire Club; Flow::Leisure
+# with the venue's fun), fashion at the nearest corp Market and cosmetic chrome at the nearest corp Clinic (Flow::Asset).
+# Real food every meal is already the diet's rule above real_meal_reserve. Placeholders.
+status_floor = 60
+status_frac = 0.05
+status_split = [0.5, 0.25, 0.25]       # night out, fashion, chrome

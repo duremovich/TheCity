@@ -6210,6 +6210,12 @@ pub struct ClassPayCfg {
     pub edu_gain_per_day: f32,
     /// P3: the night school's cap.
     pub edu_cap: f32,
+    /// P3, the status sink: coins an adult keeps before spending on status.
+    pub status_floor: i64,
+    /// P3: the share of the excess over `status_floor` spent a day.
+    pub status_frac: f32,
+    /// P3: the split: a Spire night out, fashion (a corp Market), cosmetic chrome (a corp Clinic).
+    pub status_split: [f32; 3],
 }
 
 impl Default for ClassPayCfg {
@@ -6230,6 +6236,9 @@ impl Default for ClassPayCfg {
             child_spread: 0.10,
             edu_gain_per_day: 0.0003,
             edu_cap: 0.75,
+            status_floor: 60,
+            status_frac: 0.05,
+            status_split: [0.5, 0.25, 0.25],
         }
     }
 }
