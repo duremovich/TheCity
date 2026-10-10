@@ -20,6 +20,122 @@ use citysim::systems::{contracts, demography, hunt, law};
 use citysim::word::{GrudgeCause, Grudges};
 use citysim::{Config, Corp, Crime, EntityId, EventKind, Gang, Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR};
 
+/// Seeds 42-43, the market on and off: each seeded corp's fate (the day it
+/// went, the Bankrupt/BrokenUp lines naming it), its execs' deaths, what it
+/// paid for organic records, and its treasury every 15 days.
+#[test]
+#[ignore]
+fn corp_fates() {
+    let runs: Vec<(u64, bool)> = vec![(42, true), (42, false), (43, true), (43, false)];
+    let out: Vec<String> = std::thread::scope(|s| {
+        let hs: Vec<_> = runs
+            .iter()
+            .map(|&(seed, on)| {
+                s.spawn(move || {
+                    let mut cfg = Config::load();
+                    cfg.hitmarket.enabled = on;
+                    let mut w = World::new(seed, cfg);
+                    let seeded: Vec<EntityId> = w.corps();
+                    let names: BTreeMap<EntityId, String> = seeded
+                        .iter()
+                        .map(|&c| (c, w.comp::<Corp>(c).map_or_else(String::new, |x| x.name.clone())))
+                        .collect();
+                    let mut lines: BTreeMap<EntityId, Vec<String>> = BTreeMap::new();
+                    let mut execs: BTreeMap<EntityId, EntityId> = BTreeMap::new();
+                    let mut cursor = 0u64;
+                    let mut gone: BTreeMap<EntityId, u64> = BTreeMap::new();
+                    let mut kinds: BTreeMap<(EntityId, u64, String), u32> = BTreeMap::new();
+                    let mut paid: BTreeMap<EntityId, i64> = BTreeMap::new();
+                    let mut counted: std::collections::BTreeSet<u64> = Default::default();
+                    for day in 0..120u64 {
+                        for x in w.contracts.values() {
+                            if let Some(b) = x.buyer.filter(|b| seeded.contains(b)) {
+                                if counted.insert(x.id) {
+                                    *paid.entry(b).or_insert(0) += x.price;
+                                }
+                            }
+                        }
+                        for c in &seeded {
+                            if let Some(e) = w.comp::<Corp>(*c).and_then(|x| x.exec) {
+                                execs.insert(e, *c);
+                            }
+                        }
+                        for _ in 0..24 {
+                            w.run_ticks(TICKS_PER_HOUR);
+                            for e in w.events.iter().rev().take_while(|e| e.id >= cursor) {
+                                for (&ex, &c) in &execs {
+                                    if e.kind == EventKind::Death && e.actors.first() == Some(&ex) {
+                                        lines.entry(c).or_default().push(format!("d{day} EXEC DEATH {}", e.text));
+                                    }
+                                }
+                                for &c in &seeded {
+                                    let named = e.actors.contains(&c) || e.text.contains(&w.owner_label(Some(c)));
+                                    let k = format!("{:?}", e.kind);
+                                    if named
+                                        && (k.contains("Bankrupt")
+                                            || k.contains("CorpOrder")
+                                            || k.contains("TalentLost")
+                                            || k.contains("BrokenUp")
+                                            || k.contains("Acquired")
+                                            || (e.kind == EventKind::ContractPosted
+                                                && (e.text.contains("(rival") || e.text.contains("(culprit"))))
+                                    {
+                                        lines.entry(c).or_default().push(format!("d{day} {k} {}", e.text));
+                                    } else if named {
+                                        *kinds.entry((c, day / 15, k)).or_insert(0) += 1;
+                                    }
+                                }
+                            }
+                            cursor = w.events.back().map_or(cursor, |e| e.id + 1);
+                        }
+                        let alive: std::collections::BTreeSet<EntityId> = w.corps().into_iter().collect();
+                        for &c in &seeded {
+                            if !alive.contains(&c) && !gone.contains_key(&c) {
+                                gone.insert(c, day);
+                            }
+                            if day % 15 == 14 && alive.contains(&c) {
+                                lines
+                                    .entry(c)
+                                    .or_default()
+                                    .push(format!("d{day} treasury {}", w.comp::<Corp>(c).map_or(0, |x| x.treasury)));
+                            }
+                        }
+                    }
+                    let mut s = format!("=== seed {seed} market {}\n", if on { "ON" } else { "OFF" });
+                    for &c in &seeded {
+                        let name = names[&c].clone();
+                        s += &format!(
+                            "-- {name} {c:?}: gone day {:?}; contract prices posted (all kinds) {}\n",
+                            gone.get(&c),
+                            paid.get(&c).copied().unwrap_or(0)
+                        );
+                        for win in 0..8u64 {
+                            let row: Vec<String> = kinds
+                                .iter()
+                                .filter(|((cc, ww, _), _)| *cc == c && *ww == win)
+                                .map(|((_, _, k), n)| format!("{k} {n}"))
+                                .collect();
+                            if !row.is_empty() {
+                                s += &format!("   days {}-{}: {}\n", win * 15, win * 15 + 14, row.join(", "));
+                            }
+                        }
+                        for l in lines.get(&c).into_iter().flatten() {
+                            if !l.contains("Acquired") {
+                                s += &format!("   {l}\n");
+                            }
+                        }
+                    }
+                    s
+                })
+            })
+            .collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    for s in out {
+        print!("{s}");
+    }
+}
+
 #[test]
 #[ignore]
 fn exec_protection() {
