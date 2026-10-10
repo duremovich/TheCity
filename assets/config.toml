@@ -2083,6 +2083,62 @@ shift = "day"
 skill = "fighting"
 model = "contract"                 # paid by the camp's owner at shift end (a city camp: the Treasury, in civic_payroll); the model has no code in P3
 
+# Class pay (docs/CLASS_PAY.md): the professional and management posts. `classpay = true` rows post places only
+# with class pay on ([economy2] wages and [classpay] enabled); `corp_only` rows only at a corp's workplace; `grade`
+# multiplies `wage` by [classpay] grade_mult (2 professional, 3 management). Paid by the workplace's owner out of
+# the same revenue pool as every wage (the margin rule prices the place at its grade). Placeholders, not tuned.
+[[trades]]
+id = "manager"
+label = "Manager"
+workplace = ["Farm", "Market", "Fab", "Clinic", "Lab", "Garage", "Hotel", "SecurityOffice", "Club", "Den", "Lounge", "Arcade", "FightPit", "NoodleBar", "Feed"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "persuasion"
+model = "overhead"
+grade = 3
+classpay = true
+corp_only = true
+
+[[trades]]
+id = "engineer"
+label = "Engineer"
+workplace = ["Farm", "Fab", "Lab", "Garage"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "knowledge"
+model = "overhead"
+grade = 2
+classpay = true
+corp_only = true
+
+[[trades]]
+id = "accountant"
+label = "Accountant"
+workplace = ["Market", "Hotel", "Clinic", "SecurityOffice"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "knowledge"
+model = "overhead"
+grade = 2
+classpay = true
+corp_only = true
+
+[[trades]]
+id = "broker"
+label = "Broker"
+workplace = ["Market", "Lab"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "persuasion"
+model = "overhead"
+grade = 2
+classpay = true
+corp_only = true
+
 # ---------------------------------------------------------------------------
 # Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values; every
 # key read only with `enabled`. Dylan 2026-10-10: on with the flip (wages + no_safety_net), off until then.
@@ -2154,3 +2210,21 @@ bin_turf_tiles = 15        # a gang-held Home this near makes a bin the gang's (
 bin_shake_p = 0.3
 bin_toll = 1
 starve_grace_days = 7
+
+# ---------------------------------------------------------------------------
+# Class pay (docs/CLASS_PAY.md; Dylan 2026-10-10: tiered jobs and pay, class persists through income). Every key
+# read only with [economy2] wages (the dole city is byte-identical). Placeholders, not tuned to targets.
+[classpay]
+enabled = true
+grade_mult = [1.0, 1.3, 2.0, 3.0]   # labour, skilled, professional, management: a post pays its role's wage x this
+role_grade = { Ripperdoc = 2, Researcher = 2, Mechanic = 1, Reporter = 1 }   # bespoke roles' base grade (others labour)
+skilled_share = 0.25                 # of a corp building's labour staff in a role, the skilled posts (floor), by promotion
+promote_days = 30                    # tenure before a promotion (skilled in place, or a move to a graded post)
+merit_edu = 0.5                      # merit = edu x education + skill x skill + tenure x tenure - commute_w x tiles
+merit_skill = 0.3
+merit_tenure = 0.2
+tenure_full_days = 180               # tenure at the same corp counts in full at this many days
+commute_w = 0.0005                   # merit lost per tile from Home to the workplace (100 tiles: 0.05)
+education = [0.10, 0.25, 0.50, 0.80] # the mean by origin: Dreg, Sump, Mid, Spire
+education_spread = 0.20              # +- uniform, a pure hash of the seed and the agent
+child_spread = 0.10                  # a newborn: its parents' mean +- this

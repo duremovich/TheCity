@@ -195,6 +195,10 @@ pub struct Config {
     /// meals, the malnutrition and toxicity meters, the bins, cancer.
     #[serde(default)]
     pub sickness: SicknessCfg,
+    /// Class pay (docs/CLASS_PAY.md): graded posts and wages, read only
+    /// with `[economy2] wages` ([`Config::classpay_on`]).
+    #[serde(default)]
+    pub classpay: ClassPayCfg,
     /// Jobs and room J9 (docs/JOBS_V2.md § 1.3): the configured trades
     /// (`[[trades]]` rows), `Role::Trade(TradeId)` indexing them. Read
     /// through [`trades_de`], which also makes the keys a save's
@@ -290,6 +294,17 @@ pub struct TradeCfg {
     /// J14: how the shift is worked (`post`, or the Super's `round`).
     #[serde(default)]
     pub duty: TradeDuty,
+    /// Class pay (docs/CLASS_PAY.md): the post's grade (0 labour, 1
+    /// skilled, 2 professional, 3 management), read only with class pay on.
+    #[serde(default)]
+    pub grade: u8,
+    /// Class pay: the row exists only with class pay on
+    /// ([`Config::trade_live`]); off, it posts nothing anywhere.
+    #[serde(default)]
+    pub classpay: bool,
+    /// Class pay: only a corp-owned workplace posts the row's places.
+    #[serde(default)]
+    pub corp_only: bool,
     /// J14 (a `round` duty): the doors a shift's round visits.
     #[serde(default)]
     pub round_stops: u8,
@@ -4933,6 +4948,18 @@ impl Config {
         }
     }
 
+    /// Class pay (docs/CLASS_PAY.md): `[economy2] wages` and `[classpay]
+    /// enabled`.
+    pub fn classpay_on(&self) -> bool {
+        self.economy2.wages && self.classpay.enabled
+    }
+
+    /// Class pay: does this `[[trades]]` row post places in this city (a
+    /// `classpay` row only with class pay on)?
+    pub fn trade_live(&self, row: &TradeCfg) -> bool {
+        !row.classpay || self.classpay_on()
+    }
+
     /// J9: a trade's `[[trades]]` row.
     pub fn trade(&self, t: crate::components::TradeId) -> Option<&TradeCfg> {
         self.trades.get(t.index())
@@ -6147,6 +6174,56 @@ impl Default for SicknessCfg {
             bin_shake_p: 0.3,
             bin_toll: 1,
             starve_grace_days: 7,
+        }
+    }
+}
+
+/// `[classpay]` (docs/CLASS_PAY.md; placeholders, not tuned). Every key is
+/// read only with [`Config::classpay_on`] (`[economy2] wages` and
+/// `enabled`): the dole city is the city before it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClassPayCfg {
+    pub enabled: bool,
+    /// A post's wage multiple by grade: labour, skilled, professional, management.
+    pub grade_mult: [f32; 4],
+    /// The bespoke roles' base grade by `{role:?}` (others labour).
+    pub role_grade: std::collections::BTreeMap<String, u8>,
+    /// Of a corp building's labour staff in a role, the skilled posts (floor).
+    pub skilled_share: f32,
+    /// Days at the corp before a promotion.
+    pub promote_days: u32,
+    pub merit_edu: f32,
+    pub merit_skill: f32,
+    pub merit_tenure: f32,
+    /// Tenure at the same corp counts in full at this many days.
+    pub tenure_full_days: u32,
+    /// Merit lost per tile of commute (Home door to workplace door).
+    pub commute_w: f32,
+    /// Education's mean by origin: Dreg, Sump, Mid, Spire.
+    pub education: [f32; 4],
+    /// The seeded and immigrant spread (+- uniform, a pure hash).
+    pub education_spread: f32,
+    /// A child's spread around its parents' mean.
+    pub child_spread: f32,
+}
+
+impl Default for ClassPayCfg {
+    fn default() -> Self {
+        ClassPayCfg {
+            enabled: false,
+            grade_mult: [1.0, 1.3, 2.0, 3.0],
+            role_grade: std::collections::BTreeMap::new(),
+            skilled_share: 0.25,
+            promote_days: 30,
+            merit_edu: 0.5,
+            merit_skill: 0.3,
+            merit_tenure: 0.2,
+            tenure_full_days: 180,
+            commute_w: 0.0005,
+            education: [0.10, 0.25, 0.50, 0.80],
+            education_spread: 0.20,
+            child_spread: 0.10,
         }
     }
 }

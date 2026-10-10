@@ -290,10 +290,14 @@ pub enum EventKind {
     Diagnosed,
     /// `[agent, clinic]`: a cancer cured at a Clinic.
     Cured,
+    // --- Class pay (docs/CLASS_PAY.md).
+    /// `[agent, workplace]`: promoted to a higher-graded post (skilled in
+    /// place, or a professional/management post, or a corp's exec).
+    Promoted,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 144] = [
+    pub const ALL: [EventKind; 145] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -438,6 +442,7 @@ impl EventKind {
         EventKind::BinContest,
         EventKind::Diagnosed,
         EventKind::Cured,
+        EventKind::Promoted,
     ];
 }
 
@@ -522,6 +527,8 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         // Real economy phase 2 (plan E44): a layoff on the revenue rule.
         (E::LaidOff, 0) => row(LifeKind::Fired),
         (E::Quit, 0) => row(LifeKind::Quit),
+        // Class pay: a promotion is a hire into the new post.
+        (E::Promoted, 0) => row(LifeKind::Hired),
         (E::Starving, 0) => row(LifeKind::Starving),
         (E::Theft, 0) => row(LifeKind::Stole),
         (E::Robbed, 1) => victim_side(LifeKind::Robbed, HoleKind::Robbed),

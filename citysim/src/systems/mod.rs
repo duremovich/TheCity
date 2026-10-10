@@ -25,6 +25,7 @@ pub mod camp;
 pub mod charity;
 pub mod chrome;
 pub mod classes;
+pub mod classpay;
 pub mod competence;
 pub mod contracts;
 pub mod corp_brain;

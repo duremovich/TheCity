@@ -1,0 +1,547 @@
+//! Class-tiered jobs and pay (docs/CLASS_PAY.md).
+//!
+//! `class_table` (`#[ignore]`, a printed finding, never a band): seeds
+//! 42-44 x 120 days in threads, the classes by Home tier (Spire, Mid, Sump,
+//! and the Dregs: no Home) at days 0, 30, 60, 90 and 119: adults, employed
+//! share, mean coins, mean gross wage of the employed, the synth share of
+//! the last 30 days' meals; the city's wallet Gini, employed, corps alive,
+//! population and Treasury. Run it on the flipped config:
+//! `CITYSIM_ASSETS=<flipped copy> cargo test --release -p citysim --test
+//! classpay -- --ignored class_table --nocapture`.
+
+use std::collections::BTreeMap;
+
+use citysim::systems::{demography, wages};
+use citysim::{Building, Config, Health, Household, Job, Wallet, World, TICKS_PER_DAY};
+
+/// The class of an adult by where it sleeps: 3 Spire, 2 Mid, 1 Sump (the
+/// Home's tier + 1), 0 a Dreg (no Home).
+fn home_class(w: &World, id: citysim::EntityId) -> usize {
+    // `CLASSPAY_BY=origin`: by the background class (`Schooling.origin`).
+    if std::env::var("CLASSPAY_BY").is_ok_and(|v| v == "origin") {
+        if let Some(s) = w.comp::<citysim::Schooling>(id) {
+            return usize::from(s.origin.min(3));
+        }
+    }
+    w.comp::<Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| w.comp::<Building>(h))
+        .map_or(0, |b| usize::from(b.tier.min(2)) + 1)
+}
+
+const CLASS: [&str; 4] = ["Dreg", "Sump", "Mid", "Spire"];
+
+#[derive(Default, Clone)]
+struct Acc {
+    n: u32,
+    employed: u32,
+    coins: i64,
+    wage: i64,
+    /// (synthy meals, all meals) of the window.
+    synth: u32,
+    meals: u32,
+    /// Job holders by grade.
+    grades: [u32; 4],
+}
+
+fn gini(mut v: Vec<i64>) -> f64 {
+    if v.is_empty() {
+        return 0.0;
+    }
+    v.sort();
+    let n = v.len() as f64;
+    let sum: f64 = v.iter().map(|&x| x.max(0) as f64).sum();
+    if sum <= 0.0 {
+        return 0.0;
+    }
+    let mut acc = 0.0;
+    for (i, &x) in v.iter().enumerate() {
+        acc += (2.0 * (i as f64 + 1.0) - n - 1.0) * x.max(0) as f64;
+    }
+    acc / (n * sum)
+}
+
+struct Snap {
+    day: u64,
+    by: Vec<Acc>,
+    by_tier: BTreeMap<u8, (u32, i64)>,
+    gini: f64,
+    employed: u32,
+    corps: usize,
+    population: u32,
+    treasury: i64,
+}
+
+fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
+    let mut w = World::new(seed, Config::load());
+    let marks = [0u64, 30, 60, 90, days - 1];
+    // Meals by agent class over the window, read each day before midnight.
+    let mut window: Vec<(u32, u32)> = vec![(0, 0); 4];
+    let mut out = Vec::new();
+    for day in 0..days {
+        w.run_ticks(TICKS_PER_DAY - 1);
+        for id in w.citizens() {
+            if !demography::is_adult(&w, id) {
+                continue;
+            }
+            let c = home_class(&w, id);
+            if let Some(h) = w.comp::<Health>(id) {
+                let t = &h.today;
+                window[c].0 += u32::from(t.synth) + u32::from(t.alms);
+                window[c].1 += u32::from(t.synth) + u32::from(t.alms) + u32::from(t.dive) + u32::from(t.real);
+            }
+        }
+        if marks.contains(&day) {
+            let mut by = vec![Acc::default(); 4];
+            let mut coins = Vec::new();
+            let mut by_tier: BTreeMap<u8, (u32, i64)> = BTreeMap::new();
+            for id in w.citizens() {
+                if !demography::is_adult(&w, id) {
+                    continue;
+                }
+                let c = home_class(&w, id);
+                let a = &mut by[c];
+                a.n += 1;
+                let k = w.comp::<Wallet>(id).map_or(0, |x| x.coins);
+                a.coins += k;
+                coins.push(k);
+                if let Some(j) = w.comp::<Job>(id) {
+                    a.employed += 1;
+                    a.grades[usize::from(j.grade.min(3))] += 1;
+                    let g = wages::gross_wage(&w, j);
+                    a.wage += g;
+                    let e = by_tier.entry(j.grade).or_default();
+                    e.0 += 1;
+                    e.1 += g;
+                }
+            }
+            for c in 0..4 {
+                by[c].synth = window[c].0;
+                by[c].meals = window[c].1;
+            }
+            window = vec![(0, 0); 4];
+            out.push(Snap {
+                day,
+                by,
+                by_tier,
+                gini: gini(coins),
+                employed: w.with::<Job>().len() as u32,
+                corps: w.corps().len(),
+                population: w.citizens().len() as u32,
+                treasury: w.treasury().map_or(0, |t| t.coins),
+            });
+        }
+        w.run_ticks(1);
+    }
+    out
+}
+
+#[test]
+#[ignore]
+fn class_table() {
+    let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(120);
+    let handles: Vec<_> =
+        [42u64, 43, 44].into_iter().map(|s| std::thread::spawn(move || (s, run_seed(s, days)))).collect();
+    let runs: Vec<(u64, Vec<Snap>)> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+    for (seed, snaps) in &runs {
+        println!("\n== seed {seed} ==");
+        println!("day | class | adults | employed | mean coins | mean wage | synth% (window)");
+        for s in snaps {
+            for c in (0..4).rev() {
+                let a = &s.by[c];
+                let n = a.n.max(1) as f64;
+                println!(
+                    "{:>3} | {:<5} | {:>5} | {:>5.1}% | {:>8.1} | {:>5.2} | {:>5.1}%",
+                    s.day,
+                    CLASS[c],
+                    a.n,
+                    100.0 * a.employed as f64 / n,
+                    a.coins as f64 / n,
+                    a.wage as f64 / a.employed.max(1) as f64,
+                    100.0 * a.synth as f64 / a.meals.max(1) as f64
+                );
+            }
+            let tiers: Vec<String> = s
+                .by_tier
+                .iter()
+                .map(|(g, (n, w))| format!("g{g}: {n} @ {:.2}", *w as f64 / (*n).max(1) as f64))
+                .collect();
+            println!(
+                "{:>3} | city: gini {:.3}, employed {}, corps {}, population {}, treasury {} | {}",
+                s.day,
+                s.gini,
+                s.employed,
+                s.corps,
+                s.population,
+                s.treasury,
+                tiers.join(", ")
+            );
+        }
+    }
+    // Pooled over the seeds: the class means at each mark.
+    println!("\n== pooled 42-44 ==");
+    println!("day | class | adults | employed | mean coins | mean wage | synth%");
+    let marks = runs[0].1.len();
+    for m in 0..marks {
+        for c in (0..4).rev() {
+            let mut a = Acc::default();
+            for (_, snaps) in &runs {
+                let b = &snaps[m].by[c];
+                a.n += b.n;
+                a.employed += b.employed;
+                a.coins += b.coins;
+                a.wage += b.wage;
+                a.synth += b.synth;
+                a.meals += b.meals;
+                for g in 0..4 {
+                    a.grades[g] += b.grades[g];
+                }
+            }
+            let n = a.n.max(1) as f64;
+            println!(
+                "{:>3} | {:<5} | {:>5} | {:>5.1}% | {:>8.1} | {:>5.2} | {:>5.1}% | grades {:?}",
+                runs[0].1[m].day,
+                CLASS[c],
+                a.n,
+                100.0 * a.employed as f64 / n,
+                a.coins as f64 / n,
+                a.wage as f64 / a.employed.max(1) as f64,
+                100.0 * a.synth as f64 / a.meals.max(1) as f64,
+                a.grades
+            );
+        }
+        let g: f64 = runs.iter().map(|(_, s)| s[m].gini).sum::<f64>() / runs.len() as f64;
+        let e: Vec<String> = runs.iter().map(|(_, s)| s[m].employed.to_string()).collect();
+        let p: Vec<String> = runs.iter().map(|(_, s)| s[m].population.to_string()).collect();
+        let k: Vec<String> = runs.iter().map(|(_, s)| s[m].corps.to_string()).collect();
+        let t: Vec<String> = runs.iter().map(|(_, s)| s[m].treasury.to_string()).collect();
+        println!(
+            "{:>3} | gini {:.3} | employed {} | population {} | corps {} | treasury {}",
+            runs[0].1[m].day,
+            g,
+            e.join("/"),
+            p.join("/"),
+            k.join("/"),
+            t.join("/")
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Mechanisms (unit tests)
+// ---------------------------------------------------------------------------
+
+use citysim::systems::{classpay, economy};
+use citysim::{Brain, Corp, EntityId, Lod, Role, Schooling};
+
+/// The class-pay city: `[economy2] wages` on (off by default until the
+/// flip), class pay on as shipped.
+fn config_on() -> Config {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    assert!(cfg.classpay.enabled, "class pay ships enabled (read only with wages)");
+    cfg
+}
+
+fn city_on() -> World {
+    let w = World::new(42, config_on());
+    assert!(classpay::on(&w));
+    w
+}
+
+fn holders(w: &World, pred: impl Fn(&Job) -> bool) -> Vec<EntityId> {
+    let mut v: Vec<EntityId> = w.with::<Job>().into_iter().filter(|&a| w.comp::<Job>(a).is_some_and(&pred)).collect();
+    v.sort();
+    v
+}
+
+fn role(w: &World, key: &str) -> Role {
+    w.config.trade_role(key).expect(key)
+}
+
+/// The default (dole) city with class pay's keys and rows in the config is
+/// the city without them, byte for byte: every class-pay path reads
+/// `[economy2] wages`.
+#[test]
+fn test_default_city_identical_with_classpay_keys() {
+    let a_cfg = Config::load();
+    assert!(!a_cfg.economy2.wages, "the shipped default is the dole city");
+    assert!(a_cfg.trades.iter().any(|r| r.classpay), "the class-pay rows ship in the config");
+    let mut b_cfg = a_cfg.clone();
+    b_cfg.classpay.enabled = false;
+    b_cfg.trades.retain(|r| !r.classpay);
+    b_cfg.reset_trade_cache();
+    let mut a = World::new(42, a_cfg);
+    let mut b = World::new(42, b_cfg);
+    for _ in 0..3 {
+        a.run_ticks(TICKS_PER_DAY);
+        b.run_ticks(TICKS_PER_DAY);
+    }
+    assert!(a.with::<Schooling>().is_empty(), "no backgrounds without wages");
+    assert!(a.with::<Job>().into_iter().all(|j| a.comp::<Job>(j).is_some_and(|j| j.grade == 0)));
+    b.config = a.config.clone();
+    assert_eq!(citysim::save::to_ron(&a), citysim::save::to_ron(&b), "the dole city moved with class pay's keys");
+}
+
+/// A graded post's wage is fixed at hire: the role's wage times the grade's
+/// multiple (a Manager 3x, a skilled post 1.3x); labour at the config wage
+/// exactly.
+#[test]
+fn test_graded_wage_at_hire() {
+    let w = city_on();
+    let mult = w.config.classpay.grade_mult;
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager);
+    assert!(!m.is_empty(), "the seeded city staffs Managers");
+    for a in &m {
+        let j = w.comp::<Job>(*a).expect("job");
+        assert_eq!(j.grade, 3);
+        assert_eq!(j.wage_per_day, (w.config.wage(manager) as f32 * mult[3]).round() as i64);
+    }
+    let skilled = holders(&w, |j| j.grade == 1);
+    assert!(!skilled.is_empty(), "the seeded city has skilled posts");
+    for a in &skilled {
+        let j = w.comp::<Job>(*a).expect("job");
+        assert_eq!(j.wage_per_day, (w.config.wage(j.role) as f32 * mult[1]).round() as i64, "{:?}", j.role);
+    }
+    for a in holders(&w, |j| j.grade == 0 && j.employer.is_some_and(|e| w.corp_of_building(e).is_some())) {
+        let j = w.comp::<Job>(a).expect("job");
+        assert_eq!(j.wage_per_day, w.config.wage(j.role), "{:?}", j.role);
+    }
+}
+
+/// One pay path: a graded post pays its grade at the Full and at the
+/// Statistical tier alike (`economy::collect_wage_scaled` reads the Job's
+/// `wage_per_day`; the Statistical shift end calls it, P5f).
+#[test]
+fn test_graded_wage_paid_alike_at_both_tiers() {
+    let mut w = city_on();
+    w.levers.tax_rate = 0.0;
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager);
+    assert!(m.len() >= 2);
+    let (full, stat) = (m[0], m[1]);
+    for (a, lod) in [(full, Lod::Full), (stat, Lod::Statistical)] {
+        if let Some(b) = w.comp_mut::<Brain>(a) {
+            b.lod = lod;
+        }
+        if let Some(j) = w.comp_mut::<Job>(a) {
+            j.days_unpaid = 1;
+        }
+    }
+    let gross = |w: &World, a| wages::gross_wage(w, w.comp::<Job>(a).expect("job"));
+    let (gf, gs) = (gross(&w, full), gross(&w, stat));
+    let paid_full = economy::collect_wage(&mut w, full);
+    let paid_stat = economy::collect_wage(&mut w, stat);
+    assert_eq!(paid_full, gf, "the Full tier pays the graded gross");
+    assert_eq!(paid_stat, gs, "the Statistical tier pays the graded gross");
+    let base = (w.config.wage(manager) as f32 * w.config.classpay.grade_mult[3]).round() as i64;
+    assert!(gf >= base * 8 / 10, "a Manager's gross ({gf}) carries the grade ({base})");
+}
+
+/// The margin rule prices a graded place at its grade (the pool split):
+/// `post_wage` is the role's wage times the base grade's multiple at a
+/// corp's workplace, the plain wage elsewhere or with class pay off.
+#[test]
+fn test_post_wage_priced_at_grade() {
+    let w = city_on();
+    let manager = role(&w, "manager");
+    let farm = w
+        .buildings_of_kind(citysim::BuildingKind::Farm)
+        .iter()
+        .copied()
+        .find(|&b| w.corp_of_building(b).is_some())
+        .expect("a corp Farm");
+    let m = w.config.classpay.grade_mult;
+    assert_eq!(classpay::post_wage(&w, farm, manager), w.config.wage(manager) as f32 * m[3]);
+    assert_eq!(classpay::post_wage(&w, farm, Role::Farmer), w.config.wage(Role::Farmer) as f32);
+    let off = World::new(42, Config::load());
+    assert_eq!(classpay::post_wage(&off, farm, manager), off.config.wage(manager) as f32);
+}
+
+/// Every adult but `keep` leaves the labour pool (emigrating).
+fn only_candidates(w: &mut World, keep: &[EntityId]) {
+    for a in w.citizens() {
+        if !keep.contains(&a) {
+            if let Some(b) = w.comp_mut::<Brain>(a) {
+                b.emigrating = true;
+            }
+        }
+    }
+}
+
+fn set_education(w: &mut World, a: EntityId, origin: u8, education: f32) {
+    w.insert(a, Schooling { origin, education });
+}
+
+/// Graded hiring is by merit: the Spire-schooled candidate over the Sump
+/// one; a long-tenured worker at the same corp can win the post over a
+/// better-schooled outsider (mobility), and leaves its old post re-posted.
+#[test]
+fn test_graded_vacancy_goes_to_merit_and_tenure_moves_up() {
+    let mut w = city_on();
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager);
+    let post = w.comp::<Job>(m[0]).and_then(|j| j.employer).expect("a Manager's workplace");
+    let corp = w.corp_of_building(post).expect("a corp's");
+    let jobless: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| {
+            demography::is_adult(&w, a) && !w.has::<Job>(a) && w.comp::<Brain>(a).is_some_and(|b| !b.emigrating)
+        })
+        .take(2)
+        .collect();
+    assert_eq!(jobless.len(), 2);
+    let (spire, sump) = (jobless[0], jobless[1]);
+    set_education(&mut w, spire, 3, 0.95);
+    set_education(&mut w, sump, 1, 0.15);
+    only_candidates(&mut w, &[spire, sump]);
+    let ms = classpay::merit(&w, spire, post, manager);
+    let mu = classpay::merit(&w, sump, post, manager);
+    assert!(ms > mu, "schooling leads: {ms} vs {mu}");
+    assert_eq!(classpay::pick_graded(&w, post, manager), Some(spire));
+
+    // Mobility: a labour-grade worker of the same corp, 200 days in, with
+    // the post's skill at the top, against an outsider schooled at 0.55.
+    w.tick = 400 * TICKS_PER_DAY;
+    let insider = holders(&w, |j| j.grade == 0 && j.employer.and_then(|e| w.corp_of_building(e)) == Some(corp))[0];
+    let hired = w.tick - 200 * TICKS_PER_DAY;
+    if let Some(j) = w.comp_mut::<Job>(insider) {
+        j.hired_tick = hired;
+    }
+    if let Some(b) = w.comp_mut::<Brain>(insider) {
+        b.emigrating = false;
+    }
+    if let Some(s) = w.comp_mut::<citysim::Skills>(insider) {
+        s.persuasion = 1.0;
+        s.knowledge = 1.0;
+    }
+    set_education(&mut w, insider, 1, 0.3);
+    set_education(&mut w, spire, 2, 0.55);
+    if let Some(s) = w.comp_mut::<citysim::Skills>(spire) {
+        s.persuasion = 0.0;
+        s.knowledge = 0.0;
+    }
+    let mi = classpay::merit(&w, insider, post, manager);
+    let mo = classpay::merit(&w, spire, post, manager);
+    assert!(mi > mo, "tenure and skill carry the insider: {mi} vs {mo}");
+    assert_eq!(classpay::pick_graded(&w, post, manager), Some(insider));
+    // The move: the insider's old post is vacated (posted), the new one held.
+    let old = w.comp::<Job>(insider).and_then(|j| j.employer.map(|e| (e, j.role))).expect("job");
+    let open = |w: &World| w.vacancies.get(&old.0).map_or(0, |v| v.iter().filter(|&&r| r == old.1).count());
+    let before = open(&w);
+    assert!(classpay::leave_for_promotion(&mut w, insider));
+    assert_eq!(open(&w), before + 1, "the old post is re-posted");
+    demography::hire(&mut w, insider, post, manager);
+    assert_eq!(w.comp::<Job>(insider).map(|j| j.grade), Some(3));
+}
+
+/// No promotion to skilled before `promote_days` of tenure; after it the
+/// building's skilled slots fill, at the skilled wage.
+#[test]
+fn test_promotion_waits_for_tenure() {
+    let mut w = city_on();
+    w.tick = 100 * TICKS_PER_DAY;
+    let farmers =
+        holders(&w, |j| j.role == Role::Farmer && j.employer.is_some_and(|e| w.corp_of_building(e).is_some()));
+    let farm = w.comp::<Job>(farmers[0]).and_then(|j| j.employer).expect("farm");
+    let staff: Vec<EntityId> = holders(&w, |j| j.employer == Some(farm) && j.role == Role::Farmer);
+    assert!(staff.len() >= 4, "a Farm with a crew");
+    let now = w.tick;
+    let wage0 = w.config.wage(Role::Farmer);
+    for &a in &staff {
+        if let Some(j) = w.comp_mut::<Job>(a) {
+            j.grade = 0;
+            j.hired_tick = now;
+            j.wage_per_day = wage0;
+        }
+    }
+    classpay::promote_skilled(&mut w, false);
+    assert!(staff.iter().all(|&a| w.comp::<Job>(a).is_some_and(|j| j.grade == 0)), "no promotion before tenure");
+    for &a in &staff {
+        if let Some(j) = w.comp_mut::<Job>(a) {
+            j.hired_tick = now - 40 * TICKS_PER_DAY;
+        }
+    }
+    classpay::promote_skilled(&mut w, false);
+    let skilled: Vec<EntityId> =
+        staff.iter().copied().filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.grade == 1)).collect();
+    let slots = (staff.len() as f32 * w.config.classpay.skilled_share).floor() as usize;
+    assert_eq!(skilled.len(), slots, "the skilled slots fill after tenure");
+    let wage = (wage0 as f32 * w.config.classpay.grade_mult[1]).round() as i64;
+    assert!(skilled.iter().all(|&a| w.comp::<Job>(a).is_some_and(|j| j.wage_per_day == wage)));
+}
+
+/// Layoffs take a professional or management post last: the newest hire
+/// the margin rule lays off is not a Manager while anyone else could go.
+#[test]
+fn test_layoff_spares_graded_posts() {
+    let mut w = city_on();
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager)[0];
+    let corp = w.comp::<Job>(m).and_then(|j| j.employer).and_then(|e| w.corp_of_building(e)).expect("corp");
+    if let Some(j) = w.comp_mut::<Job>(m) {
+        j.hired_tick = 1_000_000;
+    }
+    let (who, _) = wages::newest_hire(&w, corp).expect("a hire to lay off");
+    assert_ne!(who, m, "the Manager hired last is not the one laid off");
+    assert!(w.comp::<Job>(who).is_some_and(|j| j.grade < classpay::PROFESSIONAL));
+}
+
+/// A corp's replacement exec comes from its management, leaves the post,
+/// and logs a promotion.
+#[test]
+fn test_exec_from_management() {
+    let mut w = city_on();
+    let manager = role(&w, "manager");
+    let m = holders(&w, |j| j.role == manager);
+    let corp_of =
+        |w: &World, a: EntityId| w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.corp_of_building(e));
+    let corp = w
+        .corps()
+        .into_iter()
+        .find(|&c| classpay::exec_from_ranks(&w, c).is_some() && m.iter().any(|&a| corp_of(&w, a) == Some(c)))
+        .expect("a corp with a Manager old enough to run it");
+    let pick = classpay::exec_from_ranks(&w, corp).expect("pick");
+    assert_eq!(w.comp::<Job>(pick).map(|j| j.grade), Some(3), "a Manager first");
+    if let Some(c) = w.comp_mut::<Corp>(corp) {
+        c.exec = None;
+    }
+    w.run_ticks(TICKS_PER_DAY + 1);
+    let exec = w.comp::<Corp>(corp).and_then(|c| c.exec).expect("a new exec");
+    assert!(!w.has::<Job>(exec), "the exec left the post");
+    assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::Promoted && e.actors.first() == Some(&exec)));
+}
+
+/// Backgrounds are pure hashes (the same seed, the same Schooling) and the
+/// classes' mean education is ordered Spire > Mid > Sump > Dreg.
+#[test]
+fn test_schooling_deterministic_and_ordered() {
+    let a = city_on();
+    let b = city_on();
+    let mut sums = [(0.0f32, 0u32); 4];
+    for id in a.citizens() {
+        let s = a.comp::<Schooling>(id).copied().expect("every citizen schooled");
+        assert_eq!(b.comp::<Schooling>(id).copied(), Some(s));
+        sums[usize::from(s.origin)].0 += s.education;
+        sums[usize::from(s.origin)].1 += 1;
+    }
+    let mean = |i: usize| sums[i].0 / sums[i].1.max(1) as f32;
+    assert!(mean(3) > mean(2) && mean(2) > mean(1) && mean(1) > mean(0), "{sums:?}");
+}
+
+/// A graded post holder keeps its Home's tier when it relocates; a labour
+/// post holder moves anywhere.
+#[test]
+fn test_graded_keep_their_tier() {
+    let w = city_on();
+    let manager = role(&w, "manager");
+    let housed = |a: &EntityId| w.comp::<Household>(*a).and_then(|h| h.home);
+    let m = holders(&w, |j| j.role == manager).into_iter().find(|a| housed(a).is_some()).expect("a housed Manager");
+    let home = housed(&m).expect("home");
+    let tier = w.comp::<Building>(home).map(|b| b.tier).expect("tier");
+    assert_eq!(classpay::min_home_tier(&w, m, home), tier);
+    let l = holders(&w, |j| j.grade == 0).into_iter().find(|a| housed(a).is_some()).expect("a housed labourer");
+    assert_eq!(classpay::min_home_tier(&w, l, housed(&l).expect("home")), 0);
+}

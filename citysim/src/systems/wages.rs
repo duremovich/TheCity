@@ -499,7 +499,10 @@ pub fn ceiling_at(world: &World, b: EntityId, role: Role) -> usize {
     // Jobs and room J14: a `per_owned` trade (the Super) is one post per
     // group of buildings; a busier landlord does not post three.
     let per_owned = crate::systems::trades::row_of(world, role).is_some_and(|r| r.per_owned > 0);
-    if mult <= 1.0 || per_owned {
+    // Class pay: a professional or management post is scarce: no shift
+    // past its places.
+    let graded = crate::systems::classpay::base_grade(world, Some(b), role) >= crate::systems::classpay::PROFESSIONAL;
+    if mult <= 1.0 || per_owned || graded {
         return full;
     }
     ((full as f32 * mult).ceil() as usize).max(full)
@@ -562,7 +565,8 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
             let cap = crate::systems::jobs::places_of(world, b, role) + extra;
             let ceiling = ceiling_at(world, b, role) + extra;
             let (hires, open) = places(world, b, role, exec);
-            let marginal = world.config.wage(role) as f32 * rev_mult;
+            // Class pay: a graded place is priced at its grade.
+            let marginal = crate::systems::classpay::post_wage(world, b, role) * rev_mult;
             room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
             if demand.wants(kind, cfg.hire_demand) {
                 rows.push((b, role, cap, ceiling, hires.len(), open, marginal));
@@ -624,7 +628,7 @@ pub fn seed_staff(world: &mut World) -> u32 {
             for (role, _) in ownership::roles_for(world, kind) {
                 let ceiling = ceiling_at(world, b, role) + overtime_of(kind, role, overtime);
                 let (hires, open) = places(world, b, role, exec);
-                let marginal = world.config.wage(role) as f32 * rev_mult;
+                let marginal = crate::systems::classpay::post_wage(world, b, role) * rev_mult;
                 let mut n = hires.len() + open;
                 while n < ceiling && room >= marginal {
                     world.vacancies.entry(b).or_default().push(role);
@@ -643,7 +647,7 @@ pub fn seed_staff(world: &mut World) -> u32 {
 /// E18: the corp's newest hire (ties the higher id), its exec excepted and,
 /// under `[corps] hunker_spares_farms`, its Farm staff (M11's rule for
 /// Hunker: Vat Techs are the city's food; a deviation recorded).
-fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)> {
+pub fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)> {
     let c = world.comp::<Corp>(corp)?;
     let spare_farms = world.config.corps.hunker_spares_farms;
     ownership::employees_of(world, corp)
@@ -653,10 +657,12 @@ fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)> {
             let j = world.comp::<Job>(a)?;
             let b = j.employer?;
             let kind = world.comp::<Building>(b)?.kind;
-            (!(spare_farms && kind == BuildingKind::Farm)).then_some((j.hired_tick, a, b))
+            // Class pay: a professional or management post goes last.
+            let exposed = !crate::systems::classpay::protected(world, a);
+            (!(spare_farms && kind == BuildingKind::Farm)).then_some((exposed, j.hired_tick, a, b))
         })
         .max()
-        .map(|(_, a, b)| (a, b))
+        .map(|(_, _, a, b)| (a, b))
 }
 
 /// E18: lay the newest hire off (`LaidOff`, "laid off: revenue"; no vacancy).
@@ -830,7 +836,7 @@ pub fn floor_pass(world: &mut World, corp: EntityId, order: f32, room: f32, r: f
             let floor_bill: f32 = ownership::roles_for(world, kind)
                 .into_iter()
                 .filter(|&(r, _)| crate::systems::trades::row_of(world, r).is_none_or(|t| t.per_owned == 0))
-                .map(|(r, n)| n as f32 * (world.config.wage(r) as f32 * rev_mult))
+                .map(|(r, n)| n as f32 * (crate::systems::classpay::post_wage(world, b, r) * rev_mult))
                 .sum();
             let covers = room > 0.0 && room >= floor_bill;
             let higher = floors < fcfg.max_for(kind) && crate::systems::founding::floor_cost(world, kind).is_some();

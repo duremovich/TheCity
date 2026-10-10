@@ -1701,6 +1701,15 @@ pub struct Job {
     /// (`(key, jail)`), set as the key comes due (`law::credit_guard_shifts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duty_fixed: Option<(i64, bool)>,
+    /// Class pay (docs/CLASS_PAY.md): the post's grade (0 labour, 1
+    /// skilled, 2 professional, 3 management), fixed in `wage_per_day` at
+    /// hire or promotion; always 0 with class pay off (not written).
+    #[serde(default, skip_serializing_if = "is_zero_grade")]
+    pub grade: u8,
+}
+
+fn is_zero_grade(v: &u8) -> bool {
+    *v == 0
 }
 
 fn true_() -> bool {
@@ -3904,6 +3913,16 @@ pub struct MealTally {
     pub dive: u8,
     pub alms: u8,
     pub hungry_hours: u8,
+}
+
+/// Class pay (docs/CLASS_PAY.md): an adult's background, made only with
+/// class pay on. `origin` is the class it was seeded, born or arrived into
+/// (0 Dreg, 1 Sump, 2 Mid, 3 Spire, by Home tier); `education` (0..=1) is
+/// the origin's mean plus a pure-hash spread, a child's its parents' mean.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Schooling {
+    pub origin: u8,
+    pub education: f32,
 }
 
 /// A cancer rolled from high toxicity (§ 3).

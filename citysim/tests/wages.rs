@@ -37,6 +37,10 @@ fn config() -> Config {
     cfg.economy2.rehire_bonus = 0;
     // The flip-readiness round's seeding off too (its own tests turn it on).
     cfg.economy2.seed_staff_days = 0.0;
+    // Class pay off (docs/CLASS_PAY.md): these tests pin the revenue rule's
+    // staffing with every post at its role's wage (`tests/classpay.rs` pins
+    // the grades).
+    cfg.classpay.enabled = false;
     cfg
 }
 

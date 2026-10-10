@@ -865,7 +865,14 @@ pub fn roles_for(world: &World, kind: BuildingKind) -> Vec<(Role, usize)> {
     if world.config.trades.is_empty() {
         return out;
     }
-    out.extend_from_slice(world.config.trades_at(kind));
+    // Class pay: a `classpay` row posts nothing with class pay off.
+    let cfg = &world.config;
+    out.extend(
+        cfg.trades_at(kind)
+            .iter()
+            .copied()
+            .filter(|&(r, _)| r.trade().and_then(|t| cfg.trade(t)).is_none_or(|row| cfg.trade_live(row))),
+    );
     out
 }
 
@@ -1701,9 +1708,17 @@ fn exec_wages(world: &mut World) {
         let exec = match living {
             Some(e) => Some(e),
             None => {
-                let next = replacement_exec(world, c);
+                // Class pay: the corp's management, then its professionals,
+                // first; the new exec leaves the post (re-posted).
+                let ranked = crate::systems::classpay::exec_from_ranks(world, c);
+                let next = ranked.or_else(|| replacement_exec(world, c));
                 if let Some(cc) = world.comp_mut::<Corp>(c) {
                     cc.exec = next;
+                }
+                if let Some(e) = ranked {
+                    let at = world.comp::<Job>(e).and_then(|j| j.employer);
+                    crate::systems::classpay::leave_for_promotion(world, e);
+                    crate::systems::classpay::note_promoted(world, e, at);
                 }
                 if let Some(e) = next {
                     crate::systems::life::house_exec(world, e);

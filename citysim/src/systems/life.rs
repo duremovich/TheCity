@@ -446,10 +446,13 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
         let need = 1 + usize::from(spouse.is_some()) + kids.len();
         let purse = coins(world, a);
         let evicted_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).map(|(o, _)| o);
+        // Class pay: a graded post holder or an exec keeps its tier.
+        let min_tier = crate::systems::classpay::min_home_tier(world, a, home);
         let pick = homes
             .iter()
             .filter(|&&(h, _, cap)| {
                 h != home
+                    && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
                     && world.residents_of(h).len() + need <= cap
                     && purse >= mult * crate::systems::ownership::rent_for(world, h)
                     && evicted_by.is_none_or(|o| o != world.owner_of(h))
@@ -466,7 +469,7 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
         let pick = match pick {
             Some(p) => Some(p),
             None if fix && spouse.is_none() && kids.is_empty() => {
-                if let Some((dd, to, r)) = swap_partner(world, a, home, work, cap, d, margin) {
+                if let Some((dd, to, r)) = swap_partner(world, a, home, work, cap, d, margin, min_tier) {
                     let (an, rn) = (world.name_of(a), world.name_of(r));
                     let (to_name, from_name) = (world.name_of(to), world.name_of(home));
                     world.set_home(a, Some(to));
@@ -523,6 +526,7 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
 /// single adult resident (no spouse or child there) who is not itself a
 /// worker nearer that Home than `home`, can pay `home`'s first rent, and is
 /// no Corp-class exec. `(distance, that Home, the resident)`.
+#[allow(clippy::too_many_arguments)]
 fn swap_partner(
     world: &World,
     a: EntityId,
@@ -531,12 +535,15 @@ fn swap_partner(
     cap: u64,
     d: u64,
     margin: u64,
+    min_tier: u8,
 ) -> Option<(u64, EntityId, EntityId)> {
     let home_door = world.comp::<Building>(home)?.door;
     let home_rent = crate::systems::ownership::rent_for(world, home);
     let mut best: Option<(u64, EntityId, EntityId)> = None;
     for &h in world.buildings_of_kind(BuildingKind::Home) {
-        let Some(b) = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict) else { continue };
+        let Some(b) = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict && b.tier >= min_tier) else {
+            continue;
+        };
         let dd = commute_cost(world, b.door, work);
         if h == home || dd > cap || dd + margin > d || best.is_some_and(|(bd, _, _)| dd >= bd) {
             continue;

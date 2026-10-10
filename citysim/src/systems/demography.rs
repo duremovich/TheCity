@@ -286,6 +286,7 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
+    crate::systems::classpay::on_birth(world, id, mother, father, home);
     // M13 D4: the parents' mean from the child's keyed stream.
     let body = crate::systems::assets::child_body(world, id, mother, father);
     crate::systems::assets::give_body(world, id, body);
@@ -597,14 +598,41 @@ pub(crate) fn job_search(world: &mut World) {
         world.laid_off.retain(|_, &mut (_, t)| t + REHIRE_DAYS * TICKS_PER_DAY > now);
     }
     let vacancies: Vec<(EntityId, Vec<Role>)> = world.vacancies.iter().map(|(&e, r)| (e, r.clone())).collect();
+    // Class pay (docs/CLASS_PAY.md): the graded vacancies (professional and
+    // management) are filled first, by merit, then every other as before.
+    let graded_first = crate::systems::classpay::on(world);
+    let passes: &[Option<bool>] = if graded_first { &[Some(true), Some(false)] } else { &[None] };
+    for &pass in passes {
+        job_search_pass(world, &vacancies, pass);
+    }
+}
+
+/// One walk of [`job_search`]'s vacancy snapshot: every vacancy (`None`),
+/// or only the graded (`Some(true)`) or ungraded (`Some(false)`) ones.
+fn job_search_pass(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass: Option<bool>) {
+    use crate::systems::classpay;
     for (employer, roles) in vacancies {
+        let employer = *employer;
         let Some(workplace_door) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else {
             world.vacancies.remove(&employer);
             continue;
         };
-        for role in roles {
-            let Some(id) = pick_candidate(world, employer, workplace_door, role) else { continue };
+        for &role in roles {
+            let graded = pass.is_some() && classpay::base_grade(world, Some(employer), role) >= classpay::PROFESSIONAL;
+            if pass.is_some_and(|p| p != graded) {
+                continue;
+            }
+            let pick = if graded {
+                classpay::pick_graded(world, employer, role)
+            } else {
+                pick_candidate(world, employer, workplace_door, role)
+            };
+            let Some(id) = pick else { continue };
+            let moved = graded && classpay::leave_for_promotion(world, id);
             hire(world, id, employer, role);
+            if moved {
+                classpay::note_promoted(world, id, Some(employer));
+            }
             // L2 L10: a public-works vacancy's hire joins the works roster.
             crate::systems::budget::note_hire(world, id, employer, role);
             if let Some(v) = world.vacancies.get_mut(&employer) {
@@ -728,7 +756,9 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if let Some(row) = crate::systems::trades::row_of(world, role) {
         shifts = crate::systems::trades::shifts_for(world, row, id);
     }
-    let wage_per_day = world.config.wage(role);
+    // Class pay: the post's grade fixes its wage (the config wage at grade 0).
+    let grade = crate::systems::classpay::base_grade(world, Some(employer), role);
+    let wage_per_day = crate::systems::classpay::wage_at(world, role, grade);
     world.insert(
         id,
         Job {
@@ -747,6 +777,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             // L2 fix round: unpaid until the first wage (L2 on only).
             paid_once: false,
             duty_fixed: None,
+            grade,
         },
     );
     world.abort_plan(id);
@@ -1031,6 +1062,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     let home = a.home;
     world.insert(id, Household::new(home));
     arrival_savings(world, id, home);
+    crate::systems::classpay::on_arrival(world, id, home);
     world.stats.current.immigrants += 1;
     let name = world.name_of(id);
     let where_ = match home {
@@ -1325,6 +1357,7 @@ fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, ho
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
+    crate::systems::classpay::on_birth(world, id, mother, father, home);
     let body = crate::systems::assets::child_body(world, id, mother, father);
     crate::systems::assets::give_body(world, id, body);
     let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);
