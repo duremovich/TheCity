@@ -206,3 +206,13 @@ Loan sharks (a gang lending to fund a Hit; an Open question), inheritance killin
 5. **Kin pooling** takes half the wallet of every relative who shares the grudge, and every one of them then knows. Should a relative be able to refuse (a lawfulness or honour roll)?
 6. **The exec war** (H18): dirty execs (2-4 per seed) buying rival execs could decapitate the corps (god v8: Militech bankrupt within a month of losing its exec). A cooldown of 30 days is the only brake. Acceptable, or a per-corp cap per run?
 7. **The gun's floor wage** (`week_wage = max(7 × wage, 50)` from M16a) sets the whole scale of asks for jobless guns. Keep it, or tie it to the city's median wage so prices follow the economy?
+
+## Decisions (Dylan, 2026-10-10)
+
+1. Death is cheap: the price is set by what the guns would take, with floors of 20 for a Hit and 8 for a Beat; hard targets keep the old quote.
+2. No witness, no case: a report goes cold 3 days after its witness dies unless a guard saw the crime, and a beaten witness may recant.
+3. Credit and debt: half down, the rest owed out of future wages, and a gun who isn't paid holds a grudge.
+4. Corp exec Hits: a 30-day cooldown per corp and at most 2 a year city-wide.
+5. (Orchestrator default) Gang loan sharks come with M16b, not here.
+6. (Orchestrator default) A relative may refuse to chip in, on a roll against loyalty to the buyer and their own lawfulness.
+7. (Orchestrator default) A gun's weekly-wage floor follows the economy: max(50, the city's median weekly wage × 0.5), so the flip rescales Hit prices on its own.
