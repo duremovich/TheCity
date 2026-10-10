@@ -1,0 +1,172 @@
+# Transit: the El
+
+Companion to `JOBS_V2.md` (the jobs, the hiring key), `M13_ASSETS.md` § 2 (vehicles, trips, the flyer's off-map hop), `M12_DISTRICTS.md` (district crime, riots, curfews), `TESTING.md` (the tiers) and `VISION.md` ("Public transport rails can be damaged by accident or by terrorism"; roadmap addendum 6). Plan: `~/.claude/plans/transit.md`. Identifiers marked *new* don't exist at HEAD (`d771073`). Numbers marked *placeholder* are starting values; the rest are measured or computed from `assets/map.txt`.
+
+**The problem (2026-10-10).** In the all-Full flipped city a worker is at the work for ~51 % of free, healthy shift minutes (Hunger as sickness P5f's diagnosis, seed 42, days 2-30): 16 % of shift minutes are the commute itself, and the Sleep (8-10 %) and the mid-shift meal (10 %) are partly the commute's too, because a 3-hour walk each way leaves no room for a night's sleep and a meal at home. The median home-to-work commute is ~90 Manhattan tiles (~3 h at the measured 2.05 ticks a tile); ~500 farmers walk a median 116 tiles to Farms on the east edge. Learned attendance (`StatTable.p_attend`): farmers 0.38, clerks 0.53, cooks 0.91. A parallel branch adds relocation and a hiring commute cap; this spec is the long-term answer the vision already promised: rails.
+
+**The short version.** Three elevated lines (the El) run over the road grid from the Sump and Mid to the Vats, with stops at road intersections every 16 tiles. A ride is a deterministic timetable lookup (no train entities): walk to a stop, wait for the next departure, ride off-map like M13's flyer, walk from the stop. One pure function decides walk or ride for every tier, so Full, Coarse and Statistical agents commute by the same arithmetic. The rail is a corp concession: fares are its revenue, power is its cost, and the lines close when the street riots. Everything the vision hangs on rails (sabotage, gang turf, inspectors, station crime) gets a hook, not a mechanism.
+
+---
+
+## 0. What the El buys (computed from the map)
+
+`net.py` (scratchpad; the plan's phase 1 ports it to `citysim-cli transit-report`): every Home door against every Farm door and against a fifth of all workplace doors, walking at 2 ticks a tile, the El at the config below (0.25 ticks a tile, 1-tick dwell, 5-tick average wait, 5-tick transfers, the 3 nearest stops at each end).
+
+| network | stops | track tiles | access walk to the nearest stop, p50 / p90 tiles (Sump, Mid, Spire) | home → Farm, ticks p50 (walk → best) | home → any workplace, p50 (walk → best) | pairs where the ride wins |
+|---|---|---|---|---|---|---|
+| one line (Sump → Vats) | 24 | 360 | 19/35, 69/125, 93/133 | 440 → 173 | 304 → 201 | 63 % |
+| two lines (Vat Line + Crosstown) | 38 | 592 | 19/43, 27/43, 37/53 | 440 → 154 | 304 → 159 | 86 % |
+| **three lines (the proposal)** | **54** | **840** | **11/21, 21/35, 37/53** | **440 → 147** | **304 → 149** | **88 %** |
+
+By commute length (three lines): a 70-100 tile walk (140-200 ticks) becomes ~130; a 100-130 tile walk (200-260) becomes ~142. **The access walk is the binding term, not the train**: at 0.15 ticks a tile instead of 0.25 the home → Farm median moves only 154 → 134. So the El alone cuts the measured median commute (~90 tiles, ~180 ticks) by about a quarter and the farmers' (~116 tiles, ~235 ticks) by about two fifths. The rest comes from where people live: the relocation branch should prefer Homes near a stop, and the hiring cap should read travel time, not tiles (§ 6). A static estimate; the plan measures the real one.
+
+---
+
+## 1. Decisions
+
+| # | Question | Decision |
+|---|---|---|
+| T1 | What it is | **The El**: elevated rail over the road grid. Grade-separated, so road wreckage, crashes and traffic never touch it in v1 (rails get their own damage later, addendum 6). Not buses: buses on roads would need vehicle entities, road capacity and a crash model for 50-passenger vehicles. |
+| T2 | Trains | **No train entities.** A line is a timetable: departures from each terminus every `headway` ticks, a stop's departure time is the terminus's plus the ride ticks to it. A ride is a lookup, never a moving body. Capacity is unlimited in v1 (the peak load per departure is printed). |
+| T3 | Stops | A stop is a **road tile** at an intersection under the track (no building, no map change). The line's `waypoints` are road intersections; stops fall every `stop_spacing` track tiles from the line's first waypoint, plus every waypoint and every tile two lines share (the transfers). A nominal stop tile that is not walkable Road (a double-wide building overwrote the road) snaps to the nearest walkable Road tile, ties the lower `(y, x)`. Derived at world creation and on load from config and map; not saved. |
+| T4 | Lines (*placeholder* network) | **Vat Line** `(7,127) → (231,127) → (231,15)`: Sump north to the Vat Farms. **Low Line** `(7,167) → (231,167) → (231,127)`: the deep Sump, joining the Vat Line at `(231,127)`. **Crosstown** `(39,15) → (39,63) → (231,63)`: Mid West, Civic, the Vats, crossing the Vat Line at `(231,63)`. The Spire is not served: the rich drive or fly. All coordinates are road lines (`7 + 8k`). |
+| T5 | Ride time | `ride(s → t) = Σ track tiles × ride_ticks_per_tile + dwell_ticks × stops passed + transfer_ticks × transfers`, the minimum over the line graph, precomputed all-pairs (≤ 64 stops: a 64 × 64 `u16` table, 8 KB) at world creation and on load. |
+| T6 | Wait | **Exact, from the timetable**: `next_departure(stop, line, dir, t)` = the first departure at or after `t`. Pure function of the tick. The wait at a transfer is not exact: `transfer_ticks` (half a headway) is folded into T5, the same for every tier. |
+| T7 | The route | *new* `transit::route(world, who, from, to, t) -> Option<Route>`: over the `stop_candidates` stops nearest `from` (board) and nearest `to` (alight), the minimum of `walk(from, s) + wait(s, t + walk) + ride(s, t) + walk(t, to)`, where `walk` is `exec::timed_walk` (litter included). `Route { board, alight, line, dir, depart, arrive, total_ticks, fare }`. No RNG. ≤ 9 combinations of table lookups and two scans over ≤ 64 stops. |
+| T8 | Walk or ride | Ride iff every test passes, in order (each refusal counted by cause): (1) `[transit] enabled`, the line open (T15) and in service hours; (2) Manhattan distance ≥ `min_ride_tiles`; (3) **time vs fare**: `walk_ticks − route.total_ticks ≥ min_saving_ticks + fare × ticks_per_coin`, where `ticks_per_coin` is `poor_ticks_per_coin` when the wallet holds less than `poor_meals` meals at the local price (a coin is worth more to the poor); (4) **can pay**: wallet ≥ fare, or the agent dodges (T10); (5) **danger**: at night (`night_from..night_to`), the worse of the two stops' districts by `crime_rate` above `danger_crime × (0.5 + courage)` refuses. An agent with a vehicle for the trip (`vehicles::vehicle_for_trip`) drives and never asks. |
+| T9 | Fare | Flat `fare` per ride (transfers free), paid at boarding (Full, Coarse) or at the commute's hour (Statistical, T13), `Flow::Fare` (*new*, taxed like a Hotel night) from the rider to the operator. No passes in v1. |
+| T10 | Fare dodging | A rider who can't pay (or whose `lawfulness < dodge_always`) jumps the gate if `lawfulness < dodge_lawfulness`; otherwise walks. Counted (`fare_dodges`), no crime filed in v1: the hook for ticket inspectors (T18). |
+| T11 | The operator | A **corp concession**: `operator = "Arasaka"` (*placeholder*; a Security corp, so its guards are the later inspectors and its cameras the later station surveillance). Fares are the corp's revenue (wages from revenue count them). `power_per_line_day` per open line is paid at midnight to the World account (power imported until the Power milestone). The corp brain does not know it owns a rail in v1: no fare setting, no expansion. A bankrupt or dissolved operator's concession passes to the city (`operator` none: fares to the Treasury, power from the Treasury). `operator = "city"` is the city from day 0. |
+| T12 | Full riders | The plan step stays `GoTo(key)` throughout; the exec chains the legs. *new* `World::rides: BTreeMap<EntityId, Ride>` holds the itinerary (as `World::trips` does for a vehicle). Leg 1 is an ordinary `walking_goto` to the board stop's tile. On arrival the agent stands on the platform (the stop tile) in *new* `ExecState::Ride { target, board, alight, depart, arrive_tick }` until `depart`, then is off the map (like `ExecState::Fly`: no co-location, no witness, uninterruptible) until `arrive_tick`, then stands at the alight stop and leg 3 starts as an ordinary goto to the original target. The fare is paid when the agent boards. A missed departure (arrived late) takes the next one. |
+| T13 | Coarse and Statistical | **Coarse**: `timed_goto` reads `route` and arrives at `t + route.total_ticks` (litter on the walk legs only), pays at the start, counts the ride at the board stop. **Statistical**: no movement. On each workday, at the shift's first credited hour, the worker's home → work route (cached per agent, keyed by `(home door, workplace door, transit epoch)`) decides walk or ride; a ride pays `2 × fare` (out and back) and counts two rides in the stop ledger. Errands are not modelled off-screen (the parity rates count commute rides only). |
+| T14 | Attendance (the parity term) | Today a Statistical worker's shift hours are credited at `StatTable.p_attend[role]` (Hunger as sickness P5f). **Re-key it by `(role, commute band)`**, the band from `route`'s door-to-door ticks (walk or ride, whichever wins): `< 30`, `30-60`, `60-120`, `120-180`, `≥ 180` (`p_attend` falls back to the role's row for an empty cell). `calibrate` learns it from the all-Full city with the El on. Then a line cut moves an off-screen worker into a longer band and his attendance falls, with no new rule. Needs P5f merged (§ 8). |
+| T15 | Closures | A line or a stop is closed while `closed_until > tick`. **Riots** close every stop in a rioting district for the riot's span (trains run through); a **curfew** closes the district's stops from `night_from` to `night_to`. **God** `CutLine { line, days }` and `CloseStop { stop, days }` (*new* `PlayerCommand`s). A closed board or alight stop is not a candidate; a line cut leaves the riders to the rest of the network or to their feet. Nothing else closes a line in v1. |
+| T16 | Departure gate | `routine::must_leave_for_work` reads *new* `transit::estimate(world, id, door)` (= the route's ticks if the agent would ride, else `fixes::walk_estimate`). A rider leaves later and sleeps longer. |
+| T17 | Stops as places | Full riders waiting on a platform co-locate as on any street tile: the existing readers (social drift, gossip, sightings, witnesses, street encounters) see them, with no new code. *new* `TransitState.load[stop][hour]` counts boardings (all tiers) for the day: printed, read by nothing in v1 but the report; it is the hook for ambient platform density (addendum 13) and stop crime. |
+| T18 | Hooks only (not v1) | Sabotage and power cuts close a line through T15's `closed_until` (one call). Gang turf: a district's controller is readable at each stop (a toll later). Ticket inspectors: the operator's guards stop dodgers (T10's count becomes a Crime). Station crime: pickpockets on the busiest platforms by `load`. Crime aboard. Rail damage as a `Damage` tile layer (addendum 6). |
+
+---
+
+## 2. Config (`[transit]`)
+
+```toml
+[transit]
+# docs/TRANSIT.md. Every value a placeholder until the plan's phase 1 measures it.
+enabled = true                 # CITYSIM_TRANSIT_OFF=1 turns it off (the vf_* pattern); off = today exactly
+operator = "Arasaka"           # a corp name, or "city"
+fare = 1                       # coins per ride, transfers free
+headway = 10                   # ticks between departures from each terminus
+ride_ticks_per_tile = 0.25     # 4 tiles a minute, ~8x walking
+dwell_ticks = 1                # per stop passed
+transfer_ticks = 5             # per transfer (half a headway)
+stop_spacing = 16              # track tiles between stops
+stop_candidates = 3            # nearest stops tried at each end
+min_ride_tiles = 24            # no ride under this Manhattan distance
+min_saving_ticks = 15
+ticks_per_coin = 20            # what a coin of fare must save in time
+poor_ticks_per_coin = 60       # ... for a wallet under poor_meals meals
+poor_meals = 2
+dodge_lawfulness = 0.25        # a rider who can't pay jumps the gate below this
+dodge_always = 0.1             # ... and never pays below this
+service_from = 300             # 05:00
+service_to = 60                # 01:00 (no service 01:00-05:00)
+night_from = 1260              # 21:00
+night_to = 300                 # 05:00
+danger_crime = 3.0             # crime_rate (per 100 residents a day) at which an average-courage rider refuses at night; set from phase 1's distribution
+power_per_line_day = 150       # operator -> World account, per open line
+
+[[transit.lines]]
+name = "Vat Line"
+waypoints = [[7, 127], [231, 127], [231, 15]]
+
+[[transit.lines]]
+name = "Low Line"
+waypoints = [[7, 167], [231, 167], [231, 127]]
+
+[[transit.lines]]
+name = "Crosstown"
+waypoints = [[39, 15], [39, 63], [231, 63]]
+```
+
+`Config::v1_profile` (unit tests on the 96 × 64 map) has `enabled = false` and no lines; a unit test builds its own line on the v1 map.
+
+---
+
+## 3. LOD: one function, three tiers
+
+| | Full | Coarse | Statistical |
+|---|---|---|---|
+| decides | `route` + T8 at the GoTo's start | the same | the same, home → work, once a workday |
+| moves | walks to the stop, stands on the platform, off-map aboard, walks on | `GotoTimed` for the route's total | none |
+| pays | at boarding | at the start | `2 × fare` at the commute's hour |
+| counts in `load` | the board stop, the departure hour | the board stop, the start hour | the home stop at the shift-start hour, the work stop at the shift-end hour |
+| attendance | emerges (less walking, more sleep) | emerges | `p_attend[(role, band)]` learned from Full (T14) |
+
+**Tier changes.** A demotion or promotion mid-ride ends the `Ride` (`transit::end_ride`, called where `vehicles::end_trip` is: `World::abort_plan`, `remove_agent`, `set_lod`); the fare is not refunded; the agent is snapped as today (`lod::snap_to_phase_door`). A Coarse agent promoted mid-`GotoTimed` keeps today's behaviour (re-plans its GoTo, which re-reads `route`).
+
+**Parity.** The Full-vs-Statistical test (`lod.rs::test_full_vs_statistical_within_15pct`) gains: fares per worker-day (commute rides only on the Full side: a ride whose GoTo targets the agent's employer or Home on a workday), the ride share of commutes, and attendance by commute band. Full's errand rides are printed apart.
+
+**Determinism.** No RNG anywhere in transit. `World::rides` and `TransitState`'s maps are `BTreeMap`s; the stop list is ordered by line then track position.
+
+---
+
+## 4. Data and columns
+
+- *new* `systems/transit.rs`: `TransitState { lines: Vec<Line>, stops: Vec<Stop>, ride: Vec<u16> (all-pairs), nearest: per-district stop shortlist, closed_line: Vec<Option<Tick>>, closed_stop: Vec<Option<Tick>>, load: Vec<[u16; 24]>, epoch: u32 }`; `route`, `estimate`, `next_departure`, `board`, `end_ride`, `daily` (power, load reset, operator succession), `on_riot`, `on_curfew`.
+- *new* `components::{Line, Stop, Ride}`, `ExecState::Ride`, `Flow::Fare`, `PlayerCommand::{CutLine, CloseStop}`.
+- Saved: `World::rides`, `closed_line`, `closed_stop`, today's `load` and counters, the operator id. Derived on load: stops, the table, the shortlists. **`save::SAVE_VERSION` + 1** (6 → 7 at HEAD; the Hunger-as-sickness and Hit-market branches may bump it first: whoever merges last takes the next number). A pre-transit save loads with no rides and every line open.
+- *new* `TransitCols` (the `JobsCols` pattern, its own header block, `is_zero` when off): `rides_full`, `rides_coarse`, `rides_stat`, `fares`, `fare_dodges`, `refused_fare`, `refused_danger`, `refused_closed`, `peak_stop_load`, `peak_stop` (index), `operator_fares`, `operator_power`, `commute_tpt_ride` (beside `commute_tpt_walk`/`_drive`: `World::commute_acc` grows two slots), `attend_rider`, `attend_walker` (Full: on-shift minutes at work over shift minutes, by how the agent came). `tools/analyze_run.py` gets a Transit section.
+- UI (`citysim-app`): the track drawn over the roads, stops as markers, riders aboard drawn along the track between `depart` and `arrive_tick` (the flyer's lerp, along the polyline); the inspector shows "riding the Vat Line to X, arrives 07:42".
+
+---
+
+## 5. Costs
+
+- **Ticks/s.** Per Full or Coarse GoTo: two scans over ≤ 64 stops and ≤ 9 table lookups (a few hundred ns). Per Statistical worker: one cached route a workday. Riders aboard take no path steps: a Full rider walks ~40 % of the tiles he walked before, so the exec does less. Expected neutral to slightly positive; the floor (4,000 on seed 42, `core_throughput`) stands and the plan A/Bs it.
+- **Memory.** < 100 KB.
+- **Save.** One version bump; the rides map is at most the number of agents aboard (~100s at peak).
+- **Gates.** The behaviour tier re-measures (commute legs change every Full worker's day); shadow rows move by the doctrine (bounds re-fit from main plus the butterflies). The stat table regenerates once (with T14).
+
+---
+
+## 6. Hooks into work in flight
+
+- **Relocation + the hiring commute cap** (parallel branch, 2026-10-10): every distance it reads should be `transit::commute_ticks(world, who, from_door, to_door)` (the route's ticks, or the walk's), not Manhattan tiles, so a Sump resident near a stop is hireable at the Vats and a mover prefers a Home near a stop. If that branch merges first, phase 2 swaps its distance; if this merges first, it calls the function.
+- **Hunger as sickness P5f** (`p_attend`): T14 extends its key. If P5f is not merged when phase 3 starts, phase 3 waits for it (Statistical attendance is the parity term).
+- **The flip** (P9a re-run, then P10): transit changes attendance and so wages; land it before the recalibration so one `calibrate` covers both (open question 7).
+- **Ambient LOD** (addendum 13): `load[stop][hour]` is the platform density a promotion reads.
+
+---
+
+## 7. Acceptance (TESTING.md tiers)
+
+**Unit** (`tests/transit.rs`, a hand-built line on a small map): the timetable (`next_departure` at, before and after a departure; both directions); `route` picks the minimum and refuses under `min_ride_tiles`; T8's five refusals each by a built case; the fare moves from wallet to operator and the coin identity holds; a dodger rides free and is counted; a closed stop is skipped and a cut line falls back to the other line or the walk; a mid-ride save loads and runs on byte for byte; a demotion mid-ride ends it; the operator's bankruptcy hands the concession to the city.
+
+**Core** (`core_sanity`, seeds 42-44 × 120 days): mechanism bullets "a ride" and "a fare paid to the operator" (each on 3/3); sanity: no agent in `ExecState::Ride` past `arrive_tick + 1`, `World::rides` keys == agents in `Ride` or on a ride's walk legs, the coin identity (unchanged). `core_year` unchanged. The ticks floor unchanged.
+
+**Behaviour.** The shadow diary shows the legs ("walked to Sump Central stop, 14 min; the Vat Line to Vats North, 31 min; walked 6 min"). New printed metrics per archetype: rides a week, commute minutes a workday, attendance. Rows re-measured. A critic read of the farmer and night-porter diaries after phase 2.
+
+**Person probes** (`tests/person.rs`): a Sump farmer with coins rides and arrives before his walk would; a broke lawful worker walks; a broke lawless one jumps the gate; a timid worker walks rather than board at night in the worst district; a worker whose line is cut walks the next day.
+
+**God** (`god_line_cut`, `docs/GOD_SCENARIOS_V*.md`): cut the Vat Line for 10 days at day 20 of a 60-day run; asserts: no ride on it during the cut, Vat Line commuters' commute ticks up, the operator's fares down; recovered after (rides resume). The riot close is unit-tested (riots are rare per seed).
+
+**Printed findings, never asserted**: the ride share of commutes, commute minutes p50/p90 walk vs ride, attendance by role and band before vs after, `p_attend` by band, fares and the operator's treasury, peak stop loads, dodges, refusals by cause, Murders and thefts at stops' districts.
+
+---
+
+## 8. Not in v1
+
+Train entities, capacity and platform queues; buses and road transit; sabotage, power cuts and rail damage (hooks only, T18); gang tolls on lines; ticket inspectors and a FareEvasion crime; crime aboard; station buildings with Security profiles and cameras (the Interiors milestone); the corp brain setting fares or building lines; passes, zone fares, concessions for children or the camps; errand rides off-screen; park-and-ride; a Spire express; rail to the outside (M17).
+
+---
+
+## Open questions for Dylan
+
+1. **Who owns the El?** Proposed: a corp concession (Arasaka: its guards become the inspectors, its cameras the station surveillance, its fares a raid prize). Alternatives: the city (fares fund police and sweepers through P5a's ring; the tax band falls), or a new transit corp (a tenth corp, a Niche the corp brain must learn: more work).
+2. **The fare.** A flat 1 coin a ride is 2 a workday, a fifth to a third of a low wage on the flipped city. Brutal and real, and the time-vs-fare rule makes the poorest walk short trips. Keep it, or price it lower (a weekly pass; a free Sump line)?
+3. **The El, not buses?** Grade-separated rail over the roads is the cheapest model and fits the look. Buses would share the roads with M13's cars (crashes, wreckage, impassable roads) and cost vehicle entities.
+4. **The network.** Three lines serving the Sump and Mid, none in the Spire (the rich drive or fly). Two lines get most of the median gain (159 vs 149 ticks); the third halves the Sump's access walk (19 → 11 tiles p50). A fourth (another N-S spine) added nothing in the estimate.
+5. **No service 01:00-05:00.** Night porters and stockers walk. Story, or a night service?
+6. **Fare dodging with nobody checking.** In v1 a broke lawless rider rides free and nothing happens to him. OK until inspectors land, or file a Crime from day one?
+7. **Sequencing.** Transit moves attendance and so wages and the money circuit: land it before the recalibration and the flip (one `calibrate`), or after the flip (a second recalibration)? Proposed: after Hunger as sickness (it needs P5f's `p_attend`), before the recalibration.
+8. **Map.** v1 stops are street tiles: no map change. Station buildings (with a door, a Security profile, shops on the concourse) need map cells; take them from the free ground now, or wait for the Interiors milestone?
