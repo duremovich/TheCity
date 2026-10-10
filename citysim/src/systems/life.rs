@@ -367,8 +367,9 @@ pub fn commute_cost(world: &World, home: TilePos, work: TilePos) -> crate::time:
 /// out), else a floor on the nearest Home in range below `[floors]
 /// floors_max`. The employer's owner corp pays `found_cost` / `floor_cost`
 /// (Flow::Found, as Grow and AddFloor) when its purse holds it; else the
-/// city builds (owner None, unpaid, the existing city path). No RNG;
-/// bounded by the Lots and the floor cap.
+/// Treasury buys it from the World when it holds the cost above its band
+/// floor (`housing_payer`); else nothing goes up today. No RNG; bounded by
+/// the Lots and the floor cap.
 pub fn grow_housing(world: &mut World) {
     if !crate::systems::fixes::grow_housing(world) {
         if !world.housing_demand.is_empty() {
@@ -441,7 +442,7 @@ pub fn grow_housing(world: &mut World) {
 pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
     let cap = world.config.life.commute_move_ticks;
     let Some((work, owner)) = world.comp::<Building>(employer).map(|b| (b.door, b.owner)) else { return false };
-    let payer = owner.filter(|&o| world.has::<Corp>(o));
+    let corp = owner.filter(|&o| world.has::<Corp>(o));
     let what = world.name_of(employer);
     // A vacant Lot in range: plain Lots first, then shanties; nearest; ties lower id.
     let lot = crate::systems::founding::vacant_lots(world)
@@ -454,16 +455,11 @@ pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
         .map(|(_, _, l)| l);
     if let Some(lot) = lot {
         let cost = crate::systems::founding::found_cost(world, BuildingKind::Home).unwrap_or(0);
-        let by = payer.filter(|&c| world.purse(Some(c)) >= cost);
+        let Some(by) = housing_payer(world, corp, cost) else { return false };
         if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Home, by).is_err() {
             return false;
         }
-        let paid = match by {
-            Some(c) if cost > 0 => {
-                crate::systems::ownership::pay(world, Some(c), None, cost, crate::systems::ownership::Flow::Found)
-            }
-            _ => 0,
-        };
+        let paid = pay_housing(world, by, cost);
         let (who, home) = (world.owner_label(by), world.name_of(lot));
         let mut actors: Vec<EntityId> = by.into_iter().collect();
         actors.push(lot);
@@ -488,11 +484,44 @@ pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
         .map(|(_, h)| h);
     let Some(home) = home else { return false };
     let cost = crate::systems::founding::floor_cost(world, BuildingKind::Home).unwrap_or(0);
-    let by = payer.filter(|&c| world.purse(Some(c)) >= cost);
+    let Some(by) = housing_payer(world, corp, cost) else { return false };
+    // A corp's floor is paid inside `add_floor` (Flow::Found); the city's
+    // after it stands.
     if crate::systems::founding::add_floor(world, home, by).is_err() {
         return false;
     }
+    if by.is_none() {
+        pay_housing(world, None, cost);
+    }
     true
+}
+
+/// P5h (the no-safety-net doctrine: no unpaid builds): who pays `cost` for
+/// housing toward `corp`'s workplace. The owner corp when its purse holds
+/// it (`Some(Some(corp))`); else the Treasury (`Some(None)`) when it holds
+/// the cost and keeps `[treasury] band[0]` after it (with the Treasury band
+/// on; else just the cost), the civic budget's floor; else nobody (`None`:
+/// nothing is built today).
+fn housing_payer(world: &World, corp: Option<EntityId>, cost: i64) -> Option<Option<EntityId>> {
+    if let Some(c) = corp.filter(|&c| world.purse(Some(c)) >= cost) {
+        return Some(Some(c));
+    }
+    let floor = if crate::systems::treasury::on(world) { world.config.treasury.band[0] } else { 0 };
+    (world.purse(None) - cost >= floor).then_some(None)
+}
+
+/// P5h: the payment for a Home or floor: a corp pays the Treasury
+/// `Flow::Found` (Grow's and AddFloor's path); the Treasury buys the build
+/// from the World (`ownership::import`, `ImportWhy::Build`), so the coins
+/// leave the city as any import's. Returns the coins paid.
+fn pay_housing(world: &mut World, by: Option<EntityId>, cost: i64) -> i64 {
+    if cost <= 0 {
+        return 0;
+    }
+    match by {
+        Some(c) => crate::systems::ownership::pay(world, Some(c), None, cost, crate::systems::ownership::Flow::Found),
+        None => crate::systems::ownership::import(world, None, cost, crate::systems::ownership::ImportWhy::Build),
+    }
 }
 
 pub fn relocate(world: &mut World) {

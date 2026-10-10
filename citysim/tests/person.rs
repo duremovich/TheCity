@@ -1087,3 +1087,43 @@ fn probe_working_couple_moves_near_work() {
     assert!(after < before, "a working couple with room near their shared work stayed put");
     assert_eq!(home(&w, a), home(&w, s), "the couple moved together");
 }
+
+/// Item 10 (P5h, no unpaid builds): housing toward jobs is paid. A broke
+/// employer and a Treasury at its band floor build nothing; a Treasury
+/// above it pays the build out of its purse.
+#[test]
+fn probe_housing_toward_jobs_is_paid() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_HOUR);
+    let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
+    if let Some(cc) = w.comp::<Building>(farm).and_then(|b| b.owner).and_then(|o| w.comp_mut::<citysim::Corp>(o)) {
+        cc.treasury = 0;
+    }
+    let set_treasury = |w: &mut World, c: i64| {
+        if let Some(t) = w.treasury_mut() {
+            t.coins = c;
+        }
+    };
+    let floor = w.config.treasury.band[0];
+    let homes = |w: &World| -> u32 {
+        w.buildings_of_kind(citysim::BuildingKind::Home)
+            .iter()
+            .filter_map(|&h| w.comp::<Building>(h))
+            .map(|b| u32::from(b.floors.max(1)))
+            .sum()
+    };
+    set_treasury(&mut w, floor);
+    let before = homes(&w);
+    let built = citysim::systems::life::build_housing_near(&mut w, farm);
+    assert!(!built && homes(&w) == before, "a build with no one able to pay");
+    assert_eq!(w.purse(None), floor, "the Treasury paid nothing");
+    // A Treasury with room above its floor pays.
+    set_treasury(&mut w, floor + 10_000);
+    let t0 = w.purse(None);
+    assert!(citysim::systems::life::build_housing_near(&mut w, farm), "the Treasury builds");
+    eprintln!("Treasury {t0} -> {} for the build", w.purse(None));
+    assert!(w.purse(None) < t0, "the Treasury's build cost it nothing");
+}

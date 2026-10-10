@@ -4357,8 +4357,8 @@ pub struct LifeCfg {
     /// vacant Lot in that range (else a floor on the nearest Home there
     /// below `[floors] floors_max`); up to `housing_builds_per_1000` a day
     /// per 1,000 residents. Its owner corp pays `found_cost` / `floor_cost`
-    /// when it can (company housing), else the city builds (the city's
-    /// existing unpaid build path).
+    /// when it can (company housing), else the Treasury buys it from the
+    /// World when it can (keeping `[treasury] band[0]`), else nothing.
     pub hf_grow_housing: bool,
     pub housing_demand_min: u32,
     pub housing_demand_days: u16,

@@ -605,6 +605,8 @@ pub enum ImportWhy {
     Ice,
     /// E11: a Market's food from the World at the ask.
     Food,
+    /// Hunger as sickness P5h: a Home or a floor the Treasury builds toward jobs.
+    Build,
 }
 
 /// Plan E5: an import, paid by `from`. With the market off it is
