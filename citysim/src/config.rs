@@ -5161,6 +5161,20 @@ impl Config {
         self
     }
 
+    /// The flip (Dylan, 2026-10-10): the shipped city runs wages from
+    /// revenue with no safety net, hunger as sickness and the shanties. This
+    /// is the old default, the dole city, kept reachable (P10 keeps its
+    /// mechanisms as policy levers): `[economy2] wages` and `no_safety_net`
+    /// off, `[sickness]` off, `[street] shanties` off (class pay and the
+    /// no-net hunger fixes read only with the wages on).
+    pub fn dole_city(mut self) -> Config {
+        self.economy2.wages = false;
+        self.economy2.no_safety_net = false;
+        self.sickness.enabled = false;
+        self.street.shanties = false;
+        self
+    }
+
     /// The Full city size the shipped planner budgets serve
     /// (`calibration_city` scales them past it).
     pub const PLAN_BUDGET_REF_AGENTS: u32 = 500;

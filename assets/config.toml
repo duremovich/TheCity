@@ -809,7 +809,7 @@ relet_days = 60
 # street). Traced on the flipped seed 42 (days 30-66): 519-641 rough sleepers, 76-184 squatters in 15-33
 # derelicts, 24 Hotel beds; 412-509 of the homeless held 0 coins (a bed costs 3), so the free rung is the
 # one missing. While the rough sleepers outnumber the free squat slots, vacant Lots go up as shanties.
-shanties = false                   # in flight: on with the flip
+shanties = true                    # the flip (2026-10-10): on
 shanty_capacity = 24               # slots a shanty holds
 shanties_per_night = 3             # Lots that can go up a night
 shanty_lots_max = 20               # Lots standing as shanties at once (of ~160; the rest stay for building)
@@ -1821,8 +1821,8 @@ min_gap_hours = 6
 # The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
 # `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).
 [economy2]
-wages = false                        # E1: phase 2's switch (econ::wages_on): off until the stop rule is answered (see the phase 2 record)
-no_safety_net = false                # E1: phase 3a turns it on (only after the stop rule)
+wages = true                         # the flip (Dylan, 2026-10-10): wages from revenue; Config::dole_city switches the dole city back
+no_safety_net = true                 # the flip (Dylan, 2026-10-10): no dole; Config::dole_city switches it back
 emigrate_cost = 20                   # E35 (the jobs round, read only with wages on): fewer coins cannot start emigrating (spec § 10's 20)
 # Spec § 5 (phase 2, plan E13-E20): wages from revenue. Each corp's payroll tracks labour_share x its
 # 7-day revenue through wage_rev (E17), clamped [wage_floor_mult, wage_cap_mult] and moving wage_step a
@@ -2164,7 +2164,7 @@ corp_only = true
 # Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values; every
 # key read only with `enabled`. Dylan 2026-10-10: on with the flip (wages + no_safety_net), off until then.
 [sickness]
-enabled = false            # master; off is the city before it
+enabled = true             # master (on with the flip, 2026-10-10); Config::dole_city switches it off
 diet = true                # § 1-2: synth/real, the meters, the debuffs
 bins = true                # § 4
 cancer = true              # § 3
