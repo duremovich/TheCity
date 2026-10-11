@@ -169,9 +169,13 @@ pub fn rent_meal(world: &World) -> bool {
 /// `commute_tpt_walk` column reads ~2.05 ticks a tile against
 /// `move_ticks_full` 2). The old estimate padded by half and so shrank 1.5x
 /// faster than the clock: the leave-for-work gate went false after a leg.
+/// Transit phase 2 (T16): the trip as it would be made, so the ride
+/// `transit::choose` would take when the El is on (`transit::estimate`;
+/// the walk exactly with it off). Every reader means "how long to get
+/// there": the departure gate, the shift lead before an outing, the exec's
+/// start, the muster.
 pub fn walk_estimate(world: &World, id: EntityId, to: TilePos) -> Tick {
-    let from = crate::exec::walk_origin(world, id).unwrap_or(to);
-    crate::exec::timed_walk(world, id, from, to)
+    crate::systems::transit::estimate(world, id, to)
 }
 
 /// Item 1: `id` is on its Work plan for `job`'s employer, made for the

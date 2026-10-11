@@ -1328,6 +1328,11 @@ impl World {
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
         systems::districts::rebuild(&mut w);
+        // Transit: the El's network from the config and the map (no RNG;
+        // nothing with transit off), before anything reads a commute
+        // (phase 2: `life::commute_cost` rides; the staffing and the
+        // housing pre-roll read it).
+        systems::transit::build(&mut w);
         w.rumours = vec![Default::default(); w.districts.len()];
         w.spawn_gangs();
         w.spawn_population(&names);
@@ -1400,9 +1405,6 @@ impl World {
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.
         systems::health::seed_history(&mut w);
-        // Transit: the El's network from the config and the map (no RNG;
-        // nothing with transit off).
-        systems::transit::build(&mut w);
         w
     }
 

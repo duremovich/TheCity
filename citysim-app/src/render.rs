@@ -52,6 +52,9 @@ const C_LEISURE: u32 = 0xe0a030;
 /// L2 L15: a Sump fire barrel.
 const C_BARREL: u32 = 0xff5a1e;
 const C_EPISODE: u32 = 0xff1010;
+/// Transit phase 2: the El's track and stops (a closed stop drawn hollow).
+const C_TRACK: u32 = 0x8fa3b8;
+const C_STOP: u32 = 0xe8eef5;
 /// M12 D43: the district overlay's controller fill (the City's grey fainter).
 const DISTRICT_ALPHA: f32 = 0.22;
 const DISTRICT_CITY_ALPHA: f32 = 0.12;
@@ -358,6 +361,9 @@ pub fn draw(world: &World, app: &App) {
         }
     }
 
+    // 3c. Transit phase 2: the El over the roads.
+    draw_transit(world, app);
+
     // 4. corpses
     for id in world.with::<Corpse>() {
         let Some(pos) = world.comp::<Position>(id) else { continue };
@@ -369,8 +375,13 @@ pub fn draw(world: &World, app: &App) {
         draw_line(p.x + ppt - 1.0, p.y + 1.0, p.x + 1.0, p.y + ppt - 1.0, 2.0, hex(C_CORPSE));
     }
 
-    // 5. Full agents, coloured by current action (M0: everyone is idle)
+    // 5. Full agents, coloured by current action (M0: everyone is idle).
+    // Transit phase 2: a rider aboard is off the street (drawn on the track
+    // below, whatever the tier).
     for (id, tile) in full {
+        if citysim::systems::transit::aboard_at(world, id).is_some() {
+            continue;
+        }
         let p = cam.tile_to_screen(vec2(f32::from(tile.x), f32::from(tile.y)));
         let colour = agent_colour(world, id);
         draw_rectangle(p.x + 1.0, p.y + 1.0, ppt - 2.0, ppt - 2.0, colour);
@@ -389,6 +400,18 @@ pub fn draw(world: &World, app: &App) {
     // top edge (at most four a door), drivers' glyphs over their squares,
     // and flyers lerped from where they took off to the door, over walls.
     draw_vehicles(world, app, &in_view);
+
+    // 5c. Transit phase 2: riders aboard, lerped along the track between
+    // their stops (the flyer's lerp), whatever the tier (the rides map is small).
+    for &id in world.rides.keys() {
+        let Some((x, y)) = citysim::systems::transit::aboard_at(world, id) else { continue };
+        if !in_view(TilePos { x: x as u8, y: y as u8 }) {
+            continue;
+        }
+        let p = cam.tile_to_screen(vec2(x, y));
+        draw_circle(p.x + ppt / 2.0, p.y + ppt / 2.0, (ppt * 0.35).max(2.0), agent_colour(world, id));
+        draw_circle_lines(p.x + ppt / 2.0, p.y + ppt / 2.0, (ppt * 0.35).max(2.0), 1.0, hex(C_TRACK));
+    }
 
     // 6. selection: a Full agent's square and sight radius, else the building
     // the selection is (or is inside)
@@ -595,6 +618,40 @@ fn draw_vehicles(world: &World, app: &App, in_view: &dyn Fn(TilePos) -> bool) {
             let size = (ppt * 0.9).clamp(10.0, 28.0);
             draw_text(vehicle_glyph(kind), p.x + ppt * 0.25, p.y + ppt * 0.8, size, BLACK);
         }
+    }
+}
+
+/// Transit phase 2: each line's track between consecutive stops (x first,
+/// then y, as the network's `track` runs), a cut line dimmed; each stop a
+/// square, hollow while closed. Nothing with transit off (no stops).
+fn draw_transit(world: &World, app: &App) {
+    let net = &world.transit.net;
+    if net.stops.is_empty() {
+        return;
+    }
+    let cam = &app.camera;
+    let ppt = cam.px_per_tile;
+    let centre = |t: TilePos| cam.tile_to_screen(vec2(f32::from(t.x), f32::from(t.y))) + vec2(ppt, ppt) * 0.5;
+    let width = (ppt * 0.2).clamp(1.5, 4.0);
+    for (l, line) in net.lines.iter().enumerate() {
+        let open = net.open.get(l).copied().unwrap_or(true);
+        let colour = Color { a: if open { 0.85 } else { 0.3 }, ..hex(C_TRACK) };
+        for pair in line.stops.windows(2) {
+            let (a, b) = (net.stops[usize::from(pair[0])], net.stops[usize::from(pair[1])]);
+            let (pa, pb) = (centre(a), centre(b));
+            let corner = vec2(pb.x, pa.y);
+            draw_line(pa.x, pa.y, corner.x, corner.y, width, colour);
+            draw_line(corner.x, corner.y, pb.x, pb.y, width, colour);
+        }
+    }
+    let s = (ppt * 0.7).max(4.0);
+    for (i, &t) in net.stops.iter().enumerate() {
+        let c = centre(t);
+        let open = u16::try_from(i).is_ok_and(|i| citysim::systems::transit::stop_open(world, i, world.tick));
+        if open {
+            draw_rectangle(c.x - s / 2.0, c.y - s / 2.0, s, s, hex(C_STOP));
+        }
+        draw_rectangle_lines(c.x - s / 2.0, c.y - s / 2.0, s, s, 1.5, hex(C_TRACK));
     }
 }
 

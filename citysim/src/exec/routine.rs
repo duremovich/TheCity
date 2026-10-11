@@ -146,7 +146,19 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     if crate::systems::fixes::commuting(world, id, job) {
         return true;
     }
-    until <= crate::systems::fixes::walk_estimate(world, id, door) + DEPARTURE_MARGIN
+    // Transit T16: a rider leaves later: the trip as it would be made to
+    // arrive by the margin (`transit::estimate_by`: the deadline's trip, not
+    // the clock's, so the gate holds still while the body waits). The
+    // estimate is never above the walk, so the route is only computed once
+    // the walk's gate is open (this runs every tick for a body resting
+    // before its shift).
+    let from = crate::exec::walk_origin(world, id).unwrap_or(door);
+    let walk = crate::exec::timed_walk(world, id, from, door);
+    if until > walk + DEPARTURE_MARGIN {
+        return false;
+    }
+    let arrive_by = world.tick + until - DEPARTURE_MARGIN.min(until);
+    until <= crate::systems::transit::estimate_by(world, id, from, door, arrive_by) + DEPARTURE_MARGIN
 }
 
 /// Work before the shift starts: head to the workplace and rest inside until
@@ -188,7 +200,11 @@ pub fn ticks_to_bedtime(world: &World, id: EntityId) -> Option<i64> {
     let home_door = world.comp::<Building>(home)?.door;
     let work_door = world.comp::<Building>(job.employer?)?.door;
     let until = i64::from(job.ticks_until_shift(tod));
-    let leave = until - crate::exec::timed_walk(world, id, home_door, work_door) as i64 - DEPARTURE_MARGIN as i64;
+    // Transit T16: the trip from the Home door as the gate will read it (the
+    // ride when the El wins, to arrive by the margin).
+    let arrive_by = world.tick.saturating_add_signed(until - DEPARTURE_MARGIN as i64);
+    let trip = crate::systems::transit::estimate_by(world, id, home_door, work_door, arrive_by) as i64;
+    let leave = until - trip - DEPARTURE_MARGIN as i64;
     let at_home = world.comp::<Position>(id).is_some_and(|p| p.building == Some(home));
     let walk_home = if at_home { 0 } else { crate::systems::fixes::walk_estimate(world, id, home_door) as i64 };
     // The night this body needs: a full night (`sleep_ticks_full`) restores

@@ -76,12 +76,31 @@ pub struct Net {
     pub open: Vec<bool>,
     /// `table[s × n + t]`.
     pub table: Vec<Hop>,
+    /// Phase 2: each map tile's `NEAR` nearest stops by `(Manhattan, index)`
+    /// (row-major, `u16::MAX` padding), so a stop shortlist is a slice read,
+    /// not a scan (`candidates`, `commute_ticks`). Derived with the stops.
+    pub near: Vec<u16>,
+    pub map_w: usize,
 }
+
+/// Stops kept per tile in `Net::near`: `stop_candidates` plus room for a
+/// few closed ones before `candidates` falls back to the scan.
+pub const NEAR: usize = 8;
 
 impl Net {
     pub fn hop(&self, s: u16, t: u16) -> Hop {
         let n = self.stops.len();
         self.table.get(usize::from(s) * n + usize::from(t)).copied().unwrap_or(NO_HOP)
+    }
+
+    /// `tile`'s nearest stops (up to `NEAR`, nearest first, ties the lower
+    /// index); empty off the map or before `build`.
+    pub fn near(&self, tile: TilePos) -> &[u16] {
+        let i = (usize::from(tile.y) * self.map_w + usize::from(tile.x)) * NEAR;
+        match self.near.get(i..i + NEAR) {
+            Some(v) => &v[..v.iter().position(|&s| s == u16::MAX).unwrap_or(NEAR)],
+            None => &[],
+        }
     }
 }
 
@@ -267,10 +286,39 @@ pub fn build(world: &mut World) {
         line.total = line.offsets.last().copied().unwrap_or(0);
         lines.push(line);
     }
-    world.transit.net.stops = stops;
+    world.transit.net.near = near_table(world, &stops);
+    world.transit.net.map_w = world.map.w();
     world.transit.net.lines = lines;
+    world.transit.net.stops = stops;
     let open = open_lines(world);
     rebuild_table(world, open);
+}
+
+/// Every tile's `NEAR` nearest stops by `(Manhattan, index)`.
+fn near_table(world: &World, stops: &[TilePos]) -> Vec<u16> {
+    let (w, h) = (world.map.w(), world.map.h());
+    let mut out = vec![u16::MAX; w * h * NEAR];
+    let k = NEAR.min(stops.len());
+    if k == 0 {
+        return out;
+    }
+    let mut v: Vec<(u32, u16)> = Vec::with_capacity(stops.len());
+    for y in 0..h {
+        for x in 0..w {
+            let t = TilePos::new(x as u8, y as u8);
+            v.clear();
+            v.extend(stops.iter().enumerate().map(|(i, s)| (s.manhattan(t), u16::try_from(i).unwrap_or(u16::MAX))));
+            if k < v.len() {
+                v.select_nth_unstable(k - 1);
+            }
+            v[..k].sort_unstable();
+            let base = (y * w + x) * NEAR;
+            for (j, &(_, i)) in v[..k].iter().enumerate() {
+                out[base + j] = i;
+            }
+        }
+    }
+    out
 }
 
 /// The lines open now (god `CutLine` is the only closure of a whole line).
@@ -440,10 +488,14 @@ pub fn cut_line(world: &mut World, line: u8, days: u32) -> Result<String, String
     };
     if days == 0 {
         world.transit.line_closed.remove(&line);
+        ensure_net(world);
         return Ok(format!("reopened the {name}"));
     }
     let until = world.tick + u64::from(days) * TICKS_PER_DAY;
     world.transit.line_closed.insert(line, until);
+    // Phase 2: the table now, so the structural commute (`commute_ticks`,
+    // read without `&mut`) sees the cut at once.
+    ensure_net(world);
     Ok(format!("cut the {name} for {days} days"))
 }
 
@@ -470,6 +522,14 @@ pub fn close_stop(world: &mut World, stop: u16, days: u32) -> Result<String, Str
 /// ties the lower index.
 fn candidates(world: &World, tile: TilePos, t: Tick) -> Vec<u16> {
     let k = world.config.transit.stop_candidates.max(1);
+    // Phase 2: the tile's precomputed shortlist, in the scan's order; the
+    // scan below only when closures leave the shortlist short.
+    let net = &world.transit.net;
+    let near = net.near(tile);
+    let open: Vec<u16> = near.iter().copied().filter(|&i| stop_open(world, i, t)).take(k).collect();
+    if open.len() == k || near.len() == net.stops.len() {
+        return open;
+    }
     let mut v: Vec<(u32, u16)> = world
         .transit
         .net
@@ -558,6 +618,101 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
     r.walk = walk;
     r.dodge = dodge;
     Ok(r)
+}
+
+// ---------------------------------------------------------------------------
+// The shared distance and the estimate (phase 2: T16, plan § 6)
+// ---------------------------------------------------------------------------
+
+/// The one measure of a commute between two doors, in travel ticks: the
+/// walk (Manhattan × `[exec] move_ticks_full`, `life::commute_cost`'s
+/// formula), or with the El on the best ride over the doors' nearest stops
+/// (`stop_candidates` each, the walks at the same rate, half a `headway`
+/// of wait, the table's ride) when it saves `min_saving_ticks` plus a
+/// fare's `ticks_per_coin`, as `choose` asks of a rider with the coins.
+/// No agent, no clock: the structural commute the hiring band, relocation
+/// and the housing demand read. God closures count (a closed stop is
+/// skipped); a riot's or a curfew's do not (they pass). With transit off it
+/// is the walk exactly.
+pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
+    let step = world.config.exec.move_ticks_full;
+    let tiles = from.manhattan(to);
+    let walk = Tick::from(tiles) * step;
+    let c = &world.config.transit;
+    if !c.enabled || tiles < c.min_ride_tiles {
+        return walk;
+    }
+    let net = &world.transit.net;
+    let k = c.stop_candidates.max(1);
+    let shut = |s: u16| world.transit.stop_closed.get(&s).is_some_and(|&until| until > world.tick);
+    let mut best = UNREACHABLE as Tick;
+    for &s in net.near(from).iter().filter(|&&s| !shut(s)).take(k) {
+        let w1 = Tick::from(net.stops[usize::from(s)].manhattan(from)) * step;
+        for &e in net.near(to).iter().filter(|&&e| !shut(e)).take(k) {
+            if s == e {
+                continue;
+            }
+            let hop = net.hop(s, e);
+            if hop.ticks == UNREACHABLE {
+                continue;
+            }
+            let w2 = Tick::from(net.stops[usize::from(e)].manhattan(to)) * step;
+            best = best.min(w1 + Tick::from(c.headway / 2) + Tick::from(hop.ticks) + w2);
+        }
+    }
+    let need = Tick::from(c.min_saving_ticks) + c.fare.max(0) as Tick * Tick::from(c.ticks_per_coin);
+    if best.saturating_add(need) <= walk {
+        best
+    } else {
+        walk
+    }
+}
+
+/// T16: how long `who` takes from `from` to `to` setting out at `t`: the
+/// ride `choose` would take (door to door, its exact wait), else the walk
+/// (`exec::timed_walk`). With transit off, or under `min_ride_tiles`, the
+/// walk exactly (no route is computed).
+pub fn estimate_from(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) -> Tick {
+    let walk = crate::exec::timed_walk(world, who, from, to);
+    if !may_ride(world, who, from, to) {
+        return walk;
+    }
+    choose(world, who, from, to, t).map_or(walk, |r| r.total.min(walk))
+}
+
+/// Could this trip ride at all: the El on and built, the trip past
+/// `min_ride_tiles`, no vehicle to hand (a driver never asks, T8).
+fn may_ride(world: &World, who: EntityId, from: TilePos, to: TilePos) -> bool {
+    enabled(world)
+        && from.manhattan(to) >= world.config.transit.min_ride_tiles
+        && !world.transit.net.stops.is_empty()
+        && !(world.config.assets.enabled && crate::systems::vehicles::vehicle_for_trip(world, who).is_some())
+}
+
+/// T16, the departure gate's estimate: the trip to arrive at `to` by
+/// `arrive_by`, as `choose` would make it setting out at the time that
+/// arrival needs (the structural ride's leaving time, then once more from
+/// the leaving time the first answer gives). It reads the deadline, not the
+/// clock, so it holds still while a body waits to leave: an estimate read
+/// at "now" fell when the El's service began at 05:00 and turned riders
+/// back from commutes their walk's gate had opened (the behaviour tier's
+/// commute aborts). The walk exactly where `estimate_from` is.
+pub fn estimate_by(world: &World, who: EntityId, from: TilePos, to: TilePos, arrive_by: Tick) -> Tick {
+    let walk = crate::exec::timed_walk(world, who, from, to);
+    if !may_ride(world, who, from, to) {
+        return walk;
+    }
+    let ride = |t: Tick| choose(world, who, from, to, t).map_or(walk, |r| r.total.min(walk));
+    let first = ride(arrive_by.saturating_sub(commute_ticks(world, from, to).min(walk)));
+    ride(arrive_by.saturating_sub(first))
+}
+
+/// T16: `estimate_from` where `who` stands (outside its building's door),
+/// setting out now: the departure gate's and every "how long to get there"
+/// reader's (`fixes::walk_estimate`).
+pub fn estimate(world: &World, who: EntityId, to: TilePos) -> Tick {
+    let from = crate::exec::walk_origin(world, who).unwrap_or(to);
+    estimate_from(world, who, from, to, world.tick)
 }
 
 // ---------------------------------------------------------------------------
@@ -745,6 +900,105 @@ pub fn end_ride(world: &mut World, id: EntityId) {
     }
     world.rides.remove(&id);
     world.transit.rode.remove(&id);
+}
+
+// ---------------------------------------------------------------------------
+// Off screen (phase 2: T13, plan D8)
+// ---------------------------------------------------------------------------
+
+/// T13: a Statistical worker's commute on a workday, at the shift's first
+/// hour on (the caller has checked the shift is pending and today a
+/// workday): the Home door to the work door as `choose` would ride it,
+/// setting out a walk before the shift. A ride pays two fares (out and
+/// back; a leg it can't pay is jumped and counted, no crime off screen) and
+/// counts two boardings: the board stop at the departure's hour, the alight
+/// stop at the shift's end. No movement, no RNG. Errands are not modelled
+/// off screen. Plan D8's per-agent route cache is not built: the choice is
+/// a few table lookups once a workday, and a cache left out of the save
+/// would make a loaded world choose differently.
+pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Job) {
+    if !enabled(world) || world.transit.net.stops.is_empty() {
+        return;
+    }
+    let tod = world.tick_of_day();
+    let wraps = job.shifts.iter().any(|&(_, e)| e == 1440);
+    let first_hour =
+        |&&(s, e): &&(u16, u16)| tod >= s && tod < e && tod - s < TICKS_PER_HOUR as u16 && !(s == 0 && wraps);
+    let Some(&(start, _)) = job.shifts.iter().find(first_hour) else { return };
+    let Some(work) = job.employer.and_then(|e| world.comp::<crate::components::Building>(e)).map(|b| b.door) else {
+        return;
+    };
+    let Some(home) = world
+        .comp::<crate::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<crate::components::Building>(h))
+        .map(|b| b.door)
+    else {
+        return;
+    };
+    let walk = crate::exec::timed_walk(world, id, home, work);
+    let shift_start = world.tick - Tick::from(tod - start);
+    world.stats.current.transit.stat_commutes += 1;
+    let Ok(r) = choose(world, id, home, work, shift_start.saturating_sub(walk)) else { return };
+    world.stats.current.transit.stat_commute_rides += 1;
+    let fare = world.config.transit.fare;
+    for _ in 0..2 {
+        let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+        if r.dodge || coins < fare {
+            world.stats.current.transit.fare_dodges += 1;
+        } else {
+            crate::systems::ownership::pay(world, Some(id), None, fare, crate::systems::ownership::Flow::Fare);
+        }
+    }
+    world.stats.current.transit.rides_stat += 2;
+    let back = job.shift_end(world.tick).unwrap_or(world.tick);
+    for (stop, at) in [(r.board, r.depart), (r.alight, back)] {
+        let hour = ((at % TICKS_PER_DAY) / TICKS_PER_HOUR) as usize;
+        let slot = world.transit.load.entry(stop).or_insert([0; 24]);
+        slot[hour] = slot[hour].saturating_add(1);
+        let peak = u32::from(slot[hour]);
+        let c = &mut world.stats.current.transit;
+        c.peak_stop_load = c.peak_stop_load.max(peak);
+    }
+}
+
+/// The app's lerp: where a rider aboard is on the track now, in tiles (a
+/// point between two stops of its line, by the ride offsets); `None` on the
+/// platform, off a ride, or with transit off.
+pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
+    let ride = world.rides.get(&id)?;
+    let Some(ExecState::Ride { depart, arrive_tick, .. }) = world.comp::<crate::components::Brain>(id).map(|b| &b.exec)
+    else {
+        return None;
+    };
+    if world.tick < *depart || world.tick >= *arrive_tick {
+        return None;
+    }
+    let net = &world.transit.net;
+    let line = net.lines.get(usize::from(ride.line))?;
+    let k0 = line.stops.iter().position(|&s| s == ride.board)?;
+    // The first leg's line from the board stop, in the ride's direction: the
+    // stops it passes and their ticks from the board stop (a transfer's
+    // second line is drawn as the end of the first: the lerp is cosmetic).
+    let seq: Vec<(u16, u32)> = if ride.forward {
+        line.stops[k0..].iter().zip(&line.offsets[k0..]).map(|(&s, &o)| (s, o - line.offsets[k0])).collect()
+    } else {
+        line.stops[..=k0].iter().zip(&line.offsets[..=k0]).rev().map(|(&s, &o)| (s, line.offsets[k0] - o)).collect()
+    };
+    let span = arrive_tick.saturating_sub(*depart).max(1) as f32;
+    let total = seq.last().map_or(1, |&(_, o)| o.max(1)) as f32;
+    let at = (world.tick - depart) as f32 / span * total.min(ride.hop_ticks.max(1) as f32);
+    let pos = |s: u16| net.stops[usize::from(s)];
+    for w in seq.windows(2) {
+        let ((a, oa), (b, ob)) = (w[0], w[1]);
+        if at <= ob as f32 {
+            let f = ((at - oa as f32) / (ob - oa).max(1) as f32).clamp(0.0, 1.0);
+            let (pa, pb) = (pos(a), pos(b));
+            let lerp = |x: u8, y: u8| f32::from(x) + (f32::from(y) - f32::from(x)) * f;
+            return Some((lerp(pa.x, pb.x), lerp(pa.y, pb.y)));
+        }
+    }
+    seq.last().map(|&(s, _)| (f32::from(pos(s).x), f32::from(pos(s).y)))
 }
 
 // ---------------------------------------------------------------------------

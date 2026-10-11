@@ -1379,6 +1379,9 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     if job.last_shift_day == Some(key) {
         return;
     }
+    // Transit T13 (phase 2): the shift's first hour pays the day's commute
+    // rides when the El wins the trip (nothing with transit off).
+    crate::systems::transit::stat_commute(world, id, &job);
     // P5f (wage parity): the hour is worked on the role's `p_attend` (a
     // pure hash of the agent and the hour; the wage below reads the same).
     let attend = stat_attend(world, job.role);

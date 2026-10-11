@@ -957,12 +957,21 @@ pub fn off_hours(world: &World, id: EntityId) -> bool {
         {
             return true;
         }
-        let walk = j
-            .employer
-            .and_then(|e| world.comp::<Building>(e))
-            .map_or(0, |b| crate::systems::fixes::walk_estimate(world, id, b.door));
+        let Some(door) = j.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door) else {
+            let until = u64::from(j.ticks_until_shift(world.tick_of_day()));
+            return until > world.config.leisure.shift_lead_ticks;
+        };
         let until = u64::from(j.ticks_until_shift(world.tick_of_day()));
-        return until > walk + world.config.leisure.shift_lead_ticks;
+        let lead = world.config.leisure.shift_lead_ticks;
+        // Transit T16: the trip as it would be made to arrive by the lead
+        // (`transit::estimate_by`, never above the walk: the walk first).
+        let from = crate::exec::walk_origin(world, id).unwrap_or(door);
+        let walk = crate::exec::timed_walk(world, id, from, door);
+        if until > walk + lead {
+            return true;
+        }
+        let arrive_by = world.tick + until - lead.min(until);
+        return until > crate::systems::transit::estimate_by(world, id, from, door, arrive_by) + lead;
     }
     if !matches!(world.phase(), DayPhase::Evening | DayPhase::Night) {
         return false;

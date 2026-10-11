@@ -346,9 +346,11 @@ pub fn pair_key(a: EntityId, b: EntityId, day: u64) -> u64 {
 /// commute, in travel ticks from a home door to a work door. Today the walk
 /// (tiles x `[exec] move_ticks_full`); transit (the El) swaps the body.
 /// Every P5g commute rule (relocation, the hiring band, the seeded staff's
-/// housing) reads it.
+/// housing) reads it. Transit phase 2: `transit::commute_ticks`, the walk
+/// or the ride when the El is on and wins (the walk exactly with it off),
+/// so a Home near a stop is near the Vats.
 pub fn commute_cost(world: &World, home: TilePos, work: TilePos) -> crate::time::Tick {
-    crate::time::Tick::from(home.manhattan(work)) * world.config.exec.move_ticks_full
+    crate::systems::transit::commute_ticks(world, home, work)
 }
 
 /// Hunger fix item 10 (P5h), daily before `relocate`: housing demand at

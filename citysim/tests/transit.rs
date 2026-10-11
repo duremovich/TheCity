@@ -336,6 +336,173 @@ fn test_power_is_paid_at_midnight() {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 2: the shared distance, the departure gate, off-screen riders
+// ---------------------------------------------------------------------------
+
+fn door(w: &World, b: EntityId) -> citysim::TilePos {
+    w.comp::<Building>(b).expect("a building").door
+}
+
+/// The structural commute rides when the ride wins and is the walk
+/// otherwise: a Sump Home to a Vats Farm, a short hop, the El off, the
+/// board stops closed.
+#[test]
+fn test_commute_ticks_rides_when_it_wins() {
+    let mut w = city_on();
+    let (_, home, farm) = sump_farmer(&w);
+    let (hd, fd) = (door(&w, home), door(&w, farm));
+    let walk = u64::from(hd.manhattan(fd)) * w.config.exec.move_ticks_full;
+    let ride = transit::commute_ticks(&w, hd, fd);
+    assert!(ride + 30 < walk, "the El wins the Sump to the Vats: {ride} vs a {walk}-tick walk");
+    assert_eq!(citysim::systems::life::commute_cost(&w, hd, fd), ride, "commute_cost is the shared distance");
+    let near = citysim::TilePos::new(hd.x.saturating_add(5), hd.y);
+    assert_eq!(transit::commute_ticks(&w, hd, near), u64::from(hd.manhattan(near)) * w.config.exec.move_ticks_full);
+    // God closes the Home's nearest stops: another stop or the walk, never faster.
+    for &s in w.transit.net.near(hd).to_vec().iter().take(3) {
+        transit::close_stop(&mut w, s, 2).expect("a stop");
+    }
+    assert!(transit::commute_ticks(&w, hd, fd) >= ride);
+    w.config.transit.enabled = false;
+    assert_eq!(transit::commute_ticks(&w, hd, fd), walk, "off: the walk exactly");
+}
+
+/// An employed adult with a Home, no vehicle and a home -> work trip the El
+/// wins by `margin` ticks setting out at 06:00 on day 1: (who, home,
+/// employer).
+fn rider_worker(w: &World, margin: u64) -> (EntityId, EntityId, EntityId) {
+    use citysim::{Job, Role};
+    let t = TICKS_PER_DAY + 6 * 60;
+    w.citizens()
+        .into_iter()
+        .filter(|&a| w.has::<Brain>(a) && demography::is_adult(w, a))
+        .filter(|&a| citysim::systems::vehicles::vehicle_for_trip(w, a).is_none())
+        .find_map(|a| {
+            let job = w.comp::<Job>(a).filter(|j| j.role != Role::Guard && j.shifts.len() == 1)?;
+            let employer = job.employer?;
+            let home = w.comp::<Household>(a).and_then(|h| h.home)?;
+            let (hd, wd) = (w.outside_door(w.comp::<Building>(home)?), door(w, employer));
+            let walk = citysim::exec::timed_walk(w, a, hd, wd);
+            let r = transit::choose(w, a, hd, wd, t).ok()?;
+            (r.total + margin <= walk).then_some((a, home, employer))
+        })
+        .expect("a worker the El carries home to work")
+}
+
+/// T16: the departure gate reads the trip as it would be made, so a rider
+/// at home leaves later than the walk would; with the El off the same body
+/// at the same tick sets out.
+#[test]
+fn test_rider_leaves_later_for_work() {
+    use citysim::Job;
+    let mut w = city_on();
+    let (who, home, employer) = rider_worker(&w, 40);
+    let job = w.comp::<Job>(who).cloned().expect("a job");
+    let (start, _) = job.shifts[0];
+    // A workday whose shift is still pending.
+    let day = (1..8u64).find(|&d| citysim::exec::routine::is_workday(d as i64)).expect("a workday");
+    w.leave_building(who);
+    w.enter_building(who, home);
+    if let Some(b) = w.comp_mut::<Brain>(who) {
+        b.clear_plan();
+    }
+    if let Some(j) = w.comp_mut::<Job>(who) {
+        j.last_shift_day = None;
+    }
+    let (hd, wd) = (w.outside_door(w.comp::<Building>(home).expect("home")), door(&w, employer));
+    let walk = citysim::exec::timed_walk(&w, who, hd, wd);
+    // The walker's gate opened 10 ticks ago.
+    let arrive_by = day * TICKS_PER_DAY + u64::from(start) - 60;
+    w.tick = arrive_by - walk + 10;
+    let est = transit::estimate_by(&w, who, hd, wd, arrive_by);
+    assert!(est + 30 < walk, "the rider's estimate {est} vs the walk {walk}");
+    assert!(!citysim::exec::routine::must_leave_for_work(&w, who), "a rider stays in bed");
+    // The deadline's estimate holds still while the body waits (the clock's
+    // own moved with the timetable and the 05:00 start of service).
+    for t in [arrive_by - walk - 200, arrive_by - walk, arrive_by - est - 5] {
+        w.tick = t;
+        assert_eq!(transit::estimate_by(&w, who, hd, wd, arrive_by), est, "at {t}");
+    }
+    w.tick = arrive_by - walk + 10;
+    w.config.transit.enabled = false;
+    assert!(citysim::exec::routine::must_leave_for_work(&w, who), "a walker sets out");
+    w.config.transit.enabled = true;
+    // ... and the rider sets out once its own gate opens.
+    w.tick = arrive_by - est;
+    assert!(citysim::exec::routine::must_leave_for_work(&w, who), "the rider sets out at its time");
+    w.tick -= 1;
+    assert!(!citysim::exec::routine::must_leave_for_work(&w, who), "not a tick before");
+}
+
+/// T13: a Statistical worker the El carries pays two fares and counts two
+/// rides at the shift's first hour, and nothing in the next hour.
+#[test]
+fn test_statistical_rider_pays_two_fares_at_the_shift_start() {
+    use citysim::Job;
+    let mut w = city_on();
+    let (who, _, _) = rider_worker(&w, 40);
+    lod::set_lod(&mut w, who, Lod::Statistical);
+    let job = w.comp::<Job>(who).cloned().expect("a job");
+    let (start, _) = job.shifts[0];
+    w.comp_mut::<Wallet>(who).expect("wallet").coins = 50;
+    w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.6;
+    w.tick = TICKS_PER_DAY + u64::from(start) + 7;
+    let (purse0, id0) = (treasury(&w), citysim::systems::econ::identity(&w));
+    let c0 = w.stats.current.transit.clone();
+    transit::stat_commute(&mut w, who, &job);
+    let c = &w.stats.current.transit;
+    assert_eq!(c.rides_stat, c0.rides_stat + 2, "out and back");
+    assert_eq!(c.fares, c0.fares + 2);
+    assert_eq!(coins(&w, who), 48);
+    assert_eq!(treasury(&w), purse0 + 2, "to the Treasury");
+    assert_eq!(citysim::systems::econ::identity(&w), id0);
+    assert_eq!(w.transit.load.values().map(|h| h.iter().map(|&n| u32::from(n)).sum::<u32>()).sum::<u32>(), 2);
+    // The next hour of the same shift: nothing.
+    w.tick += 60;
+    transit::stat_commute(&mut w, who, &job);
+    assert_eq!(w.stats.current.transit.rides_stat, c0.rides_stat + 2);
+    // Broke and lawful off screen: the walk, no ride.
+    w.tick = 2 * TICKS_PER_DAY + u64::from(start) + 7;
+    w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
+    transit::stat_commute(&mut w, who, &job);
+    assert_eq!(w.stats.current.transit.rides_stat, c0.rides_stat + 2);
+}
+
+/// The app's lerp: a rider aboard is on the track between its board and
+/// alight stops, nowhere on the platform.
+#[test]
+fn test_aboard_rider_is_on_the_track() {
+    let mut w = city_on();
+    let (who, home, farm) = sump_farmer(&w);
+    set_out(&mut w, who, home, farm, Lod::Full, 50, 0.6);
+    let mut seen = 0;
+    for _ in 0..1_000 {
+        exec_tick(&mut w);
+        let Some(ride) = w.rides.get(&who).cloned() else { continue };
+        let Some(ExecState::Ride { depart, arrive_tick, .. }) = w.comp::<Brain>(who).map(|b| b.exec.clone()) else {
+            continue;
+        };
+        if w.tick >= arrive_tick {
+            continue;
+        }
+        let at = transit::aboard_at(&w, who);
+        if w.tick < depart {
+            assert_eq!(at, None, "on the platform");
+            continue;
+        }
+        let (x, y) = at.expect("aboard");
+        let line = &w.transit.net.lines[usize::from(ride.line)];
+        let (lo_x, hi_x, lo_y, hi_y) = line
+            .stops
+            .iter()
+            .map(|&s| w.transit.net.stops[usize::from(s)])
+            .fold((255u8, 0u8, 255u8, 0u8), |(a, b, c, d), p| (a.min(p.x), b.max(p.x), c.min(p.y), d.max(p.y)));
+        assert!(x >= f32::from(lo_x) && x <= f32::from(hi_x) && y >= f32::from(lo_y) && y <= f32::from(hi_y));
+        seen += 1;
+    }
+    assert!(seen > 0, "rode");
+}
+
+// ---------------------------------------------------------------------------
 // The switched-off city
 // ---------------------------------------------------------------------------
 
@@ -483,17 +650,32 @@ fn measure_transit_on_vs_off() {
     }
 }
 
-/// `(far by the walk, far by the best of walk and ride, employed workers
-/// counted)`: `grow_housing`'s measure (a housed, free, non-sweeper
-/// worker whose Home door to work door `commute_cost` is past
-/// `commute_move_ticks`), and the same with the El's door-to-door route
-/// at 06:00 today where `choose` rides.
-fn far_workers(w: &World) -> (u32, u32, u32) {
+/// The day's commute tail over the housed, free, non-sweeper workers
+/// (`grow_housing`'s filter), each count past `commute_move_ticks`:
+/// `[by the walk (Manhattan x move_ticks_full), by commute_cost (the
+/// shared distance: the ride where it wins with the El on), by the agent's
+/// own choice at 06:00 today (choose's route, else the walk), workers]`.
+fn farmer_trips(w: &World) -> Vec<u32> {
+    use citysim::systems::missions;
+    use citysim::{Job, Role};
+    let t = (w.tick / TICKS_PER_DAY) * TICKS_PER_DAY + 6 * 60;
+    w.citizens()
+        .into_iter()
+        .filter_map(|a| {
+            let j = w.comp::<Job>(a).filter(|j| j.role == Role::Farmer)?;
+            let work = w.comp::<Building>(j.employer?)?.door;
+            let hd = missions::home_of(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door)?;
+            Some(transit::estimate_from(w, a, hd, work, t) as u32)
+        })
+        .collect()
+}
+
+fn far_workers(w: &World) -> [u32; 4] {
     use citysim::systems::{jobs, life, missions};
     use citysim::{Job, Sentence};
     let cap = w.config.life.commute_move_ticks;
     let t = (w.tick / TICKS_PER_DAY) * TICKS_PER_DAY + 6 * 60;
-    let (mut far, mut far_best, mut n) = (0, 0, 0);
+    let mut out = [0u32; 4];
     for a in w.citizens() {
         let Some(employer) = w.comp::<Job>(a).and_then(|j| j.employer) else { continue };
         if w.has::<Sentence>(a) || w.comp::<Brain>(a).is_none_or(|b| b.emigrating) || jobs::is_sweeper(w, a) {
@@ -501,21 +683,28 @@ fn far_workers(w: &World) -> (u32, u32, u32) {
         }
         let Some(work) = w.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else { continue };
         let Some(hd) = missions::home_of(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door) else { continue };
-        n += 1;
-        let walk = life::commute_cost(w, hd, work);
-        if walk > cap {
-            far += 1;
-        }
-        let best = if transit::enabled(w) {
+        out[3] += 1;
+        let walk = u64::from(hd.manhattan(work)) * w.config.exec.move_ticks_full;
+        let cost = life::commute_cost(w, hd, work);
+        let own = if transit::enabled(w) {
             transit::choose(w, a, hd, work, t).map_or(walk, |r| r.total.min(walk))
         } else {
             walk
         };
-        if best > cap {
-            far_best += 1;
+        for (i, v) in [walk, cost, own].into_iter().enumerate() {
+            out[i] += u32::from(v > cap);
+        }
+        if std::env::var("TRANSIT_DIAG").is_ok() && cost <= cap && own > cap {
+            let coins = w.comp::<Wallet>(a).map_or(0, |x| x.coins);
+            let law = w.comp::<Personality>(a).map_or(0.0, |p| p.lawfulness);
+            eprintln!(
+                "DIAG walk {walk} cost {cost} own {own} {:?} coins {coins} law {law:.2} price {}",
+                transit::choose(w, a, hd, work, t).err(),
+                w.mean_price()
+            );
         }
     }
-    (far, far_best, n)
+    out
 }
 
 fn pct(v: &mut [u32], p: f32) -> u32 {
@@ -532,21 +721,35 @@ fn measure_tail(seed: u64, on: bool, days: u64) -> String {
     use citysim::EventKind;
     let mut cfg = Config::load();
     cfg.transit.enabled = on;
+    // Experiments (printed findings): `TRANSIT_POOR_TPC` overrides `poor_ticks_per_coin`,
+    // `TRANSIT_POWER` `power_per_line_day`.
+    if let Some(v) = std::env::var("TRANSIT_POWER").ok().and_then(|v| v.parse().ok()) {
+        cfg.transit.power_per_line_day = v;
+    }
+    if let Some(v) = std::env::var("TRANSIT_POOR_TPC").ok().and_then(|v| v.parse().ok()) {
+        cfg.transit.poor_ticks_per_coin = v;
+    }
     let mut w = World::new(seed, cfg);
     let seeded = w.corps();
     w.commute_log = Some(Vec::new());
     let mut cursor = 0u64;
     let mut murders = 0u32;
-    let (mut rf, mut rc, mut fares, mut dodges, mut power) = (0u64, 0u64, 0i64, 0u64, 0i64);
+    let mut starved = 0u32;
+    let (mut rf, mut rc, mut rs, mut fares, mut dodges, mut power) = (0u64, 0u64, 0u64, 0i64, 0u64, 0i64);
+    let (mut sc, mut scr) = (0u64, 0u64);
     let mut refused = [0u64; 4];
     for _ in 0..days {
         w.run_ticks(TICKS_PER_DAY);
         murders +=
             w.events.iter().rev().take_while(|e| e.id >= cursor).filter(|e| e.kind == EventKind::Murder).count() as u32;
         cursor = w.next_event_id;
+        starved += w.stats.history.back().map_or(0, |r| r.deaths_starvation);
         let c = &w.stats.history.back().expect("a day").transit;
         rf += u64::from(c.rides_full);
         rc += u64::from(c.rides_coarse);
+        rs += u64::from(c.rides_stat);
+        sc += u64::from(c.stat_commutes);
+        scr += u64::from(c.stat_commute_rides);
         fares += c.fares;
         dodges += u64::from(c.fare_dodges);
         power += c.transit_power;
@@ -555,28 +758,40 @@ fn measure_tail(seed: u64, on: bool, days: u64) -> String {
         refused[2] += u64::from(c.refused_slow);
         refused[3] += u64::from(c.refused_danger);
     }
-    let (far, far_best, workers) = far_workers(&w);
+    let [far_walk, far_cost, far_own, workers] = far_workers(&w);
     let row = w.stats.history.back().expect("a day");
     let alive: std::collections::BTreeSet<EntityId> = w.corps().into_iter().collect();
     let corps = seeded.iter().filter(|c| alive.contains(c)).count();
     let log = w.commute_log.take().unwrap_or_default();
+    let mut all: Vec<u32> = log.iter().map(|e| e.0).collect();
     let mut walked: Vec<u32> = log.iter().filter(|e| e.2 == 0).map(|e| e.0).collect();
     let mut rode: Vec<u32> = log.iter().filter(|e| e.2 == 2).map(|e| e.0).collect();
     let rode_n = rode.len();
     let share = if log.is_empty() { 0.0 } else { rode_n as f32 / log.len() as f32 };
+    let stat_share = if sc == 0 { 0.0 } else { scr as f64 / sc as f64 };
+    let purses: i64 = w.citizens().into_iter().filter_map(|a| w.comp::<Wallet>(a).map(|x| x.coins)).sum();
+    let mut farmers = farmer_trips(&w);
+    let farmers_n = farmers.len();
+    let (f50, f90) = (pct(&mut farmers, 0.5), pct(&mut farmers, 0.9));
     format!(
-        "seed {seed} transit {}: d{days} far(walk) {far} far(best) {far_best} of {workers} housed workers; employed {}, \
-         pop {}, Murders {murders}, corps alive {corps}/{}; rides/day full {:.0} coarse {:.0}, fares {fares}, dodges \
-         {dodges}, power {power}, refused no_route/fare/slow/danger {refused:?}; commutes {} ride share {:.3}, walk \
-         p50/p90 {}/{}, ride p50/p90 {}/{}",
+        "seed {seed} transit {}: d{days} far walk/cost/own {far_walk}/{far_cost}/{far_own} of {workers} housed \
+         workers; farmers' own trip p50/p90 {f50}/{f90} (n {farmers_n}); employed {}, pop {}, treasury {}, purses \
+         {purses}, starved {starved}, Murders {murders}, corps alive {corps}/{}; rides/day full {:.0} coarse {:.0} \
+         stat {:.0}, fares {fares}, dodges {dodges}, power {power}, refused no_route/fare/slow/danger {refused:?}; \
+         body commutes {} ride share {:.3}, stat ride share {stat_share:.3}; commute ticks all p50/p90 {}/{}, walk \
+         {}/{}, ride {}/{}",
         if on { "ON " } else { "OFF" },
         row.employed,
         row.population,
+        row.treasury,
         seeded.len(),
         rf as f64 / days as f64,
         rc as f64 / days as f64,
+        rs as f64 / days as f64,
         log.len(),
         share,
+        pct(&mut all, 0.5),
+        pct(&mut all, 0.9),
         pct(&mut walked, 0.5),
         pct(&mut walked, 0.9),
         pct(&mut rode, 0.5),

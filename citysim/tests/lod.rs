@@ -145,7 +145,7 @@ fn test_full_vs_statistical_within_15pct() {
     const DAYS: u64 = 30;
     const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
     struct Run {
-        rates: [f64; 9],
+        rates: [f64; 11],
         actors: [f64; 3],
     }
     fn bucket(w: &World, id: citysim::EntityId) -> Option<usize> {
@@ -253,6 +253,24 @@ fn test_full_vs_statistical_within_15pct() {
                 },
                 sum(|r| r.health.meals_dive),
                 100.0 * f64::from(w.stats.history.back().map_or(0.0, |r| r.health.mean_malnutrition)),
+                // Transit phase 2 (zeros with the El off): commute rides per
+                // 100 agent-days (a body's ride to work counted twice for the
+                // way back, as a Statistical riding workday pays two; errand
+                // rides are not counted on either side), and the ride share
+                // of commutes (x 100).
+                {
+                    let t = |f: fn(&citysim::stats::TransitCols) -> u32| {
+                        w.stats.history.iter().map(|r| f64::from(f(&r.transit))).sum::<f64>()
+                    };
+                    (2.0 * t(|c| c.commute_rides) + t(|c| c.rides_stat)) / per
+                },
+                {
+                    let t = |f: fn(&citysim::stats::TransitCols) -> u32| {
+                        w.stats.history.iter().map(|r| f64::from(f(&r.transit))).sum::<f64>()
+                    };
+                    let all = t(|c| c.commutes) + t(|c| c.stat_commutes);
+                    100.0 * (t(|c| c.commute_rides) + t(|c| c.stat_commute_rides)) / all.max(1.0)
+                },
             ],
             actors: actors.map(|n| n as f64),
         }
@@ -282,6 +300,8 @@ fn test_full_vs_statistical_within_15pct() {
         "synth % meals",
         "bin meals",
         "malnutrition x100",
+        "commute rides",
+        "ride share x100",
     ];
     let mut failures = Vec::new();
     for (i, name) in names.iter().enumerate() {

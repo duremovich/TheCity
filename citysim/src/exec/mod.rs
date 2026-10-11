@@ -629,6 +629,13 @@ fn commute_arrived(world: &mut World, id: EntityId, driving: bool) {
         let mode = if rode { 2 } else { u8::from(driving) };
         log.push((ticks as u32, tiles, mode));
     }
+    // Transit phase 2: the bodies' commutes and those that rode (the parity
+    // test's ride share; nothing with transit off).
+    if world.config.transit.enabled {
+        let c = &mut world.stats.current.transit;
+        c.commutes += 1;
+        c.commute_rides += u32::from(rode);
+    }
     // Transit: a commute that rode goes to its own sums (`commute_tpt_ride`).
     if rode {
         world.stats.current.transit.commute_ride_ticks += ticks;

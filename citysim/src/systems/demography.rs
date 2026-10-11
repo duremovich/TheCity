@@ -732,7 +732,16 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             };
             let off = (skill_w * 100.0 * skill).round() as u32
                 + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
-            let d = from.manhattan(workplace_door);
+            // Transit phase 2 (plan § 6): with the El on, the distance is the
+            // commute (`life::commute_cost`, the ride when it wins) in walking
+            // tiles, so a Sump resident by a stop ranks as near the Vats.
+            let d = if crate::systems::transit::enabled(world) {
+                let step = world.config.exec.move_ticks_full.max(1);
+                u32::try_from(crate::systems::life::commute_cost(world, from, workplace_door) / step)
+                    .unwrap_or(u32::MAX)
+            } else {
+                from.manhattan(workplace_door)
+            };
             // Hunger fix item 9 (P5g): a candidate within `commute_hire_ticks`
             // (`life::commute_cost`) before any beyond it (skill and the
             // rehire bonus rank inside each band).
