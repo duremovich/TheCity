@@ -311,7 +311,19 @@ Item 12 (`hf_work_night`, coordinator call). The farmers' on-shift sleep (6.2 % 
 - **Probe:** `probe_worker_sleeps_the_night_before_a_shift` (twenty flipped-config farmers due at 09:00: mean energy at 09:00 0.61 with item 12 off, 0.74 on; bound 0.7).
 - **Measured** (flipped seed 42, all-Full, days 30-60): Sleep on shift 8.4 % → 4.2 %; working 51.6 % → 51.9 % (Idle 5.2 → 6.9 %, Earn 5.9 → 7.4 % took the rest); commute 17.5 → 16.5 %. **Stop rule (coordinator):** this working share is accepted; the learned `p_attend` mirrors it, so parity holds.
 
+## After the classpay merge: re-housing and diet parity (2026-10-10)
+
+- **Item 13 (`hf_rehouse_employed`, no-net city only):** a homeless adult who holds a Job re-houses on the first rent, not `rehouse_coins_mult` 21 x rent (the jobless keep the deposit; the 7-day wait and the refusing landlord stand). Flipped seed 42, homeless employed on day 30 / 60: 12 / 19 (item 13 off: 98 / 138), with 900-1,400 beds empty before it.
+- **Diet parity (flipped parity failed hunger-days 2.68 vs 3.58, bins 2.10 vs 3.39, law1 0.205 vs 0.153):** the off-screen jobless and broke went hungry because nobody ran the grocery runs that stock the pantries they eat from.
+  - `p_meal` learned apart for hours starting on shift (`MEAL_CELLS_SPLIT`).
+  - `lod::stat_grocery`: an employed off-screen worker off shift restocks the household pantry to the Full city's learned level (`StatTable::pantry_per_resident`, 0.38 meals a resident), the shortfall only, at most three meals (pantries off screen 0.40 a resident against 0.39 Full; buying up to a shift's worth each stocked 0.84).
+  - `bins::dive_target`: no bin with a meal at hand (carried, or in the Home pantry), both tiers.
+  - `calibrate` counts a dive when it fed the diver (a bin meal in the day's tally), as the off-screen roll eats at once (begun 937, fed 929 on the all-Full run: the counts were already close).
+  - Flipped parity after them: hunger-days 2.67 vs 3.04 and law1 0.201 vs 0.153, inside; bins out (below).
+
 ## Open items (after P5)
+
+- **Bin meals parity (flipped config, a known gap like marriages):** Full 1.64 against Statistical 2.71 per 100 agent-days (tolerance 0.50), after two mechanism attempts (the off-screen grocery run; no bin with a meal at hand) and the denominator check (the coordinator's stop rule; tolerance not widened). The rate is not the gap: bin meals per eligible hour (an adult hungry, broke, with no meal at hand and a bin in reach at the hour's start) are 0.31 Full and 0.28 off screen, and the denominators match (`dive_target` at the hour's start in both). The pool is: 5,582 eligible adult-hours off screen against 3,010 Full over 30 days (seed 2000, all-Full vs all-Statistical, 2,000 agents), so more off-screen adults are broke and hungry with nothing at hand at once. The next place to look is how the off-screen broke get coins and food between meals (the scavenge, beg and Mission rolls), not the dive.
 
 - **Shift attendance (a later planner pass; no more attendance phases before the flip):** on the flipped all-Full city after P5j, working is ~52 % of shift time. What is left: late arrivals 2-4 h+ into the shift after Sleep, Idle, Earn and Eat (~11 % of shift time, the commute rows "since start" 2 h+); Eat on shift with nothing carried and an empty pantry (5.5 %); Idle (6.9 %) and Earn (7.4 %) on shift.
 - **Default-city starvation (the rollback cost, on record):** the flip replaces the default city, but if it is ever rolled back this is what ships. `core_sanity` starvation per 120 days, seeds 42 / 43 / 44, each commit built clean:

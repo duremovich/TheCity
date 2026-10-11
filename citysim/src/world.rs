@@ -191,6 +191,12 @@ pub struct StatTable {
     /// rule (every hungry hour eats, `p_eat` the rest).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_meal: Option<Vec<f32>>,
+    /// Diet parity (the off-screen grocery run): the Full city's pantry
+    /// meals per resident (the daily mean over inhabited Homes at midnight),
+    /// the level `lod::stat_grocery` restocks a household to. A table
+    /// without it: a shift's worth per resident.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pantry_per_resident: Option<f32>,
     /// P5f (wage parity): by role (`{role:?}`), the share of a Full
     /// worker's free, healthy workday shift minutes spent at the work
     /// itself (the commute, a meal, a sleep run over, the guard's patrol

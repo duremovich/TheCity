@@ -1262,8 +1262,8 @@ fn stat_eat(world: &mut World, id: EntityId) {
 /// Diet parity (hunger fix item 11, P5i (b), off screen): an employed
 /// agent off shift whose household's pantry and own carried meals are under
 /// `routine::shift_meals_needed` per resident (capped at the pantry) and who
-/// holds a meal's coins at its stocked food Market buys up to three meals
-/// into the pantry, as a Full worker's grocery run does. The Full city's
+/// holds a meal's coins at its stocked food Market buys the shortfall (at
+/// most three meals) into the pantry, as a Full worker's grocery run does. The Full city's
 /// jobless ate from the pantries the workers' runs filled (hungry at
 /// midnight 0.3-0.7 % against 3-3.6 % off screen on the flipped city).
 fn stat_grocery(world: &mut World, id: EntityId) {
@@ -1279,7 +1279,11 @@ fn stat_grocery(world: &mut World, id: EntityId) {
     let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
     let carried = world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
     let residents = world.residents_of(home).len().max(1) as u32;
-    let need = (need_one * residents).min(world.config.buildings.home.stock_cap);
+    // The level: the Full city's learned pantry per resident (a run does
+    // not always win the evening), else a shift's worth each.
+    let per = world.stat_table.as_ref().and_then(|t| t.pantry_per_resident).map_or(need_one as f32, |p| p.max(0.0));
+    let need =
+        ((per * residents as f32).round() as u32).min(need_one * residents).min(world.config.buildings.home.stock_cap);
     if pantry + carried >= need {
         return;
     }
@@ -1289,7 +1293,9 @@ fn stat_grocery(world: &mut World, id: EntityId) {
     if !stocked || world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins) < price {
         return;
     }
-    let units = economy::buy_quantity(world, id, Some(market));
+    // Up to the shortfall only (a run of three meals each time stocked the
+    // off-screen pantries at 0.84 meals a resident against 0.28 in Full).
+    let units = economy::buy_quantity(world, id, Some(market)).min(need - (pantry + carried));
     if units == 0 {
         return;
     }

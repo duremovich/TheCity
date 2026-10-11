@@ -1459,6 +1459,8 @@ struct HourTally {
     /// `p_dive`'s hours), and the dives it began this hour.
     dive_ok: bool,
     dives: u16,
+    /// The agent's bin meals today at the last tick (`Health.today.dive`).
+    dive_meals: u8,
     /// Parity (`p_meal`): hungry at the hour's start (below the
     /// table's hunger edge), the hunger last seen, and a meal this hour.
     meal_seen: bool,
@@ -1501,6 +1503,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_meal: None,
         p_attend: None,
         p_wage_ratio: None,
+        pantry_per_resident: None,
         rows: Vec::new(),
     };
     let mut counts = [[0u64; 5]; STAT_ROWS];
@@ -1527,6 +1530,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let mut attend: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     // P5f: wages owed (a free, healthy workday shift's wage at its start) and paid.
     let (mut wage_owed, mut wage_paid) = (0i64, 0i64);
+    // Diet parity: the pantry meals per resident, a daily mean.
+    let (mut pantry_sum, mut pantry_days) = (0f64, 0u64);
     let (mut eat_h, mut eat_h_denom) =
         ([0u64; citysim::world::MEAL_CELLS_SPLIT], [0u64; citysim::world::MEAL_CELLS_SPLIT]);
     let (mut desp, mut desp_denom) = ([0u64; 3], [0u64; 3]);
@@ -1574,6 +1579,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     earn,
                     broke,
                     dive_ok,
+                    dive_meals: world.comp::<citysim::Health>(id).map_or(0, |h| h.today.dive),
                     meal_seen: citysim::systems::lod::has_means(world, id),
                     meal_cell: header.meal_index_split(
                         world.phase(),
@@ -1607,6 +1613,16 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 let tod = world.tick_of_day();
                 if tod == 0 {
                     wage_paid += world.stats.history.back().map_or(0, |r| r.flow_wages);
+                    let (mut st, mut rs) = (0u64, 0u64);
+                    for &h in world.buildings_of_kind(citysim::BuildingKind::Home) {
+                        let r = world.residents_of(h).len() as u64;
+                        if r > 0 {
+                            rs += r;
+                            st += world.comp::<citysim::Building>(h).map_or(0, |b| u64::from(b.stock_food));
+                        }
+                    }
+                    pantry_sum += st as f64 / rs.max(1) as f64;
+                    pantry_days += 1;
                 }
                 for &id in hour.keys() {
                     let Some(j) = world.comp::<citysim::Job>(id) else { continue };
@@ -1666,13 +1682,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     }
                     t.last_hunger = h;
                 }
+                // Diet parity: a dive counts when it fed the diver (a bin
+                // meal in the agent's day tally), as the off-screen roll's
+                // `bins::dive` eats at once (a begun dive can lose the bin).
                 if t.dive_ok {
-                    if let citysim::ExecState::Use { kind: citysim::ActionKind::DumpsterDive, started, .. } = brain.exec
-                    {
-                        if started == just {
-                            t.dives += 1;
-                        }
+                    let d = world.comp::<citysim::Health>(id).map_or(0, |h| h.today.dive);
+                    if d > t.dive_meals {
+                        t.dives += 1;
                     }
+                    t.dive_meals = d;
                 }
                 if t.broke && !t.hungry {
                     t.hungry = world.comp::<Needs>(id).is_some_and(|n| n.hunger < header.hunger_edge);
@@ -2014,6 +2032,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_meal,
         p_attend,
         p_wage_ratio,
+        pantry_per_resident: (pantry_days > 0).then(|| (pantry_sum / pantry_days as f64) as f32),
         ..header
     };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
