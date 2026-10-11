@@ -69,7 +69,7 @@ fn test_map_eighth_field_is_floors() {
     let homes: Vec<_> = map.buildings.iter().filter(|b| b.kind == BuildingKind::Home).collect();
     assert_eq!(homes[0].floors, 3);
     assert!(homes[1..].iter().all(|b| b.floors == 1));
-    assert_eq!(founding::with_floors(BuildingKind::Home, 5, 3), 15);
+    assert_eq!(founding::with_floors(&Config::load(), BuildingKind::Home, 5, 3), 15);
 }
 
 /// J7: a two-floor Farm's places are twice a one-floor Farm's, and under the
@@ -117,13 +117,14 @@ fn test_two_floor_farm_posts_twice_the_places() {
 /// Lot of two floors converted into a Club seats and posts two floors' worth.
 #[test]
 fn test_capacity_multiplies_and_clamps() {
-    assert_eq!(founding::with_floors(BuildingKind::Home, 5, 2), 10);
-    assert_eq!(founding::with_floors(BuildingKind::Hotel, 12, 3), 36);
-    assert_eq!(founding::with_floors(BuildingKind::Club, 40, 6), 240);
-    assert_eq!(founding::with_floors(BuildingKind::Club, 100, 3), 255, "clamped at u8::MAX");
-    assert_eq!(founding::with_floors(BuildingKind::Farm, 16, 3), 48, "a Farm's floors hold their shifts");
-    assert_eq!(founding::with_floors(BuildingKind::Fab, 14, 2), 28, "a Fab's floors hold their shifts");
-    assert_eq!(founding::with_floors(BuildingKind::Market, 20, 2), 20);
+    let cfg = Config::load();
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Home, 5, 2), 10);
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Hotel, 12, 3), 36);
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Club, 40, 6), 240);
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Club, 100, 3), 255, "clamped at u8::MAX");
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Farm, 16, 3), 48, "a Farm's floors hold their shifts");
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Fab, 14, 2), 28, "a Fab's floors hold their shifts");
+    assert_eq!(founding::with_floors(&cfg, BuildingKind::Market, 20, 2), 20);
 
     let mut w = World::new(42, Config::load().dole_city());
     let lot = founding::vacant_lots(&w)
@@ -348,4 +349,43 @@ fn test_wages_staff_adds_a_floor_on_the_seventh_midnight() {
     let floored: Vec<EntityId> = farms.iter().copied().filter(|&f| floors(&w, f) == 2).collect();
     assert_eq!(floored.len(), 1);
     assert!(w.comp::<Corp>(corp).expect("corp").treasury < 1_000_000, "the corp paid for it");
+}
+
+/// Review fix: a Farm's or a Fab's floors multiply its room only under the
+/// workplace room cap (`[economy2] room_cap` with wages on); the dole city
+/// and a room-cap-off wages city keep one floor's room (as before the cap),
+/// and `add_floor` leaves it there. Blocks multiply under both rules.
+#[test]
+fn test_workplace_floors_only_under_the_room_cap() {
+    let farm_on_two_floors = |cfg: Config| -> (u8, u8, Option<u8>) {
+        let mut w = World::new(42, cfg);
+        let lot = founding::vacant_lots(&w)
+            .into_iter()
+            .max_by_key(|&l| w.comp::<Building>(l).map_or(0, |bd| u32::from(bd.rect.w) * u32::from(bd.rect.h)))
+            .expect("a Lot");
+        let interior =
+            w.comp::<Building>(lot).map(|bd| usize::from(bd.rect.w - 2) * usize::from(bd.rect.h - 2)).unwrap();
+        let per =
+            u8::try_from(interior).unwrap_or(u8::MAX).min(w.config.buildings.for_kind(BuildingKind::Farm).capacity);
+        set_floors(&mut w, lot, 2);
+        founding::build_on_lot(&mut w, lot, BuildingKind::Farm, None).expect("a two-floor Farm");
+        let two = w.comp::<Building>(lot).expect("farm").capacity;
+        // The dole city founds no Farm, so no one builds one up.
+        let three =
+            founding::add_floor(&mut w, lot, None).ok().map(|_| w.comp::<Building>(lot).expect("farm").capacity);
+        (per, two, three)
+    };
+    let shipped = Config::load();
+    assert!(shipped.economy2.wages && shipped.economy2.room_cap, "the shipped city runs the cap");
+    let (per, two, three) = farm_on_two_floors(shipped.clone());
+    assert!(per > 1, "{per}");
+    assert_eq!(usize::from(two), (2 * usize::from(per)).min(255), "two floors' room");
+    assert_eq!(three.map(usize::from), Some((3 * usize::from(per)).min(255)), "a floor's room added");
+    let (_, two, three) = farm_on_two_floors(shipped.clone().dole_city());
+    assert_eq!(two, per, "the dole city: one floor's room");
+    assert!(three.is_none_or(|x| x == per));
+    let mut off = shipped;
+    off.economy2.room_cap = false;
+    let (_, two, three) = farm_on_two_floors(off);
+    assert_eq!((two, three), (per, Some(per)), "the cap off: one floor's room, a floor adds none");
 }

@@ -803,11 +803,9 @@ fn mode_a_at(
     risk: f32,
     urgency_v: f32,
 ) -> Vec<Consideration> {
-    let wage = world.comp::<Job>(who).map_or(0, |j| j.wage_per_day);
-    let week_wage = (7 * wage).max(week_wage_floor(world)) as f32;
     let p = world.comp::<Personality>(who);
     let mut cs = vec![
-        Consideration::new("U(price/week wage)", u_of(price as f32 / week_wage), Curve::Logistic { k: 8.0, mid: 0.3 }),
+        price_term(price, week_wage_of(world, who)),
         Consideration::new("1-risk", 1.0 - risk, Curve::Linear { m: 0.7, b: 0.3 }),
     ];
     if !brokered {
@@ -824,6 +822,18 @@ fn mode_a_at(
     }
     cs.push(Consideration::new("urgency", urgency_v, Curve::Linear { m: 0.5, b: 0.5 }));
     cs
+}
+
+/// Mode A's price term: `U(price ÷ week wage)` through Logistic{8, 0.3}
+/// (the first consideration of [`mode_a_at`]).
+fn price_term(price: i64, week_wage: f32) -> Consideration {
+    Consideration::new("U(price/week wage)", u_of(price as f32 / week_wage), Curve::Logistic { k: 8.0, mid: 0.3 })
+}
+
+/// A gun's week wage as mode A reads it: `max(7 × wage, the floor)`.
+fn week_wage_of(world: &World, who: EntityId) -> f32 {
+    let wage = world.comp::<Job>(who).map_or(0, |j| j.wage_per_day);
+    (7 * wage).max(week_wage_floor(world)) as f32
 }
 
 /// C13: mode A's raw product without the gate, urgency 1.0: what a
@@ -854,9 +864,13 @@ pub fn ask_against(
 ) -> Option<i64> {
     let min = world.config.contracts.accept_min;
     let risk = risk_against(world, kind, gun, s_def);
-    let score = |price: i64| -> f32 {
-        mode_a_at(world, gun, kind, brokered, buyer, price, risk, 1.0).iter().map(|x| x.output).product()
-    };
+    // Every term but the price's is fixed: their outputs once, multiplied
+    // in mode A's order after the price term's (the same f32 operations as
+    // the product over the full list, so the boundary is bit-identical).
+    let rest: SmallVec<[f32; 6]> =
+        mode_a_at(world, gun, kind, brokered, buyer, 1, risk, 1.0).iter().skip(1).map(|x| x.output).collect();
+    let week_wage = week_wage_of(world, gun);
+    let score = |price: i64| -> f32 { rest.iter().fold(1.0f32 * price_term(price, week_wage).output, |a, &o| a * o) };
     if score(ASK_CAP) < min {
         return None;
     }
@@ -1438,12 +1452,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
                 // does (`beat_settle`; a Hit's death settles it outright),
                 // so the buyer does not buy the same beating twice.
                 if kind == ContractKind::Beat && c.motive == Motive::Revenge {
-                    let settle = world.config.grudges.beat_settle;
-                    let t = c.target.id();
-                    if let Some(g) = c.agent.and_then(|a| world.comp_mut::<crate::word::Grudges>(a)) {
-                        if let Some(x) = g.list.iter_mut().find(|x| x.target == t && x.settled.is_none()) {
-                            x.weight -= settle;
-                        }
+                    if let Some(a) = c.agent {
+                        crate::systems::grudges::answer_beating(world, a, c.target.id());
                     }
                 }
                 // Phase 2 (H15, H17, the Debt clock).
@@ -3393,6 +3403,12 @@ pub fn post_lobby(world: &mut World, corp: EntityId, gang: EntityId) -> bool {
             .values()
             .any(|c| c.is_live() && c.buyer == Some(corp) && c.target == Target::Agent(head));
     }
+    // The Hit market (H11, review fix): the culprit record is organic, so
+    // the day's brake holds it (`max_open`, `posts_per_day`); past the brake
+    // nothing is posted and the bribe goes ahead.
+    if world.config.hitmarket.enabled && !crate::systems::hitmarket::room(world) {
+        return false;
+    }
     let origin = Origin::CorpOrder(crate::components::CorpOrder::Lobby);
     let target = Target::Agent(head);
     // The Hit market (H18): at the market price, the motive on the record.
@@ -4214,5 +4230,69 @@ pub fn strike_at_contact(world: &mut World, taker: EntityId) -> bool {
             false
         }
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The ask by the pre-review bisection: a fresh mode-A list per step.
+    fn ask_reference(
+        world: &World,
+        gun: EntityId,
+        kind: ContractKind,
+        brokered: bool,
+        buyer: Option<EntityId>,
+        s_def: f32,
+    ) -> Option<i64> {
+        let min = world.config.contracts.accept_min;
+        let risk = risk_against(world, kind, gun, s_def);
+        let score = |price: i64| -> f32 {
+            mode_a_at(world, gun, kind, brokered, buyer, price, risk, 1.0).iter().map(|x| x.output).product()
+        };
+        if score(ASK_CAP) < min {
+            return None;
+        }
+        if score(1) >= min {
+            return Some(1);
+        }
+        let (mut lo, mut hi) = (1i64, ASK_CAP);
+        while hi - lo > 1 {
+            let mid = lo + (hi - lo) / 2;
+            if score(mid) >= min {
+                hi = mid;
+            } else {
+                lo = mid;
+            }
+        }
+        Some(hi)
+    }
+
+    /// Review fix (perf): the hoisted ask equals the old bisection's on a
+    /// spread of candidates, kinds, broker modes and defender strengths.
+    #[test]
+    fn test_hoisted_ask_equals_the_bisection() {
+        let w = World::new(42, crate::config::Config::load());
+        // scan-ok: a unit test, once.
+        let people: Vec<EntityId> = w.citizens().into_iter().filter(|&a| crate::systems::law::living(&w, a)).collect();
+        let buyer = people.first().copied();
+        let (mut some, mut none) = (0, 0);
+        for &g in people.iter().step_by(5) {
+            for kind in [ContractKind::Hit, ContractKind::Beat, ContractKind::Locate] {
+                for brokered in [true, false] {
+                    for s_def in [0.1, 0.625, 1.5, 4.0] {
+                        let new = ask_against(&w, g, kind, brokered, buyer, s_def);
+                        assert_eq!(new, ask_reference(&w, g, kind, brokered, buyer, s_def), "{g:?} {kind:?}");
+                        if new.is_some() {
+                            some += 1;
+                        } else {
+                            none += 1;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(some > 100 && none > 100, "a spread: {some} priced, {none} not for hire");
     }
 }

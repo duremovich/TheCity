@@ -103,14 +103,16 @@ pub fn exec_guards(world: &World, t: EntityId) -> Vec<EntityId> {
     if !world.config.hitmarket.enabled || n == 0 {
         return Vec::new();
     }
-    let corps = world.corps();
+    // The cheap check first (every pricing call reads this): no corp's exec,
+    // no bodyguards; nothing is allocated.
+    let corps = world.corp_slice();
     let Some(c) =
         corps.iter().copied().find(|&c| world.comp::<crate::components::Corp>(c).and_then(|x| x.exec) == Some(t))
     else {
         return Vec::new();
     };
     let mut protectors: Vec<EntityId> = vec![c];
-    for &s in &corps {
+    for &s in corps {
         let covers = world
             .comp::<crate::components::Corp>(s)
             .is_some_and(|x| x.contracts.iter().any(|&(b, _)| world.corp_of_building(b) == Some(c)));

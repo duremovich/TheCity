@@ -116,6 +116,24 @@ pub fn grudge_on(world: &World, holder: EntityId, target: EntityId) -> Option<Gr
     world.comp::<Grudges>(holder)?.list.iter().find(|x| x.target == target && x.settled.is_none()).cloned()
 }
 
+/// A beating answered `holder`'s unsettled grudge on `target` (a Hunt's
+/// winning strike that left the target alive, or a bought revenge Beat
+/// done): `[grudges] beat_settle` off its weight; at 0 or under it is
+/// settled now, its weight 0.
+pub fn answer_beating(world: &mut World, holder: EntityId, target: EntityId) {
+    let settle = world.config.grudges.beat_settle;
+    let now = world.tick;
+    if let Some(g) = world.comp_mut::<Grudges>(holder) {
+        if let Some(x) = g.list.iter_mut().find(|x| x.target == target && x.settled.is_none()) {
+            x.weight -= settle;
+            if x.weight <= 0.0 {
+                x.settled = Some(now);
+                x.weight = 0.0;
+            }
+        }
+    }
+}
+
 /// A display name for an agent or a faction.
 pub fn label(world: &World, id: EntityId) -> String {
     if let Some(g) = world.comp::<Gang>(id) {

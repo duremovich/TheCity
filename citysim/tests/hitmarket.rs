@@ -1212,3 +1212,163 @@ fn test_direct_hit_skips_a_well_paid_viewer() {
     assert!(run(false).is_some(), "the control: a broke, jobless friend takes it");
     assert_eq!(run(true), None, "a well-paid friend took a direct Hit");
 }
+
+// ---------------------------------------------------------------------------
+// Review fixes (`/code-review high 8270896..HEAD`)
+// ---------------------------------------------------------------------------
+
+/// Review fix 1: a buyer on the way to a Fixer for one head reports no hire
+/// on another (a want stands for its own head only, any motive); the want on
+/// the first head is untouched.
+#[test]
+fn test_want_on_one_head_is_no_hire_on_another() {
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    let want = w.wants.get(&h).cloned().expect("a want");
+    let t2 = adults(&w)
+        .into_iter()
+        .find(|&a| a != h && a != t && w.edge(h, a).is_none() && !law::is_guard(&w, a))
+        .expect("a second head");
+    set_grudge(&mut w, h, t2, 0.95);
+    assert!(hitmarket::hires(&w, h, t2));
+    assert!(!hitmarket::try_revenge(&mut w, h, t2, 0.95), "no hire happened on the second head");
+    assert_eq!(w.wants.get(&h), Some(&want), "the first errand stands");
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95), "the errand stands for its own head");
+    assert!(organic_by(&w, h).is_empty());
+}
+
+/// Review fix 2: a bought revenge Beat that takes the grudge to 0 or under
+/// settles it (weight 0), as a Hunt's beating does.
+#[test]
+fn test_bought_beating_settles_a_light_grudge() {
+    let mut w = world();
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    let light = w.config.grudges.beat_settle * 0.6;
+    set_grudge(&mut w, buyer, t, light);
+    set_coins(&mut w, buyer, 500);
+    let f = contracts::open_fixers(&w)[0];
+    let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, brokered(buyer, ContractKind::Beat, t, f, 40), extra).expect("posted");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    let x = w.comp::<Grudges>(buyer).and_then(|gs| gs.list.iter().find(|x| x.target == t).cloned()).expect("grudge");
+    assert!(x.settled.is_some(), "answered: settled");
+    assert_eq!(x.weight, 0.0);
+    assert!(grudges::grudge_on(&w, buyer, t).is_none());
+}
+
+/// Review fix 3: Lobby's culprit record is organic, so the day's brake
+/// holds it: past `posts_per_day` (or `max_open`) nothing is posted and the
+/// bribe goes ahead.
+#[test]
+fn test_lobby_culprit_under_the_brake() {
+    let mut w = world();
+    let (c, _, _) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.1);
+    let g = led_gangs(&mut w)[0];
+    w.config.hitmarket.posts_per_day = 0;
+    let n = w.contracts.len();
+    assert!(!contracts::post_lobby(&mut w, c, g), "the brake: the bribe goes ahead");
+    assert_eq!(w.contracts.len(), n, "nothing posted");
+    w.config.hitmarket.posts_per_day = 3;
+    w.config.hitmarket.max_open = 0;
+    assert!(!contracts::post_lobby(&mut w, c, g));
+    assert_eq!(w.contracts.len(), n);
+    w.config.hitmarket.max_open = 16;
+    assert!(contracts::post_lobby(&mut w, c, g), "the control: room, posted");
+    assert_eq!(w.contracts.len(), n + 1);
+}
+
+/// An edge debt of `debt_min` owed to a lawless rich Statistical creditor,
+/// `debt_days` old.
+fn aged_edge_debt(w: &mut World) -> (EntityId, EntityId) {
+    let [c, d] = strangers(w, 2)[..] else { unreachable!() };
+    set_law(w, c, 0.1, 0.5);
+    set_lod(w, c, citysim::Lod::Statistical);
+    set_coins(w, c, 10_000);
+    let owed = w.config.hitmarket.debt_min;
+    let (lo, _) = citysim::edge_key(c, d);
+    let e = w.edge_entry(c, d);
+    e.debt = if lo == d { owed } else { -owed };
+    hitmarket::debt_pass(w);
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(w, days);
+    (c, d)
+}
+
+/// Review fix 5: only a living free adult creditor buys a Debt beating: a
+/// cuffed one buys nothing, a dead one is not even priced (no
+/// `hm_unaffordable` tick a day).
+#[test]
+fn test_debt_creditor_must_be_free_and_living() {
+    let mut w = world();
+    let (c, _) = aged_edge_debt(&mut w);
+    let gd = citysim::systems::law_brain::guards(&w)[0];
+    if let Some(b) = w.comp_mut::<citysim::Brain>(c) {
+        b.cuffed_by = Some(gd);
+    }
+    hitmarket::debt_pass(&mut w);
+    assert!(organic_by(&w, c).is_empty(), "a cuffed creditor bought a beating");
+    let mut w = world();
+    let (c, _) = aged_edge_debt(&mut w);
+    w.kill_by(c, citysim::DeathCause::Violence, None);
+    let before = w.stats.current.hit.hm_unaffordable;
+    hitmarket::debt_pass(&mut w);
+    assert!(organic_by(&w, c).is_empty());
+    assert_eq!(w.stats.current.hit.hm_unaffordable, before, "a dead creditor tried to buy");
+    // Control: the same debt, a free creditor.
+    let mut w = world();
+    let (c, _) = aged_edge_debt(&mut w);
+    hitmarket::debt_pass(&mut w);
+    assert_eq!(organic_by(&w, c).len(), 1);
+}
+
+/// Review fix 6: a finance-arrears Debt record's text names what is in
+/// arrears (`per_day × arrears`, at most what remains), not "0 owed".
+#[test]
+fn test_debt_from_arrears_says_what_is_owed() {
+    use citysim::systems::assets;
+    let mut w = world();
+    let [l, o] = strangers(&w, 2)[..] else { unreachable!() };
+    set_law(&mut w, l, 0.1, 0.5);
+    set_lod(&mut w, l, citysim::Lod::Statistical);
+    set_coins(&mut w, l, 10_000);
+    let spot = contracts::open_fixers(&w)[0];
+    let a =
+        assets::spawn_asset(&mut w, citysim::AssetKind::Motorcycle, 1, Some(o), citysim::AssetLoc::Parked(spot), 300);
+    let repo = w.config.assets.repo_days;
+    if let Some(x) = w.comp_mut::<citysim::Asset>(a) {
+        x.finance = Some(citysim::Finance { lender: Some(l), remaining: 100, per_day: 5, arrears: repo });
+    }
+    hitmarket::debt_pass(&mut w);
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days);
+    hitmarket::debt_pass(&mut w);
+    assert_eq!(organic_by(&w, l).len(), 1);
+    let owed = (5 * i64::from(repo)).min(100);
+    assert!(owed > 0);
+    let phrase = format!("over {owed} owed");
+    assert!(w.events.iter().any(|e| e.text.contains(&phrase)), "no event reads {phrase:?}");
+    assert!(!w.events.iter().any(|e| e.text.contains("over 0 owed")));
+}
+
+/// Review fix 7 (the spec's Rival row): a dirty corp in an open vendetta
+/// buys the feuding rival's exec before the one that last wronged it.
+#[test]
+fn test_corp_rival_vendetta_before_the_last_wrong() {
+    let mut w = world();
+    let (c, r, r2) = two_corps(&w);
+    set_corp_treasury(&mut w, c, 1_000_000);
+    set_exec_law(&mut w, c, 0.1);
+    hitmarket::wronged(&mut w, c, r, citysim::contract::Wrong::Acquired);
+    let now = w.tick;
+    w.vendettas.push(citysim::word::Vendetta { a: c, b: r2, since: now, kills: [0, 0], w: [1.0, 1.0], declared: None });
+    hitmarket::corp_pass(&mut w);
+    let e2 = w.comp::<citysim::Corp>(r2).and_then(|x| x.exec).unwrap();
+    let mine = organic_by(&w, c);
+    assert_eq!(mine.len(), 1);
+    assert_eq!((mine[0].target, mine[0].motive), (Target::Agent(e2), Motive::Rival), "the feud first");
+}

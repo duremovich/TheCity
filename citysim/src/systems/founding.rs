@@ -225,7 +225,7 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
         // M12 D20: a bed per `[street] hotel_beds`, as the interior allows.
         capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(world.config.street.hotel_beds);
     }
-    let capacity = with_floors(kind, capacity, floors);
+    let capacity = with_floors(&world.config, kind, capacity, floors);
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.kind = kind;
         bd.capacity = capacity;
@@ -288,19 +288,22 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
 // ---------------------------------------------------------------------------
 
 /// J7: the kinds whose seats or beds floors multiply: Blocks, Hotels and
-/// the leisure venues; workplace room (2026-10-11): and the Farms and Fabs,
-/// whose floors multiply their staff (`jobs::places_of`), so a floor holds
-/// the shift it adds (a Market's `capacity` stays its one floor's; no
-/// stock cap is multiplied).
-pub fn floor_seats(kind: BuildingKind) -> bool {
-    matches!(kind, BuildingKind::Home | BuildingKind::Hotel | BuildingKind::Farm | BuildingKind::Fab)
+/// the leisure venues; workplace room (2026-10-11), under `[economy2]
+/// room_cap` with wages on (`wages::room_capped`'s switch; review fix: the
+/// dole city and a room-cap-off run keep one floor's room): and the Farms
+/// and Fabs, whose floors multiply their staff (`jobs::places_of`), so a
+/// floor holds the shift it adds (a Market's `capacity` stays its one
+/// floor's; no stock cap is multiplied).
+pub fn floor_seats(cfg: &crate::config::Config, kind: BuildingKind) -> bool {
+    matches!(kind, BuildingKind::Home | BuildingKind::Hotel)
         || kind.is_leisure()
+        || (matches!(kind, BuildingKind::Farm | BuildingKind::Fab) && cfg.economy2.wages && cfg.economy2.room_cap)
 }
 
 /// J7: one floor's `capacity` × `floors` for a [`floor_seats`] kind,
 /// clamped at 255 (`capacity` is a `u8`); `per_floor` otherwise.
-pub fn with_floors(kind: BuildingKind, per_floor: u8, floors: u8) -> u8 {
-    if !floor_seats(kind) || floors <= 1 {
+pub fn with_floors(cfg: &crate::config::Config, kind: BuildingKind, per_floor: u8, floors: u8) -> u8 {
+    if !floor_seats(cfg, kind) || floors <= 1 {
         return per_floor;
     }
     u8::try_from(usize::from(per_floor) * usize::from(floors)).unwrap_or(u8::MAX)
@@ -334,7 +337,7 @@ pub fn add_floor(world: &mut World, b: EntityId, payer: Option<EntityId>) -> Res
         return Err(format!("{} cannot pay {cost}", world.owner_label(payer)));
     }
     let per_floor = capacity / floors;
-    let new_capacity = with_floors(kind, per_floor, floors + 1).max(capacity);
+    let new_capacity = with_floors(&world.config, kind, per_floor, floors + 1).max(capacity);
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.floors = floors + 1;
         bd.capacity = new_capacity;

@@ -1400,7 +1400,7 @@ impl World {
                 _ => 0,
             };
             // Jobs and room J7: a map building's seats × its floors.
-            let capacity = crate::systems::founding::with_floors(def.kind, cfg.capacity, def.floors);
+            let capacity = crate::systems::founding::with_floors(&self.config, def.kind, cfg.capacity, def.floors);
             let id = self.spawn();
             self.insert(
                 id,
@@ -2226,6 +2226,11 @@ impl World {
     /// Every corp, ascending by id (an index kept by the Corp hooks).
     pub fn corps(&self) -> Vec<EntityId> {
         self.corp_ids.clone()
+    }
+
+    /// [`World::corps`] borrowed (no copy; a per-call read).
+    pub fn corp_slice(&self) -> &[EntityId] {
+        &self.corp_ids
     }
 
     /// Position of a corp in `corps()`: picks its colour in the app.

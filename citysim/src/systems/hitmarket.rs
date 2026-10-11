@@ -205,7 +205,7 @@ fn why_of(world: &World, buyer: EntityId, target: EntityId, motive: Motive) -> O
     match motive {
         Motive::Revenge => revenge_why(world, buyer, target),
         Motive::Silence => silence_report(world, buyer, target).map(|c| format!("over the {}", c.label())),
-        Motive::Debt => Some(format!("over {} owed", owed_to(world, buyer, target))),
+        Motive::Debt => Some(format!("over {} owed", owed_to(world, buyer, target) + arrears_to(world, buyer, target))),
         _ => None,
     }
 }
@@ -221,7 +221,8 @@ fn why_of(world: &World, buyer: EntityId, target: EntityId, motive: Motive) -> O
 /// coin moves, the kin are asked at the Fixer). With no Fixer in reach the
 /// post is direct, at once; a Statistical buyer posts at once (H10).
 /// Short of the deposit nothing moves (`hm_unaffordable`). True when
-/// posted or wanted. A Revenge buyer's Hunt cools (D8).
+/// posted or wanted, or a want on this head already stands (a want on
+/// another head: false). A Revenge buyer's Hunt cools (D8).
 pub fn agent_buy(
     world: &mut World,
     buyer: EntityId,
@@ -231,9 +232,15 @@ pub fn agent_buy(
     weight: f32,
     at: Option<EntityId>,
 ) -> bool {
-    if at.is_none() && world.wants.contains_key(&buyer) {
-        // Already on the way to a Fixer: one errand at a time.
-        return true;
+    if at.is_none() {
+        if let Some(w) = world.wants.get(&buyer) {
+            // Already on the way to a Fixer: one errand at a time. The
+            // errand stands for this head (any motive, any kind: the buyer
+            // is paying for violence on it, as `paying_for` reads); a want
+            // on another head buys nothing here (review fix: it reported a
+            // hire that never happened).
+            return w.target == target;
+        }
     }
     if !room(world) || buying(world, buyer, target) {
         return false;
@@ -466,9 +473,9 @@ fn corp_hits_this_year(world: &mut World) -> usize {
 }
 
 /// H18, decision 4, daily: a corp whose exec's lawfulness is under
-/// `dirty_beat` buys its rival corp's exec: a rival is the last corp to
-/// wrong it (`Corp.last_wronged`) within `rival_window_days`, or a corp in
-/// an open vendetta with it. A Hit under `[contracts] dirty_lobby`, else a
+/// `dirty_beat` buys its rival corp's exec: a rival is a corp in an open
+/// vendetta with it, else the last corp to wrong it (`Corp.last_wronged`)
+/// within `rival_window_days` (the spec's Rival row: the vendetta first). A Hit under `[contracts] dirty_lobby`, else a
 /// Beat; at most one Rival record per corp per `corp_cooldown_days`, Hits
 /// at most `corp_year_cap` a year city-wide; paid in full from `treasury ÷
 /// corp_reserve_mult`, brokered at the open Fixer nearest the target.
@@ -495,10 +502,9 @@ pub fn corp_pass(world: &mut World) {
         if recent {
             continue;
         }
-        let mut rivals: Vec<(EntityId, String)> = Vec::new();
-        if let Some((by, _, how)) = wronged.filter(|&(_, t, _)| now.saturating_sub(t) < window) {
-            rivals.push((by, format!("over {}", how.label())));
-        }
+        // The spec's Rival row (review fix): the open vendettas first, then
+        // the latest wrong (a feuding corp that also wronged us is tried
+        // once, as a feud).
         let mut feuds: Vec<EntityId> = world
             .vendettas
             .iter()
@@ -514,7 +520,13 @@ pub fn corp_pass(world: &mut World) {
             .filter(|&r| world.has::<crate::components::Corp>(r))
             .collect();
         feuds.sort_unstable();
-        rivals.extend(feuds.into_iter().map(|r| (r, "in the feud".to_string())));
+        feuds.dedup();
+        let mut rivals: Vec<(EntityId, String)> = feuds.iter().map(|&r| (r, "in the feud".to_string())).collect();
+        if let Some((by, _, how)) = wronged.filter(|&(_, t, _)| now.saturating_sub(t) < window) {
+            if !feuds.contains(&by) {
+                rivals.push((by, format!("over {}", how.label())));
+            }
+        }
         let kind = if law < world.config.contracts.dirty_lobby { ContractKind::Hit } else { ContractKind::Beat };
         if kind == ContractKind::Hit && corp_hits_this_year(world) >= h.corp_year_cap as usize {
             continue;
@@ -747,6 +759,23 @@ fn owed_to(world: &World, creditor: EntityId, debtor: EntityId) -> i64 {
     i64::from(owed.max(0))
 }
 
+/// What `debtor` is behind on the financed assets `lender` lent it, in
+/// arrears of `assets.repo_days` or more (the Debt pass's finance source):
+/// `per_day × arrears` each, at most what remains (0 when nothing).
+fn arrears_to(world: &World, lender: EntityId, debtor: EntityId) -> i64 {
+    let repo = world.config.assets.repo_days;
+    // scan-ok: at a Debt post only, the assets.
+    world
+        .with::<crate::components::Asset>()
+        .into_iter()
+        .filter_map(|a| world.comp::<crate::components::Asset>(a))
+        .filter(|x| x.owner == Some(debtor))
+        .filter_map(|x| x.finance.as_ref())
+        .filter(|f| f.lender == Some(lender) && f.arrears >= repo)
+        .map(|f| (f.per_day * i64::from(f.arrears)).min(f.remaining).max(0))
+        .sum()
+}
+
 /// Debt (§ 2), daily: every edge debt of `debt_min` or more (one unordered
 /// pass over the edges), and every financed asset in arrears of
 /// `assets.repo_days` or more still on its owner (nothing was
@@ -816,6 +845,11 @@ pub fn debt_pass(world: &mut World) {
             let broker = contracts::fixer_in_held(world, c);
             let why = Some("over a debt".to_string());
             faction_post(world, c, Some(leader), kind, d, broker, Origin::GangOrder(order), budget, Motive::Debt, why);
+            continue;
+        }
+        // Review fix: a dead creditor keeps its edges, a jailed or cuffed one
+        // its wallet; only a living free adult buys (as Silence's suspect).
+        if !contracts::free_adult(world, c) {
             continue;
         }
         if world.comp::<Personality>(c).is_none_or(|p| p.lawfulness >= h.debt_lawfulness) {

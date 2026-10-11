@@ -744,7 +744,8 @@ pub fn grow_hotels(world: &mut World) {
             continue;
         }
         let per = capacity / floors;
-        let new_capacity = crate::systems::founding::with_floors(BuildingKind::Hotel, per, floors + 1).max(capacity);
+        let new_capacity =
+            crate::systems::founding::with_floors(&world.config, BuildingKind::Hotel, per, floors + 1).max(capacity);
         if let Some(bd) = world.comp_mut::<Building>(h) {
             bd.floors = floors + 1;
             bd.capacity = new_capacity;

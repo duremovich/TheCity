@@ -721,18 +721,14 @@ pub fn on_strike(world: &mut World, hunter: EntityId, target: EntityId, winner: 
             if died { " (killed)" } else { "" }
         );
         world.push_event(EventKind::Avenged, &[hunter, target], text);
-        if let Some(g) = world.comp_mut::<Grudges>(hunter) {
-            if let Some(x) = g.list.iter_mut().find(|x| x.target == target && x.settled.is_none()) {
-                if died {
+        if died {
+            if let Some(g) = world.comp_mut::<Grudges>(hunter) {
+                if let Some(x) = g.list.iter_mut().find(|x| x.target == target && x.settled.is_none()) {
                     x.settled = Some(now);
-                } else {
-                    x.weight -= cfg.grudges.beat_settle;
-                    if x.weight <= 0.0 {
-                        x.settled = Some(now);
-                        x.weight = 0.0;
-                    }
                 }
             }
+        } else {
+            crate::systems::grudges::answer_beating(world, hunter, target);
         }
         let w = &mut world.stats.current.word;
         w.avenged += 1;

@@ -370,15 +370,14 @@ fn vagrant_at_work(world: &World, s: EntityId) -> bool {
 fn located(world: &World, s: EntityId) -> bool {
     let window = world.config.crime.suspect_seen_ticks;
     let tick = world.tick;
-    if vagrant_at_work(world, s) {
-        return false;
-    }
     // L1: a corpse keeps its Position and Identity (`is_alive`), and guards
-    // walked hours to arrest the dead.
+    // walked hours to arrest the dead. The cheap checks first: the vagrancy
+    // test walks the reports (a pure conjunction, reordered).
     (living(world, s))
         && !world.has::<Sentence>(s)
         && world.comp::<Brain>(s).is_some_and(|b| b.cuffed_by.is_none())
         && world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
+        && !vagrant_at_work(world, s)
 }
 
 /// Who a guard can chase: `Some((tile, guard))` keeps the located suspects
