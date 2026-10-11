@@ -1,5 +1,5 @@
-//! Jobs v2 P5a (docs/JOBS_V2.md § 5; plan J16-J18): the civic budget. With
-//! `[economy2] wages` and `no_safety_net` on, the Treasury's midnight pass
+//! Jobs v2 P5a (docs/JOBS_V2.md § 5; plan J16-J18): the civic budget. Under the
+//! market wage law (P10; was `[economy2] wages` and `no_safety_net`), the Treasury's midnight pass
 //! turns a share of its trailing receipts (plus a payout of the hoard above
 //! the band) into the police and Sanitation headcounts, police first; a
 //! headcount drops at most `civic_pace` a day; nothing is spent at or under
@@ -14,14 +14,13 @@ use citysim::{Config, EventKind, PlayerCommand, World, TICKS_PER_DAY};
 /// The wages + no-net city.
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    cfg.policy = citysim::config::PolicyCfg::default();
     cfg
 }
 
 fn city() -> World {
     let w = World::new(42, config());
-    assert!(econ::no_net(&w) && treasury::on(&w), "the target city has wages on and no net");
+    assert!(econ::wages_on(&w) && treasury::on(&w), "the target city has wages on and no net");
     w
 }
 
@@ -149,10 +148,8 @@ fn test_civic_pin_and_release() {
     w.apply_commands();
     assert!(w.econ.civic_pinned, "SetSanitation pins too");
 
-    // With the net (no band): no pin, and the release is refused.
-    let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
-    let mut twin = World::new(42, cfg);
+    // Under the levy (the dole city: no band): no pin, and the release is refused.
+    let mut twin = World::new(42, Config::load().dole_city());
     assert!(!treasury::on(&twin));
     twin.push_command(PlayerCommand::SetGuardCount(12));
     twin.push_command(PlayerCommand::SetCivicAuto);
@@ -246,7 +243,7 @@ fn test_scaled_no_net_city_keeps_its_police_and_beats() {
     assert_eq!(cfg.treasury.treasury_initial, s(full.treasury.treasury_initial));
     assert_eq!(cfg.treasury.till_initial, s(full.treasury.till_initial));
     let mut w = World::new(19, cfg);
-    assert!(econ::no_net(&w));
+    assert!(econ::wages_on(&w) && !citysim::systems::policy::net_enacted(&w));
     w.run_ticks(TICKS_PER_DAY + 10);
     assert!(w.levers.guard_count > 0, "the first midnight keeps police");
     assert!(!w.law().expect("law").beats.is_empty(), "the first midnight deals the beats");

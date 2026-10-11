@@ -79,7 +79,7 @@ struct SeedRun {
     /// The Dregs' split at each day's end: (Dregs, street, squat, of them in a
     /// shanty, a Mission cot, a Hotel bed).
     dregs: Vec<(u32, u32, u32, u32, u32, u32)>,
-    /// The run is a no-net city (J24/J25 asserted).
+    /// The run is a no-net city (J24/J25 asserted): the market wage law, no dole or public works (P10).
     no_net: bool,
     /// `[sickness]` on (the tighter starvation bound and its bullets).
     sickness: bool,
@@ -118,7 +118,7 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         tps: 0.0,
         adults: Vec::new(),
         dregs: Vec::new(),
-        no_net: econ::no_net(&w),
+        no_net: econ::wages_on(&w) && !citysim::systems::policy::net_enacted(&w),
         sickness: citysim::systems::health::on(&w),
         transit: w.config.transit.enabled,
     };
@@ -460,8 +460,8 @@ fn mechanisms() -> Vec<Mechanism> {
     ]
 }
 
-/// Hunger as sickness: the bullets read only with `[sickness]` on (the
-/// dole city, `Config::dole_city`, has them off). Chosen on the flipped city,
+/// Hunger as sickness: the bullets read with the diet on (always since
+/// P10; `[sickness] diet` is the part key). Chosen on the flipped city,
 /// 120 days, seeds 42-47 (each on 6 of 6; see the P5 commit). A regular's
 /// bin contest, a diagnosis, a cure and a Disease death fired on 2 or fewer
 /// of 6: unit tests in `sickness.rs` instead.

@@ -90,6 +90,10 @@ struct RunArgs {
     /// configured one (ignored with `--load`).
     #[arg(long)]
     v1_profile: bool,
+    /// Start under the dole city's policy (`Config::dole_city`, P10: the
+    /// levy and the safety net enacted from day 0; ignored with `--load`).
+    #[arg(long)]
+    dole_city: bool,
     /// The Statistical tier's policy, overriding `[lod] policy`: `table` or
     /// `mlp` (experiment; ignored with `--load`).
     #[arg(long, value_name = "POLICY")]
@@ -1173,6 +1177,18 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             PlayerCommand::SetPublicWorks(on_off(value).ok_or_else(|| format!("{spec}: public_works must be on|off"))?)
         }
         "export" => PlayerCommand::SetExport(on_off(value).ok_or_else(|| format!("{spec}: export must be on|off"))?),
+        // P10 (docs/P10_POLICY.md): the policy levers (`dole_per_day=<n>`
+        // and `public_works=on|off` above are two of them).
+        "levy" => PlayerCommand::SetLevy(on_off(value).ok_or_else(|| format!("{spec}: levy must be on|off"))?),
+        "school_meals" => {
+            PlayerCommand::SetSchoolMeals(on_off(value).ok_or_else(|| format!("{spec}: school_meals must be on|off"))?)
+        }
+        "reserve_release" => PlayerCommand::SetReserveRelease(
+            on_off(value).ok_or_else(|| format!("{spec}: reserve_release must be on|off"))?,
+        ),
+        "safety_net" => {
+            PlayerCommand::SetSafetyNet(on_off(value).ok_or_else(|| format!("{spec}: safety_net must be on|off"))?)
+        }
         "export_price" => {
             let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<n>"))?;
             PlayerCommand::SetExportPrice {
@@ -1255,6 +1271,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     let mut config = Config::load();
     if args.v1_profile {
         config = config.v1_profile();
+    }
+    if args.dole_city {
+        config = config.dole_city();
     }
     config.lod.force = args.force_lod.map(Lod::from);
     if let Some(n) = args.population {
@@ -2001,7 +2020,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let p_beg = Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i])));
     // Hunger as sickness § 5: `p_dive` with the bins on. A row with under
     // 200 eligible hours takes the mean over all rows (plan risk: noisy rows).
-    let p_dive = (config.sickness.enabled && config.sickness.diet && config.sickness.bins).then(|| {
+    let p_dive = (config.sickness.diet && config.sickness.bins).then(|| {
         eprintln!("bins: dives {dive:?} of {dive_denom:?} eligible hours");
         let (n, d): (u64, u64) = (dive.iter().sum(), dive_denom.iter().sum());
         let mean = (n as f32 / d.max(1) as f32).min(1.0);
@@ -2129,6 +2148,17 @@ mod tests {
         assert_eq!(cmd("day=30:stims_legal=on"), PlayerCommand::SetStimsLegal(true));
         assert_eq!(cmd("day=30:stims_legal=off"), PlayerCommand::SetStimsLegal(false));
         assert!(parse_lever("day=30:stims_legal=maybe").is_err());
+    }
+
+    /// P10: the policy levers.
+    #[test]
+    fn test_parse_policy_levers() {
+        assert_eq!(cmd("day=10:levy=on"), PlayerCommand::SetLevy(true));
+        assert_eq!(cmd("day=10:school_meals=off"), PlayerCommand::SetSchoolMeals(false));
+        assert_eq!(cmd("day=10:reserve_release=on"), PlayerCommand::SetReserveRelease(true));
+        assert_eq!(cmd("day=10:safety_net=on"), PlayerCommand::SetSafetyNet(true));
+        assert_eq!(cmd("day=10:dole_per_day=4"), PlayerCommand::SetDolePerDay(4));
+        assert!(parse_lever("day=10:safety_net=maybe").is_err());
     }
 
     #[test]

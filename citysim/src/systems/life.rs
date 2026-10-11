@@ -516,8 +516,7 @@ pub fn preroll_housing(world: &mut World) -> (u32, u32) {
         && crate::systems::fixes::relocate_fix(world)
         && crate::systems::fixes::grow_housing(world)
         && crate::systems::fixes::hire_near(world)
-        && crate::systems::wages::on(world)
-        && crate::systems::econ::no_net(world);
+        && crate::systems::wages::on(world);
     let mut built = (0u32, 0u32);
     if !on {
         return built;
@@ -641,8 +640,7 @@ fn build_near(world: &mut World, employer: EntityId, seeded: bool) -> Option<boo
         let (floors, capacity) = world.comp::<Building>(home).map(|b| (b.floors.max(1), b.capacity))?;
         let per_floor = capacity / floors;
         let new_capacity =
-            crate::systems::founding::with_floors(&world.config, BuildingKind::Home, per_floor, floors + 1)
-                .max(capacity);
+            crate::systems::founding::with_floors(world, BuildingKind::Home, per_floor, floors + 1).max(capacity);
         let b = world.comp_mut::<Building>(home)?;
         b.capacity = new_capacity;
         b.floors = floors + 1;

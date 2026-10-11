@@ -23,7 +23,20 @@ use crate::world::World;
 /// 9: the Hit market's gaps pass: `World::hm_stiffs` (the stiffed gun's
 /// grace) and `[hitmarket] reach_premium`, `lawful_wait`, `queue_hours` in
 /// the saved config (serde defaults).
-pub const SAVE_VERSION: u8 = 9;
+/// 10: P10 (docs/P10_POLICY.md): the policy levers `Levers.{levy,
+/// school_meals, reserve_release}`, `CityBudget.{dry_days, short_today}`
+/// and `[policy]` in the saved config (serde defaults: the shipped no-net
+/// market city); the saved config's retired `[economy2] wages` /
+/// `no_safety_net`, `[sickness] enabled`, `[street] shanties` and
+/// `[demography] school_meals` keys are ignored on load. An old save's dole
+/// and public works levers load as they were saved; its levy and school
+/// meals load off (an old dole-city save resumes under the market wage law).
+/// 11: transit, the El (docs/TRANSIT.md): `World::transit` (closures, the day's
+/// load, `rode`, the crews), `World::rides`, `DayRow.transit`,
+/// `StatTable.p_dodge_caught` and `[transit]` in the saved config (serde
+/// defaults, none written with the El off; a pre-transit save loads with
+/// its saved config, so the El stays off for it).
+pub const SAVE_VERSION: u8 = 11;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

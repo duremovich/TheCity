@@ -1,42 +1,20 @@
-//! The Real economy (docs/ECONOMY_V2.md, plan E1, E49): the switches, the
+//! The Real economy (docs/ECONOMY_V2.md, plan E1, E49): the wage law, the
 //! pure hashes every milestone decision draws on, and the conservation
-//! identity. No path of the milestone runs without its `on()`.
+//! identity.
 
-use crate::config::Config;
 use crate::rng::splitmix64;
 use crate::world::World;
 
-/// Plan E1: phase 2's switch (wages from revenue). Nothing reads it in phase 1.
+/// P10 (docs/P10_POLICY.md; was plan E1's `[economy2] wages` switch): the
+/// market wage law, wages from revenue, read from the saved policy: the
+/// levy (`Levers::levy`, the dole city's wage schedule and upkeep levy) not
+/// enacted. Its institutions follow it too (the property rate, the tax band
+/// and civic budget, the Recycler's till, the household rent share, the
+/// housing pre-roll, the no-net hunger fix 13), which the retired
+/// `no_safety_net` switch gated; the safety net itself is the dole, public
+/// works, school meals and the Reserve release levers (each its own).
 pub fn wages_on(world: &World) -> bool {
-    world.config.economy2.wages
-}
-
-/// Plan E1: phase 3a's switch (no safety net): `[economy2] no_safety_net`,
-/// read only with wages on (a city with no dole and no wages from revenue is
-/// § 0's dole-off city, not the milestone's).
-pub fn no_net_cfg(cfg: &Config) -> bool {
-    cfg.economy2.wages && cfg.economy2.no_safety_net
-}
-
-pub fn no_net(world: &World) -> bool {
-    no_net_cfg(&world.config)
-}
-
-/// Plan E22 (a), E36 (phase 3a, the `Config` resolution in `World::new`
-/// before `Levers::from_config`): with `no_net` the dole is 0 at seed (every
-/// reader sees `levers.dole_per_day` 0; the `SetDolePerDay` god lever still
-/// sets it) and school meals are off (children eat from the pantry; the camp
-/// stands between an unfed child and the third day). Public works are off in
-/// `Levers::from_config`. Without `no_net` the config is returned untouched.
-pub fn apply(mut cfg: Config) -> Config {
-    if no_net_cfg(&cfg) {
-        cfg.levers.dole_per_day = 0;
-        cfg.demography.school_meals = false;
-        if cfg.treasury.tax_initial >= 0.0 {
-            cfg.levers.tax_rate = cfg.treasury.tax_initial;
-        }
-    }
-    cfg
+    !world.levers.levy
 }
 
 /// Plan E49: a pure hash in `[0, 1)` of `(seed, purpose, a, b)` over

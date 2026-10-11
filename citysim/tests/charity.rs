@@ -127,7 +127,11 @@ fn test_mission_meal_costs_exactly_its_purse() {
     assert!(matches!(charity::on_eat_alms(&mut w, a, Some(m)), citysim::StepResult::Done));
     assert!(hunger(&w, a) > 0.2, "the meal fed them");
     assert_eq!(stock(&w, m), bought - 1);
-    assert_eq!(w.stats.current.econ.flow_alms - alms0, cost, "Alms is the meal's value, ledger-only");
+    // Hunger as sickness (always on since P10): the kitchen serves synth,
+    // `synth_stretch` meals a unit, so a meal's value is the unit's cost over it.
+    let stretch = i64::from(citysim::systems::diet::stretch(&w));
+    let meal = (cost + stretch / 2) / stretch;
+    assert_eq!(w.stats.current.econ.flow_alms - alms0, meal, "Alms is the meal's value, ledger-only");
     assert_eq!(w.stats.current.econ.mission_meals - meals0, 1);
     assert_eq!(identity(&w), before, "a meal moves no coin");
     // Not hungry, or with the price of a meal: no alms.
@@ -178,6 +182,8 @@ fn test_hourly_cap_doubles_with_a_volunteer() {
     charity::daily(&mut w);
     let mut served = 0;
     for &a in &eaters {
+        // Still broke after the day (P10: a dole or a dive may have paid them).
+        set_coins(&mut w, a, 0);
         set_hunger(&mut w, a, 0.1);
         w.enter_building(a, m);
         if charity::can_start(&w, a, ActionKind::EatAlms, Some(m)) {

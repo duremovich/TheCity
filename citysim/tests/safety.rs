@@ -1,5 +1,5 @@
 //! The Real economy phase 3a (docs/ECONOMY_V2.md § 2; plan 3a.5): no safety
-//! net. With `[economy2] no_safety_net` (and wages on) the dole is 0, public
+//! net. In the shipped policy (P10: the market wage law, no net) the dole is 0, public
 //! works are never posted, the Reserve's free release is gone, school meals
 //! are off, scavenging is paid from the Recycler's till alone, and the
 //! Treasury's tax band moves the tax rate with hysteresis and a pin.
@@ -17,14 +17,13 @@ use citysim::{
 /// The 3a city: wages on and no safety net.
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    cfg.policy = citysim::config::PolicyCfg::default();
     cfg
 }
 
 fn city() -> World {
     let w = World::new(42, config());
-    assert!(econ::no_net(&w) && econ::wages_on(&w), "the 3a city has wages on and no net");
+    assert!(econ::wages_on(&w) && !citysim::systems::policy::net_enacted(&w), "the 3a city has wages on and no net");
     w
 }
 
@@ -85,10 +84,9 @@ fn test_no_dole_no_works_no_release_with_no_net() {
     assert_eq!(w.levers.dole_per_day, 4, "the god lever still sets the dole");
 
     // The release, pinned: one midnight with a stranded Market.
-    let mut cfg_net = Config::load().dole_city();
-    cfg_net.economy2.wages = true;
+    let cfg_net = Config::load().dole_city();
     let mut twin = World::new(42, cfg_net);
-    assert!(!econ::no_net(&twin));
+    assert!(twin.levers.reserve_release, "the dole city enacts the release");
     let mut nn = city();
     for x in [&mut twin, &mut nn] {
         x.run_ticks(TICKS_PER_DAY - 1);
@@ -172,9 +170,8 @@ fn test_tax_band_steps_with_hysteresis_and_pins() {
     assert!(w.levers.tax_rate < start, "the band moved the rate in the tick order ({start} -> {})", w.levers.tax_rate);
     assert!(w.events.iter().any(|e| e.kind == EventKind::TaxMoved));
     assert!(!w.events.iter().any(|e| e.kind == EventKind::WorksPosted), "no public works");
-    // With the net (the band off) a SetTaxRate does not pin.
-    let mut cfg_net = Config::load().dole_city();
-    cfg_net.economy2.wages = true;
+    // Under the levy (the dole city: the band off) a SetTaxRate does not pin.
+    let cfg_net = Config::load().dole_city();
     let mut twin = World::new(42, cfg_net);
     assert!(!treasury::on(&twin));
     twin.push_command(PlayerCommand::SetTaxRate(0.1));
@@ -224,9 +221,8 @@ fn test_scavenge_pays_from_till_only() {
     assert_eq!(w.econ.recycler_till, before.0 + 30);
     assert_eq!(treasury_coins(&w), before.1 - 30);
     assert_eq!(ownership::total_coins(&w), total, "the till move conserves");
-    // With the net on, the till is never written: the Treasury pays the find.
-    let mut cfg_net = Config::load().dole_city();
-    cfg_net.economy2.wages = true;
+    // Under the levy (the dole city) the till is never written: the Treasury pays the find.
+    let cfg_net = Config::load().dole_city();
     let mut twin = World::new(42, cfg_net);
     twin.config.life.scavenge_p = 1.0;
     let b = jobless(&twin, 1)[0];
@@ -234,22 +230,21 @@ fn test_scavenge_pays_from_till_only() {
     let t0 = treasury_coins(&twin);
     let t = twin.tick;
     actions::on_complete(&mut twin, b, ActionKind::Scavenge, None, t, t);
-    assert_eq!(twin.econ.recycler_till, 0, "no till with the net");
+    assert_eq!(twin.econ.recycler_till, 0, "no till under the levy");
     assert!(treasury_coins(&twin) < t0, "the Treasury paid the find");
     citysim::systems::treasury::to_till(&mut twin, 30);
-    assert_eq!(twin.econ.recycler_till, 0, "no till move with the net");
+    assert_eq!(twin.econ.recycler_till, 0, "no till move under the levy");
 }
 
 /// E36: with no_net school meals are off at seed: a child whose pantry is
 /// empty goes a day unfed (the net-on twin feeds it from the Reserve).
 #[test]
 fn test_school_meals_off_with_no_net() {
-    let mut cfg_net = Config::load().dole_city();
-    cfg_net.economy2.wages = true;
-    assert!(cfg_net.demography.school_meals, "school meals on in the base config");
+    let cfg_net = Config::load().dole_city();
+    assert!(cfg_net.policy.school_meals, "school meals on in the dole city");
     let mut twin = World::new(42, cfg_net);
     let mut nn = city();
-    assert!(!nn.config.demography.school_meals, "no_net forces school meals off");
+    assert!(!nn.levers.school_meals, "the shipped policy: no school meals");
     let mut unfed = Vec::new();
     for x in [&mut twin, &mut nn] {
         x.run_ticks(TICKS_PER_DAY - 1);

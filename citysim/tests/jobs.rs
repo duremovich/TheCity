@@ -121,7 +121,7 @@ fn test_market_staff_tops_up_to_12() {
     // staffed by the margin rule (`wages::staff`), not the top-up; L2's
     // rule is read with that switch off.
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = false;
+    cfg.policy.levy = true;
     let mut on = World::new(42, cfg);
     on.run_ticks(TICKS_PER_DAY + 1);
     let hunker = |w: &World, m: EntityId| {

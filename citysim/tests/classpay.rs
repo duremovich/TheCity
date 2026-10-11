@@ -260,11 +260,11 @@ fn class_table() {
 use citysim::systems::{classpay, economy};
 use citysim::{Brain, Corp, EntityId, Lod, Role, Schooling};
 
-/// The class-pay city: `[economy2] wages` on (off by default until the
-/// flip), class pay on as shipped.
+/// The class-pay city: the market wage law (the levy not enacted, P10) on
+/// the dole city, class pay on as shipped.
 fn config_on() -> Config {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
+    cfg.policy.levy = false;
     assert!(cfg.classpay.enabled, "class pay ships enabled (read only with wages)");
     cfg
 }
@@ -286,12 +286,12 @@ fn role(w: &World, key: &str) -> Role {
 }
 
 /// The default (dole) city with class pay's keys and rows in the config is
-/// the city without them, byte for byte: every class-pay path reads
-/// `[economy2] wages`.
+/// the city without them, byte for byte: every class-pay path reads the
+/// market wage law (`wages::on`).
 #[test]
 fn test_default_city_identical_with_classpay_keys() {
     let a_cfg = Config::load().dole_city();
-    assert!(!a_cfg.economy2.wages, "Config::dole_city: wages off");
+    assert!(a_cfg.policy.levy, "Config::dole_city: the levy (no wages from revenue)");
     assert!(a_cfg.trades.iter().any(|r| r.classpay), "the class-pay rows ship in the config");
     let mut b_cfg = a_cfg.clone();
     b_cfg.classpay.enabled = false;

@@ -144,7 +144,7 @@ fn children_of(world: &World, home: EntityId) -> Vec<EntityId> {
 fn children(world: &mut World) {
     let homes = world.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
     let mut starved = Vec::new();
-    let school = world.config.demography.school_meals;
+    let school = world.levers.school_meals;
     let reserve = world.building_of_kind(BuildingKind::Warehouse);
     for home in homes {
         let kids = children_of(world, home);
@@ -1112,7 +1112,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
 // Jobs and room P6: immigration that answers the city (docs/JOBS_V2.md § 4,
 // plan J19-J21). Every arrival is an abstract event: an entity spawned at
 // the map edge whose coins cross in from the World account. Read only with
-// `[economy2] wages` on.
+// the market wage law.
 // ---------------------------------------------------------------------------
 
 /// J19: today's labour market into `EconState.migrant_days` (midnight,

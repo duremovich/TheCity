@@ -302,9 +302,7 @@ fn probe_guard_eats_on_a_long_shift() {
 #[test]
 #[ignore]
 fn probe_laid_off_farm_worker_finds_work_within_14_days() {
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     // Day 20, a minute to midnight: the layoff lands just before the
     // midnight job search, as `wages::staff`'s do.
@@ -347,8 +345,6 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
 #[test]
 fn probe_offer_migrant_reaches_the_first_shift() {
     let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
     cfg.demography.p_spouse = 0.0;
     let mut w = World::new(42, cfg);
     // Day 14's midnight, when the week's offers spawn.
@@ -885,8 +881,6 @@ fn probe_dry_beg_is_an_honest_hour() {
 #[test]
 fn probe_far_worker_with_one_rent_moves_near_work() {
     let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
     // Transit phase 3: the relocation premise is a far walker; with the El on
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
@@ -969,9 +963,7 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
 /// have outweighed the walk.
 #[test]
 fn probe_near_candidate_hired_before_a_far_skilled_one() {
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
@@ -1031,8 +1023,6 @@ fn probe_near_candidate_hired_before_a_far_skilled_one() {
 #[test]
 fn probe_city_grows_homes_toward_jobs() {
     let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
     // The runtime rule, on the city without the pre-roll: the pre-roll
     // builds until no employer has far workers past its free beds in range
     // while a Lot or floor is left there (its most-far employer is then the
@@ -1080,9 +1070,7 @@ fn probe_city_grows_homes_toward_jobs() {
 /// the Farm the new Homes served on day 8, flipped seed 42).
 #[test]
 fn probe_working_couple_moves_near_work() {
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
@@ -1182,9 +1170,7 @@ fn probe_working_couple_moves_near_work() {
 /// above it pays the build out of its purse.
 #[test]
 fn probe_housing_toward_jobs_is_paid() {
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_HOUR);
     let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
@@ -1349,10 +1335,7 @@ fn probe_worker_stocks_the_pantry_off_shift() {
 /// went ~13 % to Unwind and ~16 % to walking home to bed.
 #[test]
 fn probe_worker_sleeps_the_night_before_a_shift() {
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
-    cfg.sickness.enabled = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(3 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
     let farmers: Vec<EntityId> = day_workers(&w)
@@ -1416,9 +1399,7 @@ fn probe_sweeper_stays_near_its_beat() {
 /// wall (21 x rent) kept such workers on the street beside empty beds.
 #[test]
 fn probe_evicted_worker_rehouses_on_the_first_rent() {
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let a = civilians(&w)
@@ -1461,8 +1442,6 @@ fn probe_evicted_worker_rehouses_on_the_first_rent() {
 #[test]
 fn probe_trade_respects_rent_and_the_evictor() {
     let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
     // Transit phase 3: the relocation premise is a far walker; with the El on
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).

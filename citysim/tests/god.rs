@@ -1910,10 +1910,7 @@ fn god_law_locate_on_gang_leader() {
 #[ignore]
 fn god_famine_synth() {
     fn city() -> World {
-        let mut c = Config::load();
-        c.sickness.enabled = true;
-        c.street.shanties = true;
-        World::new(42, c)
+        World::new(42, Config::load())
     }
     fn after(w: &World, from: u64, f: fn(&citysim::DayRow) -> u32) -> u32 {
         w.stats.history.iter().filter(|r| r.day >= from).map(f).sum()

@@ -824,7 +824,7 @@ pub fn total_coins(world: &World) -> i64 {
     let holes: i64 = world.holes.values().map(|h| h.loot).sum();
     // Real economy E26: the Missions' purses are coins held.
     let purses: i64 = crate::systems::charity::purses(world);
-    // Real economy E33 (phase 3a): the Recycler's till (0 without `no_net`).
+    // Real economy E33 (phase 3a): the Recycler's till (0 under the levy).
     let till = world.econ.recycler_till;
     wallets + gangs + corps + city + loot + escrow + holes + purses + till
 }
@@ -904,12 +904,9 @@ pub fn roles_for(world: &World, kind: BuildingKind) -> Vec<(Role, usize)> {
     }
     // Class pay: a `classpay` row posts nothing with class pay off.
     let cfg = &world.config;
-    out.extend(
-        cfg.trades_at(kind)
-            .iter()
-            .copied()
-            .filter(|&(r, _)| r.trade().and_then(|t| cfg.trade(t)).is_none_or(|row| cfg.trade_live(row))),
-    );
+    out.extend(cfg.trades_at(kind).iter().copied().filter(|&(r, _)| {
+        r.trade().and_then(|t| cfg.trade(t)).is_none_or(|row| crate::systems::classpay::trade_live(world, row))
+    }));
     out
 }
 
@@ -1428,7 +1425,7 @@ fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
     }
     let owner = world.owner_of(home);
     let mut paid = pay(world, Some(a), owner, due, Flow::Rent);
-    // The transition wave (phase 3a, `[economy2] household_rent`, no_net
+    // The transition wave (phase 3a, `[economy2] household_rent`, the market wage law
     // only): a co-resident spouse covers a short share from their own
     // wallet before it counts as arrears (the household's purse, not a
     // transfer from outside it).
@@ -1473,9 +1470,9 @@ fn settle_rent(world: &mut World, a: EntityId, home: EntityId, midnight: bool) {
 }
 
 /// The transition wave (phase 3a): a co-resident spouse covers a short
-/// rent share with `[economy2] household_rent` and `no_net`.
+/// rent share with `[economy2] household_rent` under the market wage law (P10: was `no_net`).
 fn household_rent(world: &World) -> bool {
-    world.config.economy2.household_rent && crate::systems::econ::no_net(world)
+    world.config.economy2.household_rent && crate::systems::econ::wages_on(world)
 }
 
 /// `[rent] pay_from_income`: rent comes out of a wage or the dole the moment

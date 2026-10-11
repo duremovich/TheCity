@@ -173,9 +173,12 @@ pub struct Config {
     #[serde(default)]
     pub hitmarket: HitMarketCfg,
     /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
-    /// always on; `wages` and `no_safety_net` are the phase switches in flight.
+    /// always on; the wage law and the safety net are policy (P10, `policy`).
     #[serde(default)]
     pub economy2: Economy2Cfg,
+    /// P10 (docs/P10_POLICY.md): the policy a new world starts under.
+    #[serde(default)]
+    pub policy: PolicyCfg,
     /// Spec § 3 `[world_market]`: the World's book per good (phase 1).
     #[serde(default)]
     pub world_market: WorldMarketCfg,
@@ -199,7 +202,7 @@ pub struct Config {
     #[serde(default)]
     pub sickness: SicknessCfg,
     /// Class pay (docs/CLASS_PAY.md): graded posts and wages, read only
-    /// with `[economy2] wages` ([`Config::classpay_on`]).
+    /// under the market wage law (`classpay::on`).
     #[serde(default)]
     pub classpay: ClassPayCfg,
     /// Jobs and room J9 (docs/JOBS_V2.md § 1.3): the configured trades
@@ -406,7 +409,7 @@ pub struct TradeCfg {
     #[serde(default)]
     pub grade: u8,
     /// Class pay: the row exists only with class pay on
-    /// ([`Config::trade_live`]); off, it posts nothing anywhere.
+    /// (`classpay::trade_live`); off, it posts nothing anywhere.
     #[serde(default)]
     pub classpay: bool,
     /// Class pay: only a corp-owned workplace posts the row's places.
@@ -1460,11 +1463,8 @@ pub struct DemographyCfg {
     pub old_age_p_per_day: f64,
     pub emigrate_mood: f32,
     pub emigrate_days: u32,
-    /// M11 phase 5: a child whose Home pantry is empty eats from the Reserve.
-    #[serde(default)]
-    pub school_meals: bool,
     // --- Jobs and room P6 (docs/JOBS_V2.md § 4, plan J19-J21): immigration
-    // that answers the city. Read only with `[economy2] wages` on.
+    // that answers the city. Read only with the market wage law.
     /// J19: the wage a migrant would earn outside (the Harris-Todaro `R`);
     /// the `SetOutsideWage` lever (`EconState.outside_wage_pin`) overrides it.
     #[serde(default = "default_outside_wage")]
@@ -2559,9 +2559,7 @@ pub struct StreetCfg {
     /// sleepers go up as shanties: the Lot stays a Lot (a builder may
     /// clear it), derelict, ownerless, `shanty_capacity` slots; at most
     /// `shanty_lots_max` Lots at once, so the construction P2 kept them for
-    /// goes on (in flight: off is the city before it; on with the flip).
-    #[serde(default)]
-    pub shanties: bool,
+    /// goes on (always on since P10 with the street rung, `enabled`).
     #[serde(default = "default_shanty_capacity")]
     pub shanty_capacity: u8,
     #[serde(default = "default_shanties_per_night")]
@@ -2605,7 +2603,6 @@ impl StreetCfg {
             squat_reach: 40,
             squat_ban_days: 14,
             relet_days: 0,
-            shanties: false,
             shanty_capacity: 24,
             shanties_per_night: 3,
             shanty_lots_max: 20,
@@ -3298,6 +3295,8 @@ pub struct LeversCfg {
     pub sentence_mult: f32,
     pub guard_count: u8,
     pub immigration_per_week: u8,
+    /// P10: the dole's rate while the dole is enacted (`[policy] dole` at
+    /// seed, the `safety_net` lever); a city without it seeds 0.
     pub dole_per_day: u8,
     /// M12 D23: city Sanitation workers (0 in a pre-M12 save: nobody sweeps).
     #[serde(default)]
@@ -3312,6 +3311,60 @@ pub struct LeversCfg {
 
 fn default_city_ice() -> u8 {
     2
+}
+
+/// P10 (docs/P10_POLICY.md): the city's policy at world creation. It seeds
+/// the saved policy levers (`levers::Levers`); after day 0 only the levers
+/// are read (`--lever day=D:<key>=<value>`, `PlayerCommand::SetPolicy`).
+/// The default is the shipped city: the market wage law and no safety net.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PolicyCfg {
+    /// The levy (the M11 economy, the dole city's): the config wage
+    /// schedule, the corps' upkeep levy to the Treasury and L2's budget band
+    /// (public works sized by the surplus, the levy cut), the Treasury's
+    /// scavenge coin. Off: wages from revenue, inputs and the property rate,
+    /// the tax band and civic budget, the Recycler's till (the Real economy).
+    pub levy: bool,
+    /// The dole at `[levers] dole_per_day` a day, paid by the Treasury.
+    pub dole: bool,
+    /// Public works: Sanitation posts the Treasury band opens above its top.
+    pub public_works: bool,
+    /// School meals: a child whose pantry is empty eats from the Reserve.
+    pub school_meals: bool,
+    /// The Reserve's free release to a stranded Market (L2 phase 5).
+    pub reserve_release: bool,
+    /// The dole and public works lapse after this many days in a row on
+    /// which the Treasury could not pay (0: never).
+    pub lapse_days: u16,
+}
+
+impl Default for PolicyCfg {
+    fn default() -> Self {
+        PolicyCfg {
+            levy: false,
+            dole: false,
+            public_works: false,
+            school_meals: false,
+            reserve_release: false,
+            lapse_days: 7,
+        }
+    }
+}
+
+impl PolicyCfg {
+    /// The dole city's policy (the old default before the flip): the levy
+    /// and the whole safety net.
+    pub fn dole_city() -> PolicyCfg {
+        PolicyCfg {
+            levy: true,
+            dole: true,
+            public_works: true,
+            school_meals: true,
+            reserve_release: true,
+            ..PolicyCfg::default()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -4533,7 +4586,7 @@ pub struct LifeCfg {
     /// weight, not a ban: some stay out).
     pub hf_work_night: bool,
     /// Coordinator call (after the recalibration, 2026-10-10): with
-    /// `no_safety_net` on, a homeless adult who holds a Job re-houses on the
+    /// the market wage law, a homeless adult who holds a Job re-houses on the
     /// first rent (no `rehouse_coins_mult` deposit), as relocation does; the
     /// jobless keep the deposit. The flipped city had 82-92 employed adults
     /// on the street (~8 %), 930-1,420 beds empty, the deposit 21 coins on a
@@ -5182,18 +5235,6 @@ impl Config {
         }
     }
 
-    /// Class pay (docs/CLASS_PAY.md): `[economy2] wages` and `[classpay]
-    /// enabled`.
-    pub fn classpay_on(&self) -> bool {
-        self.economy2.wages && self.classpay.enabled
-    }
-
-    /// Class pay: does this `[[trades]]` row post places in this city (a
-    /// `classpay` row only with class pay on)?
-    pub fn trade_live(&self, row: &TradeCfg) -> bool {
-        !row.classpay || self.classpay_on()
-    }
-
     /// J9: a trade's `[[trades]]` row.
     pub fn trade(&self, t: crate::components::TradeId) -> Option<&TradeCfg> {
         self.trades.get(t.index())
@@ -5303,7 +5344,6 @@ impl Config {
         // prices; the v1 gates and unit tests keep the v1 economy.
         self.levers.dole_per_day = 3;
         self.levers.tax_rate = 0.05;
-        self.demography.school_meals = false;
         self.economy.price_tenths = false;
         self.rent.rehouse_wait_days = 0;
         // M12 D1: the v1 city is one district.
@@ -5332,31 +5372,27 @@ impl Config {
         // L1b's food price is the 2,000 city's (the v1 economy prices at 3).
         // Since 2026-10-09 the life pass, the plane, the word, the living
         // city, contracts and the World market run here too: their off
-        // switches are retired. The switches in flight are pinned off here
-        // (`[economy2] wages`, `no_safety_net`), so an experiment in
-        // `config.toml` never reaches the unit-test city; `[life]
-        // violence_fixes` follows the shipped default.
+        // switches are retired. P10 (docs/P10_POLICY.md): the v1 city starts
+        // under the dole city's policy (the levy and the safety net) but for
+        // its school meals; hunger as sickness is always on (the street,
+        // and with it the shanties, is cut above); `[life] violence_fixes`
+        // follows the shipped default.
         self.economy.price_base = 3.0;
-        self.economy2.wages = false;
-        self.economy2.no_safety_net = false;
-        // Hunger as sickness: in flight, pinned off as the wages switches.
-        self.sickness.enabled = false;
+        self.policy = PolicyCfg { school_meals: false, ..PolicyCfg::dole_city() };
         self
     }
 
     /// The flip (Dylan, 2026-10-10): the shipped city runs wages from
-    /// revenue with no safety net, hunger as sickness and the shanties. This
-    /// is the old default, the dole city, kept reachable (P10 keeps its
-    /// mechanisms as policy levers): `[economy2] wages` and `no_safety_net`
-    /// off, `[sickness]` off, `[street] shanties` off (class pay and the
-    /// no-net hunger fixes read only with the wages on). The housing
-    /// catch-up (`[life] housing_catchup_days`, 2026-10-11) is off: its
-    /// housing growth is the flat P5h rule (the pre-roll reads no-net).
+    /// revenue with no safety net. P10 (docs/P10_POLICY.md): this is the old
+    /// default as a policy preset, the dole city, which most unit-test files
+    /// pin: the city starts under the levy (the wage schedule and the corp
+    /// upkeep levy) with the whole safety net enacted (`PolicyCfg::dole_city`).
+    /// Hunger as sickness and the shanties run here too (their switches
+    /// retired with P10). The housing catch-up (`[life]
+    /// housing_catchup_days`, 2026-10-11) is off: its housing growth is the
+    /// flat P5h rule (the pre-roll reads the market wage law and no net).
     pub fn dole_city(mut self) -> Config {
-        self.economy2.wages = false;
-        self.economy2.no_safety_net = false;
-        self.sickness.enabled = false;
-        self.street.shanties = false;
+        self.policy = PolicyCfg::dole_city();
         // Transit phase 3: the old default had no El.
         self.transit.enabled = false;
         self.life.housing_catchup_days = 0.0;
@@ -5409,12 +5445,11 @@ impl Config {
         c.robots = RobotsCfg::off();
         // 2026-10-09 (the off switches retired): the life pass, the Virt
         // plane, the word, the living city, contracts and the World market
-        // run here as in the shipped city. `[economy2] wages` and
-        // `no_safety_net` follow the loaded config too, as `[life]
-        // violence_fixes` does (the flip-readiness round: the table and the
-        // parity test model the off-screen hours of the city the config
-        // ships; on the default config both are off). `v1_profile` still pins
-        // them off.
+        // run here as in the shipped city. The starting policy (`[policy]`,
+        // P10; the wage law and the safety net) follows the loaded config
+        // too, as `[life] violence_fixes` does (the flip-readiness round: the
+        // table and the parity test model the off-screen hours of the city
+        // the config ships). `v1_profile` starts under the dole city's.
         // Hunger as sickness P5h (a harness change): the planner budgets were
         // tuned for a 500-agent Full city; the all-Full calibration and
         // parity cities scale them by n / 500 (never below the shipped
@@ -5469,7 +5504,7 @@ impl Config {
         }
         c.bar_owner_coins = (c.bar_owner_coins as f64 * f).round() as i64;
         // Flip readiness: the no-net Treasury's coin keys (read only with
-        // `[economy2] wages` / `no_safety_net` on) scale too. Unscaled, a
+        // the market wage law, P10) scale too. Unscaled, a
         // 300-resident city's Treasury sat under the 2,000 city's band, the
         // civic budget's target read 0 and the first midnight dismissed the
         // police (the district beats emptied a day later).
@@ -5853,15 +5888,14 @@ impl Default for HitMarketCfg {
 // The Real economy (docs/ECONOMY_V2.md; plan E1, E4, E35)
 // ---------------------------------------------------------------------------
 
-/// `[economy2]` (plan E1): the master switch and the phase switches. Each
-/// part's `on()` reads `living.enabled && economy2.enabled && <its switch>`.
+/// `[economy2]` (plan E1): the Real economy's parameters. Its phase switches
+/// (`wages`, `no_safety_net`) retired with P10: the wage law and the safety
+/// net are policy levers (`[policy]`, docs/P10_POLICY.md); the keys below
+/// marked "wages on" are read under the market wage law (the levy not
+/// enacted, `wages::on`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Economy2Cfg {
-    /// E1: phase 2's switch (`econ::wages_on`).
-    pub wages: bool,
-    /// E1: phase 3a's switch (`econ::no_net`), only after the stop rule.
-    pub no_safety_net: bool,
     /// E35: a contingency only (0: off): coins an agent needs to start emigrating.
     pub emigrate_cost: i64,
     // --- Phase 2 (spec § 5, plan E13-E20): wages from revenue.
@@ -5916,7 +5950,7 @@ pub struct Economy2Cfg {
     /// The overflow leg: with wages on the Reserve buys a Farm's surplus only
     /// from a positive Treasury, the rest stays at the Farm (false: phase 2).
     pub overflow_paid_only: bool,
-    /// Phase 3a (the transition wave; read only with `no_net`): a
+    /// Phase 3a (the transition wave; read only under the market wage law): a
     /// co-resident spouse covers a short rent share before arrears.
     pub household_rent: bool,
     // --- Jobs and room P1 (docs/JOBS_V2.md § 3; plan J2, J4; read only
@@ -5956,8 +5990,6 @@ pub struct Economy2Cfg {
 impl Default for Economy2Cfg {
     fn default() -> Self {
         Economy2Cfg {
-            wages: false,
-            no_safety_net: false,
             emigrate_cost: 0,
             labour_share: LabourShareCfg::default(),
             wage_step: 0.03,
@@ -6131,19 +6163,19 @@ pub struct TreasuryCfg {
     pub tax_max: f32,
     pub tax_step: f32,
     pub band: [i64; 2],
-    /// Phase 3a (plan key, the transition wave): the tax rate a `no_net`
-    /// city opens with (`econ::apply`); negative keeps `[levers] tax_rate`.
+    /// Phase 3a (plan key, the transition wave): the tax rate a market-law
+    /// city opens with (`Levers::from_config`); negative keeps `[levers] tax_rate`.
     pub tax_initial: f32,
     /// Phase 3a (plan key, the transition wave): what the Recycler's till
-    /// pays a scavenger's find with `no_net` (0: `[life] scavenge_coins`).
+    /// pays a scavenger's find under the market wage law (0: `[life] scavenge_coins`).
     pub scrap_coins: i64,
-    /// Flip readiness (the transition wave; `no_net` only): coins moved from
+    /// Flip readiness (the transition wave; the market wage law only): coins moved from
     /// the Treasury into the Recycler's till at world creation (a purse
     /// move, `treasury::seed_till`): the scrap dealer's opening float, so a
     /// find pays before its first Parts sale (0: the till opens empty and
     /// pays nothing until the Recycler has sold, ~day 21-24).
     pub till_initial: i64,
-    /// Jobs v2 J16 (P5a, `no_net` only): the civic budget's share of the
+    /// Jobs v2 J16 (P5a, the market wage law only): the civic budget's share of the
     /// trailing receipts (`Flow::{Tax, Fine, Customs, Property}`).
     pub civic_share: f32,
     /// J16: days over which the hoard above `band[1]` is paid out.
@@ -6431,12 +6463,12 @@ impl FloorsCfg {
     }
 }
 
-/// `[sickness]` (docs/HUNGER_SICKNESS.md § 8; starting values). Every key
-/// is read only with `enabled` (in flight: off is the city before it).
+/// `[sickness]` (docs/HUNGER_SICKNESS.md § 8; starting values). Always on
+/// since P10 (its `enabled` switch retired); `diet`, `bins` and `cancer`
+/// are its parts.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SicknessCfg {
-    pub enabled: bool,
     /// § 1-2: synth and real meals, the meters, the debuffs.
     pub diet: bool,
     /// § 4: the bins and the dive.
@@ -6531,7 +6563,6 @@ pub struct SicknessCfg {
 impl Default for SicknessCfg {
     fn default() -> Self {
         SicknessCfg {
-            enabled: false,
             diet: true,
             bins: true,
             cancer: true,
@@ -6592,7 +6623,7 @@ impl Default for SicknessCfg {
 }
 
 /// `[classpay]` (docs/CLASS_PAY.md; placeholders, not tuned). Every key is
-/// read only with [`Config::classpay_on`] (`[economy2] wages` and
+/// read only with `classpay::on` (the market wage law and
 /// `enabled`): the dole city is the city before it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]

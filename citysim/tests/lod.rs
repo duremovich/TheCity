@@ -398,6 +398,10 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
             // roll is the no-net tests' below.
             if let Some(t) = w.stat_table.as_mut() {
                 t.p_desperate = None;
+                // Nor a scavenged or begged coin to buy with (the earn path; on
+                // the transit phase 3 table this agent scavenged its meal).
+                t.p_scavenge = None;
+                t.p_beg = None;
             }
         }
         {
@@ -430,11 +434,9 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
 /// rates are set by each test.
 fn no_net_stat_agent() -> (World, citysim::EntityId) {
     use citysim::{Inventory, Job, Wallet};
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
-    assert!(citysim::systems::econ::no_net(&w));
+    assert!(citysim::systems::econ::wages_on(&w) && !citysim::systems::policy::net_enacted(&w));
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let id = w
         .tier(Lod::Statistical)
@@ -536,9 +538,7 @@ fn test_no_net_need_theft_follows_lawfulness() {
 #[test]
 fn test_night_shift_worker_promoted_at_the_workplace() {
     use citysim::{Building, Job, Position, TilePos};
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     let role = w.config.trade_role("night_porter").expect("the Night Porter trade");
     // Day 1 (a workday), 00:30: the night shift is on.
@@ -581,9 +581,7 @@ fn test_night_shift_worker_promoted_at_the_workplace() {
 fn test_no_net_child_keeps_the_starving_theft_rule() {
     use citysim::{EventKind, Inventory, Wallet};
     for starving in [false, true] {
-        let mut cfg = Config::load();
-        cfg.economy2.wages = true;
-        cfg.economy2.no_safety_net = true;
+        let cfg = Config::load();
         let mut w = World::new(42, cfg);
         w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
         let id = w
@@ -667,8 +665,6 @@ fn test_statistical_worker_off_shift_stocks_the_pantry() {
     use citysim::{Household, Inventory, Job, Needs, Wallet};
     for on in [true, false] {
         let mut cfg = Config::load();
-        cfg.economy2.wages = true;
-        cfg.economy2.no_safety_net = true;
         cfg.life.hf_shift_meals = on;
         let mut w = World::new(42, cfg);
         w.run_ticks(TICKS_PER_DAY + 20 * TICKS_PER_HOUR);
@@ -713,10 +709,7 @@ fn test_statistical_worker_off_shift_stocks_the_pantry() {
 #[test]
 fn test_no_bin_with_a_meal_at_hand() {
     use citysim::{Household, Inventory, Needs, Wallet};
-    let mut cfg = Config::load();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
-    cfg.sickness.enabled = true;
+    let cfg = Config::load();
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     // A housed broke adult, starving, with a bin in reach once its food is gone.

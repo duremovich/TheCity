@@ -1,7 +1,7 @@
 //! The Real economy phase 3a (docs/ECONOMY_V2.md §§ 2, 5; plan E21, E33):
 //! the Treasury on taxes and the Recycler's till.
 //!
-//! With `econ::no_net` the Treasury has no dole to pay and no public works to
+//! With `econ::wages_on` (P10) the Treasury has no dole to pay and no public works to
 //! post: its inflows are the tax, customs, the property rate and fines; its
 //! spending the city's own roles, the Jail's meal, the Reserve and the city
 //! Camp's food. `daily` replaces L2's `budget::daily` and moves
@@ -35,9 +35,9 @@ use crate::components::Role;
 use crate::events::EventKind;
 use crate::world::World;
 
-/// E21: the band runs with `no_net` and `[treasury] enabled`.
+/// E21: the band runs under the market wage law (P10: was `no_net`).
 pub fn on(world: &World) -> bool {
-    crate::systems::econ::no_net(world)
+    crate::systems::econ::wages_on(world)
 }
 
 /// E21: the midnight pass (in `living::run` in `budget::daily`'s slot).
@@ -89,13 +89,13 @@ pub fn daily(world: &mut World) {
     );
 }
 
-/// E33: the till holds the Recycler's sales (with `no_net`).
+/// E33: the till holds the Recycler's sales (the market wage law; P10: was `no_net`).
 pub fn till_on(world: &World) -> bool {
-    crate::systems::econ::no_net(world)
+    crate::systems::econ::wages_on(world)
 }
 
 /// E33: coins the Recycler's Parts sale brought into the Treasury move into
-/// the till (a purse move: `total_coins` counts both). With `no_net` only.
+/// the till (a purse move: `total_coins` counts both). Under the market wage law only.
 pub fn to_till(world: &mut World, coins: i64) {
     if coins <= 0 || !till_on(world) {
         return;
@@ -104,7 +104,7 @@ pub fn to_till(world: &mut World, coins: i64) {
     world.econ.recycler_till += coins;
 }
 
-/// Flip readiness (the transition wave; world creation, `no_net` only,
+/// Flip readiness (the transition wave; world creation, the market wage law only,
 /// before `econ::seed_capital`, which takes the float out of the corps'
 /// share of the opening hoard): `[treasury] till_initial` coins (at most
 /// the Treasury's) move from the Treasury into the till, the Recycler's

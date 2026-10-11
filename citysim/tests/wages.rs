@@ -15,11 +15,14 @@ use citysim::{
     World, TICKS_PER_DAY,
 };
 
-/// The phase-2 city: `[economy2] wages` is off by default until the stop
-/// rule is answered, so the tests force it on.
+/// The phase-2 city: the market wage law (P10: the levy repealed) over the
+/// dole city, as phase 2 was tested.
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
+    cfg.policy.levy = false;
+    // P10: the housing pre-roll runs under the market wage law now (it read
+    // no-net); these tests pin the city they were written on, without it.
+    cfg.life.housing_preroll = false;
     // The jobs round's keys at their off values: these tests pin phase 2's
     // rules (the round's own tests turn each key on).
     cfg.economy2.staff_ceiling_mult = 1.0;
@@ -45,7 +48,11 @@ fn config() -> Config {
 }
 
 fn city() -> World {
-    let w = World::new(42, config());
+    city_with(config())
+}
+
+fn city_with(cfg: Config) -> World {
+    let w = World::new(42, cfg);
     assert!(wages::on(&w), "wages and the market are on for the tests");
     w
 }
@@ -305,12 +312,19 @@ fn test_upkeep_becomes_property_and_inputs() {
 /// Treasury opens at `[treasury] treasury_initial`; coins are conserved.
 #[test]
 fn test_seed_capital_moves_hoard_pro_rata_and_conserves() {
-    let w = city();
+    // P10: the market wage law now opens at `[treasury] tax_initial` and
+    // seeds the till (the no-net institutions follow it); the comparison
+    // with the levy city pins the opening rate and no float (the till has
+    // its own test, `test_seed_till_comes_out_of_the_hoard`).
+    let mut cfg = config();
+    cfg.treasury.tax_initial = -1.0;
+    cfg.treasury.till_initial = 0;
+    let w = city_with(cfg);
     let cfg = &w.config;
     let moved = cfg.world.treasury_initial - cfg.treasury.treasury_initial;
     // The same seed with wages off: the Treasury less what seeding spent.
     let mut off = Config::load().dole_city();
-    off.economy2.wages = false;
+    off.policy.levy = true;
     let w_off = World::new(42, off);
     let t_off = w_off.treasury().map_or(0, |t| t.coins);
     assert!(t_off <= cfg.world.treasury_initial && t_off > cfg.world.treasury_initial - 1_000, "seeding spends little");
@@ -484,12 +498,12 @@ fn test_clinic_chrome_sells_as_parts_equivalents() {
     let _ = Good::Parts;
 }
 
-/// The off path: with `[economy2] wages = false` nothing of phase 2 runs in
+/// The off path: under the levy (P10; was `[economy2] wages = false`) nothing of phase 2 runs in
 /// three days (the byte identity against the phase-1 CLI is the device).
 #[test]
 fn test_wages_off_identical() {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = false;
+    cfg.policy.levy = true;
     let mut w = World::new(42, cfg);
     assert!(!wages::on(&w));
     assert!(w.treasury().map_or(0, |t| t.coins) > w.config.world.treasury_initial - 1_000, "no capital moved");
@@ -817,7 +831,7 @@ fn test_emigrate_cost_keeps_the_broke_home() {
     w.config.economy2.emigrate_cost = 0;
     assert!(can_buy_passage(&w, a), "0: off");
     w.config.economy2.emigrate_cost = 20;
-    w.config.economy2.wages = false;
+    w.levers.levy = true;
     assert!(can_buy_passage(&w, a), "wages off: off");
 }
 
@@ -989,13 +1003,16 @@ fn test_past_cap_posting_respects_room_with_lagging_payroll() {
 
 /// E35 with the identity: gated emigrants stay, the wallets of those who
 /// leave cross out, and `coin_identity` holds to the coin every day either
-/// way (20 days, no dole).
+/// way (40 days, no dole).
 #[test]
 fn test_emigrate_cost_keeps_the_identity() {
+    // 40 days (was 20): the free city shed one emigrant by day 20 on main
+    // and none on the transit phase 3 stat table; a one-agent premise.
+    const DAYS: u64 = 40;
     let run = |cost: i64| -> (Vec<i64>, i64) {
         let mut w = round_city(|c| c.economy2.emigrate_cost = cost);
         w.levers.dole_per_day = 0;
-        w.run_ticks(20 * TICKS_PER_DAY);
+        w.run_ticks(DAYS * TICKS_PER_DAY);
         let ids: Vec<i64> = w.stats.history.iter().map(|r| r.econ.coin_identity).collect();
         let emigrants: i64 = w.stats.history.iter().map(|r| i64::from(r.emigrants)).sum();
         (ids, emigrants)
@@ -1004,8 +1021,8 @@ fn test_emigrate_cost_keeps_the_identity() {
     let (gated_ids, gated) = run(20);
     assert!(free_ids.windows(2).all(|p| p[0] == p[1]), "free: the identity holds: {free_ids:?}");
     assert!(gated_ids.windows(2).all(|p| p[0] == p[1]), "gated: the identity holds: {gated_ids:?}");
-    eprintln!("emigrants in 20 days: free {free}, gated {gated}");
-    assert!(free > 0, "the no-dole city sheds people by day 20");
+    eprintln!("emigrants in {DAYS} days: free {free}, gated {gated}");
+    assert!(free > 0, "the no-dole city sheds people by day {DAYS}");
     assert!(gated < free, "passage keeps the broke home ({gated} vs {free})");
 }
 
@@ -1021,7 +1038,7 @@ fn test_cap_wages_sets_the_worlds_cap_with_wages_on_only() {
     assert_eq!(wm::cap_today(&w, ExportGood::Parts), expect(100, app(&w, ExportGood::Parts)));
     assert_eq!(wm::cap_today(&w, ExportGood::Data), expect(30, app(&w, ExportGood::Data)));
     assert_eq!(wm::cap_today(&w, ExportGood::Food), expect(food_cap, app(&w, ExportGood::Food)), "0: the good's own");
-    w.config.economy2.wages = false;
+    w.levers.levy = true;
     let parts_cap = w.config.world_market.parts.cap;
     assert_eq!(wm::cap_today(&w, ExportGood::Parts), expect(parts_cap, app(&w, ExportGood::Parts)), "wages off");
 }
@@ -1231,8 +1248,7 @@ fn test_hiring_key_weighs_the_roles_skill() {
 #[test]
 fn test_employer_index_matches_a_scan_after_30_days() {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    cfg.policy = citysim::config::PolicyCfg::default();
     let mut w = World::new(42, cfg);
     for day in 1..=30 {
         w.run_ticks(TICKS_PER_DAY);
@@ -1442,7 +1458,7 @@ fn test_seed_staff_fills_the_ceilings_before_day_0() {
 #[test]
 fn test_seed_till_comes_out_of_the_hoard() {
     let mut cfg = config();
-    cfg.economy2.no_safety_net = true;
+    cfg.policy = citysim::config::PolicyCfg::default();
     cfg.economy2.seed_staff_days = 0.0;
     cfg.treasury.till_initial = 0;
     let none = World::new(42, cfg.clone());
@@ -1454,8 +1470,8 @@ fn test_seed_till_comes_out_of_the_hoard() {
     let capital = |w: &World| w.corps().into_iter().filter_map(|c| w.comp::<Corp>(c)).map(|c| c.treasury).sum::<i64>();
     assert_eq!(capital(&w), capital(&none) - 4_000, "the float out of the corps' capital");
     assert_eq!(ownership::total_coins(&w), ownership::total_coins(&none));
-    cfg.economy2.no_safety_net = false;
-    assert_eq!(World::new(42, cfg).econ.recycler_till, 0, "no till without no-net");
+    cfg.policy.levy = true;
+    assert_eq!(World::new(42, cfg).econ.recycler_till, 0, "no till under the levy");
 }
 
 /// Workplace room: a Farm's Vat Techs past its day shift's room (16 seats,

@@ -19,8 +19,7 @@ use citysim::{
 /// The wages + no-net city (the switches the phase is read under).
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    cfg.policy = citysim::config::PolicyCfg::default();
     cfg
 }
 
