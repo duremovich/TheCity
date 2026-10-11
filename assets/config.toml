@@ -437,6 +437,11 @@ move_ticks_full = 2
 interrupt_check_ticks = 30
 door_capacity_per_tick = 2
 door_queue_max_ticks = 30
+# Workplace room (2026-10-11): an agent refused at a full building passes it over in `World::local` for this many
+# ticks (its replan goes to another Market or the home pantry, not back to the same door; 0: off), and a
+# building's own staff are let in when it is full (the staff door: customers never lock the shift out).
+refused_ticks = 120
+staff_door = true
 reservation_ttl = 120
 # M10: 16000 (v1 4000) for the 256 x 192 map; street targets can be 300+ tiles away.
 astar_max_expansions = 16000
@@ -1476,6 +1481,7 @@ escort_van_ticks = 60
 shift_pro_rata = 0.5                # ... and a cut shift pays pro rata from half of it
 starving_hunger = 0.1               # the starvation that breaks a commitment
 sleep_wake_energy = 0.99            # ... and runs to here (it ended at 0.9: 1-6 min Sleeps all night)
+rough_sleep_on = true               # workplace room: a housed worker asleep rough near work sleeps on to here or the shift (it woke at 02:00 at the 8 h cap and walked 4.5 h home)
 idle_sleep_energy = 0.9             # Idle plans Sleep only below this (0.7 left nights to 90-min Rests)
 energy_brake = 0.5                  # Unwind / Eat / Earn carry an energy term below this
 spot_walk_cap_tiles = 22            # 5: ~45 min: a farther free spot gives way to the nearest
@@ -1932,6 +1938,15 @@ rehire_bonus = 40                    # J4: tiles off the key for an adult laid o
 # 0: 0.089-0.123 (the never-hired starve instead: 488-554); 14: 0.062-0.159, 293-380 (820 employed at day 0, the
 # capital binds); 5: 0.070-0.098, 224-281 (1,100 employed at day 0, every corp role at its ceiling: 5 does not bind).
 seed_staff_days = 5
+# Workplace room (2026-10-11; read only with wages on): the places past full staff fit the building's room on their
+# shift (staff on one shift <= capacity, less customer_room of it at a Market, a venue, a Clinic, a Garage or a Hotel;
+# full staff is never cut). Before it the x3 ceiling staffed Farms with 44-88 in a room of 16, Markets with 36 Clerks
+# in a room of 20 and Fabs with 38-56 in 14 (25-28 workplaces a day over their room on seeds 42-44). relief_shift: a
+# Farm or Fab whose day shift fills its room hires onto the night shift (shift_night), a second shift's room. Past
+# both, the floor pass (AddFloor) and Grow are how a corp adds room.
+room_cap = true
+customer_room = 0.4
+relief_shift = true
 
 # Spec § 3: the World's book per good. At these placeholders the World pays at most ~900 a day for Food
 # (350 units, mean bid ~2.6), ~550 for Parts and ~310 for Data at appetite 1.0. Food's ask is 5.4: the

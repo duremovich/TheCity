@@ -533,6 +533,9 @@ fn round_city(f: impl FnOnce(&mut Config)) -> World {
     cfg.economy2.asset_import_per_day = 0;
     cfg.economy2.overflow_paid_only = false;
     cfg.economy2.emigrate_cost = 0;
+    // Workplace room (2026-10-11): the margin rule alone.
+    cfg.economy2.room_cap = false;
+    cfg.economy2.relief_shift = false;
     cfg.world_market.cap_wages = [0; 3];
     f(&mut cfg);
     let w = World::new(42, cfg);
@@ -543,7 +546,10 @@ fn round_city(f: impl FnOnce(&mut Config)) -> World {
 /// Staffing from revenue: under its margin a corp posts past `full_staff`
 /// up to `ceil(full_staff × staff_ceiling_mult)` while `hire_below × P* −
 /// P` covers the marginal hire; with the room short of a wage it stops at
-/// full staff, and at mult 1.0 the cap is phase 2's.
+/// full staff, and at mult 1.0 the cap is phase 2's. Workplace room: with
+/// `room_cap` the places past full staff stop at the building's room (a
+/// Market keeps its customers' share: 20 seats, 15 on the day shift with
+/// the graded posts, so none past full staff).
 #[test]
 fn test_staffing_past_full_staff_only_when_revenue_covers_the_hire() {
     let places = |w: &World, b: EntityId| {
@@ -551,8 +557,11 @@ fn test_staffing_past_full_staff_only_when_revenue_covers_the_hire() {
         ownership::staff_at(w, b).into_iter().filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.role == role)).count()
             + w.vacancies.get(&b).map_or(0, |v| v.iter().filter(|&&r| r == role).count())
     };
-    let run = |mult: f32, rev: i64, pay: i64| -> (World, Vec<EntityId>) {
-        let mut w = round_city(|c| c.economy2.staff_ceiling_mult = mult);
+    let run_room = |mult: f32, rev: i64, pay: i64, room: bool| -> (World, Vec<EntityId>) {
+        let mut w = round_city(|c| {
+            c.economy2.staff_ceiling_mult = mult;
+            c.economy2.room_cap = room;
+        });
         let corp = corp_named(&w, "Nutrix");
         pin_food_demand(&mut w, corp);
         let markets = ownership::owned_of_kind(&w, Some(corp), BuildingKind::Market);
@@ -563,6 +572,7 @@ fn test_staffing_past_full_staff_only_when_revenue_covers_the_hire() {
         }
         (w, markets)
     };
+    let run = |mult: f32, rev: i64, pay: i64| run_room(mult, rev, pay, false);
     let full = |w: &World| corp_brain::full_staff(w, BuildingKind::Market);
     // Room to spare (target 0.6 × 3,000; payroll 100): every Market to the ceiling.
     let (w, markets) = run(2.0, 3000, 100);
@@ -582,6 +592,13 @@ fn test_staffing_past_full_staff_only_when_revenue_covers_the_hire() {
     assert_eq!(wages::staff_ceiling(&w, BuildingKind::Market), full(&w));
     for &m in &markets {
         assert_eq!(places(&w, m), full(&w));
+    }
+    // Workplace room: the revenue for the ceiling, a Market's room for none
+    // past full staff (and full staff not cut).
+    let (w, markets) = run_room(2.0, 3000, 100, true);
+    for &m in &markets {
+        assert!(wages::staff_room(&w, m) < 15, "Market {m:?}: the customers' share kept");
+        assert_eq!(places(&w, m), full(&w), "Market {m:?}: no hire past its room");
     }
 }
 
@@ -1439,4 +1456,45 @@ fn test_seed_till_comes_out_of_the_hoard() {
     assert_eq!(ownership::total_coins(&w), ownership::total_coins(&none));
     cfg.economy2.no_safety_net = false;
     assert_eq!(World::new(42, cfg).econ.recycler_till, 0, "no till without no-net");
+}
+
+/// Workplace room: a Farm's Vat Techs past its day shift's room (16 seats,
+/// 14 Vat Techs of full staff: 16 a shift) work the night shift, up to the
+/// night's room; the margin rule's ceiling (x3: 42) is held to the two
+/// shifts' room, and full staff is never cut.
+#[test]
+fn test_room_caps_the_ceiling_and_a_full_day_shift_hires_onto_nights() {
+    use citysim::Role;
+    let mut w = round_city(|c| {
+        c.economy2.staff_ceiling_mult = 3.0;
+        c.economy2.room_cap = true;
+        c.economy2.relief_shift = true;
+    });
+    let farm = w.buildings_of_kind(BuildingKind::Farm)[0];
+    let room = wages::staff_room(&w, farm);
+    let cap = usize::from(w.comp::<Building>(farm).expect("farm").capacity);
+    assert_eq!(room, cap, "a Farm keeps no customers' share");
+    let full = citysim::systems::jobs::places_of(&w, farm, Role::Farmer);
+    assert_eq!(wages::room_capped(&w, farm, Role::Farmer, full), full, "full staff is never cut");
+    assert_eq!(wages::room_capped(&w, farm, Role::Farmer, 3 * full), 2 * room, "a day and a night shift's room");
+    // Clear the Farm and fill its day shift.
+    for a in ownership::staff_at(&w, farm) {
+        w.remove::<Job>(a);
+    }
+    w.vacancies.remove(&farm);
+    let free: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| citysim::systems::demography::is_adult(&w, a) && !w.has::<Job>(a))
+        .take(2 * room + 1)
+        .collect();
+    assert!(free.len() > 2 * room);
+    let (day, night) = (w.config.world.shift_day.clone(), w.config.world.shift_night.clone());
+    for (i, &a) in free.iter().take(2 * room).enumerate() {
+        let nights = wages::relief_hire(&w, farm, Role::Farmer);
+        assert_eq!(nights, i >= room, "hire {i}: the night shift only past the day's room");
+        citysim::systems::demography::hire(&mut w, a, farm, Role::Farmer);
+        let shifts = w.comp::<Job>(a).expect("hired").shifts.clone();
+        assert_eq!(shifts, if i >= room { night.clone() } else { day.clone() }, "hire {i}");
+    }
 }

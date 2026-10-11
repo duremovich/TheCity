@@ -20,7 +20,21 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::EatFromInventory => 10,
         ActionKind::EatAtHome => 15,
         ActionKind::BuyFood => 10,
-        ActionKind::Sleep => Tick::from(world.config.needs.sleep_ticks_full),
+        ActionKind::Sleep => {
+            let full = Tick::from(world.config.needs.sleep_ticks_full);
+            // Workplace room: a housed agent sleeping rough sleeps on (the
+            // committed sleep's own ends, `finishes_early`, wake it: rested,
+            // or the walk to the shift); woken at the cap it walked home at
+            // 02:00 across the city to sleep again.
+            let rough = world.config.life.rough_sleep_on
+                && world.comp::<crate::components::Household>(id).is_some_and(|h| h.home.is_some())
+                && world.comp::<crate::components::Position>(id).is_some_and(|p| p.building.is_none());
+            if rough {
+                full * 2
+            } else {
+                full
+            }
+        }
         ActionKind::Rest => 90,
         ActionKind::HaulToMarket => 40,
         ActionKind::CollectWage | ActionKind::CollectDole | ActionKind::StoreFood => 5,
