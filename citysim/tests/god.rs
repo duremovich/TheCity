@@ -1787,6 +1787,12 @@ fn god_hit_hollow_leader_from_arasaka() {
                 w.purse(Some(arasaka))
             );
             watched.push(leader);
+            // The flip (wages from revenue): Arasaka's day-45 treasury can sit
+            // under the price; the god funds it (the scenario is the Hit's
+            // aftermath, not the corp's books).
+            if let Some(c) = w.comp_mut::<citysim::Corp>(arasaka) {
+                c.treasury = c.treasury.max(2_500);
+            }
             w.push_command(PlayerCommand::PostContract {
                 buyer: Some(arasaka),
                 kind: citysim::contract::ContractKind::Hit,
