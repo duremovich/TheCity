@@ -2114,6 +2114,20 @@ impl World {
             .map(|(_, b)| b)
     }
 
+    /// Workplace room: [`World::nearest_of_kind`] passing `except` over.
+    fn nearest_of_kind_except(&self, kind: BuildingKind, from: TilePos, except: EntityId) -> Option<EntityId> {
+        self.buildings_of_kind(kind)
+            .iter()
+            .filter(|&&b| b != except)
+            .filter_map(|&b| {
+                self.comp::<Building>(b)
+                    .filter(|bd| !bd.demolished && !bd.derelict)
+                    .map(|bd| (bd.door.manhattan(from), b))
+            })
+            .min()
+            .map(|(_, b)| b)
+    }
+
     /// The building of `kind` an agent uses: the one it is inside, else its
     /// employer if that is of `kind` (a clerk's own Market, a bartender's own
     /// Bar, as the Farm rule already did), else the nearest door to its tile
@@ -2131,13 +2145,28 @@ impl World {
         if let Some(b) = pos.building.filter(|&b| usable(b)) {
             return Some(b);
         }
-        if let Some(e) = self.comp::<Job>(agent).and_then(|j| j.employer).filter(|&e| usable(e)) {
+        // Workplace room: the building that refused the agent at a full
+        // door in the last `[exec] refused_ticks` is passed over (the
+        // replan goes to the next one of the kind, or none: the home
+        // pantry), not walked back to.
+        let ttl = self.config.exec.refused_ticks;
+        let refused = self
+            .comp::<Brain>(agent)
+            .and_then(|br| br.refused)
+            .filter(|&(b, t)| ttl > 0 && now < t + ttl && self.comp::<Building>(b).is_some_and(|bd| bd.kind == kind))
+            .map(|(b, _)| b);
+        if let Some(e) = self.comp::<Job>(agent).and_then(|j| j.employer).filter(|&e| usable(e) && Some(e) != refused) {
             return Some(e);
         }
-        if kind == BuildingKind::Market && self.config.corps.shop_price_tiles > 0 {
-            return self.market_by_price(pos.tile);
+        let pick = if kind == BuildingKind::Market && self.config.corps.shop_price_tiles > 0 {
+            self.market_by_price(pos.tile)
+        } else {
+            self.nearest_of_kind(kind, pos.tile)
+        };
+        match refused {
+            Some(r) if pick == Some(r) => self.nearest_of_kind_except(kind, pos.tile, r),
+            _ => pick,
         }
-        self.nearest_of_kind(kind, pos.tile)
     }
 
     /// M11 D15: the Market a shopper at `from` picks, every tier alike: the

@@ -48,7 +48,10 @@ fn test_cli_report_csv_header() {
     // working poor housed nowhere near work (80 on seed 1): 1,000-1,300
     // employed, the derelicts' to 120 homeless. The dole city's row
     // (`Config::dole_city`) kept 330-500 and the derelicts' alone.
-    assert!((1995..=2000).contains(&n(2)) && (1000..=1300).contains(&n(3)), "row: {row}");
+    // Workplace room (2026-10-11): the seeding stops at each workplace's
+    // room on its shifts (the x3 ceiling had 44 Vat Techs in a Farm of 16):
+    // 863 on seed 1, so 800-1,300.
+    assert!((1995..=2000).contains(&n(2)) && (800..=1300).contains(&n(3)), "row: {row}");
     assert!((derelict_homeless - 5..=120).contains(&n(4)), "row: {row}");
     // M13 D49: corp slot 9 and the 40 asset columns; M14 V43: the 72 Virt
     // columns; M15 W43: the 68 word columns (30, 4 gangs x 2, 9 corps x 3, 3);

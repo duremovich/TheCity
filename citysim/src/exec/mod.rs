@@ -961,9 +961,25 @@ fn try_enter(
     }
     let since = blocked_since.unwrap_or(tick);
     if tick - since >= world.config.exec.door_queue_max_ticks {
-        return StepResult::Failed(if full { FailReason::BuildingFull } else { FailReason::Timeout });
+        if full {
+            note_refused(world, id, b);
+            return StepResult::Failed(FailReason::BuildingFull);
+        }
+        return StepResult::Failed(FailReason::Timeout);
     }
     set_goto(world, id, target, path, tick + 1, Some(since), 0)
+}
+
+/// Workplace room: remember the full building that refused `id` (`[exec]
+/// refused_ticks`; `World::local` passes it over until then).
+fn note_refused(world: &mut World, id: EntityId, b: EntityId) {
+    if world.config.exec.refused_ticks == 0 {
+        return;
+    }
+    let tick = world.tick;
+    if let Some(brain) = world.comp_mut::<Brain>(id) {
+        brain.refused = Some((b, tick));
+    }
 }
 
 fn set_goto(
@@ -993,6 +1009,7 @@ fn arrive(world: &mut World, id: EntityId, target: GotoTarget, blocked_since: Op
             if world.comp::<Building>(b).is_some_and(|bd| bd.is_full()) && !world.capacity_exempt(id, b) {
                 let since = blocked_since.unwrap_or(tick);
                 if tick - since >= world.config.exec.door_queue_max_ticks {
+                    note_refused(world, id, b);
                     return StepResult::Failed(FailReason::BuildingFull);
                 }
                 if let Some(brain) = world.comp_mut::<Brain>(id) {
@@ -1175,9 +1192,18 @@ impl World {
         let sweeper = self
             .comp::<crate::components::Job>(agent)
             .is_some_and(|j| j.role == crate::components::Role::Sanitation && j.employer == Some(b));
+        // Workplace room: with `[exec] staff_door`, any staff into their
+        // own workplace (the shift's room is the jobs round's to keep).
+        let staff = self.config.exec.staff_door
+            && self.comp::<crate::components::Job>(agent).is_some_and(|j| j.employer == Some(b));
         // Jobs and room J13: a trade's staff into their workplace, a Super
         // into the Blocks of his round.
-        guard_at_jail || own_home || own_bed || sweeper || crate::systems::trades::capacity_exempt(self, agent, b)
+        guard_at_jail
+            || own_home
+            || own_bed
+            || sweeper
+            || staff
+            || crate::systems::trades::capacity_exempt(self, agent, b)
     }
 
     /// The street tile just outside a building's door (a Road if there is one).

@@ -512,6 +512,144 @@ pub fn ceiling_at(world: &World, b: EntityId, role: Role) -> usize {
     ((full as f32 * mult).ceil() as usize).max(full)
 }
 
+// ---------------------------------------------------------------------------
+// Workplace room (`[economy2] room_cap`, `customer_room`, `relief_shift`)
+// ---------------------------------------------------------------------------
+
+/// Workplace room: `[economy2] room_cap` with wages on.
+fn room_on(world: &World) -> bool {
+    on(world) && world.config.economy2.room_cap
+}
+
+/// Workplace room: a kind whose room is shared with its customers (a
+/// Market's shoppers, a venue's guests, a Clinic's patients, a Garage's
+/// drivers, a Hotel's guests).
+fn customer_facing(kind: BuildingKind) -> bool {
+    kind.is_leisure()
+        || matches!(
+            kind,
+            BuildingKind::Market
+                | BuildingKind::Bar
+                | BuildingKind::Clinic
+                | BuildingKind::Garage
+                | BuildingKind::Hotel
+        )
+}
+
+/// Workplace room: a kind that runs a night shift past a full day shift
+/// (`[economy2] relief_shift`): the vats and the line run round the clock.
+fn relief_kind(kind: BuildingKind) -> bool {
+    matches!(kind, BuildingKind::Farm | BuildingKind::Fab)
+}
+
+/// Workplace room: the staff `b` holds on one shift: its `capacity`
+/// (floors included), less `customer_room` of it at a customer-facing kind.
+pub fn staff_room(world: &World, b: EntityId) -> usize {
+    let Some((kind, cap)) = world.comp::<Building>(b).map(|bd| (bd.kind, usize::from(bd.capacity))) else { return 0 };
+    if !customer_facing(kind) {
+        return cap;
+    }
+    let keep = (cap as f32 * world.config.economy2.customer_room.clamp(0.0, 1.0)).ceil() as usize;
+    cap.saturating_sub(keep)
+}
+
+/// Workplace room: the shifts a `role` hire works on site by default (as
+/// `demography::hire` sets them; a `split` trade both of its shifts);
+/// `None` for a role whose work is off site (a Guard's beat, a sweeper's,
+/// a Super's round).
+fn site_shifts(world: &World, role: Role) -> Option<Vec<(u16, u16)>> {
+    let wc = &world.config.world;
+    if let Some(row) = crate::systems::trades::row_of(world, role) {
+        use crate::config::{TradeDuty, TradeShift};
+        if row.duty == TradeDuty::Round {
+            return None;
+        }
+        return Some(match row.shift {
+            TradeShift::Day => wc.shift_day.clone(),
+            TradeShift::Evening => world.config.leisure.evening_shift.clone(),
+            TradeShift::Night => wc.shift_night.clone(),
+            TradeShift::Split => wc.shift_day.iter().chain(wc.shift_night.iter()).copied().collect(),
+        });
+    }
+    match role {
+        Role::Guard | Role::Sanitation => None,
+        Role::Host | Role::Fighter | Role::Croupier | Role::Concierge => {
+            Some(world.config.leisure.evening_shift.clone())
+        }
+        _ => Some(wc.shift_day.clone()),
+    }
+}
+
+/// Two shift lists meet (any segment overlaps).
+fn overlap(a: &[(u16, u16)], b: &[(u16, u16)]) -> bool {
+    a.iter().any(|&(s1, e1)| b.iter().any(|&(s2, e2)| s1 < e2 && s2 < e1))
+}
+
+/// Workplace room: the places of every on-site role of `b`'s kind whose
+/// shift meets `shifts`.
+fn places_on(world: &World, b: EntityId, kind: BuildingKind, shifts: &[(u16, u16)]) -> usize {
+    ownership::roles_for(world, kind)
+        .into_iter()
+        .filter(|&(r, _)| site_shifts(world, r).is_some_and(|s| overlap(&s, shifts)))
+        .map(|(r, _)| crate::systems::jobs::places_of(world, b, r))
+        .sum()
+}
+
+/// Workplace room: `role`'s room at `b` on its default shift: its places
+/// plus its share (by places) of the room the shift's full staff leave;
+/// `None` for an off-site role.
+fn day_share(world: &World, b: EntityId, role: Role) -> Option<usize> {
+    let kind = world.comp::<Building>(b)?.kind;
+    let shifts = site_shifts(world, role)?;
+    let places = crate::systems::jobs::places_of(world, b, role);
+    let base = places_on(world, b, kind, &shifts);
+    let slack = staff_room(world, b).saturating_sub(base);
+    Some(places + slack * places / base.max(1))
+}
+
+/// Workplace room: does `role` at `b` run a night shift (`relief_shift`):
+/// the bespoke role of a Farm or a Fab.
+fn relief_role(world: &World, b: EntityId, role: Role) -> Option<BuildingKind> {
+    let kind = world.comp::<Building>(b)?.kind;
+    (world.config.economy2.relief_shift && relief_kind(kind) && ownership::role_for(kind) == Some(role)).then_some(kind)
+}
+
+/// Workplace room: `want` (the margin rule's ceiling or cap at `b` in
+/// `role`, Farm overtime included) held to the room the role has on its
+/// shifts: [`day_share`] plus, for a relief role, the night shift's room
+/// its full staff leave. Never under the role's places (full staff is the
+/// earlier milestones' and is not cut); `want` unchanged without
+/// `room_cap` or for an off-site role.
+pub fn room_capped(world: &World, b: EntityId, role: Role, want: usize) -> usize {
+    let places = crate::systems::jobs::places_of(world, b, role);
+    if !room_on(world) || want <= places {
+        return want;
+    }
+    let Some(day) = day_share(world, b, role) else { return want };
+    let night = relief_role(world, b, role).map_or(0, |kind| {
+        let night = &world.config.world.shift_night;
+        staff_room(world, b).saturating_sub(places_on(world, b, kind, night))
+    });
+    want.min(day + night).max(places)
+}
+
+/// Workplace room: a `role` hire at `employer` works the night shift: a
+/// relief role (`relief_shift`) whose day shift already holds its
+/// [`day_share`].
+pub fn relief_hire(world: &World, employer: EntityId, role: Role) -> bool {
+    if !room_on(world) || relief_role(world, employer, role).is_none() {
+        return false;
+    }
+    let Some(day) = day_share(world, employer, role) else { return false };
+    let shift_day = &world.config.world.shift_day;
+    let on_day = ownership::staff_at(world, employer)
+        .into_iter()
+        .filter_map(|a| world.comp::<Job>(a))
+        .filter(|j| j.role == role && overlap(&j.shifts, shift_day))
+        .count();
+    on_day >= day
+}
+
 /// The jobs round: a building's `role` staff as the margin rule counts it
 /// (the corp's exec never counted, in [`post`] and [`shed_extra`] alike),
 /// oldest first, and its open `role` vacancies.
@@ -565,9 +703,10 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
         // Jobs and room J10: every role of the kind, the bespoke first.
         for (role, _) in ownership::roles_for(world, kind) {
             let extra = overtime_of(kind, role, overtime);
-            // Jobs and room J7: per building, floors included.
-            let cap = crate::systems::jobs::places_of(world, b, role) + extra;
-            let ceiling = ceiling_at(world, b, role) + extra;
+            // Jobs and room J7: per building, floors included; workplace
+            // room: neither past the room the role has on its shifts.
+            let cap = room_capped(world, b, role, crate::systems::jobs::places_of(world, b, role) + extra);
+            let ceiling = room_capped(world, b, role, ceiling_at(world, b, role) + extra);
             let (hires, open) = places(world, b, role, exec);
             // Class pay P3: the labour pool prices a graded place at the
             // labour rate; its premium is capital's and profit's (below).
@@ -641,7 +780,8 @@ pub fn seed_staff(world: &mut World) -> u32 {
             }
             let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
             for (role, _) in ownership::roles_for(world, kind) {
-                let ceiling = ceiling_at(world, b, role) + overtime_of(kind, role, overtime);
+                let want = ceiling_at(world, b, role) + overtime_of(kind, role, overtime);
+                let ceiling = room_capped(world, b, role, want);
                 let (hires, open) = places(world, b, role, exec);
                 let marginal = crate::systems::classpay::post_wage(world, b, role) * rev_mult;
                 let mut n = hires.len() + open;
@@ -732,8 +872,10 @@ fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: boo
         // layoff per building a day, the first role past its cap.
         let mut laid = false;
         for (role, _) in ownership::roles_for(world, kind) {
-            // Jobs and room J7: per building, floors included.
-            let cap = crate::systems::jobs::places_of(world, b, role) + overtime_of(kind, role, overtime);
+            // Jobs and room J7: per building, floors included (workplace
+            // room: as in [`post`]).
+            let full = crate::systems::jobs::places_of(world, b, role) + overtime_of(kind, role, overtime);
+            let cap = room_capped(world, b, role, full);
             let (hires, _) = places(world, b, role, exec);
             withdraw_past_cap(world, b, role, cap, hires.len());
             if laid || !lay_off_one || hires.len() <= cap {
@@ -846,7 +988,10 @@ pub fn floor_pass(world: &mut World, corp: EntityId, order: f32, room: f32, r: f
             let per_floor = crate::systems::corp_brain::full_staff(world, kind);
             let extra = if kind == BuildingKind::Farm { overtime } else { 0 };
             let (hires, open) = places(world, b, role, exec);
-            let at_ceiling = per_floor > 0 && hires.len() + open >= ceiling_at(world, b, role) + extra;
+            // Workplace room: a building at its room is at its ceiling (a
+            // floor is how it grows).
+            let ceiling = room_capped(world, b, role, ceiling_at(world, b, role) + extra);
+            let at_ceiling = per_floor > 0 && hires.len() + open >= ceiling;
             // Jobs and room J10: a floor's wage bill is every role's places
             // on it (the bespoke role's ceiling still decides).
             // (A `per_owned` trade's places do not grow with floors.)

@@ -111,7 +111,9 @@ fn test_two_floor_farm_posts_twice_the_places() {
     assert_eq!(a, b + full, "the second floor adds one floor's places");
 }
 
-/// J7: seats multiply for Blocks, Hotels and venues only, clamped at 255; a
+/// J7: seats multiply for Blocks, Hotels and venues (workplace room,
+/// 2026-10-11: and the Farms and Fabs, whose floors multiply their staff),
+/// clamped at 255; a
 /// Lot of two floors converted into a Club seats and posts two floors' worth.
 #[test]
 fn test_capacity_multiplies_and_clamps() {
@@ -119,7 +121,8 @@ fn test_capacity_multiplies_and_clamps() {
     assert_eq!(founding::with_floors(BuildingKind::Hotel, 12, 3), 36);
     assert_eq!(founding::with_floors(BuildingKind::Club, 40, 6), 240);
     assert_eq!(founding::with_floors(BuildingKind::Club, 100, 3), 255, "clamped at u8::MAX");
-    assert_eq!(founding::with_floors(BuildingKind::Farm, 16, 3), 16, "a Farm's room is not seats");
+    assert_eq!(founding::with_floors(BuildingKind::Farm, 16, 3), 48, "a Farm's floors hold their shifts");
+    assert_eq!(founding::with_floors(BuildingKind::Fab, 14, 2), 28, "a Fab's floors hold their shifts");
     assert_eq!(founding::with_floors(BuildingKind::Market, 20, 2), 20);
 
     let mut w = World::new(42, Config::load().dole_city());

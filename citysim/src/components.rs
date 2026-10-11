@@ -1983,6 +1983,11 @@ pub struct Brain {
     /// pick avoids it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avoid_spot: Option<(TilePos, Tick)>,
+    /// Workplace room: the building that last refused this agent at a full
+    /// door, and when (`World::local` passes it over for `[exec]
+    /// refused_ticks`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refused: Option<(EntityId, Tick)>,
 }
 
 fn is_zero_u64(v: &u64) -> bool {
@@ -2037,6 +2042,7 @@ impl Default for Brain {
             gang_paid_day: None,
             lod_since: 0,
             avoid_spot: None,
+            refused: None,
         }
     }
 }

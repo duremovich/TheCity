@@ -288,10 +288,13 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
 // ---------------------------------------------------------------------------
 
 /// J7: the kinds whose seats or beds floors multiply: Blocks, Hotels and
-/// the leisure venues (a Farm's or Market's `capacity` is its visitors'
-/// room and its stock cap is not multiplied).
+/// the leisure venues; workplace room (2026-10-11): and the Farms and Fabs,
+/// whose floors multiply their staff (`jobs::places_of`), so a floor holds
+/// the shift it adds (a Market's `capacity` stays its one floor's; no
+/// stock cap is multiplied).
 pub fn floor_seats(kind: BuildingKind) -> bool {
-    matches!(kind, BuildingKind::Home | BuildingKind::Hotel) || kind.is_leisure()
+    matches!(kind, BuildingKind::Home | BuildingKind::Hotel | BuildingKind::Farm | BuildingKind::Fab)
+        || kind.is_leisure()
 }
 
 /// J7: one floor's `capacity` × `floors` for a [`floor_seats`] kind,
