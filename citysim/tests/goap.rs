@@ -163,16 +163,20 @@ fn test_plan_budget_12_per_tick() {
 fn test_reservation_prevents_overcommit() {
     let mut w = world(4);
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
-    w.comp_mut::<Building>(market).expect("market").stock_food = 2;
+    // Hunger as sickness (always on since P10): a buyer with `real_meal_reserve`
+    // real meals' coins buys real, that many shelf units (a synth buyer's
+    // reservation counts meals, not units: see docs/P10_POLICY.md).
+    let reserve = u32::try_from(w.config.sickness.real_meal_reserve).expect("a small reserve");
+    w.comp_mut::<Building>(market).expect("market").stock_food = 2 * reserve;
     // nobody's pantry counts as a source
     for h in w.buildings_by_kind[&BuildingKind::Home].clone() {
         w.comp_mut::<Building>(h).expect("home").stock_food = 0;
     }
     let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
-    let price = w.mean_price();
     for &id in &ids {
-        // one unit's worth each: BuyFood reserves what it will actually buy
-        w.comp_mut::<Wallet>(id).expect("wallet").coins = price;
+        // one buyer's worth each: BuyFood reserves what it will actually buy
+        let price = w.price_for(market, id);
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = price * i64::from(reserve);
         w.comp_mut::<Inventory>(id).expect("inv").food = 0;
         w.comp_mut::<Needs>(id).expect("needs").hunger = 0.2;
         w.comp_mut::<Brain>(id).expect("brain").current_goal = Some(GoalKind::Eat);
@@ -180,11 +184,11 @@ fn test_reservation_prevents_overcommit() {
     assert!(WorldState::observe(&w, ids[0], None).food_source_available);
     plan::plan_for(&mut w, ids[0], GoalKind::Eat);
     assert!(w.comp::<Brain>(ids[0]).expect("b").plan.is_some());
-    assert!(WorldState::observe(&w, ids[1], None).food_source_available, "one unit left");
+    assert!(WorldState::observe(&w, ids[1], None).food_source_available, "one buyer's worth left");
     plan::plan_for(&mut w, ids[1], GoalKind::Eat);
     assert!(w.comp::<Brain>(ids[1]).expect("b").plan.is_some());
-    assert!(!WorldState::observe(&w, ids[2], None).food_source_available, "both units reserved");
-    assert_eq!(WorldState::reserved_units(&w, market), 2);
+    assert!(!WorldState::observe(&w, ids[2], None).food_source_available, "both buyers' units reserved");
+    assert_eq!(WorldState::reserved_units(&w, market), 2 * reserve);
 }
 
 #[test]
@@ -242,9 +246,12 @@ fn test_empty_market_with_stocked_pantry_eats_at_home() {
 fn test_beg_does_not_promise_a_meal_at_price_three() {
     let mut w = world(9);
     let id = scenario(&mut w, 14, 0, 0.9, 0.4, 0.6);
+    // Hunger as sickness (always on since P10): a broke agent's meal is synth
+    // at a third of the shelf price, so a meal at 3 is a shelf at 9.
+    let stretch = i64::from(citysim::systems::diet::stretch(&w));
     w.comp_mut::<citysim::Market>(w.building_of_kind(BuildingKind::Market).expect("market"))
         .expect("market")
-        .price_food = 3;
+        .price_food = 3 * stretch;
     let ctx = PlanCtx::build(&w, id, None);
     let mut ws = WorldState::observe(&w, id, None);
     ws.at = LocationKey::Market;

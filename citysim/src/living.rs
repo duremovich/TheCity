@@ -107,11 +107,22 @@ pub struct CityBudget {
     /// Plan field: -1 below `lo`, 0 inside, 1 above `hi`.
     #[serde(default)]
     pub band_side: i8,
+    /// P10 (`policy::daily`): days in a row the Treasury could not pay the
+    /// safety net (a dole refused, or the Treasury below 0 at midnight).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub dry_days: u16,
+    /// P10: a dole visit was refused today for want of Treasury coins.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub short_today: bool,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
 }
 
 impl Default for CityBudget {
     fn default() -> Self {
-        CityBudget { upkeep_mult: 1.0, works_posted: 0, band_days: 0, band_side: 0 }
+        CityBudget { upkeep_mult: 1.0, works_posted: 0, band_days: 0, band_side: 0, dry_days: 0, short_today: false }
     }
 }
 

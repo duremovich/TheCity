@@ -8,7 +8,7 @@
 //! post (>= 2) is by merit (education, skill, tenure), from the jobless and
 //! from lower-graded posts; the skilled grade is a promotion in place. An
 //! adult's background (`Schooling`) is a pure hash of its origin class.
-//! Nothing here runs without [`on`] (`[economy2] wages` and `[classpay]
+//! Nothing here runs without [`on`] (the market wage law and `[classpay]
 //! enabled`): the dole city is byte-identical.
 
 use crate::components::{Building, BuildingKind, Corp, Household, Job, Role, Schooling, Skills};
@@ -27,9 +27,15 @@ pub const PROFESSIONAL: u8 = 2;
 /// The management grade.
 pub const MANAGEMENT: u8 = 3;
 
-/// `[economy2] wages` and `[classpay] enabled`.
+/// The market wage law (P10: the levy not enacted) and `[classpay] enabled`.
 pub fn on(world: &World) -> bool {
-    world.config.classpay_on()
+    crate::systems::wages::on(world) && world.config.classpay.enabled
+}
+
+/// Class pay: does this `[[trades]]` row post places in this city (a
+/// `classpay` row only with class pay on)?
+pub fn trade_live(world: &World, row: &crate::config::TradeCfg) -> bool {
+    !row.classpay || on(world)
 }
 
 /// Is `b` a standing-or-not building owned by a corp?

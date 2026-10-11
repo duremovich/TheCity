@@ -151,10 +151,11 @@ fn reserve_release(world: &mut World, wh: EntityId) {
     if cfg.reserve_release_price <= 0 {
         return;
     }
-    // Real economy E32 (phase 3a): no free release with `no_net` (the ask
-    // ceiling and Market imports, E11, are the famine bound; the
-    // `ReleaseReserve` god lever stays).
-    if crate::systems::econ::no_net(world) {
+    // Real economy E32 (phase 3a): no free release in the shipped city (the
+    // ask ceiling and Market imports, E11, are the famine bound; the
+    // `ReleaseReserve` god lever stays). P10: a policy lever
+    // (`SetReserveRelease`, the safety net).
+    if !world.levers.reserve_release {
         return;
     }
     let (mut threshold, batch, floor) =
@@ -932,7 +933,13 @@ pub fn collect_dole(world: &mut World, agent: EntityId) -> bool {
     let mut dole = i64::from(world.levers.dole_per_day);
     let treasury = world.treasury().map_or(0, |t| t.coins);
     let already = world.comp::<Brain>(agent).is_some_and(|b| b.last_dole_day == Some(day));
-    if already || treasury < 0 || dole <= 0 || !dole_eligible(world, agent) {
+    if already || dole <= 0 || !dole_eligible(world, agent) {
+        return false;
+    }
+    // P10: a dole the Treasury cannot pay marks the day short (the net
+    // lapses after `[policy] lapse_days` of them, `policy::daily`).
+    if treasury < 0 {
+        world.budget.short_today = true;
         return false;
     }
     // L1: the dole accrues: one visit pays the days since the last (up to

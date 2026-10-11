@@ -32,10 +32,15 @@ pub fn run(world: &mut World) {
     crate::systems::classpay::daily(world);
     // Class pay P3: the rich spend on status (Spire nights, fashion, chrome).
     crate::systems::classpay::status_daily(world);
-    // Real economy E21 (phase 3a): with `no_net` the Treasury's tax band
-    // replaces L2's budget band (no works, no upkeep cut).
-    if crate::systems::econ::no_net(world) {
+    // P10: the safety net lapses when the Treasury cannot pay it (before
+    // the band reads the lever).
+    crate::systems::policy::daily(world);
+    // Real economy E21 (phase 3a): under the market wage law the Treasury's
+    // tax band replaces L2's budget band (no upkeep levy to cut); public
+    // works, when enacted, open and close on the tax band's reading (P10).
+    if crate::systems::econ::wages_on(world) {
         crate::systems::treasury::daily(world);
+        crate::systems::budget::market_works(world);
     } else {
         crate::systems::budget::daily(world);
     }

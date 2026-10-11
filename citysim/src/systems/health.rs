@@ -17,7 +17,7 @@ const ROLL_SICK: u64 = 0x51c4_0001;
 const ROLL_CANCER: u64 = 0x51c4_0002;
 const ROLL_TREAT: u64 = 0x51c4_0003;
 
-/// The meters and debuffs run (`[sickness] enabled` and `diet`).
+/// The meters and debuffs run (`[sickness] diet`).
 pub fn on(world: &World) -> bool {
     crate::systems::diet::on(world)
 }

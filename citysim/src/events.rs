@@ -302,10 +302,14 @@ pub enum EventKind {
     /// `[suspect, witness]`: the report's witness is dead and no guard saw
     /// it: the case goes cold (H14).
     CaseCold,
+    // --- P10 (docs/P10_POLICY.md; amber).
+    /// `[]`: the Treasury could not pay the safety net for `[policy]
+    /// lapse_days` days in a row: the dole and public works lapsed.
+    PolicyLapsed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 148] = [
+    pub const ALL: [EventKind; 149] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -454,6 +458,7 @@ impl EventKind {
         EventKind::Stiffed,
         EventKind::Recanted,
         EventKind::CaseCold,
+        EventKind::PolicyLapsed,
     ];
 }
 

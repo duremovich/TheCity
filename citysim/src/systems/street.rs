@@ -712,12 +712,12 @@ pub fn evict_squatters(world: &mut World, b: EntityId, why: &str) -> Vec<EntityI
     out
 }
 
-/// Hunger as sickness P4b (`[street] shanties`): the bed rung grows with
+/// Hunger as sickness P4b (the street rung): the bed rung grows with
 /// demand. A standing Hotel (not a Mission's cots) booked full after the
 /// night's bookings adds a floor of beds when its owner holds `floor_cost`
 /// (`Flow::Found`, `FloorAdded`), up to `hotel_floors_max` floors.
 pub fn grow_hotels(world: &mut World) {
-    if !world.config.street.shanties {
+    if !enabled(world) {
         return;
     }
     let max = world.config.street.hotel_floors_max;
@@ -745,7 +745,7 @@ pub fn grow_hotels(world: &mut World) {
         }
         let per = capacity / floors;
         let new_capacity =
-            crate::systems::founding::with_floors(&world.config, BuildingKind::Hotel, per, floors + 1).max(capacity);
+            crate::systems::founding::with_floors(world, BuildingKind::Hotel, per, floors + 1).max(capacity);
         if let Some(bd) = world.comp_mut::<Building>(h) {
             bd.floors = floors + 1;
             bd.capacity = new_capacity;
@@ -771,7 +771,7 @@ pub fn is_shanty(world: &World, b: EntityId) -> bool {
     world.comp::<Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Lot && bd.derelict && !bd.demolished)
 }
 
-/// Hunger as sickness P4b (`[street] shanties`): while the rough sleepers
+/// Hunger as sickness P4b (the street rung): while the rough sleepers
 /// outnumber the free squat slots, up to `shanties_per_night` vacant Lots
 /// go up as shanties (at most `shanty_lots_max` standing), each in the
 /// district with the most rough sleepers: the vacant Lot nearest their mean
@@ -780,7 +780,7 @@ pub fn is_shanty(world: &World, b: EntityId) -> bool {
 /// any derelict. It stays a Lot: a builder clears it (`founding::convert`
 /// puts the squatters out).
 pub fn grow_shanties(world: &mut World) {
-    if !world.config.street.shanties {
+    if !enabled(world) {
         return;
     }
     let standing = world.buildings_of_kind(BuildingKind::Lot).iter().filter(|&&l| is_shanty(world, l)).count();

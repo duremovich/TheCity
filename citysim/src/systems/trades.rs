@@ -83,7 +83,7 @@ fn trade_only_kinds(world: &World) -> Vec<BuildingKind> {
         .config
         .trades
         .iter()
-        .filter(|r| world.config.trade_live(r))
+        .filter(|r| crate::systems::classpay::trade_live(world, r))
         .flat_map(|r| r.workplace.iter().copied())
         .filter(|&k| !matches!(k, BuildingKind::Market | BuildingKind::Bar | BuildingKind::Fab) && !k.is_leisure())
         .collect();
@@ -153,7 +153,7 @@ pub fn seed(world: &mut World) {
         .config
         .trades
         .iter()
-        .filter(|r| world.config.trade_live(r))
+        .filter(|r| crate::systems::classpay::trade_live(world, r))
         .flat_map(|r| r.workplace.iter().copied())
         .collect();
     kinds.sort();

@@ -395,10 +395,6 @@ old_age_days = 10800
 old_age_p_per_day = 0.01
 emigrate_mood = -0.8
 emigrate_days = 7
-# M11 phase 5: a child whose Home pantry is empty eats from the Reserve. Children ate only from the
-# pantry and the dole is per adult, so the poor's children starved (~70 deaths in 120 days on seeds 42,
-# 43, 44 at HEAD; 0 with school meals in the diagnosis).
-school_meals = true
 # Jobs and room P6 (docs/JOBS_V2.md § 4, plan J19-J21; placeholders): read only with [economy2] wages on.
 # Harris-Todaro: E = gross_mean x employed / free adults (7-day means); pull = clamp((E - outside_wage) /
 # outside_wage, 0, pull_cap); beds = clamp(empty Block beds / beds_ref, 0.25, 1); a week brings
@@ -752,7 +748,7 @@ immigration_per_week = 13
 # agent was a skipped meal and a theft by arithmetic (thefts 6.7 per 100 agent-days on seed 42); one
 # coin of slack halves them (3.2) and leaves need and lawfulness to decide who steals. v1_profile keeps
 # 3 (the v1 gates' thefts 2.62 -> 1.22 at 4).
-dole_per_day = 4
+dole_per_day = 4                      # P10: the dole's rate while enacted ([policy] dole, the safety_net lever)
 # M12 D23: city Sanitation workers, hired from the jobless (the poorest first) by the daily reconcile.
 sanitation_count = 12
 # M13 D40: Markets sell Stims legally (the lever; `--lever day=D:stims_legal=on|off`).
@@ -813,8 +809,8 @@ relet_days = 60
 # Hunger as sickness P4b (Dylan on J25: the evicted land on the survival ladder's lower rungs, not the
 # street). Traced on the flipped seed 42 (days 30-66): 519-641 rough sleepers, 76-184 squatters in 15-33
 # derelicts, 24 Hotel beds; 412-509 of the homeless held 0 coins (a bed costs 3), so the free rung is the
-# one missing. While the rough sleepers outnumber the free squat slots, vacant Lots go up as shanties.
-shanties = true                    # the flip (2026-10-10): on
+# one missing. While the rough sleepers outnumber the free squat slots, vacant Lots go up as shanties
+# (always on with the street since P10; the `shanties` switch retired).
 shanty_capacity = 24               # slots a shanty holds
 shanties_per_night = 3             # Lots that can go up a night
 shanty_lots_max = 20               # Lots standing as shanties at once (of ~160; the rest stay for building)
@@ -1887,11 +1883,22 @@ reach_premium = 0.5                  # an agent's direct record with too few ask
 lawful_wait = 0.6                    # a revenge buyer above this lawfulness waits while the target is wanted or held
 queue_hours = 24                     # a taken organic Hit/Beat queued this long for a live slot goes to the ledger
 
+# P10 (docs/P10_POLICY.md): the city's policy at world creation (the `[economy2] wages` / `no_safety_net`
+# switches retired into it). Each item is a saved lever after day 0: `--lever day=D:<key>=on|off` (`levy`,
+# `school_meals`, `reserve_release`, `public_works`, `safety_net` for the whole net; the dole is
+# `dole_per_day=<n>`), PlayerCommand::SetLevy / SetSchoolMeals / SetReserveRelease / SetPublicWorks /
+# SetSafetyNet / SetDolePerDay. The shipped city is the no-net market city; Config::dole_city is the old one.
+[policy]
+levy = false                         # the M11 wage schedule + corp upkeep levy + L2's band (off: wages from revenue, the tax band)
+dole = false                         # the dole at [levers] dole_per_day a day, from the Treasury
+public_works = false                 # Sanitation posts opened above the band's top, paid by the Treasury
+school_meals = false                 # a child whose pantry is empty eats from the Reserve (Dylan 2026-10-08: none)
+reserve_release = false              # the Reserve's free food to a stranded Market (Real economy E32: none)
+lapse_days = 7                       # the dole and public works lapse after this many dry days in a row (0: never)
+
 # The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
-# `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).
+# the wage law and the safety net are policy ([policy] above). Every number a placeholder (the late calibration milestone).
 [economy2]
-wages = true                         # the flip (Dylan, 2026-10-10): wages from revenue; Config::dole_city switches the dole city back
-no_safety_net = true                 # the flip (Dylan, 2026-10-10): no dole; Config::dole_city switches it back
 emigrate_cost = 20                   # E35 (the jobs round, read only with wages on): fewer coins cannot start emigrating (spec § 10's 20)
 # Spec § 5 (phase 2, plan E13-E20): wages from revenue. Each corp's payroll tracks labour_share x its
 # 7-day revenue through wage_rev (E17), clamped [wage_floor_mult, wage_cap_mult] and moving wage_step a
@@ -2239,10 +2246,9 @@ classpay = true
 corp_only = true
 
 # ---------------------------------------------------------------------------
-# Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values; every
-# key read only with `enabled`. Dylan 2026-10-10: on with the flip (wages + no_safety_net), off until then.
+# Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values. On with
+# the flip (Dylan 2026-10-10); always on since P10 (its `enabled` switch retired).
 [sickness]
-enabled = true             # master (on with the flip, 2026-10-10); Config::dole_city switches it off
 diet = true                # § 1-2: synth/real, the meters, the debuffs
 bins = true                # § 4
 cancer = true              # § 3

@@ -43,7 +43,7 @@ pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
         let Some(row) = world.config.trade(t).filter(|r| r.workplace.contains(&kind)) else { return 0 };
         // Class pay: a `classpay` row only with class pay on; a
         // `corp_only` row only at a corp's workplace.
-        if !world.config.trade_live(row) || (row.corp_only && world.corp_of_building(b).is_none()) {
+        if !crate::systems::classpay::trade_live(world, row) || (row.corp_only && world.corp_of_building(b).is_none()) {
             return 0;
         }
         if row.per_owned > 0 {
@@ -398,7 +398,7 @@ pub fn add_scrap(world: &mut World) {
 
 /// An hour's scavenge (`exec::actions` Scavenge's find, shared with the
 /// Statistical tier's no-net hour): one draw on the agent's stream against
-/// `scavenge_p`; a find is paid from the Recycler's till with `no_net` (an
+/// `scavenge_p`; a find is paid from the Recycler's till under the market wage law (an
 /// empty till pays 0, the find is still scrap), else from the Treasury, at
 /// `[treasury] scrap_coins` (with the till, when set) or `[life]
 /// scavenge_coins`. Returns whether the hour paid.
@@ -410,7 +410,7 @@ pub fn scavenge_find(world: &mut World, id: EntityId) -> bool {
     // same draw on the same stream).
     let p = scavenge_p(world, id);
     let found = world.rng.agent(id).random::<f32>() < p;
-    // Real economy E33 (phase 3a): with `no_net` the find is paid from the
+    // Real economy E33 (phase 3a): under the market wage law the find is paid from the
     // Recycler's till alone (an empty till pays 0; the find is still scrap).
     let till = crate::systems::treasury::till_on(world);
     let purse = if till { world.econ.recycler_till } else { world.treasury().map_or(0, |t| t.coins) };

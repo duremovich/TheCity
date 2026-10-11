@@ -10,10 +10,9 @@ use citysim::{
     Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
+/// The dole city (`Config::dole_city`); hunger as sickness is always on (P10).
 fn sick_cfg() -> Config {
-    let mut c = Config::load().dole_city();
-    c.sickness.enabled = true;
-    c
+    Config::load().dole_city()
 }
 
 fn world_on() -> World {
@@ -41,19 +40,6 @@ fn set_price(w: &mut World, m: EntityId, p: i64) {
 
 fn health(w: &World, id: EntityId) -> Health {
     w.comp::<Health>(id).cloned().unwrap_or_default()
-}
-
-/// With `[sickness]` off (the dole city, `Config::dole_city`) nothing of it is kept: no
-/// `Health`, no synth subset, no health columns (the CSV identity against
-/// d771073 is the commit's A/B).
-#[test]
-fn test_sickness_off_leaves_no_trace() {
-    let mut w = World::new(42, Config::load().dole_city());
-    assert!(!w.config.sickness.enabled, "Config::dole_city has [sickness] off");
-    w.run_ticks(5 * TICKS_PER_DAY);
-    assert!(w.citizens().iter().all(|&a| !w.has::<Health>(a)), "a Health with sickness off");
-    assert!(w.citizens().iter().all(|&a| w.comp::<Inventory>(a).is_none_or(|i| i.synth == 0)));
-    assert!(w.stats.history.iter().all(|r| r.health.is_zero()));
 }
 
 /// § 1: at price 4 a synth meal is 1 coin; three synth meals take one shelf
@@ -98,8 +84,11 @@ fn test_real_bought_above_the_floor() {
     assert_eq!(diet::quality(&w, a, 4), Quality::Synth);
     w.insert(a, Health { malnutrition: 0.6, ..Health::default() });
     assert_eq!(diet::quality(&w, a, 4), Quality::Real, "malnourished with two meals' coins");
-    // The diet off: always real, at the Market's price.
-    let mut off = World::new(42, Config::load().dole_city());
+    // The diet part off (`[sickness] diet`; the master switch retired with
+    // P10): always real, at the Market's price.
+    let mut no_diet = Config::load().dole_city();
+    no_diet.sickness.diet = false;
+    let mut off = World::new(42, no_diet);
     let b = adults(&off)[0];
     off.comp_mut::<Wallet>(b).expect("wallet").coins = 1;
     assert_eq!(diet::quality(&off, b, 4), Quality::Real);
@@ -824,9 +813,7 @@ fn test_bins_fill_from_sales_meals_and_carried_spoilage() {
 // ---------------------------------------------------------------------------
 
 fn rungs_cfg() -> Config {
-    let mut c = sick_cfg();
-    c.street.shanties = true;
-    c
+    sick_cfg()
 }
 
 /// Put `n` adults out on the street (no home), Statistical.
@@ -866,9 +853,18 @@ fn test_shanties_rise_with_rough_sleepers_and_are_capped() {
         .filter(|&&a| w.comp::<citysim::Squatter>(a).is_some_and(|s| street::is_shanty(&w, s.building)))
         .count();
     assert!(in_shanty > 0, "the off-screen homeless settle in the shanties");
-    // Off, nothing rises.
+    // P10 (the switch retired): where the rough sleepers fit the free squat
+    // slots, nothing rises.
     let mut v = World::new(42, sick_cfg());
-    evict_n(&mut v, 200);
+    let free: usize = street::derelicts(&v).into_iter().map(|b| street::squat_slots(&v, b)).sum();
+    let rough = street::rough_sleepers(&v);
+    if rough.len() > free {
+        // Off the map: the city's rough sleepers are gone.
+        for a in rough {
+            v.kill(a, citysim::DeathCause::Violence);
+        }
+    }
+    assert!(street::rough_sleepers(&v).len() <= free, "the control's rough sleepers fit the squats");
     street::grow_shanties(&mut v);
     assert!(!v.buildings_of_kind(BuildingKind::Lot).iter().any(|&l| street::is_shanty(&v, l)));
 }
@@ -980,8 +976,7 @@ fn test_bin_rot_rounds_up() {
 fn test_city_hotel_floor_is_paid() {
     use citysim::systems::street;
     let mut cfg = rungs_cfg();
-    cfg.economy2.wages = true;
-    cfg.economy2.no_safety_net = true;
+    cfg.policy = citysim::config::PolicyCfg::default();
     for rich in [false, true] {
         let mut w = World::new(42, cfg.clone());
         let Some(h) = w.buildings_of_kind(BuildingKind::Hotel).iter().copied().find(|&h| {

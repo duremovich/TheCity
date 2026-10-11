@@ -1075,11 +1075,11 @@ fn stat_flirt(world: &mut World, id: EntityId) {
 /// `stat_theft_caught_p` report with no witness (the thief then gets a body,
 /// which the arrest path needs). Shared by the eat path and the `p_steal`
 /// roll. Returns whether anything was taken. Flip readiness: with
-/// `econ::no_net` the haul is a Full Market theft's (`exec::actions`
+/// the market wage law (P10: was `no_net`) the haul is a Full Market theft's (`exec::actions`
 /// StealFood: two units where the shelf holds them): off screen it is the
 /// only meal a broke thief gets, and one unit sent it back a few hours later.
 fn stat_theft(world: &mut World, id: EntityId) -> bool {
-    let per = if crate::systems::econ::no_net(world) { 2 } else { 1 };
+    let per = if crate::systems::econ::wages_on(world) { 2 } else { 1 };
     // Jobs and room P2 fix: an empty local Market sends the thief to a stocked one.
     let Some(market) = world.food_market(id) else { return false };
     let Some(b) = world.comp_mut::<Building>(market).filter(|b| b.stock_food > 0) else { return false };
@@ -1223,7 +1223,7 @@ fn stat_eat(world: &mut World, id: EntityId) {
     // table without `p_desperate`: the M10 rule (starving, whatever the
     // lawfulness). Adults only; a child keeps the M10 rule.
     let dole_pays = world.levers.dole_per_day > 0 && world.treasury().map_or(0, |t| t.coins) >= 0;
-    let learned_city = crate::systems::econ::no_net(world) || dole_pays;
+    let learned_city = crate::systems::econ::wages_on(world) || dole_pays;
     let need = if learned_city && crate::systems::demography::is_adult(world, id) {
         let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
         world.stat_table.as_ref().and_then(|t| t.p_desperate.map(|d| (d[t.lawfulness_bucket(law)], t.hunger_edge)))
@@ -1496,7 +1496,7 @@ fn stat_row_index(world: &World, id: EntityId) -> Option<usize> {
 }
 
 /// Flip readiness (no safety net): the Full tier's broke jobless hour off
-/// screen. With `no_net` and a table holding `p_scavenge`/`p_beg`, a jobless
+/// screen. Under the market wage law (P10) and a table holding `p_scavenge`/`p_beg`, a jobless
 /// adult below its savings line (`SAVINGS_DAYS` meals, the Full Earn goal's
 /// gate) scavenges on its row's `p_scavenge` of hours (the same find, paid
 /// from the Recycler's till: `jobs::scavenge_find`) and begs on its row's

@@ -4,6 +4,9 @@
 //! the city posts public-works Sanitation jobs at the Recycler, and once
 //! they stand full lowers corp upkeep; below `lo` it raises upkeep back and
 //! lays off the newest public-works hire. The dole is never touched.
+//! P10: the band runs under the levy (`daily`); under the market wage law
+//! the tax band reads the Treasury and `market_works` runs public works on
+//! its reading.
 
 use crate::components::{BuildingKind, Job, Role};
 use crate::entity::EntityId;
@@ -51,10 +54,9 @@ fn withdraw_vacancies(world: &mut World, recycler: EntityId) {
     world.works_vacancies = 0;
 }
 
-/// The midnight pass (spec § 1, plan L10).
-pub fn daily(world: &mut World) {
-    let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
-    // The works roster: hires still at the Recycler as Sanitation.
+/// The works roster: hires still at the Recycler as Sanitation; a vacancy
+/// someone else filled (a non-works path) is no longer open.
+fn refresh_roster(world: &mut World, recycler: EntityId) {
     let works: Vec<EntityId> = world
         .jobs_book
         .works
@@ -63,9 +65,44 @@ pub fn daily(world: &mut World) {
         .filter(|&a| world.comp::<Job>(a).is_some_and(|j| j.role == Role::Sanitation && j.employer == Some(recycler)))
         .collect();
     world.jobs_book.works = works;
-    // A vacancy someone else filled (a non-works path) is no longer open.
     let open = world.vacancies.get(&recycler).map_or(0, |v| v.iter().filter(|&&r| r == Role::Sanitation).count());
     world.works_vacancies = world.works_vacancies.min(u16::try_from(open).unwrap_or(u16::MAX));
+}
+
+/// Post `works_step` public-works vacancies (up to `works_max` standing)
+/// while the lever is on.
+fn post_works(world: &mut World, recycler: EntityId, posted: u16, t: i64) {
+    let (works_max, works_step) = (world.config.budget.works_max, world.config.budget.works_step);
+    if world.levers.public_works && posted < works_max {
+        let n = works_step.min(works_max - posted);
+        world.vacancies.entry(recycler).or_default().extend(std::iter::repeat_n(Role::Sanitation, n as usize));
+        world.works_vacancies += n;
+        world.push_event(
+            EventKind::WorksPosted,
+            &[recycler],
+            format!("the city posted {n} public-works jobs (Treasury {t}, {} standing)", posted + n),
+        );
+    }
+}
+
+/// Fix round (c): the open works vacancies withdrawn plus `works_step`
+/// hires laid off, newest first (was one a day).
+fn lay_off_works(world: &mut World, recycler: EntityId, t: i64) {
+    if world.works_vacancies > 0 {
+        withdraw_vacancies(world, recycler);
+    }
+    for _ in 0..world.config.budget.works_step {
+        let Some(newest) = world.jobs_book.works.pop() else { break };
+        let text = format!("{} laid off from public works (Treasury {t})", world.name_of(newest));
+        crate::systems::economy::dismiss(world, newest, Some(recycler), text);
+        world.sweep_beats.remove(&newest);
+    }
+}
+
+/// The midnight pass (spec § 1, plan L10), under the levy (P10).
+pub fn daily(world: &mut World) {
+    let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
+    refresh_roster(world, recycler);
 
     let cfg = world.config.budget.clone();
     let t = world.treasury().map_or(0, |x| x.coins);
@@ -100,16 +137,7 @@ pub fn daily(world: &mut World) {
     }
     let posted = world.jobs_book.works.len() as u16 + world.works_vacancies;
     if side == 1 && held {
-        if world.levers.public_works && posted < cfg.works_max {
-            let n = cfg.works_step.min(cfg.works_max - posted);
-            world.vacancies.entry(recycler).or_default().extend(std::iter::repeat_n(Role::Sanitation, n as usize));
-            world.works_vacancies += n;
-            world.push_event(
-                EventKind::WorksPosted,
-                &[recycler],
-                format!("the city posted {n} public-works jobs (Treasury {t}, {} standing)", posted + n),
-            );
-        }
+        post_works(world, recycler, posted, t);
         // The works stand full (deviation: within one `works_step` of
         // `works_max`, as hires quit and are replaced daily) or the lever is
         // off: corp upkeep falls.
@@ -119,20 +147,40 @@ pub fn daily(world: &mut World) {
         }
     } else if side == -1 && held {
         // Fix round (c): the restore is asymmetric: twice the cut's step,
-        // and the open works vacancies withdrawn plus `works_step` hires
-        // laid off, newest first (was one a day).
+        // and the works laid off.
         world.budget.upkeep_mult = (world.budget.upkeep_mult + 2.0 * cfg.upkeep_step).min(1.0);
-        if world.works_vacancies > 0 {
-            withdraw_vacancies(world, recycler);
-        }
-        for _ in 0..cfg.works_step {
-            let Some(newest) = world.jobs_book.works.pop() else { break };
-            let text = format!("{} laid off from public works (Treasury {t})", world.name_of(newest));
-            crate::systems::economy::dismiss(world, newest, Some(recycler), text);
-            world.sweep_beats.remove(&newest);
-        }
+        lay_off_works(world, recycler, t);
     }
     world.budget.works_posted = world.jobs_book.works.len() as u16 + world.works_vacancies;
     // Tidy the f32 so the CSV and saves read 0.95, not 0.9499999.
     world.budget.upkeep_mult = (world.budget.upkeep_mult * 100.0).round() / 100.0;
+}
+
+/// P10 (docs/P10_POLICY.md): public works under the market wage law. The
+/// Treasury's tax band (`treasury::daily`, just before) has read the side
+/// and the days on it; on the hold's multiples above its top the city
+/// posts `works_step` posts while the lever is on, below its bottom it
+/// withdraws the open ones and lays off `works_step` hires, newest first
+/// (L2's rule without the levy cut: there is no levy to cut). A city that
+/// never enacted public works has no roster and returns at once.
+pub fn market_works(world: &mut World) {
+    if !world.levers.public_works && world.jobs_book.works.is_empty() && world.works_vacancies == 0 {
+        return;
+    }
+    let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
+    refresh_roster(world, recycler);
+    let t = world.treasury().map_or(0, |x| x.coins);
+    let hold = world.config.budget.band_hold_days.max(1);
+    let (side, days) = (world.budget.band_side, world.budget.band_days);
+    let held = days >= hold && days.is_multiple_of(hold);
+    if !world.levers.public_works && world.works_vacancies > 0 {
+        withdraw_vacancies(world, recycler);
+    }
+    let posted = world.jobs_book.works.len() as u16 + world.works_vacancies;
+    if side == 1 && held {
+        post_works(world, recycler, posted, t);
+    } else if side == -1 && held {
+        lay_off_works(world, recycler, t);
+    }
+    world.budget.works_posted = world.jobs_book.works.len() as u16 + world.works_vacancies;
 }

@@ -320,8 +320,8 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
     let world_treasury = world.outside.faction(crate::outside::WORLD_ACCOUNT).map_or(0, |f| f.treasury);
     let identity = crate::systems::econ::identity(world);
     let outbound = world.outside.outbound;
-    let (no_net, tax_rate, till) =
-        (crate::systems::econ::no_net(world), world.levers.tax_rate, world.econ.recycler_till);
+    let (market, tax_rate, till) =
+        (crate::systems::econ::wages_on(world), world.levers.tax_rate, world.econ.recycler_till);
     // Phase 2 (plan E45): the wage columns, wages on only.
     let wages = crate::systems::wages::on(world);
     let (wage_mult_mean, wage_gross_mean, vacancies_open) = if wages {
@@ -391,7 +391,7 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
         e.pop_inflow_wages = row.flow_wages;
     }
     // Phase 3a (plan E21, E33, E45): the band's rate and the till.
-    if no_net {
+    if market {
         e.tax_rate = tax_rate;
         e.recycler_till = till;
     }
