@@ -1545,6 +1545,8 @@ hf_work_night = true                # 12
 work_night_sleep_flat = 0.5         # 12: Sleep's flat at bedtime (x the ramp's pressure)
 work_night_ramp_ticks = 120         # 12: the pressure rises over the 2 h before bedtime
 work_night_unwind_mult = 0.3        # 12: Unwind and the grocery run past bedtime
+# Coordinator call (after the recalibration): employed workers slept rough beside empty beds (the deposit wall).
+hf_rehouse_employed = true          # 13: with no_safety_net, a worker re-houses on the first rent (the jobless keep the deposit)
 housing_demand_min = 6              # 10: one Home's beds
 housing_demand_days = 3
 housing_builds_per_1000 = 1.0       # 10: Homes or floors a day per 1,000 residents (2 at 2,000)

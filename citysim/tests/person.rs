@@ -1325,3 +1325,47 @@ fn probe_sweeper_stays_near_its_beat() {
     );
     assert!(on <= off, "housing near work moved the sweepers away from their beats");
 }
+
+/// Item 13 (coordinator call): in the no-net city an evicted Farmer who
+/// keeps the job, holding ~8 coins (the flipped city's homeless workers'
+/// median), is back in a bed within the wait plus a few days; the deposit
+/// wall (21 x rent) kept such workers on the street beside empty beds.
+#[test]
+fn probe_evicted_worker_rehouses_on_the_first_rent() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let a = civilians(&w)
+        .into_iter()
+        .find(|&a| {
+            w.spouse_of(a).is_none()
+                && home(&w, a).is_some()
+                && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer)
+                && demography::children_of_agent(&w, a).is_empty()
+        })
+        .expect("a single Farmer with a Home");
+    citysim::systems::ownership::evict(&mut w, a, "arrears");
+    if let Some(h) = w.comp_mut::<Household>(a) {
+        h.arrears = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 8;
+    let wait = w.config.rent.rehouse_wait_days;
+    let end = w.tick + (wait + 3) * TICKS_PER_DAY;
+    let mut housed_on = None;
+    run_to(&mut w, a, end, |w| {
+        if housed_on.is_none() && home(w, a).is_some() {
+            housed_on = Some(w.day());
+        }
+    });
+    eprintln!(
+        "farmer {}: housed on day {housed_on:?} (evicted day 1, wait {wait} days); job {:?}; coins {}",
+        a.index,
+        w.comp::<Job>(a).map(|j| j.role),
+        coins(&w, a)
+    );
+    assert!(w.has::<Job>(a), "the probe needs the Farmer employed");
+    // Wages lift the purse a little (17 by the end with item 13 off): still under the 21-coin deposit.
+    assert!(housed_on.is_some(), "an employed Farmer with the first rent stayed on the street");
+}

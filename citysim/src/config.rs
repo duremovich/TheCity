@@ -4394,6 +4394,13 @@ pub struct LifeCfg {
     /// Unwind and the grocery run score x `work_night_unwind_mult` (a
     /// weight, not a ban: some stay out).
     pub hf_work_night: bool,
+    /// Coordinator call (after the recalibration, 2026-10-10): with
+    /// `no_safety_net` on, a homeless adult who holds a Job re-houses on the
+    /// first rent (no `rehouse_coins_mult` deposit), as relocation does; the
+    /// jobless keep the deposit. The flipped city had 82-92 employed adults
+    /// on the street (~8 %), 930-1,420 beds empty, the deposit 21 coins on a
+    /// ~6 a day wage.
+    pub hf_rehouse_employed: bool,
     pub work_night_sleep_flat: f32,
     pub work_night_ramp_ticks: u64,
     pub work_night_unwind_mult: f32,
@@ -4492,6 +4499,7 @@ impl Default for LifeCfg {
             hf_shift_meals: true,
             grocery_score: 0.5,
             hf_work_night: true,
+            hf_rehouse_employed: true,
             work_night_sleep_flat: 0.5,
             work_night_ramp_ticks: 120,
             work_night_unwind_mult: 0.3,

@@ -88,6 +88,11 @@ pub fn hire_near(world: &World) -> bool {
     hfix_item(world, 9) && world.config.life.hf_hire_near
 }
 
+/// Item 13: a worker re-houses on the first rent (no-net city only).
+pub fn rehouse_employed(world: &World) -> bool {
+    hfix_item(world, 13) && world.config.life.hf_rehouse_employed && crate::systems::econ::no_net(world)
+}
+
 /// P5j (item 12): work-night sleep.
 pub fn work_night(world: &World) -> bool {
     hfix_item(world, 12) && world.config.life.hf_work_night

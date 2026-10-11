@@ -1663,6 +1663,12 @@ fn rehouse(world: &mut World) {
             .collect();
         let need = 1 + usize::from(spouse.is_some()) + kids.len();
         let coins = world.comp::<Wallet>(a).map_or(0, |w| w.coins);
+        // Hunger fix item 13: a worker pays the first rent, not the deposit.
+        let mult = if crate::systems::fixes::rehouse_employed(world) && world.has::<crate::components::Job>(a) {
+            1
+        } else {
+            mult
+        };
         let refused_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).filter(|&(_, t)| tick < t + refuse);
         let from = world.comp::<Position>(a).map_or_else(Default::default, |p| p.tile);
         let pick = homes
