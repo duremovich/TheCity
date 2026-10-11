@@ -615,6 +615,16 @@ pub fn derelicts(world: &World) -> Vec<EntityId> {
     out
 }
 
+/// `derelicts` less the shanties (derelict Lots): the derelict buildings a
+/// claim or a refit means (review fix: a gang's Squat order claimed shanty
+/// Lots, which stayed in its territory once built over).
+pub fn derelict_buildings(world: &World) -> Vec<EntityId> {
+    derelicts(world)
+        .into_iter()
+        .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.kind != BuildingKind::Lot))
+        .collect()
+}
+
 /// D27: the agent's squat, else the nearest derelict with a free slot
 /// within `squat_reach` of it that it is not banned from (ties lower id).
 pub fn squat_target(world: &World, agent: EntityId) -> Option<EntityId> {
@@ -728,6 +738,11 @@ pub fn grow_hotels(world: &mut World) {
         if owner.is_some() && world.purse(owner) < cost {
             continue;
         }
+        // Review fix (P5h's rule, no unpaid builds): a city Hotel's floor is
+        // the Treasury's import when it keeps `[treasury] band[0]`, else none.
+        if owner.is_none() && crate::systems::life::housing_payer(world, None, cost).is_none() {
+            continue;
+        }
         let per = capacity / floors;
         let new_capacity = crate::systems::founding::with_floors(BuildingKind::Hotel, per, floors + 1).max(capacity);
         if let Some(bd) = world.comp_mut::<Building>(h) {
@@ -737,7 +752,7 @@ pub fn grow_hotels(world: &mut World) {
         let paid = if owner.is_some() && cost > 0 {
             crate::systems::ownership::pay(world, owner, None, cost, crate::systems::ownership::Flow::Found)
         } else {
-            0
+            crate::systems::life::pay_housing(world, None, cost)
         };
         let (who, what) = (world.owner_label(owner), world.name_of(h));
         let mut actors: Vec<EntityId> = owner.into_iter().collect();

@@ -506,7 +506,7 @@ pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
 /// the cost and keeps `[treasury] band[0]` after it (with the Treasury band
 /// on; else just the cost), the civic budget's floor; else nobody (`None`:
 /// nothing is built today).
-fn housing_payer(world: &World, corp: Option<EntityId>, cost: i64) -> Option<Option<EntityId>> {
+pub(crate) fn housing_payer(world: &World, corp: Option<EntityId>, cost: i64) -> Option<Option<EntityId>> {
     if let Some(c) = corp.filter(|&c| world.purse(Some(c)) >= cost) {
         return Some(Some(c));
     }
@@ -518,7 +518,7 @@ fn housing_payer(world: &World, corp: Option<EntityId>, cost: i64) -> Option<Opt
 /// `Flow::Found` (Grow's and AddFloor's path); the Treasury buys the build
 /// from the World (`ownership::import`, `ImportWhy::Build`), so the coins
 /// leave the city as any import's. Returns the coins paid.
-fn pay_housing(world: &mut World, by: Option<EntityId>, cost: i64) -> i64 {
+pub(crate) fn pay_housing(world: &mut World, by: Option<EntityId>, cost: i64) -> i64 {
     if cost <= 0 {
         return 0;
     }
@@ -674,7 +674,8 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
         let pick = match pick {
             Some(p) => Some(p),
             None if fix && spouse.is_none() && kids.is_empty() => {
-                if let Some((dd, to, r)) = swap_partner(world, a, home, work, cap, d, margin, min_tier) {
+                let mover = Mover { purse, evicted_by, min_tier };
+                if let Some((_, to, r)) = swap_partner(world, a, home, work, cap, d, margin, mover) {
                     let (an, rn) = (world.name_of(a), world.name_of(r));
                     let (to_name, from_name) = (world.name_of(to), world.name_of(home));
                     world.set_home(a, Some(to));
@@ -694,7 +695,6 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
                         &[r, home],
                         format!("{rn} traded Homes with {an}, into {from_name}"),
                     );
-                    let _ = dd;
                     moved += 1;
                 }
                 continue;
@@ -726,11 +726,22 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
     }
 }
 
+/// The mover's side of a trade (`swap_partner`), as the plain pick reads
+/// it: its purse (the first rent of the Home it takes), the landlord that
+/// evicted it (never traded back into), and its tier floor (class pay).
+struct Mover {
+    purse: i64,
+    evicted_by: Option<Option<EntityId>>,
+    min_tier: u8,
+}
+
 /// Hunger fix item 8 (P5g): the swap for mover `a` (Home `home`, work door
-/// `work`, commute `d`): the nearest Home within `cap` of work holding a
-/// single adult resident (no spouse or child there) who is not itself a
-/// worker nearer that Home than `home`, can pay `home`'s first rent, and is
-/// no Corp-class exec. `(distance, that Home, the resident)`.
+/// `work`, commute `d`): the nearest Home within `cap` of work, the mover
+/// can pay the first rent of, not its evictor's and at its tier floor,
+/// holding a single adult resident (no spouse or child there) who is not
+/// itself a worker nearer that Home than `home`, can pay `home`'s first
+/// rent, keeps its own tier floor in `home` and was not evicted by `home`'s
+/// landlord. `(distance, that Home, the resident)`.
 #[allow(clippy::too_many_arguments)]
 fn swap_partner(
     world: &World,
@@ -740,9 +751,12 @@ fn swap_partner(
     cap: u64,
     d: u64,
     margin: u64,
-    min_tier: u8,
+    mover: Mover,
 ) -> Option<(u64, EntityId, EntityId)> {
+    let min_tier = mover.min_tier;
     let home_door = world.comp::<Building>(home)?.door;
+    let home_tier = world.comp::<Building>(home)?.tier;
+    let home_owner = world.owner_of(home);
     let home_rent = crate::systems::ownership::rent_for(world, home);
     let mut best: Option<(u64, EntityId, EntityId)> = None;
     for &h in world.buildings_of_kind(BuildingKind::Home) {
@@ -751,6 +765,12 @@ fn swap_partner(
         };
         let dd = commute_cost(world, b.door, work);
         if h == home || dd > cap || dd + margin > d || best.is_some_and(|(bd, _, _)| dd >= bd) {
+            continue;
+        }
+        // The mover's checks, as the plain pick's.
+        if mover.purse < crate::systems::ownership::rent_for(world, h)
+            || mover.evicted_by.is_some_and(|o| o == world.owner_of(h))
+        {
             continue;
         }
         let residents = world.residents_of(h);
@@ -772,6 +792,12 @@ fn swap_partner(
                 Some(wt) => commute_cost(world, home_door, wt) <= commute_cost(world, b.door, wt),
             };
             if !ok || coins(world, r) < home_rent {
+                continue;
+            }
+            // The partner's tier floor and evictor, as its own pick's.
+            if crate::systems::classpay::min_home_tier(world, r, h) > home_tier
+                || world.comp::<Household>(r).and_then(|x| x.evicted_by).is_some_and(|(o, _)| o == home_owner)
+            {
                 continue;
             }
             best = Some((dd, h, r));

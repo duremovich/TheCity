@@ -125,7 +125,8 @@ pub fn rot(world: &mut World) {
                 world.bins.remove(&b);
                 continue;
             };
-            bd.bin -= (f32::from(bd.bin) * rate).floor() as u16;
+            // Review fix: rounded up (a one-meal bin floored to 0 never emptied).
+            bd.bin -= ((f32::from(bd.bin) * rate).ceil() as u16).min(bd.bin);
             bd.bin == 0
         };
         if empty {

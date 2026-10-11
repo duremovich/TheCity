@@ -922,3 +922,149 @@ fn test_full_hotel_adds_a_floor_of_beds() {
     assert_eq!(b.floors, 2);
     assert!(usize::from(b.capacity) > beds, "a floor of beds");
 }
+
+/// Review finding 2: a lone child eats half a pantry unit a day, so every
+/// other day eats no unit; that day carries the last unit's quality. On an
+/// all-synth pantry the child's malnutrition builds (it read as a real meal
+/// every other day, so it never did).
+#[test]
+fn test_lone_child_on_a_synth_pantry_builds_malnutrition() {
+    let mut w = world_on();
+    // The seed has no children: one born to two adults of a Home (alone there).
+    let home = w
+        .buildings_of_kind(BuildingKind::Home)
+        .iter()
+        .copied()
+        .find(|&h| w.residents_of(h).iter().filter(|&&a| demography::is_adult(&w, a)).count() >= 2)
+        .expect("a Home with two adults");
+    let adults: Vec<EntityId> = w.residents_of(home).iter().copied().filter(|&a| demography::is_adult(&w, a)).collect();
+    let child = demography::spawn_child(&mut w, adults[0], adults[1], home);
+    if !w.has::<Health>(child) {
+        w.insert(child, Health::default());
+    }
+    if let Some(h) = w.comp_mut::<Health>(child) {
+        h.malnutrition = 0.0;
+    }
+    for _ in 0..12 {
+        if let Some(b) = w.comp_mut::<Building>(home) {
+            b.stock_food = 30;
+            b.synth_food = 30;
+        }
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    let m = health(&w, child).malnutrition;
+    eprintln!("lone child on an all-synth pantry, 12 days: malnutrition {m:.3}");
+    assert!(m > 0.05, "a lone child on synth alone stayed nourished ({m:.3})");
+}
+
+/// Review finding 3: the rot rounds up, so a one-meal bin empties (floor of
+/// 0.5 left it standing for ever) and an odd bin loses the larger half.
+#[test]
+fn test_bin_rot_rounds_up() {
+    let mut w = world_on();
+    let m = market(&w);
+    citysim::systems::bins::add(&mut w, m, 1);
+    assert_eq!(bin_of(&w, m), 1);
+    citysim::systems::bins::rot(&mut w);
+    assert_eq!(bin_of(&w, m), 0, "a one-meal bin rots away");
+    assert!(!w.bins.contains(&m), "an empty bin leaves the set");
+    citysim::systems::bins::add(&mut w, m, 3);
+    citysim::systems::bins::rot(&mut w);
+    assert_eq!(bin_of(&w, m), 1, "3 rots by ceil(1.5) = 2");
+}
+
+/// Review finding 5 (P5h's rule, no unpaid builds): a city-owned Hotel
+/// booked full adds a floor only when the Treasury buys it (an import,
+/// keeping `[treasury] band[0]`); at the band's floor it adds none.
+#[test]
+fn test_city_hotel_floor_is_paid() {
+    use citysim::systems::street;
+    let mut cfg = rungs_cfg();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    for rich in [false, true] {
+        let mut w = World::new(42, cfg.clone());
+        let Some(h) = w.buildings_of_kind(BuildingKind::Hotel).iter().copied().find(|&h| {
+            !citysim::systems::charity::is_cot_house(&w, h) && w.comp::<Building>(h).is_some_and(|b| !b.derelict)
+        }) else {
+            eprintln!("no Hotel on seed 42: nothing to check");
+            return;
+        };
+        citysim::systems::ownership::transfer_building(&mut w, h, None);
+        let beds = usize::from(w.comp::<Building>(h).expect("hotel").capacity);
+        let guests = evict_n(&mut w, beds);
+        for &a in &guests {
+            w.comp_mut::<Wallet>(a).expect("wallet").coins = 50;
+            w.hotel_beds.insert(a, (h, w.tick + TICKS_PER_DAY));
+        }
+        assert_eq!(street::free_beds(&w, h), 0);
+        let floor = w.config.treasury.band[0];
+        let t0 = if rich { floor + 50_000 } else { floor };
+        if let Some(t) = w.treasury_mut() {
+            t.coins = t0;
+        }
+        street::grow_hotels(&mut w);
+        let floors = w.comp::<Building>(h).expect("hotel").floors.max(1);
+        let t1 = w.purse(None);
+        eprintln!("Treasury {t0} -> {t1}: floors {floors}");
+        if rich {
+            assert_eq!(floors, 2, "a floor the Treasury could buy");
+            assert!(t1 < t0, "the Treasury paid for it");
+        } else {
+            assert_eq!(floors, 1, "a city Hotel floor no one paid for");
+        }
+    }
+}
+
+/// Review finding 6: a shanty is a derelict Lot, not a Block; a gang's
+/// Squat order claims buildings, so `gang::squat_targets` never names one
+/// (a claimed shanty stayed in the territory once built over).
+#[test]
+fn test_gang_squat_targets_skip_shanties() {
+    use citysim::systems::street;
+    let mut w = World::new(42, rungs_cfg());
+    evict_n(&mut w, 200);
+    street::grow_shanties(&mut w);
+    let shanties: Vec<EntityId> =
+        w.buildings_of_kind(BuildingKind::Lot).iter().copied().filter(|&l| street::is_shanty(&w, l)).collect();
+    assert!(!shanties.is_empty(), "shanties went up");
+    // Every gang holds a Home in each shanty's district, so each shanty is in reach.
+    for g in w.gangs() {
+        for &s in &shanties {
+            let d = w.district_of_building(s);
+            if let Some(h) =
+                w.buildings_of_kind(BuildingKind::Home).iter().copied().find(|&h| w.district_of_building(h) == d)
+            {
+                if let Some(gg) = w.comp_mut::<citysim::Gang>(g) {
+                    if !gg.territory.contains(&h) {
+                        gg.territory.push(h);
+                        gg.territory.sort_unstable();
+                    }
+                }
+            }
+        }
+        let t = citysim::systems::gang::squat_targets(&w, g);
+        assert!(t.iter().all(|b| !shanties.contains(b)), "a shanty Lot among the gang's squat targets");
+    }
+}
+
+/// Review finding 7: a diagnosed patient saves toward the treatment only
+/// while its pool falls short: `treatment_savings` is the price then, 0
+/// once the pool covers it.
+#[test]
+fn test_treatment_savings_zero_when_the_pool_covers_it() {
+    let mut w = world_on();
+    let a = adults(&w)[0];
+    w.insert(a, diagnosed(0.3));
+    let price = health::treat_price(&w);
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 0;
+    for p in health::payers(&w, a) {
+        if let Some(x) = w.comp_mut::<Wallet>(p.0) {
+            x.coins = 0;
+        }
+    }
+    assert_eq!(health::treatment_savings(&w, a), price, "short: the price is the line");
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = price + 10;
+    assert!(!health::saving_short(&w, a));
+    assert_eq!(health::treatment_savings(&w, a), 0, "the pool covers it: nothing to save");
+}

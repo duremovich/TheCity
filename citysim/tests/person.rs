@@ -1369,3 +1369,67 @@ fn probe_evicted_worker_rehouses_on_the_first_rent() {
     // Wages lift the purse a little (17 by the end with item 13 off): still under the 21-coin deposit.
     assert!(housed_on.is_some(), "an employed Farmer with the first rent stayed on the street");
 }
+
+/// Item 8 (review finding 1): the Home trade checks what the plain pick
+/// checks. A far farmer with no coins, evicted by the landlord of the Home
+/// near work that a jobless single resident would trade, does not trade into
+/// it (nor anywhere it cannot pay the first rent of).
+#[test]
+fn probe_trade_respects_rent_and_the_evictor() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let cap = w.config.life.commute_move_ticks;
+    let work_of = |w: &World, a: EntityId| {
+        w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+    };
+    let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+    let (far, partner) = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.spouse_of(a).is_none() && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer))
+        .filter(|&a| demography::children_of_agent(&w, a).is_empty())
+        .filter_map(|a| {
+            let work = work_of(&w, a)?;
+            let d = commute_cost(&w, door_of(&w, a)?, work);
+            if d <= 2 * cap {
+                return None;
+            }
+            let r = civilians(&w).into_iter().find(|&r| {
+                r != a
+                    && w.spouse_of(r).is_none()
+                    && door_of(&w, r).is_some_and(|d| commute_cost(&w, d, work) <= cap * 3 / 4)
+            })?;
+            Some((d, std::cmp::Reverse(a), a, r))
+        })
+        // The longest such commute: the pass serves it first.
+        .max()
+        .map(|(_, _, a, r)| (a, r))
+        .expect("a single far farmer and a single adult living near the Farm");
+    w.config.life.relocate_per_1000 = 1_000.0;
+    w.remove::<Job>(partner);
+    w.comp_mut::<Wallet>(partner).expect("wallet").coins = 50;
+    let before = home(&w, far);
+    let target = home(&w, partner).expect("partner home");
+    let evictor = w.owner_of(target);
+    let t = w.tick;
+    if let Some(h) = w.comp_mut::<Household>(far) {
+        h.evicted_by = Some((evictor, t));
+    }
+    // No coins at the midnight pass (the day's wage spent).
+    let midnight = 2 * TICKS_PER_DAY;
+    run_to(&mut w, far, midnight - 1, |_| {});
+    w.comp_mut::<Wallet>(far).expect("wallet").coins = 0;
+    run_to(&mut w, far, midnight + TICKS_PER_HOUR, |_| {});
+    let after = home(&w, far);
+    eprintln!(
+        "farmer {}: home {:?} -> {:?}; the evictor's Home {}",
+        far.index,
+        before.map(|x| x.index),
+        after.map(|x| x.index),
+        target.index
+    );
+    assert_ne!(after, Some(target), "traded back into its evictor's Home");
+    assert_eq!(after, before, "a farmer with no coins traded Homes (the first rent unpaid)");
+}

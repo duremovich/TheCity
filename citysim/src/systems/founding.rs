@@ -620,7 +620,7 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
 
 /// L2 L6: with jobs on, a derelict Block may take a refit when no Lot is left.
 fn refit_room(world: &World) -> bool {
-    !crate::systems::street::derelicts(world).is_empty()
+    !crate::systems::street::derelict_buildings(world).is_empty()
 }
 
 /// L2 L6: the Lounge is for the wealthiest: a Corp-class founder who can pay it.

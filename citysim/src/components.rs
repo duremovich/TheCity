@@ -3959,4 +3959,7 @@ pub struct Health {
     /// § 4: the day a gang last shook this diver down at a bin (once a day).
     pub shaken_day: Option<u64>,
     pub today: MealTally,
+    /// A child's last pantry unit was synth (review fix: a child's half-unit
+    /// day eats no unit and carries the last one's quality).
+    pub child_last_synth: bool,
 }

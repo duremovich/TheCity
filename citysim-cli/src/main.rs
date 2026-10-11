@@ -1633,7 +1633,11 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     {
                         continue;
                     }
-                    if j.shifts.iter().any(|&(s, _)| s == tod) {
+                    // Once a shift: a night shift split at midnight
+                    // ((1260, 1440), (0, 360)) starts once, at 21:00 (review
+                    // fix: its 00:00 segment counted the wage twice).
+                    let wraps = j.shifts.iter().any(|&(_, e)| e == 1440);
+                    if j.shifts.iter().any(|&(s, _)| s == tod && !(s == 0 && wraps)) {
                         wage_owed += j.wage_per_day;
                     }
                     let Some(b) = world.comp::<Brain>(id) else { continue };

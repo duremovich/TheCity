@@ -155,14 +155,16 @@ fn children(world: &mut World) {
             let Some(b) = world.comp_mut::<Building>(home) else { continue };
             b.child_food_debt += CHILD_FOOD_PER_DAY * kids.len() as f32;
             let mut fed = true;
-            let mut synth = false;
+            // None: no unit eaten today (the debt below one).
+            let mut synth: Option<bool> = None;
             while b.child_food_debt >= 1.0 {
                 if b.stock_food == 0 {
                     fed = false;
                     break;
                 }
                 // Hunger as sickness § 2: real first (0 synth with the diet off).
-                synth |= crate::systems::health::eat_pantry_unit(b) == crate::components::MealKind::Synth;
+                let s = crate::systems::health::eat_pantry_unit(b) == crate::components::MealKind::Synth;
+                synth = Some(synth.unwrap_or(false) | s);
                 b.child_food_debt -= 1.0;
             }
             (fed, synth)

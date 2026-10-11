@@ -105,12 +105,20 @@ pub fn hourly_mark(world: &mut World, id: EntityId) {
 
 /// A child's day (`demography::children`): fed from the pantry (synth or
 /// real) or unfed. Children carry malnutrition only (decision 6).
-pub fn child_day(world: &mut World, child: EntityId, fed: bool, synth: bool) {
+/// A child's day: `synth` is the quality of the pantry units eaten for it
+/// today, `None` when the half-unit debt ate none (a lone child every other
+/// day): the last unit's quality then stands (an all-synth pantry read as a
+/// real meal every other day, so a lone child's malnutrition never built).
+pub fn child_day(world: &mut World, child: EntityId, fed: bool, synth: Option<bool>) {
     if !on(world) {
         return;
     }
     let cfg = world.config.sickness.clone();
     let Some(h) = health_mut(world, child) else { return };
+    if let Some(s) = synth {
+        h.child_last_synth = s;
+    }
+    let synth = h.child_last_synth;
     let d = if !fed {
         cfg.mal_hungry
     } else if synth {
@@ -482,8 +490,9 @@ pub fn treatment_savings(world: &World, id: EntityId) -> i64 {
     if !on(world) || !world.config.sickness.cancer {
         return 0;
     }
-    let diagnosed = world.comp::<Health>(id).and_then(|h| h.cancer).is_some_and(|c| c.diagnosed);
-    if diagnosed {
+    // Review fix: the line only while the pool falls short (it held the
+    // price even when the household's pool already covered it).
+    if saving_short(world, id) {
         treat_price(world)
     } else {
         0
