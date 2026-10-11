@@ -1203,13 +1203,14 @@ impl V6Run {
     }
 }
 
-/// The CLI's `member<g>`: the gang's living member with the best fighting (ties the lower id).
-fn best_fighter(w: &World, g: EntityId) -> Option<EntityId> {
+/// The CLI's `member<g>`: the gang's living member with the best fighting (ties the lower id), not one of
+/// `not`.
+fn best_fighter(w: &World, g: EntityId, not: &[EntityId]) -> Option<EntityId> {
     w.comp::<Gang>(g)?
         .members
         .iter()
         .copied()
-        .filter(|&m| citysim::systems::law::living(w, m))
+        .filter(|&m| citysim::systems::law::living(w, m) && !not.contains(&m))
         .map(|m| (citysim::systems::law::fighting(w, m), m))
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, m)| m)
@@ -1231,6 +1232,10 @@ fn god_kill_friend_of_leaders_day_10() {
             return Vec::new();
         }
         let gs = w.gangs();
+        // The Friends the earlier command kills: never the later command's
+        // killer (the pre-roll's seed 42 had The Hollow's best fighter as its
+        // leader's closest Friend, killed by the first command).
+        let mut victims: Vec<EntityId> = Vec::new();
         for (a, b) in [(0usize, 1usize), (1, 0)] {
             let (Some(&ga), Some(&gb)) = (gs.get(a), gs.get(b)) else { continue };
             // L2 phase 5: the leader if it has a living Friend, else the gang's highest-ranked member with
@@ -1245,8 +1250,20 @@ fn god_kill_friend_of_leaders_day_10() {
             let leader = leader
                 .filter(|&l| has_friend(w, l))
                 .or_else(|| citysim::systems::gang::leader_ranking(w, ga).into_iter().find(|&m| has_friend(w, m)));
-            match (leader, best_fighter(w, gb)) {
+            match (leader, best_fighter(w, gb, &victims)) {
                 (Some(of), Some(by)) => {
+                    // `KillFriend`'s victim: `of`'s Friend of highest affinity, not `by`.
+                    let victim = w
+                        .neighbours(of)
+                        .filter(|&o| o != by && citysim::systems::law::living(w, o))
+                        .filter_map(|o| {
+                            w.edge(of, o)
+                                .filter(|e| e.kind == citysim::components::RelKind::Friend)
+                                .map(|e| (o, e.affinity))
+                        })
+                        .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
+                        .map(|(o, _)| o);
+                    victims.extend(victim);
                     names.push(format!(
                         "{} (leader of {}) loses a Friend to {} of {}",
                         w.name_of(of),
@@ -1787,6 +1804,12 @@ fn god_hit_hollow_leader_from_arasaka() {
                 w.purse(Some(arasaka))
             );
             watched.push(leader);
+            // The flip (wages from revenue): Arasaka's day-45 treasury can sit
+            // under the price; the god funds it (the scenario is the Hit's
+            // aftermath, not the corp's books).
+            if let Some(c) = w.comp_mut::<citysim::Corp>(arasaka) {
+                c.treasury = c.treasury.max(2_500);
+            }
             w.push_command(PlayerCommand::PostContract {
                 buyer: Some(arasaka),
                 kind: citysim::contract::ContractKind::Hit,
@@ -1870,4 +1893,65 @@ fn god_law_locate_on_gang_leader() {
     let at = |d: &V8Day| d.gangs.get("Ninefold").map_or("-".to_string(), |o| format!("{o:?}"));
     eprintln!("Ninefold: {} (control {})", r.orders(40, at), c.orders(40, at));
     assert!(r.applied() >= 1 && r.failed.is_empty(), "the Locate was not posted: {:?}", r.failed);
+}
+
+/// Hunger as sickness (docs/GOD_SCENARIOS_V9.md): from day 45 the Warehouse
+/// and every Market shelf are emptied each morning for 15 days in a city
+/// with `[sickness]` on. The
+/// free-food floor must answer: the starving go to the bins (and the
+/// Missions) and starvation stays near the control's. 60 days, seed 42.
+#[test]
+#[ignore]
+fn god_famine_synth() {
+    fn city() -> World {
+        let mut c = Config::load();
+        c.sickness.enabled = true;
+        c.street.shanties = true;
+        World::new(42, c)
+    }
+    fn after(w: &World, from: u64, f: fn(&citysim::DayRow) -> u32) -> u32 {
+        w.stats.history.iter().filter(|r| r.day >= from).map(f).sum()
+    }
+    let (mut shock, mut control) = (city(), city());
+    shock.run_ticks(45 * TICKS_PER_DAY);
+    control.run_ticks(45 * TICKS_PER_DAY);
+    // Every shelf emptied each morning for the 15 days (the World's imports
+    // refill a Market overnight: one emptying is no famine).
+    for _ in 0..15 {
+        let shelves: Vec<EntityId> = shock
+            .buildings_of_kind(citysim::BuildingKind::Market)
+            .iter()
+            .chain(shock.buildings_of_kind(citysim::BuildingKind::Warehouse))
+            .copied()
+            .collect();
+        for b in shelves {
+            if let Some(x) = shock.comp_mut::<citysim::Building>(b) {
+                x.stock_food = 0;
+            }
+        }
+        shock.run_ticks(TICKS_PER_DAY);
+    }
+    control.run_ticks(15 * TICKS_PER_DAY);
+    let starve = |w: &World| after(w, 45, |r| r.deaths_starvation);
+    let dives = |w: &World| after(w, 45, |r| r.health.meals_dive);
+    let alms = |w: &World| after(w, 45, |r| r.health.meals_alms);
+    let synth = |w: &World| after(w, 45, |r| r.health.meals_synth);
+    eprintln!(
+        "days 45-60: starvation {} (control {}), bin meals {} ({}), Mission meals {} ({}), synth meals {} ({})",
+        starve(&shock),
+        starve(&control),
+        dives(&shock),
+        dives(&control),
+        alms(&shock),
+        alms(&control),
+        synth(&shock),
+        synth(&control)
+    );
+    assert!(
+        starve(&shock) <= starve(&control) + 5,
+        "the famine starved the city: {} vs {}",
+        starve(&shock),
+        starve(&control)
+    );
+    assert!(dives(&shock) > dives(&control), "the starving did not turn to the bins");
 }

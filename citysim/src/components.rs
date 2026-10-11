@@ -702,6 +702,8 @@ pub enum DeathCause {
     Overdose,
     /// M14 V14: killed by a node's ICE in a lost contest (not violence).
     Flatline,
+    /// Hunger as sickness § 3: a cancer run its course.
+    Disease,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -779,6 +781,8 @@ pub enum MemoryKind {
     /// service (Grief-class salience and mood; not a deed: `deed_of` reads
     /// `None`, so no killing rumour spreads).
     ChildTaken,
+    /// Hunger as sickness § 3: told the cancer has a name.
+    Diagnosed,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1452,6 +1456,14 @@ pub struct Corp {
     /// asset_import_per_day`), zeroed at the midnight roll; wages on only.
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub import_today: i64,
+    /// Class pay (docs/CLASS_PAY.md P3): today's graded premium (the part of
+    /// a graded wage above the labour rate), paid out of capital and profit,
+    /// not the labour pool; rolled into a 7-day window at midnight. Written
+    /// only with class pay on.
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub prem_today: i64,
+    #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
+    pub prem: VecDeque<i64>,
 }
 
 fn is_zero_f32_c(v: &f32) -> bool {
@@ -1525,6 +1537,8 @@ impl Corp {
             hire_days: 0,
             fire_days: 0,
             import_today: 0,
+            prem_today: 0,
+            prem: VecDeque::new(),
         }
     }
 
@@ -1644,6 +1658,18 @@ pub struct Inventory {
     /// M13 D7: Parts carried (load 3 each).
     #[serde(default)]
     pub parts: u16,
+    /// Hunger as sickness § 1: the synth meals among `food` (a subset, read
+    /// through `synth_held`: removals take real units first, so a stale
+    /// count is clamped, never trusted).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub synth: u32,
+}
+
+impl Inventory {
+    /// The synth meals carried (`synth` clamped to `food`).
+    pub fn synth_held(&self) -> u32 {
+        self.synth.min(self.food)
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -1690,6 +1716,15 @@ pub struct Job {
     /// (`(key, jail)`), set as the key comes due (`law::credit_guard_shifts`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub duty_fixed: Option<(i64, bool)>,
+    /// Class pay (docs/CLASS_PAY.md): the post's grade (0 labour, 1
+    /// skilled, 2 professional, 3 management), fixed in `wage_per_day` at
+    /// hire or promotion; always 0 with class pay off (not written).
+    #[serde(default, skip_serializing_if = "is_zero_grade")]
+    pub grade: u8,
+}
+
+fn is_zero_grade(v: &u8) -> bool {
+    *v == 0
 }
 
 fn true_() -> bool {
@@ -1938,6 +1973,9 @@ pub struct Brain {
     /// L2 (L29): dry Scavenge hours in a row (saved: a streak survives a load).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub scavenge_dry: u8,
+    /// Hunger fix G4: dry Begs in a row (saved, as `scavenge_dry`).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub beg_dry: u8,
     /// L2 phase 5 (gang desistance): the day a gang stipend or tribute last
     /// reached this member (written only with `[living]` on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -2000,6 +2038,7 @@ impl Default for Brain {
             quit_from: None,
             stat_dole_day: None,
             scavenge_dry: 0,
+            beg_dry: 0,
             gang_paid_day: None,
             lod_since: 0,
             avoid_spot: None,
@@ -2416,6 +2455,61 @@ pub struct Building {
     /// staff (`wages::floor_pass`).
     #[serde(default, skip_serializing_if = "is_zero_u8")]
     pub floor_days: u8,
+    /// Hunger as sickness § 1: the synth meals among a pantry's
+    /// `stock_food` (a subset, clamped as `Inventory.synth`).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub synth_food: u32,
+    /// Hunger as sickness § 4: meals of scraps in the bin out back.
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub bin: u16,
+    /// § 4: a venue's fraction of a scrap meal (`venue_scrap` a meal served).
+    #[serde(default, skip_serializing_if = "is_zero_f32_c")]
+    pub bin_accum: f32,
+    /// § 4 (P5): a Home pantry's fraction of a spoiled unit, carried over.
+    #[serde(default, skip_serializing_if = "is_zero_f32_c")]
+    pub spoil_carry: f32,
+    /// § 4: the diver holding the bin, until (one at a time).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bin_diver: Option<(EntityId, Tick)>,
+    /// § 4: the bin's regular (or the diver who may become one).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bin_regular: Option<BinRegular>,
+}
+
+/// Hunger as sickness § 4: a bin's regular diver and the days (of the last
+/// seven, bit 0 the last seen) it dove there.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BinRegular {
+    pub who: EntityId,
+    pub days: u8,
+    pub last_day: u64,
+}
+
+impl BinRegular {
+    pub fn new(who: EntityId, day: u64) -> BinRegular {
+        BinRegular { who, days: 1, last_day: day }
+    }
+
+    /// The dive days of the 7 ending `day`.
+    pub fn days_as_of(&self, day: u64) -> u8 {
+        let gap = day.saturating_sub(self.last_day);
+        if gap >= 7 {
+            0
+        } else {
+            ((u16::from(self.days) << gap) & 0x7f) as u8
+        }
+    }
+
+    /// A diver there on `need` of the last 7 days.
+    pub fn established(&self, day: u64, need: u8) -> bool {
+        self.days_as_of(day).count_ones() >= u32::from(need)
+    }
+
+    /// Another dive by the regular on `day`.
+    pub fn saw(&mut self, day: u64) {
+        self.days = self.days_as_of(day) | 1;
+        self.last_day = day;
+    }
 }
 
 pub fn default_tier() -> u8 {
@@ -2628,6 +2722,10 @@ pub struct Market {
     /// M13 D6/D40: legal Stims doses sold today (phase 4).
     #[serde(default)]
     pub stim_sales_today: u32,
+    /// Hunger as sickness § 1: synth meals sold out of the shelf unit last
+    /// opened (`0..synth_stretch`).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub synth_frac: u32,
 }
 
 impl Market {
@@ -2649,6 +2747,7 @@ impl Market {
             stock_hist: VecDeque::new(),
             price_tenths: 0,
             stim_sales_today: 0,
+            synth_frac: 0,
         }
     }
 }
@@ -3656,6 +3755,14 @@ pub struct Asset {
     pub turned: Option<(EntityId, Tick)>,
 }
 
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
 fn is_zero_u8(v: &u8) -> bool {
     *v == 0
 }
@@ -3795,4 +3902,69 @@ pub struct Trip {
     pub half: u16,
     pub mid: Option<TilePos>,
     pub chase: bool,
+}
+
+// ---------------------------------------------------------------------------
+// Hunger as sickness (docs/HUNGER_SICKNESS.md § 2-3)
+// ---------------------------------------------------------------------------
+
+/// What a meal was, for the day's tally.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum MealKind {
+    Real,
+    Synth,
+    /// Scraps from a bin.
+    Dive,
+    /// A Mission's synth meal.
+    Alms,
+}
+
+/// The day's meals and hungry hours (reset at midnight by `health::daily`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MealTally {
+    pub real: u8,
+    pub synth: u8,
+    pub dive: u8,
+    pub alms: u8,
+    pub hungry_hours: u8,
+}
+
+/// Class pay (docs/CLASS_PAY.md): an adult's background, made only with
+/// class pay on. `origin` is the class it was seeded, born or arrived into
+/// (0 Dreg, 1 Sump, 2 Mid, 3 Spire, by Home tier); `education` (0..=1) is
+/// the origin's mean plus a pure-hash spread, a child's its parents' mean.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Schooling {
+    pub origin: u8,
+    pub education: f32,
+}
+
+/// A cancer rolled from high toxicity (§ 3).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Cancer {
+    /// 0..=1; death at 1.
+    pub stage: f32,
+    pub since: Tick,
+    pub diagnosed: bool,
+}
+
+/// § 2: the meters, kept on every citizen while `[sickness]` is on (the
+/// store is empty, and not saved, while it is off).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Health {
+    pub malnutrition: f32,
+    pub toxicity: f32,
+    pub cancer: Option<Cancer>,
+    /// Rolled at midnight: no shift, no wage today.
+    pub sick_today: bool,
+    /// The last 14 days' sick days, bit 0 today (decision 4: 5 cost the job).
+    pub sick_days: u16,
+    /// § 4: the day a gang last shook this diver down at a bin (once a day).
+    pub shaken_day: Option<u64>,
+    pub today: MealTally,
+    /// A child's last pantry unit was synth (review fix: a child's half-unit
+    /// day eats no unit and carries the last one's quality).
+    pub child_last_synth: bool,
 }

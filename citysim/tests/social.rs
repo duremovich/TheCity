@@ -7,7 +7,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 /// Two jobless adults who are not each other's spouse.

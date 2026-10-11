@@ -198,7 +198,10 @@ pub fn fleet_floor(world: &World, corp: EntityId) -> i64 {
 
 /// `P*` from the windows' means: `labour_share × R` plus the capital payout.
 fn target_of(world: &World, corp: EntityId, r: f32, p: f32) -> f32 {
-    labour_share(world, corp) * r + capital_payout(world, corp, r, p)
+    // Class pay P3: the graded premium is charged to profit, then to the
+    // payout; the labour share of revenue stays labour's.
+    let payout = crate::systems::classpay::labour_payout(world, corp, capital_payout(world, corp, r, p));
+    labour_share(world, corp) * r + payout
 }
 
 /// E17: `EconState.vacancy_since` against the open vacancies: a `(building,
@@ -223,11 +226,12 @@ fn shortage(world: &World, corp: EntityId, days: u64) -> bool {
     let now = world.tick;
     // `since + days ≤ now`, not `since ≤ now − days`: in the first days the
     // subtraction saturates to 0 and every day-0 vacancy read as a shortage.
-    world
-        .econ
-        .vacancy_since
-        .iter()
-        .any(|(&(b, _), &since)| since + days * TICKS_PER_DAY <= now && c.buildings.binary_search(&b).is_ok())
+    world.econ.vacancy_since.iter().any(|(&(b, role), &since)| {
+        since + days * TICKS_PER_DAY <= now
+                && c.buildings.binary_search(&b).is_ok()
+                // Class pay P3: an unfilled graded post is no labour shortage.
+                && crate::systems::classpay::base_grade(world, Some(b), role) < crate::systems::classpay::PROFESSIONAL
+    })
 }
 
 /// Round to two decimals (0.01 steps stay exact in the CSV and saves).
@@ -499,7 +503,10 @@ pub fn ceiling_at(world: &World, b: EntityId, role: Role) -> usize {
     // Jobs and room J14: a `per_owned` trade (the Super) is one post per
     // group of buildings; a busier landlord does not post three.
     let per_owned = crate::systems::trades::row_of(world, role).is_some_and(|r| r.per_owned > 0);
-    if mult <= 1.0 || per_owned {
+    // Class pay: a professional or management post is scarce: no shift
+    // past its places.
+    let graded = crate::systems::classpay::base_grade(world, Some(b), role) >= crate::systems::classpay::PROFESSIONAL;
+    if mult <= 1.0 || per_owned || graded {
         return full;
     }
     ((full as f32 * mult).ceil() as usize).max(full)
@@ -562,6 +569,8 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
             let cap = crate::systems::jobs::places_of(world, b, role) + extra;
             let ceiling = ceiling_at(world, b, role) + extra;
             let (hires, open) = places(world, b, role, exec);
+            // Class pay P3: the labour pool prices a graded place at the
+            // labour rate; its premium is capital's and profit's (below).
             let marginal = world.config.wage(role) as f32 * rev_mult;
             room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
             if demand.wants(kind, cfg.hire_demand) {
@@ -570,7 +579,17 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
         }
     }
     let mut posted = 0;
+    // Class pay P3: the premium the corp's capital and profit can still fund.
+    let mut prem_room = crate::systems::classpay::premium_room(world, corp);
     for (b, role, cap, ceiling, working, open, marginal) in rows {
+        let prem = crate::systems::classpay::marginal_premium(world, b, role);
+        if prem > 0.0 && working + open < cap {
+            match prem_room {
+                Some(r) if r < prem => continue,
+                Some(r) => prem_room = Some(r - prem),
+                None => {}
+            }
+        }
         let beyond = working + open >= cap && working + open < ceiling && room >= marginal;
         if beyond {
             room -= marginal;
@@ -624,7 +643,7 @@ pub fn seed_staff(world: &mut World) -> u32 {
             for (role, _) in ownership::roles_for(world, kind) {
                 let ceiling = ceiling_at(world, b, role) + overtime_of(kind, role, overtime);
                 let (hires, open) = places(world, b, role, exec);
-                let marginal = world.config.wage(role) as f32 * rev_mult;
+                let marginal = crate::systems::classpay::post_wage(world, b, role) * rev_mult;
                 let mut n = hires.len() + open;
                 while n < ceiling && room >= marginal {
                     world.vacancies.entry(b).or_default().push(role);
@@ -643,7 +662,7 @@ pub fn seed_staff(world: &mut World) -> u32 {
 /// E18: the corp's newest hire (ties the higher id), its exec excepted and,
 /// under `[corps] hunker_spares_farms`, its Farm staff (M11's rule for
 /// Hunker: Vat Techs are the city's food; a deviation recorded).
-fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)> {
+pub fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)> {
     let c = world.comp::<Corp>(corp)?;
     let spare_farms = world.config.corps.hunker_spares_farms;
     ownership::employees_of(world, corp)
@@ -653,10 +672,12 @@ fn newest_hire(world: &World, corp: EntityId) -> Option<(EntityId, EntityId)> {
             let j = world.comp::<Job>(a)?;
             let b = j.employer?;
             let kind = world.comp::<Building>(b)?.kind;
-            (!(spare_farms && kind == BuildingKind::Farm)).then_some((j.hired_tick, a, b))
+            // Class pay: a professional or management post goes last.
+            let exposed = !crate::systems::classpay::protected(world, a);
+            (!(spare_farms && kind == BuildingKind::Farm)).then_some((exposed, j.hired_tick, a, b))
         })
         .max()
-        .map(|(_, a, b)| (a, b))
+        .map(|(_, _, a, b)| (a, b))
 }
 
 /// E18: lay the newest hire off (`LaidOff`, "laid off: revenue"; no vacancy).
@@ -767,6 +788,8 @@ pub fn staff(world: &mut World) {
         // Jobs and room J8: a corp at a building's ceiling with room for
         // another floor's staff builds up (a lean corp's counts reset).
         let lean_now = lean(world, corp, r, p);
+        // Class pay P3: no graded hiring the corp cannot fund.
+        crate::systems::classpay::withdraw_unfunded(world, corp);
         let room = if lean_now { 0.0 } else { cfg.hire_below * target - p };
         floor_pass(world, corp, order, room, r, p);
         // The jobs round: a lean corp posts nothing and closes its open

@@ -12,7 +12,7 @@ use citysim::{
 };
 
 fn city() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 /// Living adults with a Brain and a Wallet, ascending.
@@ -75,7 +75,7 @@ fn couple(w: &World) -> (EntityId, EntityId) {
 fn test_purchase_pays_seller_imports_and_conserves() {
     // M13 D30's import: with the World market it crosses out to the World,
     // customs to the Treasury (`tests/econ.rs`); the identity holds.
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     // The plan's car and finance terms (phase 5 calibration moved them).
     w.config.assets.price.car = vec![800, 1400];
     w.config.assets.down_frac = 0.25;
@@ -366,7 +366,7 @@ fn test_parts_market_buys_from_gang_first() {
 
 #[test]
 fn test_kit_rebuilt_on_change_and_load() {
-    let mut w = World::new(42, Config::load().scaled_to(300));
+    let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
     let who = adults(&w)[2];
     assert!(w.comp::<Kit>(who).expect("kit").is_bare());
     let arm = assets::grant(&mut w, who, AssetKind::Implant(Slot::Arms), 2).expect("granted");
@@ -384,7 +384,7 @@ fn test_kit_rebuilt_on_change_and_load() {
 
 #[test]
 fn test_body_draws_do_not_touch_world_stream() {
-    let mut on = Config::load().scaled_to(300);
+    let mut on = Config::load().dole_city().scaled_to(300);
     on.assets.enabled = true;
     let mut off = on.clone();
     off.assets.enabled = false;

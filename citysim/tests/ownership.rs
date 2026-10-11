@@ -11,7 +11,7 @@ use citysim::{
 /// The v1 city with two corps: FoodCo (both Farms, the Market and, by
 /// seeding rule 5, the Bar) and HomeCo (30 Blocks); rent [1, 2, 4].
 fn cfg() -> Config {
-    let mut c = Config::load().v1_profile();
+    let mut c = Config::load().dole_city().v1_profile();
     c.corps.names = vec!["FoodCo".into(), "HomeCo".into()];
     c.corps.niches = vec![vec!["Food".into()], vec!["Housing".into()]];
     c.corps.farms = vec![2, 0];
@@ -291,7 +291,7 @@ fn test_wage_collected_at_workplace_for_corp_job() {
 fn test_seeding_matches_table() {
     // M15 W31: The Unplugged's Chapel takes one of the City's Sump Blocks;
     // the table is M11's (tests/moves.rs checks the Chapel).
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.creeds.seed_purist = false;
     let w = World::new(42, cfg);
     let corps = w.corps();
@@ -370,7 +370,7 @@ fn test_seeding_matches_table() {
 
 #[test]
 fn test_daily_ownership_pass_conserves_coins() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(3 * TICKS_PER_DAY);
     assert_eq!(w.tick_of_day(), 0);
     let before = ownership::total_coins(&w);
@@ -414,7 +414,7 @@ fn test_restock_capped_by_owner_purse() {
 
 #[test]
 fn test_cheaper_market_wins_customers_across_tiers() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let markets = w.buildings_of_kind(BuildingKind::Market).to_vec();
     let door = |w: &World, m: EntityId| w.comp::<Building>(m).expect("m").door;
     let (a, b, c) = (markets[0], markets[1], markets[2]);
@@ -518,7 +518,7 @@ fn test_nationalise_and_subsidise_levers() {
 
 #[test]
 fn test_private_guard_never_takes_jail_duty() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.tick(); // tick 0: job search fills the Security Offices
     let private: Vec<EntityId> =
         w.guards().iter().copied().filter(|&g| citysim::systems::law::is_private_guard(&w, g)).collect();
@@ -544,7 +544,7 @@ fn test_private_guard_never_takes_jail_duty() {
 
 #[test]
 fn test_owner_death_passes_buildings_to_heir() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let bars: Vec<EntityId> = w
         .buildings_of_kind(BuildingKind::Bar)
         .iter()
@@ -691,7 +691,7 @@ fn test_tax_remainder_of_gone_payee_dropped() {
 fn test_full_day_of_flows_conserves_coins() {
     // The M11 flows on the shipped city: every crossing is booked, so the
     // conservation identity (`econ::identity`) is the check.
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(3 * TICKS_PER_DAY);
     assert_eq!(w.tick_of_day(), 0);
     let mut before = citysim::systems::econ::identity(&w);
@@ -771,7 +771,7 @@ fn test_evictee_waits_on_the_street() {
 /// their own door); one in an agent's hands likewise.
 #[test]
 fn test_office_without_a_corp_has_no_guards() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.tick(); // tick 0: job search fills the Security Offices
     let offices: Vec<EntityId> = w.buildings_of_kind(BuildingKind::SecurityOffice).to_vec();
     let staff = |w: &World, o: EntityId| ownership::staff_at(w, o);
@@ -863,7 +863,7 @@ fn test_rent_paid_is_a_seven_day_window() {
 fn test_ledger_hack_conserves_money() {
     use citysim::systems::{assets, lod, tech, virt};
     use citysim::virt::{NodeId, Purpose, RunMode, RunOrder, RunOutcome, RunWhy, Track};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY);
     let before = ownership::total_coins(&w);
     let corp = w.corps().into_iter().max_by_key(|&c| (w.purse(Some(c)), c)).expect("a corp");
@@ -927,7 +927,7 @@ fn test_ledger_hack_conserves_money() {
 fn test_news_day_conserves_coins() {
     use citysim::systems::{memory, news};
     use citysim::word::{Deed, Story};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY);
     w.levers.news_tax = 0.2;
     let corp = |w: &World, n: &str| {

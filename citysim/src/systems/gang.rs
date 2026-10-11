@@ -458,8 +458,9 @@ pub fn squat_targets(world: &World, gang: EntityId) -> Vec<EntityId> {
     districts.push(world.district_of_building(g.hideout));
     districts.sort_unstable();
     districts.dedup();
-    // Fix pass (phase 3 review): any derelict (a Block, a Bar, a Hotel).
-    crate::systems::street::derelicts(world)
+    // Fix pass (phase 3 review): any derelict (a Block, a Bar, a Hotel), no
+    // shanty Lot.
+    crate::systems::street::derelict_buildings(world)
         .into_iter()
         .filter(|&b| g.territory.binary_search(&b).is_err())
         .filter(|&b| districts.binary_search(&world.district_of_building(b)).is_ok())

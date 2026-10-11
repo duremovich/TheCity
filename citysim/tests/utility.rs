@@ -7,7 +7,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 fn set_needs(w: &mut World, id: citysim::EntityId, f: impl FnOnce(&mut Needs)) {

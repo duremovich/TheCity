@@ -9,7 +9,7 @@ use citysim::{Building, BuildingKind, Config, Corp, EntityId, World};
 use rand::{Rng, SeedableRng};
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn corp_named(w: &World, name: &str) -> EntityId {
@@ -184,7 +184,7 @@ fn test_contest_f_equals_m13_contest() {
 fn test_ice_upkeep_and_install_flows_conserve() {
     // M14 V26's self-install imports: the coins cross to the World, so the
     // conservation identity (`econ::identity`) is the check.
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let total = citysim::systems::econ::identity(&w);
     let expected: i64 = (0..w.virt.nodes.len())
         .filter(|&i| w.virt.nodes[i].alive)
@@ -213,7 +213,7 @@ fn test_ice_upkeep_and_install_flows_conserve() {
 /// V35: hacking is seeded in `0..=hack_seed_scale`, about a fifth past the deck shop's floor.
 #[test]
 fn test_hacking_seeded_in_range() {
-    let on = World::new(42, Config::load());
+    let on = World::new(42, Config::load().dole_city());
     let h: Vec<f32> = on.citizens().iter().filter_map(|&c| on.comp::<citysim::Skills>(c)).map(|s| s.hacking).collect();
     assert!(h.iter().all(|&x| (0.0..=0.8).contains(&x)), "hacking in 0..=hack_seed_scale");
     let clear = h.iter().filter(|&&x| x >= 0.4).count() as f32 / h.len() as f32;

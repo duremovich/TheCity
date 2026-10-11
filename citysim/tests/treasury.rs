@@ -13,7 +13,7 @@ use citysim::{Config, EventKind, PlayerCommand, World, TICKS_PER_DAY};
 
 /// The wages + no-net city.
 fn config() -> Config {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
     cfg
@@ -150,7 +150,7 @@ fn test_civic_pin_and_release() {
     assert!(w.econ.civic_pinned, "SetSanitation pins too");
 
     // With the net (no band): no pin, and the release is refused.
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     let mut twin = World::new(42, cfg);
     assert!(!treasury::on(&twin));

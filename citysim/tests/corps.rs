@@ -50,7 +50,7 @@ fn inputs(n: NicheInputs) -> CorpInputs {
 }
 
 fn best(i: &CorpInputs) -> (CorpOrder, Niche) {
-    let s = corp_brain::score_all(i, &Config::load().corps);
+    let s = corp_brain::score_all(i, &Config::load().dole_city().corps);
     (s[0].order, s[0].niche)
 }
 
@@ -131,7 +131,7 @@ fn test_brain_picks_lobby_after_extortion_with_lawless_exec() {
 #[test]
 fn test_choose_keeps_the_standing_order_within_hysteresis() {
     let i = inputs(NicheInputs { share: 0.1, rival_price: 1.6, ..niche() });
-    let s = corp_brain::score_all(&i, &Config::load().corps);
+    let s = corp_brain::score_all(&i, &Config::load().dole_city().corps);
     assert_eq!(s[0].order, CorpOrder::Undercut);
     // The runner-up within 0.1 of the best stays.
     let second = s[1].clone();
@@ -168,7 +168,7 @@ fn test_shock_rescore_keeps_the_standing_order_at_equal_scores() {
 /// The v1 city with three corps: FoodCo (a Farm, the Market and, by seeding
 /// rule 5, the Bar), FarmCo (the other Farm) and HomeCo (30 Blocks).
 fn cfg() -> Config {
-    let mut c = Config::load().v1_profile();
+    let mut c = Config::load().dole_city().v1_profile();
     c.corps.names = vec!["FoodCo".into(), "FarmCo".into(), "HomeCo".into()];
     c.corps.niches = vec![vec!["Food".into()], vec!["Food".into()], vec!["Housing".into()]];
     c.corps.farms = vec![1, 1, 0];
@@ -191,7 +191,7 @@ fn three(w: &World) -> (EntityId, EntityId, EntityId) {
 
 /// A small v2 city (Lots, two Security Offices, the eight seeded corps).
 fn v2_world(seed: u64) -> World {
-    World::new(seed, Config::load().scaled_to(400))
+    World::new(seed, Config::load().dole_city().scaled_to(400))
 }
 
 fn corp_named(w: &World, name: &str) -> EntityId {
@@ -528,7 +528,7 @@ fn test_squeeze_entry_cuts_food_wages_and_housing_eviction_days() {
 
 /// A private guard on a 24-hour shift, its corp with a contract on a Market.
 fn private_guard_scene() -> (World, EntityId, EntityId, EntityId) {
-    let mut c = Config::load().scaled_to(400);
+    let mut c = Config::load().dole_city().scaled_to(400);
     c.law.pursuit_radius = 0; // the city's guards chase nobody
     let mut w = World::new(11, c);
     w.run_ticks(2);

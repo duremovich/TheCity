@@ -1,4 +1,4 @@
-//! Same seed, same bytes: the shipped city (`Config::load()`, 2,000
+//! Same seed, same bytes: the shipped city (`Config::load().dole_city()`, 2,000
 //! residents) hashed at the first day boundary (the midnight passes have
 //! run). The mid-day save that runs on identically is `save.rs`'s
 //! `test_word_save_mid_day_bit_identical`.
@@ -6,7 +6,7 @@
 use citysim::{save, Config, World, TICKS_PER_DAY};
 
 fn hash_after(seed: u64, ticks: u64) -> blake3::Hash {
-    let mut w = World::new(seed, Config::load());
+    let mut w = World::new(seed, Config::load().dole_city());
     w.run_ticks(ticks);
     blake3::hash(save::to_ron(&w).as_bytes())
 }

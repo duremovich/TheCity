@@ -673,16 +673,37 @@ pub fn run_statistical(world: &mut World) {
     let phase = world.phase();
     // L2 L13: the hour's `fun` decay off screen (the exec set once).
     let fun_execs = Some(crate::systems::classes::exec_set(world));
-    let no_net = crate::systems::econ::no_net(world);
+    // The recalibration (2026-10-09, ported with hunger as sickness P5): the
+    // dole city reads the scavenge and beg path too, whenever the table
+    // carries it (`calibrate` learns it in every city; without it the
+    // off-screen broke of the dole city had the dole alone).
+    let earn_path = world.stat_table.as_ref().is_some_and(|t| t.p_scavenge.is_some());
     for id in agents {
         let Some(row) = stat_row(world, id) else { continue };
         // Flip readiness (no safety net): the table row's index at the hour's
-        // start, for the no-net income path's per-row rates.
-        let no_net_row = if no_net { stat_row_index(world, id) } else { None };
+        // start, for the income path's per-row rates.
+        let no_net_row = if earn_path { stat_row_index(world, id) } else { None };
+        // § 4 (parity, after P5): the dive is its own hour, on the row's
+        // `p_dive` (every eligible hour without a learned rate), as `calibrate`
+        // learns it: dives begun per hour with a bin in reach at the hour's
+        // start (before the hour's decay, as `calibrate` reads eligibility).
+        if crate::systems::bins::on(world) && crate::systems::demography::is_adult(world, id) {
+            let p = match (world.stat_table.as_ref().and_then(|t| t.p_dive), stat_row_index(world, id)) {
+                (Some(rates), Some(r)) => rates[r],
+                _ => 1.0,
+            };
+            crate::systems::bins::stat_dive(world, id, p);
+        }
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
         let under_18 = !crate::systems::demography::is_adult(world, id);
         let energy_mult = crate::systems::stims::energy_mult(world, id);
+        let energy_mult = crate::systems::health::energy_mult(world, id, energy_mult);
+        // Parity (after P5): a Full sleeper's hunger decays at half rate; off
+        // screen the hour's sleep is the row's `p_sleep` share, so (with a
+        // table holding `p_meal`, learned with it) the hunger lost is cut by
+        // `0.5 x p_sleep`, as a Full agent sleeping that share would lose.
+        let sleep_share = if world.stat_table.as_ref().is_some_and(|t| t.p_meal.is_some()) { row.p_sleep } else { 0.0 };
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             let ctx = crate::needs::DecayCtx {
                 season_energy_mult,
@@ -691,7 +712,11 @@ pub fn run_statistical(world: &mut World) {
                 energy_mult,
                 ..crate::needs::DecayCtx::plain()
             };
+            let before = n.hunger;
             crate::needs::decay(n, &cfg, &ctx, TICKS_PER_HOUR as u32);
+            if sleep_share > 0.0 {
+                n.hunger = (n.hunger + (before - n.hunger) * 0.5 * sleep_share).min(1.0);
+            }
         }
         if let Some(execs) = &fun_execs {
             crate::systems::leisure::stat_hour(world, id, execs);
@@ -700,11 +725,15 @@ pub fn run_statistical(world: &mut World) {
         if !world.has::<Brain>(id) {
             continue; // starved this hour
         }
+        // Hunger as sickness § 2: the hour's hungry mark (bodies: needs::run).
+        crate::systems::health::hourly_mark(world, id);
         // 2b. Work is not a gamble: an employed agent on shift works the hour
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
         // idle hours of the employed.
         stat_work(world, id, phase, no_net_row);
+        // Diet parity (hunger fix item 11's off-screen side): the grocery run.
+        stat_grocery(world, id);
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
         // hungry Statistical agent eats if it can and the draw covers the
         // discretionary meals of the fed.
@@ -712,7 +741,27 @@ pub fn run_statistical(world: &mut World) {
         let hunger = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.hunger);
         let (hungry, sated) = (hunger < 0.4, hunger >= 0.7);
         let u: f32 = world.rng.agent(id).random();
-        let outcome = if hungry || (u < row.p_eat && !sated) {
+        // Parity (hunger as sickness, after P5): a Full agent neither eats
+        // the hour it gets hungry (the walk, the queue, a goal ahead of Eat)
+        // nor only when hungry (a meal bought on the way): with the table's
+        // `p_meal` an agent eats on its phase's and hunger band's share of
+        // hours (a pure hash: no stream moves); without it the M10 rule
+        // (every hungry hour eats, `p_eat` the rest).
+        let on_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day()));
+        let meal_p = world.stat_table.as_ref().and_then(|t| t.meal_rate(phase, hunger, on_shift));
+        // `p_meal` is the means' rate (food in hand, a pantry, a meal's
+        // coins); the broke eat through their own hourly rolls: the bin
+        // (`p_dive`, above), the noon Mission, and the hungry broke hour's
+        // theft (`p_desperate`, in `stat_eat`), each learned per such hour.
+        let means = meal_p.is_some() && has_means(world, id);
+        let eats = match meal_p {
+            Some(p) if means => {
+                crate::systems::econ::hash_unit(world.seed(), 0x4e47_0001, u64::from(id.index), world.tick) < p
+            }
+            Some(_) => hungry,
+            None => hungry || (u < row.p_eat && !sated),
+        };
+        let outcome = if eats {
             Outcome::Eat
         } else if u < row.p_eat + row.p_work {
             Outcome::Idle
@@ -1073,17 +1122,36 @@ enum Outcome {
     Idle,
 }
 
+/// Parity (after P5): an agent with the means of a meal now: food in hand,
+/// a stocked pantry, or a meal's coins at its food Market (`p_meal`'s
+/// hours; `calibrate` reads it too).
+pub fn has_means(world: &World, id: EntityId) -> bool {
+    if world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.food >= 1) {
+        return true;
+    }
+    let pantry = world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .is_some_and(|h| world.comp::<Building>(h).is_some_and(|b| b.stock_food > 0));
+    if pantry {
+        return true;
+    }
+    crate::systems::life::can_buy_meal(world, id)
+}
+
 fn stat_eat(world: &mut World, id: EntityId) {
     let cfg = world.config.needs.clone();
     let has_food = world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.food >= 1);
     if has_food {
+        let mut meal = crate::components::MealKind::Real;
         if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-            i.food -= 1;
+            meal = crate::systems::health::eat_inventory_unit(i);
             i.stolen_food = i.stolen_food.min(i.food);
         }
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
+        crate::systems::health::ate(world, id, meal);
         world.mark_day(id, trace_flags::ATE);
         return;
     }
@@ -1093,20 +1161,21 @@ fn stat_eat(world: &mut World, id: EntityId) {
         .and_then(|h| h.home)
         .filter(|&h| world.comp::<Building>(h).is_some_and(|b| b.stock_food > 0));
     if let Some(h) = pantry {
+        let mut meal = crate::components::MealKind::Real;
         if let Some(b) = world.comp_mut::<Building>(h) {
-            b.stock_food -= 1;
+            meal = crate::systems::health::eat_pantry_unit(b);
         }
         if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
             crate::needs::eat(n, &cfg);
         }
+        crate::systems::health::ate(world, id, meal);
         world.mark_day(id, trace_flags::ATE);
         return;
     }
     // Jobs and room P2 fix: an empty local Market sends the shopper to a stocked one.
-    let Some((market, stock, price)) = world
-        .food_market(id)
-        .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food, world.price_for(m, id))))
-    else {
+    let Some((market, stock, price)) = world.food_market(id).and_then(|m| {
+        world.comp::<Building>(m).map(|b| (m, b.stock_food, crate::systems::diet::price_at(world, id, m)))
+    }) else {
         return;
     };
     if stock == 0 {
@@ -1119,14 +1188,17 @@ fn stat_eat(world: &mut World, id: EntityId) {
         // household eats it. Buying one meal at a time left a broke
         // housemate nothing to eat once the opening pantry was gone (M10).
         let units = economy::buy_quantity(world, id, Some(market)).max(1);
-        let paid = economy::pay_for_food(world, id, Some(market), units);
-        if economy::take_food(world, id, Some(market), units, paid) {
+        let q = economy::quality_at(world, id, Some(market));
+        let paid = economy::pay_for_food_q(world, id, Some(market), units, q);
+        if economy::take_food_q(world, id, Some(market), units, paid, q) {
+            let mut meal = crate::components::MealKind::Real;
             if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-                i.food = i.food.saturating_sub(1);
+                meal = crate::systems::health::eat_inventory_unit(i);
             }
             if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
                 crate::needs::eat(n, &cfg);
             }
+            crate::systems::health::ate(world, id, meal);
             world.mark_day(id, trace_flags::ATE);
             stat_store_food(world, id);
         }
@@ -1142,10 +1214,17 @@ fn stat_eat(world: &mut World, id: EntityId) {
     // the meal by lawfulness, as the Full planner's theft cost reads it
     // (`p_desperate`, calibrated on the Full tier's hungry thieves below the
     // meal price); a lawful agent mostly goes hungry (the noon Mission, the
-    // next hour's scavenge or beg). The dole city's table has no
-    // `p_desperate`: the M10 rule (starving, whatever the lawfulness). Adults
-    // only (`calibrate` learns it from adults); a child keeps the M10 rule.
-    let need = if crate::systems::econ::no_net(world) && crate::systems::demography::is_adult(world, id) {
+    // next hour's scavenge or beg).
+    // The recalibration (2026-10-09, ported
+    // with hunger as sickness P5): the dole city reads it too (`calibrate`
+    // learns it in every city), only where the city it was learned in holds:
+    // a no-net city or a dole that pays. With the dole cut and no no-net path
+    // the off-screen broke have no other meal, so the M10 rule stands. A
+    // table without `p_desperate`: the M10 rule (starving, whatever the
+    // lawfulness). Adults only; a child keeps the M10 rule.
+    let dole_pays = world.levers.dole_per_day > 0 && world.treasury().map_or(0, |t| t.coins) >= 0;
+    let learned_city = crate::systems::econ::no_net(world) || dole_pays;
+    let need = if learned_city && crate::systems::demography::is_adult(world, id) {
         let law = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
         world.stat_table.as_ref().and_then(|t| t.p_desperate.map(|d| (d[t.lawfulness_bucket(law)], t.hunger_edge)))
     } else {
@@ -1168,14 +1247,66 @@ fn stat_eat(world: &mut World, id: EntityId) {
         return;
     }
     // ... and eaten at once.
+    let mut meal = crate::components::MealKind::Real;
     if let Some(i) = world.comp_mut::<crate::components::Inventory>(id) {
-        i.food = i.food.saturating_sub(1);
+        meal = crate::systems::health::eat_inventory_unit(i);
         i.stolen_food = i.stolen_food.min(i.food);
     }
     if let Some(n) = world.comp_mut::<crate::components::Needs>(id) {
         crate::needs::eat(n, &cfg);
     }
+    crate::systems::health::ate(world, id, meal);
     world.mark_day(id, trace_flags::ATE);
+}
+
+/// Diet parity (hunger fix item 11, P5i (b), off screen): an employed
+/// agent off shift whose household's pantry and own carried meals are under
+/// `routine::shift_meals_needed` per resident (capped at the pantry) and who
+/// holds a meal's coins at its stocked food Market buys the shortfall (at
+/// most three meals) into the pantry, as a Full worker's grocery run does. The Full city's
+/// jobless ate from the pantries the workers' runs filled (hungry at
+/// midnight 0.3-0.7 % against 3-3.6 % off screen on the flipped city).
+fn stat_grocery(world: &mut World, id: EntityId) {
+    if !crate::systems::fixes::shift_meals(world) {
+        return;
+    }
+    let Some(job) = world.comp::<Job>(id) else { return };
+    if job.on_shift(world.tick_of_day()) {
+        return;
+    }
+    let need_one = crate::exec::routine::shift_meals_needed(world, job);
+    let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return };
+    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    let carried = world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
+    let residents = world.residents_of(home).len().max(1) as u32;
+    // The level: the Full city's learned pantry per resident (a run does
+    // not always win the evening), else a shift's worth each.
+    let per = world.stat_table.as_ref().and_then(|t| t.pantry_per_resident).map_or(need_one as f32, |p| p.max(0.0));
+    let need =
+        ((per * residents as f32).round() as u32).min(need_one * residents).min(world.config.buildings.home.stock_cap);
+    if pantry + carried >= need {
+        return;
+    }
+    let Some(market) = world.food_market(id) else { return };
+    let price = crate::systems::diet::price_at(world, id, market);
+    let stocked = world.comp::<Building>(market).is_some_and(|b| b.stock_food > 0);
+    if !stocked || world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins) < price {
+        return;
+    }
+    // Up to the shortfall only (a run of three meals each time stocked the
+    // off-screen pantries at 0.84 meals a resident against 0.28 in Full),
+    // and all of it in one run, as a Full grocery run buys it
+    // (`routine::grocery_cap`: not three meals at a time).
+    let short = need - (pantry + carried);
+    let units = economy::buy_quantity_upto(world, id, Some(market), short);
+    if units == 0 {
+        return;
+    }
+    let q = economy::quality_at(world, id, Some(market));
+    let paid = economy::pay_for_food_q(world, id, Some(market), units, q);
+    if economy::take_food_q(world, id, Some(market), units, paid, q) {
+        stat_store_food(world, id);
+    }
 }
 
 /// StoreFood off screen: the agent's bought (not stolen) food goes into its
@@ -1186,8 +1317,12 @@ fn stat_store_food(world: &mut World, id: EntityId) {
     let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
     let Some(inv) = world.comp_mut::<crate::components::Inventory>(id) else { return };
     let movable = inv.food.saturating_sub(inv.stolen_food).min(room);
+    let synth = inv.synth_held().min(movable);
+    inv.synth = inv.synth_held() - synth;
     inv.food -= movable;
+    inv.synth = inv.synth.min(inv.food);
     if let Some(b) = world.comp_mut::<Building>(home) {
+        b.synth_food = b.synth_food.min(b.stock_food) + synth;
         b.stock_food += movable;
     }
 }
@@ -1231,6 +1366,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
         stat_earn(world, id, i);
     }
     let Some(job) = job else { return };
+    // Hunger as sickness § 2: a sick day is no shift and no wage (as Full's).
+    if crate::systems::health::sick(world, id) {
+        return;
+    }
     let key = job.shift_key_at(tick);
     // L2 shadow fixes item 10: a guard's own (staggered) workday.
     if !job.on_shift(world.tick_of_day()) || !crate::exec::routine::workday_of(world, id, &job, key) {
@@ -1240,19 +1379,23 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     if job.last_shift_day == Some(key) {
         return;
     }
-    if job.role == Role::Farmer {
+    // P5f (wage parity): the hour is worked on the role's `p_attend` (a
+    // pure hash of the agent and the hour; the wage below reads the same).
+    let attend = stat_attend(world, job.role);
+    let worked = attend.is_none_or(|p| attend_roll(world, id, tick / TICKS_PER_HOUR) < p);
+    if worked && job.role == Role::Farmer {
         if let Some(farm) = job.employer {
             economy::accrue_farm_work(world, id, farm, u64::from(TICKS_PER_HOUR as u32));
         }
     }
     // L2 L9: a Statistical Fab Tech's hour on shift.
-    if job.role == Role::Fabber {
+    if worked && job.role == Role::Fabber {
         if let Some(fab) = job.employer {
             crate::systems::jobs::accrue_fab_work(world, id, fab, u64::from(TICKS_PER_HOUR as u32));
         }
     }
     // Jobs and room J13: a Statistical producing trade's hour on shift.
-    if job.role.is_trade() {
+    if worked && job.role.is_trade() {
         if let Some(b) = job.employer {
             crate::systems::trades::accrue(world, id, b, u64::from(TICKS_PER_HOUR as u32));
         }
@@ -1282,7 +1425,18 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
             j.last_shift_day = Some(key);
             j.days_unpaid = j.days_unpaid.saturating_add(1);
         }
-        economy::collect_wage(world, id);
+        // P5f: pro rata on the shift's hours credited (the whole wage
+        // without a `p_attend`).
+        match attend {
+            Some(p) => {
+                let ratio = world.stat_table.as_ref().and_then(|t| t.p_wage_ratio).unwrap_or(1.0);
+                let share = (stat_shift_share(world, id, &job, tick, p) * ratio).min(1.0);
+                economy::collect_wage_scaled(world, id, share);
+            }
+            None => {
+                economy::collect_wage(world, id);
+            }
+        }
         // A Full farmer hauls to the Market at shift end; so does this one.
         if job.role == Role::Farmer {
             if let Some(farm) = job.employer {
@@ -1297,6 +1451,39 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
             }
         }
     }
+}
+
+/// P5f: the role's learned attendance (`StatTable::p_attend`), if any.
+fn stat_attend(world: &World, role: Role) -> Option<f32> {
+    let t = world.stat_table.as_ref()?.p_attend.as_ref()?;
+    match t.get(&format!("{role:?}")) {
+        Some(&p) => Some(p),
+        // Class pay (docs/CLASS_PAY.md): a role the table has not learned
+        // (the new graded trades, a Ripperdoc) works the table's mean
+        // attendance rather than a whole paid shift, until `calibrate`
+        // learns it (a graded wage would otherwise widen the tiers' gap).
+        None if crate::systems::classpay::on(world) && !t.is_empty() => Some(t.values().sum::<f32>() / t.len() as f32),
+        None => None,
+    }
+}
+
+/// P5f: the hour's attendance roll (a pure hash of the agent and the hour).
+fn attend_roll(world: &World, id: EntityId, hour: u64) -> f32 {
+    crate::systems::econ::hash_unit(world.seed(), 0xa77e_0001, u64::from(id.index), hour)
+}
+
+/// P5f: the share of the shift ending around `tick` whose hours the agent
+/// worked (the same rolls `stat_work` made).
+fn stat_shift_share(world: &World, id: EntityId, job: &Job, tick: Tick, p: f32) -> f32 {
+    let Some(end) = job.shift_end(tick) else { return 1.0 };
+    let tod = (tick % crate::time::TICKS_PER_DAY) as u16;
+    let len = job.shifts.iter().find(|&&(s, e)| tod >= s && tod < e).map_or(0, |&(s, e)| Tick::from(e - s));
+    let len = if job.shifts.iter().any(|&(_, e)| e == 1440) { len.max(end.saturating_sub(tick)) } else { len };
+    let start = end.saturating_sub(len.max(TICKS_PER_HOUR));
+    let (h0, h1) = (start / TICKS_PER_HOUR, end.div_ceil(TICKS_PER_HOUR));
+    let n = h1.saturating_sub(h0).max(1);
+    let worked = (h0..h1).filter(|&h| attend_roll(world, id, h) < p).count() as f32;
+    worked / n as f32
 }
 
 /// The table row index of `id`'s hour (`calibrate`'s buckets: the phase,

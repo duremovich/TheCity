@@ -1107,7 +1107,8 @@ impl World {
             | LocationKey::RaidTarget
             | LocationKey::Vehicle
             | LocationKey::Beat
-            | LocationKey::Spot => None,
+            | LocationKey::Spot
+            | LocationKey::Bin => None,
         }
     }
 
@@ -1141,6 +1142,8 @@ impl World {
             LocationKey::Beat => crate::systems::jobs::beat_tile(self, agent),
             // L2 L14: the leisure pick's street spot.
             LocationKey::Spot => crate::systems::leisure::spot_of(self, agent),
+            // Hunger as sickness § 4: the bin outside the bound building's door.
+            LocationKey::Bin => target.and_then(|b| crate::systems::bins::bin_tile(self, b)),
             _ => None,
         }
     }

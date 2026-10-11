@@ -986,7 +986,14 @@ fn hunker_staff(world: &mut World, corp: EntityId) {
             continue;
         }
         list.sort();
-        let Some(&(_, who)) = list.last() else { continue };
+        // Class pay: a professional or management post goes last.
+        let who = list
+            .iter()
+            .rev()
+            .find(|&&(_, a)| !crate::systems::classpay::protected(world, a))
+            .or(list.last())
+            .map(|&(_, a)| a);
+        let Some(who) = who else { continue };
         let role = world.comp::<Job>(who).map(|j| j.role);
         let name = world.name_of(who);
         let what = role.map_or("worker", |r| r.label());

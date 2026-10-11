@@ -13,7 +13,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().scaled_to(300))
+    World::new(seed, Config::load().dole_city().scaled_to(300))
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -261,7 +261,7 @@ fn test_harvest_cell_abducts() {
     use citysim::{AssetKind, Kit, Slot};
     // The Harvest cell of `fviolence::daily` (M13's own abduction roll is gone).
     let build = || -> (World, EntityId, EntityId) {
-        let cfg = Config::load().scaled_to(300);
+        let cfg = Config::load().dole_city().scaled_to(300);
         let mut w = World::new(47, cfg);
         w.run_ticks(TICKS_PER_HOUR + 1);
         let (g, _) = gang_and_member(&mut w);

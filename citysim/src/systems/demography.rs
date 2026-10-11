@@ -43,6 +43,9 @@ pub fn run(world: &mut World) {
     job_search(world);
     // Jobs and room J19: the day's labour market for the migrants' means.
     note_labour_market(world);
+    // Hunger fix item 10 (P5h): the city grows Homes toward unmet demand,
+    // then relocation fills them.
+    crate::systems::life::grow_housing(world);
     // L1: a long commute moves nearer work (a few households a night).
     crate::systems::life::relocate(world);
     emigration(world);
@@ -88,7 +91,7 @@ pub fn mature(world: &mut World, id: EntityId) {
     );
     world.insert(id, Mood::default());
     world.insert(id, Memory::default());
-    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
+    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
     world.insert(id, Brain { lod: Lod::Coarse, ..Brain::default() });
     // The Real economy E41: a camp's child is released at its door.
     if crate::systems::camp::on_mature(world, id) {
@@ -108,10 +111,18 @@ pub fn old_age_roll(rng: &mut rand_chacha::ChaCha8Rng, age_days: u32, cfg: &crat
 
 fn old_age(world: &mut World) {
     let cfg = world.config.demography.clone();
+    let sick_on = crate::systems::health::on(world);
     let mut dying = Vec::new();
     for id in world.citizens() {
         let Some(age) = world.comp::<Identity>(id).map(|i| i.age_days) else { continue };
-        if old_age_roll(world.rng.world(), age, &cfg) {
+        // Hunger as sickness § 2: a worn body's hazard (the same one draw).
+        let dies = if sick_on && age >= cfg.old_age_days {
+            let p = (cfg.old_age_p_per_day * f64::from(crate::systems::health::effects(world, id).old_mult)).min(1.0);
+            world.rng.world().random_bool(p)
+        } else {
+            old_age_roll(world.rng.world(), age, &cfg)
+        };
+        if dies {
             dying.push(id);
         }
     }
@@ -140,24 +151,31 @@ fn children(world: &mut World) {
         if kids.is_empty() {
             continue;
         }
-        let fed = {
+        let (fed, synth) = {
             let Some(b) = world.comp_mut::<Building>(home) else { continue };
             b.child_food_debt += CHILD_FOOD_PER_DAY * kids.len() as f32;
             let mut fed = true;
+            // None: no unit eaten today (the debt below one).
+            let mut synth: Option<bool> = None;
             while b.child_food_debt >= 1.0 {
                 if b.stock_food == 0 {
                     fed = false;
                     break;
                 }
-                b.stock_food -= 1;
+                // Hunger as sickness § 2: real first (0 synth with the diet off).
+                let s = crate::systems::health::eat_pantry_unit(b) == crate::components::MealKind::Synth;
+                synth = Some(synth.unwrap_or(false) | s);
                 b.child_food_debt -= 1.0;
             }
-            fed
+            (fed, synth)
         };
         // M11 phase 5: school meals. A child whose pantry is empty eats from
         // the Reserve (children ate only from the pantry and the dole is per
         // adult: ~70 child starvation deaths in 120 days on seeds 42-44).
         let fed = fed || (school && school_meal(world, home, reserve));
+        for &k in &kids {
+            crate::systems::health::child_day(world, k, fed, synth);
+        }
         for k in kids {
             let Some(c) = world.comp_mut::<Child>(k) else { continue };
             if fed {
@@ -203,6 +221,8 @@ fn births(world: &mut World) {
         let fertile = |id: EntityId| {
             world.comp::<Identity>(id).is_some_and(|i| (ADULT_AGE_DAYS..=FERTILE_UNTIL_DAYS).contains(&i.age_days))
                 && world.comp::<Needs>(id).is_some_and(|n| n.intimacy >= 0.6)
+                // Hunger as sickness § 2 (true with the diet off).
+                && crate::systems::health::effects(world, id).fertile
         };
         if !fertile(a) || !fertile(b) {
             continue;
@@ -218,7 +238,11 @@ fn births(world: &mut World) {
         }
         let happy = world.comp::<Mood>(a).is_some_and(|m| m.value > 0.5)
             && world.comp::<Mood>(b).is_some_and(|m| m.value > 0.5);
-        let p = p_base * if happy { 1.5 } else { 1.0 };
+        let mut p = p_base * if happy { 1.5 } else { 1.0 };
+        if crate::systems::health::on(world) {
+            let (ea, eb) = (crate::systems::health::effects(world, a), crate::systems::health::effects(world, b));
+            p *= f64::from(ea.conceive_mult * eb.conceive_mult);
+        }
         if world.rng.world().random_bool(p.min(1.0)) {
             born.push((a, b, home));
         }
@@ -267,6 +291,7 @@ pub fn spawn_child(world: &mut World, mother: EntityId, father: EntityId, home: 
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
+    crate::systems::classpay::on_birth(world, id, mother, father, home);
     // M13 D4: the parents' mean from the child's keyed stream.
     let body = crate::systems::assets::child_body(world, id, mother, father);
     crate::systems::assets::give_body(world, id, body);
@@ -578,14 +603,45 @@ pub(crate) fn job_search(world: &mut World) {
         world.laid_off.retain(|_, &mut (_, t)| t + REHIRE_DAYS * TICKS_PER_DAY > now);
     }
     let vacancies: Vec<(EntityId, Vec<Role>)> = world.vacancies.iter().map(|(&e, r)| (e, r.clone())).collect();
+    // Class pay (docs/CLASS_PAY.md): the graded vacancies (professional and
+    // management) are filled first, by merit, then every other as before.
+    let graded_first = crate::systems::classpay::on(world);
+    let passes: &[Option<bool>] = if graded_first { &[Some(true), Some(false)] } else { &[None] };
+    for &pass in passes {
+        job_search_pass(world, &vacancies, pass);
+    }
+}
+
+/// One walk of [`job_search`]'s vacancy snapshot: every vacancy (`None`),
+/// or only the graded (`Some(true)`) or ungraded (`Some(false)`) ones.
+fn job_search_pass(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass: Option<bool>) {
+    use crate::systems::classpay;
     for (employer, roles) in vacancies {
+        let employer = *employer;
         let Some(workplace_door) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else {
             world.vacancies.remove(&employer);
             continue;
         };
-        for role in roles {
-            let Some(id) = pick_candidate(world, employer, workplace_door, role) else { continue };
+        for &role in roles {
+            let graded = pass.is_some() && classpay::base_grade(world, Some(employer), role) >= classpay::PROFESSIONAL;
+            if pass.is_some_and(|p| p != graded) {
+                continue;
+            }
+            let pick = if graded {
+                // P3: a premium the corp cannot fund is not hired.
+                if !classpay::premium_funded(world, employer, role) {
+                    continue;
+                }
+                classpay::pick_graded(world, employer, role)
+            } else {
+                pick_candidate(world, employer, workplace_door, role)
+            };
+            let Some(id) = pick else { continue };
+            let moved = graded && classpay::leave_for_promotion(world, id);
             hire(world, id, employer, role);
+            if moved {
+                classpay::note_promoted(world, id, Some(employer));
+            }
             // L2 L10: a public-works vacancy's hire joins the works roster.
             crate::systems::budget::note_hire(world, id, employer, role);
             if let Some(v) = world.vacancies.get_mut(&employer) {
@@ -616,6 +672,10 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
     } else {
         (0.0, 0)
     };
+    // A sweeper post's day is a beat assigned after the hire: no band.
+    let sweeper_post = role == Role::Sanitation && crate::systems::jobs::sweep_on(world);
+    let near_cap =
+        (crate::systems::fixes::hire_near(world) && !sweeper_post).then_some(world.config.life.commute_hire_ticks);
     world
         .citizens()
         .into_iter()
@@ -672,7 +732,17 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             };
             let off = (skill_w * 100.0 * skill).round() as u32
                 + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
-            ((1024 + from.manhattan(workplace_door)).saturating_sub(off.min(512)), id)
+            let d = from.manhattan(workplace_door);
+            // Hunger fix item 9 (P5g): a candidate within `commute_hire_ticks`
+            // (`life::commute_cost`) before any beyond it (skill and the
+            // rehire bonus rank inside each band).
+            let band = if near_cap.is_some_and(|c| crate::systems::life::commute_cost(world, from, workplace_door) > c)
+            {
+                1024
+            } else {
+                0
+            };
+            ((1024 + band + d).saturating_sub(off.min(512)), id)
         })
         .min()
         .map(|(_, id)| id)
@@ -698,7 +768,9 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if let Some(row) = crate::systems::trades::row_of(world, role) {
         shifts = crate::systems::trades::shifts_for(world, row, id);
     }
-    let wage_per_day = world.config.wage(role);
+    // Class pay: the post's grade fixes its wage (the config wage at grade 0).
+    let grade = crate::systems::classpay::base_grade(world, Some(employer), role);
+    let wage_per_day = crate::systems::classpay::wage_at(world, role, grade);
     world.insert(
         id,
         Job {
@@ -717,6 +789,7 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             // L2 fix round: unpaid until the first wage (L2 on only).
             paid_once: false,
             duty_fixed: None,
+            grade,
         },
     );
     world.abort_plan(id);
@@ -977,7 +1050,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     // M15 W25: an immigrant's own draw (after the Personality it tilts on).
     let social = crate::systems::moves::seed_skills(world, id);
     crate::systems::moves::give_social(world, id, social);
-    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0 });
+    world.insert(id, Inventory { food: 0, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
     world.insert(
         id,
         Needs {
@@ -1001,6 +1074,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     let home = a.home;
     world.insert(id, Household::new(home));
     arrival_savings(world, id, home);
+    crate::systems::classpay::on_arrival(world, id, home);
     world.stats.current.immigrants += 1;
     let name = world.name_of(id);
     let where_ = match home {
@@ -1015,6 +1089,8 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
     if home.is_none() {
         world.push_event(EventKind::Homeless, &[id], format!("{name} has no home"));
     }
+    // Hunger as sickness (after P5): an arrival carries a history too.
+    crate::systems::health::seed_agent(world, id);
     id
 }
 
@@ -1293,6 +1369,7 @@ fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, ho
     world.insert(id, Wallet { coins: 0 });
     world.insert(id, Household::new(Some(home)));
     world.insert(id, Child { hunger_days: 0 });
+    crate::systems::classpay::on_birth(world, id, mother, father, home);
     let body = crate::systems::assets::child_body(world, id, mother, father);
     crate::systems::assets::give_body(world, id, body);
     let door = world.comp::<Building>(home).map_or(TilePos::default(), |b| b.door);

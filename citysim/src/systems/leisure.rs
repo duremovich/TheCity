@@ -333,7 +333,7 @@ pub fn drink_fun(world: &mut World, id: EntityId) {
 }
 
 /// The fun an `Enjoy` (or a meal, a table) at `b` gives.
-fn gain_at(world: &World, b: EntityId) -> f32 {
+pub(crate) fn gain_at(world: &World, b: EntityId) -> f32 {
     let g = &world.config.leisure.gain;
     match world.comp::<Building>(b).map(|bd| (bd.kind, bd.tier)) {
         Some((BuildingKind::Club, 2)) => g.club_spire,
@@ -359,7 +359,7 @@ fn belonging_at(world: &World, b: EntityId) -> f32 {
 
 /// A payment into a venue (`Flow::Leisure` or `Flow::Gamble`): `pay` and
 /// `credit`, the `SetLeisureTax` surcharge (plan L37), the front's take.
-fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: i64, flow: Flow) -> i64 {
+pub(crate) fn pay_venue(world: &mut World, from: EntityId, b: EntityId, amount: i64, flow: Flow) -> i64 {
     let owner = world.owner_of(b);
     let paid = ownership::pay(world, Some(from), owner, amount, flow);
     if paid <= 0 {
@@ -931,6 +931,12 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         return None;
     }
     let n = world.comp::<Needs>(id)?;
+    // Hunger fix item 5 (P5f): a worker on shift stays at work.
+    if crate::systems::fixes::shift_first(world)
+        && world.comp::<Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day()))
+    {
+        return None;
+    }
     let pick = choice(world, id, false)?;
     let cs = vec![
         Consideration::new("U(fun)", urgency(n.fun), Curve::Logistic { k: 8.0, mid: 0.5 }),
@@ -1195,6 +1201,7 @@ pub fn abort_paid(world: &mut World, id: EntityId, kind: ActionKind, started: Ti
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     crate::needs::eat(n, &cfg);
                 }
+                crate::systems::health::ate(world, id, crate::components::MealKind::Real);
                 world.mark_day(id, crate::components::trace_flags::ATE);
                 world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             }
@@ -1227,10 +1234,12 @@ pub fn on_complete(world: &mut World, id: EntityId, kind: ActionKind, target: Op
             let (units, _) = world.pending_purchase.remove(&id).unwrap_or((0, 0));
             let Some(b) = target else { return };
             if units > 0 {
+                crate::systems::bins::venue_meal(world, b);
                 let cfg = world.config.needs.clone();
                 if let Some(n) = world.comp_mut::<Needs>(id) {
                     crate::needs::eat(n, &cfg);
                 }
+                crate::systems::health::ate(world, id, crate::components::MealKind::Real);
                 world.mark_day(id, crate::components::trace_flags::ATE);
                 world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             }

@@ -9,7 +9,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 fn civilians(w: &World, n: usize) -> Vec<EntityId> {
@@ -34,7 +34,7 @@ fn inputs() -> PostureInputs {
 }
 
 fn best(i: &PostureInputs) -> Posture {
-    law_brain::score_postures(i, &Config::load().law)[0].posture
+    law_brain::score_postures(i, &Config::load().dole_city().law)[0].posture
 }
 
 #[test]
@@ -369,7 +369,7 @@ fn test_crackdown_pressure_scales_per_capita() {
     let v1 = world(42);
     assert_eq!(v1.config.law.crackdown_reports_per_1000, 0.0, "v1_profile keeps the absolute key");
     assert_eq!(law_brain::crackdown_reports(&v1), v1.config.law.crackdown_reports);
-    let cfg = Config::load();
+    let cfg = Config::load().dole_city();
     let k = cfg.law.crackdown_reports_per_1000;
     assert!(k > 0.0, "the shipped city scales");
     let small = World::new(42, cfg.clone().scaled_to(300));

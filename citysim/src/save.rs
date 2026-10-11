@@ -12,10 +12,14 @@ use crate::world::World;
 /// (`Building.floors`, `floor_days`, `MapBuilding.floors`; serde defaults).
 /// 6: Jobs and room P3 (J32): `Role::Trade` by key (`Trade("night_porter")`,
 /// resolved against the save's own `Config::trades`; an unknown key fails
-/// the load) and the `trades` rows in the saved config.
-/// 7: the Hit market (docs/HIT_MARKET.md H22): `Contract.deposit`,
-/// `Contract.motive`, `[hitmarket]` in the saved config (serde defaults).
-pub const SAVE_VERSION: u8 = 7;
+/// the load) and the `trades` rows in the saved config. 7: Hunger as
+/// sickness (`World.health`, `Inventory.synth`, `Building.synth_food`,
+/// `Market.synth_frac`, `Charity.synth_frac`, `DayRow.health`; serde
+/// defaults, none written with `[sickness]` off).
+/// 8: the Hit market (docs/HIT_MARKET.md H22): `Contract.deposit`,
+/// `Contract.motive`, `Corp.last_wronged`, `World::hm_corp_hits`,
+/// `[hitmarket]` in the saved config (serde defaults).
+pub const SAVE_VERSION: u8 = 8;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

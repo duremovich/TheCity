@@ -16,7 +16,7 @@ use citysim::{
 };
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -809,7 +809,7 @@ fn test_chase_reads_hunt_state_without_a_contract_run() {
     // intel readers answer from it; a god Hunt over three days runs the
     // same twice.
     let run = || {
-        let mut w = World::new(42, Config::load());
+        let mut w = World::new(42, Config::load().dole_city());
         let [h, t] = strangers(&w, 2)[..] else { unreachable!() };
         hunt::god_hunt(&mut w, h, t).expect("a god Hunt");
         let mut seen = Vec::new();

@@ -5,7 +5,7 @@
 //!                 [--lever "day=90:release_reserve=1500"]... [--save-at T]
 //!                 [--load FILE] [--force-lod full|coarse|stat] [--population N]
 //!                 [--map FILE]
-//! citysim-cli calibrate [--days 30] [--agents 500] [--seeds 3] [--map assets/map.txt]
+//! citysim-cli calibrate [--days 30] [--agents N] [--seeds 3] [--map assets/map.txt]
 //!                       [--out assets/stat_table.toml] [--straight-lines]
 //! ```
 //!
@@ -125,8 +125,12 @@ impl From<ForceLod> for Lod {
 struct CalibrateArgs {
     #[arg(long, default_value_t = 30)]
     days: u64,
-    #[arg(long, default_value_t = 500)]
-    agents: u32,
+    /// Residents (`[world] population` when absent). The recalibration
+    /// (2026-10-09) moved the default from 500: a 500-resident city on the
+    /// 2,000 map has a quarter of the police per street and four times the
+    /// corps' places per resident (see `Config::calibration_city`).
+    #[arg(long)]
+    agents: Option<u32>,
     #[arg(long, default_value = "assets/map.txt")]
     map: PathBuf,
     #[arg(long, default_value = "assets/stat_table.toml")]
@@ -1450,6 +1454,19 @@ struct HourTally {
     broke: bool,
     hungry: bool,
     desperate: u16,
+    /// Hunger as sickness § 5 (`[sickness] bins` on): an adult who cannot
+    /// buy a meal with a bin in reach at the hour's start (`bins::dive_target`;
+    /// `p_dive`'s hours), and the dives it began this hour.
+    dive_ok: bool,
+    dives: u16,
+    /// The agent's bin meals today at the last tick (`Health.today.dive`).
+    dive_meals: u8,
+    /// Parity (`p_meal`): hungry at the hour's start (below the
+    /// table's hunger edge), the hunger last seen, and a meal this hour.
+    meal_seen: bool,
+    meal_cell: usize,
+    last_hunger: f32,
+    ate: bool,
 }
 
 /// Build a Full-only world (seed 1000, straight-line walks, gangless, the
@@ -1463,7 +1480,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         Brain, Corpse, DeathCause, EventKind, MemoryKind, Needs, Personality, StatRow, StatTable, STAT_ROWS,
     };
     use std::collections::BTreeMap;
-    let mut config = Config::load().calibration_city(args.agents);
+    let loaded = Config::load();
+    let agents = args.agents.unwrap_or(loaded.world.population);
+    let mut config = loaded.calibration_city(agents);
     config.world.map = map_path(&args.map)?;
     config.lod.force = Some(Lod::Full);
     config.exec.straight_line_paths = args.straight_lines;
@@ -1472,7 +1491,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         version: 2,
         seed: 1000,
         days: args.days,
-        agents: args.agents,
+        agents,
         lawfulness_edges: [0.3, 0.7],
         hunger_edge: 0.4,
         p_dole_day: 1.0,
@@ -1480,6 +1499,11 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_scavenge: None,
         p_beg: None,
         p_desperate: None,
+        p_dive: None,
+        p_meal: None,
+        p_attend: None,
+        p_wage_ratio: None,
+        pantry_per_resident: None,
         rows: Vec::new(),
     };
     let mut counts = [[0u64; 5]; STAT_ROWS];
@@ -1497,8 +1521,19 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     // agent-hours with a Scavenge, with a Beg, and all earning agent-hours;
     // per lawfulness bucket: thefts by a hungry thief below the meal price,
     // and the hungry agent-hours below the meal price.
-    let no_net = citysim::systems::econ::no_net_cfg(&config);
+    // The recalibration (2026-10-09): the income path and p_desperate are
+    // learned in every city (the dole city's off-screen broke scavenge, beg
+    // and go hungry as its Full ones do).
     let (mut scav, mut beg, mut scav_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    let (mut dive, mut dive_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    // P5f: per role, free healthy workday shift minutes, and those at the work.
+    let mut attend: BTreeMap<String, (u64, u64)> = BTreeMap::new();
+    // P5f: wages owed (a free, healthy workday shift's wage at its start) and paid.
+    let (mut wage_owed, mut wage_paid) = (0i64, 0i64);
+    // Diet parity: the pantry meals per resident, a daily mean.
+    let (mut pantry_sum, mut pantry_days) = (0f64, 0u64);
+    let (mut eat_h, mut eat_h_denom) =
+        ([0u64; citysim::world::MEAL_CELLS_SPLIT], [0u64; citysim::world::MEAL_CELLS_SPLIT]);
     let (mut desp, mut desp_denom) = ([0u64; 3], [0u64; 3]);
     let with_rows = args.rows_csv.is_some();
     let mut rows_out = match &args.rows_csv {
@@ -1529,11 +1564,12 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let hunger = world.comp::<Needs>(id).map_or(1.0, |n| n.hunger);
             let courting = citysim::systems::social::known_candidate(world, id, 0.3).is_some();
             let features = with_rows.then(|| citysim::systems::stat_policy::features(world, id));
-            let adult = no_net && citysim::systems::demography::is_adult(world, id);
+            let adult = citysim::systems::demography::is_adult(world, id);
             let earn = adult && !world.has::<citysim::Job>(id) && below_savings(world, id);
             let broke = adult
                 && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
                     < citysim::systems::life::meal_price(world, id);
+            let dive_ok = citysim::systems::bins::dive_target(world, id).is_some();
             hour.insert(
                 id,
                 HourTally {
@@ -1542,6 +1578,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     features,
                     earn,
                     broke,
+                    dive_ok,
+                    dive_meals: world.comp::<citysim::Health>(id).map_or(0, |h| h.today.dive),
+                    meal_seen: citysim::systems::lod::has_means(world, id),
+                    meal_cell: header.meal_index_split(
+                        world.phase(),
+                        hunger,
+                        world.comp::<citysim::Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day())),
+                    ),
+                    last_hunger: hunger,
                     ..Default::default()
                 },
             );
@@ -1563,6 +1608,51 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             citysim::tick(&mut world);
             let night = world.phase() == citysim::DayPhase::Night;
             let just = world.tick - 1;
+            // P5f: the shift minutes and those at the work (`p_attend`).
+            {
+                let tod = world.tick_of_day();
+                if tod == 0 {
+                    wage_paid += world.stats.history.back().map_or(0, |r| r.flow_wages);
+                    let (mut st, mut rs) = (0u64, 0u64);
+                    for &h in world.buildings_of_kind(citysim::BuildingKind::Home) {
+                        let r = world.residents_of(h).len() as u64;
+                        if r > 0 {
+                            rs += r;
+                            st += world.comp::<citysim::Building>(h).map_or(0, |b| u64::from(b.stock_food));
+                        }
+                    }
+                    pantry_sum += st as f64 / rs.max(1) as f64;
+                    pantry_days += 1;
+                }
+                for &id in hour.keys() {
+                    let Some(j) = world.comp::<citysim::Job>(id) else { continue };
+                    if !j.on_shift(tod)
+                        || !citysim::exec::routine::workday_of(&world, id, j, j.shift_key_at(world.tick))
+                        || world.has::<citysim::Sentence>(id)
+                        || citysim::systems::health::sick(&world, id)
+                    {
+                        continue;
+                    }
+                    // Once a shift: a night shift split at midnight
+                    // ((1260, 1440), (0, 360)) starts once, at 21:00 (review
+                    // fix: its 00:00 segment counted the wage twice).
+                    let wraps = j.shifts.iter().any(|&(_, e)| e == 1440);
+                    if j.shifts.iter().any(|&(s, _)| s == tod && !(s == 0 && wraps)) {
+                        wage_owed += j.wage_per_day;
+                    }
+                    let Some(b) = world.comp::<Brain>(id) else { continue };
+                    // At the work: a work step under Work, or any step of a
+                    // guard's Patrol or Arrest (the beat is walked).
+                    let at_work = match b.current_goal {
+                        Some(citysim::GoalKind::Work) => matches!(b.exec, citysim::ExecState::Use { .. }),
+                        Some(citysim::GoalKind::Patrol | citysim::GoalKind::Arrest) => true,
+                        _ => false,
+                    };
+                    let e = attend.entry(format!("{:?}", j.role)).or_insert((0, 0));
+                    e.0 += 1;
+                    e.1 += u64::from(at_work);
+                }
+            }
             for (&id, t) in hour.iter_mut() {
                 let Some(brain) = world.comp::<Brain>(id) else { continue };
                 t.ticks[exec_category(&brain.exec, night)] += 1;
@@ -1588,6 +1678,23 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         }
                         _ => {}
                     }
+                }
+                if t.meal_seen {
+                    let h = world.comp::<Needs>(id).map_or(1.0, |n| n.hunger);
+                    if h > t.last_hunger + 0.05 {
+                        t.ate = true;
+                    }
+                    t.last_hunger = h;
+                }
+                // Diet parity: a dive counts when it fed the diver (a bin
+                // meal in the agent's day tally), as the off-screen roll's
+                // `bins::dive` eats at once (a begun dive can lose the bin).
+                if t.dive_ok {
+                    let d = world.comp::<citysim::Health>(id).map_or(0, |h| h.today.dive);
+                    if d > t.dive_meals {
+                        t.dives += 1;
+                    }
+                    t.dive_meals = d;
                 }
                 if t.broke && !t.hungry {
                     t.hungry = world.comp::<Needs>(id).is_some_and(|n| n.hunger < header.hunger_edge);
@@ -1713,6 +1820,14 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         scav[t.row] += u64::from(t.scav.min(1));
                         beg[t.row] += u64::from(t.beg.min(1));
                         scav_denom[t.row] += 1;
+                    }
+                    if t.dive_ok {
+                        dive[t.row] += u64::from(t.dives.min(1));
+                        dive_denom[t.row] += 1;
+                    }
+                    if t.meal_seen {
+                        eat_h[t.meal_cell] += u64::from(t.ate);
+                        eat_h_denom[t.meal_cell] += 1;
                     }
                     if t.broke && t.hungry {
                         desp[(t.row % 6) / 2] += u64::from(t.desperate.min(1));
@@ -1851,27 +1966,86 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let p_dole_day = (dole_taken as f32 / dole_days.max(1) as f32).min(1.0);
     let p_theft_caught = Some((theft_arrests as f32 / thefts_all.max(1) as f32).min(1.0));
     eprintln!("thefts {thefts_all}, arrests {arrests}, of a thief {theft_arrests}");
-    let (p_scavenge, p_beg, p_desperate) = if no_net {
-        eprintln!(
-            "no-net: scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours; desperate {desp:?} of {desp_denom:?} hungry broke hours"
-        );
-        let rate = |n: u64, d: u64| (n as f32 / d.max(1) as f32).min(1.0);
-        (
-            Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i]))),
-            Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i]))),
-            Some(std::array::from_fn(|i| rate(desp[i], desp_denom[i]))),
+    let rate = |n: u64, d: u64| (n as f32 / d.max(1) as f32).min(1.0);
+    eprintln!("desperate {desp:?} of {desp_denom:?} hungry broke hours");
+    let p_desperate = Some(std::array::from_fn(|i| rate(desp[i], desp_denom[i])));
+    eprintln!("scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours");
+    let p_scavenge = Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i])));
+    let p_beg = Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i])));
+    // Hunger as sickness § 5: `p_dive` with the bins on. A row with under
+    // 200 eligible hours takes the mean over all rows (plan risk: noisy rows).
+    let p_dive = (config.sickness.enabled && config.sickness.diet && config.sickness.bins).then(|| {
+        eprintln!("bins: dives {dive:?} of {dive_denom:?} eligible hours");
+        let (n, d): (u64, u64) = (dive.iter().sum(), dive_denom.iter().sum());
+        let mean = (n as f32 / d.max(1) as f32).min(1.0);
+        std::array::from_fn(
+            |i| if dive_denom[i] < 200 { mean } else { (dive[i] as f32 / dive_denom[i] as f32).min(1.0) },
         )
-    } else {
-        (None, None, None)
+    });
+    // Parity: the hungry hour's meal, every city (a row under 200 hungry
+    // hours takes the all-row mean).
+    eprintln!("hungry hours with a meal {eat_h:?} of {eat_h_denom:?}");
+    let p_meal = {
+        let (n, d): (u64, u64) = (eat_h.iter().sum(), eat_h_denom.iter().sum());
+        let mean = (n as f32 / d.max(1) as f32).min(1.0);
+        Some(
+            (0..citysim::world::MEAL_CELLS_SPLIT)
+                .map(|i| {
+                    // A thin cell takes its pooled (unsplit) cell's rate, else the mean.
+                    let j = i % citysim::world::MEAL_CELLS;
+                    let (pn, pd) = (
+                        eat_h[j] + eat_h[j + citysim::world::MEAL_CELLS],
+                        eat_h_denom[j] + eat_h_denom[j + citysim::world::MEAL_CELLS],
+                    );
+                    if eat_h_denom[i] >= 200 {
+                        (eat_h[i] as f32 / eat_h_denom[i] as f32).min(1.0)
+                    } else if pd >= 200 {
+                        (pn as f32 / pd as f32).min(1.0)
+                    } else {
+                        mean
+                    }
+                })
+                .collect::<Vec<f32>>(),
+        )
     };
-    let table = StatTable { rows, p_dole_day, p_theft_caught, p_scavenge, p_beg, p_desperate, ..header };
+
+    eprintln!("attendance (role: worked of shift minutes) {attend:?}");
+    // P5f: Full pays a cut shift past half pro rata and a shift worked whole
+    // in full, so the wage share runs above the attendance share: the ratio
+    // of the two scales the Statistical pro rata wage.
+    let (worked, minutes) = attend.values().fold((0u64, 0u64), |(w, n), &(n2, w2)| (w + w2, n + n2));
+    let attend_all = worked as f32 / minutes.max(1) as f32;
+    let paid_share = wage_paid as f32 / wage_owed.max(1) as f32;
+    let p_wage_ratio = Some(if attend_all > 0.0 { paid_share / attend_all } else { 1.0 });
+    eprintln!("wages paid {wage_paid} of owed {wage_owed} ({paid_share:.3}); attendance {attend_all:.3}; ratio {p_wage_ratio:?}");
+    let p_attend = Some(
+        attend
+            .iter()
+            .filter(|(_, &(n, _))| n >= 600)
+            .map(|(r, &(n, w))| (r.clone(), (w as f32 / n as f32).min(1.0)))
+            .collect::<BTreeMap<String, f32>>(),
+    );
+    let table = StatTable {
+        rows,
+        p_dole_day,
+        p_theft_caught,
+        p_scavenge,
+        p_beg,
+        p_desperate,
+        p_dive,
+        p_meal,
+        p_attend,
+        p_wage_ratio,
+        pantry_per_resident: (pantry_days > 0).then(|| (pantry_sum / pantry_days as f64) as f32),
+        ..header
+    };
     let body = toml::to_string(&table).map_err(|e| e.to_string())?;
     let text = format!(
-        "# generated by calibrate v2: seeds {}..={}, {} days, {} agents, map {}, gangless, {} walks, DO NOT EDIT\n{body}",
+        "# generated by calibrate v2: seeds {}..={}, {} days, {} agents, map {}, gangless, riot- and asset-free, {} walks, DO NOT EDIT\n{body}",
         args.first_seed,
         args.first_seed + args.seeds - 1,
         args.days,
-        args.agents,
+        agents,
         args.map.display(),
         if args.straight_lines { "straight-line" } else { "pathed" }
     );
@@ -1881,7 +2055,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     std::fs::write(&args.out, text).map_err(|e| format!("{}: {e}", args.out.display()))?;
     eprintln!(
         "calibrated {} agents over {} days in {:.1}s -> {} (agent-hours per row: {:?})",
-        args.agents,
+        agents,
         args.days,
         t0.elapsed().as_secs_f32(),
         args.out.display(),

@@ -25,13 +25,18 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         p_scavenge: None,
         p_beg: None,
         p_desperate: None,
+        p_dive: None,
+        p_meal: None,
+        p_attend: None,
+        p_wage_ratio: None,
+        pantry_per_resident: None,
         rows,
     }
 }
 
 /// A v1 world, every agent forced Statistical, on an all-zero table.
 fn stat_world(seed: u64) -> World {
-    let mut cfg = Config::load().v1_profile();
+    let mut cfg = Config::load().dole_city().v1_profile();
     cfg.lod.force = Some(Lod::Statistical);
     let mut w = World::new(seed, cfg);
     w.stat_table = Some(table(|_| {}));
@@ -41,7 +46,7 @@ fn stat_world(seed: u64) -> World {
 /// A v1 world on normal tiers and an all-zero table, run past day 0 so
 /// every adult has a trace for it.
 fn traced_world(seed: u64) -> World {
-    let mut w = World::new(seed, Config::load().v1_profile());
+    let mut w = World::new(seed, Config::load().dole_city().v1_profile());
     w.stat_table = Some(table(|_| {}));
     w.run_ticks(TICKS_PER_DAY + 1);
     w
@@ -346,7 +351,7 @@ fn life_kinds(w: &World, id: EntityId) -> Vec<LifeKind> {
 
 #[test]
 fn test_bind_command_logged_and_replays() {
-    let cfg = Config::load().v1_profile();
+    let cfg = Config::load().dole_city().v1_profile();
     let mut w = World::new(404, cfg.clone());
     // Run until the real table has left a hole open.
     while w.holes.is_empty() {
@@ -368,7 +373,7 @@ fn test_bind_command_logged_and_replays() {
 
 #[test]
 fn test_life_keeps_birth_and_death_past_cap() {
-    let mut w = World::new(405, Config::load().v1_profile());
+    let mut w = World::new(405, Config::load().dole_city().v1_profile());
     let id = *w.citizens().first().expect("citizen");
     w.push_event(EventKind::Birth, &[id], "born");
     for i in 0..60 {
@@ -448,9 +453,15 @@ fn test_life_same_richness_full_vs_statistical() {
     // city's best biography at 2-3 kinds, on the threshold; M10 phase 5b.
     // 15 days were enough until the life pass's calmer days, 2026-10-09.)
     let kinds = |tier: Lod| {
-        let mut cfg = Config::load().v1_profile();
+        let mut cfg = Config::load().dole_city().v1_profile();
         cfg.lod.force = Some(tier);
         let mut w = World::new(408, cfg);
+        // Hunger as sickness P1: the hunger fixes' G3 (no food theft while a
+        // meal is affordable) left this all-Full dole city without a theft in
+        // 30 days (4-7 before, every one by a thief holding a meal's coins):
+        // the dole fed everyone. No dole here, so the broke steal on both
+        // tiers and the biographies carry crime (pressure, not a switch).
+        w.levers.dole_per_day = 0;
         w.run_ticks(30 * TICKS_PER_DAY);
         let mut seen = std::collections::BTreeSet::new();
         let mut best = 0;
@@ -520,7 +531,7 @@ fn test_bound_rival_kill_upgrades_the_one_shock() {
 /// the Death event names them, so the biography does too.
 #[test]
 fn test_killed_attacker_biography_names_the_killer() {
-    let mut w = World::new(410, Config::load().v1_profile());
+    let mut w = World::new(410, Config::load().dole_city().v1_profile());
     let c = w.citizens();
     let (dead, killer) = (c[0], c[1]);
     w.kill_by(dead, DeathCause::Violence, Some(killer));

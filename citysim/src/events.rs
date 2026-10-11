@@ -282,13 +282,25 @@ pub enum EventKind {
     // --- Jobs and room P3 (plan J14; amber).
     /// `[super, post]`: a Super walked the round of his Blocks (`trades::round_plan`).
     SuperRound,
+    // --- Hunger as sickness (docs/HUNGER_SICKNESS.md § 9).
+    /// `[winner, loser, bin]` or `[gang, diver]`: a bin's regular saw a diver
+    /// off, or a gang shook one down.
+    BinContest,
+    /// `[agent]`: a cancer turned symptomatic.
+    Diagnosed,
+    /// `[agent, clinic]`: a cancer cured at a Clinic.
+    Cured,
+    // --- Class pay (docs/CLASS_PAY.md).
+    /// `[agent, workplace]`: promoted to a higher-graded post (skilled in
+    /// place, or a professional/management post, or a corp's exec).
+    Promoted,
     // --- The Hit market (docs/HIT_MARKET.md H6; amber).
     /// `[buyer, taker]`: a buyer on credit could not pay the balance.
     Stiffed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 142] = [
+    pub const ALL: [EventKind; 146] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -430,6 +442,10 @@ impl EventKind {
         EventKind::TaxMoved,
         EventKind::FloorAdded,
         EventKind::SuperRound,
+        EventKind::BinContest,
+        EventKind::Diagnosed,
+        EventKind::Cured,
+        EventKind::Promoted,
         EventKind::Stiffed,
     ];
 }
@@ -515,6 +531,8 @@ fn life_kind(world: &World, event: &Event, slot: usize, actor: EntityId) -> Opti
         // Real economy phase 2 (plan E44): a layoff on the revenue rule.
         (E::LaidOff, 0) => row(LifeKind::Fired),
         (E::Quit, 0) => row(LifeKind::Quit),
+        // Class pay: a promotion is a hire into the new post.
+        (E::Promoted, 0) => row(LifeKind::Hired),
         (E::Starving, 0) => row(LifeKind::Starving),
         (E::Theft, 0) => row(LifeKind::Stole),
         (E::Robbed, 1) => victim_side(LifeKind::Robbed, HoleKind::Robbed),

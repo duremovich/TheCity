@@ -10,13 +10,13 @@ use citysim::{
 
 /// A small v2 city: Lots, the eight seeded corps.
 fn v2_world(seed: u64) -> World {
-    World::new(seed, Config::load().scaled_to(400))
+    World::new(seed, Config::load().dole_city().scaled_to(400))
 }
 
 /// The v1 city with two corps (FoodCo: both Farms, the Market, the Bar;
 /// HomeCo: 30 Blocks) and the classes on.
 fn v1_corp_world() -> World {
-    let mut c = Config::load().v1_profile();
+    let mut c = Config::load().dole_city().v1_profile();
     c.corps.names = vec!["FoodCo".into(), "HomeCo".into()];
     c.corps.niches = vec![vec!["Food".into()], vec!["Housing".into()]];
     c.corps.farms = vec![2, 0];
@@ -24,7 +24,7 @@ fn v1_corp_world() -> World {
     c.corps.blocks = vec![0, 30];
     c.corps.offices = vec![0, 0];
     c.corps.treasury_initial = vec![2000, 2000];
-    c.classes = Config::load().classes;
+    c.classes = Config::load().dole_city().classes;
     World::new(7, c)
 }
 
@@ -324,7 +324,7 @@ fn test_immigration_scales_with_street_happiness() {
     w.classes[s].happiness = 0.2;
     assert!(classes::immigration_factor(&w) < 0.1);
     // v1_profile: the lever, uncoupled.
-    let mut v1 = World::new(7, Config::load().v1_profile());
+    let mut v1 = World::new(7, Config::load().dole_city().v1_profile());
     v1.levers.immigration_per_week = 10;
     v1.classes[s].happiness = 0.2;
     assert_eq!(classes::immigrants_this_week(&v1), 10);

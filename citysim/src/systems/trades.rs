@@ -83,6 +83,7 @@ fn trade_only_kinds(world: &World) -> Vec<BuildingKind> {
         .config
         .trades
         .iter()
+        .filter(|r| world.config.trade_live(r))
         .flat_map(|r| r.workplace.iter().copied())
         .filter(|&k| !matches!(k, BuildingKind::Market | BuildingKind::Bar | BuildingKind::Fab) && !k.is_leisure())
         .collect();
@@ -148,7 +149,13 @@ pub fn seed(world: &mut World) {
     if world.config.trades.is_empty() {
         return;
     }
-    let mut kinds: Vec<BuildingKind> = world.config.trades.iter().flat_map(|r| r.workplace.iter().copied()).collect();
+    let mut kinds: Vec<BuildingKind> = world
+        .config
+        .trades
+        .iter()
+        .filter(|r| world.config.trade_live(r))
+        .flat_map(|r| r.workplace.iter().copied())
+        .collect();
     kinds.sort();
     kinds.dedup();
     for kind in kinds {

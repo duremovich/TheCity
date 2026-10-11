@@ -12,8 +12,8 @@ use citysim::{
 /// The v1 city cut into three Mid districts by x, the district law on, and
 /// litter and the street on with nothing seeded (the tests seed by hand).
 fn street_cfg() -> Config {
-    let assets = Config::load();
-    let mut c = Config::load().v1_profile();
+    let assets = Config::load().dole_city();
+    let mut c = Config::load().dole_city().v1_profile();
     c.districts = DistrictsCfg {
         names: vec!["West".into(), "Centre".into(), "East".into()],
         zones: vec!["M".into(), "M".into(), "M".into()],
@@ -386,7 +386,7 @@ fn test_bankruptcy_below_floor_leaves_derelict() {
 
 #[test]
 fn test_seed_derelicts_spread_over_sump() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.street.seed_derelict_blocks = 8;
     // M15 W31: The Unplugged's Chapel would take one of the eight.
     cfg.creeds.seed_purist = false;
@@ -658,7 +658,7 @@ fn strip(text: &str, token: &str, open: char, close: char) -> String {
 /// litter and the street off, and runs a day as M11 did.
 #[test]
 fn test_pre_m12_street_save_loads_with_zero_litter() {
-    let mut cfg = Config::load().scaled_to(300);
+    let mut cfg = Config::load().dole_city().scaled_to(300);
     cfg.litter = LitterCfg::off();
     cfg.street = StreetCfg::off();
     let mut w = World::new(19, cfg);

@@ -13,7 +13,7 @@ use citysim::{
 
 /// The v1 city (the LOD budget is always on since 2026-10-09).
 fn budget_cfg() -> Config {
-    Config::load().v1_profile()
+    Config::load().dole_city().v1_profile()
 }
 
 fn world(seed: u64) -> World {
@@ -239,7 +239,7 @@ fn test_ledger_counts_body_acts_and_member_days() {
 #[test]
 fn test_dry_scavenge_is_done_and_cools_earn() {
     let mut w = world(308);
-    w.config.life = Config::load().life;
+    w.config.life = Config::load().dole_city().life;
     w.config.life.scavenge_p = 0.0;
     let a = civilians(&w, 1)[0];
     w.leave_building(a);
@@ -264,7 +264,7 @@ fn test_dry_scavenge_is_done_and_cools_earn() {
 #[test]
 fn test_reserved_bed_cannot_be_taken() {
     // The 2,000 city: Hotels, the life pass and the budget on.
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let hotels: Vec<EntityId> =
         w.buildings_of_kind(BuildingKind::Hotel).iter().copied().filter(|&h| street::is_hotel(&w, h)).collect();
     let h = hotels[0];
@@ -377,7 +377,7 @@ fn test_held_prisoner_is_no_partner_or_runner() {
     }
 
     // The Virt pass: a held prisoner with a deck gets no run order.
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.hack.stat_hack_min = 0.0;
     let mut v = World::new(42, cfg);
     let a = v
@@ -436,7 +436,7 @@ use citysim::systems::contracts;
 
 /// The shipped city (the seeded Fixers stand in Mid East and Sump Central).
 fn shipped(seed: u64) -> World {
-    World::new(seed, Config::load())
+    World::new(seed, Config::load().dole_city())
 }
 
 /// `n` free adults with no edge between any two, no gang, no guard's job.

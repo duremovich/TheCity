@@ -68,7 +68,7 @@ fn three(w: &World) -> (EntityId, EntityId, EntityId) {
 
 #[test]
 fn test_grudge_forms_at_spouse_weight_on_heard_killing() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let (a, b, k) = three(&w);
     w.set_spouse(a, b);
     heard_killing(&mut w, a, k, b, 0.6);
@@ -84,7 +84,7 @@ fn test_grudge_forms_at_spouse_weight_on_heard_killing() {
 
 #[test]
 fn test_grudge_inherits_on_holder_death() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let ads = adults(&w);
     let (h, t, _) = three(&w);
     let born = |w: &World, x: EntityId| w.comp::<Identity>(x).map_or(0, |i| i.born_tick);
@@ -110,7 +110,7 @@ fn test_grudge_inherits_on_holder_death() {
 
 #[test]
 fn test_grudge_settles_on_target_death_by_anyone() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let (h, t, other) = three(&w);
     grudges::add(&mut w, h, t, GrudgeCause::Robbed, 0.7, 0);
     assert!(grudges::holds(&w, h, t, 0.5));
@@ -122,7 +122,7 @@ fn test_grudge_settles_on_target_death_by_anyone() {
 
 #[test]
 fn test_hunt_gates_on_max_hunts() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.hunt.max_hunts = 1;
     let mut w = World::new(42, cfg);
     let ads = adults(&w);
@@ -137,14 +137,14 @@ fn test_hunt_gates_on_max_hunts() {
     assert!(!hunt::adopt(&mut w, h2, HuntWhy::Goal));
     assert!(hunt::considerations(&w, h1).is_some(), "a hunter is scored whatever the cap");
     // Below hunt_min nobody hunts.
-    let mut w2 = World::new(42, Config::load());
+    let mut w2 = World::new(42, Config::load().dole_city());
     grudges::add(&mut w2, h1, t1, GrudgeCause::Assaulted, 0.3, 0);
     assert!(hunt::considerations(&w2, h1).is_none());
 }
 
 #[test]
 fn test_hunted_statistical_target_promoted_at_stakeout() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(2 * TICKS_PER_HOUR);
     let lod = |w: &World, x: EntityId| w.comp::<Brain>(x).map(|b| b.lod);
     let stat: Vec<EntityId> = adults(&w).into_iter().filter(|&x| lod(&w, x) == Some(Lod::Statistical)).collect();
@@ -175,7 +175,7 @@ fn trace_of(flags: u16, district: citysim::DistrictId, last_day: u64) -> Trace {
 #[test]
 fn test_askaround_returns_trace_habit_without_sighting() {
     use citysim::components::trace_flags;
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.tick = 20 * TICKS_PER_DAY;
     let day = w.day();
     let employed = adults(&w)
@@ -207,7 +207,7 @@ fn test_askaround_returns_trace_habit_without_sighting() {
 
 #[test]
 fn test_friend_deceive_sends_hunter_elsewhere() {
-    let base = World::new(42, Config::load());
+    let base = World::new(42, Config::load().dole_city());
     let bars = base.buildings_of_kind(BuildingKind::Bar).to_vec();
     assert!(bars.len() >= 2);
     let (h, r, t) = three(&base);
@@ -254,7 +254,7 @@ fn test_friend_deceive_sends_hunter_elsewhere() {
 
 #[test]
 fn test_revenge_killing_is_murder_and_grudge_witness_silent() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.crime.witness_base = 1.0;
     let mut w = World::new(42, cfg);
     let ads = adults(&w);
@@ -292,7 +292,7 @@ fn test_revenge_killing_is_murder_and_grudge_witness_silent() {
 
 #[test]
 fn test_kill_chain_makes_next_grudge_chain_plus_one() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let (h, t, _) = three(&w);
     grudges::add(&mut w, h, t, GrudgeCause::KilledKin(EntityId::NONE), 1.0, 1);
     assert!(hunt::adopt(&mut w, h, HuntWhy::Goal));
@@ -322,7 +322,7 @@ fn test_kill_chain_makes_next_grudge_chain_plus_one() {
 
 #[test]
 fn test_vendetta_opens_and_retaliate_targets_it() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.gangs.order_flat.retaliate = 5.0;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10);
@@ -355,7 +355,7 @@ fn test_vendetta_opens_and_retaliate_targets_it() {
 
 #[test]
 fn test_contract_lost_on_honour() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let sec: Vec<EntityId> = w
         .corps()
         .into_iter()
@@ -383,7 +383,7 @@ fn test_contract_lost_on_honour() {
 
 #[test]
 fn test_guard_body_turns_strip_into_fight() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let (dead, g, s) = three(&w);
     w.edge_entry(g, dead).kind = RelKind::Family;
     let bar = w.buildings_of_kind(BuildingKind::Bar)[0];
@@ -434,7 +434,7 @@ fn test_guard_body_turns_strip_into_fight() {
 /// (M15 phase 5; it was 0.3 × 0.8).
 #[test]
 fn test_noticing_victim_holds_one_grudge_per_deed() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.crime.witness_base = 1.0;
     let mut w = World::new(42, cfg);
     let (thief, victim, _) = three(&w);

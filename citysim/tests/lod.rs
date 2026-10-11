@@ -128,8 +128,10 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
     }
 }
 
-/// Parity v2 (M10 § 7, D37): Full vs Statistical on the 2,000 map's city
-/// scaled to 500, gangless, 30 days, seeds 2000-2005 pooled. Thefts, hunger-days, arrests,
+/// Parity v2 (M10 § 7, D37): Full vs Statistical in `calibrate`'s city
+/// (`Config::calibration_city` at `[world] population`: the shipped city,
+/// gangless, riot- and asset-free; 500 residents until the 2026-10-09
+/// recalibration), 30 days, seeds 2000-2005 pooled. Thefts, hunger-days, arrests,
 /// assaults, violent deaths and marriages per 100 agent-days within 15%
 /// (floor 0.5); then, with every hole bound, the share of attributed crimes
 /// per actor lawfulness bucket within `max(0.15 x share, 0.05)`. Run with
@@ -139,11 +141,11 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
 fn test_full_vs_statistical_within_15pct() {
     use citysim::systems::bind;
     use citysim::{EventKind, Personality};
-    const AGENTS: u32 = 500;
+    let agents: u32 = Config::load().world.population;
     const DAYS: u64 = 30;
     const SEEDS: [u64; 6] = [2000, 2001, 2002, 2003, 2004, 2005];
     struct Run {
-        rates: [f64; 6],
+        rates: [f64; 9],
         actors: [f64; 3],
     }
     fn bucket(w: &World, id: citysim::EntityId) -> Option<usize> {
@@ -156,9 +158,9 @@ fn test_full_vs_statistical_within_15pct() {
             2
         })
     }
-    fn run(force: Lod, seed: u64) -> Run {
+    fn run(force: Lod, seed: u64, agents: u32) -> Run {
         // The city `calibrate` measured: gangless, full Warehouse.
-        let mut cfg = Config::load().calibration_city(AGENTS);
+        let mut cfg = Config::load().calibration_city(agents);
         cfg.lod.force = Some(force);
         cfg.lod.stat_violence_mult = 1.0;
         // The learned-policy experiment: `CITYSIM_STAT_POLICY=mlp`.
@@ -229,7 +231,7 @@ fn test_full_vs_statistical_within_15pct() {
             "{force:?} seed {seed}: thefts by bucket {:?}, violence/attributed by bucket {:?}, population {pop:?}",
             split[0], split[1]
         );
-        let per = f64::from(AGENTS) * DAYS as f64 / 100.0;
+        let per = f64::from(agents) * DAYS as f64 / 100.0;
         let sum = |f: fn(&citysim::DayRow) -> u32| w.stats.history.iter().map(f).sum::<u32>() as f64 / per;
         Run {
             rates: [
@@ -239,6 +241,18 @@ fn test_full_vs_statistical_within_15pct() {
                 assaults as f64 / per,
                 sum(|r| r.deaths_violence),
                 marriages as f64 / per,
+                // Hunger as sickness § 5 (zeros with `[sickness]` off): the
+                // synth share of meals (percent), bin meals per 100
+                // agent-days, mean malnutrition on the last day (x 100).
+                {
+                    let meals = |f: fn(&citysim::DayRow) -> u32| w.stats.history.iter().map(f).sum::<u32>() as f64;
+                    let all = meals(|r| {
+                        r.health.meals_real + r.health.meals_synth + r.health.meals_dive + r.health.meals_alms
+                    });
+                    100.0 * meals(|r| r.health.meals_synth + r.health.meals_alms) / all.max(1.0)
+                },
+                sum(|r| r.health.meals_dive),
+                100.0 * f64::from(w.stats.history.back().map_or(0.0, |r| r.health.mean_malnutrition)),
             ],
             actors: actors.map(|n| n as f64),
         }
@@ -249,7 +263,7 @@ fn test_full_vs_statistical_within_15pct() {
     // on the Full side alone between seeds 2000-2002 and 2003-2005 (law0
     // 0.204 vs 0.242) against a 0.05 tolerance (M10 review fixes).
     let pooled = |force: Lod| {
-        let runs: Vec<Run> = SEEDS.iter().map(|&s| run(force, s)).collect();
+        let runs: Vec<Run> = SEEDS.iter().map(|&s| run(force, s, agents)).collect();
         let n = runs.len() as f64;
         let rates = std::array::from_fn(|i| runs.iter().map(|r| r.rates[i]).sum::<f64>() / n);
         let counts: [f64; 3] = std::array::from_fn(|b| runs.iter().map(|r| r.actors[b]).sum::<f64>());
@@ -258,7 +272,17 @@ fn test_full_vs_statistical_within_15pct() {
     };
     let full = pooled(Lod::Full);
     let stat = pooled(Lod::Statistical);
-    let names = ["thefts", "hunger-days", "arrests", "assaults", "violent deaths", "marriages"];
+    let names = [
+        "thefts",
+        "hunger-days",
+        "arrests",
+        "assaults",
+        "violent deaths",
+        "marriages",
+        "synth % meals",
+        "bin meals",
+        "malnutrition x100",
+    ];
     let mut failures = Vec::new();
     for (i, name) in names.iter().enumerate() {
         let (f, s) = (full.rates[i], stat.rates[i]);
@@ -318,7 +342,7 @@ fn test_command_log_replay_matches() {
 fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
     use citysim::{Building, BuildingKind, EventKind, Inventory, Job, Wallet};
     for broke in [false, true] {
-        let mut w = World::new(42, Config::load());
+        let mut w = World::new(42, Config::load().dole_city());
         w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
         let id = w
             .tier(Lod::Statistical)
@@ -337,6 +361,11 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
         let stock = w.comp::<Building>(other).map_or(0, |b| b.stock_food);
         assert!(stock > 0);
         assert_eq!(w.food_market(id), Some(other));
+        // The meal's mechanics, not its delay: the M10 rule (every hungry
+        // hour eats), not the table's learned `p_meal`.
+        if let Some(t) = w.stat_table.as_mut() {
+            t.p_meal = None;
+        }
         // Homeless: no pantry a housemate could refill within the hour.
         w.set_home(id, None);
         w.comp_mut::<Inventory>(id).expect("inv").food = 0;
@@ -344,6 +373,12 @@ fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
         if broke {
             // No dole to buy with: the starving agent's only meal is a theft.
             w.levers.dole_per_day = 0;
+            // The M10 rule (a table without `p_desperate`: a starving adult
+            // steals whatever its lawfulness); the table's `p_desperate`
+            // roll is the no-net tests' below.
+            if let Some(t) = w.stat_table.as_mut() {
+                t.p_desperate = None;
+            }
         }
         {
             let n = w.comp_mut::<Needs>(id).expect("needs");
@@ -563,4 +598,128 @@ fn test_no_net_child_keeps_the_starving_theft_rule() {
             w.events.iter().any(|e| e.id >= start && e.kind == EventKind::Theft && e.actors.first() == Some(&id));
         assert_eq!(stole, starving, "starving {starving}: a child steals only when starving");
     }
+}
+
+/// Hunger as sickness P5h (a harness change): the all-Full calibration and
+/// parity cities scale the planner budgets by n / 500 (never below the
+/// shipped values), so a 2,000-agent Full city is not a planner-starved one.
+#[test]
+fn test_calibration_city_scales_the_planner_budget() {
+    let base = Config::load();
+    let (p, e) = (base.brain.plan_budget_per_tick, base.brain.plan_expansion_budget_per_tick);
+    let at = |n: u32| {
+        let c = Config::load().calibration_city(n);
+        (c.brain.plan_budget_per_tick, c.brain.plan_expansion_budget_per_tick)
+    };
+    assert_eq!(at(500), (p, e));
+    assert_eq!(at(250), (p, e), "never below the shipped budget");
+    assert_eq!(at(2000), (4 * p, 4 * e));
+}
+
+/// Hunger as sickness P5h, a printed finding (not an assert): the planner
+/// queue in the shipped mixed-LOD city on seed 42 (does a busy on-screen
+/// crowd starve the planner in the real game too?). Max and mean queue
+/// length sampled hourly, and the stale drops, over 3 days.
+#[test]
+fn finding_planner_queue_shipped_city() {
+    let mut w = World::new(42, Config::load());
+    let mut lens = Vec::new();
+    let mut full_max = 0;
+    for _ in 0..(3 * 24) {
+        w.run_ticks(TICKS_PER_HOUR);
+        lens.push(w.plan_queue.len());
+        full_max = full_max.max(counts(&w).0);
+    }
+    let max = lens.iter().copied().max().unwrap_or(0);
+    let mean = lens.iter().sum::<usize>() as f64 / lens.len().max(1) as f64;
+    eprintln!(
+        "FINDING planner queue (shipped, seed 42, 3 days): budget {}/tick; queue max {max} mean {mean:.1}; stale drops {}; Full agents max {full_max}",
+        w.config.brain.plan_budget_per_tick, w.plan_stale_drops
+    );
+}
+
+/// Diet parity (hunger fix item 11's off-screen side): an employed
+/// Statistical agent off shift, with a meal's coins and an empty household
+/// pantry, stocks the pantry in its hour (the Full worker's grocery run);
+/// with item 11 off it does not.
+#[test]
+fn test_statistical_worker_off_shift_stocks_the_pantry() {
+    use citysim::{Household, Inventory, Job, Needs, Wallet};
+    for on in [true, false] {
+        let mut cfg = Config::load();
+        cfg.economy2.wages = true;
+        cfg.economy2.no_safety_net = true;
+        cfg.life.hf_shift_meals = on;
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY + 20 * TICKS_PER_HOUR);
+        let tod = w.tick_of_day();
+        let id = w
+            .tier(Lod::Statistical)
+            .iter()
+            .copied()
+            .find(|&a| {
+                citysim::systems::demography::is_adult(&w, a)
+                    && !w.has::<Sentence>(a)
+                    && w.comp::<Job>(a).is_some_and(|j| j.employer.is_some() && !j.on_shift(tod))
+                    && w.comp::<Household>(a).is_some_and(|h| h.home.is_some())
+            })
+            .expect("an employed Statistical adult off shift");
+        let home = w.comp::<Household>(id).and_then(|h| h.home).unwrap();
+        for r in w.residents_of(home).to_vec() {
+            if let Some(i) = w.comp_mut::<Inventory>(r) {
+                i.food = 0;
+                i.synth = 0;
+                i.stolen_food = 0;
+            }
+            if let Some(n) = w.comp_mut::<Needs>(r) {
+                n.hunger = 0.95;
+            }
+        }
+        if let Some(b) = w.comp_mut::<citysim::Building>(home) {
+            b.stock_food = 0;
+            b.synth_food = 0;
+        }
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = 60;
+        stat_hour(&mut w);
+        let stock = w.comp::<citysim::Building>(home).map_or(0, |b| b.stock_food);
+        eprintln!("item 11 {on}: pantry after the hour {stock}");
+        assert_eq!(stock > 0, on, "the off-shift worker's pantry run (item 11 {on})");
+    }
+}
+
+/// Diet parity: a meal at hand (carried, or in the Home pantry) is eaten
+/// before a bin is: `bins::dive_target` has none for an agent holding one,
+/// in both tiers.
+#[test]
+fn test_no_bin_with_a_meal_at_hand() {
+    use citysim::{Household, Inventory, Needs, Wallet};
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    cfg.sickness.enabled = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    // A housed broke adult, starving, with a bin in reach once its food is gone.
+    let found = w.citizens().into_iter().find_map(|a| {
+        if !citysim::systems::demography::is_adult(&w, a) || w.has::<Sentence>(a) {
+            return None;
+        }
+        let home = w.comp::<Household>(a).and_then(|h| h.home)?;
+        let mut c = w.clone();
+        c.comp_mut::<Wallet>(a)?.coins = 0;
+        c.comp_mut::<Needs>(a)?.hunger = 0.05;
+        if let Some(i) = c.comp_mut::<Inventory>(a) {
+            i.food = 0;
+            i.synth = 0;
+            i.stolen_food = 0;
+        }
+        c.comp_mut::<citysim::Building>(home)?.stock_food = 0;
+        citysim::systems::bins::dive_target(&c, a).map(|_| (a, home, c))
+    });
+    let Some((a, home, mut c)) = found else { panic!("no broke adult with a bin in reach") };
+    c.comp_mut::<citysim::Building>(home).unwrap().stock_food = 2;
+    assert!(citysim::systems::bins::dive_target(&c, a).is_none(), "a bin with a pantry meal at home");
+    c.comp_mut::<citysim::Building>(home).unwrap().stock_food = 0;
+    c.comp_mut::<Inventory>(a).unwrap().food = 1;
+    assert!(citysim::systems::bins::dive_target(&c, a).is_none(), "a bin with a meal in hand");
 }

@@ -194,6 +194,14 @@ pub struct Config {
     /// Jobs and room (docs/JOBS_V2.md § 2.3, plan J6-J8): floors.
     #[serde(default)]
     pub floors: FloorsCfg,
+    /// Hunger as sickness (docs/HUNGER_SICKNESS.md § 8): synth and real
+    /// meals, the malnutrition and toxicity meters, the bins, cancer.
+    #[serde(default)]
+    pub sickness: SicknessCfg,
+    /// Class pay (docs/CLASS_PAY.md): graded posts and wages, read only
+    /// with `[economy2] wages` ([`Config::classpay_on`]).
+    #[serde(default)]
+    pub classpay: ClassPayCfg,
     /// Jobs and room J9 (docs/JOBS_V2.md § 1.3): the configured trades
     /// (`[[trades]]` rows), `Role::Trade(TradeId)` indexing them. Read
     /// through [`trades_de`], which also makes the keys a save's
@@ -289,6 +297,17 @@ pub struct TradeCfg {
     /// J14: how the shift is worked (`post`, or the Super's `round`).
     #[serde(default)]
     pub duty: TradeDuty,
+    /// Class pay (docs/CLASS_PAY.md): the post's grade (0 labour, 1
+    /// skilled, 2 professional, 3 management), read only with class pay on.
+    #[serde(default)]
+    pub grade: u8,
+    /// Class pay: the row exists only with class pay on
+    /// ([`Config::trade_live`]); off, it posts nothing anywhere.
+    #[serde(default)]
+    pub classpay: bool,
+    /// Class pay: only a corp-owned workplace posts the row's places.
+    #[serde(default)]
+    pub corp_only: bool,
     /// J14 (a `round` duty): the doors a shift's round visits.
     #[serde(default)]
     pub round_stops: u8,
@@ -2418,6 +2437,42 @@ pub struct StreetCfg {
     /// while the Treasury holds `city_absorb_floor` (0 = never).
     #[serde(default)]
     pub relet_days: u64,
+    /// Hunger as sickness P4b (Dylan, J25: the evicted land on the lower
+    /// rungs, not the street): the squat rung grows with demand. Each night
+    /// while the rough sleepers outnumber the free squat slots, up to
+    /// `shanties_per_night` vacant Lots in the districts with the most rough
+    /// sleepers go up as shanties: the Lot stays a Lot (a builder may
+    /// clear it), derelict, ownerless, `shanty_capacity` slots; at most
+    /// `shanty_lots_max` Lots at once, so the construction P2 kept them for
+    /// goes on (in flight: off is the city before it; on with the flip).
+    #[serde(default)]
+    pub shanties: bool,
+    #[serde(default = "default_shanty_capacity")]
+    pub shanty_capacity: u8,
+    #[serde(default = "default_shanties_per_night")]
+    pub shanties_per_night: usize,
+    #[serde(default = "default_shanty_lots_max")]
+    pub shanty_lots_max: usize,
+    /// P4b (with `shanties`): a Hotel booked full at the night's pass adds a
+    /// floor of beds, paid by its owner at `floor_cost`, up to this many floors.
+    #[serde(default = "default_hotel_floors_max")]
+    pub hotel_floors_max: u8,
+}
+
+fn default_hotel_floors_max() -> u8 {
+    4
+}
+
+fn default_shanty_lots_max() -> usize {
+    20
+}
+
+fn default_shanty_capacity() -> u8 {
+    24
+}
+
+fn default_shanties_per_night() -> usize {
+    3
 }
 
 impl StreetCfg {
@@ -2435,6 +2490,11 @@ impl StreetCfg {
             squat_reach: 40,
             squat_ban_days: 14,
             relet_days: 0,
+            shanties: false,
+            shanty_capacity: 24,
+            shanties_per_night: 3,
+            shanty_lots_max: 20,
+            hotel_floors_max: 4,
         }
     }
 }
@@ -4273,6 +4333,115 @@ pub struct LifeCfg {
     /// Item 5: an immigrant arrives with a seeded adult's savings for its
     /// Home's tier (`demography::spawn_immigrant`), crossed in from the World.
     pub vf_arrival: bool,
+    /// Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6): the Full
+    /// planner's hunger gaps the recalibration diaries found. Master switch
+    /// (off is the d771073 city byte for byte); the sub-switches are read
+    /// only with it on; `CITYSIM_HFIX_OFF=1,3` leaves single items off.
+    pub hunger_fixes: bool,
+    /// G1: starving with a meal in reach, eat before any paid leisure, a
+    /// bed, a dose or a purchase, and before an exhausted or night sleep.
+    pub hf_food_first: bool,
+    /// G2: Eat's can-obtain gate opens on a stocked Mission in reach.
+    pub hf_mission: bool,
+    /// G3: a theft of food costs `steal_can_buy` more while a meal is affordable.
+    pub hf_buy_not_steal: bool,
+    /// G4: a Beg with no giver is a dry hour (as Scavenge's), not a failure.
+    pub hf_beg_retry: bool,
+    /// P5f: a worker on shift does not leave for leisure (Unwind gated to 0
+    /// on shift; it was `gate_or(0.3)`: 5.2 % of Full shift minutes in the
+    /// all-Full flipped city went to Unwind).
+    pub hf_shift_first: bool,
+    /// P5g (Dylan: relocation): an employed worker whose commute
+    /// (`life::commute_cost`, travel ticks) is past `commute_move_ticks`
+    /// moves to the nearest Home with room within that of work (or trades
+    /// Homes), needing only the first rent (no `rehouse_coins_mult`
+    /// deposit), when it saves `commute_margin_ticks`; up to
+    /// `relocate_per_1000` a day per 1,000 residents.
+    pub hf_relocate: bool,
+    pub commute_move_ticks: u64,
+    pub commute_margin_ticks: u64,
+    pub relocate_per_1000: f32,
+    /// P5g (Dylan: the hiring cap): a candidate within `commute_hire_ticks`
+    /// (`life::commute_cost`) of the workplace is preferred over any beyond
+    /// it (skill and the rehire bonus rank within each band); world creation
+    /// houses the seeded staff near work where Homes allow (the relocation
+    /// pass, uncapped).
+    pub hf_hire_near: bool,
+    pub commute_hire_ticks: u64,
+    /// P5h (Dylan: the city grows toward jobs): an employer with at least
+    /// `housing_demand_min` workers past `commute_move_ticks` and fewer free
+    /// beds than that within `commute_move_ticks` of its door, for
+    /// `housing_demand_days` midnights running, gets a Home on the nearest
+    /// vacant Lot in that range (else a floor on the nearest Home there
+    /// below `[floors] floors_max`); up to `housing_builds_per_1000` a day
+    /// per 1,000 residents. Its owner corp pays `found_cost` / `floor_cost`
+    /// when it can (company housing), else the Treasury buys it from the
+    /// World when it can (keeping `[treasury] band[0]`), else nothing.
+    pub hf_grow_housing: bool,
+    /// P5i (coordinator call): meals around the shift. (a) At home before a
+    /// shift its hunger would not last (under the Eat line by the shift's
+    /// end), a worker eats from the pantry first (when a meal would not
+    /// overfill it) and packs a meal to carry; (b) off shift, with the
+    /// household's pantry and its carried meals under a shift's worth and
+    /// coins for a meal, an idle worker makes a grocery run (buy, carry
+    /// home, store) when the round trip ends `DEPARTURE_MARGIN` before the
+    /// next shift's leaving time.
+    pub hf_shift_meals: bool,
+    pub grocery_score: f32,
+    /// Item 11 (b), after the d19 diaries (up to 2.4 h a day of grocery
+    /// walking, a third of runs ended by Sleep mid-walk): no grocery run
+    /// starts that would leave the body under this energy by the time it is
+    /// home (the energy decays over the round trip).
+    pub grocery_energy_floor: f32,
+    /// Item 11 (b): a run must bring home a meal for each this many ticks of
+    /// its round trip (here to the shop and home): a 2 h trip for two meals,
+    /// 7 h for seven. The d19 fighter walked 3.7 h each way for 1-2 meals; a
+    /// poor man far from a shop shops rarely and big (0 turns it off).
+    pub grocery_ticks_per_meal: u64,
+    /// P5j (coordinator call): work-night sleep. The bedtime before a
+    /// workday shift is the leaving time (`routine::must_leave_for_work`'s:
+    /// the walk to work and `DEPARTURE_MARGIN` before the start) minus a
+    /// full night (`[needs] sleep_ticks_full`) minus the walk home. Sleep
+    /// gains `work_night_sleep_flat` x a pressure rising from 0 at
+    /// `work_night_ramp_ticks` before bedtime to 1 at bedtime; past it,
+    /// Unwind and the grocery run score x `work_night_unwind_mult` (a
+    /// weight, not a ban: some stay out).
+    pub hf_work_night: bool,
+    /// Coordinator call (after the recalibration, 2026-10-10): with
+    /// `no_safety_net` on, a homeless adult who holds a Job re-houses on the
+    /// first rent (no `rehouse_coins_mult` deposit), as relocation does; the
+    /// jobless keep the deposit. The flipped city had 82-92 employed adults
+    /// on the street (~8 %), 930-1,420 beds empty, the deposit 21 coins on a
+    /// ~6 a day wage.
+    pub hf_rehouse_employed: bool,
+    pub work_night_sleep_flat: f32,
+    pub work_night_ramp_ticks: u64,
+    pub work_night_unwind_mult: f32,
+    pub housing_demand_min: u32,
+    pub housing_demand_days: u16,
+    pub housing_builds_per_1000: f32,
+    /// The housing catch-up (`life::grow_housing`): with this > 0 a ready
+    /// employer's unmet demand (far workers less the free beds in range)
+    /// asks `ceil(unmet / a Home's beds / housing_catchup_days)` builds a
+    /// day, the city's floored at `housing_builds_per_1000` and capped at
+    /// `housing_builds_max_per_1000` per 1,000 residents, and a build keeps
+    /// the employer's demand count. 0: the flat rule (one build per ready
+    /// employer, the count reset by a build).
+    pub housing_catchup_days: f32,
+    pub housing_builds_max_per_1000: f32,
+    /// The pre-roll (`life::preroll_housing`, world creation; with items
+    /// 8-10, wages and no safety net on): Homes and floors toward the
+    /// seeded staff's jobs, unpaid as the seed buildings, until the far
+    /// workers have beds in range or no Lot or floor is left there.
+    pub housing_preroll: bool,
+    /// G2: a starving agent walks this much further to a Mission.
+    pub hungry_reach_mult: f32,
+    /// G3: the theft cost added while the agent can buy a meal.
+    pub steal_can_buy: f32,
+    /// G4: dry Begs in a row that cool Earn ...
+    pub beg_dry_max: u8,
+    /// ... for this many hours.
+    pub beg_cool_hours: u64,
 }
 
 impl Default for LifeCfg {
@@ -4341,6 +4510,38 @@ impl Default for LifeCfg {
             vf_chrome_cap: true,
             vf_rent_meal: true,
             vf_arrival: true,
+            hunger_fixes: false,
+            hf_food_first: true,
+            hf_mission: true,
+            hf_buy_not_steal: true,
+            hf_beg_retry: true,
+            hf_shift_first: true,
+            hf_relocate: true,
+            commute_move_ticks: 80,
+            commute_margin_ticks: 40,
+            relocate_per_1000: 20.0,
+            hf_hire_near: true,
+            commute_hire_ticks: 80,
+            hf_grow_housing: true,
+            hf_shift_meals: true,
+            grocery_score: 0.5,
+            grocery_energy_floor: 0.4,
+            grocery_ticks_per_meal: 60,
+            hf_work_night: true,
+            hf_rehouse_employed: true,
+            work_night_sleep_flat: 0.5,
+            work_night_ramp_ticks: 120,
+            work_night_unwind_mult: 0.3,
+            housing_demand_min: 6,
+            housing_demand_days: 3,
+            housing_builds_per_1000: 1.0,
+            housing_catchup_days: 5.0,
+            housing_builds_max_per_1000: 6.0,
+            housing_preroll: true,
+            hungry_reach_mult: 2.0,
+            steal_can_buy: 12.0,
+            beg_dry_max: 3,
+            beg_cool_hours: 1,
         }
     }
 }
@@ -4836,6 +5037,18 @@ impl Config {
         }
     }
 
+    /// Class pay (docs/CLASS_PAY.md): `[economy2] wages` and `[classpay]
+    /// enabled`.
+    pub fn classpay_on(&self) -> bool {
+        self.economy2.wages && self.classpay.enabled
+    }
+
+    /// Class pay: does this `[[trades]]` row post places in this city (a
+    /// `classpay` row only with class pay on)?
+    pub fn trade_live(&self, row: &TradeCfg) -> bool {
+        !row.classpay || self.classpay_on()
+    }
+
     /// J9: a trade's `[[trades]]` row.
     pub fn trade(&self, t: crate::components::TradeId) -> Option<&TradeCfg> {
         self.trades.get(t.index())
@@ -4979,42 +5192,67 @@ impl Config {
         self.economy.price_base = 3.0;
         self.economy2.wages = false;
         self.economy2.no_safety_net = false;
+        // Hunger as sickness: in flight, pinned off as the wages switches.
+        self.sickness.enabled = false;
         self
     }
 
-    /// The city `calibrate` measures and the LOD parity test replays: `n`
-    /// residents (`scaled_to`), gangless (the table never modelled gang
-    /// actions, D26) and a full Warehouse (M10 phase 5b). Full farmers work
-    /// about half the shift hours a Statistical farmer is credited with, so
-    /// an all-Full city runs a food deficit the real, mostly Statistical
-    /// city never sees: at 500 residents it emptied its Warehouse by day 24,
-    /// the price reached 16, and the table learned famine theft as everyday
-    /// theft.
+    /// The flip (Dylan, 2026-10-10): the shipped city runs wages from
+    /// revenue with no safety net, hunger as sickness and the shanties. This
+    /// is the old default, the dole city, kept reachable (P10 keeps its
+    /// mechanisms as policy levers): `[economy2] wages` and `no_safety_net`
+    /// off, `[sickness]` off, `[street] shanties` off (class pay and the
+    /// no-net hunger fixes read only with the wages on). The housing
+    /// catch-up (`[life] housing_catchup_days`, 2026-10-11) is off: its
+    /// housing growth is the flat P5h rule (the pre-roll reads no-net).
+    pub fn dole_city(mut self) -> Config {
+        self.economy2.wages = false;
+        self.economy2.no_safety_net = false;
+        self.sickness.enabled = false;
+        self.street.shanties = false;
+        self.life.housing_catchup_days = 0.0;
+        self
+    }
+
+    /// The Full city size the shipped planner budgets serve
+    /// (`calibration_city` scales them past it).
+    pub const PLAN_BUDGET_REF_AGENTS: u32 = 500;
+
+    /// The city `calibrate` measures and the LOD parity test replays: the
+    /// shipped city at `n` residents (`scaled_to`; both run the shipped
+    /// population since the recalibration, see below) with only the cuts
+    /// whose effect the Statistical tier models elsewhere. Gangless (the
+    /// table never modelled gang actions, D26; off screen a gang's violence
+    /// is `fviolence`'s ledger, L2 phase 4) and a full Warehouse (M10 phase
+    /// 5b). Full farmers work about half the shift hours a Statistical
+    /// farmer is credited with, so an all-Full city runs a food deficit the
+    /// real, mostly Statistical city never sees: at 500 residents it emptied
+    /// its Warehouse by day 24, the price reached 16, and the table learned
+    /// famine theft as everyday theft.
+    ///
+    /// The recalibration (2026-10-09, `recal`; ported with hunger as
+    /// sickness P5 onto the fixed planner): the table's rows condition on
+    /// phase, lawfulness and hunger only, so every off-screen agent rolls the
+    /// calibration city's average hour. That city was corp-less, rent-free,
+    /// with equal wallets, no derelicts and 500 residents on the 2,000 map:
+    /// on the flipped config about half its adults stayed jobless and broke
+    /// while the shipped city is ~93 % employed (p_killed 5.7x, p_steal 3x),
+    /// and at 500 residents a quarter of the police patrolled the same
+    /// streets. The corps (their jobs, private guards, Markets and Blocks),
+    /// rent, the tiered opening wallets, the class coupling and the seeded
+    /// derelicts are the shipped city's now; three pooled seeds average one
+    /// seed's landlords out.
     pub fn calibration_city(self, n: u32) -> Config {
         let mut c = self.scaled_to(n);
         c.gangs.max_members = 0;
         c.world.warehouse_initial = c.buildings.warehouse.stock_cap;
-        // M11: the calibration city stays city-owned and rent-free with equal
-        // wallets, so the table measures behaviour, not one seed's landlords.
-        c.rent.base = [0, 0, 0];
-        // The real city shops by price (D15); keep that walk, not the
-        // corp-free default's nearest Market. The dole, tax and school
-        // meals stay the 2,000 city's.
-        let tiles = c.corps.shop_price_tiles;
-        c.corps = CorpsCfg::none();
-        c.corps.shop_price_tiles = tiles;
-        c.world.coins_by_tier = [1.0, 1.0, 1.0];
-        // M11 phase 4: no class coupling (immigration at the lever, no Dreg
-        // emigration), as v1_profile.
-        c.classes.couple_immigration = false;
-        c.classes.dreg_emigrate_days = 0;
-        // M12 D48: litter and the street on, but no seeded derelicts (the
-        // table measures behaviour, not one seed's housing shortage).
-        c.street.seed_derelict_blocks = 0;
-        // M12 D48 (phase 4): riots off, no splits, no crossfire.
+        // M12 D48 (phase 4): riots off, no splits, no crossfire (off screen
+        // a riot is `fviolence`'s source).
         c.riots = RiotsCfg::off();
         c.gangs.split_base = 0.0;
-        // M13 D46/D50: no assets: the table and the parity test are unchanged.
+        // M13 D46/D50: no assets. `lod::stat_probs` layers a kitted agent's
+        // Kit and a stim withdrawal over the bare row, so the row must not
+        // already hold them.
         c.assets = AssetsCfg::off();
         c.vehicles = VehiclesCfg::off();
         c.shop = ShopCfg::off();
@@ -5028,6 +5266,15 @@ impl Config {
         // parity test model the off-screen hours of the city the config
         // ships; on the default config both are off). `v1_profile` still pins
         // them off.
+        // Hunger as sickness P5h (a harness change): the planner budgets were
+        // tuned for a 500-agent Full city; the all-Full calibration and
+        // parity cities scale them by n / 500 (never below the shipped
+        // values). At 2,000 on budget 12 the queue held ~480 and 12% of
+        // shift time was a Work goal waiting on a plan (1.1% at 4x).
+        let scale = (f64::from(n) / f64::from(Self::PLAN_BUDGET_REF_AGENTS)).max(1.0);
+        c.brain.plan_budget_per_tick = (c.brain.plan_budget_per_tick as f64 * scale).ceil() as usize;
+        c.brain.plan_expansion_budget_per_tick =
+            (c.brain.plan_expansion_budget_per_tick as f64 * scale).ceil() as usize;
         c
     }
 
@@ -5963,5 +6210,234 @@ impl FloorsCfg {
     /// J8: the most floors a `kind` may have (1 when not listed).
     pub fn max_for(&self, kind: BuildingKind) -> u8 {
         self.floors_max.iter().find(|(k, _)| BuildingKind::parse(k) == Some(kind)).map_or(1, |(_, &v)| v.max(1))
+    }
+}
+
+/// `[sickness]` (docs/HUNGER_SICKNESS.md § 8; starting values). Every key
+/// is read only with `enabled` (in flight: off is the city before it).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SicknessCfg {
+    pub enabled: bool,
+    /// § 1-2: synth and real meals, the meters, the debuffs.
+    pub diet: bool,
+    /// § 4: the bins and the dive.
+    pub bins: bool,
+    /// § 3: cancer and its treatment.
+    pub cancer: bool,
+    /// Synth meals a shelf unit is cut into (each at a `1 / stretch` price).
+    pub synth_stretch: u32,
+    /// Buy real at coins >= this many real meals (coordinator call on P2:
+    /// 10 kept the employed on synth for good) ...
+    pub real_meal_reserve: i64,
+    /// ... or this malnourished with two real meals' coins.
+    pub mal_seek_real: f32,
+    /// An hour below this hunger is a hungry hour.
+    pub mal_hungry_edge: f32,
+    /// Malnutrition per fully hungry day.
+    pub mal_hungry: f32,
+    /// Malnutrition per day at an all-synth (or scraps) diet.
+    pub mal_poor_diet: f32,
+    /// A synth (or Mission) diet raises malnutrition only to here: run-down,
+    /// not sick; hunger and bin scraps push past it (coordinator call on P2).
+    pub synth_malnut_cap: f32,
+    /// Malnutrition off per real meal (two a day at most).
+    pub mal_real: f32,
+    pub mal_onset: f32,
+    /// Toxicity per synth or Mission meal.
+    pub tox_synth: f32,
+    /// Toxicity per bin meal.
+    pub tox_dive: f32,
+    /// The share of toxicity cleared a day (after P5: a flat clearance gave
+    /// no resting level). The steady level of a diet of S synth meals a day
+    /// is `tox_synth x S / tox_clear_frac`.
+    pub tox_clear_frac: f32,
+    /// World creation (and an arrival): an adult's toxicity approaches its
+    /// diet's steady level by `1 - exp(-(age - 16) / tox_seed_years)`.
+    pub tox_seed_years: f32,
+    /// The seeded levels' spread: x `(1 - j/2 + j u)`, `u` a hash.
+    pub tox_seed_jitter: f32,
+    pub tox_onset: f32,
+    pub mal_energy: f32,
+    pub tox_energy: f32,
+    pub cancer_energy: f32,
+    pub mal_work: f32,
+    pub cancer_work: f32,
+    /// A day's sick chance per unit of malnutrition past the onset (scaled).
+    pub sick_mal: f32,
+    /// Sick days in the last 14 that cost the job (Dylan, decision 4).
+    pub sick_fire_days: u32,
+    pub mal_mood: f32,
+    pub tox_mood: f32,
+    pub cancer_mood: f32,
+    /// The old-age hazard x (1 + this x (m + t)).
+    pub frail_old: f32,
+    /// The fight's skill term less this x (m' + c).
+    pub frail_fight: f32,
+    /// No conception at or above this malnutrition.
+    pub fertile_mal_max: f32,
+    /// The cancer's daily hazard: p = this x toxicity x age factor (Dylan,
+    /// after P5: a stationary hazard; no dose term, which compounded).
+    pub cancer_hazard: f32,
+    /// The age factor `1 + max(0, age - cancer_age_from) / cancer_age_span`
+    /// (sim years).
+    pub cancer_age_from: f32,
+    pub cancer_age_span: f32,
+    pub cancer_growth: f32,
+    pub cancer_symptom: f32,
+    pub cancer_treat_price: i64,
+    pub cure_stage: f32,
+    pub remission: f32,
+    pub treat_tox_mult: f32,
+    pub p_stat_treat: f32,
+    pub bin_cap: u16,
+    pub bin_meals_per_unit: u16,
+    pub venue_scrap: f32,
+    /// Scrap meals into a Market's bin per shelf unit sold (retail waste).
+    pub market_waste: f32,
+    /// Scrap meals into a Home's bin per pantry meal eaten (household waste).
+    pub home_scrap: f32,
+    pub bin_rot: f32,
+    pub dive_reach_tiles: u32,
+    pub dive_satisfy: f32,
+    pub dive_sick_p: f32,
+    pub regular_days: u8,
+    /// A held gang Home within this many tiles makes the bin the gang's.
+    pub bin_turf_tiles: u32,
+    pub bin_shake_p: f32,
+    pub bin_toll: i64,
+    /// Days at hunger 0 before a death by starvation.
+    pub starve_grace_days: u64,
+}
+
+impl Default for SicknessCfg {
+    fn default() -> Self {
+        SicknessCfg {
+            enabled: false,
+            diet: true,
+            bins: true,
+            cancer: true,
+            synth_stretch: 3,
+            real_meal_reserve: 3,
+            mal_seek_real: 0.5,
+            mal_hungry_edge: 0.25,
+            mal_hungry: 0.08,
+            mal_poor_diet: 0.012,
+            synth_malnut_cap: 0.45,
+            mal_real: 0.02,
+            mal_onset: 0.3,
+            tox_synth: 0.005,
+            tox_dive: 0.012,
+            tox_clear_frac: 0.03,
+            tox_seed_years: 8.0,
+            tox_seed_jitter: 0.3,
+            tox_onset: 0.4,
+            mal_energy: 0.5,
+            tox_energy: 0.3,
+            cancer_energy: 1.0,
+            mal_work: 0.4,
+            cancer_work: 0.5,
+            sick_mal: 0.3,
+            sick_fire_days: 5,
+            mal_mood: 0.2,
+            tox_mood: 0.15,
+            cancer_mood: 0.3,
+            frail_old: 2.0,
+            frail_fight: 0.2,
+            fertile_mal_max: 0.5,
+            cancer_hazard: 0.00017,
+            cancer_age_from: 30.0,
+            cancer_age_span: 10.0,
+            cancer_growth: 0.015,
+            cancer_symptom: 0.25,
+            cancer_treat_price: 240,
+            cure_stage: 0.6,
+            remission: 0.4,
+            treat_tox_mult: 0.5,
+            p_stat_treat: 0.2,
+            bin_cap: 40,
+            bin_meals_per_unit: 2,
+            venue_scrap: 0.3,
+            market_waste: 0.2,
+            home_scrap: 0.2,
+            bin_rot: 0.5,
+            dive_reach_tiles: 40,
+            dive_satisfy: 0.6,
+            dive_sick_p: 0.05,
+            regular_days: 3,
+            bin_turf_tiles: 15,
+            bin_shake_p: 0.3,
+            bin_toll: 1,
+            starve_grace_days: 7,
+        }
+    }
+}
+
+/// `[classpay]` (docs/CLASS_PAY.md; placeholders, not tuned). Every key is
+/// read only with [`Config::classpay_on`] (`[economy2] wages` and
+/// `enabled`): the dole city is the city before it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ClassPayCfg {
+    pub enabled: bool,
+    /// A post's wage multiple by grade: labour, skilled, professional, management.
+    pub grade_mult: [f32; 4],
+    /// The bespoke roles' base grade by `{role:?}` (others labour).
+    pub role_grade: std::collections::BTreeMap<String, u8>,
+    /// Of a corp building's labour staff in a role, the skilled posts (floor).
+    pub skilled_share: f32,
+    /// Days at the corp before a promotion.
+    pub promote_days: u32,
+    pub merit_edu: f32,
+    pub merit_skill: f32,
+    pub merit_tenure: f32,
+    /// Tenure at the same corp counts in full at this many days.
+    pub tenure_full_days: u32,
+    /// Merit lost per tile of commute (Home door to workplace door).
+    pub commute_w: f32,
+    /// Education's mean by origin: Dreg, Sump, Mid, Spire.
+    pub education: [f32; 4],
+    /// The seeded and immigrant spread (+- uniform, a pure hash).
+    pub education_spread: f32,
+    /// A child's spread around its parents' mean.
+    pub child_spread: f32,
+    /// P3, the thin ladder: education gained a day in a skilled or graded post.
+    pub edu_gain_per_day: f32,
+    /// P3: the night school's cap.
+    pub edu_cap: f32,
+    /// P3, the status sink: coins an adult keeps before spending on status.
+    pub status_floor: i64,
+    /// P3: the share of the excess over `status_floor` spent a day.
+    pub status_frac: f32,
+    /// P3: the split: a Spire night out, fashion (a corp Market), cosmetic chrome (a corp Clinic).
+    pub status_split: [f32; 3],
+    /// P3 (Dylan): the most of the capital payout the graded premium may
+    /// draw on; the rest always goes into labour's P*.
+    pub premium_payout_share: f32,
+}
+
+impl Default for ClassPayCfg {
+    fn default() -> Self {
+        ClassPayCfg {
+            enabled: false,
+            grade_mult: [1.0, 1.3, 2.0, 3.0],
+            role_grade: std::collections::BTreeMap::new(),
+            skilled_share: 0.25,
+            promote_days: 30,
+            merit_edu: 0.5,
+            merit_skill: 0.3,
+            merit_tenure: 0.2,
+            tenure_full_days: 180,
+            commute_w: 0.0005,
+            education: [0.10, 0.25, 0.50, 0.80],
+            education_spread: 0.20,
+            child_spread: 0.10,
+            edu_gain_per_day: 0.0003,
+            edu_cap: 0.75,
+            status_floor: 60,
+            status_frac: 0.05,
+            status_split: [0.5, 0.25, 0.25],
+            premium_payout_share: 0.5,
+        }
     }
 }

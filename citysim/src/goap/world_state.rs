@@ -106,6 +106,9 @@ pub enum LocationKey {
     /// L2 L14: the street spot of the agent's leisure pick
     /// (`World::unwind`): scripted plans only, never in `GOTO`.
     Spot,
+    /// Hunger as sickness § 4: the street outside the bound building's
+    /// door (its bin). Scripted dive plans only, never in `GOTO`.
+    Bin,
 }
 
 impl LocationKey {
@@ -500,7 +503,7 @@ impl WorldState {
         let inv = world.comp::<Inventory>(agent).cloned().unwrap_or_default();
         let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
         let market = world.local(agent, BuildingKind::Market);
-        let price = market.map_or(1, |m| world.price_for(m, agent)).max(1);
+        let price = market.map_or(1, |m| crate::systems::diet::price_at(world, agent, m)).max(1);
         let home = world.comp::<Household>(agent).and_then(|h| h.home);
         let pos = world.comp::<Position>(agent);
         let job = world.comp::<Job>(agent);

@@ -30,7 +30,7 @@ fn terms(skill_a: f32, resist_t: f32, might_gap: f32, rep_gap: f32, taste: f32) 
 /// The plan's Move table (W26, `bias.intimidate` 0.8 per W27).
 #[test]
 fn test_move_table() {
-    let full = Config::load();
+    let full = Config::load().dole_city();
     let cfg = &full.moves;
     let p = |k, t: MoveTerms| moves::move_p(cfg, k, &t);
     // Intimidate: member intim 0.12, dread 0.1 vs courage 0.5, fighting 0.25, no allies.
@@ -59,7 +59,7 @@ fn test_move_table() {
 #[test]
 fn test_resolve_order_independent_and_clamped() {
     use rand::Rng;
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.tick = 3 * TICKS_PER_DAY + 17;
     let ads = adults(&w);
     let m1 = SocialMove { actor: ads[0], target: ads[1], kind: MoveKind::Intimidate, stake: Stake::Coins(3) };
@@ -93,7 +93,7 @@ fn test_resolve_order_independent_and_clamped() {
 /// W27: 1,000 keyed trials of the same Shakedown at dread 0.1 and 0.6.
 #[test]
 fn test_higher_dread_extorter_succeeds_more() {
-    let mut w = World::new(43, Config::load());
+    let mut w = World::new(43, Config::load().dole_city());
     let ads = adults(&w);
     let (actor, target) = (ads[5], ads[6]);
     let m = SocialMove { actor, target, kind: MoveKind::Intimidate, stake: Stake::Coins(3) };
@@ -113,7 +113,7 @@ fn test_higher_dread_extorter_succeeds_more() {
 
 /// An exec (Corp audience) and a Dreg (no Home, no job) in `dress`.
 fn exec_and_dreg(dress: u8) -> (World, EntityId, EntityId) {
-    let mut w = World::new(44, Config::load());
+    let mut w = World::new(44, Config::load().dole_city());
     let exec = w.corps().into_iter().find_map(|c| w.comp::<Corp>(c).and_then(|cc| cc.exec)).expect("an exec");
     let dreg = adults(&w)
         .into_iter()
@@ -150,7 +150,7 @@ fn test_suit_opens_some_meetings() {
 /// each skill ≥ 0.5 for 6-11 %, no secondary ≥ 0.65.
 #[test]
 fn test_skill_rarity_seed() {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     let skills: Vec<[f32; 4]> =
         adults(&w).into_iter().filter_map(|a| w.comp::<Skills>(a).map(|s| s.social_all())).collect();
     assert!(skills.len() > 1500, "{} adults", skills.len());
@@ -175,7 +175,7 @@ fn test_competence_neutral_on_landing() {
     let mut sum = 0.0f32;
     let n = 20;
     for seed in 0..n {
-        let w = World::new(1000 + seed, Config::load());
+        let w = World::new(1000 + seed, Config::load().dole_city());
         let farms: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Farm).to_vec();
         let m: f32 =
             farms.iter().map(|&f| w.corp_of_building(f).map_or(1.0, |c| competence::comp_mult(&w, c))).sum::<f32>()
@@ -190,7 +190,7 @@ fn test_competence_neutral_on_landing() {
 /// `TalentLost` names the dead.
 #[test]
 fn test_competence_falls_after_exec_dies() {
-    let mut w = World::new(45, Config::load());
+    let mut w = World::new(45, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY + 30);
     let corp = w
         .corps()
@@ -229,7 +229,7 @@ fn test_competence_falls_after_exec_dies() {
 /// the premium is paid at the next collection, the loser is shocked.
 #[test]
 fn test_poach_moves_job_and_shocks_loser() {
-    let mut w = World::new(46, Config::load());
+    let mut w = World::new(46, Config::load().dole_city());
     // The target: a corp Clerk; the poacher: another corp with a Market and an exec.
     let target = w
         .workers(Role::Clerk)
@@ -292,7 +292,7 @@ fn test_poach_moves_job_and_shocks_loser() {
 
 /// The Unplugged, with one member.
 fn unplugged_world(seed: u64) -> (World, EntityId) {
-    let w = World::new(seed, Config::load());
+    let w = World::new(seed, Config::load().dole_city());
     let g = w.gang_list().iter().copied().find(|&g| creeds::is_purist(&w, g)).expect("The Unplugged");
     (w, g)
 }
@@ -346,7 +346,7 @@ fn test_purist_refuses_chromed_recruit() {
 /// move, the same id draws the same, another id draws anew.
 #[test]
 fn test_skill_draw_untouches_world_stream() {
-    let mut w = World::new(49, Config::load());
+    let mut w = World::new(49, Config::load().dole_city());
     let ads = adults(&w);
     let before = format!("{:?}", w.rng);
     let a = moves::seed_skills(&w, ads[0]);

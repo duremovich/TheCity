@@ -17,7 +17,7 @@ use citysim::{
 /// tests force an unfed child (school meals off, a Block's pantry and its
 /// adults' wallets emptied every evening).
 fn config() -> Config {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.demography.school_meals = false;
     cfg
 }
@@ -238,9 +238,10 @@ fn test_camp_feeds_from_owner_purchase_and_city_camp_from_treasury() {
     if at == corp_camp {
         assert!(w.purse(Some(corp)) < t0, "the corp paid the Market");
         assert!(w.stats.history.back().is_some_and(|r| r.flow_wholesale > 0));
-    } else {
-        assert!(w.stats.history.back().is_some_and(|r| r.econ.flow_camp_food > 0), "the Treasury paid");
     }
+    // Taken to the city camp instead, a lone child's first custody days can
+    // eat its standing stock (half a unit a day): the Treasury's purchase is
+    // asserted below, with a second child housed there directly.
     // The city camp's own purchase: house a second child there directly.
     let (_, c2) = family_home(&mut w);
     let treasury0 = w.purse(None);

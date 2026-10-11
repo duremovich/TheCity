@@ -9,7 +9,7 @@ use citysim::{Brain, Config, EntityId, EventKind, Gang, Job, World, TICKS_PER_DA
 /// A world on seed 42 with gang 0 holding `n` fresh recruits drawn by
 /// `pick` (the gang's own members untouched).
 fn setup(n: usize, pick: impl Fn(&World, EntityId) -> bool) -> (World, EntityId, Vec<EntityId>) {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let g = w.gangs()[0];
     let recruits: Vec<EntityId> = w
         .citizens()

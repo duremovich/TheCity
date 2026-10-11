@@ -18,7 +18,7 @@ use citysim::{
 /// The phase-2 city: `[economy2] wages` is off by default until the stop
 /// rule is answered, so the tests force it on.
 fn config() -> Config {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     // The jobs round's keys at their off values: these tests pin phase 2's
     // rules (the round's own tests turn each key on).
@@ -37,6 +37,10 @@ fn config() -> Config {
     cfg.economy2.rehire_bonus = 0;
     // The flip-readiness round's seeding off too (its own tests turn it on).
     cfg.economy2.seed_staff_days = 0.0;
+    // Class pay off (docs/CLASS_PAY.md): these tests pin the revenue rule's
+    // staffing with every post at its role's wage (`tests/classpay.rs` pins
+    // the grades).
+    cfg.classpay.enabled = false;
     cfg
 }
 
@@ -305,7 +309,7 @@ fn test_seed_capital_moves_hoard_pro_rata_and_conserves() {
     let cfg = &w.config;
     let moved = cfg.world.treasury_initial - cfg.treasury.treasury_initial;
     // The same seed with wages off: the Treasury less what seeding spent.
-    let mut off = Config::load();
+    let mut off = Config::load().dole_city();
     off.economy2.wages = false;
     let w_off = World::new(42, off);
     let t_off = w_off.treasury().map_or(0, |t| t.coins);
@@ -484,7 +488,7 @@ fn test_clinic_chrome_sells_as_parts_equivalents() {
 /// three days (the byte identity against the phase-1 CLI is the device).
 #[test]
 fn test_wages_off_identical() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = false;
     let mut w = World::new(42, cfg);
     assert!(!wages::on(&w));
@@ -645,8 +649,8 @@ fn test_overflow_buys_only_from_a_positive_treasury() {
         w.treasury_mut().expect("treasury").coins = treasury;
         (w, farm)
     };
-    let batch = Config::load().economy.haul_batch;
-    let wholesale = Config::load().corps.wholesale;
+    let batch = Config::load().dole_city().economy.haul_batch;
+    let wholesale = Config::load().dole_city().corps.wholesale;
     // Phase 2: a negative Treasury still pays (the magic money).
     let (mut w, farm) = setup(false, -500);
     let moved = citysim::systems::economy::haul(&mut w, farm, None);
@@ -1170,7 +1174,7 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
     citysim::systems::demography::hire(&mut w, laid, farm, citysim::Role::Farmer);
     assert!(!w.laid_off.contains_key(&laid), "the hire spends the note");
     // Wages off never writes one.
-    let mut off = World::new(42, Config::load());
+    let mut off = World::new(42, Config::load().dole_city());
     assert!(!wages::on(&off));
     let worker = ownership::staff_at(&off, farm)[0];
     citysim::systems::economy::dismiss_as(&mut off, worker, Some(farm), "laid off".into(), EventKind::LaidOff);
@@ -1209,7 +1213,7 @@ fn test_hiring_key_weighs_the_roles_skill() {
 /// `check_indices` holds every day.
 #[test]
 fn test_employer_index_matches_a_scan_after_30_days() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
     let mut w = World::new(42, cfg);
@@ -1230,9 +1234,24 @@ fn test_employer_index_matches_a_scan_after_30_days() {
         assert_eq!(&ownership::staff_at(&w, *b), staff, "workplace {b:?}");
     }
     assert_eq!(w.employers, scan);
-    let laid = w.events.iter().filter(|e| e.kind == EventKind::LaidOff).count();
-    eprintln!("30 days: {} workplaces, {} LaidOff, {} layoff notes", scan.len(), laid, w.laid_off.len());
-    assert!(laid > 0 && !w.laid_off.is_empty(), "layoffs happened and were noted");
+    // The day rows count every layoff (the event ring keeps only the latest).
+    let laid: u32 = w.stats.history.iter().map(|r| r.econ.laid_off).sum::<u32>() + w.stats.current.econ.laid_off;
+    eprintln!("30 days: {} workplaces, {} layoffs, {} layoff notes", scan.len(), laid, w.laid_off.len());
+    // Every dismissal (a revenue layoff or a firing) leaves a rehire note;
+    // whether the revenue rule laid anyone off inside 30 days is the
+    // trajectory's (0 on seed 42 after the review fixes).
+    assert!(laid > 0 || !w.laid_off.is_empty(), "dismissals happened and were noted");
+    // Each laid-off worker holds its note, or was hired since the layoff
+    // (a rehire spends the note: after the merge of class pay into hunger
+    // as sickness P5g-P5j, all twelve on seed 42 were hired again within
+    // 0-9 days, so the notes alone no longer show the layoffs).
+    for e in w.events.iter().filter(|e| e.kind == EventKind::LaidOff) {
+        let a = e.actors[0];
+        // Hired since (a later Hire event; the job may since have ended).
+        let rehired =
+            w.events.iter().any(|h| h.kind == EventKind::Hire && h.actors.first() == Some(&a) && h.tick >= e.tick);
+        assert!(w.laid_off.contains_key(&a) || rehired, "{}: neither noted nor rehired", e.text);
+    }
 }
 
 /// J2 (ruling): hire first, raise when it can't hire: a corp under `0.9 P*`

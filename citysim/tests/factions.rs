@@ -8,7 +8,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 /// Two jobless adults who are not each other's spouse.
@@ -85,7 +85,7 @@ fn inputs() -> OrderInputs {
 }
 
 fn best(i: &OrderInputs) -> Order {
-    faction::score_orders(i, &Config::load().gangs)[0].order
+    faction::score_orders(i, &Config::load().dole_city().gangs)[0].order
 }
 
 #[test]
@@ -145,7 +145,7 @@ fn test_order_break_out_for_the_boss_or_lie_low_when_timid() {
 
 #[test]
 fn test_choose_respects_hysteresis() {
-    let cfg = Config::load().gangs;
+    let cfg = Config::load().dole_city().gangs;
     let scores = faction::score_orders(&inputs(), &cfg);
     // Expand leads comfortably here: a current Expand holds, a current LieLow does not.
     assert_eq!(faction::choose(&scores, Order::Expand, 0.1), None);
@@ -594,7 +594,7 @@ fn test_breach_against_three_guards_fails_and_shocks() {
 /// the slots round from day to day.
 #[test]
 fn test_gang_quota_holds_and_rotates() {
-    let mut cfg = Config::load().v1_profile();
+    let mut cfg = Config::load().dole_city().v1_profile();
     cfg.gangs.max_members = 200;
     let mut w = World::new(53, cfg);
     let (g0, _) = gangs(&w);
@@ -757,7 +757,7 @@ use citysim::{Controller, DistrictId, Position, TilePos, TICKS_PER_DAY};
 
 /// The 400-resident v2 city (districts, corps, Lots) with today's aggregates.
 fn v2(seed: u64) -> World {
-    let mut w = World::new(seed, Config::load().scaled_to(400));
+    let mut w = World::new(seed, Config::load().dole_city().scaled_to(400));
     w.config.crime.fight_death_p = 0.0;
     w.config.riots.p_crossfire = 0.0;
     citysim::systems::districts::daily(&mut w);
@@ -832,7 +832,7 @@ fn test_muster_point_is_held_home_nearest_target() {
 
 #[test]
 fn test_raid_into_cover_is_not_chosen_or_departed() {
-    let cfg = Config::load().gangs;
+    let cfg = Config::load().dole_city().gangs;
     // The corp variant obeys its own cover.
     let base = OrderInputs {
         frontier: 0,

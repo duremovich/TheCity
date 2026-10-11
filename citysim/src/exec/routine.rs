@@ -159,8 +159,261 @@ pub fn commute_plan(world: &World, id: EntityId) -> Option<Plan> {
         return None;
     }
     let key = workplace_key_for(world, id, job);
-    let steps = vec![step(ActionKind::GoTo(key), Some(employer)), step(ActionKind::Rest, None)];
+    // Hunger fix item 11 (P5i): a meal before leaving, one packed to carry.
+    let mut steps = pre_shift_meal(world, id, job);
+    steps.extend([step(ActionKind::GoTo(key), Some(employer)), step(ActionKind::Rest, None)]);
     Some(plan(GoalKind::Work, Some(employer), steps, world.tick))
+}
+
+/// Hunger fix item 12 (P5j): ticks until bedtime before the next workday
+/// shift (negative: past it): the leaving time (the shift's start less the
+/// walk from the Home door to work and `DEPARTURE_MARGIN`) less the night
+/// this body needs to wake full (`[needs] sleep_ticks_full` x the energy it
+/// will lack at bedtime) less the walk home from here. `None` on
+/// shift, on a rest day's eve, homeless or jobless, or with the item off.
+pub fn ticks_to_bedtime(world: &World, id: EntityId) -> Option<i64> {
+    if !crate::systems::fixes::work_night(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?;
+    let tod = world.tick_of_day();
+    if job.on_shift(tod) {
+        return None;
+    }
+    let key = job.next_shift_key(world.tick);
+    if !workday_of(world, id, job, key) || job.last_shift_day == Some(key) {
+        return None;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home)?;
+    let home_door = world.comp::<Building>(home)?.door;
+    let work_door = world.comp::<Building>(job.employer?)?.door;
+    let until = i64::from(job.ticks_until_shift(tod));
+    let leave = until - crate::exec::timed_walk(world, id, home_door, work_door) as i64 - DEPARTURE_MARGIN as i64;
+    let at_home = world.comp::<Position>(id).is_some_and(|p| p.building == Some(home));
+    let walk_home = if at_home { 0 } else { crate::systems::fixes::walk_estimate(world, id, home_door) as i64 };
+    // The night this body needs: a full night (`sleep_ticks_full`) restores
+    // energy 0 to 1, and Sleep ends at 1, so a night is `(1 - energy at
+    // bedtime) x sleep_ticks_full`; the energy at bedtime is today's less
+    // the decay until then (solved for the bedtime). A full 8 h from a
+    // half-rested body put it to bed early and up at 04:00, out again
+    // before the shift (measured on the probe: Unwind after midnight 34 ->
+    // 929 minutes over twelve workers).
+    let full = f64::from(world.config.needs.sleep_ticks_full);
+    let e = f64::from(world.comp::<crate::components::Needs>(id).map_or(0.0, |n| n.energy));
+    let d = f64::from(world.config.needs.energy_decay_per_tick);
+    // bedtime b (ticks from now): leave - walk_home - b = (1 - (e - d b)) full
+    //   => b (1 - d full) = leave - walk_home - (1 - e) full.
+    let num = (leave - walk_home) as f64 - (1.0 - e).max(0.0) * full;
+    let den = (1.0 - d * full).max(0.1);
+    Some((num / den).round() as i64)
+}
+
+/// P5j: Sleep's work-night pressure, 0 at `work_night_ramp_ticks` before
+/// bedtime rising to 1 at it (and after).
+pub fn work_night_pressure(world: &World, id: EntityId) -> f32 {
+    let Some(b) = ticks_to_bedtime(world, id) else { return 0.0 };
+    let ramp = world.config.life.work_night_ramp_ticks.max(1) as f32;
+    (1.0 - b as f32 / ramp).clamp(0.0, 1.0)
+}
+
+/// P5j: past bedtime on a work night (Unwind and the grocery run weigh less).
+pub fn past_bedtime(world: &World, id: EntityId) -> bool {
+    ticks_to_bedtime(world, id).is_some_and(|b| b <= 0)
+}
+
+/// P5i: ticks from now to the end of the next (or current) shift.
+pub fn ticks_to_shift_end(world: &World, job: &Job) -> u64 {
+    let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
+    job.shift_end(world.tick + until).map_or(until, |e| e.saturating_sub(world.tick))
+}
+
+/// P5i: the hunger `n` reaches by the next shift's end with nothing eaten.
+fn hunger_at_shift_end(world: &World, hunger: f32, job: &Job) -> f32 {
+    hunger - world.config.needs.hunger_decay_per_tick * ticks_to_shift_end(world, job) as f32
+}
+
+/// Hunger fix item 11 (a): at Home before a shift whose end finds the
+/// worker under the Eat line (`HUNGER_SATISFIED`, below which Eat can win
+/// on shift), with pantry meals: `EatAtHome` when a meal would not overfill
+/// (hunger + `food_satisfy` <= 1), then `PackMeal` when the shift still
+/// outlasts the hunger and nothing unstolen is carried.
+fn pre_shift_meal(world: &World, id: EntityId, job: &Job) -> Vec<ActionInstance> {
+    use crate::goap::world_state::HUNGER_SATISFIED;
+    let mut steps = Vec::new();
+    if !crate::systems::fixes::shift_meals(world) || job.on_shift(world.tick_of_day()) {
+        return steps;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home);
+    if home.is_none() || world.comp::<Position>(id).map(|p| p.building) != Some(home) {
+        return steps;
+    }
+    let Some(mut hunger) = world.comp::<crate::components::Needs>(id).map(|n| n.hunger) else { return steps };
+    let mut pantry = home.and_then(|h| world.comp::<Building>(h)).map_or(0, |b| b.stock_food);
+    let fs = world.config.needs.food_satisfy;
+    if pantry > 0 && hunger_at_shift_end(world, hunger, job) < HUNGER_SATISFIED && hunger + fs <= 1.0 {
+        steps.push(step(ActionKind::EatAtHome, home));
+        hunger = (hunger + fs).min(1.0);
+        pantry -= 1;
+    }
+    let carried = world.comp::<Inventory>(id).is_some_and(|i| i.food > i.stolen_food);
+    if pantry > 0 && !carried && hunger_at_shift_end(world, hunger, job) < HUNGER_SATISFIED {
+        steps.push(step(ActionKind::PackMeal, home));
+    }
+    steps
+}
+
+/// Hunger fix item 11 (b): the meals a shift takes, `ceil(drain over the
+/// shift and an hour's walk each way ÷ food_satisfy)`, at least 1.
+pub fn shift_meals_needed(world: &World, job: &Job) -> u32 {
+    let len: u64 = job.shifts.iter().map(|&(s, e)| u64::from(e.saturating_sub(s))).max().unwrap_or(0) + 120;
+    let drain = world.config.needs.hunger_decay_per_tick * len as f32;
+    (drain / world.config.needs.food_satisfy.max(0.01)).ceil().max(1.0) as u32
+}
+
+/// Hunger fix item 11 (b): the meals the household holds toward a shift:
+/// its Home pantry and the worker's own carried (not stolen) food.
+fn meals_held(world: &World, id: EntityId, home: EntityId) -> u32 {
+    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    pantry + world.comp::<Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))
+}
+
+/// Hunger fix item 11 (b): the pantry level a grocery run fills: a shift's
+/// meals for each resident (5-6 share a Block's pantry; one worker's meal
+/// was eaten by the rest), capped at the pantry.
+fn household_need(world: &World, home: EntityId, job: &Job) -> u32 {
+    let residents = world.residents_of(home).len().max(1) as u32;
+    (shift_meals_needed(world, job) * residents).min(world.config.buildings.home.stock_cap)
+}
+
+/// Hunger fix item 11 (b): the meals a grocery run buys at the shop, the
+/// household's shortfall (bounded by carry room, `FOOD_CAP`, the wallet and
+/// the shelf); a person shops for what the week needs when they can carry
+/// and pay for it, rather than three meals and back again.
+pub fn grocery_cap(world: &World, id: EntityId) -> Option<u32> {
+    let brain = world.comp::<crate::components::Brain>(id)?;
+    let plan = brain.plan.as_ref().filter(|p| p.goal == GoalKind::Eat && p.steps.len() == 4)?;
+    if plan.steps[1].action != ActionKind::BuyFood || plan.steps[3].action != ActionKind::StoreFood {
+        return None;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home)?;
+    let job = world.comp::<Job>(id)?;
+    let short = household_need(world, home, job).saturating_sub(meals_held(world, id, home));
+    Some(short.max(1))
+}
+
+/// Hunger fix item 11 (b): an off-shift worker's grocery run, `[GoTo(Market)
+/// m, BuyFood m, GoTo(Home), StoreFood]`. `m` is the stocked Market with the
+/// least detour (the walk from here to `m` and on home), where the worker
+/// holds a meal's coins. The run is made when the household's pantry and the
+/// worker's carried meals are under the pantry level `household_need`, if one
+/// run can fill it (carry room, `FOOD_CAP`, the wallet and the shelf permit);
+/// when it cannot (a Block's six residents), under the worker's own shift's
+/// meals instead, so one worker does not shop twice a day for a pantry no
+/// run can fill. It must bring home a meal for each hour of the round trip
+/// (`[life] grocery_ticks_per_meal`), end before the worker must leave for
+/// the shift, and end before bedtime and the energy line (`[life]
+/// grocery_energy_floor`). A closed or packed Market is passed over.
+pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
+    if !crate::systems::fixes::shift_meals(world) {
+        return None;
+    }
+    let job = world.comp::<Job>(id)?;
+    job.employer?;
+    if job.on_shift(world.tick_of_day()) {
+        return None;
+    }
+    // The cheap shortfall test before any walk estimate.
+    let home = world.comp::<Household>(id).and_then(|h| h.home)?;
+    let home_door = world.comp::<Building>(home).filter(|b| !b.demolished)?.door;
+    let held = meals_held(world, id, home);
+    let need = household_need(world, home, job);
+    if held >= need || must_leave_for_work(world, id) {
+        return None;
+    }
+    // The market: least detour among the stocked ones it can buy at.
+    let here = crate::exec::walk_origin(world, id)?;
+    let short = need - held;
+    let mut best: Option<(u64, EntityId, u32)> = None;
+    for &m in world.buildings_of_kind(BuildingKind::Market) {
+        let Some(b) = world.comp::<Building>(m).filter(|b| !b.demolished && !b.derelict && b.stock_food > 0) else {
+            continue;
+        };
+        // Closed, or packed (a queue out of the door ends the errand with
+        // `BuildingFull`): a shopper passes it over.
+        if world.is_closed(m) || (b.is_full() && !world.capacity_exempt(id, m)) {
+            continue;
+        }
+        let can = crate::systems::economy::buy_quantity_upto(world, id, Some(m), u32::MAX);
+        if can == 0 {
+            continue;
+        }
+        let detour =
+            crate::exec::timed_walk(world, id, here, b.door) + crate::exec::timed_walk(world, id, b.door, home_door);
+        if best.is_none_or(|(d, bm, _)| (detour, m) < (d, bm)) {
+            best = Some((detour, m, can));
+        }
+    }
+    let (detour, m, can) = best?;
+    // One run cannot fill the household's pantry: the worker's own shift's meals.
+    if can < short && held >= shift_meals_needed(world, job) {
+        return None;
+    }
+    let trip = detour + 20;
+    // The walk must be worth it: a meal brought home for each hour of it.
+    // A worker who cannot pay for that many (and for less than the pantry
+    // wants) stays home; one with food in the larder does not walk the
+    // hours for a meal or two; one with an empty larder does.
+    let per = world.config.life.grocery_ticks_per_meal;
+    if per > 0 {
+        let want = trip.div_ceil(per) as u32;
+        if can < want.min(short) || (held > 0 && short < want) {
+            return None;
+        }
+    }
+    // The run must end before the worker must leave for the shift ...
+    let employer_door = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
+    let to_work = crate::exec::timed_walk(world, id, home_door, employer_door);
+    let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
+    if trip + to_work + 2 * DEPARTURE_MARGIN > until {
+        return None;
+    }
+    // ... before bedtime (home by the time the night's sleep must begin) ...
+    if let Some(b) = ticks_to_bedtime(world, id) {
+        let walk_home = if world.comp::<Position>(id).is_some_and(|p| p.building == Some(home)) {
+            0
+        } else {
+            crate::exec::timed_walk(world, id, here, home_door) as i64
+        };
+        if trip as i64 > b + walk_home {
+            return None;
+        }
+    }
+    // ... and before the body is tired enough that Sleep wins mid-walk.
+    let decay = world.config.needs.energy_decay_per_tick;
+    let energy = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.energy);
+    if energy - decay * (trip as f32) < world.config.life.grocery_energy_floor {
+        return None;
+    }
+    let steps = vec![
+        step(ActionKind::GoTo(LocationKey::Market), Some(m)),
+        step(ActionKind::BuyFood, Some(m)),
+        step(ActionKind::GoTo(LocationKey::Home), Some(home)),
+        step(ActionKind::StoreFood, None),
+    ];
+    Some(plan(GoalKind::Eat, Some(m), steps, world.tick))
+}
+
+/// Fed past the Eat line (`HUNGER_SATISFIED`): an Eat goal is then the
+/// grocery run's.
+pub fn fed(world: &World, id: EntityId) -> bool {
+    use crate::goap::world_state::HUNGER_SATISFIED;
+    world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger >= HUNGER_SATISFIED)
+}
+
+/// Hunger fix item 11 (b): a fed worker's Eat goal stands for the grocery
+/// run (`grocery_plan` would plan one now).
+pub fn grocery_due(world: &World, id: EntityId) -> bool {
+    fed(world, id) && grocery_plan(world, id).is_some()
 }
 
 /// Idle bypasses the planner: Rest at Home or the Bar; otherwise go home
@@ -205,6 +458,11 @@ pub fn idle_plan(world: &World, id: EntityId) -> Option<Plan> {
     let goal = GoalKind::Idle;
     if at_home && inv.food > inv.stolen_food && inv.food >= 2 {
         return Some(plan(goal, home, vec![step(ActionKind::StoreFood, None)], tick));
+    }
+    // Hunger fix item 11 (b): the grocery run (as an Eat plan).
+    if let Some(mut p) = grocery_plan(world, id) {
+        p.goal = goal;
+        return Some(p);
     }
     // A member lying low, or without a Home, idles at the Hideout.
     if let Some(h) = crate::systems::gang::holes_up_at(world, id) {

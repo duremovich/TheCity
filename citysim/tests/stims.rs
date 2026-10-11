@@ -10,7 +10,7 @@ use citysim::{
 };
 
 fn city() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 /// Living adults with a Brain and a Wallet, not in a gang and without a job,

@@ -13,7 +13,7 @@ use citysim::{
 };
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn mission(w: &World) -> EntityId {
