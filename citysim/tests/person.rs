@@ -751,6 +751,9 @@ fn probe_broke_lawful_eats_at_the_mission() {
     let reach = w.config.charity.reach_tiles;
     let picks: Vec<EntityId> = jobless_civilians(&w)
         .into_iter()
+        // A corp exec has no Job but keeps office hours (not the jobless
+        // the probe means; workplace room moved one into the picks).
+        .filter(|&a| citysim::systems::life::exec_corp(&w, a).is_none())
         .filter(|&a| w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness >= 0.3))
         .filter(|&a| {
             home(&w, a).and_then(|h| w.comp::<Building>(h)).is_some_and(|b| {
@@ -790,7 +793,12 @@ fn probe_starving_with_coins_buys_not_steals() {
     let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 22 * TICKS_PER_HOUR);
     let (mut stole, mut bought, mut tried) = (0, 0, 0);
-    for a in civilians(&w).into_iter().filter(|&a| home(&w, a).is_some()).take(12) {
+    // Off shift at 22:00 (workplace room, 2026-10-11: the Farms' and Fabs'
+    // night crews are at work then, and a starving worker on shift is
+    // another stimulus).
+    let tod = w.tick_of_day();
+    let off = |a: EntityId| w.comp::<Job>(a).is_none_or(|j| !j.on_shift(tod));
+    for a in civilians(&w).into_iter().filter(|&a| home(&w, a).is_some() && off(a)).take(12) {
         tried += 1;
         let mut w = w.clone();
         if let Some(p) = w.comp_mut::<citysim::Personality>(a) {
@@ -899,6 +907,14 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     let before = door_of(&w, far).map(|d| cost(&w, d, work));
     let partner_home = home(&w, partner).expect("partner home");
     let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
+    // The partner stays jobless at the midnight pass: its job search runs
+    // before relocation, and with open places (workplace room, 2026-10-11:
+    // the Farms' night shifts) it hired the partner 32 ticks from the Farm
+    // first, whose new commute then barred the trade (`swap_partner`: the
+    // partner's own day no worse). The night's open places are closed.
+    let midnight = (w.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY;
+    run_to(&mut w, far, midnight - 1, |_| {});
+    w.vacancies.clear();
     run_to(&mut w, far, end, |_| {});
     let after = door_of(&w, far).map(|d| cost(&w, d, work));
     // The partner's Home went to a far worker (this farmer, or a farther one
@@ -1053,7 +1069,7 @@ fn probe_working_couple_moves_near_work() {
     let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
     // A married pair sharing a Home, no children there, the first employed
     // with a commute past twice the cap.
-    let (a, s) = civilians(&w)
+    let mut couples: Vec<(u64, std::cmp::Reverse<EntityId>, EntityId, EntityId)> = civilians(&w)
         .into_iter()
         .filter_map(|a| {
             let s = w.spouse_of(a)?;
@@ -1069,42 +1085,58 @@ fn probe_working_couple_moves_near_work() {
             if citysim::systems::jobs::is_sweeper(&w, a) {
                 return None;
             }
+            // A graded post holder keeps its Home's tier (class pay), a
+            // rule of its own: the premise is any Home with room.
+            if citysim::systems::classpay::min_home_tier(&w, a, hm) > 0 {
+                return None;
+            }
             let work = work_of(&w, a)?;
             let d = commute_cost(&w, door_of(&w, a)?, work);
             (d > 2 * cap).then_some((d, std::cmp::Reverse(a), a, s))
         })
-        // The longest such commute: the relocation pass serves the longest
-        // first, and the beds in range are bounded by the Lots and floors
-        // there (after class pay's merge, 65 farther movers took the 72 beds
-        // the first pick had).
-        .max()
-        .map(|(_, _, a, s)| (a, s))
-        .expect("a married worker with a long commute");
-    // The spouse works at the same place.
-    let (employer, role) = w.comp::<Job>(a).map(|j| (j.employer.unwrap(), j.role)).unwrap();
-    w.remove::<Job>(s);
-    demography::hire(&mut w, s, employer, role);
-    for m in [a, s] {
-        w.comp_mut::<Wallet>(m).expect("wallet").coins = 1_000;
-    }
-    // Room near work, enough that the longer commutes served first leave
-    // some: Homes and floors
-    // go up in range.
-    let work = work_of(&w, a).unwrap();
-    let free = |w: &World| -> usize {
+        .collect();
+    // The longest such commute: the relocation pass serves the longest
+    // first, and the beds in range are bounded by the Lots and floors
+    // there (after class pay's merge, 65 farther movers took the 72 beds
+    // the first pick had).
+    couples.sort();
+    assert!(!couples.is_empty(), "a married worker with a long commute");
+    let free = |w: &World, work: citysim::TilePos| -> usize {
         w.buildings_of_kind(citysim::BuildingKind::Home)
             .iter()
             .filter(|&&h| w.comp::<Building>(h).is_some_and(|b| !b.derelict && commute_cost(w, b.door, work) <= cap))
             .map(|&h| usize::from(w.comp::<Building>(h).unwrap().capacity).saturating_sub(w.residents_of(h).len()))
             .sum()
     };
-    // The builds are paid (P5h): a Treasury that can pay for them.
-    let band = w.config.treasury.band[0];
-    if let Some(t) = w.treasury_mut() {
-        t.coins = t.coins.max(band + 100_000);
-    }
-    while free(&w) < 200 && citysim::systems::life::build_housing_near(&mut w, employer) {}
-    eprintln!("free beds in range of work {}", free(&w));
+    // The longest whose work has room for them (workplace room, 2026-10-11:
+    // the room-capped city's longest was a night crew's Farm whose range the
+    // housing pre-roll had already built out, no Lot and every Home at its
+    // floors; the premise is a couple with room near work).
+    let (mut w, a, s, work) = couples
+        .into_iter()
+        .rev()
+        .find_map(|(_, _, a, s)| {
+            let mut w = w.clone();
+            // The spouse works at the same place.
+            let (employer, role) = w.comp::<Job>(a).map(|j| (j.employer.unwrap(), j.role)).unwrap();
+            w.remove::<Job>(s);
+            demography::hire(&mut w, s, employer, role);
+            for m in [a, s] {
+                w.comp_mut::<Wallet>(m).expect("wallet").coins = 1_000;
+            }
+            // Room near work, enough that the longer commutes served first
+            // leave some: Homes and floors go up in range.
+            let work = work_of(&w, a).unwrap();
+            // The builds are paid (P5h): a Treasury that can pay for them.
+            let band = w.config.treasury.band[0];
+            if let Some(t) = w.treasury_mut() {
+                t.coins = t.coins.max(band + 100_000);
+            }
+            while free(&w, work) < 200 && citysim::systems::life::build_housing_near(&mut w, employer) {}
+            (free(&w, work) >= 2).then_some((w, a, s, work))
+        })
+        .expect("a couple with a long commute and room near their work");
+    eprintln!("free beds in range of work {}", free(&w, work));
     // The daily cap out of the way (the pass serves the longest commutes
     // first; this pair's is not among the city's 40 longest).
     w.config.life.relocate_per_1000 = 1_000.0;
@@ -1562,4 +1594,67 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
     );
     assert_eq!(starts.len(), 1, "grocery runs in one evening-to-morning window");
     assert!(wrong.is_empty(), "not the least-detour market: {wrong:?}");
+}
+
+/// Workplace room: hungry at noon with coins and an empty pantry, the
+/// Market the agent would shop at full (its door shut to customers): a
+/// person turns away at the full door once and eats elsewhere (another
+/// Market). On main a refused shopper's replan resolved the same Market
+/// (`World::local`) and queued at the same full door again (the shadow run
+/// had a guard try `GoTo(Market)` four times and eat nothing with 9 meals
+/// at home).
+#[test]
+fn probe_refused_at_a_full_market_eats_elsewhere() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+    let picks: Vec<EntityId> = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<Job>(a).is_none() && home(&w, a).is_some())
+        .filter(|&a| w.local(a, citysim::BuildingKind::Market).is_some_and(|m| building(&w, a) != Some(m)))
+        .step_by(29)
+        .take(24)
+        .collect();
+    let (mut refused, mut looped, mut unfed) = (0, Vec::new(), Vec::new());
+    for &a in &picks {
+        let mut w = w.clone();
+        pin(&mut w, a);
+        let m = w.local(a, citysim::BuildingKind::Market).expect("a Market");
+        // The Market is full: no customer gets in.
+        w.comp_mut::<Building>(m).expect("market").capacity = 0;
+        let price = citysim::systems::life::meal_price(&w, a);
+        set_hungry(&mut w, a, 0.2, 10 * price);
+        w.debug_events.clear();
+        let (mut fulls, mut ate_at) = (0u32, None);
+        // The walk to a Market can take hours on the 2 m-tile map.
+        let end = w.tick + 12 * TICKS_PER_HOUR;
+        run_to(&mut w, a, end, |w| {
+            if ate_at.is_none() && is_eat(step(w, a)) {
+                ate_at = Some(w.tick);
+            }
+        });
+        let ate = ate_at.is_some();
+        // The refusals before the first meal (a second try hours after it,
+        // the Market still shut, is a new errand, not the loop).
+        for e in w.debug_events.iter() {
+            if e.actors.first() == Some(&a)
+                && e.text.contains("GoTo(Market): BuildingFull")
+                && ate_at.is_none_or(|t| e.tick < t)
+            {
+                fulls += 1;
+            }
+        }
+        if fulls > 0 {
+            refused += 1;
+            if fulls > 1 {
+                looped.push((a.index, fulls));
+            }
+            if !ate {
+                unfed.push(a.index);
+            }
+        }
+    }
+    eprintln!("{refused} of {} refused at the full Market; looped {looped:?}; unfed {unfed:?}", picks.len());
+    assert!(refused > 0, "no pick went to the full Market (the probe tests nothing)");
+    assert!(looped.is_empty(), "refused at the same full Market again: {looped:?}");
+    assert!(unfed.is_empty(), "refused once and never ate (coins in hand): {unfed:?}");
 }

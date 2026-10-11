@@ -1454,6 +1454,17 @@ pub struct ExecCfg {
     /// changes results: a field is a pure function of the map and its door.
     #[serde(default = "default_flow_cache")]
     pub flow_field_cache: usize,
+    /// Workplace room: an agent refused at a full building
+    /// (`FailReason::BuildingFull`) passes it over in `World::local` for
+    /// this many ticks, so the replan goes elsewhere (another Market, the
+    /// home pantry) instead of back to the same door (0: off).
+    #[serde(default)]
+    pub refused_ticks: u64,
+    /// Workplace room: a building's own staff are let in when it is full
+    /// (the staff door; the trades' J13 rule for every role), so customers
+    /// never lock the shift out (false: the trades and the sweepers only).
+    #[serde(default)]
+    pub staff_door: bool,
 }
 
 fn default_flow_cache() -> usize {
@@ -4275,6 +4286,12 @@ pub struct LifeCfg {
     pub shift_pro_rata: f32,
     pub starving_hunger: f32,
     pub sleep_wake_energy: f32,
+    /// Workplace room (2026-10-11): a housed agent sleeping rough (out of
+    /// doors, its bed past `rough_min_tiles`) sleeps on past
+    /// `[needs] sleep_ticks_full` until `sleep_wake_energy` or the walk to
+    /// the next shift, not woken at the cap to walk hours home at night
+    /// (false: the cap ends it).
+    pub rough_sleep_on: bool,
     pub idle_sleep_energy: f32,
     pub energy_brake: f32,
     /// Item 5: the free spot's walk cap (else the nearest spot), the lone
@@ -4485,6 +4502,7 @@ impl Default for LifeCfg {
             shift_pro_rata: 0.5,
             starving_hunger: 0.1,
             sleep_wake_energy: 0.99,
+            rough_sleep_on: false,
             idle_sleep_energy: 0.9,
             energy_brake: 0.5,
             spot_walk_cap_tiles: 22,
@@ -5653,6 +5671,21 @@ pub struct Economy2Cfg {
     /// days of the added payroll, and the jobless fill them by the hiring
     /// key before day 0 (`wages::seed_staff`; 0: off, the dole era's seed).
     pub seed_staff_days: f32,
+    /// Workplace room (read only with wages on): the jobs round's places
+    /// past full staff fit the building's room on their shift
+    /// (`wages::room_capped`): the on-site staff of a shift never past
+    /// `capacity` (less `customer_room` of it at a customer-facing kind);
+    /// full staff is never cut (false: the jobs round's `staff_ceiling_mult`
+    /// alone).
+    pub room_cap: bool,
+    /// Workplace room: the share of a customer-facing building's
+    /// `capacity` (a Market, a venue, a Clinic, a Garage, a Hotel) its
+    /// staff leave to the customers.
+    pub customer_room: f32,
+    /// Workplace room: with `room_cap`, a Farm or a Fab whose day shift
+    /// fills its room hires its bespoke role onto the night shift
+    /// (`[world] shift_night`), a second shift's room (false: day only).
+    pub relief_shift: bool,
 }
 
 impl Default for Economy2Cfg {
@@ -5688,6 +5721,9 @@ impl Default for Economy2Cfg {
             skill_w: 0.0,
             rehire_bonus: 0,
             seed_staff_days: 0.0,
+            room_cap: false,
+            customer_room: 0.4,
+            relief_shift: false,
         }
     }
 }

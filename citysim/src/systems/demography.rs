@@ -768,6 +768,11 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
     if let Some(row) = crate::systems::trades::row_of(world, role) {
         shifts = crate::systems::trades::shifts_for(world, row, id);
     }
+    // Workplace room: a Farm's or Fab's hire past its day shift's room
+    // works the night shift.
+    if crate::systems::wages::relief_hire(world, employer, role) {
+        shifts = world.config.world.shift_night.clone();
+    }
     // Class pay: the post's grade fixes its wage (the config wage at grade 0).
     let grade = crate::systems::classpay::base_grade(world, Some(employer), role);
     let wage_per_day = crate::systems::classpay::wage_at(world, role, grade);
