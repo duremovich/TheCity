@@ -289,3 +289,12 @@ In order:
 Seen and not fixed (smaller): ~2 % of Statistical adults at energy 0 at 10:00; relocated bodies stay in the old Block in the dole city; tier floors leave graded staff unmoved; the Home pantry cap doesn't scale with floors; guards hit BuildingFull on Patrol/Arrest (arrests should be door-exempt); an exec's Meeting ignores hunger; job search runs before relocation (a jobless swap partner is re-hired the same night); seed 44's vagrancy count jumped 476 → 1,324 after the vagrancy fix (a squat-pipeline divergence, unread).
 
 Housekeeping: worktrees from this session (`agent-ac151…`, `agent-abf81…`, `agent-a6c21…`, `agent-ae017…`, `agent-a143a…` (branch `hits-p2`), `agent-a0f87…`, `agent-a3e95…`, `agent-a2f11…`) are all merged; the old `agent-ad159…` (Hit market branch) is superseded by main. Keep `agent-abdc8…` (transit).
+
+## Session log (the tenth session, 2026-10-11 →)
+
+- **Behaviour tier on main 7324e60**: 133 of 133 bounds pass. Diaries read for the three worse rows (three Sonnet readers):
+  - **worker_friday longest sleep 4.27 h: not broken.** Sleep runs to `sleep_wake_energy` 0.99, not 8 h; the energy rates balance at ~6 h/day, so a night is (1 − energy at bed) × 480 min. No fragmentation, no 02:00 wakes, no Friday dip (night-of-week flat 4.2-4.75 h). A printed finding; the levers (`sleep_ticks_full`, `energy_decay_per_tick`) move every archetype.
+  - **Ripperdoc pay: not broken; the row was misread.** PaidOfWorked is 1.00 on every seed; the 0.69/0.87 is the share of shifts *attended*. Seed 42's low is two agents: a homeless night farmer on a 4 h commute (brutal, working) and a rich clinic owner holding a Bartender post at Bar#416 he never works (Work 0.02 vs Idle 0.05): a held, unworked post under the room cap.
+  - **Fabber known/wk 2.72: partly the metric, partly missing activity.** `known/wk` counts only HangOut co-presence; half of fabber Unwinds are paid venues, and the any-district venue fallback sends them on 171-195 min walks after a 9 h shift. Night-crew fabbers idle 10-15 h.
+  - **Fighters and guards at home: a gate bug.** `leisure::off_hours` is the wall clock (Evening/Night), so anyone off shift in the daytime (night crews, the fighters' 15:45 shift, night guards, rest days) gets Unwind × 0.3 ≈ 0.09 < Idle 0.15. Fighters idle 6.3 h/day.
+- Dispatched: `hitgaps` (Opus, worktree): the HIT_MARKET.md phase 4 gaps. `days` (Opus, worktree): off-hours by the agent's own shift, a walk cap on the paid-venue fallback, the held-but-unworked post.
