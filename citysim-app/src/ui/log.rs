@@ -126,6 +126,8 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::FixerBusted
         | EventKind::GuardTaken
         | EventKind::Stiffed
+        | EventKind::Recanted
+        | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported
         | EventKind::AppetiteShift

@@ -339,10 +339,36 @@ impl Wrong {
     }
 }
 
+/// The Hit market (H8, H9; phase 2): an agent buyer at Full or Coarse who
+/// would post with an open Fixer in reach walks there first: the want
+/// waits in `World::wants` until the `Commission` step at `fixer` (or
+/// lapses). Re-priced and re-paid at the Fixer; no coin moves before.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Want {
+    pub target: EntityId,
+    pub kind: ContractKind,
+    pub motive: Motive,
+    /// The motive's weight (the brakes' order and the goal's score).
+    pub weight: f32,
+    pub since: Tick,
+    pub fixer: EntityId,
+}
+
+/// The Hit market (Debt, phase 2): a debt the Debt pass has seen standing
+/// at `debt_min` or more since `seen` (`Edge.debt_since` is re-stamped
+/// every fortnight by `social::daily`, so it cannot age a debt), and the
+/// last Debt Beat fulfilled on the debtor (the Hit escalation's clock).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct DebtClock {
+    pub seen: Tick,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub beat: Option<Tick>,
+}
+
 /// The Hit market: what `contracts::post_with` adds to a `Posting`.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PostExtra {
-    /// H4: put this much down now (escrowed when brokered, checked when
+    /// H4: put this much down now (escrowed on the record, brokered or
     /// direct); the rest is owed at fulfilment. `None`: the full price.
     pub deposit: Option<i64>,
     pub motive: Motive,

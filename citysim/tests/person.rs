@@ -1700,3 +1700,178 @@ fn probe_homeless_night_worker_on_shift_is_not_charged_with_vagrancy() {
     assert!(!worker_chased, "a homeless worker on shift is a Vagrancy suspect");
     assert!(drifter_chased, "control: a jobless drifter with a Vagrancy report is not chaseable");
 }
+
+// ---------------------------------------------------------------------------
+// The Hit market phase 2 (docs/HIT_MARKET.md § 9): the widow and the
+// suspect. Every Hit and Beat here is a record between fictional agents:
+// a struct with a price, matched by a score, resolved by a seeded roll.
+// ---------------------------------------------------------------------------
+
+fn set_skill_and_nerve(w: &mut World, id: EntityId, fighting: f32, courage: f32, lawfulness: f32) {
+    if let Some(s) = w.comp_mut::<citysim::Skills>(id) {
+        s.fighting = fighting;
+    }
+    if let Some(p) = w.comp_mut::<citysim::Personality>(id) {
+        p.courage = courage;
+        p.lawfulness = lawfulness;
+    }
+}
+
+/// The organic Hit and Beat records `buyer` placed.
+fn bought_by(w: &World, buyer: EntityId) -> Vec<citysim::contract::Contract> {
+    w.contracts.values().filter(|c| c.buyer == Some(buyer) && !c.motive.is_none()).cloned().collect()
+}
+
+/// A married civilian with a Fixer in reach of home, her husband killed by
+/// a stranger (day 10, 12:00); her grudge on the killer is lethal, and her
+/// brother (a Family edge, loyal, lawless) shares it. She holds 40 coins,
+/// he 200 (with 40 each no want formed in 7 days: the price moved 42-73
+/// while both wallets ran down). The killer is the stranger with the
+/// fewest defenders about him. `strong`: she is the stronger and the
+/// braver; else the killer is. Returns the world, the widow and the killer.
+fn widow(strong: bool) -> (World, EntityId, EntityId) {
+    use citysim::systems::grudges;
+    use citysim::word::GrudgeCause;
+    let mut w = world();
+    // Day 10: the Fixers' books have filled (on day 2 too few regulars
+    // would take a Hit at any price, and it priced at the old quote).
+    w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
+    let civ = civilians(&w);
+    let her = civ
+        .iter()
+        .copied()
+        .find(|&a| {
+            w.spouses.get(&a).is_some_and(|s| civ.contains(s))
+                && contracts::nearest_fixer(&w, a).is_some()
+                && w.comp::<Job>(a).is_none_or(|j| j.role != Role::Guard)
+        })
+        .expect("a married civilian near a Fixer");
+    let husband = w.spouses[&her];
+    let near = |w: &World, x: EntityId, y: EntityId| w.edge(x, y).is_some();
+    // A loner: the stranger with the fewest defenders about him (a Hit on
+    // a man with friends at his side prices at the old quote, H1).
+    let sdef = |w: &World, x: EntityId| citysim::systems::missions::defender_strength(w, &Target::Agent(x));
+    let killer = civ
+        .iter()
+        .copied()
+        .filter(|&x| x != her && x != husband && !near(&w, her, x) && !near(&w, husband, x))
+        .take(200)
+        .min_by(|&a, &b| sdef(&w, a).total_cmp(&sdef(&w, b)).then(a.cmp(&b)))
+        .expect("a stranger");
+    let brother = civ
+        .iter()
+        .copied()
+        .find(|&x| ![her, husband, killer].contains(&x) && !near(&w, her, x) && !near(&w, killer, x))
+        .expect("a brother");
+    {
+        let e = w.edge_entry(her, brother);
+        e.kind = RelKind::Family;
+        e.affinity = 1.0;
+    }
+    if strong {
+        set_skill_and_nerve(&mut w, her, 1.0, 0.9, 0.3);
+        set_skill_and_nerve(&mut w, killer, 0.1, 0.5, 0.3);
+    } else {
+        set_skill_and_nerve(&mut w, her, 0.0, 0.3, 0.3);
+        set_skill_and_nerve(&mut w, killer, 0.3, 0.5, 0.3);
+    }
+    set_skill_and_nerve(&mut w, brother, 0.5, 0.5, 0.0);
+    w.kill_by(husband, citysim::DeathCause::Violence, Some(killer));
+    grudges::add(&mut w, her, killer, GrudgeCause::KilledKin(husband), 0.95, 0);
+    grudges::add(&mut w, brother, killer, GrudgeCause::KilledKin(husband), 0.6, 0);
+    w.comp_mut::<Wallet>(her).expect("wallet").coins = 40;
+    w.comp_mut::<Wallet>(brother).expect("wallet").coins = 200;
+    pin(&mut w, her);
+    (w, her, killer)
+}
+
+/// A widow whose husband was killed by a stronger man, holding 40 coins
+/// with a sharing brother, walks to the Fixer and commissions a Hit on him
+/// within 7 days. Control: a stronger, braver widow hunts him herself and
+/// buys nothing.
+#[test]
+fn probe_widow_commissions_a_hit_at_the_fixer() {
+    let (mut w, her, killer) = widow(false);
+    let (mut at_fixer, end) = (None, w.tick + 7 * TICKS_PER_DAY);
+    run_to(&mut w, her, end, |w| {
+        if at_fixer.is_none() && step(w, her) == Some(ActionKind::Commission) {
+            at_fixer = Some(w.tick);
+        }
+    });
+    let mine = bought_by(&w, her);
+    eprintln!(
+        "widow {}: the Commission step at {at_fixer:?}; records {:?}",
+        her.index,
+        mine.iter()
+            .map(|c| (c.kind, c.target.id().index, c.price, c.deposit, c.broker.map(|b| b.index)))
+            .collect::<Vec<_>>()
+    );
+    assert!(at_fixer.is_some(), "never walked to the Fixer");
+    let hit = mine.iter().find(|c| c.target == Target::Agent(killer)).expect("no record on her husband's killer");
+    assert_eq!(hit.kind, ContractKind::Hit);
+    assert!(hit.broker.is_some(), "posted at the Fixer");
+    // Control.
+    let (mut w, her, killer) = widow(true);
+    let (mut hunted, end) = (false, w.tick + 7 * TICKS_PER_DAY);
+    run_to(&mut w, her, end, |w| hunted |= w.hunts.get(&her).is_some_and(|h| h.target == killer));
+    eprintln!("strong widow {}: hunted {hunted}, records {}", her.index, bought_by(&w, her).len());
+    assert!(hunted, "the control: a strong, brave widow hunts him herself");
+    assert!(bought_by(&w, her).is_empty(), "the strong widow paid instead");
+}
+
+/// A lawless resident (the suspect) with an open Assault report filed by a
+/// woman he knows (`known`) or a stranger, 200 coins, a Fixer near home,
+/// at 22:00 on day 2.
+fn suspect(known: bool) -> (World, EntityId, EntityId) {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 22 * TICKS_PER_HOUR);
+    let civ = civilians(&w);
+    let s = civ
+        .iter()
+        .copied()
+        .find(|&a| contracts::nearest_fixer(&w, a).is_some() && w.comp::<Job>(a).is_none())
+        .expect("a jobless civilian near a Fixer");
+    let wit = civ
+        .iter()
+        .copied()
+        .find(|&x| x != s && w.edge(s, x).is_none() && w.comp::<Household>(x).and_then(|h| h.home) != home(&w, s))
+        .expect("a stranger");
+    if known {
+        let e = w.edge_entry(s, wit);
+        e.kind = RelKind::Acquaintance;
+    }
+    set_skill_and_nerve(&mut w, s, 0.5, 0.5, 0.1);
+    w.comp_mut::<Wallet>(s).expect("wallet").coins = 200;
+    law::file_report(&mut w, citysim::Crime::Assault, s, Some(wit));
+    pin(&mut w, s);
+    (w, s, wit)
+}
+
+/// A suspect with a known witness to his assault buys a Beat on her within
+/// 7 days (or is in Jail first: printed). Control: an unknown witness is
+/// never targeted.
+#[test]
+fn probe_suspect_buys_a_beat_on_a_known_witness() {
+    let (mut w, s, wit) = suspect(true);
+    let end = w.tick + 7 * TICKS_PER_DAY;
+    let mut posted = None;
+    run_to(&mut w, s, end, |w| {
+        if posted.is_none() && bought_by(w, s).iter().any(|c| c.target == Target::Agent(wit)) {
+            posted = Some(w.tick);
+        }
+    });
+    eprintln!(
+        "suspect {} on witness {}: posted at {posted:?}, jailed {}, records {:?}",
+        s.index,
+        wit.index,
+        w.has::<citysim::Sentence>(s),
+        bought_by(&w, s).iter().map(|c| (c.kind, c.status, c.motive)).collect::<Vec<_>>()
+    );
+    let beat = bought_by(&w, s).into_iter().find(|c| c.target == Target::Agent(wit)).expect("never bought the witness");
+    assert_eq!((beat.kind, beat.motive), (ContractKind::Beat, citysim::contract::Motive::Silence));
+    // Control.
+    let (mut w, s, wit) = suspect(false);
+    let end = w.tick + 7 * TICKS_PER_DAY;
+    run_to(&mut w, s, end, |_| {});
+    assert!(bought_by(&w, s).iter().all(|c| c.target != Target::Agent(wit)), "an unknown witness was targeted");
+}

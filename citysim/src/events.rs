@@ -297,10 +297,15 @@ pub enum EventKind {
     // --- The Hit market (docs/HIT_MARKET.md H6; amber).
     /// `[buyer, taker]`: a buyer on credit could not pay the balance.
     Stiffed,
+    /// `[witness, suspect]`: a beaten witness took back the report (H15).
+    Recanted,
+    /// `[suspect, witness]`: the report's witness is dead and no guard saw
+    /// it: the case goes cold (H14).
+    CaseCold,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 146] = [
+    pub const ALL: [EventKind; 148] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -447,6 +452,8 @@ impl EventKind {
         EventKind::Cured,
         EventKind::Promoted,
         EventKind::Stiffed,
+        EventKind::Recanted,
+        EventKind::CaseCold,
     ];
 }
 

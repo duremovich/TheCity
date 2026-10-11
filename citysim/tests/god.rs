@@ -1810,12 +1810,18 @@ fn god_hit_hollow_leader_from_arasaka() {
             if let Some(c) = w.comp_mut::<citysim::Corp>(arasaka) {
                 c.treasury = c.treasury.max(2_500);
             }
+            // The Hit market warms the Fixers' heat: the city's only office can
+            // be closed by the law on the day (seed 42 after the market: shut
+            // on day 44 for 7 days). The scenario is the Hit's aftermath, not
+            // the broker: with no open office Arasaka posts direct.
+            let brokered = !citysim::systems::contracts::open_fixers(w).is_empty();
+            eprintln!("day 45: posted {}", if brokered { "brokered" } else { "direct (no open Fixer)" });
             w.push_command(PlayerCommand::PostContract {
                 buyer: Some(arasaka),
                 kind: citysim::contract::ContractKind::Hit,
                 target: citysim::contract::Target::Agent(leader),
                 price: 2000,
-                brokered: true,
+                brokered,
                 deadline_days: 0,
             });
         }

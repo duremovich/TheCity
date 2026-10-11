@@ -1861,6 +1861,18 @@ dirty_beat = 0.45                    # H18
 rival_window_days = 30               # H18
 exec_guards = 3                      # P3 follow-up: an exec's defenders add up to 3 of its protecting corps' private guards.
                                      # A stand-in for real bodyguards (roadmap addendum 13, ambient LOD): retire it when those land.
+# Phase 2: silence, debt and the walk to the Fixer.
+want_days = 30                       # H8: a want not acted on lapses
+commission_mins = 30                 # H9: the Commission step at the Fixer
+commission_flat = 0.0                # H9
+closure_val = 0.3                    # H17: a Revenge buyer's relief at the news
+silence_lawfulness = 0.3             # Silence: a suspect under this buys its witness
+recant_p = 0.5                       # H15: x (1 - courage)
+cold_days = 3                        # H14, decision 2: no witness, no case
+debt_min = 15                        # Debt: an edge debt this big ...
+debt_days = 21                       # ... this old ...
+debt_lawfulness = 0.35               # ... owed to a creditor this lawless buys a Beat
+debt_hit_days = 30                   # Debt: a Hit when the Beat is this old and the debt stands
 
 # The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
 # `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).

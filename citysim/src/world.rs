@@ -747,6 +747,14 @@ pub struct World {
     /// exec, the last 365 days (the city-wide cap).
     #[serde(default, skip_serializing_if = "std::collections::VecDeque::is_empty")]
     pub hm_corp_hits: std::collections::VecDeque<Tick>,
+    /// The Hit market (H8, H9; phase 2): agent buyers walking to a Fixer
+    /// to commission a Hit or a Beat, by buyer.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub wants: BTreeMap<EntityId, crate::contract::Want>,
+    /// The Hit market (Debt, phase 2): `(creditor, debtor)` -> the debt's
+    /// clock (first seen at `debt_min`, the last Debt Beat).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hm_debts: BTreeMap<(EntityId, EntityId), crate::contract::DebtClock>,
     /// M15 W35: a body -> the agents standing over it (GuardBody's wait);
     /// rebuilt from the guards' plans on load.
     #[serde(skip)]
@@ -1247,6 +1255,8 @@ impl World {
             kill_chain: BTreeMap::new(),
             vendettas: Vec::new(),
             hm_corp_hits: std::collections::VecDeque::new(),
+            wants: BTreeMap::new(),
+            hm_debts: BTreeMap::new(),
             guards_of_corpse: BTreeMap::new(),
             stories: VecDeque::new(),
             next_story_id: 0,

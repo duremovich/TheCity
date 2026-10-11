@@ -169,6 +169,10 @@ pub enum ActionKind {
     /// Hunger as sickness P5i: at Home, a pantry meal packed to carry to a
     /// shift (the commute plan's scripted step; never in `PLANNABLE`).
     PackMeal,
+    /// The Hit market (H9): at an open Fixer's office, the want posted (the
+    /// Commission goal's scripted step; never in `PLANNABLE`, started by
+    /// `contracts::can_start`).
+    Commission,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -404,7 +408,7 @@ impl ActionKind {
     /// M16a (plan C10, C15): a Contract plan's own scripted step (never
     /// planned; started by `contracts::can_start`).
     pub fn is_contract_step(self) -> bool {
-        matches!(self, ActionKind::Network | ActionKind::Guard)
+        matches!(self, ActionKind::Network | ActionKind::Guard | ActionKind::Commission)
     }
 
     /// Real economy E27, E28: a charity plan's scripted step (never
@@ -1826,7 +1830,7 @@ impl ActionKind {
             | ActionKind::Collect
             | ActionKind::Preach => 60.0,
             // M16a (plan C10, C15): scripted, never planned.
-            ActionKind::Network => 4.0,
+            ActionKind::Network | ActionKind::Commission => 4.0,
             ActionKind::Guard => 2.0,
             // Real economy E27, E28: scripted, never searched.
             ActionKind::EatAlms

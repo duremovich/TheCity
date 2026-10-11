@@ -521,8 +521,8 @@ fn record_of(
 }
 
 /// [`post`] with the Hit market's extras (docs/HIT_MARKET.md H4, H13): a
-/// deposit put down now (escrowed when brokered, purse-checked when
-/// direct) with the balance owed at fulfilment, the motive and a few words
+/// deposit put down now (escrowed on the record, brokered or direct) with
+/// the balance owed at fulfilment, the motive and a few words
 /// for the event text.
 pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<ContractId, Refusal> {
     let live = world.contracts.values().filter(|c| c.is_live()).count();
@@ -565,7 +565,9 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
     rec.deposit = deposit.unwrap_or(0);
     rec.motive = extra.motive;
     world.contracts.insert(id, rec);
-    if p.broker.is_some() {
+    // H4 (P2 fix round): a deposit is held on the record, brokered or
+    // direct, so a direct buyer cannot spend it before fulfilment.
+    if p.broker.is_some() || deposit.is_some() {
         let moved = ownership::escrow_in(world, p.buyer, id, down);
         debug_assert_eq!(moved, down, "the purse was checked");
     }
@@ -902,7 +904,13 @@ pub fn market_price(
 ) -> Option<i64> {
     let mut cands: Vec<EntityId> = match broker {
         Some(b) => world.comp::<Broker>(b).map(|k| k.regulars.keys().copied().collect()).unwrap_or_default(),
-        None => buyer.map(|b| direct_pool(world, b)).unwrap_or_default(),
+        None => {
+            let mut v = buyer.map(|b| direct_pool(world, b)).unwrap_or_default();
+            if direct_gated(world, kind) {
+                v.retain(|&a| gun_gate(world, a));
+            }
+            v
+        }
     };
     cands.sort_unstable();
     cands.dedup();
@@ -1329,7 +1337,19 @@ fn direct_candidates(world: &World, id: ContractId) -> Vec<EntityId> {
     out.sort();
     out.dedup();
     out.retain(|&a| sees(world, a, id));
+    if direct_gated(world, c.kind) {
+        out.retain(|&a| gun_gate(world, a));
+    }
     out
+}
+
+/// The Hit market (P2 fix round): a direct Hit or Beat goes to the buyer's
+/// people who pass the gun gate (C13), as a brokered one goes to the
+/// Fixer's regulars, who passed it to network: a man with a day job paid
+/// above 0.7 × the median wage takes no direct work either. With the
+/// market off: M16a's viewers.
+fn direct_gated(world: &World, kind: ContractKind) -> bool {
+    world.config.hitmarket.enabled && kind.violent()
 }
 
 // ---------------------------------------------------------------------------
@@ -1426,6 +1446,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
                         }
                     }
                 }
+                // Phase 2 (H15, H17, the Debt clock).
+                crate::systems::hitmarket::on_fulfilled(world, &c);
             }
             ContractStatus::Failed | ContractStatus::Expired | ContractStatus::Cancelled => {
                 let until = now + Tick::from(world.config.hitmarket.repost_days) * TICKS_PER_DAY;
@@ -1584,6 +1606,29 @@ fn fulfil(world: &mut World, id: ContractId, c: &Contract, why: &str) {
         set_status(world, id, ContractStatus::Fulfilled, why);
         if got < balance {
             stiff(world, c, balance - got, balance);
+        }
+        return;
+    }
+    // The Hit market (H4, P2 fix round): a direct record on credit holds its
+    // deposit: the taker gets the deposit and the balance from the purse,
+    // and a short buyer is stiffed for the balance only. A renege keeps
+    // the balance (the deposit is the taker's).
+    let held = world.contracts.get(&id).map_or(0, |x| x.escrow);
+    if held > 0 {
+        let balance = c.balance();
+        let got = if balance > 0 && !c.renege { ownership::escrow_in(world, c.buyer, id, balance) } else { 0 };
+        let held = world.contracts.get(&id).map_or(0, |x| x.escrow);
+        for (who, share) in pay_to.iter().zip(shares(held, pay_to.len())) {
+            ownership::escrow_out(world, id, Some(*who), share, Flow::Payout);
+        }
+        refund(world, id);
+        if c.renege {
+            renege(world, id, c);
+        } else {
+            set_status(world, id, ContractStatus::Fulfilled, why);
+            if got < balance {
+                stiff(world, c, balance - got, balance);
+            }
         }
         return;
     }
@@ -2358,7 +2403,10 @@ fn at_building(world: &World, id: EntityId, b: EntityId) -> bool {
 /// while the record is taken; the chase steps through `hunt::can_start`.
 pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<EntityId>) -> bool {
     match kind {
-        ActionKind::Network => target.is_some_and(|f| fixer_open(world, f) && at_building(world, id, f)),
+        // The Hit market (H9): the Commission step likewise.
+        ActionKind::Network | ActionKind::Commission => {
+            target.is_some_and(|f| fixer_open(world, f) && at_building(world, id, f))
+        }
         ActionKind::Guard => {
             let Some(r) = world.contract_runs.get(&id) else { return false };
             let taken = world.contracts.get(&r.contract).is_some_and(|c| c.status == ContractStatus::Taken);
@@ -2589,10 +2637,15 @@ pub fn daily(world: &mut World) {
     }
     prune_regulars(world);
     stat_regulars(world);
+    // The Hit market (phase 2): stale wants lapse first (H8).
+    crate::systems::hitmarket::want_sweep(world);
     hire_pass(world);
-    // The Hit market (H18, H19): the gangs' and corps' business.
+    // The Hit market: Silence and Debt (phase 2), the gangs' and corps'
+    // business (H18, H19, Protect), and the cold cases (H14).
+    crate::systems::hitmarket::agent_passes(world);
     crate::systems::hitmarket::gang_pass(world);
     crate::systems::hitmarket::corp_pass(world);
+    crate::systems::hitmarket::cold_cases(world);
     // Phase 3 (C30, C31, C33, C34).
     law_and_street_daily(world);
     for f in world.buildings_of_kind(BuildingKind::Fixer).to_vec() {
@@ -4064,7 +4117,9 @@ pub fn sell_out(world: &mut World, id: ContractId, gang: EntityId) -> bool {
     let Some(c) = world.contracts.get(&id).cloned() else { return false };
     let new_price = ((c.price as f32) * world.config.missions.sell_premium).round().max(c.price as f32) as i64;
     let top = new_price - c.price;
-    if c.brokered() {
+    // The Hit market (P2 fix round): a direct record holding a deposit tops
+    // up its escrow as a brokered one does.
+    if c.brokered() || c.escrow > 0 {
         // Review fix: a short top-up returns only what it took (the record's
         // own escrow stays for its next taker) and the offer lapses.
         let moved = if top > 0 { ownership::escrow_in(world, c.buyer, id, top) } else { 0 };
@@ -4073,6 +4128,13 @@ pub fn sell_out(world: &mut World, id: ContractId, gang: EntityId) -> bool {
                 ownership::escrow_out(world, id, refund_to(world, c.buyer), moved, Flow::Escrow);
             }
             return false;
+        }
+        // A record on credit: the top-up is paid down, the balance unchanged
+        // (it was charged a second time at fulfilment).
+        if c.deposit > 0 {
+            if let Some(x) = world.contracts.get_mut(&id) {
+                x.deposit += top;
+            }
         }
     } else if world.purse(c.buyer) < new_price {
         return false;

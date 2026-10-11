@@ -18,7 +18,8 @@ use crate::world::World;
 /// defaults, none written with `[sickness]` off).
 /// 8: the Hit market (docs/HIT_MARKET.md H22): `Contract.deposit`,
 /// `Contract.motive`, `Corp.last_wronged`, `World::hm_corp_hits`,
-/// `[hitmarket]` in the saved config (serde defaults).
+/// `World::wants`, `World::hm_debts`, `[hitmarket]` in the saved config
+/// (serde defaults).
 pub const SAVE_VERSION: u8 = 8;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.

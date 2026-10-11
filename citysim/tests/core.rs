@@ -378,7 +378,7 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a raid resolved", m("raid resolved")),            // [12, 13, 15]
         ("a Home flipped", k(EventKind::TerritoryFlipped)), // [35, 33, 95]
         // M9 the law.
-        ("a day in Crackdown", m("Crackdown held")), // [47, 31, 44]
+        // "a day in Crackdown" is printed since the Hit market P2 (below).
         // M10 off-screen lives.
         ("a hole bound", k(EventKind::Attributed)), // [905, 1007, 993]
         // M11 ownership and corps.
@@ -459,7 +459,17 @@ fn sickness_mechanisms() -> Vec<Mechanism> {
 fn printed_mechanisms() -> Vec<Mechanism> {
     let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
     let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
-    vec![("a Riot", k(EventKind::Riot)), ("a gang front", m("gang front")), ("a Jailbreak", k(EventKind::Jailbreak))]
+    vec![
+        ("a Riot", k(EventKind::Riot)),
+        ("a gang front", m("gang front")),
+        ("a Jailbreak", k(EventKind::Jailbreak)),
+        // M9's day in Crackdown, demoted (the Hit market P2, 2026-10-11): on
+        // the flipped city it is rare, days held over 42-47 x 120 days [4, 9,
+        // 0, 1, 0, 0] with the market off (main) and [0, 0, 0, 4, 6, 0] with
+        // P2 (cold cases and recants on); `law_faction.rs::
+        // test_posture_patrol_at_rest_and_crackdown_under_pressure` carries it.
+        ("a day in Crackdown", m("Crackdown held")),
+    ]
 }
 
 /// Every mechanism's count per seed, then the bullets: one line each.

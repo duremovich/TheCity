@@ -704,11 +704,16 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                     crate::components::GoalKind::Hunt
                         | crate::components::GoalKind::GuardBody
                         | crate::components::GoalKind::Contract
+                        | crate::components::GoalKind::Commission
                 )
             });
             if scripted {
-                // M16a (plan C13): a Contract step's own start check.
-                let ok = if goal == Some(crate::components::GoalKind::Contract) {
+                // M16a (plan C13): a Contract step's own start check (and
+                // the Hit market's Commission, H9).
+                let ok = if matches!(
+                    goal,
+                    Some(crate::components::GoalKind::Contract | crate::components::GoalKind::Commission)
+                ) {
                     crate::systems::contracts::can_start(world, id, kind, step.target)
                 } else {
                     crate::systems::hunt::can_start(world, id, kind, step.target)

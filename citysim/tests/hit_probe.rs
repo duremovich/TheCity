@@ -175,6 +175,8 @@ struct Seen {
     brokered: bool,
     /// A corp bought it on a corp exec (decided when first seen).
     exec: bool,
+    /// Ever taken.
+    taken: bool,
 }
 
 #[test]
@@ -249,6 +251,7 @@ fn hit_market_report() {
                                     deposit: c.deposit,
                                     charged: c.charged,
                                     brokered: c.brokered(),
+                                    taken: c.taker.is_some() || seen.get(&c.id).is_some_and(|s| s.taken),
                                     exec: seen.get(&c.id).map_or_else(
                                         || {
                                             c.buyer.is_some_and(|b| w.has::<Corp>(b))
@@ -538,4 +541,402 @@ fn hit_probe() {
             });
         }
     });
+}
+
+/// One seed's run for `hm_ab_report`.
+#[derive(Default)]
+struct AbRun {
+    murders: u32,
+    crackdown_days: u32,
+    violent: u32,
+    corps_alive: usize,
+    corps_seeded: usize,
+    /// (motive, kind) -> [posted, done, failed, expired, cancelled, live].
+    by: BTreeMap<(String, String), [u32; 6]>,
+    prices_hit: Vec<i64>,
+    prices_beat: Vec<i64>,
+    deposits: Vec<i64>,
+    charged: u32,
+    charge_delays: Vec<u64>,
+    /// Organic records expired: (after a taker held them, never taken).
+    expired: (u32, u32),
+    cols: BTreeMap<&'static str, i64>,
+    floors: Vec<(u64, i64, i64, i64)>,
+    stories: Vec<String>,
+}
+
+fn ab_run(seed: u64, on: bool) -> AbRun {
+    let mut cfg = Config::load();
+    cfg.hitmarket.enabled = on;
+    let mut w = World::new(seed, cfg);
+    let seeded: Vec<EntityId> = w.corps();
+    let mut r = AbRun { corps_seeded: seeded.len(), ..Default::default() };
+    let mut seen: BTreeMap<u64, Seen> = BTreeMap::new();
+    let mut closed_day: BTreeMap<u64, u64> = BTreeMap::new();
+    let mut cursor = 0u64;
+    for day in 0..120u64 {
+        for _ in 0..24 {
+            w.run_ticks(TICKS_PER_HOUR);
+            for e in w.events.iter().rev().take_while(|e| e.id >= cursor) {
+                let d = e.tick / TICKS_PER_DAY;
+                match e.kind {
+                    EventKind::Murder => r.murders += 1,
+                    EventKind::Stiffed | EventKind::Accessory | EventKind::Recanted | EventKind::CaseCold => {
+                        r.stories.push(format!("  d{d} {:?} {}", e.kind, e.text))
+                    }
+                    EventKind::ContractPosted if e.text.contains(" down, ") || e.text.ends_with(')') => {
+                        r.stories.push(format!("  d{d} POST {}", e.text))
+                    }
+                    _ => {}
+                }
+            }
+            cursor = w.events.back().map_or(cursor, |e| e.id + 1);
+        }
+        for c in w.contracts.values().filter(|c| !c.motive.is_none()) {
+            let prev = seen.get(&c.id).cloned();
+            if prev.is_none() {
+                match c.kind {
+                    ContractKind::Hit => r.prices_hit.push(c.price),
+                    _ => r.prices_beat.push(c.price),
+                }
+                r.deposits.push(if c.deposit > 0 { c.deposit } else { c.price });
+            }
+            if !c.status.is_live() && !closed_day.contains_key(&c.id) {
+                closed_day.insert(c.id, c.closed.unwrap_or(w.tick) / TICKS_PER_DAY);
+                if c.status == ContractStatus::Fulfilled {
+                    r.stories.push(format!(
+                        "  d{day} DONE {} on {} for {} by {} ({})",
+                        c.kind.label(),
+                        w.name_of(c.target.id()),
+                        w.owner_label(c.buyer),
+                        w.owner_label(c.taker),
+                        c.motive.label()
+                    ));
+                }
+            }
+            if c.charged && !prev.as_ref().is_some_and(|p| p.charged) {
+                let cd = closed_day.get(&c.id).copied().unwrap_or(day);
+                r.charge_delays.push(day.saturating_sub(cd));
+            }
+            seen.insert(
+                c.id,
+                Seen {
+                    kind: c.kind,
+                    motive: c.motive,
+                    status: c.status,
+                    price: c.price,
+                    deposit: c.deposit,
+                    charged: c.charged,
+                    brokered: c.brokered(),
+                    taken: c.taker.is_some() || seen.get(&c.id).is_some_and(|s| s.taken),
+                    exec: false,
+                },
+            );
+        }
+        if w.law().is_some_and(|l| l.posture == citysim::Posture::Crackdown) {
+            r.crackdown_days += 1;
+        }
+        if let Some(row) = w.stats.history.back() {
+            r.violent += row.deaths_violence;
+            let h = &row.hit;
+            for (k, v) in [
+                ("unaffordable", i64::from(h.hm_unaffordable)),
+                ("refused", i64::from(h.hm_refused)),
+                ("pooled", h.hm_pooled),
+                ("stiffed", i64::from(h.hm_stiffed)),
+                ("wants", i64::from(h.hm_wants)),
+                ("commissions", i64::from(h.hm_commissions)),
+                ("recanted", i64::from(h.hm_recanted)),
+                ("cold", i64::from(h.hm_cold)),
+            ] {
+                *r.cols.entry(k).or_default() += v;
+            }
+        }
+        if matches!(day, 29 | 59 | 119) {
+            let floor = 50i64.max((0.5 * 7.0 * w.median_wage as f32).round() as i64);
+            // The gross wage the flip pays (`wages::gross_wage`), median.
+            let mut gross: Vec<i64> = w
+                .with::<citysim::Job>()
+                .iter()
+                .filter_map(|&a| w.comp::<citysim::Job>(a).map(|j| citysim::systems::wages::gross_wage(&w, j)))
+                .collect();
+            gross.sort_unstable();
+            let g = gross.get(gross.len() / 2).copied().unwrap_or(0);
+            r.floors.push((day + 1, w.median_wage, g, floor));
+        }
+    }
+    for s in seen.values() {
+        let e = r.by.entry((s.motive.label().to_string(), s.kind.label().to_string())).or_default();
+        e[0] += 1;
+        e[match s.status {
+            ContractStatus::Fulfilled | ContractStatus::Reneged => 1,
+            ContractStatus::Failed => 2,
+            ContractStatus::Expired => 3,
+            ContractStatus::Cancelled => 4,
+            _ => 5,
+        }] += 1;
+        r.charged += u32::from(s.charged);
+        if s.status == ContractStatus::Expired {
+            if s.taken {
+                r.expired.0 += 1;
+            } else {
+                r.expired.1 += 1;
+            }
+        }
+    }
+    let alive: std::collections::BTreeSet<EntityId> = w.corps().into_iter().collect();
+    r.corps_alive = seeded.iter().filter(|c| alive.contains(c)).count();
+    r
+}
+
+/// The Hit market on and off (≈ main) on seeds 42-47 × 120 days, the
+/// shipped config: Murders, violent deaths, corps alive at d120, the
+/// organic records per motive and kind ([posted, done, failed, expired,
+/// cancelled, live]), prices, the gun's week-wage floor (decision 7) at
+/// days 30/60/120, charges and their delay, and the `HitCols` sums.
+/// `HM_STORIES=<file>` writes the market-on story lines there.
+#[test]
+#[ignore]
+fn hm_ab_report() {
+    let seeds = [42u64, 43, 44, 45, 46, 47];
+    let runs: Vec<(u64, bool)> = seeds.iter().flat_map(|&s| [(s, true), (s, false)]).collect();
+    let out: Vec<(u64, bool, AbRun)> = std::thread::scope(|s| {
+        let hs: Vec<_> = runs.iter().map(|&(seed, on)| s.spawn(move || (seed, on, ab_run(seed, on)))).collect();
+        hs.into_iter().map(|h| h.join().unwrap()).collect()
+    });
+    let mut stories = String::new();
+    for (seed, on, r) in &out {
+        let tag = if *on { "on " } else { "off" };
+        let p = |v: &Vec<i64>| {
+            let mut v = v.clone();
+            v.sort_unstable();
+            if v.is_empty() {
+                "-".to_string()
+            } else {
+                format!("n{} min {} p50 {} max {}", v.len(), v[0], v[v.len() / 2], v[v.len() - 1])
+            }
+        };
+        println!(
+            "seed {seed} {tag}: murders {} violent {} corps {}/{}; crackdown days {}; floor (day, median wage, median gross, floor) {:?}",
+            r.murders, r.violent, r.corps_alive, r.corps_seeded, r.crackdown_days, r.floors
+        );
+        if *on {
+            println!("    organic {:?}; expired (taken, never taken) {:?}", r.by, r.expired);
+            println!(
+                "    hit prices [{}] beat prices [{}] deposits [{}]; charged {} delays {:?}; cols {:?}",
+                p(&r.prices_hit),
+                p(&r.prices_beat),
+                p(&r.deposits),
+                r.charged,
+                r.charge_delays,
+                r.cols
+            );
+            stories.push_str(&format!("seed {seed}\n"));
+            for l in &r.stories {
+                stories.push_str(l);
+                stories.push('\n');
+            }
+        }
+    }
+    if let Ok(path) = std::env::var("HM_STORIES") {
+        std::fs::write(path, stories).expect("write stories");
+    }
+}
+
+/// "Nobody takes" (P2 fix round): seed 44, every organic Revenge Hit, read
+/// at 17:59 each day it is Open (the minute before `match_day`): its place
+/// in its Fixer's book (`offers_per_day`), and per candidate (a brokered
+/// record's regulars, a direct one's viewers as `direct_pool` reads them:
+/// the buyer's edges but Enemies) why matching would not take it: the
+/// `eligible` filter that fails, else the candidate's ask against the
+/// price and its `accept_score`. Prints the log of each record that ends
+/// Expired.
+#[test]
+#[ignore]
+fn why_expired() {
+    use citysim::systems::demography;
+    use citysim::RelKind;
+    let seed: u64 = std::env::var("HM_SEED").ok().and_then(|s| s.parse().ok()).unwrap_or(44);
+    let mut w = World::new(seed, Config::load());
+    let mut logs: BTreeMap<u64, Vec<String>> = BTreeMap::new();
+    let mut last: BTreeMap<u64, (ContractStatus, Option<u32>)> = BTreeMap::new();
+    let match_tick = u64::from(w.config.fixers.match_hour) * TICKS_PER_HOUR;
+    let per_day = usize::from(w.config.fixers.offers_per_day);
+    let hit_law = w.config.fixers.gun_lawfulness.get(ContractKind::Hit);
+    for _day in 0..120 {
+        w.run_ticks(match_tick - 1);
+        let ids: Vec<u64> = w
+            .contracts
+            .values()
+            .filter(|c| c.motive == Motive::Revenge && c.kind == ContractKind::Hit && c.is_open())
+            .map(|c| c.id)
+            .collect();
+        for id in ids {
+            let c = w.contracts[&id].clone();
+            let t = c.target.id();
+            let mut out: Vec<String> = Vec::new();
+            let (cands, book) = match c.broker {
+                Some(f) => {
+                    let k = w.comp::<citysim::contract::Broker>(f).unwrap();
+                    let now = w.tick;
+                    let mut book: Vec<(f64, u64, i64)> = k
+                        .book
+                        .iter()
+                        .filter_map(|x| w.contracts.get(x))
+                        .filter(|x| x.is_open())
+                        .map(|x| {
+                            let age = now.saturating_sub(x.posted) as f64 / TICKS_PER_DAY as f64;
+                            let days = (x.deadline.saturating_sub(x.posted) as f64 / TICKS_PER_DAY as f64).max(1.0);
+                            (x.price as f64 * (1.0 + age / days), x.id, x.price)
+                        })
+                        .collect();
+                    book.sort_by(|a, b| b.0.total_cmp(&a.0).then(a.1.cmp(&b.1)));
+                    let rank = book.iter().position(|x| x.1 == id).unwrap_or(99);
+                    let prices: Vec<i64> = book.iter().map(|x| x.2).collect();
+                    (
+                        k.regulars.keys().copied().collect::<Vec<_>>(),
+                        format!("book rank {rank} of {} (offers {per_day}) prices {prices:?}", book.len()),
+                    )
+                }
+                None => {
+                    let b = c.buyer.unwrap();
+                    let v: Vec<EntityId> =
+                        w.neighbours(b).filter(|&o| w.edge(b, o).is_some_and(|e| e.kind != RelKind::Enemy)).collect();
+                    (v, "direct".to_string())
+                }
+            };
+            out.push(format!(
+                "d{} #{id} {} hit on {} for {} ({} down) by {}: {book}, {} candidates",
+                w.tick / TICKS_PER_DAY,
+                if c.broker.is_some() { "brokered" } else { "direct" },
+                t.index,
+                c.price,
+                c.deposit,
+                c.buyer.map_or(0, |b| b.index),
+                cands.len()
+            ));
+            let mut why: BTreeMap<&str, u32> = BTreeMap::new();
+            for a in cands {
+                let reason = if a == t || Some(a) == c.buyer {
+                    "party"
+                } else if !contracts::free_adult(&w, a) {
+                    if demography::is_adult(&w, a) {
+                        "jailed/cuffed/leaving/dead"
+                    } else {
+                        "child"
+                    }
+                } else if law::is_guard(&w, a) {
+                    "guard"
+                } else if w.edge(a, t).is_some_and(|e| {
+                    matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent | RelKind::Friend)
+                }) {
+                    "close to the target"
+                } else if w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness > hit_law) {
+                    "lawful (> gun_lawfulness)"
+                } else if contracts::holds_taken(&w, a) {
+                    "holds a taken record"
+                } else {
+                    let ask = contracts::ask(&w, a, c.kind, &c.target, c.broker.is_some(), c.buyer);
+                    let score = contracts::accept_score(&w, a, id);
+                    out.push(format!(
+                        "    cand {}: ask {ask:?} vs price {} -> score {score:.3} (min {}) {}",
+                        a.index,
+                        c.price,
+                        w.config.contracts.accept_min,
+                        if score >= w.config.contracts.accept_min { "WOULD TAKE" } else { "declines" }
+                    ));
+                    continue;
+                };
+                *why.entry(reason).or_default() += 1;
+            }
+            out.push(format!("    filtered: {why:?}"));
+            logs.entry(id).or_default().extend(out);
+        }
+        let since = w.tick;
+        w.run_ticks(TICKS_PER_DAY - (match_tick - 1));
+        if std::env::var("HM_LIVE").is_ok() && logs.values().any(|_| true) {
+            let mut live: Vec<(String, &str, i64, bool)> = w
+                .contracts
+                .values()
+                .filter(|c| c.status == ContractStatus::Taken && c.render == citysim::contract::Render::Live)
+                .map(|c| {
+                    (
+                        format!("#{}", c.id),
+                        c.kind.label(),
+                        c.price,
+                        c.started.is_some() || w.contract_runs.values().any(|r| r.contract == c.id),
+                    )
+                })
+                .collect();
+            live.sort_by_key(|x| -x.2);
+            let row = w.stats.history.back().map(|r| (r.contract.live_parties, r.contract.live_queued));
+            println!("day {} live (parties, queued) {row:?}: {live:?}", w.tick / TICKS_PER_DAY);
+        }
+        let lines: Vec<(u64, String)> = w
+            .contract_log
+            .iter()
+            .filter(|(tk, cid, _)| *tk >= since && logs.contains_key(cid))
+            .map(|(tk, cid, text)| {
+                (*cid, format!("    log d{}h{}: {text}", tk / TICKS_PER_DAY, (tk % TICKS_PER_DAY) / TICKS_PER_HOUR))
+            })
+            .collect();
+        for (cid, l) in lines {
+            logs.entry(cid).or_default().push(l);
+        }
+        for id in logs.keys() {
+            if let Some(c) = w.contracts.get(id) {
+                last.insert(*id, (c.status, c.taker.map(|x| x.index)));
+            }
+        }
+    }
+    let mut shown = 0;
+    for (id, log) in &logs {
+        let status = last.get(id).copied();
+        println!("record #{id} ends {status:?}");
+        if status.is_some_and(|s| s.0 == ContractStatus::Expired) {
+            for l in log {
+                println!("{l}");
+            }
+            shown += 1;
+        }
+    }
+    println!("{shown} expired Revenge Hits of {} logged", logs.len());
+}
+
+/// One taken record's chase, every 2 hours (`HM_SEED`, `HM_RECORD`,
+/// `HM_FROM` day): the taker's goal and step, its run's phase and intel,
+/// both tiers and the distance to the target.
+#[test]
+#[ignore]
+fn trace_record() {
+    let env = |k: &str, d: u64| std::env::var(k).ok().and_then(|s| s.parse().ok()).unwrap_or(d);
+    let (seed, rid, from) = (env("HM_SEED", 44), env("HM_RECORD", 55), env("HM_FROM", 29));
+    let mut w = World::new(seed, Config::load());
+    w.run_ticks(from * TICKS_PER_DAY);
+    for _ in 0..(12 * 12) {
+        w.run_ticks(2 * TICKS_PER_HOUR);
+        let Some(c) = w.contracts.get(&rid).cloned() else { continue };
+        let Some(g) = c.taker else { continue };
+        let t = c.target.id();
+        let b = w.comp::<citysim::Brain>(g);
+        let run = w.contract_runs.get(&g);
+        let tile = |x: EntityId| w.comp::<citysim::Position>(x).map(|p| (p.tile, p.building.map(|b| b.index)));
+        println!(
+            "d{}h{} {:?} goal {:?} step {:?} run {:?} intel {:?} lods {:?}/{:?} taker {:?} target {:?}",
+            w.tick / TICKS_PER_DAY,
+            (w.tick % TICKS_PER_DAY) / TICKS_PER_HOUR,
+            c.status,
+            b.and_then(|b| b.current_goal),
+            b.and_then(|b| b.current_step().map(|s| s.action)),
+            run.map(|r| r.phase),
+            run.and_then(|r| r.intel.map(|i| (i.tile, i.building.map(|x| x.index)))),
+            b.map(|b| b.lod),
+            w.comp::<citysim::Brain>(t).map(|b| b.lod),
+            tile(g),
+            tile(t)
+        );
+        if !c.status.is_live() {
+            break;
+        }
+    }
 }

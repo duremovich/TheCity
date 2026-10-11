@@ -107,6 +107,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Collect => 10,
         // M16a (plan C10, C15).
         ActionKind::Network => 30,
+        // The Hit market (H9).
+        ActionKind::Commission => world.config.hitmarket.commission_mins,
         // Real economy E27, E28: a meal at the kitchen, a gift at the door.
         ActionKind::EatAlms => 30,
         ActionKind::DumpsterDive => 20,
@@ -734,6 +736,8 @@ pub fn on_complete(
         }
         // M16a (plan C10, C15): a regular's stamp; a Guard's day kept.
         ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
+        // The Hit market (H9): the want posted at the Fixer.
+        ActionKind::Commission => crate::systems::hitmarket::on_commission(world, id, target),
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),

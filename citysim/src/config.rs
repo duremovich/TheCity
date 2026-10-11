@@ -5639,6 +5639,30 @@ pub struct HitMarketCfg {
     /// addendum 13, ambient LOD: execs travel with company); retire it when
     /// those land.
     pub exec_guards: usize,
+    // --- Phase 2: silence, debt and the errand.
+    /// H8: a want not acted on lapses after this many days.
+    pub want_days: u32,
+    /// H9: the `Commission` step at the Fixer, in ticks (minutes).
+    pub commission_mins: u64,
+    /// H9: the Commission goal's flat.
+    pub commission_flat: f32,
+    /// H17: a Revenge buyer's `Commissioned` memory valence at fulfilment.
+    pub closure_val: f32,
+    /// Silence (§ 2): a suspect under this lawfulness buys its witness.
+    pub silence_lawfulness: f32,
+    /// H15: a beaten witness recants at `recant_p × (1 − courage)`.
+    pub recant_p: f32,
+    /// H14: a dead witness's report goes cold this many days after the death.
+    pub cold_days: u32,
+    /// Debt (§ 2): an edge debt of at least this many coins …
+    pub debt_min: i32,
+    /// … standing this many days …
+    pub debt_days: u32,
+    /// … owed to a creditor under this lawfulness buys a Beat.
+    pub debt_lawfulness: f32,
+    /// Debt: a Hit when a Debt Beat on the same debtor is this many days old
+    /// and the debt still stands.
+    pub debt_hit_days: u32,
 }
 
 impl Default for HitMarketCfg {
@@ -5663,6 +5687,17 @@ impl Default for HitMarketCfg {
             dirty_beat: 0.45,
             rival_window_days: 30,
             exec_guards: 3,
+            want_days: 30,
+            commission_mins: 30,
+            commission_flat: 0.0,
+            closure_val: 0.3,
+            silence_lawfulness: 0.3,
+            recant_p: 0.5,
+            cold_days: 3,
+            debt_min: 15,
+            debt_days: 21,
+            debt_lawfulness: 0.35,
+            debt_hit_days: 30,
         }
     }
 }

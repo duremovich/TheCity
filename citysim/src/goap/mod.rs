@@ -47,5 +47,7 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         GoalKind::Unwind | GoalKind::Lead => return None,
         // M16a (plan C13): scripted (`contracts::plan`).
         GoalKind::Contract => return None,
+        // The Hit market (H9): scripted (`hitmarket::commission_plan`).
+        GoalKind::Commission => return None,
     })
 }

@@ -212,12 +212,9 @@ fn test_revenge_pooled_from_kin_half_down() {
     assert_eq!(c.deposit, hitmarket::deposit_of(&w, c.price), "half down");
     assert!(c.deposit < c.price);
     assert_eq!(coins(&w, k), 1_000 - c.deposit, "the kin put in the deposit");
-    if c.brokered() {
-        assert_eq!(c.escrow, c.deposit, "only the deposit is escrowed");
-        assert_eq!(coins(&w, h), 0);
-    } else {
-        assert_eq!(coins(&w, h), c.deposit, "a direct buyer holds it");
-    }
+    // Brokered or direct (P2 fix round), the deposit is held on the record.
+    assert_eq!(c.escrow, c.deposit, "only the deposit is escrowed");
+    assert_eq!(coins(&w, h), 0);
     assert!(c.known_by.contains(&k), "who paid knows");
     assert_eq!(identity(&w), id0, "the coins are conserved");
     assert!(w.stats.current.hit.hm_posted_revenge == 1);
@@ -352,12 +349,54 @@ fn test_direct_credit_short_is_stiffed_not_reneged() {
     let extra = PostExtra { deposit: Some(50), motive: Motive::Revenge, why: None };
     let id = contracts::post_with(&mut w, p, extra).expect("posted");
     w.contracts.get_mut(&id).unwrap().renege = false;
-    assert_eq!(coins(&w, buyer), 60, "a direct record moves nothing at posting");
+    assert_eq!(coins(&w, buyer), 10, "the deposit is held on the record (P2 fix round)");
+    assert_eq!(w.contracts[&id].escrow, 50);
     assert!(contracts::accept(&mut w, id, g, &[]));
     contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
     assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
     assert_eq!(coins(&w, buyer), 0);
     assert!(w.events.iter().any(|e| e.kind == EventKind::Stiffed));
+}
+
+/// H4 (P2 fix round): a direct buyer on credit cannot spend the deposit
+/// before fulfilment: it is held on the record; the gun gets the deposit
+/// whatever the buyer did with the rest of the purse, and only the balance
+/// is owed. The coin identity holds.
+#[test]
+fn test_direct_deposit_is_held_not_spent() {
+    let mut w = world();
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    w.edge_entry(buyer, g).kind = RelKind::Friend;
+    set_coins(&mut w, buyer, 50);
+    set_coins(&mut w, g, 0);
+    let id0 = identity(&w);
+    let mut p = brokered(buyer, ContractKind::Beat, t, EntityId::NONE, 100);
+    p.broker = None;
+    let extra = PostExtra { deposit: Some(50), motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, p, extra).expect("posted");
+    w.contracts.get_mut(&id).unwrap().renege = false;
+    // The buyer spends everything he holds before the job is done.
+    assert_eq!(coins(&w, buyer), 0, "the deposit left the purse at posting");
+    assert_eq!(w.contracts[&id].escrow, 50);
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    assert_eq!(coins(&w, g), 50, "the gun is paid the deposit");
+    let e = w.edge(buyer, g).expect("an edge");
+    let owed = if buyer < g { e.debt } else { -e.debt };
+    assert_eq!(owed, 50, "only the balance is owed");
+    assert_eq!(w.contracts[&id].escrow, 0);
+    assert_eq!(identity(&w), id0);
+    // Expired instead: the deposit goes back.
+    let mut w = world();
+    let [buyer, t, _] = strangers(&w, 3)[..] else { unreachable!() };
+    set_coins(&mut w, buyer, 50);
+    let mut p = brokered(buyer, ContractKind::Beat, t, EntityId::NONE, 100);
+    p.broker = None;
+    let extra = PostExtra { deposit: Some(50), motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, p, extra).expect("posted");
+    contracts::settle(&mut w, id, contracts::Settle::Expired, "test");
+    assert_eq!(coins(&w, buyer), 50, "refunded");
 }
 
 /// A bought revenge beating answers the grudge (`beat_settle`), so the
@@ -641,4 +680,503 @@ fn test_exec_defended_by_corp_guards() {
     w.config.hitmarket.enabled = true;
     let [p] = strangers(&w, 1)[..] else { unreachable!() };
     assert!(missions::exec_guards(&w, p).is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// Phase 2: the walk to the Fixer (H9), Silence (H16), Debt, Protect (D12),
+// cold cases (H14), recanting (H15) and the buyer after (H17)
+// ---------------------------------------------------------------------------
+
+fn set_lod(w: &mut World, id: EntityId, lod: citysim::Lod) {
+    if let Some(b) = w.comp_mut::<citysim::Brain>(id) {
+        b.lod = lod;
+    }
+}
+
+fn set_law(w: &mut World, id: EntityId, lawfulness: f32, courage: f32) {
+    if let Some(p) = w.comp_mut::<Personality>(id) {
+        p.lawfulness = lawfulness;
+        p.courage = courage;
+    }
+}
+
+fn open_report(w: &World, suspect: EntityId, witness: EntityId) -> bool {
+    w.crime_reports().iter().any(|r| !r.resolved && r.suspect == suspect && r.witness == Some(witness))
+}
+
+fn day(w: &mut World, days: u64) {
+    w.tick += days * citysim::TICKS_PER_DAY;
+}
+
+/// A lawless suspect (Statistical: posts at once) with an open `crime`
+/// report filed by `wit`, rich; `known` gives them an edge (H16).
+fn suspect_and_witness(w: &mut World, crime: citysim::Crime, known: bool) -> (EntityId, EntityId) {
+    let [s, wit] = strangers(w, 2)[..] else { unreachable!() };
+    set_law(w, s, 0.1, 0.5);
+    set_lod(w, s, citysim::Lod::Statistical);
+    set_coins(w, s, 10_000);
+    if known {
+        w.edge_entry(s, wit).kind = RelKind::Acquaintance;
+    }
+    law::file_report(w, crime, s, Some(wit));
+    (s, wit)
+}
+
+/// Silence (H16): a lawless suspect who knows the witness to his assault
+/// buys a Beat on her; one who does not know her buys nothing; a lawful one
+/// buys nothing.
+#[test]
+fn test_silence_buys_a_known_witness_only() {
+    let mut w = world();
+    let (s, wit) = suspect_and_witness(&mut w, citysim::Crime::Assault, true);
+    hitmarket::silence_pass(&mut w);
+    let mine = organic_by(&w, s);
+    assert_eq!(mine.len(), 1, "the suspect bought the witness");
+    assert_eq!(
+        (mine[0].kind, mine[0].target, mine[0].motive),
+        (ContractKind::Beat, Target::Agent(wit), Motive::Silence)
+    );
+    // Control: an unknown witness is never targeted.
+    let mut w = world();
+    let (s, _) = suspect_and_witness(&mut w, citysim::Crime::Assault, false);
+    hitmarket::silence_pass(&mut w);
+    assert!(organic_by(&w, s).is_empty(), "an unknown witness was targeted");
+    // Control: a lawful suspect does not buy.
+    let mut w = world();
+    let (s, _) = suspect_and_witness(&mut w, citysim::Crime::Assault, true);
+    set_law(&mut w, s, 0.9, 0.5);
+    hitmarket::silence_pass(&mut w);
+    assert!(organic_by(&w, s).is_empty(), "a lawful suspect bought a beating");
+}
+
+/// Silence: a Murder's witness is bought dead (a Hit).
+#[test]
+fn test_silence_on_a_murder_is_a_hit() {
+    let mut w = world();
+    let (s, wit) = suspect_and_witness(&mut w, citysim::Crime::Murder, true);
+    hitmarket::silence_pass(&mut w);
+    let mine = organic_by(&w, s);
+    assert_eq!(mine.len(), 1);
+    assert_eq!((mine[0].kind, mine[0].target), (ContractKind::Hit, Target::Agent(wit)));
+}
+
+/// H16 (D9): the street tells: a gang member knows a witness who lives in a
+/// district his gang holds, and not one who lives elsewhere.
+#[test]
+fn test_gang_member_knows_witness_in_held_district() {
+    let mut w = world();
+    let g = led_gangs(&mut w)[0];
+    let m = w.comp::<citysim::Gang>(g).map(|x| x.members[0]).unwrap();
+    let wit = adults(&w)
+        .into_iter()
+        .find(|&a| a != m && w.edge(m, a).is_none() && w.comp::<citysim::Household>(a).and_then(|h| h.home).is_some())
+        .expect("a housed stranger");
+    let home = w.comp::<citysim::Household>(wit).and_then(|h| h.home).unwrap();
+    if let Some(x) = w.comp_mut::<citysim::Gang>(g) {
+        x.territory.retain(|&b| b != home);
+    }
+    let held = |w: &World| {
+        citysim::systems::gang::held_districts(w, g).iter().any(|&(d, _)| d == w.district_of_building(home))
+    };
+    if !held(&w) {
+        assert!(!hitmarket::knows_witness(&w, m, wit), "a stranger elsewhere is unknown");
+    }
+    if let Some(x) = w.comp_mut::<citysim::Gang>(g) {
+        x.territory.push(home);
+    }
+    assert!(hitmarket::knows_witness(&w, m, wit), "the street tells");
+}
+
+/// Debt from an edge: a lawless creditor owed `debt_min` buys nothing until
+/// the debt is `debt_days` old, then a Beat on the debtor; a Debt Beat done
+/// starts the Hit's clock: `debt_hit_days` later, the debt standing, a Hit.
+/// A lawful creditor buys nothing.
+#[test]
+fn test_debt_beat_then_hit() {
+    let run = |lawful: bool| -> (World, EntityId, EntityId) {
+        let mut w = world();
+        let [c, d, g] = strangers(&w, 3)[..] else { unreachable!() };
+        set_law(&mut w, c, if lawful { 0.9 } else { 0.1 }, 0.5);
+        set_lod(&mut w, c, citysim::Lod::Statistical);
+        set_coins(&mut w, c, 10_000);
+        gun(&mut w, g);
+        let owed = w.config.hitmarket.debt_min;
+        let (lo, _) = citysim::edge_key(c, d);
+        let e = w.edge_entry(c, d);
+        e.debt = if lo == d { owed } else { -owed };
+        hitmarket::debt_pass(&mut w);
+        assert!(organic_by(&w, c).is_empty(), "a fresh debt is no motive");
+        let days = u64::from(w.config.hitmarket.debt_days);
+        day(&mut w, days);
+        hitmarket::debt_pass(&mut w);
+        (w, c, d)
+    };
+    let (mut w, c2, d) = run(false);
+    let mine = organic_by(&w, c2);
+    assert_eq!(mine.len(), 1, "the creditor bought a beating");
+    assert_eq!((mine[0].kind, mine[0].target, mine[0].motive), (ContractKind::Beat, Target::Agent(d), Motive::Debt));
+    // The Beat is done: the clock starts; the record closes.
+    let beat = mine[0].clone();
+    hitmarket::on_fulfilled(&mut w, &beat);
+    contracts::settle(&mut w, beat.id, contracts::Settle::Cancelled, "test");
+    assert!(w.hm_debts[&(c2, d)].beat.is_some());
+    hitmarket::debt_pass(&mut w);
+    assert_eq!(organic_by(&w, c2).len(), 1, "no Hit before debt_hit_days");
+    let days = u64::from(w.config.hitmarket.debt_hit_days);
+    day(&mut w, days);
+    hitmarket::debt_pass(&mut w);
+    let hit: Vec<_> = organic_by(&w, c2).into_iter().filter(|x| x.is_live()).collect();
+    assert_eq!(hit.len(), 1);
+    assert_eq!((hit[0].kind, hit[0].target), (ContractKind::Hit, Target::Agent(d)));
+    // Control: the lawful creditor.
+    let (w, c, _) = run(true);
+    assert!(organic_by(&w, c).is_empty(), "a lawful creditor bought a beating");
+}
+
+/// Debt from a finance plan: an agent lender whose asset sits on its owner
+/// in arrears past `repo_days` buys a Beat on the owner after `debt_days`.
+#[test]
+fn test_debt_from_finance_arrears() {
+    use citysim::systems::assets;
+    let mut w = world();
+    let [l, o] = strangers(&w, 2)[..] else { unreachable!() };
+    set_law(&mut w, l, 0.1, 0.5);
+    set_lod(&mut w, l, citysim::Lod::Statistical);
+    set_coins(&mut w, l, 10_000);
+    let spot = contracts::open_fixers(&w)[0];
+    let a =
+        assets::spawn_asset(&mut w, citysim::AssetKind::Motorcycle, 1, Some(o), citysim::AssetLoc::Parked(spot), 300);
+    let repo = w.config.assets.repo_days;
+    if let Some(x) = w.comp_mut::<citysim::Asset>(a) {
+        x.finance = Some(citysim::Finance { lender: Some(l), remaining: 100, per_day: 5, arrears: repo });
+    }
+    hitmarket::debt_pass(&mut w);
+    assert!(organic_by(&w, l).is_empty());
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days);
+    hitmarket::debt_pass(&mut w);
+    let mine = organic_by(&w, l);
+    assert_eq!(mine.len(), 1, "the lender bought a beating");
+    assert_eq!((mine[0].kind, mine[0].target, mine[0].motive), (ContractKind::Beat, Target::Agent(o), Motive::Debt));
+    // Repaid (no arrears): the clock drops.
+    if let Some(x) = w.comp_mut::<citysim::Asset>(a) {
+        x.finance = None;
+    }
+    hitmarket::debt_pass(&mut w);
+    assert!(!w.hm_debts.contains_key(&(l, o)));
+}
+
+/// Protect (D12): a gang buys the known witness of its member's assault,
+/// direct to its own first; untaken a day later, the same record moves to
+/// the open Fixer in a district the gang holds (escrowed from its purse).
+#[test]
+fn test_protect_direct_then_brokered() {
+    let mut w = world();
+    let g = led_gangs(&mut w)[0];
+    set_gang_treasury(&mut w, g, 100_000);
+    let leader = w.comp::<citysim::Gang>(g).and_then(|x| x.leader).unwrap();
+    let m = w.comp::<citysim::Gang>(g).map(|x| x.members.clone()).unwrap().into_iter().find(|&x| x != leader).unwrap();
+    let wit = adults(&w)
+        .into_iter()
+        .find(|&a| w.gang_of(a).is_none() && !law::is_guard(&w, a) && w.edge(m, a).is_none() && a != m)
+        .expect("a witness");
+    w.edge_entry(m, wit).kind = RelKind::Acquaintance;
+    law::file_report(&mut w, citysim::Crime::Assault, m, Some(wit));
+    // The gang holds the district of an open Fixer.
+    let f = contracts::open_fixers(&w)[0];
+    let d = w.district_of_building(f);
+    let home =
+        w.buildings_of_kind(citysim::BuildingKind::Home).iter().copied().find(|&h| w.district_of_building(h) == d);
+    if let (Some(h), Some(x)) = (home, w.comp_mut::<citysim::Gang>(g)) {
+        x.territory.push(h);
+    }
+    hitmarket::gang_pass(&mut w);
+    let mine = organic_by(&w, g);
+    assert_eq!(mine.len(), 1, "the gang bought its member's witness");
+    let r = &mine[0];
+    assert_eq!((r.kind, r.target, r.motive, r.broker), (ContractKind::Beat, Target::Agent(wit), Motive::Protect, None));
+    let id0 = identity(&w);
+    day(&mut w, 1);
+    hitmarket::gang_pass(&mut w);
+    let r = &w.contracts[&r.id];
+    assert_eq!(r.broker, Some(f), "re-posted at the held district's Fixer");
+    assert_eq!(r.escrow, r.price, "the price in escrow");
+    assert_eq!(organic_by(&w, g).len(), 1, "one record, not two");
+    assert_eq!(identity(&w), id0);
+}
+
+/// H14: a dead witness's case goes cold `cold_days` after the death (not
+/// before); a case a city guard saw does not.
+#[test]
+fn test_dead_witness_case_goes_cold_unless_a_guard_saw() {
+    let run = |guard_saw: bool| -> bool {
+        let mut w = world();
+        let [s, wit] = strangers(&w, 2)[..] else { unreachable!() };
+        law::file_report(&mut w, citysim::Crime::Assault, s, Some(wit));
+        if guard_saw {
+            let gd = citysim::systems::law_brain::guards(&w)[0];
+            w.remember_crime(gd, s, citysim::Crime::Assault, 1.0, None);
+        }
+        w.kill_by(wit, citysim::DeathCause::Violence, None);
+        hitmarket::cold_cases(&mut w);
+        assert!(open_report(&w, s, wit), "not cold the same day");
+        let days = u64::from(w.config.hitmarket.cold_days);
+        day(&mut w, days);
+        hitmarket::cold_cases(&mut w);
+        let cold = !open_report(&w, s, wit);
+        assert_eq!(cold, w.events.iter().any(|e| e.kind == EventKind::CaseCold));
+        cold
+    };
+    assert!(run(false), "no witness, no case");
+    assert!(!run(true), "a guard saw it: the case stands");
+}
+
+/// A done Silence Beat on `wit` by a gun, the witness at `courage`, with
+/// `recant_p` 1: did the report on `s` go?
+fn beaten_witness(courage: f32) -> bool {
+    let mut w = world();
+    w.config.hitmarket.recant_p = 1.0;
+    let (s, wit) = suspect_and_witness(&mut w, citysim::Crime::Assault, true);
+    let [g] = strangers(&w, 1)[..] else { unreachable!() };
+    gun(&mut w, g);
+    set_law(&mut w, wit, 0.5, courage);
+    let p = Posting {
+        buyer: Some(s),
+        agent: Some(s),
+        kind: ContractKind::Beat,
+        target: Target::Agent(wit),
+        broker: None,
+        deadline_days: 10,
+        origin: Origin::Hunt,
+        price: Some(30),
+    };
+    let extra = PostExtra { deposit: None, motive: Motive::Silence, why: None };
+    let id = contracts::post_with(&mut w, p, extra).expect("posted");
+    if let Some(c) = w.contracts.get_mut(&id) {
+        c.renege = false;
+    }
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Fulfilled);
+    let gone = !open_report(&w, s, wit);
+    assert_eq!(gone, w.events.iter().any(|e| e.kind == EventKind::Recanted));
+    gone
+}
+
+/// H15: a beaten witness recants at `recant_p × (1 − courage)`: always at
+/// courage 0 with `recant_p` 1, never at courage 1.
+#[test]
+fn test_beaten_witness_recants_by_courage() {
+    assert!(beaten_witness(0.0), "a frightened witness recants");
+    assert!(!beaten_witness(1.0), "a brave witness stands");
+}
+
+/// H15: a guard witness never recants.
+#[test]
+fn test_guard_witness_never_recants() {
+    let mut w = world();
+    w.config.hitmarket.recant_p = 1.0;
+    let gd = citysim::systems::law_brain::guards(&w)[0];
+    set_law(&mut w, gd, 0.5, 0.0);
+    let [s] = strangers(&w, 1)[..] else { unreachable!() };
+    law::file_report(&mut w, citysim::Crime::Assault, s, Some(gd));
+    let [other] = strangers(&w, 2)[1..] else { unreachable!() };
+    let mut c = organic_record(&mut w, s, other);
+    c.target = Target::Agent(gd);
+    hitmarket::on_fulfilled(&mut w, &c);
+    assert!(open_report(&w, s, gd), "a guard recanted");
+}
+
+/// A live organic Beat by `buyer` on `t` (posted direct with the motive Silence).
+fn organic_record(w: &mut World, buyer: EntityId, t: EntityId) -> citysim::contract::Contract {
+    set_coins(w, buyer, 10_000);
+    let p = Posting {
+        buyer: Some(buyer),
+        agent: Some(buyer),
+        kind: ContractKind::Beat,
+        target: Target::Agent(t),
+        broker: None,
+        deadline_days: 10,
+        origin: Origin::Hunt,
+        price: Some(30),
+    };
+    let extra = PostExtra { deposit: None, motive: Motive::Silence, why: None };
+    let id = contracts::post_with(w, p, extra).expect("posted");
+    w.contracts[&id].clone()
+}
+
+/// A coward with a lethal grudge, rich, housed with an open Fixer in reach,
+/// at `lod`.
+fn walking_buyer(w: &mut World, lod: citysim::Lod) -> (EntityId, EntityId) {
+    w.config.fixers.hire_reach_tiles = 100_000;
+    let all: Vec<EntityId> = adults(w)
+        .into_iter()
+        .filter(|&a| !w.has::<GangMember>(a) && !law::is_guard(w, a) && !w.has::<citysim::Sentence>(a))
+        .collect();
+    let h = all.iter().copied().find(|&a| contracts::nearest_fixer(w, a).is_some()).expect("a housed holder");
+    let t = all.iter().copied().find(|&a| a != h && w.edge(h, a).is_none()).expect("a target");
+    set_law(w, h, 0.2, 0.1);
+    set_grudge(w, h, t, 0.95);
+    set_coins(w, h, 10_000);
+    set_lod(w, h, lod);
+    (h, t)
+}
+
+/// H9: a buyer at Full with a Fixer in reach does not post from the daily
+/// pass: it holds a want (no coin moves), the Commission goal scores, its
+/// plan is `GoTo(Fixer) → Commission`, and the step at the Fixer posts the
+/// record there.
+#[test]
+fn test_full_buyer_walks_to_the_fixer() {
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    assert!(organic_by(&w, h).is_empty(), "no record before the walk");
+    assert_eq!(coins(&w, h), 10_000, "no coin moved");
+    let want = w.wants.get(&h).cloned().expect("a want");
+    assert_eq!((want.target, want.kind, want.motive), (t, ContractKind::Hit, Motive::Revenge));
+    assert!(hitmarket::commission_considerations(&w, h).is_some());
+    let plan = hitmarket::commission_plan(&mut w, h).expect("a plan");
+    let steps: Vec<_> = plan.steps.iter().map(|s| (s.action, s.target)).collect();
+    assert_eq!(
+        steps,
+        vec![
+            (citysim::ActionKind::GoTo(citysim::LocationKey::Seller), Some(want.fixer)),
+            (citysim::ActionKind::Commission, Some(want.fixer))
+        ]
+    );
+    // D8: no Hunt on the target while the want stands.
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95), "the errand stands in for the Hunt");
+    let _ = hitmarket::on_commission(&mut w, h, Some(want.fixer));
+    let mine = organic_by(&w, h);
+    assert_eq!(mine.len(), 1, "posted at the Fixer");
+    assert_eq!((mine[0].broker, mine[0].motive), (Some(want.fixer), Motive::Revenge));
+    assert!(w.wants.is_empty());
+    assert_eq!(w.stats.current.hit.hm_commissions, 1);
+}
+
+/// H9, H10: with no Fixer in reach a Full buyer posts direct at once; a
+/// Statistical buyer posts at once.
+#[test]
+fn test_no_errand_without_a_fixer_or_a_body() {
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    w.config.fixers.hire_reach_tiles = 0;
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    let mine = organic_by(&w, h);
+    assert_eq!((mine.len(), mine[0].broker), (1, None), "direct at once");
+    assert!(w.wants.is_empty());
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Statistical);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    assert_eq!(organic_by(&w, h).len(), 1, "a Statistical buyer posts at once");
+    assert!(w.wants.is_empty());
+}
+
+/// H8: a want lapses after `want_days`; a buyer demoted to Statistical
+/// posts at once.
+#[test]
+fn test_want_sweep_lapses_or_posts() {
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    set_lod(&mut w, h, citysim::Lod::Statistical);
+    hitmarket::want_sweep(&mut w);
+    assert!(w.wants.is_empty());
+    assert_eq!(organic_by(&w, h).len(), 1, "demoted: posted at once");
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    let days = u64::from(w.config.hitmarket.want_days);
+    day(&mut w, days);
+    hitmarket::want_sweep(&mut w);
+    assert!(w.wants.is_empty(), "lapsed");
+    assert!(organic_by(&w, h).is_empty());
+}
+
+/// H17: the buyer of a done Beat learns it first-hand (an `Assaulted` deed
+/// with the taker as actor) and remembers it (`Commissioned`, relief for
+/// Revenge).
+#[test]
+fn test_buyer_learns_and_remembers_the_deed() {
+    let mut w = world();
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    set_coins(&mut w, buyer, 10_000);
+    let f = contracts::open_fixers(&w)[0];
+    let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, brokered(buyer, ContractKind::Beat, t, f, 40), extra).expect("posted");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    let m = w.comp::<citysim::Memory>(buyer).expect("memory");
+    let c = m
+        .entries
+        .iter()
+        .find(|e| e.kind == citysim::MemoryKind::Commissioned && e.subject == Some(t))
+        .expect("Commissioned");
+    assert!((c.valence - w.config.hitmarket.closure_val).abs() < 1e-4, "{}", c.valence);
+    let heard = m.heard.iter().chain(m.entries.iter()).any(|e| {
+        e.deed == Some(citysim::word::Deed::Assaulted) && e.subject == Some(g) && e.object == Some(t) && e.hops == 0
+    });
+    assert!(heard, "the buyer knows who did it, first-hand");
+}
+
+/// H22: a want and a debt clock survive a save round trip.
+#[test]
+fn test_save_round_trip_with_a_want_and_a_debt_clock() {
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    let now = w.tick;
+    w.hm_debts.insert((h, t), citysim::contract::DebtClock { seen: now, beat: Some(now) });
+    let text = citysim::save::to_ron(&w);
+    let back = citysim::save::from_ron(&text).expect("load");
+    assert_eq!(back.wants, w.wants);
+    assert_eq!(back.hm_debts, w.hm_debts);
+}
+
+/// P2 fix round: a direct Hit's viewer must pass the gun gate, as a
+/// Fixer's regulars did to network: a friend with a well-paid day job does
+/// not take it; the same friend jobless and broke does.
+#[test]
+fn test_direct_hit_skips_a_well_paid_viewer() {
+    let run = |employed: bool| -> Option<EntityId> {
+        let mut w = world();
+        let [buyer, t] = strangers(&w, 2)[..] else { unreachable!() };
+        let v = adults(&w)
+            .into_iter()
+            .find(|&a| {
+                a != buyer
+                    && a != t
+                    && w.edge(a, t).is_none()
+                    && w.edge(a, buyer).is_none()
+                    && !w.has::<GangMember>(a)
+                    && !law::is_guard(&w, a)
+                    && w.comp::<citysim::Job>(a).is_some_and(|j| j.wage_per_day > 0)
+            })
+            .expect("an employed viewer");
+        w.edge_entry(buyer, v).kind = RelKind::Friend;
+        if let Some(p) = w.comp_mut::<Personality>(v) {
+            p.lawfulness = 0.0;
+            p.courage = 0.9;
+        }
+        if let Some(s) = w.comp_mut::<Skills>(v) {
+            s.fighting = 1.0;
+        }
+        let wage = w.comp::<citysim::Job>(v).map(|j| j.wage_per_day).unwrap();
+        w.median_wage = wage;
+        if !employed {
+            w.vacate_job(v);
+            set_coins(&mut w, v, 0);
+        }
+        set_coins(&mut w, buyer, 10_000);
+        let mut p = brokered(buyer, ContractKind::Hit, t, EntityId::NONE, 2_000);
+        p.broker = None;
+        let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+        let id = contracts::post_with(&mut w, p, extra).expect("posted");
+        contracts::match_day(&mut w);
+        w.contracts[&id].taker
+    };
+    assert!(run(false).is_some(), "the control: a broke, jobless friend takes it");
+    assert_eq!(run(true), None, "a well-paid friend took a direct Hit");
 }

@@ -783,6 +783,10 @@ pub enum MemoryKind {
     ChildTaken,
     /// Hunger as sickness § 3: told the cancer has a name.
     Diagnosed,
+    /// The Hit market (H17): a Hit or a Beat this agent paid for was done
+    /// (subject the target); relief for a Revenge buyer (`closure_val`),
+    /// neutral otherwise. Not a deed (`deed_of` reads `None`).
+    Commissioned,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -834,6 +838,9 @@ pub enum GoalKind {
     /// M16a (plan C13): work a taken contract record, or network at a
     /// Fixer for one (a scripted plan; `systems::contracts`).
     Contract,
+    /// The Hit market (H9): walk to a Fixer and commission the Hit or Beat
+    /// one wants (a scripted plan; `systems::hitmarket`).
+    Commission,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).
