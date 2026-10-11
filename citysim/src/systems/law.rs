@@ -337,11 +337,42 @@ pub fn file_report(world: &mut World, crime: Crime, suspect: EntityId, witness: 
     }
 }
 
+/// Is `a` at work: on shift inside its employer, or on a Work plan (the
+/// commute to or from a shift included)? A person at work is not loitering.
+pub fn at_work(world: &World, a: EntityId) -> bool {
+    let Some(job) = world.comp::<Job>(a) else { return false };
+    if job.role == Role::Guard {
+        return false;
+    }
+    let inside = job.employer.is_some() && job.employer == world.comp::<Position>(a).and_then(|p| p.building);
+    (inside && job.on_shift(world.tick_of_day()))
+        || world
+            .comp::<Brain>(a)
+            .is_some_and(|b| b.plan.as_ref().is_some_and(|p| p.goal == crate::components::GoalKind::Work))
+}
+
+/// Is Vagrancy the only thing `s` is wanted for, while `s` is at work? Such a
+/// suspect is not chased: a night-shift worker with no bed is not loitering.
+fn vagrant_at_work(world: &World, s: EntityId) -> bool {
+    if !at_work(world, s) {
+        return false;
+    }
+    let mut any = false;
+    let only_vagrancy = world.crime_reports().iter().filter(|r| !r.resolved && r.suspect == s).all(|r| {
+        any = true;
+        r.crime == Crime::Vagrancy
+    });
+    any && only_vagrancy
+}
+
 /// A wanted suspect the law can chase now: free, uncuffed and seen by a
 /// guard within `suspect_seen_ticks`. Callers pair it with an open report.
 fn located(world: &World, s: EntityId) -> bool {
     let window = world.config.crime.suspect_seen_ticks;
     let tick = world.tick;
+    if vagrant_at_work(world, s) {
+        return false;
+    }
     // L1: a corpse keeps its Position and Identity (`is_alive`), and guards
     // walked hours to arrest the dead.
     (living(world, s))

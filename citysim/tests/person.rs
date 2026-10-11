@@ -1656,3 +1656,47 @@ fn probe_refused_at_a_full_market_eats_elsewhere() {
     assert!(looped.is_empty(), "refused at the same full Market again: {looped:?}");
     assert!(unfed.is_empty(), "refused once and never ate (coins in hand): {unfed:?}");
 }
+
+// ---------------------------------------------------------------------------
+// Vagrancy and the night shift (the workplace-room fix put homeless workers on
+// night relief crews; seed 42 d19 an on-shift Vat Tech was cuffed at 23:19).
+// ---------------------------------------------------------------------------
+
+/// A homeless worker on a night shift with a Vagrancy report open is not a
+/// suspect the law can chase while at work; a homeless jobless adult is.
+#[test]
+fn probe_homeless_night_worker_on_shift_is_not_charged_with_vagrancy() {
+    let mut w = world();
+    // Day 3, 02:00: the night crews are on shift at their employers.
+    w.run_ticks(3 * TICKS_PER_DAY + 2 * TICKS_PER_HOUR);
+    let tod = w.tick_of_day();
+    let worker = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a))
+        .filter(|&a| w.gang_of(a).is_none() && !w.has::<citysim::Sentence>(a))
+        .find(|&a| {
+            w.comp::<Job>(a).is_some_and(|j| {
+                j.role != Role::Guard && j.employer.is_some() && j.employer == building(&w, a) && j.on_shift(tod)
+            })
+        })
+        .expect("a free adult at work on the night shift");
+    let drifter = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a) && a != worker)
+        .filter(|&a| w.gang_of(a).is_none() && !w.has::<citysim::Sentence>(a))
+        .find(|&a| w.comp::<Job>(a).is_none_or(|j| j.employer.is_none()))
+        .expect("a free jobless adult");
+    for a in [worker, drifter] {
+        w.comp_mut::<Household>(a).expect("household").home = None;
+        let tile = w.comp::<Position>(a).expect("position").tile;
+        law::file_report(&mut w, citysim::Crime::Vagrancy, a, None);
+        w.last_seen.insert(a, (tile, w.tick));
+    }
+    let worker_chased = law::is_located_suspect(&w, worker);
+    let drifter_chased = law::is_located_suspect(&w, drifter);
+    eprintln!("worker {} chased {worker_chased}; drifter {} chased {drifter_chased}", worker.index, drifter.index);
+    assert!(!worker_chased, "a homeless worker on shift is a Vagrancy suspect");
+    assert!(drifter_chased, "control: a jobless drifter with a Vagrancy report is not chaseable");
+}
