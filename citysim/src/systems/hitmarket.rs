@@ -734,7 +734,9 @@ pub fn stiff_sweep(world: &mut World) {
             world.hm_stiffs.remove(&(taker, buyer));
             continue;
         }
-        if owed_to(world, taker, buyer) <= 0 {
+        // Fix round: an edge pruned with the balance on it is no repayment
+        // (the clock stands; the debt is still unpaid).
+        if world.edge(taker, buyer).is_some() && owed_to(world, taker, buyer) <= 0 {
             world.hm_stiffs.remove(&(taker, buyer));
             if let Some(g) = world.comp_mut::<crate::word::Grudges>(taker) {
                 if let Some(x) = g
@@ -750,7 +752,17 @@ pub fn stiff_sweep(world: &mut World) {
         }
         if now.saturating_sub(since) >= grace {
             world.hm_stiffs.remove(&(taker, buyer));
-            crate::systems::grudges::add(world, taker, buyer, GrudgeCause::Betrayed, w, 0);
+            // Fix round: back up to the stiffing's weight, not merged over
+            // what stands (`grudges::add`'s `1 − (1 − a)(1 − b)` over-weighted
+            // it); sworn afresh only when the grudge decayed away.
+            let held = world
+                .comp_mut::<crate::word::Grudges>(taker)
+                .and_then(|g| g.list.iter_mut().find(|x| x.target == buyer && x.settled.is_none()))
+                .map(|x| x.weight = x.weight.max(w))
+                .is_some();
+            if !held {
+                crate::systems::grudges::add(world, taker, buyer, GrudgeCause::Betrayed, w, 0);
+            }
         }
     }
 }

@@ -998,21 +998,46 @@ pub fn render_for(world: &World, id: ContractId) -> Render {
     if is_mission(world, c) {
         return Render::Live;
     }
-    let shown = |e: EntityId| {
-        world.comp::<Brain>(e).is_some_and(|b| b.lod != Lod::Statistical || b.pinned)
-            || world.view_rect.zip(world.comp::<Position>(e)).is_some_and(|(r, p)| r.contains(p.tile))
-    };
+    if party_shown(world, c) {
+        Render::Live
+    } else {
+        Render::Ledger
+    }
+}
+
+/// C17: is any of record `c`'s taker, crew or agent target a body (not
+/// Statistical, or pinned) or on screen? (`render_for`'s test; the Hit
+/// market's ledger fallback never rolls such a record off-screen.)
+pub fn party_shown(world: &World, c: &Contract) -> bool {
     let mut ids: SmallVec<[EntityId; 6]> = SmallVec::new();
     ids.extend(c.taker);
     ids.extend(c.crew.iter().copied());
     if let Target::Agent(t) = c.target {
         ids.push(t);
     }
-    if ids.into_iter().any(shown) {
-        Render::Live
-    } else {
-        Render::Ledger
-    }
+    ids.into_iter().any(|e| shown(world, e))
+}
+
+/// C17's body test for one entity: not Statistical, pinned, or on screen.
+fn shown(world: &World, e: EntityId) -> bool {
+    world.comp::<Brain>(e).is_some_and(|b| b.lod != Lod::Statistical) || seen(world, e)
+}
+
+/// At Full, pinned, or on screen: in front of the player.
+fn seen(world: &World, e: EntityId) -> bool {
+    world.comp::<Brain>(e).is_some_and(|b| b.lod == Lod::Full || b.pinned)
+        || world.view_rect.zip(world.comp::<Position>(e)).is_some_and(|(r, p)| r.contains(p.tile))
+}
+
+/// The Hit market (fix round): may organic record `c` be worked on the
+/// ledger: its target is no body (`shown`: a ledger kill is a body's death
+/// with no scene), and none of its taker or crew is in front of the player
+/// (`seen`). A taker or crew member walking off-screen at Coarse may strike
+/// from the ledger (a gang's crew mostly is: the LOD pass promotes members);
+/// a lost strike's death never falls on a body (`resolve_ledger`).
+fn ledger_ok(world: &World, c: &Contract) -> bool {
+    !c.target_agent().is_some_and(|t| shown(world, t))
+        && !c.taker.into_iter().chain(c.crew.iter().copied()).any(|e| seen(world, e))
 }
 
 /// Live records being worked now (each one run or one mission, C17;
@@ -1094,7 +1119,7 @@ pub fn holds_body(world: &World, id: EntityId) -> bool {
 /// `max_missions` running, and its bodies fit inside `contract_quota`
 /// beside the running records' (else it stays queued by price).
 fn has_room(world: &World, c: &Contract) -> bool {
-    if live_count(world) >= world.config.missions.max_missions {
+    if live_count(world) >= world.config.missions.max_missions && !jumps_queue(world, c) {
         return false;
     }
     let set = contract_set(world);
@@ -1949,6 +1974,17 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
         return;
     }
     let Some(taker) = c.taker else { return };
+    // Fix round: an organic record whose target became a body, or whose
+    // party came in front of the player, after it went to the ledger goes
+    // back to the live queue rather than roll a death off-screen
+    // (`ledger_ok`).
+    if !c.motive.is_none() && !ledger_ok(world, &c) {
+        if let Some(x) = world.contracts.get_mut(&id) {
+            x.render = Render::Live;
+            x.due = None;
+        }
+        return;
+    }
     // The Hit market's gaps pass: a gang's or a squad's job that waited out
     // `queue_hours` for a live slot is worked here: the crew strikes as one
     // party, its first free member (the strongest, `job_crew`'s order) for
@@ -2056,7 +2092,10 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     let lethal = p_win < world.config.missions.ledger_death_p
         && world.rng.contract(ContractNs::TakerDeath, id, attempts).random::<f32>() < 1.0 - p_win;
     fail_attempt(world, id, "the strike was lost");
-    if lethal && crate::systems::law::living(world, lead) {
+    // Fix round: an organic record's lost strike is never a body's death
+    // off-screen (a Coarse lead loses and lives; M16a's records unchanged).
+    let body = !c.motive.is_none() && shown(world, lead);
+    if lethal && crate::systems::law::living(world, lead) && !body {
         crate::systems::lod::stat_hit(world, lead, crate::components::HoleKind::Killed, Some(&src(t)));
     }
 }
@@ -2574,9 +2613,6 @@ pub fn run(world: &mut World) {
 /// runs are under `max_missions`.
 fn start_queued(world: &mut World) {
     ledger_stale_queue(world);
-    if live_count(world) >= world.config.missions.max_missions {
-        return;
-    }
     let mut queued: Vec<(i64, ContractId)> = world
         .contracts
         .values()
@@ -2590,13 +2626,35 @@ fn start_queued(world: &mut World) {
     queued.sort();
     // Phase 4 review: a record that cannot start (its bodies over the
     // quota, a lost taker or crew) is passed over, not a wall for the
-    // cheaper ones behind it; only the run count stops the pass.
+    // cheaper ones behind it; only the run count stops the pass (the Hit
+    // market's stale records with a body on them excepted: `jumps_queue`).
     for (_, id) in queued {
-        if live_count(world) >= world.config.missions.max_missions {
-            break;
+        let full = live_count(world) >= world.config.missions.max_missions;
+        if full && !world.contracts.get(&id).is_some_and(|c| jumps_queue(world, c)) {
+            continue;
         }
         start_live(world, id);
     }
+}
+
+/// The Hit market's gaps pass (fix round): a solo taker's organic Hit or
+/// Beat queued `queue_hours` or more that may not go to the ledger
+/// (`ledger_ok`: its target a body, or a party in front of the player)
+/// starts live past the `max_missions` run count; the bodies'
+/// `contract_quota` still holds, and `[hitmarket] max_open` bounds how many
+/// such records exist at once. A gang's or a squad's job does not jump (on
+/// 42-47 letting the missions jump too raised Murders 509 → 632: door
+/// brawls); it waits for a slot or for its party to leave the screen.
+fn jumps_queue(world: &World, c: &Contract) -> bool {
+    world.config.hitmarket.enabled
+        && c.status == ContractStatus::Taken
+        && !c.motive.is_none()
+        && c.kind.violent()
+        && !is_mission(world, c)
+        && c.taken.is_some_and(|t| {
+            world.tick.saturating_sub(t) >= u64::from(world.config.hitmarket.queue_hours) * TICKS_PER_HOUR
+        })
+        && !ledger_ok(world, c)
 }
 
 /// The Hit market's gaps pass (takers who can't close), hourly before the
@@ -2620,6 +2678,9 @@ fn ledger_stale_queue(world: &mut World) {
         .filter(|c| !c.motive.is_none() && c.kind.violent() && c.target_agent().is_some())
         .filter(|c| c.taken.is_some_and(|t| now.saturating_sub(t) >= wait))
         .filter(|c| !running(world, c))
+        // Fix round: a body for a target, or a party in front of the
+        // player, keeps it live in the queue (`ledger_ok`).
+        .filter(|c| ledger_ok(world, c))
         .map(|c| c.id)
         .collect();
     for id in stale {

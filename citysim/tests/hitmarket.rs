@@ -1627,6 +1627,8 @@ fn test_queued_record_goes_to_the_ledger() {
     for gang_job in [false, true] {
         let mut w = world();
         w.config.missions.max_missions = 0;
+        // A day in, at 01:00 (an hour mark, past midnight's pass).
+        w.run_ticks(citysim::TICKS_PER_DAY + citysim::TICKS_PER_HOUR);
         let gangs = if gang_job { led_gangs(&mut w) } else { Vec::new() };
         let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
         gun(&mut w, g);
@@ -1645,8 +1647,27 @@ fn test_queued_record_goes_to_the_ledger() {
         };
         assert!(taken);
         assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "queued for a live slot");
-        let hours = u64::from(w.config.hitmarket.queue_hours) + 1;
-        w.run_ticks(hours * citysim::TICKS_PER_HOUR);
+        // Fix round: only a record with no body on it goes to the ledger;
+        // the gun (taken live as a body) has since gone off-screen.
+        // The take is `queue_hours` old (backdated: a crew may be promoted
+        // by the LOD pass over a real day, and stays queued then).
+        let hours = u64::from(w.config.hitmarket.queue_hours);
+        if let Some(x) = w.contracts.get_mut(&id) {
+            x.taken = x.taken.map(|k| k.saturating_sub(hours * citysim::TICKS_PER_HOUR));
+        }
+        let c = w.contracts[&id].clone();
+        let party: Vec<EntityId> = c.taker.into_iter().chain(c.crew.iter().copied()).chain([t]).collect();
+        for p in party {
+            set_lod(&mut w, p, citysim::Lod::Statistical);
+        }
+        // A crew member walking off-screen (Coarse) may strike from the
+        // ledger; only the target as a body, or a party in front of the
+        // player, keeps it live.
+        if let Some(&m) = c.crew.first() {
+            set_lod(&mut w, m, citysim::Lod::Coarse);
+        }
+        // The hourly queue pass (`contracts::run` at the hour).
+        contracts::run(&mut w);
         let c = w.contracts[&id].clone();
         assert_eq!(
             (c.status, c.render),
@@ -1663,4 +1684,83 @@ fn test_queued_record_goes_to_the_ledger() {
         let not_free = w.contract_log.iter().any(|(_, x, text)| *x == id && text.contains("was not free"));
         assert!(!not_free, "gang {gang_job}: the ledger read a gang as an unfree taker");
     }
+}
+
+/// Fix round (review 1): a stale-queued record whose target is a body
+/// (pinned here; Full, Coarse or on screen alike) is never rolled on the
+/// ledger, where `lod::stat_hit` would kill a body with no scene: it stays
+/// live and, stale, starts past the `max_missions` run count.
+#[test]
+fn test_stale_queued_record_with_a_shown_target_stays_live() {
+    let mut w = world();
+    w.config.missions.max_missions = 0;
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    if let Some(b) = w.comp_mut::<citysim::Brain>(t) {
+        b.pinned = true;
+    }
+    set_coins(&mut w, buyer, 10_000);
+    let f = contracts::open_fixers(&w)[0];
+    let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, brokered(buyer, ContractKind::Hit, t, f, 100), extra).expect("posted");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "queued live");
+    let hours = u64::from(w.config.hitmarket.queue_hours) + 1;
+    w.run_ticks(hours * citysim::TICKS_PER_HOUR);
+    let c = w.contracts[&id].clone();
+    let off = w.contract_log.iter().any(|(_, x, text)| *x == id && text.contains("worked off-screen"));
+    assert!(!off && c.render == citysim::contract::Render::Live, "a shown target went to the ledger");
+    // ... and, stale, it jumps the run cap: worked live.
+    assert!(c.started.is_some(), "a stale record with a body on it never started");
+}
+
+/// A gun stiffed by a buyer on a 100 record with 50 down and nothing more;
+/// `murder_grudge`: the gun already held a killing grudge on the buyer.
+fn stiffed_gun(w: &mut World, murder_grudge: bool) -> (EntityId, EntityId) {
+    let [buyer, t, g] = strangers(w, 3)[..] else { unreachable!() };
+    gun(w, g);
+    if murder_grudge {
+        set_grudge(w, g, buyer, 0.9);
+    }
+    set_coins(w, buyer, 50);
+    let id = credit_record(w, buyer, t, g, 100);
+    contracts::settle(w, id, contracts::Settle::Fulfilled, "");
+    (buyer, g)
+}
+
+/// Fix round (review 2): the grace's end re-swears the grudge at the
+/// stiffing's weight, not merged over the grudge that stood (no decay ran
+/// here, so the weight is unchanged).
+#[test]
+fn test_grace_end_does_not_overweight_the_grudge() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, false);
+    let before = grudges::grudge_on(&w, g, buyer).expect("grudge").weight;
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days);
+    hitmarket::stiff_sweep(&mut w);
+    let after = grudges::grudge_on(&w, g, buyer).expect("grudge").weight;
+    assert!((after - before).abs() < 1e-5, "{before} -> {after}");
+}
+
+/// Fix round (review 2): the grace holds back only the betrayal: a gun who
+/// already holds a killing grudge on the buyer still hunts him.
+#[test]
+fn test_grace_does_not_hide_a_killing_grudge() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, true);
+    assert!(w.hm_stiffs.contains_key(&(g, buyer)));
+    assert_eq!(citysim::systems::hunt::heaviest_eligible(&w, g).map(|x| x.0), Some(buyer));
+}
+
+/// Fix round (review 3): an edge pruned with the balance on it is no
+/// repayment: the clock stands and the grudge is not settled.
+#[test]
+fn test_pruned_debt_edge_is_not_a_repayment() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, false);
+    w.remove_edge(buyer, g);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(w.hm_stiffs.contains_key(&(g, buyer)), "the clock stands");
+    assert!(grudges::grudge_on(&w, g, buyer).is_some(), "not forgiven");
 }
