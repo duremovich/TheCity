@@ -1087,16 +1087,18 @@ fn test_full_buyer_walks_to_the_fixer() {
     assert_eq!(w.stats.current.hit.hm_commissions, 1);
 }
 
-/// H9, H10: with no Fixer in reach a Full buyer posts direct at once; a
-/// Statistical buyer posts at once.
+/// H9, H10: with no Fixer in reach a Full buyer posts at once, no errand
+/// (direct, or with too few asks of its own, at the nearest Fixer out of
+/// reach: the gaps pass); a Statistical buyer posts at once.
 #[test]
 fn test_no_errand_without_a_fixer_or_a_body() {
     let mut w = world();
     let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
     w.config.fixers.hire_reach_tiles = 0;
+    let far = contracts::reach_offer(&w, ContractKind::Hit, &Target::Agent(t), h).map(|x| x.0);
     assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
     let mine = organic_by(&w, h);
-    assert_eq!((mine.len(), mine[0].broker), (1, None), "direct at once");
+    assert_eq!((mine.len(), mine[0].broker), (1, far), "at once");
     assert!(w.wants.is_empty());
     let mut w = world();
     let (h, t) = walking_buyer(&mut w, citysim::Lod::Statistical);
@@ -1161,10 +1163,13 @@ fn test_save_round_trip_with_a_want_and_a_debt_clock() {
     assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
     let now = w.tick;
     w.hm_debts.insert((h, t), citysim::contract::DebtClock { seen: now, beat: Some(now) });
+    // The gaps pass: a stiffed gun's grace (save 9).
+    w.hm_stiffs.insert((t, h), (now, 0.8));
     let text = citysim::save::to_ron(&w);
     let back = citysim::save::from_ron(&text).expect("load");
     assert_eq!(back.wants, w.wants);
     assert_eq!(back.hm_debts, w.hm_debts);
+    assert_eq!(back.hm_stiffs, w.hm_stiffs);
 }
 
 /// P2 fix round: a direct Hit's viewer must pass the gun gate, as a
@@ -1371,4 +1376,391 @@ fn test_corp_rival_vendetta_before_the_last_wrong() {
     let mine = organic_by(&w, c);
     assert_eq!(mine.len(), 1);
     assert_eq!((mine[0].target, mine[0].motive), (Target::Agent(e2), Motive::Rival), "the feud first");
+}
+
+// ---------------------------------------------------------------------------
+// The gaps pass (docs/HIT_MARKET.md "Gaps pass")
+// ---------------------------------------------------------------------------
+
+/// Does `holder` hold a `deed` rumour with this actor and object?
+fn holds_deed(w: &World, holder: EntityId, deed: citysim::word::Deed, actor: EntityId, object: EntityId) -> bool {
+    w.comp::<citysim::Memory>(holder).is_some_and(|m| {
+        m.entries
+            .iter()
+            .chain(m.heard.iter())
+            .any(|e| e.deed == Some(deed) && e.subject == Some(actor) && e.object == Some(object))
+    })
+}
+
+/// A teller who knows the city (no distortion) and holds nothing yet.
+fn blank_teller(w: &mut World, id: EntityId) {
+    if let Some(s) = w.comp_mut::<Skills>(id) {
+        s.knowledge = 1.0;
+    }
+    if let Some(m) = w.comp_mut::<citysim::Memory>(id) {
+        m.entries.clear();
+        m.heard.clear();
+    }
+}
+
+/// An off-reach Revenge buyer whose own people would not take it, two guns
+/// on the Fixer's books, with or without two guns among its own friends.
+fn off_reach_buyer(w: &mut World, own_guns: bool) -> (EntityId, EntityId, EntityId) {
+    w.config.fixers.hire_reach_tiles = 0;
+    let [b, t, g1, g2, f1, f2] = strangers(w, 6)[..] else { unreachable!() };
+    set_law(w, b, 0.2, 0.1);
+    set_lod(w, b, citysim::Lod::Statistical);
+    set_coins(w, b, 10_000);
+    let ns: Vec<EntityId> = w.neighbours(b).collect();
+    for n in ns {
+        set_law(w, n, 1.0, 0.0);
+    }
+    let f = contracts::open_fixers(w)[0];
+    let now = w.tick;
+    for g in [g1, g2] {
+        gun(w, g);
+        if let Some(k) = w.comp_mut::<citysim::contract::Broker>(f) {
+            k.regulars.insert(g, now);
+        }
+    }
+    if own_guns {
+        for g in [f1, f2] {
+            gun(w, g);
+            w.edge_entry(b, g).kind = RelKind::Friend;
+        }
+    }
+    (b, t, f)
+}
+
+/// Gaps pass (reach): an agent's direct record with fewer than `ask_rank`
+/// asks among its own people goes to the nearest open Fixer (out of
+/// walking reach) at that Fixer's market price plus the go-between's
+/// premium (`reach_premium` 0.5), not the M16a quote; with two guns of its
+/// own it stays direct at their price.
+#[test]
+fn test_off_reach_buyer_goes_to_the_nearest_fixer_at_a_premium() {
+    let mut w = world();
+    let (b, t, f) = off_reach_buyer(&mut w, false);
+    let tgt = Target::Agent(t);
+    assert!(contracts::market_price(&w, ContractKind::Hit, &tgt, Some(b), Some(b), None).is_none());
+    let p =
+        contracts::market_price(&w, ContractKind::Hit, &tgt, Some(b), Some(b), Some(f)).expect("the Fixer's guns ask");
+    let quote = contracts::quote(&w, ContractKind::Hit, &tgt, None);
+    assert!(hitmarket::agent_buy(&mut w, b, t, ContractKind::Hit, Motive::Revenge, 0.95, None));
+    let mine = organic_by(&w, b);
+    assert_eq!(mine.len(), 1);
+    assert_eq!(mine[0].broker, Some(f), "word went to the Fixer out of reach");
+    assert_eq!(mine[0].price, (p as f32 * 1.5).ceil() as i64, "its market price and the premium");
+    assert!(mine[0].price < quote, "not the M16a quote ({} vs {quote})", mine[0].price);
+    // Control: two guns among the buyer's own friends price it direct.
+    let mut w = world();
+    let (b, t, _) = off_reach_buyer(&mut w, true);
+    let tgt = Target::Agent(t);
+    let direct = contracts::market_price(&w, ContractKind::Hit, &tgt, Some(b), Some(b), None).expect("own guns ask");
+    assert!(hitmarket::agent_buy(&mut w, b, t, ContractKind::Hit, Motive::Revenge, 0.95, None));
+    let mine = organic_by(&w, b);
+    assert_eq!((mine.len(), mine[0].broker, mine[0].price), (1, None, direct), "direct at its own people's price");
+}
+
+/// Gaps pass: a lawful revenge buyer waits for the law: with his report on
+/// the killer open (the killer wanted) or the killer held, he buys nothing;
+/// with no case open he buys; a lawless one does not wait.
+#[test]
+fn test_lawful_buyer_waits_for_the_law() {
+    let run = |law_: f32, case: u8| -> usize {
+        let mut w = world();
+        let [h, t] = strangers(&w, 2)[..] else { unreachable!() };
+        set_law(&mut w, h, law_, 0.1);
+        set_lod(&mut w, h, citysim::Lod::Statistical);
+        set_grudge(&mut w, h, t, 0.95);
+        set_coins(&mut w, h, 10_000);
+        match case {
+            1 => law::file_report(&mut w, citysim::Crime::Murder, t, Some(h)),
+            2 => {
+                let gd = citysim::systems::law_brain::guards(&w)[0];
+                if let Some(b) = w.comp_mut::<citysim::Brain>(t) {
+                    b.cuffed_by = Some(gd);
+                }
+            }
+            _ => {}
+        }
+        hitmarket::try_revenge(&mut w, h, t, 0.95);
+        organic_by(&w, h).len()
+    };
+    assert_eq!(run(0.8, 1), 0, "a lawful man waits while his report on the killer is open");
+    assert_eq!(run(0.8, 2), 0, "and while the killer is held");
+    assert_eq!(run(0.8, 0), 1, "no case open: he buys");
+    assert_eq!(run(0.3, 1), 1, "a lawless one does not wait");
+}
+
+/// Gaps pass: a lawful buyer's want waits on the way to the Fixer: the
+/// errand does not score while the law has the case, and the step at the
+/// Fixer keeps the want and posts nothing.
+#[test]
+fn test_lawful_buyers_want_waits_for_the_law() {
+    let mut w = world();
+    let (h, t) = walking_buyer(&mut w, citysim::Lod::Full);
+    set_law(&mut w, h, 0.8, 0.1);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
+    let want = w.wants.get(&h).cloned().expect("a want");
+    law::file_report(&mut w, citysim::Crime::Murder, t, Some(h));
+    assert!(hitmarket::waits_for_law(&w, h, t));
+    assert!(hitmarket::commission_considerations(&w, h).is_none(), "the errand waits");
+    let _ = hitmarket::on_commission(&mut w, h, Some(want.fixer));
+    assert!(organic_by(&w, h).is_empty(), "nothing bought at the Fixer");
+    assert!(w.wants.contains_key(&h), "the want waits");
+}
+
+/// Gaps pass: a Fixer's owner keeps her book quiet: she holds the buyer's
+/// `Hired` first-hand and does not tell it; the gun who took it still does
+/// (the leak stays through other holders).
+#[test]
+fn test_fixer_owner_keeps_her_book_quiet() {
+    let mut w = world();
+    let f = contracts::open_fixers(&w)[0];
+    let owner = w.owner_of(f).expect("an owner");
+    let people: Vec<EntityId> = strangers(&w, 7).into_iter().filter(|&a| a != owner).collect();
+    let [buyer, t, g, listener, l2] = people[..5] else { unreachable!() };
+    gun(&mut w, g);
+    set_coins(&mut w, buyer, 5000);
+    blank_teller(&mut w, owner);
+    blank_teller(&mut w, g);
+    w.edge_entry(listener, owner).trust = 1.0;
+    w.edge_entry(l2, g).trust = 1.0;
+    let id = contracts::post(&mut w, brokered(buyer, ContractKind::Hit, t, f, 100)).expect("posted");
+    let hired = citysim::word::Deed::Hired;
+    assert!(holds_deed(&w, owner, hired, buyer, t), "the broker knows first-hand");
+    citysim::systems::gossip::exchange(&mut w, owner, listener, citysim::systems::gossip::Venue::Chat);
+    assert!(!holds_deed(&w, listener, hired, buyer, t), "the owner told her book");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    citysim::systems::gossip::exchange(&mut w, g, l2, citysim::systems::gossip::Venue::Chat);
+    assert!(holds_deed(&w, l2, hired, buyer, t), "the gun still talks");
+}
+
+/// Gaps pass: a buyer keeps the deed she bought to herself (H17's
+/// first-hand `Assaulted`, actor the gun); a first-hand deed she did not
+/// buy she still tells.
+#[test]
+fn test_buyer_keeps_the_bought_deed_to_herself() {
+    let mut w = world();
+    let [buyer, t, g, listener, x, y] = strangers(&w, 6)[..] else { unreachable!() };
+    gun(&mut w, g);
+    set_coins(&mut w, buyer, 10_000);
+    let f = contracts::open_fixers(&w)[0];
+    let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, brokered(buyer, ContractKind::Beat, t, f, 40), extra).expect("posted");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    blank_teller(&mut w, buyer);
+    w.edge_entry(listener, buyer).trust = 1.0;
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    let assaulted = citysim::word::Deed::Assaulted;
+    assert!(holds_deed(&w, buyer, assaulted, g, t), "H17: the buyer knows who did it");
+    let sal = w.config.gossip.deed_sal.get(assaulted);
+    let other = citysim::MemoryEntry {
+        subject: Some(x),
+        salience: sal,
+        deed: Some(assaulted),
+        object: Some(y),
+        hops: 0,
+        conf: 1.0,
+        ..citysim::MemoryEntry::blank(citysim::MemoryKind::Rumour, w.tick)
+    };
+    citysim::systems::memory::hear_entry(&mut w, buyer, other);
+    for _ in 0..2 {
+        citysim::systems::gossip::exchange(&mut w, buyer, listener, citysim::systems::gossip::Venue::Chat);
+    }
+    assert!(!holds_deed(&w, listener, assaulted, g, t), "she told the beating she bought");
+    assert!(holds_deed(&w, listener, assaulted, x, y), "she tells what she only saw");
+}
+
+/// Gaps pass (decision 3's grace): a stiffed gun's grudge counts toward no
+/// Hunt while the balance is owed out of wages; `debt_days` on, unpaid, it
+/// does.
+#[test]
+fn test_stiffed_gun_waits_out_the_grace() {
+    let mut w = world();
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    set_coins(&mut w, buyer, 50);
+    let id = credit_record(&mut w, buyer, t, g, 100);
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    let gr = grudges::grudge_on(&w, g, buyer).expect("the gun's grudge");
+    assert!(gr.weight >= w.config.hunt.hunt_min, "{}", gr.weight);
+    let hunted = |w: &World| citysim::systems::hunt::heaviest_eligible(w, g).map(|x| x.0) == Some(buyer);
+    assert!(!hunted(&w), "owed out of wages first: no Hunt in the grace");
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days - 1);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(!hunted(&w), "a day short");
+    day(&mut w, 1);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(hunted(&w), "unpaid past the grace: the grudge counts");
+    assert!(w.hm_stiffs.is_empty());
+}
+
+/// Gaps pass: a stiffed buyer who pays the balance from wages inside the
+/// grace is forgiven: the gun's `Betrayed` grudge settles and never hunts.
+#[test]
+fn test_stiffed_gun_paid_in_the_grace_lets_it_go() {
+    let mut w = world();
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    set_coins(&mut w, buyer, 50);
+    let id = credit_record(&mut w, buyer, t, g, 100);
+    contracts::settle(&mut w, id, contracts::Settle::Fulfilled, "");
+    set_coins(&mut w, buyer, 1_000);
+    citysim::systems::social::repay_debts(&mut w, buyer);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(grudges::grudge_on(&w, g, buyer).is_none(), "paid: the grudge settles");
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(citysim::systems::hunt::heaviest_eligible(&w, g).map(|x| x.0) != Some(buyer));
+}
+
+/// Gaps pass (takers who can't close): a taken organic Hit queued for a
+/// live slot (every `max_missions` slot held) is worked on the ledger after
+/// `queue_hours`, a solo gun's and a gang's job alike; a gang's ledger
+/// strike is its crew's (never "the taker was not free").
+#[test]
+fn test_queued_record_goes_to_the_ledger() {
+    for gang_job in [false, true] {
+        let mut w = world();
+        w.config.missions.max_missions = 0;
+        // A day in, at 01:00 (an hour mark, past midnight's pass).
+        w.run_ticks(citysim::TICKS_PER_DAY + citysim::TICKS_PER_HOUR);
+        let gangs = if gang_job { led_gangs(&mut w) } else { Vec::new() };
+        let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+        gun(&mut w, g);
+        set_lod(&mut w, g, citysim::Lod::Full);
+        set_coins(&mut w, buyer, 10_000);
+        let f = contracts::open_fixers(&w)[0];
+        let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+        let id = contracts::post_with(&mut w, brokered(buyer, ContractKind::Hit, t, f, 100), extra).expect("posted");
+        let taken = if gang_job {
+            let c = w.contracts[&id].clone();
+            let crew = contracts::job_crew(&w, &c, gangs[0]);
+            assert!(!crew.is_empty());
+            contracts::accept(&mut w, id, gangs[0], &crew)
+        } else {
+            contracts::accept(&mut w, id, g, &[])
+        };
+        assert!(taken);
+        assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "queued for a live slot");
+        // Fix round: only a record with no body on it goes to the ledger;
+        // the gun (taken live as a body) has since gone off-screen.
+        // The take is `queue_hours` old (backdated: a crew may be promoted
+        // by the LOD pass over a real day, and stays queued then).
+        let hours = u64::from(w.config.hitmarket.queue_hours);
+        if let Some(x) = w.contracts.get_mut(&id) {
+            x.taken = x.taken.map(|k| k.saturating_sub(hours * citysim::TICKS_PER_HOUR));
+        }
+        let c = w.contracts[&id].clone();
+        let party: Vec<EntityId> = c.taker.into_iter().chain(c.crew.iter().copied()).chain([t]).collect();
+        for p in party {
+            set_lod(&mut w, p, citysim::Lod::Statistical);
+        }
+        // A crew member walking off-screen (Coarse) may strike from the
+        // ledger; only the target as a body, or a party in front of the
+        // player, keeps it live.
+        if let Some(&m) = c.crew.first() {
+            set_lod(&mut w, m, citysim::Lod::Coarse);
+        }
+        // The hourly queue pass (`contracts::run` at the hour).
+        contracts::run(&mut w);
+        let c = w.contracts[&id].clone();
+        assert_eq!(
+            (c.status, c.render),
+            (ContractStatus::Taken, citysim::contract::Render::Ledger),
+            "gang {gang_job}: still queued after {hours} h"
+        );
+        assert!(c.due.is_some_and(|d| d <= c.deadline), "a due inside the deadline");
+        contracts::resolve_ledger(&mut w, id);
+        let c = w.contracts[&id].clone();
+        assert!(
+            c.status != ContractStatus::Taken || c.attempts > 0 || c.holds > 0,
+            "gang {gang_job}: the ledger did not work it"
+        );
+        let not_free = w.contract_log.iter().any(|(_, x, text)| *x == id && text.contains("was not free"));
+        assert!(!not_free, "gang {gang_job}: the ledger read a gang as an unfree taker");
+    }
+}
+
+/// Fix round (review 1): a stale-queued record whose target is a body
+/// (pinned here; Full, Coarse or on screen alike) is never rolled on the
+/// ledger, where `lod::stat_hit` would kill a body with no scene: it stays
+/// live and, stale, starts past the `max_missions` run count.
+#[test]
+fn test_stale_queued_record_with_a_shown_target_stays_live() {
+    let mut w = world();
+    w.config.missions.max_missions = 0;
+    let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, g);
+    if let Some(b) = w.comp_mut::<citysim::Brain>(t) {
+        b.pinned = true;
+    }
+    set_coins(&mut w, buyer, 10_000);
+    let f = contracts::open_fixers(&w)[0];
+    let extra = PostExtra { deposit: None, motive: Motive::Revenge, why: None };
+    let id = contracts::post_with(&mut w, brokered(buyer, ContractKind::Hit, t, f, 100), extra).expect("posted");
+    assert!(contracts::accept(&mut w, id, g, &[]));
+    assert_eq!(w.contracts[&id].render, citysim::contract::Render::Live, "queued live");
+    let hours = u64::from(w.config.hitmarket.queue_hours) + 1;
+    w.run_ticks(hours * citysim::TICKS_PER_HOUR);
+    let c = w.contracts[&id].clone();
+    let off = w.contract_log.iter().any(|(_, x, text)| *x == id && text.contains("worked off-screen"));
+    assert!(!off && c.render == citysim::contract::Render::Live, "a shown target went to the ledger");
+    // ... and, stale, it jumps the run cap: worked live.
+    assert!(c.started.is_some(), "a stale record with a body on it never started");
+}
+
+/// A gun stiffed by a buyer on a 100 record with 50 down and nothing more;
+/// `murder_grudge`: the gun already held a killing grudge on the buyer.
+fn stiffed_gun(w: &mut World, murder_grudge: bool) -> (EntityId, EntityId) {
+    let [buyer, t, g] = strangers(w, 3)[..] else { unreachable!() };
+    gun(w, g);
+    if murder_grudge {
+        set_grudge(w, g, buyer, 0.9);
+    }
+    set_coins(w, buyer, 50);
+    let id = credit_record(w, buyer, t, g, 100);
+    contracts::settle(w, id, contracts::Settle::Fulfilled, "");
+    (buyer, g)
+}
+
+/// Fix round (review 2): the grace's end re-swears the grudge at the
+/// stiffing's weight, not merged over the grudge that stood (no decay ran
+/// here, so the weight is unchanged).
+#[test]
+fn test_grace_end_does_not_overweight_the_grudge() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, false);
+    let before = grudges::grudge_on(&w, g, buyer).expect("grudge").weight;
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days);
+    hitmarket::stiff_sweep(&mut w);
+    let after = grudges::grudge_on(&w, g, buyer).expect("grudge").weight;
+    assert!((after - before).abs() < 1e-5, "{before} -> {after}");
+}
+
+/// Fix round (review 2): the grace holds back only the betrayal: a gun who
+/// already holds a killing grudge on the buyer still hunts him.
+#[test]
+fn test_grace_does_not_hide_a_killing_grudge() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, true);
+    assert!(w.hm_stiffs.contains_key(&(g, buyer)));
+    assert_eq!(citysim::systems::hunt::heaviest_eligible(&w, g).map(|x| x.0), Some(buyer));
+}
+
+/// Fix round (review 3): an edge pruned with the balance on it is no
+/// repayment: the clock stands and the grudge is not settled.
+#[test]
+fn test_pruned_debt_edge_is_not_a_repayment() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, false);
+    w.remove_edge(buyer, g);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(w.hm_stiffs.contains_key(&(g, buyer)), "the clock stands");
+    assert!(grudges::grudge_on(&w, g, buyer).is_some(), "not forgiven");
 }

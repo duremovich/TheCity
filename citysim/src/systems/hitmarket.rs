@@ -178,6 +178,21 @@ pub fn paying_for(world: &World, buyer: EntityId, target: EntityId) -> bool {
         })
 }
 
+/// Gaps pass: `buyer` placed a fulfilled record on `object` that `actor`
+/// took (as taker or crew): the deed H17 handed it is one it bought.
+pub fn bought_deed(world: &World, buyer: EntityId, actor: EntityId, object: EntityId) -> bool {
+    world.by_party.get(&buyer).is_some_and(|l| {
+        l.iter().any(|id| {
+            world.contracts.get(id).is_some_and(|c| {
+                c.status == crate::contract::ContractStatus::Fulfilled
+                    && (c.agent == Some(buyer) || c.buyer == Some(buyer))
+                    && c.target == Target::Agent(object)
+                    && (c.taker == Some(actor) || c.crew.contains(&actor))
+            })
+        })
+    })
+}
+
 /// A live organic record of `buyer`'s on `target`, or one closed within
 /// `repost_days` (the buyer waits before buying the same head again).
 fn buying(world: &World, buyer: EntityId, target: EntityId) -> bool {
@@ -242,16 +257,30 @@ pub fn agent_buy(
             return w.target == target;
         }
     }
+    // Gaps pass: a lawful revenge buyer waits for the law (nothing bought,
+    // and the Hunt it would hire for stays cooled: the want waits).
+    if motive == Motive::Revenge && waits_for_law(world, buyer, target) {
+        cool_hunt(world, buyer);
+        return true;
+    }
     if !room(world) || buying(world, buyer, target) {
         return false;
     }
     let tgt = Target::Agent(target);
-    let broker = at.or_else(|| contracts::nearest_fixer(world, buyer));
-    let price = contracts::organic_price(world, kind, &tgt, Some(buyer), Some(buyer), broker);
+    let near = at.or_else(|| contracts::nearest_fixer(world, buyer));
+    // Gaps pass (reach): no Fixer in reach and fewer than `ask_rank` asks
+    // among the buyer's own people: word goes to the nearest Fixer at its
+    // market price plus the go-between's premium, at once (no walk),
+    // instead of the M16a quote.
+    let far = if near.is_none() { contracts::reach_offer(world, kind, &tgt, buyer) } else { None };
+    let (broker, price) = match far {
+        Some((f, p)) => (Some(f), p),
+        None => (near, contracts::organic_price(world, kind, &tgt, Some(buyer), Some(buyer), near)),
+    };
     let deposit = deposit_of(world, price);
     let own = wallet(world, buyer);
     let kin = motive == Motive::Revenge;
-    if let (None, Some(fixer), true) = (at, broker, walks(world, buyer)) {
+    if let (None, Some(fixer), true) = (at, near, walks(world, buyer)) {
         // H9: the want waits for the walk; the kin are counted, not asked.
         let could = own + if kin { kin_potential(world, buyer, target) } else { 0 };
         if could < deposit {
@@ -320,12 +349,33 @@ pub fn agent_buy(
         }
     }
     if kin {
-        let until = world.tick + Tick::from(world.config.hunt.hunt_cooldown_days) * TICKS_PER_DAY;
-        if let Some(b) = world.comp_mut::<Brain>(buyer) {
-            b.cooldowns.insert(GoalKind::Hunt, until);
-        }
+        cool_hunt(world, buyer);
     }
     true
+}
+
+/// The buyer's Hunt cools `hunt_cooldown_days` (D8).
+fn cool_hunt(world: &mut World, buyer: EntityId) {
+    let until = world.tick + Tick::from(world.config.hunt.hunt_cooldown_days) * TICKS_PER_DAY;
+    if let Some(b) = world.comp_mut::<Brain>(buyer) {
+        b.cooldowns.insert(GoalKind::Hunt, until);
+    }
+}
+
+/// Gaps pass: lawful buyers wait for the law. A holder above
+/// `lawful_wait` whose target is wanted (an open report on it: its own or
+/// anyone's) or held (sentenced or cuffed) buys no violence on it while
+/// that lasts; the want waits (`commission_considerations`, `on_commission`).
+pub fn waits_for_law(world: &World, holder: EntityId, target: EntityId) -> bool {
+    if !world.config.hitmarket.enabled {
+        return false;
+    }
+    if world.comp::<Personality>(holder).is_none_or(|p| p.lawfulness <= world.config.hitmarket.lawful_wait) {
+        return false;
+    }
+    crate::systems::law::wanted(world, target)
+        || world.has::<crate::components::Sentence>(target)
+        || world.comp::<Brain>(target).is_some_and(|b| b.cuffed_by.is_some())
 }
 
 // ---------------------------------------------------------------------------
@@ -596,6 +646,10 @@ pub fn commission_considerations(world: &World, id: EntityId) -> Option<(Vec<Con
     if !contracts::fixer_open(world, w.fixer) || !contracts::free_adult(world, id) {
         return None;
     }
+    // Gaps pass: a lawful buyer's errand waits while the law has the case.
+    if w.motive == Motive::Revenge && waits_for_law(world, id, w.target) {
+        return None;
+    }
     let p = world.comp::<Personality>(id)?;
     let cs = vec![
         Consideration::new("holds a want", can(true), GATE),
@@ -625,6 +679,11 @@ pub fn on_commission(world: &mut World, id: EntityId, fixer: Option<EntityId>) -
     let Some(f) = fixer.filter(|&f| contracts::fixer_open(world, f)) else {
         return StepResult::Failed(FailReason::PreconditionLost);
     };
+    // Gaps pass: the law took the case on the way: the want waits.
+    if w.motive == Motive::Revenge && waits_for_law(world, id, w.target) {
+        world.wants.insert(id, w);
+        return StepResult::Done;
+    }
     if still_wants(world, id, &w) {
         agent_buy(world, id, w.target, w.kind, w.motive, w.weight, Some(f));
     }
@@ -651,6 +710,59 @@ pub fn want_sweep(world: &mut World) {
         if !walks(world, id) {
             world.wants.remove(&id);
             agent_buy(world, id, w.target, w.kind, w.motive, w.weight, None);
+        }
+    }
+}
+
+/// Gaps pass (decision 3's grace), daily before the hire pass: each
+/// stiffed `(taker, buyer)` on the clock (`World::hm_stiffs`). Either gone:
+/// dropped. The balance paid off (out of wages, `social::repay_debts`): the
+/// taker's `Betrayed` grudge on the buyer settles, no Hunt. `debt_days`
+/// run out with the balance standing: the clock drops, so the grudge counts
+/// toward a Hunt from now, and the taker swears it again at the stiffing's
+/// weight (it decayed through the grace).
+pub fn stiff_sweep(world: &mut World) {
+    if world.hm_stiffs.is_empty() {
+        return;
+    }
+    let now = world.tick;
+    let grace = Tick::from(world.config.hitmarket.debt_days) * TICKS_PER_DAY;
+    let list: Vec<((EntityId, EntityId), (Tick, f32))> = world.hm_stiffs.iter().map(|(&k, &v)| (k, v)).collect();
+    for ((taker, buyer), (since, w)) in list {
+        let alive = |e: EntityId| crate::systems::law::living(world, e);
+        if !alive(taker) || !alive(buyer) {
+            world.hm_stiffs.remove(&(taker, buyer));
+            continue;
+        }
+        // Fix round: an edge pruned with the balance on it is no repayment
+        // (the clock stands; the debt is still unpaid).
+        if world.edge(taker, buyer).is_some() && owed_to(world, taker, buyer) <= 0 {
+            world.hm_stiffs.remove(&(taker, buyer));
+            if let Some(g) = world.comp_mut::<crate::word::Grudges>(taker) {
+                if let Some(x) = g
+                    .list
+                    .iter_mut()
+                    .find(|x| x.target == buyer && x.settled.is_none() && x.cause == GrudgeCause::Betrayed)
+                {
+                    x.settled = Some(now);
+                    x.weight = 0.0;
+                }
+            }
+            continue;
+        }
+        if now.saturating_sub(since) >= grace {
+            world.hm_stiffs.remove(&(taker, buyer));
+            // Fix round: back up to the stiffing's weight, not merged over
+            // what stands (`grudges::add`'s `1 − (1 − a)(1 − b)` over-weighted
+            // it); sworn afresh only when the grudge decayed away.
+            let held = world
+                .comp_mut::<crate::word::Grudges>(taker)
+                .and_then(|g| g.list.iter_mut().find(|x| x.target == buyer && x.settled.is_none()))
+                .map(|x| x.weight = x.weight.max(w))
+                .is_some();
+            if !held {
+                crate::systems::grudges::add(world, taker, buyer, GrudgeCause::Betrayed, w, 0);
+            }
         }
     }
 }
