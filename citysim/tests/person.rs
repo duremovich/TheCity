@@ -766,6 +766,12 @@ fn probe_broke_lawful_eats_at_the_mission() {
         let mut w = w.clone();
         pin(&mut w, a);
         set_hungry(&mut w, a, 0.3, 0);
+        // Hunger is the stimulus, not exhaustion: an off-screen pick can wake
+        // at energy 0 (~2 % of the Statistical adults at 10:00 on main and
+        // here), and a person that tired sleeps first.
+        if let Some(n) = w.comp_mut::<Needs>(a) {
+            n.energy = n.energy.max(0.5);
+        }
         let mut log = Vec::new();
         let end = w.tick + 6 * TICKS_PER_HOUR;
         run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
@@ -988,6 +994,11 @@ fn probe_city_grows_homes_toward_jobs() {
     let mut cfg = Config::load();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
+    // The runtime rule, on the city without the pre-roll: the pre-roll
+    // builds until no employer has far workers past its free beds in range
+    // while a Lot or floor is left there (its most-far employer is then the
+    // land-locked Farm#405: 0 Lots, every Home at floors_max).
+    cfg.life.housing_preroll = false;
     let mut w = World::new(42, cfg);
     let cap = w.config.life.commute_move_ticks;
     let door_of = |w: &World, b: EntityId| w.comp::<Building>(b).map(|b| b.door);
@@ -1051,6 +1062,11 @@ fn probe_working_couple_moves_near_work() {
                 return None;
             }
             if demography::children_of_agent(&w, a).iter().any(|&c| home(&w, c) == Some(hm)) {
+                return None;
+            }
+            // A sweeper's day is its beat, not the Recycler's door
+            // (`life::work_tile`): relocation does not measure it here.
+            if citysim::systems::jobs::is_sweeper(&w, a) {
                 return None;
             }
             let work = work_of(&w, a)?;

@@ -4407,6 +4407,20 @@ pub struct LifeCfg {
     pub housing_demand_min: u32,
     pub housing_demand_days: u16,
     pub housing_builds_per_1000: f32,
+    /// The housing catch-up (`life::grow_housing`): with this > 0 a ready
+    /// employer's unmet demand (far workers less the free beds in range)
+    /// asks `ceil(unmet / a Home's beds / housing_catchup_days)` builds a
+    /// day, the city's floored at `housing_builds_per_1000` and capped at
+    /// `housing_builds_max_per_1000` per 1,000 residents, and a build keeps
+    /// the employer's demand count. 0: the flat rule (one build per ready
+    /// employer, the count reset by a build).
+    pub housing_catchup_days: f32,
+    pub housing_builds_max_per_1000: f32,
+    /// The pre-roll (`life::preroll_housing`, world creation; with items
+    /// 8-10, wages and no safety net on): Homes and floors toward the
+    /// seeded staff's jobs, unpaid as the seed buildings, until the far
+    /// workers have beds in range or no Lot or floor is left there.
+    pub housing_preroll: bool,
     /// G2: a starving agent walks this much further to a Mission.
     pub hungry_reach_mult: f32,
     /// G3: the theft cost added while the agent can buy a meal.
@@ -4506,6 +4520,9 @@ impl Default for LifeCfg {
             housing_demand_min: 6,
             housing_demand_days: 3,
             housing_builds_per_1000: 1.0,
+            housing_catchup_days: 5.0,
+            housing_builds_max_per_1000: 6.0,
+            housing_preroll: true,
             hungry_reach_mult: 2.0,
             steal_can_buy: 12.0,
             beg_dry_max: 3,
@@ -5166,12 +5183,15 @@ impl Config {
     /// is the old default, the dole city, kept reachable (P10 keeps its
     /// mechanisms as policy levers): `[economy2] wages` and `no_safety_net`
     /// off, `[sickness]` off, `[street] shanties` off (class pay and the
-    /// no-net hunger fixes read only with the wages on).
+    /// no-net hunger fixes read only with the wages on). The housing
+    /// catch-up (`[life] housing_catchup_days`, 2026-10-11) is off: its
+    /// housing growth is the flat P5h rule (the pre-roll reads no-net).
     pub fn dole_city(mut self) -> Config {
         self.economy2.wages = false;
         self.economy2.no_safety_net = false;
         self.sickness.enabled = false;
         self.street.shanties = false;
+        self.life.housing_catchup_days = 0.0;
         self
     }
 

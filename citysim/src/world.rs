@@ -1353,9 +1353,12 @@ impl World {
         systems::wages::seed_staff(&mut w);
         systems::classpay::seed_after_staff(&mut w);
         // Hunger fix item 9 (P5g): the seeded staff housed near work where
-        // Homes allow (the relocation pass, uncapped; no RNG).
+        // Homes allow (the relocation pass, uncapped; no RNG). The pre-roll
+        // (items 8-10, wages and no safety net on): Homes and floors toward
+        // the jobs, unpaid as the seed buildings, until the far workers have
+        // beds in range or no Lot or floor is left there (no RNG).
         if systems::fixes::hire_near(&w) {
-            systems::life::relocate_up_to(&mut w, usize::MAX);
+            systems::life::preroll_housing(&mut w);
         }
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.

@@ -365,6 +365,17 @@ pub fn commute_cost(world: &World, home: TilePos, work: TilePos) -> crate::time:
 /// Treasury buys it from the World when it holds the cost above its band
 /// floor (`housing_payer`); else nothing goes up today. No RNG; bounded by
 /// the Lots and the floor cap.
+///
+/// The catch-up (`housing_catchup_days` > 0; the flipped city's Farms
+/// outgrew two builds a day: 458 far workers on day 120, seed 42): a ready
+/// employer's unmet demand is its far workers less the free beds in range;
+/// it gets `ceil(unmet / beds a build adds / housing_catchup_days)` builds
+/// today (at least one), the city `ceil(sum of unmet / beds / catch-up
+/// days)`, floored at `housing_builds_per_1000` and capped at
+/// `housing_builds_max_per_1000` per 1,000 residents; and a build keeps the
+/// employer's demand count (the next midnight builds again while the beds
+/// fill and the far workers remain; free beds in range reset it). Payment
+/// is unchanged: no unpaid builds.
 pub fn grow_housing(world: &mut World) {
     if !crate::systems::fixes::grow_housing(world) {
         if !world.housing_demand.is_empty() {
@@ -374,6 +385,65 @@ pub fn grow_housing(world: &mut World) {
     }
     let cfg = world.config.life.clone();
     let cap = cfg.commute_move_ticks;
+    let demand = housing_far(world);
+    let homes = housing_homes(world);
+    // (demand, employer, unmet far workers)
+    let mut ready: Vec<(std::cmp::Reverse<u32>, EntityId, u32)> = Vec::new();
+    let mut next: std::collections::BTreeMap<EntityId, u16> = std::collections::BTreeMap::new();
+    for (&employer, &n) in &demand {
+        if n < cfg.housing_demand_min {
+            continue;
+        }
+        let Some(work) = world.comp::<Building>(employer).map(|b| b.door) else { continue };
+        let free = free_beds_near(world, &homes, work, cap);
+        if free >= cfg.housing_demand_min as usize {
+            continue;
+        }
+        let days = world.housing_demand.get(&employer).copied().unwrap_or(0).saturating_add(1);
+        next.insert(employer, days);
+        if days >= cfg.housing_demand_days {
+            let unmet = n.saturating_sub(u32::try_from(free).unwrap_or(u32::MAX));
+            ready.push((std::cmp::Reverse(n), employer, unmet));
+        }
+    }
+    world.housing_demand = next;
+    ready.sort_unstable();
+    let pop = world.citizens().len() as f32;
+    let base = (cfg.housing_builds_per_1000 * pop / 1000.0).round().max(1.0) as usize;
+    let catchup = cfg.housing_catchup_days > 0.0;
+    let beds = f32::from(world.config.buildings.for_kind(BuildingKind::Home).capacity.max(1));
+    // Builds the unmet demand asks for today (the catch-up).
+    let want = |unmet: u32| -> usize { (unmet as f32 / beds / cfg.housing_catchup_days).ceil().max(0.0) as usize };
+    let limit = if catchup {
+        let max = (cfg.housing_builds_max_per_1000 * pop / 1000.0).round().max(base as f32) as usize;
+        want(ready.iter().map(|&(_, _, u)| u).sum()).clamp(base, max)
+    } else {
+        base
+    };
+    let mut built = 0;
+    'employers: for (_, employer, unmet) in ready {
+        let mine = if catchup { want(unmet).max(1) } else { 1 };
+        for _ in 0..mine {
+            if built >= limit {
+                break 'employers;
+            }
+            if !build_housing_near(world, employer) {
+                break;
+            }
+            built += 1;
+            if !catchup {
+                world.housing_demand.remove(&employer);
+            }
+        }
+    }
+}
+
+/// P5h: the housing demand per employer, `grow_housing`'s measure: its
+/// workers (not sentenced, not emigrating, not sweepers, housed) whose
+/// `commute_cost` from their Home's door to its door is past
+/// `commute_move_ticks`.
+fn housing_far(world: &World) -> std::collections::BTreeMap<EntityId, u32> {
+    let cap = world.config.life.commute_move_ticks;
     let mut demand: std::collections::BTreeMap<EntityId, u32> = std::collections::BTreeMap::new();
     // scan-ok: daily: the housing demand pass
     for a in world.citizens() {
@@ -391,56 +461,131 @@ pub fn grow_housing(world: &mut World) {
             *demand.entry(employer).or_default() += 1;
         }
     }
-    let homes: Vec<(TilePos, usize, usize)> = world
+    demand
+}
+
+/// P5h: every standing Home's `(door, beds, residents)`.
+fn housing_homes(world: &World) -> Vec<(TilePos, usize, usize)> {
+    world
         .buildings_of_kind(BuildingKind::Home)
         .iter()
         .filter_map(|&h| {
             let b = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict)?;
             Some((b.door, usize::from(b.capacity), world.residents_of(h).len()))
         })
-        .collect();
-    let mut ready: Vec<(std::cmp::Reverse<u32>, EntityId)> = Vec::new();
-    let mut next: std::collections::BTreeMap<EntityId, u16> = std::collections::BTreeMap::new();
-    for (&employer, &n) in &demand {
-        if n < cfg.housing_demand_min {
-            continue;
-        }
-        let Some(work) = world.comp::<Building>(employer).map(|b| b.door) else { continue };
-        let free: usize = homes
-            .iter()
-            .filter(|&&(door, _, _)| commute_cost(world, door, work) <= cap)
-            .map(|&(_, c, r)| c.saturating_sub(r))
-            .sum();
-        if free >= cfg.housing_demand_min as usize {
-            continue;
-        }
-        let days = world.housing_demand.get(&employer).copied().unwrap_or(0).saturating_add(1);
-        next.insert(employer, days);
-        if days >= cfg.housing_demand_days {
-            ready.push((std::cmp::Reverse(n), employer));
-        }
+        .collect()
+}
+
+/// P5h: the free beds in `homes` within `cap` (`commute_cost`) of `work`.
+fn free_beds_near(world: &World, homes: &[(TilePos, usize, usize)], work: TilePos, cap: u64) -> usize {
+    homes
+        .iter()
+        .filter(|&&(door, _, _)| commute_cost(world, door, work) <= cap)
+        .map(|&(_, c, r)| c.saturating_sub(r))
+        .sum()
+}
+
+/// The pre-roll (the seed city has stood for years: it is not a city that
+/// hired 800 people this morning into Homes laid out for 500), at world
+/// creation after the staffing: the seeded staff housed near work
+/// (`relocate_up_to`, uncapped; hunger fix item 9), then, with `[life]
+/// housing_preroll`, items 8-10, wages and no safety net on (the flipped
+/// city whose staffing outgrew the map's Homes; the dole city's creation,
+/// and the wages-on dole city the unit tests pin to the shipped map, are as
+/// before), rounds of: each employer whose far workers (`grow_housing`'s
+/// measure) outnumber the free beds within `commute_move_ticks` of its door
+/// gets one build (`build_housing_near`'s rule: a plain vacant Lot in range,
+/// then a shanty's, then a floor on a Home below `[floors] floors_max`;
+/// most unmet first, ties lower id), then the uncapped relocation fills
+/// them; until no employer builds (no unmet demand, or no Lot or floor left
+/// in range). A pre-roll building is a seed building: it stands unpaid (no
+/// coin moves, so `econ::identity` and the escrow are untouched; the
+/// opening hoard is already the corps' capital) and silent (no event),
+/// owned as a paid build would be by the employer's owner corp (company
+/// housing) else the city, with a seed Home's pantry. Then the day's job
+/// search fills the places the new Blocks posted (their trades), the
+/// relocation runs once more, and every adult housed away from the Block it
+/// was dealt into wakes up in its own (the seed city lives where it is
+/// housed: a Statistical body left in the old Block never slept at home).
+/// No RNG. Returns the builds (Lots, floors).
+pub fn preroll_housing(world: &mut World) -> (u32, u32) {
+    relocate_up_to(world, usize::MAX);
+    let on = world.config.life.housing_preroll
+        && crate::systems::fixes::relocate_fix(world)
+        && crate::systems::fixes::grow_housing(world)
+        && crate::systems::fixes::hire_near(world)
+        && crate::systems::wages::on(world)
+        && crate::systems::econ::no_net(world);
+    let mut built = (0u32, 0u32);
+    if !on {
+        return built;
     }
-    world.housing_demand = next;
-    ready.sort_unstable();
-    let pop = world.citizens().len() as f32;
-    let limit = (cfg.housing_builds_per_1000 * pop / 1000.0).round().max(1.0) as usize;
-    let mut built = 0;
-    for (_, employer) in ready {
-        if built >= limit {
+    let cap = world.config.life.commute_move_ticks;
+    loop {
+        let demand = housing_far(world);
+        let homes = housing_homes(world);
+        let mut unmet: Vec<(std::cmp::Reverse<usize>, EntityId)> = demand
+            .iter()
+            .filter_map(|(&employer, &n)| {
+                let work = world.comp::<Building>(employer)?.door;
+                let free = free_beds_near(world, &homes, work, cap);
+                (n as usize > free).then_some((std::cmp::Reverse(n as usize - free), employer))
+            })
+            .collect();
+        unmet.sort_unstable();
+        let mut round = 0;
+        for (_, employer) in unmet {
+            match build_near(world, employer, true) {
+                Some(true) => built.0 += 1,
+                Some(false) => built.1 += 1,
+                None => continue,
+            }
+            round += 1;
+        }
+        if round == 0 {
             break;
         }
-        if build_housing_near(world, employer) {
-            world.housing_demand.remove(&employer);
-            built += 1;
-        }
+        relocate_up_to(world, usize::MAX);
     }
+    if built != (0, 0) {
+        crate::systems::demography::job_search(world);
+        relocate_up_to(world, usize::MAX);
+    }
+    // Bodies to their Homes: the creation's movers are still inside the
+    // Block they were dealt into.
+    let tick = world.tick;
+    // scan-ok: once, at world creation
+    for a in world.citizens() {
+        let Some(to) = home_of(world, a) else { continue };
+        let Some(at) = world.comp::<Position>(a).and_then(|p| p.building) else { continue };
+        if at == to || world.comp::<Building>(at).is_none_or(|b| b.kind != BuildingKind::Home) {
+            continue;
+        }
+        let Some(door) = world.comp::<Building>(to).map(|b| b.door) else { continue };
+        world.remove_from_building(a);
+        if let Some(p) = world.comp_mut::<Position>(a) {
+            p.tile = door;
+            p.building = None;
+            p.entered = tick;
+        }
+        world.enter_building(a, to);
+    }
+    built
 }
 
 /// P5h: one Home (or a floor) within `commute_move_ticks` of `employer`'s
 /// door, as `grow_housing` says. Returns whether anything went up.
 pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
+    build_near(world, employer, false).is_some()
+}
+
+/// `build_housing_near`, paid (`housing_payer`) or, at the pre-roll,
+/// unpaid (`seeded`: a seed building, owned by the employer's owner corp,
+/// else the city; a Lot's Home opens with `[world] home_pantry_initial`).
+/// `Some(true)` a Home on a Lot, `Some(false)` a floor, `None` nothing.
+fn build_near(world: &mut World, employer: EntityId, seeded: bool) -> Option<bool> {
     let cap = world.config.life.commute_move_ticks;
-    let Some((work, owner)) = world.comp::<Building>(employer).map(|b| (b.door, b.owner)) else { return false };
+    let (work, owner) = world.comp::<Building>(employer).map(|b| (b.door, b.owner))?;
     let corp = owner.filter(|&o| world.has::<Corp>(o));
     let what = world.name_of(employer);
     // A vacant Lot in range: plain Lots first, then shanties; nearest; ties lower id.
@@ -454,9 +599,17 @@ pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
         .map(|(_, _, l)| l);
     if let Some(lot) = lot {
         let cost = crate::systems::founding::found_cost(world, BuildingKind::Home).unwrap_or(0);
-        let Some(by) = housing_payer(world, corp, cost) else { return false };
+        let by = if seeded { corp } else { housing_payer(world, corp, cost)? };
         if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Home, by).is_err() {
-            return false;
+            return None;
+        }
+        if seeded {
+            // A seed Block: its pantry, no event (it stood before day 0).
+            let pantry = world.config.world.home_pantry_initial;
+            if let Some(b) = world.comp_mut::<Building>(lot) {
+                b.stock_food = pantry;
+            }
+            return Some(true);
         }
         let paid = pay_housing(world, by, cost);
         let (who, home) = (world.owner_label(by), world.name_of(lot));
@@ -467,7 +620,7 @@ pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
             &actors,
             format!("{who} built {home} on a Lot for {paid}: housing for {what}'s far workers"),
         );
-        return true;
+        return Some(true);
     }
     // Else a floor on the nearest Home in range below its cap.
     let max = world.config.floors.max_for(BuildingKind::Home);
@@ -480,19 +633,26 @@ pub fn build_housing_near(world: &mut World, employer: EntityId) -> bool {
             (d <= cap).then_some((d, h))
         })
         .min()
-        .map(|(_, h)| h);
-    let Some(home) = home else { return false };
+        .map(|(_, h)| h)?;
+    if seeded {
+        // A seed storey: `add_floor`'s seats, no coin and no event.
+        let b = world.comp_mut::<Building>(home)?;
+        let floors = b.floors.max(1);
+        let per_floor = b.capacity / floors;
+        b.capacity = crate::systems::founding::with_floors(BuildingKind::Home, per_floor, floors + 1).max(b.capacity);
+        b.floors = floors + 1;
+        b.floor_days = 0;
+        return Some(false);
+    }
     let cost = crate::systems::founding::floor_cost(world, BuildingKind::Home).unwrap_or(0);
-    let Some(by) = housing_payer(world, corp, cost) else { return false };
+    let by = housing_payer(world, corp, cost)?;
     // A corp's floor is paid inside `add_floor` (Flow::Found); the city's
     // after it stands.
-    if crate::systems::founding::add_floor(world, home, by).is_err() {
-        return false;
-    }
+    crate::systems::founding::add_floor(world, home, by).ok()?;
     if by.is_none() {
         pay_housing(world, None, cost);
     }
-    true
+    Some(false)
 }
 
 /// P5h (the no-safety-net doctrine: no unpaid builds): who pays `cost` for

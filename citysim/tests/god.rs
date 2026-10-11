@@ -1203,13 +1203,14 @@ impl V6Run {
     }
 }
 
-/// The CLI's `member<g>`: the gang's living member with the best fighting (ties the lower id).
-fn best_fighter(w: &World, g: EntityId) -> Option<EntityId> {
+/// The CLI's `member<g>`: the gang's living member with the best fighting (ties the lower id), not one of
+/// `not`.
+fn best_fighter(w: &World, g: EntityId, not: &[EntityId]) -> Option<EntityId> {
     w.comp::<Gang>(g)?
         .members
         .iter()
         .copied()
-        .filter(|&m| citysim::systems::law::living(w, m))
+        .filter(|&m| citysim::systems::law::living(w, m) && !not.contains(&m))
         .map(|m| (citysim::systems::law::fighting(w, m), m))
         .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
         .map(|(_, m)| m)
@@ -1231,6 +1232,10 @@ fn god_kill_friend_of_leaders_day_10() {
             return Vec::new();
         }
         let gs = w.gangs();
+        // The Friends the earlier command kills: never the later command's
+        // killer (the pre-roll's seed 42 had The Hollow's best fighter as its
+        // leader's closest Friend, killed by the first command).
+        let mut victims: Vec<EntityId> = Vec::new();
         for (a, b) in [(0usize, 1usize), (1, 0)] {
             let (Some(&ga), Some(&gb)) = (gs.get(a), gs.get(b)) else { continue };
             // L2 phase 5: the leader if it has a living Friend, else the gang's highest-ranked member with
@@ -1245,8 +1250,20 @@ fn god_kill_friend_of_leaders_day_10() {
             let leader = leader
                 .filter(|&l| has_friend(w, l))
                 .or_else(|| citysim::systems::gang::leader_ranking(w, ga).into_iter().find(|&m| has_friend(w, m)));
-            match (leader, best_fighter(w, gb)) {
+            match (leader, best_fighter(w, gb, &victims)) {
                 (Some(of), Some(by)) => {
+                    // `KillFriend`'s victim: `of`'s Friend of highest affinity, not `by`.
+                    let victim = w
+                        .neighbours(of)
+                        .filter(|&o| o != by && citysim::systems::law::living(w, o))
+                        .filter_map(|o| {
+                            w.edge(of, o)
+                                .filter(|e| e.kind == citysim::components::RelKind::Friend)
+                                .map(|e| (o, e.affinity))
+                        })
+                        .max_by(|x, y| x.1.total_cmp(&y.1).then(y.0.cmp(&x.0)))
+                        .map(|(o, _)| o);
+                    victims.extend(victim);
                     names.push(format!(
                         "{} (leader of {}) loses a Friend to {} of {}",
                         w.name_of(of),

@@ -1550,6 +1550,18 @@ hf_rehouse_employed = true          # 13: with no_safety_net, a worker re-houses
 housing_demand_min = 6              # 10: one Home's beds
 housing_demand_days = 3
 housing_builds_per_1000 = 1.0       # 10: Homes or floors a day per 1,000 residents (2 at 2,000)
+# The catch-up (2026-10-11: the flipped city's Farms grew to ~1,000 workers and outran two builds a day: 458 far
+# workers on day 120, seed 42): a ready employer's unmet demand (far workers less free beds in range) asks
+# ceil(unmet / a Home's 6 beds / housing_catchup_days) builds a day, the city's floored at housing_builds_per_1000
+# and capped at housing_builds_max_per_1000 per 1,000 residents; a build keeps the demand count (free beds in range
+# reset it). Payment as before (no unpaid builds). 0 days: the flat rule.
+housing_catchup_days = 5.0
+housing_builds_max_per_1000 = 6.0   # 12 a day at 2,000
+# The pre-roll (2026-10-11; with items 8-10, wages and no_safety_net on): the seed city has stood for years, so at
+# world creation, after the staffing, Homes go up on Lots in range of the far workers' jobs (else floors on Homes
+# there), unpaid as the map's own Blocks (no coin moves; no event), relocation filling them, until every employer's far
+# workers have beds in range or no Lot or floor is left (flipped seed 42: day-0 far workers 661 -> 98).
+housing_preroll = true
 hungry_reach_mult = 2.0             # 2: a starving agent walks this much further to a Mission
 steal_can_buy = 12.0                # 3
 beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...
