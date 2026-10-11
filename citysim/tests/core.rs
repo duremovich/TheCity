@@ -378,7 +378,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a raid resolved", m("raid resolved")),            // [12, 13, 15]
         ("a Home flipped", k(EventKind::TerritoryFlipped)), // [35, 33, 95]
         // M9 the law.
-        ("a Jailbreak", k(EventKind::Jailbreak)),    // [5, 4, 2]
         ("a day in Crackdown", m("Crackdown held")), // [47, 31, 44]
         // M10 off-screen lives.
         ("a hole bound", k(EventKind::Attributed)), // [905, 1007, 993]
@@ -451,11 +450,16 @@ fn sickness_mechanisms() -> Vec<Mechanism> {
 /// with P5i on under two others). Each is a unit-tested mechanism instead
 /// (docs/TESTING.md): `districts.rs::test_riot_fires_at_streak_and_picks_target`
 /// (and its streak-short negative), `leisure.rs::test_front_built_under_expand_in_held_district`
-/// and `test_no_front_without_expand_or_treasury`.
+/// and `test_no_front_without_expand_or_treasury`. A Jailbreak likewise
+/// (2026-10-10, the flipped city after the recalibration: [0, 0, 0] on
+/// 42-44, [0, 1, 1] under a one-step butterfly): `factions.rs::
+/// test_breach_with_no_guards_frees_the_boss_first_and_reopens_the_warrant`
+/// (the break fires) with its negatives `test_breach_with_nobody_inside_fizzles`
+/// and `test_breach_against_three_guards_fails_and_shocks`.
 fn printed_mechanisms() -> Vec<Mechanism> {
     let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
     let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
-    vec![("a Riot", k(EventKind::Riot)), ("a gang front", m("gang front"))]
+    vec![("a Riot", k(EventKind::Riot)), ("a gang front", m("gang front")), ("a Jailbreak", k(EventKind::Jailbreak))]
 }
 
 /// Every mechanism's count per seed, then the bullets: one line each.
