@@ -1492,6 +1492,9 @@ flee_clear_ticks = 30               # ... and leisure cools 30 min after the fli
 lod_dwell_ticks = 180
 jail_affinity_cap = 0.3             # 10: a guard and a prisoner warm to each other this far at most
 noshow_fire_days = 7                # 11: seven missed workdays end the job (no dole: addendum 17)
+# Day gaps (2026-10-11): a holder with secure wealth who has missed this many workdays running quits (a vacancy
+# for someone who will work it): seed 42's rich clinic owner held a Bar's post at Full and worked none in 7 days
+secure_quit_days = 2
 muster_walk_cap_ticks = 480         # 15: a Muster waits for the farthest member's walk, up to 8 h
 deal_busy_from = 720                # 16: Deal shifts start 12:00 ...
 deal_busy_to = 120                  # ... to 02:00
@@ -1667,6 +1670,12 @@ call_w = 2.0                         # plan key (L20): the Hideout spot's bonus 
 gamble_rung_courage = 0.5            # plan key (2.1): below it the FightPit and Den score halved
 bet_window_hours = 2                 # plan key (L18): a FightPit takes bets this long before the bout
 evening_shift = [[1080, 1440]]       # plan key (deviation): Hosts, Fighters, Croupiers, Concierges work evenings
+# Day gaps (2026-10-11): off hours are the agent's own (off shift, the next workday shift more than the walk
+# to work plus shift_lead_ticks away), not the wall clock's Evening/Night: night crews, the venues' evening
+# staff, night guards and rest days sat at home at Unwind x 0.3 < Idle. A paid venue past venue_walk_cap_ticks
+# (exec::timed_walk) is off the Full ladder: the any-district fallback sent fabbers on 171/195 min walks.
+shift_lead_ticks = 120
+venue_walk_cap_ticks = 60
 # plan key: the fun of each satisfier (spec leisure-kinds table and rung ladder)
 gain = { club = 0.6, club_spire = 0.7, arcade = 0.35, noodle_bar = 0.1, fight_pit = 0.5, den = 0.5, lounge = 0.9, drink = 0.1, hangout_hour = 0.1, watch = 0.3, free_stat = 0.3 }
 

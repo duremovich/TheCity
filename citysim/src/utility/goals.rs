@@ -377,7 +377,19 @@ pub fn considerations(
                 Consideration::new("U(belonging)", urgency(n.belonging), Curve::Logistic { k: 6.0, mid: 0.5 }),
                 Consideration::raw("mood", mood_x, IDENTITY.eval(mood_x) * mm),
                 Consideration::new("sociability", p.sociability, IDENTITY),
-                phase_curve(phase, &[DayPhase::Evening], 0.4),
+                // Day gaps fix round: a job holder's evening is its own (off
+                // hours outside the small hours: a night crew's afternoon, an
+                // evening shift's morning, a rest day), not the wall clock's
+                // (fighter_1065 scored Socialise 0.089 at 08:31 off shift, under
+                // Idle). The jobless and execs keep the Evening.
+                match world.comp::<Job>(id) {
+                    Some(_) => Consideration::new(
+                        "phase",
+                        can(phase != DayPhase::Night && crate::systems::leisure::off_hours(world, id)),
+                        gate_or(0.4),
+                    ),
+                    None => phase_curve(phase, &[DayPhase::Evening], 0.4),
+                },
             ];
             // L1: a drink two hours' walk off is not worth the walk; company
             // here is free.

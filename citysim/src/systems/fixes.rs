@@ -361,15 +361,41 @@ pub fn daily(world: &mut World) {
     // never draws the dole: addendum 17).
     let fire = world.config.life.noshow_fire_days;
     let mut out: Vec<EntityId> = Vec::new();
+    // Day gaps 3: every free holder with a workday missed, short of the
+    // dismissal (the secure quit below).
+    let mut skipping: Vec<EntityId> = Vec::new();
     // scan-ok: daily: no-show dismissals
     for id in world.citizens().into_iter() {
         let Some(job) = world.comp::<Job>(id) else { continue };
         if world.has::<Sentence>(id) || job.employer.is_none() {
             continue;
         }
-        if missed_workdays(world, job) >= fire {
+        let missed = missed_workdays(world, job);
+        if missed >= fire {
             out.push(id);
+        } else if missed > 0 {
+            skipping.push(id);
         }
+    }
+    // Day gaps 3: a holder with no need of the wage who skips it quits
+    // first (a vacancy for someone who will work it): Work's wealth term
+    // loses to Idle at secure wealth, so a rich holder at Full never works
+    // the post (seed 42's Ripperdoc#515 owner, Bar#416's Bartender: Work
+    // 0.02 vs Idle 0.05 for 7 days; the no-show rule needs 7 workdays). A
+    // Statistical holder is credited by the clock and never misses one.
+    let secure = world.config.life.secure_quit_days;
+    let mut quits: Vec<EntityId> = Vec::new();
+    if secure > 0 {
+        for &id in &skipping {
+            let Some(job) = world.comp::<Job>(id) else { continue };
+            if missed_workdays(world, job) >= secure && world.comp::<Needs>(id).is_some_and(|n| n.wealth >= 1.0) {
+                quits.push(id);
+            }
+        }
+    }
+    for id in quits {
+        world.abort_plan(id);
+        crate::systems::economy::quit_job(world, id, "no need of the wage");
     }
     for id in out {
         // The job stays (a vacancy for someone who turns up), as a quit's.

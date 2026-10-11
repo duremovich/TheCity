@@ -4312,6 +4312,10 @@ pub struct LifeCfg {
     /// Item 11: an employee who has missed this many workdays is dismissed
     /// (the absentee's dole at 2 was removed by roadmap addendum 17).
     pub noshow_fire_days: i64,
+    /// Day gaps 3 (2026-10-11): a holder whose wealth is secure (`Needs::
+    /// wealth` 1: Work's wealth term loses to Idle) who has missed this many
+    /// workdays running quits the post (0: never).
+    pub secure_quit_days: i64,
     /// Item 15: a Muster is held for the farthest member's walk (capped).
     pub muster_walk_cap_ticks: u64,
     /// Item 16: a Deal shift starts only from `deal_busy_from` to
@@ -4516,6 +4520,7 @@ impl Default for LifeCfg {
             lod_dwell_ticks: 180,
             jail_affinity_cap: 0.3,
             noshow_fire_days: 7,
+            secure_quit_days: 2,
             muster_walk_cap_ticks: 480,
             deal_busy_from: 720,
             deal_busy_to: 120,
@@ -4834,6 +4839,15 @@ pub struct LeisureCfg {
     pub evening_shift: Vec<(u16, u16)>,
     /// Plan key: hours before `bout_hour` a FightPit takes bets.
     pub bet_window_hours: u16,
+    /// Day gaps 1 (2026-10-11): a job holder's off hours end this many
+    /// ticks before leaving for the next workday shift (`leisure::off_hours`:
+    /// the agent's own shift, not the wall clock's Evening and Night).
+    pub shift_lead_ticks: u64,
+    /// Day gaps 2 (2026-10-11): a paid venue farther than this walk
+    /// (`exec::timed_walk`, the commute's estimate: a vehicle reaches
+    /// farther) is not on a Full agent's Unwind ladder (fabbers walked 171
+    /// min to a Den after a 9 h shift).
+    pub venue_walk_cap_ticks: u64,
 }
 
 impl Default for LeisureCfg {
@@ -4866,6 +4880,8 @@ impl Default for LeisureCfg {
             gain: FunGainCfg::default(),
             evening_shift: vec![(1080, 1440)],
             bet_window_hours: 2,
+            shift_lead_ticks: 120,
+            venue_walk_cap_ticks: 60,
         }
     }
 }

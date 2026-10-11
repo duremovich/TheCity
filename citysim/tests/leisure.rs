@@ -197,6 +197,9 @@ fn test_unwind_skips_paid_rungs_when_broke() {
     assert_eq!(pick.rung, citysim::living::Rung::Free, "{pick:?}");
     assert!(pick.venue.is_none());
     set_coins(&mut w, a, 300);
+    // Day gaps 2: a venue in reach (here, at the Arcade's door).
+    let arcade = standing(&w, BuildingKind::Arcade)[0];
+    w.enter_building(a, arcade);
     let pick = leisure::choice(&w, a, true).expect("a rung");
     assert_ne!(pick.rung, citysim::living::Rung::Free, "{pick:?}");
     assert!(pick.venue.is_some());
@@ -459,4 +462,132 @@ fn test_l2_streams_untouch_world_and_agent() {
         let xb: u64 = b.rng.agent(id).random();
         assert_eq!(xa, xb, "{id:?}'s stream");
     }
+}
+
+/// The "off hours" gate's output in `id`'s Unwind considerations.
+fn off_hours_gate(w: &World, id: EntityId) -> Option<f32> {
+    leisure::considerations(w, id).map(|(cs, _)| cs.iter().find(|c| c.name == "off hours").expect("the gate").output)
+}
+
+/// Day gaps 1 (2026-10-11): off hours are the agent's own: a night crew's
+/// afternoon and a rest day are off (the wall clock's Evening/Night gate
+/// left them at Unwind x 0.3 < Idle, at home all day), the hour before a
+/// shift is not, and a workday's shift is not.
+#[test]
+fn test_off_hours_follow_the_agents_own_shift() {
+    let mut w = World::new(42, Config::load());
+    leisure::spots_daily(&mut w);
+    let a = civilian(&w, &[]);
+    // The Bar nearest the Home: the walk to work is short (the rule reads it).
+    let home = w.comp::<Household>(a).and_then(|h| h.home).expect("housed");
+    let home_door = w.comp::<Building>(home).expect("home").door;
+    let bar = standing(&w, BuildingKind::Bar)
+        .into_iter()
+        .min_by_key(|&b| (w.comp::<Building>(b).expect("bar").door.manhattan(home_door), b))
+        .expect("a Bar");
+    demography::hire(&mut w, a, bar, Role::Bartender);
+    {
+        let n = w.comp_mut::<Needs>(a).expect("needs");
+        n.fun = 0.2;
+        n.hunger = 1.0;
+        n.energy = 1.0;
+    }
+    set_coins(&mut w, a, 300);
+    // A night crew (21:00-06:00) on day 1, a workday.
+    w.comp_mut::<Job>(a).expect("job").shifts = vec![(1260, 1440), (0, 360)];
+    w.tick = TICKS_PER_DAY + 13 * 60;
+    assert_eq!(off_hours_gate(&w, a), Some(1.0), "a night crew's afternoon is off hours");
+    w.tick = TICKS_PER_DAY + 20 * 60;
+    assert_eq!(off_hours_gate(&w, a), Some(0.3), "an hour before the shift is not");
+    // A day shift: day 6 is the rest day, day 5 a workday.
+    w.comp_mut::<Job>(a).expect("job").shifts = vec![(540, 1080)];
+    w.tick = 6 * TICKS_PER_DAY + 12 * 60;
+    assert_eq!(off_hours_gate(&w, a), Some(1.0), "a rest day's noon is off hours");
+    w.tick = 5 * TICKS_PER_DAY + 12 * 60;
+    assert!(off_hours_gate(&w, a).is_none_or(|g| g < 1.0), "a workday's shift is not");
+    w.tick = 5 * TICKS_PER_DAY + 20 * 60;
+    assert_eq!(off_hours_gate(&w, a), Some(1.0), "the evening after it is");
+}
+
+/// Day gaps 2 (2026-10-11): a paid venue past `[leisure]
+/// venue_walk_cap_ticks` is not on the ladder (fabbers walked 171 min to a
+/// Gambling Den after a 9 h shift, 195 back); the free rungs or Idle win.
+#[test]
+fn test_unwind_paid_venue_within_walk_cap() {
+    let mut w = World::new(42, Config::load());
+    leisure::spots_daily(&mut w);
+    w.tick = 19 * 60;
+    let cap = w.config.leisure.venue_walk_cap_ticks;
+    let adults: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| demography::is_adult(&w, a) && w.comp::<Household>(a).is_some_and(|h| h.home.is_some()))
+        .take(400)
+        .collect();
+    let (mut paid, mut far) = (0, Vec::new());
+    for a in adults {
+        {
+            let n = w.comp_mut::<Needs>(a).expect("needs");
+            n.fun = 0.2;
+            n.hunger = 1.0;
+        }
+        set_coins(&mut w, a, 300);
+        let Some(v) = leisure::choice(&w, a, false).and_then(|p| p.venue) else { continue };
+        paid += 1;
+        let from = citysim::exec::walk_origin(&w, a).expect("an origin");
+        let door = w.comp::<Building>(v).expect("a venue").door;
+        let walk = citysim::exec::timed_walk(&w, a, from, door);
+        if walk > cap {
+            far.push((a, v, walk));
+        }
+    }
+    assert!(paid > 0, "someone takes a paid rung");
+    assert!(far.is_empty(), "{} of {paid} paid picks past the cap: {:?}", far.len(), &far[..far.len().min(5)]);
+}
+
+/// The "phase" gate's output in `id`'s Socialise considerations.
+fn socialise_phase(w: &World, id: EntityId) -> Option<f32> {
+    citysim::utility::goals::considerations(w, id, citysim::GoalKind::Socialise, false)
+        .map(|(cs, _)| cs.iter().find(|c| c.name == "phase").expect("the gate").output)
+}
+
+/// Day gaps fix round (2026-10-11): Socialise's evening is the job
+/// holder's own (off hours, `leisure::off_hours`, outside the small
+/// hours): a night crew's afternoon and an evening-shift Fighter's morning
+/// are its evening; a shift being worked in the wall clock's Evening is
+/// not. The jobless keep the wall clock.
+#[test]
+fn test_socialise_evening_follows_the_agents_own_shift() {
+    let mut w = World::new(42, Config::load());
+    let a = civilian(&w, &[]);
+    let b = civilian(&w, &[a]);
+    for id in [a, b] {
+        let n = w.comp_mut::<Needs>(id).expect("needs");
+        n.hunger = 1.0;
+        n.energy = 1.0;
+        n.belonging = 0.2;
+    }
+    let home = w.comp::<Household>(a).and_then(|h| h.home).expect("housed");
+    let home_door = w.comp::<Building>(home).expect("home").door;
+    let bar = standing(&w, BuildingKind::Bar)
+        .into_iter()
+        .min_by_key(|&x| (w.comp::<Building>(x).expect("bar").door.manhattan(home_door), x))
+        .expect("a Bar");
+    demography::hire(&mut w, a, bar, Role::Bartender);
+    w.comp_mut::<Job>(a).expect("job").shifts = vec![(1260, 1440), (0, 360)];
+    // A night crew's afternoon on day 1 (a workday) is its evening.
+    w.tick = TICKS_PER_DAY + 13 * 60;
+    assert_eq!(socialise_phase(&w, a), Some(1.0), "a night crew's afternoon");
+    assert_eq!(socialise_phase(&w, b), Some(0.4), "the jobless keep the wall clock's Evening");
+    // An evening shift (18:00-24:00): the morning is free, the shift is not.
+    w.comp_mut::<Job>(a).expect("job").shifts = vec![(1080, 1440)];
+    w.tick = TICKS_PER_DAY + 10 * 60;
+    assert_eq!(socialise_phase(&w, a), Some(1.0), "an evening shift's morning");
+    w.tick = TICKS_PER_DAY + 20 * 60;
+    assert_eq!(socialise_phase(&w, a), Some(0.4), "an evening shift being worked");
+    assert_eq!(socialise_phase(&w, b), Some(1.0), "the jobless evening");
+    // A day worker's small hours stay the Night.
+    w.comp_mut::<Job>(a).expect("job").shifts = vec![(540, 1080)];
+    w.tick = 2 * TICKS_PER_DAY + 2 * 60;
+    assert_eq!(socialise_phase(&w, a), Some(0.4), "a day worker's 02:00");
 }
