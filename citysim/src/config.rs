@@ -5663,6 +5663,19 @@ pub struct HitMarketCfg {
     /// Debt: a Hit when a Debt Beat on the same debtor is this many days old
     /// and the debt still stands.
     pub debt_hit_days: u32,
+    // --- The gaps pass (docs/HIT_MARKET.md "Gaps pass").
+    /// Reach: an agent's direct Hit or Beat with fewer than `ask_rank` asks
+    /// among its own people goes to the open Fixer nearest its Home (any
+    /// distance) at that Fixer's market price × (1 + this): the go-between's
+    /// premium for a Fixer out of walking reach.
+    pub reach_premium: f32,
+    /// Lawful buyers wait for the law: a revenge buyer above this lawfulness
+    /// whose target is wanted (an open report) or held buys nothing while it lasts.
+    pub lawful_wait: f32,
+    /// Takers who can't close: a taken organic Hit or Beat still queued for
+    /// a live slot (`[missions] max_missions`) this many hours after the take
+    /// is worked on the ledger.
+    pub queue_hours: u32,
 }
 
 impl Default for HitMarketCfg {
@@ -5698,6 +5711,9 @@ impl Default for HitMarketCfg {
             debt_days: 21,
             debt_lawfulness: 0.35,
             debt_hit_days: 30,
+            reach_premium: 0.5,
+            lawful_wait: 0.6,
+            queue_hours: 24,
         }
     }
 }

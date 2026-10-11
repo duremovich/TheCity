@@ -175,6 +175,11 @@ pub fn fixer_open(world: &World, b: EntityId) -> bool {
         && world.comp::<Broker>(b).is_some_and(|k| k.closed_until.is_none_or(|t| t <= now))
 }
 
+/// Does `id` own a Fixer's office (open or not)?
+pub fn owns_fixer(world: &World, id: EntityId) -> bool {
+    world.buildings_of_kind(BuildingKind::Fixer).iter().any(|&f| world.owner_of(f) == Some(id))
+}
+
 /// Every open Fixer, ascending.
 pub fn open_fixers(world: &World) -> Vec<EntityId> {
     world.buildings_of_kind(BuildingKind::Fixer).iter().copied().filter(|&b| fixer_open(world, b)).collect()
@@ -962,6 +967,26 @@ pub fn organic_price(
     quote(world, kind, target, broker)
 }
 
+/// The Hit market's reach (gaps pass): an agent buyer's Hit or Beat that
+/// would go direct (no open Fixer within `hire_reach_tiles` of its Home)
+/// and finds fewer than `ask_rank` asks among its own people goes to the
+/// open Fixer nearest its Home door at any distance, at that Fixer's market
+/// price × (1 + `reach_premium`): `(fixer, price)`. `None` with the market
+/// off, for a faction buyer, when the direct market prices it, or when no
+/// Fixer is open or its regulars price it neither (the caller keeps the
+/// direct record at `quote`).
+pub fn reach_offer(world: &World, kind: ContractKind, target: &Target, buyer: EntityId) -> Option<(EntityId, i64)> {
+    if !world.config.hitmarket.enabled || !kind.violent() || !world.has::<Identity>(buyer) {
+        return None;
+    }
+    if market_price(world, kind, target, Some(buyer), Some(buyer), None).is_some() {
+        return None;
+    }
+    let f = nearest_fixer_to(world, home_door(world, buyer)?)?;
+    let p = market_price(world, kind, target, Some(buyer), Some(buyer), Some(f))?;
+    Some((f, (p as f32 * (1.0 + world.config.hitmarket.reach_premium.max(0.0))).ceil() as i64))
+}
+
 /// C17: `Live` when the target or the taker is a body, pinned or on
 /// screen, or the record is a Guard taken by an agent; else `Ledger`.
 pub fn render_for(world: &World, id: ContractId) -> Render {
@@ -1691,6 +1716,9 @@ fn stiff(world: &mut World, c: &Contract, unpaid: i64, owed: i64) {
     betrayed(world, buyer, taker);
     let w = world.config.hitmarket.stiff_grudge * unpaid as f32 / owed.max(1) as f32;
     crate::systems::grudges::add(world, taker, buyer, crate::word::GrudgeCause::Betrayed, w, 0);
+    // Gaps pass (decision 3): the balance is owed out of future wages; the
+    // grudge counts toward a Hunt only once `debt_days` run out unpaid.
+    world.hm_stiffs.entry((taker, buyer)).and_modify(|x| x.1 = x.1.max(w)).or_insert((tick, w));
     let text = format!(
         "{} could not pay {} the {unpaid} owed for the {}",
         world.name_of(buyer),
@@ -1921,7 +1949,16 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
         return;
     }
     let Some(taker) = c.taker else { return };
-    if world.contract_runs.contains_key(&taker) {
+    // The Hit market's gaps pass: a gang's or a squad's job that waited out
+    // `queue_hours` for a live slot is worked here: the crew strikes as one
+    // party, its first free member (the strongest, `job_crew`'s order) for
+    // a gang's job. A solo taker's party is the taker alone (M16a's ledger).
+    let lead = if is_gang(world, taker) { c.crew.iter().copied().find(|&m| free_adult(world, m)) } else { Some(taker) };
+    let Some(lead) = lead else {
+        fail_attempt(world, id, "the crew is gone");
+        return;
+    };
+    if world.contract_runs.contains_key(&lead) {
         // Review fix: the taker is busy on a live run: look again in an
         // hour (the record stays in the ledger's index).
         let due = world.tick + TICKS_PER_HOUR;
@@ -1931,10 +1968,13 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
         world.ledger_due.insert((due, id));
         return;
     }
-    if !free_adult(world, taker) {
+    if !free_adult(world, lead) {
         fail_attempt(world, id, "the taker was not free");
         return;
     }
+    let mut party: SmallVec<[EntityId; 6]> = SmallVec::new();
+    party.push(lead);
+    party.extend(c.crew.iter().copied().filter(|&m| m != lead && free_adult(world, m)));
     let Target::Agent(t) = c.target else {
         // A ledger Guard cannot occur (a Guard is always live).
         return;
@@ -1973,7 +2013,7 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     // first: a Hold looks again in a day, a SellOut hands the record to the
     // district's gang (live), a Fail is a failed attempt.
     let door = habit.building.and_then(|b| missions::door_of(world, b)).unwrap_or(habit.tile);
-    match missions::decide(world, id, &[taker], door) {
+    match missions::decide(world, id, &party, door) {
         crate::contract::Decision::Strike => {}
         crate::contract::Decision::Hold => {
             let due = missions::hold_until(now);
@@ -1989,7 +2029,7 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
         .contracts
         .get(&id)
         .and_then(|x| x.strike)
-        .map_or_else(|| missions::estimate(world, &[taker], &c.target), |s| s.p_win);
+        .map_or_else(|| missions::estimate(world, &party, &c.target), |s| s.p_win);
     let attempts = u64::from(c.attempts);
     let win = world.rng.contract(ContractNs::Outcome, id, attempts).random::<f32>() < p_win;
     let src = |faction: EntityId| crate::ledger::ActiveSource {
@@ -2004,10 +2044,10 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
             ContractKind::Hit => {
                 // Settled first, so the death's `on_death` finds it closed.
                 settle(world, id, Settle::Fulfilled, "");
-                crate::systems::lod::stat_hit(world, t, crate::components::HoleKind::Killed, Some(&src(taker)));
+                crate::systems::lod::stat_hit(world, t, crate::components::HoleKind::Killed, Some(&src(lead)));
             }
             _ => {
-                crate::systems::lod::stat_hit(world, t, crate::components::HoleKind::Assaulted, Some(&src(taker)));
+                crate::systems::lod::stat_hit(world, t, crate::components::HoleKind::Assaulted, Some(&src(lead)));
                 settle(world, id, Settle::Fulfilled, "");
             }
         }
@@ -2016,8 +2056,8 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     let lethal = p_win < world.config.missions.ledger_death_p
         && world.rng.contract(ContractNs::TakerDeath, id, attempts).random::<f32>() < 1.0 - p_win;
     fail_attempt(world, id, "the strike was lost");
-    if lethal && crate::systems::law::living(world, taker) {
-        crate::systems::lod::stat_hit(world, taker, crate::components::HoleKind::Killed, Some(&src(t)));
+    if lethal && crate::systems::law::living(world, lead) {
+        crate::systems::lod::stat_hit(world, lead, crate::components::HoleKind::Killed, Some(&src(t)));
     }
 }
 
@@ -2533,6 +2573,7 @@ pub fn run(world: &mut World) {
 /// C17: queued live records start, by price (ties the lower id), while
 /// runs are under `max_missions`.
 fn start_queued(world: &mut World) {
+    ledger_stale_queue(world);
     if live_count(world) >= world.config.missions.max_missions {
         return;
     }
@@ -2555,6 +2596,44 @@ fn start_queued(world: &mut World) {
             break;
         }
         start_live(world, id);
+    }
+}
+
+/// The Hit market's gaps pass (takers who can't close), hourly before the
+/// queue starts: a taken organic Hit or Beat still waiting for a live slot
+/// `queue_hours` after the take (the `max_missions` slots held by
+/// week-long Locate runs and Guards: 42-47 had records taken on day one
+/// and queued to their deadline) is worked on the ledger instead: a `due`
+/// drawn over half the time left (`ContractNs::Due`, key `1 + attempts`;
+/// the take's draw is key 0), the strike rolled by `resolve_ledger` (a
+/// gang's or a squad's crew strikes as one party).
+fn ledger_stale_queue(world: &mut World) {
+    if !world.config.hitmarket.enabled {
+        return;
+    }
+    let now = world.tick;
+    let wait = u64::from(world.config.hitmarket.queue_hours) * TICKS_PER_HOUR;
+    let stale: Vec<ContractId> = world
+        .contracts
+        .values()
+        .filter(|c| c.status == ContractStatus::Taken && c.render == Render::Live)
+        .filter(|c| !c.motive.is_none() && c.kind.violent() && c.target_agent().is_some())
+        .filter(|c| c.taken.is_some_and(|t| now.saturating_sub(t) >= wait))
+        .filter(|c| !running(world, c))
+        .map(|c| c.id)
+        .collect();
+    for id in stale {
+        let Some((deadline, attempts)) = world.contracts.get(&id).map(|c| (c.deadline, c.attempts)) else { continue };
+        let span = (deadline.saturating_sub(now) / 2).max(60);
+        let u: f64 = world.rng.contract(ContractNs::Due, id, 1 + u64::from(attempts)).random();
+        let due = now + (u * span as f64).floor() as Tick;
+        if let Some(c) = world.contracts.get_mut(&id) {
+            c.render = Render::Ledger;
+            c.due = Some(due);
+        }
+        world.ledger_due.insert((due, id));
+        let hours = world.config.hitmarket.queue_hours;
+        log(world, id, format!("no live slot in {hours} h: worked off-screen"));
     }
 }
 
@@ -2647,8 +2726,10 @@ pub fn daily(world: &mut World) {
     }
     prune_regulars(world);
     stat_regulars(world);
-    // The Hit market (phase 2): stale wants lapse first (H8).
+    // The Hit market (phase 2): stale wants lapse first (H8); the gaps
+    // pass: the stiffed guns' grace (decision 3).
     crate::systems::hitmarket::want_sweep(world);
+    crate::systems::hitmarket::stiff_sweep(world);
     hire_pass(world);
     // The Hit market: Silence and Debt (phase 2), the gangs' and corps'
     // business (H18, H19, Protect), and the cold cases (H14).

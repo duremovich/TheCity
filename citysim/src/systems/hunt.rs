@@ -56,6 +56,9 @@ pub fn heaviest_eligible(world: &World, holder: EntityId) -> Option<(EntityId, f
         .list
         .iter()
         .filter(|x| x.settled.is_none() && x.weight >= min && x.target != holder)
+        // The Hit market (gaps pass): a stiffed gun's grudge waits out the
+        // debt's grace (`hitmarket::stiff_sweep`).
+        .filter(|x| world.hm_stiffs.is_empty() || !world.hm_stiffs.contains_key(&(holder, x.target)))
         .filter(|x| world.has::<crate::components::Identity>(x.target) && target_ok(world, x.target))
         .max_by(|a, b| a.weight.total_cmp(&b.weight).then(b.target.cmp(&a.target)))
         .map(|x| (x.target, x.weight, x.chain))

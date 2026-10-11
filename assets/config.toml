@@ -1873,6 +1873,10 @@ debt_min = 15                        # Debt: an edge debt this big ...
 debt_days = 21                       # ... this old ...
 debt_lawfulness = 0.35               # ... owed to a creditor this lawless buys a Beat
 debt_hit_days = 30                   # Debt: a Hit when the Beat is this old and the debt stands
+# The gaps pass (docs/HIT_MARKET.md "Gaps pass").
+reach_premium = 0.5                  # an agent's direct record with too few asks goes to the nearest Fixer at its price x 1.5
+lawful_wait = 0.6                    # a revenge buyer above this lawfulness waits while the target is wanted or held
+queue_hours = 24                     # a taken organic Hit/Beat queued this long for a live slot goes to the ledger
 
 # The Real economy (docs/ECONOMY_V2.md; plan ~/.claude/plans/economy-v2.md). The World market is always on;
 # `wages` and `no_safety_net` are the switches in flight. Every number a placeholder (the late calibration milestone).

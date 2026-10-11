@@ -20,7 +20,10 @@ use crate::world::World;
 /// `Contract.motive`, `Corp.last_wronged`, `World::hm_corp_hits`,
 /// `World::wants`, `World::hm_debts`, `[hitmarket]` in the saved config
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 8;
+/// 9: the Hit market's gaps pass: `World::hm_stiffs` (the stiffed gun's
+/// grace) and `[hitmarket] reach_premium`, `lawful_wait`, `queue_hours` in
+/// the saved config (serde defaults).
+pub const SAVE_VERSION: u8 = 9;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

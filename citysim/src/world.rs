@@ -755,6 +755,12 @@ pub struct World {
     /// clock (first seen at `debt_min`, the last Debt Beat).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub hm_debts: BTreeMap<(EntityId, EntityId), crate::contract::DebtClock>,
+    /// The Hit market (gaps pass, decision 3's grace): `(taker, buyer)` ->
+    /// (the tick the buyer was stiffed, the grudge weight it swore): the
+    /// taker's grudge on the buyer counts toward no Hunt until `debt_days`
+    /// run out with the balance unpaid (`hitmarket::stiff_sweep`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub hm_stiffs: BTreeMap<(EntityId, EntityId), (Tick, f32)>,
     /// M15 W35: a body -> the agents standing over it (GuardBody's wait);
     /// rebuilt from the guards' plans on load.
     #[serde(skip)]
@@ -1257,6 +1263,7 @@ impl World {
             hm_corp_hits: std::collections::VecDeque::new(),
             wants: BTreeMap::new(),
             hm_debts: BTreeMap::new(),
+            hm_stiffs: BTreeMap::new(),
             guards_of_corpse: BTreeMap::new(),
             stories: VecDeque::new(),
             next_story_id: 0,

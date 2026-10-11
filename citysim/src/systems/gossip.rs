@@ -374,6 +374,29 @@ fn self_or_mine(world: &World, who: EntityId, actor: EntityId) -> bool {
             && crate::systems::grudges::member_of(world, who, actor))
 }
 
+/// The Hit market: what `teller` never volunteers in an exchange (with the
+/// market on). H7: a `Hired` whose actor is the teller or its gang or corp.
+/// Gaps pass: a Fixer's owner's first-hand `Hired` (her book: the copy
+/// `contracts::post_with` writes her at hops 0); and the deed a buyer bought
+/// (H17's first-hand `Killed` or `Assaulted`, actor its taker, on a record
+/// the teller placed). Interrogation, the Fixer's talk to her regulars,
+/// pooled kin and every other holder still spread them.
+fn keeps_quiet(world: &World, teller: EntityId, e: &MemoryEntry, r: &DeedRef) -> bool {
+    match r.deed {
+        Deed::Hired => {
+            r.actor.is_some_and(|a| self_or_mine(world, teller, a))
+                || (memory::hops_of(e) == 0 && crate::systems::contracts::owns_fixer(world, teller))
+        }
+        Deed::Killed | Deed::Assaulted => {
+            memory::hops_of(e) == 0
+                && r.actor
+                    .zip(r.object)
+                    .is_some_and(|(a, o)| crate::systems::hitmarket::bought_deed(world, teller, a, o))
+        }
+        _ => false,
+    }
+}
+
 /// The ordinary exchange (W8), `exchange` without the venue's extras.
 fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
     if from == to {
@@ -395,9 +418,10 @@ fn exchange_one(world: &mut World, from: EntityId, to: EntityId) {
         if e.salience < g.gossip_min || memory::hops_of(e) >= g.max_hops || r.actor == Some(to) {
             continue;
         }
-        // The Hit market (H7): a buyer never volunteers his own `Hired` (nor
-        // his gang's or corp's); interrogation and the Fixer's talk still can.
-        if quiet && r.deed == crate::word::Deed::Hired && r.actor.is_some_and(|a| self_or_mine(world, from, a)) {
+        // The Hit market (H7, gaps pass): a buyer never volunteers his own
+        // `Hired` (nor his gang's or corp's) nor the deed he bought, a
+        // Fixer's owner her book; interrogation and the Fixer's talk still can.
+        if quiet && keeps_quiet(world, from, e, &r) {
             continue;
         }
         let day = time::day(e.tick);
