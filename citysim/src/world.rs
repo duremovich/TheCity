@@ -215,6 +215,12 @@ fn one_f32() -> f32 {
 pub const MEAL_BANDS: usize = 10;
 /// `StatTable::p_meal`'s cells: 4 phases x `MEAL_BANDS`.
 pub const MEAL_CELLS: usize = 4 * MEAL_BANDS;
+/// Diet parity (after items 8-13): `p_meal` learned apart for the hours a
+/// worker starts on shift (cells `MEAL_CELLS..2 x MEAL_CELLS`): a Full
+/// worker on shift defers its meal (item 5, P5i's meal before the shift),
+/// the off-shift and the jobless eat when hungry. A table of `MEAL_CELLS`
+/// cells (before the split) reads the pooled rate for both.
+pub const MEAL_CELLS_SPLIT: usize = 2 * MEAL_CELLS;
 
 impl StatTable {
     /// Morning 0, Work 1, Evening 2, Night 3 (`DayPhase` declares Night first).
@@ -247,6 +253,24 @@ impl StatTable {
     pub fn meal_index(&self, phase: time::DayPhase, hunger: f32) -> usize {
         let band = (hunger.max(0.0) * MEAL_BANDS as f32).floor() as usize;
         Self::phase_index(phase) * MEAL_BANDS + band.min(MEAL_BANDS - 1)
+    }
+
+    /// `meal_index` in the split table (`MEAL_CELLS_SPLIT`): on shift at
+    /// the hour's start, the second half.
+    pub fn meal_index_split(&self, phase: time::DayPhase, hunger: f32, on_shift: bool) -> usize {
+        self.meal_index(phase, hunger) + if on_shift { MEAL_CELLS } else { 0 }
+    }
+
+    /// The `p_meal` rate for an hour (the split table's cell when the table
+    /// holds one, else the pooled cell).
+    pub fn meal_rate(&self, phase: time::DayPhase, hunger: f32, on_shift: bool) -> Option<f32> {
+        let p = self.p_meal.as_ref()?;
+        let i = if p.len() >= MEAL_CELLS_SPLIT {
+            self.meal_index_split(phase, hunger, on_shift)
+        } else {
+            self.meal_index(phase, hunger)
+        };
+        p.get(i).copied()
     }
 
     pub fn index(&self, phase: time::DayPhase, lawfulness: f32, hunger: f32) -> usize {

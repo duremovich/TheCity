@@ -732,6 +732,8 @@ pub fn run_statistical(world: &mut World) {
         // the dole once a day. The table's p_work mass then stands for the
         // idle hours of the employed.
         stat_work(world, id, phase, no_net_row);
+        // Diet parity (hunger fix item 11's off-screen side): the grocery run.
+        stat_grocery(world, id);
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
         // hungry Statistical agent eats if it can and the draw covers the
         // discretionary meals of the fed.
@@ -745,10 +747,8 @@ pub fn run_statistical(world: &mut World) {
         // `p_meal` an agent eats on its phase's and hunger band's share of
         // hours (a pure hash: no stream moves); without it the M10 rule
         // (every hungry hour eats, `p_eat` the rest).
-        let meal_p = world
-            .stat_table
-            .as_ref()
-            .and_then(|t| t.p_meal.as_ref().and_then(|p| p.get(t.meal_index(phase, hunger)).copied()));
+        let on_shift = world.comp::<Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day()));
+        let meal_p = world.stat_table.as_ref().and_then(|t| t.meal_rate(phase, hunger, on_shift));
         // `p_meal` is the means' rate (food in hand, a pantry, a meal's
         // coins); the broke eat through their own hourly rolls: the bin
         // (`p_dive`, above), the noon Mission, and the hungry broke hour's
@@ -1257,6 +1257,47 @@ fn stat_eat(world: &mut World, id: EntityId) {
     }
     crate::systems::health::ate(world, id, meal);
     world.mark_day(id, trace_flags::ATE);
+}
+
+/// Diet parity (hunger fix item 11, P5i (b), off screen): an employed
+/// agent off shift whose household's pantry and own carried meals are under
+/// `routine::shift_meals_needed` per resident (capped at the pantry) and who
+/// holds a meal's coins at its stocked food Market buys up to three meals
+/// into the pantry, as a Full worker's grocery run does. The Full city's
+/// jobless ate from the pantries the workers' runs filled (hungry at
+/// midnight 0.3-0.7 % against 3-3.6 % off screen on the flipped city).
+fn stat_grocery(world: &mut World, id: EntityId) {
+    if !crate::systems::fixes::shift_meals(world) {
+        return;
+    }
+    let Some(job) = world.comp::<Job>(id) else { return };
+    if job.on_shift(world.tick_of_day()) {
+        return;
+    }
+    let need_one = crate::exec::routine::shift_meals_needed(world, job);
+    let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else { return };
+    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    let carried = world.comp::<crate::components::Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
+    let residents = world.residents_of(home).len().max(1) as u32;
+    let need = (need_one * residents).min(world.config.buildings.home.stock_cap);
+    if pantry + carried >= need {
+        return;
+    }
+    let Some(market) = world.food_market(id) else { return };
+    let price = crate::systems::diet::price_at(world, id, market);
+    let stocked = world.comp::<Building>(market).is_some_and(|b| b.stock_food > 0);
+    if !stocked || world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins) < price {
+        return;
+    }
+    let units = economy::buy_quantity(world, id, Some(market));
+    if units == 0 {
+        return;
+    }
+    let q = economy::quality_at(world, id, Some(market));
+    let paid = economy::pay_for_food_q(world, id, Some(market), units, q);
+    if economy::take_food_q(world, id, Some(market), units, paid, q) {
+        stat_store_food(world, id);
+    }
 }
 
 /// StoreFood off screen: the agent's bought (not stolen) food goes into its

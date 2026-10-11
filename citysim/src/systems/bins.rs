@@ -167,6 +167,22 @@ pub fn dive_target(world: &World, id: EntityId) -> Option<EntityId> {
     if crate::systems::life::can_buy_meal(world, id) {
         return None;
     }
+    // Diet parity (after items 8-13): a meal at hand (carried, or in the
+    // Home pantry) is eaten before a bin is (G1, food first), in both tiers:
+    // off screen the dive's roll came before the meal, and with the pantries
+    // the grocery runs stock a stocked household dived (bin meals 3.2 off
+    // screen against 2.1 Full per 100 agent-days on the flipped city).
+    if world.comp::<crate::components::Inventory>(id).is_some_and(|i| i.food >= 1) {
+        return None;
+    }
+    let pantry = world
+        .comp::<crate::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .is_some_and(|b| b.stock_food > 0);
+    if pantry {
+        return None;
+    }
     // One origin for both tiers (parity, after P5): the Home's door, else
     // the squat's, else the tile, as the Mission's reach is read (an
     // off-screen stand-in stands at its phase's door, so "where it stands"

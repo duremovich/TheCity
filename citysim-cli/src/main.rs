@@ -1527,7 +1527,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let mut attend: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     // P5f: wages owed (a free, healthy workday shift's wage at its start) and paid.
     let (mut wage_owed, mut wage_paid) = (0i64, 0i64);
-    let (mut eat_h, mut eat_h_denom) = ([0u64; citysim::world::MEAL_CELLS], [0u64; citysim::world::MEAL_CELLS]);
+    let (mut eat_h, mut eat_h_denom) =
+        ([0u64; citysim::world::MEAL_CELLS_SPLIT], [0u64; citysim::world::MEAL_CELLS_SPLIT]);
     let (mut desp, mut desp_denom) = ([0u64; 3], [0u64; 3]);
     let with_rows = args.rows_csv.is_some();
     let mut rows_out = match &args.rows_csv {
@@ -1574,7 +1575,11 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     broke,
                     dive_ok,
                     meal_seen: citysim::systems::lod::has_means(world, id),
-                    meal_cell: header.meal_index(world.phase(), hunger),
+                    meal_cell: header.meal_index_split(
+                        world.phase(),
+                        hunger,
+                        world.comp::<citysim::Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day())),
+                    ),
                     last_hunger: hunger,
                     ..Default::default()
                 },
@@ -1962,8 +1967,22 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         let (n, d): (u64, u64) = (eat_h.iter().sum(), eat_h_denom.iter().sum());
         let mean = (n as f32 / d.max(1) as f32).min(1.0);
         Some(
-            (0..citysim::world::MEAL_CELLS)
-                .map(|i| if eat_h_denom[i] < 200 { mean } else { (eat_h[i] as f32 / eat_h_denom[i] as f32).min(1.0) })
+            (0..citysim::world::MEAL_CELLS_SPLIT)
+                .map(|i| {
+                    // A thin cell takes its pooled (unsplit) cell's rate, else the mean.
+                    let j = i % citysim::world::MEAL_CELLS;
+                    let (pn, pd) = (
+                        eat_h[j] + eat_h[j + citysim::world::MEAL_CELLS],
+                        eat_h_denom[j] + eat_h_denom[j + citysim::world::MEAL_CELLS],
+                    );
+                    if eat_h_denom[i] >= 200 {
+                        (eat_h[i] as f32 / eat_h_denom[i] as f32).min(1.0)
+                    } else if pd >= 200 {
+                        (pn as f32 / pd as f32).min(1.0)
+                    } else {
+                        mean
+                    }
+                })
                 .collect::<Vec<f32>>(),
         )
     };

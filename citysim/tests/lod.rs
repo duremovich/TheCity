@@ -637,3 +637,89 @@ fn finding_planner_queue_shipped_city() {
         w.config.brain.plan_budget_per_tick, w.plan_stale_drops
     );
 }
+
+/// Diet parity (hunger fix item 11's off-screen side): an employed
+/// Statistical agent off shift, with a meal's coins and an empty household
+/// pantry, stocks the pantry in its hour (the Full worker's grocery run);
+/// with item 11 off it does not.
+#[test]
+fn test_statistical_worker_off_shift_stocks_the_pantry() {
+    use citysim::{Household, Inventory, Job, Needs, Wallet};
+    for on in [true, false] {
+        let mut cfg = Config::load();
+        cfg.economy2.wages = true;
+        cfg.economy2.no_safety_net = true;
+        cfg.life.hf_shift_meals = on;
+        let mut w = World::new(42, cfg);
+        w.run_ticks(TICKS_PER_DAY + 20 * TICKS_PER_HOUR);
+        let tod = w.tick_of_day();
+        let id = w
+            .tier(Lod::Statistical)
+            .iter()
+            .copied()
+            .find(|&a| {
+                citysim::systems::demography::is_adult(&w, a)
+                    && !w.has::<Sentence>(a)
+                    && w.comp::<Job>(a).is_some_and(|j| j.employer.is_some() && !j.on_shift(tod))
+                    && w.comp::<Household>(a).is_some_and(|h| h.home.is_some())
+            })
+            .expect("an employed Statistical adult off shift");
+        let home = w.comp::<Household>(id).and_then(|h| h.home).unwrap();
+        for r in w.residents_of(home).to_vec() {
+            if let Some(i) = w.comp_mut::<Inventory>(r) {
+                i.food = 0;
+                i.synth = 0;
+                i.stolen_food = 0;
+            }
+            if let Some(n) = w.comp_mut::<Needs>(r) {
+                n.hunger = 0.95;
+            }
+        }
+        if let Some(b) = w.comp_mut::<citysim::Building>(home) {
+            b.stock_food = 0;
+            b.synth_food = 0;
+        }
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = 60;
+        stat_hour(&mut w);
+        let stock = w.comp::<citysim::Building>(home).map_or(0, |b| b.stock_food);
+        eprintln!("item 11 {on}: pantry after the hour {stock}");
+        assert_eq!(stock > 0, on, "the off-shift worker's pantry run (item 11 {on})");
+    }
+}
+
+/// Diet parity: a meal at hand (carried, or in the Home pantry) is eaten
+/// before a bin is: `bins::dive_target` has none for an agent holding one,
+/// in both tiers.
+#[test]
+fn test_no_bin_with_a_meal_at_hand() {
+    use citysim::{Household, Inventory, Needs, Wallet};
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    cfg.sickness.enabled = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    // A housed broke adult, starving, with a bin in reach once its food is gone.
+    let found = w.citizens().into_iter().find_map(|a| {
+        if !citysim::systems::demography::is_adult(&w, a) || w.has::<Sentence>(a) {
+            return None;
+        }
+        let home = w.comp::<Household>(a).and_then(|h| h.home)?;
+        let mut c = w.clone();
+        c.comp_mut::<Wallet>(a)?.coins = 0;
+        c.comp_mut::<Needs>(a)?.hunger = 0.05;
+        if let Some(i) = c.comp_mut::<Inventory>(a) {
+            i.food = 0;
+            i.synth = 0;
+            i.stolen_food = 0;
+        }
+        c.comp_mut::<citysim::Building>(home)?.stock_food = 0;
+        citysim::systems::bins::dive_target(&c, a).map(|_| (a, home, c))
+    });
+    let Some((a, home, mut c)) = found else { panic!("no broke adult with a bin in reach") };
+    c.comp_mut::<citysim::Building>(home).unwrap().stock_food = 2;
+    assert!(citysim::systems::bins::dive_target(&c, a).is_none(), "a bin with a pantry meal at home");
+    c.comp_mut::<citysim::Building>(home).unwrap().stock_food = 0;
+    c.comp_mut::<Inventory>(a).unwrap().food = 1;
+    assert!(citysim::systems::bins::dive_target(&c, a).is_none(), "a bin with a meal in hand");
+}
