@@ -192,3 +192,52 @@ What keeps that swap cheap (phase 1 already holds to it):
 3. Fare: a flat 1 coin a ride.
 4. Fare dodging is a petty crime record from day one, fed to the existing police and witness machinery. Inspectors come later.
 5. (Orchestrator defaults) Elevated rail, not buses; three lines; no service 01:00-05:00, so night workers walk; stations are stops with no buildings until the Interiors milestone.
+
+## Status (2026-10-11): phases 1-3 built, on by default
+
+Phase 1 was ported onto main `ef83a2a` (the flipped city). Phases 2 and 3 followed on the same branch. **`[transit] enabled = true`** ships. `CITYSIM_TRANSIT=0` turns it off for A/B runs, and `Config::dole_city()` turns it off (the old default had no El). The measurement harness is `tests/transit.rs::measure_transit_tail` (ignored; `TRANSIT_SEEDS`, `TRANSIT_DAYS`, `TRANSIT_POOR_TPC`, `TRANSIT_POWER`).
+
+**Seeds 42-47 x 120 days, shipped ON vs main OFF** (printed findings, never asserted):
+
+| | main OFF | ON |
+|---|---|---|
+| far workers at day 120 (the agent's own trip > `commute_move_ticks` 80) | 245 | 197 |
+| farmers' trip p90 (ticks) | 124-156 | 93-104 |
+| all commutes p90 (ticks) | 192-206 | ~140 |
+| employed at day 120 (mean) | 1,477 | 1,581 |
+| Murders (sum) | 554 | 506 |
+| private purses at day 120 (mean) | 44.4k | 42.0k |
+| coins in the city (mean) | 254k | 241k |
+| seeded corps alive | 51 | 53 |
+| starvation | 0-1 | 0 |
+
+- Ride share of commutes: about a third for bodies, 0.27-0.31 off screen.
+- The far count by walking tiles doubles (~500). Housing and hiring now read the commute as ridden, so the city stops building Homes by the Farms for people the El carries.
+- About 90 workers the shared distance calls near still walk far by their own choice. Most are the poor (the time-vs-fare rule's dearer coin); some are broke and lawful. The poor rule is kept: it is the brutal city working.
+
+**Deviations from the spec and the plan**, with the reason for each:
+
+1. **Ownership and money (decision 2).** The city owns the El. Fares go to the Treasury, which pays the power and pays **maintenance crews** from the fares: `TransitState.staff`, Sanitation posts on the city payroll, sized as (the 14-day mean of fares − a day's power) / a sweeper's wage, paced down like the civic headcount, and hired by `reconcile_sanitation` on top of it (the `el_staff` column). Why: parked in the Treasury (police at their ceiling, tax at its floor) the fares left purses 17 % lower. Station clerks and platform guards wait for station buildings (decision 5, Interiors).
+2. **`power_per_line_day` 150 → 20** (E13's scale: a Market's power is 20 a day). Coins paid to the World displace export minting one for one. The placeholder sent 450 a day out of the city, about 45k over 120 days: purses −25 %, employed −5 %.
+3. **The shared distance** (§ 6). `life::commute_cost` = `transit::commute_ticks`: the walk, or the ride over each door's nearest stops (untimed walks, half a headway's wait, the table) when it saves `min_saving_ticks` plus a fare's `ticks_per_coin`. No agent and no clock, so it is structural. The hiring band, relocation, the housing demand and the pre-roll read it, and so does the hire key's distance when the El is on. `Net::near` holds each tile's 8 nearest stops.
+4. **The departure gate** (T16). It reads `transit::estimate_by`: the trip that arrives by the deadline, as `choose` would make it. It does not read "now". A now-based estimate fell when service began at 05:00 and turned riders back from commutes (tier commute aborts: sweeper 0.46, worker_friday 0.18). Bedtime (P5j) and leisure's shift lead read it too. `fixes::walk_estimate` is `transit::estimate` (now-based) for the other "how long to get there" readers.
+5. **No per-agent route cache** (D8). An unsaved cache would make a loaded world choose differently. The choice is a few table lookups once per workday.
+6. **Off-screen dodgers are caught** at `StatTable.p_dodge_caught`, learned by `calibrate` as Fare Evasion sentences per jumped gate (0.38). A caught dodger is reported and comes on screen for the arrest, as an off-screen theft does. Why: in the all-Full city Fare Evasion was 70 % of sentences, and parity's arrests went red. `calibrate`'s `p_theft_caught` no longer counts a thief sentenced at the gate. Without that fix the first table read 1.0, against 0.82 without the El.
+7. **An arrest deters** (`dodge_deterred_days` 7). A rider arrested in the last week pays when it can, whatever its lawfulness. Why: a d90 gang leader with a full purse jumped the gate every morning, was arrested by 11:00 and spent ten hours a day in the cells, four days running (the tier's d90 gang leader `e0_h/wk` 4.03 against ≤ 3.1).
+8. **Attendance by band** (T14, D9). `p_attend` gains `"{role}/b{n}"` cells (bands < 30, 30-60, 60-120, 120-180, ≥ 180 ticks of `commute_cost`), kept only past 54,000 shift minutes. The role's row is the fallback. Finding: in the all-Full calibration city the bands barely separate, because far workers leave earlier. Full farmer attendance rose from 0.83 to 0.91 with the El.
+9. **The stale ride sweep.** `transit::run` drops, every tick, a ride whose plan step was replaced without an abort. `core_sanity`'s new check caught one on seed 43.
+10. Unchanged from phase 1:
+    - the aboard body keeps the board stop's tile;
+    - a line cut mid-ride doesn't stop the ride;
+    - `SAVE_VERSION` is not bumped: every new field is `#[serde(default)]` and skipped while empty or off, so an off world's save is byte-identical. With the El on, the save gains `transit`, `rides` and the config row; a pre-transit save loads with no rides.
+
+**Gates.**
+- Trio green: 920 passed.
+- `core_sanity`:
+  - two bullets with the El on: an El ride [81,882 / 84,121 / 87,740] and a fare paid [120 / 120 / 120] days;
+  - the ride sanity (no stale ride, nobody aboard past arrival).
+- `core_year` ok: seed 42, Murders 338, starvation 0, corps 8/9.
+- Behaviour tier: 135/135 judged rows pass, no bound moved.
+- God: 23 + 3 pass, including the new `god_line_cut` (v10).
+- Parity (nightly, `lod.rs`): law1 actor share now passes (0.170 vs 0.167; red on main); bin meals stays red (1.43 vs 2.68, as on main); two new reds: arrests 1.25 vs 0.51 (main 0.58 vs 0.43: the Full city's Fare Evasion arrests come from errand rides too, and the Statistical tier models commute rides only, plan risk 1) and commute rides 28.5 vs 24.1 (tolerance 4.3; ride share 34.5 vs 31.0 passes). Next: learn an off-screen errand-ride rate, or `p_dodge_caught` per commute dodge.
+- Five person probes (`probe_el_*`).

@@ -252,6 +252,10 @@ pub struct TransitCfg {
     pub dodge_lawfulness: f32,
     /// ... and never pays below this.
     pub dodge_always: f32,
+    /// Phase 3: a rider arrested in the last this many days pays the fare
+    /// when it can, whatever its lawfulness (the deterrent a night in the
+    /// cells is; a broke rider still jumps).
+    pub dodge_deterred_days: u32,
     /// Service hours, tick of day: from `service_from` to `service_to`
     /// (wrapping midnight).
     pub service_from: u16,
@@ -296,12 +300,13 @@ impl Default for TransitCfg {
             poor_meals: 2,
             dodge_lawfulness: 0.25,
             dodge_always: 0.1,
+            dodge_deterred_days: 7,
             service_from: 300,
             service_to: 60,
             night_from: 1260,
             night_to: 300,
             danger_crime: 3.0,
-            power_per_line_day: 150,
+            power_per_line_day: 20,
             dodge_fine: 5,
             lines: Vec::new(),
         }
@@ -5352,6 +5357,8 @@ impl Config {
         self.economy2.no_safety_net = false;
         self.sickness.enabled = false;
         self.street.shanties = false;
+        // Transit phase 3: the old default had no El.
+        self.transit.enabled = false;
         self.life.housing_catchup_days = 0.0;
         self
     }

@@ -120,11 +120,20 @@ pub struct TransitState {
     pub load: BTreeMap<u16, [u16; 24]>,
     /// Agents whose commute in progress rode (for `commute_tpt_ride`).
     pub rode: BTreeSet<EntityId>,
+    /// Phase 3, the money circuit: the El's maintenance crews, Sanitation
+    /// posts on the city's payroll funded from the line's fares
+    /// (`staff_target`); `districts::reconcile_sanitation` hires them on
+    /// top of the civic headcount.
+    pub staff: u16,
 }
 
 impl TransitState {
     pub fn is_idle(&self) -> bool {
-        self.line_closed.is_empty() && self.stop_closed.is_empty() && self.load.is_empty() && self.rode.is_empty()
+        self.line_closed.is_empty()
+            && self.stop_closed.is_empty()
+            && self.load.is_empty()
+            && self.rode.is_empty()
+            && self.staff == 0
     }
 }
 
@@ -591,7 +600,13 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
     let coins = world.comp::<Wallet>(who).map_or(0, |w| w.coins);
     let (law, courage) = world.comp::<Personality>(who).map_or((0.5, 0.5), |p| (p.lawfulness, p.courage));
     // T10: pay, or jump the gate.
-    let dodge = law < c.dodge_always || (coins < c.fare && law < c.dodge_lawfulness);
+    // Phase 3: fresh from the cells, a rider with the fare pays it.
+    let since = world.tick.saturating_sub(u64::from(c.dodge_deterred_days) * TICKS_PER_DAY);
+    let deterred = coins >= c.fare
+        && world.comp::<crate::components::Memory>(who).is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasArrested && e.tick >= since)
+        });
+    let dodge = !deterred && (law < c.dodge_always || (coins < c.fare && law < c.dodge_lawfulness));
     if !dodge && coins < c.fare {
         return Err(Refusal::Fare);
     }
@@ -666,6 +681,26 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     } else {
         walk
     }
+}
+
+/// T14 (phase 3, plan D9): the commute band's upper bounds in ticks: `< 30`,
+/// `30-60`, `60-120`, `120-180`, `>= 180` (bands 0-4).
+pub const BANDS: [u64; 4] = [30, 60, 120, 180];
+
+/// T14: `id`'s commute band, from its Home door to its work door by
+/// `life::commute_cost` (the walk, or the ride where it wins: the same
+/// measure on both tiers, read by `calibrate` and `lod::stat_work`). `None`
+/// homeless or jobless.
+pub fn commute_band(world: &World, id: EntityId) -> Option<usize> {
+    let job = world.comp::<crate::components::Job>(id)?;
+    let work = world.comp::<crate::components::Building>(job.employer?)?.door;
+    let home = world
+        .comp::<crate::components::Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<crate::components::Building>(h))?
+        .door;
+    let ticks = crate::systems::life::commute_cost(world, home, work);
+    Some(BANDS.iter().position(|&b| ticks < b).unwrap_or(BANDS.len()))
 }
 
 /// T16: how long `who` takes from `from` to `to` setting out at `t`: the
@@ -942,15 +977,28 @@ pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Jo
     let Ok(r) = choose(world, id, home, work, shift_start.saturating_sub(walk)) else { return };
     world.stats.current.transit.stat_commute_rides += 1;
     let fare = world.config.transit.fare;
+    let mut dodged = 0u64;
     for _ in 0..2 {
         let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
         if r.dodge || coins < fare {
             world.stats.current.transit.fare_dodges += 1;
+            dodged += 1;
         } else {
             crate::systems::ownership::pay(world, Some(id), None, fare, crate::systems::ownership::Flow::Fare);
         }
     }
     world.stats.current.transit.rides_stat += 2;
+    // Phase 3 (parity): a jumped leg is reported at the Full city's rate
+    // (`StatTable.p_dodge_caught`, a pure hash of the agent and the day), and
+    // the body comes on screen for the arrest, as an off-screen theft's does.
+    let p = world.stat_table.as_ref().and_then(|t| t.p_dodge_caught).unwrap_or(0.0);
+    let caught = (0..dodged).any(|leg| {
+        crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0001, u64::from(id.index), world.day() * 2 + leg) < p
+    });
+    if caught {
+        crate::systems::law::file_report(world, Crime::FareEvasion, id, None);
+        crate::systems::lod::set_lod(world, id, Lod::Coarse);
+    }
     let back = job.shift_end(world.tick).unwrap_or(world.tick);
     for (stop, at) in [(r.board, r.depart), (r.alight, back)] {
         let hour = ((at % TICKS_PER_DAY) / TICKS_PER_HOUR) as usize;
@@ -1008,7 +1056,24 @@ pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
 /// Per tick: at midnight, the closures that ran out, the power, the day's
 /// load ledger. A no-op with transit off.
 pub fn run(world: &mut World) {
-    if !enabled(world) || world.tick_of_day() != 0 || world.tick == 0 {
+    if !enabled(world) {
+        return;
+    }
+    // Phase 3: a ride whose plan step was replaced without an abort (a goal
+    // interrupt mid-walk writes a new plan) is dropped now, not at a next
+    // leg that may never come (core_sanity's stale-ride check, seed 43).
+    if !world.rides.is_empty() {
+        let stale: Vec<EntityId> = world
+            .rides
+            .iter()
+            .filter(|(&id, r)| plan_key(world, id) != Some((r.plan_started, r.plan_step)))
+            .map(|(&id, _)| id)
+            .collect();
+        for id in stale {
+            world.rides.remove(&id);
+        }
+    }
+    if world.tick_of_day() != 0 || world.tick == 0 {
         return;
     }
     ensure_net(world);
@@ -1024,6 +1089,31 @@ pub fn run(world: &mut World) {
     world.transit.load.clear();
     let starts = &world.commute_start;
     world.transit.rode.retain(|a| starts.contains_key(a));
+    // The operator spends its fares in the city: the crews it can pay.
+    let want = staff_target(world);
+    world.transit.staff = want.max(world.transit.staff.saturating_sub(u16::from(world.config.treasury.civic_pace)));
+    world.stats.current.transit.el_staff = u32::from(world.transit.staff);
+}
+
+/// Phase 3, the money circuit (Dylan 2026-10-10: the city owns the El; fares
+/// to the Treasury, power from it): the maintenance crews the line's fares
+/// pay for: the mean fares of the last `[treasury] receipts_days` days less
+/// a day's power, over a Sanitation post's wage (`treasury::sweeper_wage`).
+/// Parked in the Treasury, whose posts are capped (police at its ceiling,
+/// Sanitation at `sanitation_max`) and whose tax already sits at its floor,
+/// the fares left the city's purses 15-17 % lower (seeds 42-47); spent as
+/// wages they go back round. Station posts (clerks, platform guards) wait
+/// for station buildings (the Interiors milestone, decision 5).
+pub fn staff_target(world: &World) -> u16 {
+    let days = world.config.treasury.receipts_days.max(1) as usize;
+    let rows: Vec<i64> = world.stats.history.iter().rev().take(days).map(|r| r.transit.fares).collect();
+    if rows.is_empty() {
+        return 0;
+    }
+    let mean = rows.iter().sum::<i64>() / rows.len() as i64;
+    let open = open_lines(world).iter().filter(|&&o| o).count() as i64;
+    let net = mean - open * world.config.transit.power_per_line_day;
+    u16::try_from((net.max(0)) / crate::systems::treasury::sweeper_wage(world)).unwrap_or(u16::MAX)
 }
 
 /// The network as text (stops, lines, a sample of rides): the

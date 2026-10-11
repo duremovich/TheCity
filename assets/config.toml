@@ -2341,11 +2341,12 @@ status_split = [0.5, 0.25, 0.25]       # night out, fashion, chrome
 # P3 (Dylan 2026-10-10): the graded premium draws on profit plus at most this share of the capital payout; the rest
 # always goes into labour's P* (the payout was labour's raise engine). Not tuned.
 premium_payout_share = 0.5
+
 [transit]
-# docs/TRANSIT.md (the El). Phase 1: off by default (CITYSIM_TRANSIT=1 turns it on for A/B runs).
-# City-owned (Dylan 2026-10-10): fares go to the Treasury, power is paid from it to the World.
-# Every value a placeholder until measured.
-enabled = false
+# docs/TRANSIT.md (the El). On by default since phase 3 (CITYSIM_TRANSIT=0 turns it off for A/B runs).
+# City-owned (Dylan 2026-10-10): fares go to the Treasury, which pays the power to the World and the El's
+# maintenance crews (Sanitation posts, `TransitState.staff`) out of them. Placeholders unless a comment says measured.
+enabled = true
 fare = 1                       # coins per ride, transfers free
 headway = 10                   # ticks between departures from each terminus
 ride_ticks_per_tile = 0.25     # 4 tiles a minute, ~8x walking
@@ -2360,12 +2361,13 @@ poor_ticks_per_coin = 60       # ... for a wallet under poor_meals meals
 poor_meals = 2
 dodge_lawfulness = 0.25        # a rider who can't pay jumps the gate below this (a FareEvasion crime)
 dodge_always = 0.1             # ... and never pays below this
+dodge_deterred_days = 7        # phase 3: arrested in the last 7 days, a rider pays if it can (a d90 gang leader jumped every morning and spent every day in the cells)
 service_from = 300             # 05:00
 service_to = 60                # 01:00 (no service 01:00-05:00)
 night_from = 1260              # 21:00
 night_to = 300                 # 05:00
 danger_crime = 3.0             # crime_rate at which an average-courage rider refuses at night
-power_per_line_day = 150       # the Treasury -> the World account, per open line
+power_per_line_day = 20        # the Treasury -> the World account, per open line: E13's scale (a Market's power is 20 a day). Phase 3: the placeholder 150 sent 450 a day to the World, which then minted ~45k fewer export coins over 120 days (purses -25 %, employed -5 %, seeds 42-47)
 dodge_fine = 5                 # a dodger's fine when the Precinct is full
 
 [[transit.lines]]

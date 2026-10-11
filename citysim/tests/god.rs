@@ -2217,3 +2217,80 @@ fn god_kill_ten_fathers_day_10() {
     assert_eq!(fathers.len(), 10, "ten houses on day {DAY}");
     assert!(hits >= 1, "no widow or adult child placed a Hit within 30 days of the killings");
 }
+
+// ---------------------------------------------------------------------------
+// Transit (docs/TRANSIT.md § 7, docs/GOD_SCENARIOS_V10.md): cut the Vat Line
+// for 10 days at day 20 of a 45-day run with the El on.
+// ---------------------------------------------------------------------------
+
+/// The Vat Line cut: no ride on it during the cut; the riders it carried on
+/// days 10-20 have longer commutes (`life::commute_cost`) and the city's
+/// fares fall; after it reopens, rides on it resume.
+#[test]
+#[ignore]
+fn god_line_cut() {
+    use citysim::systems::{life, transit};
+    use citysim::{Building, Household, Job, TICKS_PER_HOUR};
+    const CUT: u64 = 20;
+    const DAYS: u32 = 10;
+    const END: u64 = 45;
+    let mut cfg = Config::load();
+    cfg.transit.enabled = true;
+    let mut w = World::new(SEED, cfg);
+    let mut vat_riders: std::collections::BTreeSet<EntityId> = std::collections::BTreeSet::new();
+    let (mut on_cut, mut after) = (0u32, 0u32);
+    let commute = |w: &World, a: EntityId| -> Option<u64> {
+        let work = w.comp::<Building>(w.comp::<Job>(a)?.employer?)?.door;
+        let home = w.comp::<Building>(w.comp::<Household>(a)?.home?)?.door;
+        Some(life::commute_cost(w, home, work))
+    };
+    let mut before_ticks: Vec<(EntityId, u64)> = Vec::new();
+    let mut during_ticks: Vec<(EntityId, u64)> = Vec::new();
+    while w.tick < END * TICKS_PER_DAY {
+        let day = w.tick / TICKS_PER_DAY;
+        if w.tick == CUT * TICKS_PER_DAY {
+            before_ticks = vat_riders.iter().filter_map(|&a| commute(&w, a).map(|c| (a, c))).collect();
+            w.push_command(PlayerCommand::CutLine { line: 0, days: DAYS });
+        }
+        if w.tick == CUT * TICKS_PER_DAY + 2 * TICKS_PER_DAY {
+            during_ticks = before_ticks.iter().filter_map(|&(a, _)| commute(&w, a).map(|c| (a, c))).collect();
+        }
+        w.run_ticks(TICKS_PER_HOUR);
+        for ride in w.rides.values().filter(|r| r.line == 0) {
+            match day {
+                10..CUT => {}
+                d if (CUT..CUT + u64::from(DAYS)).contains(&d) => on_cut += 1,
+                d if d >= CUT + u64::from(DAYS) => after += 1,
+                _ => {}
+            }
+            let _ = ride;
+        }
+        if (10..CUT).contains(&day) {
+            vat_riders.extend(w.rides.iter().filter(|(_, r)| r.line == 0).map(|(&a, _)| a));
+        }
+    }
+    let fares = |from: u64, to: u64| -> i64 {
+        w.stats.history.iter().filter(|r| r.day >= from && r.day < to).map(|r| r.transit.fares).sum()
+    };
+    let (f_before, f_cut, f_after) = (fares(10, CUT), fares(CUT, CUT + 10), fares(CUT + 10, END));
+    // The same riders before and two days into the cut (the ones still housed
+    // and employed then).
+    let before: std::collections::BTreeMap<EntityId, u64> = before_ticks.into_iter().collect();
+    let pairs: Vec<(u64, u64)> = during_ticks.iter().filter_map(|&(a, d)| before.get(&a).map(|&b| (b, d))).collect();
+    let longer = pairs.iter().filter(|(b, d)| d > b).count();
+    let mean = |f: fn(&(u64, u64)) -> u64| pairs.iter().map(f).sum::<u64>() as f64 / pairs.len().max(1) as f64;
+    let (m_before, m_during) = (mean(|p| p.0), mean(|p| p.1));
+    eprintln!(
+        "Vat Line riders {} (days 10-{CUT}), {} housed and employed: commute_cost mean {m_before:.0} -> {m_during:.0} \
+         ({longer} longer); rides on the line during the cut {on_cut}, after {after}; fares days 10-20 {f_before}, \
+         20-30 {f_cut}, 30-45 {f_after}; {}",
+        vat_riders.len(),
+        pairs.len(),
+        transit::describe(&mut w).lines().next().unwrap_or("")
+    );
+    assert!(!vat_riders.is_empty(), "the Vat Line carried nobody before the cut");
+    assert_eq!(on_cut, 0, "a ride on the cut line");
+    assert!(m_during > m_before, "the Vat Line riders' commutes did not get longer");
+    assert!(f_cut < f_before, "fares did not fall during the cut");
+    assert!(after > 0, "rides on the Vat Line did not resume");
+}

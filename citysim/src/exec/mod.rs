@@ -604,7 +604,9 @@ impl World {
 /// M13 D49: a `GoTo` toward the agent's own workplace starts (Full and
 /// Coarse): remember when and how far, door to door.
 fn commute_started(world: &mut World, id: EntityId, target: &GotoTarget) {
-    if !world.config.assets.enabled {
+    // Transit phase 3: the El's commutes are counted in an asset-free city
+    // too (the calibration city the parity test replays).
+    if !world.config.assets.enabled && !world.config.transit.enabled {
         return;
     }
     let employer = world.comp::<crate::components::Job>(id).and_then(|j| j.employer);

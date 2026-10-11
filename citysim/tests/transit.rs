@@ -467,6 +467,28 @@ fn test_statistical_rider_pays_two_fares_at_the_shift_start() {
     assert_eq!(w.stats.current.transit.rides_stat, c0.rides_stat + 2);
 }
 
+/// Phase 3 (parity: Full's dodgers are arrested, 70 % of the all-Full
+/// city's sentences): an off-screen dodger is reported at the table's
+/// `p_dodge_caught` and comes on screen for the arrest; at 0, never.
+#[test]
+fn test_statistical_dodger_is_caught_at_the_learned_rate() {
+    use citysim::Job;
+    for (p, caught) in [(0.0f32, false), (1.0, true)] {
+        let mut w = city_on();
+        let (who, _, _) = rider_worker(&w, 40);
+        lod::set_lod(&mut w, who, Lod::Statistical);
+        w.stat_table.as_mut().expect("a table").p_dodge_caught = Some(p);
+        let job = w.comp::<Job>(who).cloned().expect("a job");
+        w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
+        w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.05;
+        w.tick = TICKS_PER_DAY + u64::from(job.shifts[0].0) + 7;
+        transit::stat_commute(&mut w, who, &job);
+        assert_eq!(w.stats.current.transit.rides_stat, 2, "p {p}: rode through the gate");
+        let lod_now = w.comp::<Brain>(who).expect("brain").lod;
+        assert_eq!(lod_now != Lod::Statistical, caught, "p {p}: on screen for the arrest");
+    }
+}
+
 /// The app's lerp: a rider aboard is on the track between its board and
 /// alight stops, nowhere on the platform.
 #[test]
@@ -500,6 +522,114 @@ fn test_aboard_rider_is_on_the_track() {
         seen += 1;
     }
     assert!(seen > 0, "rode");
+}
+
+/// Phase 3 (the behaviour tier's d90 gang leader, seed 42: jumped the gate
+/// every morning, arrested by 11:00, ten hours in the cells, out at 22:00,
+/// four days running, his purse full): a rider arrested in the last
+/// `dodge_deterred_days` pays if he can; a broke one still jumps.
+#[test]
+fn test_an_arrest_deters_the_next_dodge() {
+    let mut w = city_on();
+    let (who, home, farm) = sump_farmer(&w);
+    set_out(&mut w, who, home, farm, Lod::Full, 50, 0.05);
+    let from = citysim::exec::walk_origin(&w, who).expect("origin");
+    let door = w.comp::<Building>(farm).expect("farm").door;
+    let t = w.tick;
+    assert!(transit::choose(&w, who, from, door, t).expect("a ride").dodge, "the lawless never pay");
+    w.remember(who, citysim::MemoryKind::WasArrested, None, 0.7, -0.5, false);
+    assert!(!transit::choose(&w, who, from, door, t).expect("a ride").dodge, "fresh from the cells: pays");
+    w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
+    assert!(transit::choose(&w, who, from, door, t).expect("a ride").dodge, "broke: jumps anyway");
+    w.comp_mut::<Wallet>(who).expect("wallet").coins = 50;
+    w.tick += u64::from(w.config.transit.dodge_deterred_days) * TICKS_PER_DAY + 1;
+    assert!(transit::choose(&w, who, from, door, w.tick).expect("a ride").dodge, "the lesson fades");
+}
+
+/// Phase 3 (core_sanity's ride check, seed 43): a plan replaced without an
+/// abort (a goal interrupt mid-walk) leaves no ride filed behind: the next
+/// tick's sweep drops it.
+#[test]
+fn test_replaced_plan_leaves_no_stale_ride() {
+    let mut w = city_on();
+    let (who, home, farm) = sump_farmer(&w);
+    set_out(&mut w, who, home, farm, Lod::Full, 50, 0.6);
+    exec_tick(&mut w);
+    assert!(w.rides.contains_key(&who), "the ride is filed");
+    // A new plan, as `plan::run` writes one on an interrupt.
+    let tick = w.tick;
+    if let Some(b) = w.comp_mut::<Brain>(who) {
+        b.plan = Some(Plan { goal: GoalKind::Idle, target: None, steps: Vec::new(), started_tick: tick });
+        b.plan_step = 0;
+        b.exec = ExecState::Idle;
+    }
+    transit::run(&mut w);
+    assert!(!w.rides.contains_key(&who), "the stale ride was dropped");
+}
+
+/// Phase 3, the money circuit: the city operator spends its fares in the
+/// city. The trailing fares less a day's power pay for maintenance crews
+/// (Sanitation posts), the reconciler hires them on top of the civic
+/// headcount, and a line with no fares keeps none.
+#[test]
+fn test_fares_pay_for_maintenance_crews() {
+    let mut w = city_on();
+    w.tick = 3 * TICKS_PER_DAY;
+    assert_eq!(transit::staff_target(&w), 0, "no fares yet, no crews");
+    let wage = citysim::systems::treasury::sweeper_wage(&w);
+    let power = 3 * w.config.transit.power_per_line_day;
+    for _ in 0..14 {
+        let mut row = citysim::DayRow::new(0);
+        row.transit.fares = power + 10 * wage;
+        w.stats.history.push_back(row);
+    }
+    assert_eq!(transit::staff_target(&w), 10, "the fares past the power, over a sweeper's wage");
+    let before = citysim::systems::districts::sweepers(&w).len();
+    transit::run(&mut w);
+    assert_eq!(w.transit.staff, 10);
+    assert_eq!(w.stats.current.transit.el_staff, 10);
+    citysim::systems::districts::reconcile_sanitation(&mut w);
+    let after = citysim::systems::districts::sweepers(&w).len();
+    assert!(after > before, "the crews are hired ({before} -> {after})");
+    // Fares dry up: the crews go at the civic pace, not at once.
+    for _ in 0..14 {
+        w.stats.history.push_back(citysim::DayRow::new(0));
+    }
+    w.tick += TICKS_PER_DAY;
+    transit::run(&mut w);
+    assert_eq!(w.transit.staff, 10u16.saturating_sub(u16::from(w.config.treasury.civic_pace)));
+}
+
+/// T14 (plan D9): a Statistical worker's attendance is its role's row in its
+/// commute band when the table learned one, the role's row otherwise; a line
+/// cut that moves the commute into a longer band moves the attendance with
+/// no new rule.
+#[test]
+fn test_attendance_reads_the_commute_band() {
+    use citysim::Job;
+    let mut w = city_on();
+    let (who, _, _) = rider_worker(&w, 40);
+    let role = w.comp::<Job>(who).expect("a job").role;
+    let band = transit::commute_band(&w, who).expect("housed and employed");
+    let mut t = std::collections::BTreeMap::new();
+    t.insert(format!("{role:?}"), 0.4);
+    for b in 0..=transit::BANDS.len() {
+        t.insert(format!("{role:?}/b{b}"), 0.9 - 0.1 * b as f32);
+    }
+    w.stat_table.as_mut().expect("a table").p_attend = Some(t.clone());
+    let want = 0.9 - 0.1 * band as f32;
+    assert_eq!(lod::stat_attend(&w, who, role), Some(want), "the band's row");
+    // Every line cut: the commute is the walk, a longer band, a lower row.
+    for l in 0..3 {
+        transit::cut_line(&mut w, l, 5).expect("a line");
+    }
+    let walked = transit::commute_band(&w, who).expect("a band");
+    assert!(walked > band, "the walk is a longer band ({band} -> {walked})");
+    assert!(lod::stat_attend(&w, who, role) < Some(want));
+    // A table without banded rows: the role's row (P5f's rule).
+    t.retain(|k, _| !k.contains('/'));
+    w.stat_table.as_mut().expect("a table").p_attend = Some(t);
+    assert_eq!(lod::stat_attend(&w, who, role), Some(0.4));
 }
 
 // ---------------------------------------------------------------------------
@@ -770,13 +900,21 @@ fn measure_tail(seed: u64, on: bool, days: u64) -> String {
     let share = if log.is_empty() { 0.0 } else { rode_n as f32 / log.len() as f32 };
     let stat_share = if sc == 0 { 0.0 } else { scr as f64 / sc as f64 };
     let purses: i64 = w.citizens().into_iter().filter_map(|a| w.comp::<Wallet>(a).map(|x| x.coins)).sum();
+    // The money circuit: where the coins sit on the last day.
+    let corps_sum: i64 = w.corps().iter().filter_map(|&c| w.comp::<citysim::Corp>(c)).map(|c| c.treasury).sum();
+    let gangs_sum: i64 = w.gangs().iter().filter_map(|&g| w.comp::<citysim::Gang>(g)).map(|g| g.treasury).sum();
+    let total = citysim::systems::ownership::total_coins(&w);
+    let outside = w.outside.treasuries();
+    let minted = w.outside.minted;
+    let circuit =
+        format!("coins in the city {total} (corps {corps_sum}, gangs {gangs_sum}), outside {outside}, minted {minted}");
     let mut farmers = farmer_trips(&w);
     let farmers_n = farmers.len();
     let (f50, f90) = (pct(&mut farmers, 0.5), pct(&mut farmers, 0.9));
     format!(
         "seed {seed} transit {}: d{days} far walk/cost/own {far_walk}/{far_cost}/{far_own} of {workers} housed \
          workers; farmers' own trip p50/p90 {f50}/{f90} (n {farmers_n}); employed {}, pop {}, treasury {}, purses \
-         {purses}, starved {starved}, Murders {murders}, corps alive {corps}/{}; rides/day full {:.0} coarse {:.0} \
+         {purses}, {circuit}, starved {starved}, Murders {murders}, corps alive {corps}/{}; rides/day full {:.0} coarse {:.0} \
          stat {:.0}, fares {fares}, dodges {dodges}, power {power}, refused no_route/fare/slow/danger {refused:?}; \
          body commutes {} ride share {:.3}, stat ride share {stat_share:.3}; commute ticks all p50/p90 {}/{}, walk \
          {}/{}, ride {}/{}",

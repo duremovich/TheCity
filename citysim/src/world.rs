@@ -210,6 +210,12 @@ pub struct StatTable {
     /// Statistical pro rata wage x this, capped at the whole wage.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_wage_ratio: Option<f32>,
+    /// Transit phase 3 (parity): the share of the Full city's jumped gates
+    /// that drew a Fare Evasion sentence; a Statistical commuter's jumped
+    /// leg is reported on it (`transit::stat_commute`). A table without it:
+    /// no off-screen dodger is caught.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_dodge_caught: Option<f32>,
     pub rows: Vec<StatRow>,
 }
 

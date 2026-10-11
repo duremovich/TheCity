@@ -285,6 +285,7 @@ def analyze(rows, events, jail_cap=None):
     contracts(rows, events, out, flags)
     hitmarket(rows, events, out)
     health(rows, events, out, flags)
+    transit(rows, out)
     out["flags"] = flags
     return out
 
@@ -835,6 +836,29 @@ def health(rows, events, out, flags):
         flags.append(f"health: starvation {t['deaths_starvation']:g} (> 20 per 120 days: the free-food floor broke)")
 
 
+TRANSIT_TOTALS = ("rides_full", "rides_coarse", "rides_stat", "fares", "fare_dodges", "refused_no_route",
+                  "refused_fare", "refused_slow", "refused_danger", "ride_abandoned", "transit_power")
+
+
+def transit(rows, out):
+    """Transit, the El (docs/TRANSIT.md § 4): the run's rides, fares and refusals, the day's peak stop load, the
+    El's crews, and the ride commute's ticks a tile beside the walk's. Numbers only, no flags."""
+    if not rows or "rides_full" not in rows[0]:
+        return
+    t = {k: sum(col(rows, k)) for k in TRANSIT_TOTALS if k in rows[0]}
+    rides = t.get("rides_full", 0) + t.get("rides_coarse", 0) + t.get("rides_stat", 0)
+    if rides == 0:
+        return
+    T = {"totals": t, "rides_per_day": rides / len(rows)}
+    T["dodge_share"] = t.get("fare_dodges", 0) / rides
+    T["peak_stop_load_max"] = max(col(rows, "peak_stop_load"), default=0)
+    T["el_staff_last"] = rows[-1].get("el_staff", 0)
+    T["tpt_ride_mean"] = mean([x for x in col(rows, "commute_tpt_ride") if x > 0])
+    T["tpt_walk_mean"] = mean([x for x in col(rows, "commute_tpt_walk") if x > 0]) if "commute_tpt_walk" in rows[0] else 0
+    T["net_to_city"] = t.get("fares", 0) - t.get("transit_power", 0)
+    out["transit"] = T
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -996,6 +1020,14 @@ def fmt(o):
                  f"100 residents {w['dives_per_week_per_100']:.2f}; Disease deaths per year "
                  f"{w['disease_deaths_per_year']:.1f} (printed target 20-40 at 2,000)")
         L.append("last day: " + f(w["last"]) + "; peaks: " + f(w["peak"]))
+    if "transit" in o:
+        w = o["transit"]
+        L.append("-- transit (the El) --")
+        L.append("run totals: " + f(w["totals"]))
+        L.append(f"rides a day {w['rides_per_day']:.0f}; dodge share {w['dodge_share']:.1%}; peak stop load (an hour) "
+                 f"{w['peak_stop_load_max']:g}; crews on the last day {w['el_staff_last']:g}; fares less power "
+                 f"{w['net_to_city']:g}; commute ticks a tile, ride {w['tpt_ride_mean']:.2f} vs walk "
+                 f"{w['tpt_walk_mean']:.2f}")
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

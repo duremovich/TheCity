@@ -1503,6 +1503,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_meal: None,
         p_attend: None,
         p_wage_ratio: None,
+        p_dodge_caught: None,
         pantry_per_resident: None,
         rows: Vec::new(),
     };
@@ -1530,6 +1531,10 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let mut attend: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     // P5f: wages owed (a free, healthy workday shift's wage at its start) and paid.
     let (mut wage_owed, mut wage_paid) = (0i64, 0i64);
+    // Transit phase 3 (parity): the gates jumped and the Fare Evasion
+    // sentences they drew (`p_dodge_caught`).
+    let (mut dodges, mut dodges_caught) = (0u64, 0u64);
+    let mut theft_arrested: std::collections::BTreeSet<citysim::EntityId> = std::collections::BTreeSet::new();
     // Diet parity: the pantry meals per resident, a daily mean.
     let (mut pantry_sum, mut pantry_days) = (0f64, 0u64);
     let (mut eat_h, mut eat_h_denom) =
@@ -1598,6 +1603,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     // its theft rate from seed to seed (M10).
     for seed in args.first_seed..args.first_seed + args.seeds {
         let mut world = World::new(seed, config.clone());
+        theft_arrested.clear();
         let mut hour: BTreeMap<citysim::EntityId, HourTally> = BTreeMap::new();
         let mut hour_start = world.tick;
         let mut poor_today: (u64, Vec<citysim::EntityId>) = (u64::MAX, Vec::new());
@@ -1613,6 +1619,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 let tod = world.tick_of_day();
                 if tod == 0 {
                     wage_paid += world.stats.history.back().map_or(0, |r| r.flow_wages);
+                    dodges += world.stats.history.back().map_or(0, |r| u64::from(r.transit.fare_dodges));
                     let (mut st, mut rs) = (0u64, 0u64);
                     for &h in world.buildings_of_kind(citysim::BuildingKind::Home) {
                         let r = world.residents_of(h).len() as u64;
@@ -1651,6 +1658,13 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     let e = attend.entry(format!("{:?}", j.role)).or_insert((0, 0));
                     e.0 += 1;
                     e.1 += u64::from(at_work);
+                    // Transit T14 (plan D9): the same minutes by commute band
+                    // (`"{role:?}/b{band}"`, rows with 600+ minutes kept).
+                    if let Some(b) = citysim::systems::transit::commute_band(&world, id) {
+                        let e = attend.entry(format!("{:?}/b{b}", j.role)).or_insert((0, 0));
+                        e.0 += 1;
+                        e.1 += u64::from(at_work);
+                    }
                 }
             }
             for (&id, t) in hour.iter_mut() {
@@ -1711,6 +1725,16 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             // New ring entries since the cursor.
             let first = world.events.front().map_or(0, |e| e.id);
             for e in world.events.iter().skip(cursor.saturating_sub(first) as usize) {
+                if e.kind == EventKind::Sentence {
+                    let thief = e.actors.first().is_some_and(|a| theft_arrested.remove(a));
+                    if e.text.contains("for Fare Evasion") {
+                        dodges_caught += 1;
+                        // A thief taken at the gate was sentenced for the gate,
+                        // not the theft: not `p_theft_caught`'s arrest (the first
+                        // El table read 1.0 against 0.82 without the El).
+                        theft_arrests -= u64::from(thief);
+                    }
+                }
                 let hit = |k: usize, who: Option<&citysim::EntityId>, hour: &mut BTreeMap<_, HourTally>| {
                     if let Some(t) = who.and_then(|w| hour.get_mut(w)) {
                         t.extra[k] += 1;
@@ -1728,6 +1752,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                             .iter()
                             .any(|r| Some(r.suspect) == suspect && r.crime == citysim::Crime::Theft);
                         theft_arrests += u64::from(thief);
+                        if let (true, Some(s)) = (thief, suspect) {
+                            theft_arrested.insert(s);
+                        }
                     }
                     EventKind::Theft => {
                         thefts_all += 1;
@@ -2013,7 +2040,9 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     // P5f: Full pays a cut shift past half pro rata and a shift worked whole
     // in full, so the wage share runs above the attendance share: the ratio
     // of the two scales the Statistical pro rata wage.
-    let (worked, minutes) = attend.values().fold((0u64, 0u64), |(w, n), &(n2, w2)| (w + w2, n + n2));
+    // The roles' own rows only (the banded rows count the same minutes again).
+    let (worked, minutes) =
+        attend.iter().filter(|(k, _)| !k.contains('/')).fold((0u64, 0u64), |(w, n), (_, &(n2, w2))| (w + w2, n + n2));
     let attend_all = worked as f32 / minutes.max(1) as f32;
     let paid_share = wage_paid as f32 / wage_owed.max(1) as f32;
     let p_wage_ratio = Some(if attend_all > 0.0 { paid_share / attend_all } else { 1.0 });
@@ -2021,7 +2050,10 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     let p_attend = Some(
         attend
             .iter()
-            .filter(|(_, &(n, _))| n >= 600)
+            // Transit T14: a banded cell needs a hundred 9-hour shifts' minutes
+            // (54,000; a role's own row 600): the first banded table read
+            // Reporter/b2 0.0 off 20,520 minutes, about one reporter.
+            .filter(|(k, &(n, _))| n >= if k.contains('/') { 54_000 } else { 600 })
             .map(|(r, &(n, w))| (r.clone(), (w as f32 / n as f32).min(1.0)))
             .collect::<BTreeMap<String, f32>>(),
     );
@@ -2036,6 +2068,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_meal,
         p_attend,
         p_wage_ratio,
+        p_dodge_caught: (dodges > 0).then(|| (dodges_caught as f64 / dodges as f64).min(1.0) as f32),
         pantry_per_resident: (pantry_days > 0).then(|| (pantry_sum / pantry_days as f64) as f32),
         ..header
     };

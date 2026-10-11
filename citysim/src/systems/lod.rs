@@ -1382,9 +1382,13 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     // Transit T13 (phase 2): the shift's first hour pays the day's commute
     // rides when the El wins the trip (nothing with transit off).
     crate::systems::transit::stat_commute(world, id, &job);
+    // A dodger caught at the gate is on screen now (the arrest path).
+    if world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical) {
+        return;
+    }
     // P5f (wage parity): the hour is worked on the role's `p_attend` (a
     // pure hash of the agent and the hour; the wage below reads the same).
-    let attend = stat_attend(world, job.role);
+    let attend = stat_attend(world, id, job.role);
     let worked = attend.is_none_or(|p| attend_roll(world, id, tick / TICKS_PER_HOUR) < p);
     if worked && job.role == Role::Farmer {
         if let Some(farm) = job.employer {
@@ -1457,15 +1461,25 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
 }
 
 /// P5f: the role's learned attendance (`StatTable::p_attend`), if any.
-fn stat_attend(world: &World, role: Role) -> Option<f32> {
+pub fn stat_attend(world: &World, id: EntityId, role: Role) -> Option<f32> {
     let t = world.stat_table.as_ref()?.p_attend.as_ref()?;
+    // Transit T14 (plan D9): the role's row in the agent's commute band
+    // (`"{role:?}/b{band}"`) when the table learned it; the role's row
+    // otherwise (a table without banded rows keeps P5f's rule).
+    if let Some(&p) = crate::systems::transit::commute_band(world, id).and_then(|b| t.get(&format!("{role:?}/b{b}"))) {
+        return Some(p);
+    }
     match t.get(&format!("{role:?}")) {
         Some(&p) => Some(p),
         // Class pay (docs/CLASS_PAY.md): a role the table has not learned
         // (the new graded trades, a Ripperdoc) works the table's mean
         // attendance rather than a whole paid shift, until `calibrate`
         // learns it (a graded wage would otherwise widen the tiers' gap).
-        None if crate::systems::classpay::on(world) && !t.is_empty() => Some(t.values().sum::<f32>() / t.len() as f32),
+        None if crate::systems::classpay::on(world) && !t.is_empty() => {
+            // The mean over the roles' own rows (not the banded ones).
+            let roles: Vec<f32> = t.iter().filter(|(k, _)| !k.contains('/')).map(|(_, &v)| v).collect();
+            Some(roles.iter().sum::<f32>() / roles.len().max(1) as f32)
+        }
         None => None,
     }
 }

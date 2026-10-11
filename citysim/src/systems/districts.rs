@@ -606,7 +606,10 @@ pub fn gang_cleaning(world: &mut World) {
 /// Treasury pays them.
 pub fn reconcile_sanitation(world: &mut World) {
     // L2 L10: public works add on top of the M12 headcount.
-    let want = usize::from(world.levers.sanitation_count) + world.jobs_book.works.len();
+    // Transit phase 3: the El's maintenance crews, paid for by its fares (0
+    // with the El off).
+    let want =
+        usize::from(world.levers.sanitation_count) + world.jobs_book.works.len() + usize::from(world.transit.staff);
     let have = sweepers(world);
     let Some(recycler) = world.building_of_kind(BuildingKind::Cemetery) else { return };
     if have.len() < want {

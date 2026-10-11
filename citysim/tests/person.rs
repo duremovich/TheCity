@@ -24,6 +24,17 @@ fn pin(w: &mut World, id: EntityId) {
 /// Run to `tick`, the pin re-applied every tick (the shadow tool's rule).
 fn run_to(w: &mut World, id: EntityId, tick: u64, mut each: impl FnMut(&World)) {
     while w.tick < tick {
+        if !w.has::<Brain>(id) {
+            let last: Vec<String> = w
+                .events
+                .iter()
+                .rev()
+                .filter(|e| e.actors.contains(&id))
+                .take(6)
+                .map(|e| format!("{} {:?} {}", e.tick, e.kind, e.text))
+                .collect();
+            panic!("agent {} is gone at {}: {last:#?}", id.index, w.tick);
+        }
         pin(w, id);
         w.run_ticks(1);
         each(w);
@@ -876,6 +887,10 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     let mut cfg = Config::load();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
+    // Transit phase 3: the relocation premise is a far walker; with the El on
+    // `commute_cost` rides and no single farmer reads far (the El case is
+    // `probe_el_*` and `tests/transit.rs`).
+    cfg.transit.enabled = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     // Every commute measure through `life::commute_cost` (travel ticks).
@@ -1448,6 +1463,10 @@ fn probe_trade_respects_rent_and_the_evictor() {
     let mut cfg = Config::load();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
+    // Transit phase 3: the relocation premise is a far walker; with the El on
+    // `commute_cost` rides and no single farmer reads far (the El case is
+    // `probe_el_*` and `tests/transit.rs`).
+    cfg.transit.enabled = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
@@ -1808,11 +1827,15 @@ fn widow(strong: bool) -> (World, EntityId, EntityId) {
 fn probe_widow_commissions_a_hit_at_the_fixer() {
     let (mut w, her, killer) = widow(false);
     let (mut at_fixer, end) = (None, w.tick + 7 * TICKS_PER_DAY);
-    run_to(&mut w, her, end, |w| {
-        if at_fixer.is_none() && step(w, her) == Some(ActionKind::Commission) {
+    // Watched while she lives (transit phase 3's table: on seed 42 she
+    // commissions the Hit, cannot pay the gun and dies in a fight on day 17).
+    while w.tick < end && w.has::<Brain>(her) {
+        pin(&mut w, her);
+        w.run_ticks(1);
+        if at_fixer.is_none() && step(&w, her) == Some(ActionKind::Commission) {
             at_fixer = Some(w.tick);
         }
-    });
+    }
     let mine = bought_by(&w, her);
     eprintln!(
         "widow {}: the Commission step at {at_fixer:?}; records {:?}",
@@ -1889,4 +1912,196 @@ fn probe_suspect_buys_a_beat_on_a_known_witness() {
     let end = w.tick + 7 * TICKS_PER_DAY;
     run_to(&mut w, s, end, |_| {});
     assert!(bought_by(&w, s).iter().all(|c| c.target != Target::Agent(wit)), "an unknown witness was targeted");
+}
+
+// ---------------------------------------------------------------------------
+// Transit (docs/TRANSIT.md § 7, phase 3): the El's person probes, on the
+// shipped city with the El switched on. A day worker whose Home -> work
+// trip the El wins, pinned at Full from 05:00 on day 1.
+// ---------------------------------------------------------------------------
+
+use citysim::exec::ExecState;
+use citysim::systems::transit;
+
+/// The shipped city with the El on, run to day 1 05:00, and a free housed
+/// day worker (09:00-18:00, a workday) with no vehicle whose commute the El
+/// wins by 40+ ticks at 07:00: (world, worker, employer, the walk's ticks).
+fn el_commuter() -> (World, EntityId, EntityId, u64) {
+    let mut cfg = Config::load();
+    cfg.transit.enabled = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 5 * TICKS_PER_HOUR);
+    let t = TICKS_PER_DAY + 7 * TICKS_PER_HOUR;
+    let found = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a))
+        .filter(|&a| w.gang_of(a).is_none() && !w.has::<citysim::Sentence>(a))
+        .filter(|&a| citysim::systems::vehicles::vehicle_for_trip(&w, a).is_none())
+        .find_map(|a| {
+            let j = w.comp::<Job>(a)?;
+            if matches!(j.role, Role::Guard | Role::Sanitation)
+                || j.shifts != vec![(540, 1080)]
+                || !routine::workday_of(&w, a, j, j.shift_key_at(t))
+            {
+                return None;
+            }
+            let employer = j.employer?;
+            let h = home(&w, a)?;
+            if building(&w, a) != Some(h) {
+                return None;
+            }
+            let hd = w.outside_door(w.comp::<Building>(h)?);
+            let wd = w.comp::<Building>(employer)?.door;
+            let walk = citysim::exec::timed_walk(&w, a, hd, wd);
+            let r = transit::choose(&w, a, hd, wd, t).ok()?;
+            (r.total + 40 <= walk && walk < 6 * 60 && !r.dodge).then_some((a, employer, walk))
+        })
+        .expect("a day worker at home whom the El carries to work");
+    let (a, employer, walk) = found;
+    // Decent and solvent unless a probe says otherwise.
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 40;
+    w.comp_mut::<citysim::Personality>(a).expect("personality").lawfulness = 0.6;
+    pin(&mut w, a);
+    (w, a, employer, walk)
+}
+
+/// Watch `a` to `until` (re-pinned, `each` before every tick): whether it
+/// rode (an `ExecState::Ride` aboard), when it first set out (it starts at
+/// home) and when it first stood inside `employer`.
+fn watch_commute(
+    w: &mut World,
+    a: EntityId,
+    employer: EntityId,
+    until: u64,
+    mut each: impl FnMut(&mut World),
+) -> (bool, Option<u64>, Option<u64>) {
+    let (mut rode, mut left, mut arrived) = (false, None, None);
+    while w.tick < until {
+        each(w);
+        pin(w, a);
+        w.run_ticks(1);
+        let b = w.comp::<Brain>(a).expect("brain");
+        if let ExecState::Ride { depart, .. } = b.exec {
+            rode |= w.tick >= depart;
+        }
+        let moving = matches!(b.exec, ExecState::Goto { .. } | ExecState::GotoTimed { .. } | ExecState::Ride { .. });
+        if left.is_none() && moving {
+            left = Some(w.tick);
+        }
+        if arrived.is_none() && building(w, a) == Some(employer) {
+            arrived = Some(w.tick);
+            break;
+        }
+    }
+    (rode, left, arrived)
+}
+
+/// A worker with the fare rides to work and is there sooner than the walk
+/// would have brought it (and on time).
+#[test]
+fn probe_el_commuter_with_coins_rides_and_beats_the_walk() {
+    let (mut w, a, employer, walk) = el_commuter();
+    let (rode, left, arrived) = watch_commute(&mut w, a, employer, TICKS_PER_DAY + 10 * TICKS_PER_HOUR, |_| {});
+    eprintln!("rode {rode}, left {left:?}, arrived {arrived:?}, walk {walk}");
+    assert!(rode, "the commuter never rode the El");
+    let (left, arrived) = (left.expect("set out"), arrived.expect("arrived at work"));
+    assert!(arrived - left < walk, "{} ticks door to door against a {walk}-tick walk", arrived - left);
+    assert!(arrived <= TICKS_PER_DAY + 9 * TICKS_PER_HOUR, "late for the 09:00 shift");
+}
+
+/// Broke and lawful: walks (no ride, no dodge), and still gets to work.
+#[test]
+fn probe_el_broke_lawful_worker_walks() {
+    let (mut w, a, employer, _) = el_commuter();
+    let (rode, _, arrived) = watch_commute(&mut w, a, employer, TICKS_PER_DAY + 12 * TICKS_PER_HOUR, |w| {
+        w.comp_mut::<Wallet>(a).expect("wallet").coins = 0;
+    });
+    assert!(!rode, "a broke lawful worker rode");
+    // (A gate jumped needs a ride: the city's other dodgers count in the column too.)
+    assert!(arrived.is_some(), "the walker reached work");
+}
+
+/// Broke and lawless: jumps the gate (a FareEvasion on the books) and rides.
+#[test]
+fn probe_el_broke_lawless_worker_jumps_the_gate() {
+    let (mut w, a, employer, _) = el_commuter();
+    w.comp_mut::<citysim::Personality>(a).expect("personality").lawfulness = 0.05;
+    let dodges0 = w.stats.current.transit.fare_dodges;
+    let (rode, _, _) = watch_commute(&mut w, a, employer, TICKS_PER_DAY + 10 * TICKS_PER_HOUR, |w| {
+        w.comp_mut::<Wallet>(a).expect("wallet").coins = 0;
+    });
+    assert!(rode, "the lawless broke worker never rode");
+    assert!(w.stats.current.transit.fare_dodges > dodges0, "no gate jumped");
+    assert_eq!(coins(&w, a), 0, "rode on an empty wallet: through the gate unpaid");
+}
+
+/// A timid worker sent across town at 22:00 from the worst district walks
+/// rather than wait on its platform at night; by day the same trip rides.
+#[test]
+fn probe_el_timid_worker_walks_at_night_from_the_worst_district() {
+    let (mut w, a, employer, _) = el_commuter();
+    let h = home(&w, a).expect("home");
+    let hd = w.outside_door(w.comp::<Building>(h).expect("home"));
+    let wd = w.comp::<Building>(employer).expect("work").door;
+    w.comp_mut::<citysim::Personality>(a).expect("personality").courage = 1.0;
+    let late = TICKS_PER_DAY + 22 * TICKS_PER_HOUR;
+    let r = transit::choose(&w, a, hd, wd, late).expect("a brave rider takes the late train");
+    let d = w.district_of(w.transit.net.stops[usize::from(r.board)]);
+    let worst = w.districts.iter().map(|x| x.crime_rate).fold(0.0f32, f32::max);
+    w.districts[d.index()].crime_rate = worst.max(w.config.transit.danger_crime) + 1.0;
+    w.comp_mut::<citysim::Personality>(a).expect("personality").courage = 0.0;
+    assert_eq!(transit::choose(&w, a, hd, wd, late), Err(transit::Refusal::Danger));
+    // With the executor: the trip set out at 22:00 never boards.
+    w.tick = late;
+    let tick = w.tick;
+    {
+        let b = w.comp_mut::<Brain>(a).expect("brain");
+        b.plan = Some(citysim::Plan {
+            goal: citysim::GoalKind::Idle,
+            target: Some(employer),
+            steps: vec![citysim::components::ActionInstance {
+                action: ActionKind::GoTo(citysim::LocationKey::TargetHome),
+                target: Some(employer),
+                tile: None,
+            }],
+            started_tick: tick,
+        });
+        b.plan_step = 0;
+        b.exec = ExecState::Idle;
+    }
+    for _ in 0..30 {
+        citysim::exec::run(&mut w);
+        w.tick += 1;
+        assert!(!w.rides.contains_key(&a), "the timid worker took the El at night");
+    }
+    // By day the same body rides.
+    let day = TICKS_PER_DAY + 13 * TICKS_PER_HOUR;
+    assert!(transit::choose(&w, a, hd, wd, day).is_ok(), "the daytime trip rides");
+}
+
+/// Every line cut on the evening of day 1: the next workday morning the
+/// worker walks to work (and gets there).
+#[test]
+fn probe_el_worker_whose_line_is_cut_walks_next_day() {
+    let (mut w, a, employer, _) = el_commuter();
+    let (rode, _, arrived) = watch_commute(&mut w, a, employer, TICKS_PER_DAY + 10 * TICKS_PER_HOUR, |_| {});
+    assert!(rode && arrived.is_some(), "rode on day 1");
+    run_to(&mut w, a, TICKS_PER_DAY + 20 * TICKS_PER_HOUR, |_| {});
+    for l in 0..3 {
+        w.push_command(citysim::PlayerCommand::CutLine { line: l, days: 3 });
+    }
+    w.apply_commands();
+    // The next workday (day 2, or day 3 past a rest day).
+    let day = (2..4u64)
+        .find(|&d| {
+            let t = d * TICKS_PER_DAY + 9 * TICKS_PER_HOUR;
+            w.comp::<Job>(a).is_some_and(|j| routine::workday_of(&w, a, j, j.shift_key_at(t)))
+        })
+        .expect("a workday within two days");
+    run_to(&mut w, a, day * TICKS_PER_DAY + TICKS_PER_HOUR, |_| {});
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 40;
+    let (rode, _, arrived) = watch_commute(&mut w, a, employer, day * TICKS_PER_DAY + 12 * TICKS_PER_HOUR, |_| {});
+    assert!(!rode, "rode a cut line");
+    assert!(arrived.is_some(), "walked to work");
 }

@@ -13,6 +13,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::Instant;
 
 use citysim::contract::{Broker, ContractKind};
+use citysim::exec::ExecState;
 use citysim::systems::{contracts, demography, econ};
 use citysim::{
     Brain, Building, BuildingKind, Config, Controller, Corp, CorpOrder, DayRow, EntityId, EventKind, Household, Job,
@@ -82,6 +83,8 @@ struct SeedRun {
     no_net: bool,
     /// `[sickness]` on (the tighter starvation bound and its bullets).
     sickness: bool,
+    /// Transit: the El on (its bullets and sanity are judged).
+    transit: bool,
 }
 
 impl SeedRun {
@@ -117,6 +120,7 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         dregs: Vec::new(),
         no_net: econ::no_net(&w),
         sickness: citysim::systems::health::on(&w),
+        transit: w.config.transit.enabled,
     };
     let mut cursor = 0u64;
     // Prisoners at the last hour's end, by their tier then.
@@ -165,6 +169,26 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
                 }
             }
             cursor = w.next_event_id;
+            // Transit (docs/TRANSIT.md § 7): no body left aboard past its
+            // arrival, and every filed ride belongs to a body on one of its
+            // legs (walking, on the platform or aboard).
+            if w.config.transit.enabled {
+                for &a in w.rides.keys() {
+                    let on_leg = w.comp::<Brain>(a).is_some_and(|b| {
+                        matches!(b.exec, ExecState::Ride { .. } | ExecState::Goto { .. } | ExecState::GotoTimed { .. })
+                    });
+                    if !on_leg {
+                        *r.marks.entry("stale ride").or_insert(0) += 1;
+                    }
+                }
+                for a in w.citizens() {
+                    if let Some(ExecState::Ride { arrive_tick, .. }) = w.comp::<Brain>(a).map(|b| &b.exec) {
+                        if w.tick > arrive_tick + 1 {
+                            *r.marks.entry("ride past arrival").or_insert(0) += 1;
+                        }
+                    }
+                }
+            }
             held = w
                 .with::<Sentence>()
                 .into_iter()
@@ -191,6 +215,10 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         day_mark("malnourished agent", row.health.malnourished > 0);
         day_mark("a sick day", row.health.sick_days > 0);
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
+        // Transit: a ride (any tier) and a fare paid to the city.
+        let t = &row.transit;
+        *r.marks.entry("El ride").or_insert(0) += t.rides_full + t.rides_coarse + t.rides_stat;
+        *r.marks.entry("El fare").or_insert(0) += u32::from(t.fares > 0);
         *r.marks.entry("crash death").or_insert(0) += row.crash_deaths;
         *r.marks.entry("Mission meal").or_insert(0) += row.econ.mission_meals;
         // Hunger as sickness: the day's synth and bin meals, a malnourished
@@ -425,8 +453,10 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a Guard fulfilled", m("Guard fulfilled")), // [11, 4, 12]; 45-47 [16, 11, 8]
         ("a Locate fulfilled", m("Locate fulfilled")), // [167, 166, 155]; 45-47 [145, 137, 133]
         ("a Fixer in business", m("Fixer in business")), // [111, 107, 112] days; 45-47 [106, 111, 109]
-        ("a Reneged", k(EventKind::Reneged)),        // [22, 6, 12]; 45-47 [23, 6, 12]
-                                                     // "An organic Hit fulfilled" is printed (the Hit market phase 4, below).
+        ("a Reneged", k(EventKind::Reneged)),
+        // Transit (docs/TRANSIT.md § 7), with the El on: rides [..] and fare
+        // days [..] on 42-44 (see `transit_mechanisms`).        // [22, 6, 12]; 45-47 [23, 6, 12]
+        // "An organic Hit fulfilled" is printed (the Hit market phase 4, below).
     ]
 }
 
@@ -487,6 +517,12 @@ fn printed_mechanisms() -> Vec<Mechanism> {
 }
 
 /// Every mechanism's count per seed, then the bullets: one line each.
+/// Transit (docs/TRANSIT.md § 7): judged with the El on.
+fn transit_mechanisms() -> Vec<Mechanism> {
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    vec![("an El ride", m("El ride")), ("a fare paid to the city", m("El fare"))]
+}
+
 fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
     for (name, f) in printed_mechanisms() {
         let per: Vec<u32> = runs.iter().map(&f).collect();
@@ -495,6 +531,9 @@ fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
     let mut all = mechanisms();
     if runs.first().is_some_and(|r| r.sickness) {
         all.extend(sickness_mechanisms());
+    }
+    if runs.first().is_some_and(|r| r.transit) {
+        all.extend(transit_mechanisms());
     }
     for (name, f) in all {
         let per: Vec<u32> = runs.iter().map(&f).collect();
@@ -544,6 +583,11 @@ fn core_sanity() {
         }
         if r.corps_alive < CORPS_ALIVE_MIN {
             failures.push(format!("seed {}: seeded corps alive {}/{}", r.seed, r.corps_alive, r.corps_seeded));
+        }
+        for m in ["stale ride", "ride past arrival"] {
+            if r.mark(m) > 0 {
+                failures.push(format!("seed {}: {} hours with a {m}", r.seed, r.mark(m)));
+            }
         }
     }
     judge_mechanisms(&runs, &mut failures);

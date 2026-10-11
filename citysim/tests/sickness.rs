@@ -20,6 +20,17 @@ fn world_on() -> World {
     World::new(42, sick_cfg())
 }
 
+/// Run on a day at a time (to day 30) until a gang has members: the day-5
+/// premise moved with the stat table regenerated for transit phase 3 (no
+/// gang had members by day 5 on seed 42).
+fn run_until_gang(w: &mut World) {
+    let manned =
+        |w: &World| w.gangs().into_iter().any(|g| w.comp::<citysim::Gang>(g).is_some_and(|x| !x.members.is_empty()));
+    while !manned(w) && w.tick < 30 * TICKS_PER_DAY {
+        w.run_ticks(TICKS_PER_DAY);
+    }
+}
+
 fn adults(w: &World) -> Vec<EntityId> {
     w.citizens()
         .into_iter()
@@ -463,6 +474,7 @@ fn test_gang_turf_shakes_down_a_non_member() {
     cfg.sickness.bin_shake_p = 1.0;
     let mut w = World::new(42, cfg);
     w.run_ticks(5 * TICKS_PER_DAY);
+    run_until_gang(&mut w);
     let g = w
         .gangs()
         .into_iter()
@@ -697,6 +709,7 @@ fn test_treatment_cures_below_cure_stage_and_remits_above() {
 fn test_pool_pays_wallet_then_kin_then_gang() {
     let mut w = world_on();
     w.run_ticks(5 * TICKS_PER_DAY);
+    run_until_gang(&mut w);
     let price = w.config.sickness.cancer_treat_price;
     let a = adults(&w).into_iter().find(|&a| w.spouse_of(a).is_some()).expect("a married adult");
     let s = w.spouse_of(a).expect("spouse");
