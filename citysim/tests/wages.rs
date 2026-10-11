@@ -1237,13 +1237,15 @@ fn test_employer_index_matches_a_scan_after_30_days() {
     let laid = w.events.iter().filter(|e| e.kind == EventKind::LaidOff).count();
     eprintln!("30 days: {} workplaces, {} LaidOff, {} layoff notes", scan.len(), laid, w.laid_off.len());
     assert!(laid > 0, "layoffs happened");
-    // Each laid-off worker holds its note, or a Job hired since the layoff
+    // Each laid-off worker holds its note, or was hired since the layoff
     // (a rehire spends the note: after the merge of class pay into hunger
     // as sickness P5g-P5j, all twelve on seed 42 were hired again within
     // 0-9 days, so the notes alone no longer show the layoffs).
     for e in w.events.iter().filter(|e| e.kind == EventKind::LaidOff) {
         let a = e.actors[0];
-        let rehired = w.comp::<Job>(a).is_some_and(|j| j.hired_tick >= e.tick);
+        // Hired since (a later Hire event; the job may since have ended).
+        let rehired =
+            w.events.iter().any(|h| h.kind == EventKind::Hire && h.actors.first() == Some(&a) && h.tick >= e.tick);
         assert!(w.laid_off.contains_key(&a) || rehired, "{}: neither noted nor rehired", e.text);
     }
 }
