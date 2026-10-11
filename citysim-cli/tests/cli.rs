@@ -64,7 +64,10 @@ fn test_cli_report_csv_header() {
     // hunger as sickness: the 16 health columns; the Hit market
     // (docs/HIT_MARKET.md § 7): the 18 `HitCols`; transit
     // (docs/TRANSIT.md § 4): the 12 transit columns.
-    assert_eq!(row.split(',').count(), 81 + 8 * 6 + 7 + 2 + 40 + 72 + 68 + 54 + 15 + 1 + 48 + 68 + 4 + 2 + 2 + 16 + 18 + 12);
+    assert_eq!(
+        row.split(',').count(),
+        81 + 8 * 6 + 7 + 2 + 40 + 72 + 68 + 54 + 15 + 1 + 48 + 68 + 4 + 2 + 2 + 16 + 18 + 12
+    );
     assert!(lines.next().is_none());
 }
 

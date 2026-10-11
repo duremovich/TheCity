@@ -1670,7 +1670,8 @@ mod econ_cols_tests {
         let health = HealthCols::header();
         let hit = HitCols::header();
         let transit = TransitCols::header();
-        let tail = format!("flow_fixer_cut,contracts_refused_full,{names},{jobs},{health},{hit},{transit},ticks_per_sec");
+        let tail =
+            format!("flow_fixer_cut,contracts_refused_full,{names},{jobs},{health},{hit},{transit},ticks_per_sec");
         assert_eq!(TransitCols::default().csv().split(',').count(), transit.split(',').count());
         assert_eq!(HealthCols::default().csv().split(',').count(), health.split(',').count());
         assert_eq!(HitCols::default().csv().split(',').count(), hit.split(',').count());

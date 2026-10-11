@@ -482,3 +482,128 @@ fn measure_transit_on_vs_off() {
         println!("{}", measure(on, full, days));
     }
 }
+
+/// `(far by the walk, far by the best of walk and ride, employed workers
+/// counted)`: `grow_housing`'s measure (a housed, free, non-sweeper
+/// worker whose Home door to work door `commute_cost` is past
+/// `commute_move_ticks`), and the same with the El's door-to-door route
+/// at 06:00 today where `choose` rides.
+fn far_workers(w: &World) -> (u32, u32, u32) {
+    use citysim::systems::{jobs, life, missions};
+    use citysim::{Job, Sentence};
+    let cap = w.config.life.commute_move_ticks;
+    let t = (w.tick / TICKS_PER_DAY) * TICKS_PER_DAY + 6 * 60;
+    let (mut far, mut far_best, mut n) = (0, 0, 0);
+    for a in w.citizens() {
+        let Some(employer) = w.comp::<Job>(a).and_then(|j| j.employer) else { continue };
+        if w.has::<Sentence>(a) || w.comp::<Brain>(a).is_none_or(|b| b.emigrating) || jobs::is_sweeper(w, a) {
+            continue;
+        }
+        let Some(work) = w.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else { continue };
+        let Some(hd) = missions::home_of(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door) else { continue };
+        n += 1;
+        let walk = life::commute_cost(w, hd, work);
+        if walk > cap {
+            far += 1;
+        }
+        let best = if transit::enabled(w) {
+            transit::choose(w, a, hd, work, t).map_or(walk, |r| r.total.min(walk))
+        } else {
+            walk
+        };
+        if best > cap {
+            far_best += 1;
+        }
+    }
+    (far, far_best, n)
+}
+
+fn pct(v: &mut [u32], p: f32) -> u32 {
+    if v.is_empty() {
+        return 0;
+    }
+    v.sort_unstable();
+    v[((v.len() - 1) as f32 * p).round() as usize]
+}
+
+/// One seed, transit on or off, `days` days: the day-`days` commute tail and
+/// the city's vital signs (printed findings).
+fn measure_tail(seed: u64, on: bool, days: u64) -> String {
+    use citysim::EventKind;
+    let mut cfg = Config::load();
+    cfg.transit.enabled = on;
+    let mut w = World::new(seed, cfg);
+    let seeded = w.corps();
+    w.commute_log = Some(Vec::new());
+    let mut cursor = 0u64;
+    let mut murders = 0u32;
+    let (mut rf, mut rc, mut fares, mut dodges, mut power) = (0u64, 0u64, 0i64, 0u64, 0i64);
+    let mut refused = [0u64; 4];
+    for _ in 0..days {
+        w.run_ticks(TICKS_PER_DAY);
+        murders +=
+            w.events.iter().rev().take_while(|e| e.id >= cursor).filter(|e| e.kind == EventKind::Murder).count() as u32;
+        cursor = w.next_event_id;
+        let c = &w.stats.history.back().expect("a day").transit;
+        rf += u64::from(c.rides_full);
+        rc += u64::from(c.rides_coarse);
+        fares += c.fares;
+        dodges += u64::from(c.fare_dodges);
+        power += c.transit_power;
+        refused[0] += u64::from(c.refused_no_route);
+        refused[1] += u64::from(c.refused_fare);
+        refused[2] += u64::from(c.refused_slow);
+        refused[3] += u64::from(c.refused_danger);
+    }
+    let (far, far_best, workers) = far_workers(&w);
+    let row = w.stats.history.back().expect("a day");
+    let alive: std::collections::BTreeSet<EntityId> = w.corps().into_iter().collect();
+    let corps = seeded.iter().filter(|c| alive.contains(c)).count();
+    let log = w.commute_log.take().unwrap_or_default();
+    let mut walked: Vec<u32> = log.iter().filter(|e| e.2 == 0).map(|e| e.0).collect();
+    let mut rode: Vec<u32> = log.iter().filter(|e| e.2 == 2).map(|e| e.0).collect();
+    let rode_n = rode.len();
+    let share = if log.is_empty() { 0.0 } else { rode_n as f32 / log.len() as f32 };
+    format!(
+        "seed {seed} transit {}: d{days} far(walk) {far} far(best) {far_best} of {workers} housed workers; employed {}, \
+         pop {}, Murders {murders}, corps alive {corps}/{}; rides/day full {:.0} coarse {:.0}, fares {fares}, dodges \
+         {dodges}, power {power}, refused no_route/fare/slow/danger {refused:?}; commutes {} ride share {:.3}, walk \
+         p50/p90 {}/{}, ride p50/p90 {}/{}",
+        if on { "ON " } else { "OFF" },
+        row.employed,
+        row.population,
+        seeded.len(),
+        rf as f64 / days as f64,
+        rc as f64 / days as f64,
+        log.len(),
+        share,
+        pct(&mut walked, 0.5),
+        pct(&mut walked, 0.9),
+        pct(&mut rode, 0.5),
+        pct(&mut rode, 0.9),
+    )
+}
+
+/// Seeds 42-44 (or `TRANSIT_SEEDS`, comma-separated) x `TRANSIT_DAYS`
+/// (default 120), transit off and on, in threads: the commute tail
+/// (`far_workers`), employed, Murders, corps alive, rides, the ride share
+/// and commute ticks by mode. Printed findings; run alone with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn measure_transit_tail() {
+    let days = std::env::var("TRANSIT_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(120);
+    let seeds: Vec<u64> = std::env::var("TRANSIT_SEEDS")
+        .ok()
+        .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_else(|| vec![42, 43, 44]);
+    let mut handles = Vec::new();
+    for &seed in &seeds {
+        for on in [false, true] {
+            handles.push(std::thread::spawn(move || measure_tail(seed, on, days)));
+        }
+    }
+    for h in handles {
+        println!("{}", h.join().expect("a seed run"));
+    }
+}
