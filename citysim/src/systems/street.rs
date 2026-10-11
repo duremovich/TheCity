@@ -998,7 +998,8 @@ fn vagrancy_except(world: &mut World, skip: &[EntityId]) {
         let tile = pos.tile;
         let d = world.district_of(tile);
         let statistical = is_statistical(world, a);
-        if (pos.building.is_some() && !statistical) || skip.contains(&a) {
+        // A worker on shift (or walking to or from one) is not loitering.
+        if (pos.building.is_some() && !statistical) || skip.contains(&a) || crate::systems::law::at_work(world, a) {
             continue;
         }
         // Fix pass (phase 2 review): only the sleepers the law can roll count
