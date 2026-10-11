@@ -1294,8 +1294,11 @@ fn stat_grocery(world: &mut World, id: EntityId) {
         return;
     }
     // Up to the shortfall only (a run of three meals each time stocked the
-    // off-screen pantries at 0.84 meals a resident against 0.28 in Full).
-    let units = economy::buy_quantity(world, id, Some(market)).min(need - (pantry + carried));
+    // off-screen pantries at 0.84 meals a resident against 0.28 in Full),
+    // and all of it in one run, as a Full grocery run buys it
+    // (`routine::grocery_cap`: not three meals at a time).
+    let short = need - (pantry + carried);
+    let units = economy::buy_quantity_upto(world, id, Some(market), short);
     if units == 0 {
         return;
     }

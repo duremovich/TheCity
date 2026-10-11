@@ -376,7 +376,14 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         }
         ActionKind::BuyFood => {
             let market = world.local(id, BuildingKind::Market);
-            let units = economy::buy_quantity(world, id, market);
+            // Hunger fix item 11 (b): a grocery run buys the household's
+            // shortfall, not the three meals of an errand.
+            let units = economy::buy_quantity_upto(
+                world,
+                id,
+                market,
+                crate::exec::routine::grocery_cap(world, id).unwrap_or(3),
+            );
             // Hunger as sickness § 1: the meal's quality, chosen before the
             // coins move (`Real` with the diet off).
             let q = economy::quality_at(world, id, market);

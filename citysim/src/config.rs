@@ -4385,6 +4385,16 @@ pub struct LifeCfg {
     /// next shift's leaving time.
     pub hf_shift_meals: bool,
     pub grocery_score: f32,
+    /// Item 11 (b), after the d19 diaries (up to 2.4 h a day of grocery
+    /// walking, a third of runs ended by Sleep mid-walk): no grocery run
+    /// starts that would leave the body under this energy by the time it is
+    /// home (the energy decays over the round trip).
+    pub grocery_energy_floor: f32,
+    /// Item 11 (b): a run must bring home a meal for each this many ticks of
+    /// its round trip (here to the shop and home): a 2 h trip for two meals,
+    /// 7 h for seven. The d19 fighter walked 3.7 h each way for 1-2 meals; a
+    /// poor man far from a shop shops rarely and big (0 turns it off).
+    pub grocery_ticks_per_meal: u64,
     /// P5j (coordinator call): work-night sleep. The bedtime before a
     /// workday shift is the leaving time (`routine::must_leave_for_work`'s:
     /// the walk to work and `DEPARTURE_MARGIN` before the start) minus a
@@ -4512,6 +4522,8 @@ impl Default for LifeCfg {
             hf_grow_housing: true,
             hf_shift_meals: true,
             grocery_score: 0.5,
+            grocery_energy_floor: 0.4,
+            grocery_ticks_per_meal: 60,
             hf_work_night: true,
             hf_rehouse_employed: true,
             work_night_sleep_flat: 0.5,

@@ -270,11 +270,49 @@ pub fn shift_meals_needed(world: &World, job: &Job) -> u32 {
     (drain / world.config.needs.food_satisfy.max(0.01)).ceil().max(1.0) as u32
 }
 
+/// Hunger fix item 11 (b): the meals the household holds toward a shift:
+/// its Home pantry and the worker's own carried (not stolen) food.
+fn meals_held(world: &World, id: EntityId, home: EntityId) -> u32 {
+    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
+    pantry + world.comp::<Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food))
+}
+
+/// Hunger fix item 11 (b): the pantry level a grocery run fills: a shift's
+/// meals for each resident (5-6 share a Block's pantry; one worker's meal
+/// was eaten by the rest), capped at the pantry.
+fn household_need(world: &World, home: EntityId, job: &Job) -> u32 {
+    let residents = world.residents_of(home).len().max(1) as u32;
+    (shift_meals_needed(world, job) * residents).min(world.config.buildings.home.stock_cap)
+}
+
+/// Hunger fix item 11 (b): the meals a grocery run buys at the shop, the
+/// household's shortfall (bounded by carry room, `FOOD_CAP`, the wallet and
+/// the shelf); a person shops for what the week needs when they can carry
+/// and pay for it, rather than three meals and back again.
+pub fn grocery_cap(world: &World, id: EntityId) -> Option<u32> {
+    let brain = world.comp::<crate::components::Brain>(id)?;
+    let plan = brain.plan.as_ref().filter(|p| p.goal == GoalKind::Eat && p.steps.len() == 4)?;
+    if plan.steps[1].action != ActionKind::BuyFood || plan.steps[3].action != ActionKind::StoreFood {
+        return None;
+    }
+    let home = world.comp::<Household>(id).and_then(|h| h.home)?;
+    let job = world.comp::<Job>(id)?;
+    let short = household_need(world, home, job).saturating_sub(meals_held(world, id, home));
+    Some(short.max(1))
+}
+
 /// Hunger fix item 11 (b): an off-shift worker's grocery run, `[GoTo(Market)
-/// m, BuyFood m, GoTo(Home), StoreFood]`, when the household's pantry and
-/// its own carried meals are under `shift_meals_needed` per resident (capped at the pantry), it holds a meal's
-/// coins at `m` (the Market `world.local` gives, stocked), and the round
-/// trip plus `DEPARTURE_MARGIN` ends before it must leave for the shift.
+/// m, BuyFood m, GoTo(Home), StoreFood]`. `m` is the stocked Market with the
+/// least detour (the walk from here to `m` and on home), where the worker
+/// holds a meal's coins. The run is made when the household's pantry and the
+/// worker's carried meals are under the pantry level `household_need`, if one
+/// run can fill it (carry room, `FOOD_CAP`, the wallet and the shelf permit);
+/// when it cannot (a Block's six residents), under the worker's own shift's
+/// meals instead, so one worker does not shop twice a day for a pantry no
+/// run can fill. It must bring home a meal for each hour of the round trip
+/// (`[life] grocery_ticks_per_meal`), end before the worker must leave for
+/// the shift, and end before bedtime and the energy line (`[life]
+/// grocery_energy_floor`). A closed or packed Market is passed over.
 pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     if !crate::systems::fixes::shift_meals(world) {
         return None;
@@ -287,27 +325,73 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     // The cheap shortfall test before any walk estimate.
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
     let home_door = world.comp::<Building>(home).filter(|b| !b.demolished)?.door;
-    let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
-    let carried = world.comp::<Inventory>(id).map_or(0, |i| i.food.saturating_sub(i.stolen_food));
-    // The pantry is the household's: a shift's worth for each resident
-    // (5-6 share a Block's pantry; one worker's meal was eaten by the rest).
-    let residents = world.residents_of(home).len().max(1) as u32;
-    let need = (shift_meals_needed(world, job) * residents).min(world.config.buildings.home.stock_cap);
-    if pantry + carried >= need || must_leave_for_work(world, id) {
+    let held = meals_held(world, id, home);
+    let need = household_need(world, home, job);
+    if held >= need || must_leave_for_work(world, id) {
         return None;
     }
-    let m = world.local(id, BuildingKind::Market)?;
-    if crate::systems::economy::buy_quantity(world, id, Some(m)) == 0 {
+    // The market: least detour among the stocked ones it can buy at.
+    let here = crate::exec::walk_origin(world, id)?;
+    let short = need - held;
+    let mut best: Option<(u64, EntityId, u32)> = None;
+    for &m in world.buildings_of_kind(BuildingKind::Market) {
+        let Some(b) = world.comp::<Building>(m).filter(|b| !b.demolished && !b.derelict && b.stock_food > 0) else {
+            continue;
+        };
+        // Closed, or packed (a queue out of the door ends the errand with
+        // `BuildingFull`): a shopper passes it over.
+        if world.is_closed(m) || (b.is_full() && !world.capacity_exempt(id, m)) {
+            continue;
+        }
+        let can = crate::systems::economy::buy_quantity_upto(world, id, Some(m), u32::MAX);
+        if can == 0 {
+            continue;
+        }
+        let detour =
+            crate::exec::timed_walk(world, id, here, b.door) + crate::exec::timed_walk(world, id, b.door, home_door);
+        if best.is_none_or(|(d, bm, _)| (detour, m) < (d, bm)) {
+            best = Some((detour, m, can));
+        }
+    }
+    let (detour, m, can) = best?;
+    // One run cannot fill the household's pantry: the worker's own shift's meals.
+    if can < short && held >= shift_meals_needed(world, job) {
         return None;
     }
-    let m_door = world.comp::<Building>(m)?.door;
-    let trip = crate::systems::fixes::walk_estimate(world, id, m_door)
-        + crate::exec::timed_walk(world, id, m_door, home_door)
-        + 20;
+    let trip = detour + 20;
+    // The walk must be worth it: a meal brought home for each hour of it.
+    // A worker who cannot pay for that many (and for less than the pantry
+    // wants) stays home; one with food in the larder does not walk the
+    // hours for a meal or two; one with an empty larder does.
+    let per = world.config.life.grocery_ticks_per_meal;
+    if per > 0 {
+        let want = trip.div_ceil(per) as u32;
+        if can < want.min(short) || (held > 0 && short < want) {
+            return None;
+        }
+    }
+    // The run must end before the worker must leave for the shift ...
     let employer_door = job.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door)?;
     let to_work = crate::exec::timed_walk(world, id, home_door, employer_door);
     let until = u64::from(job.ticks_until_shift(world.tick_of_day()));
     if trip + to_work + 2 * DEPARTURE_MARGIN > until {
+        return None;
+    }
+    // ... before bedtime (home by the time the night's sleep must begin) ...
+    if let Some(b) = ticks_to_bedtime(world, id) {
+        let walk_home = if world.comp::<Position>(id).is_some_and(|p| p.building == Some(home)) {
+            0
+        } else {
+            crate::exec::timed_walk(world, id, here, home_door) as i64
+        };
+        if trip as i64 > b + walk_home {
+            return None;
+        }
+    }
+    // ... and before the body is tired enough that Sleep wins mid-walk.
+    let decay = world.config.needs.energy_decay_per_tick;
+    let energy = world.comp::<crate::components::Needs>(id).map_or(1.0, |n| n.energy);
+    if energy - decay * (trip as f32) < world.config.life.grocery_energy_floor {
         return None;
     }
     let steps = vec![

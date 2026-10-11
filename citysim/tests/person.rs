@@ -1194,8 +1194,13 @@ fn day_workers(w: &World) -> Vec<EntityId> {
 fn probe_worker_eats_before_the_shift_not_during_it() {
     let mut w = world();
     w.run_ticks(2 * TICKS_PER_DAY + 6 * TICKS_PER_HOUR);
-    let a =
-        day_workers(&w).into_iter().find(|&a| building(&w, a) == home(&w, a)).expect("a day worker at home at 06:00");
+    let a = day_workers(&w)
+        .into_iter()
+        .find(|&a| {
+            building(&w, a) == home(&w, a)
+                && w.comp::<Brain>(a).is_some_and(|b| b.current_goal != Some(citysim::GoalKind::Work))
+        })
+        .expect("a day worker at home at 06:00");
     pin(&mut w, a);
     let employer = w.comp::<Job>(a).and_then(|j| j.employer).unwrap();
     w.comp_mut::<Needs>(a).expect("needs").hunger = 0.75;
@@ -1456,4 +1461,105 @@ fn probe_trade_respects_rent_and_the_evictor() {
     );
     assert_ne!(after, Some(target), "traded back into its evictor's Home");
     assert_eq!(after, before, "a farmer with no coins traded Homes (the first rent unpaid)");
+}
+
+/// Item 11 (b), the off-shift grocery run (the d19 diaries: up to 2.4 h a
+/// day of grocery walking, a run re-planned the moment the first returned
+/// because one worker never fills a 5-6-resident pantry with three meals):
+/// a worker with a crowded Home far from work, an empty pantry and coins
+/// does at most one grocery run in the evening-to-morning window, and its
+/// market is the one with the least detour (here to the shop and on home).
+#[test]
+fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
+    use citysim::BuildingKind;
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
+    let dist = |w: &World, a: EntityId| {
+        let h = home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+        let e = w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door);
+        h.zip(e).map_or(0, |(h, e)| h.manhattan(e))
+    };
+    // Off shift at home at 19:00, a crowded Home a walk of an hour or two from work.
+    let a = day_workers(&w)
+        .into_iter()
+        .filter(|&a| building(&w, a) == home(&w, a) && (20..=90).contains(&dist(&w, a)))
+        .max_by_key(|&a| {
+            (home(&w, a).map_or(0, |h| w.residents_of(h).len().min(3)), dist(&w, a), std::cmp::Reverse(a.index))
+        })
+        .expect("a day worker at home at 19:00");
+    pin(&mut w, a);
+    let h = home(&w, a).expect("a home");
+    let residents = w.residents_of(h).len();
+    w.comp_mut::<Needs>(a).expect("needs").hunger = 0.95;
+    w.comp_mut::<Needs>(a).expect("needs").energy = 0.9;
+    if let Some(i) = w.comp_mut::<Inventory>(a) {
+        i.food = 0;
+        i.synth = 0;
+        i.stolen_food = 0;
+    }
+    if let Some(b) = w.comp_mut::<Building>(h) {
+        b.stock_food = 0;
+        b.synth_food = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 80;
+    // The other residents are broke (the shortfall is this worker's alone to fill).
+    fn broke(w: &mut World, h: EntityId, a: EntityId) {
+        for r in w.residents_of(h).to_vec() {
+            if r != a {
+                if let Some(x) = w.comp_mut::<Wallet>(r) {
+                    x.coins = 0;
+                }
+                if let Some(i) = w.comp_mut::<Inventory>(r) {
+                    i.food = 0;
+                }
+            }
+        }
+    }
+    let home_door = w.comp::<Building>(h).expect("home").door;
+    let (mut starts, mut markets) = (Vec::new(), Vec::new());
+    let mut wrong: Vec<String> = Vec::new();
+    // Rested and fed all evening (the shortfall alone drives the errand).
+    while w.tick < 3 * TICKS_PER_DAY + 8 * TICKS_PER_HOUR {
+        pin(&mut w, a);
+        broke(&mut w, h, a);
+        if let Some(n) = w.comp_mut::<Needs>(a) {
+            n.energy = n.energy.max(0.8);
+            n.hunger = n.hunger.max(0.95);
+        }
+        w.run_ticks(1);
+        let w = &w;
+        let Some(p) = w.comp::<Brain>(a).and_then(|b| b.plan.as_ref()) else { continue };
+        let grocery = p.steps.len() == 4
+            && matches!(p.steps[0].action, ActionKind::GoTo(_))
+            && p.steps[1].action == ActionKind::BuyFood
+            && p.steps[3].action == ActionKind::StoreFood;
+        if !grocery || starts.contains(&p.started_tick) {
+            continue;
+        }
+        starts.push(p.started_tick);
+        markets.push(p.target);
+        // The least detour among the stocked Markets, from where the run began.
+        let from = citysim::exec::walk_origin(w, a).expect("origin");
+        let best = w
+            .buildings_of_kind(BuildingKind::Market)
+            .iter()
+            .filter_map(|&m| {
+                w.comp::<Building>(m)
+                    .filter(|b| !b.demolished && !b.derelict && b.stock_food > 0)
+                    .map(|b| (from.manhattan(b.door) + b.door.manhattan(home_door), m))
+            })
+            .min()
+            .map(|(_, m)| m);
+        if best != p.target {
+            wrong.push(format!("tick {}: went to {:?}, the least detour is {best:?}", w.tick, p.target));
+        }
+    }
+    eprintln!(
+        "worker {}: {residents} residents, home {} tiles from work; grocery runs {} (markets {markets:?})",
+        a.index,
+        dist(&w, a),
+        starts.len()
+    );
+    assert_eq!(starts.len(), 1, "grocery runs in one evening-to-morning window");
+    assert!(wrong.is_empty(), "not the least-detour market: {wrong:?}");
 }

@@ -592,6 +592,12 @@ fn import_food(world: &mut World, budget: &mut std::collections::BTreeMap<Entity
 /// (capacity is at least 22 by the defaults, 20 with assets off), so every
 /// purchase without them is the M12 one.
 pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) -> u32 {
+    buy_quantity_upto(world, agent, market, 3)
+}
+
+/// `buy_quantity` with the per-buy cap `cap` (a meal-by-meal errand's 3; a
+/// grocery run's is the household's shortfall, `routine::grocery_cap`).
+pub fn buy_quantity_upto(world: &World, agent: EntityId, market: Option<EntityId>, cap: u32) -> u32 {
     use crate::systems::assets::{capacity, load, FOOD_CAP};
     let Some(market) = market else { return 0 };
     // Hunger as sickness § 1: the meal this agent would buy (the real
@@ -604,7 +610,7 @@ pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) ->
     let room = inv.map_or(0, |i| capacity(world, agent).saturating_sub(load(i)));
     let stock = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
     let stock = crate::systems::diet::meals_on_shelf(world, market, stock, quality_at(world, agent, Some(market)));
-    let afford = (coins / price).clamp(0, 3) as u32;
+    let afford = (coins / price).clamp(0, i64::from(cap)) as u32;
     afford.min(FOOD_CAP.saturating_sub(food)).min(room).min(stock)
 }
 

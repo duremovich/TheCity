@@ -1539,6 +1539,8 @@ hf_grow_housing = true              # 10
 # shift with nothing carried and an empty pantry (92 % of the on-shift Work -> Eat switches).
 hf_shift_meals = true               # 11: eat or pack a meal before a shift; grocery runs off shift
 grocery_score = 0.5                 # 11: the fed worker's Eat (the grocery run) scores this
+grocery_energy_floor = 0.4         # 11: no grocery run that leaves the body under this energy by the time it is home
+grocery_ticks_per_meal = 60        # 11: a grocery run brings home a meal per this many ticks of its round trip (0: off)
 # P5j (coordinator call): the farmers' on-shift sleep came from short nights (60 % after under 4 h; nights
 # ~13 % Unwind, ~16 % walking home to bed). Bedtime = leaving time - a full night - the walk home.
 hf_work_night = true                # 12
