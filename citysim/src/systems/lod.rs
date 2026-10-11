@@ -683,6 +683,8 @@ pub fn run_statistical(world: &mut World) {
         // Flip readiness (no safety net): the table row's index at the hour's
         // start, for the income path's per-row rates.
         let no_net_row = if earn_path { stat_row_index(world, id) } else { None };
+        // Parity (arrests): the hour's row for the El's non-commute ride.
+        let ride_row = stat_row_index(world, id);
         // § 4 (parity, after P5): the dive is its own hour, on the row's
         // `p_dive` (every eligible hour without a learned rate), as `calibrate`
         // learns it: dives begun per hour with a bin in reach at the hour's
@@ -732,6 +734,16 @@ pub fn run_statistical(world: &mut World) {
         // the dole once a day. The table's p_work mass then stands for the
         // idle hours of the employed.
         stat_work(world, id, phase, no_net_row);
+        // Parity (arrests): a non-commute ride on the El (`p_errand_ride`);
+        // a dodger caught at the gate comes on screen (the arrest path).
+        if let Some(r) = ride_row.filter(|_| crate::systems::demography::is_adult(world, id)) {
+            if world.comp::<Brain>(id).is_some_and(|b| b.lod == Lod::Statistical)
+                && crate::systems::transit::stat_errand(world, id, r)
+                && world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical)
+            {
+                continue;
+            }
+        }
         // Diet parity (hunger fix item 11's off-screen side): the grocery run.
         stat_grocery(world, id);
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
@@ -891,7 +903,22 @@ pub fn stat_probs(world: &World, id: EntityId, row: &StatRow) -> (f32, f32, f32,
         }
     }
     // M13 D46: in withdrawal the hour's theft is likelier (a branch).
-    let mut steal = row.p_steal;
+    let mut steal = match world.stat_table.as_ref().and_then(|t| t.p_steal_broke) {
+        // Parity (the law1 actor share): with the table's `p_steal_broke`
+        // the hour's theft is the broke adult's alone (below the meal price,
+        // as `calibrate` reads it): a Full agent with a meal's coins all but
+        // never steals.
+        Some(rates) if world.stat_mlp.is_none() => {
+            let broke = crate::systems::demography::is_adult(world, id)
+                && world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins)
+                    < crate::systems::life::meal_price(world, id);
+            match (broke, stat_row_index(world, id)) {
+                (true, Some(r)) => rates[r],
+                _ => 0.0,
+            }
+        }
+        _ => row.p_steal,
+    };
     if crate::systems::stims::in_withdrawal(world, id) {
         steal *= world.config.stims.withdrawal_steal_mult;
     }
@@ -1514,8 +1541,8 @@ fn stat_row_index(world: &World, id: EntityId) -> Option<usize> {
 
 /// Flip readiness (no safety net): the Full tier's broke jobless hour off
 /// screen. Under the market wage law (P10) and a table holding `p_scavenge`/`p_beg`, a jobless
-/// adult below its savings line (`SAVINGS_DAYS` meals, the Full Earn goal's
-/// gate) scavenges on its row's `p_scavenge` of hours (the same find, paid
+/// adult who is broke (`life::broke`, the Full Scavenge's and Beg's gate)
+/// scavenges on its row's `p_scavenge` of hours (the same find, paid
 /// from the Recycler's till: `jobs::scavenge_find`) and begs on its row's
 /// `p_beg` (`stat_beg`), one draw on the agent's stream.
 fn stat_earn(world: &mut World, id: EntityId, row: usize) {
@@ -1527,9 +1554,15 @@ fn stat_earn(world: &mut World, id: EntityId, row: usize) {
     if p_scav + p_beg <= 0.0 || !crate::systems::demography::is_adult(world, id) {
         return;
     }
-    let price = world.local(id, BuildingKind::Market).map_or(1, |m| world.price_for(m, id));
-    let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
-    if coins >= crate::goap::world_state::SAVINGS_DAYS.saturating_mul(price) {
+    // Parity (the bin meals red): the Full Scavenge's and Beg's own gate,
+    // `life::broke` (the planner's `ctx.poor`: below a meal, and homeless a
+    // Hotel night too), not the Earn goal's savings line. A Full jobless
+    // adult with a meal's coins all but never scavenges or begs (seed 2000,
+    // all-Full: 0.196 scavenges an hour at 0 coins, 0.012 at 1, under 0.01
+    // above); the savings-line gate spread the broke's rate over everyone
+    // under seven meals, so the broke off screen stayed broke (half the
+    // off-screen homeless broke against a tenth Full).
+    if !crate::systems::life::broke(world, id) {
         return;
     }
     let u: f32 = world.rng.agent(id).random();

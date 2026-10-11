@@ -1694,6 +1694,14 @@ fn test_queued_record_goes_to_the_ledger() {
 fn test_stale_queued_record_with_a_shown_target_stays_live() {
     let mut w = world();
     w.config.missions.max_missions = 0;
+    // The gun (lawfulness 0) jumps every gate of the El: off screen its
+    // errand rides (parity's `p_errand_ride`) had it arrested for Fare
+    // Evasion on day 1 here, failing the attempt (the record back on the
+    // board, `Render::Ledger` as every open record). This test reads the
+    // queued record's render while its taker is free.
+    if let Some(t) = w.stat_table.as_mut() {
+        t.p_errand_ride = None;
+    }
     let [buyer, t, g] = strangers(&w, 3)[..] else { unreachable!() };
     gun(&mut w, g);
     if let Some(b) = w.comp_mut::<citysim::Brain>(t) {

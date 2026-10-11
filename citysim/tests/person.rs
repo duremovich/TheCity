@@ -713,9 +713,20 @@ fn probe_starving_eats_before_spending_or_sleeping() {
             pin(&mut w, a);
             let price = citysim::systems::life::meal_price(&w, a);
             set_hungry(&mut w, a, 0.08, (price + extra).max(0));
+            // A spending step already under way when the hunger is set
+            // (begun before the stimulus: a BuyAsset started at 16:52 and
+            // ending 19:12 on the El city's table) is not a choice the
+            // starving agent made; only what comes after it is judged.
+            let under_way = w.comp::<Brain>(a).and_then(|b| match b.exec {
+                ExecState::Use { kind, started, .. } if started < w.tick => Some(kind),
+                _ => None,
+            });
             let mut log = Vec::new();
             let end = w.tick + 8 * TICKS_PER_HOUR;
             run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+            if under_way.is_some() && log.first().copied() == under_way {
+                log.remove(0);
+            }
             // A bin meal is a meal (the bins run with [sickness] on, the shipped city since the flip).
             let first_eat =
                 log.iter().position(|&s| is_eat(Some(s)) || s == ActionKind::EatAlms || s == ActionKind::DumpsterDive);

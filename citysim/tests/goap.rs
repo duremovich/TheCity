@@ -191,6 +191,46 @@ fn test_reservation_prevents_overcommit() {
     assert_eq!(WorldState::reserved_units(&w, market), 2 * reserve);
 }
 
+/// A synth buyer reserves the shelf units its meals take, not one unit a
+/// meal: three synth meals are one unit at `synth_stretch` 3, so a shelf
+/// of two units serves two such buyers before it reads reserved.
+#[test]
+fn test_synth_reservation_counts_shelf_units_not_meals() {
+    let mut w = world(4);
+    let market = w.building_of_kind(BuildingKind::Market).expect("market");
+    let stretch = w.config.sickness.synth_stretch;
+    assert!(stretch >= 2, "the case needs a synth unit of several meals");
+    w.comp_mut::<Building>(market).expect("market").stock_food = 2;
+    w.comp_mut::<citysim::Market>(market).expect("market").synth_frac = 0; // no open unit
+    for h in w.buildings_by_kind[&BuildingKind::Home].clone() {
+        w.comp_mut::<Building>(h).expect("home").stock_food = 0;
+    }
+    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
+    for &id in &ids {
+        // a unit's worth of synth meals' coins, short of the real reserve
+        let synth = citysim::systems::diet::synth_price(&w, w.price_for(market, id));
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = synth * i64::from(stretch);
+        w.comp_mut::<Inventory>(id).expect("inv").food = 0;
+        w.comp_mut::<Needs>(id).expect("needs").hunger = 0.2;
+        w.comp_mut::<Brain>(id).expect("brain").current_goal = Some(GoalKind::Eat);
+        let (q, _) = citysim::systems::diet::offer(&w, id, market);
+        assert_eq!(q, citysim::systems::diet::Quality::Synth, "a synth buyer");
+    }
+    assert_eq!(
+        citysim::systems::economy::buy_quantity(&w, ids[0], Some(market)),
+        stretch.min(3),
+        "the buyer takes a unit's meals"
+    );
+    plan::plan_for(&mut w, ids[0], GoalKind::Eat);
+    assert!(w.comp::<Brain>(ids[0]).expect("b").plan.is_some());
+    assert_eq!(WorldState::reserved_units(&w, market), 1, "three synth meals hold one shelf unit");
+    assert!(WorldState::observe(&w, ids[1], None).food_source_available, "one unit left");
+    plan::plan_for(&mut w, ids[1], GoalKind::Eat);
+    assert!(w.comp::<Brain>(ids[1]).expect("b").plan.is_some());
+    assert!(!WorldState::observe(&w, ids[2], None).food_source_available, "both units reserved");
+    assert_eq!(WorldState::reserved_units(&w, market), 2);
+}
+
 #[test]
 fn test_idle_with_stolen_food_can_still_store() {
     use citysim::exec::routine;

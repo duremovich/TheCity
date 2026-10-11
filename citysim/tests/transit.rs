@@ -441,6 +441,8 @@ fn test_statistical_rider_pays_two_fares_at_the_shift_start() {
     let mut w = city_on();
     let (who, _, _) = rider_worker(&w, 40);
     lod::set_lod(&mut w, who, Lod::Statistical);
+    // The model's own answer (the learned commute share pinned off).
+    w.stat_table.as_mut().expect("a table").p_commute_ride = None;
     let job = w.comp::<Job>(who).cloned().expect("a job");
     let (start, _) = job.shifts[0];
     w.comp_mut::<Wallet>(who).expect("wallet").coins = 50;
@@ -478,6 +480,7 @@ fn test_statistical_dodger_is_caught_at_the_learned_rate() {
         let (who, _, _) = rider_worker(&w, 40);
         lod::set_lod(&mut w, who, Lod::Statistical);
         w.stat_table.as_mut().expect("a table").p_dodge_caught = Some(p);
+        w.stat_table.as_mut().expect("a table").p_commute_ride = None;
         let job = w.comp::<Job>(who).cloned().expect("a job");
         w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
         w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.05;
@@ -486,6 +489,86 @@ fn test_statistical_dodger_is_caught_at_the_learned_rate() {
         assert_eq!(w.stats.current.transit.rides_stat, 2, "p {p}: rode through the gate");
         let lod_now = w.comp::<Brain>(who).expect("brain").lod;
         assert_eq!(lod_now != Lod::Statistical, caught, "p {p}: on screen for the arrest");
+    }
+}
+
+/// Parity (commute rides): an off-screen commute rides on the Full city's
+/// share for the Home-door model's answer (`p_commute_ride`): a rider the
+/// model carries walks at a ride share of 0; a commute the model walks
+/// (here: under `min_ride_tiles` from the Home door) rides the Home-to-work
+/// route at a share of 1, paying its two fares, and not at 0.
+#[test]
+fn test_statistical_commute_rides_at_the_learned_share() {
+    use citysim::Job;
+    // (model rides, cells, rode)
+    for (model_rides, cells, rode) in
+        [(true, [0.0f32, 0.0], false), (true, [0.0, 1.0], true), (false, [1.0, 0.0], true), (false, [0.0, 1.0], false)]
+    {
+        let mut w = city_on();
+        let (who, _, _) = rider_worker(&w, 40);
+        lod::set_lod(&mut w, who, Lod::Statistical);
+        if !model_rides {
+            w.config.transit.min_ride_tiles = u32::MAX;
+        }
+        w.stat_table.as_mut().expect("a table").p_commute_ride = Some(cells);
+        let job = w.comp::<Job>(who).cloned().expect("a job");
+        w.comp_mut::<Wallet>(who).expect("wallet").coins = 50;
+        w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.6;
+        w.tick = TICKS_PER_DAY + u64::from(job.shifts[0].0) + 7;
+        let c0 = w.stats.current.transit.clone();
+        transit::stat_commute(&mut w, who, &job);
+        let c = &w.stats.current.transit;
+        assert_eq!(c.stat_commutes, c0.stat_commutes + 1, "judged");
+        let n = u32::from(rode);
+        assert_eq!(c.stat_commute_rides, c0.stat_commute_rides + n, "model {model_rides}, {cells:?}");
+        assert_eq!(c.rides_stat, c0.rides_stat + 2 * n);
+        assert_eq!(coins(&w, who), 50 - 2 * i64::from(n), "two fares a riding workday");
+    }
+}
+
+/// Parity (arrests): an off-screen adult rides the El off the commute on
+/// its row's `p_errand_ride`: a payer pays the fare; a lawless broke rider
+/// jumps the gate, is counted, and at `p_dodge_caught` 1 is reported and
+/// comes on screen for the arrest. A table without the rate: no ride.
+#[test]
+fn test_statistical_errand_ride_pays_or_jumps_the_gate() {
+    for (rated, payer) in [(true, true), (true, false), (false, false)] {
+        let mut w = city_on();
+        w.run_ticks(TICKS_PER_DAY + 10 * 60);
+        let who = w
+            .tier(Lod::Statistical)
+            .iter()
+            .copied()
+            .find(|&a| demography::is_adult(&w, a) && !w.has::<citysim::Sentence>(a))
+            .expect("a Statistical adult");
+        w.comp_mut::<Wallet>(who).expect("wallet").coins = if payer { 50 } else { 0 };
+        w.comp_mut::<Personality>(who).expect("p").lawfulness = if payer { 0.6 } else { 0.05 };
+        {
+            let t = w.stat_table.as_mut().expect("a table");
+            t.p_errand_ride = rated.then_some([1.0; citysim::STAT_ROWS]);
+            t.p_dodge_caught = Some(1.0);
+        }
+        let c0 = w.stats.current.transit.clone();
+        let before = coins(&w, who);
+        for _ in 0..60 {
+            lod::run_statistical(&mut w);
+            w.tick += 1;
+        }
+        let c = &w.stats.current.transit;
+        let mine = c.stat_errand_rides > c0.stat_errand_rides;
+        assert_eq!(mine, rated, "rated {rated}: an errand ride");
+        if !rated {
+            continue;
+        }
+        let lod_now = w.comp::<Brain>(who).expect("brain").lod;
+        if payer {
+            assert!(c.fares > c0.fares, "the fare paid");
+            assert!(coins(&w, who) < before, "from the rider's purse");
+            assert_eq!(lod_now, Lod::Statistical);
+        } else {
+            assert!(c.fare_dodges > c0.fare_dodges, "the gate jumped");
+            assert_ne!(lod_now, Lod::Statistical, "reported, on screen for the arrest");
+        }
     }
 }
 

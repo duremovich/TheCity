@@ -498,6 +498,68 @@ fn test_no_net_statistical_scavenge_is_paid_from_the_till() {
     }
 }
 
+/// Parity (the bin meals red): the off-screen income path has the Full
+/// Scavenge's and Beg's gate, `life::broke` (the planner's `ctx.poor`), not
+/// the Earn goal's savings line: a Full jobless adult with a meal's coins
+/// (and, homeless, a Hotel night's) neither scavenges nor begs (seed 2000,
+/// all-Full: 0.196 scavenges per hour at 0 coins, 0.012 at 1, under 0.01
+/// above), so off screen it does not either; a coin short of the line, it
+/// does.
+#[test]
+fn test_statistical_scavenge_only_when_broke() {
+    use citysim::Wallet;
+    for short in [false, true] {
+        let (mut w, id) = no_net_stat_agent();
+        w.config.life.scavenge_p = 1.0;
+        w.econ.recycler_till = 1_000_000;
+        w.comp_mut::<Needs>(id).expect("needs").hunger = 1.0;
+        let line = citysim::systems::life::meal_price(&w, id) + w.config.street.night_price;
+        let price = w.local(id, citysim::BuildingKind::Market).map_or(1, |m| w.price_for(m, id));
+        assert!(line < citysim::goap::world_state::SAVINGS_DAYS * price, "below the savings line either way");
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = if short { line - 1 } else { line };
+        assert_eq!(citysim::systems::life::broke(&w, id), short);
+        if let Some(t) = w.stat_table.as_mut() {
+            t.p_scavenge = Some([1.0; citysim::STAT_ROWS]);
+        }
+        let till = w.econ.recycler_till;
+        stat_hour(&mut w);
+        let after = w.comp::<Wallet>(id).map_or(0, |x| x.coins);
+        if short {
+            assert!(after >= line - 1 + w.config.treasury.scrap_coins, "broke: the hour's find ({after})");
+            assert!(w.econ.recycler_till < till, "paid from the till");
+        } else {
+            assert!(after <= line, "a meal and a night in hand: no scavenging ({after})");
+        }
+    }
+}
+
+/// Parity (the law1 actor share): with the table's `p_steal_broke` the
+/// off-screen hour's theft roll is the broke adult's alone, as a Full agent
+/// with a meal's coins all but never steals (seed 2000, all-Full: 1 theft
+/// of ~240 by a thief who could buy); the rows' `p_steal` is not read. A
+/// table without it keeps the rows' roll for everyone.
+#[test]
+fn test_statistical_theft_roll_is_the_broke_adults() {
+    use citysim::{EventKind, Wallet};
+    for (learned, broke) in [(true, true), (true, false), (false, false)] {
+        let (mut w, id) = no_net_stat_agent();
+        w.comp_mut::<Needs>(id).expect("needs").hunger = 1.0;
+        let price = citysim::systems::life::meal_price(&w, id);
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = if broke { price - 1 } else { 50 * price };
+        if let Some(t) = w.stat_table.as_mut() {
+            for r in &mut t.rows {
+                r.p_steal = 1.0;
+            }
+            t.p_steal_broke = learned.then_some([1.0; citysim::STAT_ROWS]);
+        }
+        let start = w.events.back().map_or(0, |e| e.id + 1);
+        stat_hour(&mut w);
+        let stole =
+            w.events.iter().any(|e| e.id >= start && e.kind == EventKind::Theft && e.actors.first() == Some(&id));
+        assert_eq!(stole, broke || !learned, "learned {learned}, broke {broke}");
+    }
+}
+
 /// Flip readiness: with no net a hungry Statistical agent who cannot buy
 /// steals by its lawfulness bucket's `p_desperate` (the lawful go hungry, as
 /// the Full planner's theft cost has them), and a theft takes a Full Market

@@ -157,12 +157,12 @@ pub struct StatTable {
     #[serde(default)]
     pub p_theft_caught: Option<f32>,
     /// The no-net income path (flip readiness, read only with `econ::wages_on` (P10)):
-    /// the chance a jobless adult below its savings line (`SAVINGS_DAYS`
-    /// meals) spends the hour scavenging, per row (phase, lawfulness and
-    /// hunger at the hour's start, as `rows`). `calibrate` writes it only in
-    /// a no-net city: the share of such Full agent-hours with a Scavenge
-    /// begun. A table without it: no off-screen scavenging (the dole city's
-    /// table).
+    /// the chance a jobless adult who is broke (`life::broke`, the Full
+    /// Scavenge's and Beg's gate; the Earn goal's savings line before the
+    /// parity fix) spends the hour scavenging, per row (phase, lawfulness and
+    /// hunger at the hour's start, as `rows`): the share of such Full
+    /// agent-hours with a Scavenge begun. A table without it: no off-screen
+    /// scavenging.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_scavenge: Option<[f32; STAT_ROWS]>,
     /// As `p_scavenge`, for the hours the Full agent begs (`lod::stat_beg`).
@@ -177,6 +177,17 @@ pub struct StatTable {
     /// whatever the lawfulness).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_desperate: Option<[f32; 3]>,
+    /// Parity (the law1 actor share): the hour's theft roll is the broke
+    /// adult's alone (below the meal price at the hour's start, the
+    /// calibration's `broke`), per row, pooled over hunger as `p_steal`:
+    /// Full thefts not `p_desperate`'s by a thief broke at the hour's start,
+    /// per such agent-hour. A Full agent with a meal's coins all but never
+    /// steals (`steal_can_buy`; seed 2000: 1 of ~240 thefts), while the
+    /// rows' `p_steal` is per agent-hour of every agent and, rolled by
+    /// everyone off screen, put a third of the lawless bucket's thefts on
+    /// agents with the coins. With it the rows' `p_steal` is not read.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_steal_broke: Option<[f32; STAT_ROWS]>,
     /// Hunger as sickness § 5 (read only with `[sickness] bins`): the chance
     /// an adult who cannot buy a meal, with a bin in reach (`bins::dive_target`
     /// at the hour's start), dives in the hour, per row. `calibrate` writes it
@@ -216,6 +227,27 @@ pub struct StatTable {
     /// no off-screen dodger is caught.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_dodge_caught: Option<f32>,
+    /// Parity (commute rides): a Statistical commute's `transit::choose`
+    /// reads the trip from the Home door, but a third of the Full city's
+    /// commutes set out from somewhere else (a Market, a Bar), and those ride
+    /// more. Learned against the same call: of the Full first commutes of a
+    /// workday whose Home-to-work `choose` at the start would walk (`[0]`) or
+    /// ride (`[1]`), the share that rode. A Statistical commute rides on
+    /// its cell's share (a pure hash of the agent and the day); a walk the
+    /// model refused rides the Home-to-work route when the rider can pay or
+    /// would jump the gate. A table without it: the model's own answer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_commute_ride: Option<[f32; 2]>,
+    /// Parity (arrests): the El's rides that are not a commute (the first
+    /// ride to work of a workday and the first ride Home after it), per
+    /// agent-hour of an adult who could pay the fare or would jump the gate
+    /// at the hour's start, per row. Off screen only commutes rode, while
+    /// these were ~55 % of the Full city's boardings and ~70 % of its jumped
+    /// gates (seed 2000), so its Fare Evasion arrests had no off-screen
+    /// counterpart. `transit::stat_errand` rides on it: the fare, or the gate
+    /// jumped and reported at `p_dodge_caught`. A table without it: none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_errand_ride: Option<[f32; STAT_ROWS]>,
     pub rows: Vec<StatRow>,
 }
 

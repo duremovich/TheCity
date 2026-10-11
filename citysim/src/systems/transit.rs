@@ -590,6 +590,22 @@ fn meal_price(world: &World) -> i64 {
     world.mean_price().max(1)
 }
 
+/// T10: how `who` would board now: `Some(false)` pays the fare,
+/// `Some(true)` jumps the gate, `None` can't pay and won't jump it. Phase 3:
+/// fresh from the cells, a rider with the fare pays it. Pure.
+pub fn pays_or_dodges(world: &World, who: EntityId) -> Option<bool> {
+    let c = &world.config.transit;
+    let coins = world.comp::<Wallet>(who).map_or(0, |w| w.coins);
+    let law = world.comp::<Personality>(who).map_or(0.5, |p| p.lawfulness);
+    let since = world.tick.saturating_sub(u64::from(c.dodge_deterred_days) * TICKS_PER_DAY);
+    let deterred = coins >= c.fare
+        && world.comp::<crate::components::Memory>(who).is_some_and(|m| {
+            m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasArrested && e.tick >= since)
+        });
+    let dodge = !deterred && (law < c.dodge_always || (coins < c.fare && law < c.dodge_lawfulness));
+    (dodge || coins >= c.fare).then_some(dodge)
+}
+
 /// T8: walk or ride, for `who` from `from` to `to` leaving at `t`. Pure.
 pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) -> Result<Route, Refusal> {
     let c = &world.config.transit;
@@ -598,18 +614,8 @@ pub fn choose(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick)
     }
     let mut r = route(world, who, from, to, t).ok_or(Refusal::NoRoute)?;
     let coins = world.comp::<Wallet>(who).map_or(0, |w| w.coins);
-    let (law, courage) = world.comp::<Personality>(who).map_or((0.5, 0.5), |p| (p.lawfulness, p.courage));
-    // T10: pay, or jump the gate.
-    // Phase 3: fresh from the cells, a rider with the fare pays it.
-    let since = world.tick.saturating_sub(u64::from(c.dodge_deterred_days) * TICKS_PER_DAY);
-    let deterred = coins >= c.fare
-        && world.comp::<crate::components::Memory>(who).is_some_and(|m| {
-            m.entries.iter().any(|e| e.kind == crate::components::MemoryKind::WasArrested && e.tick >= since)
-        });
-    let dodge = !deterred && (law < c.dodge_always || (coins < c.fare && law < c.dodge_lawfulness));
-    if !dodge && coins < c.fare {
-        return Err(Refusal::Fare);
-    }
+    let courage = world.comp::<Personality>(who).map_or(0.5, |p| p.courage);
+    let dodge = pays_or_dodges(world, who).ok_or(Refusal::Fare)?;
     let fare = if dodge { 0 } else { c.fare };
     // Time vs fare: a coin is worth more to the poor.
     let poor = coins < c.poor_meals.saturating_mul(meal_price(world));
@@ -974,7 +980,28 @@ pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Jo
     let walk = crate::exec::timed_walk(world, id, home, work);
     let shift_start = world.tick - Tick::from(tod - start);
     world.stats.current.transit.stat_commutes += 1;
-    let Ok(r) = choose(world, id, home, work, shift_start.saturating_sub(walk)) else { return };
+    let leave = shift_start.saturating_sub(walk);
+    let model = choose(world, id, home, work, leave);
+    // Parity (commute rides): the model's answer from the Home door,
+    // corrected by the Full city's ride share per answer
+    // (`StatTable.p_commute_ride`): a commute that sets out from elsewhere
+    // may ride where the Home door's would walk.
+    let cell = world.stat_table.as_ref().and_then(|t| t.p_commute_ride).map(|p| p[usize::from(model.is_ok())]);
+    let r = match cell {
+        None => model.ok(),
+        Some(p) => {
+            let u = crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0002, u64::from(id.index), world.day());
+            if u >= p {
+                None
+            } else {
+                model.ok().or_else(|| {
+                    let dodge = pays_or_dodges(world, id)?;
+                    route(world, id, home, work, leave).map(|r| Route { dodge, ..r })
+                })
+            }
+        }
+    };
+    let Some(r) = r else { return };
     world.stats.current.transit.stat_commute_rides += 1;
     let fare = world.config.transit.fare;
     let mut dodged = 0u64;
@@ -1008,6 +1035,38 @@ pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Jo
         let c = &mut world.stats.current.transit;
         c.peak_stop_load = c.peak_stop_load.max(peak);
     }
+}
+
+/// Parity (arrests): a Statistical adult's non-commute ride this hour, on
+/// its row's `StatTable.p_errand_ride` (a pure hash of the agent and the
+/// hour), when it would pay the fare or jump the gate (`pays_or_dodges`, the
+/// rate's own denominator). The fare is paid as a body's; a jumped gate is
+/// counted and reported at `p_dodge_caught`, and the body comes on screen
+/// for the arrest (`stat_commute`'s rule). No movement, no stop load. True
+/// when the agent rode.
+pub fn stat_errand(world: &mut World, id: EntityId, row: usize) -> bool {
+    if !enabled(world) || world.transit.net.stops.is_empty() {
+        return false;
+    }
+    let Some(p) = world.stat_table.as_ref().and_then(|t| t.p_errand_ride).map(|p| p[row]) else { return false };
+    let hour = world.tick / TICKS_PER_HOUR;
+    if crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0003, u64::from(id.index), hour) >= p {
+        return false;
+    }
+    let Some(dodge) = pays_or_dodges(world, id) else { return false };
+    world.stats.current.transit.stat_errand_rides += 1;
+    if !dodge {
+        let fare = world.config.transit.fare;
+        crate::systems::ownership::pay(world, Some(id), None, fare, crate::systems::ownership::Flow::Fare);
+        return true;
+    }
+    world.stats.current.transit.fare_dodges += 1;
+    let p = world.stat_table.as_ref().and_then(|t| t.p_dodge_caught).unwrap_or(0.0);
+    if crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0004, u64::from(id.index), hour) < p {
+        crate::systems::law::file_report(world, Crime::FareEvasion, id, None);
+        crate::systems::lod::set_lod(world, id, Lod::Coarse);
+    }
+    true
 }
 
 /// The app's lerp: where a rider aboard is on the track now, in tiles (a

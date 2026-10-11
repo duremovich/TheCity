@@ -1616,6 +1616,9 @@ pub struct TransitCols {
     pub commute_rides: u32,
     pub stat_commutes: u32,
     pub stat_commute_rides: u32,
+    /// Parity (arrests): the Statistical non-commute rides
+    /// (`transit::stat_errand`; not a column).
+    pub stat_errand_rides: u32,
 }
 
 impl TransitCols {

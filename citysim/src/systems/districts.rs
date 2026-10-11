@@ -601,9 +601,10 @@ pub fn gang_cleaning(world: &mut World) {
 
 /// D23 (plan deviation: its own reconcile, not `law::reconcile_guards`
 /// generalised): hire jobless free adults (no lawfulness floor; the
-/// poorest first, ties lower id) or let the newest go, at most five a
-/// day, toward `levers.sanitation_count`; the Recycler employs them, the
-/// Treasury pays them.
+/// poorest first, ties lower id) or let the newest city sweeper go (never
+/// a public-works hire), at most five a day, toward
+/// `levers.sanitation_count`; the Recycler employs them, the Treasury pays
+/// them.
 pub fn reconcile_sanitation(world: &mut World) {
     // L2 L10: public works add on top of the M12 headcount.
     // Transit phase 3: the El's maintenance crews, paid for by its fares (0
@@ -631,8 +632,16 @@ pub fn reconcile_sanitation(world: &mut World) {
             crate::systems::demography::hire(world, id, recycler, Role::Sanitation);
         }
     } else if have.len() > want {
-        let mut newest: Vec<(std::cmp::Reverse<u64>, EntityId)> =
-            have.iter().filter_map(|&s| world.comp::<Job>(s).map(|j| (std::cmp::Reverse(j.hired_tick), s))).collect();
+        // P10: the excess is the civic headcount's (the works roster sits on
+        // top of it and has its own layoffs, `budget::lay_off_works`): the
+        // newest city sweepers go, never a public-works hire (they were the
+        // newest, so a civic cut emptied the works first).
+        let works = &world.jobs_book.works;
+        let mut newest: Vec<(std::cmp::Reverse<u64>, EntityId)> = have
+            .iter()
+            .filter(|s| !works.contains(s))
+            .filter_map(|&s| world.comp::<Job>(s).map(|j| (std::cmp::Reverse(j.hired_tick), s)))
+            .collect();
         newest.sort_unstable();
         for (_, s) in newest.into_iter().take((have.len() - want).min(5)) {
             let text = format!("{} let go from Sanitation", world.name_of(s));

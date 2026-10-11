@@ -124,3 +124,47 @@ fn test_public_works_open_on_the_tax_band() {
     w.run_ticks(TICKS_PER_DAY);
     assert_eq!(w.works_vacancies, 0, "repealed: the open posts withdrawn");
 }
+
+/// Public works sit on top of the civic headcount (L2 L10): when the civic
+/// budget lowers Sanitation, the city's own sweepers go, never the works
+/// hires (they were the newest Sanitation hires, so `reconcile_sanitation`
+/// let them go first: works 30 -> 2 inside the band on seed 42).
+#[test]
+fn test_civic_cut_spares_public_works_hires() {
+    // The El off: its maintenance crews are Sanitation hires too (funded by
+    // fares, growing with them), and this test reads the city's own.
+    let mut cfg = Config::load();
+    cfg.transit.enabled = false;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(2 * TICKS_PER_DAY);
+    w.push_command(PlayerCommand::SetSafetyNet(true));
+    w.apply_commands();
+    let recycler = w.building_of_kind(citysim::BuildingKind::Cemetery).expect("the Recycler");
+    let band = w.config.treasury.band;
+    let hold = u64::from(w.config.budget.band_hold_days.max(1));
+    for _ in 0..3 * hold + 1 {
+        w.push_command(PlayerCommand::SetTreasury(band[1] * 4));
+        w.run_ticks(TICKS_PER_DAY);
+    }
+    let works = w.jobs_book.works.clone();
+    assert!(!works.is_empty(), "public works hired above the band");
+    // The city's own sweepers: Sanitation outside the works roster.
+    let civic =
+        |w: &World| w.workers(citysim::Role::Sanitation).iter().filter(|s| !w.jobs_book.works.contains(s)).count();
+    let sweepers = civic(&w);
+    assert!(sweepers > 0, "civic sweepers beside the works");
+    // Inside the band (no works step either way), the civic headcount cut to 0.
+    w.push_command(PlayerCommand::SetTreasury((band[0] + band[1]) / 2));
+    w.push_command(PlayerCommand::SetSanitation(0));
+    w.apply_commands();
+    w.run_ticks(3 * TICKS_PER_DAY);
+    let kept = works
+        .iter()
+        .filter(|&&a| {
+            w.comp::<Job>(a).is_some_and(|j| j.role == citysim::Role::Sanitation && j.employer == Some(recycler))
+        })
+        .count();
+    assert_eq!(kept, works.len(), "every works hire kept his post");
+    let after = civic(&w);
+    assert!(after < sweepers, "the civic sweepers were let go ({sweepers} -> {after})");
+}

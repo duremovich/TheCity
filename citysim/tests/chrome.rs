@@ -505,6 +505,11 @@ fn test_harvest_scored_only_with_target_and_clinic() {
 #[test]
 fn test_stat_multipliers_only_for_kitted() {
     let mut w = small();
+    // The rows' `p_steal` (the table's broke-only `p_steal_broke`, parity's
+    // law1 fix, replaces it; this test pins the chrome multipliers).
+    if let Some(t) = w.stat_table.as_mut() {
+        t.p_steal_broke = None;
+    }
     let people = free(&w);
     let (bare, kitted) = (people[0], people[1]);
     let row = StatRow { p_killed: 0.0123, p_assaulted: 0.0456, p_robbed: 0.0789, p_steal: 0.031, ..StatRow::default() };

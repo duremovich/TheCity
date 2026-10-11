@@ -1443,6 +1443,84 @@ fn below_savings(world: &World, id: citysim::EntityId) -> bool {
         .is_some_and(|w| w.coins < citysim::goap::world_state::SAVINGS_DAYS.saturating_mul(price))
 }
 
+/// Parity (arrests, commute rides): the El's boardings in the all-Full
+/// calibration city, read tick by tick.
+#[derive(Default)]
+struct ElTally {
+    /// Aboard (`ExecState::Ride`) at the last tick.
+    riding: std::collections::BTreeSet<citysim::EntityId>,
+    /// `(agent, day)`: rode to work today, and the ride Home after it not yet seen.
+    to_work: std::collections::BTreeSet<(citysim::EntityId, u64)>,
+    back_due: std::collections::BTreeSet<(citysim::EntityId, u64)>,
+    /// A commute under way (`World::commute_start`): the Home-to-work
+    /// model's answer at its start (`None` homeless), and whether it rode.
+    commuting: std::collections::BTreeMap<citysim::EntityId, (Option<bool>, bool)>,
+    /// `(agent, day)` with its first commute arrival seen.
+    arrived: std::collections::BTreeSet<(citysim::EntityId, u64)>,
+}
+
+impl ElTally {
+    /// One tick: the commutes' model answers and arrivals into `cells`
+    /// (`[model walks, model rides][walked, rode]`); returns the agents who
+    /// boarded on a non-commute ride (anything but the first ride to work of
+    /// the day and the first ride Home after it).
+    fn step(&mut self, world: &World, cells: &mut [[u64; 2]; 2]) -> Vec<citysim::EntityId> {
+        use citysim::{Building, Household, Job};
+        let day = world.day();
+        let employer = |id| world.comp::<Job>(id).and_then(|j| j.employer);
+        let home = |id| world.comp::<Household>(id).and_then(|h| h.home);
+        let door = |b: Option<citysim::EntityId>| b.and_then(|b| world.comp::<Building>(b)).map(|b| b.door);
+        let now: std::collections::BTreeSet<citysim::EntityId> = world
+            .rides
+            .keys()
+            .copied()
+            .filter(|&id| {
+                world.comp::<citysim::Brain>(id).is_some_and(|b| matches!(b.exec, citysim::ExecState::Ride { .. }))
+            })
+            .collect();
+        let mut errands = Vec::new();
+        for &id in now.difference(&self.riding) {
+            let target = world.rides[&id].target.building;
+            if target.is_some() && target == employer(id) {
+                if let Some(c) = self.commuting.get_mut(&id) {
+                    c.1 = true;
+                }
+                if self.to_work.insert((id, day)) {
+                    self.back_due.insert((id, day));
+                    continue;
+                }
+            } else if target.is_some() && target == home(id) && self.back_due.remove(&(id, day)) {
+                continue;
+            }
+            errands.push(id);
+        }
+        self.riding = now;
+        // Commutes: started (the model's answer from the Home door now) and
+        // arrived (at the employer, the day's first).
+        for &id in world.commute_start.keys() {
+            self.commuting.entry(id).or_insert_with(|| {
+                let model = match (door(home(id)), door(employer(id))) {
+                    (Some(h), Some(w)) => Some(citysim::systems::transit::choose(world, id, h, w, world.tick).is_ok()),
+                    _ => None,
+                };
+                (model, false)
+            });
+        }
+        let ended: Vec<citysim::EntityId> =
+            self.commuting.keys().copied().filter(|id| !world.commute_start.contains_key(id)).collect();
+        for id in ended {
+            let Some((model, rode)) = self.commuting.remove(&id) else { continue };
+            let at = world.comp::<citysim::Position>(id).and_then(|p| p.building);
+            if at.is_some() && at == employer(id) && self.arrived.insert((id, day)) {
+                if let Some(m) = model {
+                    cells[usize::from(m)][usize::from(rode)] += 1;
+                }
+            }
+        }
+        errands
+    }
+}
+
 /// Per-agent tallies for the hour in progress.
 #[derive(Default, Clone)]
 struct HourTally {
@@ -1461,8 +1539,8 @@ struct HourTally {
     chats_home: u16,
     /// `stat_policy::features` at the hour's start (`--rows-csv` only).
     features: Option<[f32; citysim::systems::stat_policy::N_FEATURES]>,
-    /// The no-net income path (a no-net city only): a jobless adult below
-    /// its savings line at the hour's start (`p_scavenge`'s and `p_beg`'s
+    /// The no-net income path: a jobless adult who is broke
+    /// (`life::broke`) at the hour's start (`p_scavenge`'s and `p_beg`'s
     /// hours), and the Scavenges and Begs it began this hour.
     earn: bool,
     scav: u16,
@@ -1478,6 +1556,11 @@ struct HourTally {
     /// `p_dive`'s hours), and the dives it began this hour.
     dive_ok: bool,
     dives: u16,
+    /// Parity (arrests): an adult who could pay the El's fare or would jump
+    /// the gate at the hour's start (`p_errand_ride`'s hours), and its
+    /// non-commute boardings this hour.
+    ride_ok: bool,
+    errands: u16,
     /// The agent's bin meals today at the last tick (`Health.today.dive`).
     dive_meals: u8,
     /// Parity (`p_meal`): hungry at the hour's start (below the
@@ -1518,11 +1601,14 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_scavenge: None,
         p_beg: None,
         p_desperate: None,
+        p_steal_broke: None,
         p_dive: None,
         p_meal: None,
         p_attend: None,
         p_wage_ratio: None,
         p_dodge_caught: None,
+        p_commute_ride: None,
+        p_errand_ride: None,
         pantry_per_resident: None,
         rows: Vec::new(),
     };
@@ -1546,6 +1632,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     // and go hungry as its Full ones do).
     let (mut scav, mut beg, mut scav_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS], [0u64; STAT_ROWS]);
     let (mut dive, mut dive_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    // Parity (the law1 actor share): thefts (not `p_desperate`'s) by a thief
+    // broke at the hour's start, and the broke agent-hours (`p_steal_broke`).
+    let (mut steal_broke, mut broke_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    // Parity (arrests): non-commute boardings per ride-able agent-hour
+    // (`p_errand_ride`); (commute rides) the first commutes of a workday by
+    // the Home-to-work model's answer at the start, and those that rode
+    // (`p_commute_ride`).
+    let (mut errand, mut errand_denom) = ([0u64; STAT_ROWS], [0u64; STAT_ROWS]);
+    let mut commute_cells = [[0u64; 2]; 2];
     // P5f: per role, free healthy workday shift minutes, and those at the work.
     let mut attend: BTreeMap<String, (u64, u64)> = BTreeMap::new();
     // P5f: wages owed (a free, healthy workday shift's wage at its start) and paid.
@@ -1589,11 +1684,15 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             let courting = citysim::systems::social::known_candidate(world, id, 0.3).is_some();
             let features = with_rows.then(|| citysim::systems::stat_policy::features(world, id));
             let adult = citysim::systems::demography::is_adult(world, id);
-            let earn = adult && !world.has::<citysim::Job>(id) && below_savings(world, id);
+            // Parity (the bin meals red): the Full Scavenge's and Beg's gate
+            // (`life::broke`, the planner's `ctx.poor`), as `lod::stat_earn` reads it.
+            let earn = adult && !world.has::<citysim::Job>(id) && citysim::systems::life::broke(world, id);
             let broke = adult
                 && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
                     < citysim::systems::life::meal_price(world, id);
             let dive_ok = citysim::systems::bins::dive_target(world, id).is_some();
+            let ride_ok =
+                adult && world.config.transit.enabled && citysim::systems::transit::pays_or_dodges(world, id).is_some();
             hour.insert(
                 id,
                 HourTally {
@@ -1603,6 +1702,7 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                     earn,
                     broke,
                     dive_ok,
+                    ride_ok,
                     dive_meals: world.comp::<citysim::Health>(id).map_or(0, |h| h.today.dive),
                     meal_seen: citysim::systems::lod::has_means(world, id),
                     meal_cell: header.meal_index_split(
@@ -1626,11 +1726,19 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         let mut hour: BTreeMap<citysim::EntityId, HourTally> = BTreeMap::new();
         let mut hour_start = world.tick;
         let mut poor_today: (u64, Vec<citysim::EntityId>) = (u64::MAX, Vec::new());
+        let mut el = ElTally::default();
         let mut cursor = world.next_event_id;
         open_hour(&world, &mut hour);
         let mut known: std::collections::BTreeSet<_> = world.edges.keys().copied().collect();
         for _ in 0..total_ticks {
             citysim::tick(&mut world);
+            if world.config.transit.enabled {
+                for id in el.step(&world, &mut commute_cells) {
+                    if let Some(t) = hour.get_mut(&id) {
+                        t.errands += 1;
+                    }
+                }
+            }
             let night = world.phase() == citysim::DayPhase::Night;
             let just = world.tick - 1;
             // P5f: the shift minutes and those at the work (`p_attend`).
@@ -1867,6 +1975,14 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                         beg[t.row] += u64::from(t.beg.min(1));
                         scav_denom[t.row] += 1;
                     }
+                    if t.broke {
+                        steal_broke[t.row] += u64::from(t.extra[0].min(1));
+                        broke_denom[t.row] += 1;
+                    }
+                    if t.ride_ok {
+                        errand[t.row] += u64::from(t.errands.min(1));
+                        errand_denom[t.row] += 1;
+                    }
                     if t.dive_ok {
                         dive[t.row] += u64::from(t.dives.min(1));
                         dive_denom[t.row] += 1;
@@ -2018,6 +2134,35 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
     eprintln!("scavenge {scav:?} beg {beg:?} of {scav_denom:?} earning hours");
     let p_scavenge = Some(std::array::from_fn(|i| rate(scav[i], scav_denom[i])));
     let p_beg = Some(std::array::from_fn(|i| rate(beg[i], scav_denom[i])));
+    // Parity (the law1 actor share): `p_steal_broke`, pooled over the two
+    // hunger buckets as the rows' `p_steal`; a pair under 200 broke hours
+    // takes the mean over all rows.
+    eprintln!("thefts by the broke {steal_broke:?} of {broke_denom:?} broke hours");
+    let p_steal_broke = {
+        let (n, d): (u64, u64) = (steal_broke.iter().sum(), broke_denom.iter().sum());
+        let mean = (n as f32 / d.max(1) as f32).min(1.0);
+        Some(std::array::from_fn(|i| {
+            let (a, b) = (i & !1, i | 1);
+            let (n, d) = (steal_broke[a] + steal_broke[b], broke_denom[a] + broke_denom[b]);
+            if d < 200 {
+                mean
+            } else {
+                (n as f32 / d as f32).min(1.0)
+            }
+        }))
+    };
+    // Parity (arrests, commute rides): the El's two rates, with it on.
+    let p_errand_ride = config.transit.enabled.then(|| {
+        eprintln!("El: non-commute boardings {errand:?} of {errand_denom:?} ride-able hours");
+        std::array::from_fn(|i| rate(errand[i], errand_denom[i]))
+    });
+    let p_commute_ride = config.transit.enabled.then(|| {
+        eprintln!(
+            "El: first commutes [walked, rode] by the model's walk {:?} ride {:?}",
+            commute_cells[0], commute_cells[1]
+        );
+        std::array::from_fn(|m| rate(commute_cells[m][1], commute_cells[m][0] + commute_cells[m][1]))
+    });
     // Hunger as sickness § 5: `p_dive` with the bins on. A row with under
     // 200 eligible hours takes the mean over all rows (plan risk: noisy rows).
     let p_dive = (config.sickness.diet && config.sickness.bins).then(|| {
@@ -2083,10 +2228,13 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
         p_scavenge,
         p_beg,
         p_desperate,
+        p_steal_broke,
         p_dive,
         p_meal,
         p_attend,
         p_wage_ratio,
+        p_commute_ride,
+        p_errand_ride,
         p_dodge_caught: (dodges > 0).then(|| (dodges_caught as f64 / dodges as f64).min(1.0) as f32),
         pantry_per_resident: (pantry_days > 0).then(|| (pantry_sum / pantry_days as f64) as f32),
         ..header
