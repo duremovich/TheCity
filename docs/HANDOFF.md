@@ -200,3 +200,53 @@ In order:
   - Parity fails on the diet rates (the off-screen tier eats when hungry and reaches bins from its Home door); three flip probes fail with or without sickness (the guard's long shift, the night porter, the laid-off Vat Tech: P9a's).
 - **Default config** (recalibrated table): trio green, core_year green (starvation 236 in the year), god 15+3+3 green, behaviour tier green (one row widened).
 - Next: close the parity diet gap; P9a's flip (re-measure the behaviour rows on the flipped city; the three flip probes); `/code-review high` over this branch.
+- **Review, merge, flip (2026-10-10).**
+  - **Diet parity pass:**
+    - `p_meal` split by on-shift hours.
+    - `lod::stat_grocery`: off-screen workers stock the pantry up to a learned `pantry_per_resident`.
+    - `bins::dive_target`: no dive with a meal at hand.
+  - **hunger_fixes item 13:** with `no_safety_net`, employed workers re-house on the first rent. Homeless employed on d30/d60 went from 98/138 to 12/19.
+  - **Jailbreak** is demoted to a printed FINDING; three unit tests in factions.rs force it.
+  - **Sweeper fix:** `life::work_tile` houses sweepers near their beats.
+  - **`/code-review high`:** 10 findings, all confirmed and fixed with failing-first tests (7f02852, f826e50). Default table recalibrated, since the night-shift wage-owed double count was one of the findings.
+  - **Merged `c59b552`.**
+- **THE FLIP, `ce3dc23` (fast-forward):** wages, no_safety_net, `[sickness]`, `[street] shanties`, class pay and hunger_fixes are the shipped default. `assets/stat_table.toml` is the flipped table. The old dole city is `Config::dole_city()`, and the mechanism unit tests pin it explicitly.
+  - **Gates on the new default:**
+    - Trio: 825 passed.
+    - core_sanity 42-44: starvation 0/0/0.
+    - J24/J25: street peaks 3.5/4.9/2.7 %.
+    - core_year 42: starvation 0; 9/9 corps alive.
+    - Behaviour tier: 134 PASS (bounds re-derived from 8 runs).
+    - God: 21/21.
+    - Person probes: 25.
+    - tps alone: 7.2k.
+  - **Parity red on two recorded gaps** (HUNGER_SICKNESS.md open items, tolerances not widened):
+    - **Bin meals,** Full 1.55 vs Stat 2.53. The per-hour dive rate matches, but the off-screen broke-and-hungry pool is ~1.85× larger. Look next at off-screen coin/food income between meals: scavenge, beg, Mission.
+    - **law1 actor share,** 0.218 vs 0.155. Not noise: Full leads on all 6 parity seeds (gap 0.044-0.077). It's theft in the middle-lawfulness bucket, 7-19 thefts per seed in Full against 0-2 off screen. Suspect: how calibrate buckets Full thieves' lawfulness.
+  - **Behaviour rows that moved >30 % on the flip** (the list is in 3ceba34's message):
+    - **KnownMetWeek roughly halved for every archetype.** The d90 gang_leader and purist floors fell to 0.0/0.6.
+    - **WalkHDay up 1.5-2.5 h** for club staff, cooks, fabbers (7.4-7.9 h), guards (9.7-10.6 h) and ripperdocs.
+    - **d90 homeless:** Energy0HWeek 1.7-3.9 (was 0.2-0.7); WagedWorkdays 0.50-0.70 (was 0.84-0.93).
+    - **The reporter got healthier.**
+    - **Sweeper contacts:** measured, and they're relocation's trade. Home-to-beat distance halved; home-to-contacts went from ~100 to ~115 tiles.
+
+## Next session (written 2026-10-10, end of the eighth session)
+
+State: main `ce3dc23` is the **flipped city**: no dole, wages from revenue, hunger as sickness, shanties, class pay. Branches not merged, each needs a rebase onto the flip and a save-version renumber at merge:
+- **Hit market**, `worktree-agent-ad159dd59f903c9ac` @ f721474: spec, P1 and P3 built. Next: rebase, then P2 (silence, debt, the walk to the Fixer).
+- **Transit (the El)**, `worktree-agent-abdc8c1d22393b1ee` @ a5b89df: spec, P1 off by default, the map port spec. Phases 2-3 need their own recalibration.
+
+In order:
+1. **Look at the flipped city's days for broken-system signals** before building on it:
+   - guards walking ~10 h and fabbers ~7.5 h a day;
+   - contacts halved everywhere;
+   - the d90 homeless.
+
+   Read diaries (person probes, shadow). Decide which are broken days, to fix, and which are the brutal city working as intended (memory `thecity-brutality-via-pressure.md`: never broken days). Transit is the designed answer to long walks; it may move up.
+2. **P10: retire the switches.** Keep the dole/safety-net mechanisms as **policy levers**, not deleted (memory `thecity-utopia-dystopia-game.md`); `Config::dole_city()` is the seed of that.
+3. **Hit market:** rebase, then P2, then its gates on the flipped city.
+4. **Transit phases 2-3,** with their own recalibration.
+5. **The two parity gaps,** bins and law1, when convenient.
+6. **M16b, M17, M18.** Raise the sim-scale question for the bigger map (`D:\TheCityGraphics`, read-only) before M18.
+
+Housekeeping: about 25 stale worktrees under `.claude/worktrees`, cleanup offered to Dylan with no answer yet. Keep `agent-ad159dd59f903c9ac` (hits) and `agent-abdc8c1d22393b1ee` (transit). `agent-a74ec841dce33aa73` (hunger), `classpay`, `agent-a82410b104eb008ad` (old P9a) and `agent-a2b9c223ae831978a` (old recal) are superseded by main.
