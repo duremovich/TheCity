@@ -220,13 +220,16 @@ fn hit_market_report() {
                             let first = !seen.contains_key(&c.id);
                             let prev = seen.get(&c.id).map(|s| s.status);
                             if first {
+                                // The entity indices, for `shadow --agent` (phase 4's reads).
                                 stories.push(format!(
-                                    "  d{} #{} is the {} on {} ({})",
+                                    "  d{} #{} is the {} on {} ({}; buyer agent {:?}, target {})",
                                     c.posted / TICKS_PER_DAY,
                                     c.id,
                                     c.kind.label(),
                                     w.name_of(c.target.id()),
-                                    c.motive.label()
+                                    c.motive.label(),
+                                    c.agent.map(|a| a.index),
+                                    c.target.id().index
                                 ));
                             }
                             if (first || prev != Some(c.status)) && c.status == ContractStatus::Fulfilled {

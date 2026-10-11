@@ -40,8 +40,8 @@ pub struct ShadowArgs {
     pub start_day: u64,
     /// Comma-separated archetypes: gang_member, gang_leader, ripperdoc, homeless, ceo, exec, guard,
     /// worker, runner, purist, reporter, child, dealer, cook, club_staff, fighter, fabber, sweeper,
-    /// worker_friday, super, bouncer, dancer, night_shift, orderly, camp_warden, fixer, gun (a child
-    /// is unpinnable: no Brain).
+    /// worker_friday, super, bouncer, dancer, night_shift, orderly, camp_warden, fixer, gun, sick,
+    /// buyer (a child is unpinnable: no Brain).
     #[arg(long)]
     pub pick: Option<String>,
     /// Shadow this entity index (repeatable).
@@ -68,7 +68,7 @@ pub struct ShadowArgs {
     pub assert: bool,
 }
 
-const ARCHETYPES: [&str; 28] = [
+const ARCHETYPES: [&str; 29] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -103,6 +103,10 @@ const ARCHETYPES: [&str; 28] = [
     // Hunger as sickness (docs/HUNGER_SICKNESS.md § 9): malnutrition >= 0.5 or a cancer. Diaries
     // only (no `CHECKS` rows); empty with `[sickness]` off.
     "sick",
+    // The Hit market phase 4: an agent holding a want (on the walk to the Fixer) or the placing
+    // agent of an organic Hit or Beat live or posted in the 7 days before today. Diaries only
+    // (no `CHECKS` rows: the tier is recalibrated separately).
+    "buyer",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -270,6 +274,18 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 }
             }
             adults().filter(|a| guns.contains(a)).collect()
+        }
+        // The Hit market phase 4: a want's holder, or the placing agent of an organic record
+        // (a motive set) still live or posted in the 7 days before today.
+        "buyer" => {
+            let from = world.tick.saturating_sub(7 * TICKS_PER_DAY);
+            let mut buyers: BTreeSet<EntityId> = world.wants.keys().copied().collect();
+            for c in world.contracts.values().filter(|c| !c.motive.is_none()) {
+                if c.status.is_live() || c.posted >= from {
+                    buyers.extend(c.agent);
+                }
+            }
+            adults().filter(|a| buyers.contains(a)).collect()
         }
         other => return Err(format!("unknown archetype {other:?} (known: {})", ARCHETYPES.join(", "))),
     };
@@ -1719,7 +1735,7 @@ fn contracts_section(world: &World, id: EntityId, md: &mut String) {
         };
         let _ = writeln!(
             md,
-            "- #{} {} on {} for {} ({role}, {:?}, {:?}, posted {}{})",
+            "- #{} {} on {} for {} ({role}, {:?}, {:?}, posted {}{}{})",
             c.id,
             c.kind.label(),
             nm(world, c.target.id()),
@@ -1727,7 +1743,15 @@ fn contracts_section(world: &World, id: EntityId, md: &mut String) {
             c.status,
             c.render,
             clock(c.posted),
-            c.broker.map(|b| format!(" at {}", bname(world, b))).unwrap_or_default()
+            c.broker.map(|b| format!(" at {}", bname(world, b))).unwrap_or_default(),
+            // The Hit market: an organic record's motive and deposit.
+            if c.motive.is_none() {
+                String::new()
+            } else if c.deposit > 0 {
+                format!(", {}, {} down", c.motive.label(), money(c.deposit))
+            } else {
+                format!(", {}", c.motive.label())
+            }
         );
     }
     let fixers: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Fixer).to_vec();

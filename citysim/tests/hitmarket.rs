@@ -260,6 +260,38 @@ fn test_brakes_hold() {
     assert!(hitmarket::try_revenge(&mut w, h, t, 0.95));
 }
 
+/// D8 (phase 4 fix, from the buyers' diaries): a buyer does not hunt the
+/// head it is paying for while its want or its record stands, even with the
+/// Hunt's cooldown gone; once the record closes the Hunt is open again.
+#[test]
+fn test_buyer_does_not_hunt_the_head_it_paid_for() {
+    use citysim::systems::hunt;
+    use citysim::word::HuntWhy;
+    let mut w = world();
+    let (h, t) = coward_holder(&mut w);
+    set_coins(&mut w, h, 1_000);
+    assert!(hitmarket::try_revenge(&mut w, h, t, 0.95), "posted or wanted");
+    assert!(hitmarket::paying_for(&w, h, t));
+    // The Hunt's cooldown (D8's) runs out; the record or the want stands.
+    let cool = |w: &mut World| {
+        if let Some(b) = w.comp_mut::<citysim::Brain>(h) {
+            b.cooldowns.clear();
+        }
+    };
+    cool(&mut w);
+    assert!(hunt::considerations(&w, h).is_none(), "no Hunt scored on a paid head");
+    assert!(!hunt::adopt(&mut w, h, HuntWhy::Goal), "no Hunt adopted on a paid head");
+    assert!(!w.hunts.contains_key(&h));
+    // Control: the want lapses and the record closes; the Hunt is open again.
+    w.wants.remove(&h);
+    for c in w.contracts.values_mut().filter(|c| c.buyer == Some(h)) {
+        c.status = ContractStatus::Expired;
+    }
+    cool(&mut w);
+    assert!(!hitmarket::paying_for(&w, h, t));
+    assert!(hunt::considerations(&w, h).is_some(), "the Hunt scores once the record is gone");
+}
+
 /// H12: a brave, strong holder hunts himself (no hire).
 #[test]
 fn test_brave_strong_holder_does_not_hire() {

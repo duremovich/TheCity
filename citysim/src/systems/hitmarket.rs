@@ -160,6 +160,24 @@ pub fn try_revenge(world: &mut World, holder: EntityId, target: EntityId, weight
     agent_buy(world, holder, target, kind, Motive::Revenge, weight, None)
 }
 
+/// D8 (phase 4 fix): `buyer` is paying for a Hit or a Beat on `target`: a
+/// want on it, or a live organic record it bought. A buyer does not hunt
+/// the head it paid for while the record stands (the diaries: a buyer's
+/// Hunt cooled for `hunt_cooldown_days` at the post, then hunted the target
+/// with the gun still on it; one adopted through the hire path had its
+/// cooldown shortened to the planner's `goal_cooldown_ticks` the same tick
+/// and killed the target herself 3 hours after paying).
+pub fn paying_for(world: &World, buyer: EntityId, target: EntityId) -> bool {
+    world.wants.get(&buyer).is_some_and(|w| w.target == target)
+        || world.by_party.get(&buyer).is_some_and(|l| {
+            l.iter().any(|id| {
+                world.contracts.get(id).is_some_and(|c| {
+                    c.is_live() && !c.motive.is_none() && c.buyer == Some(buyer) && c.target == Target::Agent(target)
+                })
+            })
+        })
+}
+
 /// A live organic record of `buyer`'s on `target`, or one closed within
 /// `repost_days` (the buyer waits before buying the same head again).
 fn buying(world: &World, buyer: EntityId, target: EntityId) -> bool {

@@ -206,6 +206,8 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
             *r.marks.entry(DONE_MARKS[k.index()]).or_insert(0) += c.k_done[k.index()];
         }
         *r.marks.entry("squad Hit").or_insert(0) += c.hits_squad;
+        // The Hit market: an organic Hit (a motive set) fulfilled or reneged.
+        *r.marks.entry("organic Hit fulfilled").or_insert(0) += row.hit.hm_hits_done;
         *r.marks.entry("StrikeDeclined political").or_insert(0) += c.strikes_declined_pol;
         *r.marks.entry("Fixer run").or_insert(0) += c.fixer_runs;
         *r.marks.entry("escrow leak days").or_insert(0) += u32::from(c.escrow_leak != 0);
@@ -424,6 +426,7 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a Locate fulfilled", m("Locate fulfilled")), // [167, 166, 155]; 45-47 [145, 137, 133]
         ("a Fixer in business", m("Fixer in business")), // [111, 107, 112] days; 45-47 [106, 111, 109]
         ("a Reneged", k(EventKind::Reneged)),        // [22, 6, 12]; 45-47 [23, 6, 12]
+                                                     // "An organic Hit fulfilled" is printed (the Hit market phase 4, below).
     ]
 }
 
@@ -469,6 +472,17 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         // P2 (cold cases and recants on); `law_faction.rs::
         // test_posture_patrol_at_rest_and_crackdown_under_pressure` carries it.
         ("a day in Crackdown", m("Crackdown held")),
+        // The Hit market phase 4 (2026-10-11): an organic Hit (a motive set)
+        // fulfilled or reneged (`hm_hits_done`), seeds 42-47 x 120 days: [1,
+        // 1, 1, 0, 1, 0] on fe60d37 (4 of 6), [1, 1, 1, 0, 0, 0] with the
+        // phase's D8 fix (a buyer does not hunt the head it paid for), 2 of 6
+        // on the main before the market's last fix round: one a seed at most,
+        // so it flips with any trajectory change. Unit-tested instead:
+        // `hitmarket.rs` (`test_revenge_pooled_from_kin_half_down`,
+        // `test_credit_buyer_pays_balance`, `test_stiffed_buyer_owes_and_is_hated`),
+        // `person.rs::probe_widow_commissions_a_hit_at_the_fixer`, and the
+        // god scenario `god_kill_ten_fathers_day_10`.
+        ("an organic Hit fulfilled", m("organic Hit fulfilled")),
     ]
 }
 

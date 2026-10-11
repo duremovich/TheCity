@@ -64,6 +64,13 @@ that must read 0 (`escrow_leak`, `escrow_stuck`, `contract_hole_wrong`); with an
 events file, Hits taken by render (`LIVE`, `LEDGER`, `QUEUED`) and the amber event counts. The spec's
 bands (`docs/M16_CONTRACTS.md`, the M16a printed findings) are printed beside their numbers. One flag: a
 probe above 0 (a broken record, not a calibration miss).
+
+The Hit market (docs/HIT_MARKET.md): a "Hit market" section from the `HitCols` columns (organic postings
+by motive, wants, unaffordable tries, kin refusals and pooled coins, Hits and Beats done, stiffed, recants,
+cold cases, Commission errands, the mean price and deposit) and, with an events file, the story list: every
+organic record chained from its posting by (kind, target), who bought, why, price, deposit, Fixer, takers,
+attempts and outcome, and the city's answer (a stiffed balance, a renege, a Conspiracy charge, a Hunt on the
+taker or the buyer within 30 days, a case gone cold, a report taken back). No flags.
 """
 import argparse
 import csv
@@ -276,6 +283,7 @@ def analyze(rows, events, jail_cap=None):
     living(rows, events, out, flags)
     word(rows, events, out)
     contracts(rows, events, out, flags)
+    hitmarket(rows, events, out)
     health(rows, events, out, flags)
     out["flags"] = flags
     return out
@@ -675,6 +683,130 @@ def contracts(rows, events, out, flags):
             flags.append(f"M16a: {k} reached {v:g} (must stay 0: a record broke)")
 
 
+HM_MOTIVES = ("revenge", "silence", "debt", "rival", "culprit", "protect")
+HM_TOTALS = ["hm_posted_" + m for m in HM_MOTIVES] + ["hm_wants", "hm_unaffordable", "hm_refused", "hm_pooled",
+                                                    "hm_hits_done", "hm_beats_done", "hm_stiffed", "hm_recanted",
+                                                    "hm_cold", "hm_commissions"]
+HM_POST = re.compile(r"^(?P<buyer>.+?) posted a (?P<kind>hit|beat) on (?P<target>.+?) for (?P<price>\d+)"
+                     r"(?: at (?P<fixer>.+?))? \((?:(?P<down>\d+) down, )?(?P<motive>" + "|".join(HM_MOTIVES) +
+                     r")(?P<why>.*)\)$")
+HM_TAKEN = re.compile(r"^(?P<taker>.+) took the (?P<kind>hit|beat) on (?P<target>.+) \((?P<tag>[A-Z]+)")
+HM_CLOSE = re.compile(r"^(?P<kind>hit|beat) on (?P<target>.+?): (?P<what>done by|attempt \d+ failed|failed|cancelled|"
+                      r"expired)(?P<rest>.*)$")
+HM_STIFF = re.compile(r"^(?P<buyer>.+) could not pay (?P<taker>.+) the (?P<n>\d+) owed for the (?P<kind>hit|beat)$")
+HM_RENEGE = re.compile(r"^(?P<buyer>.+) stiffed (?P<taker>.+) on the (?P<kind>hit|beat)$")
+HM_CHARGE = re.compile(r"^(?P<buyer>.+) charged with Conspiracy in the (?:killing|beating) of (?P<target>.+) "
+                       r"\((?P<days>\d+) days after\)$")
+HM_COLD = re.compile(r"^the (?P<crime>.+) case on (?P<suspect>.+) went cold: (?P<witness>.+) is dead$")
+HM_RECANT = re.compile(r"^(?P<witness>.+) took back the (?P<crime>.+) report on (?P<suspect>.+)$")
+HM_HUNT = re.compile(r"^(?P<hunter>.+) went looking for (?P<target>.+)$")
+HM_HUNT_DAYS = 30
+
+
+def hit_stories(events):
+    """The Hit market's story list: every organic record (a motive in the posting's text), chained from the
+    events by (kind, target): who bought, why, the price and deposit, who took it, the outcome, and the city's
+    answer (a stiffed balance or a renege, a Conspiracy charge, a Hunt on the taker or the buyer within 30 days
+    of the deed, a case gone cold or a report taken back by the record's target). Names, not ids: two agents of
+    one name can cross."""
+    recs, live = [], {}
+    for tick, kind, text in events:
+        d = tick // TICKS_PER_DAY
+        if kind == "ContractPosted":
+            m = HM_POST.match(text)
+            if m:
+                r = {"day": d, "buyer": m["buyer"], "kind": m["kind"], "target": m["target"],
+                     "price": int(m["price"]), "down": int(m["down"]) if m["down"] else None,
+                     "fixer": m["fixer"], "motive": m["motive"], "why": m["why"].strip(), "takers": [],
+                     "log": [], "outcome": "live", "done_day": None, "done_by": None, "answer": []}
+                recs.append(r)
+                live[(r["kind"], r["target"])] = r
+        elif kind == "ContractTaken":
+            m = HM_TAKEN.match(text)
+            r = live.get((m["kind"], m["target"])) if m else None
+            if r:
+                r["takers"].append(m["taker"])
+                r["log"].append(f"d{d} taken by {m['taker']} ({m['tag']})")
+        elif kind in ("ContractFulfilled", "ContractFailed", "ContractExpired"):
+            m = HM_CLOSE.match(text)
+            r = live.get((m["kind"], m["target"])) if m else None
+            if not r:
+                continue
+            what = m["what"]
+            if what.startswith("attempt"):
+                r["log"].append(f"d{d} {what}{m['rest']}")
+                continue
+            del live[(m["kind"], m["target"])]
+            if what == "done by":
+                r["outcome"], r["done_day"] = "done", d
+                r["done_by"] = re.sub(r" \(.*\)$", "", m["rest"].strip())
+                r["log"].append(f"d{d} done by {m['rest'].strip()}")
+            else:
+                r["outcome"] = what
+                r["log"].append(f"d{d} {what}{m['rest']}")
+        elif kind in ("Stiffed", "Reneged"):
+            m = (HM_STIFF if kind == "Stiffed" else HM_RENEGE).match(text)
+            cands = [r for r in recs if r["buyer"] == m["buyer"] and r["kind"] == m["kind"]
+                     and m["taker"] in r["takers"] and r["outcome"] in ("live", "done")] if m else []
+            if cands and kind == "Stiffed":
+                cands[-1]["answer"].append(f"d{d} stiffed: owes {m['taker']} {m['n']}")
+            elif cands:
+                r = cands[-1]
+                r["outcome"], r["done_day"], r["done_by"] = "reneged", d, m["taker"]
+                r["answer"].append(f"d{d} reneged on {m['taker']}")
+        elif kind == "Accessory":
+            m = HM_CHARGE.match(text)
+            cands = [r for r in recs if r["target"] == m["target"] and r["outcome"] in ("done", "reneged")] if m else []
+            if cands:
+                cands[-1]["answer"].append(f"d{d} {m['buyer']} charged with Conspiracy ({m['days']} days after)")
+        elif kind in ("CaseCold", "Recanted"):
+            m = (HM_COLD if kind == "CaseCold" else HM_RECANT).match(text)
+            cands = [r for r in recs if r["target"] == m["witness"] and r["motive"] in ("silence", "protect")] if m else []
+            if cands:
+                what = "case cold" if kind == "CaseCold" else "recanted"
+                cands[-1]["answer"].append(f"d{d} {what}: the {m['crime']} report on {m['suspect']}")
+        elif kind == "HuntStarted":
+            m = HM_HUNT.match(text)
+            for r in recs if m else []:
+                if r["done_day"] is None or not 0 <= d - r["done_day"] <= HM_HUNT_DAYS:
+                    continue
+                if m["target"] == r["done_by"]:
+                    r["answer"].append(f"d{d} {m['hunter']} hunts the taker {r['done_by']}")
+                elif m["target"] == r["buyer"]:
+                    r["answer"].append(f"d{d} {m['hunter']} hunts the buyer")
+    return recs
+
+
+def hitmarket(rows, events, out):
+    """The Hit market (docs/HIT_MARKET.md § 7): the `HitCols` totals and, with an events file, the story list
+    and each outcome per motive. Numbers and stories only, no flags."""
+    if not rows or "hm_wants" not in rows[0]:
+        return
+    t = {k: sum(col(rows, k)) for k in HM_TOTALS if k in rows[0]}
+    posted = sum(t.get("hm_posted_" + m, 0) for m in HM_MOTIVES)
+    M = {"totals": t, "posted": posted}
+    if posted:
+        M["price_mean"] = sum(col(rows, "hm_price_sum")) / posted
+        M["deposit_mean"] = sum(col(rows, "hm_deposit_sum")) / posted
+    if events:
+        recs = hit_stories(events)
+        outcomes = defaultdict(Counter)
+        for r in recs:
+            outcomes[f"{r['motive']} {r['kind']}"][r["outcome"]] += 1
+        M["outcomes"] = {k: dict(v) for k, v in sorted(outcomes.items())}
+        M["answered"] = {k: sum(1 for r in recs if any(k in a for a in r["answer"]))
+                         for k in ("stiffed", "reneged", "charged", "hunts", "case cold", "recanted")}
+        M["stories"] = []
+        for r in recs:
+            down = f", {r['down']} down" if r["down"] is not None else ", in full"
+            at = f" at {r['fixer']}" if r["fixer"] else " (direct)"
+            why = f" {r['why']}" if r["why"] else ""
+            M["stories"].append(f"d{r['day']} {r['buyer']}: a {r['kind']} on {r['target']} ({r['motive']}{why}) for "
+                                f"{r['price']}{down}{at} -> {r['outcome']}")
+            M["stories"] += [f"    {x}" for x in r["log"] + r["answer"]]
+    out["hitmarket"] = M
+
+
 HEALTH_TOTALS = ("meals_real", "meals_synth", "meals_dive", "meals_alms", "sick_days", "cancer_new",
                  "cancer_diagnosed", "cancer_cured", "deaths_disease", "bin_meals_in", "bin_contests",
                  "bin_shakedowns", "deaths_starvation")
@@ -843,6 +975,19 @@ def fmt(o):
             L.append("Hits taken by render: " + f(w["hits_taken_by_render"]))
         if w.get("events"):
             L.append("amber events: " + f(w["events"]))
+    if "hitmarket" in o:
+        w = o["hitmarket"]
+        L.append("-- the Hit market --")
+        L.append("run totals: " + f(w["totals"]))
+        if w["posted"]:
+            L.append(f"organic posted {w['posted']:g}, mean price {w['price_mean']:.0f}, mean deposit "
+                     f"{w['deposit_mean']:.0f}")
+        if "outcomes" in w:
+            L.append("outcomes by motive: " + "; ".join(f"{k} " + ", ".join(f"{o} {n}" for o, n in v.items())
+                                                       for k, v in w["outcomes"].items()))
+            L.append("records answered: " + f(w["answered"]))
+            L.append("story list:")
+            L += [f"  {x}" for x in w["stories"]]
     if "health" in o:
         w = o["health"]
         L.append("-- hunger as sickness --")

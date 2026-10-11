@@ -82,6 +82,10 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
                 return None;
             }
             let (t, w, _) = heaviest_eligible(world, id)?;
+            // The Hit market (D8, phase 4 fix): no Hunt on a head it is paying for.
+            if crate::systems::hitmarket::paying_for(world, id, t) {
+                return None;
+            }
             (t, w, None)
         }
     };
@@ -223,6 +227,11 @@ pub fn adopt(world: &mut World, id: EntityId, why: HuntWhy) -> bool {
         return false;
     }
     let Some((target, weight, chain)) = heaviest_eligible(world, id) else { return false };
+    // The Hit market (D8, phase 4 fix): a buyer does not hunt the head it is
+    // paying for (a god's Hunt still goes ahead and ends the want).
+    if why != HuntWhy::God && crate::systems::hitmarket::paying_for(world, id, target) {
+        return false;
+    }
     // M16a (plan C20): a holder too weak to win who can pay hires instead
     // (a Goal or Stat Hunt; never a god's).
     if why != HuntWhy::God && crate::systems::contracts::try_hire(world, id, target, weight) {

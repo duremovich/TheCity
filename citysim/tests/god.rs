@@ -1961,3 +1961,259 @@ fn god_famine_synth() {
     );
     assert!(dives(&shock) > dives(&control), "the starving did not turn to the bins");
 }
+
+// ---------------------------------------------------------------------------
+// God scenario v9: the Hit market (docs/HIT_MARKET.md § 9,
+// docs/GOD_SCENARIOS_V9.md). Every killing here is a record on a struct
+// between fictional agents; every Hit a record with a price, matched by a
+// score and resolved by a seeded roll.
+// ---------------------------------------------------------------------------
+
+/// One house of `god_kill_ten_fathers_day_10`: the dead, his widow, his
+/// adult children on the day, and the stronger stranger named as his killer.
+#[derive(Clone, Debug)]
+struct Father {
+    father: EntityId,
+    widow: EntityId,
+    kids: Vec<EntityId>,
+    killer: EntityId,
+}
+
+/// How much stronger (fighting) a killer is than the widow and every adult
+/// child: past `[contracts] hire_gap` (-0.1), so the house buys rather than
+/// hunts (with 0.0 five of ten widows hunted the killer themselves).
+const STRONGER: f32 = 0.2;
+
+/// Ten household heads (a married man with a living wife, the most children
+/// first), each with a killer: a stranger to the house (no edge with the
+/// father, the widow or an adult child), neither a guard nor a gang member,
+/// `STRONGER` than the widow and every adult child, the one with the fewest
+/// defenders about him (a man with friends at his side prices at the old
+/// quote). No one in two houses; no killer twice.
+fn ten_fathers(w: &World) -> Vec<Father> {
+    use citysim::systems::{demography, law, missions};
+    let civ: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| law::living(w, a) && demography::is_adult(w, a) && !w.has::<citysim::Sentence>(a))
+        .filter(|&a| !w.guards().contains(&a) && w.gang_of(a).is_none())
+        .collect();
+    let male = |a: EntityId| w.comp::<citysim::Identity>(a).is_some_and(|i| i.sex == citysim::Sex::Male);
+    let mut heads: Vec<(EntityId, EntityId, Vec<EntityId>, usize)> = civ
+        .iter()
+        .copied()
+        .filter(|&a| male(a))
+        .filter_map(|a| {
+            let wife = w.spouse_of(a).filter(|s| civ.contains(s))?;
+            let kids = demography::children_of_agent(w, a);
+            let n = kids.len();
+            let adult: Vec<EntityId> = kids.into_iter().filter(|k| civ.contains(k)).collect();
+            Some((a, wife, adult, n))
+        })
+        .collect();
+    heads.sort_by(|x, y| y.3.cmp(&x.3).then(x.0.cmp(&y.0)));
+    let def = |x: EntityId| missions::defender_strength(w, &citysim::contract::Target::Agent(x));
+    let mut used: Vec<EntityId> = Vec::new();
+    let mut out = Vec::new();
+    for (father, widow, kids, _) in heads {
+        if out.len() == 10 {
+            break;
+        }
+        let house: Vec<EntityId> = [father, widow].into_iter().chain(kids.iter().copied()).collect();
+        if house.iter().any(|h| used.contains(h)) {
+            continue;
+        }
+        let bar = house.iter().skip(1).map(|&h| law::fighting(w, h)).fold(0.0f32, f32::max);
+        let killer = civ
+            .iter()
+            .copied()
+            .filter(|x| !house.contains(x) && !used.contains(x))
+            .filter(|&x| house.iter().all(|&h| w.edge(h, x).is_none()))
+            .filter(|&x| law::fighting(w, x) >= bar + STRONGER)
+            .min_by(|&a, &b| def(a).total_cmp(&def(b)).then(a.cmp(&b)));
+        let Some(killer) = killer else { continue };
+        used.extend(house.iter().copied());
+        used.push(killer);
+        out.push(Father { father, widow, kids, killer });
+    }
+    out
+}
+
+/// The natural killing's path (as the `KillFriend` god command): the death,
+/// the crime raised at the tile (witnesses, the district's note, a guard's
+/// report), and when nobody named the killer, one witness who did (the
+/// first living adult whose Home is in the death's district), so the deed
+/// is in the district's pool.
+fn kill_named(w: &mut World, victim: EntityId, by: EntityId) {
+    use citysim::systems::{demography, gossip, law};
+    let tile = w.comp::<citysim::Position>(victim).map(|p| p.tile).unwrap_or_default();
+    let d = w.district_of(tile);
+    w.kill_by(victim, citysim::DeathCause::Violence, Some(by));
+    let crime = citysim::components::Crime::Murder;
+    law::raise_crime_on(w, by, None, Some(victim), crime, tile);
+    let named = w.rumours.iter().any(|p| {
+        p.entries
+            .iter()
+            .any(|e| e.deed == citysim::word::Deed::Killed && e.object == Some(victim) && e.actor == Some(by))
+    });
+    if named {
+        return;
+    }
+    let witness = w.citizens().into_iter().find(|&x| {
+        x != by && law::living(w, x) && demography::is_adult(w, x) && gossip::home_district(w, x) == Some(d)
+    });
+    if let Some(x) = witness {
+        w.remember_crime(x, by, crime, law::crime_salience(crime), Some(victim));
+        gossip::name_actor(w, victim, by);
+        gossip::post_deed(w, d, citysim::word::Deed::Killed, Some(by), Some(victim));
+    }
+}
+
+/// One organic record a house placed: (day posted, kind, the placing agent,
+/// the target, the price, the last status seen).
+type HouseRecord = (u64, citysim::contract::ContractKind, EntityId, EntityId, i64, String);
+
+/// What one house did after the shock: its organic records by id, the
+/// agent-days a member held a want, its Hunts (hunter, target).
+#[derive(Default)]
+struct House {
+    records: std::collections::BTreeMap<u64, HouseRecord>,
+    want_days: u32,
+    hunts: std::collections::BTreeSet<(EntityId, EntityId)>,
+}
+
+fn watch_houses(w: &World, fathers: &[Father], h: &mut [House]) {
+    for (f, house) in fathers.iter().zip(h.iter_mut()) {
+        let kin: Vec<EntityId> = std::iter::once(f.widow).chain(f.kids.iter().copied()).collect();
+        for c in w.contracts.values().filter(|c| !c.motive.is_none()) {
+            let Some(a) = c.agent.filter(|a| kin.contains(a)) else { continue };
+            let e = house
+                .records
+                .entry(c.id)
+                .or_insert_with(|| (c.posted / TICKS_PER_DAY, c.kind, a, c.target.id(), c.price, String::new()));
+            e.5 = format!("{:?}", c.status);
+        }
+        house.want_days += kin.iter().filter(|k| w.wants.contains_key(k)).count() as u32;
+        for &k in &kin {
+            if let Some(t) = w.hunts.get(&k).map(|x| x.target) {
+                house.hunts.insert((k, t));
+            }
+        }
+    }
+}
+
+/// The Hit market's god scenario (v9): on day 10 ten household heads are
+/// killed, each by a named stranger stronger than his widow and every
+/// adult child. The world reacted if at least one widow or adult child
+/// posts a Hit within 30 days (`docs/HIT_MARKET.md` § 9). The control runs
+/// the same city from day 10 unshocked, the same houses watched. Seed 42.
+#[test]
+#[ignore]
+fn god_kill_ten_fathers_day_10() {
+    const DAY: u64 = 10;
+    const END: u64 = DAY + 30;
+    let mut shock = World::new(SEED, Config::load());
+    shock.run_ticks(DAY * TICKS_PER_DAY);
+    let fathers = ten_fathers(&shock);
+    eprintln!("god_kill_ten_fathers_day_10: {} houses", fathers.len());
+    for f in &fathers {
+        let w = &shock;
+        // What a Hit on the killer would cost her today: brokered at the
+        // Fixer in reach, else direct (few asks in her own circle: the quote).
+        let fixer = citysim::systems::contracts::nearest_fixer(w, f.widow);
+        let price = citysim::systems::contracts::organic_price(
+            w,
+            citysim::contract::ContractKind::Hit,
+            &citysim::contract::Target::Agent(f.killer),
+            Some(f.widow),
+            Some(f.widow),
+            fixer,
+        );
+        eprintln!(
+            "  {} (#{}) killed by {} (#{}, fighting {:.2}); widow {} (#{}, fighting {:.2}, {} coins, a Hit on him {price} {}); adult children {:?}",
+            w.name_of(f.father),
+            f.father.index,
+            w.name_of(f.killer),
+            f.killer.index,
+            citysim::systems::law::fighting(w, f.killer),
+            w.name_of(f.widow),
+            f.widow.index,
+            citysim::systems::law::fighting(w, f.widow),
+            w.comp::<citysim::Wallet>(f.widow).map_or(0, |x| x.coins),
+            fixer.map_or("direct: no Fixer in reach".to_string(), |b| format!("at {}", w.name_of(b))),
+            f.kids.iter().map(|&k| (w.name_of(k), k.index)).collect::<Vec<_>>()
+        );
+    }
+    let run = |mut w: World, kill: bool| -> (World, Vec<House>) {
+        if kill {
+            for f in &fathers {
+                kill_named(&mut w, f.father, f.killer);
+            }
+        }
+        let mut h: Vec<House> = fathers.iter().map(|_| House::default()).collect();
+        for _ in DAY..END {
+            w.run_ticks(TICKS_PER_DAY);
+            watch_houses(&w, &fathers, &mut h);
+        }
+        (w, h)
+    };
+    let control = shock.clone();
+    let ((w, h), (wc, hc)) = std::thread::scope(|s| {
+        let a = s.spawn(|| run(shock, true));
+        let b = s.spawn(|| run(control, false));
+        (a.join().expect("the shocked run"), b.join().expect("the control"))
+    });
+    let tally = |w: &World, h: &[House], tag: &str| -> usize {
+        let mut hits = 0;
+        for (f, house) in fathers.iter().zip(h) {
+            let recs: Vec<String> = house
+                .records
+                .iter()
+                .map(|(id, (d, k, a, t, p, st))| {
+                    format!("#{id} d{d} {} by {} on {} for {p} ({st})", k.label(), w.name_of(*a), w.name_of(*t))
+                })
+                .collect();
+            hits += house.records.values().filter(|r| r.1 == citysim::contract::ContractKind::Hit).count();
+            let hunts: Vec<String> =
+                house.hunts.iter().map(|(a, t)| format!("{} hunts {}", w.name_of(*a), w.name_of(*t))).collect();
+            // The widow's grudge on the killer at the end (settled or not), and her purse.
+            let grudge = w
+                .comp::<citysim::word::Grudges>(f.widow)
+                .and_then(|g| g.list.iter().find(|x| x.target == f.killer).map(|x| x.weight));
+            eprintln!(
+                "  {tag} house of {}: want-days {}, records {recs:?}, hunts {hunts:?}; the widow's grudge on the killer {grudge:?}, coins {}; the killer {}",
+                w.name_of(f.father),
+                house.want_days,
+                w.comp::<citysim::Wallet>(f.widow).map_or(0, |x| x.coins),
+                if !citysim::systems::law::living(w, f.killer) {
+                    "dead"
+                } else if w.has::<citysim::Sentence>(f.killer) {
+                    "jailed"
+                } else {
+                    "free"
+                }
+            );
+        }
+        hits
+    };
+    let hits = tally(&w, &h, "shock");
+    let hits_c = tally(&wc, &hc, "control");
+    let sum = |w: &World, f: fn(&citysim::DayRow) -> u32| -> u32 {
+        w.stats.history.iter().filter(|r| r.day >= DAY).map(f).sum()
+    };
+    eprintln!(
+        "days {DAY}-{END}: Hits placed by a widow or adult child {hits} (control {hits_c}); organic Revenge posted {} ({}), want-days {} ({}), organic Hits done {} ({}), commissions {} ({}), violent deaths {} ({})",
+        sum(&w, |r| r.hit.hm_posted_revenge),
+        sum(&wc, |r| r.hit.hm_posted_revenge),
+        sum(&w, |r| r.hit.hm_wants),
+        sum(&wc, |r| r.hit.hm_wants),
+        sum(&w, |r| r.hit.hm_hits_done),
+        sum(&wc, |r| r.hit.hm_hits_done),
+        sum(&w, |r| r.hit.hm_commissions),
+        sum(&wc, |r| r.hit.hm_commissions),
+        sum(&w, |r| r.deaths_violence),
+        sum(&wc, |r| r.deaths_violence)
+    );
+    assert_eq!(fathers.len(), 10, "ten houses on day {DAY}");
+    assert!(hits >= 1, "no widow or adult child placed a Hit within 30 days of the killings");
+}
