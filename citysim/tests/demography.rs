@@ -9,7 +9,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 fn civilian(w: &World) -> citysim::EntityId {
@@ -48,7 +48,7 @@ fn test_starvation_kills_after_3_days_at_zero() {
 
 #[test]
 fn test_old_age_death_probability() {
-    let cfg = Config::load().demography;
+    let cfg = Config::load().dole_city().demography;
     let mut rng = rand_chacha::ChaCha8Rng::seed_from_u64(7);
     let age = 95 * citysim::time::DAYS_PER_YEAR as u32;
     let deaths = (0..10_000).filter(|_| demography::old_age_roll(&mut rng, age, &cfg)).count();

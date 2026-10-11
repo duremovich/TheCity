@@ -9,7 +9,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 fn random_walkable(w: &World, rng: &mut rand_chacha::ChaCha8Rng) -> TilePos {
@@ -272,7 +272,7 @@ fn test_idle_agent_leaves_the_hall() {
 /// every door.
 #[test]
 fn test_flowfield_radix_build_matches_binary_heap() {
-    let assets = Config::load().assets_dir;
+    let assets = Config::load().dole_city().assets_dir;
     for file in ["map_v1.txt", "map.txt"] {
         let map = citysim::Map::load(&assets.join(file));
         for b in &map.buildings {

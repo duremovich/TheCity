@@ -10,7 +10,7 @@ use citysim::{Config, EventKind, Lod, Wallet, World, TICKS_PER_DAY};
 /// meal; nobody holding a meal's coins steals food, and the broke still do.
 #[test]
 fn test_g3_only_the_broke_steal_food() {
-    let mut cfg = Config::load().v1_profile();
+    let mut cfg = Config::load().dole_city().v1_profile();
     cfg.lod.force = Some(Lod::Full);
     let mut w = World::new(408, cfg);
     w.levers.dole_per_day = 0;

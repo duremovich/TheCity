@@ -13,7 +13,7 @@ use citysim::{
 };
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn corp_named(w: &World, name: &str) -> EntityId {
@@ -105,7 +105,7 @@ fn corp_building(w: &World, kind: BuildingKind) -> (EntityId, EntityId) {
 /// Hideout, patron the gang.
 #[test]
 fn test_gang_virtraid_scores_and_orders_runners() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.gangs.order_flat.virt_raid = 0.3;
     let mut w = World::new(42, cfg);
     let gang = w.gang_list()[0];
@@ -299,7 +299,7 @@ fn test_blind_skips_camera_and_camera_writes_sighting() {
 /// second: it is raised first.
 #[test]
 fn test_secure_raises_largest_gap_newest_virt_loss_first() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.corps.secure_per_day = 1;
     let mut w = World::new(42, cfg);
     let z = corp_named(&w, "Zetatech");
@@ -323,7 +323,7 @@ fn test_secure_raises_largest_gap_newest_virt_loss_first() {
 /// upkeep saved repays the rebuy; at the shipped upkeep it is kept.
 #[test]
 fn test_hunker_lowers_excess_ice() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     // Upkeep with teeth: a shed of tier 3 repays its rebuy within 30 days.
     cfg.ice.ice_upkeep = vec![0, 0, 10, 60];
     let mut w = World::new(42, cfg);
@@ -360,7 +360,7 @@ fn test_hunker_lowers_excess_ice() {
     virt::hunker_ice(&mut w, z);
     assert_eq!(virt::profile(&w, n).map(|p| p.ice), Some(2));
     // At the shipped upkeep no shed repays its rebuy: the tier stays.
-    w.config.ice.ice_upkeep = Config::load().ice.ice_upkeep;
+    w.config.ice.ice_upkeep = Config::load().dole_city().ice.ice_upkeep;
     set_ice(&mut w, n, 3);
     virt::hunker_ice(&mut w, z);
     assert_eq!(virt::profile(&w, n).map(|p| p.ice), Some(3), "no paid churn");
@@ -413,7 +413,7 @@ fn test_corp_virtraid_wipes_when_behind_and_lawless() {
 /// threshold at 0: promoted to Coarse with a `RunOrder { why: Stat }`.
 #[test]
 fn test_stat_pass_promotes_runner_to_coarse() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.hack.stat_hack_min = 0.0;
     let mut w = World::new(42, cfg);
     let a = adult(&mut w, &[]);

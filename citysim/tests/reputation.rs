@@ -7,7 +7,7 @@ use citysim::word::{Axis, Deed};
 use citysim::{Brain, Config, EntityId, Memory, MemoryEntry, MemoryKind, PlayerCommand, World, TICKS_PER_DAY};
 
 fn word_world(seed: u64) -> World {
-    let full = Config::load();
+    let full = Config::load().dole_city();
     let mut c = full.clone().v1_profile();
     c.gossip = full.gossip.clone();
     c.reputation = full.reputation.clone();
@@ -64,7 +64,7 @@ fn test_dread_saturates() {
 
 #[test]
 fn test_reputation_numbers() {
-    let cfg = Config::load().reputation;
+    let cfg = Config::load().dole_city().reputation;
     // Named killer, 25 holders: salience 0.5 after decay, conf 0.6, hops 2.
     let w1 = 0.5 * 0.6 * cfg.hop_w[2];
     assert!((w1 - 0.18).abs() < 1e-6);

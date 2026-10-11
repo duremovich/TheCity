@@ -13,7 +13,7 @@ use citysim::{
 use rand::Rng;
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn corp_named(w: &World, name: &str) -> EntityId {
@@ -335,7 +335,7 @@ fn test_jacked_in_body_never_statistical() {
 /// `p_flatline` 1, the pass lost: a Flatline, not violence.
 #[test]
 fn test_flatline_at_tier3_gap() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.ice.p_flatline = 1.0;
     let mut w = World::new(42, cfg);
     let a = runner(&mut w, &[]);

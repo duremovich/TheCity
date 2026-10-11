@@ -12,7 +12,7 @@ use citysim::{
 };
 
 fn v2_world() -> World {
-    World::new(42, Config::load().scaled_to(400))
+    World::new(42, Config::load().dole_city().scaled_to(400))
 }
 
 /// The v1 city cut into three Mid districts by x (thirds of the 96-wide map).
@@ -21,7 +21,7 @@ fn v1_three() -> World {
 }
 
 fn three_cfg() -> Config {
-    let mut c = Config::load().v1_profile();
+    let mut c = Config::load().dole_city().v1_profile();
     c.districts = DistrictsCfg {
         names: vec!["West".into(), "Centre".into(), "East".into()],
         zones: vec!["M".into(), "M".into(), "M".into()],
@@ -41,7 +41,7 @@ fn count(w: &World, kind: EventKind) -> usize {
 fn test_district_of_matches_cuts_on_v2_map() {
     // M15 W31: The Unplugged's Chapel takes a Sump Central derelict Block;
     // the cuts table is the map's (tests/moves.rs checks the Chapel).
-    let mut cfg = Config::load().scaled_to(400);
+    let mut cfg = Config::load().dole_city().scaled_to(400);
     cfg.creeds.seed_purist = false;
     let w = World::new(42, cfg);
     assert_eq!(w.districts.len(), 8);
@@ -108,7 +108,7 @@ fn test_district_of_matches_cuts_on_v2_map() {
 
 #[test]
 fn test_v1_map_is_one_district() {
-    let w = World::new(3, Config::load().v1_profile());
+    let w = World::new(3, Config::load().dole_city().v1_profile());
     assert_eq!(w.districts.len(), 1);
     assert_eq!(w.districts[0].name, "City");
     for y in 0..w.map.h() {
@@ -117,8 +117,8 @@ fn test_v1_map_is_one_district() {
         }
     }
     // The assets' eight rows on the zoneless map still give one district (D1).
-    let mut c = Config::load().v1_profile();
-    c.districts = Config::load().districts;
+    let mut c = Config::load().dole_city().v1_profile();
+    c.districts = Config::load().dole_city().districts;
     let w = World::new(3, c);
     assert_eq!(w.districts.len(), 1);
 }
@@ -703,7 +703,7 @@ fn test_vagrancy_fines_payer_and_jails_broke_vagrant() {
 
 #[test]
 fn test_raid_gated_by_crackdown_on_raider() {
-    let cfg = Config::load().gangs;
+    let cfg = Config::load().dole_city().gangs;
     let base = faction::OrderInputs {
         frontier: 0,
         frontier_total: 10,
@@ -931,7 +931,7 @@ fn test_private_guard_fills_thin_district() {
 
 #[test]
 fn test_district_beats_run_daily_and_survive_a_save() {
-    let mut w = World::new(19, Config::load().scaled_to(300));
+    let mut w = World::new(19, Config::load().dole_city().scaled_to(300));
     w.run_ticks(TICKS_PER_DAY + 10);
     assert!(!w.law().expect("law").beats.is_empty(), "the first midnight deals the beats");
     let alloc: u32 = w.districts.iter().map(|d| u32::from(d.guards)).sum();
@@ -1432,7 +1432,7 @@ fn test_gang_owned_home_weighs_as_a_home() {
 #[test]
 fn test_broke_corp_skips_owner_cleaning() {
     let mut w = v1_three();
-    w.config.litter = Config::load().litter;
+    w.config.litter = Config::load().dole_city().litter;
     let corp = w.spawn();
     w.insert(corp, citysim::Corp::new("Broke".into(), Default::default(), 0, None));
     w.comp_mut::<citysim::Corp>(corp).expect("c").order = citysim::CorpOrder::Secure;

@@ -21,7 +21,7 @@ fn standing(w: &World, kind: BuildingKind) -> Vec<EntityId> {
 /// shift; the Fab holds Parts.
 #[test]
 fn test_each_new_kind_seeds_and_pays_a_shift() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     for kind in [
         BuildingKind::Club,
         BuildingKind::Arcade,
@@ -57,7 +57,7 @@ fn test_each_new_kind_seeds_and_pays_a_shift() {
 /// kind the founder would register.
 #[test]
 fn test_register_chooses_noodle_bar_at_120() {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     assert_eq!(founding::choose_kind_for(&w, 130, false), Some(BuildingKind::NoodleBar));
 }
 
@@ -65,7 +65,7 @@ fn test_register_chooses_noodle_bar_at_120() {
 /// coins are conserved (the founder pays the Treasury).
 #[test]
 fn test_refit_turns_derelict_into_den_at_half_cost() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let d = citysim::systems::street::derelicts(&w)
         .into_iter()
         .find(|&b| {
@@ -120,7 +120,7 @@ fn test_market_staff_tops_up_to_12() {
     // Real economy phase 2 (plan E18): with wages on a corp's Markets are
     // staffed by the margin rule (`wages::staff`), not the top-up; L2's
     // rule is read with that switch off.
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = false;
     let mut on = World::new(42, cfg);
     on.run_ticks(TICKS_PER_DAY + 1);
@@ -142,7 +142,7 @@ fn test_market_staff_tops_up_to_12() {
 /// own Fab before the Recycler, at no coin to itself.
 #[test]
 fn test_fab_accrues_and_parts_market_buys_fab_before_recycler() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let fab = standing(&w, BuildingKind::Fab).into_iter().next().expect("a Fab");
     let corp = w.owner_of(fab).expect("a corp's Fab");
     let worker = w.citizens()[0];
@@ -194,7 +194,7 @@ fn test_fab_accrues_and_parts_market_buys_fab_before_recycler() {
 /// remainder kept.
 #[test]
 fn test_scrap_becomes_recycler_part_at_scrap_per_part() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("Recycler");
     let per = w.config.jobs.scrap_per_part;
     let before = w.stock(recycler, Good::Parts);
@@ -209,7 +209,7 @@ fn test_scrap_becomes_recycler_part_at_scrap_per_part() {
 /// and the newest public-works hire is laid off.
 #[test]
 fn test_band_posts_works_above_hi_and_lifts_upkeep_below_lo() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("Recycler");
     let hi = w.config.budget.band[1];
     let lo = w.config.budget.band[0];
@@ -274,7 +274,7 @@ fn test_band_posts_works_above_hi_and_lifts_upkeep_below_lo() {
 /// credit skips that sweeper (no double count).
 #[test]
 fn test_sweep_cleans_beat_and_skips_d23_credit() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     assert!(jobs::sweep_on(&w));
     w.run_ticks(TICKS_PER_DAY + 1);
     let s = *w.workers(Role::Sanitation).first().expect("a sweeper");
@@ -313,7 +313,7 @@ fn test_sweep_cleans_beat_and_skips_d23_credit() {
 #[test]
 fn test_new_hire_draws_no_dole() {
     use citysim::systems::economy;
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("Recycler");
     let a = w
         .citizens()
@@ -342,7 +342,7 @@ fn test_new_hire_draws_no_dole() {
 #[test]
 fn test_unpaid_hire_plans_no_dole() {
     use citysim::{ActionKind, PlanCtx};
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.life.dole_in_place = false;
     let mut w = World::new(42, cfg);
     let recycler = w.building_of_kind(BuildingKind::Cemetery).expect("Recycler");

@@ -50,7 +50,7 @@ fn coins(w: &World, id: EntityId) -> i64 {
 fn test_enjoy_charges_price_and_keeps_it_on_abort() {
     // L2 shadow fixes item 4: a started purchase is atomic (an abandoned
     // entry is not refunded: 12 food flows for 6 meals).
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let club = standing(&w, BuildingKind::Arcade)[0];
     let a = civilian(&w, &[]);
     set_coins(&mut w, a, 100);
@@ -75,7 +75,7 @@ fn test_enjoy_charges_price_and_keeps_it_on_abort() {
 /// its table for the day.
 #[test]
 fn test_gamble_conserves_coins_and_short_house_shuts_table() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let den = standing(&w, BuildingKind::Den)[0];
     let gambler = civilian(&w, &[]);
     let house = civilian(&w, &[gambler]);
@@ -106,7 +106,7 @@ fn test_gamble_conserves_coins_and_short_house_shuts_table() {
 /// L19: a Lounge refuses a Dreg; an exec (Corp, dressed) gets in.
 #[test]
 fn test_lounge_refuses_dreg() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let lounge = standing(&w, BuildingKind::Lounge)[0];
     let a = civilian(&w, &[]);
     assert!(!leisure::door_ok(&w, a, lounge), "a Street dress-1 civilian is refused");
@@ -120,7 +120,7 @@ fn test_lounge_refuses_dreg() {
 /// L19: a Club's door Host refuses a hot visitor when braver than the heat.
 #[test]
 fn test_club_door_refuses_heat() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let club = standing(&w, BuildingKind::Club)[0];
     let a = civilian(&w, &[]);
     let host = civilian(&w, &[a]);
@@ -143,7 +143,7 @@ fn test_club_door_refuses_heat() {
 /// door beat a nearer spot with nobody expected.
 #[test]
 fn test_hangout_picks_spot_where_friend_habit_is() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let a = civilian(&w, &[]);
     let friend = civilian(&w, &[a]);
     // A Bar's door spot and a street tile 4-6 tiles off it.
@@ -187,7 +187,7 @@ fn test_hangout_picks_spot_where_friend_habit_is() {
 /// § 2: a broke agent's only rung is free; with coins a paid one.
 #[test]
 fn test_unwind_skips_paid_rungs_when_broke() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     leisure::spots_daily(&mut w);
     let a = civilian(&w, &[]);
     w.comp_mut::<Needs>(a).expect("needs").fun = 0.2;
@@ -205,7 +205,7 @@ fn test_unwind_skips_paid_rungs_when_broke() {
 /// L17: the Statistical evening pays a venue, raises fun, adds a visit.
 #[test]
 fn test_stat_daily_pays_venue_and_raises_fun() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let a = civilian(&w, &[]);
     lod::set_lod(&mut w, a, Lod::Statistical);
     assert_eq!(w.comp::<Brain>(a).map(|b| b.lod), Some(Lod::Statistical));
@@ -232,7 +232,7 @@ fn test_stat_daily_pays_venue_and_raises_fun() {
 /// L20: the leader's Collect pays the week's share to at least 3 members.
 #[test]
 fn test_collect_pays_three_members_tribute() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let gang = w.gangs()[0];
     let mut skip = Vec::new();
     for _ in 0..3 {
@@ -263,7 +263,7 @@ fn test_collect_pays_three_members_tribute() {
 /// it holds.
 #[test]
 fn test_front_built_under_expand_in_held_district() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     // A Lot a Den may stand on, and a Home of its district held by the gang.
     let lot = citysim::systems::founding::vacant_lots(&w)
         .into_iter()
@@ -316,7 +316,7 @@ fn test_front_built_under_expand_in_held_district() {
 #[test]
 fn test_no_front_without_expand_or_treasury() {
     for (order, treasury) in [(citysim::Order::LieLow, 5000), (citysim::Order::Expand, 0)] {
-        let mut w = World::new(42, Config::load());
+        let mut w = World::new(42, Config::load().dole_city());
         let lot = citysim::systems::founding::vacant_lots(&w)
             .into_iter()
             .find(|&l| {
@@ -352,7 +352,7 @@ fn test_no_front_without_expand_or_treasury() {
 #[test]
 fn test_fun_decays_at_every_tier_equally() {
     let run = |force: Lod| -> Vec<(EntityId, f32, citysim::Class)> {
-        let mut cfg = Config::load().scaled_to(300);
+        let mut cfg = Config::load().dole_city().scaled_to(300);
         cfg.lod.force = Some(force);
         // Jobs and room P3: no trades (their hires shrink the jobless pool compared here).
         cfg.trades.clear();
@@ -403,7 +403,7 @@ fn test_fun_decays_at_every_tier_equally() {
     assert!(full.iter().any(|(_, f, _)| *f < 0.9), "fun decayed");
     // A held prisoner (`[lod] budget` on): a day settled at once by
     // `law::settle_held` equals 24 hourly decays.
-    let mut w = World::new(7, Config::load().scaled_to(300));
+    let mut w = World::new(7, Config::load().dole_city().scaled_to(300));
     let a = civilian(&w, &[]);
     let execs = citysim::systems::classes::exec_set(&w);
     let rate = leisure::fun_per_hour(&w, a, &execs);
@@ -424,7 +424,7 @@ fn test_fun_decays_at_every_tier_equally() {
 /// keyed streams: the world and agent streams are where they were.
 #[test]
 fn test_l2_streams_untouch_world_and_agent() {
-    let mk = || World::new(42, Config::load());
+    let mk = || World::new(42, Config::load().dole_city());
     let (mut a, mut b) = (mk(), mk());
     // A bout needs two Fighters on shift and a bet.
     let pit = standing(&a, BuildingKind::FightPit)[0];

@@ -22,7 +22,7 @@ fn adults(w: &World) -> Vec<EntityId> {
 }
 
 fn small() -> World {
-    World::new(42, Config::load().scaled_to(300))
+    World::new(42, Config::load().dole_city().scaled_to(300))
 }
 
 fn coins(w: &World, a: EntityId) -> i64 {
@@ -76,7 +76,7 @@ fn open_clinic(w: &mut World, who: EntityId) -> EntityId {
 /// branches, not zero terms).
 #[test]
 fn test_unchromed_fight_identical_to_m12() {
-    let mut on = Config::load().scaled_to(300);
+    let mut on = Config::load().dole_city().scaled_to(300);
     on.assets.enabled = true;
     // The loot window (D13) defers a death's inheritance event; it is not a
     // fight term, so it is held at M12's 0 here.
@@ -108,7 +108,7 @@ fn test_unchromed_fight_identical_to_m12() {
 #[test]
 fn test_arms_raise_p_win_and_skin_lowers_death() {
     // Win share: Arms T3 against an equal bare fighter, no deaths.
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.crime.fight_death_p = 0.0;
     let mut w = World::new(42, cfg);
     let people = free(&w);
@@ -129,7 +129,7 @@ fn test_arms_raise_p_win_and_skin_lowers_death() {
 
     // Death share: the loser's death chance is 1 for a bare body, so a Skin
     // T2 loser's share is its (1 − armour) = 0.7.
-    let mut w = World::new(43, Config::load());
+    let mut w = World::new(43, Config::load().dole_city());
     let pool = free(&w);
     let (attackers, victims) = pool.split_at(pool.len() / 3);
     for &v in victims {
@@ -170,7 +170,7 @@ fn test_arms_raise_p_win_and_skin_lowers_death() {
 
 #[test]
 fn test_load_past_psycho_starts_episode_ending_at_arrest() {
-    let mut cfg = Config::load().scaled_to(300);
+    let mut cfg = Config::load().dole_city().scaled_to(300);
     cfg.chrome.episode_base = 5.0;
     let mut w = World::new(42, cfg);
     let people = free(&w);
@@ -203,7 +203,7 @@ fn test_load_past_psycho_starts_episode_ending_at_arrest() {
     assert_eq!(w.stats.current.episodes_by_law, 1);
     // Review fix: with assets off, an M9 arrest leaves a suspect's LOD rank
     // class where it was (only an abductee ranks with the gangs, D46).
-    let mut off = Config::load().scaled_to(300);
+    let mut off = Config::load().dole_city().scaled_to(300);
     off.assets.enabled = false;
     let mut m9 = World::new(42, off);
     let civilians = free(&m9);
@@ -359,7 +359,7 @@ fn test_rip_takes_every_implant_to_hideout() {
 #[test]
 fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
     for unknown in [false, true] {
-        let mut cfg = Config::load().scaled_to(300);
+        let mut cfg = Config::load().dole_city().scaled_to(300);
         cfg.chrome.abduct_base = 1.0e6;
         cfg.bind.p_unknown = if unknown { 1.0 } else { 0.0 };
         // The Harvest cell of `fviolence::daily` (M13's own roll retired with it).
@@ -421,7 +421,7 @@ fn test_bound_abducted_hole_hands_implants_to_binders_gang() {
 
 #[test]
 fn test_eyes_widen_witness_radius() {
-    let mut cfg = Config::load().scaled_to(300);
+    let mut cfg = Config::load().dole_city().scaled_to(300);
     cfg.crime.witness_base = 1.0;
     let mut w = World::new(42, cfg);
     let people = free(&w);
@@ -491,7 +491,7 @@ fn test_harvest_scored_only_with_target_and_clinic() {
         vendetta: None,
         job: None,
     };
-    let cfg = Config::load().gangs;
+    let cfg = Config::load().dole_city().gangs;
     let has = |i: &OrderInputs| faction::score_orders(i, &cfg).iter().any(|s| s.order == Order::Harvest);
     assert!(has(&base), "a target and a Clinic: scored");
     assert!(!has(&OrderInputs { harvest_target: None, ..base.clone() }), "no target");
@@ -537,7 +537,7 @@ fn test_stat_multipliers_only_for_kitted() {
 /// for an episode) is cuffed or killed by `law` before the episode runs out.
 #[test]
 fn test_episode_near_on_duty_guard_ended_by_law() {
-    let mut w = World::new(42, Config::load().scaled_to(300));
+    let mut w = World::new(42, Config::load().dole_city().scaled_to(300));
     w.run_ticks(600);
     let tod = w.tick_of_day();
     let guard = w

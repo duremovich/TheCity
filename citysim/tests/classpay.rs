@@ -86,7 +86,7 @@ struct Snap {
 }
 
 fn run_seed(seed: u64, days: u64) -> Vec<Snap> {
-    let mut w = World::new(seed, Config::load());
+    let mut w = World::new(seed, Config::load().dole_city());
     let marks = [0u64, 30, 60, 90, 119, days - 1];
     // Meals by agent class over the window, read each day before midnight.
     let mut window: Vec<(u32, u32)> = vec![(0, 0); 4];
@@ -263,7 +263,7 @@ use citysim::{Brain, Corp, EntityId, Lod, Role, Schooling};
 /// The class-pay city: `[economy2] wages` on (off by default until the
 /// flip), class pay on as shipped.
 fn config_on() -> Config {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     assert!(cfg.classpay.enabled, "class pay ships enabled (read only with wages)");
     cfg
@@ -290,8 +290,8 @@ fn role(w: &World, key: &str) -> Role {
 /// `[economy2] wages`.
 #[test]
 fn test_default_city_identical_with_classpay_keys() {
-    let a_cfg = Config::load();
-    assert!(!a_cfg.economy2.wages, "the shipped default is the dole city");
+    let a_cfg = Config::load().dole_city();
+    assert!(!a_cfg.economy2.wages, "Config::dole_city: wages off");
     assert!(a_cfg.trades.iter().any(|r| r.classpay), "the class-pay rows ship in the config");
     let mut b_cfg = a_cfg.clone();
     b_cfg.classpay.enabled = false;
@@ -381,7 +381,7 @@ fn test_post_wage_priced_at_grade() {
     let m = w.config.classpay.grade_mult;
     assert_eq!(classpay::post_wage(&w, farm, manager), w.config.wage(manager) as f32 * m[3]);
     assert_eq!(classpay::post_wage(&w, farm, Role::Farmer), w.config.wage(Role::Farmer) as f32);
-    let off = World::new(42, Config::load());
+    let off = World::new(42, Config::load().dole_city());
     assert_eq!(classpay::post_wage(&off, farm, manager), off.config.wage(manager) as f32);
 }
 
@@ -731,7 +731,7 @@ fn test_status_sink_spends_the_excess_into_owners() {
     assert!(spent >= 1_000 - left && 1_000 - left > 0 && 1_000 - left <= budget, "spent {} of {budget}", 1_000 - left);
     assert_eq!(w.comp::<Wallet>(poor).map(|x| x.coins), Some(floor), "the poor spend nothing");
     assert_eq!(citysim::systems::econ::identity(&w), before, "every coin reaches an owner");
-    let off = &mut World::new(42, Config::load());
+    let off = &mut World::new(42, Config::load().dole_city());
     assert_eq!(classpay::status_daily(off), 0, "no status sink without wages");
 }
 
@@ -742,7 +742,7 @@ fn test_status_sink_spends_the_excess_into_owners() {
 #[ignore]
 fn treasury_census() {
     let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(365);
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let t0 = w.treasury().map_or(0, |t| t.coins);
     let mut last = (t0, w.probe.treasury_in.clone(), w.probe.treasury_out.clone());
     let windows = [0u64, 30, 120, 240, days];
@@ -777,7 +777,7 @@ fn treasury_census() {
 #[ignore]
 fn wage_rule_census() {
     let days: u64 = std::env::var("CLASSPAY_DAYS").ok().and_then(|s| s.parse().ok()).unwrap_or(365);
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let windows = [0u64, 30, 120, 240, days];
     let mut cursor = 0u64;
     for pair in windows.windows(2) {

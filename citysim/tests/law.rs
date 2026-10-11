@@ -7,7 +7,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 fn guard(w: &World) -> citysim::EntityId {
@@ -20,7 +20,7 @@ fn civilian(w: &World) -> citysim::EntityId {
 
 #[test]
 fn test_witness_notice_formula() {
-    let cfg = Config::load();
+    let cfg = Config::load().dole_city();
     assert!((law::notice_probability(&cfg.crime, 0.2, false) - 0.5).abs() < 1e-6);
     assert!((law::notice_probability(&cfg.crime, 0.2, true) - 0.8).abs() < 1e-6);
     assert!((law::notice_probability(&cfg.crime, 1.0, false) - 0.1).abs() < 1e-6);

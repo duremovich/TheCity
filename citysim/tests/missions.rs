@@ -17,7 +17,7 @@ use citysim::{
 use rand::Rng;
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn adults(w: &World) -> Vec<EntityId> {
@@ -127,7 +127,7 @@ fn ready_gang(w: &mut World, g: EntityId, n: usize) -> Vec<EntityId> {
 #[test]
 fn test_strike_table() {
     // The plan's Strike table (C24): strike_k 3.0, loss_w 0.5, pol_w 1.0.
-    let cfg = Config::load().missions;
+    let cfg = Config::load().dole_city().missions;
     let near = |a: f32, b: f32| (a - b).abs() < 1e-3;
     let r = |value, fear| Regard { value, fear };
     // A: a solo gun (fi 0.6, co 0.5) vs a lone target (fi 0.4, co 0.4), City.
@@ -406,7 +406,7 @@ fn test_no_mission_no_draw() {
     // mission hooks are also called on the no-source world every tick. The
     // world stream's next value and the day's row are the same.
     let mut a = world();
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.contracts.max_open = 0;
     let mut b = World::new(42, cfg);
     let agents: Vec<EntityId> = a.citizens().into_iter().take(64).collect();

@@ -16,7 +16,7 @@ use citysim::{
 
 /// The 3a city: wages on and no safety net.
 fn config() -> Config {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
     cfg
@@ -85,7 +85,7 @@ fn test_no_dole_no_works_no_release_with_no_net() {
     assert_eq!(w.levers.dole_per_day, 4, "the god lever still sets the dole");
 
     // The release, pinned: one midnight with a stranded Market.
-    let mut cfg_net = Config::load();
+    let mut cfg_net = Config::load().dole_city();
     cfg_net.economy2.wages = true;
     let mut twin = World::new(42, cfg_net);
     assert!(!econ::no_net(&twin));
@@ -173,7 +173,7 @@ fn test_tax_band_steps_with_hysteresis_and_pins() {
     assert!(w.events.iter().any(|e| e.kind == EventKind::TaxMoved));
     assert!(!w.events.iter().any(|e| e.kind == EventKind::WorksPosted), "no public works");
     // With the net (the band off) a SetTaxRate does not pin.
-    let mut cfg_net = Config::load();
+    let mut cfg_net = Config::load().dole_city();
     cfg_net.economy2.wages = true;
     let mut twin = World::new(42, cfg_net);
     assert!(!treasury::on(&twin));
@@ -225,7 +225,7 @@ fn test_scavenge_pays_from_till_only() {
     assert_eq!(treasury_coins(&w), before.1 - 30);
     assert_eq!(ownership::total_coins(&w), total, "the till move conserves");
     // With the net on, the till is never written: the Treasury pays the find.
-    let mut cfg_net = Config::load();
+    let mut cfg_net = Config::load().dole_city();
     cfg_net.economy2.wages = true;
     let mut twin = World::new(42, cfg_net);
     twin.config.life.scavenge_p = 1.0;
@@ -244,7 +244,7 @@ fn test_scavenge_pays_from_till_only() {
 /// empty goes a day unfed (the net-on twin feeds it from the Reserve).
 #[test]
 fn test_school_meals_off_with_no_net() {
-    let mut cfg_net = Config::load();
+    let mut cfg_net = Config::load().dole_city();
     cfg_net.economy2.wages = true;
     assert!(cfg_net.demography.school_meals, "school meals on in the base config");
     let mut twin = World::new(42, cfg_net);

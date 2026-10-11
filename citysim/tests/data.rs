@@ -22,7 +22,7 @@ fn lab_of(w: &World, corp: EntityId, focus: Track) -> EntityId {
 /// moves the units into Zetatech's store.
 #[test]
 fn test_theft_moves_units_and_sale_pays_tech_corp() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.hack.quiet_take = 1.0;
     // A tier-2 deck's take, read from `[data] steal_units` (the store holds more).
     let units = cfg.data.steal_units[1];
@@ -100,7 +100,7 @@ fn test_theft_moves_units_and_sale_pays_tech_corp() {
 /// back-alley Clinic by the street tier.
 #[test]
 fn test_deck_seller_gate() {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     let office = |name: &str| {
         ownership::owned_of_kind(&w, Some(corp_named(&w, name)), BuildingKind::SecurityOffice)
             .first()
@@ -128,7 +128,7 @@ fn test_deck_seller_gate() {
 #[test]
 fn test_city_ice_lever_sets_treasury_and_precinct() {
     use citysim::PlayerCommand;
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let hall = w.building_of_kind(BuildingKind::Hall).expect("hall");
     let jail = w.building_of_kind(BuildingKind::Jail).expect("jail");
     let (treasury, precinct) = (
@@ -153,7 +153,7 @@ fn test_city_ice_lever_sets_treasury_and_precinct() {
 fn test_data_tax_applies() {
     use citysim::PlayerCommand;
     let sell = |tax: f32| {
-        let mut w = World::new(42, Config::load());
+        let mut w = World::new(42, Config::load().dole_city());
         w.push_command(PlayerCommand::SetDataTax(tax));
         w.apply_commands();
         assert!((w.levers.data_tax - tax).abs() < 1e-6);

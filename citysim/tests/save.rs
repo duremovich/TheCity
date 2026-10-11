@@ -6,7 +6,7 @@ use citysim::{save, BuildingKind, Config, EntityId, PlayerCommand, RelKind, Worl
 /// would make a loaded world diverge mid-streak).
 #[test]
 fn test_scavenge_dry_survives_save_load() {
-    let mut w = World::new(42, Config::load().v1_profile());
+    let mut w = World::new(42, Config::load().dole_city().v1_profile());
     w.run_ticks(600);
     let a = w.citizens()[3];
     w.comp_mut::<citysim::Brain>(a).expect("brain").scavenge_dry = 2;
@@ -21,7 +21,7 @@ fn test_scavenge_dry_survives_save_load() {
 
 #[test]
 fn test_save_round_trips_commands_and_events() {
-    let mut w = World::new(5, Config::load().v1_profile());
+    let mut w = World::new(5, Config::load().dole_city().v1_profile());
     w.push_command(PlayerCommand::ReleaseReserve { amount: 100 });
     w.push_command(PlayerCommand::SetTaxRate(0.2));
     w.run_ticks(10);
@@ -44,7 +44,7 @@ fn test_save_round_trips_commands_and_events() {
 fn test_save_file_helpers() {
     let dir = std::env::temp_dir().join(format!("citysim-save-test-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&dir);
-    let mut w = World::new(9, Config::load().v1_profile());
+    let mut w = World::new(9, Config::load().dole_city().v1_profile());
     w.run_ticks(5);
     let p5 = save::save_path(&dir, 9, w.tick);
     save::save_to_file(&w, &p5).expect("save");
@@ -61,7 +61,7 @@ fn test_save_file_helpers() {
 /// A current save is not touched by the migration: an in-progress claim survives.
 #[test]
 fn test_current_save_keeps_live_claims() {
-    let mut w = World::new(12, Config::load().v1_profile());
+    let mut w = World::new(12, Config::load().dole_city().v1_profile());
     let gangs = w.gangs();
     let home = w.buildings_by_kind[&BuildingKind::Home][0];
     w.comp_mut::<citysim::Gang>(gangs[0]).expect("gang").territory = vec![home];
@@ -98,7 +98,7 @@ fn edge_bits(w: &World) -> Vec<EdgeBits> {
 /// loaded world again gives the same bytes.
 #[test]
 fn test_save_edges_round_trip_lossless() {
-    let mut w = World::new(42, Config::load().v1_profile());
+    let mut w = World::new(42, Config::load().dole_city().v1_profile());
     w.run_ticks(10 * TICKS_PER_DAY);
     assert!(w.edges.len() > 100, "a city ten days in knows people");
     assert!(w.edges.values().any(|e| e.trust != 0.3), "some trust has moved");
@@ -114,7 +114,7 @@ fn test_save_edges_round_trip_lossless() {
 /// runs on bit for bit, and two runs of a seed agree.
 #[test]
 fn test_word_save_mid_day_bit_identical() {
-    let mut original = World::new(25, Config::load().scaled_to(300));
+    let mut original = World::new(25, Config::load().dole_city().scaled_to(300));
     original.run_ticks(2 * TICKS_PER_DAY + 700);
     assert!(original.rumours.iter().any(|p| !p.entries.is_empty()));
     assert!(original.reputation.iter().flatten().count() > 0);
@@ -125,7 +125,7 @@ fn test_word_save_mid_day_bit_identical() {
     let a = blake3::hash(save::to_ron(&original).as_bytes());
     let b = blake3::hash(save::to_ron(&loaded).as_bytes());
     assert_eq!(a, b, "save/load mid-day diverged with the word on");
-    let mut again = World::new(25, Config::load().scaled_to(300));
+    let mut again = World::new(25, Config::load().dole_city().scaled_to(300));
     again.run_ticks(3 * TICKS_PER_DAY + 700);
     assert_eq!(a, blake3::hash(save::to_ron(&again).as_bytes()), "two runs of a seed agree");
 }
@@ -136,7 +136,7 @@ fn test_word_save_mid_day_bit_identical() {
 #[test]
 fn test_save_mid_hunt_continues_identically() {
     use citysim::systems::{demography, law};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY + 600);
     let ads: Vec<EntityId> =
         w.citizens().into_iter().filter(|&a| law::living(&w, a) && demography::is_adult(&w, a)).collect();
@@ -167,7 +167,7 @@ fn test_save_mid_hunt_continues_identically() {
 fn test_save_mid_guard_continues_identically() {
     use citysim::systems::{demography, grudges, law, lod};
     use citysim::{ActionInstance, ActionKind, Brain, DeathCause, ExecState, GoalKind, Lod, Plan};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY + 600);
     let ads: Vec<EntityId> =
         w.citizens().into_iter().filter(|&a| law::living(&w, a) && demography::is_adult(&w, a)).collect();
@@ -204,7 +204,7 @@ fn test_save_mid_guard_continues_identically() {
 fn test_save_mid_contract_keeps_identity() {
     use citysim::contract::{ContractKind, Origin, Posting, Target};
     use citysim::systems::{contracts, ownership};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY / 2);
     let ids: Vec<EntityId> = w
         .citizens()
@@ -248,7 +248,7 @@ fn test_save_mid_contract_keeps_identity() {
 /// `check_indices` is clean and the index equals the saved world's.
 #[test]
 fn test_save_round_trips_layoff_notes_and_rebuilds_the_employer_index() {
-    let mut w = World::new(42, Config::load().v1_profile());
+    let mut w = World::new(42, Config::load().dole_city().v1_profile());
     w.run_ticks(TICKS_PER_DAY + 600);
     let jobless: Vec<EntityId> = w.citizens().into_iter().filter(|&a| !w.has::<citysim::Job>(a)).take(3).collect();
     assert_eq!(jobless.len(), 3);

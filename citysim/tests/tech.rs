@@ -9,7 +9,7 @@ use citysim::{
 };
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn corp_named(w: &World, name: &str) -> EntityId {

@@ -42,8 +42,14 @@ fn test_cli_report_csv_header() {
     assert_eq!(&cols[..2], ["0", "Spring"], "row: {row}");
     let n = |i: usize| cols[i].parse::<u32>().expect("a count");
     let derelict_homeless = 5 * citysim::Config::load().street.seed_derelict_blocks as u32;
-    assert!((1995..=2000).contains(&n(2)) && (330..=500).contains(&n(3)), "row: {row}");
-    assert!((derelict_homeless - 5..=derelict_homeless).contains(&n(4)), "row: {row}");
+    // The flip (2026-10-10, wages from revenue, no net): the transition
+    // wave's seed_staff hires the city's staffing before day 0 (1,142 on seed
+    // 1), and the seeded homeless are the derelicts' residents plus the
+    // working poor housed nowhere near work (80 on seed 1): 1,000-1,300
+    // employed, the derelicts' to 120 homeless. The dole city's row
+    // (`Config::dole_city`) kept 330-500 and the derelicts' alone.
+    assert!((1995..=2000).contains(&n(2)) && (1000..=1300).contains(&n(3)), "row: {row}");
+    assert!((derelict_homeless - 5..=120).contains(&n(4)), "row: {row}");
     // M13 D49: corp slot 9 and the 40 asset columns; M14 V43: the 72 Virt
     // columns; M15 W43: the 68 word columns (30, 4 gangs x 2, 9 corps x 3, 3);
     // L2 (plan L34): the 54 living-city columns; L2 phase 3: the 15 budget columns;

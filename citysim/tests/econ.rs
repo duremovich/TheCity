@@ -11,7 +11,7 @@ use citysim::systems::{bind, econ, gang, world_market as wm};
 use citysim::{Building, BuildingKind, Config, Corp, Market, Wallet, World, TICKS_PER_DAY};
 
 fn city() -> World {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     assert!(wm::open(&w), "the market is on and open by the config");
     w
 }
@@ -63,7 +63,7 @@ fn test_tranche_bid_matches_closed_form_and_cap() {
 /// and revert toward 1; two worlds of one seed walk identically.
 #[test]
 fn test_appetite_walk_reverts_and_clamps() {
-    let cfg = Config::load().world_market;
+    let cfg = Config::load().dole_city().world_market;
     let seed = 42u64;
     let mut book = WorldBook::default();
     let (mut lo, mut hi, mut sum) = (f32::MAX, f32::MIN, 0.0f32);
@@ -90,7 +90,7 @@ fn test_appetite_walk_reverts_and_clamps() {
     // Two worlds of one seed: identical books after four midnights (the
     // scaled city runs quickly; the hash reads only seed, day and good).
     let run = || {
-        let mut w = World::new(7, Config::load().scaled_to(300));
+        let mut w = World::new(7, Config::load().dole_city().scaled_to(300));
         w.run_ticks(4 * TICKS_PER_DAY + 1);
         ExportGood::ALL.map(|g| wm::book(&w, g).cloned().unwrap_or_default())
     };
@@ -126,7 +126,7 @@ fn farm_with_rival_market(w: &mut World) -> (citysim::EntityId, Option<citysim::
 /// rival Market; the owner's own Market first either way.
 #[test]
 fn test_haul_sells_to_higher_of_world_and_rival() {
-    let wholesale = Config::load().corps.wholesale;
+    let wholesale = Config::load().dole_city().corps.wholesale;
     // (a) bid above wholesale: the World.
     let mut w = city();
     let (farm, owner, rival) = farm_with_rival_market(&mut w);

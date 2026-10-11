@@ -11,7 +11,7 @@ use citysim::{
 };
 
 fn sick_cfg() -> Config {
-    let mut c = Config::load();
+    let mut c = Config::load().dole_city();
     c.sickness.enabled = true;
     c
 }
@@ -43,13 +43,13 @@ fn health(w: &World, id: EntityId) -> Health {
     w.comp::<Health>(id).cloned().unwrap_or_default()
 }
 
-/// With `[sickness]` off (the shipped default) nothing of it is kept: no
+/// With `[sickness]` off (the dole city, `Config::dole_city`) nothing of it is kept: no
 /// `Health`, no synth subset, no health columns (the CSV identity against
 /// d771073 is the commit's A/B).
 #[test]
 fn test_sickness_off_leaves_no_trace() {
-    let mut w = World::new(42, Config::load());
-    assert!(!w.config.sickness.enabled, "the shipped default is off until the flip");
+    let mut w = World::new(42, Config::load().dole_city());
+    assert!(!w.config.sickness.enabled, "Config::dole_city has [sickness] off");
     w.run_ticks(5 * TICKS_PER_DAY);
     assert!(w.citizens().iter().all(|&a| !w.has::<Health>(a)), "a Health with sickness off");
     assert!(w.citizens().iter().all(|&a| w.comp::<Inventory>(a).is_none_or(|i| i.synth == 0)));
@@ -99,7 +99,7 @@ fn test_real_bought_above_the_floor() {
     w.insert(a, Health { malnutrition: 0.6, ..Health::default() });
     assert_eq!(diet::quality(&w, a, 4), Quality::Real, "malnourished with two meals' coins");
     // The diet off: always real, at the Market's price.
-    let mut off = World::new(42, Config::load());
+    let mut off = World::new(42, Config::load().dole_city());
     let b = adults(&off)[0];
     off.comp_mut::<Wallet>(b).expect("wallet").coins = 1;
     assert_eq!(diet::quality(&off, b, 4), Quality::Real);

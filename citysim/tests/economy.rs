@@ -4,13 +4,13 @@ use citysim::systems::economy;
 use citysim::{needs, Building, BuildingKind, Config, Job, Needs, Role, Skills, Wallet, World, TICKS_PER_DAY};
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 #[test]
 fn test_price_formula_table() {
     // The M1 table at price_base 3 (the v1 economy; L1b prices the 2,000 city at 4).
-    let cfg = Config::load().v1_profile();
+    let cfg = Config::load().dole_city().v1_profile();
     // price_ref_stock 1500: round(3 * sqrt(1500 / max(stock, 7))) clamped to 1..=30
     for (stock, price) in [(7, 30), (50, 16), (400, 6), (600, 5), (1500, 3), (2400, 2), (10000, 1)] {
         assert_eq!(economy::price_for_stock(&cfg.economy, stock), price, "stock {stock}");
@@ -114,7 +114,7 @@ fn test_wage_partially_paid_when_treasury_short() {
 
 #[test]
 fn test_hunger_decays_and_eating_restores() {
-    let cfg = Config::load();
+    let cfg = Config::load().dole_city();
     let mut n = Needs {
         hunger: 1.0,
         energy: 1.0,

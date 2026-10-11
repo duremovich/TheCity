@@ -342,7 +342,7 @@ fn test_command_log_replay_matches() {
 fn test_statistical_agent_eats_at_a_stocked_market_when_its_own_is_empty() {
     use citysim::{Building, BuildingKind, EventKind, Inventory, Job, Wallet};
     for broke in [false, true] {
-        let mut w = World::new(42, Config::load());
+        let mut w = World::new(42, Config::load().dole_city());
         w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
         let id = w
             .tier(Lod::Statistical)

@@ -162,7 +162,7 @@ fn reference(ctx: &PlanCtx, start: WorldState, goal: &GoalState, limits: Limits)
 
 #[test]
 fn test_planner_parity_with_whole_state_keys() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(3 * TICKS_PER_DAY + 13 * 60);
     let limits = Limits { max_expansions: w.config.brain.plan_max_expansions, max_len: w.config.brain.plan_max_len };
     let mut compared = 0;

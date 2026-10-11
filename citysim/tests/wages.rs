@@ -18,7 +18,7 @@ use citysim::{
 /// The phase-2 city: `[economy2] wages` is off by default until the stop
 /// rule is answered, so the tests force it on.
 fn config() -> Config {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     // The jobs round's keys at their off values: these tests pin phase 2's
     // rules (the round's own tests turn each key on).
@@ -309,7 +309,7 @@ fn test_seed_capital_moves_hoard_pro_rata_and_conserves() {
     let cfg = &w.config;
     let moved = cfg.world.treasury_initial - cfg.treasury.treasury_initial;
     // The same seed with wages off: the Treasury less what seeding spent.
-    let mut off = Config::load();
+    let mut off = Config::load().dole_city();
     off.economy2.wages = false;
     let w_off = World::new(42, off);
     let t_off = w_off.treasury().map_or(0, |t| t.coins);
@@ -488,7 +488,7 @@ fn test_clinic_chrome_sells_as_parts_equivalents() {
 /// three days (the byte identity against the phase-1 CLI is the device).
 #[test]
 fn test_wages_off_identical() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = false;
     let mut w = World::new(42, cfg);
     assert!(!wages::on(&w));
@@ -649,8 +649,8 @@ fn test_overflow_buys_only_from_a_positive_treasury() {
         w.treasury_mut().expect("treasury").coins = treasury;
         (w, farm)
     };
-    let batch = Config::load().economy.haul_batch;
-    let wholesale = Config::load().corps.wholesale;
+    let batch = Config::load().dole_city().economy.haul_batch;
+    let wholesale = Config::load().dole_city().corps.wholesale;
     // Phase 2: a negative Treasury still pays (the magic money).
     let (mut w, farm) = setup(false, -500);
     let moved = citysim::systems::economy::haul(&mut w, farm, None);
@@ -1174,7 +1174,7 @@ fn test_rehire_bonus_picks_the_laid_off_worker_over_a_nearer_stranger() {
     citysim::systems::demography::hire(&mut w, laid, farm, citysim::Role::Farmer);
     assert!(!w.laid_off.contains_key(&laid), "the hire spends the note");
     // Wages off never writes one.
-    let mut off = World::new(42, Config::load());
+    let mut off = World::new(42, Config::load().dole_city());
     assert!(!wages::on(&off));
     let worker = ownership::staff_at(&off, farm)[0];
     citysim::systems::economy::dismiss_as(&mut off, worker, Some(farm), "laid off".into(), EventKind::LaidOff);
@@ -1213,7 +1213,7 @@ fn test_hiring_key_weighs_the_roles_skill() {
 /// `check_indices` holds every day.
 #[test]
 fn test_employer_index_matches_a_scan_after_30_days() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     cfg.economy2.no_safety_net = true;
     let mut w = World::new(42, cfg);

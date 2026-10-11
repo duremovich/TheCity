@@ -86,7 +86,7 @@ fn reach_of(w: &World, f: EntityId) -> f32 {
 
 #[test]
 fn test_feeds_seeded_with_owner_district_and_vacancies() {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     let feeds = news::all_feeds(&w);
     assert_eq!(feeds.len(), 2, "the Civic Wire and Nutrix Now");
     let civic = civic_wire(&w);
@@ -105,7 +105,7 @@ fn test_feeds_seeded_with_owner_district_and_vacancies() {
 
 #[test]
 fn test_feed_posts_at_reach_and_skips_buried() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     clear_pools(&mut w);
     apply(&mut w, PlayerCommand::SetPressLicence(false));
     let civic = civic_wire(&w);
@@ -134,7 +134,7 @@ fn test_feed_posts_at_reach_and_skips_buried() {
 
 #[test]
 fn test_spin_plants_rival_misdeed_and_charges_plant() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     clear_pools(&mut w);
     let nutrix = corp_named(&w, "Nutrix");
     let vatra = corp_named(&w, "Vatra");
@@ -167,7 +167,7 @@ fn test_spin_plants_rival_misdeed_and_charges_plant() {
 
 #[test]
 fn test_spin_buries_own_story_for_bury_days() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     clear_pools(&mut w);
     let nutrix = corp_named(&w, "Nutrix");
     let exec = w.comp::<Corp>(nutrix).and_then(|c| c.exec).expect("exec");
@@ -208,7 +208,7 @@ fn test_spin_buries_own_story_for_bury_days() {
 
 #[test]
 fn test_planted_story_moves_press_and_loyalty() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(TICKS_PER_DAY);
     let vatra = corp_named(&w, "Vatra");
     let staff: Vec<EntityId> = ownership::employees_of(&w, vatra)
@@ -244,7 +244,7 @@ fn test_planted_story_moves_press_and_loyalty() {
 
 #[test]
 fn test_press_licence_off_only_civic_wire_publishes() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     clear_pools(&mut w);
     w.levers.tax_rate = 0.0;
     apply(&mut w, PlayerCommand::SetPressLicence(false));
@@ -271,7 +271,7 @@ fn test_press_licence_off_only_civic_wire_publishes() {
 
 #[test]
 fn test_censor_buries_faction_on_civic_wire() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     clear_pools(&mut w);
     apply(&mut w, PlayerCommand::SetPressLicence(false));
     let g = w.gang_list()[0];
@@ -299,7 +299,7 @@ fn test_censor_buries_faction_on_civic_wire() {
 
 #[test]
 fn test_ads_split_by_reach_and_civic_share_to_treasury() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     clear_pools(&mut w);
     w.levers.tax_rate = 0.0;
     let civic = civic_wire(&w);
@@ -340,7 +340,7 @@ fn test_ads_split_by_reach_and_civic_share_to_treasury() {
 
 #[test]
 fn test_feeds_survive_save_and_load() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     w.run_ticks(2 * TICKS_PER_DAY + 30);
     let text = citysim::save::to_ron(&w);
     let back = citysim::save::from_ron(&text).expect("loads");
@@ -352,7 +352,7 @@ fn test_feeds_survive_save_and_load() {
 #[test]
 fn test_plants_respect_burials_and_censorship() {
     let setup = || {
-        let mut w = World::new(42, Config::load());
+        let mut w = World::new(42, Config::load().dole_city());
         clear_pools(&mut w);
         let nutrix = corp_named(&w, "Nutrix");
         let vatra = corp_named(&w, "Vatra");

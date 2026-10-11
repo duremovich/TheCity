@@ -9,9 +9,9 @@ use citysim::systems::ownership;
 use citysim::systems::{founding, jobs, wages};
 use citysim::{save, Building, BuildingKind, Config, Corp, EntityId, EventKind, Job, Role, World};
 
-/// The wages city (`[economy2] wages` is off by default until the flip).
+/// The wages city (pinned on over the dole city, `Config::dole_city`).
 fn wages_city() -> World {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     let w = World::new(42, cfg);
     assert!(wages::on(&w));
@@ -41,7 +41,7 @@ fn places_held(w: &World, b: EntityId, role: Role) -> usize {
 /// BFS proved every door reachable.
 #[test]
 fn test_map_has_the_new_lots_on_one_floor() {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     assert_eq!(w.map.count_kind(BuildingKind::Lot), 160);
     let wide = w.map.buildings.iter().filter(|b| b.kind == BuildingKind::Lot && b.rect.w == 15).count();
     assert_eq!(wide, 20, "the Vats' double-wide yards");
@@ -52,7 +52,7 @@ fn test_map_has_the_new_lots_on_one_floor() {
 /// absent); a Block seeded on three floors seats three floors' residents.
 #[test]
 fn test_map_eighth_field_is_floors() {
-    let text = std::fs::read_to_string(Config::load().assets_dir.join("map.txt")).expect("map");
+    let text = std::fs::read_to_string(Config::load().dole_city().assets_dir.join("map.txt")).expect("map");
     let mut done = false;
     let edited: String = text
         .lines()
@@ -76,7 +76,7 @@ fn test_map_eighth_field_is_floors() {
 /// margin rule a corp staffs it to twice the places (overtime alike).
 #[test]
 fn test_two_floor_farm_posts_twice_the_places() {
-    let mut cfg = Config::load();
+    let mut cfg = Config::load().dole_city();
     cfg.economy2.wages = true;
     cfg.economy2.staff_ceiling_mult = 1.0;
     cfg.economy2.capital_hi_days = 0.0;
@@ -122,7 +122,7 @@ fn test_capacity_multiplies_and_clamps() {
     assert_eq!(founding::with_floors(BuildingKind::Farm, 16, 3), 16, "a Farm's room is not seats");
     assert_eq!(founding::with_floors(BuildingKind::Market, 20, 2), 20);
 
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let lot = founding::vacant_lots(&w)
         .into_iter()
         .find(|&l| {
@@ -130,7 +130,7 @@ fn test_capacity_multiplies_and_clamps() {
             founding::tier_ok(BuildingKind::Club, bd.tier) && founding::door_tier(&w, bd.door) >= 1
         })
         .expect("a Lot a Club may take");
-    let mut one = World::new(42, Config::load());
+    let mut one = World::new(42, Config::load().dole_city());
     founding::build_on_lot(&mut one, lot, BuildingKind::Club, None).expect("one floor");
     set_floors(&mut w, lot, 2);
     founding::build_on_lot(&mut w, lot, BuildingKind::Club, None).expect("two floors");
@@ -242,13 +242,13 @@ fn test_floor_trigger_after_floor_days_with_no_lot_near() {
 }
 
 fn w_days() -> u8 {
-    Config::load().floors.floor_days
+    Config::load().dole_city().floors.floor_days
 }
 
 /// J6, J32: floors survive a save round trip byte for byte.
 #[test]
 fn test_save_round_trip_keeps_floors() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let home = w.buildings_of_kind(BuildingKind::Home)[0];
     founding::add_floor(&mut w, home, None).expect("a floor");
     w.comp_mut::<Building>(home).expect("home").floor_days = 3;
@@ -271,7 +271,7 @@ fn test_save_round_trip_keeps_floors() {
 fn test_hunker_keeps_half_of_every_floor() {
     use citysim::systems::corp_brain;
     use citysim::{CorpOrder, Niche};
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     // A day in: the opening vacancies filled.
     w.run_ticks(citysim::TICKS_PER_DAY);
     let corp = corp_named(&w, "Nutrix");

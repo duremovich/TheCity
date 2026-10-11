@@ -10,7 +10,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 #[test]
@@ -169,7 +169,7 @@ fn kind_count(m: &Map, kind: BuildingKind) -> usize {
 
 #[test]
 fn test_map_v2_loads_with_zones() {
-    let cfg = Config::load();
+    let cfg = Config::load().dole_city();
     let m = Map::load(&cfg.asset("map.txt"));
     assert_eq!((m.w(), m.h()), (256, 192));
     assert!(m.has_zones());
@@ -211,7 +211,7 @@ fn test_map_v2_loads_with_zones() {
 
 #[test]
 fn test_map_v1_loads_without_zones() {
-    let cfg = Config::load();
+    let cfg = Config::load().dole_city();
     let m = Map::load(&cfg.asset("map_v1.txt"));
     assert_eq!((m.w(), m.h()), (96, 64));
     assert!(!m.has_zones());
@@ -226,7 +226,7 @@ fn test_map_v1_loads_without_zones() {
 
 #[test]
 fn test_nearest_market_per_agent() {
-    let mut w = World::new(42, Config::load());
+    let mut w = World::new(42, Config::load().dole_city());
     let markets = w.buildings_of_kind(BuildingKind::Market).to_vec();
     assert_eq!(markets.len(), 3);
     // Two jobless adults (the employer rule does not apply), each put outside a different Market.
@@ -253,7 +253,7 @@ fn test_nearest_market_per_agent() {
 
 #[test]
 fn test_flow_field_lazy_lru_and_wall_change() {
-    let mut cfg = Config::load().v1_profile();
+    let mut cfg = Config::load().dole_city().v1_profile();
     cfg.exec.flow_field_cache = 2;
     let mut w = World::new(7, cfg);
     assert!(w.flow_fields.is_empty(), "fields are built lazily");
@@ -276,7 +276,7 @@ fn test_flow_field_lazy_lru_and_wall_change() {
 
 #[test]
 fn test_two_thousand_spawn_housed() {
-    let w = World::new(42, Config::load());
+    let w = World::new(42, Config::load().dole_city());
     assert_eq!(w.population(), 2000);
     let homeless =
         w.citizens().into_iter().filter(|&id| w.comp::<Household>(id).is_none_or(|h| h.home.is_none())).count();

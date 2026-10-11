@@ -13,7 +13,7 @@ use citysim::{
 };
 
 fn world(seed: u64) -> World {
-    let w = World::new(seed, Config::load().scaled_to(300));
+    let w = World::new(seed, Config::load().dole_city().scaled_to(300));
     assert!(fixes::violence_on(&w), "[life] violence_fixes on in the shipped config");
     w
 }

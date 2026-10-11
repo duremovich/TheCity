@@ -7,7 +7,7 @@ use citysim::systems::{demography, jobs, law, ownership};
 use citysim::{BuildingKind, Config, EntityId, EventKind, Job, Role, World, TICKS_PER_DAY, TICKS_PER_HOUR};
 
 fn world() -> World {
-    World::new(42, Config::load())
+    World::new(42, Config::load().dole_city())
 }
 
 fn trade(w: &World, key: &str) -> Role {

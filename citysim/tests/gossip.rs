@@ -12,7 +12,7 @@ use citysim::{
 
 /// The v1 city (the word always on since 2026-10-09).
 fn word_world(seed: u64) -> World {
-    World::new(seed, Config::load().v1_profile())
+    World::new(seed, Config::load().dole_city().v1_profile())
 }
 
 /// Adults with a Brain and a Memory, ascending.
@@ -270,7 +270,7 @@ fn test_entries_unchanged_by_heard() {
 
 #[test]
 fn test_pool_decays_leaks_adjacent_only_and_drops() {
-    let mut w = World::new(54, Config::load());
+    let mut w = World::new(54, Config::load().dole_city());
     for p in w.rumours.iter_mut() {
         p.entries.clear();
     }
@@ -327,7 +327,7 @@ fn test_pool_decays_leaks_adjacent_only_and_drops() {
 
 #[test]
 fn test_kin_channel_reaches_friend_in_other_district() {
-    let mut w = World::new(55, Config::load());
+    let mut w = World::new(55, Config::load().dole_city());
     let (spire, east) = (DistrictId(0), DistrictId(7));
     assert_eq!(w.district_name(spire), "Spire");
     assert_eq!(w.district_name(east), "Sump East");
@@ -366,7 +366,7 @@ fn test_kin_channel_reaches_friend_in_other_district() {
 
 #[test]
 fn test_distortion_never_at_knowledge_one() {
-    let mut w = World::new(56, Config::load());
+    let mut w = World::new(56, Config::load().dole_city());
     let gang = w.gang_list()[0];
     let ads = adults(&w);
     let (member, speaker) = (ads[0], ads[1]);

@@ -428,7 +428,7 @@ fn mechanisms() -> Vec<Mechanism> {
 }
 
 /// Hunger as sickness: the bullets read only with `[sickness]` on (the
-/// shipped default is off until the flip). Chosen on the flipped city,
+/// dole city, `Config::dole_city`, has them off). Chosen on the flipped city,
 /// 120 days, seeds 42-47 (each on 6 of 6; see the P5 commit). A regular's
 /// bin contest, a diagnosis, a cure and a Disease death fired on 2 or fewer
 /// of 6: unit tests in `sickness.rs` instead.

@@ -275,8 +275,9 @@ fn probe_guard_eats_on_a_long_shift() {
 /// Jobs and room P1 (spec § 7, plan P1 step 5): a Vat Tech laid off at
 /// midnight in the wages + no-net city, with at least three posts open
 /// city-wide, holds a Job again within 14 days (the rehire bonus and the
-/// skill key put the laid-off hand back to work). Ignored until the flip
-/// (J31): it needs `[economy2] wages` and `no_safety_net` on.
+/// skill key put the laid-off hand back to work). Still ignored after the
+/// flip: on the flipped seed-42 city its stimulus (three posts open
+/// city-wide) does not hold (2 open), so it measures nothing.
 #[test]
 #[ignore]
 fn probe_laid_off_farm_worker_finds_work_within_14_days() {
@@ -320,10 +321,9 @@ fn probe_laid_off_farm_worker_finds_work_within_14_days() {
 
 /// Jobs and room P6 (spec § 7, "the offer is real"): a migrant spawned with
 /// an offer at the weekly midnight is at that workplace on shift within two
-/// days. Ignored until the flip (J31): it needs `[economy2] wages` and
-/// `no_safety_net` on.
+/// days. Needs `[economy2] wages` and `no_safety_net` on: run since the
+/// flip (J31).
 #[test]
-#[ignore]
 fn probe_offer_migrant_reaches_the_first_shift() {
     let mut cfg = Config::load();
     cfg.economy2.wages = true;
@@ -701,7 +701,9 @@ fn probe_starving_eats_before_spending_or_sleeping() {
             let mut log = Vec::new();
             let end = w.tick + 8 * TICKS_PER_HOUR;
             run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
-            let first_eat = log.iter().position(|&s| is_eat(Some(s)) || s == ActionKind::EatAlms);
+            // A bin meal is a meal (the bins run with [sickness] on, the shipped city since the flip).
+            let first_eat =
+                log.iter().position(|&s| is_eat(Some(s)) || s == ActionKind::EatAlms || s == ActionKind::DumpsterDive);
             let first_spend = log.iter().position(|&s| {
                 matches!(
                     s,
@@ -890,19 +892,23 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     w.comp_mut::<Wallet>(far).expect("wallet").coins = rents.max(1) + 2;
     let before = door_of(&w, far).map(|d| cost(&w, d, work));
     let partner_home = home(&w, partner).expect("partner home");
-    let partner_door = w.comp::<Building>(partner_home).expect("home").door;
     let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
     run_to(&mut w, far, end, |_| {});
     let after = door_of(&w, far).map(|d| cost(&w, d, work));
     // The partner's Home went to a far worker (this farmer, or a farther one
     // the pass served first): a trade nearer work happened.
-    let traded_in = w.residents_of(partner_home).iter().copied().find(|&r| {
-        r != partner
-            && work_of(&w, r).is_some_and(|wd| cost(&w, partner_door, wd) <= cap)
-            && w.events.iter().any(|e| {
-                e.kind == citysim::EventKind::Housed && e.actors.first() == Some(&r) && e.text.contains("traded")
-            })
-    });
+    // (The trade's own event: the trader may have moved on since.)
+    let traded_in = w
+        .events
+        .iter()
+        .find(|e| {
+            e.kind == citysim::EventKind::Housed
+                && e.actors.len() == 2
+                && e.actors[1] == partner_home
+                && e.actors[0] != partner
+                && e.text.contains("traded")
+        })
+        .map(|e| e.actors[0]);
     eprintln!(
         "farmer {}: commute {before:?} -> {after:?} ticks; partner {} moved out {}; traded in {:?}",
         far.index,
@@ -1194,7 +1200,9 @@ fn probe_worker_eats_before_the_shift_not_during_it() {
         ate |= is_eat(s);
         let on = w.comp::<Job>(a).is_some_and(|j| j.on_shift(w.tick_of_day()));
         let eat_goal = w.comp::<Brain>(a).is_some_and(|b| b.current_goal == Some(citysim::GoalKind::Eat));
-        if on && eat_goal && building(w, a) != Some(employer) {
+        // Walking for food (a GoTo under Eat): a carried meal eaten on the walk in is no walk off the job.
+        let walking = matches!(s, Some(ActionKind::GoTo(_)));
+        if on && eat_goal && walking && building(w, a) != Some(employer) {
             away_for_food += 1;
         }
         if w.tick_of_day() == 540 {
