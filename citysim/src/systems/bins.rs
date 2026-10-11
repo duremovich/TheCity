@@ -25,7 +25,7 @@ use crate::world::World;
 const ROLL_SICK: u64 = 0xb1_0001;
 const ROLL_SHAKE: u64 = 0xb1_0002;
 
-/// The bins run (`[sickness] enabled`, `diet` and `bins`).
+/// The bins run (`[sickness] diet` and `bins`).
 pub fn on(world: &World) -> bool {
     crate::systems::diet::on(world) && world.config.sickness.bins
 }

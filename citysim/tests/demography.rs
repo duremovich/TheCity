@@ -20,15 +20,16 @@ fn burials(w: &World) -> u32 {
     w.stats.history.iter().map(|r| r.burials).sum::<u32>() + w.stats.current.burials
 }
 
-/// The bookkeeping (`needs::starvation`): three days at hunger 0 kill. Run
+/// The bookkeeping (`needs::starvation`): a week at hunger 0 kills (hunger
+/// as sickness § 7, always on since P10; three days before it). Run
 /// directly: in the full city a broke agent finds a Mission's meal or a
 /// scavenged coin, so the world never holds one at 0 that long.
 #[test]
-fn test_starvation_kills_after_3_days_at_zero() {
+fn test_starvation_kills_after_the_grace_at_zero() {
     let mut w = world(41);
     let id = civilian(&w);
-    let grace = w.config.needs.starvation_grace_ticks;
-    assert_eq!(grace, 3 * TICKS_PER_DAY);
+    let grace = w.config.sickness.starve_grace_days * TICKS_PER_DAY;
+    assert_eq!(grace, 7 * TICKS_PER_DAY);
     let start = w.tick;
     w.comp_mut::<Needs>(id).expect("needs").hunger = 0.0;
     for t in start..=start + grace {

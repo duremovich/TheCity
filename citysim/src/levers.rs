@@ -141,7 +141,7 @@ pub enum PlayerCommand {
     /// The city's Sanitation headcount (`0..=60`).
     SetSanitation(u8),
     /// Jobs v2 J17 (P5a): release a `SetGuardCount`/`SetSanitation` pin back
-    /// to the civic budget (CLI `civic=auto`; with `no_safety_net` only).
+    /// to the civic budget (CLI `civic=auto`; under the market wage law only).
     SetCivicAuto,
     /// A district's sweeper weight multiplier (`0.0..=5.0`; 0 sends no sweepers).
     SetSanitationWeight {
@@ -460,6 +460,21 @@ pub enum PlayerCommand {
     /// On: the law posts a public Locate on every wanted suspect after one
     /// day instead of `[contracts] law_bounty_days`.
     PublicBounties(bool),
+    // --- P10 (docs/P10_POLICY.md): the city's policy as levers (the
+    // council's acts once M18's player holds a seat; a god's today). The
+    // dole is `SetDolePerDay`, public works `SetPublicWorks`.
+    /// The levy on (the M11 wage schedule, the corps' upkeep levy and L2's
+    /// budget band) or off (the market wage law: wages from revenue, the
+    /// property rate, the tax band). A mid-run switch runs, uncalibrated.
+    SetLevy(bool),
+    /// School meals from the Reserve on or off.
+    SetSchoolMeals(bool),
+    /// The Reserve's free release to a stranded Market on or off.
+    SetReserveRelease(bool),
+    /// The whole safety net enacted (the dole at `[levers] dole_per_day`,
+    /// public works, school meals, the Reserve release) or repealed (all
+    /// four off). The levy is its own lever.
+    SetSafetyNet(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -580,6 +595,22 @@ pub struct Levers {
     /// on every wanted suspect after one day.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub public_bounties: bool,
+    // --- P10 (docs/P10_POLICY.md): the policy levers the retired
+    // `[economy2] wages` / `no_safety_net` switches became. With
+    // `dole_per_day` and `public_works` above they are the city's policy
+    // (seeded from `[policy]`; serde defaults are the shipped city's).
+    /// The levy (`SetLevy`): the M11 wage schedule, the corps' upkeep levy
+    /// to the Treasury and L2's budget band; off, the market wage law
+    /// (`econ::wages_on`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub levy: bool,
+    /// School meals (`SetSchoolMeals`): a child whose pantry is empty eats
+    /// from the Reserve.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub school_meals: bool,
+    /// The Reserve's free release to a stranded Market (`SetReserveRelease`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub reserve_release: bool,
 }
 
 fn is_zero_f32(v: &f32) -> bool {
@@ -634,12 +665,22 @@ fn rects_overlap(a: Rect, b: Rect) -> bool {
 
 impl Levers {
     pub fn from_config(cfg: &Config) -> Levers {
+        let policy = &cfg.policy;
         Levers {
-            tax_rate: cfg.levers.tax_rate,
+            // Real economy E36 (phase 3a): the market wage law opens at
+            // `[treasury] tax_initial` (P10: under the market law, the levy
+            // not enacted; was `no_net`).
+            tax_rate: if !policy.levy && cfg.treasury.tax_initial >= 0.0 {
+                cfg.treasury.tax_initial
+            } else {
+                cfg.levers.tax_rate
+            },
             sentence_mult: cfg.levers.sentence_mult,
             guard_count: cfg.levers.guard_count,
             immigration_per_week: cfg.levers.immigration_per_week,
-            dole_per_day: cfg.levers.dole_per_day,
+            // P10: the dole at its rate only where the policy enacts it (the
+            // shipped city seeds 0, Real economy E22 (a)).
+            dole_per_day: if policy.dole { cfg.levers.dole_per_day } else { 0 },
             city_rent: cfg.rent.base,
             rent_cap: None,
             no_city_evictions: false,
@@ -658,9 +699,9 @@ impl Levers {
             press_licence: true,
             news_tax: 0.0,
             censored: Default::default(),
-            // Real economy E22 (b) (phase 3a): no public works with `no_net`
-            // (`budget::daily` does not run either: `treasury::daily` replaces it).
-            public_works: !crate::systems::econ::no_net_cfg(cfg),
+            // P10: public works as the policy enacts them (Real economy E22
+            // (b): none in the shipped city).
+            public_works: policy.public_works,
             // Real economy (plan E4, E12): the World market buys from seed;
             // `SetExport` closes and reopens it.
             export_open: true,
@@ -669,6 +710,9 @@ impl Levers {
             fixer_licence: true,
             accessory_mult: None,
             public_bounties: false,
+            levy: policy.levy,
+            school_meals: policy.school_meals,
+            reserve_release: policy.reserve_release,
         }
     }
 }
@@ -832,7 +876,7 @@ impl World {
                         self.levers.guard_count, self.levers.sanitation_count
                     ))
                 } else {
-                    Err("SetCivicAuto: no civic budget (no_safety_net is off)".to_string())
+                    Err("SetCivicAuto: no civic budget (the levy is enacted)".to_string())
                 };
                 self.lever_result(text);
             }
@@ -1064,7 +1108,7 @@ impl World {
                     self.econ.tax_pinned = false;
                     Ok(format!("Tax rate released to the band (now {:.2})", self.levers.tax_rate))
                 } else {
-                    Err("SetTaxAuto: no tax band (no_safety_net is off)".to_string())
+                    Err("SetTaxAuto: no tax band (the levy is enacted)".to_string())
                 };
                 self.lever_result(text);
             }
@@ -1100,6 +1144,41 @@ impl World {
                     "Lever: public bounties back to the law's own delay"
                 };
                 self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetLevy(on) => {
+                self.levers.levy = *on;
+                let text = if *on {
+                    "Policy: the levy enacted (the wage schedule and the corps' upkeep levy)"
+                } else {
+                    "Policy: the levy repealed (wages from revenue, the tax band)"
+                };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetSchoolMeals(on) => {
+                self.levers.school_meals = *on;
+                let text = if *on { "Policy: school meals enacted" } else { "Policy: school meals repealed" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetReserveRelease(on) => {
+                self.levers.reserve_release = *on;
+                let text =
+                    if *on { "Policy: the Reserve release enacted" } else { "Policy: the Reserve release repealed" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetSafetyNet(on) => {
+                let dole = if *on { self.config.levers.dole_per_day.min(10) } else { 0 };
+                self.levers.dole_per_day = dole;
+                self.levers.public_works = *on;
+                self.levers.school_meals = *on;
+                self.levers.reserve_release = *on;
+                let text = if *on {
+                    format!(
+                        "Policy: the safety net enacted (a dole of {dole} a day, public works, school meals, the Reserve release)"
+                    )
+                } else {
+                    "Policy: the safety net repealed".to_string()
+                };
+                self.push_event(EventKind::PlayerAction, &[], text);
             }
             PlayerCommand::SetOutsideWage(w) => {
                 let w = if w.is_finite() { w.clamp(0.1, 1000.0) } else { 0.1 };

@@ -246,12 +246,13 @@ fn test_capacity_with_strength_and_pack() {
     let who = adults(&w)[11];
     w.comp_mut::<Body>(who).expect("body").strength = 0.4;
     assert_eq!(assets::capacity(&w, who), 24);
-    // No stims or parts: buy_quantity is the M12 one.
+    // No stims or parts: buy_quantity is the M12 one, at the meal's price
+    // (hunger as sickness, always on since P10: a broke buyer's meal is synth).
     let market = w.building_of_kind(BuildingKind::Market);
     for (food, coins) in [(0, 100), (18, 100), (20, 100), (5, 4), (0, 0)] {
         w.comp_mut::<Inventory>(who).expect("inv").food = food;
         set_coins(&mut w, who, coins);
-        let price = w.price_for(market.expect("market"), who);
+        let price = citysim::systems::diet::price_at(&w, who, market.expect("market"));
         let stock = w.comp::<Building>(market.expect("m")).expect("b").stock_food;
         let m12 = ((coins / price).clamp(0, 3) as u32).min(20 - food).min(stock);
         assert_eq!(economy::buy_quantity(&w, who, market), m12, "food {food}, coins {coins}");

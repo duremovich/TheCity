@@ -18,7 +18,7 @@ use citysim::{
 /// adults' wallets emptied every evening).
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
-    cfg.demography.school_meals = false;
+    cfg.policy.school_meals = false;
     cfg
 }
 
@@ -27,7 +27,7 @@ fn config() -> Config {
 #[test]
 fn test_camp_parts_pay_inputs_with_wages_on() {
     let mut cfg = config();
-    cfg.economy2.wages = true;
+    cfg.policy.levy = false;
     let mut w = World::new(42, cfg);
     assert!(citysim::systems::wages::on(&w));
     let city = city_camp(&w);

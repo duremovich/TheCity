@@ -27,7 +27,7 @@ const HIRE_DAYS: u8 = 3;
 /// E18: days over `fire_above × P*` before a corp lays off.
 const FIRE_DAYS: u8 = 7;
 
-/// Plan E1: `[living] enabled && [economy2] enabled && [economy2] wages`.
+/// Plan E1: P10: the levy not enacted (`econ::wages_on`).
 pub fn on(world: &World) -> bool {
     crate::systems::econ::wages_on(world)
 }

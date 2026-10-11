@@ -156,7 +156,7 @@ pub struct StatTable {
     /// `[crime] stat_theft_caught_p`.
     #[serde(default)]
     pub p_theft_caught: Option<f32>,
-    /// The no-net income path (flip readiness, read only with `econ::no_net`):
+    /// The no-net income path (flip readiness, read only with `econ::wages_on` (P10)):
     /// the chance a jobless adult below its savings line (`SAVINGS_DAYS`
     /// meals) spends the hour scavenging, per row (phase, lawfulness and
     /// hunger at the hour's start, as `rows`). `calibrate` writes it only in
@@ -169,7 +169,7 @@ pub struct StatTable {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_beg: Option<[f32; STAT_ROWS]>,
     /// The no-net need theft (flip readiness, read only with
-    /// `econ::no_net`): the chance a hungry adult (below `hunger_edge`) who
+    /// `econ::wages_on` (P10)): the chance a hungry adult (below `hunger_edge`) who
     /// cannot buy a meal steals one in the hour, per lawfulness bucket.
     /// `calibrate` writes it only in a no-net city: Full thefts by a hungry
     /// thief below the meal price per such agent-hour (those thefts leave
@@ -1101,9 +1101,8 @@ impl World {
     /// Build the initial city: map, buildings, gang, 300 citizens with homes
     /// and jobs. Deterministic for a given `(seed, config)`.
     pub fn new(seed: u64, config: Config) -> World {
-        // Real economy E22 (a), E36 (phase 3a): the dole and school meals
-        // resolved off with `no_net` (a no-op otherwise).
-        let config = crate::systems::econ::apply(config);
+        // P10: the starting policy (`[policy]`) seeds the policy levers in
+        // `Levers::from_config` (it was `econ::apply`'s config rewrite).
         let map = Map::load(&config.asset(&config.world.map));
         let names = NameTables::load(&config);
         // Absent until `citysim-cli calibrate` has written it; any other read
@@ -1360,7 +1359,7 @@ impl World {
         systems::virt::seed_ice(&mut w);
         // M15 W28: every corp's and the Law's opening competence.
         systems::competence::seed(&mut w);
-        // Flip readiness (the transition wave; no_net): the Recycler's
+        // Flip readiness (the transition wave; the market wage law): the Recycler's
         // opening float, out of the opening hoard (a purse move, no RNG).
         systems::treasury::seed_till(&mut w);
         // Real economy phase 2 (plan E14, Seeding): the hoard into the
@@ -1407,7 +1406,7 @@ impl World {
                 _ => 0,
             };
             // Jobs and room J7: a map building's seats × its floors.
-            let capacity = crate::systems::founding::with_floors(&self.config, def.kind, cfg.capacity, def.floors);
+            let capacity = crate::systems::founding::with_floors(self, def.kind, cfg.capacity, def.floors);
             let id = self.spawn();
             self.insert(
                 id,

@@ -1586,7 +1586,7 @@ pub fn end_shift(world: &mut World, id: EntityId) {
 }
 
 /// L1 `Scavenge`: `[life] scavenge_coins` from the Treasury (the Recycler's
-/// scrap price, `Flow::Sanitation`) when it is not negative; with `no_net`
+/// scrap price, `Flow::Sanitation`) when it is not negative; under the market wage law
 /// from the Recycler's till (E33).
 fn scavenge(world: &mut World, id: EntityId) -> StepResult {
     // The find and its pay (`jobs::scavenge_find`, shared with the

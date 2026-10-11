@@ -9,10 +9,10 @@ use crate::components::{BuildingKind, Market};
 use crate::entity::EntityId;
 use crate::world::World;
 
-/// Synth and real meals, the meters and the debuffs (`[sickness] enabled`
-/// and `diet`).
+/// Synth and real meals, the meters and the debuffs (`[sickness] diet`;
+/// always on since P10 but for the part switch).
 pub fn on(world: &World) -> bool {
-    world.config.sickness.enabled && world.config.sickness.diet
+    world.config.sickness.diet
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

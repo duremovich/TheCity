@@ -9,10 +9,13 @@ use citysim::systems::ownership;
 use citysim::systems::{founding, jobs, wages};
 use citysim::{save, Building, BuildingKind, Config, Corp, EntityId, EventKind, Job, Role, World};
 
-/// The wages city (pinned on over the dole city, `Config::dole_city`).
+/// The wages city (the market wage law over the dole city, `Config::dole_city`).
 fn wages_city() -> World {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
+    cfg.policy.levy = false;
+    // P10: the housing pre-roll runs under the market wage law now (it read
+    // no-net); these tests pin the city they were written on, without it.
+    cfg.life.housing_preroll = false;
     let w = World::new(42, cfg);
     assert!(wages::on(&w));
     w
@@ -69,7 +72,7 @@ fn test_map_eighth_field_is_floors() {
     let homes: Vec<_> = map.buildings.iter().filter(|b| b.kind == BuildingKind::Home).collect();
     assert_eq!(homes[0].floors, 3);
     assert!(homes[1..].iter().all(|b| b.floors == 1));
-    assert_eq!(founding::with_floors(&Config::load(), BuildingKind::Home, 5, 3), 15);
+    assert_eq!(founding::with_floors(&World::new(42, Config::load().v1_profile()), BuildingKind::Home, 5, 3), 15);
 }
 
 /// J7: a two-floor Farm's places are twice a one-floor Farm's, and under the
@@ -77,7 +80,10 @@ fn test_map_eighth_field_is_floors() {
 #[test]
 fn test_two_floor_farm_posts_twice_the_places() {
     let mut cfg = Config::load().dole_city();
-    cfg.economy2.wages = true;
+    cfg.policy.levy = false;
+    // P10: the housing pre-roll runs under the market wage law now (it read
+    // no-net); these tests pin the city they were written on, without it.
+    cfg.life.housing_preroll = false;
     cfg.economy2.staff_ceiling_mult = 1.0;
     cfg.economy2.capital_hi_days = 0.0;
     cfg.economy2.capital_lo_days = 0.0;
@@ -117,14 +123,16 @@ fn test_two_floor_farm_posts_twice_the_places() {
 /// Lot of two floors converted into a Club seats and posts two floors' worth.
 #[test]
 fn test_capacity_multiplies_and_clamps() {
-    let cfg = Config::load();
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Home, 5, 2), 10);
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Hotel, 12, 3), 36);
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Club, 40, 6), 240);
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Club, 100, 3), 255, "clamped at u8::MAX");
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Farm, 16, 3), 48, "a Farm's floors hold their shifts");
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Fab, 14, 2), 28, "a Fab's floors hold their shifts");
-    assert_eq!(founding::with_floors(&cfg, BuildingKind::Market, 20, 2), 20);
+    // The market wage law (P10: the levy repealed) on the small v1 city.
+    let mut market = World::new(42, Config::load().v1_profile());
+    market.levers.levy = false;
+    assert_eq!(founding::with_floors(&market, BuildingKind::Home, 5, 2), 10);
+    assert_eq!(founding::with_floors(&market, BuildingKind::Hotel, 12, 3), 36);
+    assert_eq!(founding::with_floors(&market, BuildingKind::Club, 40, 6), 240);
+    assert_eq!(founding::with_floors(&market, BuildingKind::Club, 100, 3), 255, "clamped at u8::MAX");
+    assert_eq!(founding::with_floors(&market, BuildingKind::Farm, 16, 3), 48, "a Farm's floors hold their shifts");
+    assert_eq!(founding::with_floors(&market, BuildingKind::Fab, 14, 2), 28, "a Fab's floors hold their shifts");
+    assert_eq!(founding::with_floors(&market, BuildingKind::Market, 20, 2), 20);
 
     let mut w = World::new(42, Config::load().dole_city());
     let lot = founding::vacant_lots(&w)
@@ -376,7 +384,7 @@ fn test_workplace_floors_only_under_the_room_cap() {
         (per, two, three)
     };
     let shipped = Config::load();
-    assert!(shipped.economy2.wages && shipped.economy2.room_cap, "the shipped city runs the cap");
+    assert!(!shipped.policy.levy && shipped.economy2.room_cap, "the shipped city runs the cap");
     let (per, two, three) = farm_on_two_floors(shipped.clone());
     assert!(per > 1, "{per}");
     assert_eq!(usize::from(two), (2 * usize::from(per)).min(255), "two floors' room");

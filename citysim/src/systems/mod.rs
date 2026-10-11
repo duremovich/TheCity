@@ -61,6 +61,7 @@ pub mod news;
 pub mod outside;
 pub mod ownership;
 pub mod plan;
+pub mod policy;
 pub mod raid;
 pub mod reputation;
 pub mod riot;
