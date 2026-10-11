@@ -5161,6 +5161,10 @@ impl Config {
         self
     }
 
+    /// The Full city size the shipped planner budgets serve
+    /// (`calibration_city` scales them past it).
+    pub const PLAN_BUDGET_REF_AGENTS: u32 = 500;
+
     /// The city `calibrate` measures and the LOD parity test replays: the
     /// shipped city at `n` residents (`scaled_to`; both run the shipped
     /// population since the recalibration, see below) with only the cuts
@@ -5185,10 +5189,6 @@ impl Config {
     /// rent, the tiered opening wallets, the class coupling and the seeded
     /// derelicts are the shipped city's now; three pooled seeds average one
     /// seed's landlords out.
-    /// The Full city size the shipped planner budgets serve
-    /// (`calibration_city` scales them past it).
-    pub const PLAN_BUDGET_REF_AGENTS: u32 = 500;
-
     pub fn calibration_city(self, n: u32) -> Config {
         let mut c = self.scaled_to(n);
         c.gangs.max_members = 0;

@@ -281,9 +281,10 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     let job = world.comp::<Job>(id)?;
     job.employer?;
-    if job.on_shift(world.tick_of_day()) || must_leave_for_work(world, id) {
+    if job.on_shift(world.tick_of_day()) {
         return None;
     }
+    // The cheap shortfall test before any walk estimate.
     let home = world.comp::<Household>(id).and_then(|h| h.home)?;
     let home_door = world.comp::<Building>(home).filter(|b| !b.demolished)?.door;
     let pantry = world.comp::<Building>(home).map_or(0, |b| b.stock_food);
@@ -292,7 +293,7 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     // (5-6 share a Block's pantry; one worker's meal was eaten by the rest).
     let residents = world.residents_of(home).len().max(1) as u32;
     let need = (shift_meals_needed(world, job) * residents).min(world.config.buildings.home.stock_cap);
-    if pantry + carried >= need {
+    if pantry + carried >= need || must_leave_for_work(world, id) {
         return None;
     }
     let m = world.local(id, BuildingKind::Market)?;
@@ -318,12 +319,17 @@ pub fn grocery_plan(world: &World, id: EntityId) -> Option<Plan> {
     Some(plan(GoalKind::Eat, Some(m), steps, world.tick))
 }
 
+/// Fed past the Eat line (`HUNGER_SATISFIED`): an Eat goal is then the
+/// grocery run's.
+pub fn fed(world: &World, id: EntityId) -> bool {
+    use crate::goap::world_state::HUNGER_SATISFIED;
+    world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger >= HUNGER_SATISFIED)
+}
+
 /// Hunger fix item 11 (b): a fed worker's Eat goal stands for the grocery
 /// run (`grocery_plan` would plan one now).
 pub fn grocery_due(world: &World, id: EntityId) -> bool {
-    use crate::goap::world_state::HUNGER_SATISFIED;
-    world.comp::<crate::components::Needs>(id).is_some_and(|n| n.hunger >= HUNGER_SATISFIED)
-        && grocery_plan(world, id).is_some()
+    fed(world, id) && grocery_plan(world, id).is_some()
 }
 
 /// Idle bypasses the planner: Rest at Home or the Bar; otherwise go home

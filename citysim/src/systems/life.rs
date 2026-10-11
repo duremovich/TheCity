@@ -51,7 +51,6 @@ pub fn travel(world: &World, tiles: u32) -> Consideration {
     Consideration::raw("travel", ticks as f32 / 60.0, travel_factor(world, ticks))
 }
 
-/// The local meal price (the Eat goal's), at least 1.
 /// Hunger as sickness (parity, after P5): can `id` buy a meal now: a
 /// stocked food Market (`World::food_market`) whose meal it can pay for. A
 /// city whose shelves are bare is no meal however many coins are held (the
@@ -66,6 +65,7 @@ pub fn can_buy_meal(world: &World, id: EntityId) -> bool {
         .is_some_and(|m| coins >= crate::systems::diet::price_at(world, id, m).max(1))
 }
 
+/// The local meal price (the Eat goal's), at least 1.
 pub fn meal_price(world: &World, id: EntityId) -> i64 {
     // Hunger as sickness § 1: the meal this agent would buy (its own price).
     if crate::systems::diet::on(world) {
@@ -342,11 +342,6 @@ pub fn pair_key(a: EntityId, b: EntityId, day: u64) -> u64 {
 // Housing: a commute that fits a day
 // ---------------------------------------------------------------------------
 
-/// Daily: up to `relocate_per_day` employed adults whose commute is past
-/// `commute_cap_tiles` move (with a spouse and children who share their
-/// Home) into the Home with room nearest their workplace that they can pay
-/// `[rent] rehouse_coins_mult` x rent for, when it is nearer by the margin.
-/// Longest commutes first (ties lower id). A guard's workplace is the Precinct.
 /// Hunger as sickness P5g (the transit spec's call): the one measure of a
 /// commute, in travel ticks from a home door to a work door. Today the walk
 /// (tiles x `[exec] move_ticks_full`); transit (the El) swaps the body.
@@ -544,6 +539,13 @@ pub fn work_tile(world: &World, id: EntityId, employer: EntityId) -> Option<Tile
     world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door)
 }
 
+/// Daily: up to `relocate_per_day` employed adults whose commute is past
+/// `commute_cap_tiles` move (with a spouse and children who share their
+/// Home) into the Home with room nearest their workplace that they can pay
+/// `[rent] rehouse_coins_mult` x rent for, when it is nearer by the margin.
+/// Longest commutes first (ties lower id). A guard's workplace is the Precinct.
+/// Hunger fix item 8 (P5g): with the fix, the daily cap is
+/// `relocate_per_1000` per 1,000 residents (`relocate_up_to` has the rule).
 pub fn relocate(world: &mut World) {
     let limit = if crate::systems::fixes::relocate_fix(world) {
         let pop = world.citizens().len() as f32;

@@ -163,8 +163,6 @@ pub fn dive_target(world: &World, id: EntityId) -> Option<EntityId> {
     if hunger >= dive_hunger(world, id) {
         return None;
     }
-    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
-    let _ = coins;
     if crate::systems::life::can_buy_meal(world, id) {
         return None;
     }
@@ -479,10 +477,11 @@ fn eat_scraps(world: &mut World, id: EntityId, b: EntityId) {
 /// `p` of hours (the row's learned `p_dive`), the same bin choice, contest
 /// and meal as a body's. True when it ate.
 pub fn stat_dive(world: &mut World, id: EntityId, p: f32) -> bool {
-    let Some(b) = dive_target(world, id) else { return false };
+    // The pure-hash roll first: the bin search only for a dive that rolls.
     let u = crate::systems::econ::hash_unit(world.seed(), ROLL_SICK ^ 0xff, u64::from(id.index), world.tick);
     if u >= p {
         return false;
     }
+    let Some(b) = dive_target(world, id) else { return false };
     dive(world, id, b)
 }

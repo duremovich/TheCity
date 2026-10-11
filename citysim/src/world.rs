@@ -253,7 +253,6 @@ impl StatTable {
         usize::from(hunger >= self.hunger_edge)
     }
 
-    /// `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
     /// `p_meal`'s cell: the phase, and the hunger's band of `[0, 1]` in
     /// `MEAL_BANDS` equal bands.
     pub fn meal_index(&self, phase: time::DayPhase, hunger: f32) -> usize {
@@ -279,6 +278,7 @@ impl StatTable {
         p.get(i).copied()
     }
 
+    /// `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
     pub fn index(&self, phase: time::DayPhase, lawfulness: f32, hunger: f32) -> usize {
         Self::phase_index(phase) * 6 + self.lawfulness_bucket(lawfulness) * 2 + self.hunger_bucket(hunger)
     }
