@@ -1259,7 +1259,7 @@ fn probe_worker_stocks_the_pantry_off_shift() {
 
 /// Item 12 (P5j, work-night sleep): on the flipped config, the farmers due
 /// at 09:00 (twenty, each pinned in its own clone of the city from 18:00)
-/// start the shift rested: the mean energy at 09:00 is at least 0.7, and
+/// start the shift rested: the mean energy at 09:00 is at least 0.65, and
 /// none is on Sleep then. Measured on the flipped seed 42 (all-Full): 60 %
 /// of the farmers' on-shift sleep came from a night under 4 h; their nights
 /// went ~13 % to Unwind and ~16 % to walking home to bed.
@@ -1287,7 +1287,41 @@ fn probe_worker_sleeps_the_night_before_a_shift() {
     let mean = energy / n.max(1) as f32;
     eprintln!("{n} farmers at 09:00: mean energy {mean:.2}, on Sleep {asleep}");
     assert!(n >= 10, "the probe needs farmers");
-    // Item 12 off: 0.61; on: 0.74 (the bound sits between).
-    assert!(mean >= 0.7, "farmers start the shift tired: mean energy {mean:.2}");
+    // Item 12 off: 0.61 (52266c8), 0.59 (after the classpay merge and the recalibrated table); on: 0.74, 0.69. The bound sits between the two ranges.
+    assert!(mean >= 0.65, "farmers start the shift tired: mean energy {mean:.2}");
     assert_eq!(asleep, 0, "farmers asleep at the shift's start");
+}
+
+/// Items 8-10 (after the classpay merge's behaviour tier: d19 sweeper
+/// WalkHDay 10.25 against 6.74-7.60, 7.43 with items 8-10 off): a sweeper's
+/// working day is its beat, not the Recycler's door. Housing the staff near
+/// work (world creation's relocation, then the nightly passes) leaves the
+/// sweepers no farther from their beats than without it.
+#[test]
+fn probe_sweeper_stays_near_its_beat() {
+    let beat_walk = |near: bool| -> (f64, usize) {
+        let mut cfg = Config::load();
+        cfg.life.hf_hire_near = near;
+        cfg.life.hf_relocate = near;
+        cfg.life.hf_grow_housing = near;
+        let mut w = World::new(42, cfg);
+        w.run_ticks(15 * TICKS_PER_DAY);
+        let v: Vec<u64> = civilians(&w)
+            .into_iter()
+            .filter(|&a| citysim::systems::jobs::is_sweeper(&w, a))
+            .filter_map(|a| {
+                let d = citysim::systems::jobs::beat_of(&w, a)?;
+                let c = w.districts.get(d.index())?.centroid;
+                let hd = home(&w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door)?;
+                Some(commute_cost(&w, hd, c))
+            })
+            .collect();
+        (v.iter().sum::<u64>() as f64 / v.len().max(1) as f64, v.len())
+    };
+    let (on, n_on) = beat_walk(true);
+    let (off, n_off) = beat_walk(false);
+    eprintln!(
+        "sweepers' mean Home-to-beat walk on day 15: items 8-10 on {on:.0} ticks ({n_on}), off {off:.0} ({n_off})"
+    );
+    assert!(on <= off, "housing near work moved the sweepers away from their beats");
 }

@@ -386,6 +386,10 @@ pub fn grow_housing(world: &mut World) {
         if world.has::<Sentence>(a) || world.comp::<Brain>(a).is_none_or(|b| b.emigrating) {
             continue;
         }
+        // A sweeper's day is its beat, not the employer's door: no demand there.
+        if crate::systems::jobs::is_sweeper(world, a) {
+            continue;
+        }
         let Some(work) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else { continue };
         let Some(hd) = home_of(world, a).and_then(|h| world.comp::<Building>(h)).map(|b| b.door) else { continue };
         if commute_cost(world, hd, work) > cap {
@@ -524,6 +528,22 @@ fn pay_housing(world: &mut World, by: Option<EntityId>, cost: i64) -> i64 {
     }
 }
 
+/// Items 8-10: where `id`'s working day is spent, the point every commute
+/// rule measures to: its employer's door, except a sweeper's (Sweep on),
+/// which is its beat district's centroid (the Recycler is only its wage
+/// desk; the behaviour tier's d19 sweepers walked 10.25 h a day, 7.43 with
+/// items 8-10 off, housed toward the Recycler and away from their beats).
+pub fn work_tile(world: &World, id: EntityId, employer: EntityId) -> Option<TilePos> {
+    if crate::systems::jobs::is_sweeper(world, id) {
+        if let Some(c) =
+            crate::systems::jobs::beat_of(world, id).and_then(|d| world.districts.get(d.index())).map(|x| x.centroid)
+        {
+            return Some(c);
+        }
+    }
+    world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door)
+}
+
 pub fn relocate(world: &mut World) {
     let limit = if crate::systems::fixes::relocate_fix(world) {
         let pop = world.citizens().len() as f32;
@@ -574,7 +594,11 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
             continue;
         }
         let Some(home) = home_of(world, a) else { continue };
-        let Some(work) = world.comp::<Building>(employer).map(|b| b.door) else { continue };
+        let Some(work) =
+            (if fix { work_tile(world, a, employer) } else { world.comp::<Building>(employer).map(|b| b.door) })
+        else {
+            continue;
+        };
         let Some(hd) = world.comp::<Building>(home).map(|b| b.door) else { continue };
         let d = cost(world, hd, work);
         if d > cap {
@@ -608,8 +632,8 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
         // commutes together shrink by the margin (39 of the 42 far workers
         // left at a Farm the new Homes served on day 8 had a working spouse).
         let spouse_work = spouse
-            .and_then(|s| world.comp::<Job>(s))
-            .map(|j| j.employer.and_then(|e| world.comp::<Building>(e)).map(|b| b.door));
+            .and_then(|s| world.comp::<Job>(s).map(|j| (s, j.employer)))
+            .map(|(s, e)| e.and_then(|e| work_tile(world, s, e)));
         let spouse_work = match spouse_work {
             Some(None) => continue,
             Some(Some(_)) if !fix => continue,
@@ -743,9 +767,9 @@ fn swap_partner(
                 continue;
             }
             // Its own day no worse: no job, or its work no nearer `h` than `home`.
-            let ok = match world.comp::<Job>(r).and_then(|j| j.employer).and_then(|e| world.comp::<Building>(e)) {
+            let ok = match world.comp::<Job>(r).and_then(|j| j.employer).and_then(|e| work_tile(world, r, e)) {
                 None => true,
-                Some(wb) => commute_cost(world, home_door, wb.door) <= commute_cost(world, b.door, wb.door),
+                Some(wt) => commute_cost(world, home_door, wt) <= commute_cost(world, b.door, wt),
             };
             if !ok || coins(world, r) < home_rent {
                 continue;

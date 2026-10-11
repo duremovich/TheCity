@@ -670,7 +670,10 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
     } else {
         (0.0, 0)
     };
-    let near_cap = crate::systems::fixes::hire_near(world).then_some(world.config.life.commute_hire_ticks);
+    // A sweeper post's day is a beat assigned after the hire: no band.
+    let sweeper_post = role == Role::Sanitation && crate::systems::jobs::sweep_on(world);
+    let near_cap =
+        (crate::systems::fixes::hire_near(world) && !sweeper_post).then_some(world.config.life.commute_hire_ticks);
     world
         .citizens()
         .into_iter()
