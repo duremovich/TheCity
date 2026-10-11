@@ -6,6 +6,7 @@
 
 use citysim::contract::{Broker, ContractId, ContractKind, ContractStatus, Origin, Posting, Target};
 use citysim::exec::routine;
+use citysim::systems::life::commute_cost;
 use citysim::systems::{contracts, demography, law, leisure, social};
 use citysim::{
     ActionKind, Brain, Building, Config, EntityId, Household, Inventory, Job, Needs, Position, RelKind, Role, Wallet,
@@ -648,4 +649,787 @@ fn probe_broke_hand_networks_at_a_fixer_within_a_week() {
         w.comp::<citysim::Personality>(a).map_or(0.0, |p| p.lawfulness)
     );
     assert!(on.is_some(), "never networked at the Fixer within a week of going broke");
+}
+
+// ---------------------------------------------------------------------------
+// Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6): the Full-planner gaps
+// the recalibration diaries found. Each probe failed on main before its fix
+// (`[life] hunger_fixes`).
+// ---------------------------------------------------------------------------
+
+/// The distinct steps an agent began, in order (consecutive repeats folded).
+fn steps_log(log: &mut Vec<ActionKind>, w: &World, id: EntityId) {
+    if let Some(s) = step(w, id) {
+        if log.last() != Some(&s) {
+            log.push(s);
+        }
+    }
+}
+
+fn set_hungry(w: &mut World, a: EntityId, hunger: f32, coins: i64) {
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = coins;
+    w.comp_mut::<Inventory>(a).expect("inventory").food = 0;
+    w.comp_mut::<Inventory>(a).expect("inventory").stolen_food = 0;
+    if let Some(h) = home(w, a) {
+        w.comp_mut::<Building>(h).expect("home").stock_food = 0;
+    }
+    w.comp_mut::<Needs>(a).expect("needs").hunger = hunger;
+}
+
+fn jobless_civilians(w: &World) -> Vec<EntityId> {
+    civilians(w).into_iter().filter(|&a| w.comp::<Job>(a).is_none()).collect()
+}
+
+/// G1 (`hf_food_first`): starving (hunger 0.08) at 18:00, with either a
+/// coin short of a meal or sixty over it: a person eats before spending on
+/// a drink, a game, a bed or a dose, and does not sleep the night through
+/// starving with the coins for a meal. The diaries (and this probe on main)
+/// showed a starving beggar spending the begged coins on a Drink, and an
+/// exhausted one with 60 coins sleeping 8 h to hunger 0.
+#[test]
+fn probe_starving_eats_before_spending_or_sleeping() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
+    let picks: Vec<EntityId> = civilians(&w).into_iter().step_by(37).take(30).collect();
+    let mut bad = Vec::new();
+    for &a in &picks {
+        for extra in [-1i64, 60] {
+            let mut w = w.clone();
+            pin(&mut w, a);
+            let price = citysim::systems::life::meal_price(&w, a);
+            set_hungry(&mut w, a, 0.08, (price + extra).max(0));
+            let mut log = Vec::new();
+            let end = w.tick + 8 * TICKS_PER_HOUR;
+            run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+            let first_eat = log.iter().position(|&s| is_eat(Some(s)) || s == ActionKind::EatAlms);
+            let first_spend = log.iter().position(|&s| {
+                matches!(
+                    s,
+                    ActionKind::CheckIn
+                        | ActionKind::Gamble
+                        | ActionKind::Enjoy
+                        | ActionKind::Drink
+                        | ActionKind::BuyStims
+                        | ActionKind::BuyAsset
+                        | ActionKind::Donate
+                )
+            });
+            let spent_first = match (first_eat, first_spend) {
+                (Some(e), Some(s)) => s < e,
+                (None, Some(_)) => true,
+                _ => false,
+            };
+            let rich_unfed = extra > 0 && first_eat.is_none();
+            if spent_first || rich_unfed {
+                eprintln!("agent {} {extra:+}: {log:?}", a.index);
+                bad.push((a.index, extra));
+            }
+        }
+    }
+    assert!(
+        bad.is_empty(),
+        "{} of {} starving runs spent first or went unfed with coins: {bad:?}",
+        bad.len(),
+        picks.len() * 2
+    );
+}
+
+/// G2 (`hf_mission`): lawful, broke, an empty larder, hungry, a stocked
+/// Mission within reach: a person walks to the Mission and eats.
+#[test]
+fn probe_broke_lawful_eats_at_the_mission() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let m = citysim::systems::charity::missions(&w)
+        .into_iter()
+        .find(|&m| w.comp::<Building>(m).is_some_and(|b| b.kind == citysim::BuildingKind::Mission))
+        .expect("a Mission");
+    w.comp_mut::<Building>(m).expect("mission").stock_food = 60;
+    let door = w.comp::<Building>(m).expect("mission").door;
+    let reach = w.config.charity.reach_tiles;
+    let picks: Vec<EntityId> = jobless_civilians(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<citysim::Personality>(a).is_some_and(|p| p.lawfulness >= 0.3))
+        .filter(|&a| {
+            home(&w, a).and_then(|h| w.comp::<Building>(h)).is_some_and(|b| {
+                let d = b.door.manhattan(door);
+                (8..=reach.saturating_sub(8)).contains(&d)
+            })
+        })
+        .take(8)
+        .collect();
+    assert!(!picks.is_empty(), "a lawful jobless adult within a Mission's reach");
+    let mut bad = Vec::new();
+    for &a in &picks {
+        let mut w = w.clone();
+        pin(&mut w, a);
+        set_hungry(&mut w, a, 0.3, 0);
+        let mut log = Vec::new();
+        let end = w.tick + 6 * TICKS_PER_HOUR;
+        run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+        eprintln!("lawful broke {}: {:?}, hunger {:.2}", a.index, log, w.comp::<Needs>(a).map_or(0.0, |n| n.hunger));
+        if !log.iter().any(|&s| s == ActionKind::EatAlms || is_eat(Some(s))) {
+            bad.push(a.index);
+        }
+    }
+    assert!(bad.is_empty(), "{} of {} never ate in six hours: {bad:?}", bad.len(), picks.len());
+}
+
+/// G3 (`hf_buy_not_steal`): starving at 22:00, lawless, with coins for three
+/// meals: a person buys; the diaries showed such agents stealing from Homes.
+#[test]
+fn probe_starving_with_coins_buys_not_steals() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 22 * TICKS_PER_HOUR);
+    let (mut stole, mut bought, mut tried) = (0, 0, 0);
+    for a in civilians(&w).into_iter().filter(|&a| home(&w, a).is_some()).take(12) {
+        tried += 1;
+        let mut w = w.clone();
+        if let Some(p) = w.comp_mut::<citysim::Personality>(a) {
+            p.lawfulness = 0.05;
+        }
+        pin(&mut w, a);
+        let price = citysim::systems::life::meal_price(&w, a);
+        set_hungry(&mut w, a, 0.05, 3 * price);
+        let mut log = Vec::new();
+        let end = w.tick + 8 * TICKS_PER_HOUR;
+        run_to(&mut w, a, end, |w| steps_log(&mut log, w, a));
+        if log.iter().any(|s| matches!(s, ActionKind::StealFood(_))) {
+            stole += 1;
+            eprintln!("agent {} stole with coins: {log:?}", a.index);
+        }
+        bought += usize::from(log.contains(&ActionKind::BuyFood));
+    }
+    eprintln!("of {tried}: stole {stole}, bought {bought}");
+    assert_eq!(stole, 0, "{stole} of {tried} lawless starving agents with coins stole food");
+}
+
+/// G4 (`hf_beg_retry`): a Beg that finds no giver at 03:00 (nobody about
+/// holds more than 10 coins) is an hour honestly spent, as Scavenge's dry
+/// hour: `Done`, not a failure that cools Earn after the second try (the
+/// diaries' beggar gave up after one dry Beg). Three dry Begs in a row cool
+/// Earn for `beg_cool_hours`.
+#[test]
+fn probe_dry_beg_is_an_honest_hour() {
+    use citysim::exec::actions::on_complete;
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 3 * TICKS_PER_HOUR);
+    for o in w.citizens() {
+        if let Some(x) = w.comp_mut::<Wallet>(o) {
+            x.coins = x.coins.min(10);
+        }
+    }
+    let a = jobless_civilians(&w)[0];
+    pin(&mut w, a);
+    set_hungry(&mut w, a, 0.3, 0);
+    let t = w.tick;
+    let first = on_complete(&mut w, a, ActionKind::Beg, None, t, t);
+    eprintln!("a dry Beg: {first:?}");
+    assert!(matches!(first, citysim::StepResult::Done), "a dry Beg failed the plan: {first:?}");
+    let cooled = |w: &World| {
+        w.comp::<Brain>(a).and_then(|b| b.cooldowns.get(&citysim::GoalKind::Earn).copied()).is_some_and(|u| u > w.tick)
+    };
+    assert!(!cooled(&w), "one dry Beg cooled Earn");
+    for _ in 0..w.config.life.beg_dry_max {
+        let t = w.tick;
+        on_complete(&mut w, a, ActionKind::Beg, None, t, t);
+    }
+    assert!(cooled(&w), "beg_dry_max dry Begs in a row did not cool Earn");
+}
+
+// ---------------------------------------------------------------------------
+// P5g (Dylan: relocation and the hiring cap; hunger fixes items 8-9)
+// ---------------------------------------------------------------------------
+
+/// Item 8 (`hf_relocate`): an employed worker on a long commute, holding the
+/// first rent (not 21 rents), moves nearer work within a day: into a Home
+/// with room, or (the Farms' neighbourhoods are full) by trading Homes with
+/// a single jobless resident there. Measured on the all-Full flipped city:
+/// median commute ~90 tiles, ~3 h each way; relocation moved 8 a day, only
+/// those holding 21x the rent.
+#[test]
+fn probe_far_worker_with_one_rent_moves_near_work() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    // Every commute measure through `life::commute_cost` (travel ticks).
+    let cost = |w: &World, a: citysim::TilePos, b: citysim::TilePos| commute_cost(w, a, b);
+    let cap = w.config.life.commute_move_ticks;
+    let work_of = |w: &World, a: EntityId| {
+        w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+    };
+    let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+    let (far, partner) = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.spouse_of(a).is_none() && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer))
+        .find_map(|a| {
+            let work = work_of(&w, a)?;
+            if cost(&w, door_of(&w, a)?, work) <= 2 * cap {
+                return None;
+            }
+            // A single adult living within 30 tiles of that work, to trade with.
+            let r = civilians(&w).into_iter().find(|&r| {
+                r != a && w.spouse_of(r).is_none() && door_of(&w, r).is_some_and(|d| cost(&w, d, work) <= cap * 3 / 4)
+            })?;
+            Some((a, r))
+        })
+        .expect("a single far farmer and a single adult living near the Farm");
+    let work = work_of(&w, far).unwrap();
+    // The partner has nothing keeping it there: no job, the coins of a rent.
+    w.remove::<Job>(partner);
+    w.comp_mut::<Wallet>(partner).expect("wallet").coins = 20;
+    let rents: i64 = w
+        .buildings_of_kind(citysim::BuildingKind::Home)
+        .iter()
+        .filter(|&&h| w.comp::<Building>(h).is_some_and(|b| cost(&w, b.door, work) <= cap))
+        .map(|&h| citysim::systems::ownership::rent_for(&w, h))
+        .max()
+        .unwrap_or(1);
+    w.comp_mut::<Wallet>(far).expect("wallet").coins = rents.max(1) + 2;
+    let before = door_of(&w, far).map(|d| cost(&w, d, work));
+    let partner_home = home(&w, partner).expect("partner home");
+    let partner_door = w.comp::<Building>(partner_home).expect("home").door;
+    let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
+    run_to(&mut w, far, end, |_| {});
+    let after = door_of(&w, far).map(|d| cost(&w, d, work));
+    // The partner's Home went to a far worker (this farmer, or a farther one
+    // the pass served first): a trade nearer work happened.
+    let traded_in = w.residents_of(partner_home).iter().copied().find(|&r| {
+        r != partner
+            && work_of(&w, r).is_some_and(|wd| cost(&w, partner_door, wd) <= cap)
+            && w.events.iter().any(|e| {
+                e.kind == citysim::EventKind::Housed && e.actors.first() == Some(&r) && e.text.contains("traded")
+            })
+    });
+    eprintln!(
+        "farmer {}: commute {before:?} -> {after:?} ticks; partner {} moved out {}; traded in {:?}",
+        far.index,
+        partner.index,
+        home(&w, partner) != Some(partner_home),
+        traded_in.map(|r| r.index)
+    );
+    assert!(after < before || traded_in.is_some(), "no far worker traded Homes nearer work");
+}
+
+/// Item 9 (`hf_hire_near`): with wages on, a jobless adult living near the
+/// workplace is hired before a far one whose skill and rehire bonus would
+/// have outweighed the walk.
+#[test]
+fn probe_near_candidate_hired_before_a_far_skilled_one() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
+    let door = w.comp::<Building>(farm).unwrap().door;
+    let cap = w.config.life.commute_hire_ticks;
+    // Every adult a candidate (the wages city is staffed at day 0): two are
+    // made jobless below.
+    let jobless: Vec<EntityId> = civilians(&w).into_iter().filter(|&a| home(&w, a).is_some()).collect();
+    let dist = |w: &World, a: EntityId| {
+        home(w, a)
+            .and_then(|h| w.comp::<Building>(h))
+            .map(|b| b.door)
+            .or_else(|| w.comp::<Position>(a).map(|p| p.tile))
+            .map_or(u64::MAX, |t| commute_cost(w, t, door))
+    };
+    let near =
+        jobless.iter().copied().filter(|&a| (cap * 5 / 8..=cap).contains(&dist(&w, a))).max_by_key(|&a| dist(&w, a));
+    let far = jobless
+        .iter()
+        .copied()
+        .filter(|&a| (cap * 9 / 4..=cap * 11 / 4).contains(&dist(&w, a)))
+        .min_by_key(|&a| dist(&w, a));
+    let (Some(near), Some(far)) = (near, far) else {
+        eprintln!("no near/far jobless pair on seed 42 at day 1: nothing to probe");
+        return;
+    };
+    w.remove::<Job>(near);
+    w.remove::<Job>(far);
+    // The far one: the best farmer, laid off from the role yesterday.
+    if let Some(s) = w.comp_mut::<citysim::Skills>(far) {
+        s.farming = 1.0;
+    }
+    if let Some(s) = w.comp_mut::<citysim::Skills>(near) {
+        s.farming = 0.0;
+    }
+    let t = w.tick;
+    w.laid_off.insert(far, (Role::Farmer, t));
+    let pick = citysim::systems::demography::hire_candidate(&w, farm, Role::Farmer);
+    eprintln!(
+        "near {} at {} ticks, far {} at {} ticks: picked {:?}",
+        near.index,
+        dist(&w, near),
+        far.index,
+        dist(&w, far),
+        pick.map(|p| p.index)
+    );
+    assert_ne!(pick, Some(far), "the far skilled rehire beat a candidate within the cap");
+    assert!(pick.is_some_and(|p| dist(&w, p) <= cap), "a candidate within the cap");
+}
+
+/// Item 10 (`hf_grow_housing`, P5h; Dylan: the city grows toward jobs): the
+/// employer with the most workers past `commute_move_ticks` and no free
+/// beds in range gets beds in range within a few days (a Home on a Lot or a
+/// floor), and relocation moves far workers into them. Measured on the
+/// flipped seed 42: the Farms' 282 beds in range were full for 489-584
+/// farmers and the median commute stayed 116 tiles.
+#[test]
+fn probe_city_grows_homes_toward_jobs() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    let cap = w.config.life.commute_move_ticks;
+    let door_of = |w: &World, b: EntityId| w.comp::<Building>(b).map(|b| b.door);
+    // Beds (capacity) and far workers in range of an employer's door.
+    let beds = |w: &World, door: citysim::TilePos| -> usize {
+        w.buildings_of_kind(citysim::BuildingKind::Home)
+            .iter()
+            .filter_map(|&h| w.comp::<Building>(h))
+            .filter(|b| !b.demolished && !b.derelict && commute_cost(w, b.door, door) <= cap)
+            .map(|b| usize::from(b.capacity))
+            .sum()
+    };
+    let far_at = |w: &World, e: EntityId| -> usize {
+        let Some(door) = door_of(w, e) else { return 0 };
+        civilians(w)
+            .into_iter()
+            .filter(|&a| w.comp::<Job>(a).and_then(|j| j.employer) == Some(e))
+            .filter(|&a| home(w, a).and_then(|h| door_of(w, h)).is_some_and(|hd| commute_cost(w, hd, door) > cap))
+            .count()
+    };
+    // The employer with the most far workers (ties lower id).
+    let employers: Vec<EntityId> =
+        civilians(&w).into_iter().filter_map(|a| w.comp::<Job>(a).and_then(|j| j.employer)).collect();
+    let mut uniq = employers.clone();
+    uniq.sort_unstable();
+    uniq.dedup();
+    let e = uniq.iter().copied().max_by_key(|&e| (far_at(&w, e), std::cmp::Reverse(e))).expect("an employer");
+    let door = door_of(&w, e).unwrap();
+    let (beds0, far0) = (beds(&w, door), far_at(&w, e));
+    w.run_ticks(6 * TICKS_PER_DAY + TICKS_PER_HOUR);
+    let (beds1, far1) = (beds(&w, door), far_at(&w, e));
+    eprintln!("{}: beds in range {beds0} -> {beds1}; far workers {far0} -> {far1}", w.name_of(e));
+    assert!(far0 >= 6, "the probe needs an employer with far workers");
+    assert!(beds1 > beds0, "no Home or floor went up in range of the employer with the most far workers");
+}
+
+/// Item 8 (P5h, the couple rule): a married pair who both work at the same
+/// far workplace move together into a Home near it (relocation skipped
+/// every worker whose spouse held a job: 39 of the 42 far workers left at
+/// the Farm the new Homes served on day 8, flipped seed 42).
+#[test]
+fn probe_working_couple_moves_near_work() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let cap = w.config.life.commute_move_ticks;
+    let work_of = |w: &World, a: EntityId| {
+        w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+    };
+    let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+    // A married pair sharing a Home, no children there, the first employed
+    // with a commute past twice the cap.
+    let (a, s) = civilians(&w)
+        .into_iter()
+        .filter_map(|a| {
+            let s = w.spouse_of(a)?;
+            let hm = home(&w, a)?;
+            if home(&w, s) != Some(hm) || !w.has::<Brain>(s) || !demography::is_adult(&w, s) {
+                return None;
+            }
+            if demography::children_of_agent(&w, a).iter().any(|&c| home(&w, c) == Some(hm)) {
+                return None;
+            }
+            let work = work_of(&w, a)?;
+            let d = commute_cost(&w, door_of(&w, a)?, work);
+            (d > 2 * cap).then_some((d, std::cmp::Reverse(a), a, s))
+        })
+        // The longest such commute: the relocation pass serves the longest
+        // first, and the beds in range are bounded by the Lots and floors
+        // there (after class pay's merge, 65 farther movers took the 72 beds
+        // the first pick had).
+        .max()
+        .map(|(_, _, a, s)| (a, s))
+        .expect("a married worker with a long commute");
+    // The spouse works at the same place.
+    let (employer, role) = w.comp::<Job>(a).map(|j| (j.employer.unwrap(), j.role)).unwrap();
+    w.remove::<Job>(s);
+    demography::hire(&mut w, s, employer, role);
+    for m in [a, s] {
+        w.comp_mut::<Wallet>(m).expect("wallet").coins = 1_000;
+    }
+    // Room near work, enough that the longer commutes served first leave
+    // some: Homes and floors
+    // go up in range.
+    let work = work_of(&w, a).unwrap();
+    let free = |w: &World| -> usize {
+        w.buildings_of_kind(citysim::BuildingKind::Home)
+            .iter()
+            .filter(|&&h| w.comp::<Building>(h).is_some_and(|b| !b.derelict && commute_cost(w, b.door, work) <= cap))
+            .map(|&h| usize::from(w.comp::<Building>(h).unwrap().capacity).saturating_sub(w.residents_of(h).len()))
+            .sum()
+    };
+    // The builds are paid (P5h): a Treasury that can pay for them.
+    let band = w.config.treasury.band[0];
+    if let Some(t) = w.treasury_mut() {
+        t.coins = t.coins.max(band + 100_000);
+    }
+    while free(&w) < 200 && citysim::systems::life::build_housing_near(&mut w, employer) {}
+    eprintln!("free beds in range of work {}", free(&w));
+    // The daily cap out of the way (the pass serves the longest commutes
+    // first; this pair's is not among the city's 40 longest).
+    w.config.life.relocate_per_1000 = 1_000.0;
+    let before = door_of(&w, a).map(|d| commute_cost(&w, d, work));
+    let end = w.tick + TICKS_PER_DAY + TICKS_PER_HOUR;
+    run_to(&mut w, a, end, |_| {});
+    let after = door_of(&w, a).map(|d| commute_cost(&w, d, work));
+    eprintln!(
+        "couple {} + {}: commute {before:?} -> {after:?} ticks; same Home {}",
+        a.index,
+        s.index,
+        home(&w, a) == home(&w, s)
+    );
+    assert!(after < before, "a working couple with room near their shared work stayed put");
+    assert_eq!(home(&w, a), home(&w, s), "the couple moved together");
+}
+
+/// Item 10 (P5h, no unpaid builds): housing toward jobs is paid. A broke
+/// employer and a Treasury at its band floor build nothing; a Treasury
+/// above it pays the build out of its purse.
+#[test]
+fn probe_housing_toward_jobs_is_paid() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_HOUR);
+    let farm = *w.buildings_of_kind(citysim::BuildingKind::Farm).first().expect("a Farm");
+    if let Some(cc) = w.comp::<Building>(farm).and_then(|b| b.owner).and_then(|o| w.comp_mut::<citysim::Corp>(o)) {
+        cc.treasury = 0;
+    }
+    let set_treasury = |w: &mut World, c: i64| {
+        if let Some(t) = w.treasury_mut() {
+            t.coins = c;
+        }
+    };
+    let floor = w.config.treasury.band[0];
+    let homes = |w: &World| -> u32 {
+        w.buildings_of_kind(citysim::BuildingKind::Home)
+            .iter()
+            .filter_map(|&h| w.comp::<Building>(h))
+            .map(|b| u32::from(b.floors.max(1)))
+            .sum()
+    };
+    set_treasury(&mut w, floor);
+    let before = homes(&w);
+    let built = citysim::systems::life::build_housing_near(&mut w, farm);
+    assert!(!built && homes(&w) == before, "a build with no one able to pay");
+    assert_eq!(w.purse(None), floor, "the Treasury paid nothing");
+    // A Treasury with room above its floor pays.
+    set_treasury(&mut w, floor + 10_000);
+    let t0 = w.purse(None);
+    assert!(citysim::systems::life::build_housing_near(&mut w, farm), "the Treasury builds");
+    eprintln!("Treasury {t0} -> {} for the build", w.purse(None));
+    assert!(w.purse(None) < t0, "the Treasury's build cost it nothing");
+}
+
+// ---------------------------------------------------------------------------
+// P5i (hunger fixes item 11): meals around the shift
+// ---------------------------------------------------------------------------
+
+/// Housed day workers (09:00-18:00, not a guard or sweeper, no gang, free)
+/// whose next shift is a workday.
+fn day_workers(w: &World) -> Vec<EntityId> {
+    w.citizens()
+        .into_iter()
+        .filter(|&a| law::living(w, a) && demography::is_adult(w, a))
+        .filter(|&a| w.gang_of(a).is_none() && !w.has::<citysim::Sentence>(a) && home(w, a).is_some())
+        .filter(|&a| {
+            w.comp::<Job>(a).is_some_and(|j| {
+                !matches!(j.role, Role::Guard | Role::Sanitation)
+                    && j.shifts == vec![(540, 1080)]
+                    && j.employer.is_some()
+                    && routine::workday_of(w, a, j, j.next_shift_key(w.tick))
+            })
+        })
+        .collect()
+}
+
+/// Item 11 (a): at home before a shift its hunger would not last (0.75 at
+/// 06:00 is under the Eat line, 0.6, by mid-shift), with meals in the
+/// pantry, a worker eats or packs a meal before leaving (a meal at 0.72
+/// would overfill: it packs one) and does not walk off the job for food. Measured on the flipped seed 42 (all-Full): 10.5 %
+/// of shift time was Eat, most of it a walk out 2-4 h+ into the shift with
+/// nothing carried and an empty pantry.
+#[test]
+fn probe_worker_eats_before_the_shift_not_during_it() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 6 * TICKS_PER_HOUR);
+    let a =
+        day_workers(&w).into_iter().find(|&a| building(&w, a) == home(&w, a)).expect("a day worker at home at 06:00");
+    pin(&mut w, a);
+    let employer = w.comp::<Job>(a).and_then(|j| j.employer).unwrap();
+    w.comp_mut::<Needs>(a).expect("needs").hunger = 0.75;
+    if let Some(i) = w.comp_mut::<Inventory>(a) {
+        i.food = 0;
+        i.synth = 0;
+        i.stolen_food = 0;
+    }
+    let h = home(&w, a).unwrap();
+    if let Some(b) = w.comp_mut::<Building>(h) {
+        b.stock_food = 8;
+        b.synth_food = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 30;
+    let (mut away_for_food, mut ate, mut packed) = (0u32, false, false);
+    run_to(&mut w, a, 2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR, |w| {
+        let s = step(w, a);
+        ate |= is_eat(s);
+        let on = w.comp::<Job>(a).is_some_and(|j| j.on_shift(w.tick_of_day()));
+        let eat_goal = w.comp::<Brain>(a).is_some_and(|b| b.current_goal == Some(citysim::GoalKind::Eat));
+        if on && eat_goal && building(w, a) != Some(employer) {
+            away_for_food += 1;
+        }
+        if w.tick_of_day() == 540 {
+            packed = w.comp::<Inventory>(a).is_some_and(|i| i.food > i.stolen_food);
+        }
+    });
+    eprintln!(
+        "worker {}: ate {ate}; a meal carried at 09:00 {packed}; on-shift minutes away for food {away_for_food}",
+        a.index
+    );
+    assert!(ate || packed, "no meal before the shift and none carried into it");
+    assert_eq!(away_for_food, 0, "walked off the job for food with a stocked pantry at home");
+}
+
+/// Item 11 (b): off shift, fed, with coins and an empty pantry, a worker
+/// tops the pantry up before the next shift (a grocery run), so the next
+/// shift's meal is at hand.
+#[test]
+fn probe_worker_stocks_the_pantry_off_shift() {
+    let mut w = world();
+    w.run_ticks(2 * TICKS_PER_DAY + 19 * TICKS_PER_HOUR);
+    let a = day_workers(&w)
+        .into_iter()
+        .find(|&a| {
+            building(&w, a) == home(&w, a)
+                && w.spouse_of(a).is_none()
+                && home(&w, a).is_some_and(|h| w.residents_of(h).len() == 1)
+        })
+        .or_else(|| day_workers(&w).into_iter().find(|&a| building(&w, a) == home(&w, a)))
+        .expect("a day worker at home at 19:00");
+    pin(&mut w, a);
+    let h = home(&w, a).unwrap();
+    w.comp_mut::<Needs>(a).expect("needs").hunger = 0.95;
+    w.comp_mut::<Needs>(a).expect("needs").energy = 0.9;
+    if let Some(i) = w.comp_mut::<Inventory>(a) {
+        i.food = 0;
+        i.synth = 0;
+        i.stolen_food = 0;
+    }
+    if let Some(b) = w.comp_mut::<Building>(h) {
+        b.stock_food = 0;
+        b.synth_food = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 60;
+    let mut most = 0u32;
+    let mut seen: Vec<ActionKind> = Vec::new();
+    run_to(&mut w, a, 2 * TICKS_PER_DAY + 23 * TICKS_PER_HOUR, |w| {
+        let held = w.comp::<Building>(h).map_or(0, |b| b.stock_food)
+            + w.comp::<Inventory>(a).map_or(0, |i| i.food - i.stolen_food);
+        most = most.max(held);
+        if let Some(st) = step(w, a) {
+            if !seen.contains(&st) {
+                seen.push(st);
+            }
+        }
+    });
+    eprintln!("steps {seen:?}; residents {}", w.residents_of(h).len());
+    eprintln!("worker {}: meals at hand (pantry + carried) peaked at {most} by 23:00; coins {}", a.index, coins(&w, a));
+    assert!(seen.contains(&ActionKind::BuyFood), "an empty pantry, coins and an evening off, and no grocery run");
+    assert!(most >= 1, "the run left nothing at hand");
+}
+
+/// Item 12 (P5j, work-night sleep): on the flipped config, the farmers due
+/// at 09:00 (twenty, each pinned in its own clone of the city from 18:00)
+/// start the shift rested: the mean energy at 09:00 is at least 0.65, and
+/// none is on Sleep then. Measured on the flipped seed 42 (all-Full): 60 %
+/// of the farmers' on-shift sleep came from a night under 4 h; their nights
+/// went ~13 % to Unwind and ~16 % to walking home to bed.
+#[test]
+fn probe_worker_sleeps_the_night_before_a_shift() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    cfg.sickness.enabled = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(3 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
+    let farmers: Vec<EntityId> = day_workers(&w)
+        .into_iter()
+        .filter(|&a| w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer))
+        .take(20)
+        .collect();
+    let (mut energy, mut asleep, mut n) = (0f32, 0u32, 0u32);
+    for &a in &farmers {
+        let mut c = w.clone();
+        run_to(&mut c, a, 4 * TICKS_PER_DAY + 9 * TICKS_PER_HOUR, |_| {});
+        energy += c.comp::<Needs>(a).map_or(0.0, |x| x.energy);
+        asleep += u32::from(c.comp::<Brain>(a).is_some_and(|b| b.current_goal == Some(citysim::GoalKind::Sleep)));
+        n += 1;
+    }
+    let mean = energy / n.max(1) as f32;
+    eprintln!("{n} farmers at 09:00: mean energy {mean:.2}, on Sleep {asleep}");
+    assert!(n >= 10, "the probe needs farmers");
+    // Item 12 off: 0.61 (52266c8), 0.59 (after the classpay merge and the recalibrated table); on: 0.74, 0.69. The bound sits between the two ranges.
+    assert!(mean >= 0.65, "farmers start the shift tired: mean energy {mean:.2}");
+    assert_eq!(asleep, 0, "farmers asleep at the shift's start");
+}
+
+/// Items 8-10 (after the classpay merge's behaviour tier: d19 sweeper
+/// WalkHDay 10.25 against 6.74-7.60, 7.43 with items 8-10 off): a sweeper's
+/// working day is its beat, not the Recycler's door. Housing the staff near
+/// work (world creation's relocation, then the nightly passes) leaves the
+/// sweepers no farther from their beats than without it.
+#[test]
+fn probe_sweeper_stays_near_its_beat() {
+    let beat_walk = |near: bool| -> (f64, usize) {
+        let mut cfg = Config::load();
+        cfg.life.hf_hire_near = near;
+        cfg.life.hf_relocate = near;
+        cfg.life.hf_grow_housing = near;
+        let mut w = World::new(42, cfg);
+        w.run_ticks(15 * TICKS_PER_DAY);
+        let v: Vec<u64> = civilians(&w)
+            .into_iter()
+            .filter(|&a| citysim::systems::jobs::is_sweeper(&w, a))
+            .filter_map(|a| {
+                let d = citysim::systems::jobs::beat_of(&w, a)?;
+                let c = w.districts.get(d.index())?.centroid;
+                let hd = home(&w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door)?;
+                Some(commute_cost(&w, hd, c))
+            })
+            .collect();
+        (v.iter().sum::<u64>() as f64 / v.len().max(1) as f64, v.len())
+    };
+    let (on, n_on) = beat_walk(true);
+    let (off, n_off) = beat_walk(false);
+    eprintln!(
+        "sweepers' mean Home-to-beat walk on day 15: items 8-10 on {on:.0} ticks ({n_on}), off {off:.0} ({n_off})"
+    );
+    assert!(on <= off, "housing near work moved the sweepers away from their beats");
+}
+
+/// Item 13 (coordinator call): in the no-net city an evicted Farmer who
+/// keeps the job, holding ~8 coins (the flipped city's homeless workers'
+/// median), is back in a bed within the wait plus a few days; the deposit
+/// wall (21 x rent) kept such workers on the street beside empty beds.
+#[test]
+fn probe_evicted_worker_rehouses_on_the_first_rent() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let a = civilians(&w)
+        .into_iter()
+        .find(|&a| {
+            w.spouse_of(a).is_none()
+                && home(&w, a).is_some()
+                && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer)
+                && demography::children_of_agent(&w, a).is_empty()
+        })
+        .expect("a single Farmer with a Home");
+    citysim::systems::ownership::evict(&mut w, a, "arrears");
+    if let Some(h) = w.comp_mut::<Household>(a) {
+        h.arrears = 0;
+    }
+    w.comp_mut::<Wallet>(a).expect("wallet").coins = 8;
+    let wait = w.config.rent.rehouse_wait_days;
+    let end = w.tick + (wait + 3) * TICKS_PER_DAY;
+    let mut housed_on = None;
+    run_to(&mut w, a, end, |w| {
+        if housed_on.is_none() && home(w, a).is_some() {
+            housed_on = Some(w.day());
+        }
+    });
+    eprintln!(
+        "farmer {}: housed on day {housed_on:?} (evicted day 1, wait {wait} days); job {:?}; coins {}",
+        a.index,
+        w.comp::<Job>(a).map(|j| j.role),
+        coins(&w, a)
+    );
+    assert!(w.has::<Job>(a), "the probe needs the Farmer employed");
+    // Wages lift the purse a little (17 by the end with item 13 off): still under the 21-coin deposit.
+    assert!(housed_on.is_some(), "an employed Farmer with the first rent stayed on the street");
+}
+
+/// Item 8 (review finding 1): the Home trade checks what the plain pick
+/// checks. A far farmer with no coins, evicted by the landlord of the Home
+/// near work that a jobless single resident would trade, does not trade into
+/// it (nor anywhere it cannot pay the first rent of).
+#[test]
+fn probe_trade_respects_rent_and_the_evictor() {
+    let mut cfg = Config::load();
+    cfg.economy2.wages = true;
+    cfg.economy2.no_safety_net = true;
+    let mut w = World::new(42, cfg);
+    w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
+    let cap = w.config.life.commute_move_ticks;
+    let work_of = |w: &World, a: EntityId| {
+        w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.comp::<Building>(e)).map(|b| b.door)
+    };
+    let door_of = |w: &World, a: EntityId| home(w, a).and_then(|h| w.comp::<Building>(h)).map(|b| b.door);
+    let (far, partner) = civilians(&w)
+        .into_iter()
+        .filter(|&a| w.spouse_of(a).is_none() && w.comp::<Job>(a).is_some_and(|j| j.role == Role::Farmer))
+        .filter(|&a| demography::children_of_agent(&w, a).is_empty())
+        .filter_map(|a| {
+            let work = work_of(&w, a)?;
+            let d = commute_cost(&w, door_of(&w, a)?, work);
+            if d <= 2 * cap {
+                return None;
+            }
+            let r = civilians(&w).into_iter().find(|&r| {
+                r != a
+                    && w.spouse_of(r).is_none()
+                    && door_of(&w, r).is_some_and(|d| commute_cost(&w, d, work) <= cap * 3 / 4)
+            })?;
+            Some((d, std::cmp::Reverse(a), a, r))
+        })
+        // The longest such commute: the pass serves it first.
+        .max()
+        .map(|(_, _, a, r)| (a, r))
+        .expect("a single far farmer and a single adult living near the Farm");
+    w.config.life.relocate_per_1000 = 1_000.0;
+    w.remove::<Job>(partner);
+    w.comp_mut::<Wallet>(partner).expect("wallet").coins = 50;
+    let before = home(&w, far);
+    let target = home(&w, partner).expect("partner home");
+    let evictor = w.owner_of(target);
+    let t = w.tick;
+    if let Some(h) = w.comp_mut::<Household>(far) {
+        h.evicted_by = Some((evictor, t));
+    }
+    // No coins at the midnight pass (the day's wage spent).
+    let midnight = 2 * TICKS_PER_DAY;
+    run_to(&mut w, far, midnight - 1, |_| {});
+    w.comp_mut::<Wallet>(far).expect("wallet").coins = 0;
+    run_to(&mut w, far, midnight + TICKS_PER_HOUR, |_| {});
+    let after = home(&w, far);
+    eprintln!(
+        "farmer {}: home {:?} -> {:?}; the evictor's Home {}",
+        far.index,
+        before.map(|x| x.index),
+        after.map(|x| x.index),
+        target.index
+    );
+    assert_ne!(after, Some(target), "traded back into its evictor's Home");
+    assert_eq!(after, before, "a farmer with no coins traded Homes (the first rent unpaid)");
 }

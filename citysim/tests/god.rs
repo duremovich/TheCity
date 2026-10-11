@@ -1871,3 +1871,64 @@ fn god_law_locate_on_gang_leader() {
     eprintln!("Ninefold: {} (control {})", r.orders(40, at), c.orders(40, at));
     assert!(r.applied() >= 1 && r.failed.is_empty(), "the Locate was not posted: {:?}", r.failed);
 }
+
+/// Hunger as sickness (docs/GOD_SCENARIOS_V9.md): from day 45 the Warehouse
+/// and every Market shelf are emptied each morning for 15 days in a city
+/// with `[sickness]` on. The
+/// free-food floor must answer: the starving go to the bins (and the
+/// Missions) and starvation stays near the control's. 60 days, seed 42.
+#[test]
+#[ignore]
+fn god_famine_synth() {
+    fn city() -> World {
+        let mut c = Config::load();
+        c.sickness.enabled = true;
+        c.street.shanties = true;
+        World::new(42, c)
+    }
+    fn after(w: &World, from: u64, f: fn(&citysim::DayRow) -> u32) -> u32 {
+        w.stats.history.iter().filter(|r| r.day >= from).map(f).sum()
+    }
+    let (mut shock, mut control) = (city(), city());
+    shock.run_ticks(45 * TICKS_PER_DAY);
+    control.run_ticks(45 * TICKS_PER_DAY);
+    // Every shelf emptied each morning for the 15 days (the World's imports
+    // refill a Market overnight: one emptying is no famine).
+    for _ in 0..15 {
+        let shelves: Vec<EntityId> = shock
+            .buildings_of_kind(citysim::BuildingKind::Market)
+            .iter()
+            .chain(shock.buildings_of_kind(citysim::BuildingKind::Warehouse))
+            .copied()
+            .collect();
+        for b in shelves {
+            if let Some(x) = shock.comp_mut::<citysim::Building>(b) {
+                x.stock_food = 0;
+            }
+        }
+        shock.run_ticks(TICKS_PER_DAY);
+    }
+    control.run_ticks(15 * TICKS_PER_DAY);
+    let starve = |w: &World| after(w, 45, |r| r.deaths_starvation);
+    let dives = |w: &World| after(w, 45, |r| r.health.meals_dive);
+    let alms = |w: &World| after(w, 45, |r| r.health.meals_alms);
+    let synth = |w: &World| after(w, 45, |r| r.health.meals_synth);
+    eprintln!(
+        "days 45-60: starvation {} (control {}), bin meals {} ({}), Mission meals {} ({}), synth meals {} ({})",
+        starve(&shock),
+        starve(&control),
+        dives(&shock),
+        dives(&control),
+        alms(&shock),
+        alms(&control),
+        synth(&shock),
+        synth(&control)
+    );
+    assert!(
+        starve(&shock) <= starve(&control) + 5,
+        "the famine starved the city: {} vs {}",
+        starve(&shock),
+        starve(&control)
+    );
+    assert!(dives(&shock) > dives(&control), "the starving did not turn to the bins");
+}

@@ -805,6 +805,15 @@ squat_ban_days = 14
 # city_absorb_floor; its squatters are put out (the SquatEvicted path). 30 re-let the whole seed by
 # day 46 and the street dried up; 60 keeps the squats through the season and returns them after.
 relet_days = 60
+# Hunger as sickness P4b (Dylan on J25: the evicted land on the survival ladder's lower rungs, not the
+# street). Traced on the flipped seed 42 (days 30-66): 519-641 rough sleepers, 76-184 squatters in 15-33
+# derelicts, 24 Hotel beds; 412-509 of the homeless held 0 coins (a bed costs 3), so the free rung is the
+# one missing. While the rough sleepers outnumber the free squat slots, vacant Lots go up as shanties.
+shanties = false                   # in flight: on with the flip
+shanty_capacity = 24               # slots a shanty holds
+shanties_per_night = 3             # Lots that can go up a night
+shanty_lots_max = 20               # Lots standing as shanties at once (of ~160; the rest stay for building)
+hotel_floors_max = 4               # a Hotel booked full adds a floor of beds (owner pays floor_cost) up to this
 
 [riots]
 # M12 § 6 (plan D29-D35): district unrest, riots, crossfire.
@@ -1500,6 +1509,51 @@ vf_rent_meal = true                 # 4: rent from income leaves an agent in arr
 # coins_by_tier (Sump 12 -> keeps 15, Mid 25, Spire 75, homeless 25), crossed in from the World, not a flat
 # 15 (three days of Spire rent: nearly every year-3 immigrant on seed 43 was starving within two weeks).
 vf_arrival = true
+# Hunger as sickness P1 (docs/HUNGER_SICKNESS.md § 6; plan docs/plans/hunger-sickness.md): the Full planner's
+# hunger gaps the recalibration diaries found, each reproduced by a person probe that failed on d771073.
+# Master switch (off is the d771073 city byte for byte); `CITYSIM_HFIX_OFF=1,3` leaves single items off.
+hunger_fixes = true
+hf_food_first = true                # 1: starving with a meal in reach: eat before paid leisure, a bed, a dose, a sleep
+hf_mission = true                   # 2: Eat's can-obtain gate opens on a stocked Mission in reach
+hf_buy_not_steal = true             # 3: a food theft costs steal_can_buy more while a meal is affordable
+hf_beg_retry = true                 # 4: a Beg with no giver is a dry hour (as Scavenge's), not a failure
+hf_shift_first = true               # 5 (P5f): a worker on shift does not leave for leisure (Unwind 0 on shift)
+# P5g (Dylan, 2026-10-10: relocation and the hiring cap; transit is its own milestone). Measured on the all-Full
+# flipped city (seed 42): the median commute 84-92 tiles (~3 h each way at ~0.45 tiles a minute), farmers 116;
+# relocation moved 8 a day and only those holding 21x the rent.
+# Every commute measure goes through life::commute_cost (travel ticks; today the walk: tiles x [exec]
+# move_ticks_full; the El will swap its body). 80 ticks = 40 tiles walked.
+hf_relocate = true                  # 8: a worker past commute_move_ticks moves near work on the first rent, not 21x
+commute_move_ticks = 80
+commute_margin_ticks = 40           # 8: ... when the move saves this much
+relocate_per_1000 = 20.0            # 8: movers a day per 1,000 residents (40 at 2,000; was a flat 8)
+hf_hire_near = true                 # 9: a candidate within commute_hire_ticks is hired before any beyond it
+commute_hire_ticks = 80
+# P5h (Dylan, 2026-10-10: the city grows toward jobs; map-agnostic): housing demand at an employer is its
+# workers past commute_move_ticks; with fewer free beds than housing_demand_min in range for
+# housing_demand_days midnights, a Home goes up on the nearest vacant Lot in range (else a floor on a Home
+# there), its owner corp paying when it can, else the Treasury (an import, keeping band[0]), else nothing
+# that day (no unpaid builds). Relocation then fills it.
+hf_grow_housing = true              # 10
+# P5i (coordinator call, 2026-10-10): 10.5 % of Full's shift time was Eat, mostly a walk out 2-4 h+ into the
+# shift with nothing carried and an empty pantry (92 % of the on-shift Work -> Eat switches).
+hf_shift_meals = true               # 11: eat or pack a meal before a shift; grocery runs off shift
+grocery_score = 0.5                 # 11: the fed worker's Eat (the grocery run) scores this
+# P5j (coordinator call): the farmers' on-shift sleep came from short nights (60 % after under 4 h; nights
+# ~13 % Unwind, ~16 % walking home to bed). Bedtime = leaving time - a full night - the walk home.
+hf_work_night = true                # 12
+work_night_sleep_flat = 0.5         # 12: Sleep's flat at bedtime (x the ramp's pressure)
+work_night_ramp_ticks = 120         # 12: the pressure rises over the 2 h before bedtime
+work_night_unwind_mult = 0.3        # 12: Unwind and the grocery run past bedtime
+# Coordinator call (after the recalibration): employed workers slept rough beside empty beds (the deposit wall).
+hf_rehouse_employed = true          # 13: with no_safety_net, a worker re-houses on the first rent (the jobless keep the deposit)
+housing_demand_min = 6              # 10: one Home's beds
+housing_demand_days = 3
+housing_builds_per_1000 = 1.0       # 10: Homes or floors a day per 1,000 residents (2 at 2,000)
+hungry_reach_mult = 2.0             # 2: a starving agent walks this much further to a Mission
+steal_can_buy = 12.0                # 3
+beg_dry_max = 3                     # 4: dry Begs in a row that cool Earn ...
+beg_cool_hours = 1                  # ... for this many hours
 
 # ---------------------------------------------------------------------------
 # Life pass L2: the living city (docs/LIFE_L2.md; plan ~/.claude/plans/life-l2.md). Every key is a
@@ -2049,3 +2103,163 @@ wage = 5
 shift = "day"
 skill = "fighting"
 model = "contract"                 # paid by the camp's owner at shift end (a city camp: the Treasury, in civic_payroll); the model has no code in P3
+
+# Class pay (docs/CLASS_PAY.md): the professional and management posts. `classpay = true` rows post places only
+# with class pay on ([economy2] wages and [classpay] enabled); `corp_only` rows only at a corp's workplace; `grade`
+# multiplies `wage` by [classpay] grade_mult (2 professional, 3 management). Paid by the workplace's owner out of
+# the same revenue pool as every wage (the margin rule prices the place at its grade). Placeholders, not tuned.
+[[trades]]
+id = "manager"
+label = "Manager"
+workplace = ["Farm", "Market", "Fab", "Clinic", "Lab", "Garage", "Hotel", "SecurityOffice", "Club", "Den", "Lounge", "Arcade", "FightPit", "NoodleBar", "Feed"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "persuasion"
+model = "overhead"
+grade = 3
+classpay = true
+corp_only = true
+
+[[trades]]
+id = "engineer"
+label = "Engineer"
+workplace = ["Farm", "Fab", "Lab", "Garage"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "knowledge"
+model = "overhead"
+grade = 2
+classpay = true
+corp_only = true
+
+[[trades]]
+id = "accountant"
+label = "Accountant"
+workplace = ["Market", "Hotel", "Clinic", "SecurityOffice"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "knowledge"
+model = "overhead"
+grade = 2
+classpay = true
+corp_only = true
+
+[[trades]]
+id = "broker"
+label = "Broker"
+workplace = ["Market", "Lab"]
+staff_per_floor = 1
+wage = 6
+shift = "day"
+skill = "persuasion"
+model = "overhead"
+grade = 2
+classpay = true
+corp_only = true
+
+# ---------------------------------------------------------------------------
+# Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values; every
+# key read only with `enabled`. Dylan 2026-10-10: on with the flip (wages + no_safety_net), off until then.
+[sickness]
+enabled = false            # master; off is the city before it
+diet = true                # § 1-2: synth/real, the meters, the debuffs
+bins = true                # § 4
+cancer = true              # § 3
+synth_stretch = 3          # meals per shelf unit cut with filler (a synth meal ~1 coin at P 3-4)
+# P2 measured (seed 42 x 60, flipped): at 10 real meals' coins 64 % of meals were synth and 1,059 of ~1,900
+# malnourished, the working class included; coordinator call: buy real holding 3 meals' worth.
+real_meal_reserve = 3      # buy real at coins >= this many real meals ...
+mal_seek_real = 0.5        # ... or when this malnourished with 2 real meals' coins
+mal_hungry_edge = 0.25     # an hour below this hunger is a hungry hour
+mal_hungry = 0.08          # malnutrition per fully hungry day (~12 days to 1.0)
+mal_poor_diet = 0.012      # per day at an all-synth diet (~25 days to the onset)
+synth_malnut_cap = 0.45    # ... but a synth diet levels off here (run-down, not sick); hunger and scraps push past it
+mal_real = 0.02            # off per real meal (max 2 a day)
+mal_onset = 0.3
+# After P5 (Dylan): a share cleared a day, so a diet settles. Steady t* = tox_synth x S / tox_clear_frac, S synth
+# meals a day. The sim's day of food is ~1 meal (food_satisfy 0.5; measured 0.9-1.0 meals per adult-day), so
+# all-synth is S = 1 -> 0.8, and "one synth meal a day" (one of three human meals) is S = 1/3 -> 0.27. Hence
+# tox_synth / tox_clear_frac = 0.8; tox_clear_frac 0.03 (a 23-day half-life toward a cleaner diet) -> tox_synth 0.024.
+tox_synth = 0.024          # per synth or Mission meal
+tox_dive = 0.048           # per bin meal (scraps: twice synth)
+tox_clear_frac = 0.03      # the share cleared a day
+tox_seed_years = 8.0       # world creation: the seeded level approaches the diet's steady one by 1 - exp(-(age - 16) / this)
+tox_seed_jitter = 0.3
+tox_onset = 0.4
+mal_energy = 0.5
+tox_energy = 0.3
+cancer_energy = 1.0
+mal_work = 0.4
+cancer_work = 0.5
+sick_mal = 0.3
+sick_fire_days = 5         # sick days in the last 14 that cost the job (Dylan)
+mal_mood = 0.2
+tox_mood = 0.15
+cancer_mood = 0.3
+frail_old = 2.0
+frail_fight = 0.2
+fertile_mal_max = 0.5
+# After P5 (Dylan): a stationary daily hazard p = cancer_hazard x toxicity x (1 + max(0, age - 30) / 10). Chosen
+# once from the paper estimate in docs/HUNGER_SICKNESS.md § 3 (the seeded distribution), never against runs.
+cancer_hazard = 0.00017    # = 30 cancers a year (120 days) / (120 x E 1,440): the paper estimate, HUNGER_SICKNESS.md § 3
+cancer_age_from = 30.0     # sim years
+cancer_age_span = 10.0
+cancer_growth = 0.015      # stage a day: ~67 days from onset to death (two seasons)
+cancer_symptom = 0.25
+cancer_treat_price = 240   # ~30-40 days of a wage: the sink (wallet, then spouse/kin, then the gang)
+cure_stage = 0.6
+remission = 0.4
+treat_tox_mult = 0.5
+p_stat_treat = 0.2
+bin_cap = 40
+bin_meals_per_unit = 2
+venue_scrap = 0.3
+# P5 (the stop rule's trace, seed 42 flipped): with spoilage alone 0-5 bins held scraps city-wide (a small
+# pantry's 5 % floors to 0; the Markets' 1 % half rots by morning) and the off-screen starving had none in
+# reach. Waste scales with what is sold and eaten, as a city's does:
+market_waste = 0.2         # scrap meals into a Market's bin per shelf unit sold
+home_scrap = 0.2           # scrap meals into the buyer's Home bin per unit bought (household waste; booked at the purchase, both tiers)
+bin_rot = 0.5
+dive_reach_tiles = 40
+dive_satisfy = 0.6
+dive_sick_p = 0.05
+regular_days = 3
+bin_turf_tiles = 15        # a gang-held Home this near makes a bin the gang's (districts are almost never a gang's)
+bin_shake_p = 0.3
+bin_toll = 1
+starve_grace_days = 7
+
+# ---------------------------------------------------------------------------
+# Class pay (docs/CLASS_PAY.md; Dylan 2026-10-10: tiered jobs and pay, class persists through income). Every key
+# read only with [economy2] wages (the dole city is byte-identical). Placeholders, not tuned to targets.
+[classpay]
+enabled = true
+grade_mult = [1.0, 1.3, 2.0, 3.0]   # labour, skilled, professional, management: a post pays its role's wage x this
+role_grade = { Ripperdoc = 2, Researcher = 2, Mechanic = 1, Reporter = 1 }   # bespoke roles' base grade (others labour)
+skilled_share = 0.25                 # of a corp building's labour staff in a role, the skilled posts (floor), by promotion
+promote_days = 30                    # tenure before a promotion (skilled in place, or a move to a graded post)
+merit_edu = 0.5                      # merit = edu x education + skill x skill + tenure x tenure - commute_w x tiles
+merit_skill = 0.3
+merit_tenure = 0.2
+tenure_full_days = 180               # tenure at the same corp counts in full at this many days
+commute_w = 0.0005                   # merit lost per tile from Home to the workplace (100 tiles: 0.05)
+education = [0.10, 0.25, 0.50, 0.80] # the mean by origin: Dreg, Sump, Mid, Spire
+education_spread = 0.20              # +- uniform, a pure hash of the seed and the agent
+child_spread = 0.10                  # a newborn: its parents' mean +- this
+# P3 (Dylan 2026-10-10), the thin ladder: a day in a skilled or graded post is a day of night school. A Sump-born
+# 0.25 reaches 0.58 after three sim years (+0.11 a year), level with a Spire-born outsider once skill and tenure count.
+edu_gain_per_day = 0.0003
+edu_cap = 0.75
+# P3 (Dylan 2026-10-10), the status sink for the rich: a midnight ledger at both tiers. Above status_floor coins, an
+# adult spends status_frac of the excess a day: a Spire night out (the nearest Lounge, else a Spire Club; Flow::Leisure
+# with the venue's fun), fashion at the nearest corp Market and cosmetic chrome at the nearest corp Clinic (Flow::Asset).
+# Real food every meal is already the diet's rule above real_meal_reserve. Placeholders.
+status_floor = 60
+status_frac = 0.05
+status_split = [0.5, 0.25, 0.25]       # night out, fashion, chrome
+# P3 (Dylan 2026-10-10): the graded premium draws on profit plus at most this share of the capital payout; the rest
+# always goes into labour's P* (the payout was labour's raise engine). Not tuned.
+premium_payout_share = 0.5

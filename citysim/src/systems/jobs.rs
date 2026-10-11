@@ -41,6 +41,11 @@ pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
     let Some((kind, floors)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.floors.max(1))) else { return 0 };
     if let Role::Trade(t) = role {
         let Some(row) = world.config.trade(t).filter(|r| r.workplace.contains(&kind)) else { return 0 };
+        // Class pay: a `classpay` row only with class pay on; a
+        // `corp_only` row only at a corp's workplace.
+        if !world.config.trade_live(row) || (row.corp_only && world.corp_of_building(b).is_none()) {
+            return 0;
+        }
         if row.per_owned > 0 {
             return crate::systems::trades::owned_places(world, b, row);
         }
@@ -366,6 +371,8 @@ pub fn accrue_fab_work(world: &mut World, worker: EntityId, fab: EntityId, ticks
     let cfg = &world.config.jobs;
     let farming = world.comp::<Skills>(worker).map_or(0.0, |s| s.farming);
     let mut per_hour = cfg.fab_yield * (cfg.fab_skill_floor + cfg.fab_skill_slope * farming);
+    // Hunger as sickness § 2 (x 1.0 off: exact).
+    per_hour *= crate::systems::health::work_mult(world, worker);
     if let Some(c) = world.corp_of_building(fab) {
         per_hour *= crate::systems::competence::comp_mult(world, c);
     }
@@ -448,7 +455,7 @@ pub fn scavenge_p(world: &World, id: EntityId) -> f32 {
         .map(|pos| world.district_of(pos.tile))
         .and_then(|d| world.districts.get(d.index()))
         .map_or(0.0, |d| d.litter.clamp(0.0, 1.0));
-    p * (0.5 + litter).max(1.0)
+    p * (0.5 + litter).max(1.0) * crate::systems::health::work_mult(world, id)
 }
 
 /// Plan L9: a seller owner's `Flow::Import` coins go into its 14-day tally

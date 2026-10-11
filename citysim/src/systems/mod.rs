@@ -19,17 +19,20 @@
 
 pub mod assets;
 pub mod bind;
+pub mod bins;
 pub mod budget;
 pub mod camp;
 pub mod charity;
 pub mod chrome;
 pub mod classes;
+pub mod classpay;
 pub mod competence;
 pub mod contracts;
 pub mod corp_brain;
 pub mod corps;
 pub mod creeds;
 pub mod demography;
+pub mod diet;
 pub mod districts;
 pub mod econ;
 pub mod economy;
@@ -40,6 +43,7 @@ pub mod fviolence;
 pub mod gang;
 pub mod gossip;
 pub mod grudges;
+pub mod health;
 pub mod hunt;
 pub mod jobs;
 pub mod law;

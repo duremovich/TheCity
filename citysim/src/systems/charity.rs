@@ -102,7 +102,11 @@ pub fn meal_cost(world: &World) -> i64 {
 /// The standing Mission with stock nearest `from` within `reach_tiles`
 /// (ties the lower id).
 pub fn mission_in_reach(world: &World, from: TilePos) -> Option<EntityId> {
-    let reach = world.config.charity.reach_tiles;
+    mission_within(world, from, world.config.charity.reach_tiles)
+}
+
+/// The nearest standing, stocked, open Mission within `reach` tiles of `from`.
+pub fn mission_within(world: &World, from: TilePos, reach: u32) -> Option<EntityId> {
     missions(world)
         .into_iter()
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.stock_food > 0) && !world.is_closed(b))
@@ -548,6 +552,22 @@ pub fn gang_gift(world: &mut World, gang: EntityId) {
 /// `[GoTo(Seller = mission)] -> EatAlms`. A Volunteer at its own Mission
 /// eats there on shift whatever its coins (the staff meal).
 pub fn alms_plan(world: &World, id: EntityId) -> Option<Plan> {
+    let m = alms_target(world, id)?;
+    let here = world.comp::<Position>(id).and_then(|p| p.building);
+    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
+    let mut steps = Vec::with_capacity(2);
+    if here != Some(m) {
+        steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(m)));
+    }
+    steps.push(step(ActionKind::EatAlms, Some(m)));
+    Some(Plan { goal: crate::components::GoalKind::Eat, target: Some(m), steps, started_tick: world.tick })
+}
+
+/// The Mission that would serve `id` a meal now (`alms_plan`'s test): a
+/// hungry adult who cannot buy a meal, its own Mission for a Volunteer,
+/// else the nearest stocked one within `reach_tiles` of its Home door (else
+/// tile); hunger fix G2: a starving agent's reach x `hungry_reach_mult`.
+pub fn alms_target(world: &World, id: EntityId) -> Option<EntityId> {
     if !crate::systems::demography::is_adult(world, id) {
         return None;
     }
@@ -557,24 +577,29 @@ pub fn alms_plan(world: &World, id: EntityId) -> Option<Plan> {
     }
     let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let staff = volunteer_at(world, id);
-    if staff.is_none() && coins >= crate::systems::life::meal_price(world, id) {
+    // Hunger fix G2 (parity, after P5): with the fix on, "cannot buy" is
+    // no stocked Market within its means (`life::can_buy_meal`).
+    let can_buy = if crate::systems::fixes::mission_gate(world) {
+        crate::systems::life::can_buy_meal(world, id)
+    } else {
+        coins >= crate::systems::life::meal_price(world, id)
+    };
+    if staff.is_none() && can_buy {
         return None;
     }
-    let here = world.comp::<Position>(id).and_then(|p| p.building);
-    let m = match staff {
-        Some(m) if world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0) => m,
+    match staff {
+        Some(m) if world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0) => Some(m),
         _ => {
             let from = origin(world, id)?;
-            mission_in_reach(world, from)?
+            let starving = hunger < world.config.life.starving_hunger;
+            if starving && crate::systems::fixes::mission_gate(world) {
+                let reach = (world.config.charity.reach_tiles as f32 * world.config.life.hungry_reach_mult) as u32;
+                mission_within(world, from, reach)
+            } else {
+                mission_in_reach(world, from)
+            }
         }
-    };
-    let step = |action, target| crate::components::ActionInstance { action, target, tile: None };
-    let mut steps = Vec::with_capacity(2);
-    if here != Some(m) {
-        steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(m)));
     }
-    steps.push(step(ActionKind::EatAlms, Some(m)));
-    Some(Plan { goal: crate::components::GoalKind::Eat, target: Some(m), steps, started_tick: world.tick })
 }
 
 /// The Mission `id` volunteers at, if any.
@@ -614,7 +639,9 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
             let served = charity(world, m).map_or(0, |c| if c.hour_key == hour { c.meals_this_hour } else { 0 });
             here == Some(m)
                 && !world.is_closed(m)
-                && world.comp::<Building>(m).is_some_and(|bd| bd.stock_food > 0)
+                && world
+                    .comp::<Building>(m)
+                    .is_some_and(|bd| bd.stock_food > 0 || bd.charity.as_ref().is_some_and(|c| c.synth_frac > 0))
                 && (staff || (hungry && poor))
                 && served < hour_cap(world, m)
         }
@@ -630,11 +657,20 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
 /// ledger-only `Alms` line at the meal's cost, the district's `d_meals`.
 fn serve(world: &mut World, m: EntityId, id: EntityId) -> bool {
     let hour = world.tick / TICKS_PER_HOUR;
+    // Hunger as sickness § 1: the Mission serves synth, `synth_stretch`
+    // meals a shelf unit (the open unit's first).
+    let stretch = if crate::systems::diet::on(world) { crate::systems::diet::stretch(world) } else { 1 };
     let Some(bd) = world.comp_mut::<Building>(m) else { return false };
-    if bd.stock_food == 0 {
-        return false;
+    let frac = bd.charity.as_ref().map_or(0, |c| c.synth_frac);
+    if frac == 0 {
+        if bd.stock_food == 0 {
+            return false;
+        }
+        bd.stock_food -= 1;
     }
-    bd.stock_food -= 1;
+    if let Some(c) = bd.charity.as_mut() {
+        c.synth_frac = (frac + 1) % stretch;
+    }
     if let Some(c) = bd.charity.as_mut() {
         c.meals_today = c.meals_today.saturating_add(1);
         if c.hour_key != hour {
@@ -647,9 +683,11 @@ fn serve(world: &mut World, m: EntityId, id: EntityId) -> bool {
     if let Some(n) = world.comp_mut::<Needs>(id) {
         crate::needs::eat(n, &cfg);
     }
+    crate::systems::health::ate(world, id, crate::components::MealKind::Alms);
     world.mark_day(id, crate::components::trace_flags::ATE);
     world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
-    let cost = meal_cost(world);
+    let cost =
+        if stretch > 1 { (meal_cost(world) + i64::from(stretch) / 2) / i64::from(stretch) } else { meal_cost(world) };
     ownership::ledger_only(world, Flow::Alms, cost);
     let d = district_of_agent(world, id);
     let row = &mut world.stats.current.econ;

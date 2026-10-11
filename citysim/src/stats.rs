@@ -20,7 +20,7 @@ g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
 c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
 flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,\
 tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,flow_street_dice,\
-contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,ticks_per_sec";
+contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 pub const CORP_SLOTS: usize = 9;
@@ -307,6 +307,10 @@ pub struct DayRow {
     /// and before `ticks_per_sec`; later phases append to it.
     #[serde(default, skip_serializing_if = "JobsCols::is_zero")]
     pub jobs: JobsCols,
+    /// Hunger as sickness (docs/HUNGER_SICKNESS.md § 9): after the jobs
+    /// group, before `ticks_per_sec` (zeros with `[sickness]` off).
+    #[serde(default, skip_serializing_if = "HealthCols::is_zero")]
+    pub health: HealthCols,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -1010,12 +1014,15 @@ impl DayRow {
             contract: ContractCols::default(),
             econ: EconCols::default(),
             jobs: JobsCols::default(),
+            health: HealthCols::default(),
             ticks_per_sec: 0.0,
         }
     }
 
     /// One CSV line matching [`CSV_HEADER`], without a trailing newline.
     pub fn csv_row(&self) -> String {
+        // Hunger as sickness: the health group rides with the jobs group.
+        let jobs_health = format!("{},{}", self.jobs.csv(), self.health.csv());
         let corps: Vec<String> = (0..CORP_SLOTS)
             .map(|i| match self.corps.get(i).copied().flatten() {
                 Some((t, o)) => format!("{t},{o}"),
@@ -1150,7 +1157,7 @@ impl DayRow {
             self.living.flow_street_dice,
             self.contract.csv(),
             self.econ.csv(),
-            self.jobs.csv(),
+            jobs_health,
             self.ticks_per_sec,
         )
     }
@@ -1406,6 +1413,64 @@ impl JobsCols {
     }
 }
 
+/// Hunger as sickness (docs/HUNGER_SICKNESS.md § 9): the health group,
+/// after `JobsCols` and before `ticks_per_sec`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HealthCols {
+    pub meals_real: u32,
+    pub meals_synth: u32,
+    pub meals_dive: u32,
+    pub meals_alms: u32,
+    /// Citizens at or over `mal_onset` / adults at or over `tox_onset` at midnight.
+    pub malnourished: u32,
+    pub toxic: u32,
+    pub mean_malnutrition: f32,
+    pub mean_toxicity: f32,
+    /// Adults off sick today (rolled at midnight).
+    pub sick_days: u32,
+    pub cancer_new: u32,
+    pub cancer_diagnosed: u32,
+    pub cancer_cured: u32,
+    pub deaths_disease: u32,
+    /// Scrap meals into the bins today.
+    pub bin_meals_in: u32,
+    pub bin_contests: u32,
+    pub bin_shakedowns: u32,
+}
+
+impl HealthCols {
+    pub fn is_zero(&self) -> bool {
+        *self == HealthCols::default()
+    }
+
+    pub fn header() -> String {
+        "meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns".to_string()
+    }
+
+    pub fn csv(&self) -> String {
+        [
+            self.meals_real.to_string(),
+            self.meals_synth.to_string(),
+            self.meals_dive.to_string(),
+            self.meals_alms.to_string(),
+            self.malnourished.to_string(),
+            self.toxic.to_string(),
+            format!("{:.4}", self.mean_malnutrition),
+            format!("{:.4}", self.mean_toxicity),
+            self.sick_days.to_string(),
+            self.cancer_new.to_string(),
+            self.cancer_diagnosed.to_string(),
+            self.cancer_cured.to_string(),
+            self.deaths_disease.to_string(),
+            self.bin_meals_in.to_string(),
+            self.bin_contests.to_string(),
+            self.bin_shakedowns.to_string(),
+        ]
+        .join(",")
+    }
+}
+
 #[cfg(test)]
 mod econ_cols_tests {
     use super::*;
@@ -1417,7 +1482,9 @@ mod econ_cols_tests {
         assert_eq!(names.split(',').count(), 68);
         assert_eq!(EconCols::default().csv().split(',').count(), 68);
         let jobs = JobsCols::header();
-        let tail = format!("flow_fixer_cut,contracts_refused_full,{names},{jobs},ticks_per_sec");
+        let health = HealthCols::header();
+        let tail = format!("flow_fixer_cut,contracts_refused_full,{names},{jobs},{health},ticks_per_sec");
+        assert_eq!(HealthCols::default().csv().split(',').count(), health.split(',').count());
         assert!(CSV_HEADER.ends_with(&tail), "the header ends with the econ columns, then the jobs columns");
         assert_eq!(JobsCols::default().csv().split(',').count(), jobs.split(',').count());
         assert_eq!(DayRow::new(0).csv_row().split(',').count(), CSV_HEADER.split(',').count());

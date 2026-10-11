@@ -29,6 +29,7 @@ pub fn run(world: &mut World) {
             b.plan_queued = false;
         }
         if tick.saturating_sub(enqueued) > PLAN_QUEUE_MAX_AGE {
+            world.plan_stale_drops += 1;
             continue; // stale: the agent idles until its next think
         }
         let Some(goal) = world.comp::<Brain>(id).filter(|b| b.plan.is_none()).and_then(|b| b.current_goal) else {
@@ -188,6 +189,9 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
             .or_else(|| crate::systems::life::exec_plan(world, id)),
         // M12 phase 4: the expedition chain, built directly.
         GoalKind::Raid => routine::raid_plan(world, id),
+        // Hunger fix item 11 (b): a fed worker's Eat is the grocery run
+        // (planned once; a hungry agent's Eat goes to the planner).
+        GoalKind::Eat if routine::fed(world, id) => routine::grocery_plan(world, id),
         _ => None,
     };
     if let Some(plan) = bypass {
@@ -216,8 +220,13 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // The Real economy E27, E28: a meal at a Mission for the hungry poor, a
     // gift at its door from a donor; scripted as the leisure plans.
     let scripted = match goal {
-        GoalKind::Eat => crate::systems::charity::alms_plan(world, id),
+        // Hunger as sickness § 4: the bin when no Mission serves.
+        GoalKind::Eat => {
+            crate::systems::charity::alms_plan(world, id).or_else(|| crate::systems::bins::dive_plan(world, id))
+        }
         GoalKind::Socialise => crate::systems::charity::donate_plan(world, id),
+        // Hunger as sickness § 3: the cancer's treatment.
+        GoalKind::Treat => crate::systems::health::oncology_plan(world, id),
         _ => None,
     };
     if let Some(plan) = scripted {
@@ -486,7 +495,9 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
             ActionKind::StealFood(StealSource::Home) => {
                 plan.target.map(|b| ReservationKind::FoodUnits { building: b, units: 2 })
             }
-            ActionKind::EatAtHome => home.map(|b| ReservationKind::FoodUnits { building: b, units: 1 }),
+            ActionKind::EatAtHome | ActionKind::PackMeal => {
+                home.map(|b| ReservationKind::FoodUnits { building: b, units: 1 })
+            }
             ActionKind::Chat | ActionKind::Flirt | ActionKind::Propose => {
                 plan.target.map(|other| ReservationKind::Partner { other })
             }

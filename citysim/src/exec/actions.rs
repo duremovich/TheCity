@@ -95,6 +95,9 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Network => 30,
         // Real economy E27, E28: a meal at the kitchen, a gift at the door.
         ActionKind::EatAlms => 30,
+        ActionKind::DumpsterDive => 20,
+        ActionKind::Oncology => 120,
+        ActionKind::PackMeal => 5,
         ActionKind::Donate => 5,
         ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
@@ -186,6 +189,10 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         k if k.is_contract_step() => crate::systems::contracts::can_start(world, id, k, target),
         // Real economy E27, E28: the scripted charity steps.
         k if k.is_charity_step() => crate::systems::charity::can_start(world, id, k, target),
+        // Hunger as sickness § 4: the dive's start check.
+        ActionKind::DumpsterDive => crate::systems::bins::can_start(world, id, target),
+        ActionKind::Oncology => crate::systems::health::can_start_oncology(world, id, target),
+        ActionKind::PackMeal => at_home(world, id) && home_pantry(world, id) > 0,
         // M11 D13: at the wage desk (the Hall for a city job, else the workplace).
         ActionKind::CollectWage => {
             world.comp::<Position>(id).is_some_and(|p| p.building.is_some() && p.building == world.wage_desk(id))
@@ -370,11 +377,14 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         ActionKind::BuyFood => {
             let market = world.local(id, BuildingKind::Market);
             let units = economy::buy_quantity(world, id, market);
-            let paid = economy::pay_for_food(world, id, market, units);
+            // Hunger as sickness § 1: the meal's quality, chosen before the
+            // coins move (`Real` with the diet off).
+            let q = economy::quality_at(world, id, market);
+            let paid = economy::pay_for_food_q(world, id, market, units, q);
             // L2 shadow fixes item 4: the units move with the coins (an
             // interrupted purchase was refunded and bought again: 12 food
             // flows for 6 meals); `(0, 0)` marks a shelf found empty.
-            let taken = economy::take_food(world, id, market, units, paid);
+            let taken = economy::take_food_q(world, id, market, units, paid, q);
             world.pending_purchase.insert(id, if taken { (units, 0) } else { (0, 0) });
         }
         ActionKind::Wander => {
@@ -430,6 +440,11 @@ pub fn on_start(world: &mut World, id: EntityId, kind: ActionKind, target: Optio
         k if k.is_leisure_step() => crate::systems::leisure::on_start(world, id, k, target),
         // M16a (plan C32): the guard is on post.
         ActionKind::Guard => crate::systems::contracts::on_guard_start(world, id, target),
+        // Hunger as sickness § 4: the diver holds the bin for the dive.
+        ActionKind::DumpsterDive => {
+            let until = world.tick + duration(world, id, kind);
+            crate::systems::bins::on_start(world, id, target, until);
+        }
         ActionKind::Drink => {
             // M11: the Bar's owner takes the 2 coins (the Treasury owns a city Bar).
             let bar = world.comp::<Position>(id).and_then(|p| p.building);
@@ -486,6 +501,11 @@ pub fn on_abort(world: &mut World, id: EntityId, kind: ActionKind, started: Tick
         }
         // M13 D38: a dealer who leaves the Bar is no longer dealing there.
         ActionKind::Deal => crate::systems::stims::end_deal(world, id),
+        // Hunger as sickness § 4: the bin is let go.
+        ActionKind::DumpsterDive => {
+            let b = world.comp::<Brain>(id).and_then(|b| b.current_step()).and_then(|s| s.target);
+            crate::systems::bins::release(world, id, b);
+        }
         // L2 L14: a paid entry or meal refunded; a HangOut leaves its spot.
         k if k.is_leisure_step() => crate::systems::leisure::on_abort(world, id, k),
         // M16a (plan C32): off post.
@@ -561,11 +581,12 @@ pub fn on_complete(
             if inv.food == 0 {
                 return StepResult::Failed(FailReason::StockGone);
             }
-            inv.food -= 1;
+            let meal = crate::systems::health::eat_inventory_unit(inv);
             inv.stolen_food = inv.stolen_food.min(inv.food);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
+            crate::systems::health::ate(world, id, meal);
             world.mark_day(id, crate::components::trace_flags::ATE);
             world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             StepResult::Done
@@ -578,11 +599,12 @@ pub fn on_complete(
             if b.stock_food == 0 {
                 return StepResult::Failed(FailReason::StockGone);
             }
-            b.stock_food -= 1;
+            let meal = crate::systems::health::eat_pantry_unit(b);
             world.release_all(id);
             if let Some(n) = world.comp_mut::<Needs>(id) {
                 needs::eat(n, &cfg);
             }
+            crate::systems::health::ate(world, id, meal);
             world.mark_day(id, crate::components::trace_flags::ATE);
             world.remember(id, MemoryKind::Ate, None, 0.2, 0.3, false);
             StepResult::Done
@@ -595,8 +617,13 @@ pub fn on_complete(
             let room = world.comp::<Building>(home).map_or(0, |b| cap.saturating_sub(b.stock_food));
             let Some(inv) = world.comp_mut::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
             let movable = (inv.food - inv.stolen_food).min(room);
+            // Hunger as sickness § 1: the synth meals go in with the rest.
+            let synth = inv.synth_held().min(movable);
+            inv.synth = inv.synth_held() - synth;
             inv.food -= movable;
+            inv.synth = inv.synth.min(inv.food);
             if let Some(b) = world.comp_mut::<Building>(home) {
+                b.synth_food = b.synth_food.min(b.stock_food) + synth;
                 b.stock_food += movable;
             }
             StepResult::Done
@@ -688,6 +715,28 @@ pub fn on_complete(
         ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
+        ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
+        // P5i: one pantry unit (synth first, as eaten) into the carried food.
+        ActionKind::PackMeal => {
+            let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else {
+                return StepResult::Failed(FailReason::NoSuchPlace);
+            };
+            let Some(b) = world.comp_mut::<Building>(home) else { return StepResult::Failed(FailReason::NoSuchPlace) };
+            if b.stock_food == 0 {
+                return StepResult::Failed(FailReason::StockGone);
+            }
+            let meal = crate::systems::health::eat_pantry_unit(b);
+            world.release_all(id);
+            let Some(inv) = world.comp_mut::<Inventory>(id) else { return StepResult::Failed(FailReason::StockGone) };
+            let synth = inv.synth_held();
+            inv.food += 1;
+            inv.synth = synth + u32::from(meal == crate::components::MealKind::Synth);
+            StepResult::Done
+        }
+        ActionKind::Oncology => match target {
+            Some(c) if crate::systems::health::oncology(world, id, c) => StepResult::Done,
+            _ => StepResult::Failed(FailReason::PreconditionLost),
+        },
         ActionKind::Donate => crate::systems::charity::on_donate(world, id, target),
         ActionKind::Guard => crate::systems::contracts::on_guard_done(world, id, target),
         ActionKind::CollectWage => {
@@ -1387,6 +1436,9 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
             if let Some(w) = world.comp_mut::<Wallet>(id) {
                 w.coins += coins;
             }
+            if let Some(b) = world.comp_mut::<Brain>(id) {
+                b.beg_dry = 0;
+            }
             {
                 // the lower id owes the higher id
                 let (lo, _) = key;
@@ -1398,6 +1450,20 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
             }
             return StepResult::Done;
         }
+    }
+    // Hunger fix G4: nobody gave; an hour honestly spent (Scavenge's dry
+    // hour), retried, until `beg_dry_max` in a row cool Earn.
+    if crate::systems::fixes::beg_retry(world) {
+        let max = world.config.life.beg_dry_max.max(1);
+        let cool = world.tick + world.config.life.beg_cool_hours * crate::time::TICKS_PER_HOUR;
+        if let Some(b) = world.comp_mut::<Brain>(id) {
+            b.beg_dry = b.beg_dry.saturating_add(1);
+            if b.beg_dry >= max {
+                b.beg_dry = 0;
+                b.cooldowns.insert(crate::components::GoalKind::Earn, cool);
+            }
+        }
+        return StepResult::Done;
     }
     world.remember(id, MemoryKind::Rejected, None, 0.3, -0.3, false);
     StepResult::Failed(FailReason::PreconditionLost)

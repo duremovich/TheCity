@@ -25,6 +25,11 @@ fn table(f: impl Fn(&mut StatRow)) -> StatTable {
         p_scavenge: None,
         p_beg: None,
         p_desperate: None,
+        p_dive: None,
+        p_meal: None,
+        p_attend: None,
+        p_wage_ratio: None,
+        pantry_per_resident: None,
         rows,
     }
 }
@@ -451,6 +456,12 @@ fn test_life_same_richness_full_vs_statistical() {
         let mut cfg = Config::load().v1_profile();
         cfg.lod.force = Some(tier);
         let mut w = World::new(408, cfg);
+        // Hunger as sickness P1: the hunger fixes' G3 (no food theft while a
+        // meal is affordable) left this all-Full dole city without a theft in
+        // 30 days (4-7 before, every one by a thief holding a meal's coins):
+        // the dole fed everyone. No dole here, so the broke steal on both
+        // tiers and the biographies carry crime (pressure, not a switch).
+        w.levers.dole_per_day = 0;
         w.run_ticks(30 * TICKS_PER_DAY);
         let mut seen = std::collections::BTreeSet::new();
         let mut best = 0;

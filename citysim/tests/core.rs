@@ -34,6 +34,10 @@ const POP_MIN: u32 = 1333;
 const POP_MAX: u32 = 2667;
 /// Starvation deaths per 120 days.
 const STARVATION_MAX_120: f64 = 200.0;
+/// Hunger as sickness (Dylan, decision 5): with `[sickness]` on, starvation
+/// over 20 per 120 days means synth, the bins and the Missions all failed:
+/// a broken free-food floor, a broken city.
+const STARVATION_MAX_120_SICK: f64 = 20.0;
 /// Assault + Murder events per day (2x the M7 baseline, per capita).
 const ASSAULTS_PER_DAY_MAX: f64 = 42.7;
 /// Seeded corps still trading at the run's end (the year gate's number).
@@ -44,7 +48,10 @@ const CORPS_ALIVE_MIN: usize = 4;
 // wages` and `no_safety_net` on): the dole city is jobless by design.
 /// J24: employed free adults over free adults (adults not jailed), every day from day 30.
 const EMPLOYED_MIN_SHARE: f64 = 0.5;
-/// J25: homeless adults over adults, every day from day 30.
+/// J25: adults sleeping on the street over adults, every day from day 30.
+/// Dylan, 2026-10-10 (hunger as sickness P4b): a squat, a cot or a Hotel bed
+/// is a rung, not the street; the Dregs (`Household.home == None`) are
+/// printed with their split beside it.
 const HOMELESS_MAX_SHARE: f64 = 0.25;
 
 /// The fulfilled-contract marks, by `ContractKind::index`.
@@ -66,10 +73,15 @@ struct SeedRun {
     corps_seeded: usize,
     corps_alive: usize,
     tps: f64,
-    /// J24/J25 at each day's end: (adults, free adults, employed free adults, homeless adults).
+    /// J24/J25 at each day's end: (adults, free adults, employed free adults, street sleepers).
     adults: Vec<(u32, u32, u32, u32)>,
+    /// The Dregs' split at each day's end: (Dregs, street, squat, of them in a
+    /// shanty, a Mission cot, a Hotel bed).
+    dregs: Vec<(u32, u32, u32, u32, u32, u32)>,
     /// The run is a no-net city (J24/J25 asserted).
     no_net: bool,
+    /// `[sickness]` on (the tighter starvation bound and its bullets).
+    sickness: bool,
 }
 
 impl SeedRun {
@@ -102,7 +114,9 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         corps_alive: 0,
         tps: 0.0,
         adults: Vec::new(),
+        dregs: Vec::new(),
         no_net: econ::no_net(&w),
+        sickness: citysim::systems::health::on(&w),
     };
     let mut cursor = 0u64;
     // Prisoners at the last hour's end, by their tier then.
@@ -174,9 +188,16 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         day_mark("Crackdown held", w.law().is_some_and(|l| l.posture == Posture::Crackdown));
         day_mark("gang controls a district", w.districts.iter().any(|d| matches!(d.control, Controller::Gang(_))));
         day_mark("gang front", row.living.fronts > 0);
+        day_mark("malnourished agent", row.health.malnourished > 0);
+        day_mark("a sick day", row.health.sick_days > 0);
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
         *r.marks.entry("crash death").or_insert(0) += row.crash_deaths;
         *r.marks.entry("Mission meal").or_insert(0) += row.econ.mission_meals;
+        // Hunger as sickness: the day's synth and bin meals, a malnourished
+        // day, the shakedowns (zeros with `[sickness]` off).
+        *r.marks.entry("synth meal").or_insert(0) += row.health.meals_synth;
+        *r.marks.entry("bin meal").or_insert(0) += row.health.meals_dive;
+        *r.marks.entry("bin shakedown").or_insert(0) += row.health.bin_shakedowns;
         // M16a: the contract columns (printed; the bullets read the
         // Guard and Locate rows), and a Fixer in business (open, a record
         // brokered there in the last 7 days: the spec's definition).
@@ -198,6 +219,7 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         r.rows.push(row);
         if r.no_net {
             r.adults.push(adult_counts(&w));
+            r.dregs.push(dreg_split(&w));
         }
     }
     r.tps = (days * TICKS_PER_DAY) as f64 / started.elapsed().as_secs_f64();
@@ -207,9 +229,9 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
 }
 
 /// J24/J25's day-end counts: (adults, free adults, employed free adults,
-/// homeless adults). An adult is a living citizen with a Brain of age; free
-/// is not jailed; homeless is a Household with no home (the `homeless`
-/// column's rule).
+/// street sleepers). An adult is a living citizen with a Brain of age; free
+/// is not jailed; a street sleeper is a Dreg (a Household with no home)
+/// with no Hotel or cot booked and no squat (Dylan, P4b).
 fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
     let (mut adults, mut free, mut employed, mut homeless) = (0u32, 0u32, 0u32, 0u32);
     for a in w.citizens() {
@@ -217,7 +239,10 @@ fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
             continue;
         }
         adults += 1;
-        if matches!(w.comp::<Household>(a), Some(Household { home: None, .. })) {
+        if matches!(w.comp::<Household>(a), Some(Household { home: None, .. }))
+            && !w.has::<citysim::Squatter>(a)
+            && citysim::systems::street::booked_hotel(w, a).is_none()
+        {
             homeless += 1;
         }
         if w.has::<Sentence>(a) {
@@ -229,6 +254,34 @@ fn adult_counts(w: &World) -> (u32, u32, u32, u32) {
         }
     }
     (adults, free, employed, homeless)
+}
+
+/// The Dregs' split (printed beside J25): (Dregs, street, squat, in a
+/// shanty, a Mission cot, a Hotel bed).
+fn dreg_split(w: &World) -> (u32, u32, u32, u32, u32, u32) {
+    let (mut dregs, mut street, mut squat, mut shanty, mut cot, mut hotel) = (0, 0, 0, 0, 0, 0);
+    for a in w.citizens() {
+        if !w.has::<Brain>(a) || !demography::is_adult(w, a) {
+            continue;
+        }
+        if !matches!(w.comp::<Household>(a), Some(Household { home: None, .. })) {
+            continue;
+        }
+        dregs += 1;
+        if let Some(s) = w.comp::<citysim::Squatter>(a) {
+            squat += 1;
+            shanty += u32::from(citysim::systems::street::is_shanty(w, s.building));
+        } else if let Some(h) = citysim::systems::street::booked_hotel(w, a) {
+            if citysim::systems::charity::is_cot_house(w, h) {
+                cot += 1;
+            } else {
+                hotel += 1;
+            }
+        } else {
+            street += 1;
+        }
+    }
+    (dregs, street, squat, shanty, cot, hotel)
 }
 
 /// The collapse bounds over days `[from, to)` of one run, as failure lines.
@@ -247,7 +300,8 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     let (lo, hi) = (pop.iter().copied().min().unwrap_or(0), pop.iter().copied().max().unwrap_or(0));
     fail((POP_MIN..=POP_MAX).contains(&lo) && hi <= POP_MAX, format!("population {lo}..{hi} in {POP_MIN}..={POP_MAX}"));
     let starv = r.sum(from, to, |x| x.deaths_starvation);
-    let starv_max = STARVATION_MAX_120 * n / 120.0;
+    let per_120 = if r.sickness { STARVATION_MAX_120_SICK } else { STARVATION_MAX_120 };
+    let starv_max = per_120 * n / 120.0;
     fail(starv <= starv_max, format!("starvation {starv:.0} <= {starv_max:.0}"));
     let asl: f64 = r.assaults[from as usize..to as usize].iter().map(|&a| f64::from(a)).sum::<f64>() / n;
     fail(asl <= assaults_max, format!("assaults/day {asl:.2} <= {assaults_max:.2}"));
@@ -286,10 +340,16 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     {
         let h = share(hl, adults);
         let over = days.iter().filter(|(_, c)| share(c.3, c.0) > HOMELESS_MAX_SHARE).count();
+        // The Dregs beside it (printed, not asserted).
+        if let Some(&(dregs, street, squat, shanty, cot, hotel)) = r.dregs.get(d as usize) {
+            eprintln!(
+                "seed {s} J25 peak day {d}: street {street} of {adults} adults ({h:.3}); Dregs {dregs} = street {street}, squat {squat} (shanty {shanty}), cot {cot}, Hotel {hotel}"
+            );
+        }
         fail(
             h <= HOMELESS_MAX_SHARE,
             format!(
-                "J25 homeless {hl} of {adults} adults ({h:.3}) on day {d} <= {HOMELESS_MAX_SHARE} ({over} days over)"
+                "J25 street sleepers {hl} of {adults} adults ({h:.3}) on day {d} <= {HOMELESS_MAX_SHARE} ({over} days over)"
             ),
         );
     }
@@ -318,7 +378,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a raid resolved", m("raid resolved")),            // [12, 13, 15]
         ("a Home flipped", k(EventKind::TerritoryFlipped)), // [35, 33, 95]
         // M9 the law.
-        ("a Jailbreak", k(EventKind::Jailbreak)),    // [5, 4, 2]
         ("a day in Crackdown", m("Crackdown held")), // [47, 31, 44]
         // M10 off-screen lives.
         ("a hole bound", k(EventKind::Attributed)), // [905, 1007, 993]
@@ -328,7 +387,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a hostile takeover", m("hostile takeover")), // [9, 10, 9]
         ("a Strike", k(EventKind::Strike)),            // [10, 9, 9]
         // M12 districts.
-        ("a Riot", k(EventKind::Riot)),        // [2, 10, 2]
         ("a gang Split", k(EventKind::Split)), // [1, 1, 1]; 5 of 6
         ("a Squat", k(EventKind::Squatted)),   // [93, 82, 94]
         // M13 assets.
@@ -348,7 +406,6 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a World export", k(EventKind::Exported)),      // [294, 328, 319]
         ("a Collect", k(EventKind::Collected)),          // [57, 57, 58]
         ("a Bout", k(EventKind::Bout)),                  // [150, 182, 223]
-        ("a gang front", m("gang front")),               // [0, 0, 74] days; 3 of 6 (the rarest bullet)
         ("a Mission meal", k(EventKind::MissionServed)), // [166, 250, 146]
         // M16a phase 3 (seeds 42-47 at phase 3, 120 days: each on 6 of 6).
         ("a BountyPaid", k(EventKind::BountyPaid)), // [729, 744, 731]; 45-47 [642, 725, 654]
@@ -370,9 +427,52 @@ fn mechanisms() -> Vec<Mechanism> {
     ]
 }
 
+/// Hunger as sickness: the bullets read only with `[sickness]` on (the
+/// shipped default is off until the flip). Chosen on the flipped city,
+/// 120 days, seeds 42-47 (each on 6 of 6; see the P5 commit). A regular's
+/// bin contest, a diagnosis, a cure and a Disease death fired on 2 or fewer
+/// of 6: unit tests in `sickness.rs` instead.
+fn sickness_mechanisms() -> Vec<Mechanism> {
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    vec![
+        ("a synth meal", m("synth meal")),
+        ("a bin meal", m("bin meal")),
+        ("a bin shakedown", m("bin shakedown")),
+        ("a malnourished agent", m("malnourished agent")),
+        ("a sick day", m("a sick day")),
+    ]
+}
+
+/// Printed findings, not bullets: rare events (0-2 a seed) that flip on any
+/// trajectory change (hunger as sickness P5i, 2026-10-10: a Riot [2, 2, 0]
+/// and a gang front [0, 0, 32] days with item 11 off read [0, 0, 0] on
+/// both under a one-step butterfly, `max_coarse` 151, and fired again
+/// with P5i on under two others). Each is a unit-tested mechanism instead
+/// (docs/TESTING.md): `districts.rs::test_riot_fires_at_streak_and_picks_target`
+/// (and its streak-short negative), `leisure.rs::test_front_built_under_expand_in_held_district`
+/// and `test_no_front_without_expand_or_treasury`. A Jailbreak likewise
+/// (2026-10-10, the flipped city after the recalibration: [0, 0, 0] on
+/// 42-44, [0, 1, 1] under a one-step butterfly): `factions.rs::
+/// test_breach_with_no_guards_frees_the_boss_first_and_reopens_the_warrant`
+/// (the break fires) with its negatives `test_breach_with_nobody_inside_fizzles`
+/// and `test_breach_against_three_guards_fails_and_shocks`.
+fn printed_mechanisms() -> Vec<Mechanism> {
+    let k = |kind: EventKind| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.kind(kind)) };
+    let m = |mark: &'static str| -> Box<dyn Fn(&SeedRun) -> u32> { Box::new(move |r: &SeedRun| r.mark(mark)) };
+    vec![("a Riot", k(EventKind::Riot)), ("a gang front", m("gang front")), ("a Jailbreak", k(EventKind::Jailbreak))]
+}
+
 /// Every mechanism's count per seed, then the bullets: one line each.
 fn judge_mechanisms(runs: &[SeedRun], failures: &mut Vec<String>) {
-    for (name, f) in mechanisms() {
+    for (name, f) in printed_mechanisms() {
+        let per: Vec<u32> = runs.iter().map(&f).collect();
+        eprintln!("FINDING mechanism {name} (printed, unit-tested): per seed {per:?}");
+    }
+    let mut all = mechanisms();
+    if runs.first().is_some_and(|r| r.sickness) {
+        all.extend(sickness_mechanisms());
+    }
+    for (name, f) in all {
         let per: Vec<u32> = runs.iter().map(&f).collect();
         let ok = per.iter().any(|&c| c >= 1);
         eprintln!("{} mechanism {name}: per seed {per:?}", if ok { "PASS" } else { "FAIL" });

@@ -159,6 +159,16 @@ pub enum ActionKind {
     EatAlms,
     /// At a Mission's door: a gift from the surplus into its purse.
     Donate,
+    // --- Hunger as sickness § 4: the dive plan's scripted step; never in
+    // `PLANNABLE`, `allowed` false, started by `bins::can_start`.
+    /// At a bin outside a building's door: a meal of scraps, eaten there.
+    DumpsterDive,
+    /// Hunger as sickness § 3: at a Clinic, the cancer treated (the Treat
+    /// goal's scripted step; never in `PLANNABLE`).
+    Oncology,
+    /// Hunger as sickness P5i: at Home, a pantry meal packed to carry to a
+    /// shift (the commute plan's scripted step; never in `PLANNABLE`).
+    PackMeal,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -385,6 +395,9 @@ impl ActionKind {
                 | ActionKind::Guard
                 | ActionKind::EatAlms
                 | ActionKind::Donate
+                | ActionKind::DumpsterDive
+                | ActionKind::Oncology
+                | ActionKind::PackMeal
         )
     }
 
@@ -581,6 +594,9 @@ pub struct PlanCtx {
     /// M13 D39: in withdrawal, `withdrawal_steal_bonus` off a theft's cost
     /// (0 otherwise: a branch).
     pub withdrawal_bonus: f32,
+    /// Hunger fix G3: `[life] steal_can_buy` added to a food theft's cost
+    /// while the agent can buy a meal (0 otherwise: a branch).
+    pub steal_can_buy: f32,
     /// M14 V11: the agent holds a `RunOrder` and a deck.
     pub run_order: bool,
     /// M14 V29: the carried deck holds Data.
@@ -805,6 +821,13 @@ impl PlanCtx {
         } else {
             0.0
         };
+        let steal_can_buy = if crate::systems::fixes::buy_not_steal(world)
+            && coins_now >= crate::systems::life::meal_price(world, agent)
+        {
+            world.config.life.steal_can_buy
+        } else {
+            0.0
+        };
         // M12 D21/D27: the street's rungs (homeless agents only; cheap scans
         // over the few Hotels and derelicts).
         let homeless = home.is_none();
@@ -966,7 +989,7 @@ impl PlanCtx {
             warehouse_stock: stock_of(BuildingKind::Warehouse),
             farm_stock: farm.and_then(|f| world.comp::<Building>(f)).map_or(0, |b| b.stock_food),
             coins: world.comp::<Wallet>(agent).map_or(0, |w| w.coins),
-            price: market.map_or(1, |m| world.price_for(m, agent)).max(1),
+            price: market.map_or(1, |m| crate::systems::diet::price_at(world, agent, m)).max(1),
             food_unstolen: world.comp::<crate::components::Inventory>(agent).is_some_and(|i| i.food > i.stolen_food),
             market_free: market
                 .and_then(|m| world.comp::<Building>(m).map(|b| (m, b.stock_food)))
@@ -1087,6 +1110,7 @@ impl PlanCtx {
             detox_affordable: detox_pick
                 && target_clinic.is_some_and(|c| coins_now >= crate::systems::stims::detox_price(world, c)),
             withdrawal_bonus,
+            steal_can_buy,
             run_order: world.run_orders.contains_key(&agent)
                 && world.comp::<crate::components::Kit>(agent).is_some_and(|k| k.deck.is_some()),
             has_data: crate::systems::virt::deck_data(world, agent) > 0,
@@ -1242,6 +1266,7 @@ impl ActionKind {
             k if k.is_contract_step() => false,
             // Real economy E27, E28: scripted only.
             k if k.is_charity_step() => false,
+            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal => false,
             _ => true,
         }
     }
@@ -1334,6 +1359,7 @@ impl ActionKind {
             k if k.is_contract_step() => true,
             // Real economy E27, E28: likewise `charity::can_start`.
             k if k.is_charity_step() => true,
+            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1701,9 +1727,11 @@ impl ActionKind {
             ActionKind::EatFromInventory => 1.0,
             ActionKind::EatAtHome => 2.0 + if ctx.pantry <= 2 { 4.0 } else { 0.0 },
             ActionKind::BuyFood => 3.0 + ctx.greed * 2.0,
-            ActionKind::StealFood(StealSource::Market) => steal_mods(8.0),
-            ActionKind::StealFood(StealSource::Home) => steal_mods(7.0) + if ctx.target_occupied { 5.0 } else { 0.0 },
-            ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0,
+            ActionKind::StealFood(StealSource::Market) => steal_mods(8.0) + ctx.steal_can_buy,
+            ActionKind::StealFood(StealSource::Home) => {
+                steal_mods(7.0) + if ctx.target_occupied { 5.0 } else { 0.0 } + ctx.steal_can_buy
+            }
+            ActionKind::StealFood(StealSource::Warehouse) => steal_mods(9.0) + 4.0 + ctx.steal_can_buy,
             ActionKind::Forage => 6.0 + if ctx.hunger < 0.3 { 2.0 } else { 0.0 },
             ActionKind::Beg => {
                 let mut c = 5.0 + ctx.pride * 10.0 + (1.0 - ctx.sociability) * 4.0;
@@ -1801,7 +1829,11 @@ impl ActionKind {
             ActionKind::Network => 4.0,
             ActionKind::Guard => 2.0,
             // Real economy E27, E28: scripted, never searched.
-            ActionKind::EatAlms | ActionKind::Donate => 60.0,
+            ActionKind::EatAlms
+            | ActionKind::Donate
+            | ActionKind::DumpsterDive
+            | ActionKind::Oncology
+            | ActionKind::PackMeal => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

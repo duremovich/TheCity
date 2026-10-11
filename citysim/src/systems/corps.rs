@@ -421,7 +421,9 @@ pub fn dissolve(world: &mut World, corp: EntityId) {
         }
         let rest = world.purse(Some(corp));
         if rest > 0 {
-            ownership::pay(world, Some(corp), None, rest, Flow::Sale);
+            let paid = ownership::pay(world, Some(corp), None, rest, Flow::Sale);
+            // The Treasury's census (diagnostic): a dissolved corp's estate.
+            *world.probe.treasury_in.entry("Sale: of it a dissolved corp's estate".to_string()).or_insert(0) += paid;
         }
     } else if balance < 0 {
         ownership::charge(world, None, Some(corp), -balance, Flow::Sale);

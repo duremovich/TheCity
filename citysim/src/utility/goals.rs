@@ -97,7 +97,10 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
     use crate::goap::world_state::{BELONGING_SATISFIED, ENERGY_SATISFIED, HUNGER_SATISFIED, SAFE, SAVINGS_DAYS};
     let needs = world.comp::<Needs>(id);
     match goal {
-        GoalKind::Eat => needs.is_some_and(|n| n.hunger >= HUNGER_SATISFIED),
+        // Hunger fix item 11 (b): a fed worker's grocery run is Eat's too.
+        GoalKind::Eat => {
+            needs.is_some_and(|n| n.hunger >= HUNGER_SATISFIED) && !crate::exec::routine::grocery_due(world, id)
+        }
         GoalKind::Sleep => needs.is_some_and(|n| n.energy >= ENERGY_SATISFIED),
         GoalKind::Socialise => {
             // Until Chat arrives (M5) a drink is the only satisfier: the goal is
@@ -118,7 +121,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Flee => needs.is_some_and(|n| n.safety >= SAFE),
         GoalKind::Earn => {
             let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
-            if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= SAVINGS_DAYS.saturating_mul(price)) {
+            // Hunger as sickness § 3: a diagnosed patient saves for the treatment too.
+            let line = SAVINGS_DAYS.saturating_mul(price).max(crate::systems::health::treatment_savings(world, id));
+            if world.comp::<Wallet>(id).is_some_and(|w| w.coins >= line) {
                 return true;
             }
             // Nothing to plan: an unemployed agent whose dole is taken or
@@ -170,7 +175,9 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         // M13 D34: nothing to treat at `treat_below`; D39: and no addiction
         // within 0.2 of `hooked` to Detox.
         GoalKind::Treat => {
-            !crate::systems::chrome::wants_treatment(world, id) && !crate::systems::stims::wants_detox(world, id)
+            !crate::systems::chrome::wants_treatment(world, id)
+                && !crate::systems::stims::wants_detox(world, id)
+                && !crate::systems::health::wants_oncology(world, id)
         }
         // M13 D39: high already, or no dose in hand and none to buy.
         GoalKind::GetHigh => !crate::systems::stims::wants_high(world, id),
@@ -184,6 +191,29 @@ pub fn already_satisfied(world: &World, id: EntityId, goal: GoalKind, has_spouse
         GoalKind::Lead => crate::systems::leisure::lead_satisfied(world, id),
         _ => false,
     }
+}
+
+/// Eat's "can afford/obtain" gate: food in hand, a meal's coins, a pantry,
+/// lawless enough to steal, or (hunger fix G2) a stocked Mission in reach
+/// that would serve this agent. Only Eat reads the local price: one Market
+/// scan per think, not per goal.
+pub fn eat_obtainable(world: &World, id: EntityId) -> bool {
+    let food = world.comp::<Inventory>(id).is_some_and(|i| i.food > 0);
+    let coins = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
+    let pantry = world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<crate::components::Building>(h))
+        .map_or(0, |b| b.stock_food);
+    let lawfulness = world.comp::<Personality>(id).map_or(0.5, |p| p.lawfulness);
+    let price =
+        world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| crate::systems::diet::price_at(world, id, m));
+    food || coins >= price
+        || pantry > 0
+        || lawfulness < 0.3
+        || (crate::systems::fixes::mission_gate(world) && crate::systems::charity::alms_target(world, id).is_some())
+        // Hunger as sickness § 4: a stocked bin in reach.
+        || crate::systems::bins::dive_target(world, id).is_some()
 }
 
 /// Considerations and flat bonus for one goal, or `None` if the agent lacks a
@@ -202,20 +232,44 @@ pub fn considerations(
     let mm = mood_mult(mood, goal);
 
     let mut flat = 0.0;
+    // Hunger fix G1: starving with a meal in reach, the optional and paid
+    // goals wait for Eat (the diaries' starving beggar spent the begged
+    // coins on a Drink; an exhausted one slept to hunger 0 with 60 coins).
+    if matches!(
+        goal,
+        GoalKind::Socialise
+            | GoalKind::Court
+            | GoalKind::Unwind
+            | GoalKind::Shop
+            | GoalKind::GetHigh
+            | GoalKind::Hack
+            | GoalKind::Found
+            | GoalKind::Squat
+    ) && crate::systems::fixes::starving_first(world, id)
+    {
+        return None;
+    }
+    let eat_first = goal == GoalKind::Sleep && crate::systems::fixes::eat_first(world, id);
+    // Hunger fix G2: a free Mission meal before an hour's scavenging.
+    if goal == GoalKind::Earn && crate::systems::fixes::free_meal_first(world, id) {
+        return None;
+    }
     let cs = match goal {
         GoalKind::Eat => {
             let n = needs?;
-            let inv = world.comp::<Inventory>(id)?;
-            let wallet = world.comp::<Wallet>(id)?;
-            let pantry = world
-                .comp::<Household>(id)
-                .and_then(|h| h.home)
-                .and_then(|h| world.comp::<crate::components::Building>(h))
-                .map_or(0, |b| b.stock_food);
-            let lawfulness = pers.map_or(0.5, |p| p.lawfulness);
-            // Only Eat reads the local price: one Market scan per think, not per goal.
-            let price = world.local(id, BuildingKind::Market).map_or(i64::MAX, |m| world.price_for(m, id));
-            let can_eat = inv.food > 0 || wallet.coins >= price || pantry > 0 || lawfulness < 0.3;
+            world.comp::<Inventory>(id)?;
+            world.comp::<Wallet>(id)?;
+            // Hunger fix item 11 (b): fed, the goal is the grocery run, at
+            // `[life] grocery_score` (an errand: below a real need).
+            if n.hunger >= crate::goap::world_state::HUNGER_SATISFIED {
+                let mut s = world.config.life.grocery_score.clamp(0.01, 1.0);
+                // Hunger fix item 12 (P5j): past a work night's bedtime.
+                if crate::exec::routine::past_bedtime(world, id) {
+                    s *= world.config.life.work_night_unwind_mult.clamp(0.01, 1.0);
+                }
+                return Some((vec![Consideration::raw("pantry under a shift's meals", s, s)], 0.0));
+            }
+            let can_eat = eat_obtainable(world, id);
             let mut cs = vec![
                 Consideration::new("U(hunger)", urgency(n.hunger), SQUARE),
                 Consideration::new("can afford/obtain", can(can_eat), GATE),
@@ -242,11 +296,17 @@ pub fn considerations(
             };
             // L1: exhaustion wins (agents sat at energy 0 for a day), and
             // the night belongs to sleep for anyone off shift.
-            if n.energy < world.config.life.exhausted_energy {
+            // Hunger fix G1: starving with a meal in reach, the flats wait
+            // for the meal (Sleep keeps its need and phase terms).
+            if n.energy < world.config.life.exhausted_energy && !eat_first {
                 flat += world.config.life.exhausted_flat;
             }
-            if phase == DayPhase::Night && !world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) {
+            if phase == DayPhase::Night && !world.comp::<Job>(id).is_some_and(|j| j.on_shift(tod)) && !eat_first {
                 flat += world.config.life.night_sleep_flat;
+            }
+            // Hunger fix item 12 (P5j): a work night's bedtime presses.
+            if !eat_first {
+                flat += world.config.life.work_night_sleep_flat * crate::exec::routine::work_night_pressure(world, id);
             }
             vec![
                 Consideration::new("U(energy)", urgency(n.energy), Curve::Logistic { k: 10.0, mid: 0.75 }),
@@ -270,7 +330,12 @@ pub fn considerations(
                 return None;
             }
             vec![
-                Consideration::new("in shift", can(shift_reachable(world, id, job)), GATE),
+                // Hunger as sickness § 2: a sick day is no shift.
+                Consideration::new(
+                    "in shift",
+                    can(shift_reachable(world, id, job) && !crate::systems::health::sick(world, id)),
+                    GATE,
+                ),
                 Consideration::new("energy", n.energy, IDENTITY),
                 // Wages owed press too (M10 phase 5c): a guard collects only
                 // by winning Work after a Patrol shift, and a guard with coins
@@ -701,6 +766,18 @@ pub fn considerations(
         GoalKind::Treat => {
             let n = needs?;
             let p = pers?;
+            // Hunger as sickness § 3: a diagnosed cancer the pool can pay for.
+            if crate::systems::health::wants_oncology(world, id) {
+                let stage = world.comp::<crate::components::Health>(id).and_then(|h| h.cancer).map_or(0.0, |c| c.stage);
+                return Some((
+                    vec![
+                        Consideration::new("a Clinic, the pool pays", 1.0, GATE),
+                        Consideration::new("cancer stage", stage, Curve::Linear { m: 0.6, b: 0.4 }),
+                        Consideration::new("lawfulness", p.lawfulness, Curve::Linear { m: 0.2, b: 0.8 }),
+                    ],
+                    0.0,
+                ));
+            }
             let body = world.comp::<crate::components::Body>(id)?;
             let tile = world.comp::<crate::components::Position>(id)?.tile;
             let clinic = crate::systems::assets::nearest_seller(world, BuildingKind::Clinic, tile, true);
@@ -785,7 +862,18 @@ pub fn considerations(
         // M16a (plan C13): work a taken record, or network at a Fixer.
         GoalKind::Contract => return crate::systems::contracts::considerations(world, id),
         // L2 L14, L20.
-        GoalKind::Unwind => return crate::systems::leisure::considerations(world, id),
+        GoalKind::Unwind => {
+            let (mut cs, flat) = crate::systems::leisure::considerations(world, id)?;
+            // Hunger fix item 12 (P5j): nearing a work night's bedtime (or,
+            // up and rested, the morning's leaving time), Unwind weighs
+            // less, down to `work_night_unwind_mult` at it and past it.
+            let p = crate::exec::routine::work_night_pressure(world, id);
+            if p > 0.0 {
+                let m = 1.0 - (1.0 - world.config.life.work_night_unwind_mult.clamp(0.01, 1.0)) * p;
+                cs.push(Consideration::raw("a work night's bedtime", p, m));
+            }
+            return Some((cs, flat));
+        }
         GoalKind::Lead => return crate::systems::leisure::lead_considerations(world, id),
         // M15 W35.
         GoalKind::GuardBody => return crate::systems::grudges::guard_body_considerations(world, id),

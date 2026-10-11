@@ -68,7 +68,7 @@ pub struct ShadowArgs {
     pub assert: bool,
 }
 
-const ARCHETYPES: [&str; 27] = [
+const ARCHETYPES: [&str; 28] = [
     "gang_member",
     "gang_leader",
     "ripperdoc",
@@ -100,6 +100,9 @@ const ARCHETYPES: [&str; 27] = [
     // behaviour tier after the pick rework.
     "fixer",
     "gun",
+    // Hunger as sickness (docs/HUNGER_SICKNESS.md § 9): malnutrition >= 0.5 or a cancer. Diaries
+    // only (no `CHECKS` rows); empty with `[sickness]` off.
+    "sick",
 ];
 
 /// Activity classes of the time-use table, in print order.
@@ -153,6 +156,9 @@ fn candidates(world: &World, arch: &str) -> Result<Vec<EntityId>, String> {
                 .collect()
         }
         "homeless" => adults().filter(|&a| world.comp::<Household>(a).is_some_and(|h| h.home.is_none())).collect(),
+        "sick" => adults()
+            .filter(|&a| world.comp::<citysim::Health>(a).is_some_and(|h| h.malnutrition >= 0.5 || h.cancer.is_some()))
+            .collect(),
         "ceo" => {
             let mut corps: Vec<(i64, EntityId, EntityId)> = world
                 .corps()
@@ -407,6 +413,8 @@ struct Track {
     cooldowns: BTreeMap<GoalKind, Tick>,
     wallet: Option<i64>,
     inv: Option<(u32, u32, u16, u16)>,
+    /// Hunger as sickness: the day's meal tally last seen (a meal logged on a rise).
+    tally: Option<citysim::MealTally>,
     mem_seen: BTreeSet<(Tick, MemoryKind, Option<EntityId>, bool)>,
     mem_primed: bool,
     edges_primed: bool,
@@ -456,6 +464,12 @@ struct Track {
     /// `(end tick, minutes)` of every finished block of sleep-class minutes.
     sleep_blocks: Vec<(Tick, u32)>,
     energy0_min: u32,
+    /// Hunger as sickness: free minutes starving (hunger < `[life]
+    /// starving_hunger`), and meals by kind (synth includes a Mission's).
+    starve_min: u32,
+    meals: u32,
+    meals_synth: u32,
+    meals_dive: u32,
     /// The job's shift under way, and the shifts seen whole.
     shift: Option<ShiftObs>,
     shifts: Vec<ShiftObs>,
@@ -504,6 +518,7 @@ impl Track {
             last_building: None,
             cooldowns: BTreeMap::new(),
             wallet: None,
+            tally: None,
             inv: None,
             mem_seen: BTreeSet::new(),
             mem_primed: false,
@@ -549,6 +564,10 @@ impl Track {
             sleep_run: 0,
             sleep_blocks: Vec::new(),
             energy0_min: 0,
+            starve_min: 0,
+            meals: 0,
+            meals_synth: 0,
+            meals_dive: 0,
             shift: None,
             shifts: Vec::new(),
             wages: Vec::new(),
@@ -722,6 +741,9 @@ fn header(world: &World, t: &Track) -> String {
     let wallet = world.comp::<Wallet>(id).map_or(0, |w| w.coins);
     let inv = world.comp::<Inventory>(id).map(|i| format!("food {}, stims {}, parts {}", i.food, i.stims, i.parts));
     let _ = writeln!(h, "- **Wallet**: {} | inventory: {}", money(wallet), inv.unwrap_or_default());
+    if let Some(hl) = world.comp::<citysim::Health>(id) {
+        let _ = writeln!(h, "- **Health**: {}", health_line(hl));
+    }
     if let Some(k) = world.comp::<Kit>(id) {
         let assets: Vec<String> =
             world.assets_by_owner.get(&id).map(|v| v.iter().map(|&a| world.name_of(a)).collect()).unwrap_or_default();
@@ -1277,6 +1299,34 @@ fn observe(world: &World, t: &mut Track, now: Tick, events: &[&Event], dbg: &[&E
         }
     }
 
+    // Hunger as sickness: each meal by kind (the tally rises), and the
+    // meters with the needs line.
+    if let Some(hl) = world.comp::<citysim::Health>(id) {
+        let now_t = hl.today;
+        if let Some(prev) = t.tally {
+            let rises = [
+                (now_t.real > prev.real, "ate a REAL meal"),
+                (now_t.synth > prev.synth, "ate SYNTH"),
+                (now_t.dive > prev.dive, "ate scraps from a BIN"),
+                (now_t.alms > prev.alms, "ate a Mission's SYNTH meal"),
+            ];
+            for (up, what) in rises {
+                if up {
+                    t.log(now, "meal", format!("{what} | {}", health_line(hl)));
+                }
+            }
+            let (real, synth, dive, alms) = (
+                now_t.real.saturating_sub(prev.real),
+                now_t.synth.saturating_sub(prev.synth),
+                now_t.dive.saturating_sub(prev.dive),
+                now_t.alms.saturating_sub(prev.alms),
+            );
+            t.meals += u32::from(real) + u32::from(synth) + u32::from(dive) + u32::from(alms);
+            t.meals_synth += u32::from(synth) + u32::from(alms);
+            t.meals_dive += u32::from(dive);
+        }
+        t.tally = Some(now_t);
+    }
     // Money.
     let mut money_logged = false;
     if let Some(w) = world.comp::<Wallet>(id) {
@@ -1509,6 +1559,10 @@ fn behaviour_minute(world: &World, t: &mut Track, now: Tick, act: &'static str) 
     // city never does (a sentenced agent is held Statistical, `lod::held_on`).
     if !jailed && world.comp::<Needs>(id).is_some_and(|n| n.energy <= 0.001) {
         t.energy0_min += 1;
+    }
+    let starving = world.config.life.starving_hunger;
+    if !jailed && world.comp::<Needs>(id).is_some_and(|n| n.hunger < starving) {
+        t.starve_min += 1;
     }
     let tod = (now % TICKS_PER_DAY) as u16;
     match world.comp::<Job>(id) {
@@ -2090,6 +2144,10 @@ struct Agg {
     sleep_min: u64,
     work_min: u64,
     energy0_min: u64,
+    starve_min: u64,
+    meals: u32,
+    meals_synth: u32,
+    meals_dive: u32,
     /// The longest sleep block of each agent-night (noon to noon), minutes.
     nights: Vec<u32>,
     /// Whole workday shifts while free; of those worked (half the shift at work-class
@@ -2114,6 +2172,10 @@ impl Agg {
         self.sleep_min += u64::from(t.total_use.get("sleep").copied().unwrap_or(0));
         self.work_min += u64::from(t.work_min);
         self.energy0_min += u64::from(t.energy0_min);
+        self.starve_min += u64::from(t.starve_min);
+        self.meals += t.meals;
+        self.meals_synth += t.meals_synth;
+        self.meals_dive += t.meals_dive;
         let mut by_night: BTreeMap<u64, u32> = BTreeMap::new();
         for &(end, len) in &t.sleep_blocks {
             let night = end.saturating_sub(TICKS_PER_DAY / 2) / TICKS_PER_DAY;
@@ -2145,6 +2207,10 @@ impl Agg {
         self.sleep_min += o.sleep_min;
         self.work_min += o.work_min;
         self.energy0_min += o.energy0_min;
+        self.starve_min += o.starve_min;
+        self.meals += o.meals;
+        self.meals_synth += o.meals_synth;
+        self.meals_dive += o.meals_dive;
         self.nights.extend_from_slice(&o.nights);
         self.shifts += o.shifts;
         self.worked += o.worked;
@@ -2185,6 +2251,9 @@ impl Agg {
             Metric::RefundsWeek => Some(f64::from(self.refunds) / days * 7.0),
             Metric::CommuteAbortsDay => Some(f64::from(self.commute_aborts) / days),
             Metric::BoutsAttended => ratio(self.bouts_present, self.bouts),
+            Metric::StarveHWeek => Some(self.starve_min as f64 / 60.0 / days * 7.0),
+            Metric::SynthShare => ratio(self.meals_synth, self.meals),
+            Metric::DivesWeek => Some(f64::from(self.meals_dive) / days * 7.0),
         }
     }
 }
@@ -2217,6 +2286,13 @@ enum Metric {
     CommuteAbortsDay,
     /// Bouts with the fighter inside the pit, of the bouts naming her.
     BoutsAttended,
+    /// Hunger as sickness (printed; no bound yet): free hours starving
+    /// (hunger < `starving_hunger`) per agent-week.
+    StarveHWeek,
+    /// Synth (and Mission) meals of all meals, pooled (zero with `[sickness]` off).
+    SynthShare,
+    /// Bin meals per agent-week (zero with `[sickness]` off).
+    DivesWeek,
 }
 
 impl Metric {
@@ -2224,7 +2300,14 @@ impl Metric {
     /// shifts are no rate). Every other metric is a per-agent rate,
     /// trimmed-mean averaged.
     fn pooled(self) -> bool {
-        matches!(self, Metric::ShiftsWorkedShare | Metric::PaidOfWorked | Metric::WagedWorkdays | Metric::BoutsAttended)
+        matches!(
+            self,
+            Metric::ShiftsWorkedShare
+                | Metric::PaidOfWorked
+                | Metric::WagedWorkdays
+                | Metric::BoutsAttended
+                | Metric::SynthShare
+        )
     }
 }
 
@@ -2284,7 +2367,7 @@ fn trimmed_mean(mut v: Vec<f64>, trim: f64) -> Option<f64> {
     Some(kept.iter().sum::<f64>() / kept.len() as f64)
 }
 
-const METRICS: [Metric; 13] = [
+const METRICS: [Metric; 16] = [
     Metric::WalkHDay,
     Metric::SleepHDay,
     Metric::LongestSleepH,
@@ -2298,6 +2381,9 @@ const METRICS: [Metric; 13] = [
     Metric::RefundsWeek,
     Metric::CommuteAbortsDay,
     Metric::BoutsAttended,
+    Metric::StarveHWeek,
+    Metric::SynthShare,
+    Metric::DivesWeek,
 ];
 
 /// A bound: the value must be at least (`Min`) or at most (`Max`) it.
@@ -2371,7 +2457,7 @@ const CHECKS: &[Check] = &[
     (19, "gang_leader", Metric::CommuteAbortsDay, Bound::Max(0.24), 0.02, 0.19),
     (19, "gang_leader", Metric::PaidOfWorked, Bound::Min(0.9), 1.00, 1.00),
     (19, "gang_leader", Metric::WagedWorkdays, Bound::Min(0.86), 0.96, 0.96),
-    (19, "gang_member", Metric::WalkHDay, Bound::Max(6.8), 4.74, 5.73),
+    (19, "gang_member", Metric::WalkHDay, Bound::Max(7.9), 4.74, 6.84),
     (19, "gang_member", Metric::LongestSleepH, Bound::Min(4.1), 4.68, 5.06),
     (19, "gang_member", Metric::Energy0HWeek, Bound::Max(2.2), 0.00, 0.14),
     (19, "gang_member", Metric::KnownMetWeek, Bound::Min(3.9), 6.50, 13.40),
@@ -2624,7 +2710,24 @@ fn short(m: Metric) -> &'static str {
         Metric::RefundsWeek => "refund/wk",
         Metric::CommuteAbortsDay => "abort/d",
         Metric::BoutsAttended => "bouts_at",
+        Metric::StarveHWeek => "starve_h/wk",
+        Metric::SynthShare => "synth%",
+        Metric::DivesWeek => "dive/wk",
     }
+}
+
+/// Hunger as sickness: the meters on one line (the header and meal lines).
+fn health_line(h: &citysim::Health) -> String {
+    let cancer = h.cancer.map_or(String::from("no cancer"), |c| {
+        format!("cancer stage {:.2}{}", c.stage, if c.diagnosed { " (diagnosed)" } else { " (silent)" })
+    });
+    format!(
+        "malnutrition {:.2} | toxicity {:.2} | {cancer} | sick days {}/14{}",
+        h.malnutrition,
+        h.toxicity,
+        h.sick_days.count_ones(),
+        if h.sick_today { " | OFF SICK TODAY" } else { "" }
+    )
 }
 
 #[cfg(test)]

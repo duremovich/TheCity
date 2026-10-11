@@ -32,6 +32,9 @@ pub fn run(world: &mut World) {
     crate::systems::stims::restock_legal(world);
     daily_price(world);
     daily_spoilage(world);
+    // Hunger as sickness § 2: yesterday's meals into the meters.
+    crate::systems::health::daily(world);
+    crate::systems::bins::rot(world);
 }
 
 /// Clerks top each Market up from the Warehouse while it is under
@@ -280,6 +283,9 @@ fn daily_spoilage(world: &mut World) {
     let pantry = world.config.economy.spoilage_pantry;
     let market = world.config.economy.spoilage_market;
     let sump = world.config.rent.sump_spoilage_mult;
+    // Hunger as sickness § 4: the units spoiled at Markets and Homes go to their bins.
+    let bins = crate::systems::bins::on(world);
+    let mut spoiled: Vec<(EntityId, u32)> = Vec::new();
     for id in world.with::<Building>() {
         let Some(b) = world.comp_mut::<Building>(id) else { continue };
         let rate = match b.kind {
@@ -289,12 +295,31 @@ fn daily_spoilage(world: &mut World) {
             BuildingKind::Market | BuildingKind::Warehouse => market,
             _ => continue,
         };
-        b.stock_food -= (b.stock_food as f32 * rate).floor() as u32;
+        // Hunger as sickness § 1: synth keeps (0 synth with the diet off).
+        let synth = b.synth_food.min(b.stock_food);
+        // Hunger as sickness § 4 (P5): with the bins on a Home carries its
+        // spoilage's fraction (a small pantry's 5 % floored to 0 for good).
+        let due = (b.stock_food - synth) as f32 * rate;
+        let due = if bins && b.kind == BuildingKind::Home { due + b.spoil_carry } else { due };
+        let lost = (due.floor() as u32).min(b.stock_food - synth);
+        if bins && b.kind == BuildingKind::Home {
+            b.spoil_carry = if b.stock_food > synth { (due - lost as f32).clamp(0.0, 1.0) } else { 0.0 };
+        }
+        b.stock_food -= lost;
+        b.synth_food = synth.min(b.stock_food);
+        if bins && lost > 0 && b.kind != BuildingKind::Warehouse {
+            spoiled.push((id, lost));
+        }
+    }
+    for (b, lost) in spoiled {
+        crate::systems::bins::spoiled(world, b, lost);
     }
     for id in world.citizens() {
         let Some(inv) = world.comp_mut::<Inventory>(id) else { continue };
-        let lost = (inv.food as f32 * pantry).floor() as u32;
+        let synth = inv.synth_held();
+        let lost = ((inv.food - synth) as f32 * pantry).floor() as u32;
         inv.food -= lost;
+        inv.synth = synth.min(inv.food);
         inv.stolen_food = inv.stolen_food.min(inv.food);
     }
 }
@@ -306,6 +331,8 @@ pub fn accrue_farm_work(world: &mut World, farmer: EntityId, farm: EntityId, tic
     let farming = world.comp::<Skills>(farmer).map_or(0.0, |s| s.farming);
     let mult = cfg.season_mult[world.season().index()];
     let mut per_hour = cfg.farm_yield_base * (cfg.farm_skill_floor + cfg.farm_skill_slope * farming) * mult;
+    // Hunger as sickness § 2: a sick body's output (x 1.0 off: exact).
+    per_hour *= crate::systems::health::work_mult(world, farmer);
     // M14 (spec § 5): a corp-owned Farm yields `x (1 + industry_prod[tier])`
     // of its owner's Industry tier (a branch: tier 1 multiplies nothing).
     let tier = world
@@ -567,14 +594,91 @@ fn import_food(world: &mut World, budget: &mut std::collections::BTreeMap<Entity
 pub fn buy_quantity(world: &World, agent: EntityId, market: Option<EntityId>) -> u32 {
     use crate::systems::assets::{capacity, load, FOOD_CAP};
     let Some(market) = market else { return 0 };
-    let price = if world.has::<Market>(market) { world.price_for(market, agent) } else { i64::MAX };
+    // Hunger as sickness § 1: the meal this agent would buy (the real
+    // price, and the shelf's units, with the diet off).
+    let price =
+        if world.has::<Market>(market) { crate::systems::diet::price_at(world, agent, market) } else { i64::MAX };
     let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);
     let inv = world.comp::<Inventory>(agent);
     let food = inv.map_or(FOOD_CAP, |i| i.food);
     let room = inv.map_or(0, |i| capacity(world, agent).saturating_sub(load(i)));
     let stock = world.comp::<Building>(market).map_or(0, |b| b.stock_food);
+    let stock = crate::systems::diet::meals_on_shelf(world, market, stock, quality_at(world, agent, Some(market)));
     let afford = (coins / price).clamp(0, 3) as u32;
     afford.min(FOOD_CAP.saturating_sub(food)).min(room).min(stock)
+}
+
+/// Hunger as sickness § 1: the quality `agent` would buy at `market` now
+/// (`Real` with the diet off or no Market).
+pub fn quality_at(world: &World, agent: EntityId, market: Option<EntityId>) -> crate::systems::diet::Quality {
+    match market.filter(|&m| world.has::<Market>(m)) {
+        Some(m) if crate::systems::diet::on(world) => crate::systems::diet::offer(world, agent, m).0,
+        _ => crate::systems::diet::Quality::Real,
+    }
+}
+
+/// `pay_for_food` for `units` meals of `q` (a synth meal at its own price).
+pub fn pay_for_food_q(
+    world: &mut World,
+    agent: EntityId,
+    market: Option<EntityId>,
+    units: u32,
+    q: crate::systems::diet::Quality,
+) -> i64 {
+    if q == crate::systems::diet::Quality::Real {
+        return pay_for_food(world, agent, market, units);
+    }
+    let price = market
+        .filter(|&m| world.has::<Market>(m))
+        .map_or(0, |m| crate::systems::diet::synth_price(world, world.price_for(m, agent)));
+    let cost = price * i64::from(units);
+    let owner = market.and_then(|m| world.owner_of(m));
+    let paid = ownership::pay(world, Some(agent), owner, cost, Flow::Food);
+    if let Some(m) = market {
+        ownership::credit(world, m, paid);
+    }
+    paid
+}
+
+/// `take_food` for `meals` of `q`: a synth meal takes a shelf unit per
+/// `synth_stretch` meals (the open unit's first) and joins the carried
+/// synth subset.
+pub fn take_food_q(
+    world: &mut World,
+    agent: EntityId,
+    market: Option<EntityId>,
+    meals: u32,
+    paid: i64,
+    q: crate::systems::diet::Quality,
+) -> bool {
+    if q == crate::systems::diet::Quality::Real {
+        return take_food(world, agent, market, meals, paid);
+    }
+    let Some(m) = market else {
+        refund_food(world, agent, market, paid);
+        return false;
+    };
+    let stock = world.comp::<Building>(m).map_or(0, |b| b.stock_food);
+    let (units, frac) = crate::systems::diet::synth_units(world, m, meals);
+    if stock < units || meals == 0 {
+        refund_food(world, agent, market, paid);
+        return false;
+    }
+    if let Some(b) = world.comp_mut::<Building>(m) {
+        b.stock_food -= units;
+    }
+    if let Some(mk) = world.comp_mut::<Market>(m) {
+        mk.sales_today += units;
+        mk.synth_frac = frac;
+    }
+    crate::systems::bins::market_sale(world, m, units);
+    crate::systems::bins::household_waste(world, agent, units);
+    if let Some(i) = world.comp_mut::<Inventory>(agent) {
+        i.synth = i.synth_held() + meals;
+        i.food += meals;
+    }
+    world.remember(agent, MemoryKind::Paid, None, 0.1, 0.0, false);
+    true
 }
 
 /// Pay for `units` at `market`'s price to the Market's owner (M11; the
@@ -613,6 +717,10 @@ pub fn take_food(world: &mut World, agent: EntityId, market: Option<EntityId>, u
     if let Some(m) = market.and_then(|m| world.comp_mut::<Market>(m)) {
         m.sales_today += units;
     }
+    if let Some(m) = market {
+        crate::systems::bins::market_sale(world, m, units);
+    }
+    crate::systems::bins::household_waste(world, agent, units);
     if let Some(i) = world.comp_mut::<Inventory>(agent) {
         i.food += units;
     }
@@ -673,7 +781,11 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     let paid = gross - tax;
     ownership::pay(world, payer, Some(agent), paid, Flow::Wage);
     // Real economy phase 2 (plan E16): the gross is the corp's payroll.
-    ownership::note_payroll(world, payer, gross);
+    // Class pay P3: a graded wage's premium over the labour rate is not the
+    // labour pool's: it is noted apart (paid out of capital and profit).
+    let premium = crate::systems::classpay::premium_of(world, &job, gross);
+    ownership::note_payroll(world, payer, gross - premium);
+    ownership::note_premium(world, payer, premium);
     // L2 fix round: the first wage marks the job paid (`gang::desist` reads it).
     if paid > 0 {
         if let Some(j) = world.comp_mut::<Job>(agent).filter(|j| !j.paid_once) {

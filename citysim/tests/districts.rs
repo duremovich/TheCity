@@ -372,13 +372,15 @@ fn test_daytrace_legacy_decode() {
 #[test]
 fn test_daily_trace_and_crime_counter() {
     let mut w = v2_world();
+    // Civic and Vats are seeded with no Blocks (hunger fix item 10, P5h,
+    // may later build Homes toward their jobs).
+    assert_eq!(w.districts[1].homes.len() + w.districts[2].homes.len(), 0);
     w.run_ticks(citysim::TICKS_PER_DAY * 3 + 1);
     for d in &w.districts {
         assert!(!d.trace.is_empty(), "{} has a trace", d.name);
         assert_eq!(d.crimes.len(), 3, "{}: three finished days rolled", d.name);
     }
-    // Civic and Vats have no Blocks; every Sump and Mid district is inhabited.
-    assert_eq!(w.districts[1].homes.len() + w.districts[2].homes.len(), 0);
+    // Every Sump and Mid district is inhabited.
     for i in [0, 3, 4, 5, 6, 7] {
         assert!(w.districts[i].population > 0, "{} inhabited", w.districts[i].name);
     }
@@ -1081,12 +1083,17 @@ fn test_riot_fires_at_streak_and_picks_target() {
     assert_eq!(kind, citysim::RiotTarget::Corp);
     assert!((grievance - 3.0).abs() < 1e-5, "{grievance}");
     // One midnight short of the streak: nothing.
+    let riot_events = |w: &World| w.events.iter().filter(|e| e.kind == citysim::EventKind::Riot).count();
+    let e0 = riot_events(&w);
     w.districts[d].unrest_streak = w.config.riots.riot_days - 1;
     riot::trigger(&mut w);
     assert!(w.riots.is_empty());
+    assert_eq!(riot_events(&w), e0, "no Riot event short of the streak");
     w.districts[d].unrest_streak = w.config.riots.riot_days;
     riot::trigger(&mut w);
     assert_eq!(w.riots.len(), 1);
+    // The core_sanity mechanism (now a printed finding): the Riot event.
+    assert!(riot_events(&w) > e0, "the riot logged a Riot event");
     let r = w.riots[0].clone();
     assert_eq!(r.district, DistrictId(d as u8));
     assert_eq!(r.target, block);

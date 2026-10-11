@@ -276,6 +276,7 @@ def analyze(rows, events, jail_cap=None):
     living(rows, events, out, flags)
     word(rows, events, out)
     contracts(rows, events, out, flags)
+    health(rows, events, out, flags)
     out["flags"] = flags
     return out
 
@@ -674,6 +675,34 @@ def contracts(rows, events, out, flags):
             flags.append(f"M16a: {k} reached {v:g} (must stay 0: a record broke)")
 
 
+HEALTH_TOTALS = ("meals_real", "meals_synth", "meals_dive", "meals_alms", "sick_days", "cancer_new",
+                 "cancer_diagnosed", "cancer_cured", "deaths_disease", "bin_meals_in", "bin_contests",
+                 "bin_shakedowns", "deaths_starvation")
+
+
+def health(rows, events, out, flags):
+    """Hunger as sickness (docs/HUNGER_SICKNESS.md § 9): only when the columns exist and moved."""
+    if not rows or "meals_synth" not in rows[0]:
+        return
+    total = lambda k: sum(col(rows, k))
+    t = {k: total(k) for k in HEALTH_TOTALS if k in rows[0]}
+    meals = sum(t.get(k, 0) for k in ("meals_real", "meals_synth", "meals_dive", "meals_alms"))
+    if meals == 0:
+        return
+    H = {"totals": t}
+    weeks = max(1.0, len(rows) / 7.0)
+    pop = mean(col(rows, "population")) or 1.0
+    H["synth_share"] = (t.get("meals_synth", 0) + t.get("meals_alms", 0)) / meals
+    H["dive_share"] = t.get("meals_dive", 0) / meals
+    H["dives_per_week_per_100"] = 100.0 * t.get("meals_dive", 0) / weeks / pop
+    H["last"] = {k: rows[-1].get(k) for k in ("malnourished", "toxic", "mean_malnutrition", "mean_toxicity")}
+    H["peak"] = {k: max(col(rows, k), default=0) for k in ("malnourished", "toxic", "sick_days")}
+    H["disease_deaths_per_year"] = t.get("deaths_disease", 0) * 120.0 / len(rows)
+    out["health"] = H
+    if t.get("deaths_starvation", 0) > 20 * len(rows) / 120.0:
+        flags.append(f"health: starvation {t['deaths_starvation']:g} (> 20 per 120 days: the free-food floor broke)")
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -814,6 +843,14 @@ def fmt(o):
             L.append("Hits taken by render: " + f(w["hits_taken_by_render"]))
         if w.get("events"):
             L.append("amber events: " + f(w["events"]))
+    if "health" in o:
+        w = o["health"]
+        L.append("-- hunger as sickness --")
+        L.append("run totals: " + f(w["totals"]))
+        L.append(f"synth share of meals {w['synth_share']:.1%}; bin share {w['dive_share']:.1%}; dives per week per "
+                 f"100 residents {w['dives_per_week_per_100']:.2f}; Disease deaths per year "
+                 f"{w['disease_deaths_per_year']:.1f} (printed target 20-40 at 2,000)")
+        L.append("last day: " + f(w["last"]) + "; peaks: " + f(w["peak"]))
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

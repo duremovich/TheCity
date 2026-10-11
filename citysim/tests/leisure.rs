@@ -309,6 +309,44 @@ fn test_front_built_under_expand_in_held_district() {
     assert_eq!(ownership::total_coins(&w), total, "the cost went to the Treasury");
 }
 
+/// L20, the negative case (the core_sanity "a gang front" bullet is a
+/// printed finding since P5i; docs/TESTING.md): with a Lot and a held
+/// district, a gang not under Expand, or under Expand with an empty
+/// treasury, builds no front.
+#[test]
+fn test_no_front_without_expand_or_treasury() {
+    for (order, treasury) in [(citysim::Order::LieLow, 5000), (citysim::Order::Expand, 0)] {
+        let mut w = World::new(42, Config::load());
+        let lot = citysim::systems::founding::vacant_lots(&w)
+            .into_iter()
+            .find(|&l| {
+                let door = w.comp::<Building>(l).expect("lot").door;
+                citysim::systems::founding::tier_ok(BuildingKind::Den, citysim::systems::founding::door_tier(&w, door))
+            })
+            .expect("a Lot for a Den");
+        let d = w.district_of_building(lot);
+        let home = w
+            .buildings_of_kind(BuildingKind::Home)
+            .iter()
+            .copied()
+            .find(|&h| w.district_of_building(h) == d && w.comp::<Building>(h).is_some_and(|b| !b.derelict))
+            .expect("a Home there");
+        let gang = w.gangs()[0];
+        let m = civilian(&w, &[]);
+        citysim::systems::gang::enlist(&mut w, m, gang);
+        {
+            let g = w.comp_mut::<Gang>(gang).expect("gang");
+            g.order = order;
+            g.treasury = treasury;
+            g.territory.push(home);
+        }
+        w.config.leisure.fronts_max = 99;
+        let before = leisure::fronts_of(&w, gang);
+        leisure::fronts_daily(&mut w, gang);
+        assert_eq!(leisure::fronts_of(&w, gang), before, "a front under {order:?} with treasury {treasury}");
+    }
+}
+
 /// L13: a Full and a Statistical agent lose the same fun in 24 hours (the
 /// same agent in a forced-Full and a forced-Statistical city, the gains off).
 #[test]

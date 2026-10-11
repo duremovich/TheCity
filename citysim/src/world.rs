@@ -177,12 +177,56 @@ pub struct StatTable {
     /// whatever the lawfulness).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub p_desperate: Option<[f32; 3]>,
+    /// Hunger as sickness § 5 (read only with `[sickness] bins`): the chance
+    /// an adult who cannot buy a meal, with a bin in reach (`bins::dive_target`
+    /// at the hour's start), dives in the hour, per row. `calibrate` writes it
+    /// with the bins on. A table without it: every such hour dives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_dive: Option<[f32; STAT_ROWS]>,
+    /// Parity (hunger as sickness, after P5): the chance an agent eats in
+    /// the hour, by phase and its hunger at the hour's start (`meal_index`:
+    /// 4 phases x `MEAL_BANDS` tenths): Full agent-hours with a meal (hunger
+    /// rose) over agent-hours. A Full agent neither eats the hour it gets
+    /// hungry nor only when hungry; this is both. A table without it: the M10
+    /// rule (every hungry hour eats, `p_eat` the rest).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_meal: Option<Vec<f32>>,
+    /// Diet parity (the off-screen grocery run): the Full city's pantry
+    /// meals per resident (the daily mean over inhabited Homes at midnight),
+    /// the level `lod::stat_grocery` restocks a household to. A table
+    /// without it: a shift's worth per resident.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pantry_per_resident: Option<f32>,
+    /// P5f (wage parity): by role (`{role:?}`), the share of a Full
+    /// worker's free, healthy workday shift minutes spent at the work
+    /// itself (the commute, a meal, a sleep run over, the guard's patrol
+    /// counted as work). A Statistical worker's shift hour is credited on
+    /// it, and the wage paid pro rata on the hours credited. A role not
+    /// listed, or a table without it: every hour (the M10 rule).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_attend: Option<std::collections::BTreeMap<String, f32>>,
+    /// P5f: Full's wage share of wages owed over its attendance share (a
+    /// cut shift past half is paid pro rata, a whole one in full): the
+    /// Statistical pro rata wage x this, capped at the whole wage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub p_wage_ratio: Option<f32>,
     pub rows: Vec<StatRow>,
 }
 
 fn one_f32() -> f32 {
     1.0
 }
+
+/// `StatTable::p_meal`'s hunger bands (tenths of `[0, 1]`).
+pub const MEAL_BANDS: usize = 10;
+/// `StatTable::p_meal`'s cells: 4 phases x `MEAL_BANDS`.
+pub const MEAL_CELLS: usize = 4 * MEAL_BANDS;
+/// Diet parity (after items 8-13): `p_meal` learned apart for the hours a
+/// worker starts on shift (cells `MEAL_CELLS..2 x MEAL_CELLS`): a Full
+/// worker on shift defers its meal (item 5, P5i's meal before the shift),
+/// the off-shift and the jobless eat when hungry. A table of `MEAL_CELLS`
+/// cells (before the split) reads the pooled rate for both.
+pub const MEAL_CELLS_SPLIT: usize = 2 * MEAL_CELLS;
 
 impl StatTable {
     /// Morning 0, Work 1, Evening 2, Night 3 (`DayPhase` declares Night first).
@@ -207,6 +251,31 @@ impl StatTable {
 
     pub fn hunger_bucket(&self, hunger: f32) -> usize {
         usize::from(hunger >= self.hunger_edge)
+    }
+
+    /// `p_meal`'s cell: the phase, and the hunger's band of `[0, 1]` in
+    /// `MEAL_BANDS` equal bands.
+    pub fn meal_index(&self, phase: time::DayPhase, hunger: f32) -> usize {
+        let band = (hunger.max(0.0) * MEAL_BANDS as f32).floor() as usize;
+        Self::phase_index(phase) * MEAL_BANDS + band.min(MEAL_BANDS - 1)
+    }
+
+    /// `meal_index` in the split table (`MEAL_CELLS_SPLIT`): on shift at
+    /// the hour's start, the second half.
+    pub fn meal_index_split(&self, phase: time::DayPhase, hunger: f32, on_shift: bool) -> usize {
+        self.meal_index(phase, hunger) + if on_shift { MEAL_CELLS } else { 0 }
+    }
+
+    /// The `p_meal` rate for an hour (the split table's cell when the table
+    /// holds one, else the pooled cell).
+    pub fn meal_rate(&self, phase: time::DayPhase, hunger: f32, on_shift: bool) -> Option<f32> {
+        let p = self.p_meal.as_ref()?;
+        let i = if p.len() >= MEAL_CELLS_SPLIT {
+            self.meal_index_split(phase, hunger, on_shift)
+        } else {
+            self.meal_index(phase, hunger)
+        };
+        p.get(i).copied()
     }
 
     /// `phase x 6 + lawfulness bucket x 2 + hunger bucket`.
@@ -426,6 +495,10 @@ pub struct World {
     pub next_event_id: u64,
     /// Value = enqueue tick.
     pub plan_queue: BTreeMap<(Urgency, EntityId), Tick>,
+    /// Hunger as sickness P5h (a printed finding): queue entries dropped
+    /// stale (`plan::PLAN_QUEUE_MAX_AGE`), counted since world creation.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub plan_stale_drops: u64,
     pub reservations: BTreeMap<EntityId, Vec<Reservation>>,
     pub door_queue: BTreeMap<TilePos, u8>,
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
@@ -601,6 +674,17 @@ pub struct World {
     /// camp; empty stores are not written.
     #[serde(default, skip_serializing_if = "all_none")]
     pub camp_raised: Vec<Option<crate::econ::CampRaised>>,
+    /// Hunger as sickness § 2: the meters (only with `[sickness]` on; an
+    /// empty store is not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub health: Vec<Option<crate::components::Health>>,
+    /// Class pay (docs/CLASS_PAY.md): backgrounds (only with class pay on;
+    /// an empty store is not written).
+    #[serde(default, skip_serializing_if = "all_none")]
+    pub schooling: Vec<Option<crate::components::Schooling>>,
+    /// Hunger as sickness § 4: buildings whose bin holds scraps (rebuilt on load).
+    #[serde(skip)]
+    pub bins: BTreeSet<EntityId>,
     /// M15 W6: one rumour pool per district (`DistrictId` order).
     #[serde(default)]
     pub rumours: Vec<crate::word::RumourPool>,
@@ -830,6 +914,10 @@ pub struct World {
     /// `pick_candidate`'s rehire bonus reads it.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub laid_off: BTreeMap<EntityId, (Role, Tick)>,
+    /// Hunger fix item 10 (P5h): employer -> consecutive midnights its
+    /// housing demand went unmet (`life::grow_housing`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub housing_demand: BTreeMap<EntityId, u16>,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -910,6 +998,8 @@ components! {
     grudges: crate::word::Grudges,
     broker: crate::contract::Broker,
     camp_raised: crate::econ::CampRaised,
+    health: crate::components::Health,
+    schooling: crate::components::Schooling,
 }
 
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
@@ -1076,6 +1166,7 @@ impl World {
             debug_events: VecDeque::new(),
             next_event_id: 0,
             plan_queue: BTreeMap::new(),
+            plan_stale_drops: 0,
             reservations: BTreeMap::new(),
             door_queue: BTreeMap::new(),
             flow_fields: FlowCache::default(),
@@ -1133,6 +1224,9 @@ impl World {
             grudges: Vec::new(),
             broker: Vec::new(),
             camp_raised: Vec::new(),
+            health: Vec::new(),
+            schooling: Vec::new(),
+            bins: BTreeSet::new(),
             rumours: Vec::new(),
             regard: BTreeMap::new(),
             kill_watch: VecDeque::new(),
@@ -1192,6 +1286,7 @@ impl World {
             employers: BTreeMap::new(),
             employer_of: BTreeMap::new(),
             laid_off: BTreeMap::new(),
+            housing_demand: BTreeMap::new(),
         };
         w.spawn_buildings();
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1251,7 +1346,20 @@ impl World {
         systems::econ::seed_capital(&mut w);
         // Flip readiness (the transition wave; wages on): the no-dole city's
         // staffing before day 0, from the capital just seeded (no RNG).
+        // Class pay (docs/CLASS_PAY.md): the backgrounds, then the staffing
+        // (graded posts first, by merit), then the posts the graded hires
+        // left and the skilled grade (no RNG).
+        systems::classpay::seed_schooling(&mut w);
         systems::wages::seed_staff(&mut w);
+        systems::classpay::seed_after_staff(&mut w);
+        // Hunger fix item 9 (P5g): the seeded staff housed near work where
+        // Homes allow (the relocation pass, uncapped; no RNG).
+        if systems::fixes::hire_near(&w) {
+            systems::life::relocate_up_to(&mut w, usize::MAX);
+        }
+        // Hunger as sickness (after P5): the adults' histories (pure
+        // hashes, no stream draw), once they are housed.
+        systems::health::seed_history(&mut w);
         w
     }
 
@@ -1314,6 +1422,12 @@ impl World {
                     input_accum: 0.0,
                     floors: def.floors,
                     floor_days: 0,
+                    synth_food: 0,
+                    bin: 0,
+                    bin_accum: 0.0,
+                    spoil_carry: 0.0,
+                    bin_diver: None,
+                    bin_regular: None,
                 },
             );
             match def.kind {
@@ -1391,7 +1505,7 @@ impl World {
             self.insert(id, personality);
             self.insert(id, Mood::default());
             self.insert(id, Wallet { coins });
-            self.insert(id, Inventory { food, stolen_food: 0, stims: 0, parts: 0 });
+            self.insert(id, Inventory { food, stolen_food: 0, stims: 0, parts: 0, synth: 0 });
             self.insert(id, Brain::default());
             self.insert(id, Memory::default());
             self.insert(id, skills);
@@ -1539,6 +1653,7 @@ impl World {
                         premium: 1.0,
                         paid_once: true,
                         duty_fixed: None,
+                        grade: 0,
                     },
                 );
             }
@@ -2612,6 +2727,8 @@ impl World {
         self.grudges.resize_with(n.max(self.grudges.len()), || None);
         self.broker.resize_with(n.max(self.broker.len()), || None);
         self.camp_raised.resize_with(n.max(self.camp_raised.len()), || None);
+        self.health.resize_with(n.max(self.health.len()), || None);
+        self.schooling.resize_with(n.max(self.schooling.len()), || None);
         self.trace.resize_with(n.max(self.trace.len()), || None);
         self.life.resize_with(n.max(self.life.len()), || None);
         self.corp.resize_with(n.max(self.corp.len()), || None);
@@ -2628,6 +2745,13 @@ impl World {
     /// Rebuild `neighbours`, `spouses` and `enemies` from `edges` (after a
     /// load; the indices are not saved).
     pub fn rebuild_indices(&mut self) {
+        // Hunger as sickness § 4: the stocked bins.
+        let bins: BTreeSet<EntityId> = self
+            .with::<Building>()
+            .into_iter()
+            .filter(|&b| self.comp::<Building>(b).is_some_and(|x| x.bin > 0))
+            .collect();
+        self.bins = bins;
         self.neighbours.clear();
         self.spouses.clear();
         self.enemies.clear();
@@ -2864,6 +2988,8 @@ impl World {
             DeathCause::Overdose => self.stats.current.overdoses += 1,
             // M14 V14: a Flatline is not violence.
             DeathCause::Flatline => self.stats.current.virt.flatlined += 1,
+            // Hunger as sickness § 3.
+            DeathCause::Disease => self.stats.current.health.deaths_disease += 1,
         }
         // `[dead, spouse?]`, or `[dead, spouse or NONE, killer]` when the
         // killer is known, so the biography names them (an attacker who

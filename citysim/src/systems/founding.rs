@@ -206,6 +206,15 @@ pub fn door_tier(world: &World, door: TilePos) -> u8 {
 /// Jobs and room J7: the seats (`floor_seats` kinds) and the staff posted
 /// are per floor, × the building's `floors`.
 pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option<EntityId>, tier: u8) {
+    // Hunger as sickness P4b: building on a shanty clears it (its squatters
+    // put out, the Lot no longer derelict).
+    if crate::systems::street::is_shanty(world, b) {
+        crate::systems::street::evict_squatters(world, b, "the Lot cleared to build");
+        if let Some(bd) = world.comp_mut::<Building>(b) {
+            bd.derelict = false;
+            bd.empty_since = None;
+        }
+    }
     let Some((rect, old, floors)) = world.comp::<Building>(b).map(|bd| (bd.rect, bd.kind, bd.floors.max(1))) else {
         return;
     };
@@ -611,7 +620,7 @@ pub fn can_found(world: &World, agent: EntityId) -> bool {
 
 /// L2 L6: with jobs on, a derelict Block may take a refit when no Lot is left.
 fn refit_room(world: &World) -> bool {
-    !crate::systems::street::derelicts(world).is_empty()
+    !crate::systems::street::derelict_buildings(world).is_empty()
 }
 
 /// L2 L6: the Lounge is for the wealthiest: a Corp-class founder who can pay it.
