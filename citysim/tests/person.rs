@@ -117,6 +117,16 @@ fn probe_married_adult_across_town_comes_home_at_night() {
         .filter(|&a| law::living(&w, a) && demography::is_adult(&w, a) && w.gang_of(a).is_none())
         .filter(|&a| !w.has::<citysim::Sentence>(a) && home(&w, a).is_some())
         .filter(|&a| w.comp::<Job>(a).is_none_or(|j| !j.on_shift(0) && !j.on_shift(180)))
+        // Day gaps (2026-10-11): not a body that can pay for a Hotel bed
+        // (`life::away_hotel`, L2's designed bed far from Home): the city's
+        // divergence picked one (seed 42 #589 took a Hotel bed at 21:40, as
+        // on the old main given the same pick).
+        .filter(|&a| {
+            let budget = coins(&w, a) - w.config.life.hotel_reserve_meals * citysim::systems::life::meal_price(&w, a);
+            !w.buildings_of_kind(citysim::BuildingKind::Hotel).iter().any(|&h| {
+                citysim::systems::street::is_hotel(&w, h) && citysim::systems::street::hotel_price(&w, h) <= budget
+            })
+        })
         .find(|&a| w.spouses.contains_key(&a))
         .expect("a married housed adult");
     let h = home(&w, a).expect("home");
@@ -1555,6 +1565,11 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
         if let Some(n) = w.comp_mut::<Needs>(a) {
             n.energy = n.energy.max(0.8);
             n.hunger = n.hunger.max(0.95);
+            // Day gaps (2026-10-11): and amused, so leisure does not split
+            // the errand (the city's divergence picked seed 42 #1335, whose
+            // Unwind won mid-walk as an Arcade came into reach, then the run
+            // restarted: two plan starts, one Market).
+            n.fun = n.fun.max(0.8);
         }
         w.run_ticks(1);
         let w = &w;

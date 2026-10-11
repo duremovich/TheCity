@@ -361,3 +361,39 @@ fn test_unpaid_hire_plans_no_dole() {
     assert!(!ctx.dole_available, "no dole for a Job holder");
     assert!(!ActionKind::CollectDole.allowed(&ctx), "CollectDole is not open to a hire");
 }
+
+/// Day gaps 3 (2026-10-11): a holder with no need of the wage (wealth
+/// secure) who has missed `[life] secure_quit_days` workdays running quits
+/// the post, a vacancy for someone who will work it. Seed 42's rich
+/// Ripperdoc#515 owner held Bar#416's Bartender post at Full for 7 days and
+/// worked none (Work 0.02 vs Idle 0.05); the no-show dismissal needs 7
+/// missed workdays, past the week. A holder who needs the wage keeps it.
+#[test]
+fn test_secure_holder_who_skips_shifts_quits() {
+    let mut w = World::new(42, Config::load());
+    let holders: Vec<EntityId> = w
+        .citizens()
+        .into_iter()
+        .filter(|&a| {
+            w.comp::<Job>(a)
+                .is_some_and(|j| j.employer.is_some() && j.role == Role::Bartender && j.shifts == [(540, 1080)])
+        })
+        .take(2)
+        .collect();
+    let (rich, poor) = (holders[0], holders[1]);
+    // Midnight of day 4: the day shifts of days 2 and 3 were missed.
+    w.tick = 4 * TICKS_PER_DAY;
+    for (a, coins) in [(rich, 100_000), (poor, 0)] {
+        let j = w.comp_mut::<Job>(a).expect("job");
+        j.hired_tick = 0;
+        j.last_shift_day = Some(1);
+        w.comp_mut::<Wallet>(a).expect("wallet").coins = coins;
+        w.recompute_wealth_for(a);
+    }
+    assert!(w.comp::<citysim::Needs>(rich).is_some_and(|n| n.wealth >= 1.0), "secure");
+    let missed = citysim::systems::fixes::missed_workdays(&w, w.comp::<Job>(rich).expect("job"));
+    assert_eq!(missed, 2);
+    citysim::systems::fixes::daily(&mut w);
+    assert!(!w.has::<Job>(rich), "the secure holder who skips quits");
+    assert!(w.has::<Job>(poor), "a holder who needs the wage keeps it (the no-show rule is 7 days)");
+}

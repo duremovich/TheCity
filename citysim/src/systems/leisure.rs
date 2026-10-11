@@ -553,8 +553,18 @@ fn nearest_venue(
         .min()
 }
 
-/// The paid rungs open to `id` from `from` with `purse` to spend.
-fn paid_candidates(world: &World, id: EntityId, from: TilePos, purse: i64, district: Option<DistrictId>) -> Vec<Cand> {
+/// The paid rungs open to `id` from `from` with `purse` to spend. Day gaps
+/// 2 (2026-10-11): with `reach`, a venue whose walk (`exec::timed_walk`)
+/// is longer is off the ladder (the Full agent's pick; the Statistical
+/// evening walks nowhere and passes `None`).
+fn paid_candidates(
+    world: &World,
+    id: EntityId,
+    from: TilePos,
+    purse: i64,
+    district: Option<DistrictId>,
+    reach: Option<u64>,
+) -> Vec<Cand> {
     let mut out = Vec::new();
     if purse < 1 {
         return out;
@@ -573,6 +583,12 @@ fn paid_candidates(world: &World, id: EntityId, from: TilePos, purse: i64, distr
         let pick = nearest_venue(world, id, kind, from, district, &held)
             .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None, &held)));
         let Some((tiles, b)) = pick else { continue };
+        if let Some(r) = reach {
+            let door = world.comp::<Building>(b).map_or(from, |bd| bd.door);
+            if crate::exec::timed_walk(world, id, from, door) > r {
+                continue;
+            }
+        }
         let price = price_of(world, b);
         // The rung's affordability (spec § 2's brake): at most half the purse above
         // the reserve goes on one evening.
@@ -641,7 +657,8 @@ fn origin(world: &World, id: EntityId) -> Option<TilePos> {
 pub fn choice(world: &World, id: EntityId, scored: bool) -> Option<UnwindPick> {
     let from = origin(world, id)?;
     let purse = spendable(world, id);
-    let mut cands = paid_candidates(world, id, from, purse, None);
+    let reach = world.config.leisure.venue_walk_cap_ticks;
+    let mut cands = paid_candidates(world, id, from, purse, None, Some(reach));
     // Spec § 2 (stat_daily's rule, kept on screen for parity): a hungry
     // agent's evening is the NoodleBar's meal when one is in reach.
     if let Some(c) = cands.iter().find(|c| c.act == ActionKind::EatOut) {
@@ -910,20 +927,51 @@ pub fn unwind_satisfied(world: &World, id: EntityId) -> bool {
     !adult_free(world, id) || world.comp::<Needs>(id).is_none_or(|n| n.fun >= world.config.needs.fun_satisfied)
 }
 
-/// Off shift in the Evening or Night (an exec once the office has shut).
-fn off_hours(world: &World, id: EntityId) -> bool {
-    let phase = world.phase();
-    if !matches!(phase, DayPhase::Evening | DayPhase::Night) {
-        return false;
-    }
+/// Day gaps 1 (2026-10-11): `job`'s shift is being worked now: on shift on
+/// a working day (the agent's own: a guard's staggered rest day) that no
+/// strike struck. A rest day's shift hours are free.
+pub fn working_now(world: &World, id: EntityId, job: &Job) -> bool {
+    let key = job.shift_key_at(world.tick);
+    job.on_shift(world.tick_of_day())
+        && crate::exec::routine::workday_of(world, id, job, key)
+        && job.struck_shift != Some(key)
+}
+
+/// The agent's off hours. Day gaps 1 (2026-10-11): a job holder's are its
+/// own: not working a shift now, and the next workday shift not due (a
+/// rest day, a shift already worked or struck) or further off than the
+/// walk to work plus `[leisure] shift_lead_ticks`. The wall clock's
+/// Evening and Night left night crews, the venues' evening staff, night
+/// guards and rest days at Unwind x 0.3 < Idle, at home for 6-18 h. The
+/// jobless and execs keep the Evening and Night (an exec once the office
+/// has shut).
+pub fn off_hours(world: &World, id: EntityId) -> bool {
     if let Some(j) = world.comp::<Job>(id) {
-        return !j.on_shift(world.tick_of_day());
+        if working_now(world, id, j) {
+            return false;
+        }
+        let key = j.next_shift_key(world.tick);
+        if !crate::exec::routine::workday_of(world, id, j, key)
+            || j.last_shift_day == Some(key)
+            || j.struck_shift == Some(key)
+        {
+            return true;
+        }
+        let walk = j
+            .employer
+            .and_then(|e| world.comp::<Building>(e))
+            .map_or(0, |b| crate::systems::fixes::walk_estimate(world, id, b.door));
+        let until = u64::from(j.ticks_until_shift(world.tick_of_day()));
+        return until > walk + world.config.leisure.shift_lead_ticks;
+    }
+    if !matches!(world.phase(), DayPhase::Evening | DayPhase::Night) {
+        return false;
     }
     crate::systems::life::exec_corp(world, id).is_none() || crate::systems::life::exec_shift_over(world)
 }
 
-/// Plan L14 (spec § 2): `U(fun)` Logistic{8, 0.5}; Evening and Night off
-/// shift, else `gate_or(0.3)`; the best rung's score (gain × the walk ×
+/// Plan L14 (spec § 2): `U(fun)` Logistic{8, 0.5}; off hours ([`off_hours`]:
+/// the agent's own), else `gate_or(0.3)`; the best rung's score (gain × the walk ×
 /// pride on the mid and high rungs × courage at the FightPit and Den ×
 /// greed-weighted affordability). `None`: no rung reachable.
 pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>, f32)> {
@@ -931,10 +979,9 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
         return None;
     }
     let n = world.comp::<Needs>(id)?;
-    // Hunger fix item 5 (P5f): a worker on shift stays at work.
-    if crate::systems::fixes::shift_first(world)
-        && world.comp::<Job>(id).is_some_and(|j| j.on_shift(world.tick_of_day()))
-    {
+    // Hunger fix item 5 (P5f): a worker on shift stays at work (day gaps
+    // 1: a shift being worked; a rest day's shift hours are free).
+    if crate::systems::fixes::shift_first(world) && world.comp::<Job>(id).is_some_and(|j| working_now(world, id, j)) {
         return None;
     }
     let pick = choice(world, id, false)?;
@@ -1470,7 +1517,7 @@ pub fn stat_daily(world: &mut World) {
         let Some(from) = from else { continue };
         let district = Some(world.district_of(from));
         let purse = spendable(world, id);
-        let cands = paid_candidates(world, id, from, purse, district);
+        let cands = paid_candidates(world, id, from, purse, district, None);
         let pick = cands.iter().find(|c| c.act == ActionKind::EatOut).cloned().or_else(|| {
             cands.iter().max_by(|a, b| a.score.total_cmp(&b.score).then_with(|| b.venue.cmp(&a.venue))).cloned()
         });

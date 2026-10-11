@@ -112,7 +112,7 @@ Why (measured 2026-10-09, `d11e397`; the numbers are in the commit message): the
 `citysim/tests/person.rs`: the shipped seed-42 city, one agent pinned at Full LOD, one stimulus, and an assert on what a person would do. The always-on probes (all pass; the Jobs probes that need the wages switches are `#[ignore]`d until the flip):
 
 - hungry, broke, an empty larder at 15:00: paid at 18:00, buys food before midnight's rent;
-- married, across town at 20:00, tired: at home at 03:00;
+- married, across town at 20:00, tired, no Hotel bed affordable (2026-10-11: an affordable away Hotel is L2's designed bed): at home at 03:00;
 - an Enemy standing at the nearer HangOut spot: the other spot;
 - at the counter at 17:45, a little hungry: stays to 18:00 and is paid;
 - an immigrant with no coins and no food: eats or is hired within five days, alive;
