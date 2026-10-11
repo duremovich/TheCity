@@ -250,3 +250,13 @@ In order:
 6. **M16b, M17, M18.** Raise the sim-scale question for the bigger map (`D:\TheCityGraphics`, read-only) before M18.
 
 Housekeeping: about 25 stale worktrees under `.claude/worktrees`, cleanup offered to Dylan with no answer yet. Keep `agent-ad159dd59f903c9ac` (hits) and `agent-abdc8c1d22393b1ee` (transit). `agent-a74ec841dce33aa73` (hunger), `classpay`, `agent-a82410b104eb008ad` (old P9a) and `agent-a2b9c223ae831978a` (old recal) are superseded by main.
+
+## Session log (the ninth session, 2026-10-11 →)
+
+- **Audit of the flipped city's days** (item 1). Behaviour-tier diaries on main 8270896 vs the pre-flip merge c59b552 (run from its own worktree; the binary reads `assets/` from its cwd, so an A/B must run each binary in its own tree). Findings:
+  - **Guards' ~9.7 h walking is mostly Patrol** (3.4 h/day to waypoints): the job, not broken. Pre-flip it was 9.1 h.
+  - **The flip's extra walking is commute.** Fabber walk-to-work 0.75 → 3.1 h/day, cook 0.56 → 1.86, camp warden 1.05 → 3.0. Fabbers live 250-270 min each way from the Fab, all week. Cause: wages-on hires ~1,300 at creation (dole city ~520) into Homes laid out for the old city. A probe (`commute_cost` vs `commute_move_ticks` 80) on seed 42: day 19, 607 of ~1,300 far, 586 with no Home with a free bed in range; day 60, 263 (growth caught up); day 120, 458 (Farms at 995 workers, 365 far; 110 workers past 280 ticks). `grow_housing` builds 2 a day flat. Not a relocation bug: there is nowhere to move them.
+  - **Contacts halved** (KnownMetWeek, fabber 11.9 → 4.7, guard 13.2 → 5.5): likely commutes eating free hours plus ~800 fewer idle people at street spots. Re-measure after the commute fix before calling it.
+  - **Grocery-run churn** (hunger fix item 11b, pre-dates the flip): the run targets the household's need (shift meals × residents), a buy caps at 3, so it re-fires; the market is `world.local` to wherever the worker is, not on the way home; ~25-35 % of runs are abandoned when Sleep wins mid-walk. Up to 2.4 h/day (fighters).
+  - **d90 homeless**: the brutal city working (casual day work, squats and Lots, broke); no broken loop seen.
+  - Two coders dispatched in worktrees: `commute` (Opus: a housing pre-roll at world creation + a demand-scaled build rate) and `grocery` (Sonnet: detour-minimising market, one run that counts, no run past bedtime).
