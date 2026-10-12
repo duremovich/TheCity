@@ -151,7 +151,8 @@ fn test_tax_band_steps_with_hysteresis_and_pins() {
         treasury::daily(&mut w);
     }
     assert!((w.levers.tax_rate - cfg.tax_max).abs() < 1e-6, "clamped at tax_max: {}", w.levers.tax_rate);
-    // Clamped at tax_min above hi.
+    // With no surplus credit, clamped at tax_min above hi.
+    w.config.treasury.credit_max = 0.0;
     w.levers.tax_rate = cfg.tax_min;
     set_coins(&mut w, cfg.band[1] + 50_000);
     let before = moved(&w);
@@ -177,6 +178,107 @@ fn test_tax_band_steps_with_hysteresis_and_pins() {
     twin.push_command(PlayerCommand::SetTaxRate(0.1));
     twin.apply_commands();
     assert!(!twin.econ.tax_pinned, "no pin without the band");
+}
+
+/// The surplus credit: a Treasury held above `hi` with the tax at its floor
+/// takes the rate past `tax_min`, a step a hold, down to `-credit_max`;
+/// back inside the band a credit eases a step a hold toward `tax_min` (the
+/// Treasury settles at `hi`, not drained to `lo`); under `lo` it stops at
+/// once (the civic posts come first). The shipped city runs it.
+#[test]
+fn test_surplus_takes_the_rate_below_the_floor() {
+    let mut w = city();
+    assert!(w.config.treasury.credit_max > 0.0, "the shipped city returns its surplus");
+    w.config.treasury.credit_max = 0.03;
+    let cfg = w.config.treasury.clone();
+    let set_coins = |w: &mut World, c: i64| w.treasury_mut().expect("the Treasury").coins = c;
+    let near = |a: f32, b: f32| (a - b).abs() < 1e-6;
+    w.levers.tax_rate = cfg.tax_min;
+    set_coins(&mut w, cfg.band[1] + 50_000);
+    for _ in 0..3 {
+        treasury::daily(&mut w);
+    }
+    assert!(near(w.levers.tax_rate, cfg.tax_min - cfg.tax_step), "a step past the floor: {}", w.levers.tax_rate);
+    for _ in 0..30 {
+        treasury::daily(&mut w);
+    }
+    assert!(near(w.levers.tax_rate, -cfg.credit_max), "clamped at -credit_max: {}", w.levers.tax_rate);
+    // Inside the band: the credit eases toward the floor and stops there.
+    set_coins(&mut w, (cfg.band[0] + cfg.band[1]) / 2);
+    for _ in 0..3 {
+        treasury::daily(&mut w);
+    }
+    assert!(near(w.levers.tax_rate, -cfg.credit_max + cfg.tax_step), "eased a step: {}", w.levers.tax_rate);
+    for _ in 0..30 {
+        treasury::daily(&mut w);
+    }
+    assert!(near(w.levers.tax_rate, cfg.tax_min), "eased to the floor and held: {}", w.levers.tax_rate);
+    // Under lo: a credit stops at once.
+    w.levers.tax_rate = -cfg.credit_max;
+    set_coins(&mut w, cfg.band[0] - 1);
+    treasury::daily(&mut w);
+    assert!(near(w.levers.tax_rate, cfg.tax_min), "under lo the credit stops at once: {}", w.levers.tax_rate);
+}
+
+/// A corp's worker on the market law: its wage, its days unpaid set to 1.
+fn corp_worker(w: &mut World, wage: i64) -> (EntityId, EntityId) {
+    let (worker, corp) = w
+        .citizens()
+        .into_iter()
+        .find_map(|a| {
+            let corp = w.comp::<Job>(a).and_then(|j| j.employer).and_then(|e| w.owner_of(e))?;
+            w.has::<Corp>(corp).then_some((a, corp))
+        })
+        .expect("a corp's worker");
+    let j = w.comp_mut::<Job>(worker).expect("job");
+    j.wage_per_day = wage;
+    j.days_unpaid = 1;
+    j.tax_accum = 0.0;
+    j.premium = 1.0;
+    if let Some(c) = w.comp_mut::<Corp>(corp) {
+        c.wage_mult = 1.0;
+        c.wage_rev = 1.0;
+        c.treasury = 1_000;
+    }
+    (worker, corp)
+}
+
+/// The surplus credit at the wage desk: a negative rate pays the worker the
+/// gross plus the credit; the employer pays the gross, the Treasury the
+/// credit (`tax_credit`, `flow_tax` untouched), from its coins above `lo`
+/// only. Coins are conserved.
+#[test]
+fn test_negative_rate_pays_a_wage_credit_from_the_surplus() {
+    use citysim::systems::economy;
+    let mut w = city();
+    // The wage alone (no rent settled from it).
+    w.config.rent.pay_from_income = false;
+    let lo = w.config.treasury.band[0];
+    let wallet = |w: &World, a: EntityId| w.comp::<Wallet>(a).map_or(0, |x| x.coins);
+    let (worker, corp) = corp_worker(&mut w, 10);
+    w.levers.tax_rate = -0.5;
+    w.treasury_mut().expect("t").coins = lo + 100;
+    let total = ownership::total_coins(&w);
+    let (c0, p0, t0) = (wallet(&w, worker), w.purse(Some(corp)), treasury_coins(&w));
+    let tax0 = w.stats.current.flow_tax;
+    economy::collect_wage(&mut w, worker);
+    assert_eq!(wallet(&w, worker) - c0, 15, "the gross 10 and a credit of 5");
+    assert_eq!(p0 - w.purse(Some(corp)), 10, "the employer pays the gross, no tax");
+    assert_eq!(t0 - treasury_coins(&w), 5, "the Treasury pays the credit");
+    assert_eq!(w.stats.current.jobs.tax_credit, 5);
+    assert_eq!(w.stats.current.flow_tax, tax0, "the receipts stay the gross tax");
+    assert_eq!(ownership::total_coins(&w), total, "conserved");
+    // Only the coins above lo are a surplus.
+    let (worker, _) = corp_worker(&mut w, 10);
+    w.treasury_mut().expect("t").coins = lo + 2;
+    let c0 = wallet(&w, worker);
+    economy::collect_wage(&mut w, worker);
+    assert_eq!(wallet(&w, worker) - c0, 12, "the credit stops at the surplus");
+    assert_eq!(treasury_coins(&w), lo);
+    let (worker, _) = corp_worker(&mut w, 10);
+    let c0 = wallet(&w, worker);
+    economy::collect_wage(&mut w, worker);
+    assert_eq!(wallet(&w, worker) - c0, 10, "no surplus, no credit");
 }
 
 /// E33: a find is paid from the Recycler's till alone: an empty till pays

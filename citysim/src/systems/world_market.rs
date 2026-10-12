@@ -173,7 +173,7 @@ pub fn sell(
         return (0, 0);
     }
     let moved = ownership::cross_in(world, WORLD_ACCOUNT, owner, paid, Flow::Export);
-    let tax = (world.levers.tax_rate * moved as f32).round() as i64;
+    let tax = (world.levers.tax_rate.max(0.0) * moved as f32).round() as i64;
     if owner.is_some() && tax > 0 {
         ownership::pay(world, owner, None, tax, Flow::Tax);
     }

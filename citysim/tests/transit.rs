@@ -901,6 +901,33 @@ fn test_fares_pay_for_maintenance_crews() {
     assert_eq!(w.transit.staff, 10u16.saturating_sub(u16::from(w.config.treasury.civic_pace)));
 }
 
+/// The El crews' cap: however rich the fares, the crews stop at
+/// `staff_per_line` a line open (a real metro staffs 0.2-0.8 % of its
+/// population; uncapped, the fares paid ~250 crews on seed 42), and a cut
+/// line stands its crews down with its power. The fares stay the upper bound.
+#[test]
+fn test_crews_capped_per_open_line() {
+    let mut w = city_on();
+    w.tick = 3 * TICKS_PER_DAY;
+    let per = w.config.transit.staff_per_line;
+    assert!(per > 0, "the shipped city caps the crews");
+    let lines = w.config.transit.lines.len() as u16;
+    let wage = citysim::systems::treasury::sweeper_wage(&w);
+    for _ in 0..14 {
+        let mut row = citysim::DayRow::new(0);
+        row.transit.fares = i64::from(lines) * w.config.transit.power_per_line_day + 100 * wage;
+        w.stats.history.push_back(row);
+    }
+    assert_eq!(transit::staff_target(&w), lines * per, "a hundred crews' fares hire the cap");
+    transit::run(&mut w);
+    assert_eq!(w.stats.current.transit.el_staff, u32::from(lines * per));
+    transit::cut_line(&mut w, 0, 3).expect("a line");
+    assert_eq!(transit::staff_target(&w), (lines - 1) * per, "a cut line's crews stand down");
+    transit::cut_line(&mut w, 0, 0).expect("reopened");
+    w.config.transit.staff_per_line = u16::MAX;
+    assert_eq!(transit::staff_target(&w), 100, "uncapped: the fares past the power, over a sweeper's wage");
+}
+
 /// T14 (plan D9): a Statistical worker's attendance is its role's row in its
 /// commute band when the table learned one, the role's row otherwise; a line
 /// cut that moves the commute into a longer band moves the attendance with
@@ -1255,6 +1282,87 @@ fn measure_transit_tail() {
     for &seed in &seeds {
         for on in [false, true] {
             handles.push(std::thread::spawn(move || measure_tail(seed, on, days)));
+        }
+    }
+    for h in handles {
+        println!("{}", h.join().expect("a seed run"));
+    }
+}
+
+/// One run of `measure_el_crews`: the El crews capped at `cap` a line,
+/// `seed` x `days`, the money circuit (printed findings).
+fn measure_crews(name: &str, seed: u64, cap: u16, credit: f32, days: u64) -> String {
+    use citysim::EventKind;
+    let mut cfg = Config::load();
+    cfg.transit.staff_per_line = cap;
+    cfg.treasury.credit_max = credit;
+    let mut w = World::new(seed, cfg);
+    let mut cursor = 0u64;
+    let mut murders = 0u32;
+    let mut fares = 0i64;
+    let mut payroll = 0i64;
+    let mut credits = 0i64;
+    let mut tre = Vec::new();
+    for d in 1..=days {
+        w.run_ticks(TICKS_PER_DAY);
+        murders +=
+            w.events.iter().rev().take_while(|e| e.id >= cursor).filter(|e| e.kind == EventKind::Murder).count() as u32;
+        cursor = w.next_event_id;
+        let row = w.stats.history.back().expect("a day");
+        fares += row.transit.fares;
+        payroll += row.jobs.civic_payroll;
+        credits += row.jobs.tax_credit;
+        if d % 30 == 0 || d == 15 {
+            tre.push(format!("d{d} {}/{:.2}", row.treasury, row.econ.tax_rate));
+        }
+    }
+    let row = w.stats.history.back().expect("a day");
+    let cits = w.citizens();
+    let purses: i64 = cits.iter().filter_map(|&a| w.comp::<Wallet>(a).map(|x| x.coins)).sum();
+    let corps_sum: i64 = w.corps().iter().filter_map(|&c| w.comp::<citysim::Corp>(c)).map(|c| c.treasury).sum();
+    let total = citysim::systems::ownership::total_coins(&w);
+    format!(
+        "{name} seed {seed}: el_staff {} employed {} homeless {} pop {} purses {purses} (mean {:.1}) Murders {murders} \
+         fares {fares} civic_payroll {payroll} credits {credits} guards {} sanitation {} corps {corps_sum} till {} coins {total} \
+         treasury/tax [{}]",
+        row.transit.el_staff,
+        row.employed,
+        row.homeless,
+        row.population,
+        purses as f64 / cits.len().max(1) as f64,
+        row.jobs.guard_count,
+        row.jobs.sanitation_count,
+        w.econ.recycler_till,
+        tre.join(", "),
+    )
+}
+
+/// The El crews' cap and the money circuit: `EL_RUNS` (comma-separated
+/// `name=cap/credit_max`, default `main=65535/0,cap=4/0,capcredit=4/0.15`) x `EL_SEEDS` (default 42-47) x
+/// `EL_DAYS` (default 120), in threads. Printed findings; run alone with
+/// `--ignored --nocapture`.
+#[test]
+#[ignore]
+fn measure_el_crews() {
+    let days = std::env::var("EL_DAYS").ok().and_then(|d| d.parse().ok()).unwrap_or(120);
+    let seeds: Vec<u64> = std::env::var("EL_SEEDS")
+        .ok()
+        .map(|s| s.split(',').filter_map(|x| x.trim().parse().ok()).collect())
+        .unwrap_or_else(|| (42..=47).collect());
+    let runs: Vec<(String, u16, f32)> = std::env::var("EL_RUNS")
+        .unwrap_or_else(|_| "main=65535/0,cap=4/0,capcredit=4/0.15".into())
+        .split(',')
+        .filter_map(|r| {
+            let (n, rest) = r.split_once('=')?;
+            let (c, k) = rest.split_once('/')?;
+            Some((n.to_string(), c.parse().ok()?, k.parse().ok()?))
+        })
+        .collect();
+    let mut handles = Vec::new();
+    for (name, cap, credit) in runs {
+        for &seed in &seeds {
+            let name = name.clone();
+            handles.push(std::thread::spawn(move || measure_crews(&name, seed, cap, credit, days)));
         }
     }
     for h in handles {

@@ -9,7 +9,11 @@
 //! hysteresis (`[budget] band_hold_days`, the state in `CityBudget.{band_side,
 //! band_days}`): above `hi` held, the rate falls; below `lo` held, it rises;
 //! clamped `[tax_min, tax_max]`. A `SetTaxRate` pins it (`EconState.tax_pinned`)
-//! until `SetTaxAuto`.
+//! until `SetTaxAuto`. The surplus credit (`credit_max`): held above `hi`
+//! at the floor, the rate goes negative, a credit on wages paid from the
+//! coins above `lo` (`ownership::tax_credit`); it eases back to the floor
+//! inside the band and stops at once under `lo`. The Treasury hoards no
+//! income its capped posts can't spend.
 //!
 //! The till (E33) is the Recycler's purse in all but name (the Recycler is
 //! city-owned and has no `Corp`): its Parts sales (to the city's buyers in
@@ -49,9 +53,12 @@ pub fn daily(world: &mut World) {
     civic_daily(world);
     let cfg = world.config.treasury.clone();
     let t = world.treasury().map_or(0, |x| x.coins);
+    // The surplus credit (a negative rate past the floor) eases back inside
+    // the band (the Treasury settles at `hi`) and stops at once under `lo`.
+    let credit = world.levers.tax_rate < cfg.tax_min.min(0.0);
     let side: i8 = if t > cfg.band[1] {
         1
-    } else if t < cfg.band[0] {
+    } else if t < cfg.band[0] || credit {
         -1
     } else {
         0
@@ -65,6 +72,19 @@ pub fn daily(world: &mut World) {
     if world.econ.tax_pinned || side == 0 {
         return;
     }
+    if credit && t < cfg.band[0] {
+        let old = world.levers.tax_rate;
+        world.levers.tax_rate = cfg.tax_min;
+        world.push_event(
+            EventKind::TaxMoved,
+            &[],
+            format!(
+                "the city ended its wage credit {old:.2} -> {:.2} (Treasury {t}, below the band [{}, {}])",
+                cfg.tax_min, cfg.band[0], cfg.band[1]
+            ),
+        );
+        return;
+    }
     // L2's hysteresis on every step: a step fires on the hold's multiples.
     let hold = world.config.budget.band_hold_days.max(1);
     let held = world.budget.band_days >= hold && world.budget.band_days.is_multiple_of(hold);
@@ -73,12 +93,22 @@ pub fn daily(world: &mut World) {
     }
     let old = world.levers.tax_rate;
     let step = if side == 1 { -cfg.tax_step } else { cfg.tax_step };
-    let new = ((old + step).clamp(cfg.tax_min, cfg.tax_max) * 1000.0).round() / 1000.0;
+    // Above `hi` the rate may pass the floor down to `-credit_max` (a credit
+    // on wages); otherwise it rises no further than the floor's side it is on.
+    let floor = if side == 1 && cfg.credit_max > 0.0 { cfg.tax_min.min(-cfg.credit_max) } else { cfg.tax_min.min(old) };
+    let ceiling = if credit { cfg.tax_min } else { cfg.tax_max };
+    let new = ((old + step).clamp(floor, ceiling) * 1000.0).round() / 1000.0;
     if (new - old).abs() < 1e-6 {
         return;
     }
     world.levers.tax_rate = new;
-    let why = if side == 1 { "above" } else { "below" };
+    let why = if side == 1 {
+        "above"
+    } else if credit {
+        "easing its wage credit inside"
+    } else {
+        "below"
+    };
     world.push_event(
         EventKind::TaxMoved,
         &[],
@@ -128,7 +158,7 @@ pub fn seed_till(world: &mut World) {
 // Jobs v2 P5a (plan J16, J17): the civic budget.
 // ---------------------------------------------------------------------------
 
-/// J16: yesterday's receipts into `EconState.receipts` (`stats::run` rolls
+/// J16: yesterday's receipts (the El's fares included) into `EconState.receipts` (`stats::run` rolls
 /// the row at 23:59; this pass runs at 00:00, so `history.back()` is
 /// yesterday), then the headcounts unless a god pinned them. The first
 /// midnight has no receipts yet and holds the configured headcounts.
@@ -137,7 +167,12 @@ pub fn civic_daily(world: &mut World) {
         return;
     }
     if let Some(row) = world.stats.history.back() {
-        let r = row.flow_tax + row.jobs.flow_fines + row.econ.flow_customs + row.econ.flow_property;
+        // Every coin the city levies, the El's fares included: the surplus
+        // credit returns the hoard above `hi`, so a post the receipts don't
+        // fund is not funded by the hoard either (left out, the fares paid
+        // the police and the sweepers only through the hoard term, and the
+        // credit cut Sanitation 50 -> 1-25 on seeds 42-47).
+        let r = row.flow_tax + row.jobs.flow_fines + row.econ.flow_customs + row.econ.flow_property + row.transit.fares;
         let days = world.config.treasury.receipts_days.max(1) as usize;
         let ring = &mut world.econ.receipts;
         ring.push_back(r);

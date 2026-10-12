@@ -746,7 +746,10 @@ pub fn collect_wage(world: &mut World, agent: EntityId) -> i64 {
 /// `collect_wage` with the day's wage scaled by `scale` (L2 shadow fixes
 /// item 2: a cut shift paid pro rata; 1.0 is `collect_wage` exactly).
 pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i64 {
-    let tax_rate = world.levers.tax_rate;
+    // A negative rate is the surplus credit (`treasury::daily`): no tax, and
+    // the Treasury adds `-rate` of the gross paid (`ownership::tax_credit`).
+    let tax_rate = world.levers.tax_rate.max(0.0);
+    let credit_rate = (-world.levers.tax_rate).max(0.0);
     let day = world.day();
     let Some(job) = world.comp::<Job>(agent).cloned() else { return 0 };
     if job.days_unpaid == 0 {
@@ -805,6 +808,14 @@ pub fn collect_wage_scaled(world: &mut World, agent: EntityId, scale: f32) -> i6
     let remainder = due - gross;
     let days_left = if remainder > 0 { ((remainder + per_day.max(1) - 1) / per_day.max(1)) as u8 } else { 0 };
     tax_accum = tax_accum.max(0.0);
+    // The surplus credit on the gross paid, its fraction carried in
+    // `tax_accum` as the tax's is (a coin short of the Treasury's surplus is
+    // not owed later).
+    if credit_rate > 0.0 && gross > 0 {
+        let acc = tax_accum + gross as f32 * credit_rate;
+        let paid_credit = ownership::tax_credit(world, agent, acc.floor() as i64);
+        tax_accum = (acc - paid_credit as f32).clamp(0.0, 0.999);
+    }
     if let Some(j) = world.comp_mut::<Job>(agent) {
         j.tax_accum = tax_accum;
         j.days_unpaid = days_left;

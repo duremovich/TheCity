@@ -74,6 +74,7 @@ night_from = 1260              # 21:00
 night_to = 300                 # 05:00
 danger_crime = 3.0             # crime_rate (per 100 residents a day) at which an average-courage rider refuses at night; set from phase 1's distribution
 power_per_line_day = 150       # operator -> World account, per open line
+staff_per_line = 4             # 2026-10-12: the El's maintenance crews per open line (see Status, the crews' cap)
 
 [[transit.lines]]
 name = "Vat Line"
@@ -217,7 +218,7 @@ Phase 1 was ported onto main `ef83a2a` (the flipped city). Phases 2 and 3 follow
 
 **Deviations from the spec and the plan**, with the reason for each:
 
-1. **Ownership and money (decision 2).** The city owns the El. Fares go to the Treasury, which pays the power and pays **maintenance crews** from the fares: `TransitState.staff`, Sanitation posts on the city payroll, sized as (the 14-day mean of fares − a day's power) / a sweeper's wage, paced down like the civic headcount, and hired by `reconcile_sanitation` on top of it (the `el_staff` column). Why: parked in the Treasury (police at their ceiling, tax at its floor) the fares left purses 17 % lower. Station clerks and platform guards wait for station buildings (decision 5, Interiors).
+1. **Ownership and money (decision 2).** The city owns the El. Fares go to the Treasury, which pays the power and pays **maintenance crews** from the fares: `TransitState.staff`, Sanitation posts on the city payroll, sized as (the 14-day mean of fares − a day's power) / a sweeper's wage, **capped at `staff_per_line` × the open lines since 2026-10-12** (below), paced down like the civic headcount, and hired by `reconcile_sanitation` on top of it (the `el_staff` column). Why: parked in the Treasury (police at their ceiling, tax at its floor) the fares left purses 17 % lower. Station clerks and platform guards wait for station buildings (decision 5, Interiors).
 2. **`power_per_line_day` 150 → 20** (E13's scale: a Market's power is 20 a day). Coins paid to the World displace export minting one for one. The placeholder sent 450 a day out of the city, about 45k over 120 days: purses −25 %, employed −5 %.
 3. **The shared distance** (§ 6). `life::commute_cost` = `transit::commute_ticks`: the walk, or the ride over each door's nearest stops (untimed walks, half a headway's wait, the table) when it saves `min_saving_ticks` plus a fare's `ticks_per_coin`. No agent and no clock, so it is structural. The hiring band, relocation, the housing demand and the pre-roll read it, and so does the hire key's distance when the El is on. `Net::near` holds each tile's 8 nearest stops.
 4. **The departure gate** (T16). It reads `transit::estimate_by`: the trip that arrives by the deadline, as `choose` would make it. It does not read "now". A now-based estimate fell when service began at 05:00 and turned riders back from commutes (tier commute aborts: sweeper 0.46, worker_friday 0.18). Bedtime (P5j) and leisure's shift lead read it too. `fixes::walk_estimate` is `transit::estimate` (now-based) for the other "how long to get there" readers.
@@ -241,3 +242,38 @@ Phase 1 was ported onto main `ef83a2a` (the flipped city). Phases 2 and 3 follow
 - God: 23 + 3 pass, including the new `god_line_cut` (v10).
 - Parity (nightly, `lod.rs`): law1 actor share now passes (0.170 vs 0.167; red on main); bin meals stays red (1.43 vs 2.68, as on main); two new reds: arrests 1.25 vs 0.51 (main 0.58 vs 0.43: the Full city's Fare Evasion arrests come from errand rides too, and the Statistical tier models commute rides only, plan risk 1) and commute rides 28.5 vs 24.1 (tolerance 4.3; ride share 34.5 vs 31.0 passes). Next: learn an off-screen errand-ride rate, or `p_dodge_caught` per commute dodge.
 - Five person probes (`probe_el_*`).
+
+## The crews' cap and the surplus credit (2026-10-12)
+
+**The problem.** `staff_target` turned every spare fare coin into a crew wage: ~250 El crews on seed 42, 12.5 % of 2,000 residents and ~14 % of jobs (a real metro staffs 0.2-0.8 % of its population). It was a jobs program hiding a Treasury leak: the Treasury's posts are capped (police at the Jail's ceiling, Sanitation at `sanitation_max`) and the tax sits at its floor 0 from day ~30, so income the posts can't spend just piles up.
+
+**The money circuit, measured first** (`tests/transit.rs::measure_el_crews`, ignored; `EL_RUNS`, `EL_SEEDS`, `EL_DAYS`). Fares are ~1,450-1,600 coins a day, about a fifth of the city's wage bill (a 1-coin fare against a ~7-coin wage). With the crews capped and nothing else changed, the fares pooled in the Treasury: 145k at day 120 (main 74k), and the purses fell 27 %. Main hoards too: 65-85k at day 120, 139-154k at day 365 on 42-44, the tax at 0 the whole time. The crews only hid part of it.
+
+**The fix.**
+1. **The cap**: `[transit] staff_per_line = 4`, so crews = min(the fares past the power ÷ a sweeper's wage, 4 × the open lines): 12 on the shipped three lines (0.6 %). No fares, no crews, as before. The cap is per open line, not per stop. The line is the unit the power is billed by, so a cut line stands its crews down with its power. Per stop would tie the crews to `stop_spacing`, a timetable knob.
+2. **The surplus credit** (general, not a fare special case): `[treasury] credit_max = 0.25`. While the Treasury sits above band hi with the tax at its floor, the band (unchanged `tax_step` and `band_hold_days`) takes the rate past the floor, down to −0.25. A negative rate is a credit of −rate on every wage paid (`economy::collect_wage`), paid by the Treasury from its coins above band lo only (`ownership::tax_credit`, the `tax_credit` column; `flow_tax` stays the gross tax). Inside the band a credit eases a step a hold back to the floor, so the Treasury settles at hi. Under lo it stops at once. This is not a safety net: the jobless get nothing, and no coin is minted. The dole and public works stay off.
+3. **The civic receipts count the fares.** Left out, the fares paid the police and sweepers only through the budget's hoard term. Once the credit returned the hoard, Sanitation fell 50 → 1-25 (main + credit, 42-47). The posts now get the first claim on the fares, and the credit returns the rest.
+
+**Seeds 42-47 × 120 days** (printed findings; day-120 values, sums for Murders):
+
+| | main (crews uncapped) | capped, fares parked | **capped + credit 0.25 (shipped)** |
+|---|---|---|---|
+| el_staff (mean) | 251 | 12 | 12 |
+| employed (mean) | 1,746 | 1,396 | 1,503 |
+| homeless (mean) | 50 | 242 | 163 |
+| purses (mean of the seed sums) | 43.1k | 31.6k | 49.4k |
+| mean wallet | 21.9 | 16.6 | 26.0 |
+| Treasury d60 / d120 (mean) | 54.9k / 73.6k | 80.3k / 144.8k | 68.4k / 64.4k |
+| tax rate d120 | 0.00 | 0.00 | −0.25 |
+| credits paid (per seed, 120 d) | 0 | 0 | 108k |
+| Murders (sum) | 459 | 503 | 526 |
+| police / Sanitation d120 | 40 / 50 | 40 / 50 | 40 / 50 |
+
+Other credit_max values, capped, 42-47 × 120: 0.15: Treasury 90k, purses 42.0k, employed 1,489. 0.35: 57k, 53.9k, 1,516.
+
+**The year, seeds 42-44 × 365, main vs shipped**: Treasury d360 145k → 27k (from day 150 it holds 13-41k against band hi 25k); purses 79.0k → 111.6k; employed 1,700 → 1,554; homeless 12 → 20; Murders 1,255 → 1,416 (seed 44 577). credit_max 0.35 dips to band lo (8k) on two seeds.
+
+**Read.** The credit returns the coins, and purses end above main. The jobs don't come back: employed is −14 % at day 120 and −9 % over the year, because the ~240 crews were jobs and the credit doesn't buy labour. Homelessness is higher at day 120 and recovers over the year. That cost is the jobs program gone, and it is the brutal city's pressure (`thecity-brutality-via-pressure`). The Treasury ramp is slow: the band opens at 0.05 and steps 0.01 every 3 days, so the credit only reaches −0.25 around day 100. Until then the Treasury still sits at 60-80k.
+
+**Gates**: trio 940/0, `core_year` ok (seed 42: Murders 431, starvation 0, corps 8/9, the Treasury 13-65k), behaviour tier 133/133 (the credit is logged as a payment, not a refund: logged as a refund it failed three `RefundsWeek` rows), god 17 + 3 + 3, parity green (synth % 42.7 vs 48.6, tolerance 6.4). The stat table was not regenerated.
+
