@@ -372,3 +372,11 @@ Findings:
   - Persuade never fires naturally; it waits on the phase-4 board campaigns.
   - `[leverage] enabled` / `CITYSIM_LEVERAGE_OFF=1` is the off identity.
   - Phase 2 (captives and the new kinds) is running on the same agent.
+- **M16b phase 2 (captives and the new kinds) merged 7495ee8**, SAVE 17:
+  - Gates: trio 1,034/0; core_year; shadow 133/0/2; gods; parity; core_20k at 191 tps.
+  - Hostages land on 3 of 6 seeds, and all were ransomed at once. Rescue and Escort never fire naturally (unit-tested only); no Prison was built in 120 days.
+  - Steal (Lab heists) is the busy kind, landing about 60 %. Fabrications are rare and caught.
+  - Murders 492 → 567 is within the noise between builds (498-572).
+  - Levers if Prison-door gunfights are wanted: `hostage_w`, `lev_bias.hostage`.
+  - `CITYSIM_HOSTAGE_OFF=1` is the off identity.
+  - Phase 3 (the wounded) is running.
