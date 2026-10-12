@@ -334,10 +334,11 @@ const SEED_LABS: [(&str, Seat, Track); 4] = [
 /// plane off.
 pub fn seed_labs(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let copies = world.config.copies();
+    let copies = world.seed_copies();
     for (copy, (template, seat, focus)) in (0..copies).flat_map(|j| SEED_LABS.into_iter().map(move |r| (j, r))) {
-        let owners = world.corps_of_template(template);
-        let Some(&corp) = owners.get(copy % owners.len().max(1)) else {
+        // Review finding 7: copy `j` is the row's `j`th corp (none: skipped,
+        // never another copy's owner).
+        let Some(&corp) = world.corps_of_template(template).get(copy) else {
             continue;
         };
         let corp_name = world.comp::<Corp>(corp).map_or_else(String::new, |c| c.name.clone());

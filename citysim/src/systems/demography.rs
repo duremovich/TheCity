@@ -750,6 +750,7 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
 /// guard lawful (≥ 0.4); a Lab the best hacker, a Feed the most
 /// knowledgeable (ties lower id). Jobs and room J4 (wages on): the default
 /// key is `1024 + distance − round(skill_w × 100 × skill) − rehire_bonus`
+/// (`camp_band + 512` for the 1024 on a map past 1,024 Manhattan tiles)
 /// (the role's `competence::role_skill`; the bonus for an adult laid off
 /// from the same role in the last 30 days).
 fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
@@ -813,7 +814,9 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             }
             // J4: skill and the rehire bonus come off the distance, capped
             // at 512 so the key stays above the `CampRaised` band (a halved
-            // distance, at most 224 on the 256 x 192 map).
+            // distance: review finding 8, the key's floor is `camp_band`,
+            // past the map's largest halved distance; 512 on the 256 x 192
+            // map, whose largest is 223).
             let skill = if skill_w > 0.0 {
                 crate::systems::competence::role_skill(world, id, role).map_or(0.0, |(v, _, _)| v.clamp(0.0, 1.0))
             } else {
@@ -840,7 +843,7 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
             } else {
                 0
             };
-            ((1024 + band + d).saturating_sub(off.min(512)), id)
+            ((camp_band(world) + 512 + band + d).saturating_sub(off.min(512)), id)
         })
         .min()
         .map(|(_, id)| id)
@@ -917,8 +920,19 @@ fn hire_offset(world: &World, id: EntityId, role: Role, skill_w: f32, rehire: u3
     off.min(512)
 }
 
+/// The Real economy E41's band (review finding 8): every regular hiring key
+/// is at least this (`camp_band + 512 + d - offset`, the offset capped at
+/// 512), and a `CampRaised` applicant's key (its halved Manhattan distance)
+/// is below it on any map: the largest halved distance plus one, at least
+/// 512 (the shipped 256 x 192 map's 1,024 base, unchanged).
+fn camp_band(world: &World) -> u32 {
+    let (w, h) = (world.map.w() as u32, world.map.h() as u32);
+    ((w.saturating_sub(1) + h.saturating_sub(1)) / 2 + 1).max(512)
+}
+
 /// [`pick_candidate`]'s distance part of the key from `from` to a
-/// workplace door, `1024 + band + d` (`near_cap`: the hire-near band's cap).
+/// workplace door, `camp_band + 512 + band + d` (`near_cap`: the hire-near
+/// band's cap).
 fn hire_base(world: &World, from: TilePos, workplace_door: TilePos, near_cap: Option<u64>) -> u32 {
     let d = if crate::systems::transit::enabled(world) {
         let step = world.config.exec.move_ticks_full.max(1);
@@ -931,7 +945,7 @@ fn hire_base(world: &World, from: TilePos, workplace_door: TilePos, near_cap: Op
     } else {
         0
     };
-    1024 + band + d
+    camp_band(world) + 512 + band + d
 }
 
 /// The groups of one role: home door (else tile) -> `(512 - offset, id)`,
@@ -1829,5 +1843,50 @@ mod tests {
         let hired = |x: &World| x.vacancies.values().map(Vec::len).sum::<usize>();
         assert!(hired(&a) < open, "nobody was hired: the test exercises nothing");
         assert_eq!(crate::save::to_ron(&a), crate::save::to_ron(&b));
+    }
+
+    /// Review finding 8 (the Real economy E41 on a big map): a `CampRaised`
+    /// applicant comes first for a Farm vacancy however far away, on a map
+    /// whose halved distances pass 512 (the generated 20k map, 1,280 x 376:
+    /// up to 827), against the best-placed regular candidate (next door,
+    /// the full skill and rehire offset, `skill_w` raised so it reaches the
+    /// 512 cap). Both pickers (`pick_candidate` and the pooled pass).
+    #[test]
+    fn test_camp_raised_first_on_a_big_map() {
+        let mut c = crate::config::Config::load();
+        c.world.map = "gen:20000".into();
+        c.economy2.skill_w = 6.0;
+        let mut w = World::new(42, c);
+        let farm = w.buildings_of_kind(BuildingKind::Farm)[0];
+        let door = w.comp::<Building>(farm).map(|b| b.door).expect("a Farm");
+        // scan-ok: a unit test, once.
+        let adults: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&id| w.has::<Brain>(id) && is_adult(&w, id) && !w.has::<Sentence>(id))
+            .collect();
+        let far = *adults.iter().max_by_key(|&&id| (hire_from(&w, id).manhattan(door), id)).expect("an adult");
+        let near = *adults
+            .iter()
+            .filter(|&&id| id != far)
+            .min_by_key(|&&id| (hire_from(&w, id).manhattan(door), id))
+            .expect("a neighbour");
+        assert!(hire_from(&w, far).manhattan(door) / 2 > 512, "the map is big enough to test");
+        for id in [far, near] {
+            if w.has::<Job>(id) {
+                w.vacate_job(id);
+            }
+        }
+        if let Some(s) = w.comp_mut::<crate::components::Skills>(near) {
+            s.farming = 1.0;
+            s.fighting = 1.0;
+            s.stealth = 1.0;
+        }
+        note_laid_off(&mut w, near, Role::Farmer);
+        let camp = w.spawn();
+        w.insert(far, crate::econ::CampRaised { camp, owner: None, days: 30, fed_share: 1.0 });
+        assert_eq!(pick_candidate(&w, farm, door, Role::Farmer), Some(far), "pick_candidate");
+        let mut pool = HirePool::new(&w);
+        assert_eq!(pool.pick(&w, farm, door, Role::Farmer), Some(far), "the pooled pass");
     }
 }

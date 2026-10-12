@@ -674,6 +674,13 @@ fn rects_overlap(a: Rect, b: Rect) -> bool {
     a.overlaps(&b)
 }
 
+/// The range a `SetTaxRate` may set: `-[treasury] credit_max` (the surplus
+/// credit, a negative rate; 0 with no credit) up to 0.3. The city panel's
+/// tax slider reads it too.
+pub fn tax_lever_range(cfg: &Config) -> (f32, f32) {
+    ((-cfg.treasury.credit_max).min(0.0), 0.3)
+}
+
 impl Levers {
     pub fn from_config(cfg: &Config) -> Levers {
         let policy = &cfg.policy;
@@ -763,7 +770,10 @@ impl World {
             }
             PlayerCommand::ReleaseReserve { amount } => self.cmd_release_reserve(*amount),
             PlayerCommand::SetTaxRate(r) => {
-                self.levers.tax_rate = r.clamp(0.0, 0.3);
+                // Review finding 1: down to the surplus credit's floor (the
+                // band's own reach), so a set rate can hold a credit.
+                let (lo, hi) = tax_lever_range(&self.config);
+                self.levers.tax_rate = r.clamp(lo, hi);
                 // Real economy E21: a set rate pins against the band (written
                 // only while the band runs: the state is the milestone's).
                 if crate::systems::treasury::on(self) {

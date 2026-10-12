@@ -355,7 +355,7 @@ fn test_seeding_matches_table() {
     }
     for (i, &c) in corps.iter().enumerate() {
         let cc = w.comp::<Corp>(c).expect("corp");
-        assert_eq!(cc.slot, Some(i as u8));
+        assert_eq!(cc.slot, Some(i as u16));
         assert!(cc.exec.is_some(), "{} has an exec", cc.name);
         assert_eq!(cc.order, citysim::CorpOrder::Hunker);
         assert_eq!(cc.governance, citysim::Governance::Dictator);

@@ -66,7 +66,7 @@ pub fn open_to_strangers(world: &World, gang: EntityId) -> bool {
 /// creed Purist, no members). No derelict there: the vacant Lot nearest
 /// the centroid, built as a Hideout. Neither: no Unplugged. No RNG.
 /// Scale S4: Sump Central by role (`districts::Seat`, the Sump's middle),
-/// and a chapel per `Config::copies` ("The Unplugged 2", ...), each its own
+/// and a chapel per `World::seed_copies` ("The Unplugged 2", ...), each its own
 /// Purist gang. Returns the first.
 pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
     if !world.config.creeds.seed_purist {
@@ -75,7 +75,7 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
     if world.gang_list().iter().any(|&g| is_purist(world, g)) {
         return None;
     }
-    let copies = world.config.copies();
+    let copies = world.seed_copies();
     let mut first = None;
     for copy in 0..copies {
         if let Some(g) = seed_chapel(world, copy, copies) {

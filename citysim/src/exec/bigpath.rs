@@ -20,10 +20,16 @@
 //!   and the heuristic is the largest of 7 × Manhattan and the triangle
 //!   bounds `d(L, goal) − d(L, n)` and `d(n, L) − d(goal, L)`: admissible
 //!   and consistent. The landmarks are measured on the tiles without the
-//!   rubble, so rubble (which only closes ways) never stales them, and
-//!   rebuilt when a tile changes (a Lot's walls, a demolition): they are a
-//!   pure function of the tiles, so a loaded world searches as the saved
-//!   one did.
+//!   rubble, so rubble (which only closes ways) never stales them. Review
+//!   finding 10: a tile change that only closes ways (a Lot's walls: every
+//!   tile's entry cost the same or higher) keeps them too (distances on the
+//!   old tiles are lower bounds on the new: still admissible and
+//!   consistent, ~1 s a rebuild spared on the 3,000 x 1,875 island); one
+//!   that opens a way (a demolition) drops them, rebuilt on the tiles of
+//!   their next use. They are a pure function of the tiles they were
+//!   measured on (`base_tiles`), which a save carries while they differ
+//!   from the map's (`World::landmark_base`), so a loaded world searches
+//!   with the landmarks the saved one had and its paths tie-break alike.
 //! - **Unreachable is O(1).** [`labels`] gives every walkable tile its
 //!   4-connected component; a goal in another component is `None` without a
 //!   search. Rebuilt on every wall or rubble change (`FlowCache::labels`).
@@ -38,6 +44,7 @@
 use std::cell::{Cell, RefCell};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
+use std::sync::Arc;
 
 use crate::components::{TileKind, TilePos};
 use crate::map::Map;
@@ -121,7 +128,7 @@ pub fn labels(map: &Map) -> Vec<u32> {
 #[derive(Clone, Debug, Default)]
 pub struct Landmarks {
     /// The tiles the distances were measured on (`same_tiles`).
-    tiles: Vec<TileKind>,
+    tiles: Arc<Vec<TileKind>>,
     pub points: Vec<TilePos>,
     /// `dist[i * LANDMARKS + k]`: tile `i` from landmark `k`, [`FAR`] if
     /// unreached or too far for a u16.
@@ -138,8 +145,14 @@ impl Landmarks {
     /// the four corners and the four edge midpoints (ties the lower index),
     /// each a Dijkstra over the whole map.
     pub fn build(map: &Map) -> Landmarks {
+        Landmarks::build_on(map, Arc::new(map.tiles().to_vec()))
+    }
+
+    /// [`Landmarks::build`] on `tiles` (`map`'s size): a loaded world's
+    /// landmarks measured before a closure (review finding 10).
+    pub fn build_on(map: &Map, tiles: Arc<Vec<TileKind>>) -> Landmarks {
         let (w, h) = (map.w(), map.h());
-        let tiles = map.tiles().to_vec();
+        assert_eq!(tiles.len(), w * h, "landmark tiles of another map");
         let (mx, my) = ((w - 1) as i64, (h - 1) as i64);
         let aims = [(0, 0), (mx, 0), (0, my), (mx, my), (mx / 2, 0), (mx / 2, my), (0, my / 2), (mx, my / 2)];
         let mut points = Vec::with_capacity(LANDMARKS);
@@ -167,8 +180,44 @@ impl Landmarks {
         self.tiles.as_slice() == map.tiles()
     }
 
+    /// The tiles the distances were measured on.
+    pub fn base_tiles(&self) -> &Arc<Vec<TileKind>> {
+        &self.tiles
+    }
+
     pub fn bytes(&self) -> usize {
         self.dist.len() * 2 + self.tiles.len()
+    }
+}
+
+/// Review finding 10: has `map` only closed ways since `base` (every tile's
+/// entry cost the same or higher, a wall where there was none)? Then
+/// landmarks measured on `base` stay admissible and consistent on `map`.
+pub fn only_closed(base: &[TileKind], map: &Map) -> bool {
+    base.len() == map.tiles().len() && base.iter().zip(map.tiles()).all(|(&a, &b)| cost_tenths(b) >= cost_tenths(a))
+}
+
+/// Review finding 10: the tiles a world's landmarks were measured on,
+/// saved (as the map's run-length string) while they differ from the
+/// map's (`World::landmark_base`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct BaseTiles(pub Arc<Vec<TileKind>>);
+
+impl serde::Serialize for BaseTiles {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        s.serialize_str(&crate::map::rle_encode(self.0.iter().map(|&t| crate::map::tile_char(t))))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for BaseTiles {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let text = String::deserialize(d)?;
+        let chars = crate::map::rle_decode(&text).map_err(serde::de::Error::custom)?;
+        let tiles = chars
+            .into_iter()
+            .map(|c| crate::map::tile_of_char(c).ok_or_else(|| serde::de::Error::custom(format!("bad tile {c:?}"))))
+            .collect::<Result<Vec<_>, _>>()?;
+        Ok(BaseTiles(Arc::new(tiles)))
     }
 }
 

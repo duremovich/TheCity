@@ -237,13 +237,17 @@ impl CostQueue {
 /// Scale S3a: also the big-map paths' component labels
 /// (`exec::bigpath::labels`, dropped with the fields on every wall or
 /// rubble change) and landmarks (`exec::bigpath::Landmarks`, dropped only
-/// when a tile changed: `keep_landmarks_if`), each built on first use.
+/// when a tile change opened a way: `keep_landmarks_if`), each built on
+/// first use.
 #[derive(Clone, Debug, Default)]
 pub struct FlowCache {
     fields: BTreeMap<EntityId, (FlowField, u64)>,
     clock: u64,
     labels: OnceLock<Arc<Vec<u32>>>,
     landmarks: OnceLock<Arc<crate::exec::bigpath::Landmarks>>,
+    /// Review finding 10: the tiles the next landmarks are measured on
+    /// when not the map's (a loaded world's `landmark_base`).
+    base: Option<Arc<Vec<crate::components::TileKind>>>,
 }
 
 impl FlowCache {
@@ -265,19 +269,51 @@ impl FlowCache {
         self.labels.get_or_init(|| Arc::new(crate::exec::bigpath::labels(map))).clone()
     }
 
-    /// The big-map landmarks for `map`'s tiles, built on first use after a
-    /// tile changed.
+    /// The big-map landmarks, built on first use after a tile change
+    /// opened a way: on `map`'s tiles, or on the loaded base's.
     pub fn landmarks(&self, map: &Map) -> Arc<crate::exec::bigpath::Landmarks> {
-        self.landmarks.get_or_init(|| Arc::new(crate::exec::bigpath::Landmarks::build(map))).clone()
+        self.landmarks
+            .get_or_init(|| {
+                Arc::new(crate::prof::timed!(
+                    "exec::landmarks",
+                    match &self.base {
+                        Some(t) => crate::exec::bigpath::Landmarks::build_on(map, t.clone()),
+                        None => crate::exec::bigpath::Landmarks::build(map),
+                    }
+                ))
+            })
+            .clone()
     }
 
-    /// After a wall change: keep the landmarks only if they were measured
-    /// on exactly `map`'s tiles (rubble is not a tile change), so they stay
-    /// a pure function of the tiles.
+    /// The tiles the landmarks were (or, loaded, will be) measured on.
+    fn landmark_tiles(&self) -> Option<Arc<Vec<crate::components::TileKind>>> {
+        self.landmarks.get().map(|l| l.base_tiles().clone()).or_else(|| self.base.clone())
+    }
+
+    /// After a wall change: keep the landmarks while the tiles since they
+    /// were measured only closed ways (rubble is not a tile change; review
+    /// finding 10: a closure keeps them admissible), drop them when one
+    /// opened (rebuilt on the tiles of their next use). Either way they are
+    /// a pure function of the tiles they were measured on.
     pub fn keep_landmarks_if(&mut self, map: &Map) {
-        if self.landmarks.get().is_some_and(|l| !l.same_tiles(map)) {
+        let Some(base) = self.landmark_tiles() else { return };
+        if base.as_slice() != map.tiles() && !crate::exec::bigpath::only_closed(&base, map) {
             self.landmarks = OnceLock::new();
+            self.base = None;
         }
+    }
+
+    /// Review finding 10: the landmarks' tiles while they differ from
+    /// `map`'s (what a save carries: `World::landmark_base`).
+    pub fn stale_base(&self, map: &Map) -> Option<Arc<Vec<crate::components::TileKind>>> {
+        self.landmark_tiles().filter(|t| t.as_slice() != map.tiles())
+    }
+
+    /// Review finding 10 (a load): the next landmarks are measured on
+    /// `base` (`None`: the map's tiles).
+    pub fn set_landmark_base(&mut self, base: Option<Arc<Vec<crate::components::TileKind>>>) {
+        self.landmarks = OnceLock::new();
+        self.base = base;
     }
 
     /// The labels' and landmarks' bytes held (the bench's read).

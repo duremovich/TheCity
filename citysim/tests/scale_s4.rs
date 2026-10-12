@@ -87,6 +87,9 @@ fn test_fit_to_map_changes_nothing_on_the_shipped_map() {
     map.apply_to(&mut c);
     let mut fitted = c.clone();
     fitted.fit_to_map(&map);
+    // The flag aside (review finding 4).
+    assert!(fitted.scale.fitted);
+    fitted.scale.fitted = false;
     assert_eq!(format!("{fitted:?}"), format!("{c:?}"));
     assert_eq!(fitted.corps.row_count(), 9);
     assert!(fitted.corps.template.is_empty());
@@ -225,4 +228,128 @@ fn test_scaled_to_s4_keys_scale_up_only() {
     assert_eq!(big.per_capita_count(5), 50);
     assert_eq!(big.copies(), 10);
     assert_eq!(big.lever_ceiling(60), 600);
+}
+
+/// Review finding 3: a roster dealt past 256 rows (a ~60,000 city's: k = 30,
+/// 270 rows) keeps every row's slot: `corp_template` reads the row each
+/// corp copies and the CSV's corp columns don't collide (a `u8` slot wrapped
+/// row 256 onto row 0). Dealt by hand on the shipped map (k = 1 there).
+#[test]
+fn test_roster_past_256_rows_keeps_its_slots() {
+    let mut c = Config::load();
+    let blocks = c.corps.blocks.iter().sum();
+    c.corps.replicate(30, [12, 3, 2, blocks]);
+    assert_eq!(c.corps.row_count(), 270);
+    let mut w = World::new(42, c);
+    let mut seen = std::collections::BTreeSet::new();
+    for &id in w.corp_slice() {
+        let cc = w.comp::<citysim::Corp>(id).expect("a corp");
+        let s = usize::from(cc.slot.expect("a seeded corp has a slot"));
+        assert!(seen.insert(s), "slot {s} taken twice");
+        assert_eq!(cc.name, w.config.corps.names[s], "slot {s} is its own row");
+        assert_eq!(w.corp_template(id), w.config.corps.template_of(s));
+    }
+    assert_eq!(seen.len(), 270);
+    w.run_ticks(citysim::TICKS_PER_DAY);
+    let row = w.stats.history.back().expect("a closed day");
+    assert_eq!(row.corps.len(), 270);
+    let filled = row.corps.iter().filter(|c| c.is_some()).count();
+    let alive =
+        w.corp_slice().iter().filter(|&&id| w.comp::<citysim::Corp>(id).is_some_and(|c| c.slot.is_some())).count();
+    assert_eq!(filled, alive, "one CSV slot per seeded corp");
+}
+
+/// Review finding 4: `fit_to_map` is idempotent. `World::new` fits, and a
+/// world's own config (already fitted, and saved) handed back to
+/// `World::new` (a replay) must not be fitted again: the per-Market keys
+/// divided twice, the roster dealt again (2 copies -> 4 on the 4,000 map).
+#[test]
+fn test_fit_to_map_twice_is_fit_once() {
+    let mut c = Config::load().scaled_to(4_000);
+    c.world.map = "gen:4000".into();
+    let map = MapSource::from_config(&c).load();
+    map.apply_to(&mut c);
+    c.fit_to_map(&map);
+    assert!(c.corps.row_count() > 9, "the 4,000 map deals the roster again");
+    let once = format!("{c:?}");
+    map.apply_to(&mut c);
+    c.fit_to_map(&map);
+    assert_eq!(format!("{c:?}"), once, "a fitted config fits to itself");
+}
+
+/// Review finding 4: `World::replay(seed, world.config, log, end)` from a
+/// generated map's world (its config fitted) runs the same city.
+#[test]
+fn test_replay_from_a_fitted_config_is_the_same_run() {
+    let mut c = Config::load().scaled_to(4_000);
+    c.world.map = "gen:4000".into();
+    let mut w = World::new(42, c);
+    w.run_ticks(3 * citysim::TICKS_PER_HOUR);
+    w.push_command(citysim::PlayerCommand::SetSentenceMult(1.5));
+    w.run_ticks(citysim::TICKS_PER_HOUR);
+    let back = World::replay(42, w.config.clone(), &w.command_log, w.tick);
+    assert_eq!(back.corp_slice().len(), w.corp_slice().len(), "the roster dealt once");
+    assert!(citysim::save::to_ron(&back) == citysim::save::to_ron(&w), "the replay is the run");
+}
+
+/// Seeded buildings of `kind` per owner template: `(template, count)`.
+fn seeded_by_template(w: &World, kind: BuildingKind) -> std::collections::BTreeMap<String, usize> {
+    let mut m = std::collections::BTreeMap::new();
+    for b in w.with::<citysim::Building>() {
+        let Some(bd) = w.comp::<citysim::Building>(b).filter(|bd| bd.kind == kind && !bd.demolished) else { continue };
+        let t =
+            bd.owner.filter(|&o| w.has::<citysim::Corp>(o)).map_or("-".to_string(), |o| w.corp_template(o).to_string());
+        *m.entry(t).or_insert(0) += 1;
+    }
+    m
+}
+
+/// Review finding 7: the role-seeding passes deal one copy per copy of the
+/// roster (the corps `fit_to_map` dealt for the map), not per
+/// `Config::copies` (the population ratio). The shipped map scaled to 6,000
+/// keeps one roster (the map's employers are the 2,000 city's): one Lab per
+/// row, each owned by its own row's corp (it built 3 copies of every Lab,
+/// all owned by the one Zetatech, eating the Lots), one Nutrix Now.
+#[test]
+fn test_seeding_copies_follow_the_roster_on_a_scaled_shipped_map() {
+    let w = World::new(42, Config::load().scaled_to(6_000));
+    assert_eq!(w.corp_slice().len(), 9, "the shipped map deals one roster");
+    let labs = seeded_by_template(&w, BuildingKind::Lab);
+    assert_eq!(labs.get("Zetatech"), Some(&2), "{labs:?}");
+    assert_eq!(labs.get("Arasaka"), Some(&1), "{labs:?}");
+    assert_eq!(labs.get("Militech"), Some(&1), "{labs:?}");
+    let feeds = seeded_by_template(&w, BuildingKind::Feed);
+    assert_eq!(feeds.get("Nutrix"), Some(&1), "{feeds:?}");
+}
+
+/// Review finding 7, the generated map: the roster dealt twice (4,000), so
+/// every copy of a Lab or Feed row's corp holds its own (no copy wraps onto
+/// another's owner, none is skipped).
+#[test]
+fn test_seeding_copies_follow_the_roster_on_a_generated_map() {
+    let mut c = Config::load().scaled_to(4_000);
+    c.world.map = "gen:4000".into();
+    let w = World::new(42, c);
+    let k = w.corps_of_template("Zetatech").len();
+    assert_eq!(k, 2);
+    let mut per_corp = std::collections::BTreeMap::new();
+    for b in w.with::<citysim::Building>() {
+        let Some(bd) = w.comp::<citysim::Building>(b).filter(|bd| bd.kind == BuildingKind::Lab) else { continue };
+        *per_corp.entry(bd.owner.expect("a corp's Lab")).or_insert(0) += 1;
+    }
+    for (template, each) in [("Zetatech", 2), ("Arasaka", 1), ("Militech", 1)] {
+        for corp in w.corps_of_template(template) {
+            assert_eq!(per_corp.get(&corp).copied().unwrap_or(0), each, "{template} copy {corp:?}'s Labs");
+        }
+    }
+    for corp in w.corps_of_template("Nutrix") {
+        let feeds = w
+            .with::<citysim::Building>()
+            .into_iter()
+            .filter(|&b| {
+                w.comp::<citysim::Building>(b).is_some_and(|bd| bd.kind == BuildingKind::Feed && bd.owner == Some(corp))
+            })
+            .count();
+        assert_eq!(feeds, 1, "each Nutrix copy runs its Feed");
+    }
 }

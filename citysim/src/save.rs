@@ -55,7 +55,14 @@ use crate::world::World;
 /// Homes, the district aggregates, the donors, the counters), `[ambient]` in
 /// the saved config (both skipped when empty or default: a world without
 /// Ambient flats saves as before), `DayRow.ambient`, `EventKind::Materialised`.
-pub const SAVE_VERSION: u8 = 14;
+/// 15: the Scale review fixes: `[scale] fitted` in the saved config (a
+/// fitted config is not fitted again; an older save's reads `false`, so a
+/// replay from it fits once more, as before), `Corp.slot` a `u16` (RON
+/// writes numbers: an older save reads as it was), `World::landmark_base`
+/// (the big-map landmarks' tiles while a closure left them older than the
+/// map's; skipped when `None`, always on the 2,000 city), and `[transit]
+/// staff_per_line` uncapped when missing (an older config keeps its crews).
+pub const SAVE_VERSION: u8 = 15;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
@@ -67,6 +74,9 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     // save carries (read before any Job): none until that config is read.
     crate::components::TradeId::set_keys(Vec::new());
     let mut world: World = ron::from_str(text)?;
+    // Review finding 10: the landmarks the saved world searched with.
+    let base = world.landmark_base.as_ref().map(|b| b.0.clone()).filter(|t| t.len() == world.map.tiles().len());
+    world.flow_fields.set_landmark_base(base);
     world.resize_stores();
     world.rebuild_indices();
     // M12 D1: the district grid and adjacency are not saved.

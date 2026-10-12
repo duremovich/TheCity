@@ -1131,7 +1131,7 @@ pub fn seed(world: &mut World) {
         let treasury = cfg.treasury_initial[i];
         let id = spawn_corp(world, cfg.names[i].clone(), niches, treasury, None);
         if let Some(c) = world.comp_mut::<Corp>(id) {
-            c.slot = Some(i as u8);
+            c.slot = Some(u16::try_from(i).expect("[corps] at most 65,536 rows"));
             c.treasury_ref = treasury.max(1);
             if cfg.megacorp.get(i).copied().unwrap_or(false) {
                 c.parent = Some(crate::components::OUTSIDE_PARENT_BASE + i as u32);

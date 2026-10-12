@@ -163,7 +163,7 @@ byte-identical (CSV without `ticks_per_sec`, and events, seeds 42-47 x 120, chec
 | `law::reconcile_guards`, `districts::reconcile_sanitation` | 5 moves a day (code) | `Config::per_capita_count(5)` | 5 | 50 |
 | `law_brain::REPORT_LOG_CAP`, `REPORT_PLACES_CAP` | 128, 512 rings the crackdown pressure reads over 7 days (code) | `per_capita_count` | 128, 512 | 1,280, 5,120 |
 | `PlayerCommand` Set{GuardCount,Sanitation,ImmigrationPerWeek} ceilings | 60, 60, 30 | `Config::lever_ceiling` (x f) | as before | 600, 600, 300 |
-| seeded Garages/Clinics, Labs, corp Feeds, Fixers, Unplugged chapels | one set | `Config::copies()` = round(f) sets (below) | 1 | 10 |
+| seeded Garages/Clinics, Labs, corp Feeds, Fixers, Unplugged chapels | one set | `World::seed_copies()`: the roster's copies (`fit_to_map`'s k, from the map's employers; was `Config::copies()`, the population ratio, until the review fixes) | 1 | 10 |
 
 Verified per holder and left absolute: `[law] patrol_beat_homes` (a loop walkable in a shift), `[data] store_cap`
 (per store), `[buildings] market.stock_cap` (per Market), `[corps] hoard_heat`, `outside_treasury_initial`,

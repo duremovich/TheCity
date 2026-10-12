@@ -516,7 +516,7 @@ fn corp_in_slot(world: &World, slot: u8) -> Result<citysim::EntityId, String> {
     world
         .corps()
         .into_iter()
-        .find(|&c| world.comp::<citysim::Corp>(c).is_some_and(|cc| cc.slot == Some(slot)))
+        .find(|&c| world.comp::<citysim::Corp>(c).is_some_and(|cc| cc.slot == Some(u16::from(slot))))
         .ok_or_else(|| format!("no corp in slot {slot}"))
 }
 

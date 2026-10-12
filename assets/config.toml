@@ -2104,7 +2104,7 @@ scrap_coins = 3                      # phase 3a (plan key): a find paid from the
 till_initial = 10000
 # Jobs v2 J16 (P5a; read only with [economy2] wages and no_safety_net on): the civic budget. Each midnight
 # target = civic_share x the mean of the last receipts_days days' receipts (tax, fines, customs, property, the El's
-# fares: left out, the fares funded the posts only through the hoard term, and the surplus credit cut Sanitation 50 -> 1-25)
+# fares net of its power and crews' wages, transit::net_fares: left out, the fares funded the posts only through the hoard term, and the surplus credit cut Sanitation 50 -> 1-25)
 # + max(0, Treasury - band hi) / payout_days, spent only above band lo; allocated in order to the police
 # ([levers] guard_count up to police_per_1000 x population / 1,000) and Sanitation (sanitation_count up to
 # sanitation_max), each x its wage. A headcount drops at most civic_pace a day. Placeholders (spec 5).

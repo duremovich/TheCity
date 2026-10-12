@@ -527,6 +527,7 @@ pub fn arrival_near(world: &mut World, work: TilePos) -> Option<(EntityId, u32)>
     let adults = materialise(world, hi);
     let &head = adults.first()?;
     world.ambient.today.arrivals += 1;
+    immigrated(world, &adults);
     Some((head, adults.len() as u32))
 }
 
@@ -541,7 +542,33 @@ pub fn arrival_any(world: &mut World, ordinal: u64) -> Option<(EntityId, u32)> {
     let adults = materialise(world, hi);
     let &head = adults.first()?;
     world.ambient.today.arrivals += 1;
+    immigrated(world, &adults);
     Some((head, adults.len() as u32))
+}
+
+/// Review finding 6: an Ambient household routed in by immigration is
+/// immigration, as an arrival at the map edge (`demography::arrive`): each
+/// adult counts in the day's `immigrants` and gets an `Immigration` event in
+/// `arrive`'s words (the `Materialised` event stays: the tier's own trace,
+/// which the labour pool and a story touch fire too, and those are no
+/// immigrants).
+fn immigrated(world: &mut World, adults: &[EntityId]) {
+    let Some(&head) = adults.first() else { return };
+    let home = world.comp::<Household>(head).and_then(|h| h.home);
+    let where_ = match home {
+        Some(h) => format!("housed in Block#{}", h.index),
+        None => "homeless".to_string(),
+    };
+    let head_name = world.name_of(head);
+    for (i, &id) in adults.iter().enumerate() {
+        world.stats.current.immigrants += 1;
+        let text = if i == 0 {
+            format!("{head_name} arrived, {where_}")
+        } else {
+            format!("{} arrived with {head_name}, {where_}", world.name_of(id))
+        };
+        world.push_event(EventKind::Immigration, &[id], text);
+    }
 }
 
 /// The story and player hook (M18's view, a story reaching an unsimulated

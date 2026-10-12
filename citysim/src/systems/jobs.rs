@@ -121,8 +121,8 @@ const SEED_ORDER: [BuildingKind; 7] = [
 ];
 
 /// The seeded corps by row (`Corp.slot`), ascending.
-fn corps_by_row(world: &World) -> Vec<(u8, EntityId)> {
-    let mut v: Vec<(u8, EntityId)> = world
+fn corps_by_row(world: &World) -> Vec<(u16, EntityId)> {
+    let mut v: Vec<(u16, EntityId)> = world
         .corps()
         .into_iter()
         .filter_map(|c| world.comp::<Corp>(c).and_then(|cc| cc.slot).map(|s| (s, c)))

@@ -262,7 +262,7 @@ fn is_regular(world: &World, id: EntityId, slack: Tick) -> bool {
 }
 
 /// C9: the districts that get a seeded Fixer, in order, by role (Scale S4:
-/// Mid East on the shipped map), each dealt `Config::copies` times.
+/// Mid East on the shipped map), each dealt `World::seed_copies` times.
 pub const SEEDED_FIXERS: [crate::systems::districts::Seat; 1] =
     [crate::systems::districts::Seat::new(crate::components::Zone::Mid, 0.75)];
 
@@ -279,7 +279,7 @@ pub const SEEDED_FIXERS: [crate::systems::districts::Seat; 1] =
 /// then the lower id). No coin is minted.
 pub fn seed_fixers(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let copies = world.config.copies();
+    let copies = world.seed_copies();
     for (copy, seat) in (0..copies).flat_map(|j| SEEDED_FIXERS.into_iter().map(move |s| (j, s))) {
         let Some(d) = crate::systems::districts::seat_district(world, seat, copy, copies).map(|d| d.index()) else {
             log(world, 0, format!("no {:?} district: Fixer not seeded", seat.zone));

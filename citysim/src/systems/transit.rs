@@ -1335,10 +1335,11 @@ pub fn run(world: &mut World) {
 /// a day's power, over a Sanitation post's wage (`treasury::sweeper_wage`),
 /// capped at `[transit] staff_per_line` a line open. Uncapped, the fares
 /// paid ~250 crews on seed 42 (~14 % of jobs, a jobs program hiding the
-/// Treasury's hoard); the fares past the cap are the Treasury's income like
-/// any other, counted in the civic receipts and returned by the surplus
-/// credit (`treasury::daily`). Station posts (clerks, platform guards) wait
-/// for station buildings (the Interiors milestone, decision 5).
+/// Treasury's hoard); the fares past the power and the crews' wages are the
+/// Treasury's income like any other, counted in the civic receipts
+/// (`net_fares`) and returned by the surplus credit (`treasury::daily`).
+/// Station posts (clerks, platform guards) wait for station buildings (the
+/// Interiors milestone, decision 5).
 pub fn staff_target(world: &World) -> u16 {
     let days = world.config.treasury.receipts_days.max(1) as usize;
     let rows: Vec<i64> = world.stats.history.iter().rev().take(days).map(|r| r.transit.fares).collect();
@@ -1351,6 +1352,17 @@ pub fn staff_target(world: &World) -> u16 {
     let paid = (net.max(0)) / crate::systems::treasury::sweeper_wage(world);
     let cap = open * i64::from(world.config.transit.staff_per_line);
     u16::try_from(paid.min(cap)).unwrap_or(u16::MAX)
+}
+
+/// Review finding 2: a day's fares left after the El paid its way: the
+/// day's power (`transit_power`) and its crews' wages (`el_staff` x
+/// `treasury::sweeper_wage`, the post `staff_target` funds), at least 0.
+/// The civic receipts count this, not the gross (the gross paid the crews
+/// and then the police and sweepers again).
+pub fn net_fares(world: &World, row: &crate::stats::DayRow) -> i64 {
+    let t = &row.transit;
+    let crews = i64::from(t.el_staff) * crate::systems::treasury::sweeper_wage(world);
+    (t.fares - t.transit_power - crews).max(0)
 }
 
 /// The network as text (stops, lines, a sample of rides): the

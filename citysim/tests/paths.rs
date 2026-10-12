@@ -227,9 +227,11 @@ fn test_full_walk_on_big_paths_arrives() {
     assert!(walks.len() > 200 && arrived * 10 > walks.len() * 8, "{arrived} of {} walkers arrived", walks.len());
 }
 
-/// The landmarks are a pure function of the tiles: rubble (not a tile
-/// change) keeps them; a wall going up rebuilds them on the new tiles, so a
-/// loaded world searches with the landmarks the saved one had.
+/// The landmarks are a pure function of the tiles they were measured on:
+/// rubble (not a tile change) keeps them; a wall going up (a closure) keeps
+/// them too (review finding 10: still admissible), the world noting their
+/// tiles for a save (`landmark_base`); a wall coming down (an opening)
+/// rebuilds them on the new tiles.
 #[test]
 fn test_landmarks_follow_the_tiles() {
     let mut cfg = Config::load();
@@ -245,11 +247,50 @@ fn test_landmarks_follow_the_tiles() {
     w.map.blocked.insert(roads[0]);
     w.invalidate_flow_fields();
     assert!(std::sync::Arc::ptr_eq(&a, &w.flow_fields.landmarks(&w.map)), "rubble keeps them");
+    assert!(w.landmark_base.is_none());
     w.map.set_tile(roads[1], TileKind::Wall);
     w.invalidate_flow_fields();
     let b = w.flow_fields.landmarks(&w.map);
-    assert!(!std::sync::Arc::ptr_eq(&a, &b) && b.same_tiles(&w.map), "a wall rebuilds them");
+    assert!(std::sync::Arc::ptr_eq(&a, &b) && !b.same_tiles(&w.map), "a wall going up keeps them");
+    assert!(w.landmark_base.as_ref().is_some_and(|t| t.0 == *a.base_tiles()), "noted for a save");
     assert!(w.big_path(roads[0], roads[1]).is_none(), "rubble and wall ends are unreachable");
+    // A wall coming down: rebuilt on the new tiles, nothing to save.
+    let wall = (0..w.map.h() as u16)
+        .flat_map(|y| (0..w.map.w() as u16).map(move |x| TilePos::new(x, y)))
+        .find(|&t| t != roads[1] && w.map.tile_at(t) == TileKind::Wall)
+        .expect("a wall");
+    w.map.set_tile(wall, TileKind::Ground);
+    w.invalidate_flow_fields();
+    let c = w.flow_fields.landmarks(&w.map);
+    assert!(!std::sync::Arc::ptr_eq(&a, &c) && c.same_tiles(&w.map), "a wall coming down rebuilds them");
+    assert!(w.landmark_base.is_none());
+}
+
+/// Review finding 10: the landmarks kept across a closure (a building going
+/// up on a Lot) are the ones a loaded world searches with, so a save after
+/// the closure resumes byte for byte (the paths' tie-breaks follow the
+/// heuristic). Big paths forced on the 2k map; Full walkers so the paths run.
+#[test]
+fn test_save_after_a_closure_resumes_byte_for_byte() {
+    let mut cfg = Config::load();
+    cfg.exec.flow_field_max_tiles = 0;
+    cfg.lod.force = Some(citysim::Lod::Full);
+    let mut w = World::new(42, cfg);
+    w.run_ticks(120);
+    let before = w.flow_fields.landmarks(&w.map);
+    let lot = citysim::systems::founding::vacant_lots(&w).into_iter().next().expect("a vacant Lot");
+    citysim::systems::founding::build_on_lot(&mut w, lot, citysim::BuildingKind::Bar, None).expect("built");
+    assert!(std::sync::Arc::ptr_eq(&before, &w.flow_fields.landmarks(&w.map)), "the closure kept the landmarks");
+    assert!(w.landmark_base.is_some(), "and the world notes their tiles");
+    w.run_ticks(30);
+    let text = citysim::save::to_ron(&w);
+    let mut back = citysim::save::from_ron(&text).expect("load");
+    assert_eq!(citysim::save::to_ron(&back), text);
+    w.run_ticks(240);
+    back.run_ticks(240);
+    assert!(citysim::save::to_ron(&back) == citysim::save::to_ron(&w), "the load walks on byte for byte");
+    let (a, b) = (w.flow_fields.landmarks(&w.map), back.flow_fields.landmarks(&back.map));
+    assert!(a.base_tiles() == b.base_tiles() && !a.same_tiles(&w.map), "the same stale landmarks");
 }
 
 /// The El's per-tile shortlist (`Net::near`) is the brute-force scan's: the

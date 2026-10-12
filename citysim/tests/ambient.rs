@@ -306,11 +306,42 @@ fn test_immigration_draws_from_ambient_flats_first() {
     w.run_ticks(7 * TICKS_PER_DAY + 1);
     let pull: u32 =
         w.stats.history.iter().map(|r| r.jobs.migrants_pull).sum::<u32>() + w.stats.current.jobs.migrants_pull;
-    let edge: u32 = w.stats.history.iter().map(|r| r.immigrants).sum::<u32>() + w.stats.current.immigrants;
+    // Review finding 6: `immigrants` counts the Ambient arrivals too; an edge
+    // arrival is an Immigration event for someone no flat materialised.
+    let edge = w
+        .events
+        .iter()
+        .filter(|e| e.kind == citysim::EventKind::Immigration)
+        .filter(|e| e.actors.first().is_some_and(|id| w.ambient.materialised.binary_search(id).is_err()))
+        .count();
     let arrivals = w.ambient.today.arrivals;
     println!("pull arrivals {pull}, Ambient households {arrivals}, edge immigrants {edge}");
     assert!(arrivals > 0, "the week's pull brought no Ambient household");
     assert_eq!(edge, 0, "an arrival walked in at the edge with Ambient flats left");
     let materialised = w.events.iter().filter(|e| e.kind == citysim::EventKind::Materialised).count();
     assert!(materialised as u32 >= arrivals);
+}
+
+/// Review finding 6: an Ambient household routed in by immigration (the
+/// week's pull, an offer) is immigration: every adult counts in the day's
+/// `immigrants` and gets an `Immigration` event (beside its `Materialised`).
+/// A labour-pool hire is not (a resident of the city's flats taking a job).
+#[test]
+fn test_ambient_arrivals_count_as_immigrants() {
+    let mut w = ambient_world(42, 4.0);
+    w.econ.outside_wage_pin = Some(0.1);
+    w.run_ticks(7 * TICKS_PER_DAY + 1);
+    let pull: u32 =
+        w.stats.history.iter().map(|r| r.jobs.migrants_pull).sum::<u32>() + w.stats.current.jobs.migrants_pull;
+    let counted: u32 = w.stats.history.iter().map(|r| r.immigrants).sum::<u32>() + w.stats.current.immigrants;
+    assert!(pull > 0, "the week's pull brought nobody");
+    let arrived: Vec<EntityId> = w
+        .events
+        .iter()
+        .filter(|e| e.kind == citysim::EventKind::Immigration)
+        .filter_map(|e| e.actors.first().copied())
+        .filter(|id| w.ambient.materialised.binary_search(id).is_ok())
+        .collect();
+    assert_eq!(arrived.len() as u32, pull, "one Immigration event per Ambient arrival");
+    assert!(counted >= pull, "the day's immigrants count the Ambient arrivals ({counted} < {pull})");
 }

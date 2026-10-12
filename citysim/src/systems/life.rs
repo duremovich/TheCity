@@ -735,6 +735,12 @@ pub fn relocate(world: &mut World) {
 /// `rehouse_coins_mult` deposit), saving `commute_margin_ticks`. Off, the
 /// L1 rule in tiles (`commute_cap_tiles`, `bed_margin_tiles`).
 pub fn relocate_up_to(world: &mut World, limit: usize) {
+    relocate_up_to_with(world, limit, true);
+}
+
+/// [`relocate_up_to`]; `lazy` false fills every Home's measure to a work
+/// tile before the pick's filters (the pre-review walk, for the tests).
+fn relocate_up_to_with(world: &mut World, limit: usize, lazy: bool) {
     let fix = crate::systems::fixes::relocate_fix(world);
     // The measure: travel ticks with the fix, the L1 tiles without.
     let cost = |w: &World, a: TilePos, b: TilePos| -> u64 {
@@ -829,29 +835,41 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
         let evicted_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).map(|(o, _)| o);
         // Class pay: a graded post holder or an exec keeps its tier.
         let min_tier = crate::systems::classpay::min_home_tier(world, a, home);
-        memo.fill(world, work, &cost);
-        if let Some(sw) = spouse_work {
-            memo.fill(world, sw, &cost);
+        if !lazy {
+            memo.fill(world, work, &cost);
+            if let Some(sw) = spouse_work {
+                memo.fill(world, sw, &cost);
+            }
         }
-        let to_work = memo.row(work);
-        let to_spouse = spouse_work.map(|sw| memo.row(sw));
-        let pick = crate::prof::timed!(
-            "reloc::pick",
-            homes
-                .iter()
-                .enumerate()
-                .filter(|&(_, &(h, _, cap))| {
-                    h != home
-                        && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
-                        && world.residents_of(h).len() + need <= cap
-                        && purse >= mult * crate::systems::ownership::rent_for(world, h)
-                        && evicted_by.is_none_or(|o| o != world.owner_of(h))
-                })
-                .map(|(i, &(h, _, _))| (to_work[i], to_spouse.map_or(0, |r| r[i]), h))
-                .filter(|&(dd, sp, _)| dd + sp + margin <= d_pair && (!fix || dd <= cap))
-                .map(|(dd, sp, h)| (dd + sp, h))
-                .min()
-        );
+        // Review finding 9: the room, purse, tier and evictor filters first;
+        // a Home's measure only for the Homes they leave (memoised by work
+        // tile and Home), the work leg before the spouse's. The same pick:
+        // the filters and the minimum are the eager walk's.
+        let pick = crate::prof::timed!("reloc::pick", {
+            let mut best: Option<(u64, EntityId)> = None;
+            for (i, &(h, _, room)) in homes.iter().enumerate() {
+                let open = h != home
+                    && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
+                    && world.residents_of(h).len() + need <= room
+                    && purse >= mult * crate::systems::ownership::rent_for(world, h)
+                    && evicted_by.is_none_or(|o| o != world.owner_of(h));
+                if !open {
+                    continue;
+                }
+                let dd = memo.cost(world, work, i, &cost);
+                if (fix && dd > cap) || dd + margin > d_pair {
+                    continue;
+                }
+                let sp = spouse_work.map_or(0, |sw| memo.cost(world, sw, i, &cost));
+                if dd + sp + margin > d_pair {
+                    continue;
+                }
+                if best.is_none_or(|b| (dd + sp, h) < b) {
+                    best = Some((dd + sp, h));
+                }
+            }
+            best
+        });
         // Hunger fix item 8 (P5g): no Home with room near work (the Farms'
         // neighbourhoods are full: 282 beds within 40 tiles of the 12 Farms
         // for 504 farmers on the flipped seed 42): trade Homes with a single
@@ -862,7 +880,9 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
             Some(p) => Some(p),
             None if fix && spouse.is_none() && kids.is_empty() => {
                 let mover = Mover { purse, evicted_by, min_tier };
-                let near = NearHomes { homes: &homes, to_work, order: memo.order(work) };
+                // The trade walks the Homes nearest first: the whole row.
+                memo.fill(world, work, &cost);
+                let near = NearHomes { homes: &homes, to_work: memo.row(work), order: memo.order(work) };
                 if let Some((_, to, r)) =
                     crate::prof::timed!("reloc::swap", swap_partner(world, a, home, near, cap, d, margin, mover))
                 {
@@ -918,24 +938,48 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
 
 /// Scale S1: per work tile, the measure from each Home door of a
 /// relocation pass's list to it (`rows[tile].0[i]` for `doors[i]`) and the
-/// list's indices nearest first (ties in list order), filled once a tile.
+/// list's indices nearest first (ties in list order). Review finding 9: a
+/// row fills lazily, a Home at a time ([`DoorCosts::cost`]); `fill`
+/// completes it and sorts the order (the trade's walk).
 struct DoorCosts {
     doors: Vec<TilePos>,
+    /// `UNKNOWN` until measured.
     rows: std::collections::BTreeMap<TilePos, (Vec<u64>, Vec<u32>)>,
 }
+
+/// A [`DoorCosts`] cell not measured yet (a real measure of `u64::MAX` is
+/// measured again on each read: the same answer).
+const UNKNOWN: u64 = u64::MAX;
 
 impl DoorCosts {
     fn new(doors: Vec<TilePos>) -> DoorCosts {
         DoorCosts { doors, rows: std::collections::BTreeMap::new() }
     }
 
-    fn fill(&mut self, world: &World, to: TilePos, cost: &impl Fn(&World, TilePos, TilePos) -> u64) {
-        if !self.rows.contains_key(&to) {
-            let row: Vec<u64> = self.doors.iter().map(|&d| cost(world, d, to)).collect();
-            let mut order: Vec<u32> = (0..row.len() as u32).collect();
-            order.sort_unstable_by_key(|&i| (row[i as usize], i));
-            self.rows.insert(to, (row, order));
+    /// The measure from Home `i`'s door to `to`, memoised.
+    fn cost(&mut self, world: &World, to: TilePos, i: usize, cost: &impl Fn(&World, TilePos, TilePos) -> u64) -> u64 {
+        let n = self.doors.len();
+        let row = &mut self.rows.entry(to).or_insert_with(|| (vec![UNKNOWN; n], Vec::new())).0;
+        if row[i] == UNKNOWN {
+            row[i] = cost(world, self.doors[i], to);
         }
+        row[i]
+    }
+
+    /// Every Home's measure to `to` and the order, nearest first.
+    fn fill(&mut self, world: &World, to: TilePos, cost: &impl Fn(&World, TilePos, TilePos) -> u64) {
+        let n = self.doors.len();
+        let (row, order) = self.rows.entry(to).or_insert_with(|| (vec![UNKNOWN; n], Vec::new()));
+        if !order.is_empty() || n == 0 {
+            return;
+        }
+        for (i, c) in row.iter_mut().enumerate() {
+            if *c == UNKNOWN {
+                *c = cost(world, self.doors[i], to);
+            }
+        }
+        *order = (0..n as u32).collect();
+        order.sort_unstable_by_key(|&i| (row[i as usize], i));
     }
 
     /// The row `fill` made for `to` (empty if none).
@@ -1285,5 +1329,67 @@ pub fn dole_in_place(world: &mut World) {
         .collect();
     for a in due {
         crate::systems::economy::collect_dole(world, a);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::time::TICKS_PER_DAY;
+
+    /// Review finding 9: the lazy measure (the filters first, a Home's
+    /// commute only for the Homes they leave) moves exactly whom the eager
+    /// walk moved (every Home's commute to each work tile first): a city on
+    /// day 5 with the move threshold cut to a third (more movers, the
+    /// couples' two legs and the trades), byte for byte after the pass. The
+    /// shipped city and the generated 4,000 city.
+    #[test]
+    fn test_lazy_relocation_matches_the_eager_walk() {
+        for map in ["", "gen:4000"] {
+            let mut c = crate::config::Config::load();
+            if !map.is_empty() {
+                c = c.scaled_to(4_000);
+                c.world.map = map.into();
+            }
+            let mut w = World::new(42, c);
+            w.run_ticks(5 * TICKS_PER_DAY + 3);
+            w.config.life.commute_move_ticks /= 3;
+            let housed = |x: &World| x.events.iter().filter(|e| e.kind == EventKind::Housed).count();
+            let before = housed(&w);
+            let (mut a, mut b) = (w.clone(), w);
+            relocate_up_to_with(&mut a, usize::MAX, true);
+            relocate_up_to_with(&mut b, usize::MAX, false);
+            let moved = housed(&a) - before;
+            println!("{map:?}: {moved} Housed events");
+            assert!(moved >= 10, "the test moves people ({map:?}: {moved})");
+            assert!(crate::save::to_ron(&a) == crate::save::to_ron(&b), "lazy == eager on {map:?}");
+        }
+    }
+
+    /// Review finding 9, the measurement: the generated 20,000 city on day
+    /// `CITYSIM_RELOC_DAYS` (default 5), one night's relocation pass (its
+    /// daily limit) eager and lazy on clones of the same world, three times
+    /// each: wall time and the same answer. Prints.
+    #[test]
+    #[ignore]
+    fn measure_relocation_lazy_vs_eager() {
+        let days: u64 = std::env::var("CITYSIM_RELOC_DAYS").ok().and_then(|v| v.parse().ok()).unwrap_or(5);
+        let mut c = crate::config::Config::load().scaled_to(20_000);
+        c.world.map = "gen:20000".into();
+        let mut w = World::new(42, c);
+        w.run_ticks(days * TICKS_PER_DAY + 3);
+        let pop = w.citizens().len() as f32;
+        let limit = (w.config.life.relocate_per_1000 * pop / 1000.0).round().max(w.config.life.relocate_per_day as f32)
+            as usize;
+        let mut out = Vec::new();
+        for lazy in [false, true, false, true, false, true] {
+            let mut x = w.clone();
+            let t = std::time::Instant::now();
+            relocate_up_to_with(&mut x, limit, lazy);
+            let ms = t.elapsed().as_secs_f64() * 1e3;
+            println!("relocation {} day {days} limit {limit}: {ms:.1} ms", if lazy { "lazy " } else { "eager" });
+            out.push(crate::save::to_ron(&x));
+        }
+        assert!(out.windows(2).all(|p| p[0] == p[1]), "lazy == eager");
     }
 }

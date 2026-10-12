@@ -207,6 +207,12 @@ impl TryFrom<MapRepr> for Map {
     }
 }
 
+/// The tile kind of a map-file char (review finding 10: the saved landmark
+/// tiles), `None` for no tile.
+pub fn tile_of_char(ch: char) -> Option<TileKind> {
+    try_tile(ch)
+}
+
 fn try_tile(ch: char) -> Option<TileKind> {
     Some(match ch {
         '.' => TileKind::Ground,

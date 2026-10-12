@@ -2418,7 +2418,7 @@ fn garage_rent(world: &mut World) {
 /// Clinic in the Spire (the Tech corp's) and back-alley docs in Sump West
 /// and Mid East (agents', as Sump Central's Garage).
 /// Scale S4: the rows by role (`districts::Seat`, the shipped names on the
-/// shipped map), dealt `Config::copies` times (copy `j`'s corp rows go to
+/// shipped map), dealt `World::seed_copies` times (copy `j`'s corp rows go to
 /// the `j`-th Tech corp, wrapped).
 /// Returns the Lots built, in row order.
 pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
@@ -2440,7 +2440,7 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
         (Seat::new(Zone::Sump, 0.0), false, BuildingKind::Clinic),
         (Seat::new(Zone::Mid, 0.75), false, BuildingKind::Clinic),
     ];
-    let copies = world.config.copies();
+    let copies = world.seed_copies();
     for copy in 0..copies {
         let tech = if techs.is_empty() { None } else { Some(techs[copy % techs.len()]) };
         for &(seat, corp_owned, kind) in &rows {

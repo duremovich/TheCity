@@ -1377,7 +1377,7 @@ pub struct Corp {
     pub last_wronged: Option<(EntityId, Tick, crate::contract::Wrong)>,
     /// D38: the seeding row (CSV columns); spinoffs and incorporations `None`.
     #[serde(default)]
-    pub slot: Option<u8>,
+    pub slot: Option<u16>,
     /// The `cash` denominator: `treasury_initial`, or the treasury at founding.
     #[serde(default)]
     pub treasury_ref: i64,

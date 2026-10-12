@@ -645,6 +645,12 @@ pub struct World {
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
     #[serde(skip)]
     pub flow_fields: FlowCache,
+    /// Review finding 10: the tiles the big-map landmarks were measured on
+    /// while a closure left them older than the map's (`FlowCache::
+    /// stale_base`), so a load measures the same landmarks. `None` on the
+    /// 2,000 city (flow fields, no landmarks) and whenever they are current.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub landmark_base: Option<crate::exec::bigpath::BaseTiles>,
     /// Where and when the law last saw each suspect (read with
     /// `last_seen()`, written with `set_last_seen` / `remove_last_seen`).
     last_seen: BTreeMap<EntityId, (TilePos, Tick)>,
@@ -1453,6 +1459,7 @@ impl World {
             res_by_building: BTreeMap::new(),
             door_queue: BTreeMap::new(),
             flow_fields: FlowCache::default(),
+            landmark_base: None,
             last_seen: BTreeMap::new(),
             last_seen_by_tick: BTreeSet::new(),
             seen_gen: 0,
@@ -2643,7 +2650,7 @@ impl World {
     /// Scale S4: the seeded corps copying the shipped row `template`, by
     /// row (the first copy first).
     pub fn corps_of_template(&self, template: &str) -> Vec<EntityId> {
-        let mut v: Vec<(u8, EntityId)> = self
+        let mut v: Vec<(u16, EntityId)> = self
             .corp_ids
             .iter()
             .filter_map(|&c| self.comp::<Corp>(c).and_then(|cc| cc.slot).map(|s| (s, c)))
@@ -2651,6 +2658,20 @@ impl World {
             .collect();
         v.sort_unstable();
         v.into_iter().map(|(_, c)| c).collect()
+    }
+
+    /// Review finding 7: how many copies of the opening roster the city
+    /// was dealt (`Config::fit_to_map`'s `k`: the map's employers over the
+    /// reference city's), read from the seeded corps (the most copies of any
+    /// shipped row), at least 1. Every role-seeding pass (the Labs, the
+    /// Feeds, the Garages and Clinics, the Fixers, the Unplugged) deals this
+    /// many copies, so a corp row's copies and its buildings' agree (the
+    /// population ratio, `Config::copies`, built 10 Labs for the one
+    /// Zetatech of the shipped map at 20,000).
+    pub fn seed_copies(&self) -> usize {
+        let c = &self.config.corps;
+        let templates: BTreeSet<&str> = (0..c.names.len()).map(|i| c.template_of(i)).collect();
+        templates.into_iter().map(|t| self.corps_of_template(t).len()).max().unwrap_or(0).max(1)
     }
 
     /// Position of a corp in `corps()`: picks its colour in the app.

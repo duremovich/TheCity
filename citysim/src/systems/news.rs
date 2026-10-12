@@ -37,7 +37,7 @@ pub const CIVIC_WIRE: &str = "Civic Wire";
 /// W41: the opening Feeds, `(name, owner corp by its row's template or the
 /// city, district by role)`: the Civic and Mid West on the shipped map.
 /// Scale S4: the city's Feed is one per city; a corp's is dealt once per
-/// copy of its template (`Config::copies`, "Nutrix 2 Now").
+/// copy of its template (`World::seed_copies`, "Nutrix 2 Now").
 const SEED_FEEDS: [(&str, Option<&str>, Seat); 2] =
     [(CIVIC_WIRE, None, Seat::new(Zone::Civic, 0.0)), ("Nutrix Now", Some("Nutrix"), Seat::new(Zone::Mid, 0.0))];
 
@@ -134,7 +134,7 @@ fn open_feed(world: &mut World, feed: EntityId, name: String) {
 /// three Reporter vacancies (`build_on_lot`). No RNG. A no-op with the news off.
 pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let copies = world.config.copies();
+    let copies = world.seed_copies();
     for (copy, (name, corp_name, seat)) in (0..copies).flat_map(|j| SEED_FEEDS.into_iter().map(move |r| (j, r))) {
         if copy > 0 && corp_name.is_none() {
             continue;

@@ -49,6 +49,8 @@ pub struct CityState {
     /// M16a C39: the Conspiracy sentence multiplier slider.
     pub accessory_mult: f32,
     pub synced: bool,
+    /// Review finding 1: the Apply levers the player moved.
+    pub dirty: LeverDirty,
 }
 
 impl Default for CityState {
@@ -80,8 +82,140 @@ impl Default for CityState {
             news_tax: 0.0,
             accessory_mult: 0.75,
             synced: false,
+            dirty: LeverDirty::default(),
         }
     }
+}
+
+/// The tax slider's range: the range a `SetTaxRate` may set (down to
+/// `-credit_max`, the surplus credit).
+fn tax_range(cfg: &citysim::Config) -> std::ops::RangeInclusive<f32> {
+    let (lo, hi) = citysim::levers::tax_lever_range(cfg);
+    lo..=hi
+}
+
+/// A headcount slider's ceiling: the command's own, per capita
+/// (`Config::lever_ceiling`).
+fn headcount_ceiling(cfg: &citysim::Config, at_2000: u16) -> u16 {
+    cfg.lever_ceiling(at_2000)
+}
+
+/// Which of "Apply levers"' levers the player has moved since the last
+/// apply. A clean lever follows the world (the band moves the tax rate, the
+/// civic budget the headcounts) and Apply leaves it alone.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct LeverDirty {
+    pub tax: bool,
+    pub sentence: bool,
+    pub guards: bool,
+    pub immigration: bool,
+    pub dole: bool,
+    pub law_pin: bool,
+    pub city_rent: bool,
+    pub rent_cap: bool,
+    pub evictions: bool,
+    pub sanitation: bool,
+    pub riot: bool,
+}
+
+/// Copy every clean lever from the world.
+fn sync_levers(c: &mut CityState, l: &citysim::Levers, law_pin: Option<citysim::Posture>) {
+    let d = c.dirty;
+    if !d.tax {
+        c.tax_rate = l.tax_rate;
+    }
+    if !d.sentence {
+        c.sentence_mult = l.sentence_mult;
+    }
+    if !d.guards {
+        c.guard_count = l.guard_count;
+    }
+    if !d.immigration {
+        c.immigration_per_week = l.immigration_per_week;
+    }
+    if !d.dole {
+        c.dole_per_day = l.dole_per_day;
+    }
+    if !d.law_pin {
+        c.law_pin = law_pin;
+    }
+    if !d.city_rent {
+        c.city_rent = l.city_rent;
+    }
+    if !d.rent_cap {
+        c.rent_cap_on = l.rent_cap.is_some();
+        if let Some(cap) = l.rent_cap {
+            c.rent_cap = cap;
+        }
+    }
+    if !d.evictions {
+        c.no_city_evictions = l.no_city_evictions;
+    }
+    if !d.sanitation {
+        c.sanitation_count = l.sanitation_count;
+    }
+    if !d.riot {
+        c.riot_response = l.riot_response;
+    }
+}
+
+/// Mark the levers the widgets moved this frame (against `before`).
+fn mark_dirty(c: &mut CityState, before: &CityState) {
+    let d = &mut c.dirty;
+    d.tax |= c.tax_rate != before.tax_rate;
+    d.sentence |= c.sentence_mult != before.sentence_mult;
+    d.guards |= c.guard_count != before.guard_count;
+    d.immigration |= c.immigration_per_week != before.immigration_per_week;
+    d.dole |= c.dole_per_day != before.dole_per_day;
+    d.law_pin |= c.law_pin != before.law_pin;
+    d.city_rent |= c.city_rent != before.city_rent;
+    d.rent_cap |= c.rent_cap_on != before.rent_cap_on || c.rent_cap != before.rent_cap;
+    d.evictions |= c.no_city_evictions != before.no_city_evictions;
+    d.sanitation |= c.sanitation_count != before.sanitation_count;
+    d.riot |= c.riot_response != before.riot_response;
+}
+
+/// "Apply levers": the commands for the levers the player moved (review
+/// finding 1: it compared every slider with the world, so a slider clamped
+/// to its range, or one the band had moved since, sent a command the player
+/// never asked for).
+fn lever_commands(c: &CityState) -> Vec<PlayerCommand> {
+    let d = c.dirty;
+    let mut cmds = Vec::new();
+    if d.tax {
+        cmds.push(PlayerCommand::SetTaxRate(c.tax_rate));
+    }
+    if d.sentence {
+        cmds.push(PlayerCommand::SetSentenceMult(c.sentence_mult));
+    }
+    if d.guards {
+        cmds.push(PlayerCommand::SetGuardCount(c.guard_count));
+    }
+    if d.immigration {
+        cmds.push(PlayerCommand::SetImmigrationPerWeek(c.immigration_per_week));
+    }
+    if d.dole {
+        cmds.push(PlayerCommand::SetDolePerDay(c.dole_per_day));
+    }
+    if d.law_pin {
+        cmds.push(PlayerCommand::SetLawPosture(c.law_pin));
+    }
+    if d.city_rent {
+        cmds.push(PlayerCommand::SetCityRent(c.city_rent));
+    }
+    if d.rent_cap {
+        cmds.push(PlayerCommand::SetRentCap(c.rent_cap_on.then_some(c.rent_cap)));
+    }
+    if d.evictions {
+        cmds.push(PlayerCommand::NoCityEvictions(c.no_city_evictions));
+    }
+    if d.sanitation {
+        cmds.push(PlayerCommand::SetSanitation(c.sanitation_count));
+    }
+    if d.riot {
+        cmds.push(PlayerCommand::SetRiotResponse(c.riot_response));
+    }
+    cmds
 }
 
 fn sum_last_30(world: &World, f: impl Fn(&citysim::DayRow) -> u32) -> u32 {
@@ -119,6 +253,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         ];
         app.city.synced = true;
     }
+    sync_levers(&mut app.city, &world.levers, world.law().and_then(|l| l.pinned));
     egui::ScrollArea::vertical().show(ui, |ui| {
         ui.heading("City");
         // Employed, homeless, jailed and gang are end-of-day snapshots: read
@@ -260,26 +395,34 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         ui.separator();
         ui.strong("Levers");
         let c = &mut app.city;
-        ui.add(egui::Slider::new(&mut c.tax_rate, 0.0..=0.3).text("tax rate"));
-        ui.add(egui::Slider::new(&mut c.sentence_mult, 0.5..=3.0).text("sentence ×"));
-        ui.add(egui::Slider::new(&mut c.guard_count, 0..=60).text("guards"));
-        ui.add(egui::Slider::new(&mut c.immigration_per_week, 0..=30).text("immigrants / week"));
-        ui.add(egui::Slider::new(&mut c.dole_per_day, 0..=10).text("dole / day"));
+        let before = c.clone();
+        // Review finding 1: a slider clamps only the player's edits (a world
+        // value outside its range is shown as it is, not moved and marked).
+        let edits = egui::SliderClamping::Edits;
+        ui.add(egui::Slider::new(&mut c.tax_rate, tax_range(&world.config)).clamping(edits).text("tax rate"));
+        ui.add(egui::Slider::new(&mut c.sentence_mult, 0.5..=3.0).clamping(edits).text("sentence ×"));
+        let guards = 0..=headcount_ceiling(&world.config, 60);
+        ui.add(egui::Slider::new(&mut c.guard_count, guards).clamping(edits).text("guards"));
+        let immigrants = 0..=headcount_ceiling(&world.config, 30);
+        ui.add(egui::Slider::new(&mut c.immigration_per_week, immigrants).clamping(edits).text("immigrants / week"));
+        ui.add(egui::Slider::new(&mut c.dole_per_day, 0..=10).clamping(edits).text("dole / day"));
         // M11 § 8: rent on city Blocks per tier, a cap on every Block, and
         // the city's own evictions.
         ui.horizontal(|ui| {
             ui.label("city rent");
             for (i, tier) in ["Sump", "Mid", "Spire"].iter().enumerate() {
-                ui.add(egui::DragValue::new(&mut c.city_rent[i]).range(0..=20).prefix(format!("{tier} ")));
+                let rent = egui::DragValue::new(&mut c.city_rent[i]).range(0..=20).clamp_existing_to_range(false);
+                ui.add(rent.prefix(format!("{tier} ")));
             }
         });
         ui.horizontal(|ui| {
             ui.checkbox(&mut c.rent_cap_on, "rent cap");
-            ui.add_enabled(c.rent_cap_on, egui::Slider::new(&mut c.rent_cap, 0..=20).suffix("¢"));
+            ui.add_enabled(c.rent_cap_on, egui::Slider::new(&mut c.rent_cap, 0..=20).clamping(edits).suffix("¢"));
         });
         ui.checkbox(&mut c.no_city_evictions, "the city never evicts");
         // M12 D42: Sanitation headcount and the riot response pin.
-        ui.add(egui::Slider::new(&mut c.sanitation_count, 0..=60).text("sanitation"));
+        let sweepers = 0..=headcount_ceiling(&world.config, 60);
+        ui.add(egui::Slider::new(&mut c.sanitation_count, sweepers).clamping(edits).text("sanitation"));
         ui.horizontal(|ui| {
             ui.label("riot response");
             let combo =
@@ -305,42 +448,10 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
                 }
             });
         });
+        mark_dirty(c, &before);
         if ui.button("Apply levers").clicked() {
-            let l = &world.levers;
-            if (c.tax_rate - l.tax_rate).abs() > 1e-4 {
-                app.cmds.push(PlayerCommand::SetTaxRate(c.tax_rate));
-            }
-            if (c.sentence_mult - l.sentence_mult).abs() > 1e-4 {
-                app.cmds.push(PlayerCommand::SetSentenceMult(c.sentence_mult));
-            }
-            if c.guard_count != l.guard_count {
-                app.cmds.push(PlayerCommand::SetGuardCount(c.guard_count));
-            }
-            if c.immigration_per_week != l.immigration_per_week {
-                app.cmds.push(PlayerCommand::SetImmigrationPerWeek(c.immigration_per_week));
-            }
-            if c.dole_per_day != l.dole_per_day {
-                app.cmds.push(PlayerCommand::SetDolePerDay(c.dole_per_day));
-            }
-            if c.law_pin != world.law().and_then(|l| l.pinned) {
-                app.cmds.push(PlayerCommand::SetLawPosture(c.law_pin));
-            }
-            if c.city_rent != l.city_rent {
-                app.cmds.push(PlayerCommand::SetCityRent(c.city_rent));
-            }
-            let cap = c.rent_cap_on.then_some(c.rent_cap);
-            if cap != l.rent_cap {
-                app.cmds.push(PlayerCommand::SetRentCap(cap));
-            }
-            if c.no_city_evictions != l.no_city_evictions {
-                app.cmds.push(PlayerCommand::NoCityEvictions(c.no_city_evictions));
-            }
-            if c.sanitation_count != l.sanitation_count {
-                app.cmds.push(PlayerCommand::SetSanitation(c.sanitation_count));
-            }
-            if c.riot_response != l.riot_response {
-                app.cmds.push(PlayerCommand::SetRiotResponse(c.riot_response));
-            }
+            app.cmds.extend(lever_commands(c));
+            c.dirty = LeverDirty::default();
         }
         ui.horizontal(|ui| {
             ui.add(egui::DragValue::new(&mut c.release_amount).range(1..=3000));
@@ -880,4 +991,45 @@ fn living_section(ui: &mut Ui, world: &World) {
         ui.label(best.map_or("-".to_string(), |e| e.text.clone()));
         ui.end_row();
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Review finding 1: with the surplus credit running (a negative tax
+    /// rate) in a 20,000 city (headcounts past 60), applying only a dole
+    /// change sends only the dole: no SetTaxRate(0.0) killing the credit, no
+    /// SetGuardCount(60) or SetSanitation(60) firing the per-capita staff.
+    #[test]
+    fn test_apply_sends_only_the_changed_lever() {
+        let mut cfg = citysim::Config::load();
+        cfg.treasury.credit_max = 0.25;
+        cfg.world.population = 20_000;
+        let mut l = citysim::Levers::from_config(&cfg);
+        l.tax_rate = -0.12;
+        l.guard_count = 400;
+        l.sanitation_count = 300;
+        l.immigration_per_week = 200;
+        let mut c = CityState::default();
+        sync_levers(&mut c, &l, None);
+        // What drawing the sliders does: egui clamps a value to its range.
+        let t = tax_range(&cfg);
+        c.tax_rate = c.tax_rate.clamp(*t.start(), *t.end());
+        c.guard_count = c.guard_count.min(headcount_ceiling(&cfg, 60));
+        c.sanitation_count = c.sanitation_count.min(headcount_ceiling(&cfg, 60));
+        c.immigration_per_week = c.immigration_per_week.min(headcount_ceiling(&cfg, 30));
+        // The player moves the dole only.
+        let before = c.clone();
+        c.dole_per_day = l.dole_per_day + 2;
+        mark_dirty(&mut c, &before);
+        assert_eq!(lever_commands(&c), vec![PlayerCommand::SetDolePerDay(l.dole_per_day + 2)]);
+        // The ranges hold what the world can hold.
+        assert!(tax_range(&cfg).contains(&-0.25), "the slider reaches the full credit");
+        assert_eq!(headcount_ceiling(&cfg, 60), 600);
+        // A clean lever follows the world; the moved one keeps the player's value.
+        l.tax_rate = -0.2;
+        sync_levers(&mut c, &l, None);
+        assert_eq!((c.tax_rate, c.dole_per_day), (-0.2, l.dole_per_day + 2));
+    }
 }

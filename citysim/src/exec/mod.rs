@@ -1395,6 +1395,13 @@ impl World {
     pub fn invalidate_flow_fields(&mut self) {
         self.flow_fields.clear();
         self.flow_fields.keep_landmarks_if(&self.map);
+        self.note_landmark_base();
+    }
+
+    /// Review finding 10: what a save carries of the landmarks (their tiles
+    /// while a closure left them older than the map's).
+    fn note_landmark_base(&mut self) {
+        self.landmark_base = self.flow_fields.stale_base(&self.map).map(bigpath::BaseTiles);
     }
 
     /// A building went up on a Lot (`rect`): drop the cached fields whose
@@ -1407,5 +1414,6 @@ impl World {
         let sealed = |t: TilePos| rect.contains(t) && self.map.tile_at(t) != crate::components::TileKind::Door;
         self.flow_fields.invalidate_sealed(&tiles, &sealed);
         self.flow_fields.keep_landmarks_if(&self.map);
+        self.note_landmark_base();
     }
 }

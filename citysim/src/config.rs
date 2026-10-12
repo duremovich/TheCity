@@ -300,6 +300,12 @@ pub struct ScaleCfg {
     pub lots: u32,
     /// The reference map's districts (`[districts]` rows).
     pub districts: u32,
+    /// Review finding 4: `fit_to_map` has run on this config (it is
+    /// idempotent: a world's own config, fitted and saved, handed back to
+    /// `World::new` by a replay is not fitted twice). Not a config.toml key;
+    /// written into a save only when set.
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub fitted: bool,
 }
 
 impl Default for ScaleCfg {
@@ -314,6 +320,7 @@ impl Default for ScaleCfg {
             offices: 2,
             lots: 160,
             districts: 8,
+            fitted: false,
         }
     }
 }
@@ -377,7 +384,10 @@ pub struct TransitCfg {
     /// `transit::staff_target` (the fares past the power still bound it
     /// from above: no fares, no crews). A real metro staffs 0.2-0.8 % of
     /// its population; 4 a line on the shipped 3 lines is 12 posts (0.6 %
-    /// of 2,000). Uncapped, the fares paid ~250 crews on seed 42.
+    /// of 2,000). Uncapped, the fares paid ~250 crews on seed 42. Missing
+    /// (an old save's config, from before the cap): `u16::MAX`, uncapped,
+    /// the behaviour it was saved under (review finding 5); the shipped
+    /// config.toml sets 4.
     pub staff_per_line: u16,
     /// A fare dodger's fine when the Precinct is full (`Flow::Fine`).
     pub dodge_fine: i64,
@@ -417,7 +427,7 @@ impl Default for TransitCfg {
             night_to: 300,
             danger_crime: 3.0,
             power_per_line_day: 20,
-            staff_per_line: 4,
+            staff_per_line: u16::MAX,
             dodge_fine: 5,
             lines: Vec::new(),
         }
@@ -5780,7 +5790,7 @@ impl Config {
         self.budget.works_max = (f64::from(self.budget.works_max) * up).round().clamp(0.0, 65535.0) as u16;
         self.street.city_absorb_floor = up_i64(self.street.city_absorb_floor);
         // The opening businesses dealt per resident (the Hotels, the venues
-        // and Fabs, the Missions); the name-keyed rows deal `copies()`.
+        // and Fabs, the Missions); the name-keyed rows deal `World::seed_copies()`.
         self.street.seed_hotels = up_usize(self.street.seed_hotels);
         self.street.seed_derelict_blocks = up_usize(self.street.seed_derelict_blocks);
         let v = &mut self.jobs.seed_venues;
@@ -5805,9 +5815,9 @@ impl Config {
         f64::from(self.world.population) / f64::from(self.scale.population.max(1))
     }
 
-    /// Scale S4: how many copies of a one-per-2,000 seeding row the city
-    /// gets (the Garages and Clinics, the Labs, the corp Feeds, the Fixers,
-    /// the Unplugged): `round(per_capita)`, at least 1.
+    /// Scale S4: `round(per_capita)`, at least 1: the population's count of
+    /// reference cities. The role-seeding passes read the roster's copies
+    /// instead (`World::seed_copies`, review finding 7).
     pub fn copies(&self) -> usize {
         (self.per_capita().round() as usize).max(1)
     }
@@ -5846,10 +5856,13 @@ impl Config {
     ///   sweep thresholds by residents per district; the concurrent riots and
     ///   crackdowns by districts;
     /// - per Lot: the shanty ceiling.
+    ///
+    /// Once per config (`[scale] fitted`): a fitted config fits to itself.
     pub fn fit_to_map(&mut self, map: &crate::map::Map) {
-        if !self.scale.enabled {
+        if !self.scale.enabled || self.scale.fitted {
             return;
         }
+        self.scale.fitted = true;
         let s = self.scale.clone();
         let mut count: std::collections::BTreeMap<BuildingKind, u32> = Default::default();
         for b in &map.buildings {

@@ -158,7 +158,7 @@ pub fn seed_till(world: &mut World) {
 // Jobs v2 P5a (plan J16, J17): the civic budget.
 // ---------------------------------------------------------------------------
 
-/// J16: yesterday's receipts (the El's fares included) into `EconState.receipts` (`stats::run` rolls
+/// J16: yesterday's receipts (the El's fares net of its power and crews included) into `EconState.receipts` (`stats::run` rolls
 /// the row at 23:59; this pass runs at 00:00, so `history.back()` is
 /// yesterday), then the headcounts unless a god pinned them. The first
 /// midnight has no receipts yet and holds the configured headcounts.
@@ -167,12 +167,19 @@ pub fn civic_daily(world: &mut World) {
         return;
     }
     if let Some(row) = world.stats.history.back() {
-        // Every coin the city levies, the El's fares included: the surplus
-        // credit returns the hoard above `hi`, so a post the receipts don't
-        // fund is not funded by the hoard either (left out, the fares paid
-        // the police and the sweepers only through the hoard term, and the
-        // credit cut Sanitation 50 -> 1-25 on seeds 42-47).
-        let r = row.flow_tax + row.jobs.flow_fines + row.econ.flow_customs + row.econ.flow_property + row.transit.fares;
+        // Every coin the city levies, the El's net fares included: the
+        // surplus credit returns the hoard above `hi`, so a post the
+        // receipts don't fund is not funded by the hoard either (left out,
+        // the fares paid the police and the sweepers only through the hoard
+        // term, and the credit cut Sanitation 50 -> 1-25 on seeds 42-47).
+        // Review finding 2: only the fares left after the day's power and
+        // the El crews' wages (`transit::staff_target` spends the fares on
+        // both first; the gross counted those coins twice).
+        let r = row.flow_tax
+            + row.jobs.flow_fines
+            + row.econ.flow_customs
+            + row.econ.flow_property
+            + crate::systems::transit::net_fares(world, row);
         let days = world.config.treasury.receipts_days.max(1) as usize;
         let ring = &mut world.econ.receipts;
         ring.push_back(r);

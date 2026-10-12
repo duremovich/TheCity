@@ -1369,3 +1369,40 @@ fn measure_el_crews() {
         println!("{}", h.join().expect("a seed run"));
     }
 }
+
+/// Review finding 2: the El's fares already pay its power and its crews
+/// (`staff_target`), so only the fares left after both count as civic
+/// receipts (counting the gross paid the crews twice: once as crews, once
+/// as police and sweepers from the same coins).
+#[test]
+fn test_civic_receipts_count_the_fares_left_after_power_and_crews() {
+    let mut w = city_on();
+    w.tick = 3 * TICKS_PER_DAY;
+    let wage = citysim::systems::treasury::sweeper_wage(&w);
+    let power = 3 * w.config.transit.power_per_line_day;
+    let mut row = citysim::DayRow::new(0);
+    row.transit.fares = power + 10 * wage + 500;
+    row.transit.transit_power = power;
+    row.transit.el_staff = 10;
+    w.stats.history.push_back(row);
+    citysim::systems::treasury::civic_daily(&mut w);
+    assert_eq!(w.econ.receipts.back(), Some(&500), "the fares past the power and the crews' wages");
+    // Fares that don't cover the El add nothing (and take nothing).
+    let mut row = citysim::DayRow::new(0);
+    row.transit.fares = power / 2;
+    row.transit.transit_power = power;
+    row.flow_tax = 300;
+    w.stats.history.push_back(row);
+    citysim::systems::treasury::civic_daily(&mut w);
+    assert_eq!(w.econ.receipts.back(), Some(&300));
+}
+
+/// Review finding 5: a config without `staff_per_line` (an old save's, from
+/// before the cap) is uncapped, the behaviour it was saved under; the
+/// shipped config.toml sets the cap (4). As `[treasury] credit_max` did.
+#[test]
+fn test_missing_staff_per_line_is_uncapped() {
+    let cfg: citysim::config::TransitCfg = toml::from_str("enabled = true\nfare = 1\n").expect("a [transit] table");
+    assert_eq!(cfg.staff_per_line, u16::MAX, "an old config keeps its crews");
+    assert_eq!(citysim::Config::load().transit.staff_per_line, 4, "the shipped city caps them");
+}
