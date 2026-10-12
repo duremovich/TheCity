@@ -1432,10 +1432,13 @@ fn beg(world: &mut World, id: EntityId) -> StepResult {
         return StepResult::Failed(FailReason::NoSuchPlace);
     };
     let sociability = world.comp::<crate::components::Personality>(id).map_or(0.5, |p| p.sociability);
+    // Scale S4 perf: the first four citizens by id within 3 tiles, from the
+    // position index (ascending, every entity with a Position near the
+    // tile, Statistical passers included), not a scan of every citizen.
     let passers: Vec<EntityId> = world
-        // scan-ok: per Beg, includes Statistical passers
-        .citizens()
+        .agents_near(tile, 3, None)
         .into_iter()
+        .filter(|&o| world.has::<crate::components::Identity>(o) && !world.has::<crate::components::Corpse>(o))
         .filter(|&o| o != id)
         .filter(|&o| world.comp::<Position>(o).is_some_and(|p| p.tile.manhattan(tile) <= 3))
         .take(4)

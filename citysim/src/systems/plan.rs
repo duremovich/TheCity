@@ -58,16 +58,18 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
         GoalKind::Eat => {
             let home = world.comp::<Household>(id).and_then(|h| h.home);
             let tile = world.comp::<Position>(id)?.tile;
+            world.buildings_by_kind.get(&BuildingKind::Home)?;
+            // Scale S4 perf: read outward from the agent on the building
+            // grid (a building of kind Home is on the Home list unless
+            // demolished), not every Home: the same pick.
             world
-                .buildings_by_kind
-                .get(&BuildingKind::Home)?
-                .iter()
-                .copied()
-                .filter(|&h| Some(h) != home)
-                .filter_map(|h| world.comp::<Building>(h).map(|b| (h, b)))
-                .filter(|(_, b)| b.stock_food > 0 && !b.demolished)
-                .min_by_key(|(h, b)| (b.door.manhattan(tile), h.index))
-                .map(|(h, _)| h)
+                .building_grid()
+                .nearest(tile, 0, |h| {
+                    let b = world.comp::<Building>(h)?;
+                    (Some(h) != home && b.kind == BuildingKind::Home && b.stock_food > 0 && !b.demolished)
+                        .then_some((b.door.manhattan(tile), h.index))
+                })
+                .map(|(_, _, h)| h)
         }
         // Arrest binds the located warrant suspect nearest the guard.
         GoalKind::Arrest => {

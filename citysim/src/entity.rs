@@ -55,6 +55,9 @@ impl World {
         if !self.is_alive(id) {
             return false;
         }
+        if self.has::<crate::components::Building>(id) {
+            self.building_gen += 1;
+        }
         let i = id.index as usize;
         self.unindex_brain(id);
         self.unindex_job(id);

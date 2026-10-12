@@ -636,6 +636,11 @@ pub struct World {
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub plan_stale_drops: u64,
     pub reservations: BTreeMap<EntityId, Vec<Reservation>>,
+    /// Scale S4 perf: per building, every holder of a reservation there
+    /// (`FoodUnits`, `Bed`, `Seat`, `OpenMeals`), ascending; kept by
+    /// `reserve`, `release_all` and `sweep_reservations`, rebuilt on load.
+    #[serde(skip)]
+    pub(crate) res_by_building: BTreeMap<EntityId, BTreeSet<EntityId>>,
     pub door_queue: BTreeMap<TilePos, u8>,
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
     #[serde(skip)]
@@ -661,6 +666,14 @@ pub struct World {
     /// not saved, built on its first query).
     #[serde(skip)]
     pub(crate) pos_index: crate::spatial::PosIndex,
+    /// Scale S4 perf: bumped whenever a Building is inserted or removed (the
+    /// key of `building_grid`; not saved).
+    #[serde(skip)]
+    pub(crate) building_gen: u64,
+    /// Scale S4 perf: every building by door tile (`World::building_grid`),
+    /// with the `building_gen` it was built at (not saved, not cloned).
+    #[serde(skip)]
+    building_memo: Memo<(u64, std::sync::Arc<crate::spatial::BuildingGrid>)>,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -1437,6 +1450,7 @@ impl World {
             plan_queue: BTreeMap::new(),
             plan_stale_drops: 0,
             reservations: BTreeMap::new(),
+            res_by_building: BTreeMap::new(),
             door_queue: BTreeMap::new(),
             flow_fields: FlowCache::default(),
             last_seen: BTreeMap::new(),
@@ -1444,6 +1458,8 @@ impl World {
             seen_gen: 0,
             located_memo: Memo::default(),
             pos_index: Default::default(),
+            building_gen: 0,
+            building_memo: Memo::default(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
@@ -2032,6 +2048,8 @@ impl World {
             self.index_household(id);
         } else if TypeId::of::<T>() == TypeId::of::<Squatter>() {
             self.index_squatter(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Building>() {
+            self.building_gen += 1;
         } else if TypeId::of::<T>() == TypeId::of::<Position>() {
             self.pos_index.mark(id.index);
         }
@@ -2053,6 +2071,8 @@ impl World {
             self.unindex_household(id);
         } else if TypeId::of::<T>() == TypeId::of::<Squatter>() {
             self.unindex_squatter(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Building>() {
+            self.building_gen += 1;
         } else if TypeId::of::<T>() == TypeId::of::<Position>() {
             self.pos_index.mark(id.index);
         }
@@ -2275,6 +2295,23 @@ impl World {
         out
     }
 
+    /// Scale S4 perf: every building by door tile, built on the first query
+    /// after a Building was inserted or removed (`building_gen`).
+    pub fn building_grid(&self) -> std::sync::Arc<crate::spatial::BuildingGrid> {
+        let mut memo = self.building_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((g, grid)) = memo.as_ref() {
+            if *g == self.building_gen {
+                return grid.clone();
+            }
+        }
+        let ids: Vec<EntityId> = self.with::<Building>();
+        let doors: Vec<TilePos> =
+            ids.iter().map(|&b| self.comp::<Building>(b).map_or_else(TilePos::default, |bd| bd.door)).collect();
+        let grid = std::sync::Arc::new(crate::spatial::BuildingGrid::build(self.map.w(), self.map.h(), ids, &doors));
+        *memo = Some((self.building_gen, grid.clone()));
+        grid
+    }
+
     /// Scale S1: every live entity with a Position on a tile within the
     /// Chebyshev square of radius `r` around `tile`'s cell neighbourhood, or
     /// inside `building`, ascending, each once: a superset of "within `r`
@@ -2330,6 +2367,7 @@ impl World {
         self.corp_ids = self.with::<Corp>();
         (self.residents, self.resident_home) = self.residents_from_stores();
         self.squat_index = self.squat_index_from_stores();
+        self.rebuild_reservation_index();
         self.rioter_of =
             self.riots.iter().flat_map(|r| r.rioters.iter().map(move |&a| (a, r.id))).collect::<BTreeMap<_, _>>();
         self.mean_price_cache = None;

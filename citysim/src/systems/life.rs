@@ -126,18 +126,23 @@ pub fn away_hotel(world: &World, id: EntityId) -> Option<EntityId> {
     let home_t = tiles_to(world, id, home)?;
     let budget = coins(world, id) - world.config.life.hotel_reserve_meals * meal_price(world, id);
     let margin = world.config.life.bed_margin_tiles;
-    world
+    // Scale S4 perf: the walks first, then the bed tests nearest first
+    // until one passes (a bed count reads every booking), not the tests
+    // over every Hotel: the same pick.
+    let mut near: Vec<(u32, EntityId)> = world
         .buildings_of_kind(BuildingKind::Hotel)
         .iter()
         .copied()
-        .filter(|&h| {
+        .filter_map(|h| tiles_to(world, id, h).map(|t| (t, h)))
+        .filter(|&(t, _)| t + margin <= home_t)
+        .collect();
+    near.sort_unstable();
+    near.into_iter()
+        .find(|&(_, h)| {
             crate::systems::street::is_hotel(world, h)
                 && crate::systems::street::hotel_price(world, h) <= budget
                 && crate::systems::street::free_beds_for(world, h, id) > 0
         })
-        .filter_map(|h| tiles_to(world, id, h).map(|t| (t, h)))
-        .filter(|&(t, _)| t + margin <= home_t)
-        .min()
         .map(|(_, h)| h)
 }
 

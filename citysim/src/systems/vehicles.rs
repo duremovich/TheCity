@@ -942,13 +942,25 @@ pub fn steal_target(world: &World, agent: EntityId) -> Option<EntityId> {
         return None;
     }
     let pos = world.comp::<Position>(agent)?.tile;
-    world
-        .vehicles
-        .iter()
-        .copied()
-        .filter_map(|v| stealable_at(world, agent, v, pos).map(|d| (d, v)))
-        .min()
-        .map(|(_, v)| v)
+    if world.vehicles.is_empty() {
+        return None;
+    }
+    // Scale S4 perf: only a vehicle parked at a building whose door is
+    // within reach (its stand, the outside door, is a step from the door)
+    // can pass `stealable_at`; the vehicles there are the building's
+    // `assets_at`. Every vehicle is filed under the building it is parked
+    // at, so this is the scan over every vehicle (the fleet grows all run).
+    let mut best: Option<(u32, EntityId)> = None;
+    for b in world.building_grid().near(pos, world.config.vehicles.steal_reach.saturating_add(1)) {
+        for &v in assets_at(world, b) {
+            if let Some(d) = stealable_at(world, agent, v, pos) {
+                if best.is_none_or(|x| (d, v) < x) {
+                    best = Some((d, v));
+                }
+            }
+        }
+    }
+    best.map(|(_, v)| v)
 }
 
 /// D26: would this agent plan a vehicle theft at all (an Earn binding)?

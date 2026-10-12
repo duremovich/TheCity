@@ -688,8 +688,9 @@ fn core_throughput() {
 
 /// Scale S4: the 20k profile's ticks/s floor, printed only (as
 /// `core_year`'s): measured 155-173 ticks/s over 30 days (the two runs in
-/// parallel, 2026-10-12), less ~25 %.
-const TPS_FLOOR_20K: f64 = 120.0;
+/// parallel, 2026-10-12), less ~25 %; S4 perf (the goal scoring's indices,
+/// docs/SCALE_20K.md § S4 perf): 189, less ~25 %.
+const TPS_FLOOR_20K: f64 = 140.0;
 
 /// Scale S4 (coordinator ruling, 2026-10-12): `core_20k`'s employment
 /// floor, a collapse floor and not a calibration band. J24's 0.5 is

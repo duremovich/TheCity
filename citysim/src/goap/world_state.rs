@@ -8,7 +8,6 @@ use crate::components::{
     Wallet,
 };
 use crate::entity::EntityId;
-use crate::exec::ReservationKind;
 use crate::time::Season;
 use crate::world::World;
 
@@ -475,16 +474,8 @@ impl WorldState {
 
     /// Food units reserved on a building by holders other than `except`.
     pub fn reserved_by_others(world: &World, building: EntityId, except: Option<EntityId>) -> u32 {
-        world
-            .reservations
-            .iter()
-            .filter(|(&holder, _)| Some(holder) != except)
-            .flat_map(|(_, v)| v.iter())
-            .filter_map(|r| match r.kind {
-                ReservationKind::FoodUnits { building: b, units } if b == building => Some(units),
-                _ => None,
-            })
-            .sum()
+        // Scale S4 perf: from the per-building index, not every reservation.
+        world.food_units_reserved(building, except)
     }
 
     /// Snapshot an agent's state. `target` is `Plan.target` (bound at plan

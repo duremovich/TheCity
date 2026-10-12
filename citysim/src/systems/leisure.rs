@@ -10,8 +10,6 @@
 //! `Leisure`) or a `splitmix64` hash; nothing here draws on `rng.world()` or
 //! `rng.agent()`.
 
-use std::collections::BTreeMap;
-
 use rand::Rng;
 use smallvec::SmallVec;
 
@@ -21,7 +19,7 @@ use crate::components::{
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::exec::{ExecState, ReservationKind};
+use crate::exec::ExecState;
 use crate::goap::{ActionKind, LocationKey, Plan};
 use crate::living::{Rung, Spot, SpotKind, UnwindPick};
 use crate::rng::splitmix64;
@@ -233,35 +231,13 @@ pub fn open(world: &World, b: EntityId) -> bool {
 }
 
 /// Room for `id`: inside already, or fewer occupants than the capacity.
-/// `held` is [`held_by_others`] for `id`.
-fn has_room(world: &World, id: EntityId, b: EntityId, held: &BTreeMap<EntityId, usize>) -> bool {
-    // Plan L19, L30: the live Seat (and Bed) reservations of others count.
+fn has_room(world: &World, id: EntityId, b: EntityId) -> bool {
+    // Plan L19, L30: the live Seat (and Bed) reservations of others count
+    // (`World::reserved_at`: Scale S4 perf, the per-building index; it was
+    // one pass over every reservation per ladder walk).
     world.comp::<Building>(b).is_some_and(|bd| {
-        bd.occupants.contains(&id) || bd.occupants.len() + held.get(&b).copied().unwrap_or(0) < usize::from(bd.capacity)
+        bd.occupants.contains(&id) || bd.occupants.len() + world.reserved_at(b, id) < usize::from(bd.capacity)
     })
-}
-
-/// `World::reserved_at(b, exclude)` for every building at once (review fix,
-/// perf: one pass over the reservations per ladder walk, not one per
-/// venue): live `Bed` and `Seat` reservations by holders other than
-/// `exclude`, per building, a holder already inside it not counted.
-fn held_by_others(world: &World, exclude: EntityId) -> BTreeMap<EntityId, usize> {
-    let tick = world.tick;
-    let mut out: BTreeMap<EntityId, usize> = BTreeMap::new();
-    for (&h, rs) in &world.reservations {
-        if h == exclude {
-            continue;
-        }
-        let inside = world.comp::<Position>(h).and_then(|p| p.building);
-        for r in rs {
-            if let ReservationKind::Bed { home: b } | ReservationKind::Seat { building: b } = r.kind {
-                if r.expires > tick && inside != Some(b) {
-                    *out.entry(b).or_default() += 1;
-                }
-            }
-        }
-    }
-    out
 }
 
 /// Plan L19: the door policy. A Lounge refuses a Dreg or a dress below 2; a
@@ -537,20 +513,24 @@ fn nearest_venue(
     kind: BuildingKind,
     from: TilePos,
     district: Option<DistrictId>,
-    held: &BTreeMap<EntityId, usize>,
 ) -> Option<(u32, EntityId)> {
-    world
+    // Scale S4 perf: the distances first, then the tests nearest first
+    // until one passes (the door policy reads the staff, the room the
+    // reservations), not the tests over every venue of the kind: the same pick.
+    let mut near: Vec<(u32, EntityId)> = world
         .buildings_of_kind(kind)
         .iter()
-        .copied()
-        .filter(|&b| {
-            standing(world, b)
-                && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
-        })
-        .filter(|&b| district.is_none_or(|d| world.district_of_building(b) == d))
-        .filter(|&b| open(world, b) && door_ok(world, id, b) && has_room(world, id, b, held))
-        .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
-        .min()
+        .filter_map(|&b| world.comp::<Building>(b).map(|bd| (bd.door.manhattan(from), b)))
+        .collect();
+    near.sort_unstable();
+    near.into_iter().find(|&(_, b)| {
+        standing(world, b)
+            && (kind == BuildingKind::Bar || world.comp::<Building>(b).is_some_and(|bd| bd.venue.is_some()))
+            && district.is_none_or(|d| world.district_of_building(b) == d)
+            && open(world, b)
+            && door_ok(world, id, b)
+            && has_room(world, id, b)
+    })
 }
 
 /// The paid rungs open to `id` from `from` with `purse` to spend. Day gaps
@@ -572,7 +552,6 @@ fn paid_candidates(
     let drank = crate::utility::goals::drank_today(world, id);
     let hungry = world.comp::<Needs>(id).is_some_and(|n| n.hunger < 0.5);
     let high = high_ok(world, id);
-    let held = held_by_others(world, id);
     for kind in LADDER {
         if kind == BuildingKind::Bar && drank {
             continue;
@@ -580,8 +559,8 @@ fn paid_candidates(
         if kind == BuildingKind::NoodleBar && !hungry {
             continue;
         }
-        let pick = nearest_venue(world, id, kind, from, district, &held)
-            .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None, &held)));
+        let pick = nearest_venue(world, id, kind, from, district)
+            .or_else(|| district.and_then(|_| nearest_venue(world, id, kind, from, None)));
         let Some((tiles, b)) = pick else { continue };
         if let Some(r) = reach {
             let door = world.comp::<Building>(b).map_or(from, |bd| bd.door);

@@ -48,7 +48,7 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         return None;
     }
     let cfg = &world.config.social;
-    let gangs = world.gangs();
+    let gangs = world.gang_list();
     // The member with the best qualifying edge: the highest affinity, ties to
     // the first gang in `gangs()` then the first in its roster. Walks the
     // agent's own edges rather than every roster (M10 phase 5b).
@@ -57,7 +57,8 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
     if open.contains(&true) {
         for m in world.neighbours(id) {
             let Some(gid) = world.comp::<GangMember>(m).map(|gm| gm.gang) else { continue };
-            let Some(gi) = gangs.iter().position(|&g| g == gid) else { continue };
+            // `gangs` is ascending (Scale S4 perf: a search, not a scan).
+            let Ok(gi) = gangs.binary_search(&gid) else { continue };
             // M15 W31: a Purist gang refuses the chromed.
             if !open[gi]
                 || !crate::systems::creeds::tolerated(world, gid, id)
@@ -97,7 +98,8 @@ pub fn recruit_gang(world: &World, id: EntityId) -> Option<EntityId> {
         .map(|b| b.door)
         .or_else(|| world.comp::<Position>(id).map(|p| p.tile))?;
     gangs
-        .into_iter()
+        .iter()
+        .copied()
         .filter_map(|gid| world.comp::<Gang>(gid).map(|g| (gid, g)))
         .filter(|(_, g)| !g.is_sacked(world.tick))
         .filter(|&(gid, _)| may_reform(world, gid))
@@ -141,9 +143,15 @@ pub fn eligible(world: &World, id: EntityId) -> bool {
 /// The Hideout a `LocationKey::Hideout` means for this agent: their gang's,
 /// or the gang they would join, or the first on the map.
 pub fn hideout_for(world: &World, id: EntityId) -> Option<EntityId> {
+    hideout_with(world, id, || recruit_gang(world, id))
+}
+
+/// [`hideout_for`] with `recruit_gang`'s answer supplied by the caller
+/// (Scale S4 perf: a plan context reads it for `eligible` too).
+pub fn hideout_with(world: &World, id: EntityId, recruit: impl FnOnce() -> Option<EntityId>) -> Option<EntityId> {
     world
         .gang_of(id)
-        .or_else(|| recruit_gang(world, id))
+        .or_else(recruit)
         .and_then(|g| world.hideout_of(g))
         .or_else(|| world.building_of_kind(BuildingKind::Hideout))
 }
@@ -453,11 +461,7 @@ pub fn following_order(world: &World, id: EntityId) -> Option<Order> {
 /// yet, ascending.
 pub fn squat_targets(world: &World, gang: EntityId) -> Vec<EntityId> {
     let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
-    let mut districts: Vec<crate::components::DistrictId> =
-        g.territory.iter().map(|&h| world.district_of_building(h)).collect();
-    districts.push(world.district_of_building(g.hideout));
-    districts.sort_unstable();
-    districts.dedup();
+    let districts = gang_districts(world, g);
     // Fix pass (phase 3 review): any derelict (a Block, a Bar, a Hotel), no
     // shanty Lot.
     crate::systems::street::derelict_buildings(world)
@@ -465,6 +469,34 @@ pub fn squat_targets(world: &World, gang: EntityId) -> Vec<EntityId> {
         .filter(|&b| g.territory.binary_search(&b).is_err())
         .filter(|&b| districts.binary_search(&world.district_of_building(b)).is_ok())
         .collect()
+}
+
+/// The districts of a gang's territory and Hideout, ascending.
+fn gang_districts(world: &World, g: &Gang) -> Vec<crate::components::DistrictId> {
+    let mut districts: Vec<crate::components::DistrictId> =
+        g.territory.iter().map(|&h| world.district_of_building(h)).collect();
+    districts.push(world.district_of_building(g.hideout));
+    districts.sort_unstable();
+    districts.dedup();
+    districts
+}
+
+/// Scale S4 perf: "a guard within `r` (Chebyshev) of this door", the
+/// guards' tiles on a grid built on the first test (a search that tests
+/// many doors read every guard per door).
+fn guard_test(world: &World, r: u32) -> impl Fn(TilePos) -> bool + '_ {
+    let grid: std::cell::OnceCell<(Vec<TilePos>, crate::spatial::TileGrid)> = std::cell::OnceCell::new();
+    move |door: TilePos| {
+        let (tiles, grid) = grid.get_or_init(|| {
+            let tiles: Vec<TilePos> =
+                world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
+            let grid = crate::spatial::TileGrid::build(world.map.w(), world.map.h(), 16, tiles.iter().copied());
+            (tiles, grid)
+        });
+        let mut near = Vec::new();
+        grid.near(door, r, &mut near);
+        near.iter().any(|&i| law::chebyshev(tiles[i as usize], door) <= r)
+    }
 }
 
 /// A member serving the gang's Squat order, inside a derelict.
@@ -588,18 +620,27 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         }
         // M12 D38: the unheld derelict in the gang's districts nearest the Hideout.
         Some(Order::Squat) => {
-            let guards: Vec<TilePos> =
-                world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
             let r = world.config.crime.sight_day_crime;
             // L1: near the Hideout and near the member (the derelict nearest
             // the Hideout sat a 6 h walk from where the member stood).
-            let own = Some(actor_tile);
-            return squat_targets(world, gang)
-                .into_iter()
-                .filter_map(|b| world.comp::<Building>(b).map(|bd| (bd.door, b)))
-                .filter(|&(door, _)| !guards.iter().any(|&gt| law::chebyshev(gt, door) <= r))
-                .map(|(door, b)| (door.manhattan(hideout_door) + own.map_or(0, |t| door.manhattan(t)), b.index, b))
-                .min()
+            // Scale S4 perf: `squat_targets` (the unheld derelict buildings
+            // in the gang's districts, not Lots) read on the building grid
+            // by the summed walk, not every derelict in the city: the same pick.
+            let g = world.comp::<Gang>(gang)?;
+            let districts = gang_districts(world, g);
+            let guarded = guard_test(world, r);
+            return world
+                .building_grid()
+                .nearest_sum(&[hideout_door, actor_tile], |b| {
+                    let bd = world.comp::<Building>(b)?;
+                    let ok = matches!(bd.kind, BuildingKind::Home | BuildingKind::Bar | BuildingKind::Hotel)
+                        && bd.derelict
+                        && !bd.demolished
+                        && g.territory.binary_search(&b).is_err()
+                        && districts.binary_search(&world.district_of_building(b)).is_ok()
+                        && !guarded(bd.door);
+                    ok.then_some((bd.door.manhattan(hideout_door) + bd.door.manhattan(actor_tile), b.index))
+                })
                 .map(|(_, _, b)| (b, Some(Order::Squat)));
         }
         Some(_) => return None,
@@ -610,18 +651,44 @@ pub fn gang_work_target(world: &World, id: EntityId) -> Option<(EntityId, Option
         Some(t) => t.binary_search(&h).is_ok(),
         None => holder_of(world, h).is_none(),
     };
+    let r = world.config.crime.sight_day_crime;
+    // M15 W31: a Purist gang shakes down the chromed's Homes first.
+    let purist = crate::systems::creeds::is_purist(world, gang);
+    // L1: an order's Home is near the Hideout and near the member.
+    let own = if from != actor_tile { Some(actor_tile) } else { None };
+    if !purist {
+        // Scale S4 perf: the least `(door distance, index)` read outward
+        // from `from` on the building grid (the distance is at least the
+        // door's from `from`), not every Home: the same Home. A building of
+        // kind Home is on the Home list unless demolished.
+        let guarded = guard_test(world, r);
+        let score = |h: EntityId| {
+            if Some(h) == own_home {
+                return None;
+            }
+            let b = world.comp::<Building>(h)?;
+            if b.kind != BuildingKind::Home || b.demolished || b.derelict || b.occupants.is_empty() {
+                return None;
+            }
+            let dist = b.door.manhattan(from) + own.map_or(0, |t| b.door.manhattan(t));
+            (pick(h) && !guarded(b.door)).then_some((dist, h.index))
+        };
+        // Under Contest the candidates are the rival's territory.
+        let best = match (theirs, own) {
+            (Some(t), _) => t.iter().filter_map(|&h| score(h).map(|(d, i)| (d, i, h))).min(),
+            (None, None) => world.building_grid().nearest(from, 0, score),
+            // The walk via the Hideout: the cells by the summed distance.
+            (None, Some(o)) => world.building_grid().nearest_sum(&[from, o], score),
+        };
+        return best.map(|(_, _, h)| (h, order));
+    }
     // Guarded: a guard within `sight_day_crime` of the door. The nearest
     // unguarded candidate by `(door distance, index)`; the guard test runs
     // only for a candidate that would beat the best so far (it was a
     // Homes x guards table rebuilt whenever a guard moved; perf).
     let guards: Vec<TilePos> =
         world.guards().iter().filter_map(|&g| world.comp::<Position>(g).map(|p| p.tile)).collect();
-    let r = world.config.crime.sight_day_crime;
     let guarded = |door: TilePos| guards.iter().any(|&gt| law::chebyshev(gt, door) <= r);
-    // M15 W31: a Purist gang shakes down the chromed's Homes first.
-    let purist = crate::systems::creeds::is_purist(world, gang);
-    // L1: an order's Home is near the Hideout and near the member.
-    let own = if from != actor_tile { Some(actor_tile) } else { None };
     let mut best: Option<((bool, u32, u32), EntityId)> = None;
     for &h in homes {
         if Some(h) == own_home {

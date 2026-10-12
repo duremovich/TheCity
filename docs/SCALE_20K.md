@@ -235,11 +235,61 @@ Also: 13-16 of 90 corps bankrupt by day 60 (the 2k city 0-1 of 9); Vagrancy per 
 (the sweeps run per district, and the districts hold 3x the residents).
 
 **Throughput.** 20k reads 155-173 ticks/s in `core_20k` (two runs in parallel) and 82-130 with six runs on the box,
-falling over the run (210 on day 1, ~90 on day 60). The bodies' goal scoring is the cost (above). `TPS_FLOOR_20K` is
-120, printed.
+falling over the run (210 on day 1, ~90 on day 60). The bodies' goal scoring is the cost (above; indexed in § S4 perf below). `TPS_FLOOR_20K` was
+120, printed (140 after S4 perf).
 
 **The gate:** `core_20k` (docs/TESTING.md): 20k seed 42 x 30 days twice in parallel; per-capita collapse bounds,
 an employment collapse floor of 0.40 (J24's 0.5 printed), determinism, the coin identity. Passes on the final code.
+
+#### S4 perf (2026-10-12): the goal scoring's city-wide scans indexed
+
+Every index gives the scan's answer: the 2k city is byte-identical to `da07983` (CSV without `ticks_per_sec`, and
+events, seeds 42-47 x 120) and the generated 20k city to main `d9e7fde` (seed 42 x 30 days; 60 days against
+`da07983` before the S5 merge). Profiled with `--features prof` from a day-20 save of the 20k city.
+
+| site (20k, day 20) | before: per call | what it scanned | the index | after |
+| --- | --- | --- | --- | --- |
+| Earn's vehicle theft (`vehicles::steal_target`) | 10 us | every vehicle (123 on day 0, ~1,000 by day 27) | `World::building_grid` (every building by door, 16-tile cells): the buildings within `steal_reach` + 1, their `assets_at` | ~1 us |
+| Squat's bed and squat (`street::hotel_for`, `life::away_hotel`) | 37-45 us | every Hotel and Mission's beds (a scan of every booking and reservation each) | the distances first, the bed tests nearest first until one passes | ~4 us |
+| Squat's derelict (`street::squat_target`) | ~30 us | every Home, Bar, Hotel and Lot | the building grid within `squat_reach` | small |
+| GangWork's Home (`gang::gang_work_target`) | 25 us | every Home, every guard per order | the grid read outward from the Hideout (`BuildingGrid::nearest`; with the member's tile as a second point, cells by the summed walk, `nearest_sum`); the Squat order's derelicts the same; the guards on a per-call grid; Contest reads the rival's territory | 20-25 us (the nearest unclaimed, unguarded Home is often far: most of the gain is the Squat order) |
+| Unwind's venues (`leisure::nearest_venue`) | 4.5 us x 7 | every venue of a kind through the door and room tests, every reservation per think | the distances first, the tests nearest first; the room test through the reservation index | ~2 us x 7 |
+| Court's candidate (`social::candidate_at_venue_in`) | 11 us | every occupant of every Bar and Market | the agent's neighbours who are occupants there, when that list is the shorter (min > 0); the Partner reservations built only when a candidate passes | 7-8 us (both lists run ~200 at 20k) |
+| Eat's pantry (`plan::bind_target`) | ~40 us | every Home | the building grid read outward | small |
+| The plan context (`PlanCtx::build_inner`) | 18-28 us | `gang::recruit_gang` twice, `hotel_for` | `recruit_gang` once (`gang::hideout_with`), and as above; `recruit_gang`'s gang index by binary search | ~9 us |
+| Reservation counts (`reserved_at`, `bed_reservations_unbooked`, `open_meals_reserved`, `WorldState::reserved_by_others`) | O(reservations) | every reservation in the city | `World::res_by_building`: per building, its holders (kept by `reserve`, `release_all`, `sweep_reservations`, rebuilt on load) | O(holders there) |
+| Beg's passers (`exec::actions::beg`) | 240 us | every citizen | the position index (`agents_near`) | small |
+
+**The tps** (seed 42, `run --population N --scaled`, main `d9e7fde` and this code side by side in parallel; the box
+had ~15-25 % background load):
+
+| city | days | main | S4 perf |
+| --- | --- | --- | --- |
+| 2k (shipped map) | 1-5 / 25-29 | 7,600-9,800 / 4,600-5,200 | 7,000-9,100 / 4,800-5,700 (noise: no scan was large at 2k) |
+| 5k import (`isle_m_k4`) | 1-5 / 25-29 | 1,900-2,350 / 1,260-1,310 | 1,880-2,130 / 1,240-1,480 |
+| 20k (`gen:20000`) | 1-5 / 25-29 | 202-238 / 119-135 | 252-295 / 151-172 |
+
+`core_20k` (two runs in parallel, alone on the box): 189 ticks/s against S4's 155-173; `TPS_FLOOR_20K` 120 -> 140.
+
+**The 600 target is not reachable by indexing the goal scoring.** On the day-20 profile after the indices, per tick:
+think 2.2 ms, exec 1.15 ms, the Statistical tier (`lod::run_statistical`) 1.0-1.4 ms, plan 0.45 ms, needs 0.35 ms,
+demography 0.3 ms, law 0.2 ms; ~6 ms a tick in all. 600 ticks/s is 1.7 ms a tick: the Statistical tier alone (18,000
+residents, `stat::stat_work` and its `work::coworkers` pairs) is most of that, and the 2,000 bodies cost ~1.7 us each
+a tick in think, exec and plan with no city-wide scan left in the top sites (a body thinks every ~24 ticks; a think is
+~25 us over 29 goals; exec's per-tick step is ~0.6 us a body). Before S4 the same map ran ~1,000 with 200 bodies.
+What would move it: fewer bodies (the per-capita `max_full`/`max_coarse` S4 chose for the gangs' sake), a cheaper
+Statistical hour (the co-worker pairs: `[lod] coworker_crew`), or a think interval by tier. Each is a behaviour change.
+
+**Why tps decays over a run** (measured over 60 days on `da07983`: ~255 on day 0, ~110 by day 25, ~80-100 by
+day 55; homeless 800 -> 3,900, vehicles 123 -> ~1,000, employed 8.6k -> 9.6k): lists that grow with the run were
+scanned per think or plan. The homeless are the Squat and bed scans' callers and the bookings they scanned grew
+with them (quadratic); the fleet grew under every lawless adult's Earn think; reservations grew with the bodies'
+plans. Those are indexed now. What still grows (day 20 -> day 50, per tick, this code): the Statistical tier
+(`stat_work` + `coworkers` 0.67 -> 1.28 ms: more workers, larger staffs, the co-worker pairs O(staff) per worker),
+Unwind's plan-time spot scoring (`leisure::contacts` walks every neighbour's edge: ~74 us a plan by day 50; the
+social graph densifies, ~200-700 neighbours an agent, which also slows Court and JoinGang), and relocation
+(`demo::life::relocate`). Not chased: the first is the Statistical tier's design, the second needs a friends/kin
+index kept by every edge write.
 
 ### S5: the Ambient tier
 - Flats as seeds + occupancy; per-district aggregate demand feeding the markets, rents, labour pool and street

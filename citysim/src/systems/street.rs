@@ -192,27 +192,36 @@ pub fn hotel_for(world: &World, agent: EntityId) -> Option<EntityId> {
     // past 48 tiles from most of the street).
     let reach = world.config.street.hotel_reach.max(world.config.life.hotel_reach_homeless);
     // Real economy E27: a Mission's cot (price 0) within reach comes first.
-    let cot = world
-        .buildings_of_kind(BuildingKind::Mission)
-        .iter()
-        .copied()
-        .filter(|&m| crate::systems::charity::is_cot_house(world, m) && free_beds_for(world, m, agent) > 0)
-        .filter_map(|m| door_of(world, m).map(|d| (d.manhattan(from), m)))
-        .filter(|&(d, _)| d <= reach)
-        .min()
-        .map(|(_, m)| m);
+    let cot = nearest_passing(world, BuildingKind::Mission, from, reach, |m| {
+        crate::systems::charity::is_cot_house(world, m) && free_beds_for(world, m, agent) > 0
+    });
     if cot.is_some() {
         return cot;
     }
-    world
-        .buildings_of_kind(BuildingKind::Hotel)
+    nearest_passing(world, BuildingKind::Hotel, from, reach, |h| {
+        is_hotel(world, h) && hotel_price(world, h) <= coins && free_beds_for(world, h, agent) > 0
+    })
+}
+
+/// The building of `kind` with the least `(door distance from from, id)`
+/// within `reach` that passes `pass`. Scale S4 perf: the distances first,
+/// then `pass` nearest first until one passes (the bed count reads every
+/// booking and reservation), not `pass` over the whole list: the same pick.
+fn nearest_passing(
+    world: &World,
+    kind: BuildingKind,
+    from: TilePos,
+    reach: u32,
+    pass: impl Fn(EntityId) -> bool,
+) -> Option<EntityId> {
+    let mut near: Vec<(u32, EntityId)> = world
+        .buildings_of_kind(kind)
         .iter()
-        .copied()
-        .filter(|&h| is_hotel(world, h) && hotel_price(world, h) <= coins && free_beds_for(world, h, agent) > 0)
-        .filter_map(|h| door_of(world, h).map(|d| (d.manhattan(from), h)))
+        .filter_map(|&b| door_of(world, b).map(|d| (d.manhattan(from), b)))
         .filter(|&(d, _)| d <= reach)
-        .min()
-        .map(|(_, h)| h)
+        .collect();
+    near.sort_unstable();
+    near.into_iter().find(|&(_, b)| pass(b)).map(|(_, b)| b)
 }
 
 /// D21: is a bed tonight within the homeless agent's means and reach?
@@ -614,10 +623,14 @@ pub fn squat_banned(world: &World, a: EntityId, b: EntityId) -> bool {
     world.comp::<Household>(a).and_then(|h| h.squat_ban).is_some_and(|(x, until)| x == b && world.tick < until)
 }
 
+/// The kinds a building may go derelict as (a shanty is a derelict Lot).
+const DERELICT_KINDS: [BuildingKind; 4] =
+    [BuildingKind::Home, BuildingKind::Bar, BuildingKind::Hotel, BuildingKind::Lot];
+
 /// Every derelict building (any kind), ascending.
 pub fn derelicts(world: &World) -> Vec<EntityId> {
     // Hunger as sickness P4b: a shanty is a derelict Lot.
-    let mut out: Vec<EntityId> = [BuildingKind::Home, BuildingKind::Bar, BuildingKind::Hotel, BuildingKind::Lot]
+    let mut out: Vec<EntityId> = DERELICT_KINDS
         .iter()
         .flat_map(|&k| world.buildings_of_kind(k).iter().copied())
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| bd.derelict && !bd.demolished))
@@ -647,11 +660,20 @@ pub fn squat_target(world: &World, agent: EntityId) -> Option<EntityId> {
     }
     let from = origin(world, agent)?;
     let reach = world.config.street.squat_reach;
-    derelicts(world)
+    // Scale S4 perf: the derelicts whose door is within reach, from the
+    // building grid (a building of a `derelicts` kind is on that kind's
+    // list unless demolished), not every Home, Bar, Hotel and Lot.
+    world
+        .building_grid()
+        .near(from, reach)
         .into_iter()
+        .filter(|&b| {
+            world.comp::<Building>(b).is_some_and(|bd| {
+                DERELICT_KINDS.contains(&bd.kind) && bd.derelict && !bd.demolished && bd.door.manhattan(from) <= reach
+            })
+        })
         .filter(|&b| squat_slots(world, b) > 0 && !squat_banned(world, agent, b))
         .filter_map(|b| door_of(world, b).map(|d| (d.manhattan(from), b)))
-        .filter(|&(d, _)| d <= reach)
         .min()
         .map(|(_, b)| b)
 }

@@ -660,6 +660,10 @@ impl PlanCtx {
         let tile = pos.map(|p| p.tile);
         let home = world.comp::<Household>(agent).and_then(|h| h.home);
         let sight = world.config.crime.sight_day_crime; // "guard8"
+
+        // The gang this agent would join (`gang::eligible`, and the Hideout a
+        // non-member means): read once (Scale S4 perf: it walks the edges).
+        let recruit = crate::systems::gang::recruit_gang(world, agent);
         let guard8 = !light
             && tile.is_some_and(|t| {
                 world
@@ -713,7 +717,7 @@ impl PlanCtx {
             ] {
                 add(LocationKey::of_building(kind), world.local(agent, kind));
             }
-            add(LocationKey::Hideout, crate::systems::gang::hideout_for(world, agent));
+            add(LocationKey::Hideout, crate::systems::gang::hideout_with(world, agent, || recruit));
             if wage_at == LocationKey::Workplace {
                 add(LocationKey::Workplace, world.wage_desk(agent));
             } else if job.and_then(|j| j.employer).is_some_and(|e| {
@@ -1015,7 +1019,7 @@ impl PlanCtx {
                                 .is_some_and(|bd| matches!(bd.kind, BuildingKind::Bar | BuildingKind::Market))
                     })
             }),
-            gang_eligible: crate::systems::gang::eligible(world, agent),
+            gang_eligible: recruit.is_some(),
             extort_ok: target
                 .and_then(|t| world.comp::<Building>(t))
                 .is_some_and(|b| b.kind == BuildingKind::Home && !b.occupants.is_empty() && !b.derelict),

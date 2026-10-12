@@ -198,6 +198,25 @@ pub fn reserved_partners(world: &World, holder: EntityId) -> std::collections::B
         .collect()
 }
 
+/// [`reserved_partners`], built on the first `contains` (Scale S4 perf: a
+/// scan of every reservation, needed only once a candidate passes the
+/// cheap tests).
+pub struct LazyReserved<'a> {
+    world: &'a World,
+    holder: EntityId,
+    set: std::cell::OnceCell<std::collections::BTreeSet<EntityId>>,
+}
+
+impl<'a> LazyReserved<'a> {
+    pub fn new(world: &'a World, holder: EntityId) -> Self {
+        LazyReserved { world, holder, set: std::cell::OnceCell::new() }
+    }
+
+    pub fn contains(&self, o: &EntityId) -> bool {
+        self.set.get_or_init(|| reserved_partners(self.world, self.holder)).contains(o)
+    }
+}
+
 /// The co-located agent with the highest affinity who is reservable.
 pub fn best_colocated_partner(world: &World, id: EntityId, min_affinity: f32, unmarried: bool) -> Option<EntityId> {
     // Alone (the usual case at home): no reservation scan (perf).
@@ -206,7 +225,7 @@ pub fn best_colocated_partner(world: &World, id: EntityId, min_affinity: f32, un
     if !b.occupants.iter().any(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o)) {
         return None;
     }
-    let reserved = reserved_partners(world, id);
+    let reserved = LazyReserved::new(world, id);
     best_colocated_partner_in(world, id, min_affinity, unmarried, &reserved)
 }
 
@@ -216,7 +235,7 @@ pub fn best_colocated_partner_in(
     id: EntityId,
     min_affinity: f32,
     unmarried: bool,
-    reserved: &std::collections::BTreeSet<EntityId>,
+    reserved: &LazyReserved,
 ) -> Option<EntityId> {
     let here = world.comp::<crate::components::Position>(id)?.building?;
     let b = world.comp::<Building>(here)?;
@@ -275,7 +294,7 @@ pub fn candidate_at_venue(world: &World, id: EntityId, min: f32) -> Option<Entit
                 .collect()
         })
         .unwrap_or_default();
-    let reserved = reserved_partners(world, id);
+    let reserved = LazyReserved::new(world, id);
     candidate_at_venue_in(world, id, min, &rejected, &reserved)
 }
 
@@ -285,15 +304,42 @@ pub fn candidate_at_venue_in(
     id: EntityId,
     min: f32,
     rejected: &[EntityId],
-    reserved: &std::collections::BTreeSet<EntityId>,
+    reserved: &LazyReserved,
 ) -> Option<EntityId> {
     let venues = [BuildingKind::Bar, BuildingKind::Market];
-    venues
+    // Scale S4 perf: with `min` above 0 only an agent with an edge to `id`
+    // can pass (no edge reads affinity 0), so the candidates may be read
+    // from `id`'s neighbours who are occupants of a Bar or Market (an
+    // occupant's Position names the building it is in; the occupant list is
+    // ascending) instead of every occupant of every Bar and Market: the same
+    // candidate. The shorter of the two lists is read (both run ~200 at 20k).
+    let occupants: usize = venues
         .iter()
         .filter_map(|k| world.buildings_by_kind.get(k))
         .flatten()
         .filter_map(|&b| world.comp::<Building>(b))
-        .flat_map(|bd| bd.occupants.iter().copied())
+        .map(|bd| bd.occupants.len())
+        .sum();
+    let known = world.neighbours.get(&id).map_or(0, |s| s.len());
+    let candidates: Box<dyn Iterator<Item = EntityId> + '_> = if min > 0.0 && known < occupants {
+        Box::new(world.neighbours(id).filter(move |&o| {
+            world.comp::<Position>(o).and_then(|p| p.building).is_some_and(|b| {
+                world
+                    .comp::<Building>(b)
+                    .is_some_and(|bd| venues.contains(&bd.kind) && bd.occupants.binary_search(&o).is_ok())
+            })
+        }))
+    } else {
+        Box::new(
+            venues
+                .iter()
+                .filter_map(|k| world.buildings_by_kind.get(k))
+                .flatten()
+                .filter_map(|&b| world.comp::<Building>(b))
+                .flat_map(|bd| bd.occupants.iter().copied()),
+        )
+    };
+    candidates
         .filter(|&o| o != id && world.has::<Brain>(o) && !world.has::<Sentence>(o))
         .filter(|&o| !has_spouse(world, o) && !rejected.contains(&o) && !reserved.contains(&o))
         .map(|o| (o, world.edge(id, o).map_or(0.0, |e| e.affinity)))
@@ -313,7 +359,7 @@ pub fn court_target(world: &World, id: EntityId) -> Option<EntityId> {
     let venue = here
         .and_then(|b| world.comp::<Building>(b))
         .is_some_and(|bd| matches!(bd.kind, BuildingKind::Bar | BuildingKind::Market));
-    let reserved = reserved_partners(world, id);
+    let reserved = LazyReserved::new(world, id);
     if here.is_some() {
         let min = world.config.social.propose_affinity;
         if let Some(t) =
