@@ -75,6 +75,50 @@ full-map flow fields (5.6 MB each at 3,000 × 1,875; the 512 cache would be ~2.9
   workplaces, the rail layer → El lines). The adapter is a CLI subcommand that writes the sim's own map files;
   a downsampled snapshot of one import is committed as a fixture so tests never need the graphics repo.
 
+#### S3b status (2026-10-12)
+- **The map spec** (`citysim/src/map.rs`, all optional, old maps parse as before): an `rle` header (run-length
+  grid rows); `D <zone> <x_from> <x_to> <name>` district rows and a `districts` grid (any district shape);
+  `L <x>,<y> ... <name>` El lines; `#` comments. A map's districts and lines replace the config's
+  (`Map::apply_to` in `World::new`). `MapSource`: `[world] map` is a file (default `map.txt`) or
+  `gen:<residents>[:<seed>]`. A Home's `floors` field now deals a household a floor at creation (5 residents a
+  floor; no Home on the shipped map has the field, so the 2k city is unchanged).
+- **Saves** (SAVE_VERSION 13): the map's grids are run-length strings (61 KB for the 2k map against ~550 KB;
+  1.3 MB at 3,000 x 1,875 against ~62 MB). A v12 save loads and runs on byte-identically.
+- **The generator** (`citysim::mapgen`, `citysim-cli gen-map --residents N --seed S --out FILE`): one borough
+  per 2,000 residents, each a copy of the shipped layout (`assets/gen_map.py`), so employers and food stay near
+  the homes; the one-per-city buildings and the shipped eight districts (by name: seeding passes look them up)
+  in the central borough; the other boroughs split by zone within `MAX_DISTRICTS`; two El lines per borough row,
+  two per column. At 2,000 residents and seed 0 it is `assets/map.txt` exactly (a test). The committed stand-in
+  is `assets/maps/gen20k.txt` (1,280 x 376, 26 districts, 14 lines, 367 KB). Per 1,000 residents: 200 Blocks,
+  6 Vat Farms, 1.5 Markets, 1.5 Bars, 1 Hideout, 1 Security Office, 80 Lots; one Precinct, Civic Hall, Reserve
+  Depot and Recycler per city.
+- **The adapter** (`citysim-cli import-graphics`): docs/IMPORT_GRAPHICS.md (the mapping, the gaps, asks for
+  their side). The fixture is `assets/maps/isle_m_k4.txt` (the whole island at 8 m tiles, 750 x 469).
+- **Smoke, seed 42, on main + S3a (`ca3b244`)** (`run --population N --scaled --map ...`; ticks/s on this box alone; before S3a: gen20k ~1,000 / ~450 late, the import 1,100-2,600):
+
+  | map | residents | days | employed | homeless | starved (cum.) | Murders | corps | ticks/s |
+  | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+  | gen20k | 20,000 | d0 / d10 / d20 / d29 | 17.0 % / 17.1 % / 17.1 % / 21.2 % | 80 / 16 / 4,798 / 12,314 | 0 / 0 / 0 / 3,617 | 100 in 30 days | 9 / 9 / 9 / 9 | ~1,300 (d0-6), ~1,000 (d8-13), ~780 (d15-20), ~450-550 (d24-29) |
+  | isle_m_k4 | 5,000 | d0 / d9 | 35.3 % / 36.9 % | 15 / 6 | 0 / 0 | 10 in 10 days | 9 / 9 | 3,000-4,900 |
+  | (2k reference, map.txt) | 2,000 | d0 / d29 | 42.9 % / 51.4 % | 80 / 196 | 0 / 0 | 12 in 30 days | 9 | ~4,100-6,500 (six seeds in parallel) |
+
+  **The 20k city collapses from day 15** (evictions: RentShort 25k, Evicted 16k; homeless 12k; 3,617 starved
+  with 350k food on the Market shelves: no coins to buy it). The map is not the binding constraint; the config's
+  absolute keys are (S4's list, measured here): `[corps] farms / markets / offices` (12 of 120 Farms, 3 of 30
+  Markets and Bars, 2 of 20 Security Offices owned at day 0; `Config::scaled_to` leaves them by design);
+  the World market's export demand (food exported 362/day at 20k against 376 at 2k: the outside money
+  doesn't scale, wages 19.5k/day against 4.4k); `market_initial` is per Market and `scaled_to` scales it too
+  (444k food on the shelves at day 0 against 5.8k: 100x with 10x the Markets); the seeded venues, Labs, Fabs and
+  Clinics are fixed counts (3 Clubs, 2 Fabs, 1 Lab at 20k). On a map without the shipped district names
+  (the import) five seeding passes find nothing: no Garage, Clinic, Lab, Feed, Fixer or Unplugged chapel
+  (`assets::seed_sellers`, `virt::SEED_LABS`, `news`, `contracts::SEEDED_FIXERS`, `creeds`); a name-agnostic
+  rule (by zone, or by the map's own tag) is S4's. The import otherwise runs: both El lines carry riders
+  (fares 3,066/day), the piers feed migrants, no starvation in 10 days.
+- **Manhattan commute estimates vs the real walk** (S3a's open item, measured, not fixed): 2,000 random
+  Block-to-workplace pairs, `bigpath::find` steps over Manhattan: `isle_m_k4` p50 1.01 / p90 1.05 / max 1.37;
+  the 2 m import p50 1.00 / p90 1.03 / max 1.58; `gen20k` max 1.28. Small today (the import's hills read as
+  Water and its street grid rarely detours); docs/IMPORT_GRAPHICS.md.
+
 ### S4: per-capita config and the 20k profile
 - Convert the absolute keys that assume 2,000 (probe list: `[lod] max_full/max_coarse`, plan budgets, stock caps,
   gang homes/names, sweeps, migrants, riots, money floors/caps, `max_hunts`, `cook_target`, ...) to per-1,000 or

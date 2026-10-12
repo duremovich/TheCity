@@ -45,7 +45,13 @@ use crate::world::World;
 /// `sanitation_weight`, `DistrictWatch`, `EconCols.d_*`) read a shorter
 /// saved tuple padded (the weights with 1.0, the rest with their default);
 /// the packed `DayTrace` keeps a district under 16 where it was.
-pub const SAVE_VERSION: u8 = 12;
+/// 13: Scale S3b (docs/SCALE_20K.md): the map's grids are run-length strings
+/// (`Map` saves `tiles_rle` / `zones_rle`: the whole map 1.3 MB for the
+/// 3,000 x 1,875 import against ~62 MB of enum names, 61 KB for the 2k map
+/// against ~550 KB), plus the map's own `districts`, `district_rle` and
+/// `lines` (serde defaults). A save before 13 carries `tiles` / `zones` as
+/// one enum name per tile and loads as it did (`map::MapRepr`).
+pub const SAVE_VERSION: u8 = 13;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

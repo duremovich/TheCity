@@ -322,6 +322,7 @@ version = "0.1.0"
 dependencies = [
  "citysim",
  "clap",
+ "serde_json",
  "toml",
 ]
 

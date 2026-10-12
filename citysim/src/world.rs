@@ -1308,10 +1308,13 @@ impl NameTables {
 impl World {
     /// Build the initial city: map, buildings, gang, 300 citizens with homes
     /// and jobs. Deterministic for a given `(seed, config)`.
-    pub fn new(seed: u64, config: Config) -> World {
+    pub fn new(seed: u64, mut config: Config) -> World {
         // P10: the starting policy (`[policy]`) seeds the policy levers in
         // `Levers::from_config` (it was `econ::apply`'s config rewrite).
-        let map = Map::load(&config.asset(&config.world.map));
+        // Scale S3b: the map from its source (a text map by default, or the
+        // generator); a map's own districts and El lines replace the config's.
+        let map = crate::map::MapSource::from_config(&config).load();
+        map.apply_to(&mut config);
         let names = NameTables::load(&config);
         // Absent until `citysim-cli calibrate` has written it; any other read
         // failure is a broken checkout and must not pass silently.
@@ -1765,7 +1768,20 @@ impl World {
         self.recompute_wealth();
 
         // --- homes: seeded shuffle, residents_per_home each ----------------
-        let mut homes = self.buildings_by_kind.get(&BuildingKind::Home).cloned().unwrap_or_default();
+        // Scale S3b: a Home of `floors` storeys holds a household a floor
+        // (a map Home with no floors field is one slot: the 2k city's dealing
+        // is unchanged).
+        let mut homes: Vec<EntityId> = self
+            .buildings_by_kind
+            .get(&BuildingKind::Home)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .flat_map(|h| {
+                let floors = self.comp::<Building>(h).map_or(1, |b| usize::from(b.floors.max(1)));
+                std::iter::repeat_n(h, floors)
+            })
+            .collect();
         // Under capacity, spread the households over the whole map by even
         // stride (M10 D24), so a 500-agent world still spans every zone.
         let per = (wc.residents_per_home as usize).max(1);

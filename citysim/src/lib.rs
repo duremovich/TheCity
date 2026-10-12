@@ -20,6 +20,7 @@ pub mod ledger;
 pub mod levers;
 pub mod living;
 pub mod map;
+pub mod mapgen;
 pub mod mood;
 pub mod needs;
 pub mod outside;

@@ -113,7 +113,11 @@ pub fn rebuild(world: &mut World) {
     for y in 0..h {
         for x in 0..w {
             let p = TilePos { x: x as u16, y: y as u16 };
-            let d = row_of(&rows, world.map.zone(p), x as u16);
+            // Scale S3b: a map's districts grid decides where it has one.
+            let d = match world.map.district_at(p) {
+                Some(d) => d.min(n.saturating_sub(1) as u8),
+                None => row_of(&rows, world.map.zone(p), x as u16),
+            };
             let i = y * w + x;
             let street = world.map.walkable(p) && !in_building[i];
             grid[i] = d | if street { STREET_BIT } else { 0 };
