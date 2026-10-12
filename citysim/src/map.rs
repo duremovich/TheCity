@@ -28,6 +28,10 @@ pub struct MapBuilding {
     pub floors: u8,
 }
 
+/// The largest map side (Scale S2): `TilePos` and `Rect` are `u16`, and a
+/// rect's exclusive edge (`x + w`) is computed in `u32`.
+pub const MAX_SIDE: usize = u16::MAX as usize;
+
 fn v1_w() -> u16 {
     96
 }
@@ -96,7 +100,10 @@ impl Map {
                 (w, h, 0)
             }
         };
-        assert!(w > 0 && h > 0 && w <= 256 && h <= 256, "map is {w} x {h}; both must be 1..=256 (TilePos is u8)");
+        assert!(
+            w > 0 && h > 0 && w <= MAX_SIDE && h <= MAX_SIDE,
+            "map is {w} x {h}; both must be 1..={MAX_SIDE} (TilePos is u16)"
+        );
         assert!(lines.len() > at + h, "map must have {h} grid rows then a blank line");
 
         let mut tiles = Vec::with_capacity(w * h);
@@ -142,7 +149,8 @@ impl Map {
             let kind = BuildingKind::parse(parts[1])
                 .unwrap_or_else(|| panic!("line {}: unknown building kind {}", n + 1, parts[1]));
             let num = |s: &str| -> u8 { s.parse().unwrap_or_else(|_| panic!("line {}: bad number {s}", n + 1)) };
-            let rect = Rect { x: num(parts[2]), y: num(parts[3]), w: num(parts[4]), h: num(parts[5]) };
+            let coord = |s: &str| -> u16 { s.parse().unwrap_or_else(|_| panic!("line {}: bad number {s}", n + 1)) };
+            let rect = Rect { x: coord(parts[2]), y: coord(parts[3]), w: coord(parts[4]), h: coord(parts[5]) };
             let tier = parts.get(6).map_or(1, |s| num(s));
             assert!(tier <= 2, "line {}: tier {tier} must be 0..=2", n + 1);
             // Jobs and room J6: the optional eighth field.
@@ -171,7 +179,7 @@ impl Map {
         let mut farmland = 0;
         for y in usize::from(rect.y)..usize::from(rect.y) + usize::from(rect.h) {
             for x in usize::from(rect.x)..usize::from(rect.x) + usize::from(rect.w) {
-                let p = TilePos { x: x as u8, y: y as u8 };
+                let p = TilePos { x: x as u16, y: y as u16 };
                 let t = self.tile_at(p);
                 if rect.on_perimeter(p) {
                     match (t, lot) {
@@ -218,7 +226,7 @@ impl Map {
     fn validate_orphans(&self) {
         for y in 0..self.h() {
             for x in 0..self.w() {
-                let p = TilePos { x: x as u8, y: y as u8 };
+                let p = TilePos { x: x as u16, y: y as u16 };
                 let t = self.tile_at(p);
                 if matches!(t, TileKind::Door | TileKind::Farmland) {
                     assert!(
@@ -300,7 +308,7 @@ impl Map {
         [(x - 1, y), (x + 1, y), (x, y - 1), (x, y + 1)]
             .into_iter()
             .filter(|&(nx, ny)| self.in_bounds(nx, ny))
-            .map(|(nx, ny)| TilePos { x: nx as u8, y: ny as u8 })
+            .map(|(nx, ny)| TilePos { x: nx as u16, y: ny as u16 })
     }
 
     /// Road tiles on the map border, ascending by `(y, x)`.
@@ -311,7 +319,7 @@ impl Map {
             for x in 0..w {
                 let on_edge = x == 0 || y == 0 || x == w - 1 || y == h - 1;
                 if on_edge && self.tile(x, y) == TileKind::Road {
-                    out.push(TilePos { x: x as u8, y: y as u8 });
+                    out.push(TilePos { x: x as u16, y: y as u16 });
                 }
             }
         }

@@ -211,12 +211,12 @@ pub fn immigration_factor(world: &World) -> f32 {
 }
 
 /// This week's immigrants: `immigration_per_week × immigration_factor`, rounded.
-pub fn immigrants_this_week(world: &World) -> u8 {
+pub fn immigrants_this_week(world: &World) -> u16 {
     let lever = world.levers.immigration_per_week;
     if !world.config.classes.couple_immigration {
         return lever;
     }
-    (f32::from(lever) * immigration_factor(world)).round().clamp(0.0, 255.0) as u8
+    (f32::from(lever) * immigration_factor(world)).round().clamp(0.0, 65535.0) as u16
 }
 
 /// D36: evicted within `[classes] evicted_recruit_days` and lawless: desperate

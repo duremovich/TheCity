@@ -24,7 +24,7 @@ mod shadow;
 
 use clap::{Parser, Subcommand, ValueEnum};
 
-use citysim::{save, stats, Config, Lod, PlayerCommand, Posture, World, TICKS_PER_DAY};
+use citysim::{save, Config, Lod, PlayerCommand, Posture, World, TICKS_PER_DAY};
 
 #[derive(Parser)]
 #[command(name = "citysim-cli", about = "Living City Simulator headless runner")]
@@ -1058,10 +1058,10 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         "tax" if value.eq_ignore_ascii_case("auto") => PlayerCommand::SetTaxAuto,
         "tax" => PlayerCommand::SetTaxRate(num("rate")? as f32),
         "sentence_mult" => PlayerCommand::SetSentenceMult(num("multiplier")? as f32),
-        "guard_count" => PlayerCommand::SetGuardCount(num("count")? as u8),
+        "guard_count" => PlayerCommand::SetGuardCount(num("count")? as u16),
         // Jobs v2 J17 (P5a): `civic=auto` releases a guard/Sanitation pin to the budget.
         "civic" if value.eq_ignore_ascii_case("auto") => PlayerCommand::SetCivicAuto,
-        "immigration_per_week" => PlayerCommand::SetImmigrationPerWeek(num("count")? as u8),
+        "immigration_per_week" => PlayerCommand::SetImmigrationPerWeek(num("count")? as u16),
         "dole_per_day" => PlayerCommand::SetDolePerDay(num("coins")? as u8),
         "law_posture" => PlayerCommand::SetLawPosture(match value.to_ascii_lowercase().as_str() {
             "auto" => None,
@@ -1078,7 +1078,7 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 weight: wt.parse::<f32>().map_err(|e| format!("{spec}: bad weight: {e}"))?,
             }
         }
-        "sanitation" => PlayerCommand::SetSanitation(num("count")?.clamp(0.0, 255.0) as u8),
+        "sanitation" => PlayerCommand::SetSanitation(num("count")?.clamp(0.0, 65535.0) as u16),
         "sanitation_weight" => {
             let (d, wt) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <district>:<weight>"))?;
             PlayerCommand::SetSanitationWeight {
@@ -1346,7 +1346,7 @@ fn run(args: RunArgs) -> Result<(), String> {
     };
 
     if args.report {
-        println!("{}", stats::CSV_HEADER);
+        println!("{}", citysim::systems::stats::csv_header(&world));
     }
 
     let mut next_lever = 0;

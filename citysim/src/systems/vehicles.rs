@@ -381,7 +381,7 @@ pub fn on_demoted(world: &mut World, agent: EntityId) {
 // ---------------------------------------------------------------------------
 
 fn midpoint(a: TilePos, b: TilePos) -> TilePos {
-    TilePos { x: ((u16::from(a.x) + u16::from(b.x)) / 2) as u8, y: ((u16::from(a.y) + u16::from(b.y)) / 2) as u8 }
+    TilePos { x: ((u32::from(a.x) + u32::from(b.x)) / 2) as u16, y: ((u32::from(a.y) + u32::from(b.y)) / 2) as u16 }
 }
 
 /// Body reflex plus the Kit's (the dodge and the driver's term).

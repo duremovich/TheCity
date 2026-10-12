@@ -221,7 +221,7 @@ fn links(world: &World) -> Vec<Link> {
     for (&da, &na) in &public {
         let bits = world.district_adjacent.get(da.index()).copied().unwrap_or(0);
         for (&db, &nb) in public.range(DistrictId(da.0.saturating_add(1))..) {
-            if db.index() < 16 && bits & (1 << db.index()) != 0 {
+            if db.index() < crate::components::MAX_DISTRICTS && bits & (1 << db.index()) != 0 {
                 out.push(link(na, nb, LinkKind::Street, cfg.public_links_tier));
             }
         }

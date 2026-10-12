@@ -34,7 +34,7 @@ pub fn fill(world: &World, app: &App, bounds: (u16, u16, u16, u16)) {
     let (w, ht) = (world.map.w() as u16, world.map.h() as u16);
     for y in vy0..y1.min(ht) {
         for x in vx0..x1.min(w) {
-            let d = world.district_of(TilePos { x: x as u8, y: y as u8 });
+            let d = world.district_of(TilePos { x, y });
             let v = h.get(d.index()).copied().unwrap_or(0.0);
             if v <= 0.0 {
                 continue;

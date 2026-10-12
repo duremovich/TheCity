@@ -17,7 +17,7 @@ use std::collections::BTreeMap;
 use rand::Rng;
 use smallvec::SmallVec;
 
-use crate::components::{Building, BuildingKind, Corp, Job, Personality, Role};
+use crate::components::{Building, BuildingKind, Corp, DistrictMask, Job, Personality, Role, MAX_DISTRICTS};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::ownership::{self, Flow};
@@ -89,16 +89,16 @@ pub fn feed_state(world: &World, feed: EntityId) -> Option<&FeedState> {
 
 /// The district bitset a Feed covers (spec § 7): every district when its
 /// owner is a corp or the city, else its own and the adjacent ones.
-pub fn covers_for(world: &World, feed: EntityId) -> u16 {
-    let n = world.districts.len().min(16);
-    let all: u16 = if n >= 16 { u16::MAX } else { (1u16 << n) - 1 };
+pub fn covers_for(world: &World, feed: EntityId) -> DistrictMask {
+    let n = world.districts.len().min(MAX_DISTRICTS);
+    let all: DistrictMask = if n >= MAX_DISTRICTS { DistrictMask::MAX } else { (1 << n) - 1 };
     let owner = world.comp::<Building>(feed).and_then(|b| b.owner);
     if owner.is_none_or(|o| world.has::<Corp>(o)) {
         return all;
     }
     let d = world.district_of_building(feed).index();
     let adj = world.district_adjacent.get(d).copied().unwrap_or(0);
-    (adj | (1u16 << d.min(15))) & all
+    (adj | (1 << d.min(MAX_DISTRICTS - 1))) & all
 }
 
 /// A default name for a Feed founded in play: "{owner's last name} Feed",
@@ -639,7 +639,7 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
         let owner = world.comp::<Building>(feed).and_then(|b| b.owner);
         let mut cands: BTreeMap<DeedKey, (f32, PoolEntry)> = BTreeMap::new();
         for (d, pool) in world.rumours.iter().enumerate() {
-            if d >= 16 || st.covers & (1u16 << d) == 0 {
+            if d >= MAX_DISTRICTS || st.covers & (1 << d) == 0 {
                 continue;
             }
             for e in &pool.entries {
@@ -713,8 +713,8 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
             }
             let Some(actor) = r.actor else { continue };
             let press = (slant * 100.0).round().clamp(-100.0, 100.0) as i8;
-            for d in 0..world.rumours.len().min(16) {
-                if st.covers & (1u16 << d) == 0 {
+            for d in 0..world.rumours.len().min(MAX_DISTRICTS) {
+                if st.covers & (1 << d) == 0 {
                     continue;
                 }
                 let entry = PoolEntry {

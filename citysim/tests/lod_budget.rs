@@ -271,7 +271,7 @@ fn test_reserved_bed_cannot_be_taken() {
     // One bed left there.
     let beds = usize::from(w.comp::<Building>(h).expect("hotel").capacity);
     let taken = beds - street::free_beds(&w, h);
-    w.comp_mut::<Building>(h).expect("hotel").capacity = u8::try_from(taken + 1).expect("u8");
+    w.comp_mut::<Building>(h).expect("hotel").capacity = u16::try_from(taken + 1).expect("u16");
     assert_eq!(street::free_beds(&w, h), 1);
     let door = w.comp::<Building>(h).map(|b| w.outside_door(b)).expect("door");
     let pick: Vec<EntityId> = w

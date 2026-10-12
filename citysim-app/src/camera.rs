@@ -44,7 +44,7 @@ impl Camera {
         if t.x < 0.0 || t.y < 0.0 || t.x >= self.map_w || t.y >= self.map_h {
             return None;
         }
-        Some(TilePos { x: t.x as u8, y: t.y as u8 })
+        Some(TilePos { x: t.x as u16, y: t.y as u16 })
     }
 
     /// Visible tiles as `(x0, y0, x1, y1)`, right and bottom exclusive, in
@@ -65,18 +65,18 @@ impl Camera {
         self.px_per_tile = (screen_width() / self.map_w).min(screen_height() / self.map_h).max(1.0);
     }
 
-    /// The world's view rect: `view_bounds` with `w` and `h` clamped to 255
-    /// (`u8`). The world's on-screen test adds a margin, so the one column or
+    /// The world's view rect: `view_bounds` with `w` and `h` clamped to 65,535
+    /// (`u16`). The world's on-screen test adds a margin, so the one column or
     /// row a full-map frame loses is still counted as on screen. Passed to
     /// `world.set_view` every frame.
     pub fn view_rect(&self) -> TileRect {
         let (x0, y0, x1, y1) = self.view_bounds();
         let (x0, y0, x1, y1) = (f32::from(x0), f32::from(y0), f32::from(x1), f32::from(y1));
         TileRect {
-            x: x0 as u8,
-            y: y0 as u8,
-            w: (x1 - x0).clamp(1.0, 255.0) as u8,
-            h: (y1 - y0).clamp(1.0, 255.0) as u8,
+            x: x0 as u16,
+            y: y0 as u16,
+            w: (x1 - x0).clamp(1.0, 65535.0) as u16,
+            h: (y1 - y0).clamp(1.0, 65535.0) as u16,
         }
     }
 

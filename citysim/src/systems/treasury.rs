@@ -219,15 +219,15 @@ pub fn sweeper_wage(world: &World) -> i64 {
 /// J16: `target` coins a day spent in priority order: police (`wage_guard`
 /// each) up to `police_ceiling`, then Sanitation up to `sanitation_max`.
 /// Headcounts, before the pace.
-pub fn civic_allocation(world: &World, target: i64) -> (u8, u8) {
+pub fn civic_allocation(world: &World, target: i64) -> (u16, u16) {
     let cfg = &world.config.treasury;
     let target = target.max(0);
     let police_cap = police_ceiling(world);
     let gw = world.config.economy.wage(Role::Guard).max(1);
-    let guards = (target / gw).min(police_cap).clamp(0, i64::from(u8::MAX));
+    let guards = (target / gw).min(police_cap).clamp(0, i64::from(u16::MAX));
     let left = target - guards * gw;
-    let sweepers = (left / sweeper_wage(world)).min(i64::from(cfg.sanitation_max)).clamp(0, i64::from(u8::MAX));
-    (guards as u8, sweepers as u8)
+    let sweepers = (left / sweeper_wage(world)).min(i64::from(cfg.sanitation_max)).clamp(0, i64::from(u16::MAX));
+    (guards as u16, sweepers as u16)
 }
 
 /// J16: the police ceiling, `police_per_1000` x population ÷ 1,000, capped
@@ -245,6 +245,6 @@ pub fn police_ceiling(world: &World) -> i64 {
 
 /// J16: a headcount moves up at once (the reconcilers hire five a day) and
 /// down at most `pace` a day.
-pub fn paced(current: u8, want: u8, pace: u8) -> u8 {
-    want.max(current.saturating_sub(pace))
+pub fn paced(current: u16, want: u16, pace: u8) -> u16 {
+    want.max(current.saturating_sub(u16::from(pace)))
 }

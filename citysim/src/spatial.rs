@@ -285,7 +285,7 @@ mod tests {
             let x = (s >> 8) as usize % w;
             s = s.wrapping_mul(1_103_515_245).wrapping_add(12_345);
             let y = (s >> 8) as usize % h;
-            pts.push(TilePos { x: x as u8, y: y as u8 });
+            pts.push(TilePos { x: x as u16, y: y as u16 });
         }
         pts.push(TilePos { x: 255, y: 191 });
         pts.push(TilePos { x: 0, y: 0 });

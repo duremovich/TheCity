@@ -734,7 +734,7 @@ pub fn spots_daily(world: &mut World) {
         let near: Vec<TilePos> = d
             .streets
             .iter()
-            .map(|&ix| TilePos { x: (ix as usize % w) as u8, y: (ix as usize / w) as u8 })
+            .map(|&ix| TilePos { x: (ix as usize % w) as u16, y: (ix as usize / w) as u16 })
             .filter(|&t| doors.iter().any(|&dd| dd.manhattan(t) <= BARREL_REACH))
             .collect();
         if near.is_empty() {
@@ -2151,7 +2151,7 @@ pub fn hourly(world: &mut World) {
 /// `d{i}_street_density`: HangOut and venue occupants per district, the
 /// day's hourly mean.
 fn sample_density(world: &mut World) {
-    let n = crate::stats::DISTRICT_SLOTS;
+    let n = crate::systems::stats::csv_slots(world).1;
     let mut counts = vec![0u32; n];
     for (t, v) in &world.hangouts {
         let d = world.district_of(*t).index();

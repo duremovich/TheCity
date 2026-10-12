@@ -608,7 +608,7 @@ pub fn vendetta_building(world: &World, gang: EntityId, v: EntityId) -> Option<E
         return world.hideout_of(v);
     }
     let c = world.comp::<Corp>(v)?;
-    let mut mask: u16 = 0;
+    let mut mask: crate::components::DistrictMask = 0;
     if let Some(g) = world.comp::<Gang>(gang) {
         for &h in &g.territory {
             mask |= 1 << world.district_of_building(h).index();
@@ -668,7 +668,8 @@ pub fn district_ground(world: &World, gang: EntityId) -> (Vec<bool>, Vec<bool>) 
 /// prize a won raid on it takes (`raid::corp_prize_value`).
 pub fn corp_prize(world: &World, held: &[bool], hoard_corp: Option<EntityId>) -> Option<(EntityId, i64)> {
     let corp = hoard_corp?;
-    let mask: u16 = held.iter().enumerate().filter(|(_, &h)| h).fold(0, |m, (i, _)| m | (1 << i));
+    let mask: crate::components::DistrictMask =
+        held.iter().enumerate().filter(|(_, &h)| h).fold(0, |m, (i, _)| m | (1 << i));
     if mask == 0 {
         return None;
     }

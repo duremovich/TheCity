@@ -743,7 +743,7 @@ pub fn grow_hotels(world: &mut World) {
         if owner.is_none() && crate::systems::life::housing_payer(world, None, cost).is_none() {
             continue;
         }
-        let per = capacity / floors;
+        let per = capacity / u16::from(floors);
         let new_capacity =
             crate::systems::founding::with_floors(world, BuildingKind::Hotel, per, floors + 1).max(capacity);
         if let Some(bd) = world.comp_mut::<Building>(h) {
@@ -809,13 +809,13 @@ pub fn grow_shanties(world: &mut World) {
             .map(|(&d, &(n, x, y))| (std::cmp::Reverse(n), d, x / i64::from(n.max(1)), y / i64::from(n.max(1))))
             .min()
             .and_then(|(_, _, x, y)| {
-                let at = TilePos { x: x as u8, y: y as u8 };
+                let at = TilePos { x: x as u16, y: y as u16 };
                 lots.iter().copied().filter_map(|l| door_of(world, l).map(|d| (d.manhattan(at), l))).min()
             });
         let Some((_, lot)) = pick else { break };
         let now = world.tick;
         if let Some(bd) = world.comp_mut::<Building>(lot) {
-            bd.capacity = u8::try_from(cap).unwrap_or(u8::MAX);
+            bd.capacity = u16::try_from(cap).unwrap_or(u16::MAX);
             bd.derelict = true;
             bd.empty_since = Some(now);
         }

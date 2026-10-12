@@ -84,22 +84,16 @@ pub fn draw(world: &World, app: &App) {
     clear_background(hex(C_GROUND));
     let cam = &app.camera;
     let ppt = cam.px_per_tile;
-    // Culling uses the u16 bounds so a whole-map frame reaches column 255.
+    // Culling uses the u16 bounds so a whole-map frame reaches the last column.
     let (vx0, vy0, x1, y1) = cam.view_bounds();
-    let in_view =
-        |t: TilePos| u16::from(t.x) >= vx0 && u16::from(t.x) < x1 && u16::from(t.y) >= vy0 && u16::from(t.y) < y1;
-    let rect_in_view = |r: &citysim::Rect| {
-        u16::from(r.x) < x1
-            && vx0 < u16::from(r.x) + u16::from(r.w)
-            && u16::from(r.y) < y1
-            && vy0 < u16::from(r.y) + u16::from(r.h)
-    };
+    let in_view = |t: TilePos| t.x >= vx0 && t.x < x1 && t.y >= vy0 && t.y < y1;
+    let rect_in_view = |r: &citysim::Rect| r.x < x1 && vx0 < r.x + r.w && r.y < y1 && vy0 < r.y + r.h;
 
     // 1. tiles, culled to the view
     for y in vy0..y1 {
         for x in vx0..x1 {
             let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
-            let t = TilePos { x: x as u8, y: y as u8 };
+            let t = TilePos { x, y };
             draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, tile_colour(world.map.tile_at(t), world.map.zone(t)));
         }
     }
@@ -145,7 +139,7 @@ pub fn draw(world: &World, app: &App) {
         let (w, h) = (world.map.w() as u16, world.map.h() as u16);
         for y in vy0..y1.min(h) {
             for x in vx0..x1.min(w) {
-                let d = world.district_of(TilePos { x: x as u8, y: y as u8 });
+                let d = world.district_of(TilePos { x, y });
                 let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
                 match fills.get(d.index()) {
                     Some(Some(c)) => draw_rectangle(p.x, p.y, ppt + 0.5, ppt + 0.5, *c),
@@ -175,7 +169,7 @@ pub fn draw(world: &World, app: &App) {
         let (w, h) = (world.map.w() as u16, world.map.h() as u16);
         for y in vy0..y1.min(h) {
             for x in vx0..x1.min(w) {
-                let d = world.district_of(TilePos { x: x as u8, y: y as u8 });
+                let d = world.district_of(TilePos { x, y });
                 let n = hooked.get(d.index()).copied().unwrap_or(0);
                 if n == 0 {
                     continue;
@@ -216,7 +210,7 @@ pub fn draw(world: &World, app: &App) {
         let (w, h) = (world.map.w() as u16, world.map.h() as u16);
         for y in vy0..y1.min(h) {
             for x in vx0..x1.min(w) {
-                let t = TilePos { x: x as u8, y: y as u8 };
+                let t = TilePos { x, y };
                 if !world.is_street(t) {
                     continue;
                 }
@@ -405,7 +399,7 @@ pub fn draw(world: &World, app: &App) {
     // their stops (the flyer's lerp), whatever the tier (the rides map is small).
     for &id in world.rides.keys() {
         let Some((x, y)) = citysim::systems::transit::aboard_at(world, id) else { continue };
-        if !in_view(TilePos { x: x as u8, y: y as u8 }) {
+        if !in_view(TilePos { x: x as u16, y: y as u16 }) {
             continue;
         }
         let p = cam.tile_to_screen(vec2(x, y));
@@ -461,7 +455,7 @@ pub fn draw(world: &World, app: &App) {
         let sel = app.selected_district;
         for y in vy0..y1.min(h) {
             for x in vx0..x1.min(w) {
-                let t = TilePos { x: x as u8, y: y as u8 };
+                let t = TilePos { x, y };
                 let d = world.district_of(t);
                 let p = cam.tile_to_screen(vec2(f32::from(x), f32::from(y)));
                 let colour = |o: citysim::DistrictId| {
@@ -472,13 +466,13 @@ pub fn draw(world: &World, app: &App) {
                     }
                 };
                 if x + 1 < w {
-                    let e = world.district_of(TilePos { x: (x + 1) as u8, y: y as u8 });
+                    let e = world.district_of(TilePos { x: (x + 1), y });
                     if e != d {
                         draw_line(p.x + ppt, p.y, p.x + ppt, p.y + ppt, 2.0, colour(e));
                     }
                 }
                 if y + 1 < h {
-                    let s = world.district_of(TilePos { x: x as u8, y: (y + 1) as u8 });
+                    let s = world.district_of(TilePos { x, y: (y + 1) });
                     if s != d {
                         draw_line(p.x, p.y + ppt, p.x + ppt, p.y + ppt, 2.0, colour(s));
                     }
@@ -550,7 +544,7 @@ fn draw_vehicles(world: &World, app: &App, in_view: &dyn Fn(TilePos) -> bool) {
     let cam = &app.camera;
     let ppt = cam.px_per_tile;
     // Parked: up to four per door, in a 2 x 2 grid over the door tile.
-    let mut per_door: std::collections::BTreeMap<(u8, u8), u8> = std::collections::BTreeMap::new();
+    let mut per_door: std::collections::BTreeMap<(u16, u16), u8> = std::collections::BTreeMap::new();
     for &v in &world.vehicles {
         let Some(x) = world.comp::<Asset>(v) else { continue };
         let AssetLoc::Parked(b) = x.loc else { continue };
@@ -605,7 +599,7 @@ fn draw_vehicles(world: &World, app: &App, in_view: &dyn Fn(TilePos) -> bool) {
             _ => None,
         };
         let Some(at) = at else { continue };
-        if !in_view(TilePos { x: at.x as u8, y: at.y as u8 }) {
+        if !in_view(TilePos { x: at.x as u16, y: at.y as u16 }) {
             continue;
         }
         let p = cam.tile_to_screen(at);

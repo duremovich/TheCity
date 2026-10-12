@@ -36,7 +36,16 @@ use crate::world::World;
 /// `StatTable.p_dodge_caught` and `[transit]` in the saved config (serde
 /// defaults, none written with the El off; a pre-transit save loads with
 /// its saved config, so the El stays off for it).
-pub const SAVE_VERSION: u8 = 11;
+/// 12: Scale S2 (docs/SCALE_20K.md): `TilePos`, `Rect`, `Building.capacity`
+/// / `full_capacity`, the `guard_count` / `immigration_per_week` /
+/// `sanitation_count` levers, `District.guards` / `sweepers` and
+/// `FeedState.covers` widened (RON writes numbers, so an older save's
+/// values read as they were); `MAX_DISTRICTS` 12 -> 32, the per-district
+/// arrays (`Levers.guard_weight`, `stance_pin`, `curfew`,
+/// `sanitation_weight`, `DistrictWatch`, `EconCols.d_*`) read a shorter
+/// saved tuple padded (the weights with 1.0, the rest with their default);
+/// the packed `DayTrace` keeps a district under 16 where it was.
+pub const SAVE_VERSION: u8 = 12;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -93,7 +93,7 @@ pub fn run(world: &mut World) {
     // Guard positions once per tick for the safety modifier.
     // Sorted by row so each agent checks only the guards within `sight` rows
     // (M11: twelve private guards made the all-pairs scan a third dearer).
-    let mut guard_tiles: Vec<(u8, EntityId, crate::components::TilePos)> = world
+    let mut guard_tiles: Vec<(u16, EntityId, crate::components::TilePos)> = world
         .guards()
         .iter()
         .copied()

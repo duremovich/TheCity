@@ -14,8 +14,8 @@
 use std::collections::BTreeSet;
 
 use crate::components::{
-    Brain, Building, BuildingKind, Controller, Corp, CorpShock, District, DistrictId, Gang, Household, Job, Mood,
-    Position, Role, Shock, TilePos, Zone, MAX_DISTRICTS,
+    Brain, Building, BuildingKind, Controller, Corp, CorpShock, District, DistrictId, DistrictMask, Gang, Household,
+    Job, Mood, Position, Role, Shock, TilePos, Zone, MAX_DISTRICTS,
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -24,8 +24,8 @@ use crate::world::World;
 /// Bit 7 of a `district_grid` byte: walkable and inside no building rect
 /// (the litter and sweep domain, phase 3).
 pub const STREET_BIT: u8 = 0x80;
-/// The low nibble of a `district_grid` byte.
-const ID_MASK: u8 = 0x0f;
+/// The low 6 bits of a `district_grid` byte (Scale S2: `MAX_DISTRICTS` 32).
+const ID_MASK: u8 = 0x3f;
 /// Days kept in `District::crimes`.
 const CRIME_DAYS: usize = 7;
 /// M12 D42: the happiness a curfew costs a district's residents.
@@ -95,9 +95,9 @@ pub fn rebuild(world: &mut World) {
             continue;
         }
         let r = b.rect;
-        for y in u16::from(r.y)..u16::from(r.y) + u16::from(r.h) {
-            for x in u16::from(r.x)..u16::from(r.x) + u16::from(r.w) {
-                let (x, y) = (usize::from(x), usize::from(y));
+        for y in u32::from(r.y)..u32::from(r.y) + u32::from(r.h) {
+            for x in u32::from(r.x)..u32::from(r.x) + u32::from(r.w) {
+                let (x, y) = (x as usize, y as usize);
                 if x < w && y < h {
                     in_building[y * w + x] = true;
                 }
@@ -112,7 +112,7 @@ pub fn rebuild(world: &mut World) {
     let mut sum = vec![(0u64, 0u64, 0u64); n];
     for y in 0..h {
         for x in 0..w {
-            let p = TilePos { x: x as u8, y: y as u8 };
+            let p = TilePos { x: x as u16, y: y as u16 };
             let d = row_of(&rows, world.map.zone(p), x as u16);
             let i = y * w + x;
             let street = world.map.walkable(p) && !in_building[i];
@@ -127,7 +127,7 @@ pub fn rebuild(world: &mut World) {
             }
         }
     }
-    let mut adjacent = vec![0u16; n];
+    let mut adjacent: Vec<DistrictMask> = vec![0; n];
     for y in 0..h {
         for x in 0..w {
             let d = usize::from(grid[y * w + x] & ID_MASK);
@@ -172,7 +172,7 @@ pub fn rebuild(world: &mut World) {
         d.streets = std::mem::take(&mut streets[i]);
         let (sx, sy, c) = sum[i];
         d.centroid = match ((sx + c / 2).checked_div(c), (sy + c / 2).checked_div(c)) {
-            (Some(x), Some(y)) => TilePos { x: x as u8, y: y as u8 },
+            (Some(x), Some(y)) => TilePos { x: x as u16, y: y as u16 },
             _ => TilePos::default(),
         };
     }
@@ -447,7 +447,7 @@ pub fn sanitation(world: &mut World) {
         })
         .collect();
     let alloc = crate::util::largest_remainder(workers.len() as u32, &weights);
-    let old: Vec<u8> = world.districts.iter().map(|d| d.sweepers).collect();
+    let old: Vec<u16> = world.districts.iter().map(|d| d.sweepers).collect();
     // L2 shadow fixes item 14: the same allocation, each sweeper dealt its
     // home district's slot first (else yesterday's beat), the rest in order
     // (the beat moved nightly: Spire one night, Civic the next, 130-265 min
@@ -459,7 +459,7 @@ pub fn sanitation(world: &mut World) {
                 .map(|h| w.district_of_building(h))
                 .or_else(|| w.sweep_beats.get(&s).copied())
         };
-        let mut left: Vec<u8> = alloc.clone();
+        let mut left: Vec<u16> = alloc.clone();
         let mut out: Vec<(EntityId, DistrictId)> = Vec::new();
         let mut rest: Vec<EntityId> = Vec::new();
         for &s in &workers {

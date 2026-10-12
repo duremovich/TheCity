@@ -14,7 +14,7 @@ fn world(seed: u64) -> World {
 
 fn random_walkable(w: &World, rng: &mut rand_chacha::ChaCha8Rng) -> TilePos {
     loop {
-        let p = TilePos { x: rng.random_range(0..w.map.w() as u8), y: rng.random_range(0..w.map.h() as u8) };
+        let p = TilePos { x: rng.random_range(0..w.map.w() as u16), y: rng.random_range(0..w.map.h() as u16) };
         // stay on the street: building interiors are only reachable through their door
         if w.map.tile_at(p) == TileKind::Road || w.map.tile_at(p) == TileKind::Ground {
             let inside = w.map.buildings.iter().any(|b| b.rect.contains(p));

@@ -429,7 +429,7 @@ fn test_eyes_widen_witness_radius() {
     let r = if w.is_dark() { w.config.crime.sight_night_crime } else { w.config.crime.sight_day_crime };
     let tile = TilePos { x: 100, y: 100 };
     place(&mut w, actor, tile);
-    place(&mut w, witness, TilePos { x: 100 + r as u8 + 2, y: 100 });
+    place(&mut w, witness, TilePos { x: 100 + r as u16 + 2, y: 100 });
     let saw = |w: &World| {
         w.comp::<Memory>(witness)
             .is_some_and(|m| m.entries.iter().any(|e| e.kind == MemoryKind::SawCrime && e.subject == Some(actor)))

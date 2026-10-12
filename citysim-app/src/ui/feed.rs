@@ -30,7 +30,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             .districts
             .iter()
             .enumerate()
-            .filter(|(i, _)| *i < 16 && st.covers & (1u16 << i) != 0)
+            .filter(|(i, _)| *i < citysim::MAX_DISTRICTS && st.covers & (1 << i) != 0)
             .map(|(_, d)| d.name.as_str())
             .collect();
         ui.label(format!(

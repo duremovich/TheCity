@@ -176,7 +176,7 @@ fn test_police_ceiling_capped_by_jail_room() {
     assert_eq!(i64::from(g), by_jail);
     assert!(s > 0);
     // A bigger Jail lifts the ceiling (to the population's at most).
-    cfg.buildings.jail.capacity = u8::MAX;
+    cfg.buildings.jail.capacity = u16::from(u8::MAX);
     let big = World::new(42, cfg);
     let by_big = (f64::from(per_bed) * f64::from(u8::MAX)).round() as i64;
     assert!(by_big > by_jail);

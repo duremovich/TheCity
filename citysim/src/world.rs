@@ -725,7 +725,7 @@ pub struct World {
     pub district_grid: Vec<u8>,
     /// M12 D1: per district, a bitmask of the districts sharing a 4-neighbour edge.
     #[serde(skip)]
-    pub district_adjacent: Vec<u16>,
+    pub district_adjacent: Vec<crate::components::DistrictMask>,
     /// M12 D3: guard-on-shift ticks per district, rolled with `zone_watch`.
     #[serde(default)]
     pub district_watch: crate::components::DistrictWatch,

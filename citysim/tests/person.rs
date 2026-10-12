@@ -144,7 +144,7 @@ fn probe_married_adult_across_town_comes_home_at_night() {
     let door = w.comp::<Building>(h).map(|b| b.door).expect("door");
     // A street tile 40-60 tiles off the door: across town, a walk of an hour or two.
     let far = (0..256u32)
-        .flat_map(|x| (0..192u32).map(move |y| citysim::TilePos { x: x as u8, y: y as u8 }))
+        .flat_map(|x| (0..192u32).map(move |y| citysim::TilePos { x: x as u16, y: y as u16 }))
         .filter(|&t| (40..=60).contains(&t.manhattan(door)) && w.is_street(t))
         .min_by_key(|t| (t.manhattan(door), t.x, t.y))
         .expect("a street tile across town");
@@ -181,7 +181,7 @@ fn probe_enemy_at_the_spot_is_avoided() {
     // Two street tiles 6 tiles apart in one district; `a` stands 2 tiles from the first.
     let d = w.district_of(w.comp::<Position>(a).expect("pos").tile);
     let streets: Vec<citysim::TilePos> = (0..256u32)
-        .flat_map(|x| (0..192u32).map(move |y| citysim::TilePos { x: x as u8, y: y as u8 }))
+        .flat_map(|x| (0..192u32).map(move |y| citysim::TilePos { x: x as u16, y: y as u16 }))
         .filter(|&t| w.is_street(t) && w.district_of(t) == d)
         .collect();
     let (near, other, from) = streets

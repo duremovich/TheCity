@@ -4,7 +4,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 
-use crate::components::CorpOrder;
+use crate::components::{CorpOrder, MAX_DISTRICTS};
 use crate::time::Season;
 
 /// Days of history kept for the city panel's sparklines.
@@ -23,18 +23,63 @@ tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims
 contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,tax_credit,meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns,hm_posted_revenge,hm_posted_rival,hm_posted_culprit,hm_posted_silence,hm_posted_debt,hm_posted_protect,hm_wants,hm_unaffordable,hm_refused,hm_pooled,hm_price_sum,hm_deposit_sum,hm_hits_done,hm_beats_done,hm_stiffed,hm_recanted,hm_cold,hm_commissions,rides_full,rides_coarse,rides_stat,fares,fare_dodges,refused_no_route,refused_fare,refused_slow,refused_danger,ride_abandoned,peak_stop_load,transit_power,el_staff,commute_tpt_ride,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
+/// Scale S2: the floor; a config seeding more corps prints one slot per row
+/// ([`csv_header`]).
 pub const CORP_SLOTS: usize = 9;
 
 /// M15 W43: gang CSV slots (`World::gang_index` order).
 pub const GANG_SLOTS: usize = 4;
 
-/// M12 D45: district CSV slots (`[districts]` row order); a 9th-12th
-/// district is not printed.
+/// M12 D45: district CSV slots (`[districts]` row order). Scale S2: the
+/// floor; a config with more districts prints one slot per district
+/// ([`csv_header`]).
 pub const DISTRICT_SLOTS: usize = 8;
+
+/// Scale S2: the header for `corps` corp slots and `districts` district
+/// slots: [`CSV_HEADER`] itself while both fit its [`CORP_SLOTS`] and
+/// [`DISTRICT_SLOTS`] (the 2k city's CSV is unchanged), else every slot
+/// group grown past its last slot (`corp10_treasury,corp10_order` after
+/// `corp9_order`, `d9_coverage..d9_guards` after `d8_guards`, and so on).
+/// The rows match it: a row's slot vectors are as long as the run's slots
+/// (`systems::stats::csv_slots`).
+pub fn csv_header(corps: usize, districts: usize) -> String {
+    if corps <= CORP_SLOTS && districts <= DISTRICT_SLOTS {
+        return CSV_HEADER.to_string();
+    }
+    // `corp9_order` -> ("corp", 9, "order"); `d8_meals` -> ("d", 8, "meals").
+    fn slot(col: &str) -> Option<(&str, usize, &str)> {
+        let prefix = ["corp", "c", "d"].into_iter().find(|p| col.starts_with(p))?;
+        let rest = &col[prefix.len()..];
+        let digits = rest.find('_')?;
+        let n = rest[..digits].parse().ok()?;
+        Some((prefix, n, &rest[digits + 1..]))
+    }
+    let cols: Vec<&str> = CSV_HEADER.split(',').collect();
+    let mut out: Vec<String> = Vec::with_capacity(cols.len());
+    let mut block: Vec<&str> = Vec::new();
+    for (i, &col) in cols.iter().enumerate() {
+        out.push(col.to_string());
+        let Some((prefix, n, suffix)) = slot(col) else { continue };
+        let (last, want) = if prefix == "d" { (DISTRICT_SLOTS, districts) } else { (CORP_SLOTS, corps) };
+        if n != last {
+            continue;
+        }
+        block.push(suffix);
+        let next = cols.get(i + 1).and_then(|c| slot(c));
+        if next.is_some_and(|(p, m, _)| p == prefix && m == n) {
+            continue;
+        }
+        for k in last + 1..=want {
+            out.extend(block.iter().map(|s| format!("{prefix}{k}_{s}")));
+        }
+        block.clear();
+    }
+    out.join(",")
+}
 
 /// M12 D45: one district's CSV numbers: coverage, control code, litter,
 /// unrest, crime rate, guards.
-pub type DistrictCols = (f32, u8, f32, f32, f32, u8);
+pub type DistrictCols = (f32, u8, f32, f32, f32, u16);
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DayRow {
@@ -503,7 +548,10 @@ impl LivingCols {
             self.collected.to_string(),
             self.preached.to_string(),
         ]);
-        v.extend((0..DISTRICT_SLOTS).map(|i| format!("{:.3}", self.street_density.get(i).copied().unwrap_or(0.0))));
+        v.extend(
+            (0..self.street_density.len().max(DISTRICT_SLOTS))
+                .map(|i| format!("{:.3}", self.street_density.get(i).copied().unwrap_or(0.0))),
+        );
         v.extend([
             self.fv_killed.to_string(),
             self.fv_assaulted.to_string(),
@@ -580,7 +628,7 @@ impl WordCols {
                 format!("{d:.3},{h:.3}")
             })
             .collect();
-        let corps: Vec<String> = (0..CORP_SLOTS)
+        let corps: Vec<String> = (0..self.corps.len().max(CORP_SLOTS))
             .map(|i| {
                 let [h, s, c] = self.corps.get(i).copied().unwrap_or_default();
                 format!("{h:.3},{s:.3},{c:.3}")
@@ -848,7 +896,7 @@ pub struct VirtCols {
 impl VirtCols {
     /// The columns, comma-separated, in header order.
     pub fn csv(&self) -> String {
-        let corps: Vec<String> = (0..CORP_SLOTS)
+        let corps: Vec<String> = (0..self.corps.len().max(CORP_SLOTS))
             .map(|i| {
                 let [c, d, n, data] = self.corps.get(i).copied().unwrap_or_default();
                 format!("{c},{d},{n},{data}")
@@ -898,6 +946,12 @@ impl VirtCols {
 }
 
 impl DayRow {
+    /// Scale S2: the row's district slots, [`DISTRICT_SLOTS`] or the run's
+    /// districts when more (`districts` holds one entry per district).
+    pub fn district_slots(&self) -> usize {
+        self.districts.len().clamp(DISTRICT_SLOTS, MAX_DISTRICTS)
+    }
+
     pub fn new(day: u64) -> Self {
         DayRow {
             day,
@@ -1033,13 +1087,13 @@ impl DayRow {
     pub fn csv_row(&self) -> String {
         // Hunger as sickness: the health group rides with the jobs group.
         let jobs_health = format!("{},{}", self.jobs.csv(), self.health.csv());
-        let corps: Vec<String> = (0..CORP_SLOTS)
+        let corps: Vec<String> = (0..self.corps.len().max(CORP_SLOTS))
             .map(|i| match self.corps.get(i).copied().flatten() {
                 Some((t, o)) => format!("{t},{o}"),
                 None => "0,-".to_string(),
             })
             .collect();
-        let districts: Vec<String> = (0..DISTRICT_SLOTS)
+        let districts: Vec<String> = (0..self.district_slots())
             .map(|i| {
                 let (cov, ctrl, litter, unrest, crime, guards) = self.districts.get(i).copied().unwrap_or_default();
                 format!("{cov:.3},{ctrl},{litter:.3},{unrest:.3},{crime:.3},{guards}")
@@ -1166,7 +1220,7 @@ impl DayRow {
             self.budget.csv(),
             self.living.flow_street_dice,
             self.contract.csv(),
-            self.econ.csv(),
+            self.econ.csv_slots(self.district_slots()),
             jobs_health,
             self.hit.csv(),
             self.transit.csv(),
@@ -1237,11 +1291,16 @@ pub struct EconCols {
     pub camp_unfed: u32,
     pub camp_released: u32,
     pub camp_scandals: u32,
-    /// Per district slot (`DISTRICT_SLOTS`): Mission meals to its residents,
-    /// `Starving` events by the agent's district, Dreg-class adults by Home district.
-    pub d_meals: [u32; DISTRICT_SLOTS],
-    pub d_starving: [u32; DISTRICT_SLOTS],
-    pub d_dregs: [u32; DISTRICT_SLOTS],
+    /// Per district (`DistrictId::index`; Scale S2: every district, 8 before;
+    /// the CSV prints the run's district slots): Mission meals to its
+    /// residents, `Starving` events by the agent's district, Dreg-class
+    /// adults by Home district.
+    #[serde(deserialize_with = "crate::components::district_slots_any_len")]
+    pub d_meals: [u32; MAX_DISTRICTS],
+    #[serde(deserialize_with = "crate::components::district_slots_any_len")]
+    pub d_starving: [u32; MAX_DISTRICTS],
+    #[serde(deserialize_with = "crate::components::district_slots_any_len")]
+    pub d_dregs: [u32; MAX_DISTRICTS],
 }
 
 impl EconCols {
@@ -1310,6 +1369,11 @@ impl EconCols {
 
     /// The columns, comma-separated, in header order.
     pub fn csv(&self) -> String {
+        self.csv_slots(DISTRICT_SLOTS)
+    }
+
+    /// [`EconCols::csv`] with `districts` district slots (at most `MAX_DISTRICTS`).
+    pub fn csv_slots(&self, districts: usize) -> String {
         let mut v: Vec<String> = vec![
             self.flow_import_out.to_string(),
             self.flow_customs.to_string(),
@@ -1356,7 +1420,7 @@ impl EconCols {
             self.camp_released.to_string(),
             self.camp_scandals.to_string(),
         ];
-        for i in 0..DISTRICT_SLOTS {
+        for i in 0..districts.min(MAX_DISTRICTS) {
             v.push(self.d_meals[i].to_string());
             v.push(self.d_starving[i].to_string());
             v.push(self.d_dregs[i].to_string());
@@ -1376,8 +1440,8 @@ impl EconCols {
 pub struct JobsCols {
     pub civic_payroll: i64,
     pub flow_fines: i64,
-    pub guard_count: u8,
-    pub sanitation_count: u8,
+    pub guard_count: u16,
+    pub sanitation_count: u16,
     /// Jobs v2 J19 (P6): the day's arrivals drawn by the Harris-Todaro pull
     /// (a spouse counted with its partner).
     pub migrants_pull: u32,

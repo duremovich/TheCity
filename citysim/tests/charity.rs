@@ -339,7 +339,7 @@ fn test_stat_daily_serves_statistical_poor_in_reach() {
     assert!(hunger(&w, near) > 0.2, "served");
     assert!((hunger(&w, far) - 0.2).abs() < 1e-6, "out of reach");
     assert!(w.stats.current.econ.mission_meals >= 1);
-    assert_eq!(w.stats.current.econ.d_meals.get(d).copied().unwrap_or(0) >= 1, d < citysim::stats::DISTRICT_SLOTS);
+    assert_eq!(w.stats.current.econ.d_meals.get(d).copied().unwrap_or(0) >= 1, d < citysim::MAX_DISTRICTS);
 }
 
 /// E27: a Mission whose purse covers a cot is a Hotel at price 0: the

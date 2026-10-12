@@ -220,10 +220,10 @@ pub fn convert(world: &mut World, b: EntityId, kind: BuildingKind, owner: Option
     };
     let cfg = world.config.buildings.for_kind(kind).clone();
     let interior = usize::from(rect.w.saturating_sub(2)) * usize::from(rect.h.saturating_sub(2));
-    let mut capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cfg.capacity);
+    let mut capacity = u16::try_from(interior).unwrap_or(u16::MAX).min(cfg.capacity);
     if kind == BuildingKind::Hotel {
         // M12 D20: a bed per `[street] hotel_beds`, as the interior allows.
-        capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(world.config.street.hotel_beds);
+        capacity = u16::try_from(interior).unwrap_or(u16::MAX).min(u16::from(world.config.street.hotel_beds));
     }
     let capacity = with_floors(world, kind, capacity, floors);
     if let Some(bd) = world.comp_mut::<Building>(b) {
@@ -303,12 +303,12 @@ pub fn floor_seats(world: &World, kind: BuildingKind) -> bool {
 }
 
 /// J7: one floor's `capacity` × `floors` for a [`floor_seats`] kind,
-/// clamped at 255 (`capacity` is a `u8`); `per_floor` otherwise.
-pub fn with_floors(world: &World, kind: BuildingKind, per_floor: u8, floors: u8) -> u8 {
+/// clamped at 65,535 (`capacity` is a `u16`); `per_floor` otherwise.
+pub fn with_floors(world: &World, kind: BuildingKind, per_floor: u16, floors: u8) -> u16 {
     if !floor_seats(world, kind) || floors <= 1 {
         return per_floor;
     }
-    u8::try_from(usize::from(per_floor) * usize::from(floors)).unwrap_or(u8::MAX)
+    u16::try_from(usize::from(per_floor) * usize::from(floors)).unwrap_or(u16::MAX)
 }
 
 /// J8: what a floor on a `kind` costs: `floor_cost_frac × found_cost`
@@ -338,7 +338,7 @@ pub fn add_floor(world: &mut World, b: EntityId, payer: Option<EntityId>) -> Res
     if payer.is_some() && world.purse(payer) < cost {
         return Err(format!("{} cannot pay {cost}", world.owner_label(payer)));
     }
-    let per_floor = capacity / floors;
+    let per_floor = capacity / u16::from(floors);
     let new_capacity = with_floors(world, kind, per_floor, floors + 1).max(capacity);
     if let Some(bd) = world.comp_mut::<Building>(b) {
         bd.floors = floors + 1;

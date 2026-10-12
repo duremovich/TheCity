@@ -49,7 +49,7 @@ fn road_run(w: &World, len: usize) -> Vec<TilePos> {
     for y in 0..w.map.h().min(256) {
         let mut run: Vec<TilePos> = Vec::new();
         for x in 0..w.map.w().min(256) {
-            let t = TilePos { x: x as u8, y: y as u8 };
+            let t = TilePos { x: x as u16, y: y as u16 };
             if w.map.tile_at(t) == TileKind::Road {
                 run.push(t);
                 if run.len() > len {
@@ -838,7 +838,7 @@ fn test_thief_steals_drives_and_fences_end_to_end() {
         .expect("a jobless non-member");
     // A Road tile a few steps from the car's stand.
     let start = (0..w.map.h().min(256))
-        .flat_map(|y| (0..w.map.w().min(256)).map(move |x| TilePos { x: x as u8, y: y as u8 }))
+        .flat_map(|y| (0..w.map.w().min(256)).map(move |x| TilePos { x: x as u16, y: y as u16 }))
         .filter(|&t| w.map.tile_at(t) == TileKind::Road && (4..=8).contains(&t.manhattan(stand)))
         .min_by_key(|&t| (t.manhattan(stand), t.y, t.x))
         .expect("a road near the car");

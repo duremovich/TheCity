@@ -155,7 +155,8 @@ fn test_hangout_picks_spot_where_friend_habit_is() {
             .flat_map(|dx| (-6i32..=6).map(move |dy| (dx, dy)))
             .filter_map(|(dx, dy)| {
                 let (x, y) = (i32::from(door.x) + dx, i32::from(door.y) + dy);
-                ((0..256).contains(&x) && (0..192).contains(&y)).then_some(citysim::TilePos { x: x as u8, y: y as u8 })
+                ((0..256).contains(&x) && (0..192).contains(&y))
+                    .then_some(citysim::TilePos { x: x as u16, y: y as u16 })
             })
             .find(|&t| (4..=6).contains(&t.manhattan(door)) && w.is_street(t));
         if let Some(t) = near {

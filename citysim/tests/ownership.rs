@@ -423,7 +423,7 @@ fn test_cheaper_market_wins_customers_across_tiers() {
     let mut spot = None;
     'find: for y in 0..w.map.h().min(256) {
         for x in 0..w.map.w().min(256) {
-            let t = TilePos::new(x as u8, y as u8);
+            let t = TilePos::new(x as u16, y as u16);
             if w.map.tile_at(t) != citysim::TileKind::Road {
                 continue;
             }
@@ -663,13 +663,13 @@ fn test_rehouse_uses_each_home_capacity() {
     set_coins(&mut w, a, 1000);
     let homes = w.buildings_of_kind(BuildingKind::Home).to_vec();
     for &h in &homes {
-        let n = w.residents_of(h).len() as u8;
+        let n = w.residents_of(h).len() as u16;
         w.comp_mut::<Building>(h).expect("b").capacity = n;
     }
     midnight(&mut w);
     assert_eq!(w.comp::<Household>(a).expect("h").home, None, "every Home is full at its own capacity");
     let roomy = homes[5];
-    let n = w.residents_of(roomy).len() as u8;
+    let n = w.residents_of(roomy).len() as u16;
     w.comp_mut::<Building>(roomy).expect("b").capacity = n + 4;
     midnight(&mut w);
     assert_eq!(w.comp::<Household>(a).expect("h").home, Some(roomy));

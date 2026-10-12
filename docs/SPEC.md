@@ -71,7 +71,7 @@ B Farm 40 10 12 9
 
 #### Map format v2 (M10)
 
-Since M10 `assets/map.txt` is the 256 x 192 v2 map and the v1 map lives on as `assets/map_v1.txt` (used by `Config::v1_profile()` in unit tests). v2 layout: a first line `<w> <h>` (each at most 256, because `TilePos` is `u8`), then `h` tile rows of `w` characters, a blank line, then `h` zone rows of `w` characters from `S` Spire, `C` Civic, `V` Vats, `M` Mid, `U` Sump, a blank line, then the building lines `B <Kind> <x> <y> <w> <h> [<tier>]` (tier defaults to 1). A file without the `<w> <h>` header is read as v1: width and height from the rows, every tile `Zone::Mid`, every tier 1. `BuildingKind` gains `Lot` (a wall-less rect with one door, inert until M11) and `SecurityOffice` (inert). The generator is `assets/gen_map.py`. The full table of the v2 city is in [M10_SCALE.md](M10_SCALE.md) section 2.
+Since M10 `assets/map.txt` is the 256 x 192 v2 map and the v1 map lives on as `assets/map_v1.txt` (used by `Config::v1_profile()` in unit tests). v2 layout: a first line `<w> <h>` (each at most 256 while `TilePos` was `u8`; Scale S2 widened it to `u16`, each at most 65,535), then `h` tile rows of `w` characters, a blank line, then `h` zone rows of `w` characters from `S` Spire, `C` Civic, `V` Vats, `M` Mid, `U` Sump, a blank line, then the building lines `B <Kind> <x> <y> <w> <h> [<tier>]` (tier defaults to 1). A file without the `<w> <h>` header is read as v1: width and height from the rows, every tile `Zone::Mid`, every tier 1. `BuildingKind` gains `Lot` (a wall-less rect with one door, inert until M11) and `SecurityOffice` (inert). The generator is `assets/gen_map.py`. The full table of the v2 city is in [M10_SCALE.md](M10_SCALE.md) section 2.
 
 ### Building definition table
 
@@ -1163,8 +1163,8 @@ pub enum PlayerCommand {
     ReleaseReserve { amount: u32 },
     SetTaxRate(f32),
     SetSentenceMult(f32),
-    SetGuardCount(u8),
-    SetImmigrationPerWeek(u8),
+    SetGuardCount(u16),         // Scale S2: u16
+    SetImmigrationPerWeek(u16), // Scale S2: u16
     GrantCoins { agent: EntityId, amount: i64 },
     Arrest(EntityId),
     Release(EntityId),

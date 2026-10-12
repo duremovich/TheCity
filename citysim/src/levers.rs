@@ -23,8 +23,8 @@ pub enum PlayerCommand {
     },
     SetTaxRate(f32),
     SetSentenceMult(f32),
-    SetGuardCount(u8),
-    SetImmigrationPerWeek(u8),
+    SetGuardCount(u16),
+    SetImmigrationPerWeek(u16),
     GrantCoins {
         agent: EntityId,
         amount: i64,
@@ -139,7 +139,7 @@ pub enum PlayerCommand {
     WipeTreasuries,
     // --- M12 levers (docs/M12_DISTRICTS.md § 7, plan D42) ---
     /// The city's Sanitation headcount (`0..=60`).
-    SetSanitation(u8),
+    SetSanitation(u16),
     /// Jobs v2 J17 (P5a): release a `SetGuardCount`/`SetSanitation` pin back
     /// to the civic budget (CLI `civic=auto`; under the market wage law only).
     SetCivicAuto,
@@ -522,9 +522,9 @@ pub struct Levers {
     /// `0.5..=3.0`, default 1.0.
     pub sentence_mult: f32,
     /// `0..=60`, default 36 (M10, 2,000 residents; v1 `0..=30`, 10).
-    pub guard_count: u8,
+    pub guard_count: u16,
     /// `0..=30`, default 13 (M10; v1 `0..=10`, 2).
-    pub immigration_per_week: u8,
+    pub immigration_per_week: u16,
     /// `0..=10`, default 3.
     pub dole_per_day: u8,
     /// M11: rent on city-owned Blocks per tier (initially `[rent] base`).
@@ -538,19 +538,19 @@ pub struct Levers {
     pub no_city_evictions: bool,
     /// M12 D10: a multiplier on each district's allocation weight (1.0; 0
     /// abandons the district: no guards, stance Withdrawn).
-    #[serde(default = "default_guard_weight")]
+    #[serde(default = "default_guard_weight", deserialize_with = "crate::components::district_weights_any_len")]
     pub guard_weight: [f32; crate::components::MAX_DISTRICTS],
     /// M12 D12: the player's stance pin per district; `None` = the captain.
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::components::district_slots_any_len")]
     pub stance_pin: [Option<crate::components::Stance>; crate::components::MAX_DISTRICTS],
     /// M12 (curfew lands with the levers in phase 5; Vagrancy reads it now).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "crate::components::district_slots_any_len")]
     pub curfew: [bool; crate::components::MAX_DISTRICTS],
     /// M12 D23: city Sanitation workers (`[levers] sanitation_count`).
     #[serde(default)]
-    pub sanitation_count: u8,
+    pub sanitation_count: u16,
     /// M12 D23: a multiplier on each district's sweeper weight (1.0).
-    #[serde(default = "default_guard_weight")]
+    #[serde(default = "default_guard_weight", deserialize_with = "crate::components::district_weights_any_len")]
     pub sanitation_weight: [f32; crate::components::MAX_DISTRICTS],
     /// M12 D42: the player's riot-response pin; `None` = the captain (D34).
     #[serde(default)]
@@ -2302,7 +2302,8 @@ impl World {
         }
         for y in (i32::from(rect.y) - 1)..=y1 {
             for x in (i32::from(rect.x) - 1)..=x1 {
-                if self.map.in_bounds(x, y) && self.map.tile_at(TilePos { x: x as u8, y: y as u8 }) == TileKind::Water {
+                if self.map.in_bounds(x, y) && self.map.tile_at(TilePos { x: x as u16, y: y as u16 }) == TileKind::Water
+                {
                     return Err("adjacent to Water".into());
                 }
             }
@@ -2312,7 +2313,7 @@ impl World {
         if !self.map.in_bounds(outside.0, outside.1) {
             return Err("the door would open off the map".into());
         }
-        let outside_tile = TilePos { x: outside.0 as u8, y: outside.1 as u8 };
+        let outside_tile = TilePos { x: outside.0 as u16, y: outside.1 as u16 };
         if !matches!(self.map.tile_at(outside_tile), TileKind::Ground | TileKind::Road) {
             return Err(format!("the door would open onto {:?}", self.map.tile_at(outside_tile)));
         }

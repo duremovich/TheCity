@@ -10,6 +10,24 @@ use crate::entity::EntityId;
 use crate::time::{self, TICKS_PER_DAY};
 use crate::world::World;
 
+/// Scale S2: the run's CSV slots, `(corps, districts)`: the header's
+/// [`crate::stats::CORP_SLOTS`] and [`crate::stats::DISTRICT_SLOTS`], or the
+/// config's seeded corp rows and the world's districts when more. Fixed for a
+/// run (seeded rows and districts never change), so every row and the
+/// header ([`csv_header`]) agree.
+pub fn csv_slots(world: &World) -> (usize, usize) {
+    (
+        world.config.corps.names.len().max(crate::stats::CORP_SLOTS),
+        world.districts.len().clamp(crate::stats::DISTRICT_SLOTS, crate::components::MAX_DISTRICTS),
+    )
+}
+
+/// Scale S2: the CSV header for this run ([`crate::stats::csv_header`]).
+pub fn csv_header(world: &World) -> String {
+    let (corps, districts) = csv_slots(world);
+    crate::stats::csv_header(corps, districts)
+}
+
 pub fn run(world: &mut World) {
     if u64::from(time::tick_of_day(world.tick)) != TICKS_PER_DAY - 1 {
         return;
@@ -191,7 +209,7 @@ pub fn snapshot(world: &mut World) {
     row.tier_full = tiers[0];
     row.tier_coarse = tiers[1];
     row.tier_stat = tiers[2];
-    let mut slots = vec![None; crate::stats::CORP_SLOTS];
+    let mut slots = vec![None; csv_slots(world).0];
     for c in world.corps() {
         if let Some(cc) = world.comp::<crate::components::Corp>(c) {
             if let Some(s) = cc.slot.map(usize::from).filter(|&s| s < slots.len()) {
@@ -213,7 +231,7 @@ pub fn snapshot(world: &mut World) {
     let slots: Vec<crate::stats::DistrictCols> = world
         .districts
         .iter()
-        .take(crate::stats::DISTRICT_SLOTS)
+        .take(crate::components::MAX_DISTRICTS)
         .map(|d| (d.coverage, d.control.csv_code(), d.litter, d.unrest, d.crime_rate, d.guards))
         .collect();
     let gangs = world.gang_list().len() as u32;
@@ -341,7 +359,7 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
         .filter(|bd| crate::systems::ownership::role_for(bd.kind).is_some())
         .count() as u32;
     let execs = crate::systems::classes::exec_set(world);
-    let mut dregs = [0u32; crate::stats::DISTRICT_SLOTS];
+    let mut dregs = [0u32; crate::components::MAX_DISTRICTS];
     for &id in citizens {
         if !world.has::<Brain>(id) || !crate::systems::demography::is_adult(world, id) {
             continue;
@@ -436,7 +454,7 @@ fn word_snapshot(world: &mut World, citizens: &[EntityId]) {
             gangs[i] = [r.dread, r.heat];
         }
     }
-    let mut corps = vec![[0.0f32; 3]; crate::stats::CORP_SLOTS];
+    let mut corps = vec![[0.0f32; 3]; csv_slots(world).0];
     for c in world.corps() {
         let Some(s) = world.comp::<crate::components::Corp>(c).and_then(|cc| cc.slot).map(usize::from) else {
             continue;
@@ -493,7 +511,7 @@ fn virt_snapshot(world: &mut World) {
         .flatten()
         .filter(|&&b| crate::systems::virt::camera_at(world, b).is_some())
         .count() as u32;
-    let mut corps = vec![[0u32; 4]; crate::stats::CORP_SLOTS];
+    let mut corps = vec![[0u32; 4]; csv_slots(world).0];
     for c in world.corps() {
         let Some(cc) = world.comp::<crate::components::Corp>(c) else { continue };
         let Some(s) = cc.slot.map(usize::from).filter(|&s| s < corps.len()) else { continue };

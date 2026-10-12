@@ -217,13 +217,13 @@ fn test_build_home_rejects_invalid_rect() {
 
 /// A 4×4 all-Ground rect not touching Water or any building, scanning the map.
 fn find_ground_rect(w: &World) -> Option<Rect> {
-    for y in 1..(w.map.h() as u8 - 6) {
-        for x in 1..(w.map.w() as u8 - 6) {
+    for y in 1..(w.map.h() as u16 - 6) {
+        for x in 1..(w.map.w() as u16 - 6) {
             let r = Rect { x, y, w: 4, h: 4 };
             let mut ok = true;
             for yy in (y as i32 - 1)..=(y as i32 + 4) {
                 for xx in (x as i32 - 1)..=(x as i32 + 4) {
-                    let t = citysim::TilePos { x: xx as u8, y: yy as u8 };
+                    let t = citysim::TilePos { x: xx as u16, y: yy as u16 };
                     let kind = w.map.tile_at(t);
                     let inside = r.contains(t);
                     if (inside && kind != citysim::TileKind::Ground) || kind == citysim::TileKind::Water {

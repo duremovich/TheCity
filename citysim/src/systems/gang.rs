@@ -1663,7 +1663,7 @@ pub fn convert_to_hideout(world: &mut World, gang: EntityId, b: EntityId) {
         bd.claim = None;
         bd.rent_per_day = 0;
         bd.stock_food = 0;
-        bd.capacity = u8::try_from(interior).unwrap_or(u8::MAX).min(cap);
+        bd.capacity = u16::try_from(interior).unwrap_or(u16::MAX).min(cap);
     }
     if let Some(k) = old_kind {
         if let Some(v) = world.buildings_by_kind.get_mut(&k) {

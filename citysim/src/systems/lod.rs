@@ -272,7 +272,7 @@ fn assign(world: &mut World) {
     let view = world.view_rect;
     let centre = match view {
         Some(r) => TilePos { x: r.x + r.w / 2, y: r.y + r.h / 2 },
-        None => TilePos { x: (world.map.w() / 2) as u8, y: (world.map.h() / 2) as u8 },
+        None => TilePos { x: (world.map.w() / 2) as u16, y: (world.map.h() / 2) as u16 },
     };
     let on_screen = |t: TilePos| -> bool {
         let Some(r) = view else { return false };

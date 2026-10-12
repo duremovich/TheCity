@@ -641,7 +641,7 @@ fn build_near(world: &mut World, employer: EntityId, seeded: bool) -> Option<boo
     if seeded {
         // A seed storey: `add_floor`'s seats, no coin and no event.
         let (floors, capacity) = world.comp::<Building>(home).map(|b| (b.floors.max(1), b.capacity))?;
-        let per_floor = capacity / floors;
+        let per_floor = capacity / u16::from(floors);
         let new_capacity =
             crate::systems::founding::with_floors(world, BuildingKind::Home, per_floor, floors + 1).max(capacity);
         let b = world.comp_mut::<Building>(home)?;

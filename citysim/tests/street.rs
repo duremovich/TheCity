@@ -47,12 +47,12 @@ fn idx(w: &World, p: TilePos) -> usize {
 fn open_street(w: &World, d: u8) -> TilePos {
     for y in 2..w.map.h() - 2 {
         for x in 2..w.map.w() - 2 {
-            let p = TilePos { x: x as u8, y: y as u8 };
+            let p = TilePos { x: x as u16, y: y as u16 };
             if w.district_of(p) != DistrictId(d) {
                 continue;
             }
             let all = (-1..=1i32).all(|dy| {
-                (-1..=1i32).all(|dx| w.is_street(TilePos { x: (x as i32 + dx) as u8, y: (y as i32 + dy) as u8 }))
+                (-1..=1i32).all(|dx| w.is_street(TilePos { x: (x as i32 + dx) as u16, y: (y as i32 + dy) as u16 }))
             });
             if all {
                 return p;
@@ -127,7 +127,7 @@ fn test_litter_deposits_per_event_and_decays() {
     law::raise_crime(&mut w, actor, None, Crime::Assault, u);
     assert_eq!(litter::at(&w, u), 12);
     for (dx, dy) in [(-1i32, -1i32), (0, -1), (1, 1), (-1, 0)] {
-        let p = TilePos { x: (i32::from(u.x) + dx) as u8, y: (i32::from(u.y) + dy) as u8 };
+        let p = TilePos { x: (i32::from(u.x) + dx) as u16, y: (i32::from(u.y) + dy) as u16 };
         assert_eq!(litter::at(&w, p), 6, "ring tile {p}");
     }
     // A Murder deposits nothing here (its death does, 40 r1 in `kill_by`).
@@ -211,7 +211,7 @@ fn test_littered_step_delays_next_move_and_keeps_flow_fields() {
     // On the street ten tiles from the Market's door.
     let door = w.comp::<Building>(market).expect("market").door;
     let start = (0..w.map.h())
-        .flat_map(|y| (0..w.map.w()).map(move |x| TilePos { x: x as u8, y: y as u8 }))
+        .flat_map(|y| (0..w.map.w()).map(move |x| TilePos { x: x as u16, y: y as u16 }))
         .filter(|&p| w.is_street(p))
         .min_by_key(|&p| (p.manhattan(door).abs_diff(10), p))
         .expect("a street tile");

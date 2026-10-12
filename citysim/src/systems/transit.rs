@@ -202,7 +202,7 @@ pub struct Route {
 
 /// The tiles of a polyline, waypoint to waypoint (an L when a pair is not
 /// axis-aligned: x first), the first waypoint included.
-fn track(waypoints: &[[u8; 2]]) -> Vec<TilePos> {
+fn track(waypoints: &[[u16; 2]]) -> Vec<TilePos> {
     let mut out = Vec::new();
     let Some(&[x0, y0]) = waypoints.first() else { return out };
     let (mut x, mut y) = (i32::from(x0), i32::from(y0));
@@ -211,11 +211,11 @@ fn track(waypoints: &[[u8; 2]]) -> Vec<TilePos> {
         let (bx, by) = (i32::from(bx), i32::from(by));
         while x != bx {
             x += (bx - x).signum();
-            out.push(TilePos::new(x as u8, y as u8));
+            out.push(TilePos::new(x as u16, y as u16));
         }
         while y != by {
             y += (by - y).signum();
-            out.push(TilePos::new(x as u8, y as u8));
+            out.push(TilePos::new(x as u16, y as u16));
         }
     }
     out
@@ -234,7 +234,7 @@ fn snap(world: &World, p: TilePos) -> Option<TilePos> {
                 if !world.map.in_bounds(x, y) {
                     continue;
                 }
-                let t = TilePos::new(x as u8, y as u8);
+                let t = TilePos::new(x as u16, y as u16);
                 if world.map.tile_at(t) != TileKind::Road {
                     continue;
                 }
@@ -323,7 +323,7 @@ fn near_table(world: &World, stops: &[TilePos]) -> Vec<u16> {
     let mut v: Vec<(u32, u16)> = Vec::with_capacity(stops.len());
     for y in 0..h {
         for x in 0..w {
-            let t = TilePos::new(x as u8, y as u8);
+            let t = TilePos::new(x as u16, y as u16);
             v.clear();
             v.extend(stops.iter().enumerate().map(|(i, s)| (s.manhattan(t), u16::try_from(i).unwrap_or(u16::MAX))));
             if k < v.len() {
@@ -1179,7 +1179,7 @@ pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
         if at <= ob as f32 {
             let f = ((at - oa as f32) / (ob - oa).max(1) as f32).clamp(0.0, 1.0);
             let (pa, pb) = (pos(a), pos(b));
-            let lerp = |x: u8, y: u8| f32::from(x) + (f32::from(y) - f32::from(x)) * f;
+            let lerp = |x: u16, y: u16| f32::from(x) + (f32::from(y) - f32::from(x)) * f;
             return Some((lerp(pa.x, pb.x), lerp(pa.y, pb.y)));
         }
     }

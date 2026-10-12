@@ -531,7 +531,7 @@ pub struct FeedState {
     pub name: String,
     pub reach: f32,
     /// District bitset.
-    pub covers: u16,
+    pub covers: crate::components::DistrictMask,
     /// `(actor, until)`.
     pub buried: VecDeque<(EntityId, Tick)>,
     pub stories_today: u8,

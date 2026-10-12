@@ -23,7 +23,7 @@ fn scenario(w: &mut World, d: u8, coins: i64, lawfulness: f32, pride: f32, socia
     let market = w.building_of_kind(BuildingKind::Market).expect("market");
     let door = w.comp::<Building>(market).expect("market").door;
     // walk straight up the vertical road west of the Market: (door.x - 1?)... use the road at x = 39
-    let tile = TilePos { x: 39, y: door.y.saturating_sub(d - (door.x - 39)) };
+    let tile = TilePos { x: 39, y: door.y.saturating_sub(u16::from(d) - (door.x - 39)) };
     assert_eq!(tile.manhattan(door), u32::from(d), "scenario tile distance");
     w.comp_mut::<Position>(id).expect("pos").tile = tile;
     w.comp_mut::<Wallet>(id).expect("wallet").coins = coins;

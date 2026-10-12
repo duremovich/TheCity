@@ -17,12 +17,12 @@ use crate::utility::{Consideration, ThinkTrace};
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
 pub struct TilePos {
-    pub x: u8,
-    pub y: u8,
+    pub x: u16,
+    pub y: u16,
 }
 
 impl TilePos {
-    pub const fn new(x: u8, y: u8) -> Self {
+    pub const fn new(x: u16, y: u16) -> Self {
         TilePos { x, y }
     }
 
@@ -40,29 +40,29 @@ impl fmt::Display for TilePos {
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
 pub struct Rect {
-    pub x: u8,
-    pub y: u8,
-    pub w: u8,
-    pub h: u8,
+    pub x: u16,
+    pub y: u16,
+    pub w: u16,
+    pub h: u16,
 }
 
 impl Rect {
-    /// Exclusive right and bottom edges, in `u16` so a rect reaching column 255 cannot overflow.
-    fn x1(&self) -> u16 {
-        u16::from(self.x) + u16::from(self.w)
+    /// Exclusive right and bottom edges, in `u32` so a rect reaching column 65,535 cannot overflow.
+    fn x1(&self) -> u32 {
+        u32::from(self.x) + u32::from(self.w)
     }
 
-    fn y1(&self) -> u16 {
-        u16::from(self.y) + u16::from(self.h)
+    fn y1(&self) -> u32 {
+        u32::from(self.y) + u32::from(self.h)
     }
 
     pub fn contains(&self, p: TilePos) -> bool {
-        p.x >= self.x && u16::from(p.x) < self.x1() && p.y >= self.y && u16::from(p.y) < self.y1()
+        p.x >= self.x && u32::from(p.x) < self.x1() && p.y >= self.y && u32::from(p.y) < self.y1()
     }
 
     pub fn on_perimeter(&self, p: TilePos) -> bool {
         self.contains(p)
-            && (p.x == self.x || u16::from(p.x) + 1 == self.x1() || p.y == self.y || u16::from(p.y) + 1 == self.y1())
+            && (p.x == self.x || u32::from(p.x) + 1 == self.x1() || p.y == self.y || u32::from(p.y) + 1 == self.y1())
     }
 
     pub fn centre(&self) -> (f32, f32) {
@@ -70,10 +70,10 @@ impl Rect {
     }
 
     pub fn overlaps(&self, o: &Rect) -> bool {
-        u16::from(self.x) < o.x1()
-            && u16::from(o.x) < self.x1()
-            && u16::from(self.y) < o.y1()
-            && u16::from(o.y) < self.y1()
+        u32::from(self.x) < o.x1()
+            && u32::from(o.x) < self.x1()
+            && u32::from(self.y) < o.y1()
+            && u32::from(o.y) < self.y1()
     }
 }
 
@@ -2386,7 +2386,7 @@ pub struct Building {
     pub door: TilePos,
     /// `0..=cap` per kind table.
     pub stock_food: u32,
-    pub capacity: u8,
+    pub capacity: u16,
     /// `None` = city-owned.
     pub owner: Option<EntityId>,
     /// Sorted.
@@ -2416,7 +2416,7 @@ pub struct Building {
     /// M12 fix pass: the capacity a derelict had before it went derelict (a
     /// demolished Block stands at half), restored when it returns to use.
     #[serde(default)]
-    pub full_capacity: Option<u8>,
+    pub full_capacity: Option<u16>,
     /// M12 D25/D26: a Block with no residents since this tick (abandonment),
     /// and, once derelict, the tick it went derelict (re-letting).
     #[serde(default)]
@@ -2548,9 +2548,9 @@ impl Building {
     /// Interior tiles (everything inside the perimeter), row-major.
     pub fn interior(&self) -> impl Iterator<Item = TilePos> + '_ {
         let r = self.rect;
-        let (x0, y0) = (u16::from(r.x) + 1, u16::from(r.y) + 1);
-        let (x1, y1) = (u16::from(r.x) + u16::from(r.w) - 1, u16::from(r.y) + u16::from(r.h) - 1);
-        (y0..y1).flat_map(move |y| (x0..x1).map(move |x| TilePos { x: x as u8, y: y as u8 }))
+        let (x0, y0) = (u32::from(r.x) + 1, u32::from(r.y) + 1);
+        let (x1, y1) = (u32::from(r.x) + u32::from(r.w) - 1, u32::from(r.y) + u32::from(r.h) - 1);
+        (y0..y1).flat_map(move |y| (x0..x1).map(move |x| TilePos { x: x as u16, y: y as u16 }))
     }
 
     pub fn is_full(&self) -> bool {
@@ -2960,7 +2960,7 @@ pub mod trace_flags {
 
 /// One day of an adult's life, packed into a u32 for the save (M12 D4):
 /// zone (3 bits) | flags 0-7 (8) << 3 | hunger band (2) << 11 | mood band (2) << 13
-/// | district (4) << 15 | has-district (1) << 19 | flags 8-9 (2) << 20.
+/// | district bits 0-3 (4) << 15 | has-district (1) << 19 | flags 8-9 (2) << 20 | district bit 4 (1) << 22 (Scale S2: a district under 16 packs as before).
 /// A pre-M12 value has bit 19 clear and decodes `district = UNSET`.
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 #[serde(from = "u32", into = "u32")]
@@ -3014,8 +3014,11 @@ impl DayTrace {
 impl From<u32> for DayTrace {
     fn from(v: u32) -> DayTrace {
         let z = (v & 0b111) as usize;
-        let district =
-            if v & TRACE_HAS_DISTRICT != 0 { DistrictId(((v >> 15) & 0xf) as u8) } else { DistrictId::UNSET };
+        let district = if v & TRACE_HAS_DISTRICT != 0 {
+            DistrictId((((v >> 15) & 0xf) | (((v >> 22) & 1) << 4)) as u8)
+        } else {
+            DistrictId::UNSET
+        };
         DayTrace {
             zone: Zone::ALL[z.min(Zone::ALL.len() - 1)],
             district,
@@ -3028,7 +3031,11 @@ impl From<u32> for DayTrace {
 
 impl From<DayTrace> for u32 {
     fn from(t: DayTrace) -> u32 {
-        let district = if t.district.is_unset() { 0 } else { u32::from(t.district.0 & 0xf) << 15 | TRACE_HAS_DISTRICT };
+        let district = if t.district.is_unset() {
+            0
+        } else {
+            u32::from(t.district.0 & 0xf) << 15 | u32::from((t.district.0 >> 4) & 1) << 22 | TRACE_HAS_DISTRICT
+        };
         t.zone.index() as u32
             | u32::from(t.flags & 0xff) << 3
             | u32::from(t.hunger & 0b11) << 11
@@ -3159,9 +3166,56 @@ pub struct ZoneWatch {
 // M12: districts (docs/M12_DISTRICTS.md § 1)
 // ---------------------------------------------------------------------------
 
-/// Most districts a config may define (the `[u32; 12]` watch slots, the
-/// low nibble of `World::district_grid`).
-pub const MAX_DISTRICTS: usize = 12;
+/// Most districts a config may define (the `[u32; 32]` watch slots, the
+/// low 6 bits of `World::district_grid`, the `u32` adjacency and Feed
+/// masks, the 5-bit district of a `DayTrace`). Scale S2: 12 before; 32 is
+/// serde's largest derived array.
+pub const MAX_DISTRICTS: usize = 32;
+
+/// A district bitset (bit `DistrictId::index`).
+pub type DistrictMask = u32;
+
+/// Scale S2: a `[T; MAX_DISTRICTS]` from a save written with fewer slots
+/// (12 before S2), the rest `fill`; extra slots are dropped.
+fn district_slots_padded<'de, D, T>(d: D, fill: T) -> Result<[T; MAX_DISTRICTS], D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Copy,
+{
+    struct V<T>(T);
+    impl<'de, T: Deserialize<'de> + Copy> serde::de::Visitor<'de> for V<T> {
+        type Value = [T; MAX_DISTRICTS];
+        fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+            f.write_str("a list of per-district values")
+        }
+        fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Self::Value, A::Error> {
+            let mut out = [self.0; MAX_DISTRICTS];
+            let mut i = 0;
+            while let Some(x) = seq.next_element::<T>()? {
+                if let Some(slot) = out.get_mut(i) {
+                    *slot = x;
+                }
+                i += 1;
+            }
+            Ok(out)
+        }
+    }
+    d.deserialize_tuple(MAX_DISTRICTS, V(fill))
+}
+
+/// [`district_slots_padded`] with `T::default()`.
+pub fn district_slots_any_len<'de, D, T>(d: D) -> Result<[T; MAX_DISTRICTS], D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de> + Copy + Default,
+{
+    district_slots_padded(d, T::default())
+}
+
+/// [`district_slots_padded`] with 1.0 (a weight lever's neutral value).
+pub fn district_weights_any_len<'de, D: serde::Deserializer<'de>>(d: D) -> Result<[f32; MAX_DISTRICTS], D::Error> {
+    district_slots_padded(d, 1.0)
+}
 
 /// A district's index in `World::districts` (`[districts]` row order).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
@@ -3292,7 +3346,9 @@ pub struct Riot {
 /// Guard-on-shift ticks per district (`DistrictId::index`), today and yesterday.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct DistrictWatch {
+    #[serde(deserialize_with = "district_slots_any_len")]
     pub today: [u32; MAX_DISTRICTS],
+    #[serde(deserialize_with = "district_slots_any_len")]
     pub yesterday: [u32; MAX_DISTRICTS],
 }
 
@@ -3386,10 +3442,10 @@ pub struct District {
     pub stance_since: Tick,
     /// City guards allocated today.
     #[serde(default)]
-    pub guards: u8,
+    pub guards: u16,
     /// Sanitation workers allocated today (phase 3).
     #[serde(default)]
-    pub sweepers: u8,
+    pub sweepers: u16,
     #[serde(default)]
     pub curfew: bool,
     #[serde(default)]

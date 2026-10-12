@@ -288,7 +288,7 @@ pub struct TransitCfg {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TransitLineCfg {
     pub name: String,
-    pub waypoints: Vec<[u8; 2]>,
+    pub waypoints: Vec<[u16; 2]>,
 }
 
 impl Default for TransitCfg {
@@ -554,7 +554,7 @@ pub struct NeedsInitialCfg {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BuildingCfg {
-    pub capacity: u8,
+    pub capacity: u16,
     pub stock_cap: u32,
     /// M11 D17: full staff for an owned niche building (Grow tops up to it;
     /// an agent-owned Bar posts a vacancy below it). 0 = no rule.
@@ -3308,14 +3308,14 @@ impl RobotsCfg {
 pub struct LeversCfg {
     pub tax_rate: f32,
     pub sentence_mult: f32,
-    pub guard_count: u8,
-    pub immigration_per_week: u8,
+    pub guard_count: u16,
+    pub immigration_per_week: u16,
     /// P10: the dole's rate while the dole is enacted (`[policy] dole` at
     /// seed, the `safety_net` lever); a city without it seeds 0.
     pub dole_per_day: u8,
     /// M12 D23: city Sanitation workers (0 in a pre-M12 save: nobody sweeps).
     #[serde(default)]
-    pub sanitation_count: u8,
+    pub sanitation_count: u16,
     /// M13 D40: Markets sell Stims legally from day 0.
     #[serde(default)]
     pub stims_legal: bool,
@@ -5500,10 +5500,10 @@ impl Config {
         self.world.market_initial = scale(self.world.market_initial);
         self.world.warehouse_initial = scale(self.world.warehouse_initial);
         self.world.treasury_initial = (self.world.treasury_initial as f64 * f).round() as i64;
-        self.levers.guard_count = (f64::from(self.levers.guard_count) * f).round().clamp(0.0, 255.0) as u8;
+        self.levers.guard_count = (f64::from(self.levers.guard_count) * f).round().clamp(0.0, 65535.0) as u16;
         self.levers.immigration_per_week =
-            (f64::from(self.levers.immigration_per_week) * f).round().clamp(0.0, 255.0) as u8;
-        self.levers.sanitation_count = (f64::from(self.levers.sanitation_count) * f).round().clamp(0.0, 255.0) as u8;
+            (f64::from(self.levers.immigration_per_week) * f).round().clamp(0.0, 65535.0) as u16;
+        self.levers.sanitation_count = (f64::from(self.levers.sanitation_count) * f).round().clamp(0.0, 65535.0) as u16;
         self.gangs.max_members = (self.gangs.max_members as f64 * f).round() as usize;
         self.economy.restock_floor = scale(self.economy.restock_floor);
         self.economy.restock_batch = scale(self.economy.restock_batch);
@@ -5529,7 +5529,7 @@ impl Config {
         for b in &mut t.band {
             *b = (*b as f64 * f).round() as i64;
         }
-        t.sanitation_max = (f64::from(t.sanitation_max) * f).round().clamp(0.0, 255.0) as u8;
+        t.sanitation_max = (f64::from(t.sanitation_max) * f).round().clamp(0.0, 65535.0) as u16;
         self
     }
 }
@@ -6206,7 +6206,7 @@ pub struct TreasuryCfg {
     /// J16: the police ceiling per 1,000 residents.
     pub police_per_1000: f32,
     /// J16: the Sanitation ceiling.
-    pub sanitation_max: u8,
+    pub sanitation_max: u16,
     /// J16: a headcount never drops more than this a day (the reconcilers' pace).
     pub civic_pace: u8,
     /// P5a (risk 8): police per Jail bed, the ceiling's cap by Jail room

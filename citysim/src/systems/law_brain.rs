@@ -558,7 +558,7 @@ pub struct StanceInputs {
     pub landlord: bool,
     pub coverage: f32,
     /// Guards allocated today.
-    pub guards: u8,
+    pub guards: u16,
     /// A Crackdown slot is free (`max_crackdowns`).
     pub slot_free: bool,
     pub courage: f32,

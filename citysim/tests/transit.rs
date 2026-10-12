@@ -818,7 +818,7 @@ fn test_aboard_rider_is_on_the_track() {
             .stops
             .iter()
             .map(|&s| w.transit.net.stops[usize::from(s)])
-            .fold((255u8, 0u8, 255u8, 0u8), |(a, b, c, d), p| (a.min(p.x), b.max(p.x), c.min(p.y), d.max(p.y)));
+            .fold((u16::MAX, 0u16, u16::MAX, 0u16), |(a, b, c, d), p| (a.min(p.x), b.max(p.x), c.min(p.y), d.max(p.y)));
         assert!(x >= f32::from(lo_x) && x <= f32::from(hi_x) && y >= f32::from(lo_y) && y <= f32::from(hi_y));
         seen += 1;
     }

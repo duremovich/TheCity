@@ -99,7 +99,7 @@ fn vats_centroid(world: &World) -> TilePos {
         .districts
         .iter()
         .find(|d| d.zone == Zone::Vats)
-        .map_or_else(|| TilePos { x: (world.map.w() / 2) as u8, y: (world.map.h() / 2) as u8 }, |d| d.centroid)
+        .map_or_else(|| TilePos { x: (world.map.w() / 2) as u16, y: (world.map.h() / 2) as u16 }, |d| d.centroid)
 }
 
 /// A vacant Lot nearest `from` (a Vats Lot first), else a derelict Block

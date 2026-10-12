@@ -82,7 +82,7 @@ impl FlowField {
                 if enter[i].is_finite() && nc < cost[i] {
                     cost[i] = nc;
                     f.next[i] = byte;
-                    open.push(key(nc, TilePos { x: nx as u8, y: ny as u8 }));
+                    open.push(key(nc, TilePos { x: nx as u16, y: ny as u16 }));
                 }
             };
             // W, E, N, S: the order of `Map::neighbours4`.
@@ -141,7 +141,7 @@ impl FlowField {
             return None;
         }
         let (dx, dy) = DIRS[usize::from(b - 1)];
-        Some(TilePos { x: (i32::from(p.x) + dx) as u8, y: (i32::from(p.y) + dy) as u8 })
+        Some(TilePos { x: (i32::from(p.x) + dx) as u16, y: (i32::from(p.y) + dy) as u16 })
     }
 
     /// Does a tile outside `sealed` step into `t`? (`t` is on the descent of
@@ -154,7 +154,7 @@ impl FlowField {
             if x < 0 || y < 0 || x >= w || y >= h {
                 return false;
             }
-            let from = TilePos { x: x as u8, y: y as u8 };
+            let from = TilePos { x: x as u16, y: y as u16 };
             !sealed(from) && self.step(from) == Some(t)
         })
     }
@@ -177,11 +177,11 @@ impl FlowField {
 /// `(cost, tile)` as one `u64` ordered like the tuple: a non-negative `f32`'s
 /// bits order like its value, and `TilePos` orders by `(x, y)`.
 fn key(cost: f32, t: TilePos) -> u64 {
-    (u64::from(cost.to_bits()) << 16) | (u64::from(t.x) << 8) | u64::from(t.y)
+    (u64::from(cost.to_bits()) << 32) | (u64::from(t.x) << 16) | u64::from(t.y)
 }
 
 fn unkey(k: u64) -> (f32, TilePos) {
-    (f32::from_bits((k >> 16) as u32), TilePos { x: (k >> 8) as u8, y: k as u8 })
+    (f32::from_bits((k >> 32) as u32), TilePos { x: (k >> 16) as u16, y: k as u16 })
 }
 
 /// Dijkstra's open set as cost buckets: the tiles pushed at one cost are
@@ -191,13 +191,13 @@ fn unkey(k: u64) -> (f32, TilePos) {
 /// 0.7), so a bucket is complete when it is reached. (M11's radix heap
 /// re-bucketed on nearly every pop, as the tile bits differ within a cost.)
 struct CostQueue {
-    /// `cost bits -> tiles (x << 8 | y)` not yet reached.
-    pending: BTreeMap<u32, Vec<u16>>,
+    /// `cost bits -> tiles (x << 16 | y)` not yet reached.
+    pending: BTreeMap<u32, Vec<u32>>,
     /// The bucket being popped, sorted, and the next position in it.
-    cur: Vec<u16>,
+    cur: Vec<u32>,
     cur_cost: u64,
     pos: usize,
-    spare: Vec<Vec<u16>>,
+    spare: Vec<Vec<u32>>,
 }
 
 impl CostQueue {
@@ -206,10 +206,10 @@ impl CostQueue {
     }
 
     fn push(&mut self, k: u64) {
-        let cost = (k >> 16) as u32;
+        let cost = (k >> 32) as u32;
         debug_assert!(self.cur.is_empty() || u64::from(cost) > self.cur_cost, "costs must rise past the bucket");
         let spare = &mut self.spare;
-        self.pending.entry(cost).or_insert_with(|| spare.pop().unwrap_or_default()).push(k as u16);
+        self.pending.entry(cost).or_insert_with(|| spare.pop().unwrap_or_default()).push(k as u32);
     }
 
     fn pop(&mut self) -> Option<u64> {
@@ -224,7 +224,7 @@ impl CostQueue {
         }
         let t = self.cur[self.pos];
         self.pos += 1;
-        Some((self.cur_cost << 16) | u64::from(t))
+        Some((self.cur_cost << 32) | u64::from(t))
     }
 }
 

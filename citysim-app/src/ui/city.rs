@@ -16,8 +16,8 @@ pub const CITY_W: f32 = 300.0;
 pub struct CityState {
     pub tax_rate: f32,
     pub sentence_mult: f32,
-    pub guard_count: u8,
-    pub immigration_per_week: u8,
+    pub guard_count: u16,
+    pub immigration_per_week: u16,
     pub dole_per_day: u8,
     /// M9: `None` = the captain decides.
     pub law_pin: Option<citysim::Posture>,
@@ -32,7 +32,7 @@ pub struct CityState {
     pub subsidise_amount: i64,
     /// M12 D42: Sanitation headcount, the riot response pin (`None` = the
     /// captain), and the District panel's per-district weights.
-    pub sanitation_count: u8,
+    pub sanitation_count: u16,
     pub riot_response: Option<citysim::RiotResponse>,
     pub guard_weight: [f32; citysim::MAX_DISTRICTS],
     pub sanitation_weight: [f32; citysim::MAX_DISTRICTS],

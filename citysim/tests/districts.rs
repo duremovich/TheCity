@@ -64,7 +64,7 @@ fn test_district_of_matches_cuts_on_v2_map() {
     let cfg = &w.config.districts;
     for y in 0..w.map.h() {
         for x in 0..w.map.w() {
-            let p = TilePos { x: x as u8, y: y as u8 };
+            let p = TilePos { x: x as u16, y: y as u16 };
             let z = w.map.zone(p);
             let hits: Vec<usize> = (0..cfg.names.len())
                 .filter(|&i| {
@@ -113,7 +113,7 @@ fn test_v1_map_is_one_district() {
     assert_eq!(w.districts[0].name, "City");
     for y in 0..w.map.h() {
         for x in 0..w.map.w() {
-            assert_eq!(w.district_of(TilePos { x: x as u8, y: y as u8 }), DistrictId(0));
+            assert_eq!(w.district_of(TilePos { x: x as u16, y: y as u16 }), DistrictId(0));
         }
     }
     // The assets' eight rows on the zoneless map still give one district (D1).
@@ -150,8 +150,8 @@ fn test_aggregates_on_hand_built_world() {
     let idle = pick(&w, 1, |w, a| !w.has::<citysim::Job>(a));
     let drifter = pick(&w, 2, |_, _| true);
     w.set_home(drifter, None);
-    let east_street = (0..w.map.h() as u8)
-        .flat_map(|y| (64..96u8).map(move |x| TilePos { x, y }))
+    let east_street = (0..w.map.h() as u16)
+        .flat_map(|y| (64..96u16).map(move |x| TilePos { x, y }))
         .find(|&t| w.is_street(t))
         .expect("an East street tile");
     if let Some(p) = w.comp_mut::<Position>(drifter) {
@@ -468,7 +468,7 @@ fn test_allocation_follows_crime_and_lever() {
     let patrol = law_brain::patrol_guards(&w);
     assert!(patrol.len() >= 3, "patrol guards: {}", patrol.len());
     law_brain::allocate(&mut w);
-    let g: Vec<u8> = w.districts.iter().map(|d| d.guards).collect();
+    let g: Vec<u16> = w.districts.iter().map(|d| d.guards).collect();
     assert_eq!(g.iter().map(|&x| usize::from(x)).sum::<usize>(), patrol.len(), "allocation sums to the roster");
     assert!(g[1] >= 2 * g[0] && g[1] > 0, "crime 4 vs 1 draws at least 2:1, got {g:?}");
     assert_eq!(g[2], 0, "an uninhabited district gets nobody");
@@ -696,7 +696,7 @@ fn test_vagrancy_fines_payer_and_jails_broke_vagrant() {
     lod::set_lod(&mut w, other, Lod::Statistical);
     sleep_rough(&mut w, other, at);
     w.comp_mut::<Wallet>(other).expect("wallet").coins = 0;
-    w.config.buildings.jail.capacity = w.sentenced().len() as u8;
+    w.config.buildings.jail.capacity = w.sentenced().len() as u16;
     street::vagrancy(&mut w);
     assert!(!w.has::<Sentence>(other), "no cell is freed for a vagrant");
 }
@@ -870,7 +870,7 @@ fn test_coverage_per_district() {
         }
     }
     // Every hour in Sump West: it reads the max, the rest the floor.
-    w.district_watch.yesterday = [0; 12];
+    w.district_watch.yesterday = [0; citysim::MAX_DISTRICTS];
     w.district_watch.yesterday[5] = 1000;
     assert_eq!(bind::district_coverage(&w, DistrictId(5)), w.config.bind.coverage_max);
     assert_eq!(bind::district_coverage(&w, DistrictId(6)), w.config.bind.coverage_min);
@@ -978,7 +978,7 @@ fn test_full_precinct_frees_the_vagrant_first() {
     let now = w.tick;
     law::sentence(&mut w, vagrant, Crime::Vagrancy, now + 600, jail);
     law::sentence(&mut w, thief, Crime::Theft, now + 3 * TICKS_PER_DAY, jail);
-    w.config.buildings.jail.capacity = w.sentenced().len() as u8;
+    w.config.buildings.jail.capacity = w.sentenced().len() as u16;
     law::file_report(&mut w, Crime::Assault, assailant, None);
     let guard = law_brain::guards(&w)[0];
     law::jail_suspect(&mut w, guard, assailant);
@@ -989,7 +989,7 @@ fn test_full_precinct_frees_the_vagrant_first() {
     let late = civ[3];
     law::file_report(&mut w, Crime::Vagrancy, late, None);
     w.comp_mut::<Wallet>(late).expect("wallet").coins = 0;
-    w.config.buildings.jail.capacity = w.sentenced().len() as u8;
+    w.config.buildings.jail.capacity = w.sentenced().len() as u16;
     law::jail_suspect(&mut w, guard, late);
     assert!(!w.has::<Sentence>(late));
     assert!(w.has::<Sentence>(thief) && w.has::<Sentence>(assailant));

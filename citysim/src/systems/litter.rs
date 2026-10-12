@@ -80,7 +80,7 @@ pub fn street_tiles_around(world: &World, centre: TilePos, r: u8) -> impl Iterat
             let (x, y) = (cx + dx, cy + dy);
             x >= 0 && y >= 0 && x < w && y < h
         })
-        .map(move |(dx, dy)| (TilePos { x: (cx + dx) as u8, y: (cy + dy) as u8 }, dx.abs().max(dy.abs())))
+        .map(move |(dx, dy)| (TilePos { x: (cx + dx) as u16, y: (cy + dy) as u16 }, dx.abs().max(dy.abs())))
         .filter(move |&(p, _)| world.is_street(p))
 }
 
@@ -134,7 +134,7 @@ pub fn deposit_in_district(world: &mut World, d: DistrictId, amount: u8, r: u8, 
         let k = world.rng.keyed(key).random_range(0..dist.streets.len());
         let i = dist.streets[k] as usize;
         let w = world.map.w();
-        TilePos { x: (i % w) as u8, y: (i / w) as u8 }
+        TilePos { x: (i % w) as u16, y: (i / w) as u16 }
     };
     deposit(world, tile, amount, r);
 }
@@ -208,7 +208,7 @@ fn clean_tiles(world: &mut World, mut tiles: Vec<u32>, units: u32) -> u32 {
     }
     let w = world.map.w();
     for i in rubble_cleared {
-        let p = TilePos { x: (i as usize % w) as u8, y: (i as usize / w) as u8 };
+        let p = TilePos { x: (i as usize % w) as u16, y: (i as usize / w) as u16 };
         unblock(world, p);
     }
     units - left
@@ -233,7 +233,7 @@ pub fn dirtiest_tile(world: &World, d: DistrictId) -> Option<TilePos> {
     dist.streets
         .iter()
         .map(|&i| {
-            let p = TilePos { x: (i as usize % w) as u8, y: (i as usize / w) as u8 };
+            let p = TilePos { x: (i as usize % w) as u16, y: (i as usize / w) as u16 };
             let v = world.litter.get(i as usize).copied().unwrap_or(0);
             (std::cmp::Reverse(v), p.manhattan(centroid), i, p)
         })
