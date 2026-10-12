@@ -22,6 +22,12 @@
 //! - `L <x>,<y> <x>,<y> [...] <name...>`: an El line (the map's lines
 //!   replace `[[transit.lines]]`).
 //!
+//! Scale S3c (the TheCityGraphics sim export), also optional:
+//! - the tile `m`, Mountain: walkable at 1.5 a step, never built on;
+//! - after a `B` line's floors field, `flats=<n>` and `storeys=<n>`: the
+//!   source city's own flat count and storeys (an import's; the sim deals a
+//!   Home's households by its floors field and only carries these).
+//!
 //! A save packs the grids as run-length strings (SAVE_VERSION 13); an older
 //! save's one-enum-per-tile lists still load.
 
@@ -44,6 +50,20 @@ pub struct MapBuilding {
     /// Jobs and room J6: storeys (1 when the line has no eighth field).
     #[serde(default = "one_u8", skip_serializing_if = "is_one_u8")]
     pub floors: u8,
+    /// Scale S3c: the source city's flats in this building (`flats=`), for
+    /// the Ambient tier; `None` on a map without the field.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flats: Option<u32>,
+    /// Scale S3c: the source city's storeys (`storeys=`); `None` without.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storeys: Option<u16>,
+}
+
+/// Scale S3c: a `B` line's optional `key=value` fields ([`MapText::extra`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct BuildingExtra {
+    pub flats: Option<u32>,
+    pub storeys: Option<u16>,
 }
 
 /// Scale S3b: one `D <zone> <x_from> <x_to> <name...>` line, a `[districts]`
@@ -195,6 +215,7 @@ fn try_tile(ch: char) -> Option<TileKind> {
         'D' => TileKind::Door,
         'f' => TileKind::Farmland,
         '~' => TileKind::Water,
+        'm' => TileKind::Mountain,
         _ => return None,
     })
 }
@@ -212,6 +233,7 @@ pub fn tile_char(t: TileKind) -> char {
         TileKind::Door => 'D',
         TileKind::Farmland => 'f',
         TileKind::Water => '~',
+        TileKind::Mountain => 'm',
     }
 }
 
@@ -336,6 +358,9 @@ pub struct MapText {
     pub lines: Vec<TransitLineCfg>,
     /// `#` lines written before the buildings.
     pub comments: Vec<String>,
+    /// Scale S3c: per building (aligned with `buildings`; empty for none),
+    /// the optional `flats=` / `storeys=` fields.
+    pub extra: Vec<BuildingExtra>,
 }
 
 impl MapText {
@@ -363,10 +388,17 @@ impl MapText {
         for c in &self.comments {
             out.push_str(&format!("# {c}\n"));
         }
-        for (kind, r, tier, floors) in &self.buildings {
+        for (i, (kind, r, tier, floors)) in self.buildings.iter().enumerate() {
             out.push_str(&format!("B {kind:?} {} {} {} {} {tier}", r.x, r.y, r.w, r.h));
-            if *floors > 1 {
+            let extra = self.extra.get(i).copied().unwrap_or_default();
+            if *floors > 1 || extra != BuildingExtra::default() {
                 out.push_str(&format!(" {floors}"));
+            }
+            if let Some(n) = extra.flats {
+                out.push_str(&format!(" flats={n}"));
+            }
+            if let Some(n) = extra.storeys {
+                out.push_str(&format!(" storeys={n}"));
             }
             out.push('\n');
         }
@@ -499,9 +531,12 @@ impl Map {
                 "D" => map.districts.push(parse_district(&parts, n + 1)),
                 "L" => map.lines.push(parse_line(&parts, n + 1, w, h)),
                 _ => {
+                    // S3c: `key=value` fields follow the floors field.
+                    let keyed = parts.iter().position(|p| p.contains('=')).unwrap_or(parts.len());
+                    let (parts, keyed) = parts.split_at(keyed);
                     assert!(
-                        (6..=8).contains(&parts.len()) && parts[0] == "B",
-                        "line {}: expected `B <Kind> <x> <y> <w> <h> [<tier> [<floors>]]`",
+                        (6..=8).contains(&parts.len()) && parts[0] == "B" && (keyed.is_empty() || parts.len() == 8),
+                        "line {}: expected `B <Kind> <x> <y> <w> <h> [<tier> [<floors> [key=value...]]]`",
                         n + 1
                     );
                     let kind = BuildingKind::parse(parts[1])
@@ -516,8 +551,18 @@ impl Map {
                     // Jobs and room J6: the optional eighth field.
                     let floors = parts.get(7).map_or(1, |s| num(s));
                     assert!(floors >= 1, "line {}: floors must be at least 1", n + 1);
+                    let (mut flats, mut storeys) = (None, None);
+                    for kv in keyed {
+                        let (k, v) = kv.split_once('=').unwrap_or((kv, ""));
+                        let bad = || -> ! { panic!("line {}: bad field {kv}", n + 1) };
+                        match k {
+                            "flats" => flats = Some(v.parse().unwrap_or_else(|_| bad())),
+                            "storeys" => storeys = Some(v.parse().unwrap_or_else(|_| bad())),
+                            _ => panic!("line {}: unknown field {k:?} (flats, storeys)", n + 1),
+                        }
+                    }
                     let door = map.validate_building(kind, rect);
-                    map.buildings.push(MapBuilding { kind, rect, door, tier, floors });
+                    map.buildings.push(MapBuilding { kind, rect, door, tier, floors, flats, storeys });
                 }
             }
             n += 1;

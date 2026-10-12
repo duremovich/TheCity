@@ -8,10 +8,10 @@
 //! walks on byte for byte):
 //!
 //! - **A\*, exact.** Costs in tenths (`Road` 7, `Ground`/`Door` 10,
-//!   `Farmland` 12: the f32 move costs × 10, so sums are exact). The first
-//!   pop of the goal is a shortest path, the cost a flow field's descent
-//!   has. Ties pop the deeper node first (the larger `g`), then the lower
-//!   tile index.
+//!   `Farmland` 12, `Mountain` 15: the f32 move costs × 10, so sums are
+//!   exact). The first pop of the goal is a shortest path, the cost a flow
+//!   field's descent has. Ties pop the deeper node first (the larger `g`),
+//!   then the lower tile index.
 //! - **Landmarks (ALT).** 7 × Manhattan alone floods: every road tile in the
 //!   box between the ends has `f` below the true cost as soon as the path
 //!   pays for one Ground or Door tile (a cross-island walk expanded ~10⁶
@@ -48,6 +48,7 @@ pub fn cost_tenths(kind: TileKind) -> u32 {
         TileKind::Road => 7,
         TileKind::Ground | TileKind::Door => 10,
         TileKind::Farmland => 12,
+        TileKind::Mountain => 15,
         TileKind::Wall | TileKind::Water => u32::MAX,
     }
 }
@@ -172,7 +173,8 @@ impl Landmarks {
 }
 
 /// Dijkstra from `src` over `tiles` (rubble ignored) by entry cost, into
-/// `d` (`u32::MAX` unreached): Dial's buckets, the costs being 7-12.
+/// `d` (`u32::MAX` unreached): Dial's buckets, the costs being 7-15 (each
+/// under `B`, so a push never lands in the bucket being popped).
 fn dial(tiles: &[TileKind], w: usize, h: usize, src: usize, d: &mut Vec<u32>) {
     const B: usize = 16;
     d.clear();

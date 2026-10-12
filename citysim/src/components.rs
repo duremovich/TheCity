@@ -127,6 +127,9 @@ pub enum TileKind {
     Door,
     Farmland,
     Water,
+    /// Scale S3c (docs/IMPORT_GRAPHICS.md): land outside the urban limit
+    /// (an import's hills): walkable, slower to cross, never built on.
+    Mountain,
 }
 
 impl TileKind {
@@ -140,6 +143,7 @@ impl TileKind {
             TileKind::Ground | TileKind::Door => 1.0,
             TileKind::Road => 0.7,
             TileKind::Farmland => 1.2,
+            TileKind::Mountain => 1.5,
             TileKind::Wall | TileKind::Water => f32::INFINITY,
         }
     }

@@ -9,6 +9,14 @@
 //! superblocks, El lines from the elevated rail (and the tram, when its file
 //! exists). Their format still evolves: a missing file or field is an error
 //! naming the file, the record and the field, never a panic.
+//!
+//! Scale S3c: their sim export (`<src>/sim/`, schema `city-sim/0.1`,
+//! SIM_NOTES "The sim export") is preferred where present, file by file:
+//! `lots_sim.json` (per-lot floors, use, flats, shop units, street doors,
+//! the named civic sites), `terrain_sim.json` (sea, urban land and mountain:
+//! the hills become walkable Mountain), `rail.json` (the Terrace Line and its
+//! named stations). Without it the S3b inputs stand; the report says which
+//! were read.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::path::{Path, PathBuf};
@@ -17,7 +25,14 @@ use serde_json::Value;
 
 use citysim::components::{BuildingKind, Rect, Zone};
 use citysim::config::TransitLineCfg;
-use citysim::map::{MapDistrict, MapText};
+use citysim::map::{BuildingExtra, MapDistrict, MapText};
+
+/// The sim export's schema this adapter reads (`<src>/sim/*.json`).
+pub const SIM_SCHEMA: &str = "city-sim/0.1";
+
+/// Residents a Home's floor slot (a household) holds: the 2k city's
+/// `[world] residents_per_home`, the generator's convention.
+const RESIDENTS_PER_SLOT: u32 = citysim::mapgen::RESIDENTS_PER_HOME;
 
 #[derive(clap::Args, Clone, Debug)]
 pub struct ImportArgs {
@@ -63,10 +78,56 @@ pub struct Report {
     pub piers: usize,
     pub unmapped: Vec<String>,
     pub warnings: Vec<String>,
+    /// S3c: which inputs were read (the sim export or the S3b fallbacks).
+    pub inputs: Vec<String>,
+    /// S3c: the residents the employers and beds are sized for.
+    pub residents: u32,
+    /// S3c: doors placed on their `doors_m` `out` tile, on the nearest
+    /// road-facing wall tile to it, or by the S3b side search.
+    pub doors_exact: usize,
+    pub doors_near: usize,
+    pub doors_searched: usize,
+    /// Doors moved off an outside tile a later cut built over.
+    pub doors_moved: usize,
+    /// S3c: flats in the Homes (their estimate) and Home floor slots capped at 255.
+    pub home_flats: u64,
+    pub slots_capped: usize,
+    /// S3c: sim tiles read as Mountain and as sea from `terrain_sim.json`
+    /// (before blocks and roads are laid over them).
+    pub mountain_tiles: usize,
+    pub sea_tiles: usize,
+    /// S3c: buildings by kind and their cut's `use` (`-` without the export).
+    pub kind_use: BTreeMap<(BuildingKind, String), usize>,
 }
 
+/// The generator's per-1,000 mix (docs/SCALE_20K.md § S3b), for the report.
+const GEN_MIX: [(BuildingKind, f64); 7] = [
+    (BuildingKind::Home, 200.0),
+    (BuildingKind::Farm, 6.0),
+    (BuildingKind::Market, 1.5),
+    (BuildingKind::Bar, 1.5),
+    (BuildingKind::Hideout, 1.0),
+    (BuildingKind::SecurityOffice, 1.0),
+    (BuildingKind::Lot, 80.0),
+];
+
 impl Report {
+    /// Kind counts per 1,000 residents beside the generator's, one line each.
+    pub fn mix_lines(&self) -> Vec<String> {
+        let per_k = f64::from(self.residents.max(1)) / 1000.0;
+        GEN_MIX
+            .iter()
+            .map(|&(k, gen)| {
+                let n = self.kinds.get(&k).copied().unwrap_or(0);
+                format!("{:<15} {n:>6}  {:>7.2} per 1,000 (generator {gen})", format!("{k:?}"), n as f64 / per_k)
+            })
+            .collect()
+    }
+
     pub fn print(&self) {
+        for i in &self.inputs {
+            println!("input: {i}");
+        }
         println!(
             "map {} x {} tiles ({} m a tile); {} lots read ({} with a sim_layout), {} block parts",
             self.w, self.h, self.tile_m, self.lots, self.lots_with_layout, self.parts
@@ -76,14 +137,34 @@ impl Report {
             self.segments, self.dropped_small, self.dropped_no_road, self.dropped_overlap, self.lots_dropped
         );
         println!(
-            "flats read {} (layouts only), shop units {}; Home floor slots {} ({} residents at 5 a floor)",
+            "flats read {}, shop units {}; Homes hold {} flats; Home floor slots {} ({} residents at {RESIDENTS_PER_SLOT} a slot; {} capped at 255)",
             self.flats,
             self.shop_units,
+            self.home_flats,
             self.home_floors,
-            self.home_floors * 5
+            self.home_floors * RESIDENTS_PER_SLOT as usize,
+            self.slots_capped
+        );
+        println!(
+            "doors: {} on their out tile, {} on the nearest road-facing wall tile, {} by the side search; {} moved off a built-over alley",
+            self.doors_exact, self.doors_near, self.doors_searched, self.doors_moved
+        );
+        println!(
+            "terrain: {} Mountain tiles, {} sea tiles before the blocks and roads",
+            self.mountain_tiles, self.sea_tiles
         );
         for (k, n) in &self.kinds {
             println!("  {:<15} {n:>6}", format!("{k:?}"));
+        }
+        if self.kind_use.keys().any(|(_, u)| u != "-") {
+            println!("kinds by their cut's use:");
+            for ((k, u), n) in &self.kind_use {
+                println!("  {:<15} {u:<12} {n:>6}", format!("{k:?}"));
+            }
+        }
+        println!("mix for {} residents:", self.residents);
+        for l in self.mix_lines() {
+            println!("  {l}");
         }
         for s in &self.shortfall {
             println!("  short: {s}");
@@ -153,6 +234,190 @@ fn points(v: &Value, key: &str, ctx: &str) -> Result<Vec<(f64, f64)>, String> {
         .collect()
 }
 
+/// A whole number field.
+fn uint(v: &Value, key: &str, ctx: &str) -> Result<u64, String> {
+    get(v, key, ctx)?.as_u64().ok_or_else(|| format!("{ctx}: \"{key}\" is not a whole number"))
+}
+
+/// A `[x, y, ...]` point field.
+fn point(v: &Value, key: &str, ctx: &str) -> Result<(f64, f64), String> {
+    let c = format!("{ctx} \"{key}\"");
+    let a = get(v, key, ctx)?.as_array().filter(|a| a.len() >= 2).ok_or_else(|| format!("{c}: not a point"))?;
+    Ok((num(&a[0], &c)?, num(&a[1], &c)?))
+}
+
+/// Warn when a sim export file's `schema` is not the one this adapter reads.
+fn check_schema(v: &Value, file: &str, rep: &mut Report) -> Result<(), String> {
+    let s = text(v, "schema", file)?;
+    if s != SIM_SCHEMA {
+        rep.warnings.push(format!("{file}: schema {s:?}, this adapter reads {SIM_SCHEMA:?}; reading it anyway"));
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// The sim export (`<src>/sim/`, S3c).
+// ---------------------------------------------------------------------------
+
+/// A lot's `use` in `lots_sim.json`.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum Use {
+    ShopHouse,
+    Commercial,
+    Residential,
+    Factory,
+    VatFarm,
+    Godown,
+    Civic,
+    Vacant,
+}
+
+impl Use {
+    fn parse(s: &str) -> Option<Use> {
+        Some(match s {
+            "shop_house" => Use::ShopHouse,
+            "commercial" => Use::Commercial,
+            "residential" => Use::Residential,
+            "factory" => Use::Factory,
+            "vat_farm" => Use::VatFarm,
+            "godown" => Use::Godown,
+            "civic" => Use::Civic,
+            "vacant" => Use::Vacant,
+            _ => return None,
+        })
+    }
+
+    fn industrial(self) -> bool {
+        matches!(self, Use::Factory | Use::VatFarm | Use::Godown)
+    }
+}
+
+/// One lot's record in `sim/lots_sim.json`.
+#[derive(Clone, Debug)]
+struct SimLot {
+    floors: u32,
+    use_: Use,
+    /// `ground == "workshop"` (an alley-only lot's ground floor).
+    workshop: bool,
+    flats: u32,
+    shops: usize,
+    /// Each door's `out` point: the centre of the road tile outside it.
+    doors_out: Vec<(f64, f64)>,
+    layout: bool,
+    civic: Option<String>,
+}
+
+/// `sim/lots_sim.json`'s lots by id.
+fn read_sim_lots(dir: &Path, rep: &mut Report) -> Result<BTreeMap<String, SimLot>, String> {
+    const F: &str = "sim/lots_sim.json";
+    let v = read_json(dir, "lots_sim.json")?;
+    check_schema(&v, F, rep)?;
+    let lots = get(&v, "lots", F)?.as_object().ok_or_else(|| format!("{F}: \"lots\" is not an object"))?;
+    let mut out = BTreeMap::new();
+    let mut odd: BTreeMap<String, usize> = BTreeMap::new();
+    for (id, r) in lots {
+        let ctx = format!("{F} lots.{id}");
+        let u = text(r, "use", &ctx)?;
+        let use_ = Use::parse(u).unwrap_or_else(|| {
+            *odd.entry(format!("use {u:?} (read as vacant)")).or_default() += 1;
+            Use::Vacant
+        });
+        let ground = text(r, "ground", &ctx)?;
+        if !matches!(ground, "shop" | "workshop" | "lobby" | "works" | "civic" | "none") {
+            *odd.entry(format!("ground {ground:?}")).or_default() += 1;
+        }
+        let source = text(r, "source", &ctx)?;
+        if !matches!(source, "layout" | "estimate") {
+            *odd.entry(format!("source {source:?}")).or_default() += 1;
+        }
+        let mut doors_out = Vec::new();
+        for (j, d) in arr(r, "doors_m", &ctx)?.iter().enumerate() {
+            let c = format!("{ctx} doors_m[{j}]");
+            point(d, "at", &c)?;
+            doors_out.push(point(d, "out", &c)?);
+        }
+        let civic = match r.get("civic") {
+            None | Some(Value::Null) => None,
+            Some(Value::String(s)) => Some(s.clone()),
+            Some(_) => return Err(format!("{ctx}: \"civic\" is not a string")),
+        };
+        let rec = SimLot {
+            floors: u32::try_from(uint(r, "floors", &ctx)?).unwrap_or(u32::MAX),
+            use_,
+            workshop: ground == "workshop",
+            flats: u32::try_from(uint(r, "flats", &ctx)?).unwrap_or(u32::MAX),
+            shops: usize::try_from(uint(r, "shop_units", &ctx)?).unwrap_or(usize::MAX),
+            doors_out,
+            layout: source == "layout",
+            civic,
+        };
+        out.insert(id.clone(), rec);
+    }
+    for (what, n) in odd {
+        rep.warnings.push(format!("{F}: {n} lot(s) with an unknown {what}"));
+    }
+    Ok(out)
+}
+
+/// `sim/terrain_sim.json`: a class per their tile, north-up (0 sea, 1
+/// urban, 2 mountain).
+struct Terrain {
+    tile_m: f64,
+    nx: usize,
+    ny: usize,
+    cls: Vec<u8>,
+}
+
+const SEA: u8 = 0;
+const URBAN: u8 = 1;
+const MOUNTAIN: u8 = 2;
+
+impl Terrain {
+    fn read(dir: &Path, rep: &mut Report) -> Result<Terrain, String> {
+        const F: &str = "sim/terrain_sim.json";
+        let v = read_json(dir, "terrain_sim.json")?;
+        check_schema(&v, F, rep)?;
+        let tile_m = num(get(&v, "tile_m", F)?, &format!("{F} \"tile_m\""))?;
+        if tile_m <= 0.0 {
+            return Err(format!("{F}: \"tile_m\" {tile_m} is not positive"));
+        }
+        let nx = usize::try_from(uint(&v, "nx", F)?).unwrap_or(usize::MAX);
+        let ny = usize::try_from(uint(&v, "ny", F)?).unwrap_or(usize::MAX);
+        let rows = arr(&v, "rows", F)?;
+        if rows.len() != ny {
+            return Err(format!("{F}: {} rows but ny {ny}", rows.len()));
+        }
+        let mut cls = Vec::with_capacity(nx.saturating_mul(ny));
+        for (r, row) in rows.iter().enumerate() {
+            let ctx = format!("{F} rows[{r}]");
+            let s = row.as_str().ok_or_else(|| format!("{ctx}: not a string"))?;
+            let chars = citysim::map::rle_decode(s).map_err(|e| format!("{ctx}: {e}"))?;
+            if chars.len() != nx {
+                return Err(format!("{ctx}: {} tiles but nx {nx}", chars.len()));
+            }
+            for c in chars {
+                cls.push(match c {
+                    '~' => SEA,
+                    'u' => URBAN,
+                    'm' => MOUNTAIN,
+                    _ => return Err(format!("{ctx}: unknown class {c:?} (the legend is ~ u m)")),
+                });
+            }
+        }
+        Ok(Terrain { tile_m, nx, ny, cls })
+    }
+
+    /// The class under a point in metres (x east, y north); sea off the grid.
+    fn at(&self, x: f64, y: f64) -> u8 {
+        let c = (x / self.tile_m).floor();
+        let r = ((self.ny as f64 * self.tile_m - y) / self.tile_m).floor();
+        if c < 0.0 || r < 0.0 || c as usize >= self.nx || r as usize >= self.ny {
+            return SEA;
+        }
+        self.cls[r as usize * self.nx + c as usize]
+    }
+}
+
 // ---------------------------------------------------------------------------
 // The grid frame: metres (y north) to tiles (y south).
 // ---------------------------------------------------------------------------
@@ -197,6 +462,30 @@ impl Frame {
     }
 }
 
+/// A rect's wall tiles a door can take (not the corners), each with the
+/// tile outside it: `(door, outside)`; the S, N, E, W walls in turn.
+fn wall_doors(r: (usize, usize, usize, usize), w: usize, h: usize) -> Vec<((usize, usize), (usize, usize))> {
+    let (x0, y0, x1, y1) = r;
+    let mut out = Vec::new();
+    for v in x0 + 1..x1.saturating_sub(1) {
+        if y1 < h {
+            out.push(((v, y1 - 1), (v, y1)));
+        }
+        if y0 > 0 {
+            out.push(((v, y0), (v, y0 - 1)));
+        }
+    }
+    for v in y0 + 1..y1.saturating_sub(1) {
+        if x1 < w {
+            out.push(((x1 - 1, v), (x1, v)));
+        }
+        if x0 > 0 {
+            out.push(((x0, v), (x0 - 1, v)));
+        }
+    }
+    out
+}
+
 fn inside(r: [f64; 4], win: [f64; 4]) -> bool {
     r[0] >= win[0] && r[1] >= win[1] && r[2] <= win[2] && r[3] <= win[3]
 }
@@ -219,6 +508,8 @@ struct Lot {
     layout: bool,
     residential: bool,
     door_off: Option<usize>,
+    /// S3c: the lot's `lots_sim.json` record (`None` without the export).
+    sim: Option<SimLot>,
 }
 
 /// Floors (non-roof), flats (units with a living room), shop units, the
@@ -272,6 +563,24 @@ struct Seg {
     floors: u32,
     shops: usize,
     residential: bool,
+    /// S3c, from the export (`None` / 0 without it): the members' use (a
+    /// named civic member's, else the most common), whether most members'
+    /// ground floor is a workshop, their flats and the named civic site.
+    use_: Option<Use>,
+    workshop: bool,
+    flats: u32,
+    civic: Option<String>,
+}
+
+/// A named civic site's rank when two share a cut (the first is kept).
+fn civic_rank(name: &str) -> usize {
+    match name {
+        "city_hall" => 0,
+        n if n.starts_with("precinct") => 1,
+        "depot" => 2,
+        "crematorium" => 3,
+        _ => 4,
+    }
 }
 
 fn zone_letter(z: &str) -> Option<Zone> {
@@ -369,7 +678,49 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         return Err(format!("--src {}: not a directory", src.display()));
     }
     let k = args.downsample.max(1);
-    let mut rep = Report::default();
+    let mut rep = Report { residents: args.residents, ..Report::default() };
+
+    // S3c: the sim export, file by file; the S3b inputs where one is absent.
+    let sim_dir = src.join("sim");
+    let sim_lots = if sim_dir.join("lots_sim.json").is_file() {
+        let l = read_sim_lots(&sim_dir, &mut rep)?;
+        rep.inputs.push(format!(
+            "lots: sim/lots_sim.json ({} records, {} from layouts): floors, use, flats, shop units, doors, civic sites",
+            l.len(),
+            l.values().filter(|r| r.layout).count()
+        ));
+        Some(l)
+    } else {
+        rep.inputs.push(
+            "lots: lots.json floor ranges and bldg/<lot>/sim_layout.toml (no sim/lots_sim.json: the S3b fallback)"
+                .into(),
+        );
+        None
+    };
+    let terrain = if sim_dir.join("terrain_sim.json").is_file() {
+        let t = Terrain::read(&sim_dir, &mut rep)?;
+        rep.inputs.push(format!(
+            "terrain: sim/terrain_sim.json ({} x {} at {} m): sea Water, mountain Mountain",
+            t.nx, t.ny, t.tile_m
+        ));
+        Some(t)
+    } else {
+        rep.inputs.push(
+            "terrain: none (no sim/terrain_sim.json: every tile off the blocks and ways is Water, the S3b fallback)"
+                .into(),
+        );
+        None
+    };
+    let rail_json = if sim_dir.join("rail.json").is_file() {
+        let r = read_json(&sim_dir, "rail.json")?;
+        check_schema(&r, "sim/rail.json", &mut rep)?;
+        rep.inputs
+            .push("rail: sim/rail.json (lines and named stations; the timetable stays the sim's [transit])".into());
+        Some(r)
+    } else {
+        rep.inputs.push("rail: elevated.json rail elements (no sim/rail.json: the S3b fallback)".into());
+        None
+    };
 
     let districts_json = read_json(src, "districts.json")?;
     let blocks_json = read_json(src, "blocks.json")?;
@@ -544,16 +895,52 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
 
     // --- tiles: water, land, roads ------------------------------------------------
     let mut tiles = vec!['~'; w * h];
-    let land = |r: [f64; 4], tiles: &mut Vec<char>| {
+    // S3c: the terrain first (each sim tile the most common class of its
+    // samples, one per their tile; ties urban, then mountain), then the
+    // blocks and ways over it.
+    if let Some(t) = &terrain {
+        let sub = ((s / t.tile_m).round() as usize).max(1);
+        for ty in 0..h {
+            for tx in 0..w {
+                let mut n = [0usize; 3];
+                for j in 0..sub {
+                    for i in 0..sub {
+                        let x = f.x0 + (tx as f64 + (i as f64 + 0.5) / sub as f64) * s;
+                        let y = f.y1 - (ty as f64 + (j as f64 + 0.5) / sub as f64) * s;
+                        n[usize::from(t.at(x, y))] += 1;
+                    }
+                }
+                let c = [URBAN, MOUNTAIN, SEA].into_iter().fold(URBAN, |b, c| {
+                    if n[usize::from(c)] > n[usize::from(b)] {
+                        c
+                    } else {
+                        b
+                    }
+                });
+                tiles[at(tx, ty)] = match c {
+                    URBAN => '.',
+                    MOUNTAIN => 'm',
+                    _ => '~',
+                };
+            }
+        }
+        rep.mountain_tiles = tiles.iter().filter(|&&c| c == 'm').count();
+        rep.sea_tiles = tiles.iter().filter(|&&c| c == '~').count();
+    }
+    // S3c: with the terrain, only the blocks are laid over its Mountain (a
+    // superblock's or a green's rect is a bounding box, often up the hill).
+    let land = |r: [f64; 4], tiles: &mut Vec<char>, over_hills: bool| {
         let (x0, y0, x1, y1) = f.round(r);
         for y in y0..y1 {
             for x in x0..x1 {
-                tiles[at(x, y)] = '.';
+                if over_hills || tiles[at(x, y)] != 'm' {
+                    tiles[at(x, y)] = '.';
+                }
             }
         }
     };
     for (i, sb) in arr(&districts_json, "superblocks", "districts.json")?.iter().enumerate() {
-        land(field_rect(sb, "rect_m", &format!("districts.json superblocks[{i}]"))?, &mut tiles);
+        land(field_rect(sb, "rect_m", &format!("districts.json superblocks[{i}]"))?, &mut tiles, false);
     }
     for list in ["blocks", "open", "greens_m", "leftover_m", "voids_m"] {
         let Some(items) = blocks_json.get(list).and_then(|v| v.as_array()) else {
@@ -563,7 +950,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         for (i, it) in items.iter().enumerate() {
             let ctx = format!("blocks.json {list}[{i}]");
             let r = if it.is_array() { rect_m(it, &ctx)? } else { field_rect(it, "rect_m", &ctx)? };
-            land(r, &mut tiles);
+            land(r, &mut tiles, list == "blocks");
         }
     }
     let ways = arr(&roads_json, "ways", "roads.json")?;
@@ -634,6 +1021,30 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
         rep.lots += 1;
         let block = text(l, "block", &ctx)?.to_string();
         let front = text(l, "front", &ctx)?.chars().next().unwrap_or('S');
+        // S3c: the export's record replaces the floor range and the layout read.
+        if let Some(sim) = &sim_lots {
+            let rec = sim
+                .get(id)
+                .ok_or_else(|| format!("sim/lots_sim.json lots: no record for lot {id} (lots.json lots[{i}])"))?;
+            if rec.layout {
+                rep.lots_with_layout += 1;
+            }
+            rep.flats += rec.flats as usize;
+            rep.shop_units += rec.shops;
+            let lot = Lot {
+                rect,
+                front,
+                floors: rec.floors.max(1),
+                flats: rec.flats as usize,
+                shops: rec.shops,
+                layout: rec.layout,
+                residential: rec.use_ == Use::Residential,
+                door_off: None,
+                sim: Some(rec.clone()),
+            };
+            lots_by_block.entry(block).or_default().push(lot);
+            continue;
+        }
         let fl = arr(l, "floors", &ctx)?;
         if fl.len() != 2 {
             return Err(format!("{ctx}: \"floors\" is not [lo, hi]"));
@@ -651,6 +1062,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             layout: false,
             residential: true,
             door_off: None,
+            sim: None,
         };
         let layout = src.join("bldg").join(id).join("sim_layout.toml");
         if layout.is_file() {
@@ -666,6 +1078,15 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             rep.shop_units += shops;
         }
         lots_by_block.entry(block).or_default().push(lot);
+    }
+    if let Some(sim) = &sim_lots {
+        if sim.len() != lots_list.len() {
+            rep.warnings.push(format!(
+                "sim/lots_sim.json holds {} records, lots.json {} lots (records past lots.json are ignored)",
+                sim.len(),
+                lots_list.len()
+            ));
+        }
     }
 
     // --- buildings: block parts cut at lot boundaries ---------------------------
@@ -739,9 +1160,31 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
             edges.dedup();
             let (a0, a1) = if along_x { (px0, px1) } else { (py0, py1) };
             let mut cuts = vec![a0];
-            // The Vats' godowns stay whole (a Vat Farm needs 60 interior tiles).
+            // The Vats' godowns stay whole (a Vat Farm needs 60 interior
+            // tiles). S3c: with the export, a Vats part is cut between two
+            // lots each big enough for a Farm on its own (at 2 m tiles most
+            // vat farms are; at 8 m none, and the parts stay whole).
             if vats_block {
-                edges.clear();
+                let depth = if along_x { py1 - py0 } else { px1 - px0 };
+                let span = |l: &Lot| {
+                    let (x0, y0, x1, y1) = f.round(l.rect);
+                    if along_x {
+                        (x0, x1)
+                    } else {
+                        (y0, y1)
+                    }
+                };
+                let farm_sized = |l: &Lot| {
+                    let (a, b) = span(l);
+                    (b.saturating_sub(a)).saturating_sub(2) * depth.saturating_sub(2) >= 60
+                };
+                edges.retain(|&e| {
+                    let before: Vec<&&Lot> = lots.iter().filter(|l| span(l).1 == e).collect();
+                    let after: Vec<&&Lot> = lots.iter().filter(|l| span(l).0 == e).collect();
+                    !before.is_empty()
+                        && !after.is_empty()
+                        && before.iter().chain(&after).all(|l| l.sim.is_some() && farm_sized(l))
+                });
             }
             for e in edges {
                 let last = *cuts.last().unwrap_or(&a0);
@@ -841,8 +1284,38 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                         })
                         .collect()
                 };
+                // S3c: the members' (else the part's) lots, for the export's fields.
+                let src_lots: Vec<&Lot> =
+                    if members.is_empty() { lots.clone() } else { members.iter().map(|l| **l).collect() };
+                // S3c: their street doors first: a wall tile (not a corner)
+                // whose outside is the `out` tile, else the road-facing wall
+                // tile nearest any `out` tile.
+                let outs: Vec<(usize, usize)> = src_lots
+                    .iter()
+                    .filter_map(|l| l.sim.as_ref())
+                    .flat_map(|r| r.doors_out.iter())
+                    .filter_map(|&(x, y)| f.tile(x, y))
+                    .collect();
                 let mut door = None;
+                if !outs.is_empty() {
+                    let mut cands = wall_doors((x0, y0, x1, y1), w, h);
+                    cands.retain(|&(_, (ox, oy))| road(&tiles, ox, oy));
+                    let dist = |c: &((usize, usize), (usize, usize))| {
+                        outs.iter().map(|o| c.1 .0.abs_diff(o.0) + c.1 .1.abs_diff(o.1)).min().unwrap_or(usize::MAX)
+                    };
+                    if let Some(c) = outs.iter().find_map(|o| cands.iter().find(|c| c.1 == *o)) {
+                        door = Some(c.0);
+                        rep.doors_exact += 1;
+                    } else if let Some(c) = cands.iter().min_by_key(|c| dist(c)) {
+                        door = Some(c.0);
+                        rep.doors_near += 1;
+                    }
+                }
+                let searched = door.is_none() && sim_lots.is_some();
                 for side in std::iter::once(front).chain(['S', 'N', 'E', 'W'].into_iter().filter(|&c| c != front)) {
+                    if door.is_some() {
+                        break;
+                    }
                     for ((dx, dy), (ox, oy)) in side_tiles(side) {
                         let (nx, ny) = (dx as isize + ox, dy as isize + oy);
                         if nx >= 0
@@ -864,6 +1337,9 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     rep.lots_dropped += members.len();
                     continue;
                 };
+                if searched {
+                    rep.doors_searched += 1;
+                }
                 for y in y0..y1 {
                     for x in x0..x1 {
                         occupied[at(x, y)] = true;
@@ -877,6 +1353,25 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                 };
                 let (cx, cy) =
                     (usize::from(rect.x) + usize::from(rect.w) / 2, usize::from(rect.y) + usize::from(rect.h) / 2);
+                // S3c: the export's use, ground, flats and civic name.
+                let recs: Vec<&SimLot> = src_lots.iter().filter_map(|l| l.sim.as_ref()).collect();
+                let civic = members
+                    .iter()
+                    .filter_map(|l| l.sim.as_ref().and_then(|r| r.civic.clone()))
+                    .min_by_key(|c| (civic_rank(c), c.clone()));
+                let use_ = if recs.is_empty() {
+                    None
+                } else if civic.is_some() {
+                    Some(Use::Civic)
+                } else {
+                    let mut n: BTreeMap<Use, usize> = BTreeMap::new();
+                    for r in recs.iter().filter(|r| r.civic.is_none()) {
+                        *n.entry(r.use_).or_default() += 1;
+                    }
+                    n.iter()
+                        .max_by_key(|(u, c)| (**c, std::cmp::Reverse(**u)))
+                        .map_or(Some(Use::Civic), |(u, _)| Some(*u))
+                };
                 segs.push(Seg {
                     rect,
                     door,
@@ -884,10 +1379,46 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     floors: floors.clamp(1, 255),
                     shops: members.iter().map(|l| l.shops).sum(),
                     residential: members.iter().all(|l| l.residential),
+                    use_,
+                    workshop: !recs.is_empty() && recs.iter().filter(|r| r.workshop).count() * 2 >= recs.len(),
+                    flats: members.iter().map(|l| l.flats as u32).sum(),
+                    civic,
                 });
             }
         }
     }
+    // A door's outside tile can be a rear alley a whole-block cut built
+    // over later: such a door moves to the nearest wall tile still facing an
+    // open road (else the cut is dropped).
+    let mut keep_seg = vec![true; segs.len()];
+    for (j, sg) in segs.iter_mut().enumerate() {
+        let r = sg.rect;
+        let (x0, y0) = (usize::from(r.x), usize::from(r.y));
+        let cands: Vec<((usize, usize), (usize, usize))> =
+            wall_doors((x0, y0, x0 + usize::from(r.w), y0 + usize::from(r.h)), w, h)
+                .into_iter()
+                .filter(|&(_, (ox, oy))| road(&tiles, ox, oy) && !occupied[at(ox, oy)])
+                .collect();
+        if cands.iter().any(|c| c.0 == sg.door) {
+            continue;
+        }
+        let d = sg.door;
+        match cands.iter().min_by_key(|c| c.0 .0.abs_diff(d.0) + c.0 .1.abs_diff(d.1)) {
+            Some(c) => {
+                sg.door = c.0;
+                rep.doors_moved += 1;
+            }
+            None => {
+                keep_seg[j] = false;
+                rep.dropped_no_road += 1;
+            }
+        }
+    }
+    let mut j = 0;
+    segs.retain(|_| {
+        j += 1;
+        keep_seg[j - 1]
+    });
     rep.segments = segs.len();
     if segs.is_empty() {
         return Err("no lot became a building (the window holds no block with lots?)".into());
@@ -901,37 +1432,40 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     let area = |i: usize| usize::from(segs[i].rect.w) * usize::from(segs[i].rect.h);
     let interior = |i: usize| (usize::from(segs[i].rect.w) - 2) * (usize::from(segs[i].rect.h) - 2);
     let pos = |i: usize| (segs[i].rect.y, segs[i].rect.x);
-    // Take `n` of the free candidates passing `ok`, preferred zones first,
-    // spread by stride over the city (sorted by position).
-    let take = |kind: &mut Vec<Option<BuildingKind>>,
+    // Take `n` of the free candidates, stage by stage (each a filter; S3c's
+    // use-led picks), within a stage the preferred zones first, spread by
+    // stride over the city (sorted by position) or the largest first.
+    let pick = |kind: &mut Vec<Option<BuildingKind>>,
                 rep: &mut Report,
                 want: BuildingKind,
                 n: usize,
                 prefer: &[Zone],
-                ok: &dyn Fn(usize) -> bool,
+                stages: &[&dyn Fn(usize) -> bool],
                 largest: bool| {
         let mut got = 0;
-        let mut tiers: Vec<Vec<usize>> = prefer
-            .iter()
-            .map(|z| (0..segs.len()).filter(|&i| kind[i].is_none() && zone(i) == *z && ok(i)).collect())
-            .collect();
-        tiers.push((0..segs.len()).filter(|&i| kind[i].is_none() && !prefer.contains(&zone(i)) && ok(i)).collect());
-        for mut c in tiers {
-            if got >= n {
-                break;
-            }
-            c.retain(|&i| kind[i].is_none());
-            if largest {
-                c.sort_by_key(|&i| (std::cmp::Reverse(area(i)), pos(i)));
-            } else {
-                c.sort_by_key(|&i| pos(i));
-            }
-            let m = (n - got).min(c.len());
-            let picks: Vec<usize> =
-                if largest { c[..m].to_vec() } else { (0..m).map(|j| c[j * c.len() / m]).collect() };
-            for i in picks {
-                kind[i] = Some(want);
-                got += 1;
+        for ok in stages {
+            let mut tiers: Vec<Vec<usize>> = prefer
+                .iter()
+                .map(|z| (0..segs.len()).filter(|&i| kind[i].is_none() && zone(i) == *z && ok(i)).collect())
+                .collect();
+            tiers.push((0..segs.len()).filter(|&i| kind[i].is_none() && !prefer.contains(&zone(i)) && ok(i)).collect());
+            for mut c in tiers {
+                if got >= n {
+                    break;
+                }
+                c.retain(|&i| kind[i].is_none());
+                if largest {
+                    c.sort_by_key(|&i| (std::cmp::Reverse(area(i)), pos(i)));
+                } else {
+                    c.sort_by_key(|&i| pos(i));
+                }
+                let m = (n - got).min(c.len());
+                let picks: Vec<usize> =
+                    if largest { c[..m].to_vec() } else { (0..m).map(|j| c[j * c.len() / m]).collect() };
+                for i in picks {
+                    kind[i] = Some(want);
+                    got += 1;
+                }
             }
         }
         if got < n {
@@ -941,39 +1475,201 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     use BuildingKind as K;
     use Zone as Z;
     let any = |_: usize| true;
-    take(&mut kind, &mut rep, K::Jail, 1, &[Z::Civic], &any, true);
-    take(&mut kind, &mut rep, K::Hall, 1, &[Z::Civic], &any, true);
-    take(&mut kind, &mut rep, K::Warehouse, 1, &[Z::Vats], &any, true);
-    take(&mut kind, &mut rep, K::Cemetery, 1, &[Z::Vats], &any, false);
     let farm_ok = |i: usize| interior(i) >= 60;
-    take(&mut kind, &mut rep, K::Farm, target(6.0), &[Z::Vats], &farm_ok, true);
-    take(&mut kind, &mut rep, K::SecurityOffice, target(1.0), &[Z::Vats], &any, false);
-    take(&mut kind, &mut rep, K::Hideout, target(1.0), &[Z::Sump], &any, false);
-    let shop_ok = |i: usize| segs[i].shops > 0 || !segs[i].residential;
-    for (kd, per) in [(K::Market, 1.5), (K::Bar, 1.5)] {
-        let n = target(per);
-        let before = rep.shortfall.len();
-        take(&mut kind, &mut rep, kd, n, &[Z::Mid, Z::Sump], &shop_ok, false);
-        if rep.shortfall.len() > before {
-            // Too few shop units: the rest on any block.
-            rep.shortfall.pop();
-            let have = kind.iter().filter(|x| **x == Some(kd)).count();
-            take(&mut kind, &mut rep, kd, n - have, &[Z::Mid, Z::Sump], &any, false);
+    let by_use = segs.iter().any(|sg| sg.use_.is_some());
+    if !by_use {
+        // S3b: no export, the generator's mix by district.
+        pick(&mut kind, &mut rep, K::Jail, 1, &[Z::Civic], &[&any], true);
+        pick(&mut kind, &mut rep, K::Hall, 1, &[Z::Civic], &[&any], true);
+        pick(&mut kind, &mut rep, K::Warehouse, 1, &[Z::Vats], &[&any], true);
+        pick(&mut kind, &mut rep, K::Cemetery, 1, &[Z::Vats], &[&any], false);
+        pick(&mut kind, &mut rep, K::Farm, target(6.0), &[Z::Vats], &[&farm_ok], true);
+        pick(&mut kind, &mut rep, K::SecurityOffice, target(1.0), &[Z::Vats], &[&any], false);
+        pick(&mut kind, &mut rep, K::Hideout, target(1.0), &[Z::Sump], &[&any], false);
+        // Shop cuts first; too few shop units: the rest on any block.
+        let shop_ok = |i: usize| segs[i].shops > 0 || !segs[i].residential;
+        for (kd, per) in [(K::Market, 1.5), (K::Bar, 1.5)] {
+            pick(&mut kind, &mut rep, kd, target(per), &[Z::Mid, Z::Sump], &[&shop_ok, &any], false);
+        }
+        pick(&mut kind, &mut rep, K::Lot, target(80.0), &[], &[&any], false);
+    } else {
+        // S3c: the export's use leads; the counts stay the generator's mix.
+        let segs = &segs;
+        let is = |u: Use| move |i: usize| segs[i].use_ == Some(u);
+        let (vat, factory, godown) = (is(Use::VatFarm), is(Use::Factory), is(Use::Godown));
+        let (shop_house, commercial) = (is(Use::ShopHouse), is(Use::Commercial));
+        let industrial = |i: usize| segs[i].use_.is_some_and(Use::industrial);
+        // The named civic sites: city_hall the Hall, depot the Reserve Depot,
+        // crematorium the Recycler; the precinct in a Civic district (else
+        // the first) the Precinct (the Jail), every other precinct a
+        // Security Office.
+        let mut precincts: Vec<usize> = Vec::new();
+        for (i, sg) in segs.iter().enumerate() {
+            let Some(c) = sg.civic.as_deref() else { continue };
+            let kd = match c {
+                "city_hall" => K::Hall,
+                "depot" => K::Warehouse,
+                "crematorium" => K::Cemetery,
+                p if p.starts_with("precinct") => {
+                    precincts.push(i);
+                    continue;
+                }
+                other => {
+                    rep.warnings.push(format!("civic site {other:?}: no sim kind; read as a Lot"));
+                    continue;
+                }
+            };
+            if kind.contains(&Some(kd)) {
+                rep.warnings.push(format!("civic site {c:?}: a second {kd:?}; read as a Lot"));
+            } else {
+                kind[i] = Some(kd);
+            }
+        }
+        precincts.sort_by_key(|&i| (zone(i) != Z::Civic, segs[i].district, pos(i)));
+        for (j, &i) in precincts.iter().enumerate() {
+            kind[i] = Some(if j == 0 { K::Jail } else { K::SecurityOffice });
+        }
+        // A site the window or the cuts lost: the S3b rule, with a warning.
+        for (kd, prefer, largest) in [
+            (K::Jail, Z::Civic, true),
+            (K::Hall, Z::Civic, true),
+            (K::Warehouse, Z::Vats, true),
+            (K::Cemetery, Z::Vats, false),
+        ] {
+            if !kind.contains(&Some(kd)) {
+                rep.warnings.push(format!("no named civic site became the {kd:?}: placed by the S3b rule"));
+                pick(&mut kind, &mut rep, kd, 1, &[prefer], &[&any], largest);
+            }
+        }
+        let farm_vat = |i: usize| vat(i) && farm_ok(i);
+        let farm_ind = |i: usize| industrial(i) && farm_ok(i);
+        // Then a cut nobody lives in (commercial, civic), before any Block.
+        let farm_open =
+            |i: usize| farm_ok(i) && !segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse));
+        pick(
+            &mut kind,
+            &mut rep,
+            K::Farm,
+            target(6.0),
+            &[Z::Vats],
+            &[&farm_vat, &farm_ind, &farm_open, &farm_ok],
+            true,
+        );
+        let have_so = kind.iter().filter(|x| **x == Some(K::SecurityOffice)).count();
+        let n_so = target(1.0).saturating_sub(have_so);
+        if n_so > 0 {
+            pick(
+                &mut kind,
+                &mut rep,
+                K::SecurityOffice,
+                n_so,
+                &[Z::Vats],
+                &[&factory, &godown, &industrial, &any],
+                false,
+            );
+        }
+        let alley = |i: usize| shop_house(i) && segs[i].workshop;
+        let shopfront = |i: usize| shop_house(i) && !segs[i].workshop;
+        pick(&mut kind, &mut rep, K::Hideout, target(1.0), &[Z::Sump], &[&alley, &shop_house, &any], false);
+        pick(&mut kind, &mut rep, K::Market, target(1.5), &[Z::Sump, Z::Mid], &[&shopfront, &commercial, &any], false);
+        pick(&mut kind, &mut rep, K::Bar, target(1.5), &[Z::Mid, Z::Sump], &[&commercial, &shopfront, &any], false);
+        // Lots: the leftover industrial, civic and vacant cuts, then (to the
+        // mix's count) commercial cuts without flats, commercial, shop-houses.
+        for (i, sg) in segs.iter().enumerate() {
+            if kind[i].is_none() && sg.use_.is_some_and(|u| u.industrial() || matches!(u, Use::Civic | Use::Vacant)) {
+                kind[i] = Some(K::Lot);
+            }
+        }
+        // Never past the generator's Lots to Blocks (80 to 200): a coarse
+        // import has too few cuts for both, and the Blocks come first.
+        let have_lots = kind.iter().filter(|x| **x == Some(K::Lot)).count();
+        let housing = (0..segs.len())
+            .filter(|&i| {
+                kind[i].is_none()
+                    && segs[i].use_.is_some_and(|u| matches!(u, Use::Residential | Use::ShopHouse | Use::Commercial))
+            })
+            .count();
+        let room = (housing as f64 * 0.4 - have_lots as f64) / 1.4;
+        let want = target(80.0).saturating_sub(have_lots);
+        let n_lots = want.min(room.max(0.0).floor() as usize);
+        if n_lots < want {
+            rep.shortfall.push(format!(
+                "Lot: {} of {} (more would take Blocks past the generator's 80 Lots to 200 Blocks)",
+                have_lots + n_lots,
+                have_lots + want
+            ));
+        }
+        if n_lots > 0 {
+            let no_flats = |i: usize| commercial(i) && segs[i].flats == 0;
+            pick(&mut kind, &mut rep, K::Lot, n_lots, &[], &[&no_flats, &commercial, &shop_house], false);
         }
     }
-    take(&mut kind, &mut rep, K::Lot, target(80.0), &[], &any, false);
-    // The rest: Blocks in the living districts, open Lots in the Vats and Civic.
-    let mut out_b: Vec<(BuildingKind, Rect, u8, u8)> = Vec::new();
+    // The rest: Blocks where people live, open Lots elsewhere (S3b: in the
+    // Vats and Civic; S3c: commercial cuts without flats).
+    let rest = |i: usize| match segs[i].use_ {
+        None if matches!(zone(i), Z::Vats | Z::Civic) => K::Lot,
+        None => K::Home,
+        Some(Use::Residential | Use::ShopHouse) => K::Home,
+        Some(Use::Commercial) if segs[i].flats > 0 => K::Home,
+        Some(_) => K::Lot,
+    };
+    let kinds: Vec<BuildingKind> = (0..segs.len()).map(|i| kind[i].unwrap_or_else(|| rest(i))).collect();
+    // Home floor slots (a household each, `RESIDENTS_PER_SLOT` residents).
+    // S3b: a Home's floors. S3c: the `--residents` households (one a slot)
+    // dealt over the Homes by their flats (largest remainder), at least one
+    // slot a Home; World::new deals households by stride over the slots, so
+    // a tower holds its flats' share and the beds come to at least N.
+    let homes: Vec<usize> = (0..segs.len()).filter(|&i| kinds[i] == K::Home).collect();
+    let mut slots: Vec<u32> = segs.iter().map(|sg| sg.floors).collect();
+    if by_use && !homes.is_empty() {
+        let want = u64::from(args.residents.div_ceil(RESIDENTS_PER_SLOT));
+        let total: u64 = homes.iter().map(|&i| u64::from(segs[i].flats)).sum();
+        rep.home_flats = total;
+        let n = homes.len() as u64;
+        let mut rems: Vec<(u64, usize)> = Vec::with_capacity(homes.len());
+        let mut dealt = 0u64;
+        for (j, &i) in homes.iter().enumerate() {
+            let p = want * u64::from(segs[i].flats);
+            // No flats anywhere: an even deal.
+            let (q, r) = match (p.checked_div(total), p.checked_rem(total)) {
+                (Some(q), Some(r)) => (q, r),
+                _ => (want / n + u64::from((j as u64) < want % n), 0),
+            };
+            slots[i] = u32::try_from(q).unwrap_or(u32::MAX - 1);
+            dealt += q;
+            rems.push((r, i));
+        }
+        rems.sort_by_key(|&(r, i)| (std::cmp::Reverse(r), i));
+        for &(_, i) in rems.iter().take(want.saturating_sub(dealt) as usize) {
+            slots[i] += 1;
+        }
+        for &i in &homes {
+            slots[i] = slots[i].max(1);
+        }
+        rep.slots_capped = homes.iter().filter(|&&i| slots[i] > 255).count();
+    }
+
+    let mut out_b: Vec<(BuildingKind, Rect, u8, u8, BuildingExtra)> = Vec::new();
     let mut doors: Vec<(usize, usize)> = Vec::new();
     for (i, sg) in segs.iter().enumerate() {
         let z = zone(i);
-        let kd = kind[i].unwrap_or(if matches!(z, Z::Vats | Z::Civic) { K::Lot } else { K::Home });
-        let floors = if kd == K::Home { sg.floors.min(255) as u8 } else { 1 };
+        let kd = kinds[i];
+        let floors = if kd == K::Home { slots[i].clamp(1, 255) as u8 } else { 1 };
         if kd == K::Home {
             rep.home_floors += usize::from(floors);
         }
+        let extra = if by_use {
+            BuildingExtra {
+                flats: (kd == K::Home).then_some(sg.flats),
+                storeys: Some(u16::try_from(sg.floors).unwrap_or(u16::MAX)),
+            }
+        } else {
+            BuildingExtra::default()
+        };
         *rep.kinds.entry(kd).or_default() += 1;
-        out_b.push((kd, sg.rect, tier_of(z), floors));
+        let u = sg.use_.map_or("-".to_string(), |u| format!("{u:?}"));
+        *rep.kind_use.entry((kd, u)).or_default() += 1;
+        out_b.push((kd, sg.rect, tier_of(z), floors, extra));
         doors.push(sg.door);
     }
 
@@ -1004,61 +1700,114 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
 
     // --- El lines ---------------------------------------------------------------
     let mut lines: Vec<TransitLineCfg> = Vec::new();
+    let mut comments: Vec<String> = vec![
+        format!(
+            "imported from TheCityGraphics by citysim-cli import-graphics (Scale S3c): downsample {k}, {s} m tiles, crop {}, employers and beds for {} residents",
+            args.crop.as_deref().unwrap_or("none"),
+            args.residents
+        ),
+        format!("inputs: {}", rep.inputs.join("; ")),
+        "docs/IMPORT_GRAPHICS.md: the mapping and what is not mapped".into(),
+    ];
     let elements = arr(&elevated_json, "elements", "elevated.json")?;
-    let mut stations: Vec<(f64, f64)> = Vec::new();
     let mut unmapped_el: BTreeMap<String, usize> = BTreeMap::new();
     for (i, e) in elements.iter().enumerate() {
-        let ctx = format!("elevated.json elements[{i}]");
-        if text(e, "kind", &ctx)? == "station" {
-            let p = points(e, "pts", &ctx)?;
-            if !p.is_empty() {
-                let n = p.len() as f64;
-                stations.push((p.iter().map(|q| q.0).sum::<f64>() / n, p.iter().map(|q| q.1).sum::<f64>() / n));
-            }
+        let kd = text(e, "kind", &format!("elevated.json elements[{i}]"))?;
+        if kd != "rail" && kd != "station" {
+            *unmapped_el.entry(kd.to_string()).or_default() += 1;
         }
     }
-    for (i, e) in elements.iter().enumerate() {
-        let ctx = format!("elevated.json elements[{i}]");
-        let kd = text(e, "kind", &ctx)?;
-        if kd != "rail" {
-            if kd != "station" {
-                *unmapped_el.entry(kd.to_string()).or_default() += 1;
+    if let Some(r) = &rail_json {
+        // S3c: sim/rail.json, each line by its name with its stations kept
+        // as waypoints (a waypoint is a stop); its service is not read (the
+        // sim's `[transit]` headway and dwell run every line).
+        for (i, l) in arr(r, "lines", "sim/rail.json")?.iter().enumerate() {
+            let ctx = format!("sim/rail.json lines[{i}]");
+            let name = text(l, "name", &ctx)?;
+            let pts = points(l, "pts", &ctx)?;
+            let u: Vec<f64> = arr(l, "u", &ctx)?.iter().map(|v| num(v, &ctx)).collect::<Result<_, _>>()?;
+            if u.len() != pts.len() {
+                return Err(format!("{ctx}: {} pts but {} u", pts.len(), u.len()));
             }
-            continue;
+            let mut keep = BTreeSet::new();
+            let mut names = Vec::new();
+            for (j, st) in arr(l, "stops", &ctx)?.iter().enumerate() {
+                let c = format!("{ctx} stops[{j}]");
+                let su = num(get(st, "u", &c)?, &format!("{c} \"u\""))?;
+                names.push(text(st, "name", &c)?.to_string());
+                let at = (0..u.len()).min_by(|&a, &b| (u[a] - su).abs().total_cmp(&(u[b] - su).abs())).unwrap_or(0);
+                keep.insert(at);
+            }
+            match line_waypoints(&f, &pts, &keep) {
+                Some(wp) => {
+                    comments.push(format!(
+                        "El line {name}: stations {} (sim/rail.json; headway {} s, {} s at night there; the sim's [transit] timetable runs it)",
+                        names.join(", "),
+                        l.get("headway_s").and_then(Value::as_f64).unwrap_or(0.0),
+                        l.get("night_headway_s").and_then(Value::as_f64).unwrap_or(0.0)
+                    ));
+                    lines.push(TransitLineCfg { name: name.to_string(), waypoints: wp });
+                }
+                None => rep.warnings.push(format!("{ctx} ({name}): under two track points in the window")),
+            }
         }
-        let id = text(e, "id", &ctx)?;
-        let pts = points(e, "pts", &ctx)?;
-        if pts.len() < 2 {
-            continue;
+        rep.unmapped.push(
+            "sim/rail.json service (headway_s, night_headway_s, service_hours, dwell_s, speed_mps, trains, cars): the sim's [transit] timetable runs every line".into(),
+        );
+    } else {
+        let mut stations: Vec<(f64, f64)> = Vec::new();
+        for (i, e) in elements.iter().enumerate() {
+            let ctx = format!("elevated.json elements[{i}]");
+            if text(e, "kind", &ctx)? == "station" {
+                let p = points(e, "pts", &ctx)?;
+                if !p.is_empty() {
+                    let n = p.len() as f64;
+                    stations.push((p.iter().map(|q| q.0).sum::<f64>() / n, p.iter().map(|q| q.1).sum::<f64>() / n));
+                }
+            }
         }
-        // Each station's nearest track point is kept (a waypoint is a stop).
-        let keep: BTreeSet<usize> = stations
-            .iter()
-            .map(|&(sx, sy)| {
-                (0..pts.len())
-                    .min_by(|&a, &b| {
-                        let da = (pts[a].0 - sx).powi(2) + (pts[a].1 - sy).powi(2);
-                        let db = (pts[b].0 - sx).powi(2) + (pts[b].1 - sy).powi(2);
-                        da.total_cmp(&db)
-                    })
-                    .unwrap_or(0)
-            })
-            .collect();
-        match line_waypoints(&f, &pts, &keep) {
-            Some(wp) => lines.push(TransitLineCfg { name: format!("El {id}"), waypoints: wp }),
-            None => rep.warnings.push(format!("{ctx} ({id}): under two track points in the window")),
+        for (i, e) in elements.iter().enumerate() {
+            let ctx = format!("elevated.json elements[{i}]");
+            if text(e, "kind", &ctx)? != "rail" {
+                continue;
+            }
+            let id = text(e, "id", &ctx)?;
+            let pts = points(e, "pts", &ctx)?;
+            if pts.len() < 2 {
+                continue;
+            }
+            // Each station's nearest track point is kept (a waypoint is a stop).
+            let keep: BTreeSet<usize> = stations
+                .iter()
+                .map(|&(sx, sy)| {
+                    (0..pts.len())
+                        .min_by(|&a, &b| {
+                            let da = (pts[a].0 - sx).powi(2) + (pts[a].1 - sy).powi(2);
+                            let db = (pts[b].0 - sx).powi(2) + (pts[b].1 - sy).powi(2);
+                            da.total_cmp(&db)
+                        })
+                        .unwrap_or(0)
+                })
+                .collect();
+            match line_waypoints(&f, &pts, &keep) {
+                Some(wp) => lines.push(TransitLineCfg { name: format!("El {id}"), waypoints: wp }),
+                None => rep.warnings.push(format!("{ctx} ({id}): under two track points in the window")),
+            }
         }
     }
     for (kd, n) in &unmapped_el {
         rep.unmapped.push(format!("elevated.json: {n} \"{kd}\" element(s) (no sim counterpart)"));
     }
-    // The tram (street/tram.json): its loop out to the terminus is a line.
+    // The tram (street/tram.json): its loop out to the terminus is a line,
+    // named after its street (street/names.json) where that file names it.
+    let street_names = read_json(&src.join("street"), "names.json").ok();
     match read_json(&src.join("street"), "tram.json") {
         Err(e) => rep.warnings.push(format!("{e}; no tram line")),
         Ok(t) => {
             for (i, l) in arr(&t, "lines", "tram.json")?.iter().enumerate() {
                 let ctx = format!("tram.json lines[{i}]");
                 let way = l.get("way").and_then(|v| v.as_str()).unwrap_or("tram");
+                let street = street_names.as_ref().and_then(|n| n.get(way)).and_then(Value::as_str).unwrap_or(way);
                 let pts = points(l, "pts", &ctx)?;
                 let u: Vec<f64> = arr(l, "u", &ctx)?.iter().map(|v| num(v, &ctx)).collect::<Result<_, _>>()?;
                 if u.len() != pts.len() {
@@ -1085,7 +1834,7 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
                     .map(|(su, _)| u.iter().position(|&x| x >= *su).unwrap_or(0).min(half.len() - 1))
                     .collect();
                 match line_waypoints(&f, half, &keep) {
-                    Some(wp) => lines.push(TransitLineCfg { name: format!("Tram {way}"), waypoints: wp }),
+                    Some(wp) => lines.push(TransitLineCfg { name: format!("Tram {street}"), waypoints: wp }),
                     None => rep.warnings.push(format!("{ctx}: under two tram points in the window")),
                 }
             }
@@ -1102,36 +1851,41 @@ pub fn build(args: &ImportArgs) -> Result<(String, Report), String> {
     rep.unmapped.push(
         "lots.json: platform z, under_deck, pylons, frontage classes, walkway_join (the sim's ground is flat)".into(),
     );
-    rep.unmapped.push("lots.json floors: the district's range, not the lot's massing (a seeded pick in it)".into());
-    rep.unmapped.push("terrain: sea and mountain both read as Water (outside every block, way and superblock)".into());
+    if sim_lots.is_some() {
+        rep.unmapped.push(
+            "lots_sim.json shop_units: Markets and Bars follow use and ground, not the unit count; workplaces keep one floor (their storeys are written as storeys=)".into(),
+        );
+    } else {
+        rep.unmapped.push("lots.json floors: the district's range, not the lot's massing (a seeded pick in it)".into());
+    }
+    if terrain.is_none() {
+        rep.unmapped
+            .push("terrain: sea and mountain both read as Water (outside every block, way and superblock)".into());
+    }
     rep.unmapped.push("roads.json nodes/edges, traffic.json lanes: vehicles are not simulated on roads".into());
     rep.unmapped.push(
-        "sim_layout.toml rooms, portals, slots: a Home is 5 residents a floor; flats and shop units are counted, rooms are not placed"
+        "sim_layout.toml rooms, portals, slots: a Home is 5 residents a floor slot; flats and shop units are counted, rooms are not placed"
             .into(),
     );
 
     let zones: Vec<char> =
         dgrid.iter().map(|&d| zone_of_d.get(usize::from(d)).copied().unwrap_or(Z::Mid).letter()).collect();
     let grid: Vec<u8> = dgrid.iter().map(|&d| d as u8).collect();
+    let extra: Vec<BuildingExtra> = out_b.iter().map(|b| b.4).collect();
     let text_out = MapText {
         w,
         h,
         tiles,
         zones,
-        buildings: out_b,
+        buildings: out_b.into_iter().map(|(kd, r, t, fl, _)| (kd, r, t, fl)).collect(),
         districts,
         district_grid: grid,
         lines,
-        comments: vec![
-            format!(
-                "imported from TheCityGraphics by citysim-cli import-graphics (Scale S3b): downsample {k}, {s} m tiles, crop {}, employers for {} residents",
-                args.crop.as_deref().unwrap_or("none"),
-                args.residents
-            ),
-            "docs/IMPORT_GRAPHICS.md: the mapping and what is not mapped".into(),
-        ],
+        comments,
+        extra,
     }
     .to_text(true);
+
     // Self-check: the sim's own parser must accept it.
     let check = text_out.clone();
     let parsed = std::panic::catch_unwind(move || citysim::Map::parse(&check));
@@ -1234,6 +1988,64 @@ mod tests {
         assert!(err.contains("roads.json"), "{err}");
         let err = build(&ImportArgs { src: d.join("nope"), ..args(&d) }).expect_err("no dir");
         assert!(err.contains("not a directory"), "{err}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+
+    /// S3c: the tiny city with their sim export (`sim/`): the hills north of
+    /// the city (outside every block and way) are Mountain, the named civic
+    /// site is the Hall, the Homes carry their flats, the rail line its name.
+    fn write_sim(d: &Path, schema: &str, drop_use_of: Option<&str>) {
+        std::fs::write(d.join("terrain.json"), r#"{"summary":{"size_m":[80,70]}}"#).expect("write");
+        let sim = d.join("sim");
+        std::fs::create_dir_all(&sim).expect("mkdir");
+        let mut lots = Vec::new();
+        for i in 0..10 {
+            let x = f64::from(i) * 8.0 + 4.0;
+            let (use_s, ground, flats, civic) =
+                if i == 0 { ("civic", "civic", 0, r#","civic":"city_hall""#) } else { ("shop_house", "shop", 3, "") };
+            lots.push(format!(
+                r#""m{i}":{{"floors":5,"use":"{use_s}","ground":"{ground}","flats":{flats},"shop_units":1,"source":"estimate","doors_m":[{{"at":[{x},48],"out":[{x},49],"side":"N"}}]{civic}}}"#
+            ));
+            let use_field =
+                if drop_use_of == Some(&format!("l{i}")) { String::new() } else { r#""use":"residential","#.into() };
+            lots.push(format!(
+                r#""l{i}":{{"floors":6,{use_field}"ground":"lobby","flats":{},"shop_units":0,"source":"estimate","doors_m":[{{"at":[{x},12],"out":[{x},11],"side":"S"}}]}}"#,
+                4 + i
+            ));
+        }
+        let lots = format!(r#"{{"schema":"{schema}","lots":{{{}}}}}"#, lots.join(","));
+        let rows: Vec<String> =
+            (0..35).map(|r| if r < 5 { "\"40m\"".to_string() } else { "\"40u\"".to_string() }).collect();
+        let terrain = format!(r#"{{"schema":"{schema}","tile_m":2,"nx":40,"ny":35,"rows":[{}]}}"#, rows.join(","));
+        let rail = format!(
+            r#"{{"schema":"{schema}","lines":[{{"name":"Test Line","pts":[[2,6,40],[40,6,40],[78,6,40]],"u":[0,38,76],
+            "stops":[{{"name":"West","u":0}},{{"name":"East","u":76}}],"headway_s":240}}]}}"#
+        );
+        for (n, t) in [("lots_sim.json", lots), ("terrain_sim.json", terrain), ("rail.json", rail)] {
+            std::fs::write(sim.join(n), t).expect("write");
+        }
+    }
+
+    #[test]
+    fn test_import_reads_the_sim_export() {
+        let d = tmp("sim");
+        write_city(&d, "rect_m");
+        write_sim(&d, "city-sim/0.9", None);
+        let (text, rep) = build(&args(&d)).expect("imports");
+        let m = citysim::Map::parse(&text);
+        assert_eq!((m.w(), m.h()), (40, 35));
+        assert_eq!(m.tiles().iter().filter(|&&t| t == citysim::TileKind::Mountain).count(), 200, "{rep:?}");
+        assert!(m.walkable(citysim::TilePos::new(10, 2)));
+        assert_eq!(m.lines.iter().map(|l| l.name.as_str()).collect::<Vec<_>>(), ["Test Line"]);
+        assert_eq!(m.count_kind(BuildingKind::Hall), 1);
+        assert!(m.buildings.iter().any(|b| b.kind == BuildingKind::Home && b.flats.is_some_and(|f| f > 0)));
+        assert!(rep.doors_exact > 0, "{rep:?}");
+        assert!(rep.inputs.iter().any(|i| i.starts_with("lots: sim/lots_sim.json")));
+        assert!(rep.warnings.iter().any(|w| w.contains("schema \"city-sim/0.9\"")), "{:?}", rep.warnings);
+        // A record missing a field fails naming the file, the record and the field.
+        write_sim(&d, SIM_SCHEMA, Some("l3"));
+        let err = build(&args(&d)).expect_err("a lot without use");
+        assert!(err.contains("sim/lots_sim.json lots.l3: missing field \"use\""), "{err}");
         let _ = std::fs::remove_dir_all(&d);
     }
 }

@@ -188,6 +188,8 @@ fn test_map_text_round_trips() {
         }
     }
     tiles[3 * w + 3] = 'D';
+    // S3c: a Mountain tile.
+    tiles[8 * w + 11] = 'm';
     let zones: Vec<char> = (0..w * h).map(|i| if i % w < 6 { 'U' } else { 'M' }).collect();
     let grid: Vec<u8> = (0..w * h).map(|i| u8::from(i / w >= 5)).collect();
     let parts = MapText {
@@ -203,11 +205,15 @@ fn test_map_text_round_trips() {
         district_grid: grid,
         lines: vec![citysim::config::TransitLineCfg { name: "Test Line".into(), waypoints: vec![[0, 4], [11, 4]] }],
         comments: vec!["a test".into()],
+        extra: vec![citysim::map::BuildingExtra { flats: Some(12), storeys: Some(9) }],
     };
     for rle in [false, true] {
         let m = Map::parse(&parts.to_text(rle));
         assert_eq!(m.buildings.len(), 1);
         assert_eq!((m.buildings[0].floors, m.buildings[0].tier, m.buildings[0].door), (3, 0, TilePos::new(3, 3)));
+        assert_eq!((m.buildings[0].flats, m.buildings[0].storeys), (Some(12), Some(9)));
+        assert_eq!(m.tile(11, 8), TileKind::Mountain);
+        assert!(m.walkable(TilePos::new(11, 8)));
         assert_eq!(m.districts, parts.districts);
         assert_eq!(m.lines, parts.lines);
         assert_eq!(m.district_at(TilePos::new(0, 0)), Some(0));
@@ -271,7 +277,11 @@ fn test_graphics_import_fixture_parses() {
             "D7 The Stack"
         ]
     );
-    assert_eq!(m.lines.len(), 2, "the El rail and the tram");
+    let lines: Vec<&str> = m.lines.iter().map(|l| l.name.as_str()).collect();
+    assert_eq!(lines, ["Terrace Line", "Tram Tai Ning Road"], "the El rail and the tram");
+    // S3c: the sim export's hills are walkable Mountain, its flats carried.
+    assert!(m.tiles().iter().filter(|&&t| t == TileKind::Mountain).count() > 100_000, "the hills");
+    assert!(m.buildings.iter().filter(|b| b.kind == BuildingKind::Home).all(|b| b.flats.is_some()));
     assert!(!m.edge_roads().is_empty(), "the carved piers");
     for k in [BuildingKind::Jail, BuildingKind::Hall, BuildingKind::Warehouse, BuildingKind::Cemetery] {
         assert_eq!(m.count_kind(k), 1, "{k:?}");

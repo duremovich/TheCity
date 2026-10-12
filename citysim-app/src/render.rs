@@ -17,6 +17,8 @@ const C_WALL: u32 = 0x6b6660;
 const C_DOOR: u32 = 0x9a7b4f;
 const C_FARMLAND: u32 = 0x3f5a2a;
 const C_WATER: u32 = 0x27485e;
+/// Scale S3c: an import's hills.
+const C_MOUNTAIN: u32 = 0x4a4f3a;
 const C_OUTLINE: u32 = 0xc8c0b0;
 /// M10: Lots (open plots) and Security Offices.
 const C_LOT: u32 = 0x7a7466;
@@ -77,6 +79,7 @@ fn tile_colour(kind: TileKind, zone: Zone) -> Color {
         TileKind::Door => C_DOOR,
         TileKind::Farmland => C_FARMLAND,
         TileKind::Water => C_WATER,
+        TileKind::Mountain => C_MOUNTAIN,
     })
 }
 

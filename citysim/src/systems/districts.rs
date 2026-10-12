@@ -119,7 +119,10 @@ pub fn rebuild(world: &mut World) {
                 None => row_of(&rows, world.map.zone(p), x as u16),
             };
             let i = y * w + x;
-            let street = world.map.walkable(p) && !in_building[i];
+            // Scale S3c: an import's hills are walkable but no street.
+            let street = world.map.walkable(p)
+                && !in_building[i]
+                && world.map.tile_at(p) != crate::components::TileKind::Mountain;
             grid[i] = d | if street { STREET_BIT } else { 0 };
             let s = &mut sum[usize::from(d)];
             if street {

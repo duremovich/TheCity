@@ -11,8 +11,8 @@ use citysim::exec::flowfield::{FlowCache, FlowField};
 use citysim::map::Map;
 use citysim::{Building, Config, EntityId, Position, TileKind, TilePos, World};
 
-/// A random `w × h` map: mostly Road and Ground, some Farmland-free walls,
-/// water and rubble (Door and Farmland need a building around them).
+/// A random `w × h` map: mostly Road and Ground, some Mountain,
+/// Farmland-free walls, water and rubble (Door and Farmland need a building around them).
 fn random_map(rng: &mut rand_chacha::ChaCha8Rng, w: usize, h: usize) -> Map {
     random_maps(rng, w, h).0
 }
@@ -27,7 +27,9 @@ fn random_maps(rng: &mut rand_chacha::ChaCha8Rng, w: usize, h: usize) -> (Map, M
             let r: f32 = rng.random();
             let ch = match r {
                 r if r < 0.40 => '=',
-                r if r < 0.72 => '.',
+                r if r < 0.64 => '.',
+                // Scale S3c: Mountain (15 tenths, the dearest step).
+                r if r < 0.72 => 'm',
                 r if r < 0.92 => '#',
                 _ => '~',
             };
