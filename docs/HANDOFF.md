@@ -360,7 +360,8 @@ Findings:
 
 ## Next session (written 2026-10-12, end of the Scale milestone)
 
-1. `/code-review high` over 2e5ffa2^..HEAD's Scale work (908d055..226871e), then fix.
-2. Dylan's answers on the Ambient questions.
+1. Done: `/code-review high` over 908d055..226871e, ten findings fixed in b7f8376 (SAVE 15; 2k byte-identical; core_20k 200 tps).
+2. Done: Dylan agreed with the Ambient recs (hire_far off; dematerialise and children later; Ambient demand in M17).
 3. M16b → M17 (Ambient demand as outside demand creating jobs) → M18. Write every new mechanism for 20k and run
    core_20k beside core_year per merge.
+- **Review fixes merged b7f8376** (all ten, SAVE 15, 2k byte-identical, core_20k 200 tps). **M16b started**: one solo coder (`m16b`), phase by phase per the SOP; the orchestrator commits and merges each phase, then continues the same agent. Phase 1 (leverage) running off b7f8376.
