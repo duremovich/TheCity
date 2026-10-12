@@ -64,6 +64,10 @@ pub fn expected_defenders(world: &World, target: &Target) -> Vec<EntityId> {
     if !crate::systems::law::living(world, t) {
         return Vec::new();
     }
+    // M16b phase 2: a captive's defenders are its hold's.
+    if crate::systems::captives::is_captive(world, t) {
+        return crate::systems::captives::guards_at(world, t);
+    }
     let home_d = world.comp::<Household>(t).and_then(|h| h.home).map(|h| world.district_of_building(h));
     let mut allies: Vec<EntityId> = Vec::new();
     if let Some(g) = world.gang_of(t).and_then(|g| world.comp::<crate::components::Gang>(g)) {
@@ -498,6 +502,10 @@ pub fn defenders(world: &World, id: ContractId) -> Vec<EntityId> {
     let Some(m) = world.missions.get(&id) else { return Vec::new() };
     let Some(t) = world.contracts.get(&id).and_then(|c| c.target_agent()) else { return Vec::new() };
     let fit = |a: EntityId| law::living(world, a) && !world.has::<Sentence>(a) && !m.crew.contains(&a);
+    // M16b phase 2: a Rescue meets the hold's guards.
+    if world.contracts.get(&id).is_some_and(|c| c.kind == ContractKind::Rescue) {
+        return crate::systems::captives::guards_at(world, t).into_iter().filter(|&a| fit(a)).collect();
+    }
     let mut out: Vec<EntityId> = Vec::new();
     if fit(t) && at_door(world, m, t) {
         out.push(t);
@@ -562,6 +570,27 @@ pub fn brawl(world: &mut World, actor: EntityId) -> Option<raid::Outcome> {
     let tname = world.name_of(t);
     let mut raiders = raid::gathered_for(world, &m.crew, actor, m.door, GoalKind::Contract);
     let mut defs = defenders(world, id);
+    // M16b phase 2: a Rescue breaks the hold's door.
+    if c.kind == ContractKind::Rescue {
+        let (n_raiders, n_defenders) = (raiders.len(), defs.len());
+        let tally = fight(world, &mut raiders, &mut defs, m.door, &place);
+        let won = defs.is_empty() && raiders.iter().any(|&r| law::living(world, r));
+        let result = if won { "won" } else { "lost" };
+        let line = format!(
+            "{crew_name} broke into {place} for {tname}: {result} ({n_raiders} vs {n_defenders}, {} dead)",
+            tally.deaths
+        );
+        contracts::note(world, id, line.clone());
+        if taken(world, id) {
+            if won && crate::systems::captives::is_captive(world, t) {
+                crate::systems::captives::rescue_win(world, t, &raiders);
+                contracts::settle(world, id, contracts::Settle::Fulfilled, &line);
+            } else {
+                contracts::fail_attempt(world, id, &line);
+            }
+        }
+        return Some(if won { raid::Outcome::Won } else { raid::Outcome::Lost });
+    }
     if !defs.contains(&t) {
         let text = format!("{crew_name} found no {tname} at {place}");
         contracts::fail_attempt(world, id, &text);

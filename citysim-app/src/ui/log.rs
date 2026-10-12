@@ -133,6 +133,11 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Lapsed
         | EventKind::Parleyed
         | EventKind::Defrauded
+        // M16b phase 2.
+        | EventKind::HostageTaken
+        | EventKind::HostageFreed
+        | EventKind::HostageKilled
+        | EventKind::Exposed
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

@@ -198,10 +198,13 @@ pub enum BuildingKind {
     /// Real economy E37 (addendum 19): a work camp; `Building.camp` holds
     /// the children housed there. Owned by a corp or the city, never an agent.
     Camp,
+    /// M16b phase 2 (spec § 4): a corp's private prison, where its
+    /// captives are held; built by a corp, never by an agent.
+    Prison,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 26] = [
+    pub const ALL: [BuildingKind; 27] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -228,6 +231,7 @@ impl BuildingKind {
         BuildingKind::Fixer,
         BuildingKind::Mission,
         BuildingKind::Camp,
+        BuildingKind::Prison,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -273,6 +277,7 @@ impl BuildingKind {
             "Fixer" => BuildingKind::Fixer,
             "Mission" => BuildingKind::Mission,
             "Camp" => BuildingKind::Camp,
+            "Prison" => BuildingKind::Prison,
             _ => return None,
         })
     }
@@ -306,6 +311,7 @@ impl BuildingKind {
             BuildingKind::Fixer => "Fixer",
             BuildingKind::Mission => "Soup Kitchen",
             BuildingKind::Camp => "Work Camp",
+            BuildingKind::Prison => "Private Prison",
         }
     }
 
@@ -342,6 +348,8 @@ impl BuildingKind {
             // free capital, so the Mission draws `+` (render only).
             BuildingKind::Mission => '+',
             BuildingKind::Camp => 'Y',
+            // M16b phase 2: the letter L2 left it.
+            BuildingKind::Prison => 'Z',
         }
     }
 }

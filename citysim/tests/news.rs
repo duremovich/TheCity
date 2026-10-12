@@ -183,6 +183,8 @@ fn test_spin_buries_own_story_for_bury_days() {
         tick: now,
         slant: -0.3,
         paid_by: None,
+        fabricated: false,
+        exposed: false,
     });
     w.next_story_id = 1;
     w.config.news.spin_min = 0.0;

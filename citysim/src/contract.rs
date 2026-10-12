@@ -46,11 +46,51 @@ pub enum ContractKind {
     /// the taker on the target (a Charm toward the buyer for a Court
     /// suitor), resolved at any tier as one Move-stream draw.
     Persuade,
+    /// M16b phase 2: a record whose fulfilment is the target dragged to a
+    /// holding building and handed over (`HandOver`): a hostage or a
+    /// Harvest's take.
+    Abduct,
+    /// M16b phase 2: a mission on a holding building; a win frees its
+    /// holder's captives inside.
+    Rescue,
+    /// M16b phase 2: a bodyguard's post on an agent client (a `Guard` on a
+    /// person, taken by agents and Security corps alike).
+    Escort,
+    /// M16b phase 2: a theft from a building, or, on a Lab with a node, a
+    /// heist through a run order (`RunWhy::Contract`) whose Data goes to
+    /// the buyer.
+    Steal,
+    /// M16b phase 2: a cargo carried to a building (a corpse to the
+    /// Recycler).
+    Deliver,
+    /// M16b phase 2: a story planted on a Feed (fabricated or true).
+    Spin,
 }
 
 impl ContractKind {
-    pub const ALL: [ContractKind; 5] =
-        [ContractKind::Hit, ContractKind::Beat, ContractKind::Guard, ContractKind::Locate, ContractKind::Persuade];
+    pub const ALL: [ContractKind; 11] = [
+        ContractKind::Hit,
+        ContractKind::Beat,
+        ContractKind::Guard,
+        ContractKind::Locate,
+        ContractKind::Persuade,
+        ContractKind::Abduct,
+        ContractKind::Rescue,
+        ContractKind::Escort,
+        ContractKind::Steal,
+        ContractKind::Deliver,
+        ContractKind::Spin,
+    ];
+
+    /// M16b phase 2's six kinds (`LeverageCols`' per-kind columns).
+    pub const PHASE2: [ContractKind; 6] = [
+        ContractKind::Abduct,
+        ContractKind::Rescue,
+        ContractKind::Escort,
+        ContractKind::Steal,
+        ContractKind::Deliver,
+        ContractKind::Spin,
+    ];
 
     /// M16a's four kinds: the `k_{kind}_*` CSV slots of `ContractCols` and
     /// the City panel's rows (M16b's kinds count in `LeverageCols`).
@@ -65,6 +105,12 @@ impl ContractKind {
             ContractKind::Guard => "guard",
             ContractKind::Locate => "locate",
             ContractKind::Persuade => "persuade",
+            ContractKind::Abduct => "abduct",
+            ContractKind::Rescue => "rescue",
+            ContractKind::Escort => "escort",
+            ContractKind::Steal => "steal",
+            ContractKind::Deliver => "deliver",
+            ContractKind::Spin => "spin",
         }
     }
 
@@ -80,7 +126,16 @@ impl ContractKind {
 
     /// The law files on its fulfilment (a Murder or an Assault).
     pub fn illegal(self) -> bool {
-        matches!(self, ContractKind::Hit | ContractKind::Beat)
+        matches!(
+            self,
+            ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct | ContractKind::Rescue | ContractKind::Steal
+        )
+    }
+
+    /// M16b: worked by a fight (the risk and the nerve read the strike
+    /// estimate): the violent kinds, an abduction and a rescue.
+    pub fn fights(self) -> bool {
+        matches!(self, ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct | ContractKind::Rescue)
     }
 
     /// Fulfilled through a fight roll.
@@ -94,18 +149,49 @@ impl ContractKind {
     }
 }
 
-/// Who or what a record names. M16b appends `Node`, `Carry`, `Seat`, `Story`.
+/// Who or what a record names. M16b phase 2 appends `Carry` and `Story`
+/// (a heist on a node names its Lab: `Building`; the board's `Seat` is
+/// phase 4's).
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
 pub enum Target {
     Agent(EntityId),
     Building(EntityId),
+    /// A Deliver: `what` carried to the building `to`.
+    Carry {
+        what: Cargo,
+        to: EntityId,
+    },
+    /// A Spin: the deed a story names (`fabricated`: it never happened).
+    Story {
+        deed: Deed,
+        actor: EntityId,
+        object: Option<EntityId>,
+        fabricated: bool,
+    },
+}
+
+/// What a Deliver carries.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum Cargo {
+    Corpse(EntityId),
+    Captive(EntityId),
+}
+
+impl Cargo {
+    pub fn id(self) -> EntityId {
+        match self {
+            Cargo::Corpse(e) | Cargo::Captive(e) => e,
+        }
+    }
 }
 
 impl Target {
-    /// The entity named.
+    /// The entity named: the agent, the building, the cargo, the story's actor.
     pub fn id(self) -> EntityId {
         match self {
             Target::Agent(a) | Target::Building(a) => a,
+            Target::Carry { what, .. } => what.id(),
+            Target::Story { actor, .. } => actor,
         }
     }
 }
@@ -161,6 +247,10 @@ pub enum Origin {
     God,
     /// M16b phase 1: a suitor rejected twice buys a `Persuade` on the courted.
     Court,
+    /// M16b phase 2: kin buy a corpse's carry to the Recycler.
+    Bury,
+    /// M16b phase 2: a spinning corp's plant (`Corp.spin_since`).
+    Spin,
 }
 
 /// How a taken record is resolved: a ledger draw at `due` (no bodies), a
@@ -284,6 +374,9 @@ pub struct Contract {
     /// records, the law's and the god's.
     #[serde(default, skip_serializing_if = "Motive::is_none")]
     pub motive: Motive,
+    /// M16b phase 2: an Abduct's holding building and demand.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hold: Option<Hold>,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -418,7 +511,7 @@ impl Contract {
     pub fn target_agent(&self) -> Option<EntityId> {
         match self.target {
             Target::Agent(a) => Some(a),
-            Target::Building(_) => None,
+            _ => None,
         }
     }
 }
@@ -551,6 +644,8 @@ pub enum Leverage {
     Secret { deed: Deed, actor: EntityId, object: Option<EntityId>, day: u32 },
     /// An edge debt called in.
     Debt { amount: i64 },
+    /// M16b phase 2: a captive the holder keeps.
+    Hostage { captive: EntityId },
 }
 
 impl Leverage {
@@ -560,6 +655,7 @@ impl Leverage {
             Leverage::Threat => LeverageKind::Threat,
             Leverage::Secret { .. } => LeverageKind::Secret,
             Leverage::Debt { .. } => LeverageKind::Debt,
+            Leverage::Hostage { .. } => LeverageKind::Hostage,
         }
     }
 }
@@ -570,10 +666,12 @@ pub enum LeverageKind {
     Threat,
     Secret,
     Debt,
+    Hostage,
 }
 
 impl LeverageKind {
-    pub const ALL: [LeverageKind; 3] = [LeverageKind::Threat, LeverageKind::Secret, LeverageKind::Debt];
+    pub const ALL: [LeverageKind; 4] =
+        [LeverageKind::Threat, LeverageKind::Secret, LeverageKind::Debt, LeverageKind::Hostage];
 
     pub fn index(self) -> usize {
         self as usize
@@ -584,6 +682,7 @@ impl LeverageKind {
             LeverageKind::Threat => "threat",
             LeverageKind::Secret => "secret",
             LeverageKind::Debt => "debt",
+            LeverageKind::Hostage => "hostage",
         }
     }
 }
@@ -602,6 +701,10 @@ pub enum Demand {
     /// Withdraw testimony: the report naming `suspect` filed at `tick`
     /// (reports have no id) loses its witness.
     Silence { suspect: EntityId, tick: Tick },
+    /// M16b phase 2: a building sold to the holder at its value.
+    Sell(EntityId),
+    /// M16b phase 2: a convict let out (the captain's to grant).
+    Release(EntityId),
 }
 
 /// A coercion's state.
@@ -645,6 +748,8 @@ pub enum CoercionWhy {
     Parley,
     /// A job done under a threat.
     Job,
+    /// M16b phase 2: a captive held for a demand.
+    Hostage,
 }
 
 impl CoercionWhy {
@@ -655,6 +760,7 @@ impl CoercionWhy {
             CoercionWhy::Blackmail => "blackmail",
             CoercionWhy::Parley => "tribute",
             CoercionWhy::Job => "job",
+            CoercionWhy::Hostage => "hostage",
         }
     }
 }
@@ -705,4 +811,35 @@ pub struct FakeJob {
     pub victim: EntityId,
     pub fee: i64,
     pub due: Tick,
+}
+
+// ---------------------------------------------------------------------------
+// M16b phase 2: captives
+// ---------------------------------------------------------------------------
+
+/// A held agent (spec § 4, `World::captives`): cuffed to its holding
+/// building (`Brain.cuffed_by`, so it neither thinks nor walks), a body
+/// while held (`Brain.abducted_by`), fed by the holder daily.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Captive {
+    /// The owner it is held for (a gang or a corp).
+    pub holder: Option<EntityId>,
+    /// Who handed it over.
+    pub agent: EntityId,
+    pub held_at: EntityId,
+    pub since: Tick,
+    pub coercion: Option<CoercionId>,
+    pub until: Tick,
+}
+
+/// An Abduct record's terms beyond its target (`Contract.hold`): where
+/// the captive goes and what it is held for (`None`: a Harvest's take,
+/// ripped at the Hideout).
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub struct Hold {
+    pub at: EntityId,
+    pub demand: Option<Demand>,
+    /// Who the demand is put to (`None`: the default answerer).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub over: Option<EntityId>,
 }

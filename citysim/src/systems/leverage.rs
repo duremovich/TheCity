@@ -64,6 +64,8 @@ pub mod tried {
     pub const FAKE: u8 = 6;
     pub const DEBT: u8 = 7;
     pub const COURT: u8 = 8;
+    pub const HOSTAGE: u8 = 9;
+    pub const FABRICATE: u8 = 10;
 }
 
 fn retry(world: &World) -> Tick {
@@ -75,7 +77,7 @@ pub fn tried_recently(world: &World, a: EntityId, b: EntityId, k: u8) -> bool {
     world.lev_tried.get(&(a, b, k)).is_some_and(|&t| world.tick.saturating_sub(t) < retry(world))
 }
 
-fn mark(world: &mut World, a: EntityId, b: EntityId, k: u8) {
+pub(crate) fn mark(world: &mut World, a: EntityId, b: EntityId, k: u8) {
     let now = world.tick;
     world.lev_tried.insert((a, b, k), now);
 }
@@ -92,7 +94,9 @@ fn demand_value(world: &World, d: &Demand) -> f32 {
         Demand::Coins { amount, weekly } => (if weekly { 4 * amount } else { amount }) as f32,
         Demand::Do(id) => world.contracts.get(&id).map_or(0, |c| world.config.contracts.price_base.get(c.kind)) as f32,
         Demand::Join { wage, .. } => (7 * wage) as f32,
-        Demand::Silence { .. } => 0.0,
+        Demand::Silence { .. } | Demand::Release(_) => 0.0,
+        // M16b phase 2: a building is worth its value.
+        Demand::Sell(b) => world.comp::<Building>(b).map_or(0, |bd| ownership::value(world, bd.kind)) as f32,
     }
 }
 
@@ -135,6 +139,12 @@ pub fn extra(world: &World, over: EntityId, payer: Option<EntityId>, lev: &Lever
         let sev = world.config.gossip.deed_sev.get(deed);
         x += cfg.secret_w * sev * (1.0 - reach(world, deed, actor, object));
     }
+    // M16b phase 2: a hostage weighs by what the captive is to the coerced
+    // (M15's `rel_w`; a stranger's life at the Friend floor).
+    if let Leverage::Hostage { captive } = *lev {
+        let w = crate::systems::grudges::relation(world, over, Some(captive)).map_or(0.2, |(w, _)| w);
+        x += cfg.hostage_w * w;
+    }
     x
 }
 
@@ -142,7 +152,7 @@ fn stake_of(agent: EntityId, demand: &Demand) -> Stake {
     match *demand {
         Demand::Coins { amount, .. } => Stake::Coins(amount),
         Demand::Join { building, wage } => Stake::Job { building, wage },
-        Demand::Do(_) | Demand::Silence { .. } => Stake::Info { about: agent },
+        Demand::Do(_) | Demand::Silence { .. } | Demand::Sell(_) | Demand::Release(_) => Stake::Info { about: agent },
     }
 }
 
@@ -175,10 +185,36 @@ pub fn roll(
     let x = extra(world, over, payer, lev, demand);
     let out = moves::resolve_with(world, &m, x);
     world.stats.current.leverage.note_try(lev.kind(), out.success);
+    if lev.kind() == LeverageKind::Hostage {
+        let c = &mut world.stats.current.captive;
+        c.lev_hostage_tries += 1;
+        c.lev_hostage_ok += u32::from(out.success);
+    }
     if !out.success {
         report_failure(world, agent, over, lev);
     }
     out
+}
+
+/// M16b phase 2: a coercion recorded without a roll and without a first
+/// payment (a hostage's: the demand is rolled daily by `captives`).
+#[allow(clippy::too_many_arguments)]
+pub fn open(
+    world: &mut World,
+    holder: Option<EntityId>,
+    agent: EntityId,
+    over: EntityId,
+    lev: Leverage,
+    demand: Demand,
+    why: CoercionWhy,
+    payer: Option<EntityId>,
+) -> CoercionId {
+    record(world, holder, agent, over, lev, demand, why, payer, None)
+}
+
+/// M16b phase 2: close a coercion from outside (a hostage freed or killed).
+pub fn finish(world: &mut World, id: CoercionId, status: CoercionStatus, why: &str) {
+    close(world, id, status, why);
 }
 
 /// A failed move's report: the coerced files with `backlash_report ×
@@ -250,6 +286,8 @@ fn record(
         }
         Demand::Join { wage, .. } => format!("a post at {wage}/day"),
         Demand::Silence { .. } => "the report withdrawn".to_string(),
+        Demand::Sell(b) => format!("{} sold", world.name_of(b)),
+        Demand::Release(c) => format!("{} released", world.name_of(c)),
     };
     let on_what = building.map(|b| format!(" on {}", world.name_of(b))).unwrap_or_default();
     let text =
@@ -309,6 +347,7 @@ fn close(world: &mut World, id: CoercionId, status: CoercionStatus, why: &str) {
                 CoercionWhy::Blackmail => tried::BLACKMAIL,
                 CoercionWhy::Parley => tried::PARLEY,
                 CoercionWhy::Job | CoercionWhy::Other => tried::JOB,
+                CoercionWhy::Hostage => tried::HOSTAGE,
             };
             let by = c.holder.unwrap_or(c.agent);
             mark(world, by, target, k);
@@ -366,7 +405,7 @@ fn snapshot(world: &mut World) {
             CoercionWhy::Protection => 1,
             CoercionWhy::Blackmail => 2,
             CoercionWhy::Parley => 3,
-            CoercionWhy::Job | CoercionWhy::Other => 0,
+            CoercionWhy::Job | CoercionWhy::Other | CoercionWhy::Hostage => 0,
         };
         by[i] += 1;
     }

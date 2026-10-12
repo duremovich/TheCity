@@ -175,6 +175,9 @@ pub struct Config {
     /// M16b § 4 (phase 1): leverage and coercion.
     #[serde(default)]
     pub leverage: LeverageCfg,
+    /// M16b phase 2: captives, the Prison and the new kinds.
+    #[serde(default)]
+    pub hostage: HostageCfg,
     /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
     /// always on; the wage law and the safety net are policy (P10, `policy`).
     #[serde(default)]
@@ -737,6 +740,12 @@ impl BuildingCfg {
     pub fn camp() -> BuildingCfg {
         BuildingCfg { capacity: 40, stock_cap: 120, staff: 0 }
     }
+
+    /// M16b phase 2 (spec § 4): a private prison (plan deviation: no staff
+    /// role; its guards are its corp's posted ones).
+    pub fn prison() -> BuildingCfg {
+        BuildingCfg { capacity: 20, stock_cap: 100, staff: 0 }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -795,6 +804,9 @@ pub struct BuildingsCfg {
     /// Real economy E37 (none stands with `[camp]` off).
     #[serde(default = "BuildingCfg::camp")]
     pub camp: BuildingCfg,
+    /// M16b phase 2: a corp's private prison.
+    #[serde(default = "BuildingCfg::prison")]
+    pub prison: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -826,6 +838,7 @@ impl BuildingsCfg {
             BuildingKind::Fixer => &self.fixer,
             BuildingKind::Mission => &self.mission,
             BuildingKind::Camp => &self.camp,
+            BuildingKind::Prison => &self.prison,
         }
     }
 }
@@ -4081,6 +4094,8 @@ pub struct DeedTable {
     pub gave: f32,
     /// M16b § 4: the `Blackmailed` deed (a missing key reads 0).
     pub blackmailed: f32,
+    /// M16b phase 2: the `Rescued` deed (a missing key reads 0).
+    pub rescued: f32,
 }
 
 impl DeedTable {
@@ -4105,6 +4120,7 @@ impl DeedTable {
             Deed::Hired => self.hired,
             Deed::Gave => self.gave,
             Deed::Blackmailed => self.blackmailed,
+            Deed::Rescued => self.rescued,
         }
     }
 
@@ -4131,6 +4147,7 @@ impl DeedTable {
             hired,
             gave,
             blackmailed: 0.0,
+            rescued: 0.0,
         }
     }
 }
@@ -5450,6 +5467,10 @@ impl Config {
         if std::env::var("CITYSIM_LEVERAGE_OFF").is_ok_and(|v| v == "1") {
             cfg.leverage.enabled = false;
         }
+        // M16b phase 2: the captives' A/B and identity device.
+        if std::env::var("CITYSIM_HOSTAGE_OFF").is_ok_and(|v| v == "1") {
+            cfg.hostage.enabled = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -5796,8 +5817,9 @@ impl Config {
         h.max_open = up_usize(h.max_open);
         h.posts_per_day = up_usize(h.posts_per_day);
         h.corp_year_cap = up_u32(h.corp_year_cap);
-        // M16b: the standing coercions' cap.
+        // M16b: the standing coercions' cap; phase 2: the captives'.
         self.leverage.max_coercions = up_usize(self.leverage.max_coercions);
+        self.hostage.captive_quota = up_usize(self.hostage.captive_quota);
         let fv = &mut self.fviolence.day_cap;
         *fv = FvKindsCfg {
             killed: up_u32(fv.killed),
@@ -6002,6 +6024,13 @@ pub struct KindTable<T> {
     pub locate: T,
     /// M16b phase 1.
     pub persuade: T,
+    /// M16b phase 2.
+    pub abduct: T,
+    pub rescue: T,
+    pub escort: T,
+    pub steal: T,
+    pub deliver: T,
+    pub spin: T,
 }
 
 impl<T: Default + Copy> KindTable<T> {
@@ -6013,6 +6042,12 @@ impl<T: Default + Copy> KindTable<T> {
             ContractKind::Guard => self.guard,
             ContractKind::Locate => self.locate,
             ContractKind::Persuade => self.persuade,
+            ContractKind::Abduct => self.abduct,
+            ContractKind::Rescue => self.rescue,
+            ContractKind::Escort => self.escort,
+            ContractKind::Steal => self.steal,
+            ContractKind::Deliver => self.deliver,
+            ContractKind::Spin => self.spin,
         }
     }
 }
@@ -6064,8 +6099,32 @@ impl Default for ContractsCfg {
         ContractsCfg {
             max_open: 256,
             closed_keep_days: 30,
-            price_base: KindTable { hit: 400, beat: 120, guard: 25, locate: 20, persuade: 100 },
-            deadline_days: KindTable { hit: 10, beat: 7, guard: 7, locate: 14, persuade: 7 },
+            price_base: KindTable {
+                hit: 400,
+                beat: 120,
+                guard: 25,
+                locate: 20,
+                persuade: 100,
+                abduct: 300,
+                rescue: 350,
+                escort: 80,
+                steal: 150,
+                deliver: 40,
+                spin: 120,
+            },
+            deadline_days: KindTable {
+                hit: 10,
+                beat: 7,
+                guard: 7,
+                locate: 14,
+                persuade: 7,
+                abduct: 10,
+                rescue: 7,
+                escort: 3,
+                steal: 7,
+                deliver: 3,
+                spin: 5,
+            },
             risk_w: 1.5,
             standing_w: 1.0,
             max_attempts: 2,
@@ -6090,11 +6149,15 @@ impl Default for ContractsCfg {
 pub struct GunLawfulnessCfg {
     pub hit: f32,
     pub beat: f32,
+    /// M16b phase 2.
+    pub abduct: f32,
+    pub steal: f32,
+    pub rescue: f32,
 }
 
 impl Default for GunLawfulnessCfg {
     fn default() -> Self {
-        GunLawfulnessCfg { hit: 0.3, beat: 0.4 }
+        GunLawfulnessCfg { hit: 0.3, beat: 0.4, abduct: 0.3, steal: 0.4, rescue: 0.7 }
     }
 }
 
@@ -6104,7 +6167,15 @@ impl GunLawfulnessCfg {
         match k {
             ContractKind::Hit => self.hit,
             ContractKind::Beat => self.beat,
-            ContractKind::Guard | ContractKind::Locate | ContractKind::Persuade => 1.0,
+            ContractKind::Abduct => self.abduct,
+            ContractKind::Steal => self.steal,
+            ContractKind::Rescue => self.rescue,
+            ContractKind::Guard
+            | ContractKind::Locate
+            | ContractKind::Persuade
+            | ContractKind::Escort
+            | ContractKind::Deliver
+            | ContractKind::Spin => 1.0,
         }
     }
 }
@@ -6316,7 +6387,7 @@ impl Default for HitMarketCfg {
         HitMarketCfg {
             enabled: true,
             ask_rank: 2,
-            price_floor: KindTable { hit: 20, beat: 8, guard: 0, locate: 0, persuade: 0 },
+            price_floor: KindTable { hit: 20, beat: 8, ..Default::default() },
             wage_floor_min: 50,
             wage_floor_mult: 0.5,
             deposit_share: 0.5,
@@ -7178,11 +7249,13 @@ pub struct LevBiasCfg {
     pub threat: f32,
     pub secret: f32,
     pub debt: f32,
+    /// M16b phase 2.
+    pub hostage: f32,
 }
 
 impl Default for LevBiasCfg {
     fn default() -> Self {
-        LevBiasCfg { threat: 0.0, secret: 0.3, debt: 0.2 }
+        LevBiasCfg { threat: 0.0, secret: 0.3, debt: 0.2, hostage: 0.5 }
     }
 }
 
@@ -7193,6 +7266,7 @@ impl LevBiasCfg {
             LeverageKind::Threat => self.threat,
             LeverageKind::Secret => self.secret,
             LeverageKind::Debt => self.debt,
+            LeverageKind::Hostage => self.hostage,
         }
     }
 }
@@ -7241,6 +7315,14 @@ pub struct LeverageCfg {
     pub court_sociability: f32,
     /// Plan key: a pair refused, broken or failed is not tried again for this long.
     pub retry_days: u32,
+    /// M16b phase 2: a Hostage adds `hostage_w × rel_w(over, captive)`.
+    pub hostage_w: f32,
+    /// M16b phase 2: a spinning corp's exec under this fabricates.
+    pub fabricate_lawfulness: f32,
+    /// M16b phase 2: a fabricated plant's price multiplier.
+    pub fabricate_mult: f32,
+    /// M16b phase 2: a contradicting holder exposes a fabrication a day with this p.
+    pub expose_p: f32,
 }
 
 impl Default for LeverageCfg {
@@ -7271,6 +7353,59 @@ impl Default for LeverageCfg {
             court_rejections: 2,
             court_sociability: 0.4,
             retry_days: 28,
+            hostage_w: 1.5,
+            fabricate_lawfulness: 0.35,
+            fabricate_mult: 2.0,
+            expose_p: 0.05,
+        }
+    }
+}
+
+/// `[hostage]` (M16b phase 2; spec § 4 "Hostages and the private prison",
+/// with the plan keys marked). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct HostageCfg {
+    /// The switch in flight (off: the phase-1 city). `CITYSIM_HOSTAGE_OFF=1`.
+    pub enabled: bool,
+    pub hostage_days: u32,
+    /// Coins a day the holder pays for a captive's meal.
+    pub hostage_food: i64,
+    pub p_hostage_kill: f32,
+    /// Plan deviation (spec `[lod] captive_quota`): captives held at once,
+    /// city-wide (per capita, up only).
+    pub captive_quota: usize,
+    /// Plan key: a ransom's coins.
+    pub ransom: i64,
+    /// Plan key (spec `found_cost.prison`): what a corp pays to build one.
+    pub prison_cost: i64,
+    /// Plan key (spec `upkeep.prison`): a Prison's daily upkeep.
+    pub prison_upkeep: i64,
+    /// Plan key: a Steal on a building takes this share of its owner's purse ...
+    pub steal_share: f32,
+    /// ... at most this.
+    pub steal_max: i64,
+    /// Plan key: a corpse unburied this long may be bought a Deliver.
+    pub bury_hours: u32,
+    /// Spec `[contracts] abduct_share`: a Harvest's Abduct price, × the chrome's value.
+    pub abduct_share: f32,
+}
+
+impl Default for HostageCfg {
+    fn default() -> Self {
+        HostageCfg {
+            enabled: true,
+            hostage_days: 7,
+            hostage_food: 3,
+            p_hostage_kill: 0.3,
+            captive_quota: 6,
+            ransom: 200,
+            prison_cost: 800,
+            prison_upkeep: 20,
+            steal_share: 0.2,
+            steal_max: 300,
+            bury_hours: 24,
+            abduct_share: 0.3,
         }
     }
 }

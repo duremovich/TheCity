@@ -377,7 +377,7 @@ fn seed_owner(world: &World, door: TilePos) -> Option<EntityId> {
 /// The risk a record carries: `1 − estimate(&[MEDIAN], target)` for the
 /// violent kinds, 0.1 for Guard and Locate (C7).
 pub fn risk_of(world: &World, kind: ContractKind, target: &Target) -> f32 {
-    if kind.violent() {
+    if kind.fights() {
         1.0 - missions::estimate(world, &[missions::MEDIAN], target)
     } else {
         0.1
@@ -393,6 +393,9 @@ fn standing_of(world: &World, target: &Target) -> f32 {
             Some(o) => crate::systems::reputation::rep(world, o).standing,
             None => 0.3,
         },
+        // M16b phase 2: a carry is a porter's job; a story's price reads its actor.
+        Target::Carry { .. } => 0.0,
+        Target::Story { actor, .. } => crate::systems::reputation::rep(world, actor).standing,
     }
 }
 
@@ -412,6 +415,12 @@ fn target_ok(world: &World, target: &Target) -> bool {
     match *target {
         Target::Agent(t) => world.has::<Identity>(t) && crate::systems::law::living(world, t) && world.has::<Brain>(t),
         Target::Building(b) => world.comp::<Building>(b).is_some_and(|bd| !bd.demolished),
+        // M16b phase 2: a corpse still unburied; a story's actor alive.
+        Target::Carry { what, .. } => match what {
+            crate::contract::Cargo::Corpse(c) => world.comp::<crate::components::Corpse>(c).is_some_and(|k| !k.buried),
+            crate::contract::Cargo::Captive(c) => crate::systems::law::living(world, c),
+        },
+        Target::Story { actor, .. } => crate::systems::law::living(world, actor),
     }
 }
 
@@ -442,7 +451,7 @@ fn renege_draw(world: &World, id: ContractId, agent: Option<EntityId>) -> bool {
 pub(crate) fn hear_hired(world: &mut World, id: ContractId, holder: EntityId) {
     let Some(c) = world.contracts.get(&id) else { return };
     // M16b: a Persuade is no hire on its target.
-    if matches!(c.kind, ContractKind::Guard | ContractKind::Persuade) {
+    if !c.kind.illegal() && c.kind != ContractKind::Locate {
         return;
     }
     let (actor, object) = (c.buyer.or(c.agent), c.target.id());
@@ -527,6 +536,7 @@ fn record_of(
         started: None,
         deposit: 0,
         motive: Motive::None,
+        hold: None,
     }
 }
 
@@ -540,10 +550,12 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
         return Err(Refusal::MaxOpen);
     }
     // A Guard may be bought on oneself (C31); any other kind may not.
-    let on_self = Some(p.target.id()) == p.buyer && p.kind != ContractKind::Guard;
+    let on_self = Some(p.target.id()) == p.buyer && !matches!(p.kind, ContractKind::Guard | ContractKind::Escort);
     // Review fix: only a Guard may name a building (a Hit, Beat or Locate
     // on one has no plan and no ledger row: it would sit Taken to its deadline).
-    let building = matches!(p.target, Target::Building(_)) && p.kind != ContractKind::Guard;
+    // M16b phase 2: and a Steal.
+    let building =
+        matches!(p.target, Target::Building(_)) && !matches!(p.kind, ContractKind::Guard | ContractKind::Steal);
     if !target_ok(world, &p.target) || on_self || building || !buyer_ok(world, p.buyer) {
         return Err(Refusal::NoTarget);
     }
@@ -628,7 +640,10 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
 fn note_kind_posted(world: &mut World, kind: ContractKind) {
     match kind {
         ContractKind::Persuade => world.stats.current.leverage.k_persuade_posted += 1,
-        k => world.stats.current.contract.k_posted[k.index()] += 1,
+        k => match crate::stats::CaptiveCols::slot(k) {
+            Some(i) => world.stats.current.captive.k_posted[i] += 1,
+            None => world.stats.current.contract.k_posted[k.index()] += 1,
+        },
     }
 }
 
@@ -643,6 +658,25 @@ pub fn post_coerced(
     coercion: crate::contract::CoercionId,
     taker: EntityId,
 ) -> Option<ContractId> {
+    post_unpaid(world, p, extra, Terms::Coerced(coercion), taker, "under a threat")
+}
+
+/// M16b phase 2: a gang's order to one of its own: an unpaid direct record
+/// (`price` 0) its leader hands a member, taken at once (a hostage taken
+/// by the holder's members, spec § 4). `None` as [`post_coerced`].
+pub fn post_order(world: &mut World, p: Posting, extra: PostExtra, taker: EntityId) -> Option<ContractId> {
+    post_unpaid(world, p, extra, Terms::Pay { price: 0 }, taker, "as an order")
+}
+
+/// The unpaid records' one constructor (a coerced job, a gang's order).
+fn post_unpaid(
+    world: &mut World,
+    p: Posting,
+    extra: PostExtra,
+    terms: Terms,
+    taker: EntityId,
+    how: &str,
+) -> Option<ContractId> {
     let live = world.contracts.values().filter(|c| c.is_live()).count();
     if live >= world.config.contracts.max_open || !target_ok(world, &p.target) || !buyer_ok(world, p.buyer) {
         return None;
@@ -654,7 +688,7 @@ pub fn post_coerced(
     let id = world.next_contract.max(1);
     world.next_contract = id + 1;
     let mut rec = record_of(id, p.buyer, p.agent, p.kind, p.target, None, p.origin, now, 0);
-    rec.terms = Terms::Coerced(coercion);
+    rec.terms = terms;
     rec.deadline = now + Tick::from(p.deadline_days.max(1)) * TICKS_PER_DAY;
     rec.risk = risk_of(world, p.kind, &p.target);
     rec.motive = extra.motive;
@@ -666,7 +700,7 @@ pub fn post_coerced(
     world.stats.current.contract.contracts_posted += 1;
     note_kind_posted(world, p.kind);
     let text = format!(
-        "{} put a {} on {} on {} under a threat",
+        "{} put a {} on {} on {} {how}",
         world.owner_label(p.buyer),
         p.kind.label(),
         world.name_of(p.target.id()),
@@ -789,9 +823,11 @@ pub fn eligible(world: &World, c: &Contract, cand: EntityId) -> bool {
     } else if crate::systems::law::is_guard(world, cand) {
         return false;
     }
-    if world
-        .edge(cand, t)
-        .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent | RelKind::Friend))
+    // M16b phase 2: kin and friends may march to free their own.
+    if c.kind != ContractKind::Rescue
+        && world
+            .edge(cand, t)
+            .is_some_and(|e| matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent | RelKind::Friend))
     {
         return false;
     }
@@ -806,7 +842,7 @@ pub fn eligible(world: &World, c: &Contract, cand: EntityId) -> bool {
 
 /// C12: `risk_for(cand)` against a target whose defenders sum to `s_def`.
 fn risk_against(world: &World, kind: ContractKind, cand: EntityId, s_def: f32) -> f32 {
-    if kind.violent() {
+    if kind.fights() {
         1.0 - missions::estimate_against(world, &[cand], s_def)
     } else {
         0.1
@@ -815,7 +851,7 @@ fn risk_against(world: &World, kind: ContractKind, cand: EntityId, s_def: f32) -
 
 /// C12: `risk_for(cand)` on record `c`.
 pub fn risk_for(world: &World, c: &Contract, cand: EntityId) -> f32 {
-    if c.kind.violent() {
+    if c.kind.fights() {
         1.0 - missions::estimate(world, &[cand], &c.target)
     } else {
         0.1
@@ -826,7 +862,12 @@ fn skill_for(world: &World, kind: ContractKind, cand: EntityId) -> f32 {
     match kind {
         ContractKind::Hit | ContractKind::Beat | ContractKind::Guard => crate::systems::law::fighting(world, cand),
         ContractKind::Locate => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth),
-        ContractKind::Persuade => world.comp::<Skills>(cand).map_or(0.0, |s| s.persuasion),
+        ContractKind::Persuade | ContractKind::Spin => world.comp::<Skills>(cand).map_or(0.0, |s| s.persuasion),
+        // M16b phase 2.
+        ContractKind::Abduct | ContractKind::Rescue | ContractKind::Escort | ContractKind::Deliver => {
+            crate::systems::law::fighting(world, cand)
+        }
+        ContractKind::Steal => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth.max(s.hacking)),
     }
 }
 
@@ -847,8 +888,11 @@ fn u_of(x: f32) -> f32 {
 fn mode_a(world: &World, who: EntityId, c: &Contract, risk: f32, urgency_v: f32) -> Vec<Consideration> {
     // M16b: a coerced job pays nothing; the threat behind it weighs as the
     // kind's list price.
+    // M16b phase 2: a gang's unpaid order to its own (price 0) weighs as
+    // a coerced job does.
     let (price, coerced) = match c.terms {
         Terms::Coerced(_) => (world.config.contracts.price_base.get(c.kind), true),
+        Terms::Pay { .. } if c.price == 0 => (world.config.contracts.price_base.get(c.kind), true),
         Terms::Pay { .. } => (c.price, false),
     };
     let cs = mode_a_at(world, who, c.kind, c.brokered(), c.buyer, price, risk, urgency_v);
@@ -897,7 +941,7 @@ fn mode_a_at(
         let law = p.map_or(0.5, |p| p.lawfulness);
         cs.push(Consideration::new("1-lawfulness", 1.0 - law, Curve::Linear { m: 0.6, b: 0.4 }));
     }
-    if kind.violent() {
+    if kind.fights() {
         let courage = p.map_or(0.5, |p| p.courage);
         cs.push(Consideration::new("courage", courage, Curve::Linear { m: 0.5, b: 0.5 }));
     }
@@ -1035,7 +1079,8 @@ pub fn organic_price(
     agent: Option<EntityId>,
     broker: Option<EntityId>,
 ) -> i64 {
-    if world.config.hitmarket.enabled && kind.violent() {
+    // M16b phase 2: an abduction and a rescue are priced at the guns' asks too.
+    if world.config.hitmarket.enabled && kind.fights() {
         if let Some(p) = market_price(world, kind, target, buyer, agent, broker) {
             return p;
         }
@@ -1067,11 +1112,15 @@ pub fn reach_offer(world: &World, kind: ContractKind, target: &Target, buyer: En
 /// screen, or the record is a Guard taken by an agent; else `Ledger`.
 pub fn render_for(world: &World, id: ContractId) -> Render {
     let Some(c) = world.contracts.get(&id) else { return Render::Ledger };
-    // M16b phase 1: a Persuade is a social move resolved at any tier.
-    if c.kind == ContractKind::Persuade {
+    // M16b phase 1: a Persuade is a social move resolved at any tier;
+    // phase 2: a Deliver and a Spin likewise, a Steal unless its heist runs.
+    if matches!(c.kind, ContractKind::Persuade | ContractKind::Deliver | ContractKind::Spin | ContractKind::Steal) {
         return Render::Ledger;
     }
-    if c.kind == ContractKind::Guard && c.taker.is_some_and(|t| world.has::<Identity>(t)) {
+    // Phase 2: an Escort is a Guard on a person; an Abduct is never ledger.
+    if matches!(c.kind, ContractKind::Guard | ContractKind::Escort | ContractKind::Abduct)
+        && c.taker.is_some_and(|t| world.has::<Identity>(t))
+    {
         return Render::Live;
     }
     // Phase 2 (C22, C25, C26): a squad or a gang's job is always live.
@@ -1314,6 +1363,10 @@ pub fn accept(world: &mut World, id: ContractId, taker: EntityId, crew: &[Entity
             "LEDGER"
         }
     };
+    // M16b phase 2: a Steal on a Lab with a node is a heist run.
+    if world.contracts.get(&id).is_some_and(|c| c.kind == ContractKind::Steal) {
+        crate::systems::captives::start_heist(world, id, taker);
+    }
     // Phase 1 sends every Hit solo; a weak solo gun is counted (C25).
     if let Some(c) = world.contracts.get(&id) {
         if c.kind == ContractKind::Hit
@@ -1549,6 +1602,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
             row.contracts_fulfilled += 1;
             if kind == ContractKind::Persuade {
                 world.stats.current.leverage.k_persuade_done += 1;
+            } else if let Some(i) = crate::stats::CaptiveCols::slot(kind) {
+                world.stats.current.captive.k_done[i] += 1;
             } else {
                 world.stats.current.contract.k_done[kind.index()] += 1;
             }
@@ -1917,7 +1972,9 @@ pub fn fail_attempt(world: &mut World, id: ContractId, why: &str) {
     }
     // M16b: a coerced job is the coerced's alone: one failed attempt ends it
     // (back on the board it would be a free job for anyone).
-    if attempts >= world.config.contracts.max_attempts || matches!(c.terms, Terms::Coerced(_)) {
+    // Phase 2: a gang's unpaid order likewise.
+    let unpaid = matches!(c.terms, Terms::Coerced(_) | Terms::Pay { price: 0 });
+    if attempts >= world.config.contracts.max_attempts || unpaid {
         settle(world, id, Settle::Failed, why);
         return;
     }
@@ -1977,7 +2034,7 @@ pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
                 ContractKind::Hit | ContractKind::Beat if c.status == ContractStatus::Taken && by_taker => {
                     settle(world, id, Settle::Fulfilled, "");
                 }
-                ContractKind::Guard if c.status == ContractStatus::Taken => {
+                ContractKind::Guard | ContractKind::Escort if c.status == ContractStatus::Taken => {
                     settle(world, id, Settle::Failed, "the client died");
                 }
                 ContractKind::Locate if c.paid_sightings > 0 => settle(world, id, Settle::Fulfilled, ""),
@@ -2111,6 +2168,21 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     // M16b phase 1: a Persuade is the taker's one move.
     if c.kind == ContractKind::Persuade {
         crate::systems::leverage::resolve_persuade(world, id, lead);
+        return;
+    }
+    // M16b phase 2: a Steal (no heist run going) and a Deliver.
+    if c.kind == ContractKind::Steal {
+        if world.steal_runs.get(&lead) == Some(&id) {
+            return;
+        }
+        crate::systems::captives::resolve_steal(world, id, lead);
+        return;
+    }
+    if c.kind == ContractKind::Deliver {
+        crate::systems::captives::resolve_deliver(world, id, lead);
+        return;
+    }
+    if c.kind == ContractKind::Spin {
         return;
     }
     let mut party: SmallVec<[EntityId; 6]> = SmallVec::new();
@@ -2507,7 +2579,7 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     if c.status != ContractStatus::Taken {
         return None;
     }
-    if c.kind == ContractKind::Guard {
+    if matches!(c.kind, ContractKind::Guard | ContractKind::Escort) {
         let steps = match c.target {
             Target::Building(b) => {
                 vec![step(ActionKind::GoTo(LocationKey::Seller), Some(b)), step(ActionKind::Guard, Some(b))]
@@ -2521,6 +2593,7 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
                 }
                 vec![step(ActionKind::GoTo(LocationKey::Intel), None), step(ActionKind::Guard, Some(a))]
             }
+            _ => return None,
         };
         crate::systems::hunt::reindex(world);
         return Some(Plan { goal: GoalKind::Contract, target: Some(c.target.id()), steps, started_tick: now });
@@ -2562,6 +2635,13 @@ pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     steps.push(step(ActionKind::StakeOut, tt));
     if c.kind.violent() {
         steps.push(step(ActionKind::Attack, tt));
+    }
+    // M16b phase 2: an abduction drags the target to its hold.
+    if c.kind == ContractKind::Abduct {
+        let at = c.hold.map(|h| h.at)?;
+        steps.push(step(ActionKind::Abduct, tt));
+        steps.push(step(ActionKind::GoTo(LocationKey::Seller), Some(at)));
+        steps.push(step(ActionKind::HandOver, Some(at)));
     }
     Some(Plan { goal: GoalKind::Contract, target: tt, steps, started_tick: now })
 }
@@ -2621,6 +2701,24 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         // Phase 2 (C22): the mission's muster and brawl.
         ActionKind::Muster | ActionKind::Brawl => missions::can_start(world, id, kind),
+        // M16b phase 2: an Abduct's grab (within an Attack's reach) and hand-over.
+        ActionKind::Abduct => target.is_some_and(|v| {
+            crate::systems::law::living(world, v)
+                && crate::systems::law::near(world, id, v, 4)
+                && world.comp::<Brain>(v).is_some_and(|b| b.cuffed_by.is_none())
+        }),
+        ActionKind::HandOver => {
+            target.is_some_and(|b| at_building(world, id, b)) && crate::systems::chrome::dragging(world, id).is_some()
+        }
+        // The walk to the hold: in tow or not, the step starts.
+        ActionKind::GoTo(LocationKey::Seller)
+            if world
+                .comp::<Brain>(id)
+                .and_then(|b| b.plan.as_ref())
+                .is_some_and(|p| p.steps.iter().any(|s| s.action == ActionKind::HandOver)) =>
+        {
+            true
+        }
         _ => crate::systems::hunt::can_start(world, id, kind, target),
     }
 }
@@ -2876,10 +2974,10 @@ pub fn daily(world: &mut World) {
         match (c.kind, c.status) {
             // Phase 4 review: a Guard still queued at its deadline never
             // stood its post: expired (the buyer refunded, the taker unpaid).
-            (ContractKind::Guard, ContractStatus::Taken) if c.started.is_none() => {
+            (ContractKind::Guard | ContractKind::Escort, ContractStatus::Taken) if c.started.is_none() => {
                 settle(world, id, Settle::Expired, "the post was never stood")
             }
-            (ContractKind::Guard, ContractStatus::Taken) => {
+            (ContractKind::Guard | ContractKind::Escort, ContractStatus::Taken) => {
                 if guard_kept(world, &c) {
                     settle(world, id, Settle::Fulfilled, "");
                 } else {
@@ -2927,6 +3025,7 @@ fn guard_kept(world: &World, c: &Contract) -> bool {
     }
     match c.target {
         Target::Agent(a) => crate::systems::law::living(world, a),
+        Target::Carry { .. } | Target::Story { .. } => false,
         Target::Building(b) => {
             let since = c.guard_since.unwrap_or(c.posted);
             world
@@ -3512,7 +3611,9 @@ pub(crate) fn brain_post_with(
     extra: PostExtra,
 ) -> Result<ContractId, Refusal> {
     if let (Some(b), Target::Agent(t)) = (buyer, target) {
-        if kind != ContractKind::Guard && crate::systems::grudges::member_of(world, t, b) {
+        if !matches!(kind, ContractKind::Guard | ContractKind::Escort)
+            && crate::systems::grudges::member_of(world, t, b)
+        {
             return Err(Refusal::NoTarget);
         }
     }
@@ -3935,6 +4036,8 @@ pub fn god_post(
         let from = match target {
             Target::Agent(a) => world.comp::<Position>(a).map(|p| p.tile),
             Target::Building(b) => world.comp::<Building>(b).map(|bd| bd.door),
+            Target::Carry { what, .. } => world.comp::<Position>(what.id()).map(|p| p.tile),
+            Target::Story { actor, .. } => world.comp::<Position>(actor).map(|p| p.tile),
         }
         .ok_or("no such target")?;
         Some(nearest_fixer_to(world, from).ok_or("no open Fixer")?)
@@ -4001,7 +4104,8 @@ fn is_gang(world: &World, id: EntityId) -> bool {
 /// C22, C25, C26: a record worked as a mission: a gang's job, or a squad
 /// (an agent taker with a crew).
 fn is_mission(world: &World, c: &Contract) -> bool {
-    c.taker.is_some_and(|t| is_gang(world, t)) || !c.crew.is_empty()
+    // M16b phase 2: a Rescue always marches on its hold.
+    c.taker.is_some_and(|t| is_gang(world, t)) || !c.crew.is_empty() || c.kind == ContractKind::Rescue
 }
 
 /// A Taken live record already being worked (a run or a mission).
@@ -4064,7 +4168,8 @@ fn crew_ok(world: &World, c: &Contract, m: EntityId) -> bool {
 pub fn squad_crew(world: &World, c: &Contract, taker: EntityId) -> SmallVec<[EntityId; 4]> {
     let mut crew: SmallVec<[EntityId; 4]> = SmallVec::new();
     let below = world.config.missions.squad_below;
-    if !c.kind.violent() || missions::estimate(world, &[taker], &c.target) >= below {
+    let rescue = c.kind == ContractKind::Rescue;
+    if (!c.kind.violent() && !rescue) || (!rescue && missions::estimate(world, &[taker], &c.target) >= below) {
         return crew;
     }
     let ok = |m: EntityId| m != taker && crew_ok(world, c, m);
@@ -4135,10 +4240,12 @@ pub fn gang_eligible(world: &World, c: &Contract, gang: EntityId) -> bool {
                 matches!(e.kind, RelKind::Spouse | RelKind::Family | RelKind::Parent | RelKind::Friend)
             })
     };
-    c.kind.violent()
-        && c.buyer != Some(gang)
-        && !crate::systems::grudges::member_of(world, t, gang)
-        && g.leader.is_some_and(|l| !world.has::<Sentence>(l) && !kin(l))
+    // M16b phase 2: a Rescue frees its own: the buyer's gang, a member, kin.
+    let rescue = c.kind == ContractKind::Rescue;
+    (c.kind.violent() || rescue)
+        && (c.buyer != Some(gang) || rescue)
+        && (rescue || !crate::systems::grudges::member_of(world, t, gang))
+        && g.leader.is_some_and(|l| !world.has::<Sentence>(l) && (rescue || !kin(l)))
         && job_of(world, gang).is_none()
         && g.raid_at.is_none()
         && g.strike.is_none_or(|(_, until)| until <= now)
@@ -4181,6 +4288,14 @@ pub fn accept_gang(world: &mut World, id: ContractId, gang: EntityId) -> bool {
 pub fn mission_door(world: &World, id: ContractId, at: Tick) -> (TilePos, Option<EntityId>) {
     let Some(c) = world.contracts.get(&id) else { return (TilePos::default(), None) };
     let Some(t) = c.target_agent() else { return (TilePos::default(), None) };
+    // M16b phase 2: a Rescue marches on the captive's hold.
+    if c.kind == ContractKind::Rescue {
+        if let Some(b) = crate::systems::captives::hold_of(world, t) {
+            if let Some(d) = missions::door_of(world, b) {
+                return (d, Some(b));
+            }
+        }
+    }
     let lead = c.taker.filter(|&x| !is_gang(world, x)).or_else(|| c.crew.first().copied());
     let intel = lead
         .and_then(|l| crate::systems::hunt::fresh_intel(world, l, t))

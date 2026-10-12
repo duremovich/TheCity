@@ -1131,6 +1131,8 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     // M15 W33: a seller refuses a dishonoured buyer unless it is going under.
     let honour = crate::systems::reputation::rep(world, corp).honour;
     if honour < world.config.reputation.acquire_honour_min && !bankrupt {
+        // M16b phase 2: a refusal counted; the second may bring a hostage.
+        crate::systems::captives::on_refused(world, corp, seller, building);
         return;
     }
     if crate::systems::corps::acquire(world, corp, building, ni.offer, "hostile") {

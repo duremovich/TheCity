@@ -46,10 +46,12 @@ pub enum Deed {
     /// M16b § 4 (phase 1): `actor` made a coercion over `object` on a
     /// secret it held.
     Blackmailed,
+    /// M16b phase 2: `actor` (a crew member) freed `object` from its holder.
+    Rescued,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 18] = [
+    pub const ALL: [Deed; 19] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -68,6 +70,7 @@ impl Deed {
         Deed::Hired,
         Deed::Gave,
         Deed::Blackmailed,
+        Deed::Rescued,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -96,6 +99,7 @@ impl Deed {
             Deed::Hired => "hired",
             Deed::Gave => "gave",
             Deed::Blackmailed => "blackmailed",
+            Deed::Rescued => "rescued",
         }
     }
 
@@ -521,6 +525,12 @@ pub struct Story {
     /// `-1..=1`.
     pub slant: f32,
     pub paid_by: Option<EntityId>,
+    /// M16b phase 2: a planted deed that never happened (hidden).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fabricated: bool,
+    /// M16b phase 2: a fabrication found out.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub exposed: bool,
 }
 
 impl Story {

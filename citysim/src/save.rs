@@ -68,7 +68,15 @@ use crate::world::World;
 /// config (serde defaults: an older save loads with no coercions); the
 /// appended `ContractKind::Persuade`, `Terms::Coerced`, `Origin::Court`,
 /// `Crime::{Fraud, Blackmail}`, `Deed::Blackmailed` and their events.
-pub const SAVE_VERSION: u8 = 16;
+/// 17: M16b phase 2, captives and the new kinds: `World::{captives,
+/// refusals, steal_runs, feed_shamed}`, `Contract.hold`,
+/// `Story.{fabricated, exposed}`, `DayRow.captive`, `[hostage]` and the
+/// phase-2 kind keys in the saved config (serde defaults: an older save
+/// loads with nobody held); the appended `BuildingKind::Prison`, the six
+/// `ContractKind`s, `Target::{Carry, Story}`, `Origin::{Bury, Spin}`,
+/// `Leverage::Hostage`, `Demand::{Sell, Release}`, `Deed::Rescued`,
+/// `ActionKind::HandOver`, `RunWhy::Contract` and the four events.
+pub const SAVE_VERSION: u8 = 17;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

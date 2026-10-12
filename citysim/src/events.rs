@@ -320,10 +320,20 @@ pub enum EventKind {
     Parleyed,
     /// `[victim, faker]`: a fake job's buyer learned it never existed.
     Defrauded,
+    // --- M16b phase 2: captives and stories (amber).
+    /// `[captive, holder agent, building]`: a captive handed over.
+    HostageTaken,
+    /// `[captive, building]`: a captive let go (a demand met, a rescue, an
+    /// expiry, the hold gone).
+    HostageFreed,
+    /// `[agent, captive]`: a captive killed at the hold's end.
+    HostageKilled,
+    /// `[holder, feed]`: a fabricated story found out.
+    Exposed,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 155] = [
+    pub const ALL: [EventKind; 159] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -479,6 +489,10 @@ impl EventKind {
         EventKind::Lapsed,
         EventKind::Parleyed,
         EventKind::Defrauded,
+        EventKind::HostageTaken,
+        EventKind::HostageFreed,
+        EventKind::HostageKilled,
+        EventKind::Exposed,
     ];
 }
 
