@@ -130,6 +130,8 @@ fn test_arms_raise_p_win_and_skin_lowers_death() {
     // Death share: the loser's death chance is 1 for a bare body, so a Skin
     // T2 loser's share is its (1 − armour) = 0.7.
     let mut w = World::new(43, Config::load().dole_city());
+    // M16b phase 3: the death roll alone (no wound replaces it).
+    w.config.wounded.wound_share = 0.0;
     let pool = free(&w);
     let (attackers, victims) = pool.split_at(pool.len() / 3);
     for &v in victims {

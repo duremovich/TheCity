@@ -631,6 +631,15 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     if crate::systems::robots::is_robot(world, a) || crate::systems::robots::is_robot(world, b) {
         return resolve_robot_fight(world, a, b, mods);
     }
+    // M16b phase 3: a downed party is finished where it lies (no rolls).
+    if !world.wounded.is_empty() {
+        let (down_a, down_b) = (world.wounded.contains_key(&a), world.wounded.contains_key(&b));
+        if down_a != down_b {
+            let (winner, loser) = if down_b { (a, b) } else { (b, a) };
+            crate::systems::wounded::finish(world, loser, winner);
+            return (winner, loser, true);
+        }
+    }
     // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
     let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
     let co = courage;
@@ -679,7 +688,14 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
         p_death *= 1.0 - armour;
     }
     let roll: f32 = world.rng.world().random();
-    let died = roll < p_death;
+    let mut died = roll < p_death;
+    // M16b phase 3 (spec § 5): a second draw makes the death a wound.
+    // A bleed-out is counted as the death would have been: a Murder when
+    // the attacked (`b`) fell to an attacker who is no guard.
+    let murder = loser == b && !is_guard(world, a);
+    if died && crate::systems::wounded::wound_instead(world, loser, winner, armour, murder) {
+        died = false;
+    }
     if died {
         world.kill_by(loser, DeathCause::Violence, Some(winner));
     }

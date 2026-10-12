@@ -101,6 +101,8 @@ fn attributed_texts(w: &World) -> Vec<String> {
 fn test_p_killed_kills_with_violence_and_opens_consequential_hole() {
     let mut w = stat_world(301);
     w.stat_table = Some(table(|r| r.p_killed = 1.0));
+    // M16b phase 3: the Statistical split pinned out (every killing a death).
+    w.config.wounded.stat_saved = 0.0;
     w.tick(); // tick 0: the slot-0 agents run
     let holes: Vec<Hole> = w.holes.values().cloned().collect();
     assert!(!holes.is_empty(), "no hole opened");

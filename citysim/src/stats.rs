@@ -20,7 +20,7 @@ g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
 c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
 flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,\
 tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,flow_street_dice,\
-contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,tax_credit,meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns,hm_posted_revenge,hm_posted_rival,hm_posted_culprit,hm_posted_silence,hm_posted_debt,hm_posted_protect,hm_wants,hm_unaffordable,hm_refused,hm_pooled,hm_price_sum,hm_deposit_sum,hm_hits_done,hm_beats_done,hm_stiffed,hm_recanted,hm_cold,hm_commissions,coercions_active,lev_threat_tries,lev_threat_ok,lev_secret_tries,lev_secret_ok,lev_debt_tries,lev_debt_ok,coercions_broken,protection_made,protection_paid,protection_coins,protection_active,blackmail_made,blackmail_active,secrets_lapsed,silenced_threat,coerced_jobs,coerced_done,poach_threats,parleys,parley_fails,tribute_active,fake_jobs,frauds_filed,k_persuade_posted,k_persuade_done,flow_coerced,captives_held,prison_pop,prisons,hostages_taken,hostages_freed,ransomed,rescued_captives,escaped,hostages_killed,harvest_handovers,captives_unfed,lev_hostage_tries,lev_hostage_ok,k_abduct_posted,k_abduct_done,k_rescue_posted,k_rescue_done,k_escort_posted,k_escort_done,k_steal_posted,k_steal_done,k_deliver_posted,k_deliver_done,k_spin_posted,k_spin_done,fabricated,exposed,steal_runs,flow_ransom,rides_full,rides_coarse,rides_stat,fares,fare_dodges,refused_no_route,refused_fare,refused_slow,refused_danger,ride_abandoned,peak_stop_load,transit_power,el_staff,commute_tpt_ride,ticks_per_sec";
+contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,tax_credit,meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns,hm_posted_revenge,hm_posted_rival,hm_posted_culprit,hm_posted_silence,hm_posted_debt,hm_posted_protect,hm_wants,hm_unaffordable,hm_refused,hm_pooled,hm_price_sum,hm_deposit_sum,hm_hits_done,hm_beats_done,hm_stiffed,hm_recanted,hm_cold,hm_commissions,coercions_active,lev_threat_tries,lev_threat_ok,lev_secret_tries,lev_secret_ok,lev_debt_tries,lev_debt_ok,coercions_broken,protection_made,protection_paid,protection_coins,protection_active,blackmail_made,blackmail_active,secrets_lapsed,silenced_threat,coerced_jobs,coerced_done,poach_threats,parleys,parley_fails,tribute_active,fake_jobs,frauds_filed,k_persuade_posted,k_persuade_done,flow_coerced,captives_held,prison_pop,prisons,hostages_taken,hostages_freed,ransomed,rescued_captives,escaped,hostages_killed,harvest_handovers,captives_unfed,lev_hostage_tries,lev_hostage_ok,k_abduct_posted,k_abduct_done,k_rescue_posted,k_rescue_done,k_escort_posted,k_escort_done,k_steal_posted,k_steal_done,k_deliver_posted,k_deliver_done,k_spin_posted,k_spin_done,fabricated,exposed,steal_runs,flow_ransom,downed,wounds_capped,bled_out,finished_off,stabilised,recovered,rescued_kin,rescued_gang,rescued_colleague,rescued_guard,trauma_calls,trauma_saves,down_now,trauma_subs,trauma_subs_new,trauma_lapsed,stat_wounds,flow_trauma,rides_full,rides_coarse,rides_stat,fares,fare_dodges,refused_no_route,refused_fare,refused_slow,refused_danger,ride_abandoned,peak_stop_load,transit_power,el_staff,commute_tpt_ride,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 /// Scale S2: the floor; a config seeding more corps prints one slot per row
@@ -366,6 +366,9 @@ pub struct DayRow {
     /// M16b phase 2: captives and the new kinds, after leverage's.
     #[serde(default, skip_serializing_if = "CaptiveCols::is_zero")]
     pub captive: CaptiveCols,
+    /// M16b phase 3: the wounded, after the captives'.
+    #[serde(default, skip_serializing_if = "WoundedCols::is_zero")]
+    pub wounded: WoundedCols,
     /// Transit (docs/TRANSIT.md § 4): the El's group, after the hit group
     /// and before `ticks_per_sec` (zero, and not saved, with transit off).
     #[serde(default, skip_serializing_if = "TransitCols::is_zero")]
@@ -1155,6 +1158,7 @@ impl DayRow {
             hit: HitCols::default(),
             leverage: LeverageCols::default(),
             captive: CaptiveCols::default(),
+            wounded: WoundedCols::default(),
             transit: TransitCols::default(),
             ambient: None,
             ticks_per_sec: 0.0,
@@ -1166,7 +1170,8 @@ impl DayRow {
         // Hunger as sickness: the health group rides with the jobs group.
         let jobs_health = format!("{},{}", self.jobs.csv(), self.health.csv());
         // M16b: the leverage group rides with the hit group.
-        let hit_lev = format!("{},{},{}", self.hit.csv(), self.leverage.csv(), self.captive.csv());
+        let hit_lev =
+            format!("{},{},{},{}", self.hit.csv(), self.leverage.csv(), self.captive.csv(), self.wounded.csv());
         // Scale S5: the Ambient group rides with the transit group (only on a
         // world with an Ambient tier).
         let transit_ambient = match &self.ambient {
@@ -1978,6 +1983,90 @@ impl CaptiveCols {
     }
 }
 
+/// M16b phase 3: the wounded's CSV columns, after the captives'.
+/// `down_now` and `trauma_subs` are day-end snapshots; the rest daily
+/// counters. `downed` counts wounds (a fight's death made a wound),
+/// `wounds_capped` the would-be wounds that stayed deaths at the quota,
+/// `finished_off` the downed killed where they lay, `rescued_*` the
+/// stabilisations by the carrier's tie, `stat_wounds` off-screen killings
+/// survived as assaults (the Statistical split).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WoundedCols {
+    pub downed: u32,
+    pub wounds_capped: u32,
+    pub bled_out: u32,
+    pub finished_off: u32,
+    pub stabilised: u32,
+    pub recovered: u32,
+    pub rescued_kin: u32,
+    pub rescued_gang: u32,
+    pub rescued_colleague: u32,
+    pub rescued_guard: u32,
+    pub trauma_calls: u32,
+    pub trauma_saves: u32,
+    pub down_now: u32,
+    pub trauma_subs: u32,
+    pub trauma_subs_new: u32,
+    pub trauma_lapsed: u32,
+    pub stat_wounds: u32,
+    pub flow_trauma: i64,
+}
+
+impl WoundedCols {
+    pub fn is_zero(&self) -> bool {
+        *self == WoundedCols::default()
+    }
+
+    pub fn header() -> String {
+        [
+            "downed",
+            "wounds_capped",
+            "bled_out",
+            "finished_off",
+            "stabilised",
+            "recovered",
+            "rescued_kin",
+            "rescued_gang",
+            "rescued_colleague",
+            "rescued_guard",
+            "trauma_calls",
+            "trauma_saves",
+            "down_now",
+            "trauma_subs",
+            "trauma_subs_new",
+            "trauma_lapsed",
+            "stat_wounds",
+            "flow_trauma",
+        ]
+        .join(",")
+    }
+
+    pub fn csv(&self) -> String {
+        [
+            self.downed.to_string(),
+            self.wounds_capped.to_string(),
+            self.bled_out.to_string(),
+            self.finished_off.to_string(),
+            self.stabilised.to_string(),
+            self.recovered.to_string(),
+            self.rescued_kin.to_string(),
+            self.rescued_gang.to_string(),
+            self.rescued_colleague.to_string(),
+            self.rescued_guard.to_string(),
+            self.trauma_calls.to_string(),
+            self.trauma_saves.to_string(),
+            self.down_now.to_string(),
+            self.trauma_subs.to_string(),
+            self.trauma_subs_new.to_string(),
+            self.trauma_lapsed.to_string(),
+            self.stat_wounds.to_string(),
+            self.flow_trauma.to_string(),
+        ]
+        .join(",")
+    }
+}
+
 /// Transit (docs/TRANSIT.md § 4): the El's day. `commute_ride_*` are the
 /// commutes that rode (ticks and Manhattan tiles door to door), read as
 /// `commute_tpt_ride` beside `commute_tpt_walk`/`_drive`.
@@ -2083,7 +2172,8 @@ mod econ_cols_tests {
         let jobs = JobsCols::header();
         let health = HealthCols::header();
         let hit = HitCols::header();
-        let lev = format!("{},{}", LeverageCols::header(), CaptiveCols::header());
+        let lev = format!("{},{},{}", LeverageCols::header(), CaptiveCols::header(), WoundedCols::header());
+        assert_eq!(WoundedCols::default().csv().split(',').count(), WoundedCols::header().split(',').count());
         assert_eq!(CaptiveCols::default().csv().split(',').count(), CaptiveCols::header().split(',').count());
         let transit = TransitCols::header();
         let tail = format!(

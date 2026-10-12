@@ -110,6 +110,9 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         // The Hit market (H9).
         ActionKind::Commission => world.config.hitmarket.commission_mins,
         ActionKind::HandOver => 5,
+        // M16b phase 3 (spec § 5: Stabilise is dur 30).
+        ActionKind::CarryWounded => 5,
+        ActionKind::Stabilise => 30,
         // Real economy E27, E28: a meal at the kitchen, a gift at the door.
         ActionKind::EatAlms => 30,
         ActionKind::DumpsterDive => 20,
@@ -741,6 +744,9 @@ pub fn on_complete(
         ActionKind::Commission => crate::systems::hitmarket::on_commission(world, id, target),
         // M16b phase 2: the abductee handed over at the holding building.
         ActionKind::HandOver => crate::systems::captives::on_hand_over(world, id, target),
+        // M16b phase 3: the downed taken up; stabilised at the Clinic.
+        ActionKind::CarryWounded => crate::systems::wounded::on_carry(world, id, target),
+        ActionKind::Stabilise => crate::systems::wounded::on_stabilise(world, id, target),
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),

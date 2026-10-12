@@ -246,6 +246,9 @@ pub enum Flow {
     /// M16b § 4: coins paid under a coercion (protection, hush money, a
     /// called debt, a tribute, a fake job's fee), untaxed.
     Coerced,
+    /// M16b phase 3: a Trauma subscription's weekly fee, client -> Security
+    /// corp (taxed as owner revenue).
+    Trauma,
 }
 
 impl Flow {
@@ -278,6 +281,7 @@ impl Flow {
                 | Flow::Leisure
                 | Flow::Gamble
                 | Flow::FixerCut
+                | Flow::Trauma
         )
     }
 }
@@ -349,6 +353,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Pool => {}
         Flow::Fare => row.transit.fares += coins,
         Flow::Coerced => row.leverage.flow_coerced += coins,
+        Flow::Trauma => row.wounded.flow_trauma += coins,
     }
 }
 

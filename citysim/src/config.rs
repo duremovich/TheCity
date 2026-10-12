@@ -178,6 +178,12 @@ pub struct Config {
     /// M16b phase 2: captives, the Prison and the new kinds.
     #[serde(default)]
     pub hostage: HostageCfg,
+    /// M16b phase 3: the wounded.
+    #[serde(default)]
+    pub wounded: WoundedCfg,
+    /// M16b phase 3: the Trauma Team.
+    #[serde(default)]
+    pub trauma: TraumaCfg,
     /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
     /// always on; the wage law and the safety net are policy (P10, `policy`).
     #[serde(default)]
@@ -5471,6 +5477,10 @@ impl Config {
         if std::env::var("CITYSIM_HOSTAGE_OFF").is_ok_and(|v| v == "1") {
             cfg.hostage.enabled = false;
         }
+        // M16b phase 3: the wounded's A/B and identity device.
+        if std::env::var("CITYSIM_WOUNDED_OFF").is_ok_and(|v| v == "1") {
+            cfg.wounded.enabled = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -5820,6 +5830,8 @@ impl Config {
         // M16b: the standing coercions' cap; phase 2: the captives'.
         self.leverage.max_coercions = up_usize(self.leverage.max_coercions);
         self.hostage.captive_quota = up_usize(self.hostage.captive_quota);
+        // Phase 3: the downed.
+        self.wounded.wounded_quota = up_usize(self.wounded.wounded_quota);
         let fv = &mut self.fviolence.day_cap;
         *fv = FvKindsCfg {
             killed: up_u32(fv.killed),
@@ -6031,6 +6043,8 @@ pub struct KindTable<T> {
     pub steal: T,
     pub deliver: T,
     pub spin: T,
+    /// M16b phase 3.
+    pub trauma: T,
 }
 
 impl<T: Default + Copy> KindTable<T> {
@@ -6048,6 +6062,7 @@ impl<T: Default + Copy> KindTable<T> {
             ContractKind::Steal => self.steal,
             ContractKind::Deliver => self.deliver,
             ContractKind::Spin => self.spin,
+            ContractKind::Trauma => self.trauma,
         }
     }
 }
@@ -6111,6 +6126,7 @@ impl Default for ContractsCfg {
                 steal: 150,
                 deliver: 40,
                 spin: 120,
+                trauma: 35,
             },
             deadline_days: KindTable {
                 hit: 10,
@@ -6124,6 +6140,7 @@ impl Default for ContractsCfg {
                 steal: 7,
                 deliver: 3,
                 spin: 5,
+                trauma: 7,
             },
             risk_w: 1.5,
             standing_w: 1.0,
@@ -6175,7 +6192,8 @@ impl GunLawfulnessCfg {
             | ContractKind::Persuade
             | ContractKind::Escort
             | ContractKind::Deliver
-            | ContractKind::Spin => 1.0,
+            | ContractKind::Spin
+            | ContractKind::Trauma => 1.0,
         }
     }
 }
@@ -7406,6 +7424,75 @@ impl Default for HostageCfg {
             steal_max: 300,
             bury_hours: 24,
             abduct_share: 0.3,
+        }
+    }
+}
+
+/// `[wounded]` (M16b phase 3; spec § 5, with the plan keys marked). Every
+/// value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WoundedCfg {
+    /// The switch in flight (off: the phase-2 city). `CITYSIM_WOUNDED_OFF=1`.
+    pub enabled: bool,
+    /// A fight's death becomes a wound with `wound_share × (1 − armour)`.
+    pub wound_share: f32,
+    pub bleed_hours: u32,
+    pub stabilise_price: i64,
+    pub recover_days: u32,
+    pub rescue_radius: u32,
+    pub rescue_loyalty: f32,
+    /// Spec `[lod] wounded_quota`: downed at once (per capita, up only).
+    pub wounded_quota: usize,
+    /// Plan key (the Statistical split of `p_killed`): the share of
+    /// wounds a Full run saves; off screen an hour's killing survives as
+    /// an assault with `wound_share × stat_saved`.
+    pub stat_saved: f32,
+    /// Plan key: the Rescue goal's flat (a Trauma crew's call adds
+    /// `trauma_flat`).
+    pub rescue_flat: f32,
+    pub trauma_flat: f32,
+}
+
+impl Default for WoundedCfg {
+    fn default() -> Self {
+        WoundedCfg {
+            enabled: true,
+            wound_share: 0.6,
+            bleed_hours: 3,
+            stabilise_price: 80,
+            recover_days: 3,
+            rescue_radius: 12,
+            rescue_loyalty: 0.5,
+            wounded_quota: 12,
+            stat_saved: 0.16,
+            rescue_flat: 0.0,
+            trauma_flat: 0.5,
+        }
+    }
+}
+
+/// `[trauma]` (M16b phase 3; spec § 5 "Trauma Team").
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TraumaCfg {
+    pub fee_weekly: i64,
+    pub trauma_crew: u32,
+    pub subscribe_coins: i64,
+    pub subscribe_heat: f32,
+    pub p_subscribe: f32,
+    pub trauma_stat_save: f32,
+}
+
+impl Default for TraumaCfg {
+    fn default() -> Self {
+        TraumaCfg {
+            fee_weekly: 35,
+            trauma_crew: 2,
+            subscribe_coins: 400,
+            subscribe_heat: 0.3,
+            p_subscribe: 0.2,
+            trauma_stat_save: 0.5,
         }
     }
 }

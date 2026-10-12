@@ -148,6 +148,57 @@ pub fn rebuild_index(world: &mut World) {
     }
     // C31: the guards on the take.
     reindex_take(world);
+    // M16b phase 3: the Trauma clients.
+    crate::systems::wounded::reindex(world);
+}
+
+/// M16b phase 3 (spec § 5 "Trauma Team"): a standing Trauma subscription
+/// of `client` with the Security corp `corp`, paid by `buyer` (the client,
+/// or its corp for an exec): `Standing` (never matched, never on the
+/// ledger), its first week charged now (`last_paid`). `None` when the
+/// payer is short.
+pub fn post_standing(
+    world: &mut World,
+    buyer: EntityId,
+    client: EntityId,
+    corp: EntityId,
+    fee: i64,
+) -> Option<ContractId> {
+    if world.purse(Some(buyer)) < fee {
+        return None;
+    }
+    let now = world.tick;
+    let id = world.next_contract.max(1);
+    world.next_contract = id + 1;
+    let mut rec = record_of(
+        id,
+        Some(buyer),
+        Some(client),
+        ContractKind::Trauma,
+        Target::Agent(client),
+        None,
+        Origin::Subscription,
+        now,
+        fee,
+    );
+    rec.status = ContractStatus::Standing;
+    rec.taker = Some(corp);
+    rec.taken = Some(now);
+    rec.deadline = Tick::MAX / 2;
+    rec.last_paid = Some(now);
+    world.contracts.insert(id, rec);
+    index_parties(world, id);
+    ownership::pay(world, Some(buyer), Some(corp), fee, Flow::Trauma);
+    world.stats.current.contract.contracts_posted += 1;
+    note_kind_posted(world, ContractKind::Trauma);
+    let text = format!(
+        "{} subscribed {} to {}'s Trauma Team for {fee} a week",
+        world.owner_label(Some(buyer)),
+        world.name_of(client),
+        world.owner_label(Some(corp))
+    );
+    log(world, id, text);
+    Some(id)
 }
 
 fn log(world: &mut World, id: ContractId, text: String) {
@@ -640,6 +691,7 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
 fn note_kind_posted(world: &mut World, kind: ContractKind) {
     match kind {
         ContractKind::Persuade => world.stats.current.leverage.k_persuade_posted += 1,
+        ContractKind::Trauma => world.stats.current.wounded.trauma_subs_new += 1,
         k => match crate::stats::CaptiveCols::slot(k) {
             Some(i) => world.stats.current.captive.k_posted[i] += 1,
             None => world.stats.current.contract.k_posted[k.index()] += 1,
@@ -863,6 +915,7 @@ fn skill_for(world: &World, kind: ContractKind, cand: EntityId) -> f32 {
         ContractKind::Hit | ContractKind::Beat | ContractKind::Guard => crate::systems::law::fighting(world, cand),
         ContractKind::Locate => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth),
         ContractKind::Persuade | ContractKind::Spin => world.comp::<Skills>(cand).map_or(0.0, |s| s.persuasion),
+        ContractKind::Trauma => crate::systems::law::fighting(world, cand),
         // M16b phase 2.
         ContractKind::Abduct | ContractKind::Rescue | ContractKind::Escort | ContractKind::Deliver => {
             crate::systems::law::fighting(world, cand)
@@ -1604,6 +1657,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
                 world.stats.current.leverage.k_persuade_done += 1;
             } else if let Some(i) = crate::stats::CaptiveCols::slot(kind) {
                 world.stats.current.captive.k_done[i] += 1;
+            } else if kind == ContractKind::Trauma {
+                // M16b phase 3: a subscription is never fulfilled.
             } else {
                 world.stats.current.contract.k_done[kind.index()] += 1;
             }
@@ -1626,7 +1681,7 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
         ContractStatus::Failed => row.contracts_failed += 1,
         ContractStatus::Expired => row.contracts_expired += 1,
         ContractStatus::Cancelled => row.contracts_cancelled += 1,
-        ContractStatus::Open | ContractStatus::Taken => {}
+        ContractStatus::Open | ContractStatus::Taken | ContractStatus::Standing => {}
     }
     // The Hit market: organic outcomes, and a buyer whose record closed
     // unfulfilled waits `repost_days` before buying again (H8).
@@ -1657,7 +1712,7 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
                     *t = (*t).max(until);
                 }
             }
-            ContractStatus::Open | ContractStatus::Taken => {}
+            ContractStatus::Open | ContractStatus::Taken | ContractStatus::Standing => {}
         }
     }
     // M16b § 4: a coerced job's coercion follows its record.
@@ -1698,7 +1753,7 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
             EventKind::Reneged,
             format!("{} stiffed {} on the {}", world.owner_label(c.buyer), world.owner_label(c.taker), kind.label()),
         ),
-        ContractStatus::Open | ContractStatus::Taken => return,
+        ContractStatus::Open | ContractStatus::Taken | ContractStatus::Standing => return,
     };
     let actors =
         if status == ContractStatus::Reneged { [c.buyer.unwrap_or(EntityId::NONE), taker] } else { [taker, target] };

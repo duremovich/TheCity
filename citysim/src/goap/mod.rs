@@ -48,6 +48,6 @@ pub fn goal_state(goal: GoalKind) -> Option<GoalState> {
         // M16a (plan C13): scripted (`contracts::plan`).
         GoalKind::Contract => return None,
         // The Hit market (H9): scripted (`hitmarket::commission_plan`).
-        GoalKind::Commission => return None,
+        GoalKind::Commission | GoalKind::Rescue => return None,
     })
 }

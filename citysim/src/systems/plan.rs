@@ -249,9 +249,13 @@ pub fn plan_for(world: &mut World, id: EntityId, goal: GoalKind) -> usize {
     // M15 W19/W35: the Hunt's and Guard the body's scripted plans; M16a
     // (plan C13) the Contract goal's.
     // The Hit market (H9): the Commission goal's.
-    if matches!(goal, GoalKind::Hunt | GoalKind::GuardBody | GoalKind::Contract | GoalKind::Commission) {
+    if matches!(
+        goal,
+        GoalKind::Hunt | GoalKind::GuardBody | GoalKind::Contract | GoalKind::Commission | GoalKind::Rescue
+    ) {
         let plan = match goal {
             GoalKind::Hunt => crate::systems::hunt::plan(world, id),
+            GoalKind::Rescue => crate::systems::wounded::plan(world, id),
             GoalKind::Contract => crate::systems::contracts::plan(world, id),
             GoalKind::Commission => crate::systems::hitmarket::commission_plan(world, id),
             _ => crate::systems::grudges::guard_body_plan(world, id),

@@ -1805,8 +1805,8 @@ staff = 0
 [contracts]
 max_open = 256
 closed_keep_days = 30
-price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120 }   # M16b: persuade; phase 2: the rest
-deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5 }
+price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120, trauma = 35 }   # M16b: persuade; phase 2: the rest
+deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5, trauma = 7 }
 risk_w = 1.5
 standing_w = 1.0
 max_attempts = 2
@@ -1943,6 +1943,29 @@ steal_share = 0.2                    # plan key: a Steal takes this share of the
 steal_max = 300                      # ... at most this
 bury_hours = 24                      # spec: a kin corpse unburied 24 h
 abduct_share = 0.3                   # spec [contracts] abduct_share: a Harvest's Abduct price x the chrome's value
+
+# M16b phase 3 (docs/M16_CONTRACTS.md § 5): the wounded. A wound is a record on a struct: the fight's loser
+# down and bleeding on a timer, carried to a Clinic and stabilised, or dead. Every value a placeholder.
+[wounded]
+enabled = true                       # the switch in flight (CITYSIM_WOUNDED_OFF=1: the A/B and identity device)
+wound_share = 0.6                    # a fight's death becomes a wound with wound_share x (1 - armour)
+bleed_hours = 3
+stabilise_price = 80
+recover_days = 3
+rescue_radius = 12
+rescue_loyalty = 0.5
+wounded_quota = 12                   # spec [lod] wounded_quota: downed at once (per capita, up only)
+stat_saved = 0.16                    # plan key: off screen a killing survives as an assault with wound_share x stat_saved (calibrated once: 58 stabilised of 366 downed, 42-47 x 120)
+rescue_flat = 0.0                    # plan key: the Rescue goal's flat
+trauma_flat = 0.5                    # plan key: a Trauma crew's call adds this
+
+[trauma]
+fee_weekly = 35
+trauma_crew = 2
+subscribe_coins = 400
+subscribe_heat = 0.3
+p_subscribe = 0.2
+trauma_stat_save = 0.5
 
 # P10 (docs/P10_POLICY.md): the city's policy at world creation (the `[economy2] wages` / `no_safety_net`
 # switches retired into it). Each item is a saved lever after day 0: `--lever day=D:<key>=on|off` (`levy`,

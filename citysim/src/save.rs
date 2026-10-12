@@ -76,7 +76,13 @@ use crate::world::World;
 /// `ContractKind`s, `Target::{Carry, Story}`, `Origin::{Bury, Spin}`,
 /// `Leverage::Hostage`, `Demand::{Sell, Release}`, `Deed::Rescued`,
 /// `ActionKind::HandOver`, `RunWhy::Contract` and the four events.
-pub const SAVE_VERSION: u8 = 17;
+/// 18: M16b phase 3, the wounded: `World::wounded`, `DayRow.wounded`,
+/// `[wounded]`, `[trauma]` and the `trauma` kind keys in the saved config
+/// (serde defaults: an older save loads with nobody down); the appended
+/// `GoalKind::Rescue`, `ActionKind::{CarryWounded, Stabilise}`,
+/// `ContractKind::Trauma`, `ContractStatus::Standing`,
+/// `Origin::Subscription`, `Flow::Trauma` and the six events.
+pub const SAVE_VERSION: u8 = 18;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

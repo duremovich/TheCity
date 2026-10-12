@@ -65,10 +65,13 @@ pub enum ContractKind {
     Deliver,
     /// M16b phase 2: a story planted on a Feed (fabricated or true).
     Spin,
+    /// M16b phase 3 (spec § 5): a standing subscription (`Standing`) to a
+    /// Security corp's Trauma crew, renewed weekly.
+    Trauma,
 }
 
 impl ContractKind {
-    pub const ALL: [ContractKind; 11] = [
+    pub const ALL: [ContractKind; 12] = [
         ContractKind::Hit,
         ContractKind::Beat,
         ContractKind::Guard,
@@ -80,6 +83,7 @@ impl ContractKind {
         ContractKind::Steal,
         ContractKind::Deliver,
         ContractKind::Spin,
+        ContractKind::Trauma,
     ];
 
     /// M16b phase 2's six kinds (`LeverageCols`' per-kind columns).
@@ -111,6 +115,7 @@ impl ContractKind {
             ContractKind::Steal => "steal",
             ContractKind::Deliver => "deliver",
             ContractKind::Spin => "spin",
+            ContractKind::Trauma => "trauma",
         }
     }
 
@@ -215,6 +220,9 @@ pub enum ContractStatus {
     Expired,
     Reneged,
     Cancelled,
+    /// M16b phase 3: a Trauma subscription in force (not live: never
+    /// matched, never on the ledger).
+    Standing,
 }
 
 impl ContractStatus {
@@ -232,6 +240,7 @@ impl ContractStatus {
             ContractStatus::Expired => "expired",
             ContractStatus::Reneged => "reneged",
             ContractStatus::Cancelled => "cancelled",
+            ContractStatus::Standing => "standing",
         }
     }
 }
@@ -251,6 +260,8 @@ pub enum Origin {
     Bury,
     /// M16b phase 2: a spinning corp's plant (`Corp.spin_since`).
     Spin,
+    /// M16b phase 3: a Trauma subscription.
+    Subscription,
 }
 
 /// How a taken record is resolved: a ledger draw at `due` (no bodies), a
@@ -842,4 +853,33 @@ pub struct Hold {
     /// Who the demand is put to (`None`: the default answerer).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub over: Option<EntityId>,
+}
+
+// ---------------------------------------------------------------------------
+// M16b phase 3: the wounded
+// ---------------------------------------------------------------------------
+
+/// A downed agent (spec § 5, `World::wounded`): it lies where it fell
+/// (`Brain.cuffed_by` itself, so it neither thinks nor walks), or is
+/// dragged by a carrier (`cuffed_by` the carrier); unstabilised past
+/// `bleed_until` it dies; stabilised it rises at `rise_at`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Wounded {
+    pub by: Option<EntityId>,
+    pub since: Tick,
+    pub bleed_until: Tick,
+    pub tile: TilePos,
+    pub stable: bool,
+    /// Who is coming for it (a rescuer's claim), if anyone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rescuer: Option<EntityId>,
+    /// A Trauma client's corp, when its beacon called a crew.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trauma: Option<EntityId>,
+    /// Stabilised: on its feet again at this tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rise_at: Option<Tick>,
+    /// A bleed-out is a Murder (the death would have been one).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub murder: bool,
 }

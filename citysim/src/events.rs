@@ -330,10 +330,23 @@ pub enum EventKind {
     HostageKilled,
     /// `[holder, feed]`: a fabricated story found out.
     Exposed,
+    // --- M16b phase 3: the wounded (amber).
+    /// `[downed, attacker]`: a fight's loser down, bleeding.
+    Wounded,
+    /// `[dead, attacker]`: a downed agent died before it was stabilised.
+    BledOut,
+    /// `[agent]`: a stabilised agent back on its feet.
+    Recovered,
+    /// `[carrier, downed, clinic]`: a downed agent stabilised at a Clinic.
+    Rescued,
+    /// `[corp, client]`: a Trauma client's beacon called its crew.
+    TraumaCall,
+    /// `[corp, client]`: a Trauma client stabilised by its crew in time.
+    TraumaSave,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 159] = [
+    pub const ALL: [EventKind; 165] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -493,6 +506,12 @@ impl EventKind {
         EventKind::HostageFreed,
         EventKind::HostageKilled,
         EventKind::Exposed,
+        EventKind::Wounded,
+        EventKind::BledOut,
+        EventKind::Recovered,
+        EventKind::Rescued,
+        EventKind::TraumaCall,
+        EventKind::TraumaSave,
     ];
 }
 

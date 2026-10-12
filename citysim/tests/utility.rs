@@ -216,8 +216,8 @@ fn test_worked_example_through_goal_table() {
     assert!((score(GoalKind::Socialise) - 0.034).abs() < 0.005, "socialise {}", score(GoalKind::Socialise));
     assert_eq!(
         goals::GOAL_ORDER.len(),
-        29,
-        "the spec's 15 goals plus M8's Raid, M11's Found, M12's Squat, M13's Shop, GetHigh, Treat and Loot, M14's Hack, M15's Hunt and GuardBody, L2's Unwind and Lead, M16a's Contract, the Hit market's Commission"
+        30,
+        "the spec's 15 goals plus M8's Raid, M11's Found, M12's Squat, M13's Shop, GetHigh, Treat and Loot, M14's Hack, M15's Hunt and GuardBody, L2's Unwind and Lead, M16a's Contract, the Hit market's Commission, M16b's Rescue"
     );
 }
 

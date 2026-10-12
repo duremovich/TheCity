@@ -138,6 +138,13 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::HostageFreed
         | EventKind::HostageKilled
         | EventKind::Exposed
+        // M16b phase 3.
+        | EventKind::Wounded
+        | EventKind::BledOut
+        | EventKind::Recovered
+        | EventKind::Rescued
+        | EventKind::TraumaCall
+        | EventKind::TraumaSave
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

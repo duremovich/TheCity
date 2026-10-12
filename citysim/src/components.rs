@@ -871,6 +871,9 @@ pub enum GoalKind {
     /// The Hit market (H9): walk to a Fixer and commission the Hit or Beat
     /// one wants (a scripted plan; `systems::hitmarket`).
     Commission,
+    /// M16b phase 3 (spec § 5): carry a downed ally (or a Trauma client) to
+    /// a Clinic and have it stabilised (a scripted plan; `systems::wounded`).
+    Rescue,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).

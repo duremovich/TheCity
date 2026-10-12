@@ -1071,6 +1071,13 @@ pub struct World {
     /// cut until the tick.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub feed_shamed: BTreeMap<EntityId, Tick>,
+    /// M16b phase 3: the downed, by agent.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub wounded: BTreeMap<EntityId, crate::contract::Wounded>,
+    /// M16b phase 3: client -> its Trauma corp, from the `Standing` Trauma
+    /// records (rebuilt on load, `wounded::reindex`).
+    #[serde(skip)]
+    pub trauma_clients: BTreeMap<EntityId, EntityId>,
     /// C9: the Fixers were seeded (at `World::new`, or at the first midnight
     /// after loading an older save with contracts on).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1605,6 +1612,8 @@ impl World {
             refusals: BTreeMap::new(),
             steal_runs: BTreeMap::new(),
             feed_shamed: BTreeMap::new(),
+            wounded: BTreeMap::new(),
+            trauma_clients: BTreeMap::new(),
             fixers_seeded: false,
             fixers_due: false,
             fixer_runs: BTreeMap::new(),
@@ -3137,6 +3146,7 @@ impl World {
         crate::prof::timed!("tick::contracts", systems::contracts::run(self));
         crate::prof::timed!("tick::leverage", systems::leverage::run(self));
         crate::prof::timed!("tick::captives", systems::captives::run(self));
+        crate::prof::timed!("tick::wounded", systems::wounded::run(self));
         crate::prof::timed!("tick::demography", systems::demography::run(self));
         crate::prof::timed!("tick::stats", systems::stats::run(self));
         self.tick += 1;

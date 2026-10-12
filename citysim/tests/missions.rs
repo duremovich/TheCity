@@ -419,8 +419,11 @@ fn test_no_mission_no_draw() {
             assert!(contracts::strike_at_contact(&mut b, x));
         }
     }
-    assert!(a.contracts.is_empty() && a.missions.is_empty(), "the shipped day posted nothing");
-    assert!(b.contracts.is_empty() && b.missions.is_empty());
+    // M16b phase 3: the execs' Trauma subscriptions stand from the first
+    // midnight (`Standing`, never matched or worked), in both.
+    let posted = |w: &World| w.contracts.values().any(|c| c.kind != citysim::contract::ContractKind::Trauma);
+    assert!(!posted(&a) && a.missions.is_empty(), "the shipped day posted nothing");
+    assert!(!posted(&b) && b.missions.is_empty());
     assert_eq!(a.rng.world().random::<u64>(), b.rng.world().random::<u64>(), "the same world stream");
     let row = |w: &World| {
         w.stats.history.back().map(|r| {

@@ -85,3 +85,4 @@ pub mod virt;
 pub mod wages;
 pub mod word;
 pub mod world_market;
+pub mod wounded;

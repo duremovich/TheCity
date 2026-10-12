@@ -435,6 +435,8 @@ fn class_with(world: &World, id: EntityId, harvest: &[EntityId], sets: Option<&B
     // (while that gang's order is Harvest) too.
     let gang = gang
         || brain.abducted_by.is_some()
+        // M16b phase 3: the downed keep a body (inside `wounded_quota`).
+        || (!world.wounded.is_empty() && world.wounded.contains_key(&id))
         || harvest.contains(&id)
         || (!world.episodes.is_empty() && world.episodes.contains(&id));
     // M10 D20: guards rank with gang members, or at 2,000 the gangs take
@@ -948,7 +950,18 @@ fn stat_rolls(world: &mut World, id: EntityId, row: &StatRow) {
     if !world.has::<Position>(id) {
         return;
     }
+    // M16b phase 3 (spec § 5, the Statistical split of `p_killed`): of the
+    // hour's killing, `wound_share × stat_saved` is a wound survived (an
+    // assault), and a Trauma client's is cut by `trauma_stat_save`; the same
+    // draw decides (with the wounded off, M16a's roll exactly).
     if adult && u_killed < p_killed {
+        if let Some(eff) = crate::systems::wounded::stat_kill_p(world, id, p_killed) {
+            if u_killed >= eff {
+                world.stats.current.wounded.stat_wounds += 1;
+                stat_hit(world, id, HoleKind::Assaulted, None);
+                return;
+            }
+        }
         stat_hit(world, id, HoleKind::Killed, None);
         return;
     }

@@ -177,6 +177,12 @@ pub enum ActionKind {
     /// captive handed over (an Abduct plan's scripted step; never in
     /// `PLANNABLE`, started by `contracts::can_start`).
     HandOver,
+    /// M16b phase 3 (spec § 5): beside a downed agent, take it up and drag
+    /// it (the Rescue goal's scripted step; never in `PLANNABLE`).
+    CarryWounded,
+    /// M16b phase 3: at a Clinic with a Ripperdoc inside, the carried
+    /// downed agent stabilised (the Rescue goal's scripted step).
+    Stabilise,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -402,6 +408,8 @@ impl ActionKind {
                 | ActionKind::Network
                 | ActionKind::Guard
                 | ActionKind::HandOver
+                | ActionKind::CarryWounded
+                | ActionKind::Stabilise
                 | ActionKind::EatAlms
                 | ActionKind::Donate
                 | ActionKind::DumpsterDive
@@ -1839,7 +1847,11 @@ impl ActionKind {
             | ActionKind::Collect
             | ActionKind::Preach => 60.0,
             // M16a (plan C10, C15): scripted, never planned.
-            ActionKind::Network | ActionKind::Commission | ActionKind::HandOver => 4.0,
+            ActionKind::Network
+            | ActionKind::Commission
+            | ActionKind::HandOver
+            | ActionKind::CarryWounded
+            | ActionKind::Stabilise => 4.0,
             ActionKind::Guard => 2.0,
             // Real economy E27, E28: scripted, never searched.
             ActionKind::EatAlms

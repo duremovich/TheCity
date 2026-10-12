@@ -302,12 +302,16 @@ fn test_weak_gang_under_retaliate_takes_a_hostage() {
     let mut w = gang_world();
     let gs: Vec<EntityId> =
         w.gangs().into_iter().filter(|&x| w.comp::<Gang>(x).is_some_and(|y| y.leader.is_some())).collect();
-    let (g, r) = (gs[0], gs[1]);
+    // The rival the bigger gang (the weaker side's ratio under `hire_ratio`).
+    let r = *gs.iter().max_by_key(|&&x| (w.comp::<Gang>(x).unwrap().members.len(), std::cmp::Reverse(x))).unwrap();
+    let g = *gs.iter().find(|&&x| x != r).unwrap();
+    assert!(w.comp::<Gang>(r).unwrap().members.len() >= 2, "a rival of two or more");
     w.comp_mut::<Gang>(g).unwrap().order = citysim::Order::Retaliate;
     w.comp_mut::<Gang>(g).unwrap().retaliate_on = Some(r);
     w.comp_mut::<Gang>(g).unwrap().treasury = 5_000;
     // Make g the weaker: trim its roster to one.
-    let keep: Vec<EntityId> = w.comp::<Gang>(g).unwrap().members.iter().copied().take(1).collect();
+    let keep: Vec<EntityId> =
+        w.comp::<Gang>(g).unwrap().members.iter().copied().filter(|&m| contracts::free_adult(&w, m)).take(1).collect();
     w.comp_mut::<Gang>(g).unwrap().members = keep;
     let rl = w.comp::<Gang>(r).unwrap().leader.unwrap();
     let [s] = strangers(&w, 1)[..] else { unreachable!() };

@@ -295,6 +295,18 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         *r.marks.entry("Deliver fulfilled").or_insert(0) += k.k_done[4];
         *r.marks.entry("fabrication planted").or_insert(0) += k.fabricated;
         *r.marks.entry("fabrication exposed").or_insert(0) += k.exposed;
+        // M16b phase 3: the wounded.
+        let wd = &row.wounded;
+        *r.marks.entry("downed").or_insert(0) += wd.downed;
+        *r.marks.entry("bled out").or_insert(0) += wd.bled_out;
+        *r.marks.entry("stabilised").or_insert(0) += wd.stabilised;
+        *r.marks.entry("recovered").or_insert(0) += wd.recovered;
+        *r.marks.entry("finished off").or_insert(0) += wd.finished_off;
+        *r.marks.entry("Trauma subscription").or_insert(0) += wd.trauma_subs_new;
+        *r.marks.entry("rescued by kin").or_insert(0) += wd.rescued_kin;
+        *r.marks.entry("rescued by a gang-mate").or_insert(0) += wd.rescued_gang;
+        *r.marks.entry("Trauma call").or_insert(0) += wd.trauma_calls;
+        *r.marks.entry("TraumaSave").or_insert(0) += wd.trauma_saves;
         r.assaults.push(assaults);
         r.rows.push(row);
         if r.no_net {
@@ -538,6 +550,16 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a Steal fulfilled", m("Steal fulfilled")), // [10, 8, 5]; 45-47 [21, 9, 28]
         ("a heist run", m("heist run")),          // [14, 10, 21]; 45-47 [15, 0, 23]
         ("a Spin posted", m("Spin posted")),      // [1, 6, 3]; 45-47 [6, 4, 4]
+        // M16b phase 3, the wounded (seeds 42-47 x 120 days; each on 6 of 6). Fewer, so printed
+        // below and unit-tested in `wounded.rs`: a rescue by a gang-mate (1 of 6;
+        // test_abandon_gang_leaves_its_own carries the Loyal/Abandon rule), a Trauma call (2 of
+        // 6) and a TraumaSave (0 of 6: test_trauma_call_and_save).
+        ("a downed agent", m("downed")),          // [71, 65, 63]; 45-47 [73, 72, 44]
+        ("a bleed-out", m("bled out")),           // [48, 48, 47]; 45-47 [44, 51, 30]
+        ("a stabilisation", m("stabilised")),     // [3, 4, 5]; 45-47 [15, 8, 3]
+        ("a rescue by kin", m("rescued by kin")), // [2, 1, 3]; 45-47 [10, 3, 3]
+        ("a downed agent finished off", m("finished off")), // [9, 5, 3]; 45-47 [9, 5, 3]
+        ("a Trauma subscription", m("Trauma subscription")), // [27, 15, 22]; 45-47 [34, 16, 19]
     ]
 }
 
@@ -607,6 +629,10 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a Deliver fulfilled", m("Deliver fulfilled")),     // [2, 0, 0, 0, 0, 1]
         ("a fabrication planted", m("fabrication planted")), // [0, 0, 0, 1, 0, 0]
         ("a fabrication exposed", m("fabrication exposed")), // [0, 0, 0, 0, 0, 0]
+        // M16b phase 3 (seeds 42-47 x 120 days): rare, unit-tested in `wounded.rs`.
+        ("a rescue by a gang-mate", m("rescued by a gang-mate")), // [0, 0, 0, 1, 0, 0]
+        ("a Trauma call", m("Trauma call")),                      // [0, 0, 0, 1, 0, 1]
+        ("a TraumaSave", m("TraumaSave")),                        // [0, 0, 0, 0, 0, 0]
     ]
 }
 
