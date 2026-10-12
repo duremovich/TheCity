@@ -2451,7 +2451,10 @@ const CHECKS: &[Check] = &[
     (19, "ceo", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     // An exec never does a work-class action, so every run of the office-hours
     // Work goal counts here: the row reads goal flicker (2026-10-11: 0.63 after
-    // the own-shift off hours, more Idle -> Work switches, the same day).
+    // the own-shift off hours, more Idle -> Work switches, the same day). Not
+    // the office gate's estimate: with it read against the deadline (review
+    // item 6) the row reads 0.58, and 0.57 with that change alone undone;
+    // 0.52-0.63 over the round's tables, so the 0.62 bound would flip on noise.
     (19, "ceo", Metric::CommuteAbortsDay, Bound::Max(0.75), 0.52, 0.63),
     (19, "club_staff", Metric::WalkHDay, Bound::Max(5.6), 3.95, 4.53),
     (19, "club_staff", Metric::LongestSleepH, Bound::Min(4.0), 4.54, 4.76),

@@ -57,15 +57,20 @@ pub struct NetLine {
 }
 
 /// The fastest ride between two stops over the open lines: its ticks and
-/// the first leg's line and direction (the departure the rider waits for).
+/// the first leg's line, direction and board position on that line (the
+/// departure the rider waits for). Review item 7: a line that calls at a
+/// stop twice (a loop) departs from each call at its own offset, and the
+/// table's path starts from one of them.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Hop {
     pub ticks: u32,
     pub line: u8,
     pub forward: bool,
+    /// The board stop's index in the line's `stops` the path starts from.
+    pub pos: u16,
 }
 
-const NO_HOP: Hop = Hop { ticks: UNREACHABLE, line: 0, forward: true };
+const NO_HOP: Hop = Hop { ticks: UNREACHABLE, line: 0, forward: true, pos: 0 };
 
 /// The derived network (not saved).
 #[derive(Clone, Debug, Default)]
@@ -156,6 +161,10 @@ pub struct Ride {
     pub dodge: bool,
     pub plan_started: Tick,
     pub plan_step: u8,
+    /// Review item 7: the board stop's position on the line (`Hop::pos`);
+    /// `None` in a save from before it (the line's first call there).
+    #[serde(default)]
+    pub board_pos: Option<u16>,
 }
 
 /// Why a trip walks (the refusal columns).
@@ -340,6 +349,9 @@ fn open_lines(world: &World) -> Vec<bool> {
         .collect()
 }
 
+/// A path's first leg in `rebuild_table`: line, direction, board position.
+type FirstLeg = (u8, bool, u16);
+
 /// The all-pairs table over the open lines: Dijkstra from every stop over
 /// `(line, position)` nodes, ride edges along a line, `transfer_ticks`
 /// between two lines' nodes at one stop. Ties keep the first path found
@@ -364,7 +376,7 @@ fn rebuild_table(world: &mut World, open: Vec<bool>) {
     }
     let mut table = vec![NO_HOP; n * n];
     for src in 0..n {
-        let mut dist: Vec<(u32, Option<(u8, bool)>)> = vec![(UNREACHABLE, None); nodes.len()];
+        let mut dist: Vec<(u32, Option<FirstLeg>)> = vec![(UNREACHABLE, None); nodes.len()];
         let mut heap = BinaryHeap::new();
         for &v in &at_stop[src] {
             dist[v] = (0, None);
@@ -377,7 +389,7 @@ fn rebuild_table(world: &mut World, open: Vec<bool>) {
             let first = dist[v].1;
             let (l, k) = nodes[v];
             let line = &net.lines[l];
-            let mut relax = |to: usize, cost: u32, first: Option<(u8, bool)>, heap: &mut BinaryHeap<_>| {
+            let mut relax = |to: usize, cost: u32, first: Option<FirstLeg>, heap: &mut BinaryHeap<_>| {
                 let nd = d.saturating_add(cost);
                 if nd < dist[to].0 {
                     dist[to] = (nd, first);
@@ -385,13 +397,14 @@ fn rebuild_table(world: &mut World, open: Vec<bool>) {
                 }
             };
             let lu = u8::try_from(l).unwrap_or(u8::MAX);
+            let ku = u16::try_from(k).unwrap_or(u16::MAX);
             if k + 1 < line.stops.len() {
                 let to = node_of[&(l, k + 1)];
-                relax(to, line.offsets[k + 1] - line.offsets[k], first.or(Some((lu, true))), &mut heap);
+                relax(to, line.offsets[k + 1] - line.offsets[k], first.or(Some((lu, true, ku))), &mut heap);
             }
             if k > 0 {
                 let to = node_of[&(l, k - 1)];
-                relax(to, line.offsets[k] - line.offsets[k - 1], first.or(Some((lu, false))), &mut heap);
+                relax(to, line.offsets[k] - line.offsets[k - 1], first.or(Some((lu, false, ku))), &mut heap);
             }
             // A transfer only once riding (at the source it changes nothing).
             if first.is_some() {
@@ -408,8 +421,8 @@ fn rebuild_table(world: &mut World, open: Vec<bool>) {
                 continue;
             }
             let best = at_stop[t].iter().filter_map(|&v| dist[v].1.map(|f| (dist[v].0, f))).min_by_key(|&(d, _)| d);
-            if let Some((ticks, (line, forward))) = best {
-                table[src * n + t] = Hop { ticks, line, forward };
+            if let Some((ticks, (line, forward, pos))) = best {
+                table[src * n + t] = Hop { ticks, line, forward, pos };
             }
         }
     }
@@ -462,14 +475,34 @@ pub fn is_night(world: &World, t: Tick) -> bool {
 }
 
 /// T6: the first departure from `stop` on `line` in a direction at or after
-/// `t`. `None` when the line does not call there.
+/// `t`, at the line's first call there. `None` when the line does not call
+/// there. A ride departs from the call its route boards at
+/// ([`departure_at`]).
 pub fn next_departure(world: &World, line: u8, forward: bool, stop: u16, t: Tick) -> Option<Tick> {
     let l = world.transit.net.lines.get(usize::from(line))?;
     let k = l.stops.iter().position(|&s| s == stop)?;
-    let off = if forward { l.offsets[k] } else { l.total - l.offsets[k] };
+    departure_at(world, line, forward, u16::try_from(k).ok()?, t)
+}
+
+/// T6, review item 7: the first departure at or after `t` from the line's
+/// `pos`-th call (`NetLine::stops[pos]`) in a direction: a loop line calls
+/// at a stop more than once, each at its own offset. `None` past the line.
+pub fn departure_at(world: &World, line: u8, forward: bool, pos: u16, t: Tick) -> Option<Tick> {
+    let l = world.transit.net.lines.get(usize::from(line))?;
+    let k = usize::from(pos);
+    let off = if forward { *l.offsets.get(k)? } else { l.total - *l.offsets.get(k)? };
     let h = i64::from(world.config.transit.headway.max(1));
     let wait = (i64::from(off) - t as i64).rem_euclid(h);
     Some(t + wait as Tick)
+}
+
+/// The board stop's call on the ride's line: the route's (`Ride::board_pos`),
+/// else (a save from before it) the line's first call there.
+fn board_pos(world: &World, ride: &Ride) -> Option<u16> {
+    ride.board_pos.or_else(|| {
+        let l = world.transit.net.lines.get(usize::from(ride.line))?;
+        u16::try_from(l.stops.iter().position(|&s| s == ride.board)?).ok()
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -570,7 +603,7 @@ pub fn route(world: &World, who: EntityId, from: TilePos, to: TilePos, t: Tick) 
             if hop.ticks == UNREACHABLE {
                 continue;
             }
-            let Some(depart) = next_departure(world, hop.line, hop.forward, s, t + w1) else { continue };
+            let Some(depart) = departure_at(world, hop.line, hop.forward, hop.pos, t + w1) else { continue };
             if !in_service(world, depart) {
                 continue;
             }
@@ -700,11 +733,7 @@ pub const BANDS: [u64; 4] = [30, 60, 120, 180];
 pub fn commute_band(world: &World, id: EntityId) -> Option<usize> {
     let job = world.comp::<crate::components::Job>(id)?;
     let work = world.comp::<crate::components::Building>(job.employer?)?.door;
-    let home = world
-        .comp::<crate::components::Household>(id)
-        .and_then(|h| h.home)
-        .and_then(|h| world.comp::<crate::components::Building>(h))?
-        .door;
+    let home = crate::systems::contracts::home_door(world, id)?;
     let ticks = crate::systems::life::commute_cost(world, home, work);
     Some(BANDS.iter().position(|&b| ticks < b).unwrap_or(BANDS.len()))
 }
@@ -746,6 +775,25 @@ pub fn estimate_by(world: &World, who: EntityId, from: TilePos, to: TilePos, arr
     let ride = |t: Tick| choose(world, who, from, to, t).map_or(walk, |r| r.total.min(walk));
     let first = ride(arrive_by.saturating_sub(commute_ticks(world, from, to).min(walk)));
     ride(arrive_by.saturating_sub(first))
+}
+
+/// T16, the trip gate shared by the departure gate
+/// (`routine::must_leave_for_work`, `lead` = its margin) and the shift lead
+/// before an outing (`leisure::off_hours`, `lead` = `shift_lead_ticks`):
+/// is it time to set out for `door`, `until` ticks off, to arrive `lead`
+/// ahead of it? The trip from where `who` stands as it would be made to
+/// arrive by then (`estimate_by`: the deadline's trip, not the clock's, so
+/// the gate holds still while the body waits). The estimate is never above
+/// the walk, so the route is only computed once the walk's gate is open
+/// (the departure gate runs every tick for a body resting before its shift).
+pub fn trip_due(world: &World, who: EntityId, door: TilePos, until: Tick, lead: Tick) -> bool {
+    let from = crate::exec::walk_origin(world, who).unwrap_or(door);
+    let walk = crate::exec::timed_walk(world, who, from, door);
+    if until > walk + lead {
+        return false;
+    }
+    let arrive_by = world.tick + until - lead.min(until);
+    until <= estimate_by(world, who, from, door, arrive_by) + lead
 }
 
 /// T16: `estimate_from` where `who` stands (outside its building's door),
@@ -825,6 +873,7 @@ pub fn try_ride(world: &mut World, id: EntityId, target: &GotoTarget, lod: Lod) 
         dodge: route.dodge,
         plan_started,
         plan_step,
+        board_pos: Some(route.hop.pos),
     };
     world.rides.insert(id, ride);
     Some(state)
@@ -872,7 +921,7 @@ fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
     let depart = if now <= ride.depart {
         Some(ride.depart)
     } else {
-        next_departure(world, ride.line, ride.forward, ride.board, now)
+        board_pos(world, &ride).and_then(|k| departure_at(world, ride.line, ride.forward, k, now))
     };
     let Some(depart) = depart.filter(|&d| in_service(world, d) && stop_open(world, ride.board, now)) else {
         abandon(world, id, &ride, lod);
@@ -902,12 +951,7 @@ fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
             _ => c.rides_coarse += 1,
         }
     }
-    let hour = ((depart % TICKS_PER_DAY) / TICKS_PER_HOUR) as usize;
-    let slot = world.transit.load.entry(ride.board).or_insert([0; 24]);
-    slot[hour] = slot[hour].saturating_add(1);
-    let peak = u32::from(slot[hour]);
-    let c = &mut world.stats.current.transit;
-    c.peak_stop_load = c.peak_stop_load.max(peak);
+    count_boarding(world, ride.board, depart);
     ride.depart = depart;
     ride.arrive = depart + Tick::from(ride.hop_ticks);
     let state = ExecState::Ride { target: ride.target.clone(), depart, arrive_tick: ride.arrive };
@@ -915,6 +959,17 @@ fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
     if let Some(b) = world.comp_mut::<crate::components::Brain>(id) {
         b.exec = state;
     }
+}
+
+/// A boarding at `stop` in the hour of `at`, into today's load ledger
+/// (T17) and the day's peak.
+fn count_boarding(world: &mut World, stop: u16, at: Tick) {
+    let hour = ((at % TICKS_PER_DAY) / TICKS_PER_HOUR) as usize;
+    let slot = world.transit.load.entry(stop).or_insert([0; 24]);
+    slot[hour] = slot[hour].saturating_add(1);
+    let peak = u32::from(slot[hour]);
+    let c = &mut world.stats.current.transit;
+    c.peak_stop_load = c.peak_stop_load.max(peak);
 }
 
 /// Off at the alight stop: stand on it and walk on to the `GoTo`'s target.
@@ -953,11 +1008,12 @@ pub fn end_ride(world: &mut World, id: EntityId) {
 /// setting out a walk before the shift. A ride pays two fares (out and
 /// back; a leg it can't pay is jumped and counted, no crime off screen) and
 /// counts two boardings: the board stop at the departure's hour, the alight
-/// stop at the shift's end. No movement, no RNG. Errands are not modelled
+/// stop at the shift's end; none on a no-show at `attend` (the role's
+/// `p_attend`, review item 2). No movement, no RNG. Errands are not modelled
 /// off screen. Plan D8's per-agent route cache is not built: the choice is
 /// a few table lookups once a workday, and a cache left out of the save
 /// would make a loaded world choose differently.
-pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Job) {
+pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Job, attend: Option<f32>) {
     if !enabled(world) || world.transit.net.stops.is_empty() {
         return;
     }
@@ -966,17 +1022,15 @@ pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Jo
     let first_hour =
         |&&(s, e): &&(u16, u16)| tod >= s && tod < e && tod - s < TICKS_PER_HOUR as u16 && !(s == 0 && wraps);
     let Some(&(start, _)) = job.shifts.iter().find(first_hour) else { return };
+    // Review item 2: a no-show on the role's attendance `attend` (no hour
+    // of this shift worked, `lod::shift_attended`) makes no commute.
+    if attend.is_some_and(|p| !crate::systems::lod::shift_attended(world, id, job, p)) {
+        return;
+    }
     let Some(work) = job.employer.and_then(|e| world.comp::<crate::components::Building>(e)).map(|b| b.door) else {
         return;
     };
-    let Some(home) = world
-        .comp::<crate::components::Household>(id)
-        .and_then(|h| h.home)
-        .and_then(|h| world.comp::<crate::components::Building>(h))
-        .map(|b| b.door)
-    else {
-        return;
-    };
+    let Some(home) = crate::systems::contracts::home_door(world, id) else { return };
     let walk = crate::exec::timed_walk(world, id, home, work);
     let shift_start = world.tick - Tick::from(tod - start);
     world.stats.current.transit.stat_commutes += 1;
@@ -1028,12 +1082,7 @@ pub fn stat_commute(world: &mut World, id: EntityId, job: &crate::components::Jo
     }
     let back = job.shift_end(world.tick).unwrap_or(world.tick);
     for (stop, at) in [(r.board, r.depart), (r.alight, back)] {
-        let hour = ((at % TICKS_PER_DAY) / TICKS_PER_HOUR) as usize;
-        let slot = world.transit.load.entry(stop).or_insert([0; 24]);
-        slot[hour] = slot[hour].saturating_add(1);
-        let peak = u32::from(slot[hour]);
-        let c = &mut world.stats.current.transit;
-        c.peak_stop_load = c.peak_stop_load.max(peak);
+        count_boarding(world, stop, at);
     }
 }
 
@@ -1053,6 +1102,10 @@ pub fn stat_errand(world: &mut World, id: EntityId, row: usize) -> bool {
     if crate::systems::econ::hash_unit(world.seed(), 0xfa2e_0003, u64::from(id.index), hour) >= p {
         return false;
     }
+    // Review item 3: gated as a body's boarding is (`can_board_here`).
+    if !can_board_here(world, id) {
+        return false;
+    }
     let Some(dodge) = pays_or_dodges(world, id) else { return false };
     world.stats.current.transit.stat_errand_rides += 1;
     if !dodge {
@@ -1069,6 +1122,28 @@ pub fn stat_errand(world: &mut World, id: EntityId, row: usize) -> bool {
     true
 }
 
+/// Review item 3: could `id` board a train now from where it stands, as a
+/// body's boarding is gated (`board`, `route`): the El in service now, and
+/// among its nearest open stops (`candidates`: no god closure, no riot, no
+/// night curfew there) one a running line calls at (a cut line's stops see
+/// no train). `stat_errand`'s gate and `calibrate`'s denominator for
+/// `p_errand_ride` (the hours an errand ride was possible).
+pub fn can_board_here(world: &World, id: EntityId) -> bool {
+    let now = world.tick;
+    if !enabled(world) || !in_service(world, now) {
+        return false;
+    }
+    let Some(tile) = world.comp::<Position>(id).map(|p| p.tile) else { return false };
+    let net = &world.transit.net;
+    let served = |s: u16| {
+        net.lines
+            .iter()
+            .enumerate()
+            .any(|(l, line)| net.open.get(l).copied().unwrap_or(false) && line.stops.contains(&s))
+    };
+    candidates(world, tile, now).into_iter().any(served)
+}
+
 /// The app's lerp: where a rider aboard is on the track now, in tiles (a
 /// point between two stops of its line, by the ride offsets); `None` on the
 /// platform, off a ride, or with transit off.
@@ -1083,7 +1158,10 @@ pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
     }
     let net = &world.transit.net;
     let line = net.lines.get(usize::from(ride.line))?;
-    let k0 = line.stops.iter().position(|&s| s == ride.board)?;
+    let k0 = usize::from(board_pos(world, ride)?);
+    if line.stops.get(k0) != Some(&ride.board) {
+        return None;
+    }
     // The first leg's line from the board stop, in the ride's direction: the
     // stops it passes and their ticks from the board stop (a transfer's
     // second line is drawn as the end of the first: the lerp is cosmetic).
@@ -1111,6 +1189,18 @@ pub fn aboard_at(world: &World, id: EntityId) -> Option<(f32, f32)> {
 // ---------------------------------------------------------------------------
 // The day
 // ---------------------------------------------------------------------------
+
+/// Per tick, first thing (review item 8): a `CutLine` runs out at its
+/// tick, any time of day, and the table must not wait for the next reader
+/// that holds `&mut World` (`try_ride`): `commute_ticks` and the
+/// `route` readers take `&World` and read the table as built. While any
+/// line is cut, the table is checked against the open lines and rebuilt on
+/// a change. Nothing to do (one map test) with no line cut.
+pub fn reopen(world: &mut World) {
+    if !world.transit.line_closed.is_empty() {
+        ensure_net(world);
+    }
+}
 
 /// Per tick: at midnight, the closures that ran out, the power, the day's
 /// load ledger. A no-op with transit off.

@@ -622,9 +622,16 @@ fn probe_buyer_nobody_heard_of_is_never_charged() {
 /// so within the day two city guards held it from him and the next
 /// midnight's `accessory_check` charged him. A person keeps a bought
 /// killing to himself, above all from the law.
+///
+/// The law's own road is shut here: an arrested gun interrogated
+/// (`law::interrogate`, M16a C28) names his buyer to the guard, which is
+/// not the buyer telling. After review item 1 (a dodger caught at the El's
+/// gate off screen is on screen for the rest of the hour) this seed's gun
+/// is arrested for Fare Evasion on day 5 and names the buyer.
 #[test]
 fn probe_buyer_keeps_his_own_hit_quiet() {
     let (mut w, buyer, t, _) = quiet_buyer();
+    w.config.law.interrogate_days = 0;
     let end = w.tick + 7 * TICKS_PER_DAY;
     run_to(&mut w, buyer, end, |_| {});
     let guards: Vec<u32> =

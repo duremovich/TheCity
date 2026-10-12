@@ -488,14 +488,24 @@ fn reserve_for(world: &mut World, id: EntityId, plan: &Plan) {
     for step in &plan.steps {
         let kind = match step.action {
             ActionKind::BuyFood => market.map(|b| {
-                use crate::systems::diet::{synth_units, Quality};
+                use crate::systems::diet::{synth_hold, Quality};
                 let meals = crate::systems::economy::buy_quantity(world, id, market).max(1);
                 // Hunger as sickness § 1: a synth buyer's meals are cut from
                 // shelf units `synth_stretch` at a time (the open unit's
                 // first), and the shelf is what the reservation holds.
+                // Review item 4: the open unit's meals other buyers hold
+                // are not counted again; those this buyer takes are held
+                // (`OpenMeals`) beside the shelf units.
                 let units = match crate::systems::economy::quality_at(world, id, Some(b)) {
                     Quality::Real => meals,
-                    Quality::Synth => synth_units(world, b, meals).0,
+                    Quality::Synth => {
+                        let claimed = world.open_meals_reserved(b, id);
+                        let (from_open, units) = synth_hold(world, b, meals, claimed);
+                        if from_open > 0 {
+                            world.reserve(id, ReservationKind::OpenMeals { building: b, meals: from_open }, expires);
+                        }
+                        units
+                    }
                 };
                 ReservationKind::FoodUnits { building: b, units }
             }),

@@ -28,6 +28,13 @@ pub enum ReservationKind {
     Seat {
         building: EntityId,
     },
+    /// Review item 4: synth meals a buyer takes from the unit a Market has
+    /// open (`diet::open_meals`), held beside its `FoodUnits` (the shelf
+    /// units past them), so two buyers never both count the same open meals.
+    OpenMeals {
+        building: EntityId,
+        meals: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +82,20 @@ impl World {
                 rs.iter()
                     .filter(|r| r.expires > tick && matches!(r.kind, ReservationKind::Bed { home } if home == b))
                     .count()
+            })
+            .sum()
+    }
+
+    /// Review item 4: open-unit synth meals at `b` held by holders other
+    /// than `exclude` (`OpenMeals`).
+    pub fn open_meals_reserved(&self, b: EntityId, exclude: EntityId) -> u32 {
+        self.reservations
+            .iter()
+            .filter(|&(&h, _)| h != exclude)
+            .flat_map(|(_, rs)| rs.iter())
+            .filter_map(|r| match r.kind {
+                ReservationKind::OpenMeals { building, meals } if building == b => Some(meals),
+                _ => None,
             })
             .sum()
     }

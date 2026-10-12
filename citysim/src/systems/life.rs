@@ -1083,8 +1083,12 @@ pub fn exec_day_pending(world: &World, id: EntityId) -> Option<EntityId> {
         return Some(hq);
     }
     let door = world.comp::<Building>(hq).map_or_else(Default::default, |b| b.door);
-    let walk = crate::systems::fixes::walk_estimate(world, id, door);
-    (tod + walk + 30 >= u64::from(s)).then_some(hq)
+    // Review item 6: the trip to arrive 30 ticks before the office opens,
+    // read against that deadline (`transit::trip_due`, the departure
+    // gate's), not at "now": a now-based estimate moves with the timetable
+    // and the 05:00 start of service, and turned the exec back.
+    let until = u64::from(s).saturating_sub(tod);
+    crate::systems::transit::trip_due(world, id, door, until, 30).then_some(hq)
 }
 
 /// Move an exec (with a spouse and children sharing the Home) into a free

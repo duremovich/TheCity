@@ -1691,8 +1691,12 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
                 && world.comp::<citysim::Wallet>(id).map_or(0, |w| w.coins)
                     < citysim::systems::life::meal_price(world, id);
             let dive_ok = citysim::systems::bins::dive_target(world, id).is_some();
-            let ride_ok =
-                adult && world.config.transit.enabled && citysim::systems::transit::pays_or_dodges(world, id).is_some();
+            // Review item 3: the hours a body could board (`can_board_here`,
+            // the off-screen errand ride's gate).
+            let ride_ok = adult
+                && world.config.transit.enabled
+                && citysim::systems::transit::pays_or_dodges(world, id).is_some()
+                && citysim::systems::transit::can_board_here(world, id);
             hour.insert(
                 id,
                 HourTally {
@@ -2219,7 +2223,8 @@ fn calibrate(args: CalibrateArgs) -> Result<(), String> {
             // Reporter/b2 0.0 off 20,520 minutes, about one reporter.
             .filter(|(k, &(n, _))| n >= if k.contains('/') { 54_000 } else { 600 })
             .map(|(r, &(n, w))| (r.clone(), (w as f32 / n as f32).min(1.0)))
-            .collect::<BTreeMap<String, f32>>(),
+            .collect::<BTreeMap<String, f32>>()
+            .into(),
     );
     let table = StatTable {
         rows,

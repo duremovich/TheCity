@@ -802,7 +802,7 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     // L2 shadow fixes item 15: the muster waits for the farthest member's
     // walk (a Purist walked 291 min to a Muster and missed it by 14).
     if let Some(m) = muster {
-        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang)));
+        muster = Some(m.max(now + crate::systems::fixes::muster_walk(world, gang, m)));
     }
     // M12 D39: a Raid chosen for the corp prize names the corp building.
     let corp_target = inputs.corp_prize.map(|(b, _)| b).filter(|_| order == Order::Raid && corp_raid_best);

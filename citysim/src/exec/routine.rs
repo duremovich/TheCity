@@ -146,19 +146,9 @@ pub fn must_leave_for_work(world: &World, id: EntityId) -> bool {
     if crate::systems::fixes::commuting(world, id, job) {
         return true;
     }
-    // Transit T16: a rider leaves later: the trip as it would be made to
-    // arrive by the margin (`transit::estimate_by`: the deadline's trip, not
-    // the clock's, so the gate holds still while the body waits). The
-    // estimate is never above the walk, so the route is only computed once
-    // the walk's gate is open (this runs every tick for a body resting
-    // before its shift).
-    let from = crate::exec::walk_origin(world, id).unwrap_or(door);
-    let walk = crate::exec::timed_walk(world, id, from, door);
-    if until > walk + DEPARTURE_MARGIN {
-        return false;
-    }
-    let arrive_by = world.tick + until - DEPARTURE_MARGIN.min(until);
-    until <= crate::systems::transit::estimate_by(world, id, from, door, arrive_by) + DEPARTURE_MARGIN
+    // Transit T16: a rider leaves later (`transit::trip_due`: the trip as
+    // it would be made to arrive by the margin).
+    crate::systems::transit::trip_due(world, id, door, until, DEPARTURE_MARGIN)
 }
 
 /// Work before the shift starts: head to the workplace and rest inside until

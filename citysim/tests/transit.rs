@@ -211,6 +211,76 @@ fn test_closures_cut_lines_and_stops() {
     assert!(!transit::stop_open(&w, first.board, 2 * TICKS_PER_DAY + 23 * 60));
 }
 
+/// Review item 7 (`/code-review high 7324e60..dfaca2e`): a loop line calls
+/// at its terminus twice (first and last). A ride the table starts from the
+/// last call departs at that call's offset, not the first's: the route's
+/// departure and arrival are the timetable's, and a body boards the train
+/// the route planned.
+#[test]
+fn test_loop_line_departs_from_the_call_it_boards() {
+    let mut cfg = Config::load();
+    cfg.transit.enabled = true;
+    let mut lines = cfg.transit.lines.clone();
+    lines.truncate(1);
+    lines[0].name = "Loop".into();
+    lines[0].waypoints = vec![[7, 167], [231, 167], [231, 127], [7, 127], [7, 167]];
+    cfg.transit.lines = lines;
+    // A headway that does not divide the loop's length, so the two calls at
+    // the terminus depart at different minutes.
+    let mut w = World::new(42, cfg);
+    let total = w.transit.net.lines[0].total;
+    let h = (7..30).find(|h| !total.is_multiple_of(*h)).expect("a headway");
+    w.config.transit.headway = h;
+    let line = w.transit.net.lines[0].clone();
+    let n = line.stops.len();
+    assert!(n >= 4, "{n} stops");
+    assert_eq!(line.stops[0], line.stops[n - 1], "a loop: the terminus is called twice");
+    let (s0, near_end) = (line.stops[0], line.stops[n - 2]);
+    let hop = w.transit.net.hop(s0, near_end);
+    assert!(!hop.forward, "the short way is back from the last call");
+    assert_eq!(hop.ticks, line.offsets[n - 1] - line.offsets[n - 2], "one hop back");
+    // The last call's backward departures leave at `total - offsets[n-1]` = 0.
+    let t = 10 * TICKS_PER_DAY + 9 * 60 + 1;
+    let from = w.transit.net.stops[usize::from(s0)];
+    let to = w.transit.net.stops[usize::from(near_end)];
+    let who = w.citizens().into_iter().find(|&a| demography::is_adult(&w, a)).expect("an adult");
+    let r = transit::route(&w, who, from, to, t).expect("a route");
+    assert_eq!((r.board, r.alight), (s0, near_end));
+    let off = u64::from(line.total - line.offsets[n - 1]);
+    assert_eq!(r.depart % u64::from(h), off % u64::from(h), "the last call's departure");
+    let first_call = u64::from(line.total - line.offsets[0]);
+    assert_ne!(first_call % u64::from(h), off % u64::from(h), "the calls differ");
+}
+
+/// Review item 8 (`/code-review high 7324e60..dfaca2e`): a cut line runs
+/// out at its tick, any time of day, and the ride table is rebuilt that
+/// tick, not at the next `try_ride` (`commute_ticks` reads `&World`). Every
+/// agent is Statistical here, so no body's ride rebuilds it by chance.
+#[test]
+fn test_cut_line_expiry_rebuilds_the_table_at_once() {
+    let mut cfg = Config::load();
+    cfg.transit.enabled = true;
+    cfg.lod.force = Some(Lod::Statistical);
+    let mut w = World::new(42, cfg);
+    let (a, b) = (citysim::components::TilePos::new(20, 128), citysim::components::TilePos::new(228, 30));
+    let open_ticks = transit::commute_ticks(&w, a, b);
+    w.tick = TICKS_PER_DAY + 8 * 60 + 13;
+    for l in 0..3 {
+        transit::cut_line(&mut w, l, 1).expect("a line");
+    }
+    let cut_ticks = transit::commute_ticks(&w, a, b);
+    assert!(cut_ticks > open_ticks, "the cut takes the ride away ({open_ticks} -> {cut_ticks})");
+    // The cut's last tick, then the tick it runs out (not an hour's start,
+    // not midnight).
+    w.tick = 2 * TICKS_PER_DAY + 8 * 60 + 13;
+    for id in w.citizens() {
+        lod::set_lod(&mut w, id, Lod::Statistical);
+    }
+    w.tick();
+    assert_eq!(w.transit.net.open, vec![true; 3], "the table holds the reopened lines");
+    assert_eq!(transit::commute_ticks(&w, a, b), open_ticks, "the ride is back");
+}
+
 // ---------------------------------------------------------------------------
 // Rides (T12, T13)
 // ---------------------------------------------------------------------------
@@ -450,7 +520,7 @@ fn test_statistical_rider_pays_two_fares_at_the_shift_start() {
     w.tick = TICKS_PER_DAY + u64::from(start) + 7;
     let (purse0, id0) = (treasury(&w), citysim::systems::econ::identity(&w));
     let c0 = w.stats.current.transit.clone();
-    transit::stat_commute(&mut w, who, &job);
+    transit::stat_commute(&mut w, who, &job, None);
     let c = &w.stats.current.transit;
     assert_eq!(c.rides_stat, c0.rides_stat + 2, "out and back");
     assert_eq!(c.fares, c0.fares + 2);
@@ -460,12 +530,12 @@ fn test_statistical_rider_pays_two_fares_at_the_shift_start() {
     assert_eq!(w.transit.load.values().map(|h| h.iter().map(|&n| u32::from(n)).sum::<u32>()).sum::<u32>(), 2);
     // The next hour of the same shift: nothing.
     w.tick += 60;
-    transit::stat_commute(&mut w, who, &job);
+    transit::stat_commute(&mut w, who, &job, None);
     assert_eq!(w.stats.current.transit.rides_stat, c0.rides_stat + 2);
     // Broke and lawful off screen: the walk, no ride.
     w.tick = 2 * TICKS_PER_DAY + u64::from(start) + 7;
     w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
-    transit::stat_commute(&mut w, who, &job);
+    transit::stat_commute(&mut w, who, &job, None);
     assert_eq!(w.stats.current.transit.rides_stat, c0.rides_stat + 2);
 }
 
@@ -485,7 +555,7 @@ fn test_statistical_dodger_is_caught_at_the_learned_rate() {
         w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
         w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.05;
         w.tick = TICKS_PER_DAY + u64::from(job.shifts[0].0) + 7;
-        transit::stat_commute(&mut w, who, &job);
+        transit::stat_commute(&mut w, who, &job, None);
         assert_eq!(w.stats.current.transit.rides_stat, 2, "p {p}: rode through the gate");
         let lod_now = w.comp::<Brain>(who).expect("brain").lod;
         assert_eq!(lod_now != Lod::Statistical, caught, "p {p}: on screen for the arrest");
@@ -516,7 +586,7 @@ fn test_statistical_commute_rides_at_the_learned_share() {
         w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.6;
         w.tick = TICKS_PER_DAY + u64::from(job.shifts[0].0) + 7;
         let c0 = w.stats.current.transit.clone();
-        transit::stat_commute(&mut w, who, &job);
+        transit::stat_commute(&mut w, who, &job, None);
         let c = &w.stats.current.transit;
         assert_eq!(c.stat_commutes, c0.stat_commutes + 1, "judged");
         let n = u32::from(rode);
@@ -569,6 +639,154 @@ fn test_statistical_errand_ride_pays_or_jumps_the_gate() {
             assert!(c.fare_dodges > c0.fare_dodges, "the gate jumped");
             assert_ne!(lod_now, Lod::Statistical, "reported, on screen for the arrest");
         }
+    }
+}
+
+/// The tick at or after `t` when `who`'s Statistical hour runs (its slot);
+/// the world's clock set there, and every other agent of that slot given a
+/// body, so `run_statistical` runs `who` alone.
+fn alone_at_slot(w: &mut World, who: EntityId, t: u64) {
+    w.tick = t + (u64::from(who.index) + 60 - t % 60) % 60;
+    for id in w.stat_slots.at(w.tick).to_vec() {
+        if id != who {
+            lod::set_lod(w, id, Lod::Coarse);
+        }
+    }
+}
+
+/// Review item 1 (`/code-review high 7324e60..dfaca2e`): a dodger caught at
+/// the commute's gate comes on screen for the arrest, and the rest of the
+/// Statistical hour is not run on it (no meal from the hourly draw, no
+/// grocery run, no rolls), as after the errand ride's catch.
+#[test]
+fn test_caught_commuter_leaves_the_statistical_hour() {
+    use citysim::{Inventory, Job, Needs};
+    let mut w = city_on();
+    let (who, _, _) = rider_worker(&w, 40);
+    lod::set_lod(&mut w, who, Lod::Statistical);
+    {
+        let t = w.stat_table.as_mut().expect("a table");
+        t.p_dodge_caught = Some(1.0);
+        t.p_commute_ride = None;
+        t.p_attend = None;
+        // Every hour with a meal at hand eats (the draw this hour would).
+        t.p_meal = Some(vec![1.0; citysim::world::MEAL_CELLS_SPLIT]);
+    }
+    let job = w.comp::<Job>(who).cloned().expect("a job");
+    w.comp_mut::<Wallet>(who).expect("wallet").coins = 0;
+    w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.05;
+    w.comp_mut::<Inventory>(who).expect("inv").food = 2;
+    w.comp_mut::<Needs>(who).expect("needs").hunger = 0.3;
+    alone_at_slot(&mut w, who, TICKS_PER_DAY + u64::from(job.shifts[0].0));
+    lod::run_statistical(&mut w);
+    assert_eq!(w.stats.current.transit.rides_stat, 2, "rode through the gate");
+    assert_ne!(w.comp::<Brain>(who).expect("brain").lod, Lod::Statistical, "on screen for the arrest");
+    assert_eq!(w.comp::<Inventory>(who).expect("inv").food, 2, "no off-screen meal after the catch");
+}
+
+/// Review item 2 (`/code-review high 7324e60..dfaca2e`): attendance is
+/// rolled before the commute: a no-show (no hour of the shift worked) does
+/// not ride or pay; at full attendance the same worker rides.
+#[test]
+fn test_statistical_no_show_does_not_ride() {
+    use citysim::Job;
+    for (attend, rides) in [(0.0f32, 0u32), (1.0, 2)] {
+        let mut w = city_on();
+        let (who, _, _) = rider_worker(&w, 40);
+        lod::set_lod(&mut w, who, Lod::Statistical);
+        let job = w.comp::<Job>(who).cloned().expect("a job");
+        {
+            let t = w.stat_table.as_mut().expect("a table");
+            t.p_commute_ride = None;
+            let cells: std::collections::BTreeMap<String, f32> = [(format!("{:?}", job.role), attend)].into();
+            t.p_attend = Some(cells.into());
+        }
+        w.comp_mut::<Wallet>(who).expect("wallet").coins = 50;
+        w.comp_mut::<Personality>(who).expect("p").lawfulness = 0.6;
+        alone_at_slot(&mut w, who, TICKS_PER_DAY + u64::from(job.shifts[0].0));
+        let fares = w.stats.current.transit.fares;
+        lod::run_statistical(&mut w);
+        assert_eq!(w.stats.current.transit.rides_stat, rides, "attendance {attend}");
+        assert_eq!(w.stats.current.transit.fares - fares, i64::from(rides), "attendance {attend}: fares");
+    }
+}
+
+/// Review item 6 (`/code-review high 7324e60..dfaca2e`): an exec's office
+/// gate reads the trip to arrive by the office's deadline, not the trip
+/// setting out now (the now-based estimate flips between the ride and the
+/// walk as the next departure's wait shrinks, so the gate opened and shut).
+/// Over the morning, every exec in every Home: once open, it stays open.
+#[test]
+fn test_exec_office_gate_holds_once_open() {
+    use citysim::components::Corp;
+    let mut w = city_on();
+    let day = (1..8u64).find(|&d| citysim::exec::routine::is_workday(d as i64)).expect("a workday");
+    let (s, _) = w.config.life.exec_shift;
+    let execs: Vec<EntityId> = w
+        .corps()
+        .into_iter()
+        .filter_map(|c| w.comp::<Corp>(c).and_then(|cc| cc.exec))
+        .filter(|&e| !w.has::<citysim::Job>(e) && w.has::<Brain>(e))
+        .collect();
+    assert!(!execs.is_empty(), "an exec");
+    let homes: Vec<EntityId> = w.buildings_of_kind(BuildingKind::Home).iter().copied().step_by(7).take(40).collect();
+    let mut opened = 0;
+    for &e in &execs {
+        if let Some(b) = w.comp_mut::<Brain>(e) {
+            b.clear_plan();
+            b.office_day = None;
+        }
+        for &h in &homes {
+            w.leave_building(e);
+            w.enter_building(e, h);
+            let mut was_open = false;
+            for t in day * TICKS_PER_DAY + u64::from(s) - 240..day * TICKS_PER_DAY + u64::from(s) {
+                w.tick = t;
+                let open = citysim::systems::life::exec_day_pending(&w, e).is_some();
+                assert!(open || !was_open, "exec {e:?} from Home {h:?}: the gate shut again at {t}");
+                was_open |= open;
+            }
+            opened += usize::from(was_open);
+        }
+    }
+    assert!(opened > 0, "the gate opened");
+}
+
+/// Review item 3 (`/code-review high 7324e60..dfaca2e`): an off-screen
+/// errand ride is gated as a body's boarding: no ride out of service
+/// (01:00-05:00), with every line cut, or with every stop closed; the
+/// control rides.
+#[test]
+fn test_statistical_errand_ride_is_gated_like_a_boarding() {
+    for case in ["control", "out of service", "lines cut", "stops closed"] {
+        let mut w = city_on();
+        let hour = if case == "out of service" { 2 } else { 10 };
+        w.run_ticks(TICKS_PER_DAY + hour * 60);
+        {
+            let t = w.stat_table.as_mut().expect("a table");
+            t.p_errand_ride = Some([1.0; citysim::STAT_ROWS]);
+            t.p_dodge_caught = Some(0.0);
+        }
+        match case {
+            "lines cut" => {
+                for l in 0..3 {
+                    transit::cut_line(&mut w, l, 2).expect("a line");
+                }
+            }
+            "stops closed" => {
+                for s in 0..w.transit.net.stops.len() as u16 {
+                    transit::close_stop(&mut w, s, 2).expect("a stop");
+                }
+            }
+            _ => {}
+        }
+        let c0 = w.stats.current.transit.stat_errand_rides;
+        for _ in 0..60 {
+            lod::run_statistical(&mut w);
+            w.tick += 1;
+        }
+        let rides = w.stats.current.transit.stat_errand_rides - c0;
+        assert_eq!(rides > 0, case == "control", "{case}: {rides} errand rides");
     }
 }
 
@@ -699,7 +917,7 @@ fn test_attendance_reads_the_commute_band() {
     for b in 0..=transit::BANDS.len() {
         t.insert(format!("{role:?}/b{b}"), 0.9 - 0.1 * b as f32);
     }
-    w.stat_table.as_mut().expect("a table").p_attend = Some(t.clone());
+    w.stat_table.as_mut().expect("a table").p_attend = Some(t.clone().into());
     let want = 0.9 - 0.1 * band as f32;
     assert_eq!(lod::stat_attend(&w, who, role), Some(want), "the band's row");
     // Every line cut: the commute is the walk, a longer band, a lower row.
@@ -711,7 +929,7 @@ fn test_attendance_reads_the_commute_band() {
     assert!(lod::stat_attend(&w, who, role) < Some(want));
     // A table without banded rows: the role's row (P5f's rule).
     t.retain(|k, _| !k.contains('/'));
-    w.stat_table.as_mut().expect("a table").p_attend = Some(t);
+    w.stat_table.as_mut().expect("a table").p_attend = Some(t.into());
     assert_eq!(lod::stat_attend(&w, who, role), Some(0.4));
 }
 

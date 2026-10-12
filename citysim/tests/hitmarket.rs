@@ -1772,3 +1772,28 @@ fn test_pruned_debt_edge_is_not_a_repayment() {
     assert!(w.hm_stiffs.contains_key(&(g, buyer)), "the clock stands");
     assert!(grudges::grudge_on(&w, g, buyer).is_some(), "not forgiven");
 }
+
+/// Review item 5 (`/code-review high 7324e60..dfaca2e`): the grace's end
+/// restores the betrayal only. A killing grudge that stood at the stiffing
+/// took the stiff in then and was never held back, so the grace's end does
+/// not raise it again (it was raised to the stiffing's weight, whatever
+/// it had decayed to).
+#[test]
+fn test_grace_end_leaves_a_killing_grudge_alone() {
+    let mut w = world();
+    let (buyer, g) = stiffed_gun(&mut w, true);
+    let stiff_w = w.hm_stiffs[&(g, buyer)].1;
+    // The killing grudge decayed through the grace below the stiff's weight.
+    let decayed = stiff_w * 0.5;
+    if let Some(x) = w.comp_mut::<Grudges>(g).and_then(|gr| gr.list.iter_mut().find(|x| x.target == buyer)) {
+        assert!(matches!(x.cause, GrudgeCause::KilledKin(_)), "the killing grudge took the stiff");
+        x.weight = decayed;
+    }
+    let days = u64::from(w.config.hitmarket.debt_days);
+    day(&mut w, days);
+    hitmarket::stiff_sweep(&mut w);
+    assert!(!w.hm_stiffs.contains_key(&(g, buyer)), "the clock ran out");
+    let x = grudges::grudge_on(&w, g, buyer).expect("grudge");
+    assert!(matches!(x.cause, GrudgeCause::KilledKin(_)));
+    assert!((x.weight - decayed).abs() < 1e-6, "left as it stood: {decayed} -> {}", x.weight);
+}

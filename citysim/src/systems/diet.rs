@@ -95,6 +95,15 @@ pub fn synth_units(world: &World, market: EntityId, meals: u32) -> (u32, u32) {
     (units, (frac + meals) % s)
 }
 
+/// Review item 4: what a synth buyer's `meals` hold at `market` at plan
+/// time when `claimed` of the open unit's meals are already held by other
+/// buyers' reservations: `(open meals it takes, shelf units past them)`.
+pub fn synth_hold(world: &World, market: EntityId, meals: u32, claimed: u32) -> (u32, u32) {
+    let open = open_meals(world, market).saturating_sub(claimed);
+    let from_open = meals.min(open);
+    (from_open, (meals - from_open).div_ceil(stretch(world)))
+}
+
 /// The local Market's per-meal price for `id` (3 with no Market), as
 /// `life::meal_price` reads it with the diet on.
 pub fn meal_price(world: &World, id: EntityId) -> i64 {

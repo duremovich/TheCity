@@ -216,20 +216,20 @@ pub fn fixer_set(world: &World) -> std::collections::BTreeSet<EntityId> {
     set
 }
 
+/// `id`'s Home door; `None` homeless.
+pub fn home_door(world: &World, id: EntityId) -> Option<TilePos> {
+    world.comp::<Household>(id).and_then(|h| h.home).and_then(|h| world.comp::<Building>(h)).map(|b| b.door)
+}
+
 /// A home door, else where the agent stands.
-fn home_door(world: &World, id: EntityId) -> Option<TilePos> {
-    world
-        .comp::<Household>(id)
-        .and_then(|h| h.home)
-        .and_then(|h| world.comp::<Building>(h))
-        .map(|b| b.door)
-        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
+fn home_or_here(world: &World, id: EntityId) -> Option<TilePos> {
+    home_door(world, id).or_else(|| world.comp::<Position>(id).map(|p| p.tile))
 }
 
 /// C20: the open Fixer whose door is nearest `id`'s Home door within
 /// `hire_reach_tiles` (Manhattan; ties the lower id).
 pub fn nearest_fixer(world: &World, id: EntityId) -> Option<EntityId> {
-    let from = home_door(world, id)?;
+    let from = home_or_here(world, id)?;
     let reach = world.config.fixers.hire_reach_tiles;
     world
         .buildings_of_kind(BuildingKind::Fixer)
@@ -359,7 +359,7 @@ fn seed_owner(world: &World, door: TilePos) -> Option<EntityId> {
         .filter(|&a| !crate::systems::founding::is_exec(world, a))
         .filter_map(|a| {
             let l = world.comp::<Personality>(a)?.lawfulness;
-            let dist = home_door(world, a).map_or(u32::MAX, |t| t.manhattan(door));
+            let dist = home_or_here(world, a).map_or(u32::MAX, |t| t.manhattan(door));
             Some((ordered_float::OrderedFloat(l), dist, a))
         })
         .min()
@@ -982,7 +982,7 @@ pub fn reach_offer(world: &World, kind: ContractKind, target: &Target, buyer: En
     if market_price(world, kind, target, Some(buyer), Some(buyer), None).is_some() {
         return None;
     }
-    let f = nearest_fixer_to(world, home_door(world, buyer)?)?;
+    let f = nearest_fixer_to(world, home_or_here(world, buyer)?)?;
     let p = market_price(world, kind, target, Some(buyer), Some(buyer), Some(f))?;
     Some((f, (p as f32 * (1.0 + world.config.hitmarket.reach_premium.max(0.0))).ceil() as i64))
 }

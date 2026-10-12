@@ -754,13 +754,23 @@ pub fn stiff_sweep(world: &mut World) {
             world.hm_stiffs.remove(&(taker, buyer));
             // Fix round: back up to the stiffing's weight, not merged over
             // what stands (`grudges::add`'s `1 − (1 − a)(1 − b)` over-weighted
-            // it); sworn afresh only when the grudge decayed away.
-            let held = world
-                .comp_mut::<crate::word::Grudges>(taker)
-                .and_then(|g| g.list.iter_mut().find(|x| x.target == buyer && x.settled.is_none()))
-                .map(|x| x.weight = x.weight.max(w))
-                .is_some();
-            if !held {
+            // it); sworn afresh only when the grudge decayed away. Review
+            // item 5: only the betrayal is restored, as the paid-off branch
+            // settles only it. A grudge of another cause that stood at the
+            // stiffing took the stiff in then (`grudges::add` keeps one per
+            // target) and was never held back by the grace (only `Betrayed`
+            // waits), so it is left as it stands; one sworn since (the
+            // betrayal decayed away) takes the stiff afresh.
+            let restored = world.comp_mut::<crate::word::Grudges>(taker).and_then(|g| {
+                let x = g.list.iter_mut().find(|x| x.target == buyer && x.settled.is_none())?;
+                if x.cause == GrudgeCause::Betrayed {
+                    x.weight = x.weight.max(w);
+                    Some(())
+                } else {
+                    (x.since <= since).then_some(())
+                }
+            });
+            if restored.is_none() {
                 crate::systems::grudges::add(world, taker, buyer, GrudgeCause::Betrayed, w, 0);
             }
         }

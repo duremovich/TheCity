@@ -215,7 +215,7 @@ pub struct StatTable {
     /// it, and the wage paid pro rata on the hours credited. A role not
     /// listed, or a table without it: every hour (the M10 rule).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub p_attend: Option<std::collections::BTreeMap<String, f32>>,
+    pub p_attend: Option<AttendTable>,
     /// P5f: Full's wage share of wages owed over its attendance share (a
     /// cut shift past half is paid pro rata, a whole one in full): the
     /// Statistical pro rata wage x this, capped at the whole wage.
@@ -253,6 +253,92 @@ pub struct StatTable {
 
 fn one_f32() -> f32 {
     1.0
+}
+
+/// `StatTable::p_attend`'s commute bands (`transit::BANDS`' five).
+const ATTEND_BANDS: usize = 5;
+
+/// P5f and transit T14: `StatTable::p_attend`, the learned attendance by
+/// role (`"{role:?}"`) and by role and commute band (`"{role:?}/b{n}"`).
+/// The table file keeps the readable string map; the cells are parsed once
+/// into role and band so `lod::stat_attend` looks a worker's hour up with
+/// no formatted key (it ran per Statistical worker-hour on shift).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(from = "BTreeMap<String, f32>", into = "BTreeMap<String, f32>")]
+pub struct AttendTable {
+    /// The cells as written (the file's order).
+    cells: BTreeMap<String, f32>,
+    /// `Role::ALL`'s roles: the role's row, then bands 0-4.
+    base: Vec<[Option<f32>; 1 + ATTEND_BANDS]>,
+    /// A trade's (`Trade("key")`), by its key.
+    trades: BTreeMap<String, [Option<f32>; 1 + ATTEND_BANDS]>,
+    /// The mean over the roles' own rows (not the banded ones), summed in
+    /// the file's order; `None` empty.
+    mean: Option<f32>,
+}
+
+impl From<BTreeMap<String, f32>> for AttendTable {
+    fn from(cells: BTreeMap<String, f32>) -> AttendTable {
+        let mut base = vec![[None; 1 + ATTEND_BANDS]; Role::ALL.len()];
+        let mut trades: BTreeMap<String, [Option<f32>; 1 + ATTEND_BANDS]> = BTreeMap::new();
+        for (k, &p) in &cells {
+            let (role, slot) = match k.rsplit_once("/b") {
+                Some((r, b)) => match b.parse::<usize>() {
+                    Ok(b) if b < ATTEND_BANDS => (r, b + 1),
+                    _ => continue,
+                },
+                None => (k.as_str(), 0),
+            };
+            if let Some(key) = role.strip_prefix("Trade(\"").and_then(|r| r.strip_suffix("\")")) {
+                trades.entry(key.to_string()).or_insert([None; 1 + ATTEND_BANDS])[slot] = Some(p);
+            } else if let Some(i) = Role::ALL.iter().position(|r| format!("{r:?}") == role) {
+                base[i][slot] = Some(p);
+            }
+        }
+        let roles: Vec<f32> = cells.iter().filter(|(k, _)| !k.contains('/')).map(|(_, &v)| v).collect();
+        let mean = (!cells.is_empty()).then(|| roles.iter().sum::<f32>() / roles.len().max(1) as f32);
+        AttendTable { cells, base, trades, mean }
+    }
+}
+
+impl From<AttendTable> for BTreeMap<String, f32> {
+    fn from(t: AttendTable) -> BTreeMap<String, f32> {
+        t.cells
+    }
+}
+
+impl AttendTable {
+    fn row(&self, role: Role) -> Option<&[Option<f32>; 1 + ATTEND_BANDS]> {
+        match role {
+            Role::Trade(t) => self.trades.get(t.key()),
+            r => Role::ALL.iter().position(|&x| x == r).and_then(|i| self.base.get(i)),
+        }
+    }
+
+    /// The role's own row (`band` `None`) or its row in commute band `band`.
+    pub fn get(&self, role: Role, band: Option<usize>) -> Option<f32> {
+        let slot = match band {
+            Some(b) if b < ATTEND_BANDS => b + 1,
+            Some(_) => return None,
+            None => 0,
+        };
+        self.row(role)?[slot]
+    }
+
+    /// Does the table hold any banded row for `role`?
+    pub fn banded(&self, role: Role) -> bool {
+        self.row(role).is_some_and(|r| r[1..].iter().any(Option::is_some))
+    }
+
+    /// The mean over the roles' own rows; `None` for an empty table.
+    pub fn mean(&self) -> Option<f32> {
+        self.mean
+    }
+
+    /// The cells as written (`"{role:?}"`, `"{role:?}/b{n}"`).
+    pub fn cells(&self) -> &BTreeMap<String, f32> {
+        &self.cells
+    }
 }
 
 /// `StatTable::p_meal`'s hunger bands (tenths of `[0, 1]`).
@@ -2614,6 +2700,9 @@ impl World {
     /// re-housing, upkeep) runs before the economy's price step (M11 D42).
     pub fn tick(&mut self) {
         self.apply_commands();
+        // Review item 8: a cut line that ran out is back in the ride table
+        // before anything reads it this tick.
+        systems::transit::reopen(self);
         // time: the clock is `self.tick`; daily hooks live in the systems that need them.
         systems::lod::run(self);
         crate::needs::run(self);

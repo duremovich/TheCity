@@ -734,6 +734,12 @@ pub fn run_statistical(world: &mut World) {
         // the dole once a day. The table's p_work mass then stands for the
         // idle hours of the employed.
         stat_work(world, id, phase, no_net_row);
+        // Review item 1: a dodger caught at the commute's gate is on screen
+        // now (the arrest path, `transit::stat_commute`): the rest of the
+        // hour is its body's, as after the errand ride's catch below.
+        if world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical) {
+            continue;
+        }
         // Parity (arrests): a non-commute ride on the El (`p_errand_ride`);
         // a dodger caught at the gate comes on screen (the arrest path).
         if let Some(r) = ride_row.filter(|_| crate::systems::demography::is_adult(world, id)) {
@@ -1406,16 +1412,18 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     if job.last_shift_day == Some(key) {
         return;
     }
+    // P5f (wage parity): the hour is worked on the role's `p_attend` (a
+    // pure hash of the agent and the hour; the wage below reads the same).
+    let attend = stat_attend(world, id, job.role);
     // Transit T13 (phase 2): the shift's first hour pays the day's commute
-    // rides when the El wins the trip (nothing with transit off).
-    crate::systems::transit::stat_commute(world, id, &job);
+    // rides when the El wins the trip (nothing with transit off). Review
+    // item 2: attendance is rolled first; a no-show (no hour of the shift
+    // worked) does not ride.
+    crate::systems::transit::stat_commute(world, id, &job, attend);
     // A dodger caught at the gate is on screen now (the arrest path).
     if world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical) {
         return;
     }
-    // P5f (wage parity): the hour is worked on the role's `p_attend` (a
-    // pure hash of the agent and the hour; the wage below reads the same).
-    let attend = stat_attend(world, id, job.role);
     let worked = attend.is_none_or(|p| attend_roll(world, id, tick / TICKS_PER_HOUR) < p);
     if worked && job.role == Role::Farmer {
         if let Some(farm) = job.employer {
@@ -1492,21 +1500,21 @@ pub fn stat_attend(world: &World, id: EntityId, role: Role) -> Option<f32> {
     let t = world.stat_table.as_ref()?.p_attend.as_ref()?;
     // Transit T14 (plan D9): the role's row in the agent's commute band
     // (`"{role:?}/b{band}"`) when the table learned it; the role's row
-    // otherwise (a table without banded rows keeps P5f's rule).
-    if let Some(&p) = crate::systems::transit::commute_band(world, id).and_then(|b| t.get(&format!("{role:?}/b{b}"))) {
-        return Some(p);
+    // otherwise (a table without banded rows keeps P5f's rule). The band is
+    // measured only for a role with banded rows.
+    if t.banded(role) {
+        if let Some(p) = crate::systems::transit::commute_band(world, id).and_then(|b| t.get(role, Some(b))) {
+            return Some(p);
+        }
     }
-    match t.get(&format!("{role:?}")) {
-        Some(&p) => Some(p),
+    match t.get(role, None) {
+        Some(p) => Some(p),
         // Class pay (docs/CLASS_PAY.md): a role the table has not learned
         // (the new graded trades, a Ripperdoc) works the table's mean
-        // attendance rather than a whole paid shift, until `calibrate`
-        // learns it (a graded wage would otherwise widen the tiers' gap).
-        None if crate::systems::classpay::on(world) && !t.is_empty() => {
-            // The mean over the roles' own rows (not the banded ones).
-            let roles: Vec<f32> = t.iter().filter(|(k, _)| !k.contains('/')).map(|(_, &v)| v).collect();
-            Some(roles.iter().sum::<f32>() / roles.len().max(1) as f32)
-        }
+        // attendance (over the roles' own rows, not the banded ones) rather
+        // than a whole paid shift, until `calibrate` learns it (a graded
+        // wage would otherwise widen the tiers' gap).
+        None if crate::systems::classpay::on(world) => t.mean(),
         None => None,
     }
 }
@@ -1514,6 +1522,19 @@ pub fn stat_attend(world: &World, id: EntityId, role: Role) -> Option<f32> {
 /// P5f: the hour's attendance roll (a pure hash of the agent and the hour).
 fn attend_roll(world: &World, id: EntityId, hour: u64) -> f32 {
     crate::systems::econ::hash_unit(world.seed(), 0xa77e_0001, u64::from(id.index), hour)
+}
+
+/// Review item 2: does `id` work any hour of the shift it is on, from this
+/// hour (its slot's minute) to the shift's end, on attendance `p` (the
+/// rolls `stat_work` makes, one per hour at the same minute)? A shift with
+/// none is a no-show. `calibrate`'s commute ride share counts the Full
+/// commutes that arrived at the work, so a commute is a shift shown up
+/// for, whatever hour it began.
+pub fn shift_attended(world: &World, id: EntityId, job: &Job, p: f32) -> bool {
+    let tick = world.tick;
+    let Some(end) = job.shift_end(tick) else { return true };
+    let minute = tick % TICKS_PER_HOUR;
+    (tick / TICKS_PER_HOUR..).take_while(|&h| h * TICKS_PER_HOUR + minute < end).any(|h| attend_roll(world, id, h) < p)
 }
 
 /// P5f: the share of the shift ending around `tick` whose hours the agent

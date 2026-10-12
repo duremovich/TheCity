@@ -171,9 +171,10 @@ pub fn rent_meal(world: &World) -> bool {
 /// faster than the clock: the leave-for-work gate went false after a leg.
 /// Transit phase 2 (T16): the trip as it would be made, so the ride
 /// `transit::choose` would take when the El is on (`transit::estimate`;
-/// the walk exactly with it off). Every reader means "how long to get
-/// there": the departure gate, the shift lead before an outing, the exec's
-/// start, the muster.
+/// the walk exactly with it off), setting out now: P5j's walk home before
+/// bedtime. A gate against a deadline (the departure gate, the shift lead
+/// before an outing, the exec's start, the muster: review item 6) reads
+/// `transit::estimate_by` instead, which holds still while the body waits.
 pub fn walk_estimate(world: &World, id: EntityId, to: TilePos) -> Tick {
     crate::systems::transit::estimate(world, id, to)
 }
@@ -508,8 +509,10 @@ pub fn deal_hours(world: &World) -> bool {
 }
 
 /// Item 15: the farthest body of `gang`'s walk to its Hideout, capped at
-/// `muster_walk_cap_ticks`.
-pub fn muster_walk(world: &World, gang: EntityId) -> Tick {
+/// `muster_walk_cap_ticks`. Review item 6: each trip as it would be made to
+/// arrive by the muster `arrive_by` (`transit::estimate_by`, the deadline's
+/// trip), not at "now" (`walk_estimate` moves with the timetable).
+pub fn muster_walk(world: &World, gang: EntityId, arrive_by: Tick) -> Tick {
     let Some(door) = world.hideout_of(gang).and_then(|h| world.comp::<Building>(h)).map(|b| b.door) else {
         return 0;
     };
@@ -517,7 +520,10 @@ pub fn muster_walk(world: &World, gang: EntityId) -> Tick {
         .into_iter()
         .filter(|&m| world.comp::<Brain>(m).is_some_and(|b| b.lod != Lod::Statistical))
         .filter(|&m| !world.has::<Sentence>(m))
-        .map(|m| walk_estimate(world, m, door))
+        .map(|m| {
+            let from = crate::exec::walk_origin(world, m).unwrap_or(door);
+            crate::systems::transit::estimate_by(world, m, from, door, arrive_by)
+        })
         .max()
         .unwrap_or(0);
     far.min(world.config.life.muster_walk_cap_ticks)

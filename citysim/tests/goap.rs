@@ -231,6 +231,47 @@ fn test_synth_reservation_counts_shelf_units_not_meals() {
     assert_eq!(WorldState::reserved_units(&w, market), 2);
 }
 
+/// Review item 4 (`/code-review high 7324e60..dfaca2e`): two synth buyers
+/// planning at once each counted the same open unit's meals and held no
+/// shelf unit between them. The first holds the open meals; the second
+/// holds the shelf unit its meals need past them, so a third finds the
+/// shelf reserved.
+#[test]
+fn test_synth_reservation_does_not_count_open_meals_twice() {
+    let mut w = world(4);
+    let market = w.building_of_kind(BuildingKind::Market).expect("market");
+    let stretch = w.config.sickness.synth_stretch;
+    assert!((2..=4).contains(&stretch), "the case needs an open unit of 1-3 meals");
+    w.comp_mut::<Building>(market).expect("market").stock_food = 1;
+    // One meal cut from the open unit: `stretch - 1` meals left in it.
+    w.comp_mut::<citysim::Market>(market).expect("market").synth_frac = 1;
+    let open = citysim::systems::diet::open_meals(&w, market);
+    assert_eq!(open, stretch - 1);
+    for h in w.buildings_by_kind[&BuildingKind::Home].clone() {
+        w.comp_mut::<Building>(h).expect("home").stock_food = 0;
+    }
+    let ids: Vec<_> = w.citizens().into_iter().filter(|&id| !w.has::<Job>(id)).take(3).collect();
+    for &id in &ids {
+        // the open unit's meals' coins, short of the real reserve
+        let synth = citysim::systems::diet::synth_price(&w, w.price_for(market, id));
+        w.comp_mut::<Wallet>(id).expect("wallet").coins = synth * i64::from(open);
+        w.comp_mut::<Inventory>(id).expect("inv").food = 0;
+        w.comp_mut::<Needs>(id).expect("needs").hunger = 0.2;
+        w.comp_mut::<Brain>(id).expect("brain").current_goal = Some(GoalKind::Eat);
+        let (q, _) = citysim::systems::diet::offer(&w, id, market);
+        assert_eq!(q, citysim::systems::diet::Quality::Synth, "a synth buyer");
+    }
+    assert_eq!(citysim::systems::economy::buy_quantity(&w, ids[0], Some(market)), open, "the open unit's meals");
+    plan::plan_for(&mut w, ids[0], GoalKind::Eat);
+    assert!(w.comp::<Brain>(ids[0]).expect("b").plan.is_some());
+    assert_eq!(WorldState::reserved_units(&w, market), 0, "the open unit serves the first buyer");
+    assert!(WorldState::observe(&w, ids[1], None).food_source_available, "the shelf unit is free");
+    plan::plan_for(&mut w, ids[1], GoalKind::Eat);
+    assert!(w.comp::<Brain>(ids[1]).expect("b").plan.is_some());
+    assert_eq!(WorldState::reserved_units(&w, market), 1, "the second buyer's meals need the shelf unit");
+    assert!(!WorldState::observe(&w, ids[2], None).food_source_available, "the shelf unit is reserved");
+}
+
 #[test]
 fn test_idle_with_stolen_food_can_still_store() {
     use citysim::exec::routine;
