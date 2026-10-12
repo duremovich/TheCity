@@ -433,15 +433,33 @@ pub fn try_poach(world: &mut World, corp: EntityId, vacancy: EntityId, role: Rol
     if v < free + cfg.poach_gap {
         return false;
     }
-    let wage = (world.config.wage(role) as f32 * cfg.poach_premium).round() as i64;
-    let m = SocialMove { actor: exec, target, kind: MoveKind::Persuade, stake: Stake::Job { building: vacancy, wage } };
-    if !crate::systems::moves::resolve(world, &m).success {
+    // M16b § 4: a dirty exec poaches by threat (or a secret) at the base
+    // wage instead of the premium.
+    let base = world.config.wage(role);
+    let threat = crate::systems::leverage::poach(world, exec, target, vacancy, base);
+    let (wage, premium) = match threat {
+        Some(_) => (base, 1.0),
+        None => ((base as f32 * cfg.poach_premium).round() as i64, cfg.poach_premium),
+    };
+    let won = match threat {
+        Some(ok) => ok,
+        None => {
+            let m = SocialMove {
+                actor: exec,
+                target,
+                kind: MoveKind::Persuade,
+                stake: Stake::Job { building: vacancy, wage },
+            };
+            crate::systems::moves::resolve(world, &m).success
+        }
+    };
+    if !won {
         return false;
     }
     world.vacate_job(target);
     crate::systems::demography::hire(world, target, vacancy, role);
     if let Some(j) = world.comp_mut::<Job>(target) {
-        j.premium = cfg.poach_premium;
+        j.premium = premium;
     }
     if let Some(v) = world.vacancies.get_mut(&vacancy) {
         if let Some(i) = v.iter().position(|&r| r == role) {

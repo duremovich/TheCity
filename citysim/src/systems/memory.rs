@@ -103,6 +103,8 @@ pub fn deed_of(holder: EntityId, e: &MemoryEntry) -> Option<DeedRef> {
                 | Crime::Intrusion
                 | Crime::DataTheft
                 | Crime::Conspiracy
+                | Crime::Fraud
+                | Crime::Blackmail
                 | Crime::FareEvasion => return None,
             };
             r(deed, e.subject, e.object)

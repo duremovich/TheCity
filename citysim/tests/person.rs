@@ -9,8 +9,8 @@ use citysim::exec::routine;
 use citysim::systems::life::commute_cost;
 use citysim::systems::{contracts, demography, law, leisure, social};
 use citysim::{
-    ActionKind, Brain, Building, Config, EntityId, Household, Inventory, Job, Needs, Position, RelKind, Role, Wallet,
-    World, TICKS_PER_DAY, TICKS_PER_HOUR,
+    ActionKind, Brain, Building, Config, EntityId, EventKind, Household, Inventory, Job, Needs, Position, RelKind,
+    Role, Wallet, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
 fn world() -> World {
@@ -1882,9 +1882,10 @@ fn suspect(known: bool) -> (World, EntityId, EntityId) {
     (w, s, wit)
 }
 
-/// A suspect with a known witness to his assault buys a Beat on her within
-/// 7 days (or is in Jail first: printed). Control: an unknown witness is
-/// never targeted.
+/// A suspect with a known witness to his assault deals with her within 7
+/// days: M16b § 4's threat first (she withdraws the report), else a Beat
+/// bought on her (or he is in Jail first: printed). Control: an unknown
+/// witness is never targeted.
 #[test]
 fn probe_suspect_buys_a_beat_on_a_known_witness() {
     let (mut w, s, wit) = suspect(true);
@@ -1895,15 +1896,24 @@ fn probe_suspect_buys_a_beat_on_a_known_witness() {
             posted = Some(w.tick);
         }
     });
+    let leaned = w
+        .events
+        .iter()
+        .any(|e| e.kind == EventKind::Coerced && e.actors[..] == [s, wit] && e.text.contains("withdrawn"));
     eprintln!(
-        "suspect {} on witness {}: posted at {posted:?}, jailed {}, records {:?}",
+        "suspect {} on witness {}: leaned {leaned}, posted at {posted:?}, jailed {}, records {:?}",
         s.index,
         wit.index,
         w.has::<citysim::Sentence>(s),
         bought_by(&w, s).iter().map(|c| (c.kind, c.status, c.motive)).collect::<Vec<_>>()
     );
-    let beat = bought_by(&w, s).into_iter().find(|c| c.target == Target::Agent(wit)).expect("never bought the witness");
-    assert_eq!((beat.kind, beat.motive), (ContractKind::Beat, citysim::contract::Motive::Silence));
+    if !leaned {
+        let beat = bought_by(&w, s)
+            .into_iter()
+            .find(|c| c.target == Target::Agent(wit))
+            .expect("never dealt with the witness");
+        assert_eq!((beat.kind, beat.motive), (ContractKind::Beat, citysim::contract::Motive::Silence));
+    }
     // Control.
     let (mut w, s, wit) = suspect(false);
     let end = w.tick + 7 * TICKS_PER_DAY;

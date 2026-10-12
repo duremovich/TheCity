@@ -85,7 +85,7 @@ fn cause_of(deed: Deed, rel: Rel, object: Option<EntityId>) -> GrudgeCause {
             Rel::Own => GrudgeCause::Assaulted,
         },
         Deed::Assaulted | Deed::Raided => GrudgeCause::Assaulted,
-        Deed::Robbed | Deed::Extorted => GrudgeCause::Robbed,
+        Deed::Robbed | Deed::Extorted | Deed::Blackmailed => GrudgeCause::Robbed,
         Deed::Stripped => GrudgeCause::Stripped(o),
         Deed::Evicted => GrudgeCause::Evicted,
         Deed::Betrayed | Deed::Poached => GrudgeCause::Betrayed,

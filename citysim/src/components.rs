@@ -639,6 +639,12 @@ pub enum Crime {
     /// Transit (docs/TRANSIT.md T10, Dylan 2026-10-10): jumping the El's
     /// gate. Petty: a night in the cells as Vagrancy's, ranked just above it.
     FareEvasion,
+    /// M16b § 4 (phase 1): a renege or a fake job, filed by its lawful
+    /// victim; ranks just above Theft.
+    Fraud,
+    /// M16b § 4 (phase 1): a coercion on a secret, filed by the coerced
+    /// on a failed move; ranks just above Shakedown.
+    Blackmail,
 }
 
 impl Crime {
@@ -658,6 +664,8 @@ impl Crime {
             Crime::DataTheft => "Data Theft",
             Crime::Conspiracy => "Conspiracy",
             Crime::FareEvasion => "Fare Evasion",
+            Crime::Fraud => "Fraud",
+            Crime::Blackmail => "Blackmail",
         }
     }
 
@@ -674,16 +682,20 @@ impl Crime {
             // Transit (T10): just above Vagrancy; everything above moves up one.
             Crime::FareEvasion => 1,
             Crime::Theft => 2,
-            Crime::Intrusion => 3,
-            Crime::GrandTheft => 4,
-            Crime::DataTheft => 5,
-            Crime::Dealing => 6,
-            Crime::Extortion => 7,
-            Crime::Assault => 8,
-            Crime::Manslaughter => 9,
-            Crime::Abduction => 10,
-            Crime::Conspiracy => 11,
-            Crime::Murder => 12,
+            // M16b: Fraud just above Theft, Blackmail just above Shakedown;
+            // everything above each moves up (the order is all that is read).
+            Crime::Fraud => 3,
+            Crime::Intrusion => 4,
+            Crime::GrandTheft => 5,
+            Crime::DataTheft => 6,
+            Crime::Dealing => 7,
+            Crime::Extortion => 8,
+            Crime::Blackmail => 9,
+            Crime::Assault => 10,
+            Crime::Manslaughter => 11,
+            Crime::Abduction => 12,
+            Crime::Conspiracy => 13,
+            Crime::Murder => 14,
         }
     }
 }

@@ -1011,13 +1011,9 @@ fn intimidate(world: &mut World, actor: EntityId, home: EntityId, occupants: &[E
     let Some(target) = target else { return true };
     let feared = crate::systems::reputation::rep(world, actor).dread >= 0.5;
     let allied = moves::allies_within(world, target, 8) > 0;
-    let m = crate::word::SocialMove {
-        actor,
-        target,
-        kind: crate::word::MoveKind::Intimidate,
-        stake: crate::word::Stake::Coins(amount),
-    };
-    let out = moves::resolve(world, &m);
+    // M16b § 4: the shakedown goes through `leverage` (Threat, a one-off
+    // coin demand): the same roll and the same `p` as M15's.
+    let out = crate::systems::leverage::shakedown(world, actor, target, amount);
     if world.extort_log.len() >= 4096 {
         world.extort_log.pop_front();
     }

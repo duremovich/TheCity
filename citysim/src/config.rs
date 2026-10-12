@@ -172,6 +172,9 @@ pub struct Config {
     /// The Hit market (docs/HIT_MARKET.md): organic Hits and Beats.
     #[serde(default)]
     pub hitmarket: HitMarketCfg,
+    /// M16b § 4 (phase 1): leverage and coercion.
+    #[serde(default)]
+    pub leverage: LeverageCfg,
     /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
     /// always on; the wage law and the safety net are policy (P10, `policy`).
     #[serde(default)]
@@ -1074,11 +1077,24 @@ pub struct SentenceDaysExt {
     pub intrusion: u32,
     /// M14 V18: the spec's 120 h.
     pub data_theft: u32,
+    /// M16b § 4: the spec's 48 h (`[law.sentence_hours] fraud`).
+    pub fraud: u32,
+    /// M16b § 4: the spec's 72 h.
+    pub blackmail: u32,
 }
 
 impl Default for SentenceDaysExt {
     fn default() -> Self {
-        SentenceDaysExt { grand_theft: 6, dealing: 5, abduction: 20, manslaughter: 10, intrusion: 2, data_theft: 5 }
+        SentenceDaysExt {
+            grand_theft: 6,
+            dealing: 5,
+            abduction: 20,
+            manslaughter: 10,
+            intrusion: 2,
+            data_theft: 5,
+            fraud: 2,
+            blackmail: 3,
+        }
     }
 }
 
@@ -4063,6 +4079,8 @@ pub struct DeedTable {
     pub hired: f32,
     /// Real economy E29: the `Gave` deed (a missing key reads 0).
     pub gave: f32,
+    /// M16b § 4: the `Blackmailed` deed (a missing key reads 0).
+    pub blackmailed: f32,
 }
 
 impl DeedTable {
@@ -4086,6 +4104,7 @@ impl DeedTable {
             Deed::Poached => self.poached,
             Deed::Hired => self.hired,
             Deed::Gave => self.gave,
+            Deed::Blackmailed => self.blackmailed,
         }
     }
 
@@ -4111,6 +4130,7 @@ impl DeedTable {
             poached,
             hired,
             gave,
+            blackmailed: 0.0,
         }
     }
 }
@@ -4159,15 +4179,19 @@ impl Default for GossipCfg {
             rumour_cap: 8,
             rumour_cap_statistical: 3,
             relay_conf: 0.8,
-            reach0: DeedTable::of([
-                1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3, 0.3, 0.2,
-            ]),
-            deed_sal: DeedTable::of([
-                0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4, 0.7, 0.3,
-            ]),
-            deed_sev: DeedTable::of([
-                1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1, 0.7, 0.0,
-            ]),
+            // M16b § 4: `blackmailed` reach0 0.2, sal 0.5, sev 0.4.
+            reach0: DeedTable {
+                blackmailed: 0.2,
+                ..DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.5, 0.6, 0.3, 0.4, 0.8, 0.9, 0.4, 1.0, 0.6, 0.1, 0.3, 0.3, 0.2])
+            },
+            deed_sal: DeedTable {
+                blackmailed: 0.5,
+                ..DeedTable::of([0.9, 0.6, 0.5, 0.4, 0.6, 0.5, 0.3, 0.5, 0.6, 0.8, 0.4, 0.9, 0.7, 0.3, 0.4, 0.7, 0.3])
+            },
+            deed_sev: DeedTable {
+                blackmailed: 0.4,
+                ..DeedTable::of([1.0, 0.5, 0.3, 0.2, 0.6, 0.0, 0.0, 0.3, 0.0, 0.6, 0.0, 0.8, 0.6, 0.0, 0.1, 0.7, 0.0])
+            },
             kin_cap: 12,
         }
     }
@@ -4202,8 +4226,13 @@ impl Default for ReputationCfg {
         //                        kil  ass  rob   ext  str  arr  mar  evi   stk  rai  fou  ave  bet   rep  poa  hir  gav
         let dread_w =
             DeedTable::of([1.0, 0.4, 0.15, 0.3, 0.2, 0.0, 0.0, 0.0, 0.0, 0.6, 0.0, 0.8, 0.0, 0.0, 0.0, 0.3, 0.0]);
-        let honour_w =
-            DeedTable::of([0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1, -0.2, 0.2]);
+        // M16b § 4: `blackmailed` honour_w -0.4.
+        let honour_w = DeedTable {
+            blackmailed: -0.4,
+            ..DeedTable::of([
+                0.0, 0.0, -0.3, -0.2, -0.6, 0.0, 0.1, -0.2, 0.0, 0.0, 0.0, 0.4, -1.0, 0.3, -0.1, -0.2, 0.2,
+            ])
+        };
         let heat_w =
             DeedTable::of([0.5, 0.2, 0.2, 0.1, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.4, 0.0]);
         ReputationCfg {
@@ -5417,6 +5446,10 @@ impl Config {
         if std::env::var("CITYSIM_HITMARKET_OFF").is_ok_and(|v| v == "1") {
             cfg.hitmarket.enabled = false;
         }
+        // M16b phase 1: the leverage A/B and identity device.
+        if std::env::var("CITYSIM_LEVERAGE_OFF").is_ok_and(|v| v == "1") {
+            cfg.leverage.enabled = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -5763,6 +5796,8 @@ impl Config {
         h.max_open = up_usize(h.max_open);
         h.posts_per_day = up_usize(h.posts_per_day);
         h.corp_year_cap = up_u32(h.corp_year_cap);
+        // M16b: the standing coercions' cap.
+        self.leverage.max_coercions = up_usize(self.leverage.max_coercions);
         let fv = &mut self.fviolence.day_cap;
         *fv = FvKindsCfg {
             killed: up_u32(fv.killed),
@@ -5965,6 +6000,8 @@ pub struct KindTable<T> {
     pub beat: T,
     pub guard: T,
     pub locate: T,
+    /// M16b phase 1.
+    pub persuade: T,
 }
 
 impl<T: Default + Copy> KindTable<T> {
@@ -5975,6 +6012,7 @@ impl<T: Default + Copy> KindTable<T> {
             ContractKind::Beat => self.beat,
             ContractKind::Guard => self.guard,
             ContractKind::Locate => self.locate,
+            ContractKind::Persuade => self.persuade,
         }
     }
 }
@@ -6026,8 +6064,8 @@ impl Default for ContractsCfg {
         ContractsCfg {
             max_open: 256,
             closed_keep_days: 30,
-            price_base: KindTable { hit: 400, beat: 120, guard: 25, locate: 20 },
-            deadline_days: KindTable { hit: 10, beat: 7, guard: 7, locate: 14 },
+            price_base: KindTable { hit: 400, beat: 120, guard: 25, locate: 20, persuade: 100 },
+            deadline_days: KindTable { hit: 10, beat: 7, guard: 7, locate: 14, persuade: 7 },
             risk_w: 1.5,
             standing_w: 1.0,
             max_attempts: 2,
@@ -6066,7 +6104,7 @@ impl GunLawfulnessCfg {
         match k {
             ContractKind::Hit => self.hit,
             ContractKind::Beat => self.beat,
-            ContractKind::Guard | ContractKind::Locate => 1.0,
+            ContractKind::Guard | ContractKind::Locate | ContractKind::Persuade => 1.0,
         }
     }
 }
@@ -6278,7 +6316,7 @@ impl Default for HitMarketCfg {
         HitMarketCfg {
             enabled: true,
             ask_rank: 2,
-            price_floor: KindTable { hit: 20, beat: 8, guard: 0, locate: 0 },
+            price_floor: KindTable { hit: 20, beat: 8, guard: 0, locate: 0, persuade: 0 },
             wage_floor_min: 50,
             wage_floor_mult: 0.5,
             deposit_share: 0.5,
@@ -7123,6 +7161,116 @@ impl Default for ClassPayCfg {
             status_frac: 0.05,
             status_split: [0.5, 0.25, 0.25],
             premium_payout_share: 0.5,
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// M16b § 4 leverage (docs/M16_CONTRACTS.md; phase 1). A coercion is a record
+// on a struct and one seeded Intimidate roll between fictional agents.
+// ---------------------------------------------------------------------------
+
+/// `[leverage] lev_bias`: the logit's bias per leverage kind (phase 2
+/// appends `hostage`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LevBiasCfg {
+    pub threat: f32,
+    pub secret: f32,
+    pub debt: f32,
+}
+
+impl Default for LevBiasCfg {
+    fn default() -> Self {
+        LevBiasCfg { threat: 0.0, secret: 0.3, debt: 0.2 }
+    }
+}
+
+impl LevBiasCfg {
+    pub fn get(&self, k: crate::contract::LeverageKind) -> f32 {
+        use crate::contract::LeverageKind;
+        match k {
+            LeverageKind::Threat => self.threat,
+            LeverageKind::Secret => self.secret,
+            LeverageKind::Debt => self.debt,
+        }
+    }
+}
+
+/// `[leverage]` (spec § 4; the plan keys marked). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LeverageCfg {
+    /// The switch in flight (the A/B and identity device; off: M16a's
+    /// city, the shakedown M15's roll). `CITYSIM_LEVERAGE_OFF=1` at load.
+    pub enabled: bool,
+    /// Standing coercions at once (per capita, up only).
+    pub max_coercions: usize,
+    pub lev_bias: LevBiasCfg,
+    /// `demand_cost = demand_w × value ÷ max(purse + 7 × wage, 1)`.
+    pub demand_w: f32,
+    /// A Secret adds `secret_w × deed_sev × (1 − reach)`.
+    pub secret_w: f32,
+    /// A failed move is reported with `p = backlash_report × lawfulness`.
+    pub backlash_report: f32,
+    pub protection_weekly: i64,
+    pub blackmail_weekly: i64,
+    pub blackmail_lawfulness: f32,
+    /// Plan key: the coerced's standing above the holder's by this much.
+    pub blackmail_gap: f32,
+    /// Plan key: a holder looks for a secret once in this many days.
+    pub blackmail_days: u32,
+    pub secret_known_max: u32,
+    pub secret_public_reach: f32,
+    pub silence_lawfulness: f32,
+    pub poach_threat_lawfulness: f32,
+    /// Plan key: a debt under this is not called (begging loans).
+    pub debt_call_min: i64,
+    pub fake_fee: i64,
+    /// Plan key: a fake-job candidate tries on a day with this p.
+    pub fake_p: f32,
+    /// Plan key: the fake job's victim learns it after this many days.
+    pub fake_days: u32,
+    pub parley_ratio: f32,
+    pub parley_tribute: i64,
+    /// Plan key: a fulfilled Persuade adds this to the courted's affinity.
+    pub persuade_affinity: f32,
+    /// Plan key: a suitor rejected this often by the same person (30 days).
+    pub court_rejections: u32,
+    /// Plan key: ... and under this sociability buys a Persuade.
+    pub court_sociability: f32,
+    /// Plan key: a pair refused, broken or failed is not tried again for this long.
+    pub retry_days: u32,
+}
+
+impl Default for LeverageCfg {
+    fn default() -> Self {
+        LeverageCfg {
+            enabled: true,
+            max_coercions: 128,
+            lev_bias: LevBiasCfg::default(),
+            demand_w: 1.0,
+            secret_w: 1.0,
+            backlash_report: 0.5,
+            protection_weekly: 40,
+            blackmail_weekly: 30,
+            blackmail_lawfulness: 0.35,
+            blackmail_gap: 0.2,
+            blackmail_days: 30,
+            secret_known_max: 5,
+            secret_public_reach: 0.3,
+            silence_lawfulness: 0.3,
+            poach_threat_lawfulness: 0.3,
+            debt_call_min: 3,
+            fake_fee: 40,
+            fake_p: 0.1,
+            fake_days: 7,
+            parley_ratio: 0.3,
+            parley_tribute: 30,
+            persuade_affinity: 0.3,
+            court_rejections: 2,
+            court_sociability: 0.4,
+            retry_days: 28,
         }
     }
 }

@@ -250,6 +250,11 @@ fn test_poach_moves_job_and_shocks_loser() {
         })
         .expect("a rival corp Market");
     let exec = w.comp::<Corp>(corp).and_then(|c| c.exec).expect("exec");
+    // M16b § 4: a lawful exec poaches by the wage premium (a dirty one leans:
+    // `leverage.rs::test_poach_by_threat_only_for_dirty_exec`).
+    if let Some(p) = w.comp_mut::<citysim::Personality>(exec) {
+        p.lawfulness = 0.9;
+    }
     if let Some(s) = w.comp_mut::<Skills>(target) {
         s.persuasion = 1.0;
     }

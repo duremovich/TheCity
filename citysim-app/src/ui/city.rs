@@ -805,8 +805,8 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
             app.show_board = !app.show_board;
         }
     });
-    let mut open = [0u32; 4];
-    let mut taken = [0u32; 4];
+    let mut open = [0u32; ContractKind::ALL.len()];
+    let mut taken = [0u32; ContractKind::ALL.len()];
     for c in world.contracts.values() {
         let i = c.kind.index();
         if c.is_open() {
@@ -817,6 +817,15 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
     }
     let today = &world.stats.current.contract;
     let yday = world.stats.history.back().map(|r| r.contract.clone()).unwrap_or_default();
+    // M16b: M16a's four kinds count in `ContractCols`, the Persuade in `LeverageCols`.
+    let done_today = |k: ContractKind| match k {
+        ContractKind::Persuade => world.stats.current.leverage.k_persuade_done,
+        k => today.k_done[k.index()],
+    };
+    let done_yday = |k: ContractKind| match k {
+        ContractKind::Persuade => world.stats.history.back().map_or(0, |r| r.leverage.k_persuade_done),
+        k => yday.k_done[k.index()],
+    };
     egui::Grid::new("city_contracts").striped(true).show(ui, |ui| {
         ui.strong("kind");
         ui.strong("open");
@@ -829,8 +838,8 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
             ui.label(k.label());
             ui.label(open[i].to_string());
             ui.label(taken[i].to_string());
-            ui.label(today.k_done[i].to_string());
-            ui.label(yday.k_done[i].to_string());
+            ui.label(done_today(k).to_string());
+            ui.label(done_yday(k).to_string());
             ui.end_row();
         }
     });

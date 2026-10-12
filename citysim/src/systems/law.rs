@@ -71,6 +71,9 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::DataTheft => 0.6,
         // M16a (plan C29).
         Crime::Conspiracy => 0.8,
+        // M16b § 4.
+        Crime::Fraud => 0.4,
+        Crime::Blackmail => 0.5,
     }
 }
 
@@ -167,7 +170,10 @@ pub fn raise_crime_except(
         | Crime::Intrusion
         | Crime::DataTheft
         // M16a (plan C29): never raised on the street.
-        | Crime::Conspiracy => {}
+        | Crime::Conspiracy
+        // M16b: filed by their victims, never raised on the street.
+        | Crime::Fraud
+        | Crime::Blackmail => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -269,6 +275,8 @@ pub fn raise_crime_except(
             | Crime::Intrusion
             | Crime::DataTheft
             | Crime::Conspiracy
+            | Crime::Fraud
+            | Crime::Blackmail
             | Crime::FareEvasion => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
@@ -529,6 +537,9 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         // V42 `SetHackSentence` replaces the base.
         Crime::Intrusion => world.levers.hack_sentence_days[0].map_or(ext.intrusion, u32::from),
         Crime::DataTheft => world.levers.hack_sentence_days[1].map_or(ext.data_theft, u32::from),
+        // M16b § 4.
+        Crime::Fraud => ext.fraud,
+        Crime::Blackmail => ext.blackmail,
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;

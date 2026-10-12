@@ -20,7 +20,7 @@ use smallvec::SmallVec;
 use crate::components::{CorpOrder, Order, TilePos};
 use crate::entity::EntityId;
 use crate::time::Tick;
-use crate::word::{HuntPhase, Intel};
+use crate::word::{Deed, HuntPhase, Intel};
 
 /// `World::next_contract`, monotonic from 1, saved.
 pub type ContractId = u64;
@@ -42,10 +42,19 @@ pub enum ContractKind {
     /// A record that pays per sighting of the target written to the
     /// buyer's `FactionDb`.
     Locate,
+    /// M16b (§ 4, phase 1): a record whose fulfilment is a social move by
+    /// the taker on the target (a Charm toward the buyer for a Court
+    /// suitor), resolved at any tier as one Move-stream draw.
+    Persuade,
 }
 
 impl ContractKind {
-    pub const ALL: [ContractKind; 4] =
+    pub const ALL: [ContractKind; 5] =
+        [ContractKind::Hit, ContractKind::Beat, ContractKind::Guard, ContractKind::Locate, ContractKind::Persuade];
+
+    /// M16a's four kinds: the `k_{kind}_*` CSV slots of `ContractCols` and
+    /// the City panel's rows (M16b's kinds count in `LeverageCols`).
+    pub const M16A: [ContractKind; 4] =
         [ContractKind::Hit, ContractKind::Beat, ContractKind::Guard, ContractKind::Locate];
 
     /// Lower-case, as the config tables and the CLI spell it.
@@ -55,6 +64,7 @@ impl ContractKind {
             ContractKind::Beat => "beat",
             ContractKind::Guard => "guard",
             ContractKind::Locate => "locate",
+            ContractKind::Persuade => "persuade",
         }
     }
 
@@ -100,10 +110,12 @@ impl Target {
     }
 }
 
-/// The record's terms. M16b appends `Coerced(CoercionId)`.
+/// The record's terms. M16b appends `Coerced(CoercionId)`: a job done
+/// under a threat, unpaid (`price` 0, no escrow).
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Terms {
     Pay { price: i64 },
+    Coerced(CoercionId),
 }
 
 /// The status machine's states (`contracts::set_status` is the one writer).
@@ -147,6 +159,8 @@ pub enum Origin {
     CorpOrder(CorpOrder),
     Law,
     God,
+    /// M16b phase 1: a suitor rejected twice buys a `Persuade` on the courted.
+    Court,
 }
 
 /// How a taken record is resolved: a ledger draw at `due` (no bodies), a
@@ -511,7 +525,184 @@ pub enum ContractNs {
     Want,
     /// The Hit market (H15, phase 2): a beaten witness recants.
     Recant,
+    /// M16b phase 1: a leverage roll other than the move's own draw, with a
+    /// purpose byte in `a`'s top bits (`leverage::Purpose`).
+    Leverage,
 }
 
 /// C38: per-Fixer CSV slots (`f0_heat` … `f3_income`), Fixers by building id.
 pub const FIXER_SLOTS: usize = 4;
+
+// ---------------------------------------------------------------------------
+// M16b § 4: leverage (phase 1)
+// ---------------------------------------------------------------------------
+
+/// `World::next_coercion`, monotonic from 1, saved.
+pub type CoercionId = u64;
+
+/// What a coercion holds over the coerced (a label on a record; the move
+/// is one seeded Intimidate roll, `leverage::coerce`). M16b phase 2
+/// appends `Hostage`.
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Leverage {
+    /// Credibility from might and dread (M15's Intimidate terms).
+    Threat,
+    /// A deed the holder knows about the coerced.
+    Secret { deed: Deed, actor: EntityId, object: Option<EntityId>, day: u32 },
+    /// An edge debt called in.
+    Debt { amount: i64 },
+}
+
+impl Leverage {
+    /// The kind's slot (`[leverage] lev_bias`, the CSV's per-kind columns).
+    pub fn kind(&self) -> LeverageKind {
+        match self {
+            Leverage::Threat => LeverageKind::Threat,
+            Leverage::Secret { .. } => LeverageKind::Secret,
+            Leverage::Debt { .. } => LeverageKind::Debt,
+        }
+    }
+}
+
+/// The leverage kinds, for tables and counters.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum LeverageKind {
+    Threat,
+    Secret,
+    Debt,
+}
+
+impl LeverageKind {
+    pub const ALL: [LeverageKind; 3] = [LeverageKind::Threat, LeverageKind::Secret, LeverageKind::Debt];
+
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            LeverageKind::Threat => "threat",
+            LeverageKind::Secret => "secret",
+            LeverageKind::Debt => "debt",
+        }
+    }
+}
+
+/// What the holder demands (spec § 4). Phase 1 makes `Coins`, `Do`,
+/// `Join` and `Silence`; `Sell`, `Vote`, `Release` and `Access` arrive
+/// with their phases.
+#[derive(Copy, Clone, PartialEq, Debug, Serialize, Deserialize)]
+pub enum Demand {
+    /// A shakedown, protection, hush money, a called debt, a tribute.
+    Coins { amount: i64, weekly: bool },
+    /// A coerced job (`Terms::Coerced`).
+    Do(ContractId),
+    /// Poaching by threat: take the post at the wage.
+    Join { building: EntityId, wage: i64 },
+    /// Withdraw testimony: the report naming `suspect` filed at `tick`
+    /// (reports have no id) loses its witness.
+    Silence { suspect: EntityId, tick: Tick },
+}
+
+/// A coercion's state.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum CoercionStatus {
+    /// Standing: weekly coins due, or a coerced job under way.
+    Active,
+    /// The demand was met (a coerced job done).
+    Complied,
+    /// The coerced would not, or could not, pay a later week.
+    Refused,
+    /// It ended otherwise (the holder lost its hold, a party is gone).
+    Broken,
+    /// A blackmail whose secret went public.
+    Lapsed,
+}
+
+impl CoercionStatus {
+    pub fn label(self) -> &'static str {
+        match self {
+            CoercionStatus::Active => "active",
+            CoercionStatus::Complied => "complied",
+            CoercionStatus::Refused => "refused",
+            CoercionStatus::Broken => "broken",
+            CoercionStatus::Lapsed => "lapsed",
+        }
+    }
+}
+
+/// Why a standing coercion was made (the weekly pass and the counters
+/// read it).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Default, Serialize, Deserialize)]
+pub enum CoercionWhy {
+    #[default]
+    Other,
+    /// A gang's weekly take from a business in a district it holds.
+    Protection,
+    /// Hush money over a secret.
+    Blackmail,
+    /// A gang's weekly tribute for peace after a Parley.
+    Parley,
+    /// A job done under a threat.
+    Job,
+}
+
+impl CoercionWhy {
+    pub fn label(self) -> &'static str {
+        match self {
+            CoercionWhy::Other => "other",
+            CoercionWhy::Protection => "protection",
+            CoercionWhy::Blackmail => "blackmail",
+            CoercionWhy::Parley => "tribute",
+            CoercionWhy::Job => "job",
+        }
+    }
+}
+
+/// One coercion (spec § 4): a record of who holds what over whom and for
+/// what; every payment is coins moved by `ownership::pay` (`Flow::Coerced`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Coercion {
+    pub id: CoercionId,
+    /// The owner the demand pays: an agent, a gang or a corp.
+    pub holder: Option<EntityId>,
+    /// Who made the move.
+    pub agent: EntityId,
+    /// The coerced agent (an owner, an exec, a leader).
+    pub over: EntityId,
+    pub leverage: Leverage,
+    pub demand: Demand,
+    pub since: Tick,
+    pub until: Tick,
+    pub next_due: Tick,
+    /// Payments made.
+    pub paid: u16,
+    pub status: CoercionStatus,
+    #[serde(default)]
+    pub why: CoercionWhy,
+    /// The purse that pays (a building's owner for protection, a gang for a
+    /// tribute); `None`: the coerced's own wallet.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub payer: Option<EntityId>,
+    /// Protection: the business it is levied on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub building: Option<EntityId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed: Option<Tick>,
+}
+
+impl Coercion {
+    pub fn is_active(&self) -> bool {
+        self.status == CoercionStatus::Active
+    }
+}
+
+/// The fake job (spec § 4 Fraud): `faker` sold `victim` a record that
+/// does not exist for `fee`; the victim learns it at `due`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct FakeJob {
+    pub faker: EntityId,
+    pub victim: EntityId,
+    pub fee: i64,
+    pub due: Tick,
+}
