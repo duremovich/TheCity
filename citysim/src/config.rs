@@ -1568,6 +1568,14 @@ pub struct ExecCfg {
     /// changes results: a field is a pure function of the map and its door.
     #[serde(default = "default_flow_cache")]
     pub flow_field_cache: usize,
+    /// Scale S3a: the flow fields' byte budget in MiB (caps
+    /// `flow_field_cache` by the map's size: `FlowCache::cap_for`).
+    #[serde(default = "default_flow_budget_mb")]
+    pub flow_field_budget_mb: usize,
+    /// Scale S3a: maps of more tiles than this walk by exact A* paths
+    /// (`exec::bigpath`) instead of per-door flow fields.
+    #[serde(default = "default_flow_max_tiles")]
+    pub flow_field_max_tiles: usize,
     /// Workplace room: an agent refused at a full building
     /// (`FailReason::BuildingFull`) passes it over in `World::local` for
     /// this many ticks, so the replan goes elsewhere (another Market, the
@@ -1583,6 +1591,14 @@ pub struct ExecCfg {
 
 fn default_flow_cache() -> usize {
     512
+}
+
+fn default_flow_budget_mb() -> usize {
+    64
+}
+
+fn default_flow_max_tiles() -> usize {
+    131_072
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

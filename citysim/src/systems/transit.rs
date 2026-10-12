@@ -81,16 +81,42 @@ pub struct Net {
     pub open: Vec<bool>,
     /// `table[s × n + t]`.
     pub table: Vec<Hop>,
-    /// Phase 2: each map tile's `NEAR` nearest stops by `(Manhattan, index)`
-    /// (row-major, `u16::MAX` padding), so a stop shortlist is a slice read,
-    /// not a scan (`candidates`, `commute_ticks`). Derived with the stops.
-    pub near: Vec<u16>,
-    pub map_w: usize,
+    /// Phase 2, Scale S3a: per `NEAR_CELL` × `NEAR_CELL` cell of the map
+    /// (row-major), the stops that can be among the `NEAR` nearest of some
+    /// tile in it, ascending: `near_cands[near_cells[c]..near_cells[c + 1]]`.
+    /// A tile's shortlist is ranked from its cell's few candidates
+    /// (`Net::near`), not scanned over every stop. Phase 2 kept every tile's
+    /// shortlist (`w × h × 8` u16: 90 MB at 3,000 × 1,875, built in O(tiles
+    /// × stops) on every load); the cells are ~1/256 of the tiles and built
+    /// in O(cells × stops). Derived with the stops.
+    near_cands: Vec<u16>,
+    near_cells: Vec<u32>,
+    cells_w: usize,
+    map_w: usize,
+    map_h: usize,
 }
 
 /// Stops kept per tile in `Net::near`: `stop_candidates` plus room for a
 /// few closed ones before `candidates` falls back to the scan.
 pub const NEAR: usize = 8;
+
+/// The side of a `Net::near` candidate cell, in tiles.
+const NEAR_CELL: usize = 16;
+
+/// A tile's shortlist from `Net::near`: up to `NEAR` stop indices, nearest
+/// first (a slice by `Deref`).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NearStops {
+    ids: [u16; NEAR],
+    len: u8,
+}
+
+impl std::ops::Deref for NearStops {
+    type Target = [u16];
+    fn deref(&self) -> &[u16] {
+        &self.ids[..usize::from(self.len)]
+    }
+}
 
 impl Net {
     pub fn hop(&self, s: u16, t: u16) -> Hop {
@@ -99,13 +125,43 @@ impl Net {
     }
 
     /// `tile`'s nearest stops (up to `NEAR`, nearest first, ties the lower
-    /// index); empty off the map or before `build`.
-    pub fn near(&self, tile: TilePos) -> &[u16] {
-        let i = (usize::from(tile.y) * self.map_w + usize::from(tile.x)) * NEAR;
-        match self.near.get(i..i + NEAR) {
-            Some(v) => &v[..v.iter().position(|&s| s == u16::MAX).unwrap_or(NEAR)],
-            None => &[],
+    /// index: the order of a scan sorted by `(Manhattan, index)`); empty off
+    /// the map or before `build`.
+    pub fn near(&self, tile: TilePos) -> NearStops {
+        let mut out = NearStops::default();
+        let (x, y) = (usize::from(tile.x), usize::from(tile.y));
+        if x >= self.map_w || y >= self.map_h || self.near_cells.is_empty() {
+            return out;
         }
+        let c = (y / NEAR_CELL) * self.cells_w + x / NEAR_CELL;
+        let (a, b) = (self.near_cells[c] as usize, self.near_cells[c + 1] as usize);
+        let k = NEAR.min(self.stops.len());
+        let mut best = [(u32::MAX, u16::MAX); NEAR];
+        let mut n = 0usize;
+        for &s in &self.near_cands[a..b] {
+            let key = (self.stops[usize::from(s)].manhattan(tile), s);
+            if n == k && key >= best[k - 1] {
+                continue;
+            }
+            // Insert in order, dropping the k-th when full.
+            let mut j = n.min(k - 1);
+            while j > 0 && best[j - 1] > key {
+                best[j] = best[j - 1];
+                j -= 1;
+            }
+            best[j] = key;
+            n = (n + 1).min(k);
+        }
+        for (slot, &(_, s)) in out.ids.iter_mut().zip(&best[..n]) {
+            *slot = s;
+        }
+        out.len = n as u8;
+        out
+    }
+
+    /// The shortlist index's bytes (the memory test's read).
+    pub fn near_bytes(&self) -> usize {
+        self.near_cands.len() * 2 + self.near_cells.len() * 4
     }
 }
 
@@ -304,39 +360,67 @@ pub fn build(world: &mut World) {
         line.total = line.offsets.last().copied().unwrap_or(0);
         lines.push(line);
     }
-    world.transit.net.near = near_table(world, &stops);
-    world.transit.net.map_w = world.map.w();
+    let (w, h) = (world.map.w(), world.map.h());
+    let (cells, cands) = near_index(w, h, &stops);
+    let net = &mut world.transit.net;
+    net.near_cells = cells;
+    net.near_cands = cands;
+    net.cells_w = w.div_ceil(NEAR_CELL);
+    net.map_w = w;
+    net.map_h = h;
     world.transit.net.lines = lines;
     world.transit.net.stops = stops;
     let open = open_lines(world);
     rebuild_table(world, open);
 }
 
-/// Every tile's `NEAR` nearest stops by `(Manhattan, index)`.
-fn near_table(world: &World, stops: &[TilePos]) -> Vec<u16> {
-    let (w, h) = (world.map.w(), world.map.h());
-    let mut out = vec![u16::MAX; w * h * NEAR];
+/// `Net::near`'s index: per `NEAR_CELL` cell (row-major), the offsets into
+/// the candidates, and the candidates: every stop whose nearest point of the
+/// cell is no farther than the `NEAR`-th smallest of the stops' farthest
+/// points of it. A stop past that bound is beaten, on every tile of the
+/// cell, by `NEAR` stops strictly nearer, so the cell's candidates hold each
+/// of its tiles' `NEAR` nearest (ties included).
+fn near_index(w: usize, h: usize, stops: &[TilePos]) -> (Vec<u32>, Vec<u16>) {
+    let (cw, ch) = (w.div_ceil(NEAR_CELL), h.div_ceil(NEAR_CELL));
+    let mut cells = Vec::with_capacity(cw * ch + 1);
+    let mut cands = Vec::new();
     let k = NEAR.min(stops.len());
-    if k == 0 {
-        return out;
-    }
-    let mut v: Vec<(u32, u16)> = Vec::with_capacity(stops.len());
-    for y in 0..h {
-        for x in 0..w {
-            let t = TilePos::new(x as u16, y as u16);
-            v.clear();
-            v.extend(stops.iter().enumerate().map(|(i, s)| (s.manhattan(t), u16::try_from(i).unwrap_or(u16::MAX))));
-            if k < v.len() {
-                v.select_nth_unstable(k - 1);
+    let mut far: Vec<u32> = Vec::with_capacity(stops.len());
+    cells.push(0);
+    for cy in 0..ch {
+        for cx in 0..cw {
+            if k > 0 {
+                let (x0, y0) = ((cx * NEAR_CELL) as i64, (cy * NEAR_CELL) as i64);
+                let (x1, y1) = (((cx + 1) * NEAR_CELL).min(w) as i64 - 1, ((cy + 1) * NEAR_CELL).min(h) as i64 - 1);
+                let span = |v: i64, lo: i64, hi: i64| -> (u32, u32) {
+                    let near = if v < lo {
+                        lo - v
+                    } else if v > hi {
+                        v - hi
+                    } else {
+                        0
+                    };
+                    (near as u32, (v - lo).abs().max((v - hi).abs()) as u32)
+                };
+                let reach = |s: &TilePos| {
+                    let (nx, fx) = span(i64::from(s.x), x0, x1);
+                    let (ny, fy) = span(i64::from(s.y), y0, y1);
+                    (nx + ny, fx + fy)
+                };
+                far.clear();
+                far.extend(stops.iter().map(|s| reach(s).1));
+                far.select_nth_unstable(k - 1);
+                let bound = far[k - 1];
+                for (i, s) in stops.iter().enumerate() {
+                    if reach(s).0 <= bound {
+                        cands.push(u16::try_from(i).unwrap_or(u16::MAX));
+                    }
+                }
             }
-            v[..k].sort_unstable();
-            let base = (y * w + x) * NEAR;
-            for (j, &(_, i)) in v[..k].iter().enumerate() {
-                out[base + j] = i;
-            }
+            cells.push(cands.len() as u32);
         }
     }
-    out
+    (cells, cands)
 }
 
 /// The lines open now (god `CutLine` is the only closure of a whole line).
@@ -700,9 +784,10 @@ pub fn commute_ticks(world: &World, from: TilePos, to: TilePos) -> Tick {
     let k = c.stop_candidates.max(1);
     let shut = |s: u16| world.transit.stop_closed.get(&s).is_some_and(|&until| until > world.tick);
     let mut best = UNREACHABLE as Tick;
+    let near_to = net.near(to);
     for &s in net.near(from).iter().filter(|&&s| !shut(s)).take(k) {
         let w1 = Tick::from(net.stops[usize::from(s)].manhattan(from)) * step;
-        for &e in net.near(to).iter().filter(|&&e| !shut(e)).take(k) {
+        for &e in near_to.iter().filter(|&&e| !shut(e)).take(k) {
             if s == e {
                 continue;
             }

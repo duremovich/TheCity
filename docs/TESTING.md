@@ -49,6 +49,7 @@ Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --
   cargo build --release -p citysim-cli --features prof
   target/release/citysim-cli run --days 30 --report --population 20000 --scaled --rph 50 --map <map> --prof-from 25 > run.csv 2> prof.txt
   ```
+- **Big-map paths** (Scale S3a): `cargo test --release -p citysim --test big_island -- --ignored --nocapture` runs the synthetic 3,000 × 1,875 island (`CITYSIM_BENCH_POP`, `_DAYS`, `_FULL` for the population, days and `max_full`) and prints ticks/s, the path queries' latency (p50/p90/p99, Manhattan-only against the landmarks), the pathing state's bytes and the peak working set; `paths.rs::measure_flow_field_vs_big_path` (ignored) prints a flow field's build against an A* query by map size.
 
 ## The core tier
 

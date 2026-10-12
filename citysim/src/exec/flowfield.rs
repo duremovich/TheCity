@@ -6,10 +6,15 @@
 //! no cost array after the build; fields are built lazily and kept in an LRU
 //! ([`FlowCache`]). A field is a pure function of the map and its door, so
 //! eviction never changes results.
+//!
+//! Scale S3a: the LRU is also capped by bytes (`[exec] flow_field_budget_mb`),
+//! and maps past `[exec] flow_field_max_tiles` walk by exact A* paths
+//! instead (`exec::bigpath`), whose labels and landmarks the cache holds.
 
 use ordered_float::OrderedFloat;
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
+use std::sync::{Arc, OnceLock};
 
 use crate::components::TilePos;
 use crate::entity::EntityId;
@@ -229,13 +234,57 @@ impl CostQueue {
 }
 
 /// Flow fields by building, with a use stamp for LRU eviction. Not saved.
+/// Scale S3a: also the big-map paths' component labels
+/// (`exec::bigpath::labels`, dropped with the fields on every wall or
+/// rubble change) and landmarks (`exec::bigpath::Landmarks`, dropped only
+/// when a tile changed: `keep_landmarks_if`), each built on first use.
 #[derive(Clone, Debug, Default)]
 pub struct FlowCache {
     fields: BTreeMap<EntityId, (FlowField, u64)>,
     clock: u64,
+    labels: OnceLock<Arc<Vec<u32>>>,
+    landmarks: OnceLock<Arc<crate::exec::bigpath::Landmarks>>,
 }
 
 impl FlowCache {
+    /// Scale S3a: the fields kept for a map of `tiles` tiles: the configured
+    /// count (`[exec] flow_field_cache`), capped so the fields' bytes stay
+    /// within `budget_bytes` (`[exec] flow_field_budget_mb`); at least one.
+    pub fn cap_for(count: usize, budget_bytes: usize, tiles: usize) -> usize {
+        count.min(budget_bytes / tiles.max(1)).max(1)
+    }
+
+    /// The fields' direction bytes held.
+    pub fn bytes(&self) -> usize {
+        self.fields.values().map(|(f, _)| f.next.len()).sum()
+    }
+
+    /// The big-map component labels for `map`, built on first use after a
+    /// wall change.
+    pub fn labels(&self, map: &Map) -> Arc<Vec<u32>> {
+        self.labels.get_or_init(|| Arc::new(crate::exec::bigpath::labels(map))).clone()
+    }
+
+    /// The big-map landmarks for `map`'s tiles, built on first use after a
+    /// tile changed.
+    pub fn landmarks(&self, map: &Map) -> Arc<crate::exec::bigpath::Landmarks> {
+        self.landmarks.get_or_init(|| Arc::new(crate::exec::bigpath::Landmarks::build(map))).clone()
+    }
+
+    /// After a wall change: keep the landmarks only if they were measured
+    /// on exactly `map`'s tiles (rubble is not a tile change), so they stay
+    /// a pure function of the tiles.
+    pub fn keep_landmarks_if(&mut self, map: &Map) {
+        if self.landmarks.get().is_some_and(|l| !l.same_tiles(map)) {
+            self.landmarks = OnceLock::new();
+        }
+    }
+
+    /// The labels' and landmarks' bytes held (the bench's read).
+    pub fn index_bytes(&self) -> usize {
+        self.labels.get().map_or(0, |l| l.len() * 4) + self.landmarks.get().map_or(0, |l| l.bytes())
+    }
+
     pub fn len(&self) -> usize {
         self.fields.len()
     }
@@ -250,6 +299,7 @@ impl FlowCache {
 
     pub fn clear(&mut self) {
         self.fields.clear();
+        self.labels = OnceLock::new();
     }
 
     /// A building went up on a Lot: `sealed` is its new walls plus its
@@ -261,6 +311,7 @@ impl FlowCache {
     /// are byte-identical to a rebuild on the new map: keeping the field
     /// changes nothing and spares the rebuilds.
     pub fn invalidate_sealed(&mut self, tiles: &[TilePos], sealed: &dyn Fn(TilePos) -> bool) {
+        self.labels = OnceLock::new();
         self.fields.retain(|_, (f, _)| !tiles.iter().any(|&t| f.entered_from_outside(t, sealed)));
     }
 

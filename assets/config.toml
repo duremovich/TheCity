@@ -443,6 +443,13 @@ reservation_ttl = 120
 astar_max_expansions = 16000
 # M10: lazy flow fields kept in an LRU of this many (49 KB each); every real destination fits.
 flow_field_cache = 512
+# Scale S3a (docs/SCALE_20K.md): the fields' byte budget, MiB (caps the count above by the map's size).
+flow_field_budget_mb = 64
+# Scale S3a: past this many tiles a Full walk follows an exact A* path (exec::bigpath) instead of a flow
+# field. 131,072 = 64 MiB / 512: below it the 512-field LRU fits the budget and nothing changes (the 2k
+# map is 49,152). Measured on a street grid with a river: a field builds in 0.3 ms at 256 x 192, 10 ms at
+# 1,000 x 1,000, 78 ms at 3,000 x 1,875 (5.5 MB); an A* query 5-120 us p50, 0.4-3.9 ms p99.
+flow_field_max_tiles = 131072
 
 [lod]
 max_full = 50

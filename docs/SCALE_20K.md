@@ -49,6 +49,25 @@ full-map flow fields (5.6 MB each at 3,000 × 1,875; the 512 cache would be ~2.9
 ### S3: big maps (two coders in parallel after S2)
 - S3a, paths: hierarchical / sector pathfinding (or a bounded flow-field cache keyed by sector); memory bounded
   at 3,000 × 1,875. The 2k city's paths may differ only if proven equal-length.
+  **Done (2026-10-12):** below `[exec] flow_field_max_tiles` (131,072 = the 64 MiB `flow_field_budget_mb` over
+  512 fields) the flow fields stay, now also capped by bytes: the 2k city is byte-identical (CSV and events, seeds
+  42-47 × 120). Above it a Full walk asks `exec::bigpath::find` once for an exact A* path and carries it in its
+  `Goto` (saved; re-found when its next tile is no longer a step away or walkable): integer costs, ALT landmarks
+  (8, measured on the tiles without rubble, rebuilt only when a tile changes, so a pure function of the tiles)
+  over 7 × Manhattan, connected-component labels for an O(1) "unreachable". Why not sectors: only Full agents
+  (`max_full` 50) path, so queries are few (~230 a day on the bench) and an exact search is cheap; HPA*'s portals
+  are inexact unless every boundary tile is one, and an exact property test against Dijkstra was the bar.
+  Manhattan alone flooded on long walks (a Door or Ground tile anywhere on the path puts every road tile of the
+  box under the true cost: 260k tiles expanded on a cross-island query); the landmarks cut the bench's total path
+  time 1,680 → 341 ms over 3 days. Memory at 3,000 × 1,875: search scratch 51 MB (per thread), labels 22 MB,
+  landmarks + tile snapshot 96 MB, no flow fields. The El's per-tile stop shortlist (`transit::Net::near`, 90 MB
+  at that size, rebuilt on every load) is now a per-16 × 16-cell candidate list (620 KB with 486 stops, O(cells ×
+  stops) to build). The commute estimates stay Manhattan, as at 2k; the bench's Full walks run 2.5 % longer than
+  Manhattan (doors, the river's bridges). Bench: `tests/big_island.rs` (ignored), nine copies of the 2k city on a
+  3,000 × 1,875 street grid with a river; 6,000 residents, 3 days: 1,300-1,500 ticks/s after day 0, path queries
+  p50 8 µs / p99 16 ms, peak working set 380 MB; main's flow fields on the same run: 340-400 ticks/s and 746 MB of
+  fields after 3 days (139 of the 512 allowed). 18,000 residents: 630 ticks/s, peak 452 MB; `max_full` 500: ~2,300
+  queries a day, p99 4.6 ms, 570-630 ticks/s.
 - S3b, the map spec: a `MapSource` behind the current text map; a deterministic in-repo generator for a 20k
   stand-in (districts, Blocks, Farms/Fabs, Markets, civic, Hideouts, rail lines as `[[transit.lines]]`,
   employers sized to the population); the TheCityGraphics adapter (`blocks.json`, `districts.json`,

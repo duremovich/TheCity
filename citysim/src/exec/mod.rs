@@ -9,6 +9,7 @@
 #![deny(clippy::unwrap_used)]
 
 pub mod actions;
+pub mod bigpath;
 pub mod flowfield;
 pub mod pathfind;
 pub mod reservations;
@@ -43,6 +44,8 @@ pub enum ExecState {
     Goto {
         target: GotoTarget,
         /// Remaining A* path, reversed (next tile is `last()`); empty when following a flow field.
+        /// Scale S3a: on a big map (`World::big_paths`) a building's walk carries its path too, the
+        /// door its first element.
         path: Vec<TilePos>,
         next_move_tick: Tick,
         /// When the agent first found the door or building full.
@@ -908,8 +911,15 @@ pub fn walking_goto(world: &World, id: EntityId, target: GotoTarget) -> Option<E
     if world.config.exec.straight_line_paths {
         return Some(timed_goto(world, id, target));
     }
+    // Scale S3a: on a big map a building's path is found on the first step
+    // (`advance_goto`, from outside the building being left).
     let path = if target.building.is_some() {
         Vec::new()
+    } else if world.big_paths() {
+        let from = walk_origin(world, id)?;
+        let mut p = world.big_path(from, target.tile)?;
+        p.reverse();
+        p
     } else {
         let from = walk_origin(world, id)?;
         let mut p = pathfind::astar(&world.map, from, target.tile, world.config.exec.astar_max_expansions)?;
@@ -954,6 +964,7 @@ fn advance_goto(
 
     let driving = world.comp::<crate::components::Kit>(id).is_some_and(|k| k.driving.is_some());
     let max_steps = if driving { world.config.vehicles.max_steps_per_tick.max(1) } else { 1 };
+    let big = target.building.is_some() && world.big_paths();
     let mut next_q = (next_move_tick * 4 + Tick::from(carry_q)).max(tick * 4);
     let end_q = (tick + 1) * 4;
     let mut here = pos.tile;
@@ -968,7 +979,12 @@ fn advance_goto(
                     }
                     break;
                 }
-                match world.flow_step(b, here) {
+                let step = match (big, door) {
+                    (false, _) => world.flow_step(b, here),
+                    (true, None) => None,
+                    (true, Some(d)) => big_step(world, &mut path, here, d),
+                };
+                match step {
                     Some(n) if door == Some(n) => {
                         if steps == 0 {
                             return try_enter(world, id, target, path, blocked_since);
@@ -1001,6 +1017,25 @@ fn advance_goto(
     }
     let carry = (next_q % 4) as u8;
     set_goto(world, id, target, path, next_q / 4, None, carry)
+}
+
+/// Scale S3a: the next tile toward `door` on a big map, off the walk's own
+/// path (reversed, the door its first element: the door stays on it until
+/// `try_enter` lets the walker in). The path is found here when the walk
+/// has none, or when its next tile is no longer a step away or no longer
+/// walkable (a wall went up, rubble fell, the body was moved).
+fn big_step(world: &World, path: &mut Vec<TilePos>, here: TilePos, door: TilePos) -> Option<TilePos> {
+    let usable = path.last().is_some_and(|&n| n.manhattan(here) == 1 && world.map.walkable(n));
+    if !usable {
+        let mut p = world.big_path(here, door)?;
+        p.reverse();
+        *path = p;
+    }
+    let n = *path.last()?;
+    if n != door {
+        path.pop();
+    }
+    Some(n)
 }
 
 fn move_to(world: &mut World, id: EntityId, tile: TilePos) {
@@ -1323,15 +1358,32 @@ impl World {
     }
 
     /// Lazily build and cache the flow field for a building's door; past
-    /// `[exec] flow_field_cache` fields the least recently used is evicted.
+    /// `[exec] flow_field_cache` fields (Scale S3a: or the
+    /// `flow_field_budget_mb` bytes) the least recently used is evicted.
     pub fn flow_field_for(&mut self, b: EntityId) -> Option<&FlowField> {
         if !self.flow_fields.contains(b) {
             let door = self.comp::<Building>(b)?.door;
             let field = FlowField::build(&self.map, door);
-            let cap = self.config.exec.flow_field_cache;
+            let e = &self.config.exec;
+            let cap = FlowCache::cap_for(e.flow_field_cache, e.flow_field_budget_mb << 20, field.next.len());
             self.flow_fields.insert(b, field, cap);
         }
         self.flow_fields.get(b)
+    }
+
+    /// Scale S3a: does a Full walk on this map follow exact A* paths
+    /// (`exec::bigpath`) rather than per-door flow fields? Past `[exec]
+    /// flow_field_max_tiles` tiles.
+    pub fn big_paths(&self) -> bool {
+        self.map.w() * self.map.h() > self.config.exec.flow_field_max_tiles
+    }
+
+    /// Scale S3a: the shortest path from `from` (exclusive) to `to`
+    /// (inclusive), forward, or `None` with no way there.
+    pub fn big_path(&self, from: TilePos, to: TilePos) -> Option<Vec<TilePos>> {
+        let labels = self.flow_fields.labels(&self.map);
+        let marks = self.flow_fields.landmarks(&self.map);
+        crate::prof::timed!("exec::big_path", bigpath::find(&self.map, &labels, &marks, from, to))
     }
 
     /// Next tile toward building `b` from `from`.
@@ -1342,6 +1394,7 @@ impl World {
     /// Drop every cached field (after BuildHome / DemolishHome).
     pub fn invalidate_flow_fields(&mut self) {
         self.flow_fields.clear();
+        self.flow_fields.keep_landmarks_if(&self.map);
     }
 
     /// A building went up on a Lot (`rect`): drop the cached fields whose
@@ -1353,5 +1406,6 @@ impl World {
             .collect();
         let sealed = |t: TilePos| rect.contains(t) && self.map.tile_at(t) != crate::components::TileKind::Door;
         self.flow_fields.invalidate_sealed(&tiles, &sealed);
+        self.flow_fields.keep_landmarks_if(&self.map);
     }
 }
