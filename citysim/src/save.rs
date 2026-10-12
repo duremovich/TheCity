@@ -51,7 +51,11 @@ use crate::world::World;
 /// against ~550 KB), plus the map's own `districts`, `district_rle` and
 /// `lines` (serde defaults). A save before 13 carries `tiles` / `zones` as
 /// one enum name per tile and loads as it did (`map::MapRepr`).
-pub const SAVE_VERSION: u8 = 13;
+/// 14: Scale S5 (docs/SCALE_20K.md § S5): `World::ambient` (the Ambient
+/// Homes, the district aggregates, the donors, the counters), `[ambient]` in
+/// the saved config (both skipped when empty or default: a world without
+/// Ambient flats saves as before), `DayRow.ambient`, `EventKind::Materialised`.
+pub const SAVE_VERSION: u8 = 14;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

@@ -17,6 +17,7 @@
 
 #![deny(clippy::unwrap_used)]
 
+pub mod ambient;
 pub mod assets;
 pub mod bind;
 pub mod bins;

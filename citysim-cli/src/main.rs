@@ -4,7 +4,7 @@
 //! citysim-cli run --days N --seed S [--speed 1000] [--report]
 //!                 [--lever "day=90:release_reserve=1500"]... [--save-at T]
 //!                 [--load FILE] [--force-lod full|coarse|stat] [--population N]
-//!                 [--map FILE]
+//!                 [--map FILE] [--ambient-flats R] [--no-ambient] [--ambient-hire-far]
 //! citysim-cli calibrate [--days 30] [--agents N] [--seeds 3] [--map assets/map.txt]
 //!                       [--out assets/stat_table.toml] [--straight-lines]
 //! citysim-cli gen-map --residents N [--seed S] --out FILE
@@ -151,6 +151,20 @@ struct RunArgs {
     /// `mlp` (experiment; ignored with `--load`).
     #[arg(long, value_name = "POLICY")]
     stat_policy: Option<String>,
+    /// Scale S5: Ambient flats per household slot on a map without `flats=`
+    /// (`[ambient] flats_per_slot`; ignored with `--load`).
+    #[arg(long, value_name = "R")]
+    ambient_flats: Option<f32>,
+    /// Scale S5: no Ambient tier (`[ambient] enabled = false`; ignored with `--load`).
+    #[arg(long)]
+    no_ambient: bool,
+    /// Scale S5: `[ambient] hire_far` on (ignored with `--load`).
+    #[arg(long)]
+    ambient_hire_far: bool,
+    /// Scale S5 (measurement): a `MEM <day> <peak working set MB> <working
+    /// set MB>` line on stderr at each day's end (Windows; 0 elsewhere).
+    #[arg(long)]
+    mem: bool,
     /// With the `prof` feature: zero the profile at the start of this day,
     /// so the printed profile is the run's tail (Scale S1).
     #[arg(long, value_name = "DAY")]
@@ -1353,6 +1367,15 @@ fn run(args: RunArgs) -> Result<(), String> {
     if let Some(p) = &args.stat_policy {
         config.lod.policy = p.clone();
     }
+    if let Some(r) = args.ambient_flats {
+        config.ambient.flats_per_slot = r;
+    }
+    if args.no_ambient {
+        config.ambient.enabled = false;
+    }
+    if args.ambient_hire_far {
+        config.ambient.hire_far = true;
+    }
     let mut world = match &args.load {
         Some(path) => {
             let mut w = save::load_from_file(path)?;
@@ -1454,6 +1477,10 @@ fn run(args: RunArgs) -> Result<(), String> {
             print_diag(&world);
         }
         let secs = day_start.elapsed().as_secs_f32().max(1e-9);
+        if args.mem && world.tick % TICKS_PER_DAY == 0 {
+            let (peak, now) = working_set_mb();
+            eprintln!("MEM	{}	{peak:.0}	{now:.0}", world.tick / TICKS_PER_DAY);
+        }
         if args.report && world.tick % TICKS_PER_DAY == 0 {
             if let Some(row) = world.stats.history.back_mut() {
                 row.ticks_per_sec = chunk_ticks as f32 / secs;
@@ -1463,6 +1490,43 @@ fn run(args: RunArgs) -> Result<(), String> {
     }
     citysim::prof::dump();
     Ok(())
+}
+
+/// `--mem`: the process's peak and current working set, MB (Windows; 0
+/// elsewhere), as `tests/big_island.rs` reads it.
+#[cfg(windows)]
+fn working_set_mb() -> (f64, f64) {
+    #[repr(C)]
+    #[derive(Default)]
+    struct Counters {
+        cb: u32,
+        page_faults: u32,
+        peak_working_set: usize,
+        working_set: usize,
+        quota_peak_paged: usize,
+        quota_paged: usize,
+        quota_peak_non_paged: usize,
+        quota_non_paged: usize,
+        pagefile: usize,
+        peak_pagefile: usize,
+    }
+    extern "system" {
+        fn GetCurrentProcess() -> *mut std::ffi::c_void;
+        fn K32GetProcessMemoryInfo(process: *mut std::ffi::c_void, counters: *mut Counters, cb: u32) -> i32;
+    }
+    let mut c = Counters { cb: std::mem::size_of::<Counters>() as u32, ..Counters::default() };
+    // SAFETY: a plain Win32 query into a correctly sized, owned struct.
+    let ok = unsafe { K32GetProcessMemoryInfo(GetCurrentProcess(), &mut c, c.cb) };
+    if ok == 0 {
+        (0.0, 0.0)
+    } else {
+        (c.peak_working_set as f64 / 1_048_576.0, c.working_set as f64 / 1_048_576.0)
+    }
+}
+
+#[cfg(not(windows))]
+fn working_set_mb() -> (f64, f64) {
+    (0.0, 0.0)
 }
 
 /// `--diag`: one `Diag` event line per Market and per corp at the day's start.

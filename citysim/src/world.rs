@@ -1092,6 +1092,10 @@ pub struct World {
     /// housing demand went unmet (`life::grow_housing`).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub housing_demand: BTreeMap<EntityId, u16>,
+    /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier (empty, and not
+    /// saved, on a map without Ambient flats).
+    #[serde(default, skip_serializing_if = "crate::ambient::AmbientState::is_empty")]
+    pub ambient: crate::ambient::AmbientState,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1267,6 +1271,19 @@ pub struct NameTables {
 }
 
 impl NameTables {
+    /// Scale S5: the first-name table for `sex`.
+    pub fn first_names(&self, sex: Sex) -> &[String] {
+        match sex {
+            Sex::Male => &self.first_male,
+            Sex::Female => &self.first_female,
+        }
+    }
+
+    /// Scale S5: the surname table.
+    pub fn last_names(&self) -> &[String] {
+        &self.last
+    }
+
     pub fn load(config: &Config) -> NameTables {
         let text =
             std::fs::read_to_string(config.asset("names.txt")).unwrap_or_else(|e| panic!("cannot read names.txt: {e}"));
@@ -1547,6 +1564,7 @@ impl World {
             employer_of: BTreeMap::new(),
             laid_off: BTreeMap::new(),
             housing_demand: BTreeMap::new(),
+            ambient: Default::default(),
         };
         crate::prof::timed!("new::spawn_buildings", w.spawn_buildings());
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1628,6 +1646,9 @@ impl World {
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.
         crate::prof::timed!("new::health::seed_history", systems::health::seed_history(&mut w));
+        // Scale S5: the Ambient flats beyond the residents' beds (no RNG;
+        // none on a map without them).
+        crate::prof::timed!("new::ambient::seed", systems::ambient::seed(&mut w));
         w
     }
 

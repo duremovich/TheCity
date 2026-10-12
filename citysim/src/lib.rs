@@ -7,6 +7,7 @@
 //! Rules (see `docs/SPEC.md` › Coding rules): no `HashMap`/`HashSet`, no
 //! `std::time`, every constant comes from `assets/config.toml`.
 
+pub mod ambient;
 pub mod components;
 pub mod config;
 pub mod contract;

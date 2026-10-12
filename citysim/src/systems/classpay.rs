@@ -127,8 +127,12 @@ fn mean_education(world: &World, origin: u8) -> f32 {
 /// class's mean education ± `education_spread` (a pure hash of the seed and
 /// the agent).
 fn seeded(world: &World, id: EntityId, home: Option<EntityId>) -> Schooling {
+    seeded_keyed(world, u64::from(id.index), home)
+}
+
+fn seeded_keyed(world: &World, key: u64, home: Option<EntityId>) -> Schooling {
     let origin = home_class(world, home);
-    let u = crate::systems::econ::hash_unit(world.seed(), HASH_EDU, u64::from(id.index), 0);
+    let u = crate::systems::econ::hash_unit(world.seed(), HASH_EDU, key, 0);
     let spread = world.config.classpay.education_spread;
     let education = (mean_education(world, origin) + (2.0 * u - 1.0) * spread).clamp(0.0, 1.0);
     Schooling { origin, education }
@@ -148,10 +152,16 @@ pub fn seed_schooling(world: &mut World) {
 
 /// An immigrant's background, from its arrival Home.
 pub fn on_arrival(world: &mut World, id: EntityId, home: Option<EntityId>) {
+    on_arrival_keyed(world, id, home, u64::from(id.index));
+}
+
+/// [`on_arrival`] with the education hash keyed on `key` (Scale S5: a
+/// materialised Ambient adult's flat).
+pub fn on_arrival_keyed(world: &mut World, id: EntityId, home: Option<EntityId>, key: u64) {
     if !on(world) {
         return;
     }
-    let s = seeded(world, id, home);
+    let s = seeded_keyed(world, key, home);
     world.insert(id, s);
 }
 

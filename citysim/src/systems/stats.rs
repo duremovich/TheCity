@@ -25,7 +25,14 @@ pub fn csv_slots(world: &World) -> (usize, usize) {
 /// Scale S2: the CSV header for this run ([`crate::stats::csv_header`]).
 pub fn csv_header(world: &World) -> String {
     let (corps, districts) = csv_slots(world);
-    crate::stats::csv_header(corps, districts)
+    let header = crate::stats::csv_header(corps, districts);
+    // Scale S5: the Ambient group before `ticks_per_sec`, only on a world
+    // with an Ambient tier (its rows carry it: `systems::ambient::close_day`).
+    if crate::systems::ambient::on(world) {
+        let head = header.strip_suffix(",ticks_per_sec").unwrap_or(&header);
+        return format!("{head},{},ticks_per_sec", crate::stats::AmbientCols::header());
+    }
+    header
 }
 
 pub fn run(world: &mut World) {
@@ -102,6 +109,8 @@ pub fn record_traces(world: &mut World) {
 pub fn snapshot(world: &mut World) {
     // M16a (plan C38): the contract board's snapshot columns.
     crate::systems::contracts::snapshot(world);
+    // Scale S5: the Ambient tier's day (nothing without one).
+    world.stats.current.ambient = crate::systems::ambient::close_day(world);
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;

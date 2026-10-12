@@ -227,6 +227,55 @@ pub struct Config {
     /// scale from.
     #[serde(default)]
     pub scale: ScaleCfg,
+    /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier, the flats
+    /// beyond the simulated residents' beds. Not written into a save at its
+    /// defaults (a 2k save is unchanged).
+    #[serde(default, skip_serializing_if = "AmbientCfg::is_default")]
+    pub ambient: AmbientCfg,
+}
+
+/// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier. A map Home's Ambient
+/// flats are its `flats=` beyond its household slots (`floors`), or, on a
+/// map without `flats=`, `round(floors x flats_per_slot)` (0 by default: the
+/// shipped map has no Ambient tier).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AmbientCfg {
+    /// Off: no Ambient flats on any map.
+    pub enabled: bool,
+    /// Ambient flats per household slot on a map without `flats=`.
+    pub flats_per_slot: f32,
+    /// The share of Ambient flats with a household in them (a hash per flat).
+    pub occupancy: f32,
+    /// The share of Ambient households with a second adult.
+    pub couple_p: f32,
+    /// Labour-pool hires a day at 2,000 residents (`Config::per_capita_count`).
+    pub hires_per_day: u32,
+    /// Also prefer an Ambient household within `[life] commute_hire_ticks`
+    /// of the workplace to a simulated candidate beyond it.
+    pub hire_far: bool,
+    /// The donor's contacts copied onto a materialised adult, at most.
+    pub edges_max: u32,
+}
+
+impl Default for AmbientCfg {
+    fn default() -> Self {
+        AmbientCfg {
+            enabled: true,
+            flats_per_slot: 0.0,
+            occupancy: 0.92,
+            couple_p: 0.25,
+            hires_per_day: 10,
+            hire_far: false,
+            edges_max: 96,
+        }
+    }
+}
+
+impl AmbientCfg {
+    pub fn is_default(&self) -> bool {
+        *self == AmbientCfg::default()
+    }
 }
 
 /// Scale S4 (docs/SCALE_20K.md § S4): the reference city the config's

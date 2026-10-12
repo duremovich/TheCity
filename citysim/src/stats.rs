@@ -364,8 +364,77 @@ pub struct DayRow {
     /// and before `ticks_per_sec` (zero, and not saved, with transit off).
     #[serde(default, skip_serializing_if = "TransitCols::is_zero")]
     pub transit: TransitCols,
+    /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier's group, after the
+    /// transit group and before `ticks_per_sec`, only on a world with an
+    /// Ambient tier (`None` and no columns otherwise: the 2k CSV is unchanged;
+    /// the header from `systems::stats::csv_header`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ambient: Option<AmbientCols>,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
+}
+
+/// Scale S5: the Ambient tier's day (`systems::ambient::close_day`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AmbientCols {
+    /// Ambient flats (occupied or not, materialised or not).
+    pub flats: u64,
+    /// Occupied Ambient flats not yet materialised, and their adults.
+    pub households: u64,
+    pub adults: u64,
+    /// Adults materialised today (every path), the labour pool's hires and
+    /// the households materialised as arrivals.
+    pub materialised: u32,
+    pub hires: u32,
+    pub arrivals: u32,
+    /// Coins crossed in from the World with them today.
+    pub coins_in: i64,
+    /// The materialised adults alive at the day's close, and every adult
+    /// materialised since day 0.
+    pub living: u32,
+    pub total: u64,
+    /// The districts' labour pool and food demand estimates, summed.
+    pub labour: f32,
+    pub food: f32,
+}
+
+impl AmbientCols {
+    /// The header's names, comma-separated, in column order.
+    pub fn header() -> String {
+        [
+            "ambient_flats",
+            "ambient_households",
+            "ambient_adults",
+            "ambient_materialised",
+            "ambient_hires",
+            "ambient_arrivals",
+            "ambient_coins_in",
+            "ambient_living",
+            "ambient_total",
+            "ambient_labour",
+            "ambient_food",
+        ]
+        .join(",")
+    }
+
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        format!(
+            "{},{},{},{},{},{},{},{},{},{:.1},{:.1}",
+            self.flats,
+            self.households,
+            self.adults,
+            self.materialised,
+            self.hires,
+            self.arrivals,
+            self.coins_in,
+            self.living,
+            self.total,
+            self.labour,
+            self.food
+        )
+    }
 }
 
 /// L2 (plan L34): the six leisure kinds' CSV names (`BuildingKind::LEISURE` order).
@@ -1079,6 +1148,7 @@ impl DayRow {
             health: HealthCols::default(),
             hit: HitCols::default(),
             transit: TransitCols::default(),
+            ambient: None,
             ticks_per_sec: 0.0,
         }
     }
@@ -1087,6 +1157,12 @@ impl DayRow {
     pub fn csv_row(&self) -> String {
         // Hunger as sickness: the health group rides with the jobs group.
         let jobs_health = format!("{},{}", self.jobs.csv(), self.health.csv());
+        // Scale S5: the Ambient group rides with the transit group (only on a
+        // world with an Ambient tier).
+        let transit_ambient = match &self.ambient {
+            Some(a) => format!("{},{}", self.transit.csv(), a.csv()),
+            None => self.transit.csv(),
+        };
         let corps: Vec<String> = (0..self.corps.len().max(CORP_SLOTS))
             .map(|i| match self.corps.get(i).copied().flatten() {
                 Some((t, o)) => format!("{t},{o}"),
@@ -1223,7 +1299,7 @@ impl DayRow {
             self.econ.csv_slots(self.district_slots()),
             jobs_health,
             self.hit.csv(),
-            self.transit.csv(),
+            transit_ambient,
             self.ticks_per_sec,
         )
     }

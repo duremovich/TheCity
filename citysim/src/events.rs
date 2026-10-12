@@ -306,10 +306,13 @@ pub enum EventKind {
     /// `[]`: the Treasury could not pay the safety net for `[policy]
     /// lapse_days` days in a row: the dole and public works lapsed.
     PolicyLapsed,
+    // --- Scale S5 (docs/SCALE_20K.md § S5).
+    /// `[adult, spouse?, home]`: an Ambient household entered the simulation.
+    Materialised,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 149] = [
+    pub const ALL: [EventKind; 150] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -459,6 +462,7 @@ impl EventKind {
         EventKind::Recanted,
         EventKind::CaseCold,
         EventKind::PolicyLapsed,
+        EventKind::Materialised,
     ];
 }
 

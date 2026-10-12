@@ -40,6 +40,9 @@ pub fn run(world: &mut World) {
     }
     crate::prof::timed!("demo::corpses", corpses(world));
     crate::prof::timed!("demo::gravedigger_notices", gravedigger_notices(world));
+    // Scale S5: the Ambient tier's donors and district aggregates, before
+    // the job search reads its labour pool (nothing without the tier).
+    crate::prof::timed!("demo::ambient::daily", crate::systems::ambient::daily(world));
     crate::prof::timed!("demo::job_search", job_search(world));
     // Jobs and room J19: the day's labour market for the migrants' means.
     crate::prof::timed!("demo::note_labour_market", note_labour_market(world));
@@ -631,6 +634,47 @@ pub(crate) fn job_search(world: &mut World) {
     for &pass in passes {
         job_search_pass(world, &vacancies, pass);
     }
+    // Scale S5: the labour pool. The ungraded places no simulated adult
+    // took go to the Ambient household nearest the workplace, up to the
+    // day's cap (nothing without the tier).
+    if crate::systems::ambient::on(world) {
+        ambient_pass(world);
+    }
+}
+
+/// Scale S5 (docs/SCALE_20K.md § S5): [`job_search`]'s last pass, the open
+/// ungraded places (in `vacancies` order) offered to the Ambient labour pool.
+fn ambient_pass(world: &mut World) {
+    use crate::systems::classpay;
+    let open: Vec<(EntityId, Vec<Role>)> = world.vacancies.iter().map(|(&e, r)| (e, r.clone())).collect();
+    for (employer, roles) in open {
+        for role in roles {
+            if !crate::systems::ambient::hires_left(world) {
+                return;
+            }
+            if classpay::on(world) && classpay::base_grade(world, Some(employer), role) >= classpay::PROFESSIONAL {
+                continue;
+            }
+            if !world.vacancies.get(&employer).is_some_and(|v| v.contains(&role)) {
+                continue;
+            }
+            let Some(id) = crate::systems::ambient::hire_from_pool(world, employer, role) else { return };
+            close_vacancy(world, id, employer, role);
+        }
+    }
+}
+
+/// A hire's place out of `world.vacancies` (and its works roster entry).
+fn close_vacancy(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
+    crate::systems::budget::note_hire(world, id, employer, role);
+    if let Some(v) = world.vacancies.get_mut(&employer) {
+        if let Some(i) = v.iter().position(|&r| r == role) {
+            v.remove(i);
+        }
+        if v.is_empty() {
+            world.vacancies.remove(&employer);
+        }
+    }
 }
 
 /// One walk of [`job_search`]'s vacancy snapshot: every vacancy (`None`),
@@ -671,6 +715,14 @@ fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], 
                 }
             };
             let Some(id) = pick else { continue };
+            // Scale S5 (`[ambient] hire_far`): an Ambient household within
+            // the commute cap before a simulated adult beyond it.
+            if !graded && ambient_nearer(world, id, workplace_door) {
+                if let Some(a) = crate::systems::ambient::hire_from_pool(world, employer, role) {
+                    close_vacancy(world, a, employer, role);
+                    continue;
+                }
+            }
             if let Some(pool) = pool.as_mut() {
                 pool.hired.insert(id);
             }
@@ -792,6 +844,26 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         })
         .min()
         .map(|(_, id)| id)
+}
+
+/// Scale S5 (`[ambient] hire_far`): `id`'s commute to `workplace_door` is
+/// past `[life] commute_hire_ticks` and the nearest Ambient household's is
+/// within it (the labour pool's cap not spent).
+fn ambient_nearer(world: &World, id: EntityId, workplace_door: TilePos) -> bool {
+    if !world.config.ambient.hire_far
+        || !crate::systems::ambient::on(world)
+        || !crate::systems::ambient::hires_left(world)
+    {
+        return false;
+    }
+    let cap = world.config.life.commute_hire_ticks;
+    if crate::systems::life::commute_cost(world, hire_from(world, id), workplace_door) <= cap {
+        return false;
+    }
+    crate::systems::ambient::nearest_home(world, workplace_door)
+        .and_then(|hi| world.ambient.homes.get(hi))
+        .and_then(|h| world.comp::<Building>(h.building))
+        .is_some_and(|b| crate::systems::life::commute_cost(world, b.door, workplace_door) <= cap)
 }
 
 /// [`pick_candidate`]'s filters that hold for a whole `job_search` pass
@@ -1154,15 +1226,22 @@ fn immigration(world: &mut World) {
         for (b, role) in offers_due(world) {
             spawn_immigrant_for(world, b, role);
         }
-        for _ in 0..pull_week(world) {
-            let (_, n) = spawn_migrant(world, None);
+        for i in 0..pull_week(world) {
+            // Scale S5: an Ambient household before the map edge.
+            let (_, n) = match crate::systems::ambient::arrival_any(world, u64::from(i)) {
+                Some(x) => x,
+                None => spawn_migrant(world, None),
+            };
             world.stats.current.jobs.migrants_pull += n;
         }
         return;
     }
     let n = crate::systems::classes::immigrants_this_week(world);
-    for _ in 0..n {
-        spawn_immigrant(world);
+    for i in 0..n {
+        // Scale S5: an Ambient household before the map edge.
+        if crate::systems::ambient::arrival_any(world, u64::from(i)).is_none() {
+            spawn_immigrant(world);
+        }
     }
 }
 
@@ -1470,7 +1549,11 @@ pub fn spawn_immigrant_for(world: &mut World, b: EntityId, role: Role) -> Option
     if !world.vacancies.get(&b).is_some_and(|v| v.contains(&role)) {
         return None;
     }
-    let (id, n) = spawn_migrant(world, Some(door));
+    // Scale S5: the Ambient household nearest the workplace before the map edge.
+    let (id, n) = match crate::systems::ambient::arrival_near(world, door) {
+        Some(x) => x,
+        None => spawn_migrant(world, Some(door)),
+    };
     floor_role_skill(world, id, role);
     hire(world, id, b, role);
     crate::systems::budget::note_hire(world, id, b, role);
@@ -1496,7 +1579,7 @@ pub fn spawn_immigrant_for(world: &mut World, b: EntityId, role: Role) -> Option
 /// `competence::role_skill` names; a Lab's hacking and a Fixer's knowledge
 /// too, their other slots); a guard's lawfulness at least 0.4
 /// (`pick_candidate`'s rule).
-fn floor_role_skill(world: &mut World, id: EntityId, role: Role) {
+pub(crate) fn floor_role_skill(world: &mut World, id: EntityId, role: Role) {
     let floor = world.config.demography.offer_skill.clamp(0.0, 1.0);
     let label = crate::systems::competence::role_skill(world, id, role).map(|(_, _, l)| l);
     if let Some(s) = world.comp_mut::<Skills>(id) {

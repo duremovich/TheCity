@@ -305,12 +305,18 @@ fn steady_tox(cfg: &crate::config::SicknessCfg, s: f32, dreg: bool) -> f32 {
 /// uniform below the symptom). Pure hashes of the seed and the agent:
 /// deterministic, the same at either LOD tier.
 pub fn seed_agent(world: &mut World, id: EntityId) {
+    seed_agent_keyed(world, id, u64::from(id.index));
+}
+
+/// [`seed_agent`] with the hashes keyed on `key` rather than the entity's
+/// index (Scale S5: a materialised Ambient adult's history is its flat's,
+/// whatever entity it lands in).
+pub fn seed_agent_keyed(world: &mut World, id: EntityId, key: u64) {
     if !on(world) || !crate::systems::demography::is_adult(world, id) || !world.has::<Needs>(id) {
         return;
     }
     let cfg = world.config.sickness.clone();
     let seed = world.seed();
-    let key = u64::from(id.index);
     let dreg = world.comp::<crate::components::Household>(id).is_none_or(|h| h.home.is_none());
     let s = likely_synth_share(world, id);
     let age = age_years(world, id);

@@ -2436,3 +2436,16 @@ hideouts = 2
 offices = 2
 lots = 160
 districts = 8
+
+# Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier. A map Home's flats beyond its household slots (the
+# import's `flats=`; on a map without it, `round(floors x flats_per_slot)`, 0 here: the shipped map has none)
+# are Ambient: seeds and an occupancy hash, materialised into Statistical residents on demand (the labour
+# pool, immigration, a story touch). Their savings cross in from the World account.
+[ambient]
+enabled = true
+flats_per_slot = 0.0
+occupancy = 0.92                    # the share of Ambient flats with a household
+couple_p = 0.25                     # a household's second adult
+hires_per_day = 10                  # labour-pool hires a day at 2,000 residents (per capita)
+hire_far = false                    # also prefer an Ambient household near work to a simulated one past the commute cap
+edges_max = 96                      # a materialised adult's contacts (copied from a donor), at most
