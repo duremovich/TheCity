@@ -365,3 +365,10 @@ Findings:
 3. M16b → M17 (Ambient demand as outside demand creating jobs) → M18. Write every new mechanism for 20k and run
    core_20k beside core_year per merge.
 - **Review fixes merged b7f8376** (all ten, SAVE 15, 2k byte-identical, core_20k 200 tps). **M16b started**: one solo coder (`m16b`), phase by phase per the SOP; the orchestrator commits and merges each phase, then continues the same agent. Phase 1 (leverage) running off b7f8376.
+- **M16b phase 1 (leverage) merged 56e5729**, SAVE 16:
+  - Gates: trio 1,019/0; core_year; shadow 131/0/4; gods; parity; core_20k at 177 tps.
+  - Seeds 42-47 × 120 vs main: Murders −6 %, Assault/day +10 % (the backlash from failed coercions, accepted as pressure).
+  - Gang income is a per-seed finding with the shakedown roll identical. Protection runs ≥ 3 weeks on all 6 seeds.
+  - Persuade never fires naturally; it waits on the phase-4 board campaigns.
+  - `[leverage] enabled` / `CITYSIM_LEVERAGE_OFF=1` is the off identity.
+  - Phase 2 (captives and the new kinds) is running on the same agent.
