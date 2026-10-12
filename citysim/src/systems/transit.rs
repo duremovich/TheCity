@@ -1247,11 +1247,12 @@ pub fn run(world: &mut World) {
 /// Phase 3, the money circuit (Dylan 2026-10-10: the city owns the El; fares
 /// to the Treasury, power from it): the maintenance crews the line's fares
 /// pay for: the mean fares of the last `[treasury] receipts_days` days less
-/// a day's power, over a Sanitation post's wage (`treasury::sweeper_wage`).
-/// Parked in the Treasury, whose posts are capped (police at its ceiling,
-/// Sanitation at `sanitation_max`) and whose tax already sits at its floor,
-/// the fares left the city's purses 15-17 % lower (seeds 42-47); spent as
-/// wages they go back round. Station posts (clerks, platform guards) wait
+/// a day's power, over a Sanitation post's wage (`treasury::sweeper_wage`),
+/// capped at `[transit] staff_per_line` a line open. Uncapped, the fares
+/// paid ~250 crews on seed 42 (~14 % of jobs, a jobs program hiding the
+/// Treasury's hoard); the fares past the cap are the Treasury's income like
+/// any other, counted in the civic receipts and returned by the surplus
+/// credit (`treasury::daily`). Station posts (clerks, platform guards) wait
 /// for station buildings (the Interiors milestone, decision 5).
 pub fn staff_target(world: &World) -> u16 {
     let days = world.config.treasury.receipts_days.max(1) as usize;
@@ -1262,7 +1263,9 @@ pub fn staff_target(world: &World) -> u16 {
     let mean = rows.iter().sum::<i64>() / rows.len() as i64;
     let open = open_lines(world).iter().filter(|&&o| o).count() as i64;
     let net = mean - open * world.config.transit.power_per_line_day;
-    u16::try_from((net.max(0)) / crate::systems::treasury::sweeper_wage(world)).unwrap_or(u16::MAX)
+    let paid = (net.max(0)) / crate::systems::treasury::sweeper_wage(world);
+    let cap = open * i64::from(world.config.transit.staff_per_line);
+    u16::try_from(paid.min(cap)).unwrap_or(u16::MAX)
 }
 
 /// The network as text (stops, lines, a sample of rides): the

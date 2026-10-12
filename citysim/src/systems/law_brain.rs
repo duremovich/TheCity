@@ -403,7 +403,7 @@ pub fn mean_crime_rate(world: &World) -> f32 {
 pub fn paid_shares(world: &World) -> Vec<f32> {
     let n = world.districts.len();
     let mut paid = vec![0.0f32; n];
-    let rate = world.levers.tax_rate;
+    let rate = world.levers.tax_rate.max(0.0);
     let upkeep = &world.config.corps.upkeep;
     for (i, d) in world.districts.iter().enumerate() {
         for &b in &d.buildings {

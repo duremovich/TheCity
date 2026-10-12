@@ -2069,6 +2069,18 @@ tax_min = 0.0                        # plan 0.05 (see above: at 0.05 the Treasur
 tax_max = 0.20
 tax_step = 0.01
 band = [8000, 25000]
+# The surplus credit (2026-10-12): with the tax at tax_min and the Treasury held above band hi, the band takes the
+# rate past the floor, a tax_step a band_hold_days, down to -credit_max: a negative rate is a credit of -rate on
+# every wage paid (economy::collect_wage), paid from the Treasury's coins above band lo only (ownership::tax_credit,
+# the tax_credit column). Inside the band a credit eases a step a hold back to tax_min (the Treasury settles at hi);
+# under lo it stops at once. Not a safety net: the jobless get nothing; it is the city not hoarding what its capped
+# posts can't spend. Why: the city hoarded on main (Treasury 65-85k at d120 and 139-154k at d365 on 42-44, tax 0
+# from day 30) and, with the El crews capped (staff_per_line), the fares pooled too (145k at d120, purses -27 %).
+# Seeds 42-47 x 120, crews capped, credit_max 0 / 0.15 / 0.25 / 0.35: Treasury d120 145k / 90k / 64k / 57k, purses
+# 31.6k / 42.0k / 49.4k / 53.9k (main, uncapped crews: 73.6k, 43.1k), employed 1,396 / 1,489 / 1,503 / 1,516
+# (main 1,746). 42-44 x 365, 0.25: the Treasury 13-41k from d150 (main 139-154k), purses 111.6k (main 79.0k);
+# 0.35 dips to lo (8k) on two seeds.
+credit_max = 0.25
 tax_initial = 0.05                   # phase 3a (plan key): the rate a no_net city opens with (negative: [levers] tax_rate)
 scrap_coins = 3                      # phase 3a (plan key): a find paid from the Recycler's till with no_net (0: [life] scavenge_coins)
 # Flip readiness (the transition wave; no_net): the Recycler's opening float, out of the corps' share of the opening hoard
@@ -2079,7 +2091,8 @@ scrap_coins = 3                      # phase 3a (plan key): a find paid from the
 # 10,000 out of the hoard (kept): 145-205.
 till_initial = 10000
 # Jobs v2 J16 (P5a; read only with [economy2] wages and no_safety_net on): the civic budget. Each midnight
-# target = civic_share x the mean of the last receipts_days days' receipts (tax, fines, customs, property)
+# target = civic_share x the mean of the last receipts_days days' receipts (tax, fines, customs, property, the El's
+# fares: left out, the fares funded the posts only through the hoard term, and the surplus credit cut Sanitation 50 -> 1-25)
 # + max(0, Treasury - band hi) / payout_days, spent only above band lo; allocated in order to the police
 # ([levers] guard_count up to police_per_1000 x population / 1,000) and Sanitation (sanitation_count up to
 # sanitation_max), each x its wage. A headcount drops at most civic_pace a day. Placeholders (spec 5).
@@ -2351,7 +2364,7 @@ premium_payout_share = 0.5
 [transit]
 # docs/TRANSIT.md (the El). On by default since phase 3 (CITYSIM_TRANSIT=0 turns it off for A/B runs).
 # City-owned (Dylan 2026-10-10): fares go to the Treasury, which pays the power to the World and the El's
-# maintenance crews (Sanitation posts, `TransitState.staff`) out of them. Placeholders unless a comment says measured.
+# maintenance crews (Sanitation posts, `TransitState.staff`, capped by staff_per_line) out of them. Placeholders unless a comment says measured.
 enabled = true
 fare = 1                       # coins per ride, transfers free
 headway = 10                   # ticks between departures from each terminus
@@ -2375,6 +2388,13 @@ night_to = 300                 # 05:00
 danger_crime = 3.0             # crime_rate at which an average-courage rider refuses at night
 power_per_line_day = 20        # the Treasury -> the World account, per open line: E13's scale (a Market's power is 20 a day). Phase 3: the placeholder 150 sent 450 a day to the World, which then minted ~45k fewer export coins over 120 days (purses -25 %, employed -5 %, seeds 42-47)
 dodge_fine = 5                 # a dodger's fine when the Precinct is full
+# The El crews' cap (2026-10-12): crews = min(the fares past the power / a sweeper's wage, staff_per_line x open lines).
+# Uncapped, the fares paid ~250 crews on seed 42 (12.5 % of residents, ~14 % of jobs: a jobs program masking the
+# Treasury's hoard); a real metro staffs 0.2-0.8 % of its population. Per open line, not per stop: the line is the
+# unit the power is billed by, and a cut line stands its crews down with its power; per stop would tie the crews to
+# stop_spacing, a timetable knob. 4 a line = 12 crews (0.6 %). Seeds 42-47 x 120 vs uncapped: employed 1,746 ->
+# 1,396 with the fares parked in the Treasury (145k at d120), 1,503 with [treasury] credit_max returning them.
+staff_per_line = 4
 
 [[transit.lines]]
 name = "Vat Line"

@@ -560,6 +560,25 @@ pub fn refund_tax(world: &mut World, owner: Option<EntityId>, amount: i64) {
     world.stats.current.flow_tax -= amount;
 }
 
+/// The surplus credit (`[treasury] credit_max`, `economy::collect_wage` at
+/// a negative tax rate): the Treasury pays `coins` to `agent` on a wage,
+/// at most its coins above `band[0]`. Ledgered as `jobs.tax_credit`, not
+/// in `flow_tax`: the civic budget's receipts stay the gross tax. Conserves
+/// coins. Returns the coins paid.
+pub fn tax_credit(world: &mut World, agent: EntityId, coins: i64) -> i64 {
+    let surplus = world.purse(None) - world.config.treasury.band[0];
+    let coins = coins.min(surplus);
+    if coins <= 0 {
+        return 0;
+    }
+    shadow_flow(world, None, Some(agent), coins, Flow::Tax, false);
+    *world.probe.treasury_out.entry("Tax credit".to_string()).or_insert(0) += coins;
+    world.purse_add(None, -coins);
+    world.purse_add(Some(agent), coins);
+    world.stats.current.jobs.tax_credit += coins;
+    coins
+}
+
 /// L2 L11 (M17 plan O6): coins cross into the city from an outside
 /// account: `from`'s treasury pays (never below 0), `to`'s purse gains,
 /// the ledger column moves, `outside.inbound` grows. Untaxed (an export's

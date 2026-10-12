@@ -272,6 +272,12 @@ pub struct TransitCfg {
     pub danger_crime: f32,
     /// Coins per open line per day, the Treasury to the World (power).
     pub power_per_line_day: i64,
+    /// The El's maintenance crews per open line: the cap on
+    /// `transit::staff_target` (the fares past the power still bound it
+    /// from above: no fares, no crews). A real metro staffs 0.2-0.8 % of
+    /// its population; 4 a line on the shipped 3 lines is 12 posts (0.6 %
+    /// of 2,000). Uncapped, the fares paid ~250 crews on seed 42.
+    pub staff_per_line: u16,
     /// A fare dodger's fine when the Precinct is full (`Flow::Fine`).
     pub dodge_fine: i64,
     pub lines: Vec<TransitLineCfg>,
@@ -310,6 +316,7 @@ impl Default for TransitCfg {
             night_to: 300,
             danger_crime: 3.0,
             power_per_line_day: 20,
+            staff_per_line: 4,
             dodge_fine: 5,
             lines: Vec::new(),
         }
@@ -6163,6 +6170,12 @@ pub struct TreasuryCfg {
     pub tax_max: f32,
     pub tax_step: f32,
     pub band: [i64; 2],
+    /// The surplus credit: while the Treasury sits above `band[1]` the rate
+    /// may fall past `tax_min` down to `-credit_max`. A negative rate is a
+    /// credit on every wage paid (`economy::collect_wage`), paid from the
+    /// coins above `band[0]` only, so the Treasury hoards no income its
+    /// capped posts can't spend. 0: the rate stops at `tax_min`.
+    pub credit_max: f32,
     /// Phase 3a (plan key, the transition wave): the tax rate a market-law
     /// city opens with (`Levers::from_config`); negative keeps `[levers] tax_rate`.
     pub tax_initial: f32,
@@ -6176,7 +6189,7 @@ pub struct TreasuryCfg {
     /// pays nothing until the Recycler has sold, ~day 21-24).
     pub till_initial: i64,
     /// Jobs v2 J16 (P5a, the market wage law only): the civic budget's share of the
-    /// trailing receipts (`Flow::{Tax, Fine, Customs, Property}`).
+    /// trailing receipts (`Flow::{Tax, Fine, Customs, Property}` and the El's fares).
     pub civic_share: f32,
     /// J16: days over which the hoard above `band[1]` is paid out.
     pub payout_days: u32,
@@ -6202,6 +6215,7 @@ impl Default for TreasuryCfg {
             tax_max: 0.20,
             tax_step: 0.01,
             band: [8_000, 25_000],
+            credit_max: 0.0,
             tax_initial: -1.0,
             scrap_coins: 0,
             till_initial: 0,
