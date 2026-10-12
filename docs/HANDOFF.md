@@ -380,3 +380,12 @@ Findings:
   - Levers if Prison-door gunfights are wanted: `hostage_w`, `lev_bias.hostage`.
   - `CITYSIM_HOSTAGE_OFF=1` is the off identity.
   - Phase 3 (the wounded) is running.
+- **M16b phase 3 (the wounded) merged c357052**, SAVE 18:
+  - The Statistical split is analytic (`stat_saved` 0.16) with no stat_table regen.
+  - Gates: trio 1,044/0; core_year (starvation 4); shadow 133/0/2; gods; parity; core_20k at 210 tps.
+  - The downed (388 on 42-47): 69 % bleed out, 9 % finished off, 10 % stabilised (kin mostly). Violent deaths −4 %, Murder events +4 % (late bleed-out Murders).
+  - Trauma Team: 75 subscriptions standing, about 5.5k coins a seed flowing to Security corps, 2 calls, 0 saves.
+  - Printed findings: the wounded share is 61 % (band 20-50) and the saved share 10 % (band 30-70).
+  - Levers: `bleed_hours`, the Rescue flat.
+  - `CITYSIM_WOUNDED_OFF=1` is the off identity.
+  - Phase 4 (boards, tags, attention) is running.
