@@ -2419,3 +2419,20 @@ waypoints = [[7, 167], [231, 167], [231, 127]]
 [[transit.lines]]
 name = "Crosstown"
 waypoints = [[39, 15], [39, 63], [231, 63]]
+
+# Scale S4 (docs/SCALE_20K.md § S4): the reference city every absolute key above was tuned on, the shipped
+# map at 2,000 residents. `Config::scaled_to(n)` (`run --population N --scaled`) scales the per-person keys by
+# n / population (the city-wide caps, the World's demand, the opening businesses: up only, a smaller city keeps
+# the 2,000 city's value); `Config::fit_to_map` (World::new) spreads the per-building keys over the map's counts
+# against these (per Market, per Hideout's gang, the corp roster once per reference city's employers, the
+# one-per-city buildings, per district, per Lot). Every ratio is 1 on the shipped map.
+[scale]
+enabled = true
+population = 2000
+farms = 12
+markets = 3
+bars = 3
+hideouts = 2
+offices = 2
+lots = 160
+districts = 8

@@ -125,16 +125,17 @@ pub fn nearest_mission(world: &World, from: TilePos) -> Option<EntityId> {
 // Seeding and founding (E26, E30)
 // ---------------------------------------------------------------------------
 
-/// The Sump district with the most Blocks (ties the lower index).
-fn sump_district(world: &World) -> Option<usize> {
-    world
+/// The Sump districts by Blocks, most first (ties the lower index).
+fn sump_districts(world: &World) -> Vec<usize> {
+    let mut v: Vec<(std::cmp::Reverse<usize>, usize)> = world
         .districts
         .iter()
         .enumerate()
         .filter(|(_, d)| d.zone == crate::components::Zone::Sump)
-        .map(|(i, d)| (d.homes.len(), std::cmp::Reverse(i)))
-        .max()
-        .map(|(_, std::cmp::Reverse(i))| i)
+        .map(|(i, d)| (std::cmp::Reverse(d.homes.len()), i))
+        .collect();
+    v.sort_unstable();
+    v.into_iter().map(|(_, i)| i).collect()
 }
 
 /// A vacant Lot in district `d` nearest its centroid, else (`refit`) a
@@ -200,11 +201,14 @@ fn open_mission(world: &mut World, site: EntityId, on_lot: bool, owner: Option<E
 /// Unplugged's Hideout) gains a kitchen. Returns the Missions built.
 pub fn seed(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    let n = world.config.charity.seed;
-    let Some(d) = sump_district(world) else {
+    let n = world.config.charity.seed as usize;
+    let sump = sump_districts(world);
+    if sump.is_empty() {
         return built;
-    };
-    for _ in 0..n {
+    }
+    // Scale S4: Mission `j` in the `j`-th Sump district by Blocks (wrapped).
+    for j in 0..n {
+        let d = sump[j % sump.len()];
         let Some((site, on_lot)) = site_for(world, d, true) else { break };
         let Some(b) = open_mission(world, site, on_lot, None) else { break };
         let at = world.district_name(world.district_of_building(b)).to_string();

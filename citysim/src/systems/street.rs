@@ -307,9 +307,19 @@ pub fn seed_hotels(world: &mut World) {
         .filter(|d| d.zone == crate::components::Zone::Sump)
         .map(|d| (d.id, d.centroid))
         .collect();
-    for (d, centroid) in sump {
+    // Scale S4: past one a Sump district (`seed_hotels` per capita), the
+    // round goes again while it builds.
+    let rounds = sump.iter().copied().cycle().take(sump.len() * left);
+    let mut built_this_round = false;
+    for (k, (d, centroid)) in rounds.enumerate() {
         if left == 0 {
             break;
+        }
+        if k > 0 && k % sump.len() == 0 {
+            if !built_this_round {
+                break;
+            }
+            built_this_round = false;
         }
         let lot = crate::systems::founding::vacant_lots(world)
             .into_iter()
@@ -340,6 +350,7 @@ pub fn seed_hotels(world: &mut World) {
             continue;
         }
         left -= 1;
+        built_this_round = true;
         let what = world.name_of(lot);
         let (actors, who) = match owner {
             Some(o) => (vec![o, lot], world.name_of(o)),

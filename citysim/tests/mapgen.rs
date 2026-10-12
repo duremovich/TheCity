@@ -160,7 +160,9 @@ fn test_world_on_a_generated_map() {
     assert_eq!(w.config.districts.names.len(), w.map.districts.len());
     let housed =
         w.citizens().into_iter().filter(|&a| w.comp::<citysim::Household>(a).and_then(|h| h.home).is_some()).count();
-    assert!(housed >= 3_900, "housed {housed}");
+    // Scale S4: the opening derelicts are per resident (32 Blocks at 4,000,
+    // as 16 at 2,000), their residents start homeless: ~96 % housed.
+    assert!(housed >= 3_800, "housed {housed}");
     // A Home in the west borough is in one of its districts.
     let far = w.map.buildings.iter().find(|b| b.kind == BuildingKind::Home && b.door.x < 256).expect("a home").clone();
     let d = w.district_of(far.door);

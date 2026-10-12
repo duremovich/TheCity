@@ -241,6 +241,59 @@ impl World {
     }
 }
 
+/// Scale S4: a seeding row's place by role, not by district name (the
+/// generated and imported maps name their districts otherwise): a zone and
+/// a position from west (0.0) to east (1.0) among its districts. On the
+/// shipped map the old names resolve to themselves: Sump 0.0 / 0.5 / 0.9 is
+/// Sump West / Central / East, Mid 0.0 / 0.75 Mid West / East, and the
+/// Spire, the Civic and the Vats are one district each.
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub struct Seat {
+    pub zone: Zone,
+    pub pos: f32,
+}
+
+impl Seat {
+    pub const fn new(zone: Zone, pos: f32) -> Seat {
+        Seat { zone, pos }
+    }
+}
+
+/// Scale S4: the district of copy `copy` of `copies` of a seeding row: the
+/// seat's zone's districts by centroid (west to east, then north to south,
+/// then id), copy `j` at the fraction `pos + j / copies` (wrapped) of that
+/// list. With more copies than the zone has districts the list widens to
+/// the Mid's too (the generated map folds the Spire, the Civic and the Vats
+/// of the outer boroughs into their Mid). A zone with no district reads the
+/// Mid's, then every district's. One copy on the shipped map is the old
+/// named district.
+pub fn seat_district(world: &World, seat: Seat, copy: usize, copies: usize) -> Option<DistrictId> {
+    let of = |zones: &[Zone]| -> Vec<DistrictId> {
+        let mut v: Vec<(u16, u16, DistrictId)> = world
+            .districts
+            .iter()
+            .filter(|d| zones.is_empty() || zones.contains(&d.zone))
+            .map(|d| (d.centroid.x, d.centroid.y, d.id))
+            .collect();
+        v.sort_unstable();
+        v.into_iter().map(|(_, _, d)| d).collect()
+    };
+    let copies = copies.max(1);
+    let mut list = of(&[seat.zone]);
+    if seat.zone != Zone::Mid && (list.is_empty() || copies > list.len()) {
+        list = of(&[seat.zone, Zone::Mid]);
+    }
+    if list.is_empty() {
+        list = of(&[]);
+    }
+    if list.is_empty() {
+        return None;
+    }
+    let at = (f64::from(seat.pos) + (copy % copies) as f64 / copies as f64).fract();
+    let i = ((at * list.len() as f64).floor() as usize).min(list.len() - 1);
+    Some(list[i])
+}
+
 /// D7: a crime at `tile` counts toward its district's crime rate.
 pub fn note_crime(world: &mut World, tile: TilePos) {
     let d = world.district_of(tile);
@@ -609,7 +662,8 @@ pub fn gang_cleaning(world: &mut World) {
 /// D23 (plan deviation: its own reconcile, not `law::reconcile_guards`
 /// generalised): hire jobless free adults (no lawfulness floor; the
 /// poorest first, ties lower id) or let the newest city sweeper go (never
-/// a public-works hire), at most five a day, toward
+/// a public-works hire), at most five a day (Scale S4: per 2,000 residents,
+/// `Config::per_capita_count`), toward
 /// `levers.sanitation_count`; the Recycler employs them, the Treasury pays
 /// them.
 pub fn reconcile_sanitation(world: &mut World) {
@@ -635,7 +689,7 @@ pub fn reconcile_sanitation(world: &mut World) {
             .map(|id| (world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins), id))
             .collect();
         candidates.sort_unstable();
-        for (_, id) in candidates.into_iter().take((want - have.len()).min(5)) {
+        for (_, id) in candidates.into_iter().take((want - have.len()).min(world.config.per_capita_count(5))) {
             crate::systems::demography::hire(world, id, recycler, Role::Sanitation);
         }
     } else if have.len() > want {
@@ -650,7 +704,7 @@ pub fn reconcile_sanitation(world: &mut World) {
             .filter_map(|&s| world.comp::<Job>(s).map(|j| (std::cmp::Reverse(j.hired_tick), s)))
             .collect();
         newest.sort_unstable();
-        for (_, s) in newest.into_iter().take((have.len() - want).min(5)) {
+        for (_, s) in newest.into_iter().take((have.len() - want).min(world.config.per_capita_count(5))) {
             let text = format!("{} let go from Sanitation", world.name_of(s));
             crate::systems::economy::dismiss(world, s, Some(recycler), text);
             world.sweep_beats.remove(&s);

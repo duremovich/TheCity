@@ -71,7 +71,8 @@ pub fn give_hacking(world: &mut World, id: EntityId, hacking: f32) {
 pub fn seeded_tech(world: &World, corp: EntityId) -> Tech {
     let cfg = &world.config.tech;
     let Some(c) = world.comp::<Corp>(corp) else { return Tech::default() };
-    let tiers = cfg.seed.get(&c.name).copied().unwrap_or([1, 1, 1]).map(|t| t.clamp(1, 3));
+    // Scale S4: a copy of a shipped row is seeded as its template.
+    let tiers = cfg.seed.get(world.corp_template(corp)).copied().unwrap_or([1, 1, 1]).map(|t| t.clamp(1, 3));
     let focus = c.niches.iter().next().map_or(Track::Industry, |&n| cfg.focus_by_niche.for_niche(n));
     Tech::seeded(tiers, focus)
 }

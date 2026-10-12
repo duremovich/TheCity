@@ -1206,11 +1206,20 @@ pub fn seed(world: &mut World) {
     }
     // 5. Bars: the Food corp with the most Farms takes the Bar nearest its
     //    Market; then the first agent owners (D11).
+    //    Scale S4: once per copy of the roster (`CorpsCfg::replicate`;
+    //    copy `j` is the rows that are the `j`-th of their template).
     let mut free_bars: Vec<EntityId> = world.buildings_of_kind(BuildingKind::Bar).to_vec();
-    let food_lead = (0..n)
-        .filter(|&i| world.comp::<Corp>(corps[i]).is_some_and(|c| c.niches.contains(&Niche::Food)))
-        .min_by_key(|&i| (std::cmp::Reverse(cfg.farms[i]), i));
-    if let Some(i) = food_lead {
+    let copy_of = |i: usize| (0..i).filter(|&j| cfg.template_of(j) == cfg.template_of(i)).count();
+    let copies = (0..n).map(copy_of).max().map_or(0, |c| c + 1);
+    let food_leads: Vec<usize> = (0..copies)
+        .filter_map(|copy| {
+            (0..n)
+                .filter(|&i| copy_of(i) == copy)
+                .filter(|&i| world.comp::<Corp>(corps[i]).is_some_and(|c| c.niches.contains(&Niche::Food)))
+                .min_by_key(|&i| (std::cmp::Reverse(cfg.farms[i]), i))
+        })
+        .collect();
+    for i in food_leads {
         let market = world.comp::<Corp>(corps[i]).and_then(|cc| {
             cc.buildings
                 .iter()

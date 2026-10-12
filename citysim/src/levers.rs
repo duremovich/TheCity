@@ -780,7 +780,8 @@ impl World {
                 );
             }
             PlayerCommand::SetGuardCount(n) => {
-                self.levers.guard_count = (*n).min(60);
+                // Scale S4: the ceiling per capita (60 at 2,000).
+                self.levers.guard_count = (*n).min(self.config.lever_ceiling(60));
                 // Jobs v2 J17: a set headcount pins against the civic budget.
                 if crate::systems::treasury::on(self) {
                     self.econ.civic_pinned = true;
@@ -792,7 +793,7 @@ impl World {
                 );
             }
             PlayerCommand::SetImmigrationPerWeek(n) => {
-                self.levers.immigration_per_week = (*n).min(30);
+                self.levers.immigration_per_week = (*n).min(self.config.lever_ceiling(30));
                 self.push_event(
                     EventKind::PlayerAction,
                     &[],
@@ -871,7 +872,7 @@ impl World {
                 crate::systems::law_brain::redeal(self, "pinned");
             }
             PlayerCommand::SetSanitation(n) => {
-                self.levers.sanitation_count = (*n).min(60);
+                self.levers.sanitation_count = (*n).min(self.config.lever_ceiling(60));
                 // Jobs v2 J17: a set headcount pins against the civic budget.
                 if crate::systems::treasury::on(self) {
                     self.econ.civic_pinned = true;

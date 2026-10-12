@@ -2417,35 +2417,61 @@ fn garage_rent(world: &mut World) {
 /// seed_owner_coins`, its founding cooldown started. Phase 3 rows: a
 /// Clinic in the Spire (the Tech corp's) and back-alley docs in Sump West
 /// and Mid East (agents', as Sump Central's Garage).
+/// Scale S4: the rows by role (`districts::Seat`, the shipped names on the
+/// shipped map), dealt `Config::copies` times (copy `j`'s corp rows go to
+/// the `j`-th Tech corp, wrapped).
 /// Returns the Lots built, in row order.
 pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
+    use crate::components::Zone;
+    use crate::systems::districts::Seat;
     let mut built = Vec::new();
     if !world.config.assets.enabled {
         return built;
     }
-    let tech = world
+    let techs: Vec<EntityId> = world
         .corps()
         .into_iter()
-        .find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&crate::components::Niche::Tech)));
-    let rows: [(&str, bool, BuildingKind); 5] = [
-        ("Civic", true, BuildingKind::Garage),
-        ("Sump Central", false, BuildingKind::Garage),
-        ("Spire", true, BuildingKind::Clinic),
-        ("Sump West", false, BuildingKind::Clinic),
-        ("Mid East", false, BuildingKind::Clinic),
+        .filter(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.niches.contains(&crate::components::Niche::Tech)))
+        .collect();
+    let rows: [(Seat, bool, BuildingKind); 5] = [
+        (Seat::new(Zone::Civic, 0.0), true, BuildingKind::Garage),
+        (Seat::new(Zone::Sump, 0.5), false, BuildingKind::Garage),
+        (Seat::new(Zone::Spire, 0.0), true, BuildingKind::Clinic),
+        (Seat::new(Zone::Sump, 0.0), false, BuildingKind::Clinic),
+        (Seat::new(Zone::Mid, 0.75), false, BuildingKind::Clinic),
     ];
-    for (district, corp_owned, kind) in rows {
-        let Some((d, centroid)) = world.districts.iter().find(|x| x.name == district).map(|x| (x.id, x.centroid))
-        else {
-            continue;
-        };
+    let copies = world.config.copies();
+    for copy in 0..copies {
+        let tech = if techs.is_empty() { None } else { Some(techs[copy % techs.len()]) };
+        for &(seat, corp_owned, kind) in &rows {
+            if let Some(lot) = seed_seller(world, seat, copy, copies, corp_owned, kind, tech) {
+                built.push(lot);
+            }
+        }
+    }
+    built
+}
+
+/// One `seed_sellers` row's copy: the Lot built, if any.
+fn seed_seller(
+    world: &mut World,
+    seat: crate::systems::districts::Seat,
+    copy: usize,
+    copies: usize,
+    corp_owned: bool,
+    kind: BuildingKind,
+    tech: Option<EntityId>,
+) -> Option<EntityId> {
+    {
+        let d = crate::systems::districts::seat_district(world, seat, copy, copies)?;
+        let (district, centroid) = world.districts.get(d.index()).map(|x| (x.name.clone(), x.centroid))?;
         let lot = crate::systems::founding::vacant_lots(world)
             .into_iter()
             .filter(|&l| world.district_of_building(l) == d)
             .filter_map(|l| world.comp::<Building>(l).map(|b| (b.door.manhattan(centroid), l)))
             .min()
             .map(|(_, l)| l);
-        let Some(lot) = lot else { continue };
+        let lot = lot?;
         let lot_door = world.comp::<Building>(lot).map(|b| b.door).unwrap_or_default();
         let owner = if corp_owned {
             tech
@@ -2469,9 +2495,7 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
                 .min()
                 .map(|(_, a)| a)
         };
-        if crate::systems::founding::build_on_lot(world, lot, kind, owner).is_err() {
-            continue;
-        }
+        crate::systems::founding::build_on_lot(world, lot, kind, owner).ok()?;
         if !corp_owned {
             let coins = world.config.shop.seed_owner_coins;
             if let Some(w) = owner.and_then(|o| world.comp_mut::<Wallet>(o)) {
@@ -2486,7 +2510,6 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
                 b.last_found_day = Some(today);
             }
         }
-        built.push(lot);
         let (what, who) = (world.name_of(lot), world.owner_label(owner));
         let rect = world.comp::<Building>(lot).map(|b| b.rect);
         let actors: Vec<EntityId> = owner.into_iter().chain([lot]).collect();
@@ -2495,6 +2518,6 @@ pub fn seed_sellers(world: &mut World) -> Vec<EntityId> {
             &actors,
             format!("{who} opened {what} in {district} (seeded; Lot {} {rect:?})", lot.index),
         );
+        Some(lot)
     }
-    built
 }

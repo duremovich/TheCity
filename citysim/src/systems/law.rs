@@ -1491,7 +1491,8 @@ fn credit_guard_shifts(world: &mut World) {
     }
 }
 
-/// The `guard_count` lever, reconciled daily with at most five changes:
+/// The `guard_count` lever, reconciled daily with at most five changes (Scale
+/// S4: five per 2,000 residents, `Config::per_capita_count`):
 /// hire unemployed, unjailed adults of lawfulness >= 0.4 (highest first);
 /// fire the guard with the lowest loyalty.
 pub fn reconcile_guards(world: &mut World) {
@@ -1510,7 +1511,7 @@ pub fn reconcile_guards(world: &mut World) {
             .filter(|&(l, _)| l.0 >= 0.4)
             .collect();
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then(a.1.cmp(&b.1)));
-        for (_, id) in candidates.into_iter().take((want - guards.len()).min(5)) {
+        for (_, id) in candidates.into_iter().take((want - guards.len()).min(world.config.per_capita_count(5))) {
             crate::systems::demography::hire(world, id, jail, Role::Guard);
             // A dead guard's vacancy is this hire, not a second one.
             if let Some(v) = world.vacancies.get_mut(&jail) {
@@ -1528,7 +1529,7 @@ pub fn reconcile_guards(world: &mut World) {
             .filter_map(|&g| world.comp::<Personality>(g).map(|p| (ordered_float::OrderedFloat(p.loyalty), g)))
             .collect();
         by_loyalty.sort();
-        for (_, g) in by_loyalty.into_iter().take((guards.len() - want).min(5)) {
+        for (_, g) in by_loyalty.into_iter().take((guards.len() - want).min(world.config.per_capita_count(5))) {
             let text = format!("{} dismissed from the guard", world.name_of(g));
             crate::systems::economy::dismiss(world, g, None, text);
         }

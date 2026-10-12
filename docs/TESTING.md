@@ -16,6 +16,7 @@
 | core | `core_sanity` (non-ignored) | `citysim/tests/core.rs` | seeds 42-44 x 120 days in threads, one collector: coin identity and `escrow_leak` every day, collapse bounds, 37 mechanism-existence bullets; ticks/s printed | ~30 s |
 | core | `core_throughput` (ignored) | `citysim/tests/core.rs` | seed 42 alone x 30 days: the 4,000 ticks/s floor (release). Run it alone on a quiet box: parallel builds make the reading meaningless | ~10 s |
 | core | `core_year` (`#[ignore]`) | `citysim/tests/core.rs` | seed 42 x 365 days, the collapse bounds per 30-day window | ~100 s |
+| core | `core_20k` (`#[ignore]`) | `citysim/tests/core.rs` | the 20k profile (Scale S4): the generated 20,000-resident city (`gen:20000`, `scaled_to(20_000)`), seed 42 x 30 days twice in parallel: the collapse bounds per capita, an employment collapse floor, the coin identity, determinism (the two runs' save hashes); J24 and the per-capita readings printed as `FINDING`s; ticks/s printed against its own floor (120) | ~5 min |
 | core | determinism and saves | `determinism.rs`, `save.rs` | same seed same hash at a day boundary; a mid-day save runs on byte for byte (plus the hunt, guard and contract rebuilds) | seconds |
 | behaviour | `shadow --assert` / `test_behaviour_tier` (`#[ignore]`) | `citysim-cli/src/shadow.rs` | 135 per-archetype bounds on the diary metrics (days 19 and 90, seeds 42-44 pooled, up to 30 agents per archetype and seed, each archetype in its own clone), calibrated on the noise of seven config butterflies | ~80 s, ~3 GB |
 | behaviour | person probes | `citysim/tests/person.rs` | one pinned agent, one stimulus, what a person would do | ~2 s |
@@ -41,6 +42,7 @@ Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --
 - **Every milestone** (or nightly): the merge set, the parity test, and a human (or model critic) read of the diaries:
   ```
   cargo test --release -p citysim --test lod -- --ignored --nocapture
+  cargo test --release -p citysim --test core -- --ignored core_20k --nocapture   # the 20k profile, alone (~5 min)
   citysim-cli shadow --assert --out shadow_out     # keeps the diaries under shadow_out/d19, shadow_out/d90
   ```
   plus a shadow pass in the style of `docs/SHADOW_V2.md` (critics read one diary per archetype and write what would make it real). That read is the final judge of "alive"; the bounds only catch regressions between reads.
@@ -61,6 +63,8 @@ Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --
 - **a mechanism that never fired** on any of the three seeds (the list below);
 - **hunger as sickness** (on with the flip, always on since P10): starvation over 20 per 120 days (Dylan: a broken free-food floor), and five more bullets (a synth meal, a bin meal, a bin shakedown, a malnourished agent, a sick day). J25 counts adults sleeping on the street (Dylan, 2026-10-10: a squat, a cot or a Hotel bed is a rung); the Dregs and their split print beside it;
 - **ticks/s** under 4,000 on seed 42 (release only). The core binary holds one non-ignored test and cargo runs test binaries one at a time, so the seed runs alone but for its two sibling threads (it reads ~6,000 there; ~10,700 truly alone and idle).
+
+**The 20k profile** (`core_20k`, Scale S4, docs/SCALE_20K.md § S4): the same bounds per capita, the counts (population range, starvation, assaults a day, corps alive) times `Config::per_capita` (10 at 20,000; 1 in the shipped city), the Jail's capacity read from the fitted world. Employment is asserted as a **collapse floor, not a calibration band**: employed >= 0.40 of free adults from day 30 (S3b's collapsed 20k city read 0.17). J24's 0.5 is printed beside it as a `FINDING` (the 20k city reads ~0.50 on day 30, the 2,000 city ~0.53: a calibration gap, written up in SCALE_20K.md). Determinism: seed 42 runs twice in parallel threads and the closing save hashes must match. Ticks/s is printed against `TPS_FLOOR_20K` (120: 155-173 measured with the two runs in parallel, less ~25 %), never asserted (the box is noisy). The mechanism bullets are `core_sanity`'s, not repeated here.
 
 The bounds are the v1 sanity trio scaled to 2,000 residents (M10 plan D38), unchanged since M8. `core_year` runs the same bounds over each 30-day window of a 365-day seed-42 run, the Assault bound at 1.5 x (a 30-day window is noisier than 120 days; seed 42 peaks at 36.3).
 

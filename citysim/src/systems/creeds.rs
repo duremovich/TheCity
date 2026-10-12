@@ -65,6 +65,9 @@ pub fn open_to_strangers(world: &World, gang: EntityId) -> bool {
 /// Hideout labelled "Chapel", held by The Unplugged (`purist_treasury`,
 /// creed Purist, no members). No derelict there: the vacant Lot nearest
 /// the centroid, built as a Hideout. Neither: no Unplugged. No RNG.
+/// Scale S4: Sump Central by role (`districts::Seat`, the Sump's middle),
+/// and a chapel per `Config::copies` ("The Unplugged 2", ...), each its own
+/// Purist gang. Returns the first.
 pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
     if !world.config.creeds.seed_purist {
         return None;
@@ -72,13 +75,20 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
     if world.gang_list().iter().any(|&g| is_purist(world, g)) {
         return None;
     }
-    let d = (0..world.districts.len())
-        .map(|i| crate::components::DistrictId(i as u8))
-        .find(|&d| world.district_name(d) == "Sump Central")
-        .unwrap_or(crate::components::DistrictId(6));
-    if d.index() >= world.districts.len() {
-        return None;
+    let copies = world.config.copies();
+    let mut first = None;
+    for copy in 0..copies {
+        if let Some(g) = seed_chapel(world, copy, copies) {
+            first.get_or_insert(g);
+        }
     }
+    first
+}
+
+/// One `seed_unplugged` chapel.
+fn seed_chapel(world: &mut World, copy: usize, copies: usize) -> Option<EntityId> {
+    let seat = crate::systems::districts::Seat::new(crate::components::Zone::Sump, 0.5);
+    let d = crate::systems::districts::seat_district(world, seat, copy, copies)?;
     let centroid = world.district(d).centroid;
     let derelict = world
         .buildings_of_kind(BuildingKind::Home)
@@ -90,10 +100,11 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
         .min()
         .map(|(_, h)| h);
     let cfg = world.config.creeds.clone();
+    let name = if copy == 0 { cfg.purist_name.clone() } else { format!("{} {}", cfg.purist_name, copy + 1) };
     let chapel = match derelict {
         Some(b) => {
             let gang = world.spawn();
-            world.insert(gang, Gang::new(cfg.purist_name.clone(), b, cfg.purist_treasury));
+            world.insert(gang, Gang::new(name, b, cfg.purist_treasury));
             crate::systems::gang::convert_to_hideout(world, gang, b);
             (gang, b)
         }
@@ -109,7 +120,7 @@ pub fn seed_unplugged(world: &mut World) -> Option<EntityId> {
                 .map(|(_, l)| l)?;
             let b = crate::systems::founding::build_on_lot(world, lot, BuildingKind::Hideout, None).ok()?;
             let gang = world.spawn();
-            world.insert(gang, Gang::new(cfg.purist_name.clone(), b, cfg.purist_treasury));
+            world.insert(gang, Gang::new(name, b, cfg.purist_treasury));
             (gang, b)
         }
     };

@@ -635,8 +635,11 @@ fn test_fixer_seeded_in_mid_east_and_sump_central_or_logged() {
         .count();
     assert!(lots > 0, "Sump Central keeps its vacant Lots");
     assert!(fixers.iter().all(|&f| w.district_of_building(f).index() != sc), "no seeded Fixer in Sump Central");
-    for want in contracts::SEEDED_FIXERS {
-        let d = w.districts.iter().position(|x| x.name == want).expect("the district");
+    for seat in contracts::SEEDED_FIXERS {
+        // Scale S4: the seat by role is Mid East on the shipped map.
+        let d = citysim::systems::districts::seat_district(&w, seat, 0, 1).expect("the district").index();
+        let want = w.districts[d].name.clone();
+        assert_eq!(want, "Mid East");
         let mask = w.district_adjacent[d];
         let ok = fixers.iter().any(|&f| {
             let i = w.district_of_building(f).index();

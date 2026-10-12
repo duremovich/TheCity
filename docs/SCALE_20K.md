@@ -127,6 +127,120 @@ full-map flow fields (5.6 MB each at 3,000 × 1,875; the 512 cache would be ~2.9
   shadow/behaviour read. A sane 20k city: employment, hunger, homeless, deaths in the 2k city's per-capita band
   (findings, not tuned asserts, per the no-fine-tuning doctrine).
 
+#### S4 status (2026-10-12)
+**The rule.** `[scale]` (config.toml) names the reference city every absolute key was tuned on: the shipped
+map at 2,000 residents. Two passes scale from it, and every ratio is 1 in the shipped city, which stays
+byte-identical (CSV without `ticks_per_sec`, and events, seeds 42-47 x 120, checked on the final code):
+- `Config::scaled_to(n)` (per person, `f = n / 2,000`): the old keys as before; the S4 keys **up only** (a city
+  under 2,000 keeps the 2,000 city's value, as before S4: the small test cities were calibrated on it).
+- `Config::fit_to_map(&map)` (`World::new`, after the map's districts and lines are in): per building, per gang,
+  per corp and per district, by the map's count of the kind over `[scale]`'s (ratios under 1 read 1);
+  `[scale] enabled = false` in `v1_profile`.
+
+| key | old (absolute) | rule | 2k | 20k (gen) |
+| --- | --- | --- | --- | --- |
+| `[world] market_initial`, `[economy] restock_floor/batch`, `price_ref_stock` | per Market, but `scaled_to` scaled them too (the double scaling: 444k food at day 0) | `x f / (Markets / 3)` | 1,500 / 1,200 / 1,200 / 1,500 | same per Market |
+| `[corps]` rows (`farms`, `markets`, `offices`, `blocks`, `treasury_initial`, `megacorp`, `niches`) | 9 rows, Farms/Markets/Offices absolute (12 of 120 Farms owned) | the roster dealt `k = round(map employers / 17)` times ("Nutrix 2", ...), each column re-dealt to `round(sum x ratio)` (largest remainder), treasuries `/ k`; new `[corps] template` | 9 corps | 90 corps own 120/30/20 |
+| `[corps] bar_owner_count`, `bar_owner_coins` | 2, 200 (x f) | `x Bars/3`, `/ (Bars/3)` (per owner) | 2, 200 | 20, 200 |
+| the corp Bar (`ownership::seed`) | the roster's one food lead | one per roster copy | 1 | 10 |
+| `[gangs] max_members` | 60 (x f by `scaled_to`: 600) | per gang: `/ (Hideouts/2)` | 60 | 60 |
+| `[gangs] max_gangs` | 4 | `x Hideouts/2` | 4 | 40 |
+| gang names | `[gangs] names`, then "Gang N" | past the names, generated ("The Neon Dogs", 144 distinct) | as before | 20 Hideout gangs |
+| `[buildings] jail / hall / cemetery / warehouse` capacity and stock_cap | absolute | per capita over the map's count of the kind | 160 / 20 / 8 / 6, 20,000 | 1,600 / 200 / 80 / 60, 200,000 |
+| `[riots] riot_max`, `riot_promote_max`; `[law] gang_landlord_homes`, `sweep_full` | per district | `x` residents per district / 250 | 40, 20, 20, 10 | 123, 62, 62, 31 |
+| `[riots] max_active_riots`, `[law] max_crackdowns` | city-wide | `x districts / 8` | 2, 2 | 7, 7 |
+| `[street] shanty_lots_max` | 20 of 160 Lots | `x Lots/160` | 20 | 200 |
+| `[street] seed_derelict_blocks` | 16 | per resident (they empty occupied Blocks; a tall-Block map has many Homes per resident) | 16 | 160 |
+| `[street] seed_hotels`, `city_absorb_floor` | 2, 5,000 | `x f` | 2, 5,000 | 20, 50,000 |
+| `[jobs] seed_venues`; `[charity] seed` | absolute | `x f` | 3/3/10/2/2/1/2; 1 | x10 |
+| `[world_market] food/parts/data cap`, `cap_wages`, `treasury_ref`; `[export] treasury_ref` | 350/40/12, [0,100,30], 50k; 20k | `x f` (money enters at the 2k per-capita rate) | as before | x10 |
+| `[demography] migrants_max`, `beds_ref`, `offers_max` | 20, 60, 6 | `x f` | as before | 200, 600, 60 |
+| `[hunt] max_hunts`; `[contracts] max_open`; `[missions] max_missions`; `[hitmarket] max_open`, `posts_per_day`, `corp_year_cap`; `[fviolence] day_cap` | city-wide | `x f` | 16; 256; 12; 16, 3, 2; 3/12/20/2 | x10 |
+| `[budget] band`, `works_max`; `[treasury] civic_pace` | 30k/60k, 120; 5 | `x f` | as before | x10 |
+| `[life] relocate_per_day` | 8 (a floor under `relocate_per_1000`) | `x f` | 8 | 80 (never binds) |
+| `[lod] max_full`, `max_coarse`, `private_quota` | 50, 150, 12 | `x f` (measured, below) | as before | 500, 1,500, 120 |
+| `[brain] plan_budget_per_tick`, `plan_expansion_budget_per_tick`, `path_budget_per_tick` | 12, 600, 20 | `x` (bodied tier / 200) | as before | 120, 6,000, 200 |
+| `law::reconcile_guards`, `districts::reconcile_sanitation` | 5 moves a day (code) | `Config::per_capita_count(5)` | 5 | 50 |
+| `law_brain::REPORT_LOG_CAP`, `REPORT_PLACES_CAP` | 128, 512 rings the crackdown pressure reads over 7 days (code) | `per_capita_count` | 128, 512 | 1,280, 5,120 |
+| `PlayerCommand` Set{GuardCount,Sanitation,ImmigrationPerWeek} ceilings | 60, 60, 30 | `Config::lever_ceiling` (x f) | as before | 600, 600, 300 |
+| seeded Garages/Clinics, Labs, corp Feeds, Fixers, Unplugged chapels | one set | `Config::copies()` = round(f) sets (below) | 1 | 10 |
+
+Verified per holder and left absolute: `[law] patrol_beat_homes` (a loop walkable in a shift), `[data] store_cap`
+(per store), `[buildings] market.stock_cap` (per Market), `[corps] hoard_heat`, `outside_treasury_initial`,
+`estate_buyer_cap/heir_cap`, `[gangs] corp_raid_cap` (per corp, and the corps are copies), `[stims]
+cook_target` (per gang), `stim_restock_floor` and `[living] reserve_release_batch` (per Market), `[news]
+stories_per_day` and `[fixers] offers_per_day` (per Feed, per Fixer), `[transit] staff_per_line` (per line),
+`[treasury] police_per_jail_bed` (the Jail scales), `[law] crackdown_reports_per_1000`, `[corps] residents_per_*`,
+`[fixers] fixers_per_pop`, `[life] relocate_per_1000` (already per capita).
+
+**More corps, not bigger ones** (generated 20k, seeds 42-44, day 60): the roster dealt ten times read employed
+47.7-49.4 % and homeless 246-260 per 1,000; nine rows owning ten times the buildings, with every per-corp coin key
+(`hoard_heat`, `lobby_min_treasury`, the estate caps, the outside treasuries, `corp_raid_cap`) ten times over,
+read 45.1-46.9 % and 278-284. Copies also keep an exec per ~2,000 residents and a bankruptcy's share of the economy.
+
+**The bodied tiers per capita.** Both at 50/150 at 20k: gang members 0.8 and arrests 46 per 1,000 against the 2k
+city's 46 and 373 (a gang recruits only through its bodies; the gangs die) at 435-784 ticks/s. Coarse per capita:
+gangs back (28-30) at 117-235 ticks/s. Full per capita too: +0.4-1.4 points employed, -6-7 homeless per 1,000, the
+same ticks/s. The cost is a body's goal scoring over city-wide lists (Unwind's venues, Squat's derelicts: the
+profile's top sites), not the residents.
+
+**Seeding by role** (`districts::Seat`, `seat_district`): a row is a zone and a position west to east among its
+districts (by centroid); on the shipped map Sump 0.0 / 0.5 / 0.9, Mid 0.0 / 0.75 and the one Spire, Civic and
+Vats resolve to the old names, so the 2k picks are the same. Copy `j` of `n` takes the fraction `pos + j/n`; past
+the zone's district count the list widens to the Mid's (the generator folds the outer boroughs' Spire, Civic and
+Vats into Mid). The corp rows read their template (`World::corps_of_template`, `corp_template`): Zetatech's Labs
+and Garages go to every Zetatech copy, the tech trees seed by template. Converted: `assets::seed_sellers`,
+`virt::SEED_LABS`, `news::SEED_FEEDS` (the Civic Wire stays one per city; "Nutrix 2 Now" per copy),
+`contracts::SEEDED_FIXERS`, `creeds::seed_unplugged` ("The Unplugged 2", each its own Purist gang),
+`jobs::seed_owner` (the Fabs to the template copies in turn; the Lounge's heir), `charity::seed` (one Mission per
+Sump district by Blocks), `street::seed_hotels` (rounds over the Sump districts). Seeded at day 0: the import (5k,
+arbitrary district names) 5 Garages, 8 Ripperdocs, 12 Labs, 4 Feeds, 3 Fixers, 2 chapels (main: none); gen20k 20,
+30, 40, 11, 10, 10.
+
+**`[lod] coworker_crew`** stays 0. 2k (seeds 42-47 x 120, summed), 32 vs 0: Friend edges 370,786 vs 382,120
+(-3.0 %, inside the 53-70k per-seed spread; S1's -43 % predates the El crew cap), employed +0.5 %, homeless -3 %,
+Murders +6 %, Marriages +1.6 %, ticks/s +11 %. 20k (42-43 x 30): Friend +8 %, ticks/s +4 %, employment flat. Small
+at 2k, but not byte-identical, and the 20k profile doesn't need it for throughput (the co-worker pairs are ~2 % of a
+20k tick now); recommended for a later default flip only alongside a regenerated table.
+
+**20k vs 2k per 1,000 residents** (final code; gen20k `run --population 20000 --scaled`, seeds 42 / 43 / 44;
+the 2k city seeds 42 / 43 / 44):
+
+| | day | employed % | homeless | starved (cum.) | Murders (cum.) | gang members | jailed | corps alive | Treasury / resident | ticks/s |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| 2k | 30 | 51.4 / 53.3 / 51.6 | 98 / 87 / 88 | 0 | 6.0 / 6.1 / 4.0 | 46 | 42 | 9/9 | 28.0 / 26.8 / 24.6 | (4,000+) |
+| 20k | 30 | 48.5 / 48.2 / 48.6 | 97 / 103 / 97 | 0 / 0.05 / 0 | 5.8 / 6.6 / 6.0 | - | - | 87/90 (core_20k) | 28.3 / 26.4 / 26.2 | 86-110 (six runs on the box) |
+| 2k | 60 | 56.0 / 59.2 / 58.9 | 161 / 144 / 150 | 0 | 16.8 / 14.3 / 13.2 | 67 / 60 / - | 54 / 52 / - | 9/9 (1, 0, 1 bankrupt) | 33.4 / 37.6 / 29.7 | |
+| 20k | 60 | 51.6 / 51.5 / 49.8 | 199 / 204 / 201 | 0.15 | 16.0 / 14.8 / 16.5 | 40 / 40 / 40 | 43 / 31 / 32 | 90 rows, 13-16 bankrupt | 35.7 / 34.3 / 34.3 | 82-95 |
+| 5k import | 30 | 47.4 / 46.1 / 47.3 | 129 / 142 / 139 | 0 | 7.7 / 7.5 / 7.1 | 26 / 27 / 21 | 29 / 33 / 28 | 27 rows, 1-2 bankrupt | 30.5 / 29.4 / 32.8 | 1,030-1,090 |
+
+Before S4 (S3b's smoke, seed 42): gen20k 21 % employed, 616 homeless and 182 starved per 1,000 by day 29; the
+new 5k fixture (import-v2's run on main) 25-30 % employed, ~610 homeless per 1,000 and starvation from day 27.
+
+**What still diverges per capita, and why (a finding, not chased: coordinator ruling 2026-10-12).** By day 30 the
+20k city employs ~3 points fewer (J24 0.497 of free adults vs ~0.53 at 2k), by day 60 ~6 points, with ~50 more
+homeless per 1,000. The gap grows with size: generated 4k 50.0 / 53.2 % on day 30 (2k-like), 10k 49.8-49.9 %, 20k
+48.2-48.6 %. Day 0 matches role for role (42.8 % vs 42.9 %). Days 1-29, per 1,000 (2k seeds 42 / 43 vs 20k 42 / 43),
+hires later than day 0, exits (laid off, fired, quit), net:
+- Guards: +14.0 / +9.5 hired, 6.5 / 1.5 out at 2k; +6.2 / +7.0, 10.3 / 10.9 out at 20k (net 29-30 vs 17.5): the
+  Security copies lay off private guards on revenue ("a shift past full staff"). Contracts spread evenly over the
+  twenty Security corps (11-23 each); the demand per corp is lower (smaller gangs, fewer raids to secure against:
+  gang members 40 vs 60-67 per 1,000 by day 60).
+- Vat Techs: net 149-150 vs 166-186 (later hires 51-56 vs 62-85).
+- Clerks: +0.6-0.9 later vs +6.0-6.5; Night Stockers +0.7-0.9 vs +2.0-3.5 (already at 4k: Clerks +1.8).
+- Fab Techs: 8-9 exits vs 0 (the per-capita Fabs sell Parts at the per-capita cap, and lay off on revenue).
+- Bartenders: net 10-11 vs 8.5-9.5 (matched once the corp Bar went per copy).
+- Sanitation: net 29.6-29.9 vs 31.5-32.5 (was 7.5 before the reconcilers' daily five went per capita).
+Also: 13-16 of 90 corps bankrupt by day 60 (the 2k city 0-1 of 9); Vagrancy per capita several times the 2k city's
+(the sweeps run per district, and the districts hold 3x the residents).
+
+**Throughput.** 20k reads 155-173 ticks/s in `core_20k` (two runs in parallel) and 82-130 with six runs on the box,
+falling over the run (210 on day 1, ~90 on day 60). The bodies' goal scoring is the cost (above). `TPS_FLOOR_20K` is
+120, printed.
+
+**The gate:** `core_20k` (docs/TESTING.md): 20k seed 42 x 30 days twice in parallel; per-capita collapse bounds,
+an employment collapse floor of 0.40 (J24's 0.5 printed), determinism, the coin identity. Passes on the final code.
+
 ### S5: the Ambient tier
 - Flats as seeds + occupancy; per-district aggregate demand feeding the markets, rents, labour pool and street
   density; deterministic materialise / dematerialise (hire, immigration, a story touch, the player's circle);

@@ -17,12 +17,13 @@ use smallvec::SmallVec;
 
 use crate::components::{
     Asset, AssetKind, AssetLoc, Brain, Building, BuildingKind, Corp, DistrictId, Gang, GoalKind, Kit, Niche,
-    Personality, Position, Skills, TilePos,
+    Personality, Position, Skills, TilePos, Zone,
 };
 use crate::config::IceCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::corps::fleet_reserve;
+use crate::systems::districts::Seat;
 use crate::systems::ownership::{self, Flow, OwnerKind};
 use crate::time::{Tick, TICKS_PER_DAY, TICKS_PER_HOUR};
 use crate::virt::{
@@ -314,12 +315,14 @@ pub fn bump_epoch(world: &mut World) {
 // Seeding (the plan's Seeding table, V26, V47)
 // ---------------------------------------------------------------------------
 
-/// The seeded Labs: owner corp by name, district by name, focus.
-const SEED_LABS: [(&str, &str, Track); 4] = [
-    ("Zetatech", "Spire", Track::Chrome),
-    ("Zetatech", "Civic", Track::Industry),
-    ("Arasaka", "Vats", Track::Deck),
-    ("Militech", "Mid West", Track::Deck),
+/// The seeded Labs: owner corp by its row's template (Scale S4: copy `j`
+/// goes to the template's `j`-th copy), district by role (the Spire, the
+/// Civic, the Vats, Mid West on the shipped map), focus.
+const SEED_LABS: [(&str, Seat, Track); 4] = [
+    ("Zetatech", Seat::new(Zone::Spire, 0.0), Track::Chrome),
+    ("Zetatech", Seat::new(Zone::Civic, 0.0), Track::Industry),
+    ("Arasaka", Seat::new(Zone::Vats, 0.0), Track::Deck),
+    ("Militech", Seat::new(Zone::Mid, 0.0), Track::Deck),
 ];
 
 /// Last in `World::new`, after `assets::seed_sellers`: each row's Lab on
@@ -331,14 +334,17 @@ const SEED_LABS: [(&str, &str, Track); 4] = [
 /// plane off.
 pub fn seed_labs(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    for (corp_name, district, focus) in SEED_LABS {
-        let Some(corp) =
-            world.corps().into_iter().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.name == corp_name))
-        else {
+    let copies = world.config.copies();
+    for (copy, (template, seat, focus)) in (0..copies).flat_map(|j| SEED_LABS.into_iter().map(move |r| (j, r))) {
+        let owners = world.corps_of_template(template);
+        let Some(&corp) = owners.get(copy % owners.len().max(1)) else {
             continue;
         };
-        let Some((d, centroid)) = world.districts.iter().find(|x| x.name == district).map(|x| (x.id, x.centroid))
-        else {
+        let corp_name = world.comp::<Corp>(corp).map_or_else(String::new, |c| c.name.clone());
+        let Some(d) = crate::systems::districts::seat_district(world, seat, copy, copies) else {
+            continue;
+        };
+        let Some((district, centroid)) = world.districts.get(d.index()).map(|x| (x.name.clone(), x.centroid)) else {
             continue;
         };
         let lot = crate::systems::founding::vacant_lots(world)

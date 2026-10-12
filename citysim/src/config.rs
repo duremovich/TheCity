@@ -222,6 +222,58 @@ pub struct Config {
     /// save is byte-identical to a world built before transit existed.
     #[serde(default, skip_serializing_if = "TransitCfg::is_off")]
     pub transit: TransitCfg,
+    /// Scale S4 (docs/SCALE_20K.md): the reference city the absolute keys
+    /// were tuned on, which `Config::scaled_to` and `Config::fit_to_map`
+    /// scale from.
+    #[serde(default)]
+    pub scale: ScaleCfg,
+}
+
+/// Scale S4 (docs/SCALE_20K.md § S4): the reference city the config's
+/// absolute keys were tuned on, the shipped map (`assets/map.txt`) at 2,000
+/// residents. `Config::scaled_to` scales the per-person keys by `population
+/// / this population`; `Config::fit_to_map` (at `World::new`) the
+/// per-building keys by the map's count of the kind over the count here.
+/// On the shipped map at 2,000 every ratio is 1. `enabled = false` (the v1
+/// profile, whose map is its own reference) leaves the map's keys alone.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ScaleCfg {
+    pub enabled: bool,
+    /// Residents the absolute keys assume.
+    pub population: u32,
+    /// The reference map's building counts.
+    pub farms: u32,
+    pub markets: u32,
+    pub bars: u32,
+    pub hideouts: u32,
+    pub offices: u32,
+    pub lots: u32,
+    /// The reference map's districts (`[districts]` rows).
+    pub districts: u32,
+}
+
+impl Default for ScaleCfg {
+    fn default() -> Self {
+        ScaleCfg {
+            enabled: true,
+            population: 2000,
+            farms: 12,
+            markets: 3,
+            bars: 3,
+            hideouts: 2,
+            offices: 2,
+            lots: 160,
+            districts: 8,
+        }
+    }
+}
+
+impl ScaleCfg {
+    /// Off: `fit_to_map` changes nothing (the v1 profile).
+    pub fn off() -> Self {
+        ScaleCfg { enabled: false, ..ScaleCfg::default() }
+    }
 }
 
 /// Transit (docs/TRANSIT.md § 2): the El's lines, timetable and the walk-or-
@@ -2191,6 +2243,14 @@ pub struct CorpsCfg {
     pub raided_days: u64,
     #[serde(default = "CorpsCfg::default_raided_losses")]
     pub raided_losses: f32,
+    /// Scale S4: each row's template, the shipped row it copies (empty: every
+    /// row is its own, `names`). `Config::fit_to_map` deals the roster once
+    /// per ~2,000 residents' worth of employers ("Nutrix", "Nutrix 2", ...);
+    /// the name-keyed seeding (the tech trees, the Labs, the Fabs, the Feeds)
+    /// reads a row's template, so every copy of Zetatech is a Tech corp
+    /// seeded as Zetatech.
+    #[serde(default)]
+    pub template: Vec<String>,
 }
 
 impl Default for CorpsCfg {
@@ -2336,7 +2396,59 @@ impl CorpsCfg {
                 virt_raid: 0.0,
                 spin: 0.0,
             },
+            template: Vec::new(),
         }
+    }
+
+    /// Scale S4: row `i`'s template, the shipped row it copies (its own
+    /// name when the roster was never dealt again).
+    pub fn template_of(&self, i: usize) -> &str {
+        self.template.get(i).or_else(|| self.names.get(i)).map_or("", String::as_str)
+    }
+
+    /// Scale S4: the roster dealt `k` times (row `i + j × n` copies row `i`,
+    /// named "<name> <j + 1>" past the first copy), the treasuries split `k`
+    /// ways and each holding column re-dealt over the copies so that they ask
+    /// for `[farms, markets, offices, blocks]` of `totals` together (largest
+    /// remainder by the row's own count, ties to the lower row). `k = 1`
+    /// with totals equal to the columns' sums changes nothing.
+    pub fn replicate(&mut self, k: usize, totals: [u32; 4]) {
+        let n = self.row_count();
+        let k = k.max(1);
+        let rows = |v: &Vec<u32>| -> Vec<u32> { (0..k).flat_map(|_| v.iter().copied()).collect() };
+        let deal = |weights: Vec<u32>, total: u32| -> Vec<u32> {
+            let sum: u64 = weights.iter().map(|&w| u64::from(w)).sum();
+            if sum == 0 {
+                return weights;
+            }
+            let exact: Vec<(u64, u64)> = weights
+                .iter()
+                .map(|&w| (u64::from(w) * u64::from(total) / sum, u64::from(w) * u64::from(total) % sum))
+                .collect();
+            let mut out: Vec<u32> = exact.iter().map(|&(q, _)| q as u32).collect();
+            let left = u64::from(total) - exact.iter().map(|&(q, _)| q).sum::<u64>();
+            let mut order: Vec<usize> = (0..weights.len()).filter(|&i| weights[i] > 0).collect();
+            order.sort_by_key(|&i| (std::cmp::Reverse(exact[i].1), i));
+            for &i in order.iter().take(left as usize) {
+                out[i] += 1;
+            }
+            out
+        };
+        let template: Vec<String> = (0..k).flat_map(|_| (0..n).map(|i| self.template_of(i).to_string())).collect();
+        self.names = (0..k)
+            .flat_map(|j| (0..n).map(move |i| (i, j)))
+            .map(|(i, j)| if j == 0 { self.names[i].clone() } else { format!("{} {}", self.names[i], j + 1) })
+            .collect();
+        self.niches = (0..k).flat_map(|_| self.niches.iter().cloned()).collect();
+        self.megacorp = (0..k).flat_map(|_| (0..n).map(|i| self.megacorp.get(i).copied().unwrap_or(false))).collect();
+        self.farms = deal(rows(&self.farms), totals[0]);
+        self.markets = deal(rows(&self.markets), totals[1]);
+        self.offices = deal(rows(&self.offices), totals[2]);
+        self.blocks = deal(rows(&self.blocks), totals[3]);
+        let kk = k as f64;
+        self.treasury_initial =
+            (0..k).flat_map(|_| self.treasury_initial.iter().map(|&t| (t as f64 / kk).round() as i64)).collect();
+        self.template = template;
     }
 
     /// The number of corp rows; panics when the row vectors disagree.
@@ -5342,6 +5454,8 @@ impl Config {
     pub fn v1_profile(mut self) -> Config {
         self.world.map = "map_v1.txt".to_string();
         self.world.population = 300;
+        // Scale S4: the v1 map is its own reference (nothing is fitted to it).
+        self.scale = ScaleCfg::off();
         // Transit: the v1 map has no lines (a unit test builds its own).
         self.transit = TransitCfg::default();
         self.world.jobs = JobsCfg { farmer: 24, guard: 10, clerk: 3, bartender: 2, gravedigger: 1, sanitation: 0 };
@@ -5546,7 +5660,229 @@ impl Config {
             *b = (*b as f64 * f).round() as i64;
         }
         t.sanitation_max = (f64::from(t.sanitation_max) * f).round().clamp(0.0, 65535.0) as u16;
+        // Scale S4 (docs/SCALE_20K.md § S4): the city-wide counts, caps and
+        // budgets that assumed 2,000 residents scale per capita, up only (a
+        // city under 2,000 keeps the 2,000 city's value, as before S4: the
+        // small test cities were calibrated on it).
+        let up = f.max(1.0);
+        let up_usize = |v: usize| (v as f64 * up).round() as usize;
+        let up_u32 = |v: u32| (f64::from(v) * up).round() as u32;
+        let up_i64 = |v: i64| (v as f64 * up).round() as i64;
+        // The bodied tiers per capita (and the private guards' quota inside
+        // Coarse): the forced classes, a gang's quota and the private guards,
+        // grow with the city, a gang recruits only through its bodies, and
+        // the Statistical tier is calibrated against a Full share of the
+        // city. Measured on the generated 20k map (30 days; the 2,000 city
+        // on day 30: gang members 46 and arrests 373 per 1,000, employed
+        // 51-53 %): both at 50 / 150, gang members 0.8 and arrests 46 per
+        // 1,000 (the gangs die without bodies) at 435-784 ticks/s; Coarse per
+        // capita 28-30 and 160-220, employed 45-47 % at 117-235 ticks/s; with
+        // Full per capita too (seeds 42-43, the S4 city) employed 48.0-48.3 %
+        // vs 46.9-47.6 % at 114-125 ticks/s vs 125-128. A body's goal scoring
+        // reads city-wide lists (Unwind's venues, Squat's derelicts), so the
+        // bodies, not the residents, cost the run.
+        let bodies = (self.lod.max_full + self.lod.max_coarse).max(1) as f64;
+        self.lod.max_full = up_usize(self.lod.max_full);
+        self.lod.max_coarse = up_usize(self.lod.max_coarse);
+        self.lod.private_quota = up_usize(self.lod.private_quota);
+        // The planner's and the paths' per-tick budgets serve the bodies.
+        let k = (self.lod.max_full + self.lod.max_coarse) as f64 / bodies;
+        let b = &mut self.brain;
+        b.plan_budget_per_tick = (b.plan_budget_per_tick as f64 * k).ceil() as usize;
+        b.plan_expansion_budget_per_tick = (b.plan_expansion_budget_per_tick as f64 * k).ceil() as usize;
+        b.path_budget_per_tick = (b.path_budget_per_tick as f64 * k).ceil() as usize;
+        // Migration (a week's arrivals and the beds that read as room).
+        let d = &mut self.demography;
+        d.migrants_max = up_u32(d.migrants_max);
+        d.beds_ref *= up as f32;
+        d.offers_max = up_u32(d.offers_max);
+        // City-wide caps on live records and daily events.
+        self.hunt.max_hunts = up_usize(self.hunt.max_hunts);
+        self.contracts.max_open = up_usize(self.contracts.max_open);
+        self.missions.max_missions = up_usize(self.missions.max_missions);
+        let h = &mut self.hitmarket;
+        h.max_open = up_usize(h.max_open);
+        h.posts_per_day = up_usize(h.posts_per_day);
+        h.corp_year_cap = up_u32(h.corp_year_cap);
+        let fv = &mut self.fviolence.day_cap;
+        *fv = FvKindsCfg {
+            killed: up_u32(fv.killed),
+            assaulted: up_u32(fv.assaulted),
+            robbed: up_u32(fv.robbed),
+            abducted: up_u32(fv.abducted),
+        };
+        self.life.relocate_per_day = up_usize(self.life.relocate_per_day);
+        // The outside's demand: the World buys per resident (money enters at
+        // the 2,000 city's per-capita rate) and its account refills to match.
+        let wm = &mut self.world_market;
+        wm.treasury_ref = up_i64(wm.treasury_ref);
+        wm.food.cap = up_u32(wm.food.cap);
+        wm.parts.cap = up_u32(wm.parts.cap);
+        wm.data.cap = up_u32(wm.data.cap);
+        for c in &mut wm.cap_wages {
+            *c = up_u32(*c);
+        }
+        self.export.treasury_ref = up_i64(self.export.treasury_ref);
+        // The Treasury's other coin keys (the L2 band, the public works, the
+        // derelict floor), as `[treasury]` above.
+        for b in &mut self.budget.band {
+            *b = up_i64(*b);
+        }
+        self.budget.works_max = (f64::from(self.budget.works_max) * up).round().clamp(0.0, 65535.0) as u16;
+        self.street.city_absorb_floor = up_i64(self.street.city_absorb_floor);
+        // The opening businesses dealt per resident (the Hotels, the venues
+        // and Fabs, the Missions); the name-keyed rows deal `copies()`.
+        self.street.seed_hotels = up_usize(self.street.seed_hotels);
+        self.street.seed_derelict_blocks = up_usize(self.street.seed_derelict_blocks);
+        let v = &mut self.jobs.seed_venues;
+        *v = SeedVenuesCfg {
+            club: up_u32(v.club),
+            arcade: up_u32(v.arcade),
+            noodle_bar: up_u32(v.noodle_bar),
+            fight_pit: up_u32(v.fight_pit),
+            den: up_u32(v.den),
+            lounge: up_u32(v.lounge),
+            fab: up_u32(v.fab),
+        };
+        self.charity.seed = up_u32(self.charity.seed);
+        // The civic headcounts' daily cut (the reconcilers' daily moves are
+        // `per_capita_count`).
+        self.treasury.civic_pace = (f64::from(self.treasury.civic_pace) * up).round().clamp(0.0, 255.0) as u8;
         self
+    }
+
+    /// Scale S4: residents over the reference city's (`[scale] population`).
+    pub fn per_capita(&self) -> f64 {
+        f64::from(self.world.population) / f64::from(self.scale.population.max(1))
+    }
+
+    /// Scale S4: how many copies of a one-per-2,000 seeding row the city
+    /// gets (the Garages and Clinics, the Labs, the corp Feeds, the Fixers,
+    /// the Unplugged): `round(per_capita)`, at least 1.
+    pub fn copies(&self) -> usize {
+        (self.per_capita().round() as usize).max(1)
+    }
+
+    /// Scale S4: a city-wide count in code that assumed 2,000 residents (the
+    /// guard and Sanitation reconcilers' five hires or dismissals a day, the
+    /// law's report rings), per capita, up only.
+    pub fn per_capita_count(&self, at_2000: usize) -> usize {
+        (at_2000 as f64 * self.per_capita().max(1.0)).round() as usize
+    }
+
+    /// Scale S4: a `PlayerCommand` headcount's ceiling (`SetGuardCount`,
+    /// `SetSanitation`, `SetImmigrationPerWeek`), per capita, up only.
+    pub fn lever_ceiling(&self, at_2000: u16) -> u16 {
+        (f64::from(at_2000) * self.per_capita().max(1.0)).round().clamp(0.0, 65535.0) as u16
+    }
+
+    /// Scale S4 (`World::new`, after the map's districts and lines are in):
+    /// the keys held per building, per gang, per corp or per district,
+    /// fitted to the map's counts against `[scale]`'s (every ratio is 1 on
+    /// the shipped map, and ratios under 1 read 1). `scaled_to` scaled the
+    /// city totals by population; here they are spread over the map's
+    /// holders:
+    /// - per Market: the opening shelf, the restock floor and batch and
+    ///   `price_ref_stock` (the double scaling: a 20k city's ten times the
+    ///   Markets each held ten times the shelf);
+    /// - per gang (one per Hideout): `max_members`, and `max_gangs` grows
+    ///   with the Hideouts;
+    /// - the corps: the roster dealt once per reference city's employers
+    ///   (Farms, Markets and Security Offices) and re-dealt so every one is
+    ///   owned in the shipped proportion ([`CorpsCfg::replicate`]); the
+    ///   agent Bar owners and their purse per Bar;
+    /// - the one-per-city buildings (the Jail, the Hall, the Recycler, the
+    ///   Reserve Depot): seats and stock per capita;
+    /// - per district: the riot crowd and its bodies, the gang-landlord and
+    ///   sweep thresholds by residents per district; the concurrent riots and
+    ///   crackdowns by districts;
+    /// - per Lot: the shanty ceiling.
+    pub fn fit_to_map(&mut self, map: &crate::map::Map) {
+        if !self.scale.enabled {
+            return;
+        }
+        let s = self.scale.clone();
+        let mut count: std::collections::BTreeMap<BuildingKind, u32> = Default::default();
+        for b in &map.buildings {
+            *count.entry(b.kind).or_insert(0) += 1;
+        }
+        let n = |k: BuildingKind| count.get(&k).copied().unwrap_or(0);
+        let ratio = |have: u32, reference: u32| (f64::from(have) / f64::from(reference.max(1))).max(1.0);
+        let r_market = ratio(n(BuildingKind::Market), s.markets);
+        let r_bar = ratio(n(BuildingKind::Bar), s.bars);
+        let r_hideout = ratio(n(BuildingKind::Hideout), s.hideouts);
+        let r_lot = ratio(n(BuildingKind::Lot), s.lots);
+        let districts = self.districts.names.len().max(1) as u32;
+        let r_districts = ratio(districts, s.districts);
+        let up = self.per_capita().max(1.0);
+        // Residents per district against the reference city's.
+        let r_dsize = (up / (f64::from(districts) / f64::from(s.districts.max(1)))).max(1.0);
+        // Per Market.
+        let w = &mut self.world;
+        w.market_initial = (f64::from(w.market_initial) / r_market).round() as u32;
+        let e = &mut self.economy;
+        e.restock_floor = (f64::from(e.restock_floor) / r_market).round() as u32;
+        e.restock_batch = (f64::from(e.restock_batch) / r_market).round() as u32;
+        e.price_ref_stock /= r_market;
+        // Per gang.
+        let g = &mut self.gangs;
+        g.max_members = (g.max_members as f64 / r_hideout).round() as usize;
+        g.max_gangs = (g.max_gangs as f64 * r_hideout).round() as usize;
+        // The corps: the roster once per reference city's employers.
+        let employers = |a: u32, b: u32, c: u32| f64::from(a + b + c);
+        let r_emp = employers(n(BuildingKind::Farm), n(BuildingKind::Market), n(BuildingKind::SecurityOffice))
+            / employers(s.farms, s.markets, s.offices).max(1.0);
+        // More corps, not bigger ones (measured on the generated 20k map,
+        // seeds 42-44, 60 days, day 60: the roster dealt ten times read
+        // employed 47.7-49.4 %, homeless 246-260 per 1,000; the nine rows
+        // owning ten times the buildings, with the per-corp coin keys
+        // (`hoard_heat`, `lobby_min_treasury`, the estate caps, the outside
+        // treasuries, `corp_raid_cap`) ten times over, 45.1-46.9 % and
+        // 278-284). Copies keep every per-corp key as tuned, an exec per
+        // ~2,000 residents and a bankruptcy's share of the economy.
+        let k = (r_emp.round() as usize).max(1);
+        let c = &mut self.corps;
+        if c.row_count() > 0 {
+            let total = |v: &Vec<u32>, r: f64| (f64::from(v.iter().sum::<u32>()) * r).round() as u32;
+            let totals = [
+                total(&c.farms, ratio(n(BuildingKind::Farm), s.farms)),
+                total(&c.markets, r_market),
+                total(&c.offices, ratio(n(BuildingKind::SecurityOffice), s.offices)),
+                c.blocks.iter().sum(),
+            ];
+            let same = [c.farms.iter().sum(), c.markets.iter().sum(), c.offices.iter().sum(), totals[3]];
+            if k > 1 || totals != same {
+                c.replicate(k, totals);
+            }
+        }
+        c.bar_owner_count = (c.bar_owner_count as f64 * r_bar).round() as usize;
+        c.bar_owner_coins = (c.bar_owner_coins as f64 / r_bar).round() as i64;
+        // The one-per-city buildings: seats and stock per capita.
+        let per_city = |cfg: &mut BuildingCfg, have: u32| {
+            let r = up / f64::from(have.max(1));
+            if r > 1.0 {
+                cfg.capacity = (f64::from(cfg.capacity) * r).round().clamp(0.0, 65535.0) as u16;
+                cfg.stock_cap = (f64::from(cfg.stock_cap) * r).round() as u32;
+            }
+        };
+        let bl = &mut self.buildings;
+        per_city(&mut bl.jail, n(BuildingKind::Jail));
+        per_city(&mut bl.hall, n(BuildingKind::Hall));
+        per_city(&mut bl.cemetery, n(BuildingKind::Cemetery));
+        per_city(&mut bl.warehouse, n(BuildingKind::Warehouse));
+        // Per district.
+        let r = &mut self.riots;
+        r.riot_max = (r.riot_max as f64 * r_dsize).round() as usize;
+        r.riot_promote_max = (r.riot_promote_max as f64 * r_dsize).round() as usize;
+        r.max_active_riots = (r.max_active_riots as f64 * r_districts).round() as usize;
+        let l = &mut self.law;
+        l.gang_landlord_homes = (l.gang_landlord_homes as f64 * r_dsize).round() as usize;
+        l.sweep_full = (f64::from(l.sweep_full) * r_dsize).round() as u32;
+        l.max_crackdowns = (l.max_crackdowns as f64 * r_districts).round() as usize;
+        // Per Lot (the opening derelicts are per resident, `scaled_to`: they empty
+        // occupied Blocks, and a map of tall Blocks has many Homes per resident).
+        let st = &mut self.street;
+        st.shanty_lots_max = (st.shanty_lots_max as f64 * r_lot).round() as usize;
     }
 }
 

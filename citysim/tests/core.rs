@@ -85,6 +85,16 @@ struct SeedRun {
     sickness: bool,
     /// Transit: the El on (its bullets and sanity are judged).
     transit: bool,
+    /// Scale S4: residents over the 2,000 city's (`Config::per_capita`):
+    /// the collapse bounds' counts scale by it (1 for the shipped city).
+    per: f64,
+    /// The Jail's capacity in this world (Scale S4: per capita).
+    jail_cap: u32,
+    /// The world's save hash at the run's end (determinism).
+    end_hash: blake3::Hash,
+    /// The employment floor `sanity` asserts from day 30 (J24's
+    /// `EMPLOYED_MIN_SHARE`; `core_20k` asserts the collapse floor).
+    employed_min: f64,
 }
 
 impl SeedRun {
@@ -102,7 +112,17 @@ impl SeedRun {
 }
 
 fn run_seed(seed: u64, days: u64) -> SeedRun {
-    let mut w = World::new(seed, Config::load());
+    run_city(seed, days, Config::load())
+}
+
+/// Scale S4: the corps alive the bounds ask for, per capita (4 of the
+/// shipped 9 rows).
+fn corps_alive_min(r: &SeedRun) -> usize {
+    (CORPS_ALIVE_MIN as f64 * r.per).round() as usize
+}
+
+fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
+    let mut w = World::new(seed, cfg);
     let base = econ::identity(&w);
     let seeded: Vec<EntityId> = w.corps();
     let mut r = SeedRun {
@@ -121,6 +141,10 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
         no_net: econ::wages_on(&w) && !citysim::systems::policy::net_enacted(&w),
         sickness: citysim::systems::health::on(&w),
         transit: w.config.transit.enabled,
+        per: w.config.per_capita().max(1.0),
+        jail_cap: u32::from(w.config.buildings.jail.capacity),
+        end_hash: blake3::hash(&[]),
+        employed_min: EMPLOYED_MIN_SHARE,
     };
     let mut cursor = 0u64;
     // Prisoners at the last hour's end, by their tier then.
@@ -255,6 +279,9 @@ fn run_seed(seed: u64, days: u64) -> SeedRun {
     r.tps = (days * TICKS_PER_DAY) as f64 / started.elapsed().as_secs_f64();
     let alive: BTreeSet<EntityId> = w.corps().into_iter().collect();
     r.corps_alive = seeded.iter().filter(|c| alive.contains(c)).count();
+    if r.per > 1.0 {
+        r.end_hash = blake3::hash(citysim::save::to_ron(&w).as_bytes());
+    }
     r
 }
 
@@ -320,18 +347,22 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     let s = r.seed;
     let n = (to - from) as f64;
     let rows: Vec<&DayRow> = r.rows.iter().filter(|x| x.day >= from && x.day < to).collect();
-    let jail_cap = u32::from(Config::load().buildings.jail.capacity);
+    let jail_cap = r.jail_cap;
     let mut fail = |ok: bool, what: String| {
         if !ok {
             failures.push(format!("seed {s} days {from}-{to}: {what}"));
         }
     };
+    // Scale S4: the counts per capita (`r.per` is 1 in the shipped city).
+    let scaled = |v: u32| (f64::from(v) * r.per).round() as u32;
+    let (pop_min, pop_max) = (scaled(POP_MIN), scaled(POP_MAX));
+    let assaults_max = assaults_max * r.per;
     let pop: Vec<u32> = rows.iter().map(|x| x.population).collect();
     let (lo, hi) = (pop.iter().copied().min().unwrap_or(0), pop.iter().copied().max().unwrap_or(0));
-    fail((POP_MIN..=POP_MAX).contains(&lo) && hi <= POP_MAX, format!("population {lo}..{hi} in {POP_MIN}..={POP_MAX}"));
+    fail((pop_min..=pop_max).contains(&lo) && hi <= pop_max, format!("population {lo}..{hi} in {pop_min}..={pop_max}"));
     let starv = r.sum(from, to, |x| x.deaths_starvation);
     let per_120 = if r.sickness { STARVATION_MAX_120_SICK } else { STARVATION_MAX_120 };
-    let starv_max = per_120 * n / 120.0;
+    let starv_max = per_120 * n / 120.0 * r.per;
     fail(starv <= starv_max, format!("starvation {starv:.0} <= {starv_max:.0}"));
     let asl: f64 = r.assaults[from as usize..to as usize].iter().map(|&a| f64::from(a)).sum::<f64>() / n;
     fail(asl <= assaults_max, format!("assaults/day {asl:.2} <= {assaults_max:.2}"));
@@ -361,8 +392,8 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     {
         let e = share(emp, free);
         fail(
-            e >= EMPLOYED_MIN_SHARE,
-            format!("J24 employed {emp} of {free} free adults ({e:.3}) on day {d} >= {EMPLOYED_MIN_SHARE}"),
+            e >= r.employed_min,
+            format!("J24 employed {emp} of {free} free adults ({e:.3}) on day {d} >= {}", r.employed_min),
         );
     }
     if let Some(&(d, (adults, _, _, hl))) =
@@ -581,7 +612,7 @@ fn core_sanity() {
         if r.held_starved > 0 {
             failures.push(format!("seed {}: {} held prisoners starved", r.seed, r.held_starved));
         }
-        if r.corps_alive < CORPS_ALIVE_MIN {
+        if r.corps_alive < corps_alive_min(r) {
             failures.push(format!("seed {}: seeded corps alive {}/{}", r.seed, r.corps_alive, r.corps_seeded));
         }
         for m in ["stale ride", "ride past arrival"] {
@@ -632,7 +663,7 @@ fn core_year() {
     if r.held_starved > 0 {
         failures.push(format!("{} held prisoners starved", r.held_starved));
     }
-    if r.corps_alive < CORPS_ALIVE_MIN {
+    if r.corps_alive < corps_alive_min(&r) {
         failures.push(format!("seeded corps alive on day 365 {}/{}", r.corps_alive, r.corps_seeded));
     }
     eprintln!("ticks/s {:.0} (floor {TPS_FLOOR:.0}, printed)", r.tps);
@@ -653,4 +684,101 @@ fn core_throughput() {
     if !cfg!(debug_assertions) {
         assert!(r.tps >= TPS_FLOOR, "ticks/s {:.0} under the {TPS_FLOOR:.0} floor", r.tps);
     }
+}
+
+/// Scale S4: the 20k profile's ticks/s floor, printed only (as
+/// `core_year`'s): measured 155-173 ticks/s over 30 days (the two runs in
+/// parallel, 2026-10-12), less ~25 %.
+const TPS_FLOOR_20K: f64 = 120.0;
+
+/// Scale S4 (coordinator ruling, 2026-10-12): `core_20k`'s employment
+/// floor, a collapse floor and not a calibration band. J24's 0.5 is
+/// printed beside it: the 20k city reads ~0.50 on day 30 (the 2,000 city
+/// ~0.53), a calibration gap; S3b's collapsed city read 0.17.
+const EMPLOYED_FLOOR_20K: f64 = 0.40;
+
+/// Scale S4 (docs/SCALE_20K.md § S4): the generated 20,000-resident city
+/// (`gen:20000`, `Config::scaled_to(20_000)`), seed 42 for 30 days, twice in
+/// parallel threads: `core_sanity`'s collapse bounds per capita (the
+/// population, starvation, assault and corps-alive counts scaled by
+/// `Config::per_capita`; the Treasury, the Jail, the Markets, escrow and
+/// J25 as they are; employment at the collapse floor
+/// `EMPLOYED_FLOOR_20K`), the coin identity every day, and the two runs'
+/// closing save hashes equal (determinism). The calibration numbers
+/// (J24 against 0.5, employed, homeless, Murders per 1,000) are printed
+/// `FINDING` lines, never asserted. `#[ignore]`; run alone:
+/// `cargo test --release -p citysim --test core -- --ignored core_20k --nocapture`.
+#[test]
+#[ignore]
+fn core_20k() {
+    const DAYS: u64 = 30;
+    let cfg = || {
+        let mut c = Config::load().scaled_to(20_000);
+        c.world.map = "gen:20000".into();
+        c
+    };
+    let mut runs: Vec<SeedRun> = std::thread::scope(|s| {
+        let hs: Vec<_> = (0..2).map(|_| s.spawn(move || run_city(42, DAYS, cfg()))).collect();
+        hs.into_iter().map(|h| h.join().expect("a core_20k run panicked")).collect()
+    });
+    runs[0].employed_min = EMPLOYED_FLOOR_20K;
+    let r = &runs[0];
+    report(r);
+    let mut failures: Vec<String> = Vec::new();
+    if !r.identity_broken.is_empty() {
+        failures.push(format!("the coin identity moved on days {:?}", r.identity_broken));
+    }
+    if runs[0].end_hash != runs[1].end_hash {
+        failures.push("two runs of seed 42 ended in different worlds (nondeterminism)".into());
+    }
+    sanity(r, 0, DAYS, ASSAULTS_PER_DAY_MAX, &mut failures);
+    if r.held_starved > 0 {
+        failures.push(format!("{} held prisoners starved", r.held_starved));
+    }
+    if r.corps_alive < corps_alive_min(r) {
+        failures.push(format!("seeded corps alive {}/{} < {}", r.corps_alive, r.corps_seeded, corps_alive_min(r)));
+    }
+    for m in ["stale ride", "ride past arrival"] {
+        if r.mark(m) > 0 {
+            failures.push(format!("{} hours with a {m}", r.mark(m)));
+        }
+    }
+    // Printed findings: the per-capita read (set it beside the 2,000 city's).
+    for d in [0u64, 9, 19, DAYS - 1] {
+        let (Some(x), Some(&(adults, free, emp, street))) = (r.rows.get(d as usize), r.adults.get(d as usize)) else {
+            continue;
+        };
+        let k = 1000.0 / f64::from(x.population.max(1));
+        eprintln!(
+            "FINDING day {:>2}: population {}, employed {:.3} of free adults, street {:.3} of {adults} adults, homeless {:.1}/1k, jailed {}, Treasury {:.1}/resident",
+            d + 1,
+            x.population,
+            f64::from(emp) / f64::from(free.max(1)),
+            f64::from(street) / f64::from(adults.max(1)),
+            f64::from(x.homeless) * k,
+            x.jailed,
+            x.treasury as f64 / f64::from(x.population.max(1)),
+        );
+    }
+    if let Some(&(_, free, emp, _)) = r.adults.get((DAYS - 1) as usize) {
+        let e = f64::from(emp) / f64::from(free.max(1));
+        eprintln!(
+            "FINDING J24 day {DAYS}: employed {e:.3} of free adults against the 2,000 city's {EMPLOYED_MIN_SHARE} ({}; asserted: the collapse floor {EMPLOYED_FLOOR_20K})",
+            if e >= EMPLOYED_MIN_SHARE { "over" } else { "under" }
+        );
+    }
+    let murders = r.kind(EventKind::Murder);
+    let pop = r.rows.last().map_or(1, |x| x.population.max(1));
+    eprintln!(
+        "FINDING Murders {murders} ({:.2}/1k), starvation {:.0}, corps alive {}/{}",
+        f64::from(murders) * 1000.0 / f64::from(pop),
+        r.sum(0, DAYS, |x| x.deaths_starvation),
+        r.corps_alive,
+        r.corps_seeded,
+    );
+    eprintln!("ticks/s {:.0} (two runs in parallel; floor {TPS_FLOOR_20K:.0}, printed)", r.tps);
+    for f in &failures {
+        eprintln!("FAIL {f}");
+    }
+    assert!(failures.is_empty(), "core_20k failures: {failures:?}");
 }

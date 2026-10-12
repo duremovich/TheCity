@@ -1305,6 +1305,24 @@ impl NameTables {
     }
 }
 
+/// Scale S4: the `j`-th generated gang name past `[gangs] names` (one gang
+/// per Hideout: twenty at 20,000), "<adjective> <noun>", 144 distinct, then
+/// numbered. Disjoint from `[gangs] splinter_names`' words.
+fn gang_name(j: usize) -> String {
+    const ADJ: [&str; 12] =
+        ["Neon", "Ash", "Static", "Iron", "Cinder", "Red", "Grey", "Glass", "Wire", "Salt", "Black", "Pale"];
+    const NOUN: [&str; 12] = [
+        "Dogs", "Wolves", "Rats", "Knives", "Crows", "Brothers", "Lanterns", "Teeth", "Hands", "Widows", "Ghosts",
+        "Hounds",
+    ];
+    let (a, n) = (j % ADJ.len(), (j + j / ADJ.len()) % NOUN.len());
+    let base = format!("The {} {}", ADJ[a], NOUN[n]);
+    match j / (ADJ.len() * NOUN.len()) {
+        0 => base,
+        k => format!("{base} {}", k + 1),
+    }
+}
+
 impl World {
     /// Build the initial city: map, buildings, gang, 300 citizens with homes
     /// and jobs. Deterministic for a given `(seed, config)`.
@@ -1315,6 +1333,9 @@ impl World {
         // generator); a map's own districts and El lines replace the config's.
         let map = crate::map::MapSource::from_config(&config).load();
         map.apply_to(&mut config);
+        // Scale S4: the per-building, per-gang, per-corp and per-district
+        // keys fitted to this map's counts (nothing moves on the shipped map).
+        config.fit_to_map(&map);
         let names = NameTables::load(&config);
         // Absent until `citysim-cli calibrate` has written it; any other read
         // failure is a broken checkout and must not pass silently.
@@ -1693,13 +1714,14 @@ impl World {
         }
     }
 
-    /// One gang per Hideout, in map order, named and funded from `[gangs]`.
+    /// One gang per Hideout, in map order, named and funded from `[gangs]`
+    /// (Scale S4: past the configured names, a generated one).
     fn spawn_gangs(&mut self) {
         let hideouts = self.buildings_by_kind.get(&BuildingKind::Hideout).cloned().unwrap_or_default();
         let cfg = self.config.gangs.clone();
         for (i, hideout) in hideouts.into_iter().enumerate() {
             let id = self.spawn();
-            let name = cfg.names.get(i).cloned().unwrap_or_else(|| format!("Gang {}", i + 1));
+            let name = cfg.names.get(i).cloned().unwrap_or_else(|| gang_name(i - cfg.names.len()));
             let treasury = cfg.treasury_initial.get(i).or(cfg.treasury_initial.last()).copied().unwrap_or(0);
             self.insert(id, Gang::new(name, hideout, treasury));
         }
@@ -2547,6 +2569,29 @@ impl World {
     /// [`World::corps`] borrowed (no copy; a per-call read).
     pub fn corp_slice(&self) -> &[EntityId] {
         &self.corp_ids
+    }
+
+    /// Scale S4: the shipped row a corp copies (`[corps] template`): a
+    /// seeded corp's row template, else its own name (a founded corp).
+    pub fn corp_template(&self, corp: EntityId) -> &str {
+        let Some(c) = self.comp::<Corp>(corp) else { return "" };
+        match c.slot {
+            Some(s) => self.config.corps.template_of(usize::from(s)),
+            None => c.name.as_str(),
+        }
+    }
+
+    /// Scale S4: the seeded corps copying the shipped row `template`, by
+    /// row (the first copy first).
+    pub fn corps_of_template(&self, template: &str) -> Vec<EntityId> {
+        let mut v: Vec<(u8, EntityId)> = self
+            .corp_ids
+            .iter()
+            .filter_map(|&c| self.comp::<Corp>(c).and_then(|cc| cc.slot).map(|s| (s, c)))
+            .filter(|&(s, _)| self.config.corps.template_of(usize::from(s)) == template)
+            .collect();
+        v.sort_unstable();
+        v.into_iter().map(|(_, c)| c).collect()
     }
 
     /// Position of a corp in `corps()`: picks its colour in the app.

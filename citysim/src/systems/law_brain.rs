@@ -19,9 +19,12 @@ use crate::utility::curves::{can, Curve, GATE};
 use crate::utility::Consideration;
 use crate::world::World;
 
-/// `report_log` keeps at most this many reports.
+/// `report_log` keeps at most this many reports (Scale S4: per 2,000
+/// residents, `Config::per_capita_count`; the crackdown pressure reads its
+/// last `window_days` against a per-1,000 bar).
 pub const REPORT_LOG_CAP: usize = 128;
-/// M12 D13: `World::report_places` keeps at most this many.
+/// M12 D13: `World::report_places` keeps at most this many (per 2,000
+/// residents, as `REPORT_LOG_CAP`).
 pub const REPORT_PLACES_CAP: usize = 512;
 
 /// Everything `score_postures` reads, gathered once per rescoring.
@@ -321,15 +324,16 @@ pub fn push_shock(world: &mut World, shock: LawShock) {
 pub fn log_report(world: &mut World, suspect: EntityId) {
     let Some(gang) = world.gang_of(suspect) else { return };
     let tick = world.tick;
+    let cap = world.config.per_capita_count(REPORT_LOG_CAP);
     if let Some(l) = world.law_mut() {
-        if l.report_log.len() >= REPORT_LOG_CAP {
+        if l.report_log.len() >= cap {
             l.report_log.pop_front();
         }
         l.report_log.push_back((tick, gang));
     }
     let tile = world.comp::<Position>(suspect).map(|p| p.tile).unwrap_or_default();
     let d = world.district_of(tile);
-    if world.report_places.len() >= REPORT_PLACES_CAP {
+    if world.report_places.len() >= world.config.per_capita_count(REPORT_PLACES_CAP) {
         world.report_places.pop_front();
     }
     world.report_places.push_back((tick, gang, d));

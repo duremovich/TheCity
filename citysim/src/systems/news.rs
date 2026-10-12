@@ -17,9 +17,10 @@ use std::collections::BTreeMap;
 use rand::Rng;
 use smallvec::SmallVec;
 
-use crate::components::{Building, BuildingKind, Corp, DistrictMask, Job, Personality, Role, MAX_DISTRICTS};
+use crate::components::{Building, BuildingKind, Corp, DistrictMask, Job, Personality, Role, Zone, MAX_DISTRICTS};
 use crate::entity::EntityId;
 use crate::events::EventKind;
+use crate::systems::districts::Seat;
 use crate::systems::ownership::{self, Flow};
 use crate::time::{self, Tick, TICKS_PER_DAY};
 use crate::utility::curves::{can, Curve, GATE};
@@ -33,9 +34,12 @@ pub const STORY_RING: usize = 256;
 /// The city's Feed (W41): owner `None`, wages from the Treasury.
 pub const CIVIC_WIRE: &str = "Civic Wire";
 
-/// W41: the opening Feeds, `(name, owner corp by name or the city, district)`.
-const SEED_FEEDS: [(&str, Option<&str>, &str); 2] =
-    [(CIVIC_WIRE, None, "Civic"), ("Nutrix Now", Some("Nutrix"), "Mid West")];
+/// W41: the opening Feeds, `(name, owner corp by its row's template or the
+/// city, district by role)`: the Civic and Mid West on the shipped map.
+/// Scale S4: the city's Feed is one per city; a corp's is dealt once per
+/// copy of its template (`Config::copies`, "Nutrix 2 Now").
+const SEED_FEEDS: [(&str, Option<&str>, Seat); 2] =
+    [(CIVIC_WIRE, None, Seat::new(Zone::Civic, 0.0)), ("Nutrix Now", Some("Nutrix"), Seat::new(Zone::Mid, 0.0))];
 
 /// A story's run within this many days of the same deed is skipped (W37),
 /// and a Spin corp buries stories this recent.
@@ -130,18 +134,26 @@ fn open_feed(world: &mut World, feed: EntityId, name: String) {
 /// three Reporter vacancies (`build_on_lot`). No RNG. A no-op with the news off.
 pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    for (name, corp_name, district) in SEED_FEEDS {
+    let copies = world.config.copies();
+    for (copy, (name, corp_name, seat)) in (0..copies).flat_map(|j| SEED_FEEDS.into_iter().map(move |r| (j, r))) {
+        if copy > 0 && corp_name.is_none() {
+            continue;
+        }
         let owner = match corp_name {
-            Some(cn) => {
-                match world.corps().into_iter().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.name == cn)) {
-                    Some(c) => Some(c),
-                    None => continue,
-                }
-            }
+            Some(cn) => match world.corps_of_template(cn).get(copy) {
+                Some(&c) => Some(c),
+                None => continue,
+            },
             None => None,
         };
-        let Some((d, centroid)) = world.districts.iter().find(|x| x.name == district).map(|x| (x.id, x.centroid))
-        else {
+        let name = match owner {
+            Some(o) if copy > 0 => format!("{} Now", world.owner_label(Some(o))),
+            _ => name.to_string(),
+        };
+        let Some(d) = crate::systems::districts::seat_district(world, seat, copy, copies) else {
+            continue;
+        };
+        let Some((district, centroid)) = world.districts.get(d.index()).map(|x| (x.name.clone(), x.centroid)) else {
             continue;
         };
         let lot = crate::systems::founding::vacant_lots(world)
@@ -155,7 +167,7 @@ pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
         if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Feed, owner).is_err() {
             continue;
         }
-        open_feed(world, lot, name.to_string());
+        open_feed(world, lot, name.clone());
         built.push(lot);
         let at = world.districts.get(world.district_of_building(lot).index()).map_or("?", |x| x.name.as_str());
         let who = world.owner_label(owner);

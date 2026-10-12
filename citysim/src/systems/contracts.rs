@@ -261,8 +261,10 @@ fn is_regular(world: &World, id: EntityId, slack: Tick) -> bool {
     })
 }
 
-/// C9: the districts that get a seeded Fixer, in order.
-pub const SEEDED_FIXERS: [&str; 1] = ["Mid East"];
+/// C9: the districts that get a seeded Fixer, in order, by role (Scale S4:
+/// Mid East on the shipped map), each dealt `Config::copies` times.
+pub const SEEDED_FIXERS: [crate::systems::districts::Seat; 1] =
+    [crate::systems::districts::Seat::new(crate::components::Zone::Mid, 0.75)];
 
 /// C9 (deviation, coordinator 2026-10-08): one seeded Fixer, Mid East's,
 /// on the Lots left after L2's venues (no RNG); the second is founded by an
@@ -277,11 +279,13 @@ pub const SEEDED_FIXERS: [&str; 1] = ["Mid East"];
 /// then the lower id). No coin is minted.
 pub fn seed_fixers(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
-    for name in SEEDED_FIXERS {
-        let Some(d) = world.districts.iter().position(|x| x.name == name) else {
-            log(world, 0, format!("no {name} district: Fixer not seeded"));
+    let copies = world.config.copies();
+    for (copy, seat) in (0..copies).flat_map(|j| SEEDED_FIXERS.into_iter().map(move |s| (j, s))) {
+        let Some(d) = crate::systems::districts::seat_district(world, seat, copy, copies).map(|d| d.index()) else {
+            log(world, 0, format!("no {:?} district: Fixer not seeded", seat.zone));
             continue;
         };
+        let name = world.districts[d].name.clone();
         let adjacent: Vec<usize> = {
             let mask = world.district_adjacent.get(d).copied().unwrap_or(0);
             (0..world.districts.len()).filter(|&i| i != d && mask & (1 << i) != 0).collect()

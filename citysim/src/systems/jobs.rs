@@ -150,8 +150,13 @@ fn seed_owner(world: &World, kind: BuildingKind, i: usize) -> Option<(Option<Ent
         world.gang_list().iter().copied().filter(|&g| !crate::systems::creeds::is_purist(world, g)).collect();
     Some(match kind {
         BuildingKind::Fab => {
-            let name = ["Zetatech", "Militech"].get(i)?;
-            (Some(corp_named(world, name)?), None)
+            // Scale S4: the two rows' copies in turn (copy `i / 2` of the
+            // template), so the Fabs dealt per capita go to every copy.
+            let owners = world.corps_of_template(["Zetatech", "Militech"][i % 2]);
+            if owners.is_empty() {
+                return None;
+            }
+            (Some(owners[(i / 2) % owners.len()]), None)
         }
         // Fix round (phase 1 deviation, as the fronts below; Seeding table:
         // "the megacorp rows"): the seeded Lounge and Clubs stand on the
@@ -203,13 +208,22 @@ fn seed_heir(world: &World, kind: BuildingKind, i: usize) -> Option<EntityId> {
         return None;
     }
     match kind {
-        BuildingKind::Lounge => rows
-            .iter()
-            .map(|&(s, c)| {
-                (world.config.corps.treasury_initial.get(usize::from(s)).copied().unwrap_or(0), std::cmp::Reverse(s), c)
-            })
-            .max()
-            .map(|(_, _, c)| c),
+        BuildingKind::Lounge => {
+            let top = rows
+                .iter()
+                .map(|&(s, c)| {
+                    (
+                        world.config.corps.treasury_initial.get(usize::from(s)).copied().unwrap_or(0),
+                        std::cmp::Reverse(s),
+                        c,
+                    )
+                })
+                .max()
+                .map(|(_, _, c)| c)?;
+            // Scale S4: copy `i` of the Lounges to the richest row's `i`-th copy.
+            let copies = world.corps_of_template(world.corp_template(top));
+            Some(copies.get(i % copies.len().max(1)).copied().unwrap_or(top))
+        }
         BuildingKind::Club => Some(rows[i % rows.len()].1),
         _ => None,
     }
