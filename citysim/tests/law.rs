@@ -279,7 +279,7 @@ fn test_guard_never_arrests_self() {
     law::file_report(&mut w, Crime::Theft, g, None);
     let tile = w.comp::<Position>(g).expect("pos").tile;
     let tick = w.tick;
-    w.last_seen.insert(g, (tile, tick));
+    w.set_last_seen(g, (tile, tick));
     assert!(law::is_located_suspect(&w, g), "the guard is a located suspect");
     assert!(!law::located_suspects(&w, Some(law::Pursuer { tile, guard: g })).contains(&g));
     assert!(law::located_suspects(&w, None).contains(&g), "the city-wide list still names them");

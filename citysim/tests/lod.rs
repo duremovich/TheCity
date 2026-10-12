@@ -798,3 +798,74 @@ fn test_no_bin_with_a_meal_at_hand() {
     c.comp_mut::<Inventory>(a).unwrap().food = 1;
     assert!(citysim::systems::bins::dive_target(&c, a).is_none(), "a bin with a meal in hand");
 }
+
+/// Scale S1: `crew_above`, a Statistical worker's co-workers above it for
+/// the hour's co-work. `crew` 0 and a group of at most `crew + 1` are every
+/// co-worker above it (the pre-S1 rule); a bigger group is the `crew / 2`
+/// nearest on each side in id order, wrapping, so every member drives at
+/// most `crew` pairs in all and each pair is driven once (membership is
+/// symmetric); other roles at the employer are passed over.
+#[test]
+fn test_crew_above_bounds_coworker_pairs() {
+    let ids = |r: std::ops::Range<u32>| -> Vec<citysim::EntityId> {
+        r.map(|index| citysim::EntityId { index, generation: 0 }).collect()
+    };
+    let all = |_: citysim::EntityId| true;
+    let small = ids(0..10);
+    for crew in [0, 9, 16] {
+        assert_eq!(lod::crew_above(&small, small[3], crew, all), small[4..].to_vec(), "crew {crew}");
+    }
+    assert_eq!(lod::crew_above(&small, small[3], 4, all), vec![small[4], small[5]]);
+    // Wrapping: the last member's crew holds the first ones, driven by them.
+    assert_eq!(lod::crew_above(&small, small[9], 4, all), Vec::<citysim::EntityId>::new());
+    assert_eq!(lod::crew_above(&small, small[0], 4, all), vec![small[1], small[2], small[8], small[9]]);
+    let big = ids(0..100);
+    for crew in [2usize, 8, 32] {
+        let mut pairs = std::collections::BTreeSet::new();
+        for &a in &big {
+            for b in lod::crew_above(&big, a, crew, all) {
+                assert!(b > a);
+                assert!(pairs.insert((a, b)), "pair driven twice");
+            }
+        }
+        assert_eq!(pairs.len(), big.len() * crew / 2, "crew {crew}: each member in `crew` pairs");
+    }
+    // Another role in between is skipped, not counted.
+    let even = |e: citysim::EntityId| e.index.is_multiple_of(2);
+    assert_eq!(lod::crew_above(&big, big[10], 4, even), vec![big[12], big[14]]);
+}
+
+/// Scale S1: `[lod] coworker_crew` bounds the hour's co-work: with a crew of
+/// 2, the co-workers of a big group are tied to their two neighbours, not to
+/// the whole group (the pre-S1 rule, `coworker_crew` 0, ties every pair).
+#[test]
+fn test_coworker_crew_bounds_the_coworker_edges() {
+    let tied = |crew: usize| -> (usize, usize) {
+        let mut cfg = Config::load();
+        cfg.lod.coworker_crew = crew;
+        let mut w = World::new(42, cfg);
+        w.run_ticks(2 * TICKS_PER_DAY);
+        // The staff of every workplace's biggest role, at least 20 strong.
+        let (mut tied, mut groups) = (0, 0);
+        for staff in w.employers.values() {
+            let mut by_role: std::collections::BTreeMap<String, Vec<citysim::EntityId>> = Default::default();
+            for &c in staff {
+                if let Some(j) = w.comp::<citysim::Job>(c) {
+                    by_role.entry(j.role.label().to_string()).or_default().push(c);
+                }
+            }
+            for g in by_role.values().filter(|g| g.len() >= 20) {
+                groups += 1;
+                for (i, &a) in g.iter().enumerate() {
+                    tied += g[i + 1..].iter().filter(|&&b| w.edge(a, b).is_some()).count();
+                }
+            }
+        }
+        (tied, groups)
+    };
+    let (all, groups) = tied(0);
+    let (crew, _) = tied(2);
+    eprintln!("co-worker pairs tied in {groups} groups of 20+: every pair {all}, crew 2 {crew}");
+    assert!(groups > 0, "no workplace has 20 of a role");
+    assert!(crew * 3 < all, "crew 2 tied {crew} pairs, every co-worker {all}");
+}

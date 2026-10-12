@@ -3,6 +3,10 @@ name = "citysim-cli"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Scale S1: `run` prints the per-system profile (`citysim::prof`).
+prof = ["citysim/prof"]
+
 [dependencies]
 toml = "0.8"
 citysim = { path = "../citysim" }

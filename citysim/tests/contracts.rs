@@ -1112,7 +1112,7 @@ fn test_fixer_closes_at_warrant_heat_and_refunds_open_book() {
     assert_eq!(w.escrow_held, 0);
     assert_eq!(ownership::total_coins(&w), total);
     assert!(conspiracy_on(&w, owner), "the owner is a Conspiracy suspect");
-    assert!(w.last_seen.contains_key(&owner), "last seen at the office door");
+    assert!(w.last_seen().contains_key(&owner), "last seen at the office door");
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::FixerBusted));
     // A closed office takes no posting.
     let r = contracts::post(&mut w, posting(buyer, ContractKind::Beat, t, Some(f)));
@@ -1190,7 +1190,7 @@ fn test_guard_on_take_skips_buyer_in_chase_and_report() {
     assert!(filed(&w, g2), "another guard reports it");
     // The chase: the guard on the take never pursues its buyer.
     let now = w.tick;
-    w.last_seen.insert(buyer, (tile, now));
+    w.set_last_seen(buyer, (tile, now));
     let mine = law::located_suspects(&w, Some(law::Pursuer { tile, guard: g }));
     assert!(!mine.contains(&buyer), "skipped by the guard on the take");
     let theirs = law::located_suspects(&w, Some(law::Pursuer { tile, guard: g2 }));
@@ -1257,7 +1257,7 @@ fn test_public_locate_paid_by_treasury_sets_last_seen() {
     // A wanted suspect, unseen for law_bounty_days: the law posts.
     citysim::systems::law_brain::recompute_captain(&mut w).expect("a captain");
     law::file_report(&mut w, citysim::Crime::Assault, s, None);
-    w.last_seen.remove(&s);
+    w.remove_last_seen(&s);
     w.tick += u64::from(w.config.contracts.law_bounty_days + 1) * TICKS_PER_DAY;
     if let Some(t) = w.treasury_mut() {
         t.coins = 100_000;
@@ -1278,7 +1278,7 @@ fn test_public_locate_paid_by_treasury_sets_last_seen() {
     let per = w.config.bounty.per_sighting;
     assert_eq!(coins(&w, observer) - obs0, per, "paid per sighting");
     assert_eq!(city0 - w.purse(None), per, "by the Treasury");
-    assert_eq!(w.last_seen.get(&s).map(|&(t, _)| t), Some(tile), "the law knows where");
+    assert_eq!(w.last_seen().get(&s).map(|&(t, _)| t), Some(tile), "the law knows where");
     assert_eq!(ownership::total_coins(&w), total);
     assert!(w.events.iter().any(|e| e.kind == citysim::EventKind::BountyPaid));
 }

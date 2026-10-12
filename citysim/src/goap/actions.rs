@@ -693,7 +693,7 @@ impl PlanCtx {
         let mut dist = BTreeMap::new();
         if let (Some(o), false) = (origin, light) {
             dist.insert(LocationKey::Street, 0);
-            if let Some(&(t, _)) = target.and_then(|s| world.last_seen.get(&s)) {
+            if let Some(&(t, _)) = target.and_then(|s| world.last_seen().get(&s)) {
                 dist.insert(LocationKey::SuspectTile, o.manhattan(t));
             }
             let mut add = |key: LocationKey, b: Option<EntityId>| {

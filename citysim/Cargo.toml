@@ -3,6 +3,10 @@ name = "citysim"
 version.workspace = true
 edition.workspace = true
 
+[features]
+# Scale S1: the wall-time profiler (`prof.rs`), off by default.
+prof = []
+
 [dependencies]
 rand = "0.9"
 rand_chacha = { version = "0.9", features = ["serde"] }

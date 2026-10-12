@@ -426,7 +426,7 @@ fn disperse(world: &mut World, riot: &Riot, door: crate::components::TilePos, de
         }
         let witness = guards.iter().map(|&(t, g)| (t.manhattan(tile), g)).min().map(|(_, g)| g);
         law::file_report(world, Crime::Assault, r, witness);
-        world.last_seen.insert(r, (tile, now));
+        world.set_last_seen(r, (tile, now));
     }
 }
 

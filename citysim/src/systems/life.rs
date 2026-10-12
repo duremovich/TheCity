@@ -264,10 +264,13 @@ pub fn claimed_suspects(world: &World, guard: EntityId) -> std::collections::BTr
 /// A sighting fresh enough to chase from `from`: seen within
 /// `arrest_fresh_ticks`, or within `near_tiles` of the guard.
 pub fn sighting_fresh(world: &World, suspect: EntityId, from: TilePos) -> bool {
-    world.last_seen.get(&suspect).is_some_and(|&(t, at)| {
-        world.tick.saturating_sub(at) <= world.config.life.arrest_fresh_ticks
-            || t.manhattan(from) <= world.config.life.near_tiles
-    })
+    world.last_seen().get(&suspect).is_some_and(|&seen| sighting_fresh_at(world, seen, from))
+}
+
+/// `sighting_fresh` on a `last_seen` entry already read (Scale S1).
+pub fn sighting_fresh_at(world: &World, (t, at): (TilePos, crate::time::Tick), from: TilePos) -> bool {
+    world.tick.saturating_sub(at) <= world.config.life.arrest_fresh_ticks
+        || t.manhattan(from) <= world.config.life.near_tiles
 }
 
 /// The guard reached the suspect's last-seen tile. A suspect in sight
@@ -287,7 +290,7 @@ pub fn arrive_at_suspect(world: &mut World, guard: EntityId, suspect: EntityId) 
     if visible && hops < world.config.life.chase_hops {
         let tile = world.comp::<Position>(suspect).map(|p| p.tile).unwrap_or_default();
         let now = world.tick;
-        world.last_seen.insert(suspect, (tile, now));
+        world.set_last_seen(suspect, (tile, now));
         if let Some(b) = world.comp_mut::<Brain>(guard) {
             b.chase_hops = hops + 1;
             let at = usize::from(b.plan_step);
@@ -306,7 +309,7 @@ pub fn arrive_at_suspect(world: &mut World, guard: EntityId, suspect: EntityId) 
         return true;
     }
     // Stale: nobody chases this sighting again.
-    world.last_seen.remove(&suspect);
+    world.remove_last_seen(&suspect);
     false
 }
 
@@ -781,6 +784,10 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
                 .map(|b| (h, b.door, usize::from(b.capacity)))
         })
         .collect();
+    // Scale S1: each Home's measure to a work tile, once a pass per tile (the
+    // pick and the trade read it for every mover; a pure function of the two
+    // doors and the network, which a pass does not change).
+    let mut memo = DoorCosts::new(homes.iter().map(|&(_, door, _)| door).collect());
     let mut moved = 0usize;
     let tick = world.tick;
     for (std::cmp::Reverse(d), a, home, work) in movers {
@@ -817,19 +824,29 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
         let evicted_by = world.comp::<Household>(a).and_then(|h| h.evicted_by).map(|(o, _)| o);
         // Class pay: a graded post holder or an exec keeps its tier.
         let min_tier = crate::systems::classpay::min_home_tier(world, a, home);
-        let pick = homes
-            .iter()
-            .filter(|&&(h, _, cap)| {
-                h != home
-                    && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
-                    && world.residents_of(h).len() + need <= cap
-                    && purse >= mult * crate::systems::ownership::rent_for(world, h)
-                    && evicted_by.is_none_or(|o| o != world.owner_of(h))
-            })
-            .map(|&(h, door, _)| (cost(world, door, work), both(door), h))
-            .filter(|&(dd, sp, _)| dd + sp + margin <= d_pair && (!fix || dd <= cap))
-            .map(|(dd, sp, h)| (dd + sp, h))
-            .min();
+        memo.fill(world, work, &cost);
+        if let Some(sw) = spouse_work {
+            memo.fill(world, sw, &cost);
+        }
+        let to_work = memo.row(work);
+        let to_spouse = spouse_work.map(|sw| memo.row(sw));
+        let pick = crate::prof::timed!(
+            "reloc::pick",
+            homes
+                .iter()
+                .enumerate()
+                .filter(|&(_, &(h, _, cap))| {
+                    h != home
+                        && (min_tier == 0 || world.comp::<Building>(h).is_some_and(|b| b.tier >= min_tier))
+                        && world.residents_of(h).len() + need <= cap
+                        && purse >= mult * crate::systems::ownership::rent_for(world, h)
+                        && evicted_by.is_none_or(|o| o != world.owner_of(h))
+                })
+                .map(|(i, &(h, _, _))| (to_work[i], to_spouse.map_or(0, |r| r[i]), h))
+                .filter(|&(dd, sp, _)| dd + sp + margin <= d_pair && (!fix || dd <= cap))
+                .map(|(dd, sp, h)| (dd + sp, h))
+                .min()
+        );
         // Hunger fix item 8 (P5g): no Home with room near work (the Farms'
         // neighbourhoods are full: 282 beds within 40 tiles of the 12 Farms
         // for 504 farmers on the flipped seed 42): trade Homes with a single
@@ -840,7 +857,10 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
             Some(p) => Some(p),
             None if fix && spouse.is_none() && kids.is_empty() => {
                 let mover = Mover { purse, evicted_by, min_tier };
-                if let Some((_, to, r)) = swap_partner(world, a, home, work, cap, d, margin, mover) {
+                let near = NearHomes { homes: &homes, to_work, order: memo.order(work) };
+                if let Some((_, to, r)) =
+                    crate::prof::timed!("reloc::swap", swap_partner(world, a, home, near, cap, d, margin, mover))
+                {
                     let (an, rn) = (world.name_of(a), world.name_of(r));
                     let (to_name, from_name) = (world.name_of(to), world.name_of(home));
                     world.set_home(a, Some(to));
@@ -891,6 +911,47 @@ pub fn relocate_up_to(world: &mut World, limit: usize) {
     }
 }
 
+/// Scale S1: per work tile, the measure from each Home door of a
+/// relocation pass's list to it (`rows[tile].0[i]` for `doors[i]`) and the
+/// list's indices nearest first (ties in list order), filled once a tile.
+struct DoorCosts {
+    doors: Vec<TilePos>,
+    rows: std::collections::BTreeMap<TilePos, (Vec<u64>, Vec<u32>)>,
+}
+
+impl DoorCosts {
+    fn new(doors: Vec<TilePos>) -> DoorCosts {
+        DoorCosts { doors, rows: std::collections::BTreeMap::new() }
+    }
+
+    fn fill(&mut self, world: &World, to: TilePos, cost: &impl Fn(&World, TilePos, TilePos) -> u64) {
+        if !self.rows.contains_key(&to) {
+            let row: Vec<u64> = self.doors.iter().map(|&d| cost(world, d, to)).collect();
+            let mut order: Vec<u32> = (0..row.len() as u32).collect();
+            order.sort_unstable_by_key(|&i| (row[i as usize], i));
+            self.rows.insert(to, (row, order));
+        }
+    }
+
+    /// The row `fill` made for `to` (empty if none).
+    fn row(&self, to: TilePos) -> &[u64] {
+        self.rows.get(&to).map_or(&[], |r| r.0.as_slice())
+    }
+
+    /// The row's indices, nearest first (empty if none).
+    fn order(&self, to: TilePos) -> &[u32] {
+        self.rows.get(&to).map_or(&[], |r| r.1.as_slice())
+    }
+}
+
+/// Scale S1: a relocation pass's standing Homes (`(Home, door, capacity)`),
+/// each one's measure to the mover's work, and their indices nearest first.
+struct NearHomes<'a> {
+    homes: &'a [(EntityId, TilePos, usize)],
+    to_work: &'a [u64],
+    order: &'a [u32],
+}
+
 /// The mover's side of a trade (`swap_partner`), as the plain pick reads
 /// it: its purse (the first rent of the Home it takes), the landlord that
 /// evicted it (never traded back into), and its tier floor (class pay).
@@ -906,13 +967,18 @@ struct Mover {
 /// holding a single adult resident (no spouse or child there) who is not
 /// itself a worker nearer that Home than `home`, can pay `home`'s first
 /// rent, keeps its own tier floor in `home` and was not evicted by `home`'s
-/// landlord. `(distance, that Home, the resident)`.
+/// landlord. `(distance, that Home, the resident)`. Scale S1: `near` is the
+/// pass's standing Homes (`(Home, door, capacity)`, the Homes of the kind
+/// list that are neither demolished nor derelict, in its order) with each
+/// one's `commute_cost` to the mover's work and the list's indices nearest
+/// first: the first Home in that order with a partner is the nearest (ties
+/// in list order), and the walk stops past `cap` or the margin.
 #[allow(clippy::too_many_arguments)]
 fn swap_partner(
     world: &World,
     a: EntityId,
     home: EntityId,
-    work: TilePos,
+    near: NearHomes<'_>,
     cap: u64,
     d: u64,
     margin: u64,
@@ -923,13 +989,17 @@ fn swap_partner(
     let home_tier = world.comp::<Building>(home)?.tier;
     let home_owner = world.owner_of(home);
     let home_rent = crate::systems::ownership::rent_for(world, home);
-    let mut best: Option<(u64, EntityId, EntityId)> = None;
-    for &h in world.buildings_of_kind(BuildingKind::Home) {
-        let Some(b) = world.comp::<Building>(h).filter(|b| !b.demolished && !b.derelict && b.tier >= min_tier) else {
+    let NearHomes { homes, to_work, order } = near;
+    for &i in order {
+        let (h, dd) = (homes[i as usize].0, to_work[i as usize]);
+        // Nearest first: every Home after this one is as far or farther.
+        if dd > cap || dd + margin > d {
+            break;
+        }
+        let Some(b) = world.comp::<Building>(h).filter(|b| b.tier >= min_tier) else {
             continue;
         };
-        let dd = commute_cost(world, b.door, work);
-        if h == home || dd > cap || dd + margin > d || best.is_some_and(|(bd, _, _)| dd >= bd) {
+        if h == home {
             continue;
         }
         // The mover's checks, as the plain pick's.
@@ -965,11 +1035,10 @@ fn swap_partner(
             {
                 continue;
             }
-            best = Some((dd, h, r));
-            break;
+            return Some((dd, h, r));
         }
     }
-    best
+    None
 }
 
 // ---------------------------------------------------------------------------

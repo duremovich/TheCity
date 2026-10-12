@@ -415,7 +415,7 @@ fn test_corp_trace_files_report_sets_last_seen_and_arrest_at_chair() {
     virt::lose(&mut w, r, n, LossRolls { gap, fry: 1.0, dodge: 0.0, kill: 1.0, trace: 0.0 });
     let door = w.comp::<Building>(bar).expect("bar").door;
     assert!(w.crime_reports().iter().any(|x| !x.resolved && x.suspect == a && x.crime == Crime::DataTheft));
-    assert_eq!(w.last_seen.get(&a).map(|&(t, _)| t), Some(door));
+    assert_eq!(w.last_seen().get(&a).map(|&(t, _)| t), Some(door));
     assert_eq!(w.last_trace.get(&a).map(|&(c, _)| c), Some(bar));
     assert!(w.comp::<Brain>(a).and_then(|b| b.dazed_until).is_some_and(|t| t > w.tick), "dazed");
     assert!(matches!(w.comp::<Brain>(a).map(|b| &b.exec), Some(ExecState::Wait { .. })), "waits in the chair");

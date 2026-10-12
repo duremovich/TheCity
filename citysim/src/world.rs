@@ -640,7 +640,27 @@ pub struct World {
     /// Lazily built, LRU-evicted (`[exec] flow_field_cache`); pure functions of map and door.
     #[serde(skip)]
     pub flow_fields: FlowCache,
-    pub last_seen: BTreeMap<EntityId, (TilePos, Tick)>,
+    /// Where and when the law last saw each suspect (read with
+    /// `last_seen()`, written with `set_last_seen` / `remove_last_seen`).
+    last_seen: BTreeMap<EntityId, (TilePos, Tick)>,
+    /// Scale S1: `last_seen` by its tick, `(tick, suspect)` (not saved;
+    /// rebuilt on load). The law's "located" window reads the recent end
+    /// instead of every open warrant. Written only by `set_last_seen` and
+    /// `remove_last_seen`.
+    #[serde(skip)]
+    last_seen_by_tick: BTreeSet<(Tick, EntityId)>,
+    /// Scale S1: bumped by every write to `last_seen` and to the reports
+    /// (the key of `located_memo`; not saved).
+    #[serde(skip)]
+    seen_gen: u64,
+    /// Scale S1: `located_candidates`' last answer, keyed by tick, window
+    /// and `seen_gen` (every guard's think reads it; not saved, not cloned).
+    #[serde(skip)]
+    located_memo: Memo<LocatedMemo>,
+    /// Scale S1: every Position by tile cell and building (`agents_near`;
+    /// not saved, built on its first query).
+    #[serde(skip)]
+    pub(crate) pos_index: crate::spatial::PosIndex,
     pub vacancies: BTreeMap<EntityId, Vec<Role>>,
     pub edge_roads: Vec<TilePos>,
     pub view_rect: Option<Rect>,
@@ -1156,12 +1176,64 @@ components! {
     schooling: crate::components::Schooling,
 }
 
+/// Scale S1: a memo cell on the world: skipped by serde and empty in a
+/// clone (a cache of a pure function of the world, never state).
+#[derive(Debug)]
+pub struct Memo<T>(std::sync::Mutex<Option<T>>);
+
+impl<T> Default for Memo<T> {
+    fn default() -> Self {
+        Memo(std::sync::Mutex::new(None))
+    }
+}
+
+impl<T> Clone for Memo<T> {
+    fn clone(&self) -> Self {
+        Memo(std::sync::Mutex::new(None))
+    }
+}
+
+/// `(tick, window, seen_gen)` and the open suspects seen inside the window
+/// then, ascending, each with its `last_seen` entry.
+type LocatedMemo = (Tick, Tick, u64, std::sync::Arc<Located>);
+
+/// Scale S1: the open-warrant suspects seen inside the law's window,
+/// ascending, each with its `last_seen` entry, and a grid of their tiles.
+#[derive(Debug, PartialEq)]
+pub struct Located {
+    pub list: Vec<(EntityId, (TilePos, Tick))>,
+    grid: crate::spatial::TileGrid,
+}
+
+impl Located {
+    /// The cell of `grid`, in tiles (a city guard's reach is 64, a private one's 16).
+    const CELL: u32 = 16;
+
+    fn new(list: Vec<(EntityId, (TilePos, Tick))>, w: usize, h: usize) -> Located {
+        let grid = crate::spatial::TileGrid::build(w, h, Self::CELL, list.iter().map(|&(_, (t, _))| t));
+        Located { list, grid }
+    }
+
+    /// The entries last seen within the Chebyshev square of radius `r`
+    /// around `t` (and maybe a few beyond it), ascending: a superset of
+    /// those within `r` Manhattan tiles.
+    pub fn near(&self, t: TilePos, r: u32) -> Vec<(EntityId, (TilePos, Tick))> {
+        let mut idx = Vec::new();
+        self.grid.near(t, r, &mut idx);
+        idx.sort_unstable();
+        idx.into_iter().map(|i| self.list[i as usize]).collect()
+    }
+}
+
 /// Per suspect `(open reports, latest report tick)`, and the suspects with an
 /// open report, ascending.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct ReportIndex {
     pub by_suspect: BTreeMap<EntityId, (u32, Tick)>,
     pub open: Vec<EntityId>,
+    /// Scale S1: per suspect, its open reports for anything but Vagrancy
+    /// (only suspects with one; `law::vagrant_at_work` read every report).
+    pub open_not_vagrancy: BTreeMap<EntityId, u32>,
 }
 
 /// Statistical agents by hourly slot: `slots[s]` holds the ids with
@@ -1327,6 +1399,10 @@ impl World {
             door_queue: BTreeMap::new(),
             flow_fields: FlowCache::default(),
             last_seen: BTreeMap::new(),
+            last_seen_by_tick: BTreeSet::new(),
+            seen_gen: 0,
+            located_memo: Memo::default(),
+            pos_index: Default::default(),
             vacancies: BTreeMap::new(),
             edge_roads,
             view_rect: None,
@@ -1448,86 +1524,86 @@ impl World {
             laid_off: BTreeMap::new(),
             housing_demand: BTreeMap::new(),
         };
-        w.spawn_buildings();
+        crate::prof::timed!("new::spawn_buildings", w.spawn_buildings());
         w.litter = vec![0; w.map.w() * w.map.h()];
-        systems::districts::rebuild(&mut w);
+        crate::prof::timed!("new::districts::rebuild", systems::districts::rebuild(&mut w));
         // Transit: the El's network from the config and the map (no RNG;
         // nothing with transit off), before anything reads a commute
         // (phase 2: `life::commute_cost` rides; the staffing and the
         // housing pre-roll read it).
-        systems::transit::build(&mut w);
+        crate::prof::timed!("new::transit::build", systems::transit::build(&mut w));
         w.rumours = vec![Default::default(); w.districts.len()];
-        w.spawn_gangs();
-        w.spawn_population(&names);
+        crate::prof::timed!("new::spawn_gangs", w.spawn_gangs());
+        crate::prof::timed!("new::spawn_population", w.spawn_population(&names));
         // M15 W25/W28: the social skills from each agent's Skill word stream
         // (the world stream is untouched), then the city means competence reads.
-        systems::moves::seed_population(&mut w);
+        crate::prof::timed!("new::moves::seed_population", systems::moves::seed_population(&mut w));
         // M12 D26: the derelicts are cut after the population is dealt (the
         // world stream is untouched) and before ownership skips them; the
         // Hotels go up on Lots once the Bar owners are dealt.
-        systems::street::seed_derelicts(&mut w);
-        systems::ownership::seed(&mut w);
+        crate::prof::timed!("new::street::seed_derelicts", systems::street::seed_derelicts(&mut w));
+        crate::prof::timed!("new::ownership::seed", systems::ownership::seed(&mut w));
         // Real economy (plan E4, Seeding): the World account and its books
         // (no RNG), before any purchase can cross.
-        systems::world_market::seed(&mut w);
-        systems::street::seed_hotels(&mut w);
+        crate::prof::timed!("new::world_market::seed", systems::world_market::seed(&mut w));
+        crate::prof::timed!("new::street::seed_hotels", systems::street::seed_hotels(&mut w));
         // M13 D18: the Garages go up last, on the Lots the Hotels left.
-        systems::assets::seed_sellers(&mut w);
+        crate::prof::timed!("new::assets::seed_sellers", systems::assets::seed_sellers(&mut w));
         // M14 (Seeding table, V21, V26, V47): the corps' trees by name (no
         // RNG), then, with the plane on, the Labs on the Lots left, the
         // plane and its opening ICE.
-        systems::tech::seed_corps(&mut w, false);
-        systems::virt::seed_labs(&mut w);
+        crate::prof::timed!("new::tech::seed_corps", systems::tech::seed_corps(&mut w, false));
+        crate::prof::timed!("new::virt::seed_labs", systems::virt::seed_labs(&mut w));
         // M15 W41: the Civic Wire and Nutrix Now on the Lots left (no RNG),
         // before the plane links, so each has a node from the start.
-        systems::news::seed_feeds(&mut w);
+        crate::prof::timed!("new::news::seed_feeds", systems::news::seed_feeds(&mut w));
         // M15 W31: The Unplugged on a Sump Central derelict (no RNG), before
         // the plane links, so its Chapel has a node from the start.
-        systems::creeds::seed_unplugged(&mut w);
+        crate::prof::timed!("new::creeds::seed_unplugged", systems::creeds::seed_unplugged(&mut w));
         // L2 (plan L7): the venues and Fabs on the Lots left (no RNG), after
         // the Chapel and before the plane links, so each has a node.
-        systems::jobs::seed_venues(&mut w);
+        crate::prof::timed!("new::jobs::seed_venues", systems::jobs::seed_venues(&mut w));
         // M16a (plan C9): the seeded Fixer on the Lots left (no RNG), after
         // the venues and before the plane links, so each has a node.
-        systems::contracts::seed_fixers(&mut w);
+        crate::prof::timed!("new::contracts::seed_fixers", systems::contracts::seed_fixers(&mut w));
         // Real economy E26, E37 (Seeding table): the Sump Mission and the
         // Chapel's kitchen, then the city's Camp (no RNG), before the plane links.
-        systems::charity::seed(&mut w);
-        systems::camp::seed(&mut w);
+        crate::prof::timed!("new::charity::seed", systems::charity::seed(&mut w));
+        crate::prof::timed!("new::camp::seed", systems::camp::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
-        systems::trades::seed(&mut w);
+        crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));
         // L2 phase 5 (the day-1 leisure pulse): opening fun spread (no RNG).
-        systems::leisure::seed_fun(&mut w);
-        systems::virt::relink(&mut w);
-        systems::virt::seed_ice(&mut w);
+        crate::prof::timed!("new::leisure::seed_fun", systems::leisure::seed_fun(&mut w));
+        crate::prof::timed!("new::virt::relink", systems::virt::relink(&mut w));
+        crate::prof::timed!("new::virt::seed_ice", systems::virt::seed_ice(&mut w));
         // M15 W28: every corp's and the Law's opening competence.
-        systems::competence::seed(&mut w);
+        crate::prof::timed!("new::competence::seed", systems::competence::seed(&mut w));
         // Flip readiness (the transition wave; the market wage law): the Recycler's
         // opening float, out of the opening hoard (a purse move, no RNG).
-        systems::treasury::seed_till(&mut w);
+        crate::prof::timed!("new::treasury::seed_till", systems::treasury::seed_till(&mut w));
         // Real economy phase 2 (plan E14, Seeding): the hoard into the
         // corps' working capital, last (no RNG; a plain purse move).
-        systems::econ::seed_capital(&mut w);
+        crate::prof::timed!("new::econ::seed_capital", systems::econ::seed_capital(&mut w));
         // Flip readiness (the transition wave; wages on): the no-dole city's
         // staffing before day 0, from the capital just seeded (no RNG).
         // Class pay (docs/CLASS_PAY.md): the backgrounds, then the staffing
         // (graded posts first, by merit), then the posts the graded hires
         // left and the skilled grade (no RNG).
-        systems::classpay::seed_schooling(&mut w);
-        systems::wages::seed_staff(&mut w);
-        systems::classpay::seed_after_staff(&mut w);
+        crate::prof::timed!("new::classpay::seed_schooling", systems::classpay::seed_schooling(&mut w));
+        crate::prof::timed!("new::wages::seed_staff", systems::wages::seed_staff(&mut w));
+        crate::prof::timed!("new::classpay::seed_after_staff", systems::classpay::seed_after_staff(&mut w));
         // Hunger fix item 9 (P5g): the seeded staff housed near work where
         // Homes allow (the relocation pass, uncapped; no RNG). The pre-roll
         // (items 8-10, wages and no safety net on): Homes and floors toward
         // the jobs, unpaid as the seed buildings, until the far workers have
         // beds in range or no Lot or floor is left there (no RNG).
         if systems::fixes::hire_near(&w) {
-            systems::life::preroll_housing(&mut w);
+            crate::prof::timed!("new::life::preroll_housing", systems::life::preroll_housing(&mut w));
         }
         // Hunger as sickness (after P5): the adults' histories (pure
         // hashes, no stream draw), once they are housed.
-        systems::health::seed_history(&mut w);
+        crate::prof::timed!("new::health::seed_history", systems::health::seed_history(&mut w));
         w
     }
 
@@ -1776,27 +1852,47 @@ impl World {
                 Some((id, self.comp::<Building>(home)?.door))
             })
             .collect();
-        let mut taken = vec![false; pool.len()];
+        // Scale S1: the untaken residents by home door, each door's in pool
+        // order (the homeless apart), so a slot reads one candidate per door
+        // (its first untaken: the lowest `i` at that distance), not the whole
+        // pool: the same `(distance, i)` minimum as the scan.
+        let mut by_door: BTreeMap<TilePos, std::collections::VecDeque<usize>> = BTreeMap::new();
+        let mut doorless: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+        for (i, id) in pool.iter().enumerate() {
+            match home_door.get(id) {
+                Some(&h) => by_door.entry(h).or_default().push_back(i),
+                None => doorless.push_back(i),
+            }
+        }
         for role in Role::ALL {
             let count = wc.jobs.count(role) as usize;
             let workplaces = role.workplace().and_then(|k| self.buildings_by_kind.get(&k)).cloned().unwrap_or_default();
             for k in 0..count {
                 let employer = workplaces.get(k % workplaces.len().max(1)).copied();
                 let work_door = employer.and_then(|e| self.comp::<Building>(e)).map(|b| b.door);
-                let pick = pool
-                    .iter()
-                    .enumerate()
-                    .filter(|&(i, _)| !taken[i])
-                    .map(|(i, id)| {
-                        let d = match (home_door.get(id), work_door) {
-                            (Some(h), Some(w)) => h.manhattan(w),
-                            _ => u32::MAX,
-                        };
-                        (d, i)
-                    })
-                    .min();
-                let Some((_, i)) = pick else { break };
-                taken[i] = true;
+                // `(distance, i, door)`: a resident with a home door and a
+                // workplace door is nearer than `u32::MAX`; else the lowest `i`.
+                let mut pick: Option<(u32, usize, Option<TilePos>)> = doorless.front().map(|&i| (u32::MAX, i, None));
+                for (&door, list) in &by_door {
+                    let Some(&i) = list.front() else { continue };
+                    let d = work_door.map_or(u32::MAX, |w| door.manhattan(w));
+                    if pick.is_none_or(|(pd, pi, _)| (d, i) < (pd, pi)) {
+                        pick = Some((d, i, Some(door)));
+                    }
+                }
+                let Some((_, i, door)) = pick else { break };
+                match door {
+                    Some(door) => {
+                        let list = by_door.get_mut(&door).expect("the picked door");
+                        list.pop_front();
+                        if list.is_empty() {
+                            by_door.remove(&door);
+                        }
+                    }
+                    None => {
+                        doorless.pop_front();
+                    }
+                }
                 let id = pool[i];
                 let shifts = if role == Role::Guard && id.index % 2 == 0 {
                     wc.shift_night.clone()
@@ -1877,6 +1973,8 @@ impl World {
             self.index_household(id);
         } else if TypeId::of::<T>() == TypeId::of::<Squatter>() {
             self.index_squatter(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Position>() {
+            self.pos_index.mark(id.index);
         }
     }
 
@@ -1896,6 +1994,8 @@ impl World {
             self.unindex_household(id);
         } else if TypeId::of::<T>() == TypeId::of::<Squatter>() {
             self.unindex_squatter(id);
+        } else if TypeId::of::<T>() == TypeId::of::<Position>() {
+            self.pos_index.mark(id.index);
         }
     }
 
@@ -2094,6 +2194,53 @@ impl World {
         out
     }
 
+    /// Scale S1: every agent with a Brain (the three tiers merged),
+    /// ascending: `citizens()` with a Brain without walking every entity
+    /// (buildings included) and their stores.
+    pub fn brained(&self) -> Vec<EntityId> {
+        let stat = &self.by_tier[Lod::Statistical as usize];
+        let bodies = self.bodies();
+        let mut out = Vec::with_capacity(stat.len() + bodies.len());
+        let (mut i, mut j) = (0, 0);
+        while i < bodies.len() && j < stat.len() {
+            if bodies[i] < stat[j] {
+                out.push(bodies[i]);
+                i += 1;
+            } else {
+                out.push(stat[j]);
+                j += 1;
+            }
+        }
+        out.extend_from_slice(&bodies[i..]);
+        out.extend_from_slice(&stat[j..]);
+        out
+    }
+
+    /// Scale S1: every live entity with a Position on a tile within the
+    /// Chebyshev square of radius `r` around `tile`'s cell neighbourhood, or
+    /// inside `building`, ascending, each once: a superset of "within `r`
+    /// tiles, or inside `building`", for the caller's exact filter (a scan
+    /// of every entity reads the same agents).
+    pub fn agents_near(&mut self, tile: TilePos, r: u32, building: Option<EntityId>) -> Vec<EntityId> {
+        let (w, h, n) = (self.map.w(), self.map.h(), self.alive.len());
+        let (alive, position) = (&self.alive, &self.position);
+        self.pos_index.refresh(w, h, n, |i| {
+            let i = i as usize;
+            if !alive[i] {
+                return None;
+            }
+            position[i].as_ref().map(|p| (p.tile, p.building.map(|b| b.index)))
+        });
+        let mut idx = Vec::new();
+        self.pos_index.near(tile, r, building.map(|b| b.index), &mut idx);
+        idx.sort_unstable();
+        idx.dedup();
+        idx.into_iter()
+            .filter(|&i| self.alive[i as usize])
+            .map(|i| EntityId { index: i, generation: self.generations[i as usize] })
+            .collect()
+    }
+
     /// Job holders of one role, ascending.
     pub fn workers(&self, role: Role) -> &[EntityId] {
         self.by_role.get(role_index(role)).map_or(&[], Vec::as_slice)
@@ -2233,6 +2380,9 @@ impl World {
         }
         if self.squat_index != self.squat_index_from_stores() {
             return Err("squat_index out of sync with the Squatter store".to_string());
+        }
+        if self.last_seen_by_tick != Self::last_seen_by_tick_of(&self.last_seen) {
+            return Err("last_seen_by_tick out of sync with last_seen".to_string());
         }
         if let Some(idx) = self.report_index.get() {
             if *idx != Self::build_report_index(&self.crime_reports) {
@@ -2496,6 +2646,7 @@ impl World {
     /// The reports, for writing; drops the per-suspect index.
     pub fn reports_mut(&mut self) -> &mut Vec<CrimeReport> {
         self.report_index.take();
+        self.seen_gen += 1;
         &mut self.crime_reports
     }
 
@@ -2528,6 +2679,7 @@ impl World {
     /// Resolve every report on `suspect` (an arrest), keeping a built index
     /// in step (as `refresh_open_report`).
     pub fn resolve_reports_of(&mut self, suspect: EntityId) {
+        self.seen_gen += 1;
         for r in self.crime_reports.iter_mut().filter(|r| r.suspect == suspect) {
             r.resolved = true;
         }
@@ -2538,27 +2690,34 @@ impl World {
             if let Ok(i) = idx.open.binary_search(&suspect) {
                 idx.open.remove(i);
             }
+            idx.open_not_vagrancy.remove(&suspect);
         }
     }
 
     /// Drop every report on `suspect` (removed from the world), keeping a
     /// built index in step.
     pub fn drop_reports_of(&mut self, suspect: EntityId) {
+        self.seen_gen += 1;
         self.crime_reports.retain(|r| r.suspect != suspect);
         if let Some(idx) = self.report_index.get_mut() {
             idx.by_suspect.remove(&suspect);
             if let Ok(i) = idx.open.binary_search(&suspect) {
                 idx.open.remove(i);
             }
+            idx.open_not_vagrancy.remove(&suspect);
         }
     }
 
     /// Append a report, keeping a built index in step (as `refresh_open_report`).
     pub fn push_report(&mut self, r: CrimeReport) {
+        self.seen_gen += 1;
         if let Some(idx) = self.report_index.get_mut() {
             let e = idx.by_suspect.entry(r.suspect).or_insert((0, 0));
             e.0 += u32::from(!r.resolved);
             e.1 = e.1.max(r.tick);
+            if !r.resolved && r.crime != crate::components::Crime::Vagrancy {
+                *idx.open_not_vagrancy.entry(r.suspect).or_insert(0) += 1;
+            }
             if e.0 > 0 {
                 if let Err(i) = idx.open.binary_search(&r.suspect) {
                     idx.open.insert(i, r.suspect);
@@ -2570,15 +2729,19 @@ impl World {
 
     fn build_report_index(reports: &[CrimeReport]) -> ReportIndex {
         let mut m: BTreeMap<EntityId, (u32, Tick)> = BTreeMap::new();
+        let mut open_not_vagrancy: BTreeMap<EntityId, u32> = BTreeMap::new();
         for r in reports {
             let e = m.entry(r.suspect).or_insert((0, 0));
             e.0 += u32::from(!r.resolved);
             e.1 = e.1.max(r.tick);
+            if !r.resolved && r.crime != crate::components::Crime::Vagrancy {
+                *open_not_vagrancy.entry(r.suspect).or_insert(0) += 1;
+            }
         }
         // M11 phase 2: the suspects with an open report, kept apart so the
         // guards' warrant checks do not walk 60 days of closed ones.
         let open = m.iter().filter(|(_, &(open, _))| open > 0).map(|(&s, _)| s).collect();
-        ReportIndex { by_suspect: m, open }
+        ReportIndex { by_suspect: m, open, open_not_vagrancy }
     }
 
     fn report_index(&self) -> &ReportIndex {
@@ -2588,6 +2751,74 @@ impl World {
     /// `(open reports, latest report tick)` on `suspect`, if any report names them.
     pub fn reports_on(&self, suspect: EntityId) -> Option<(u32, Tick)> {
         self.report_index().by_suspect.get(&suspect).copied()
+    }
+
+    /// Scale S1: does `suspect` have an open report, every one of them for
+    /// Vagrancy? (`law::vagrant_at_work`'s test, from the index.)
+    pub fn wanted_only_for_vagrancy(&self, suspect: EntityId) -> bool {
+        let idx = self.report_index();
+        idx.by_suspect.get(&suspect).is_some_and(|e| e.0 > 0) && !idx.open_not_vagrancy.contains_key(&suspect)
+    }
+
+    /// Where and when the law last saw each suspect.
+    pub fn last_seen(&self) -> &BTreeMap<EntityId, (TilePos, Tick)> {
+        &self.last_seen
+    }
+
+    /// Record a sighting of `suspect` (`(tile, tick)`), keeping the by-tick
+    /// index in step.
+    pub fn set_last_seen(&mut self, suspect: EntityId, seen: (TilePos, Tick)) {
+        self.seen_gen += 1;
+        if let Some((_, old)) = self.last_seen.insert(suspect, seen) {
+            self.last_seen_by_tick.remove(&(old, suspect));
+        }
+        self.last_seen_by_tick.insert((seen.1, suspect));
+    }
+
+    /// Forget `suspect`'s sighting.
+    pub fn remove_last_seen(&mut self, suspect: &EntityId) {
+        self.seen_gen += 1;
+        if let Some((_, old)) = self.last_seen.remove(suspect) {
+            self.last_seen_by_tick.remove(&(old, *suspect));
+        }
+    }
+
+    /// Scale S1: every suspect last seen at `since` or later, in tick order
+    /// (ties ascending by id).
+    pub fn seen_since(&self, since: Tick) -> impl Iterator<Item = EntityId> + '_ {
+        self.last_seen_by_tick.range((since, EntityId { index: 0, generation: 0 })..).map(|&(_, s)| s)
+    }
+
+    /// Scale S1: the open-warrant suspects last seen at `tick - window` or
+    /// later, ascending, each with its `last_seen` entry (the only suspects
+    /// the law's `located` can pass). Memoised until a sighting or a report
+    /// changes or the clock moves.
+    pub fn located_candidates(&self, window: Tick) -> std::sync::Arc<Located> {
+        let key = (self.tick, window, self.seen_gen);
+        let mut memo = self.located_memo.0.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((t, w, g, v)) = memo.as_ref() {
+            if (*t, *w, *g) == key {
+                debug_assert_eq!(v.list, self.located_candidates_fresh(window), "located_memo is stale");
+                return v.clone();
+            }
+        }
+        let v = std::sync::Arc::new(Located::new(self.located_candidates_fresh(window), self.map.w(), self.map.h()));
+        *memo = Some((key.0, key.1, key.2, v.clone()));
+        v
+    }
+
+    fn located_candidates_fresh(&self, window: Tick) -> Vec<(EntityId, (TilePos, Tick))> {
+        let mut out: Vec<(EntityId, (TilePos, Tick))> = self
+            .seen_since(self.tick.saturating_sub(window))
+            .filter(|&s| self.reports_on(s).is_some_and(|(open, _)| open > 0))
+            .filter_map(|s| self.last_seen.get(&s).map(|&seen| (s, seen)))
+            .collect();
+        out.sort_unstable_by_key(|&(s, _)| s);
+        out
+    }
+
+    fn last_seen_by_tick_of(last_seen: &BTreeMap<EntityId, (TilePos, Tick)>) -> BTreeSet<(Tick, EntityId)> {
+        last_seen.iter().map(|(&s, &(_, t))| (t, s)).collect()
     }
 
     /// Suspects with an open report, ascending, each once.
@@ -2702,33 +2933,33 @@ impl World {
         self.apply_commands();
         // Review item 8: a cut line that ran out is back in the ride table
         // before anything reads it this tick.
-        systems::transit::reopen(self);
+        crate::prof::timed!("tick::transit::reopen", systems::transit::reopen(self));
         // time: the clock is `self.tick`; daily hooks live in the systems that need them.
-        systems::lod::run(self);
-        crate::needs::run(self);
-        systems::memory::run(self);
-        crate::mood::run(self);
-        systems::think::run(self);
-        systems::plan::run(self);
-        crate::exec::run(self);
-        systems::transit::run(self);
-        systems::virt::run(self);
-        systems::ownership::run(self);
-        systems::assets::run(self);
-        systems::tech::run(self);
-        systems::classes::run(self);
-        systems::districts::run(self);
-        systems::economy::run(self);
-        systems::bind::run(self);
-        systems::word::run(self);
-        systems::law::run(self);
-        systems::social::run(self);
-        systems::gang::run(self);
-        systems::corp_brain::run(self);
-        systems::living::run(self);
-        systems::contracts::run(self);
-        systems::demography::run(self);
-        systems::stats::run(self);
+        crate::prof::timed!("tick::lod", systems::lod::run(self));
+        crate::prof::timed!("tick::needs", crate::needs::run(self));
+        crate::prof::timed!("tick::memory", systems::memory::run(self));
+        crate::prof::timed!("tick::mood", crate::mood::run(self));
+        crate::prof::timed!("tick::think", systems::think::run(self));
+        crate::prof::timed!("tick::plan", systems::plan::run(self));
+        crate::prof::timed!("tick::exec", crate::exec::run(self));
+        crate::prof::timed!("tick::transit", systems::transit::run(self));
+        crate::prof::timed!("tick::virt", systems::virt::run(self));
+        crate::prof::timed!("tick::ownership", systems::ownership::run(self));
+        crate::prof::timed!("tick::assets", systems::assets::run(self));
+        crate::prof::timed!("tick::tech", systems::tech::run(self));
+        crate::prof::timed!("tick::classes", systems::classes::run(self));
+        crate::prof::timed!("tick::districts", systems::districts::run(self));
+        crate::prof::timed!("tick::economy", systems::economy::run(self));
+        crate::prof::timed!("tick::bind", systems::bind::run(self));
+        crate::prof::timed!("tick::word", systems::word::run(self));
+        crate::prof::timed!("tick::law", systems::law::run(self));
+        crate::prof::timed!("tick::social", systems::social::run(self));
+        crate::prof::timed!("tick::gang", systems::gang::run(self));
+        crate::prof::timed!("tick::corp_brain", systems::corp_brain::run(self));
+        crate::prof::timed!("tick::living", systems::living::run(self));
+        crate::prof::timed!("tick::contracts", systems::contracts::run(self));
+        crate::prof::timed!("tick::demography", systems::demography::run(self));
+        crate::prof::timed!("tick::stats", systems::stats::run(self));
         self.tick += 1;
     }
 
@@ -2899,7 +3130,7 @@ impl World {
         });
         self.pending_purchase.remove(&id);
         self.plan_queue.retain(|&(_, who), _| who != id);
-        self.last_seen.remove(&id);
+        self.remove_last_seen(&id);
         self.vagrancy_places.remove(&id);
         // M12 D27/D20: a squatter's slot and a guest's bed are freed.
         self.remove::<Squatter>(id);
@@ -2907,7 +3138,8 @@ impl World {
         self.sweep_beats.remove(&id);
         crate::systems::bind::drop_victim_holes(self, id);
         self.drop_reports_of(id);
-        for id2 in self.citizens() {
+        // Scale S1: the Brain holders, not every entity (only a Brain holds these).
+        for id2 in self.brained() {
             if let Some(b) = self.comp_mut::<Brain>(id2) {
                 if b.escorting == Some(id) {
                     b.escorting = None;
@@ -2962,6 +3194,7 @@ impl World {
         self.neighbours.clear();
         self.spouses.clear();
         self.enemies.clear();
+        self.last_seen_by_tick = Self::last_seen_by_tick_of(&self.last_seen);
         let living = |w: &World, id: EntityId| w.has::<Identity>(id) && !w.has::<Corpse>(id);
         let edges: Vec<((EntityId, EntityId), RelKind)> = self.edges.iter().map(|(&k, e)| (k, e.kind)).collect();
         for ((a, b), kind) in edges {

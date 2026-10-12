@@ -1634,6 +1634,14 @@ pub struct LodCfg {
     /// matching window.
     #[serde(default = "LodCfg::default_fixer_quota")]
     pub fixer_quota: usize,
+    /// Scale S1: a Statistical worker's hour of co-work drifts it with its
+    /// crew, the `coworker_crew` co-workers of its role and employer nearest
+    /// it in id order (half each side, wrapping), not with every one: the
+    /// pairs grew with the square of a workplace's staff (a 20,000 city's
+    /// Farms hold ~300). 0 is every co-worker (the pre-S1 rule); a group of
+    /// at most `coworker_crew + 1` is every co-worker either way.
+    #[serde(default)]
+    pub coworker_crew: usize,
 }
 
 impl LodCfg {

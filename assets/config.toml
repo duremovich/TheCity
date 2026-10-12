@@ -473,6 +473,11 @@ release_soon_hours = 2              # a prisoner this close to release holds a b
 # gate's Murders bound (192.5); with it off (M10 D20 kept) Murders 160 and violent deaths 485 vs
 # 446 base, while the Coarse budget still holds (the watch is ~50 of the 200 ranked bodies).
 watch_on_shift_only = false
+# Scale S1: a Statistical worker's hour of co-work ties it to its crew, the coworker_crew co-workers of its
+# role nearest it in id order (half each side), not to every co-worker (pairs grow with the square of a
+# workplace's staff: ~300 farmers a Farm at 20,000). 0 = every co-worker (the 2,000 city, byte-identical).
+# 32 at 2,000 (seeds 42-47 x 120 days): Friend edges -43 %; the 20,000 probe needs it for its tps.
+coworker_crew = 0
 
 # M10 holes and the binder (docs/M10_SCALE.md § 3). Weight per candidate:
 # (1 - lawfulness)^lawfulness_power x (1 + gang_claim_mult*gang*claims) x (1 + enemy_mult*enemy) x (1 + statistical_mult*stat),

@@ -978,7 +978,7 @@ fn vagrancy_hit(world: &mut World, a: EntityId, tile: TilePos, d: DistrictId) {
     world.vagrancy_places.insert(a, d);
     crate::systems::law::file_report(world, Crime::Vagrancy, a, witness);
     let now = world.tick;
-    world.last_seen.insert(a, (tile, now));
+    world.set_last_seen(a, (tile, now));
 }
 
 /// D15: the nightly Vagrancy pass. Each rough sleeper not inside a building

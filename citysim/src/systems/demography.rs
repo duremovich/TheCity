@@ -30,27 +30,27 @@ pub fn run(world: &mut World) {
         return;
     }
     if world.tick > 0 {
-        ageing(world);
-        children(world);
-        births(world);
-        old_age(world);
+        crate::prof::timed!("demo::ageing", ageing(world));
+        crate::prof::timed!("demo::children", children(world));
+        crate::prof::timed!("demo::births", births(world));
+        crate::prof::timed!("demo::old_age", old_age(world));
         // The Real economy E38: the child protective service, after the
         // Blocks fed their children (a child is judged on today's meal).
-        crate::systems::camp::take_daily(world);
+        crate::prof::timed!("demo::camp::take_daily", crate::systems::camp::take_daily(world));
     }
-    corpses(world);
-    gravedigger_notices(world);
-    job_search(world);
+    crate::prof::timed!("demo::corpses", corpses(world));
+    crate::prof::timed!("demo::gravedigger_notices", gravedigger_notices(world));
+    crate::prof::timed!("demo::job_search", job_search(world));
     // Jobs and room J19: the day's labour market for the migrants' means.
-    note_labour_market(world);
+    crate::prof::timed!("demo::note_labour_market", note_labour_market(world));
     // Hunger fix item 10 (P5h): the city grows Homes toward unmet demand,
     // then relocation fills them.
-    crate::systems::life::grow_housing(world);
+    crate::prof::timed!("demo::life::grow_housing", crate::systems::life::grow_housing(world));
     // L1: a long commute moves nearer work (a few households a night).
-    crate::systems::life::relocate(world);
-    emigration(world);
+    crate::prof::timed!("demo::life::relocate", crate::systems::life::relocate(world));
+    crate::prof::timed!("demo::emigration", emigration(world));
     if world.tick > 0 && world.day().is_multiple_of(7) {
-        immigration(world);
+        crate::prof::timed!("demo::immigration", immigration(world));
     }
 }
 
@@ -362,10 +362,12 @@ pub fn on_death(world: &mut World, id: EntityId) -> crate::components::Loot {
     let (tile, building) = world.comp::<Position>(id).map_or((TilePos::default(), None), |p| (p.tile, p.building));
     // 4. SawCorpse to Brain agents within 6 tiles or in the same building.
     let sight = world.config.crime.sight;
+    // Scale S1: the position index's neighbourhood (and the building), not
+    // every citizen; the same citizens, ascending.
     let witnesses: Vec<EntityId> = world
-        .citizens()
+        .agents_near(tile, sight, building)
         .into_iter()
-        .filter(|&o| o != id && world.has::<Brain>(o))
+        .filter(|&o| o != id && world.has::<Brain>(o) && world.has::<Identity>(o) && !world.has::<Corpse>(o))
         .filter(|&o| {
             world.comp::<Position>(o).is_some_and(|p| {
                 (building.is_some() && p.building == building) || crate::systems::law::chebyshev(p.tile, tile) <= sight
@@ -465,6 +467,11 @@ fn corpses(world: &mut World) {
     let tick = world.tick;
     let sight = world.config.crime.sight;
     let mut freed = Vec::new();
+    // Scale S1: the living with a Brain and a Position, bucketed by tile once
+    // (nobody moves or dies inside this pass), so a rotting body reads its
+    // neighbourhood, not the city. Built on the first such body.
+    let mut seers: Option<(Vec<(EntityId, TilePos)>, crate::spatial::TileGrid)> = None;
+    let mut near_idx: Vec<u32> = Vec::new();
     for c in world.with::<Corpse>() {
         let Some(corpse) = world.comp::<Corpse>(c).cloned() else { continue };
         let age = tick.saturating_sub(corpse.died_tick);
@@ -486,13 +493,27 @@ fn corpses(world: &mut World) {
         }
         if age > 2 * TICKS_PER_DAY {
             let tile = world.comp::<Position>(c).map_or(TilePos::default(), |p| p.tile);
-            let near: Vec<EntityId> = world
-                .citizens()
-                .into_iter()
-                .filter(|&o| world.has::<Brain>(o))
-                .filter(|&o| {
-                    world.comp::<Position>(o).is_some_and(|p| crate::systems::law::chebyshev(p.tile, tile) <= sight)
-                })
+            let (list, grid) = seers.get_or_insert_with(|| {
+                let list: Vec<(EntityId, TilePos)> = world
+                    // scan-ok: daily, once a pass (the corpses' seers)
+                    .citizens()
+                    .into_iter()
+                    .filter(|&o| world.has::<Brain>(o))
+                    .filter_map(|o| world.comp::<Position>(o).map(|p| (o, p.tile)))
+                    .collect();
+                let grid =
+                    crate::spatial::TileGrid::build(world.map.w(), world.map.h(), sight + 1, list.iter().map(|x| x.1));
+                (list, grid)
+            });
+            near_idx.clear();
+            grid.near(tile, sight, &mut near_idx);
+            // `list` is ascending by id, so ascending indices are ascending ids.
+            near_idx.sort_unstable();
+            let near: Vec<EntityId> = near_idx
+                .iter()
+                .map(|&i| list[i as usize])
+                .filter(|&(_, t)| crate::systems::law::chebyshev(t, tile) <= sight)
+                .map(|(o, _)| o)
                 .collect();
             for o in near {
                 if let Some(n) = world.comp_mut::<Needs>(o) {
@@ -561,8 +582,8 @@ pub fn bury(world: &mut World, digger: EntityId, corpse: EntityId) -> bool {
 
 /// Remove a corpse entity entirely (rotted or a day after burial).
 pub fn free_corpse(world: &mut World, corpse: EntityId) {
-    // Anyone carrying it puts it down.
-    for id in world.citizens() {
+    // Anyone carrying it puts it down (Scale S1: only a Brain carries).
+    for id in world.brained() {
         if world.comp::<Brain>(id).is_some_and(|b| b.carrying_corpse == Some(corpse)) {
             if let Some(b) = world.comp_mut::<Brain>(id) {
                 b.carrying_corpse = None;
@@ -615,7 +636,15 @@ pub(crate) fn job_search(world: &mut World) {
 /// One walk of [`job_search`]'s vacancy snapshot: every vacancy (`None`),
 /// or only the graded (`Some(true)`) or ungraded (`Some(false)`) ones.
 fn job_search_pass(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass: Option<bool>) {
+    job_search_pass_with(world, vacancies, pass, true);
+}
+
+/// [`job_search_pass`]; `pooled` false reads `pick_candidate` for every
+/// ungraded vacancy (the pre-S1 walk, for the tests).
+fn job_search_pass_with(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass: Option<bool>, pooled: bool) {
     use crate::systems::classpay;
+    // Scale S1: the labour pool, built on the pass's first ungraded pick.
+    let mut pool: Option<HirePool> = None;
     for (employer, roles) in vacancies {
         let employer = *employer;
         let Some(workplace_door) = world.comp::<Building>(employer).filter(|b| !b.demolished).map(|b| b.door) else {
@@ -632,11 +661,19 @@ fn job_search_pass(world: &mut World, vacancies: &[(EntityId, Vec<Role>)], pass:
                 if !classpay::premium_funded(world, employer, role) {
                     continue;
                 }
-                classpay::pick_graded(world, employer, role)
+                crate::prof::timed!("job::pick_graded", classpay::pick_graded(world, employer, role))
             } else {
-                pick_candidate(world, employer, workplace_door, role)
+                if pooled {
+                    let pool = pool.get_or_insert_with(|| HirePool::new(world));
+                    crate::prof::timed!("job::pick_candidate", pool.pick(world, employer, workplace_door, role))
+                } else {
+                    pick_candidate(world, employer, workplace_door, role)
+                }
             };
             let Some(id) = pick else { continue };
+            if let Some(pool) = pool.as_mut() {
+                pool.hired.insert(id);
+            }
             let moved = graded && classpay::leave_for_promotion(world, id);
             hire(world, id, employer, role);
             if moved {
@@ -755,6 +792,202 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         })
         .min()
         .map(|(_, id)| id)
+}
+
+/// [`pick_candidate`]'s filters that hold for a whole `job_search` pass
+/// (a hire takes only its own hire out of the pool): a free, unemployed,
+/// staying adult who is not an exec.
+fn pool_member(world: &World, id: EntityId, execs: &std::collections::BTreeSet<EntityId>) -> bool {
+    world.comp::<Brain>(id).is_some_and(|b| !b.emigrating)
+        && !world.has::<Job>(id)
+        && !world.has::<Sentence>(id)
+        && is_adult(world, id)
+        && !execs.contains(&id)
+}
+
+/// [`pick_candidate`]'s skill-ranked roles (the key has no distance).
+fn skill_ranked(role: Role) -> bool {
+    matches!(role, Role::Researcher | Role::Fighter | Role::Fixer | Role::Reporter)
+}
+
+/// [`pick_candidate`]'s key for a skill-ranked role.
+fn skill_key(world: &World, id: EntityId, role: Role) -> u32 {
+    let skill = |f: fn(&crate::components::Skills) -> f32| world.comp::<crate::components::Skills>(id).map_or(0.0, f);
+    match role {
+        Role::Researcher => u32::MAX - (skill(|s| s.hacking).clamp(0.0, 1.0) * 1_000_000.0) as u32,
+        Role::Fighter => u32::MAX - (skill(|s| s.fighting).clamp(0.0, 1.0) * 1_000_000.0) as u32,
+        Role::Fixer => u32::MAX - (skill(|s| s.persuasion + s.knowledge).clamp(0.0, 2.0) * 500_000.0) as u32,
+        _ => u32::MAX - (skill(|s| s.knowledge).clamp(0.0, 1.0) * 1_000_000.0) as u32,
+    }
+}
+
+/// [`pick_candidate`]'s home door (else tile) of a candidate.
+fn hire_from(world: &World, id: EntityId) -> TilePos {
+    world
+        .comp::<Household>(id)
+        .and_then(|h| h.home)
+        .and_then(|h| world.comp::<Building>(h))
+        .map(|b| b.door)
+        .or_else(|| world.comp::<Position>(id).map(|p| p.tile))
+        .unwrap_or_default()
+}
+
+/// [`pick_candidate`]'s skill and rehire offset for `id` in `role` (capped
+/// at 512, as the key reads it).
+fn hire_offset(world: &World, id: EntityId, role: Role, skill_w: f32, rehire: u32) -> u32 {
+    let skill = if skill_w > 0.0 {
+        crate::systems::competence::role_skill(world, id, role).map_or(0.0, |(v, _, _)| v.clamp(0.0, 1.0))
+    } else {
+        0.0
+    };
+    let off = (skill_w * 100.0 * skill).round() as u32
+        + if rehire > 0 && laid_off_from(world, id, role) { rehire } else { 0 };
+    off.min(512)
+}
+
+/// [`pick_candidate`]'s distance part of the key from `from` to a
+/// workplace door, `1024 + band + d` (`near_cap`: the hire-near band's cap).
+fn hire_base(world: &World, from: TilePos, workplace_door: TilePos, near_cap: Option<u64>) -> u32 {
+    let d = if crate::systems::transit::enabled(world) {
+        let step = world.config.exec.move_ticks_full.max(1);
+        u32::try_from(crate::systems::life::commute_cost(world, from, workplace_door) / step).unwrap_or(u32::MAX)
+    } else {
+        from.manhattan(workplace_door)
+    };
+    let band = if near_cap.is_some_and(|c| crate::systems::life::commute_cost(world, from, workplace_door) > c) {
+        1024
+    } else {
+        0
+    };
+    1024 + band + d
+}
+
+/// The groups of one role: home door (else tile) -> `(512 - offset, id)`,
+/// ascending (the group's best first).
+type HireGroups = std::collections::BTreeMap<TilePos, Vec<(u32, EntityId)>>;
+
+/// Every candidate's home door by the key's distance part from one
+/// workplace door, `(hire_base, from)` ascending.
+type HireBases = Vec<(u32, TilePos)>;
+
+/// Scale S1: one `job_search` pass's labour pool. [`pick_candidate`] walked
+/// every citizen for every vacancy (a 20,000 city's opening staffing read
+/// ~14,000 adults for each of ~2,500 vacancies). The pool keeps the pass's
+/// candidates (`pool_member`: the filters a hire cannot change) and, per
+/// role, groups them by home door with each group ranked by its offset, so
+/// a vacancy reads the groups in the order of the key's distance part from
+/// its door, each group's best, and stops once no farther group can beat
+/// the best found: `pick_candidate`'s pick (`test_hire_pool_matches_pick_candidate`).
+struct HirePool {
+    /// The candidates, ascending.
+    members: Vec<EntityId>,
+    /// The `CampRaised` candidates (E41: first for a Farm or Fab vacancy).
+    camp: Vec<EntityId>,
+    /// Every candidate's home door (else tile), each once.
+    froms: Vec<TilePos>,
+    /// Hired this pass.
+    hired: std::collections::BTreeSet<EntityId>,
+    groups: std::collections::BTreeMap<Role, HireGroups>,
+    /// `(workplace door, near cap)` -> `froms` by `hire_base`, ascending.
+    bases: std::collections::BTreeMap<(TilePos, Option<u64>), HireBases>,
+}
+
+impl HirePool {
+    fn new(world: &World) -> HirePool {
+        let execs = crate::systems::classes::exec_set(world);
+        let members: Vec<EntityId> = world
+            .brained()
+            .into_iter()
+            .filter(|&id| world.has::<Identity>(id) && !world.has::<Corpse>(id) && pool_member(world, id, &execs))
+            .collect();
+        let camp = members.iter().copied().filter(|&id| world.has::<crate::econ::CampRaised>(id)).collect();
+        let froms: std::collections::BTreeSet<TilePos> = members.iter().map(|&id| hire_from(world, id)).collect();
+        HirePool {
+            members,
+            camp,
+            froms: froms.into_iter().collect(),
+            hired: std::collections::BTreeSet::new(),
+            groups: std::collections::BTreeMap::new(),
+            bases: std::collections::BTreeMap::new(),
+        }
+    }
+
+    /// `pick_candidate(world, employer, workplace_door, role)`.
+    fn pick(&mut self, world: &World, employer: EntityId, workplace_door: TilePos, role: Role) -> Option<EntityId> {
+        let free = |hired: &std::collections::BTreeSet<EntityId>, id: EntityId| {
+            !hired.contains(&id)
+                && !crate::systems::life::quit_blocks(world, id, employer)
+                && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
+        };
+        if skill_ranked(role) {
+            return self
+                .members
+                .iter()
+                .copied()
+                .filter(|&id| free(&self.hired, id))
+                .map(|id| (skill_key(world, id, role), id))
+                .min()
+                .map(|(_, id)| id);
+        }
+        let (skill_w, rehire) = if crate::systems::wages::on(world) {
+            (world.config.economy2.skill_w.max(0.0), world.config.economy2.rehire_bonus)
+        } else {
+            (0.0, 0)
+        };
+        let sweeper_post = role == Role::Sanitation && crate::systems::jobs::sweep_on(world);
+        let near_cap =
+            (crate::systems::fixes::hire_near(world) && !sweeper_post).then_some(world.config.life.commute_hire_ticks);
+        let mut best: Option<(u32, EntityId)> = None;
+        // The Real economy E41: the `CampRaised` applicants' halved distance.
+        if matches!(role, Role::Farmer | Role::Fabber) {
+            for &id in &self.camp {
+                if crate::systems::camp::applicant_first(world, id, role) && free(&self.hired, id) {
+                    let k = (hire_from(world, id).manhattan(workplace_door) / 2, id);
+                    if best.is_none_or(|b| k < b) {
+                        best = Some(k);
+                    }
+                }
+            }
+        }
+        let members = &self.members;
+        let groups = self.groups.entry(role).or_insert_with(|| {
+            let mut g = HireGroups::new();
+            for &id in members {
+                if crate::systems::camp::applicant_first(world, id, role) {
+                    continue;
+                }
+                let off = hire_offset(world, id, role, skill_w, rehire);
+                g.entry(hire_from(world, id)).or_default().push((512 - off, id));
+            }
+            for v in g.values_mut() {
+                v.sort_unstable();
+            }
+            g
+        });
+        let froms = &self.froms;
+        let bases = self.bases.entry((workplace_door, near_cap)).or_insert_with(|| {
+            let mut b: Vec<(u32, TilePos)> =
+                froms.iter().map(|&from| (hire_base(world, from, workplace_door, near_cap), from)).collect();
+            b.sort_unstable();
+            b
+        });
+        for &(base, from) in bases.iter() {
+            // Every key in this group and the ones after it is at least `base - 512`.
+            if best.is_some_and(|(k, _)| base - 512 > k) {
+                break;
+            }
+            let Some(list) = groups.get_mut(&from) else { continue };
+            // The hired leave a group for good; the quit-blocked only for this employer.
+            list.retain(|&(_, id)| !self.hired.contains(&id));
+            if let Some(&(rank, id)) = list.iter().find(|&&(_, id)| free(&self.hired, id)) {
+                let k = (base - 512 + rank, id);
+                if best.is_none_or(|b| k < b) {
+                    best = Some(k);
+                }
+            }
+        }
+        best.map(|(_, id)| id)
+    }
 }
 
 /// M15 W29: the adult the vacancy at `employer` would hire for `role` now
@@ -1475,4 +1708,43 @@ pub fn emptiest_home(world: &World) -> Option<EntityId> {
         }
     }
     counts.into_iter().filter(|&(_, n)| n < 6).min_by_key(|&(h, n)| (n, h)).map(|(h, _)| h)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scale S1: the pooled pass hires exactly whom `pick_candidate`'s walk
+    /// of every citizen hired: the shipped city on day 3 with a fifth of its
+    /// workers dismissed (their posts open, the dismissed back in the pool
+    /// and laid off for the rehire bonus), byte for byte after the pass.
+    #[test]
+    fn test_hire_pool_matches_pick_candidate() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(3 * TICKS_PER_DAY + 7);
+        // scan-ok: a unit test, once.
+        let workers: Vec<(EntityId, EntityId, Role)> = w
+            .citizens()
+            .into_iter()
+            .filter_map(|id| w.comp::<Job>(id).and_then(|j| j.employer.map(|e| (id, e, j.role))))
+            .collect();
+        for &(id, employer, role) in workers.iter().step_by(5) {
+            w.vacate_job(id);
+            w.vacancies.entry(employer).or_default().push(role);
+            note_laid_off(&mut w, id, role);
+        }
+        let vacancies: Vec<(EntityId, Vec<Role>)> = w.vacancies.iter().map(|(&e, r)| (e, r.clone())).collect();
+        let open: usize = vacancies.iter().map(|(_, r)| r.len()).sum();
+        assert!(open > 100, "the test opens posts: {open}");
+        let graded_first = crate::systems::classpay::on(&w);
+        let passes: &[Option<bool>] = if graded_first { &[Some(true), Some(false)] } else { &[None] };
+        let (mut a, mut b) = (w.clone(), w.clone());
+        for &pass in passes {
+            job_search_pass_with(&mut a, &vacancies, pass, true);
+            job_search_pass_with(&mut b, &vacancies, pass, false);
+        }
+        let hired = |x: &World| x.vacancies.values().map(Vec::len).sum::<usize>();
+        assert!(hired(&a) < open, "nobody was hired: the test exercises nothing");
+        assert_eq!(crate::save::to_ron(&a), crate::save::to_ron(&b));
+    }
 }

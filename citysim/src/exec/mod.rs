@@ -1214,7 +1214,7 @@ impl World {
                     None => Some(pos.tile),
                 }
             }
-            LocationKey::SuspectTile => target.and_then(|t| self.last_seen.get(&t)).map(|&(tile, _)| tile),
+            LocationKey::SuspectTile => target.and_then(|t| self.last_seen().get(&t)).map(|&(tile, _)| tile),
             LocationKey::CorpseTile | LocationKey::Victim => {
                 target.and_then(|t| self.comp::<Position>(t)).map(|p| p.tile)
             }

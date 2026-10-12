@@ -90,12 +90,19 @@ pub fn think_once(world: &mut World, id: EntityId, scheduled: bool) {
     let today = world.day();
     let stale = world.comp::<Brain>(id).is_some_and(|b| b.court_candidate.is_none_or(|(d, _)| d != today));
     if stale {
-        let candidate = crate::systems::social::known_candidate(world, id, 0.3).is_some();
+        let candidate = crate::prof::timed!(
+            "think::known_candidate",
+            crate::systems::social::known_candidate(world, id, 0.3).is_some()
+        );
         if let Some(b) = world.comp_mut::<Brain>(id) {
             b.court_candidate = Some((today, candidate));
         }
     }
-    let Some((winner, trace, offer)) = utility::think_with_offer(world, id) else { return };
+    let Some((winner, trace, offer)) =
+        crate::prof::timed!("think::think_with_offer", utility::think_with_offer(world, id))
+    else {
+        return;
+    };
     let Some(brain) = world.comp::<Brain>(id) else { return };
     let score = trace.goals.first().map_or(0.0, |g| g.score);
     // A different winner while an uninterruptible step runs is deferred: the
