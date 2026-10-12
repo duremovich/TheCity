@@ -217,7 +217,7 @@ fn is_misdeed(world: &World, deed: Deed) -> bool {
 
 /// Whom a Spin corp may plant against: its niche rivals, their execs, and
 /// the gangs in an open vendetta with it, ascending.
-fn plant_targets(world: &World, corp: EntityId) -> Vec<EntityId> {
+pub(crate) fn plant_targets(world: &World, corp: EntityId) -> Vec<EntityId> {
     let mut out: Vec<EntityId> = Vec::new();
     let Some(c) = world.comp::<Corp>(corp) else { return out };
     for &n in &c.niches {
@@ -362,6 +362,17 @@ fn reporters(world: &World, feed: EntityId) -> (Vec<EntityId>, usize) {
     (staff, worked)
 }
 
+/// M16b phase 2: the Feed's reporter with the most knowledge (ties the
+/// lower id), who contests a fabricated plant.
+pub(crate) fn sharpest_reporter(world: &World, feed: EntityId) -> Option<EntityId> {
+    let (staff, _) = reporters(world, feed);
+    staff
+        .into_iter()
+        .map(|r| (world.comp::<crate::components::Skills>(r).map_or(0.0, |s| s.knowledge), r))
+        .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+        .map(|(_, r)| r)
+}
+
 /// The owner's standing for a Feed's reach: a corp's or an agent's; the
 /// city reads the Law's (plan deviation: the city has no reputation).
 fn owner_standing(world: &World, feed: EntityId) -> f32 {
@@ -411,8 +422,12 @@ fn refresh(world: &mut World) {
             open_feed(world, f, name);
         }
         let (_, worked) = reporters(world, f);
-        let reach =
+        let mut reach =
             (cfg.reach_base + cfg.reach_per_reporter * worked as f32 + 0.3 * owner_standing(world, f)).clamp(0.0, 1.0);
+        // M16b phase 2: a Feed caught running a fabrication, for 14 days.
+        if world.feed_shamed.get(&f).is_some_and(|&t| t > now) {
+            reach *= 0.8;
+        }
         let covers = covers_for(world, f);
         if let Some(s) = world.comp_mut::<Building>(f).and_then(|b| b.feed.as_mut()) {
             s.reach = reach;
@@ -426,8 +441,8 @@ fn refresh(world: &mut World) {
 /// A deed's key across the pools: `(deed, actor, object, day)`.
 type DeedKey = (Deed, EntityId, Option<EntityId>, u64);
 
-/// A story the day's Spin paid for: `(feed, deed, payer)`.
-type Plant = (EntityId, PoolEntry, EntityId);
+/// A story the day's Spin paid for: `(feed, deed, payer, fabricated)`.
+type Plant = (EntityId, PoolEntry, EntityId, bool);
 
 /// W40 (orchestrator deviation: a side spend, not a corp-wide order):
 /// the Spin score of a corp, the spec's considerations: GATE `can(a
@@ -574,8 +589,12 @@ fn spin(world: &mut World, mut known: BTreeMap<EntityId, Misdeeds>) -> Vec<Plant
                         format!("{cn} paid {fname} to run {} by {actor} ({price}¢)", e.deed.label()),
                     );
                     world.stats.current.word.planted += 1;
-                    plants.push((feed, e, corp));
+                    plants.push((feed, e, corp, false));
                 }
+            } else if let Some(e) = crate::systems::captives::fabricate(world, corp, feed, reach) {
+                // M16b phase 2: no true misdeed to plant: a dirty exec buys a
+                // fabricated one (a `Spin` record).
+                plants.push((feed, e, corp, true));
             }
         }
         // The buries: every Feed that ran a story about the corp's people lately.
@@ -687,16 +706,16 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                 .then(a.1.tick.cmp(&b.1.tick))
                 .then(a.1.actor.map_or(0, |x| x.index).cmp(&b.1.actor.map_or(0, |x| x.index)))
         });
-        let mut runs: Vec<(PoolEntry, f32, Option<EntityId>)> = ranked
+        let mut runs: Vec<(PoolEntry, f32, Option<EntityId>, bool)> = ranked
             .into_iter()
             .take(usize::from(cfg.stories_per_day))
             .map(|(_, e)| {
                 let slant = organic_slant(world, e.deed);
-                (e, slant, None)
+                (e, slant, None, false)
             })
             .collect();
-        for (_, e, payer) in plants.iter().filter(|(f, _, _)| *f == feed) {
-            runs.push((e.clone(), -1.0, Some(*payer)));
+        for (_, e, payer, fab) in plants.iter().filter(|(f, _, _, _)| *f == feed) {
+            runs.push((e.clone(), -1.0, Some(*payer), *fab));
         }
         if runs.is_empty() {
             continue;
@@ -712,7 +731,7 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
         let reach = (st.reach * world.config.news.story_reach).clamp(0.0, 1.0);
         let fname = st.name.clone();
         let mut ran = 0u8;
-        for (e, slant, payer) in runs {
+        for (e, slant, payer, fabricated) in runs {
             let mut r = DeedRef { deed: e.deed, actor: e.actor, object: e.object };
             let p = world.config.gossip.distort_base * (1.0 - k).clamp(0.0, 1.0);
             let roll: f32 = rng.random();
@@ -760,6 +779,8 @@ fn run_stories(world: &mut World, plants: Vec<Plant>) {
                 tick: now,
                 slant,
                 paid_by: payer,
+                fabricated,
+                exposed: false,
             });
             let obj = r.object.map_or_else(String::new, |o| format!(" {}", crate::systems::grudges::label(world, o)));
             let paid = payer.map_or_else(String::new, |p| format!(" (paid by {})", world.owner_label(Some(p))));

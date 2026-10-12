@@ -618,8 +618,13 @@ pub fn strip(world: &mut World, agent: EntityId, c: EntityId) -> bool {
 /// into its inventory. A live abductee is then killed (`p_rip_kill`) or
 /// released at sanity 0.1. Returns the implants taken.
 pub fn rip(world: &mut World, agent: EntityId, body: EntityId) -> usize {
+    rip_for(world, agent, body, world.gang_of(agent))
+}
+
+/// [`rip`] for `gang` (M16b phase 2: a hired abductor hands a Harvest's
+/// take to the gang that bought it).
+pub fn rip_for(world: &mut World, agent: EntityId, body: EntityId, gang: Option<EntityId>) -> usize {
     let implants = installed(world, body);
-    let gang = world.gang_of(agent);
     let hideout = gang.and_then(|g| world.hideout_of(g));
     let per = world.config.assets.parts_per.implant;
     // M15 W31: a Purist destroys what it rips: Parts to the Recycler.
@@ -771,7 +776,13 @@ pub fn gang_harvest_target(world: &World, gang: EntityId) -> Option<EntityId> {
 /// victim to the abductor (the M9 escort drag); a victim killed in the
 /// fight is carried as a corpse. Either way an Abduction is raised.
 pub fn abduct(world: &mut World, agent: EntityId, victim: EntityId) -> bool {
-    if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, agent, victim, 1) {
+    abduct_within(world, agent, victim, 1)
+}
+
+/// [`abduct`] from up to `reach` tiles (M16b phase 2: a contract's
+/// abductor closes in from its stake-out, as an `Attack` does).
+pub fn abduct_within(world: &mut World, agent: EntityId, victim: EntityId, reach: u32) -> bool {
+    if !crate::systems::law::living(world, victim) || !crate::systems::law::near(world, agent, victim, reach) {
         return false;
     }
     let bonus: f32 = world

@@ -1057,6 +1057,20 @@ pub struct World {
     /// M16b § 4 Fraud: fake jobs sold, until their victims learn it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fake_jobs: Vec<crate::contract::FakeJob>,
+    /// M16b phase 2: the held agents, by captive.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub captives: BTreeMap<EntityId, crate::contract::Captive>,
+    /// M16b phase 2: `(buyer corp, seller corp)` -> Acquire offers refused
+    /// (two make a dirty exec reach for a hostage).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub refusals: BTreeMap<(EntityId, EntityId), u8>,
+    /// M16b phase 2: a Steal heist's runner -> its record.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub steal_runs: BTreeMap<EntityId, crate::contract::ContractId>,
+    /// M16b phase 2: a Feed caught running a fabrication -> its reach is
+    /// cut until the tick.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub feed_shamed: BTreeMap<EntityId, Tick>,
     /// C9: the Fixers were seeded (at `World::new`, or at the first midnight
     /// after loading an older save with contracts on).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1587,6 +1601,10 @@ impl World {
             next_coercion: 0,
             lev_tried: BTreeMap::new(),
             fake_jobs: Vec::new(),
+            captives: BTreeMap::new(),
+            refusals: BTreeMap::new(),
+            steal_runs: BTreeMap::new(),
+            feed_shamed: BTreeMap::new(),
             fixers_seeded: false,
             fixers_due: false,
             fixer_runs: BTreeMap::new(),
@@ -3118,6 +3136,7 @@ impl World {
         crate::prof::timed!("tick::living", systems::living::run(self));
         crate::prof::timed!("tick::contracts", systems::contracts::run(self));
         crate::prof::timed!("tick::leverage", systems::leverage::run(self));
+        crate::prof::timed!("tick::captives", systems::captives::run(self));
         crate::prof::timed!("tick::demography", systems::demography::run(self));
         crate::prof::timed!("tick::stats", systems::stats::run(self));
         self.tick += 1;

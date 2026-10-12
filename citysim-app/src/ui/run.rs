@@ -54,6 +54,7 @@ fn why_label(w: RunWhy) -> &'static str {
         RunWhy::Stat => "off-screen pass",
         RunWhy::God => "god order",
         RunWhy::Fixer => "Fixer order",
+        RunWhy::Contract => "a Steal record's heist",
     }
 }
 

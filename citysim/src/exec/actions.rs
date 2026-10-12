@@ -109,6 +109,7 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::Network => 30,
         // The Hit market (H9).
         ActionKind::Commission => world.config.hitmarket.commission_mins,
+        ActionKind::HandOver => 5,
         // Real economy E27, E28: a meal at the kitchen, a gift at the door.
         ActionKind::EatAlms => 30,
         ActionKind::DumpsterDive => 20,
@@ -738,6 +739,8 @@ pub fn on_complete(
         ActionKind::Network => crate::systems::contracts::on_network(world, id, target),
         // The Hit market (H9): the want posted at the Fixer.
         ActionKind::Commission => crate::systems::hitmarket::on_commission(world, id, target),
+        // M16b phase 2: the abductee handed over at the holding building.
+        ActionKind::HandOver => crate::systems::captives::on_hand_over(world, id, target),
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
@@ -1200,7 +1203,14 @@ pub fn on_complete(
         }
         ActionKind::Abduct => {
             let Some(v) = target else { return StepResult::Failed(FailReason::NoSuchPlace) };
-            if crate::systems::chrome::abduct(world, id, v) {
+            // M16b phase 2: a contract's abductor closes in from its stake-out.
+            let reach =
+                if world.comp::<Brain>(id).and_then(|b| b.plan_goal()) == Some(crate::components::GoalKind::Contract) {
+                    4
+                } else {
+                    1
+                };
+            if crate::systems::chrome::abduct_within(world, id, v, reach) {
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::PreconditionLost)

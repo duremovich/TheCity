@@ -153,6 +153,8 @@ pub fn build_on_lot(
             | BuildingKind::Camp
             // Real economy phase 2 (plan E19): a corp's Farm on World demand.
             | BuildingKind::Farm
+            // M16b phase 2: a corp's Private Prison.
+            | BuildingKind::Prison
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -432,7 +434,7 @@ pub fn refit_with(
     // M16a (plan C9): a seeded Fixer may stand in a refitted derelict.
     // Real economy E26, E37: a Mission or a Camp too; phase 2 (plan E19): a corp's Grow kinds with wages on.
     if !kind.is_leisure()
-        && !matches!(kind, BuildingKind::Fixer | BuildingKind::Mission | BuildingKind::Camp)
+        && !matches!(kind, BuildingKind::Fixer | BuildingKind::Mission | BuildingKind::Camp | BuildingKind::Prison)
         && !grow_refit_kind(world, kind)
     {
         return Err(format!("cannot refit as a {}", kind.label()));

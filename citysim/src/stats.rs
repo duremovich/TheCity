@@ -20,7 +20,7 @@ g1_dread,g1_heat,g2_dread,g2_heat,g3_dread,g3_heat,g4_dread,g4_heat,\
 c1_honour,c1_standing,c1_competence,c2_honour,c2_standing,c2_competence,c3_honour,c3_standing,c3_competence,c4_honour,c4_standing,c4_competence,c5_honour,c5_standing,c5_competence,c6_honour,c6_standing,c6_competence,c7_honour,c7_standing,c7_competence,c8_honour,c8_standing,c8_competence,c9_honour,c9_standing,c9_competence,law_competence,flow_ads,flow_plant,\
 flow_leisure,flow_gamble,flow_gamble_win,flow_tribute,flow_export,flow_public_works,wage_dole_ratio,employed_share,venues_club,venues_arcade,venues_noodle_bar,venues_fight_pit,venues_den,venues_lounge,visits_club,visits_arcade,visits_noodle_bar,visits_fight_pit,visits_den,visits_lounge,fab_parts,scrap_parts,parts_imported,works_jobs,upkeep_mult,outside_inbound,outside_minted,fun_mean,fun_satisfied_share,hangouts,hangout_contacts_mean,fronts,collected,preached,d1_street_density,d2_street_density,d3_street_density,d4_street_density,d5_street_density,d6_street_density,d7_street_density,d8_street_density,fv_killed,fv_assaulted,fv_robbed,fv_abducted,fv_bound,fv_unknown,fv_capped,fv_bound_wrong,kill_rate_body,kill_rate_stat,kill_rate_body_civ,kill_rate_stat_civ,\
 tier_held,tier_held_body,held_fed,gang_bodies,gang_stat,stat_extorts,stat_claims,stat_deals,aborts,aborts_scavenge,aborts_sleep,aborts_checkin,aborts_seat,rough_sleeps,scavenge_dry,flow_street_dice,\
-contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,tax_credit,meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns,hm_posted_revenge,hm_posted_rival,hm_posted_culprit,hm_posted_silence,hm_posted_debt,hm_posted_protect,hm_wants,hm_unaffordable,hm_refused,hm_pooled,hm_price_sum,hm_deposit_sum,hm_hits_done,hm_beats_done,hm_stiffed,hm_recanted,hm_cold,hm_commissions,coercions_active,lev_threat_tries,lev_threat_ok,lev_secret_tries,lev_secret_ok,lev_debt_tries,lev_debt_ok,coercions_broken,protection_made,protection_paid,protection_coins,protection_active,blackmail_made,blackmail_active,secrets_lapsed,silenced_threat,coerced_jobs,coerced_done,poach_threats,parleys,parley_fails,tribute_active,fake_jobs,frauds_filed,k_persuade_posted,k_persuade_done,flow_coerced,rides_full,rides_coarse,rides_stat,fares,fare_dodges,refused_no_route,refused_fare,refused_slow,refused_danger,ride_abandoned,peak_stop_load,transit_power,el_staff,commute_tpt_ride,ticks_per_sec";
+contracts_open,contracts_posted,contracts_fulfilled,contracts_failed,contracts_expired,contracts_cancelled,reneged,k_hit_posted,k_hit_done,k_beat_posted,k_beat_done,k_guard_posted,k_guard_done,k_locate_posted,k_locate_done,hits_done,hits_squad,hits_solo_weak,strikes_declined_pol,sold_out,contract_murders,contract_cleared,contract_holes,contract_hole_wrong,accessory,interrogations,interrogations_won,bounties_paid,guards_on_take,fixer_runs,regulars,live_parties,live_queued,escrow_held,escrow_leak,escrow_stuck,f0_heat,f1_heat,f2_heat,f3_heat,f0_income,f1_income,f2_income,f3_income,flow_escrow,flow_payout,flow_fixer_cut,contracts_refused_full,flow_import_out,flow_customs,flow_inputs,flow_property,flow_donate,trade_balance,trade_balance_30,appetite_food,appetite_parts,appetite_data,bid_food,ask_food,food_imported,food_exported,wage_mult_mean,wage_gross_mean,vacancies_open,laid_off,pop_inflow_wages,pop_inflow_other,tax_rate,mission_meals,mission_cots,mission_purse,flow_migrant_in,flow_migrant_out,flow_fence,flow_alms,flow_camp_food,outside_outbound,world_treasury,coin_identity,parts_exported,data_exported,export_paid,grow_world,city_owned_buildings,recycler_till,children_taken,camp_children,camp_output,camp_unfed,camp_released,camp_scandals,d1_meals,d1_starving,d1_dregs,d2_meals,d2_starving,d2_dregs,d3_meals,d3_starving,d3_dregs,d4_meals,d4_starving,d4_dregs,d5_meals,d5_starving,d5_dregs,d6_meals,d6_starving,d6_dregs,d7_meals,d7_starving,d7_dregs,d8_meals,d8_starving,d8_dregs,civic_payroll,flow_fines,guard_count,sanitation_count,migrants_pull,migrants_offer,trades_employed,super_rounds,tax_credit,meals_real,meals_synth,meals_dive,meals_alms,malnourished,toxic,mean_malnutrition,mean_toxicity,sick_days,cancer_new,cancer_diagnosed,cancer_cured,deaths_disease,bin_meals_in,bin_contests,bin_shakedowns,hm_posted_revenge,hm_posted_rival,hm_posted_culprit,hm_posted_silence,hm_posted_debt,hm_posted_protect,hm_wants,hm_unaffordable,hm_refused,hm_pooled,hm_price_sum,hm_deposit_sum,hm_hits_done,hm_beats_done,hm_stiffed,hm_recanted,hm_cold,hm_commissions,coercions_active,lev_threat_tries,lev_threat_ok,lev_secret_tries,lev_secret_ok,lev_debt_tries,lev_debt_ok,coercions_broken,protection_made,protection_paid,protection_coins,protection_active,blackmail_made,blackmail_active,secrets_lapsed,silenced_threat,coerced_jobs,coerced_done,poach_threats,parleys,parley_fails,tribute_active,fake_jobs,frauds_filed,k_persuade_posted,k_persuade_done,flow_coerced,captives_held,prison_pop,prisons,hostages_taken,hostages_freed,ransomed,rescued_captives,escaped,hostages_killed,harvest_handovers,captives_unfed,lev_hostage_tries,lev_hostage_ok,k_abduct_posted,k_abduct_done,k_rescue_posted,k_rescue_done,k_escort_posted,k_escort_done,k_steal_posted,k_steal_done,k_deliver_posted,k_deliver_done,k_spin_posted,k_spin_done,fabricated,exposed,steal_runs,flow_ransom,rides_full,rides_coarse,rides_stat,fares,fare_dodges,refused_no_route,refused_fare,refused_slow,refused_danger,ride_abandoned,peak_stop_load,transit_power,el_staff,commute_tpt_ride,ticks_per_sec";
 
 /// D38: corp CSV slots (seeding order). M13 D17: 9 (the Tech corp from phase 2).
 /// Scale S2: the floor; a config seeding more corps prints one slot per row
@@ -363,6 +363,9 @@ pub struct DayRow {
     /// M16b § 4 (phase 1): leverage's group, after the Hit market's.
     #[serde(default, skip_serializing_if = "LeverageCols::is_zero")]
     pub leverage: LeverageCols,
+    /// M16b phase 2: captives and the new kinds, after leverage's.
+    #[serde(default, skip_serializing_if = "CaptiveCols::is_zero")]
+    pub captive: CaptiveCols,
     /// Transit (docs/TRANSIT.md § 4): the El's group, after the hit group
     /// and before `ticks_per_sec` (zero, and not saved, with transit off).
     #[serde(default, skip_serializing_if = "TransitCols::is_zero")]
@@ -1151,6 +1154,7 @@ impl DayRow {
             health: HealthCols::default(),
             hit: HitCols::default(),
             leverage: LeverageCols::default(),
+            captive: CaptiveCols::default(),
             transit: TransitCols::default(),
             ambient: None,
             ticks_per_sec: 0.0,
@@ -1162,7 +1166,7 @@ impl DayRow {
         // Hunger as sickness: the health group rides with the jobs group.
         let jobs_health = format!("{},{}", self.jobs.csv(), self.health.csv());
         // M16b: the leverage group rides with the hit group.
-        let hit_lev = format!("{},{}", self.hit.csv(), self.leverage.csv());
+        let hit_lev = format!("{},{},{}", self.hit.csv(), self.leverage.csv(), self.captive.csv());
         // Scale S5: the Ambient group rides with the transit group (only on a
         // world with an Ambient tier).
         let transit_ambient = match &self.ambient {
@@ -1785,6 +1789,8 @@ impl LeverageCols {
             LeverageKind::Threat => (&mut self.lev_threat_tries, &mut self.lev_threat_ok),
             LeverageKind::Secret => (&mut self.lev_secret_tries, &mut self.lev_secret_ok),
             LeverageKind::Debt => (&mut self.lev_debt_tries, &mut self.lev_debt_ok),
+            // M16b phase 2: counted in `CaptiveCols`.
+            LeverageKind::Hostage => return,
         };
         *t += 1;
         if ok {
@@ -1854,6 +1860,119 @@ impl LeverageCols {
             self.k_persuade_posted.to_string(),
             self.k_persuade_done.to_string(),
             self.flow_coerced.to_string(),
+        ]
+        .join(",")
+    }
+}
+
+/// M16b phase 2: the captives' and the new kinds' CSV columns, after
+/// leverage's. `captives_held`, `prison_pop` (captives held at a Private
+/// Prison) and `prisons` are day-end snapshots; the rest daily counters.
+/// `hostages_freed` counts every release (`ransomed`: a demand met,
+/// `rescued_captives`: a Rescue's win, `escaped`: the hold gone, the rest
+/// at expiry); `flow_ransom` the coins paid for a hostage.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct CaptiveCols {
+    pub captives_held: u32,
+    pub prison_pop: u32,
+    pub prisons: u32,
+    pub hostages_taken: u32,
+    pub hostages_freed: u32,
+    pub ransomed: u32,
+    pub rescued_captives: u32,
+    pub escaped: u32,
+    pub hostages_killed: u32,
+    pub harvest_handovers: u32,
+    pub captives_unfed: u32,
+    pub lev_hostage_tries: u32,
+    pub lev_hostage_ok: u32,
+    /// Posted per M16b phase-2 kind (`ContractKind::PHASE2` order).
+    pub k_posted: [u32; 6],
+    /// Fulfilled per phase-2 kind.
+    pub k_done: [u32; 6],
+    pub fabricated: u32,
+    pub exposed: u32,
+    pub steal_runs: u32,
+    pub flow_ransom: i64,
+}
+
+impl CaptiveCols {
+    pub fn is_zero(&self) -> bool {
+        *self == CaptiveCols::default()
+    }
+
+    /// The slot of a phase-2 kind (`None` for the others).
+    pub fn slot(k: crate::contract::ContractKind) -> Option<usize> {
+        crate::contract::ContractKind::PHASE2.iter().position(|&x| x == k)
+    }
+
+    pub fn header() -> String {
+        [
+            "captives_held",
+            "prison_pop",
+            "prisons",
+            "hostages_taken",
+            "hostages_freed",
+            "ransomed",
+            "rescued_captives",
+            "escaped",
+            "hostages_killed",
+            "harvest_handovers",
+            "captives_unfed",
+            "lev_hostage_tries",
+            "lev_hostage_ok",
+            "k_abduct_posted",
+            "k_abduct_done",
+            "k_rescue_posted",
+            "k_rescue_done",
+            "k_escort_posted",
+            "k_escort_done",
+            "k_steal_posted",
+            "k_steal_done",
+            "k_deliver_posted",
+            "k_deliver_done",
+            "k_spin_posted",
+            "k_spin_done",
+            "fabricated",
+            "exposed",
+            "steal_runs",
+            "flow_ransom",
+        ]
+        .join(",")
+    }
+
+    pub fn csv(&self) -> String {
+        [
+            self.captives_held.to_string(),
+            self.prison_pop.to_string(),
+            self.prisons.to_string(),
+            self.hostages_taken.to_string(),
+            self.hostages_freed.to_string(),
+            self.ransomed.to_string(),
+            self.rescued_captives.to_string(),
+            self.escaped.to_string(),
+            self.hostages_killed.to_string(),
+            self.harvest_handovers.to_string(),
+            self.captives_unfed.to_string(),
+            self.lev_hostage_tries.to_string(),
+            self.lev_hostage_ok.to_string(),
+            self.k_posted[0].to_string(),
+            self.k_done[0].to_string(),
+            self.k_posted[1].to_string(),
+            self.k_done[1].to_string(),
+            self.k_posted[2].to_string(),
+            self.k_done[2].to_string(),
+            self.k_posted[3].to_string(),
+            self.k_done[3].to_string(),
+            self.k_posted[4].to_string(),
+            self.k_done[4].to_string(),
+            self.k_posted[5].to_string(),
+            self.k_done[5].to_string(),
+            self.fabricated.to_string(),
+            self.exposed.to_string(),
+            self.steal_runs.to_string(),
+            self.flow_ransom.to_string(),
         ]
         .join(",")
     }
@@ -1964,12 +2083,13 @@ mod econ_cols_tests {
         let jobs = JobsCols::header();
         let health = HealthCols::header();
         let hit = HitCols::header();
-        let lev = LeverageCols::header();
+        let lev = format!("{},{}", LeverageCols::header(), CaptiveCols::header());
+        assert_eq!(CaptiveCols::default().csv().split(',').count(), CaptiveCols::header().split(',').count());
         let transit = TransitCols::header();
         let tail = format!(
             "flow_fixer_cut,contracts_refused_full,{names},{jobs},{health},{hit},{lev},{transit},ticks_per_sec"
         );
-        assert_eq!(LeverageCols::default().csv().split(',').count(), lev.split(',').count());
+        assert_eq!(LeverageCols::default().csv().split(',').count(), LeverageCols::header().split(',').count());
         assert_eq!(TransitCols::default().csv().split(',').count(), transit.split(',').count());
         assert_eq!(HealthCols::default().csv().split(',').count(), health.split(',').count());
         assert_eq!(HitCols::default().csv().split(',').count(), hit.split(',').count());

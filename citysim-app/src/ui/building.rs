@@ -216,6 +216,11 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 // Jobs and room P3: the Camp Wardens.
                 staff(ui, app, world, id, "Wardens");
             }
+            // M16b phase 2: a Private Prison's captives (the Prison panel is phase 4's).
+            BuildingKind::Prison => {
+                let held = world.captives.values().filter(|c| c.held_at == id).count();
+                ui.label(format!("captives held {held}"));
+            }
         }
         super::asset::building_section(ui, app, world, id, b);
         derelict(ui, app, world, id, b);

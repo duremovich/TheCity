@@ -2153,6 +2153,10 @@ pub fn end_run(world: &mut World, mut r: Run, outcome: RunOutcome) {
             plan.steps.push(step(ActionKind::SellData, Some(lab)));
         }
     }
+    // M16b phase 2: a Steal record's heist settles with its run.
+    if r.why == RunWhy::Contract {
+        crate::systems::captives::on_heist_end(world, r.runner, outcome == RunOutcome::Success);
+    }
     let lent = world.run_orders.remove(&r.runner).is_some_and(|o| o.why == RunWhy::CorpOrder);
     if lent {
         // V31: the fleet deck goes back to the Lab.

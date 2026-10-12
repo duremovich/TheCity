@@ -23,6 +23,7 @@ pub mod bind;
 pub mod bins;
 pub mod budget;
 pub mod camp;
+pub mod captives;
 pub mod charity;
 pub mod chrome;
 pub mod classes;

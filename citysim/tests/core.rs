@@ -283,6 +283,18 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         *r.marks.entry("secret lapsed").or_insert(0) += l.secrets_lapsed;
         *r.marks.entry("Persuade posted").or_insert(0) += l.k_persuade_posted;
         *r.marks.entry("coerced job done").or_insert(0) += l.coerced_done;
+        // M16b phase 2: captives and the new kinds.
+        let k = &row.captive;
+        *r.marks.entry("Abduct posted").or_insert(0) += k.k_posted[0];
+        *r.marks.entry("Steal fulfilled").or_insert(0) += k.k_done[3];
+        *r.marks.entry("heist run").or_insert(0) += k.steal_runs;
+        *r.marks.entry("Spin posted").or_insert(0) += k.k_posted[5];
+        *r.marks.entry("hostage taken").or_insert(0) += k.hostages_taken;
+        *r.marks.entry("Rescue posted").or_insert(0) += k.k_posted[1];
+        *r.marks.entry("Escort posted").or_insert(0) += k.k_posted[2];
+        *r.marks.entry("Deliver fulfilled").or_insert(0) += k.k_done[4];
+        *r.marks.entry("fabrication planted").or_insert(0) += k.fabricated;
+        *r.marks.entry("fabrication exposed").or_insert(0) += k.exposed;
         r.assaults.push(assaults);
         r.rows.push(row);
         if r.no_net {
@@ -516,6 +528,16 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a coerced job", m("coerced job")),         // [14, 7, 7]; 45-47 [5, 9, 3]
         ("a fake job", m("fake job")),               // [1, 4, 3]; 45-47 [1, 2, 10]
         ("a Parley", m("Parley")),                   // [1, 1, 2]; 45-47 [1, 1, 3] (3-6 of 6 over three runs)
+        // M16b phase 2, captives and the new kinds (seeds 42-47 x 120 days; 5-6 of 6). Fired on 3
+        // or fewer, so printed below and unit-tested in `captives.rs`: a hostage taken (and its
+        // ransom, test_ransom_paid_frees_the_captive), a Rescue and an Escort posted (0 of 6:
+        // test_refusal_posts_rescue_and_escort, test_rescue_win_frees_the_holders_captives,
+        // test_escort_kept_is_fulfilled), a Deliver fulfilled (test_deliver_posted_for_a_corpse_and_
+        // buried), a fabrication planted and exposed (test_fabricated_spin_and_exposure).
+        ("an Abduct posted", m("Abduct posted")), // [8, 8, 5]; 45-47 [2, 3, 1]
+        ("a Steal fulfilled", m("Steal fulfilled")), // [10, 8, 5]; 45-47 [21, 9, 28]
+        ("a heist run", m("heist run")),          // [14, 10, 21]; 45-47 [15, 0, 23]
+        ("a Spin posted", m("Spin posted")),      // [1, 6, 3]; 45-47 [6, 4, 4]
     ]
 }
 
@@ -578,6 +600,13 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a secret lapsed", m("secret lapsed")),       // [0, 1, 0, 0, 0, 0]
         ("a Persuade posted", m("Persuade posted")),   // [0, 0, 0, 0, 0, 0]
         ("a coerced job done", m("coerced job done")), // [2, 0, 0, 0, 0, 0]
+        // M16b phase 2 (seeds 42-47 x 120 days): rare, unit-tested in `captives.rs`.
+        ("a hostage taken", m("hostage taken")),             // [0, 1, 1, 1, 0, 0]
+        ("a Rescue posted", m("Rescue posted")),             // [0, 0, 0, 0, 0, 0]
+        ("an Escort posted", m("Escort posted")),            // [0, 0, 0, 0, 0, 0]
+        ("a Deliver fulfilled", m("Deliver fulfilled")),     // [2, 0, 0, 0, 0, 1]
+        ("a fabrication planted", m("fabrication planted")), // [0, 0, 0, 1, 0, 0]
+        ("a fabrication exposed", m("fabrication exposed")), // [0, 0, 0, 0, 0, 0]
     ]
 }
 

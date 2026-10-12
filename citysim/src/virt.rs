@@ -405,6 +405,9 @@ pub enum RunWhy {
     God,
     /// M16a (plan C34, phase 3): a run order a Fixer handed a regular.
     Fixer,
+    /// M16b phase 2: a Steal record's heist (`World::steal_runs`); the
+    /// Data goes to the buyer.
+    Contract,
 }
 
 /// Plan V66 (the spec addendum's quiet and loud): how a run is made.

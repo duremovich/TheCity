@@ -1264,8 +1264,8 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2, rescued = 0.5 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5, rescued = 0.6 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
@@ -1291,7 +1291,7 @@ heat_wanted = 0.4
 heat_arrest = 0.2
 bribe_honour = 0.5
 dread_w = { killed = 1.0, assaulted = 0.4, avenged = 0.8, raided = 0.6, extorted = 0.3, robbed = 0.15, stripped = 0.2, hired = 0.3 }  # M16a C21: hired
-honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2, gave = 0.2, blackmailed = -0.4 }  # M16a C21: hired; Real economy E29: gave (no standing table at HEAD: honour carries the gift)
+honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2, gave = 0.2, blackmailed = -0.4, rescued = 0.3 }  # M16a C21: hired; Real economy E29: gave (no standing table at HEAD: honour carries the gift)
 heat_w = { arrested = 1.0, killed = 0.5, assaulted = 0.2, robbed = 0.2, extorted = 0.1, hired = 0.4 }  # M16a C21: hired
 own_bias = 0.3
 heat_pressure_w = 0.8
@@ -1805,8 +1805,8 @@ staff = 0
 [contracts]
 max_open = 256
 closed_keep_days = 30
-price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100 }   # M16b: persuade
-deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7 }
+price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120 }   # M16b: persuade; phase 2: the rest
+deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5 }
 risk_w = 1.5
 standing_w = 1.0
 max_attempts = 2
@@ -1827,7 +1827,7 @@ fixer_lawfulness = 0.35
 fixer_skill = 0.8
 regular_days = 14
 gun_skill_min = 0.45
-gun_lawfulness = { hit = 0.3, beat = 0.4 }
+gun_lawfulness = { hit = 0.3, beat = 0.4, abduct = 0.3, steal = 0.4, rescue = 0.7 }
 run_offers_per_day = 1             # phase 3 (C34)
 match_hour = 18
 offers_per_day = 4
@@ -1900,7 +1900,7 @@ queue_hours = 24                     # a taken organic Hit/Beat queued this long
 [leverage]
 enabled = true                       # the switch in flight (CITYSIM_LEVERAGE_OFF=1: the A/B and identity device)
 max_coercions = 128                  # standing coercions at once (per capita, up only)
-lev_bias = { threat = 0.0, secret = 0.3, debt = 0.2 }
+lev_bias = { threat = 0.0, secret = 0.3, debt = 0.2, hostage = 0.5 }
 demand_w = 1.0                       # demand_cost = demand_w x value / max(purse + 7 x wage, 1)
 secret_w = 1.0                       # a Secret adds secret_w x deed_sev x (1 - reach)
 backlash_report = 0.5                # a failed move is reported with p = backlash_report x lawfulness
@@ -1923,6 +1923,26 @@ persuade_affinity = 0.3              # plan key: a fulfilled Persuade's affinity
 court_rejections = 2                 # plan key: rejected twice by the same person in 30 days ...
 court_sociability = 0.4              # ... and under this sociability buys a Persuade
 retry_days = 28                      # plan key: a refused or broken pair is not tried again for this long
+hostage_w = 1.5                      # phase 2: a Hostage adds hostage_w x rel_w(over, captive)
+fabricate_lawfulness = 0.35          # phase 2: a spinning corp's exec under this fabricates a story
+fabricate_mult = 2.0
+expose_p = 0.05
+
+# M16b phase 2 (docs/M16_CONTRACTS.md § 4): captives (records on a struct: a held agent is cuffed to a
+# building and fed by its holder), the Private Prison, the new contract kinds. Every value a placeholder.
+[hostage]
+enabled = true                       # the switch in flight (CITYSIM_HOSTAGE_OFF=1: the A/B and identity device)
+hostage_days = 7
+hostage_food = 3
+p_hostage_kill = 0.3
+captive_quota = 6                    # spec [lod] captive_quota: held at once (per capita, up only)
+ransom = 200                         # plan key: a ransom's coins
+prison_cost = 800                    # spec found_cost.prison
+prison_upkeep = 20                   # spec upkeep.prison
+steal_share = 0.2                    # plan key: a Steal takes this share of the owner's purse ...
+steal_max = 300                      # ... at most this
+bury_hours = 24                      # spec: a kin corpse unburied 24 h
+abduct_share = 0.3                   # spec [contracts] abduct_share: a Harvest's Abduct price x the chrome's value
 
 # P10 (docs/P10_POLICY.md): the city's policy at world creation (the `[economy2] wages` / `no_safety_net`
 # switches retired into it). Each item is a saved lever after day 0: `--lever day=D:<key>=on|off` (`levy`,
