@@ -309,10 +309,21 @@ pub enum EventKind {
     // --- Scale S5 (docs/SCALE_20K.md § S5).
     /// `[adult, spouse?, home]`: an Ambient household entered the simulation.
     Materialised,
+    // --- M16b § 4 leverage (phase 1; amber).
+    /// `[agent, over, holder?]`: a coercion made (or a fake job sold).
+    Coerced,
+    /// `[over, agent]`: a standing coercion refused or broken.
+    CoercionBroken,
+    /// `[agent, over]`: a blackmail lapsed: its secret went public.
+    Lapsed,
+    /// `[leader, rival leader]`: a Parley made peace for a tribute.
+    Parleyed,
+    /// `[victim, faker]`: a fake job's buyer learned it never existed.
+    Defrauded,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 150] = [
+    pub const ALL: [EventKind; 155] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -463,6 +474,11 @@ impl EventKind {
         EventKind::CaseCold,
         EventKind::PolicyLapsed,
         EventKind::Materialised,
+        EventKind::Coerced,
+        EventKind::CoercionBroken,
+        EventKind::Lapsed,
+        EventKind::Parleyed,
+        EventKind::Defrauded,
     ];
 }
 

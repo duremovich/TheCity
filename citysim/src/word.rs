@@ -43,10 +43,13 @@ pub enum Deed {
     /// Real economy E29: `actor` gave to a Mission (`object` the building);
     /// written first-hand into the donor for gifts of `rep_gift_min`.
     Gave,
+    /// M16b § 4 (phase 1): `actor` made a coercion over `object` on a
+    /// secret it held.
+    Blackmailed,
 }
 
 impl Deed {
-    pub const ALL: [Deed; 17] = [
+    pub const ALL: [Deed; 18] = [
         Deed::Killed,
         Deed::Assaulted,
         Deed::Robbed,
@@ -64,6 +67,7 @@ impl Deed {
         Deed::Poached,
         Deed::Hired,
         Deed::Gave,
+        Deed::Blackmailed,
     ];
 
     /// Position in [`Deed::ALL`].
@@ -91,6 +95,7 @@ impl Deed {
             Deed::Poached => "poached",
             Deed::Hired => "hired",
             Deed::Gave => "gave",
+            Deed::Blackmailed => "blackmailed",
         }
     }
 

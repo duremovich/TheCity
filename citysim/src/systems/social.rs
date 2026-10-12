@@ -677,6 +677,7 @@ fn daily(world: &mut World) {
     let month = 30 * TICKS_PER_DAY;
     let mut prune = Vec::new();
     let mut aged_debts = Vec::new();
+    let mut called: Vec<(EntityId, EntityId, i64)> = Vec::new();
     let mut rekinded = Vec::new();
     // Each edge's update is its own; only the three lists depend on order,
     // and they are sorted into key order below (the hash map's order is not
@@ -701,6 +702,10 @@ fn daily(world: &mut World) {
                 if tick.saturating_sub(since) >= 14 * TICKS_PER_DAY {
                     aged_debts.push((a, b));
                     e.debt_since = Some(tick); // charged once per fortnight
+                                               // M16b § 4 Debt: (creditor, debtor, owed); the lower id
+                                               // owes the higher when `debt > 0`.
+                    let owed = i64::from(e.debt.unsigned_abs());
+                    called.push(if e.debt > 0 { (b, a, owed) } else { (a, b, owed) });
                 }
             }
         }
@@ -721,6 +726,9 @@ fn daily(world: &mut World) {
         promote(e);
         reindex_kind(world, a, b);
     }
+    // M16b § 4 Debt: the creditor calls the aged debt in.
+    called.sort_unstable();
+    crate::systems::leverage::call_debts(world, &called);
 }
 
 /// Automatic repayment at CollectWage when `coins > 20`: pay

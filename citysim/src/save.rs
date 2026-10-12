@@ -62,7 +62,13 @@ use crate::world::World;
 /// (the big-map landmarks' tiles while a closure left them older than the
 /// map's; skipped when `None`, always on the 2,000 city), and `[transit]
 /// staff_per_line` uncapped when missing (an older config keeps its crews).
-pub const SAVE_VERSION: u8 = 15;
+/// 16: M16b phase 1, leverage (docs/M16_CONTRACTS.md § 4):
+/// `World::{coercions, next_coercion, lev_tried, fake_jobs}`,
+/// `DayRow.leverage`, `[leverage]` and the `persuade` keys in the saved
+/// config (serde defaults: an older save loads with no coercions); the
+/// appended `ContractKind::Persuade`, `Terms::Coerced`, `Origin::Court`,
+/// `Crime::{Fraud, Blackmail}`, `Deed::Blackmailed` and their events.
+pub const SAVE_VERSION: u8 = 16;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

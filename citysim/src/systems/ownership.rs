@@ -243,6 +243,9 @@ pub enum Flow {
     Pool,
     /// Transit (docs/TRANSIT.md T9): an El fare, rider -> Treasury (untaxed: the city's own).
     Fare,
+    /// M16b § 4: coins paid under a coercion (protection, hush money, a
+    /// called debt, a tribute, a fake job's fee), untaxed.
+    Coerced,
 }
 
 impl Flow {
@@ -345,6 +348,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Inputs => row.econ.flow_inputs += coins,
         Flow::Pool => {}
         Flow::Fare => row.transit.fares += coins,
+        Flow::Coerced => row.leverage.flow_coerced += coins,
     }
 }
 

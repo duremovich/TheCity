@@ -429,6 +429,12 @@ fn faction_post(
     let price = contracts::organic_price(world, kind, &tgt, Some(buyer), agent, broker);
     if price > budget || world.purse(Some(buyer)) < price {
         world.stats.current.hit.hm_unaffordable += 1;
+        // M16b § 4 (Threat): a head who cannot afford the price leans on a
+        // weaker regular instead (`Terms::Coerced`).
+        if let Some(head) = agent {
+            let extra = PostExtra { deposit: None, motive, why };
+            return crate::systems::leverage::coerced_job(world, buyer, head, kind, target, broker, origin, extra);
+        }
         return false;
     }
     let extra = PostExtra { deposit: None, motive, why };
@@ -817,7 +823,7 @@ fn silence_report(world: &World, suspect: EntityId, witness: EntityId) -> Option
 /// kind)`, the witness living and no guard, the suspect a free adult who
 /// knows the witness (H16); one row per pair, the weightiest crime;
 /// heaviest first, then ids.
-fn silenceable(world: &World) -> Vec<(f32, EntityId, EntityId, ContractKind)> {
+pub(crate) fn silenceable(world: &World) -> Vec<(f32, EntityId, EntityId, ContractKind)> {
     let mut best: std::collections::BTreeMap<(EntityId, EntityId), (f32, ContractKind)> =
         std::collections::BTreeMap::new();
     // scan-ok: daily, the open reports.
@@ -1095,6 +1101,8 @@ pub fn agent_passes(world: &mut World) {
     if !world.config.hitmarket.enabled {
         return;
     }
+    // M16b § 4: a threat first; the Beat when it fails.
+    crate::systems::leverage::silence_pass(world);
     silence_pass(world);
     debt_pass(world);
 }

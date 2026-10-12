@@ -178,7 +178,7 @@ sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
 # M13 D47: the crimes appended after Vagrancy (GrandTheft and Manslaughter land in phase 2).
-sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5 }   # M14 V18: intrusion, data_theft
+sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5, fraud = 2, blackmail = 3 }   # M14 V18: intrusion, data_theft; M16b: fraud, blackmail
 # jail capacity is buildings.jail.capacity
 fight_death_p = 0.03
 stat_theft_caught_p = 0.25
@@ -1264,13 +1264,13 @@ rumour_cap_statistical = 3
 relay_conf = 0.8
 # M15 phase 5: repaid 0.1 -> 0.3. A Security contract kept a week is now told as Repaid (the seller), so
 # honour moves on kept contracts; at 0.1 the pool entry fell under reach_min before anyone heard it.
-reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2 }  # M16a C21: hired; Real economy E29: gave
-deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3 }  # M16a C21: hired; Real economy E29: gave
+reach0 = { killed = 1.0, assaulted = 0.5, robbed = 0.3, extorted = 0.2, stripped = 0.5, arrested = 0.6, married = 0.3, evicted = 0.4, struck = 0.8, raided = 0.9, founded = 0.4, avenged = 1.0, betrayed = 0.6, repaid = 0.3, poached = 0.3, hired = 0.3, gave = 0.2, blackmailed = 0.2 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
+deed_sal = { killed = 0.9, assaulted = 0.6, robbed = 0.5, extorted = 0.4, stripped = 0.6, arrested = 0.5, married = 0.3, evicted = 0.5, struck = 0.6, raided = 0.8, founded = 0.4, avenged = 0.9, betrayed = 0.7, repaid = 0.3, poached = 0.4, hired = 0.7, gave = 0.3, blackmailed = 0.5 }  # M16a C21: hired; Real economy E29: gave; M16b: blackmailed
 # M15 phase 5: robbed 0.3 -> 0.6 (with [grudges] grudge_min 0.35 and rel_w.own 0.6): a robbery of a
 # dole wallet forms the victim's grudge (0.36), a beating no longer does (0.30). Grudges formed on
 # seed 42: 20,728 (16,851 from beatings, 30,870 grudge hits from friends hearing of one) -> 5,236
 # (seeds 42/43/44: 20,728 / 19,185 / 18,125 -> 5,236 / 5,183 / 5,939; robberies ~55 %).
-deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1, hired = 0.7 }  # M16a C21: hired
+deed_sev = { killed = 1.0, assaulted = 0.5, robbed = 0.6, extorted = 0.2, stripped = 0.6, arrested = 0.0, married = 0.0, evicted = 0.3, struck = 0.0, raided = 0.6, founded = 0.0, avenged = 0.8, betrayed = 0.6, repaid = 0.0, poached = 0.1, hired = 0.7, blackmailed = 0.4 }  # M16a C21: hired; M16b: blackmailed
 # W9 (phase 3): the legacy second-hand copies in Memory.entries retire (social::gossip still draws);
 # the word's exchange nudges an existing edge to the actor instead.
 kin_cap = 12                       # W10: kin captured at death
@@ -1291,7 +1291,7 @@ heat_wanted = 0.4
 heat_arrest = 0.2
 bribe_honour = 0.5
 dread_w = { killed = 1.0, assaulted = 0.4, avenged = 0.8, raided = 0.6, extorted = 0.3, robbed = 0.15, stripped = 0.2, hired = 0.3 }  # M16a C21: hired
-honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2, gave = 0.2 }  # M16a C21: hired; Real economy E29: gave (no standing table at HEAD: honour carries the gift)
+honour_w = { betrayed = -1.0, robbed = -0.3, stripped = -0.6, extorted = -0.2, evicted = -0.2, poached = -0.1, avenged = 0.4, repaid = 0.3, married = 0.1, hired = -0.2, gave = 0.2, blackmailed = -0.4 }  # M16a C21: hired; Real economy E29: gave (no standing table at HEAD: honour carries the gift)
 heat_w = { arrested = 1.0, killed = 0.5, assaulted = 0.2, robbed = 0.2, extorted = 0.1, hired = 0.4 }  # M16a C21: hired
 own_bias = 0.3
 heat_pressure_w = 0.8
@@ -1805,8 +1805,8 @@ staff = 0
 [contracts]
 max_open = 256
 closed_keep_days = 30
-price_base = { hit = 400, beat = 120, guard = 25, locate = 20 }
-deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14 }
+price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100 }   # M16b: persuade
+deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7 }
 risk_w = 1.5
 standing_w = 1.0
 max_attempts = 2
@@ -1894,6 +1894,35 @@ debt_hit_days = 30                   # Debt: a Hit when the Beat is this old and
 reach_premium = 0.5                  # an agent's direct record with too few asks goes to the nearest Fixer at its price x 1.5
 lawful_wait = 0.6                    # a revenge buyer above this lawfulness waits while the target is wanted or held
 queue_hours = 24                     # a taken organic Hit/Beat queued this long for a live slot goes to the ledger
+
+# M16b leverage (docs/M16_CONTRACTS.md § 4, phase 1): coercions are records on a struct and one seeded
+# Intimidate roll (moves::resolve_with) between fictional agents. Every value a placeholder.
+[leverage]
+enabled = true                       # the switch in flight (CITYSIM_LEVERAGE_OFF=1: the A/B and identity device)
+max_coercions = 128                  # standing coercions at once (per capita, up only)
+lev_bias = { threat = 0.0, secret = 0.3, debt = 0.2 }
+demand_w = 1.0                       # demand_cost = demand_w x value / max(purse + 7 x wage, 1)
+secret_w = 1.0                       # a Secret adds secret_w x deed_sev x (1 - reach)
+backlash_report = 0.5                # a failed move is reported with p = backlash_report x lawfulness
+protection_weekly = 40
+blackmail_weekly = 30
+blackmail_lawfulness = 0.35
+blackmail_gap = 0.2                  # plan key: the coerced's standing above the holder's by this
+blackmail_days = 30                  # plan key: a holder looks for a secret once a month
+secret_known_max = 5
+secret_public_reach = 0.3
+silence_lawfulness = 0.3
+poach_threat_lawfulness = 0.3
+debt_call_min = 3                    # plan key: begging loans are not called
+fake_fee = 40
+fake_p = 0.1                         # plan key: a fake-job candidate tries on a day with this p
+fake_days = 7                        # plan key: the victim learns it after this
+parley_ratio = 0.3
+parley_tribute = 30
+persuade_affinity = 0.3              # plan key: a fulfilled Persuade's affinity toward the buyer
+court_rejections = 2                 # plan key: rejected twice by the same person in 30 days ...
+court_sociability = 0.4              # ... and under this sociability buys a Persuade
+retry_days = 28                      # plan key: a refused or broken pair is not tried again for this long
 
 # P10 (docs/P10_POLICY.md): the city's policy at world creation (the `[economy2] wages` / `no_safety_net`
 # switches retired into it). Each item is a saved lever after day 0: `--lever day=D:<key>=on|off` (`levy`,

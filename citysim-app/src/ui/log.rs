@@ -127,6 +127,12 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::GuardTaken
         | EventKind::Stiffed
         | EventKind::Recanted
+        // M16b leverage (phase 1).
+        | EventKind::Coerced
+        | EventKind::CoercionBroken
+        | EventKind::Lapsed
+        | EventKind::Parleyed
+        | EventKind::Defrauded
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

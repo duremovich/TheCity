@@ -254,7 +254,7 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         // Guard and Locate rows), and a Fixer in business (open, a record
         // brokered there in the last 7 days: the spec's definition).
         let c = &row.contract;
-        for k in ContractKind::ALL {
+        for k in ContractKind::M16A {
             *r.marks.entry(DONE_MARKS[k.index()]).or_insert(0) += c.k_done[k.index()];
         }
         *r.marks.entry("squad Hit").or_insert(0) += c.hits_squad;
@@ -269,6 +269,20 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
             .into_iter()
             .any(|f| w.has::<Broker>(f) && w.contracts.values().any(|x| x.broker == Some(f) && x.posted >= week));
         *r.marks.entry("Fixer in business").or_insert(0) += u32::from(in_business);
+        // M16b phase 1: leverage's day.
+        let l = &row.leverage;
+        *r.marks.entry("protection paid").or_insert(0) += l.protection_paid;
+        *r.marks.entry("blackmail made").or_insert(0) += l.blackmail_made;
+        *r.marks.entry("debt called").or_insert(0) += l.lev_debt_ok;
+        *r.marks.entry("report withdrawn under a threat").or_insert(0) += l.silenced_threat;
+        *r.marks.entry("coerced job").or_insert(0) += l.coerced_jobs;
+        *r.marks.entry("fake job").or_insert(0) += l.fake_jobs;
+        *r.marks.entry("Parley").or_insert(0) += l.parleys;
+        *r.marks.entry("poach by threat").or_insert(0) += l.poach_threats;
+        *r.marks.entry("Fraud filed").or_insert(0) += l.frauds_filed;
+        *r.marks.entry("secret lapsed").or_insert(0) += l.secrets_lapsed;
+        *r.marks.entry("Persuade posted").or_insert(0) += l.k_persuade_posted;
+        *r.marks.entry("coerced job done").or_insert(0) += l.coerced_done;
         r.assaults.push(assaults);
         r.rows.push(row);
         if r.no_net {
@@ -488,6 +502,20 @@ fn mechanisms() -> Vec<Mechanism> {
         // Transit (docs/TRANSIT.md § 7), with the El on: rides [..] and fare
         // days [..] on 42-44 (see `transit_mechanisms`).        // [22, 6, 12]; 45-47 [23, 6, 12]
         // "An organic Hit fulfilled" is printed (the Hit market phase 4, below).
+        // M16b phase 1, leverage (seeds 42-47 x 120 days; each on 6 of 6). Fired on 2 or
+        // fewer of 6, so printed below and unit-tested in `leverage.rs`: a blackmail lapsed
+        // (test_blackmail_pays_then_lapses_when_public), a Fraud filed (test_renege_files_fraud_
+        // by_a_lawful_taker, test_fake_job_fee_then_the_victim_learns), a coerced job done
+        // (test_coerced_job_unpaid_and_complied), a Persuade posted (0 of 6: the Court suitor is
+        // rare; test_court_persuade_posted_and_resolved); poaching by threat on 3-4 of 6
+        // (test_poach_by_threat_only_for_dirty_exec).
+        ("a protection paid", m("protection paid")), // [37, 6, 4]; 45-47 [10, 19, 20]
+        ("a blackmail made", m("blackmail made")),   // [16, 24, 19]; 45-47 [15, 12, 23]
+        ("a debt called in", m("debt called")),      // [39, 88, 53]; 45-47 [60, 56, 61]
+        ("a report withdrawn under a threat", m("report withdrawn under a threat")), // [42, 33, 45]; 45-47 [36, 34, 47]
+        ("a coerced job", m("coerced job")),         // [14, 7, 7]; 45-47 [5, 9, 3]
+        ("a fake job", m("fake job")),               // [1, 4, 3]; 45-47 [1, 2, 10]
+        ("a Parley", m("Parley")),                   // [1, 1, 2]; 45-47 [1, 1, 3] (3-6 of 6 over three runs)
     ]
 }
 
@@ -544,6 +572,12 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         // `person.rs::probe_widow_commissions_a_hit_at_the_fixer`, and the
         // god scenario `god_kill_ten_fathers_day_10`.
         ("an organic Hit fulfilled", m("organic Hit fulfilled")),
+        // M16b phase 1 (seeds 42-47 x 120 days): rare, unit-tested in `leverage.rs`.
+        ("a poach by threat", m("poach by threat")),   // [0, 3, 2, 0, 1, 1]
+        ("a Fraud filed", m("Fraud filed")),           // [0, 2, 1, 0, 0, 0]
+        ("a secret lapsed", m("secret lapsed")),       // [0, 1, 0, 0, 0, 0]
+        ("a Persuade posted", m("Persuade posted")),   // [0, 0, 0, 0, 0, 0]
+        ("a coerced job done", m("coerced job done")), // [2, 0, 0, 0, 0, 0]
     ]
 }
 
