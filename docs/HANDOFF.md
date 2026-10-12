@@ -325,3 +325,42 @@ In order:
 3. Smaller, seen and not fixed: the tax band reads only the balance (cut the rate while paying a dole); Socialise/Unwind idle at home when needs are met (design); `Court` keeps a wall-clock gate; the Statistical 21:00 evening overspends at venues (+42 %); a critic read of farmer/porter/clerk diaries with the El on; the El UI unseen; `stat_commute`'s doc line on errands is stale; no second Fixer ever founds (jobless + 400 coins); Debt never reaches `debt_min`.
 
 Housekeeping: this session's worktrees are merged (`abea3…`, `ad8fb…`, `a34ee…`, `a9893…`, `acd59…`, `af0e9…`); the old transit worktree `abdc8…` is superseded. ~35 stale worktrees remain under `.claude/worktrees` (cleanup offered to Dylan).
+
+## Session log (the eleventh session, 2026-10-12 →)
+
+Dylan's calls: leave the softer city for now; the El crews were absurd (~251, 12.5 % of residents); calibration noise
+matters only at fine-tuning time; **20k simulated residents** plus an Ambient tier; import TheCityGraphics through
+an adapter (it still evolves); the test floors on my rec (2k keeps 4,000 tps; core_20k its own printed floor).
+
+| commit | what | numbers |
+| --- | --- | --- |
+| addbd4a | El crews capped (`[transit] staff_per_line` 4 = 12 crews); the Treasury surplus pays a wage credit (`[treasury] credit_max` 0.25: the band may go below 0); fares count as civic receipts | 42-47 x 120: employed 1,746 → 1,503, homeless 50 → 163, wallet 21.9 → 26.0, Murders 459 → 526; main had hoarded 139-154k by d365 |
+| 908d055 | docs/SCALE_20K.md, the plan | |
+| 67be011 | S1: N² paths (sightings grid, located-suspect index, door costs, hire pool, agents_near), `prof` feature, `[lod] coworker_crew` (0) | 2k byte-identical; 20k 272 → 571 tps (probe map) |
+| ef58206 | S2: u16 tiles/capacities/levers, MAX_DISTRICTS 32, growing CSV slot groups, SAVE 12 | 2k byte-identical |
+| ca3b244 | S3a: exact A* + ALT landmarks over 131,072 tiles, byte-budgeted flow fields, El stop cell shortlist | 3,000 x 1,875 pathing ~164 MB (was → 2.9 GB) |
+| 41f0213 | S3b: MapSource (`gen:N`), generator, `import-graphics`, RLE maps, district grids, El lines in maps, SAVE 13 | assets/maps/gen20k.txt, isle_m_k4.txt |
+| 2e5ffa2 | Import v2 on the graphics `out/sim/` export (lots_sim, terrain_sim, rail): uses, civic sites, doors, flats, Mountain tiles, Terrace Line | commute Manhattan within 1 % p50 / 11 % p99 |
+| da07983 | S4: `[scale]`, `scaled_to` + `fit_to_map`, corp roster dealt per ~2k residents ("Nutrix 2"), seeding by role (`seat_district`), core_20k | 20k d60: employed 50-52 % (was 17-21 %), starved 0.15/1k (was 182) |
+| d9e7fde | S5: the Ambient tier (flats hashed from the seed, labour pool, immigration from flats), SAVE 14 | 0.2 B/flat on 783k flats; nearly idle at 20k (jobs are short, not people) |
+| 226871e | S4b: goal-scoring indices; tests for S4's seat resolver and corp dealing | 20k +20-28 % (core_20k 189 tps alone) |
+
+Every merge: trio, core_year, shadow 133/0, god 17+3+3, parity green; the 2k city byte-identical from S1 on.
+
+Findings:
+- 20k runs at ~190 tps (a tick is a game minute: a game day in ~8 s). Fine for play; slow for testing (120 days
+  ≈ 15 min). The cost is 2,000 bodies (Full 500 + Coarse 1,500, needed or the gangs die) at ~1.7 µs each plus the
+  Statistical hour. Faster needs behaviour changes: a think interval by tier, a parallel Statistical hour, or
+  `coworker_crew` (S4 recommends flipping it only with a stat-table regen).
+- J24 at 20k reads 0.497 vs the 2k city's ~0.53 (a printed finding; collapse floor 0.40 asserted). Per-role gap in
+  SCALE_20K.md (private guards, Vat Techs, Clerks, Night Stockers, Fab Tech churn).
+- The Ambient tier's open questions (hire_far, consumers, dematerialise, children, demand creating jobs): my rec is
+  hire_far off, dematerialise and children later, Ambient consumption as outside demand in M17.
+- Graphics asks in docs/IMPORT_GRAPHICS.md (Mid-Levels podium use, mountain slope, central precinct name, a use legend).
+
+## Next session (written 2026-10-12, end of the Scale milestone)
+
+1. `/code-review high` over 2e5ffa2^..HEAD's Scale work (908d055..226871e), then fix.
+2. Dylan's answers on the Ambient questions.
+3. M16b → M17 (Ambient demand as outside demand creating jobs) → M18. Write every new mechanism for 20k and run
+   core_20k beside core_year per merge.
