@@ -2143,7 +2143,7 @@ fn pay_sighting(
     let owner = c.buyer.unwrap_or(EntityId::NONE);
     crate::systems::gossip::relay_sighting(world, owner, s);
     if c.buyer.is_none() {
-        world.last_seen.insert(who, (tile, now));
+        world.set_last_seen(who, (tile, now));
     }
     let per = world.config.bounty.per_sighting;
     let paid = if c.brokered() {
@@ -3048,7 +3048,7 @@ pub fn heat_bust(world: &mut World, fixer: EntityId) {
     let door = world.comp::<Building>(fixer).map(|b| b.door).unwrap_or_default();
     if let Some(o) = owner.filter(|&o| crate::systems::law::living(world, o)) {
         crate::systems::law::file_report(world, crate::components::Crime::Conspiracy, o, None);
-        world.last_seen.insert(o, (door, now));
+        world.set_last_seen(o, (door, now));
     }
     let open: Vec<ContractId> = world
         .comp::<Broker>(fixer)
@@ -3602,7 +3602,7 @@ pub fn post_law(world: &mut World) {
         if !crate::systems::law::living(world, s) || world.has::<Sentence>(s) || !world.has::<Brain>(s) {
             continue;
         }
-        let seen = world.last_seen.get(&s).map_or(reported, |&(_, t)| t.max(reported));
+        let seen = world.last_seen().get(&s).map_or(reported, |&(_, t)| t.max(reported));
         let escaped = world.comp::<Memory>(s).is_some_and(|m| {
             m.entries.iter().any(|e| e.kind == MemoryKind::Escaped && now.saturating_sub(e.tick) < 2 * TICKS_PER_DAY)
         });

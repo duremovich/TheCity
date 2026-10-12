@@ -74,7 +74,7 @@ pub fn bind_target(world: &World, id: EntityId, goal: GoalKind) -> Option<Entity
             let tile = world.comp::<Position>(id)?.tile;
             let located =
                 crate::systems::law::located_suspects(world, Some(crate::systems::law::Pursuer { tile, guard: id }));
-            let dist = |s: EntityId| world.last_seen.get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile));
+            let dist = |s: EntityId| world.last_seen().get(&s).map_or(u32::MAX, |&(t, _)| t.manhattan(tile));
             // M15 W34: the hottest first, then the nearest.
             let heat = |s: EntityId| (crate::systems::reputation::rep(world, s).heat * 10.0).round() as i32;
             located.into_iter().min_by_key(|&s| (-heat(s), dist(s), s.index))

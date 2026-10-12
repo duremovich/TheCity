@@ -264,12 +264,11 @@ pub fn add(world: &mut World, holder: EntityId, target: EntityId, cause: GrudgeC
 /// was part of end.
 pub fn on_death(world: &mut World, dead: EntityId, killer: Option<EntityId>) {
     let now = world.tick;
-    // scan-ok: per death, the grudge store (no per-tick work).
-    for h in world.with::<Grudges>() {
-        if let Some(g) = world.comp_mut::<Grudges>(h) {
-            for x in g.list.iter_mut().filter(|x| x.target == dead && x.settled.is_none()) {
-                x.settled = Some(now);
-            }
+    // scan-ok: per death, the grudge store (no per-tick work). Scale S1:
+    // the store itself, not an id list of every entity holding one.
+    for g in world.grudges.iter_mut().flatten() {
+        for x in g.list.iter_mut().filter(|x| x.target == dead && x.settled.is_none()) {
+            x.settled = Some(now);
         }
     }
     let cfg = world.config.grudges.clone();

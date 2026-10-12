@@ -59,7 +59,7 @@ pub fn run(world: &mut World) {
         if world.tick_of_day() == TICKS_PER_HOUR as u16 {
             crate::systems::fviolence::rebuild_active(world);
         }
-        assign_hour(world);
+        crate::prof::timed!("lod::assign_hour", assign_hour(world));
         // L2 phase 4 (Ledger maths): the hour's body exposure.
         crate::systems::fviolence::tally_exposure(world);
         #[cfg(debug_assertions)]
@@ -75,7 +75,7 @@ pub fn run(world: &mut World) {
             }
         }
     }
-    run_statistical(world);
+    crate::prof::timed!("lod::run_statistical", run_statistical(world));
     // Promotions this tick queued their victims' open holes (M10 D32).
     bind::drain_queue(world);
 }
@@ -694,7 +694,7 @@ pub fn run_statistical(world: &mut World) {
                 (Some(rates), Some(r)) => rates[r],
                 _ => 1.0,
             };
-            crate::systems::bins::stat_dive(world, id, p);
+            crate::prof::timed!("stat::stat_dive", crate::systems::bins::stat_dive(world, id, p));
         }
         // 1. An hour of decay in one step.
         let sociability = world.comp::<Personality>(id).map_or(0.5, |p| p.sociability);
@@ -721,9 +721,9 @@ pub fn run_statistical(world: &mut World) {
             }
         }
         if let Some(execs) = &fun_execs {
-            crate::systems::leisure::stat_hour(world, id, execs);
+            crate::prof::timed!("stat::leisure::stat_hour", crate::systems::leisure::stat_hour(world, id, execs));
         }
-        crate::needs::starvation(world, id);
+        crate::prof::timed!("stat::starvation", crate::needs::starvation(world, id));
         if !world.has::<Brain>(id) {
             continue; // starved this hour
         }
@@ -733,7 +733,7 @@ pub fn run_statistical(world: &mut World) {
         // (a Full farmer works every hour of the shift), and the jobless draw
         // the dole once a day. The table's p_work mass then stands for the
         // idle hours of the employed.
-        stat_work(world, id, phase, no_net_row);
+        crate::prof::timed!("stat::stat_work", stat_work(world, id, phase, no_net_row));
         // Review item 1: a dodger caught at the commute's gate is on screen
         // now (the arrest path, `transit::stat_commute`): the rest of the
         // hour is its body's, as after the errand ride's catch below.
@@ -751,7 +751,7 @@ pub fn run_statistical(world: &mut World) {
             }
         }
         // Diet parity (hunger fix item 11's off-screen side): the grocery run.
-        stat_grocery(world, id);
+        crate::prof::timed!("stat::stat_grocery", stat_grocery(world, id));
         // 3. One outcome. A Full agent eats when hungry, not by lottery, so a
         // hungry Statistical agent eats if it can and the draw covers the
         // discretionary meals of the fed.
@@ -792,7 +792,7 @@ pub fn run_statistical(world: &mut World) {
         };
         match outcome {
             Outcome::Eat => {
-                stat_eat(world, id);
+                crate::prof::timed!("stat::stat_eat", stat_eat(world, id));
                 // L2 shadow fixes item 8: a hungry hour whose Eat came to
                 // nothing sleeps at night (two Statistical workers read
                 // energy 0.00 for 92 and 122 h: every night hour drew Eat).
@@ -801,7 +801,7 @@ pub fn run_statistical(world: &mut World) {
                     stat_sleep_night(world, id);
                 }
             }
-            Outcome::Social => stat_social(world, id),
+            Outcome::Social => crate::prof::timed!("stat::stat_social", stat_social(world, id)),
             Outcome::Sleep => {
                 if phase == DayPhase::Night {
                     stat_sleep_night(world, id);
@@ -811,7 +811,7 @@ pub fn run_statistical(world: &mut World) {
         }
         // 4. The independent rolls: the agent's own crimes and courtship, and
         // what is done to it by an actor nobody has drawn yet (a hole).
-        stat_rolls(world, id, &row);
+        crate::prof::timed!("stat::stat_rolls", stat_rolls(world, id, &row));
         if world.has::<Brain>(id) {
             world.recompute_wealth_for(id);
         }
@@ -1393,10 +1393,10 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     }
     // L2 (L23): a jobless Statistical member's GangWork day.
     if job.is_none() && phase == DayPhase::Work {
-        crate::systems::fviolence::stat_gang_day(world, id);
+        crate::prof::timed!("work::stat_gang_day", crate::systems::fviolence::stat_gang_day(world, id));
     }
     if let (None, Some(i)) = (&job, no_net_row) {
-        stat_earn(world, id, i);
+        crate::prof::timed!("work::stat_earn", stat_earn(world, id, i));
     }
     let Some(job) = job else { return };
     // Hunger as sickness § 2: a sick day is no shift and no wage (as Full's).
@@ -1419,7 +1419,7 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     // rides when the El wins the trip (nothing with transit off). Review
     // item 2: attendance is rolled first; a no-show (no hour of the shift
     // worked) does not ride.
-    crate::systems::transit::stat_commute(world, id, &job, attend);
+    crate::prof::timed!("work::stat_commute", crate::systems::transit::stat_commute(world, id, &job, attend));
     // A dodger caught at the gate is on screen now (the arrest path).
     if world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical) {
         return;
@@ -1445,18 +1445,22 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     // An hour of co-work drifts each pair of co-workers as `social`'s
     // co-location does for bodies (bodies never see a Statistical agent in
     // their building). Each Statistical pair once an hour: the lower id drives.
-    if job.employer.is_some() {
+    // Scale S1: the employer's staff index, not every holder of the role,
+    // and only the agent's crew (`[lod] coworker_crew`).
+    if let Some(employer) = job.employer {
+        let _timer = crate::prof::scope!("work::coworkers");
         let tod = world.tick_of_day();
-        let ws = world.workers(job.role);
-        let mates: Vec<EntityId> = ws[ws.partition_point(|&c| c <= id)..]
-            .iter()
-            .copied()
-            .filter(|&c| {
-                world.comp::<Job>(c).is_some_and(|j| j.employer == job.employer && j.on_shift(tod))
-                    && world.comp::<Brain>(c).is_some_and(|b| b.lod == Lod::Statistical)
-                    && !world.has::<Sentence>(c)
-            })
-            .collect();
+        let crew = world.config.lod.coworker_crew;
+        let mates: Vec<EntityId> = crew_above(world.staff_of(employer), id, crew, |c| {
+            world.comp::<Job>(c).is_some_and(|j| j.role == job.role)
+        })
+        .into_iter()
+        .filter(|&c| {
+            world.comp::<Job>(c).is_some_and(|j| j.on_shift(tod))
+                && world.comp::<Brain>(c).is_some_and(|b| b.lod == Lod::Statistical)
+                && !world.has::<Sentence>(c)
+        })
+        .collect();
         for c in mates {
             crate::systems::social::interacted(world, id, c);
         }
@@ -1535,6 +1539,49 @@ pub fn shift_attended(world: &World, id: EntityId, job: &Job, p: f32) -> bool {
     let Some(end) = job.shift_end(tick) else { return true };
     let minute = tick % TICKS_PER_HOUR;
     (tick / TICKS_PER_HOUR..).take_while(|&h| h * TICKS_PER_HOUR + minute < end).any(|h| attend_roll(world, id, h) < p)
+}
+
+/// Scale S1: `id`'s crew above it, ascending: of `staff` (ascending ids)
+/// the members `same` keeps (its role), half of `crew` (rounded up) nearest `id` on each
+/// side in that order, wrapping (`crew` 0: every one), then those above `id`
+/// (the lower id drives a pair). Crew membership is symmetric, so each pair
+/// is driven once; a group of at most `crew + 1` is every member.
+pub fn crew_above(staff: &[EntityId], id: EntityId, crew: usize, same: impl Fn(EntityId) -> bool) -> Vec<EntityId> {
+    let above = staff.partition_point(|&c| c <= id);
+    if crew == 0 {
+        return staff[above..].iter().copied().filter(|&c| same(c)).collect();
+    }
+    let n = staff.len();
+    let half = crew.div_ceil(2);
+    let mut out: Vec<EntityId> = Vec::with_capacity(2 * half);
+    // Forward from `id` (wrapping), then backward, `half` members each.
+    let mut found = 0;
+    for k in 0..n {
+        let c = staff[(above + k) % n];
+        if found == half || c == id {
+            break;
+        }
+        if same(c) {
+            out.push(c);
+            found += 1;
+        }
+    }
+    let below = staff.partition_point(|&c| c < id);
+    found = 0;
+    for k in 1..=n {
+        let c = staff[(below + n - k) % n];
+        if found == half || c == id {
+            break;
+        }
+        if same(c) {
+            out.push(c);
+            found += 1;
+        }
+    }
+    out.retain(|&c| c > id);
+    out.sort_unstable();
+    out.dedup();
+    out
 }
 
 /// P5f: the share of the shift ending around `tick` whose hours the agent

@@ -292,7 +292,7 @@ fn test_blind_skips_camera_and_camera_writes_sighting() {
     assert_eq!(s.who, thief);
     assert!(s.confidence > 0.9, "{}", s.confidence);
     assert!(law::wanted(&w, thief), "a report with no witness");
-    assert!(w.last_seen.contains_key(&thief), "the law reads the sighting");
+    assert!(w.last_seen().contains_key(&thief), "the law reads the sighting");
 }
 
 /// Plan 3.6 (V27): two Labs short of their ICE target, a Virt loss on the

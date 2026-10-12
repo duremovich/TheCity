@@ -429,7 +429,7 @@ pub fn start_episode(world: &mut World, agent: EntityId) {
     }
     crate::systems::law::file_report(world, crate::components::Crime::Assault, agent, None);
     let now = world.tick;
-    world.last_seen.insert(agent, (tile, now));
+    world.set_last_seen(agent, (tile, now));
 }
 
 /// D33: the episode ends (`why`: "spent", "arrested", "dead"). A survivor

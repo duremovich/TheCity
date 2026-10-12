@@ -1723,7 +1723,7 @@ fn probe_homeless_night_worker_on_shift_is_not_charged_with_vagrancy() {
         w.comp_mut::<Household>(a).expect("household").home = None;
         let tile = w.comp::<Position>(a).expect("position").tile;
         law::file_report(&mut w, citysim::Crime::Vagrancy, a, None);
-        w.last_seen.insert(a, (tile, w.tick));
+        w.set_last_seen(a, (tile, w.tick));
     }
     let worker_chased = law::is_located_suspect(&w, worker);
     let drifter_chased = law::is_located_suspect(&w, drifter);

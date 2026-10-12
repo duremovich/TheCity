@@ -361,12 +361,8 @@ fn vagrant_at_work(world: &World, s: EntityId) -> bool {
     if !at_work(world, s) {
         return false;
     }
-    let mut any = false;
-    let only_vagrancy = world.crime_reports().iter().filter(|r| !r.resolved && r.suspect == s).all(|r| {
-        any = true;
-        r.crime == Crime::Vagrancy
-    });
-    any && only_vagrancy
+    // Scale S1: from the report index (this walked every report).
+    world.wanted_only_for_vagrancy(s)
 }
 
 /// A wanted suspect the law can chase now: free, uncuffed and seen by a
@@ -380,7 +376,7 @@ fn located(world: &World, s: EntityId) -> bool {
     (living(world, s))
         && !world.has::<Sentence>(s)
         && world.comp::<Brain>(s).is_some_and(|b| b.cuffed_by.is_none())
-        && world.last_seen.get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
+        && world.last_seen().get(&s).is_some_and(|&(_, t)| tick.saturating_sub(t) <= window)
         && !vagrant_at_work(world, s)
 }
 
@@ -423,16 +419,16 @@ pub fn is_city_guard(world: &World, guard: EntityId) -> bool {
 }
 
 /// `claimed`: the suspects other guards already chase (L1), built once per
-/// scoring call by `claim_set`.
-fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>, claimed: &BTreeSet<EntityId>) -> bool {
+/// scoring call by `claim_set`, on its first read, with the pursuer's
+/// `pursuit_radius_for`. `seen`: `s`'s `World::last_seen` entry.
+fn chaseable(world: &World, s: EntityId, seen: (TilePos, Tick), by: Option<Pursuer>, claimed: &Claims<'_>) -> bool {
     let near = |p: Pursuer| {
-        let radius = pursuit_radius_for(world, p.guard);
         s != p.guard
-            && world.last_seen.get(&s).is_some_and(|&(t, _)| t.manhattan(p.tile) <= radius)
+            && seen.0.manhattan(p.tile) <= claimed.radius
             // L1: a stale sighting is chased only from near by, and a
             // suspect another guard is after is theirs.
-            && crate::systems::life::sighting_fresh(world, s, p.tile)
-            && !claimed.contains(&s)
+            && crate::systems::life::sighting_fresh_at(world, seen, p.tile)
+            && !claimed.contains(s)
             // M16a (plan C31): never the buyer of a guard on the take.
             && !crate::systems::contracts::on_take_of(world, p.guard, s)
     };
@@ -440,25 +436,68 @@ fn chaseable(world: &World, s: EntityId, by: Option<Pursuer>, claimed: &BTreeSet
     by.is_none_or(near) && located(world, s)
 }
 
-/// The L1 claim set for `by` (empty for the whole city, or with life off).
-fn claim_set(world: &World, by: Option<Pursuer>) -> BTreeSet<EntityId> {
+/// The L1 claim set for a pursuer (empty for the whole city). Scale S1:
+/// built on the first suspect in reach, not on every call (it walks every
+/// guard; most calls find nobody in reach and never read it).
+struct Claims<'a> {
+    world: &'a World,
+    guard: Option<EntityId>,
+    /// The pursuer's `pursuit_radius_for` (0 for the whole city: unread).
+    radius: u32,
+    set: std::cell::OnceCell<BTreeSet<EntityId>>,
+}
+
+impl Claims<'_> {
+    fn contains(&self, s: EntityId) -> bool {
+        match self.guard {
+            Some(g) => self.set.get_or_init(|| crate::systems::life::claimed_suspects(self.world, g)).contains(&s),
+            None => false,
+        }
+    }
+}
+
+fn claim_set(world: &World, by: Option<Pursuer>) -> Claims<'_> {
+    let radius = by.map_or(0, |p| pursuit_radius_for(world, p.guard));
+    Claims { world, guard: by.map(|p| p.guard), radius, set: std::cell::OnceCell::new() }
+}
+
+/// Scale S1: the open-warrant suspects `located` can pass for `by`,
+/// ascending, with their `last_seen` entries: those last seen inside
+/// `[crime] suspect_seen_ticks` (`World::located_candidates`, memoised per
+/// tick) and, for a pursuer, inside its reach's square (the memo's grid),
+/// not every open warrant in the city (a guard's every think walked them all).
+fn located_candidates(world: &World, by: Option<Pursuer>, claimed: &Claims<'_>) -> Vec<(EntityId, (TilePos, Tick))> {
+    let located = world.located_candidates(world.config.crime.suspect_seen_ticks);
     match by {
-        Some(p) => crate::systems::life::claimed_suspects(world, p.guard),
-        _ => BTreeSet::new(),
+        Some(p) => located.near(p.tile, claimed.radius),
+        None => located.list.clone(),
     }
 }
 
 /// Open-warrant suspects that are located (and in reach of `by`), ascending.
 pub fn located_suspects(world: &World, by: Option<Pursuer>) -> Vec<EntityId> {
     let claimed = claim_set(world, by);
-    // `open_suspects` is ascending and deduplicated.
-    world.open_suspects().filter(|&s| chaseable(world, s, by, &claimed)).collect()
+    located_candidates(world, by, &claimed)
+        .into_iter()
+        .filter(|&(s, t)| chaseable(world, s, t, by, &claimed))
+        .map(|(s, _)| s)
+        .collect()
 }
 
 /// Is `located_suspects(world, by)` non-empty?
 pub fn any_located_suspect(world: &World, by: Option<Pursuer>) -> bool {
     let claimed = claim_set(world, by);
-    world.open_suspects().any(|s| chaseable(world, s, by, &claimed))
+    located_candidates(world, by, &claimed).into_iter().any(|(s, t)| chaseable(world, s, t, by, &claimed))
+}
+
+/// The pre-S1 `located_suspects` (every open warrant), for the tests.
+#[cfg(test)]
+fn located_suspects_scan(world: &World, by: Option<Pursuer>) -> Vec<EntityId> {
+    let claimed = claim_set(world, by);
+    world
+        .open_suspects()
+        .filter(|&s| world.last_seen().get(&s).is_some_and(|&seen| chaseable(world, s, seen, by, &claimed)))
+        .collect()
 }
 
 /// Is `s` a wanted, located suspect (anywhere)?
@@ -1297,30 +1336,33 @@ fn jail_duty_now(world: &World, guard: EntityId, shift_key: i64) -> bool {
 /// Per tick: guards perceive wanted suspects; escorted suspects follow.
 /// Daily: warrants expire, prisoners are fed and released.
 pub fn run(world: &mut World) {
-    tally_watch(world);
-    credit_guard_shifts(world);
-    sightings(world);
+    crate::prof::timed!("law::tally_watch", tally_watch(world));
+    crate::prof::timed!("law::credit_guard_shifts", credit_guard_shifts(world));
+    crate::prof::timed!("law::sightings", sightings(world));
     // L2 (L21): the held prisoners' needs decay hour by hour, as a body's
     // do through the day (a day's decay at once left them fed and rested
     // all day, and their mood lifted their districts' unrest off the riot
     // line: riots on 42-47 read 0.17 a seed against 2.67 with the budget off).
     if world.tick.is_multiple_of(crate::time::TICKS_PER_HOUR) {
-        held_hourly(world);
+        crate::prof::timed!("law::held_hourly", held_hourly(world));
     }
     if world.tick_of_day() == 0 {
-        expire_warrants(world);
+        crate::prof::timed!("law::expire_warrants", expire_warrants(world));
         // L2 (L21): the held prisoners' day (meetings, the pitch), before their meal.
-        held_daily(world);
-        jail_upkeep(world);
-        reconcile_guards(world);
+        crate::prof::timed!("law::held_daily", held_daily(world));
+        crate::prof::timed!("law::jail_upkeep", jail_upkeep(world));
+        crate::prof::timed!("law::reconcile_guards", reconcile_guards(world));
         // M12 D23: the city's sweepers, toward `levers.sanitation_count`.
-        crate::systems::districts::reconcile_sanitation(world);
+        crate::prof::timed!(
+            "law::districts::reconcile_sanitation",
+            crate::systems::districts::reconcile_sanitation(world)
+        );
         // M16a (plan C29): after `word::run`'s pass.
-        accessory_check(world);
+        crate::prof::timed!("law::accessory_check", accessory_check(world));
     }
     // The captain's daily rescoring, after the guard roster is reconciled.
-    crate::systems::law_brain::run(world);
-    releases(world);
+    crate::prof::timed!("law::law_brain::run", crate::systems::law_brain::run(world));
+    crate::prof::timed!("law::releases", releases(world));
 }
 
 /// M10 D33, M12 D3: one tick of watch per on-shift, unjailed guard, in the
@@ -1495,15 +1537,137 @@ pub fn reconcile_guards(world: &mut World) {
 }
 
 /// Any guard perceiving (SIGHT, or same building) a wanted suspect records it.
+///
+/// Scale S1: the guards are bucketed once a tick (a [`TileGrid`] by tile, a
+/// map by building), so each suspect reads only the guards in its square
+/// and its building, not every guard in the city: the same pairs, the same
+/// `seen`, the same seers in ascending order (`sightings_scan` is the old
+/// loop, kept as the test's reference).
 fn sightings(world: &mut World) {
+    sightings_with(world, SIGHTINGS_GRID_PAIRS);
+}
+
+/// [`sightings`], with the grid past `grid_pairs` guard-suspect pairs.
+fn sightings_with(world: &mut World, grid_pairs: usize) {
+    let open = world.open_suspects().count();
+    if open == 0 {
+        return;
+    }
+    let sight = world.config.crime.sight;
+    // M13 D32: a guard with Eyes sees `Kit.sight` tiles further.
+    let guards = guard_sights(world);
+    let max_extra = guards.iter().map(|g| g.extra).max().unwrap_or(0);
+    // A small city (a few thousand guard-suspect pairs) reads every guard
+    // for each suspect: the grid's upkeep would cost more than it saves.
+    let grid = (open * guards.len() > grid_pairs).then(|| {
+        let grid = crate::spatial::TileGrid::build(
+            world.map.w(),
+            world.map.h(),
+            sight + max_extra + 1,
+            guards.iter().map(|g| g.tile),
+        );
+        let mut in_building: BTreeMap<EntityId, Vec<u32>> = BTreeMap::new();
+        for (i, g) in guards.iter().enumerate() {
+            if let Some(b) = g.building {
+                in_building.entry(b).or_default().push(i as u32);
+            }
+        }
+        (grid, in_building)
+    });
+    // With the grid, only a suspect with a guard in its square's cells or its
+    // building can be seen (positions do not move in this pass): the rest
+    // are passed over before their stores are read.
+    let suspects: Vec<EntityId> = world
+        .open_suspects()
+        .filter(|&s| {
+            grid.as_ref().is_none_or(|(grid, in_building)| {
+                world.comp::<Position>(s).is_some_and(|p| {
+                    grid.any_near(p.tile, sight + max_extra) || p.building.is_some_and(|b| in_building.contains_key(&b))
+                })
+            })
+        })
+        .filter(|&s| (living(world, s)) && !world.has::<Sentence>(s))
+        .collect();
+    let tick = world.tick;
+    // M15 W12 (plan deviation: hourly, not every tick): the guards who see a
+    // suspect hold a Sighting of them.
+    let note = tick.is_multiple_of(crate::time::TICKS_PER_HOUR);
+    let mut near: Vec<u32> = Vec::new();
+    for s in suspects {
+        let Some(ps) = world.comp::<Position>(s) else { continue };
+        let (tile, building) = (ps.tile, ps.building);
+        let sees = |g: &GuardSight| {
+            (g.building.is_some() && g.building == building) || chebyshev(g.tile, tile) <= sight + g.extra
+        };
+        // The guards who see `s`, ascending (`guards` is ascending by id, so
+        // ascending indices are): from the grid's cells and the building, or
+        // without the grid, only whether any does until a note needs them.
+        near.clear();
+        let seen = match &grid {
+            Some((grid, in_building)) => {
+                grid.near(tile, sight + max_extra, &mut near);
+                if let Some(list) = building.and_then(|b| in_building.get(&b)) {
+                    near.extend_from_slice(list);
+                }
+                near.sort_unstable();
+                near.dedup();
+                near.retain(|&i| sees(&guards[i as usize]));
+                !near.is_empty()
+            }
+            None => guards.iter().any(sees),
+        };
+        if !seen {
+            continue;
+        }
+        world.set_last_seen(s, (tile, tick));
+        if note {
+            if grid.is_none() {
+                near.extend((0..guards.len() as u32).filter(|&i| sees(&guards[i as usize])));
+            }
+            let seers: Vec<EntityId> = near.iter().map(|&i| guards[i as usize].id).collect();
+            for g in seers {
+                crate::systems::gossip::maybe_sight(world, g, s, building, tile);
+            }
+        }
+    }
+}
+
+/// Scale S1: past this many guard-suspect pairs a tick, `sightings` buckets
+/// the guards by tile (the 2,000 city reads ~2,300 a tick over 30 days on
+/// seed 42, the 20,000 probe city hundreds of thousands).
+const SIGHTINGS_GRID_PAIRS: usize = 16_384;
+
+/// A guard as `sightings` reads it: where, inside what, and its Eyes' reach.
+#[derive(Clone, Copy, Debug)]
+struct GuardSight {
+    id: EntityId,
+    tile: TilePos,
+    building: Option<EntityId>,
+    extra: u32,
+}
+
+/// Every guard with a Position, ascending by id.
+fn guard_sights(world: &World) -> Vec<GuardSight> {
+    world
+        .guards()
+        .iter()
+        .filter_map(|&g| {
+            let extra = world.comp::<Kit>(g).map_or(0, |k| u32::from(k.sight));
+            world.comp::<Position>(g).map(|p| GuardSight { id: g, tile: p.tile, building: p.building, extra })
+        })
+        .collect()
+}
+
+/// The pre-S1 `sightings` (every suspect against every guard), kept for
+/// `test_sightings_grid_matches_the_scan`.
+#[cfg(test)]
+fn sightings_scan(world: &mut World) {
     let suspects: Vec<EntityId> =
         world.open_suspects().filter(|&s| (living(world, s)) && !world.has::<Sentence>(s)).collect();
     if suspects.is_empty() {
         return;
     }
     let sight = world.config.crime.sight;
-    // `near` per (guard, suspect) pair, with the guards' positions read once.
-    // M13 D32: a guard with Eyes sees `Kit.sight` tiles further.
     let guards: Vec<(TilePos, Option<EntityId>, u32)> = world
         .guards()
         .iter()
@@ -1513,8 +1677,6 @@ fn sightings(world: &mut World) {
         })
         .collect();
     let tick = world.tick;
-    // M15 W12 (plan deviation: hourly, not every tick): the guards who see a
-    // suspect hold a Sighting of them.
     let note = tick.is_multiple_of(crate::time::TICKS_PER_HOUR);
     let ids: Vec<EntityId> = if note { world.guards().to_vec() } else { Vec::new() };
     for s in suspects {
@@ -1523,7 +1685,7 @@ fn sightings(world: &mut World) {
         let seen =
             guards.iter().any(|&(t, b, extra)| (b.is_some() && b == building) || chebyshev(t, tile) <= sight + extra);
         if seen {
-            world.last_seen.insert(s, (tile, tick));
+            world.set_last_seen(s, (tile, tick));
             if note {
                 let seers: Vec<EntityId> = ids
                     .iter()
@@ -2088,5 +2250,73 @@ pub fn guard_duty_action(world: &World, guard: EntityId) -> ActionKind {
         ActionKind::GuardJail
     } else {
         ActionKind::PatrolLeg
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Scale S1: the bucketed `sightings` is the old every-guard scan: the
+    /// shipped city on day 2 with a warrant on every tenth adult (so every
+    /// guard sees someone), over an hour of ticks (the hourly Sighting
+    /// note included), the whole world byte for byte after each tick.
+    #[test]
+    fn test_sightings_grid_matches_the_scan() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(2 * TICKS_PER_DAY + 7 * crate::time::TICKS_PER_HOUR - 3);
+        // scan-ok: a unit test, once.
+        let people: Vec<EntityId> = w.citizens().into_iter().filter(|&a| living(&w, a)).collect();
+        let tick = w.tick;
+        for &s in people.iter().step_by(10) {
+            w.push_report(CrimeReport { crime: Crime::Theft, suspect: s, witness: None, tick, resolved: false });
+        }
+        let mut seen_any = 0usize;
+        for _ in 0..6 {
+            let mut b = w.clone();
+            sightings_scan(&mut b);
+            let want = crate::save::to_ron(&b);
+            // The grid always, and never (the small city's walk).
+            for grid_pairs in [0, usize::MAX] {
+                let mut a = w.clone();
+                sightings_with(&mut a, grid_pairs);
+                assert_eq!(a.last_seen(), b.last_seen(), "tick {}, grid past {grid_pairs}", w.tick);
+                assert_eq!(crate::save::to_ron(&a), want, "tick {}, grid past {grid_pairs}", w.tick);
+            }
+            seen_any += b.last_seen().values().filter(|&&(_, t)| t == w.tick).count();
+            // On to the next hour boundary or tick (both paths taken).
+            w.run_ticks(1);
+        }
+        assert!(seen_any > 0, "no suspect was seen: the test exercises nothing");
+    }
+
+    /// Scale S1: the warrants a guard can chase, read from the by-tick
+    /// sighting index (and the lazily built claim set), are the old scan of
+    /// every open warrant's: every guard, and the whole city, at ticks over
+    /// two days of a city with a warrant on every tenth adult.
+    #[test]
+    fn test_located_suspects_index_matches_the_scan() {
+        let mut w = World::new(42, crate::config::Config::load());
+        w.run_ticks(TICKS_PER_DAY + 9 * crate::time::TICKS_PER_HOUR);
+        // scan-ok: a unit test, once.
+        let people: Vec<EntityId> = w.citizens().into_iter().filter(|&a| living(&w, a)).collect();
+        let tick = w.tick;
+        for &s in people.iter().step_by(10) {
+            w.push_report(CrimeReport { crime: Crime::Theft, suspect: s, witness: None, tick, resolved: false });
+        }
+        let mut found = 0usize;
+        for _ in 0..24 {
+            w.run_ticks(97);
+            assert_eq!(located_suspects(&w, None), located_suspects_scan(&w, None), "the city, tick {}", w.tick);
+            for &g in w.guards() {
+                let Some(tile) = w.comp::<Position>(g).map(|p| p.tile) else { continue };
+                let by = Some(Pursuer { tile, guard: g });
+                let got = located_suspects(&w, by);
+                assert_eq!(got, located_suspects_scan(&w, by), "guard {g}, tick {}", w.tick);
+                assert_eq!(any_located_suspect(&w, by), !got.is_empty());
+                found += got.len();
+            }
+        }
+        assert!(found > 0, "no guard had a warrant in reach: the test exercises nothing");
     }
 }

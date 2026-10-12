@@ -66,6 +66,7 @@ impl World {
         self.alive[i] = false;
         self.generations[i] = self.generations[i].wrapping_add(1);
         self.clear_components(i);
+        self.pos_index.mark(id.index);
         self.rng.forget_agent(id);
         self.free_list.insert(id.index);
         true
@@ -100,6 +101,11 @@ impl World {
     pub fn comp_mut<T: Component>(&mut self, id: EntityId) -> Option<&mut T> {
         if !self.is_alive(id) {
             return None;
+        }
+        // Scale S1: a Position written through here is re-filed on the
+        // position index's next query (the type test is resolved at compile time).
+        if std::any::TypeId::of::<T>() == std::any::TypeId::of::<crate::components::Position>() {
+            self.pos_index.mark(id.index);
         }
         T::store_mut(self).get_mut(id.index as usize).and_then(|c| c.as_mut())
     }

@@ -1764,7 +1764,7 @@ pub fn trace(world: &mut World, r: &Run, n: NodeId) {
                     _ => crate::components::Crime::Intrusion,
                 };
                 crate::systems::law::file_report(world, crime, r.runner, None);
-                world.last_seen.insert(r.runner, (door, now));
+                world.set_last_seen(r.runner, (door, now));
                 world.last_trace.insert(r.runner, (r.chair, now));
             }
         }
@@ -2945,9 +2945,9 @@ pub fn record_sighting(world: &mut World, owner: Option<EntityId>, s: crate::vir
     world.stats.current.virt.sightings += 1;
     let lawful = owner.is_none_or(|o| world.has::<Corp>(o));
     if lawful && crate::systems::law::wanted(world, s.who) {
-        let newer = world.last_seen.get(&s.who).is_none_or(|&(_, t)| t <= s.tick);
+        let newer = world.last_seen().get(&s.who).is_none_or(|&(_, t)| t <= s.tick);
         if newer {
-            world.last_seen.insert(s.who, (s.tile, s.tick));
+            world.set_last_seen(s.who, (s.tile, s.tick));
         }
     }
 }

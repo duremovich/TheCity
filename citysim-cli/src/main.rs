@@ -83,6 +83,14 @@ struct RunArgs {
     /// Starting population, overriding the config (ignored with `--load`).
     #[arg(long)]
     population: Option<u32>,
+    /// With `--population`: scale the configured city to it
+    /// (`Config::scaled_to`: jobs, stocks, treasuries, levers), not only the
+    /// head count (Scale S1's probe).
+    #[arg(long, requires = "population")]
+    scaled: bool,
+    /// Override `[world] residents_per_home` (ignored with `--load`).
+    #[arg(long, value_name = "N")]
+    rph: Option<u32>,
     /// Map file, overriding `[world] map` (ignored with `--load`).
     #[arg(long, value_name = "FILE")]
     map: Option<PathBuf>,
@@ -98,6 +106,10 @@ struct RunArgs {
     /// `mlp` (experiment; ignored with `--load`).
     #[arg(long, value_name = "POLICY")]
     stat_policy: Option<String>,
+    /// With the `prof` feature: zero the profile at the start of this day,
+    /// so the printed profile is the run's tail (Scale S1).
+    #[arg(long, value_name = "DAY")]
+    prof_from: Option<u64>,
 }
 
 /// An absolute map path for `config.world.map` (`Config::asset` joins it onto
@@ -1277,7 +1289,14 @@ fn run(args: RunArgs) -> Result<(), String> {
     }
     config.lod.force = args.force_lod.map(Lod::from);
     if let Some(n) = args.population {
-        config.world.population = n;
+        if args.scaled {
+            config = config.scaled_to(n);
+        } else {
+            config.world.population = n;
+        }
+    }
+    if let Some(r) = args.rph {
+        config.world.residents_per_home = r;
     }
     if let Some(m) = &args.map {
         config.world.map = map_path(m)?;
@@ -1292,7 +1311,14 @@ fn run(args: RunArgs) -> Result<(), String> {
             w.config.assets_dir = config.assets_dir;
             w
         }
-        None => World::new(args.seed, config),
+        None => {
+            let t0 = Instant::now();
+            let w = World::new(args.seed, config);
+            if cfg!(feature = "prof") {
+                eprintln!("PROF world_new {:.2}s", t0.elapsed().as_secs_f64());
+            }
+            w
+        }
     };
     let _ = args.speed;
 
@@ -1332,6 +1358,9 @@ fn run(args: RunArgs) -> Result<(), String> {
     let mut events_out = std::io::BufWriter::with_capacity(1 << 16, std::io::stderr());
     save_if_due(&world)?;
     while world.tick < end_tick {
+        if args.prof_from.is_some_and(|d| d * TICKS_PER_DAY == world.tick) {
+            citysim::prof::reset();
+        }
         let day_start = Instant::now();
         // Chunk to the next day boundary so a mid-day `--load` still reports its first day.
         let day_end = ((world.tick / TICKS_PER_DAY + 1) * TICKS_PER_DAY).min(end_tick);
@@ -1383,6 +1412,7 @@ fn run(args: RunArgs) -> Result<(), String> {
             }
         }
     }
+    citysim::prof::dump();
     Ok(())
 }
 

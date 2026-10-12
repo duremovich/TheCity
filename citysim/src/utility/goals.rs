@@ -620,7 +620,7 @@ pub fn considerations(
                 .filter(|p| p.goal == GoalKind::Arrest)
                 .and_then(|p| p.target)
                 .filter(|&s| crate::systems::law::is_located_suspect(world, s));
-            let dist = |s: EntityId| world.last_seen.get(&s).map(|&(t, _)| t.manhattan(here));
+            let dist = |s: EntityId| world.last_seen().get(&s).map(|&(t, _)| t.manhattan(here));
             let nearest = if escorting {
                 Some(0)
             } else if let Some(s) = chasing {

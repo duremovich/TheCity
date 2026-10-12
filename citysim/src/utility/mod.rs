@@ -112,7 +112,16 @@ pub fn think_with_offer(
     let has_spouse = goals::has_spouse(world, id);
     let mut scored: Vec<GoalScore> = Vec::new();
     let mut shop = None;
-    for goal in goals::GOAL_ORDER {
+    for (gi, goal) in goals::GOAL_ORDER.into_iter().enumerate() {
+        // Scale S1: each goal's scoring time (the `prof` feature only).
+        #[cfg(feature = "prof")]
+        let _timer = {
+            static SITES: [crate::prof::Site; goals::GOAL_ORDER.len()] =
+                [const { crate::prof::Site::new() }; goals::GOAL_ORDER.len()];
+            SITES[gi].guard(GOAL_PROF_NAMES[gi])
+        };
+        #[cfg(not(feature = "prof"))]
+        let _ = gi;
         // A cooled goal scores 0 (skipped). M14 V29: Hack's sale of a deck's
         // Data is not cooled by the run that took it.
         if brain.cooldowns.get(&goal).is_some_and(|&until| until > tick)
@@ -183,3 +192,37 @@ pub fn think_with_offer(
     scored.truncate(TRACE_TOP_N);
     Some((winner, ThinkTrace { tick, goals: scored }, shop))
 }
+
+/// Scale S1: the profiler's name for each goal, in [`goals::GOAL_ORDER`].
+#[cfg(feature = "prof")]
+const GOAL_PROF_NAMES: [&str; goals::GOAL_ORDER.len()] = [
+    "goal::Eat",
+    "goal::Sleep",
+    "goal::Work",
+    "goal::Earn",
+    "goal::Socialise",
+    "goal::Court",
+    "goal::Flee",
+    "goal::Fight",
+    "goal::Hunt",
+    "goal::Contract",
+    "goal::Commission",
+    "goal::ReportCrime",
+    "goal::Patrol",
+    "goal::Arrest",
+    "goal::JoinGang",
+    "goal::GangWork",
+    "goal::Raid",
+    "goal::Lead",
+    "goal::Bury",
+    "goal::GuardBody",
+    "goal::Squat",
+    "goal::Shop",
+    "goal::GetHigh",
+    "goal::Treat",
+    "goal::Loot",
+    "goal::Hack",
+    "goal::Unwind",
+    "goal::Found",
+    "goal::Idle",
+];

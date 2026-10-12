@@ -44,6 +44,11 @@ Measured 2026-10-09 (after the off switches retired): `cargo test --workspace --
   citysim-cli shadow --assert --out shadow_out     # keeps the diaries under shadow_out/d19, shadow_out/d90
   ```
   plus a shadow pass in the style of `docs/SHADOW_V2.md` (critics read one diary per archetype and write what would make it real). That read is the final judge of "alive"; the bounds only catch regressions between reads.
+- **Profiling** (Scale S1, `citysim/src/prof.rs`): build with `--features prof` and `run` prints a `PROF` line per timed site (seconds, share of the tick, calls) at the end; `--prof-from DAY` zeroes it at that day's start, so the profile is the run's tail. Off (the default build) the timers compile to nothing. A scaled city for measurement: `run --population N --scaled [--rph R] [--map FILE]` (`Config::scaled_to`).
+  ```
+  cargo build --release -p citysim-cli --features prof
+  target/release/citysim-cli run --days 30 --report --population 20000 --scaled --rph 50 --map <map> --prof-from 25 > run.csv 2> prof.txt
+  ```
 
 ## The core tier
 
