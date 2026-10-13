@@ -425,3 +425,12 @@ Findings:
   - Parents' extraction is only about 0.4k a day net at 20k, so it is not the drain. There is no 20k-specific minting.
   - Homeless roughly double d30 → d60 per capita at both scales (pre-existing). Phase 2 adds +20 % homeless at 2k, being traced.
 - Phase 3 (bodies) is running.
+- **M17 phase 3 (bodies) merged at a07544b; phase 4 (weapons and scrip) merged at 19e17d0**, SAVE 24, trio 1,124/0.
+  - Parents dead at baseline: 0.
+  - Uplink runs: 0 (god-only).
+  - Scrip: 485k paid, 99k converted (2k, 6 seeds).
+  - `god_kill_militech`: Militech dies on day 33; the control lives.
+- **Dylan 2026-10-13:**
+  - Arasaka, Militech and the rest are placeholder names. Phase 5 re-keys the name-dependent logic onto roles and config.
+  - The brothers are too frequent. Gangs promote from within, or fight a civil war over a close succession; brothers become a rare event.
+  - This is phase 4b, by a fresh coder `m17b` in the manual worktree `.claude/worktrees/m17b`. The `m17` agent's worktree became unresumable.
