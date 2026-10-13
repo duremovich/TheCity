@@ -403,3 +403,24 @@ the employed share (J24) and the homeless share (J25) by phase; the J24/J25 effe
 6. **Cults that kill.** Apostates hunted through the grudge machinery means a cult can kill leavers (rare, `hunt_min`). *Recommendation: yes; it is the Purist expulsion story one step further, and the Feeds carry it.*
 7. **The Soylent factory and the chop shop** (addendum 2) are out of scope here; the organ book and the Packing Plant are their hooks. *Recommendation: a later goods milestone with Power and Water.*
 8. **The one stat-table regen at the gate** (a Statistical pitch worker's hour) redraws the rare rates. *Recommendation: do it once, check Murders against main, keep main's table if it drifts past the noise.*
+
+## Dylan's answers (2026-10-13), binding
+
+1. **Owned items, generalised.** Weapons, **clothing** and cyberware are all owned items with condition and provenance. Cyberware already exists as M13 `Implant` assets; weapons and clothes join it.
+   - **Petty theft:** pickpocketing, mugging for gear, and stealing from homes and stalls, all fenced through the existing fence.
+   - **Scavs:** a gang type whose business is killing people for their chrome **and organs**. It rides Harvest, the corpse rip, and the organ book (§ gray market).
+   - Dress (D15) comes from worn clothing items, not only a derived tier. That changes D5 and D15: phase 3 builds the generic item store for weapons, and phase 4 adds clothing on that store.
+2. **Vice lever defaults: as recommended.**
+   - Brothels are licensed.
+   - Corp dollhouse contracts are legal.
+   - Street work is swept.
+   - Captive chipping is Trafficking.
+3. **Organs are a capped World export**, printed.
+4. **School is fee-only.** The `public_school` lever is off by default.
+5. **Seed ages go to 75** under the switch.
+6. **Cults may hunt apostates.** Dylan loves cults and religion in general.
+   - A planned **player life path**: found a cult or religion that takes over the whole city, for good or ill, as a route to political takeover.
+   - So creeds need room to grow: a membership that spreads through edges and preachers, tithes as a treasury, and influence on politics (boards, votes, the law's posture, M17's State).
+   - Build the growth and money in phase 6, and keep the takeover levers as hooks for M18 (the life-path playtests, addendum 14).
+7. **Soylent, chop shops, Power and Water** go to a later goods milestone.
+8. **One stat-table regen at the gate**, checked against Murders.
