@@ -7,7 +7,7 @@
 //! Σ outside treasuries − outside.minted` is constant to the coin. With
 //! `[export]` off nothing crosses and `outside` stays empty.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 
 use serde::{Deserialize, Serialize};
 
@@ -50,6 +50,109 @@ pub struct OutsideFaction {
     /// on the first day a world with Ambient flats runs with `[outside]` on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ambient: Option<AmbientBook>,
+    /// M17 phase 2: a parent's state (megacorps, syndicates, the State;
+    /// `None` on the World account).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent: Option<Parent>,
+}
+
+/// M17 § 2: what a parent decides (phase 2 scores Hold and Subsidise; the
+/// rest arrive with their phases, appended here once so the enum is stable).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Default, Serialize, Deserialize)]
+pub enum OutsideOrder {
+    #[default]
+    Hold,
+    Subsidise,
+    Reinforce,
+    Retake,
+    Sanction,
+    Campaign,
+    FoundBranch,
+    Abandon,
+}
+
+impl OutsideOrder {
+    pub fn label(self) -> &'static str {
+        match self {
+            OutsideOrder::Hold => "Hold",
+            OutsideOrder::Subsidise => "Subsidise",
+            OutsideOrder::Reinforce => "Reinforce",
+            OutsideOrder::Retake => "Retake",
+            OutsideOrder::Sanction => "Sanction",
+            OutsideOrder::Campaign => "Campaign",
+            OutsideOrder::FoundBranch => "FoundBranch",
+            OutsideOrder::Abandon => "Abandon",
+        }
+    }
+}
+
+/// M17 § 1: the board abroad, as one aggregate.
+#[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Persona {
+    pub greed: f32,
+    pub pride: f32,
+    pub lawfulness: f32,
+}
+
+impl Default for Persona {
+    fn default() -> Self {
+        Persona { greed: 0.5, pride: 0.5, lawfulness: 0.5 }
+    }
+}
+
+/// M17 § 1: a parent's 30-day rings (newest last) and today's counters.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutsideLedger {
+    /// Income abroad a day (after every factor).
+    pub income: VecDeque<i64>,
+    /// Coins the branches sent home a day (net of the tariff).
+    pub remitted: VecDeque<i64>,
+    /// Coins the parent spent on its branches a day (subsidies).
+    pub spent: VecDeque<i64>,
+    /// The branches' value at each midnight: Σ building values (corps), or
+    /// `member_value` a member (gangs).
+    pub branch_value: VecDeque<i64>,
+    pub remitted_today: i64,
+    pub tariff_today: i64,
+    pub spent_today: i64,
+    pub subsidies_today: u32,
+    /// The last midnight's tariff and subsidy count (the CSV's).
+    pub tariff_last: i64,
+    pub subsidies_last: u32,
+}
+
+/// M17 phase 2: a parent's state on its `OutsideFaction`.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Parent {
+    pub persona: Persona,
+    /// The share of income riding on the city.
+    pub exposure: f32,
+    /// `0..=1`, the outside's view of it.
+    pub rep: f32,
+    /// `-1..=1` toward its branches.
+    pub attitude: f32,
+    /// `0..=1`, the single gauge (scrip's value from phase 4).
+    pub health: f32,
+    /// `0..=1`, the last midnight's.
+    pub branch_loss: f32,
+    /// Corps, gangs or the Law's Jail, ascending.
+    pub branches: Vec<crate::entity::EntityId>,
+    /// The roster name a refounded branch takes.
+    pub branch_name: String,
+    pub order: OutsideOrder,
+    pub order_since: crate::time::Tick,
+    pub order_target: Option<crate::entity::EntityId>,
+    /// Every order's score from the last rescore, best first. Not saved.
+    #[serde(skip)]
+    pub order_trace: Vec<(OutsideOrder, f32)>,
+    pub ledger: OutsideLedger,
+    pub failing_since: Option<crate::time::Tick>,
+    pub insolvent_since: Option<crate::time::Tick>,
+    /// The city's `Embargo`: no remittance out, no subsidy in, and the
+    /// sanction's cut on income.
+    pub embargoed: bool,
 }
 
 /// M17 phase 1 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the Ambient
@@ -143,6 +246,24 @@ pub struct Outside {
     pub outbound: i64,
     pub export: ExportBook,
     pub next_id: OutsideId,
+    /// M17 phase 2: the city's `SetTariff`: the share of every remittance
+    /// kept by the Treasury.
+    #[serde(default, skip_serializing_if = "is_zero_f32")]
+    pub tariff: f32,
+    /// M17 phase 2: `inbound`/`outbound` at the last day's close (the CSV's
+    /// daily crossings).
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub inbound_mark: i64,
+    #[serde(default, skip_serializing_if = "is_zero_i64")]
+    pub outbound_mark: i64,
+}
+
+fn is_zero_f32(v: &f32) -> bool {
+    *v == 0.0
+}
+
+fn is_zero_i64(v: &i64) -> bool {
+    *v == 0
 }
 
 impl Outside {
@@ -161,6 +282,11 @@ impl Outside {
 
     pub fn faction_mut(&mut self, id: OutsideId) -> Option<&mut OutsideFaction> {
         self.factions.iter_mut().find(|f| f.id == id)
+    }
+
+    /// M17 phase 2: the parents (every account but the World), in account order.
+    pub fn parents(&self) -> impl Iterator<Item = &OutsideFaction> {
+        self.factions.iter().filter(|f| f.parent.is_some())
     }
 
     /// Σ outside treasuries (the conservation identity's term).

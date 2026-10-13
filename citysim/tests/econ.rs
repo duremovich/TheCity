@@ -379,7 +379,9 @@ fn test_world_seeded_with_books() {
     let w = city();
     let f = w.outside.faction(WORLD_ACCOUNT).expect("the World account at seed");
     assert_eq!((f.treasury, f.treasury_ref), (50_000, 50_000));
-    assert_eq!(w.outside.minted, 50_000);
+    // M17 phase 2: the parents' seeded treasuries are minted too.
+    let parents: i64 = w.outside.parents().map(|f| f.treasury).sum();
+    assert_eq!(w.outside.minted, 50_000 + parents);
     assert_eq!(f.books.len(), 3);
     for g in ExportGood::ALL {
         let b = &f.books[&g];

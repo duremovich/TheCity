@@ -1462,6 +1462,15 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
         } else {
             Some(value.parse::<f32>().map_err(|e| format!("{spec}: bad mult: {e}"))?)
         }),
+        // M17 phase 2: `embargo=<account id>:on|off`, `tariff=<rate>`.
+        "embargo" => {
+            let (id, v) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <account id>:on|off"))?;
+            PlayerCommand::Embargo {
+                id: id.parse::<u32>().map_err(|e| format!("{spec}: bad account id: {e}"))?,
+                on: on_off(v).ok_or_else(|| format!("{spec}: embargo must be on|off"))?,
+            }
+        }
+        "tariff" => PlayerCommand::SetTariff(value.parse::<f32>().map_err(|e| format!("{spec}: bad tariff: {e}"))?),
         "export_cap" => {
             let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<n|auto>"))?;
             PlayerCommand::SetExportCap {

@@ -2528,9 +2528,13 @@ const CHECKS: &[Check] = &[
     (19, "ripperdoc", Metric::WalkHDay, Bound::Max(5.5), 3.72, 4.44),
     (19, "ripperdoc", Metric::LongestSleepH, Bound::Min(4.0), 4.52, 4.94),
     (19, "ripperdoc", Metric::Energy0HWeek, Bound::Max(2.2), 0.00, 0.11),
-    (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(2.4), 4.10, 9.47),
+    // M17 phase 2 (one-row re-calibration, TESTING.md): the parents moved the city's trajectory and the
+    // ten-agent ripperdoc row read 2.78 known met and 0.05 aborts on 42-44 (2.90 / 0.00 on c6d6ebe;
+    // 5.23 / 0.03 and 4.30 / 0.01 under the 1.01 and 0.99 stat_violence_mult butterflies with the parents
+    // on): the ranges widened by the new reading, the cushions as the rule.
+    (19, "ripperdoc", Metric::KnownMetWeek, Bound::Min(1.6), 2.78, 9.47),
     (19, "ripperdoc", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
-    (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.05), 0.00, 0.00),
+    (19, "ripperdoc", Metric::CommuteAbortsDay, Bound::Max(0.10), 0.00, 0.05),
     (19, "ripperdoc", Metric::PaidOfWorked, Bound::Min(0.79), 0.89, 1.00),
     (19, "ripperdoc", Metric::WagedWorkdays, Bound::Min(0.75), 0.85, 0.97),
     (19, "sweeper", Metric::WalkHDay, Bound::Max(7.0), 5.21, 5.99),

@@ -529,6 +529,14 @@ pub enum PlayerCommand {
     /// M17 phase 1: pin the World's Ambient appetite (`None` releases it to
     /// the walk). The global economy's lever on Ambient demand.
     SetAmbientAppetite(Option<f32>),
+    /// M17 phase 2: the city's sanction on a parent without expiry while
+    /// set: no remittance out, no subsidy in, and its cut on the income.
+    Embargo {
+        id: crate::outside::OutsideId,
+        on: bool,
+    },
+    /// M17 phase 2: the share of every remittance the Treasury keeps.
+    SetTariff(f32),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1159,6 +1167,15 @@ impl World {
             }
             PlayerCommand::SetAmbientAppetite(mult) => {
                 let text = crate::systems::outside::pin_appetite(self, *mult);
+                self.lever_result(text);
+            }
+            PlayerCommand::Embargo { id, on } => {
+                let text = crate::systems::outside::set_embargo(self, *id, *on);
+                self.lever_result(text);
+            }
+            PlayerCommand::SetTariff(t) => {
+                self.outside.tariff = t.clamp(0.0, 1.0);
+                let text = Ok(format!("Tariff on remittances set to {:.2}", self.outside.tariff));
                 self.lever_result(text);
             }
             PlayerCommand::SetExportCap { good, cap } => {

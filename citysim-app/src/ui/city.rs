@@ -1018,6 +1018,34 @@ fn living_section(ui: &mut Ui, world: &World) {
             ui.end_row();
         }
     });
+    // M17 phase 2: the outside's accounts (the parents and their orders).
+    if citysim::systems::parents::parents_on(world) {
+        ui.strong("Outside");
+        egui::Grid::new("city_outside").striped(true).show(ui, |ui| {
+            ui.label("Tariff");
+            ui.label(format!("{:.2}", world.outside.tariff));
+            ui.end_row();
+            for f in world.outside.parents() {
+                let Some(p) = f.parent.as_ref() else { continue };
+                ui.label(&f.name);
+                ui.label(format!(
+                    "{}¢, income {} / upkeep {}, health {:.2}, rep {:.2}, attitude {:+.2}, loss {:.2}, {} ({} branches){}{}",
+                    f.treasury,
+                    p.ledger.income.back().copied().unwrap_or(0),
+                    f.base_upkeep,
+                    p.health,
+                    p.rep,
+                    p.attitude,
+                    p.branch_loss,
+                    p.order.label(),
+                    p.branches.len(),
+                    if p.embargoed { ", embargoed" } else { "" },
+                    if p.failing_since.is_some() { ", failing" } else { "" },
+                ));
+                ui.end_row();
+            }
+        });
+    }
     ui.strong("Leisure");
     egui::Grid::new("city_leisure").striped(true).show(ui, |ui| {
         ui.label("Fun (mean, satisfied)");

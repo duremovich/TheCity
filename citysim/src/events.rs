@@ -354,10 +354,16 @@ pub enum EventKind {
     TagFound,
     /// `[member, gang]`: a Purist Patrol's scan at a hang-out.
     PatrolScan,
+    /// M17 phase 2: `[branch]`: a parent sent coins to a weak branch.
+    Subsidised,
+    /// M17 phase 2: a parent's income stayed under its upkeep for a week.
+    ParentFailing,
+    /// M17 phase 2: a parent changed its order.
+    OutsideOrder,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 170] = [
+    pub const ALL: [EventKind; 173] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -528,6 +534,9 @@ impl EventKind {
         EventKind::Tagged,
         EventKind::TagFound,
         EventKind::PatrolScan,
+        EventKind::Subsidised,
+        EventKind::ParentFailing,
+        EventKind::OutsideOrder,
     ];
 }
 

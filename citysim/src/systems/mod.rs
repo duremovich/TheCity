@@ -65,6 +65,7 @@ pub mod moves;
 pub mod news;
 pub mod outside;
 pub mod ownership;
+pub mod parents;
 pub mod plan;
 pub mod policy;
 pub mod raid;

@@ -28,11 +28,15 @@ pub fn csv_header(world: &World) -> String {
     let header = crate::stats::csv_header(corps, districts);
     // Scale S5: the Ambient group before `ticks_per_sec`, only on a world
     // with an Ambient tier (its rows carry it: `systems::ambient::close_day`).
+    let mut head = header.strip_suffix(",ticks_per_sec").unwrap_or(&header).to_string();
     if crate::systems::ambient::on(world) {
-        let head = header.strip_suffix(",ticks_per_sec").unwrap_or(&header);
-        return format!("{head},{},ticks_per_sec", crate::stats::AmbientCols::header());
+        head = format!("{head},{}", crate::stats::AmbientCols::header());
     }
-    header
+    // M17 phase 2: the parents' group after it.
+    if crate::systems::parents::parents_on(world) {
+        head = format!("{head},{}", crate::stats::OutsideCols::header(world.outside.parents().count()));
+    }
+    format!("{head},ticks_per_sec")
 }
 
 pub fn run(world: &mut World) {
@@ -111,6 +115,8 @@ pub fn snapshot(world: &mut World) {
     crate::systems::contracts::snapshot(world);
     // Scale S5: the Ambient tier's day (nothing without one).
     world.stats.current.ambient = crate::systems::ambient::close_day(world);
+    // M17 phase 2: the parents' day (nothing with them off).
+    world.stats.current.outside = crate::systems::parents::close_day(world);
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;
@@ -392,7 +398,10 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
     // M17 phase 1: the Ambient book's purchases are World money in (0 on a
     // map without Ambient flats).
     let ambient_in = row.ambient.as_ref().map_or(0, |a| a.paid_food + a.paid_visits);
-    e.trade_balance = e.export_paid + e.flow_migrant_in + e.flow_fence + ambient_in
+    // M17 phase 2: the parents' crossings (subsidies in, remittances out;
+    // 0 with the parents off).
+    let parents_net = row.outside.as_ref().map_or(0, |o| o.parent_fund - o.remit);
+    e.trade_balance = e.export_paid + e.flow_migrant_in + e.flow_fence + ambient_in + parents_net
         - e.flow_import_out
         - e.flow_inputs
         - e.flow_migrant_out;

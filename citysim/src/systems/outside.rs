@@ -12,7 +12,7 @@ use crate::world::World;
 
 /// The World account, created on first use (Real economy plan E4: the
 /// market seeds it with `[world_market] treasury_ref`).
-pub(crate) fn ensure_world_account(world: &mut World, treasury_ref: i64) {
+pub fn ensure_world_account(world: &mut World, treasury_ref: i64) {
     if world.outside.faction(WORLD_ACCOUNT).is_some() {
         return;
     }
@@ -29,6 +29,7 @@ pub(crate) fn ensure_world_account(world: &mut World, treasury_ref: i64) {
         dead: false,
         books: Default::default(),
         ambient: None,
+        parent: None,
     });
     world.outside.next_id = world.outside.next_id.max(WORLD_ACCOUNT + 1);
 }
@@ -362,7 +363,15 @@ fn sell_hour(world: &mut World, hour: u8) {
 /// The tick (after `living::run`): on the hour, the book opens its day if
 /// it has not, then sells the hour's share.
 pub fn run(world: &mut World) {
-    if !ambient_on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+    if !on(world) || !world.tick.is_multiple_of(TICKS_PER_HOUR) {
+        return;
+    }
+    // M17 phase 2: the parents' midnight (not on the first tick: nothing
+    // has traded yet, as `ownership`'s cashflow roll).
+    if world.tick_of_day() == 0 && world.tick > 0 {
+        crate::systems::parents::daily(world);
+    }
+    if !ambient_on(world) {
         return;
     }
     ensure_book(world);
@@ -404,3 +413,6 @@ pub fn pin_appetite(world: &mut World, mult: Option<f32>) -> Result<String, Stri
         None => "World appetite for Ambient spending released to the walk".to_string(),
     })
 }
+
+/// M17 phase 2 (re-exported from `systems::parents`).
+pub use crate::systems::parents::{branch_loss, decide, parent_income, parents_on, remit, seed_parents, set_embargo};

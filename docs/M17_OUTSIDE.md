@@ -168,6 +168,60 @@ Seed 42 × 60 on gen20k, 50 flats a slot, against main (and main with the same f
 
 **Finding on the money stock.** It grows in main's 20k city already: +49 % in 60 days, with the trade balance at +400k over the last 30 days. Ambient demand adds a bounded, linear ~8k a day at the cap, and prices hold at 4. This is not a broken signal from the book, but the stock has no drain at 20k.
 
+### Phase 2 status (2026-10-13): the ledger and the parents
+
+Built as designed above. Files:
+- `citysim/src/systems/parents.rs`: seeding, the midnight pass, remittance, the orders, the books and the CSV group.
+- `outside.rs`: `Parent`, `OutsideOrder`, `Persona`, `OutsideLedger`, and `Outside.{tariff, inbound_mark, outbound_mark}`.
+- `[outside.parents]` in config.toml.
+- `Flow::{Remit, ParentFund}` (both capital), `EventKind::{Subsidised, ParentFailing, OutsideOrder}`, `PlayerCommand::{Embargo, SetTariff}` (CLI `embargo=<id>:on|off`, `tariff=<rate>`).
+- The Outside CSV group, after the Ambient group: 8 columns plus 7 per parent.
+- An Outside section in the city panel; the corp panel names its parent.
+- SAVE 22. A save before 22 builds the accounts on load (minted, so the identity carries over).
+
+Deviations:
+- **A parent's state hangs off `OutsideFaction.parent: Option<Parent>`.** The World account carries `None`.
+- **`Gang.parent` and `Law.parent` are not added.** Branches live in the account's `branches` list; only `Corp.parent` is re-pointed.
+- **Syndicates by seeded order.** Seeded Hideout gang `i` (ascending id) is a branch of syndicate row `i mod n`. The shipped city's two gangs map to its two rows; the 20k city's generated gangs are dealt over them. A creed's gang (The Unplugged) has no syndicate.
+- **`branch_loss` has no district term yet.** Phase 2 reads buildings and remittances only, `0.6 × (1 − value ÷ peak) + 0.4 × remit_gap`; the district term arrives with economic warfare in phase 4.
+- **The State holds in phase 2.** Its own orders are phase 3's.
+- **The parents run at each midnight but tick 0.** As `ownership`'s cashflow roll, nothing has traded yet at tick 0.
+- **`trade_balance` now includes the parents' crossings** (subsidies in, less remittances out), so Σ `trade_balance` = Δ `total_coins` holds.
+
+Identity: with `CITYSIM_OUTSIDE_OFF=1` the 2k city is byte-identical to c6d6ebe (events and CSV), seeds 42-44 × 30.
+
+Measured on seeds 42-47 × 120 at 2k, c6d6ebe → phase 2:
+- Murders 587 → 543; Assault/day (Σ over the six seeds) 83.6 → 86.5.
+- Employed: mean 7,043 → 6,978, d120 9,003 → 8,801.
+- Homeless d120 1,051 → 1,265 (+20 %, on 6 of 6 seeds); starvation 3 → 3.
+- Total coins d120 1,583k → 1,552k.
+- Remittances 82k on 520 seed-days (6 of 6 seeds); subsidies 287 paying 39k (6 of 6).
+- Net crossing +734k, against a trade balance of +765k on c6d6ebe.
+- `core_year`: population 1,863 on day 365 (1,892 on c6d6ebe).
+- A parent failing on day 120 on 4 of 6 seeds (a syndicate).
+- `core_sanity` gains two bullets, a day with a remittance and a Subsidised.
+
+**Money stock at 20k** (seed 42 × 60, gen20k, 50 Ambient flats a slot; remittances on, then `remit_share` and `tribute_share` 0):
+
+| | d10 | d30 | d60 |
+|---|---|---|---|
+| total coins, remittances on (k) | 1,373 | 1,734 | 2,294 |
+| total coins, remittances off (k) | 1,401 | 1,769 | 2,333 |
+| homeless, remittances on | 366 | 1,836 | 3,387 |
+| homeless, remittances off | 367 | 1,755 | 3,221 |
+
+- **The parents are not the missing drain.** Over 60 days remittances average 1.6k a day out and subsidies 1.2k a day in, against a trade balance of +15.6k a day.
+- **Nothing mints at 20k that does not mint at 2k.** Per 2,000 residents, the 2k and 20k cities run the same circuit: exports ~2.5k a day, imports and inputs ~1.3k a day, so a trade surplus of ~1.1-1.4k a day. Total coins grow +42 % (2k) and +46 % (20k) in 60 days without the parents.
+- **The surplus is the World market's export leg exceeding the import and input legs at both scales.** Coins pile up in the Treasury (16k → 70k per 2,000 residents; the tax band cuts the rate to 0 by day 30) and in the corps.
+- **No 2k constant is mis-scaled on this path.**
+- **The homeless doubling is per capita the same at 2k:** 177 → 325 from d30 to d60 on seed 42 at 2k, against 199 → 394 per 2,000 at 20k. Evictions run ~10 a day per 2,000 at both scales.
+
+Test fixtures:
+- `leverage.rs` and `tags.rs` build their seeded worlds with `[outside] enabled = false`. Their dice and picks read the M16b city's trajectory at day ~40 (which gang is the rival, an equal-tier Patrol sweep).
+- The shadow tier's d19 ripperdoc row is re-calibrated by the one-row rule. It is a ten-agent row: 2.78 known met and 0.05 aborts on 42-44, inside the range under two butterflies with the parents on.
+
+Found and fixed (outside phase 2's scope): `transit::board` did not check `CutLine`. A ride filed before the cut boarded the cut line after it: `god_line_cut` caught one on day 20 at 00:35. `board` now requires the line open, as it requires the stop.
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).

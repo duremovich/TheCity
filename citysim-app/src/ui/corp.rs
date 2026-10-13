@@ -107,8 +107,15 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
             let niches: Vec<&str> = c.niches.iter().map(|n| n.label()).collect();
             let slot = c.slot.map_or("unslotted".to_string(), |s| format!("slot {}", s + 1));
             ui.label(format!("{} · {} · {slot}", niches.join(" + "), governance_label(&c.governance)));
-            if c.parent.is_some() {
-                ui.colored_label(GOLD, format!("branch of an outside parent ({}¢ abroad)", c.outside_treasury));
+            // M17 phase 2: the parent's account (the M11 hook before it).
+            match c.parent.and_then(|p| world.outside.faction(p)) {
+                Some(f) => {
+                    ui.colored_label(GOLD, format!("branch of {} ({}¢ abroad)", f.name, f.treasury));
+                }
+                None if c.parent.is_some() => {
+                    ui.colored_label(GOLD, format!("branch of an outside parent ({}¢ abroad)", c.outside_treasury));
+                }
+                None => {}
             }
             ui.horizontal(|ui| {
                 ui.label("Exec");

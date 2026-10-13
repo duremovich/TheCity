@@ -22,8 +22,14 @@ use citysim::{
     RelKind, Skills, World, TICKS_PER_DAY,
 };
 
+/// The shipped city with the outside's parents off (M17 phase 2): these
+/// seeded-world tests read the M16b city's gangs and businesses at day ~40
+/// (which gang is the rival, which business is the district's best), and the
+/// parents move that trajectory.
 fn world() -> World {
-    World::new(42, Config::load())
+    let mut c = Config::load();
+    c.outside.enabled = false;
+    World::new(42, c)
 }
 
 /// The seed-42 city once its gangs hold Homes and have leaders (two or

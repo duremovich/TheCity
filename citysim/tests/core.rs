@@ -238,6 +238,8 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         day_mark("gang front", row.living.fronts > 0);
         day_mark("malnourished agent", row.health.malnourished > 0);
         day_mark("a sick day", row.health.sick_days > 0);
+        // M17 phase 2: a branch sent coins home at the day's midnight.
+        day_mark("remittance", row.outside.as_ref().is_some_and(|o| o.remit > 0));
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
         // Transit: a ride (any tier) and a fare paid to the city.
         let t = &row.transit;
@@ -583,6 +585,9 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a tag found", m("tag found")),         // [5, 8, 7]; 45-47 [7, 0, 6]
         ("a scan", m("scan")),                   // [200, 239, 182]; 45-47 [216, 191, 245]
         ("a day a faction is distracted", m("faction distracted")), // [116, 114, 105]; 45-47 [115, 117, 113]
+        // M17 phase 2 (seeds 42-47 x 120 days): the parents.
+        ("a day with a remittance home", m("remittance")), // [87, 87, 81]; 45-47 [85, 93, 87]
+        ("a Subsidised", k(EventKind::Subsidised)),        // [30, 47, 32]; 45-47 [41, 96, 41]
     ]
 }
 

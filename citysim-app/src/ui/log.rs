@@ -151,6 +151,10 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Tagged
         | EventKind::TagFound
         | EventKind::PatrolScan
+        // M17 phase 2.
+        | EventKind::Subsidised
+        | EventKind::ParentFailing
+        | EventKind::OutsideOrder
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

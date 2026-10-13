@@ -16,8 +16,13 @@ use citysim::{
     Position, Skills, World, TICKS_PER_DAY, TICKS_PER_HOUR,
 };
 
+/// The shipped city with the outside's parents off (M17 phase 2): these
+/// seeded-world tests roll their dice on the M16b city's trajectory (the
+/// Patrol's equal-tier sweep is a contest).
 fn world() -> World {
-    World::new(42, Config::load())
+    let mut c = Config::load();
+    c.outside.enabled = false;
+    World::new(42, c)
 }
 
 /// The seed-42 city once two gangs are led and one holds a district.

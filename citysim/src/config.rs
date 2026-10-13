@@ -268,11 +268,120 @@ pub struct Config {
 pub struct OutsideCfg {
     pub enabled: bool,
     pub ambient: AmbientDemandCfg,
+    /// M17 phase 2: the parents' ledger and orders.
+    pub parents: ParentsCfg,
 }
 
 impl Default for OutsideCfg {
     fn default() -> Self {
-        OutsideCfg { enabled: true, ambient: AmbientDemandCfg::default() }
+        OutsideCfg { enabled: true, ambient: AmbientDemandCfg::default(), parents: ParentsCfg::default() }
+    }
+}
+
+/// M17 phase 2 (`[outside.parents]`, the body's `[outside]` and
+/// `[outside.orders]` keys that phase 2 reads). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ParentsCfg {
+    /// The accounts at seed (the World is the Real economy's, not a row).
+    pub factions: Vec<ParentRow>,
+    pub market_sd: f32,
+    pub market_revert: f32,
+    /// A corp branch remits when its closing is at least this × `treasury_ref`.
+    pub remit_floor: f32,
+    /// The share of a branch's positive daily cashflow sent home.
+    pub remit_share: f32,
+    /// The `SetTariff` lever's value at seed.
+    pub tariff: f32,
+    /// A syndicate's gang pays this share of its treasury above `tribute_floor`, weekly.
+    pub tribute_share: f32,
+    pub tribute_floor: i64,
+    pub rep_rate: f32,
+    pub att_decay: f32,
+    pub att_remit: f32,
+    pub att_cost: f32,
+    pub att_loss: f32,
+    /// The city's Embargo cuts the parent's income by this (a sanction's cut).
+    pub embargo_cut: f32,
+    /// A gang's value a member (`branch_value`).
+    pub member_value: i64,
+    /// A gang's `cash`: treasury ÷ this.
+    pub gang_cash_ref: i64,
+    pub hysteresis: f32,
+    pub min_hold_days: u32,
+    /// The daily action's ceiling, a share of the parent's treasury.
+    pub max_spend_frac: f32,
+    pub subsidise_below: f32,
+    pub subsidise_to: f32,
+    /// Coins a day into one branch, at most.
+    pub subsidy_cap_day: i64,
+    pub flat_hold: f32,
+    pub flat_subsidise: f32,
+}
+
+/// One seeded outside account. `treasury`, `income` and `upkeep` are per
+/// branch (a brand dealt k times at 20k has k branches); the State's per
+/// 2,000 residents.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ParentRow {
+    pub name: String,
+    pub kind: crate::outside::OutsideKind,
+    /// A corp template (megacorps), a gang name (syndicates, by seeded
+    /// order), or "Law" (the State).
+    pub branch: String,
+    pub treasury: i64,
+    pub income: i64,
+    pub upkeep: i64,
+    pub exposure: f32,
+    /// `[greed, pride, lawfulness]`.
+    pub persona: [f32; 3],
+}
+
+impl Default for ParentsCfg {
+    fn default() -> Self {
+        use crate::outside::OutsideKind::{Megacorp, State, Syndicate};
+        let row = |name: &str, kind, branch: &str, t: i64, i: i64, u: i64, e: f32, p: [f32; 3]| ParentRow {
+            name: name.to_string(),
+            kind,
+            branch: branch.to_string(),
+            treasury: t,
+            income: i,
+            upkeep: u,
+            exposure: e,
+            persona: p,
+        };
+        ParentsCfg {
+            factions: vec![
+                row("Arasaka Global", Megacorp, "Arasaka", 100_000, 3000, 2500, 0.15, [0.6, 0.8, 0.3]),
+                row("Militech International", Megacorp, "Militech", 100_000, 2800, 2400, 0.2, [0.7, 0.6, 0.4]),
+                row("The State", State, "Law", 60_000, 900, 900, 0.0, [0.2, 0.5, 0.8]),
+                row("Hollow Brothers", Syndicate, "The Hollow", 3000, 40, 30, 0.3, [0.6, 0.7, 0.1]),
+                row("Ninefold Lodge", Syndicate, "Ninefold", 3000, 40, 30, 0.3, [0.5, 0.8, 0.1]),
+            ],
+            market_sd: 0.01,
+            market_revert: 0.1,
+            remit_floor: 0.5,
+            remit_share: 0.3,
+            tariff: 0.0,
+            tribute_share: 0.1,
+            tribute_floor: 100,
+            rep_rate: 0.05,
+            att_decay: 0.05,
+            att_remit: 0.3,
+            att_cost: 0.4,
+            att_loss: 0.3,
+            embargo_cut: 0.08,
+            member_value: 100,
+            gang_cash_ref: 300,
+            hysteresis: 0.10,
+            min_hold_days: 3,
+            max_spend_frac: 0.05,
+            subsidise_below: 0.3,
+            subsidise_to: 0.5,
+            subsidy_cap_day: 1500,
+            flat_hold: 0.3,
+            flat_subsidise: 0.0,
+        }
     }
 }
 

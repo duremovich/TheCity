@@ -1008,7 +1008,11 @@ fn board(world: &mut World, id: EntityId, mut ride: Ride, lod: Lod) {
     } else {
         board_pos(world, &ride).and_then(|k| departure_at(world, ride.line, ride.forward, k, now))
     };
-    let Some(depart) = depart.filter(|&d| in_service(world, d) && stop_open(world, ride.board, now)) else {
+    // M17 phase 2 (a found gap, god_line_cut): a ride filed before a CutLine
+    // does not board the cut line after it.
+    let line_open = world.transit.line_closed.get(&ride.line).is_none_or(|&until| until <= now);
+    let Some(depart) = depart.filter(|&d| line_open && in_service(world, d) && stop_open(world, ride.board, now))
+    else {
         abandon(world, id, &ride, lod);
         return;
     };

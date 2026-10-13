@@ -96,7 +96,13 @@ use crate::world::World;
 /// paid_food, paid_visits}`, the Ambient CSV group's new columns, `[outside]`
 /// in the saved config (serde defaults; skipped at its defaults), the
 /// appended `Flow::AmbientSale` and `PlayerCommand::SetAmbientAppetite`.
-pub const SAVE_VERSION: u8 = 21;
+/// 22: M17 phase 2, the parents: `OutsideFaction.parent`, `Outside.{tariff,
+/// inbound_mark, outbound_mark}`, `DayRow.outside`, `[outside.parents]` in the
+/// saved config (serde defaults), the appended `Flow::{Remit, ParentFund}`,
+/// `EventKind::{Subsidised, ParentFailing, OutsideOrder}` and
+/// `PlayerCommand::{Embargo, SetTariff}`. A save before 22 builds the
+/// accounts on load (`outside::seed_parents`).
+pub const SAVE_VERSION: u8 = 22;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
@@ -117,6 +123,11 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     crate::systems::districts::rebuild(&mut world);
     // Transit: the derived network (not saved).
     crate::systems::transit::build(&mut world);
+    // M17 phase 2: a save from before the parents builds their accounts
+    // (minted, so the identity carries over; nothing with `[outside]` off).
+    if world.save_version < 22 {
+        crate::systems::outside::seed_parents(&mut world);
+    }
     world.save_version = SAVE_VERSION;
     world.reload_names();
     Ok(world)

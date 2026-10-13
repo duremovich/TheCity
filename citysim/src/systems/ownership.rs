@@ -254,6 +254,13 @@ pub enum Flow {
     /// explicitly, as `Export`). Its column is the Ambient group's
     /// `flow_ambient` (`AmbientDay.paid_*`), so the ledger line is empty.
     AmbientSale,
+    /// M17 phase 2: a branch's coins home to its parent (a corp's share of
+    /// its day, a gang's weekly tribute), untaxed; capital. Its column is the
+    /// Outside group's `outside_remit`.
+    Remit,
+    /// M17 phase 2: a parent's coins into a branch (a subsidy), untaxed;
+    /// capital, never revenue. The Outside group's `outside_parent_fund`.
+    ParentFund,
 }
 
 impl Flow {
@@ -261,7 +268,7 @@ impl Flow {
     /// subsidy. Kept out of a corp's `cashflow` (the brain's `flow` input),
     /// or one purchase reads as two weeks of losses.
     pub fn capital(self) -> bool {
-        matches!(self, Flow::Sale | Flow::Found | Flow::Subsidy | Flow::Escrow)
+        matches!(self, Flow::Sale | Flow::Found | Flow::Subsidy | Flow::Escrow | Flow::Remit | Flow::ParentFund)
     }
 
     /// Owner revenue taxed at the moment of the flow (spec § 3); wage tax
@@ -359,7 +366,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Fare => row.transit.fares += coins,
         Flow::Coerced => row.leverage.flow_coerced += coins,
         Flow::Trauma => row.wounded.flow_trauma += coins,
-        Flow::AmbientSale => {}
+        Flow::AmbientSale | Flow::Remit | Flow::ParentFund => {}
     }
 }
 

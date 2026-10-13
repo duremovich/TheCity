@@ -1732,6 +1732,9 @@ impl World {
         // Scale S5: the Ambient flats beyond the residents' beds (no RNG;
         // none on a map without them).
         crate::prof::timed!("new::ambient::seed", systems::ambient::seed(&mut w));
+        // M17 phase 2: the parents' accounts, minted (no RNG; nothing with
+        // `[outside]` off).
+        crate::prof::timed!("new::outside::seed_parents", systems::outside::seed_parents(&mut w));
         w
     }
 

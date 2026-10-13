@@ -382,6 +382,11 @@ pub struct DayRow {
     /// the header from `systems::stats::csv_header`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ambient: Option<AmbientCols>,
+    /// M17 phase 2: the parents' group, after the Ambient group and before
+    /// `ticks_per_sec`, only with the parents on (`None` and no columns
+    /// otherwise; the header from `systems::stats::csv_header`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outside: Option<OutsideCols>,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
 }
@@ -470,6 +475,88 @@ impl AmbientCols {
             self.paid_visits,
             self.appetite
         )
+    }
+}
+
+/// M17 phase 2: one parent's day (`systems::parents::close_day`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ParentCols {
+    pub treasury: i64,
+    /// Income abroad at the last midnight.
+    pub income: i64,
+    pub health: f32,
+    pub attitude: f32,
+    pub rep: f32,
+    pub branch_loss: f32,
+    pub order: String,
+}
+
+/// M17 phase 2: the parents' group. The flows are the last midnight's
+/// (the parents act at midnight); the crossings are the whole day's, every
+/// account (the World's too).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutsideCols {
+    /// Coins the branches sent home (net of the tariff), the tariff the
+    /// Treasury kept, the subsidies paid and their count.
+    pub remit: i64,
+    pub tariff: i64,
+    pub parent_fund: i64,
+    pub subsidies: u32,
+    /// Coins crossing into and out of the city today, every account.
+    pub crossed_in: i64,
+    pub crossed_out: i64,
+    /// Parents failing (income under upkeep for a week).
+    pub failing: u32,
+    pub accounts: Vec<ParentCols>,
+}
+
+impl OutsideCols {
+    /// The header's names for `n` parents, comma-separated.
+    pub fn header(n: usize) -> String {
+        let mut v: Vec<String> = [
+            "outside_remit",
+            "outside_tariff",
+            "outside_parent_fund",
+            "outside_subsidies",
+            "outside_in",
+            "outside_out",
+            "outside_net",
+            "parents_failing",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        for i in 1..=n {
+            for c in ["treasury", "income", "health", "attitude", "rep", "loss", "order"] {
+                v.push(format!("o{i}_{c}"));
+            }
+        }
+        v.join(",")
+    }
+
+    pub fn csv(&self) -> String {
+        let mut v = vec![
+            self.remit.to_string(),
+            self.tariff.to_string(),
+            self.parent_fund.to_string(),
+            self.subsidies.to_string(),
+            self.crossed_in.to_string(),
+            self.crossed_out.to_string(),
+            (self.crossed_in - self.crossed_out).to_string(),
+            self.failing.to_string(),
+        ];
+        for a in &self.accounts {
+            v.push(a.treasury.to_string());
+            v.push(a.income.to_string());
+            v.push(format!("{:.3}", a.health));
+            v.push(format!("{:.3}", a.attitude));
+            v.push(format!("{:.3}", a.rep));
+            v.push(format!("{:.3}", a.branch_loss));
+            v.push(a.order.clone());
+        }
+        v.join(",")
     }
 }
 
@@ -1189,6 +1276,7 @@ impl DayRow {
             gov: GovCols::default(),
             transit: TransitCols::default(),
             ambient: None,
+            outside: None,
             ticks_per_sec: 0.0,
         }
     }
@@ -1211,6 +1299,11 @@ impl DayRow {
         let transit_ambient = match &self.ambient {
             Some(a) => format!("{},{}", self.transit.csv(), a.csv()),
             None => self.transit.csv(),
+        };
+        // M17 phase 2: the parents' group after it (only with the parents on).
+        let transit_ambient = match &self.outside {
+            Some(o) => format!("{transit_ambient},{}", o.csv()),
+            None => transit_ambient,
         };
         let corps: Vec<String> = (0..self.corps.len().max(CORP_SLOTS))
             .map(|i| match self.corps.get(i).copied().flatten() {
@@ -1374,7 +1467,8 @@ pub struct EconCols {
     pub flow_property: i64,
     pub flow_donate: i64,
     /// `export_paid + flow_migrant_in + flow_fence + flow_ambient_* − flow_import_out − flow_inputs − flow_migrant_out`
-    /// (M17 phase 1 added the Ambient book's purchases: 0 without Ambient flats).
+    /// (M17 phase 1 added the Ambient book's purchases: 0 without Ambient flats; phase 2 the
+    /// parents' subsidies in less the remittances out).
     pub trade_balance: i64,
     pub trade_balance_30: i64,
     pub appetite_food: f32,

@@ -2582,3 +2582,40 @@ appetite_min = 0.3
 appetite_max = 3.0
 food_hours = [8, 20]                # [from, to)
 visit_hours = [18, 24]
+
+# M17 phase 2: the parents. One account per megacorp brand (every "Arasaka N" copy is a branch of Arasaka
+# Global), per syndicate (seeded gang i is the branch of syndicate row i mod n) and the State (the Law).
+# treasury, income and upkeep are per branch (the State's per 2,000 residents); income less upkeep is the
+# outside's own money (minted). Branches remit; the parent Holds or Subsidises (capital, never revenue).
+# persona = [greed, pride, lawfulness]. Placeholders.
+[outside.parents]
+factions = [
+  { name = "Arasaka Global", kind = "Megacorp", branch = "Arasaka", treasury = 100000, income = 3000, upkeep = 2500, exposure = 0.15, persona = [0.6, 0.8, 0.3] },
+  { name = "Militech International", kind = "Megacorp", branch = "Militech", treasury = 100000, income = 2800, upkeep = 2400, exposure = 0.2, persona = [0.7, 0.6, 0.4] },
+  { name = "The State", kind = "State", branch = "Law", treasury = 60000, income = 900, upkeep = 900, exposure = 0.0, persona = [0.2, 0.5, 0.8] },
+  { name = "Hollow Brothers", kind = "Syndicate", branch = "The Hollow", treasury = 3000, income = 40, upkeep = 30, exposure = 0.3, persona = [0.6, 0.7, 0.1] },
+  { name = "Ninefold Lodge", kind = "Syndicate", branch = "Ninefold", treasury = 3000, income = 40, upkeep = 30, exposure = 0.3, persona = [0.5, 0.8, 0.1] },
+]
+market_sd = 0.01
+market_revert = 0.1
+remit_floor = 0.5                   # a corp branch remits with closing >= this x treasury_ref
+remit_share = 0.3                   # of the branch's positive daily cashflow
+tariff = 0.0                        # the SetTariff lever at seed: the Treasury's share of a remittance
+tribute_share = 0.1                 # a syndicate's gang, weekly, of its treasury above tribute_floor
+tribute_floor = 100
+rep_rate = 0.05
+att_decay = 0.05
+att_remit = 0.3
+att_cost = 0.4
+att_loss = 0.3
+embargo_cut = 0.08                  # the city's Embargo cuts the parent's income by this
+member_value = 100                  # a gang branch's value a member
+gang_cash_ref = 300                 # a gang branch's cash = treasury / this
+hysteresis = 0.10
+min_hold_days = 3
+max_spend_frac = 0.05               # the daily action's ceiling, of the parent's treasury
+subsidise_below = 0.3
+subsidise_to = 0.5
+subsidy_cap_day = 1500
+flat_hold = 0.3
+flat_subsidise = 0.0
