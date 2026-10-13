@@ -398,3 +398,20 @@ Findings:
   - Unit-tested only: the Purist Patrol, board Persuade and Vote records.
   - `CITYSIM_PHASE4_OFF=1` is the off identity.
   - Phase 5 (god scenarios V8, docs, deviations) is running, then `/code-review high`.
+- **M16b closed.**
+  - Commits: phase 5 d665a39 (god scenarios in GOD_SCENARIOS_V11.md, the M16b deviations in M16_CONTRACTS.md, calibration findings against the spec bands); review fixes 2fdd4c2 (nine of ten `/code-review high` findings; `secret_on` skipped as negligible), SAVE 20.
+  - Trio 1,075/0, and every gate is green.
+  - Board effect: Nutrix boards are less greedy than their execs and Grow a third as often (62 vs 117 outlets founded), so fewer jobs. Habitat's rent behaviour is unchanged.
+  - Off-band findings (printed):
+    - Hits fulfilled 0-4 (band 4-20);
+    - contract killings 0-4 % of Murders;
+    - wounded saved 5-19 %;
+    - Trauma subscribers 0.5-0.8 %;
+    - active coercions 2-6;
+    - contracts posted 545-823 (band 60-300; tags add about 100).
+  - V11 gaps:
+    - The law never answers a hostage taken over its captain.
+    - Corp-class adults can't carry the Trauma fee (employer-paid is the hook).
+    - A deposed chair gets no parachute, and a coerced vote is no crime.
+    - Gangs of equal strength never parley.
+- **M17 next**: docs/M17_OUTSIDE.md predates the real economy (World account, imports and exports, L2's export hook) and the 20k scale. A fresh solo coder (`m17`) reconciles the plan against HEAD first (phase 0), folding in Ambient demand as outside demand creating jobs, then builds phase by phase.
