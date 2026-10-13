@@ -690,8 +690,9 @@ pub fn corp_prize(world: &World, held: &[bool], hoard_corp: Option<EntityId>) ->
 /// law) is, a multiplier on its detection and response rolls. M12 reads it
 /// in the riot response, the corp-raid response (the posted guards) and the
 /// stance's sweep rolls. Always 1.0 until M16 gives factions attention.
-pub fn alertness_mult(_world: &World, _faction: Option<EntityId>) -> f32 {
-    1.0
+pub fn alertness_mult(world: &World, faction: Option<EntityId>) -> f32 {
+    // M16b phase 4: the attention addendum (1.0 off or undistracted).
+    crate::systems::attention::alertness_mult(world, faction)
 }
 
 /// A departed raid has this long to reach the rival door before it is
@@ -762,7 +763,9 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
         return true;
     };
     let cfg = world.config.gangs.clone();
-    let scores = score_orders(&inputs, &cfg);
+    let mut scores = score_orders(&inputs, &cfg);
+    // M16b phase 4: a distracted gang tilts to LieLow.
+    crate::systems::attention::tilt(world, Some(gang), &mut scores, |s| s.order == Order::LieLow, |s| &mut s.score);
     // M15 W32: would the winner differ with the fear term neutral?
     if inputs.fear.is_some() {
         let neutral = OrderInputs { fear: Some(0.5), ..inputs.clone() };

@@ -1,8 +1,10 @@
 //! M16a § 9 (plan C42), the contracts overlay (`C`; Shift+C opens the
 //! Board panel): a glyph on each Fixer sized by its record book, and a
 //! crosshair on each live mission's door (a thinner one where a solo
-//! taker's chase has intel). A contract is a record with a price between
-//! fictional agents; the overlay reads state only.
+//! taker's chase has intel). M16b (phase 4): a pulsing cross on each Down
+//! agent and a lock on each building holding captives. A contract is a
+//! record with a price between fictional agents; the overlay reads state
+//! only.
 
 use macroquad::prelude::*;
 
@@ -75,5 +77,30 @@ pub fn draw(world: &World, app: &App) {
         let Some(intel) = r.intel else { continue };
         let p = cam.tile_to_screen(centre(intel.tile));
         crosshair(p, (ppt * 0.8).max(5.0), 1.5, Color { a: 0.8, ..AMBER });
+    }
+    // M16b: each Down agent, a pulsing cross where it lies (white once stable).
+    let pulse = 0.55 + 0.45 * (get_time() as f32 * 4.0).sin();
+    for (&id, w) in &world.wounded {
+        let tile = world.comp::<citysim::Position>(id).map_or(w.tile, |p| p.tile);
+        let p = cam.tile_to_screen(centre(tile));
+        let colour = if w.stable { Color::new(0.9, 0.9, 0.9, pulse) } else { Color { a: pulse, ..RED } };
+        let r = (ppt * 0.6).max(5.0);
+        draw_line(p.x - r, p.y, p.x + r, p.y, 3.0, colour);
+        draw_line(p.x, p.y - r, p.x, p.y + r, 3.0, colour);
+    }
+    // Each building with captives: a lock and the count.
+    let mut held: std::collections::BTreeMap<citysim::EntityId, usize> = std::collections::BTreeMap::new();
+    for c in world.captives.values() {
+        *held.entry(c.held_at).or_default() += 1;
+    }
+    for (b, n) in held {
+        let Some(bd) = world.comp::<Building>(b) else { continue };
+        let c =
+            vec2(f32::from(bd.rect.x) + f32::from(bd.rect.w) / 2.0, f32::from(bd.rect.y) + f32::from(bd.rect.h) / 2.0);
+        let p = cam.tile_to_screen(c);
+        let s = (ppt * 0.5).max(5.0);
+        draw_rectangle(p.x - s, p.y - s * 0.2, s * 2.0, s * 1.4, AMBER);
+        draw_circle_lines(p.x, p.y - s * 0.2, s * 0.7, 2.0, AMBER);
+        label(vec2(p.x + s + 3.0, p.y), &format!("{n} held"), AMBER);
     }
 }

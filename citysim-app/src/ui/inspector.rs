@@ -198,7 +198,94 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World) {
         body_kit(ui, app, world, id);
         hacking(ui, app, world, id);
         contracts(ui, app, world, id);
+        holds(ui, world, id);
         buttons(ui, app, world, id);
+    });
+}
+
+/// M16b § 9 (phase 4): the leverage an agent holds and suffers (each a
+/// record between fictional agents), its captivity, its wound, its Trauma
+/// subscription and the tags on it (the god's view). Hidden when empty.
+fn holds(ui: &mut Ui, world: &World, id: EntityId) {
+    use citysim::systems::leverage::demand_text;
+    let held: Vec<&citysim::contract::Coercion> =
+        world.coercions.values().filter(|c| c.is_active() && (c.agent == id || c.holder == Some(id))).collect();
+    let over: Vec<&citysim::contract::Coercion> =
+        world.coercions.values().filter(|c| c.is_active() && c.over == id).collect();
+    let captive = world.captives.get(&id);
+    let wound = world.wounded.get(&id);
+    let trauma = world.trauma_clients.get(&id);
+    let tags = citysim::systems::tags::tags_on(world, id);
+    if held.is_empty() && over.is_empty() && captive.is_none() && wound.is_none() && trauma.is_none() && tags.is_empty()
+    {
+        return;
+    }
+    section(ui, "Leverage, holds and wounds", |ui| {
+        for c in held {
+            ui.label(format!(
+                "Holds a {} over {} ({}): {} · since day {}",
+                c.leverage.kind().label(),
+                world.name_of(c.over),
+                c.why.label(),
+                demand_text(world, &c.demand),
+                time::day(c.since)
+            ));
+        }
+        for c in over {
+            ui.colored_label(
+                RED,
+                format!(
+                    "Coerced by {} ({}, {}): {} · since day {}",
+                    world.owner_label(c.holder.or(Some(c.agent))),
+                    c.leverage.kind().label(),
+                    c.why.label(),
+                    demand_text(world, &c.demand),
+                    time::day(c.since)
+                ),
+            );
+        }
+        if let Some(k) = captive {
+            let demand = k
+                .coercion
+                .and_then(|cid| world.coercions.get(&cid))
+                .map(|c| format!(" · demand {} of {}", demand_text(world, &c.demand), world.name_of(c.over)))
+                .unwrap_or_default();
+            ui.colored_label(
+                RED,
+                format!(
+                    "Captive at {} for {} since day {} (until day {}){demand}",
+                    world.name_of(k.held_at),
+                    world.owner_label(k.holder),
+                    time::day(k.since),
+                    time::day(k.until)
+                ),
+            );
+        }
+        if let Some(w) = wound {
+            let state = if w.stable {
+                "stabilised".to_string()
+            } else {
+                format!("bleeding out at day {} {}", time::day(w.bleed_until), time::clock(w.bleed_until))
+            };
+            let by = w.by.map(|b| format!(" by {}", world.name_of(b))).unwrap_or_default();
+            let carrier = w.rescuer.map(|r| format!(" · carried by {}", world.name_of(r))).unwrap_or_default();
+            ui.colored_label(RED, format!("Down{by} since day {}: {state}{carrier}", time::day(w.since)));
+        }
+        if let Some(&corp) = trauma {
+            ui.label(format!("Trauma subscriber: {}", world.owner_label(Some(corp))));
+        }
+        for t in tags {
+            ui.colored_label(
+                GOLD,
+                format!(
+                    "Tag #{} (tier {}) for {} until day {} (god's view)",
+                    t.id,
+                    t.tier,
+                    world.owner_label(Some(t.owner)),
+                    time::day(t.until)
+                ),
+            );
+        }
     });
 }
 

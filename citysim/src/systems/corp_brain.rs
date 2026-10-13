@@ -7,7 +7,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::components::{
-    Building, BuildingKind, Corp, CorpOrder, CorpOrderScore, CorpShock, Gang, Job, Market, Niche, Personality, Wallet,
+    Building, BuildingKind, Corp, CorpOrder, CorpOrderScore, CorpShock, Gang, Job, Market, Niche, Wallet,
 };
 use crate::config::CorpsCfg;
 use crate::entity::EntityId;
@@ -417,7 +417,9 @@ pub fn gather_inputs(world: &World, corp: EntityId) -> Option<CorpInputs> {
         if c.cashflow.is_empty() { 0.0 } else { c.cashflow.iter().sum::<i64>() as f32 / c.cashflow.len() as f32 };
     let horizon = now.saturating_sub(14 * TICKS_PER_DAY);
     let lost: i64 = c.loss_log.iter().filter(|l| l.tick >= horizon).map(|l| l.coins.max(0)).sum();
-    let p = c.exec.and_then(|e| world.comp::<Personality>(e));
+    // M16b phase 4: a board corp reads its members' mean Personality.
+    let board_p = crate::systems::governance::personality(world, corp);
+    let p = board_p.as_ref();
     let lots_total = crate::systems::founding::vacant_lots(world).len();
     let mut niches = BTreeMap::new();
     for &n in &c.niches {
@@ -807,7 +809,9 @@ pub fn push_shock(world: &mut World, corp: EntityId, shock: CorpShock) {
 pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
     let Some(inputs) = gather_inputs(world, corp) else { return };
     let cfg = world.config.corps.clone();
-    let scores = score_all(&inputs, &cfg);
+    let mut scores = score_all(&inputs, &cfg);
+    // M16b phase 4: a distracted corp tilts to Hunker.
+    crate::systems::attention::tilt(world, Some(corp), &mut scores, |s| s.order == CorpOrder::Hunker, |s| &mut s.score);
     let Some((current, cur_niche, name)) = world.comp::<Corp>(corp).map(|c| (c.order, c.order_niche, c.name.clone()))
     else {
         return;
@@ -1127,6 +1131,8 @@ fn acquire(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
     if !(i.cooldown_ok && world.purse(Some(corp)) >= ni.offer) {
         return;
     }
+    // M16b phase 4: a hostile offer holds the seller's attention.
+    crate::systems::attention::note(world, Some(seller), crate::contract::ThreatKind::Acquisition, corp, 0);
     let bankrupt = world.comp::<Corp>(seller).is_some_and(|s| s.negative_since.is_some());
     // M15 W33: a seller refuses a dishonoured buyer unless it is going under.
     let honour = crate::systems::reputation::rep(world, corp).honour;

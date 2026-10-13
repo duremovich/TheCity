@@ -307,6 +307,21 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         *r.marks.entry("rescued by a gang-mate").or_insert(0) += wd.rescued_gang;
         *r.marks.entry("Trauma call").or_insert(0) += wd.trauma_calls;
         *r.marks.entry("TraumaSave").or_insert(0) += wd.trauma_saves;
+        // M16b phase 4: boards, tags, the Patrol, attention.
+        let gv = &row.gov;
+        *r.marks.entry("board vote").or_insert(0) += gv.votes;
+        *r.marks.entry("VoteSwung").or_insert(0) += gv.votes_swung;
+        *r.marks.entry("campaign move").or_insert(0) += gv.campaign_moves;
+        *r.marks.entry("tag planted").or_insert(0) += gv.tags_planted;
+        *r.marks.entry("tag found").or_insert(0) += gv.tags_found;
+        *r.marks.entry("scan").or_insert(0) += gv.scans;
+        *r.marks.entry("Patrol scan").or_insert(0) += gv.patrols;
+        *r.marks.entry("faction distracted").or_insert(0) += u32::from(gv.distracted > 0);
+        // A broken-system signal: alertness ÷ pool under the floor (the
+        // ratio is never under `alert_floor` while the pool is at most 1).
+        let floor = w.config.attention.alert_floor;
+        *r.marks.entry("alertness under the floor").or_insert(0) +=
+            u32::from(w.config.attention.enabled && gv.alert_min < floor - 1e-4);
         r.assaults.push(assaults);
         r.rows.push(row);
         if r.no_net {
@@ -560,6 +575,14 @@ fn mechanisms() -> Vec<Mechanism> {
         ("a rescue by kin", m("rescued by kin")), // [2, 1, 3]; 45-47 [10, 3, 3]
         ("a downed agent finished off", m("finished off")), // [9, 5, 3]; 45-47 [9, 5, 3]
         ("a Trauma subscription", m("Trauma subscription")), // [27, 15, 22]; 45-47 [34, 16, 19]
+        // M16b phase 4 (seeds 42-47 x 120 days): boards, tags, attention.
+        ("a board vote", m("board vote")),       // [4, 5, 4]; 45-47 [4, 4, 4]
+        ("a campaign move", m("campaign move")), // [0, 3, 1]; 45-47 [4, 3, 0]
+        ("a VoteSwung", m("VoteSwung")),         // [0, 1, 1]; 45-47 [4, 3, 0]
+        ("a tag planted", m("tag planted")),     // [85, 109, 98]; 45-47 [61, 66, 84]
+        ("a tag found", m("tag found")),         // [5, 8, 7]; 45-47 [7, 0, 6]
+        ("a scan", m("scan")),                   // [200, 239, 182]; 45-47 [216, 191, 245]
+        ("a day a faction is distracted", m("faction distracted")), // [116, 114, 105]; 45-47 [115, 117, 113]
     ]
 }
 
@@ -633,6 +656,9 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a rescue by a gang-mate", m("rescued by a gang-mate")), // [0, 0, 0, 1, 0, 0]
         ("a Trauma call", m("Trauma call")),                      // [0, 0, 0, 1, 0, 1]
         ("a TraumaSave", m("TraumaSave")),                        // [0, 0, 0, 0, 0, 0]
+        // M16b phase 4 (seeds 42-47 x 120 days): rare, unit-tested in `tags.rs`
+        // and `governance.rs`.
+        ("a Patrol scan", m("Patrol scan")), // [0, 0, 0, 0, 0, 0]
     ]
 }
 
@@ -704,7 +730,7 @@ fn core_sanity() {
         if r.corps_alive < corps_alive_min(r) {
             failures.push(format!("seed {}: seeded corps alive {}/{}", r.seed, r.corps_alive, r.corps_seeded));
         }
-        for m in ["stale ride", "ride past arrival"] {
+        for m in ["stale ride", "ride past arrival", "alertness under the floor"] {
             if r.mark(m) > 0 {
                 failures.push(format!("seed {}: {} hours with a {m}", r.seed, r.mark(m)));
             }
@@ -828,7 +854,7 @@ fn core_20k() {
     if r.corps_alive < corps_alive_min(r) {
         failures.push(format!("seeded corps alive {}/{} < {}", r.corps_alive, r.corps_seeded, corps_alive_min(r)));
     }
-    for m in ["stale ride", "ride past arrival"] {
+    for m in ["stale ride", "ride past arrival", "alertness under the floor"] {
         if r.mark(m) > 0 {
             failures.push(format!("{} hours with a {m}", r.mark(m)));
         }

@@ -68,6 +68,10 @@ const FILES: &[&str] = &[
     "systems/camp.rs",
     // The Real economy phase 2 (the wage and staffing passes from `living::run`).
     "systems/wages.rs",
+    // M16b phase 4.
+    "systems/governance.rs",
+    "systems/tags.rs",
+    "systems/attention.rs",
 ];
 
 #[test]

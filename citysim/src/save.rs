@@ -82,7 +82,14 @@ use crate::world::World;
 /// `GoalKind::Rescue`, `ActionKind::{CarryWounded, Stabilise}`,
 /// `ContractKind::Trauma`, `ContractStatus::Standing`,
 /// `Origin::Subscription`, `Flow::Trauma` and the six events.
-pub const SAVE_VERSION: u8 = 18;
+/// 19: M16b phase 4, boards, tags and attention: `Governance::Board`'s
+/// `chair`, `last_vote`, `votes`; `World::{tags, next_tag, gang_scanners,
+/// attention}`; `Levers.prison_permit`; `DayRow.gov`; `[governance]`,
+/// `[tags]`, `[attention]` and the `tag`/`vote` kind keys in the saved
+/// config (serde defaults); the appended `ContractKind::{Tag, Vote}`,
+/// `Origin::Board`, `Demand::Vote`, `CoercionWhy::Vote`, the five events
+/// and the eight god commands.
+pub const SAVE_VERSION: u8 = 19;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

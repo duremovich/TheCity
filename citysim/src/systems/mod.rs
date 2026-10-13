@@ -19,6 +19,7 @@
 
 pub mod ambient;
 pub mod assets;
+pub mod attention;
 pub mod bind;
 pub mod bins;
 pub mod budget;
@@ -44,6 +45,7 @@ pub mod founding;
 pub mod fviolence;
 pub mod gang;
 pub mod gossip;
+pub mod governance;
 pub mod grudges;
 pub mod health;
 pub mod hitmarket;
@@ -75,6 +77,7 @@ pub mod stat_policy;
 pub mod stats;
 pub mod stims;
 pub mod street;
+pub mod tags;
 pub mod tech;
 pub mod think;
 pub mod trades;

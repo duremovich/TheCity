@@ -319,6 +319,110 @@ enum Lever {
     TakeContract(u64, u32),
     /// Real economy (plan E47): `donate=<mission building i>:<coins>`.
     Donate(u32, i64),
+    /// M16b god (phase 4, spec § 8): `hostage=`, `wound=`, `subscribe=`,
+    /// `tag_agent=`, `coerce=`, `call_vote=` (see `parse_lever`).
+    M16b(M16bLever),
+}
+
+/// M16b phase 4's god levers, by entity index, gang index or corp slot.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum M16bLever {
+    Hostage { captive: u32, holder: Option<FactionRef>, at: u32, demand: DemandSpec },
+    Wound(u32),
+    Subscribe(u32, u8),
+    TagAgent(u32, FactionRef, u8),
+    Coerce(u32, u32, LevSpec, DemandSpec),
+    CallVote(u8),
+}
+
+/// A demand on the command line: `coins<n>`, `weekly<n>`, `release<agent>`,
+/// `vote<corp slot>` (for the coercing agent), or none.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum DemandSpec {
+    None,
+    Coins(i64),
+    Weekly(i64),
+    Release(u32),
+    Vote(u8),
+}
+
+/// A leverage on the command line: `threat` or `debt<n>`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum LevSpec {
+    Threat,
+    Debt(i64),
+}
+
+fn parse_demand(v: &str) -> Result<DemandSpec, String> {
+    let num = |s: &str| s.parse::<i64>().map_err(|e| format!("bad demand {v}: {e}"));
+    if v.is_empty() || v == "none" {
+        return Ok(DemandSpec::None);
+    }
+    if let Some(n) = v.strip_prefix("coins") {
+        return Ok(DemandSpec::Coins(num(n)?));
+    }
+    if let Some(n) = v.strip_prefix("weekly") {
+        return Ok(DemandSpec::Weekly(num(n)?));
+    }
+    if let Some(n) = v.strip_prefix("release") {
+        return n.parse::<u32>().map(DemandSpec::Release).map_err(|e| format!("bad demand {v}: {e}"));
+    }
+    if let Some(n) = v.strip_prefix("vote") {
+        return n.parse::<u8>().map(DemandSpec::Vote).map_err(|e| format!("bad demand {v}: {e}"));
+    }
+    Err(format!("demand must be none|coins<n>|weekly<n>|release<agent>|vote<slot>, got {v}"))
+}
+
+impl DemandSpec {
+    fn resolve(self, world: &World, agent: citysim::EntityId) -> Result<Option<citysim::contract::Demand>, String> {
+        use citysim::contract::Demand;
+        Ok(match self {
+            DemandSpec::None => None,
+            DemandSpec::Coins(amount) => Some(Demand::Coins { amount, weekly: false }),
+            DemandSpec::Weekly(amount) => Some(Demand::Coins { amount, weekly: true }),
+            DemandSpec::Release(a) => Some(Demand::Release(agent_at(world, a)?)),
+            DemandSpec::Vote(s) => Some(Demand::Vote { corp: corp_in_slot(world, s)?, for_: agent }),
+        })
+    }
+}
+
+impl M16bLever {
+    fn resolve(self, world: &World) -> Result<PlayerCommand, String> {
+        Ok(match self {
+            M16bLever::Hostage { captive, holder, at, demand } => {
+                let captive = agent_at(world, captive)?;
+                PlayerCommand::Hostage {
+                    captive,
+                    holder: match holder {
+                        Some(f) => Some(f.resolve(world)?),
+                        None => None,
+                    },
+                    at: building_at(world, at)?,
+                    demand: demand.resolve(world, captive)?,
+                }
+            }
+            M16bLever::Wound(a) => PlayerCommand::Wound { agent: agent_at(world, a)?, by: None },
+            M16bLever::Subscribe(a, s) => {
+                PlayerCommand::Subscribe { agent: agent_at(world, a)?, corp: corp_in_slot(world, s)? }
+            }
+            M16bLever::TagAgent(a, f, tier) => {
+                PlayerCommand::TagAgent { agent: agent_at(world, a)?, owner: f.resolve(world)?, tier }
+            }
+            M16bLever::Coerce(a, o, lev, demand) => {
+                let agent = agent_at(world, a)?;
+                PlayerCommand::Coerce {
+                    agent,
+                    over: agent_at(world, o)?,
+                    leverage: match lev {
+                        LevSpec::Threat => citysim::contract::Leverage::Threat,
+                        LevSpec::Debt(amount) => citysim::contract::Leverage::Debt { amount },
+                    },
+                    demand: demand.resolve(world, agent)?.ok_or_else(|| "coerce needs a demand".to_string())?,
+                }
+            }
+            M16bLever::CallVote(s) => PlayerCommand::CallVote(corp_in_slot(world, s)?),
+        })
+    }
 }
 
 /// A contract record's target on the command line: an agent's or a
@@ -670,6 +774,7 @@ impl Lever {
                 PlayerCommand::TakeContract { contract, taker: agent_at(world, taker)? }
             }
             Lever::Donate(b, amount) => PlayerCommand::Donate { mission: building_at(world, b)?, amount },
+            Lever::M16b(m) => m.resolve(world)?,
             Lever::RunNow(a, t, purpose) => PlayerCommand::RunNow {
                 agent: agent_at(world, a)?,
                 target: match t {
@@ -1061,6 +1166,68 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 on_off(brokered).ok_or_else(|| format!("{spec}: brokered must be 0|1"))?,
                 days.parse::<u16>().map_err(|e| format!("{spec}: bad days: {e}"))?,
             ))
+        }
+        // M16b phase 4 (spec § 8).
+        "prison_permit" => Some(Lever::Cmd(PlayerCommand::SetPrisonPermit(
+            on_off(value).ok_or_else(|| format!("{spec}: expected on|off"))?,
+        ))),
+        "expose_secret" => Some(Lever::Cmd(PlayerCommand::ExposeSecret(
+            value.parse::<u64>().map_err(|e| format!("{spec}: bad coercion: {e}"))?,
+        ))),
+        "call_vote" => Some(Lever::M16b(M16bLever::CallVote(slot(value)?))),
+        "wound" => {
+            Some(Lever::M16b(M16bLever::Wound(value.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?)))
+        }
+        "subscribe" => {
+            let (a, c) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <agent>:<corp slot>"))?;
+            Some(Lever::M16b(M16bLever::Subscribe(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                slot(c)?,
+            )))
+        }
+        "tag_agent" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, f, t] = parts[..] else { return Err(format!("{spec}: expected <agent>:<faction>:<tier>")) };
+            Some(Lever::M16b(M16bLever::TagAgent(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                parse_faction(f).map_err(|e| format!("{spec}: {e}"))?,
+                t.parse::<u8>().map_err(|e| format!("{spec}: bad tier: {e}"))?,
+            )))
+        }
+        "hostage" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let (a, h, b, d) = match parts[..] {
+                [a, h, b] => (a, h, b, "none"),
+                [a, h, b, d] => (a, h, b, d),
+                _ => return Err(format!("{spec}: expected <agent>:<holder|none>:<building>[:<demand>]")),
+            };
+            Some(Lever::M16b(M16bLever::Hostage {
+                captive: a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                holder: if h == "none" { None } else { Some(parse_faction(h).map_err(|e| format!("{spec}: {e}"))?) },
+                at: b.parse::<u32>().map_err(|e| format!("{spec}: bad building: {e}"))?,
+                demand: parse_demand(d).map_err(|e| format!("{spec}: {e}"))?,
+            }))
+        }
+        "coerce" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [a, o, l, d] = parts[..] else {
+                return Err(format!("{spec}: expected <agent>:<over>:<threat|debt<n>>:<demand>"));
+            };
+            let lev = match l.strip_prefix("debt") {
+                Some(n) => LevSpec::Debt(n.parse::<i64>().map_err(|e| format!("{spec}: bad debt: {e}"))?),
+                None if l == "threat" => LevSpec::Threat,
+                None => return Err(format!("{spec}: leverage must be threat|debt<n>")),
+            };
+            let demand = parse_demand(d).map_err(|e| format!("{spec}: {e}"))?;
+            if demand == DemandSpec::None {
+                return Err(format!("{spec}: coerce needs a demand"));
+            }
+            Some(Lever::M16b(M16bLever::Coerce(
+                a.parse::<u32>().map_err(|e| format!("{spec}: bad agent: {e}"))?,
+                o.parse::<u32>().map_err(|e| format!("{spec}: bad over: {e}"))?,
+                lev,
+                demand,
+            )))
         }
         "take_contract" => {
             let (c, t) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <id>:<agent>"))?;
@@ -2656,6 +2823,38 @@ mod tests {
         ));
         assert!(parse_lever("day=3:post_contract=12:kill:34:700:1:10").is_err());
         assert!(matches!(parse_lever("day=4:take_contract=5:21").unwrap().1, Lever::TakeContract(5, 21)));
+    }
+
+    /// M16b phase 4 (spec § 8): the 16b god levers parse.
+    #[test]
+    fn test_parse_m16b_levers() {
+        assert!(matches!(
+            parse_lever("day=5:prison_permit=off").unwrap().1,
+            Lever::Cmd(PlayerCommand::SetPrisonPermit(false))
+        ));
+        assert!(matches!(parse_lever("day=5:expose_secret=7").unwrap().1, Lever::Cmd(PlayerCommand::ExposeSecret(7))));
+        assert!(matches!(parse_lever("day=5:call_vote=3").unwrap().1, Lever::M16b(M16bLever::CallVote(3))));
+        assert!(matches!(parse_lever("day=5:wound=12").unwrap().1, Lever::M16b(M16bLever::Wound(12))));
+        assert!(matches!(parse_lever("day=5:subscribe=12:4").unwrap().1, Lever::M16b(M16bLever::Subscribe(12, 4))));
+        assert!(matches!(
+            parse_lever("day=5:tag_agent=12:gang1:2").unwrap().1,
+            Lever::M16b(M16bLever::TagAgent(12, FactionRef::Gang(1), 2))
+        ));
+        assert!(matches!(
+            parse_lever("day=5:hostage=12:gang0:300:release44").unwrap().1,
+            Lever::M16b(M16bLever::Hostage {
+                captive: 12,
+                holder: Some(FactionRef::Gang(0)),
+                at: 300,
+                demand: DemandSpec::Release(44)
+            })
+        ));
+        assert!(matches!(
+            parse_lever("day=5:coerce=12:13:threat:vote2").unwrap().1,
+            Lever::M16b(M16bLever::Coerce(12, 13, LevSpec::Threat, DemandSpec::Vote(2)))
+        ));
+        assert!(parse_lever("day=5:coerce=12:13:threat:none").is_err());
+        assert!(parse_lever("day=5:hostage=12").is_err());
     }
 
     #[test]

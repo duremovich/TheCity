@@ -370,6 +370,8 @@ pub fn strike(world: &mut World) {
         world.districts[i].last_strike = Some(now);
         world.last_strike = Some(now);
         world.stats.current.strikes += 1;
+        // M16b phase 4: a strike holds the struck corp's attention a day.
+        crate::systems::attention::note(world, Some(corp), crate::contract::ThreatKind::Strike, EntityId::NONE, 1);
         let cname = world.owner_label(Some(corp));
         world.push_event(
             EventKind::Strike,

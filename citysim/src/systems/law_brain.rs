@@ -240,7 +240,9 @@ pub fn rescore(world: &mut World, hysteresis: f32, why: &str) {
     let cfg = world.config.law.clone();
     let Some((current, pinned, old_target)) = world.law().map(|l| (l.posture, l.pinned, l.target)) else { return };
     let inputs = gather_inputs(world);
-    let scores = inputs.as_ref().map(|i| score_postures(i, &cfg)).unwrap_or_default();
+    let mut scores = inputs.as_ref().map(|i| score_postures(i, &cfg)).unwrap_or_default();
+    // M16b phase 4: a distracted law tilts to Garrison.
+    crate::systems::attention::tilt(world, None, &mut scores, |s| s.posture == Posture::Garrison, |s| &mut s.score);
     let brain = choose(&scores, current, hysteresis);
     // M11 D21: a corp's bought crackdown, while it holds and its gang lives,
     // forces a Crackdown on that gang (the player's pin still wins).

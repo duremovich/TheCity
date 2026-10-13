@@ -817,6 +817,9 @@ pub enum MemoryKind {
     /// (subject the target); relief for a Revenge buyer (`closure_val`),
     /// neutral otherwise. Not a deed (`deed_of` reads `None`).
     Commissioned,
+    /// M16b phase 4: a tag found on this agent by a scanner (subject the
+    /// head of the tag's owner). Not a deed.
+    Tagged,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
@@ -1194,6 +1197,19 @@ pub enum Governance {
     Dictator,
     Board {
         members: Vec<EntityId>,
+        /// M16b phase 4 (spec § 6): the chair (the corp's exec).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        chair: Option<EntityId>,
+        /// The last vote's tick (the board's founding at first).
+        #[serde(default)]
+        last_vote: Tick,
+        /// The last vote's ballots `(member, candidate)`.
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        votes: Vec<(EntityId, EntityId)>,
+        /// A campaign's Persuade pins `(member, candidate)` until the vote
+        /// (a `Vote` coercion pins through `World::coercions`).
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pinned: Vec<(EntityId, EntityId)>,
     },
 }
 

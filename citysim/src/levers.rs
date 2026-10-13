@@ -486,6 +486,46 @@ pub enum PlayerCommand {
     /// public works, school meals, the Reserve release) or repealed (all
     /// four off). The levy is its own lever.
     SetSafetyNet(bool),
+    // --- M16b phase 4 (spec § 8): the 16b lever and god commands.
+    /// Off: corps cannot build Prisons, and a Prison admits no new captive.
+    SetPrisonPermit(bool),
+    /// God: `captive` held at `at` for `holder` (`None` the head of no
+    /// faction: the god's own hold), with `demand` over the captive's
+    /// payer (a `Release` over the captain).
+    Hostage {
+        captive: EntityId,
+        holder: Option<EntityId>,
+        at: EntityId,
+        demand: Option<crate::contract::Demand>,
+    },
+    /// God: `agent` goes down at once, its bleed timer running.
+    Wound {
+        agent: EntityId,
+        by: Option<EntityId>,
+    },
+    /// God: a Trauma subscription for `agent` with `corp`'s crew (the
+    /// agent pays).
+    Subscribe {
+        agent: EntityId,
+        corp: EntityId,
+    },
+    /// God: a tier-`tier` tag on `agent` for `owner`.
+    TagAgent {
+        agent: EntityId,
+        owner: EntityId,
+        tier: u8,
+    },
+    /// God: a coercion made without the roll (`leverage::force`).
+    Coerce {
+        agent: EntityId,
+        over: EntityId,
+        leverage: crate::contract::Leverage,
+        demand: crate::contract::Demand,
+    },
+    /// God: a board vote now (a corp without a board seats one).
+    CallVote(EntityId),
+    /// God: a Secret coercion's deed posted at reach 1.0 (it lapses).
+    ExposeSecret(crate::contract::CoercionId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -602,6 +642,10 @@ pub struct Levers {
     /// M16a (plan C39; `SetAccessoryMult`, phase 4): overrides `[law] accessory_mult`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub accessory_mult: Option<f32>,
+    /// M16b phase 4 (`SetPrisonPermit`): corps may build Prisons and hold
+    /// new captives in them.
+    #[serde(default = "default_true", skip_serializing_if = "is_true")]
+    pub prison_permit: bool,
     /// M16a (plan C39; `PublicBounties`, phase 4): the law posts a Locate
     /// on every wanted suspect after one day.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -726,6 +770,7 @@ impl Levers {
             leisure_tax: 0.0,
             ban_gambling: false,
             fixer_licence: true,
+            prison_permit: true,
             accessory_mult: None,
             public_bounties: false,
             levy: policy.levy,
@@ -1146,6 +1191,17 @@ impl World {
                     Err("SetTaxAuto: no tax band (the levy is enacted)".to_string())
                 };
                 self.lever_result(text);
+            }
+            PlayerCommand::SetPrisonPermit(_)
+            | PlayerCommand::Hostage { .. }
+            | PlayerCommand::Wound { .. }
+            | PlayerCommand::Subscribe { .. }
+            | PlayerCommand::TagAgent { .. }
+            | PlayerCommand::Coerce { .. }
+            | PlayerCommand::CallVote(_)
+            | PlayerCommand::ExposeSecret(_) => {
+                let r = self.apply_m16b(cmd);
+                self.lever_result(r);
             }
             PlayerCommand::SetFixerLicence(on) => {
                 self.levers.fixer_licence = *on;
@@ -2497,5 +2553,101 @@ impl World {
         }
         let name = self.name_of(agent);
         self.push_event(EventKind::PlayerAction, &[agent], format!("Granted {amount} coins to {name}"));
+    }
+}
+
+impl World {
+    /// M16b phase 4 (spec § 8): the lever and the god commands of 16b.
+    /// `Ok` the event's text, `Err` the failure's.
+    fn apply_m16b(&mut self, cmd: &PlayerCommand) -> Result<String, String> {
+        use crate::contract::{CoercionWhy, Demand, Leverage};
+        match cmd {
+            PlayerCommand::SetPrisonPermit(on) => {
+                self.levers.prison_permit = *on;
+                Ok(if *on {
+                    "Lever: Prisons permitted".to_string()
+                } else {
+                    "Lever: no new Prison, and no new captive in one".to_string()
+                })
+            }
+            PlayerCommand::Hostage { captive, holder, at, demand } => {
+                if !crate::systems::captives::on(self) {
+                    return Err("Hostage: captives are off".to_string());
+                }
+                if !self.has::<crate::components::Building>(*at) {
+                    return Err("Hostage: no such building".to_string());
+                }
+                let over = match demand {
+                    Some(Demand::Release(_)) => self.law().and_then(|l| l.captain),
+                    _ => None,
+                };
+                let agent = holder.and_then(|h| crate::systems::contracts::head_of(self, h)).unwrap_or(*captive);
+                if crate::systems::captives::take(self, *captive, *holder, agent, *at, *demand, over) {
+                    Ok(format!("God: {} held at {}", self.name_of(*captive), self.name_of(*at)))
+                } else {
+                    Err("Hostage: refused (quota, capacity, permit or already held)".to_string())
+                }
+            }
+            PlayerCommand::Wound { agent, by } => {
+                if !crate::systems::wounded::on(self) || !crate::systems::law::living(self, *agent) {
+                    return Err("Wound: the wounded are off or the agent is gone".to_string());
+                }
+                if crate::systems::wounded::is_down(self, *agent) {
+                    return Err("Wound: already down".to_string());
+                }
+                crate::systems::wounded::down(self, *agent, *by);
+                Ok(format!("God: {} went down", self.name_of(*agent)))
+            }
+            PlayerCommand::Subscribe { agent, corp } => {
+                if crate::systems::wounded::subscribe_with(self, *agent, *agent, *corp) {
+                    Ok(format!(
+                        "God: {} subscribed to {}'s Trauma crew",
+                        self.name_of(*agent),
+                        self.owner_label(Some(*corp))
+                    ))
+                } else {
+                    Err("Subscribe: refused".to_string())
+                }
+            }
+            PlayerCommand::TagAgent { agent, owner, tier } => {
+                crate::systems::tags::god_tag(self, *agent, *owner, *tier)
+                    .map(|id| format!("God: tag #{id} on {}", self.name_of(*agent)))
+            }
+            PlayerCommand::Coerce { agent, over, leverage, demand } => {
+                if !crate::systems::leverage::on(self) {
+                    return Err("Coerce: leverage is off".to_string());
+                }
+                if !crate::systems::law::living(self, *over) {
+                    return Err("Coerce: the coerced is gone".to_string());
+                }
+                let why = match (leverage, demand) {
+                    (_, Demand::Vote { .. }) => CoercionWhy::Vote,
+                    (Leverage::Hostage { .. }, _) => CoercionWhy::Hostage,
+                    (Leverage::Secret { .. }, _) => CoercionWhy::Blackmail,
+                    _ => CoercionWhy::Other,
+                };
+                let holder = self.gang_of(*agent).or(self.corp_of_agent(*agent)).filter(|_| why != CoercionWhy::Vote);
+                let holder = holder.or(Some(*agent));
+                let id =
+                    crate::systems::leverage::force(self, holder, *agent, *over, *leverage, *demand, why, None, None);
+                Ok(format!("God: coercion #{id} of {} by {}", self.name_of(*over), self.name_of(*agent)))
+            }
+            PlayerCommand::CallVote(corp) => crate::systems::governance::call_vote(self, *corp)
+                .map(|w| format!("God: {}'s board voted, chair {}", self.owner_label(Some(*corp)), self.name_of(w))),
+            PlayerCommand::ExposeSecret(id) => {
+                let Some(c) = self.coercions.get(id).cloned() else {
+                    return Err("ExposeSecret: no such coercion".to_string());
+                };
+                let Leverage::Secret { deed, actor, object, .. } = c.leverage else {
+                    return Err("ExposeSecret: not a secret".to_string());
+                };
+                let d = crate::systems::gossip::home_district(self, actor)
+                    .unwrap_or_else(|| crate::systems::gossip::talk_district(self, actor));
+                let mult = 1.0 / self.config.gossip.reach0.get(deed).max(0.01);
+                crate::systems::gossip::post_deed_at(self, d, deed, Some(actor), object, mult);
+                Ok(format!("God: {}'s secret is out", self.name_of(actor)))
+            }
+            _ => Err("not a 16b command".to_string()),
+        }
     }
 }

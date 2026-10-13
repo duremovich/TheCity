@@ -145,6 +145,12 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Rescued
         | EventKind::TraumaCall
         | EventKind::TraumaSave
+        // M16b phase 4.
+        | EventKind::VoteHeld
+        | EventKind::VoteSwung
+        | EventKind::Tagged
+        | EventKind::TagFound
+        | EventKind::PatrolScan
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

@@ -68,10 +68,16 @@ pub enum ContractKind {
     /// M16b phase 3 (spec § 5): a standing subscription (`Standing`) to a
     /// Security corp's Trauma crew, renewed weekly.
     Trauma,
+    /// M16b phase 4 (spec § 3): a tracking tag planted on the target (its
+    /// sightings to the buyer's database for the battery's days).
+    Tag,
+    /// M16b phase 4 (spec § 6): a board member leaned on to vote for the
+    /// buyer (an Intimidate pinning the vote).
+    Vote,
 }
 
 impl ContractKind {
-    pub const ALL: [ContractKind; 12] = [
+    pub const ALL: [ContractKind; 14] = [
         ContractKind::Hit,
         ContractKind::Beat,
         ContractKind::Guard,
@@ -84,6 +90,8 @@ impl ContractKind {
         ContractKind::Deliver,
         ContractKind::Spin,
         ContractKind::Trauma,
+        ContractKind::Tag,
+        ContractKind::Vote,
     ];
 
     /// M16b phase 2's six kinds (`LeverageCols`' per-kind columns).
@@ -116,6 +124,8 @@ impl ContractKind {
             ContractKind::Deliver => "deliver",
             ContractKind::Spin => "spin",
             ContractKind::Trauma => "trauma",
+            ContractKind::Tag => "tag",
+            ContractKind::Vote => "vote",
         }
     }
 
@@ -133,7 +143,13 @@ impl ContractKind {
     pub fn illegal(self) -> bool {
         matches!(
             self,
-            ContractKind::Hit | ContractKind::Beat | ContractKind::Abduct | ContractKind::Rescue | ContractKind::Steal
+            ContractKind::Hit
+                | ContractKind::Beat
+                | ContractKind::Abduct
+                | ContractKind::Rescue
+                | ContractKind::Steal
+                | ContractKind::Tag
+                | ContractKind::Vote
         )
     }
 
@@ -262,6 +278,8 @@ pub enum Origin {
     Spin,
     /// M16b phase 3: a Trauma subscription.
     Subscription,
+    /// M16b phase 4: a board campaign's Persuade or Vote.
+    Board,
 }
 
 /// How a taken record is resolved: a ledger draw at `due` (no bodies), a
@@ -716,6 +734,8 @@ pub enum Demand {
     Sell(EntityId),
     /// M16b phase 2: a convict let out (the captain's to grant).
     Release(EntityId),
+    /// M16b phase 4 (spec § 6): a board member's vote pinned for `for_`.
+    Vote { corp: EntityId, for_: EntityId },
 }
 
 /// A coercion's state.
@@ -761,6 +781,8 @@ pub enum CoercionWhy {
     Job,
     /// M16b phase 2: a captive held for a demand.
     Hostage,
+    /// M16b phase 4: a board member's vote pinned by a campaign.
+    Vote,
 }
 
 impl CoercionWhy {
@@ -772,6 +794,7 @@ impl CoercionWhy {
             CoercionWhy::Parley => "tribute",
             CoercionWhy::Job => "job",
             CoercionWhy::Hostage => "hostage",
+            CoercionWhy::Vote => "vote",
         }
     }
 }
@@ -882,4 +905,62 @@ pub struct Wounded {
     /// A bleed-out is a Murder (the death would have been one).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub murder: bool,
+}
+
+// ---------------------------------------------------------------------------
+// M16b phase 4: tags and attention
+// ---------------------------------------------------------------------------
+
+/// A tracking tag on an agent (spec § 3; plan deviation: a record in
+/// `World::tags`, not an M13 asset): its owner's database gets the
+/// carrier's sighting at `conf` once an hour until the battery runs out.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Tag {
+    pub id: u64,
+    pub on: EntityId,
+    pub owner: EntityId,
+    pub tier: u8,
+    pub until: Tick,
+}
+
+/// A threat holding a share of a faction's attention (the addendum's table).
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]
+pub enum ThreatKind {
+    /// A raid or a mission at its door, a breach in progress.
+    Raid,
+    /// A riot in a district it controls, or at its building.
+    Riot,
+    /// A loud run against its nodes.
+    LoudRun,
+    /// A strike against it.
+    Strike,
+    /// A hostile acquisition offer made to it.
+    Acquisition,
+    /// An open vendetta.
+    Vendetta,
+}
+
+impl ThreatKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            ThreatKind::Raid => "raid",
+            ThreatKind::Riot => "riot",
+            ThreatKind::LoudRun => "loud run",
+            ThreatKind::Strike => "strike",
+            ThreatKind::Acquisition => "acquisition",
+            ThreatKind::Vendetta => "vendetta",
+        }
+    }
+}
+
+/// A faction's attention (the addendum): the pool (management competence
+/// and headcount), the threats holding shares of it, each `(kind, source,
+/// until)` (its live span plus `linger_days`), and what is left
+/// (`alertness`, never under `alert_floor`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct Attention {
+    pub pool: f32,
+    pub alertness: f32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub threats: Vec<(ThreatKind, EntityId, Tick)>,
 }

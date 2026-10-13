@@ -817,15 +817,21 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
     }
     let today = &world.stats.current.contract;
     let yday = world.stats.history.back().map(|r| r.contract.clone()).unwrap_or_default();
-    // M16b: M16a's four kinds count in `ContractCols`, the Persuade in `LeverageCols`.
-    let done_today = |k: ContractKind| match k {
-        ContractKind::Persuade => world.stats.current.leverage.k_persuade_done,
-        k => today.k_done[k.index()],
+    // M16b: M16a's four kinds count in `ContractCols`, the Persuade in
+    // `LeverageCols`, phase 2's six in `CaptiveCols`, the Tag and the Vote in
+    // `GovCols` (a subscription is never done).
+    let done_of = |r: &citysim::stats::DayRow, k: ContractKind| match k {
+        ContractKind::Persuade => r.leverage.k_persuade_done,
+        ContractKind::Trauma => 0,
+        ContractKind::Tag => r.gov.k_tag_done,
+        ContractKind::Vote => r.gov.k_vote_done,
+        k => match citysim::stats::CaptiveCols::slot(k) {
+            Some(i) => r.captive.k_done[i],
+            None => r.contract.k_done.get(k.index()).copied().unwrap_or(0),
+        },
     };
-    let done_yday = |k: ContractKind| match k {
-        ContractKind::Persuade => world.stats.history.back().map_or(0, |r| r.leverage.k_persuade_done),
-        k => yday.k_done[k.index()],
-    };
+    let done_today = |k: ContractKind| done_of(&world.stats.current, k);
+    let done_yday = |k: ContractKind| world.stats.history.back().map_or(0, |r| done_of(r, k));
     egui::Grid::new("city_contracts").striped(true).show(ui, |ui| {
         ui.strong("kind");
         ui.strong("open");
@@ -882,6 +888,33 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
     let r = ui.add(egui::Slider::new(&mut app.city.accessory_mult, 0.0..=3.0).text("Conspiracy x Murder"));
     if r.drag_stopped() || (r.changed() && !r.dragged()) {
         app.cmds.push(PlayerCommand::SetAccessoryMult(app.city.accessory_mult));
+    }
+    // M16b § 9 (phase 4): the 16b counts and the Prison permit.
+    let gov = &world.stats.current.gov;
+    let law = citysim::systems::attention::alertness_mult(world, None);
+    ui.label(format!(
+        "Hostages held {} · wounded down {} · Trauma clients {} · coercions {}",
+        world.captives.len(),
+        world.wounded.len(),
+        world.trauma_clients.len(),
+        world.coercions.values().filter(|c| c.is_active()).count()
+    ));
+    ui.label(format!(
+        "Boards {} · votes today {} (swung {}) · tags live {} (found today {}) · Patrol scans today {}",
+        citysim::systems::governance::board_corps(world).len(),
+        gov.votes,
+        gov.votes_swung,
+        world.tags.len(),
+        gov.tags_found,
+        gov.patrols
+    ));
+    ui.label(format!(
+        "Attention: {} factions distracted · the law's alertness x{law:.2}",
+        world.attention.values().filter(|a| a.alertness < a.pool).count()
+    ));
+    let mut permit = world.levers.prison_permit;
+    if ui.checkbox(&mut permit, "Prison permit (off: no new Prison, no new captive in one)").changed() {
+        app.cmds.push(PlayerCommand::SetPrisonPermit(permit));
     }
 }
 

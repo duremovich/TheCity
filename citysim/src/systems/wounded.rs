@@ -578,6 +578,24 @@ pub fn subscribe(world: &mut World, buyer: EntityId, client: EntityId) -> bool {
     true
 }
 
+/// M16b phase 4 (god `Subscribe`): [`subscribe`] with a named Security
+/// corp, at its fee (`fee_weekly × its Security level`).
+pub fn subscribe_with(world: &mut World, buyer: EntityId, client: EntityId, corp: EntityId) -> bool {
+    if !on(world) || world.trauma_clients.contains_key(&client) || !law::living(world, client) {
+        return false;
+    }
+    let Some(cc) = world.comp::<crate::components::Corp>(corp) else { return false };
+    if !cc.niches.contains(&crate::components::Niche::Security) {
+        return false;
+    }
+    let fee = ((world.config.trauma.fee_weekly as f32) * cc.level(crate::components::Niche::Security)).round() as i64;
+    if contracts::post_standing(world, buyer, client, corp, fee.max(1)).is_none() {
+        return false;
+    }
+    world.trauma_clients.insert(client, corp);
+    true
+}
+
 /// Daily: the weekly fees (unpaid: the subscription lapses), then the new
 /// subscribers: every corp's exec (paid by the corp), and an adult with
 /// `subscribe_coins` and `heat ≥ subscribe_heat` or a Hunt or a live Hit

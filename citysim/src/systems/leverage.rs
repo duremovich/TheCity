@@ -66,6 +66,8 @@ pub mod tried {
     pub const COURT: u8 = 8;
     pub const HOSTAGE: u8 = 9;
     pub const FABRICATE: u8 = 10;
+    /// M16b phase 4: a board campaign's try on a swing member.
+    pub const VOTE: u8 = 11;
 }
 
 fn retry(world: &World) -> Tick {
@@ -94,7 +96,7 @@ fn demand_value(world: &World, d: &Demand) -> f32 {
         Demand::Coins { amount, weekly } => (if weekly { 4 * amount } else { amount }) as f32,
         Demand::Do(id) => world.contracts.get(&id).map_or(0, |c| world.config.contracts.price_base.get(c.kind)) as f32,
         Demand::Join { wage, .. } => (7 * wage) as f32,
-        Demand::Silence { .. } | Demand::Release(_) => 0.0,
+        Demand::Silence { .. } | Demand::Release(_) | Demand::Vote { .. } => 0.0,
         // M16b phase 2: a building is worth its value.
         Demand::Sell(b) => world.comp::<Building>(b).map_or(0, |bd| ownership::value(world, bd.kind)) as f32,
     }
@@ -152,7 +154,9 @@ fn stake_of(agent: EntityId, demand: &Demand) -> Stake {
     match *demand {
         Demand::Coins { amount, .. } => Stake::Coins(amount),
         Demand::Join { building, wage } => Stake::Job { building, wage },
-        Demand::Do(_) | Demand::Silence { .. } | Demand::Sell(_) | Demand::Release(_) => Stake::Info { about: agent },
+        Demand::Do(_) | Demand::Silence { .. } | Demand::Sell(_) | Demand::Release(_) | Demand::Vote { .. } => {
+            Stake::Info { about: agent }
+        }
     }
 }
 
@@ -233,6 +237,25 @@ fn report_failure(world: &mut World, agent: EntityId, over: EntityId, lev: &Leve
     law::file_report(world, crime, agent, Some(over));
 }
 
+/// M16b phase 4 (the Inspector): a demand in words.
+pub fn demand_text(world: &World, d: &Demand) -> String {
+    match *d {
+        Demand::Coins { amount, weekly: true } => format!("{amount} a week"),
+        Demand::Coins { amount, weekly: false } => format!("{amount} coins"),
+        Demand::Do(cid) => {
+            let k = world.contracts.get(&cid).map_or("job", |c| c.kind.label());
+            format!("a {k} for nothing")
+        }
+        Demand::Join { wage, .. } => format!("a post at {wage}/day"),
+        Demand::Silence { .. } => "the report withdrawn".to_string(),
+        Demand::Sell(b) => format!("{} sold", world.name_of(b)),
+        Demand::Release(c) => format!("{} released", world.name_of(c)),
+        Demand::Vote { corp, for_ } => {
+            format!("a vote for {} on {}'s board", world.name_of(for_), world.owner_label(Some(corp)))
+        }
+    }
+}
+
 /// Standing coercions at once (the cap's count).
 pub fn active_count(world: &World) -> usize {
     world.coercions.values().filter(|c| c.is_active()).count()
@@ -288,6 +311,9 @@ fn record(
         Demand::Silence { .. } => "the report withdrawn".to_string(),
         Demand::Sell(b) => format!("{} sold", world.name_of(b)),
         Demand::Release(c) => format!("{} released", world.name_of(c)),
+        Demand::Vote { corp, for_ } => {
+            format!("a vote for {} on {}'s board", world.name_of(for_), world.owner_label(Some(corp)))
+        }
     };
     let on_what = building.map(|b| format!(" on {}", world.name_of(b))).unwrap_or_default();
     let text =
@@ -348,6 +374,7 @@ fn close(world: &mut World, id: CoercionId, status: CoercionStatus, why: &str) {
                 CoercionWhy::Parley => tried::PARLEY,
                 CoercionWhy::Job | CoercionWhy::Other => tried::JOB,
                 CoercionWhy::Hostage => tried::HOSTAGE,
+                CoercionWhy::Vote => tried::VOTE,
             };
             let by = c.holder.unwrap_or(c.agent);
             mark(world, by, target, k);
@@ -405,7 +432,7 @@ fn snapshot(world: &mut World) {
             CoercionWhy::Protection => 1,
             CoercionWhy::Blackmail => 2,
             CoercionWhy::Parley => 3,
-            CoercionWhy::Job | CoercionWhy::Other | CoercionWhy::Hostage => 0,
+            CoercionWhy::Job | CoercionWhy::Other | CoercionWhy::Hostage | CoercionWhy::Vote => 0,
         };
         by[i] += 1;
     }
@@ -1419,6 +1446,12 @@ pub fn resolve_persuade(world: &mut World, id: ContractId, taker: EntityId) {
     }
     let m = SocialMove { actor: taker, target: t, kind: MoveKind::Charm, stake: Stake::Info { about: buyer } };
     if moves::resolve(world, &m).success {
+        // M16b phase 4: a board campaign's Persuade pins the member's vote.
+        if c.origin == Origin::Board {
+            crate::systems::governance::on_persuaded(world, buyer, t);
+            contracts::settle(world, id, contracts::Settle::Fulfilled, "");
+            return;
+        }
         let aff = world.config.leverage.persuade_affinity;
         crate::systems::social::adjust(world, t, buyer, aff, 0.1);
         contracts::settle(world, id, contracts::Settle::Fulfilled, "");

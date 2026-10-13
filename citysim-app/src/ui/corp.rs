@@ -29,8 +29,50 @@ fn select(app: &mut App, id: EntityId) {
 pub fn governance_label(g: &Governance) -> String {
     match g {
         Governance::Dictator => "dictatorship".to_string(),
-        Governance::Board { members } => format!("board of {}", members.len()),
+        Governance::Board { members, .. } => format!("board of {}", members.len()),
     }
+}
+
+/// M16b § 9 (phase 4): a board corp's board (a list of members and a
+/// tally over it): the chair, the members with their standing and pins,
+/// the last tally, the next vote, the campaign under way, and CallVote.
+fn board(ui: &mut Ui, app: &mut App, world: &World, id: EntityId, c: &Corp) {
+    let Governance::Board { members, chair, last_vote, votes, .. } = &c.governance else { return };
+    section(ui, "Board", |ui| {
+        for &m in members {
+            ui.horizontal(|ui| {
+                let name = world.name_of(m);
+                let label = if Some(m) == *chair { format!("{name} (chair)") } else { name };
+                if ui.link(label).clicked() {
+                    select(app, m);
+                }
+                let r = citysim::systems::reputation::rep(world, m);
+                let greed = world.comp::<citysim::Personality>(m).map_or(0.0, |p| p.greed);
+                let pin = citysim::systems::governance::pinned_for(world, id, m)
+                    .map(|f| format!(" · pinned for {}", world.name_of(f)))
+                    .unwrap_or_default();
+                ui.small(format!("standing {:.2} · greed {greed:.2}{pin}", r.standing));
+            });
+        }
+        let mut tally: std::collections::BTreeMap<EntityId, u32> = std::collections::BTreeMap::new();
+        for &(_, cand) in votes {
+            *tally.entry(cand).or_default() += 1;
+        }
+        let t: Vec<String> = tally.iter().map(|(&k, n)| format!("{} {n}", world.name_of(k))).collect();
+        ui.label(format!(
+            "Last vote day {}{}",
+            time::day(*last_vote),
+            if t.is_empty() { String::new() } else { format!(": {}", t.join(", ")) }
+        ));
+        let next = *last_vote + u64::from(world.config.governance.vote_days) * TICKS_PER_DAY;
+        ui.label(format!("Next vote day {}", time::day(next)));
+        if let Some((ch, m)) = citysim::systems::governance::campaign_target(world, id) {
+            ui.colored_label(GOLD, format!("Campaign: {} leaning on {}", world.name_of(ch), world.name_of(m)));
+        }
+        if ui.button("Call a vote (god)").clicked() {
+            app.cmds.push(PlayerCommand::CallVote(id));
+        }
+    });
 }
 
 /// Days until bankruptcy for a corp in the red, `None` when solvent.
@@ -85,6 +127,8 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 }
             });
         });
+
+        board(ui, app, world, id, c);
 
         section(ui, "Money", |ui| {
             let tc = if c.treasury < 0 { RED } else { GREEN };

@@ -97,6 +97,10 @@ pub fn holding_for(world: &World, holder: EntityId) -> Option<EntityId> {
 /// `prison_cost` to the Treasury (`Flow::Found`; nothing minted). `None`
 /// with no Lot or no coins.
 pub fn build_prison(world: &mut World, corp: EntityId) -> Option<EntityId> {
+    // M16b phase 4: `SetPrisonPermit(false)` forbids new Prisons.
+    if !world.levers.prison_permit {
+        return None;
+    }
     let cost = world.config.hostage.prison_cost;
     if world.purse(Some(corp)) < cost {
         return None;
@@ -190,6 +194,10 @@ pub fn take(
         return false;
     }
     let cap = usize::from(world.comp::<Building>(at).map_or(0, |bd| bd.capacity));
+    // M16b phase 4: without the permit a Prison admits no new captive.
+    if !world.levers.prison_permit && world.comp::<Building>(at).is_some_and(|bd| bd.kind == BuildingKind::Prison) {
+        return false;
+    }
     if !quota_ok(world) || held_at(world, at) >= cap.max(1) || is_captive(world, victim) || !law::living(world, victim)
     {
         return false;
@@ -554,6 +562,18 @@ fn comply(world: &mut World, co: &crate::contract::Coercion) -> bool {
             let Some(h) = co.holder else { return false };
             let price = world.comp::<Building>(b).map_or(0, |bd| ownership::value(world, bd.kind));
             crate::systems::corps::acquire(world, h, b, price, "for a hostage")
+        }
+        // M16b phase 4 (spec § 11): the captain lets a convict out only
+        // when the law is weak and the captain bent (`Law.competence < 0.4`,
+        // lawfulness < 0.5).
+        Demand::Release(convict) => {
+            let comp = world.law().map_or(1.0, |l| l.competence);
+            let law = world.comp::<crate::components::Personality>(co.over).map_or(1.0, |p| p.lawfulness);
+            if comp >= 0.4 || law >= 0.5 || !world.has::<Sentence>(convict) {
+                return false;
+            }
+            law::release(world, convict, false);
+            true
         }
         _ => false,
     }

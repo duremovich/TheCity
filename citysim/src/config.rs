@@ -184,6 +184,15 @@ pub struct Config {
     /// M16b phase 3: the Trauma Team.
     #[serde(default)]
     pub trauma: TraumaCfg,
+    /// M16b phase 4: boards and votes.
+    #[serde(default)]
+    pub governance: GovernanceCfg,
+    /// M16b phase 4: tags, scanners and the Purist Patrol.
+    #[serde(default)]
+    pub tags: TagsCfg,
+    /// M16b phase 4: the attention addendum.
+    #[serde(default)]
+    pub attention: AttentionCfg,
     /// The Real economy (docs/ECONOMY_V2.md, plan E1): the World market is
     /// always on; the wage law and the safety net are policy (P10, `policy`).
     #[serde(default)]
@@ -5481,6 +5490,12 @@ impl Config {
         if std::env::var("CITYSIM_WOUNDED_OFF").is_ok_and(|v| v == "1") {
             cfg.wounded.enabled = false;
         }
+        // M16b phase 4: boards, tags and attention's A/B and identity device.
+        if std::env::var("CITYSIM_PHASE4_OFF").is_ok_and(|v| v == "1") {
+            cfg.governance.enabled = false;
+            cfg.tags.enabled = false;
+            cfg.attention.enabled = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -5832,6 +5847,8 @@ impl Config {
         self.hostage.captive_quota = up_usize(self.hostage.captive_quota);
         // Phase 3: the downed.
         self.wounded.wounded_quota = up_usize(self.wounded.wounded_quota);
+        // Phase 4: the tags city-wide.
+        self.tags.max_tags = up_usize(self.tags.max_tags);
         let fv = &mut self.fviolence.day_cap;
         *fv = FvKindsCfg {
             killed: up_u32(fv.killed),
@@ -6045,6 +6062,9 @@ pub struct KindTable<T> {
     pub spin: T,
     /// M16b phase 3.
     pub trauma: T,
+    /// M16b phase 4.
+    pub tag: T,
+    pub vote: T,
 }
 
 impl<T: Default + Copy> KindTable<T> {
@@ -6063,6 +6083,8 @@ impl<T: Default + Copy> KindTable<T> {
             ContractKind::Deliver => self.deliver,
             ContractKind::Spin => self.spin,
             ContractKind::Trauma => self.trauma,
+            ContractKind::Tag => self.tag,
+            ContractKind::Vote => self.vote,
         }
     }
 }
@@ -6127,6 +6149,8 @@ impl Default for ContractsCfg {
                 deliver: 40,
                 spin: 120,
                 trauma: 35,
+                tag: 150,
+                vote: 250,
             },
             deadline_days: KindTable {
                 hit: 10,
@@ -6141,6 +6165,8 @@ impl Default for ContractsCfg {
                 deliver: 3,
                 spin: 5,
                 trauma: 7,
+                tag: 10,
+                vote: 14,
             },
             risk_w: 1.5,
             standing_w: 1.0,
@@ -6170,11 +6196,14 @@ pub struct GunLawfulnessCfg {
     pub abduct: f32,
     pub steal: f32,
     pub rescue: f32,
+    /// M16b phase 4.
+    pub tag: f32,
+    pub vote: f32,
 }
 
 impl Default for GunLawfulnessCfg {
     fn default() -> Self {
-        GunLawfulnessCfg { hit: 0.3, beat: 0.4, abduct: 0.3, steal: 0.4, rescue: 0.7 }
+        GunLawfulnessCfg { hit: 0.3, beat: 0.4, abduct: 0.3, steal: 0.4, rescue: 0.7, tag: 0.5, vote: 0.6 }
     }
 }
 
@@ -6187,6 +6216,8 @@ impl GunLawfulnessCfg {
             ContractKind::Abduct => self.abduct,
             ContractKind::Steal => self.steal,
             ContractKind::Rescue => self.rescue,
+            ContractKind::Tag => self.tag,
+            ContractKind::Vote => self.vote,
             ContractKind::Guard
             | ContractKind::Locate
             | ContractKind::Persuade
@@ -7493,6 +7524,115 @@ impl Default for TraumaCfg {
             subscribe_heat: 0.3,
             p_subscribe: 0.2,
             trauma_stat_save: 0.5,
+        }
+    }
+}
+
+/// `[governance]` (M16b phase 4; spec § 6). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct GovernanceCfg {
+    /// The switch in flight (`CITYSIM_PHASE4_OFF=1` turns phase 4 off).
+    pub enabled: bool,
+    /// The roster names whose corps (and their copies) have boards.
+    pub boards: Vec<String>,
+    pub board_size: usize,
+    pub vote_days: u32,
+    pub campaign_days: u32,
+    pub ambition_min: f32,
+    pub vote_bribe: i64,
+}
+
+impl Default for GovernanceCfg {
+    fn default() -> Self {
+        GovernanceCfg {
+            enabled: true,
+            boards: vec!["Habitat".to_string(), "Nutrix".to_string()],
+            board_size: 5,
+            vote_days: 45,
+            campaign_days: 7,
+            ambition_min: 0.12,
+            vote_bribe: 150,
+        }
+    }
+}
+
+/// `[tags]` (M16b phase 4; spec § 3's `[bounty]` tag and scanner keys and
+/// the Patrol's `patrol_share`, kept together).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TagsCfg {
+    pub enabled: bool,
+    pub tag_price: [i64; 4],
+    pub tag_conf: [f32; 4],
+    pub tag_battery_days: u32,
+    /// City-wide (per capita, up only).
+    pub max_tags: usize,
+    pub scanner_price: [i64; 4],
+    pub scan_price: i64,
+    pub scan_heat: f32,
+    pub patrol_share: f32,
+    /// Plan keys: the scanner a Clinic and a Security Office keep.
+    pub clinic_scanner: u8,
+    pub office_scanner: u8,
+    /// Plan key: a scanning adult goes once in this many days.
+    pub scan_days: u32,
+    /// Plan key: the Patrol's reach around its spot.
+    pub patrol_radius: u32,
+}
+
+impl Default for TagsCfg {
+    fn default() -> Self {
+        TagsCfg {
+            enabled: true,
+            tag_price: [0, 150, 400, 900],
+            tag_conf: [0.0, 0.7, 0.85, 0.95],
+            tag_battery_days: 10,
+            max_tags: 32,
+            scanner_price: [0, 300, 800, 2000],
+            scan_price: 40,
+            scan_heat: 0.4,
+            patrol_share: 0.3,
+            clinic_scanner: 1,
+            office_scanner: 2,
+            scan_days: 7,
+            patrol_radius: 6,
+        }
+    }
+}
+
+/// `[attention]` (M16b phase 4; the addendum's table). Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AttentionCfg {
+    pub enabled: bool,
+    pub alert_floor: f32,
+    pub linger_days: u32,
+    pub raid: f32,
+    pub riot: f32,
+    pub loud_run: f32,
+    pub strike: f32,
+    pub acquisition: f32,
+    pub vendetta: f32,
+    /// Plan key (deviation): the flat tilt `brain_tilt × (1 − alertness ÷
+    /// pool)` a distracted brain adds to Hunker, Garrison and LieLow (a
+    /// consideration at no distraction would move every rescore).
+    pub brain_tilt: f32,
+}
+
+impl Default for AttentionCfg {
+    fn default() -> Self {
+        AttentionCfg {
+            enabled: true,
+            alert_floor: 0.2,
+            linger_days: 2,
+            raid: 0.5,
+            riot: 0.4,
+            loud_run: 0.3,
+            strike: 0.2,
+            acquisition: 0.15,
+            vendetta: 0.15,
+            brain_tilt: 0.2,
         }
     }
 }

@@ -692,6 +692,8 @@ fn note_kind_posted(world: &mut World, kind: ContractKind) {
     match kind {
         ContractKind::Persuade => world.stats.current.leverage.k_persuade_posted += 1,
         ContractKind::Trauma => world.stats.current.wounded.trauma_subs_new += 1,
+        ContractKind::Tag => world.stats.current.gov.k_tag_posted += 1,
+        ContractKind::Vote => world.stats.current.gov.k_vote_posted += 1,
         k => match crate::stats::CaptiveCols::slot(k) {
             Some(i) => world.stats.current.captive.k_posted[i] += 1,
             None => world.stats.current.contract.k_posted[k.index()] += 1,
@@ -921,6 +923,9 @@ fn skill_for(world: &World, kind: ContractKind, cand: EntityId) -> f32 {
             crate::systems::law::fighting(world, cand)
         }
         ContractKind::Steal => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth.max(s.hacking)),
+        // M16b phase 4.
+        ContractKind::Tag => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth),
+        ContractKind::Vote => world.comp::<Skills>(cand).map_or(0.0, |s| s.intimidation),
     }
 }
 
@@ -1168,6 +1173,10 @@ pub fn render_for(world: &World, id: ContractId) -> Render {
     // M16b phase 1: a Persuade is a social move resolved at any tier;
     // phase 2: a Deliver and a Spin likewise, a Steal unless its heist runs.
     if matches!(c.kind, ContractKind::Persuade | ContractKind::Deliver | ContractKind::Spin | ContractKind::Steal) {
+        return Render::Ledger;
+    }
+    // Phase 4: a Tag's plant and a Vote's Intimidate likewise.
+    if matches!(c.kind, ContractKind::Tag | ContractKind::Vote) {
         return Render::Ledger;
     }
     // Phase 2: an Escort is a Guard on a person; an Abduct is never ledger.
@@ -1659,6 +1668,10 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
                 world.stats.current.captive.k_done[i] += 1;
             } else if kind == ContractKind::Trauma {
                 // M16b phase 3: a subscription is never fulfilled.
+            } else if kind == ContractKind::Tag {
+                world.stats.current.gov.k_tag_done += 1;
+            } else if kind == ContractKind::Vote {
+                world.stats.current.gov.k_vote_done += 1;
             } else {
                 world.stats.current.contract.k_done[kind.index()] += 1;
             }
@@ -2223,6 +2236,15 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     // M16b phase 1: a Persuade is the taker's one move.
     if c.kind == ContractKind::Persuade {
         crate::systems::leverage::resolve_persuade(world, id, lead);
+        return;
+    }
+    // M16b phase 4: a Tag's plant and a Vote's Intimidate.
+    if c.kind == ContractKind::Tag {
+        crate::systems::tags::resolve_plant(world, id, lead);
+        return;
+    }
+    if c.kind == ContractKind::Vote {
+        crate::systems::governance::resolve_vote(world, id, lead);
         return;
     }
     // M16b phase 2: a Steal (no heist run going) and a Deliver.
@@ -3754,6 +3776,9 @@ pub fn post_vendetta_locates(world: &mut World) {
             .comp::<crate::components::Gang>(g)
             .map_or((None, crate::components::Order::Retaliate), |x| (x.leader, x.order));
         let _ = brain_post(world, Some(g), agent, ContractKind::Locate, target, None, Origin::GangOrder(order));
+        // M16b phase 4: a tag on the head too, when the gang can pay the
+        // record and the device.
+        crate::systems::tags::post_tag(world, g, agent, head, Origin::GangOrder(order));
     }
 }
 
@@ -3780,6 +3805,8 @@ pub fn post_culprit_locate(world: &mut World, corp: EntityId, culprit: EntityId,
     let exec = world.comp::<crate::components::Corp>(corp).and_then(|c| c.exec);
     let origin = Origin::CorpOrder(crate::components::CorpOrder::Secure);
     let _ = brain_post(world, Some(corp), exec, ContractKind::Locate, Target::Agent(head), broker, origin);
+    // M16b phase 4: and a tag on the culprit's head when the corp can pay.
+    crate::systems::tags::post_tag(world, corp, exec, head, origin);
 }
 
 /// C33, from `corp_brain::lobby`: an exec below `dirty_lobby` posts a Beat

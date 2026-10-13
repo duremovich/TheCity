@@ -1805,8 +1805,8 @@ staff = 0
 [contracts]
 max_open = 256
 closed_keep_days = 30
-price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120, trauma = 35 }   # M16b: persuade; phase 2: the rest
-deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5, trauma = 7 }
+price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120, trauma = 35, tag = 150, vote = 250 }   # M16b: persuade; phase 2: the rest
+deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5, trauma = 7, tag = 10, vote = 14 }
 risk_w = 1.5
 standing_w = 1.0
 max_attempts = 2
@@ -1827,7 +1827,7 @@ fixer_lawfulness = 0.35
 fixer_skill = 0.8
 regular_days = 14
 gun_skill_min = 0.45
-gun_lawfulness = { hit = 0.3, beat = 0.4, abduct = 0.3, steal = 0.4, rescue = 0.7 }
+gun_lawfulness = { hit = 0.3, beat = 0.4, abduct = 0.3, steal = 0.4, rescue = 0.7, tag = 0.5, vote = 0.6 }
 run_offers_per_day = 1             # phase 3 (C34)
 match_hour = 18
 offers_per_day = 4
@@ -1966,6 +1966,44 @@ subscribe_coins = 400
 subscribe_heat = 0.3
 p_subscribe = 0.2
 trauma_stat_save = 0.5
+
+# M16b phase 4 (docs/M16_CONTRACTS.md § 6, § 3, the attention addendum): boards and votes, tags and scanners,
+# attention. A vote is a tally over a record; a tag a record writing sightings; attention a number. Placeholders.
+[governance]
+enabled = true                       # the switch in flight (CITYSIM_PHASE4_OFF=1 turns boards, tags and attention off)
+boards = ["Habitat", "Nutrix"]       # roster names: every copy ("Nutrix 2") has a board too
+board_size = 5
+vote_days = 45
+campaign_days = 7
+ambition_min = 0.12                  # spec 0.4: above every employee's greed x standing at HEAD (standing 0.16 base)
+vote_bribe = 150
+
+[tags]
+enabled = true
+tag_price = [0, 150, 400, 900]
+tag_conf = [0.0, 0.7, 0.85, 0.95]
+tag_battery_days = 10
+max_tags = 32                        # city-wide (per capita, up only)
+scanner_price = [0, 300, 800, 2000]
+scan_price = 40
+scan_heat = 0.4
+patrol_share = 0.3                   # spec [leverage] patrol_share: the Purist Patrol's day
+clinic_scanner = 1                   # plan keys: the scanner tier a Clinic and a Security Office keep
+office_scanner = 2
+scan_days = 7                        # plan key: a scanning adult goes once in this many days
+patrol_radius = 6                    # plan key: the Patrol's reach around its spot
+
+[attention]
+enabled = true
+alert_floor = 0.2
+linger_days = 2
+raid = 0.5
+riot = 0.4
+loud_run = 0.3
+strike = 0.2
+acquisition = 0.15
+vendetta = 0.15
+brain_tilt = 0.2                     # plan key: a distracted brain's flat tilt to Hunker/Garrison/LieLow
 
 # P10 (docs/P10_POLICY.md): the city's policy at world creation (the `[economy2] wages` / `no_safety_net`
 # switches retired into it). Each item is a saved lever after day 0: `--lever day=D:<key>=on|off` (`levy`,

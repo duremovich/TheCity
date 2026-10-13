@@ -1078,6 +1078,17 @@ pub struct World {
     /// records (rebuilt on load, `wounded::reindex`).
     #[serde(skip)]
     pub trauma_clients: BTreeMap<EntityId, EntityId>,
+    /// M16b phase 4: the tags on agents.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<crate::contract::Tag>,
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub next_tag: u64,
+    /// M16b phase 4: the Purist gangs that bought a Patrol's scanner.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub gang_scanners: std::collections::BTreeSet<EntityId>,
+    /// M16b phase 4: each faction's attention (the law at `EntityId::NONE`).
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub attention: BTreeMap<EntityId, crate::contract::Attention>,
     /// C9: the Fixers were seeded (at `World::new`, or at the first midnight
     /// after loading an older save with contracts on).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
@@ -1614,6 +1625,10 @@ impl World {
             feed_shamed: BTreeMap::new(),
             wounded: BTreeMap::new(),
             trauma_clients: BTreeMap::new(),
+            tags: Vec::new(),
+            next_tag: 0,
+            gang_scanners: std::collections::BTreeSet::new(),
+            attention: BTreeMap::new(),
             fixers_seeded: false,
             fixers_due: false,
             fixer_runs: BTreeMap::new(),
@@ -3147,6 +3162,9 @@ impl World {
         crate::prof::timed!("tick::leverage", systems::leverage::run(self));
         crate::prof::timed!("tick::captives", systems::captives::run(self));
         crate::prof::timed!("tick::wounded", systems::wounded::run(self));
+        crate::prof::timed!("tick::governance", systems::governance::run(self));
+        crate::prof::timed!("tick::tags", systems::tags::run(self));
+        crate::prof::timed!("tick::attention", systems::attention::run(self));
         crate::prof::timed!("tick::demography", systems::demography::run(self));
         crate::prof::timed!("tick::stats", systems::stats::run(self));
         self.tick += 1;

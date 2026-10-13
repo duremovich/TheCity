@@ -216,10 +216,32 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 // Jobs and room P3: the Camp Wardens.
                 staff(ui, app, world, id, "Wardens");
             }
-            // M16b phase 2: a Private Prison's captives (the Prison panel is phase 4's).
+            // M16b § 9 (phase 4): a Private Prison's captives, each with its
+            // holder, its day in and its demand (a record between fictional agents).
             BuildingKind::Prison => {
-                let held = world.captives.values().filter(|c| c.held_at == id).count();
-                ui.label(format!("captives held {held}"));
+                let held: Vec<(&EntityId, &citysim::contract::Captive)> =
+                    world.captives.iter().filter(|(_, c)| c.held_at == id).collect();
+                let permit = if world.levers.prison_permit { "permitted" } else { "no permit: admits nobody new" };
+                ui.label(format!("captives held {} of {} · {permit}", held.len(), b.capacity));
+                for (&k, c) in held {
+                    ui.horizontal(|ui| {
+                        if ui.link(world.name_of(k)).clicked() {
+                            app.selected = Some(k);
+                            app.follow = false;
+                        }
+                        let demand = c
+                            .coercion
+                            .and_then(|cid| world.coercions.get(&cid))
+                            .map(|x| citysim::systems::leverage::demand_text(world, &x.demand))
+                            .unwrap_or_else(|| "no demand".to_string());
+                        ui.small(format!(
+                            "for {} since day {} · {demand} · until day {}",
+                            world.owner_label(c.holder),
+                            time::day(c.since),
+                            time::day(c.until)
+                        ));
+                    });
+                }
             }
         }
         super::asset::building_section(ui, app, world, id, b);

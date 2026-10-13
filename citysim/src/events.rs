@@ -343,10 +343,21 @@ pub enum EventKind {
     TraumaCall,
     /// `[corp, client]`: a Trauma client stabilised by its crew in time.
     TraumaSave,
+    // --- M16b phase 4: boards, tags, the Patrol (amber).
+    /// `[corp, chair]`: a board's vote, with its tally.
+    VoteHeld,
+    /// `[member, corp]`: a pinned member voted against its own preference.
+    VoteSwung,
+    /// `[carrier, owner]`: a tag planted.
+    Tagged,
+    /// `[carrier, scanner building]`: a tag found and destroyed.
+    TagFound,
+    /// `[member, gang]`: a Purist Patrol's scan at a hang-out.
+    PatrolScan,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 165] = [
+    pub const ALL: [EventKind; 170] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -512,6 +523,11 @@ impl EventKind {
         EventKind::Rescued,
         EventKind::TraumaCall,
         EventKind::TraumaSave,
+        EventKind::VoteHeld,
+        EventKind::VoteSwung,
+        EventKind::Tagged,
+        EventKind::TagFound,
+        EventKind::PatrolScan,
     ];
 }
 

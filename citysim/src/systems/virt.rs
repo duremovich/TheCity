@@ -798,8 +798,9 @@ pub fn node_label(world: &World, n: NodeId) -> String {
 
 /// M16 addendum hook: an owner's alertness multiplies every detection roll
 /// a run meets (the trace). 1.0 until M16 defines it.
-pub fn alertness_mult(_world: &World, _owner: Option<EntityId>) -> f32 {
-    1.0
+pub fn alertness_mult(world: &World, owner: Option<EntityId>) -> f32 {
+    // M16b phase 4: the faction hook (the city's nodes read the law's).
+    crate::systems::faction::alertness_mult(world, owner)
 }
 
 /// V8: `[chrome] contest_step` (one value for locks, sensors and ICE).
