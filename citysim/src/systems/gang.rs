@@ -327,8 +327,11 @@ fn recompute_leader_after(world: &mut World, gang: EntityId, fallen: Option<Enti
     let Some(g) = world.comp::<Gang>(gang) else { return };
     let (members, old, crowned) = (g.members.clone(), g.leader, g.crowned);
     let ranking = leader_ranking(world, gang);
-    // The war's heir, then its winner, leads while a free member.
-    let crowned = crowned.filter(|c| ranking.contains(c));
+    // The war's heir, then its winner (or a splinter's founder), leads while
+    // a free member. M17 review: the crown stays while its holder lives in
+    // the gang (a night in the cells leaves an acting leader, not a new king).
+    let kept = crowned.filter(|&c| crate::systems::law::living(world, c) && world.gang_of(c) == Some(gang));
+    let crowned = kept.filter(|c| ranking.contains(c));
     let leader = crowned.or_else(|| ranking.first().copied());
     for &m in &members {
         if let Some(gm) = world.comp_mut::<GangMember>(m) {
@@ -342,8 +345,7 @@ fn recompute_leader_after(world: &mut World, gang: EntityId, fallen: Option<Enti
     let decapitated = !war_lost && fallen.is_some() && old == fallen && leader.is_some() && leader != old;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.leader = leader;
-        // A heir out for a Vagrancy night keeps the war's crown.
-        if crowned.is_none() && g.war.is_none() {
+        if kept.is_none() && g.war.is_none() {
             g.crowned = None;
         }
         // A claimant who lost the war from a cell is nobody's boss.

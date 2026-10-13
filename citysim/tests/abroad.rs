@@ -73,7 +73,12 @@ fn test_crew_is_away_then_comes_back() {
         assert!(abroad::is_away(&w, a));
         assert_eq!(w.comp::<Brain>(a).map(|b| b.lod), Some(Lod::Statistical));
     }
-    let due: Vec<EntityId> = (0..60).flat_map(|_| lod::due_this_tick(&w)).collect();
+    // Review 7: every slot of the hour (the tick advanced), not one slot 60 times.
+    let mut due: Vec<EntityId> = Vec::new();
+    for _ in 0..60 {
+        due.extend(lod::due_this_tick(&w));
+        w.run_ticks(1);
+    }
     assert!(team.iter().all(|a| !due.contains(a)));
     let d = u64::from(w.config.outside.abroad.abroad_days) + 1;
     days(&mut w, d);
@@ -121,12 +126,19 @@ fn test_won_depot_pays_and_keeps_the_identity() {
     god(&mut w, PlayerCommand::PostAbroad { buyer: Some(buyer), on, asset: OutsideAsset::Depot, crew: team.clone() });
     let m = w.outside.abroad[0].clone();
     assert!(abroad::odds(&w, &m) > 0.9, "a strong crew: {}", abroad::odds(&w, &m));
-    w.run_ticks((m.back_at - w.tick) + TICKS_PER_DAY);
+    let _ = t0;
+    // Review: the settling alone, so the parent's treasury moves by the loot only.
+    w.outside.abroad[0].back_at = w.tick;
+    let (g1, c1, t1) = (w.purse(Some(buyer)), wallets(&w), w.outside.faction(on).expect("p").treasury);
+    abroad::daily(&mut w);
     let ev = w.events.iter().find(|e| e.kind == EventKind::AbroadResolved).expect("resolved");
     assert!(ev.text.contains("coins taken"), "{}", ev.text);
-    assert!(w.purse(Some(buyer)) > g0, "the buyer's cut");
-    assert!(wallets(&w) > c0, "the crew's share");
-    assert!(w.outside.faction(on).expect("p").treasury < t0 + 10_000, "paid from the parent");
+    let (buyer_got, crew_got) = (w.purse(Some(buyer)) - g1, wallets(&w) - c1);
+    assert!(buyer_got > 0 && w.purse(Some(buyer)) > g0, "the buyer's cut");
+    assert!(crew_got > 0 && wallets(&w) > c0, "the crew's share");
+    let paid = t1 - w.outside.faction(on).expect("p").treasury;
+    assert_eq!(paid, buyer_got + crew_got, "paid from the parent's treasury, to the coin");
+    assert_eq!(paid, w.config.outside.abroad.loot, "the whole loot");
     assert_eq!(econ::identity(&w), base, "coins only cross");
 }
 
@@ -139,16 +151,17 @@ fn test_deaths_happen_only_abroad() {
     let on = account(&w, "Arasaka Global");
     let team = crew(&mut w, 4, 0.0);
     god(&mut w, PlayerCommand::PostAbroad { buyer: None, on, asset: OutsideAsset::DataCentre, crew: team.clone() });
-    // Away, nobody dies: the mission runs its days.
-    days(&mut w, 1);
-    assert!(team.iter().all(|&a| citysim::systems::law::living(&w, a)));
-    let d = u64::from(w.config.outside.abroad.abroad_days) + 1;
-    days(&mut w, d);
+    // Away, nobody dies while the mission runs its days (review: every hour
+    // until it settles), and at the settling's tick every dead crew member
+    // is already buried (review 8: read before a buried body is freed).
+    while count(&w, EventKind::AbroadResolved) == 0 {
+        assert!(team.iter().all(|&a| citysim::systems::law::living(&w, a)), "a death while away");
+        w.run_ticks(60);
+    }
     let dead: Vec<EntityId> = team.iter().copied().filter(|&a| !citysim::systems::law::living(&w, a)).collect();
     assert!(!dead.is_empty(), "a hopeless job costs lives");
     for a in dead {
-        // Buried abroad (a buried body is freed a day on): none lies in the city.
-        assert!(w.comp::<citysim::Corpse>(a).is_none_or(|c| c.buried), "buried abroad, no body in the city");
+        assert!(w.comp::<citysim::Corpse>(a).is_some_and(|c| c.buried), "buried abroad, no body in the city");
     }
     assert!(
         w.outside.today.abroad_dead > 0
@@ -168,12 +181,15 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
         let on = account(&w, "Arasaka Global");
         let team = crew(&mut w, 3, 1.0);
         god(&mut w, PlayerCommand::PostAbroad { buyer: None, on, asset: OutsideAsset::Convoy, crew: team.clone() });
-        let d = u64::from(w.config.outside.abroad.abroad_days) + 3;
-        days(&mut w, d);
-        (w, team[0])
+        while count(&w, EventKind::AbroadResolved) == 0 {
+            w.run_ticks(60);
+        }
+        let names: Vec<String> = w.outside.promoted.iter().map(|p| p.cast.name.clone()).collect();
+        days(&mut w, 3);
+        (w, team[0], names)
     };
     // Every disposition past the Friend threshold, the roll certain.
-    let (w, leader) = run(-1.0, -2.0, 1.0);
+    let (w, leader, names) = run(-1.0, -2.0, 1.0);
     let arrived: Vec<_> = w.events.iter().filter(|e| e.kind == EventKind::CastArrived).collect();
     assert!(!arrived.is_empty(), "a promoted NPC arrived");
     let max = w.config.outside.abroad.promoted_max as usize;
@@ -182,17 +198,19 @@ fn test_promotion_past_the_thresholds_arrives_with_the_edge() {
     assert_eq!(arrived[0].actors.get(1), Some(&leader));
     assert!(w.edge(a, leader).is_some_and(|e| e.kind == RelKind::Friend && e.affinity > 0.5));
     assert!(w.outside.promoted_living.contains(&a));
-    assert!(arrived[0].text.starts_with(&w.name_of(a)), "the stored name");
+    // Review 9: the arrival carries the Promoted record's name.
+    assert!(!names.is_empty());
+    assert!(arrived.iter().all(|e| names.contains(&w.name_of(e.actors[0]))), "the stored names: {names:?}");
     // Every disposition an Enemy: the arrival holds a grudge.
-    let (w, leader) = run(2.0, 1.0, 1.0);
+    let (w, leader, _) = run(2.0, 1.0, 1.0);
     let e = w.events.iter().find(|e| e.kind == EventKind::CastArrived).expect("an enemy arrived");
     let a = e.actors[0];
     assert!(w.edge(a, leader).is_some_and(|e| e.kind == RelKind::Enemy));
     assert!(citysim::systems::grudges::grudge_on(&w, a, leader).is_some());
     // Inside the thresholds, or the roll at 0: nobody.
-    let (w, _) = run(2.0, -2.0, 1.0);
+    let (w, _, _) = run(2.0, -2.0, 1.0);
     assert_eq!(count(&w, EventKind::CastArrived), 0);
-    let (w, _) = run(-1.0, -2.0, 0.0);
+    let (w, _, _) = run(-1.0, -2.0, 0.0);
     assert_eq!(count(&w, EventKind::CastArrived), 0);
 }
 
@@ -231,6 +249,19 @@ fn test_the_outside_traces_into_its_branches() {
     let db = w.db.get(&branch).expect("a database");
     let conf = w.config.outside.blackwall.trace_conf;
     assert!(db.sightings.iter().any(|s| s.who == who && (s.confidence - conf).abs() < 1e-6));
+    let traced = |w: &World, x: EntityId| {
+        w.db.get(&branch).is_some_and(|d| d.sightings.iter().any(|s| s.who == x && (s.confidence - conf).abs() < 1e-6))
+    };
+    // Review: a run that lands on the uplink is traced.
+    let runner = crew(&mut w, 1, 0.5)[0];
+    parents::uplink_landed(&mut w, on, citysim::virt::Purpose::Data { wipe: false }, 0, None, runner);
+    assert!(traced(&w, runner), "uplink_landed traces the runner");
+    // Review: the known killer of one of the parent's Outsiders is traced.
+    parents::force_reinforce(&mut w, on, 1).expect("an Outsider");
+    let outsider = w.outside.outsiders.iter().find(|(_, o)| o.from == on && !o.brother).map(|(&a, _)| a).expect("one");
+    let killer = crew(&mut w, 1, 0.5)[0];
+    w.kill_by(outsider, citysim::DeathCause::Violence, Some(killer));
+    assert!(traced(&w, killer), "kill_by traces the killer");
 }
 
 #[test]
@@ -252,6 +283,11 @@ fn test_god_found_parent() {
     let mut w = city();
     let corp =
         w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|x| x.parent.is_none())).expect("a local corp");
+    // Review extra: a corp short of `found_parent_treasury` is refused (a
+    // parent founded on nothing would starve).
+    w.comp_mut::<Corp>(corp).expect("corp").treasury = 100;
+    assert!(parents::god_found_parent(&mut w, corp).is_err(), "a broke corp founds no parent");
+    w.comp_mut::<Corp>(corp).expect("corp").treasury = w.config.outside.parents.found_parent_treasury * 2;
     let n = w.outside.factions.len();
     god(&mut w, PlayerCommand::FoundParent(corp));
     assert_eq!(w.outside.factions.len(), n + 1);

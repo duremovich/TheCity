@@ -891,6 +891,10 @@ fn pay_abroad(world: &mut World, id: OutsideId, cost: i64) -> bool {
     }
     f.treasury -= cost;
     world.outside.minted -= cost;
+    // M17 review: every spend is booked (attitude and Abandon read it).
+    if let Some(p) = parent_mut(world, id) {
+        p.ledger.spent_today += cost;
+    }
     true
 }
 
@@ -905,8 +909,33 @@ fn fund(world: &mut World, id: OutsideId, branch: EntityId, amount: i64) -> i64 
         if let Some(c) = world.comp_mut::<Corp>(branch) {
             c.cashflow_today -= moved;
         }
+        // M17 review: every spend is booked (attitude and Abandon read it).
+        if let Some(p) = parent_mut(world, id) {
+            p.ledger.spent_today += moved;
+        }
     }
     moved
+}
+
+/// M17 review: coins `fund` sent for a post that failed go back abroad (as
+/// much as the branch still holds), the booking undone.
+fn unfund(world: &mut World, id: OutsideId, branch: EntityId, amount: i64) {
+    let back = amount.min(world.purse(Some(branch)).max(0));
+    if back <= 0 {
+        return;
+    }
+    let moved = ownership::cross_out(world, Some(branch), id, back, Flow::ParentFund, true);
+    if moved > 0 {
+        if let Some(f) = world.outside.faction_mut(id) {
+            f.income_today -= moved;
+        }
+        if let Some(c) = world.comp_mut::<Corp>(branch) {
+            c.cashflow_today += moved;
+        }
+        if let Some(p) = parent_mut(world, id) {
+            p.ledger.spent_today -= moved;
+        }
+    }
 }
 
 /// One agent from abroad at `door` (the edge road nearest it, a bed in the
@@ -1203,6 +1232,8 @@ pub fn retake_step(world: &mut World, id: OutsideId) {
                 );
                 return;
             }
+            // M17 review: the sale fell through: the coins go back abroad.
+            unfund(world, id, branch, got);
         }
         world.push_event(
             EventKind::BuyBackOffered,
@@ -1217,7 +1248,7 @@ pub fn retake_step(world: &mut World, id: OutsideId) {
     // Force: the Retake on the board, the parent's coins behind it.
     let target = crate::contract::Target::Building(b);
     let quote = crate::systems::contracts::quote(world, crate::contract::ContractKind::Retake, &target, None);
-    fund(world, id, branch, quote);
+    let sent = fund(world, id, branch, quote);
     let door = world.comp::<Building>(b).map(|bd| bd.door).unwrap_or_default();
     let broker = crate::systems::contracts::nearest_fixer_to(world, door);
     let exec = world.comp::<Corp>(branch).and_then(|c| c.exec);
@@ -1232,7 +1263,10 @@ pub fn retake_step(world: &mut World, id: OutsideId) {
         Some(quote),
         crate::contract::PostExtra::default(),
     );
-    let Ok(cid) = r else { return };
+    let Ok(cid) = r else {
+        unfund(world, id, branch, sent);
+        return;
+    };
     if let Some(p) = parent_mut(world, id) {
         p.lost[i].contract = Some(cid);
     }
@@ -1256,8 +1290,8 @@ pub fn retake_step(world: &mut World, id: OutsideId) {
             if let Some(l) = world.comp::<Gang>(g).and_then(|x| x.leader) {
                 let t = crate::contract::Target::Agent(l);
                 let q = crate::systems::contracts::quote(world, crate::contract::ContractKind::Hit, &t, broker);
-                fund(world, id, branch, q);
-                let _ = crate::systems::contracts::brain_post_with(
+                let sent = fund(world, id, branch, q);
+                let posted = crate::systems::contracts::brain_post_with(
                     world,
                     Some(branch),
                     exec,
@@ -1268,6 +1302,9 @@ pub fn retake_step(world: &mut World, id: OutsideId) {
                     Some(q),
                     crate::contract::PostExtra::default(),
                 );
+                if posted.is_err() {
+                    unfund(world, id, branch, sent);
+                }
                 if let Some(p) = parent_mut(world, id) {
                     p.lost[i].hit_posted = true;
                 }
@@ -1369,13 +1406,18 @@ pub fn found_branch(world: &mut World, id: OutsideId) -> Option<EntityId> {
     let rows = world.config.corps.row_count();
     let row = (0..rows).find(|&i| world.config.corps.template_of(i) == brand)?;
     let niches = world.config.corps.niches_of(row);
-    let taken = world
-        .corps()
-        .into_iter()
-        .filter(|&c| world.comp::<Corp>(c).is_some_and(|x| x.name.starts_with(&brand)))
-        .count();
+    // M17 review: the numeral counts the branches this parent founded (a
+    // living count repeated "II" after a death, and the 20k "Arasaka 2"
+    // copies inflated it).
+    let taken = f.parent.as_ref().map_or(0, |p| p.founded as usize);
     let numerals = ["II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"];
-    let name = format!("{brand} {}", numerals.get(taken).copied().unwrap_or("X"));
+    let name = match numerals.get(taken) {
+        Some(n) => format!("{brand} {n}"),
+        None => format!("{brand} {}", taken + 2),
+    };
+    if let Some(p) = parent_mut(world, id) {
+        p.founded += 1;
+    }
     let corp = ownership::spawn_corp(world, name.clone(), niches.clone(), 0, None);
     if let Some(c) = world.comp_mut::<Corp>(corp) {
         c.parent = Some(id);
@@ -1507,6 +1549,12 @@ pub fn god_found_parent(world: &mut World, corp: EntityId) -> Result<String, Str
     let x = world.comp::<Corp>(corp).ok_or("FoundParent: no corp".to_string())?;
     if x.parent.is_some() {
         return Err(format!("FoundParent: {} has a parent", x.name));
+    }
+    // M17 review: a parent founded on nothing would starve (its income and
+    // upkeep scale with the coins it moves abroad): the natural threshold.
+    let need = world.config.outside.parents.found_parent_treasury;
+    if x.treasury < need {
+        return Err(format!("FoundParent: {} holds {} (needs {need})", x.name, x.treasury));
     }
     if world.outside.factions.len() >= world.config.outside.parents.max_accounts {
         return Err("FoundParent: no account left".into());
@@ -2115,6 +2163,14 @@ pub fn uplink_landed(
     crate::systems::abroad::on_uplink_run(world, id, runner, patron);
 }
 
+/// `units` of Data gone from `id` abroad: its edge cut by `edge_per_unit` a unit.
+pub fn cut_edge(world: &mut World, id: OutsideId, units: u32) {
+    let cfg = world.config.outside.parents.clone();
+    if let Some(p) = parent_mut(world, id) {
+        p.edge = (p.edge - cfg.edge_per_unit * units as f32).clamp(cfg.edge_min, cfg.edge_max);
+    }
+}
+
 /// God `ForceUplinkRun`: the run's effect now, no runner (a theft's units
 /// at a tier-3 deck's take, to the patron's first Lab when it has one).
 pub fn force_uplink_run(
@@ -2152,7 +2208,7 @@ pub fn force_uplink_run(
 /// `on`'s income by `cut` for `days`.
 pub fn sanction(world: &mut World, by: Option<OutsideId>, on: OutsideId, days: u32, cut: f32) {
     let until = world.tick + u64::from(days) * TICKS_PER_DAY;
-    world.outside.sanctions.push(crate::outside::Sanction { by, on, until, cut: cut.clamp(0.0, 1.0) });
+    world.outside.sanctions.push(crate::outside::Sanction { by, on, until, cut: cut.clamp(0.0, 1.0), crew: false });
     world.outside.today.sanctions += 1;
     let name = |w: &World, x: OutsideId| w.outside.faction(x).map_or_else(String::new, |f| f.name.clone());
     let text = match by {
@@ -2162,6 +2218,27 @@ pub fn sanction(world: &mut World, by: Option<OutsideId>, on: OutsideId, days: u
     world.push_event(EventKind::Sanctioned, &[], text);
 }
 
+/// M17 review: a crew abroad burned `on`'s convoy: its income cut by `cut`
+/// for `days`, the crew's sanction (no State's: subsidies and bodies still
+/// cross, and a State sanction can still come).
+pub fn crew_sanction(world: &mut World, on: OutsideId, days: u32, cut: f32) {
+    let until = world.tick + u64::from(days) * TICKS_PER_DAY;
+    world.outside.sanctions.push(crate::outside::Sanction {
+        by: None,
+        on,
+        until,
+        cut: cut.clamp(0.0, 1.0),
+        crew: true,
+    });
+    world.outside.today.sanctions += 1;
+    let name = world.outside.faction(on).map_or_else(String::new, |f| f.name.clone());
+    world.push_event(
+        EventKind::Sanctioned,
+        &[],
+        format!("a crew burned {name}'s convoy abroad: its income cut for {days} days"),
+    );
+}
+
 /// The combined cut of the sanctions standing on `id`: `1 − Π(1 − cut)`.
 pub fn sanction_cut(world: &World, id: OutsideId) -> f32 {
     let now = world.tick;
@@ -2169,9 +2246,9 @@ pub fn sanction_cut(world: &World, id: OutsideId) -> f32 {
 }
 
 /// The State's (or the city's) sanction stands on `id`: no subsidy or body crosses.
-fn state_sanctioned(world: &World, id: OutsideId) -> bool {
+pub fn state_sanctioned(world: &World, id: OutsideId) -> bool {
     let now = world.tick;
-    world.outside.sanctions.iter().any(|s| s.on == id && s.by.is_none() && s.until > now)
+    world.outside.sanctions.iter().any(|s| s.on == id && s.by.is_none() && !s.crew && s.until > now)
 }
 
 /// The cut on a corp's sales to the World (a sanction on its parent).
@@ -2553,7 +2630,7 @@ pub fn campaign_step(world: &mut World, id: OutsideId) {
             let door = world.comp::<crate::components::Position>(e).map(|x| x.tile).unwrap_or_default();
             let broker = crate::systems::contracts::nearest_fixer_to(world, door);
             let q = crate::systems::contracts::quote(world, crate::contract::ContractKind::Beat, &t, broker);
-            fund(world, id, b, q);
+            let sent = fund(world, id, b, q);
             let bexec = world.comp::<Corp>(b).and_then(|x| x.exec);
             let r = crate::systems::contracts::brain_post_with(
                 world,
@@ -2568,6 +2645,8 @@ pub fn campaign_step(world: &mut World, id: OutsideId) {
             );
             if r.is_ok() {
                 acted = Some(format!("a Beat on {}", world.name_of(e)));
+            } else {
+                unfund(world, id, b, sent);
             }
         }
     }

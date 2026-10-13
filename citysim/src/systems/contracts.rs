@@ -464,7 +464,13 @@ pub fn quote(world: &World, kind: ContractKind, target: &Target, broker: Option<
 
 fn target_ok(world: &World, target: &Target) -> bool {
     match *target {
-        Target::Agent(t) => world.has::<Identity>(t) && crate::systems::law::living(world, t) && world.has::<Brain>(t),
+        // M17 review: an agent away on a job abroad is no target.
+        Target::Agent(t) => {
+            world.has::<Identity>(t)
+                && crate::systems::law::living(world, t)
+                && world.has::<Brain>(t)
+                && !crate::systems::abroad::is_away(world, t)
+        }
         Target::Building(b) => world.comp::<Building>(b).is_some_and(|bd| !bd.demolished),
         // M16b phase 2: a corpse still unburied; a story's actor alive.
         Target::Carry { what, .. } => match what {
@@ -2241,6 +2247,18 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     if !free_adult(world, lead) {
         fail_attempt(world, id, "the taker was not free");
         return;
+    }
+    // M17 review: a target away abroad is struck when it is home: look
+    // again in a day (the record stays in the ledger's index).
+    if let Target::Agent(t) = c.target {
+        if crate::systems::abroad::is_away(world, t) {
+            let due = world.tick + TICKS_PER_DAY;
+            if let Some(old) = world.contracts.get_mut(&id).and_then(|x| x.due.replace(due)) {
+                world.ledger_due.remove(&(old, id));
+            }
+            world.ledger_due.insert((due, id));
+            return;
+        }
     }
     // M16b phase 1: a Persuade is the taker's one move.
     if c.kind == ContractKind::Persuade {

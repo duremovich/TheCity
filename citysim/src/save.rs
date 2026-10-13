@@ -127,7 +127,9 @@ use crate::world::World;
 /// seeding (`fab_rows`, `noodle_first_row`, `seed_labs`, `seed_feeds`; serde
 /// defaults), the appended `GrudgeCause::Abroad`, four events and
 /// `PlayerCommand::{PostAbroad, BlackwallBreach, SetStateGuards, FoundParent}`.
-pub const SAVE_VERSION: u8 = 26;
+/// 27: the M17 review: `Sanction.crew`, `Parent.founded` (serde defaults)
+/// and the appended `DeathCause::Abroad`.
+pub const SAVE_VERSION: u8 = 27;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

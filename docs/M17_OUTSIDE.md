@@ -385,8 +385,8 @@ Built in `systems/abroad.rs`, with hooks in `parents.rs` (the Campaign's last re
 - **Abroad (§ 5).** A mission on a parent's depot, data centre or convoy is a ledger record (`Outside.abroad`). Its crew (free adults working no live record, `crew_max` at most, the leader first) is away (`Outside.away`) for `abroad_days`:
   - demoted to Statistical and kept there by the hourly tiers (the hunt and contract holds bypassed), skipped by the hourly Statistical table (no decay, no outcome), refused by the board (`free_adult`) and by the Hunt (`hunter_ok`/`target_ok`), taken out of its building;
   - on `back_at` one keyed draw (`econ::hash_unit`, the mission's id) at `p = logistic(strike_k × (S_crew ÷ def − 1))`, `def = def[asset] × (0.5 + 0.5 × edge)`;
-  - a won depot pays `loot` from the parent's treasury (`crew_share` split over the crew, the rest to the buyer of record, `Flow::Payout`, crossing in: the identity holds); a data centre takes `data` units a track into the buyer's first Lab and cuts edge as an uplink theft; a convoy is a `convoy_days` sanction at `convoy_cut`;
-  - each crew member dies abroad under `death_p × (1 − p)` (`kill_by`, the body buried abroad); the survivors walk back in at the edge road nearest them, Coarse;
+  - a won depot pays `loot` from the parent's treasury (`crew_share` split over the crew, the rest to the buyer of record, `Flow::Payout`, crossing in: the identity holds); a data centre takes `data` units a track into the buyer's first Lab and cuts the edge by `edge_per_unit` a unit (no Lab: the Data stays abroad, no cut; never a netrun, review 6); a convoy is the crew's `convoy_days` sanction at `convoy_cut` (`Sanction.crew`: no State sanction, review 1);
+  - each crew member dies abroad under `death_p × (1 − p)` (`kill_by` with `DeathCause::Abroad`, the body buried abroad); the survivors walk back in at the edge road nearest them, Coarse;
   - `AbroadDeparted`, `AbroadResolved`.
 - **The cast.** Each mission makes `cast_size` records (name from the name tables, role, six traits, disposition), all from keyed hashes of the mission and the index. The disposition is ±0.3 for the outcome, plus the leader's honour − 0.5, plus noise. Past `promote_friend` or `promote_enemy`, a member is promoted under `promote_p` while fewer than `promoted_max` (per capita) are pending or living. It arrives within `promote_delay_days` through the migrant arrival with its stored name and traits and a Friend (0.6) or Enemy (−0.6) edge to the crew's leader (its first member alive on the way back); an Enemy holds a `GrudgeCause::Abroad` grudge at 0.7 that the Hunt reads. `CastArrived`.
 - **Natural posting.** A parent's Campaign with no tier-3 run and no Beat sends `campaign_crew_min` or more of its own Outsiders on a job against the rival's depot. A god posts any (`PostAbroad`).
@@ -399,7 +399,7 @@ Built in `systems/abroad.rs`, with hooks in `parents.rs` (the Campaign's last re
 Deviations:
 - **Abroad is a ledger record, not a board contract.** The crew is named at posting (by a god or by the Campaign); there is no taker market, no escrow and no `ContractKind::Abroad`/`Target::Outside`. The Board panel row waits for M18.
 - **Away is a side table (`Outside.away`), not a component**, as the Outsiders are. An away agent is Statistical and skipped by the Statistical table, the Hunt, the board and the tiers; the daily systems that walk citizens (wages, rent, ageing) still see them.
-- **A death abroad goes through `kill_by`**: the city's ledgers count it (a violent death, the kin's grief); the body is buried at once (no corpse in the street) but the death can open a hole like any unnamed killing.
+- **A death abroad is `DeathCause::Abroad`** (review 2): no violent death in the city's count (so no `city_heat`), no litter, no killing in the word (no gossip, no witness, no hole), no corp or Law shock; the kin grieve and inherit, the body is buried at once, and a gang leader's death abroad opens the succession like any death.
 - **The breach lands at the next midnight**, not inside the run's resolution (killing a runner mid-run would cut the run machinery).
 - **The cast's names repeat across seeds' first missions** (a cast is keyed on the world seed, the mission's id and its index, and the god scenarios all post mission 0 on seed 42).
 - **Not built:** `ForceReinforce`'s `coins`, `ActionKind::ConvertScrip` (phase 4's daily pass stands), the scrip memories, the Outside panel's sparkline and click-through, the map overlay's arrival markers.
@@ -476,6 +476,20 @@ Seeds 42-47 × 120 at 2k (the phase 5 city, identical to 4b's), from `tools/anal
 | Mean megacorp edge, day 120 | 0.85-1.15 | 1.00 (no natural uplink run) | in |
 | Abroad contracts | 1-6 | 0 (a Campaign needs a disliked rival) | under |
 | Civil wars (4b, no band) | — | 4 over six seeds, every one ended by an arrest | — |
+
+### Review fixes (2026-10-13, `/code-review high` over 33fa3da..a8880e9)
+
+Each with a test that fails on a8880e9 (`tests/m17_review.rs`, `abroad.rs`, `contracts.rs`); SAVE 27.
+1. A won convoy's sanction is the crew's (`Sanction.crew`, `parents::crew_sanction`): no State sanction, so subsidies and bodies still cross and a real State sanction can still come.
+2. A death abroad is `DeathCause::Abroad`: no violent death counted (no heat), no litter, no word of a killing, no shocks; a leader's death abroad still opens the succession.
+3. An agent away abroad is no contract target: posting refuses it, and a ledger strike on one waits a day.
+4. The crown stays while its holder lives in the gang (a night in the cells leaves an acting leader); the same for a splinter's founder.
+5. Every spend a parent makes is booked to `spent_today` (`fund`, `pay_abroad`): attitude and Abandon now see Reinforce, Retake, Guard, brothers. On seeds 42-47 × 120 this moved 3 of 6 seeds (43, 45, 47): Militech's attitude on day 120 falls (seed 47 +0.72 → −0.88), Abandoned 10 → 9, State Withdraw orders 5 → 8; Murders 565 → 591, homeless d120 1,546 → 1,504, employed d120 8,222 → 8,243 (inside the noise). A bug fix, not a tune.
+6. A data centre is no netrun (no `UplinkBreached`, no uplink counters); the edge falls only when the Data reached the buyer's Lab.
+7-9. The Away tests read every slot of an hour, check burial at the settling's tick, and compare the arrival's name with the Promoted record's.
+10. A new branch's numeral counts this parent's founded branches (`Parent.founded`).
+- A post that fails gives the parent's funding back (`unfund`: the forced Retake, the Hit on a raider, the Campaign's Beat, a buy-back whose sale fell through).
+- God `FoundParent` refuses a corp holding less than `found_parent_treasury` (a parent founded on nothing starves).
 
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
