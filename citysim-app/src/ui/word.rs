@@ -236,6 +236,7 @@ fn cause_text(world: &World, c: citysim::word::GrudgeCause) -> String {
         G::Hired => "a contract".to_string(),
         G::ChildTaken => "a child taken".to_string(),
         G::Succession => "the war for the gang".to_string(),
+        G::Abroad => "a job abroad".to_string(),
     }
 }
 

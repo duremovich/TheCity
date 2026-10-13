@@ -576,6 +576,25 @@ pub enum PlayerCommand {
     /// M17 phase 4b, god: a gang's syndicate sends its brothers at the next
     /// midnight (the cooldown ignored; the syndicate pays).
     SendBrothers(EntityId),
+    /// M17 phase 5, god: a mission abroad on a parent's asset with this crew
+    /// (the leader first), `buyer` of record.
+    PostAbroad {
+        buyer: Option<EntityId>,
+        on: crate::outside::OutsideId,
+        asset: crate::outside::OutsideAsset,
+        crew: Vec<EntityId>,
+    },
+    /// M17 phase 5, god: a Blackwall breach behind a parent's uplink, the
+    /// patron's Lab stores wiped with it.
+    BlackwallBreach {
+        on: crate::outside::OutsideId,
+        patron: Option<EntityId>,
+    },
+    /// M17 phase 5: the city's cap on the State's guards (`None`: uncapped;
+    /// `Some(0)` refuses the State's men).
+    SetStateGuards(Option<u16>),
+    /// M17 phase 5, god: a corp founds its parent now.
+    FoundParent(EntityId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1246,6 +1265,22 @@ impl World {
             }
             PlayerCommand::SendBrothers(gang) => {
                 let text = crate::systems::parents::send_brothers(self, *gang);
+                self.lever_result(text);
+            }
+            PlayerCommand::PostAbroad { buyer, on, asset, crew } => {
+                let text = crate::systems::abroad::god_post(self, *buyer, *on, *asset, crew);
+                self.lever_result(text);
+            }
+            PlayerCommand::BlackwallBreach { on, patron } => {
+                let text = crate::systems::abroad::god_breach(self, *on, *patron);
+                self.lever_result(text);
+            }
+            PlayerCommand::SetStateGuards(cap) => {
+                let text = crate::systems::abroad::set_state_guards(self, *cap);
+                self.lever_result(text);
+            }
+            PlayerCommand::FoundParent(corp) => {
+                let text = crate::systems::parents::god_found_parent(self, *corp);
                 self.lever_result(text);
             }
             PlayerCommand::SetTariff(t) => {

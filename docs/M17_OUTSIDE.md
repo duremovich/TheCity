@@ -378,6 +378,105 @@ Seeds 42-47 × 120 at 2k, 19e17d0 → phase 4b (printed findings):
 
 The shadow d19 homeless rows `PaidOfWorked` / `WagedWorkdays` are restored to their pre-phase-3 bounds (Min 0.7 / 0.68): the shipped city reads 0.84 / 0.80.
 
+### Phase 5 status (2026-10-13): Abroad, the Blackwall, the gate
+
+Built in `systems/abroad.rs`, with hooks in `parents.rs` (the Campaign's last resort, `uplink_landed`, the State's cap, `found_parent_for`), `lod.rs`, `hunt.rs`, `contracts.rs` and `World::kill_by`; `[outside.abroad]`, `[outside.blackwall]`; SAVE 26.
+
+- **Abroad (§ 5).** A mission on a parent's depot, data centre or convoy is a ledger record (`Outside.abroad`). Its crew (free adults working no live record, `crew_max` at most, the leader first) is away (`Outside.away`) for `abroad_days`:
+  - demoted to Statistical and kept there by the hourly tiers (the hunt and contract holds bypassed), skipped by the hourly Statistical table (no decay, no outcome), refused by the board (`free_adult`) and by the Hunt (`hunter_ok`/`target_ok`), taken out of its building;
+  - on `back_at` one keyed draw (`econ::hash_unit`, the mission's id) at `p = logistic(strike_k × (S_crew ÷ def − 1))`, `def = def[asset] × (0.5 + 0.5 × edge)`;
+  - a won depot pays `loot` from the parent's treasury (`crew_share` split over the crew, the rest to the buyer of record, `Flow::Payout`, crossing in: the identity holds); a data centre takes `data` units a track into the buyer's first Lab and cuts edge as an uplink theft; a convoy is a `convoy_days` sanction at `convoy_cut`;
+  - each crew member dies abroad under `death_p × (1 − p)` (`kill_by`, the body buried abroad); the survivors walk back in at the edge road nearest them, Coarse;
+  - `AbroadDeparted`, `AbroadResolved`.
+- **The cast.** Each mission makes `cast_size` records (name from the name tables, role, six traits, disposition), all from keyed hashes of the mission and the index. The disposition is ±0.3 for the outcome, plus the leader's honour − 0.5, plus noise. Past `promote_friend` or `promote_enemy`, a member is promoted under `promote_p` while fewer than `promoted_max` (per capita) are pending or living. It arrives within `promote_delay_days` through the migrant arrival with its stored name and traits and a Friend (0.6) or Enemy (−0.6) edge to the crew's leader (its first member alive on the way back); an Enemy holds a `GrudgeCause::Abroad` grudge at 0.7 that the Hunt reads. `CastArrived`.
+- **Natural posting.** A parent's Campaign with no tier-3 run and no Beat sends `campaign_crew_min` or more of its own Outsiders on a job against the rival's depot. A god posts any (`PostAbroad`).
+- **The Blackwall (§ 6).** `[outside.blackwall] cap` is the deck, ICE and daemon tier ceiling as a key (M14's arrays already stop at 3). A run that lands on an uplink (only a tier-3 deck routes there) rolls `breach_p` outside the `cooldown_days`; the breach lands at the next midnight: the parent's Data abroad and the patron's Lab stores wiped, every node of the patron's alarmed for `alarm_days`, the runner flatlined. `BlackwallBreach`.
+- **Traces (§ 6).** Whoever lands a run on a parent's uplink, or kills one of its Outsiders (killer known), is written into each branch's database at `trace_conf`.
+- **Levers and god commands.** `SetStateGuards(Option<u16>)` (the State's guards at most, at once down to it; `Some(0)` refuses them), `PostAbroad { buyer, on, asset, crew }`, `BlackwallBreach { on, patron }`, `FoundParent(corp)`.
+- **CSV:** `abroad_posted`, `abroad_done`, `abroad_won`, `abroad_dead`, `away`, `promoted_cast`, `cast_arrived`, `blackwall_breaches`. `tools/analyze_run.py` gains an Outside section with § 11's bands printed beside the readings.
+- **God scenario** `god_abroad`: four of Ninefold's members on Arasaka Global's depot on day 20, `promote_p` 1. The job is settled on day 23 (odds 0.13, lost, its leader dead abroad) and three of the cast arrive on days 29-31 as Enemies of the crew's new leader.
+
+Deviations:
+- **Abroad is a ledger record, not a board contract.** The crew is named at posting (by a god or by the Campaign); there is no taker market, no escrow and no `ContractKind::Abroad`/`Target::Outside`. The Board panel row waits for M18.
+- **Away is a side table (`Outside.away`), not a component**, as the Outsiders are. An away agent is Statistical and skipped by the Statistical table, the Hunt, the board and the tiers; the daily systems that walk citizens (wages, rent, ageing) still see them.
+- **A death abroad goes through `kill_by`**: the city's ledgers count it (a violent death, the kin's grief); the body is buried at once (no corpse in the street) but the death can open a hole like any unnamed killing.
+- **The breach lands at the next midnight**, not inside the run's resolution (killing a runner mid-run would cut the run machinery).
+- **The cast's names repeat across seeds' first missions** (a cast is keyed on the world seed, the mission's id and its index, and the god scenarios all post mission 0 on seed 42).
+- **Not built:** `ForceReinforce`'s `coins`, `ActionKind::ConvertScrip` (phase 4's daily pass stands), the scrip memories, the Outside panel's sparkline and click-through, the map overlay's arrival markers.
+
+Identity:
+- With `CITYSIM_OUTSIDE_OFF=1` the 2k city is byte-identical to cdcd6a2 (events, and the CSV on its 654 shared columns), seeds 42-44 × 30.
+- **With the switch on**, seeds 42-47 × 120 at 2k and seed 42 × 60 at 20k, every event is byte-identical to cdcd6a2: nothing of phase 5 fires naturally. A Campaign needs a disliked rival (0 in phase 4), no natural runner reaches an uplink, and no Outsider was killed by a known killer.
+
+Phase 5's readings are therefore 4b's: see "Phase 4b status" above and the calibration findings below. Gates: trio 1,149/0; `core_year` (population 1,956, starvation 1, 8 of 9 corps alive, 4,539 ticks/s); shadow 131/0 (4 skips); god 28 + 3 + 3; parity; `core_20k` (201 ticks/s). 20k seed 42 × 60: 210 ticks/s.
+
+### The rename hazard (phase 5)
+
+"Arasaka", "Militech", "Nutrix" and "Zetatech" are placeholder names Dylan will rename. No logic keys on a name any more:
+- **The seeding roles are rows** in `[corps]`: `fab_rows` (the Fab owners, dealt in turn: rows 8, 7), `noodle_first_row` (the Food row the Noodle Bars start from: row 0), `seed_labs` (owner row, zone, focus track) and `seed_feeds` (owner row, zone; the Feed is named "<owner> Now"). They replace `jobs.rs`'s `corps_of_template(["Zetatech", "Militech"])` and `corp_named("Nutrix")`, `virt.rs`'s `SEED_LABS` and `news.rs`'s `SEED_FEEDS`. Re-keyed with every output byte-identical (events and CSV, 2k seeds 42-44 × 30).
+- **The references the config still makes by name** (`[tech] seed`, `[governance] boards`, `[outside.parents] factions[].branch`) are data, renamed with the row in the same file. `Config::unresolved_names()` lists every reference that resolves to no row of `[corps] names` or `[gangs] names` (and every role row out of range); `tests/names.rs` asserts the shipped config, and its 20k profile, have none, and that a row renamed without its references is caught. Renaming a row means editing `names` and the references the test names; the seeding follows the row.
+- `purist_name` ("The Unplugged") is a name the city gives, not a lookup. The tests still find corps and gangs by name: they test the shipped config.
+
+### The homeless trace (phase 5, for Dylan: a design question, nothing tuned)
+
+Homeless on day 120 at 2k has climbed through M17: 1,051 (c6d6ebe) → 1,265 (p2) → 1,339 (p3) → 1,353 (p4) → 1,546 (4b).
+
+**4b's +14 % is inside the noise.** Three config butterflies of the 4b city (`[lod] stat_violence_mult` 1.01, 0.99, 1.02, inert by design) read 1,244, 1,448 and 1,348 against the shipped 1,546 (seeds 42-47 summed, d120); the d61-120 mean spreads 1,598-1,829. So a single build's d120 sum moves ±150 for nothing. **It is not the ex-gang members:** homeless who once were in a gang were 51 on p4 and 54 on 4b at d120 (gang members now 44 → 61). 98 % of the homeless at d120 on both builds were evicted at least once; 6-7 % hold a job. The homeless are evicted renters.
+
+**M17 as a whole adds about a quarter to a third.** The attribution, each lever off alone on the 4b city (seeds 42-47 × 120, summed; noise ±150 at d120):
+
+| run | homeless d120 | homeless mean d61-120 | employed d120 | gang members d120 |
+|---|---|---|---|---|
+| 4b, shipped | 1,546 | 1,829 | 8,222 | 725 |
+| butterflies (×3) | 1,244-1,448 | 1,598-1,793 | 8,314-8,581 | 773-817 |
+| M17 off (`CITYSIM_OUTSIDE_OFF`) | **1,051** | **1,471** | **9,003** | 768 |
+| remittances, tribute, subsidies and scrip off | 1,269 (1,172 with a butterfly) | 1,649 (1,532) | 8,615 (8,804) | 795 |
+| remittances and scrip off | **1,189** | **1,560** | **8,918** | 717 |
+| remittances off | 1,276 | 1,727 | 8,639 | 754 |
+| scrip off | 1,334 | 1,659 | 8,462 | 778 |
+| subsidies off | 1,431 | 1,754 | 8,270 | 816 |
+| Outsiders off (`bodies_per_day` 0) | 1,396 | 1,793 | 8,434 | 745 |
+| tribute off | 1,574 | 1,847 | 8,115 | 804 |
+| the State off | 1,500 | 1,827 | 8,207 | 826 |
+| succession off | 1,480 | 1,827 | 8,318 | 754 |
+
+- **Remittances and scrip carry most of it, through jobs.** With both off, employed d120 is 8,918 against M17 off's 9,003 and the shipped 8,222, and homeless falls to 1,189. A remittance ships 30 % of a branch's positive cashflow abroad (less revenue to hire on); scrip pays 30 % of a branch's wages in paper that spends only at the issuer's shops and Blocks, so a worker renting elsewhere has less coin for rent. Fewer jobs and thinner coin wages are evictions.
+- **Tribute, the State, the Outsiders and the succession are inside the noise.** Phase 2's trace blamed tribute; on today's city (scrip on since phase 4, the brothers rare since 4b) tribute off reads no different.
+- **The question for Dylan:** extraction was the dystopian default ("Open for Dylan" 2). It costs the 2k city ~780 jobs and ~+350 homeless by day 120 (~+33 %). Is that the city you want, or should the parents take less (`remit_share`, `remit_floor`, `scrip_wage_share`), or should scrip be spendable more widely?
+
+### Implemented: deviations (M17, the whole milestone)
+
+Each phase's own list is in its status section above; the milestone in one place:
+
+- **Phase 1 (Ambient demand):** food demand is computed fresh at midnight; `trade_balance` counts the book; Ambient visits stay out of a venue's own visits ring; unsold demand is lost. The 2k map has no flats, so the 2k city never sees the book.
+- **Phase 2 (the parents):** a parent hangs off `OutsideFaction.parent`; no `Gang.parent` or `Law.parent` (the branch lists); syndicates by seeded order; the State held until phase 3; the parents skip tick 0; `trade_balance` reads the parents' crossings.
+- **Phase 3 (bodies):** a Retake is struck on the ledger, not a live mission; the buy-back's seller rule is simplified; Outsiders live in a side table and arrive through the migrant path; a new branch survives its grace without a building; brothers on a decapitation (superseded by 4b); emptied gangs wait out of `branch_loss`; the State's Fund scores at the cap and its Mandate is read at the rescore (no `LawShock`); placeholders for `flat_retake` and `refound_attitude`; a founded parent has no CSV columns.
+- **Phase 4 (weapons, scrip):** conversion is a daily pass, not a walk; no scrip memories or wipe grudges; a Campaign needs a disliked rival; the State's sanction is a rule, only in a hot city; a failing parent dies only with its reserves under `treasury_ref`; `branch_loss`'s district term is additive; `ForceUplinkRun` applies the effect without a runner.
+- **Phase 4b (succession, Dylan's call):** wars follow deaths only; a member's regard is the claimants' reputation; the succession rides the M17 switch; a jailed loser stays a member.
+- **Phase 5 (Abroad, the Blackwall):** see above.
+- **Throughout:** every M17 roll is a keyed hash (`econ::hash_unit`, purposes `0x0E17_0001..0009`), never a stream; every coin crosses through `ownership::cross_in`/`cross_out` (the identity is asserted every day in `core_sanity`, `core_year` and `core_20k`); every enum variant is appended; SAVE 21 → 26.
+
+### Calibration findings against § 11's bands (printed, never asserted)
+
+Seeds 42-47 × 120 at 2k (the phase 5 city, identical to 4b's), from `tools/analyze_run.py`'s Outside section:
+
+| Target | Band | Reading | |
+| --- | --- | --- | --- |
+| Outside coins in ÷ `total_coins` | 3-15 % | not in the CSV (the World market's crossings dominate `outside_in`: 389-449k a seed) | — |
+| Net crossing ÷ `total_coins` | ±5 % | `outside_in − outside_out` +49k to +99k a seed (the World market's export surplus, phase 2's finding) | over |
+| Subsidies per megacorp parent | 1-8 | 20-35 a seed over every parent (syndicates included) | over |
+| Reinforce episodes (all parents) | 1-6 | 1-3 | in |
+| Outsiders living, max | 6-40 | 6-17 | in |
+| Retakes ÷ buildings lost | 20-80 % | no branch building lost to a holder (0 posted) | — |
+| Megacorp parent deaths (baseline) | 0 | 0 | in |
+| Parent lifetime under `god_kill_militech` | 60-110 days | 33 days (phase 4) | under |
+| Syndicate reinforcements | 1-4 | 0 on 5 seeds, 1 on seed 47 (the brothers are rare since 4b) | under, by design |
+| State guards, mean | 0-8 | 9.1-10.4 | over |
+| Scrip ÷ coins in branch employees' wealth | 10-35 % | not in the CSV; scrip out 12.6-18.4k a seed on day 120 | — |
+| Mean megacorp edge, day 120 | 0.85-1.15 | 1.00 (no natural uplink run) | in |
+| Abroad contracts | 1-6 | 0 (a Campaign needs a disliked rival) | under |
+| Civil wars (4b, no band) | — | 4 over six seeds, every one ended by an arrest | — |
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).

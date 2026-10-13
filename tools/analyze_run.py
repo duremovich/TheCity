@@ -286,6 +286,7 @@ def analyze(rows, events, jail_cap=None):
     hitmarket(rows, events, out)
     health(rows, events, out, flags)
     transit(rows, out)
+    outside(rows, out)
     out["flags"] = flags
     return out
 
@@ -859,6 +860,48 @@ def transit(rows, out):
     out["transit"] = T
 
 
+OUTSIDE_TOTALS = ("outside_remit", "outside_tariff", "outside_parent_fund", "outside_subsidies", "outside_in",
+                  "outside_out", "outsiders_arrived", "outsiders_left", "settled", "reinforcements", "buybacks",
+                  "retakes_posted", "retakes_won", "branches_founded", "parents_founded", "abandoned",
+                  "brothers_arrived", "gangs_refounded", "state_grants", "mandates", "withdrawals", "uplink_runs",
+                  "uplink_breached", "data_shipped", "sanctions_new", "campaigns", "parents_dead", "scrip_paid",
+                  "scrip_spent", "scrip_converted", "scrip_wiped", "parents_in", "parents_out", "successions",
+                  "civil_wars", "war_loser_dead", "war_loser_fled", "war_loser_splinter", "war_loser_jailed",
+                  "abroad_posted", "abroad_done", "abroad_won", "abroad_dead", "promoted_cast", "cast_arrived",
+                  "blackwall_breaches")
+
+
+def outside(rows, out):
+    """M17 (docs/M17_OUTSIDE.md, "Revised 2026-10-12" and § 11): the parents, bodies, weapons, scrip, the
+    succession and Abroad, with the plan's calibration bands printed beside the readings. Numbers only, never
+    flags: every band is a printed finding."""
+    if not rows or "outside_remit" not in rows[0]:
+        return
+    t = {k: sum(col(rows, k)) for k in OUTSIDE_TOTALS if k in rows[0]}
+    last = rows[-1]
+    O = {"totals": t}
+    days = len(rows)
+    O["net_crossing"] = t.get("outside_in", 0) - t.get("outside_out", 0)
+    O["outsiders_living_max"] = max(col(rows, "outsiders_living"), default=0)
+    O["state_guards_mean"] = mean(col(rows, "state_guards"))
+    O["scrip_out_last"] = num(last.get("scrip_out", 0))
+    O["wars_active_max"] = max(col(rows, "wars_active"), default=0)
+    O["away_max"] = max(col(rows, "away"), default=0)
+    edges = [num(last[k]) for k in last if k.endswith("_edge") and k.startswith("o")]
+    O["edges_last"] = edges
+    O["bands"] = {
+        "reinforcements per 120 days (all parents)": (t.get("reinforcements", 0) * 120.0 / days, "1-6"),
+        "Outsiders living, max": (O["outsiders_living_max"], "6-40"),
+        "retakes posted / buybacks": (t.get("retakes_posted", 0), "20-80 % of buildings lost"),
+        "megacorp parent deaths": (t.get("parents_dead", 0), "0"),
+        "syndicate reinforcements (brothers / 3)": (t.get("brothers_arrived", 0) / 3.0, "1-4"),
+        "State guards, mean": (O["state_guards_mean"], "0-8 at 2,000"),
+        "Abroad missions per 120 days": (t.get("abroad_posted", 0) * 120.0 / days, "1-6"),
+        "mean megacorp edge, last day": (mean(edges[:2]) if edges else 0, "0.85-1.15"),
+    }
+    out["outside"] = O
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -1028,6 +1071,15 @@ def fmt(o):
                  f"{w['peak_stop_load_max']:g}; crews on the last day {w['el_staff_last']:g}; fares less power "
                  f"{w['net_to_city']:g}; commute ticks a tile, ride {w['tpt_ride_mean']:.2f} vs walk "
                  f"{w['tpt_walk_mean']:.2f}")
+    if "outside" in o:
+        w = o["outside"]
+        L.append("-- the outside (M17) --")
+        L.append("run totals: " + f({k: v for k, v in w["totals"].items() if v}))
+        L.append(f"net crossing {w['net_crossing']:g}; Outsiders living max {w['outsiders_living_max']:g}; State "
+                 f"guards mean {w['state_guards_mean']:.1f}; scrip out last {w['scrip_out_last']:g}; civil wars "
+                 f"running max {w['wars_active_max']:g}; away max {w['away_max']:g}")
+        L.append("printed bands (docs/M17_OUTSIDE.md § 11, never asserted):")
+        L += [f"  {k}: {v:.3g} (band {b})" for k, (v, b) in w["bands"].items()]
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

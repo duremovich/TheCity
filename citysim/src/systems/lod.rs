@@ -92,7 +92,14 @@ fn assign_hour(world: &mut World) {
             let Some(b) = world.comp::<Brain>(id) else { continue };
             let held = world.has::<Sentence>(id) || b.emigrating || b.cuffed_by.is_some();
             let body = forced == Lod::Statistical && (body_role(world, id) || crate::systems::law::wanted(world, id));
-            set_lod(world, id, if held || body { Lod::Coarse } else { forced });
+            let lod = if crate::systems::abroad::is_away(world, id) {
+                Lod::Statistical
+            } else if held || body {
+                Lod::Coarse
+            } else {
+                forced
+            };
+            set_lod(world, id, lod);
         }
     } else {
         assign(world);
@@ -290,6 +297,11 @@ fn assign(world: &mut World) {
     // scan-ok: hourly: assign
     for id in world.citizens() {
         let (Some(pos), Some(brain)) = (world.comp::<Position>(id), world.comp::<Brain>(id)) else { continue };
+        // M17 phase 5: away abroad, no body.
+        if crate::systems::abroad::is_away(world, id) {
+            set_lod(world, id, Lod::Statistical);
+            continue;
+        }
         if world.has::<Sentence>(id) || brain.emigrating {
             // L1: a pinned prisoner keeps its pin (the shadow went blind in the cells).
             let pinned = brain.pinned;
@@ -499,14 +511,17 @@ pub fn set_lod(world: &mut World, id: EntityId, lod: Lod) {
     }
     // M14 V13: a body jacked in is never Statistical; M15 W22: nor a
     // hunter or a hunted target.
+    // M17 phase 5: a crew away abroad is Statistical whatever holds it.
+    let away = crate::systems::abroad::is_away(world, id);
     if lod == Lod::Statistical
+        && !away
         && (world.runner_of.contains_key(&id) || world.hunts.contains_key(&id) || world.hunted_by.contains_key(&id))
     {
         return;
     }
     // M16a (plan C17, C35 phase 4): nor a party of a record worked live
     // (the contract set: taker, crew, target, inside `contract_quota`).
-    if lod == Lod::Statistical && crate::systems::contracts::holds_body(world, id) {
+    if lod == Lod::Statistical && !away && crate::systems::contracts::holds_body(world, id) {
         return;
     }
     // L2 shadow fixes item 7: the tier's start, for the dwell (after the
@@ -650,7 +665,14 @@ fn stat_row(world: &World, id: EntityId) -> Option<StatRow> {
 /// the load is spread evenly over the ticks.
 /// Reads one slot bucket (`World::stat_slots`), so the cost is O(due agents).
 pub fn due_this_tick(world: &World) -> Vec<EntityId> {
-    world.stat_slots.at(world.tick).iter().copied().filter(|&id| !world.has::<Sentence>(id)).collect()
+    // M17 phase 5: a crew away on a job abroad is skipped (no decay, no outcome).
+    world
+        .stat_slots
+        .at(world.tick)
+        .iter()
+        .copied()
+        .filter(|&id| !world.has::<Sentence>(id) && !crate::systems::abroad::is_away(world, id))
+        .collect()
 }
 
 /// The hourly stand-in for a Statistical brain: an hour of need decay, then

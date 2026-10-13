@@ -3592,6 +3592,8 @@ impl World {
         // M15 W16: grudges on the dead settle, the dead's pass to its heirs
         // (read before `on_death` unlinks the spouse), its Hunts end.
         systems::grudges::on_death(self, id, killer);
+        // M17 phase 5: the outside traces whoever killed one of its Outsiders.
+        systems::abroad::on_death(self, id, killer);
         crate::systems::social::on_death(self, id);
         if cause == DeathCause::Violence && systems::law::is_guard(self, id) {
             systems::law_brain::push_shock(self, LawShock::GuardKilled);

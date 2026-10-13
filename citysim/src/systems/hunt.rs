@@ -38,6 +38,7 @@ pub fn hunter_ok(world: &World, h: EntityId) -> bool {
         && crate::systems::demography::is_adult(world, h)
         && !world.has::<Sentence>(h)
         && world.comp::<Brain>(h).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating)
+        && !crate::systems::abroad::is_away(world, h)
 }
 
 /// Can `t` be hunted: a living agent, free, not leaving.
@@ -45,6 +46,7 @@ pub fn target_ok(world: &World, t: EntityId) -> bool {
     crate::systems::law::living(world, t)
         && !world.has::<Sentence>(t)
         && world.comp::<Brain>(t).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating)
+        && !crate::systems::abroad::is_away(world, t)
 }
 
 /// W20: the heaviest unsettled grudge of `holder` on a huntable agent with

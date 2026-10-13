@@ -389,10 +389,17 @@ pub enum EventKind {
     CivilWar,
     TookSides,
     CivilWarEnded,
+    /// M17 phase 5: `AbroadDeparted [crew..]`, `AbroadResolved [crew..]`,
+    /// `CastArrived [arrival, toward]` (a promoted cast member),
+    /// `BlackwallBreach [runner, patron]`.
+    AbroadDeparted,
+    AbroadResolved,
+    CastArrived,
+    BlackwallBreach,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 197] = [
+    pub const ALL: [EventKind; 201] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -590,6 +597,10 @@ impl EventKind {
         EventKind::CivilWar,
         EventKind::TookSides,
         EventKind::CivilWarEnded,
+        EventKind::AbroadDeparted,
+        EventKind::AbroadResolved,
+        EventKind::CastArrived,
+        EventKind::BlackwallBreach,
     ];
 }
 

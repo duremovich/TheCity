@@ -34,13 +34,6 @@ pub const STORY_RING: usize = 256;
 /// The city's Feed (W41): owner `None`, wages from the Treasury.
 pub const CIVIC_WIRE: &str = "Civic Wire";
 
-/// W41: the opening Feeds, `(name, owner corp by its row's template or the
-/// city, district by role)`: the Civic and Mid West on the shipped map.
-/// Scale S4: the city's Feed is one per city; a corp's is dealt once per
-/// copy of its template (`World::seed_copies`, "Nutrix 2 Now").
-const SEED_FEEDS: [(&str, Option<&str>, Seat); 2] =
-    [(CIVIC_WIRE, None, Seat::new(Zone::Civic, 0.0)), ("Nutrix Now", Some("Nutrix"), Seat::new(Zone::Mid, 0.0))];
-
 /// A story's run within this many days of the same deed is skipped (W37),
 /// and a Spin corp buries stories this recent.
 const RECENT_DAYS: u64 = 3;
@@ -135,20 +128,28 @@ fn open_feed(world: &mut World, feed: EntityId, name: String) {
 pub fn seed_feeds(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
     let copies = world.seed_copies();
-    for (copy, (name, corp_name, seat)) in (0..copies).flat_map(|j| SEED_FEEDS.into_iter().map(move |r| (j, r))) {
-        if copy > 0 && corp_name.is_none() {
+    // W41: the opening Feeds, the city's (the Civic, once per city) then
+    // `[corps] seed_feeds` (M17 phase 5: owner corp by its row's template,
+    // never by name; "<owner> Now", dealt once per copy of the template,
+    // Scale S4; district by role).
+    let mut rows: Vec<(Option<usize>, Seat)> = vec![(None, Seat::new(Zone::Civic, 0.0))];
+    rows.extend(world.config.corps.seed_feeds.iter().map(|f| (Some(f.row), Seat::new(f.zone, 0.0))));
+    for (copy, (row, seat)) in (0..copies).flat_map(|j| rows.iter().map(move |&r| (j, r))) {
+        if copy > 0 && row.is_none() {
             continue;
         }
-        let owner = match corp_name {
-            Some(cn) => match world.corps_of_template(cn).get(copy) {
-                Some(&c) => Some(c),
-                None => continue,
-            },
+        let owner = match row {
+            Some(r) => {
+                match world.config.corps.row_template(r).and_then(|t| world.corps_of_template(t).get(copy).copied()) {
+                    Some(c) => Some(c),
+                    None => continue,
+                }
+            }
             None => None,
         };
         let name = match owner {
-            Some(o) if copy > 0 => format!("{} Now", world.owner_label(Some(o))),
-            _ => name.to_string(),
+            Some(o) => format!("{} Now", world.owner_label(Some(o))),
+            None => CIVIC_WIRE.to_string(),
         };
         let Some(d) = crate::systems::districts::seat_district(world, seat, copy, copies) else {
             continue;

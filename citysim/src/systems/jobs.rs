@@ -131,10 +131,6 @@ fn corps_by_row(world: &World) -> Vec<(u16, EntityId)> {
     v
 }
 
-fn corp_named(world: &World, name: &str) -> Option<EntityId> {
-    world.corps().into_iter().find(|&c| world.comp::<Corp>(c).is_some_and(|cc| cc.name == name))
-}
-
 /// The owner of copy `i` of `kind` (the Seeding table; the fronts below):
 /// `(owner, front_of)`;
 /// `None` for the Fab = skip the copy (no Tech-capable row left).
@@ -150,13 +146,22 @@ fn seed_owner(world: &World, kind: BuildingKind, i: usize) -> Option<(Option<Ent
         world.gang_list().iter().copied().filter(|&g| !crate::systems::creeds::is_purist(world, g)).collect();
     Some(match kind {
         BuildingKind::Fab => {
-            // Scale S4: the two rows' copies in turn (copy `i / 2` of the
-            // template), so the Fabs dealt per capita go to every copy.
-            let owners = world.corps_of_template(["Zetatech", "Militech"][i % 2]);
+            // Scale S4: the rows' copies in turn (copy `i / n` of the
+            // template), so the Fabs dealt per capita go to every copy. M17
+            // phase 5: the rows are `[corps] fab_rows` (Zetatech, Militech).
+            let rows = &world.config.corps.fab_rows;
+            if rows.is_empty() {
+                return None;
+            }
+            let owners = world
+                .config
+                .corps
+                .row_template(rows[i % rows.len()])
+                .map_or_else(Vec::new, |t| world.corps_of_template(t));
             if owners.is_empty() {
                 return None;
             }
-            (Some(owners[(i / 2) % owners.len()]), None)
+            (Some(owners[(i / rows.len()) % owners.len()]), None)
         }
         // Fix round (phase 1 deviation, as the fronts below; Seeding table:
         // "the megacorp rows"): the seeded Lounge and Clubs stand on the
@@ -180,12 +185,14 @@ fn seed_owner(world: &World, kind: BuildingKind, i: usize) -> Option<(Option<Ent
             (if tech.is_empty() { None } else { Some(tech[i % tech.len()]) }, None)
         }
         BuildingKind::NoodleBar => {
-            // Every third the city; the rest round-robin by row, Nutrix first.
+            // Every third the city; the rest round-robin by row, the
+            // `noodle_first_row` (Nutrix) first.
             if i % 3 == 2 {
                 (None, None)
             } else {
                 let mut food = in_niche(Niche::Food);
-                if let Some(n) = corp_named(world, "Nutrix") {
+                let first = world.config.corps.noodle_first_row.and_then(|r| world.config.corps.row_template(r));
+                if let Some(n) = first.and_then(|t| world.corps_of_template(t).first().copied()) {
                     if let Some(p) = food.iter().position(|&c| c == n) {
                         food.remove(p);
                         food.insert(0, n);

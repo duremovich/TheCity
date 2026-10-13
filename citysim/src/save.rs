@@ -120,7 +120,14 @@ use crate::world::World;
 /// `[outside.parents]`'s `brothers_gutted_below`/`brothers_p` (serde
 /// defaults), the appended `GrudgeCause::Succession`, `HuntWhy::Succession`,
 /// four events and `PlayerCommand::SendBrothers`.
-pub const SAVE_VERSION: u8 = 25;
+/// 26: M17 phase 5, Abroad, the Blackwall and the gate: `Outside.{abroad,
+/// abroad_next, away, promoted, promoted_living, last_breach,
+/// state_guards_cap, breach_due}`, the day's phase 5 counters,
+/// `[outside.abroad]`, `[outside.blackwall]` and `[corps]`'s row-keyed
+/// seeding (`fab_rows`, `noodle_first_row`, `seed_labs`, `seed_feeds`; serde
+/// defaults), the appended `GrudgeCause::Abroad`, four events and
+/// `PlayerCommand::{PostAbroad, BlackwallBreach, SetStateGuards, FoundParent}`.
+pub const SAVE_VERSION: u8 = 26;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

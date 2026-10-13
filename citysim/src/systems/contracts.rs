@@ -853,6 +853,7 @@ pub fn free_adult(world: &World, id: EntityId) -> bool {
         && crate::systems::demography::is_adult(world, id)
         && !world.has::<Sentence>(id)
         && world.comp::<Brain>(id).is_some_and(|b| b.cuffed_by.is_none() && !b.emigrating)
+        && !crate::systems::abroad::is_away(world, id)
 }
 
 /// C12: may `cand` be offered record `c`: not its target, buyer or placing

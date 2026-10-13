@@ -272,6 +272,10 @@ pub struct OutsideCfg {
     pub parents: ParentsCfg,
     /// M17 phase 4b: a gang's succession (promotion, or a civil war).
     pub succession: SuccessionCfg,
+    /// M17 phase 5: missions abroad and their cast (§ 5).
+    pub abroad: AbroadCfg,
+    /// M17 phase 5: the Blackwall and the outside's traces (§ 6).
+    pub blackwall: BlackwallCfg,
 }
 
 impl Default for OutsideCfg {
@@ -281,7 +285,83 @@ impl Default for OutsideCfg {
             ambient: AmbientDemandCfg::default(),
             parents: ParentsCfg::default(),
             succession: SuccessionCfg::default(),
+            abroad: AbroadCfg::default(),
+            blackwall: BlackwallCfg::default(),
         }
+    }
+}
+
+/// M17 phase 5 `[outside.abroad]` (§ 5): a mission abroad is one keyed draw
+/// after `abroad_days` away, `p = logistic(strike_k × (S_crew ÷ def − 1))`
+/// with `def = def[asset] × (0.5 + 0.5 × edge)`. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AbroadCfg {
+    pub abroad_days: u32,
+    /// `[depot, data_centre, convoy]`.
+    pub def: [f32; 3],
+    pub strike_k: f32,
+    pub loot: i64,
+    /// The crew's share of a depot's loot (the rest to the buyer).
+    pub crew_share: f32,
+    pub data: u32,
+    pub convoy_cut: f32,
+    pub convoy_days: u32,
+    pub death_p: f32,
+    pub crew_max: usize,
+    pub cast_size: u32,
+    pub promote_friend: f32,
+    pub promote_enemy: f32,
+    pub promote_p: f32,
+    pub promote_delay_days: u32,
+    /// Promoted cast living at most, at 2,000 residents (`scaled_to`).
+    pub promoted_max: u32,
+    /// A Campaign with no run and no Beat sends this many of its Outsiders at least.
+    pub campaign_crew_min: usize,
+}
+
+impl Default for AbroadCfg {
+    fn default() -> Self {
+        AbroadCfg {
+            abroad_days: 3,
+            def: [3.0, 4.0, 2.0],
+            strike_k: 4.0,
+            loot: 1500,
+            crew_share: 0.4,
+            data: 150,
+            convoy_cut: 0.05,
+            convoy_days: 7,
+            death_p: 0.3,
+            crew_max: 6,
+            cast_size: 6,
+            promote_friend: 0.6,
+            promote_enemy: -0.6,
+            promote_p: 0.3,
+            promote_delay_days: 30,
+            promoted_max: 8,
+            campaign_crew_min: 2,
+        }
+    }
+}
+
+/// M17 phase 5 `[outside.blackwall]` (§ 6): the one boogeyman. A
+/// successful run on an uplink at a deck of `cap` rolls `breach_p`, never
+/// twice inside `cooldown_days`. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BlackwallCfg {
+    /// The deck, ICE and daemon tier ceiling (M14's tiers stop here).
+    pub cap: u8,
+    pub breach_p: f32,
+    pub alarm_days: u32,
+    pub cooldown_days: u32,
+    /// The conf of the sighting the outside's trace writes in its branches' databases.
+    pub trace_conf: f32,
+}
+
+impl Default for BlackwallCfg {
+    fn default() -> Self {
+        BlackwallCfg { cap: 3, breach_p: 0.002, alarm_days: 7, cooldown_days: 60, trace_conf: 0.8 }
     }
 }
 
@@ -633,6 +713,45 @@ impl Default for ParentsCfg {
 impl OutsideCfg {
     pub fn is_default(&self) -> bool {
         *self == OutsideCfg::default()
+    }
+}
+
+impl Config {
+    /// M17 phase 5 (the rename hazard): every corp, gang or Law reference the
+    /// config makes by name or row that resolves to no row of `[corps] names`
+    /// or `[gangs] names`, as readable lines. The shipped config must give
+    /// none (`tests/names.rs`): renaming a row in `names` without its
+    /// references fails there, loudly, instead of silently seeding nothing.
+    pub fn unresolved_names(&self) -> Vec<String> {
+        let corps: Vec<&str> = (0..self.corps.names.len()).map(|i| self.corps.template_of(i)).collect();
+        let gangs = &self.gangs.names;
+        let mut out = Vec::new();
+        for t in self.tech.seed.keys().filter(|t| !corps.contains(&t.as_str())) {
+            out.push(format!("[tech] seed names corp {t:?}"));
+        }
+        for b in self.governance.boards.iter().filter(|b| !corps.contains(&b.as_str())) {
+            out.push(format!("[governance] boards names corp {b:?}"));
+        }
+        for f in &self.outside.parents.factions {
+            let ok = match f.kind {
+                crate::outside::OutsideKind::Megacorp => corps.contains(&f.branch.as_str()),
+                crate::outside::OutsideKind::Syndicate => gangs.contains(&f.branch),
+                crate::outside::OutsideKind::State => f.branch == "Law",
+                crate::outside::OutsideKind::World => true,
+            };
+            if !ok {
+                out.push(format!("[outside.parents] {:?} names branch {:?}", f.name, f.branch));
+            }
+        }
+        let n = self.corps.names.len();
+        let rows = self.corps.fab_rows.iter().map(|&r| ("fab_rows", r));
+        let rows = rows.chain(self.corps.noodle_first_row.map(|r| ("noodle_first_row", r)));
+        let rows = rows.chain(self.corps.seed_labs.iter().map(|s| ("seed_labs", s.row)));
+        let rows = rows.chain(self.corps.seed_feeds.iter().map(|s| ("seed_feeds", s.row)));
+        for (key, r) in rows.filter(|&(_, r)| r >= n) {
+            out.push(format!("[corps] {key} names row {r} of {n}"));
+        }
+        out
     }
 }
 
@@ -2783,6 +2902,29 @@ pub struct CorpsCfg {
     /// seeded as Zetatech.
     #[serde(default)]
     pub template: Vec<String>,
+    /// M17 phase 5 (the rename hazard): the seeding roles by row index into
+    /// `names` (a row's template at 20k), never by a corp's name, so a renamed
+    /// row keeps its role. The Fab owners, dealt in turn (Zetatech, Militech).
+    #[serde(default = "CorpsCfg::default_fab_rows")]
+    pub fab_rows: Vec<usize>,
+    /// The Food row the Noodle Bars' round-robin starts from (Nutrix).
+    #[serde(default = "CorpsCfg::default_noodle_first_row")]
+    pub noodle_first_row: Option<usize>,
+    /// The seeded Labs (M14 V26): owner row, district by zone, focus track.
+    #[serde(default = "CorpsCfg::default_seed_labs")]
+    pub seed_labs: Vec<SeedSite>,
+    /// The seeded corp Feeds (M15 W41, "<owner> Now"): owner row, district by zone.
+    #[serde(default = "CorpsCfg::default_seed_feeds")]
+    pub seed_feeds: Vec<SeedSite>,
+}
+
+/// M17 phase 5: a seeded building's owner row and seat (`seed_labs`, `seed_feeds`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct SeedSite {
+    pub row: usize,
+    pub zone: crate::components::Zone,
+    #[serde(default)]
+    pub track: crate::virt::Track,
 }
 
 impl Default for CorpsCfg {
@@ -2792,6 +2934,32 @@ impl Default for CorpsCfg {
 }
 
 impl CorpsCfg {
+    fn default_fab_rows() -> Vec<usize> {
+        vec![8, 7]
+    }
+    fn default_noodle_first_row() -> Option<usize> {
+        Some(0)
+    }
+    fn default_seed_labs() -> Vec<SeedSite> {
+        use crate::components::Zone;
+        use crate::virt::Track;
+        let site = |row, zone, track| SeedSite { row, zone, track };
+        vec![
+            site(8, Zone::Spire, Track::Chrome),
+            site(8, Zone::Civic, Track::Industry),
+            site(6, Zone::Vats, Track::Deck),
+            site(7, Zone::Mid, Track::Deck),
+        ]
+    }
+    fn default_seed_feeds() -> Vec<SeedSite> {
+        vec![SeedSite { row: 0, zone: crate::components::Zone::Mid, track: crate::virt::Track::Industry }]
+    }
+
+    /// Row `i`'s template when `i` is a row of the shipped roster, else `None`.
+    pub fn row_template(&self, i: usize) -> Option<&str> {
+        (i < self.names.len()).then(|| self.template_of(i))
+    }
+
     fn default_raided_days() -> u64 {
         7
     }
@@ -2929,6 +3097,10 @@ impl CorpsCfg {
                 spin: 0.0,
             },
             template: Vec::new(),
+            fab_rows: Vec::new(),
+            noodle_first_row: None,
+            seed_labs: Vec::new(),
+            seed_feeds: Vec::new(),
         }
     }
 
@@ -6304,6 +6476,8 @@ impl Config {
         op.state_guards_max = (f64::from(op.state_guards_max) * up).round().clamp(0.0, 65535.0) as u16;
         op.state_guards_step = (f64::from(op.state_guards_step) * up).round().clamp(1.0, 65535.0) as u16;
         op.heat_murders *= up as f32;
+        // M17 phase 5: the promoted cast living at most, per capita.
+        self.outside.abroad.promoted_max = up_u32(self.outside.abroad.promoted_max);
         let wm = &mut self.world_market;
         wm.treasury_ref = up_i64(wm.treasury_ref);
         wm.food.cap = up_u32(wm.food.cap);

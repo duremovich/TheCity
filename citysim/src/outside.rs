@@ -309,6 +309,15 @@ pub struct OutsideDay {
     pub war_fled: u32,
     pub war_splinter: u32,
     pub war_jailed: u32,
+    /// Phase 5: missions abroad posted and resolved (won), crew dead
+    /// abroad, cast promoted and arrived, Blackwall breaches.
+    pub abroad_posted: u32,
+    pub abroad_done: u32,
+    pub abroad_won: u32,
+    pub abroad_dead: u32,
+    pub promoted: u32,
+    pub cast_arrived: u32,
+    pub breaches: u32,
 }
 
 /// M17 phase 1 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the Ambient
@@ -439,6 +448,114 @@ pub struct Outside {
     /// `BanScrip`: no issuance.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub scrip_banned: bool,
+    // --- Phase 5: Abroad, the cast, the Blackwall, the State's cap.
+    /// The missions abroad under way (a ledger record each).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub abroad: Vec<Abroad>,
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub abroad_next: u32,
+    /// The agents away on a mission (`Abroad.id`): off the map, Statistical
+    /// and skipped by the hourly table.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub away: BTreeMap<crate::entity::EntityId, u32>,
+    /// Cast members promoted to arrive later as immigrants.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub promoted: Vec<Promoted>,
+    /// The promoted who arrived and live (the `promoted_max` cap).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub promoted_living: Vec<crate::entity::EntityId>,
+    /// The Blackwall's last breach.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_breach: Option<crate::time::Tick>,
+    /// `SetStateGuards`: the city's cap on the State's guards (`None`: the config's).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub state_guards_cap: Option<u16>,
+    /// A Blackwall breach rolled on a run, landing at the next midnight:
+    /// `(parent, runner, patron)`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub breach_due: Option<(OutsideId, crate::entity::EntityId, Option<crate::entity::EntityId>)>,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
+}
+
+/// M17 phase 5 (§ 5): an asset abroad an `Abroad` mission strikes.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum OutsideAsset {
+    /// Coins: `abroad_loot` from the parent's treasury.
+    Depot,
+    /// Data: `abroad_data` a track into the buyer's store, and `edge`.
+    DataCentre,
+    /// A sanction's cut on the parent for a week.
+    Convoy,
+}
+
+impl OutsideAsset {
+    pub fn label(self) -> &'static str {
+        match self {
+            OutsideAsset::Depot => "depot",
+            OutsideAsset::DataCentre => "data centre",
+            OutsideAsset::Convoy => "convoy",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<OutsideAsset> {
+        match s.to_ascii_lowercase().as_str() {
+            "depot" => Some(OutsideAsset::Depot),
+            "data_centre" | "datacentre" | "data" => Some(OutsideAsset::DataCentre),
+            "convoy" => Some(OutsideAsset::Convoy),
+            _ => None,
+        }
+    }
+}
+
+/// M17 phase 5 (§ 5): a mission abroad, always at the Ledger LOD: the crew
+/// is away (`Outside.away`) until `back_at`, then one keyed draw resolves it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Abroad {
+    pub id: u32,
+    /// The buyer of record (a branch, a gang, an agent; `None`: god's).
+    pub buyer: Option<crate::entity::EntityId>,
+    pub on: OutsideId,
+    pub asset: OutsideAsset,
+    /// The crew, its leader first.
+    pub crew: Vec<crate::entity::EntityId>,
+    pub since: crate::time::Tick,
+    pub back_at: crate::time::Tick,
+}
+
+/// M17 phase 5 (§ 5): a cast member's role abroad.
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub enum CastRole {
+    Guard,
+    Clerk,
+    Runner,
+    Fixer,
+    Bystander,
+}
+
+/// M17 phase 5 (§ 5): a transient NPC of a mission abroad, a record (never
+/// an entity), hash-derived from the mission and its index. `personality`
+/// is `[lawfulness, greed, pride, sociability, courage, loyalty]`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CastMember {
+    pub seed: u64,
+    pub name: String,
+    pub role: CastRole,
+    pub personality: [f32; 6],
+    /// `-1..=1` toward the crew.
+    pub disposition: f32,
+}
+
+/// M17 phase 5 (§ 5): a cast member who will arrive as an immigrant with an
+/// edge (Friend or Enemy) to `toward` on day `arrive_on`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Promoted {
+    pub cast: CastMember,
+    pub toward: crate::entity::EntityId,
+    pub rel: crate::components::RelKind,
+    pub arrive_on: u64,
 }
 
 fn is_zero_u16(v: &u16) -> bool {

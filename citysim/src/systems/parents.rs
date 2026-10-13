@@ -794,6 +794,14 @@ pub fn close_day(world: &mut World) -> Option<crate::stats::OutsideCols> {
     cols.war_loser_fled = t.war_fled;
     cols.war_loser_splinter = t.war_splinter;
     cols.war_loser_jailed = t.war_jailed;
+    cols.abroad_posted = t.abroad_posted;
+    cols.abroad_done = t.abroad_done;
+    cols.abroad_won = t.abroad_won;
+    cols.abroad_dead = t.abroad_dead;
+    cols.away = o.away.len() as u32;
+    cols.promoted = t.promoted;
+    cols.cast_arrived = t.cast_arrived;
+    cols.breaches = t.breaches;
     // The CSV's account slots are the seeded parents (the header is fixed;
     // a parent founded later is in the panel, not the CSV).
     let slots = usize::from(o.csv_parents);
@@ -1432,9 +1440,17 @@ pub fn found_parents(world: &mut World) {
         if world.outside.factions.len() >= cfg.max_accounts {
             break;
         }
-        let Some((name, treasury, exec)) = world.comp::<Corp>(c).map(|x| (x.name.clone(), x.treasury, x.exec)) else {
-            continue;
-        };
+        found_parent_for(world, c);
+    }
+}
+
+/// A local corp founds its parent: `found_parent_frac` of its treasury
+/// moved abroad into a new megacorp account it is the branch of. The
+/// account's id, or `None` for no corp.
+fn found_parent_for(world: &mut World, c: EntityId) -> Option<OutsideId> {
+    let cfg = world.config.outside.parents.clone();
+    {
+        let (name, treasury, exec) = world.comp::<Corp>(c).map(|x| (x.name.clone(), x.treasury, x.exec))?;
         let persona = exec
             .and_then(|e| world.comp::<Personality>(e))
             .map(|p| Persona { greed: p.greed, pride: p.pride, lawfulness: p.lawfulness })
@@ -1478,7 +1494,26 @@ pub fn found_parents(world: &mut World) {
             &[c],
             format!("{name} moved {moved} abroad and founded {name} Holdings"),
         );
+        Some(id)
     }
+}
+
+/// God `FoundParent`: `corp` founds its parent now, whatever its treasury
+/// and share (not past `max_accounts`, not a branch already).
+pub fn god_found_parent(world: &mut World, corp: EntityId) -> Result<String, String> {
+    if !parents_on(world) {
+        return Err("FoundParent: the parents are off".into());
+    }
+    let x = world.comp::<Corp>(corp).ok_or("FoundParent: no corp".to_string())?;
+    if x.parent.is_some() {
+        return Err(format!("FoundParent: {} has a parent", x.name));
+    }
+    if world.outside.factions.len() >= world.config.outside.parents.max_accounts {
+        return Err("FoundParent: no account left".into());
+    }
+    let id = found_parent_for(world, corp).ok_or("FoundParent: no corp".to_string())?;
+    let name = world.outside.faction(id).map_or_else(String::new, |f| f.name.clone());
+    Ok(format!("God: {name} founded"))
 }
 
 /// § 2 Abandon: every branch cut loose, the Outsiders' tours ended, no
@@ -1780,6 +1815,13 @@ fn grant_week(world: &mut World, id: OutsideId) {
     }
 }
 
+/// The State's guards at most: `state_guards_max`, under the city's
+/// `SetStateGuards` cap when one is set.
+pub fn state_cap(world: &World) -> u16 {
+    let max = world.config.outside.parents.state_guards_max;
+    world.outside.state_guards_cap.map_or(max, |c| c.min(max))
+}
+
 /// The State's order's action (also a god's, through the tests).
 pub fn state_act(world: &mut World, order: OutsideOrder) {
     let cfg = world.config.outside.parents.clone();
@@ -1787,7 +1829,7 @@ pub fn state_act(world: &mut World, order: OutsideOrder) {
     let now = world.tick;
     match order {
         OutsideOrder::Fund => {
-            world.outside.state_guards = (world.outside.state_guards + cfg.state_guards_step).min(cfg.state_guards_max);
+            world.outside.state_guards = (world.outside.state_guards + cfg.state_guards_step).min(state_cap(world));
             grant_week(world, id);
         }
         OutsideOrder::Mandate => {
@@ -1839,7 +1881,7 @@ fn state_daily(world: &mut World, id: OutsideId) {
     let Some(p) = f.parent.as_ref() else { return };
     let wealth = sat(f.treasury as f32 / f.treasury_ref.max(1) as f32);
     let current = p.order;
-    let mut scores = state_scores(&cfg, heat, corrupt, wealth, world.outside.state_guards, cfg.state_guards_max);
+    let mut scores = state_scores(&cfg, heat, corrupt, wealth, world.outside.state_guards, state_cap(world));
     for s in &mut scores {
         if s.0 == current {
             s.1 += cfg.hysteresis;
@@ -1870,7 +1912,7 @@ fn state_daily(world: &mut World, id: OutsideId) {
         world.push_event(EventKind::OutsideOrder, &[], format!("{name}: {} -> {}", current.label(), next.label()));
     }
     match next {
-        OutsideOrder::Fund if world.outside.state_guards < cfg.state_guards_max => state_act(world, OutsideOrder::Fund),
+        OutsideOrder::Fund if world.outside.state_guards < state_cap(world) => state_act(world, OutsideOrder::Fund),
         OutsideOrder::Mandate if !mandate_active(world) => state_act(world, OutsideOrder::Mandate),
         OutsideOrder::Withdraw if world.outside.state_guards > 0 => state_act(world, OutsideOrder::Withdraw),
         _ => {
@@ -2069,6 +2111,8 @@ pub fn uplink_landed(
     world.outside.today.uplink_breached += 1;
     let actors = [runner, patron.unwrap_or(EntityId::NONE)];
     world.push_event(EventKind::UplinkBreached, &actors, text);
+    // Phase 5: the outside traces the runner; the Blackwall may answer.
+    crate::systems::abroad::on_uplink_run(world, id, runner, patron);
 }
 
 /// God `ForceUplinkRun`: the run's effect now, no runner (a theft's units
@@ -2526,6 +2570,11 @@ pub fn campaign_step(world: &mut World, id: OutsideId) {
                 acted = Some(format!("a Beat on {}", world.name_of(e)));
             }
         }
+    }
+    // Phase 5: no run and no Beat: a job abroad on the rival's depot by
+    // the parent's own Outsiders.
+    if acted.is_none() && crate::systems::abroad::campaign_post(world, id, rival) {
+        acted = Some("a job on its depot abroad".to_string());
     }
     if let Some(what) = acted {
         world.outside.today.campaigns += 1;

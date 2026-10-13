@@ -370,6 +370,10 @@ pub fn run(world: &mut World) {
     // has traded yet, as `ownership`'s cashflow roll).
     if world.tick_of_day() == 0 && world.tick > 0 {
         crate::systems::parents::daily(world);
+        // M17 phase 5: missions abroad, the promoted cast, a breach due.
+        if crate::systems::parents::parents_on(world) {
+            crate::systems::abroad::daily(world);
+        }
     }
     if !ambient_on(world) {
         return;

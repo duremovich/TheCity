@@ -2846,6 +2846,66 @@ fn god_decapitate_close_succession() {
     assert!(ended.iter().any(|l| l.contains("The Hollow")), "the war was not settled within war_days");
 }
 
+/// M17 god 5 (phase 5): a job abroad. On day 20 four of Ninefold's
+/// members leave on a mission against Arasaka Global's depot, `promote_p`
+/// at 1. Does the mission come back settled, and does someone the crew met
+/// abroad arrive in the city with an edge to its leader (its first member alive on the way back) within
+/// `promote_delay_days`?
+#[test]
+#[ignore]
+fn god_abroad() {
+    let mut team: Vec<EntityId> = Vec::new();
+    let (w, story) = run_outside(60, |w, day| {
+        if day == 0 {
+            w.config.outside.abroad.promote_p = 1.0;
+        }
+        if day != 20 {
+            return;
+        }
+        let Some(g) = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "Ninefold")) else {
+            return;
+        };
+        let crew: Vec<EntityId> = citysim::systems::gang::leader_ranking(w, g)
+            .into_iter()
+            .filter(|&m| {
+                citysim::systems::contracts::free_adult(w, m) && !citysim::systems::contracts::holds_body(w, m)
+            })
+            .take(4)
+            .collect();
+        let Some(on) = w.outside.factions.iter().find(|f| f.name == "Arasaka Global").map(|f| f.id) else { return };
+        team = crew.clone();
+        eprintln!("day 20: {} crew from Ninefold to Arasaka Global's depot", crew.len());
+        w.push_command(PlayerCommand::PostAbroad {
+            buyer: Some(g),
+            on,
+            asset: citysim::outside::OutsideAsset::Depot,
+            crew,
+        });
+    });
+    let kinds = [EventKind::AbroadDeparted, EventKind::AbroadResolved, EventKind::CastArrived];
+    for l in told(&story, &kinds, 0, 60) {
+        eprintln!("{l}");
+    }
+    assert!(!team.is_empty(), "a crew left");
+    let delay = u64::from(w.config.outside.abroad.promote_delay_days);
+    let days = u64::from(w.config.outside.abroad.abroad_days);
+    assert!(!told(&story, &[EventKind::AbroadResolved], 20, 20 + days + 2).is_empty(), "the job was not settled");
+    let arrived: Vec<EntityId> = w
+        .outside
+        .promoted_living
+        .iter()
+        .copied()
+        .filter(|&a| {
+            team.iter().any(|&m| {
+                w.edge(a, m).is_some_and(|e| matches!(e.kind, citysim::RelKind::Friend | citysim::RelKind::Enemy))
+            })
+        })
+        .collect();
+    let in_time = !told(&story, &[EventKind::CastArrived], 20, 20 + days + delay + 2).is_empty();
+    eprintln!("promoted living with an edge to the crew: {}", arrived.len());
+    assert!(in_time && !arrived.is_empty(), "nobody met abroad came to the city");
+}
+
 /// M17 god 4: a murder wave (25 residents killed on day 10). Does the State
 /// fund guards (a StateGrant) within 14 days, and withdraw once it calms?
 #[test]

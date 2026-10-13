@@ -17,7 +17,7 @@ use smallvec::SmallVec;
 
 use crate::components::{
     Asset, AssetKind, AssetLoc, Brain, Building, BuildingKind, Corp, DistrictId, Gang, GoalKind, Kit, Niche,
-    Personality, Position, Skills, TilePos, Zone,
+    Personality, Position, Skills, TilePos,
 };
 use crate::config::IceCfg;
 use crate::entity::EntityId;
@@ -333,16 +333,6 @@ pub fn bump_epoch(world: &mut World) {
 // Seeding (the plan's Seeding table, V26, V47)
 // ---------------------------------------------------------------------------
 
-/// The seeded Labs: owner corp by its row's template (Scale S4: copy `j`
-/// goes to the template's `j`-th copy), district by role (the Spire, the
-/// Civic, the Vats, Mid West on the shipped map), focus.
-const SEED_LABS: [(&str, Seat, Track); 4] = [
-    ("Zetatech", Seat::new(Zone::Spire, 0.0), Track::Chrome),
-    ("Zetatech", Seat::new(Zone::Civic, 0.0), Track::Industry),
-    ("Arasaka", Seat::new(Zone::Vats, 0.0), Track::Deck),
-    ("Militech", Seat::new(Zone::Mid, 0.0), Track::Deck),
-];
-
 /// Last in `World::new`, after `assets::seed_sellers`: each row's Lab on
 /// the vacant Lot of its district nearest the centroid (Lot door
 /// Manhattan, ties lower id), owned by the row's corp, `focus` set, four
@@ -353,9 +343,16 @@ const SEED_LABS: [(&str, Seat, Track); 4] = [
 pub fn seed_labs(world: &mut World) -> Vec<EntityId> {
     let mut built = Vec::new();
     let copies = world.seed_copies();
-    for (copy, (template, seat, focus)) in (0..copies).flat_map(|j| SEED_LABS.into_iter().map(move |r| (j, r))) {
+    // M17 phase 5: the seeded Labs are `[corps] seed_labs` (owner corp by
+    // its row's template, Scale S4: copy `j` goes to the template's `j`-th
+    // copy; district by role: the Spire, the Civic, the Vats, Mid West on the
+    // shipped map; focus), keyed by row, never by name.
+    let sites = world.config.corps.seed_labs.clone();
+    for (copy, site) in (0..copies).flat_map(|j| sites.iter().map(move |r| (j, r))) {
+        let (seat, focus) = (Seat::new(site.zone, 0.0), site.track);
         // Review finding 7: copy `j` is the row's `j`th corp (none: skipped,
         // never another copy's owner).
+        let Some(template) = world.config.corps.row_template(site.row) else { continue };
         let Some(&corp) = world.corps_of_template(template).get(copy) else {
             continue;
         };

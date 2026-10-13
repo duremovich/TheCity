@@ -180,6 +180,11 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::CivilWar
         | EventKind::TookSides
         | EventKind::CivilWarEnded
+        // M17 phase 5.
+        | EventKind::AbroadDeparted
+        | EventKind::AbroadResolved
+        | EventKind::CastArrived
+        | EventKind::BlackwallBreach
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

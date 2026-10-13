@@ -556,6 +556,16 @@ pub struct OutsideCols {
     pub war_loser_fled: u32,
     pub war_loser_splinter: u32,
     pub war_loser_jailed: u32,
+    /// M17 phase 5: missions abroad (the day's; `away` at the close), the
+    /// cast promoted and arrived, Blackwall breaches.
+    pub abroad_posted: u32,
+    pub abroad_done: u32,
+    pub abroad_won: u32,
+    pub abroad_dead: u32,
+    pub away: u32,
+    pub promoted: u32,
+    pub cast_arrived: u32,
+    pub breaches: u32,
     pub accounts: Vec<ParentCols>,
 }
 
@@ -609,6 +619,14 @@ impl OutsideCols {
             "war_loser_fled",
             "war_loser_splinter",
             "war_loser_jailed",
+            "abroad_posted",
+            "abroad_done",
+            "abroad_won",
+            "abroad_dead",
+            "away",
+            "promoted_cast",
+            "cast_arrived",
+            "blackwall_breaches",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -669,6 +687,14 @@ impl OutsideCols {
             self.war_loser_fled.to_string(),
             self.war_loser_splinter.to_string(),
             self.war_loser_jailed.to_string(),
+            self.abroad_posted.to_string(),
+            self.abroad_done.to_string(),
+            self.abroad_won.to_string(),
+            self.abroad_dead.to_string(),
+            self.away.to_string(),
+            self.promoted.to_string(),
+            self.cast_arrived.to_string(),
+            self.breaches.to_string(),
         ];
         for a in &self.accounts {
             v.push(a.treasury.to_string());

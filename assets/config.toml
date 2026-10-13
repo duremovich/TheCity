@@ -568,6 +568,19 @@ markets  = [1, 1, 1, 0, 0, 0, 0, 0, 0]
 blocks   = [0, 60, 0, 120, 60, 20, 0, 40, 0]
 offices  = [0, 0, 0, 0, 0, 0, 1, 1, 0]
 treasury_initial = [6000, 5000, 2500, 8000, 4000, 1500, 4000, 3000, 5000]
+# M17 phase 5 (the rename hazard): the seeding roles by row index into `names` above, never by name, so a
+# renamed row keeps its role. Fab owners dealt in turn; the Food row the Noodle Bars start from; the seeded
+# Labs (owner row, zone, focus) and corp Feeds ("<owner> Now", owner row, zone). Rows 0 Nutrix, 6 Arasaka,
+# 7 Militech, 8 Zetatech at the time of writing.
+fab_rows = [8, 7]
+noodle_first_row = 0
+seed_labs = [
+  { row = 8, zone = "Spire", track = "Chrome" },
+  { row = 8, zone = "Civic", track = "Industry" },
+  { row = 6, zone = "Vats", track = "Deck" },
+  { row = 7, zone = "Mid", track = "Deck" },
+]
+seed_feeds = [{ row = 0, zone = "Mid" }]
 bar_owner_coins = 200
 hoard_heat = 5000                  # a corp treasury above this is a raid prize in the gang brain
 acquire_premium = 1.2              # offer = value × premium
@@ -2723,3 +2736,40 @@ war_enemy_pairs = 30
 loyalty_w = 0.3                     # a member's pull toward the heir, x loyalty
 regard_w = 0.3                      # x (standing + dread x (1 - courage)) of each claimant
 splinter_min = 2                    # a loser with this many followers leads a splinter, else flees
+
+# M17 phase 5 (§ 5): missions abroad at the Ledger LOD. The crew is away (off the map, Statistical, skipped
+# by the hourly table) for abroad_days, then one keyed draw: p = logistic(strike_k x (crew strength / def - 1)),
+# def = def[asset] x (0.5 + 0.5 x the parent's edge). A depot pays loot (crew_share to the crew), a data centre
+# Data into the buyer's Lab and an edge cut, a convoy a week's sanction. A crew member dies abroad with
+# death_p x (1 - p). cast_size hash-derived NPCs per mission; one with a disposition past promote_friend or
+# promote_enemy arrives as an immigrant within promote_delay_days with that edge, on a roll under promote_p.
+# Placeholders.
+[outside.abroad]
+abroad_days = 3
+def = [3.0, 4.0, 2.0]               # depot, data centre, convoy
+strike_k = 4.0
+loot = 1500
+crew_share = 0.4
+data = 150
+convoy_cut = 0.05
+convoy_days = 7
+death_p = 0.3
+crew_max = 6
+cast_size = 6
+promote_friend = 0.6
+promote_enemy = -0.6
+promote_p = 0.3
+promote_delay_days = 30
+promoted_max = 8                    # living at 2,000 residents (per capita)
+campaign_crew_min = 2               # a Campaign with no run and no Beat sends this many Outsiders abroad
+
+# M17 phase 5 (§ 6): the Blackwall (a successful uplink run at a deck of `cap` rolls breach_p, never twice
+# inside cooldown_days: the target parent's Data and the patron's Lab stores wiped, the runner flatlined,
+# the patron's nodes alarmed for alarm_days) and the outside's traces (a sighting at trace_conf in each
+# branch's database of whoever breached a parent's uplink or killed one of its Outsiders). Placeholders.
+[outside.blackwall]
+cap = 3
+breach_p = 0.002
+alarm_days = 7
+cooldown_days = 60
+trace_conf = 0.8

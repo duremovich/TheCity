@@ -369,6 +369,8 @@ pub enum GrudgeCause {
     ChildTaken,
     /// M17 phase 4b: the other claimant in a civil war for the holder's gang.
     Succession,
+    /// M17 phase 5: a cast member abroad who met the holder's crew and came after them.
+    Abroad,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
