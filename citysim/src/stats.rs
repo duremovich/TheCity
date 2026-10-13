@@ -490,6 +490,8 @@ pub struct ParentCols {
     pub rep: f32,
     pub branch_loss: f32,
     pub order: String,
+    /// M17 phase 4.
+    pub edge: f32,
 }
 
 /// M17 phase 2: the parents' group. The flows are the last midnight's
@@ -528,6 +530,24 @@ pub struct OutsideCols {
     pub state_grants: u32,
     pub mandates: u32,
     pub withdrawals: u32,
+    /// M17 phase 4: the weapons and scrip (the day's; `sanctions_active`
+    /// and `scrip_out` at the close).
+    pub uplink_runs: i64,
+    pub uplink_breached: i64,
+    pub data_shipped: i64,
+    pub sanctions_new: i64,
+    pub sanctions_active: i64,
+    pub campaigns: i64,
+    pub parents_dead: i64,
+    pub scrip_out: i64,
+    pub scrip_paid: i64,
+    pub scrip_spent: i64,
+    pub scrip_converted: i64,
+    pub scrip_wiped: i64,
+    /// Coins in from, and out to, the parents today (every flow: the
+    /// balance of trade's parents term).
+    pub parents_in: i64,
+    pub parents_out: i64,
     pub accounts: Vec<ParentCols>,
 }
 
@@ -560,12 +580,26 @@ impl OutsideCols {
             "state_grants",
             "mandates",
             "withdrawals",
+            "uplink_runs",
+            "uplink_breached",
+            "data_shipped",
+            "sanctions_new",
+            "sanctions_active",
+            "campaigns",
+            "parents_dead",
+            "scrip_out",
+            "scrip_paid",
+            "scrip_spent",
+            "scrip_converted",
+            "scrip_wiped",
+            "parents_in",
+            "parents_out",
         ]
         .iter()
         .map(|s| s.to_string())
         .collect();
         for i in 1..=n {
-            for c in ["treasury", "income", "health", "attitude", "rep", "loss", "order"] {
+            for c in ["treasury", "income", "health", "attitude", "rep", "loss", "order", "edge"] {
                 v.push(format!("o{i}_{c}"));
             }
         }
@@ -599,6 +633,20 @@ impl OutsideCols {
             self.state_grants.to_string(),
             self.mandates.to_string(),
             self.withdrawals.to_string(),
+            self.uplink_runs.to_string(),
+            self.uplink_breached.to_string(),
+            self.data_shipped.to_string(),
+            self.sanctions_new.to_string(),
+            self.sanctions_active.to_string(),
+            self.campaigns.to_string(),
+            self.parents_dead.to_string(),
+            self.scrip_out.to_string(),
+            self.scrip_paid.to_string(),
+            self.scrip_spent.to_string(),
+            self.scrip_converted.to_string(),
+            self.scrip_wiped.to_string(),
+            self.parents_in.to_string(),
+            self.parents_out.to_string(),
         ];
         for a in &self.accounts {
             v.push(a.treasury.to_string());
@@ -608,6 +656,7 @@ impl OutsideCols {
             v.push(format!("{:.3}", a.rep));
             v.push(format!("{:.3}", a.branch_loss));
             v.push(a.order.clone());
+            v.push(format!("{:.3}", a.edge));
         }
         v.join(",")
     }

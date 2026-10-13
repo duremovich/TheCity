@@ -44,7 +44,7 @@ fn hex(c: u32) -> Color {
 fn radius(node: &Node, ppt: f32) -> f32 {
     match node.kind {
         NodeKind::Public(_) => (ppt * 0.9).clamp(6.0, 14.0),
-        NodeKind::Ledger(_) => (ppt * 0.5).clamp(4.0, 9.0),
+        NodeKind::Ledger(_) | NodeKind::Uplink(_) => (ppt * 0.5).clamp(4.0, 9.0),
         NodeKind::Building(_) => (ppt * 0.45).clamp(4.0, 9.0),
     }
 }
@@ -54,6 +54,8 @@ pub fn screen_pos(cam: &Camera, node: &Node) -> Vec2 {
     let p = cam.tile_to_screen(vec2(f32::from(node.pos.x) + 0.5, f32::from(node.pos.y) + 0.5));
     match node.kind {
         NodeKind::Ledger(_) => p + LEDGER_OFF,
+        // M17 phase 4: an uplink above its branch's Ledger.
+        NodeKind::Uplink(_) => p + LEDGER_OFF * 2.0,
         _ => p,
     }
 }
@@ -151,7 +153,7 @@ pub fn draw(world: &World, app: &App) {
     let mut order: Vec<usize> = (0..nodes.len()).filter(|&i| nodes[i].alive).collect();
     order.sort_by_key(|&i| match nodes[i].kind {
         NodeKind::Public(_) => 0,
-        NodeKind::Ledger(_) => 1,
+        NodeKind::Ledger(_) | NodeKind::Uplink(_) => 1,
         NodeKind::Building(_) => 2,
     });
     for i in order {
@@ -176,6 +178,14 @@ pub fn draw(world: &World, app: &App) {
             NodeKind::Building(_) => {
                 draw_circle(p.x, p.y, r, fill);
                 draw_circle_lines(p.x, p.y, r + 1.0, 1.5, ring);
+            }
+            // M17 phase 4: an uplink, a diamond.
+            NodeKind::Uplink(_) => {
+                let (a, b, c, d) = (vec2(p.x, p.y - r), vec2(p.x + r, p.y), vec2(p.x, p.y + r), vec2(p.x - r, p.y));
+                draw_triangle(a, b, c, fill);
+                draw_triangle(a, c, d, fill);
+                draw_triangle_lines(a, b, c, 1.5, ring);
+                draw_triangle_lines(a, c, d, 1.5, ring);
             }
         }
         if n.hacked.is_some_and(|(_, until)| until > world.tick) {

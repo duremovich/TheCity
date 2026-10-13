@@ -169,6 +169,12 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::StateGrant
         | EventKind::StateMandate
         | EventKind::StateWithdrew
+        | EventKind::UplinkBreached
+        | EventKind::DataShipped
+        | EventKind::Sanctioned
+        | EventKind::CampaignPosted
+        | EventKind::ParentDied
+        | EventKind::ScripWiped
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

@@ -160,13 +160,19 @@ fn test_tier1_route_never_uses_trunk() {
                 ledgers += 1;
                 assert!(tree.dist[i].is_infinite(), "Ledger {i} reached at tier 1");
             }
+            // M17 phase 4: an uplink sits behind a tier-3 Trunk.
+            NodeKind::Uplink(_) => assert!(tree.dist[i].is_infinite(), "uplink {i} reached at tier 1"),
             _ => assert!(tree.dist[i].is_finite(), "node {i} unreached at tier 1"),
         }
     }
     assert!(ledgers >= 9);
+    let uplinks = w.virt.nodes.iter().filter(|n| n.alive && matches!(n.kind, NodeKind::Uplink(_))).count();
     let t2 = virt::routes_from(&w, NodeId(0), 2, 2.5, None);
     let reached = w.virt.nodes.iter().enumerate().filter(|(i, n)| n.alive && t2.dist[*i].is_finite()).count();
-    assert_eq!(reached, w.virt.alive_count(), "a tier-2 deck reaches every node");
+    assert_eq!(reached, w.virt.alive_count() - uplinks, "a tier-2 deck reaches every node but the uplinks");
+    let t3 = virt::routes_from(&w, NodeId(0), 3, 3.5, None);
+    let reached = w.virt.nodes.iter().enumerate().filter(|(i, n)| n.alive && t3.dist[*i].is_finite()).count();
+    assert_eq!(reached, w.virt.alive_count(), "a tier-3 deck reaches the uplinks too");
 }
 
 /// V7: a corp's weakest building is its treasury's front door.

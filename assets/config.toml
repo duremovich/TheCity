@@ -2590,8 +2590,8 @@ visit_hours = [18, 24]
 # persona = [greed, pride, lawfulness]. Placeholders.
 [outside.parents]
 factions = [
-  { name = "Arasaka Global", kind = "Megacorp", branch = "Arasaka", treasury = 100000, income = 3000, upkeep = 2500, exposure = 0.15, persona = [0.6, 0.8, 0.3] },
-  { name = "Militech International", kind = "Megacorp", branch = "Militech", treasury = 100000, income = 2800, upkeep = 2400, exposure = 0.2, persona = [0.7, 0.6, 0.4] },
+  { name = "Arasaka Global", kind = "Megacorp", branch = "Arasaka", treasury = 100000, income = 3000, upkeep = 2500, exposure = 0.15, persona = [0.6, 0.8, 0.3], data = [400, 1500, 400], tech = [2, 3, 2] },
+  { name = "Militech International", kind = "Megacorp", branch = "Militech", treasury = 100000, income = 2800, upkeep = 2400, exposure = 0.2, persona = [0.7, 0.6, 0.4], data = [400, 1200, 600], tech = [2, 3, 2] },
   { name = "The State", kind = "State", branch = "Law", treasury = 60000, income = 900, upkeep = 900, exposure = 0.0, persona = [0.2, 0.5, 0.8] },
   { name = "Hollow Brothers", kind = "Syndicate", branch = "The Hollow", treasury = 3000, income = 40, upkeep = 30, exposure = 0.3, persona = [0.6, 0.7, 0.1] },
   { name = "Ninefold Lodge", kind = "Syndicate", branch = "Ninefold", treasury = 3000, income = 40, upkeep = 30, exposure = 0.3, persona = [0.5, 0.8, 0.1] },
@@ -2668,3 +2668,34 @@ grant_wage = 8                      # a State guard's day of wages in the weekly
 flat_fund = 0.0
 flat_mandate = 0.0
 flat_withdraw = 0.0
+# Phase 4: the weapons that reach the ledger (the uplink, edge, sanctions, campaigns, death) and scrip.
+# Placeholders. A parent's data and tech ceiling are its row's `data` and `tech`.
+uplink_link_tier = 3                # the Trunk from a branch's Ledger to its parent's uplink
+uplink_ice = 3                      # capped by the parent's Deck tier
+edge_per_unit = 0.0003              # edge lost a Data unit stolen
+edge_wipe = 0.15                    # edge lost to a wipe
+edge_recover = 0.01                 # a day, x (1 - edge), while every track holds data_floor
+edge_tech = 0.02                    # a branch's TechGained / TechLost
+edge_min = 0.2
+edge_max = 1.5
+data_floor = 100
+data_per_day = [5, 10, 5]           # Data abroad gains a day per track
+uplink_frac = 0.01                  # a Ledger run on an uplink: this share of the parent's treasury ...
+uplink_cap = 2000                   # ... at most
+sanction_days = 30
+sanction_cut = 0.08
+sanction_cost = 60                  # a day, paid by the sanctioner
+sanction_regard = -0.4              # a rival this disliked opens Sanction
+state_sanction_heat = 0.7           # the State sanctions a parent whose branch's heat reaches this
+campaign_margin = 0.1
+flat_sanction = -0.1
+flat_campaign = -0.1
+death_days = 21                     # income under upkeep this long kills a parent
+insolvent_days = 7                  # a treasury below 0 this long kills a parent
+ship_data = [0, 20, 40]             # Data shipped to a lapsing branch's Lab, per tier 1-3
+scrip_enabled = true
+scrip_wage_share = 0.3              # of a parented corp branch's wages paid in its parent's scrip
+scrip_par_min = 0.3                 # scrip spends at par above this health, at health below
+convert_min = 20
+fixer_cut = 0.1
+scrip_unrest = 0.5                  # unrest a wipe adds per coin wiped / district coins

@@ -549,6 +549,30 @@ pub enum PlayerCommand {
         order: crate::outside::OutsideOrder,
         days: u32,
     },
+    /// M17 phase 4, god: a run's effect on a parent's uplink now, for
+    /// `patron` (a theft, a wipe, a Ledger siphon).
+    ForceUplinkRun {
+        parent: crate::outside::OutsideId,
+        purpose: crate::virt::Purpose,
+        patron: Option<EntityId>,
+    },
+    /// M17 phase 4, god: a parent dies now.
+    KillParent(crate::outside::OutsideId),
+    /// M17 phase 4, god: a parent's treasury to 0 (absorbed abroad).
+    WipeParentTreasury(crate::outside::OutsideId),
+    /// M17 phase 4, god: a parent's edge.
+    SetParentEdge {
+        parent: crate::outside::OutsideId,
+        edge: f32,
+    },
+    /// M17 phase 4, god: a sanction on a parent for `days`.
+    SanctionParent {
+        parent: crate::outside::OutsideId,
+        days: u32,
+        cut: f32,
+    },
+    /// M17 phase 4: no scrip issued; every holder redeemed at health.
+    BanScrip(bool),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1191,6 +1215,30 @@ impl World {
             }
             PlayerCommand::SetOutsideOrder { id, order, days } => {
                 let text = crate::systems::parents::set_order(self, *id, *order, *days);
+                self.lever_result(text);
+            }
+            PlayerCommand::ForceUplinkRun { parent, purpose, patron } => {
+                let text = crate::systems::parents::force_uplink_run(self, *parent, *purpose, *patron);
+                self.lever_result(text);
+            }
+            PlayerCommand::KillParent(id) => {
+                let text = crate::systems::parents::kill_parent(self, *id, "God");
+                self.lever_result(text);
+            }
+            PlayerCommand::WipeParentTreasury(id) => {
+                let text = crate::systems::parents::wipe_treasury(self, *id);
+                self.lever_result(text);
+            }
+            PlayerCommand::SetParentEdge { parent, edge } => {
+                let text = crate::systems::parents::set_edge(self, *parent, *edge);
+                self.lever_result(text);
+            }
+            PlayerCommand::SanctionParent { parent, days, cut } => {
+                let text = crate::systems::parents::god_sanction(self, *parent, *days, *cut);
+                self.lever_result(text);
+            }
+            PlayerCommand::BanScrip(on) => {
+                let text = crate::systems::parents::ban_scrip(self, *on);
                 self.lever_result(text);
             }
             PlayerCommand::SetTariff(t) => {

@@ -159,6 +159,12 @@ pub fn sell(
     if !open(world) || n == 0 {
         return (0, 0);
     }
+    // M17 phase 4: a sanction on the seller's parent cuts what the World buys.
+    let cut = crate::systems::parents::world_cut_for(world, owner);
+    let n = if cut > 0.0 { (n as f32 * (1.0 - cut)).floor() as u32 } else { n };
+    if n == 0 {
+        return (0, 0);
+    }
     let (mut units, mut paid) = quote(world, good, n);
     let purse = world.outside.faction(WORLD_ACCOUNT).map_or(0, |f| f.treasury.max(0));
     let from = book(world, good).map_or(0, |b| b.bought_today);

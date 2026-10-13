@@ -22,8 +22,14 @@ use citysim::{
     Personality, Position, RelKind, Skills, World, TICKS_PER_DAY,
 };
 
+/// The shipped city with the outside's parents off (M17 phase 4): these
+/// seeded-world tests read the M16b city's day-40 gangs and records (a
+/// direct record's keyed renege draw is by its id, which the parents' runs
+/// and scrip move).
 fn world() -> World {
-    World::new(42, Config::load())
+    let mut c = Config::load();
+    c.outside.enabled = false;
+    World::new(42, c)
 }
 
 /// The seed-42 city once two gangs are led and one holds a district.

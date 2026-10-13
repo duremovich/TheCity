@@ -51,6 +51,7 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, n: NodeId) {
                 NodeKind::Public(_) => "Public: the street net of a district",
                 NodeKind::Building(_) => "a building's node",
                 NodeKind::Ledger(_) => "a Ledger: a treasury",
+                NodeKind::Uplink(_) => "an uplink: an outside parent's ledger and Data",
             };
             ui.label(format!("#{} · {kind}{}", n.0, if node.alive { "" } else { " · DEAD (its building is gone)" }));
             ui.horizontal(|ui| {

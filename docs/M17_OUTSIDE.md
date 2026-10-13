@@ -286,6 +286,64 @@ Seeds 42-47 × 120 at 2k, 4592dc1 → phase 3:
 
 Shadow: the d19 homeless paid rows are re-calibrated by the rule (`shadow.rs`, five readings).
 
+### Phase 4 status (2026-10-13): the weapons that reach the ledger, and scrip
+
+Built in `systems/parents.rs`, with hooks in `systems/virt.rs`, `ownership.rs` and `world_market.rs`; SAVE 24.
+
+- **The uplink.** `NodeKind::Uplink(OutsideId)` is one node per living megacorp parent with a corp branch, at that branch's Ledger, behind one tier-3 Trunk. It has no owner, so the parent's Data is never a branch's holding. Its ICE is `uplink_ice` capped by the parent's Deck ceiling, and its store mirrors the parent's Data.
+  - A Data run takes from the parent and cuts `edge` by `edge_per_unit` a unit.
+  - A wipe zeroes the touched tracks, drops each from tier 2 or more by one, and cuts `edge_wipe`. The branches' effective tiers (`virt::maker_tier`) are capped by the parent's ceiling.
+  - A Ledger run crosses `min(uplink_frac × treasury, uplink_cap)` to the patron.
+  - Natural runners see the uplink as a Data target, but only a tier-3 deck routes to it.
+- **Edge.** It recovers `edge_recover × (1 − edge)` a day while every track holds `data_floor`, and Data arrives at `data_per_day`. Income now reads edge and one combined cut: the sanctions' and the Embargo's.
+- **Data shipments.** A branch whose tech upkeep would lapse for want of Data gets `ship_data[tier]` units in its first Lab.
+- **Sanctions.**
+  - A rival parent's Sanction order needs the M15 Regard between branches under `sanction_regard`.
+  - The State sanctions a hot branch's parent, but only in a hot city (`city_heat ≥ mandate_heat`; see the deviations).
+  - A sanction cuts income, costs the sanctioner `sanction_cost` a day, cuts what the World buys from the sanctioned branch, and, when the State's, stops subsidies and bodies crossing.
+- **Campaign.** A disliked rival only. It sends a weekly run on the rival's uplink from a branch Lab with a tier-3 fleet deck, or else, when the parent is lawless, a Beat on the rival branch's exec.
+- **Economic warfare.** The districts the corp branches control add `0.3 ×` the share lost since the 30-day peak to `branch_loss`.
+- **Death.**
+  - A parent dies on `death_days` failing (with its reserves under `treasury_ref`; see the deviations), or on `insolvent_days` with a treasury under 0.
+  - Its corp branches go bankrupt (M11), its gangs are on their own, its Outsiders' tours end and its scrip is wiped (district unrest by `scrip_unrest`).
+  - Its uplink drops at the relink and its treasury is absorbed abroad.
+- **Scrip.**
+  - `Outside.scrip` is a side table. `scrip_wage_share` of a parented corp branch's wage is scrip; its coins cross to the parent at issue (`Flow::Scrip`).
+  - Food or rent paid to the issuer's branch uses scrip first: the parent redeems it into the payer's purse at par, or at health below `scrip_par_min`.
+  - A daily pass converts a broke holder's scrip at a Fixer at health less `fixer_cut`.
+  - `BanScrip` redeems every holder. Abandon redeems at health, or wipes below par.
+  - Scrip is never coins: `econ::identity` holds every day. `trade_balance` now reads every crossing with a parent (`parents_in − parents_out`).
+- **God commands.** `ForceUplinkRun` (the effect without a runner), `KillParent`, `WipeParentTreasury`, `SetParentEdge`, `SanctionParent`, `BanScrip`.
+
+Deviations:
+- **Conversion is a daily pass, not a `ConvertScrip` walk.** The Fixer's owner takes the cut. The walk is an M18 hook.
+- **Not built:** the scrip memories and the wipe's Betrayed grudges.
+- **Campaign needs a disliked rival.** On the plan's gate every healthy parent campaigned: 0.52 against Hold's 0.3.
+- **The State's sanction is a rule, not an order,** and only in a hot city: M15's corp heat sat near 0.7, and Militech was sanctioned on day 3.
+- **A failing parent dies only with its reserves under `treasury_ref`.** In a year run, Nutrix Holdings (a locally founded parent) died on a treasury fat with remittances and took Nutrix, 34 buildings, with it.
+- **`branch_loss`'s district term is additive (0.3 × the share lost),** keeping phase 2's 0.6/0.4 split.
+- **`ForceUplinkRun` applies the run's effect without a runner.** Natural runs go through the run machinery.
+
+Identity: with `CITYSIM_OUTSIDE_OFF=1` the 2k city is byte-identical to a07544b with the same switch, seeds 42-44 × 30.
+
+Seeds 42-47 × 120 at 2k, a07544b → phase 4:
+- Murders 622 → 523; Assault/day (Σ) 91.3 → 89.1.
+- Employed mean 6,901 → 6,870; homeless d120 1,339 → 1,353; starvation 2 → 2.
+- Population 11,423 → 11,503; gang members 770 → 778.
+- Total coins 1,650k → 1,640k.
+- Parents dead 0.
+- Uplink runs 0: no natural runner reaches a tier-3 Trunk in 120 days.
+- Data shipped 64; sanctions 14; campaigns 0.
+- Scrip: 485k paid, 223k spent at the issuers, 99k converted, 0 wiped; 91k out on day 120 (13-19k a seed).
+- `core_year`: population 1,834, corps alive 8/9.
+- `god_kill_militech`: Militech International dies on day 33 (wiped on days 10 and 25, failing from day 12), and its scrip of 1,497 units is wiped. The control lives, at edge 1.0 against 0.64.
+
+20k (seed 42 × 60, gen20k, 50 flats a slot, a single run):
+- Scrip: 97k paid, 1.2k spent, 39k converted; 29k out on day 60.
+- 50 Data shipments, 2 sanctions, 0 uplink runs, 0 deaths.
+- Employed 10,827; homeless 3,293; Murders 315; Assault/day 104.7.
+- 183 ticks/s.
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).

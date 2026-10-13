@@ -147,6 +147,8 @@ pub struct OutsideLedger {
     /// The last midnight's tariff and subsidy count (the CSV's).
     pub tariff_last: i64,
     pub subsidies_last: u32,
+    /// Phase 4: the districts the corp branches controlled at each midnight.
+    pub districts: VecDeque<i64>,
 }
 
 /// M17 phase 2: a parent's state on its `OutsideFaction`.
@@ -207,6 +209,26 @@ pub struct Parent {
     /// Syndicates: the ticks of its refounds (the window's count).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub refounds: Vec<crate::time::Tick>,
+    // --- Phase 4: the weapons that reach the ledger.
+    /// `0.2..=1.5` competitive edge (Data theft and wipes lower it).
+    pub edge: f32,
+    /// Data held abroad, per track (the uplink node is its window).
+    pub data: crate::virt::DataStore,
+    /// The ceiling on its branches' tech tiers (0: none).
+    pub tech: [u8; 3],
+    /// Scrip in city hands.
+    pub scrip_out: i64,
+    /// The rival branch a Sanction or Campaign aims at.
+    pub rival: Option<OutsideId>,
+}
+
+/// M17 phase 4: a sanction on a parent (`by: None` = the city or the State).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Sanction {
+    pub by: Option<OutsideId>,
+    pub on: OutsideId,
+    pub until: crate::time::Tick,
+    pub cut: f32,
 }
 
 /// M17 phase 3: a branch building lost (to a raid, a squat, a sale).
@@ -250,6 +272,20 @@ pub struct Outsider {
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct OutsideDay {
+    /// Phase 4: coins crossing in from, and out to, the parents (every flow).
+    pub parents_in: i64,
+    pub parents_out: i64,
+    // Phase 4.
+    pub uplink_runs: u32,
+    pub uplink_breached: u32,
+    pub data_shipped: u32,
+    pub sanctions: u32,
+    pub campaigns: u32,
+    pub parents_dead: u32,
+    pub scrip_paid: i64,
+    pub scrip_spent: i64,
+    pub scrip_converted: i64,
+    pub scrip_wiped: i64,
     pub arrived: u32,
     pub left: u32,
     pub settled: u32,
@@ -386,6 +422,15 @@ pub struct Outside {
     pub csv_parents: u8,
     #[serde(default, skip_serializing_if = "is_default_day")]
     pub today: OutsideDay,
+    // --- Phase 4.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub sanctions: Vec<Sanction>,
+    /// Scrip held, per holder: `(issuer, units)`.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub scrip: BTreeMap<crate::entity::EntityId, Vec<(OutsideId, i64)>>,
+    /// `BanScrip`: no issuance.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub scrip_banned: bool,
 }
 
 fn is_zero_u16(v: &u16) -> bool {

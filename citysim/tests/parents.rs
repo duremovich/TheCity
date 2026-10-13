@@ -70,10 +70,11 @@ fn test_brand_account_collects_every_copy() {
 
 #[test]
 fn test_income_applies_every_factor() {
-    // base 3000, market 1.1, rep 0.5 (x1.0), exposure 0.2, loss 0.5 (x0.9), no embargo.
-    assert_eq!(outside::parent_income(3000, 1.1, 0.5, 0.2, 0.5, 0.08, false), 2970);
-    assert_eq!(outside::parent_income(3000, 1.1, 0.5, 0.2, 0.5, 0.08, true), 2732);
-    assert_eq!(outside::parent_income(3000, 1.0, 1.0, 0.0, 1.0, 0.08, false), 3600);
+    // base 3000, market 1.1, edge 1.0, rep 0.5 (x1.0), exposure 0.2, loss 0.5
+    // (x0.9), no cut; then the embargo's 0.08 cut (phase 4: one cut term).
+    assert_eq!(outside::parent_income(3000, 1.1, 1.0, 0.5, 0.2, 0.5, 0.0), 2970);
+    assert_eq!(outside::parent_income(3000, 1.1, 1.0, 0.5, 0.2, 0.5, 0.08), 2732);
+    assert_eq!(outside::parent_income(3000, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0), 3600);
 }
 
 #[test]

@@ -375,10 +375,17 @@ pub enum EventKind {
     StateGrant,
     StateMandate,
     StateWithdrew,
+    /// M17 phase 4: the weapons that reach the ledger, and scrip.
+    UplinkBreached,
+    DataShipped,
+    Sanctioned,
+    CampaignPosted,
+    ParentDied,
+    ScripWiped,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 187] = [
+    pub const ALL: [EventKind; 193] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -566,6 +573,12 @@ impl EventKind {
         EventKind::StateGrant,
         EventKind::StateMandate,
         EventKind::StateWithdrew,
+        EventKind::UplinkBreached,
+        EventKind::DataShipped,
+        EventKind::Sanctioned,
+        EventKind::CampaignPosted,
+        EventKind::ParentDied,
+        EventKind::ScripWiped,
     ];
 }
 

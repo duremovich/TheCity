@@ -15,6 +15,8 @@
 //! O(accounts + branches) a day; nothing per agent; no stream draw (the
 //! market walk is a pure hash). Nothing at all with `[outside]` off.
 
+use std::collections::BTreeMap;
+
 use crate::components::{Building, Corp, Gang, Law, Personality, RelKind, Sentence, Skills, OUTSIDE_PARENT_BASE};
 use crate::entity::EntityId;
 use crate::events::EventKind;
@@ -134,6 +136,9 @@ pub fn seed_parents(world: &mut World) {
                 health: 1.0,
                 branches,
                 branch_name: row.branch.clone(),
+                edge: 1.0,
+                data: crate::virt::DataStore { units: row.data },
+                tech: row.tech,
                 ..Default::default()
             }),
         });
@@ -148,26 +153,20 @@ pub fn seed_parents(world: &mut World) {
     }
     world.outside.tariff = cfg.tariff.clamp(0.0, 1.0);
     world.outside.csv_parents = u8::try_from(world.outside.parents().count()).unwrap_or(u8::MAX);
+    // Phase 4: the uplinks join the plane now (appended: no node id moves).
+    crate::systems::virt::relink(world);
 }
 
-/// § 1 step 2: `base × market × (0.8 + 0.4 rep) × (1 − exposure × loss)`,
-/// times `1 − embargo_cut` under the city's Embargo, rounded.
-pub fn parent_income(
-    base: i64,
-    market: f32,
-    rep: f32,
-    exposure: f32,
-    loss: f32,
-    embargo_cut: f32,
-    embargoed: bool,
-) -> i64 {
-    let mut x = base as f64
+/// § 1 step 2: `base × market × edge × (0.8 + 0.4 rep) × (1 − exposure ×
+/// loss) × (1 − cut)`, rounded; `cut` the sanctions' (and the city's
+/// Embargo's) combined cut.
+pub fn parent_income(base: i64, market: f32, edge: f32, rep: f32, exposure: f32, loss: f32, cut: f32) -> i64 {
+    let x = base as f64
         * f64::from(market)
+        * f64::from(edge.max(0.0))
         * f64::from(0.8 + 0.4 * rep.clamp(0.0, 1.0))
-        * f64::from(1.0 - exposure.clamp(0.0, 1.0) * loss.clamp(0.0, 1.0));
-    if embargoed {
-        x *= f64::from(1.0 - embargo_cut.clamp(0.0, 1.0));
-    }
+        * f64::from(1.0 - exposure.clamp(0.0, 1.0) * loss.clamp(0.0, 1.0))
+        * f64::from(1.0 - cut.clamp(0.0, 1.0));
     x.round() as i64
 }
 
@@ -222,10 +221,28 @@ pub fn daily(world: &mut World) {
         if parent(world, id).is_some_and(|p| p.reinforce_left > 0) {
             reinforce_step(world, id);
         }
-        book_day(world, id);
+        if world.outside.faction(id).is_some_and(|f| f.kind == OutsideKind::Megacorp && !f.dead) {
+            ship_data(world, id);
+        }
+        if world.outside.faction(id).is_some_and(|f| !f.dead) {
+            book_day(world, id);
+        }
     }
     tours(world);
     found_parents(world);
+    // Phase 4: expired sanctions go; the dead's scrip holdings go; conversions.
+    let now = world.tick;
+    world.outside.sanctions.retain(|s| s.until > now);
+    let gone: Vec<EntityId> = world.outside.scrip.keys().copied().filter(|&a| !world.is_alive(a)).collect();
+    for a in gone {
+        let held = world.outside.scrip.remove(&a).unwrap_or_default();
+        for (i, n) in held {
+            if let Some(p) = parent_mut(world, i) {
+                p.scrip_out = (p.scrip_out - n).max(0);
+            }
+        }
+    }
+    convert_pass(world, false);
 }
 
 /// Branches that died or left drop off the list.
@@ -354,7 +371,11 @@ pub fn decide(world: &mut World, id: OutsideId) {
         Consideration::raw(
             "a weak branch",
             cash,
-            can(!p.embargoed && f.treasury > 0 && weakest.is_some() && cash < cfg.subsidise_below),
+            can(!p.embargoed
+                && !state_sanctioned(world, id)
+                && f.treasury > 0
+                && weakest.is_some()
+                && cash < cfg.subsidise_below),
         ),
         Consideration::new("1 - cash", 1.0 - cash, Curve::Linear { m: 0.8, b: 0.2 }),
         Consideration::new("wealth", wealth, Curve::Linear { m: 0.5, b: 0.5 }),
@@ -374,6 +395,17 @@ pub fn decide(world: &mut World, id: OutsideId) {
     let persona = p.persona;
     let loss = p.branch_loss;
     let megacorp = f.kind == OutsideKind::Megacorp;
+    let rival = if megacorp { rival_of(world, id) } else { None };
+    let margin = {
+        let n = p.ledger.income.len().min(7) as i64;
+        let inc = sum_last(&p.ledger.income, 7);
+        let up = f.base_upkeep.max(1) * n.max(1);
+        if n == 0 {
+            0.0
+        } else {
+            (inc - up) as f32 / up as f32
+        }
+    };
     let corp_branch = p.branches.iter().any(|&b| world.has::<Corp>(b));
     if megacorp {
         let recent_t = now.saturating_sub(u64::from(cfg.recent_days) * TICKS_PER_DAY);
@@ -394,6 +426,7 @@ pub fn decide(world: &mut World, id: OutsideId) {
                     && room
                     && corp_branch
                     && !p.embargoed
+                    && !state_sanctioned(world, id)
                     && f.treasury >= (cfg.body_cost + cfg.body_fund) * i64::from(cfg.bodies_per_call)),
             ),
             Consideration::new("loss", loss, Curve::Logistic { k: 8.0, mid: 0.3 }),
@@ -430,6 +463,34 @@ pub fn decide(world: &mut World, id: OutsideId) {
             Consideration::new("wealth", wealth, Curve::Linear { m: 0.5, b: 0.5 }),
         ];
         push_scored(OutsideOrder::FoundBranch, &found, cfg.flat_found_branch);
+        // Phase 4 (§ 3): Sanction and Campaign against the least-regarded rival.
+        if let Some((r, regard)) = rival.filter(|_| corp_branch) {
+            let ill = (1.0 - regard) / 2.0;
+            let sanctioning = world.outside.sanctions.iter().any(|s| s.by == Some(id) && s.until > now);
+            let sanction_cs = [
+                Consideration::raw("a rival", 0.0, can(regard < cfg.sanction_regard && margin >= 0.0 && !sanctioning)),
+                Consideration::new("1 - regard", ill, Curve::Linear { m: 0.7, b: 0.3 }),
+                Consideration::new("pride", persona.pride, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("margin", margin.clamp(0.0, 1.0), Curve::Linear { m: 0.5, b: 0.5 }),
+            ];
+            push_scored(OutsideOrder::Sanction, &sanction_cs, cfg.flat_sanction);
+            let campaign_cs = [
+                // A disliked rival only (the plan's table opens it on any
+                // rival; every healthy parent campaigned).
+                Consideration::raw(
+                    "a rival",
+                    0.0,
+                    can(regard < cfg.sanction_regard
+                        && margin >= cfg.campaign_margin
+                        && uplink_node(world, r).is_some()),
+                ),
+                Consideration::new("1 - regard", ill, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("1 - lawfulness", 1.0 - persona.lawfulness, Curve::Linear { m: 0.6, b: 0.4 }),
+                Consideration::new("greed", persona.greed, Curve::Linear { m: 0.5, b: 0.5 }),
+                Consideration::new("wealth", wealth, Curve::Linear { m: 0.5, b: 0.5 }),
+            ];
+            push_scored(OutsideOrder::Campaign, &campaign_cs, cfg.flat_campaign);
+        }
     }
     let spent30 = sum_last(&p.ledger.spent, RING_DAYS);
     let burn = sat(spent30 as f32 / (30.0 * f.base_income.max(1) as f32));
@@ -456,6 +517,9 @@ pub fn decide(world: &mut World, id: OutsideId) {
             p.order_since = now;
         }
         p.order_target = if next == OutsideOrder::Subsidise { weakest.map(|w| w.0) } else { None };
+        if !pinned || p.rival.is_none() {
+            p.rival = rival.map(|r| r.0);
+        }
     }
     if next != current {
         world.push_event(EventKind::OutsideOrder, &[], format!("{name}: {} -> {}", current.label(), next.label()));
@@ -474,6 +538,14 @@ pub fn decide(world: &mut World, id: OutsideId) {
             found_branch(world, id);
         }
         OutsideOrder::Abandon if next != current => abandon(world, id),
+        OutsideOrder::Sanction => {
+            let mine = world.outside.sanctions.iter().any(|s| s.by == Some(id) && s.until > now);
+            if let (Some(r), false) = (parent(world, id).and_then(|p| p.rival), mine) {
+                let cfg = world.config.outside.parents.clone();
+                sanction(world, Some(id), r, cfg.sanction_days, cfg.sanction_cut);
+            }
+        }
+        OutsideOrder::Campaign => campaign_step(world, id),
         _ => {}
     }
 }
@@ -533,6 +605,18 @@ fn book_day(world: &mut World, id: OutsideId) {
     let cfg = world.config.outside.parents.clone();
     let (seed, day, now) = (world.seed(), world.day(), world.tick);
     let gap = remit_gap(world, id);
+    // Phase 4 (economic warfare): the districts its corp branches control.
+    let held_districts = {
+        let corps = corp_branches(world, id);
+        world
+            .districts
+            .iter()
+            .filter(|d| matches!(d.control, crate::components::Controller::Corp(c) if corps.contains(&c)))
+            .count() as i64
+    };
+    let cut = sanction_cut(world, id);
+    let sanction_costs: i64 =
+        world.outside.sanctions.iter().filter(|s| s.by == Some(id) && s.until > now).count() as i64 * cfg.sanction_cost;
     let Some(f) = world.outside.faction(id) else { return };
     let Some(p) = f.parent.as_ref() else { return };
     // Phase 3: an emptied gang waiting on its refound is no lost value (the
@@ -573,15 +657,30 @@ fn book_day(world: &mut World, id: OutsideId) {
     if !all_waiting {
         push(&mut l.branch_value, value);
     }
+    push(&mut l.districts, held_districts);
     let peak = l.branch_value.iter().copied().max().unwrap_or(0);
-    let loss = if kind == OutsideKind::State || all_waiting { 0.0 } else { branch_loss(value, peak, gap) };
+    let d_peak = l.districts.iter().copied().max().unwrap_or(0);
+    // Phase 4: districts lost since the 30-day peak add 0.3 of their share.
+    let d_term = if d_peak > 0 { 0.3 * (d_peak - held_districts).max(0) as f32 / d_peak as f32 } else { 0.0 };
+    let loss =
+        if kind == OutsideKind::State || all_waiting { 0.0 } else { (branch_loss(value, peak, gap) + d_term).min(1.0) };
     p.branch_loss = loss;
     p.rep = (p.rep + cfg.rep_rate * (target - p.rep)).clamp(0.0, 1.0);
-    let income = parent_income(base_income, market, p.rep, p.exposure, loss, cfg.embargo_cut, p.embargoed);
+    // Phase 4: the edge recovers while every track holds `data_floor`; Data
+    // comes in from abroad.
+    if p.data.units.iter().all(|&u| u >= cfg.data_floor) {
+        p.edge += cfg.edge_recover * (1.0 - p.edge);
+    }
+    for (u, d) in p.data.units.iter_mut().zip(cfg.data_per_day) {
+        *u += d;
+    }
+    p.edge = p.edge.clamp(cfg.edge_min, cfg.edge_max);
+    let cut = 1.0 - (1.0 - cut) * if p.embargoed { 1.0 - cfg.embargo_cut } else { 1.0 };
+    let income = parent_income(base_income, market, p.edge, p.rep, p.exposure, loss, cut);
     push(&mut p.ledger.income, income);
     let (inc7, n7) = (sum_last(&p.ledger.income, 7), p.ledger.income.len().min(7) as i64);
     let (rem7, spent7) = (sum_last(&p.ledger.remitted, 7), sum_last(&p.ledger.spent, 7));
-    let delta = income - upkeep;
+    let delta = income - upkeep - sanction_costs;
     f.treasury += delta;
     f.income_today = income;
     let (treasury, tref) = (f.treasury, f.treasury_ref.max(1));
@@ -598,7 +697,8 @@ fn book_day(world: &mut World, id: OutsideId) {
     };
     let cost_term = if base_income > 0 { cfg.att_cost * sat(spent7 as f32 / (7.0 * base_income as f32)) } else { 0.0 };
     p.attitude = (p.attitude * (1.0 - cfg.att_decay) + remit_term - cost_term - cfg.att_loss * loss).clamp(-1.0, 1.0);
-    let failing = n7 >= 7 && inc7 < week_upkeep;
+    // The State never fails (its income tracks its upkeep).
+    let failing = n7 >= 7 && inc7 < week_upkeep && kind != OutsideKind::State;
     let newly_failing = failing && p.failing_since.is_none();
     p.failing_since = if failing { p.failing_since.or(Some(now)) } else { None };
     p.insolvent_since = if treasury < 0 { p.insolvent_since.or(Some(now)) } else { None };
@@ -610,6 +710,23 @@ fn book_day(world: &mut World, id: OutsideId) {
             format!("{name}: income {inc7} under its upkeep {week_upkeep} for a week"),
         );
     }
+    // Phase 4: death by its creditors (income under upkeep `death_days`, or
+    // a treasury under 0 `insolvent_days`). The State never dies.
+    // Deviation: the creditors call in a failing parent only once its reserves
+    // are under its `treasury_ref` (a parent fat on its branches' remittances
+    // rides out a thin month: a founded parent, Nutrix Holdings, died on a
+    // rich treasury and took the city's largest Food corp with it).
+    let reserves = world.outside.faction(id).is_some_and(|f| f.treasury < f.treasury_ref);
+    let Some(p) = parent(world, id) else { return };
+    let failed =
+        reserves && p.failing_since.is_some_and(|t| now.saturating_sub(t) >= u64::from(cfg.death_days) * TICKS_PER_DAY);
+    let broke =
+        p.insolvent_since.is_some_and(|t| now.saturating_sub(t) >= u64::from(cfg.insolvent_days) * TICKS_PER_DAY);
+    if kind != OutsideKind::State && (failed || broke) {
+        let _ = kill_parent(world, id, if failed { "its creditors called it in" } else { "insolvent" });
+        return;
+    }
+    sync_uplink(world, id);
 }
 
 /// `Embargo`: the city's sanction on a parent while set.
@@ -652,6 +769,20 @@ pub fn close_day(world: &mut World) -> Option<crate::stats::OutsideCols> {
     cols.state_grants = t.grants;
     cols.mandates = t.mandates;
     cols.withdrawals = t.withdrawals;
+    cols.uplink_runs = i64::from(t.uplink_runs);
+    cols.uplink_breached = i64::from(t.uplink_breached);
+    cols.data_shipped = i64::from(t.data_shipped);
+    cols.sanctions_new = i64::from(t.sanctions);
+    cols.sanctions_active = o.sanctions.iter().filter(|s| s.until > world.tick).count() as i64;
+    cols.campaigns = i64::from(t.campaigns);
+    cols.parents_dead = i64::from(t.parents_dead);
+    cols.scrip_out = o.parents().filter_map(|f| f.parent.as_ref()).map(|p| p.scrip_out).sum();
+    cols.scrip_paid = t.scrip_paid;
+    cols.scrip_spent = t.scrip_spent;
+    cols.scrip_converted = t.scrip_converted;
+    cols.scrip_wiped = t.scrip_wiped;
+    cols.parents_in = t.parents_in;
+    cols.parents_out = t.parents_out;
     // The CSV's account slots are the seeded parents (the header is fixed;
     // a parent founded later is in the panel, not the CSV).
     let slots = usize::from(o.csv_parents);
@@ -669,6 +800,7 @@ pub fn close_day(world: &mut World) -> Option<crate::stats::OutsideCols> {
             rep: p.rep,
             branch_loss: p.branch_loss,
             order: p.order.label().to_string(),
+            edge: p.edge,
         });
     }
     let (tariff, subsidies) = world
@@ -1317,6 +1449,7 @@ pub fn found_parents(world: &mut World) {
                 health: 1.0,
                 branches: vec![c],
                 branch_name: name.clone(),
+                edge: 1.0,
                 ..Default::default()
             }),
         });
@@ -1363,6 +1496,14 @@ pub fn abandon(world: &mut World, id: OutsideId) {
     world.outside.today.abandoned += 1;
     let name = world.outside.faction(id).map_or_else(String::new, |f| f.name.clone());
     world.push_event(EventKind::Abandoned, &branches, format!("{name} cut its branches in the city loose"));
+    // Phase 4: its scrip redeemed at health, or wiped below `scrip_par_min`.
+    let h = parent(world, id).map_or(0.0, |p| p.health);
+    if h < cfg.scrip_par_min {
+        wipe_scrip(world, id);
+    } else {
+        let (paid, _) = redeem_all(world, id, h);
+        world.outside.today.scrip_spent += paid;
+    }
 }
 
 /// A gang's syndicate (a living parent of kind Syndicate holding it).
@@ -1623,6 +1764,26 @@ pub fn state_act(world: &mut World, order: OutsideOrder) {
 fn state_daily(world: &mut World, id: OutsideId) {
     let cfg = world.config.outside.parents.clone();
     let now = world.tick;
+    // Phase 4: in a hot city (`mandate_heat`), a megacorp parent whose
+    // branch is this hot is sanctioned (deviation: the plan's table
+    // sanctioned on the branch's heat alone, and M15's corp heat sits near
+    // the threshold on most days: Militech was sanctioned on day 3).
+    let city_hot = city_heat(world) >= cfg.mandate_heat;
+    let hot: Vec<OutsideId> = world
+        .outside
+        .parents()
+        .filter(|f| f.kind == OutsideKind::Megacorp && !f.dead)
+        .filter(|f| {
+            f.parent.as_ref().is_some_and(|p| {
+                p.branches.iter().any(|&b| crate::systems::reputation::rep(world, b).heat >= cfg.state_sanction_heat)
+            })
+        })
+        .map(|f| f.id)
+        .filter(|&x| city_hot && !state_sanctioned(world, x))
+        .collect();
+    for x in hot {
+        sanction(world, None, x, cfg.sanction_days, cfg.sanction_cut);
+    }
     let heat = city_heat(world);
     let corrupt = world
         .building_of_kind(crate::components::BuildingKind::Jail)
@@ -1699,4 +1860,653 @@ pub fn in_founding_grace(world: &World, c: &Corp, now: crate::time::Tick) -> boo
     parents_on(world)
         && c.parent.is_some_and(|p| world.outside.faction(p).is_some_and(|f| f.parent.is_some()))
         && c.upkeep_grace_until.is_some_and(|t| t > now)
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4: the weapons that reach the ledger, and scrip (docs/M17_OUTSIDE.md
+// § 3-4, "Revised 2026-10-12").
+//
+// The uplink is a node of the M14 plane (`NodeKind::Uplink`): a window on
+// the parent's Data and treasury, behind a tier-3 Trunk from its branch's
+// Ledger; its ICE is the parent's. A run on it lands abroad: a theft cuts
+// the parent's edge, a wipe zeroes its Data in the touched tracks and drops
+// a tier there (its branches' effective tiers are capped by the parent's,
+// `tech_ceiling`), a Ledger run siphons its treasury. Sanctions cut income
+// (and the World's buying from the sanctioned branch); a parent under its
+// upkeep for `death_days` dies, its corp branches go bankrupt and its scrip
+// is wiped. Scrip is a share of a branch's wages whose coins cross to the
+// parent at issue: it is not coins, so `econ::identity` never sees it; it
+// becomes coins again only by crossing back from the parent (spent at the
+// issuer's buildings, converted at a Fixer, redeemed under `BanScrip`).
+// ---------------------------------------------------------------------------
+
+/// The living megacorp parents with a corp branch, and that branch (the
+/// uplink's anchor): `virt::wanted`'s and `links`'s source.
+pub fn wanted_uplinks(world: &World) -> Vec<(OutsideId, EntityId)> {
+    if !parents_on(world) {
+        return Vec::new();
+    }
+    world
+        .outside
+        .parents()
+        .filter(|f| f.kind == OutsideKind::Megacorp && !f.dead)
+        .filter_map(|f| corp_branches(world, f.id).first().map(|&b| (f.id, b)))
+        .collect()
+}
+
+/// A parent's alive uplink node.
+pub fn uplink_node(world: &World, id: OutsideId) -> Option<crate::virt::NodeId> {
+    world
+        .virt
+        .nodes
+        .iter()
+        .position(|n| n.alive && n.kind == crate::virt::NodeKind::Uplink(id))
+        .map(|i| crate::virt::NodeId(i as u16))
+}
+
+/// An uplink's ICE: `uplink_ice` capped by the parent's Deck tier.
+pub fn uplink_ice(world: &World, id: OutsideId) -> u8 {
+    let ice = world.config.outside.parents.uplink_ice;
+    match parent(world, id).map(|p| p.tech[crate::virt::Track::Deck.index()]) {
+        Some(t) if t > 0 => ice.min(t),
+        _ => ice,
+    }
+}
+
+/// The ceiling a branch's parent puts on its tier in `t` (3: none).
+pub fn tech_ceiling(world: &World, corp: &Corp, t: crate::virt::Track) -> u8 {
+    if !parents_on(world) {
+        return 3;
+    }
+    corp.parent.and_then(|p| parent(world, p)).map(|p| p.tech[t.index()]).filter(|&x| x > 0).unwrap_or(3)
+}
+
+/// The uplink node's store mirrors the parent's Data.
+fn sync_uplink(world: &mut World, id: OutsideId) {
+    let Some(data) = parent(world, id).map(|p| p.data.clone()) else { return };
+    if let Some(n) = uplink_node(world, id) {
+        if let Some(node) = world.virt.node_mut(n) {
+            if node.store != data {
+                node.store = data;
+                crate::systems::virt::bump_epoch(world);
+            }
+        }
+    }
+}
+
+/// Take up to `budget` units from the parent's Data, the largest track
+/// first (ties the lower track), as `act_begin` takes from a store.
+pub fn take_abroad(world: &mut World, id: OutsideId, budget: u32) -> [u32; 3] {
+    let mut out = [0u32; 3];
+    let Some(p) = parent_mut(world, id) else { return out };
+    let mut left = budget;
+    let mut order: Vec<(std::cmp::Reverse<u32>, usize)> =
+        p.data.units.iter().enumerate().map(|(i, &u)| (std::cmp::Reverse(u), i)).collect();
+    order.sort_unstable();
+    for (_, i) in order {
+        let got = p.data.units[i].min(left);
+        p.data.units[i] -= got;
+        out[i] += got;
+        left -= got;
+    }
+    sync_uplink(world, id);
+    out
+}
+
+/// A payload that had nowhere to go goes back abroad.
+pub fn return_abroad(world: &mut World, id: OutsideId, payload: [u32; 3]) {
+    if let Some(p) = parent_mut(world, id) {
+        for (u, x) in p.data.units.iter_mut().zip(payload) {
+            *u += x;
+        }
+    }
+    sync_uplink(world, id);
+}
+
+/// A run on an uplink lands: a theft cuts the edge by `edge_per_unit` a
+/// unit; a wipe zeroes the touched tracks, drops a tier where it is 2 or
+/// more and cuts `edge_wipe`; a Ledger run crosses `min(uplink_frac ×
+/// treasury, uplink_cap)` to the patron (`Flow::Hack`).
+pub fn uplink_landed(
+    world: &mut World,
+    id: OutsideId,
+    purpose: crate::virt::Purpose,
+    units: u32,
+    patron: Option<EntityId>,
+    runner: EntityId,
+) {
+    let cfg = world.config.outside.parents.clone();
+    let pname = world.outside.faction(id).map_or_else(String::new, |f| f.name.clone());
+    let who = if runner == EntityId::NONE { "a runner".to_string() } else { world.name_of(runner) };
+    world.outside.today.uplink_runs += 1;
+    let text = match purpose {
+        crate::virt::Purpose::Data { wipe: false } => {
+            if let Some(p) = parent_mut(world, id) {
+                p.edge = (p.edge - cfg.edge_per_unit * units as f32).clamp(cfg.edge_min, cfg.edge_max);
+            }
+            format!("{who} stole {units} Data through {pname}'s uplink")
+        }
+        crate::virt::Purpose::Data { wipe: true } => {
+            let mut dropped = Vec::new();
+            if let Some(p) = parent_mut(world, id) {
+                for t in crate::virt::Track::ALL {
+                    if p.data.units[t.index()] == 0 {
+                        continue;
+                    }
+                    p.data.units[t.index()] = 0;
+                    if p.tech[t.index()] >= 2 {
+                        p.tech[t.index()] -= 1;
+                        dropped.push(t.label());
+                    }
+                }
+                p.edge = (p.edge - cfg.edge_wipe).clamp(cfg.edge_min, cfg.edge_max);
+            }
+            sync_uplink(world, id);
+            crate::systems::virt::bump_epoch(world);
+            format!(
+                "{who} wiped {pname}'s Data abroad (tiers lost: {})",
+                if dropped.is_empty() { "none".into() } else { dropped.join(", ") }
+            )
+        }
+        crate::virt::Purpose::Ledger => {
+            let treasury = world.outside.faction(id).map_or(0, |f| f.treasury.max(0));
+            let take = ((f64::from(cfg.uplink_frac) * treasury as f64).floor() as i64).min(cfg.uplink_cap);
+            let moved = ownership::cross_in(world, id, patron, take, Flow::Hack);
+            if let Some(f) = world.outside.faction_mut(id) {
+                f.income_today += moved;
+            }
+            format!("{who} siphoned {moved} from {pname}'s ledger abroad")
+        }
+        _ => return,
+    };
+    world.outside.today.uplink_breached += 1;
+    let actors = [runner, patron.unwrap_or(EntityId::NONE)];
+    world.push_event(EventKind::UplinkBreached, &actors, text);
+}
+
+/// God `ForceUplinkRun`: the run's effect now, no runner (a theft's units
+/// at a tier-3 deck's take, to the patron's first Lab when it has one).
+pub fn force_uplink_run(
+    world: &mut World,
+    id: OutsideId,
+    purpose: crate::virt::Purpose,
+    patron: Option<EntityId>,
+) -> Result<String, String> {
+    let Some(f) = world.outside.faction(id).filter(|f| f.parent.is_some() && !f.dead) else {
+        return Err(format!("ForceUplinkRun: no living parent {id}"));
+    };
+    let name = f.name.clone();
+    let mut units = 0;
+    if purpose == (crate::virt::Purpose::Data { wipe: false }) {
+        let budget = world.config.data.steal_units.get(2).copied().unwrap_or(0);
+        let payload = take_abroad(world, id, budget);
+        units = payload.iter().sum();
+        let lab = patron
+            .map(|x| crate::systems::tech::labs_of(world, x))
+            .and_then(|v| v.first().copied())
+            .and_then(|l| crate::systems::virt::node_of_building(world, l));
+        if let Some(n) = lab {
+            if let Some(node) = world.virt.node_mut(n) {
+                for (u, x) in node.store.units.iter_mut().zip(payload) {
+                    *u += x;
+                }
+            }
+        }
+    }
+    uplink_landed(world, id, purpose, units, patron, EntityId::NONE);
+    Ok(format!("God: a run on {name}'s uplink ({purpose:?})"))
+}
+
+/// § 3 sanctions: `by` (a rival parent; `None` the city or the State) cuts
+/// `on`'s income by `cut` for `days`.
+pub fn sanction(world: &mut World, by: Option<OutsideId>, on: OutsideId, days: u32, cut: f32) {
+    let until = world.tick + u64::from(days) * TICKS_PER_DAY;
+    world.outside.sanctions.push(crate::outside::Sanction { by, on, until, cut: cut.clamp(0.0, 1.0) });
+    world.outside.today.sanctions += 1;
+    let name = |w: &World, x: OutsideId| w.outside.faction(x).map_or_else(String::new, |f| f.name.clone());
+    let text = match by {
+        Some(b) => format!("{} sanctioned {} for {days} days", name(world, b), name(world, on)),
+        None => format!("the State sanctioned {} for {days} days", name(world, on)),
+    };
+    world.push_event(EventKind::Sanctioned, &[], text);
+}
+
+/// The combined cut of the sanctions standing on `id`: `1 − Π(1 − cut)`.
+pub fn sanction_cut(world: &World, id: OutsideId) -> f32 {
+    let now = world.tick;
+    1.0 - world.outside.sanctions.iter().filter(|s| s.on == id && s.until > now).map(|s| 1.0 - s.cut).product::<f32>()
+}
+
+/// The State's (or the city's) sanction stands on `id`: no subsidy or body crosses.
+fn state_sanctioned(world: &World, id: OutsideId) -> bool {
+    let now = world.tick;
+    world.outside.sanctions.iter().any(|s| s.on == id && s.by.is_none() && s.until > now)
+}
+
+/// The cut on a corp's sales to the World (a sanction on its parent).
+pub fn world_cut_for(world: &World, owner: Option<EntityId>) -> f32 {
+    if !parents_on(world) {
+        return 0.0;
+    }
+    owner.and_then(|o| world.comp::<Corp>(o)).and_then(|c| c.parent).map_or(0.0, |p| sanction_cut(world, p))
+}
+
+/// God `SanctionParent`.
+pub fn god_sanction(world: &mut World, id: OutsideId, days: u32, cut: f32) -> Result<String, String> {
+    if parent(world, id).is_none() {
+        return Err(format!("SanctionParent: no parent {id}"));
+    }
+    sanction(world, None, id, days, cut);
+    Ok(format!("God: sanctioned parent {id} for {days} days"))
+}
+
+/// God `SetParentEdge`.
+pub fn set_edge(world: &mut World, id: OutsideId, edge: f32) -> Result<String, String> {
+    let cfg = world.config.outside.parents.clone();
+    let Some(p) = parent_mut(world, id) else { return Err(format!("SetParentEdge: no parent {id}")) };
+    p.edge = edge.clamp(cfg.edge_min, cfg.edge_max);
+    Ok(format!("God: parent {id}'s edge set to {:.2}", p.edge))
+}
+
+/// God `WipeParentTreasury`: the treasury absorbed abroad (`minted −= it`).
+pub fn wipe_treasury(world: &mut World, id: OutsideId) -> Result<String, String> {
+    let Some(f) = world.outside.faction_mut(id).filter(|f| f.parent.is_some()) else {
+        return Err(format!("WipeParentTreasury: no parent {id}"));
+    };
+    let t = std::mem::take(&mut f.treasury);
+    world.outside.minted -= t;
+    Ok(format!("God: parent {id}'s treasury of {t} wiped"))
+}
+
+/// A holder's scrip of `issuer`.
+pub fn scrip_of(world: &World, agent: EntityId, issuer: OutsideId) -> i64 {
+    world.outside.scrip.get(&agent).map_or(0, |v| v.iter().filter(|&&(i, _)| i == issuer).map(|&(_, n)| n).sum())
+}
+
+fn add_scrip(world: &mut World, agent: EntityId, issuer: OutsideId, delta: i64) {
+    let v = world.outside.scrip.entry(agent).or_default();
+    match v.iter_mut().find(|(i, _)| *i == issuer) {
+        Some(e) => e.1 += delta,
+        None => v.push((issuer, delta)),
+    }
+    v.retain(|&(_, n)| n > 0);
+    if v.is_empty() {
+        world.outside.scrip.remove(&agent);
+    }
+    if let Some(p) = parent_mut(world, issuer) {
+        p.scrip_out = (p.scrip_out + delta).max(0);
+    }
+}
+
+/// Scrip's rate: par while the issuer's health holds `scrip_par_min`, else its health.
+fn scrip_rate(world: &World, issuer: OutsideId) -> f32 {
+    let par = world.config.outside.parents.scrip_par_min;
+    parent(world, issuer).map_or(0.0, |p| if p.health >= par { 1.0 } else { p.health.max(0.0) })
+}
+
+/// The issuer whose scrip a wage from `payer` pays: a corp branch of a
+/// living megacorp parent, scrip on and not banned.
+fn issuer_of(world: &World, payer: Option<EntityId>) -> Option<OutsideId> {
+    let cfg = &world.config.outside.parents;
+    if !cfg.scrip_enabled || world.outside.scrip_banned || !parents_on(world) {
+        return None;
+    }
+    let p = payer.and_then(|x| world.comp::<Corp>(x)).and_then(|c| c.parent)?;
+    world.outside.faction(p).filter(|f| f.kind == OutsideKind::Megacorp && !f.dead && f.parent.is_some()).map(|f| f.id)
+}
+
+/// `ownership::transfer`'s wage hook: `scrip_wage_share` of a wage `from` a
+/// parented corp branch `to` an agent is scrip; its coins cross from the
+/// agent to the parent at issue.
+pub fn scrip_wage(world: &mut World, from: Option<EntityId>, to: Option<EntityId>, moved: i64) {
+    let Some(issuer) = issuer_of(world, from) else { return };
+    let Some(a) = to.filter(|&a| world.has::<crate::components::Wallet>(a)) else { return };
+    let share = (f64::from(world.config.outside.parents.scrip_wage_share) * moved as f64).round() as i64;
+    if share <= 0 {
+        return;
+    }
+    let crossed = ownership::cross_out(world, Some(a), issuer, share, Flow::Scrip, false);
+    if crossed <= 0 {
+        return;
+    }
+    if let Some(f) = world.outside.faction_mut(issuer) {
+        f.income_today -= crossed;
+    }
+    add_scrip(world, a, issuer, crossed);
+    world.outside.today.scrip_paid += crossed;
+}
+
+/// `ownership::transfer`'s spending hook: an agent paying food or rent to a
+/// building owner that is a branch of an issuer whose scrip it holds pays
+/// scrip first: the parent redeems it into the agent's purse at its rate
+/// (par, or health below `scrip_par_min`), then the coins move as usual.
+pub fn scrip_spend(world: &mut World, from: Option<EntityId>, to: Option<EntityId>, amount: i64) {
+    if amount <= 0 || world.outside.scrip.is_empty() {
+        return;
+    }
+    let Some(a) = from else { return };
+    let Some(issuer) = to.and_then(|o| world.comp::<Corp>(o)).and_then(|c| c.parent) else { return };
+    let held = scrip_of(world, a, issuer);
+    if held <= 0 || world.outside.faction(issuer).is_none_or(|f| f.dead) {
+        return;
+    }
+    let rate = scrip_rate(world, issuer);
+    if rate <= 0.0 {
+        return;
+    }
+    let used = (((amount as f64) / f64::from(rate)).ceil() as i64).min(held);
+    let coins = ((used as f64) * f64::from(rate)).floor() as i64;
+    let moved = ownership::cross_in(world, issuer, Some(a), coins, Flow::Scrip);
+    if moved <= 0 {
+        return;
+    }
+    if let Some(f) = world.outside.faction_mut(issuer) {
+        f.income_today += moved;
+    }
+    let spent = if moved < coins { ((moved as f64) / f64::from(rate)).ceil() as i64 } else { used };
+    add_scrip(world, a, issuer, -spent.min(held));
+    world.outside.today.scrip_spent += moved;
+}
+
+/// § 4 conversion at a Fixer (deviation: a daily pass, not a walk): a holder
+/// with `convert_min` scrip and under three meals' coins converts at the
+/// issuer's health, `fixer_cut` to the nearest open Fixer's owner (the
+/// city's when none), both from the parent's treasury; one day in seven
+/// per holder (`all` in tests).
+pub fn convert_pass(world: &mut World, all: bool) {
+    let cfg = world.config.outside.parents.clone();
+    let day = world.day();
+    let meal = world.mean_price().max(1);
+    let fixer = crate::systems::contracts::open_fixers(world).first().copied();
+    let owner = fixer.and_then(|f| world.owner_of(f));
+    let holders: Vec<(EntityId, Vec<(OutsideId, i64)>)> =
+        world.outside.scrip.iter().map(|(&a, v)| (a, v.clone())).collect();
+    for (a, held) in holders {
+        if !all && !(u64::from(a.index) + day).is_multiple_of(7) {
+            continue;
+        }
+        if world.purse(Some(a)) >= 3 * meal {
+            continue;
+        }
+        for (issuer, units) in held {
+            if units < cfg.convert_min || world.outside.faction(issuer).is_none_or(|f| f.dead) {
+                continue;
+            }
+            let h = parent(world, issuer).map_or(0.0, |p| p.health.clamp(0.0, 1.0));
+            let to_holder = (units as f64 * f64::from(h) * f64::from(1.0 - cfg.fixer_cut)).floor() as i64;
+            let to_fixer = (units as f64 * f64::from(h) * f64::from(cfg.fixer_cut)).floor() as i64;
+            let m1 = ownership::cross_in(world, issuer, Some(a), to_holder, Flow::Scrip);
+            let m2 = ownership::cross_in(world, issuer, owner, to_fixer, Flow::Scrip);
+            if let Some(f) = world.outside.faction_mut(issuer) {
+                f.income_today += m1 + m2;
+            }
+            add_scrip(world, a, issuer, -units);
+            world.outside.today.scrip_converted += m1;
+        }
+    }
+}
+
+/// Every holder's scrip of `issuer` redeemed at `rate` (or wiped at 0).
+fn redeem_all(world: &mut World, issuer: OutsideId, rate: f32) -> (i64, i64) {
+    let holders: Vec<(EntityId, i64)> = world
+        .outside
+        .scrip
+        .iter()
+        .filter_map(|(&a, v)| v.iter().find(|&&(i, _)| i == issuer).map(|&(_, n)| (a, n)))
+        .collect();
+    let (mut paid, mut units) = (0, 0);
+    for (a, n) in holders {
+        let coins = (n as f64 * f64::from(rate)).floor() as i64;
+        if coins > 0 && world.is_alive(a) {
+            let m = ownership::cross_in(world, issuer, Some(a), coins, Flow::Scrip);
+            if let Some(f) = world.outside.faction_mut(issuer) {
+                f.income_today += m;
+            }
+            paid += m;
+        }
+        units += n;
+        add_scrip(world, a, issuer, -n);
+    }
+    (paid, units)
+}
+
+/// § 4 the wipe: every holder's scrip of `issuer` gone; each district's
+/// unrest rises by `scrip_unrest × wiped there ÷ its residents' coins`.
+fn wipe_scrip(world: &mut World, issuer: OutsideId) {
+    let cfg = world.config.outside.parents.clone();
+    let holders: Vec<(EntityId, i64)> = world
+        .outside
+        .scrip
+        .iter()
+        .filter_map(|(&a, v)| v.iter().find(|&&(i, _)| i == issuer).map(|&(_, n)| (a, n)))
+        .collect();
+    if holders.is_empty() {
+        return;
+    }
+    let mut by_district: BTreeMap<usize, i64> = BTreeMap::new();
+    let mut total = 0;
+    for (a, n) in holders {
+        if let Some(h) = world.comp::<crate::components::Household>(a).and_then(|h| h.home) {
+            *by_district.entry(world.district_of_building(h).index()).or_insert(0) += n;
+        }
+        total += n;
+        add_scrip(world, a, issuer, -n);
+    }
+    for (d, wiped) in by_district {
+        let coins: i64 =
+            world.districts.get(d).map_or(0, |x| x.residents.iter().map(|&r| world.purse(Some(r)).max(0)).sum());
+        if let Some(x) = world.districts.get_mut(d) {
+            x.unrest = (x.unrest + cfg.scrip_unrest * wiped as f32 / coins.max(1) as f32).min(1.0);
+        }
+    }
+    world.outside.today.scrip_wiped += total;
+    let name = world.outside.faction(issuer).map_or_else(String::new, |f| f.name.clone());
+    world.push_event(EventKind::ScripWiped, &[], format!("{name}'s scrip is worthless: {total} units wiped"));
+}
+
+/// `BanScrip`: no issuance; every holder redeemed at its issuer's rate.
+pub fn ban_scrip(world: &mut World, on: bool) -> Result<String, String> {
+    world.outside.scrip_banned = on;
+    if !on {
+        return Ok("Scrip allowed again".to_string());
+    }
+    let issuers: Vec<OutsideId> = world.outside.parents().map(|f| f.id).collect();
+    let mut paid = 0;
+    for i in issuers {
+        let rate = scrip_rate(world, i);
+        paid += redeem_all(world, i, rate).0;
+    }
+    world.outside.today.scrip_spent += paid;
+    Ok(format!("Scrip banned; {paid} redeemed"))
+}
+
+/// § 3 death: `dead`, `ParentDied`; every corp branch bankrupt (M11's
+/// estate rule), its gangs on their own, its Outsiders' tours ended, its
+/// scrip wiped, its uplink dropped (a relink), its treasury absorbed abroad.
+pub fn kill_parent(world: &mut World, id: OutsideId, why: &str) -> Result<String, String> {
+    let now = world.tick;
+    let Some(f) = world.outside.faction(id).filter(|f| f.parent.is_some() && !f.dead) else {
+        return Err(format!("KillParent: no living parent {id}"));
+    };
+    if f.kind == OutsideKind::State {
+        return Err("KillParent: the State never dies".to_string());
+    }
+    let name = f.name.clone();
+    let branches = f.parent.as_ref().map(|p| p.branches.clone()).unwrap_or_default();
+    world.push_event(EventKind::ParentDied, &branches, format!("{name} died abroad ({why})"));
+    for &b in &branches {
+        if world.has::<Corp>(b) {
+            crate::systems::corps::bankrupt(world, b);
+        }
+    }
+    for o in world.outside.outsiders.values_mut().filter(|o| o.from == id) {
+        o.tour_until = o.tour_until.min(now);
+        o.brother = false;
+    }
+    wipe_scrip(world, id);
+    if let Some(f) = world.outside.faction_mut(id) {
+        f.dead = true;
+        let t = std::mem::take(&mut f.treasury);
+        if let Some(p) = f.parent.as_mut() {
+            p.branches.clear();
+            p.reinforce_left = 0;
+        }
+        world.outside.minted -= t;
+    }
+    world.outside.today.parents_dead += 1;
+    crate::systems::virt::mark_dirty(world);
+    Ok(format!("{name} is dead"))
+}
+
+/// § 3: Data shipped to a branch whose tech upkeep would lapse for want of
+/// it: `ship_data[tier]` units of the track into its first Lab.
+pub fn ship_data(world: &mut World, id: OutsideId) {
+    let cfg = world.config.outside.parents.clone();
+    for c in corp_branches(world, id) {
+        let Some(lab) = crate::systems::tech::labs_of(world, c).first().copied() else { continue };
+        let Some(n) = crate::systems::virt::node_of_building(world, lab) else { continue };
+        for t in crate::virt::Track::ALL {
+            let (tier, lapse) = world.comp::<Corp>(c).map_or((1, 0), |x| (x.tech.tier_of(t), x.tech.lapse[t.index()]));
+            if tier < 2 {
+                continue;
+            }
+            let need = world.config.tech.upkeep_data_at(tier);
+            if lapse == 0 && crate::systems::virt::holding(world, c, t) >= need {
+                continue;
+            }
+            let want = cfg.ship_data.get(usize::from(tier) - 1).copied().unwrap_or(0);
+            let units = parent(world, id).map_or(0, |p| p.data.get(t)).min(want);
+            if units == 0 {
+                continue;
+            }
+            if let Some(p) = parent_mut(world, id) {
+                p.data.units[t.index()] -= units;
+            }
+            if let Some(node) = world.virt.node_mut(n) {
+                node.store.units[t.index()] += units;
+            }
+            world.outside.today.data_shipped += 1;
+            let (pname, lname) =
+                (world.outside.faction(id).map_or_else(String::new, |f| f.name.clone()), world.name_of(lab));
+            world.push_event(EventKind::DataShipped, &[c, lab], format!("{pname} shipped {units} {t} Data to {lname}"));
+        }
+    }
+    sync_uplink(world, id);
+}
+
+/// A rival parent: another living megacorp parent whose corp branches
+/// share a niche with this one's, the one its branches regard least (M15),
+/// and that regard's value.
+fn rival_of(world: &World, id: OutsideId) -> Option<(OutsideId, f32)> {
+    let mine = corp_branches(world, id);
+    let niches: std::collections::BTreeSet<crate::components::Niche> =
+        mine.iter().filter_map(|&c| world.comp::<Corp>(c)).flat_map(|c| c.niches.iter().copied()).collect();
+    world
+        .outside
+        .parents()
+        .filter(|f| f.id != id && f.kind == OutsideKind::Megacorp && !f.dead)
+        .filter_map(|f| {
+            let theirs: Vec<EntityId> = corp_branches(world, f.id)
+                .into_iter()
+                .filter(|&c| world.comp::<Corp>(c).is_some_and(|x| x.niches.iter().any(|n| niches.contains(n))))
+                .collect();
+            let v = mine
+                .iter()
+                .flat_map(|&a| theirs.iter().map(move |&b| (a, b)))
+                .map(|(a, b)| crate::systems::reputation::regard(world, a, b).value)
+                .fold(None, |m: Option<f32>, v| Some(m.map_or(v, |x| x.min(v))))?;
+            Some((f.id, v))
+        })
+        .min_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)))
+}
+
+/// § 3 Campaign's action, weekly from its start: a run on the rival's
+/// uplink when a branch Lab has a tier-3 fleet deck and a Researcher;
+/// else, when the parent is lawless (< 0.4), a Beat on the rival branch's
+/// exec. `CampaignPosted` on an action.
+pub fn campaign_step(world: &mut World, id: OutsideId) {
+    let now = world.tick;
+    let Some(p) = parent(world, id) else { return };
+    if now.saturating_sub(p.order_since) % (7 * TICKS_PER_DAY) >= TICKS_PER_DAY {
+        return;
+    }
+    let Some(rival) = p.rival else { return };
+    let law = p.persona.lawfulness;
+    let Some(target) = uplink_node(world, rival) else { return };
+    let mut acted = None;
+    for c in corp_branches(world, id) {
+        let Some(run) = crate::systems::virt::corp_run(world, c) else { continue };
+        let tier = run.deck.and_then(|d| world.comp::<crate::components::Asset>(d)).map_or(0, |a| a.tier);
+        if tier < world.config.outside.parents.uplink_link_tier || world.run_orders.contains_key(&run.runner) {
+            continue;
+        }
+        let order = crate::virt::RunOrder {
+            patron: Some(c),
+            purpose: crate::virt::Purpose::Data { wipe: law < 0.4 },
+            target,
+            chair: run.lab,
+            not_before: now,
+            expires: now + TICKS_PER_DAY,
+            why: crate::virt::RunWhy::CorpOrder,
+            mode: crate::virt::RunMode::Loud,
+        };
+        crate::systems::virt::give_order(world, run.runner, order);
+        acted = Some(format!("a run on {}", crate::systems::virt::node_label(world, target)));
+        break;
+    }
+    if acted.is_none() && law < 0.4 {
+        let branch = corp_branches(world, id).into_iter().next();
+        let exec = corp_branches(world, rival).into_iter().find_map(|c| world.comp::<Corp>(c).and_then(|x| x.exec));
+        if let (Some(b), Some(e)) = (branch, exec.filter(|&e| crate::systems::law::living(world, e))) {
+            let t = crate::contract::Target::Agent(e);
+            let door = world.comp::<crate::components::Position>(e).map(|x| x.tile).unwrap_or_default();
+            let broker = crate::systems::contracts::nearest_fixer_to(world, door);
+            let q = crate::systems::contracts::quote(world, crate::contract::ContractKind::Beat, &t, broker);
+            fund(world, id, b, q);
+            let bexec = world.comp::<Corp>(b).and_then(|x| x.exec);
+            let r = crate::systems::contracts::brain_post_with(
+                world,
+                Some(b),
+                bexec,
+                crate::contract::ContractKind::Beat,
+                t,
+                broker,
+                crate::contract::Origin::Parent,
+                Some(q),
+                crate::contract::PostExtra::default(),
+            );
+            if r.is_ok() {
+                acted = Some(format!("a Beat on {}", world.name_of(e)));
+            }
+        }
+    }
+    if let Some(what) = acted {
+        world.outside.today.campaigns += 1;
+        let (a, b) = (
+            world.outside.faction(id).map_or_else(String::new, |f| f.name.clone()),
+            world.outside.faction(rival).map_or_else(String::new, |f| f.name.clone()),
+        );
+        world.push_event(EventKind::CampaignPosted, &[], format!("{a}'s campaign against {b}: {what}"));
+    }
+}
+
+/// A save from before phase 4: the parents' edge, Data and tech ceiling
+/// from their rows (by name).
+pub fn migrate_v24(world: &mut World) {
+    if !parents_on(world) {
+        return;
+    }
+    let rows = world.config.outside.parents.factions.clone();
+    for f in world.outside.factions.iter_mut() {
+        let Some(p) = f.parent.as_mut() else { continue };
+        if p.edge > 0.0 {
+            continue;
+        }
+        p.edge = 1.0;
+        if let Some(r) = rows.iter().find(|r| r.name == f.name) {
+            p.data = crate::virt::DataStore { units: r.data };
+            p.tech = r.tech;
+        }
+    }
+    crate::systems::virt::mark_dirty(world);
 }

@@ -375,6 +375,37 @@ pub struct ParentsCfg {
     pub flat_fund: f32,
     pub flat_mandate: f32,
     pub flat_withdraw: f32,
+    // --- Phase 4: the weapons that reach the ledger, and scrip.
+    pub uplink_link_tier: u8,
+    pub uplink_ice: u8,
+    pub edge_per_unit: f32,
+    pub edge_wipe: f32,
+    pub edge_recover: f32,
+    pub edge_tech: f32,
+    pub edge_min: f32,
+    pub edge_max: f32,
+    pub data_floor: u32,
+    pub data_per_day: [u32; 3],
+    pub uplink_frac: f32,
+    pub uplink_cap: i64,
+    pub sanction_days: u32,
+    pub sanction_cut: f32,
+    pub sanction_cost: i64,
+    pub sanction_regard: f32,
+    pub state_sanction_heat: f32,
+    pub campaign_margin: f32,
+    pub flat_sanction: f32,
+    pub flat_campaign: f32,
+    pub death_days: u32,
+    pub insolvent_days: u32,
+    /// Data a parent ships a branch's Lab when its upkeep lapses, per tier (1-3).
+    pub ship_data: [u32; 3],
+    pub scrip_enabled: bool,
+    pub scrip_wage_share: f32,
+    pub scrip_par_min: f32,
+    pub convert_min: i64,
+    pub fixer_cut: f32,
+    pub scrip_unrest: f32,
 }
 
 /// One seeded outside account. `treasury`, `income` and `upkeep` are per
@@ -393,6 +424,12 @@ pub struct ParentRow {
     pub exposure: f32,
     /// `[greed, pride, lawfulness]`.
     pub persona: [f32; 3],
+    /// M17 phase 4: Data held abroad per track (Chrome, Deck, Industry).
+    #[serde(default)]
+    pub data: [u32; 3],
+    /// M17 phase 4: the tech ceiling on its branches per track (0: none).
+    #[serde(default)]
+    pub tech: [u8; 3],
 }
 
 impl Default for ParentsCfg {
@@ -407,11 +444,21 @@ impl Default for ParentsCfg {
             upkeep: u,
             exposure: e,
             persona: p,
+            data: [0; 3],
+            tech: [0; 3],
         };
         ParentsCfg {
             factions: vec![
-                row("Arasaka Global", Megacorp, "Arasaka", 100_000, 3000, 2500, 0.15, [0.6, 0.8, 0.3]),
-                row("Militech International", Megacorp, "Militech", 100_000, 2800, 2400, 0.2, [0.7, 0.6, 0.4]),
+                ParentRow {
+                    data: [400, 1500, 400],
+                    tech: [2, 3, 2],
+                    ..row("Arasaka Global", Megacorp, "Arasaka", 100_000, 3000, 2500, 0.15, [0.6, 0.8, 0.3])
+                },
+                ParentRow {
+                    data: [400, 1200, 600],
+                    tech: [2, 3, 2],
+                    ..row("Militech International", Megacorp, "Militech", 100_000, 2800, 2400, 0.2, [0.7, 0.6, 0.4])
+                },
                 row("The State", State, "Law", 60_000, 900, 900, 0.0, [0.2, 0.5, 0.8]),
                 row("Hollow Brothers", Syndicate, "The Hollow", 3000, 40, 30, 0.3, [0.6, 0.7, 0.1]),
                 row("Ninefold Lodge", Syndicate, "Ninefold", 3000, 40, 30, 0.3, [0.5, 0.8, 0.1]),
@@ -487,6 +534,35 @@ impl Default for ParentsCfg {
             flat_fund: 0.0,
             flat_mandate: 0.0,
             flat_withdraw: 0.0,
+            uplink_link_tier: 3,
+            uplink_ice: 3,
+            edge_per_unit: 0.0003,
+            edge_wipe: 0.15,
+            edge_recover: 0.01,
+            edge_tech: 0.02,
+            edge_min: 0.2,
+            edge_max: 1.5,
+            data_floor: 100,
+            data_per_day: [5, 10, 5],
+            uplink_frac: 0.01,
+            uplink_cap: 2000,
+            sanction_days: 30,
+            sanction_cut: 0.08,
+            sanction_cost: 60,
+            sanction_regard: -0.4,
+            state_sanction_heat: 0.7,
+            campaign_margin: 0.1,
+            flat_sanction: -0.1,
+            flat_campaign: -0.1,
+            death_days: 21,
+            insolvent_days: 7,
+            ship_data: [0, 20, 40],
+            scrip_enabled: true,
+            scrip_wage_share: 0.3,
+            scrip_par_min: 0.3,
+            convert_min: 20,
+            fixer_cut: 0.1,
+            scrip_unrest: 0.5,
         }
     }
 }

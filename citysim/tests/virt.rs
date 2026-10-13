@@ -58,6 +58,11 @@ fn test_seed_plane_shape() {
                 assert!(kinds.contains(&LinkKind::Trunk), "Ledger {i} has a Trunk");
                 assert!(!kinds.contains(&LinkKind::Access), "Ledger {i} has no Access");
             }
+            // M17 phase 4: an uplink hangs off its branch's Ledger by one tier-3 Trunk.
+            NodeKind::Uplink(_) => {
+                assert!(!seen.contains(&id), "a tier-1 deck never reaches an uplink");
+                assert_eq!(kinds, vec![LinkKind::Trunk], "uplink {i}: one Trunk");
+            }
             _ => assert!(seen.contains(&id), "node {i} ({:?}) reachable at tier 1", n.kind),
         }
     }

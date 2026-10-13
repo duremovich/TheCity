@@ -123,6 +123,13 @@ fn wanted(world: &World) -> Vec<Wanted> {
             out.push((NodeKind::Building(b), building_owner(world, b, &hideouts), bd.door));
         }
     }
+    // M17 phase 4: each living megacorp parent's uplink, at its first corp
+    // branch's Ledger (no owner: the parent's Data is no city holding).
+    out.extend(
+        crate::systems::parents::wanted_uplinks(world)
+            .into_iter()
+            .map(|(id, branch)| (NodeKind::Uplink(id), None, ledger_pos(world, branch, hall_door))),
+    );
     out
 }
 
@@ -211,6 +218,7 @@ fn links(world: &World) -> Vec<Link> {
                     labs.entry(o).or_default().push(id);
                 }
             }
+            NodeKind::Uplink(_) => {}
         }
     }
     let link = |a: NodeId, b: NodeId, kind: LinkKind, tier: u8| {
@@ -264,6 +272,15 @@ fn links(world: &World) -> Vec<Link> {
             out.push(link(l, p, LinkKind::Trunk, cfg.trunk_links_tier));
         }
     }
+    // M17 phase 4: an uplink's one Trunk, from its branch's Ledger.
+    let tier = world.config.outside.parents.uplink_link_tier;
+    for (i, n) in nodes.iter().enumerate().filter(|(_, n)| n.alive) {
+        let NodeKind::Uplink(p) = n.kind else { continue };
+        let branch = crate::systems::parents::wanted_uplinks(world).into_iter().find(|&(x, _)| x == p).map(|(_, b)| b);
+        if let Some(&l) = branch.and_then(|b| ledger.get(&b)) {
+            out.push(link(NodeId(i as u16), l, LinkKind::Trunk, tier));
+        }
+    }
     out.sort_by_key(|k| (k.a, k.b, k.kind as u8));
     out
 }
@@ -292,6 +309,7 @@ pub fn rebuild_index(world: &mut World) {
             NodeKind::Ledger(c) => {
                 p.ledger_of.insert(c, id);
             }
+            NodeKind::Uplink(_) => {}
         }
     }
     for (k, l) in p.links.iter().enumerate() {
@@ -411,6 +429,8 @@ pub fn seed_ice(world: &mut World) {
                 let t = world.purse(Some(c));
                 steps.iter().filter(|&&s| t >= s).count() as u8
             }
+            // M17 phase 4: an uplink's ICE is its parent's (`ice_eff`).
+            NodeKind::Uplink(_) => continue,
         };
         if let Some(p) = profile_mut(world, n) {
             *p = SecurityProfile { ice: ice.min(3), ice_maker: None, ice_arrears: 0 };
@@ -447,7 +467,7 @@ pub fn owner_of(world: &World, n: NodeId) -> Option<EntityId> {
 /// Treasury. `None` for a Public node or a corp Ledger.
 fn profile_building(world: &World, n: NodeId) -> Option<EntityId> {
     match world.virt.node(n)?.kind {
-        NodeKind::Public(_) => None,
+        NodeKind::Public(_) | NodeKind::Uplink(_) => None,
         NodeKind::Building(b) => Some(b),
         NodeKind::Ledger(c) => (!world.has::<Corp>(c)).then_some(c),
     }
@@ -478,7 +498,8 @@ pub fn profile_mut(world: &mut World, n: NodeId) -> Option<&mut SecurityProfile>
 pub fn maker_tier(world: &World, maker: EntityId, t: Track) -> u8 {
     match world.comp::<Corp>(maker) {
         Some(c) if c.tech.is_unset() => 3,
-        Some(c) => c.tech.tier_of(t),
+        // M17 phase 4: a parent's tech ceiling caps its branches.
+        Some(c) => c.tech.tier_of(t).min(crate::systems::parents::tech_ceiling(world, c, t)),
         None => world.config.tech.orphan_cap,
     }
 }
@@ -487,6 +508,10 @@ pub fn maker_tier(world: &World, maker: EntityId, t: Track) -> u8 {
 /// live on its building; else `min(ice, the maker's Deck tier)` (the city's
 /// own ICE, `ice_maker = None`, is uncapped).
 pub fn ice_eff(world: &World, n: NodeId) -> u8 {
+    // M17 phase 4: an uplink's ICE is `uplink_ice` capped by its parent's Deck tier.
+    if let Some(NodeKind::Uplink(p)) = world.virt.node(n).map(|x| x.kind) {
+        return crate::systems::parents::uplink_ice(world, p);
+    }
     let Some(p) = profile(world, n) else { return 0 };
     if p.ice == 0 || p.ice_arrears >= world.config.ice.ice_off_days {
         return 0;
@@ -523,6 +548,7 @@ pub fn value_at_risk(world: &World, n: NodeId) -> i64 {
     let Some(node) = world.virt.node(n) else { return 0 };
     match node.kind {
         NodeKind::Public(_) => 0,
+        NodeKind::Uplink(_) => i64::from(node.store.total()) * world.config.data.data_price,
         NodeKind::Ledger(c) if world.has::<Corp>(c) => world.purse(Some(c)),
         NodeKind::Ledger(_) => world.purse(None),
         NodeKind::Building(b) => {
@@ -784,6 +810,9 @@ pub fn node_label(world: &World, n: NodeId) -> String {
         NodeKind::Building(b) => world.name_of(b),
         NodeKind::Ledger(c) if world.has::<Corp>(c) => format!("{}'s Ledger", world.owner_label(Some(c))),
         NodeKind::Ledger(_) => "the Treasury".to_string(),
+        NodeKind::Uplink(p) => {
+            format!("{}'s uplink", world.outside.faction(p).map_or("an outside parent", |f| f.name.as_str()))
+        }
     }
 }
 
@@ -1093,6 +1122,19 @@ pub fn targets(
             NodeKind::Building(b) => {
                 let kind = world.comp::<Building>(b).map(|bd| bd.kind);
                 if !matches!(kind, Some(BuildingKind::Lab | BuildingKind::Hideout)) || n.store.total() == 0 {
+                    continue;
+                }
+                let got = (n.store.total().min(units) as f32 * take).round() as i64;
+                if got > 0 {
+                    out.push((id, Purpose::Data { wipe: false }, got * price));
+                }
+            }
+            // M17 phase 4: an uplink's Data (its routing needs a tier-3 deck),
+            // not for its own branches' people or patrons.
+            NodeKind::Uplink(p) if n.store.total() > 0 => {
+                let own =
+                    |o: Option<EntityId>| o.and_then(|x| world.comp::<Corp>(x)).is_some_and(|c| c.parent == Some(p));
+                if own(employer) || own(patron) {
                     continue;
                 }
                 let got = (n.store.total().min(units) as f32 * take).round() as i64;
@@ -1805,6 +1847,12 @@ fn act_begin(world: &mut World, r: &mut Run) {
     }
     let (take, _, _) = mode_terms(world, r.mode);
     let mut budget = (steal_units(world, r.deck_eff) as f32 * take).round() as u32;
+    // M17 phase 4: the units live on the parent's account (the node is its window).
+    if let Some(NodeKind::Uplink(p)) = world.virt.node(r.target).map(|x| x.kind) {
+        r.payload = crate::systems::parents::take_abroad(world, p, budget);
+        r.source = Some(r.target);
+        return;
+    }
     let Some(node) = world.virt.node_mut(r.target) else { return };
     let mut order: SmallVec<[(std::cmp::Reverse<u32>, usize); 3]> =
         node.store.units.iter().enumerate().map(|(i, &u)| (std::cmp::Reverse(u), i)).collect();
@@ -1831,7 +1879,7 @@ fn loss_building(world: &World, n: NodeId) -> Option<EntityId> {
             .map(|(b, kind)| (std::cmp::Reverse(ownership::value(world, kind)), b))
             .min()
             .map(|(_, b)| b),
-        NodeKind::Public(_) => None,
+        NodeKind::Public(_) | NodeKind::Uplink(_) => None,
     }
 }
 
@@ -1848,6 +1896,17 @@ fn loss_building(world: &World, n: NodeId) -> Option<EntityId> {
 /// empty payload (the store was drained before Act) robs nobody: no loss,
 /// no `DataStolen` (so no hardening), no breach.
 fn apply_out(world: &mut World, r: &mut Run) -> RunOutcome {
+    // M17 phase 4: a run on an uplink lands abroad (edge, tiers, the treasury).
+    if let Some(NodeKind::Uplink(p)) = world.virt.node(r.target).map(|x| x.kind) {
+        let payload = std::mem::take(&mut r.payload);
+        let total: u32 = payload.iter().sum();
+        if total > 0 && !deliver(world, r, payload) {
+            // Nowhere to put it: back abroad.
+            crate::systems::parents::return_abroad(world, p, payload);
+        }
+        crate::systems::parents::uplink_landed(world, p, r.purpose, total, r.patron.or(Some(r.runner)), r.runner);
+        return RunOutcome::Success;
+    }
     let owner = owner_of(world, r.target);
     let label = node_label(world, r.target);
     let runner_name = world.name_of(r.runner);

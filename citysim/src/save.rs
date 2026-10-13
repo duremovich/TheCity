@@ -110,7 +110,12 @@ use crate::world::World;
 /// Withdraw}`, `ContractKind::Retake`, `Origin::Parent`, fourteen events and
 /// `PlayerCommand::{ForceReinforce, SetOutsideOrder}`, `[outside.parents]`'s
 /// phase 3 keys and the `retake` kind keys (serde defaults).
-pub const SAVE_VERSION: u8 = 23;
+/// 24: M17 phase 4, the weapons and scrip: `Parent.{edge, data, tech,
+/// scrip_out, rival}`, `Outside.{sanctions, scrip, scrip_banned}`, the
+/// day's phase 4 counters, `[outside.parents]`'s phase 4 keys and the rows'
+/// `data`/`tech` (serde defaults), the appended `NodeKind::Uplink`,
+/// `Flow::Scrip`, six events and six god commands.
+pub const SAVE_VERSION: u8 = 24;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
@@ -135,6 +140,10 @@ pub fn from_ron(text: &str) -> Result<World, ron::error::SpannedError> {
     // (minted, so the identity carries over; nothing with `[outside]` off).
     if world.save_version < 22 {
         crate::systems::outside::seed_parents(&mut world);
+    }
+    // M17 phase 4: a parent from before the weapons gets its edge, Data and tech ceiling.
+    if world.save_version < 24 {
+        crate::systems::parents::migrate_v24(&mut world);
     }
     world.save_version = SAVE_VERSION;
     world.reload_names();

@@ -41,6 +41,9 @@ pub enum NodeKind {
     Building(EntityId),
     /// A corp's treasury; `Ledger(hall)` is the city's Treasury.
     Ledger(EntityId),
+    /// M17 phase 4: an outside parent's window on its ledger and Data,
+    /// behind a tier-3 Trunk from its branch's Ledger.
+    Uplink(crate::outside::OutsideId),
 }
 
 /// The kind of a node's owner, cached at relink (plan V1).

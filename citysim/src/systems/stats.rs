@@ -400,7 +400,9 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
     let ambient_in = row.ambient.as_ref().map_or(0, |a| a.paid_food + a.paid_visits);
     // M17 phase 2: the parents' crossings (subsidies in, remittances out;
     // 0 with the parents off).
-    let parents_net = row.outside.as_ref().map_or(0, |o| o.parent_fund - o.remit);
+    // Phase 4: every crossing with a parent (subsidies, bodies' funds,
+    // grants, scrip, siphons in; remittances, scrip at issue out).
+    let parents_net = row.outside.as_ref().map_or(0, |o| o.parents_in - o.parents_out);
     e.trade_balance = e.export_paid + e.flow_migrant_in + e.flow_fence + ambient_in + parents_net
         - e.flow_import_out
         - e.flow_inputs

@@ -240,6 +240,9 @@ fn run_city(seed: u64, days: u64, cfg: Config) -> SeedRun {
         day_mark("a sick day", row.health.sick_days > 0);
         // M17 phase 2: a branch sent coins home at the day's midnight.
         day_mark("remittance", row.outside.as_ref().is_some_and(|o| o.remit > 0));
+        // M17 phase 4: scrip paid as wages, and converted at a Fixer.
+        day_mark("scrip paid", row.outside.as_ref().is_some_and(|o| o.scrip_paid > 0));
+        day_mark("scrip converted", row.outside.as_ref().is_some_and(|o| o.scrip_converted > 0));
         *r.marks.entry("Dealing report").or_insert(0) += row.dealing_reports;
         // Transit: a ride (any tier) and a fare paid to the city.
         let t = &row.transit;
@@ -595,6 +598,12 @@ fn mechanisms() -> Vec<Mechanism> {
         ("an OutsidersArrived", k(EventKind::OutsidersArrived)), // [9, 6, 6]; 45-47 [9, 6, 6]
         ("a BrothersArrived", k(EventKind::BrothersArrived)),    // [5, 6, 6]; 45-47 [2, 2, 6]
         ("a StateGrant", k(EventKind::StateGrant)),              // [17, 27, 19]; 45-47 [17, 19, 16]
+        // M17 phase 4 (seeds 42-47 x 120 days): an uplink run, a Campaign and a
+        // parent's death fired on 0 of 6 (`weapons.rs`, `god_kill_militech`).
+        ("a day with scrip paid", m("scrip paid")),
+        ("a day with scrip converted", m("scrip converted")),
+        ("a DataShipped", k(EventKind::DataShipped)), // [1, 29, 13]; 45-47 [15, 2, 4]
+        ("a Sanctioned", k(EventKind::Sanctioned)),   // [1, 2, 3]; 45-47 [2, 3, 3]
     ]
 }
 
@@ -664,6 +673,10 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a BuyBackOffered", k(EventKind::BuyBackOffered)), // [0, 0, 0, 0, 0, 0]
         ("a GangRefounded", k(EventKind::GangRefounded)), // [0, 0, 0, 0, 0, 0]
         ("an OutsiderLeft", k(EventKind::OutsiderLeft)),  // [0, 0, 0, 3, 4, 1]
+        ("an UplinkBreached", k(EventKind::UplinkBreached)), // [0, 0, 0, 0, 0, 0]
+        ("a CampaignPosted", k(EventKind::CampaignPosted)), // [0, 0, 0, 0, 0, 0]
+        ("a ParentDied", k(EventKind::ParentDied)),       // [0, 0, 0, 0, 0, 0]
+        ("a ScripWiped", k(EventKind::ScripWiped)),       // [0, 0, 0, 0, 0, 0]
         // M16b phase 2 (seeds 42-47 x 120 days): rare, unit-tested in `captives.rs`.
         ("a hostage taken", m("hostage taken")),             // [0, 1, 1, 1, 0, 0]
         ("a Rescue posted", m("Rescue posted")),             // [0, 0, 0, 0, 0, 0]

@@ -264,6 +264,9 @@ pub enum Flow {
     /// M17 phase 3: the State's weekly grant for its guards, State ->
     /// Treasury (untaxed; not a receipt the tax band reads).
     Grant,
+    /// M17 phase 4: scrip's coin side: a wage's scrip share to the parent,
+    /// a redemption or a Fixer's conversion from it (untaxed).
+    Scrip,
 }
 
 impl Flow {
@@ -369,7 +372,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Fare => row.transit.fares += coins,
         Flow::Coerced => row.leverage.flow_coerced += coins,
         Flow::Trauma => row.wounded.flow_trauma += coins,
-        Flow::AmbientSale | Flow::Remit | Flow::ParentFund | Flow::Grant => {}
+        Flow::AmbientSale | Flow::Remit | Flow::ParentFund | Flow::Grant | Flow::Scrip => {}
     }
 }
 
@@ -436,6 +439,10 @@ fn transfer(
     if amount <= 0 {
         return 0;
     }
+    // M17 phase 4: food or rent to an issuer's branch is paid in its scrip first.
+    if matches!(flow, Flow::Food | Flow::Rent) && !world.outside.scrip.is_empty() {
+        crate::systems::parents::scrip_spend(world, from, to, amount);
+    }
     let moved = if full { amount } else { amount.min(world.purse(from).max(0)) };
     if moved <= 0 || from == to {
         // Paying oneself moves nothing and is no flow.
@@ -485,6 +492,10 @@ fn transfer(
     if crate::systems::wages::on(world) {
         note_revenue(world, to, flow, moved - tax);
         crate::systems::wages::note_inflow(world, to, flow, moved - tax);
+    }
+    // M17 phase 4: a parented corp branch's wage is part scrip.
+    if flow == Flow::Wage {
+        crate::systems::parents::scrip_wage(world, from, to, moved - tax);
     }
     moved
 }
@@ -625,6 +636,10 @@ pub fn cross_in(
     }
     f.treasury -= moved;
     f.income_today -= moved;
+    // M17 phase 4: a parent's crossings, for the balance of trade.
+    if f.parent.is_some() {
+        world.outside.today.parents_in += moved;
+    }
     world.outside.inbound += moved;
     ledger(world, flow, moved);
     if matches!(owner_kind(world, to), OwnerKind::City) {
@@ -666,6 +681,9 @@ pub fn cross_out(
     if let Some(f) = world.outside.faction_mut(to) {
         f.treasury += moved;
         f.income_today += moved;
+        if f.parent.is_some() {
+            world.outside.today.parents_out += moved;
+        }
     }
     world.outside.outbound += moved;
     moved

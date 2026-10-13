@@ -2816,3 +2816,65 @@ fn god_murder_wave() {
     let grants = told(&story, &[EventKind::StateGrant], 10, 25);
     assert!(!grants.is_empty(), "the State funded no guards after the wave");
 }
+
+/// M17 god 5 (phase 4): Zetatech's runners wipe Militech International's
+/// Data abroad on days 10, 25 and 40 and steal it on days 15 and 30, and
+/// the city embargoes it from day 30. Does the parent die by day 120 (its
+/// branch bankrupt, its scrip wiped)? The control, the same city with no
+/// runs and no embargo, keeps it alive.
+#[test]
+#[ignore]
+fn god_kill_militech() {
+    use citysim::virt::Purpose;
+    let shock = |hit: bool| {
+        move |w: &mut World, day: u64| {
+            if !hit {
+                return;
+            }
+            let Some(id) = w.outside.factions.iter().find(|f| f.name == "Militech International").map(|f| f.id) else {
+                return;
+            };
+            let zetatech =
+                w.corps().into_iter().find(|&c| w.comp::<citysim::Corp>(c).is_some_and(|x| x.name == "Zetatech"));
+            let purpose = match day {
+                10 | 25 | 40 => Some(Purpose::Data { wipe: true }),
+                15 | 30 => Some(Purpose::Data { wipe: false }),
+                _ => None,
+            };
+            if let Some(purpose) = purpose {
+                w.push_command(PlayerCommand::ForceUplinkRun { parent: id, purpose, patron: zetatech });
+            }
+            if day == 30 {
+                w.push_command(PlayerCommand::Embargo { id, on: true });
+            }
+        }
+    };
+    let (r, c) = std::thread::scope(|s| {
+        let a = s.spawn(|| run_outside(120, shock(true)));
+        let b = s.spawn(|| run_outside(120, shock(false)));
+        (a.join().expect("shocked"), b.join().expect("control"))
+    });
+    let ((w, story), (wc, _)) = (r, c);
+    let kinds = [
+        EventKind::UplinkBreached,
+        EventKind::ParentFailing,
+        EventKind::ParentDied,
+        EventKind::ScripWiped,
+        EventKind::Riot,
+    ];
+    for l in told(&story, &kinds, 0, 120) {
+        eprintln!("{l}");
+    }
+    let dead = |x: &World| x.outside.factions.iter().any(|f| f.name == "Militech International" && f.dead);
+    let edge = |x: &World| {
+        x.outside
+            .factions
+            .iter()
+            .find(|f| f.name == "Militech International")
+            .and_then(|f| f.parent.as_ref())
+            .map_or(0.0, |p| p.edge)
+    };
+    eprintln!("dead: {} (control {}); edge {:.2} (control {:.2})", dead(&w), dead(&wc), edge(&w), edge(&wc));
+    assert!(dead(&w), "Militech International survived the runs and the embargo");
+    assert!(!dead(&wc), "the control's Militech International died");
+}
