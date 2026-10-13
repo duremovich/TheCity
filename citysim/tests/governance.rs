@@ -484,3 +484,27 @@ fn test_board_round_trips() {
     let back = citysim::save::from_ron(&citysim::save::to_ron(&w)).expect("loads");
     assert_eq!(back.comp::<Corp>(c).unwrap().governance, w.comp::<Corp>(c).unwrap().governance);
 }
+
+/// M16b review finding 3: a `Vote` coercion whose corp lost its board
+/// breaks at the next midnight (it never held a slot forever).
+#[test]
+fn test_vote_coercion_breaks_with_the_board() {
+    let mut w = boards();
+    let c = habitat(&w);
+    let (m, chair) = members(&w, c);
+    let others: Vec<EntityId> = m.iter().copied().filter(|&x| x != chair).collect();
+    let id = leverage::force(
+        &mut w,
+        Some(others[0]),
+        others[0],
+        others[1],
+        Leverage::Threat,
+        Demand::Vote { corp: c, for_: others[0] },
+        CoercionWhy::Vote,
+        None,
+        None,
+    );
+    w.comp_mut::<Corp>(c).unwrap().governance = Governance::Dictator;
+    w.run_ticks(TICKS_PER_DAY);
+    assert_eq!(w.coercions.get(&id).map(|x| x.status), Some(CoercionStatus::Broken));
+}

@@ -26,7 +26,7 @@
 use rand::Rng;
 
 use crate::components::{BuildingKind, Controller, Gang, Identity, Kit, Lod, MemoryKind, Order, Position};
-use crate::contract::{ContractId, ContractNs, Tag};
+use crate::contract::{ContractId, Tag};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::systems::ownership::{self, Flow};
@@ -48,8 +48,7 @@ enum Purpose {
 }
 
 fn rng(world: &World, p: Purpose, a: u64, b: u64) -> rand_chacha::ChaCha8Rng {
-    let key = ((p as u64) << 56) | (a & ((1 << 56) - 1));
-    world.rng.contract(ContractNs::Leverage, key, b)
+    crate::systems::leverage::leverage_rng(world, p as u8, a, b)
 }
 
 fn step(world: &World) -> f32 {

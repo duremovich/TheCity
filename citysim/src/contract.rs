@@ -905,6 +905,13 @@ pub struct Wounded {
     /// A bleed-out is a Murder (the death would have been one).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub murder: bool,
+    /// Review finding 8: the nearest staffed Clinic to where it lies,
+    /// refreshed every tick while it bleeds (`wounded::tick_down`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clinic: Option<EntityId>,
+    /// Review finding 6: who paid the stabilisation (and pays the care).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub care_by: Option<EntityId>,
 }
 
 // ---------------------------------------------------------------------------

@@ -769,7 +769,9 @@ pub fn rescore(world: &mut World, gang: EntityId, hysteresis: f32) -> bool {
     // M15 W32: would the winner differ with the fear term neutral?
     if inputs.fear.is_some() {
         let neutral = OrderInputs { fear: Some(0.5), ..inputs.clone() };
-        let alt = score_orders(&neutral, &cfg);
+        let mut alt = score_orders(&neutral, &cfg);
+        // Review finding 7: the same attention tilt on both sides.
+        crate::systems::attention::tilt(world, Some(gang), &mut alt, |s| s.order == Order::LieLow, |s| &mut s.score);
         if alt.first().map(|s| s.order) != scores.first().map(|s| s.order) {
             world.stats.current.word.rep_flips += 1;
         }

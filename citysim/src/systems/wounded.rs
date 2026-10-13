@@ -18,12 +18,10 @@
 //! `ContractNs::Leverage` with the spec's purpose bytes (17 the wound, 20
 //! the subscription).
 
-use rand::Rng;
-
 use crate::components::{
     Brain, Building, BuildingKind, Identity, Job, Lod, Needs, Personality, Position, RelKind, Role, Sentence,
 };
-use crate::contract::{ContractKind, ContractNs, ContractStatus, Wounded};
+use crate::contract::{ContractKind, ContractStatus, Wounded};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::exec::{FailReason, StepResult};
@@ -49,8 +47,7 @@ enum Purpose {
 }
 
 fn draw(world: &World, p: Purpose, a: u64, b: u64) -> f32 {
-    let key = ((p as u64) << 56) | (a & ((1 << 56) - 1));
-    world.rng.contract(ContractNs::Leverage, key, b).random()
+    crate::systems::leverage::leverage_draw(world, p as u8, a, b)
 }
 
 /// Is `id` down?
@@ -77,7 +74,8 @@ pub fn wound_instead(world: &mut World, loser: EntityId, by: EntityId, armour: f
     if draw(world, Purpose::Wound, u64::from(loser.index), world.tick) >= p {
         return false;
     }
-    if world.wounded.len() >= world.config.wounded.wounded_quota {
+    // Review finding 6: the stabilised hold no slot.
+    if world.wounded.values().filter(|w| !w.stable).count() >= world.config.wounded.wounded_quota {
         world.stats.current.wounded.wounds_capped += 1;
         return false;
     }
@@ -117,6 +115,8 @@ pub fn down(world: &mut World, id: EntityId, by: Option<EntityId>) {
             trauma,
             rise_at: None,
             murder: by.is_some(),
+            clinic: clinic_near(world, tile),
+            care_by: None,
         },
     );
     let s = crate::virt::Sighting { who: id, tile, tick: now, confidence: 1.0, relayed: false };
@@ -195,6 +195,7 @@ pub fn run(world: &mut World) {
     let tod = u64::from(crate::time::tick_of_day(world.tick));
     if tod == 0 {
         trauma_daily(world);
+        care_daily(world);
     }
     if tod == TICKS_PER_DAY - 1 {
         world.stats.current.wounded.down_now = world.wounded.len() as u32;
@@ -220,6 +221,15 @@ fn tick_down(world: &mut World) {
         if w.rise_at.is_some_and(|t| now >= t) {
             rise(world, id);
             continue;
+        }
+        // Review finding 8: the nearest Clinic, once a tick per bleeding
+        // agent (not per thinker × downed in `pick`).
+        if !w.stable {
+            let at = world.comp::<Position>(id).map_or(w.tile, |p| p.tile);
+            let c = clinic_near(world, at);
+            if let Some(x) = world.wounded.get_mut(&id) {
+                x.clinic = c;
+            }
         }
         let cuff = world.comp::<Brain>(id).and_then(|b| b.cuffed_by);
         let carried = cuff
@@ -345,7 +355,7 @@ fn pick(world: &World, a: EntityId) -> Option<(EntityId, f32, bool, Tie)> {
         if !trauma && law::chebyshev(me, at) > r {
             continue;
         }
-        let Some(c) = clinic_near(world, at) else { continue };
+        let Some(c) = rec.clinic else { continue };
         let to_clinic = world.comp::<Building>(c).map_or(u32::MAX, |b| b.door.manhattan(at));
         if now + Tick::from(d) + Tick::from(to_clinic) > rec.bleed_until {
             continue;
@@ -388,8 +398,7 @@ pub fn considerations(world: &World, id: EntityId) -> Option<(Vec<Consideration>
 /// → Stabilise`, the downed claimed.
 pub fn plan(world: &mut World, id: EntityId) -> Option<Plan> {
     let (w, _, _, _) = pick(world, id)?;
-    let at = world.comp::<Position>(w).map(|p| p.tile)?;
-    let clinic = clinic_near(world, at)?;
+    let clinic = world.wounded.get(&w).and_then(|r| r.clinic)?;
     if let Some(x) = world.wounded.get_mut(&w) {
         x.rescuer = Some(id);
     }
@@ -474,6 +483,9 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
         _ => None,
     };
     let payer = [faction, Some(w), Some(id)].into_iter().flatten().find(|&p| world.purse(Some(p)) >= price);
+    if let Some(x) = world.wounded.get_mut(&w) {
+        x.care_by = payer.filter(|&p| p != w);
+    }
     let owner = world.owner_of(clinic);
     if let Some(p) = payer {
         let paid = ownership::pay(world, Some(p), owner, price, Flow::Treatment);
@@ -508,6 +520,40 @@ pub fn on_stabilise(world: &mut World, id: EntityId, target: Option<EntityId>) -
         world.push_event(EventKind::TraumaSave, &[c, w], text);
     }
     StepResult::Done
+}
+
+/// Review finding 6, at midnight: each stabilised patient lying in care
+/// eats off the nearest Market's shelf (`care_food` to its owner,
+/// `Flow::Upkeep`, as a captive's meal), paid by its carer, else itself;
+/// nobody able, it goes unfed. It rests (energy 1).
+fn care_daily(world: &mut World) {
+    let cfg = world.config.needs.clone();
+    let price = world.config.wounded.care_food;
+    let stable: Vec<(EntityId, Wounded)> =
+        world.wounded.iter().filter(|(_, w)| w.stable).map(|(&k, v)| (k, v.clone())).collect();
+    for (k, w) in stable {
+        if !law::living(world, k) {
+            continue;
+        }
+        if let Some(n) = world.comp_mut::<Needs>(k) {
+            n.energy = 1.0;
+        }
+        let at = world.comp::<Position>(k).map_or(w.tile, |p| p.tile);
+        let market = world.nearest_of_kind(BuildingKind::Market, at);
+        let stocked = market.and_then(|m| world.comp::<Building>(m)).is_some_and(|b| b.stock_food > 0);
+        let payer = [w.care_by, Some(k)].into_iter().flatten().find(|&p| world.purse(Some(p)) >= price);
+        let (Some(m), Some(p), true) = (market, payer, stocked) else { continue };
+        if let Some(b) = world.comp_mut::<Building>(m) {
+            b.stock_food -= 1;
+        }
+        let owner = world.owner_of(m);
+        let paid = ownership::pay(world, Some(p), owner, price, Flow::Upkeep);
+        ownership::credit(world, m, paid);
+        if let Some(n) = world.comp_mut::<Needs>(k) {
+            crate::needs::eat(n, &cfg);
+        }
+        world.mark_day(k, crate::components::trace_flags::ATE);
+    }
 }
 
 // ---------------------------------------------------------------------------

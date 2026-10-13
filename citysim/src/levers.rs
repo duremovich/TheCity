@@ -2581,7 +2581,34 @@ impl World {
                     Some(Demand::Release(_)) => self.law().and_then(|l| l.captain),
                     _ => None,
                 };
-                let agent = holder.and_then(|h| crate::systems::contracts::head_of(self, h)).unwrap_or(*captive);
+                // Review finding 2: the hand-over agent is the holder's head,
+                // a holding person itself, else its strongest free member;
+                // a holder-less hold has none (`EntityId::NONE`: nobody
+                // rolls the demand, nobody kills at the hold's end).
+                let agent = match holder {
+                    None => EntityId::NONE,
+                    Some(h) => {
+                        let member = || {
+                            self.comp::<crate::components::Gang>(*h).and_then(|g| {
+                                g.members
+                                    .iter()
+                                    .copied()
+                                    .filter(|&m| crate::systems::contracts::free_adult(self, m))
+                                    .map(|m| (crate::systems::law::fighting(self, m), m))
+                                    .max_by(|a, b| a.0.total_cmp(&b.0).then(b.1.cmp(&a.1)))
+                                    .map(|(_, m)| m)
+                            })
+                        };
+                        let person = self.has::<crate::components::Identity>(*h).then_some(*h);
+                        match crate::systems::contracts::head_of(self, *h).or(person).or_else(member) {
+                            Some(a) => a,
+                            None => return Err("Hostage: the holder has nobody to hand over".to_string()),
+                        }
+                    }
+                };
+                if agent == *captive {
+                    return Err("Hostage: the captive cannot hold itself".to_string());
+                }
                 if crate::systems::captives::take(self, *captive, *holder, agent, *at, *demand, over) {
                     Ok(format!("God: {} held at {}", self.name_of(*captive), self.name_of(*at)))
                 } else {

@@ -306,3 +306,53 @@ fn test_save_mid_wound_round_trips() {
     back.run_ticks(TICKS_PER_DAY);
     assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
 }
+
+/// M16b review finding 6: a stabilised patient frees its quota slot and is
+/// fed at midnight (its carer pays), not left three days unfed.
+#[test]
+fn test_stabilised_patient_fed_and_off_the_quota() {
+    let mut w = world();
+    let [v, kin, by] = strangers(&w, 3)[..] else { unreachable!() };
+    w.edge_entry(v, kin).kind = RelKind::Spouse;
+    place_beside(&mut w, kin, v);
+    citysim::systems::lod::set_lod(&mut w, kin, citysim::Lod::Full);
+    if let Some(x) = w.comp_mut::<citysim::Wallet>(kin) {
+        x.coins = 1_000;
+    }
+    let clinic = w
+        .buildings_of_kind(BuildingKind::Clinic)
+        .iter()
+        .copied()
+        .find(|&c| w.staff_of(c).iter().any(|&s| w.comp::<Job>(s).is_some_and(|j| j.role == Role::Ripperdoc)))
+        .expect("a staffed Clinic");
+    wounded::down(&mut w, v, Some(by));
+    assert!(w.wounded[&v].clinic.is_some(), "the nearest Clinic cached");
+    if let Some(x) = w.wounded.get_mut(&v) {
+        x.bleed_until = w.tick + 100 * TICKS_PER_DAY;
+    }
+    assert_eq!(wounded::on_carry(&mut w, kin, Some(v)), citysim::StepResult::Done);
+    w.enter_building(kin, clinic);
+    citysim::systems::law::follow_guard(&mut w, kin);
+    assert_eq!(wounded::on_stabilise(&mut w, kin, Some(clinic)), citysim::StepResult::Done);
+    // The quota is full of the bleeding only: one slot, and the patient holds none.
+    w.config.wounded.wounded_quota = 1;
+    let [x] = strangers(&w, 1)[..] else { unreachable!() };
+    let armour = 0.0;
+    let mut downed = false;
+    for t in 0..200u64 {
+        w.tick += t;
+        if wounded::wound_instead(&mut w, x, by, armour, true) {
+            downed = true;
+            break;
+        }
+    }
+    assert!(downed, "a fresh wound found the slot");
+    if let Some(n) = w.comp_mut::<citysim::Needs>(v) {
+        n.hunger = 0.2;
+    }
+    let to_midnight = TICKS_PER_DAY - w.tick % TICKS_PER_DAY;
+    w.run_ticks(to_midnight + 1);
+    if wounded::is_down(&w, v) {
+        assert!(w.comp::<citysim::Needs>(v).unwrap().hunger > 0.2, "fed in care");
+    }
+}

@@ -89,7 +89,9 @@ use crate::world::World;
 /// config (serde defaults); the appended `ContractKind::{Tag, Vote}`,
 /// `Origin::Board`, `Demand::Vote`, `CoercionWhy::Vote`, the five events
 /// and the eight god commands.
-pub const SAVE_VERSION: u8 = 19;
+/// 20: the M16b review: `Wounded.{clinic, care_by}`, `[wounded] care_food`
+/// (serde defaults).
+pub const SAVE_VERSION: u8 = 20;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

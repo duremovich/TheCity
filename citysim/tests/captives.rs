@@ -553,3 +553,54 @@ fn test_save_mid_hold_round_trips() {
     back.run_ticks(TICKS_PER_DAY);
     assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
 }
+
+/// M16b review finding 2: a god hold with no holder has no hand-over
+/// agent: the captive is not its own abductor, nobody rolls its demand and
+/// nobody kills it at the hold's end.
+#[test]
+fn test_holderless_god_hostage_never_rolls_or_kills() {
+    let mut w = gang_world();
+    let (_, _, h) = a_gang(&mut w);
+    let [v, over] = strangers(&w, 2)[..] else { unreachable!() };
+    w.edge_entry(v, over).kind = RelKind::Spouse;
+    w.config.hostage.p_hostage_kill = 1.0;
+    w.push_command(citysim::PlayerCommand::Hostage {
+        captive: v,
+        holder: None,
+        at: h,
+        demand: Some(Demand::Coins { amount: 50, weekly: false }),
+    });
+    w.apply_commands();
+    assert!(captives::is_captive(&w, v), "held");
+    assert_ne!(w.captives[&v].agent, v, "not its own abductor");
+    assert_ne!(w.comp::<Brain>(v).and_then(|b| b.abducted_by), Some(v));
+    for _ in 0..20 {
+        assert!(!captives::roll_hostage(&mut w, v), "nobody rolls");
+        w.tick += 1;
+    }
+    captives::end_hold(&mut w, v);
+    assert!(law::living(&w, v), "nobody kills");
+    assert!(has_event(&w, EventKind::HostageFreed, v));
+}
+
+/// M16b review finding 4: a captive let go stands its Rescue and the
+/// coerced party's Escort down (cancelled, the escrow refunded).
+#[test]
+fn test_release_stands_the_help_down() {
+    let mut w = gang_world();
+    let (g, l, h) = a_gang(&mut w);
+    let [v, over] = strangers(&w, 2)[..] else { unreachable!() };
+    w.edge_entry(v, over).kind = RelKind::Spouse;
+    set_coins(&mut w, over, 5_000);
+    assert!(captives::take(&mut w, v, Some(g), l, h, Some(Demand::Coins { amount: 200, weekly: false }), Some(over)));
+    let escrow = w.escrow_held;
+    captives::seek_help(&mut w, v, over, None);
+    let live = |w: &World, k: ContractKind| w.contracts.values().filter(|c| c.kind == k && c.is_live()).count();
+    assert_eq!((live(&w, ContractKind::Rescue), live(&w, ContractKind::Escort)), (1, 1));
+    let before = identity(&w);
+    captives::end_hold(&mut w, v);
+    assert!(!captives::is_captive(&w, v));
+    assert_eq!((live(&w, ContractKind::Rescue), live(&w, ContractKind::Escort)), (0, 0), "the help stood down");
+    assert_eq!(w.escrow_held, escrow, "the escrow refunded");
+    assert_eq!(identity(&w), before);
+}

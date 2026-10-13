@@ -49,9 +49,21 @@ pub enum Purpose {
     Fake = 2,
 }
 
+/// The one keyed stream of M16b's rolls: `ContractNs::Leverage` with the
+/// purpose byte in `a`'s top byte (the low 56 bits `a`'s), `b` the second
+/// key. Every module's purposes are listed in `M16_CONTRACTS.md`.
+pub(crate) fn leverage_rng(world: &World, purpose: u8, a: u64, b: u64) -> rand_chacha::ChaCha8Rng {
+    let key = (u64::from(purpose) << 56) | (a & ((1 << 56) - 1));
+    world.rng.contract(ContractNs::Leverage, key, b)
+}
+
+/// One uniform draw off [`leverage_rng`].
+pub(crate) fn leverage_draw(world: &World, purpose: u8, a: u64, b: u64) -> f32 {
+    leverage_rng(world, purpose, a, b).random()
+}
+
 fn draw(world: &World, p: Purpose, a: u64, b: u64) -> f32 {
-    let key = ((p as u64) << 56) | (a & ((1 << 56) - 1));
-    world.rng.contract(ContractNs::Leverage, key, b).random()
+    leverage_draw(world, p as u8, a, b)
 }
 
 /// The tried-pair purposes (`World::lev_tried`'s third key).
@@ -301,19 +313,8 @@ fn record(
     };
     world.coercions.insert(id, c);
     let what = match demand {
-        Demand::Coins { amount, weekly: true } => format!("{} of {amount} a week", why.label()),
-        Demand::Coins { amount, weekly: false } => format!("{amount} coins"),
-        Demand::Do(cid) => {
-            let k = world.contracts.get(&cid).map_or("job", |c| c.kind.label());
-            format!("a {k} for nothing")
-        }
-        Demand::Join { wage, .. } => format!("a post at {wage}/day"),
-        Demand::Silence { .. } => "the report withdrawn".to_string(),
-        Demand::Sell(b) => format!("{} sold", world.name_of(b)),
-        Demand::Release(c) => format!("{} released", world.name_of(c)),
-        Demand::Vote { corp, for_ } => {
-            format!("a vote for {} on {}'s board", world.name_of(for_), world.owner_label(Some(corp)))
-        }
+        Demand::Coins { weekly: true, .. } => format!("{} of {}", why.label(), demand_text(world, &demand)),
+        d => demand_text(world, &d),
     };
     let on_what = building.map(|b| format!(" on {}", world.name_of(b))).unwrap_or_default();
     let text =
@@ -339,10 +340,50 @@ pub fn force(
     building: Option<EntityId>,
 ) -> CoercionId {
     let id = record(world, holder, agent, over, lev, demand, why, payer, building);
-    if matches!(demand, Demand::Coins { weekly: true, .. }) {
-        pay_week(world, id);
+    match demand {
+        Demand::Coins { weekly: true, .. } => pay_week(world, id),
+        // Review finding 3: a forced one-off sum is paid now (or refused).
+        Demand::Coins { amount, weekly: false } => {
+            let from = payer.unwrap_or(over);
+            if world.purse(Some(from)) < amount {
+                close(world, id, CoercionStatus::Refused, "would not pay");
+            } else {
+                ownership::pay(world, Some(from), holder, amount, Flow::Coerced);
+                close(world, id, CoercionStatus::Complied, "paid");
+            }
+        }
+        // A vote closes at the vote, a hostage's hold and a job with
+        // their own; any other forced demand stands `retry_days`.
+        Demand::Vote { .. } | Demand::Do(_) => {}
+        _ if why == CoercionWhy::Hostage => {}
+        _ => {
+            let until = world.tick + retry(world);
+            if let Some(c) = world.coercions.get_mut(&id) {
+                c.until = until;
+            }
+        }
     }
     id
+}
+
+/// Review finding 3, daily before `prune`: a coercion past its `until`
+/// stood its term (`Complied`); a `Vote` coercion whose corp lost its board
+/// (or is gone), or whose member is dead, is `Broken`.
+fn validity(world: &mut World) {
+    let now = world.tick;
+    let mut done: Vec<(CoercionId, CoercionStatus, &'static str)> = Vec::new();
+    for c in world.coercions.values().filter(|c| c.is_active()) {
+        if c.until <= now {
+            done.push((c.id, CoercionStatus::Complied, "its term ran"));
+        } else if let Demand::Vote { corp, .. } = c.demand {
+            if crate::systems::governance::board_of(world, corp).is_none() || !law::living(world, c.over) {
+                done.push((c.id, CoercionStatus::Broken, "the board is gone"));
+            }
+        }
+    }
+    for (id, st, why) in done {
+        close(world, id, st, why);
+    }
 }
 
 /// Close a coercion (the one writer of a closing status).
@@ -366,17 +407,9 @@ fn close(world: &mut World, id: CoercionId, status: CoercionStatus, why: &str) {
                 status.label()
             );
             world.push_event(EventKind::CoercionBroken, &[c.over, c.agent], text);
-            // The pair is not tried again for `retry_days`.
-            let target = c.building.unwrap_or(c.over);
-            let k = match c.why {
-                CoercionWhy::Protection => tried::PROTECT,
-                CoercionWhy::Blackmail => tried::BLACKMAIL,
-                CoercionWhy::Parley => tried::PARLEY,
-                CoercionWhy::Job | CoercionWhy::Other => tried::JOB,
-                CoercionWhy::Hostage => tried::HOSTAGE,
-                CoercionWhy::Vote => tried::VOTE,
-            };
-            let by = c.holder.unwrap_or(c.agent);
+            // The pair is not tried again for `retry_days`, keyed as the
+            // pass that tries it checks it (review finding 5).
+            let (by, target, k) = retry_pair(&c);
             mark(world, by, target, k);
         }
         CoercionStatus::Lapsed => {
@@ -386,6 +419,22 @@ fn close(world: &mut World, id: CoercionId, status: CoercionStatus, why: &str) {
             world.push_event(EventKind::Lapsed, &[c.agent, c.over], text);
         }
         CoercionStatus::Complied | CoercionStatus::Active => {}
+    }
+}
+
+/// The `(a, b, purpose)` a closed coercion cools, as its trying pass reads
+/// it: protection `(gang, building)`, a blackmail or a vote `(holder,
+/// over)`, a Parley `(payer gang, holder gang)`, a coerced job `(head,
+/// gun)`.
+pub fn retry_pair(c: &Coercion) -> (EntityId, EntityId, u8) {
+    let by = c.holder.unwrap_or(c.agent);
+    match c.why {
+        CoercionWhy::Protection => (by, c.building.unwrap_or(c.over), tried::PROTECT),
+        CoercionWhy::Blackmail => (by, c.over, tried::BLACKMAIL),
+        CoercionWhy::Parley => (c.payer.unwrap_or(c.agent), by, tried::PARLEY),
+        CoercionWhy::Job | CoercionWhy::Other => (c.agent, c.over, tried::JOB),
+        CoercionWhy::Hostage => (by, c.over, tried::HOSTAGE),
+        CoercionWhy::Vote => (by, c.over, tried::VOTE),
     }
 }
 
@@ -422,6 +471,7 @@ fn daily(world: &mut World) {
     parley_pass(world);
     court_pass(world);
     fake_pass(world);
+    validity(world);
     prune(world);
 }
 
@@ -491,6 +541,15 @@ fn collect(world: &mut World) {
     }
 }
 
+/// A holder gone: a gang or a corp that no longer exists, else a person
+/// not living (review finding 1: a faction holder is no person).
+fn holder_gone(world: &World, h: EntityId) -> bool {
+    if world.has::<crate::components::Gang>(h) || world.has::<crate::components::Corp>(h) {
+        return false;
+    }
+    !law::living(world, h)
+}
+
 /// One standing coercion's week: paid, or ended (see [`collect`]).
 fn pay_week(world: &mut World, id: CoercionId) {
     let now = world.tick;
@@ -506,7 +565,7 @@ fn pay_week(world: &mut World, id: CoercionId) {
             c.holder.is_none_or(|h| !world.has::<crate::components::Gang>(h))
                 || c.payer.is_none_or(|p| !world.has::<crate::components::Gang>(p))
         }
-        _ => c.holder.is_none_or(|h| !law::living(world, h)) || !law::living(world, c.over),
+        _ => c.holder.is_none_or(|h| holder_gone(world, h)) || !law::living(world, c.over),
     };
     if broken {
         close(world, id, CoercionStatus::Broken, "the hold is gone");

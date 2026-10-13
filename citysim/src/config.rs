@@ -7483,6 +7483,9 @@ pub struct WoundedCfg {
     /// `trauma_flat`).
     pub rescue_flat: f32,
     pub trauma_flat: f32,
+    /// Review finding 6: a stabilised patient's daily meal (off a Market's
+    /// shelf, as a captive's), paid by its carer, else itself.
+    pub care_food: i64,
 }
 
 impl Default for WoundedCfg {
@@ -7499,6 +7502,7 @@ impl Default for WoundedCfg {
             stat_saved: 0.16,
             rescue_flat: 0.0,
             trauma_flat: 0.5,
+            care_food: 3,
         }
     }
 }

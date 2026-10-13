@@ -47,8 +47,7 @@ pub enum Purpose {
 }
 
 fn draw(world: &World, p: Purpose, a: u64, b: u64) -> f32 {
-    let key = ((p as u64) << 56) | (a & ((1 << 56) - 1));
-    world.rng.contract(ContractNs::Leverage, key, b).random()
+    crate::systems::leverage::leverage_draw(world, p as u8, a, b)
 }
 
 // ---------------------------------------------------------------------------
@@ -298,8 +297,12 @@ pub fn release(world: &mut World, captive: EntityId, how: Freed) {
         Freed::Expired => {}
     }
     if law::living(world, captive) {
-        world.remember(captive, crate::components::MemoryKind::Abducted, Some(c.agent), 1.0, -1.0, false);
+        let by = Some(c.agent).filter(|&a| a != EntityId::NONE);
+        world.remember(captive, crate::components::MemoryKind::Abducted, by, 1.0, -1.0, false);
     }
+    // Review finding 4: the help sought for it stands down (a Rescue that
+    // won is settled by its own mission).
+    close_help(world, captive, c.coercion, how == Freed::Rescued);
     let why = match how {
         Freed::Ransomed => "the demand was met",
         Freed::Rescued => "rescued",
@@ -308,6 +311,27 @@ pub fn release(world: &mut World, captive: EntityId, how: Freed) {
     };
     let text = format!("{} walked out of {} ({why})", world.name_of(captive), world.name_of(c.held_at));
     world.push_event(EventKind::HostageFreed, &[captive, c.held_at], text);
+}
+
+/// The help a hold drew, closed with the hold: a live Rescue on `captive`
+/// (unless `keep_rescue`: the winning mission settles its own) and the
+/// coerced party's Escort on itself, cancelled with the escrow refunded.
+fn close_help(world: &mut World, captive: EntityId, coercion: Option<crate::contract::CoercionId>, keep_rescue: bool) {
+    let over = coercion.and_then(|id| world.coercions.get(&id)).map(|c| c.over);
+    let mut ids: Vec<crate::contract::ContractId> = Vec::new();
+    for (t, kind) in [(Some(captive), ContractKind::Rescue), (over, ContractKind::Escort)] {
+        let Some(t) = t else { continue };
+        if kind == ContractKind::Rescue && keep_rescue {
+            continue;
+        }
+        let live = world.by_party.get(&t).map(|l| l.to_vec()).unwrap_or_default();
+        ids.extend(live.into_iter().filter(|id| {
+            world.contracts.get(id).is_some_and(|c| c.is_live() && c.kind == kind && c.target == Target::Agent(t))
+        }));
+    }
+    for id in ids {
+        contracts::settle(world, id, contracts::Settle::Cancelled, "the captive is out");
+    }
 }
 
 /// The hold's end with no deal: the holder's agent kills the captive with
@@ -324,6 +348,7 @@ fn expire(world: &mut World, captive: EntityId) {
         if let Some(id) = c.coercion {
             leverage::finish(world, id, CoercionStatus::Broken, "the captive was killed");
         }
+        close_help(world, captive, c.coercion, false);
         let tile = world.comp::<Building>(c.held_at).map(|b| b.door).unwrap_or_default();
         world.kill_by(captive, crate::components::DeathCause::Violence, Some(c.agent));
         law::raise_crime_on(world, c.agent, None, Some(captive), crate::components::Crime::Murder, tile);
@@ -682,6 +707,10 @@ pub fn rescue_win(world: &mut World, captive: EntityId, crew: &[EntityId]) {
     let d = world.district_of_building(c.held_at);
     for k in freed {
         release(world, k, Freed::Rescued);
+        // The others freed with it: their own Rescues stand down.
+        if k != captive {
+            close_help(world, k, None, false);
+        }
         if let Some(&a) = crew.first() {
             crate::systems::gossip::post_deed(world, d, Deed::Rescued, Some(a), Some(k));
         }

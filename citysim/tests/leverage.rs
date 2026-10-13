@@ -623,3 +623,95 @@ fn test_save_mid_coercion_round_trips() {
     back.run_ticks(TICKS_PER_DAY);
     assert_eq!(citysim::save::to_ron(&back), citysim::save::to_ron(&w));
 }
+
+/// M16b review finding 1: a weekly coercion held by a faction (a gang) is
+/// paid, not broken on its first week (a gang is no living person).
+#[test]
+fn test_faction_held_weekly_coercion_is_paid() {
+    let mut w = gang_world();
+    let (g, _) = two_gangs(&mut w);
+    let l = w.comp::<Gang>(g).unwrap().leader.unwrap();
+    let [over] = strangers(&w, 1)[..] else { unreachable!() };
+    set_coins(&mut w, over, 1_000);
+    let before = w.purse(Some(g));
+    let id = leverage::force(
+        &mut w,
+        Some(g),
+        l,
+        over,
+        Leverage::Threat,
+        Demand::Coins { amount: 50, weekly: true },
+        CoercionWhy::Other,
+        None,
+        None,
+    );
+    let c = &w.coercions[&id];
+    assert_eq!((c.status, c.paid), (CoercionStatus::Active, 1), "paid its first week");
+    assert_eq!(w.purse(Some(g)), before + 50);
+}
+
+/// M16b review finding 3: a forced one-off sum is paid at once and closes;
+/// any other forced one-off demand stands `retry_days`, then closes.
+#[test]
+fn test_forced_one_off_coercions_close() {
+    let mut w = world();
+    let [a, over, s] = strangers(&w, 3)[..] else { unreachable!() };
+    set_coins(&mut w, over, 500);
+    let paid = leverage::force(
+        &mut w,
+        Some(a),
+        a,
+        over,
+        Leverage::Debt { amount: 80 },
+        Demand::Coins { amount: 80, weekly: false },
+        CoercionWhy::Other,
+        None,
+        None,
+    );
+    assert_eq!(w.coercions[&paid].status, CoercionStatus::Complied);
+    assert_eq!(w.purse(Some(over)), 420);
+    let now = w.tick;
+    let hush = leverage::force(
+        &mut w,
+        Some(a),
+        a,
+        s,
+        Leverage::Threat,
+        Demand::Silence { suspect: a, tick: now },
+        CoercionWhy::Other,
+        None,
+        None,
+    );
+    assert!(w.coercions[&hush].is_active());
+    w.run_ticks(u64::from(w.config.leverage.retry_days) * TICKS_PER_DAY + TICKS_PER_DAY);
+    assert_eq!(w.coercions.get(&hush).map(|c| c.status), Some(CoercionStatus::Complied), "its term ran");
+}
+
+/// M16b review finding 5: a closed Parley cools `(payer, holder)` and a
+/// closed coerced job `(head, gun)`, the pairs their passes check.
+#[test]
+fn test_closed_coercions_cool_the_pair_their_pass_checks() {
+    let mut w = gang_world();
+    let (g, r) = two_gangs(&mut w);
+    let l = w.comp::<Gang>(g).unwrap().leader.unwrap();
+    w.comp_mut::<Gang>(g).unwrap().treasury = 1_000;
+    let tribute = leverage::force(
+        &mut w,
+        Some(r),
+        l,
+        l,
+        Leverage::Threat,
+        Demand::Coins { amount: 20, weekly: true },
+        CoercionWhy::Parley,
+        Some(g),
+        None,
+    );
+    let [head, gun] = strangers(&w, 2)[..] else { unreachable!() };
+    let job =
+        leverage::force(&mut w, Some(g), head, gun, Leverage::Threat, Demand::Do(0), CoercionWhy::Job, None, None);
+    w.lev_tried.clear();
+    leverage::finish(&mut w, tribute, CoercionStatus::Broken, "a test");
+    leverage::finish(&mut w, job, CoercionStatus::Broken, "a test");
+    assert!(leverage::tried_recently(&w, g, r, leverage::tried::PARLEY), "the Parley pair cooled");
+    assert!(leverage::tried_recently(&w, head, gun, leverage::tried::JOB), "the job pair cooled");
+}

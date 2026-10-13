@@ -1955,6 +1955,7 @@ recover_days = 3
 rescue_radius = 12
 rescue_loyalty = 0.5
 wounded_quota = 12                   # spec [lod] wounded_quota: downed at once (per capita, up only)
+care_food = 3                        # a stabilised patient's daily meal (paid by its carer, else itself)
 stat_saved = 0.16                    # plan key: off screen a killing survives as an assault with wound_share x stat_saved (calibrated once: 58 stabilised of 366 downed, 42-47 x 120)
 rescue_flat = 0.0                    # plan key: the Rescue goal's flat
 trauma_flat = 0.5                    # plan key: a Trauma crew's call adds this
