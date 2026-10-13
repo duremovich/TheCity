@@ -1681,3 +1681,32 @@ fn test_busted_fixer_not_busted_again_on_reopening() {
     contracts::heat_daily(&mut w);
     assert_eq!(busts(&w), 1, "not busted again on reopening");
 }
+
+/// M17 review 3: an agent away on a job abroad is no target: a Hit on one
+/// is refused at posting, and a ledger Hit already taken waits for the
+/// target to come home rather than kill it abroad.
+#[test]
+fn test_an_away_target_is_neither_posted_nor_struck() {
+    let mut w = World::new(42, Config::load());
+    w.config.missions.strike_k = 100.0;
+    let [buyer, t, taker] = strangers(&w, 3)[..] else { unreachable!() };
+    gun(&mut w, taker);
+    if let Some(s) = w.comp_mut::<Skills>(t) {
+        s.fighting = 0.0;
+    }
+    set_coins(&mut w, buyer, 5000);
+    for a in [t, taker] {
+        lod::set_lod(&mut w, a, Lod::Statistical);
+    }
+    // Away: no Hit is posted on it.
+    w.outside.away.insert(t, 0);
+    assert!(contracts::post(&mut w, posting(buyer, ContractKind::Hit, t, None)).is_err(), "posted on an away target");
+    // Home, the Hit is posted and taken; away again before the strike.
+    w.outside.away.remove(&t);
+    let id = contracts::post(&mut w, posting(buyer, ContractKind::Hit, t, None)).expect("posted");
+    assert!(contracts::accept(&mut w, id, taker, &[]));
+    w.outside.away.insert(t, 0);
+    contracts::resolve_ledger(&mut w, id);
+    assert!(law::living(&w, t), "struck while abroad");
+    assert_eq!(w.contracts[&id].status, ContractStatus::Taken, "the record waits");
+}

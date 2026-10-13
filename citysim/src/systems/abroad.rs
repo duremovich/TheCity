@@ -182,7 +182,7 @@ fn resolve(world: &mut World, m: &Abroad) {
         let u = hash_unit(seed, PURPOSE_ABROAD_DEATH, u64::from(m.id), u64::from(a.index));
         if u < cfg.death_p * (1.0 - p) {
             dead.push(a);
-            world.kill_by(a, DeathCause::Violence, None);
+            world.kill_by(a, DeathCause::Abroad, None);
             // Buried abroad: no body lies in the city.
             let now = world.tick;
             if let Some(c) = world.comp_mut::<crate::components::Corpse>(a) {
@@ -241,26 +241,24 @@ fn effect(world: &mut World, m: &Abroad) -> String {
                 .map(|b| crate::systems::tech::labs_of(world, b))
                 .and_then(|v| v.first().copied())
                 .and_then(|l| crate::systems::virt::node_of_building(world, l));
+            // M17 review: no netrun (no `UplinkBreached`, no uplink counters);
+            // the edge falls only when the Data left the parent.
             match lab.and_then(|n| world.virt.node_mut(n)) {
                 Some(node) => {
                     for (u, x) in node.store.units.iter_mut().zip(payload) {
                         *u += x;
                     }
+                    crate::systems::parents::cut_edge(world, m.on, units);
+                    format!("{units} Data taken")
                 }
-                None => crate::systems::parents::return_abroad(world, m.on, payload),
+                None => {
+                    crate::systems::parents::return_abroad(world, m.on, payload);
+                    "the Data had nowhere to go and stayed abroad".to_string()
+                }
             }
-            crate::systems::parents::uplink_landed(
-                world,
-                m.on,
-                crate::virt::Purpose::Data { wipe: false },
-                units,
-                m.buyer,
-                EntityId::NONE,
-            );
-            format!("{units} Data taken")
         }
         OutsideAsset::Convoy => {
-            crate::systems::parents::sanction(world, None, m.on, cfg.convoy_days, cfg.convoy_cut);
+            crate::systems::parents::crew_sanction(world, m.on, cfg.convoy_days, cfg.convoy_cut);
             "the convoy burned".to_string()
         }
     }

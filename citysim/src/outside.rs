@@ -209,6 +209,9 @@ pub struct Parent {
     /// Syndicates: the ticks of its refounds (the window's count).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub refounds: Vec<crate::time::Tick>,
+    /// M17 review: branches this parent founded (the next one's numeral).
+    #[serde(default, skip_serializing_if = "is_zero_u32")]
+    pub founded: u32,
     // --- Phase 4: the weapons that reach the ledger.
     /// `0.2..=1.5` competitive edge (Data theft and wipes lower it).
     pub edge: f32,
@@ -229,6 +232,10 @@ pub struct Sanction {
     pub on: OutsideId,
     pub until: crate::time::Tick,
     pub cut: f32,
+    /// M17 review: a crew abroad burned a convoy (`by` is `None` but this is
+    /// no State sanction: subsidies and bodies still cross).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub crew: bool,
 }
 
 /// M17 phase 3: a branch building lost (to a raid, a squat, a sale).

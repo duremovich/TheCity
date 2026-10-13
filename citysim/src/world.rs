@@ -3644,6 +3644,8 @@ impl World {
             DeathCause::Flatline => self.stats.current.virt.flatlined += 1,
             // Hunger as sickness § 3.
             DeathCause::Disease => self.stats.current.health.deaths_disease += 1,
+            // M17 review: a death abroad is the outside's count (`abroad_dead`).
+            DeathCause::Abroad => {}
         }
         // `[dead, spouse?]`, or `[dead, spouse or NONE, killer]` when the
         // killer is known, so the biography names them (an attacker who

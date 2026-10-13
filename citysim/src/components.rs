@@ -734,6 +734,9 @@ pub enum DeathCause {
     Flatline,
     /// Hunger as sickness § 3: a cancer run its course.
     Disease,
+    /// M17 review: killed on a job abroad (no Murder, no witness, no heat,
+    /// no litter; the kin grieve, a gang's succession opens).
+    Abroad,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

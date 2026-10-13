@@ -47,3 +47,41 @@ fn test_seeding_follows_the_row_not_the_name() {
     assert_eq!(owned(BuildingKind::Lab), 2, "the row's two seeded Labs");
     assert!(owned(BuildingKind::Fab) >= 1, "a seeded Fab");
 }
+
+/// Review: the Food row renamed keeps the Noodle Bars' first place and its
+/// Feed ("<owner> Now"): `noodle_first_row` and `seed_feeds` read the row.
+#[test]
+fn test_food_row_renamed_keeps_its_noodle_bars_and_feed() {
+    let mut cfg = Config::load();
+    let i = cfg.corps.names.iter().position(|n| n == "Nutrix").expect("the Food row");
+    cfg.corps.names[i] = "Synthco".into();
+    for b in cfg.governance.boards.iter_mut().filter(|b| b.as_str() == "Nutrix") {
+        *b = "Synthco".into();
+    }
+    assert_eq!(cfg.unresolved_names(), Vec::<String>::new());
+    let w = World::new(42, cfg);
+    let synthco =
+        w.corps().into_iter().find(|&c| w.comp::<Corp>(c).is_some_and(|x| x.name == "Synthco")).expect("Synthco");
+    // The renamed row owns the Noodle Bars and the Feed the shipped row owns.
+    let shipped = World::new(42, Config::load());
+    let nutrix = shipped
+        .corps()
+        .into_iter()
+        .find(|&c| shipped.comp::<Corp>(c).is_some_and(|x| x.name == "Nutrix"))
+        .expect("Nutrix");
+    let bars = |w: &World, c| {
+        w.buildings_of_kind(BuildingKind::NoodleBar)
+            .iter()
+            .filter(|&&b| w.comp::<Building>(b).and_then(|x| x.owner) == Some(c))
+            .count()
+    };
+    assert!(bars(&shipped, nutrix) > 0);
+    assert_eq!(bars(&w, synthco), bars(&shipped, nutrix), "the row's Noodle Bars");
+    let feeds: Vec<String> = w
+        .buildings_of_kind(BuildingKind::Feed)
+        .iter()
+        .filter_map(|&b| w.comp::<Building>(b).and_then(|x| x.feed.as_ref()).map(|f| f.name.clone()))
+        .collect();
+    assert!(feeds.iter().any(|n| n == "Synthco Now"), "{feeds:?}");
+    assert!(!feeds.iter().any(|n| n.contains("Nutrix")), "{feeds:?}");
+}
