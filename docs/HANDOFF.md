@@ -457,7 +457,7 @@ Findings:
 
 The order (Dylan, 2026-10-13):
 
-1. **Jobs & lives milestone.**
+1. **Jobs & lives milestone.** The spec was approved by Dylan on 2026-10-13; his answers are at the end of docs/JOBS_AND_LIVES.md (owned items incl. clothing and scavs; cults as a city-takeover path). Start phase 1 with one solo coder.
    - Spec: `docs/JOBS_AND_LIVES.md`, being drafted by agent `jobs-spec` in `.claude/worktrees/jobs-spec`. Review it with Dylan before building.
    - Scope is "add it all":
      - vice: a strip club, **both** a grim chipped-joytoy dollhouse and plain brothels, street work with pimps, Spire escorts, braindance studios;
