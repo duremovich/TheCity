@@ -78,13 +78,13 @@ fn test_income_applies_every_factor() {
 
 #[test]
 fn test_branch_loss_rises_on_a_sale_and_a_remit_gap() {
-    assert_eq!(outside::branch_loss(1000, 1000, 70, 300, 30), 0.0, "whole and remitting");
-    let sale = outside::branch_loss(500, 1000, 70, 300, 30);
+    // Phase 3: the gap is the share of branches a week in the red.
+    assert_eq!(outside::branch_loss(1000, 1000, 0.0), 0.0, "whole and trading");
+    let sale = outside::branch_loss(500, 1000, 0.0);
     assert!(sale > 0.25, "half the buildings gone: {sale}");
-    let gap = outside::branch_loss(1000, 1000, 0, 300, 30);
-    assert!(gap > 0.3, "nothing sent home this week: {gap}");
-    assert_eq!(outside::branch_loss(0, 0, 0, 0, 3), 0.0, "nothing to lose yet");
-    assert_eq!(outside::branch_loss(1000, 1000, 0, 300, 5), 0.0, "no gap read before a week of books");
+    let gap = outside::branch_loss(1000, 1000, 1.0);
+    assert!(gap > 0.3, "every branch a week in the red: {gap}");
+    assert_eq!(outside::branch_loss(0, 0, 0.0), 0.0, "nothing to lose yet");
 }
 
 /// A profitable branch with a healthy treasury sends `remit_share` of its

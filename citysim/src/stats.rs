@@ -509,6 +509,25 @@ pub struct OutsideCols {
     pub crossed_out: i64,
     /// Parents failing (income under upkeep for a week).
     pub failing: u32,
+    /// M17 phase 3: bodies (the day's `Outside.today`; Outsiders living at
+    /// the close and the State's guards).
+    pub outsiders_living: u32,
+    pub outsiders_arrived: u32,
+    pub outsiders_left: u32,
+    pub settled: u32,
+    pub reinforcements: u32,
+    pub buybacks: u32,
+    pub retakes_posted: u32,
+    pub retakes_won: u32,
+    pub branches_founded: u32,
+    pub parents_founded: u32,
+    pub abandoned: u32,
+    pub brothers_arrived: u32,
+    pub gangs_refounded: u32,
+    pub state_guards: u32,
+    pub state_grants: u32,
+    pub mandates: u32,
+    pub withdrawals: u32,
     pub accounts: Vec<ParentCols>,
 }
 
@@ -524,6 +543,23 @@ impl OutsideCols {
             "outside_out",
             "outside_net",
             "parents_failing",
+            "outsiders_living",
+            "outsiders_arrived",
+            "outsiders_left",
+            "settled",
+            "reinforcements",
+            "buybacks",
+            "retakes_posted",
+            "retakes_won",
+            "branches_founded",
+            "parents_founded",
+            "abandoned",
+            "brothers_arrived",
+            "gangs_refounded",
+            "state_guards",
+            "state_grants",
+            "mandates",
+            "withdrawals",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -546,6 +582,23 @@ impl OutsideCols {
             self.crossed_out.to_string(),
             (self.crossed_in - self.crossed_out).to_string(),
             self.failing.to_string(),
+            self.outsiders_living.to_string(),
+            self.outsiders_arrived.to_string(),
+            self.outsiders_left.to_string(),
+            self.settled.to_string(),
+            self.reinforcements.to_string(),
+            self.buybacks.to_string(),
+            self.retakes_posted.to_string(),
+            self.retakes_won.to_string(),
+            self.branches_founded.to_string(),
+            self.parents_founded.to_string(),
+            self.abandoned.to_string(),
+            self.brothers_arrived.to_string(),
+            self.gangs_refounded.to_string(),
+            self.state_guards.to_string(),
+            self.state_grants.to_string(),
+            self.mandates.to_string(),
+            self.withdrawals.to_string(),
         ];
         for a in &self.accounts {
             v.push(a.treasury.to_string());

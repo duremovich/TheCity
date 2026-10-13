@@ -588,6 +588,13 @@ fn mechanisms() -> Vec<Mechanism> {
         // M17 phase 2 (seeds 42-47 x 120 days): the parents.
         ("a day with a remittance home", m("remittance")), // [87, 87, 81]; 45-47 [85, 93, 87]
         ("a Subsidised", k(EventKind::Subsidised)),        // [30, 47, 32]; 45-47 [41, 96, 41]
+        // M17 phase 3 (seeds 42-47 x 120 days): bodies. A Retake, a buy-back, a
+        // FoundBranch, a refound, a tour's end and a settling are unit-tested in
+        // `bodies.rs` (0-3 of 6 seeds); a ParentFounded (one a seed) and an
+        // Abandoned (5 of 6) are printed.
+        ("an OutsidersArrived", k(EventKind::OutsidersArrived)), // [9, 6, 6]; 45-47 [9, 6, 6]
+        ("a BrothersArrived", k(EventKind::BrothersArrived)),    // [5, 6, 6]; 45-47 [2, 2, 6]
+        ("a StateGrant", k(EventKind::StateGrant)),              // [17, 27, 19]; 45-47 [17, 19, 16]
     ]
 }
 
@@ -650,6 +657,13 @@ fn printed_mechanisms() -> Vec<Mechanism> {
         ("a secret lapsed", m("secret lapsed")),       // [0, 1, 0, 0, 0, 0]
         ("a Persuade posted", m("Persuade posted")),   // [0, 0, 0, 0, 0, 0]
         ("a coerced job done", m("coerced job done")), // [2, 0, 0, 0, 0, 0]
+        // M17 phase 3 (seeds 42-47 x 120 days): printed, unit-tested in `bodies.rs`.
+        ("a ParentFounded", k(EventKind::ParentFounded)), // [1, 1, 1, 1, 1, 1]
+        ("an Abandoned", k(EventKind::Abandoned)),        // [1, 1, 0, 2, 2, 1]
+        ("a BranchRetook", k(EventKind::BranchRetook)),   // [0, 0, 0, 0, 0, 0]
+        ("a BuyBackOffered", k(EventKind::BuyBackOffered)), // [0, 0, 0, 0, 0, 0]
+        ("a GangRefounded", k(EventKind::GangRefounded)), // [0, 0, 0, 0, 0, 0]
+        ("an OutsiderLeft", k(EventKind::OutsiderLeft)),  // [0, 0, 0, 3, 4, 1]
         // M16b phase 2 (seeds 42-47 x 120 days): rare, unit-tested in `captives.rs`.
         ("a hostage taken", m("hostage taken")),             // [0, 1, 1, 1, 0, 0]
         ("a Rescue posted", m("Rescue posted")),             // [0, 0, 0, 0, 0, 0]

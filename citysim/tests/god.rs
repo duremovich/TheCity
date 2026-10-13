@@ -2668,3 +2668,151 @@ fn god_ambient_boom() {
     let paid = |v: &[AmbientDay]| v.iter().skip(10).map(|d| d.paid).sum::<i64>();
     assert!(paid(&r) > paid(&c), "the book bought no more under the pin: {} vs {}", paid(&r), paid(&c));
 }
+
+// ---------------------------------------------------------------------------
+// M17 phase 3 (docs/M17_OUTSIDE.md § 2, § 4): bodies. Each runs the shipped
+// city with a shock and asserts the outside reacted; what it did is printed.
+// ---------------------------------------------------------------------------
+
+/// Run the shipped seed-42 city `days` days, `shock` at each day's start;
+/// the events of the run.
+fn run_outside(days: u64, mut shock: impl FnMut(&mut World, u64)) -> (World, Vec<(u64, EventKind, String)>) {
+    let mut w = World::new(SEED, Config::load());
+    let mut story = Vec::new();
+    for day in 0..days {
+        shock(&mut w, day);
+        let cursor = w.events.back().map_or(0, |e| e.id + 1);
+        w.run_ticks(TICKS_PER_DAY);
+        story.extend(
+            w.events.iter().filter(|e| e.id >= cursor).map(|e| (e.tick / TICKS_PER_DAY, e.kind, e.text.clone())),
+        );
+    }
+    (w, story)
+}
+
+fn told(story: &[(u64, EventKind, String)], kinds: &[EventKind], from: u64, to: u64) -> Vec<String> {
+    story
+        .iter()
+        .filter(|(d, k, _)| kinds.contains(k) && (from..to).contains(d))
+        .map(|(d, k, t)| format!("day {d} {k:?}: {t}"))
+        .collect()
+}
+
+/// M17 god 2: every Arasaka building given to Ninefold on day 10. Does
+/// Arasaka Global react (a Reinforce, a buy-back, a Retake, a Hit on the
+/// raider, a new branch) within 30 days? Printed: whether a branch owns a
+/// building again.
+#[test]
+#[ignore]
+fn god_raze_arasaka() {
+    let (w, story) = run_outside(45, |w, day| {
+        if day == 10 {
+            let arasaka =
+                w.corps().into_iter().find(|&c| w.comp::<citysim::Corp>(c).is_some_and(|x| x.name == "Arasaka"));
+            let ninefold = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "Ninefold"));
+            if let (Some(a), Some(n)) = (arasaka, ninefold) {
+                for b in w.comp::<citysim::Corp>(a).map(|c| c.buildings.clone()).unwrap_or_default() {
+                    citysim::systems::corps::move_building(w, b, Some(n));
+                }
+                eprintln!("day 10: every Arasaka building to Ninefold");
+            }
+        }
+    });
+    let kinds = [
+        EventKind::OutsideOrder,
+        EventKind::Reinforced,
+        EventKind::OutsidersArrived,
+        EventKind::BuyBackOffered,
+        EventKind::BranchRetook,
+        EventKind::BranchFounded,
+        EventKind::ContractPosted,
+    ];
+    let lines: Vec<String> = told(&story, &kinds, 10, 45)
+        .into_iter()
+        .filter(|l| l.contains("Arasaka") || l.contains("Retake") || l.contains("retake") || l.contains("people"))
+        .collect();
+    for l in &lines {
+        eprintln!("{l}");
+    }
+    let owns = w
+        .corps()
+        .into_iter()
+        .any(|c| w.comp::<citysim::Corp>(c).is_some_and(|x| x.name.starts_with("Arasaka") && !x.buildings.is_empty()));
+    eprintln!("an Arasaka branch owns a building on day 45: {owns}");
+    let reacted = told(
+        &story,
+        &[EventKind::Reinforced, EventKind::BuyBackOffered, EventKind::BranchRetook, EventKind::BranchFounded],
+        10,
+        40,
+    );
+    assert!(!reacted.is_empty(), "Arasaka Global did not react to the razing");
+}
+
+/// M17 god 3: The Hollow's leader killed on day 20 and the successor on
+/// day 35: brothers arrive between days 25 and 30, and none for the second
+/// (the syndicate's cooldown).
+#[test]
+#[ignore]
+fn god_decapitate_twice() {
+    let leader = |w: &World| {
+        w.gangs()
+            .into_iter()
+            .find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "The Hollow"))
+            .and_then(|g| w.comp::<Gang>(g).and_then(|x| x.leader))
+    };
+    let (_, story) = run_outside(60, |w, day| {
+        if day == 20 {
+            // A syndicate ready to answer (seed 42's gangs lose leaders to
+            // arrests in the first fortnight, which starts its cooldown).
+            for f in w.outside.factions.iter_mut().filter(|f| f.name == "Hollow Brothers") {
+                if let Some(p) = f.parent.as_mut() {
+                    p.last_brothers = None;
+                }
+            }
+        }
+        if day == 20 || day == 35 {
+            if let Some(l) = leader(w) {
+                eprintln!("day {day}: killing {}", w.name_of(l));
+                w.push_command(PlayerCommand::KillAgent(l));
+            } else {
+                eprintln!("day {day}: The Hollow has no leader");
+            }
+        }
+    });
+    let arrivals = told(&story, &[EventKind::BrothersArrived], 0, 60);
+    for l in &arrivals {
+        eprintln!("{l}");
+    }
+    let first = told(&story, &[EventKind::BrothersArrived], 25, 31);
+    assert!(!first.is_empty(), "no brothers after the first decapitation");
+    let again =
+        told(&story, &[EventKind::BrothersArrived], 36, 60).into_iter().filter(|l| l.contains("The Hollow")).count();
+    assert_eq!(again, 0, "brothers came again inside the cooldown");
+}
+
+/// M17 god 4: a murder wave (25 residents killed on day 10). Does the State
+/// fund guards (a StateGrant) within 14 days, and withdraw once it calms?
+#[test]
+#[ignore]
+fn god_murder_wave() {
+    let (w, story) = run_outside(60, |w, day| {
+        if day == 10 {
+            let victims: Vec<EntityId> = w
+                .citizens()
+                .into_iter()
+                .filter(|&a| w.has::<citysim::Brain>(a) && citysim::systems::demography::is_adult(w, a))
+                .step_by(37)
+                .take(25)
+                .collect();
+            for v in victims {
+                w.push_command(PlayerCommand::KillAgent(v));
+            }
+        }
+    });
+    for l in told(&story, &[EventKind::StateGrant, EventKind::StateMandate, EventKind::StateWithdrew], 0, 60) {
+        eprintln!("{l}");
+    }
+    eprintln!("State guards on day 60: {}", w.outside.state_guards);
+    let grants = told(&story, &[EventKind::StateGrant], 10, 25);
+    assert!(!grants.is_empty(), "the State funded no guards after the wave");
+}

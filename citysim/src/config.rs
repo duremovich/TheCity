@@ -317,6 +317,64 @@ pub struct ParentsCfg {
     pub subsidy_cap_day: i64,
     pub flat_hold: f32,
     pub flat_subsidise: f32,
+    // --- Phase 3: bodies.
+    pub flat_reinforce: f32,
+    pub flat_retake: f32,
+    pub flat_found_branch: f32,
+    pub flat_abandon: f32,
+    /// A branch shock (a building lost, a raid) this recent opens Reinforce.
+    pub recent_days: u32,
+    pub reinforce_cooldown_days: u32,
+    pub bodies_per_day: u32,
+    pub bodies_per_call: u32,
+    /// Living Outsiders per parent at most, at 2,000 residents (`scaled_to`).
+    pub outsiders_cap: u32,
+    /// Paid abroad per body (minted out).
+    pub body_cost: i64,
+    /// Into the branch per body (`Flow::ParentFund`): the new hire's wages.
+    pub body_fund: i64,
+    pub outsider_skill: f32,
+    pub tour_days: u32,
+    pub retake_window_days: u32,
+    pub retake_wealth_min: f32,
+    pub retake_premium: f32,
+    /// A holder refusing this many buy-backs gets a `Retake` posted.
+    pub refusals_to_force: u8,
+    pub hit_lawfulness: f32,
+    pub branch_seed: i64,
+    pub upkeep_grace_days: u32,
+    pub abandon_attitude: f32,
+    pub abandon_days: u32,
+    pub found_parent_treasury: i64,
+    pub found_parent_share: f32,
+    pub found_parent_days: u32,
+    pub found_parent_frac: f32,
+    pub parent_income_rate: f32,
+    pub parent_upkeep_rate: f32,
+    pub max_accounts: usize,
+    // Syndicates.
+    pub syndicate_subsidy: i64,
+    pub brothers: u32,
+    pub brother_delay_days: u32,
+    pub brother_cost: i64,
+    pub syndicate_cooldown_days: u32,
+    pub refound_days: u32,
+    pub refound_cost: i64,
+    pub refound_attitude: f32,
+    pub refound_window_days: u32,
+    // The State.
+    /// The State's extra guards at most, at 2,000 residents (`scaled_to`).
+    pub state_guards_max: u16,
+    pub state_guards_step: u16,
+    pub heat_murders: f32,
+    pub mandate_heat: f32,
+    pub mandate_bias: f32,
+    pub mandate_days: u32,
+    /// A State guard's day of wages in the weekly grant.
+    pub grant_wage: i64,
+    pub flat_fund: f32,
+    pub flat_mandate: f32,
+    pub flat_withdraw: f32,
 }
 
 /// One seeded outside account. `treasury`, `income` and `upkeep` are per
@@ -381,6 +439,54 @@ impl Default for ParentsCfg {
             subsidy_cap_day: 1500,
             flat_hold: 0.3,
             flat_subsidise: 0.0,
+            flat_reinforce: 0.0,
+            flat_retake: 0.15,
+            flat_found_branch: 0.0,
+            flat_abandon: -0.2,
+            recent_days: 14,
+            reinforce_cooldown_days: 21,
+            bodies_per_day: 2,
+            bodies_per_call: 6,
+            outsiders_cap: 24,
+            body_cost: 300,
+            body_fund: 300,
+            outsider_skill: 0.6,
+            tour_days: 60,
+            retake_window_days: 30,
+            retake_wealth_min: 0.2,
+            retake_premium: 1.5,
+            refusals_to_force: 2,
+            hit_lawfulness: 0.4,
+            branch_seed: 4000,
+            upkeep_grace_days: 14,
+            abandon_attitude: -0.5,
+            abandon_days: 60,
+            found_parent_treasury: 20000,
+            found_parent_share: 0.5,
+            found_parent_days: 30,
+            found_parent_frac: 0.5,
+            parent_income_rate: 0.02,
+            parent_upkeep_rate: 0.017,
+            max_accounts: 12,
+            syndicate_subsidy: 150,
+            brothers: 3,
+            brother_delay_days: 5,
+            brother_cost: 150,
+            syndicate_cooldown_days: 30,
+            refound_days: 21,
+            refound_cost: 600,
+            refound_attitude: -0.5,
+            refound_window_days: 60,
+            state_guards_max: 12,
+            state_guards_step: 4,
+            heat_murders: 10.0,
+            mandate_heat: 0.6,
+            mandate_bias: 0.2,
+            mandate_days: 14,
+            grant_wage: 8,
+            flat_fund: 0.0,
+            flat_mandate: 0.0,
+            flat_withdraw: 0.0,
         }
     }
 }
@@ -6052,6 +6158,13 @@ impl Config {
         let oa = &mut self.outside.ambient;
         oa.food_cap = up_u32(oa.food_cap);
         oa.visit_cap = up_u32(oa.visit_cap);
+        // M17 phase 3: the bodies per capita (a parent's Outsiders, the
+        // State's guards; the brand's own branches scale its money).
+        let op = &mut self.outside.parents;
+        op.outsiders_cap = up_u32(op.outsiders_cap);
+        op.state_guards_max = (f64::from(op.state_guards_max) * up).round().clamp(0.0, 65535.0) as u16;
+        op.state_guards_step = (f64::from(op.state_guards_step) * up).round().clamp(1.0, 65535.0) as u16;
+        op.heat_murders *= up as f32;
         let wm = &mut self.world_market;
         wm.treasury_ref = up_i64(wm.treasury_ref);
         wm.food.cap = up_u32(wm.food.cap);
@@ -6258,6 +6371,8 @@ pub struct KindTable<T> {
     /// M16b phase 4.
     pub tag: T,
     pub vote: T,
+    /// M17 phase 3.
+    pub retake: T,
 }
 
 impl<T: Default + Copy> KindTable<T> {
@@ -6278,6 +6393,7 @@ impl<T: Default + Copy> KindTable<T> {
             ContractKind::Trauma => self.trauma,
             ContractKind::Tag => self.tag,
             ContractKind::Vote => self.vote,
+            ContractKind::Retake => self.retake,
         }
     }
 }
@@ -6344,6 +6460,7 @@ impl Default for ContractsCfg {
                 trauma: 35,
                 tag: 150,
                 vote: 250,
+                retake: 500,
             },
             deadline_days: KindTable {
                 hit: 10,
@@ -6360,6 +6477,7 @@ impl Default for ContractsCfg {
                 trauma: 7,
                 tag: 10,
                 vote: 14,
+                retake: 10,
             },
             risk_w: 1.5,
             standing_w: 1.0,
@@ -6392,11 +6510,13 @@ pub struct GunLawfulnessCfg {
     /// M16b phase 4.
     pub tag: f32,
     pub vote: f32,
+    /// M17 phase 3.
+    pub retake: f32,
 }
 
 impl Default for GunLawfulnessCfg {
     fn default() -> Self {
-        GunLawfulnessCfg { hit: 0.3, beat: 0.4, abduct: 0.3, steal: 0.4, rescue: 0.7, tag: 0.5, vote: 0.6 }
+        GunLawfulnessCfg { hit: 0.3, beat: 0.4, abduct: 0.3, steal: 0.4, rescue: 0.7, tag: 0.5, vote: 0.6, retake: 0.6 }
     }
 }
 
@@ -6411,6 +6531,7 @@ impl GunLawfulnessCfg {
             ContractKind::Rescue => self.rescue,
             ContractKind::Tag => self.tag,
             ContractKind::Vote => self.vote,
+            ContractKind::Retake => self.retake,
             ContractKind::Guard
             | ContractKind::Locate
             | ContractKind::Persuade

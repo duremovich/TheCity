@@ -102,7 +102,15 @@ use crate::world::World;
 /// `EventKind::{Subsidised, ParentFailing, OutsideOrder}` and
 /// `PlayerCommand::{Embargo, SetTariff}`. A save before 22 builds the
 /// accounts on load (`outside::seed_parents`).
-pub const SAVE_VERSION: u8 = 22;
+/// 23: M17 phase 3, bodies: `Parent.{held, lost, last_reinforce,
+/// reinforce_left, cohort_next, abandoned_until, branch_died_at,
+/// pinned_until, leaders, brothers_due, last_brothers, refounds}`,
+/// `Outside.{outsiders, state_guards, mandate_until, found_streak,
+/// csv_parents, today}`, the appended `OutsideOrder::{Fund, Mandate,
+/// Withdraw}`, `ContractKind::Retake`, `Origin::Parent`, fourteen events and
+/// `PlayerCommand::{ForceReinforce, SetOutsideOrder}`, `[outside.parents]`'s
+/// phase 3 keys and the `retake` kind keys (serde defaults).
+pub const SAVE_VERSION: u8 = 23;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

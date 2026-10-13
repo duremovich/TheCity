@@ -1183,6 +1183,9 @@ fn test_decapitation_splits_with_strong_lieutenant_and_two_districts() {
 #[test]
 fn test_empty_gang_cannot_reform_in_held_district_or_before_reform_days() {
     let mut w = v2(65);
+    // M12's rule for a gang with no syndicate (M17 phase 3: a syndicate's
+    // gang re-forms only through its refound, `bodies.rs`).
+    w.config.outside.enabled = false;
     let (g0, g1) = gangs(&w);
     // A fresh, never-manned gang is open (the city's first recruits).
     assert!(gang::may_reform(&w, g0));

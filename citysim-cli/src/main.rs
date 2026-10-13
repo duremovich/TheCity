@@ -1471,6 +1471,26 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
             }
         }
         "tariff" => PlayerCommand::SetTariff(value.parse::<f32>().map_err(|e| format!("{spec}: bad tariff: {e}"))?),
+        // M17 phase 3: `force_reinforce=<account id>:<bodies>`, `outside_order=<account id>:<order>:<days>`.
+        "force_reinforce" => {
+            let (id, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <account id>:<bodies>"))?;
+            PlayerCommand::ForceReinforce {
+                id: id.parse::<u32>().map_err(|e| format!("{spec}: bad account id: {e}"))?,
+                bodies: n.parse::<u32>().map_err(|e| format!("{spec}: bad bodies: {e}"))?,
+            }
+        }
+        "outside_order" => {
+            let parts: Vec<&str> = value.split(':').collect();
+            let [id, order, days] = parts[..] else {
+                return Err(format!("{spec}: expected <account id>:<order>:<days>"));
+            };
+            PlayerCommand::SetOutsideOrder {
+                id: id.parse::<u32>().map_err(|e| format!("{spec}: bad account id: {e}"))?,
+                order: citysim::outside::OutsideOrder::parse(order)
+                    .ok_or_else(|| format!("{spec}: unknown order {order}"))?,
+                days: days.parse::<u32>().map_err(|e| format!("{spec}: bad days: {e}"))?,
+            }
+        }
         "export_cap" => {
             let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<n|auto>"))?;
             PlayerCommand::SetExportCap {

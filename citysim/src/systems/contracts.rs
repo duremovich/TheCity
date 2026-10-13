@@ -604,9 +604,9 @@ pub fn post_with(world: &mut World, p: Posting, extra: PostExtra) -> Result<Cont
     let on_self = Some(p.target.id()) == p.buyer && !matches!(p.kind, ContractKind::Guard | ContractKind::Escort);
     // Review fix: only a Guard may name a building (a Hit, Beat or Locate
     // on one has no plan and no ledger row: it would sit Taken to its deadline).
-    // M16b phase 2: and a Steal.
-    let building =
-        matches!(p.target, Target::Building(_)) && !matches!(p.kind, ContractKind::Guard | ContractKind::Steal);
+    // M16b phase 2: and a Steal; M17 phase 3: and a Retake.
+    let building = matches!(p.target, Target::Building(_))
+        && !matches!(p.kind, ContractKind::Guard | ContractKind::Steal | ContractKind::Retake);
     if !target_ok(world, &p.target) || on_self || building || !buyer_ok(world, p.buyer) {
         return Err(Refusal::NoTarget);
     }
@@ -694,6 +694,7 @@ fn note_kind_posted(world: &mut World, kind: ContractKind) {
         ContractKind::Trauma => world.stats.current.wounded.trauma_subs_new += 1,
         ContractKind::Tag => world.stats.current.gov.k_tag_posted += 1,
         ContractKind::Vote => world.stats.current.gov.k_vote_posted += 1,
+        ContractKind::Retake => world.outside.today.retakes_posted += 1,
         k => match crate::stats::CaptiveCols::slot(k) {
             Some(i) => world.stats.current.captive.k_posted[i] += 1,
             None => world.stats.current.contract.k_posted[k.index()] += 1,
@@ -926,6 +927,7 @@ fn skill_for(world: &World, kind: ContractKind, cand: EntityId) -> f32 {
         // M16b phase 4.
         ContractKind::Tag => world.comp::<Skills>(cand).map_or(0.0, |s| s.stealth),
         ContractKind::Vote => world.comp::<Skills>(cand).map_or(0.0, |s| s.intimidation),
+        ContractKind::Retake => crate::systems::law::fighting(world, cand),
     }
 }
 
@@ -1177,6 +1179,10 @@ pub fn render_for(world: &World, id: ContractId) -> Render {
     }
     // Phase 4: a Tag's plant and a Vote's Intimidate likewise.
     if matches!(c.kind, ContractKind::Tag | ContractKind::Vote) {
+        return Render::Ledger;
+    }
+    // M17 phase 3: a Retake is one strike draw at the building.
+    if c.kind == ContractKind::Retake {
         return Render::Ledger;
     }
     // Phase 2: an Escort is a Guard on a person; an Abduct is never ledger.
@@ -1672,6 +1678,8 @@ pub fn set_status(world: &mut World, id: ContractId, status: ContractStatus, why
                 world.stats.current.gov.k_tag_done += 1;
             } else if kind == ContractKind::Vote {
                 world.stats.current.gov.k_vote_done += 1;
+            } else if kind == ContractKind::Retake {
+                world.outside.today.retakes_won += 1;
             } else {
                 world.stats.current.contract.k_done[kind.index()] += 1;
             }
@@ -2245,6 +2253,11 @@ pub fn resolve_ledger(world: &mut World, id: ContractId) {
     }
     if c.kind == ContractKind::Vote {
         crate::systems::governance::resolve_vote(world, id, lead);
+        return;
+    }
+    // M17 phase 3: a Retake's strike at the building.
+    if c.kind == ContractKind::Retake {
+        crate::systems::parents::resolve_retake(world, id, lead);
         return;
     }
     // M16b phase 2: a Steal (no heist run going) and a Deliver.

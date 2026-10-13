@@ -74,10 +74,14 @@ pub enum ContractKind {
     /// M16b phase 4 (spec § 6): a board member leaned on to vote for the
     /// buyer (an Intimidate pinning the vote).
     Vote,
+    /// M17 phase 3: a parent's branch takes a lost building back: a strike
+    /// at the building (the mission's strength estimate, one ledger draw);
+    /// a win forces the sale back to the branch at its value.
+    Retake,
 }
 
 impl ContractKind {
-    pub const ALL: [ContractKind; 14] = [
+    pub const ALL: [ContractKind; 15] = [
         ContractKind::Hit,
         ContractKind::Beat,
         ContractKind::Guard,
@@ -92,6 +96,7 @@ impl ContractKind {
         ContractKind::Trauma,
         ContractKind::Tag,
         ContractKind::Vote,
+        ContractKind::Retake,
     ];
 
     /// M16b phase 2's six kinds (`LeverageCols`' per-kind columns).
@@ -126,6 +131,7 @@ impl ContractKind {
             ContractKind::Trauma => "trauma",
             ContractKind::Tag => "tag",
             ContractKind::Vote => "vote",
+            ContractKind::Retake => "retake",
         }
     }
 
@@ -150,6 +156,7 @@ impl ContractKind {
                 | ContractKind::Steal
                 | ContractKind::Tag
                 | ContractKind::Vote
+                | ContractKind::Retake
         )
     }
 
@@ -280,6 +287,8 @@ pub enum Origin {
     Subscription,
     /// M16b phase 4: a board campaign's Persuade or Vote.
     Board,
+    /// M17 phase 3: an outside parent's order (a Retake, a Hit on a raider).
+    Parent,
 }
 
 /// How a taken record is resolved: a ledger draw at `due` (no bodies), a

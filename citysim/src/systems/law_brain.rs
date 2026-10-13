@@ -243,6 +243,8 @@ pub fn rescore(world: &mut World, hysteresis: f32, why: &str) {
     let mut scores = inputs.as_ref().map(|i| score_postures(i, &cfg)).unwrap_or_default();
     // M16b phase 4: a distracted law tilts to Garrison.
     crate::systems::attention::tilt(world, None, &mut scores, |s| s.posture == Posture::Garrison, |s| &mut s.score);
+    // M17 phase 3: the State's Mandate tilts to Crackdown and Garrison.
+    crate::systems::parents::mandate_tilt(world, &mut scores);
     let brain = choose(&scores, current, hysteresis);
     // M11 D21: a corp's bought crackdown, while it holds and its gang lives,
     // forces a Crackdown on that gang (the player's pin still wins).

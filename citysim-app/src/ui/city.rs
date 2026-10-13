@@ -825,6 +825,7 @@ fn contracts_section(ui: &mut Ui, app: &mut App, world: &World) {
         ContractKind::Trauma => 0,
         ContractKind::Tag => r.gov.k_tag_done,
         ContractKind::Vote => r.gov.k_vote_done,
+        ContractKind::Retake => r.outside.as_ref().map_or(0, |o| o.retakes_won),
         k => match citysim::stats::CaptiveCols::slot(k) {
             Some(i) => r.captive.k_done[i],
             None => r.contract.k_done.get(k.index()).copied().unwrap_or(0),
@@ -1024,6 +1025,16 @@ fn living_section(ui: &mut Ui, world: &World) {
         egui::Grid::new("city_outside").striped(true).show(ui, |ui| {
             ui.label("Tariff");
             ui.label(format!("{:.2}", world.outside.tariff));
+            ui.end_row();
+            // M17 phase 3: bodies.
+            ui.label("Outsiders, State guards");
+            ui.label(format!(
+                "{} from abroad living ({} brothers); {} State guards{}",
+                world.outside.outsiders.keys().filter(|&&a| world.is_alive(a)).count(),
+                world.outside.outsiders.values().filter(|o| o.brother).count(),
+                world.outside.state_guards,
+                if citysim::systems::parents::mandate_active(world) { ", a Mandate" } else { "" },
+            ));
             ui.end_row();
             for f in world.outside.parents() {
                 let Some(p) = f.parent.as_ref() else { continue };

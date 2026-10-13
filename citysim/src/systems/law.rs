@@ -1523,7 +1523,8 @@ fn credit_guard_shifts(world: &mut World) {
 /// hire unemployed, unjailed adults of lawfulness >= 0.4 (highest first);
 /// fire the guard with the lowest loyalty.
 pub fn reconcile_guards(world: &mut World) {
-    let want = usize::from(world.levers.guard_count);
+    // M17 phase 3: the State's funded guards on top (0 with the outside off).
+    let want = usize::from(world.levers.guard_count) + usize::from(world.outside.state_guards);
     // M11 D18: the city's payroll only; private guards are the corps'.
     let guards: Vec<EntityId> = crate::systems::law_brain::guards(world);
     let Some(jail) = world.building_of_kind(BuildingKind::Jail) else { return };

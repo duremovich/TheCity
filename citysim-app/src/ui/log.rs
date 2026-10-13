@@ -155,6 +155,20 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::Subsidised
         | EventKind::ParentFailing
         | EventKind::OutsideOrder
+        | EventKind::Reinforced
+        | EventKind::OutsidersArrived
+        | EventKind::OutsiderLeft
+        | EventKind::Settled
+        | EventKind::BuyBackOffered
+        | EventKind::BranchRetook
+        | EventKind::BranchFounded
+        | EventKind::ParentFounded
+        | EventKind::Abandoned
+        | EventKind::BrothersArrived
+        | EventKind::GangRefounded
+        | EventKind::StateGrant
+        | EventKind::StateMandate
+        | EventKind::StateWithdrew
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

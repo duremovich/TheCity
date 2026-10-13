@@ -360,10 +360,25 @@ pub enum EventKind {
     ParentFailing,
     /// M17 phase 2: a parent changed its order.
     OutsideOrder,
+    /// M17 phase 3: bodies.
+    Reinforced,
+    OutsidersArrived,
+    OutsiderLeft,
+    Settled,
+    BuyBackOffered,
+    BranchRetook,
+    BranchFounded,
+    ParentFounded,
+    Abandoned,
+    BrothersArrived,
+    GangRefounded,
+    StateGrant,
+    StateMandate,
+    StateWithdrew,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 173] = [
+    pub const ALL: [EventKind; 187] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -537,6 +552,20 @@ impl EventKind {
         EventKind::Subsidised,
         EventKind::ParentFailing,
         EventKind::OutsideOrder,
+        EventKind::Reinforced,
+        EventKind::OutsidersArrived,
+        EventKind::OutsiderLeft,
+        EventKind::Settled,
+        EventKind::BuyBackOffered,
+        EventKind::BranchRetook,
+        EventKind::BranchFounded,
+        EventKind::ParentFounded,
+        EventKind::Abandoned,
+        EventKind::BrothersArrived,
+        EventKind::GangRefounded,
+        EventKind::StateGrant,
+        EventKind::StateMandate,
+        EventKind::StateWithdrew,
     ];
 }
 
