@@ -117,6 +117,57 @@ Every phase:
 2. Should the megacorps be net extractors? Remittances could make the parents a net outflow, with Ambient demand and exports as the inflow. *Recommendation: yes, extraction is the dystopian tone.* The body's "net crossing within ±5 %" becomes a printed reading.
 3. Ambient rent (World money paying city landlords for the flats) would be a large inflow to Housing corps. *Recommendation: not in M17; revisit at the late calibration.*
 
+The coordinator took all three recommendations as working defaults (2026-10-12), flagged to Dylan. Each one flips by config: `[ambient] flats_per_slot` on the 2k map, the remittance keys, and a future Ambient rent key.
+
+### Phase 1 status (2026-10-12): Ambient demand and the switch
+
+Built as designed above. Files:
+- `citysim/src/systems/outside.rs`: the book, its hourly pass after `living::run`, and the lever.
+- `outside.rs`: `AmbientBook` on the World account.
+- `ambient.rs`: the day's counters in `AmbientDay`.
+- `[outside]` and `[outside.ambient]` in config.toml, with `food_cap` and `visit_cap` in `scaled_to`.
+- `Flow::AmbientSale`, `PlayerCommand::SetAmbientAppetite` (CLI `ambient_appetite=<mult|auto>`), seven columns appended to the Ambient CSV group, and a city-panel line.
+- SAVE 21.
+
+Deviations from the design:
+- **Food demand is computed fresh at midnight.** It is the district's Ambient adults × yesterday's meals per simulated resident. The aggregate's own `food` estimate is refreshed later in the same tick, so reading it would lag a day.
+- **The trade balance includes the book's purchases.** `trade_balance` now counts them as World money in, which is 0 without flats.
+- **Ambient visits do not count in a venue's `visits` ring.** A venue's own visits set its cap, so counting them would feed the cap back into itself. NoodleBar visits take a meal off the shelf.
+- **Unsold demand is lost**, not carried to the next hour.
+
+Measured:
+- **2k city.** The shipped city is **byte-identical to main 9dd4f19 with the switch on and off**: events and CSV without `ticks_per_sec`, seeds 42-44 × 30, and with it on, seeds 42-47 × 120. There are no flats, so there is no demand.
+- **20k off identity.** On gen20k with 50 flats a slot, `CITYSIM_OUTSIDE_OFF=1` is byte-identical to main with the same flats: events, and the CSV on shared columns, seed 42 × 60.
+
+Seed 42 × 60 on gen20k, 50 flats a slot, against main (and main with the same flats):
+
+| reading | main (no flats) | main (flats) | M17 p1 |
+| --- | --- | --- | --- |
+| employed d30 / d60 | 9,454 / 9,918 | 9,454 / 9,918 | 9,911 / 10,636 |
+| employed share d60 | 0.510 | 0.509 | 0.542 |
+| homeless d30 / d60 | 1,989 / 3,940 | 1,989 / 3,983 | 1,858 / 3,773 |
+| Murders, Assault/day (60 d) | 288, 91.6 | 315, 91.8 | 275, 79.8 |
+| starvation (60 d) | 3 | 2 | 1 |
+| Ambient paid/day, share of wages | — | — | 7.9k, 14.0 % (food 1,475 units at the cap, 455 visits) |
+| laid off, foundings (60 d) | 922, 84 | 895, 87 | 719, 75 |
+| `grow_world`, Grow orders (60 d) | 38, 48 | 38, 49 | 48, 58 |
+| total coins d1 → d60 | 1.29M → 1.93M | → 1.92M | 1.39M → 2.32M |
+| food price | 4 | 4 | 4 |
+| ticks/s d11-60 (two runs in parallel) | 159 | 168 | 167 |
+
+- `core_20k` with flats passes:
+  - J24 is 0.508 on day 30.
+  - Ambient sells on every day.
+  - Ambient's share of wages falls from 18.9 % on day 2 to 10.2 % on day 30, as venue visits shrink to the venues' own falling visits.
+  - 210 ticks/s.
+- **`god_ambient_boom`** (shipped map, 4 flats a slot, appetite 3.0 from day 10) against its control over days 30-60:
+  - Ambient coins 425 a day against 131;
+  - employed 1,086 against 1,071;
+  - layoffs 4 against 18;
+  - foundings 7 against 3.
+
+**Finding on the money stock.** It grows in main's 20k city already: +49 % in 60 days, with the trade balance at +400k over the last 30 days. Ambient demand adds a bounded, linear ~8k a day at the cap, and prices hold at 4. This is not a broken signal from the book, but the stock has no drain at 20k.
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).

@@ -1456,6 +1456,12 @@ fn parse_lever(spec: &str) -> Result<(u64, Lever), String> {
                 },
             }
         }
+        // M17 phase 1: `ambient_appetite=<mult|auto>`, the Ambient book's appetite pin.
+        "ambient_appetite" => PlayerCommand::SetAmbientAppetite(if value.eq_ignore_ascii_case("auto") {
+            None
+        } else {
+            Some(value.parse::<f32>().map_err(|e| format!("{spec}: bad mult: {e}"))?)
+        }),
         "export_cap" => {
             let (g, n) = value.split_once(':').ok_or_else(|| format!("{spec}: expected <food|parts|data>:<n|auto>"))?;
             PlayerCommand::SetExportCap {

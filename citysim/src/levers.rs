@@ -526,6 +526,9 @@ pub enum PlayerCommand {
     CallVote(EntityId),
     /// God: a Secret coercion's deed posted at reach 1.0 (it lapses).
     ExposeSecret(crate::contract::CoercionId),
+    /// M17 phase 1: pin the World's Ambient appetite (`None` releases it to
+    /// the walk). The global economy's lever on Ambient demand.
+    SetAmbientAppetite(Option<f32>),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1152,6 +1155,10 @@ impl World {
                     }
                     None => Err("SetAppetite: no World book (the market is off)".to_string()),
                 };
+                self.lever_result(text);
+            }
+            PlayerCommand::SetAmbientAppetite(mult) => {
+                let text = crate::systems::outside::pin_appetite(self, *mult);
                 self.lever_result(text);
             }
             PlayerCommand::SetExportCap { good, cap } => {

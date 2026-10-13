@@ -605,7 +605,16 @@ pub fn close_day(world: &mut World) -> Option<crate::stats::AmbientCols> {
         total: s.total,
         labour,
         food,
+        food_wanted: s.today.food_wanted,
+        food_bought: s.today.food_bought,
+        visits_wanted: s.today.visits_wanted,
+        visits_made: s.today.visits_made,
+        paid_food: s.today.paid_food,
+        paid_visits: s.today.paid_visits,
+        appetite: crate::systems::outside::ambient_book(world).map_or(0.0, |b| b.appetite),
     };
+    // M17 phase 1: the Ambient book's rings take the day.
+    crate::systems::outside::close_day(world);
     world.ambient.today = Default::default();
     Some(cols)
 }

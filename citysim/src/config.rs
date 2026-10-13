@@ -253,6 +253,81 @@ pub struct Config {
     /// defaults (a 2k save is unchanged).
     #[serde(default, skip_serializing_if = "AmbientCfg::is_default")]
     pub ambient: AmbientCfg,
+    /// M17 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the outside world.
+    /// Phase 1: the Ambient book (Ambient consumption as outside demand).
+    /// Not written into a save at its defaults.
+    #[serde(default, skip_serializing_if = "OutsideCfg::is_default")]
+    pub outside: OutsideCfg,
+}
+
+/// M17 `[outside]`: the switch in flight (`CITYSIM_OUTSIDE_OFF=1` turns it
+/// off) and its sub-tables. The World market is the Real economy's and is
+/// not under it.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutsideCfg {
+    pub enabled: bool,
+    pub ambient: AmbientDemandCfg,
+}
+
+impl Default for OutsideCfg {
+    fn default() -> Self {
+        OutsideCfg { enabled: true, ambient: AmbientDemandCfg::default() }
+    }
+}
+
+impl OutsideCfg {
+    pub fn is_default(&self) -> bool {
+        *self == OutsideCfg::default()
+    }
+}
+
+/// M17 phase 1 `[outside.ambient]`: the Ambient flats' households buying at
+/// simulated businesses with World money (export demand at retail). Every
+/// value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AmbientDemandCfg {
+    /// The share of the Ambient households' meals (and venue visits) bought
+    /// at simulated businesses.
+    pub capture: f32,
+    /// Units of food a day, city-wide, at 2,000 residents (`scaled_to`, up only).
+    pub food_cap: u32,
+    /// Venue visits a day, city-wide, at 2,000 residents (`scaled_to`, up only).
+    pub visit_cap: u32,
+    /// A Market sells to the book only its stock above this many days of
+    /// its own mean daily sales (7 days).
+    pub keep_days: f32,
+    /// A venue takes at most this share of its own 7-day mean daily visits
+    /// as Ambient visits a day.
+    pub visit_share: f32,
+    /// The appetite walk (as `[world_market]`'s per good).
+    pub revert: f32,
+    pub sd: f32,
+    pub appetite_min: f32,
+    pub appetite_max: f32,
+    /// The hours food sells, `[from, to)`.
+    pub food_hours: [u8; 2],
+    /// The hours venues take visits, `[from, to)`.
+    pub visit_hours: [u8; 2],
+}
+
+impl Default for AmbientDemandCfg {
+    fn default() -> Self {
+        AmbientDemandCfg {
+            capture: 0.02,
+            food_cap: 150,
+            visit_cap: 60,
+            keep_days: 1.0,
+            visit_share: 0.5,
+            revert: 0.05,
+            sd: 0.03,
+            appetite_min: 0.3,
+            appetite_max: 3.0,
+            food_hours: [8, 20],
+            visit_hours: [18, 24],
+        }
+    }
 }
 
 /// Scale S5 (docs/SCALE_20K.md § S5): the Ambient tier. A map Home's Ambient
@@ -5496,6 +5571,10 @@ impl Config {
             cfg.tags.enabled = false;
             cfg.attention.enabled = false;
         }
+        // M17: the outside world's A/B and identity device.
+        if std::env::var("CITYSIM_OUTSIDE_OFF").is_ok_and(|v| v == "1") {
+            cfg.outside.enabled = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -5859,6 +5938,11 @@ impl Config {
         self.life.relocate_per_day = up_usize(self.life.relocate_per_day);
         // The outside's demand: the World buys per resident (money enters at
         // the 2,000 city's per-capita rate) and its account refills to match.
+        // M17 phase 1: the Ambient book's caps are per resident (the
+        // simulated businesses are sized for the simulated city).
+        let oa = &mut self.outside.ambient;
+        oa.food_cap = up_u32(oa.food_cap);
+        oa.visit_cap = up_u32(oa.visit_cap);
         let wm = &mut self.world_market;
         wm.treasury_ref = up_i64(wm.treasury_ref);
         wm.food.cap = up_u32(wm.food.cap);

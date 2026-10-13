@@ -3158,6 +3158,7 @@ impl World {
         crate::prof::timed!("tick::gang", systems::gang::run(self));
         crate::prof::timed!("tick::corp_brain", systems::corp_brain::run(self));
         crate::prof::timed!("tick::living", systems::living::run(self));
+        crate::prof::timed!("tick::outside", systems::outside::run(self));
         crate::prof::timed!("tick::contracts", systems::contracts::run(self));
         crate::prof::timed!("tick::leverage", systems::leverage::run(self));
         crate::prof::timed!("tick::captives", systems::captives::run(self));

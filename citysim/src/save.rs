@@ -91,7 +91,12 @@ use crate::world::World;
 /// and the eight god commands.
 /// 20: the M16b review: `Wounded.{clinic, care_by}`, `[wounded] care_food`
 /// (serde defaults).
-pub const SAVE_VERSION: u8 = 20;
+/// 21: M17 phase 1, the Ambient book: `OutsideFaction.ambient`,
+/// `AmbientDay.{food_wanted, food_bought, visits_wanted, visits_made,
+/// paid_food, paid_visits}`, the Ambient CSV group's new columns, `[outside]`
+/// in the saved config (serde defaults; skipped at its defaults), the
+/// appended `Flow::AmbientSale` and `PlayerCommand::SetAmbientAppetite`.
+pub const SAVE_VERSION: u8 = 21;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

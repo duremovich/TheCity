@@ -66,9 +66,14 @@ fn test_ambient_flats_from_the_ratio() {
     assert!((occ - f64::from(w.config.ambient.occupancy)).abs() < 0.03, "occupancy {occ}");
     assert!((per - 1.0 - f64::from(w.config.ambient.couple_p)).abs() < 0.05, "adults per household {per}");
     let header = citysim::systems::stats::csv_header(&w);
-    assert!(header.ends_with(",ambient_labour,ambient_food,ticks_per_sec"), "{}", &header[header.len() - 80..]);
+    // M17 phase 1 appended the Ambient book's columns to the group.
+    assert!(
+        header.ends_with(",ambient_labour,ambient_food,ambient_food_wanted,ambient_food_bought,ambient_visits_wanted,ambient_visits_made,flow_ambient_food,flow_ambient_visits,ambient_appetite,ticks_per_sec"),
+        "{}",
+        &header[header.len() - 200..]
+    );
     let row = w.stats.current.csv_row();
-    assert_eq!(row.split(',').count() + 11, header.split(',').count(), "today's row gets its group at the close");
+    assert_eq!(row.split(',').count() + 18, header.split(',').count(), "today's row gets its group at the close");
 }
 
 /// The flats' people are a function of the flat: two worlds materialising

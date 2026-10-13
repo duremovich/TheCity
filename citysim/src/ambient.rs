@@ -56,6 +56,21 @@ pub struct AmbientDay {
     pub arrivals: u32,
     /// Coins crossed in from the World with them today.
     pub coins_in: i64,
+    /// M17 phase 1: food units the Ambient book wanted today, and bought.
+    #[serde(default)]
+    pub food_wanted: u32,
+    #[serde(default)]
+    pub food_bought: u32,
+    /// Venue visits wanted today, and made.
+    #[serde(default)]
+    pub visits_wanted: u32,
+    #[serde(default)]
+    pub visits_made: u32,
+    /// Coins the book paid (`Flow::AmbientSale`), food and visits.
+    #[serde(default)]
+    pub paid_food: i64,
+    #[serde(default)]
+    pub paid_visits: i64,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

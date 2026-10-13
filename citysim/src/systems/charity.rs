@@ -430,6 +430,7 @@ pub fn god_donate(world: &mut World, mission: EntityId, amount: i64) -> Result<i
             market: 1.0,
             dead: false,
             books: Default::default(),
+            ambient: None,
         });
         world.outside.next_id = world.outside.next_id.max(WORLD_ACCOUNT + 1);
     }

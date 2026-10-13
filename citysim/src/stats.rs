@@ -409,6 +409,16 @@ pub struct AmbientCols {
     /// The districts' labour pool and food demand estimates, summed.
     pub labour: f32,
     pub food: f32,
+    /// M17 phase 1: the Ambient book's day (`AmbientDay`): food units wanted
+    /// and bought, venue visits wanted and made, the coins it paid for each
+    /// (`Flow::AmbientSale`), and its appetite.
+    pub food_wanted: u32,
+    pub food_bought: u32,
+    pub visits_wanted: u32,
+    pub visits_made: u32,
+    pub paid_food: i64,
+    pub paid_visits: i64,
+    pub appetite: f32,
 }
 
 impl AmbientCols {
@@ -426,6 +436,13 @@ impl AmbientCols {
             "ambient_total",
             "ambient_labour",
             "ambient_food",
+            "ambient_food_wanted",
+            "ambient_food_bought",
+            "ambient_visits_wanted",
+            "ambient_visits_made",
+            "flow_ambient_food",
+            "flow_ambient_visits",
+            "ambient_appetite",
         ]
         .join(",")
     }
@@ -433,7 +450,7 @@ impl AmbientCols {
     /// The columns, comma-separated, in header order.
     pub fn csv(&self) -> String {
         format!(
-            "{},{},{},{},{},{},{},{},{},{:.1},{:.1}",
+            "{},{},{},{},{},{},{},{},{},{:.1},{:.1},{},{},{},{},{},{},{:.3}",
             self.flats,
             self.households,
             self.adults,
@@ -444,7 +461,14 @@ impl AmbientCols {
             self.living,
             self.total,
             self.labour,
-            self.food
+            self.food,
+            self.food_wanted,
+            self.food_bought,
+            self.visits_wanted,
+            self.visits_made,
+            self.paid_food,
+            self.paid_visits,
+            self.appetite
         )
     }
 }
@@ -1349,7 +1373,8 @@ pub struct EconCols {
     pub flow_inputs: i64,
     pub flow_property: i64,
     pub flow_donate: i64,
-    /// `export_paid + flow_migrant_in + flow_fence − flow_import_out − flow_inputs − flow_migrant_out`.
+    /// `export_paid + flow_migrant_in + flow_fence + flow_ambient_* − flow_import_out − flow_inputs − flow_migrant_out`
+    /// (M17 phase 1 added the Ambient book's purchases: 0 without Ambient flats).
     pub trade_balance: i64,
     pub trade_balance_30: i64,
     pub appetite_food: f32,

@@ -2564,3 +2564,107 @@ fn god_parley_strongest_gangs_in_vendetta() {
     let moved = (20..60usize).any(|i| r.days[i].gangs != c.days[i].gangs);
     assert!(moved || parleys >= 1.0, "neither gang reacted to the vendetta");
 }
+
+// ---------------------------------------------------------------------------
+// M17 phase 1 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the Ambient book.
+// ---------------------------------------------------------------------------
+
+/// One day of `god_ambient_boom`.
+#[derive(Clone, Debug, Default)]
+struct AmbientDay {
+    paid: i64,
+    food: u32,
+    visits: u32,
+    vacancies: u32,
+    employed: u32,
+    laid_off: u32,
+    foundings: u32,
+    price: i64,
+    coins: i64,
+    starved: u32,
+}
+
+/// The shipped map with 4 Ambient flats a slot, 60 days; `boom` pins the
+/// Ambient appetite at 3.0 on day 10.
+fn run_ambient(boom: bool) -> (Vec<AmbientDay>, usize) {
+    let mut c = Config::load();
+    c.ambient.flats_per_slot = 4.0;
+    let mut w = World::new(SEED, c);
+    let mut days = Vec::new();
+    let mut applied = 0;
+    for day in 0..END_DAY {
+        if boom && day == 10 {
+            w.push_command(PlayerCommand::SetAmbientAppetite(Some(3.0)));
+        }
+        let cursor = w.events.back().map_or(0, |e| e.id + 1);
+        w.run_ticks(TICKS_PER_DAY);
+        applied += w
+            .events
+            .iter()
+            .filter(|e| e.id >= cursor && e.kind == EventKind::PlayerAction && e.text.contains("Ambient spending"))
+            .count();
+        let Some(r) = w.stats.history.back() else { continue };
+        let a = r.ambient.clone().unwrap_or_default();
+        days.push(AmbientDay {
+            paid: a.paid_food + a.paid_visits,
+            food: a.food_bought,
+            visits: a.visits_made,
+            vacancies: r.econ.vacancies_open,
+            employed: r.employed,
+            laid_off: r.econ.laid_off,
+            foundings: r.foundings,
+            price: r.price,
+            coins: citysim::systems::ownership::total_coins(&w),
+            starved: r.deaths_starvation,
+        });
+    }
+    (days, applied)
+}
+
+/// M17 god 1: the World's appetite for Ambient spending pinned at 3.0 on
+/// day 10, on a map with Ambient flats: does World money reach the city's
+/// businesses as revenue, and do they hire and grow on it? Asserts the
+/// lever applied and that the book bought more than the control's; the
+/// rest (vacancies, employed, foundings, prices, coins) is printed.
+#[test]
+#[ignore]
+fn god_ambient_boom() {
+    let (r, c) = std::thread::scope(|s| {
+        let a = s.spawn(|| run_ambient(true));
+        let b = s.spawn(|| run_ambient(false));
+        (a.join().expect("boom run"), b.join().expect("control run"))
+    });
+    let ((r, applied), (c, _)) = (r, c);
+    let sum = |v: &[AmbientDay], f: &dyn Fn(&AmbientDay) -> f64, a: usize, b: usize| -> f64 {
+        v.iter().skip(a).take(b - a).map(f).sum()
+    };
+    let mean = |v: &[AmbientDay], f: &dyn Fn(&AmbientDay) -> f64, a: usize, b: usize| -> f64 {
+        sum(v, f, a, b) / (b - a).max(1) as f64
+    };
+    type Col = (&'static str, Box<dyn Fn(&AmbientDay) -> f64>, bool);
+    let cols: Vec<Col> = vec![
+        ("Ambient coins/day", Box::new(|d| d.paid as f64), false),
+        ("Ambient food units/day", Box::new(|d| f64::from(d.food)), false),
+        ("Ambient visits/day", Box::new(|d| f64::from(d.visits)), false),
+        ("vacancies open", Box::new(|d| f64::from(d.vacancies)), false),
+        ("employed", Box::new(|d| f64::from(d.employed)), false),
+        ("laid off", Box::new(|d| f64::from(d.laid_off)), true),
+        ("foundings", Box::new(|d| f64::from(d.foundings)), true),
+        ("food price", Box::new(|d| d.price as f64), false),
+        ("total coins (k)", Box::new(|d| d.coins as f64 / 1000.0), false),
+        ("starvation", Box::new(|d| f64::from(d.starved)), true),
+    ];
+    let n = r.len().min(c.len());
+    for (name, f, summed) in &cols {
+        let mut line = format!("{name:<24}");
+        for (a, b) in [(1usize, 10usize), (10, 30), (30, n)] {
+            let (x, y) =
+                if *summed { (sum(&r, f, a, b), sum(&c, f, a, b)) } else { (mean(&r, f, a, b), mean(&c, f, a, b)) };
+            line.push_str(&format!(" | d{a}-{b}: {x:.1} (control {y:.1})"));
+        }
+        eprintln!("{line}");
+    }
+    assert_eq!(applied, 1, "the appetite pin applied");
+    let paid = |v: &[AmbientDay]| v.iter().skip(10).map(|d| d.paid).sum::<i64>();
+    assert!(paid(&r) > paid(&c), "the book bought no more under the pin: {} vs {}", paid(&r), paid(&c));
+}

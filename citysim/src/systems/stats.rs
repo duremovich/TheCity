@@ -389,8 +389,13 @@ fn econ_snapshot(world: &mut World, citizens: &[EntityId]) {
     let row = &mut world.stats.current;
     let e = &mut row.econ;
     e.export_paid = row.living.flow_export;
-    e.trade_balance =
-        e.export_paid + e.flow_migrant_in + e.flow_fence - e.flow_import_out - e.flow_inputs - e.flow_migrant_out;
+    // M17 phase 1: the Ambient book's purchases are World money in (0 on a
+    // map without Ambient flats).
+    let ambient_in = row.ambient.as_ref().map_or(0, |a| a.paid_food + a.paid_visits);
+    e.trade_balance = e.export_paid + e.flow_migrant_in + e.flow_fence + ambient_in
+        - e.flow_import_out
+        - e.flow_inputs
+        - e.flow_migrant_out;
     let ring = &mut world.econ.trade_ring;
     if ring.len() >= TRADE_DAYS {
         ring.pop_front();

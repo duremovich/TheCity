@@ -831,6 +831,9 @@ fn core_20k() {
     let cfg = || {
         let mut c = Config::load().scaled_to(20_000);
         c.world.map = "gen:20000".into();
+        // M17 phase 1: the 20k city sits on an island of Ambient flats (S5's
+        // 50 a slot on gen20k), whose households buy at its businesses.
+        c.ambient.flats_per_slot = 50.0;
         c
     };
     let mut runs: Vec<SeedRun> = std::thread::scope(|s| {
@@ -857,6 +860,36 @@ fn core_20k() {
     for m in ["stale ride", "ride past arrival", "alertness under the floor"] {
         if r.mark(m) > 0 {
             failures.push(format!("{} hours with a {m}", r.mark(m)));
+        }
+    }
+    // M17 phase 1: the Ambient book buys on every day from day 2 (an
+    // existence assert: the 2k city has no flats, so no core_sanity bullet).
+    let dry: Vec<usize> = r
+        .rows
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, x)| x.ambient.as_ref().is_none_or(|a| a.food_bought + a.visits_made == 0))
+        .map(|(d, _)| d + 1)
+        .collect();
+    if !dry.is_empty() {
+        failures.push(format!("no Ambient sale on days {dry:?}"));
+    }
+    for d in [1u64, 9, 19, DAYS - 1] {
+        if let Some(a) = r.rows.get(d as usize).and_then(|x| x.ambient.as_ref()) {
+            let wages = r.rows[d as usize].flow_wages.max(1);
+            eprintln!(
+                "FINDING day {:>2} Ambient: food {}/{} units, visits {}/{}, paid {} + {} ({:.1} % of wages), appetite {:.2}",
+                d + 1,
+                a.food_bought,
+                a.food_wanted,
+                a.visits_made,
+                a.visits_wanted,
+                a.paid_food,
+                a.paid_visits,
+                100.0 * (a.paid_food + a.paid_visits) as f64 / wages as f64,
+                a.appetite
+            );
         }
     }
     // Printed findings: the per-capita read (set it beside the 2,000 city's).

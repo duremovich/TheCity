@@ -46,6 +46,56 @@ pub struct OutsideFaction {
     /// World account only; M17's parents carry none).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub books: BTreeMap<ExportGood, crate::econ::WorldBook>,
+    /// M17 phase 1: the World's Ambient book (the World account only; made
+    /// on the first day a world with Ambient flats runs with `[outside]` on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ambient: Option<AmbientBook>,
+}
+
+/// M17 phase 1 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the Ambient
+/// flats' households as a World buyer at retail. The appetite walks as a
+/// good's; the day's demand per district is fixed at the first selling hour
+/// (`due_day`) from the Ambient district aggregates and spread over the
+/// selling hours. Rings are newest last (`econ::BOOK_DAYS`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct AmbientBook {
+    pub appetite: f32,
+    pub walk: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub appetite_pin: Option<f32>,
+    /// The day `food_due` and `visit_due` were set for.
+    pub due_day: u64,
+    /// Today's food units and venue visits due per district (`World::districts` order).
+    pub food_due: Vec<u32>,
+    pub visit_due: Vec<u32>,
+    /// Ambient visits each venue took today (the `visit_share` cap), by venue.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub venue_today: BTreeMap<crate::entity::EntityId, u32>,
+    /// Daily food units bought, visits made and coins paid, newest last.
+    #[serde(skip_serializing_if = "std::collections::VecDeque::is_empty")]
+    pub units: std::collections::VecDeque<u32>,
+    #[serde(skip_serializing_if = "std::collections::VecDeque::is_empty")]
+    pub visits: std::collections::VecDeque<u32>,
+    #[serde(skip_serializing_if = "std::collections::VecDeque::is_empty")]
+    pub paid: std::collections::VecDeque<i64>,
+}
+
+impl Default for AmbientBook {
+    fn default() -> Self {
+        AmbientBook {
+            appetite: 1.0,
+            walk: 1.0,
+            appetite_pin: None,
+            due_day: u64::MAX,
+            food_due: Vec::new(),
+            visit_due: Vec::new(),
+            venue_today: BTreeMap::new(),
+            units: Default::default(),
+            visits: Default::default(),
+            paid: Default::default(),
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Debug, Serialize, Deserialize)]

@@ -2560,3 +2560,25 @@ couple_p = 0.25                     # a household's second adult
 hires_per_day = 10                  # labour-pool hires a day at 2,000 residents (per capita)
 hire_far = false                    # also prefer an Ambient household near work to a simulated one past the commute cap
 edges_max = 96                      # a materialised adult's contacts (copied from a donor), at most
+
+# M17 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the outside world. `enabled` is the switch in flight
+# (`CITYSIM_OUTSIDE_OFF=1`); the World market is the Real economy's and stays on either way.
+[outside]
+enabled = true
+
+# M17 phase 1: Ambient consumption as outside demand. The Ambient flats' households (World money) buy food
+# at simulated Markets (only stock above `keep_days` of the Market's own sales) and visit leisure venues,
+# as revenue: wages follow it through `wage_rev`, Grow through sell-through. Nothing on a map without
+# Ambient flats (the shipped 2k city). Placeholders.
+[outside.ambient]
+capture = 0.02                      # the share of Ambient meals and venue visits bought at simulated businesses
+food_cap = 150                      # food units a day city-wide at 2,000 residents (per capita, up only)
+visit_cap = 60                      # venue visits a day city-wide at 2,000 residents (per capita, up only)
+keep_days = 1.0                     # a Market keeps this many days of its own mean daily sales from the book
+visit_share = 0.5                   # a venue's Ambient visits a day, at most this share of its own 7-day mean
+revert = 0.05                       # the appetite walk, as [world_market]'s
+sd = 0.03
+appetite_min = 0.3
+appetite_max = 3.0
+food_hours = [8, 20]                # [from, to)
+visit_hours = [18, 24]

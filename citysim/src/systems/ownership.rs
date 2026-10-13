@@ -249,6 +249,11 @@ pub enum Flow {
     /// M16b phase 3: a Trauma subscription's weekly fee, client -> Security
     /// corp (taxed as owner revenue).
     Trauma,
+    /// M17 phase 1: the World's Ambient book buying at a city Market or
+    /// venue (untaxed at the crossing; the owner pays the sale's tax
+    /// explicitly, as `Export`). Its column is the Ambient group's
+    /// `flow_ambient` (`AmbientDay.paid_*`), so the ledger line is empty.
+    AmbientSale,
 }
 
 impl Flow {
@@ -354,6 +359,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Fare => row.transit.fares += coins,
         Flow::Coerced => row.leverage.flow_coerced += coins,
         Flow::Trauma => row.wounded.flow_trauma += coins,
+        Flow::AmbientSale => {}
     }
 }
 

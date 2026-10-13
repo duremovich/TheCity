@@ -1003,6 +1003,20 @@ fn living_section(ui: &mut Ui, world: &World) {
             e.ask_food
         ));
         ui.end_row();
+        // M17 phase 1: the Ambient book (a map with Ambient flats only).
+        if let Some(a) = s.ambient.as_ref().filter(|_| citysim::systems::outside::ambient_on(world)) {
+            ui.label("Ambient demand");
+            ui.label(format!(
+                "food {}/{} units, visits {}/{}, {}¢ from the World; appetite {:.2}",
+                a.food_bought,
+                a.food_wanted,
+                a.visits_made,
+                a.visits_wanted,
+                a.paid_food + a.paid_visits,
+                a.appetite
+            ));
+            ui.end_row();
+        }
     });
     ui.strong("Leisure");
     egui::Grid::new("city_leisure").striped(true).show(ui, |ui| {
