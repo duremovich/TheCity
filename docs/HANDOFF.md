@@ -415,3 +415,13 @@ Findings:
     - A deposed chair gets no parachute, and a coerced vote is no crime.
     - Gangs of equal strength never parley.
 - **M17 next**: docs/M17_OUTSIDE.md predates the real economy (World account, imports and exports, L2's export hook) and the 20k scale. A fresh solo coder (`m17`) reconciles the plan against HEAD first (phase 0), folding in Ambient demand as outside demand creating jobs, then builds phase by phase.
+- **M17 phases merged:**
+  - 0: plan reconcile, 9dd4f19.
+  - 1: Ambient demand, c6d6ebe, SAVE 21. The 2k city is byte-identical with the switch on. At 20k it is about 7.9k a day, 14 % of wages, with the employed share 0.51 → 0.54.
+  - 2: parents, 4592dc1, SAVE 22, trio 1,098/0. Accounts per brand, syndicates and the State; remittance, tribute, Hold/Subsidise; Embargo, SetTariff. Plus a transit `board` fix that honours CutLine.
+- **Open economy finding (for Dylan):** total coins grow about 45 % per 60 days at both 2k and 20k.
+  - The World market's export leg (about 2.5k a day per 2k residents) exceeds imports plus inputs (about 1.3k).
+  - Coins pile up in the Treasury (the tax band hits 0 by about day 30) and in corps.
+  - Parents' extraction is only about 0.4k a day net at 20k, so it is not the drain. There is no 20k-specific minting.
+  - Homeless roughly double d30 → d60 per capita at both scales (pre-existing). Phase 2 adds +20 % homeless at 2k, being traced.
+- Phase 3 (bodies) is running.
