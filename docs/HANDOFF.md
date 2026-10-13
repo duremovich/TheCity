@@ -434,3 +434,13 @@ Findings:
   - Arasaka, Militech and the rest are placeholder names. Phase 5 re-keys the name-dependent logic onto roles and config.
   - The brothers are too frequent. Gangs promote from within, or fight a civil war over a close succession; brothers become a rare event.
   - This is phase 4b, by a fresh coder `m17b` in the manual worktree `.claude/worktrees/m17b`. The `m17` agent's worktree became unresumable.
+- **M17 phase 4b merged at cdcd6a2 and phase 5 at a8880e9**, SAVE 26, trio 1,149/0.
+  - Abroad missions and their cast, the Blackwall and traces, name-free seeding.
+  - The M17 homeless trace: remittances and scrip cost about 780 jobs and add about 350 homeless at 2k d120. Tribute, the State, Outsiders and succession sit inside noise.
+  - The `/code-review high` over 33fa3da..a8880e9 found 10, plus 2 extras; the fixes are with `m17b`.
+- **Dylan 2026-10-13:**
+  - Extraction stays at 0.3/0.3.
+  - Stale worktrees cleaned: 44 merged, clean worktrees and their branches removed (no force).
+    - Four with uncommitted old experiments remain and were left alone: ab4c98, a82410, a75bd4 (JOBS_V2.md), a2b9c2.
+    - Also left: the unmerged old transit branch abdc8c, three locked worktrees, and `preflip`/`base4b` in the scratchpads.
+  - **Pause before M18:** the next session is a dedicated NPC shadowing pass (gaps in the simulation) before any player machinery.
