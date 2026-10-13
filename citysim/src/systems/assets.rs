@@ -1134,6 +1134,17 @@ fn repairs(world: &mut World) {
         } else {
             (cfg.repair_price as f32 * seller_level(world, g) * points as f32).round() as i64
         };
+        // Jobs & lives phase 2 (§ 3): an agent's vehicle near a working
+        // tinker is fixed on the street at a discount, or wrecked.
+        if let Some(o) = x.owner.filter(|_| cost > 0 && x.kind != AssetKind::Robot) {
+            if let Some(fixed) = crate::systems::streetwork::tinker_repair(world, a, o, from, cost) {
+                if let Some(m) = world.comp_mut::<Asset>(a) {
+                    m.condition = if fixed { 100 } else { 0 };
+                    m.value = if fixed { m.list } else { 0 };
+                }
+                continue;
+            }
+        }
         if !can_pay(world, x.owner, cost) {
             continue;
         }

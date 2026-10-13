@@ -138,7 +138,13 @@ use crate::world::World;
 /// `DayRow.jobs2`, `[jobs2]`, the `KindCfg` columns of `[buildings.*]`, the
 /// trade rows' `jobs2` flag and `[competence] admin_w`/`admin_ref` (serde
 /// defaults).
-pub const SAVE_VERSION: u8 = 28;
+/// 29: Jobs & lives phase 2, the street (§ 3): the appended
+/// `GoalKind::Pitch`, `ActionKind::Vend`, `SpotKind::LabourCorner`, five
+/// events; `components::Pitch` and `Jobs2State.{pitches, idle_since,
+/// parcel_stops, cab_trips, yard_units}`, the street's `[jobs2]` keys, the
+/// trade rows' `street` flag and the `Jobs2Cols` street columns (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 29;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

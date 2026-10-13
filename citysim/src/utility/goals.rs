@@ -13,11 +13,13 @@ use crate::utility::Consideration;
 use crate::world::World;
 
 /// Table order, which is also the tie-break order.
-pub const GOAL_ORDER: [GoalKind; 30] = [
+pub const GOAL_ORDER: [GoalKind; 31] = [
     GoalKind::Eat,
     GoalKind::Sleep,
     GoalKind::Work,
     GoalKind::Earn,
+    // Jobs & lives phase 2: the street's day, right after Earn.
+    GoalKind::Pitch,
     GoalKind::Socialise,
     GoalKind::Court,
     GoalKind::Flee,
@@ -879,6 +881,8 @@ pub fn considerations(
         GoalKind::Contract => return crate::systems::contracts::considerations(world, id),
         // The Hit market (H9): walk to the Fixer with a want.
         GoalKind::Commission => return crate::systems::hitmarket::commission_considerations(world, id),
+        // Jobs & lives phase 2: one's Pitch's hours, or the dawn corner.
+        GoalKind::Pitch => return crate::systems::streetwork::considerations(world, id),
         // M16b phase 3: carry the downed to a Clinic.
         GoalKind::Rescue => return crate::systems::wounded::considerations(world, id),
         // L2 L14, L20.

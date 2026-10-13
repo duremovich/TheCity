@@ -775,12 +775,16 @@ fn start_step(world: &mut World, id: EntityId, step: &crate::components::ActionI
                         | crate::components::GoalKind::Contract
                         | crate::components::GoalKind::Commission
                         | crate::components::GoalKind::Rescue
+                        | crate::components::GoalKind::Pitch
                 )
             });
             if scripted {
                 // M16a (plan C13): a Contract step's own start check (and
                 // the Hit market's Commission, H9).
-                let ok = if goal == Some(crate::components::GoalKind::Rescue) {
+                let ok = if goal == Some(crate::components::GoalKind::Pitch) {
+                    // Jobs & lives phase 2: the street's own steps.
+                    crate::systems::streetwork::can_start(world, id, kind)
+                } else if goal == Some(crate::components::GoalKind::Rescue) {
                     // M16b phase 3: the Rescue's own steps.
                     crate::systems::wounded::can_start(world, id, kind, step.target)
                 } else if matches!(

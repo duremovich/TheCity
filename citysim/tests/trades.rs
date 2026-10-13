@@ -7,7 +7,11 @@ use citysim::systems::{demography, jobs, law, ownership};
 use citysim::{BuildingKind, Config, EntityId, EventKind, Job, Role, World, TICKS_PER_DAY, TICKS_PER_HOUR};
 
 fn world() -> World {
-    World::new(42, Config::load().dole_city())
+    // Jobs & lives phase 2: P3's roles as written (the street's day post
+    // lists the Farm as a workplace: `tests/streetwork.rs`).
+    let mut c = Config::load().dole_city();
+    c.jobs2.street = false;
+    World::new(42, c)
 }
 
 fn trade(w: &World, key: &str) -> Role {

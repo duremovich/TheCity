@@ -118,6 +118,8 @@ pub fn duration(world: &World, id: EntityId, kind: ActionKind) -> Tick {
         ActionKind::DumpsterDive => 20,
         ActionKind::Oncology => 120,
         ActionKind::PackMeal => 5,
+        // Jobs & lives phase 2: an hour at the Pitch, or to the dawn pick.
+        ActionKind::Vend => crate::systems::streetwork::vend_ticks(world, id),
         ActionKind::Donate => 5,
         ActionKind::Guard => Tick::from(world.config.fixers.guard_hours) * crate::time::TICKS_PER_HOUR,
         // M15 W21/W22/W35.
@@ -750,6 +752,8 @@ pub fn on_complete(
         // Real economy E27, E28: the meal served, the gift given.
         ActionKind::EatAlms => crate::systems::charity::on_eat_alms(world, id, target),
         ActionKind::DumpsterDive => crate::systems::bins::on_complete(world, id, target),
+        // Jobs & lives phase 2: the hour stood (the sales are world-side).
+        ActionKind::Vend => StepResult::Done,
         // P5i: one pantry unit (synth first, as eaten) into the carried food.
         ActionKind::PackMeal => {
             let Some(home) = world.comp::<Household>(id).and_then(|h| h.home) else {

@@ -77,6 +77,37 @@ pub struct Jobs2State {
     /// The civic three's headcounts (Jail, Hall, Warehouse), the budget's.
     #[serde(skip_serializing_if = "is_zero3")]
     pub civic: [u16; 3],
+    // --- Phase 2, the street (`systems::streetwork`).
+    /// Open Pitches, by owner (one an owner).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub pitches: BTreeMap<EntityId, crate::components::Pitch>,
+    /// Jobless adults -> the day they were first seen without a post.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub idle_since: BTreeMap<EntityId, u64>,
+    /// Freight Yard -> today's parcel stops for its couriers' round.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub parcel_stops: BTreeMap<EntityId, Vec<EntityId>>,
+    /// Garage -> cab rides given today.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub cab_trips: BTreeMap<EntityId, u32>,
+    /// Freight Yard -> units it handled today (the backlog's day posts read
+    /// yesterday's), and yesterday's.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub yard_units: BTreeMap<EntityId, (u32, u32)>,
+    /// Utility Plants dark at some hour today, and their dark days running
+    /// (the seizure, `seize_after_days`).
+    #[serde(skip_serializing_if = "std::collections::BTreeSet::is_empty")]
+    pub plant_dark_today: std::collections::BTreeSet<EntityId>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub plant_dark_days: BTreeMap<EntityId, u8>,
+    /// The last dawn pick's posts offered (a body walks to the corner only
+    /// after a dawn that offered some).
+    #[serde(skip_serializing_if = "is_zero_u32")]
+    pub last_posts: u32,
+}
+
+fn is_zero_u32(v: &u32) -> bool {
+    *v == 0
 }
 
 fn is_zero3(v: &[u16; 3]) -> bool {
@@ -256,6 +287,10 @@ pub fn handle_export(world: &mut World, building: Option<EntityId>, owner: Optio
     let fee = (units as f32 * world.config.jobs2.handling_per_unit).round() as i64;
     let from = building.map(|b| door(world, b));
     let to = fee_to(world, from, world.tick);
+    // Phase 2 (the backlog's day posts): the units the Yard handled.
+    if let (Some(Some(y)), true) = (to, crate::systems::streetwork::on(world)) {
+        world.jobs2.yard_units.entry(y).or_default().0 += units;
+    }
     pay_fee(world, owner, to, fee);
 }
 
@@ -463,6 +498,15 @@ pub fn settle_fuel(world: &mut World) {
 /// centroid) dark or lit; a change writes `District.dark` and an event.
 fn outages(world: &mut World) {
     let plants = open_of_kind(world, BuildingKind::UtilityPlant);
+    // Phase 2 (the late-year blackouts): a plant dark at any hour of the
+    // day is marked for the seizure count (`seize_dark_plants`).
+    if crate::systems::streetwork::on(world) {
+        for &p in &plants {
+            if !plant_lit(world, p) {
+                world.jobs2.plant_dark_today.insert(p);
+            }
+        }
+    }
     for i in 0..world.districts.len() {
         let c = world.districts[i].centroid;
         let serving = plants.iter().copied().min_by_key(|&p| (door(world, p).manhattan(c), p));
@@ -1094,6 +1138,37 @@ pub fn daily(world: &mut World) {
     civic_reconcile(world);
     offices(world);
     grow_hq(world);
+    seize_dark_plants(world);
+}
+
+/// Phase 2 (the coordinator's carry-over: a broke owner's plant left every
+/// district dark every night): a corp-owned Utility Plant dark on
+/// `[jobs2] seize_after_days` days running is taken by the city through
+/// the Nationalise lever's path (`ownership::nationalise`: the Treasury
+/// pays its value, the staff follow); the city then staffs it as any of
+/// its buildings. Under `[jobs2] street` (the phase's switch); a Treasury
+/// that cannot pay leaves it dark.
+fn seize_dark_plants(world: &mut World) {
+    if !crate::systems::streetwork::on(world) {
+        return;
+    }
+    let today = std::mem::take(&mut world.jobs2.plant_dark_today);
+    let limit = world.config.jobs2.seize_after_days;
+    for p in world.buildings_of_kind(BuildingKind::UtilityPlant).to_vec() {
+        let days = if today.contains(&p) { world.jobs2.plant_dark_days.get(&p).copied().unwrap_or(0) + 1 } else { 0 };
+        if days == 0 {
+            world.jobs2.plant_dark_days.remove(&p);
+            continue;
+        }
+        world.jobs2.plant_dark_days.insert(p, days);
+        if days < limit || limit == 0 || world.corp_of_building(p).is_none() {
+            continue;
+        }
+        if ownership::nationalise(world, p).is_ok() {
+            world.jobs2.plant_dark_days.remove(&p);
+            ownership::jobs2_row(world).plants_seized += 1;
+        }
+    }
 }
 
 /// The day's snapshot columns (`systems::stats::snapshot`): headcounts by

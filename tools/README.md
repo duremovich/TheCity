@@ -41,6 +41,9 @@ python tools/compare_runs.py a.csv b.csv
   builds, the Rations book's pay-out), the Rations share of all export pay and the run's World inbound, units
   (food packed, Rations made and sold, pilfered, builds, outages), jobs by `TradeModel` and by new kind on day 60
   and the last day, the civic three, the Hqs and, with events, the outages, builds, pilfers and foreman lines.
+  Phase 2 adds the street's lines: run totals (Pitches opened and closed, the gang's cut, sweeps, vendor meals and
+  take, day posts offered and filled, the corner's queue, parcels, cab and rickshaw trips and fares, tinker repairs,
+  plants seized), the Pitches open by kind, the take a Pitch-day, the cut's share of the take and the fill rate.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.
 - `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`):

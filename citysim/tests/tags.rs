@@ -22,6 +22,9 @@ use citysim::{
 fn world() -> World {
     let mut c = Config::load();
     c.outside.enabled = false;
+    // Jobs & lives phase 2: the city as written, without the street (its
+    // pitches and day posts move this seed's patrol day).
+    c.jobs2.street = false;
     World::new(42, c)
 }
 

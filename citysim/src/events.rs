@@ -405,10 +405,21 @@ pub enum EventKind {
     BuildDone,
     /// A Loader walked out with a Ration.
     Pilfered,
+    // --- Jobs & lives phase 2 (§ 3), the street.
+    /// A jobless adult opened a Pitch.
+    PitchOpened,
+    /// A Pitch closed (a hire, a jail, no take).
+    PitchClosed,
+    /// A Pitch swept in a Sweep district (a fine, closed a day).
+    PitchSwept,
+    /// The labour corner's dawn pick.
+    DawnPick,
+    /// A tinker's repair went wrong (the vehicle wrecked).
+    TinkerBotched,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 205] = [
+    pub const ALL: [EventKind; 210] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -614,6 +625,11 @@ impl EventKind {
         EventKind::PowerBack,
         EventKind::BuildDone,
         EventKind::Pilfered,
+        EventKind::PitchOpened,
+        EventKind::PitchClosed,
+        EventKind::PitchSwept,
+        EventKind::DawnPick,
+        EventKind::TinkerBotched,
     ];
 }
 

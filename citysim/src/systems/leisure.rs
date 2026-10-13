@@ -1083,6 +1083,11 @@ pub fn spot_in_reach(world: &World, id: EntityId) -> bool {
 
 /// `LocationKey::Spot`: the spot of the agent's pick.
 pub fn spot_of(world: &World, id: EntityId) -> Option<TilePos> {
+    // Jobs & lives phase 2: the Pitch goal's street tile (its stall, or the
+    // labour corner at dawn).
+    if world.comp::<crate::components::Brain>(id).and_then(|b| b.plan_goal()) == Some(GoalKind::Pitch) {
+        return crate::systems::streetwork::street_tile(world, id);
+    }
     world.unwind.get(&id).and_then(|p| p.spot)
 }
 

@@ -1421,7 +1421,12 @@ fn probe_sweeper_stays_near_its_beat() {
 /// wall (21 x rent) kept such workers on the street beside empty beds.
 #[test]
 fn probe_evicted_worker_rehouses_on_the_first_rent() {
-    let cfg = Config::load();
+    let mut cfg = Config::load();
+    // Jobs & lives phase 2: with the street on, the evicted Farmer (589)
+    // joins Ninefold, runs it while its leader sits and is jailed himself:
+    // the premise (an employed Farmer) is lost to the butterfly. Re-read at
+    // phase 8's gate.
+    cfg.jobs2.street = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let a = civilians(&w)

@@ -922,6 +922,43 @@ pub enum GoalKind {
     /// M16b phase 3 (spec § 5): carry a downed ally (or a Trauma client) to
     /// a Clinic and have it stabilised (a scripted plan; `systems::wounded`).
     Rescue,
+    /// Jobs & lives phase 2 (§ 3, D3): the street's day: stand one's own
+    /// Pitch through its hours, or a broke jobless adult's walk to the
+    /// labour corner before the dawn pick (a scripted plan;
+    /// `systems::streetwork`).
+    Pitch,
+}
+
+/// Jobs & lives phase 2 (§ 1, D3): a venue without a building (a vendor's
+/// stall, a rickshaw's rank, a tinker's mat), its owner's own
+/// (`Jobs2State::pitches`, one an owner, capped per district).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Pitch {
+    /// The street tile it stands on (a HangOut spot of its district).
+    pub spot: TilePos,
+    pub district: DistrictId,
+    /// The `[[trades]]` row it works (a vendor, a rickshaw, a tinker).
+    pub trade: TradeId,
+    pub owner: EntityId,
+    pub since: Tick,
+    /// Coins taken today and over the last seven days (rolled at midnight).
+    pub take_today: i64,
+    pub take_week: i64,
+    /// The gang its district's cut went to last (`Flow::StreetCut`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cut_to: Option<EntityId>,
+    /// A vendor's meals in hand.
+    #[serde(default)]
+    pub stock: u32,
+    /// Swept: closed until this tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub closed_until: Option<Tick>,
+    /// Days in a row with no take.
+    #[serde(default)]
+    pub dry_days: u8,
+    /// Today's work done (a rickshaw's rides, a tinker's repairs).
+    #[serde(default)]
+    pub jobs_today: u8,
 }
 
 /// A gang's standing order, issued by the faction brain (`systems::faction`).

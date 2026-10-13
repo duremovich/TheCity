@@ -80,6 +80,7 @@ pub mod stat_policy;
 pub mod stats;
 pub mod stims;
 pub mod street;
+pub mod streetwork;
 pub mod succession;
 pub mod tags;
 pub mod tech;

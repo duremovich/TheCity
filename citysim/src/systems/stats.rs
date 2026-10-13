@@ -123,6 +123,7 @@ pub fn snapshot(world: &mut World) {
     world.stats.current.outside = crate::systems::parents::close_day(world);
     // Jobs & lives phase 1: its group's snapshot (nothing with it off).
     crate::systems::industry::snapshot(world);
+    crate::systems::streetwork::snapshot(world);
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;

@@ -2581,6 +2581,92 @@ grade = 1
 corp_only = true
 jobs2 = true
 
+# Jobs & lives phase 2, the street (docs/JOBS_AND_LIVES.md § 3). `street = true` rows exist only with [jobs2] street.
+# The Pitch trades have no workplace (self-employed; never a Job): a vendor's stall (duty "sell", `resale`: synth
+# bought at the Market, sold to the district's off-screen synth buyers), a rickshaw's rank (duty "fare": a commute's
+# ride) and a tinker's mat (knowledge: a vehicle's street repair); `shift` is the Pitch's hours. Placeholders.
+[[trades]]
+id = "vendor"
+label = "Street Vendor"
+workplace = []
+staff_per_floor = 0
+wage = 0
+shift = "day"
+skill = "none"
+model = "resale"
+duty = "sell"
+jobs2 = true
+street = true
+
+[[trades]]
+id = "rickshaw"
+label = "Rickshaw Puller"
+workplace = []
+staff_per_floor = 0
+wage = 0
+shift = "day"
+skill = "fighting"
+model = "contract"
+duty = "fare"
+jobs2 = true
+street = true
+
+[[trades]]
+id = "tinker"
+label = "Tinker"
+workplace = []
+staff_per_floor = 0
+wage = 0
+shift = "day"
+skill = "knowledge"
+model = "service"
+jobs2 = true
+street = true
+
+# The Freight Yard's couriers (a round over the day's parcel senders near the Yard) and the Garage's cab drivers
+# (paid from the fares their Garage takes).
+[[trades]]
+id = "courier"
+label = "Courier"
+workplace = ["FreightYard"]
+staff_per_floor = 4
+wage = 6
+shift = "day"
+skill = "none"
+model = "contract"
+duty = "round"
+round_stops = 3
+jobs2 = true
+street = true
+
+[[trades]]
+id = "cab_driver"
+label = "Cab Driver"
+workplace = ["Garage"]
+staff_per_floor = 2
+wage = 6
+shift = "split"
+skill = "knowledge"
+model = "contract"
+duty = "fare"
+jobs2 = true
+street = true
+
+# The labour corner's day posts (`day`: hired at the dawn pick only, `Job.until` two hours past the shift; no place
+# is ever posted for them).
+[[trades]]
+id = "day_labourer"
+label = "Day Labourer"
+workplace = ["ConstructionYard", "FreightYard", "Farm"]
+staff_per_floor = 0
+wage = 5
+shift = "day"
+skill = "fighting"
+model = "day"
+duty = "corner"
+jobs2 = true
+street = true
+
 # ---------------------------------------------------------------------------
 # Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values. On with
 # the flip (Dylan 2026-10-10); always on since P10 (its `enabled` switch retired).
@@ -2999,3 +3085,50 @@ hq_megacorps = true                # an Hq per megacorp copy ([corps] megacorp) 
 hq_min_buildings = 6               # a local corp owning this many standing buildings builds an Hq ...
 hq_reserve = 2000                  # ... keeping this much of its treasury
 admin_share = 0.05                 # an office costs at most this share of its corp's 7-day mean revenue a day (JOBS_V2 J30)
+# Phase 2, the street (§ 3): its sub-switch (under `enabled`) and keys. Placeholders, kept on the brutal side (R8):
+# a Pitch is the overflow rung under the room cap, small and volatile, cut by the gang and fined by the law.
+street = true
+pitches_per_district = 4           # open Pitches a district holds at most, per 2,000 residents
+pitch_stake = 20                   # coins a jobless adult holds to open one ...
+pitch_after_days = 5               # ... after this many days without a post ...
+p_pitch_open = 0.05                # ... on this chance a day
+pitch_fail_days = 4                # a Pitch with no take for this many days closes
+pitch_reach = 3                    # a body stands its Pitch within this many tiles of the spot
+cut_frac = 0.1                     # of the day's take, to the gang holding the district (StreetCut)
+tinker_skill = 0.5                 # knowledge at which a pitcher tinkers
+rickshaw_skill = 0.4               # fighting at which he pulls a rickshaw
+vendor_batch = 5                   # shelf units (synth_stretch meals each) bought at the Market at the open
+vendor_markup = 1.25               # x the synth meal's price
+p_vendor_pick = 0.5                # an off-screen synth buyer in the district eats at an open stall
+p_pitch_sweep = 0.1                # a Pitch in a Sweep district is swept (a fine, closed a day) ...
+pitch_fine = 5
+sweep_close_days = 1
+sweeps_per_day = 4                 # ... at most this many a day per 2,000 residents
+corner_hour = 360                  # the dawn pick (06:00)
+corner_broke = 20                  # the corner's queue: the jobless under this many coins ...
+corner_lawful = 0.2                # ... at least this lawful ...
+corner_tiles = 6                   # ... a body within this many tiles of the corner ...
+corner_stat_reach = 160            # ... off screen, living within this many tiles (the Yards sit at the Vats edge) ...
+p_corner = 0.3                     # ... on this chance a day
+corner_reach = 40                  # a body walks to the corner from this many tiles at most (the parity diagnosis: 100 cost the all-Full city hunger)
+day_per_site = 1                   # day posts a Construction Yard posts per open site
+harvest_posts = 1                  # per Farm in the harvest seasons
+harvest_seasons = ["Summer", "Autumn"]
+yard_posts = 2                     # per Freight Yard that handled backlog_units yesterday
+backlog_units = 300
+parcels_per_building = 0.5         # a corp with two or more buildings sends this many parcels a building a day
+parcels_per_courier = 12
+parcel_fee = 1
+cab_min_tiles = 60                 # off screen, a commute this long or longer ...
+cab_reserve = 30                   # ... with the fare and this many coins to spare ...
+p_cab = 0.03                       # ... takes a cab or a rickshaw on this chance
+fare_base = 3
+fare_per_tile = 0.05
+rickshaw_mult = 0.6                # a rickshaw's fare x this
+rides_per_driver = 8               # a cab driver's rides a day
+rides_per_rickshaw = 6
+tinker_reach = 40                  # an agent's vehicle within this many tiles of a working tinker ...
+tinker_discount = 0.6              # ... is fixed at this x the Garage's price ...
+tinker_fail_p = 0.1                # ... or wrecked on this chance
+tinker_jobs = 3                    # a tinker's repairs a day
+seize_after_days = 5               # a corp's Utility Plant dark on this many days running is nationalised (0 never)

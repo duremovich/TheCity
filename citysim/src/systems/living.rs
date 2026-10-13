@@ -15,6 +15,9 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 1: the Yards' and plants' crews, the outages, the
     // sites that stand, the night's pilfer (nothing with `[jobs2]` off).
     crate::systems::industry::hourly(world);
+    // Jobs & lives phase 2: the vendors' stock, the day posts' end, the
+    // dawn pick (nothing with `[jobs2] street` off).
+    crate::systems::streetwork::hourly(world);
     if world.tick_of_day() != 0 {
         return;
     }
@@ -55,6 +58,9 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 1: the Rations sale (after the book's refill), the
     // civic posts, the offices and an Hq built (nothing with `[jobs2]` off).
     crate::systems::industry::daily(world);
+    // Jobs & lives phase 2: the Pitches' day (the cut, sweeps, closings,
+    // openings), the couriers' parcels (nothing with the street off).
+    crate::systems::streetwork::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

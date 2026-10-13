@@ -200,7 +200,8 @@ pub fn shifts_for(world: &World, row: &TradeCfg, id: EntityId) -> Vec<(u16, u16)
 /// accrual, skill included); a kind with no output yet makes nothing
 /// (P4's Packing Plant adds its own). A no-op for any other model.
 pub fn accrue(world: &mut World, worker: EntityId, b: EntityId, ticks: u64) {
-    if job_row(world, worker).is_none_or(|r| r.model != TradeModel::Produce) {
+    // Jobs & lives phase 2: a day post at a Farm works the harvest as a Vat Tech.
+    if job_row(world, worker).is_none_or(|r| r.model != TradeModel::Produce && r.model != TradeModel::Day) {
         return;
     }
     match world.comp::<Building>(b).map(|bd| bd.kind) {
@@ -272,8 +273,12 @@ fn new_round(world: &World, post: EntityId, row: &TradeCfg, shift_key: i64) -> V
     // Jobs & lives phase 1 (§ 2): a Builder's round walks his Yard's open
     // sites (any district, any owner), the same shape.
     let yard = world.comp::<Building>(post).is_some_and(|bd| bd.kind == BuildingKind::ConstructionYard);
+    // Jobs & lives phase 2 (§ 3): a courier's round walks the day's parcel senders.
+    let freight = world.comp::<Building>(post).is_some_and(|bd| bd.kind == BuildingKind::FreightYard);
     let blocks: Vec<EntityId> = if yard {
         crate::systems::industry::round_sites(world, post)
+    } else if freight {
+        crate::systems::streetwork::parcel_stops(world, post)
     } else {
         let Some(c) = world.owner_of(post).and_then(|o| world.comp::<Corp>(o)) else { return Vec::new() };
         let d = world.district_of_building(post);

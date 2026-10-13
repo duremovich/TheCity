@@ -86,6 +86,9 @@ pub enum SpotKind {
     Hideout(EntityId),
     /// A Sump fire barrel.
     Barrel,
+    /// Jobs & lives phase 2 (§ 3): the labour corner outside a Yard (kept in
+    /// `Jobs2State`, not in the HangOut lists: nobody idles at a dawn pick).
+    LabourCorner(EntityId),
 }
 
 /// L2 L15: a HangOut spot (`World::spots`, per district, rebuilt daily).

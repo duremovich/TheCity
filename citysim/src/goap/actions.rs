@@ -183,6 +183,10 @@ pub enum ActionKind {
     /// M16b phase 3: at a Clinic with a Ripperdoc inside, the carried
     /// downed agent stabilised (the Rescue goal's scripted step).
     Stabilise,
+    /// Jobs & lives phase 2 (§ 3): an hour at one's Pitch (or at the labour
+    /// corner before the dawn pick): the Pitch goal's scripted step, never in
+    /// `PLANNABLE`, started by `streetwork::can_start`.
+    Vend,
 }
 
 /// Every action the planner may consider, in tie-break order.
@@ -415,6 +419,7 @@ impl ActionKind {
                 | ActionKind::DumpsterDive
                 | ActionKind::Oncology
                 | ActionKind::PackMeal
+                | ActionKind::Vend
         )
     }
 
@@ -1287,7 +1292,7 @@ impl ActionKind {
             k if k.is_contract_step() => false,
             // Real economy E27, E28: scripted only.
             k if k.is_charity_step() => false,
-            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal => false,
+            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal | ActionKind::Vend => false,
             _ => true,
         }
     }
@@ -1380,7 +1385,7 @@ impl ActionKind {
             k if k.is_contract_step() => true,
             // Real economy E27, E28: likewise `charity::can_start`.
             k if k.is_charity_step() => true,
-            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal => true,
+            ActionKind::DumpsterDive | ActionKind::Oncology | ActionKind::PackMeal | ActionKind::Vend => true,
             ActionKind::Chat => {
                 matches!(ws.at, LocationKey::Market | LocationKey::Bar | LocationKey::Home | LocationKey::Farm)
                     && ctx.partner.is_some()
@@ -1858,7 +1863,8 @@ impl ActionKind {
             | ActionKind::Donate
             | ActionKind::DumpsterDive
             | ActionKind::Oncology
-            | ActionKind::PackMeal => 60.0,
+            | ActionKind::PackMeal
+            | ActionKind::Vend => 60.0,
         };
         c.clamp(0.5, 60.0)
     }

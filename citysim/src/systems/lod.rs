@@ -1250,6 +1250,11 @@ fn stat_eat(world: &mut World, id: EntityId) {
         return;
     }
     let coins = world.comp::<crate::components::Wallet>(id).map_or(0, |w| w.coins);
+    // Jobs & lives phase 2 (§ 3): a synth buyer may take a vendor's meal on
+    // the street instead (nothing with the street off).
+    if coins >= price && crate::systems::streetwork::stat_vendor_meal(world, id, market) {
+        return;
+    }
     if coins >= price {
         // The purchase a Full agent makes (BuyFood: up to three units), one
         // eaten and the rest stored in the Home pantry (StoreFood), where the
@@ -1454,7 +1459,14 @@ fn stat_work(world: &mut World, id: EntityId, phase: DayPhase, no_net_row: Optio
     // rides when the El wins the trip (nothing with transit off). Review
     // item 2: attendance is rolled first; a no-show (no hour of the shift
     // worked) does not ride.
-    crate::prof::timed!("work::stat_commute", crate::systems::transit::stat_commute(world, id, &job, attend));
+    // Jobs & lives phase 2 (§ 3): a cab or a rickshaw first (the El's leg
+    // is skipped for a rider; nothing with the street off).
+    let cab = crate::systems::streetwork::on(world)
+        && attend.is_none_or(|p| shift_attended(world, id, &job, p))
+        && crate::systems::streetwork::stat_cab(world, id, &job);
+    if !cab {
+        crate::prof::timed!("work::stat_commute", crate::systems::transit::stat_commute(world, id, &job, attend));
+    }
     // A dodger caught at the gate is on screen now (the arrest path).
     if world.comp::<Brain>(id).is_some_and(|b| b.lod != Lod::Statistical) {
         return;

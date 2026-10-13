@@ -8,7 +8,11 @@ use citysim::systems::{demography, economy, policy};
 use citysim::{Brain, Config, EventKind, Job, PlayerCommand, Wallet, World, TICKS_PER_DAY};
 
 fn shipped() -> World {
-    let w = World::new(42, Config::load());
+    // Jobs & lives phase 2: P10's levers as written, without the street
+    // (its butterfly changed which jobless adult the dole test draws on).
+    let mut c = Config::load();
+    c.jobs2.street = false;
+    let w = World::new(42, c);
     assert!(citysim::systems::econ::wages_on(&w) && !policy::net_enacted(&w), "the shipped city: no net");
     w
 }
@@ -135,6 +139,9 @@ fn test_civic_cut_spares_public_works_hires() {
     // fares, growing with them), and this test reads the city's own.
     let mut cfg = Config::load();
     cfg.transit.enabled = false;
+    // Jobs & lives phase 2: the city as written, without the street (a works
+    // hire went to jail in the butterfly it makes).
+    cfg.jobs2.street = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY);
     w.push_command(PlayerCommand::SetSafetyNet(true));

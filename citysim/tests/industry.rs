@@ -12,6 +12,9 @@ use citysim::{Building, BuildingKind, Config, EntityId, EventKind, Good, Job, Ro
 fn on_world() -> World {
     let mut c = Config::load();
     c.jobs2.enabled = true;
+    // Phase 1's mechanisms as written (the street's couriers move the
+    // seed's opening staffing and the housing pre-roll's Lots).
+    c.jobs2.street = false;
     World::new(42, c)
 }
 

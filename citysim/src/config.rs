@@ -341,6 +341,88 @@ pub struct Jobs2Cfg {
     /// JOBS_V2 J30: an Hq's office costs at most this share of its corp's
     /// 7-day mean revenue a day (the overhead rows' places, `industry::hq_places`).
     pub admin_share: f32,
+    // --- Phase 2, the street (§ 3): `street` is its sub-switch (read only
+    // under `enabled`; `streetwork::on`).
+    pub street: bool,
+    /// Open Pitches a district holds at most, per 2,000 residents (scaled).
+    pub pitches_per_district: u16,
+    /// Coins a jobless adult holds to open a Pitch ...
+    pub pitch_stake: i64,
+    /// ... after this many days without a post ...
+    pub pitch_after_days: u32,
+    /// ... on this chance a day (a pure hash of the day and the agent).
+    pub p_pitch_open: f32,
+    /// A Pitch with no take for this many days closes.
+    pub pitch_fail_days: u8,
+    /// A body stands its Pitch within this many tiles of the spot.
+    pub pitch_reach: u32,
+    /// The share of a Pitch's day's take paid to the gang holding its
+    /// district (`Flow::StreetCut`).
+    pub cut_frac: f32,
+    /// Knowledge at which a pitcher tinkers, fighting at which he pulls a rickshaw.
+    pub tinker_skill: f32,
+    pub rickshaw_skill: f32,
+    /// Vendors: the meals bought at the nearest Market at the day's open
+    /// (shelf units of synth, `synth_stretch` meals each) ...
+    pub vendor_batch: u32,
+    /// ... sold at the synth meal's price × this ...
+    pub vendor_markup: f32,
+    /// ... to an off-screen synth buyer in the district on this chance.
+    pub p_vendor_pick: f32,
+    /// A Pitch in a `Sweep` district is swept on this chance a day: a fine
+    /// to the Treasury and closed for `sweep_close_days`; at most
+    /// `sweeps_per_day` a day per 2,000 residents (scaled).
+    pub p_pitch_sweep: f32,
+    pub pitch_fine: i64,
+    pub sweep_close_days: u8,
+    pub sweeps_per_day: u16,
+    /// The labour corner: the dawn pick's tick of day ...
+    pub corner_hour: u16,
+    /// ... from the jobless with fewer coins than this, at least this lawful ...
+    pub corner_broke: i64,
+    pub corner_lawful: f32,
+    /// ... standing within this many tiles (a body) or living within
+    /// `corner_stat_reach` (off screen, on `p_corner` a day) ...
+    pub corner_tiles: u32,
+    pub corner_stat_reach: u32,
+    pub p_corner: f32,
+    /// ... a body walks there from this many tiles at most.
+    pub corner_reach: u32,
+    /// Day posts: per open site a Construction Yard posts, per Farm in
+    /// the harvest seasons, per Freight Yard that handled `backlog_units`
+    /// yesterday.
+    pub day_per_site: u8,
+    pub harvest_posts: u8,
+    pub harvest_seasons: Vec<crate::time::Season>,
+    pub yard_posts: u8,
+    pub backlog_units: u32,
+    /// Couriers: parcels a day per standing building of a corp with two or
+    /// more, a courier's day's parcels, and each parcel's fee.
+    pub parcels_per_building: f32,
+    pub parcels_per_courier: u32,
+    pub parcel_fee: i64,
+    /// Cabs and rickshaws (off screen, the shift's first hour): a commute of
+    /// at least `cab_min_tiles` with `fare + cab_reserve` coins takes one on
+    /// `p_cab`; the fare `fare_base + fare_per_tile × tiles` (a rickshaw's
+    /// × `rickshaw_mult`); a driver's and a rickshaw's rides a day.
+    pub cab_min_tiles: u32,
+    pub cab_reserve: i64,
+    pub p_cab: f32,
+    pub fare_base: i64,
+    pub fare_per_tile: f32,
+    pub rickshaw_mult: f32,
+    pub rides_per_driver: u32,
+    pub rides_per_rickshaw: u32,
+    /// Tinkers: an agent's vehicle due a repair within `tinker_reach` of an
+    /// open tinker is fixed at `tinker_discount` × the Garage's price, on
+    /// `tinker_fail_p` wrecked instead; `tinker_jobs` a day each.
+    pub tinker_reach: u32,
+    pub tinker_discount: f32,
+    pub tinker_fail_p: f32,
+    pub tinker_jobs: u8,
+    /// A corp's Utility Plant dark on this many days running is taken by
+    /// the city (the Nationalise path; 0 never).
+    pub seize_after_days: u8,
 }
 
 impl Default for Jobs2Cfg {
@@ -377,6 +459,51 @@ impl Default for Jobs2Cfg {
             hq_min_buildings: 6,
             hq_reserve: 2000,
             admin_share: 0.05,
+            street: false,
+            pitches_per_district: 4,
+            pitch_stake: 20,
+            pitch_after_days: 5,
+            p_pitch_open: 0.05,
+            pitch_fail_days: 4,
+            pitch_reach: 3,
+            cut_frac: 0.1,
+            tinker_skill: 0.5,
+            rickshaw_skill: 0.4,
+            vendor_batch: 5,
+            vendor_markup: 1.25,
+            p_vendor_pick: 0.5,
+            p_pitch_sweep: 0.1,
+            pitch_fine: 5,
+            sweep_close_days: 1,
+            sweeps_per_day: 4,
+            corner_hour: 360,
+            corner_broke: 20,
+            corner_lawful: 0.2,
+            corner_tiles: 6,
+            corner_stat_reach: 160,
+            p_corner: 0.3,
+            corner_reach: 40,
+            day_per_site: 1,
+            harvest_posts: 1,
+            harvest_seasons: vec![crate::time::Season::Summer, crate::time::Season::Autumn],
+            yard_posts: 2,
+            backlog_units: 300,
+            parcels_per_building: 0.5,
+            parcels_per_courier: 12,
+            parcel_fee: 1,
+            cab_min_tiles: 60,
+            cab_reserve: 30,
+            p_cab: 0.03,
+            fare_base: 3,
+            fare_per_tile: 0.05,
+            rickshaw_mult: 0.6,
+            rides_per_driver: 8,
+            rides_per_rickshaw: 6,
+            tinker_reach: 40,
+            tinker_discount: 0.6,
+            tinker_fail_p: 0.1,
+            tinker_jobs: 3,
+            seize_after_days: 5,
         }
     }
 }
@@ -1230,6 +1357,9 @@ pub struct TradeCfg {
     /// enabled` (`classpay::trade_live`); off, it posts nothing anywhere.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub jobs2: bool,
+    /// Jobs & lives phase 2: the row exists only with `[jobs2] street` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub street: bool,
 }
 
 /// J14: how a trade works its shift.
@@ -6369,6 +6499,10 @@ impl Config {
         if std::env::var("CITYSIM_JOBS2_OFF").is_ok_and(|v| v == "1") {
             cfg.jobs2.enabled = false;
         }
+        // Jobs & lives phase 2: the street's A/B and identity device.
+        if std::env::var("CITYSIM_STREET_OFF").is_ok_and(|v| v == "1") {
+            cfg.jobs2.street = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -6812,6 +6946,10 @@ impl Config {
         let j2 = &mut self.jobs2;
         j2.clerks_max = (f64::from(j2.clerks_max) * up).round().clamp(0.0, 65535.0) as u16;
         j2.depot_hands_max = (f64::from(j2.depot_hands_max) * up).round().clamp(0.0, 65535.0) as u16;
+        // Phase 2: the street's caps per capita (pitches a district, sweeps a day).
+        let per_d = |v: u16| (f64::from(v) * up).round().clamp(0.0, 65535.0) as u16;
+        j2.pitches_per_district = per_d(j2.pitches_per_district);
+        j2.sweeps_per_day = per_d(j2.sweeps_per_day);
         for c in &mut wm.cap_wages {
             *c = up_u32(*c);
         }

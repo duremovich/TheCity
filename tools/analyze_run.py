@@ -910,6 +910,12 @@ JOBS2_MODELS = ("emp_produce", "emp_service", "emp_handling", "emp_contract", "e
 JOBS2_KINDS = ("emp_packing", "emp_freight", "emp_utility", "emp_construction", "emp_hq")
 JOBS2_SNAP = ("n_packing", "n_freight", "n_utility", "n_construction", "hqs", "jailers", "clerks", "depot_hands",
               "civic3_target", "office_workers", "sites_open", "dark_districts")
+# Phase 2, the street (§ 3).
+STREET_TOTALS = ("pitch_opened", "pitch_closed", "street_cut", "swept", "vendor_meals", "vendor_take",
+                 "day_posts_offered", "day_posts_filled", "day_posts_ended", "corner_queue", "parcels", "parcel_fees",
+                 "cab_trips", "cab_fares", "rickshaw_trips", "rickshaw_fares", "tinker_repairs", "tinker_take",
+                 "tinker_botched", "plants_seized")
+STREET_SNAP = ("pitches", "pitches_vendor", "pitches_rickshaw", "pitches_tinker")
 
 
 def jobs2(rows, events, out):
@@ -942,8 +948,18 @@ def jobs2(rows, events, out):
         J["world_net_crossing"] = num(rows[-1].get("outside_inbound", 0)) - num(rows[0].get("outside_inbound", 0))
     J["rations_mint_share"] = sum(col(rows, "rations_paid")) / max(1, sum(col(rows, "export_paid"))) \
         if "export_paid" in rows[0] else 0
+    if "pitches" in rows[0]:
+        J["street_totals"] = {k: sum(col(rows, k)) for k in STREET_TOTALS}
+        J["street_mean"] = {k: mean(col(rows, k)) for k in STREET_SNAP}
+        filled, offered = J["street_totals"]["day_posts_filled"], J["street_totals"]["day_posts_offered"]
+        J["day_posts_fill"] = filled / offered if offered else 0
+        open_days = sum(col(rows, "pitches"))
+        take = J["street_totals"]["vendor_take"] + J["street_totals"]["rickshaw_fares"] + J["street_totals"]["tinker_take"]
+        J["take_per_pitch_day"] = take / open_days if open_days else 0
+        J["cut_share_of_take"] = J["street_totals"]["street_cut"] / take if take else 0
     if events:
-        kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered")
+        kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
+                 "DawnPick", "TinkerBotched")
         J["events"] = {k: sum(1 for _, kind, _ in events if kind == k) for k in kinds}
         J["foreman_named"] = sum(1 for _, kind, t in events if kind in ("Hire", "LaidOff") and "the foreman" in t)
         J["hq_built"] = sum(1 for _, kind, t in events if kind == "Founded" and " built its Corp HQ" in t)
@@ -1140,6 +1156,11 @@ def fmt(o):
         L.append("jobs by TradeModel, day 60: " + f(w["models_d60"]) + "; last: " + f(w["models_last"]))
         L.append("jobs by new kind, day 60: " + f(w["kinds_d60"]) + "; last: " + f(w["kinds_last"]))
         L.append("last day: " + f(w["snap_last"]) + f"; days with a dark district {w['dark_days']}")
+        if "street_totals" in w:
+            L.append("the street, run totals: " + f(w["street_totals"]))
+            L.append("Pitches open, daily mean: " + f(w["street_mean"]) + f"; take a Pitch-day "
+                     f"{w['take_per_pitch_day']:.2f}; the gang's cut of the take {w['cut_share_of_take']:.1%}; day "
+                     f"posts filled / offered {w['day_posts_fill']:.1%}")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")
