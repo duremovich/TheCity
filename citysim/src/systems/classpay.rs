@@ -35,7 +35,7 @@ pub fn on(world: &World) -> bool {
 /// Class pay: does this `[[trades]]` row post places in this city (a
 /// `classpay` row only with class pay on)?
 pub fn trade_live(world: &World, row: &crate::config::TradeCfg) -> bool {
-    !row.classpay || on(world)
+    (!row.classpay || on(world)) && (!row.jobs2 || crate::systems::industry::on(world))
 }
 
 /// Is `b` a standing-or-not building owned by a corp?

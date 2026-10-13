@@ -178,6 +178,12 @@ impl LocationKey {
             // Real economy E26, E37: a Volunteer inside its Mission; a Camp
             // is nobody's workplace (its children have no Brain).
             BuildingKind::Mission | BuildingKind::Camp => LocationKey::Workplace,
+            // Jobs & lives phase 1: the industries and the Hq are workplaces.
+            BuildingKind::PackingPlant
+            | BuildingKind::FreightYard
+            | BuildingKind::UtilityPlant
+            | BuildingKind::ConstructionYard
+            | BuildingKind::Hq => LocationKey::Workplace,
             // M16b phase 2: a Private Prison has no staff role.
             BuildingKind::Prison => LocationKey::Street,
         }

@@ -206,6 +206,8 @@ pub fn accrue(world: &mut World, worker: EntityId, b: EntityId, ticks: u64) {
     match world.comp::<Building>(b).map(|bd| bd.kind) {
         Some(BuildingKind::Farm) => crate::systems::economy::accrue_farm_work(world, worker, b, ticks),
         Some(BuildingKind::Fab) => crate::systems::jobs::accrue_fab_work(world, worker, b, ticks),
+        // Jobs & lives phase 1 (§ 2): the Packers.
+        Some(BuildingKind::PackingPlant) => crate::systems::industry::accrue_packing(world, worker, b, ticks),
         _ => {}
     }
 }
@@ -267,16 +269,22 @@ pub fn at_post(world: &World, agent: EntityId, b: EntityId) -> bool {
 /// turns through all of them over the days), walked nearest-first from
 /// the post's door.
 fn new_round(world: &World, post: EntityId, row: &TradeCfg, shift_key: i64) -> Vec<EntityId> {
-    let Some(c) = world.owner_of(post).and_then(|o| world.comp::<Corp>(o)) else { return Vec::new() };
-    let d = world.district_of_building(post);
-    let blocks: Vec<EntityId> = c
-        .buildings
-        .iter()
-        .copied()
-        .filter(|&x| x != post && standing(world, x))
-        .filter(|&x| world.comp::<Building>(x).is_some_and(|bd| row.workplace.contains(&bd.kind)))
-        .filter(|&x| world.district_of_building(x) == d)
-        .collect();
+    // Jobs & lives phase 1 (§ 2): a Builder's round walks his Yard's open
+    // sites (any district, any owner), the same shape.
+    let yard = world.comp::<Building>(post).is_some_and(|bd| bd.kind == BuildingKind::ConstructionYard);
+    let blocks: Vec<EntityId> = if yard {
+        crate::systems::industry::round_sites(world, post)
+    } else {
+        let Some(c) = world.owner_of(post).and_then(|o| world.comp::<Corp>(o)) else { return Vec::new() };
+        let d = world.district_of_building(post);
+        c.buildings
+            .iter()
+            .copied()
+            .filter(|&x| x != post && standing(world, x))
+            .filter(|&x| world.comp::<Building>(x).is_some_and(|bd| row.workplace.contains(&bd.kind)))
+            .filter(|&x| world.district_of_building(x) == d)
+            .collect()
+    };
     let stops = usize::from(row.round_stops).min(blocks.len());
     if stops == 0 {
         return Vec::new();

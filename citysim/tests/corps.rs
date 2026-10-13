@@ -191,7 +191,11 @@ fn three(w: &World) -> (EntityId, EntityId, EntityId) {
 
 /// A small v2 city (Lots, two Security Offices, the eight seeded corps).
 fn v2_world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().scaled_to(400))
+    // Jobs & lives phase 1: M11's founding as written (a build paid to a
+    // Construction Yard stands closed: `tests/industry.rs`).
+    let mut c = Config::load().dole_city().scaled_to(400);
+    c.jobs2.enabled = false;
+    World::new(seed, c)
 }
 
 fn corp_named(w: &World, name: &str) -> EntityId {

@@ -1436,7 +1436,7 @@ pub fn found_branch(world: &mut World, id: OutsideId) -> Option<EntityId> {
             if world.purse(Some(corp)) >= cost {
                 if let Some(lot) = crate::systems::founding::vacant_lots(world).into_iter().next() {
                     if crate::systems::founding::build_on_lot(world, lot, kind, Some(corp)).is_ok() {
-                        ownership::pay(world, Some(corp), None, cost, Flow::Found);
+                        crate::systems::industry::pay_build(world, Some(corp), cost, Some(lot), true);
                     }
                 }
             }

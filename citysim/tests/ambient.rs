@@ -67,15 +67,20 @@ fn test_ambient_flats_from_the_ratio() {
     assert!((per - 1.0 - f64::from(w.config.ambient.couple_p)).abs() < 0.05, "adults per household {per}");
     let header = citysim::systems::stats::csv_header(&w);
     // M17 phase 1 appended the Ambient book's columns to the group; phase 2
-    // puts the parents' group after it.
+    // puts the parents' group after it; Jobs & lives phase 1 its own after
+    // that (the switch on as shipped).
     let outside = citysim::stats::OutsideCols::header(w.outside.parents().count());
+    let jobs2 = citysim::stats::Jobs2Cols::header();
     let tail = format!(
-        ",ambient_labour,ambient_food,ambient_food_wanted,ambient_food_bought,ambient_visits_wanted,ambient_visits_made,flow_ambient_food,flow_ambient_visits,ambient_appetite,{outside},ticks_per_sec"
+        ",ambient_labour,ambient_food,ambient_food_wanted,ambient_food_bought,ambient_visits_wanted,ambient_visits_made,flow_ambient_food,flow_ambient_visits,ambient_appetite,{outside},{jobs2},ticks_per_sec"
     );
     assert!(header.ends_with(&tail), "{}", &header[header.len() - 200..]);
     let row = w.stats.current.csv_row();
+    // The day-0 row before its close: the industries' flows at seed may
+    // already have opened the jobs2 group.
+    let j2 = if w.stats.current.jobs2.is_some() { 0 } else { jobs2.split(',').count() };
     assert_eq!(
-        row.split(',').count() + 18 + outside.split(',').count(),
+        row.split(',').count() + 18 + outside.split(',').count() + j2,
         header.split(',').count(),
         "today's row gets its groups at the close"
     );

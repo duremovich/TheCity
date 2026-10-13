@@ -378,21 +378,42 @@ pub enum ExportGood {
     Food,
     Parts,
     Data,
+    /// Jobs & lives phase 1 (D6): the Packing Plants' Rations.
+    Rations,
+    /// Jobs & lives (D6): braindance (its book inert until phase 5).
+    Braindance,
+    /// Jobs & lives (D6, D10): organs (its book inert until phase 6).
+    Organs,
 }
 
 impl ExportGood {
+    /// The books every world keeps (the appended ones only with `[jobs2]`
+    /// on: `world_market::goods`).
     pub const ALL: [ExportGood; 3] = [ExportGood::Food, ExportGood::Parts, ExportGood::Data];
+
+    /// Jobs & lives phase 1: every book, the appended ones included.
+    pub const ALL_JOBS2: [ExportGood; 6] = [
+        ExportGood::Food,
+        ExportGood::Parts,
+        ExportGood::Data,
+        ExportGood::Rations,
+        ExportGood::Braindance,
+        ExportGood::Organs,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
             ExportGood::Food => "food",
             ExportGood::Parts => "parts",
             ExportGood::Data => "data",
+            ExportGood::Rations => "rations",
+            ExportGood::Braindance => "braindance",
+            ExportGood::Organs => "organs",
         }
     }
 
     pub fn parse(s: &str) -> Option<ExportGood> {
-        ExportGood::ALL.into_iter().find(|g| g.label().eq_ignore_ascii_case(s))
+        ExportGood::ALL_JOBS2.into_iter().find(|g| g.label().eq_ignore_ascii_case(s))
     }
 }
 

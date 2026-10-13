@@ -387,8 +387,166 @@ pub struct DayRow {
     /// otherwise; the header from `systems::stats::csv_header`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outside: Option<OutsideCols>,
+    /// Jobs & lives (docs/JOBS_AND_LIVES.md § 12): the milestone's group,
+    /// after the parents' and before `ticks_per_sec`, only with `[jobs2]
+    /// enabled` (`None` and no columns otherwise: the off CSV is unchanged;
+    /// the header from `systems::stats::csv_header`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub jobs2: Option<Jobs2Cols>,
     /// Filled in by the runner (the library has no clock).
     pub ticks_per_sec: f32,
+}
+
+/// Jobs & lives phase 1 (§ 2, § 12's printed bands): the industries' flows
+/// and units, the builds, the outages, the civic three and the Hq, and
+/// jobs by `TradeModel` and by new kind (snapshots at the day's end).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Jobs2Cols {
+    /// `Flow::Handling` paid to Freight Yards (fees on crossings and hauls).
+    pub flow_handling: i64,
+    /// Handling fees that went to the World (no staffed Yard in reach).
+    pub handling_leak: i64,
+    /// `Flow::Power` paid to Utility Plants.
+    pub flow_power: i64,
+    /// The plants' fuel share to the World (`Flow::Inputs`).
+    pub power_fuel: i64,
+    /// `Flow::Build` paid to Construction Yards.
+    pub flow_build: i64,
+    /// Food units packed and Rations made, sold to the World and paid.
+    pub food_packed: u32,
+    pub rations_made: u32,
+    pub rations_sold: u32,
+    pub rations_paid: i64,
+    /// Rations a Loader walked out with.
+    pub pilfered: u32,
+    /// Builds started and finished at Yards today; sites open at the end.
+    pub builds_started: u32,
+    pub builds_done: u32,
+    pub sites_open: u32,
+    /// Districts dark at the day's end, and outages begun today.
+    pub dark_districts: u32,
+    pub outages: u32,
+    /// The civic three's headcounts (Job holders) and the allocation's targets.
+    pub jailers: u32,
+    pub clerks: u32,
+    pub depot_hands: u32,
+    pub civic3_target: u32,
+    /// Office workers and standing Hqs.
+    pub office_workers: u32,
+    pub hqs: u32,
+    /// Trade Job holders by `TradeModel` (row order of the enum).
+    pub emp_produce: u32,
+    pub emp_service: u32,
+    pub emp_handling: u32,
+    pub emp_contract: u32,
+    pub emp_civic: u32,
+    pub emp_overhead: u32,
+    pub emp_resale: u32,
+    pub emp_day: u32,
+    /// Job holders at each new kind (every role).
+    pub emp_packing: u32,
+    pub emp_freight: u32,
+    pub emp_utility: u32,
+    pub emp_construction: u32,
+    pub emp_hq: u32,
+    /// Standing buildings of each new kind.
+    pub n_packing: u32,
+    pub n_freight: u32,
+    pub n_utility: u32,
+    pub n_construction: u32,
+}
+
+impl Jobs2Cols {
+    /// The header's names, comma-separated, in column order.
+    pub fn header() -> String {
+        [
+            "flow_handling",
+            "handling_leak",
+            "flow_power",
+            "power_fuel",
+            "flow_build",
+            "food_packed",
+            "rations_made",
+            "rations_sold",
+            "rations_paid",
+            "pilfered",
+            "builds_started",
+            "builds_done",
+            "sites_open",
+            "dark_districts",
+            "outages",
+            "jailers",
+            "clerks",
+            "depot_hands",
+            "civic3_target",
+            "office_workers",
+            "hqs",
+            "emp_produce",
+            "emp_service",
+            "emp_handling",
+            "emp_contract",
+            "emp_civic",
+            "emp_overhead",
+            "emp_resale",
+            "emp_day",
+            "emp_packing",
+            "emp_freight",
+            "emp_utility",
+            "emp_construction",
+            "emp_hq",
+            "n_packing",
+            "n_freight",
+            "n_utility",
+            "n_construction",
+        ]
+        .join(",")
+    }
+
+    /// The columns, comma-separated, in header order.
+    pub fn csv(&self) -> String {
+        [
+            self.flow_handling.to_string(),
+            self.handling_leak.to_string(),
+            self.flow_power.to_string(),
+            self.power_fuel.to_string(),
+            self.flow_build.to_string(),
+            self.food_packed.to_string(),
+            self.rations_made.to_string(),
+            self.rations_sold.to_string(),
+            self.rations_paid.to_string(),
+            self.pilfered.to_string(),
+            self.builds_started.to_string(),
+            self.builds_done.to_string(),
+            self.sites_open.to_string(),
+            self.dark_districts.to_string(),
+            self.outages.to_string(),
+            self.jailers.to_string(),
+            self.clerks.to_string(),
+            self.depot_hands.to_string(),
+            self.civic3_target.to_string(),
+            self.office_workers.to_string(),
+            self.hqs.to_string(),
+            self.emp_produce.to_string(),
+            self.emp_service.to_string(),
+            self.emp_handling.to_string(),
+            self.emp_contract.to_string(),
+            self.emp_civic.to_string(),
+            self.emp_overhead.to_string(),
+            self.emp_resale.to_string(),
+            self.emp_day.to_string(),
+            self.emp_packing.to_string(),
+            self.emp_freight.to_string(),
+            self.emp_utility.to_string(),
+            self.emp_construction.to_string(),
+            self.emp_hq.to_string(),
+            self.n_packing.to_string(),
+            self.n_freight.to_string(),
+            self.n_utility.to_string(),
+            self.n_construction.to_string(),
+        ]
+        .join(",")
+    }
 }
 
 /// Scale S5: the Ambient tier's day (`systems::ambient::close_day`).
@@ -1427,6 +1585,7 @@ impl DayRow {
             transit: TransitCols::default(),
             ambient: None,
             outside: None,
+            jobs2: None,
             ticks_per_sec: 0.0,
         }
     }
@@ -1453,6 +1612,11 @@ impl DayRow {
         // M17 phase 2: the parents' group after it (only with the parents on).
         let transit_ambient = match &self.outside {
             Some(o) => format!("{transit_ambient},{}", o.csv()),
+            None => transit_ambient,
+        };
+        // Jobs & lives: its group after that (only with `[jobs2]` on).
+        let transit_ambient = match &self.jobs2 {
+            Some(j) => format!("{transit_ambient},{}", j.csv()),
             None => transit_ambient,
         };
         let corps: Vec<String> = (0..self.corps.len().max(CORP_SLOTS))

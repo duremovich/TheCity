@@ -267,6 +267,30 @@ pub enum Flow {
     /// M17 phase 4: scrip's coin side: a wage's scrip share to the parent,
     /// a redemption or a Fixer's conversion from it (untaxed).
     Scrip,
+    // --- Jobs & lives (docs/JOBS_AND_LIVES.md § 1): appended; phase 1
+    // writes Handling, Power and Build, the rest are their phases'.
+    /// § 2: a fee per unit crossing a Freight Yard (an export, an import,
+    /// a cross-owner haul), payer -> the Yard's owner (taxed).
+    Handling,
+    /// § 2: a building's daily power, owner -> the Utility Plant's owner (taxed).
+    Power,
+    /// § 2: a build, refit or floor, payer -> the Construction Yard's owner
+    /// (taxed; capital for the payer, as `Found`).
+    Build,
+    /// § 5: a tip, customer -> the worker on duty (untaxed).
+    Tip,
+    /// § 3: a cab or rickshaw fare, rider -> the Garage's owner or the
+    /// rickshaw's own purse (taxed). The spec's `Fare`: transit's El fare
+    /// holds that name.
+    CabFare,
+    /// § 3: a Pitch's cut to the gang holding its district (untaxed).
+    StreetCut,
+    /// § 4, § 7: a licence or papers from the Civic Clerk -> Treasury (untaxed).
+    Licence,
+    /// § 7: the gray market's sales (untaxed).
+    Gray,
+    /// § 8: a follower's tithe into a church's purse (untaxed).
+    Tithe,
 }
 
 impl Flow {
@@ -274,7 +298,10 @@ impl Flow {
     /// subsidy. Kept out of a corp's `cashflow` (the brain's `flow` input),
     /// or one purchase reads as two weeks of losses.
     pub fn capital(self) -> bool {
-        matches!(self, Flow::Sale | Flow::Found | Flow::Subsidy | Flow::Escrow | Flow::Remit | Flow::ParentFund)
+        matches!(
+            self,
+            Flow::Sale | Flow::Found | Flow::Subsidy | Flow::Escrow | Flow::Remit | Flow::ParentFund | Flow::Build
+        )
     }
 
     /// Owner revenue taxed at the moment of the flow (spec § 3); wage tax
@@ -300,8 +327,18 @@ impl Flow {
                 | Flow::Gamble
                 | Flow::FixerCut
                 | Flow::Trauma
+                | Flow::Handling
+                | Flow::Power
+                | Flow::Build
+                | Flow::CabFare
         )
     }
+}
+
+/// Jobs & lives: the day row's group, created on its first flow (only
+/// with `[jobs2]` on; `systems::stats::snapshot` makes it every day then).
+pub fn jobs2_row(world: &mut World) -> &mut crate::stats::Jobs2Cols {
+    world.stats.current.jobs2.get_or_insert_with(Default::default)
 }
 
 fn ledger(world: &mut World, flow: Flow, coins: i64) {
@@ -373,6 +410,14 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Coerced => row.leverage.flow_coerced += coins,
         Flow::Trauma => row.wounded.flow_trauma += coins,
         Flow::AmbientSale | Flow::Remit | Flow::ParentFund | Flow::Grant | Flow::Scrip => {}
+        // Jobs & lives phase 1: the columns of its own group.
+        Flow::Handling => row.jobs2.get_or_insert_with(Default::default).flow_handling += coins,
+        Flow::Power => row.jobs2.get_or_insert_with(Default::default).flow_power += coins,
+        Flow::Build => row.jobs2.get_or_insert_with(Default::default).flow_build += coins,
+        // The later phases' flows: `flow_other` until their columns land.
+        Flow::Tip | Flow::CabFare | Flow::StreetCut | Flow::Licence | Flow::Gray | Flow::Tithe => {
+            row.flow_other += coins
+        }
     }
 }
 
@@ -719,6 +764,8 @@ pub fn import(world: &mut World, from: Option<EntityId>, amount: i64, _why: Impo
         if customs > 0 {
             charge(world, from, None, customs, Flow::Customs);
         }
+        // Jobs & lives phase 1 (§ 2): the crossing's handling at a Yard.
+        crate::systems::industry::handle_import(world, from, moved);
     }
     moved
 }
@@ -919,6 +966,8 @@ pub fn value(world: &World, kind: BuildingKind) -> i64 {
         // Real economy E26, E37.
         BuildingKind::Mission => c.value.mission,
         BuildingKind::Camp => c.value.camp,
+        // Jobs & lives phase 1 (D4): the new kinds' `[buildings.<kind>] value`.
+        k if BuildingKind::JOBS2.contains(&k) => world.config.buildings.for_kind(k).value.unwrap_or(0),
         _ => 0,
     }
 }

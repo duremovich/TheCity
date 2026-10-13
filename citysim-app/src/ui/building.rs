@@ -176,6 +176,32 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 ui.label(format!("Parts held {held} · made today (all Fabs) {}", world.stats.current.living.fab_parts));
                 staff(ui, app, world, id, "Fab Techs");
             }
+            // Jobs & lives phase 1 (§ 2): the industries and the Hq: the
+            // stock, a site's opening, the district's power, the staff.
+            BuildingKind::PackingPlant
+            | BuildingKind::FreightYard
+            | BuildingKind::UtilityPlant
+            | BuildingKind::ConstructionYard
+            | BuildingKind::Hq => {
+                if b.kind == BuildingKind::PackingPlant {
+                    let rations = world.stock(id, citysim::Good::Rations);
+                    ui.label(format!("Food in {} · Rations {rations}", b.stock_food));
+                }
+                if let Some(t) = b.under_construction_until.filter(|&t| t > world.tick) {
+                    ui.label(format!("under construction: opens in {:.1} days", (t - world.tick) as f32 / 1440.0));
+                }
+                if b.kind == BuildingKind::ConstructionYard {
+                    let sites = citysim::systems::industry::sites_of(world, id);
+                    ui.label(format!("open sites {}", sites.len()));
+                }
+                if citysim::systems::industry::dark_at(world, id) {
+                    ui.label("the district is dark (an outage)");
+                }
+                if let Some(f) = citysim::systems::industry::foreman(world, id, None) {
+                    ui.label(format!("foreman {}", world.name_of(f)));
+                }
+                staff(ui, app, world, id, "Staff");
+            }
             // M16a § 9 (plan C42): the Fixer's book, regulars, cut, heat,
             // income and closed-until.
             BuildingKind::Fixer => {

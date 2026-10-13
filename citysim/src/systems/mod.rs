@@ -51,6 +51,7 @@ pub mod grudges;
 pub mod health;
 pub mod hitmarket;
 pub mod hunt;
+pub mod industry;
 pub mod jobs;
 pub mod law;
 pub mod law_brain;

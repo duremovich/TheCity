@@ -13,7 +13,11 @@ use citysim::{Config, DeathCause, EntityId, EventKind, Gang, PlayerCommand, RelK
 
 /// The seed-42 city on day 4.
 fn city() -> World {
-    let mut w = World::new(42, Config::load());
+    // Jobs & lives phase 1: the M17 city as written (the industries move
+    // which gang is at war on day 4).
+    let mut c = Config::load();
+    c.jobs2.enabled = false;
+    let mut w = World::new(42, c);
     w.config.crime.fight_death_p = 0.0;
     w.run_ticks(4 * TICKS_PER_DAY + 30);
     w

@@ -12,6 +12,9 @@ pub fn run(world: &mut World) {
     crate::systems::leisure::hourly(world);
     // The Real economy E27: the Statistical kitchen pass at 12:00.
     crate::systems::charity::hourly(world);
+    // Jobs & lives phase 1: the Yards' and plants' crews, the outages, the
+    // sites that stand, the night's pilfer (nothing with `[jobs2]` off).
+    crate::systems::industry::hourly(world);
     if world.tick_of_day() != 0 {
         return;
     }
@@ -49,6 +52,9 @@ pub fn run(world: &mut World) {
     // Real economy (plan E6-E10): the World's book, appetite, refill and the
     // midnight Parts and Data sales.
     crate::systems::world_market::daily(world);
+    // Jobs & lives phase 1: the Rations sale (after the book's refill), the
+    // civic posts, the offices and an Hq built (nothing with `[jobs2]` off).
+    crate::systems::industry::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

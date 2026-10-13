@@ -201,10 +201,22 @@ pub enum BuildingKind {
     /// M16b phase 2 (spec § 4): a corp's private prison, where its
     /// captives are held; built by a corp, never by an agent.
     Prison,
+    // --- Jobs & lives phase 1 (docs/JOBS_AND_LIVES.md § 2), only with
+    // `[jobs2] enabled`: none stands with the switch off.
+    /// Packers turn Farm Food into Rations sold to the World.
+    PackingPlant,
+    /// Loaders and Drivers: the handling fee on every crossing.
+    FreightYard,
+    /// Plant Operators: the city's power, paid by every building.
+    UtilityPlant,
+    /// Builders: every build, refit and floor is paid here.
+    ConstructionYard,
+    /// A corp's head office in the Spire (Office Workers).
+    Hq,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 27] = [
+    pub const ALL: [BuildingKind; 32] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -232,6 +244,20 @@ impl BuildingKind {
         BuildingKind::Mission,
         BuildingKind::Camp,
         BuildingKind::Prison,
+        BuildingKind::PackingPlant,
+        BuildingKind::FreightYard,
+        BuildingKind::UtilityPlant,
+        BuildingKind::ConstructionYard,
+        BuildingKind::Hq,
+    ];
+
+    /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`.
+    pub const JOBS2: [BuildingKind; 5] = [
+        BuildingKind::PackingPlant,
+        BuildingKind::FreightYard,
+        BuildingKind::UtilityPlant,
+        BuildingKind::ConstructionYard,
+        BuildingKind::Hq,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -278,6 +304,11 @@ impl BuildingKind {
             "Mission" => BuildingKind::Mission,
             "Camp" => BuildingKind::Camp,
             "Prison" => BuildingKind::Prison,
+            "PackingPlant" => BuildingKind::PackingPlant,
+            "FreightYard" => BuildingKind::FreightYard,
+            "UtilityPlant" => BuildingKind::UtilityPlant,
+            "ConstructionYard" => BuildingKind::ConstructionYard,
+            "Hq" => BuildingKind::Hq,
             _ => return None,
         })
     }
@@ -312,6 +343,11 @@ impl BuildingKind {
             BuildingKind::Mission => "Soup Kitchen",
             BuildingKind::Camp => "Work Camp",
             BuildingKind::Prison => "Private Prison",
+            BuildingKind::PackingPlant => "Packing Plant",
+            BuildingKind::FreightYard => "Freight Yard",
+            BuildingKind::UtilityPlant => "Utility Plant",
+            BuildingKind::ConstructionYard => "Construction Yard",
+            BuildingKind::Hq => "Corp HQ",
         }
     }
 
@@ -350,6 +386,12 @@ impl BuildingKind {
             BuildingKind::Camp => 'Y',
             // M16b phase 2: the letter L2 left it.
             BuildingKind::Prison => 'Z',
+            // Jobs & lives phase 1 (JOBS_V2 J33): every capital is taken.
+            BuildingKind::PackingPlant => '&',
+            BuildingKind::FreightYard => '%',
+            BuildingKind::UtilityPlant => '*',
+            BuildingKind::ConstructionYard => '^',
+            BuildingKind::Hq => '$',
         }
     }
 }
@@ -1223,10 +1265,17 @@ pub enum Niche {
     Security,
     /// M13 D17: Clinics and Garages (Zetatech).
     Tech,
+    /// Jobs & lives (§ 1, § 5): strip clubs, brothels, dollhouses, BD
+    /// studios. Appended in phase 1; no kind sits in it until phase 4, and
+    /// it stays out of `ALL` (the corp brain's niche loops) until then.
+    Vice,
 }
 
 impl Niche {
     pub const ALL: [Niche; 4] = [Niche::Food, Niche::Housing, Niche::Security, Niche::Tech];
+
+    /// Every niche, the appended `Vice` included (parsing).
+    pub const ALL_JOBS2: [Niche; 5] = [Niche::Food, Niche::Housing, Niche::Security, Niche::Tech, Niche::Vice];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -1234,11 +1283,12 @@ impl Niche {
             Niche::Housing => "Housing",
             Niche::Security => "Security",
             Niche::Tech => "Tech",
+            Niche::Vice => "Vice",
         }
     }
 
     pub fn parse(s: &str) -> Option<Niche> {
-        Niche::ALL.into_iter().find(|n| n.label() == s)
+        Niche::ALL_JOBS2.into_iter().find(|n| n.label() == s)
     }
 }
 
@@ -1523,6 +1573,10 @@ pub struct Corp {
     pub prem_today: i64,
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     pub prem: VecDeque<i64>,
+    /// Jobs & lives phase 1 (§ 2, the Hq): the corp's head office where one
+    /// stands (`industry::daily` keeps it).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub office: Option<EntityId>,
 }
 
 fn is_zero_f32_c(v: &f32) -> bool {
@@ -1598,6 +1652,7 @@ impl Corp {
             import_today: 0,
             prem_today: 0,
             prem: VecDeque::new(),
+            office: None,
         }
     }
 
@@ -1780,6 +1835,10 @@ pub struct Job {
     /// hire or promotion; always 0 with class pay off (not written).
     #[serde(default, skip_serializing_if = "is_zero_grade")]
     pub grade: u8,
+    /// Jobs & lives phase 1 (§ 1, the `day` model): a one-day post ends
+    /// at this tick (`trades::end_day_posts`); `None` for a standing post.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<Tick>,
 }
 
 fn is_zero_grade(v: &u8) -> bool {
@@ -2539,6 +2598,18 @@ pub struct Building {
     /// § 4: the bin's regular (or the diver who may become one).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bin_regular: Option<BinRegular>,
+    /// Jobs & lives phase 1 (§ 2): a build paid to a Construction Yard
+    /// stands closed (no places, no door) until this tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub under_construction_until: Option<Tick>,
+    /// Jobs & lives phase 1 (§ 1): the appended goods in stock
+    /// (`Rations`, `Braindance`, `Organs`: `good as usize - 3`).
+    #[serde(default, skip_serializing_if = "is_zero_stock_x")]
+    pub stock_x: [u32; 3],
+}
+
+fn is_zero_stock_x(v: &[u32; 3]) -> bool {
+    *v == [0; 3]
 }
 
 /// Hunger as sickness § 4: a bin's regular diver and the days (of the last
@@ -3542,6 +3613,18 @@ pub struct District {
     /// M12 D10: the allocation weight's terms from the last allocation.
     #[serde(skip)]
     pub alloc_trace: Vec<(&'static str, f32)>,
+    /// Jobs & lives phase 1 (§ 2): the district's Utility Plant has had no
+    /// operator on shift for `[jobs2] outage_hours` (the spec's `powered =
+    /// false`, inverted so the derived default is the lit district).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dark: bool,
+}
+
+impl District {
+    /// Jobs & lives phase 1: the lights are on (no outage).
+    pub fn powered(&self) -> bool {
+        !self.dark
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -3799,16 +3882,30 @@ pub enum Good {
     Food,
     Stims,
     Parts,
+    /// Jobs & lives phase 1 (D6): packed Food, made at a Packing Plant
+    /// (`Building.stock_x[0]`).
+    Rations,
+    /// Jobs & lives (D6): braindance units (phase 5; `stock_x[1]`).
+    Braindance,
+    /// Jobs & lives (D6, D10): organs (phase 6; `stock_x[2]`).
+    Organs,
 }
 
 impl Good {
     pub const ALL: [Good; 3] = [Good::Food, Good::Stims, Good::Parts];
+
+    /// Jobs & lives phase 1: every good, the appended ones included.
+    pub const ALL_JOBS2: [Good; 6] =
+        [Good::Food, Good::Stims, Good::Parts, Good::Rations, Good::Braindance, Good::Organs];
 
     pub fn label(self) -> &'static str {
         match self {
             Good::Food => "Food",
             Good::Stims => "Stims",
             Good::Parts => "Parts",
+            Good::Rations => "Rations",
+            Good::Braindance => "Braindance",
+            Good::Organs => "Organs",
         }
     }
 }

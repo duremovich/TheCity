@@ -113,6 +113,9 @@ pub fn sense(world: &mut World, actor: EntityId, crime: Crime, b: EntityId) -> S
     }
     // M14 V23: the sensor contests at the robot's effective tier.
     let robot_tier = world.comp::<Asset>(robot).map_or(1, |x| assets::eff_tier_of(world, x));
+    // Jobs & lives phase 1 (§ 2): a dark district drops the door tier one step.
+    let robot_tier =
+        if crate::systems::industry::dark_at(world, b) { robot_tier.saturating_sub(1) } else { robot_tier };
     let thief_tier = crate::systems::security::thief_tier(crate::systems::law::stealth(world, actor));
     let step = world.config.chrome.contest_step;
     if crate::systems::security::contest(thief_tier, robot_tier, step, world.rng.world()) {

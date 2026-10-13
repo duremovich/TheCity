@@ -1123,13 +1123,16 @@ pub fn hire(world: &mut World, id: EntityId, employer: EntityId, role: Role) {
             paid_once: false,
             duty_fixed: None,
             grade,
+            until: None,
         },
     );
     world.abort_plan(id);
     // J4: a rehire spends the bonus.
     world.laid_off.remove(&id);
     let name = world.name_of(id);
-    world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {}", role.label()));
+    // Jobs & lives phase 1 (§ 2): the foreman named (nothing off).
+    let foreman = crate::systems::industry::foreman_note(world, employer, id, "picked");
+    world.push_event(EventKind::Hire, &[id, employer], format!("{name} hired as {}{foreman}", role.label()));
 }
 
 // ---------------------------------------------------------------------------

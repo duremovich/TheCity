@@ -258,6 +258,127 @@ pub struct Config {
     /// Not written into a save at its defaults.
     #[serde(default, skip_serializing_if = "OutsideCfg::is_default")]
     pub outside: OutsideCfg,
+    /// Jobs & lives (docs/JOBS_AND_LIVES.md § 1): the milestone's master
+    /// switch and phase 1's keys (`CITYSIM_JOBS2_OFF=1` turns it off).
+    #[serde(default)]
+    pub jobs2: Jobs2Cfg,
+}
+
+/// Jobs & lives `[jobs2]` (docs/JOBS_AND_LIVES.md §§ 1-2): the master
+/// switch in flight and phase 1's keys (the industries, the civic three,
+/// the Hq). Every number is a placeholder. Off (the default when the table
+/// is absent), no new kind seeds, no new trade row posts, no new flow books.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Jobs2Cfg {
+    pub enabled: bool,
+    /// § 2: Markets cut their synth shelf from Rations stock (off: it moves
+    /// the diet rates and parity; no code reads it before the gate).
+    pub rations_to_markets: bool,
+    /// § 1: the appended goods' stock cap at a building (at least the
+    /// kind's `stock_cap`).
+    pub goods_cap: u32,
+    // --- Packing (§ 2).
+    /// Food units a Packer packs an on-duty hour (× 0.5 + her farming skill).
+    pub pack_rate: f32,
+    /// Rations made per Food unit packed.
+    pub pack_ratio: f32,
+    /// The World's Rations bid is this × its Food bid (`world_market::bid_ref`).
+    pub packed_premium: f32,
+    /// Rations a plant keeps back at the midnight sale.
+    pub rations_floor: u32,
+    /// A Food corp's Grow builds a Packing Plant while the World's Food
+    /// fill is above this ...
+    pub pack_fill: f32,
+    /// ... and it owns fewer plants than its Farms ÷ this.
+    pub farms_per_plant: u32,
+    // --- Freight (§ 2).
+    /// Coins a unit sold to the World pays the nearest Freight Yard.
+    pub handling_per_unit: f32,
+    /// Of an import's coins, to the nearest Freight Yard (an import names
+    /// no units; JOBS_V2 J23's rate on value).
+    pub handling_rate: f32,
+    /// Coins a unit of a cross-owner Farm -> Market haul pays the Yard (the Drivers).
+    pub haul_per_unit: f32,
+    /// A Yard with no Loader on the last night shift passes the fee to the
+    /// World (the leak JOBS_V2 named) instead of taking it.
+    pub loader_gate: bool,
+    /// Per Loader shift: a Ration walks out with the Loader (`Pilfered`).
+    pub p_pilfer: f32,
+    // --- Power (§ 2).
+    /// Of the power a Utility Plant takes, to the World (its fuel).
+    pub fuel_share: f32,
+    /// Hours with no Plant Operator on shift before its districts go dark.
+    pub outage_hours: u8,
+    // --- Construction (§ 2).
+    /// Days a build stands closed with the Yard's full crew.
+    pub crew_days: f32,
+    /// The slowest build: `crew_days` × this (a Yard with no Builders).
+    pub crew_slow_max: f32,
+    /// A Builder's round visits the Yard's sites within this many tiles
+    /// (Manhattan, door to door); a farther site is built from the Yard.
+    pub site_reach: u32,
+    // --- The civic three (§ 2), after police and Sanitation.
+    /// One Jailer per this many held.
+    pub held_per_jailer: u32,
+    pub clerks_max: u16,
+    pub depot_hands_max: u16,
+    /// A Jailer short (fewer than the held need) multiplies a breach's odds.
+    pub jailer_short_mult: f32,
+    // --- Seeding (row indices into `[corps] names`, never names).
+    /// One Packing Plant per copy of each row.
+    pub packing_rows: Vec<usize>,
+    pub freight_rows: Vec<usize>,
+    pub utility_rows: Vec<usize>,
+    pub construction_rows: Vec<usize>,
+    /// An Hq per copy of each megacorp row (`[corps] megacorp`) at seed.
+    pub hq_megacorps: bool,
+    // --- The Hq (§ 2).
+    /// A local corp owning this many standing buildings builds an Hq.
+    pub hq_min_buildings: usize,
+    /// ... keeping this much of its treasury after the build.
+    pub hq_reserve: i64,
+    /// JOBS_V2 J30: an Hq's office costs at most this share of its corp's
+    /// 7-day mean revenue a day (the overhead rows' places, `industry::hq_places`).
+    pub admin_share: f32,
+}
+
+impl Default for Jobs2Cfg {
+    fn default() -> Self {
+        Jobs2Cfg {
+            enabled: false,
+            rations_to_markets: false,
+            goods_cap: 300,
+            pack_rate: 4.0,
+            pack_ratio: 1.0,
+            packed_premium: 1.4,
+            rations_floor: 0,
+            pack_fill: 0.9,
+            farms_per_plant: 6,
+            handling_per_unit: 0.25,
+            handling_rate: 0.08,
+            haul_per_unit: 0.25,
+            loader_gate: true,
+            p_pilfer: 0.02,
+            fuel_share: 0.4,
+            outage_hours: 6,
+            crew_days: 3.0,
+            crew_slow_max: 4.0,
+            site_reach: 48,
+            held_per_jailer: 25,
+            clerks_max: 8,
+            depot_hands_max: 6,
+            jailer_short_mult: 1.5,
+            packing_rows: Vec::new(),
+            freight_rows: Vec::new(),
+            utility_rows: Vec::new(),
+            construction_rows: Vec::new(),
+            hq_megacorps: false,
+            hq_min_buildings: 6,
+            hq_reserve: 2000,
+            admin_share: 0.05,
+        }
+    }
 }
 
 /// M17 `[outside]`: the switch in flight (`CITYSIM_OUTSIDE_OFF=1` turns it
@@ -1105,6 +1226,10 @@ pub struct TradeCfg {
     /// J14 (a `round` duty): the doors a shift's round visits.
     #[serde(default)]
     pub round_stops: u8,
+    /// Jobs & lives phase 1 (§ 1): the row exists only with `[jobs2]
+    /// enabled` (`classpay::trade_live`); off, it posts nothing anywhere.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub jobs2: bool,
 }
 
 /// J14: how a trade works its shift.
@@ -1116,7 +1241,17 @@ pub enum TradeDuty {
     Post,
     /// The Super's round: `round_stops` of the employer's Blocks in the
     /// post's district, door to door (`trades::round_plan`), then the post.
+    /// Jobs & lives phase 1: a Builder's round walks his Yard's open sites.
     Round,
+    // --- Jobs & lives (§ 1): appended, worked from phase 2 (the street).
+    /// Wait at a rank, carry a rider (cabs, rickshaws).
+    Fare,
+    /// The dawn pick at the labour corner.
+    Corner,
+    /// Preach at a spot (preachers).
+    Preach,
+    /// Sell at a Pitch (vendors).
+    Sell,
 }
 
 /// J9: the `trades` field's reader: the rows, checked (unique keys, at most
@@ -1240,74 +1375,179 @@ pub struct BuildingCfg {
     /// an agent-owned Bar posts a vacancy below it). 0 = no rule.
     #[serde(default)]
     pub staff: u32,
+    // --- Jobs & lives phase 1 (D4): the `KindCfg` columns. Each is
+    // optional: an absent key keeps the kind's built-in value (the M11-M17
+    // constants), so an older config reads as before.
+    /// What founding or building the kind costs (the new kinds; the older
+    /// kinds keep `[corps] found_cost`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub found_cost: Option<i64>,
+    /// What a building of the kind sells for (the new kinds; the older
+    /// kinds keep `[corps] value`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<i64>,
+    /// Floors at seed (the new kinds; a map building's own count otherwise).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floors_seed: Option<u8>,
+    /// The most floors the kind may have, ahead of `[floors] floors_max`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub floors_max: Option<u8>,
+    /// The corp niche the kind sits in (`corp_brain::niche_of_kind`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub niche: Option<crate::components::Niche>,
+    /// An agent may found it: the tie-break rank (1 first), 0 never
+    /// (`founding::foundable`, which was the `FOUNDABLE` list).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foundable: Option<u8>,
 }
 
+/// Jobs & lives phase 1 (D4): a kind's row of the `[buildings.<kind>]`
+/// table, read through [`BuildingsCfg::for_kind`] and the `KindCfg`
+/// readers ([`Config::kind_niche`], [`Config::kind_foundable`]).
+pub type KindCfg = BuildingCfg;
+
 impl BuildingCfg {
+    /// The `KindCfg` columns absent (the struct-update base of the
+    /// constructors below).
+    pub const BASE: BuildingCfg = BuildingCfg {
+        capacity: 0,
+        stock_cap: 0,
+        staff: 0,
+        found_cost: None,
+        value: None,
+        floors_seed: None,
+        floors_max: None,
+        niche: None,
+        foundable: None,
+    };
+
+    /// Jobs & lives phase 1 (§ 2): the industries and the Hq.
+    pub fn packing_plant() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 20,
+            stock_cap: 300,
+            staff: 0,
+            found_cost: Some(900),
+            value: Some(900),
+            floors_seed: Some(2),
+            floors_max: Some(4),
+            ..BuildingCfg::BASE
+        }
+    }
+    pub fn freight_yard() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 24,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(800),
+            value: Some(800),
+            floors_seed: Some(1),
+            floors_max: Some(1),
+            ..BuildingCfg::BASE
+        }
+    }
+    pub fn utility_plant() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 14,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(1000),
+            value: Some(1000),
+            floors_seed: Some(2),
+            floors_max: Some(2),
+            ..BuildingCfg::BASE
+        }
+    }
+    pub fn construction_yard() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 14,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(700),
+            value: Some(700),
+            floors_seed: Some(1),
+            floors_max: Some(1),
+            ..BuildingCfg::BASE
+        }
+    }
+    pub fn hq() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 30,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(1500),
+            value: Some(1500),
+            floors_seed: Some(3),
+            floors_max: Some(8),
+            ..BuildingCfg::BASE
+        }
+    }
+
     /// No room, no stock: the M10 kinds that do nothing until M11.
     pub fn inert() -> BuildingCfg {
-        BuildingCfg { capacity: 0, stock_cap: 0, staff: 0 }
+        BuildingCfg { capacity: 0, stock_cap: 0, staff: 0, ..BuildingCfg::BASE }
     }
 
     /// M12 D20: a Hotel holds its guests (capacity is capped by `[street]
     /// hotel_beds` and the interior when built).
     pub fn hotel() -> BuildingCfg {
-        BuildingCfg { capacity: 12, stock_cap: 0, staff: 0 }
+        BuildingCfg { capacity: 12, stock_cap: 0, staff: 0, ..BuildingCfg::BASE }
     }
 
     /// M14 (plan V16): a Lab of four Researchers.
     pub fn lab() -> BuildingCfg {
-        BuildingCfg { capacity: 8, stock_cap: 0, staff: 4 }
+        BuildingCfg { capacity: 8, stock_cap: 0, staff: 4, ..BuildingCfg::BASE }
     }
 
     /// M15 W36: a Feed of one Reporter (phase 4: `assets/config.toml`).
     pub fn feed() -> BuildingCfg {
-        BuildingCfg { capacity: 6, stock_cap: 0, staff: 1 }
+        BuildingCfg { capacity: 6, stock_cap: 0, staff: 1, ..BuildingCfg::BASE }
     }
 
     /// L2 § 1 (spec values; `[buildings.club]` … in `assets/config.toml`).
     pub fn club() -> BuildingCfg {
-        BuildingCfg { capacity: 40, stock_cap: 0, staff: 10 }
+        BuildingCfg { capacity: 40, stock_cap: 0, staff: 10, ..BuildingCfg::BASE }
     }
     pub fn arcade() -> BuildingCfg {
-        BuildingCfg { capacity: 16, stock_cap: 0, staff: 3 }
+        BuildingCfg { capacity: 16, stock_cap: 0, staff: 3, ..BuildingCfg::BASE }
     }
     pub fn noodle_bar() -> BuildingCfg {
-        BuildingCfg { capacity: 10, stock_cap: 60, staff: 3 }
+        BuildingCfg { capacity: 10, stock_cap: 60, staff: 3, ..BuildingCfg::BASE }
     }
     pub fn fight_pit() -> BuildingCfg {
-        BuildingCfg { capacity: 40, stock_cap: 0, staff: 4 }
+        BuildingCfg { capacity: 40, stock_cap: 0, staff: 4, ..BuildingCfg::BASE }
     }
     pub fn den() -> BuildingCfg {
-        BuildingCfg { capacity: 20, stock_cap: 0, staff: 4 }
+        BuildingCfg { capacity: 20, stock_cap: 0, staff: 4, ..BuildingCfg::BASE }
     }
     pub fn lounge() -> BuildingCfg {
-        BuildingCfg { capacity: 16, stock_cap: 0, staff: 6 }
+        BuildingCfg { capacity: 16, stock_cap: 0, staff: 6, ..BuildingCfg::BASE }
     }
     pub fn fab() -> BuildingCfg {
-        BuildingCfg { capacity: 14, stock_cap: 400, staff: 12 }
+        BuildingCfg { capacity: 14, stock_cap: 400, staff: 12, ..BuildingCfg::BASE }
     }
 
     /// M16a (spec § 2): a Fixer's office of one Fixer.
     pub fn fixer() -> BuildingCfg {
-        BuildingCfg { capacity: 8, stock_cap: 0, staff: 1 }
+        BuildingCfg { capacity: 8, stock_cap: 0, staff: 1, ..BuildingCfg::BASE }
     }
 
     /// Real economy E26: a Mission's kitchen (12 cots, 60 meals of stock,
     /// two Volunteers).
     pub fn mission() -> BuildingCfg {
-        BuildingCfg { capacity: 12, stock_cap: 60, staff: 2 }
+        BuildingCfg { capacity: 12, stock_cap: 60, staff: 2, ..BuildingCfg::BASE }
     }
 
     /// Real economy E37: a work camp (no staff role: the children run the
     /// shift and the owner is the employer of record).
     pub fn camp() -> BuildingCfg {
-        BuildingCfg { capacity: 40, stock_cap: 120, staff: 0 }
+        BuildingCfg { capacity: 40, stock_cap: 120, staff: 0, ..BuildingCfg::BASE }
     }
 
     /// M16b phase 2 (spec § 4): a private prison (plan deviation: no staff
     /// role; its guards are its corp's posted ones).
     pub fn prison() -> BuildingCfg {
-        BuildingCfg { capacity: 20, stock_cap: 100, staff: 0 }
+        BuildingCfg { capacity: 20, stock_cap: 100, staff: 0, ..BuildingCfg::BASE }
     }
 }
 
@@ -1370,6 +1610,17 @@ pub struct BuildingsCfg {
     /// M16b phase 2: a corp's private prison.
     #[serde(default = "BuildingCfg::prison")]
     pub prison: BuildingCfg,
+    /// Jobs & lives phase 1 (§ 2): none stands with `[jobs2]` off.
+    #[serde(default = "BuildingCfg::packing_plant")]
+    pub packing_plant: BuildingCfg,
+    #[serde(default = "BuildingCfg::freight_yard")]
+    pub freight_yard: BuildingCfg,
+    #[serde(default = "BuildingCfg::utility_plant")]
+    pub utility_plant: BuildingCfg,
+    #[serde(default = "BuildingCfg::construction_yard")]
+    pub construction_yard: BuildingCfg,
+    #[serde(default = "BuildingCfg::hq")]
+    pub hq: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -1402,6 +1653,11 @@ impl BuildingsCfg {
             BuildingKind::Mission => &self.mission,
             BuildingKind::Camp => &self.camp,
             BuildingKind::Prison => &self.prison,
+            BuildingKind::PackingPlant => &self.packing_plant,
+            BuildingKind::FreightYard => &self.freight_yard,
+            BuildingKind::UtilityPlant => &self.utility_plant,
+            BuildingKind::ConstructionYard => &self.construction_yard,
+            BuildingKind::Hq => &self.hq,
         }
     }
 }
@@ -4520,7 +4776,8 @@ impl FocusByNiche {
             Niche::Food => &self.food,
             Niche::Housing => &self.housing,
             Niche::Security => &self.security,
-            Niche::Tech => &self.tech,
+            // Jobs & lives: a Vice corp (phase 4) researches as Tech for now.
+            Niche::Tech | Niche::Vice => &self.tech,
         };
         crate::virt::Track::parse(s).unwrap_or(crate::virt::Track::Industry)
     }
@@ -5157,6 +5414,11 @@ pub struct CompetenceCfg {
     /// false: the plan's `skill ÷ city mean` (W28; the median corp near 0.85
     /// of `comp_ref`, the exec term being a heavy-tailed skill).
     pub rank_norm: bool,
+    /// Jobs & lives phase 1 (§ 2, the Hq): the admin term's weight in a
+    /// corp's competence (`[jobs2] enabled` only) ...
+    pub admin_w: f32,
+    /// ... and `admin = clamp(Σ office staff skill ÷ admin_ref, 0, 1)`.
+    pub admin_ref: f32,
 }
 
 impl Default for CompetenceCfg {
@@ -5172,6 +5434,8 @@ impl Default for CompetenceCfg {
             poach_gap: 0.2,
             poach_premium: 1.3,
             rank_norm: true,
+            admin_w: 0.1,
+            admin_ref: 10.0,
         }
     }
 }
@@ -6101,6 +6365,10 @@ impl Config {
         if std::env::var("CITYSIM_OUTSIDE_OFF").is_ok_and(|v| v == "1") {
             cfg.outside.enabled = false;
         }
+        // Jobs & lives (§ 1): the master switch's A/B and identity device.
+        if std::env::var("CITYSIM_JOBS2_OFF").is_ok_and(|v| v == "1") {
+            cfg.jobs2.enabled = false;
+        }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)
         // overrides `[transit] enabled` for A/B runs.
@@ -6124,6 +6392,59 @@ impl Config {
     /// J9: a trade's `[[trades]]` row.
     pub fn trade(&self, t: crate::components::TradeId) -> Option<&TradeCfg> {
         self.trades.get(t.index())
+    }
+
+    /// Jobs & lives phase 1 (D4): the niche a kind sits in: its
+    /// `[buildings.<kind>] niche`, else the built-in M11-L2 table (Food:
+    /// Farm, Market, Bar, NoodleBar; Housing: Home; Security: the Security
+    /// Office; Tech: Clinic, Garage, Fab). The new kinds sit in none.
+    pub fn kind_niche(&self, kind: BuildingKind) -> Option<crate::components::Niche> {
+        use crate::components::Niche;
+        if let Some(n) = self.buildings.for_kind(kind).niche {
+            return Some(n);
+        }
+        match kind {
+            BuildingKind::Farm | BuildingKind::Market | BuildingKind::Bar | BuildingKind::NoodleBar => {
+                Some(Niche::Food)
+            }
+            BuildingKind::Home => Some(Niche::Housing),
+            BuildingKind::SecurityOffice => Some(Niche::Security),
+            BuildingKind::Clinic | BuildingKind::Garage | BuildingKind::Fab => Some(Niche::Tech),
+            _ => None,
+        }
+    }
+
+    /// Jobs & lives phase 1 (D4): a kind's founding rank (1 first; 0 an
+    /// agent never founds it): its `[buildings.<kind>] foundable`, else the
+    /// built-in order of M11's `FOUNDABLE` list (tie -> Bar, then Home, the
+    /// Hotel, ...).
+    pub fn kind_foundable(&self, kind: BuildingKind) -> u8 {
+        if let Some(r) = self.buildings.for_kind(kind).foundable {
+            return r;
+        }
+        match kind {
+            BuildingKind::Bar => 1,
+            BuildingKind::Home => 2,
+            BuildingKind::Hotel => 3,
+            BuildingKind::Clinic => 4,
+            BuildingKind::Garage => 5,
+            BuildingKind::Feed => 6,
+            BuildingKind::Club => 7,
+            BuildingKind::Arcade => 8,
+            BuildingKind::NoodleBar => 9,
+            BuildingKind::FightPit => 10,
+            BuildingKind::Den => 11,
+            BuildingKind::Lounge => 12,
+            BuildingKind::Fixer => 13,
+            BuildingKind::Mission => 14,
+            _ => 0,
+        }
+    }
+
+    /// Jobs & lives phase 1 (D4): the most floors `kind` may have: its
+    /// `[buildings.<kind>] floors_max`, else `[floors] floors_max`.
+    pub fn floors_max(&self, kind: BuildingKind) -> u8 {
+        self.buildings.for_kind(kind).floors_max.map_or_else(|| self.floors.max_for(kind), |v| v.max(1))
     }
 
     /// J9: the configured trades as roles, in row order.
@@ -6483,6 +6804,14 @@ impl Config {
         wm.food.cap = up_u32(wm.food.cap);
         wm.parts.cap = up_u32(wm.parts.cap);
         wm.data.cap = up_u32(wm.data.cap);
+        // Jobs & lives phase 1 (R2): the appended books per capita, as Data's.
+        wm.rations.cap = up_u32(wm.rations.cap);
+        wm.braindance.cap = up_u32(wm.braindance.cap);
+        wm.organs.cap = up_u32(wm.organs.cap);
+        // The civic three's caps per capita (police and Sanitation's own above).
+        let j2 = &mut self.jobs2;
+        j2.clerks_max = (f64::from(j2.clerks_max) * up).round().clamp(0.0, 65535.0) as u16;
+        j2.depot_hands_max = (f64::from(j2.depot_hands_max) * up).round().clamp(0.0, 65535.0) as u16;
         for c in &mut wm.cap_wages {
             *c = up_u32(*c);
         }
@@ -7264,6 +7593,9 @@ impl LabourShareCfg {
             Niche::Housing => self.housing,
             Niche::Security => self.security,
             Niche::Tech => self.tech,
+            // Jobs & lives: the Vice venues (phase 4) pay as the Food trade's
+            // counters until they have their own share.
+            Niche::Vice => self.food,
         }
     }
 }
@@ -7488,6 +7820,13 @@ pub struct WorldMarketCfg {
     /// World's daily cap per good `[food, parts, data]` in a wages city
     /// (0: the good's own `cap`).
     pub cap_wages: [u32; 3],
+    /// Jobs & lives phase 1 (D6, risk R2): the appended goods' books, read
+    /// only with `[jobs2] enabled`, each capped per capita (`scaled_to`).
+    /// The Rations bid is `[jobs2] packed_premium` × Food's; BD and Organs
+    /// stay inert until their phases (5, 6).
+    pub rations: GoodCfg,
+    pub braindance: GoodCfg,
+    pub organs: GoodCfg,
 }
 
 impl Default for WorldMarketCfg {
@@ -7513,6 +7852,9 @@ impl Default for WorldMarketCfg {
             ask_mult: 1.0,
             asset_floor: 2,
             cap_wages: [0; 3],
+            rations: GoodCfg { bid_ref: 4.8, bid_floor: 2.0, cap: 150, slope: 0.5, spread: 0.6, season: [0.0; 4] },
+            braindance: GoodCfg { bid_ref: 12.0, bid_floor: 5.0, cap: 20, slope: 0.5, spread: 0.6, season: [0.0; 4] },
+            organs: GoodCfg { bid_ref: 40.0, bid_floor: 20.0, cap: 6, slope: 0.5, spread: 0.8, season: [0.0; 4] },
         }
     }
 }
@@ -7524,6 +7866,9 @@ impl WorldMarketCfg {
             crate::outside::ExportGood::Food => &self.food,
             crate::outside::ExportGood::Parts => &self.parts,
             crate::outside::ExportGood::Data => &self.data,
+            crate::outside::ExportGood::Rations => &self.rations,
+            crate::outside::ExportGood::Braindance => &self.braindance,
+            crate::outside::ExportGood::Organs => &self.organs,
         }
     }
 }
@@ -7678,7 +8023,9 @@ impl Default for FloorsCfg {
 }
 
 impl FloorsCfg {
-    /// J8: the most floors a `kind` may have (1 when not listed).
+    /// J8: the most floors a `kind` may have (1 when not listed). Jobs &
+    /// lives phase 1: a `[buildings.<kind>] floors_max` comes first
+    /// ([`Config::floors_max`]).
     pub fn max_for(&self, kind: BuildingKind) -> u8 {
         self.floors_max.iter().find(|(k, _)| BuildingKind::parse(k) == Some(kind)).map_or(1, |(_, &v)| v.max(1))
     }

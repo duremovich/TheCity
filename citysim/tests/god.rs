@@ -2259,7 +2259,12 @@ fn god_line_cut() {
         for ride in w.rides.values().filter(|r| r.line == 0) {
             match day {
                 10..CUT => {}
-                d if (CUT..CUT + u64::from(DAYS)).contains(&d) => on_cut += 1,
+                // Jobs & lives phase 1 (a butterfly found it): a ride that
+                // departed before the cut is still aboard at the first
+                // sample (seed 42 with the industries on: departed 28,790,
+                // cut at 28,800, arrived 28,878); only a boarding after the
+                // cut is a ride on the cut line.
+                d if (CUT..CUT + u64::from(DAYS)).contains(&d) && ride.depart >= CUT * TICKS_PER_DAY => on_cut += 1,
                 d if d >= CUT + u64::from(DAYS) => after += 1,
                 _ => {}
             }

@@ -35,7 +35,12 @@ python tools/compare_runs.py a.csv b.csv
   venues and visits by kind, HangOut contacts, fronts, the Parts chain, the faction-violence totals
   and the off-screen share of killings, kill rates by tier, the tiers with the held prisoners and the
   aborts by cause; flags for the spec's printed bands and `fv_bound_wrong`. The events file is
-  optional: `analyze_run.py run.csv` skips the event-based parts.
+  optional: `analyze_run.py run.csv` skips the event-based parts. Jobs & lives (docs/JOBS_AND_LIVES.md § 12) adds
+  a "Jobs & lives" section (skipped without the `[jobs2]` columns): the employed share from day 30 (J24) and the
+  homeless share (J25), each new flow's daily mean (handling, its leak to the World, power, the plants' fuel,
+  builds, the Rations book's pay-out), the Rations share of all export pay and the run's World inbound, units
+  (food packed, Rations made and sold, pilfered, builds, outages), jobs by `TradeModel` and by new kind on day 60
+  and the last day, the civic three, the Hqs and, with events, the outages, builds, pilfers and foreman lines.
 - `compare_runs.py`: per-column means of two reports with the relative difference, for A/B
   comparisons across seeds or commits.
 - `train_stat_policy.py` (numpy; the learned-policy experiment, `docs/EXPERIMENT_LEARNED_STAT_POLICY.md`):

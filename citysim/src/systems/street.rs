@@ -784,7 +784,7 @@ pub fn grow_hotels(world: &mut World) {
             bd.capacity = new_capacity;
         }
         let paid = if owner.is_some() && cost > 0 {
-            crate::systems::ownership::pay(world, owner, None, cost, crate::systems::ownership::Flow::Found)
+            crate::systems::industry::pay_build(world, owner, cost, Some(h), false)
         } else {
             crate::systems::life::pay_housing(world, None, cost)
         };

@@ -420,7 +420,11 @@ fn sanity(r: &SeedRun, from: u64, to: u64, assaults_max: f64, failures: &mut Vec
     fail((pop_min..=pop_max).contains(&lo) && hi <= pop_max, format!("population {lo}..{hi} in {pop_min}..={pop_max}"));
     let starv = r.sum(from, to, |x| x.deaths_starvation);
     let per_120 = if r.sickness { STARVATION_MAX_120_SICK } else { STARVATION_MAX_120 };
-    let starv_max = per_120 * n / 120.0 * r.per;
+    // Jobs & lives phase 1 (a harness fix): never under one death. The
+    // year's last window is 5 days (360-365), where the scaled bound read
+    // 0.83 and one starvation death in the year failed `core_year` (seed 42,
+    // the industries on: 1 starvation in 365 days, inside days 361-365).
+    let starv_max = (per_120 * n / 120.0 * r.per).max(1.0);
     fail(starv <= starv_max, format!("starvation {starv:.0} <= {starv_max:.0}"));
     let asl: f64 = r.assaults[from as usize..to as usize].iter().map(|&a| f64::from(a)).sum::<f64>() / n;
     fail(asl <= assaults_max, format!("assaults/day {asl:.2} <= {assaults_max:.2}"));

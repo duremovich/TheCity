@@ -129,7 +129,16 @@ use crate::world::World;
 /// `PlayerCommand::{PostAbroad, BlackwallBreach, SetStateGuards, FoundParent}`.
 /// 27: the M17 review: `Sanction.crew`, `Parent.founded` (serde defaults)
 /// and the appended `DeathCause::Abroad`.
-pub const SAVE_VERSION: u8 = 27;
+/// 28: Jobs & lives phase 1 (docs/JOBS_AND_LIVES.md §§ 1-2): the appended
+/// `BuildingKind::{PackingPlant, FreightYard, UtilityPlant,
+/// ConstructionYard, Hq}`, `Good::{Rations, Braindance, Organs}` and their
+/// `ExportGood`s, `Niche::Vice`, `TradeDuty::{Fare, Corner, Preach, Sell}`,
+/// four events; `Building.{under_construction_until, stock_x}`,
+/// `District.dark`, `Job.until`, `Corp.office`, `World::jobs2`,
+/// `DayRow.jobs2`, `[jobs2]`, the `KindCfg` columns of `[buildings.*]`, the
+/// trade rows' `jobs2` flag and `[competence] admin_w`/`admin_ref` (serde
+/// defaults).
+pub const SAVE_VERSION: u8 = 28;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

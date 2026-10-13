@@ -396,10 +396,19 @@ pub enum EventKind {
     AbroadResolved,
     CastArrived,
     BlackwallBreach,
+    // --- Jobs & lives phase 1 (docs/JOBS_AND_LIVES.md § 2).
+    /// A Utility Plant's districts went dark (no operator for `outage_hours`).
+    PowerOut,
+    /// ... and the lights came back.
+    PowerBack,
+    /// A build paid to a Construction Yard stands (its site opens).
+    BuildDone,
+    /// A Loader walked out with a Ration.
+    Pilfered,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 201] = [
+    pub const ALL: [EventKind; 205] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -601,6 +610,10 @@ impl EventKind {
         EventKind::AbroadResolved,
         EventKind::CastArrived,
         EventKind::BlackwallBreach,
+        EventKind::PowerOut,
+        EventKind::PowerBack,
+        EventKind::BuildDone,
+        EventKind::Pilfered,
     ];
 }
 

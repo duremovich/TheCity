@@ -287,6 +287,7 @@ def analyze(rows, events, jail_cap=None):
     health(rows, events, out, flags)
     transit(rows, out)
     outside(rows, out)
+    jobs2(rows, events, out)
     out["flags"] = flags
     return out
 
@@ -902,6 +903,53 @@ def outside(rows, out):
     out["outside"] = O
 
 
+JOBS2_FLOWS = ("flow_handling", "handling_leak", "flow_power", "power_fuel", "flow_build", "rations_paid")
+JOBS2_UNITS = ("food_packed", "rations_made", "rations_sold", "pilfered", "builds_started", "builds_done", "outages")
+JOBS2_MODELS = ("emp_produce", "emp_service", "emp_handling", "emp_contract", "emp_civic", "emp_overhead",
+                "emp_resale", "emp_day")
+JOBS2_KINDS = ("emp_packing", "emp_freight", "emp_utility", "emp_construction", "emp_hq")
+JOBS2_SNAP = ("n_packing", "n_freight", "n_utility", "n_construction", "hqs", "jailers", "clerks", "depot_hands",
+              "civic3_target", "office_workers", "sites_open", "dark_districts")
+
+
+def jobs2(rows, events, out):
+    """Jobs & lives (docs/JOBS_AND_LIVES.md § 12's printed bands, phase 1): the employed share (J24) and the
+    homeless share (J25), each new flow's daily mean, the Rations mint against the run's net World crossing, the
+    builds, outages, the civic three and the Hq, and jobs by TradeModel and by new kind (day 60 and the last day).
+    Skipped without the `[jobs2]` group. Numbers only, never flags."""
+    if not rows or "flow_handling" not in rows[0]:
+        return
+    days = len(rows)
+    J = {"days": days}
+    J["flows_daily_mean"] = {k: mean(col(rows, k)) for k in JOBS2_FLOWS}
+    J["units_total"] = {k: sum(col(rows, k)) for k in JOBS2_UNITS}
+    pick = lambda r, ks: {k: num(r.get(k, 0)) for k in ks}
+    d60 = rows[min(60, days) - 1]
+    J["models_d60"], J["models_last"] = pick(d60, JOBS2_MODELS), pick(rows[-1], JOBS2_MODELS)
+    J["kinds_d60"], J["kinds_last"] = pick(d60, JOBS2_KINDS), pick(rows[-1], JOBS2_KINDS)
+    J["snap_last"] = pick(rows[-1], JOBS2_SNAP)
+    J["dark_days"] = sum(1 for r in rows if num(r.get("dark_districts", 0)) > 0)
+    adults = [num(r.get("class_corp", 0)) + num(r.get("class_street", 0)) + num(r.get("class_dreg", 0)) for r in rows]
+    emp = col(rows, "employed")
+    hl = col(rows, "homeless")
+    from30 = range(min(30, days - 1), days)
+    J["employed_share_from30"] = mean([emp[i] / adults[i] for i in from30 if adults[i]])
+    J["homeless_share_from30"] = mean([hl[i] / adults[i] for i in from30 if adults[i]])
+    if "wallets" in rows[0]:
+        coins = [num(r.get("wallets", 0)) + num(r.get("treasury", 0)) for r in rows]
+        J["wallets_treasury_growth"] = (coins[-1] - coins[0]) / coins[0] if coins[0] else 0
+    if "outside_inbound" in rows[0]:
+        J["world_net_crossing"] = num(rows[-1].get("outside_inbound", 0)) - num(rows[0].get("outside_inbound", 0))
+    J["rations_mint_share"] = sum(col(rows, "rations_paid")) / max(1, sum(col(rows, "export_paid"))) \
+        if "export_paid" in rows[0] else 0
+    if events:
+        kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered")
+        J["events"] = {k: sum(1 for _, kind, _ in events if kind == k) for k in kinds}
+        J["foreman_named"] = sum(1 for _, kind, t in events if kind in ("Hire", "LaidOff") and "the foreman" in t)
+        J["hq_built"] = sum(1 for _, kind, t in events if kind == "Founded" and " built its Corp HQ" in t)
+    out["jobs2"] = J
+
+
 def fmt(o):
     f = lambda d: ", ".join(f"{k}={v:.4g}" if isinstance(v, float) else f"{k}={v}" for k, v in d.items())
     e = o["economy"]
@@ -1080,6 +1128,20 @@ def fmt(o):
                  f"running max {w['wars_active_max']:g}; away max {w['away_max']:g}")
         L.append("printed bands (docs/M17_OUTSIDE.md § 11, never asserted):")
         L += [f"  {k}: {v:.3g} (band {b})" for k, (v, b) in w["bands"].items()]
+    if "jobs2" in o:
+        w = o["jobs2"]
+        L.append("-- Jobs & lives (phase 1: industry, civic, the Hq) --")
+        L.append(f"employed share from day 30 (J24) {w['employed_share_from30']:.3f}; homeless share (J25) "
+                 f"{w['homeless_share_from30']:.3f}; wallets+Treasury growth {w.get('wallets_treasury_growth', 0):+.1%};"
+                 f" World inbound over the run {w.get('world_net_crossing', 0):g}; Rations / all export paid "
+                 f"{w['rations_mint_share']:.1%}")
+        L.append("flows, daily mean: " + f(w["flows_daily_mean"]))
+        L.append("units, run totals: " + f(w["units_total"]))
+        L.append("jobs by TradeModel, day 60: " + f(w["models_d60"]) + "; last: " + f(w["models_last"]))
+        L.append("jobs by new kind, day 60: " + f(w["kinds_d60"]) + "; last: " + f(w["kinds_last"]))
+        L.append("last day: " + f(w["snap_last"]) + f"; days with a dark district {w['dark_days']}")
+        if "events" in w:
+            L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")
     L += [f"  {x}" for x in o["flags"]] or ["  none"]
     return "\n".join(L)

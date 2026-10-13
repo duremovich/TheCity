@@ -325,7 +325,7 @@ pub fn lobby(world: &mut World, corp: EntityId) {
     }
     let Some((site, on_lot)) = site_for(world, d, true) else { return };
     let Some(b) = open_mission(world, site, on_lot, None) else { return };
-    let paid = ownership::pay(world, Some(corp), None, cost, Flow::Found);
+    let paid = crate::systems::industry::pay_build(world, Some(corp), cost, Some(b), true);
     let (who, at) = (world.owner_label(Some(corp)), world.district_name(world.district_of_building(b)).to_string());
     world.push_event(
         EventKind::Founded,

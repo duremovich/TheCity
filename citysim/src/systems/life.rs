@@ -689,7 +689,13 @@ pub(crate) fn pay_housing(world: &mut World, by: Option<EntityId>, cost: i64) ->
         return 0;
     }
     match by {
-        Some(c) => crate::systems::ownership::pay(world, Some(c), None, cost, crate::systems::ownership::Flow::Found),
+        // Jobs & lives phase 1 (§ 2): a Construction Yard's build when one
+        // stands (no site: the Block opens at once), else M11's path.
+        Some(c) => crate::systems::industry::pay_build(world, Some(c), cost, None, false),
+        // The Treasury hires the city's own Yard before it imports the build.
+        None if crate::systems::industry::yard_open(world) => {
+            crate::systems::industry::pay_build(world, None, cost, None, false)
+        }
         None => crate::systems::ownership::import(world, None, cost, crate::systems::ownership::ImportWhy::Build),
     }
 }

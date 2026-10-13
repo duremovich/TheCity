@@ -74,8 +74,11 @@ fn couple(w: &World) -> (EntityId, EntityId) {
 #[test]
 fn test_purchase_pays_seller_imports_and_conserves() {
     // M13 D30's import: with the World market it crosses out to the World,
-    // customs to the Treasury (`tests/econ.rs`); the identity holds.
-    let mut w = World::new(42, Config::load().dole_city());
+    // customs to the Treasury (`tests/econ.rs`); the identity holds. Jobs &
+    // lives phase 1: without a Freight Yard's handling (`tests/industry.rs`).
+    let mut c = Config::load().dole_city();
+    c.jobs2.enabled = false;
+    let mut w = World::new(42, c);
     // The plan's car and finance terms (phase 5 calibration moved them).
     w.config.assets.price.car = vec![800, 1400];
     w.config.assets.down_frac = 0.25;

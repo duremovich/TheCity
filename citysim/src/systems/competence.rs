@@ -134,7 +134,10 @@ pub fn corp_competence(world: &World, corp: EntityId) -> f32 {
     let staff = ownership::employees_of(world, corp);
     let e = exec_term(world, c.exec);
     let s = staff_term(world, &staff);
-    (cfg.comp_ref * (cfg.exec_w * e + (1.0 - cfg.exec_w) * s)).clamp(0.0, 1.0)
+    // Jobs & lives phase 1 (§ 2, the Hq): the office's admin term (0 with
+    // `[jobs2]` off or no Hq staffed).
+    let admin = crate::systems::industry::admin_term(world, corp);
+    (cfg.comp_ref * (cfg.exec_w * e + (1.0 - cfg.exec_w) * s) + admin).clamp(0.0, 1.0)
 }
 
 /// The Law's guards on the city payroll.

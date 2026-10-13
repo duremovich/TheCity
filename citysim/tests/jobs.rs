@@ -65,7 +65,11 @@ fn test_register_chooses_noodle_bar_at_120() {
 /// coins are conserved (the founder pays the Treasury).
 #[test]
 fn test_refit_turns_derelict_into_den_at_half_cost() {
-    let mut w = World::new(42, Config::load().dole_city());
+    // Jobs & lives phase 1: L2's refit paid to the Treasury as written (to a
+    // Construction Yard with `[jobs2]` on: `tests/industry.rs`).
+    let mut c = Config::load().dole_city();
+    c.jobs2.enabled = false;
+    let mut w = World::new(42, c);
     let d = citysim::systems::street::derelicts(&w)
         .into_iter()
         .find(|&b| {

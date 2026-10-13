@@ -11,7 +11,11 @@ use citysim::systems::{bind, econ, gang, world_market as wm};
 use citysim::{Building, BuildingKind, Config, Corp, Market, Wallet, World, TICKS_PER_DAY};
 
 fn city() -> World {
-    let w = World::new(42, Config::load().dole_city());
+    // Jobs & lives phase 1: the Real economy's books and crossings as
+    // written (the industries' books and fees are `tests/industry.rs`'s).
+    let mut c = Config::load().dole_city();
+    c.jobs2.enabled = false;
+    let w = World::new(42, c);
     assert!(wm::open(&w), "the market is on and open by the config");
     w
 }

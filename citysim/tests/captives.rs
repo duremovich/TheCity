@@ -29,6 +29,9 @@ use citysim::{
 fn world() -> World {
     let mut c = Config::load();
     c.outside.enabled = false;
+    // Jobs & lives phase 1: and without the industries (they take the Lots
+    // and the jobs that set this city's gangs and businesses).
+    c.jobs2.enabled = false;
     World::new(42, c)
 }
 

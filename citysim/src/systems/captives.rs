@@ -127,7 +127,7 @@ pub fn build_prison(world: &mut World, corp: EntityId) -> Option<EntityId> {
             d
         }
     };
-    ownership::pay(world, Some(corp), None, cost, Flow::Found);
+    crate::systems::industry::pay_build(world, Some(corp), cost, Some(lot), true);
     let text = format!("{} built a Private Prison ({})", world.owner_label(Some(corp)), world.name_of(lot));
     world.push_event(EventKind::Founded, &[corp, lot], text);
     Some(lot)

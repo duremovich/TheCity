@@ -8,7 +8,7 @@ use crate::components::{
 };
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::systems::ownership::{self, Flow};
+use crate::systems::ownership;
 use crate::world::World;
 
 /// The kinds an agent can found, in tie-break order (D25: tie -> Bar; M12
@@ -19,23 +19,15 @@ use crate::world::World;
 /// Fixer, priced only with `contracts::on` and chosen only by a founder
 /// who could run one, `fixer_ok`; the Real economy E26 the Mission, priced
 /// only with `charity::on` and chosen only by a lawful, humble founder,
-/// `charity::founder_ok`).
-const FOUNDABLE: [BuildingKind; 14] = [
-    BuildingKind::Bar,
-    BuildingKind::Home,
-    BuildingKind::Hotel,
-    BuildingKind::Clinic,
-    BuildingKind::Garage,
-    BuildingKind::Feed,
-    BuildingKind::Club,
-    BuildingKind::Arcade,
-    BuildingKind::NoodleBar,
-    BuildingKind::FightPit,
-    BuildingKind::Den,
-    BuildingKind::Lounge,
-    BuildingKind::Fixer,
-    BuildingKind::Mission,
-];
+/// `charity::founder_ok`). Jobs & lives phase 1 (D4): the `KindCfg`
+/// table's `foundable` rank (`Config::kind_foundable`) replaces the
+/// `FOUNDABLE` list; its built-in ranks are that list's order.
+pub fn foundable(world: &World) -> Vec<BuildingKind> {
+    let mut v: Vec<(u8, BuildingKind)> =
+        BuildingKind::ALL.into_iter().map(|k| (world.config.kind_foundable(k), k)).filter(|&(r, _)| r > 0).collect();
+    v.sort_unstable();
+    v.into_iter().map(|(_, k)| k).collect()
+}
 
 /// Vacant Lots (kind Lot, not demolished), ascending.
 pub fn vacant_lots(world: &World) -> Vec<EntityId> {
@@ -76,6 +68,11 @@ pub fn found_cost(world: &World, kind: BuildingKind) -> Option<i64> {
         // Real economy phase 2 (plan E19 deviation): a corp's Farm on the
         // World's demand, with wages on (`[economy2] farm_found_cost`).
         BuildingKind::Farm if crate::systems::wages::on(world) => Some(world.config.economy2.farm_found_cost),
+        // Jobs & lives phase 1 (D4): the new kinds price from their
+        // `[buildings.<kind>] found_cost`, with `[jobs2]` on.
+        k if BuildingKind::JOBS2.contains(&k) && crate::systems::industry::on(world) => {
+            world.config.buildings.for_kind(k).found_cost
+        }
         _ => None,
     }
 }
@@ -155,6 +152,12 @@ pub fn build_on_lot(
             | BuildingKind::Farm
             // M16b phase 2: a corp's Private Prison.
             | BuildingKind::Prison
+            // Jobs & lives phase 1 (§ 2): the industries and the Hq.
+            | BuildingKind::PackingPlant
+            | BuildingKind::FreightYard
+            | BuildingKind::UtilityPlant
+            | BuildingKind::ConstructionYard
+            | BuildingKind::Hq
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -332,7 +335,7 @@ pub fn add_floor(world: &mut World, b: EntityId, payer: Option<EntityId>) -> Res
         return Err(format!("{} is not a standing building", world.name_of(b)));
     }
     let (kind, floors, capacity) = (bd.kind, bd.floors.max(1), bd.capacity);
-    let max = world.config.floors.max_for(kind);
+    let max = world.config.floors_max(kind);
     if floors >= max {
         return Err(format!("{} already has {floors} floors (max {max})", world.name_of(b)));
     }
@@ -347,7 +350,11 @@ pub fn add_floor(world: &mut World, b: EntityId, payer: Option<EntityId>) -> Res
         bd.capacity = new_capacity;
         bd.floor_days = 0;
     }
-    let paid = if payer.is_some() && cost > 0 { ownership::pay(world, payer, None, cost, Flow::Found) } else { 0 };
+    let paid = if payer.is_some() && cost > 0 {
+        crate::systems::industry::pay_build(world, payer, cost, Some(b), false)
+    } else {
+        0
+    };
     let (who, what) = (world.owner_label(payer), world.name_of(b));
     let mut actors: Vec<EntityId> = payer.into_iter().collect();
     actors.push(b);
@@ -367,6 +374,8 @@ pub fn tier_ok(kind: BuildingKind, tier: u8) -> bool {
         BuildingKind::Club => tier >= 1,
         BuildingKind::FightPit => tier == 0,
         BuildingKind::Den | BuildingKind::NoodleBar => tier <= 1,
+        // Jobs & lives phase 1 (§ 2): the Hq stands in the Spire.
+        BuildingKind::Hq => tier == 2,
         _ => true,
     }
 }
@@ -456,7 +465,11 @@ pub fn refit_with(
         bd.empty_since = None;
     }
     convert(world, b, kind, owner, tier);
-    let paid = if owner.is_some() && price > 0 { ownership::pay(world, owner, None, price, Flow::Found) } else { 0 };
+    let paid = if owner.is_some() && price > 0 {
+        crate::systems::industry::pay_build(world, owner, price, Some(b), true)
+    } else {
+        0
+    };
     let (who, what) = (world.owner_label(owner), world.name_of(b));
     let mut actors: Vec<EntityId> = owner.into_iter().collect();
     actors.push(b);
@@ -548,7 +561,7 @@ pub fn choose_kind_full(
         }
     };
     let mut best: Option<(f32, BuildingKind)> = None;
-    for kind in FOUNDABLE {
+    for kind in foundable(world) {
         let Some(cost) = agent_found_cost(world, kind) else { continue };
         if coins < cost
             || (kind == BuildingKind::Lounge && !lounge_ok)
@@ -695,7 +708,7 @@ pub fn register(world: &mut World, agent: EntityId) -> Result<EntityId, String> 
     // Paid once the building stands (a failed build costs nothing), as a
     // corp's `Grow`.
     build_on_lot(world, lot, kind, Some(agent))?;
-    let paid = ownership::pay(world, Some(agent), None, cost, Flow::Found);
+    let paid = crate::systems::industry::pay_build(world, Some(agent), cost, Some(lot), true);
     debug_assert_eq!(paid, cost, "can_found checked the wallet");
     let today = world.day();
     if let Some(b) = world.comp_mut::<Brain>(agent) {
@@ -733,7 +746,9 @@ fn incorporate_owned(world: &mut World, agent: EntityId, owned: Vec<EntityId>) -
     }
     let niches: std::collections::BTreeSet<_> = owned
         .iter()
-        .filter_map(|&b| world.comp::<Building>(b).and_then(|bd| crate::systems::corp_brain::niche_of_kind(bd.kind)))
+        .filter_map(|&b| {
+            world.comp::<Building>(b).and_then(|bd| crate::systems::corp_brain::niche_of_kind(&world.config, bd.kind))
+        })
         .collect();
     if niches.is_empty() {
         return None;

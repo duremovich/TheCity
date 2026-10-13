@@ -520,6 +520,10 @@ pub fn ice_eff(world: &World, n: NodeId) -> u8 {
     if door_open {
         return 0;
     }
+    // Jobs & lives phase 1 (§ 2): ICE needs power; a dark district's is off.
+    if profile_building(world, n).is_some_and(|b| crate::systems::industry::dark_at(world, b)) {
+        return 0;
+    }
     match p.ice_maker {
         None => p.ice,
         Some(m) => p.ice.min(maker_tier(world, m, Track::Deck)),

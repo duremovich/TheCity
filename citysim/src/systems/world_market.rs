@@ -33,6 +33,18 @@ pub fn imports_open(world: &World) -> bool {
     !world.econ.world_closed
 }
 
+/// Jobs & lives phase 1 (D6): the books this world keeps: the three of
+/// the Real economy, and with `[jobs2]` on the appended Rations,
+/// Braindance and Organs (off, no new book is made, rolled or walked, so
+/// the off city is unchanged).
+pub fn goods(world: &World) -> &'static [ExportGood] {
+    if crate::systems::industry::on(world) {
+        &ExportGood::ALL_JOBS2
+    } else {
+        &ExportGood::ALL
+    }
+}
+
 pub fn book(world: &World, good: ExportGood) -> Option<&WorldBook> {
     world.outside.faction(WORLD_ACCOUNT).and_then(|f| f.books.get(&good))
 }
@@ -59,11 +71,13 @@ pub fn cap_today(world: &World, good: ExportGood) -> u32 {
     // The jobs round: the wages city's export demand (`[world_market] cap_wages`).
     if crate::systems::wages::on(world) {
         let i = match good {
-            ExportGood::Food => 0,
-            ExportGood::Parts => 1,
-            ExportGood::Data => 2,
+            ExportGood::Food => Some(0),
+            ExportGood::Parts => Some(1),
+            ExportGood::Data => Some(2),
+            // Jobs & lives: the appended books keep their own cap.
+            ExportGood::Rations | ExportGood::Braindance | ExportGood::Organs => None,
         };
-        let w = world.config.world_market.cap_wages[i];
+        let w = i.map_or(0, |i| world.config.world_market.cap_wages[i]);
         if w > 0 {
             cap = w;
         }
@@ -75,6 +89,11 @@ pub fn cap_today(world: &World, good: ExportGood) -> u32 {
 fn bid_ref(world: &World, good: ExportGood) -> f64 {
     match world.outside.export.price.get(&good) {
         Some(&p) => p as f64,
+        // Jobs & lives phase 1 (§ 2): packed Food fetches `packed_premium`
+        // × the Food bid (a god's Food pin moves it too).
+        None if good == ExportGood::Rations => {
+            f64::from(world.config.jobs2.packed_premium) * bid_ref(world, ExportGood::Food)
+        }
         None => f64::from(world.config.world_market.good(good).bid_ref),
     }
 }
@@ -183,6 +202,8 @@ pub fn sell(
     if owner.is_some() && tax > 0 {
         ownership::pay(world, owner, None, tax, Flow::Tax);
     }
+    // Jobs & lives phase 1 (§ 2): the units cross a Freight Yard.
+    crate::systems::industry::handle_export(world, building, owner, units);
     // Phase 2 (plan E16): an export is a corp's revenue, net of its tax.
     if crate::systems::wages::on(world) {
         if let Some(c) = owner.and_then(|o| world.comp_mut::<crate::components::Corp>(o)) {
@@ -318,11 +339,12 @@ pub fn seed(world: &mut World) {
 fn ensure(world: &mut World) {
     let treasury_ref = world.config.world_market.treasury_ref;
     crate::systems::outside::ensure_world_account(world, treasury_ref);
+    let goods = goods(world);
     let Some(f) = world.outside.faction_mut(WORLD_ACCOUNT) else { return };
     f.treasury_ref = treasury_ref;
     let refill = treasury_ref - f.treasury;
     f.treasury += refill;
-    for g in ExportGood::ALL {
+    for &g in goods {
         f.books.entry(g).or_default();
     }
     world.outside.minted += refill;
@@ -350,7 +372,7 @@ pub fn appetite_step(
 /// midnight imports (`economy::run`) run before `living::run` in the tick,
 /// and the day's snapshot must see the counters whole.
 pub fn close_day(world: &mut World) {
-    for g in ExportGood::ALL {
+    for &g in goods(world) {
         let cap = cap_today(world, g);
         let Some(b) = book(world, g) else { continue };
         let (n, paid) = (b.bought_today, b.paid_today);
@@ -376,7 +398,7 @@ pub fn daily(world: &mut World) {
     // 1. The day closed at 23:59 (`close_day`, from the stats roll: the
     // midnight imports in `economy::run` precede this pass in the tick).
     // 2. The appetite walk (E7): a pure hash per (day, good); the season is a level, not accumulated.
-    for g in ExportGood::ALL {
+    for &g in goods(world) {
         let z = econ::hash_normal(seed, PURPOSE_APPETITE, day, g as u64);
         let Some(b) = book_mut(world, g) else { continue };
         let old = b.appetite;

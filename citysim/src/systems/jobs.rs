@@ -39,6 +39,10 @@ pub fn full_staff(world: &World, kind: BuildingKind) -> usize {
 /// (`trades::owned_places`).
 pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
     let Some((kind, floors)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.floors.max(1))) else { return 0 };
+    // Jobs & lives phase 1 (§ 2): a closed build site has no places yet.
+    if crate::systems::industry::closed_site(world, b) {
+        return 0;
+    }
     if let Role::Trade(t) = role {
         let Some(row) = world.config.trade(t).filter(|r| r.workplace.contains(&kind)) else { return 0 };
         // Class pay: a `classpay` row only with class pay on; a
@@ -48,6 +52,15 @@ pub fn places_of(world: &World, b: EntityId, role: Role) -> usize {
         }
         if row.per_owned > 0 {
             return crate::systems::trades::owned_places(world, b, row);
+        }
+        // Jobs & lives phase 1 (§ 2): a civic trade's places are the
+        // Treasury's allocation for its kind.
+        if let Some(n) = crate::systems::industry::civic_places(world, b, row) {
+            return n;
+        }
+        // ... and an Hq's office its corp's admin budget (JOBS_V2 J30).
+        if let Some(n) = crate::systems::industry::hq_places(world, b, row) {
+            return n;
         }
         return usize::from(row.staff_per_floor) * usize::from(floors);
     }

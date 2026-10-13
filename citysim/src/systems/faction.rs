@@ -563,7 +563,16 @@ pub fn gather_inputs(world: &World, gang: EntityId) -> Option<OrderInputs> {
         hoard_tilt: world.config.corps.hoard_tilt,
         target_cover: rival_hq.map_or(0.0, |h| cover_of(world, gang, h)),
         retaliate_cover: retaliate_hq.map_or(0.0, |h| cover_of(world, gang, h)),
-        jail_cover: jail.map_or(0.0, |j| cover_of(world, gang, j)),
+        // Jobs & lives phase 1 (§ 2): a Jail short of Jailers is an easier
+        // breach: its cover ÷ `jailer_short_mult` (unchanged with `[jobs2]` off).
+        jail_cover: jail.map_or(0.0, |j| {
+            let c = cover_of(world, gang, j);
+            if crate::systems::industry::jailers_short(world) {
+                c / world.config.jobs2.jailer_short_mult.max(1.0)
+            } else {
+                c
+            }
+        }),
         derelicts: crate::systems::gang::squat_targets(world, gang).len(),
         districts_held,
         open_districts,

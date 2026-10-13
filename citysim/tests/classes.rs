@@ -10,7 +10,11 @@ use citysim::{
 
 /// A small v2 city: Lots, the eight seeded corps.
 fn v2_world(seed: u64) -> World {
-    World::new(seed, Config::load().dole_city().scaled_to(400))
+    // Jobs & lives phase 1: M11's founding as written (a build paid to a
+    // Construction Yard stands closed: `tests/industry.rs`).
+    let mut c = Config::load().dole_city().scaled_to(400);
+    c.jobs2.enabled = false;
+    World::new(seed, c)
 }
 
 /// The v1 city with two corps (FoodCo: both Farms, the Market, the Bar;

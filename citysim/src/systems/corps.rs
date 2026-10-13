@@ -148,7 +148,7 @@ pub const MAX_NICHES: usize = 2;
 pub fn move_building(world: &mut World, b: EntityId, to: Option<EntityId>) {
     let Some((kind, from)) = world.comp::<Building>(b).map(|bd| (bd.kind, bd.owner)) else { return };
     ownership::transfer_building(world, b, to);
-    let niche = corp_brain::niche_of_kind(kind);
+    let niche = corp_brain::niche_of_kind(&world.config, kind);
     if let (Some(n), Some(t)) = (niche, to) {
         if let Some(c) = world.comp_mut::<Corp>(t) {
             if !c.niches.contains(&n) && c.niches.len() < MAX_NICHES {
@@ -317,7 +317,7 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
     for b in buildings {
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
         let v = ownership::value(world, kind);
-        let niche = corp_brain::niche_of_kind(kind);
+        let niche = corp_brain::niche_of_kind(&world.config, kind);
         let barred = |id: EntityId| {
             if cfg.estate_buyer_cap > 0 && taken.get(&id).is_some_and(|&k| k >= cfg.estate_buyer_cap) {
                 return true;
@@ -461,6 +461,8 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
         Niche::Security => BuildingKind::SecurityOffice,
         // M13 D17: Garages carry the Tech share in phase 2.
         Niche::Tech => BuildingKind::Garage,
+        // Jobs & lives: no Vice kind stands before phase 4.
+        Niche::Vice => return Err(format!("{name} holds no {niche} carrier to split")),
     };
     let all = corp_brain::niche_buildings(world, corp, niche);
     let of_kind = |k: BuildingKind| -> Vec<EntityId> {
@@ -470,7 +472,7 @@ pub fn break_up(world: &mut World, corp: EntityId) -> Result<EntityId, String> {
         return Err(format!("{name} has one {}; a split cannot break the {niche} monopoly", carrier.label()));
     }
     let mut moved: Vec<EntityId> = Vec::new();
-    for &k in corp_brain::niche_kinds(niche) {
+    for k in corp_brain::niche_kinds(&world.config, niche) {
         moved.extend(of_kind(k).into_iter().skip(1).step_by(2));
     }
     moved.sort();

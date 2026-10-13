@@ -36,6 +36,10 @@ pub fn csv_header(world: &World) -> String {
     if crate::systems::parents::parents_on(world) {
         head = format!("{head},{}", crate::stats::OutsideCols::header(usize::from(world.outside.csv_parents)));
     }
+    // Jobs & lives: its group after that (only with `[jobs2]` on).
+    if crate::systems::industry::on(world) {
+        head = format!("{head},{}", crate::stats::Jobs2Cols::header());
+    }
     format!("{head},ticks_per_sec")
 }
 
@@ -117,6 +121,8 @@ pub fn snapshot(world: &mut World) {
     world.stats.current.ambient = crate::systems::ambient::close_day(world);
     // M17 phase 2: the parents' day (nothing with them off).
     world.stats.current.outside = crate::systems::parents::close_day(world);
+    // Jobs & lives phase 1: its group's snapshot (nothing with it off).
+    crate::systems::industry::snapshot(world);
     // Jobs v2 (P5a): the civic headcounts the budget (or a god) set.
     world.stats.current.jobs.guard_count = world.levers.guard_count;
     world.stats.current.jobs.sanitation_count = world.levers.sanitation_count;

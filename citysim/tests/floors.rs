@@ -12,6 +12,9 @@ use citysim::{save, Building, BuildingKind, Config, Corp, EntityId, EventKind, J
 /// The wages city (the market wage law over the dole city, `Config::dole_city`).
 fn wages_city() -> World {
     let mut cfg = Config::load().dole_city();
+    // Jobs & lives phase 1: floors paid to the Treasury as written (to a
+    // Construction Yard with `[jobs2]` on: `tests/industry.rs`).
+    cfg.jobs2.enabled = false;
     cfg.policy.levy = false;
     // P10: the housing pre-roll runs under the market wage law now (it read
     // no-net); these tests pin the city they were written on, without it.

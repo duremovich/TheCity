@@ -485,6 +485,8 @@ fn haul_to_market(
         take = take.min(afford);
         let paid = ownership::pay(world, market_owner, farm_owner, i64::from(take) * wholesale, Flow::Wholesale);
         ownership::credit(world, farm, paid);
+        // Jobs & lives phase 1 (§ 2): the cross-owner haul's Drivers.
+        crate::systems::industry::haul_fee(world, farm, farm_owner, take);
     }
     if let Some(mb) = world.comp_mut::<Building>(m) {
         mb.stock_food += take;
@@ -495,6 +497,9 @@ fn haul_to_market(
 /// Real economy (plan E9): the haul's World leg: the tranche the day's cap
 /// allows at the sloped bid (`world_market::sell`, credited to the Farm).
 fn haul_to_world(world: &mut World, farm: EntityId, farm_owner: Option<EntityId>, left: &mut u32) {
+    // Jobs & lives phase 1 (§ 2): a Packing Plant takes what the World
+    // would (the packed premium beats the Food bid); nothing with it off.
+    crate::systems::industry::haul_to_packing(world, farm, farm_owner, left);
     if *left == 0 {
         return;
     }

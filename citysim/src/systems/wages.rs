@@ -100,9 +100,13 @@ pub fn upkeep(world: &mut World) {
         }
         let p = power.for_kind(kind);
         if p > 0 && !grace {
-            inputs(world, owner, p);
+            // Jobs & lives phase 1 (§ 2): to the nearest lit Utility Plant
+            // (the World as E13 with `[jobs2]` off or no plant lit).
+            crate::systems::industry::power(world, b, owner, p);
         }
     }
+    // Jobs & lives phase 1: the plants' fuel to the World (none off).
+    crate::systems::industry::settle_fuel(world);
 }
 
 // ---------------------------------------------------------------------------
@@ -310,8 +314,8 @@ impl HiringDemand {
     }
 
     /// Would [`post`] staff a building of `kind` (its niche's demand holds `floor`)?
-    fn wants(&self, kind: BuildingKind, floor: f32) -> bool {
-        let d = crate::systems::corp_brain::niche_of_kind(kind)
+    fn wants(&self, cfg: &crate::config::Config, kind: BuildingKind, floor: f32) -> bool {
+        let d = crate::systems::corp_brain::niche_of_kind(cfg, kind)
             .and_then(|n| self.by_niche.get(&n).copied())
             .unwrap_or(self.any);
         d >= floor
@@ -335,7 +339,7 @@ pub fn at_ceiling(world: &World, corp: EntityId) -> bool {
             continue;
         }
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
-        if !demand.wants(kind, floor) {
+        if !demand.wants(&world.config, kind, floor) {
             continue;
         }
         // Jobs and room J10: every role of the kind.
@@ -712,7 +716,7 @@ fn post(world: &mut World, corp: EntityId, order: f32, room: f32) -> u32 {
             // labour rate; its premium is capital's and profit's (below).
             let marginal = world.config.wage(role) as f32 * rev_mult;
             room -= unabsorbed_past_cap(&hires, open, cap, since) as f32 * marginal;
-            if demand.wants(kind, cfg.hire_demand) {
+            if demand.wants(&world.config, kind, cfg.hire_demand) {
                 rows.push((b, role, cap, ceiling, hires.len(), open, marginal));
             }
         }
@@ -825,7 +829,9 @@ fn lay_off(world: &mut World, corp: EntityId) -> bool {
     let Some((who, b)) = newest_hire(world, corp) else { return false };
     let what = world.comp::<Job>(who).map_or("worker", |j| j.role.label());
     let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
-    let text = format!("{name} laid off as {what} by {cname} (laid off: revenue)");
+    // Jobs & lives phase 1 (§ 2): the foreman named (nothing off).
+    let foreman = crate::systems::industry::foreman_note(world, b, who, "told");
+    let text = format!("{name} laid off as {what} by {cname} (laid off: revenue){foreman}");
     crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
     world.stats.current.econ.laid_off += 1;
     true
@@ -883,8 +889,11 @@ fn past_cap_pass(world: &mut World, corp: EntityId, order: f32, lay_off_one: boo
             }
             let Some(&(_, who)) = hires.last() else { continue };
             let (name, cname) = (world.name_of(who), world.owner_label(Some(corp)));
-            let text =
-                format!("{name} laid off as {} by {cname} (laid off: revenue, a shift past full staff)", role.label());
+            let foreman = crate::systems::industry::foreman_note(world, b, who, "told");
+            let text = format!(
+                "{name} laid off as {} by {cname} (laid off: revenue, a shift past full staff){foreman}",
+                role.label()
+            );
             crate::systems::economy::dismiss_as(world, who, Some(b), text, EventKind::LaidOff);
             world.stats.current.econ.laid_off += 1;
             shed += 1;
@@ -1001,7 +1010,8 @@ pub fn floor_pass(world: &mut World, corp: EntityId, order: f32, room: f32, r: f
                 .map(|(r, n)| n as f32 * (world.config.wage(r) as f32 * rev_mult))
                 .sum();
             let covers = room > 0.0 && room >= floor_bill;
-            let higher = floors < fcfg.max_for(kind) && crate::systems::founding::floor_cost(world, kind).is_some();
+            let higher =
+                floors < world.config.floors_max(kind) && crate::systems::founding::floor_cost(world, kind).is_some();
             grows = at_ceiling && covers && higher;
         }
         let Some(bd) = world.comp_mut::<Building>(b) else { continue };

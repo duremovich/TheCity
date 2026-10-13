@@ -200,7 +200,7 @@ pub fn found_daily(world: &mut World) {
         .unwrap_or_else(|| vats_centroid(world));
     let Some((site, on_lot)) = site_near(world, from) else { return };
     let Some(b) = open_camp(world, site, on_lot, Some(corp)) else { return };
-    let paid = ownership::pay(world, Some(corp), None, cost, Flow::Found);
+    let paid = crate::systems::industry::pay_build(world, Some(corp), cost, Some(b), true);
     let (who, at) = (world.owner_label(Some(corp)), world.district_name(world.district_of_building(b)).to_string());
     world.push_event(
         EventKind::Founded,

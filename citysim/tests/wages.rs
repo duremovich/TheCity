@@ -19,6 +19,9 @@ use citysim::{
 /// dole city, as phase 2 was tested.
 fn config() -> Config {
     let mut cfg = Config::load().dole_city();
+    // Jobs & lives phase 1: power to the World as E13 wrote it (to a
+    // Utility Plant with `[jobs2]` on: `tests/industry.rs`).
+    cfg.jobs2.enabled = false;
     cfg.policy.levy = false;
     // P10: the housing pre-roll runs under the market wage law now (it read
     // no-net); these tests pin the city they were written on, without it.

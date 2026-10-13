@@ -244,6 +244,16 @@ fn has_room(world: &World, id: EntityId, b: EntityId) -> bool {
 /// Club refuses `rep.heat ≥ door_heat` when the strongest Host on shift has
 /// courage above that heat (no draw).
 pub fn door_ok(world: &World, id: EntityId, b: EntityId) -> bool {
+    // Jobs & lives phase 1 (§ 2): a site still being built is shut, and a
+    // dark district's night venues (all but the noodle stalls) are closed.
+    if crate::systems::industry::closed_site(world, b) {
+        return false;
+    }
+    if crate::systems::industry::dark_at(world, b)
+        && kind_of(world, b).is_some_and(|k| k.is_leisure() && k != BuildingKind::NoodleBar)
+    {
+        return false;
+    }
     match kind_of(world, b) {
         Some(BuildingKind::Lounge) => {
             crate::systems::classes::class_of(world, id) != Class::Dreg
@@ -1691,7 +1701,7 @@ pub fn fronts_daily(world: &mut World, gang: EntityId) {
         let built = match lot {
             Some(l) => match crate::systems::founding::build_on_lot(world, l, kind, Some(gang)) {
                 Ok(b) => {
-                    ownership::pay(world, Some(gang), None, cost, Flow::Found);
+                    crate::systems::industry::pay_build(world, Some(gang), cost, Some(b), true);
                     Some(b)
                 }
                 Err(_) => None,

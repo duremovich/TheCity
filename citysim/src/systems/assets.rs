@@ -708,6 +708,8 @@ impl World {
         match good {
             Good::Food => cap,
             Good::Stims | Good::Parts => cap.max(self.config.assets.goods_cap),
+            // Jobs & lives phase 1: the appended goods hold `[jobs2] goods_cap`.
+            Good::Rations | Good::Braindance | Good::Organs => cap.max(self.config.jobs2.goods_cap),
         }
     }
 
@@ -716,6 +718,7 @@ impl World {
         self.comp::<Building>(b).map_or(0, |bd| match good {
             Good::Food => bd.stock_food,
             Good::Stims | Good::Parts => bd.stock_goods[good as usize - 1],
+            Good::Rations | Good::Braindance | Good::Organs => bd.stock_x[good as usize - 3],
         })
     }
 
@@ -726,6 +729,7 @@ impl World {
         let slot = match good {
             Good::Food => &mut bd.stock_food,
             Good::Stims | Good::Parts => &mut bd.stock_goods[good as usize - 1],
+            Good::Rations | Good::Braindance | Good::Organs => &mut bd.stock_x[good as usize - 3],
         };
         let added = n.min(cap.saturating_sub(*slot));
         *slot += added;
@@ -738,6 +742,7 @@ impl World {
         let slot = match good {
             Good::Food => &mut bd.stock_food,
             Good::Stims | Good::Parts => &mut bd.stock_goods[good as usize - 1],
+            Good::Rations | Good::Braindance | Good::Organs => &mut bd.stock_x[good as usize - 3],
         };
         let taken = n.min(*slot);
         *slot -= taken;

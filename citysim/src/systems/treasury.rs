@@ -195,6 +195,11 @@ pub fn civic_daily(world: &mut World) {
     let pace = world.config.treasury.civic_pace;
     world.levers.guard_count = paced(world.levers.guard_count, guards, pace);
     world.levers.sanitation_count = paced(world.levers.sanitation_count, sweepers, pace);
+    // Jobs & lives phase 1 (§ 2): what police and Sanitation left funds the
+    // Jailers, the Clerks and the Depot Hands, in that order (nothing off).
+    let gw = world.config.economy.wage(Role::Guard).max(1);
+    let left = target - i64::from(guards) * gw - i64::from(sweepers) * sweeper_wage(world);
+    crate::systems::industry::civic_allocate(world, left);
 }
 
 /// J16: the day's civic payroll target in coins: `civic_share` x the mean

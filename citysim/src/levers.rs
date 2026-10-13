@@ -2345,7 +2345,7 @@ impl World {
                     match niche {
                         Niche::Housing => c.evict_days_override = Some(evict_days.saturating_sub(1).max(2)),
                         Niche::Food => c.wage_mult = 0.9,
-                        Niche::Security | Niche::Tech => {}
+                        Niche::Security | Niche::Tech | Niche::Vice => {}
                     }
                 }
                 c.order = order;
@@ -2585,6 +2585,8 @@ impl World {
                 spoil_carry: 0.0,
                 bin_diver: None,
                 bin_regular: None,
+                under_construction_until: None,
+                stock_x: [0; 3],
             },
         );
         self.buildings_by_kind.entry(BuildingKind::Home).or_default().push(id);

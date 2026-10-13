@@ -1161,6 +1161,10 @@ pub struct World {
     /// saved, on a map without Ambient flats).
     #[serde(default, skip_serializing_if = "crate::ambient::AmbientState::is_empty")]
     pub ambient: crate::ambient::AmbientState,
+    /// Jobs & lives phase 1 (docs/JOBS_AND_LIVES.md § 2): the industries'
+    /// and the civic three's state (empty, and not saved, with `[jobs2]` off).
+    #[serde(default, skip_serializing_if = "crate::systems::industry::Jobs2State::is_default")]
+    pub jobs2: crate::systems::industry::Jobs2State,
 }
 
 fn is_zero_i64(v: &i64) -> bool {
@@ -1648,6 +1652,7 @@ impl World {
             laid_off: BTreeMap::new(),
             housing_demand: BTreeMap::new(),
             ambient: Default::default(),
+            jobs2: Default::default(),
         };
         crate::prof::timed!("new::spawn_buildings", w.spawn_buildings());
         w.litter = vec![0; w.map.w() * w.map.h()];
@@ -1695,6 +1700,10 @@ impl World {
         // Chapel's kitchen, then the city's Camp (no RNG), before the plane links.
         crate::prof::timed!("new::charity::seed", systems::charity::seed(&mut w));
         crate::prof::timed!("new::camp::seed", systems::camp::seed(&mut w));
+        // Jobs & lives phase 1 (§ 2): the industries and the megacorps'
+        // Hqs on the Lots left (no RNG; nothing with `[jobs2]` off), before
+        // the trades' places are posted.
+        crate::prof::timed!("new::industry::seed", systems::industry::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
         crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));
@@ -1803,6 +1812,8 @@ impl World {
                     spoil_carry: 0.0,
                     bin_diver: None,
                     bin_regular: None,
+                    under_construction_until: None,
+                    stock_x: [0; 3],
                 },
             );
             match def.kind {
@@ -2063,6 +2074,7 @@ impl World {
                         paid_once: true,
                         duty_fixed: None,
                         grade: 0,
+                        until: None,
                     },
                 );
             }

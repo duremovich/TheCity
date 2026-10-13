@@ -12,7 +12,7 @@ use crate::components::{
 use crate::config::CorpsCfg;
 use crate::entity::EntityId;
 use crate::events::EventKind;
-use crate::systems::ownership::{self, Flow};
+use crate::systems::ownership;
 use crate::time::TICKS_PER_DAY;
 use crate::utility::curves::{can, Curve, GATE, SQUARE};
 use crate::utility::Consideration;
@@ -94,22 +94,18 @@ pub struct VirtInputs {
     pub share: f32,
 }
 
-/// The building kinds that make up a niche.
-pub fn niche_kinds(n: Niche) -> &'static [BuildingKind] {
-    match n {
-        // L2 L9: the NoodleBar rides the Food chain (static: none stands
-        // with L2 off, so every reader is unchanged then).
-        Niche::Food => &[BuildingKind::Farm, BuildingKind::Market, BuildingKind::Bar, BuildingKind::NoodleBar],
-        Niche::Housing => &[BuildingKind::Home],
-        Niche::Security => &[BuildingKind::SecurityOffice],
-        // M13 D17; L2 L9 the Fab.
-        Niche::Tech => &[BuildingKind::Clinic, BuildingKind::Garage, BuildingKind::Fab],
-    }
+/// The building kinds that make up a niche, in `BuildingKind` order.
+/// Jobs & lives phase 1 (D4): read from the `KindCfg` table's `niche`
+/// column (`Config::kind_niche`; its built-in table is M11-L2's: Food the
+/// Farm, Market, Bar and NoodleBar, Housing the Home, Security the
+/// Security Office, Tech the Clinic, Garage and Fab).
+pub fn niche_kinds(cfg: &crate::config::Config, n: Niche) -> Vec<BuildingKind> {
+    BuildingKind::ALL.into_iter().filter(|&k| cfg.kind_niche(k) == Some(n)).collect()
 }
 
-/// The niche a building kind belongs to.
-pub fn niche_of_kind(kind: BuildingKind) -> Option<Niche> {
-    Niche::ALL.into_iter().find(|&n| niche_kinds(n).contains(&kind))
+/// The niche a building kind belongs to (`KindCfg`'s `niche`).
+pub fn niche_of_kind(cfg: &crate::config::Config, kind: BuildingKind) -> Option<Niche> {
+    cfg.kind_niche(kind)
 }
 
 /// What `Grow` builds in a niche (a second Security Office is never built).
@@ -121,6 +117,8 @@ pub fn build_kind(n: Niche) -> Option<BuildingKind> {
         Niche::Housing => Some(BuildingKind::Home),
         Niche::Security => None,
         Niche::Tech => Some(BuildingKind::Garage),
+        // Jobs & lives: the Vice venues come in phase 4.
+        Niche::Vice => None,
     }
 }
 
@@ -179,6 +177,11 @@ pub fn build_kind_for(world: &World, corp: EntityId, n: Niche) -> Option<Buildin
 /// Farm (what the World buys), not M11's Bar; wages on only.
 pub fn grow_kind(world: &World, corp: EntityId, n: Niche, world_demand: bool) -> Option<BuildingKind> {
     if n == Niche::Food && world_demand && crate::systems::wages::on(world) {
+        // Jobs & lives phase 1 (§ 2): a Food corp short of Packing Plants
+        // for its Farms packs before it farms more (`[jobs2]` on only).
+        if crate::systems::industry::wants_packing(world, corp) {
+            return Some(BuildingKind::PackingPlant);
+        }
         return Some(BuildingKind::Farm);
     }
     build_kind_for(world, corp, n)
@@ -221,6 +224,8 @@ pub fn demand_of(world: &World, corp: EntityId, n: Niche) -> (f32, bool) {
             let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * sellers.len().max(1) as f32;
             sold as f32 / reference
         }
+        // Jobs & lives: the Vice arm (own visits ÷ the reference) is phase 4's.
+        Niche::Vice => 0.0,
     }
     .clamp(0.0, 1.0);
     if !crate::systems::wages::on(world) {
@@ -234,7 +239,7 @@ pub fn demand_of(world: &World, corp: EntityId, n: Niche) -> (f32, bool) {
             let has_lab = !crate::systems::tech::labs_of(world, corp).is_empty();
             fill(world, ExportGood::Parts).max(if has_lab { fill(world, ExportGood::Data) } else { 0.0 })
         }
-        Niche::Housing | Niche::Security => 0.0,
+        Niche::Housing | Niche::Security | Niche::Vice => 0.0,
     }
     .clamp(0.0, 1.0);
     if world_fill > base {
@@ -316,7 +321,7 @@ pub fn shares(world: &World, niche: Niche) -> BTreeMap<EntityId, f32> {
         // M13 D17: asset sales over 7 days, per building (empty until every
         // Tech building has its 7 days of history).
         Niche::Tech => {
-            let tech: Vec<EntityId> = niche_kinds(Niche::Tech)
+            let tech: Vec<EntityId> = niche_kinds(&world.config, Niche::Tech)
                 .iter()
                 // L2: the Fab makes Parts, it sells no assets.
                 .filter(|&&k| k != BuildingKind::Fab)
@@ -337,6 +342,8 @@ pub fn shares(world: &World, niche: Niche) -> BTreeMap<EntityId, f32> {
                 }
             }
         }
+        // Jobs & lives: no Vice kind stands before phase 4 (no shares).
+        Niche::Vice => return BTreeMap::new(),
     }
     if total <= 0.0 {
         return BTreeMap::new();
@@ -368,7 +375,7 @@ pub fn rivals_in(world: &World, corp: EntityId, n: Niche) -> Vec<EntityId> {
 
 /// A corp's buildings of a niche, ascending.
 pub fn niche_buildings(world: &World, corp: EntityId, n: Niche) -> Vec<EntityId> {
-    let kinds = niche_kinds(n);
+    let kinds = niche_kinds(&world.config, n);
     world
         .comp::<Corp>(corp)
         .map(|c| {
@@ -836,7 +843,7 @@ pub fn rescore(world: &mut World, corp: EntityId, hysteresis: f32, why: &str) {
         match niche {
             Niche::Housing => c.evict_days_override = Some(evict_days.saturating_sub(1).max(2)),
             Niche::Food => c.wage_mult = 0.9,
-            Niche::Security | Niche::Tech => {}
+            Niche::Security | Niche::Tech | Niche::Vice => {}
         }
     }
     c.order = order;
@@ -1062,7 +1069,7 @@ fn grow(world: &mut World, corp: EntityId, n: Niche, i: &CorpInputs) {
             if let Some(lot) = lot_near(world, corp) {
                 // Paid once the building stands (a failed build cost nothing).
                 if crate::systems::founding::build_on_lot(world, lot, kind, Some(corp)).is_ok() {
-                    ownership::pay(world, Some(corp), None, cost, Flow::Found);
+                    crate::systems::industry::pay_build(world, Some(corp), cost, Some(lot), true);
                     if let Some(c) = world.comp_mut::<Corp>(corp) {
                         c.last_build_tick = Some(now);
                     }
@@ -1350,7 +1357,7 @@ fn research(world: &mut World, corp: EntityId) {
     if !has && committed && cost > 0 && world.purse(Some(corp)) >= cost {
         if let Some(lot) = lot_near(world, corp) {
             if crate::systems::founding::build_on_lot(world, lot, BuildingKind::Lab, Some(corp)).is_ok() {
-                ownership::pay(world, Some(corp), None, cost, Flow::Found);
+                crate::systems::industry::pay_build(world, Some(corp), cost, Some(lot), true);
                 if let Some(bd) = world.comp_mut::<Building>(lot) {
                     bd.focus = Some(focus);
                 }

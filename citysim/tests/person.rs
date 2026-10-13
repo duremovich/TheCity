@@ -903,6 +903,10 @@ fn probe_far_worker_with_one_rent_moves_near_work() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
+    // Jobs & lives phase 1: with the industries on, seed 42 has no single
+    // far Farmer either (the premise, not the move, is lost; phase 8's gate
+    // re-reads the probes).
+    cfg.jobs2.enabled = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     // Every commute measure through `life::commute_cost` (travel ticks).
@@ -1464,6 +1468,10 @@ fn probe_trade_respects_rent_and_the_evictor() {
     // `commute_cost` rides and no single farmer reads far (the El case is
     // `probe_el_*` and `tests/transit.rs`).
     cfg.transit.enabled = false;
+    // Jobs & lives phase 1: with the industries on, seed 42 has no single
+    // far Farmer either (the premise, not the move, is lost; phase 8's gate
+    // re-reads the probes).
+    cfg.jobs2.enabled = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(TICKS_PER_DAY + 10 * TICKS_PER_HOUR);
     let cap = w.config.life.commute_move_ticks;
@@ -1763,7 +1771,14 @@ fn bought_by(w: &World, buyer: EntityId) -> Vec<citysim::contract::Contract> {
 fn widow(strong: bool) -> (World, EntityId, EntityId) {
     use citysim::systems::grudges;
     use citysim::word::GrudgeCause;
-    let mut w = world();
+    // Jobs & lives phase 1: the pick is the first married civilian near a
+    // Fixer; with the industries on it is another woman (602, a Farmer, not
+    // 612, a Cook) who hunts the killer herself in the same 7 days, the
+    // premise lost to a pick change. The probe keeps its pre-milestone city
+    // until phase 8's gate re-reads the probes (docs/JOBS_AND_LIVES.md § 11).
+    let mut c = Config::load();
+    c.jobs2.enabled = false;
+    let mut w = World::new(42, c);
     // Day 10: the Fixers' books have filled (on day 2 too few regulars
     // would take a Hit at any price, and it priced at the old quote).
     w.run_ticks(10 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
