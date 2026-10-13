@@ -1,5 +1,122 @@
 # M17: The outside world — parents, brothers, the state, the ledger beyond the wall
 
+## Revised 2026-10-12: M17 against HEAD
+
+This section overrides everything below it. The body was drafted on M12 phase 2 at 2,000 residents. Since then the tree has gained:
+
+- **The Real economy** (`docs/ECONOMY_V2.md`): the World account, books per good, imports and exports, wages from revenue.
+- **No safety net** (addenda 17-19, `docs/P10_POLICY.md`): the dole and public works are funded policy levers, and they are off.
+- **M13-M16b as built**: see the "deviations" section in each doc.
+- **Scale** (`docs/SCALE_20K.md`): 20k residents on generated or imported maps, `[scale]`, `Config::scaled_to`/`fit_to_map`, the Ambient tier of flats.
+
+The acceptance table at the end of this section (docs/TESTING.md) supersedes the body's bands, its six-seed and pinned-run devices, and its scenario gate.
+
+### What exists, what is reused, what is new
+
+| M17 item (body §) | At HEAD | M17 does |
+| --- | --- | --- |
+| `World::outside`, `Outside`, `OutsideFaction`, `OutsideKind`, `OutsideId` (§ 1) | `citysim/src/outside.rs` (L2 L11, Real economy E4) holds the World account only, `WORLD_ACCOUNT` = 1069. `OutsideFaction.books` is the World's per-good book. | **Reuse.** Append the parent fields with `#[serde(default)]`. `books` is taken, so the body's 30-day rings are named `OutsideFaction.ledger: OutsideLedger`. `Outside` gains `sanctions`, `scrip`, `promoted` and `blackwall`. |
+| The World account (§ 1) | Each midnight it refills to `[world_market] treasury_ref` both ways (`minted += refill`: the city's net trade). It buys Food at the haul, and Parts and Data at sloped tranche bids. It sells imports (`ownership::import`, already re-pointed abroad) and takes inputs (`Flow::Inputs`). Immigrants' and emigrants' purses and the fence credit cross through it. | **Reuse as the money-supply account.** *Superseded*: the body's World row (income = upkeep, treasury 1M), `import_to_outside` (always on), and "the World never decides". M17 adds two things to it: the **Ambient book** (below) and the Blackwall (§ 6). |
+| Conservation identity (§ 1, § 11) | `econ::identity` = `total_coins + Σ outside treasuries − minted`. `core_sanity`, `core_year` and `core_20k` assert it every day. | **Reuse unchanged.** A parent's daily `income − upkeep`, `body_cost`, a sanction's running cost and the treasury absorbed at death all book to `minted`. Coins cross only through `ownership::cross_in`/`cross_out`. No new assert. |
+| `market` walk, `SimRng::outside` (§ 1) | No `outside` stream exists, and `WordNs` is full (M16 § 13). The World's appetite walks are pure hashes (`systems::econ::hash_normal`, E49). | **New, as pure hashes**: `hash_unit`/`hash_normal(seed, PURPOSE_OUTSIDE_*, account, day)` for each parent's walk and for every M17 roll (the Abroad draw, promotion, a breach). No stream is used, so no other system's draws move. |
+| `Corp.parent`, `Corp.outside_treasury` (M11 D41) | Set at seed on megacorp rows (`parent = 1000 + row`, `outside_treasury = 100000`). Only the app's corp panel reads them. At 20k the roster is dealt k times ("Arasaka", "Arasaka 2", …), and each copy gets its own parent id. | **Re-pointed.** One account per **brand** (the row's `template`): every Arasaka copy is a branch of Arasaka Global. `Corp.parent` is rewritten to the brand's account at seed and when a pre-M17 save loads. `outside_treasury` is zeroed and kept for serde. A treasury is `treasury_per_branch × branches`, so a parent scales with the map. |
+| `Gang.parent`, `Law.parent` (§ 1) | absent | **New**, `#[serde(default)]`. One syndicate per seeded gang template (The Hollow, Ninefold); none for splinters or The Unplugged. The State's branch is the Law entity. |
+| Flows `Remit`, `ParentFund`, `Tribute`, `Grant`, `Scrip` (§ 9) | `Flow::Tribute` already exists (L2: a gang's weekly cut to its members). | **New**: `Remit` (corp → parent and gang → syndicate; the body's syndicate `Tribute` folds into it), `ParentFund` (inbound), `Grant` (State → Treasury), `Scrip` and `AmbientSale`. `Flow::capital()` gains `Remit` and `ParentFund`: `wage_rev` never reads a subsidy as revenue, and `cashflow` never reads a remittance as a trading loss. |
+| Subsidies and remittances vs the export-driven money supply | Money enters only through the World's purchases and migrants' purses. It leaves through imports, inputs and emigrants (ECONOMY_V2 § 1). Food corps hoard 83-113k by day 120. | A parent is an **outside purse with finite reserves**. Its income abroad is minted, like the World's refill. A subsidy is capital paid into a branch's treasury: it keeps the branch and its jobs alive, but it never raises a wage (wages follow revenue) and never reaches a wallet. Remittances take a share of positive cashflow above `remit_floor`, so the megacorps ship the city's profit abroad out of the hoards. The balance of trade gains `flow_remit`, `flow_parent_fund` and `flow_ambient`. The net crossing is a printed finding, not a band. |
+| No safety net | P10: `dole_per_day`, `public_works`, `school_meals` and `reserve_release` are levers, all off. The Treasury runs on taxes, the property rate and customs. | **Nothing in M17 pays a wallet from outside.** The State funds guards only (`Flow::Grant`, a week of `state_guards`' wages), booked outside `EconState.receipts` so the tax band does not cut taxes on it. No State dole, no relief. Scrip is wages, not aid. |
+| The State's guards (§ 4) | The Treasury sets `levers.guard_count` (Jobs J17, `treasury::daily`), and `law.rs` reconciles it daily. | `levers.state_guards` (new, `u16`) is added on top of the civic count in the reconcile. `state_guards_max` is per capita. A `Mandate` is a `LawShock` (appended) and adds `mandate_attention` to the Law's M16b attention pool. |
+| Reinforcement bodies (§ 2) | `demography::spawn_immigrant_for(b, role)` (J20: an immigrant with a signed job at a building, housed). | **Reuse**, plus an `Outsider` component. Outsiders count as none of `immigrants`, J19's pull or the Ambient arrivals: they come from abroad, not from the island's flats. A tour ends through `demography::emigrate`. |
+| `Retake`, buy-back, Guard (§ 2) | M16b's `Rescue` (a mission on a building), `leverage`'s `Demand::Sell(b)`, `corps::acquire`, M16a's funded `Guard`. | `ContractKind::Retake` (appended after `Tag`) runs on the Rescue mission machinery, and a win ends in `coerce(Threat, Sell(b))` (M16b). `Origin::Parent` is appended. Buy-back goes through `corps::acquire`. |
+| Persona, rival (§ 2) | M16b boards hold a branch's aggregate personality. M15 `Regard` exists. | The parent's `Persona` comes from config (the board abroad); the branch's own board is untouched. The rival comes from `word::Regard`. |
+| Uplink (§ 3) | M14 `NodeKind` {Public, Building, Ledger}, `virt::relink`. M16b `Steal` on a Lab runs a heist. | `NodeKind::Uplink(OutsideId)` (appended), one per brand with a living branch: at most 12 nodes at any scale. Campaign heists use M16b `Steal`. |
+| Scrip (§ 4) | absent | `Wallet` is **not** widened (20k agents). Holdings go in a side table, `Outside.scrip: BTreeMap<EntityId, SmallVec<[(OutsideId, i64); 2]>>`, cleared on death and emigration. A purchase checks it only at an issuer's building (one map lookup). |
+| Economic warfare inputs (§ 3) | M11 shocks and estates, M12 strikes and districts, M16b protection and `Sell` coercions. | **Reuse as reads.** A sanction also cuts the World's appetite for the sanctioned branch's goods (ECONOMY_V2 § 6). |
+| Abroad, cast, promotion (§ 5) | M16a's contract entity and settlement. M16 decided that `Abroad` stays M17's own kind. | `ContractKind::Abroad` (appended) and the `Away` component, kept as records only. The draw is a pure hash. |
+| The tick (§ 1) | At midnight: `corp_brain::run` (`corps::daily`), then `living::run` (`wages::daily`, `world_market::daily`, …), …, then `demography::run`. | `systems::outside::run` runs at midnight after `living::run` and before `demography::run`, which spawns the bodies. The Ambient book's sales are hourly (below). |
+| Save, switches | SAVE_VERSION 20. The off switches were retired 2026-10-09. | SAVE_VERSION +1 per phase. `[outside] enabled` (on) with `CITYSIM_OUTSIDE_OFF=1` stays in flight until M17 closes. Off turns off the parents and the Ambient book, and is byte-identical to main on seeds 42-44 × 30 (events, and the CSV on shared columns). The World market belongs to the Real economy and stays on. *Superseded*: `decisions = false`, and `v1_profile`'s `enabled = false` (the v1 city keeps every feature since 2026-10-09). |
+| Scale | `scaled_to` (`up_*` per person), `fit_to_map` (per building, gang, corp, district), `per_capita_count`. | These keys go in `scaled_to`: `state_guards_max`, `outsiders_cap`, `ambient_food_cap`, `ambient_visit_cap`, `promoted_max`. `subsidy_cap_day` and the other per-brand keys follow the branch count. Nothing runs per agent per tick. The daily pass is O(accounts + branches + Outsiders + sanctions), the Ambient hour is O(districts + Markets + venues), and nothing is O(n²). |
+
+### Dylan's decision: Ambient consumption is outside demand that creates jobs
+
+The Ambient flats' households live on the island beyond the simulated 20k, so their purses belong to the World. When they shop at a simulated business, World money is buying a city good: **export demand at retail**. That money enters as revenue and funds wages through `wage_rev` (not magic wages). It also moves the Grow inputs, so corps hire and build on it.
+
+- **The book.** The World account gains `ambient: AmbientBook` (`#[serde(default)]`). It holds an `appetite`, a pure-hash walk like the goods' with the lever `SetAmbientAppetite { mult }` to pin or release it. It also holds today's units, visits and coins, plus 30-day rings. It is built in **phase 1** for three reasons: it needs only the World account, it is the change to the money supply, and the parents can wait.
+- **Demand.**
+  - Food: `ambient::daily` already estimates each district's Ambient food (its adults × yesterday's meals per simulated resident). Demand is `units_d = AmbientDistrict.food × ambient_capture × appetite`, where `ambient_capture` is the share of those meals bought at simulated Markets. The city's total is capped at `ambient_food_cap`, in units a day per 2,000 residents (a `scaled_to` key).
+  - Leisure: `visits_d = adults_d × yesterday's simulated venue visits per resident × ambient_capture × appetite`, capped at `ambient_visit_cap`.
+- **Scaling.** Demand grows linearly with the Ambient adults (flats × occupancy × (1 + `couple_p`)) until the per-capita cap binds. The cap is proportional to the simulated population, because the simulated businesses are sized for it.
+  - On the k = 1 import (~900k Ambient adults) and on gen20k at 50 flats a slot (~230k), the cap binds.
+  - On a test map with a few flats a slot, `ambient_capture` sets the demand.
+  - The shipped 2k map has no Ambient flats. Demand is zero there, so the 2k city is unchanged and its off identity is trivial.
+- **Supply is real.** Each hour carries a share of the day's demand, following the Statistical tier's meal and evening profile.
+  - Food goes to the district's Markets first, then the nearest. A Market sells to the Ambient book only the stock above `ambient_keep` × its own 7-day mean daily sales, so the book never empties a shelf a resident needs, and no goods are created.
+  - The price is the Market's shelf price. The coins cross in from the World as `Flow::AmbientSale`, and the owner pays the sale's tax, as for `Export`. The units count in `Market.sales`.
+  - Leisure visits are ledger visits: no bodies, no seats. Each pays the venue's entry price into its owner's revenue, up to `ambient_visit_share` of the venue's own 7-day visits.
+- **How it creates jobs (no new hiring rule).**
+  - The sale is revenue, so `wages::daily`'s `wage_rev` rises and corps under target post vacancies.
+  - `Market.sales` raises Food sell-through, which raises `corp_brain::demand_of` and the Grow score, and Grow builds.
+  - The vacancies fill from the simulated jobless first, then from the Ambient labour pool (S5, `hires_per_day`).
+  - A drain is the lever's other side: lower appetite means layoffs.
+- **Not in M17:** Ambient rent (a city landlord paid by World money); Ambient Clinic, Hotel or asset purchases; dematerialisation (S5's "later").
+
+### Revised phases (one commit each; the orchestrator merges each)
+
+1. **Ambient demand and the switch.**
+   - `[outside] enabled` with `CITYSIM_OUTSIDE_OFF`.
+   - The `AmbientBook` and its hourly sales (Food and leisure), `Flow::AmbientSale` and the per-capita caps.
+   - `SetAmbientAppetite`, the CSV columns (`ambient_units`, `ambient_visits`, `flow_ambient`, `appetite_ambient`) and a city-panel line.
+   - `core_20k` gains Ambient flats (gen20k at S5's 50 a slot).
+   - SAVE 21.
+2. **The ledger and the parents.**
+   - Accounts per brand (megacorps), per gang template (syndicates) and the State, seeded from `[outside] factions`, with the pre-M17 save migration.
+   - The daily tick: market, income, upkeep, remittance (the syndicate's share weekly), health, rep, attitude and the failure flags. No death yet.
+   - The Hold and Subsidise orders.
+   - `Embargo`, `SetTariff`, the Outside panel and the CSV.
+   - SAVE 22.
+3. **Bodies: reinforcement, retaking, brothers, the State.**
+   - The considerations table (Reinforce, Retake, FoundBranch, Abandon) and `Outsider` tours.
+   - Buy-back, `Retake` with `Origin::Parent`, the Hit on the raider, Guard funding, and a local corp founding a parent.
+   - The syndicates' brothers and refounds.
+   - The State's Fund, Mandate and Withdraw with `state_guards`.
+   - `ForceReinforce` and `SetOutsideOrder`.
+   - SAVE 23.
+4. **The weapons that reach the ledger, and scrip.**
+   - The uplink, edge, the tech ceiling and Data shipments.
+   - Sanction (with the cut to the World's appetite) and Campaign.
+   - Death and the branch bankruptcies.
+   - Scrip: issuance, spending, `ConvertScrip`, the wipe and `BanScrip`.
+   - `KillParent`, `WipeParentTreasury`, `ForceUplinkRun` and `SetParentEdge`.
+   - SAVE 24.
+5. **Abroad, the Blackwall, the gate.**
+   - `Abroad`/`Away`, the cast and promotion.
+   - The Blackwall and traces.
+   - The remaining levers, god commands and the overlay.
+   - The god scenarios, an Outside section in `tools/analyze_run.py`, and the docs ("Implemented: deviations").
+   - Then `/code-review high` and a fix commit.
+
+Every phase:
+- runs the standing gates one at a time: the trio, `core_year`, `shadow --assert`, the god suites, parity and `core_20k`;
+- measures seeds 42-47 × 120 at 2k against main, and seed 42 × 30 at 20k with ticks/s;
+- checks the off identity.
+
+### Acceptance (docs/TESTING.md doctrine)
+
+| tier | M17 items |
+| --- | --- |
+| `core_sanity` bullets (must fire on 4+ of seeds 42-47, else demoted to a unit test by the TESTING.md rule) | Candidates: a remittance (P2), a Subsidised (P2), a syndicate remittance (P2), a StateGrant (P3). The identity, the collapse bounds and population (Outsiders included) are already asserted. |
+| `core_20k` | An Ambient sale on every day from day 2. This is an existence assert; it cannot be a `core_sanity` bullet because the 2k city has no flats. Also the identity, and the employment collapse floor (unchanged). |
+| Unit tests (for mechanisms that fire on 2 or fewer of 6 seeds, or that are mechanism-level) | **P1:** demand is linear in Ambient adults up to the cap, and the cap scales with `per_capita`; no Ambient sale goes below `ambient_keep`; an Ambient sale raises `Market.sales` and the owner's revenue, and its coins cross from the World (identity); a corp whose revenue rose posts a vacancy; zero flats means zero demand. **P2:** income applies every factor and books `minted`; `branch_loss` rises on a sale, a lost district and a remittance gap; a subsidy is capital (no `wage_rev` move); `Embargo` stops every crossing; a brand account collects every "Arasaka N". **P3:** Reinforce caps (per day, per call, the living cap), each body arriving with a job and a cohort; an accepted buy-back pays the premium, and two refusals post a `Retake` offered to the branch first; a `Retake` win forces the sale; FoundBranch; a local corp founds a parent; brothers arrive after the delay and not inside the cooldown; no refound before `refound_days`; the State funds above `mandate_heat` and withdraws on a corrupt captain. **P4:** the uplink needs tier 3 and its ICE reads the parent's Deck; a wipe drops the tier and caps the branch; edge recovers only above `data_floor`; death comes at `death_days` exactly, bankrupts the branches and wipes the scrip; scrip below par spends at health; a conversion at a Fixer. **P5:** the Abroad draw is stable across save, load and re-run, kills only abroad and promotes only past the thresholds; the Blackwall cooldown; a pre-M17 save loads with the accounts built. |
+| Person probes (`tests/person.rs`) | An Outsider with no kin leaves at `tour_until`, and one with a Spouse stays (P3). A brother whose leader was killed holds an Enemy edge to the known killer (P3). A broke scrip holder converts at the nearest open Fixer within 3 days (P4). |
+| Shadow | `outsider` as a diaries-only archetype (P3). Bounds only after a calibration ensemble has read it. |
+| God scenarios (60 days, each against its control) | `god_ambient_boom` (P1: Ambient appetite 3.0 on the shipped map with 4 flats a slot; Ambient revenue and vacancies above the control's; employed printed). `god_raze_arasaka` (P3: a branch owns a building again within 30 days). `god_decapitate_twice` (P3). `god_murder_wave` (P3: a StateGrant within 14 days). `god_kill_militech` and its control (P4). `god_abroad` (P5). |
+| Printed bands (`tools/analyze_run.py`, never asserted) | Ambient units ÷ Food sales; Ambient coins a day per 1,000 residents; vacancies posted by corps with Ambient revenue; employed at 20k against main; outside in ÷ `total_coins`; the net crossing including remittances; subsidies and reinforcements per parent; Outsiders living (max); retakes ÷ branch buildings lost; parent deaths (0 expected on the baseline); edge on day 120; State guards (mean); scrip's share of branch employees' wealth; Abroad contracts per 120 days. |
+
+### Open for Dylan
+
+1. Should the 2k testing city get Ambient flats, so Ambient demand runs in `core_sanity` and the 2k gates? *Recommendation: no.* The 2k city stays the closed core the gates were calibrated on. Ambient demand is a big-map mechanism, tested by unit tests on the shipped map with flats, by `god_ambient_boom` and by `core_20k`.
+2. Should the megacorps be net extractors? Remittances could make the parents a net outflow, with Ambient demand and exports as the inflow. *Recommendation: yes, extraction is the dystopian tone.* The body's "net crossing within ±5 %" becomes a printed reading.
+3. Ambient rent (World money paying city landlords for the flats) would be a large inflow to Housing corps. *Recommendation: not in M17; revisit at the late calibration.*
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).
