@@ -127,6 +127,11 @@ pub fn may_reform(world: &World, gang: EntityId) -> bool {
     if !g.emptied || !g.members.is_empty() {
         return true;
     }
+    // M17 phase 3: an emptied gang with a living syndicate re-forms only
+    // through its syndicate's refound (`parents::syndicate_daily`).
+    if crate::systems::parents::has_syndicate(world, gang) {
+        return false;
+    }
     let cfg = &world.config.gangs;
     let waited = g.empty_since.is_none_or(|t| world.tick.saturating_sub(t) >= cfg.reform_days * TICKS_PER_DAY);
     let Some(hq) = world.hideout_of(gang) else { return waited };

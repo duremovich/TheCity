@@ -1805,8 +1805,8 @@ staff = 0
 [contracts]
 max_open = 256
 closed_keep_days = 30
-price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120, trauma = 35, tag = 150, vote = 250 }   # M16b: persuade; phase 2: the rest
-deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5, trauma = 7, tag = 10, vote = 14 }
+price_base = { hit = 400, beat = 120, guard = 25, locate = 20, persuade = 100, abduct = 300, rescue = 350, escort = 80, steal = 150, deliver = 40, spin = 120, trauma = 35, tag = 150, vote = 250, retake = 500 }   # M16b: persuade; phase 2: the rest
+deadline_days = { hit = 10, beat = 7, guard = 7, locate = 14, persuade = 7, abduct = 10, rescue = 7, escort = 3, steal = 7, deliver = 3, spin = 5, trauma = 7, tag = 10, vote = 14, retake = 10 }
 risk_w = 1.5
 standing_w = 1.0
 max_attempts = 2
@@ -2619,3 +2619,52 @@ subsidise_to = 0.5
 subsidy_cap_day = 1500
 flat_hold = 0.3
 flat_subsidise = 0.0
+# Phase 3: bodies (Reinforce, Retake, FoundBranch, Abandon; brothers; the State). Placeholders.
+flat_reinforce = 0.0
+flat_retake = 0.15                  # its five considerations compensate to ~0.3 on a razed branch; Hold is 0.3 + hysteresis
+flat_found_branch = 0.0
+flat_abandon = -0.2
+recent_days = 14                    # a building lost or a raid this recent opens Reinforce
+reinforce_cooldown_days = 21
+bodies_per_day = 2
+bodies_per_call = 6
+outsiders_cap = 24                  # living Outsiders per parent at 2,000 residents (per capita)
+body_cost = 300                     # paid abroad per body (minted out)
+body_fund = 300                     # into the branch per body (the hire's wages)
+outsider_skill = 0.6
+tour_days = 60
+retake_window_days = 30
+retake_wealth_min = 0.2
+retake_premium = 1.5                # a buy-back offer, x the building's value
+refusals_to_force = 2               # refusals before a Retake is posted
+hit_lawfulness = 0.4                # a parent under this posts a Hit on the raider gang's leader
+branch_seed = 4000
+upkeep_grace_days = 14
+abandon_attitude = -0.5
+abandon_days = 60
+found_parent_treasury = 20000       # a local corp founds a parent past this treasury ...
+found_parent_share = 0.5            # ... with this top niche share ...
+found_parent_days = 30              # ... held this long
+found_parent_frac = 0.5
+parent_income_rate = 0.02
+parent_upkeep_rate = 0.017
+max_accounts = 12
+syndicate_subsidy = 150
+brothers = 3
+brother_delay_days = 5
+brother_cost = 150
+syndicate_cooldown_days = 30
+refound_days = 21
+refound_cost = 600
+refound_attitude = -0.5               # a soured syndicate refounds nobody (+0.3 for a second refound in the window)
+refound_window_days = 60
+state_guards_max = 12               # at 2,000 residents (per capita)
+state_guards_step = 4
+heat_murders = 10.0                 # murders in 7 days for half the State's heat term (per capita)
+mandate_heat = 0.6
+mandate_bias = 0.2
+mandate_days = 14
+grant_wage = 8                      # a State guard's day of wages in the weekly grant
+flat_fund = 0.0
+flat_mandate = 0.0
+flat_withdraw = 0.0

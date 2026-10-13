@@ -665,7 +665,9 @@ fn bankruptcies(world: &mut World) {
         // Still in the red now (or stalled at 0, `ownership::rolls`): a
         // sale since the midnight roll can save it.
         let due = world.comp::<Corp>(c).is_some_and(|cc| {
-            cc.buildings.is_empty()
+            // M17 phase 3: a parent's new branch has its upkeep grace to
+            // get its first building (a buy-back, a Retake).
+            (cc.buildings.is_empty() && !crate::systems::parents::in_founding_grace(world, cc, now))
                 || (cc.treasury <= 0 && cc.negative_since.is_some_and(|t| now.saturating_sub(t) >= limit))
         });
         if due {

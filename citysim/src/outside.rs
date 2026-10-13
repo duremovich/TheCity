@@ -69,6 +69,10 @@ pub enum OutsideOrder {
     Campaign,
     FoundBranch,
     Abandon,
+    /// M17 phase 3: the State's orders.
+    Fund,
+    Mandate,
+    Withdraw,
 }
 
 impl OutsideOrder {
@@ -82,7 +86,30 @@ impl OutsideOrder {
             OutsideOrder::Campaign => "Campaign",
             OutsideOrder::FoundBranch => "FoundBranch",
             OutsideOrder::Abandon => "Abandon",
+            OutsideOrder::Fund => "Fund",
+            OutsideOrder::Mandate => "Mandate",
+            OutsideOrder::Withdraw => "Withdraw",
         }
+    }
+
+    /// Every order (append-only order).
+    pub const ALL: [OutsideOrder; 11] = [
+        OutsideOrder::Hold,
+        OutsideOrder::Subsidise,
+        OutsideOrder::Reinforce,
+        OutsideOrder::Retake,
+        OutsideOrder::Sanction,
+        OutsideOrder::Campaign,
+        OutsideOrder::FoundBranch,
+        OutsideOrder::Abandon,
+        OutsideOrder::Fund,
+        OutsideOrder::Mandate,
+        OutsideOrder::Withdraw,
+    ];
+
+    /// By label, any case.
+    pub fn parse(s: &str) -> Option<OutsideOrder> {
+        OutsideOrder::ALL.into_iter().find(|o| o.label().eq_ignore_ascii_case(s))
     }
 }
 
@@ -153,6 +180,91 @@ pub struct Parent {
     /// The city's `Embargo`: no remittance out, no subsidy in, and the
     /// sanction's cut on income.
     pub embargoed: bool,
+    // --- Phase 3: bodies.
+    /// The branches' buildings at the last midnight (losses are read against it).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<crate::entity::EntityId>,
+    /// Buildings lost within `retake_window_days`, newest last.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub lost: Vec<LostBuilding>,
+    pub last_reinforce: Option<crate::time::Tick>,
+    /// Bodies still to send in this Reinforce episode.
+    pub reinforce_left: u32,
+    /// The next cohort's number (every episode one).
+    pub cohort_next: u32,
+    pub abandoned_until: Option<crate::time::Tick>,
+    /// The last corp branch's death (FoundBranch's clock).
+    pub branch_died_at: Option<crate::time::Tick>,
+    /// A god's `SetOutsideOrder`: the order holds until this tick.
+    pub pinned_until: Option<crate::time::Tick>,
+    /// Syndicates: each gang branch's leader at the last midnight.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub leaders: Vec<(crate::entity::EntityId, Option<crate::entity::EntityId>)>,
+    /// Syndicates: brothers due for a gang at a tick (the killer, when known).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub brothers_due: Vec<BrothersDue>,
+    pub last_brothers: Option<crate::time::Tick>,
+    /// Syndicates: the ticks of its refounds (the window's count).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub refounds: Vec<crate::time::Tick>,
+}
+
+/// M17 phase 3: a branch building lost (to a raid, a squat, a sale).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LostBuilding {
+    pub building: crate::entity::EntityId,
+    pub at: crate::time::Tick,
+    /// Buy-back offers refused so far.
+    pub refusals: u8,
+    /// The `Retake` record posted on it.
+    pub contract: Option<crate::contract::ContractId>,
+    /// The Hit on the raider gang's leader was posted.
+    #[serde(default)]
+    pub hit_posted: bool,
+}
+
+/// M17 phase 3: brothers a syndicate sends a gang.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BrothersDue {
+    pub gang: crate::entity::EntityId,
+    pub at: crate::time::Tick,
+    pub killer: Option<crate::entity::EntityId>,
+    /// A refound (the gang emptied), not a reinforcement.
+    pub refound: bool,
+}
+
+/// M17 phase 3: an agent from abroad (a side table, not a component: the
+/// 20k city's agents carry nothing for it).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Outsider {
+    pub from: OutsideId,
+    pub arrived: crate::time::Tick,
+    pub tour_until: crate::time::Tick,
+    pub cohort: u32,
+    /// A syndicate's brother (a member, no tour).
+    #[serde(default)]
+    pub brother: bool,
+}
+
+/// M17 phase 3: the day's bodies counters (the CSV's).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct OutsideDay {
+    pub arrived: u32,
+    pub left: u32,
+    pub settled: u32,
+    pub reinforcements: u32,
+    pub buybacks: u32,
+    pub retakes_posted: u32,
+    pub retakes_won: u32,
+    pub branches_founded: u32,
+    pub parents_founded: u32,
+    pub abandoned: u32,
+    pub brothers: u32,
+    pub refounded: u32,
+    pub grants: u32,
+    pub mandates: u32,
+    pub withdrawals: u32,
 }
 
 /// M17 phase 1 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the Ambient
@@ -256,6 +368,36 @@ pub struct Outside {
     pub inbound_mark: i64,
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub outbound_mark: i64,
+    // --- Phase 3: bodies.
+    /// Agents from abroad and the brothers, by entity.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub outsiders: BTreeMap<crate::entity::EntityId, Outsider>,
+    /// The State's extra guards (the reconcile hires `guard_count` + these).
+    #[serde(default, skip_serializing_if = "is_zero_u16")]
+    pub state_guards: u16,
+    /// The State's Mandate holds until this tick.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mandate_until: Option<crate::time::Tick>,
+    /// Days each unparented corp has held the founding thresholds.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub found_streak: BTreeMap<crate::entity::EntityId, u32>,
+    /// The parents with CSV columns (the seeded ones: the header is fixed).
+    #[serde(default, skip_serializing_if = "is_zero_u8")]
+    pub csv_parents: u8,
+    #[serde(default, skip_serializing_if = "is_default_day")]
+    pub today: OutsideDay,
+}
+
+fn is_zero_u16(v: &u16) -> bool {
+    *v == 0
+}
+
+fn is_zero_u8(v: &u8) -> bool {
+    *v == 0
+}
+
+fn is_default_day(v: &OutsideDay) -> bool {
+    *v == OutsideDay::default()
 }
 
 fn is_zero_f32(v: &f32) -> bool {

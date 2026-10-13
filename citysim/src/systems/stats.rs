@@ -34,7 +34,7 @@ pub fn csv_header(world: &World) -> String {
     }
     // M17 phase 2: the parents' group after it.
     if crate::systems::parents::parents_on(world) {
-        head = format!("{head},{}", crate::stats::OutsideCols::header(world.outside.parents().count()));
+        head = format!("{head},{}", crate::stats::OutsideCols::header(usize::from(world.outside.csv_parents)));
     }
     format!("{head},ticks_per_sec")
 }

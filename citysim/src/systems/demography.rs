@@ -1738,6 +1738,16 @@ fn spawn_migrant_child(world: &mut World, mother: EntityId, father: EntityId, ho
     id
 }
 
+/// M17 phase 3: one adult from abroad (an Outsider, a syndicate's
+/// brother): `arrive`'s migrant (the World's 15 coins and the arrival
+/// savings cross in), alone, at `tile`, housed at `home`. Not counted as an
+/// immigrant (the parents' own columns count it).
+pub(crate) fn spawn_outsider(world: &mut World, home: Option<EntityId>, tile: Option<TilePos>) -> EntityId {
+    let id = arrive(world, Arrival { home, kind: ArrivalKind::Migrant, sex: None, surname: None, tile }, None);
+    world.stats.current.immigrants = world.stats.current.immigrants.saturating_sub(1);
+    id
+}
+
 /// J20: the Block with room for `need` (residents + need ≤ capacity,
 /// floors included) nearest `near` (door to door; ties fewer residents,
 /// then id), or with no `near` the emptiest (fewest residents, then id).

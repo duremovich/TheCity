@@ -537,6 +537,18 @@ pub enum PlayerCommand {
     },
     /// M17 phase 2: the share of every remittance the Treasury keeps.
     SetTariff(f32),
+    /// M17 phase 3, god: a parent sends `bodies` Outsiders now (the
+    /// cooldown ignored, `outsiders_cap` not).
+    ForceReinforce {
+        id: crate::outside::OutsideId,
+        bodies: u32,
+    },
+    /// M17 phase 3, god: a parent's order pinned for `days`.
+    SetOutsideOrder {
+        id: crate::outside::OutsideId,
+        order: crate::outside::OutsideOrder,
+        days: u32,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1171,6 +1183,14 @@ impl World {
             }
             PlayerCommand::Embargo { id, on } => {
                 let text = crate::systems::outside::set_embargo(self, *id, *on);
+                self.lever_result(text);
+            }
+            PlayerCommand::ForceReinforce { id, bodies } => {
+                let text = crate::systems::parents::force_reinforce(self, *id, *bodies);
+                self.lever_result(text);
+            }
+            PlayerCommand::SetOutsideOrder { id, order, days } => {
+                let text = crate::systems::parents::set_order(self, *id, *order, *days);
                 self.lever_result(text);
             }
             PlayerCommand::SetTariff(t) => {

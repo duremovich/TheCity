@@ -261,6 +261,9 @@ pub enum Flow {
     /// M17 phase 2: a parent's coins into a branch (a subsidy), untaxed;
     /// capital, never revenue. The Outside group's `outside_parent_fund`.
     ParentFund,
+    /// M17 phase 3: the State's weekly grant for its guards, State ->
+    /// Treasury (untaxed; not a receipt the tax band reads).
+    Grant,
 }
 
 impl Flow {
@@ -366,7 +369,7 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Fare => row.transit.fares += coins,
         Flow::Coerced => row.leverage.flow_coerced += coins,
         Flow::Trauma => row.wounded.flow_trauma += coins,
-        Flow::AmbientSale | Flow::Remit | Flow::ParentFund => {}
+        Flow::AmbientSale | Flow::Remit | Flow::ParentFund | Flow::Grant => {}
     }
 }
 

@@ -222,6 +222,70 @@ Test fixtures:
 
 Found and fixed (outside phase 2's scope): `transit::board` did not check `CutLine`. A ride filed before the cut boarded the cut line after it: `god_line_cut` caught one on day 20 at 00:35. `board` now requires the line open, as it requires the stop.
 
+**The phase 2 homeless trace** (2026-10-13, seeds 42-47 × 120, each lever zeroed alone against phase 2). Homeless on d120 (mean over the run):
+
+| run | homeless d120 (mean) | evictions |
+|---|---|---|
+| c6d6ebe | 1,051 (1,222) | 5,212 |
+| phase 2 | 1,265 (1,328) | 5,442 |
+| `remit_share = 0` | 1,188 (1,281) | 5,259 |
+| `tribute_share = 0` | 1,109 (1,233) | 5,255 |
+| subsidies off | 1,259 (1,279) | 5,337 |
+
+- **Most of the rise is the syndicates' tribute.** With tribute off, the mean homeless count is back to c6d6ebe's, and gang members on d120 recover from 697 to 741 (768 on c6d6ebe). The weekly 10 % takes the coins a gang pays its members beyond the promise, so fewer stay in the gang, and the ones who leave lose that income and land on the street or in squats (squatters 920 → 1,132; 978 with tribute off).
+- **The rest is Arasaka's remittances.** Arasaka is a Security corp with no Housing; its mean treasury falls from 27k to 15.6k (21.7k with remittances off), and the city loses some of its hires (employed mean 7,043 → 6,978; 7,093 with remittances off).
+- **Not Militech's Housing.** Militech's treasury is unchanged (40k → 42k): its closing rarely clears `remit_floor`, so it remits little.
+
+Both effects are extraction by design, so whether they are wanted is a question for Dylan, not a tune.
+
+### Phase 3 status (2026-10-13): bodies
+
+Built as designed above in `systems/parents.rs` (one file with phase 2), `outside.rs` and `[outside.parents]`'s phase 3 keys:
+- **Reinforce:** Outsiders, each with a job at a branch post, a tour and a cohort.
+- **Retake:** a buy-back, then a `Retake` record (`ContractKind::Retake`, `Origin::Parent`) offered first to the branch's own Outsiders, a Hit on a raider gang's leader, and Guards on the remaining buildings.
+- **FoundBranch, Abandon,** and a local corp founding a parent.
+- **The syndicates:** brothers after a decapitation (leader dead or jailed) with their delay and cooldown, and refounds of an emptied gang. M12's bootstrap re-formation is off for a syndicate's gang.
+- **The State:** Fund, Mandate and Withdraw. `Outside.state_guards` sits on top of `guard_count` in the reconcile; the Mandate tilts the law's posture scores.
+- **The remit-gap fix:** `branch_loss`'s gap is now the share of corp branches a whole week in the red, so sporadic remittances read no loss.
+- **Commands and save:** `ForceReinforce` and `SetOutsideOrder` (CLI `force_reinforce=<id>:<n>`, `outside_order=<id>:<order>:<days>`), 17 Outside CSV columns, 14 events, SAVE 23.
+
+Deviations:
+- **A Retake is struck on the ledger.** It is one keyed draw at the missions' `p_win` over the crew's strength against the building's posted guards and the holder gang's strongest members, as Tag and Vote are ledger records. It is not a live mission: the mission machinery needs an agent target. A win forces the sale at value, funded by the parent.
+- **The buy-back's seller rule is simplified.** A corp sells when short of cash or its exec is greedy; an agent when greedy or poorer than the building; a gang never; the city always.
+- **Outsiders live in a side table** (`Outside.outsiders`), not a component. They spawn through demography's migrant arrival (the World's 15 coins and the arrival savings cross in), are not counted as immigrants, and get cohort edges as Acquaintances (there is no Colleague kind). The parent pays `body_cost` abroad and `body_fund` into the branch.
+- **A new branch survives without a building during its grace.** A Security Office cannot be built on a Lot, so with the parents on, M11's no-building bankruptcy waits out the new branch's upkeep grace while it buys or takes a building back.
+- **Brothers' triggers:** a leader dead or jailed since the last midnight (killer unknown); a Sack does not trigger them. A syndicate's cooldown is per syndicate, shared over its gangs.
+- **Emptied gangs:** an emptied gang waiting on its refound is out of `branch_loss` and gets no subsidy. `refound_attitude` is −0.5 (placeholder): a syndicate's attitude drifts below 0 without remittances.
+- **The State's Fund scores at the cap,** so a hot city keeps its guards (it oscillated Fund/Withdraw otherwise). The Mandate is read at the law's rescore: no `LawShock` is appended and the attention pool is not touched. `SetStateGuards` waits for phase 5.
+- **`flat_retake` is 0.15 (placeholder):** Retake's five considerations compensate to about 0.3 on a razed branch, under Hold's 0.3 plus hysteresis.
+- **A founded parent has no CSV columns.** The header is fixed at the seeded parents.
+
+Identity: with `CITYSIM_OUTSIDE_OFF=1` the 2k city is byte-identical to 4592dc1 with the same switch (events and CSV), seeds 42-44 × 30.
+
+Seeds 42-47 × 120 at 2k, 4592dc1 → phase 3:
+- Murders 543 → 622 (+15 %); Assault/day (Σ over the six seeds) 86.5 → 91.3.
+- Employed: mean 6,978 → 6,901, d120 8,801 → 8,438.
+- Homeless d120 1,265 → 1,339 (mean 1,328 → 1,336); starvation 3 → 2.
+- Population d120 11,449 → 11,423; gang members d120 697 → 770 (+10 %).
+- Total coins 1,552k → 1,650k.
+- Outsiders: 42 OutsidersArrived events, 8 left.
+- BrothersArrived events: 27 (3 bodies each), on 6 of 6 seeds.
+- Refounds 0.
+- The State: grants 115, mandates 7, withdrawals 18.
+- ParentFounded 6 (Nutrix on every seed, days 42-58, moving 16-24k abroad).
+- Abandoned 7 (the syndicates).
+- Retakes and buy-backs 0 (no branch building lost to a holder in the window). The spiral runs in `god_raze_arasaka`: FoundBranch, Reinforce, two refusals, a Retake and a Hit, BranchRetook on day 27.
+
+20k (seed 42 × 60, gen20k, 50 flats a slot, a single run):
+- 6 Outsiders arrived; 12 brothers.
+- State guards at the cap (120) by day 60; 9 grants.
+- Gang members d60 1,079 (1,053 in phase 2); population 19,753; employed 10,921.
+- Homeless d60 3,244 (3,387 in phase 2).
+- Murders 310, Assault/day 96.7.
+- 185 ticks/s (a single run; phase 2's 170 was one of two in parallel).
+
+Shadow: the d19 homeless paid rows are re-calibrated by the rule (`shadow.rs`, five readings).
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).
