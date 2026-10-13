@@ -389,3 +389,12 @@ Findings:
   - Levers: `bleed_hours`, the Rescue flat.
   - `CITYSIM_WOUNDED_OFF=1` is the off identity.
   - Phase 4 (boards, tags, attention) is running.
+- **M16b phase 4 (boards, tags, attention) merged 117d0f7**, SAVE 19:
+  - Gates: trio 1,068/0; core_year (starvation 2); shadow 131/0/4; gods 23; parity; core_20k at 209 tps.
+  - Boards on Habitat and Nutrix: 25 votes, 9 swung (by Threat), 6 chairs fallen.
+  - The boards' mean Personality costs the 2k city about 5 % employed and adds about 25 % homeless; A/B pins it on governance. Printed, not tuned.
+  - Tags: 503 planted, 33 found, 1,273 scans.
+  - Attention: about 7 of 13 factions are distracted most days (standing vendettas).
+  - Unit-tested only: the Purist Patrol, board Persuade and Vote records.
+  - `CITYSIM_PHASE4_OFF=1` is the off identity.
+  - Phase 5 (god scenarios V8, docs, deviations) is running, then `/code-review high`.
