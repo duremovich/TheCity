@@ -444,3 +444,33 @@ Findings:
     - Four with uncommitted old experiments remain and were left alone: ab4c98, a82410, a75bd4 (JOBS_V2.md), a2b9c2.
     - Also left: the unmerged old transit branch abdc8c, three locked worktrees, and `preflip`/`base4b` in the scratchpads.
   - **Pause before M18:** the next session is a dedicated NPC shadowing pass (gaps in the simulation) before any player machinery.
+- **M17 closed.**
+  - Review fixes are at a0d9c86, SAVE 27, trio 1,158/0. All 12 review findings were real and fixed, and each fix test fails on a8880e9.
+  - Every gate is green, and the off identity holds.
+- **Worktrees:** the four dirty ones were verified as superseded and removed. 8 remain:
+  - main, `m17b`, and the `jobs-spec` worktree;
+  - three locked;
+  - the old transit draft;
+  - the scratch baselines.
+
+## Next session (written 2026-10-13)
+
+The order (Dylan, 2026-10-13):
+
+1. **Jobs & lives milestone.**
+   - Spec: `docs/JOBS_AND_LIVES.md`, being drafted by agent `jobs-spec` in `.claude/worktrees/jobs-spec`. Review it with Dylan before building.
+   - Scope is "add it all":
+     - vice: a strip club, **both** a grim chipped-joytoy dollhouse and plain brothels, street work with pimps, Spire escorts, braindance studios;
+     - the street economy;
+     - weapons as a good;
+     - Corp HQ;
+     - life stages: kids, elders, disability;
+     - the gray market;
+     - faith;
+     - fashion;
+     - the unbuilt half of JOBS_V2: P4 industries, P5b civic, P7 day labour and vendors, P8 HQ, the foreman.
+   - Keep it systems-level and non-explicit. Names live in config.
+2. **The NPC shadowing session**, dedicated: many archetypes at 2k and 20k, diaries critiqued as real lives, and a gaps doc. Then fix the gaps.
+3. **M18**, the player character. Don't start it before 1 and 2.
+
+Standing: extraction stays at `remit_share` 0.3 / `scrip_wage_share` 0.3. Corp names (Arasaka, Militech, …) are placeholders, and no logic keys on names (`Config::unresolved_names`).
