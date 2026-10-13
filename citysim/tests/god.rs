@@ -2748,9 +2748,10 @@ fn god_raze_arasaka() {
     assert!(!reacted.is_empty(), "Arasaka Global did not react to the razing");
 }
 
-/// M17 god 3: The Hollow's leader killed on day 20 and the successor on
-/// day 35: brothers arrive between days 25 and 30, and none for the second
-/// (the syndicate's cooldown).
+/// M17 god 3 (phase 4b: the gang settles its own succession): The Hollow's
+/// leader killed on day 20 and the successor on day 35. Each fall is answered
+/// inside the gang within two days (a promotion, a civil war, or the end of
+/// one); the brothers are a rare sack-gutting event now and are printed.
 #[test]
 #[ignore]
 fn god_decapitate_twice() {
@@ -2761,15 +2762,6 @@ fn god_decapitate_twice() {
             .and_then(|g| w.comp::<Gang>(g).and_then(|x| x.leader))
     };
     let (_, story) = run_outside(60, |w, day| {
-        if day == 20 {
-            // A syndicate ready to answer (seed 42's gangs lose leaders to
-            // arrests in the first fortnight, which starts its cooldown).
-            for f in w.outside.factions.iter_mut().filter(|f| f.name == "Hollow Brothers") {
-                if let Some(p) = f.parent.as_mut() {
-                    p.last_brothers = None;
-                }
-            }
-        }
         if day == 20 || day == 35 {
             if let Some(l) = leader(w) {
                 eprintln!("day {day}: killing {}", w.name_of(l));
@@ -2779,15 +2771,79 @@ fn god_decapitate_twice() {
             }
         }
     });
-    let arrivals = told(&story, &[EventKind::BrothersArrived], 0, 60);
-    for l in &arrivals {
+    let kinds = [EventKind::Succession, EventKind::CivilWar, EventKind::CivilWarEnded, EventKind::BrothersArrived];
+    for l in told(&story, &kinds, 0, 60) {
         eprintln!("{l}");
     }
-    let first = told(&story, &[EventKind::BrothersArrived], 25, 31);
-    assert!(!first.is_empty(), "no brothers after the first decapitation");
-    let again =
-        told(&story, &[EventKind::BrothersArrived], 36, 60).into_iter().filter(|l| l.contains("The Hollow")).count();
-    assert_eq!(again, 0, "brothers came again inside the cooldown");
+    let answered = |from: u64| {
+        told(&story, &[EventKind::Succession, EventKind::CivilWar, EventKind::CivilWarEnded], from, from + 2)
+            .into_iter()
+            .any(|l| l.contains("The Hollow"))
+    };
+    assert!(answered(20), "no succession after the first decapitation");
+    assert!(answered(35), "no succession after the second decapitation");
+}
+
+/// M17 god 3b (phase 4b): The Hollow's leader killed on day 20 with two
+/// near-equal lieutenants (their days in the gang the leader's, their
+/// loyalty 0.001 and 0.006 under it: a gap inside `war_margin`). Does the
+/// gang fall into a civil war (sides taken, the claimants at each other)
+/// and settle it, with a winner in the chair and the loser dead, fled or
+/// at the head of a splinter, within `war_days`?
+#[test]
+#[ignore]
+fn god_decapitate_close_succession() {
+    let hollow = |w: &World| w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "The Hollow"));
+    let (w, story) = run_outside(60, |w, day| {
+        if day != 20 {
+            return;
+        }
+        let Some(g) = hollow(w) else { return };
+        let ranking = citysim::systems::gang::leader_ranking(w, g);
+        let (Some(&l), Some(&a), Some(&b)) = (ranking.first(), ranking.get(1), ranking.get(2)) else {
+            eprintln!("day 20: The Hollow has fewer than three free members");
+            return;
+        };
+        let joined = w.comp::<citysim::components::GangMember>(l).map_or(0, |m| m.joined_tick);
+        if w.comp::<citysim::components::Personality>(l).is_some_and(|p| p.loyalty < 0.01) {
+            w.comp_mut::<citysim::components::Personality>(l).expect("p").loyalty = 1.0;
+        }
+        let loyalty = w.comp::<citysim::components::Personality>(l).map_or(1.0, |p| p.loyalty);
+        for (m, under) in [(a, 0.001), (b, 0.006)] {
+            w.comp_mut::<citysim::components::GangMember>(m).expect("gm").joined_tick = joined;
+            w.comp_mut::<citysim::components::Personality>(m).expect("p").loyalty = loyalty - under;
+        }
+        eprintln!(
+            "day 20: The Hollow ({} free members); killing {}, lieutenants {} and {}",
+            ranking.len(),
+            w.name_of(l),
+            w.name_of(a),
+            w.name_of(b)
+        );
+        w.push_command(PlayerCommand::KillAgent(l));
+    });
+    let days = u64::from(w.config.outside.succession.war_days);
+    let war = told(&story, &[EventKind::CivilWar], 20, 22);
+    let sides = told(&story, &[EventKind::TookSides], 20, 22).into_iter().filter(|l| l.contains("The Hollow")).count();
+    let hunts = told(&story, &[EventKind::HuntStarted, EventKind::ContractPosted], 20, 22);
+    let ended = told(&story, &[EventKind::CivilWarEnded], 20, 20 + days + 2);
+    for l in war.iter().chain(&ended) {
+        eprintln!("{l}");
+    }
+    eprintln!("TookSides {sides}; Hunts or contracts on days 20-21: {}", hunts.len());
+    for l in told(&story, &[EventKind::Split, EventKind::Murder, EventKind::Emigration], 20, 20 + days + 2)
+        .into_iter()
+        .filter(|l| ended.iter().any(|e| e.split_whitespace().nth(3).is_some_and(|n| l.contains(n))))
+    {
+        eprintln!("  {l}");
+    }
+    if let Some(g) = hollow(&w) {
+        let x = w.comp::<Gang>(g).expect("gang");
+        eprintln!("day 60: The Hollow led by {:?}, {} members", x.leader.map(|l| w.name_of(l)), x.members.len());
+    }
+    assert!(war.iter().any(|l| l.contains("The Hollow")), "no civil war after a close succession");
+    assert!(sides > 0, "nobody took sides");
+    assert!(ended.iter().any(|l| l.contains("The Hollow")), "the war was not settled within war_days");
 }
 
 /// M17 god 4: a murder wave (25 residents killed on day 10). Does the State

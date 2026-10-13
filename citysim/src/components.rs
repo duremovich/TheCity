@@ -2713,6 +2713,30 @@ pub struct Gang {
     /// Plan field: territory tribute since the last Collect (`daily_economy`).
     #[serde(default, skip_serializing_if = "is_zero_i64")]
     pub tribute_week: i64,
+    // --- M17 phase 4b: the succession.
+    /// The civil war for the chair, while it runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub war: Option<CivilWar>,
+    /// The war's heir while it runs, then its winner: the leader while a
+    /// free member (over `leader_ranking`'s top); cleared once not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub crowned: Option<EntityId>,
+}
+
+/// M17 phase 4b: a gang's civil war for the chair after a close succession.
+/// `heir` (the ranking's top) holds the chair while it runs; `challenger`
+/// (the runner-up) contests it. The sides are the free members who took
+/// each claimant's part (the claimants included), fixed at the start.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CivilWar {
+    pub heir: EntityId,
+    pub challenger: EntityId,
+    /// The leader whose fall opened it.
+    pub fallen: Option<EntityId>,
+    pub since: Tick,
+    pub until: Tick,
+    pub heir_side: Vec<EntityId>,
+    pub challenger_side: Vec<EntityId>,
 }
 
 impl Gang {
@@ -2754,6 +2778,8 @@ impl Gang {
             called_for: None,
             collected_day: None,
             tribute_week: 0,
+            war: None,
+            crowned: None,
         }
     }
 

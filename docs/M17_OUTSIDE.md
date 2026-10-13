@@ -344,6 +344,40 @@ Seeds 42-47 × 120 at 2k, a07544b → phase 4:
 - Employed 10,827; homeless 3,293; Murders 315; Assault/day 104.7.
 - 183 ticks/s.
 
+### Phase 4b status (2026-10-13): the succession
+
+Dylan, reviewing the brothers: "A good possible event, but a little weird as an always occupancy. Gangs probably should promote from within or even have a civil war to settle who the new boss is." Built in `systems/succession.rs`, with hooks in `gang.rs` (`leader_scores`, the crown in `recompute_leader_after`, D36's split as `split_led`) and `parents.rs`; `[outside.succession]`; SAVE 25.
+
+- **Promotion is the default.** A decapitated gang's new leader is the top of `leader_ranking`, as before; a `Succession` event names the promoted, the gang and the fallen. A leader jailed leaves an acting leader ("runs The Hollow while X sits inside"; nothing for a Vagrancy night) and never a war: the boss walks back in on release.
+- **A close succession is a civil war.** When the leader died, the runner-up stands within `war_margin` (0.02) of the heir and the gang has `war_min_members` (8) free members:
+  - every free member takes a side: the challenger's pull (their edge's affinity, plus `regard_w × (standing + dread × (1 − courage))` of the claimant) against the heir's pull plus `loyalty_w × loyalty`; a `TookSides` event per member for the diaries;
+  - the feud runs on M15: each claimant holds a `war_grudge` (0.9, lethal) grudge on the other and takes up the Hunt at once (a Statistical claimant is promoted to Coarse; a weak one may hire instead), the two strongest seconds of each side hold `war_grudge_second` (0.8) on the rival claimant, and the sides are Enemies (30 pairs at most);
+  - the heir holds the chair while it runs (`Gang.crowned`);
+  - a claimant killed or jailed loses at once; after `war_days` (14) the sides' summed `raid::strength` settles it on a keyed roll (the heir wins under its share);
+  - the winner is crowned; the loser is dead, sat in a cell, leads a splinter of its following through D36's split (`split_led`: the structure tests only), or leaves the gang and the city.
+- **Brothers are a rare event.** A syndicate sends them only to a gang sacked since the last midnight with fewer than `brothers_gutted_below` (6) free members, on a keyed roll under `brothers_p` (0.3), or on the god `SendBrothers(gang)` (the next midnight, the cooldown ignored). The phase 3 scheduler is kept as `schedule_brothers`.
+- **CSV:** `successions` (promotions after a death), `civil_wars`, `wars_active`, `war_loser_dead`, `war_loser_fled`, `war_loser_splinter`, `war_loser_jailed`. Events `Succession`, `CivilWar`, `TookSides`, `CivilWarEnded`.
+
+Deviations:
+- **Wars follow deaths only.** Leaders are jailed about 70 times a seed in 120 days; a war on each read as noise (85 wars on 42-47 in the first build). A jailing leaves an acting leader.
+- **Regard is the claimants' reputation.** M15's `Regard` is faction × faction, the same for both claimants inside one gang, so a member's regard reads each claimant's standing and dread.
+- **The succession rides the M17 switch** (`CITYSIM_OUTSIDE_OFF=1` turns it off with the parents), so the off identity holds against main.
+- **A jailed loser stays a member** (nobody's boss); the war's grudges live on and decay.
+- **The god scenario's lieutenants are staged**: their days in the gang set to the leader's and their loyalty 0.001 and 0.006 under it.
+
+Identity: with `CITYSIM_OUTSIDE_OFF=1` the 2k city is byte-identical to 19e17d0 with the same switch (events, and the CSV on its 654 shared columns), seeds 42-44 × 30.
+
+Seeds 42-47 × 120 at 2k, 19e17d0 → phase 4b (printed findings):
+- Leader deaths 12: 8 promoted, 4 civil wars (seeds 43, 44, 45 twice; 98 members took sides). Every war ended inside 1-3 days with the loser jailed (Dealing, Assault): the law settles them before the strength roll. Fled and splinter fired on 0 of 6 (unit-tested). Acting leaders 424.
+- Brothers: 27 BrothersArrived (81 bodies) → 1 (3 bodies, seed 47).
+- Murders 523 → 565 (per seed 80/62/82/78/83/138 → 54/77/104/118/144/68: the noise between builds is wider than the change); Assault/day (Σ) 89.1 → 82.2.
+- Gang members d120 778 → 725 (mean 698 → 666). Per gang on day 120, summed over the seeds: The Hollow 213 → 166, Ninefold 205 → 247, Rust Saints 160 → 153, The Unplugged 200 → 159.
+- Employed mean 6,870 → 6,807 (d120 8,407 → 8,222); homeless d120 1,353 → 1,546; starvation 2 → 1; population d120 11,503 → 11,469.
+
+20k (seed 42 × 60, gen20k, 50 flats a slot, a single run; phase 4's reading in brackets): 7 promotions, 176 acting leaders, 1 civil war (Low Choir, day 51, still running on day 60), 0 brothers (12 in phase 3); employed 10,943 (10,827), homeless 3,242 (3,293), gang members 996, Murders 316 (315), Assault/day 99.4 (104.7); 210 ticks/s (183).
+
+The shadow d19 homeless rows `PaidOfWorked` / `WagedWorkdays` are restored to their pre-phase-3 bounds (Min 0.7 / 0.68): the shipped city reads 0.84 / 0.80.
+
 Companion to `SPEC.md`, `M8_FACTIONS.md`, `M9_LAW.md`, `M10_SCALE.md`, `M11_OWNERSHIP.md`, `M12_DISTRICTS.md`, `M13_ASSETS.md`, `M14_VIRT.md`, `M15_WORD_AND_BLOOD.md`, `M16_CONTRACTS.md`, `ROADMAP_POST_M14.md` and `VISION.md`. M16 put a price on everything inside the city. M17 gives the city **an outside that pays some of those prices**: a ledger nobody in the city can walk to, which sends coins, bodies and contracts in and takes remittances, tribute and Data out. Ninefold raids Arasaka's Security Office in the Sump twice and its last two clients walk; within the week a dozen hard-faced guards nobody has seen before step off the edge road, sleep in a Hotel on Arasaka's account, and a `Retake` contract appears on the Stack Bar Fixer's book with Ninefold's leader as the door. Meanwhile a Zetatech runner on a tier-3 deck goes through Militech's uplink three nights in a month and wipes its Deck Data abroad; Militech's outside income falls under its upkeep, its creditors call it in on day 97, Militech's Blocks go to the estate, and every Militech tenant holding scrip wakes up poor. Mid West riots on day 98. Where this document and the earlier ones disagree, this one wins for M17.
 
 The roadmap row (`ROADMAP_POST_M14.md`): *parents outside the city at ledger LOD: megacorps, syndicates, the state; remittance, reinforcement, collapse; Virt and economic warfare as the only weapons that reach a parent.* M17 also takes what the addenda and `VISION.md` assign to it: the outside as combat maps with a transient cast promotable to persistence (governance addendum; hook only), scrip valued by the outside ledger (addendum 9), the Blackwall as the daemon tier cap (addendum 11, candidate), bunkers that the outside can still trace (addendum 7; a sighting source only), the `Corp.parent` and `outside_treasury` hooks of M11 D41, the uplink nodes and the `edge` cut from Data theft that M14 deferred, `Flow::Import` re-pointed at the outside (M13; a switch, off by default), and the cross-boundary contracts M16 deferred. The player, maps and daemons stay out (§ 14).

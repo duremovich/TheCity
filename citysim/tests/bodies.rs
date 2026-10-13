@@ -223,7 +223,7 @@ fn test_brothers_after_the_delay_and_not_inside_the_cooldown() {
     let g = hollow.parent.as_ref().expect("p").branches[0];
     let cfg = w.config.outside.parents.clone();
     let n0 = w.comp::<Gang>(g).expect("gang").members.len();
-    assert!(parents::on_decapitation(&mut w, g, None), "brothers scheduled");
+    assert!(parents::schedule_brothers(&mut w, g, None), "brothers scheduled");
     w.run_ticks((u64::from(cfg.brother_delay_days) - 1) * TICKS_PER_DAY);
     assert!(!w.events.iter().any(|e| e.kind == EventKind::BrothersArrived), "not before the delay");
     w.run_ticks(2 * TICKS_PER_DAY);
@@ -232,7 +232,7 @@ fn test_brothers_after_the_delay_and_not_inside_the_cooldown() {
     assert_eq!(brothers.len() as u32, cfg.brothers);
     assert!(brothers.iter().all(|&b| w.gang_of(b) == Some(g)), "members of the gang");
     assert!(w.comp::<Gang>(g).expect("gang").members.len() >= n0, "the roster grew back");
-    assert!(!parents::on_decapitation(&mut w, g, None), "inside the cooldown: none");
+    assert!(!parents::schedule_brothers(&mut w, g, None), "inside the cooldown: none");
 }
 
 /// An emptied gang with a syndicate takes no bootstrap recruit; it

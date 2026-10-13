@@ -175,6 +175,11 @@ fn kind_colour(kind: EventKind) -> Color32 {
         | EventKind::CampaignPosted
         | EventKind::ParentDied
         | EventKind::ScripWiped
+        // M17 phase 4b: the succession.
+        | EventKind::Succession
+        | EventKind::CivilWar
+        | EventKind::TookSides
+        | EventKind::CivilWarEnded
         | EventKind::CaseCold
         // The Real economy (plan E44).
         | EventKind::Imported

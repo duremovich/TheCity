@@ -115,7 +115,12 @@ use crate::world::World;
 /// day's phase 4 counters, `[outside.parents]`'s phase 4 keys and the rows'
 /// `data`/`tech` (serde defaults), the appended `NodeKind::Uplink`,
 /// `Flow::Scrip`, six events and six god commands.
-pub const SAVE_VERSION: u8 = 24;
+/// 25: M17 phase 4b, the succession: `Gang.{war, crowned}` (`CivilWar`),
+/// the day's succession counters, `[outside.succession]` and
+/// `[outside.parents]`'s `brothers_gutted_below`/`brothers_p` (serde
+/// defaults), the appended `GrudgeCause::Succession`, `HuntWhy::Succession`,
+/// four events and `PlayerCommand::SendBrothers`.
+pub const SAVE_VERSION: u8 = 25;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

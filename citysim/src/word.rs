@@ -367,6 +367,8 @@ pub enum GrudgeCause {
     /// Real economy E38, E41: the child protective service (the Law) took
     /// the holder's child, or the camp (its owner) fed the holder badly.
     ChildTaken,
+    /// M17 phase 4b: the other claimant in a civil war for the holder's gang.
+    Succession,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -421,6 +423,8 @@ pub enum HuntWhy {
     Goal,
     Stat,
     God,
+    /// M17 phase 4b: a claimant in a civil war goes after the other.
+    Succession,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]

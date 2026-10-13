@@ -301,6 +301,14 @@ pub struct OutsideDay {
     pub grants: u32,
     pub mandates: u32,
     pub withdrawals: u32,
+    /// Phase 4b: the succession (promotions after a fall, civil wars opened,
+    /// and how each ended for its loser).
+    pub successions: u32,
+    pub wars: u32,
+    pub war_dead: u32,
+    pub war_fled: u32,
+    pub war_splinter: u32,
+    pub war_jailed: u32,
 }
 
 /// M17 phase 1 (docs/M17_OUTSIDE.md, "Revised 2026-10-12"): the Ambient

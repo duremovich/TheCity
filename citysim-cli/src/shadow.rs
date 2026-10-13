@@ -2516,13 +2516,11 @@ const CHECKS: &[Check] = &[
     (19, "homeless", Metric::KnownMetWeek, Bound::Min(6.4), 10.81, 12.54),
     (19, "homeless", Metric::RefundsWeek, Bound::Max(1.0), 0.00, 0.00),
     (19, "homeless", Metric::CommuteAbortsDay, Bound::Max(0.06), 0.00, 0.01),
-    // M17 phase 3 (re-calibrated by the rule on five readings with the bodies on: the shipped city
-    // 0.64 / 0.61, the 1.01 and 0.99 stat_violence_mult butterflies 0.81 / 0.77 and 0.64 / 0.64, the
-    // State off 0.68 / 0.63, the Outsiders off 0.66 / 0.64; 0.91 / 0.92 with the brothers off): the
-    // homeless workers are few, and an agent-owned Bar's owner short of a wage reads as an unpaid
-    // shift; the brothers' larger gangs move that trajectory.
-    (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.54), 0.64, 0.94),
-    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.51), 0.61, 0.88),
+    // M17 phase 4b: restored to the pre-phase-3 bounds. Phase 3 loosened them to 0.54 / 0.51 for the
+    // brothers' larger gangs (the shipped city read 0.64 / 0.61, 0.91 / 0.92 with the brothers off);
+    // with the brothers a rare sack-gutting event the shipped city reads 0.84 / 0.80.
+    (19, "homeless", Metric::PaidOfWorked, Bound::Min(0.7), 0.80, 0.94),
+    (19, "homeless", Metric::WagedWorkdays, Bound::Min(0.68), 0.78, 0.88),
     (19, "reporter", Metric::WalkHDay, Bound::Max(5.9), 4.03, 4.85),
     (19, "reporter", Metric::LongestSleepH, Bound::Min(4.4), 4.90, 5.27),
     (19, "reporter", Metric::Energy0HWeek, Bound::Max(2.1), 0.00, 0.01),

@@ -548,6 +548,14 @@ pub struct OutsideCols {
     /// balance of trade's parents term).
     pub parents_in: i64,
     pub parents_out: i64,
+    /// M17 phase 4b: the succession (the day's; `wars_active` at the close).
+    pub successions: u32,
+    pub civil_wars: u32,
+    pub wars_active: u32,
+    pub war_loser_dead: u32,
+    pub war_loser_fled: u32,
+    pub war_loser_splinter: u32,
+    pub war_loser_jailed: u32,
     pub accounts: Vec<ParentCols>,
 }
 
@@ -594,6 +602,13 @@ impl OutsideCols {
             "scrip_wiped",
             "parents_in",
             "parents_out",
+            "successions",
+            "civil_wars",
+            "wars_active",
+            "war_loser_dead",
+            "war_loser_fled",
+            "war_loser_splinter",
+            "war_loser_jailed",
         ]
         .iter()
         .map(|s| s.to_string())
@@ -647,6 +662,13 @@ impl OutsideCols {
             self.scrip_wiped.to_string(),
             self.parents_in.to_string(),
             self.parents_out.to_string(),
+            self.successions.to_string(),
+            self.civil_wars.to_string(),
+            self.wars_active.to_string(),
+            self.war_loser_dead.to_string(),
+            self.war_loser_fled.to_string(),
+            self.war_loser_splinter.to_string(),
+            self.war_loser_jailed.to_string(),
         ];
         for a in &self.accounts {
             v.push(a.treasury.to_string());

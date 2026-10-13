@@ -573,6 +573,9 @@ pub enum PlayerCommand {
     },
     /// M17 phase 4: no scrip issued; every holder redeemed at health.
     BanScrip(bool),
+    /// M17 phase 4b, god: a gang's syndicate sends its brothers at the next
+    /// midnight (the cooldown ignored; the syndicate pays).
+    SendBrothers(EntityId),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1239,6 +1242,10 @@ impl World {
             }
             PlayerCommand::BanScrip(on) => {
                 let text = crate::systems::parents::ban_scrip(self, *on);
+                self.lever_result(text);
+            }
+            PlayerCommand::SendBrothers(gang) => {
+                let text = crate::systems::parents::send_brothers(self, *gang);
                 self.lever_result(text);
             }
             PlayerCommand::SetTariff(t) => {
