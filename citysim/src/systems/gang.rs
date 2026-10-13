@@ -287,6 +287,11 @@ pub fn leave(world: &mut World, id: EntityId, reason: &str) {
 /// days_in_gang / 100`, best first (ties the lower id). M12 D36: the
 /// runner-up is the lieutenant.
 pub fn leader_ranking(world: &World, gang: EntityId) -> Vec<EntityId> {
+    leader_scores(world, gang).into_iter().map(|(m, _)| m).collect()
+}
+
+/// [`leader_ranking`] with each member's score, best first.
+pub fn leader_scores(world: &World, gang: EntityId) -> Vec<(EntityId, f32)> {
     let Some(g) = world.comp::<Gang>(gang) else { return Vec::new() };
     let tick = world.tick;
     let mut ranked: Vec<(EntityId, f32)> = g
@@ -303,7 +308,7 @@ pub fn leader_ranking(world: &World, gang: EntityId) -> Vec<EntityId> {
         })
         .collect();
     ranked.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
-    ranked.into_iter().map(|(m, _)| m).collect()
+    ranked
 }
 
 /// `leader = argmax(loyalty + days_in_gang / 100)` over members with a Brain
@@ -316,9 +321,15 @@ pub fn recompute_leader(world: &mut World, gang: EntityId) {
 /// was the leader and a new one takes over, the gang is due a split check
 /// (M12 D36, `Gang.split_check`).
 fn recompute_leader_after(world: &mut World, gang: EntityId, fallen: Option<EntityId>) {
+    // M17 phase 4b: a claimant killed or jailed loses the civil war at once;
+    // the winner is crowned and no new succession follows.
+    let war_lost = fallen.is_some_and(|f| crate::systems::succession::claimant_fell(world, gang, f));
     let Some(g) = world.comp::<Gang>(gang) else { return };
-    let (members, old) = (g.members.clone(), g.leader);
-    let leader = leader_ranking(world, gang).first().copied();
+    let (members, old, crowned) = (g.members.clone(), g.leader, g.crowned);
+    let ranking = leader_ranking(world, gang);
+    // The war's heir, then its winner, leads while a free member.
+    let crowned = crowned.filter(|c| ranking.contains(c));
+    let leader = crowned.or_else(|| ranking.first().copied());
     for &m in &members {
         if let Some(gm) = world.comp_mut::<GangMember>(m) {
             gm.rank = if Some(m) == leader { 2 } else { 0 };
@@ -328,10 +339,15 @@ fn recompute_leader_after(world: &mut World, gang: EntityId, fallen: Option<Enti
     // The standing boss is kept while they are still inside.
     let jailed_boss = old.filter(|&o| leader != Some(o) && world.has::<Sentence>(o));
     let boss_inside = world.comp::<Gang>(gang).and_then(|g| g.boss).is_some_and(|b| world.has::<Sentence>(b));
-    let decapitated = fallen.is_some() && old == fallen && leader.is_some() && leader != old;
+    let decapitated = !war_lost && fallen.is_some() && old == fallen && leader.is_some() && leader != old;
     if let Some(g) = world.comp_mut::<Gang>(gang) {
         g.leader = leader;
-        if jailed_boss.is_some() && !boss_inside {
+        // A heir out for a Vagrancy night keeps the war's crown.
+        if crowned.is_none() && g.war.is_none() {
+            g.crowned = None;
+        }
+        // A claimant who lost the war from a cell is nobody's boss.
+        if jailed_boss.is_some() && !boss_inside && !war_lost {
             g.boss = jailed_boss;
         }
         if decapitated {
@@ -1164,11 +1180,16 @@ pub fn run(world: &mut World) {
     let hysteresis = world.config.gangs.hysteresis;
     let threshold = world.config.gangs.shock_severity_rethink;
     for gang in world.gangs() {
-        // M12 D36: a decapitation this tick may split the gang.
+        // M12 D36: a decapitation this tick may split the gang. M17 phase
+        // 4b: the succession first (a promotion, or a civil war instead of
+        // the split check).
         if let Some(old) = world.comp_mut::<Gang>(gang).and_then(|g| g.split_check.take()) {
-            let _ = split(world, gang, Some(old), true);
+            if !crate::systems::succession::decide(world, gang, old) {
+                let _ = split(world, gang, Some(old), true);
+            }
         }
         if daily {
+            crate::systems::succession::daily(world, gang);
             recompute_leader(world, gang);
             // The law has just rescored (it runs before this system): a gang
             // under Crackdown may buy its way out before choosing its order.
@@ -1519,14 +1540,48 @@ pub fn held_districts(world: &World, gang: EntityId) -> Vec<(DistrictId, usize)>
 /// headcount. `Split` event; Enemy edges across the rosters (30 pairs at
 /// most); `Shock::Split` on both. Returns the splinter, or why not.
 pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, roll: bool) -> Result<EntityId, String> {
+    split_inner(world, gang, old_leader, roll, None)
+}
+
+/// M17 phase 4b: the loser of a civil war leads a splinter of its
+/// `following` (D36's structure tests only: two held districts, the cap, a
+/// Hideout site). The splinter takes the held district apart from the
+/// leader's, its claims, and the treasury share by headcount.
+pub fn split_led(
+    world: &mut World,
+    gang: EntityId,
+    loser: EntityId,
+    following: &[EntityId],
+) -> Result<EntityId, String> {
+    split_inner(world, gang, None, false, Some((loser, following)))
+}
+
+fn split_inner(
+    world: &mut World,
+    gang: EntityId,
+    old_leader: Option<EntityId>,
+    roll: bool,
+    led: Option<(EntityId, &[EntityId])>,
+) -> Result<EntityId, String> {
     use crate::systems::raid;
     let cfg = world.config.gangs.clone();
     if roll && cfg.split_base <= 0.0 {
         return Err("splits are off".into());
     }
-    let ranking = leader_ranking(world, gang);
-    let (Some(&leader), Some(&lt)) = (ranking.first(), ranking.get(1)) else {
-        return Err("no lieutenant".into());
+    let (leader, lt) = match led {
+        Some((loser, _)) => {
+            let Some(leader) = world.comp::<Gang>(gang).and_then(|g| g.leader).filter(|&l| l != loser) else {
+                return Err("no leader".into());
+            };
+            (leader, loser)
+        }
+        None => {
+            let ranking = leader_ranking(world, gang);
+            let (Some(&leader), Some(&lt)) = (ranking.first(), ranking.get(1)) else {
+                return Err("no lieutenant".into());
+            };
+            (leader, lt)
+        }
     };
     let held = held_districts(world, gang);
     if held.len() < 2 {
@@ -1590,10 +1645,14 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
         .copied()
         .filter(|&m| m != leader)
         .filter(|&m| m == lt || Some(m) != boss)
-        .filter(|&m| {
-            m == lt
-                || home_or_squat(world, m).is_some_and(|b| world.district_of_building(b) == sd)
-                || world.edge(m, lt).map_or(0.0, |e| e.affinity) > world.edge(m, leader).map_or(0.0, |e| e.affinity)
+        .filter(|&m| match led {
+            // A war's loser takes its following, wherever they live.
+            Some((_, following)) => m == lt || following.contains(&m),
+            None => {
+                m == lt
+                    || home_or_squat(world, m).is_some_and(|b| world.district_of_building(b) == sd)
+                    || world.edge(m, lt).map_or(0.0, |e| e.affinity) > world.edge(m, leader).map_or(0.0, |e| e.affinity)
+            }
         })
         .collect();
     let treasury = world.comp::<Gang>(gang).map_or(0, |g| g.treasury.max(0));
@@ -1602,6 +1661,10 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
     let mut sg = Gang::new(name.clone(), hideout, share);
     sg.empty_since = None;
     sg.split_from = Some(gang);
+    // A war's loser founds and leads its splinter.
+    if led.is_some() {
+        sg.crowned = Some(lt);
+    }
     world.insert(splinter, sg);
     // M14 V4: the splinter's Hideout (a converted derelict, or a Lot built
     // with no owner yet) gets its node at the next tick, not the next midnight.
@@ -1657,9 +1720,10 @@ pub fn split(world: &mut World, gang: EntityId, old_leader: Option<EntityId>, ro
     push_shock(world, splinter, Shock::Split);
     let ltn = world.name_of(lt);
     let dn = world.district_name(sd).to_string();
-    let why = match old_leader {
-        Some(o) => format!(" after {} fell", world.name_of(o)),
-        None => String::new(),
+    let why = match (led, old_leader) {
+        (Some(_), _) => format!(" after losing the war for {old_name}"),
+        (None, Some(o)) => format!(" after {} fell", world.name_of(o)),
+        (None, None) => String::new(),
     };
     world.push_event(
         EventKind::Split,

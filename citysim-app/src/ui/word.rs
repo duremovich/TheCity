@@ -235,6 +235,7 @@ fn cause_text(world: &World, c: citysim::word::GrudgeCause) -> String {
         G::Inherited(x) => format!("inherited from {}", world.name_of(x)),
         G::Hired => "a contract".to_string(),
         G::ChildTaken => "a child taken".to_string(),
+        G::Succession => "the war for the gang".to_string(),
     }
 }
 

@@ -596,8 +596,13 @@ fn mechanisms() -> Vec<Mechanism> {
         // `bodies.rs` (0-3 of 6 seeds); a ParentFounded (one a seed) and an
         // Abandoned (5 of 6) are printed.
         ("an OutsidersArrived", k(EventKind::OutsidersArrived)), // [9, 6, 6]; 45-47 [9, 6, 6]
-        ("a BrothersArrived", k(EventKind::BrothersArrived)),    // [5, 6, 6]; 45-47 [2, 2, 6]
         ("a StateGrant", k(EventKind::StateGrant)),              // [17, 27, 19]; 45-47 [17, 19, 16]
+        // M17 phase 4b (seeds 42-47 x 120 days): the succession. A Succession
+        // (an acting leader or a promotion) fires on every seed; a CivilWar
+        // (3 of 6) and the brothers, now a sack-gutting roll (1 of 6; phase 3
+        // read [5, 6, 6] / [2, 2, 6] on every decapitation), are unit-tested in
+        // `succession.rs`.
+        ("a Succession", k(EventKind::Succession)), // [46, 64, 58]; 45-47 [97, 96, 75]
         // M17 phase 4 (seeds 42-47 x 120 days): an uplink run, a Campaign and a
         // parent's death fired on 0 of 6 (`weapons.rs`, `god_kill_militech`).
         ("a day with scrip paid", m("scrip paid")),

@@ -382,10 +382,17 @@ pub enum EventKind {
     CampaignPosted,
     ParentDied,
     ScripWiped,
+    /// M17 phase 4b: the succession. `Succession [new leader, gang, fallen]`
+    /// (a promotion), `CivilWar [heir, challenger, gang]`, `TookSides
+    /// [member, claimant, gang]`, `CivilWarEnded [winner, loser, gang]`.
+    Succession,
+    CivilWar,
+    TookSides,
+    CivilWarEnded,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 193] = [
+    pub const ALL: [EventKind; 197] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -579,6 +586,10 @@ impl EventKind {
         EventKind::CampaignPosted,
         EventKind::ParentDied,
         EventKind::ScripWiped,
+        EventKind::Succession,
+        EventKind::CivilWar,
+        EventKind::TookSides,
+        EventKind::CivilWarEnded,
     ];
 }
 

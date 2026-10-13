@@ -270,11 +270,66 @@ pub struct OutsideCfg {
     pub ambient: AmbientDemandCfg,
     /// M17 phase 2: the parents' ledger and orders.
     pub parents: ParentsCfg,
+    /// M17 phase 4b: a gang's succession (promotion, or a civil war).
+    pub succession: SuccessionCfg,
 }
 
 impl Default for OutsideCfg {
     fn default() -> Self {
-        OutsideCfg { enabled: true, ambient: AmbientDemandCfg::default(), parents: ParentsCfg::default() }
+        OutsideCfg {
+            enabled: true,
+            ambient: AmbientDemandCfg::default(),
+            parents: ParentsCfg::default(),
+            succession: SuccessionCfg::default(),
+        }
+    }
+}
+
+/// M17 phase 4b `[outside.succession]` (Dylan, 2026-10-13: "Gangs probably
+/// should promote from within or even have a civil war to settle who the new
+/// boss is"). A decapitated gang promotes the top of `leader_ranking`; when
+/// the top two are within `war_margin` it fights a civil war for
+/// `war_days`. Every value a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SuccessionCfg {
+    pub enabled: bool,
+    /// The top two of `leader_ranking` closer than this contest the chair.
+    pub war_margin: f32,
+    /// A civil war needs this many free members (the claimants included).
+    pub war_min_members: usize,
+    /// The war is settled by the sides' strength after this many days.
+    pub war_days: u32,
+    /// Each claimant's grudge on the other (a Hunt; lethal at `[hunt] lethal_min`).
+    pub war_grudge: f32,
+    /// The strongest `war_seconds` of each side hold `war_grudge_second` on the rival claimant.
+    pub war_seconds: usize,
+    pub war_grudge_second: f32,
+    /// Enemy edges across the sides at most (as D36's split).
+    pub war_enemy_pairs: usize,
+    /// A side's pull: `loyalty_w × loyalty` toward the heir (the ranking's top), the edge
+    /// affinity, and `regard_w × (standing + dread × (1 − courage))` of each claimant.
+    pub loyalty_w: f32,
+    pub regard_w: f32,
+    /// A loser with this many followers left leads a splinter (D36's `split`), else flees.
+    pub splinter_min: usize,
+}
+
+impl Default for SuccessionCfg {
+    fn default() -> Self {
+        SuccessionCfg {
+            enabled: true,
+            war_margin: 0.02,
+            war_min_members: 8,
+            war_days: 14,
+            war_grudge: 0.9,
+            war_seconds: 2,
+            war_grudge_second: 0.8,
+            war_enemy_pairs: 30,
+            loyalty_w: 0.3,
+            regard_w: 0.3,
+            splinter_min: 2,
+        }
     }
 }
 
@@ -362,6 +417,12 @@ pub struct ParentsCfg {
     pub refound_cost: i64,
     pub refound_attitude: f32,
     pub refound_window_days: u32,
+    /// M17 phase 4b (Dylan, 2026-10-13: brothers as a rare event, not an
+    /// occupancy): a syndicate sends brothers only to a gang sacked today
+    /// with fewer than this many free members ...
+    pub brothers_gutted_below: usize,
+    /// ... on a keyed roll under this (the god `SendBrothers` aside).
+    pub brothers_p: f32,
     // The State.
     /// The State's extra guards at most, at 2,000 residents (`scaled_to`).
     pub state_guards_max: u16,
@@ -524,6 +585,8 @@ impl Default for ParentsCfg {
             refound_cost: 600,
             refound_attitude: -0.5,
             refound_window_days: 60,
+            brothers_gutted_below: 6,
+            brothers_p: 0.3,
             state_guards_max: 12,
             state_guards_step: 4,
             heat_murders: 10.0,

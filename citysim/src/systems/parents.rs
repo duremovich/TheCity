@@ -17,7 +17,7 @@
 
 use std::collections::BTreeMap;
 
-use crate::components::{Building, Corp, Gang, Law, Personality, RelKind, Sentence, Skills, OUTSIDE_PARENT_BASE};
+use crate::components::{Building, Corp, Gang, Law, Personality, RelKind, Skills, OUTSIDE_PARENT_BASE};
 use crate::entity::EntityId;
 use crate::events::EventKind;
 use crate::outside::{
@@ -783,6 +783,17 @@ pub fn close_day(world: &mut World) -> Option<crate::stats::OutsideCols> {
     cols.scrip_wiped = t.scrip_wiped;
     cols.parents_in = t.parents_in;
     cols.parents_out = t.parents_out;
+    cols.successions = t.successions;
+    cols.civil_wars = t.wars;
+    cols.wars_active = world
+        .gang_list()
+        .iter()
+        .filter(|&&g| world.comp::<crate::components::Gang>(g).is_some_and(|x| x.war.is_some()))
+        .count() as u32;
+    cols.war_loser_dead = t.war_dead;
+    cols.war_loser_fled = t.war_fled;
+    cols.war_loser_splinter = t.war_splinter;
+    cols.war_loser_jailed = t.war_jailed;
     // The CSV's account slots are the seeded parents (the header is fixed;
     // a parent founded later is in the panel, not the CSV).
     let slots = usize::from(o.csv_parents);
@@ -833,6 +844,8 @@ pub fn close_day(world: &mut World) -> Option<crate::stats::OutsideCols> {
 
 /// `econ::hash_unit` purpose of an Outsider's lawfulness.
 const PURPOSE_OUTSIDER: u64 = 0x0E17_0003;
+/// `econ::hash_unit` purpose of the brothers' roll on a gutted gang (phase 4b).
+const PURPOSE_BROTHERS: u64 = 0x0E17_0005;
 
 /// Phase 3: the share of a parent's corp branches a whole week in the red
 /// (Σ of the last 7 days' cashflow below 0). Sporadic remittances and a
@@ -1527,10 +1540,31 @@ pub fn has_syndicate(world: &World, gang: EntityId) -> bool {
     syndicate_of(world, gang).is_some()
 }
 
-/// § 4 brothers: a decapitation (or a sack) of a syndicate's gang
-/// schedules `brothers` bodies `brother_delay_days` on, unless inside the
-/// cooldown or the syndicate cannot pay. True when scheduled.
-pub fn on_decapitation(world: &mut World, gang: EntityId, killer: Option<EntityId>) -> bool {
+/// God `SendBrothers`: the gang's syndicate sends its brothers at the next
+/// midnight, the cooldown ignored (the syndicate pays).
+pub fn send_brothers(world: &mut World, gang: EntityId) -> Result<String, String> {
+    let gname = world.owner_label(Some(gang));
+    let id = syndicate_of(world, gang).ok_or(format!("SendBrothers: {gname} has no syndicate"))?;
+    let cfg = world.config.outside.parents.clone();
+    let now = world.tick;
+    let f = world.outside.faction(id).ok_or("SendBrothers: no account".to_string())?;
+    let pname = f.name.clone();
+    if f.treasury < cfg.brother_cost * i64::from(cfg.brothers) {
+        return Err(format!("SendBrothers: {pname} cannot pay"));
+    }
+    let p = parent_mut(world, id).ok_or(format!("SendBrothers: {pname} is no parent"))?;
+    if p.brothers_due.iter().any(|d| d.gang == gang) {
+        return Err(format!("SendBrothers: brothers already due for {gname}"));
+    }
+    p.brothers_due.push(BrothersDue { gang, at: now, killer: None, refound: false });
+    p.last_brothers = Some(now);
+    Ok(format!("{pname} will send {} brothers to {gname} at midnight", cfg.brothers))
+}
+
+/// § 4 brothers: a syndicate's gang gutted by a sack schedules `brothers`
+/// bodies `brother_delay_days` on, unless inside the cooldown or the
+/// syndicate cannot pay. True when scheduled.
+pub fn schedule_brothers(world: &mut World, gang: EntityId, killer: Option<EntityId>) -> bool {
     let cfg = world.config.outside.parents.clone();
     let now = world.tick;
     let Some(id) = syndicate_of(world, gang) else { return false };
@@ -1554,25 +1588,38 @@ pub fn on_decapitation(world: &mut World, gang: EntityId, killer: Option<EntityI
     true
 }
 
-/// A syndicate's midnight: a gang branch's leader dead or jailed since the
-/// last midnight is a decapitation; an emptied gang past `refound_days`
-/// with a fond enough syndicate (and the coins) is refounded; the due
-/// brothers arrive (members at once, an Enemy edge to a known killer).
+/// A syndicate's midnight: a gang branch sacked since the last midnight
+/// with fewer than `brothers_gutted_below` free members gets brothers on a
+/// keyed roll under `brothers_p` (phase 4b: a decapitation is the gang's
+/// own succession, `systems::succession`); an emptied gang past
+/// `refound_days` with a fond enough syndicate (and the coins) is
+/// refounded; the due brothers arrive (members at once, an Enemy edge to a
+/// known killer).
 pub fn syndicate_daily(world: &mut World, id: OutsideId) {
     let cfg = world.config.outside.parents.clone();
     let now = world.tick;
     let Some(p) = parent(world, id) else { return };
     let gangs: Vec<EntityId> = p.branches.iter().copied().filter(|&g| world.has::<Gang>(g)).collect();
-    let prev = p.leaders.clone();
     let attitude = p.attitude;
     let window = u64::from(cfg.refound_window_days) * TICKS_PER_DAY;
     let recent_refounds = p.refounds.iter().filter(|&&t| now.saturating_sub(t) < window).count();
-    // Decapitations.
-    for &(g, old) in &prev {
-        let Some(l) = old else { continue };
-        let now_leader = world.comp::<Gang>(g).and_then(|x| x.leader);
-        if now_leader != Some(l) && (!world.is_alive(l) || world.has::<Sentence>(l)) {
-            on_decapitation(world, g, None);
+    // A gang gutted by a sack (an emptied one waits on its refound).
+    let sacked_for = world.config.gangs.sacked_days * TICKS_PER_DAY;
+    for &g in &gangs {
+        let sacked_at = world
+            .comp::<Gang>(g)
+            .filter(|x| !x.members.is_empty())
+            .and_then(|x| x.sacked_until)
+            .map(|u| u.saturating_sub(sacked_for));
+        if !sacked_at.is_some_and(|t| t <= now && now - t < TICKS_PER_DAY)
+            || crate::systems::gang::fit_headcount(world, g) >= cfg.brothers_gutted_below
+        {
+            continue;
+        }
+        let u =
+            crate::systems::econ::hash_unit(world.seed(), PURPOSE_BROTHERS, u64::from(g.index), now / TICKS_PER_DAY);
+        if u < cfg.brothers_p {
+            schedule_brothers(world, g, None);
         }
     }
     // Refounds.

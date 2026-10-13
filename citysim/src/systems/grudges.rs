@@ -160,6 +160,7 @@ fn cause_label(c: GrudgeCause) -> &'static str {
         GrudgeCause::Inherited(_) => "inherited",
         GrudgeCause::Hired => "a contract",
         GrudgeCause::ChildTaken => "a child taken",
+        GrudgeCause::Succession => "the war for the gang",
     }
 }
 

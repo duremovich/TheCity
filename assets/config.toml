@@ -2658,6 +2658,11 @@ refound_days = 21
 refound_cost = 600
 refound_attitude = -0.5               # a soured syndicate refounds nobody (+0.3 for a second refound in the window)
 refound_window_days = 60
+# Phase 4b (Dylan, 2026-10-13): brothers are a rare event. A syndicate sends them only to a gang sacked
+# today with fewer than brothers_gutted_below free members, on a keyed roll under brothers_p (or the god
+# SendBrothers); a decapitation is the gang's own succession ([outside.succession]). Placeholders.
+brothers_gutted_below = 6
+brothers_p = 0.3
 state_guards_max = 12               # at 2,000 residents (per capita)
 state_guards_step = 4
 heat_murders = 10.0                 # murders in 7 days for half the State's heat term (per capita)
@@ -2699,3 +2704,22 @@ scrip_par_min = 0.3                 # scrip spends at par above this health, at 
 convert_min = 20
 fixer_cut = 0.1
 scrip_unrest = 0.5                  # unrest a wipe adds per coin wiped / district coins
+
+# M17 phase 4b: a gang's succession (Dylan, 2026-10-13: "Gangs probably should promote from within or
+# even have a civil war to settle who the new boss is"). A decapitated gang promotes the top of
+# leader_ranking (loyalty + days / 100); when the top two are within war_margin the members take sides
+# (loyalty toward the heir, their edges, each claimant's standing and dread) and the claimants hunt each
+# other on the M15 grudges for up to war_days, then the sides' strength settles it on a keyed roll. The
+# loser dies, flees the city, or leads a splinter through D36's split. Placeholders.
+[outside.succession]
+enabled = true
+war_margin = 0.02                   # the top two closer than this contest the chair
+war_min_members = 8                 # free members, the claimants included
+war_days = 14
+war_grudge = 0.9                    # each claimant on the other: a lethal Hunt ([hunt] lethal_min 0.85)
+war_seconds = 2                     # the strongest of each side ...
+war_grudge_second = 0.8             # ... hold this on the rival claimant (a Hunt for a beating)
+war_enemy_pairs = 30
+loyalty_w = 0.3                     # a member's pull toward the heir, x loyalty
+regard_w = 0.3                      # x (standing + dread x (1 - courage)) of each claimant
+splinter_min = 2                    # a loser with this many followers leads a splinter, else flees
