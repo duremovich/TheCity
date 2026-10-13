@@ -1574,6 +1574,8 @@ struct V8Day {
     /// The watched agents still living, and jailed.
     alive: usize,
     jailed: usize,
+    /// M16b: the law's posture at the day's end.
+    posture: Option<Posture>,
 }
 
 struct V8Run {
@@ -1633,6 +1635,7 @@ fn run_v8(name: &'static str, mut daily: impl FnMut(&mut World, u64, &mut Vec<En
             fixers: Vec::new(),
             alive: watched.iter().filter(|&&a| citysim::systems::law::living(&w, a)).count(),
             jailed: watched.iter().filter(|&&a| w.has::<citysim::Sentence>(a)).count(),
+            posture: w.law().map(|l| l.posture),
         };
         for g in w.gangs() {
             if let Some(gg) = w.comp::<Gang>(g) {
@@ -2290,4 +2293,274 @@ fn god_line_cut() {
     assert!(m_during > m_before, "the Vat Line riders' commutes did not get longer");
     assert!(f_cut < f_before, "fares did not fall during the cut");
     assert!(after > 0, "rides on the Vat Line did not resume");
+}
+
+// ---------------------------------------------------------------------------
+// M16b god scenarios (docs/GOD_SCENARIOS_V11.md): leverage, hostages, the
+// wounded and boards, on the v8 harness (seed 42, 60 days, the unshocked
+// v8 control). Every hold, wound, vote and feud here is a record between
+// fictional agents and a seeded dice roll. Each asserts that the commands
+// applied and that the world reacted; how is printed for the gaps list.
+// ---------------------------------------------------------------------------
+
+/// The M16b columns beside the board's.
+fn v11_rows() -> Vec<V8Series> {
+    vec![
+        ("coercions active (mean)", Box::new(|d: &V8Day| f64::from(d.row.leverage.coercions_active))),
+        ("hostages taken", Box::new(|d: &V8Day| f64::from(d.row.captive.hostages_taken))),
+        ("hostages freed", Box::new(|d: &V8Day| f64::from(d.row.captive.hostages_freed))),
+        ("captives held (mean)", Box::new(|d: &V8Day| f64::from(d.row.captive.captives_held))),
+        ("Rescue posted", Box::new(|d: &V8Day| f64::from(d.row.captive.k_posted[1]))),
+        ("downed", Box::new(|d: &V8Day| f64::from(d.row.wounded.downed))),
+        ("bled out", Box::new(|d: &V8Day| f64::from(d.row.wounded.bled_out))),
+        ("stabilised", Box::new(|d: &V8Day| f64::from(d.row.wounded.stabilised))),
+        ("Trauma calls", Box::new(|d: &V8Day| f64::from(d.row.wounded.trauma_calls))),
+        ("Trauma saves", Box::new(|d: &V8Day| f64::from(d.row.wounded.trauma_saves))),
+        ("Trauma subscribers (mean)", Box::new(|d: &V8Day| f64::from(d.row.wounded.trauma_subs))),
+        ("board votes", Box::new(|d: &V8Day| f64::from(d.row.gov.votes))),
+        ("votes swung", Box::new(|d: &V8Day| f64::from(d.row.gov.votes_swung))),
+        ("chairs fallen", Box::new(|d: &V8Day| f64::from(d.row.gov.chairs_fallen))),
+        ("Parleys", Box::new(|d: &V8Day| f64::from(d.row.leverage.parleys))),
+        ("tribute active (mean)", Box::new(|d: &V8Day| f64::from(d.row.leverage.tribute_active))),
+        ("factions distracted (mean)", Box::new(|d: &V8Day| f64::from(d.row.gov.distracted))),
+        ("law alertness x100 (mean)", Box::new(|d: &V8Day| f64::from(d.row.gov.alert_law) * 100.0)),
+    ]
+}
+
+fn story_has(r: &V8Run, kind: EventKind) -> usize {
+    r.story.iter().filter(|(_, k, _)| *k == kind).count()
+}
+
+/// M16b god 1 (spec § 11): on day 10 the strongest gang takes the
+/// captain's Spouse into its Hideout and demands its boss (or another of
+/// its convicts) let out. Does the law comply, Crush, or post a Rescue?
+#[test]
+#[ignore]
+fn god_hostage_captain_spouse_release() {
+    let r = run_v8("god_hostage_captain_spouse_release", |w, day, watched| {
+        if day != 20 {
+            return;
+        }
+        citysim::systems::law_brain::recompute_captain(w);
+        let Some(captain) = w.law().and_then(|l| l.captain) else {
+            eprintln!("day 20: no captain");
+            return;
+        };
+        let g = w
+            .gangs()
+            .into_iter()
+            .filter(|&g| w.hideout_of(g).is_some())
+            .max_by_key(|&g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), std::cmp::Reverse(g)))
+            .expect("a gang with a Hideout");
+        let h = w.hideout_of(g).unwrap();
+        // The spouse, else the captain's closest living tie.
+        let victim = w.spouse_of(captain).filter(|&s| citysim::systems::law::living(w, s)).or_else(|| {
+            w.citizens()
+                .into_iter()
+                .filter(|&a| a != captain && citysim::systems::law::living(w, a))
+                .filter(|&a| w.edge(captain, a).is_some())
+                .max_by(|&a, &b| {
+                    let f = |x: EntityId| w.edge(captain, x).map_or(0.0, |e| e.affinity);
+                    f(a).total_cmp(&f(b)).then(b.cmp(&a))
+                })
+        });
+        let Some(victim) = victim else {
+            eprintln!("day 20: the captain has nobody");
+            return;
+        };
+        // The gang's jailed boss, else any of its convicts, else any convict.
+        let members = w.comp::<Gang>(g).map(|x| x.members.clone()).unwrap_or_default();
+        let jailed: Vec<EntityId> = w.with::<citysim::Sentence>();
+        let convict = jailed.iter().copied().find(|&a| members.contains(&a)).or_else(|| jailed.first().copied());
+        let Some(convict) = convict else {
+            eprintln!("day 20: nobody in the Jail");
+            return;
+        };
+        eprintln!(
+            "day 20: {} holds {} (captain {}'s {}) at {}, demanding {} let out (competence {:.2}, captain lawfulness {:.2})",
+            w.owner_label(Some(g)),
+            w.name_of(victim),
+            w.name_of(captain),
+            if w.spouse_of(captain) == Some(victim) { "spouse" } else { "closest tie" },
+            w.name_of(h),
+            w.name_of(convict),
+            w.law().map_or(0.0, |l| l.competence),
+            w.comp::<citysim::Personality>(captain).map_or(0.0, |p| p.lawfulness)
+        );
+        watched.extend([victim, captain, convict, g]);
+        w.push_command(PlayerCommand::Hostage {
+            captive: victim,
+            holder: Some(g),
+            at: h,
+            demand: Some(citysim::contract::Demand::Release(convict)),
+        });
+    });
+    let mut extra = v11_rows();
+    extra.push(("watched jailed (mean)", Box::new(|d: &V8Day| d.jailed as f64)));
+    r.print_v8(&[(20, 30), (30, 60)], extra);
+    let c = v8_control();
+    eprintln!("law posture: {}", r.orders(18, |d| format!("{:?}", d.posture)));
+    eprintln!("control:     {}", c.orders(18, |d| format!("{:?}", d.posture)));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 1, "the Hostage applied");
+    // Reacted: the hold ran its course (freed, killed or still held with a
+    // daily roll), or the law answered (a Rescue, the convict out, the
+    // posture moved).
+    let taken = r.sum(20, 21, &|d| f64::from(d.row.captive.hostages_taken));
+    let answered = story_has(&r, EventKind::HostageFreed)
+        + story_has(&r, EventKind::HostageKilled)
+        + story_has(&r, EventKind::ContractPosted)
+        + story_has(&r, EventKind::Release)
+        + story_has(&r, EventKind::CoercionBroken);
+    assert!(taken >= 1.0, "the hostage was not taken");
+    assert!(answered >= 1, "the world did not react to the hold");
+}
+
+/// M16b god 2 (spec § 11): on day 5 every Corp-class adult subscribes to
+/// the cheapest Trauma crew, then every adult is chromed to tier 3. Do the
+/// Trauma crews keep up with the episodes and the fights?
+#[test]
+#[ignore]
+fn god_subscribe_and_chrome_everyone_3() {
+    let r = run_v8("god_subscribe_and_chrome_everyone_3", |w, day, watched| {
+        if day != 5 {
+            return;
+        }
+        let Some((corp, fee)) = citysim::systems::wounded::trauma_seller(w) else {
+            eprintln!("day 5: no Security corp sells Trauma");
+            return;
+        };
+        let corp_class: Vec<EntityId> = w
+            .citizens()
+            .into_iter()
+            .filter(|&a| citysim::systems::law::living(w, a) && citysim::systems::demography::is_adult(w, a))
+            .filter(|&a| citysim::systems::classes::class_of(w, a) == citysim::components::Class::Corp)
+            .filter(|&a| !w.trauma_clients.contains_key(&a))
+            .collect();
+        eprintln!(
+            "day 5: {} Corp-class adults subscribe to {} at {fee}/week, then ChromeEveryone 3",
+            corp_class.len(),
+            w.owner_label(Some(corp))
+        );
+        for &a in &corp_class {
+            w.push_command(PlayerCommand::Subscribe { agent: a, corp });
+        }
+        watched.extend(corp_class);
+        w.push_command(PlayerCommand::ChromeEveryone { tier: 3 });
+    });
+    r.print_v8(&[(0, 5), (5, 20), (20, 60)], v11_rows());
+    let c = v8_control();
+    let subs = |x: &V8Run| x.days[10].row.wounded.trauma_subs;
+    eprintln!("Trauma subscribers on day 10: {} (control {})", subs(&r), subs(c));
+    let fails = r.failed.len();
+    eprintln!("refused subscriptions: {fails} (unaffordable at the fee)");
+    assert!(r.applied() >= 2, "the commands applied");
+    assert!(subs(&r) > subs(c), "no subscription stood");
+    // Reacted: the chromed city fights and breaks down differently.
+    let downed = |x: &V8Run| x.sum(5, 60, &|d| f64::from(d.row.wounded.downed));
+    let episodes = |x: &V8Run| x.sum(5, 60, &|d| f64::from(d.row.episodes));
+    eprintln!("downed {} / {}, episodes {} / {}", downed(&r), downed(c), episodes(&r), episodes(c));
+    assert!(downed(&r) != downed(c) || episodes(&r) != episodes(c), "the chromed city did not change");
+}
+
+/// M16b god 3 (spec § 11): on day 10 the Habitat board's member of the
+/// highest standing (not the chair) coerces two others to vote for it, and
+/// god calls the vote. Does the chair fall, and does the brain's order
+/// change with the board's Personality?
+#[test]
+#[ignore]
+fn god_call_vote_habitat_after_coerce() {
+    use citysim::systems::governance;
+    let r = run_v8("god_call_vote_habitat_after_coerce", |w, day, watched| {
+        if day != 10 {
+            return;
+        }
+        let Some(c) = w.corps_of_template("Habitat").first().copied() else { return };
+        let Some((members, chair)) = governance::board_of(w, c) else {
+            eprintln!("day 10: Habitat has no board");
+            return;
+        };
+        let mut others: Vec<EntityId> = members.iter().copied().filter(|&m| Some(m) != chair).collect();
+        others.sort_by(|&a, &b| {
+            let s = |x: EntityId| citysim::systems::reputation::rep(w, x).standing;
+            s(b).total_cmp(&s(a)).then(a.cmp(&b))
+        });
+        let [challenger, a, b, ..] = others[..] else {
+            eprintln!("day 10: a board of {}", members.len());
+            return;
+        };
+        let p = |w: &World| governance::personality(w, c).map(|p| (p.greed, p.lawfulness, p.courage));
+        eprintln!(
+            "day 10: {} coerces {} and {} to vote for it on Habitat's board (chair {}); board (greed, lawful, courage) {:?}",
+            w.name_of(challenger),
+            w.name_of(a),
+            w.name_of(b),
+            chair.map_or("none".into(), |x| w.name_of(x)),
+            p(w)
+        );
+        watched.extend([c, challenger, a, b]);
+        watched.extend(chair);
+        for over in [a, b] {
+            w.push_command(PlayerCommand::Coerce {
+                agent: challenger,
+                over,
+                leverage: citysim::contract::Leverage::Threat,
+                demand: citysim::contract::Demand::Vote { corp: c, for_: challenger },
+            });
+        }
+        w.push_command(PlayerCommand::CallVote(c));
+    });
+    r.print_v8(&[(10, 11), (11, 60)], v11_rows());
+    let c = v8_control();
+    eprintln!("Habitat:         {}", r.orders(5, |d| format!("{:?}", d.corps.get("Habitat"))));
+    eprintln!("Habitat control: {}", c.orders(5, |d| format!("{:?}", d.corps.get("Habitat"))));
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 3, "two Coerces and the CallVote applied");
+    let held = story_has(&r, EventKind::VoteHeld);
+    let swung = story_has(&r, EventKind::VoteSwung);
+    eprintln!("VoteHeld {held}, VoteSwung {swung}");
+    assert!(held >= 1, "no vote was held");
+    // Reacted: the pinned members swung, or the chair fell.
+    let fallen = r.sum(10, 11, &|d| f64::from(d.row.gov.chairs_fallen));
+    assert!(swung >= 1 || fallen >= 1.0, "the coerced votes changed nothing");
+}
+
+/// M16b god 4 (spec § 11): on day 20 god declares a vendetta between the
+/// two strongest gangs. Do they fight it out, or does one Parley (a
+/// tribute for peace)?
+#[test]
+#[ignore]
+fn god_parley_strongest_gangs_in_vendetta() {
+    let r = run_v8("god_parley_strongest_gangs_in_vendetta", |w, day, watched| {
+        if day != 20 {
+            return;
+        }
+        let mut gs: Vec<(usize, EntityId)> =
+            w.gangs().into_iter().map(|g| (w.comp::<Gang>(g).map_or(0, |x| x.members.len()), g)).collect();
+        gs.sort_by(|x, y| y.0.cmp(&x.0).then(x.1.cmp(&y.1)));
+        let [(na, a), (nb, b), ..] = gs[..] else { return };
+        eprintln!(
+            "day 20: a vendetta between {} ({na}) and {} ({nb}); parley rivals now: {:?} / {:?}",
+            w.owner_label(Some(a)),
+            w.owner_label(Some(b)),
+            citysim::systems::leverage::parley_rival(w, a).map(|x| w.owner_label(Some(x))),
+            citysim::systems::leverage::parley_rival(w, b).map(|x| w.owner_label(Some(x)))
+        );
+        watched.extend([a, b]);
+        w.push_command(PlayerCommand::DeclareVendetta { a, b, weight: 1.0 });
+    });
+    r.print_v8(&[(20, 35), (35, 60)], v11_rows());
+    let c = v8_control();
+    let names: Vec<String> = r.days[21].gangs.keys().cloned().collect();
+    for n in &names {
+        eprintln!("{n}: {}", r.orders(18, |d| format!("{:?}", d.gangs.get(n))));
+        eprintln!("{n} control: {}", c.orders(18, |d| format!("{:?}", d.gangs.get(n))));
+    }
+    assert!(r.failed.is_empty(), "failed: {:?}", r.failed);
+    assert_eq!(r.applied(), 1, "the vendetta was declared");
+    let parleys = r.sum(20, 60, &|d| f64::from(d.row.leverage.parleys));
+    eprintln!("Parleys {parleys} (control {})", c.sum(20, 60, &|d| f64::from(d.row.leverage.parleys)));
+    // Reacted: a gang's orders moved off the control's, or a Parley.
+    let moved = (20..60usize).any(|i| r.days[i].gangs != c.days[i].gangs);
+    assert!(moved || parleys >= 1.0, "neither gang reacted to the vendetta");
 }

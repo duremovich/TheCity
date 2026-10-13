@@ -923,3 +923,161 @@ Where the build departs from the text above. The numbered rows are the plan's De
 - **Phase 3:** brain postings made contracts post naturally (273-334 a seed in 120 days, mostly Locates and Guards; ~700-820 Treasury-paid bounties); the behaviour tier re-measured on pick changes.
 - **Phase 4:** `charity.rs::test_endowed_mission_serves_over_days` re-pins its guests broke and hungry daily; the default city moves (the Fixer owner holds a class-2 body evenings; on seed 42 a fourth gang forms on day 26).
 - **Phase 5, acceptance (the TESTING.md pattern; the old gate `test_m16a_contracts_seed_42` and its majority, six-seed, Murders-ratio and identity devices superseded):** measured on seeds 42-47 × 120 days (ba516f2). `core_sanity` bullets for what fired on 6 of 6: a Guard fulfilled [11, 4, 12, 16, 11, 8], a Locate fulfilled [167, 166, 155, 145, 137, 133], a Fixer in business (open, a record brokered there within 7 days; days [111, 107, 112, 106, 111, 109]), a `Reneged` [22, 6, 12, 23, 6, 12], with phase 3's `BountyPaid` and city guard on the take. Unit tests in a seeded world for what fired on 2 or fewer: a Hit and a Beat fulfilled (0 of 6), a squad Hit (0; `missions.rs::test_squad_when_solo_estimate_below_squad_below` now settles it), a `SoldOut` and a `StrikeDeclined` on political cost (0; `test_gang_sells_out_non_member_refuses_member`), the Hit later attributed (0; `contracts.rs::test_interrogation_names_buyer_then_conspiracy_filed` now asserts the day), an NPC-founded Fixer (0; new `test_npc_registers_a_fixer`), a Fixer run to `SellData` (2 of 6; `test_fixer_run_order_runs_to_selldata_with_cut`). Person probes: a gun never takes a Hit on his wife (with a stranger control he takes), a buyer nobody heard of is never charged before somebody holds the deed, a broke hand with a sellable skill networks at the Fixer within a week; one gap probe `#[ignore]`d (a buyer tells his own Hit to guards). Shadow archetypes `fixer` and `gun` (bounds after the behaviour tier's rework). God scenarios v8 in `docs/GOD_SCENARIOS_V8.md`. **Finding: no natural Hit or Beat is fulfilled on any of 42-47**: the murder market the spec's goals describe exists only in god posts and unit tests.
+
+## Implemented: deviations (M16b)
+
+Where the build departs from the text above, phase by phase (phase 1 8366d5c, phase 2 7495ee8, phase 3
+c357052, phase 4 117d0f7, phase 5 the gate, god scenarios and docs). One line each. Every coercion,
+hold, wound, tag and vote is a record on a struct between fictional agents of a simulated city, moved by
+seeded dice rolls.
+
+### Across the part
+
+- **Identity devices:** each phase kept an in-flight switch instead of the retired `--leverage-off`
+  (C41's retirement): `[leverage] enabled` (`CITYSIM_LEVERAGE_OFF=1`), `[hostage]`
+  (`CITYSIM_HOSTAGE_OFF=1`), `[wounded]` (`CITYSIM_WOUNDED_OFF=1`), and `[governance]`/`[tags]`/`[attention]`
+  together (`CITYSIM_PHASE4_OFF=1`). Each phase checked off-equals-main (events byte-identical, CSV equal
+  on shared columns, seeds 42-44) against the previous main.
+- **Rolls:** on `ContractNs::Leverage` with a purpose byte in the key's top byte (M16a C4's key, not
+  `WordNs::Contract`): 1 report, 2 fake job, 16 kill, 17 wound, 18 tag plant, 19 scan, 20 subscribe,
+  21 expose, 23 Patrol evening, 24 Patrol contest.
+- **`SAVE_VERSION`** 16, 17, 18, 19 for phases 1-4 (the spec's 4 predates the version climb). Every field
+  is `#[serde(default)]` and every variant appended.
+- **Quotas:** `captive_quota` in `[hostage]`, `wounded_quota` in `[wounded]` and `max_tags` in `[tags]`,
+  not `[lod]`. All per capita in `Config::scaled_to`. A captive and a downed agent rank as forced bodies
+  through `abducted_by` and `cuffed_by`, with no `lod.rs` budget change.
+- **The god scenarios** are `GOD_SCENARIOS_V11.md`; the spec's V8 was taken by M16a.
+
+### Phase 1: leverage
+
+- **Standing records only:** only standing coercions (protection, blackmail, tribute, coerced jobs, and
+  later hostages and votes) get a `Coercion` record. One-off demands (shakedown, debt, Silence, poach)
+  are moves counted by kind, with events.
+- **A failed shakedown files no new report** (M15's consequences kept). Report-on-failure (`backlash_report
+  × lawfulness`) is for the new coercions only. The shakedown's leverage term is exactly 0: the same roll,
+  tested.
+- **No live plans:** Persuade resolves on the ledger at any tier, with no `Coerce` ActionKind. A Parley
+  resolves from a weekly pass with no walk to the door.
+- **The coerced job** hooks `hitmarket::faction_post` (a head that can't afford the market's price leans on
+  the strongest weaker regular). It is posted `Terms::Coerced` at price 0. Unpaid records end on their
+  first failed attempt.
+- **Crimes:** `Fraud` sits above Theft and `Blackmail` above Shakedown. Murder's severity is 14 and
+  Conspiracy's 13.
+- **Plan keys:** `blackmail_gap`, `blackmail_days`, `debt_call_min` 3, `fake_p`, `fake_days`,
+  `persuade_affinity`, `court_rejections`, `court_sociability`, `retry_days`. A debt is called at M15's
+  fixed fortnight.
+
+### Phase 2: captives and the new kinds
+
+- **The Prison** (`Z`) has no staff role. Its defenders are its corp's posted guards. `prison_cost` and
+  `prison_upkeep` are plan keys. It is built on a Lot, else a refitted derelict.
+- **No `Target::Node`:** a heist names its Lab.
+- **Deliver and Steal-theft resolve on the ledger;** there is no `CarryCorpse` plan.
+- **Only fabricated stories are `Spin` records.** True plants stay M15's side spend.
+- **A gang's hostage-taking is an unpaid order** (`post_order`) to its strongest free member. Gang
+  treasuries can't pay the asks.
+- **Ransoms are capped at half the payer's purse** (at least 10, at most `ransom`). The payer is the
+  richer of the coerced's faction purse and its own wallet.
+- **`Demand::Release`** is posted only by god `Hostage`. Phase 4 built the comply: the captain lets a
+  convict out only when `Law.competence < 0.4` and its lawfulness < 0.5.
+- **A 28-day fabrication retry lock** (`tried::FABRICATE`): at 20k a corp posted 71 Spin attempts in 30
+  days without it.
+
+### Phase 3: the wounded
+
+- **No `ExecState::Down`:** a downed agent is `cuffed_by` itself. The carry is M9's escort drag.
+- **A bleed-out is a Murder only when the death would have been one** (`Wounded.murder`: the attacked
+  party, and an attacker who isn't a guard). Taken literally, the spec turned arrest and self-defence
+  deaths into Murders.
+- **Stabilising needs a Ripperdoc on the Clinic's staff** (on call), not inside: night-time casualties
+  bled out at shut doors.
+- **Gang temperament is computed** (Abandon for a Purist gang or a leader with loyalty < 0.3), not stored.
+  Corps and the law are Recover through the colleague and city-guard ties.
+- **A Trauma call is one crew guard carrying** to the true tile, not a `trauma_crew` mission to the last
+  sighting.
+- **The Statistical split is analytic, with no `calibrate` re-run:** the hour's killing draw is kept, and
+  `wound_share × stat_saved` (0.16, measured once from a Full run) of it becomes a survived Assault. Only
+  the hourly table is split; L2's faction-violence ledger is unchanged.
+- **No natural Rescue-contract trigger:** the downed are carried through the Rescue goal, by people.
+
+### Phase 4: boards, tags and attention
+
+- **Tags are records** in `World::tags`, not M13 assets: no `AssetKind::{Tag, Scanner}` and no
+  `AssetLoc::On`. Scanners are implied by building kind (`clinic_scanner` 1, `office_scanner` 2), plus
+  `World::gang_scanners` for Purist gangs. The device is bought from the nearest Security Office
+  (`Flow::Asset`).
+- **No `PlantTag` or `Scan` actions.** A plant resolves on the ledger. Scans are a daily 10:00 pass: one
+  adult in `scan_days` with heat ≥ `scan_heat` or a hunter on it, at the nearest scanner.
+- **The Purist Patrol is resolved at the spot, without a walk:** the busiest spot in a held district, the
+  member nearest it.
+- **Tag postings ride the Locate triggers** (a gang vendetta's, a corp Secure culprit's) when the buyer can
+  pay the record and the device. The spec's who-posts table has no Tag row.
+- **`alertness_mult` = alertness ÷ pool** (1.0 undistracted), not raw alertness, which would cut every
+  roll about 30 % on a calm day.
+- **The brains' tilt is flat** (`brain_tilt` 0.2 × distraction) on LieLow, Hunker and Garrison, not a
+  Linear{0.5, 0.5} consideration, which would halve those orders on every calm rescore.
+- **Attention is one saved map** (`World::attention`, the law at `EntityId::NONE`), not fields on
+  Gang, Corp and Law. Gangs use `comp_ref` competence. There is no sanction (M17). Strikes and hostile
+  offers enter through `attention::note`.
+- **`ambition_min` 0.12, not 0.4:** at HEAD an employee's standing starts at 0.16 and an exec's at 0.44, so
+  at 0.4 nobody but the chair could stand.
+- **Pins:** a Persuade pin sits in `Board.pinned`, a coercion pin in `World::coercions`. `votes` is a
+  `Vec`.
+- **The campaign's records:** a challenger buys a Persuade or a Vote record only when it is too weak to
+  make the move itself (persuasion or intimidation < 0.5). Without the bribe, its stake is its word. A
+  rival corp backing a challenger is not built.
+- **Not gated by the switch:** the god commands, `SetPrisonPermit` and the Release comply. Only the
+  organic mechanisms sit behind it.
+- **A Statistical agent keeps no `Tagged` memory** (the memory doctrine).
+
+### Phase 5, acceptance
+
+The TESTING.md pattern: `test_m16b_leverage_seed_42` and its majority, six-seed, Murders-ratio,
+gang-income-band and identity devices are superseded.
+
+**`core_sanity` bullets** (61 in all):
+- phase 1: a protection paid, a blackmail made, a debt called in, a report withdrawn under a threat, a
+  coerced job, a fake job, a Parley;
+- phase 2: an Abduct posted, a Steal fulfilled, a heist run, a Spin posted;
+- phase 3: a downed agent, a bleed-out, a stabilisation, a rescue by kin, a downed agent finished off, a
+  Trauma subscription;
+- phase 4: a board vote, a campaign move, a VoteSwung, a tag planted, a tag found, a scan, a day a faction
+  is distracted.
+
+**The run fails** on a day a faction's alertness ÷ pool sits under `alert_floor`.
+
+**Printed and unit-tested:**
+- `leverage.rs`: a poach by threat, a Fraud filed, a secret lapsed, a Persuade, a coerced job done;
+- `captives.rs`: a hostage taken, a Rescue, an Escort, a Deliver fulfilled, a fabrication planted or
+  exposed;
+- `wounded.rs`: a rescue by a gang-mate, a Trauma call, a TraumaSave;
+- `tags.rs` and `governance.rs`: a Purist Patrol scan, a board Persuade, a Vote record, the Release
+  demand, `SetPrisonPermit(false)`.
+
+**Calibration findings** against the spec's bands (printed, never asserted), seeds 42-47 × 120 days at
+2k on the phase-4 tree:
+
+| Target | Band | Measured |
+| --- | --- | --- |
+| Contracts posted per 120 days | 60-300 | 545-823 (tags add about 100 a seed) |
+| Fulfilled share of closed contracts | 35-70 % | 53-60 % |
+| Hits fulfilled per 120 days | 4-20 | 0-4 |
+| Contract killings as a share of Murders | 5-25 % | 0-3.7 % |
+| Active coercions on day 120 | 10-60 | 2-6 |
+| Hostages held at once, max | 1-6 | 0-1 |
+| Wounded ÷ (wounded + fight deaths) | 20-50 % | 31-42 % (downed ÷ (downed + on-screen violent deaths − bled out)) |
+| Wounded saved (rescued or Trauma) | 30-70 % | 5-19 % |
+| Trauma subscribers on day 120 | 2-8 % of adults | 0.5-0.8 % of the population |
+| Board votes with a swung member | ≥ 1 in 120 days, ≤ 50 % of votes | 0, 1, 1, 3, 2, 0 of 4-5 votes a seed |
+
+**Murders against the M15-closing run:** the line is not re-run. Against the M16a-closing line
+(526 over 42-47 at b7f8376), M16b's tree reads 529 (main 5c3d2c4 read 591).
+
+**Off-band, and why:**
+- Hits and contract killings read low because organic Hits rarely finish: about 10 % of paid Hits, and
+  coerced jobs 2 of 45 in phase 1.
+- Coercions are short-lived. Protection breaks when a district changes hands, and blackmail fails about
+  85 %.
+- Hostages are rare: about 1 Abduct in 10 reaches the hand-over.
+- The wounded mostly bleed out: a 3-hour bleed with few bodies near.
+- Trauma is an exec's luxury: the Corp class can't carry the weekly fee (GOD_SCENARIOS_V11.md).
