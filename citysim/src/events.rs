@@ -416,10 +416,17 @@ pub enum EventKind {
     DawnPick,
     /// A tinker's repair went wrong (the vehicle wrecked).
     TinkerBotched,
+    // --- Jobs & lives phase 3 (§ 4), weapons.
+    /// A smuggled crate passed the Freight Yard into a gang's armoury.
+    CrateLanded,
+    /// ... or customs seized it into the Precinct's stock.
+    CrateSeized,
+    /// The Civic Clerk sold a weapons licence.
+    LicenceSold,
 }
 
 impl EventKind {
-    pub const ALL: [EventKind; 210] = [
+    pub const ALL: [EventKind; 213] = [
         EventKind::Theft,
         EventKind::Extortion,
         EventKind::Assault,
@@ -630,6 +637,9 @@ impl EventKind {
         EventKind::PitchSwept,
         EventKind::DawnPick,
         EventKind::TinkerBotched,
+        EventKind::CrateLanded,
+        EventKind::CrateSeized,
+        EventKind::LicenceSold,
     ];
 }
 

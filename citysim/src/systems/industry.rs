@@ -104,6 +104,9 @@ pub struct Jobs2State {
     /// after a dawn that offered some).
     #[serde(skip_serializing_if = "is_zero_u32")]
     pub last_posts: u32,
+    // --- Phase 3, weapons (`systems::weapons`).
+    #[serde(skip_serializing_if = "crate::systems::weapons::ArmsState::is_default")]
+    pub arms: crate::systems::weapons::ArmsState,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -191,6 +194,12 @@ pub fn on_duty(world: &World, b: EntityId, model: TradeModel) -> usize {
 /// Trade staff of `model` employed at `b` (on shift or not).
 fn staff_of_model(world: &World, b: EntityId, model: TradeModel) -> Vec<EntityId> {
     world.staff_of(b).iter().copied().filter(|&s| row_of_agent(world, s).is_some_and(|r| r.model == model)).collect()
+}
+
+/// Phase 3 (§ 4): the Civic Clerks on the books (a `civic` trade at a
+/// Hall), who sell the weapons licence.
+pub fn clerks_on_books(world: &World) -> usize {
+    world.buildings_of_kind(BuildingKind::Hall).iter().map(|&b| staff_of_model(world, b, TradeModel::Civic).len()).sum()
 }
 
 // ---------------------------------------------------------------------------
@@ -956,7 +965,12 @@ fn grow_hq(world: &mut World) {
 /// the Vats for the industries; any allowed tier otherwise), the district
 /// with the fewest of the kind, then nearest the district's centroid.
 fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
-    let want = if kind == BuildingKind::Hq { Zone::Spire } else { Zone::Vats };
+    // Phase 3: a Gunsmith stands in the Mid.
+    let want = match kind {
+        BuildingKind::Hq => Zone::Spire,
+        BuildingKind::Gunsmith => Zone::Mid,
+        _ => Zone::Vats,
+    };
     crate::systems::founding::vacant_lots(world)
         .into_iter()
         .filter_map(|l| {
@@ -1001,6 +1015,11 @@ fn seed_one(world: &mut World, kind: BuildingKind, owner: Option<EntityId>) -> O
     actors.push(lot);
     world.push_event(EventKind::Founded, &actors, text);
     Some(lot)
+}
+
+/// Phase 3 (`weapons::seed`): one seeded `kind` for `owner` on the Lots left.
+pub fn seed_kind(world: &mut World, kind: BuildingKind, owner: Option<EntityId>) -> Option<EntityId> {
+    seed_one(world, kind, owner)
 }
 
 /// `World::new`, after the camps and before the trades' seeding: the

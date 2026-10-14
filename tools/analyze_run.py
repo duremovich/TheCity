@@ -916,6 +916,11 @@ STREET_TOTALS = ("pitch_opened", "pitch_closed", "street_cut", "swept", "vendor_
                  "cab_trips", "cab_fares", "rickshaw_trips", "rickshaw_fares", "tinker_repairs", "tinker_take",
                  "tinker_botched", "plants_seized")
 STREET_SNAP = ("pitches", "pitches_vendor", "pitches_rickshaw", "pitches_tinker")
+# Phase 3, weapons (§ 4).
+ARMS_TOTALS = ("weapons_made", "sold_legal", "sold_dealer", "issued", "seized", "crates_landed", "crates_seized",
+               "fights", "fight_deaths", "armed_fights", "armed_deaths", "ua_reports", "licences_sold", "pickpockets", "stall_thefts",
+               "home_thefts", "fenced", "flow_licence", "flow_arms")
+ARMS_SNAP = ("weapons", "carriers", "armoury", "precinct_arms", "gunsmith_stock", "licences", "weapon_wants")
 
 
 def jobs2(rows, events, out):
@@ -957,9 +962,20 @@ def jobs2(rows, events, out):
         take = J["street_totals"]["vendor_take"] + J["street_totals"]["rickshaw_fares"] + J["street_totals"]["tinker_take"]
         J["take_per_pitch_day"] = take / open_days if open_days else 0
         J["cut_share_of_take"] = J["street_totals"]["street_cut"] / take if take else 0
+    if "weapons" in rows[0]:
+        J["arms_totals"] = {k: sum(col(rows, k)) for k in ARMS_TOTALS}
+        J["arms_mean"] = {k: mean(col(rows, k)) for k in ARMS_SNAP}
+        fights = J["arms_totals"]["fights"]
+        J["armed_share_of_fights"] = J["arms_totals"]["armed_fights"] / fights if fights else 0
+        armed = J["arms_totals"]["armed_fights"]
+        J["death_rate_armed"] = J["arms_totals"]["armed_deaths"] / armed if armed else 0
+        J["death_rate_unarmed"] = (J["arms_totals"]["fight_deaths"] - J["arms_totals"]["armed_deaths"]) / (fights - armed)             if fights > armed else 0
+        pop = mean(col(rows, "population")) if "population" in rows[0] else 0
+        J["weapons_per_1000"] = 1000 * J["arms_mean"]["weapons"] / pop if pop else 0
+        J["carriers_per_1000"] = 1000 * J["arms_mean"]["carriers"] / pop if pop else 0
     if events:
         kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
-                 "DawnPick", "TinkerBotched")
+                 "DawnPick", "TinkerBotched", "CrateLanded", "CrateSeized", "LicenceSold", "Murder")
         J["events"] = {k: sum(1 for _, kind, _ in events if kind == k) for k in kinds}
         J["foreman_named"] = sum(1 for _, kind, t in events if kind in ("Hire", "LaidOff") and "the foreman" in t)
         J["hq_built"] = sum(1 for _, kind, t in events if kind == "Founded" and " built its Corp HQ" in t)
@@ -1161,6 +1177,12 @@ def fmt(o):
             L.append("Pitches open, daily mean: " + f(w["street_mean"]) + f"; take a Pitch-day "
                      f"{w['take_per_pitch_day']:.2f}; the gang's cut of the take {w['cut_share_of_take']:.1%}; day "
                      f"posts filled / offered {w['day_posts_fill']:.1%}")
+        if "arms_totals" in w:
+            L.append("weapons, run totals: " + f(w["arms_totals"]))
+            L.append("weapons, daily mean: " + f(w["arms_mean"]) + f"; weapons per 1,000 {w['weapons_per_1000']:.1f};"
+                     f" carriers per 1,000 {w['carriers_per_1000']:.1f}; armed fights / fights "
+                     f"{w['armed_share_of_fights']:.1%}; deaths a fight armed {w['death_rate_armed']:.2%}, unarmed "
+                     f"{w['death_rate_unarmed']:.2%} (Murders with and without [weapons]: an A/B pair of runs)")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")

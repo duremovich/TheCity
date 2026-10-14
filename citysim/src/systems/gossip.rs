@@ -39,7 +39,11 @@ pub fn deed_of_crime(crime: Crime) -> Option<Deed> {
         | Crime::Conspiracy
         | Crime::Fraud
         | Crime::Blackmail
-        | Crime::FareEvasion => None,
+        | Crime::FareEvasion
+        // Jobs & lives phase 3: no deed.
+        | Crime::ArmsDealing
+        | Crime::UnlicensedArms
+        | Crime::Smuggling => None,
     }
 }
 

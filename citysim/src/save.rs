@@ -144,7 +144,16 @@ use crate::world::World;
 /// parcel_stops, cab_trips, yard_units}`, the street's `[jobs2]` keys, the
 /// trade rows' `street` flag and the `Jobs2Cols` street columns (serde
 /// defaults).
-pub const SAVE_VERSION: u8 = 29;
+/// 30: Jobs & lives phase 3, weapons (section 4; the generic owned-item
+/// store): the appended `AssetKind::Weapon`, `AssetClass::Weapon` (an
+/// eleventh `asset_tax` rate, read padded), `BuildingKind::Gunsmith`,
+/// `Crime::{ArmsDealing, UnlicensedArms, Smuggling}`, `Flow::Arms`, three
+/// events, `PlayerCommand::FloodGuns`; `Asset.prov`,
+/// `Jobs2State.arms`, `[weapons]`, `[buildings.gunsmith]`, the `weapon`
+/// entries of the `[assets]` and `[tech]` per-kind tables, the
+/// `sentence_days_ext` arms keys, the trade rows' `weapons` flag and the
+/// `Jobs2Cols` weapons columns (serde defaults).
+pub const SAVE_VERSION: u8 = 30;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {

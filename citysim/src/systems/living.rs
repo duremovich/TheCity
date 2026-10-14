@@ -18,6 +18,9 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 2: the vendors' stock, the day posts' end, the
     // dawn pick (nothing with `[jobs2] street` off).
     crate::systems::streetwork::hourly(world);
+    // Jobs & lives phase 3: the crates, the carry sightings (nothing with
+    // `[weapons]` off).
+    crate::systems::weapons::hourly(world);
     if world.tick_of_day() != 0 {
         return;
     }
@@ -61,6 +64,9 @@ pub fn run(world: &mut World) {
     // Jobs & lives phase 2: the Pitches' day (the cut, sweeps, closings,
     // openings), the couriers' parcels (nothing with the street off).
     crate::systems::streetwork::daily(world);
+    // Jobs & lives phase 3: the armouries, the fence, the carry roll, the
+    // wants and licences, the guards' stock (nothing with `[weapons]` off).
+    crate::systems::weapons::daily(world);
     // L2 phase 2: the spots, the wealth decile, the venues' hand-over.
     crate::systems::leisure::daily(world);
     // The Real economy E27, E34, E37, E39, E40, E42: the kitchens' day, the

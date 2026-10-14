@@ -262,6 +262,10 @@ pub struct Config {
     /// switch and phase 1's keys (`CITYSIM_JOBS2_OFF=1` turns it off).
     #[serde(default)]
     pub jobs2: Jobs2Cfg,
+    /// Jobs & lives phase 3 (§ 4): weapons as owned items, under the
+    /// master switch (`CITYSIM_WEAPONS_OFF=1` turns it off).
+    #[serde(default)]
+    pub weapons: WeaponsCfg,
 }
 
 /// Jobs & lives `[jobs2]` (docs/JOBS_AND_LIVES.md §§ 1-2): the master
@@ -504,6 +508,156 @@ impl Default for Jobs2Cfg {
             tinker_fail_p: 0.1,
             tinker_jobs: 3,
             seize_after_days: 5,
+        }
+    }
+}
+
+/// Jobs & lives phase 3 `[weapons]` (docs/JOBS_AND_LIVES.md § 4; Dylan's
+/// answer 1): weapons as the first kind of the owned-item store, the
+/// fight's tier term, Gunsmiths, armouries, dealers, crates, licences and
+/// carry sightings, and the petty theft of carried and kept items. Live
+/// only under `[jobs2] enabled`. Every number is a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WeaponsCfg {
+    pub enabled: bool,
+    // --- The fight.
+    /// `p_win += weapon_w × (tier_a − tier_b)` when either side is armed.
+    pub weapon_w: f32,
+    /// The loser's death chance × `(1 + kill_w × the winner's tier)`.
+    pub kill_w: f32,
+    /// A raid's pairing strength and a Hunt's might, per tier.
+    pub might_w: f32,
+    /// Condition a fight takes off the winner's weapon.
+    pub wear_per_fight: u8,
+    /// An armed suspect contesting the cuffs: the death chance × this.
+    pub armed_arrest_mult: f32,
+    // --- The store.
+    /// Weapon entities alive at most, per 1,000 residents (R4).
+    pub weapons_per_1000: f32,
+    // --- Gunsmiths.
+    /// `[corps]` rows (Security) given a Gunsmith per copy at seed.
+    pub gunsmith_rows: Vec<usize>,
+    pub parts_per_weapon: u32,
+    /// Weapons a gunsmith makes an on-duty hour, × (0.5 + knowledge).
+    pub make_rate: f32,
+    /// Weapons a Gunsmith keeps in stock at most.
+    pub gunsmith_stock: u32,
+    // --- The law and the guards.
+    /// The tier the Precinct and the Security Offices buy.
+    pub guard_tier: u8,
+    /// The Precinct's target stock per city guard, and a Security
+    /// Office's per private guard.
+    pub stock_per_guard: f32,
+    /// The Treasury's arms line: coins a day at most.
+    pub arms_budget: i64,
+    /// A licence from the Civic Clerk (`Flow::Licence`).
+    pub licence_fee: i64,
+    /// The concealment contest's step per tier.
+    pub conceal_step: f32,
+    /// `UnlicensedArms` reports a day at most, per 1,000 residents (R3).
+    pub ua_per_1000_day: f32,
+    /// Carry sightings are rolled this many times in a district cracking
+    /// down on the carrier's gang.
+    pub crackdown_rolls: u8,
+    // --- Owners.
+    /// The stable share of each class (`Corp`, `Street`, `Dreg`) who want
+    /// a weapon of their own when they can afford one.
+    pub want_p_by_class: [f32; 3],
+    /// The chance a day an owner with no other reason carries it (else it
+    /// stays at home), by class.
+    pub carry_p_by_class: [f32; 3],
+    /// Lawfulness under this is a reason to want (and carry) one.
+    pub want_lawless: f32,
+    /// A theft or an assault suffered within this many days is a reason.
+    pub robbed_days: u32,
+    /// Coins a buyer keeps after the purchase.
+    pub coin_reserve: i64,
+    // --- Gangs and dealers.
+    /// A gang's armoury target per member (the dealer sells the surplus).
+    pub armoury_per_member: f32,
+    /// A dealer's price × the tier's list.
+    pub dealer_markup: f32,
+    /// The dealer's cut of each sale (`Flow::Arms`).
+    pub dealer_cut: i64,
+    // --- Smuggling.
+    /// Weapons a crate holds at most, their tier, and the price of each
+    /// abroad; a gang ships one while its armoury is under its target plus
+    /// `deal_float` (its dealer's stock).
+    pub crate_size: u32,
+    pub crate_tier: u8,
+    pub crate_unit: i64,
+    pub deal_float: u32,
+    /// Days between a gang's crates.
+    pub crate_days: u32,
+    /// A crate is paid only from the coins above this many days of the
+    /// gang's stipends (the roster and one recruit).
+    pub crate_reserve_days: u32,
+    /// The minute of the day crates land.
+    pub crate_hour: u16,
+    pub p_seize: f32,
+    /// Coins to a Loader on shift at the Yard, and the seizure chance ×
+    /// `bribe_mult` when one takes it.
+    pub bribe: i64,
+    pub bribe_mult: f32,
+    // --- Petty theft (Dylan's answer 1).
+    /// A Market thief also lifts a carried item from a body within
+    /// `petty_reach` on this chance (a concealment contest after).
+    pub p_pickpocket: f32,
+    pub petty_reach: u32,
+    /// ... or empties the till of a stall in the Market's district of up to
+    /// this many coins.
+    pub stall_take_max: i64,
+    /// Petty item thefts a day at most, per 1,000 residents (R3).
+    pub petty_per_1000_day: f32,
+    /// What a fence pays of an item's value.
+    pub fence_frac: f32,
+}
+
+impl Default for WeaponsCfg {
+    fn default() -> Self {
+        WeaponsCfg {
+            enabled: false,
+            weapon_w: 0.08,
+            kill_w: 0.5,
+            might_w: 0.15,
+            wear_per_fight: 2,
+            armed_arrest_mult: 1.5,
+            weapons_per_1000: 100.0,
+            gunsmith_rows: vec![7],
+            parts_per_weapon: 3,
+            make_rate: 0.15,
+            gunsmith_stock: 12,
+            guard_tier: 1,
+            stock_per_guard: 0.5,
+            arms_budget: 100,
+            licence_fee: 60,
+            conceal_step: 0.25,
+            ua_per_1000_day: 1.0,
+            crackdown_rolls: 2,
+            want_p_by_class: [0.08, 0.05, 0.03],
+            carry_p_by_class: [0.3, 0.6, 0.8],
+            want_lawless: 0.25,
+            robbed_days: 7,
+            coin_reserve: 20,
+            armoury_per_member: 0.3,
+            dealer_markup: 1.5,
+            dealer_cut: 10,
+            crate_size: 4,
+            crate_tier: 1,
+            crate_unit: 40,
+            deal_float: 6,
+            crate_days: 3,
+            crate_reserve_days: 7,
+            crate_hour: 120,
+            p_seize: 0.15,
+            bribe: 15,
+            bribe_mult: 0.5,
+            p_pickpocket: 0.3,
+            petty_reach: 3,
+            stall_take_max: 10,
+            petty_per_1000_day: 2.0,
+            fence_frac: 0.4,
         }
     }
 }
@@ -1360,6 +1514,9 @@ pub struct TradeCfg {
     /// Jobs & lives phase 2: the row exists only with `[jobs2] street` on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub street: bool,
+    /// Jobs & lives phase 3: the row exists only with `[weapons]` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub weapons: bool,
 }
 
 /// J14: how a trade works its shift.
@@ -1600,6 +1757,20 @@ impl BuildingCfg {
             ..BuildingCfg::BASE
         }
     }
+    /// Jobs & lives phase 3 (§ 4): a Gunsmith (Parts in stock).
+    pub fn gunsmith() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 8,
+            stock_cap: 60,
+            staff: 0,
+            found_cost: Some(600),
+            value: Some(600),
+            floors_seed: Some(1),
+            floors_max: Some(1),
+            niche: Some(crate::components::Niche::Security),
+            ..BuildingCfg::BASE
+        }
+    }
     pub fn hq() -> BuildingCfg {
         BuildingCfg {
             capacity: 30,
@@ -1751,6 +1922,9 @@ pub struct BuildingsCfg {
     pub construction_yard: BuildingCfg,
     #[serde(default = "BuildingCfg::hq")]
     pub hq: BuildingCfg,
+    /// Jobs & lives phase 3 (§ 4): none stands with `[weapons]` off.
+    #[serde(default = "BuildingCfg::gunsmith")]
+    pub gunsmith: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -1788,6 +1962,7 @@ impl BuildingsCfg {
             BuildingKind::UtilityPlant => &self.utility_plant,
             BuildingKind::ConstructionYard => &self.construction_yard,
             BuildingKind::Hq => &self.hq,
+            BuildingKind::Gunsmith => &self.gunsmith,
         }
     }
 }
@@ -2043,6 +2218,9 @@ pub struct SentenceDaysExt {
     pub fraud: u32,
     /// M16b § 4: the spec's 72 h.
     pub blackmail: u32,
+    /// Jobs & lives phase 3 (§ 4): a dealer's weapon sale, a seized crate.
+    pub arms_dealing: u32,
+    pub smuggling: u32,
 }
 
 impl Default for SentenceDaysExt {
@@ -2056,6 +2234,8 @@ impl Default for SentenceDaysExt {
             data_theft: 5,
             fraud: 2,
             blackmail: 3,
+            arms_dealing: 6,
+            smuggling: 8,
         }
     }
 }
@@ -3935,6 +4115,9 @@ pub struct PerKind<T: Default> {
     /// M14 V28.
     #[serde(default)]
     pub camera: T,
+    /// Jobs & lives phase 3.
+    #[serde(default)]
+    pub weapon: T,
 }
 
 impl AssetsCfg {
@@ -3961,6 +4144,7 @@ impl<T: Default> PerKind<T> {
             AssetClass::Bridge => &self.bridge,
             AssetClass::Deck => &self.deck,
             AssetClass::Camera => &self.camera,
+            AssetClass::Weapon => &self.weapon,
         }
     }
 }
@@ -4050,6 +4234,7 @@ impl AssetsCfg {
                 bridge: vec![200, 600, 1800],
                 deck: vec![400, 1500, 5000],
                 camera: vec![120, 400, 1200],
+                weapon: vec![60, 160, 400],
             },
             upkeep: PerKind {
                 motorcycle: vec![1],
@@ -4062,6 +4247,7 @@ impl AssetsCfg {
                 bridge: vec![0, 0, 0],
                 deck: vec![1, 3, 8],
                 camera: vec![1, 2, 4],
+                weapon: vec![0, 0, 0],
             },
             wear: PerKind {
                 motorcycle: 1,
@@ -4074,6 +4260,7 @@ impl AssetsCfg {
                 bridge: 0,
                 deck: 0,
                 camera: 1,
+                weapon: 0,
             },
             parts_per: PerKind {
                 motorcycle: 4,
@@ -4086,6 +4273,7 @@ impl AssetsCfg {
                 bridge: 0,
                 deck: 4,
                 camera: 2,
+                weapon: 3,
             },
             parts_price: 15,
             import_frac: 0.6,
@@ -4859,6 +5047,8 @@ pub struct TechRequires {
     pub flyer: Vec<u8>,
     pub pack: Vec<u8>,
     pub bridge: Vec<u8>,
+    /// Jobs & lives phase 3.
+    pub weapon: Vec<u8>,
 }
 
 impl TechRequires {
@@ -4875,6 +5065,7 @@ impl TechRequires {
             AssetClass::Bridge => &self.bridge,
             AssetClass::Deck => &self.deck,
             AssetClass::Camera => &self.camera,
+            AssetClass::Weapon => &self.weapon,
         }
     }
 }
@@ -4961,6 +5152,7 @@ impl Default for TechCfg {
                 flyer: vec![3],
                 pack: vec![1, 1],
                 bridge: Vec::new(),
+                weapon: vec![1, 2, 3],
             },
             tier_cost: vec![0, 0, 400, 1200],
             tier_coins: vec![0, 0, 800, 2500],
@@ -6502,6 +6694,10 @@ impl Config {
         // Jobs & lives phase 2: the street's A/B and identity device.
         if std::env::var("CITYSIM_STREET_OFF").is_ok_and(|v| v == "1") {
             cfg.jobs2.street = false;
+        }
+        // Jobs & lives phase 3: the weapons' A/B and identity device.
+        if std::env::var("CITYSIM_WEAPONS_OFF").is_ok_and(|v| v == "1") {
+            cfg.weapons.enabled = false;
         }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)

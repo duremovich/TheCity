@@ -213,10 +213,13 @@ pub enum BuildingKind {
     ConstructionYard,
     /// A corp's head office in the Spire (Office Workers).
     Hq,
+    // --- Jobs & lives phase 3 (§ 4), only with `[weapons] enabled`.
+    /// Gunsmiths turn Parts into Weapons (a Security corp's shop).
+    Gunsmith,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 32] = [
+    pub const ALL: [BuildingKind; 33] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -249,15 +252,18 @@ impl BuildingKind {
         BuildingKind::UtilityPlant,
         BuildingKind::ConstructionYard,
         BuildingKind::Hq,
+        BuildingKind::Gunsmith,
     ];
 
-    /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`.
-    pub const JOBS2: [BuildingKind; 5] = [
+    /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`
+    /// (phase 3's Gunsmith only with `[weapons]` on too).
+    pub const JOBS2: [BuildingKind; 6] = [
         BuildingKind::PackingPlant,
         BuildingKind::FreightYard,
         BuildingKind::UtilityPlant,
         BuildingKind::ConstructionYard,
         BuildingKind::Hq,
+        BuildingKind::Gunsmith,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -309,6 +315,7 @@ impl BuildingKind {
             "UtilityPlant" => BuildingKind::UtilityPlant,
             "ConstructionYard" => BuildingKind::ConstructionYard,
             "Hq" => BuildingKind::Hq,
+            "Gunsmith" => BuildingKind::Gunsmith,
             _ => return None,
         })
     }
@@ -348,6 +355,7 @@ impl BuildingKind {
             BuildingKind::UtilityPlant => "Utility Plant",
             BuildingKind::ConstructionYard => "Construction Yard",
             BuildingKind::Hq => "Corp HQ",
+            BuildingKind::Gunsmith => "Gunsmith",
         }
     }
 
@@ -392,6 +400,8 @@ impl BuildingKind {
             BuildingKind::UtilityPlant => '*',
             BuildingKind::ConstructionYard => '^',
             BuildingKind::Hq => '$',
+            // Jobs & lives phase 3.
+            BuildingKind::Gunsmith => '!',
         }
     }
 }
@@ -695,6 +705,15 @@ pub enum Crime {
     /// M16b § 4 (phase 1): a coercion on a secret, filed by the coerced
     /// on a failed move; ranks just above Shakedown.
     Blackmail,
+    /// Jobs & lives phase 3 (§ 4, D16): a dealer's sale of a weapon.
+    ArmsDealing,
+    /// Jobs & lives phase 3 (§ 4, D16): a weapon carried without a licence,
+    /// seen by a guard. Petty: a night in the cells when it is the worst
+    /// open report.
+    UnlicensedArms,
+    /// Jobs & lives phase 3 (§ 4, D16): a crate seized at customs, filed
+    /// on the receiving gang's leader.
+    Smuggling,
 }
 
 impl Crime {
@@ -716,6 +735,9 @@ impl Crime {
             Crime::FareEvasion => "Fare Evasion",
             Crime::Fraud => "Fraud",
             Crime::Blackmail => "Blackmail",
+            Crime::ArmsDealing => "Arms Dealing",
+            Crime::UnlicensedArms => "Unlicensed Arms",
+            Crime::Smuggling => "Smuggling",
         }
     }
 
@@ -739,13 +761,18 @@ impl Crime {
             Crime::GrandTheft => 5,
             Crime::DataTheft => 6,
             Crime::Dealing => 7,
-            Crime::Extortion => 8,
-            Crime::Blackmail => 9,
-            Crime::Assault => 10,
-            Crime::Manslaughter => 11,
-            Crime::Abduction => 12,
-            Crime::Conspiracy => 13,
-            Crime::Murder => 14,
+            // Jobs & lives phase 3 (§ 4): the arms crimes between Dealing
+            // and Shakedown; everything above moves up three.
+            Crime::UnlicensedArms => 8,
+            Crime::ArmsDealing => 9,
+            Crime::Smuggling => 10,
+            Crime::Extortion => 11,
+            Crime::Blackmail => 12,
+            Crime::Assault => 13,
+            Crime::Manslaughter => 14,
+            Crime::Abduction => 15,
+            Crime::Conspiracy => 16,
+            Crime::Murder => 17,
         }
     }
 }
@@ -3822,6 +3849,11 @@ pub enum AssetKind {
     Deck,
     /// M14 V28: a camera posted at a building (inert until phase 3).
     Camera,
+    /// Jobs & lives phase 3 (§ 4, Dylan's answer 1): a weapon, the first
+    /// kind of the owned-item store (carried, kept at home, or stocked at
+    /// a Gunsmith, a Hideout's armoury or the Precinct); its tier is the
+    /// fight's term.
+    Weapon,
 }
 
 /// The lever and CSV grouping of an `AssetKind` (implants by class, not slot).
@@ -3840,10 +3872,12 @@ pub enum AssetClass {
     Deck,
     /// M14 V28.
     Camera,
+    /// Jobs & lives phase 3.
+    Weapon,
 }
 
 impl AssetClass {
-    pub const ALL: [AssetClass; 10] = [
+    pub const ALL: [AssetClass; 11] = [
         AssetClass::Motorcycle,
         AssetClass::Car,
         AssetClass::Truck,
@@ -3854,6 +3888,7 @@ impl AssetClass {
         AssetClass::Bridge,
         AssetClass::Deck,
         AssetClass::Camera,
+        AssetClass::Weapon,
     ];
 
     /// Position in `ALL` (indexes `Levers::asset_tax`).
@@ -3875,7 +3910,14 @@ impl AssetKind {
             AssetKind::Bridge => AssetClass::Bridge,
             AssetKind::Deck => AssetClass::Deck,
             AssetKind::Camera => AssetClass::Camera,
+            AssetKind::Weapon => AssetClass::Weapon,
         }
+    }
+
+    /// Jobs & lives phase 3 (Dylan's answer 1): an owned item (carried on
+    /// the body, kept at home, stocked): weapons now, clothing in phase 4.
+    pub fn is_item(self) -> bool {
+        matches!(self, AssetKind::Weapon)
     }
 
     /// Motorcycle, Car, Truck, Flyer.
@@ -3908,8 +3950,38 @@ impl AssetKind {
             AssetKind::Bridge => "Bridge",
             AssetKind::Deck => "Deck",
             AssetKind::Camera => "Camera",
+            AssetKind::Weapon => "Weapon",
         }
     }
+}
+
+/// Jobs & lives phase 3 (Dylan's answer 1): how an owned item came to its
+/// holder, and who made, sold, took or seized it.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Debug, Serialize, Deserialize)]
+pub enum ProvKind {
+    /// Made at a Gunsmith (`by` the workshop).
+    Made,
+    /// Sold legally (`by` the seller building).
+    Sold,
+    /// Taken by a pickpocket, a mugger, a burglar or a fight's winner
+    /// (`by` the thief).
+    Stolen,
+    /// Landed in a crate (`by` the receiving gang).
+    Smuggled,
+    /// Sold by a gang's dealer (`by` the dealer).
+    Dealt,
+    /// Seized by the law (`by` the Precinct).
+    Seized,
+    /// A god's grant.
+    Granted,
+}
+
+/// Jobs & lives phase 3: an item's provenance (its last change of hands).
+#[derive(Copy, Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+pub struct Provenance {
+    pub how: ProvKind,
+    pub by: Option<EntityId>,
+    pub at: Tick,
 }
 
 /// A traded good. Food lives in `Building.stock_food`; Stims and Parts in
@@ -4034,6 +4106,10 @@ pub struct Asset {
     /// this faction until the tick.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub turned: Option<(EntityId, Tick)>,
+    /// Jobs & lives phase 3 (Dylan's answer 1): an item's provenance
+    /// (`None` for every pre-milestone asset).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prov: Option<Provenance>,
 }
 
 fn is_zero_u16(v: &u16) -> bool {
@@ -4081,6 +4157,9 @@ pub struct Kit {
     pub deck: Option<EntityId>,
     /// M14 V36: its effective tier (`assets::eff_tier`), 0 without one.
     pub deck_tier: u8,
+    /// Jobs & lives phase 3 (§ 4): the carried weapon's effective tier
+    /// (the best one, condition > 0), 0 unarmed.
+    pub weapon: u8,
 }
 
 impl Default for Kit {
@@ -4103,6 +4182,7 @@ impl Default for Kit {
             chrome: false,
             deck: None,
             deck_tier: 0,
+            weapon: 0,
         }
     }
 }

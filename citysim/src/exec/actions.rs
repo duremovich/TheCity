@@ -3,7 +3,8 @@
 //! uses are implemented; the rest fail `can_start` until their milestone.
 
 use crate::components::{
-    Brain, Building, BuildingKind, Household, Inventory, Job, MemoryKind, Needs, Position, Skills, TilePos, Wallet,
+    AssetKind, Brain, Building, BuildingKind, Household, Inventory, Job, MemoryKind, Needs, Position, Skills, TilePos,
+    Wallet,
 };
 use crate::entity::EntityId;
 use crate::exec::{FailReason, StepResult};
@@ -254,8 +255,17 @@ pub fn can_start(world: &World, id: EntityId, kind: ActionKind, target: Option<E
         }
         // M13 D29: inside an open seller with a pick to buy.
         ActionKind::BuyAsset => {
+            // Jobs & lives phase 3: a weapon's seller is a Gunsmith or a dealer's Bar.
+            let weapon =
+                world.comp::<Brain>(id).and_then(|b| b.shop_pick.as_ref()).is_some_and(|p| p.kind == AssetKind::Weapon);
             world.comp::<Position>(id).and_then(|p| p.building).is_some_and(|b| {
-                Some(b) == target && crate::systems::assets::seller_open(world, b) && !world.is_closed(b)
+                Some(b) == target
+                    && !world.is_closed(b)
+                    && if weapon {
+                        crate::systems::weapons::sale_open(world, b)
+                    } else {
+                        crate::systems::assets::seller_open(world, b)
+                    }
             }) && world.comp::<Brain>(id).is_some_and(|b| b.shop_pick.is_some())
         }
         // M13 D34: inside an open Clinic (the Install with the gang's
@@ -1035,7 +1045,13 @@ pub fn on_complete(
                     StepResult::Failed(FailReason::StockGone)
                 };
             }
-            if crate::systems::gang::fence(world, id) > 0 {
+            let food = crate::systems::gang::fence(world, id);
+            // Jobs & lives phase 3: the stolen items carried go with the food.
+            let items = match world.gang_of(id) {
+                Some(g) => crate::systems::weapons::fence_items(world, id, g),
+                None => 0,
+            };
+            if food > 0 || items > 0 {
                 StepResult::Done
             } else {
                 StepResult::Failed(FailReason::StockGone)
@@ -1047,6 +1063,13 @@ pub fn on_complete(
             let here = world.comp::<Position>(id).and_then(|p| p.building);
             let pick = world.comp_mut::<Brain>(id).and_then(|b| b.shop_pick.take());
             match (here, pick) {
+                // Jobs & lives phase 3: a weapon at a Gunsmith or a dealer's Bar.
+                (Some(seller), Some(pick)) if target == Some(seller) && pick.kind == AssetKind::Weapon => {
+                    match crate::systems::weapons::buy(world, id, seller, &pick, true) {
+                        Ok(_) => StepResult::Done,
+                        Err(_) => StepResult::Failed(FailReason::PreconditionLost),
+                    }
+                }
                 (Some(seller), Some(pick)) if target == Some(seller) => {
                     match crate::systems::chrome::buy_install(world, id, seller, &pick) {
                         Ok(_) => StepResult::Done,
@@ -1439,6 +1462,14 @@ fn steal_food(world: &mut World, id: EntityId, source: StealSource, target: Opti
         _ => None,
     };
     crate::systems::law::raise_crime(world, id, victim, crate::components::Crime::Theft, tile);
+    // Jobs & lives phase 3 (Dylan's answer 1): the petty theft of items on
+    // the same path (a body's carried item or a stall's till at a Market,
+    // an item kept at a Home).
+    match source {
+        StealSource::Market => crate::systems::weapons::market_petty(world, id),
+        StealSource::Home => crate::systems::weapons::home_petty(world, id, b),
+        StealSource::Warehouse => {}
+    }
     StepResult::Done
 }
 

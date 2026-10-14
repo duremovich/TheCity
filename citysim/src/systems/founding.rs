@@ -158,6 +158,8 @@ pub fn build_on_lot(
             | BuildingKind::UtilityPlant
             | BuildingKind::ConstructionYard
             | BuildingKind::Hq
+            // Jobs & lives phase 3 (§ 4).
+            | BuildingKind::Gunsmith
     ) {
         return Err(format!("cannot build a {} on a Lot", kind.label()));
     }
@@ -376,6 +378,8 @@ pub fn tier_ok(kind: BuildingKind, tier: u8) -> bool {
         BuildingKind::Den | BuildingKind::NoodleBar => tier <= 1,
         // Jobs & lives phase 1 (§ 2): the Hq stands in the Spire.
         BuildingKind::Hq => tier == 2,
+        // Jobs & lives phase 3: a Gunsmith off the Sump.
+        BuildingKind::Gunsmith => tier >= 1,
         _ => true,
     }
 }

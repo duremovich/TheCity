@@ -103,6 +103,8 @@ pub fn track_of(kind: AssetKind) -> Track {
         AssetKind::Motorcycle | AssetKind::Car | AssetKind::Truck | AssetKind::Flyer | AssetKind::Pack => {
             Track::Industry
         }
+        // Jobs & lives phase 3: a Gunsmith works in its corp's Industry track.
+        AssetKind::Weapon => Track::Industry,
     }
 }
 

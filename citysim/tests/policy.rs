@@ -9,9 +9,12 @@ use citysim::{Brain, Config, EventKind, Job, PlayerCommand, Wallet, World, TICKS
 
 fn shipped() -> World {
     // Jobs & lives phase 2: P10's levers as written, without the street
-    // (its butterfly changed which jobless adult the dole test draws on).
+    // (its butterfly changed which jobless adult the dole test draws on);
+    // phase 3: nor the weapons (the same butterfly: the adult drawn paid
+    // rent out of the dole, `pay_rent_from_income`).
     let mut c = Config::load();
     c.jobs2.street = false;
+    c.weapons.enabled = false;
     let w = World::new(42, c);
     assert!(citysim::systems::econ::wages_on(&w) && !policy::net_enacted(&w), "the shipped city: no net");
     w

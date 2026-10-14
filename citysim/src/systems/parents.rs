@@ -1617,6 +1617,23 @@ fn syndicate_of(world: &World, gang: EntityId) -> Option<OutsideId> {
         .map(|f| f.id)
 }
 
+/// Jobs & lives phase 3: a gang's living syndicate (`None` with the
+/// outside off or none), which ships its crates.
+pub fn syndicate_id(world: &World, gang: EntityId) -> Option<OutsideId> {
+    syndicate_of(world, gang)
+}
+
+/// Jobs & lives phase 3: a parent's treasury abroad (0 for none).
+pub fn treasury_abroad(world: &World, id: OutsideId) -> i64 {
+    world.outside.faction(id).map_or(0, |f| f.treasury)
+}
+
+/// Jobs & lives phase 3: a parent pays a cost abroad (a crate shipped in
+/// kind): out of its treasury and out of `minted`, booked as spent.
+pub fn spend_abroad(world: &mut World, id: OutsideId, cost: i64) -> bool {
+    pay_abroad(world, id, cost)
+}
+
 /// Does `gang` have a living syndicate (M12's bootstrap re-formation is
 /// replaced by the syndicate's refound).
 pub fn has_syndicate(world: &World, gang: EntityId) -> bool {

@@ -393,6 +393,7 @@ pub fn spawn_asset(
             maker: None,
             data: [0; 3],
             turned: None,
+            prov: None,
         },
     );
     file(world, id);
@@ -585,6 +586,15 @@ pub fn compute_kit(world: &World, agent: EntityId) -> Kit {
         k.deck = Some(d);
         k.deck_tier = eff_tier_of(world, x).max(1);
     }
+    // Jobs & lives phase 3 (§ 4): the best weapon carried (condition > 0)
+    // at its effective tier. None exists with `[weapons]` off.
+    k.weapon = assets_at(world, agent)
+        .iter()
+        .filter_map(|&a| world.comp::<Asset>(a))
+        .filter(|x| x.kind == AssetKind::Weapon && x.loc == AssetLoc::Carried(agent) && x.condition > 0)
+        .map(|x| eff_tier_of(world, x).max(1))
+        .max()
+        .unwrap_or(0);
     // M14 V31: else the fleet deck a corp's run order lends at its Lab chair.
     if k.deck.is_none() {
         let lent = world
@@ -1213,7 +1223,14 @@ pub fn settle_corpse(world: &mut World, c: EntityId) {
             }
             None => {
                 set_owner(world, p, None);
-                match world.building_of_kind(BuildingKind::Cemetery) {
+                // Jobs & lives phase 3: an heirless weapon goes to the Precinct.
+                let weapon = world.comp::<Asset>(p).is_some_and(|x| x.kind == AssetKind::Weapon);
+                let to = if weapon {
+                    world.building_of_kind(BuildingKind::Jail)
+                } else {
+                    world.building_of_kind(BuildingKind::Cemetery)
+                };
+                match to {
                     Some(r) => set_loc(world, p, AssetLoc::Stock(r)),
                     None => despawn(world, p),
                 }
@@ -1382,10 +1399,13 @@ pub fn loot_to_gang(world: &mut World, gang: EntityId, coins: i64) {
 pub fn parts_market(world: &mut World) {
     let (floor, batch, price) =
         (world.config.assets.parts_floor, world.config.assets.parts_batch, world.config.assets.parts_price.max(1));
+    // Jobs & lives phase 3: a Gunsmith's Parts too (none stands with
+    // `[weapons]` off).
     let mut buyers: Vec<EntityId> = world
         .buildings_of_kind(BuildingKind::Clinic)
         .iter()
         .chain(world.buildings_of_kind(BuildingKind::Garage))
+        .chain(world.buildings_of_kind(BuildingKind::Gunsmith))
         .copied()
         .filter(|&b| world.comp::<Building>(b).is_some_and(|bd| !bd.demolished && !bd.derelict))
         .collect();
@@ -1603,7 +1623,7 @@ fn new_loc(world: &World, kind: AssetKind, buyer: EntityId, seller: EntityId) ->
     match kind {
         k if k.is_vehicle() => AssetLoc::Parked(seller),
         AssetKind::Implant(_) if agent => AssetLoc::Installed(buyer),
-        AssetKind::Pack | AssetKind::Bridge | AssetKind::Deck if agent => AssetLoc::Carried(buyer),
+        AssetKind::Pack | AssetKind::Bridge | AssetKind::Deck | AssetKind::Weapon if agent => AssetLoc::Carried(buyer),
         // M13 D42: a robot waits in the seller's stock until its buyer posts
         // it (`robots::consider_robot` posts it at the building Secure named).
         _ => AssetLoc::Stock(seller),
@@ -1863,6 +1883,9 @@ pub enum ShopCategory {
     Install,
     /// M14 V36: a deck, or the carried deck one tier up (`ShopPick.upgrade`).
     Deck,
+    /// Jobs & lives phase 3 (section 4): a weapon at a Gunsmith (licensed)
+    /// or a dealer's Bar.
+    Weapon,
 }
 
 /// The Shop goal's best offer for one agent (D43).
@@ -2068,7 +2091,10 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
         && own_deck.is_some_and(|(_, t)| {
             t < 3 && deck_level().is_some_and(|l| upgrade_price(world, t, l).is_some_and(|p| coins >= p))
         });
-    if !want_vehicle && !want_pack && !want_chrome && !want_deck && !want_upgrade {
+    // Jobs & lives phase 3 (section 4): a weapon, for an adult who wants one
+    // (`None` with `[weapons]` off).
+    let weapon = crate::systems::weapons::offer(world, id, from, require_open);
+    if !want_vehicle && !want_pack && !want_chrome && !want_deck && !want_upgrade && weapon.is_none() {
         return None;
     }
     let mut best: Option<ShopOffer> = None;
@@ -2119,6 +2145,17 @@ pub fn shop_choice(world: &World, id: EntityId, require_open: bool) -> Option<Sh
                 offer(ShopCategory::Chrome, c, (pick.kind, pick.tier, price, financed), pick.used, false, cs);
             }
         }
+    }
+    // Jobs & lives phase 3: the weapon (the unlicensed buyer's lawfulness weighs it).
+    if let Some((seller, tier, price, legal)) = weapon {
+        let p = world.comp::<crate::components::Personality>(id);
+        let courage = p.map_or(0.5, |p| p.courage);
+        let mut cs = vec![Consideration::new("courage", courage, Curve::Linear { m: 0.5, b: 0.5 })];
+        if !legal {
+            let law = p.map_or(0.5, |p| p.lawfulness);
+            cs.push(Consideration::new("1-lawfulness", 1.0 - law, Curve::Linear { m: 0.5, b: 0.5 }));
+        }
+        offer(ShopCategory::Weapon, seller, (AssetKind::Weapon, tier, price, false), None, false, cs);
     }
     // A pack, for the homeless without one.
     if want_pack {
@@ -2391,6 +2428,12 @@ fn stat_shop(world: &mut World) {
             continue;
         }
         if o.category == ShopCategory::Install {
+            continue;
+        }
+        // Jobs & lives phase 3: a weapon off screen (a Gunsmith's stock, a
+        // dealer's surplus).
+        if o.category == ShopCategory::Weapon {
+            let _ = crate::systems::weapons::buy(world, id, o.seller, &o.pick, false);
             continue;
         }
         let Ok(a) = buy(world, id, o.seller, &o.pick) else { continue };

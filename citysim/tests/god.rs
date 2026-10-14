@@ -2852,7 +2852,8 @@ fn god_decapitate_close_succession() {
 }
 
 /// M17 god 5 (phase 5): a job abroad. On day 20 four of Ninefold's
-/// members leave on a mission against Arasaka Global's depot, `promote_p`
+/// members (or the gang's with the most free members, Jobs & lives phase 3)
+/// leave on a mission against Arasaka Global's depot, `promote_p`
 /// at 1. Does the mission come back settled, and does someone the crew met
 /// abroad arrive in the city with an edge to its leader (its first member alive on the way back) within
 /// `promote_delay_days`?
@@ -2867,19 +2868,32 @@ fn god_abroad() {
         if day != 20 {
             return;
         }
-        let Some(g) = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "Ninefold")) else {
-            return;
+        let free = |w: &World, g: EntityId| -> Vec<EntityId> {
+            citysim::systems::gang::leader_ranking(w, g)
+                .into_iter()
+                .filter(|&m| {
+                    citysim::systems::contracts::free_adult(w, m) && !citysim::systems::contracts::holds_body(w, m)
+                })
+                .take(4)
+                .collect()
         };
-        let crew: Vec<EntityId> = citysim::systems::gang::leader_ranking(w, g)
-            .into_iter()
-            .filter(|&m| {
-                citysim::systems::contracts::free_adult(w, m) && !citysim::systems::contracts::holds_body(w, m)
-            })
-            .take(4)
-            .collect();
+        // Jobs & lives phase 3: Ninefold, or (when the seed-42 city left it
+        // without a free member by day 20: with the weapons on, its first
+        // recruit died on day 3, a butterfly with no weapon in the fight)
+        // the gang with the most free members.
+        let ninefold = w.gangs().into_iter().find(|&g| w.comp::<Gang>(g).is_some_and(|x| x.name == "Ninefold"));
+        let g = match ninefold.filter(|&g| !free(w, g).is_empty()) {
+            Some(g) => g,
+            None => match w.gangs().into_iter().max_by_key(|&g| (free(w, g).len(), std::cmp::Reverse(g))) {
+                Some(g) => g,
+                None => return,
+            },
+        };
+        let crew = free(w, g);
         let Some(on) = w.outside.factions.iter().find(|f| f.name == "Arasaka Global").map(|f| f.id) else { return };
         team = crew.clone();
-        eprintln!("day 20: {} crew from Ninefold to Arasaka Global's depot", crew.len());
+        let gname = w.comp::<Gang>(g).map_or_else(String::new, |x| x.name.clone());
+        eprintln!("day 20: {} crew from {gname} to Arasaka Global's depot", crew.len());
         w.push_command(PlayerCommand::PostAbroad {
             buyer: Some(g),
             on,

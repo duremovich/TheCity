@@ -319,6 +319,8 @@ pub fn depart(world: &mut World, agent: EntityId) -> bool {
     if first {
         crate::systems::virt::on_raid_departed(world, gid);
     }
+    // Jobs & lives phase 3 (section 4): the member draws from the armoury.
+    crate::systems::weapons::issue(world, agent);
     true
 }
 
@@ -761,7 +763,14 @@ pub fn turned_join(world: &World, b: EntityId, gang: EntityId, raiders: &mut Vec
 
 /// `fighting + 0.25 × courage`: the brawl's pairing order.
 pub fn strength(world: &World, id: EntityId) -> f32 {
-    law::fighting(world, id) + 0.25 * law::courage(world, id)
+    let s = law::fighting(world, id) + 0.25 * law::courage(world, id);
+    // Jobs & lives phase 3 (section 4): the side's tiers (a branch: 0 unarmed).
+    let w = crate::systems::weapons::might(world, id);
+    if w != 0.0 {
+        s + w
+    } else {
+        s
+    }
 }
 
 pub fn by_strength(world: &World, ids: &mut [EntityId]) {

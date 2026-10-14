@@ -291,6 +291,9 @@ pub enum Flow {
     Gray,
     /// § 8: a follower's tithe into a church's purse (untaxed).
     Tithe,
+    /// § 4 (phase 3): a dealer's weapon sale, buyer -> the gang, and the
+    /// dealer's cut (untaxed, `Flow::Stims`'s shape).
+    Arms,
 }
 
 impl Flow {
@@ -415,9 +418,10 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         Flow::Power => row.jobs2.get_or_insert_with(Default::default).flow_power += coins,
         Flow::Build => row.jobs2.get_or_insert_with(Default::default).flow_build += coins,
         // The later phases' flows: `flow_other` until their columns land.
-        Flow::Tip | Flow::CabFare | Flow::StreetCut | Flow::Licence | Flow::Gray | Flow::Tithe => {
-            row.flow_other += coins
-        }
+        // Jobs & lives phase 3: the weapons group's own columns.
+        Flow::Licence => row.jobs2.get_or_insert_with(Default::default).flow_licence += coins,
+        Flow::Arms => row.jobs2.get_or_insert_with(Default::default).flow_arms += coins,
+        Flow::Tip | Flow::CabFare | Flow::StreetCut | Flow::Gray | Flow::Tithe => row.flow_other += coins,
     }
 }
 

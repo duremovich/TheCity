@@ -36,6 +36,8 @@ fn set_seeded_garages_aside(w: &mut World) {
         .buildings_of_kind(BuildingKind::Garage)
         .iter()
         .chain(w.buildings_of_kind(BuildingKind::Clinic))
+        // Jobs & lives phase 3: a Gunsmith buys Parts too.
+        .chain(w.buildings_of_kind(BuildingKind::Gunsmith))
         .copied()
         .collect();
     for g in sellers {

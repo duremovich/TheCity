@@ -209,6 +209,8 @@ pub fn accrue(world: &mut World, worker: EntityId, b: EntityId, ticks: u64) {
         Some(BuildingKind::Fab) => crate::systems::jobs::accrue_fab_work(world, worker, b, ticks),
         // Jobs & lives phase 1 (§ 2): the Packers.
         Some(BuildingKind::PackingPlant) => crate::systems::industry::accrue_packing(world, worker, b, ticks),
+        // Jobs & lives phase 3 (section 4): the gunsmiths.
+        Some(BuildingKind::Gunsmith) => crate::systems::weapons::accrue_gunsmith(world, worker, b, ticks),
         _ => {}
     }
 }

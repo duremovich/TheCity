@@ -385,7 +385,10 @@ fn only_recycler_sells(w: &mut World, n: u32, buyer: Option<EntityId>) -> Entity
         let have = w.stock(b, Good::Parts);
         w.take_stock(b, Good::Parts, have);
         let kind = w.comp::<Building>(b).map(|bd| bd.kind);
-        if matches!(kind, Some(BuildingKind::Clinic | BuildingKind::Garage)) && Some(b) != buyer {
+        // Jobs & lives phase 3: a Gunsmith is a Parts buyer too.
+        if matches!(kind, Some(BuildingKind::Clinic | BuildingKind::Garage | BuildingKind::Gunsmith))
+            && Some(b) != buyer
+        {
             w.add_stock(b, Good::Parts, floor);
         }
     }

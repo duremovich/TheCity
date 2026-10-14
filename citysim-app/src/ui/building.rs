@@ -202,6 +202,13 @@ pub fn draw(ui: &mut Ui, app: &mut App, world: &World, id: EntityId) {
                 }
                 staff(ui, app, world, id, "Staff");
             }
+            // Jobs & lives phase 3 (section 4): a Gunsmith's Parts and weapons.
+            BuildingKind::Gunsmith => {
+                let parts = world.stock(id, citysim::Good::Parts);
+                let arms = citysim::systems::weapons::stock_at(world, id).len();
+                ui.label(format!("Parts held {parts} · weapons in stock {arms}"));
+                staff(ui, app, world, id, "Gunsmiths");
+            }
             // M16a § 9 (plan C42): the Fixer's book, regulars, cut, heat,
             // income and closed-until.
             BuildingKind::Fixer => {

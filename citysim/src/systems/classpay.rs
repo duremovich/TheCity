@@ -38,6 +38,7 @@ pub fn trade_live(world: &World, row: &crate::config::TradeCfg) -> bool {
     (!row.classpay || on(world))
         && (!row.jobs2 || crate::systems::industry::on(world))
         && (!row.street || crate::systems::streetwork::on(world))
+        && (!row.weapons || crate::systems::weapons::on(world))
 }
 
 /// Is `b` a standing-or-not building owned by a corp?

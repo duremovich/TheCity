@@ -16,7 +16,12 @@ fn account(w: &World, name: &str) -> u32 {
 }
 
 fn city() -> World {
-    let mut w = World::new(42, Config::load());
+    // Jobs & lives phase 3: M17's missions as written, without the weapons
+    // (their butterfly had the first Enemy arrival attack the unarmed leader
+    // and die on the first day, so the grudge the test reads was gone).
+    let mut c = Config::load();
+    c.weapons.enabled = false;
+    let mut w = World::new(42, c);
     w.run_ticks(2 * TICKS_PER_DAY + 30);
     w
 }

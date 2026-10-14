@@ -182,7 +182,7 @@ sight_day_crime = 8
 sight_night_crime = 4
 sentence_days = [3, 6, 10, 30]
 # M13 D47: the crimes appended after Vagrancy (GrandTheft and Manslaughter land in phase 2).
-sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5, fraud = 2, blackmail = 3 }   # M14 V18: intrusion, data_theft; M16b: fraud, blackmail
+sentence_days_ext = { grand_theft = 6, dealing = 5, abduction = 20, manslaughter = 10, intrusion = 2, data_theft = 5, fraud = 2, blackmail = 3, arms_dealing = 6, smuggling = 8 }   # M14 V18: intrusion, data_theft; M16b: fraud, blackmail; Jobs & lives phase 3: arms_dealing, smuggling (UnlicensedArms is a night in the cells)
 # jail capacity is buildings.jail.capacity
 fight_death_p = 0.03
 stat_theft_caught_p = 0.25
@@ -886,7 +886,7 @@ enabled = true                     # off() = false: no pass, no Kit term, no Bod
 # running a truck by day 30: 5-6 -> 8); flyer 6000 -> 2000 (nobody but a corp ever holds it; the exec
 # flyer, [shop] exec_flyer_cash_mult: at 3000 the 42-44 runs bought 0-2); implant T1 150 -> 60 (cash only
 # below, so the cash buyers must exist; adults chromed 13-17 %, members 40-60 %).
-price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200] }
+price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200], weapon = [60, 160, 400] }
 # M14 phase 2 (outside the plan's knob list, the M13 price precedent): deck [400, 1500, 5000] ->
 # [60, 120, 600]. Hackers' wallets on seed 42 (hacking >= 0.4): median 19 / 8 / 5 coins on days 5 / 20 / 40,
 # p90 45 / 21 / 18, so at 400 no agent bought a deck in 120 days (decks owned: 2, both corp fleet). At
@@ -896,9 +896,9 @@ price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], i
 # Phase 5: motorcycle upkeep 1 -> 0 and wear 1 -> 0. Unpaid upkeep wore a bike 3 a day and wear 1 a
 # day wrecked every bike bought in the first week around day 100 (64 "worn out" on seed 42): no owner
 # could pay a repair. Crashes (crash_wear) still wreck them.
-upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4] }
-wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1 }
-parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10, deck = 4, camera = 2 }
+upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4], weapon = [0, 0, 0] }
+wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1, weapon = 0 }
+parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10, deck = 4, camera = 2, weapon = 3 }
 parts_price = 15
 import_frac = 0.6
 part_credit = 20                   # import coins one Part from a seller's stock replaces
@@ -1173,7 +1173,7 @@ seed_store = 300                   # plan: seeded Lab stores
 buy_budget_frac = 0.05
 
 [tech]
-requires = { implant = [1, 2, 3], deck = [1, 2, 3], robot = [1, 2, 3], camera = [1, 2, 3], motorcycle = [1], car = [1, 2], truck = [2], flyer = [3], pack = [1, 1] }
+requires = { implant = [1, 2, 3], deck = [1, 2, 3], robot = [1, 2, 3], camera = [1, 2, 3], motorcycle = [1], car = [1, 2], truck = [2], flyer = [3], pack = [1, 1], weapon = [1, 2, 3] }
 # M14 phase 5 (with the Research change below): tier 2 400 -> 200. A Research-built Lab makes ~10 units a
 # day and a corp holds Research a few days at a time; at 400 no corp gained a tier on seeds 42-49 (labs built
 # on 5 of 8), at 200 Nutrix reaches Industry 2 on seeds 43 and 45 of the gate's 42-47. Tier 3 stays at 1,200.
@@ -1873,6 +1873,18 @@ found_cost = 1500
 value = 1500
 floors_seed = 3
 floors_max = 8
+
+# Jobs & lives phase 3 (docs/JOBS_AND_LIVES.md § 4): the Gunsmith (a Security corp's shop in the Mid; its stock_cap
+# is Parts; the weapons it holds are capped by [weapons] gunsmith_stock). None stands with [weapons] off. Placeholders.
+[buildings.gunsmith]
+capacity = 8
+stock_cap = 60
+staff = 0
+found_cost = 600
+value = 600
+floors_seed = 1
+floors_max = 1
+niche = "Security"
 
 # ---------------------------------------------------------------------------
 # M16a contracts (docs/M16_CONTRACTS.md; plan ~/.claude/plans/m16a-contracts.md).
@@ -2667,6 +2679,20 @@ duty = "corner"
 jobs2 = true
 street = true
 
+# Jobs & lives phase 3 (§ 4): the Gunsmith's gunsmiths (`produce`: Parts into weapons, [weapons] make_rate).
+[[trades]]
+id = "gunsmith"
+label = "Gunsmith"
+workplace = ["Gunsmith"]
+staff_per_floor = 3
+wage = 8
+shift = "day"
+skill = "knowledge"
+model = "produce"
+grade = 1
+jobs2 = true
+weapons = true
+
 # ---------------------------------------------------------------------------
 # Hunger as sickness (docs/HUNGER_SICKNESS.md; plan docs/plans/hunger-sickness.md). Starting values. On with
 # the flip (Dylan 2026-10-10); always on since P10 (its `enabled` switch retired).
@@ -3132,3 +3158,52 @@ tinker_discount = 0.6              # ... is fixed at this x the Garage's price .
 tinker_fail_p = 0.1                # ... or wrecked on this chance
 tinker_jobs = 3                    # a tinker's repairs a day
 seize_after_days = 5               # a corp's Utility Plant dark on this many days running is nationalised (0 never)
+
+# ---------------------------------------------------------------------------
+# Jobs & lives phase 3, weapons (docs/JOBS_AND_LIVES.md § 4; Dylan's answer 1: the generic owned-item store). A game
+# abstraction: a weapon is an owned item (an `Asset`: tier 1-3, condition, provenance), carried, kept at home or
+# stocked; a fight is the seeded roll of `law::fight_inner` with one more term from the tiers. Under [jobs2]
+# enabled (`CITYSIM_WEAPONS_OFF=1` turns it off). Prices are [assets] price.weapon. Placeholders; `weapon_w` is
+# the lever on lethality, and no earlier knob moves.
+[weapons]
+enabled = true
+weapon_w = 0.08                    # p_win += this x (tier_a - tier_b) when either side is armed
+kill_w = 0.5                       # the loser's death chance x (1 + this x the winner's tier)
+might_w = 0.15                     # a raid's pairing strength and a Hunt's might per tier (the Hit's quote reads it)
+wear_per_fight = 2                 # condition off the winner's weapon a fight
+armed_arrest_mult = 1.5            # an armed suspect contesting the cuffs: the death chance x this
+weapons_per_1000 = 100.0           # weapon entities alive at most, per 1,000 residents (R4)
+gunsmith_rows = [7]                # [corps] rows given a Gunsmith per copy at seed (Militech at the time of writing)
+parts_per_weapon = 3
+make_rate = 0.15                   # weapons a gunsmith makes an on-duty hour, x (0.5 + knowledge)
+gunsmith_stock = 12                # weapons a Gunsmith holds at most
+guard_tier = 1                     # the tier of the Precinct's opening stock
+stock_per_guard = 0.5              # the Precinct's target stock per city guard; a Security Office's per private guard
+arms_budget = 100                  # the Treasury's arms line, coins a day at most
+licence_fee = 60                   # the Civic Clerk's licence (Flow::Licence)
+conceal_step = 0.25                # the concealment contest's step per tier
+ua_per_1000_day = 1.0              # UnlicensedArms reports a day at most, per 1,000 residents (R3)
+crackdown_rolls = 2                # sightings rolled this many times where the law cracks down on the carrier's gang
+want_p_by_class = [0.08, 0.05, 0.03]   # Corp, Street, Dreg: the stable share who want a weapon when they can afford one
+carry_p_by_class = [0.3, 0.6, 0.8]     # an owner with no other reason carries it on a day (else it stays at home)
+want_lawless = 0.25                # lawfulness under this is a reason to want and carry one
+robbed_days = 7                    # a theft or a lost fight within this many days is a reason
+coin_reserve = 20                  # coins a buyer keeps after the purchase
+armoury_per_member = 0.3           # a gang's armoury target per member (its dealer sells the surplus)
+dealer_markup = 1.5                # a dealer's price x the tier's list
+dealer_cut = 10                    # the dealer's cut of a sale (Flow::Arms)
+crate_size = 4
+crate_tier = 1
+crate_unit = 40                    # each, abroad: the gang's syndicate, else the World
+deal_float = 6                     # a gang ships while its armoury is under its target plus this (its dealer's stock)
+crate_days = 3                     # days between a gang's crates
+crate_reserve_days = 7             # a crate is paid only from the coins above this many days of the gang's stipends
+crate_hour = 120                   # crates land at 02:00
+p_seize = 0.15                     # customs seizes a crate into the Precinct ...
+bribe = 15                         # ... x bribe_mult when a Loader on shift takes this
+bribe_mult = 0.5
+p_pickpocket = 0.3                 # a Market thief also lifts a carried item within petty_reach (a contest after) ...
+petty_reach = 3
+stall_take_max = 10                # ... or empties the till of a stall in the Market's district of up to this many coins
+petty_per_1000_day = 2.0           # petty item thefts a day at most, per 1,000 residents (R3)
+fence_frac = 0.4                   # the fence pays this of an item's value (into the gang's armoury)

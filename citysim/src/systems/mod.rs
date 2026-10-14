@@ -91,6 +91,7 @@ pub mod treasury;
 pub mod vehicles;
 pub mod virt;
 pub mod wages;
+pub mod weapons;
 pub mod word;
 pub mod world_market;
 pub mod wounded;

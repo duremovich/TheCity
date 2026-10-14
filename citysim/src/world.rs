@@ -1704,6 +1704,9 @@ impl World {
         // Hqs on the Lots left (no RNG; nothing with `[jobs2]` off), before
         // the trades' places are posted.
         crate::prof::timed!("new::industry::seed", systems::industry::seed(&mut w));
+        // Jobs & lives phase 3 (section 4): the Gunsmiths and the opening
+        // stocks (no RNG; nothing with `[weapons]` off).
+        crate::prof::timed!("new::weapons::seed", systems::weapons::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
         crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));

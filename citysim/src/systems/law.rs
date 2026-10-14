@@ -74,6 +74,10 @@ pub fn crime_salience(crime: Crime) -> f32 {
         // M16b § 4.
         Crime::Fraud => 0.4,
         Crime::Blackmail => 0.5,
+        // Jobs & lives phase 3 (§ 4).
+        Crime::ArmsDealing => 0.6,
+        Crime::UnlicensedArms => 0.3,
+        Crime::Smuggling => 0.6,
     }
 }
 
@@ -173,7 +177,11 @@ pub fn raise_crime_except(
         | Crime::Conspiracy
         // M16b: filed by their victims, never raised on the street.
         | Crime::Fraud
-        | Crime::Blackmail => {}
+        | Crime::Blackmail
+        // Jobs & lives phase 3: a sale, a sighting, a crate leave nothing.
+        | Crime::ArmsDealing
+        | Crime::UnlicensedArms
+        | Crime::Smuggling => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -277,7 +285,10 @@ pub fn raise_crime_except(
             | Crime::Conspiracy
             | Crime::Fraud
             | Crime::Blackmail
-            | Crime::FareEvasion => MemoryKind::WasRobbed,
+            | Crime::FareEvasion
+            | Crime::ArmsDealing
+            | Crime::UnlicensedArms
+            | Crime::Smuggling => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -516,8 +527,9 @@ pub fn is_located_suspect(world: &World, s: EntityId) -> bool {
 /// Sentence length in ticks for a crime at the current lever.
 pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
-    // Transit T10: fare evasion too.
-    if crime == Crime::Vagrancy || crime == Crime::FareEvasion {
+    // Transit T10: fare evasion too. Jobs & lives phase 3 (§ 4): an
+    // unlicensed weapon as the worst open report too.
+    if crime == Crime::Vagrancy || crime == Crime::FareEvasion || crime == Crime::UnlicensedArms {
         return world.config.law.vagrancy_sentence_ticks.max(1);
     }
     // M16a (plan C29): Conspiracy is `accessory_mult` (or the lever's) of Murder's.
@@ -540,6 +552,9 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
         // M16b § 4.
         Crime::Fraud => ext.fraud,
         Crime::Blackmail => ext.blackmail,
+        // Jobs & lives phase 3 (§ 4).
+        Crime::ArmsDealing => ext.arms_dealing,
+        Crime::Smuggling => ext.smuggling,
         _ => world.config.crime.sentence_days[crime as usize],
     } as f32;
     let days = (base * world.levers.sentence_mult).ceil().max(1.0) as u64;
@@ -640,21 +655,10 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
             return (winner, loser, true);
         }
     }
-    // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
-    let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
-    let co = courage;
     let (kit_a, kit_b) = (world.comp::<Kit>(a).cloned(), world.comp::<Kit>(b).cloned());
-    let kitted = kit_a.as_ref().is_some_and(|k| !k.is_bare()) || kit_b.as_ref().is_some_and(|k| !k.is_bare());
-    let fi_a = if mods.a_bonus != 0.0 { fi(world, a) + mods.a_bonus } else { fi(world, a) };
-    let p_win = if kitted {
-        let reflex = |k: &Option<Kit>| k.as_ref().map_or(0.0, |k| k.reflex);
-        (0.5 + 0.4 * (fi_a - fi(world, b))
-            + 0.1 * (co(world, a) - co(world, b))
-            + 0.2 * (reflex(&kit_a) - reflex(&kit_b)))
-        .clamp(0.1, 0.9)
-    } else {
-        (0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))).clamp(0.1, 0.9)
-    };
+    // Jobs & lives phase 3 (§ 4): the tiers when either side is armed.
+    let arms = crate::systems::weapons::fight_tiers(world, a, b);
+    let p_win = p_win_of(world, a, b, mods.a_bonus, arms);
     let roll: f32 = world.rng.world().random();
     let (winner, loser) = if roll < p_win { (a, b) } else { (b, a) };
     world.remember(a, MemoryKind::Fought, Some(b), 0.7, -0.5, false);
@@ -677,11 +681,20 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
         s.fighting = (s.fighting + 0.01).min(1.0);
     }
     crate::systems::social::fought(world, winner, loser);
+    // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
+    let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
     let base = match mods.kill_p {
         Some(p) if winner == a => p,
         _ => world.config.crime.fight_death_p as f32 * (1.0 + fi(world, winner)),
     };
     let mut p_death = base * mods.kill_mult;
+    // Jobs & lives phase 3: the winner's tier makes the loss deadlier.
+    if let Some((ta, tb)) = arms {
+        let t = if winner == a { ta } else { tb };
+        if t > 0 {
+            p_death *= crate::systems::weapons::kill_mult(&world.config.weapons, t);
+        }
+    }
     let loser_kit = if loser == a { &kit_a } else { &kit_b };
     let armour = loser_kit.as_ref().map_or(0.0, |k| k.armour);
     if armour > 0.0 {
@@ -699,7 +712,33 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     if died {
         world.kill_by(loser, DeathCause::Violence, Some(winner));
     }
+    // Jobs & lives phase 3: the counts, the wear, the loser's weapons.
+    crate::systems::weapons::after_fight(world, winner, loser, died, arms);
     (winner, loser, died)
+}
+
+/// The fight's `p_win` for the attacker `a` (M12's three terms; M13 D31's
+/// reflex term when either Kit is not bare; Jobs & lives phase 3's tier
+/// term when either side is armed: `arms` from `weapons::fight_tiers`).
+/// Each extra term is a branch, so an unchromed, unarmed pair reads as M12.
+pub fn p_win_of(world: &World, a: EntityId, b: EntityId, a_bonus: f32, arms: Option<(u8, u8)>) -> f32 {
+    // Hunger as sickness § 2: a wasted body fights worse (0.0 off: exact).
+    let fi = |w: &World, x: EntityId| fighting(w, x) - crate::systems::health::effects(w, x).frail_fight;
+    let co = courage;
+    let (kit_a, kit_b) = (world.comp::<Kit>(a), world.comp::<Kit>(b));
+    let kitted = kit_a.is_some_and(|k| !k.is_bare()) || kit_b.is_some_and(|k| !k.is_bare());
+    let fi_a = if a_bonus != 0.0 { fi(world, a) + a_bonus } else { fi(world, a) };
+    let raw = if kitted {
+        let reflex = |k: Option<&Kit>| k.map_or(0.0, |k| k.reflex);
+        0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b)) + 0.2 * (reflex(kit_a) - reflex(kit_b))
+    } else {
+        0.5 + 0.4 * (fi_a - fi(world, b)) + 0.1 * (co(world, a) - co(world, b))
+    };
+    let raw = match arms {
+        Some((ta, tb)) => raw + crate::systems::weapons::p_win_term(&world.config.weapons, ta, tb),
+        None => raw,
+    };
+    raw.clamp(0.1, 0.9)
 }
 
 /// M13 D41: [`resolve_fight_mods`] with a robot on one side or both. The
@@ -786,6 +825,9 @@ pub fn arrest(world: &mut World, guard: EntityId, suspect: EntityId) -> bool {
                 a_bonus: 0.0,
                 kill_p: None,
             }
+        } else if crate::systems::weapons::tier(world, suspect) > 0 {
+            // Jobs & lives phase 3 (section 4): an armed suspect is fought harder.
+            FightMods { kill_mult: world.config.weapons.armed_arrest_mult, a_bonus: 0.0, kill_p: None }
         } else {
             FightMods::default()
         };
@@ -893,6 +935,8 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     }
     // M13 D38: the arrest confiscates the suspect's Stims (destroyed).
     crate::systems::stims::confiscate(world, suspect);
+    // Jobs & lives phase 3 (§ 4): and every weapon carried (the Precinct's).
+    crate::systems::weapons::confiscate(world, suspect);
     // M14 V12/V18: a runner is dumped; the deck's Data is confiscated.
     crate::systems::virt::dump(world, suspect, "arrested");
     crate::systems::virt::confiscate_data(world, suspect);
@@ -929,7 +973,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 
     if jailed >= capacity {
         match crime {
-            Crime::Theft | Crime::Vagrancy | Crime::FareEvasion => {
+            Crime::Theft | Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms => {
                 let fine = if crime == Crime::Vagrancy {
                     world.config.law.vagrancy_fine
                 } else if crime == Crime::FareEvasion {

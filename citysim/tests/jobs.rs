@@ -166,7 +166,8 @@ fn test_fab_accrues_and_parts_market_buys_fab_before_recycler() {
             g
         }
     };
-    let others: Vec<EntityId> = [BuildingKind::Garage, BuildingKind::Clinic]
+    // Jobs & lives phase 3: a Gunsmith is a Parts buyer too.
+    let others: Vec<EntityId> = [BuildingKind::Garage, BuildingKind::Clinic, BuildingKind::Gunsmith]
         .into_iter()
         .flat_map(|k| standing(&w, k))
         .filter(|&b| b != buyer)

@@ -275,7 +275,16 @@ pub fn might(world: &World, id: EntityId) -> f32 {
     let cfg = &world.config.moves;
     let visible = world.comp::<Kit>(id).map_or(0, |k| k.visible);
     let allies = allies_within(world, id, 8) as f32;
-    law::fighting(world, id) + cfg.chrome_might * f32::from(visible) / 3.0 + (cfg.ally_might * allies).min(cfg.ally_cap)
+    let m = law::fighting(world, id)
+        + cfg.chrome_might * f32::from(visible) / 3.0
+        + (cfg.ally_might * allies).min(cfg.ally_cap);
+    // Jobs & lives phase 3 (section 4): the gun credit (a branch: 0 unarmed).
+    let w = crate::systems::weapons::might(world, id);
+    if w != 0.0 {
+        m + w
+    } else {
+        m
+    }
 }
 
 // ---------------------------------------------------------------------------

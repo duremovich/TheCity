@@ -483,6 +483,42 @@ pub struct Jobs2Cols {
     pub tinker_botched: u32,
     /// Utility Plants the city took over from a broke owner (dark too long).
     pub plants_seized: u32,
+    // --- Phase 3, weapons.
+    /// Weapon entities alive at the day's end; agents carrying one; in the gangs' armouries, the Precinct's and the Gunsmiths' stock.
+    pub weapons: u32,
+    pub carriers: u32,
+    pub armoury: u32,
+    pub precinct_arms: u32,
+    pub gunsmith_stock: u32,
+    /// Licence holders on the Clerk's register, and adults who want a weapon.
+    pub licences: u32,
+    pub weapon_wants: u32,
+    /// The day's counts: made, sold at a Gunsmith, sold by a dealer, issued at a muster, seized by the law.
+    pub weapons_made: u32,
+    pub sold_legal: u32,
+    pub sold_dealer: u32,
+    pub issued: u32,
+    pub seized: u32,
+    /// Crates landed and seized at customs.
+    pub crates_landed: u32,
+    pub crates_seized: u32,
+    /// Fights and the deaths in them; those with either side armed, and
+    /// the deaths in those.
+    pub fights: u32,
+    pub fight_deaths: u32,
+    pub armed_fights: u32,
+    pub armed_deaths: u32,
+    /// `UnlicensedArms` reports filed at sightings; licences sold.
+    pub ua_reports: u32,
+    pub licences_sold: u32,
+    /// Petty item thefts (a carrier's pocket, a stall's till, a Home), and items fenced.
+    pub pickpockets: u32,
+    pub stall_thefts: u32,
+    pub home_thefts: u32,
+    pub fenced: u32,
+    /// `Flow::Licence` and `Flow::Arms` coins.
+    pub flow_licence: i64,
+    pub flow_arms: i64,
 }
 
 impl Jobs2Cols {
@@ -552,6 +588,32 @@ impl Jobs2Cols {
             "tinker_take",
             "tinker_botched",
             "plants_seized",
+            "weapons",
+            "carriers",
+            "armoury",
+            "precinct_arms",
+            "gunsmith_stock",
+            "licences",
+            "weapon_wants",
+            "weapons_made",
+            "sold_legal",
+            "sold_dealer",
+            "issued",
+            "seized",
+            "crates_landed",
+            "crates_seized",
+            "fights",
+            "fight_deaths",
+            "armed_fights",
+            "armed_deaths",
+            "ua_reports",
+            "licences_sold",
+            "pickpockets",
+            "stall_thefts",
+            "home_thefts",
+            "fenced",
+            "flow_licence",
+            "flow_arms",
         ]
         .join(",")
     }
@@ -622,6 +684,32 @@ impl Jobs2Cols {
             self.tinker_take.to_string(),
             self.tinker_botched.to_string(),
             self.plants_seized.to_string(),
+            self.weapons.to_string(),
+            self.carriers.to_string(),
+            self.armoury.to_string(),
+            self.precinct_arms.to_string(),
+            self.gunsmith_stock.to_string(),
+            self.licences.to_string(),
+            self.weapon_wants.to_string(),
+            self.weapons_made.to_string(),
+            self.sold_legal.to_string(),
+            self.sold_dealer.to_string(),
+            self.issued.to_string(),
+            self.seized.to_string(),
+            self.crates_landed.to_string(),
+            self.crates_seized.to_string(),
+            self.fights.to_string(),
+            self.fight_deaths.to_string(),
+            self.armed_fights.to_string(),
+            self.armed_deaths.to_string(),
+            self.ua_reports.to_string(),
+            self.licences_sold.to_string(),
+            self.pickpockets.to_string(),
+            self.stall_thefts.to_string(),
+            self.home_thefts.to_string(),
+            self.fenced.to_string(),
+            self.flow_licence.to_string(),
+            self.flow_arms.to_string(),
         ]
         .join(",")
     }

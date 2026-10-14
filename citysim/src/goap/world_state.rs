@@ -184,6 +184,8 @@ impl LocationKey {
             | BuildingKind::UtilityPlant
             | BuildingKind::ConstructionYard
             | BuildingKind::Hq => LocationKey::Workplace,
+            // Jobs & lives phase 3: the gunsmiths inside their Gunsmith.
+            BuildingKind::Gunsmith => LocationKey::Workplace,
             // M16b phase 2: a Private Prison has no staff role.
             BuildingKind::Prison => LocationKey::Street,
         }

@@ -595,6 +595,13 @@ pub enum PlayerCommand {
     SetStateGuards(Option<u16>),
     /// M17 phase 5, god: a corp founds its parent now.
     FoundParent(EntityId),
+    /// Jobs & lives phase 3 (section 4), god: `n` weapons at `tier` into a
+    /// gang's armoury, past the store's cap (`god_flood_guns`).
+    FloodGuns {
+        gang: EntityId,
+        n: u32,
+        tier: u8,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1534,6 +1541,7 @@ impl World {
             | PlayerCommand::Derelict(_)
             | PlayerCommand::BuyBuilding { .. }
             | PlayerCommand::GrantAsset { .. }
+            | PlayerCommand::FloodGuns { .. }
             | PlayerCommand::Wreck(_)
             | PlayerCommand::ChromeEveryone { .. }
             | PlayerCommand::FloodStims { .. }
@@ -1707,6 +1715,14 @@ impl World {
                 let a =
                     crate::systems::assets::grant(self, agent, kind, tier).map_err(|e| format!("GrantAsset: {e}"))?;
                 Ok((vec![agent, a], format!("granted {} a {}", self.name_of(agent), self.name_of(a))))
+            }
+            PlayerCommand::FloodGuns { gang, n, tier } => {
+                let made =
+                    crate::systems::weapons::flood(self, gang, n, tier).map_err(|e| format!("FloodGuns: {e}"))?;
+                Ok((
+                    vec![gang],
+                    format!("flooded {}'s armoury with {made} T{tier} weapons", self.owner_label(Some(gang))),
+                ))
             }
             PlayerCommand::Wreck(a) => {
                 if !self.has::<crate::components::Asset>(a) {
