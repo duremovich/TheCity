@@ -501,3 +501,8 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
   - Solicitation is now 0.056 a day via patrol sweeps (`[vice] patrol_sweep`).
   - Murders 74.8 → 68.3.
   - More carry-overs for phase 8: Trafficking is 0 in runs (no gang builds a Dollhouse front; it is last in the fronts list); the black BD market is thin (25 units); nothing founds Dollhouses or BdStudios.
+- **Phase 6** (the gray market and faith) 8bfa57d, SAVE 33. Papers pass sightings; organs, black clinics and scav gang types are data; creeds are data (a church and a cult row); spread along edges; tithes; influence hooks plus the `Levers.faith` slot for M18.
+  - Murders 68.3 → 77.7: papers keep the wanted free longer, so `id_w` was halved.
+  - Followers reach 34 % of the city by day 120, with no ceiling (for Dylan).
+  - Parity gap 0.484 of 0.50.
+  - Carry-overs for phase 8: the organ book and scav kills are ~0 live, because M13 Harvest drags rarely reach the Hideout (this needs a fix, since scavs are Dylan's ask); church purses pile up (7.5k); Trafficking is still 0 (a Dollhouse front needs a held Mid/Spire Lot and 900 coins).
