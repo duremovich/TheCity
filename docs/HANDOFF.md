@@ -496,3 +496,8 @@ One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by p
   - `god_flood_guns` and the other milestone gods.
   - Three person probes are pinned off.
 - **For Dylan:** the city keeps getting softer over the milestone (J25 .145 → .061, Murders 98.5 → 74.8). It's printed, not tuned. Restore by pressure (rents, cuts) at calibration.
+- **Phase 5** (the dollhouse, braindance, patrol sweeps) 230b28c, SAVE 32. Chip contracts go to jobless debtors (73 begun across 6 seeds, 5 Chipped alive on average).
+  - BD book about 100 coins a day; coins 1.273 → 1.345.
+  - Solicitation is now 0.056 a day via patrol sweeps (`[vice] patrol_sweep`).
+  - Murders 74.8 → 68.3.
+  - More carry-overs for phase 8: Trafficking is 0 in runs (no gang builds a Dollhouse front; it is last in the fronts list); the black BD market is thin (25 units); nothing founds Dollhouses or BdStudios.
