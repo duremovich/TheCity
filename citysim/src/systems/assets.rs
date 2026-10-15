@@ -1520,6 +1520,8 @@ fn appearance(world: &mut World) {
         let colours = world
             .gang_of(id)
             .or_else(|| world.comp::<Job>(id).and_then(|j| j.employer).and_then(|e| world.corp_of_building(e)));
+        // Jobs & lives phase 4 (§ 9): the worn clothing item's dress, when better.
+        let dress = dress.max(crate::systems::fashion::worn_dress(world, id));
         // M15: a pinned dress (a god's suit) holds.
         let dress_pin = world.comp::<Appearance>(id).and_then(|a| a.dress_pin);
         let dress = dress_pin.unwrap_or(dress);

@@ -421,7 +421,9 @@ fn ledger(world: &mut World, flow: Flow, coins: i64) {
         // Jobs & lives phase 3: the weapons group's own columns.
         Flow::Licence => row.jobs2.get_or_insert_with(Default::default).flow_licence += coins,
         Flow::Arms => row.jobs2.get_or_insert_with(Default::default).flow_arms += coins,
-        Flow::Tip | Flow::CabFare | Flow::StreetCut | Flow::Gray | Flow::Tithe => row.flow_other += coins,
+        // Jobs & lives phase 4: the tips' column.
+        Flow::Tip => row.jobs2.get_or_insert_with(Default::default).tips += coins,
+        Flow::CabFare | Flow::StreetCut | Flow::Gray | Flow::Tithe => row.flow_other += coins,
     }
 }
 

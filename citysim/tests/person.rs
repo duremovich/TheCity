@@ -17,6 +17,16 @@ fn world() -> World {
     World::new(42, Config::load())
 }
 
+/// Jobs & lives phase 4: the city without the vice and fashion, for the
+/// probes their joint butterfly moved (each switch alone passes; the agents
+/// picked are no vice or fashion party). Re-read at the phase-8 gate.
+fn world_p3() -> World {
+    let mut cfg = Config::load();
+    cfg.vice.enabled = false;
+    cfg.fashion.enabled = false;
+    World::new(42, cfg)
+}
+
 fn pin(w: &mut World, id: EntityId) {
     w.comp_mut::<Brain>(id).expect("brain").pinned = true;
 }
@@ -120,7 +130,9 @@ fn probe_hungry_worker_eats_from_the_wage_before_rent() {
 /// Across town at 20:00, tired, with a spouse: a person goes home to sleep.
 #[test]
 fn probe_married_adult_across_town_comes_home_at_night() {
-    let mut w = world();
+    // Jobs & lives phase 4 (`world_p3`): with both on, the butterfly's pick
+    // stopped for a Bar's drink on the way and was still walking home at 03:00.
+    let mut w = world_p3();
     w.run_ticks(TICKS_PER_DAY + 20 * TICKS_PER_HOUR);
     let a = w
         .citizens()
@@ -710,7 +722,7 @@ fn jobless_civilians(w: &World) -> Vec<EntityId> {
 /// exhausted one with 60 coins sleeping 8 h to hunger 0.
 #[test]
 fn probe_starving_eats_before_spending_or_sleeping() {
-    let mut w = world();
+    let mut w = world_p3();
     w.run_ticks(2 * TICKS_PER_DAY + 18 * TICKS_PER_HOUR);
     let picks: Vec<EntityId> = civilians(&w).into_iter().step_by(37).take(30).collect();
     let mut bad = Vec::new();
@@ -1647,7 +1659,7 @@ fn probe_worker_makes_one_grocery_run_to_the_nearest_detour_market() {
 /// at home).
 #[test]
 fn probe_refused_at_a_full_market_eats_elsewhere() {
-    let mut w = world();
+    let mut w = world_p3();
     w.run_ticks(2 * TICKS_PER_DAY + 12 * TICKS_PER_HOUR);
     let picks: Vec<EntityId> = civilians(&w)
         .into_iter()

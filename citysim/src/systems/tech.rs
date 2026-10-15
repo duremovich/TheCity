@@ -105,6 +105,8 @@ pub fn track_of(kind: AssetKind) -> Track {
         }
         // Jobs & lives phase 3: a Gunsmith works in its corp's Industry track.
         AssetKind::Weapon => Track::Industry,
+        // Jobs & lives phase 4: a Boutique's clothing.
+        AssetKind::Clothing => Track::Industry,
     }
 }
 

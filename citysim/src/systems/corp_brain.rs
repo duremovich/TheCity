@@ -117,8 +117,9 @@ pub fn build_kind(n: Niche) -> Option<BuildingKind> {
         Niche::Housing => Some(BuildingKind::Home),
         Niche::Security => None,
         Niche::Tech => Some(BuildingKind::Garage),
-        // Jobs & lives: the Vice venues come in phase 4.
-        Niche::Vice => None,
+        // Jobs & lives phase 4: a StripClub (only a corp holding the Vice
+        // niche asks, which happens only with `[vice]` on).
+        Niche::Vice => Some(BuildingKind::StripClub),
     }
 }
 
@@ -224,8 +225,17 @@ pub fn demand_of(world: &World, corp: EntityId, n: Niche) -> (f32, bool) {
             let reference = 7.0 * world.config.shop.tech_demand_ref.max(1e-3) * sellers.len().max(1) as f32;
             sold as f32 / reference
         }
-        // Jobs & lives: the Vice arm (own visits ÷ the reference) is phase 4's.
-        Niche::Vice => 0.0,
+        // Jobs & lives phase 4 (§ 1): own 7-day visits ÷ (7 ×
+        // `vice_demand_ref` × own venues).
+        Niche::Vice => {
+            let visits: u32 = own_buildings
+                .iter()
+                .filter_map(|&b| world.comp::<Building>(b).and_then(|bd| bd.venue.as_ref()))
+                .map(|v| v.visits.iter().map(|&x| u32::from(x)).sum::<u32>())
+                .sum();
+            let reference = 7.0 * world.config.vice.vice_demand_ref.max(1e-3) * own_buildings.len().max(1) as f32;
+            visits as f32 / reference
+        }
     }
     .clamp(0.0, 1.0);
     if !crate::systems::wages::on(world) {

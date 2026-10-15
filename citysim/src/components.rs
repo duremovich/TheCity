@@ -216,10 +216,19 @@ pub enum BuildingKind {
     // --- Jobs & lives phase 3 (§ 4), only with `[weapons] enabled`.
     /// Gunsmiths turn Parts into Weapons (a Security corp's shop).
     Gunsmith,
+    // --- Jobs & lives phase 4 (§ 5.1, § 9): venues, only with `[vice]` or
+    // `[fashion]` enabled. Display names live in `[buildings.*]`'s rows.
+    /// A Vice venue with dancers (a `Venue`; Mid/Sump).
+    StripClub,
+    /// A Vice venue with its workers and a madam (a `Venue`; Sump/Mid).
+    Brothel,
+    /// The tailor's and barber's venue (a `Venue`; Mid/Spire): clothing and
+    /// grooming, the `status` need's satisfier.
+    Boutique,
 }
 
 impl BuildingKind {
-    pub const ALL: [BuildingKind; 33] = [
+    pub const ALL: [BuildingKind; 36] = [
         BuildingKind::Home,
         BuildingKind::Farm,
         BuildingKind::Market,
@@ -253,17 +262,39 @@ impl BuildingKind {
         BuildingKind::ConstructionYard,
         BuildingKind::Hq,
         BuildingKind::Gunsmith,
+        BuildingKind::StripClub,
+        BuildingKind::Brothel,
+        BuildingKind::Boutique,
     ];
 
     /// Jobs & lives phase 1: the kinds that stand only with `[jobs2] enabled`
-    /// (phase 3's Gunsmith only with `[weapons]` on too).
-    pub const JOBS2: [BuildingKind; 6] = [
+    /// (phase 3's Gunsmith only with `[weapons]` on too, phase 4's venues
+    /// only with `[vice]` or `[fashion]`).
+    pub const JOBS2: [BuildingKind; 9] = [
         BuildingKind::PackingPlant,
         BuildingKind::FreightYard,
         BuildingKind::UtilityPlant,
         BuildingKind::ConstructionYard,
         BuildingKind::Hq,
         BuildingKind::Gunsmith,
+        BuildingKind::StripClub,
+        BuildingKind::Brothel,
+        BuildingKind::Boutique,
+    ];
+
+    /// Jobs & lives phase 4: every venue kind, L2's six and phase 4's three
+    /// (a loop over it meets no building of the new kinds with their
+    /// switches off). The CSV's per-kind columns keep `LEISURE`.
+    pub const LEISURE_ALL: [BuildingKind; 9] = [
+        BuildingKind::Club,
+        BuildingKind::Arcade,
+        BuildingKind::NoodleBar,
+        BuildingKind::FightPit,
+        BuildingKind::Den,
+        BuildingKind::Lounge,
+        BuildingKind::StripClub,
+        BuildingKind::Brothel,
+        BuildingKind::Boutique,
     ];
 
     /// L2 (plan L1): the six leisure kinds (a `Venue` each; the Fab has none).
@@ -276,9 +307,10 @@ impl BuildingKind {
         BuildingKind::Lounge,
     ];
 
-    /// L2: one of the six leisure kinds.
+    /// L2: one of the six leisure kinds (Jobs & lives phase 4: or one of
+    /// its three venues).
     pub fn is_leisure(self) -> bool {
-        BuildingKind::LEISURE.contains(&self)
+        BuildingKind::LEISURE_ALL.contains(&self)
     }
 
     pub fn parse(s: &str) -> Option<BuildingKind> {
@@ -316,6 +348,9 @@ impl BuildingKind {
             "ConstructionYard" => BuildingKind::ConstructionYard,
             "Hq" => BuildingKind::Hq,
             "Gunsmith" => BuildingKind::Gunsmith,
+            "StripClub" => BuildingKind::StripClub,
+            "Brothel" => BuildingKind::Brothel,
+            "Boutique" => BuildingKind::Boutique,
             _ => return None,
         })
     }
@@ -356,6 +391,9 @@ impl BuildingKind {
             BuildingKind::ConstructionYard => "Construction Yard",
             BuildingKind::Hq => "Corp HQ",
             BuildingKind::Gunsmith => "Gunsmith",
+            BuildingKind::StripClub => "Strip Club",
+            BuildingKind::Brothel => "Brothel",
+            BuildingKind::Boutique => "Boutique",
         }
     }
 
@@ -402,6 +440,10 @@ impl BuildingKind {
             BuildingKind::Hq => '$',
             // Jobs & lives phase 3.
             BuildingKind::Gunsmith => '!',
+            // Jobs & lives phase 4.
+            BuildingKind::StripClub => '<',
+            BuildingKind::Brothel => '>',
+            BuildingKind::Boutique => '=',
         }
     }
 }
@@ -714,6 +756,10 @@ pub enum Crime {
     /// Jobs & lives phase 3 (§ 4, D16): a crate seized at customs, filed
     /// on the receiving gang's leader.
     Smuggling,
+    /// Jobs & lives phase 4 (§ 5.1, D16): a street pitch worked where the
+    /// `street_legal` lever is off, filed at a sweep. Petty (a night in the
+    /// cells), just above Fare Evasion.
+    Solicitation,
 }
 
 impl Crime {
@@ -738,6 +784,7 @@ impl Crime {
             Crime::ArmsDealing => "Arms Dealing",
             Crime::UnlicensedArms => "Unlicensed Arms",
             Crime::Smuggling => "Smuggling",
+            Crime::Solicitation => "Solicitation",
         }
     }
 
@@ -753,26 +800,29 @@ impl Crime {
             Crime::Vagrancy => 0,
             // Transit (T10): just above Vagrancy; everything above moves up one.
             Crime::FareEvasion => 1,
-            Crime::Theft => 2,
+            // Jobs & lives phase 4 (§ 5.1): just above Fare Evasion;
+            // everything above moves up one.
+            Crime::Solicitation => 2,
+            Crime::Theft => 3,
             // M16b: Fraud just above Theft, Blackmail just above Shakedown;
             // everything above each moves up (the order is all that is read).
-            Crime::Fraud => 3,
-            Crime::Intrusion => 4,
-            Crime::GrandTheft => 5,
-            Crime::DataTheft => 6,
-            Crime::Dealing => 7,
+            Crime::Fraud => 4,
+            Crime::Intrusion => 5,
+            Crime::GrandTheft => 6,
+            Crime::DataTheft => 7,
+            Crime::Dealing => 8,
             // Jobs & lives phase 3 (§ 4): the arms crimes between Dealing
             // and Shakedown; everything above moves up three.
-            Crime::UnlicensedArms => 8,
-            Crime::ArmsDealing => 9,
-            Crime::Smuggling => 10,
-            Crime::Extortion => 11,
-            Crime::Blackmail => 12,
-            Crime::Assault => 13,
-            Crime::Manslaughter => 14,
-            Crime::Abduction => 15,
-            Crime::Conspiracy => 16,
-            Crime::Murder => 17,
+            Crime::UnlicensedArms => 9,
+            Crime::ArmsDealing => 10,
+            Crime::Smuggling => 11,
+            Crime::Extortion => 12,
+            Crime::Blackmail => 13,
+            Crime::Assault => 14,
+            Crime::Manslaughter => 15,
+            Crime::Abduction => 16,
+            Crime::Conspiracy => 17,
+            Crime::Murder => 18,
         }
     }
 }
@@ -1341,6 +1391,16 @@ impl Niche {
     /// Every niche, the appended `Vice` included (parsing).
     pub const ALL_JOBS2: [Niche; 5] = [Niche::Food, Niche::Housing, Niche::Security, Niche::Tech, Niche::Vice];
 
+    /// Jobs & lives phase 4: the niches the corp loops read: `ALL`, and
+    /// `Vice` last with `[vice]` on (`systems::vice::on`).
+    pub fn live(vice: bool) -> &'static [Niche] {
+        if vice {
+            &Niche::ALL_JOBS2
+        } else {
+            &Niche::ALL
+        }
+    }
+
     pub fn label(self) -> &'static str {
         match self {
             Niche::Food => "Food",
@@ -1791,6 +1851,10 @@ pub struct Needs {
     /// off saves without it.
     #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
     pub fun: f32,
+    /// Jobs & lives phase 4 (§ 9): 1.0 at seed and in an older save; only
+    /// `systems::fashion` writes it (with `[fashion]` on).
+    #[serde(default = "one_f32", skip_serializing_if = "is_one_f32")]
+    pub status: f32,
 }
 
 /// All `f32` in `0.0..=1.0`.
@@ -3854,6 +3918,10 @@ pub enum AssetKind {
     /// a Gunsmith, a Hideout's armoury or the Precinct); its tier is the
     /// fight's term.
     Weapon,
+    /// Jobs & lives phase 4 (§ 9, Dylan's answer 1): a clothing item of the
+    /// store; the best one carried is worn (`Appearance.dress` reads its
+    /// tier and condition), the rest kept at home.
+    Clothing,
 }
 
 /// The lever and CSV grouping of an `AssetKind` (implants by class, not slot).
@@ -3874,10 +3942,12 @@ pub enum AssetClass {
     Camera,
     /// Jobs & lives phase 3.
     Weapon,
+    /// Jobs & lives phase 4.
+    Clothing,
 }
 
 impl AssetClass {
-    pub const ALL: [AssetClass; 11] = [
+    pub const ALL: [AssetClass; 12] = [
         AssetClass::Motorcycle,
         AssetClass::Car,
         AssetClass::Truck,
@@ -3889,6 +3959,7 @@ impl AssetClass {
         AssetClass::Deck,
         AssetClass::Camera,
         AssetClass::Weapon,
+        AssetClass::Clothing,
     ];
 
     /// Position in `ALL` (indexes `Levers::asset_tax`).
@@ -3911,13 +3982,14 @@ impl AssetKind {
             AssetKind::Deck => AssetClass::Deck,
             AssetKind::Camera => AssetClass::Camera,
             AssetKind::Weapon => AssetClass::Weapon,
+            AssetKind::Clothing => AssetClass::Clothing,
         }
     }
 
     /// Jobs & lives phase 3 (Dylan's answer 1): an owned item (carried on
-    /// the body, kept at home, stocked): weapons now, clothing in phase 4.
+    /// the body, kept at home, stocked): weapons and (phase 4) clothing.
     pub fn is_item(self) -> bool {
-        matches!(self, AssetKind::Weapon)
+        matches!(self, AssetKind::Weapon | AssetKind::Clothing)
     }
 
     /// Motorcycle, Car, Truck, Flyer.
@@ -3951,6 +4023,7 @@ impl AssetKind {
             AssetKind::Deck => "Deck",
             AssetKind::Camera => "Camera",
             AssetKind::Weapon => "Weapon",
+            AssetKind::Clothing => "Clothing",
         }
     }
 }
@@ -3961,7 +4034,7 @@ impl AssetKind {
 pub enum ProvKind {
     /// Made at a Gunsmith (`by` the workshop).
     Made,
-    /// Sold legally (`by` the seller building).
+    /// Sold legally (`by` the seller building: a Gunsmith, a Boutique).
     Sold,
     /// Taken by a pickpocket, a mugger, a burglar or a fight's winner
     /// (`by` the thief).

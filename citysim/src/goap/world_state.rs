@@ -186,6 +186,8 @@ impl LocationKey {
             | BuildingKind::Hq => LocationKey::Workplace,
             // Jobs & lives phase 3: the gunsmiths inside their Gunsmith.
             BuildingKind::Gunsmith => LocationKey::Workplace,
+            // Jobs & lives phase 4: the venues' staff inside their venue.
+            BuildingKind::StripClub | BuildingKind::Brothel | BuildingKind::Boutique => LocationKey::Workplace,
             // M16b phase 2: a Private Prison has no staff role.
             BuildingKind::Prison => LocationKey::Street,
         }
@@ -500,6 +502,7 @@ impl WorldState {
             intimacy: 1.0,
             starving_since: None,
             fun: 1.0,
+            status: 1.0,
         });
         let inv = world.comp::<Inventory>(agent).cloned().unwrap_or_default();
         let coins = world.comp::<Wallet>(agent).map_or(0, |w| w.coins);

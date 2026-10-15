@@ -921,6 +921,12 @@ ARMS_TOTALS = ("weapons_made", "sold_legal", "sold_dealer", "issued", "seized", 
                "fights", "fight_deaths", "armed_fights", "armed_deaths", "ua_reports", "licences_sold", "pickpockets", "stall_thefts",
                "home_thefts", "fenced", "flow_licence", "flow_arms")
 ARMS_SNAP = ("weapons", "carriers", "armoury", "precinct_arms", "gunsmith_stock", "licences", "weapon_wants")
+# Phase 4, vice and fashion (§ 5.1, § 9).
+VICE_TOTALS = ("strip_visits", "brothel_visits", "companion_visits", "vice_revenue", "tips", "street_visits",
+               "street_take", "pimp_cut", "street_assaults", "solicitation", "solicit_arrests", "brothel_closed",
+               "boutique_visits", "clothes_sold", "clothes_stolen")
+VICE_SNAP = ("vice_venues", "street_pitches", "pimps", "boutiques", "clothing", "clothes_worn", "status_corp",
+             "status_street", "status_dreg")
 
 
 def jobs2(rows, events, out):
@@ -973,6 +979,16 @@ def jobs2(rows, events, out):
         pop = mean(col(rows, "population")) if "population" in rows[0] else 0
         J["weapons_per_1000"] = 1000 * J["arms_mean"]["weapons"] / pop if pop else 0
         J["carriers_per_1000"] = 1000 * J["arms_mean"]["carriers"] / pop if pop else 0
+    if "vice_venues" in rows[0]:
+        J["vice_totals"] = {k: sum(col(rows, k)) for k in VICE_TOTALS}
+        J["vice_mean"] = {k: mean(col(rows, k)) for k in VICE_SNAP}
+        t = J["vice_totals"]
+        rev = t["vice_revenue"] + t["street_take"]
+        J["tips_share_of_vice"] = t["tips"] / rev if rev else 0
+        gi = sum(col(rows, "gang_income")) if "gang_income" in rows[0] else 0
+        J["vice_share_of_gang_income"] = t["pimp_cut"] / gi if gi else 0
+        J["sweeps_a_day"] = t["solicitation"] / days
+        J["solicit_arrests_a_day"] = t["solicit_arrests"] / days
     if events:
         kinds = ("PowerOut", "PowerBack", "BuildDone", "Pilfered", "PitchOpened", "PitchClosed", "PitchSwept",
                  "DawnPick", "TinkerBotched", "CrateLanded", "CrateSeized", "LicenceSold", "Murder")
@@ -1183,6 +1199,11 @@ def fmt(o):
                      f" carriers per 1,000 {w['carriers_per_1000']:.1f}; armed fights / fights "
                      f"{w['armed_share_of_fights']:.1%}; deaths a fight armed {w['death_rate_armed']:.2%}, unarmed "
                      f"{w['death_rate_unarmed']:.2%} (Murders with and without [weapons]: an A/B pair of runs)")
+        if "vice_totals" in w:
+            L.append("vice and fashion, run totals: " + f(w["vice_totals"]))
+            L.append("vice and fashion, daily mean: " + f(w["vice_mean"]) + f"; tips / vice revenue "
+                     f"{w['tips_share_of_vice']:.1%}; pimps' cut / gang income {w['vice_share_of_gang_income']:.2%}; "
+                     f"Solicitation reports a day {w['sweeps_a_day']:.2f}, arrests a day {w['solicit_arrests_a_day']:.2f}")
         if "events" in w:
             L.append("events: " + f(w["events"]) + f"; foreman named {w['foreman_named']}; Hqs built {w['hq_built']}")
     L.append("-- flags --")

@@ -119,6 +119,11 @@ fn update_agent(world: &mut World, id: EntityId, w_need: f32, w_memory: f32, now
     }
     // L2 L13: `fun_mood × (fun − 0.5)` (a branch: leisure off adds nothing).
     bias += crate::systems::leisure::mood_bias(world, id);
+    // Jobs & lives phase 4 (§ 9): `status_w × (status − 0.5)` (a branch: 0 off).
+    let status = crate::systems::fashion::mood_bias(world, id);
+    if status != 0.0 {
+        bias += status;
+    }
     // Hunger as sickness § 2: the body's sickness (a branch: 0 off).
     let sick = crate::systems::health::effects(world, id).mood_bias;
     if sick != 0.0 {

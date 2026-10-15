@@ -15,6 +15,9 @@ fn shipped() -> World {
     let mut c = Config::load();
     c.jobs2.street = false;
     c.weapons.enabled = false;
+    // Phase 4: nor the vice and fashion (the same butterfly).
+    c.vice.enabled = false;
+    c.fashion.enabled = false;
     let w = World::new(42, c);
     assert!(citysim::systems::econ::wages_on(&w) && !policy::net_enacted(&w), "the shipped city: no net");
     w
@@ -143,8 +146,11 @@ fn test_civic_cut_spares_public_works_hires() {
     let mut cfg = Config::load();
     cfg.transit.enabled = false;
     // Jobs & lives phase 2: the city as written, without the street (a works
-    // hire went to jail in the butterfly it makes).
+    // hire went to jail in the butterfly it makes); phase 4: nor the vice
+    // and fashion (a works hire lost his post in theirs).
     cfg.jobs2.street = false;
+    cfg.vice.enabled = false;
+    cfg.fashion.enabled = false;
     let mut w = World::new(42, cfg);
     w.run_ticks(2 * TICKS_PER_DAY);
     w.push_command(PlayerCommand::SetSafetyNet(true));

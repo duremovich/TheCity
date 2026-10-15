@@ -110,6 +110,7 @@ fn test_statistical_hourly_decay_equals_60_ticks() {
         intimacy: 0.4,
         starving_since: None,
         fun: 1.0,
+        status: 1.0,
     };
     let mut hourly = start.clone();
     citysim::needs::decay(&mut hourly, &cfg, &ctx, TICKS_PER_HOUR as u32);

@@ -1707,6 +1707,10 @@ impl World {
         // Jobs & lives phase 3 (section 4): the Gunsmiths and the opening
         // stocks (no RNG; nothing with `[weapons]` off).
         crate::prof::timed!("new::weapons::seed", systems::weapons::seed(&mut w));
+        // Jobs & lives phase 4 (§ 5.1, § 9): the Vice venues and the
+        // Boutiques (no RNG; nothing with `[vice]` / `[fashion]` off).
+        crate::prof::timed!("new::vice::seed", systems::vice::seed(&mut w));
+        crate::prof::timed!("new::fashion::seed", systems::fashion::seed(&mut w));
         // Jobs and room J15: the trade places of every standing building the
         // map and the seeding passes put up (no RNG).
         crate::prof::timed!("new::trades::seed", systems::trades::seed(&mut w));
@@ -1890,6 +1894,7 @@ impl World {
                     intimacy: wc.needs_initial.intimacy,
                     starving_since: None,
                     fun: 1.0,
+                    status: 1.0,
                 },
             );
             self.insert(id, personality);

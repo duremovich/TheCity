@@ -216,14 +216,13 @@ pub fn stock_at(world: &World, b: EntityId) -> Vec<EntityId> {
         .collect()
 }
 
-/// The weapons kept at a Home (an owner's, parked there), ascending.
+/// The items kept at a Home (an owner's, parked there: weapons and, phase
+/// 4, clothing), ascending.
 fn kept_at(world: &World, home: EntityId) -> Vec<EntityId> {
     assets::assets_at(world, home)
         .iter()
         .copied()
-        .filter(|&a| {
-            world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Weapon && x.loc == AssetLoc::Parked(home))
-        })
+        .filter(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind.is_item() && x.loc == AssetLoc::Parked(home)))
         .collect()
 }
 
@@ -517,6 +516,9 @@ pub fn sight_carriers(world: &mut World) {
         };
         let stealth = crate::systems::law::stealth(world, c);
         let p = notice_p(stealth, pack_tier(world, c), t, sight_tier(world, g), step);
+        // Jobs & lives phase 4 (§ 9): a dress-0 body in the Spire (1 off).
+        let m = crate::systems::fashion::sighting_mult(world, c);
+        let p = if m != 1.0 { (p * m).min(1.0) } else { p };
         let rolls = match world.gang_of(c) {
             Some(gang) if crate::systems::law::cracking_down_on(world, gang) => {
                 world.config.weapons.crackdown_rolls.max(1)
@@ -534,7 +536,7 @@ pub fn sight_carriers(world: &mut World) {
 }
 
 /// `per_1000 × population ÷ 1,000`, at least 1.
-fn per_capita_day(world: &World, per_1000: f32) -> u32 {
+pub(crate) fn per_capita_day(world: &World, per_1000: f32) -> u32 {
     ((f64::from(world.config.world.population) * f64::from(per_1000) / 1000.0).round() as u32).max(1)
 }
 
@@ -1147,7 +1149,10 @@ pub fn market_petty(world: &mut World, thief: EntityId) {
         .jobs2
         .pitches
         .iter()
-        .find(|(&o, p)| o != thief && p.take_today > 0 && p.district == d)
+        // Jobs & lives phase 4: a street worker's pitch is no stall.
+        .find(|(&o, p)| {
+            o != thief && p.take_today > 0 && p.district == d && !crate::systems::vice::is_street_pitch(world, p)
+        })
         .map(|(&o, p)| (o, p.take_today));
     let Some((owner, take)) = stall else { return };
     let coins = take.min(cfg.stall_take_max).min(world.comp::<Wallet>(owner).map_or(0, |w| w.coins.max(0)));
@@ -1180,8 +1185,14 @@ pub fn home_petty(world: &mut World, thief: EntityId, home: EntityId) {
     let p = prov(world, ProvKind::Stolen, Some(thief));
     hand_over(world, a, Some(thief), AssetLoc::Carried(thief), p, true);
     world.jobs2.arms.petty_today += 1;
-    ownership::jobs2_row(world).home_thefts += 1;
-    let text = format!("{} took a Weapon from {}", world.name_of(thief), world.name_of(home));
+    let clothing = world.comp::<Asset>(a).is_some_and(|x| x.kind == AssetKind::Clothing);
+    let row = ownership::jobs2_row(world);
+    row.home_thefts += 1;
+    if clothing {
+        row.clothes_stolen += 1;
+    }
+    let what = if clothing { "Clothing" } else { "Weapon" };
+    let text = format!("{} took a {what} from {}", world.name_of(thief), world.name_of(home));
     world.push_event(EventKind::Theft, &[thief, home], text);
 }
 
@@ -1195,7 +1206,13 @@ pub fn fence_items(world: &mut World, thief: EntityId, gang: EntityId) -> u32 {
     let Some(h) = world.hideout_of(gang) else { return 0 };
     let frac = world.config.weapons.fence_frac;
     let mut n = 0;
-    for a in carried_by(world, thief) {
+    // Jobs & lives phase 4: the stolen clothing carried too.
+    let items: Vec<EntityId> = assets::assets_at(world, thief)
+        .iter()
+        .copied()
+        .filter(|&a| world.comp::<Asset>(a).is_some_and(|x| x.kind.is_item() && x.loc == AssetLoc::Carried(thief)))
+        .collect();
+    for a in items {
         let Some((stolen, value, owner)) = world.comp::<Asset>(a).map(|x| (x.stolen, x.value, x.owner)) else {
             continue;
         };
@@ -1227,6 +1244,7 @@ fn fence_daily(world: &mut World) {
             .arms
             .index
             .iter()
+            .chain(world.jobs2.fashion.index.iter())
             .filter_map(|&a| world.comp::<Asset>(a))
             .filter(|x| x.stolen)
             .filter_map(|x| match x.loc {

@@ -23,8 +23,12 @@ fn world() -> World {
     let mut c = Config::load();
     c.outside.enabled = false;
     // Jobs & lives phase 2: the city as written, without the street (its
-    // pitches and day posts move this seed's patrol day).
+    // pitches and day posts move this seed's patrol day); phase 4: nor the
+    // vice and fashion (the same butterfly: the Patrol's fight went the
+    // other way).
     c.jobs2.street = false;
+    c.vice.enabled = false;
+    c.fashion.enabled = false;
     World::new(42, c)
 }
 

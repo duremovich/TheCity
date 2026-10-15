@@ -486,6 +486,11 @@ pub enum PlayerCommand {
     /// public works, school meals, the Reserve release) or repealed (all
     /// four off). The levy is its own lever.
     SetSafetyNet(bool),
+    /// Jobs & lives phase 4 (§ 5.1): street work legal (no sweeps) or swept.
+    SetStreetLegal(bool),
+    /// Jobs & lives phase 4 (§ 5.1): brothels licensed (closed only under a
+    /// Crackdown) or not (closed in a Sweep or Crackdown district).
+    SetBrothelsLicensed(bool),
     // --- M16b phase 4 (spec § 8): the 16b lever and god commands.
     /// Off: corps cannot build Prisons, and a Prison admits no new captive.
     SetPrisonPermit(bool),
@@ -742,6 +747,40 @@ pub struct Levers {
     /// The Reserve's free release to a stranded Market (`SetReserveRelease`).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub reserve_release: bool,
+    /// Jobs & lives phase 4 (§ 5.1, D7): the vice policy levers, seeded
+    /// from `[vice]` (the utopia/dystopia game moves them).
+    #[serde(default, skip_serializing_if = "ViceLevers::is_default")]
+    pub vice: ViceLevers,
+}
+
+/// Jobs & lives phase 4 (D7, Dylan's answer 2): brothels licensed and
+/// tolerated, street work swept; phase 5's dollhouse contracts legal and a
+/// captive's chip a Trafficking (their slots seeded now).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ViceLevers {
+    pub brothels_licensed: bool,
+    pub street_legal: bool,
+    pub dollhouse_contracts: bool,
+    pub captive_chip_trafficking: bool,
+}
+
+impl ViceLevers {
+    pub fn is_default(&self) -> bool {
+        *self == ViceLevers::default()
+    }
+
+    /// The seeds of `[vice]`'s policy keys (all off with `[vice]` off).
+    pub fn from_config(cfg: &Config) -> ViceLevers {
+        if !(cfg.jobs2.enabled && cfg.vice.enabled) {
+            return ViceLevers::default();
+        }
+        ViceLevers {
+            brothels_licensed: cfg.vice.brothels_licensed,
+            street_legal: cfg.vice.street_legal,
+            dollhouse_contracts: cfg.vice.dollhouse_contracts,
+            captive_chip_trafficking: cfg.vice.captive_chip_trafficking,
+        }
+    }
 }
 
 fn is_zero_f32(v: &f32) -> bool {
@@ -852,6 +891,7 @@ impl Levers {
             levy: policy.levy,
             school_meals: policy.school_meals,
             reserve_release: policy.reserve_release,
+            vice: ViceLevers::from_config(cfg),
         }
     }
 }
@@ -1411,6 +1451,16 @@ impl World {
                     "Policy: the safety net repealed".to_string()
                 };
                 self.push_event(EventKind::PlayerAction, &[], text);
+            }
+            PlayerCommand::SetStreetLegal(on) => {
+                self.levers.vice.street_legal = *on;
+                let text = if *on { "Policy: street work legal" } else { "Policy: street work swept" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
+            }
+            PlayerCommand::SetBrothelsLicensed(on) => {
+                self.levers.vice.brothels_licensed = *on;
+                let text = if *on { "Policy: brothels licensed" } else { "Policy: brothels unlicensed" };
+                self.push_event(EventKind::PlayerAction, &[], text.to_string());
             }
             PlayerCommand::SetOutsideWage(w) => {
                 let w = if w.is_finite() { w.clamp(0.1, 1000.0) } else { 0.1 };

@@ -266,6 +266,14 @@ pub struct Config {
     /// master switch (`CITYSIM_WEAPONS_OFF=1` turns it off).
     #[serde(default)]
     pub weapons: WeaponsCfg,
+    /// Jobs & lives phase 4 (§ 5.1): the Vice venues, the street pitch and
+    /// its levers, under the master switch (`CITYSIM_VICE_OFF=1`).
+    #[serde(default)]
+    pub vice: ViceCfg,
+    /// Jobs & lives phase 4 (§ 9): clothing items, Boutiques and the
+    /// `status` need, under the master switch (`CITYSIM_FASHION_OFF=1`).
+    #[serde(default)]
+    pub fashion: FashionCfg,
 }
 
 /// Jobs & lives `[jobs2]` (docs/JOBS_AND_LIVES.md §§ 1-2): the master
@@ -658,6 +666,160 @@ impl Default for WeaponsCfg {
             stall_take_max: 10,
             petty_per_1000_day: 2.0,
             fence_frac: 0.4,
+        }
+    }
+}
+
+/// Jobs & lives phase 4 `[vice]` (docs/JOBS_AND_LIVES.md § 5.1): an
+/// economic and legal simulation of venues and labour: the StripClub and
+/// the Brothel (venues on the leisure ladder: visits, prices, tips), the
+/// Lounge's companions, the `street_worker` Pitch (its night visits, the
+/// pimp's cut, the street's assault roll), the sweeps (`Solicitation`) and
+/// the policy levers seeded into `World::levers`. Live only under `[jobs2]
+/// enabled`. Every number is a placeholder (R8: the income small and taxed
+/// by cuts and fines).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ViceCfg {
+    pub enabled: bool,
+    /// `[corps]` rows given the Vice niche at seed (and the seeded venues).
+    pub corp_rows: Vec<usize>,
+    /// Venues seeded per copy of each `corp_rows` row.
+    pub strip_clubs: u32,
+    pub brothels: u32,
+    /// A visit's price by district tier (Sump, Mid, Spire).
+    pub strip_price: [i64; 3],
+    pub brothel_price: [i64; 3],
+    /// The fun a visit gives, and the intimacy a Brothel's or a
+    /// companion's visit gives.
+    pub gain_strip: f32,
+    pub gain_brothel: f32,
+    pub intimacy_gain: f32,
+    /// The ladder weighs a Brothel `1 + intimacy_pull × (1 − intimacy)`.
+    pub intimacy_pull: f32,
+    /// The visitor's tip: this share of the price, customer -> the worker
+    /// on duty (`Flow::Tip`, untaxed).
+    pub tip_share: f32,
+    /// A visit's corp demand reference (`corp_brain::demand_of`'s Vice
+    /// arm): visits a day per venue.
+    pub vice_demand_ref: f32,
+    // --- The street (on the phase-2 Pitch).
+    /// A jobless opener under this lawfulness works a street pitch on
+    /// `p_street` (else the phase-2 trades).
+    pub street_lawful: f32,
+    pub p_street: f32,
+    /// A working street pitch's visit: on this chance an hour, at this
+    /// price, from a resident of the district whose intimacy is under
+    /// `street_intimacy`.
+    pub p_street_visit: f32,
+    pub street_price: i64,
+    pub street_intimacy: f32,
+    /// A pimp's gang takes this share of a street pitch's day (instead of
+    /// `[jobs2] cut_frac`).
+    pub pimp_cut: f32,
+    /// A working street pitch-hour's assault roll (× the district's fear
+    /// + 0.5), with no pimp assigned and the worker unarmed.
+    pub p_assault_street: f32,
+    /// A street pitch in a `Sweep` district is swept on this chance a day
+    /// (`Solicitation`, the phase-2 fine and closing) while `street_legal`
+    /// is off; reports a day at most per 1,000 residents (R3).
+    pub p_street_sweep: f32,
+    pub solicit_per_1000_day: f32,
+    // --- The policy levers' seeds (`World::levers.vice`).
+    pub brothels_licensed: bool,
+    pub street_legal: bool,
+    /// Phase 5's slots, seeded now.
+    pub dollhouse_contracts: bool,
+    pub captive_chip_trafficking: bool,
+}
+
+impl Default for ViceCfg {
+    fn default() -> Self {
+        ViceCfg {
+            enabled: false,
+            corp_rows: vec![5],
+            strip_clubs: 1,
+            brothels: 1,
+            strip_price: [4, 6, 10],
+            brothel_price: [5, 8, 14],
+            gain_strip: 0.55,
+            gain_brothel: 0.45,
+            intimacy_gain: 0.4,
+            intimacy_pull: 1.0,
+            tip_share: 0.15,
+            vice_demand_ref: 4.0,
+            street_lawful: 0.35,
+            p_street: 0.5,
+            p_street_visit: 0.3,
+            street_price: 5,
+            street_intimacy: 0.7,
+            pimp_cut: 0.3,
+            p_assault_street: 0.01,
+            p_street_sweep: 0.2,
+            solicit_per_1000_day: 1.0,
+            brothels_licensed: true,
+            street_legal: false,
+            dollhouse_contracts: true,
+            captive_chip_trafficking: true,
+        }
+    }
+}
+
+/// Jobs & lives phase 4 `[fashion]` (docs/JOBS_AND_LIVES.md § 9, Dylan's
+/// answer 1): clothing as an item kind of the owned-item store, the
+/// Boutique (a venue on the leisure ladder: grooming and clothes), the
+/// `status` need, and the dress readers. Live only under `[jobs2] enabled`.
+/// Every number is a placeholder.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FashionCfg {
+    pub enabled: bool,
+    /// `[corps]` rows that own the seeded Boutiques, one per copy each.
+    pub boutique_rows: Vec<usize>,
+    /// A Boutique visit's grooming price by district tier (Sump, Mid, Spire).
+    pub groom_price: [i64; 3],
+    /// The fun and the `status` a Boutique visit gives; the `status` a
+    /// High-rung evening gives.
+    pub gain_boutique: f32,
+    /// The ladder weighs a Boutique `1 + status_pull × (1 − status)`.
+    pub status_pull: f32,
+    pub status_gain: f32,
+    pub status_high: f32,
+    /// `status` decays `status_decay × (0.5 + pride) × class_w[class]` a
+    /// day (Corp, Street, Dreg).
+    pub status_decay: f32,
+    pub class_w: [f32; 3],
+    /// Mood's `status_w × (status − 0.5)`.
+    pub status_w: f32,
+    /// Clothing items alive at most, per 1,000 residents (R4).
+    pub clothing_per_1000: f32,
+    /// A dress-0 carrier in the Spire is noticed at a carry sighting × this.
+    pub spire_dress_mult: f32,
+    /// A fight's winner (no guard) takes the loser's worn clothing on this
+    /// chance (under the petty cap, `[weapons] petty_per_1000_day`).
+    pub p_mug_clothes: f32,
+    /// A Boutique sale leaves this many meals' coins beyond the evening's
+    /// reserve (clothes after food).
+    pub clothes_reserve_meals: i64,
+}
+
+impl Default for FashionCfg {
+    fn default() -> Self {
+        FashionCfg {
+            enabled: false,
+            boutique_rows: vec![5],
+            groom_price: [3, 6, 12],
+            gain_boutique: 0.2,
+            status_pull: 4.0,
+            status_gain: 0.35,
+            status_high: 0.15,
+            status_decay: 0.01,
+            class_w: [1.5, 1.0, 0.5],
+            status_w: 0.1,
+            clothing_per_1000: 200.0,
+            spire_dress_mult: 1.5,
+            p_mug_clothes: 0.3,
+            clothes_reserve_meals: 10,
         }
     }
 }
@@ -1517,6 +1679,24 @@ pub struct TradeCfg {
     /// Jobs & lives phase 3: the row exists only with `[weapons]` on.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub weapons: bool,
+    /// Jobs & lives phase 4: the row exists only with `[vice]` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub vice: bool,
+    /// Jobs & lives phase 4: the row exists only with `[fashion]` on.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub fashion: bool,
+    /// Jobs & lives phase 4: the row's on-duty staff take a visit's tip
+    /// (`[vice] tip_share`) at a Vice venue or the Lounge.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub tipped: bool,
+    /// Jobs & lives phase 4 (§ 9): the dress a hire needs (read with
+    /// `[fashion]` on; 0 none).
+    #[serde(default, skip_serializing_if = "is_zero_u8_cfg")]
+    pub min_dress: u8,
+}
+
+fn is_zero_u8_cfg(v: &u8) -> bool {
+    *v == 0
 }
 
 /// J14: how a trade works its shift.
@@ -1758,6 +1938,47 @@ impl BuildingCfg {
         }
     }
     /// Jobs & lives phase 3 (§ 4): a Gunsmith (Parts in stock).
+    /// Jobs & lives phase 4 (§ 5.1): a StripClub (dancers, bouncers, a barkeep).
+    pub fn strip_club() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 24,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(700),
+            value: Some(700),
+            floors_seed: Some(1),
+            floors_max: Some(2),
+            niche: Some(crate::components::Niche::Vice),
+            ..BuildingCfg::BASE
+        }
+    }
+    /// Jobs & lives phase 4 (§ 5.1): a Brothel (its workers, a barkeep, a madam).
+    pub fn brothel() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 16,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(600),
+            value: Some(600),
+            floors_seed: Some(1),
+            floors_max: Some(2),
+            niche: Some(crate::components::Niche::Vice),
+            ..BuildingCfg::BASE
+        }
+    }
+    /// Jobs & lives phase 4 (§ 9): a Boutique (tailors, barbers).
+    pub fn boutique() -> BuildingCfg {
+        BuildingCfg {
+            capacity: 10,
+            stock_cap: 0,
+            staff: 0,
+            found_cost: Some(500),
+            value: Some(500),
+            floors_seed: Some(1),
+            floors_max: Some(1),
+            ..BuildingCfg::BASE
+        }
+    }
     pub fn gunsmith() -> BuildingCfg {
         BuildingCfg {
             capacity: 8,
@@ -1925,6 +2146,13 @@ pub struct BuildingsCfg {
     /// Jobs & lives phase 3 (§ 4): none stands with `[weapons]` off.
     #[serde(default = "BuildingCfg::gunsmith")]
     pub gunsmith: BuildingCfg,
+    /// Jobs & lives phase 4: none stands with `[vice]` / `[fashion]` off.
+    #[serde(default = "BuildingCfg::strip_club")]
+    pub strip_club: BuildingCfg,
+    #[serde(default = "BuildingCfg::brothel")]
+    pub brothel: BuildingCfg,
+    #[serde(default = "BuildingCfg::boutique")]
+    pub boutique: BuildingCfg,
 }
 
 impl BuildingsCfg {
@@ -1963,6 +2191,9 @@ impl BuildingsCfg {
             BuildingKind::ConstructionYard => &self.construction_yard,
             BuildingKind::Hq => &self.hq,
             BuildingKind::Gunsmith => &self.gunsmith,
+            BuildingKind::StripClub => &self.strip_club,
+            BuildingKind::Brothel => &self.brothel,
+            BuildingKind::Boutique => &self.boutique,
         }
     }
 }
@@ -4118,6 +4349,9 @@ pub struct PerKind<T: Default> {
     /// Jobs & lives phase 3.
     #[serde(default)]
     pub weapon: T,
+    /// Jobs & lives phase 4.
+    #[serde(default)]
+    pub clothing: T,
 }
 
 impl AssetsCfg {
@@ -4145,6 +4379,7 @@ impl<T: Default> PerKind<T> {
             AssetClass::Deck => &self.deck,
             AssetClass::Camera => &self.camera,
             AssetClass::Weapon => &self.weapon,
+            AssetClass::Clothing => &self.clothing,
         }
     }
 }
@@ -4235,6 +4470,7 @@ impl AssetsCfg {
                 deck: vec![400, 1500, 5000],
                 camera: vec![120, 400, 1200],
                 weapon: vec![60, 160, 400],
+                clothing: vec![20, 60, 180],
             },
             upkeep: PerKind {
                 motorcycle: vec![1],
@@ -4248,6 +4484,7 @@ impl AssetsCfg {
                 deck: vec![1, 3, 8],
                 camera: vec![1, 2, 4],
                 weapon: vec![0, 0, 0],
+                clothing: vec![0, 0, 0],
             },
             wear: PerKind {
                 motorcycle: 1,
@@ -4261,6 +4498,7 @@ impl AssetsCfg {
                 deck: 0,
                 camera: 1,
                 weapon: 0,
+                clothing: 1,
             },
             parts_per: PerKind {
                 motorcycle: 4,
@@ -4274,6 +4512,7 @@ impl AssetsCfg {
                 deck: 4,
                 camera: 2,
                 weapon: 3,
+                clothing: 0,
             },
             parts_price: 15,
             import_frac: 0.6,
@@ -5049,6 +5288,8 @@ pub struct TechRequires {
     pub bridge: Vec<u8>,
     /// Jobs & lives phase 3.
     pub weapon: Vec<u8>,
+    /// Jobs & lives phase 4.
+    pub clothing: Vec<u8>,
 }
 
 impl TechRequires {
@@ -5066,6 +5307,7 @@ impl TechRequires {
             AssetClass::Deck => &self.deck,
             AssetClass::Camera => &self.camera,
             AssetClass::Weapon => &self.weapon,
+            AssetClass::Clothing => &self.clothing,
         }
     }
 }
@@ -5153,6 +5395,7 @@ impl Default for TechCfg {
                 pack: vec![1, 1],
                 bridge: Vec::new(),
                 weapon: vec![1, 2, 3],
+                clothing: Vec::new(),
             },
             tier_cost: vec![0, 0, 400, 1200],
             tier_coins: vec![0, 0, 800, 2500],
@@ -6698,6 +6941,13 @@ impl Config {
         // Jobs & lives phase 3: the weapons' A/B and identity device.
         if std::env::var("CITYSIM_WEAPONS_OFF").is_ok_and(|v| v == "1") {
             cfg.weapons.enabled = false;
+        }
+        // Jobs & lives phase 4: the vice's and the fashion's A/B and identity devices.
+        if std::env::var("CITYSIM_VICE_OFF").is_ok_and(|v| v == "1") {
+            cfg.vice.enabled = false;
+        }
+        if std::env::var("CITYSIM_FASHION_OFF").is_ok_and(|v| v == "1") {
+            cfg.fashion.enabled = false;
         }
         cfg.districts.row_count();
         // Transit (docs/TRANSIT.md D12): `CITYSIM_TRANSIT=1` (or `0`)

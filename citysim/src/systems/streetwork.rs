@@ -58,6 +58,7 @@ use crate::world::World;
 const PURPOSE_OPEN: u64 = 0x5713_0001;
 const PURPOSE_PICK: u64 = 0x5713_0002;
 const PURPOSE_CORNER: u64 = 0x5713_0003;
+const PURPOSE_STREET: u64 = 0x5713_00F1;
 const PURPOSE_CAB: u64 = 0x5713_0004;
 const PURPOSE_TINKER: u64 = 0x5713_0005;
 const PURPOSE_SWEEP: u64 = 0x5713_0006;
@@ -81,12 +82,17 @@ pub enum PitchKind {
     Vendor,
     Rickshaw,
     Tinker,
+    /// Jobs & lives phase 4 (§ 5.1): a `vice` row's night pitch.
+    Street,
 }
 
 /// A self-employed row (no workplace) and what it works.
 pub fn pitch_kind(row: &TradeCfg) -> Option<PitchKind> {
     if !row.workplace.is_empty() {
         return None;
+    }
+    if row.vice {
+        return Some(PitchKind::Street);
     }
     match row.duty {
         TradeDuty::Sell => Some(PitchKind::Vendor),
@@ -213,15 +219,32 @@ fn close_the_day(world: &mut World) {
         });
         let sweep_stance = d.is_some_and(|d| d.stance == Stance::Sweep);
         let mut cut_to = p.cut_to;
+        // Jobs & lives phase 4 (§ 5.1): a street pitch under a pimp pays his
+        // gang `pimp_cut` instead.
+        let pimp = crate::systems::vice::street_cut(world, &p);
+        let (gang, frac) = match pimp {
+            Some((g, f)) => (Some(g), f),
+            None => (gang, cfg.cut_frac),
+        };
         if let Some(g) = gang.filter(|_| p.take_today > 0) {
-            let cut = (p.take_today as f32 * cfg.cut_frac).round() as i64;
+            let cut = (p.take_today as f32 * frac).round() as i64;
             let paid = ownership::pay(world, Some(o), Some(g), cut, Flow::StreetCut);
             ownership::jobs2_row(world).street_cut += paid;
+            if pimp.is_some() {
+                ownership::jobs2_row(world).pimp_cut += paid;
+            }
             cut_to = Some(g);
         }
-        let sweep = sweep_stance
-            && swept < cfg.sweeps_per_day
-            && hash(world, PURPOSE_SWEEP, u64::from(o.index), day) < cfg.p_pitch_sweep;
+        // Jobs & lives phase 4: a street pitch's sweep is the vice's
+        // (`Solicitation`, never with `street_legal` on).
+        let street = crate::systems::vice::on(world) && crate::systems::vice::is_street_pitch(world, &p);
+        let sweep = if street {
+            swept < cfg.sweeps_per_day && crate::systems::vice::sweep_street(world, &p)
+        } else {
+            sweep_stance
+                && swept < cfg.sweeps_per_day
+                && hash(world, PURPOSE_SWEEP, u64::from(o.index), day) < cfg.p_pitch_sweep
+        };
         let mut closed_until = p.closed_until.filter(|&t| t > now);
         if sweep {
             swept += 1;
@@ -312,6 +335,12 @@ fn openings(world: &mut World) {
             Some(s) if s.fighting >= cfg.rickshaw_skill => PitchKind::Rickshaw,
             _ => PitchKind::Vendor,
         };
+        // Jobs & lives phase 4 (§ 5.1): with `[vice]` on, a lawless opener
+        // works a street pitch on `p_street` (a pure hash of the day).
+        let street = crate::systems::vice::on(world)
+            && world.comp::<Personality>(a).is_some_and(|p| p.lawfulness < world.config.vice.street_lawful)
+            && hash(world, PURPOSE_STREET, u64::from(a.index), today) < world.config.vice.p_street;
+        let kind = if street && pitch_row(world, PitchKind::Street).is_some() { PitchKind::Street } else { kind };
         let Some(trade) = pitch_row(world, kind).or_else(|| pitch_row(world, PitchKind::Vendor)) else { continue };
         let used: Vec<TilePos> = world.jobs2.pitches.values().map(|p| p.spot).collect();
         let spot = world
@@ -948,7 +977,8 @@ pub fn snapshot(world: &mut World) {
             Some(PitchKind::Vendor) => by[0] += 1,
             Some(PitchKind::Rickshaw) => by[1] += 1,
             Some(PitchKind::Tinker) => by[2] += 1,
-            None => {}
+            // Jobs & lives phase 4: the vice's own column (`street_pitches`).
+            Some(PitchKind::Street) | None => {}
         }
     }
     let day = day_role(world).map_or(0, |r| world.workers(r).len() as u32);

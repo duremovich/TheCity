@@ -312,7 +312,7 @@ pub fn bankrupt(world: &mut World, corp: EntityId) {
     buyers.extend(corp_brain::wallets(world));
     let cfg = world.config.corps.clone();
     let shares: BTreeMap<Niche, BTreeMap<EntityId, f32>> =
-        Niche::ALL.into_iter().map(|n| (n, corp_brain::shares(world, n))).collect();
+        Niche::live(crate::systems::vice::on(world)).iter().map(|&n| (n, corp_brain::shares(world, n))).collect();
     let mut taken: BTreeMap<EntityId, usize> = BTreeMap::new();
     for b in buildings {
         let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { continue };
@@ -623,7 +623,7 @@ fn roll_shares(world: &mut World) {
         return;
     }
     let all: BTreeMap<Niche, BTreeMap<EntityId, f32>> =
-        Niche::ALL.into_iter().map(|n| (n, corp_brain::shares(world, n))).collect();
+        Niche::live(crate::systems::vice::on(world)).iter().map(|&n| (n, corp_brain::shares(world, n))).collect();
     for &c in &corps {
         let Some(cc) = world.comp_mut::<Corp>(c) else { continue };
         let niches: Vec<Niche> = cc.niches.iter().copied().collect();
@@ -680,7 +680,7 @@ fn bankruptcies(world: &mut World) {
 
 fn count_monopolies(world: &mut World) {
     let mut n = 0;
-    for niche in Niche::ALL {
+    for &niche in Niche::live(crate::systems::vice::on(world)) {
         let shares = corp_brain::shares(world, niche);
         n += shares
             .iter()

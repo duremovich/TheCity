@@ -107,6 +107,11 @@ pub struct Jobs2State {
     // --- Phase 3, weapons (`systems::weapons`).
     #[serde(skip_serializing_if = "crate::systems::weapons::ArmsState::is_default")]
     pub arms: crate::systems::weapons::ArmsState,
+    // --- Phase 4, vice and fashion (`systems::vice`, `systems::fashion`).
+    #[serde(skip_serializing_if = "crate::systems::vice::ViceState::is_default")]
+    pub vice: crate::systems::vice::ViceState,
+    #[serde(skip_serializing_if = "crate::systems::fashion::FashionState::is_default")]
+    pub fashion: crate::systems::fashion::FashionState,
 }
 
 fn is_zero_u32(v: &u32) -> bool {
@@ -971,6 +976,11 @@ fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
         BuildingKind::Gunsmith => Zone::Mid,
         _ => Zone::Vats,
     };
+    seed_lot_in(world, kind, want)
+}
+
+/// [`seed_lot`] in the zone `want` first.
+fn seed_lot_in(world: &World, kind: BuildingKind, want: Zone) -> Option<EntityId> {
     crate::systems::founding::vacant_lots(world)
         .into_iter()
         .filter_map(|l| {
@@ -997,6 +1007,17 @@ fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
 /// `Founded` event. No RNG, no coins (the seed buildings are unpaid).
 fn seed_one(world: &mut World, kind: BuildingKind, owner: Option<EntityId>) -> Option<EntityId> {
     let lot = seed_lot(world, kind)?;
+    seed_on(world, lot, kind, owner)
+}
+
+/// Phase 4 (`fashion::seed`): one seeded `kind` for `owner` on a Lot of
+/// the zone `want` first.
+pub fn seed_kind_in(world: &mut World, kind: BuildingKind, owner: Option<EntityId>, want: Zone) -> Option<EntityId> {
+    let lot = seed_lot_in(world, kind, want)?;
+    seed_on(world, lot, kind, owner)
+}
+
+fn seed_on(world: &mut World, lot: EntityId, kind: BuildingKind, owner: Option<EntityId>) -> Option<EntityId> {
     let floors = world.config.buildings.for_kind(kind).floors_seed.unwrap_or(1).max(1);
     let floors = floors.min(world.config.floors_max(kind));
     if let Some(bd) = world.comp_mut::<Building>(lot) {

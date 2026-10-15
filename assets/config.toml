@@ -886,7 +886,7 @@ enabled = true                     # off() = false: no pass, no Kit term, no Bod
 # running a truck by day 30: 5-6 -> 8); flyer 6000 -> 2000 (nobody but a corp ever holds it; the exec
 # flyer, [shop] exec_flyer_cash_mult: at 3000 the 42-44 runs bought 0-2); implant T1 150 -> 60 (cash only
 # below, so the cash buyers must exist; adults chromed 13-17 %, members 40-60 %).
-price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200], weapon = [60, 160, 400] }
+price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], implant = [60, 500, 1500], robot = [800, 2000, 5000], pack = [30, 80], bridge = [200, 600, 1800], deck = [60, 120, 600], camera = [120, 400, 1200], weapon = [60, 160, 400], clothing = [20, 60, 180] }
 # M14 phase 2 (outside the plan's knob list, the M13 price precedent): deck [400, 1500, 5000] ->
 # [60, 120, 600]. Hackers' wallets on seed 42 (hacking >= 0.4): median 19 / 8 / 5 coins on days 5 / 20 / 40,
 # p90 45 / 21 / 18, so at 400 no agent bought a deck in 120 days (decks owned: 2, both corp fleet). At
@@ -896,8 +896,8 @@ price = { motorcycle = [60], car = [500, 1400], truck = [900], flyer = [2000], i
 # Phase 5: motorcycle upkeep 1 -> 0 and wear 1 -> 0. Unpaid upkeep wore a bike 3 a day and wear 1 a
 # day wrecked every bike bought in the first week around day 100 (64 "worn out" on seed 42): no owner
 # could pay a repair. Crashes (crash_wear) still wreck them.
-upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4], weapon = [0, 0, 0] }
-wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1, weapon = 0 }
+upkeep = { motorcycle = [0], car = [2, 3], truck = [4], flyer = [15], implant = [0, 1, 3], robot = [4, 8, 15], pack = [0, 0], bridge = [0, 0, 0], deck = [1, 3, 8], camera = [1, 2, 4], weapon = [0, 0, 0], clothing = [0, 0, 0] }
+wear = { motorcycle = 0, car = 1, truck = 1, flyer = 1, implant = 0, robot = 1, pack = 0, bridge = 0, deck = 0, camera = 1, weapon = 0, clothing = 1 }
 parts_per = { motorcycle = 4, car = 8, truck = 12, flyer = 30, implant = 3, robot = 10, deck = 4, camera = 2, weapon = 3 }
 parts_price = 15
 import_frac = 0.6
@@ -1876,6 +1876,37 @@ floors_max = 8
 
 # Jobs & lives phase 3 (docs/JOBS_AND_LIVES.md § 4): the Gunsmith (a Security corp's shop in the Mid; its stock_cap
 # is Parts; the weapons it holds are capped by [weapons] gunsmith_stock). None stands with [weapons] off. Placeholders.
+# Jobs & lives phase 4 (§ 5.1, § 9): the Vice venues (Vice niche) and the Boutique. None stands with [vice] /
+# [fashion] off. staff 0: their places are the trades' rows. Placeholders.
+[buildings.strip_club]
+capacity = 24
+stock_cap = 0
+staff = 0
+found_cost = 700
+value = 700
+floors_seed = 1
+floors_max = 2
+niche = "Vice"
+
+[buildings.brothel]
+capacity = 16
+stock_cap = 0
+staff = 0
+found_cost = 600
+value = 600
+floors_seed = 1
+floors_max = 2
+niche = "Vice"
+
+[buildings.boutique]
+capacity = 10
+stock_cap = 0
+staff = 0
+found_cost = 500
+value = 500
+floors_seed = 1
+floors_max = 1
+
 [buildings.gunsmith]
 capacity = 8
 stock_cap = 60
@@ -2392,7 +2423,7 @@ model = "service"
 [[trades]]
 id = "bouncer"
 label = "Bouncer"
-workplace = ["Club", "Den", "FightPit"]
+workplace = ["Club", "Den", "FightPit", "StripClub"]
 staff_per_floor = 2
 wage = 6
 shift = "evening"
@@ -2402,12 +2433,13 @@ model = "service"
 [[trades]]
 id = "dancer"
 label = "Dancer"
-workplace = ["Club"]
+workplace = ["Club", "StripClub"]
 staff_per_floor = 3
 wage = 6
 shift = "evening"
 skill = "persuasion"
 model = "service"
+tipped = true
 
 [[trades]]
 id = "orderly"
@@ -2590,6 +2622,7 @@ shift = "day"
 skill = "knowledge"
 model = "overhead"
 grade = 1
+min_dress = 1                      # Jobs & lives phase 4 (§ 9): an office post needs a dress of 1 (fashion on)
 corp_only = true
 jobs2 = true
 
@@ -2678,6 +2711,99 @@ model = "day"
 duty = "corner"
 jobs2 = true
 street = true
+
+# Jobs & lives phase 4 (§ 5.1): the Vice venues' staff (the dancers and bouncers above work StripClubs too), the
+# Lounge's companions (a dress of 2 to be hired), and the street worker's night Pitch (no workplace; a `vice` row).
+# `tipped`: the on-duty worker takes a visit's tip ([vice] tip_share). Display names are these labels.
+[[trades]]
+id = "barkeep"
+label = "Barkeep"
+workplace = ["StripClub", "Brothel"]
+staff_per_floor = 1
+wage = 5
+shift = "evening"
+skill = "none"
+model = "service"
+jobs2 = true
+vice = true
+
+[[trades]]
+id = "brothel_worker"
+label = "Brothel Worker"
+workplace = ["Brothel"]
+staff_per_floor = 4
+wage = 3
+shift = "evening"
+skill = "persuasion"
+model = "service"
+jobs2 = true
+vice = true
+tipped = true
+
+[[trades]]
+id = "madam"
+label = "Madam"
+workplace = ["Brothel"]
+staff_per_floor = 1
+wage = 8
+shift = "evening"
+skill = "persuasion"
+model = "overhead"
+grade = 2
+jobs2 = true
+vice = true
+
+[[trades]]
+id = "companion"
+label = "Companion"
+workplace = ["Lounge"]
+staff_per_floor = 2
+wage = 5
+shift = "evening"
+skill = "persuasion"
+model = "service"
+jobs2 = true
+vice = true
+tipped = true
+min_dress = 2
+
+[[trades]]
+id = "street_worker"
+label = "Street Worker"
+workplace = []
+staff_per_floor = 0
+wage = 0
+shift = "night"
+skill = "persuasion"
+model = "service"
+jobs2 = true
+street = true
+vice = true
+
+# Jobs & lives phase 4 (§ 9): the Boutique's tailors and barbers.
+[[trades]]
+id = "tailor"
+label = "Tailor"
+workplace = ["Boutique"]
+staff_per_floor = 2
+wage = 6
+shift = "day"
+skill = "persuasion"
+model = "service"
+jobs2 = true
+fashion = true
+
+[[trades]]
+id = "barber"
+label = "Barber"
+workplace = ["Boutique"]
+staff_per_floor = 1
+wage = 5
+shift = "day"
+skill = "none"
+model = "service"
+jobs2 = true
+fashion = true
 
 # Jobs & lives phase 3 (§ 4): the Gunsmith's gunsmiths (`produce`: Parts into weapons, [weapons] make_rate).
 [[trades]]
@@ -3207,3 +3333,54 @@ petty_reach = 3
 stall_take_max = 10                # ... or empties the till of a stall in the Market's district of up to this many coins
 petty_per_1000_day = 2.0           # petty item thefts a day at most, per 1,000 residents (R3)
 fence_frac = 0.4                   # the fence pays this of an item's value (into the gang's armoury)
+
+# ---------------------------------------------------------------------------
+# Jobs & lives phase 4, vice (docs/JOBS_AND_LIVES.md § 5.1): an economic and legal simulation of venues and labour
+# (venues, shifts, visits, prices, tips, cuts, licences, sweeps, fines). Under [jobs2] enabled (`CITYSIM_VICE_OFF=1`
+# turns it off). Placeholders, on the brutal side (R8: the income small, taxed by cuts and fines).
+[vice]
+enabled = true
+corp_rows = [5]                    # [corps] rows given the Vice niche and the seeded venues (Kessler at the time of writing)
+strip_clubs = 1                    # seeded per copy of each row
+brothels = 1
+strip_price = [4, 6, 10]           # a visit by district tier (Sump, Mid, Spire)
+brothel_price = [5, 8, 14]
+gain_strip = 0.55                  # fun a visit gives
+gain_brothel = 0.45
+intimacy_gain = 0.4                # a Brothel's, a companion's or a street pitch's visit
+intimacy_pull = 1.0                # the ladder weighs a Brothel 1 + this x (1 - intimacy)
+tip_share = 0.15                   # of the price, customer -> the tipped worker on duty (Flow::Tip, untaxed)
+vice_demand_ref = 4.0              # visits a day per venue (corp_brain::demand_of's Vice arm)
+street_lawful = 0.35               # a jobless opener under this lawfulness works a street pitch ...
+p_street = 0.5                     # ... on this chance
+p_street_visit = 0.3               # a working street pitch's visit an hour ...
+street_price = 5                   # ... at this price, from a resident under ...
+street_intimacy = 0.7              # ... this intimacy
+pimp_cut = 0.3                     # a pimp's gang takes this of a street pitch's day (instead of [jobs2] cut_frac)
+p_assault_street = 0.01            # an unprotected street pitch-hour (no pimp, unarmed) x (0.5 + the district's fear)
+p_street_sweep = 0.2               # a street pitch in a Sweep district is swept (Solicitation, the fine, a day shut) ...
+solicit_per_1000_day = 1.0         # ... reports a day at most per 1,000 residents (R3)
+brothels_licensed = true           # Dylan's answer 2: the levers' defaults (World::levers.vice)
+street_legal = false
+dollhouse_contracts = true         # phase 5's slots
+captive_chip_trafficking = true
+
+# ---------------------------------------------------------------------------
+# Jobs & lives phase 4, fashion (docs/JOBS_AND_LIVES.md § 9; Dylan's answer 1): clothing items on the owned-item
+# store, the Boutique, the status need and the dress readers. Under [jobs2] enabled (`CITYSIM_FASHION_OFF=1` turns
+# it off). Clothing prices are [assets] price.clothing. Placeholders.
+[fashion]
+enabled = true
+boutique_rows = [5]                # [corps] rows given a Boutique per copy (Kessler at the time of writing; not a board corp)
+groom_price = [3, 6, 12]           # a visit by district tier (Sump, Mid, Spire)
+gain_boutique = 0.2                # fun a visit gives
+status_pull = 4.0                  # the ladder weighs a Boutique 1 + this x (1 - status)
+status_gain = 0.35                 # status a Boutique visit gives ...
+status_high = 0.15                 # ... and a High-rung evening
+status_decay = 0.01                # a day x (0.5 + pride) x class_w
+class_w = [1.5, 1.0, 0.5]          # Corp, Street, Dreg
+status_w = 0.1                     # mood's status_w x (status - 0.5)
+clothing_per_1000 = 200.0          # clothing items alive at most, per 1,000 residents (R4)
+spire_dress_mult = 1.5             # a dress-0 carrier in the Spire is noticed x this
+p_mug_clothes = 0.3                # a fight's winner (no guard) takes the loser's worn item (the petty cap)
+clothes_reserve_meals = 10         # a Boutique sale leaves this many meals' coins beyond the evening's reserve

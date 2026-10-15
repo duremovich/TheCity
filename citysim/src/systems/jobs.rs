@@ -93,7 +93,12 @@ pub fn nearest_of_kind(world: &World, kind: BuildingKind, from: TilePos) -> Opti
 /// Market's food price plus `noodle_bar_markup`. 0 = not sold at this tier.
 pub fn venue_price(world: &World, b: EntityId, kind: BuildingKind, tier: u8, owner: Option<EntityId>) -> i64 {
     let cfg = &world.config.leisure;
-    let mut base = cfg.price_base.of(kind, tier);
+    // Jobs & lives phase 4: the Vice venues' visit and the Boutique's grooming.
+    let mut base = match kind {
+        BuildingKind::StripClub | BuildingKind::Brothel => crate::systems::vice::visit_price(world, kind, tier),
+        BuildingKind::Boutique => crate::systems::fashion::groom_price(world, tier),
+        _ => cfg.price_base.of(kind, tier),
+    };
     if kind == BuildingKind::NoodleBar {
         let door = world.comp::<Building>(b).map(|bd| bd.door).unwrap_or_default();
         let market = nearest_of_kind(world, BuildingKind::Market, door)
@@ -252,7 +257,7 @@ fn seed_heir(world: &World, kind: BuildingKind, i: usize) -> Option<EntityId> {
 /// The vacant Lot for the next copy of `kind`: an allowed door tier, an
 /// interior of at least `min(capacity, 6)` tiles; least `(copies of the kind
 /// in its district, door distance to the district's centroid, id)`.
-fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
+pub(crate) fn seed_lot(world: &World, kind: BuildingKind) -> Option<EntityId> {
     let need = usize::from(world.config.buildings.for_kind(kind).capacity.min(6));
     crate::systems::founding::vacant_lots(world)
         .into_iter()
@@ -356,7 +361,8 @@ pub fn top_up(world: &mut World) {
     // Review fix: every standing leisure venue and Fab below its staff (an
     // unpaid quit posts no vacancy) re-posts one vacancy a day once its
     // owner's purse covers a day's wage (a hunkering corp's to half).
-    let mut l2 = BuildingKind::LEISURE.to_vec();
+    // Jobs & lives phase 4: every venue kind (none of phase 4's stands off).
+    let mut l2 = BuildingKind::LEISURE_ALL.to_vec();
     l2.push(BuildingKind::Fab);
     for kind in l2 {
         // Jobs and room J10: every role of the kind, the bespoke first.
@@ -592,7 +598,7 @@ fn price_venues(world: &mut World) {
     // Real economy phase 2 (plan E20): prices follow the payroll-weighted
     // mean `wage_rev` city-wide at `venue_wage_pass` (1.0 with wages off).
     let pass = crate::systems::wages::venue_price_mult(world);
-    for kind in BuildingKind::LEISURE {
+    for kind in BuildingKind::LEISURE_ALL {
         for b in world.buildings_of_kind(kind).to_vec() {
             let Some((tier, owner)) =
                 world.comp::<Building>(b).filter(|bd| bd.venue.is_some()).map(|bd| (bd.tier, bd.owner))
@@ -619,11 +625,18 @@ fn price_venues(world: &mut World) {
 /// A venue had a visit (a `Drink` at a Club or Den, phase 2's rungs).
 pub fn note_visit(world: &mut World, b: EntityId) {
     let Some(kind) = world.comp::<Building>(b).map(|bd| bd.kind) else { return };
-    let Some(i) = BuildingKind::LEISURE.iter().position(|&k| k == kind) else { return };
+    // Jobs & lives phase 4: a phase-4 venue counts its visits too (the
+    // CSV's per-kind columns stay L2's six).
+    let i = BuildingKind::LEISURE.iter().position(|&k| k == kind);
+    if i.is_none() && !kind.is_leisure() {
+        return;
+    }
     if let Some(v) = world.comp_mut::<Building>(b).and_then(|bd| bd.venue.as_mut()) {
         v.visits_today = v.visits_today.saturating_add(1);
     }
-    world.stats.current.living.visits[i] += 1;
+    if let Some(i) = i {
+        world.stats.current.living.visits[i] += 1;
+    }
 }
 
 // ---------------------------------------------------------------------------

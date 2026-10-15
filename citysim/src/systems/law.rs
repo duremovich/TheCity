@@ -78,6 +78,8 @@ pub fn crime_salience(crime: Crime) -> f32 {
         Crime::ArmsDealing => 0.6,
         Crime::UnlicensedArms => 0.3,
         Crime::Smuggling => 0.6,
+        // Jobs & lives phase 4: petty.
+        Crime::Solicitation => 0.1,
     }
 }
 
@@ -181,7 +183,9 @@ pub fn raise_crime_except(
         // Jobs & lives phase 3: a sale, a sighting, a crate leave nothing.
         | Crime::ArmsDealing
         | Crime::UnlicensedArms
-        | Crime::Smuggling => {}
+        | Crime::Smuggling
+        // Jobs & lives phase 4: filed at a sweep.
+        | Crime::Solicitation => {}
         Crime::Abduction => crate::systems::litter::deposit_near(world, tile, actor_building, 12, 1),
     }
 
@@ -288,7 +292,8 @@ pub fn raise_crime_except(
             | Crime::FareEvasion
             | Crime::ArmsDealing
             | Crime::UnlicensedArms
-            | Crime::Smuggling => MemoryKind::WasRobbed,
+            | Crime::Smuggling
+            | Crime::Solicitation => MemoryKind::WasRobbed,
         };
         world.remember(v, kind, Some(actor), 0.6, -0.6, false);
         crate::systems::social::robbed_by(world, v, actor);
@@ -529,7 +534,11 @@ pub fn sentence_ticks(world: &World, crime: Crime) -> Tick {
     // M12 D15: a night in the cells, whatever the sentence lever.
     // Transit T10: fare evasion too. Jobs & lives phase 3 (§ 4): an
     // unlicensed weapon as the worst open report too.
-    if crime == Crime::Vagrancy || crime == Crime::FareEvasion || crime == Crime::UnlicensedArms {
+    if crime == Crime::Vagrancy
+        || crime == Crime::FareEvasion
+        || crime == Crime::UnlicensedArms
+        || crime == Crime::Solicitation
+    {
         return world.config.law.vagrancy_sentence_ticks.max(1);
     }
     // M16a (plan C29): Conspiracy is `accessory_mult` (or the lever's) of Murder's.
@@ -714,6 +723,8 @@ fn fight_inner(world: &mut World, a: EntityId, b: EntityId, mods: FightMods) -> 
     }
     // Jobs & lives phase 3: the counts, the wear, the loser's weapons.
     crate::systems::weapons::after_fight(world, winner, loser, died, arms);
+    // Jobs & lives phase 4 (§ 9): the loser's worn clothing (nothing off).
+    crate::systems::fashion::after_fight(world, winner, loser);
     (winner, loser, died)
 }
 
@@ -973,7 +984,7 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
 
     if jailed >= capacity {
         match crime {
-            Crime::Theft | Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms => {
+            Crime::Theft | Crime::Vagrancy | Crime::FareEvasion | Crime::UnlicensedArms | Crime::Solicitation => {
                 let fine = if crime == Crime::Vagrancy {
                     world.config.law.vagrancy_fine
                 } else if crime == Crime::FareEvasion {
@@ -1063,6 +1074,10 @@ pub fn jail_suspect(world: &mut World, guard: EntityId, suspect: EntityId) {
     sentence(world, suspect, crime, until, jail);
     resolve_reports(world, suspect);
     world.stats.current.arrests += 1;
+    // Jobs & lives phase 4: the sweeps' arrests.
+    if crime == Crime::Solicitation {
+        crate::systems::ownership::jobs2_row(world).solicit_arrests += 1;
+    }
     // M16a (plan C28, C31): the take ends with an arrest by the guard on
     // it; the arresting guard interrogates a recent taker.
     if !world.contracts.is_empty() {

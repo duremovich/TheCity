@@ -124,6 +124,7 @@ fn test_hunger_decays_and_eating_restores() {
         intimacy: 1.0,
         starving_since: None,
         fun: 1.0,
+        status: 1.0,
     };
     let ctx = needs::DecayCtx::plain();
     for _ in 0..TICKS_PER_DAY {

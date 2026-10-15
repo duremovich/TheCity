@@ -350,7 +350,8 @@ fn sell_hour(world: &mut World, hour: u8) {
             if q == 0 {
                 continue;
             }
-            for v in sellers(world, d, &BuildingKind::LEISURE) {
+            // Jobs & lives phase 4: every venue kind (none of phase 4's stands off).
+            for v in sellers(world, d, &BuildingKind::LEISURE_ALL) {
                 q -= visit_at(world, v, q);
                 if q == 0 {
                     break;

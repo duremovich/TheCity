@@ -90,6 +90,7 @@ pub fn mature(world: &mut World, id: EntityId) {
             intimacy: initial.intimacy,
             starving_since: None,
             fun: 1.0,
+            status: 1.0,
         },
     );
     world.insert(id, Mood::default());
@@ -776,6 +777,8 @@ fn pick_candidate(world: &World, employer: EntityId, workplace_door: TilePos, ro
         .filter(|&id| is_adult(world, id))
         .filter(|id| !execs.contains(id))
         .filter(|&id| role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
+        // Jobs & lives phase 4 (§ 9): a row's `min_dress` (fashion on).
+        .filter(|&id| crate::systems::fashion::dress_ok(world, id, role))
         .map(|id| {
             // M14 V16: a Lab hires the best hacker (ties lower id),
             // so Labs collect the city's runners.
@@ -1004,6 +1007,7 @@ impl HirePool {
             !hired.contains(&id)
                 && !crate::systems::life::quit_blocks(world, id, employer)
                 && (role != Role::Guard || world.comp::<Personality>(id).is_some_and(|p| p.lawfulness >= 0.4))
+                && crate::systems::fashion::dress_ok(world, id, role)
         };
         if skill_ranked(role) {
             return self
@@ -1405,6 +1409,7 @@ fn arrive(world: &mut World, a: Arrival, with: Option<EntityId>) -> EntityId {
             intimacy: initial.intimacy,
             starving_since: None,
             fun: 1.0,
+            status: 1.0,
         },
     );
     world.insert(id, Mood::default());

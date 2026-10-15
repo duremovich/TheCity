@@ -1075,9 +1075,10 @@ fn test_conspiracy_ranks_below_murder() {
     assert!(Crime::Conspiracy > Crime::Abduction);
     // Transit T10 inserted FareEvasion just above Vagrancy: everything above moved up one;
     // M16b inserted Fraud above Theft and Blackmail above Shakedown: two more.
-    // Jobs & lives phase 3 inserted the three arms crimes above Dealing: three more.
-    assert_eq!(Crime::Murder.severity(), 17);
-    assert_eq!(Crime::Conspiracy.severity(), 16);
+    // Jobs & lives phase 3 inserted the three arms crimes above Dealing: three more;
+    // phase 4 Solicitation just above Fare Evasion: one more.
+    assert_eq!(Crime::Murder.severity(), 18);
+    assert_eq!(Crime::Conspiracy.severity(), 17);
     // Murder stays the top of every crime.
     let all = [
         Crime::Theft,

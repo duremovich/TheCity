@@ -391,6 +391,7 @@ fn spawn_adult(world: &mut World, b: EntityId, k: u32, a: u32, sex: Sex, last: &
         intimacy: initial.intimacy,
         starving_since: None,
         fun: 1.0,
+        status: 1.0,
     });
     // A starving donor's clock is the donor's, not this adult's.
     n.starving_since = n.starving_since.map(|_| tick);

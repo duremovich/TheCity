@@ -153,7 +153,15 @@ use crate::world::World;
 /// entries of the `[assets]` and `[tech]` per-kind tables, the
 /// `sentence_days_ext` arms keys, the trade rows' `weapons` flag and the
 /// `Jobs2Cols` weapons columns (serde defaults).
-pub const SAVE_VERSION: u8 = 30;
+/// 31: Jobs & lives phase 4, vice and fashion (§ 5.1, § 9): the appended
+/// `BuildingKind::{StripClub, Brothel, Boutique}`, `AssetKind::Clothing`,
+/// `AssetClass::Clothing` (a twelfth `asset_tax` rate, read padded),
+/// `Crime::Solicitation`, two god levers; `Needs.status`,
+/// `Levers.vice`, `Jobs2State.{vice, fashion}`, `[vice]`, `[fashion]`, the
+/// three `[buildings.*]` rows, the `clothing` entries of the per-kind
+/// tables, the trade rows' `vice`/`fashion`/`tipped`/`min_dress` keys and the
+/// `Jobs2Cols` vice and fashion columns (serde defaults).
+pub const SAVE_VERSION: u8 = 31;
 
 /// Compact RON of the whole world. Same world state ⇒ same bytes.
 pub fn to_ron(world: &World) -> String {
