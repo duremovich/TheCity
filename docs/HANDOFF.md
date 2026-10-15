@@ -474,3 +474,25 @@ The order (Dylan, 2026-10-13):
 3. **M18**, the player character. Don't start it before 1 and 2.
 
 Standing: extraction stays at `remit_share` 0.3 / `scrip_wage_share` 0.3. Corp names (Arasaka, Militech, …) are placeholders, and no logic keys on names (`Config::unresolved_names`).
+
+## Session log (the twelfth session, 2026-10-13 → ): Jobs & lives
+
+One solo Opus coder `jl1` (worktree `agent-a864f625a5712bd95`) builds phase by phase; the orchestrator commits, ff-merges, re-runs the trio on main and pushes. Every phase is off-identical (byte-identical 42-44 × 30 with its switch off, and `CITYSIM_JOBS2_OFF=1` vs 05b7c15).
+
+- **Phase 1** (industry, civic, Hq, foreman) 0c4c252, SAVE 28. J24 .653 → .797, J25 .145 → .076, Murders 98.5 → 80.0, coins +48 % → +62 % / 60 d (the Rations World book, capped, printed). Late-year blackouts when a plant's owner goes broke.
+- **Phase 2** (the street) a9f835c, SAVE 29. Pitches, the labour corner, couriers, cabs. Parity flipped on the corner walk and was fixed by mechanism. A broke corp's dark plant is nationalised. The street is thin (3-5 pitches, ~2 coins a day).
+- **Phase 3** (weapons, owned items) 3274a04, SAVE 30. Items on the M13 asset store (`is_item`, `prov`). Armed fights are 27 %, mostly police. Murders flat. Stackwell dies on 3 of 6 seeds.
+- **Phase 4** (vice venues, the street, fashion) 00a76d8, SAVE 31. Fashion items, the dress gate and Boutiques need `[assets]` on (the parity fix). Boutiques on roster row 5.
+  - Murders 89.8 → 74.8.
+  - Parity is thin: one vice butterfly fails at 1.131.
+- **The machine restarted on 2026-10-14 04:26** mid phase 4. The worktree survived, and `jl1` was resumed by its agent id (the name was unreachable after the restart).
+- **Carry-overs for phase 8 (the gate):**
+  - The parity margin: the gate's stat-table regen should restore it.
+  - Sweeps and Solicitation run at 0/day, because no pitch lands in a Sweep district, so the "street work swept" default is inert.
+  - The status means run Dreg > Corp.
+  - The `d19 ceo KnownMetWeek` row is fragile (0.77-1.87).
+  - The El slow-down on outages is not done.
+  - Statistical-tier weapons are not done.
+  - `god_flood_guns` and the other milestone gods.
+  - Three person probes are pinned off.
+- **For Dylan:** the city keeps getting softer over the milestone (J25 .145 → .061, Murders 98.5 → 74.8). It's printed, not tuned. Restore by pressure (rents, cuts) at calibration.
